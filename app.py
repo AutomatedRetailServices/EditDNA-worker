@@ -45,10 +45,7 @@ def extract_duration_seconds(media_path: str) -> float:
         return 0.0
 
 def ensure_portrait_filter():
-    """
-    Scale to max height 1920, keep aspect, then pad to 1080x1920 centered.
-    Works for most sources (landscape/portrait/square) without cropping.
-    """
+    """Scale to max height 1920, keep aspect, then pad to 1080x1920 centered."""
     return "scale=-2:1920,pad=1080:1920:(ow-iw)/2:(oh-ih)/2"
 
 # -----------------------
@@ -56,12 +53,6 @@ def ensure_portrait_filter():
 # -----------------------
 
 def segment_by_silence_and_transcribe_from_path(src_path: str) -> Tuple[List[Dict[str, Any]], str]:
-    """
-    1) Extract 16k mono WAV
-    2) Detect silences with ffmpeg silencedetect
-    3) Cut spoken segments and transcribe each with Whisper
-    4) Return segments=[{start,end,text}], transcript
-    """
     segments = []
     with tempfile.TemporaryDirectory() as td:
         wav = os.path.join(td, "audio.wav")
@@ -73,8 +64,7 @@ def segment_by_silence_and_transcribe_from_path(src_path: str) -> Tuple[List[Dic
         )
         log = proc.stderr or ""
 
-        starts = [0.0]
-        ends = []
+        starts = [0.0]; ends = []
         for m in re.finditer(r"silence_start:\s*([0-9.]+)", log):
             try: ends.append(float(m.group(1)))
             except: pass
@@ -113,7 +103,6 @@ def segment_by_silence_and_transcribe_from_path(src_path: str) -> Tuple[List[Dic
 
 def classify_text_buckets(transcript: str, segments_flat: List[Dict[str, Any]],
                           features_csv: str, tone: str) -> Dict[str, Any]:
-    # brief timestamped preview (kept short to save tokens)
     seg_listing = []
     for seg in segments_flat[:80]:
         seg_listing.append(f"[{seg['file_id']} {seg['start']:.2f}-{seg['end']:.2f}] {seg['text']}")
@@ -124,14 +113,13 @@ def classify_text_buckets(transcript: str, segments_flat: List[Dict[str, Any]],
         "From the given transcript and timestamped segments, extract ONLY lines that already exist "
         "(no rewriting). Return STRICT JSON with keys: "
         "hook_lines (array of strings), feature_lines (array of strings), "
-        "proof_lines (array of strings), cta_lines (array of strings). "
-        "Keep each list to at most 6 short items (verbatim)."
+        "proof_lines (array of strings), cta_lines (array of strings)."
     )
     user = (
         f"Tone: {tone}\n"
         f"Key features to prioritize: {features_csv}\n\n"
-        f"Transcript (full):\n{transcript}\n\n"
-        f"Segments (timestamped, earliest first):\n{seg_text}"
+        f"Transcript:\n{transcript}\n\n"
+        f"Segments:\n{seg_text}"
     )
     resp = client.chat.completions.create(
         model="gpt-4o-mini",
@@ -158,63 +146,44 @@ def classify_text_buckets(transcript: str, segments_flat: List[Dict[str, Any]],
     }
 
 # -----------------------
-# Mapping + scoring
+# Hook scoring + mapping
 # -----------------------
 
 EARLY_SEC = 15.0
 
 def find_segment_for_line(line: str, segments: List[Dict[str, Any]]):
-    """Find first segment whose text contains the line (case-insensitive substring match).
-       Fallback: token overlap."""
     needle = re.sub(r"\s+", " ", line.strip().lower())
     for seg in segments:
         hay = re.sub(r"\s+", " ", seg["text"].strip().lower())
         if needle and needle in hay:
             return seg
-    # fallback by token overlap
-    n_tokens = set(needle.split())
-    best = None
-    best_overlap = 0
-    for seg in segments:
-        h_tokens = set(re.sub(r"\s+", " ", seg["text"].lower()).split())
-        overlap = len(n_tokens & h_tokens)
-        if overlap > best_overlap:
-            best_overlap = overlap
-            best = seg
-    return best
+    return None
 
 def score_hook(seg: Dict[str, Any]) -> Tuple[float, str, bool]:
-    start = float(seg["start"]); end = float(seg["end"])
-    dur = max(0.01, end - start); text = seg["text"]
-    score = 0.5; reasons = []; is_early = start <= EARLY_SEC
-    if is_early:
-        score += 0.25; reasons.append("early (≤15s)")
-    if 2.0 <= dur <= 7.0:
-        score += 0.2; reasons.append("snackable length")
-    cues = 0
-    cues += 1 if re.search(r"\b(stop|wait|hold|don’t|don't)\b", text, re.I) else 0
-    cues += 1 if "?" in text else 0
-    cues += 1 if re.search(r"\b\d+(\.\d+)?\b", text) else 0
-    if cues >= 2:
-        score += 0.15; reasons.append("strong pattern cues")
-    elif cues == 1:
-        score += 0.07; reasons.append("hook cue")
+    start, end, text = float(seg["start"]), float(seg["end"]), seg["text"]
+    dur = max(0.01, end - start)
+    score, reasons, is_early = 0.5, [], start <= EARLY_SEC
+    if is_early: score += 0.25; reasons.append("early (≤15s)")
+    if 2.0 <= dur <= 7.0: score += 0.2; reasons.append("snackable")
+    if "?" in text: score += 0.1; reasons.append("question")
     why = "; ".join(reasons) if reasons else "solid line"
     return round(score, 3), why, is_early
 
 def build_hook_sets(hook_lines: List[str], segments: List[Dict[str, Any]]):
-    seen = set(); intro, in_body = [], []
+    intro, in_body = [], []
     for line in hook_lines:
         seg = find_segment_for_line(line, segments)
         if not seg: continue
-        norm = re.sub(r"\s+", " ", seg["text"].strip().lower())
-        if norm in seen: continue
-        seen.add(norm)
         score, why, is_early = score_hook(seg)
         item = {
-            "file_id": seg["file_id"], "filename": seg["filename"],
-            "text": seg["text"], "start": seg["start"], "end": seg["end"],
-            "score": score, "is_early": is_early, "why": why
+            "file_id": seg.get("file_id", ""),
+            "filename": seg.get("filename", ""),
+            "text": seg["text"],
+            "start": seg["start"],
+            "end": seg["end"],
+            "score": score,
+            "is_early": is_early,
+            "why": why
         }
         (intro if is_early else in_body).append(item)
     intro.sort(key=lambda x: x["score"], reverse=True)
@@ -222,17 +191,17 @@ def build_hook_sets(hook_lines: List[str], segments: List[Dict[str, Any]]):
     return intro[:3], in_body[:3]
 
 def map_lines(lines: List[str], segments: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-    out, seen = [], set()
+    out = []
     for line in lines:
         seg = find_segment_for_line(line, segments)
-        if not seg: continue
-        norm = re.sub(r"\s+", " ", seg["text"].strip().lower())
-        if norm in seen: continue
-        seen.add(norm)
-        out.append({
-            "file_id": seg["file_id"], "filename": seg["filename"],
-            "text": seg["text"], "start": seg["start"], "end": seg["end"]
-        })
+        if seg:
+            out.append({
+                "file_id": seg.get("file_id", ""),
+                "filename": seg.get("filename", ""),
+                "text": seg["text"],
+                "start": seg["start"],
+                "end": seg["end"]
+            })
     return out[:3]
 
 # -----------------------
@@ -245,7 +214,7 @@ def root():
 
 @app.get("/health")
 def health():
-    return {"ok": True, "service": "script2clipshop-worker", "version": "0.7.0-step6+export"}
+    return {"ok": True, "service": "script2clipshop-worker", "version": "0.8.0-export-hardened"}
 
 def _new_session_dir() -> Tuple[str, str]:
     sid = uuid.uuid4().hex
@@ -260,130 +229,135 @@ async def process_videos(
     features_csv: str = Form(...),
     product_link: str = Form(...)
 ):
-    # 0) Create session; persist originals; collect per-file meta
     sid, sdir = _new_session_dir()
-    file_meta: Dict[str, Dict[str, str]] = {}
-    all_segments_flat: List[Dict[str, Any]] = []
-    full_transcript_parts: List[str] = []
+    file_meta, all_segments_flat, transcript_parts = {}, [], []
 
-    try:
-        for i, uf in enumerate(videos):
-            file_id = uuid.uuid4().hex[:8]
-            ext = os.path.splitext(uf.filename or f"upload_{i}.mp4")[1] or ".mp4"
-            src_path = os.path.join(sdir, f"{file_id}{ext}")
-            data = await uf.read()
-            with open(src_path, "wb") as f:
-                f.write(data)
+    for i, uf in enumerate(videos):
+        file_id = uuid.uuid4().hex[:8]
+        ext = os.path.splitext(uf.filename or f"upload_{i}.mp4")[1] or ".mp4"
+        src_path = os.path.join(sdir, f"{file_id}{ext}")
+        data = await uf.read()
+        with open(src_path, "wb") as f: f.write(data)
 
-            # Per-file segmentation/transcription
-            segs, trans = segment_by_silence_and_transcribe_from_path(src_path)
-            # annotate with file_id/filename
-            for s in segs:
-                s["file_id"] = file_id
-                s["filename"] = uf.filename or f"upload_{i}{ext}"
-            all_segments_flat.extend(segs)
-            full_transcript_parts.append(trans)
+        segs, trans = segment_by_silence_and_transcribe_from_path(src_path)
+        for s in segs:
+            s["file_id"] = file_id
+            s["filename"] = uf.filename or f"upload_{i}{ext}"
+        all_segments_flat.extend(segs)
+        transcript_parts.append(trans)
+        file_meta[file_id] = {"filename": uf.filename or f"upload_{i}{ext}", "src_path": src_path}
 
-            file_meta[file_id] = {"filename": uf.filename or f"upload_{i}{ext}", "src_path": src_path}
+    transcript = " ".join([p for p in transcript_parts if p])
+    buckets_raw = classify_text_buckets(transcript, all_segments_flat, features_csv, tone)
 
-        transcript = " ".join([p for p in full_transcript_parts if p])
+    intro_hooks, in_body_hooks = build_hook_sets(buckets_raw["hook_lines"], all_segments_flat)
+    features_mapped = map_lines(buckets_raw["feature_lines"], all_segments_flat)
+    proof_mapped    = map_lines(buckets_raw["proof_lines"], all_segments_flat)
+    cta_mapped      = map_lines(buckets_raw["cta_lines"], all_segments_flat)
 
-        # 1) Classify
-        buckets_raw = classify_text_buckets(transcript, all_segments_flat, features_csv, tone)
-
-        # 2) Build swap-ready structures
-        intro_hooks, in_body_hooks = build_hook_sets(buckets_raw["hook_lines"], all_segments_flat)
-        features_mapped = map_lines(buckets_raw["feature_lines"], all_segments_flat)
-        proof_mapped    = map_lines(buckets_raw["proof_lines"], all_segments_flat)
-        cta_mapped      = map_lines(buckets_raw["cta_lines"], all_segments_flat)
-
-        # 3) Stash session
-        SESSIONS[sid] = {
-            "files": file_meta,                     # file_id -> {filename, src_path}
-            "segments": all_segments_flat,          # annotated with file_id
-            "transcript": transcript,
-            "buckets": {
-                "hooks": {"intro_hooks": intro_hooks, "in_body_hooks": in_body_hooks},
-                "features": features_mapped,
-                "proof": proof_mapped,
-                "cta": cta_mapped
-            },
-            "tone": tone,
-            "features_csv": features_csv,
-            "product_link": product_link
+    SESSIONS[sid] = {
+        "files": file_meta,
+        "segments": all_segments_flat,
+        "transcript": transcript,
+        "buckets": {
+            "hooks": {"intro_hooks": intro_hooks, "in_body_hooks": in_body_hooks},
+            "features": features_mapped,
+            "proof": proof_mapped,
+            "cta": cta_mapped
         }
+    }
 
-        # 4) Default draft indices
-        default_hook_src = "intro_hooks" if intro_hooks else ("in_body_hooks" if in_body_hooks else None)
-        default_draft = {
-            "hook_source": default_hook_src,
-            "hook_index": 0 if default_hook_src else None,
-            "feature_index": 0 if features_mapped else None,
-            "proof_index": 0 if proof_mapped else None,
-            "cta_index": 0 if cta_mapped else None
-        }
+    return {
+        "ok": True,
+        "session_id": sid,
+        "files": [{"file_id": fid, "filename": meta["filename"]} for fid, meta in file_meta.items()],
+        "transcript_chars": len(transcript),
+        "segments": all_segments_flat,
+        "buckets": SESSIONS[sid]["buckets"]
+    }
 
-        # 5) Cut plan (no rendering yet): Hook → Feature → Proof → CTA
-        cut_plan: List[Dict[str, Any]] = []
-        def add(role, bucket, idx):
-            if bucket and idx is not None and idx < len(bucket):
-                seg = bucket[idx]
-                cut_plan.append({
-                    "role": role,
-                    "file_id": seg["file_id"],
-                    "filename": seg["filename"],
-                    "start": seg["start"],
-                    "end": seg["end"],
-                    "text": seg["text"]
-                })
-        if default_hook_src:
-            add("hook", SESSIONS[sid]["buckets"]["hooks"][default_hook_src], 0)
-        add("feature", features_mapped, 0)
-        add("proof", proof_mapped, 0)
-        add("cta", cta_mapped, 0)
+# -----------------------
+# Export
+# -----------------------
 
-        return JSONResponse({
-            "ok": True,
-            "session_id": sid,
-            "files": [{"file_id": fid, "filename": meta["filename"]} for fid, meta in file_meta.items()],
-            "transcript_chars": len(transcript),
-            "segments": all_segments_flat,     # [{file_id, filename, start, end, text}, ...]
-            "buckets": SESSIONS[sid]["buckets"],
-            "default_draft": default_draft,
-            "cut_plan": cut_plan               # swap-ready plan you can edit in UI
-        })
-    except Exception as e:
-        try: shutil.rmtree(sdir, ignore_errors=True)
-        except: pass
-        raise HTTPException(status_code=502, detail=f"Processing error: {e}")
-
-@app.get("/sessions/{session_id}")
-def get_session(session_id: str):
+@app.post("/export")
+def export_video(
+    session_id: str = Form(...),
+    hook_source: str = Form(None),
+    hook_index: int = Form(None),
+    feature_index: int = Form(None),
+    proof_index: int = Form(None),
+    cta_index: int = Form(None),
+    filename: str = Form("draft.mp4")
+):
     meta = SESSIONS.get(session_id)
     if not meta:
         raise HTTPException(status_code=404, detail="Session not found")
-    files = [{"file_id": fid, "filename": m["filename"]} for fid, m in meta["files"].items()]
-    return {"ok": True, "session_id": session_id, "files": files, "buckets": meta["buckets"]}
 
-# ---------- Export (multi-file aware) ----------
+    files, buckets = meta["files"], meta["buckets"]
+    chosen = []
 
-def _extract_clip(src_path: str, start: float, end: float, out_path: str):
-    dur = max(0.01, float(end) - float(start))
+    def choose(bucket, idx):
+        if bucket and isinstance(idx, int) and 0 <= idx < len(bucket):
+            chosen.append(bucket[idx])
+
+    if hook_source is None:
+        hook_source = "intro_hooks" if buckets["hooks"]["intro_hooks"] else ("in_body_hooks" if buckets["hooks"]["in_body_hooks"] else None)
+    if hook_index is None and hook_source: hook_index = 0
+    if feature_index is None and buckets["features"]: feature_index = 0
+    if proof_index is None and buckets["proof"]: proof_index = 0
+    if cta_index is None and buckets["cta"]: cta_index = 0
+
+    if hook_source: choose(buckets["hooks"][hook_source], hook_index)
+    choose(buckets["features"], feature_index)
+    choose(buckets["proof"], proof_index)
+    choose(buckets["cta"], cta_index)
+
+    valid = []
+    for seg in chosen:
+        try:
+            start, end = float(seg["start"]), float(seg["end"])
+            if end - start < 0.25: continue
+            if seg["file_id"] not in files: continue
+            src_path = files[seg["file_id"]]["src_path"]
+            if not os.path.isfile(src_path): continue
+            seg["_src_path"], seg["_start"], seg["_end"] = src_path, start, end
+            valid.append(seg)
+        except Exception:
+            continue
+
+    if not valid:
+        raise HTTPException(status_code=400, detail="No valid segments to export")
+
+    sdir = os.path.join(BASE_DIR, session_id)
+    tmp_dir = os.path.join(sdir, "clips")
+    os.makedirs(tmp_dir, exist_ok=True)
+    clip_paths = []
+
     vf = ensure_portrait_filter()
-    run([
-        "ffmpeg", "-y",
-        "-ss", f"{start:.3f}",
-        "-t", f"{dur:.3f}",
-        "-i", src_path,
-        "-vf", vf,
-        "-r", "30",
-        "-c:v", "libx264", "-preset", "veryfast", "-crf", "23",
-        "-c:a", "aac", "-b:a", "128k",
-        out_path
-    ])
+    for i, seg in enumerate(valid):
+        clip_path = os.path.join(tmp_dir, f"part_{i:02d}.mp4")
+        dur = max(0.01, seg["_end"] - seg["_start"])
+        try:
+            run([
+                "ffmpeg", "-y",
+                "-ss", f"{seg['_start']:.3f}",
+                "-t", f"{dur:.3f}",
+                "-i", seg["_src_path"],
+                "-vf", vf,
+                "-r", "30",
+                "-c:v", "libx264", "-preset", "veryfast", "-crf", "23",
+                "-c:a", "aac", "-b:a", "128k",
+                clip_path
+            ])
+            clip_paths.append(clip_path)
+        except Exception:
+            continue
 
-def _concat_clips(clip_paths: List[str], out_path: str):
-    # concat demuxer requires a list file
+    if not clip_paths:
+        raise HTTPException(status_code=400, detail="All chosen segments failed")
+
+    out_path = os.path.join(OUTPUT_DIR, f"{session_id}_{filename}")
     list_file = out_path + ".txt"
     with open(list_file, "w") as f:
         for p in clip_paths:
@@ -397,72 +371,17 @@ def _concat_clips(clip_paths: List[str], out_path: str):
         "-movflags", "+faststart",
         out_path
     ])
-    try: os.remove(list_file)
-    except: pass
+    os.remove(list_file)
 
-@app.post("/export")
-def export_video(
-    session_id: str = Form(...),
-    hook_source: str = Form(None),  # "intro_hooks" or "in_body_hooks"
-    hook_index: int = Form(None),
-    feature_index: int = Form(None),
-    proof_index: int = Form(None),
-    cta_index: int = Form(None),
-    filename: str = Form("draft.mp4")
-):
-    meta = SESSIONS.get(session_id)
-    if not meta:
-        raise HTTPException(status_code=404, detail="Session not found")
-
-    files = meta["files"]; buckets = meta["buckets"]
-
-    # Resolve defaults
-    if hook_source is None:
-        hook_source = "intro_hooks" if buckets["hooks"]["intro_hooks"] else ("in_body_hooks" if buckets["hooks"]["in_body_hooks"] else None)
-    if hook_index is None and hook_source: hook_index = 0
-    if feature_index is None and buckets["features"]: feature_index = 0
-    if proof_index is None and buckets["proof"]: proof_index = 0
-    if cta_index is None and buckets["cta"]: cta_index = 0
-
-    chosen: List[Dict[str, Any]] = []
-    def choose(bucket, idx):
-        if bucket and idx is not None and 0 <= idx < len(bucket):
-            chosen.append(bucket[idx])
-
-    if hook_source: choose(buckets["hooks"][hook_source], hook_index)
-    choose(buckets["features"], feature_index)
-    choose(buckets["proof"], proof_index)
-    choose(buckets["cta"], cta_index)
-
-    if not chosen:
-        raise HTTPException(status_code=400, detail="No valid segments to export")
-
-    sdir = os.path.join(BASE_DIR, session_id)
-    tmp_dir = os.path.join(sdir, "clips")
-    os.makedirs(tmp_dir, exist_ok=True)
-    clip_paths = []
-    for i, seg in enumerate(chosen):
-        src_path = files[seg["file_id"]]["src_path"]
-        clip_path = os.path.join(tmp_dir, f"part_{i:02d}.mp4")
-        _extract_clip(src_path, float(seg["start"]), float(seg["end"]), clip_path)
-        clip_paths.append(clip_path)
-
-    out_path = os.path.join(OUTPUT_DIR, f"{session_id}_{filename}")
-    _concat_clips(clip_paths, out_path)
-
-    return JSONResponse({
+    return {
         "ok": True,
         "session_id": session_id,
-        "segments_used": chosen,
+        "segments_used": [{"file_id": s.get("file_id"), "start": s.get("start"), "end": s.get("end"), "text": s.get("text")} for s in valid],
         "output_path": out_path
-    })
+    }
 
 @app.get("/download/{session_id}/{filename}")
 def download_export(session_id: str, filename: str):
-    """
-    Convenience route to download the rendered MP4.
-    Use the same filename you passed to /export (e.g., draft.mp4).
-    """
     safe_name = os.path.basename(filename)
     path = os.path.join(OUTPUT_DIR, f"{session_id}_{safe_name}")
     if not os.path.isfile(path):
