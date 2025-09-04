@@ -1,86 +1,159 @@
 from fastapi import FastAPI, File, UploadFile, Form, HTTPException
 from fastapi.responses import JSONResponse
-import os, tempfile, subprocess, json
+import os, tempfile, subprocess, json, re
 from openai import OpenAI
 
 app = FastAPI()
+
+# OpenAI client (requires OPENAI_API_KEY env var)
 client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
 
-# --- helper functions ---
+# -----------------------
+# Utility helpers
+# -----------------------
 
 def run(cmd):
-    """Run a shell command, raise if it fails."""
-    p = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    """
+    Run a shell command and raise with stderr on failure.
+    """
+    p = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
     if p.returncode != 0:
-        raise RuntimeError(f"cmd failed: {' '.join(cmd)}\n{p.stderr.decode()}")
+        raise RuntimeError(f"cmd failed: {' '.join(cmd)}\n{p.stderr}")
 
-def transcribe_in_chunks(client, video_bytes: bytes, filename: str) -> str:
-    """Split long audio into ~60s chunks and transcribe with Whisper."""
+def extract_duration_seconds(audio_path: str) -> float:
+    """
+    Read total duration (seconds) using ffprobe.
+    """
+    probe = subprocess.run(
+        ["ffprobe", "-v", "error", "-show_entries", "format=duration",
+         "-of", "default=noprint_wrappers=1:nokey=1", audio_path],
+        stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True
+    )
+    try:
+        return float((probe.stdout or "").strip())
+    except:
+        return 0.0
+
+# -----------------------
+# Speech segmentation + transcription
+# -----------------------
+
+def segment_by_silence_and_transcribe(video_bytes: bytes, filename: str):
+    """
+    1) Save upload to temp
+    2) Extract mono 16k WAV
+    3) Detect silences with ffmpeg silencedetect
+    4) Cut spoken segments, transcribe each with Whisper
+    5) Return [{"start","end","text"}, ...] plus full transcript
+    """
     with tempfile.NamedTemporaryFile(delete=False, suffix=os.path.splitext(filename)[1]) as tmp_in:
         tmp_in.write(video_bytes)
         in_path = tmp_in.name
 
+    segments = []
     try:
         with tempfile.TemporaryDirectory() as td:
-            # Convert to 16k mono wav for stable STT
-            wav_path = os.path.join(td, "audio.wav")
-            run(["ffmpeg", "-y", "-i", in_path, "-ar", "16000", "-ac", "1", wav_path])
+            wav = os.path.join(td, "audio.wav")
+            # Convert to 16k mono WAV for stable VAD/STT
+            run(["ffmpeg", "-y", "-i", in_path, "-ar", "16000", "-ac", "1", wav])
 
-            # Get total duration
-            probe = subprocess.run(
-                ["ffprobe", "-v", "error", "-show_entries", "format=duration",
-                 "-of", "default=noprint_wrappers=1:nokey=1", wav_path],
-                stdout=subprocess.PIPE, stderr=subprocess.PIPE
+            # Detect silences (tweak noise/d for your content)
+            # Logs lines like: silence_start: 3.210 / silence_end: 5.870
+            proc = subprocess.run(
+                ["ffmpeg", "-i", wav, "-af", "silencedetect=noise=-30dB:d=0.35", "-f", "null", "-"],
+                stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True
             )
-            try:
-                total = float(probe.stdout.decode().strip())
-            except:
-                total = 0.0
-            if total <= 0.0:
-                raise HTTPException(status_code=400, detail="Could not read audio duration")
+            log = proc.stderr or ""
 
-            # Cut into ~60s chunks, transcribe each, join
-            CHUNK = 60.0
-            cur = 0.0
-            pieces = []
-            while cur < total:
-                dur = min(CHUNK, total - cur)
-                cut_wav = os.path.join(td, f"chunk_{int(cur)}.wav")
+            # Build start/end lists from silencedetect output
+            starts = [0.0]
+            ends = []
+            for m in re.finditer(r"silence_start:\s*([0-9.]+)", log):
+                try:
+                    ends.append(float(m.group(1)))
+                except:
+                    pass
+            for m in re.finditer(r"silence_end:\s*([0-9.]+)", log):
+                try:
+                    starts.append(float(m.group(1)))
+                except:
+                    pass
+
+            # Ensure last end == total duration
+            total = extract_duration_seconds(wav)
+            if not ends or (ends and ends[-1] < total):
+                ends.append(total)
+
+            # Cut & transcribe each segment between silence regions
+            for s, e in zip(starts, ends):
+                # skip ultra-short blips
+                if (e - s) < 0.25:
+                    continue
+                chunk = os.path.join(td, f"seg_{int(s*1000)}.wav")
                 run([
                     "ffmpeg", "-y",
-                    "-ss", f"{cur:.3f}",
-                    "-t", f"{dur:.3f}",
-                    "-i", wav_path,
+                    "-ss", f"{s:.3f}",
+                    "-t", f"{(e - s):.3f}",
+                    "-i", wav,
                     "-ac", "1", "-ar", "16000",
-                    cut_wav
+                    chunk
                 ])
-                with open(cut_wav, "rb") as f:
+                with open(chunk, "rb") as f:
                     tr = client.audio.transcriptions.create(model="whisper-1", file=f)
-                pieces.append(tr.text.strip() if hasattr(tr, "text") else "")
-                cur += CHUNK
+                text = (getattr(tr, "text", "") or "").strip()
+                if text:
+                    segments.append({
+                        "start": round(s, 3),
+                        "end": round(e, 3),
+                        "text": text
+                    })
 
-            return " ".join(p for p in pieces if p).strip()
+            # Join transcript
+            transcript = " ".join(seg["text"] for seg in segments)
+            return segments, transcript
     finally:
-        try: os.remove(in_path)
-        except: pass
+        try:
+            os.remove(in_path)
+        except:
+            pass
 
-def classify_transcript(client, transcript: str, features_csv: str, tone: str):
+# -----------------------
+# Classification (timestamp-aware)
+# -----------------------
+
+def classify_buckets(client, transcript: str, segments: list, features_csv: str, tone: str):
     """
-    Returns a JSON object with hook, feature_lines, proof_lines, cta_lines,
-    all verbatim (no rewriting), 1–3 items per bucket.
+    Ask GPT to extract ONLY verbatim lines from transcript, sorted into:
+    - hook (string)
+    - feature_lines (list)
+    - proof_lines (list)
+    - cta_lines (list)
+
+    We provide segments with timestamps and instruct it to PREFER hook lines that
+    occur in the first ~0–15 seconds if available.
     """
+    # Build a compact segment listing for the prompt
+    # (Keep it short to avoid token bloat)
+    seg_listing = []
+    for seg in segments[:80]:  # cap to first 80 segments for safety
+        seg_listing.append(f"[{seg['start']:.2f}-{seg['end']:.2f}] {seg['text']}")
+    seg_text = "\n".join(seg_listing)
+
     system = (
-        "You are an ad pre-editor. From the transcript, extract ONLY lines that already exist "
-        "in the transcript (no rewriting). Return a JSON object with keys: "
+        "You are an ad pre-editor for TikTok Shop/UGC. "
+        "From the given transcript and timestamped segments, extract ONLY lines that already exist "
+        "(no rewriting). Return STRICT JSON with keys: "
         "hook (string), feature_lines (array of strings), proof_lines (array of strings), "
-        "cta_lines (array of strings). Keep 1–3 short lines per list. Strict JSON."
+        "cta_lines (array of strings). "
+        "Prefer hooks that appear in the first 0–15 seconds when possible. "
+        "Keep each list to at most 3 short items."
     )
     user = (
         f"Tone: {tone}\n"
         f"Key features to prioritize: {features_csv}\n\n"
-        f"Transcript:\n{transcript}"
+        f"Transcript (full):\n{transcript}\n\n"
+        f"Segments (timestamped, earliest first):\n{seg_text}"
     )
-
     resp = client.chat.completions.create(
         model="gpt-4o-mini",
         response_format={"type": "json_object"},
@@ -89,21 +162,29 @@ def classify_transcript(client, transcript: str, features_csv: str, tone: str):
             {"role": "user", "content": user}
         ],
         temperature=0.2,
-        max_tokens=500,
+        max_tokens=650,
     )
     content = resp.choices[0].message.content
     try:
         data = json.loads(content)
-    except Exception:
+    except:
         data = {"hook": "", "feature_lines": [], "proof_lines": [], "cta_lines": []}
+
+    # Normalize keys & cap lengths
     return {
-        "hook": data.get("hook", ""),
-        "feature_lines": data.get("feature_lines", [])[:3],
-        "proof_lines": data.get("proof_lines", [])[:3],
-        "cta_lines": data.get("cta_lines", [])[:3],
+        "hook": data.get("hook", "") or "",
+        "feature_lines": (data.get("feature_lines", []) or [])[:3],
+        "proof_lines": (data.get("proof_lines", []) or [])[:3],
+        "cta_lines": (data.get("cta_lines", []) or [])[:3],
     }
 
-# --- API endpoint ---
+# -----------------------
+# Routes
+# -----------------------
+
+@app.get("/health")
+def health():
+    return {"ok": True, "service": "script2clipshop-worker", "version": "0.2.0"}
 
 @app.post("/process")
 async def process_video(
@@ -112,18 +193,20 @@ async def process_video(
     features_csv: str = Form(...),
     product_link: str = Form(...)
 ):
-    # 1) Read uploaded file
+    # 1) Read uploaded bytes
     data = await video.read()
     await video.seek(0)
 
-    # 2) Transcribe in chunks
+    # 2) Segment + transcribe (with timestamps)
     try:
-        transcript = transcribe_in_chunks(client, data, video.filename or "upload.mp4")
+        segments, transcript = segment_by_silence_and_transcribe(
+            data, video.filename or "upload.mp4"
+        )
     except Exception as e:
-        raise HTTPException(status_code=502, detail=f"Transcription error: {e}")
+        raise HTTPException(status_code=502, detail=f"Segmentation/Transcription error: {e}")
 
-    # 3) Classify transcript into buckets
-    buckets = classify_transcript(client, transcript, features_csv, tone)
+    # 3) Classify into buckets (timestamp-aware prompt prefers early hooks)
+    buckets = classify_buckets(client, transcript, segments, features_csv, tone)
 
     # 4) Return everything
     return JSONResponse({
@@ -132,7 +215,8 @@ async def process_video(
         "tone": tone,
         "features_csv": features_csv,
         "product_link": product_link,
-        "transcript": transcript,
+        "transcript": transcript,                # full text
         "transcript_chars": len(transcript),
-        "buckets": buckets
+        "segments": segments,                    # [{start,end,text}, ...]
+        "buckets": buckets                       # {hook, feature_lines[], proof_lines[], cta_lines[]}
     })
