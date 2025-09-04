@@ -1,82 +1,57 @@
-from fastapi import FastAPI, File, UploadFile, Form, HTTPException
-from fastapi.responses import JSONResponse
-import os, tempfile, json
-from openai import OpenAI
+import os, tempfile, subprocess
+from fastapi import HTTPException
 
-app = FastAPI()
-client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
+def run(cmd):
+    p = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    if p.returncode != 0:
+        raise RuntimeError(f"cmd failed: {' '.join(cmd)}\n{p.stderr.decode()}")
 
-def classify_transcript(transcript: str, features_csv: str, tone: str):
-    system = (
-        "You are an ad pre-editor. From the transcript, extract ONLY text that "
-        "already exists in the transcript (no rewriting). Find at most 1–3 lines for each:\n"
-        "hook, feature_lines, proof_lines, cta_lines. Keep them short and punchy, "
-        "verbatim from the transcript. Return strict JSON."
-    )
-    user = (
-        f"Tone: {tone}\n"
-        f"Key features to prioritize: {features_csv}\n\n"
-        f"Transcript:\n{transcript}"
-    )
-    resp = client.chat.completions.create(
-        model="gpt-4o-mini",
-        response_format={"type": "json_object"},
-        messages=[
-            {"role": "system", "content": system},
-            {"role": "user", "content": user}
-        ],
-        temperature=0.2,
-        max_tokens=400
-    )
+def transcribe_in_chunks(client, video_bytes: bytes, filename: str) -> str:
+    # Save upload to temp file
+    with tempfile.NamedTemporaryFile(delete=False, suffix=os.path.splitext(filename)[1]) as tmp_in:
+        tmp_in.write(video_bytes)
+        in_path = tmp_in.name
+
     try:
-        data = json.loads(resp.choices[0].message.content)
-        # Ensure all keys exist
-        return {
-            "hook": data.get("hook", ""),
-            "feature_lines": data.get("feature_lines", []),
-            "proof_lines": data.get("proof_lines", []),
-            "cta_lines": data.get("cta_lines", []),
-        }
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Parse error: {e}")
+        with tempfile.TemporaryDirectory() as td:
+            # Extract 16k mono wav for stable STT
+            wav_path = os.path.join(td, "audio.wav")
+            run(["ffmpeg", "-y", "-i", in_path, "-ar", "16000", "-ac", "1", wav_path])
 
-@app.post("/process")
-async def process_video(
-    video: UploadFile = File(...),
-    tone: str = Form(...),
-    features_csv: str = Form(...),
-    product_link: str = Form(...)
-):
-    # --- keep your existing transcription code above this line ---
-    # (we assume you already computed `transcript` and `data` bytes)
-
-    # save file -> transcribe -> set transcript variable ...
-    data = await video.read()
-    await video.seek(0)
-    with tempfile.NamedTemporaryFile(delete=False, suffix=os.path.splitext(video.filename)[1]) as tmp:
-        tmp.write(data)
-        tmp_path = tmp.name
-    try:
-        with open(tmp_path, "rb") as f:
-            tr = client.audio.transcriptions.create(
-                model="whisper-1",
-                file=f,
-                response_format="json"
+            # Get duration (seconds)
+            probe = subprocess.run(
+                ["ffprobe", "-v", "error", "-show_entries", "format=duration",
+                 "-of", "default=noprint_wrappers=1:nokey=1", wav_path],
+                stdout=subprocess.PIPE, stderr=subprocess.PIPE
             )
-        transcript = tr.text if hasattr(tr, "text") else tr.get("text", "")
+            try:
+                total = float(probe.stdout.decode().strip())
+            except:
+                total = 0.0
+            if total <= 0.0:
+                raise HTTPException(status_code=400, detail="Could not read audio duration")
+
+            # Cut into ~60s pieces to avoid timeouts; transcribe each; join
+            CHUNK = 60.0
+            cur = 0.0
+            pieces = []
+            while cur < total:
+                dur = min(CHUNK, total - cur)
+                cut_wav = os.path.join(td, f"chunk_{int(cur)}.wav")
+                run([
+                    "ffmpeg", "-y",
+                    "-ss", f"{cur:.3f}",
+                    "-t", f"{dur:.3f}",
+                    "-i", wav_path,
+                    "-ac", "1", "-ar", "16000",
+                    cut_wav
+                ])
+                with open(cut_wav, "rb") as f:
+                    tr = client.audio.transcriptions.create(model="whisper-1", file=f)
+                pieces.append(tr.text.strip() if hasattr(tr, "text") else "")
+                cur += CHUNK
+
+            return " ".join(p for p in pieces if p).strip()
     finally:
-        try: os.remove(tmp_path)
+        try: os.remove(in_path)
         except: pass
-
-    # NEW: classify into Hook / Feature / Proof / CTA
-    buckets = classify_transcript(transcript, features_csv, tone)
-
-    return JSONResponse({
-        "ok": True,
-        "bytes": len(data),
-        "tone": tone,
-        "features_csv": features_csv,
-        "product_link": product_link,
-        "transcript": transcript[:500],
-        "buckets": buckets
-    })
