@@ -1,12 +1,14 @@
 from fastapi import FastAPI, File, UploadFile, Form, HTTPException
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, FileResponse
 import os, tempfile, subprocess, json, re, uuid, shutil
 from typing import List, Dict, Any, Tuple
 from openai import OpenAI
 
 app = FastAPI()
 
+# -----------------------
 # OpenAI client (requires OPENAI_API_KEY)
+# -----------------------
 client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
 
 # -----------------------
@@ -25,11 +27,13 @@ SESSIONS: Dict[str, Dict[str, Any]] = {}
 # -----------------------
 
 def run(cmd: List[str]):
+    """Run a shell command and raise with stderr on failure."""
     p = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
     if p.returncode != 0:
         raise RuntimeError(f"cmd failed: {' '.join(cmd)}\n{p.stderr}")
 
 def extract_duration_seconds(media_path: str) -> float:
+    """Read total duration (seconds) using ffprobe."""
     probe = subprocess.run(
         ["ffprobe", "-v", "error", "-show_entries", "format=duration",
          "-of", "default=noprint_wrappers=1:nokey=1", media_path],
@@ -41,6 +45,10 @@ def extract_duration_seconds(media_path: str) -> float:
         return 0.0
 
 def ensure_portrait_filter():
+    """
+    Scale to max height 1920, keep aspect, then pad to 1080x1920 centered.
+    Works for most sources (landscape/portrait/square) without cropping.
+    """
     return "scale=-2:1920,pad=1080:1920:(ow-iw)/2:(oh-ih)/2"
 
 # -----------------------
@@ -48,6 +56,12 @@ def ensure_portrait_filter():
 # -----------------------
 
 def segment_by_silence_and_transcribe_from_path(src_path: str) -> Tuple[List[Dict[str, Any]], str]:
+    """
+    1) Extract 16k mono WAV
+    2) Detect silences with ffmpeg silencedetect
+    3) Cut spoken segments and transcribe each with Whisper
+    4) Return segments=[{start,end,text}], transcript
+    """
     segments = []
     with tempfile.TemporaryDirectory() as td:
         wav = os.path.join(td, "audio.wav")
@@ -99,6 +113,7 @@ def segment_by_silence_and_transcribe_from_path(src_path: str) -> Tuple[List[Dic
 
 def classify_text_buckets(transcript: str, segments_flat: List[Dict[str, Any]],
                           features_csv: str, tone: str) -> Dict[str, Any]:
+    # brief timestamped preview (kept short to save tokens)
     seg_listing = []
     for seg in segments_flat[:80]:
         seg_listing.append(f"[{seg['file_id']} {seg['start']:.2f}-{seg['end']:.2f}] {seg['text']}")
@@ -149,11 +164,14 @@ def classify_text_buckets(transcript: str, segments_flat: List[Dict[str, Any]],
 EARLY_SEC = 15.0
 
 def find_segment_for_line(line: str, segments: List[Dict[str, Any]]):
+    """Find first segment whose text contains the line (case-insensitive substring match).
+       Fallback: token overlap."""
     needle = re.sub(r"\s+", " ", line.strip().lower())
     for seg in segments:
         hay = re.sub(r"\s+", " ", seg["text"].strip().lower())
         if needle and needle in hay:
             return seg
+    # fallback by token overlap
     n_tokens = set(needle.split())
     best = None
     best_overlap = 0
@@ -169,14 +187,18 @@ def score_hook(seg: Dict[str, Any]) -> Tuple[float, str, bool]:
     start = float(seg["start"]); end = float(seg["end"])
     dur = max(0.01, end - start); text = seg["text"]
     score = 0.5; reasons = []; is_early = start <= EARLY_SEC
-    if is_early: score += 0.25; reasons.append("early (≤15s)")
-    if 2.0 <= dur <= 7.0: score += 0.2; reasons.append("snackable length")
+    if is_early:
+        score += 0.25; reasons.append("early (≤15s)")
+    if 2.0 <= dur <= 7.0:
+        score += 0.2; reasons.append("snackable length")
     cues = 0
     cues += 1 if re.search(r"\b(stop|wait|hold|don’t|don't)\b", text, re.I) else 0
     cues += 1 if "?" in text else 0
     cues += 1 if re.search(r"\b\d+(\.\d+)?\b", text) else 0
-    if cues >= 2: score += 0.15; reasons.append("strong pattern cues")
-    elif cues == 1: score += 0.07; reasons.append("hook cue")
+    if cues >= 2:
+        score += 0.15; reasons.append("strong pattern cues")
+    elif cues == 1:
+        score += 0.07; reasons.append("hook cue")
     why = "; ".join(reasons) if reasons else "solid line"
     return round(score, 3), why, is_early
 
@@ -217,9 +239,13 @@ def map_lines(lines: List[str], segments: List[Dict[str, Any]]) -> List[Dict[str
 # Routes
 # -----------------------
 
+@app.get("/")
+def root():
+    return {"ok": True, "msg": "Script2ClipShop worker live. See /health and /docs."}
+
 @app.get("/health")
 def health():
-    return {"ok": True, "service": "script2clipshop-worker", "version": "0.6.0-step6"}
+    return {"ok": True, "service": "script2clipshop-worker", "version": "0.7.0-step6+export"}
 
 def _new_session_dir() -> Tuple[str, str]:
     sid = uuid.uuid4().hex
@@ -339,7 +365,7 @@ def get_session(session_id: str):
     files = [{"file_id": fid, "filename": m["filename"]} for fid, m in meta["files"].items()]
     return {"ok": True, "session_id": session_id, "files": files, "buckets": meta["buckets"]}
 
-# ---------- Optional export (already Step 7, but works with multi-file) ----------
+# ---------- Export (multi-file aware) ----------
 
 def _extract_clip(src_path: str, start: float, end: float, out_path: str):
     dur = max(0.01, float(end) - float(start))
@@ -357,6 +383,7 @@ def _extract_clip(src_path: str, start: float, end: float, out_path: str):
     ])
 
 def _concat_clips(clip_paths: List[str], out_path: str):
+    # concat demuxer requires a list file
     list_file = out_path + ".txt"
     with open(list_file, "w") as f:
         for p in clip_paths:
@@ -389,6 +416,7 @@ def export_video(
 
     files = meta["files"]; buckets = meta["buckets"]
 
+    # Resolve defaults
     if hook_source is None:
         hook_source = "intro_hooks" if buckets["hooks"]["intro_hooks"] else ("in_body_hooks" if buckets["hooks"]["in_body_hooks"] else None)
     if hook_index is None and hook_source: hook_index = 0
@@ -428,3 +456,15 @@ def export_video(
         "segments_used": chosen,
         "output_path": out_path
     })
+
+@app.get("/download/{session_id}/{filename}")
+def download_export(session_id: str, filename: str):
+    """
+    Convenience route to download the rendered MP4.
+    Use the same filename you passed to /export (e.g., draft.mp4).
+    """
+    safe_name = os.path.basename(filename)
+    path = os.path.join(OUTPUT_DIR, f"{session_id}_{safe_name}")
+    if not os.path.isfile(path):
+        raise HTTPException(status_code=404, detail="File not found. Make sure /export succeeded.")
+    return FileResponse(path, media_type="video/mp4", filename=safe_name)
