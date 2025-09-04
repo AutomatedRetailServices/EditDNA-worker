@@ -1,6 +1,6 @@
 from fastapi import FastAPI, File, UploadFile, Form, HTTPException
 from fastapi.responses import JSONResponse
-import os, tempfile, subprocess
+import os, tempfile, subprocess, json
 from openai import OpenAI
 
 app = FastAPI()
@@ -64,6 +64,45 @@ def transcribe_in_chunks(client, video_bytes: bytes, filename: str) -> str:
         try: os.remove(in_path)
         except: pass
 
+def classify_transcript(client, transcript: str, features_csv: str, tone: str):
+    """
+    Returns a JSON object with hook, feature_lines, proof_lines, cta_lines,
+    all verbatim (no rewriting), 1–3 items per bucket.
+    """
+    system = (
+        "You are an ad pre-editor. From the transcript, extract ONLY lines that already exist "
+        "in the transcript (no rewriting). Return a JSON object with keys: "
+        "hook (string), feature_lines (array of strings), proof_lines (array of strings), "
+        "cta_lines (array of strings). Keep 1–3 short lines per list. Strict JSON."
+    )
+    user = (
+        f"Tone: {tone}\n"
+        f"Key features to prioritize: {features_csv}\n\n"
+        f"Transcript:\n{transcript}"
+    )
+
+    resp = client.chat.completions.create(
+        model="gpt-4o-mini",
+        response_format={"type": "json_object"},
+        messages=[
+            {"role": "system", "content": system},
+            {"role": "user", "content": user}
+        ],
+        temperature=0.2,
+        max_tokens=500,
+    )
+    content = resp.choices[0].message.content
+    try:
+        data = json.loads(content)
+    except Exception:
+        data = {"hook": "", "feature_lines": [], "proof_lines": [], "cta_lines": []}
+    return {
+        "hook": data.get("hook", ""),
+        "feature_lines": data.get("feature_lines", [])[:3],
+        "proof_lines": data.get("proof_lines", [])[:3],
+        "cta_lines": data.get("cta_lines", [])[:3],
+    }
+
 # --- API endpoint ---
 
 @app.post("/process")
@@ -77,13 +116,16 @@ async def process_video(
     data = await video.read()
     await video.seek(0)
 
-    # 2) Call chunked transcription
+    # 2) Transcribe in chunks
     try:
         transcript = transcribe_in_chunks(client, data, video.filename or "upload.mp4")
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"Transcription error: {e}")
 
-    # 3) Return JSON with full transcript
+    # 3) Classify transcript into buckets
+    buckets = classify_transcript(client, transcript, features_csv, tone)
+
+    # 4) Return everything
     return JSONResponse({
         "ok": True,
         "bytes": len(data),
@@ -91,5 +133,6 @@ async def process_video(
         "features_csv": features_csv,
         "product_link": product_link,
         "transcript": transcript,
-        "transcript_chars": len(transcript)
+        "transcript_chars": len(transcript),
+        "buckets": buckets
     })
