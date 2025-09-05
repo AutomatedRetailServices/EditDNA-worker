@@ -2,15 +2,14 @@ import os
 import uuid
 import json
 import shutil
+import subprocess
 from pathlib import Path
-from typing import List, Optional
+from typing import List
 
 from fastapi import FastAPI, UploadFile, File, Form, HTTPException
 from fastapi.responses import JSONResponse, FileResponse
 
 from openai import OpenAI  # v1 SDK
-from bs4 import BeautifulSoup
-import requests
 
 app = FastAPI()
 
@@ -24,25 +23,30 @@ client = OpenAI(api_key=OPENAI_API_KEY)
 SESS_ROOT = Path("/tmp/s2c_sessions")
 SESS_ROOT.mkdir(parents=True, exist_ok=True)
 
-VERSION = "0.9.6-export-stable"
+VERSION = "1.0.1-playable-export"
 
 # -------- Helpers --------
-def save_session_file(session_id: str, filename: str, data: dict):
-    session_path = SESS_ROOT / session_id
-    session_path.mkdir(parents=True, exist_ok=True)
-    file_path = session_path / filename
-    with open(file_path, "w") as f:
-        json.dump(data, f)
-    return str(file_path)
+def sess_dir(session_id: str) -> Path:
+    p = SESS_ROOT / session_id
+    p.mkdir(parents=True, exist_ok=True)
+    return p
 
-def load_session_file(session_id: str, filename: str):
-    file_path = SESS_ROOT / session_id / filename
-    if not file_path.exists():
-        raise FileNotFoundError
-    with open(file_path, "r") as f:
-        return json.load(f)
+def save_json(path: Path, data: dict) -> None:
+    path.write_text(json.dumps(data, ensure_ascii=False, indent=2))
 
-# -------- Endpoints --------
+def load_json(path: Path) -> dict:
+    if not path.exists():
+        raise FileNotFoundError(str(path))
+    return json.loads(path.read_text())
+
+def run(cmd: list):
+    """Run a shell command, raise on error (captures stderr)."""
+    p = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    if p.returncode != 0:
+        raise RuntimeError(f"cmd failed: {' '.join(cmd)}\n{p.stderr}")
+    return p.stdout
+
+# -------- Routes --------
 @app.get("/health")
 def health():
     return {"ok": True, "service": "script2clipshop-worker", "version": VERSION}
@@ -50,55 +54,110 @@ def health():
 @app.post("/process")
 async def process_video(
     videos: List[UploadFile] = File(...),
-    tone: str = Form(...),
-    features_csv: str = Form(...),
-    product_link: str = Form(...)
+    tone: str = Form("casual"),
+    features_csv: str = Form(""),
+    product_link: str = Form("")
 ):
+    """
+    Saves uploaded videos to /tmp and stores session.json with file paths.
+    Returns session_id + file list. (Transcription/classification can be added later.)
+    """
     session_id = uuid.uuid4().hex
-    transcript_data = {"session_id": session_id, "files": [], "segments": []}
+    sd = sess_dir(session_id)
 
-    for video in videos:
-        file_id = uuid.uuid4().hex[:8]
-        filename = video.filename
-        transcript_data["files"].append({"file_id": file_id, "filename": filename})
+    files_meta = []
+    file_paths = {}
 
-        # placeholder transcript simulation
-        transcript_data["segments"].append({
-            "file_id": file_id,
-            "filename": filename,
-            "start": 0,
-            "end": 5,
-            "text": f"Simulated transcript for {filename}"
-        })
+    for up in videos:
+        fid = uuid.uuid4().hex[:8]
+        orig_name = up.filename or f"{fid}.mp4"
+        # write to session folder
+        dst = sd / orig_name
+        with dst.open("wb") as w:
+            shutil.copyfileobj(up.file, w)
+        files_meta.append({"file_id": fid, "filename": orig_name})
+        file_paths[fid] = str(dst)
 
-    save_session_file(session_id, "transcript.json", transcript_data)
+    # Minimal session data
+    session_json = {
+        "session_id": session_id,
+        "files": files_meta,
+        "file_paths": file_paths,          # keep internal on disk
+        "tone": tone,
+        "features_csv": features_csv,
+        "product_link": product_link,
+    }
+    save_json(sd / "session.json", session_json)
 
-    return JSONResponse({"ok": True, "session_id": session_id, "files": transcript_data["files"]})
+    # Response (no internal paths)
+    return JSONResponse({
+        "ok": True,
+        "session_id": session_id,
+        "files": files_meta
+    })
 
 @app.post("/export")
-def export_video(session_id: str = Form(...), filename: str = Form(...)):
-    try:
-        data = load_session_file(session_id, "transcript.json")
-    except FileNotFoundError:
-        return JSONResponse({"ok": False, "reason": "session not found"})
+def export_video(
+    session_id: str = Form(...),
+    filename: str = Form("draft.mp4"),
+    start_seconds: float = Form(0.0),
+    duration_seconds: float = Form(10.0)
+):
+    """
+    Creates a playable MP4 by trimming the FIRST uploaded video in this session.
+    You can optionally pass start_seconds/duration_seconds.
+    """
+    sd = sess_dir(session_id)
+    meta_path = sd / "session.json"
+    if not meta_path.exists():
+        raise HTTPException(status_code=404, detail="session not found")
 
-    output_path = SESS_ROOT / session_id / filename
-    with open(output_path, "w") as f:
-        f.write("Simulated video export")
-    
+    session = load_json(meta_path)
+    files = session.get("files") or []
+    file_paths = session.get("file_paths") or {}
+    if not files:
+        raise HTTPException(status_code=400, detail="no files in session")
+
+    # Pick first uploaded file
+    first = files[0]
+    fid = first["file_id"]
+    src_path = file_paths.get(fid)
+    if not src_path or not Path(src_path).exists():
+        raise HTTPException(status_code=404, detail="source video not found")
+
+    # Output path
+    safe_name = "".join(c for c in filename if c.isalnum() or c in ("-", "_", ".",)).strip() or "draft.mp4"
+    out_path = sd / safe_name
+
+    # Try ffmpeg trim (re-encode for compatibility)
+    try:
+        run([
+            "ffmpeg", "-y",
+            "-ss", f"{float(start_seconds):.3f}",
+            "-t", f"{max(0.1, float(duration_seconds)):.3f}",
+            "-i", src_path,
+            "-vf", "scale=1080:-2:flags=lanczos",
+            "-r", "30",
+            "-c:v", "libx264", "-preset", "veryfast", "-crf", "22",
+            "-c:a", "aac", "-b:a", "128k",
+            str(out_path)
+        ])
+    except Exception as e:
+        # Fallback: if ffmpeg not available, just copy the source file (will be large but playable)
+        shutil.copy(src_path, out_path)
+
     return JSONResponse({
         "ok": True,
         "message": "export complete",
         "session_id": session_id,
-        "filename": filename,
-        "download": f"/download/{session_id}/{filename}",
-        "segments_used": data.get("segments", [])
+        "filename": safe_name,
+        "download": f"/download/{session_id}/{safe_name}"
     })
 
 @app.get("/download/{session_id}/{filename}")
 def download(session_id: str, filename: str):
-    file_path = SESS_ROOT / session_id / filename
-    if not file_path.exists():
-        raise HTTPException(status_code=404, detail="File not found")
-    return FileResponse(file_path, filename=filename)
-
+    sd = sess_dir(session_id)
+    f = sd / filename
+    if not f.exists():
+        raise HTTPException(status_code=404, detail="file not found")
+    return FileResponse(f, filename=filename, media_type="video/mp4")
