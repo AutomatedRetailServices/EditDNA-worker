@@ -19,7 +19,9 @@ RUN pip install -r requirements.txt
 # --- App code ---
 COPY app.py ./
 
-# --- Expose port (Render sets PORT) ---
+# --- Expose port (Render will set $PORT) ---
 EXPOSE 8000
-CMD ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "${PORT:-8000}"]
+
+# Use sh -c so ${PORT} is expanded properly
+CMD ["sh", "-c", "uvicorn app:app --host 0.0.0.0 --port ${PORT:-8000}"]
 
