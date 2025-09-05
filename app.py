@@ -22,7 +22,7 @@ client = OpenAI(api_key=OPENAI_API_KEY)
 SESS_ROOT = Path("/tmp/s2c_sessions")
 SESS_ROOT.mkdir(parents=True, exist_ok=True)
 
-VERSION = "1.0.3-playable-export-lowram"
+VERSION = "1.1.0-stitch"
 
 # ---- Helpers ----
 def sess_dir(session_id: str) -> Path:
@@ -157,6 +157,125 @@ def export_video(
         "session_id": session_id,
         "filename": safe_name,
         "download": f"/download/{session_id}/{safe_name}"
+    })
+
+@app.post("/stitch")
+def stitch_video(
+    session_id: str = Form(...),
+    manifest: str = Form(...),  # JSON string with {"segments":[...], "fps":30, "scale":1080}
+    filename: str = Form("final.mp4")
+):
+    # Build a single video by trimming multiple segments and concatenating
+    sd = sess_dir(session_id)
+    meta_path = sd / "session.json"
+    if not meta_path.exists():
+        raise HTTPException(status_code=404, detail="session not found")
+
+    session = load_json(meta_path)
+    file_paths = session.get("file_paths") or {}
+
+    try:
+        mani = json.loads(manifest)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"invalid manifest JSON: {e}")
+
+    segs = mani.get("segments") or []
+    if not segs:
+        raise HTTPException(status_code=400, detail="manifest has no segments")
+
+    fps = int(mani.get("fps", 30))
+    scale = int(mani.get("scale", 720))  # keep 720 by default to avoid OOM
+
+    safe_name = "".join(c for c in filename if c.isalnum() or c in ("-", "_", ".",)).strip() or "final.mp4"
+    out_path = sd / safe_name
+
+    work = sd / f"stitch_{uuid.uuid4().hex[:8]}"
+    work.mkdir(parents=True, exist_ok=True)
+
+    list_file = work / "list.txt"
+    used_segments = []
+    list_lines = []
+
+    # Generate uniformly-encoded intermediate clips (low RAM, single thread)
+    for idx, s in enumerate(segs):
+        fid = s.get("file_id")
+        if not fid or fid not in file_paths:
+            print("stitch: skipping unknown file_id", fid)
+            continue
+
+        start = float(s.get("start", 0.0))
+        end = float(s.get("end", 0.0))
+        duration = max(0.05, end - start)
+        src = file_paths[fid]
+        seg_out = work / f"seg_{idx:03d}.mp4"
+
+        try:
+            run([
+                "ffmpeg", "-y",
+                "-hide_banner", "-loglevel", "error",
+                "-ss", f"{start:.3f}",
+                "-t", f"{duration:.3f}",
+                "-i", src,
+                "-vf", f"scale={scale}:-2:flags=lanczos",
+                "-r", str(fps),
+                "-c:v", "libx264", "-preset", "veryfast", "-crf", "23",
+                "-pix_fmt", "yuv420p",
+                "-c:a", "aac", "-b:a", "96k",
+                "-threads", "1",
+                "-movflags", "+faststart",
+                str(seg_out)
+            ])
+            list_lines.append(f"file '{seg_out.as_posix()}'\n")
+            used_segments.append({
+                "file_id": fid,
+                "start": round(start, 3),
+                "end": round(end, 3),
+                "duration": round(duration, 3),
+            })
+        except Exception as e:
+            print("stitch: segment failed, skipping:", e)
+
+    if not list_lines:
+        raise HTTPException(status_code=400, detail="no valid segments to stitch")
+
+    list_file.write_text("".join(list_lines))
+
+    # Try concat with stream copy first
+    try:
+        run([
+            "ffmpeg", "-y",
+            "-hide_banner", "-loglevel", "error",
+            "-f", "concat", "-safe", "0",
+            "-i", str(list_file),
+            "-c", "copy",
+            "-movflags", "+faststart",
+            str(out_path)
+        ])
+    except Exception as e1:
+        print("stitch: concat copy failed, re-encoding:", e1)
+        # Fallback: re-encode the concatenation
+        run([
+            "ffmpeg", "-y",
+            "-hide_banner", "-loglevel", "error",
+            "-f", "concat", "-safe", "0",
+            "-i", str(list_file),
+            "-vf", f"scale={scale}:-2:flags=lanczos",
+            "-r", str(fps),
+            "-c:v", "libx264", "-preset", "veryfast", "-crf", "23",
+            "-pix_fmt", "yuv420p",
+            "-c:a", "aac", "-b:a", "96k",
+            "-threads", "1",
+            "-movflags", "+faststart",
+            str(out_path)
+        ])
+
+    return JSONResponse({
+        "ok": True,
+        "message": "stitch complete",
+        "session_id": session_id,
+        "filename": safe_name,
+        "download": f"/download/{session_id}/{safe_name}",
+        "segments_used": used_segments
     })
 
 @app.get("/download/{session_id}/{filename}")
