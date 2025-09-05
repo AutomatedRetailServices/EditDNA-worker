@@ -1,8 +1,5 @@
-fastapi==0.111.0
-uvicorn==0.30.1
-boto3==1.34.131
-requests==2.32.3
-python-multipart==0.0.9
-ffmpeg-python==0.2.0
-pydub==0.25.1
-openai==1.*
+fastapi
+uvicorn
+openai
+requests
+beautifulsoup4
