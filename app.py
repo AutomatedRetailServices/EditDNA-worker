@@ -1,77 +1,33 @@
 from fastapi import FastAPI, File, UploadFile, Form, HTTPException
-from fastapi.responses import JSONResponse, FileResponse, PlainTextResponse
+from fastapi.responses import JSONResponse, FileResponse
 from typing import List, Dict, Any, Optional, Tuple
-import os, io, re, json, shutil, uuid, secrets, tempfile, subprocess
-from datetime import datetime
 from openai import OpenAI
+import os, tempfile, subprocess, json, re, uuid, time, shutil, hashlib
+import requests
+from bs4 import BeautifulSoup
 
-# -----------------------------------------------------------------------------
-# Config
-# -----------------------------------------------------------------------------
-SERVICE_NAME = "script2clipshop-worker"
-SERVICE_VERSION = "1.1.0-disk-sessions"
-SESS_ROOT = "/tmp/s2cs_sessions"            # sessions persist here
-MAX_SEGMENTS_PER_FILE = 80                   # safety bound for classifier prompt
-EARLY_SEC = 15.0                             # early hook heuristic
-FFMPEG_VF = "scale='min(720,iw)':-2"         # cap width at 720 for stability on Render
-FFMPEG_PRESET = "ultrafast"
-FFMPEG_CRF = "26"                            # lighter encode to avoid memory spikes
-
-os.makedirs(SESS_ROOT, exist_ok=True)
-
-# OpenAI client
+# -----------------------
+# App & OpenAI client
+# -----------------------
+app = FastAPI(title="script2clipshop-worker", version="1.5.0")
 client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
 
-app = FastAPI(title="Script2ClipShop Worker", version=SERVICE_VERSION)
+TMPDIR = "/tmp/script2clipshop"
+os.makedirs(TMPDIR, exist_ok=True)
 
-
-# -----------------------------------------------------------------------------
-# Helpers (disk sessions, shell, ffmpeg)
-# -----------------------------------------------------------------------------
+# -----------------------
+# Utils
+# -----------------------
 def run(cmd: List[str]):
-    """Run a shell command and raise with stderr on failure."""
     p = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
     if p.returncode != 0:
         raise RuntimeError(f"cmd failed: {' '.join(cmd)}\n{p.stderr}")
     return p.stdout
 
-def ensure_dir(p: str):
-    os.makedirs(p, exist_ok=True)
-    return p
-
-def new_session_id() -> str:
-    return secrets.token_hex(16)
-
-def new_file_id() -> str:
-    return secrets.token_hex(4)
-
-def sess_dir(session_id: str) -> str:
-    return ensure_dir(os.path.join(SESS_ROOT, session_id))
-
-def sess_files_dir(session_id: str) -> str:
-    return ensure_dir(os.path.join(sess_dir(session_id), "files"))
-
-def sess_tmp_dir(session_id: str) -> str:
-    return ensure_dir(os.path.join(sess_dir(session_id), "tmp"))
-
-def sess_exports_dir(session_id: str) -> str:
-    return ensure_dir(os.path.join(sess_dir(session_id), "exports"))
-
-def sess_json_path(session_id: str) -> str:
-    return os.path.join(sess_dir(session_id), "session.json")
-
-def save_json(path: str, obj: Dict[str, Any]):
-    with open(path, "w", encoding="utf-8") as f:
-        json.dump(obj, f, ensure_ascii=False, indent=2)
-
-def load_json(path: str) -> Dict[str, Any]:
-    with open(path, "r", encoding="utf-8") as f:
-        return json.load(f)
-
-def extract_duration_seconds(audio_or_video_path: str) -> float:
+def extract_duration_seconds(path: str) -> float:
     probe = subprocess.run(
         ["ffprobe", "-v", "error", "-show_entries", "format=duration",
-         "-of", "default=noprint_wrappers=1:nokey=1", audio_or_video_path],
+         "-of", "default=noprint_wrappers=1:nokey=1", path],
         stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True
     )
     try:
@@ -79,86 +35,152 @@ def extract_duration_seconds(audio_or_video_path: str) -> float:
     except:
         return 0.0
 
+def safe_json(obj: Any) -> Any:
+    try:
+        return json.loads(json.dumps(obj))
+    except Exception:
+        return obj
 
-# -----------------------------------------------------------------------------
-# Segmentation + Whisper transcription
-# -----------------------------------------------------------------------------
-def segment_by_silence_and_transcribe(video_path: str) -> Tuple[List[Dict[str, Any]], str]:
-    """
-    1) Convert to 16k mono WAV
-    2) Detect silences (ffmpeg silencedetect)
-    3) Cut spoken segments (2–60s), transcribe each with Whisper
-    4) Return segments=[{start,end,text}], transcript
-    """
-    segments: List[Dict[str, Any]] = []
+# -----------------------
+# Product link summarizer
+# -----------------------
+def summarize_product_links(urls: List[str], timeout_s: int = 7) -> List[Dict[str, Any]]:
+    cards = []
+    seen = set()
+    for u in urls:
+        u = (u or "").strip()
+        if not u: 
+            continue
+        h = hashlib.md5(u.encode("utf-8")).hexdigest()[:10]
+        cache_path = os.path.join(TMPDIR, f"product_{h}.json")
+        if os.path.exists(cache_path):
+            try:
+                with open(cache_path, "r") as f:
+                    cards.append(json.load(f))
+                continue
+            except:
+                pass
+        try:
+            r = requests.get(u, timeout=timeout_s, headers={"User-Agent":"Mozilla/5.0"})
+            html = r.text
+            soup = BeautifulSoup(html, "html.parser")
+            title = (soup.find("title").get_text() if soup.find("title") else "").strip()
+            og_title = soup.find("meta", {"property":"og:title"})
+            og_desc = soup.find("meta", {"property":"og:description"})
+            meta_desc = soup.find("meta", {"name":"description"})
+            desc = ""
+            for m in [og_desc, meta_desc]:
+                if m and m.get("content"): 
+                    desc = m["content"].strip(); break
+            # Attempt to gather bullet-ish items
+            bullets = []
+            for li in soup.select("ul li"):
+                t = (li.get_text() or "").strip()
+                if 4 <= len(t) <= 140:
+                    bullets.append(t)
+                if len(bullets) >= 12: break
+            brand = ""
+            for meta_key in ["og:site_name", "twitter:site", "application-name"]:
+                tag = soup.find("meta", {"property": meta_key}) or soup.find("meta", {"name": meta_key})
+                if tag and tag.get("content"):
+                    brand = tag["content"].strip()
+                    break
+            name = og_title["content"].strip() if og_title and og_title.get("content") else (title or "")
+            # extract numbers like "3000 lb", "2-pack"
+            numbers = re.findall(r"\b\d[\d,\.]*\s?(lb|lbs|kg|oz|pack|pcs|x|\"|in|cm|mm)\b", " ".join([title, desc, " ".join(bullets)]), re.I)
+            numbers = list(set(numbers))[:6]
+            cta_terms = ["Shop now", "Add to cart", "Free shipping", "Limited stock", "In stock", "Buy now"]
+            card = {
+                "url": u, "brand": brand, "name": name,
+                "bullets": bullets[:12],
+                "description": desc,
+                "numbers": numbers,
+                "cta_terms": cta_terms
+            }
+            with open(cache_path, "w") as f:
+                json.dump(card, f)
+            if u not in seen:
+                cards.append(card); seen.add(u)
+        except Exception:
+            # fail soft; skip this link
+            continue
+    return cards
+
+# -----------------------
+# Segmentation + Transcription
+# -----------------------
+def silences_for_wav(wav: str, noise_db: str = "-30dB", min_sil: float = 0.35) -> Tuple[List[float], List[float], float]:
+    proc = subprocess.run(
+        ["ffmpeg", "-i", wav, "-af", f"silencedetect=noise={noise_db}:d={min_sil}", "-f", "null", "-"],
+        stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True
+    )
+    log = proc.stderr or ""
+    starts = [0.0]
+    ends = []
+    for m in re.finditer(r"silence_start:\s*([0-9.]+)", log):
+        try: ends.append(float(m.group(1)))
+        except: pass
+    for m in re.finditer(r"silence_end:\s*([0-9.]+)", log):
+        try: starts.append(float(m.group(1)))
+        except: pass
+    total = extract_duration_seconds(wav)
+    if not ends or (ends and ends[-1] < total):
+        ends.append(total)
+    return starts, ends, total
+
+def segment_and_transcribe_one(src_path: str, record_dir: str, language: Optional[str]=None) -> Tuple[List[Dict[str,Any]], str]:
+    """Returns (segments_with_text, full_transcript)."""
+    segments = []
     with tempfile.TemporaryDirectory() as td:
         wav = os.path.join(td, "audio.wav")
-        run(["ffmpeg", "-y", "-i", video_path, "-ar", "16000", "-ac", "1", wav])
-
-        # Tune silence gate; 0.35s gaps tends to separate sentences well
-        proc = subprocess.run(
-            ["ffmpeg", "-i", wav, "-af", "silencedetect=noise=-30dB:d=0.35", "-f", "null", "-"],
-            stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True
-        )
-        log = proc.stderr or ""
-        starts = [0.0]
-        ends: List[float] = []
-        for m in re.finditer(r"silence_start:\s*([0-9.]+)", log):
-            try: ends.append(float(m.group(1)))
-            except: pass
-        for m in re.finditer(r"silence_end:\s*([0-9.]+)", log):
-            try: starts.append(float(m.group(1)))
-            except: pass
-
-        total = extract_duration_seconds(wav)
-        if not ends or (ends and ends[-1] < total):
-            ends.append(total)
-
-        # Trim and whisper
+        # 16k mono WAV for stable VAD/STT
+        run(["ffmpeg", "-y", "-i", src_path, "-ar", "16000", "-ac", "1", wav])
+        starts, ends, total = silences_for_wav(wav)
         for s, e in zip(starts, ends):
-            dur = max(0.0, e - s)
-            if dur < 0.25:
+            if (e - s) < 0.25:
                 continue
-            # Keep cuts reasonably sized for Whisper stability
-            if dur > 60.0:
-                e = s + 60.0
-                dur = 60.0
-
             chunk = os.path.join(td, f"seg_{int(s*1000)}.wav")
-            run([
-                "ffmpeg", "-y",
-                "-ss", f"{s:.3f}",
-                "-t", f"{dur:.3f}",
-                "-i", wav,
-                "-ac", "1", "-ar", "16000",
-                chunk
-            ])
+            run(["ffmpeg", "-y", "-ss", f"{s:.3f}", "-t", f"{(e-s):.3f}", "-i", wav, "-ac", "1", "-ar", "16000", chunk])
             with open(chunk, "rb") as f:
-                try:
-                    tr = client.audio.transcriptions.create(model="whisper-1", file=f)
-                    text = (getattr(tr, "text", "") or "").strip()
-                except Exception as ex:
-                    text = ""
+                tr = client.audio.transcriptions.create(
+                    model="whisper-1",
+                    file=f,
+                    **({"language": language} if language else {})
+                )
+            text = (getattr(tr, "text", "") or "").strip()
             if text:
-                segments.append({"start": round(s, 3), "end": round(e, 3), "text": text})
-
+                segments.append({"start": round(s,3), "end": round(e,3), "text": text})
     transcript = " ".join(seg["text"] for seg in segments)
     return segments, transcript
 
+# -----------------------
+# Classification (verbatim extraction)
+# -----------------------
+EARLY_SEC = 15.0
 
-# -----------------------------------------------------------------------------
-# Classification (text → buckets)
-# -----------------------------------------------------------------------------
-def classify_text_buckets(transcript: str, segments: List[Dict[str, Any]],
-                          features_csv: str, tone: str) -> Dict[str, Any]:
-    """
-    Extract ONLY verbatim lines into:
-    - hook_lines, feature_lines, proof_lines, cta_lines (≤6 each)
-    """
-    seg_listing = []
-    for seg in segments[:MAX_SEGMENTS_PER_FILE]:
-        seg_listing.append(f"[{seg['start']:.2f}-{seg['end']:.2f}] {seg['text']}")
-    seg_text = "\n".join(seg_listing)
+def classify_text_buckets(transcript: str,
+                          segments: List[Dict[str, Any]],
+                          features_csv: str,
+                          tone: str,
+                          product_cards: List[Dict[str,Any]]) -> Dict[str, Any]:
+    # Compact segments for context
+    seg_listing = "\n".join(
+        f"[{s['start']:.2f}-{s['end']:.2f}] {s['text']}" for s in segments[:100]
+    )
+
+    # Build product context text
+    pc_txt = []
+    for c in (product_cards or []):
+        bullets = "; ".join(c.get("bullets", [])[:8])
+        nums = ", ".join(c.get("numbers", [])[:6])
+        cta = ", ".join(c.get("cta_terms", [])[:6])
+        pc_txt.append(
+            f"- Brand/Name: {c.get('brand','')}/{c.get('name','')}\n"
+            f"  Bullets: {bullets}\n"
+            f"  Numbers: {nums}\n"
+            f"  CTA terms: {cta}\n"
+        )
+    product_context = "\n".join(pc_txt) if pc_txt else "(none)"
 
     system = (
         "You are an ad pre-editor for TikTok Shop/UGC. "
@@ -170,27 +192,25 @@ def classify_text_buckets(transcript: str, segments: List[Dict[str, Any]],
     )
     user = (
         f"Tone: {tone}\n"
-        f"Key features to prioritize: {features_csv}\n\n"
+        f"Key features to prioritize (csv): {features_csv}\n\n"
+        f"Product context (summarized from links):\n{product_context}\n\n"
         f"Transcript (full):\n{transcript}\n\n"
-        f"Segments (timestamped, earliest first):\n{seg_text}"
+        f"Segments (timestamped):\n{seg_listing}"
     )
-
-    data: Dict[str, Any] = {}
+    resp = client.chat.completions.create(
+        model="gpt-4o-mini",
+        response_format={"type": "json_object"},
+        messages=[{"role":"system","content":system},{"role":"user","content":user}],
+        temperature=0.2,
+        max_tokens=900
+    )
+    content = resp.choices[0].message.content
     try:
-        resp = client.chat.completions.create(
-            model="gpt-4o-mini",
-            response_format={"type": "json_object"},
-            messages=[{"role": "system", "content": system},
-                      {"role": "user", "content": user}],
-            temperature=0.2,
-            max_tokens=900,
-        )
-        content = resp.choices[0].message.content
-        data = json.loads(content) if content else {}
-    except Exception:
+        data = json.loads(content)
+    except:
         data = {}
 
-    def arr(key):
+    def arr(key): 
         v = data.get(key, []) if isinstance(data, dict) else []
         return [x for x in v if isinstance(x, str) and x.strip()][:6]
 
@@ -201,11 +221,7 @@ def classify_text_buckets(transcript: str, segments: List[Dict[str, Any]],
         "cta_lines": arr("cta_lines")[:3],
     }
 
-
-# -----------------------------------------------------------------------------
-# Hook scoring/mapping (swap-ready)
-# -----------------------------------------------------------------------------
-def find_segment_for_line(line: str, segments: List[Dict[str, Any]]):
+def find_segment_for_line(line: str, segments: List[Dict[str, Any]]) -> Optional[Dict[str,Any]]:
     needle = re.sub(r"\s+", " ", line.strip().lower())
     best = None
     best_overlap = 0
@@ -213,7 +229,7 @@ def find_segment_for_line(line: str, segments: List[Dict[str, Any]]):
         hay = re.sub(r"\s+", " ", seg["text"].strip().lower())
         if needle and needle in hay:
             return seg
-        # loose overlap fallback
+        # fallback: token overlap
         n_tokens = set(needle.split())
         h_tokens = set(hay.split())
         overlap = len(n_tokens & h_tokens)
@@ -223,321 +239,342 @@ def find_segment_for_line(line: str, segments: List[Dict[str, Any]]):
     return best
 
 def score_hook(seg: Dict[str, Any]) -> Tuple[float, str, bool]:
-    start = float(seg["start"]); end = float(seg["end"])
+    start, end = float(seg["start"]), float(seg["end"])
     dur = max(0.01, end - start)
     text = seg["text"]
-    score = 0.5; reasons = []
+    score, reasons = 0.5, []
     is_early = start <= EARLY_SEC
-    if is_early:
-        score += 0.25; reasons.append("early (≤15s)")
-    if 2.0 <= dur <= 7.0:
-        score += 0.2; reasons.append("snackable length")
+    if is_early: score += 0.25; reasons.append("early (≤15s)")
+    if 2.0 <= dur <= 7.0: score += 0.2; reasons.append("snackable length")
     cues = 0
     cues += 1 if re.search(r"\b(stop|wait|hold|don’t|don't)\b", text, re.I) else 0
     cues += 1 if "?" in text else 0
     cues += 1 if re.search(r"\b\d+(\.\d+)?\b", text) else 0
-    if cues >= 2:
-        score += 0.15; reasons.append("strong pattern cues")
-    elif cues == 1:
-        score += 0.07; reasons.append("hook cue")
+    if cues >= 2: score += 0.15; reasons.append("strong pattern cues")
+    elif cues == 1: score += 0.07; reasons.append("hook cue")
     why = "; ".join(reasons) if reasons else "solid line"
     return round(score, 3), why, is_early
 
-def build_hook_sets(hook_lines: List[str], segments: List[Dict[str, Any]]):
-    seen = set(); intro = []; in_body = []
+def build_hook_sets(hook_lines: List[str], segments: List[Dict[str, Any]], enrich: Dict[str,Any]) -> Tuple[List[Dict[str,Any]], List[Dict[str,Any]]]:
+    intro, in_body, seen = [], [], set()
     for line in hook_lines:
         seg = find_segment_for_line(line, segments)
-        if not seg: continue
+        if not seg: 
+            continue
+        # dedupe by normalized text
         norm = re.sub(r"\s+", " ", seg["text"].strip().lower())
-        if norm in seen: continue
+        if norm in seen: 
+            continue
         seen.add(norm)
         score, why, is_early = score_hook(seg)
-        item = {
+        hook_item = {
+            "file_id": seg["file_id"], "filename": seg["filename"],
             "text": seg["text"], "start": seg["start"], "end": seg["end"],
-            "score": score, "is_early": is_early
+            "score": score, "is_early": is_early, "why": why
         }
-        (intro if is_early else in_body).append(item)
+        (intro if is_early else in_body).append(hook_item)
     intro.sort(key=lambda x: x["score"], reverse=True)
     in_body.sort(key=lambda x: x["score"], reverse=True)
     return intro[:3], in_body[:3]
 
+# -----------------------
+# Session storage helpers
+# -----------------------
+def session_path(session_id: str) -> str:
+    return os.path.join(TMPDIR, f"session_{session_id}.json")
 
-# -----------------------------------------------------------------------------
-# API
-# -----------------------------------------------------------------------------
-@app.get("/", response_class=PlainTextResponse)
-def root():
-    return f"{SERVICE_NAME} {SERVICE_VERSION}"
+def save_session(sess: Dict[str,Any]):
+    path = session_path(sess["session_id"])
+    with open(path, "w") as f:
+        json.dump(safe_json(sess), f)
 
+def load_session(session_id: str) -> Dict[str,Any]:
+    path = session_path(session_id)
+    if not os.path.exists(path):
+        raise HTTPException(status_code=404, detail="session not found")
+    with open(path, "r") as f:
+        return json.load(f)
+
+# -----------------------
+# Routes
+# -----------------------
 @app.get("/health")
 def health():
-    return {"ok": True, "service": SERVICE_NAME, "version": SERVICE_VERSION}
+    return {"ok": True, "service": "script2clipshop-worker", "version": app.version}
 
 @app.post("/process")
 async def process_videos(
-    videos: List[UploadFile] = File(...),
-    tone: str = Form(...),
-    features_csv: str = Form(...),
-    product_link: str = Form(...)
+    videos: List[UploadFile] = File(..., description="Attach 1+ raw video files of the SAME product"),
+    tone: str = Form("casual"),
+    features_csv: str = Form(""),
+    product_link: str = Form("", description="Legacy single link; optional"),
+    product_links: str = Form("", description="Comma-separated links; optional"),
+    product_language: str = Form("", description="Whisper language code (e.g., 'es'); optional")
 ):
     """
-    Accept one or more videos, produce transcript + segments + buckets.
-    Persist everything to disk under /tmp/s2cs_sessions/<session_id>.
-    Return a session_id for export/download later.
+    Accepts multiple files for one product/session.
+    - Saves each raw file to /tmp with unique name
+    - Segments + transcribes
+    - Classifies into buckets (verbatim)
+    - Returns session_id + buckets + segments (with file_id/filename)
+    - Persists full session JSON to /tmp so /export survives restarts
     """
-    session_id = new_session_id()
-    sdir = sess_dir(session_id)
-    fdir = sess_files_dir(session_id)
-    tdir = sess_tmp_dir(session_id)
+    if not videos:
+        raise HTTPException(status_code=400, detail="No video files provided")
 
-    saved_files: List[Dict[str, Any]] = []
-    all_segments: List[Dict[str, Any]] = []
-    full_transcript_parts: List[str] = []
+    # Make a working dir for this session
+    session_id = uuid.uuid4().hex
+    workdir = os.path.join(TMPDIR, session_id)
+    os.makedirs(workdir, exist_ok=True)
 
-    # Save uploads to disk
+    # Save files to disk so /export can read them later
+    saved_files = []  # [{file_id, filename, path}]
     for up in videos:
-        file_id = new_file_id()
-        # Sanitize filename
-        base = os.path.basename(up.filename or f"video_{file_id}.mp4")
-        if not re.search(r"\.(mp4|mov|m4v|mpg|mpeg|webm|mkv)$", base, re.I):
-            base = f"{base}.mp4"
-        dst = os.path.join(fdir, f"{file_id}_{base}")
-        ensure_dir(os.path.dirname(dst))
-        with open(dst, "wb") as out:
-            shutil.copyfileobj(up.file, out)
-        # Segment + transcribe
-        try:
-            segs, transcript = segment_by_silence_and_transcribe(dst)
-        except Exception as ex:
-            raise HTTPException(status_code=502, detail=f"Segmentation/Transcription error: {ex}")
+        ext = os.path.splitext(up.filename or "upload.mp4")[1] or ".mp4"
+        fid = uuid.uuid4().hex[:8]
+        dst = os.path.join(workdir, f"{fid}{ext}")
+        data = await up.read()
+        with open(dst, "wb") as f:
+            f.write(data)
+        saved_files.append({"file_id": fid, "filename": up.filename or f"upload{ext}", "path": dst})
 
-        # attach file_id, filename to each segment
-        for seg in segs:
-            seg["file_id"] = file_id
-            seg["filename"] = base
+    # Summarize product links
+    links = []
+    if product_link.strip():
+        links.append(product_link.strip())
+    if product_links.strip():
+        parts = [x.strip() for x in product_links.split(",") if x.strip()]
+        links.extend(parts)
+    product_cards = summarize_product_links(links) if links else []
+
+    # For each saved file: segment + transcribe
+    all_segments, full_text = [], []
+    for rec in saved_files:
+        segs, transcript = segment_and_transcribe_one(rec["path"], workdir, language=(product_language or None))
+        # attach file metadata
+        for s in segs:
+            s["file_id"] = rec["file_id"]
+            s["filename"] = rec["filename"]
         all_segments.extend(segs)
-        full_transcript_parts.append(transcript)
-        saved_files.append({"file_id": file_id, "filename": base, "path": dst})
+        if transcript.strip():
+            full_text.append(transcript.strip())
 
-    full_transcript = " ".join(x for x in full_transcript_parts if x).strip()
+    transcript = " ".join(full_text)
 
-    # Classify → buckets
+    # Classify (verbatim lines)
     try:
-        buckets_raw = classify_text_buckets(full_transcript, all_segments, features_csv, tone)
-    except Exception as ex:
-        buckets_raw = {"hook_lines": [], "feature_lines": [], "proof_lines": [], "cta_lines": []}
+        buckets_raw = classify_text_buckets(transcript, all_segments, features_csv, tone, product_cards)
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"Classification error: {e}")
 
     # Hook mapping + scoring
-    intro_hooks, in_body_hooks = build_hook_sets(buckets_raw.get("hook_lines", []), all_segments)
+    intro_hooks, in_body_hooks = build_hook_sets(buckets_raw["hook_lines"], all_segments, {})
 
-    # Convert feature/proof/cta lines into timestamped segments by best match
-    def map_lines(lines: List[str]) -> List[Dict[str, Any]]:
+    # Build final buckets; include file metadata on features/proof/cta by mapping lines back to segments
+    def map_lines(lines: List[str]) -> List[Dict[str,Any]]:
         mapped = []
-        for line in (lines or []):
+        for line in lines:
             seg = find_segment_for_line(line, all_segments)
             if seg:
                 mapped.append({
                     "file_id": seg["file_id"], "filename": seg["filename"],
                     "text": seg["text"], "start": seg["start"], "end": seg["end"]
                 })
-        return mapped
+        # dedupe identical texts
+        seen = set(); out=[]
+        for m in mapped:
+            key = (m["file_id"], m["start"], m["end"], re.sub(r"\s+"," ",m["text"].lower()))
+            if key in seen: continue
+            seen.add(key); out.append(m)
+        return out[:3]
 
-    features_list = map_lines(buckets_raw.get("feature_lines", []))
-    proof_list = map_lines(buckets_raw.get("proof_lines", []))
-    cta_list = map_lines(buckets_raw.get("cta_lines", []))
+    features = map_lines(buckets_raw["feature_lines"])
+    proof    = map_lines(buckets_raw["proof_lines"])
+    cta      = map_lines(buckets_raw["cta_lines"])
 
     final_buckets = {
         "hooks": {
             "intro_hooks": intro_hooks,
             "in_body_hooks": in_body_hooks
         },
-        "features": features_list,
-        "proof": proof_list,
-        "cta": cta_list
+        "features": features,
+        "proof": proof,
+        "cta": cta
     }
 
     default_draft = {
         "hook_source": "intro_hooks" if intro_hooks else ("in_body_hooks" if in_body_hooks else None),
         "hook_index": 0 if (intro_hooks or in_body_hooks) else None,
-        "feature_index": 0 if features_list else None,
-        "proof_index": 0 if proof_list else None,
-        "cta_index": 0 if cta_list else None
+        "feature_index": 0 if features else None,
+        "proof_index": 0 if proof else None,
+        "cta_index": 0 if cta else None
     }
 
-    # Persist to disk
-    session_obj = {
+    # Persist session
+    session_doc = {
+        "ok": True,
         "session_id": session_id,
-        "created_at": datetime.utcnow().isoformat() + "Z",
+        "files": [{"file_id": f["file_id"], "filename": f["filename"]} for f in saved_files],
+        "file_paths": {f["file_id"]: f["path"] for f in saved_files},
+        "product_cards": product_cards,
         "tone": tone,
         "features_csv": features_csv,
-        "product_link": product_link,
-        "files": saved_files,            # includes disk paths
+        "product_links": links,
+        "transcript": transcript,
+        "transcript_chars": len(transcript),
         "segments": all_segments,
-        "transcript": full_transcript,
         "buckets": final_buckets,
         "default_draft": default_draft
     }
-    save_json(sess_json_path(session_id), session_obj)
+    save_session(session_doc)
 
-    # Response (no disk paths)
-    resp_files = [{"file_id": f["file_id"], "filename": f["filename"]} for f in saved_files]
-    return JSONResponse({
-        "ok": True,
-        "session_id": session_id,
-        "files": resp_files,
-        "transcript_chars": len(full_transcript),
-        "segments": all_segments,
-        "buckets": final_buckets
-    })
+    # Lightweight response (no internal paths)
+    resp = dict(session_doc)
+    resp.pop("file_paths", None)
+    return JSONResponse(resp)
 
+@app.get("/session/{session_id}")
+def get_session(session_id: str):
+    doc = load_session(session_id)
+    # hide internal paths from API response
+    doc = dict(doc)
+    doc.pop("file_paths", None)
+    return JSONResponse(doc)
+
+# -----------------------
+# Export helper
+# -----------------------
+def cut_and_concat(plan: List[Dict[str,Any]], file_paths: Dict[str,str], out_path: str):
+    """
+    For each item in plan: {"file_id","start","end"}
+    Produces a concat MP4 at out_path (1080x1920, 30fps).
+    """
+    work = tempfile.mkdtemp(prefix="cut_", dir=TMPDIR)
+    parts = []
+    try:
+        for i, item in enumerate(plan):
+            fid = item["file_id"]
+            start, end = float(item["start"]), float(item["end"])
+            dur = max(0.01, end - start)
+            src = file_paths[fid]
+            part = os.path.join(work, f"p{i:02d}.mp4")
+            # Trim + scale/pad to 1080x1920
+            # Using scale to fit width, then pad to vertical (simple safe approach)
+            vf = "scale=1080:-2:flags=lanczos, pad=1080:1920:(1080-iw*min(1080/iw\\,1920/ih))/2:(1920-ih*min(1080/iw\\,1920/ih))/2"
+            run([
+                "ffmpeg","-y","-ss",f"{start:.3f}","-t",f"{dur:.3f}","-i",src,
+                "-vf", vf, "-r","30","-an","-c:v","libx264","-preset","veryfast","-crf","20", part
+            ])
+            # extract audio too (then merge later)
+            audio = os.path.join(work, f"p{i:02d}_a.m4a")
+            run([
+                "ffmpeg","-y","-ss",f"{start:.3f}","-t",f"{dur:.3f}","-i",src,
+                "-vn","-c:a","aac","-b:a","128k", audio
+            ])
+            parts.append((part, audio))
+        # Concat video
+        vlist = os.path.join(work, "list_v.txt")
+        with open(vlist,"w") as f:
+            for p,_ in parts:
+                f.write(f"file '{p}'\n")
+        vcat = os.path.join(work, "cat_v.mp4")
+        run(["ffmpeg","-y","-f","concat","-safe","0","-i",vlist,"-c","copy", vcat])
+
+        # Concat audio
+        alist = os.path.join(work, "list_a.txt")
+        with open(alist,"w") as f:
+            for _,a in parts:
+                f.write(f"file '{a}'\n")
+        acat = os.path.join(work, "cat_a.m4a")
+        run(["ffmpeg","-y","-f","concat","-safe","0","-i",alist,"-c","copy", acat])
+
+        # Merge A/V
+        run([
+            "ffmpeg","-y","-i",vcat,"-i",acat,"-c:v","copy","-c:a","aac","-shortest", out_path
+        ])
+    finally:
+        try: shutil.rmtree(work)
+        except: pass
 
 @app.post("/export")
 async def export_video(
     session_id: str = Form(...),
     filename: str = Form("draft.mp4"),
-    hook_source: Optional[str] = Form(None),
     hook_index: Optional[int] = Form(None),
     feature_index: Optional[int] = Form(None),
     proof_index: Optional[int] = Form(None),
     cta_index: Optional[int] = Form(None),
+    allowed_file_ids: Optional[str] = Form(None)  # comma-separated whitelist
 ):
     """
-    Build MP4 from selected segments. If any bucket/index is missing, we gracefully skip it.
-    Output saved to /tmp/s2cs_sessions/<session_id>/exports/<filename>
+    Builds a cut plan from the session buckets and renders MP4 to /tmp.
+    Use allowed_file_ids to restrict picks to specific source files (avoid mixing different products).
     """
+    doc = load_session(session_id)
+    file_paths: Dict[str,str] = doc.get("file_paths", {})
+    if not file_paths:
+        raise HTTPException(status_code=404, detail="session has no file paths (was it created here?)")
+
+    allowed: Optional[set] = None
+    if allowed_file_ids:
+        allowed = set(x.strip() for x in allowed_file_ids.split(",") if x.strip())
+
+    def filter_allowed(items: List[Dict[str,Any]]) -> List[Dict[str,Any]]:
+        if not allowed: return items
+        return [x for x in (items or []) if x.get("file_id") in allowed]
+
+    buckets = doc.get("buckets", {})
+    hooks = buckets.get("hooks", {})
+    intro_hooks = filter_allowed(hooks.get("intro_hooks", []) or [])
+    in_body_hooks = filter_allowed(hooks.get("in_body_hooks", []) or [])
+    features = filter_allowed(buckets.get("features", []) or [])
+    proof    = filter_allowed(buckets.get("proof", []) or [])
+    cta      = filter_allowed(buckets.get("cta", []) or [])
+
+    # pick helper
+    def pick(lst: List[Dict[str,Any]], idx: Optional[int]) -> Optional[Dict[str,Any]]:
+        if not lst: return None
+        if isinstance(idx, int) and 0 <= idx < len(lst): return lst[idx]
+        return lst[0]
+
+    # decide hook source
+    hook_src = intro_hooks if intro_hooks else in_body_hooks
+    sel = []
+    hk = pick(hook_src, hook_index)
+    if hk: sel.append(hk)
+    ft = pick(features, feature_index)
+    if ft: sel.append(ft)
+    pf = pick(proof, proof_index)
+    if pf: sel.append(pf)
+    ct = pick(cta, cta_index)
+    if ct: sel.append(ct)
+
+    if not sel:
+        raise HTTPException(status_code=400, detail="Nothing to export (no buckets available with current filters).")
+
+    # Build plan → trim & concat
+    plan = [{"file_id": x["file_id"], "start": x["start"], "end": x["end"]} for x in sel]
+    outname = re.sub(r"[^A-Za-z0-9._-]","_", filename or "draft.mp4")
+    outdir = os.path.join(TMPDIR, session_id)
+    os.makedirs(outdir, exist_ok=True)
+    out_path = os.path.join(outdir, outname)
+
     try:
-        sjson = load_json(sess_json_path(session_id))
-    except Exception:
-        return {"ok": False, "reason": "session not found"}
+        cut_and_concat(plan, file_paths, out_path)
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"FFmpeg export error: {e}")
 
-    buckets = sjson.get("buckets", {}) or {}
-    files_meta = {f["file_id"]: f for f in sjson.get("files", [])}
-
-    # Helper: pick segment safely
-    def pick_hook() -> Optional[Dict[str, Any]]:
-        nonlocal hook_source, hook_index
-        hooks = buckets.get("hooks", {})
-        if not hook_source:
-            hook_source = "intro_hooks" if hooks.get("intro_hooks") else "in_body_hooks"
-        lst = hooks.get(hook_source or "", []) or []
-        idx = hook_index if isinstance(hook_index, int) else 0
-        return lst[idx] if idx is not None and 0 <= idx < len(lst) else (lst[0] if lst else None)
-
-    def pick_from_list(key: str, idx_opt: Optional[int]) -> Optional[Dict[str, Any]]:
-        lst = buckets.get(key, []) or []
-        idx = idx_opt if isinstance(idx_opt, int) else 0
-        return lst[idx] if 0 <= idx < len(lst) else (lst[0] if lst else None)
-
-    picks = []
-    h = pick_hook()
-    if h: picks.append(h)
-    f = pick_from_list("features", feature_index)
-    if f: picks.append(f)
-    p = pick_from_list("proof", proof_index)
-    if p: picks.append(p)
-    c = pick_from_list("cta", cta_index)
-    if c: picks.append(c)
-
-    if not picks:
-        # Fallback: pick earliest segment across all if available
-        segs = sjson.get("segments", [])
-        if segs:
-            earliest = sorted(segs, key=lambda x: x.get("start", 0.0))[0]
-            picks = [{
-                "file_id": earliest.get("file_id"),
-                "filename": earliest.get("filename"),
-                "text": earliest.get("text"),
-                "start": earliest.get("start"),
-                "end": earliest.get("end"),
-            }]
-        else:
-            return {"ok": False, "reason": "no valid segments to export"}
-
-    # Cut each pick to a temporary mp4
-    tdir = sess_tmp_dir(session_id)
-    clips = []
-    try:
-        for i, seg in enumerate(picks):
-            fid = seg.get("file_id")
-            meta = files_meta.get(fid)
-            if not meta:
-                continue
-            src = meta["path"]
-            start = float(seg["start"]); end = float(seg["end"])
-            dur = max(0.01, end - start)
-
-            clip_path = os.path.join(tdir, f"clip_{i:02d}.mp4")
-            # Re-encode each cut to ensure concat-compatible streams
-            cmd = [
-                "ffmpeg", "-y",
-                "-ss", f"{start:.3f}",
-                "-t", f"{dur:.3f}",
-                "-i", src,
-                "-vf", FFMPEG_VF,
-                "-c:v", "libx264", "-preset", FFMPEG_PRESET, "-crf", FFMPEG_CRF,
-                "-c:a", "aac", "-b:a", "128k",
-                "-movflags", "+faststart",
-                clip_path
-            ]
-            run(cmd)
-            clips.append(clip_path)
-
-        if not clips:
-            return {"ok": False, "reason": "no cuttable segments"}
-
-        # Concat
-        list_txt = os.path.join(tdir, "concat.txt")
-        with open(list_txt, "w", encoding="utf-8") as f:
-            for cpath in clips:
-                f.write(f"file '{cpath}'\n")
-
-        out_dir = sess_exports_dir(session_id)
-        out_path = os.path.join(out_dir, filename)
-
-        # Re-encode final for guaranteed compatibility
-        cmd2 = [
-            "ffmpeg", "-y",
-            "-f", "concat", "-safe", "0",
-            "-i", list_txt,
-            "-c:v", "libx264", "-preset", FFMPEG_PRESET, "-crf", "23",
-            "-c:a", "aac", "-b:a", "160k",
-            "-movflags", "+faststart",
-            out_path
-        ]
-        run(cmd2)
-
-        # Save light export manifest for debugging
-        manifest = {
-            "session_id": session_id,
-            "output": out_path,
-            "segments_used": picks
-        }
-        save_json(os.path.join(out_dir, f"{filename}.json"), manifest)
-
-        return {
-            "ok": True,
-            "message": "export complete",
-            "session_id": session_id,
-            "filename": filename,
-            "download": f"/download/{session_id}/{filename}",
-            "segments_used": picks
-        }
-    except Exception as ex:
-        return {"ok": False, "error": f"{ex}"}
-
+    return JSONResponse({
+        "ok": True,
+        "session_id": session_id,
+        "filename": outname,
+        "plan": plan,
+        "download_url": f"/download/{session_id}/{outname}"
+    })
 
 @app.get("/download/{session_id}/{filename}")
-def download_export(session_id: str, filename: str):
-    out_path = os.path.join(sess_exports_dir(session_id), filename)
-    if not os.path.exists(out_path):
-        raise HTTPException(status_code=404, detail="file not found")
-    return FileResponse(out_path, media_type="video/mp4", filename=filename)
-
-
-# Optional: inspect saved session JSON quickly
-@app.get("/session/{session_id}")
-def get_session(session_id: str):
-    path = sess_json_path(session_id)
+def download(session_id: str, filename: str):
+    path = os.path.join(TMPDIR, session_id, filename)
     if not os.path.exists(path):
-        raise HTTPException(status_code=404, detail="session not found")
-    return load_json(path)
+        raise HTTPException(status_code=404, detail="file not found")
+    return FileResponse(path, media_type="video/mp4", filename=filename)
