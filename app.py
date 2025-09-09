@@ -35,7 +35,7 @@ OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
 SESS_ROOT = Path("/tmp/s2c_sessions")
 SESS_ROOT.mkdir(parents=True, exist_ok=True)
 
-VERSION = "1.1.0-genscript"
+VERSION = "1.1.1-batch-upload-status"
 
 # -----------------------------------------------------------------------------
 # Helpers
@@ -69,21 +69,18 @@ def extract_json_block(text: str) -> dict:
     Try to extract the first JSON object from a string (even if the model wraps it
     in markdown code fences). Fall back to parsing the whole string.
     """
-    # Look for fenced code block with json
     m = re.search(r"```json\s*(\{.*?\})\s*```", text, flags=re.DOTALL | re.IGNORECASE)
     if m:
         try:
             return json.loads(m.group(1))
         except Exception:
             pass
-    # Look for any JSON object
     m2 = re.search(r"(\{.*\})", text, flags=re.DOTALL)
     if m2:
         try:
             return json.loads(m2.group(1))
         except Exception:
             pass
-    # Fall back to direct parse
     return json.loads(text)
 
 # -----------------------------------------------------------------------------
@@ -94,49 +91,96 @@ def health():
     return {"ok": True, "service": "editdna-worker", "version": VERSION}
 
 # -----------------------------------------------------------------------------
-# Step 1 — Upload & Session
+# Step 1 — Upload & Session (now supports batching via session_id)
 # -----------------------------------------------------------------------------
 @app.post("/process")
 async def process_video(
     videos: List[UploadFile] = File(...),
     tone: str = Form("casual"),
     features_csv: str = Form(""),
-    product_link: str = Form(...),           # REQUIRED per updated scope
-    # Optional per-file slot metadata could be added later (e.g., "slot: hook/feature/proof/cta")
+    product_link: str = Form(""),
+    session_id: Optional[str] = Form(None)  # NEW: append to an existing session
 ):
     """
-    Saves uploaded videos to /tmp and stores session.json with file paths + context.
-    Returns session_id + file list. Product link is required (A & B flows).
+    Saves uploaded videos to /tmp and stores/updates session.json with file paths.
+    If session_id is provided, append files to that existing session. Otherwise create a new session.
+    Returns session_id + the cumulative file list for this session.
     """
-    session_id = uuid.uuid4().hex
+    # Guard per-request count to avoid Render proxy limits
+    MAX_FILES_PER_REQUEST = 6
+    if len(videos) > MAX_FILES_PER_REQUEST:
+        raise HTTPException(
+            status_code=413,
+            detail=f"too many files in one request; send ≤{MAX_FILES_PER_REQUEST} files per call",
+        )
+
+    creating_new = session_id is None or not str(session_id).strip()
+    if creating_new:
+        session_id = uuid.uuid4().hex
+        session = {
+            "session_id": session_id,
+            "files": [],
+            "file_paths": {},
+            "tone": tone,
+            "features_csv": features_csv,
+            "product_link": product_link,
+        }
+    else:
+        sd_existing = sess_dir(session_id)
+        meta_path_existing = sd_existing / "session.json"
+        if not meta_path_existing.exists():
+            raise HTTPException(status_code=404, detail="session not found")
+        session = load_json(meta_path_existing)
+        # Update optional metadata if provided
+        if tone:
+            session["tone"] = tone
+        if features_csv:
+            session["features_csv"] = features_csv
+        if product_link:
+            session["product_link"] = product_link
+
     sd = sess_dir(session_id)
 
-    files_meta = []
-    file_paths: Dict[str, str] = {}
+    files_meta: List[dict] = session.get("files", [])
+    file_paths: Dict[str, str] = session.get("file_paths", {})
 
     for up in videos:
         fid = uuid.uuid4().hex[:8]
         orig_name = up.filename or f"{fid}.mp4"
-        dst = sd / orig_name
+        safe_name = "".join(c for c in orig_name if c.isalnum() or c in ("-", "_", ".",)).strip() or f"{fid}.mp4"
+        dst = sd / safe_name
         with dst.open("wb") as w:
             shutil.copyfileobj(up.file, w)
-        files_meta.append({"file_id": fid, "filename": orig_name})
+
+        files_meta.append({"file_id": fid, "filename": safe_name})
         file_paths[fid] = str(dst)
 
-    session_json = {
-        "session_id": session_id,
-        "files": files_meta,
-        "file_paths": file_paths,        # internal only, not returned to client
-        "tone": tone,
-        "features_csv": features_csv,
-        "product_link": product_link,
-    }
-    save_json(sd / "session.json", session_json)
+    session["files"] = files_meta
+    session["file_paths"] = file_paths
+    save_json(sd / "session.json", session)
 
     return JSONResponse({
         "ok": True,
+        "created_new_session": creating_new,
         "session_id": session_id,
-        "files": files_meta
+        "files": files_meta  # cumulative list across all /process calls
+    })
+
+# -----------------------------------------------------------------------------
+# Step 1.1 — List files in a session (quick debug/QA)
+# -----------------------------------------------------------------------------
+@app.get("/list")
+def list_files(session_id: str):
+    sd = sess_dir(session_id)
+    meta = sd / "session.json"
+    if not meta.exists():
+        raise HTTPException(status_code=404, detail="session not found")
+    session = load_json(meta)
+    return JSONResponse({
+        "ok": True,
+        "session_id": session_id,
+        "count": len(session.get("files") or []),
+        "files": session.get("files") or []
     })
 
 # -----------------------------------------------------------------------------
@@ -204,11 +248,9 @@ def impl_stitch(session_id: str, manifest: dict, filename: str) -> dict:
     fps = int(manifest.get("fps") or 30)
     scale = int(manifest.get("scale") or 720)
 
-    # Create temporary concat list
     concat_txt = sd / "concat.txt"
     temp_segments: List[Path] = []
 
-    # Render each segment to an intermediate clip
     for i, seg in enumerate(segments):
         fid = seg.get("file_id")
         start = float(seg.get("start", 0))
@@ -223,7 +265,6 @@ def impl_stitch(session_id: str, manifest: dict, filename: str) -> dict:
         seg_out = sd / f"seg_{i:03d}.mp4"
         temp_segments.append(seg_out)
 
-        # Basic (can be upgraded with SmartCut later)
         run([
             "ffmpeg", "-y",
             "-ss", f"{start:.3f}",
@@ -236,7 +277,6 @@ def impl_stitch(session_id: str, manifest: dict, filename: str) -> dict:
             str(seg_out)
         ])
 
-    # Build concat file
     with concat_txt.open("w") as w:
         for p in temp_segments:
             w.write(f"file '{p.as_posix()}'\n")
@@ -253,7 +293,6 @@ def impl_stitch(session_id: str, manifest: dict, filename: str) -> dict:
             str(out_path)
         ])
     else:
-        # Fallback: if no segments, copy first file
         files = session.get("files") or []
         if not files:
             raise HTTPException(status_code=400, detail="no segments and no files")
@@ -286,7 +325,7 @@ def stitch_video(
     return JSONResponse(out)
 
 # -----------------------------------------------------------------------------
-# Step 4 — Auto-Manifest (very simple rules; can be extended later)
+# Step 4 — Auto-Manifest (simple rules; extend later)
 # -----------------------------------------------------------------------------
 @app.post("/automanifest")
 def automanifest(
@@ -304,34 +343,22 @@ def automanifest(
     if not files:
         raise HTTPException(status_code=400, detail="no files")
 
-    # Naive: take the first ~max_total_sec seconds across files (2-clip cap)
     segments = []
     remaining = float(max_total_sec)
     for f in files[:4]:
-        # Probe duration
         src = file_paths.get(f["file_id"])
         if not src or not Path(src).exists():
             continue
-        # Use a fixed chunk ~min(remaining, 6s) per file for this simple pass
         use = min(remaining, 6.0)
         if use <= 0.05:
             break
-        segments.append({
-            "file_id": f["file_id"],
-            "start": 0.0,
-            "end": round(use, 3)
-        })
+        segments.append({"file_id": f["file_id"], "start": 0.0, "end": round(use, 3)})
         remaining -= use
         if remaining <= 0.05:
             break
 
-    manifest = {
-        "fps": int(fps),
-        "scale": int(scale),
-        "segments": segments
-    }
+    manifest = {"fps": int(fps), "scale": int(scale), "segments": segments}
 
-    # Save manifest into session for reference
     session["manifest"] = manifest
     save_json(sd / "session.json", session)
 
@@ -356,10 +383,8 @@ def impl_analyze(session_id: str, max_segments_per_file: int = 8) -> dict:
     for f in files[:max_segments_per_file]:
         analysis["files"].append({
             "file_id": f["file_id"],
-            "segments": [
-                {"start": 0.0, "end": 6.0}  # simple placeholder
-            ],
-            "transcript": ""  # fill later with Whisper
+            "segments": [{"start": 0.0, "end": 6.0}],
+            "transcript": ""
         })
     session["analysis"] = analysis
     save_json(sd / "session.json", session)
@@ -382,7 +407,7 @@ def impl_classify(session_id: str) -> dict:
                 "file_id": af["file_id"],
                 "start": seg["start"],
                 "end": seg["end"],
-                "score": 0.5  # placeholder score
+                "score": 0.5
             })
             idx += 1
     session["classification"] = {"buckets": buckets}
@@ -399,7 +424,6 @@ def autoassemble(
     max_total_sec: float = Form(20.0),
     max_segments_per_file: int = Form(8)
 ):
-    # Analyze → Classify → AutoManifest → Stitch
     impl_analyze(session_id, max_segments_per_file=max_segments_per_file)
     impl_classify(session_id)
     mani_resp = automanifest(session_id, filename, fps, scale, max_total_sec)
@@ -407,7 +431,6 @@ def autoassemble(
     try:
         manifest_data = json.loads(manifest.decode("utf-8"))
     except Exception:
-        # Fallback if middleware encoded differently
         manifest_data = mani_resp.media or {}
     manifest_json = json.dumps(manifest_data.get("manifest") or {})
     out = stitch_video(session_id=session_id, manifest_json=manifest_json, filename=filename)
@@ -446,7 +469,6 @@ STYLE_HINTS = {
 def call_openai_for_script(model: str, product_link: str, style: str, tone: str,
                            language: str, target_length_sec: float,
                            script_text: Optional[str]) -> dict:
-    # Build user prompt
     style_hint = STYLE_HINTS.get(style, "Use best-fit funnel style for short ads.")
     user_prompt = {
         "product_link": product_link,
@@ -457,7 +479,6 @@ def call_openai_for_script(model: str, product_link: str, style: str, tone: str,
         "style_hint": style_hint,
         "script_text_if_any": script_text or ""
     }
-    # Ask for strict JSON. We'll parse robustly.
     resp = client.chat.completions.create(
         model=model,
         messages=[
@@ -470,19 +491,16 @@ def call_openai_for_script(model: str, product_link: str, style: str, tone: str,
     text = resp.choices[0].message.content.strip()
     try:
         data = extract_json_block(text)
-        # Basic validation
         slots = data.get("slots") or []
-        # Normalize slot ids
         normalized = []
         for s in slots:
             slot_key = (s.get("slot") or "").strip().lower()
             if slot_key not in {"hook", "feature", "proof", "cta"}:
-                # Try to map from alternates
                 mapping = {
                     "problem": "hook",
                     "solution": "feature",
                     "demo": "proof",
-                    "credibility": "hook",   # map testimonial openers to hook
+                    "credibility": "hook",
                     "before": "feature",
                     "after": "proof",
                     "vo hook": "hook",
@@ -496,7 +514,6 @@ def call_openai_for_script(model: str, product_link: str, style: str, tone: str,
         if not normalized:
             raise ValueError("no valid slots")
         data["slots"] = normalized
-        # Ensure style_detected
         if not data.get("style_detected"):
             data["style_detected"] = "best_fit"
         return data
@@ -521,7 +538,6 @@ def genscript(
     sd = sess_dir(session_id)
     meta_path = sd / "session.json"
     if not meta_path.exists():
-        # create a minimal session if not uploaded yet
         save_json(meta_path, {
             "session_id": session_id,
             "files": [],
@@ -535,7 +551,6 @@ def genscript(
     if style_requested not in {"TalkingHead", "Skit", "Testimonial", "Voiceover", "auto"}:
         raise HTTPException(status_code=400, detail="style must be one of TalkingHead|Skit|Testimonial|Voiceover|auto")
 
-    # If user provided a script and asked for auto, let the model decide style
     chosen_style = style_requested if style_requested != "auto" else "TalkingHead"
 
     data = call_openai_for_script(
@@ -548,14 +563,12 @@ def genscript(
         script_text=script_text or None
     )
 
-    # If user asked for auto, we trust model's style_detected for UI display
     storyboard = {
         "style": data.get("style_detected") or style_requested,
         "slots": data.get("slots") or [],
         "notes": data.get("notes", "")
     }
 
-    # Save to session
     session = load_json(meta_path)
     session["storyboard"] = storyboard
     save_json(meta_path, session)
@@ -569,6 +582,44 @@ def genscript(
     })
 
 # -----------------------------------------------------------------------------
+# Status — simple progress snapshot for a session
+# -----------------------------------------------------------------------------
+@app.get("/status/{session_id}")
+def status(session_id: str):
+    sd = sess_dir(session_id)
+    meta = sd / "session.json"
+    if not meta.exists():
+        raise HTTPException(status_code=404, detail="session not found")
+    session = load_json(meta)
+
+    files = session.get("files") or []
+    analysis = session.get("analysis") or {}
+    classification = session.get("classification") or {}
+    manifest = session.get("manifest") or {}
+    storyboard = session.get("storyboard") or {}
+
+    # Look for known outputs
+    draft = None
+    for name in ["final.mp4", "draft.mp4"]:
+        p = sd / name
+        if p.exists():
+            draft = f"/download/{session_id}/{name}"
+            break
+
+    return JSONResponse({
+        "ok": True,
+        "session_id": session_id,
+        "counts": {
+            "files": len(files),
+            "analyzed_files": len(analysis.get("files") or []),
+            "classified_buckets": len((classification.get("buckets") or {}).keys() or [])
+        },
+        "has_storyboard": bool(storyboard),
+        "has_manifest": bool(manifest),
+        "draft_url": draft
+    })
+
+# -----------------------------------------------------------------------------
 # Download
 # -----------------------------------------------------------------------------
 @app.get("/download/{session_id}/{filename}")
@@ -577,5 +628,4 @@ def download(session_id: str, filename: str):
     f = sd / filename
     if not f.exists():
         raise HTTPException(status_code=404, detail="file not found")
-    # For now assume mp4; later detect based on suffix
     return FileResponse(f, filename=filename, media_type="video/mp4")
