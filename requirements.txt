@@ -1,10 +1,8 @@
 fastapi==0.115.0
 uvicorn[standard]==0.30.6
 openai==1.43.0
-httpx==0.27.2          # <<< pin to avoid the 'proxies' error
+httpx==0.27.2
 requests==2.32.3
 beautifulsoup4==4.12.3
 python-multipart==0.0.9
-fastapi==0.111.0
-uvicorn==0.30.0
 boto3==1.34.162
