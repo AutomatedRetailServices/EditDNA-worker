@@ -1,306 +1,254 @@
-import os, json, uuid, time, math, tempfile, subprocess
+import os, uuid, json, shutil, subprocess, time
 from pathlib import Path
-from typing import List, Optional, Any, Dict
-from urllib.parse import urlparse
+from typing import List, Optional
 
-import boto3
-import requests
-from fastapi import FastAPI, HTTPException
-from fastapi.middleware.cors import CORSMiddleware
+from fastapi import FastAPI, HTTPException, Body
+from fastapi.responses import FileResponse
 from pydantic import BaseModel
-from starlette.responses import FileResponse
 
-# ----------------------------
-# Config & helpers
-# ----------------------------
-APP_NAME = "EditDNA Worker"
-ROOT = Path("/tmp/s2c_sessions")
-ROOT.mkdir(parents=True, exist_ok=True)
+import requests
+import redis
 
-AWS_REGION = os.getenv("AWS_DEFAULT_REGION") or os.getenv("AWS_REGION", "us-east-1")
-S3_BUCKET = os.getenv("S3_BUCKET")
-S3_PUBLIC_BASE = os.getenv("S3_PUBLIC_BASE")  # optional, e.g. https://cdn.yourdomain.com
+# ========= App setup =========
+app = FastAPI(title="EditDNA Worker API")
+VERSION = "1.2.0-async-stitch"
 
-if not S3_BUCKET:
-    raise RuntimeError("S3_BUCKET env var is required")
+SESS_ROOT = Path("/tmp/s2c_sessions")
+SESS_ROOT.mkdir(parents=True, exist_ok=True)
 
-s3 = boto3.client("s3", region_name=AWS_REGION)
+# Redis (for async jobs)
+REDIS_URL = os.getenv("REDIS_URL", "")
+r: Optional[redis.Redis] = redis.from_url(REDIS_URL, decode_responses=True) if REDIS_URL else None
 
-def sid_dir(session_id: str) -> Path:
-    d = ROOT / session_id
-    d.mkdir(parents=True, exist_ok=True)
-    return d
+# Optional public CDN base (for nicer links)
+S3_PUBLIC_BASE = os.getenv("S3_PUBLIC_BASE", "").rstrip("/")
 
-def save_json(path: Path, data: dict):
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(data, indent=2))
+
+# ========= Helpers =========
+def sess_dir(session_id: str) -> Path:
+    p = SESS_ROOT / session_id
+    p.mkdir(parents=True, exist_ok=True)
+    return p
+
+def save_json(path: Path, data: dict) -> None:
+    path.write_text(json.dumps(data, ensure_ascii=False, indent=2))
 
 def load_json(path: Path) -> dict:
     if not path.exists():
         raise FileNotFoundError(str(path))
     return json.loads(path.read_text())
 
-def short_id() -> str:
-    return uuid.uuid4().hex[:8]
+def run(cmd: list):
+    p = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    if p.returncode != 0:
+        raise RuntimeError(f"cmd failed: {' '.join(cmd)}\n{p.stderr}")
+    return p.stdout
 
-def parse_s3_key_from_url(url: str) -> str:
-    """
-    Accepts AWS-style URL:
-      https://<bucket>.s3.<region>.amazonaws.com/<key>
-    Returns key.
-    """
-    parsed = urlparse(url)
-    # path begins with '/', remove it
-    key = parsed.path.lstrip("/")
-    return key
+def _public_or_download(session_id: str, fname: str) -> dict:
+    if S3_PUBLIC_BASE:
+        return {"public_url": f"{S3_PUBLIC_BASE}/sessions/{session_id}/{fname}"}
+    return {"download_path": f"/download/{session_id}/{fname}"}
 
-def ffmpeg(cmd: List[str]):
-    proc = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-    if proc.returncode != 0:
-        raise RuntimeError(f"ffmpeg error:\n{proc.stderr.decode('utf-8', errors='ignore')}")
-    return proc
+def _download_to_tmp(url: str, dst: Path):
+    with requests.get(url, stream=True) as res:
+        res.raise_for_status()
+        with dst.open("wb") as f:
+            for chunk in res.iter_content(chunk_size=1024 * 1024):
+                if chunk:
+                    f.write(chunk)
 
-# ----------------------------
-# Schemas
-# ----------------------------
-class ProcessUrlsBody(BaseModel):
+def _ffmpeg_trim(input_path: Path, start: float, end: float, out_path: Path, scale: int, fps: int):
+    dur = max(0.1, float(end) - float(start))
+    run([
+        "ffmpeg", "-y",
+        "-ss", f"{float(start):.3f}",
+        "-t", f"{dur:.3f}",
+        "-i", str(input_path),
+        "-vf", f"scale={int(scale)}:-2:flags=lanczos",
+        "-r", str(int(fps)),
+        "-c:v", "libx264", "-preset", "veryfast", "-crf", "22",
+        "-c:a", "aac", "-b:a", "128k",
+        str(out_path)
+    ])
+
+def _concat_mp4s(parts: List[Path], out_path: Path):
+    lst = out_path.with_suffix(".txt")
+    lst.write_text("\n".join([f"file '{p.as_posix()}'" for p in parts]))
+    run(["ffmpeg", "-y", "-f", "concat", "-safe", "0", "-i", str(lst), "-c", "copy", str(out_path)])
+    lst.unlink(missing_ok=True)
+
+def _job_key(job_id: str) -> str:
+    return f"job:{job_id}"
+
+
+# ========= Health =========
+@app.get("/health")
+def health():
+    return {
+        "ok": True,
+        "service": "editdna-worker",
+        "version": VERSION,
+        "redis": bool(r)
+    }
+
+
+# ========= S3 URL (no direct upload) flow we’re using now =========
+class ProcessURLsIn(BaseModel):
     urls: List[str]
-    tone: Optional[str] = None
-    product_link: Optional[str] = None
-    features_csv: Optional[str] = None
+    tone: Optional[str] = "casual"
+    product_link: Optional[str] = ""
+    features_csv: Optional[str] = ""
 
-class AutoManifestBody(BaseModel):
+@app.post("/process_urls")
+def process_urls(body: ProcessURLsIn):
+    session_id = uuid.uuid4().hex
+    sd = sess_dir(session_id)
+
+    files_meta = []
+    url_map = {}
+    for u in body.urls:
+        fid = uuid.uuid4().hex[:8]
+        files_meta.append({"file_id": fid, "source": "url"})
+        url_map[fid] = u
+
+    session_json = {
+        "session_id": session_id,
+        "files": files_meta,
+        "urls": url_map,  # file_id -> URL (presigned or public)
+        "tone": body.tone,
+        "features_csv": body.features_csv,
+        "product_link": body.product_link,
+    }
+    save_json(sd / "session.json", session_json)
+    return {"ok": True, "session_id": session_id, "files": files_meta}
+
+
+class AutoManifestIn(BaseModel):
     session_id: str
     filename: str = "final.mp4"
     fps: int = 30
-    scale: int = 720                    # target height, keep aspect
-    max_total_sec: int = 12
-    max_segments_per_file: int = 1      # default 1 segment per file for draft
-
-class StitchBody(BaseModel):
-    session_id: str
-    filename: str = "final.mp4"
-    manifest: Dict[str, Any]
-
-# ----------------------------
-# App
-# ----------------------------
-app = FastAPI(title="FastAPI", version="1.0.0")
-
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],  # lock down later
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
-# ----------------------------
-# Endpoints
-# ----------------------------
-@app.get("/health")
-def health():
-    return {"ok": True, "service": APP_NAME, "time": time.time()}
-
-@app.post("/process_urls")
-def process_urls(body: ProcessUrlsBody):
-    """
-    Register S3 file URLs (client uploaded directly to S3).
-    Creates session.json with file list & metadata.
-    """
-    if not body.urls:
-        raise HTTPException(status_code=422, detail="No URLs provided")
-
-    session_id = uuid.uuid4().hex
-    sd = sid_dir(session_id)
-
-    files = []
-    for u in body.urls:
-        files.append({"file_id": short_id(), "url": u})
-
-    session = {
-        "session_id": session_id,
-        "created_at": time.time(),
-        "tone": body.tone,
-        "product_link": body.product_link,
-        "features_csv": body.features_csv,
-        "files": files,
-    }
-    save_json(sd / "session.json", session)
-
-    return {"ok": True, "session_id": session_id, "files": files}
+    scale: int = 720
+    max_total_sec: float = 12.0
+    max_segments_per_file: int = 1
 
 @app.post("/automanifest")
-def automanifest(body: AutoManifestBody):
-    """
-    Build a quick draft manifest:
-      - Take N files from the session
-      - 1 short segment per file (or up to max_segments_per_file later)
-      - Clip length is max_total_sec / number_of_files (clamped 2..6 sec)
-    """
-    sd = sid_dir(body.session_id)
-    session = load_json(sd / "session.json")
-    files = session.get("files", [])
+def automanifest(body: AutoManifestIn):
+    sd = sess_dir(body.session_id)
+    meta_path = sd / "session.json"
+    if not meta_path.exists():
+        raise HTTPException(status_code=404, detail="session not found")
+    session = load_json(meta_path)
+    files = session.get("files") or []
     if not files:
-        raise HTTPException(status_code=400, detail="No files in session")
+        raise HTTPException(status_code=400, detail="no files in session")
 
-    # how many seconds per segment
-    n = len(files)
-    if n <= 0:
-        raise HTTPException(status_code=400, detail="No input files")
-
-    per = max(2.0, min(6.0, body.max_total_sec / float(n)))
-    total = 0.0
+    # Simple heuristic: one short bite from each file until max_total_sec
     segments = []
-
+    total = 0.0
+    # target per segment so we don't exceed the cap
+    per_seg = max(2.0, min(8.0, body.max_total_sec / max(1, len(files))))
     for f in files:
-        if total + per > body.max_total_sec + 0.25:
+        if total >= body.max_total_sec:
             break
-        segments.append({
-            "file_id": f["file_id"],
-            "start": 0.0,
-            "end": round(per, 3)
-        })
-        total += per
+        take = min(per_seg, body.max_total_sec - total)
+        segments.append({"file_id": f["file_id"], "start": 0.0, "end": round(take, 3)})
+        total += take
 
-    manifest = {
-        "segments": segments,
-        "fps": body.fps,
-        "scale": body.scale
-    }
-    # Save last manifest draft for inspection
-    save_json(sd / "draft_manifest.json", manifest)
+    manifest = {"segments": segments, "fps": body.fps, "scale": body.scale}
+    out = {"ok": True, "session_id": body.session_id, "filename": body.filename, "manifest": manifest}
+    save_json(sd / "manifest.json", out)
+    return out
 
-    return {"ok": True, "session_id": body.session_id, "filename": body.filename, "manifest": manifest}
+
+class StitchIn(BaseModel):
+    session_id: str
+    filename: str = "final.mp4"
+    manifest: dict  # {"segments":[...], "fps":30, "scale":720}
 
 @app.post("/stitch")
-def stitch_video(body: StitchBody):
+def stitch(body: StitchIn):
     """
-    Download needed sources from S3, clip each segment to temp mp4, then concat.
-    Output saved to /tmp/s2c_sessions/{session}/finals/{filename}
+    Synchronous stitch (works for short drafts). Worker will call this for big jobs.
     """
-    sd = sid_dir(body.session_id)
-    session = load_json(sd / "session.json")
-    files = session.get("files", [])
-
-    # Build lookup: file_id -> url
-    by_id = {f["file_id"]: f["url"] for f in files}
-
-    manifest = body.manifest
-    segments = manifest.get("segments", [])
-    if not segments:
-        raise HTTPException(status_code=422, detail="Manifest has no segments")
-
-    fps = int(manifest.get("fps", 30))
-    scale_h = int(manifest.get("scale", 720))
+    sd = sess_dir(body.session_id)
+    meta_path = sd / "session.json"
+    if not meta_path.exists():
+        raise HTTPException(status_code=404, detail="session not found")
+    session = load_json(meta_path)
+    urls = session.get("urls") or {}
+    if not urls:
+        raise HTTPException(status_code=400, detail="no URLs registered for this session")
 
     work = sd / "work"
-    outd = sd / "finals"
     work.mkdir(parents=True, exist_ok=True)
-    outd.mkdir(parents=True, exist_ok=True)
 
-    temp_clips = []
-
-    # Download sources (only once per unique file_id)
-    local_cache: Dict[str, Path] = {}
-    for seg in segments:
+    parts = []
+    fps = int(body.manifest.get("fps", 30))
+    scale = int(body.manifest.get("scale", 720))
+    for idx, seg in enumerate(body.manifest.get("segments", [])):
         fid = seg["file_id"]
-        if fid in local_cache:
-            continue
-        url = by_id.get(fid)
-        if not url:
-            raise HTTPException(status_code=400, detail=f"Unknown file_id {fid}")
+        src_url = urls.get(fid)
+        if not src_url:
+            raise HTTPException(status_code=400, detail=f"missing url for file_id {fid}")
+        # cache original
+        cache_vid = work / f"src_{fid}.cache"
+        if not cache_vid.exists():
+            _download_to_tmp(src_url, cache_vid)
+        # trim/encode consistent part
+        part_out = work / f"part_{idx:03d}.mp4"
+        _ffmpeg_trim(cache_vid, seg.get("start", 0.0), seg.get("end", 3.0), part_out, scale=scale, fps=fps)
+        parts.append(part_out)
 
-        # Try S3 SDK (faster in-region), else fall back to HTTP GET
-        local_path = work / f"src_{fid}.mov"
-        try:
-            key = parse_s3_key_from_url(url)
-            # If the URL’s bucket equals our S3_BUCKET, use SDK; if not, use HTTP
-            host_bucket = urlparse(url).netloc.split(".")[0]  # <bucket>.s3...
-            if host_bucket == S3_BUCKET:
-                s3.download_file(S3_BUCKET, key, str(local_path))
-            else:
-                # fall back to HTTP
-                with requests.get(url, stream=True, timeout=60) as r:
-                    r.raise_for_status()
-                    with open(local_path, "wb") as f:
-                        for chunk in r.iter_content(chunk_size=1024*1024):
-                            if chunk:
-                                f.write(chunk)
-        except Exception:
-            # HTTP fallback if SDK path fails for any reason
-            with requests.get(url, stream=True, timeout=60) as r:
-                r.raise_for_status()
-                with open(local_path, "wb") as f:
-                    for chunk in r.iter_content(chunk_size=1024*1024):
-                        if chunk:
-                            f.write(chunk)
+    safe_name = "".join(c for c in body.filename if c.isalnum() or c in ("-", "_", ".",)).strip() or "final.mp4"
+    final_path = sd / safe_name
+    _concat_mp4s(parts, final_path)
 
-        local_cache[fid] = local_path
+    return {"ok": True, **_public_or_download(body.session_id, safe_name)}
 
-    # Make per-segment trimmed clips (re-encode to unify settings)
-    for idx, seg in enumerate(segments):
-        fid = seg["file_id"]
-        start = float(seg.get("start", 0))
-        end = float(seg.get("end", 0))
-        dur = max(0.05, end - start)
 
-        src = local_cache[fid]
-        clip = work / f"clip_{idx:03d}.mp4"
+# ========= Async layer: enqueue + status =========
+class StitchAsyncIn(BaseModel):
+    session_id: str
+    filename: str = "final.mp4"
+    manifest: dict
+    fps: int = 30
+    scale: int = 720
 
-        # scale: keep aspect, target height = scale_h
-        vf = f"scale=-2:{scale_h},fps={fps},format=yuv420p"
-        cmd = [
-            "ffmpeg", "-y",
-            "-ss", f"{start}",
-            "-i", str(src),
-            "-t", f"{dur}",
-            "-vf", vf,
-            "-r", f"{fps}",
-            "-c:v", "libx264",
-            "-preset", "veryfast",
-            "-crf", "18",
-            "-c:a", "aac",
-            "-movflags", "+faststart",
-            str(clip),
-        ]
-        ffmpeg(cmd)
-        temp_clips.append(clip)
-
-    # Concat them
-    list_file = work / "list.txt"
-    list_file.write_text("".join([f"file '{p.as_posix()}'\n" for p in temp_clips]))
-
-    out_path = outd / body.filename
-    cmd_concat = [
-        "ffmpeg", "-y",
-        "-f", "concat", "-safe", "0",
-        "-i", str(list_file),
-        "-c:v", "libx264",
-        "-preset", "veryfast",
-        "-crf", "18",
-        "-c:a", "aac",
-        "-r", f"{fps}",
-        "-movflags", "+faststart",
-        str(out_path),
-    ]
-    ffmpeg(cmd_concat)
-
-    # Prepare a public URL if caller configured S3_PUBLIC_BASE (optional future use)
-    resp = {
-        "ok": True,
-        "download_path": f"/download/{body.session_id}/{body.filename}",
+@app.post("/stitch_async")
+def stitch_async(body: StitchAsyncIn):
+    if not r:
+        raise HTTPException(status_code=500, detail="REDIS_URL not configured")
+    job_id = uuid.uuid4().hex
+    job = {
+        "job_id": job_id,
+        "type": "stitch",
         "session_id": body.session_id,
         "filename": body.filename,
+        "manifest": body.manifest,
+        "fps": body.fps,
+        "scale": body.scale,
+        "created_at": int(time.time()),
+        "status": "queued",
     }
-    if S3_PUBLIC_BASE:
-        resp["public_url"] = f"{S3_PUBLIC_BASE}/sessions/{body.session_id}/finals/{body.filename}"
-    return resp
+    r.set(_job_key(job_id), json.dumps(job))
+    r.lpush("jobs", json.dumps(job))
+    return {"ok": True, "job_id": job_id}
 
+@app.get("/job_status")
+def job_status(job_id: str):
+    if not r:
+        raise HTTPException(status_code=500, detail="REDIS_URL not configured")
+    raw = r.get(_job_key(job_id))
+    if not raw:
+        return {"ok": False, "error": "job_not_found"}
+    return {"ok": True, **json.loads(raw)}
+
+
+# ========= Local download (fallback if no S3 public base) =========
 @app.get("/download/{session_id}/{filename}")
 def download(session_id: str, filename: str):
-    sd = sid_dir(session_id)
-    file_path = sd / "finals" / filename
-    if not file_path.exists():
-        raise HTTPException(status_code=404, detail="File not found")
-    return FileResponse(str(file_path), filename=filename, media_type="video/mp4")
+    sd = sess_dir(session_id)
+    f = sd / filename
+    if not f.exists():
+        raise HTTPException(status_code=404, detail="file not found")
+    return FileResponse(f, filename=filename, media_type="video/mp4")
