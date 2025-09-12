@@ -8,7 +8,7 @@ REDIS_URL = os.getenv("REDIS_URL")
 if not REDIS_URL:
     raise RuntimeError("Missing REDIS_URL")
 
-# NOTE: With redis-py v5+, 'rediss://' automatically enables TLS.
+# No ssl= arg needed. 'rediss://' in the URL already enables TLS.
 conn = redis.from_url(REDIS_URL)
 
 if __name__ == "__main__":
