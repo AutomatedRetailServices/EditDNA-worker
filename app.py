@@ -8,6 +8,8 @@ from pydantic import BaseModel
 
 import requests
 import redis
+from rq import Queue
+from rq.job import Job
 
 # ========= App setup =========
 app = FastAPI(title="EditDNA Worker API")
@@ -252,3 +254,32 @@ def download(session_id: str, filename: str):
     if not f.exists():
         raise HTTPException(status_code=404, detail="file not found")
     return FileResponse(f, filename=filename, media_type="video/mp4")
+
+
+# ========= Redis Test Routes (for Step 4) =========
+def get_q():
+    url = os.environ["REDIS_URL"]
+    return Queue("default", connection=redis.from_url(url))
+
+def add(a, b):
+    time.sleep(2)
+    return a + b
+
+@app.get("/jobs/test")
+def jobs_test():
+    q = get_q()
+    job = q.enqueue(add, 2, 3)
+    return {"job_id": job.id}
+
+@app.get("/jobs/{job_id}")
+def jobs_status(job_id: str):
+    q = get_q()
+    try:
+        job = Job.fetch(job_id, connection=q.connection)
+        return {
+            "job_id": job.id,
+            "status": job.get_status(),
+            "result": job.result
+        }
+    except Exception as e:
+        return {"error": str(e)}
