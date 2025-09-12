@@ -1,35 +1,18 @@
-import os, json, time
+import os
 import redis
-import requests
+from rq import Worker, Queue, Connection
 
-# ENV required:
-# REDIS_URL  = redis connection string (e.g., rediss://:password@host:port/0)
-# API_BASE   = public URL of your API service, e.g. https://script2clipshop-worker.onrender.com
+# Queues to listen on
+LISTEN = ["default"]
 
-REDIS_URL = os.getenv("REDIS_URL", "")
-API_BASE  = os.getenv("API_BASE", "").rstrip("/")
-
+# Grab Redis URL from environment
+REDIS_URL = os.getenv("REDIS_URL")
 if not REDIS_URL:
-    raise SystemExit("ERROR: REDIS_URL is not set")
-if not API_BASE:
-    raise SystemExit("ERROR: API_BASE is not set (e.g. https://script2clipshop-worker.onrender.com)")
+    raise RuntimeError("Missing REDIS_URL environment variable")
 
-r = redis.from_url(REDIS_URL, decode_responses=True)
+# Connect to Redis
+conn = redis.from_url(REDIS_URL, ssl=REDIS_URL.startswith("rediss://"))
 
-def _job_key(job_id: str) -> str:
-    return f"job:{job_id}"
-
-def _update(job: dict, **fields):
-    job.update(fields)
-    r.set(_job_key(job["job_id"]), json.dumps(job))
-
-def _handle_stitch(job: dict):
-    _update(job, status="running", started_at=int(time.time()))
-    try:
-        # Call your API's synchronous /stitch (same payload), but from this worker.
-        payload = {
-            "session_id": job["session_id"],
-            "filename": job["filename"],
-            "manifest": job["manifest"]
-        }
-        resp = requests.post(f"{API
+if __name__ == "__main__":
+    with Connection(conn):
+        Worker([Queue(name) for name in LISTEN]).work()
