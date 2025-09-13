@@ -13,10 +13,10 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
 # ===================== App setup =====================
-VERSION = "1.3.2-rq-stitch"
+VERSION = "1.3.3-rq-stitch"
 app = FastAPI(title="EditDNA Web API", version=VERSION)
 
-# CORS (set CORS_ORIGINS="https://yourapp.bubbleapps.io,*" in Render if you want)
+# CORS (set CORS_ORIGINS="https://yourapp.bubbleapps.io,*" if needed)
 CORS_ORIGINS = os.getenv("CORS_ORIGINS", "*").split(",")
 app.add_middleware(
     CORSMiddleware,
@@ -30,11 +30,11 @@ app.add_middleware(
 SESS_ROOT = Path("/tmp/s2c_sessions")
 SESS_ROOT.mkdir(parents=True, exist_ok=True)
 
-# Redis & RQ
+# Redis & RQ  (NO decode_responses so we can handle bytes safely)
 REDIS_URL = os.getenv("REDIS_URL", "")
 if not REDIS_URL:
     raise RuntimeError("REDIS_URL is not set")
-_redis = redis.from_url(REDIS_URL, decode_responses=True)
+_redis = redis.from_url(REDIS_URL)  # important: leave default (bytes)
 
 def get_q() -> Queue:
     return Queue("default", connection=_redis)
