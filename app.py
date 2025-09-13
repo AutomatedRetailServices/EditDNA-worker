@@ -13,10 +13,10 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
 # ===================== App setup =====================
-VERSION = "1.3.1-rq-stitch"
+VERSION = "1.3.2-rq-stitch"
 app = FastAPI(title="EditDNA Web API", version=VERSION)
 
-# CORS (set CORS_ORIGINS="https://yourapp.bubbleapps.io,*" in Render)
+# CORS (set CORS_ORIGINS="https://yourapp.bubbleapps.io,*" in Render if you want)
 CORS_ORIGINS = os.getenv("CORS_ORIGINS", "*").split(",")
 app.add_middleware(
     CORSMiddleware,
@@ -37,7 +37,6 @@ if not REDIS_URL:
 _redis = redis.from_url(REDIS_URL, decode_responses=True)
 
 def get_q() -> Queue:
-    # single default queue
     return Queue("default", connection=_redis)
 
 # Optional public CDN base (so responses can return clickable URLs)
@@ -88,10 +87,8 @@ def _public_or_download(session_id: str, fname: str) -> Dict[str, str]:
 # ===================== Core stitch function =====================
 def stitch_core(session_id: str, manifest: Dict[str, Any], filename: str = "final.mp4") -> Dict[str, Any]:
     """
-    Does the actual video work:
-      - downloads/caches source files from session.urls
-      - trims each segment with consistent fps/scale
-      - concatenates parts into final mp4
+    Downloads/caches sources, trims segments with consistent fps/scale,
+    and concatenates into a final mp4.
     """
     sd = sess_dir(session_id)
     meta_path = sd / "session.json"
@@ -139,14 +136,13 @@ def stitch_core(session_id: str, manifest: Dict[str, Any], filename: str = "fina
             "-r", str(fps),
             "-c:v", "libx264", "-preset", "veryfast", "-crf", "22",
             "-c:a", "aac", "-b:a", "128k",
-            # optional: small CPU boxes behave better with a single thread
             "-threads", os.getenv("FFMPEG_THREADS", "1"),
             str(part_out),
         ]
         run_ffmpeg(cmd)
         parts.append(part_out)
 
-    # concat list file
+    # concat
     safe_name = _safe_name(filename or "final.mp4")
     final_path = sd / safe_name
     concat_list = work / "concat.txt"
@@ -160,7 +156,6 @@ def stitch_core(session_id: str, manifest: Dict[str, Any], filename: str = "fina
         str(final_path),
     ])
 
-    # Optionally you could upload to S3 here and return that URL
     return {"ok": True, **_public_or_download(session_id, safe_name)}
 
 
@@ -175,7 +170,7 @@ class AutoManifestIn(BaseModel):
     session_id: str
     filename: str = "final.mp4"
     fps: int = 30
-    scale: int = 1080  # TikTok ready 1080x1920 with -2 keeps aspect
+    scale: int = 1080
     max_total_sec: float = 12.0
     max_segments_per_file: int = 1
 
@@ -197,7 +192,6 @@ def health():
 def process_urls(body: ProcessURLsIn):
     """
     Register external/public/presigned video URLs for this session.
-    We do NOT upload via API; clients should use S3 presigned URLs.
     """
     session_id = uuid.uuid4().hex
     sd = sess_dir(session_id)
@@ -224,8 +218,7 @@ def process_urls(body: ProcessURLsIn):
 @app.post("/automanifest")
 def automanifest(body: AutoManifestIn):
     """
-    Simple heuristic: take up to max_total_sec, ~evenly across files.
-    Later we’ll replace with SmartCut/Whisper mapping.
+    Simple heuristic: share max_total_sec across files.
     """
     sd = sess_dir(body.session_id)
     meta_path = sd / "session.json"
@@ -266,9 +259,7 @@ def stitch(body: StitchIn):
 
 @app.post("/stitch_async")
 def stitch_async(body: StitchAsyncIn):
-    """
-    Enqueue background stitch; the worker (worker.py) processes it.
-    """
+    """Enqueue background stitch; the worker processes it."""
     q = get_q()
     job = q.enqueue(stitch_core, body.session_id, body.manifest, body.filename)
     return {"ok": True, "job_id": job.get_id()}
@@ -290,7 +281,15 @@ def jobs_status(job_id: str):
         job = Job.fetch(job_id, connection=get_q().connection)
         out = {"job_id": job.id, "status": job.get_status(), "result": job.result}
         if job.is_failed:
-            info = (job.exc_info or "").splitlines()
+            exc = job.exc_info
+            if isinstance(exc, bytes):
+                try:
+                    exc = exc.decode("utf-8", errors="replace")
+                except Exception:
+                    exc = str(exc)
+            elif not isinstance(exc, str):
+                exc = str(exc)
+            info = exc.splitlines()
             out["error"] = "\n".join(info[-25:]) if info else "job failed (see worker logs)"
         return out
     except Exception as e:
