@@ -12,11 +12,15 @@ from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
+# New for analyze/transcribe
+from bs4 import BeautifulSoup
+from openai import OpenAI
+
 # ===================== App setup =====================
-VERSION = "1.3.4-rq-stitch-session-in-job"
+VERSION = "1.4.0-full-scope"
 app = FastAPI(title="EditDNA Web API", version=VERSION)
 
-# CORS (set CORS_ORIGINS="https://yourapp.bubbleapps.io,*" if needed)
+# CORS (configure CORS_ORIGINS in Render if needed)
 CORS_ORIGINS = os.getenv("CORS_ORIGINS", "*").split(",")
 app.add_middleware(
     CORSMiddleware,
@@ -26,21 +30,25 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Working directory for sessions (used only by the web dyno for convenience)
+# Working directory (per-container ephemeral disk)
 SESS_ROOT = Path("/tmp/s2c_sessions")
 SESS_ROOT.mkdir(parents=True, exist_ok=True)
 
-# Redis & RQ  (NO decode_responses so bytes are preserved)
+# Redis & RQ (keep default: bytes, not decode_responses)
 REDIS_URL = os.getenv("REDIS_URL", "")
 if not REDIS_URL:
     raise RuntimeError("REDIS_URL is not set")
-_redis = redis.from_url(REDIS_URL)  # keep defaults
+_redis = redis.from_url(REDIS_URL)
 
 def get_q() -> Queue:
     return Queue("default", connection=_redis)
 
-# Optional public CDN base (if you later upload outputs to S3 and want to return links)
+# Optional: If you later upload outputs to S3/CloudFront, return a public URL
 S3_PUBLIC_BASE = os.getenv("S3_PUBLIC_BASE", "").rstrip("/")
+
+# OpenAI client (used by /analyze and /transcribe_urls)
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
+client = OpenAI(api_key=OPENAI_API_KEY) if OPENAI_API_KEY else None
 
 
 # ===================== Helpers =====================
@@ -58,14 +66,14 @@ def load_json(path: Path) -> dict:
     return json.loads(path.read_text())
 
 def run_ffmpeg(cmd: list) -> str:
-    """Run ffmpeg (or any shell cmd) and raise with stderr on failure."""
+    """Run ffmpeg and raise with stderr on failure."""
     p = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
     if p.returncode != 0:
         raise RuntimeError(f"ffmpeg failed: {' '.join(cmd)}\n{p.stderr}")
     return p.stdout
 
 def _download_to_tmp(url: str, dst: Path):
-    # Stream download to avoid RAM spikes
+    # Stream download to file (keeps RAM low)
     with requests.get(url, stream=True) as res:
         res.raise_for_status()
         with dst.open("wb") as f:
@@ -78,19 +86,37 @@ def _safe_name(name: str) -> str:
     return "".join(c for c in name if c.isalnum() or c in ("-", "_", "."))
 
 def _public_or_download(session_id: str, fname: str) -> Dict[str, str]:
-    # If you later upload to S3, return its URL here
     if S3_PUBLIC_BASE:
         return {"public_url": f"{S3_PUBLIC_BASE}/sessions/{session_id}/{fname}"}
     return {"download_path": f"/download/{session_id}/{fname}"}
 
+def _scrape_product_text(url: str, max_chars: int = 6000) -> str:
+    """Lightweight scrape of titles/headers/descriptions/reviews."""
+    try:
+        html = requests.get(url, timeout=20).text
+        soup = BeautifulSoup(html, "html.parser")
+        bits = []
+        for sel in ["title", "h1", "h2", "p", "[class*=description]", "[id*=description]", "[class*=review]"]:
+            for node in soup.select(sel):
+                t = node.get_text(separator=" ", strip=True)
+                if t:
+                    bits.append(t)
+                if sum(len(x) for x in bits) > max_chars:
+                    break
+            if sum(len(x) for x in bits) > max_chars:
+                break
+        text = " ".join(bits)
+        return " ".join(text.split())[:max_chars]
+    except Exception as e:
+        return f"(scrape_failed: {e})"
 
-# ===================== Core stitch functions =====================
+
+# ===================== Core stitch (two forms) =====================
 def _stitch_do(urls: Dict[str, str], session_id: str, manifest: Dict[str, Any], filename: str) -> Dict[str, Any]:
     """
-    Shared implementation: downloads/caches sources, trims, and concatenates into a final mp4.
-    This function does NOT assume any local session.json; it uses the urls dict passed in.
+    Downloads/caches sources, trims each requested segment with uniform fps/scale,
+    concatenates into a final mp4, and returns a local download path or public URL.
     """
-    # Each worker has its own /tmp, so we create a work dir by session id
     sd = sess_dir(session_id)
     work = sd / "work"
     work.mkdir(parents=True, exist_ok=True)
@@ -110,12 +136,11 @@ def _stitch_do(urls: Dict[str, str], session_id: str, manifest: Dict[str, Any], 
         if not src_url:
             raise RuntimeError(f"missing url for file_id {fid}")
 
-        # cache original once
+        # cache original once per file_id
         cache_vid = work / f"src_{fid}.cache"
         if not cache_vid.exists():
             _download_to_tmp(src_url, cache_vid)
 
-        # trim/normalize each part
         start = float(seg.get("start", 0.0))
         end = float(seg.get("end", 2.0))
         dur = max(0.1, end - start)
@@ -153,20 +178,13 @@ def _stitch_do(urls: Dict[str, str], session_id: str, manifest: Dict[str, Any], 
     return {"ok": True, **_public_or_download(session_id, safe_name)}
 
 def stitch_core_from_session(session: Dict[str, Any], manifest: Dict[str, Any], filename: str = "final.mp4") -> Dict[str, Any]:
-    """
-    Job function executed by the worker.
-    It receives the ENTIRE session dict (including urls), so it does not need to read any local files.
-    """
+    """Worker job: receives ENTIRE session (including urls), so it doesn't need local files."""
     session_id = session.get("session_id") or uuid.uuid4().hex
     urls: Dict[str, str] = session.get("urls") or {}
     return _stitch_do(urls=urls, session_id=session_id, manifest=manifest, filename=filename)
 
-# (kept for completeness; synchronous call on the web dyno — fine for tiny proofs)
 def stitch_core_from_disk(session_id: str, manifest: Dict[str, Any], filename: str = "final.mp4") -> Dict[str, Any]:
-    """
-    Synchronous stitch reading session.json from THIS machine's disk.
-    (Use only for tiny tests on the same dyno; workers won't see this file.)
-    """
+    """Sync path on web dyno (tiny tests): reads session.json from THIS container."""
     sd = sess_dir(session_id)
     meta_path = sd / "session.json"
     if not meta_path.exists():
@@ -199,17 +217,29 @@ class StitchIn(BaseModel):
 class StitchAsyncIn(StitchIn):
     pass
 
+# Analyze / Slots / Transcribe
+class AnalyzeIn(BaseModel):
+    product_link: str = ""
+    tone: str = "casual"
+    style: str = "Talking Head"  # Talking Head | Skit | Testimonial | Voiceover
+    features_csv: str = ""
+
+class SlotsIn(BaseModel):
+    script_text: str
+    style: str = "Talking Head"
+
+class TranscribeIn(BaseModel):
+    urls: List[str]
+
 
 # ===================== Routes =====================
 @app.get("/health")
 def health():
-    return {"ok": True, "service": "editdna-worker", "version": VERSION, "redis": True}
+    return {"ok": True, "service": "editdna-web", "version": VERSION, "redis": True}
 
 @app.post("/process_urls")
 def process_urls(body: ProcessURLsIn):
-    """
-    Register external/public/presigned video URLs for this session.
-    """
+    """Register external/presigned video URLs for this session."""
     session_id = uuid.uuid4().hex
     sd = sess_dir(session_id)
 
@@ -229,15 +259,12 @@ def process_urls(body: ProcessURLsIn):
         "product_link": body.product_link,
         "created_at": int(time.time()),
     }
-    # Save locally (handy for manual download later)
     save_json(sd / "session.json", session_json)
     return {"ok": True, "session_id": session_id, "files": files_meta}
 
 @app.post("/automanifest")
 def automanifest(body: AutoManifestIn):
-    """
-    Simple heuristic: share max_total_sec across files.
-    """
+    """Minimal draft: spread max_total_sec across files (2–8s per file)."""
     sd = sess_dir(body.session_id)
     meta_path = sd / "session.json"
     if not meta_path.exists():
@@ -258,18 +285,13 @@ def automanifest(body: AutoManifestIn):
         total += take
 
     manifest = {"segments": segments, "fps": body.fps, "scale": body.scale}
-    out = {
-        "ok": True,
-        "session_id": body.session_id,
-        "filename": body.filename,
-        "manifest": manifest,
-    }
+    out = {"ok": True, "session_id": body.session_id, "filename": body.filename, "manifest": manifest}
     save_json(sd / "manifest.json", out)
     return out
 
 @app.post("/stitch")
 def stitch(body: StitchIn):
-    """Synchronous stitch on the web dyno (tiny proofs only)."""
+    """Synchronous stitch on web dyno (use for tiny proofs only)."""
     try:
         return stitch_core_from_disk(body.session_id, body.manifest, body.filename)
     except Exception as e:
@@ -279,9 +301,8 @@ def stitch(body: StitchIn):
 def stitch_async(body: StitchAsyncIn):
     """
     Enqueue background stitch with the WHOLE session payload so the worker
-    does not need to read any local files from the web dyno.
+    doesn't need files from web dyno's /tmp.
     """
-    # Load the session.json on the web dyno and pass it to the worker
     sd = sess_dir(body.session_id)
     meta_path = sd / "session.json"
     if not meta_path.exists():
@@ -323,7 +344,144 @@ def jobs_status(job_id: str):
     except Exception as e:
         return {"ok": False, "error": f"lookup_failed: {e}"}
 
-# Local download (only if you didn’t upload final.mp4 to S3)
+# ---- Analyze / Slots / Transcribe ----
+@app.post("/analyze")
+def analyze(body: AnalyzeIn):
+    """Generate a funnel script + basic slot mapping from product page + features."""
+    if not client:
+        raise HTTPException(status_code=400, detail="OPENAI_API_KEY not configured")
+
+    scraped = _scrape_product_text(body.product_link) if body.product_link else ""
+    features = [x.strip() for x in (body.features_csv or "").split(",") if x.strip()]
+
+    sys = (
+        "You are a direct-response ad copywriter for short UGC videos. "
+        "Write concise lines. Target 70–120 words total. "
+        "Structure strictly as Hook → Feature → Proof → CTA. "
+        "Return clean text only (no hashtags)."
+    )
+    user = (
+        f"STYLE: {body.style}\n"
+        f"TONE: {body.tone}\n"
+        f"FEATURES: {features}\n"
+        f"SCRAPED_TEXT: {scraped[:4000]}\n\n"
+        "Write a conversion-first script. Then list 3 alternative Hooks and 2 CTAs."
+    )
+
+    try:
+        resp = client.chat.completions.create(
+            model="gpt-4o-mini",
+            temperature=0.4,
+            messages=[
+                {"role": "system", "content": sys},
+                {"role": "user", "content": user},
+            ],
+        )
+        script = resp.choices[0].message.content.strip()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"openai_error: {e}")
+
+    # Quick slot mapping
+    try:
+        map_resp = client.chat.completions.create(
+            model="gpt-4o-mini",
+            temperature=0.2,
+            messages=[
+                {"role": "system", "content": "Split the given script into JSON slots: {hook, feature, proof, cta}. Keep values short."},
+                {"role": "user", "content": script},
+            ],
+        )
+        slots_raw = map_resp.choices[0].message.content
+        try:
+            import json as _json
+            slots = _json.loads(slots_raw)
+        except Exception:
+            slots = {"hook": "", "feature": "", "proof": "", "cta": "", "raw": slots_raw}
+    except Exception as e:
+        slots = {"hook": "", "feature": "", "proof": "", "cta": "", "error": f"slot_map_error: {e}"}
+
+    return {
+        "ok": True,
+        "style": body.style,
+        "tone": body.tone,
+        "script": script,
+        "slots": slots,
+        "product_link": body.product_link,
+        "features": features,
+    }
+
+@app.post("/slots/build")
+def slots_build(body: SlotsIn):
+    """Map any script text into storyboard slots."""
+    if not body.script_text.strip():
+        raise HTTPException(status_code=400, detail="script_text is empty")
+
+    if not client:
+        txt = body.script_text.strip()
+        return {
+            "ok": True,
+            "style": body.style,
+            "slots": {
+                "hook": txt.split(".")[0] if "." in txt else txt[:120],
+                "feature": "",
+                "proof": "",
+                "cta": "",
+                "raw": txt,
+                "note": "OPENAI_API_KEY missing; returned naive split"
+            }
+        }
+
+    try:
+        resp = client.chat.completions.create(
+            model="gpt-4o-mini",
+            temperature=0.2,
+            messages=[
+                {"role": "system", "content": "Split the given script into JSON: {hook, feature, proof, cta}. Keep concise."},
+                {"role": "user", "content": body.script_text},
+            ],
+        )
+        text = resp.choices[0].message.content
+        import json as _json
+        slots = _json.loads(text)
+    except Exception as e:
+        slots = {"hook": "", "feature": "", "proof": "", "cta": "", "error": f"slot_map_error: {e}", "raw": body.script_text}
+
+    return {"ok": True, "style": body.style, "slots": slots}
+
+@app.post("/transcribe_urls")
+def transcribe_urls(body: TranscribeIn):
+    """Quick Whisper transcription for a few short clips by URL."""
+    if not client:
+        raise HTTPException(status_code=400, detail="OPENAI_API_KEY not configured")
+    if not body.urls:
+        raise HTTPException(status_code=400, detail="no urls provided")
+
+    results = []
+    tmp_root = Path("/tmp/transcribe")
+    tmp_root.mkdir(parents=True, exist_ok=True)
+
+    for i, u in enumerate(body.urls[:5]):  # small cap for MVP
+        dst = tmp_root / f"clip_{i:03d}"
+        try:
+            _download_to_tmp(u, dst)
+            real = dst.with_suffix(".mp4")
+            dst.rename(real)
+
+            with real.open("rb") as fh:
+                tr = client.audio.transcriptions.create(
+                    model="whisper-1",
+                    file=fh,
+                    response_format="json",
+                    temperature=0.0,
+                )
+            text = tr.text if hasattr(tr, "text") else tr.get("text")
+            results.append({"url": u, "text": text})
+        except Exception as e:
+            results.append({"url": u, "error": f"transcription_failed: {e}"})
+
+    return {"ok": True, "items": results}
+
+# ---- Local download (fallback if you didn't upload final.mp4 to S3) ----
 @app.get("/download/{session_id}/{filename}")
 def download(session_id: str, filename: str):
     sd = sess_dir(session_id)
