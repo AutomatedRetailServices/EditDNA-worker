@@ -13,7 +13,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
 # ===================== App setup =====================
-VERSION = "1.3.3-rq-stitch"
+VERSION = "1.3.4-rq-stitch-session-in-job"
 app = FastAPI(title="EditDNA Web API", version=VERSION)
 
 # CORS (set CORS_ORIGINS="https://yourapp.bubbleapps.io,*" if needed)
@@ -26,20 +26,20 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Working directory for sessions
+# Working directory for sessions (used only by the web dyno for convenience)
 SESS_ROOT = Path("/tmp/s2c_sessions")
 SESS_ROOT.mkdir(parents=True, exist_ok=True)
 
-# Redis & RQ  (NO decode_responses so we can handle bytes safely)
+# Redis & RQ  (NO decode_responses so bytes are preserved)
 REDIS_URL = os.getenv("REDIS_URL", "")
 if not REDIS_URL:
     raise RuntimeError("REDIS_URL is not set")
-_redis = redis.from_url(REDIS_URL)  # important: leave default (bytes)
+_redis = redis.from_url(REDIS_URL)  # keep defaults
 
 def get_q() -> Queue:
     return Queue("default", connection=_redis)
 
-# Optional public CDN base (so responses can return clickable URLs)
+# Optional public CDN base (if you later upload outputs to S3 and want to return links)
 S3_PUBLIC_BASE = os.getenv("S3_PUBLIC_BASE", "").rstrip("/")
 
 
@@ -74,32 +74,24 @@ def _download_to_tmp(url: str, dst: Path):
                     f.write(chunk)
 
 def _safe_name(name: str) -> str:
-    name = name.strip() or "final.mp4"
+    name = (name or "").strip() or "final.mp4"
     return "".join(c for c in name if c.isalnum() or c in ("-", "_", "."))
 
 def _public_or_download(session_id: str, fname: str) -> Dict[str, str]:
+    # If you later upload to S3, return its URL here
     if S3_PUBLIC_BASE:
-        # If you later upload outputs to S3, return that URL instead.
         return {"public_url": f"{S3_PUBLIC_BASE}/sessions/{session_id}/{fname}"}
     return {"download_path": f"/download/{session_id}/{fname}"}
 
 
-# ===================== Core stitch function =====================
-def stitch_core(session_id: str, manifest: Dict[str, Any], filename: str = "final.mp4") -> Dict[str, Any]:
+# ===================== Core stitch functions =====================
+def _stitch_do(urls: Dict[str, str], session_id: str, manifest: Dict[str, Any], filename: str) -> Dict[str, Any]:
     """
-    Downloads/caches sources, trims segments with consistent fps/scale,
-    and concatenates into a final mp4.
+    Shared implementation: downloads/caches sources, trims, and concatenates into a final mp4.
+    This function does NOT assume any local session.json; it uses the urls dict passed in.
     """
+    # Each worker has its own /tmp, so we create a work dir by session id
     sd = sess_dir(session_id)
-    meta_path = sd / "session.json"
-    if not meta_path.exists():
-        raise RuntimeError("session not found")
-
-    session = load_json(meta_path)
-    urls: Dict[str, str] = session.get("urls") or {}
-    if not urls:
-        raise RuntimeError("no URLs registered for this session")
-
     work = sd / "work"
     work.mkdir(parents=True, exist_ok=True)
 
@@ -108,6 +100,8 @@ def stitch_core(session_id: str, manifest: Dict[str, Any], filename: str = "fina
     segments = manifest.get("segments", [])
     if not segments:
         raise RuntimeError("manifest has no segments")
+    if not urls:
+        raise RuntimeError("no URLs provided for this job")
 
     parts: List[Path] = []
     for idx, seg in enumerate(segments):
@@ -157,6 +151,29 @@ def stitch_core(session_id: str, manifest: Dict[str, Any], filename: str = "fina
     ])
 
     return {"ok": True, **_public_or_download(session_id, safe_name)}
+
+def stitch_core_from_session(session: Dict[str, Any], manifest: Dict[str, Any], filename: str = "final.mp4") -> Dict[str, Any]:
+    """
+    Job function executed by the worker.
+    It receives the ENTIRE session dict (including urls), so it does not need to read any local files.
+    """
+    session_id = session.get("session_id") or uuid.uuid4().hex
+    urls: Dict[str, str] = session.get("urls") or {}
+    return _stitch_do(urls=urls, session_id=session_id, manifest=manifest, filename=filename)
+
+# (kept for completeness; synchronous call on the web dyno — fine for tiny proofs)
+def stitch_core_from_disk(session_id: str, manifest: Dict[str, Any], filename: str = "final.mp4") -> Dict[str, Any]:
+    """
+    Synchronous stitch reading session.json from THIS machine's disk.
+    (Use only for tiny tests on the same dyno; workers won't see this file.)
+    """
+    sd = sess_dir(session_id)
+    meta_path = sd / "session.json"
+    if not meta_path.exists():
+        raise RuntimeError("session not found")
+    session = load_json(meta_path)
+    urls: Dict[str, str] = session.get("urls") or {}
+    return _stitch_do(urls=urls, session_id=session_id, manifest=manifest, filename=filename)
 
 
 # ===================== Schemas =====================
@@ -212,6 +229,7 @@ def process_urls(body: ProcessURLsIn):
         "product_link": body.product_link,
         "created_at": int(time.time()),
     }
+    # Save locally (handy for manual download later)
     save_json(sd / "session.json", session_json)
     return {"ok": True, "session_id": session_id, "files": files_meta}
 
@@ -251,17 +269,27 @@ def automanifest(body: AutoManifestIn):
 
 @app.post("/stitch")
 def stitch(body: StitchIn):
-    """Synchronous stitch (ok for very small drafts)."""
+    """Synchronous stitch on the web dyno (tiny proofs only)."""
     try:
-        return stitch_core(body.session_id, body.manifest, body.filename)
+        return stitch_core_from_disk(body.session_id, body.manifest, body.filename)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/stitch_async")
 def stitch_async(body: StitchAsyncIn):
-    """Enqueue background stitch; the worker processes it."""
+    """
+    Enqueue background stitch with the WHOLE session payload so the worker
+    does not need to read any local files from the web dyno.
+    """
+    # Load the session.json on the web dyno and pass it to the worker
+    sd = sess_dir(body.session_id)
+    meta_path = sd / "session.json"
+    if not meta_path.exists():
+        raise HTTPException(status_code=404, detail="session not found")
+    session = load_json(meta_path)
+
     q = get_q()
-    job = q.enqueue(stitch_core, body.session_id, body.manifest, body.filename)
+    job = q.enqueue(stitch_core_from_session, session, body.manifest, body.filename)
     return {"ok": True, "job_id": job.get_id()}
 
 # ---- Jobs: test + status ----
