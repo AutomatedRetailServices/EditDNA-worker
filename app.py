@@ -7,7 +7,7 @@ import shutil
 import tempfile
 import pathlib
 import subprocess
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Tuple
 
 import boto3
 import requests
@@ -180,6 +180,35 @@ def _upload_final_to_s3(session_id: str, filename: str, local_path: pathlib.Path
     )
 
 # ------------------------------------------------------------------------------
+# Presets (inline; optionally override via file path env)
+# ------------------------------------------------------------------------------
+
+DEFAULT_PRESETS = {
+    "TalkingHead_ShockHook": [
+        {"name": "Hook",         "target": 4.0, "styles": ["Talking Head", "Shock Hook"]},
+        {"name": "Demo Step 1",  "target": 6.0, "styles": ["Talking Head"]},
+        {"name": "Demo Step 2",  "target": 6.0, "styles": ["Talking Head"]},
+        {"name": "CTA",          "target": 3.0, "styles": ["Talking Head"]},
+    ],
+    "ASMR_Product": [
+        {"name": "Hook-Foley",   "target": 3.5, "styles": ["ASMR"], "asmr": True},
+        {"name": "Prep",         "target": 7.0, "styles": ["ASMR"], "asmr": True},
+        {"name": "Money Shot",   "target": 5.0, "styles": ["ASMR"], "asmr": True},
+        {"name": "CTA",          "target": 3.0, "styles": ["ASMR"], "asmr": True},
+    ]
+}
+PRESETS_PATH = os.getenv("PRESETS_PATH")  # if you provide a JSON file, we load it
+
+def _load_presets() -> Dict[str, Any]:
+    if PRESETS_PATH and os.path.exists(PRESETS_PATH):
+        try:
+            with open(PRESETS_PATH, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception as e:
+            print(f"[WARN] Failed to load presets from {PRESETS_PATH}: {e}")
+    return DEFAULT_PRESETS
+
+# ------------------------------------------------------------------------------
 # Models
 # ------------------------------------------------------------------------------
 
@@ -197,13 +226,6 @@ class AutoManifestIn(BaseModel):
     max_total_sec: int = 12
     max_segments_per_file: int = 1
 
-class StitchAsyncIn(BaseModel):
-    session_id: str
-    filename: str = "final.mp4"
-    fps: int = 30
-    scale: int = 720
-    manifest: Dict[str, Any]
-
 class AnalyzeIn(BaseModel):
     session_id: str
     script_text: Optional[str] = None  # future: compare transcription to this
@@ -214,6 +236,29 @@ class ChooseBestIn(BaseModel):
     max_segments_per_file: int = 1
     fps: int = 30
     scale: int = 720
+
+# New: BuildManifest (choose-lite inside) + Stitch inputs
+class BuildManifestIn(BaseModel):
+    session_id: str
+    preset_key: str = "TalkingHead_ShockHook"
+    filename: str = "final.mp4"
+    fps: int = 30
+    scale: int = 720
+    # Optional: if you already chose segments, you can pass them and skip choose-lite
+    # segments = [{"file_id": "...", "start": 0.0, "end": 3.2}, ...]
+    segments: Optional[List[Dict[str, Any]]] = None
+
+class StitchAsyncIn(BaseModel):
+    session_id: str
+    filename: str = "final.mp4"
+    fps: int = 30
+    scale: int = 720
+    manifest: Dict[str, Any]
+
+class StitchIn(BaseModel):
+    session_id: str
+    filename: str = "final.mp4"
+    # If omitted, we use the last manifest saved for this session
 
 # ------------------------------------------------------------------------------
 # Core jobs (run on worker)
@@ -339,6 +384,84 @@ def choose_best_core(session_id: str, target_sec: int, max_segments_per_file: in
     return {"ok": True, "manifest": manifest}
 
 # ------------------------------------------------------------------------------
+# Choose-lite helpers for /manifest (slot-based → segments)
+# ------------------------------------------------------------------------------
+
+def _load_analysis_for_choose(session_id: str) -> Dict[str, Dict[str, float]]:
+    """
+    Returns {file_id: {"score": float, "duration": float}}
+    """
+    analysis = _jget(_analysis_key(session_id)) or {}
+    results = analysis.get("results") or {}
+    out: Dict[str, Dict[str, float]] = {}
+    for fid, info in results.items():
+        out[fid] = {
+            "score": float(info.get("score", 0.5)),
+            "duration": float(info.get("duration", 2.0)),
+        }
+    return out
+
+def _choose_lite_segments(session_id: str, preset_key: str) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
+    """
+    Minimal selection pass:
+      - Load analysis (score + duration)
+      - For each slot in the preset, pick the highest-scoring unused file_id first
+        (then allow reuse if we run out)
+      - For each slot, take segment [0, min(target, duration, 2.8)]
+    Returns (segments, debug_selection)
+    """
+    presets = _load_presets()
+    if preset_key not in presets:
+        raise HTTPException(400, f"Unknown preset_key '{preset_key}'")
+
+    slots = presets[preset_key]
+    files_map = _jget(_session_key(session_id)) or {}
+    if not files_map:
+        raise HTTPException(404, "session not found")
+
+    analysis = _load_analysis_for_choose(session_id)
+    # Fallback: if no analysis, synthesize uniform scores/durations
+    if not analysis:
+        analysis = {fid: {"score": 0.5, "duration": 2.0} for fid in files_map.keys()}
+
+    # rank file_ids by score desc, duration desc
+    ranked = sorted(analysis.items(), key=lambda kv: (kv[1]["score"], kv[1]["duration"]), reverse=True)
+
+    used_once = set()
+    segments: List[Dict[str, Any]] = []
+    selection_debug: Dict[str, Any] = {}
+    for slot in slots:
+        target = float(slot.get("target", 3.0))
+        pick_fid = None
+
+        # 1st pass: prefer unused
+        for fid, info in ranked:
+            if fid in used_once and len(used_once) < len(ranked):
+                continue
+            pick_fid = fid
+            break
+
+        # If still none (shouldn't happen), just take the first ranked
+        if not pick_fid and ranked:
+            pick_fid = ranked[0][0]
+
+        used_once.add(pick_fid)
+
+        dur = float(analysis[pick_fid]["duration"])
+        seg_len = max(0.4, min(target, dur, 2.8))  # keep it safe for TikTok-style jump
+        segments.append({"file_id": pick_fid, "start": 0.0, "end": float(seg_len)})
+
+        selection_debug[slot["name"]] = {
+            "file_id": pick_fid,
+            "target": target,
+            "picked_duration": float(seg_len),
+            "file_duration": dur,
+            "score": float(analysis[pick_fid]["score"]),
+        }
+
+    return segments, selection_debug
+
+# ------------------------------------------------------------------------------
 # FastAPI
 # ------------------------------------------------------------------------------
 
@@ -346,7 +469,7 @@ app = FastAPI()
 
 @app.get("/health")
 def health():
-    return {"ok": True, "service": "editdna-worker", "version": "1.4.0-analyze-scaffold", "redis": True}
+    return {"ok": True, "service": "editdna-worker", "version": "1.5.0-manifest-stitch", "redis": True}
 
 # --- Session: store URLs -------------------------------------------------------
 
@@ -368,7 +491,7 @@ def process_urls(inp: ProcessUrlsIn):
         "files": [{"file_id": fid, "source": "url"} for fid in files_map.keys()]
     }
 
-# --- Auto manifest (simple) ----------------------------------------------------
+# --- Auto manifest (simple, legacy) -------------------------------------------
 
 @app.post("/automanifest")
 def automanifest(inp: AutoManifestIn):
@@ -398,7 +521,7 @@ def analyze(inp: AnalyzeIn):
     _jset(_jobs_key(job.id), {"type": "analyze", "session_id": inp.session_id, "created_at": int(time.time())}, ex=60*60*12)
     return {"ok": True, "job_id": job.id}
 
-# --- Choose best (auto manifest using analysis) --------------------------------
+# --- Choose best (legacy auto manifest using analysis) -------------------------
 
 @app.post("/choose_best")
 def choose_best(inp: ChooseBestIn):
@@ -410,22 +533,82 @@ def choose_best(inp: ChooseBestIn):
     _jset(_jobs_key(job.id), {"type": "choose_best", "session_id": inp.session_id, "created_at": int(time.time())}, ex=60*60*12)
     return {"ok": True, "job_id": job.id}
 
-# --- Stitch (async) ------------------------------------------------------------
+# --- NEW: /manifest (choose-lite inside, slot-aware) ---------------------------
+
+@app.post("/manifest")
+def build_manifest(inp: BuildManifestIn):
+    """
+    Builds a slot-aware manifest.
+    - If inp.segments provided: uses them directly.
+    - Else: runs choose-lite over analysis results using the given preset.
+    Saves to Redis and returns {manifest, debug}.
+    """
+    files = _jget(_session_key(inp.session_id)) or {}
+    if not files:
+        raise HTTPException(404, "session not found")
+
+    if inp.segments and len(inp.segments) > 0:
+        segments = [
+            {"file_id": s["file_id"], "start": float(s.get("start", 0.0)), "end": float(s.get("end", 1.0))}
+            for s in inp.segments
+        ]
+        debug = {"mode": "segments_supplied", "count": len(segments)}
+    else:
+        segments, selection_debug = _choose_lite_segments(inp.session_id, inp.preset_key)
+        debug = {"mode": "choose_lite", "preset_key": inp.preset_key, "selection": selection_debug}
+
+    manifest = {"segments": segments, "fps": inp.fps, "scale": inp.scale, "filename": inp.filename, "preset_key": inp.preset_key}
+    _jset(_manifest_key(inp.session_id), manifest, ex=60*60*24)
+
+    return {"ok": True, "session_id": inp.session_id, "manifest": manifest, "debug": debug}
+
+# --- Stitch (async; uses last saved manifest for session) ----------------------
+
+@app.post("/stitch")
+def stitch(inp: StitchIn):
+    manifest = _jget(_manifest_key(inp.session_id))
+    if not manifest:
+        raise HTTPException(400, "No manifest stored for this session. Call /manifest (or /automanifest or /choose_best) first.")
+    # Allow override of filename at call time
+    filename = _safe_name(inp.filename or manifest.get("filename") or "final.mp4")
+    fps = int(manifest.get("fps", 30))
+    scale = int(manifest.get("scale", 720))
+
+    job: Job = q.enqueue(
+        stitch_core,
+        inp.session_id,
+        filename,
+        manifest,
+        fps,
+        scale,
+        job_timeout=60*60,
+    )
+    _jset(_jobs_key(job.id), {
+        "type": "stitch",
+        "session_id": inp.session_id,
+        "filename": filename,
+        "manifest": manifest,
+        "created_at": int(time.time()),
+    }, ex=60*60*12)
+
+    return {"ok": True, "job_id": job.id, "session_id": inp.session_id}
+
+# --- Stitch (legacy async that accepts manifest inline) ------------------------
 
 @app.post("/stitch_async")
 def stitch_async(inp: StitchAsyncIn):
     # Allow caller to pass a manifest, or fallback to last saved manifest for this session
     manifest = inp.manifest or _jget(_manifest_key(inp.session_id))
     if not manifest:
-        raise HTTPException(400, "manifest required (or call /automanifest or /choose_best first)")
+        raise HTTPException(400, "manifest required (or call /manifest /automanifest /choose_best first)")
 
     job: Job = q.enqueue(
         stitch_core,
         inp.session_id,
-        inp.filename,
+        _safe_name(inp.filename),
         manifest,
-        int(inp.manifest.get("fps", inp.fps)),
-        int(inp.manifest.get("scale", inp.scale)),
+        int(manifest.get("fps", inp.fps)),
+        int(manifest.get("scale", inp.scale)),
         job_timeout=60*60,  # allow long ffmpeg
     )
     _jset(_jobs_key(job.id), {
