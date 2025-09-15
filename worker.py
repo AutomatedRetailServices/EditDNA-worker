@@ -1,16 +1,16 @@
+# worker.py — minimal RQ worker that listens on the "default" queue
 import os
 import redis
 from rq import Worker, Queue, Connection
 
-LISTEN = ["default"]
-
-REDIS_URL = os.getenv("REDIS_URL")
+REDIS_URL = os.environ.get("REDIS_URL", "").strip()
 if not REDIS_URL:
-    raise RuntimeError("Missing REDIS_URL")
+    raise SystemExit("ERROR: REDIS_URL not set for worker")
 
-# Force binary-safe connection (no UTF-8 decode issues)
+# IMPORTANT: binary-safe (prevents utf-8 decode errors)
 conn = redis.from_url(REDIS_URL, decode_responses=False)
 
 if __name__ == "__main__":
     with Connection(conn):
-        Worker([Queue(name) for name in LISTEN]).work()
+        w = Worker(["default"])
+        w.work(with_scheduler=True)
