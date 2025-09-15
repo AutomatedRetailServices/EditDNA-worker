@@ -1,464 +1,487 @@
-# app.py — EditDNA Web API
-# v1.4.1 — RQ jobs pass URLs to worker; S3 upload without ACL; optional presigned links.
-# Endpoints:
-#   /health
-#   /process_urls
-#   /analyze        (placeholder)
-#   /classify       (placeholder)
-#   /automanifest
-#   /stitch         (sync — for tiny tests)
-#   /stitch_async   (RQ)
-#   /jobs/{job_id}
-#   /download/{session_id}/{filename}   (local fallback)
+import os
+import io
+import json
+import time
+import uuid
+import shutil
+import tempfile
+import pathlib
+import subprocess
+from typing import List, Dict, Any, Optional
 
-import os, uuid, json, time, subprocess
-from pathlib import Path
-from typing import List, Dict, Optional, Any
-
+import boto3
 import requests
-from fastapi import FastAPI, HTTPException
-from fastapi.responses import FileResponse
-from pydantic import BaseModel
-
-# Redis / RQ
 import redis
-from rq import Queue, Connection
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.responses import JSONResponse, StreamingResponse, PlainTextResponse, RedirectResponse
+from pydantic import BaseModel, Field
+from rq import Queue
 from rq.job import Job
 
-# Optional S3 upload
-try:
-    import boto3
-except Exception:
-    boto3 = None
+# ------------------------------------------------------------------------------
+# ENV & global clients
+# ------------------------------------------------------------------------------
 
-# =========================
-# App & storage setup
-# =========================
-app = FastAPI(title="EditDNA Web API")
-VERSION = "1.4.1-s3-no-acl-presign-option"
+REDIS_URL        = os.getenv("REDIS_URL", "")
+AWS_ACCESS_KEY   = os.getenv("AWS_ACCESS_KEY_ID", "")
+AWS_SECRET_KEY   = os.getenv("AWS_SECRET_ACCESS_KEY", "")
+AWS_REGION       = os.getenv("AWS_REGION", "us-east-1")
+S3_BUCKET        = os.getenv("S3_BUCKET", "")
+S3_PUBLIC_BASE   = os.getenv("S3_PUBLIC_BASE") or os.getenv("S3_PUBLIC_BUCKET")  # support either name
+S3_URL_MODE      = os.getenv("S3_URL_MODE", "auto").lower()  # auto | public | presigned
 
-SESS_ROOT = Path("/tmp/s2c_sessions")
-SESS_ROOT.mkdir(parents=True, exist_ok=True)
-
-# Env
-REDIS_URL = os.getenv("REDIS_URL", "").strip()
 if not REDIS_URL:
     raise RuntimeError("Missing REDIS_URL")
+if not AWS_ACCESS_KEY or not AWS_SECRET_KEY or not S3_BUCKET:
+    # We only fail when we actually try to upload; warn now for clarity.
+    print("[WARN] AWS/S3 env vars are not fully set. Uploads may fail.")
 
-# binary-safe (avoid UTF-8 decode issues with RQ payloads)
-rconn = redis.from_url(REDIS_URL, decode_responses=False)
+# Binary-safe redis (avoid UTF-8 decode problems with RQ payloads)
+r_conn = redis.from_url(REDIS_URL, decode_responses=False)
+q = Queue("default", connection=r_conn)
 
-# S3 (for final outputs)
-AWS_REGION = os.getenv("AWS_REGION", "us-east-1")
-S3_BUCKET = os.getenv("S3_BUCKET", "").strip()
-S3_PUBLIC_BASE = os.getenv("S3_PUBLIC_BASE", "").rstrip("/")  # e.g. https://bucket.s3.us-east-1.amazonaws.com
-S3_URL_MODE = (os.getenv("S3_URL_MODE", "auto") or "auto").lower()  # "auto" | "public" | "presigned"
+_s3 = boto3.client(
+    "s3",
+    region_name=AWS_REGION or "us-east-1",
+    aws_access_key_id=AWS_ACCESS_KEY,
+    aws_secret_access_key=AWS_SECRET_KEY,
+)
 
-_s3_client = None
-if S3_BUCKET and boto3:
-    _s3_client = boto3.client("s3", region_name=AWS_REGION)
+# All temp work under a stable root so /download can access by session
+TMP_ROOT = pathlib.Path("/tmp/s2c_sessions")
+TMP_ROOT.mkdir(parents=True, exist_ok=True)
 
-# =========================
-# Helpers
-# =========================
-def sess_dir(session_id: str) -> Path:
-    p = SESS_ROOT / session_id
-    p.mkdir(parents=True, exist_ok=True)
-    return p
+# ------------------------------------------------------------------------------
+# Small helpers (Redis keys, JSON)
+# ------------------------------------------------------------------------------
 
-def save_json(path: Path, data: dict) -> None:
-    path.write_text(json.dumps(data, ensure_ascii=False, indent=2))
+def _jset(key: str, obj: Any, ex: Optional[int] = None):
+    r_conn.set(key, json.dumps(obj).encode("utf-8"), ex=ex)
 
-def load_json(path: Path) -> dict:
-    if not path.exists():
-        raise FileNotFoundError(str(path))
-    return json.loads(path.read_text())
+def _jget(key: str) -> Optional[Any]:
+    raw = r_conn.get(key)
+    if not raw:
+        return None
+    try:
+        return json.loads(raw.decode("utf-8"))
+    except Exception:
+        return None
 
-def run(cmd: List[str]) -> str:
-    p = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-    if p.returncode != 0:
-        raise RuntimeError(f"cmd failed: {' '.join(cmd)}\n{p.stderr}")
-    return p.stdout
+def _session_key(session_id: str) -> str:
+    return f"session:{session_id}:files"
+
+def _analysis_key(session_id: str) -> str:
+    return f"session:{session_id}:analysis"
+
+def _manifest_key(session_id: str) -> str:
+    return f"session:{session_id}:manifest"
+
+def _jobs_key(job_id: str) -> str:
+    return f"job:{job_id}"
 
 def _safe_name(name: str) -> str:
-    s = "".join(c for c in name if c.isalnum() or c in ("-", "_", ".",)).strip()
-    return s or "final.mp4"
+    return "".join(c for c in name if c.isalnum() or c in ("-", "_", ".", " ")).strip().replace(" ", "_")
 
-def _download_to_tmp(url: str, dst: Path):
-    dst.parent.mkdir(parents=True, exist_ok=True)
-    with requests.get(url, stream=True) as res:
+# ------------------------------------------------------------------------------
+# Download / Upload helpers
+# ------------------------------------------------------------------------------
+
+def _download_to(tmp_dir: pathlib.Path, url: str, out_name: str) -> pathlib.Path:
+    out_path = tmp_dir / out_name
+    with requests.get(url, stream=True, timeout=60) as res:
         res.raise_for_status()
-        with dst.open("wb") as f:
-            for chunk in res.iter_content(chunk_size=1024 * 1024):
-                if chunk:
-                    f.write(chunk)
+        with open(out_path, "wb") as f:
+            shutil.copyfileobj(res.raw, f)
+    return out_path
 
-def _ffmpeg_trim(input_path: Path, start: float, end: float, out_path: Path, scale: int, fps: int):
-    dur = max(0.1, float(end) - float(start))
-    run([
+def _probe_duration(path: pathlib.Path) -> float:
+    """Return duration in seconds using ffprobe (if available)."""
+    try:
+        cmd = [
+            "ffprobe", "-v", "error", "-show_entries",
+            "format=duration", "-of", "default=noprint_wrappers=1:nokey=1", str(path)
+        ]
+        out = subprocess.check_output(cmd, stderr=subprocess.STDOUT).decode("utf-8").strip()
+        return float(out)
+    except Exception:
+        return 0.0
+
+def _ffmpeg_trim(src: pathlib.Path, dst: pathlib.Path, start: float, end: float, scale: int, fps: int):
+    """
+    Trim using -ss/-to and scale/fps. We re-encode for uniform output.
+    """
+    dur = max(0.0, end - start)
+    if dur <= 0:
+        raise RuntimeError("Invalid segment duration")
+    vf = f"scale=-2:{scale}"
+    cmd = [
         "ffmpeg", "-y",
-        "-ss", f"{float(start):.3f}",
+        "-ss", f"{start:.3f}",
+        "-i", str(src),
         "-t", f"{dur:.3f}",
-        "-i", str(input_path),
-        "-vf", f"scale={int(scale)}:-2:flags=lanczos",
-        "-r", str(int(fps)),
-        "-c:v", "libx264", "-preset", "veryfast", "-crf", "22",
+        "-r", str(fps),
+        "-vf", vf,
+        "-c:v", "libx264", "-preset", "veryfast", "-crf", "23",
         "-c:a", "aac", "-b:a", "128k",
-        str(out_path)
-    ])
+        str(dst),
+    ]
+    subprocess.check_call(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.STDOUT)
 
-def _concat_mp4s(parts: List[Path], out_path: Path):
-    lst = out_path.with_suffix(".txt")
-    lst.write_text("\n".join([f"file '{p.as_posix()}'" for p in parts]))
-    run(["ffmpeg", "-y", "-f", "concat", "-safe", "0", "-i", str(lst), "-c", "copy", str(out_path)])
-    lst.unlink(missing_ok=True)
-
-def _make_s3_url(key: str) -> Optional[str]:
+def _ffmpeg_concat(tsv: List[pathlib.Path], out_path: pathlib.Path):
     """
-    Decide which URL to return after upload.
-    - "public": build S3_PUBLIC_BASE URL (requires bucket policy for GetObject).
-    - "presigned": generate time-limited presigned URL.
-    - "auto": prefer public if S3_PUBLIC_BASE is set, else presigned.
+    Concat with concat demuxer: needs an intermediate list file.
     """
-    if not (_s3_client and S3_BUCKET):
-        return None
+    list_file = out_path.parent / f"concat_{uuid.uuid4().hex}.txt"
+    try:
+        with open(list_file, "w", encoding="utf-8") as f:
+            for p in tsv:
+                f.write(f"file '{p.as_posix()}'\n")
+        cmd = [
+            "ffmpeg", "-y",
+            "-f", "concat", "-safe", "0",
+            "-i", str(list_file),
+            "-c", "copy",
+            str(out_path),
+        ]
+        subprocess.check_call(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.STDOUT)
+    finally:
+        if list_file.exists():
+            list_file.unlink(missing_ok=True)
 
-    mode = S3_URL_MODE
-    if mode == "auto":
-        mode = "public" if S3_PUBLIC_BASE else "presigned"
+def _upload_final_to_s3(session_id: str, filename: str, local_path: pathlib.Path) -> str:
+    """
+    Upload to s3://<bucket>/sessions/<session_id>/<filename>
+    Returns a URL:
+      - public URL if bucket allows public read and S3_URL_MODE in {public, auto with base}
+      - presigned URL otherwise (15 min)
+    """
+    key = f"sessions/{session_id}/{filename}"
+    extra: Dict[str, Any] = {}
+    # DO NOT set ACL on ObjectOwnership=BucketOwnerEnforced buckets
+    _s3.upload_file(str(local_path), S3_BUCKET, key, ExtraArgs=extra)
 
-    if mode == "public":
-        if not S3_PUBLIC_BASE:
-            # fallback to presigned if no base provided
-            return _s3_client.generate_presigned_url(
-                "get_object",
-                Params={"Bucket": S3_BUCKET, "Key": key},
-                ExpiresIn=86400
-            )
-        return f"{S3_PUBLIC_BASE}/{key}"
-
-    # presigned
-    return _s3_client.generate_presigned_url(
+    # build URL
+    if S3_URL_MODE == "presigned":
+        return _s3.generate_presigned_url(
+            "get_object",
+            Params={"Bucket": S3_BUCKET, "Key": key},
+            ExpiresIn=900,
+        )
+    # public or auto
+    base = S3_PUBLIC_BASE
+    if base:
+        base = base.rstrip("/")
+        return f"{base}/{key}"
+    # fallback to presigned
+    return _s3.generate_presigned_url(
         "get_object",
         Params={"Bucket": S3_BUCKET, "Key": key},
-        ExpiresIn=86400
+        ExpiresIn=900,
     )
 
-def _upload_final_to_s3(session_id: str, filename: str, local_path: Path) -> Optional[str]:
-    """
-    Upload final MP4 to s3://S3_BUCKET/sessions/<session_id>/<filename>
-    NOTE: ACLs are NOT used because many buckets have "Bucket owner enforced" (no ACLs).
-    """
-    if not (_s3_client and S3_BUCKET):
-        return None
-    key = f"sessions/{session_id}/{filename}"
-    _s3_client.upload_file(
-        Filename=str(local_path),
-        Bucket=S3_BUCKET,
-        Key=key,
-        ExtraArgs={"ContentType": "video/mp4"}  # no "ACL": "public-read"
-    )
-    return _make_s3_url(key)
-
-def _public_or_download(session_id: str, fname: str) -> Dict[str, str]:
-    # Only used if S3 isn't configured; returns local URL (works only on same box)
-    return {"download_path": f"/download/{session_id}/{fname}"}
-
-# =========================
+# ------------------------------------------------------------------------------
 # Models
-# =========================
-class ProcessURLsIn(BaseModel):
+# ------------------------------------------------------------------------------
+
+class ProcessUrlsIn(BaseModel):
     urls: List[str]
-    tone: Optional[str] = "casual"
-    product_link: Optional[str] = ""
-    features_csv: Optional[str] = ""
+    tone: Optional[str] = None
+    product_link: Optional[str] = None
+    features_csv: Optional[str] = None
 
 class AutoManifestIn(BaseModel):
     session_id: str
     filename: str = "final.mp4"
     fps: int = 30
     scale: int = 720
-    max_total_sec: float = 12.0
+    max_total_sec: int = 12
     max_segments_per_file: int = 1
 
-class StitchIn(BaseModel):
+class StitchAsyncIn(BaseModel):
     session_id: str
     filename: str = "final.mp4"
-    manifest: dict  # {"segments":[{file_id,start,end}], "fps":30, "scale":720}
-
-class StitchAsyncIn(StitchIn):
-    pass
+    fps: int = 30
+    scale: int = 720
+    manifest: Dict[str, Any]
 
 class AnalyzeIn(BaseModel):
     session_id: str
+    script_text: Optional[str] = None  # future: compare transcription to this
 
-class ClassifyIn(BaseModel):
+class ChooseBestIn(BaseModel):
     session_id: str
+    target_sec: int = 12
+    max_segments_per_file: int = 1
+    fps: int = 30
+    scale: int = 720
 
-# =========================
-# Health
-# =========================
+# ------------------------------------------------------------------------------
+# Core jobs (run on worker)
+# ------------------------------------------------------------------------------
+
+def stitch_core(session_id: str, filename: str, manifest: Dict[str, Any], fps: int, scale: int) -> Dict[str, Any]:
+    """
+    Build final video per manifest and upload to S3. Returns {"ok": True, "public_url": "..."}.
+    Manifest format:
+      { "segments": [ { "file_id": "abcd", "start": 0.0, "end": 2.4 }, ... ] }
+    """
+    files = _jget(_session_key(session_id)) or {}
+    if not files:
+        raise RuntimeError("session not found")
+
+    work_dir = TMP_ROOT / session_id
+    work_dir.mkdir(parents=True, exist_ok=True)
+
+    # cache inputs
+    cache_dir = work_dir / "cache"
+    cache_dir.mkdir(exist_ok=True)
+
+    # Prepare trimmed clips
+    tmp_segments: List[pathlib.Path] = []
+    try:
+        for idx, seg in enumerate(manifest.get("segments", [])):
+            file_id = seg["file_id"]
+            start = float(seg.get("start", 0))
+            end   = float(seg.get("end", start + 1))
+            src_url = files.get(file_id)
+            if not src_url:
+                raise RuntimeError(f"file_id not found in session: {file_id}")
+
+            cache_name = f"{file_id}.src"
+            cache_path = cache_dir / cache_name
+            if not cache_path.exists():
+                _download_to(cache_dir, src_url, cache_name)
+
+            out_piece = work_dir / f"piece_{idx:03d}.mp4"
+            _ffmpeg_trim(cache_path, out_piece, start, end, scale, fps)
+            tmp_segments.append(out_piece)
+
+        # concat
+        safe_name = _safe_name(filename or "final.mp4")
+        final_path = work_dir / safe_name
+        _ffmpeg_concat(tmp_segments, final_path)
+
+        public_url = _upload_final_to_s3(session_id, safe_name, final_path)
+        result = {"ok": True, "public_url": public_url}
+        return result
+    finally:
+        # keep work_dir for /download if needed; we already uploaded
+        for p in tmp_segments:
+            p.unlink(missing_ok=True)
+
+def analyze_core_from_session(session_id: str, script_text: Optional[str] = None) -> Dict[str, Any]:
+    """
+    Stub analysis:
+      - Downloads each file once (cache)
+      - Uses ffprobe to get duration
+      - Produces a simple score: longer than 1.5s -> score 0.8, else 0.4
+    Stores results in Redis for the session.
+    """
+    files = _jget(_session_key(session_id)) or {}
+    if not files:
+        raise RuntimeError("session not found")
+
+    work_dir = TMP_ROOT / session_id
+    work_dir.mkdir(parents=True, exist_ok=True)
+    cache_dir = work_dir / "cache"
+    cache_dir.mkdir(exist_ok=True)
+
+    results = {}
+    for file_id, url in files.items():
+        cache_name = f"{file_id}.src"
+        src_path = cache_dir / cache_name
+        if not src_path.exists():
+            _download_to(cache_dir, url, cache_name)
+        dur = _probe_duration(src_path)
+        # simple rule score (placeholder for STT + LLM)
+        score = 0.8 if dur >= 1.5 else 0.4
+        results[file_id] = {"duration": dur, "score": score}
+
+    _jset(_analysis_key(session_id), {"script_used": bool(script_text), "results": results}, ex=60*60*24)
+    return {"ok": True, "analyzed": len(results)}
+
+def choose_best_core(session_id: str, target_sec: int, max_segments_per_file: int, fps: int, scale: int) -> Dict[str, Any]:
+    """
+    Build an auto manifest using analysis results (fallback to equal slices).
+    Policy:
+      - Sort files by score desc (duration if no analysis)
+      - Take up to target_sec total, at most max_segments_per_file segments per file
+      - Each picked segment is [0, min(2.4, remaining)]
+    Stores manifest in Redis and returns it.
+    """
+    files = _jget(_session_key(session_id)) or {}
+    if not files:
+        raise RuntimeError("session not found")
+
+    analysis = _jget(_analysis_key(session_id)) or {}
+    scored = []
+    for fid, url in files.items():
+        info = (analysis.get("results") or {}).get(fid) or {}
+        score = float(info.get("score", 0.5))
+        dur   = float(info.get("duration", 2.0))
+        scored.append((fid, score, dur))
+    scored.sort(key=lambda t: t[1], reverse=True)
+
+    remaining = float(target_sec)
+    segments = []
+    for fid, _score, dur in scored:
+        if remaining <= 0:
+            break
+        count = max_segments_per_file
+        while count > 0 and remaining > 0:
+            piece = min(2.4, remaining, max(0.4, dur))  # keep >=0.4s if possible
+            segments.append({"file_id": fid, "start": 0.0, "end": float(min(piece, dur))})
+            remaining -= float(piece)
+            count -= 1
+
+    manifest = {"segments": segments, "fps": fps, "scale": scale}
+    _jset(_manifest_key(session_id), manifest, ex=60*60*24)
+    return {"ok": True, "manifest": manifest}
+
+# ------------------------------------------------------------------------------
+# FastAPI
+# ------------------------------------------------------------------------------
+
+app = FastAPI()
+
 @app.get("/health")
 def health():
-    ok_redis = True
-    try:
-        rconn.ping()
-    except Exception:
-        ok_redis = False
+    return {"ok": True, "service": "editdna-worker", "version": "1.4.0-analyze-scaffold", "redis": True}
+
+# --- Session: store URLs -------------------------------------------------------
+
+@app.post("/process_urls")
+def process_urls(inp: ProcessUrlsIn):
+    if not inp.urls:
+        raise HTTPException(400, "urls required")
+    # create a new session id
+    session_id = uuid.uuid4().hex
+    files_map = {}
+    for url in inp.urls:
+        fid = uuid.uuid4().hex[:8]
+        files_map[fid] = url.strip()
+    _jset(_session_key(session_id), files_map, ex=60*60*24)  # keep 24h
 
     return {
         "ok": True,
-        "service": "editdna-web",
-        "version": VERSION,
-        "redis": ok_redis,
-        "s3_bucket": bool(S3_BUCKET),
-        "s3_public": bool(S3_PUBLIC_BASE),
-        "s3_url_mode": S3_URL_MODE,
-    }
-
-# =========================
-# 1) Register input URLs
-# =========================
-@app.post("/process_urls")
-def process_urls(body: ProcessURLsIn):
-    session_id = uuid.uuid4().hex
-    sd = sess_dir(session_id)
-
-    files_meta: List[Dict[str, str]] = []
-    url_map: Dict[str, str] = {}
-    for u in body.urls:
-        fid = uuid.uuid4().hex[:8]
-        files_meta.append({"file_id": fid, "source": "url"})
-        url_map[fid] = u
-
-    session_json = {
         "session_id": session_id,
-        "files": files_meta,
-        "urls": url_map,
-        "tone": body.tone,
-        "features_csv": body.features_csv,
-        "product_link": body.product_link,
-        "created_at": int(time.time()),
+        "files": [{"file_id": fid, "source": "url"} for fid in files_map.keys()]
     }
-    save_json(sd / "session.json", session_json)
-    return {"ok": True, "session_id": session_id, "files": files_meta}
 
-# =========================
-# NEW: Analyze (placeholder)
-# =========================
-@app.post("/analyze")
-def analyze(body: AnalyzeIn):
-    """
-    Placeholder analysis:
-    - lists the registered file_ids + source URLs
-    - picks a 'best_file_id' as the first one
-    """
-    sd = sess_dir(body.session_id)
-    meta_path = sd / "session.json"
-    if not meta_path.exists():
-        raise HTTPException(status_code=404, detail="session not found")
+# --- Auto manifest (simple) ----------------------------------------------------
 
-    session = load_json(meta_path)
-    urls: Dict[str, str] = session.get("urls") or {}
-    if not urls:
-        raise HTTPException(status_code=400, detail="no URLs registered for this session")
-
-    file_ids = list(urls.keys())
-    best_file_id = file_ids[0] if file_ids else ""
-
-    analysis = {
-        "session_id": body.session_id,
-        "best_file_id": best_file_id,
-        "files": [{"file_id": fid, "url": urls[fid]} for fid in file_ids],
-        "notes": "Placeholder analysis. Replace with real model later."
-    }
-    save_json(sd / "analysis.json", analysis)
-    return {"ok": True, **analysis}
-
-# =========================
-# NEW: Classify (placeholder)
-# =========================
-@app.post("/classify")
-def classify(body: ClassifyIn):
-    """
-    Placeholder classification:
-    returns static tags; later wire real scoring/ML here.
-    """
-    sd = sess_dir(body.session_id)
-    meta_path = sd / "session.json"
-    if not meta_path.exists():
-        raise HTTPException(status_code=404, detail="session not found")
-
-    session = load_json(meta_path)
-    urls: Dict[str, str] = session.get("urls") or {}
-    if not urls:
-        raise HTTPException(status_code=400, detail="no URLs registered for this session")
-
-    tags = ["talking_head", "product_demo"]
-    if any(("IMG" in u) or ("img" in u) for u in urls.values()):
-        tags.append("phone_camera")
-
-    out = {"ok": True, "session_id": body.session_id, "tags": tags, "notes": "Placeholder classification."}
-    save_json(sd / "classification.json", out)
-    return out
-
-# =========================
-# 2) Auto-manifest (simple)
-# =========================
 @app.post("/automanifest")
-def automanifest(body: AutoManifestIn):
-    sd = sess_dir(body.session_id)
-    meta_path = sd / "session.json"
-    if not meta_path.exists():
-        raise HTTPException(status_code=404, detail="session not found")
-    session = load_json(meta_path)
-    files = session.get("files") or []
+def automanifest(inp: AutoManifestIn):
+    files = _jget(_session_key(inp.session_id)) or {}
     if not files:
-        raise HTTPException(status_code=400, detail="no files in session")
+        raise HTTPException(404, "session not found")
 
+    # simple equal-split up to max_total_sec across first N files
+    per = max(0.4, float(inp.max_total_sec) / max(1, len(files)))
     segments = []
-    total = 0.0
-    per_seg = max(2.0, min(8.0, body.max_total_sec / max(1, len(files))))
-    for f in files:
-        if total >= body.max_total_sec:
-            break
-        take = min(per_seg, body.max_total_sec - total)
-        segments.append({"file_id": f["file_id"], "start": 0.0, "end": round(take, 3)})
-        total += take
+    for fid in list(files.keys()):
+        for _ in range(inp.max_segments_per_file):
+            if len(segments) * per >= inp.max_total_sec:
+                break
+            segments.append({"file_id": fid, "start": 0.0, "end": float(min(2.4, per))})
 
-    manifest = {"segments": segments, "fps": body.fps, "scale": body.scale}
-    out = {"ok": True, "session_id": body.session_id, "filename": _safe_name(body.filename), "manifest": manifest}
-    save_json(sd / "manifest.json", out)
-    return out
+    manifest = {"segments": segments, "fps": inp.fps, "scale": inp.scale}
+    _jset(_manifest_key(inp.session_id), manifest, ex=60*60*24)
+    return {"ok": True, "session_id": inp.session_id, "filename": inp.filename, "manifest": manifest}
 
-# =========================
-# 3) Stitch core (shared)
-# =========================
-def _stitch_do(*, session_id: str, urls: Dict[str, str], manifest: dict, filename: str) -> dict:
-    sd = sess_dir(session_id)
-    work = sd / "work"
-    work.mkdir(parents=True, exist_ok=True)
+# --- Analyze (stub) ------------------------------------------------------------
 
-    parts: List[Path] = []
-    fps = int(manifest.get("fps", 30))
-    scale = int(manifest.get("scale", 720))
+@app.post("/analyze")
+def analyze(inp: AnalyzeIn):
+    # queue job
+    job: Job = q.enqueue(analyze_core_from_session, inp.session_id, inp.script_text, job_timeout=60*30)
+    _jset(_jobs_key(job.id), {"type": "analyze", "session_id": inp.session_id, "created_at": int(time.time())}, ex=60*60*12)
+    return {"ok": True, "job_id": job.id}
 
-    for idx, seg in enumerate(manifest.get("segments", [])):
-        fid = seg["file_id"]
-        src_url = urls.get(fid)
-        if not src_url:
-            raise RuntimeError(f"missing url for file_id {fid}")
+# --- Choose best (auto manifest using analysis) --------------------------------
 
-        cache_vid = work / f"src_{fid}.cache"
-        if not cache_vid.exists():
-            _download_to_tmp(src_url, cache_vid)
-
-        part_out = work / f"part_{idx:03d}.mp4"
-        _ffmpeg_trim(cache_vid, seg.get("start", 0.0), seg.get("end", 3.0), part_out, scale=scale, fps=fps)
-        parts.append(part_out)
-
-    safe_name = _safe_name(filename)
-    final_path = sd / safe_name
-    _concat_mp4s(parts, final_path)
-
-    # Prefer S3 handoff
-    public = _upload_final_to_s3(session_id, safe_name, final_path)
-    if public:
-        return {"ok": True, "public_url": public}
-
-    # Fallback (works only if the same machine serves /download)
-    return {"ok": True, **_public_or_download(session_id, safe_name)}
-
-# =========================
-# 4) Stitch (sync) — small tests
-# =========================
-@app.post("/stitch")
-def stitch_sync(body: StitchIn):
-    sd = sess_dir(body.session_id)
-    meta_path = sd / "session.json"
-    if not meta_path.exists():
-        raise HTTPException(status_code=404, detail="session not found")
-    session = load_json(meta_path)
-    urls = session.get("urls") or {}
-    if not urls:
-        raise HTTPException(status_code=400, detail="no URLs registered for this session")
-
-    try:
-        return _stitch_do(
-            session_id=body.session_id,
-            urls=urls,
-            manifest=body.manifest,
-            filename=_safe_name(body.filename),
-        )
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-# =========================
-# 5) Stitch (async, RQ) — worker receives URLs directly
-# =========================
-def stitch_core(session_id: str, filename: str, manifest: dict, urls: Dict[str, str]) -> dict:
-    if not urls:
-        raise RuntimeError("no URLs provided")
-    return _stitch_do(
-        session_id=session_id,
-        urls=urls,
-        manifest=manifest,
-        filename=_safe_name(filename),
+@app.post("/choose_best")
+def choose_best(inp: ChooseBestIn):
+    job: Job = q.enqueue(
+        choose_best_core,
+        inp.session_id, inp.target_sec, inp.max_segments_per_file, inp.fps, inp.scale,
+        job_timeout=60*30,
     )
+    _jset(_jobs_key(job.id), {"type": "choose_best", "session_id": inp.session_id, "created_at": int(time.time())}, ex=60*60*12)
+    return {"ok": True, "job_id": job.id}
+
+# --- Stitch (async) ------------------------------------------------------------
 
 @app.post("/stitch_async")
-def stitch_async(body: StitchAsyncIn):
-    sd = sess_dir(body.session_id)
-    meta_path = sd / "session.json"
-    if not meta_path.exists():
-        raise HTTPException(status_code=404, detail="session not found")
-    session = load_json(meta_path)
-    urls = session.get("urls") or {}
-    if not urls:
-        raise HTTPException(status_code=400, detail="no URLs registered for this session")
+def stitch_async(inp: StitchAsyncIn):
+    # Allow caller to pass a manifest, or fallback to last saved manifest for this session
+    manifest = inp.manifest or _jget(_manifest_key(inp.session_id))
+    if not manifest:
+        raise HTTPException(400, "manifest required (or call /automanifest or /choose_best first)")
 
-    with Connection(rconn):
-        q = Queue("default")
-        job = q.enqueue(
-            stitch_core,
-            body.session_id,
-            _safe_name(body.filename),
-            body.manifest,
-            urls,  # pass explicit URLs so worker never reads local /tmp
-        )
-    return {"ok": True, "job_id": job.get_id()}
+    job: Job = q.enqueue(
+        stitch_core,
+        inp.session_id,
+        inp.filename,
+        manifest,
+        int(inp.manifest.get("fps", inp.fps)),
+        int(inp.manifest.get("scale", inp.scale)),
+        job_timeout=60*60,  # allow long ffmpeg
+    )
+    _jset(_jobs_key(job.id), {
+        "type": "stitch",
+        "session_id": inp.session_id,
+        "filename": inp.filename,
+        "manifest": manifest,
+        "created_at": int(time.time()),
+    }, ex=60*60*12)
 
-# =========================
-# 6) Jobs
-# =========================
+    return {"ok": True, "job_id": job.id}
+
+# --- Jobs ----------------------------------------------------------------------
+
 @app.get("/jobs/{job_id}")
 def job_status(job_id: str):
     try:
-        job = Job.fetch(job_id, connection=rconn)
+        job = Job.fetch(job_id, connection=r_conn)
     except Exception:
-        return {"ok": False, "error": "job_not_found", "job_id": job_id}
+        # still return what we can
+        meta = _jget(_jobs_key(job_id)) or {}
+        return {"job_id": job_id, "status": "queued", **({"meta": meta} if meta else {})}
 
-    status = job.get_status(refresh=True)
-    out: Dict[str, Any] = {"job_id": job_id, "status": status}
-
+    status = job.get_status()
+    resp: Dict[str, Any] = {"job_id": job_id, "status": status}
     if status == "finished":
-        try:
-            out["result"] = job.result
-        except Exception:
-            out["result"] = None
+        resp["result"] = job.result
     elif status == "failed":
-        out["result"] = None
-        out["error"] = getattr(job, "exc_info", "") or "failed"
+        resp["result"] = None
+        # include traceback message (short)
+        tb = getattr(job, "exc_info", None)
+        if tb:
+            resp["error"] = tb.splitlines()[-1] if isinstance(tb, str) else "failed"
+    return resp
 
-    return out
+# --- Download (optional local file serve) --------------------------------------
 
-# =========================
-# 7) Download (local fallback)
-# =========================
 @app.get("/download/{session_id}/{filename}")
-def download(session_id: str, filename: str):
-    sd = sess_dir(session_id)
-    f = sd / filename
-    if not f.exists():
-        raise HTTPException(status_code=404, detail="file not found")
-    return FileResponse(f, filename=filename, media_type="video/mp4")
+def download_local(session_id: str, filename: str):
+    """
+    If the file exists in /tmp we stream it. Otherwise 404.
+    (Most users will click the S3 URL returned by /jobs when stitch finishes.)
+    """
+    path = (TMP_ROOT / session_id / _safe_name(filename)).resolve()
+    if not path.exists():
+        raise HTTPException(404, "file not found")
+    def _iter():
+        with open(path, "rb") as f:
+            while True:
+                chunk = f.read(1024 * 1024)
+                if not chunk:
+                    break
+                yield chunk
+    return StreamingResponse(_iter(), media_type="video/mp4")
+
+# root 404 (Render checks /)
+@app.get("/")
+def root():
+    return PlainTextResponse("Not Found", status_code=404)
