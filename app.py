@@ -14,7 +14,8 @@ import redis
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import StreamingResponse, PlainTextResponse
 from pydantic import BaseModel
-from rq import Queue, Job
+from rq import Queue
+from rq.job import Job  # <-- RQ 1.16: import Job from rq.job
 
 # ------------------------------------------------------------------------------
 # ENV & global clients
@@ -157,6 +158,9 @@ def _upload_final_to_s3(session_id: str, filename: str, local_path: pathlib.Path
 
 class ProcessUrlsIn(BaseModel):
     urls: List[str]
+    tone: Optional[str] = None
+    product_link: Optional[str] = None
+    features_csv: Optional[str] = None
 
 class AutoManifestIn(BaseModel):
     session_id: str
@@ -278,7 +282,7 @@ app = FastAPI()
 
 @app.get("/health")
 def health():
-    return {"ok": True, "service": "editdna-worker", "version": "1.6.6", "redis": True}
+    return {"ok": True, "service": "editdna-worker", "version": "1.6.7", "redis": True}
 
 @app.post("/process_urls")
 def process_urls(inp: ProcessUrlsIn):
@@ -290,7 +294,11 @@ def process_urls(inp: ProcessUrlsIn):
         fid = uuid.uuid4().hex[:8]
         files_map[fid] = url.strip()
     _jset(_session_key(session_id), files_map, ex=60*60*24)
-    return {"ok": True, "session_id": session_id, "files": [{"file_id": fid} for fid in files_map.keys()]}
+    return {
+        "ok": True,
+        "session_id": session_id,
+        "files": [{"file_id": fid, "source": "url"} for fid in files_map.keys()]
+    }
 
 @app.post("/automanifest")
 def automanifest(inp: AutoManifestIn):
@@ -316,6 +324,7 @@ def analyze(inp: AnalyzeIn):
 
 @app.post("/choose_best")
 def choose_best(inp: ChooseBestIn):
+    # Keeps legacy route alive; internally just runs analyze to score durations.
     job: Job = q.enqueue(analyze_core_from_session, inp.session_id, job_timeout=60*5)
     _jset(_jobs_key(job.id), {"type": "choose_best", "session_id": inp.session_id}, ex=60*60*12)
     return {"ok": True, "job_id": job.id}
@@ -335,7 +344,7 @@ def job_status(job_id: str):
         job = Job.fetch(job_id, connection=r_conn)
     except Exception:
         meta = _jget(_jobs_key(job_id)) or {}
-        return {"job_id": job_id, "status": "queued", "meta": meta}
+        return {"job_id": job_id, "status": "queued", **({"meta": meta} if meta else {})}
     status = job.get_status()
     resp: Dict[str, Any] = {"job_id": job_id, "status": status}
     if status == "finished":
