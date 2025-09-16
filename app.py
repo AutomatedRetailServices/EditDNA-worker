@@ -1,5 +1,11 @@
 # app.py — EditDNA.ai MVP
-# v1.6.4 (defensive /manifest, debug endpoint, speech-adaptive + duration fallback)
+# v1.6.5 (adds /analyze_sync + /enqueue_nop to unblock without worker)
+# - Speech-adaptive manifest (silence → utterances → target-length joins)
+# - Debug endpoint /debug/session/{session_id}
+# - Legacy endpoints kept
+# - Stitch to S3
+# - NEW: /analyze_sync runs inline (no RQ worker needed)
+# - NEW: /enqueue_nop enqueues a trivial job to verify worker consumption
 
 import os
 import json
@@ -8,7 +14,7 @@ import uuid
 import shutil
 import pathlib
 import subprocess
-from typing import List, Dict, Any, Optional, Tuple
+from typing import List, Dict, Any, Optional, Tuple, Callable
 
 import boto3
 import requests
@@ -288,6 +294,10 @@ def analyze_core_from_session(session_id:str, script_text:Optional[str]=None)->D
     _jset(_analysis_key(session_id),{"results":results},ex=86400)
     return {"ok":True,"analyzed":len(results)}
 
+# A tiny no-op job for worker verification
+def _nop_job(payload: Dict[str, Any]) -> Dict[str, Any]:
+    return {"ok": True, "echo": payload, "ts": int(time.time())}
+
 # ------------------------------------------------------------------------------
 # Manifest builders
 # ------------------------------------------------------------------------------
@@ -329,7 +339,6 @@ def _choose_lite_segments(session_id:str,preset_key:str)->Tuple[List[Dict[str,An
             info.get("utterances") or []
         ))
     if not ranked or all(d==0.0 for _,_,d,_ in ranked):
-        # lazy probe so we never return 2s clips
         ranked=[]
         work_dir=TMP_ROOT/session_id; work_dir.mkdir(parents=True,exist_ok=True)
         cache_dir=work_dir/"cache"; cache_dir.mkdir(exist_ok=True)
@@ -382,7 +391,10 @@ app = FastAPI()
 
 @app.get("/health")
 def health():
-    return {"ok": True, "service": "editdna-worker", "version": "1.6.4", "redis": True}
+    # Mask REDIS_URL to avoid leaking secrets
+    ru = REDIS_URL
+    mask = ru[:6] + "..." + ru[-6:] if len(ru) > 16 else "set"
+    return {"ok": True, "service": "editdna-worker", "version": "1.6.5", "redis": True, "redis_url": mask}
 
 # Quick introspection to debug sessions
 @app.get("/debug/session/{session_id}")
@@ -394,11 +406,6 @@ def debug_session(session_id: str):
     }
 
 # --- Session: store URLs -------------------------------------------------------
-
-class Hints(BaseModel):
-    tone: Optional[str] = None
-    product_link: Optional[str] = None
-    features_csv: Optional[str] = None
 
 @app.post("/process_urls")
 def process_urls(inp: ProcessUrlsIn):
@@ -433,7 +440,7 @@ def automanifest(inp: AutoManifestIn):
     _jset(_manifest_key(inp.session_id), manifest, ex=60*60*24)
     return {"ok": True, "session_id": inp.session_id, "filename": inp.filename, "manifest": manifest}
 
-# --- Analyze (collect utterances/durations) -----------------------------------
+# --- Analyze (async via RQ) ----------------------------------------------------
 
 @app.post("/analyze")
 def analyze(inp: AnalyzeIn):
@@ -443,6 +450,24 @@ def analyze(inp: AnalyzeIn):
         retry=Retry(max=3, interval=[30, 90, 180]),
     )
     _jset(_jobs_key(job.id), {"type": "analyze", "session_id": inp.session_id, "created_at": int(time.time())}, ex=60*60*12)
+    return {"ok": True, "job_id": job.id}
+
+# --- Analyze (SYNC — no worker needed) ----------------------------------------
+
+@app.post("/analyze_sync")
+def analyze_sync(inp: AnalyzeIn):
+    try:
+        result = analyze_core_from_session(inp.session_id, inp.script_text)
+        return {"ok": True, "result": result}
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"ok": False, "error": "analyze_sync_failed", "detail": str(e)})
+
+# --- NOP job to test worker queue ---------------------------------------------
+
+@app.post("/enqueue_nop")
+def enqueue_nop():
+    job: Job = q.enqueue(_nop_job, {"msg": "hello"})
+    _jset(_jobs_key(job.id), {"type": "nop", "created_at": int(time.time())}, ex=3600)
     return {"ok": True, "job_id": job.id}
 
 # --- Choose best (legacy) ------------------------------------------------------
@@ -474,7 +499,7 @@ def manifest(inp: BuildManifestIn):
             segs,sel=_choose_lite_segments(inp.session_id, inp.preset_key)
             debug={"mode":"choose_lite","selection":sel}
 
-        # Guard rail: if any segment has invalid/zero length, replace with full file duration
+        # Guard rail: ensure positive length; if zero, use full file duration
         work_dir=TMP_ROOT/inp.session_id; cache_dir=work_dir/"cache"; cache_dir.mkdir(parents=True, exist_ok=True)
         for s in segs:
             if s["end"] <= s["start"] or s["end"] <= 0.01:
@@ -492,11 +517,7 @@ def manifest(inp: BuildManifestIn):
     except HTTPException:
         raise
     except Exception as e:
-        # Return a structured error instead of a blank 500
-        return JSONResponse(
-            status_code=500,
-            content={"ok": False, "error": "manifest_build_failed", "detail": str(e)}
-        )
+        return JSONResponse(status_code=500, content={"ok": False, "error": "manifest_build_failed", "detail": str(e)})
 
 # --- Stitch (uses last saved manifest) -----------------------------------------
 
