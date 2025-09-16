@@ -1,134 +1,142 @@
 # app.py
-import os, re
-from typing import List, Dict, Any, Optional
+import os
+from datetime import datetime, timezone
+from typing import List, Optional
 
-from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import JSONResponse
-
+import httpx
+from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel, AnyHttpUrl, Field
 import redis
 from rq import Queue
 from rq.job import Job
-from rq.registry import (FailedJobRegistry, FinishedJobRegistry,
-                         StartedJobRegistry, ScheduledJobRegistry, DeferredJobRegistry)
+from rq.registry import (
+    StartedJobRegistry,
+    ScheduledJobRegistry,
+    DeferredJobRegistry,
+    FailedJobRegistry,
+    FinishedJobRegistry,
+)
 
-# ----- Redis / RQ wiring -----
+# ---------- Redis / RQ setup ----------
 REDIS_URL = os.getenv("REDIS_URL", "")
 if not REDIS_URL:
     raise RuntimeError("Missing REDIS_URL")
 
-# VERY IMPORTANT: bytes mode to avoid decode crashes
+# IMPORTANT: keep decode_responses=False (bytes) to avoid .decode errors in RQ internals
 conn = redis.from_url(REDIS_URL, decode_responses=False)
 q = Queue("default", connection=conn)
 
-# Worker functions
-from worker import echo_nop, process_urls as worker_process_urls  # local import
+# ---------- FastAPI ----------
+app = FastAPI(title="editdna-web")
 
-app = FastAPI()
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
-
-# ----- helpers -----
-def extract_urls(payload: Dict[str, Any]) -> List[str]:
-    """
-    Accepts any of:
-      { "urls": ["https://...mov", ...] }
-      { "files": [{ "url": "https://..."}, ...] }
-      { "text": "one or more URLs in a blob" }
-    """
-    urls: List[str] = []
-
-    if isinstance(payload.get("urls"), list):
-        urls = [str(u).strip() for u in payload["urls"] if str(u).strip()]
-    elif isinstance(payload.get("files"), list):
-        for f in payload["files"]:
-            u = (f or {}).get("url") or (f or {}).get("source")  # tolerate "url" or "source"
-            if u:
-                urls.append(str(u).strip())
-    elif isinstance(payload.get("text"), str):
-        urls = re.findall(r"https?://\S+", payload["text"])
-    else:
-        # last resort: try to find any url-looking tokens in the raw body
-        for k, v in payload.items():
-            if isinstance(v, str) and v.startswith("http"):
-                urls.append(v.strip())
-
-    # de-dup while preserving order
-    seen = set()
-    uniq = []
-    for u in urls:
-        if u not in seen:
-            seen.add(u)
-            uniq.append(u)
-    return uniq
-
-
-def job_dict(job: Job) -> Dict[str, Any]:
-    status = job.get_status(refresh=True)
-    result: Optional[Any] = None
-    error: Optional[str] = None
-
-    if status == "finished":
-        result = job.result
-    elif status == "failed":
-        error = job.exc_info
-
+# ---------- Job functions (importable by the worker) ----------
+def nop_job() -> dict:
+    """Tiny job to prove queue <-> worker works."""
     return {
-        "job_id": job.id,
-        "status": status,
-        "result": result,
-        "error": error,
-        "enqueued_at": job.enqueued_at.isoformat() if job.enqueued_at else None,
-        "ended_at": (job.ended_at or job._ended_at).isoformat() if getattr(job, "ended_at", None) or getattr(job, "_ended_at", None) else None,
+        "echo": "hello",
+        "ts": datetime.now(timezone.utc).isoformat(),
     }
 
+def check_urls_job(urls: List[str]) -> dict:
+    """HEAD each URL and return basic info."""
+    out = {"checked": []}
+    timeout = httpx.Timeout(10.0, connect=10.0)
+    headers = {"User-Agent": "editdna/1.0"}
+    with httpx.Client(timeout=timeout, headers=headers, follow_redirects=True) as client:
+        for url in urls:
+            rec = {"url": url}
+            try:
+                r = client.head(url)
+                rec["status"] = "OK" if r.is_success else "HTTP_ERROR"
+                rec["http"] = r.status_code
+                # Content-Length may be missing
+                size = r.headers.get("content-length")
+                rec["size"] = int(size) if size and size.isdigit() else None
+            except Exception as e:
+                rec["status"] = "REQUEST_ERROR"
+                rec["error"] = str(e)
+            out["checked"].append(rec)
+    return out
 
-# ----- endpoints -----
+# ---------- Request/Response models ----------
+class EnqueueResp(BaseModel):
+    ok: bool = True
+    job_id: str
 
-@app.post("/enqueue_nop")
+class URLsIn(BaseModel):
+    urls: List[AnyHttpUrl] = Field(..., min_items=1, description="List of video URLs")
+
+class JobResp(BaseModel):
+    job_id: str
+    status: str
+    result: Optional[dict] = None
+    error: Optional[str] = None
+    enqueued_at: Optional[str] = None
+    ended_at: Optional[str] = None
+
+# ---------- Endpoints ----------
+@app.post("/enqueue_nop", response_model=EnqueueResp)
 def enqueue_nop():
-    job = q.enqueue(echo_nop, {"hello": "world"})
-    return {"ok": True, "job_id": job.id}
+    job = q.enqueue(nop_job)
+    return EnqueueResp(job_id=job.id)
 
-@app.get("/jobs/{job_id}")
+@app.post("/process_urls", response_model=EnqueueResp)
+def process_urls(payload: URLsIn):
+    job = q.enqueue(check_urls_job, [str(u) for u in payload.urls])
+    return EnqueueResp(job_id=job.id)
+
+@app.get("/jobs/{job_id}", response_model=JobResp)
 def get_job(job_id: str):
     try:
         job = Job.fetch(job_id, connection=conn)
     except Exception:
         raise HTTPException(status_code=404, detail="unknown_job_id")
-    return job_dict(job)
 
-@app.post("/process_urls")
-async def process_urls_ep(request: Request):
-    try:
-        payload = await request.json()
-    except Exception:
-        raise HTTPException(status_code=400, detail="invalid_json")
+    # RQ returns bytes timestamps; guard for missing attrs
+    status = job.get_status(refresh=True) or "unknown"
+    result = job.return_value() if job.is_finished else None
+    error = (job.exc_info.decode() if isinstance(job.exc_info, (bytes, bytearray)) else job.exc_info) if job.is_failed else None
 
-    urls = extract_urls(payload)
-    if not urls:
-        raise HTTPException(status_code=400, detail="no_urls_found")
+    def ts_to_iso(ts):
+        # RQ stores datetime or bytes; normalize to ISO
+        if hasattr(ts, "isoformat"):
+            return ts.isoformat()
+        if isinstance(ts, (bytes, bytearray)):
+            try:
+                return ts.decode()
+            except Exception:
+                return None
+        return str(ts) if ts else None
 
-    # enqueue real work
-    job = q.enqueue(worker_process_urls, urls)
-
-    # echo back what we queued
-    return {
-        "ok": True,
-        "job_id": job.id,
-        "files": [{"source": "url", "url": u} for u in urls],
-    }
+    return JobResp(
+        job_id=job.id,
+        status=status,
+        result=result,
+        error=error,
+        enqueued_at=ts_to_iso(job.enqueued_at),
+        ended_at=ts_to_iso(job.ended_at),
+    )
 
 @app.get("/admin/health")
-def admin_health():
+def health():
+    queue = q  # default queue
     regs = {
-        "queued": q.count,
-        "started": len(StartedJobRegistry(queue=q, connection=conn)),
-        "scheduled": len(ScheduledJobRegistry(queue=q, connection=conn)),
-        "deferred": len(DeferredJobRegistry(queue=q, connection=conn)),
-        "failed": len(FailedJobRegistry(queue=q, connection=conn)),
-        "finished": len(FinishedJobRegistry(queue=q, connection=conn)),
+        "queued": queue.count,
+        "started": StartedJobRegistry("default", connection=conn).count,
+        "scheduled": ScheduledJobRegistry("default", connection=conn).count,
+        "deferred": DeferredJobRegistry("default", connection=conn).count,
+        "failed": FailedJobRegistry("default", connection=conn).count,
+        "finished": FinishedJobRegistry("default", connection=conn).count,
     }
+    # materialize counts to ints
+    regs = {k: int(v) for k, v in regs.items()}
     return {"ok": True, "registries": regs}
 
-@app.get("/")
-def root():
-    return {"ok": True, "service": "editdna-web"}
