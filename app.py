@@ -1,123 +1,134 @@
 # app.py
-import os, json, time, uuid, redis
-from fastapi import FastAPI, HTTPException
-from pydantic import BaseModel
+import os, re
+from typing import List, Dict, Any, Optional
+
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.responses import JSONResponse
+
+import redis
 from rq import Queue
 from rq.job import Job
-from rq.registry import (StartedJobRegistry, FinishedJobRegistry,
-                         FailedJobRegistry, ScheduledJobRegistry, DeferredJobRegistry)
+from rq.registry import (FailedJobRegistry, FinishedJobRegistry,
+                         StartedJobRegistry, ScheduledJobRegistry, DeferredJobRegistry)
 
+# ----- Redis / RQ wiring -----
 REDIS_URL = os.getenv("REDIS_URL", "")
 if not REDIS_URL:
     raise RuntimeError("Missing REDIS_URL")
 
-r = redis.from_url(REDIS_URL, decode_responses=False)
-q = Queue("default", connection=r)
+# VERY IMPORTANT: bytes mode to avoid decode crashes
+conn = redis.from_url(REDIS_URL, decode_responses=False)
+q = Queue("default", connection=conn)
 
-app = FastAPI(title="editdna-web")
+# Worker functions
+from worker import echo_nop, process_urls as worker_process_urls  # local import
 
-def key_session(session_id: str) -> str:
-    return f"session:{session_id}".encode()
+app = FastAPI()
 
-class ProcessUrlsIn(BaseModel):
-    urls: list[str]
-    tone: str | None = None
-    product_link: str | None = None
-    features_csv: str | None = None
 
-class ManifestIn(BaseModel):
-    session_id: str
-    preset_key: str | None = None
-    filename: str | None = None
-    fps: int | None = None
-    scale: int | None = None
+# ----- helpers -----
+def extract_urls(payload: Dict[str, Any]) -> List[str]:
+    """
+    Accepts any of:
+      { "urls": ["https://...mov", ...] }
+      { "files": [{ "url": "https://..."}, ...] }
+      { "text": "one or more URLs in a blob" }
+    """
+    urls: List[str] = []
 
-class AnalyzeIn(BaseModel):
-    session_id: str
+    if isinstance(payload.get("urls"), list):
+        urls = [str(u).strip() for u in payload["urls"] if str(u).strip()]
+    elif isinstance(payload.get("files"), list):
+        for f in payload["files"]:
+            u = (f or {}).get("url") or (f or {}).get("source")  # tolerate "url" or "source"
+            if u:
+                urls.append(str(u).strip())
+    elif isinstance(payload.get("text"), str):
+        urls = re.findall(r"https?://\S+", payload["text"])
+    else:
+        # last resort: try to find any url-looking tokens in the raw body
+        for k, v in payload.items():
+            if isinstance(v, str) and v.startswith("http"):
+                urls.append(v.strip())
 
-def analyze_core_from_session(session_id: str, _unused=None):
-    k = key_session(session_id)
-    raw = r.get(k)
-    if not raw:
-        raise ValueError(f"session {session_id} not found")
-    payload = json.loads(raw.decode("utf-8"))
-    analysis = {
-        "num_assets": len(payload.get("files", [])),
-        "tone": payload.get("tone"),
-        "ts": int(time.time()),
+    # de-dup while preserving order
+    seen = set()
+    uniq = []
+    for u in urls:
+        if u not in seen:
+            seen.add(u)
+            uniq.append(u)
+    return uniq
+
+
+def job_dict(job: Job) -> Dict[str, Any]:
+    status = job.get_status(refresh=True)
+    result: Optional[Any] = None
+    error: Optional[str] = None
+
+    if status == "finished":
+        result = job.result
+    elif status == "failed":
+        error = job.exc_info
+
+    return {
+        "job_id": job.id,
+        "status": status,
+        "result": result,
+        "error": error,
+        "enqueued_at": job.enqueued_at.isoformat() if job.enqueued_at else None,
+        "ended_at": (job.ended_at or job._ended_at).isoformat() if getattr(job, "ended_at", None) or getattr(job, "_ended_at", None) else None,
     }
-    r.hset(k + b":analysis", mapping={b"json": json.dumps(analysis).encode("utf-8")})
-    return {"session_id": session_id, "analysis": analysis}
 
-def nop_echo(data: dict):
-    return {"echo": data}
+
+# ----- endpoints -----
 
 @app.post("/enqueue_nop")
 def enqueue_nop():
-    job = q.enqueue(nop_echo, {"hello": "world"}, job_timeout=300)
+    job = q.enqueue(echo_nop, {"hello": "world"})
     return {"ok": True, "job_id": job.id}
 
 @app.get("/jobs/{job_id}")
 def get_job(job_id: str):
     try:
-        job = Job.fetch(job_id, connection=r)
+        job = Job.fetch(job_id, connection=conn)
     except Exception:
         raise HTTPException(status_code=404, detail="unknown_job_id")
-    status = job.get_status()
-    result = job.result if status == "finished" else None
-    err = None
-    if status == "failed" and job.exc_info:
-        err = job.exc_info.splitlines()[-1]
-    enq = job.enqueued_at.isoformat() if job.enqueued_at else None
-    end = job.ended_at.isoformat() if job.ended_at else None
-    return {"job_id": job.id, "status": status, "result": result, "error": err,
-            "enqueued_at": enq, "ended_at": end}
-
-@app.get("/admin/health")
-def health():
-    regs = {
-        "queued": q.count,
-        "started": lambda: StartedJobRegistry("default", connection=r).count,
-        "scheduled": lambda: ScheduledJobRegistry("default", connection=r).count,
-        "deferred": lambda: DeferredJobRegistry("default", connection=r).count,
-        "failed": lambda: FailedJobRegistry("default", connection=r).count,
-        "finished": lambda: FinishedJobRegistry("default", connection=r).count,
-    }
-    out = {k: (v() if callable(v) else v) for k, v in regs.items()}
-    return {"ok": True, "registries": out}
+    return job_dict(job)
 
 @app.post("/process_urls")
-def process_urls(body: ProcessUrlsIn):
-    if not body.urls:
-        raise HTTPException(400, "urls required")
-    session_id = uuid.uuid4().hex
-    files = [{"file_id": uuid.uuid4().hex[:8], "source": "url", "url": u} for u in body.urls]
-    payload = {"session_id": session_id, "files": files,
-               "tone": body.tone, "product_link": body.product_link,
-               "features_csv": body.features_csv}
-    r.set(key_session(session_id), json.dumps(payload).encode("utf-8"))
-    job = q.enqueue("app.analyze_core_from_session", session_id, None, job_timeout=1800)
-    return {"ok": True, "session_id": session_id, "job_id": job.id, "files": files}
+async def process_urls_ep(request: Request):
+    try:
+        payload = await request.json()
+    except Exception:
+        raise HTTPException(status_code=400, detail="invalid_json")
 
-@app.post("/analyze")
-def analyze(body: AnalyzeIn):
-    job = q.enqueue("app.analyze_core_from_session", body.session_id, None, job_timeout=1800)
-    return {"ok": True, "job_id": job.id}
+    urls = extract_urls(payload)
+    if not urls:
+        raise HTTPException(status_code=400, detail="no_urls_found")
 
-@app.post("/manifest")
-def manifest(body: ManifestIn):
-    raw = r.get(key_session(body.session_id))
-    if not raw:
-        raise HTTPException(404, "unknown session_id")
-    payload = json.loads(raw.decode("utf-8"))
-    analysis_raw = r.hget(key_session(body.session_id) + b":analysis", b"json")
-    analysis = json.loads(analysis_raw.decode("utf-8")) if analysis_raw else None
+    # enqueue real work
+    job = q.enqueue(worker_process_urls, urls)
+
+    # echo back what we queued
     return {
         "ok": True,
-        "session_id": body.session_id,
-        "manifest": {
-            "segments": [{"file_id": f["file_id"], "start": 0.0, "end": 2.0}
-                         for f in payload["files"][:1]]
-        },
-        "analysis": analysis,
+        "job_id": job.id,
+        "files": [{"source": "url", "url": u} for u in urls],
     }
+
+@app.get("/admin/health")
+def admin_health():
+    regs = {
+        "queued": q.count,
+        "started": len(StartedJobRegistry(queue=q, connection=conn)),
+        "scheduled": len(ScheduledJobRegistry(queue=q, connection=conn)),
+        "deferred": len(DeferredJobRegistry(queue=q, connection=conn)),
+        "failed": len(FailedJobRegistry(queue=q, connection=conn)),
+        "finished": len(FinishedJobRegistry(queue=q, connection=conn)),
+    }
+    return {"ok": True, "registries": regs}
+
+@app.get("/")
+def root():
+    return {"ok": True, "service": "editdna-web"}
