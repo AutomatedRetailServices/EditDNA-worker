@@ -1,6 +1,5 @@
 # app.py — EditDNA.ai MVP
-# v1.6.2  (speech-adaptive + retries; TalkingHead preset with targets)
-# Full file. Replace your current app.py with this.
+# v1.6.3  (manifest uses analysis; fallback = real duration; TalkingHead targets)
 
 import os
 import json
@@ -63,7 +62,7 @@ UTT_JOIN_GAP_D  = float(os.getenv("UTT_JOIN_GAP_D", "0.25"))
 UTT_PAD_D       = float(os.getenv("UTT_PAD_D", "0.06"))
 
 # ------------------------------------------------------------------------------
-# Presets (UPDATED: TalkingHead has real targets)
+# Presets (TalkingHead now has real targets)
 # ------------------------------------------------------------------------------
 
 DEFAULT_PRESETS = {
@@ -79,7 +78,7 @@ DEFAULT_PRESETS = {
         {"name": "Prep",         "target": 7.0, "styles": ["ASMR"], "asmr": True},
         {"name": "Money Shot",   "target": 5.0, "styles": ["ASMR"], "asmr": True},
         {"name": "CTA",          "target": 3.0, "styles": ["ASMR"], "asmr": True},
-    ]
+    ],
 }
 PRESETS_PATH = os.getenv("PRESETS_PATH")
 
@@ -306,24 +305,31 @@ def _load_analysis_for_choose(session_id:str)->Dict[str,Dict[str,Any]]:
         "utterances":info.get("utterances") or []
     } for fid,info in results.items()}
 
-def _choose_lite_segments(session_id:str,preset_key:str)->Tuple[List[Dict[str,Any]],Dict[str,Any]]:
+def _choose_adaptive_segments(session_id:str,preset_key:str)->Tuple[List[Dict[str,Any]],Dict[str,Any]]:
+    """
+    Speech-adaptive: use utterances to reach each slot's target length.
+    If no utterances for a file, fallback to that file's real duration.
+    """
     presets=_load_presets()
     if preset_key not in presets: raise HTTPException(400,f"Unknown preset {preset_key}")
     slots=presets[preset_key]
     files=_jget(_session_key(session_id)) or {}
     if not files: raise HTTPException(404,"session not found")
+
     analysis=_load_analysis_for_choose(session_id)
-    if not analysis:
-        analysis={fid:{"score":0.5,"duration":2.0,"utterances":[]} for fid in files.keys()}
-    ranked=sorted(analysis.items(),key=lambda kv:(kv[1]["score"],kv[1]["duration"]),reverse=True)
+    # Rank files: better score + longer duration first
+    ranked=sorted(analysis.items(), key=lambda kv:(kv[1]["score"], kv[1]["duration"]), reverse=True)
     file_ptrs={fid:0 for fid in analysis.keys()}
+
     selection={}; segs=[]
     for slot in slots:
-        target=float(slot.get("target",0.0)); chosen=None
-        # try to gather enough utterances to reach target
+        target=float(slot.get("target",0.0))
+        chosen=None
+
+        # Pass 1: try to assemble from utterances
         for fid,meta in ranked:
             utts=meta["utterances"]; p=file_ptrs[fid]
-            if p>=len(utts): continue
+            if not utts or p>=len(utts): continue
             picks=[]; total=0.0
             while p<len(utts):
                 u=utts[p]; ulen=float(max(0.0,u["end"]-u["start"]))
@@ -339,15 +345,21 @@ def _choose_lite_segments(session_id:str,preset_key:str)->Tuple[List[Dict[str,An
                 s=float(picks[0]["start"]); e=float(picks[-1]["end"])
                 chosen={"file_id":fid,"start":s,"end":e}
                 break
-        if not chosen:
-            # fallback: take start of best file
-            fid,meta=ranked[0]; dur=float(meta.get("duration",2.0))
-            piece=min((max(2.0,target) if target>0 else 2.8),dur)
-            chosen={"file_id":fid,"start":0.0,"end":piece}
+
+        # Pass 2: fallback to full file duration if no utterances used
+        if not chosen and ranked:
+            fid,meta=ranked[0]
+            dur=float(meta.get("duration",2.0))
+            if dur<=0.05: dur=2.0
+            # If the slot has a target, cap at min(dur, target+0.75) but never below 2.0
+            wanted = target+0.75 if target>0 else min(dur, UTT_MAX_D)
+            end = float(min(dur, max(2.0, wanted)))
+            chosen={"file_id":fid,"start":0.0,"end":end}
+
         segs.append(chosen); selection[slot["name"]]=chosen
     return segs,selection
 
-# --- Legacy simple choose_best (kept for backward compatibility) ---------------
+# --- Legacy simple choose_best (kept for old clients) --------------------------
 
 def choose_best_core(session_id: str, target_sec: int, max_segments_per_file: int, fps: int, scale: int) -> Dict[str, Any]:
     files = _jget(_session_key(session_id)) or {}
@@ -384,7 +396,7 @@ app = FastAPI()
 
 @app.get("/health")
 def health():
-    return {"ok": True, "service": "editdna-worker", "version": "1.6.2", "redis": True}
+    return {"ok": True, "service": "editdna-worker", "version": "1.6.3", "redis": True}
 
 # Session: store URLs -----------------------------------------------------------
 
@@ -419,7 +431,7 @@ def automanifest(inp: AutoManifestIn):
     _jset(_manifest_key(inp.session_id), manifest, ex=60*60*24)
     return {"ok": True, "session_id": inp.session_id, "filename": inp.filename, "manifest": manifest}
 
-# Analyze (build utterances) ----------------------------------------------------
+# Analyze (build durations + utterances) ---------------------------------------
 
 @app.post("/analyze")
 def analyze(inp: AnalyzeIn):
@@ -446,19 +458,29 @@ def choose_best(inp: ChooseBestIn):
     _jset(_jobs_key(job.id), {"type": "choose_best", "session_id": inp.session_id, "created_at": int(time.time())}, ex=60*60*12)
     return {"ok": True, "job_id": job.id}
 
-# New speech-adaptive manifest --------------------------------------------------
+# New speech-adaptive manifest (with real-duration fallback) --------------------
 
 @app.post("/manifest")
 def manifest(inp: BuildManifestIn):
     files=_jget(_session_key(inp.session_id)) or {}
     if not files: raise HTTPException(404,"session not found")
+
     if inp.segments and len(inp.segments)>0:
         segs=[{"file_id":s["file_id"],"start":float(s.get("start",0.0)),"end":float(s.get("end",1.0))} for s in inp.segments]
         debug={"mode":"segments_supplied"}
     else:
-        segs,sel=_choose_lite_segments(inp.session_id, inp.preset_key)
-        debug={"mode":"choose_lite","selection":sel}
-    manifest={"segments":segs,"fps":inp.fps,"scale":inp.scale,"filename":inp.filename,"preset_key":inp.preset_key}
+        # Build adaptively; if no utterances, fallback to full-file durations
+        segs, sel = _choose_adaptive_segments(inp.session_id, inp.preset_key)
+        debug={"mode":"adaptive","selection":sel}
+
+    # Safety: clamp any end < start or tiny segments
+    fixed=[]
+    for s in segs:
+        st=float(s.get("start",0.0)); en=float(s.get("end",0.0))
+        if en-st < 0.25: en = st + 0.25
+        fixed.append({"file_id":s["file_id"],"start":st,"end":en})
+
+    manifest={"segments":fixed,"fps":inp.fps,"scale":inp.scale,"filename":inp.filename,"preset_key":inp.preset_key}
     _jset(_manifest_key(inp.session_id),manifest,ex=86400)
     return {"ok":True,"session_id":inp.session_id,"manifest":manifest,"debug":debug}
 
