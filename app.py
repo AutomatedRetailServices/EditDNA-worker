@@ -1,11 +1,9 @@
 # app.py — EditDNA.ai MVP
-# v1.6.5 (adds /analyze_sync + /enqueue_nop to unblock without worker)
-# - Speech-adaptive manifest (silence → utterances → target-length joins)
-# - Debug endpoint /debug/session/{session_id}
-# - Legacy endpoints kept
-# - Stitch to S3
-# - NEW: /analyze_sync runs inline (no RQ worker needed)
-# - NEW: /enqueue_nop enqueues a trivial job to verify worker consumption
+# v1.6.7
+# - NEW: /list_files/{session_id} to see file_ids
+# - NEW: /analyze_file_sync (process ONE file quickly, stores results)
+# - Keeps: /analyze (async via RQ), /analyze_sync (multi-file), /manifest (speech-adaptive),
+#          /stitch, /stitch_async, /automanifest (legacy), /choose_best (legacy), /debug/session
 
 import os
 import json
@@ -14,7 +12,7 @@ import uuid
 import shutil
 import pathlib
 import subprocess
-from typing import List, Dict, Any, Optional, Tuple, Callable
+from typing import List, Dict, Any, Optional, Tuple
 
 import boto3
 import requests
@@ -68,7 +66,7 @@ UTT_JOIN_GAP_D  = float(os.getenv("UTT_JOIN_GAP_D", "0.25"))
 UTT_PAD_D       = float(os.getenv("UTT_PAD_D", "0.06"))
 
 # ------------------------------------------------------------------------------
-# Presets (TalkingHead has real targets)
+# Presets
 # ------------------------------------------------------------------------------
 
 DEFAULT_PRESETS = {
@@ -226,6 +224,11 @@ class AnalyzeIn(BaseModel):
     session_id: str
     script_text: Optional[str] = None
 
+class AnalyzeFileIn(BaseModel):
+    session_id: str
+    file_id: str
+    detect_utterances: bool = True
+
 class ChooseBestIn(BaseModel):
     session_id: str
     target_sec: int = 12
@@ -294,10 +297,6 @@ def analyze_core_from_session(session_id:str, script_text:Optional[str]=None)->D
     _jset(_analysis_key(session_id),{"results":results},ex=86400)
     return {"ok":True,"analyzed":len(results)}
 
-# A tiny no-op job for worker verification
-def _nop_job(payload: Dict[str, Any]) -> Dict[str, Any]:
-    return {"ok": True, "echo": payload, "ts": int(time.time())}
-
 # ------------------------------------------------------------------------------
 # Manifest builders
 # ------------------------------------------------------------------------------
@@ -332,16 +331,10 @@ def _choose_lite_segments(session_id:str,preset_key:str)->Tuple[List[Dict[str,An
     ranked=[]
     for fid in files.keys():
         info = analysis.get(fid) or {}
-        ranked.append((
-            fid,
-            float(info.get("score", 0.5)),
-            float(info.get("duration", 0.0)),
-            info.get("utterances") or []
-        ))
+        ranked.append((fid, float(info.get("score", 0.5)), float(info.get("duration", 0.0)), info.get("utterances") or []))
     if not ranked or all(d==0.0 for _,_,d,_ in ranked):
         ranked=[]
-        work_dir=TMP_ROOT/session_id; work_dir.mkdir(parents=True,exist_ok=True)
-        cache_dir=work_dir/"cache"; cache_dir.mkdir(exist_ok=True)
+        work_dir=TMP_ROOT/session_id; cache_dir=work_dir/"cache"; cache_dir.mkdir(parents=True,exist_ok=True)
         for fid,url in (_jget(_session_key(session_id)) or {}).items():
             cache_name=f"{fid}.src"; src_path=cache_dir/cache_name
             if not src_path.exists(): _download_to(cache_dir,url,cache_name)
@@ -391,19 +384,15 @@ app = FastAPI()
 
 @app.get("/health")
 def health():
-    # Mask REDIS_URL to avoid leaking secrets
     ru = REDIS_URL
     mask = ru[:6] + "..." + ru[-6:] if len(ru) > 16 else "set"
-    return {"ok": True, "service": "editdna-worker", "version": "1.6.5", "redis": True, "redis_url": mask}
+    return {"ok": True, "service": "editdna-worker", "version": "1.6.7", "redis": True, "redis_url": mask}
 
-# Quick introspection to debug sessions
 @app.get("/debug/session/{session_id}")
 def debug_session(session_id: str):
-    return {
-        "files": _jget(_session_key(session_id)),
-        "analysis": _jget(_analysis_key(session_id)),
-        "manifest": _jget(_manifest_key(session_id)),
-    }
+    return {"files": _jget(_session_key(session_id)),
+            "analysis": _jget(_analysis_key(session_id)),
+            "manifest": _jget(_manifest_key(session_id))}
 
 # --- Session: store URLs -------------------------------------------------------
 
@@ -416,11 +405,14 @@ def process_urls(inp: ProcessUrlsIn):
     _jset(_session_key(session_id), files_map, ex=60*60*24)
     hints = {"tone": inp.tone, "product_link": inp.product_link, "features_csv": inp.features_csv}
     _jset(f"session:{session_id}:hints", hints, ex=60*60*24)
-    return {
-        "ok": True,
-        "session_id": session_id,
-        "files": [{"file_id": fid, "source": "url"} for fid in files_map.keys()]
-    }
+    return {"ok": True, "session_id": session_id, "files": [{"file_id": fid, "source": "url"} for fid in files_map.keys()]}
+
+@app.get("/list_files/{session_id}")
+def list_files(session_id: str):
+    files = _jget(_session_key(session_id)) or {}
+    if not files:
+        raise HTTPException(404, "session not found")
+    return {"ok": True, "session_id": session_id, "files": files}
 
 # --- Auto manifest (legacy equal splitter) ------------------------------------
 
@@ -452,7 +444,7 @@ def analyze(inp: AnalyzeIn):
     _jset(_jobs_key(job.id), {"type": "analyze", "session_id": inp.session_id, "created_at": int(time.time())}, ex=60*60*12)
     return {"ok": True, "job_id": job.id}
 
-# --- Analyze (SYNC — no worker needed) ----------------------------------------
+# --- Analyze (SYNC — all files; can be slow) ----------------------------------
 
 @app.post("/analyze_sync")
 def analyze_sync(inp: AnalyzeIn):
@@ -462,15 +454,74 @@ def analyze_sync(inp: AnalyzeIn):
     except Exception as e:
         return JSONResponse(status_code=500, content={"ok": False, "error": "analyze_sync_failed", "detail": str(e)})
 
-# --- NOP job to test worker queue ---------------------------------------------
+# --- Analyze ONE file (SYNC — fast & safe) ------------------------------------
+
+@app.post("/analyze_file_sync")
+def analyze_file_sync(inp: AnalyzeFileIn):
+    files = _jget(_session_key(inp.session_id)) or {}
+    if not files:
+        raise HTTPException(404, "session not found")
+    url = files.get(inp.file_id)
+    if not url:
+        raise HTTPException(404, "file_id not found in session")
+
+    work_dir = TMP_ROOT / inp.session_id
+    work_dir.mkdir(parents=True, exist_ok=True)
+    cache_dir = work_dir / "cache"
+    cache_dir.mkdir(exist_ok=True)
+
+    cache_name = f"{inp.file_id}.src"
+    src_path = cache_dir / cache_name
+    if not src_path.exists():
+        _download_to(cache_dir, url, cache_name)
+
+    dur = _probe_duration(src_path)
+    utts = _detect_utterances(src_path) if inp.detect_utterances else []
+    score = 0.8 if dur >= 1.5 else 0.4
+
+    analysis = _jget(_analysis_key(inp.session_id)) or {"results": {}}
+    analysis["results"][inp.file_id] = {"duration": dur, "score": score, "utterances": utts}
+    _jset(_analysis_key(inp.session_id), analysis, ex=86400)
+
+    return {"ok": True, "session_id": inp.session_id, "file_id": inp.file_id,
+            "duration": dur, "utterances": utts, "stored": True}
+
+# --- NOP (optional queue test) -------------------------------------------------
 
 @app.post("/enqueue_nop")
 def enqueue_nop():
-    job: Job = q.enqueue(_nop_job, {"msg": "hello"})
+    job: Job = q.enqueue(lambda x: {"ok": True, "echo": x, "ts": int(time.time())}, {"msg": "hello"})
     _jset(_jobs_key(job.id), {"type": "nop", "created_at": int(time.time())}, ex=3600)
     return {"ok": True, "job_id": job.id}
 
 # --- Choose best (legacy) ------------------------------------------------------
+
+def choose_best_core(session_id: str, target_sec: int, max_segments_per_file: int, fps: int, scale: int) -> Dict[str, Any]:
+    files = _jget(_session_key(session_id)) or {}
+    if not files:
+        raise RuntimeError("session not found")
+    analysis = _jget(_analysis_key(session_id)) or {}
+    scored = []
+    for fid, url in files.items():
+        info = (analysis.get("results") or {}).get(fid) or {}
+        score = float(info.get("score", 0.5))
+        dur   = float(info.get("duration", 2.0))
+        scored.append((fid, score, dur))
+    scored.sort(key=lambda t: t[1], reverse=True)
+    remaining = float(target_sec)
+    segments = []
+    for fid, _score, dur in scored:
+        if remaining <= 0:
+            break
+        count = max_segments_per_file
+        while count > 0 and remaining > 0:
+            piece = min(2.4, remaining, max(0.4, dur))
+            segments.append({"file_id": fid, "start": 0.0, "end": float(min(piece, dur))})
+            remaining -= float(piece)
+            count -= 1
+    manifest = {"segments": segments, "fps": fps, "scale": scale}
+    _jset(_manifest_key(session_id), manifest, ex=60*60*24)
+    return {"ok": True, "manifest": manifest}
 
 @app.post("/choose_best")
 def choose_best(inp: ChooseBestIn):
@@ -499,7 +550,6 @@ def manifest(inp: BuildManifestIn):
             segs,sel=_choose_lite_segments(inp.session_id, inp.preset_key)
             debug={"mode":"choose_lite","selection":sel}
 
-        # Guard rail: ensure positive length; if zero, use full file duration
         work_dir=TMP_ROOT/inp.session_id; cache_dir=work_dir/"cache"; cache_dir.mkdir(parents=True, exist_ok=True)
         for s in segs:
             if s["end"] <= s["start"] or s["end"] <= 0.01:
