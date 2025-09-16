@@ -1,218 +1,123 @@
-# app.py
-# FastAPI + RQ (v1.16.x) web app with Redis-backed session storage.
-# Endpoints:
-#  - POST /process_urls
-#  - POST /analyze
-#  - POST /manifest
-#  - POST /stitch
-#  - GET  /jobs/{job_id}
-#  - GET  /debug/session/{session_id}
-#  - GET  /admin/health
-#  - POST /enqueue_nop   (smoke test for queue)
-
-import json
+# app.py  — FastAPI + RQ 1.16.2 API
 import os
-import time
 import uuid
 from typing import Any, Dict, List, Optional
 
 import redis
 from fastapi import FastAPI, HTTPException
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
+
 from rq import Queue
 from rq.job import Job
-from rq.registry import FailedJobRegistry, FinishedJobRegistry, ScheduledJobRegistry, StartedJobRegistry
+from rq.registry import (
+    StartedJobRegistry,
+    FailedJobRegistry,
+    FinishedJobRegistry,
+    ScheduledJobRegistry,
+    DeferredJobRegistry,
+)
 
-# -----------------------------------------------------------------------------
-# Redis & RQ setup
-# -----------------------------------------------------------------------------
+# ------------------------------
+# Redis / RQ setup (match worker.py)
+# ------------------------------
 REDIS_URL = os.getenv("REDIS_URL", "")
 if not REDIS_URL:
     raise RuntimeError("Missing REDIS_URL")
 
-r = redis.from_url(REDIS_URL, decode_responses=True)  # store JSON strings
-q = Queue("default", connection=r)
+# IMPORTANT: keep decode_responses=False (bytes) to avoid decode errors seen in logs
+redis_conn = redis.from_url(REDIS_URL, decode_responses=False)
+q = Queue("default", connection=redis_conn)
 
-# -----------------------------------------------------------------------------
-# Pydantic models (request bodies)
-# -----------------------------------------------------------------------------
+# ------------------------------
+# Tasks (NO LAMBDAS)
+# ------------------------------
+def nop_task() -> Dict[str, Any]:
+    """A tiny task to verify enqueue/execute/result flow."""
+    return {"ok": True, "msg": "nop done"}
+
+# Example long-running placeholder you can hook up later
+def analyze_core_from_session(session_id: str) -> Dict[str, Any]:
+    # Do your real work here later; keep it trivial for now
+    return {"ok": True, "session_id": session_id, "analysis": "placeholder"}
+
+# ------------------------------
+# FastAPI app
+# ------------------------------
+app = FastAPI(title="editdna-web API")
+
+# ------------------------------
+# Models
+# ------------------------------
 class ProcessUrlsIn(BaseModel):
     urls: List[str]
     tone: Optional[str] = None
     product_link: Optional[str] = None
     features_csv: Optional[str] = None
 
-class AnalyzeIn(BaseModel):
-    session_id: str
+# ------------------------------
+# Endpoints
+# ------------------------------
+@app.get("/")
+def root():
+    return {"ok": True, "service": "editdna-web", "queue": q.name}
 
-class ManifestIn(BaseModel):
-    session_id: str
-    preset_key: Optional[str] = None
-    filename: str = "final.mp4"
-    fps: int = 30
-    scale: int = 720
-    manifest: Optional[Dict[str, List[Dict[str, Any]]]] = None  # e.g. { "CTA":[{file_id,start,end},...] }
-
-class StitchIn(BaseModel):
-    session_id: str
-    manifest: Dict[str, List[Dict[str, Any]]]
-    filename: str = "final.mp4"
-    fps: int = 30
-    scale: int = 720
-
-# -----------------------------------------------------------------------------
-# FastAPI app
-# -----------------------------------------------------------------------------
-app = FastAPI(title="EditDNA Web API")
-
-# -----------------------------------------------------------------------------
-# Helper: Redis keys
-# -----------------------------------------------------------------------------
-def key_session(session_id: str) -> str:
-    return f"session:{session_id}"
-
-def key_analysis(session_id: str) -> str:
-    return f"analysis:{session_id}"
-
-def key_manifest(session_id: str) -> str:
-    return f"manifest:{session_id}"
-
-# -----------------------------------------------------------------------------
-# Queueable functions (MUST be top-level named functions for RQ to import)
-# -----------------------------------------------------------------------------
-def nop() -> str:
-    """Simple no-op used to verify worker/queue."""
-    return "ok"
-
-def analyze_core_from_session(session_id: str, opts: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
-    """Pretend analysis: reads session, writes an analysis result for later steps."""
-    sess_raw = r.get(key_session(session_id))
-    if not sess_raw:
-        raise ValueError(f"Unknown session_id: {session_id}")
-
-    session = json.loads(sess_raw)
-
-    # Simulate some work
-    time.sleep(1.0)
-
-    # Create a tiny, deterministic "analysis"
-    result = {
-        "ok": True,
-        "session_id": session_id,
-        "files": session["files"],  # echo back
-        "detected_scenes": [{"file_id": f["file_id"], "start": 0.0, "end": 2.0} for f in session["files"]],
-    }
-    r.set(key_analysis(session_id), json.dumps(result))
-    return result
-
-def stitch_core(session_id: str, filename: str, manifest: Dict[str, List[Dict[str, Any]]], fps: int, scale: int) -> Dict[str, Any]:
-    """Pretend stitch: consumes manifest + analysis and returns a fake public URL."""
-    # Ensure analysis exists (optional sanity check)
-    _ = r.get(key_analysis(session_id))  # not strictly required for this mocked stitch
-
-    # Simulate work
-    time.sleep(1.0)
-
-    # In a real implementation you'd render and upload; here we just fabricate a URL.
-    public_url = f"https://script2clipshop-video-automatedetailservices.s3.us-east-1.amazonaws.com/sessions/{session_id}/{filename}"
-    return {"ok": True, "public_url": public_url, "fps": fps, "scale": scale, "manifest_keys": list(manifest.keys())}
-
-# -----------------------------------------------------------------------------
-# Routes
-# -----------------------------------------------------------------------------
-@app.post("/process_urls")
-def process_urls(body: ProcessUrlsIn):
-    if not body.urls:
-        raise HTTPException(status_code=400, detail="urls must not be empty")
-
-    session_id = uuid.uuid4().hex
-    files = []
-    for u in body.urls:
-        files.append({"file_id": uuid.uuid4().hex[:8], "source": "url", "url": u})
-
-    session = {
-        "session_id": session_id,
-        "urls": body.urls,
-        "tone": body.tone,
-        "product_link": body.product_link,
-        "features_csv": body.features_csv,
-        "files": files,
-    }
-    r.set(key_session(session_id), json.dumps(session))
-    return {"ok": True, "session_id": session_id, "files": files}
-
-@app.post("/analyze")
-def analyze(body: AnalyzeIn):
-    # Enqueue the named function so RQ can import it: "app.analyze_core_from_session"
-    job = q.enqueue(analyze_core_from_session, body.session_id, None)
+@app.post("/enqueue_nop")
+def enqueue_nop():
+    job = q.enqueue(nop_task)
     return {"ok": True, "job_id": job.get_id()}
-
-@app.post("/manifest")
-def save_manifest(body: ManifestIn):
-    # Allow the client to send the manifest now or build one from defaults later.
-    manifest = body.manifest or {}
-    r.set(key_manifest(body.session_id), json.dumps({
-        "filename": body.filename,
-        "fps": body.fps,
-        "scale": body.scale,
-        "manifest": manifest
-    }))
-    return {"ok": True, "session_id": body.session_id, "manifest": manifest}
-
-@app.post("/stitch")
-def stitch(body: StitchIn):
-    # Enqueue the named function so RQ can import it: "app.stitch_core"
-    job = q.enqueue(stitch_core, body.session_id, body.filename, body.manifest, body.fps, body.scale)
-    return {"ok": True, "job_id": job.get_id(), "session_id": body.session_id}
 
 @app.get("/jobs/{job_id}")
 def get_job(job_id: str):
     try:
-        job = Job.fetch(job_id, connection=r)
+        job = Job.fetch(job_id, connection=redis_conn)
     except Exception:
+        # Unknown job id (not in this Redis / already cleaned)
         raise HTTPException(status_code=404, detail="unknown_job_id")
 
-    payload: Dict[str, Any] = {"job_id": job_id, "status": job.get_status()}
+    status = job.get_status()
+    result = None
+    error = None
 
-    if job.is_failed:
-        payload["error"] = str(job._exc_info) if job._exc_info else "failed"
-    elif job.is_finished:
-        payload["result"] = job.result
+    if status == "finished":
+        result = job.result
+    elif status == "failed":
+        # exc_info is bytes; make it string safely
+        error = job.exc_info.decode("utf-8", errors="ignore") if isinstance(job.exc_info, (bytes, bytearray)) else str(job.exc_info)
 
-    return payload
-
-@app.get("/debug/session/{session_id}")
-def debug_session(session_id: str):
-    data = {
-        "session": r.get(key_session(session_id)),
-        "analysis": r.get(key_analysis(session_id)),
-        "manifest": r.get(key_manifest(session_id)),
+    return {
+        "job_id": job.id,
+        "status": status,
+        "result": result,
+        "error": error,
+        "enqueued_at": str(job.enqueued_at) if job.enqueued_at else None,
+        "ended_at": str(job.ended_at) if job.ended_at else None,
     }
-    # Return parsed JSON where possible
-    out = {}
-    for k, v in data.items():
-        out[k] = json.loads(v) if v else None
-    return out
 
 @app.get("/admin/health")
 def admin_health():
-    regs = {
-        "queued": len(q.jobs),
-        "started": len(StartedJobRegistry(queue=q)),
-        "scheduled": len(ScheduledJobRegistry(queue=q)),
-        "deferred": 0,  # not used in this minimal setup
-        "failed": len(FailedJobRegistry(queue=q)),
-        "finished": len(FinishedJobRegistry(queue=q)),
+    registries = {
+        "queued": q.count,
+        "started": StartedJobRegistry(queue=q).count,
+        "scheduled": ScheduledJobRegistry(queue=q).count,
+        "deferred": DeferredJobRegistry(queue=q).count,
+        "failed": FailedJobRegistry(queue=q).count,
+        "finished": FinishedJobRegistry(queue=q).count,
     }
-    return {"ok": True, "registries": regs}
+    return {"ok": True, "registries": registries}
 
-# ---- Smoke test endpoint to verify queue/worker wiring -----------------------
-@app.post("/enqueue_nop")
-def enqueue_nop():
-    job = q.enqueue(nop)  # IMPORTANT: named function, not a lambda
-    return {"ok": True, "job_id": job.get_id()}
+# -------- Optional placeholders so your old Postman tabs don't 500 --------
+@app.post("/process_urls")
+def process_urls(body: ProcessUrlsIn):
+    # Just echo + create a fake session id so you can continue your flow
+    session_id = uuid.uuid4().hex
+    return {"ok": True, "session_id": session_id, "files": [{"file_id": "demo", "source": "url"}]}
 
-# Root for friendliness
-@app.get("/")
-def root():
-    return {"ok": True, "service": "editdna-web", "queue": q.name}
+@app.post("/analyze_sync")
+def analyze_sync(session_id: str):
+    # Run the analyze job synchronously for now
+    result = analyze_core_from_session(session_id)
+    return {"ok": True, "result": result}
+
+# ------------------------------
+# (No if __name__ == "__main__":) — Render runs via uvicorn startCommand
+# ------------------------------
