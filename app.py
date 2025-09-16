@@ -1,6 +1,6 @@
 # app.py — EditDNA.ai MVP
-# v1.6.1  (speech-adaptive manifest + stitch + retries)
-# Full file. Copy/paste to replace your current app.py.
+# v1.6.2  (speech-adaptive + retries; TalkingHead preset with targets)
+# Full file. Replace your current app.py with this.
 
 import os
 import json
@@ -22,7 +22,7 @@ from rq.job import Job
 from rq import Retry
 
 # ------------------------------------------------------------------------------
-# ENV & global clients
+# ENV & clients
 # ------------------------------------------------------------------------------
 
 REDIS_URL        = os.getenv("REDIS_URL", "")
@@ -38,7 +38,6 @@ if not REDIS_URL:
 if not AWS_ACCESS_KEY or not AWS_SECRET_KEY or not S3_BUCKET:
     print("[WARN] AWS/S3 env vars are not fully set. Uploads may fail.")
 
-# Redis + RQ
 r_conn = redis.from_url(REDIS_URL, decode_responses=False)
 q = Queue("default", connection=r_conn)
 
@@ -53,7 +52,7 @@ TMP_ROOT = pathlib.Path("/tmp/s2c_sessions")
 TMP_ROOT.mkdir(parents=True, exist_ok=True)
 
 # ------------------------------------------------------------------------------
-# Speech-adaptive cut config
+# Speech-adaptive config (env tunable)
 # ------------------------------------------------------------------------------
 
 SILENCE_DB      = float(os.getenv("SILENCE_DB", "-35"))
@@ -64,15 +63,16 @@ UTT_JOIN_GAP_D  = float(os.getenv("UTT_JOIN_GAP_D", "0.25"))
 UTT_PAD_D       = float(os.getenv("UTT_PAD_D", "0.06"))
 
 # ------------------------------------------------------------------------------
-# Presets
+# Presets (UPDATED: TalkingHead has real targets)
 # ------------------------------------------------------------------------------
 
 DEFAULT_PRESETS = {
+    # ≈27s total; adaptive (never cuts mid-word)
     "TalkingHead_ShockHook": [
-        {"name": "Hook",         "target": 0,   "styles": ["Talking Head", "Shock Hook"]},
-        {"name": "Demo Step 1",  "target": 0,   "styles": ["Talking Head"]},
-        {"name": "Demo Step 2",  "target": 0,   "styles": ["Talking Head"]},
-        {"name": "CTA",          "target": 0,   "styles": ["Talking Head"]},
+        {"name": "Hook",         "target": 6.0, "styles": ["Talking Head", "Shock Hook"]},
+        {"name": "Demo Step 1",  "target": 8.0, "styles": ["Talking Head"]},
+        {"name": "Demo Step 2",  "target": 8.0, "styles": ["Talking Head"]},
+        {"name": "CTA",          "target": 5.0, "styles": ["Talking Head"]},
     ],
     "ASMR_Product": [
         {"name": "Hook-Foley",   "target": 3.5, "styles": ["ASMR"], "asmr": True},
@@ -93,7 +93,7 @@ def _load_presets() -> Dict[str, Any]:
     return DEFAULT_PRESETS
 
 # ------------------------------------------------------------------------------
-# Helpers
+# Redis helpers
 # ------------------------------------------------------------------------------
 
 def _jset(key: str, obj: Any, ex: Optional[int] = None):
@@ -115,7 +115,7 @@ def _jobs_key(job_id: str): return f"job:{job_id}"
 def _safe_name(name: str): return "".join(c for c in name if c.isalnum() or c in ("-", "_", ".", " ")).strip().replace(" ", "_")
 
 # ------------------------------------------------------------------------------
-# IO
+# IO / ffmpeg helpers
 # ------------------------------------------------------------------------------
 
 def _download_to(tmp_dir: pathlib.Path, url: str, out_name: str) -> pathlib.Path:
@@ -136,6 +136,7 @@ def _probe_duration(path: pathlib.Path) -> float:
         return 0.0
 
 def _detect_utterances(path: pathlib.Path) -> List[Dict[str,float]]:
+    # Parse ffmpeg silencedetect logs to get non-silence (speech) ranges
     cmd = ["ffmpeg", "-i", str(path), "-af",
            f"silencedetect=noise={SILENCE_DB}dB:d={SILENCE_MIN_D}",
            "-f", "null", "-"]
@@ -156,6 +157,7 @@ def _detect_utterances(path: pathlib.Path) -> List[Dict[str,float]]:
     dur = _probe_duration(path)
     if dur <= 0:
         return []
+    # Build non-silence ranges
     ranges, last_sil_end = [], 0.0
     events = sorted([(t,"start") for t in sil_starts]+[(t,"end") for t in sil_ends], key=lambda x:x[0])
     for t, kind in events:
@@ -164,6 +166,7 @@ def _detect_utterances(path: pathlib.Path) -> List[Dict[str,float]]:
         else:
             last_sil_end=t
     if last_sil_end<dur: ranges.append((last_sil_end,dur))
+    # Merge/clip/join; pad edges a little
     merged=[]
     for s,e in ranges:
         s=max(0.0,s-UTT_PAD_D); e=min(dur,e+UTT_PAD_D)
@@ -206,6 +209,9 @@ def _upload_final_to_s3(session_id: str, filename: str, local_path: pathlib.Path
 
 class ProcessUrlsIn(BaseModel):
     urls: List[str]
+    tone: Optional[str] = None
+    product_link: Optional[str] = None
+    features_csv: Optional[str] = None
 
 class AutoManifestIn(BaseModel):
     session_id: str
@@ -217,7 +223,7 @@ class AutoManifestIn(BaseModel):
 
 class AnalyzeIn(BaseModel):
     session_id: str
-    script_text: Optional[str] = None
+    script_text: Optional[str] = None  # future: compare transcription to this
 
 class ChooseBestIn(BaseModel):
     session_id: str
@@ -234,16 +240,16 @@ class BuildManifestIn(BaseModel):
     scale: int = 720
     segments: Optional[List[Dict[str, Any]]] = None
 
+class StitchIn(BaseModel):
+    session_id: str
+    filename: str = "final.mp4"
+
 class StitchAsyncIn(BaseModel):
     session_id: str
     filename: str = "final.mp4"
     fps: int = 30
     scale: int = 720
     manifest: Dict[str, Any]
-
-class StitchIn(BaseModel):
-    session_id: str
-    filename: str = "final.mp4"
 
 # ------------------------------------------------------------------------------
 # Core jobs
@@ -288,13 +294,17 @@ def analyze_core_from_session(session_id:str, script_text:Optional[str]=None)->D
     return {"ok":True,"analyzed":len(results)}
 
 # ------------------------------------------------------------------------------
-# Manifest builder (speech-adaptive)
+# Manifest builders
 # ------------------------------------------------------------------------------
 
 def _load_analysis_for_choose(session_id:str)->Dict[str,Dict[str,Any]]:
     analysis=_jget(_analysis_key(session_id)) or {}
     results=analysis.get("results") or {}
-    return {fid:{"score":float(info.get("score",0.5)),"duration":float(info.get("duration",2.0)),"utterances":info.get("utterances") or []} for fid,info in results.items()}
+    return {fid:{
+        "score":float(info.get("score",0.5)),
+        "duration":float(info.get("duration",2.0)),
+        "utterances":info.get("utterances") or []
+    } for fid,info in results.items()}
 
 def _choose_lite_segments(session_id:str,preset_key:str)->Tuple[List[Dict[str,Any]],Dict[str,Any]]:
     presets=_load_presets()
@@ -310,6 +320,7 @@ def _choose_lite_segments(session_id:str,preset_key:str)->Tuple[List[Dict[str,An
     selection={}; segs=[]
     for slot in slots:
         target=float(slot.get("target",0.0)); chosen=None
+        # try to gather enough utterances to reach target
         for fid,meta in ranked:
             utts=meta["utterances"]; p=file_ptrs[fid]
             if p>=len(utts): continue
@@ -329,66 +340,116 @@ def _choose_lite_segments(session_id:str,preset_key:str)->Tuple[List[Dict[str,An
                 chosen={"file_id":fid,"start":s,"end":e}
                 break
         if not chosen:
+            # fallback: take start of best file
             fid,meta=ranked[0]; dur=float(meta.get("duration",2.0))
             piece=min((max(2.0,target) if target>0 else 2.8),dur)
             chosen={"file_id":fid,"start":0.0,"end":piece}
         segs.append(chosen); selection[slot["name"]]=chosen
     return segs,selection
 
+# --- Legacy simple choose_best (kept for backward compatibility) ---------------
+
+def choose_best_core(session_id: str, target_sec: int, max_segments_per_file: int, fps: int, scale: int) -> Dict[str, Any]:
+    files = _jget(_session_key(session_id)) or {}
+    if not files:
+        raise RuntimeError("session not found")
+    analysis = _jget(_analysis_key(session_id)) or {}
+    scored = []
+    for fid, url in files.items():
+        info = (analysis.get("results") or {}).get(fid) or {}
+        score = float(info.get("score", 0.5))
+        dur   = float(info.get("duration", 2.0))
+        scored.append((fid, score, dur))
+    scored.sort(key=lambda t: t[1], reverse=True)
+    remaining = float(target_sec)
+    segments = []
+    for fid, _score, dur in scored:
+        if remaining <= 0:
+            break
+        count = max_segments_per_file
+        while count > 0 and remaining > 0:
+            piece = min(2.4, remaining, max(0.4, dur))
+            segments.append({"file_id": fid, "start": 0.0, "end": float(min(piece, dur))})
+            remaining -= float(piece)
+            count -= 1
+    manifest = {"segments": segments, "fps": fps, "scale": scale}
+    _jset(_manifest_key(session_id), manifest, ex=60*60*24)
+    return {"ok": True, "manifest": manifest}
+
 # ------------------------------------------------------------------------------
 # FastAPI endpoints
 # ------------------------------------------------------------------------------
 
-app=FastAPI()
+app = FastAPI()
 
 @app.get("/health")
 def health():
-    return {"ok":True,"service":"editdna-worker","version":"1.6.1-retries","redis":True}
+    return {"ok": True, "service": "editdna-worker", "version": "1.6.2", "redis": True}
+
+# Session: store URLs -----------------------------------------------------------
 
 @app.post("/process_urls")
-def process_urls(inp:ProcessUrlsIn):
-    if not inp.urls: raise HTTPException(400,"urls required")
-    session_id=uuid.uuid4().hex
-    files_map={uuid.uuid4().hex[:8]:u.strip() for u in inp.urls}
-    _jset(_session_key(session_id),files_map,ex=86400)
-    return {"ok":True,"session_id":session_id,"files":[{"file_id":fid,"source":"url"} for fid in files_map.keys()]}
+def process_urls(inp: ProcessUrlsIn):
+    if not inp.urls:
+        raise HTTPException(400, "urls required")
+    session_id = uuid.uuid4().hex
+    files_map = {uuid.uuid4().hex[:8]: url.strip() for url in inp.urls}
+    _jset(_session_key(session_id), files_map, ex=60*60*24)
+    return {
+        "ok": True,
+        "session_id": session_id,
+        "files": [{"file_id": fid, "source": "url"} for fid in files_map.keys()]
+    }
+
+# Legacy Auto manifest (equal splitter) ----------------------------------------
 
 @app.post("/automanifest")
-def automanifest(inp:AutoManifestIn):
-    files=_jget(_session_key(inp.session_id)) or {}
-    if not files: raise HTTPException(404,"session not found")
-    per=max(0.4,float(inp.max_total_sec)/max(1,len(files)))
-    segments=[]
+def automanifest(inp: AutoManifestIn):
+    files = _jget(_session_key(inp.session_id)) or {}
+    if not files:
+        raise HTTPException(404, "session not found")
+    per = max(0.4, float(inp.max_total_sec) / max(1, len(files)))
+    segments = []
     for fid in list(files.keys()):
         for _ in range(inp.max_segments_per_file):
-            if len(segments)*per>=inp.max_total_sec: break
-            segments.append({"file_id":fid,"start":0.0,"end":float(min(2.4,per))})
-    manifest={"segments":segments,"fps":inp.fps,"scale":inp.scale}
-    _jset(_manifest_key(inp.session_id),manifest,ex=86400)
-    return {"ok":True,"session_id":inp.session_id,"filename":inp.filename,"manifest":manifest}
+            if len(segments) * per >= inp.max_total_sec:
+                break
+            segments.append({"file_id": fid, "start": 0.0, "end": float(min(2.4, per))})
+    manifest = {"segments": segments, "fps": inp.fps, "scale": inp.scale}
+    _jset(_manifest_key(inp.session_id), manifest, ex=60*60*24)
+    return {"ok": True, "session_id": inp.session_id, "filename": inp.filename, "manifest": manifest}
+
+# Analyze (build utterances) ----------------------------------------------------
 
 @app.post("/analyze")
-def analyze(inp:AnalyzeIn):
-    job=q.enqueue(
-        analyze_core_from_session, inp.session_id, inp.script_text,
+def analyze(inp: AnalyzeIn):
+    job: Job = q.enqueue(
+        analyze_core_from_session,
+        inp.session_id,
+        inp.script_text,
         job_timeout=60*30,
-        retry=Retry(max=3, interval=[30, 90, 180])
+        retry=Retry(max=3, interval=[30, 90, 180]),
     )
-    _jset(_jobs_key(job.id),{"type":"analyze","session_id":inp.session_id,"created_at":int(time.time())},ex=43200)
-    return {"ok":True,"job_id":job.id}
+    _jset(_jobs_key(job.id), {"type": "analyze", "session_id": inp.session_id, "created_at": int(time.time())}, ex=60*60*12)
+    return {"ok": True, "job_id": job.id}
+
+# Legacy choose_best ------------------------------------------------------------
 
 @app.post("/choose_best")
-def choose_best(inp:ChooseBestIn):
-    # legacy helper (kept)
-    from math import inf
-    def _choose_best_job():
-        return choose_best_core(inp.session_id, inp.target_sec, inp.max_segments_per_file, inp.fps, inp.scale)
-    job=q.enqueue(_choose_best_job, job_timeout=60*30, retry=Retry(max=3, interval=[30,90,180]))
-    _jset(_jobs_key(job.id),{"type":"choose_best","session_id":inp.session_id,"created_at":int(time.time())},ex=43200)
-    return {"ok":True,"job_id":job.id}
+def choose_best(inp: ChooseBestIn):
+    job: Job = q.enqueue(
+        choose_best_core,
+        inp.session_id, inp.target_sec, inp.max_segments_per_file, inp.fps, inp.scale,
+        job_timeout=60*30,
+        retry=Retry(max=3, interval=[30, 90, 180]),
+    )
+    _jset(_jobs_key(job.id), {"type": "choose_best", "session_id": inp.session_id, "created_at": int(time.time())}, ex=60*60*12)
+    return {"ok": True, "job_id": job.id}
+
+# New speech-adaptive manifest --------------------------------------------------
 
 @app.post("/manifest")
-def manifest(inp:BuildManifestIn):
+def manifest(inp: BuildManifestIn):
     files=_jget(_session_key(inp.session_id)) or {}
     if not files: raise HTTPException(404,"session not found")
     if inp.segments and len(inp.segments)>0:
@@ -401,59 +462,70 @@ def manifest(inp:BuildManifestIn):
     _jset(_manifest_key(inp.session_id),manifest,ex=86400)
     return {"ok":True,"session_id":inp.session_id,"manifest":manifest,"debug":debug}
 
+# Stitch (uses last saved manifest) --------------------------------------------
+
 @app.post("/stitch")
-def stitch(inp:StitchIn):
+def stitch(inp: StitchIn):
     manifest=_jget(_manifest_key(inp.session_id))
     if not manifest: raise HTTPException(400,"No manifest stored for this session. Call /manifest (or /automanifest/choose_best) first.")
     filename=_safe_name(inp.filename or manifest.get("filename") or "final.mp4")
     fps=int(manifest.get("fps",30)); scale=int(manifest.get("scale",720))
-    job=q.enqueue(
+    job: Job = q.enqueue(
         stitch_core, inp.session_id, filename, manifest, fps, scale,
         job_timeout=60*60,
-        retry=Retry(max=3, interval=[30, 90, 180])
+        retry=Retry(max=3, interval=[30, 90, 180]),
     )
     _jset(_jobs_key(job.id),{"type":"stitch","session_id":inp.session_id,"filename":filename,"manifest":manifest,"created_at":int(time.time())},ex=43200)
     return {"ok":True,"job_id":job.id,"session_id":inp.session_id}
 
+# Stitch with provided manifest (async) -----------------------------------------
+
 @app.post("/stitch_async")
-def stitch_async(inp:StitchAsyncIn):
+def stitch_async(inp: StitchAsyncIn):
     manifest=inp.manifest or _jget(_manifest_key(inp.session_id))
     if not manifest: raise HTTPException(400,"manifest required (or call /manifest /automanifest /choose_best first)")
-    job=q.enqueue(
+    job: Job = q.enqueue(
         stitch_core, inp.session_id, _safe_name(inp.filename), manifest,
         int(manifest.get("fps", inp.fps)), int(manifest.get("scale", inp.scale)),
         job_timeout=60*60,
-        retry=Retry(max=3, interval=[30, 90, 180])
+        retry=Retry(max=3, interval=[30, 90, 180]),
     )
     _jset(_jobs_key(job.id),{"type":"stitch","session_id":inp.session_id,"filename":inp.filename,"manifest":manifest,"created_at":int(time.time())},ex=43200)
     return {"ok":True,"job_id":job.id}
 
+# Jobs --------------------------------------------------------------------------
+
 @app.get("/jobs/{job_id}")
 def job_status(job_id: str):
     try:
-        job=Job.fetch(job_id, connection=r_conn)
+        job = Job.fetch(job_id, connection=r_conn)
     except Exception:
-        meta=_jget(_jobs_key(job_id)) or {}
-        return {"job_id":job_id,"status":"queued", **({"meta":meta} if meta else {})}
-    status=job.get_status()
-    resp={"job_id":job_id,"status":status}
-    if status=="finished":
-        resp["result"]=job.result
-    elif status=="failed":
-        resp["result"]=None
-        tb=getattr(job,"exc_info",None)
-        if tb: resp["error"]=tb.splitlines()[-1] if isinstance(tb,str) else "failed"
+        meta = _jget(_jobs_key(job_id)) or {}
+        return {"job_id": job_id, "status": "queued", **({"meta": meta} if meta else {})}
+    status = job.get_status()
+    resp: Dict[str, Any] = {"job_id": job_id, "status": status}
+    if status == "finished":
+        resp["result"] = job.result
+    elif status == "failed":
+        resp["result"] = None
+        tb = getattr(job, "exc_info", None)
+        if tb:
+            resp["error"] = tb.splitlines()[-1] if isinstance(tb, str) else "failed"
     return resp
+
+# Download (if file still on disk) ---------------------------------------------
 
 @app.get("/download/{session_id}/{filename}")
 def download_local(session_id: str, filename: str):
-    path=(TMP_ROOT/session_id/_safe_name(filename)).resolve()
-    if not path.exists(): raise HTTPException(404,"file not found")
+    path = (TMP_ROOT / session_id / _safe_name(filename)).resolve()
+    if not path.exists():
+        raise HTTPException(404, "file not found")
     def _iter():
-        with open(path,"rb") as f:
+        with open(path, "rb") as f:
             while True:
-                chunk=f.read(1024*1024)
-                if not chunk: break
+                chunk = f.read(1024 * 1024)
+                if not chunk:
+                    break
                 yield chunk
     return StreamingResponse(_iter(), media_type="video/mp4")
 
