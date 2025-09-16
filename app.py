@@ -371,3 +371,16 @@ def download_local(session_id: str, filename: str):
 @app.get("/")
 def root():
     return PlainTextResponse("Not Found", status_code=404)
+from fastapi import FastAPI
+from rq import Queue
+import os, redis
+from worker import conn
+
+app = FastAPI()
+
+q = Queue("default", connection=conn)
+
+@app.post("/enqueue_nop")
+def enqueue_nop():
+    job = q.enqueue(lambda: "NOP")
+    return {"ok": True, "job_id": job.get_id()}
