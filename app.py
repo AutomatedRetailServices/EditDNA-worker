@@ -19,15 +19,15 @@ q = Queue("default", connection=conn)
 
 # ---- Match the functions that exist in worker.py ----
 TASK_NOP = "worker.task_nop"
-TASK_CHECK_URLS = "worker.process_urls"     # was check_urls
-TASK_ANALYZE = "worker.analyze"             # was analyze_session
+TASK_CHECK_URLS = "worker.check_urls"          # <-- matches worker.py
+TASK_ANALYZE_SESSION = "worker.analyze_session"  # <-- matches worker.py
 TASK_DIAG_OPENAI = "worker.diag_openai"
-# (No net_probe task in worker.py, so we drop /diag/net)
+TASK_NET_PROBE = "worker.net_probe"
 
 # -------------------------
 # FastAPI
 # -------------------------
-app = FastAPI(title="editdna API", version="1.2.0")
+app = FastAPI(title="editdna API", version="1.2.1")
 
 @app.get("/")
 def root():
@@ -60,8 +60,9 @@ def process_urls(payload: dict = Body(...)):
         raise HTTPException(status_code=400, detail="Provide 'urls': [ ... ]")
 
     session_id = payload.get("session_id") or f"sess-{int(time.time())}"
-    # enqueue with the signature process_urls(urls, session_id=None)
-    job = q.enqueue(TASK_CHECK_URLS, urls, session_id, job_timeout=600)
+    payload = {**payload, "session_id": session_id}  # pass ONE dict to match worker.check_urls(payload)
+
+    job = q.enqueue(TASK_CHECK_URLS, payload, job_timeout=600)
     return {"job_id": job.get_id(), "session_id": session_id}
 
 # -------------------------
@@ -76,17 +77,12 @@ def process_urls(payload: dict = Body(...)):
 # -------------------------
 @app.post("/analyze")
 def analyze(payload: dict = Body(...)):
-    session_id = payload.get("session_id")
-    if not session_id:
+    if not payload.get("session_id"):
         raise HTTPException(status_code=400, detail="Missing 'session_id'")
 
-    tone = payload.get("tone")
-    product_link = payload.get("product_link")
-    features_csv = payload.get("features_csv")
-
-    # matches worker.analyze(session_id, tone, product_link, features_csv)
-    job = q.enqueue(TASK_ANALYZE, session_id, tone, product_link, features_csv, job_timeout=1800)
-    return {"job_id": job.get_id(), "session_id": session_id}
+    # Pass ONE dict to match worker.analyze_session(payload)
+    job = q.enqueue(TASK_ANALYZE_SESSION, payload, job_timeout=1800)
+    return {"job_id": job.get_id(), "session_id": payload["session_id"]}
 
 # -------------------------
 # 3) Diagnostics (OpenAI reachability from worker)
@@ -94,6 +90,11 @@ def analyze(payload: dict = Body(...)):
 @app.post("/diag/openai")
 def diag_openai():
     job = q.enqueue(TASK_DIAG_OPENAI, job_timeout=180)
+    return {"job_id": job.get_id()}
+
+@app.post("/diag/net")
+def diag_net():
+    job = q.enqueue(TASK_NET_PROBE, job_timeout=120)
     return {"job_id": job.get_id()}
 
 # -------------------------
