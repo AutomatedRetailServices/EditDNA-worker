@@ -1,155 +1,218 @@
-# worker.py — RQ task implementations used by app.py
-import os, time, socket, ssl
-from typing import Dict, List, Any
+# worker.py  — RQ task definitions
+import os
+import time
+import socket
+import json
+from typing import Any, Dict, List
 import requests
 
-# RQ will import functions by dotted path, e.g. "worker.analyze_session"
-# Do NOT rename these symbols; app.py enqueues them by these names.
+# -------- OpenAI (v1.x) --------
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
+try:
+    from openai import OpenAI
+    _openai_import_ok = True
+except Exception:
+    OpenAI = None  # type: ignore
+    _openai_import_ok = False
 
-# ---------- Tiny NOP ----------
+_client = None
+if _openai_import_ok and OPENAI_API_KEY:
+    try:
+        _client = OpenAI(api_key=OPENAI_API_KEY)
+        _openai_client_ok = True
+    except Exception:
+        _openai_client_ok = False
+else:
+    _openai_client_ok = False
+
+
+# =========================================================
+# 0) Tiny test job
+# =========================================================
 def task_nop() -> Dict[str, Any]:
     return {"echo": {"hello": "world"}}
 
-# ---------- S3 URL checker ----------
-def _head_ok(url: str, timeout: float = 15.0) -> Dict[str, Any]:
+
+# =========================================================
+# 1) Check S3/public URLs (HEAD request)
+# payload: { "urls": [...], "session_id": "sess-..." }
+# =========================================================
+def _head(url: str, timeout: float = 20.0) -> Dict[str, Any]:
     try:
         r = requests.head(url, allow_redirects=True, timeout=timeout)
-        ok = (200 <= r.status_code < 300)
+        size = int(r.headers.get("Content-Length", "0") or 0)
         return {
             "url": url,
-            "status": "OK" if ok else "ERR",
+            "status": "OK",
             "http": r.status_code,
-            "size": int(r.headers.get("Content-Length", "0") or 0),
+            "size": size,
             "method": "HEAD",
         }
     except Exception as e:
-        return {"url": url, "status": "ERR", "http": 0, "size": 0, "error": str(e), "method": "HEAD"}
+        return {
+            "url": url,
+            "status": "ERROR",
+            "http": 0,
+            "size": 0,
+            "method": "HEAD",
+            "error": str(e),
+        }
+
 
 def check_urls(payload: Dict[str, Any]) -> Dict[str, Any]:
-    urls: List[str] = payload.get("urls", [])
-    session_id = payload.get("session_id", f"sess-{int(time.time())}")
-    results = [_head_ok(u) for u in urls]
-    return {"session_id": session_id, "checked": results}
+    urls = payload.get("urls") or []
+    sess = payload.get("session_id") or f"sess-{int(time.time())}"
+    checked = [_head(u) for u in urls]
+    return {"session_id": sess, "checked": checked}
 
-# ---------- OpenAI (real) ----------
-# We will use chat.completions (stable) and keep a clean fallback.
-def _openai_client():
-    from openai import OpenAI  # import inside so diag can report import errors
-    key = os.getenv("OPENAI_API_KEY")
-    if not key:
-        raise RuntimeError("Missing OPENAI_API_KEY")
-    return OpenAI(api_key=key)
 
-def _features_list(csv: str) -> List[str]:
-    parts = [p.strip() for p in (csv or "").split(",") if p.strip()]
-    return parts
+# =========================================================
+# 2) Analyze session → make promo script
+# payload: {
+#   "session_id": "sess-...",
+#   "tone": "casual",
+#   "product_link": "https://...",
+#   "features_csv": "durable, waterproof, lightweight"
+# }
+# Returns { session_id, engine, openai_diag?, script, product_link, features }
+# =========================================================
+_OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
+
+
+def _make_prompt(session_id: str, tone: str, product_link: str, features: List[str]) -> str:
+    feat_str = ", ".join(features) if features else "key features"
+    return (
+        f"You are a marketing writer. Create a short {tone or 'neutral'} promo script "
+        f"for product {product_link or '(no link)'} based on these features: {feat_str}. "
+        f"Keep it 3–5 sentences, engaging, and suitable for voiceover."
+    )
+
+
+def _parse_features(payload: Dict[str, Any]) -> List[str]:
+    feats: List[str] = []
+    csv = (payload.get("features_csv") or "").strip()
+    if csv:
+        feats = [p.strip() for p in csv.split(",") if p.strip()]
+    # also accept array form
+    if not feats and isinstance(payload.get("features"), list):
+        feats = [str(x).strip() for x in payload["features"] if str(x).strip()]
+    return feats
+
 
 def analyze_session(payload: Dict[str, Any]) -> Dict[str, Any]:
-    """
-    Expected payload:
-      session_id, tone, product_link, features_csv
-    Returns a dict consumed by /jobs in app.py.
-    """
-    session_id = payload["session_id"]
-    tone = payload.get("tone", "casual")
-    product_link = payload.get("product_link", "")
-    features_csv = payload.get("features_csv", "")
-    features = _features_list(features_csv)
+    sess = payload.get("session_id") or f"sess-{int(time.time())}"
+    tone = str(payload.get("tone") or "neutral")
+    product_link = str(payload.get("product_link") or "")
+    features = _parse_features(payload)
 
-    # Try real OpenAI first; on any exception, return a DEV STUB so the API never 500s.
+    # default stub (in case OpenAI is missing/fails)
+    stub = {
+        "session_id": sess,
+        "engine": "stub",
+        "script": f"[DEV STUB] {tone} promo highlighting {', '.join(features) or 'features'}. "
+                  f"Product: {product_link or '(no link)'}.",
+        "product_link": product_link or None,
+        "features": features,
+    }
+
+    # if OpenAI not configured, return stub
+    if not (_openai_import_ok and _openai_client_ok and _client and OPENAI_API_KEY):
+        return stub
+
+    # try OpenAI
+    diag = {"has_key": bool(OPENAI_API_KEY), "import_ok": _openai_import_ok,
+            "client_ok": _openai_client_ok, "attempts": [], "last_error": None}
+
+    prompt = _make_prompt(sess, tone, product_link, features)
     try:
-        client = _openai_client()
-        prompt = (
-            f"Write a {tone} 25–35 second TikTok promo script. "
-            f"Highlight these features: {', '.join(features) or 'none provided'}. "
-            f"Product URL: {product_link or 'n/a'}. "
-            f"Format it as short lines suitable for voiceover, no scene directions."
-        )
-        resp = client.chat.completions.create(
-            model="gpt-4o-mini",
+        diag["attempts"].append({"api": "chat.completions", "ok": None, "error": None})
+        resp = _client.chat.completions.create(
+            model=_OPENAI_MODEL,
             messages=[
-                {"role": "system", "content": "You are a concise promo scriptwriter."},
+                {"role": "system", "content": "You write concise, friendly promo scripts."},
                 {"role": "user", "content": prompt},
             ],
             temperature=0.7,
+            max_tokens=220,
         )
-        script = resp.choices[0].message.content
+        text = (resp.choices[0].message.content or "").strip()
+        diag["attempts"][-1]["ok"] = True
         return {
-            "session_id": session_id,
-            "engine": "openai.chat.completions",
-            "script": script,
-            "product_link": product_link,
+            "session_id": sess,
+            "engine": "openai",
+            "openai_diag": diag,
+            "script": text,
+            "product_link": product_link or None,
             "features": features,
         }
     except Exception as e:
-        # Soft fallback so your flow still completes
-        return {
-            "session_id": session_id,
-            "engine": "stub",
-            "openai_diag": {"last_error": str(e)},
-            "script": f"[DEV STUB] {tone} promo highlighting {', '.join(features) or 'features'}. "
-                      f"Product: {product_link or 'n/a'}.",
-            "product_link": product_link,
-            "features": features,
-        }
+        diag["attempts"][-1]["ok"] = False
+        diag["attempts"][-1]["error"] = str(e)
+        diag["last_error"] = str(e)
+        # graceful fallback to stub
+        out = dict(stub)
+        out["engine"] = "stub"
+        out["openai_diag"] = diag
+        return out
 
-# ---------- Diagnostics ----------
+
+# =========================================================
+# 3) Diagnostics
+# =========================================================
 def diag_openai() -> Dict[str, Any]:
     """
-    Verifies: env var present, SDK import, client creation, and a tiny call.
-    Never raises; always returns a dict so /jobs shows a clean result.
+    Quick connectivity check to OpenAI using the v1.x SDK.
+    Returns same shape you saw in Postman.
     """
-    out = {
-        "has_key": bool(os.getenv("OPENAI_API_KEY")),
-        "import_ok": False,
-        "client_ok": False,
+    result = {
+        "has_key": bool(OPENAI_API_KEY),
+        "import_ok": _openai_import_ok,
+        "client_ok": _openai_client_ok,
         "attempts": [],
         "last_error": None,
         "reply": None,
     }
-    try:
-        from openai import OpenAI
-        out["import_ok"] = True
-        try:
-            client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
-            out["client_ok"] = True
-            # Minimal call (no fancy APIs) to avoid SDK surface mismatches
-            try:
-                r = client.chat.completions.create(
-                    model="gpt-4o-mini",
-                    messages=[{"role": "user", "content": "Say OK"}],
-                    temperature=0
-                )
-                out["attempts"].append({"api": "chat.completions", "ok": True})
-                out["reply"] = r.choices[0].message.content
-                out["last_error"] = None
-            except Exception as e:
-                out["attempts"].append({"api": "chat.completions", "ok": False, "error": str(e)})
-                out["last_error"] = str(e)
-        except Exception as e:
-            out["last_error"] = f"client: {e}"
-    except Exception as e:
-        out["last_error"] = f"import: {e}"
-    return out
 
-def net_probe() -> Dict[str, Any]:
-    """
-    Quick outbound checks for Render networking/TLS.
-    """
-    host = "api.openai.com"
-    result = {"dns": "unknown", "tls": "unknown"}
-    try:
-        socket.gethostbyname(host)
-        result["dns"] = "ok"
-    except Exception as e:
-        result["dns"] = f"fail: {e}"
+    if not (_openai_import_ok and _openai_client_ok and _client and OPENAI_API_KEY):
+        result["last_error"] = "SDK/client not initialized."
         return result
 
     try:
-        ctx = ssl.create_default_context()
-        with socket.create_connection((host, 443), timeout=8) as sock:
-            with ctx.wrap_socket(sock, server_hostname=host) as ssock:
-                result["tls"] = f"ok: TLSv{ssock.version()}"
+        result["attempts"].append({"api": "chat.completions", "ok": None, "error": None})
+        r = _client.chat.completions.create(
+            model=_OPENAI_MODEL,
+            messages=[
+                {"role": "system", "content": "You are a health-check bot."},
+                {"role": "user", "content": "Reply with the single word: ok"},
+            ],
+            max_tokens=3,
+        )
+        msg = (r.choices[0].message.content or "").strip()
+        result["reply"] = msg
+        result["attempts"][-1]["ok"] = True
+        return result
     except Exception as e:
-        result["tls"] = f"fail: {e}"
-    return result
+        result["attempts"][-1]["ok"] = False
+        result["attempts"][-1]["error"] = str(e)
+        result["last_error"] = str(e)
+        return result
+
+
+def net_probe() -> Dict[str, Any]:
+    """Very small network sanity probe."""
+    out = {"dns": None, "tls": None}
+    # DNS
+    try:
+        socket.gethostbyname("api.openai.com")
+        out["dns"] = "ok"
+    except Exception as e:
+        out["dns"] = f"fail: {e}"
+
+    # TLS/HTTP (no auth endpoint)
+    try:
+        r = requests.get("https://api.openai.com/v1/models", timeout=10)
+        out["tls"] = f"ok: TLSv{r.raw.version}" if hasattr(r.raw, "version") else "ok"
+    except Exception as e:
+        out["tls"] = f"fail: {e}"
+
+    return out
