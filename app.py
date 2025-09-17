@@ -1,32 +1,31 @@
-# app.py  — FastAPI + RQ 1.16 compatible
-import os, time, json
+# app.py — FastAPI + RQ 1.16, returns session_id right away
+import os, time
 import redis
 from fastapi import FastAPI, Body, HTTPException
 from fastapi.responses import JSONResponse
 from rq import Queue
-from rq.job import Job   # <-- correct place to import Job in RQ 1.16
+from rq.job import Job
 
-# ----------------------------------------------------
-# Redis / RQ setup
-# ----------------------------------------------------
+# -------------------------
+# Redis / RQ
+# -------------------------
 REDIS_URL = os.getenv("REDIS_URL", "")
 if not REDIS_URL:
-    raise RuntimeError("Missing REDIS_URL environment variable")
+    raise RuntimeError("Missing REDIS_URL")
 
-# IMPORTANT: keep decode_responses=False for RQ internals
+# IMPORTANT: keep decode_responses=False
 conn = redis.from_url(REDIS_URL, decode_responses=False)
 q = Queue("default", connection=conn)
 
-# Import your worker functions by module path strings
-# so RQ can resolve them in the worker process.
+# RQ resolves these by import string in the worker process
 TASK_NOP = "worker.task_nop"
 TASK_CHECK_URLS = "worker.check_urls"
 TASK_ANALYZE_SESSION = "worker.analyze_session"
 
-# ----------------------------------------------------
-# FastAPI app
-# ----------------------------------------------------
-app = FastAPI(title="editdna API", version="1.0.0")
+# -------------------------
+# FastAPI
+# -------------------------
+app = FastAPI(title="editdna API", version="1.0.1")
 
 @app.get("/")
 def root():
@@ -40,48 +39,53 @@ def health():
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-# ----------------------------------------------------
-# Simple test job to prove queue+worker works
-# ----------------------------------------------------
+# -------------------------
+# 0) Tiny test job
+# -------------------------
 @app.post("/enqueue_nop")
 def enqueue_nop(payload: dict = Body(default={"echo": {"hello": "world"}})):
-    # payload is optional; worker just returns {"echo":{"hello":"world"}}
     job = q.enqueue(TASK_NOP, job_timeout=300)
     return {"job_id": job.get_id()}
 
-# ----------------------------------------------------
-# Step 1: check your S3 video URLs are reachable
-# Body example:
-# { "session_id": "sess-123", "urls": ["https://.../IMG_4856.mov", "..."] }
-# ----------------------------------------------------
+# -------------------------
+# 1) Check S3 URLs — returns job_id AND session_id now
+# Body:
+# { "session_id": "sess-01", "urls": ["https://.../IMG_4856.mov", "..."] }
+# You can omit session_id; we will generate one.
+# -------------------------
 @app.post("/process_urls")
 def process_urls(payload: dict = Body(...)):
-    if "urls" not in payload or not isinstance(payload["urls"], list) or not payload["urls"]:
+    urls = payload.get("urls")
+    if not urls or not isinstance(urls, list):
         raise HTTPException(status_code=400, detail="Provide 'urls': [ ... ]")
-    # session_id is optional; worker will make one if missing
-    job = q.enqueue(TASK_CHECK_URLS, payload, job_timeout=600)
-    return {"job_id": job.get_id()}
 
-# ----------------------------------------------------
-# Step 2: analyze the session (dummy for now; echoes back)
-# Body example:
+    session_id = payload.get("session_id") or f"sess-{int(time.time())}"
+    # inject the session_id so the worker returns the same
+    payload = {**payload, "session_id": session_id}
+
+    job = q.enqueue(TASK_CHECK_URLS, payload, job_timeout=600)
+    return {"job_id": job.get_id(), "session_id": session_id}
+
+# -------------------------
+# 2) Analyze (dummy now)
+# Body:
 # {
-#   "session_id": "sess-123",
+#   "session_id": "sess-01",
 #   "tone": "friendly",
 #   "product_link": "https://example.com",
 #   "features_csv": "fast, compact, lightweight"
 # }
-# ----------------------------------------------------
+# -------------------------
 @app.post("/analyze")
 def analyze(payload: dict = Body(...)):
     if not payload.get("session_id"):
         raise HTTPException(status_code=400, detail="Missing 'session_id'")
     job = q.enqueue(TASK_ANALYZE_SESSION, payload, job_timeout=1800)
-    return {"job_id": job.get_id()}
+    return {"job_id": job.get_id(), "session_id": payload["session_id"]}
 
-# ----------------------------------------------------
-# Poll job status/result
-# ----------------------------------------------------
+# -------------------------
+# 3) Poll a job
+# -------------------------
 @app.get("/jobs/{job_id}")
 def get_job(job_id: str):
     try:
@@ -99,7 +103,6 @@ def get_job(job_id: str):
     }
 
     if job.is_failed:
-        # include stringified error
         try:
             data["error"] = str(job.exc_info or job.meta.get("error"))
         except Exception:
