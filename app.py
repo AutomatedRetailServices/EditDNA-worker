@@ -1,4 +1,4 @@
-# app.py — FastAPI + RQ (fixed task names)
+# app.py — FastAPI + RQ (diag fix)
 import os, time
 import redis
 from fastapi import FastAPI, Body, HTTPException
@@ -13,15 +13,15 @@ REDIS_URL = os.getenv("REDIS_URL", "")
 if not REDIS_URL:
     raise RuntimeError("Missing REDIS_URL")
 
-# IMPORTANT: keep decode_responses=False
+# keep decode_responses=False (RQ stores pickles/bytes)
 conn = redis.from_url(REDIS_URL, decode_responses=False)
 q = Queue("default", connection=conn)
 
-# RQ import strings (must be module.attr)
+# --------- RQ task import strings (module.func) ----------
 TASK_NOP = "worker.task_nop"
 TASK_CHECK_URLS = "worker.check_urls"
 TASK_ANALYZE_SESSION = "worker.analyze_session"
-TASK_DIAG_OPENAI = "worker.diag_openai"   # <- THIS is the key fix
+TASK_DIAG_OPENAI = "worker.diag_openai"   # <<<<<< KEY FIX
 
 # -------------------------
 # FastAPI
@@ -74,7 +74,7 @@ def analyze(payload: dict = Body(...)):
     return {"job_id": job.get_id(), "session_id": payload["session_id"]}
 
 # -------------------------
-# 2b) OpenAI connectivity diag
+# 2b) OpenAI connectivity diag (ENQUEUES worker.diag_openai)
 # -------------------------
 @app.post("/diag/openai")
 def diag_openai():
