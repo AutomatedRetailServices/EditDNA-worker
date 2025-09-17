@@ -1,10 +1,12 @@
 fastapi==0.115.0
 uvicorn[standard]==0.30.6
-openai==1.43.0
-httpx==0.27.2
-requests==2.32.3
-beautifulsoup4==4.12.3
-python-multipart==0.0.9
-boto3==1.34.162
-redis==5.0.1
+
+# Queue/Redis
+redis==5.0.8
 rq==1.16.2
+
+# HTTP utils
+requests==2.32.3
+
+# AWS (only if you’re touching S3 anywhere)
+boto3==1.35.20
