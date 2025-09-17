@@ -1,4 +1,4 @@
-# app.py — FastAPI + RQ 1.16, returns session_id right away
+# app.py — FastAPI + RQ
 import os, time
 import redis
 from fastapi import FastAPI, Body, HTTPException
@@ -17,10 +17,11 @@ if not REDIS_URL:
 conn = redis.from_url(REDIS_URL, decode_responses=False)
 q = Queue("default", connection=conn)
 
-# RQ resolves these by import string in the worker process
+# RQ import strings
 TASK_NOP = "worker.task_nop"
 TASK_CHECK_URLS = "worker.check_urls"
 TASK_ANALYZE_SESSION = "worker.analyze_session"
+TASK_DIAG_OPENAI = "worker.diag_openai"
 
 # -------------------------
 # FastAPI
@@ -48,7 +49,7 @@ def enqueue_nop(payload: dict = Body(default={"echo": {"hello": "world"}})):
     return {"job_id": job.get_id()}
 
 # -------------------------
-# 1) Check URLs — returns job_id AND session_id
+# 1) Check S3 URLs
 # -------------------------
 @app.post("/process_urls")
 def process_urls(payload: dict = Body(...)):
@@ -57,28 +58,28 @@ def process_urls(payload: dict = Body(...)):
         raise HTTPException(status_code=400, detail="Provide 'urls': [ ... ]")
 
     session_id = payload.get("session_id") or f"sess-{int(time.time())}"
-    safe_payload = {"session_id": session_id, "urls": urls}
+    payload = {**payload, "session_id": session_id}
 
-    job = q.enqueue(TASK_CHECK_URLS, safe_payload, job_timeout=600)
+    job = q.enqueue(TASK_CHECK_URLS, payload, job_timeout=600)
     return {"job_id": job.get_id(), "session_id": session_id}
 
 # -------------------------
-# 2) Analyze (dummy)
+# 2) Analyze (real OpenAI w/ retry; falls back to stub)
 # -------------------------
 @app.post("/analyze")
 def analyze(payload: dict = Body(...)):
     if not payload.get("session_id"):
         raise HTTPException(status_code=400, detail="Missing 'session_id'")
+    job = q.enqueue(TASK_ANALYZE_SESSION, payload, job_timeout=1800)
+    return {"job_id": job.get_id(), "session_id": payload["session_id"]}
 
-    safe_payload = {
-        "session_id": payload["session_id"],
-        "tone": payload.get("tone"),
-        "product_link": payload.get("product_link"),
-        "features_csv": payload.get("features_csv", ""),
-    }
-
-    job = q.enqueue(TASK_ANALYZE_SESSION, safe_payload, job_timeout=1800)
-    return {"job_id": job.get_id(), "session_id": safe_payload["session_id"]}
+# -------------------------
+# 2b) OpenAI connectivity diag (enqueue a probe)
+# -------------------------
+@app.post("/diag/openai")
+def diag_openai():
+    job = q.enqueue(TASK_DIAG_OPENAI, job_timeout=120)
+    return {"job_id": job.get_id()}
 
 # -------------------------
 # 3) Poll a job
