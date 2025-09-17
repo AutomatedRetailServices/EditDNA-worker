@@ -1,110 +1,92 @@
 # app.py
-import os, json, uuid, time
-from fastapi import FastAPI, HTTPException
+import os, json, datetime as dt
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
-import redis as redis_lib
-from rq import Queue
-from rq.job import Job, NoSuchJobError
+import redis
+from rq import Queue, job as rq_job
 
-REDIS_URL = os.getenv("REDIS_URL", "")
-r = redis_lib.from_url(REDIS_URL, decode_responses=True)
-q = Queue("default", connection=r)
+# ---- Redis & RQ (MUST be identical for web & worker services) ----
+REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379")
+r = redis.from_url(REDIS_URL)
+q = Queue("default", connection=r)  # use same queue name "default"
+
+# ---- import the functions by name (callables) from worker.py ----
+from worker import task_nop, check_urls, analyze_session
 
 app = FastAPI()
 
-class ProcessUrlsIn(BaseModel):
-    urls: list[str]
+# ------------ Pydantic payloads ------------
+class ProcessURLsPayload(BaseModel):
     session_id: str | None = None
+    urls: list[str]
+
+class AnalyzePayload(BaseModel):
+    session_id: str
     tone: str | None = None
     product_link: str | None = None
     features_csv: str | None = None
 
-class AnalyzeIn(BaseModel):
-    session_id: str
-
-def nop_task():
-    return {"echo": {"hello": "world"}}
-
-def check_urls_task(payload: dict):
-    out = []
-    for u in payload.get("urls", []):
-        try:
-            import httpx
-            with httpx.Client(follow_redirects=True, timeout=30) as c:
-                r = c.head(u)
-            size = int(r.headers.get("content-length", "0")) if r.status_code == 200 else None
-            out.append({"url": u, "status": "OK" if r.status_code == 200 else "BAD",
-                        "http": r.status_code, "size": size})
-        except Exception as e:
-            out.append({"url": u, "status": "ERROR", "http": None, "size": None, "error": str(e)})
-    return {"checked": out}
-
-def analyze_task(session_id: str):
-    # placeholder – returns when worker runs something for the session
-    return {"echo": {"sess": session_id}}
-
-@app.post("/enqueue_nop")
-def enqueue_nop():
-    job = q.enqueue(nop_task)
-    return {"ok": True, "job_id": job.get_id()}
-
-@app.post("/process_urls")
-def process_urls(body: ProcessUrlsIn):
-    sess = body.session_id or str(uuid.uuid4())
-    job = q.enqueue(check_urls_task, {"urls": body.urls})
-    return {"ok": True, "job_id": job.get_id(), "session_id": sess}
-
-@app.post("/analyze")
-def analyze(body: AnalyzeIn):
-    job = q.enqueue(analyze_task, body.session_id)
-    return {"ok": True, "job_id": job.get_id()}
-
-@app.get("/jobs/{job_id}")
-def get_job(job_id: str):
-    try:
-        job = Job.fetch(job_id, connection=r)
-    except NoSuchJobError:
-        raise HTTPException(status_code=404, detail="unknown_job_id")
-    payload = {
-        "job_id": job_id,
-        "status": job.get_status(refresh=True),
-        "result": job.result,
-        "error": job.meta.get("error") if job.meta else None,
-        "enqueued_at": getattr(job, "enqueued_at", None),
-        "ended_at": getattr(job, "ended_at", None),
+# ------------ Helpers ------------
+def serialize_job(j: rq_job.Job):
+    return {
+        "job_id": j.id,
+        "status": j.get_status(),
+        "result": j.result,
+        "error": j.meta.get("error") if hasattr(j, "meta") else None,
+        "enqueued_at": j.enqueued_at.isoformat() if j.enqueued_at else None,
+        "ended_at": j.ended_at.isoformat() if j.ended_at else None,
     }
-    return JSONResponse(payload)
+
+# ------------ Routes ------------
+@app.get("/")
+def root():
+    return {"ok": True, "service": "editdna-web", "queue": q.name}
 
 @app.get("/admin/health")
 def health():
-    # Basic rq registry counts
+    # show simple registry counts to know worker is connected to same Redis
     from rq.registry import FailedJobRegistry, FinishedJobRegistry, StartedJobRegistry, ScheduledJobRegistry, DeferredJobRegistry
+    def count(reg):
+        try:
+            return len(reg.get_job_ids())
+        except Exception:
+            return -1
     return {
         "ok": True,
         "registries": {
             "queued": q.count,
-            "started": StartedJobRegistry(queue=q).count,
-            "scheduled": ScheduledJobRegistry(queue=q).count,
-            "deferred": DeferredJobRegistry(queue=q).count,
-            "failed": FailedJobRegistry(queue=q).count,
-            "finished": FinishedJobRegistry(queue=q).count,
-        },
+            "started": count(StartedJobRegistry(q)),
+            "scheduled": count(ScheduledJobRegistry(q)),
+            "deferred": count(DeferredJobRegistry(q)),
+            "failed": count(FailedJobRegistry(q)),
+            "finished": count(FinishedJobRegistry(q)),
+        }
     }
 
-@app.get("/admin/debug")
-def debug():
-    # Help confirm both services share exactly the same Redis view
-    info = r.info()
-    key = "debug:echo"
-    token = str(uuid.uuid4())
-    r.set(key, token, ex=60)
-    readback = r.get(key)
-    return {
-        "redis_url_tail": REDIS_URL[-60:],   # last 60 chars so you can compare
-        "redis_db": info.get("db0", info.get("db", "?")),
-        "redis_mode": info.get("redis_mode"),
-        "server": {"version": info.get("redis_version"), "proto": info.get("resp")},
-        "echo_roundtrip_ok": readback == token,
-        "queue_name": q.name,
-    }
+@app.post("/enqueue_nop")
+def enqueue_nop():
+    job = q.enqueue(task_nop)          # <— callable, NOT a string
+    return {"ok": True, "job_id": job.id}
+
+@app.get("/jobs/{job_id}")
+def get_job(job_id: str):
+    j = rq_job.Job.fetch(job_id, connection=r)
+    if not j:
+        raise HTTPException(status_code=404, detail="unknown_job_id")
+    return serialize_job(j)
+
+@app.post("/process_urls")
+async def process_urls(req: Request):
+    data = await req.json()
+    payload = ProcessURLsPayload(**data)
+    job = q.enqueue(check_urls, payload.model_dump())
+    # return the session_id so you can reuse it in /analyze later
+    return {"ok": True, "job_id": job.id, "session_id": payload.session_id or ""}
+
+@app.post("/analyze")
+async def analyze(req: Request):
+    data = await req.json()
+    payload = AnalyzePayload(**data)
+    job = q.enqueue(analyze_session, payload.model_dump())
+    return {"ok": True, "job_id": job.id}
