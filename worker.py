@@ -1,255 +1,155 @@
-# worker.py
-import os
-import json
-import time
-import socket
-import ssl
-from typing import List, Dict, Any, Optional
-
+# worker.py — RQ task implementations used by app.py
+import os, time, socket, ssl
+from typing import Dict, List, Any
 import requests
 
-# -----------------------
-# Config
-# -----------------------
-REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379")
-S3_PUBLIC_BASE = os.getenv("S3_PUBLIC_BASE", "").rstrip("/")  # optional, not required
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
+# RQ will import functions by dotted path, e.g. "worker.analyze_session"
+# Do NOT rename these symbols; app.py enqueues them by these names.
 
-# -----------------------
-# Utilities
-# -----------------------
-def _head_url(url: str, timeout: int = 10) -> Dict[str, Any]:
-    """
-    HEAD the URL and report http status and size. Falls back to GET if HEAD not allowed.
-    """
-    info: Dict[str, Any] = {"url": url, "status": "OK", "http": None, "size": 0, "method": "HEAD"}
-    try:
-        r = requests.head(url, allow_redirects=True, timeout=timeout)
-        info["http"] = r.status_code
-        # Some S3 HEADs won’t include Content-Length for certain keys; try GET-if-403/405
-        if r.status_code in (403, 405) or "Content-Length" not in r.headers:
-            r_get = requests.get(url, stream=True, timeout=timeout)
-            info["method"] = "GET"
-            info["http"] = r_get.status_code
-            if r_get.ok:
-                size = 0
-                for chunk in r_get.iter_content(chunk_size=8192):
-                    if chunk:
-                        size += len(chunk)
-                        if size > 5_000_000:  # don’t read full file; we just want to know it’s public
-                            break
-                info["size"] = size
-        else:
-            try:
-                info["size"] = int(r.headers.get("Content-Length", "0"))
-            except Exception:
-                info["size"] = 0
-    except requests.RequestException as e:
-        info["status"] = "ERR"
-        info["http"] = None
-        info["error"] = str(e)
-    return info
-
-
-def _make_session_id() -> str:
-    # Epoch-ish session id like the ones you’ve been seeing
-    return f"sess-{int(time.time())}"
-
-
-# -----------------------
-# Tasks exposed to RQ
-# -----------------------
+# ---------- Tiny NOP ----------
 def task_nop() -> Dict[str, Any]:
-    """Simple echo used by /enqueue_nop"""
     return {"echo": {"hello": "world"}}
 
+# ---------- S3 URL checker ----------
+def _head_ok(url: str, timeout: float = 15.0) -> Dict[str, Any]:
+    try:
+        r = requests.head(url, allow_redirects=True, timeout=timeout)
+        ok = (200 <= r.status_code < 300)
+        return {
+            "url": url,
+            "status": "OK" if ok else "ERR",
+            "http": r.status_code,
+            "size": int(r.headers.get("Content-Length", "0") or 0),
+            "method": "HEAD",
+        }
+    except Exception as e:
+        return {"url": url, "status": "ERR", "http": 0, "size": 0, "error": str(e), "method": "HEAD"}
 
-def process_urls(urls: List[str], session_id: Optional[str] = None) -> Dict[str, Any]:
-    """
-    Validates external URLs (S3) are publicly reachable.
-    Returns the canonical shape you’ve been using.
-    """
-    sess = session_id or _make_session_id()
-    checked = []
-    for u in urls:
-        u = u.strip()
-        if not u:
-            continue
-        # normalize accidental trailing ? (no query)
-        if u.endswith("?"):
-            u = u[:-1]
-        checked.append(_head_url(u))
-    return {
-        "session_id": sess,
-        "checked": checked,
-    }
+def check_urls(payload: Dict[str, Any]) -> Dict[str, Any]:
+    urls: List[str] = payload.get("urls", [])
+    session_id = payload.get("session_id", f"sess-{int(time.time())}")
+    results = [_head_ok(u) for u in urls]
+    return {"session_id": session_id, "checked": results}
 
+# ---------- OpenAI (real) ----------
+# We will use chat.completions (stable) and keep a clean fallback.
+def _openai_client():
+    from openai import OpenAI  # import inside so diag can report import errors
+    key = os.getenv("OPENAI_API_KEY")
+    if not key:
+        raise RuntimeError("Missing OPENAI_API_KEY")
+    return OpenAI(api_key=key)
 
-# -----------------------
-# OpenAI integration (+ fallback)
-# -----------------------
-def _openai_client_diag() -> Dict[str, Any]:
+def _features_list(csv: str) -> List[str]:
+    parts = [p.strip() for p in (csv or "").split(",") if p.strip()]
+    return parts
+
+def analyze_session(payload: Dict[str, Any]) -> Dict[str, Any]:
     """
-    Try to create a client and do a minimal call. Returns booleans + last error.
-    We *don’t* fail the job if this can’t connect; analyze() will fall back.
+    Expected payload:
+      session_id, tone, product_link, features_csv
+    Returns a dict consumed by /jobs in app.py.
     """
-    out: Dict[str, Any] = {
-        "has_key": bool(OPENAI_API_KEY),
+    session_id = payload["session_id"]
+    tone = payload.get("tone", "casual")
+    product_link = payload.get("product_link", "")
+    features_csv = payload.get("features_csv", "")
+    features = _features_list(features_csv)
+
+    # Try real OpenAI first; on any exception, return a DEV STUB so the API never 500s.
+    try:
+        client = _openai_client()
+        prompt = (
+            f"Write a {tone} 25–35 second TikTok promo script. "
+            f"Highlight these features: {', '.join(features) or 'none provided'}. "
+            f"Product URL: {product_link or 'n/a'}. "
+            f"Format it as short lines suitable for voiceover, no scene directions."
+        )
+        resp = client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[
+                {"role": "system", "content": "You are a concise promo scriptwriter."},
+                {"role": "user", "content": prompt},
+            ],
+            temperature=0.7,
+        )
+        script = resp.choices[0].message.content
+        return {
+            "session_id": session_id,
+            "engine": "openai.chat.completions",
+            "script": script,
+            "product_link": product_link,
+            "features": features,
+        }
+    except Exception as e:
+        # Soft fallback so your flow still completes
+        return {
+            "session_id": session_id,
+            "engine": "stub",
+            "openai_diag": {"last_error": str(e)},
+            "script": f"[DEV STUB] {tone} promo highlighting {', '.join(features) or 'features'}. "
+                      f"Product: {product_link or 'n/a'}.",
+            "product_link": product_link,
+            "features": features,
+        }
+
+# ---------- Diagnostics ----------
+def diag_openai() -> Dict[str, Any]:
+    """
+    Verifies: env var present, SDK import, client creation, and a tiny call.
+    Never raises; always returns a dict so /jobs shows a clean result.
+    """
+    out = {
+        "has_key": bool(os.getenv("OPENAI_API_KEY")),
         "import_ok": False,
         "client_ok": False,
         "attempts": [],
         "last_error": None,
+        "reply": None,
     }
     try:
-        from openai import OpenAI  # type: ignore
+        from openai import OpenAI
         out["import_ok"] = True
-        client = OpenAI(api_key=OPENAI_API_KEY)
-        out["client_ok"] = True
-
-        # 1) Try legacy Chat Completions (works on openai>=1.0)
         try:
-            out["attempts"].append({"api": "chat.completions"})
-            _ = client.chat.completions.create(
-                model="gpt-4o-mini",
-                messages=[{"role": "user", "content": "ping"}],
-                max_tokens=5,
-                timeout=10,
-            )
-            out["attempts"][-1]["ok"] = True
-            return out  # success
+            client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+            out["client_ok"] = True
+            # Minimal call (no fancy APIs) to avoid SDK surface mismatches
+            try:
+                r = client.chat.completions.create(
+                    model="gpt-4o-mini",
+                    messages=[{"role": "user", "content": "Say OK"}],
+                    temperature=0
+                )
+                out["attempts"].append({"api": "chat.completions", "ok": True})
+                out["reply"] = r.choices[0].message.content
+                out["last_error"] = None
+            except Exception as e:
+                out["attempts"].append({"api": "chat.completions", "ok": False, "error": str(e)})
+                out["last_error"] = str(e)
         except Exception as e:
-            out["attempts"][-1]["ok"] = False
-            out["attempts"][-1]["error"] = str(e)
-            out["last_error"] = str(e)
-
-        # 2) Try the Responses API (in case your account prefers it)
-        try:
-            out["attempts"].append({"api": "responses"})
-            _ = client.responses.create(
-                model="gpt-4o-mini",
-                input="ping",
-                timeout=10,
-            )
-            out["attempts"][-1]["ok"] = True
-            return out
-        except Exception as e:
-            out["attempts"][-1]["ok"] = False
-            out["attempts"][-1]["error"] = str(e)
-            out["last_error"] = str(e)
-
+            out["last_error"] = f"client: {e}"
     except Exception as e:
-        out["last_error"] = str(e)
-
+        out["last_error"] = f"import: {e}"
     return out
 
-
-def analyze(session_id: str,
-            tone: Optional[str] = None,
-            product_link: Optional[str] = None,
-            features_csv: Optional[str] = None) -> Dict[str, Any]:
+def net_probe() -> Dict[str, Any]:
     """
-    Builds a promo script. If OpenAI works, we use it.
-    If not, we return a deterministic stub (what you’ve been seeing).
+    Quick outbound checks for Render networking/TLS.
     """
-    # Parse features
-    features = []
-    if features_csv:
-        features = [f.strip() for f in features_csv.split(",") if f.strip()]
-
-    # Try OpenAI
-    diag = _openai_client_diag()
-    if diag.get("has_key") and diag.get("import_ok") and diag.get("client_ok"):
-        # If our last attempt in diag succeeded, just do it “for real”.
-        ok_attempt = next((a for a in diag.get("attempts", []) if a.get("ok")), None)
-        if ok_attempt:
-            try:
-                from openai import OpenAI  # type: ignore
-                client = OpenAI(api_key=OPENAI_API_KEY)
-
-                prompt = [
-                    {"role": "system", "content": "You write short, persuasive product promo scripts."},
-                    {"role": "user", "content":
-                        f"Write a {tone or 'neutral'} 60-second promo script. "
-                        f"Product: {product_link or 'N/A'}. "
-                        f"Key features: {', '.join(features) if features else 'N/A'}."
-                     }
-                ]
-                resp = client.chat.completions.create(
-                    model="gpt-4o-mini",
-                    messages=prompt,
-                    max_tokens=220,
-                    temperature=0.7,
-                    timeout=15,
-                )
-                text = resp.choices[0].message.content if resp.choices else ""
-                return {
-                    "session_id": session_id,
-                    "engine": "openai",
-                    "openai_diag": {k: v for k, v in diag.items() if k != "attempts"},
-                    "script": text or "",
-                    "product_link": product_link,
-                    "features": features,
-                }
-            except Exception as e:
-                # fall through to stub with the error captured
-                diag["last_error"] = f"chat_call: {e}"
-
-    # Fallback stub
-    summary = ", ".join(features) if features else ""
-    stub = f"[DEV STUB] {tone or 'neutral'} promo highlighting {summary or 'your key features'}. " \
-           f"Product: {product_link or 'N/A'}."
-    return {
-        "session_id": session_id,
-        "engine": "stub",
-        "openai_diag": {k: v for k, v in diag.items() if k != "attempts"},
-        "script": stub,
-        "product_link": product_link,
-        "features": features,
-    }
-
-
-# -----------------------
-# Deep connectivity diagnostic task
-# -----------------------
-def diag_openai() -> Dict[str, Any]:
-    """
-    Low-level network diagnostic to api.openai.com
-    (DNS -> TLS -> Authenticated HTTP).
-    """
-    resultado: Dict[str, Any] = {
-        "has_key": bool(OPENAI_API_KEY),
-        "dns": None,
-        "tls": None,
-        "http": None,
-    }
-
-    # DNS
+    host = "api.openai.com"
+    result = {"dns": "unknown", "tls": "unknown"}
     try:
-        socket.getaddrinfo("api.openai.com", 443)
-        resultado["dns"] = "ok"
+        socket.gethostbyname(host)
+        result["dns"] = "ok"
     except Exception as e:
-        resultado["dns"] = f"fail: {e}"
-        return resultado
+        result["dns"] = f"fail: {e}"
+        return result
 
-    # TLS
     try:
         ctx = ssl.create_default_context()
-        with socket.create_connection(("api.openai.com", 443), timeout=5) as sock:
-            with ctx.wrap_socket(sock, server_hostname="api.openai.com") as ssock:
-                resultado["tls"] = f"ok: {ssock.version()}"
+        with socket.create_connection((host, 443), timeout=8) as sock:
+            with ctx.wrap_socket(sock, server_hostname=host) as ssock:
+                result["tls"] = f"ok: TLSv{ssock.version()}"
     except Exception as e:
-        resultado["tls"] = f"fail: {e}"
-        return resultado
-
-    # HTTP
-    try:
-        r = requests.get(
-            "https://api.openai.com/v1/models",
-            headers={"Authorization": f"Bearer {OPENAI_API_KEY}"},
-            timeout=10,
-        )
-        resultado["http"] = f"{r.status_code}"
-    except Exception as e:
-        resultado["http"] = f"fail: {e}"
-
-    return resultado
+        result["tls"] = f"fail: {e}"
+    return result
