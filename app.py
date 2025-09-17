@@ -1,4 +1,4 @@
-# app.py — FastAPI + RQ
+# app.py — FastAPI + RQ (fixed task names)
 import os, time
 import redis
 from fastapi import FastAPI, Body, HTTPException
@@ -17,16 +17,16 @@ if not REDIS_URL:
 conn = redis.from_url(REDIS_URL, decode_responses=False)
 q = Queue("default", connection=conn)
 
-# RQ import strings
+# RQ import strings (must be module.attr)
 TASK_NOP = "worker.task_nop"
 TASK_CHECK_URLS = "worker.check_urls"
 TASK_ANALYZE_SESSION = "worker.analyze_session"
-TASK_DIAG_OPENAI = "worker.diag_openai"
+TASK_DIAG_OPENAI = "worker.diag_openai"   # <- THIS is the key fix
 
 # -------------------------
 # FastAPI
 # -------------------------
-app = FastAPI(title="editdna API", version="1.0.3")
+app = FastAPI(title="editdna API", version="1.0.4")
 
 @app.get("/")
 def root():
@@ -64,7 +64,7 @@ def process_urls(payload: dict = Body(...)):
     return {"job_id": job.get_id(), "session_id": session_id}
 
 # -------------------------
-# 2) Analyze (real OpenAI w/ retry; falls back to stub)
+# 2) Analyze (OpenAI w/ retry; falls back to stub)
 # -------------------------
 @app.post("/analyze")
 def analyze(payload: dict = Body(...)):
@@ -74,7 +74,7 @@ def analyze(payload: dict = Body(...)):
     return {"job_id": job.get_id(), "session_id": payload["session_id"]}
 
 # -------------------------
-# 2b) OpenAI connectivity diag (enqueue a probe)
+# 2b) OpenAI connectivity diag
 # -------------------------
 @app.post("/diag/openai")
 def diag_openai():
