@@ -12,6 +12,8 @@ services:
         value: 3.11.9
       - key: REDIS_URL
         sync: false
+      - key: OPENAI_API_KEY <-- add
+        sync: false
       - key: AWS_ACCESS_KEY_ID
         sync: false
       - key: AWS_SECRET_ACCESS_KEY
@@ -33,6 +35,8 @@ services:
       - key: PYTHON_VERSION
         value: 3.11.9
       - key: REDIS_URL
+        sync: false
+      - key: OPENAI_API_KEY    # <-- add
         sync: false
       - key: AWS_ACCESS_KEY_ID
         sync: false
