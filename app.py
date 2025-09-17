@@ -36,4 +36,5 @@ def health():
     try:
         conn.ping()
         return {"status": "ok"}
-    except Exception as e
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
