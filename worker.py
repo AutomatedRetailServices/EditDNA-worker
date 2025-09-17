@@ -1,108 +1,113 @@
-# worker.py — RQ tasks (OpenAI-powered analyze) + diagnostics
-import os, time, requests
-from typing import Dict, Any
+# worker.py — RQ worker and tasks
+import os
+import json
+import time
+import redis
+import requests
+from rq import Queue, Worker, Connection
 
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
-openai_diag = {"has_key": bool(OPENAI_API_KEY), "import_ok": False, "client_ok": False, "last_error": None}
+# Optional OpenAI imports (diag_openai handles absence gracefully)
+try:
+    from openai import OpenAI
+except Exception:  # keep worker alive even if package missing
+    OpenAI = None
 
-_client = None
-if OPENAI_API_KEY:
+REDIS_URL = os.getenv("REDIS_URL", "")
+if not REDIS_URL:
+    raise RuntimeError("Missing REDIS_URL")
+
+conn = redis.from_url(REDIS_URL, decode_responses=False)
+q = Queue("default", connection=conn)
+
+S3_PUBLIC_BASE = os.getenv("S3_PUBLIC_BASE", "").rstrip("/")
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+
+# -------------------------
+# Helpers
+# -------------------------
+def head_size(url: str) -> dict:
     try:
-        from openai import OpenAI
-        openai_diag["import_ok"] = True
-        try:
-            _client = OpenAI(api_key=OPENAI_API_KEY)
-            openai_diag["client_ok"] = True
-        except Exception as e:
-            openai_diag["last_error"] = f"client_init: {e!s}"[:200]
+        r = requests.head(url, timeout=10)
+        size = int(r.headers.get("Content-Length", "0")) if r.status_code == 200 else 0
+        return {"url": url, "status": "OK", "http": r.status_code, "size": size, "method": "HEAD"}
     except Exception as e:
-        openai_diag["last_error"] = f"import: {e!s}"[:200]
+        return {"url": url, "status": "ERR", "http": 0, "size": 0, "error": str(e)}
 
-
-def task_nop() -> Dict[str, Any]:
+# -------------------------
+# Tasks
+# -------------------------
+def task_nop():
     return {"echo": {"hello": "world"}}
 
-
-def _head_or_get(url: str, timeout: float = 20.0):
-    try:
-        r = requests.head(url, timeout=timeout, allow_redirects=True)
-        size = int(r.headers.get("Content-Length") or 0)
-        if r.status_code in (200, 206) and size > 0:
-            return {"status": "OK", "http": r.status_code, "size": size, "method": "HEAD"}
-        if r.status_code in (403, 405) or size == 0:
-            g = requests.get(url, headers={"Range": "bytes=0-0"}, timeout=timeout, allow_redirects=True)
-            g_size = int(g.headers.get("Content-Range", "bytes 0-0/0").split("/")[-1] or 0)
-            if g_size == 0:
-                g_size = int(g.headers.get("Content-Length") or 0)
-            if g.status_code in (200, 206) and g_size >= 0:
-                return {"status": "OK", "http": g.status_code, "size": g_size, "method": "GET(range)"}
-            return {"status": "ERROR", "http": g.status_code, "size": 0, "method": "GET(range)"}
-        return {"status": "OK", "http": r.status_code, "size": size, "method": "HEAD"}
-    except Exception as e:
-        return {"status": "ERROR", "http": 0, "size": 0, "error": str(e), "method": "HEAD"}
-
-
-def check_urls(payload: Dict[str, Any]) -> Dict[str, Any]:
+def check_urls(payload: dict):
+    """
+    payload: { session_id, urls: [...] }
+    """
     session_id = payload.get("session_id") or f"sess-{int(time.time())}"
-    out = []
-    for url in payload.get("urls", []):
-        result = _head_or_get(url, timeout=20.0)
-        result["url"] = url
-        out.append(result)
-    return {"session_id": session_id, "checked": out}
+    urls = payload.get("urls", [])
+    checked = [head_size(u) for u in urls]
+    return {"session_id": session_id, "checked": checked}
 
-
-def _generate_script_with_openai(session_id: str, tone: str, product_link: str, features: list) -> str:
-    assert _client is not None, "OpenAI client not initialized"
-    features_txt = ", ".join(features) if features else "key benefits"
-
-    system_msg = (
-        "You are a creative ad copywriter. Write tight, engaging short-form promo scripts for product videos."
-    )
-    user_msg = (
-        f"Create a ~90–130 word voiceover script.\n"
-        f"Tone: {tone or 'neutral'}\n"
-        f"Product page: {product_link or 'N/A'}\n"
-        f"Features: {features_txt}\n"
-        "- Hook first sentence; 2–4 concrete benefits; natural prose; end with CTA.\n"
-        f"[session:{session_id}]"
-    )
-
-    resp = _client.chat.completions.create(
-        model="gpt-4o-mini",
-        messages=[{"role": "system", "content": system_msg}, {"role": "user", "content": user_msg}],
-        temperature=0.8,
-        max_tokens=300,
-    )
-    return (resp.choices[0].message.content or "").strip()
-
-
-def analyze_session(payload: Dict[str, Any]) -> Dict[str, Any]:
-    sess = payload["session_id"]
-    tone = (payload.get("tone") or "").strip()
-    product_link = (payload.get("product_link") or "").strip()
+def analyze_session(payload: dict):
+    """
+    Dummy/stub script generator. If OPENAI is available, you can later
+    swap to a real model call.
+    """
+    session_id = payload.get("session_id") or f"sess-{int(time.time())}"
+    tone = payload.get("tone")
+    product_link = payload.get("product_link")
     features_csv = payload.get("features_csv", "")
-    features = [s.strip() for s in features_csv.split(",") if s.strip()]
+    features = [f.strip() for f in features_csv.split(",") if f.strip()]
 
-    engine = "stub"
-    script_text = f"[DEV STUB] {tone or 'neutral'} promo highlighting {', '.join(features) or 'your key benefits'}. Product: {product_link or 'N/A'}."
-
-    if _client is not None:
-        try:
-            script_text = _generate_script_with_openai(sess, tone, product_link, features)
-            engine = "openai"
-        except Exception as e:
-            openai_diag["last_error"] = f"chat_call: {e!s}"[:200]
-            # keep stub
-
-    # tiny pause
-    time.sleep(0.3)
+    script = f"[DEV STUB] {tone or 'casual'} promo highlighting " \
+             f"{', '.join(features) if features else 'key features'}. " \
+             f"Product: {product_link or 'N/A'}."
 
     return {
-        "session_id": sess,
-        "engine": engine,
-        "openai_diag": openai_diag,  # <- shows exactly why stub was used
-        "script": script_text,
-        "product_link": product_link or None,
+        "session_id": session_id,
+        "engine": "stub",
+        "script": script,
+        "product_link": product_link,
         "features": features,
     }
+
+def diag_openai():
+    """
+    Diagnostic to verify OpenAI import, client init, and a tiny chat call.
+    Returns a dict; never raises.
+    """
+    has_key = bool(OPENAI_API_KEY)
+    import_ok = OpenAI is not None
+    client_ok = False
+    last_error = None
+    reply = None
+
+    if import_ok and has_key:
+        try:
+            client = OpenAI(api_key=OPENAI_API_KEY)
+            client_ok = True
+            # very small call
+            r = client.chat.completions.create(
+                model="gpt-4o-mini",
+                messages=[{"role": "user", "content": "Say OK"}],
+                max_tokens=4,
+            )
+            reply = r.choices[0].message.content
+        except Exception as e:
+            last_error = f"chat_call: {e!s}"
+
+    return {
+        "has_key": has_key,
+        "import_ok": import_ok,
+        "client_ok": client_ok,
+        "last_error": last_error,
+        "reply": reply,
+    }
+
+# -------------------------
+# Worker entry
+# -------------------------
+if __name__ == "__main__":
+    with Connection(conn):
+        worker = Worker([q])
+        worker.work()
