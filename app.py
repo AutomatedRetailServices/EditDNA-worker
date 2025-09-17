@@ -17,17 +17,17 @@ if not REDIS_URL:
 conn = redis.from_url(REDIS_URL, decode_responses=False)
 q = Queue("default", connection=conn)
 
-# RQ resolves task names by import string in the *worker* process
+# ---- Match the functions that exist in worker.py ----
 TASK_NOP = "worker.task_nop"
-TASK_CHECK_URLS = "worker.check_urls"
-TASK_ANALYZE_SESSION = "worker.analyze_session"
+TASK_CHECK_URLS = "worker.process_urls"     # was check_urls
+TASK_ANALYZE = "worker.analyze"             # was analyze_session
 TASK_DIAG_OPENAI = "worker.diag_openai"
-TASK_NET_PROBE = "worker.net_probe"
+# (No net_probe task in worker.py, so we drop /diag/net)
 
 # -------------------------
 # FastAPI
 # -------------------------
-app = FastAPI(title="editdna API", version="1.1.0")
+app = FastAPI(title="editdna API", version="1.2.0")
 
 @app.get("/")
 def root():
@@ -51,8 +51,7 @@ def enqueue_nop(payload: dict = Body(default={"echo": {"hello": "world"}})):
 
 # -------------------------
 # 1) Check S3 URLs — returns job_id AND session_id
-# Body: { "urls": ["https://.../IMG_0001.mov", ...] }
-# You may also pass "session_id"; if omitted we generate one.
+# Body: { "urls": ["https://.../IMG_0001.mov", ...] , (optional) "session_id": "sess-..." }
 # -------------------------
 @app.post("/process_urls")
 def process_urls(payload: dict = Body(...)):
@@ -61,14 +60,13 @@ def process_urls(payload: dict = Body(...)):
         raise HTTPException(status_code=400, detail="Provide 'urls': [ ... ]")
 
     session_id = payload.get("session_id") or f"sess-{int(time.time())}"
-    payload = {**payload, "session_id": session_id}
-
-    job = q.enqueue(TASK_CHECK_URLS, payload, job_timeout=600)
+    # enqueue with the signature process_urls(urls, session_id=None)
+    job = q.enqueue(TASK_CHECK_URLS, urls, session_id, job_timeout=600)
     return {"job_id": job.get_id(), "session_id": session_id}
 
 # -------------------------
-# 2) Analyze (dev stub / OpenAI if enabled)
-# Body example:
+# 2) Analyze (OpenAI if available, otherwise stub)
+# Body:
 # {
 #   "session_id": "sess-123",
 #   "tone": "casual",
@@ -78,22 +76,24 @@ def process_urls(payload: dict = Body(...)):
 # -------------------------
 @app.post("/analyze")
 def analyze(payload: dict = Body(...)):
-    if not payload.get("session_id"):
+    session_id = payload.get("session_id")
+    if not session_id:
         raise HTTPException(status_code=400, detail="Missing 'session_id'")
-    job = q.enqueue(TASK_ANALYZE_SESSION, payload, job_timeout=1800)
-    return {"job_id": job.get_id(), "session_id": payload["session_id"]}
+
+    tone = payload.get("tone")
+    product_link = payload.get("product_link")
+    features_csv = payload.get("features_csv")
+
+    # matches worker.analyze(session_id, tone, product_link, features_csv)
+    job = q.enqueue(TASK_ANALYZE, session_id, tone, product_link, features_csv, job_timeout=1800)
+    return {"job_id": job.get_id(), "session_id": session_id}
 
 # -------------------------
-# 3) Diagnostics
+# 3) Diagnostics (OpenAI reachability from worker)
 # -------------------------
 @app.post("/diag/openai")
 def diag_openai():
     job = q.enqueue(TASK_DIAG_OPENAI, job_timeout=180)
-    return {"job_id": job.get_id()}
-
-@app.post("/diag/net")
-def diag_net():
-    job = q.enqueue(TASK_NET_PROBE, job_timeout=120)
     return {"job_id": job.get_id()}
 
 # -------------------------
@@ -117,7 +117,7 @@ def get_job(job_id: str):
 
     if job.is_failed:
         try:
-            data["error"] = str(job.exc_info or job.meta.get("error"))
+            data["error"] = str(job.exc_info or (job.meta or {}).get("error"))
         except Exception:
             data["error"] = "Job failed"
     elif job.is_finished:
