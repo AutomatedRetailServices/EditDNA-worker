@@ -1,27 +1,25 @@
 FROM python:3.11-slim
 
-# --- System dependencies (FFmpeg included) ---
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    ffmpeg build-essential && \
-    rm -rf /var/lib/apt/lists/*
+# System deps (from apt.txt)
+COPY apt.txt /tmp/apt.txt
+RUN apt-get update \
+ && xargs -a /tmp/apt.txt apt-get install -y --no-install-recommends \
+ && rm -rf /var/lib/apt/lists/* /tmp/apt.txt
 
-# --- Environment settings ---
+# Python env
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PIP_NO_CACHE_DIR=1
 
 WORKDIR /app
 
-# --- Python dependencies ---
+# Python deps
 COPY requirements.txt .
 RUN pip install -r requirements.txt
 
-# --- App code ---
-COPY app.py ./
+# App code
+COPY . ./
 
-# --- Expose port (Render will set $PORT) ---
+# Expose (Render sets $PORT)
 EXPOSE 8000
-
-# Use sh -c so ${PORT} is expanded properly
 CMD ["sh", "-c", "uvicorn app:app --host 0.0.0.0 --port ${PORT:-8000}"]
-
