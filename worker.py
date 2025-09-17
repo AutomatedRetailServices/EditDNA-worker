@@ -1,65 +1,38 @@
 # worker.py
-import os
-import time
-from typing import List, Dict, Any
+import os, json, time, requests
 
-import httpx
-from redis import from_url as redis_from_url
-from rq import Worker, Queue
-
-REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379/0")
-
-# RQ requires a Redis connection without auto-decoding for safety
-redis_conn = redis_from_url(REDIS_URL, decode_responses=False)
-queue_name = "default"
-
-# ------------- TASKS (called by the queue) -----------------
-def hello_world() -> Dict[str, str]:
-    # super small, finishes fast
+def task_nop():
+    # tiny test job
     return {"echo": {"hello": "world"}}
 
-def check_urls(urls: List[str]) -> Dict[str, Any]:
+def check_urls(payload: dict):
     """
-    For each URL:
-      - HEAD first, fallback to GET (streaming) if server doesn't support HEAD
-      - collect http status and size (Content-Length or downloaded length)
-    Returns { "checked": [...] }
+    payload = {"session_id": "sess-001", "urls": ["https://.../IMG_4856.mov", ...]}
+    Returns per-URL HTTP status/size so you can see they’re reachable.
     """
-    results = []
-    timeout = httpx.Timeout(15.0, connect=10.0)
-    headers = {"User-Agent": "editdna-checker/1.0"}
-    with httpx.Client(timeout=timeout, headers=headers, follow_redirects=True) as client:
-        for url in urls:
-            rec = {"url": url, "status": "ERR", "http": None, "size": None}
-            try:
-                # Try HEAD
-                r = client.head(url)
-                rec["http"] = r.status_code
-                if r.status_code == 200:
-                    size = r.headers.get("content-length")
-                    rec["size"] = int(size) if size and size.isdigit() else None
-                    rec["status"] = "OK"
-                else:
-                    # fallback to GET if not 200 on HEAD (some S3 links may require GET)
-                    r = client.get(url, stream=True)
-                    rec["http"] = r.status_code
-                    if r.status_code == 200:
-                        total = 0
-                        for chunk in r.iter_bytes():
-                            total += len(chunk)
-                            if total > 5 * 1024 * 1024:  # don't download full movie; cap ~5MB
-                                break
-                        rec["size"] = total
-                        rec["status"] = "OK"
-            except Exception as e:
-                rec["status"] = f"ERR: {e.__class__.__name__}"
-            results.append(rec)
-            # tiny pause to be nice to S3/CDN
-            time.sleep(0.02)
-    return {"checked": results}
+    session_id = payload.get("session_id") or f"sess-{int(time.time())}"
+    out = []
+    for url in payload.get("urls", []):
+        try:
+            r = requests.head(url, timeout=20, allow_redirects=True)
+            size = int(r.headers.get("Content-Length") or 0)
+            out.append({"url": url, "status": "OK", "http": r.status_code, "size": size})
+        except Exception as e:
+            out.append({"url": url, "status": "ERROR", "http": 0, "error": str(e)})
+    return {"session_id": session_id, "checked": out}
 
-# ------------- RQ Worker entrypoint (for Render “Background Worker”) -------------
-if __name__ == "__main__":
-    w = Worker([Queue(queue_name, connection=redis_conn)], connection=redis_conn)
-    # This will block and listen forever
-    w.work(with_scheduler=True)
+def analyze_session(payload: dict):
+    """
+    payload = {"session_id": "...", "tone": "...", "product_link": "...", "features_csv": "..."}
+    Dummy analysis that just echos back what it received.
+    Replace this with your real analysis later.
+    """
+    sess = payload["session_id"]
+    # pretend work
+    time.sleep(1)
+    return {
+        "session_id": sess,
+        "script": f"Promo script for session {sess} with tone={payload.get('tone','neutral')}",
+        "product_link": payload.get("product_link"),
+        "features": [s.strip() for s in (payload.get("features_csv","").split(",")) if s.strip()],
+    }
