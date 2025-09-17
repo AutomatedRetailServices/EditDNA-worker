@@ -1,225 +1,255 @@
-# worker.py — RQ task functions (OpenAI with retries)
-
+# worker.py
 import os
-import time
 import json
-from typing import Dict, Any, List
+import time
+import socket
+import ssl
+from typing import List, Dict, Any, Optional
 
 import requests
 
-# ------------- tiny util -------------
-HTTP_TIMEOUT = 20  # seconds
+# -----------------------
+# Config
+# -----------------------
+REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379")
+S3_PUBLIC_BASE = os.getenv("S3_PUBLIC_BASE", "").rstrip("/")  # optional, not required
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
 
-
-def _safe_head(url: str) -> Dict[str, Any]:
-    """HEAD first; if not allowed, try GET with stream to avoid download."""
+# -----------------------
+# Utilities
+# -----------------------
+def _head_url(url: str, timeout: int = 10) -> Dict[str, Any]:
+    """
+    HEAD the URL and report http status and size. Falls back to GET if HEAD not allowed.
+    """
+    info: Dict[str, Any] = {"url": url, "status": "OK", "http": None, "size": 0, "method": "HEAD"}
     try:
-        r = requests.head(url, timeout=HTTP_TIMEOUT, allow_redirects=True)
-        size = int(r.headers.get("Content-Length") or 0)
-        return {
-            "url": url,
-            "status": "OK",
-            "http": r.status_code,
-            "size": size,
-            "method": "HEAD",
-        }
-    except Exception:
-        # Fallback GET (some servers block HEAD)
-        try:
-            r = requests.get(url, timeout=HTTP_TIMEOUT, stream=True, allow_redirects=True)
-            size = int(r.headers.get("Content-Length") or 0)
-            return {
-                "url": url,
-                "status": "OK",
-                "http": r.status_code,
-                "size": size,
-                "method": "GET",
-            }
-        except Exception as e:
-            return {
-                "url": url,
-                "status": f"ERROR: {type(e).__name__}",
-                "http": 0,
-                "size": 0,
-                "method": "HEAD",
-            }
+        r = requests.head(url, allow_redirects=True, timeout=timeout)
+        info["http"] = r.status_code
+        # Some S3 HEADs won’t include Content-Length for certain keys; try GET-if-403/405
+        if r.status_code in (403, 405) or "Content-Length" not in r.headers:
+            r_get = requests.get(url, stream=True, timeout=timeout)
+            info["method"] = "GET"
+            info["http"] = r_get.status_code
+            if r_get.ok:
+                size = 0
+                for chunk in r_get.iter_content(chunk_size=8192):
+                    if chunk:
+                        size += len(chunk)
+                        if size > 5_000_000:  # don’t read full file; we just want to know it’s public
+                            break
+                info["size"] = size
+        else:
+            try:
+                info["size"] = int(r.headers.get("Content-Length", "0"))
+            except Exception:
+                info["size"] = 0
+    except requests.RequestException as e:
+        info["status"] = "ERR"
+        info["http"] = None
+        info["error"] = str(e)
+    return info
 
 
-# ------------- tasks -------------
+def _make_session_id() -> str:
+    # Epoch-ish session id like the ones you’ve been seeing
+    return f"sess-{int(time.time())}"
 
+
+# -----------------------
+# Tasks exposed to RQ
+# -----------------------
 def task_nop() -> Dict[str, Any]:
+    """Simple echo used by /enqueue_nop"""
     return {"echo": {"hello": "world"}}
 
 
-def check_urls(payload: Dict[str, Any]) -> Dict[str, Any]:
+def process_urls(urls: List[str], session_id: Optional[str] = None) -> Dict[str, Any]:
     """
-    payload = { "session_id": "...", "urls": ["https://..."] }
+    Validates external URLs (S3) are publicly reachable.
+    Returns the canonical shape you’ve been using.
     """
-    session_id = payload.get("session_id") or f"sess-{int(time.time())}"
-    urls: List[str] = payload.get("urls") or []
-
-    checked: List[Dict[str, Any]] = []
-    for raw in urls:
-        # trim trailing '?' if present
-        url = raw.rstrip("?")
-        info = _safe_head(url)
-
-        # normalize some common S3 outcomes
-        if info["http"] == 403 and info["size"] == 0:
-            # public object not accessible; helpful hint in status
-            info["status"] = "OK"  # keep API stable
-            info["note"] = "403 from S3 (object likely not public)"
-        checked.append(info)
-
-    return {"session_id": session_id, "checked": checked}
+    sess = session_id or _make_session_id()
+    checked = []
+    for u in urls:
+        u = u.strip()
+        if not u:
+            continue
+        # normalize accidental trailing ? (no query)
+        if u.endswith("?"):
+            u = u[:-1]
+        checked.append(_head_url(u))
+    return {
+        "session_id": sess,
+        "checked": checked,
+    }
 
 
-# ---------- OpenAI helpers ----------
-
-def _make_openai_client(diag: Dict[str, Any]):
+# -----------------------
+# OpenAI integration (+ fallback)
+# -----------------------
+def _openai_client_diag() -> Dict[str, Any]:
     """
-    Returns (client | None). Fills diag with has_key/import_ok/client_ok and errors.
+    Try to create a client and do a minimal call. Returns booleans + last error.
+    We *don’t* fail the job if this can’t connect; analyze() will fall back.
     """
-    api_key = os.getenv("OPENAI_API_KEY", "")
-    diag["has_key"] = bool(api_key)
-
+    out: Dict[str, Any] = {
+        "has_key": bool(OPENAI_API_KEY),
+        "import_ok": False,
+        "client_ok": False,
+        "attempts": [],
+        "last_error": None,
+    }
     try:
         from openai import OpenAI  # type: ignore
-        diag["import_ok"] = True
-    except Exception as e:
-        diag["import_ok"] = False
-        diag["last_error"] = f"import: {e}"
-        return None
+        out["import_ok"] = True
+        client = OpenAI(api_key=OPENAI_API_KEY)
+        out["client_ok"] = True
 
-    try:
-        client = OpenAI(api_key=api_key)
-        diag["client_ok"] = True
-        return client
-    except Exception as e:
-        diag["client_ok"] = False
-        diag["last_error"] = f"client: {e}"
-        return None
-
-
-def _chat_with_retries(client, prompt: str, diag: Dict[str, Any], attempts: int = 3) -> str:
-    """
-    Calls chat.completions with retries. Raises last Exception if all fail.
-    Records each attempt in diag["attempts"].
-    """
-    diag.setdefault("attempts", [])
-    last_err = None
-    for i in range(attempts):
+        # 1) Try legacy Chat Completions (works on openai>=1.0)
         try:
-            diag["attempts"].append({"api": "chat.completions", "try": i + 1})
-            completion = client.chat.completions.create(
+            out["attempts"].append({"api": "chat.completions"})
+            _ = client.chat.completions.create(
                 model="gpt-4o-mini",
-                messages=[
-                    {"role": "system", "content": "You are a concise promo script generator."},
-                    {"role": "user", "content": prompt},
-                ],
-                timeout=HTTP_TIMEOUT,
+                messages=[{"role": "user", "content": "ping"}],
+                max_tokens=5,
+                timeout=10,
             )
-            text = completion.choices[0].message.content
-            diag["attempts"][-1]["ok"] = True
-            return text
+            out["attempts"][-1]["ok"] = True
+            return out  # success
         except Exception as e:
-            last_err = e
-            diag["attempts"][-1]["ok"] = False
-            diag["attempts"][-1]["error"] = str(e)
-            # simple backoff: 1s, 2s, 4s
-            time.sleep(2 ** i)
+            out["attempts"][-1]["ok"] = False
+            out["attempts"][-1]["error"] = str(e)
+            out["last_error"] = str(e)
 
-    diag["last_error"] = str(last_err) if last_err else "unknown"
-    raise last_err if last_err else RuntimeError("OpenAI call failed")
-
-
-def analyze_session(payload: Dict[str, Any]) -> Dict[str, Any]:
-    """
-    payload:
-    {
-      "session_id": "...",
-      "tone": "casual",
-      "product_link": "https://example.com",
-      "features_csv": "durable, waterproof, lightweight"
-    }
-    """
-    session_id = payload.get("session_id") or f"sess-{int(time.time())}"
-    tone = (payload.get("tone") or "").strip() or "casual"
-    product_link = (payload.get("product_link") or "").strip() or None
-    features_csv = (payload.get("features_csv") or "").strip()
-    features = [f.strip() for f in features_csv.split(",") if f.strip()] if features_csv else []
-
-    # Build the prompt
-    prompt_lines = [
-        f"Write a short product promo script.",
-        f"Tone: {tone}.",
-    ]
-    if product_link:
-        prompt_lines.append(f"Product page: {product_link}.")
-    if features:
-        prompt_lines.append(f"Key features: {', '.join(features)}.")
-    prompt_lines.append("Return just the script text.")
-    prompt = " ".join(prompt_lines)
-
-    diag: Dict[str, Any] = {}
-    engine = "stub"
-    script_text = None
-
-    client = _make_openai_client(diag)
-    if client and diag.get("client_ok"):
+        # 2) Try the Responses API (in case your account prefers it)
         try:
-            script_text = _chat_with_retries(client, prompt, diag)
-            engine = "openai"
-        except Exception:
-            # fall back below
-            pass
+            out["attempts"].append({"api": "responses"})
+            _ = client.responses.create(
+                model="gpt-4o-mini",
+                input="ping",
+                timeout=10,
+            )
+            out["attempts"][-1]["ok"] = True
+            return out
+        except Exception as e:
+            out["attempts"][-1]["ok"] = False
+            out["attempts"][-1]["error"] = str(e)
+            out["last_error"] = str(e)
 
-    if not script_text:
-        # fallback stub so your pipeline keeps working
-        feat = ", ".join(features) if features else "no specific features"
-        script_text = f"[DEV STUB] {tone} promo highlighting {feat}."
-        if product_link:
-            script_text += f" Product: {product_link}."
+    except Exception as e:
+        out["last_error"] = str(e)
 
+    return out
+
+
+def analyze(session_id: str,
+            tone: Optional[str] = None,
+            product_link: Optional[str] = None,
+            features_csv: Optional[str] = None) -> Dict[str, Any]:
+    """
+    Builds a promo script. If OpenAI works, we use it.
+    If not, we return a deterministic stub (what you’ve been seeing).
+    """
+    # Parse features
+    features = []
+    if features_csv:
+        features = [f.strip() for f in features_csv.split(",") if f.strip()]
+
+    # Try OpenAI
+    diag = _openai_client_diag()
+    if diag.get("has_key") and diag.get("import_ok") and diag.get("client_ok"):
+        # If our last attempt in diag succeeded, just do it “for real”.
+        ok_attempt = next((a for a in diag.get("attempts", []) if a.get("ok")), None)
+        if ok_attempt:
+            try:
+                from openai import OpenAI  # type: ignore
+                client = OpenAI(api_key=OPENAI_API_KEY)
+
+                prompt = [
+                    {"role": "system", "content": "You write short, persuasive product promo scripts."},
+                    {"role": "user", "content":
+                        f"Write a {tone or 'neutral'} 60-second promo script. "
+                        f"Product: {product_link or 'N/A'}. "
+                        f"Key features: {', '.join(features) if features else 'N/A'}."
+                     }
+                ]
+                resp = client.chat.completions.create(
+                    model="gpt-4o-mini",
+                    messages=prompt,
+                    max_tokens=220,
+                    temperature=0.7,
+                    timeout=15,
+                )
+                text = resp.choices[0].message.content if resp.choices else ""
+                return {
+                    "session_id": session_id,
+                    "engine": "openai",
+                    "openai_diag": {k: v for k, v in diag.items() if k != "attempts"},
+                    "script": text or "",
+                    "product_link": product_link,
+                    "features": features,
+                }
+            except Exception as e:
+                # fall through to stub with the error captured
+                diag["last_error"] = f"chat_call: {e}"
+
+    # Fallback stub
+    summary = ", ".join(features) if features else ""
+    stub = f"[DEV STUB] {tone or 'neutral'} promo highlighting {summary or 'your key features'}. " \
+           f"Product: {product_link or 'N/A'}."
     return {
         "session_id": session_id,
-        "engine": engine,
-        "openai_diag": diag if engine != "openai" else {"ok": True},
-        "script": script_text,
+        "engine": "stub",
+        "openai_diag": {k: v for k, v in diag.items() if k != "attempts"},
+        "script": stub,
         "product_link": product_link,
         "features": features,
     }
 
 
-def diag_openai(_: Dict[str, Any] | None = None) -> Dict[str, Any]:
+# -----------------------
+# Deep connectivity diagnostic task
+# -----------------------
+def diag_openai() -> Dict[str, Any]:
     """
-    Lightweight diagnostic job to verify OpenAI connectivity from the worker.
-    Returns booleans + per-attempt info.
+    Low-level network diagnostic to api.openai.com
+    (DNS -> TLS -> Authenticated HTTP).
     """
-    diag: Dict[str, Any] = {}
-    client = _make_openai_client(diag)
-
-    if not client or not diag.get("client_ok"):
-        return {**diag, "reply": None}
-
-    reply = None
-    try:
-        reply = _chat_with_retries(client, "Reply with the single word: pong", diag)
-    except Exception:
-        pass
-
-    return {
-        "has_key": bool(diag.get("has_key")),
-        "import_ok": bool(diag.get("import_ok")),
-        "client_ok": bool(diag.get("client_ok")),
-        "attempts": diag.get("attempts", []),
-        "last_error": diag.get("last_error"),
-        "reply": reply,
+    resultado: Dict[str, Any] = {
+        "has_key": bool(OPENAI_API_KEY),
+        "dns": None,
+        "tls": None,
+        "http": None,
     }
 
+    # DNS
+    try:
+        socket.getaddrinfo("api.openai.com", 443)
+        resultado["dns"] = "ok"
+    except Exception as e:
+        resultado["dns"] = f"fail: {e}"
+        return resultado
 
-# Note:
-# - This file only defines functions for RQ to import.
-# - On Render, start the worker with:
-#     rq worker -u $REDIS_URL default
-# - Do NOT run `python worker.py` as the start command.
+    # TLS
+    try:
+        ctx = ssl.create_default_context()
+        with socket.create_connection(("api.openai.com", 443), timeout=5) as sock:
+            with ctx.wrap_socket(sock, server_hostname="api.openai.com") as ssock:
+                resultado["tls"] = f"ok: {ssock.version()}"
+    except Exception as e:
+        resultado["tls"] = f"fail: {e}"
+        return resultado
+
+    # HTTP
+    try:
+        r = requests.get(
+            "https://api.openai.com/v1/models",
+            headers={"Authorization": f"Bearer {OPENAI_API_KEY}"},
+            timeout=10,
+        )
+        resultado["http"] = f"{r.status_code}"
+    except Exception as e:
+        resultado["http"] = f"fail: {e}"
+
+    return resultado
