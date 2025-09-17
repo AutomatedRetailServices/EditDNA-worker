@@ -1,4 +1,4 @@
-# app.py — FastAPI + RQ (diag fix)
+# app.py — FastAPI + RQ 1.16
 import os, time
 import redis
 from fastapi import FastAPI, Body, HTTPException
@@ -13,20 +13,20 @@ REDIS_URL = os.getenv("REDIS_URL", "")
 if not REDIS_URL:
     raise RuntimeError("Missing REDIS_URL")
 
-# keep decode_responses=False (RQ stores pickles/bytes)
+# IMPORTANT: keep decode_responses=False
 conn = redis.from_url(REDIS_URL, decode_responses=False)
 q = Queue("default", connection=conn)
 
-# --------- RQ task import strings (module.func) ----------
+# RQ resolves these by import string in the worker process
 TASK_NOP = "worker.task_nop"
 TASK_CHECK_URLS = "worker.check_urls"
 TASK_ANALYZE_SESSION = "worker.analyze_session"
-TASK_DIAG_OPENAI = "worker.diag_openai"   # <<<<<< KEY FIX
+TASK_DIAG_OPENAI = "worker.diag_openai"   # <-- add this
 
 # -------------------------
 # FastAPI
 # -------------------------
-app = FastAPI(title="editdna API", version="1.0.4")
+app = FastAPI(title="editdna API", version="1.0.3")
 
 @app.get("/")
 def root():
@@ -49,7 +49,7 @@ def enqueue_nop(payload: dict = Body(default={"echo": {"hello": "world"}})):
     return {"job_id": job.get_id()}
 
 # -------------------------
-# 1) Check S3 URLs
+# 1) Check S3 URLs — returns job_id AND session_id
 # -------------------------
 @app.post("/process_urls")
 def process_urls(payload: dict = Body(...)):
@@ -64,7 +64,7 @@ def process_urls(payload: dict = Body(...)):
     return {"job_id": job.get_id(), "session_id": session_id}
 
 # -------------------------
-# 2) Analyze (OpenAI w/ retry; falls back to stub)
+# 2) Analyze
 # -------------------------
 @app.post("/analyze")
 def analyze(payload: dict = Body(...)):
@@ -72,14 +72,6 @@ def analyze(payload: dict = Body(...)):
         raise HTTPException(status_code=400, detail="Missing 'session_id'")
     job = q.enqueue(TASK_ANALYZE_SESSION, payload, job_timeout=1800)
     return {"job_id": job.get_id(), "session_id": payload["session_id"]}
-
-# -------------------------
-# 2b) OpenAI connectivity diag (ENQUEUES worker.diag_openai)
-# -------------------------
-@app.post("/diag/openai")
-def diag_openai():
-    job = q.enqueue(TASK_DIAG_OPENAI, job_timeout=120)
-    return {"job_id": job.get_id()}
 
 # -------------------------
 # 3) Poll a job
@@ -109,3 +101,11 @@ def get_job(job_id: str):
         data["result"] = job.result
 
     return JSONResponse(data)
+
+# -------------------------
+# 4) OpenAI diagnostics (queues worker.diag_openai)
+# -------------------------
+@app.post("/diag/openai")
+def diag_openai_endpoint():
+    job = q.enqueue(TASK_DIAG_OPENAI, job_timeout=120)
+    return {"job_id": job.get_id()}
