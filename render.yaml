@@ -1,4 +1,5 @@
 services:
+  # ---------- Web API ----------
   - type: web
     name: editdna-web
     env: python
@@ -19,7 +20,10 @@ services:
         sync: false
       - key: S3_BUCKET
         sync: false
+      - key: S3_PUBLIC_BASE
+        sync: false
 
+  # ---------- Background Worker (RQ) ----------
   - type: worker
     name: editdna-worker
     env: python
@@ -39,4 +43,6 @@ services:
       - key: AWS_REGION
         sync: false
       - key: S3_BUCKET
+        sync: false
+      - key: S3_PUBLIC_BASE
         sync: false
