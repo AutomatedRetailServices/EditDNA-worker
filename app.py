@@ -1,92 +1,110 @@
-# app.py
-import os, json, datetime as dt
-from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import JSONResponse
-from pydantic import BaseModel
+# app.py  — FastAPI + RQ 1.16 compatible
+import os, time, json
 import redis
-from rq import Queue, job as rq_job
+from fastapi import FastAPI, Body, HTTPException
+from fastapi.responses import JSONResponse
+from rq import Queue
+from rq.job import Job   # <-- correct place to import Job in RQ 1.16
 
-# ---- Redis & RQ (MUST be identical for web & worker services) ----
-REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379")
-r = redis.from_url(REDIS_URL)
-q = Queue("default", connection=r)  # use same queue name "default"
+# ----------------------------------------------------
+# Redis / RQ setup
+# ----------------------------------------------------
+REDIS_URL = os.getenv("REDIS_URL", "")
+if not REDIS_URL:
+    raise RuntimeError("Missing REDIS_URL environment variable")
 
-# ---- import the functions by name (callables) from worker.py ----
-from worker import task_nop, check_urls, analyze_session
+# IMPORTANT: keep decode_responses=False for RQ internals
+conn = redis.from_url(REDIS_URL, decode_responses=False)
+q = Queue("default", connection=conn)
 
-app = FastAPI()
+# Import your worker functions by module path strings
+# so RQ can resolve them in the worker process.
+TASK_NOP = "worker.task_nop"
+TASK_CHECK_URLS = "worker.check_urls"
+TASK_ANALYZE_SESSION = "worker.analyze_session"
 
-# ------------ Pydantic payloads ------------
-class ProcessURLsPayload(BaseModel):
-    session_id: str | None = None
-    urls: list[str]
+# ----------------------------------------------------
+# FastAPI app
+# ----------------------------------------------------
+app = FastAPI(title="editdna API", version="1.0.0")
 
-class AnalyzePayload(BaseModel):
-    session_id: str
-    tone: str | None = None
-    product_link: str | None = None
-    features_csv: str | None = None
-
-# ------------ Helpers ------------
-def serialize_job(j: rq_job.Job):
-    return {
-        "job_id": j.id,
-        "status": j.get_status(),
-        "result": j.result,
-        "error": j.meta.get("error") if hasattr(j, "meta") else None,
-        "enqueued_at": j.enqueued_at.isoformat() if j.enqueued_at else None,
-        "ended_at": j.ended_at.isoformat() if j.ended_at else None,
-    }
-
-# ------------ Routes ------------
 @app.get("/")
 def root():
-    return {"ok": True, "service": "editdna-web", "queue": q.name}
+    return {"ok": True, "service": "editdna", "time": int(time.time())}
 
 @app.get("/admin/health")
 def health():
-    # show simple registry counts to know worker is connected to same Redis
-    from rq.registry import FailedJobRegistry, FinishedJobRegistry, StartedJobRegistry, ScheduledJobRegistry, DeferredJobRegistry
-    def count(reg):
-        try:
-            return len(reg.get_job_ids())
-        except Exception:
-            return -1
-    return {
-        "ok": True,
-        "registries": {
-            "queued": q.count,
-            "started": count(StartedJobRegistry(q)),
-            "scheduled": count(ScheduledJobRegistry(q)),
-            "deferred": count(DeferredJobRegistry(q)),
-            "failed": count(FailedJobRegistry(q)),
-            "finished": count(FinishedJobRegistry(q)),
-        }
-    }
+    try:
+        conn.ping()
+        return {"status": "ok"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
+# ----------------------------------------------------
+# Simple test job to prove queue+worker works
+# ----------------------------------------------------
 @app.post("/enqueue_nop")
-def enqueue_nop():
-    job = q.enqueue(task_nop)          # <— callable, NOT a string
-    return {"ok": True, "job_id": job.id}
+def enqueue_nop(payload: dict = Body(default={"echo": {"hello": "world"}})):
+    # payload is optional; worker just returns {"echo":{"hello":"world"}}
+    job = q.enqueue(TASK_NOP, job_timeout=300)
+    return {"job_id": job.get_id()}
 
+# ----------------------------------------------------
+# Step 1: check your S3 video URLs are reachable
+# Body example:
+# { "session_id": "sess-123", "urls": ["https://.../IMG_4856.mov", "..."] }
+# ----------------------------------------------------
+@app.post("/process_urls")
+def process_urls(payload: dict = Body(...)):
+    if "urls" not in payload or not isinstance(payload["urls"], list) or not payload["urls"]:
+        raise HTTPException(status_code=400, detail="Provide 'urls': [ ... ]")
+    # session_id is optional; worker will make one if missing
+    job = q.enqueue(TASK_CHECK_URLS, payload, job_timeout=600)
+    return {"job_id": job.get_id()}
+
+# ----------------------------------------------------
+# Step 2: analyze the session (dummy for now; echoes back)
+# Body example:
+# {
+#   "session_id": "sess-123",
+#   "tone": "friendly",
+#   "product_link": "https://example.com",
+#   "features_csv": "fast, compact, lightweight"
+# }
+# ----------------------------------------------------
+@app.post("/analyze")
+def analyze(payload: dict = Body(...)):
+    if not payload.get("session_id"):
+        raise HTTPException(status_code=400, detail="Missing 'session_id'")
+    job = q.enqueue(TASK_ANALYZE_SESSION, payload, job_timeout=1800)
+    return {"job_id": job.get_id()}
+
+# ----------------------------------------------------
+# Poll job status/result
+# ----------------------------------------------------
 @app.get("/jobs/{job_id}")
 def get_job(job_id: str):
-    j = rq_job.Job.fetch(job_id, connection=r)
-    if not j:
-        raise HTTPException(status_code=404, detail="unknown_job_id")
-    return serialize_job(j)
+    try:
+        job = Job.fetch(job_id, connection=conn)
+    except Exception:
+        raise HTTPException(status_code=404, detail="Job not found")
 
-@app.post("/process_urls")
-async def process_urls(req: Request):
-    data = await req.json()
-    payload = ProcessURLsPayload(**data)
-    job = q.enqueue(check_urls, payload.model_dump())
-    # return the session_id so you can reuse it in /analyze later
-    return {"ok": True, "job_id": job.id, "session_id": payload.session_id or ""}
+    data = {
+        "job_id": job_id,
+        "status": job.get_status(),
+        "result": None,
+        "error": None,
+        "enqueued_at": job.enqueued_at.isoformat() if job.enqueued_at else None,
+        "ended_at": job.ended_at.isoformat() if job.ended_at else None,
+    }
 
-@app.post("/analyze")
-async def analyze(req: Request):
-    data = await req.json()
-    payload = AnalyzePayload(**data)
-    job = q.enqueue(analyze_session, payload.model_dump())
-    return {"ok": True, "job_id": job.id}
+    if job.is_failed:
+        # include stringified error
+        try:
+            data["error"] = str(job.exc_info or job.meta.get("error"))
+        except Exception:
+            data["error"] = "Job failed"
+    elif job.is_finished:
+        data["result"] = job.result
+
+    return JSONResponse(data)
