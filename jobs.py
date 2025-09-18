@@ -24,7 +24,7 @@ def _write_concat_file(file_paths: List[str], concat_txt_path: str) -> None:
     """
     with open(concat_txt_path, "w", encoding="utf-8") as f:
         for p in file_paths:
-            # escape single quotes for ffmpeg concat list
+            # Escape single quotes for ffmpeg concat list
             escaped = p.replace("'", "'\\''")
             line = "file '{}'\n".format(escaped)
             f.write(line)
@@ -37,9 +37,19 @@ def _sorted_by_name(paths: List[str]) -> List[str]:
 
 def _run(cmd: List[str]) -> None:
     """Run a shell command and raise on error (captures output for Render logs)."""
-    proc = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, check=False, text=True)
+    proc = subprocess.run(
+        cmd,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        check=False,
+        text=True,
+    )
     if proc.returncode != 0:
-        raise RuntimeError(f"Command failed ({proc.returncode}): {' '.join(cmd)}\n---\n{proc.stdout}\n---")
+        raise RuntimeError(
+            "Command failed ({}): {}\n---\n{}\n---".format(
+                proc.returncode, " ".join(cmd), proc.stdout
+            )
+        )
 
 
 def render_from_files(
@@ -62,7 +72,7 @@ def render_from_files(
 
     ffmpeg = _find_ffmpeg()
 
-    workdir = tempfile.mkdtemp(prefix=f"editdna-{session_id}-")
+    workdir = tempfile.mkdtemp(prefix="editdna-{}-".format(session_id))
     clips_dir = os.path.join(workdir, "clips")
     os.makedirs(clips_dir, exist_ok=True)
 
@@ -79,13 +89,13 @@ def render_from_files(
         concat_txt = os.path.join(workdir, "concat.txt")
         _write_concat_file(ordered, concat_txt)
 
-        out_path = os.path.join(workdir, f"{session_id}.mp4")
+        out_path = os.path.join(workdir, "{}.mp4".format(session_id))
 
         # Scale and pad to vertical 9:16 while preserving aspect
         vf = (
-            f"scale=w={target_width}:h={target_height}:force_original_aspect_ratio=decrease,"
-            f"pad={target_width}:{target_height}:(ow-iw)/2:(oh-ih)/2:color=black"
-        )
+            "scale=w={}:h={}:force_original_aspect_ratio=decrease,"
+            "pad:{}:{}:(ow-iw)/2:(oh-ih)/2:color=black"
+        ).format(target_width, target_height, target_width, target_height)
 
         cmd = [
             ffmpeg, "-y",
@@ -100,9 +110,21 @@ def render_from_files(
         _run(cmd)
 
         # 4) Upload
-        s3_uri = upload_file(out_path, key_prefix=f"{output_key_prefix.strip('/')}/{session_id}", content_type="video/mp4")
+        s3_uri = upload_file(
+            out_path,
+            key_prefix="{}/{}".format(output_key_prefix.strip("/"), session_id),
+            content_type="video/mp4",
+        )
 
         return {
             "ok": True,
             "session_id": session_id,
             "inputs": len(input_s3_urls),
+            "output_s3": s3_uri,
+        }
+    finally:
+        # 5) Cleanup
+        try:
+            shutil.rmtree(workdir, ignore_errors=True)
+        except Exception:
+            pass
