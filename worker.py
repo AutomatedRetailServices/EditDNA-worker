@@ -40,10 +40,10 @@ def _safe_run(cmd: List[str]) -> Dict[str, Any]:
         return {"ok": False, "stdout": "", "stderr": str(e), "code": -1}
 
 def _write_concat_txt(paths: List[str], txt_path: str) -> None:
-    # allow HTTPS inputs for concat demuxer: use -safe 0 AND prepend "file " with quoted URL
+    # ffconcat text file; allow HTTPS inputs
     with open(txt_path, "w", encoding="utf-8") as f:
+        f.write("ffconcat version 1.0\n")
         for p in paths:
-            # escape single quotes for ffmpeg concat format
             esc = p.replace("'", "'\\''")
             f.write(f"file '{esc}'\n")
 
@@ -52,14 +52,18 @@ def _ffmpeg_concat_to_mp4(sources: List[str], out_path: str, portrait: bool = Tr
         concat_txt = os.path.join(td, "concat.txt")
         _write_concat_txt(sources, concat_txt)
 
-        vf = "scale=w=1080:h=1920:force_original_aspect_ratio=decrease,pad=1080:1920:(ow-iw)/2:(oh-ih)/2:color=black" if portrait \
-            else "scale=w=1920:h=1080:force_original_aspect_ratio=decrease,pad=1920:1080:(ow-iw)/2:(oh-ih)/2:color=black"
+        vf = ("scale=w=1080:h=1920:force_original_aspect_ratio=decrease,"
+              "pad=1080:1920:(ow-iw)/2:(oh-ih)/2:color=black") if portrait else \
+             ("scale=w=1920:h=1080:force_original_aspect_ratio=decrease,"
+              "pad=1920:1080:(ow-iw)/2:(oh-ih)/2:color=black")
 
         cmd = [
             "ffmpeg",
             "-y",
             "-analyzeduration", "100M",
             "-probesize", "100M",
+            # >>> allow HTTPS/TLS with concat demuxer <<<
+            "-protocol_whitelist", "file,https,tcp,tls,crypto,data",
             "-safe", "0",
             "-f", "concat",
             "-i", concat_txt,
@@ -190,34 +194,21 @@ def analyze_session(payload: Dict[str, Any]) -> Dict[str, Any]:
 
 # =========================================================
 # 3) Render (S3/public URLs) — SINGLE PAYLOAD ARG
-# payload = {
-#   "session_id": "...",
-#   "files": [https/s3 urls],
-#   "output_prefix": "editdna/outputs"  # optional passthrough
-# }
+# payload = { "session_id": "...", "files": [urls], "output_prefix": "editdna/outputs" }
 # returns { ok, session_id, output | error }
 # =========================================================
 def job_render(payload: Dict[str, Any]) -> Dict[str, Any]:
     session_id = payload.get("session_id") or f"sess-{int(time.time())}"
     files: List[str] = payload.get("files") or []
-    out_prefix = payload.get("output_prefix")  # not used here, just passthrough if you later upload
-
     if not files:
         return {"ok": False, "session_id": session_id, "error": "No input files provided."}
 
-    # output file in /tmp
-    td = tempfile.mkdtemp(prefix=f"editdna-{session_id}-")
-    out_mp4 = os.path.join(td, f"{session_id}.mp4")
+    workdir = tempfile.mkdtemp(prefix=f"editdna-{session_id}-")
+    out_mp4 = os.path.join(workdir, f"{session_id}.mp4")
 
-    # do concat (portrait safe)
     r = _ffmpeg_concat_to_mp4(files, out_mp4, portrait=True)
     if not r.get("ok"):
-        return {
-            "ok": False,
-            "session_id": session_id,
-            "error": f"ffmpeg failed:\n{r.get('stderr','')}"
-        }
-
+        return {"ok": False, "session_id": session_id, "error": f"ffmpeg failed:\n{r.get('stderr','')}"}
     return {"ok": True, "session_id": session_id, "output": out_mp4}
 
 # =========================================================
@@ -236,7 +227,6 @@ def job_render_chunked(payload: Dict[str, Any]) -> Dict[str, Any]:
 
     workdir = tempfile.mkdtemp(prefix=f"editdna-{session_id}-")
     partials: List[str] = []
-    # 1) Render chunks
     for idx, group in enumerate(_chunk(files, chunk_size), start=1):
         part_out = os.path.join(workdir, f"part_{idx:03d}.mp4")
         r = _ffmpeg_concat_to_mp4(group, part_out, portrait=True)
@@ -244,7 +234,6 @@ def job_render_chunked(payload: Dict[str, Any]) -> Dict[str, Any]:
             return {"ok": False, "session_id": session_id, "error": f"ffmpeg chunk {idx} failed:\n{r.get('stderr','')}"}
         partials.append(part_out)
 
-    # 2) Stitch partials
     final_out = os.path.join(workdir, f"{session_id}.mp4")
     r2 = _ffmpeg_concat_to_mp4(partials, final_out, portrait=True)
     if not r2.get("ok"):
