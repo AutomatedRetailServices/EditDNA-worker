@@ -1,86 +1,102 @@
 import os
-import tempfile
+import shlex
 import subprocess
-import requests
-from typing import Dict, List
+import tempfile
+from pathlib import Path
+from typing import Iterable, List, Optional
 
+
+# ---------------------------------------------------------------------
+# Public RQ tasks (these names must stay exactly like this)
+# ---------------------------------------------------------------------
 
 def task_nop():
-    """Tiny test job to verify queue/worker wiring."""
+    # Small, fast job to verify the queue/worker plumbing.
     return {"echo": {"hello": "world"}}
 
 
-def _download_to_tmp(url: str, session_id: str, idx: int) -> str:
-    """Download a remote file to /tmp and return the local path."""
-    # Keep the extension (helps ffmpeg input probing)
-    ext = os.path.splitext(url.split("?")[0])[-1] or ".mov"
-    local_path = f"/tmp/{session_id}_{idx}{ext}"
-    with requests.get(url, stream=True, timeout=60) as r:
-        r.raise_for_status()
-        with open(local_path, "wb") as f:
-            for chunk in r.iter_content(chunk_size=1024 * 1024):
-                if chunk:
-                    f.write(chunk)
-    return local_path
-
-
-def job_render(data: Dict) -> Dict:
+def job_render(session_id: str, files: List[str], output_prefix: Optional[str] = "editdna/outputs"):
     """
-    Expects:
-    {
-      "session_id": "sess-demo-001",
-      "files": ["https://.../a.mov", "https://.../b.mov", ...],
-      "output_prefix": "editdna/outputs"
-    }
-    Returns:
-      {"ok": True, "session_id": "...", "output": "/tmp/.../sess-demo-001.mp4"}
-      or {"ok": False, "session_id": "...", "error": "ffmpeg failed: ..."}
+    Concatenate remote HTTPS videos into a single vertical 1080x1920 MP4.
+    - session_id: identifier for temporary work dir and output file name
+    - files: list of HTTPS URLs (strings). May be iPhone HEVC/LPCM etc.
+    - output_prefix: kept for compatibility; output is written under /tmp
     """
-    session_id: str = data["session_id"]
-    urls: List[str] = data["files"]
-    output_prefix: str = data.get("output_prefix", "editdna/outputs")
+    # Ensure all entries are plain strings
+    sources = [str(u) for u in files]
 
-    # Download all inputs first (avoid ffmpeg HTTPS whitelist issues)
-    local_inputs: List[str] = []
-    for i, u in enumerate(urls):
-        local_inputs.append(_download_to_tmp(u, session_id, i))
+    # Work dir under /tmp to keep things ephemeral
+    tmpdir = Path(tempfile.mkdtemp(prefix=f"editdna-sess-{session_id}-"))
+    concat_txt = tmpdir / "concat.txt"
+    out_mp4 = tmpdir / f"{session_id}.mp4"
 
-    tmpdir = tempfile.mkdtemp(prefix=f"editdna-{session_id}-")
-    concat_file = os.path.join(tmpdir, "concat.txt")
-    with open(concat_file, "w") as f:
-        for path in local_inputs:
-            # Escape single quotes in paths for ffmpeg concat demuxer
-            safe = path.replace("'", r"'\''")
-            f.write(f"file '{safe}'\n")
+    try:
+        _write_concat_txt(concat_txt, sources)
+        _ffmpeg_concat_to_mp4(concat_txt, out_mp4, portrait=True)
+        return {"ok": True, "session_id": session_id, "output": str(out_mp4)}
+    except subprocess.CalledProcessError as e:
+        # Surface full ffmpeg stdout/stderr for debugging in /jobs
+        return {"ok": False, "session_id": session_id, "error": f"ffmpeg failed:\n{e.stderr.decode('utf-8', errors='ignore') if e.stderr else str(e)}"}
+    except Exception as e:
+        return {"ok": False, "session_id": session_id, "error": str(e)}
 
-    output_path = os.path.join(tmpdir, f"{session_id}.mp4")
 
-    # Build ffmpeg command. We intentionally DO NOT pass analyzeduration/probesize
-    # overrides here; default 5.1.7 values are usually fine after local download.
+# ---------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------
+
+def _write_concat_txt(path: Path, urls: Iterable[str]) -> None:
+    """
+    Create a concat demuxer file list with HTTPS sources.
+    Properly escape single quotes; do not append stray characters.
+    """
+    with path.open("w", encoding="utf-8") as f:
+        for u in urls:
+            # escape single quotes for ffmpeg file list
+            esc = str(u).replace("'", r"'\'\''")
+            f.write(f"file '{esc}'\n")
+
+
+def _ffmpeg_concat_to_mp4(concat_txt: Path, out_mp4: Path, portrait: bool = True) -> None:
+    """
+    Run ffmpeg concat demuxer with protocol whitelist for HTTPS.
+    Re-encodes video to H.264 + AAC; handles rotation/padding to 1080x1920 when portrait=True.
+    """
+    vf = []
+    if portrait:
+        vf = [
+            "-vf",
+            "scale=w=1080:h=1920:force_original_aspect_ratio=decrease,"
+            "pad=1080:1920:(ow-iw)/2:(oh-ih)/2:color=black",
+        ]
+
     cmd = [
         "ffmpeg",
         "-y",
-        "-f", "concat",
+        # Make remote probing robust, and allow https/tls/tcp
+        "-protocol_whitelist", "file,crypto,data,https,tls,tcp",
+        "-analyzeduration", "100M",
+        "-probesize", "100M",
         "-safe", "0",
-        "-i", concat_file,
-        "-ignore_unknown", "1",  # ignore odd metadata tracks from iPhone files
-        "-vf",
-        (
-            "scale=w=1080:h=1920:force_original_aspect_ratio=decrease,"
-            "pad=1080:1920:(ow-iw)/2:(oh-ih)/2:color=black"
-        ),
+        "-f", "concat",
+        "-i", str(concat_txt),
+        "-ignore_unknown", "1",
+        *vf,
         "-c:v", "libx264",
         "-preset", "veryfast",
         "-crf", "23",
         "-c:a", "aac",
         "-b:a", "128k",
         "-movflags", "+faststart",
-        output_path,
+        str(out_mp4),
     ]
 
-    try:
-        subprocess.check_output(cmd, stderr=subprocess.STDOUT)
-        return {"ok": True, "session_id": session_id, "output": output_path}
-    except subprocess.CalledProcessError as e:
-        return {"ok": False, "session_id": session_id, "error": f"ffmpeg failed:\n{e.output.decode(errors='ignore')}"}
-
+    # Run and capture stderr for error diagnostics
+    proc = subprocess.run(
+        cmd,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=True,
+    )
+    # Optional: return code already checked; if you want logs:
+    # print(proc.stderr.decode("utf-8", errors="ignore"))
