@@ -24,13 +24,13 @@ services:
         sync: false
 
   # ---------- Background Worker (RQ) ----------
-  - type: worker
+   - type: worker
     name: editdna-worker
     env: python
     plan: starter
     buildCommand: pip install -r requirements.txt
-    startCommand: rq worker -u $REDIS_URL default
-    autoDeploy: true
+    startCommand: python -m rq worker -u $REDIS_URL default
+    autoDeploy: false        # <-- prevent restarts while a job is running
     envVars:
       - key: PYTHON_VERSION
         value: 3.11.9
@@ -41,4 +41,8 @@ services:
       - key: AWS_ACCESS_KEY_ID
         sync: false
       - key: AWS_SECRET_ACCESS_KEY
+        sync: false
+      - key: AWS_REGION
+        sync: false
+      - key: S3_BUCKET
         sync: false
