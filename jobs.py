@@ -9,12 +9,10 @@ from s3_utils import download_to_tmp, upload_file
 
 
 def _find_ffmpeg() -> str:
-    """Prefer system ffmpeg (you have it via apt.txt)."""
     return os.getenv("FFMPEG_PATH", "ffmpeg")
 
 
 def _run(cmd: List[str]) -> None:
-    """Run a shell command and raise on error (captures output for logs)."""
     proc = subprocess.run(
         cmd,
         stdout=subprocess.PIPE,
@@ -38,14 +36,15 @@ def render_from_files(
     session_id: str,
     input_s3_urls: List[str],
     output_key_prefix: str,
-    target_width: int = 1080,
-    target_height: int = 1920,
+    # ↓ reduce output size to cut CPU/RAM on starter plan
+    target_width: int = 720,
+    target_height: int = 1280,
 ) -> Dict[str, Any]:
     """
     Robust V1 renderer (video-only):
       - Downloads inputs from S3
       - Scales/pads each clip to 9:16
-      - Concatenates via filter_complex (re-encodes, so mixed codecs are OK)
+      - Concatenates via filter_complex (re-encodes; mixed codecs OK)
       - Uploads MP4 back to S3
     """
     if not input_s3_urls:
@@ -53,7 +52,7 @@ def render_from_files(
 
     ffmpeg = _find_ffmpeg()
 
-    workdir = tempfile.mkdtemp(prefix="editdna-{}-".format(session_id))
+    workdir = tempfile.mkdtemp(prefix=f"editdna-{session_id}-")
     clips_dir = os.path.join(workdir, "clips")
     os.makedirs(clips_dir, exist_ok=True)
 
@@ -65,22 +64,19 @@ def render_from_files(
 
         ordered = _sorted_by_name(local_paths)
 
-        # 2) Build ffmpeg inputs
+        # 2) Inputs
         cmd: List[str] = [
             ffmpeg, "-y",
-            "-nostdin",               # never wait for tty input
-            "-hide_banner",
+            "-nostdin", "-hide_banner",
             "-loglevel", "info",
-            "-analyzeduration", "100M",
-            "-probesize", "100M",
+            "-analyzeduration", "100M", "-probesize", "100M",
         ]
         for p in ordered:
             cmd += ["-i", p]
 
-        # 3) Build filter_complex for N inputs
+        # 3) Filter graph
         n = len(ordered)
-        per_inputs = []
-        vlabels = []
+        per_inputs, vlabels = [], []
         for i in range(n):
             vi = f"v{i}"
             per_inputs.append(
@@ -89,39 +85,29 @@ def render_from_files(
                 f"format=yuv420p,setsar=1[{vi}]"
             )
             vlabels.append(f"[{vi}]")
+        filter_complex = ";".join(per_inputs + [ "".join(vlabels) + f"concat=n={n}:v=1:a=0[v]" ])
 
-        concat_part = "".join(vlabels) + f"concat=n={n}:v=1:a=0[v]"
-        filter_complex = ";".join(per_inputs + [concat_part])
+        out_path = os.path.join(workdir, f"{session_id}.mp4")
 
         cmd += [
             "-filter_complex", filter_complex,
             "-map", "[v]",
-            "-an",                           # video-only output (V1)
-            "-c:v", "libx264",
-            "-preset", "veryfast",
-            "-crf", "23",
+            "-an",
+            "-c:v", "libx264", "-preset", "veryfast", "-crf", "23",
             "-movflags", "+faststart",
+            "-max_muxing_queue_size", "9999",
+            "-threads", "1",                # ↓ keep memory/CPU low
+            out_path,
         ]
 
-        out_path = os.path.join(workdir, "{}.mp4".format(session_id))
-        cmd += [out_path]
-
-        # 4) Run ffmpeg
         _run(cmd)
 
-        # 5) Upload to S3
         s3_uri = upload_file(
             out_path,
-            key_prefix="{}/{}".format(output_key_prefix.strip("/"), session_id),
+            key_prefix=f"{output_key_prefix.strip('/')}/{session_id}",
             content_type="video/mp4",
         )
-
-        return {
-            "ok": True,
-            "session_id": session_id,
-            "inputs": len(input_s3_urls),
-            "output_s3": s3_uri,
-        }
+        return {"ok": True, "session_id": session_id, "inputs": len(input_s3_urls), "output_s3": s3_uri}
     finally:
         try:
             shutil.rmtree(workdir, ignore_errors=True)
