@@ -27,6 +27,7 @@ if _openai_import_ok and OPENAI_API_KEY:
 else:
     _openai_client_ok = False
 
+
 # ------------------------------------------------
 # Helpers
 # ------------------------------------------------
@@ -39,6 +40,7 @@ def _safe_run(cmd: List[str]) -> Dict[str, Any]:
     except Exception as e:
         return {"ok": False, "stdout": "", "stderr": str(e), "code": -1}
 
+
 def _write_concat_txt(paths: List[str], txt_path: str) -> None:
     # ffconcat text file; allow HTTPS inputs
     with open(txt_path, "w", encoding="utf-8") as f:
@@ -46,6 +48,7 @@ def _write_concat_txt(paths: List[str], txt_path: str) -> None:
         for p in paths:
             esc = p.replace("'", "'\\''")
             f.write(f"file '{esc}'\n")
+
 
 def _ffmpeg_concat_to_mp4(sources: List[str], out_path: str, portrait: bool = True) -> Dict[str, Any]:
     with tempfile.TemporaryDirectory(prefix="editdna-") as td:
@@ -62,13 +65,19 @@ def _ffmpeg_concat_to_mp4(sources: List[str], out_path: str, portrait: bool = Tr
             "-y",
             "-analyzeduration", "100M",
             "-probesize", "100M",
-            # >>> allow HTTPS/TLS with concat demuxer <<<
+            # allow HTTPS/TLS with concat demuxer
             "-protocol_whitelist", "file,https,tcp,tls,crypto,data",
             "-safe", "0",
+            # IMPORTANT: input-scoped options BEFORE -i
+            "-ignore_unknown",
             "-f", "concat",
             "-i", concat_txt,
-            "-ignore_unknown", "1",
+            # map only video + audio, ignore weird streams
+            "-map", "0:v:0?",
+            "-map", "0:a:0?",
             "-vf", vf,
+            "-vsync", "2",
+            "-pix_fmt", "yuv420p",
             "-c:v", "libx264",
             "-preset", "veryfast",
             "-crf", "23",
@@ -79,14 +88,17 @@ def _ffmpeg_concat_to_mp4(sources: List[str], out_path: str, portrait: bool = Tr
         ]
         return _safe_run(cmd)
 
+
 def _chunk(lst: List[str], n: int) -> List[List[str]]:
     return [lst[i:i+n] for i in range(0, len(lst), n)]
+
 
 # =========================================================
 # 0) Tiny test job
 # =========================================================
 def task_nop() -> Dict[str, Any]:
     return {"echo": {"hello": "world"}}
+
 
 # =========================================================
 # 1) Check S3/public URLs (HEAD)
@@ -112,16 +124,19 @@ def _head(url: str, timeout: float = 20.0) -> Dict[str, Any]:
             "error": str(e),
         }
 
+
 def check_urls(payload: Dict[str, Any]) -> Dict[str, Any]:
     urls = payload.get("urls") or []
     sess = payload.get("session_id") or f"sess-{int(time.time())}"
     checked = [_head(u) for u in urls]
     return {"session_id": sess, "checked": checked}
 
+
 # =========================================================
 # 2) Analyze session (OpenAI optional)
 # =========================================================
 _OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
+
 
 def _make_prompt(session_id: str, tone: str, product_link: str, features: List[str]) -> str:
     feat_str = ", ".join(features) if features else "key features"
@@ -131,6 +146,7 @@ def _make_prompt(session_id: str, tone: str, product_link: str, features: List[s
         f"Keep it 3–5 sentences, engaging, and suitable for voiceover."
     )
 
+
 def _parse_features(payload: Dict[str, Any]) -> List[str]:
     feats: List[str] = []
     csv = (payload.get("features_csv") or "").strip()
@@ -139,6 +155,7 @@ def _parse_features(payload: Dict[str, Any]) -> List[str]:
     if not feats and isinstance(payload.get("features"), list):
         feats = [str(x).strip() for x in payload["features"] if str(x).strip()]
     return feats
+
 
 def analyze_session(payload: Dict[str, Any]) -> Dict[str, Any]:
     sess = payload.get("session_id") or f"sess-{int(time.time())}"
@@ -192,6 +209,7 @@ def analyze_session(payload: Dict[str, Any]) -> Dict[str, Any]:
         out["openai_diag"] = diag
         return out
 
+
 # =========================================================
 # 3) Render (S3/public URLs) — SINGLE PAYLOAD ARG
 # payload = { "session_id": "...", "files": [urls], "output_prefix": "editdna/outputs" }
@@ -210,6 +228,7 @@ def job_render(payload: Dict[str, Any]) -> Dict[str, Any]:
     if not r.get("ok"):
         return {"ok": False, "session_id": session_id, "error": f"ffmpeg failed:\n{r.get('stderr','')}"}
     return {"ok": True, "session_id": session_id, "output": out_mp4}
+
 
 # =========================================================
 # 4) Render (chunked) — SINGLE PAYLOAD ARG
@@ -240,6 +259,7 @@ def job_render_chunked(payload: Dict[str, Any]) -> Dict[str, Any]:
         return {"ok": False, "session_id": session_id, "error": f"ffmpeg final merge failed:\n{r2.get('stderr','')}"}
 
     return {"ok": True, "session_id": session_id, "output": final_out}
+
 
 # =========================================================
 # 5) Diagnostics
@@ -275,6 +295,7 @@ def diag_openai() -> Dict[str, Any]:
         result["attempts"][-1]["error"] = str(e)
         result["last_error"] = str(e)
         return result
+
 
 def net_probe() -> Dict[str, Any]:
     out = {"dns": None, "tls": None}
