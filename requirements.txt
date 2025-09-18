@@ -9,3 +9,4 @@ boto3==1.35.20
 redis==5.0.8
 rq==1.16.2
 python-dotenv==1.1.1
+imageio-ffmpeg==0.5.1
