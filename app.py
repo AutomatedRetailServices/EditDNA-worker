@@ -67,7 +67,7 @@ def process_urls(payload: dict = Body(...)):
     return {"job_id": job.get_id(), "session_id": session_id}
 
 # -------------------------
-# 2) Analyze (OpenAI or stub) 
+# 2) Analyze (OpenAI or stub)
 # Body: { "session_id": "...", "product_link": "...", "features_csv": "a,b,c", "tone": "casual" }
 # -------------------------
 @app.post("/analyze")
