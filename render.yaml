@@ -12,8 +12,8 @@ services:
         value: 3.11.9
       - key: REDIS_URL
         sync: false
-      - key: OPENAI_API_KEY       # 🔑 add this
-        sync: false               # set the secret in the dashboard
+   - key: OPENAI_API_KEY
+  sync: false
       - key: AWS_ACCESS_KEY_ID
         sync: false
       - key: AWS_SECRET_ACCESS_KEY
@@ -36,7 +36,7 @@ services:
         value: 3.11.9
       - key: REDIS_URL
         sync: false
-      - key: OPENAI_API_KEY       # 🔑 add this here too
+      - key: OPENAI_API_KEY
         sync: false
       - key: AWS_ACCESS_KEY_ID
         sync: false
