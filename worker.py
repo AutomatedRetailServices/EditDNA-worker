@@ -1,14 +1,14 @@
-# worker.py — RQ task definitions (render + analyze + diagnostics)
+# worker.py — RQ task definitions (supports both 3-arg and dict payload)
 import os
 import time
 import socket
 import json
 import subprocess
 import tempfile
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Tuple, Union
 import requests
 
-# -------- OpenAI (v1.x) --------
+# -------- OpenAI (v1.x) optional --------
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
 try:
     from openai import OpenAI
@@ -29,7 +29,7 @@ else:
 
 
 # ------------------------------------------------
-# Helpers
+# helpers
 # ------------------------------------------------
 def _safe_run(cmd: List[str]) -> Dict[str, Any]:
     try:
@@ -42,7 +42,7 @@ def _safe_run(cmd: List[str]) -> Dict[str, Any]:
 
 
 def _write_concat_txt(paths: List[str], txt_path: str) -> None:
-    # ffconcat text file; allow HTTPS inputs
+    # ffconcat file; allow https inputs
     with open(txt_path, "w", encoding="utf-8") as f:
         f.write("ffconcat version 1.0\n")
         for p in paths:
@@ -65,14 +65,14 @@ def _ffmpeg_concat_to_mp4(sources: List[str], out_path: str, portrait: bool = Tr
             "-y",
             "-analyzeduration", "100M",
             "-probesize", "100M",
-            # allow HTTPS/TLS with concat demuxer
+            # allow https/tls with concat demuxer
             "-protocol_whitelist", "file,https,tcp,tls,crypto,data",
             "-safe", "0",
-            # IMPORTANT: input-scoped options BEFORE -i
+            # input-scoped options BEFORE -i
             "-ignore_unknown",
             "-f", "concat",
             "-i", concat_txt,
-            # map only video + audio, ignore weird streams
+            # only map video/audio; ignore weird streams
             "-map", "0:v:0?",
             "-map", "0:a:0?",
             "-vf", vf,
@@ -93,36 +93,50 @@ def _chunk(lst: List[str], n: int) -> List[List[str]]:
     return [lst[i:i+n] for i in range(0, len(lst), n)]
 
 
+def _coerce_payload_for_render(*args, **kwargs) -> Tuple[str, List[str], str]:
+    """
+    Accept either:
+      job_render('sess', [urls], 'prefix')
+    or
+      job_render({'session_id': 'sess', 'files':[urls], 'output_prefix':'prefix'})
+    """
+    if args and isinstance(args[0], dict):
+        payload = args[0]
+        session_id = payload.get("session_id") or f"sess-{int(time.time())}"
+        files = list(payload.get("files") or [])
+        output_prefix = str(payload.get("output_prefix") or "")
+        return session_id, files, output_prefix
+
+    if len(args) >= 2:
+        session_id = str(args[0]) if args[0] else f"sess-{int(time.time())}"
+        files = list(args[1] or [])
+        output_prefix = str(args[2]) if len(args) >= 3 and args[2] else ""
+        return session_id, files, output_prefix
+
+    # kwargs fallback
+    session_id = kwargs.get("session_id") or f"sess-{int(time.time())}"
+    files = list(kwargs.get("files") or [])
+    output_prefix = str(kwargs.get("output_prefix") or "")
+    return session_id, files, output_prefix
+
+
 # =========================================================
-# 0) Tiny test job
+# 0) tiny test
 # =========================================================
 def task_nop() -> Dict[str, Any]:
     return {"echo": {"hello": "world"}}
 
 
 # =========================================================
-# 1) Check S3/public URLs (HEAD)
+# 1) url checks
 # =========================================================
 def _head(url: str, timeout: float = 20.0) -> Dict[str, Any]:
     try:
         r = requests.head(url, allow_redirects=True, timeout=timeout)
         size = int(r.headers.get("Content-Length", "0") or 0)
-        return {
-            "url": url,
-            "status": "OK",
-            "http": r.status_code,
-            "size": size,
-            "method": "HEAD",
-        }
+        return {"url": url, "status": "OK", "http": r.status_code, "size": size, "method": "HEAD"}
     except Exception as e:
-        return {
-            "url": url,
-            "status": "ERROR",
-            "http": 0,
-            "size": 0,
-            "method": "HEAD",
-            "error": str(e),
-        }
+        return {"url": url, "status": "ERROR", "http": 0, "size": 0, "method": "HEAD", "error": str(e)}
 
 
 def check_urls(payload: Dict[str, Any]) -> Dict[str, Any]:
@@ -133,18 +147,16 @@ def check_urls(payload: Dict[str, Any]) -> Dict[str, Any]:
 
 
 # =========================================================
-# 2) Analyze session (OpenAI optional)
+# 2) analyze (optional OpenAI)
 # =========================================================
 _OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
 
 
 def _make_prompt(session_id: str, tone: str, product_link: str, features: List[str]) -> str:
     feat_str = ", ".join(features) if features else "key features"
-    return (
-        f"You are a marketing writer. Create a short {tone or 'neutral'} promo script "
-        f"for product {product_link or '(no link)'} based on these features: {feat_str}. "
-        f"Keep it 3–5 sentences, engaging, and suitable for voiceover."
-    )
+    return (f"You are a marketing writer. Create a short {tone or 'neutral'} promo script "
+            f"for product {product_link or '(no link)'} based on these features: {feat_str}. "
+            f"Keep it 3–5 sentences, engaging, and suitable for voiceover.")
 
 
 def _parse_features(payload: Dict[str, Any]) -> List[str]:
@@ -192,14 +204,8 @@ def analyze_session(payload: Dict[str, Any]) -> Dict[str, Any]:
         )
         text = (resp.choices[0].message.content or "").strip()
         diag["attempts"][-1]["ok"] = True
-        return {
-            "session_id": sess,
-            "engine": "openai",
-            "openai_diag": diag,
-            "script": text,
-            "product_link": product_link or None,
-            "features": features,
-        }
+        return {"session_id": sess, "engine": "openai", "openai_diag": diag,
+                "script": text, "product_link": product_link or None, "features": features}
     except Exception as e:
         diag["attempts"][-1]["ok"] = False
         diag["attempts"][-1]["error"] = str(e)
@@ -211,13 +217,10 @@ def analyze_session(payload: Dict[str, Any]) -> Dict[str, Any]:
 
 
 # =========================================================
-# 3) Render (S3/public URLs) — SINGLE PAYLOAD ARG
-# payload = { "session_id": "...", "files": [urls], "output_prefix": "editdna/outputs" }
-# returns { ok, session_id, output | error }
+# 3) render — accepts 3 args OR dict
 # =========================================================
-def job_render(payload: Dict[str, Any]) -> Dict[str, Any]:
-    session_id = payload.get("session_id") or f"sess-{int(time.time())}"
-    files: List[str] = payload.get("files") or []
+def job_render(*args, **kwargs) -> Dict[str, Any]:
+    session_id, files, _output_prefix = _coerce_payload_for_render(*args, **kwargs)
     if not files:
         return {"ok": False, "session_id": session_id, "error": "No input files provided."}
 
@@ -231,8 +234,7 @@ def job_render(payload: Dict[str, Any]) -> Dict[str, Any]:
 
 
 # =========================================================
-# 4) Render (chunked) — SINGLE PAYLOAD ARG
-# payload = { session_id, files, chunk_size, output_prefix }
+# 4) render chunked — accepts dict only (web keeps using single render)
 # =========================================================
 def job_render_chunked(payload: Dict[str, Any]) -> Dict[str, Any]:
     session_id = payload.get("session_id") or f"sess-{int(time.time())}"
@@ -240,7 +242,6 @@ def job_render_chunked(payload: Dict[str, Any]) -> Dict[str, Any]:
     chunk_size = int(payload.get("chunk_size") or 8)
     if chunk_size < 2:
         chunk_size = 2
-
     if not files:
         return {"ok": False, "session_id": session_id, "error": "No input files provided."}
 
@@ -262,7 +263,7 @@ def job_render_chunked(payload: Dict[str, Any]) -> Dict[str, Any]:
 
 
 # =========================================================
-# 5) Diagnostics
+# 5) diagnostics
 # =========================================================
 def diag_openai() -> Dict[str, Any]:
     result = {
