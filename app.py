@@ -1,5 +1,8 @@
 # app.py — FastAPI + RQ (Redis Queue)
-import os, time
+import os
+import time
+from typing import Dict, Any, List, Optional
+
 import redis
 from fastapi import FastAPI, Body, HTTPException
 from fastapi.responses import JSONResponse
@@ -15,6 +18,7 @@ if not REDIS_URL:
 
 # IMPORTANT: keep decode_responses=False (RQ stores bytes)
 conn = redis.from_url(REDIS_URL, decode_responses=False)
+# We keep your existing queue name to match render.yaml
 q = Queue("default", connection=conn)
 
 # ---- Match the functions that exist in worker.py ----
@@ -23,11 +27,12 @@ TASK_CHECK_URLS    = "worker.check_urls"        # ✅ matches worker.py
 TASK_ANALYZE       = "worker.analyze_session"   # ✅ matches worker.py
 TASK_DIAG_OPENAI   = "worker.diag_openai"
 TASK_NET_PROBE     = "worker.net_probe"
+TASK_RENDER        = "worker.job_render"        # ✅ NEW: added in worker.py step 3
 
 # -------------------------
 # FastAPI
 # -------------------------
-app = FastAPI(title="editdna API", version="1.2.1")
+app = FastAPI(title="editdna API", version="1.3.0")
 
 @app.get("/")
 def root():
@@ -75,43 +80,14 @@ def analyze(payload: dict = Body(...)):
     return {"job_id": job.get_id(), "session_id": payload["session_id"]}
 
 # -------------------------
-# 3) Diagnostics
+# 3) NEW — Render job (downloads from S3 → ffmpeg stitch → uploads MP4)
+# Body:
+# {
+#   "session_id": "sess-...",
+#   "files": ["s3://bucket/raw/a.mov", "s3://bucket/raw/b.mov"],
+#   "output_prefix": "editdna/outputs"   # optional
+# }
 # -------------------------
-@app.post("/diag/openai")
-def diag_openai():
-    job = q.enqueue(TASK_DIAG_OPENAI, job_timeout=180)
-    return {"job_id": job.get_id()}
-
-@app.post("/diag/net")
-def diag_net():
-    job = q.enqueue(TASK_NET_PROBE, job_timeout=120)
-    return {"job_id": job.get_id()}
-
-# -------------------------
-# 4) Poll a job
-# -------------------------
-@app.get("/jobs/{job_id}")
-def get_job(job_id: str):
-    try:
-        job = Job.fetch(job_id, connection=conn)
-    except Exception:
-        raise HTTPException(status_code=404, detail="Job not found")
-
-    data = {
-        "job_id": job_id,
-        "status": job.get_status(),
-        "result": None,
-        "error": None,
-        "enqueued_at": job.enqueued_at.isoformat() if job.enqueued_at else None,
-        "ended_at": job.ended_at.isoformat() if job.ended_at else None,
-    }
-
-    if job.is_failed:
-        try:
-            data["error"] = str(job.exc_info or (job.meta or {}).get("error"))
-        except Exception:
-            data["error"] = "Job failed"
-    elif job.is_finished:
-        data["result"] = job.result
-
-    return JSONResponse(data)
+@app.post("/render")
+def render(payload: dict = Body(...)):
+    session_id = payload.get("session_id
