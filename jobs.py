@@ -16,7 +16,11 @@ def _find_ffmpeg() -> str:
 def _run(cmd: List[str]) -> None:
     """Run a shell command and raise on error (captures output for logs)."""
     proc = subprocess.run(
-        cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, check=False, text=True
+        cmd,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        check=False,
+        text=True,
     )
     if proc.returncode != 0:
         raise RuntimeError(
@@ -64,6 +68,9 @@ def render_from_files(
         # 2) Build ffmpeg inputs
         cmd: List[str] = [
             ffmpeg, "-y",
+            "-nostdin",               # never wait for tty input
+            "-hide_banner",
+            "-loglevel", "info",
             "-analyzeduration", "100M",
             "-probesize", "100M",
         ]
@@ -71,14 +78,11 @@ def render_from_files(
             cmd += ["-i", p]
 
         # 3) Build filter_complex for N inputs
-        #    Per input:  [i:v]scale+pad+setsar -> [vi]
-        #    Then:       [v0][v1]...[vN] concat=n=N:v=1:a=0 [v]
         n = len(ordered)
         per_inputs = []
         vlabels = []
         for i in range(n):
             vi = f"v{i}"
-            # format ensures yuv420p, setsar=1 avoids odd aspect ratios
             per_inputs.append(
                 f"[{i}:v]scale=w={target_width}:h={target_height}:force_original_aspect_ratio=decrease,"
                 f"pad={target_width}:{target_height}:(ow-iw)/2:(oh-ih)/2:color=black,"
@@ -92,7 +96,7 @@ def render_from_files(
         cmd += [
             "-filter_complex", filter_complex,
             "-map", "[v]",
-            "-an",                           # video-only output (no audio for V1)
+            "-an",                           # video-only output (V1)
             "-c:v", "libx264",
             "-preset", "veryfast",
             "-crf", "23",
