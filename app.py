@@ -1,94 +1,170 @@
+# app.py — FastAPI + RQ (Render + Worker + S3 + ffmpeg safe enqueue)
 import os
-from typing import List, Optional
+import time
+import redis
 from fastapi import FastAPI, Body, HTTPException
-from pydantic import BaseModel, Field
-from redis import Redis
+from fastapi.responses import JSONResponse
 from rq import Queue
-from datetime import timedelta
+from rq.job import Job
 
-# RQ / Redis
-REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379/0")
-redis_conn = Redis.from_url(REDIS_URL)
-q = Queue("default", connection=redis_conn)
+# -------------------------
+# Redis / RQ
+# -------------------------
+REDIS_URL = os.getenv("REDIS_URL", "")
+if not REDIS_URL:
+    raise RuntimeError("Missing REDIS_URL")
 
-# job timeout (seconds)
-JOB_TIMEOUT = int(os.getenv("JOB_TIMEOUT", "3600"))  # 1 hour default
-RESULT_TTL = int(os.getenv("RESULT_TTL", "500"))
-FAIL_TTL = int(os.getenv("FAIL_TTL", str(7 * 24 * 3600)))  # keep failed jobs 7d
+# IMPORTANT: keep decode_responses=False (RQ stores bytes)
+conn = redis.from_url(REDIS_URL, decode_responses=False)
+q = Queue("default", connection=conn)
 
-# import worker tasks
-from worker import task_nop, job_render  # noqa: E402
+# ---- Worker task names (match worker.py) ----
+TASK_NOP              = "worker.task_nop"
+TASK_CHECK_URLS       = "worker.check_urls"
+TASK_ANALYZE          = "worker.analyze_session"
+TASK_DIAG_OPENAI      = "worker.diag_openai"
+TASK_NET_PROBE        = "worker.net_probe"
+TASK_RENDER           = "worker.job_render"
+TASK_RENDER_CHUNKED   = "worker.job_render_chunked"
 
-app = FastAPI()
-
-class RenderRequest(BaseModel):
-    session_id: str = Field(default="sess-demo-001")
-    files: List[str]
-    output_prefix: str = Field(default="editdna/outputs")
+# -------------------------
+# FastAPI
+# -------------------------
+app = FastAPI(title="editdna API", version="1.3.0")
 
 @app.get("/")
 def root():
-    return {"ok": True, "service": "editdna", "time": int(os.getenv("RENDER_START_TIME", "0")) or __import__("time").time()}
+    return {"ok": True, "service": "editdna", "time": int(time.time())}
 
+@app.get("/admin/health")
+def health():
+    try:
+        conn.ping()
+        return {"status": "ok"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+# -------------------------
+# 0) Tiny test job
+# -------------------------
 @app.post("/enqueue_nop")
-def enqueue_nop():
-    job = q.enqueue(
-        task_nop,
-        job_timeout=JOB_TIMEOUT,
-        result_ttl=RESULT_TTL,
-        failure_ttl=FAIL_TTL,
-        ttl=JOB_TIMEOUT + 60,
-    )
-    return {"job_id": job.id}
+def enqueue_nop(payload: dict = Body(default={"echo": {"hello": "world"}})):
+    job = q.enqueue(TASK_NOP, job_timeout=300)
+    return {"job_id": job.get_id()}
 
+# -------------------------
+# 1) Check URL heads
+# -------------------------
+@app.post("/process_urls")
+def process_urls(payload: dict = Body(...)):
+    urls = payload.get("urls")
+    if not urls or not isinstance(urls, list):
+        raise HTTPException(status_code=400, detail="Provide 'urls': [ ... ]")
+    session_id = payload.get("session_id") or f"sess-{int(time.time())}"
+    job = q.enqueue(TASK_CHECK_URLS, {"urls": urls, "session_id": session_id}, job_timeout=600)
+    return {"job_id": job.get_id(), "session_id": session_id}
+
+# -------------------------
+# 2) Analyze (OpenAI if available, else stub)
+# -------------------------
+@app.post("/analyze")
+def analyze(payload: dict = Body(...)):
+    if not payload.get("session_id"):
+        raise HTTPException(status_code=400, detail="Missing 'session_id'")
+    job = q.enqueue(TASK_ANALYZE, payload, job_timeout=1800)
+    return {"job_id": job.get_id(), "session_id": payload["session_id"]}
+
+# -------------------------
+# 3) Diagnostics
+# -------------------------
+@app.post("/diag/openai")
+def diag_openai():
+    job = q.enqueue(TASK_DIAG_OPENAI, job_timeout=180)
+    return {"job_id": job.get_id()}
+
+@app.post("/diag/net")
+def diag_net():
+    job = q.enqueue(TASK_NET_PROBE, job_timeout=120)
+    return {"job_id": job.get_id()}
+
+# -------------------------
+# 4) RENDER (single-shot)  <<< FIXED TO SEND ONE DICT >>>
+# Body:
+# {
+#   "session_id": "sess-...",
+#   "files": ["https://s3.../a.mov", "..."],
+#   "output_prefix": "editdna/outputs"   # optional, pass-through
+# }
+# -------------------------
 @app.post("/render")
-def render_endpoint(payload: RenderRequest = Body(...)):
-    if not payload.files:
-        raise HTTPException(422, "files[] required")
-    job = q.enqueue(
-        job_render,
-        payload.session_id,
-        payload.files,
-        payload.output_prefix,
-        job_timeout=JOB_TIMEOUT,
-        result_ttl=RESULT_TTL,
-        failure_ttl=FAIL_TTL,
-        ttl=JOB_TIMEOUT + 60,
-    )
-    return {"job_id": job.id, "session_id": payload.session_id}
+def render(payload: dict = Body(...)):
+    files = payload.get("files")
+    if not files or not isinstance(files, list):
+        raise HTTPException(status_code=400, detail="Provide 'files': [ ... ]")
+    session_id = payload.get("session_id") or f"sess-{int(time.time())}"
+    out_prefix = payload.get("output_prefix")  # may be None
 
+    job_payload = {
+        "session_id": session_id,
+        "files": files,
+        "output_prefix": out_prefix,
+    }
+    job = q.enqueue(TASK_RENDER, job_payload, job_timeout=7200)  # 2h max
+    return {"job_id": job.get_id(), "session_id": session_id}
+
+# -------------------------
+# 5) RENDER (chunked)  <<< ALSO SENDS ONE DICT >>>
+# Body:
+# {
+#   "session_id": "sess-...",
+#   "files": [...],
+#   "chunk_size": 8,
+#   "output_prefix": "editdna/outputs"
+# }
+# -------------------------
+@app.post("/render_chunked")
+def render_chunked(payload: dict = Body(...)):
+    files = payload.get("files")
+    if not files or not isinstance(files, list):
+        raise HTTPException(status_code=400, detail="Provide 'files': [ ... ]")
+    session_id = payload.get("session_id") or f"sess-{int(time.time())}"
+    chunk_size = int(payload.get("chunk_size") or 8)
+    out_prefix = payload.get("output_prefix")
+
+    job_payload = {
+        "session_id": session_id,
+        "files": files,
+        "chunk_size": chunk_size,
+        "output_prefix": out_prefix,
+    }
+    job = q.enqueue(TASK_RENDER_CHUNKED, job_payload, job_timeout=14400)  # 4h max
+    return {"job_id": job.get_id(), "session_id": session_id}
+
+# -------------------------
+# 6) Poll a job
+# -------------------------
 @app.get("/jobs/{job_id}")
 def get_job(job_id: str):
-    from rq.job import Job
     try:
-        job = Job.fetch(job_id, connection=redis_conn)
+        job = Job.fetch(job_id, connection=conn)
     except Exception:
-        raise HTTPException(404, "job not found")
+        raise HTTPException(status_code=404, detail="Job not found")
 
-    status_map = {
-        "queued": "queued",
-        "started": "started",
-        "deferred": "queued",
-        "finished": "finished",
-        "failed": "failed",
-        "stopped": "failed",
-        "canceled": "failed",
-        "scheduled": "queued",
+    data = {
+        "job_id": job_id,
+        "status": job.get_status(),
+        "result": None,
+        "error": None,
+        "enqueued_at": job.enqueued_at.isoformat() if job.enqueued_at else None,
+        "ended_at": job.ended_at.isoformat() if job.ended_at else None,
     }
-    status = status_map.get(job.get_status(), job.get_status())
 
-    result = job._result if job.is_finished else None
-    err = None
     if job.is_failed:
         try:
-            err = job.exc_info or str(job._result)
+            data["error"] = str(job.exc_info or (job.meta or {}).get("error"))
         except Exception:
-            err = "failed"
-    return {
-        "job_id": job.id,
-        "status": status,
-        "result": result,
-        "error": err,
-        "enqueued_at": str(job.enqueued_at) if job.enqueued_at else None,
-        "ended_at": str(job.ended_at) if job.ended_at else None,
-    }
+            data["error"] = "Job failed"
+    elif job.is_finished:
+        data["result"] = job.result
+
+    return JSONResponse(data)
