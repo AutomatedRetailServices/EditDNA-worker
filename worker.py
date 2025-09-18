@@ -1,4 +1,4 @@
-# worker.py  — RQ task definitions
+# worker.py — RQ task definitions (now includes the render job)
 import os
 import time
 import socket
@@ -25,6 +25,10 @@ if _openai_import_ok and OPENAI_API_KEY:
 else:
     _openai_client_ok = False
 
+# -------- Render pipeline --------
+# We import the ffmpeg-based renderer from jobs.py
+from jobs import render_from_files
+
 
 # =========================================================
 # 0) Tiny test job
@@ -43,7 +47,7 @@ def _head(url: str, timeout: float = 20.0) -> Dict[str, Any]:
         size = int(r.headers.get("Content-Length", "0") or 0)
         return {
             "url": url,
-            "status": "OK",
+            "status": "OK" if r.status_code < 400 else "ERROR",
             "http": r.status_code,
             "size": size,
             "method": "HEAD",
@@ -146,9 +150,7 @@ def analyze_session(payload: Dict[str, Any]) -> Dict[str, Any]:
             "features": features,
         }
     except Exception as e:
-        diag["attempts"][-1]["ok"] = False
-        diag["attempts"][-1]["error"] = str(e)
-        diag["last_error"] = str(e)
+        diag["attempts"].append({"api": "chat.completions", "ok": False, "error": str(e)})
         # graceful fallback to stub
         out = dict(stub)
         out["engine"] = "stub"
@@ -157,7 +159,32 @@ def analyze_session(payload: Dict[str, Any]) -> Dict[str, Any]:
 
 
 # =========================================================
-# 3) Diagnostics
+# 3) NEW — Render job (downloads → ffmpeg stitch → uploads)
+# payload: {
+#   "session_id": "sess-...",
+#   "files": ["s3://bucket/raw/a.mov", "s3://bucket/raw/b.mov", ...],
+#   "output_prefix": "editdna/outputs"   # optional, defaults in app layer
+# }
+# Returns:
+#   { ok, session_id, inputs, output_s3 } or { ok: False, error: "..." }
+# =========================================================
+def job_render(payload: Dict[str, Any]) -> Dict[str, Any]:
+    session_id = payload.get("session_id") or f"sess-{int(time.time())}"
+    files = payload.get("files") or []
+    output_prefix = (payload.get("output_prefix") or "editdna/outputs").strip("/")
+
+    try:
+        return render_from_files(
+            session_id=session_id,
+            input_s3_urls=files,
+            output_key_prefix=output_prefix,
+        )
+    except Exception as e:
+        return {"ok": False, "session_id": session_id, "error": str(e)}
+
+
+# =========================================================
+# 4) Diagnostics
 # =========================================================
 def diag_openai() -> Dict[str, Any]:
     """
@@ -211,7 +238,7 @@ def net_probe() -> Dict[str, Any]:
     # TLS/HTTP (no auth endpoint)
     try:
         r = requests.get("https://api.openai.com/v1/models", timeout=10)
-        out["tls"] = f"ok: TLSv{r.raw.version}" if hasattr(r.raw, "version") else "ok"
+        out["tls"] = f"ok: TLSv{getattr(r.raw, 'version', '1.2')}"
     except Exception as e:
         out["tls"] = f"fail: {e}"
 
