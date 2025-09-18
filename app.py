@@ -1,154 +1,99 @@
-# worker.py — RQ task definitions
-import os
-import time
-import socket
-from typing import Any, Dict, List
-import requests
+# app.py — FastAPI + RQ (with /render_chunked)
+import os, time
+import redis
+from fastapi import FastAPI, Body, HTTPException
+from fastapi.responses import JSONResponse
+from rq import Queue
+from rq.job import Job
 
-from jobs import render_from_files, render_chunked
+# -------------------------
+# Redis / RQ
+# -------------------------
+REDIS_URL = os.getenv("REDIS_URL", "")
+if not REDIS_URL:
+    raise RuntimeError("Missing REDIS_URL")
 
-# -------- OpenAI (v1.x) --------
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
-try:
-    from openai import OpenAI
-    _openai_import_ok = True
-except Exception:
-    OpenAI = None  # type: ignore
-    _openai_import_ok = False
+# IMPORTANT: keep decode_responses=False (RQ stores bytes)
+conn = redis.from_url(REDIS_URL, decode_responses=False)
+q = Queue("default", connection=conn)
 
-_client = None
-if _openai_import_ok and OPENAI_API_KEY:
+# ---- Match functions in worker.py ----
+TASK_NOP           = "worker.task_nop"
+TASK_CHECK_URLS    = "worker.check_urls"
+TASK_ANALYZE       = "worker.analyze_session"
+TASK_DIAG_OPENAI   = "worker.diag_openai"
+TASK_NET_PROBE     = "worker.net_probe"
+TASK_RENDER        = "worker.job_render"
+TASK_RENDER_CHUNK  = "worker.job_render_chunked"
+
+# -------------------------
+# FastAPI
+# -------------------------
+app = FastAPI(title="editdna API", version="1.4.0")
+application = app  # alias for some ASGI hosts
+
+@app.get("/")
+def root():
+    return {"ok": True, "service": "editdna", "time": int(time.time())}
+
+@app.get("/admin/health")
+def health():
     try:
-        _client = OpenAI(api_key=OPENAI_API_KEY)
-        _openai_client_ok = True
-    except Exception:
-        _openai_client_ok = False
-else:
-    _openai_client_ok = False
+        conn.ping()
+        return {"status": "ok"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
-
-# =========================================================
+# -------------------------
 # 0) Tiny test job
-# =========================================================
-def task_nop() -> Dict[str, Any]:
-    return {"echo": {"hello": "world"}}
+# -------------------------
+@app.post("/enqueue_nop")
+def enqueue_nop(payload: dict = Body(default={"echo": {"hello": "world"}})):
+    job = q.enqueue(TASK_NOP, job_timeout=300)
+    return {"job_id": job.get_id()}
 
+# -------------------------
+# 1) Check URLs
+# -------------------------
+@app.post("/process_urls")
+def process_urls(payload: dict = Body(...)):
+    urls = payload.get("urls")
+    if not urls or not isinstance(urls, list):
+        raise HTTPException(status_code=400, detail="Provide 'urls': [ ... ]")
+    session_id = payload.get("session_id") or f"sess-{int(time.time())}"
+    job = q.enqueue(TASK_CHECK_URLS, {"urls": urls, "session_id": session_id}, job_timeout=600)
+    return {"job_id": job.get_id(), "session_id": session_id}
 
-# =========================================================
-# 1) Check S3/public URLs (HEAD)
-# =========================================================
-def _head(url: str, timeout: float = 20.0) -> Dict[str, Any]:
-    try:
-        r = requests.head(url, allow_redirects=True, timeout=timeout)
-        size = int(r.headers.get("Content-Length", "0") or 0)
-        return {"url": url, "status": "OK", "http": r.status_code, "size": size, "method": "HEAD"}
-    except Exception as e:
-        return {"url": url, "status": "ERROR", "http": 0, "size": 0, "method": "HEAD", "error": str(e)}
+# -------------------------
+# 2) Analyze (OpenAI or stub)
+# -------------------------
+@app.post("/analyze")
+def analyze(payload: dict = Body(...)):
+    if not payload.get("session_id"):
+        raise HTTPException(status_code=400, detail="Missing 'session_id'")
+    job = q.enqueue(TASK_ANALYZE, payload, job_timeout=1800)
+    return {"job_id": job.get_id(), "session_id": payload["session_id"]}
 
-
-def check_urls(payload: Dict[str, Any]) -> Dict[str, Any]:
-    urls = payload.get("urls") or []
-    sess = payload.get("session_id") or f"sess-{int(time.time())}"
-    checked = [_head(u) for u in urls]
-    return {"session_id": sess, "checked": checked}
-
-
-# =========================================================
-# 2) Analyze session → promo script (OpenAI with stub fallback)
-# =========================================================
-_OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
-
-def _make_prompt(session_id: str, tone: str, product_link: str, features: List[str]) -> str:
-    feat_str = ", ".join(features) if features else "key features"
-    return (
-        f"You are a marketing writer. Create a short {tone or 'neutral'} promo script "
-        f"for product {product_link or '(no link)'} based on these features: {feat_str}. "
-        f"Keep it 3–5 sentences, engaging, and suitable for voiceover."
+# -------------------------
+# 3) Render (original all-at-once)
+# -------------------------
+@app.post("/render")
+def render(payload: dict = Body(...)):
+    session_id = payload.get("session_id")
+    files = payload.get("files")
+    if not session_id:
+        raise HTTPException(status_code=400, detail="Missing 'session_id'")
+    if not files or not isinstance(files, list):
+        raise HTTPException(status_code=400, detail="Provide 'files': ['s3://...','https://...']")
+    output_prefix = payload.get("output_prefix") or "editdna/outputs"
+    job = q.enqueue(
+        TASK_RENDER,
+        {"session_id": session_id, "files": files, "output_prefix": output_prefix},
+        job_timeout=60 * 60,
     )
+    return {"job_id": job.get_id(), "session_id": session_id}
 
-def _parse_features(payload: Dict[str, Any]) -> List[str]:
-    feats: List[str] = []
-    csv = (payload.get("features_csv") or "").strip()
-    if csv:
-        feats = [p.strip() for p in csv.split(",") if p.strip()]
-    if not feats and isinstance(payload.get("features"), list):
-        feats = [str(x).strip() for x in payload["features"] if str(x).strip()]
-    return feats
-
-def analyze_session(payload: Dict[str, Any]) -> Dict[str, Any]:
-    sess = payload.get("session_id") or f"sess-{int(time.time())}"
-    tone = str(payload.get("tone") or "neutral")
-    product_link = str(payload.get("product_link") or "")
-    features = _parse_features(payload)
-
-    stub = {
-        "session_id": sess,
-        "engine": "stub",
-        "script": f"[DEV STUB] {tone} promo highlighting {', '.join(features) or 'features'}. Product: {product_link or '(no link)'}."
-    }
-
-    if not (_openai_import_ok and _openai_client_ok and _client and OPENAI_API_KEY):
-        return stub
-
-    try:
-        resp = _client.chat.completions.create(
-            model=_OPENAI_MODEL,
-            messages=[
-                {"role": "system", "content": "You write concise, friendly promo scripts."},
-                {"role": "user", "content": _make_prompt(sess, tone, product_link, features)},
-            ],
-            temperature=0.7,
-            max_tokens=220,
-        )
-        text = (resp.choices[0].message.content or "").strip()
-        return {"session_id": sess, "engine": "openai", "script": text}
-    except Exception:
-        return stub
-
-
-# =========================================================
-# 3) Diagnostics
-# =========================================================
-def diag_openai() -> Dict[str, Any]:
-    if not (_openai_import_ok and _openai_client_ok and _client and OPENAI_API_KEY):
-        return {"has_key": bool(OPENAI_API_KEY), "ok": False, "error": "SDK/client not initialized."}
-    try:
-        r = _client.chat.completions.create(
-            model=_OPENAI_MODEL,
-            messages=[{"role": "system", "content": "health-check"}, {"role": "user", "content": "ok"}],
-            max_tokens=3,
-        )
-        return {"ok": True, "reply": (r.choices[0].message.content or "").strip()}
-    except Exception as e:
-        return {"ok": False, "error": str(e)}
-
-def net_probe() -> Dict[str, Any]:
-    out = {"dns": None, "tls": None}
-    try:
-        socket.gethostbyname("api.openai.com"); out["dns"] = "ok"
-    except Exception as e:
-        out["dns"] = f"fail: {e}"
-    try:
-        r = requests.get("https://api.openai.com/v1/models", timeout=10)
-        out["tls"] = f"ok: TLSv{getattr(r.raw,'version', 'N/A')}"
-    except Exception as e:
-        out["tls"] = f"fail: {e}"
-    return out
-
-
-# =========================================================
-# 4) Render job wrappers
-# =========================================================
-def job_render(payload: Dict[str, Any]) -> Dict[str, Any]:
-    return render_from_files(
-        session_id=payload["session_id"],
-        input_s3_urls=payload["files"],
-        output_key_prefix=payload.get("output_prefix") or "editdna/outputs",
-    )
-
-def job_render_chunked(payload: Dict[str, Any]) -> Dict[str, Any]:
-    return render_chunked(
-        session_id=payload["session_id"],
-        input_s3_urls=payload["files"],
-        output_key_prefix=payload.get("output_prefix") or "editdna/outputs",
-    )
+# -------------------------
+# 4) Render (chunked low-memory)
+# -------------------------
+@app.post("/render
