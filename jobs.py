@@ -20,14 +20,12 @@ def _write_concat_file(file_paths: List[str], concat_txt_path: str) -> None:
     """
     Write a concat list compatible with `-f concat -safe 0`.
     Each line must be: file 'absolute/path'
-    We must escape any single quotes in the path as: '\''  (ffmpeg-friendly)
+    Escape single quotes as: '\''  (ffmpeg-friendly)
     """
     with open(concat_txt_path, "w", encoding="utf-8") as f:
         for p in file_paths:
-            # Escape single quotes for ffmpeg concat list
             escaped = p.replace("'", "'\\''")
-            line = "file '{}'\n".format(escaped)
-            f.write(line)
+            f.write("file '{}'\n".format(escaped))
 
 
 def _sorted_by_name(paths: List[str]) -> List[str]:
@@ -36,13 +34,9 @@ def _sorted_by_name(paths: List[str]) -> List[str]:
 
 
 def _run(cmd: List[str]) -> None:
-    """Run a shell command and raise on error (captures output for Render logs)."""
+    """Run a shell command and raise on error (captures output for logs)."""
     proc = subprocess.run(
-        cmd,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
-        check=False,
-        text=True,
+        cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, check=False, text=True
     )
     if proc.returncode != 0:
         raise RuntimeError(
@@ -94,13 +88,17 @@ def render_from_files(
         # Scale and pad to vertical 9:16 while preserving aspect
         vf = (
             "scale=w={}:h={}:force_original_aspect_ratio=decrease,"
-            "pad:{}:{}:(ow-iw)/2:(oh-ih)/2:color=black"
+            "pad={}:{}:(ow-iw)/2:(oh-ih)/2:color=black"
         ).format(target_width, target_height, target_width, target_height)
 
         cmd = [
             ffmpeg, "-y",
+            # Be more tolerant of weird iPhone streams
+            "-analyzeduration", "100M",
+            "-probesize", "100M",
             "-safe", "0",
             "-f", "concat", "-i", concat_txt,
+            "-ignore_unknown", "1",
             "-vf", vf,
             "-c:v", "libx264", "-preset", "veryfast", "-crf", "23",
             "-c:a", "aac", "-b:a", "128k",
