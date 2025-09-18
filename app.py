@@ -1,4 +1,4 @@
-# app.py — FastAPI + RQ (Redis Queue)
+# app.py — FastAPI + RQ (Redis Queue) with requeue helper and longer render timeout
 import os
 import time
 from typing import Dict, Any
@@ -6,7 +6,7 @@ from typing import Dict, Any
 import redis
 from fastapi import FastAPI, Body, HTTPException
 from fastapi.responses import JSONResponse
-from rq import Queue
+from rq import Queue, requeue_job
 from rq.job import Job
 
 # -------------------------
@@ -18,21 +18,21 @@ if not REDIS_URL:
 
 # IMPORTANT: keep decode_responses=False (RQ stores bytes)
 conn = redis.from_url(REDIS_URL, decode_responses=False)
-# We keep your existing queue name to match render.yaml
+# We keep the queue name to match render.yaml
 q = Queue("default", connection=conn)
 
 # ---- Match the functions that exist in worker.py ----
-TASK_NOP        = "worker.task_nop"
-TASK_CHECK_URLS = "worker.check_urls"
-TASK_ANALYZE    = "worker.analyze_session"
+TASK_NOP         = "worker.task_nop"
+TASK_CHECK_URLS  = "worker.check_urls"
+TASK_ANALYZE     = "worker.analyze_session"
 TASK_DIAG_OPENAI = "worker.diag_openai"
 TASK_NET_PROBE   = "worker.net_probe"
-TASK_RENDER      = "worker.job_render"   # NEW render task
+TASK_RENDER      = "worker.job_render"   # render task
 
 # -------------------------
 # FastAPI
 # -------------------------
-app = FastAPI(title="editdna API", version="1.3.1")
+app = FastAPI(title="editdna API", version="1.3.2")
 
 
 @app.get("/")
@@ -85,6 +85,7 @@ def analyze(payload: dict = Body(...)):
 
 # -------------------------
 # 3) Render job (downloads from S3 → ffmpeg stitch → uploads MP4)
+# Increase timeout to 60 min for large iPhone clips.
 # -------------------------
 @app.post("/render")
 def render(payload: dict = Body(...)):
@@ -102,7 +103,8 @@ def render(payload: dict = Body(...)):
         "files": files,
         "output_prefix": output_prefix,
     }
-    job = q.enqueue(TASK_RENDER, job_payload, job_timeout=60 * 30)  # 30 minutes
+    # 60 minutes to be safe on HEVC -> H.264 transcodes
+    job = q.enqueue(TASK_RENDER, job_payload, job_timeout=60 * 60)
     return {"job_id": job.get_id(), "session_id": session_id}
 
 
@@ -149,3 +151,15 @@ def get_job(job_id: str):
         data["result"] = job.result
 
     return JSONResponse(data)
+
+
+# -------------------------
+# 6) Requeue a stuck job (helper)
+# -------------------------
+@app.post("/jobs/requeue/{job_id}")
+def jobs_requeue(job_id: str):
+    try:
+        requeue_job(job_id, connection=conn)
+        return {"ok": True, "job_id": job_id}
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"requeue failed: {e}")
