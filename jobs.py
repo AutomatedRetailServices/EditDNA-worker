@@ -20,11 +20,14 @@ def _write_concat_file(file_paths: List[str], concat_txt_path: str) -> None:
     """
     Write a concat list compatible with `-f concat -safe 0`.
     Each line must be: file 'absolute/path'
+    We must escape any single quotes in the path as: '\''  (ffmpeg-friendly)
     """
     with open(concat_txt_path, "w", encoding="utf-8") as f:
         for p in file_paths:
-            # escape single quotes for ffmpeg
-            f.write(f"file '{p.replace(\"'\", \"'\\\\''\")}'\n")
+            # escape single quotes for ffmpeg concat list
+            escaped = p.replace("'", "'\\''")
+            line = "file '{}'\n".format(escaped)
+            f.write(line)
 
 
 def _sorted_by_name(paths: List[str]) -> List[str]:
@@ -103,11 +106,3 @@ def render_from_files(
             "ok": True,
             "session_id": session_id,
             "inputs": len(input_s3_urls),
-            "output_s3": s3_uri,
-        }
-    finally:
-        # 5) Cleanup
-        try:
-            shutil.rmtree(workdir, ignore_errors=True)
-        except Exception:
-            pass
