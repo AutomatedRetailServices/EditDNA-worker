@@ -49,7 +49,7 @@ def _ffmpeg_concat_to_mp4(
             "-safe", "0",
             "-f", "concat",
             "-i", str(concat_file),
-            "-ignore_unknown",            # <-- fixed: no extra "1" here
+            "-ignore_unknown",
             *vf_args,
             "-c:v", "libx264",
             "-preset", "veryfast",
@@ -71,6 +71,7 @@ def task_nop() -> dict:
 
 
 def job_render(*args, **kwargs) -> dict:
+    # Accept either a single dict payload (preferred) or legacy positional args
     if args and isinstance(args[0], dict):
         payload = dict(args[0])
         session_id = payload.get("session_id") or payload.get("sid") or "session"
