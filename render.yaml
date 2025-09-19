@@ -29,8 +29,8 @@ services:
     env: python
     plan: pro
     buildCommand: pip install -r requirements.txt
-    startCommand: rq worker -u $REDIS_URL -P . default
-    autoDeploy: true
+    startCommand: rq worker -u $REDIS_URL -P . --worker-ttl 1200 default
+    autoDeploy: false          # <— turn off auto deploy for the worker
     envVars:
       - key: PYTHON_VERSION
         value: 3.11.9
