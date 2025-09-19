@@ -1,102 +1,106 @@
+from __future__ import annotations
+
 import os
-import shlex
 import subprocess
 import tempfile
 from pathlib import Path
-from typing import Iterable, List, Optional
+from typing import Any, Iterable, List, Sequence, Union
 
 
-# ---------------------------------------------------------------------
-# Public RQ tasks (these names must stay exactly like this)
-# ---------------------------------------------------------------------
+def _to_str_list(items: Iterable[Any]) -> List[str]:
+    return [str(x) for x in items]
 
-def task_nop():
-    # Small, fast job to verify the queue/worker plumbing.
+
+def _write_concat_txt(sources: Sequence[str], dst: Path) -> None:
+    with dst.open("w", encoding="utf-8") as f:
+        for src in sources:
+            esc = str(src).replace("'", "'\\''")
+            f.write(f"file '{esc}'\n")
+
+
+def _ffmpeg_concat_to_mp4(
+    files: Sequence[Union[str, os.PathLike]],
+    output_path: Union[str, os.PathLike],
+    portrait: bool = True,
+) -> None:
+    files = _to_str_list(files)
+    output_path = str(output_path)
+
+    with tempfile.TemporaryDirectory(prefix="editdna-") as tmpdir:
+        concat_file = Path(tmpdir) / "concat.txt"
+        _write_concat_txt(files, concat_file)
+
+        vf_args: List[str] = []
+        if portrait:
+            vf_args = [
+                "-vf",
+                "scale=w=1080:h=1920:force_original_aspect_ratio=decrease,"
+                "pad=1080:1920:(ow-iw)/2:(oh-ih)/2:color=black",
+            ]
+
+        cmd: List[str] = [
+            "ffmpeg",
+            "-y",
+            "-analyzeduration", "100M",
+            "-probesize", "100M",
+            "-protocol_whitelist", "file,crypto,data,https,tcp,tls",
+            "-safe", "0",
+            "-f", "concat",
+            "-i", str(concat_file),
+            "-ignore_unknown", "1",
+            *vf_args,
+            "-c:v", "libx264",
+            "-preset", "veryfast",
+            "-crf", "23",
+            "-c:a", "aac", "-b:a", "128k",
+            "-movflags", "+faststart",
+            output_path,
+        ]
+
+        try:
+            subprocess.run(cmd, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        except subprocess.CalledProcessError as e:
+            err = e.stderr.decode("utf-8", errors="replace") if e.stderr else str(e)
+            raise RuntimeError(f"ffmpeg failed:\n{err}") from e
+
+
+def task_nop() -> dict:
     return {"echo": {"hello": "world"}}
 
 
-def job_render(session_id: str, files: List[str], output_prefix: Optional[str] = "editdna/outputs"):
-    """
-    Concatenate remote HTTPS videos into a single vertical 1080x1920 MP4.
-    - session_id: identifier for temporary work dir and output file name
-    - files: list of HTTPS URLs (strings). May be iPhone HEVC/LPCM etc.
-    - output_prefix: kept for compatibility; output is written under /tmp
-    """
-    # Ensure all entries are plain strings
-    sources = [str(u) for u in files]
+def job_render(*args, **kwargs) -> dict:
+    if args and isinstance(args[0], dict):
+        payload = dict(args[0])
+        session_id = payload.get("session_id") or payload.get("sid") or "session"
+        files = payload.get("files") or []
+        output_prefix = payload.get("output_prefix") or "editdna/outputs"
+        portrait = bool(payload.get("portrait", True))
+    else:
+        session_id = kwargs.get("session_id")
+        files = kwargs.get("files")
+        output_prefix = kwargs.get("output_prefix", "editdna/outputs")
+        portrait = bool(kwargs.get("portrait", True))
+        if args:
+            if session_id is None and len(args) >= 1:
+                session_id = args[0]
+            if files is None and len(args) >= 2:
+                files = args[1]
+            if len(args) >= 3:
+                output_prefix = args[2]
 
-    # Work dir under /tmp to keep things ephemeral
-    tmpdir = Path(tempfile.mkdtemp(prefix=f"editdna-sess-{session_id}-"))
-    concat_txt = tmpdir / "concat.txt"
-    out_mp4 = tmpdir / f"{session_id}.mp4"
+    session_id = str(session_id or "session")
+    files = _to_str_list(files or [])
+
+    workdir = Path(f"/tmp/editdna-{session_id}")
+    workdir.mkdir(parents=True, exist_ok=True)
+    output_path = workdir / f"{session_id}.mp4"
 
     try:
-        _write_concat_txt(concat_txt, sources)
-        _ffmpeg_concat_to_mp4(concat_txt, out_mp4, portrait=True)
-        return {"ok": True, "session_id": session_id, "output": str(out_mp4)}
-    except subprocess.CalledProcessError as e:
-        # Surface full ffmpeg stdout/stderr for debugging in /jobs
-        return {"ok": False, "session_id": session_id, "error": f"ffmpeg failed:\n{e.stderr.decode('utf-8', errors='ignore') if e.stderr else str(e)}"}
+        _ffmpeg_concat_to_mp4(files, output_path, portrait=portrait)
+        return {"ok": True, "session_id": session_id, "output": str(output_path)}
     except Exception as e:
         return {"ok": False, "session_id": session_id, "error": str(e)}
 
 
-# ---------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------
-
-def _write_concat_txt(path: Path, urls: Iterable[str]) -> None:
-    """
-    Create a concat demuxer file list with HTTPS sources.
-    Properly escape single quotes; do not append stray characters.
-    """
-    with path.open("w", encoding="utf-8") as f:
-        for u in urls:
-            # escape single quotes for ffmpeg file list
-            esc = str(u).replace("'", r"'\'\''")
-            f.write(f"file '{esc}'\n")
-
-
-def _ffmpeg_concat_to_mp4(concat_txt: Path, out_mp4: Path, portrait: bool = True) -> None:
-    """
-    Run ffmpeg concat demuxer with protocol whitelist for HTTPS.
-    Re-encodes video to H.264 + AAC; handles rotation/padding to 1080x1920 when portrait=True.
-    """
-    vf = []
-    if portrait:
-        vf = [
-            "-vf",
-            "scale=w=1080:h=1920:force_original_aspect_ratio=decrease,"
-            "pad=1080:1920:(ow-iw)/2:(oh-ih)/2:color=black",
-        ]
-
-    cmd = [
-        "ffmpeg",
-        "-y",
-        # Make remote probing robust, and allow https/tls/tcp
-        "-protocol_whitelist", "file,crypto,data,https,tls,tcp",
-        "-analyzeduration", "100M",
-        "-probesize", "100M",
-        "-safe", "0",
-        "-f", "concat",
-        "-i", str(concat_txt),
-        "-ignore_unknown", "1",
-        *vf,
-        "-c:v", "libx264",
-        "-preset", "veryfast",
-        "-crf", "23",
-        "-c:a", "aac",
-        "-b:a", "128k",
-        "-movflags", "+faststart",
-        str(out_mp4),
-    ]
-
-    # Run and capture stderr for error diagnostics
-    proc = subprocess.run(
-        cmd,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        check=True,
-    )
-    # Optional: return code already checked; if you want logs:
-    # print(proc.stderr.decode("utf-8", errors="ignore"))
+def job_render_chunked(*args, **kwargs) -> dict:
+    return job_render(*args, **kwargs)
