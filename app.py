@@ -1,4 +1,4 @@
-# app.py — full replacement
+# app.py — FastAPI + RQ enqueue/poll
 
 from __future__ import annotations
 
@@ -13,22 +13,18 @@ from redis import Redis
 from rq import Queue
 from rq.job import Job
 
-# -----------------------------------------------------------------------------
+APP_VERSION = "1.2.1"
+
 # Redis / RQ setup
-# -----------------------------------------------------------------------------
 REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379/0")
 redis = Redis.from_url(REDIS_URL)
 queue = Queue("default", connection=redis, default_timeout=60 * 60)  # 60 min
 
-# -----------------------------------------------------------------------------
 # FastAPI app
-# -----------------------------------------------------------------------------
-APP_VERSION = "1.2.0"
 app = FastAPI(title="editdna", version=APP_VERSION)
 
-# -----------------------------------------------------------------------------
-# Models
-# -----------------------------------------------------------------------------
+
+# Request model
 class RenderRequest(BaseModel):
     session_id: Optional[str] = "session"
     files: List[str | HttpUrl]
@@ -36,17 +32,16 @@ class RenderRequest(BaseModel):
     portrait: Optional[bool] = True
 
     # optional knobs (pass-through to worker)
-    mode: Optional[str] = "concat"            # "concat" | "best" | "split"
-    max_duration: Optional[int] = None        # seconds cap for final video
-    take_top_k: Optional[int] = None          # keep best K clips (mode="best")
-    min_clip_seconds: Optional[float] = None  # trim lower bound
-    max_clip_seconds: Optional[float] = None  # trim upper bound
+    mode: Optional[str] = "concat"            # "concat" | "best" | "split" (future)
+    max_duration: Optional[int] = None
+    take_top_k: Optional[int] = None
+    min_clip_seconds: Optional[float] = None
+    max_clip_seconds: Optional[float] = None
     drop_silent: Optional[bool] = True
     drop_black: Optional[bool] = True
 
-# -----------------------------------------------------------------------------
+
 # Helpers
-# -----------------------------------------------------------------------------
 def _job_payload(job: Job) -> Dict[str, Any]:
     status = job.get_status(refresh=True)
     result = None
@@ -64,39 +59,43 @@ def _job_payload(job: Job) -> Dict[str, Any]:
         "ended_at": job.ended_at.isoformat() if job.ended_at else None,
     }
 
+
 def _get_job_or_404(job_id: str) -> Job:
     job = Job.fetch(job_id, connection=redis)
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
     return job
 
-# -----------------------------------------------------------------------------
+
 # Routes
-# -----------------------------------------------------------------------------
 @app.get("/")
 def root() -> JSONResponse:
     return JSONResponse(
         {"ok": True, "service": "editdna", "version": APP_VERSION, "time": int(datetime.utcnow().timestamp())}
     )
 
+
 @app.get("/version")
 def version() -> JSONResponse:
     return JSONResponse({"ok": True, "version": APP_VERSION})
 
+
 @app.get("/health")
 def health() -> JSONResponse:
     try:
-        redis_ok = redis.ping()
-    except Exception as e:
-        redis_ok = False
-    # queue.count() touches Redis and is cheap
-    try:
-        pending = queue.count
+        redis_ok = bool(redis.ping())
     except Exception:
-        pending = None
+        redis_ok = False
+    # RQ queue count (property on some versions, method on others)
+    pending = None
+    try:
+        c = getattr(queue, "count", None)
+        pending = int(c() if callable(c) else (c if c is not None else 0))
+    except Exception:
+        pass
     return JSONResponse(
         {
-            "ok": bool(redis_ok),
+            "ok": redis_ok,
             "queue": {"name": queue.name, "pending": pending},
             "redis_db_hint": os.getenv("REDIS_URL", "unknown").split("/")[-1],
             "web_default_timeout_sec": queue.default_timeout,
@@ -105,10 +104,12 @@ def health() -> JSONResponse:
         }
     )
 
+
 @app.post("/enqueue_nop")
 def enqueue_nop() -> JSONResponse:
     job = queue.enqueue("worker.task_nop")
     return JSONResponse({"job_id": job.id})
+
 
 @app.get("/jobs/{job_id}")
 def get_job(job_id: str) -> JSONResponse:
@@ -117,6 +118,7 @@ def get_job(job_id: str) -> JSONResponse:
     except Exception:
         raise HTTPException(status_code=404, detail="Not Found")
     return JSONResponse(_job_payload(job))
+
 
 @app.post("/render")
 def render(req: RenderRequest) -> JSONResponse:
@@ -134,9 +136,10 @@ def render(req: RenderRequest) -> JSONResponse:
         "drop_silent": req.drop_silent,
         "drop_black": req.drop_black,
     }
-    # Single dict keeps compatibility with worker.job_render(*args) and dict payload
+    # Single dict keeps compatibility with worker.job_render signatures
     job = queue.enqueue("worker.job_render", payload)
     return JSONResponse({"job_id": job.id, "session_id": payload["session_id"]})
+
 
 @app.post("/render_chunked")
 def render_chunked(req: RenderRequest) -> JSONResponse:
