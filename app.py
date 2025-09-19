@@ -1,54 +1,54 @@
+# app.py — full replacement
+
+from __future__ import annotations
+
 import os
 from datetime import datetime
-from typing import List, Optional
+from typing import Any, Dict, List, Optional
 
-import redis
 from fastapi import FastAPI, HTTPException
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, HttpUrl
+from redis import Redis
 from rq import Queue
 from rq.job import Job
 
-# ---------------------------------------------------------------------
-# Redis / RQ
-# ---------------------------------------------------------------------
+# -----------------------------------------------------------------------------
+# Redis / RQ setup
+# -----------------------------------------------------------------------------
 REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379/0")
-_r = redis.from_url(REDIS_URL)
-_q = Queue("default", connection=_r)
+redis = Redis.from_url(REDIS_URL)
+queue = Queue("default", connection=redis, default_timeout=60 * 60)  # 60 min
 
-# ---------------------------------------------------------------------
+# -----------------------------------------------------------------------------
 # FastAPI app
-# ---------------------------------------------------------------------
+# -----------------------------------------------------------------------------
 app = FastAPI(title="editdna", version="1.0.0")
 
 
-class NOPReq(BaseModel):
-    pass
+# -----------------------------------------------------------------------------
+# Models
+# -----------------------------------------------------------------------------
+class RenderRequest(BaseModel):
+    session_id: Optional[str] = "session"
+    files: List[str | HttpUrl]
+    output_prefix: Optional[str] = "editdna/outputs"
+    portrait: Optional[bool] = True
 
 
-class RenderReq(BaseModel):
-    session_id: str
-    files: List[HttpUrl]
-    output_prefix: Optional[str] = "editdna/outputs"  # currently unused (local /tmp output)
-
-
-def _job_payload(job: Job):
-    """Uniform job status payload."""
-    status_map = {
-        "queued": "queued",
-        "started": "started",
-        "deferred": "queued",
-        "finished": "finished",
-        "failed": "failed",
-        "stopped": "failed",
-        "canceled": "failed",
-    }
-    status = status_map.get(job.get_status(refresh=True) or "", "queued")
-
+# -----------------------------------------------------------------------------
+# Helpers
+# -----------------------------------------------------------------------------
+def _job_payload(job: Job) -> Dict[str, Any]:
+    """Standard response object for a job id."""
+    status = job.get_status(refresh=True)
     result = None
     error = None
+
     if status == "finished":
         result = job.result
     elif status == "failed":
+        # RQ stores the exception info in job.exc_info
         error = job.exc_info
 
     return {
@@ -61,34 +61,80 @@ def _job_payload(job: Job):
     }
 
 
+def _get_job_or_404(job_id: str) -> Job:
+    job = Job.fetch(job_id, connection=redis)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    return job
+
+
+# -----------------------------------------------------------------------------
+# Routes
+# -----------------------------------------------------------------------------
 @app.get("/")
-def health():
-    return {"ok": True, "service": "editdna", "time": int(datetime.utcnow().timestamp())}
+def root() -> JSONResponse:
+    return JSONResponse(
+        {
+            "ok": True,
+            "service": "editdna",
+            "time": int(datetime.utcnow().timestamp()),
+        }
+    )
 
 
 @app.post("/enqueue_nop")
-def enqueue_nop(_: NOPReq | None = None):
-    # Calls worker.task_nop (no args)
-    job = _q.enqueue("worker.task_nop")
-    return {"job_id": job.id}
-
-
-@app.post("/render")
-def render(req: RenderReq):
-    # Enqueue worker.job_render(session_id, files, output_prefix)
-    job = _q.enqueue(
-        "worker.job_render",
-        req.session_id,
-        [str(u) for u in req.files],  # cast HttpUrl -> str so it's JSON-serializable in job meta
-        req.output_prefix,
-    )
-    return {"job_id": job.id, "session_id": req.session_id}
+def enqueue_nop() -> JSONResponse:
+    """
+    Enqueue a tiny health-check task that always succeeds.
+    """
+    job = queue.enqueue("worker.task_nop")
+    return JSONResponse({"job_id": job.id})
 
 
 @app.get("/jobs/{job_id}")
-def job_status(job_id: str):
+def get_job(job_id: str) -> JSONResponse:
+    """
+    Poll a job by id (used for both /enqueue_nop and /render jobs).
+    """
     try:
-        job = Job.fetch(job_id, connection=_r)
+        job = _get_job_or_404(job_id)
     except Exception:
-        raise HTTPException(status_code=404, detail="Job not found")
-    return _job_payload(job)
+        raise HTTPException(status_code=404, detail="Not Found")
+    return JSONResponse(_job_payload(job))
+
+
+@app.post("/render")
+def render(req: RenderRequest) -> JSONResponse:
+    """
+    Enqueue a render job. Accepts HTTPS S3 URLs.
+    The worker reads them via ffmpeg concat demuxer with protocol whitelist.
+    """
+    payload = {
+        "session_id": req.session_id or "session",
+        "files": [str(x) for x in req.files],
+        "output_prefix": req.output_prefix or "editdna/outputs",
+        "portrait": bool(req.portrait),
+    }
+
+    # Important: pass a single dict so both old and new worker signatures work
+    job = queue.enqueue("worker.job_render", payload)
+
+    return JSONResponse(
+        {
+            "job_id": job.id,
+            "session_id": payload["session_id"],
+        }
+    )
+
+
+# Optional compatibility endpoint (if you ever use it)
+@app.post("/render_chunked")
+def render_chunked(req: RenderRequest) -> JSONResponse:
+    payload = {
+        "session_id": req.session_id or "session",
+        "files": [str(x) for x in req.files],
+        "output_prefix": req.output_prefix or "editdna/outputs",
+        "portrait": bool(req.portrait),
+    }
+    job = queue.enqueue("worker.job_render_chunked", payload)
+    return JSONResponse({"job_id": job.id, "session_id": payload["session_id"]})
