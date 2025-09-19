@@ -1,3 +1,5 @@
+# worker.py — full replacement
+
 from __future__ import annotations
 
 import os
@@ -47,7 +49,7 @@ def _ffmpeg_concat_to_mp4(
             "-safe", "0",
             "-f", "concat",
             "-i", str(concat_file),
-            "-ignore_unknown", "1",
+            "-ignore_unknown",            # <-- fixed: no extra "1" here
             *vf_args,
             "-c:v", "libx264",
             "-preset", "veryfast",
