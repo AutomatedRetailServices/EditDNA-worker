@@ -1,10 +1,8 @@
-# app.py — full replacement
-
 from __future__ import annotations
 
 import os
 from datetime import datetime
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Literal
 
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import JSONResponse
@@ -23,24 +21,24 @@ queue = Queue("default", connection=redis, default_timeout=60 * 60)  # 60 min
 # -----------------------------------------------------------------------------
 # FastAPI app
 # -----------------------------------------------------------------------------
-app = FastAPI(title="editdna", version="1.0.0")
-
+app = FastAPI(title="editdna", version="1.1.0")
 
 # -----------------------------------------------------------------------------
 # Models
 # -----------------------------------------------------------------------------
+Mode = Literal["concat", "split"]
+
 class RenderRequest(BaseModel):
     session_id: Optional[str] = "session"
     files: List[str | HttpUrl]
     output_prefix: Optional[str] = "editdna/outputs"
     portrait: Optional[bool] = True
-
+    mode: Optional[Mode] = "concat"  # NEW: "concat" | "split"
 
 # -----------------------------------------------------------------------------
 # Helpers
 # -----------------------------------------------------------------------------
 def _job_payload(job: Job) -> Dict[str, Any]:
-    """Standard response object for a job id."""
     status = job.get_status(refresh=True)
     result = None
     error = None
@@ -48,7 +46,6 @@ def _job_payload(job: Job) -> Dict[str, Any]:
     if status == "finished":
         result = job.result
     elif status == "failed":
-        # RQ stores the exception info in job.exc_info
         error = job.exc_info
 
     return {
@@ -67,67 +64,46 @@ def _get_job_or_404(job_id: str) -> Job:
         raise HTTPException(status_code=404, detail="Job not found")
     return job
 
-
 # -----------------------------------------------------------------------------
 # Routes
 # -----------------------------------------------------------------------------
 @app.get("/")
 def root() -> JSONResponse:
     return JSONResponse(
-        {
-            "ok": True,
-            "service": "editdna",
-            "time": int(datetime.utcnow().timestamp()),
-        }
+        {"ok": True, "service": "editdna", "time": int(datetime.utcnow().timestamp())}
     )
-
 
 @app.post("/enqueue_nop")
 def enqueue_nop() -> JSONResponse:
-    """
-    Enqueue a tiny health-check task that always succeeds.
-    """
     job = queue.enqueue("worker.task_nop")
     return JSONResponse({"job_id": job.id})
 
-
 @app.get("/jobs/{job_id}")
 def get_job(job_id: str) -> JSONResponse:
-    """
-    Poll a job by id (used for both /enqueue_nop and /render jobs).
-    """
     try:
         job = _get_job_or_404(job_id)
     except Exception:
         raise HTTPException(status_code=404, detail="Not Found")
     return JSONResponse(_job_payload(job))
 
-
 @app.post("/render")
 def render(req: RenderRequest) -> JSONResponse:
     """
-    Enqueue a render job. Accepts HTTPS S3 URLs.
-    The worker reads them via ffmpeg concat demuxer with protocol whitelist.
+    Enqueue a render job.
+    mode="concat"  -> one stitched mp4
+    mode="split"   -> per-clip mp4s (list)
     """
     payload = {
         "session_id": req.session_id or "session",
         "files": [str(x) for x in req.files],
         "output_prefix": req.output_prefix or "editdna/outputs",
         "portrait": bool(req.portrait),
+        "mode": req.mode or "concat",
     }
-
-    # Important: pass a single dict so both old and new worker signatures work
     job = queue.enqueue("worker.job_render", payload)
+    return JSONResponse({"job_id": job.id, "session_id": payload["session_id"]})
 
-    return JSONResponse(
-        {
-            "job_id": job.id,
-            "session_id": payload["session_id"],
-        }
-    )
-
-
-# Optional compatibility endpoint (if you ever use it)
+# Optional compatibility endpoint
 @app.post("/render_chunked")
 def render_chunked(req: RenderRequest) -> JSONResponse:
     payload = {
@@ -135,6 +111,7 @@ def render_chunked(req: RenderRequest) -> JSONResponse:
         "files": [str(x) for x in req.files],
         "output_prefix": req.output_prefix or "editdna/outputs",
         "portrait": bool(req.portrait),
+        "mode": req.mode or "concat",
     }
     job = queue.enqueue("worker.job_render_chunked", payload)
     return JSONResponse({"job_id": job.id, "session_id": payload["session_id"]})
