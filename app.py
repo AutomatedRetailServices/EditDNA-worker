@@ -1,5 +1,3 @@
-# app.py — FastAPI + RQ enqueue/poll
-
 from __future__ import annotations
 
 import os
@@ -13,7 +11,12 @@ from redis import Redis
 from rq import Queue
 from rq.job import Job
 
-APP_VERSION = "1.2.1"
+# Import callables directly so RQ records fully-qualified names automatically.
+from worker import job_render as worker_job_render
+from worker import job_render_chunked as worker_job_render_chunked
+from worker import task_nop as worker_task_nop
+
+APP_VERSION = "1.2.2"
 
 # Redis / RQ setup
 REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379/0")
@@ -24,7 +27,7 @@ queue = Queue("default", connection=redis, default_timeout=60 * 60)  # 60 min
 app = FastAPI(title="editdna", version=APP_VERSION)
 
 
-# Request model
+# ----- Request model -----
 class RenderRequest(BaseModel):
     session_id: Optional[str] = "session"
     files: List[str | HttpUrl]
@@ -41,7 +44,7 @@ class RenderRequest(BaseModel):
     drop_black: Optional[bool] = True
 
 
-# Helpers
+# ----- Helpers -----
 def _job_payload(job: Job) -> Dict[str, Any]:
     status = job.get_status(refresh=True)
     result = None
@@ -67,7 +70,7 @@ def _get_job_or_404(job_id: str) -> Job:
     return job
 
 
-# Routes
+# ----- Routes -----
 @app.get("/")
 def root() -> JSONResponse:
     return JSONResponse(
@@ -86,7 +89,7 @@ def health() -> JSONResponse:
         redis_ok = bool(redis.ping())
     except Exception:
         redis_ok = False
-    # RQ queue count (property on some versions, method on others)
+    # queue.count can be a property or method depending on RQ version
     pending = None
     try:
         c = getattr(queue, "count", None)
@@ -107,7 +110,8 @@ def health() -> JSONResponse:
 
 @app.post("/enqueue_nop")
 def enqueue_nop() -> JSONResponse:
-    job = queue.enqueue("worker.task_nop")
+    # Enqueue callable (not string) so RQ records module path automatically
+    job = queue.enqueue(worker_task_nop)
     return JSONResponse({"job_id": job.id})
 
 
@@ -136,8 +140,8 @@ def render(req: RenderRequest) -> JSONResponse:
         "drop_silent": req.drop_silent,
         "drop_black": req.drop_black,
     }
-    # Single dict keeps compatibility with worker.job_render signatures
-    job = queue.enqueue("worker.job_render", payload)
+    # Enqueue callable (not string) to avoid "Invalid attribute name"
+    job = queue.enqueue(worker_job_render, payload)
     return JSONResponse({"job_id": job.id, "session_id": payload["session_id"]})
 
 
@@ -150,5 +154,5 @@ def render_chunked(req: RenderRequest) -> JSONResponse:
         "portrait": bool(req.portrait),
         "mode": "concat",
     }
-    job = queue.enqueue("worker.job_render_chunked", payload)
+    job = queue.enqueue(worker_job_render_chunked, payload)
     return JSONResponse({"job_id": job.id, "session_id": payload["session_id"]})
