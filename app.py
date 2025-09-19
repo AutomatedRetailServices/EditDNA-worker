@@ -1,4 +1,4 @@
-# app.py
+# app.py — EditDNA Web API (v1.2.2)
 
 from __future__ import annotations
 
@@ -14,16 +14,16 @@ from rq import Queue
 from rq.job import Job
 
 # -----------------------------------------------------------------------------
-# Redis / RQ setup
+# Redis / RQ
 # -----------------------------------------------------------------------------
-APP_VERSION = "1.2.1"
 REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379/0")
 redis = Redis.from_url(REDIS_URL)
-queue = Queue("default", connection=redis, default_timeout=60 * 60)  # 60 min
+queue = Queue("default", connection=redis, default_timeout=60 * 60)  # 60 minutes
 
 # -----------------------------------------------------------------------------
-# FastAPI app
+# FastAPI
 # -----------------------------------------------------------------------------
+APP_VERSION = "1.2.2"
 app = FastAPI(title="editdna", version=APP_VERSION)
 
 # -----------------------------------------------------------------------------
@@ -35,7 +35,7 @@ class RenderRequest(BaseModel):
     output_prefix: Optional[str] = "editdna/outputs"
     portrait: Optional[bool] = True
 
-    # optional knobs (pass-through to worker)
+    # Optional knobs (pass-through to worker)
     mode: Optional[str] = "concat"            # "concat" | "best" | "split"
     max_duration: Optional[int] = None        # seconds cap for final video
     take_top_k: Optional[int] = None          # keep best K clips (mode="best")
@@ -64,17 +64,11 @@ def _job_payload(job: Job) -> Dict[str, Any]:
         "ended_at": job.ended_at.isoformat() if job.ended_at else None,
     }
 
-
 def _get_job_or_404(job_id: str) -> Job:
     job = Job.fetch(job_id, connection=redis)
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
     return job
-
-
-# small built-in nop task so /enqueue_nop always works
-def _nop() -> dict:
-    return {"echo": {"hello": "world"}}
 
 # -----------------------------------------------------------------------------
 # Routes
@@ -96,31 +90,36 @@ def version() -> JSONResponse:
 
 @app.get("/health")
 def health() -> JSONResponse:
-    try:
-        redis_ok = redis.ping()
-    except Exception:
-        redis_ok = False
+    """
+    Safe health endpoint:
+    - never throws 500
+    - shows redis ping and queue length
+    """
+    data = {
+        "ok": False,
+        "service": "editdna",
+        "version": APP_VERSION,
+        "queue": {"name": queue.name, "pending": None},
+        "redis_db_hint": os.getenv("REDIS_URL", "unknown").split("/")[-1],
+        "web_default_timeout_sec": queue.default_timeout,
+    }
 
     try:
-        pending = queue.count()  # <-- call the method
+        data["ok"] = bool(redis.ping())
     except Exception:
-        pending = None
+        data["ok"] = False
 
-    return JSONResponse(
-        {
-            "ok": bool(redis_ok),
-            "queue": {"name": queue.name, "pending": pending},
-            "redis_db_hint": os.getenv("REDIS_URL", "unknown").split("/")[-1],
-            "web_default_timeout_sec": queue.default_timeout,
-            "service": "editdna",
-            "version": APP_VERSION,
-        }
-    )
+    try:
+        # IMPORTANT: queue.count() is a function
+        data["queue"]["pending"] = queue.count()
+    except Exception:
+        data["queue"]["pending"] = None
+
+    return JSONResponse(data)
 
 @app.post("/enqueue_nop")
 def enqueue_nop() -> JSONResponse:
-    # enqueue the local function object (importable as app._nop)
-    job = queue.enqueue(_nop)
+    job = queue.enqueue("worker.task_nop")
     return JSONResponse({"job_id": job.id})
 
 @app.get("/jobs/{job_id}")
@@ -133,6 +132,10 @@ def get_job(job_id: str) -> JSONResponse:
 
 @app.post("/render")
 def render(req: RenderRequest) -> JSONResponse:
+    """
+    Enqueue a render job. We pass a single dict so the worker supports
+    both the old positional signature and the new dict payload.
+    """
     payload = {
         "session_id": req.session_id or "session",
         "files": [str(x) for x in req.files],
@@ -147,8 +150,7 @@ def render(req: RenderRequest) -> JSONResponse:
         "drop_silent": req.drop_silent,
         "drop_black": req.drop_black,
     }
-    # IMPORTANT: job_render is in jobs.py
-    job = queue.enqueue("jobs.job_render", payload)
+    job = queue.enqueue("worker.job_render", payload)
     return JSONResponse({"job_id": job.id, "session_id": payload["session_id"]})
 
 @app.post("/render_chunked")
@@ -160,5 +162,5 @@ def render_chunked(req: RenderRequest) -> JSONResponse:
         "portrait": bool(req.portrait),
         "mode": "concat",
     }
-    job = queue.enqueue("jobs.job_render_chunked", payload)
+    job = queue.enqueue("worker.job_render_chunked", payload)
     return JSONResponse({"job_id": job.id, "session_id": payload["session_id"]})
