@@ -18,7 +18,7 @@ APP_VERSION = "1.2.5"
 # Redis / RQ
 REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379/0")
 redis = Redis.from_url(REDIS_URL)
-queue = Queue("default", connection=redis)  # timeouts set per-job
+queue = Queue("default", connection=redis)  # no default_timeout here
 
 app = FastAPI(title="editdna", version=APP_VERSION)
 
@@ -86,7 +86,7 @@ def health() -> JSONResponse:
             "service": "editdna",
             "version": APP_VERSION,
             "queue": {"name": queue.name, "pending": queue.count},
-            "redis_url_tail": os.getenv("REDIS_URL", "unknown")[-32:],  # compare to worker
+            "redis_url_tail": os.getenv("REDIS_URL", "unknown")[-32:],  # check matches worker
         }
     )
 
@@ -105,42 +105,35 @@ def get_job(job_id: str) -> JSONResponse:
 
 @app.post("/render")
 def render(req: RenderRequest) -> JSONResponse:
-    payload = {
-        "session_id": req.session_id or "session",
-        "files": [str(x) for x in req.files],
-        "output_prefix": req.output_prefix or "editdna/outputs",
-        "portrait": bool(req.portrait),
-        # extra knobs reserved; not passed to jobs.job_render yet
-    }
+    session_id = req.session_id or "session"
+    files = [str(x) for x in req.files]
+    output_prefix = req.output_prefix or "editdna/outputs"
 
-    # Match jobs.py signature: (session_id, files, output_prefix)
     job = queue.enqueue(
         "jobs.job_render",
-        payload["session_id"],
-        payload["files"],
-        payload["output_prefix"],
-        # execution controls
-        job_timeout=60 * 60,   # 60 min per job
+        session_id,
+        files,
+        output_prefix,
+        job_timeout=60 * 60,   # 60 min
         result_ttl=86400,      # keep result 1 day
-        ttl=7200               # can wait in queue up to 2h
+        ttl=7200               # wait in queue up to 2h
     )
-    return JSONResponse({"job_id": job.id, "session_id": payload["session_id"]})
+    return JSONResponse({"job_id": job.id, "session_id": session_id})
 
 
 @app.post("/render_chunked")
 def render_chunked(req: RenderRequest) -> JSONResponse:
-    payload = {
-        "session_id": req.session_id or "session",
-        "files": [str(x) for x in req.files],
-        "output_prefix": req.output_prefix or "editdna/outputs",
-    }
+    session_id = req.session_id or "session"
+    files = [str(x) for x in req.files]
+    output_prefix = req.output_prefix or "editdna/outputs"
+
     job = queue.enqueue(
         "jobs.job_render_chunked",
-        payload["session_id"],
-        payload["files"],
-        payload["output_prefix"],
+        session_id,
+        files,
+        output_prefix,
         job_timeout=60 * 60,
         result_ttl=86400,
         ttl=7200,
     )
-    return JSONResponse({"job_id": job.id, "session_id": payload["session_id"]})
+    return JSONResponse({"job_id": job.id, "session_id": session_id})
