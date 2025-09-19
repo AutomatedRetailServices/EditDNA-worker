@@ -1,169 +1,137 @@
-# app.py — Web API for EditDNA (full replacement)
+# worker.py — robust ffmpeg worker (concat HTTPS S3 clips → MP4)
 
 from __future__ import annotations
 
 import os
-from datetime import datetime
-from typing import Any, Dict, List, Optional
-
-from fastapi import FastAPI, HTTPException
-from fastapi.responses import JSONResponse
-from pydantic import BaseModel, HttpUrl
-from redis import Redis
-from rq import Queue
-from rq.job import Job
+import subprocess
+import tempfile
+from pathlib import Path
+from typing import Any, Iterable, List, Sequence, Union
 
 
-# ---------------------------------------------------------------------
-# Redis / RQ setup (web and worker **must** share the exact same REDIS_URL)
-# ---------------------------------------------------------------------
-REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379/0")
-QUEUE_NAME = os.getenv("RQ_QUEUE", "default")
-
-redis = Redis.from_url(REDIS_URL)
-queue = Queue(QUEUE_NAME, connection=redis, default_timeout=60 * 60)  # 60 min
+def _to_str_list(items: Iterable[Any]) -> List[str]:
+    return [str(x) for x in items]
 
 
-# ---------------------------------------------------------------------
-# FastAPI app
-# ---------------------------------------------------------------------
-app = FastAPI(title="editdna", version="1.1.0")
+def _write_concat_txt(sources: Sequence[str], dst: Path) -> None:
+    """Write ffmpeg concat demuxer list file. Quotes and escapes are handled."""
+    with dst.open("w", encoding="utf-8") as f:
+        for src in sources:
+            esc = str(src).replace("'", "'\\''")
+            f.write(f"file '{esc}'\n")
 
 
-# ---------------------------------------------------------------------
-# Models
-# ---------------------------------------------------------------------
-class RenderRequest(BaseModel):
-    # required inputs
-    files: List[str | HttpUrl]
-
-    # session/output controls
-    session_id: Optional[str] = "session"
-    output_prefix: Optional[str] = "editdna/outputs"
-    portrait: Optional[bool] = True
-
-    # (optional) “smart edit” knobs — passed through to worker
-    mode: Optional[str] = "concat"         # "concat" | "split" | "best" (future)
-    max_duration: Optional[int] = None     # seconds (for "best")
-    take_top_k: Optional[int] = None       # pick k best clips (for "best")
-    min_clip_seconds: Optional[float] = None
-    max_clip_seconds: Optional[float] = None
-    drop_silent: Optional[bool] = None
-    drop_black: Optional[bool] = None
+def _run_ffmpeg(cmd: List[str]) -> None:
+    """Run ffmpeg and raise with full stderr on failure."""
+    proc = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=False)
+    if proc.returncode != 0:
+        out = (proc.stdout or b"").decode("utf-8", errors="replace")
+        err = (proc.stderr or b"").decode("utf-8", errors="replace")
+        raise RuntimeError(f"ffmpeg failed (exit={proc.returncode}):\n{out}\n{err}")
 
 
-# ---------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------
-def _job_payload(job: Job) -> Dict[str, Any]:
-    status = job.get_status(refresh=True)
-    result = None
-    error = None
+def _ffmpeg_concat_to_mp4(
+    files: Sequence[Union[str, os.PathLike]],
+    output_path: Union[str, os.PathLike],
+    portrait: bool = True,
+) -> None:
+    files = _to_str_list(files)
+    output_path = str(output_path)
 
-    if status == "finished":
-        result = job.result
-    elif status == "failed":
-        error = job.exc_info
+    with tempfile.TemporaryDirectory(prefix="editdna-") as tmpdir:
+        concat_file = Path(tmpdir) / "concat.txt"
+        _write_concat_txt(files, concat_file)
 
-    return {
-        "job_id": job.id,
-        "status": status,
-        "result": result,
-        "error": error,
-        "enqueued_at": job.enqueued_at.isoformat() if job.enqueued_at else None,
-        "ended_at": job.ended_at.isoformat() if job.ended_at else None,
-    }
+        vf_args: List[str] = []
+        if portrait:
+            vf_args = [
+                "-vf",
+                "scale=w=1080:h=1920:force_original_aspect_ratio=decrease,"
+                "pad=1080:1920:(ow-iw)/2:(oh-ih)/2:color=black",
+            ]
 
+        cmd: List[str] = [
+            "ffmpeg",
+            "-y",
+            "-analyzeduration", "100M",
+            "-probesize", "100M",
+            # allow ffmpeg concat demuxer to pull HTTPS clips
+            "-protocol_whitelist", "file,crypto,data,https,tcp,tls",
+            "-safe", "0",
+            "-f", "concat",
+            "-i", str(concat_file),
+            "-ignore_unknown",          # ✅ no stray "1"
+            *vf_args,
+            "-c:v", "libx264",
+            "-preset", "veryfast",
+            "-crf", "23",
+            "-c:a", "aac", "-b:a", "128k",
+            "-movflags", "+faststart",
+            output_path,
+        ]
 
-def _get_job_or_404(job_id: str) -> Job:
-    try:
-        return Job.fetch(job_id, connection=redis)
-    except Exception:
-        raise HTTPException(status_code=404, detail="Not Found")
-
-
-# ---------------------------------------------------------------------
-# Core routes
-# ---------------------------------------------------------------------
-@app.get("/")
-def root() -> JSONResponse:
-    return JSONResponse(
-        {"ok": True, "service": "editdna", "time": int(datetime.utcnow().timestamp())}
-    )
-
-
-@app.post("/enqueue_nop")
-def enqueue_nop() -> JSONResponse:
-    """Enqueue a tiny health-check task that the worker should finish immediately."""
-    job = queue.enqueue("worker.task_nop")  # <- worker must be listening on same queue
-    return JSONResponse({"job_id": job.id})
+        _run_ffmpeg(cmd)
 
 
-@app.get("/jobs/{job_id}")
-def get_job(job_id: str) -> JSONResponse:
-    job = _get_job_or_404(job_id)
-    return JSONResponse(_job_payload(job))
+def task_nop() -> dict:
+    return {"echo": {"hello": "world"}}
 
 
-@app.post("/render")
-def render(req: RenderRequest) -> JSONResponse:
+def _coerce_payload(*args, **kwargs) -> dict:
     """
-    Enqueue a render job. We send a single dict payload so both the new
-    (dict-arg) and old (positional) worker signatures will work.
+    Accept either a single dict payload or legacy positional args.
+    Returns a normalized payload dict.
     """
-    payload: Dict[str, Any] = {
-        "session_id": req.session_id or "session",
-        "files": [str(x) for x in req.files],
-        "output_prefix": req.output_prefix or "editdna/outputs",
-        "portrait": bool(req.portrait),
-        # pass-through smart-edit knobs
-        "mode": (req.mode or "concat").lower(),
-        "max_duration": req.max_duration,
-        "take_top_k": req.take_top_k,
-        "min_clip_seconds": req.min_clip_seconds,
-        "max_clip_seconds": req.max_clip_seconds,
-        "drop_silent": req.drop_silent,
-        "drop_black": req.drop_black,
-    }
-
-    job = queue.enqueue("worker.job_render", payload)
-    return JSONResponse({"job_id": job.id, "session_id": payload["session_id"]})
-
-
-# ---------------------------------------------------------------------
-# Health & Debug (to avoid “queued forever” mysteries)
-# ---------------------------------------------------------------------
-@app.get("/health")
-def health() -> JSONResponse:
-    """
-    Basic service/queue health snapshot.
-    - redis_ping: True/False
-    - queue: name + length (pending jobs)
-    - same_redis_hint: helps ensure WEB and WORKER share the same DB index
-    """
-    try:
-        redis_ping = bool(redis.ping())
-    except Exception:
-        redis_ping = False
-
-    # VERY conservative: only expose the DB index portion to help debugging
-    same_redis_hint = REDIS_URL.rsplit("/", 1)[-1] if "://" in REDIS_URL else REDIS_URL
-
-    return JSONResponse(
-        {
-            "ok": redis_ping,
-            "queue": {"name": QUEUE_NAME, "pending": len(queue)},
-            "redis_db_hint": same_redis_hint,
-            "web_default_timeout_sec": queue.default_timeout,
+    if args and isinstance(args[0], dict):
+        p = dict(args[0])
+    else:
+        p = {
+            "session_id": kwargs.get("session_id"),
+            "files": kwargs.get("files"),
+            "output_prefix": kwargs.get("output_prefix"),
+            "portrait": kwargs.get("portrait"),
         }
-    )
+        # legacy tuple args: (session_id, files, output_prefix)
+        if args:
+            if p["session_id"] is None and len(args) >= 1:
+                p["session_id"] = args[0]
+            if p["files"] is None and len(args) >= 2:
+                p["files"] = args[1]
+            if p["output_prefix"] is None and len(args) >= 3:
+                p["output_prefix"] = args[2]
+
+    # defaults
+    p.setdefault("session_id", "session")
+    p.setdefault("files", [])
+    p.setdefault("output_prefix", "editdna/outputs")
+    p.setdefault("portrait", True)
+
+    # pass-through (future knobs, harmless if unused)
+    for k in ["mode", "max_duration", "take_top_k", "min_clip_seconds", "max_clip_seconds", "drop_silent", "drop_black"]:
+        p.setdefault(k, None if k not in ("drop_silent", "drop_black") else True)
+
+    return p
 
 
-@app.get("/debug/queue_len")
-def queue_len() -> JSONResponse:
-    """Lightweight queue length for dashboards."""
-    return JSONResponse({"queue": QUEUE_NAME, "pending": len(queue)})
+def job_render(*args, **kwargs) -> dict:
+    """Main RQ job: concat many HTTPS/S3 clips to a single MP4."""
+    p = _coerce_payload(*args, **kwargs)
+
+    session_id = str(p.get("session_id") or "session")
+    files = _to_str_list(p.get("files") or [])
+    portrait = bool(p.get("portrait", True))
+
+    workdir = Path(f"/tmp/editdna-{session_id}")
+    workdir.mkdir(parents=True, exist_ok=True)
+    output_path = workdir / f"{session_id}.mp4"
+
+    try:
+        _ffmpeg_concat_to_mp4(files, output_path, portrait=portrait)
+        return {"ok": True, "session_id": session_id, "output": str(output_path)}
+    except Exception as e:
+        return {"ok": False, "session_id": session_id, "error": str(e)}
 
 
-# (Optional) a convenience endpoint to re-enqueue a stuck job’s payload if needed.
-# Left out intentionally to keep the surface area small.
+def job_render_chunked(*args, **kwargs) -> dict:
+    """Compat stub: currently same as job_render."""
+    return job_render(*args, **kwargs)
