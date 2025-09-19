@@ -27,7 +27,7 @@ services:
   - type: worker
     name: editdna-worker
     env: python
-    plan: starter
+    plan: pro
     buildCommand: pip install -r requirements.txt
     startCommand: rq worker -u $REDIS_URL -P . default
     autoDeploy: true
@@ -37,8 +37,6 @@ services:
       - key: PYTHONPATH
         value: /opt/render/project/src
       - key: REDIS_URL
-        sync: false
-      - key: OPENAI_API_KEY
         sync: false
       - key: AWS_ACCESS_KEY_ID
         sync: false
