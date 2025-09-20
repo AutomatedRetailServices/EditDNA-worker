@@ -1,5 +1,4 @@
-# jobs.py — robust "best clips" picker with speech & visual analysis
-
+# jobs.py — ASR-aware “best clips” picker + renderer
 import os
 import re
 import math
@@ -10,28 +9,28 @@ import subprocess
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Tuple
 
-from s3_utils import upload_file, presigned_url, S3_BUCKET
+from s3_utils import upload_file, presigned_url, S3_BUCKET, download_to_tmp  # existing helper
 
 FFMPEG = os.getenv("FFMPEG_BIN", "ffmpeg")
 FFPROBE = os.getenv("FFPROBE_BIN", "ffprobe")
 
-# Tunables (env overrides)
-BIN_SEC = float(os.getenv("BIN_SEC", "0.5"))
+# ---------- config toggles ----------
+ASR_ENABLED = os.getenv("ASR_ENABLED", "true").lower() in ("1", "true", "yes", "on")
+ASR_MODEL_SIZE = os.getenv("ASR_MODEL_SIZE", "tiny")      # tiny | base | small (CPU: tiny/base recommended)
+ASR_LANGUAGE   = os.getenv("ASR_LANG", "en")              # language hint (optional)
+
+# Weights for scoring components (sum to 1.0 ideally)
+W_AUDIO  = float(os.getenv("W_AUDIO",  "0.45"))  # loudness
+W_SCENE  = float(os.getenv("W_SCENE",  "0.15"))  # motion/cuts
+W_SPEECH = float(os.getenv("W_SPEECH", "0.40"))  # ASR speech quality/density
+
+# Scene detection threshold for ffmpeg select filter
 SCENE_THRESH = float(os.getenv("SCENE_THRESH", "0.04"))
-SILENCE_DB = float(os.getenv("SILENCE_DB", "-35"))     # silence below this dB
-SILENCE_MIN = float(os.getenv("SILENCE_MIN", "0.5"))    # min silence to count
-BLACK_D = float(os.getenv("BLACK_D", "0.08"))           # min black duration
-BLACK_PIC_TH = float(os.getenv("BLACK_PIC_TH", "0.98"))
-BLACK_PIX_TH = float(os.getenv("BLACK_PIX_TH", "0.10"))
 
-# Weights for scoring
-W_SPEECH = float(os.getenv("W_SPEECH", "0.55"))
-W_LOUD = float(os.getenv("W_LOUD", "0.25"))
-W_SCENE = float(os.getenv("W_SCENE", "0.20"))
-BLACK_PENALTY = float(os.getenv("BLACK_PENALTY", "0.75"))  # multiply score when bin overlaps black
+# Bin size for analysis (seconds)
+BIN_SEC = 0.5
 
-
-# ---------- shell helpers ----------
+# ---------- low-level utils ----------
 
 def _run(cmd: List[str]) -> str:
     p = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
@@ -57,8 +56,24 @@ def _safe_concat_list(path: str, files: List[str]) -> str:
             f.write("file '{}'\n".format(safe))
     return list_path
 
+def _ensure_local(path_or_url: str, tmpdir: str) -> str:
+    """
+    Ensure a local file exists for ASR/trim. Uses your s3_utils.download_to_tmp
+    for s3/https S3 URLs. Falls back to ffmpeg copy for general https.
+    """
+    if path_or_url.startswith("s3://") or (
+        path_or_url.startswith(("http://", "https://")) and ".s3." in path_or_url
+    ):
+        return download_to_tmp(path_or_url, tmpdir)
 
-# ---------- data ----------
+    if path_or_url.startswith(("http://", "https://")):
+        local = os.path.join(tmpdir, f"dl-{uuid.uuid4().hex}.mp4")
+        # Robust copy via ffmpeg (handles weird containers/codecs)
+        _run([FFMPEG, "-y", "-i", path_or_url, "-c", "copy", local])
+        return local
+
+    # already a local file path
+    return path_or_url
 
 @dataclass
 class Clip:
@@ -71,10 +86,8 @@ class Clip:
     def dur(self) -> float:
         return max(0.0, self.end - self.start)
 
-
-# ---------- analysis passes ----------
-
-def _scene_change_times(path: str) -> List[float]:
+# ---------- visual + audio (non-ASR) analysis ----------
+def _analyze_scene_markers(path: str) -> List[float]:
     cmd = [
         FFMPEG, "-hide_banner", "-nostats", "-i", path,
         "-vf", f"select='gt(scene,{SCENE_THRESH})',showinfo",
@@ -84,238 +97,199 @@ def _scene_change_times(path: str) -> List[float]:
     times: List[float] = []
     for line in log.splitlines():
         if "showinfo" in line and "pts_time:" in line:
-            m = re.search(r"pts_time:([0-9]+(?:\.[0-9]+)?)", line)
+            m = re.search(r"pts_time:([0-9]+\.[0-9]+)", line)
             if m:
                 times.append(float(m.group(1)))
     return times
 
-def _audio_rms_bins(path: str, dur: float) -> List[float]:
+def _analyze_audio_rms_bins(path: str, dur: float, bin_sec: float) -> List[float]:
     """
-    Returns per-BIN_SEC RMS dB list. Uses astats with reset window = BIN_SEC.
+    Returns loudness proxy per bin (0..1 normalized). Uses astats every 0.5s window.
     """
-    cmd = [
-        FFMPEG, "-hide_banner", "-i", path, "-vn",
-        "-af", f"astats=metadata=1:reset={BIN_SEC}",
+    a_cmd = [
+        FFMPEG, "-hide_banner", "-i", path,
+        "-vn", "-af", f"astats=metadata=1:reset={bin_sec}",
         "-f", "null", "-"
     ]
-    log = _run(cmd)
-    rms: List[float] = []
+    log = _run(a_cmd)
+
+    rms_db: List[float] = []
     for line in log.splitlines():
         if "RMS_level:" in line:
             m = re.search(r"RMS_level:\s*(-?\d+\.?\d*)", line)
             if m:
                 try:
-                    rms.append(float(m.group(1)))
+                    rms_db.append(float(m.group(1)))
                 except Exception:
                     pass
 
-    # align to bins
-    n_bins = max(1, int(math.ceil(dur / BIN_SEC)))
-    if len(rms) < n_bins:
-        # pad with quiet values
-        pad = [-60.0] * (n_bins - len(rms))
-        rms += pad
-    elif len(rms) > n_bins:
-        rms = rms[:n_bins]
-    return rms
+    # Align to number of bins
+    num_bins = int(math.ceil(dur / bin_sec))
+    if len(rms_db) < num_bins:
+        rms_db += [min(rms_db + [-60.0])] * (num_bins - len(rms_db))
+    if len(rms_db) > num_bins:
+        rms_db = rms_db[:num_bins]
 
-def _speech_intervals(path: str) -> List[Tuple[float, float]]:
-    """
-    Invert silencedetect -> speech intervals.
-    """
-    cmd = [
-        FFMPEG, "-hide_banner", "-i", path, "-vn",
-        "-af", f"silencedetect=noise={SILENCE_DB}dB:d={SILENCE_MIN}",
-        "-f", "null", "-"
-    ]
-    log = _run(cmd)
-    # Parse silence_start / silence_end
-    silences: List[Tuple[float, float]] = []
-    s_start: Optional[float] = None
-    for line in log.splitlines():
-        if "silence_start:" in line:
-            m = re.search(r"silence_start:\s*([0-9]+(?:\.[0-9]+)?)", line)
-            if m:
-                s_start = float(m.group(1))
-        elif "silence_end:" in line and "silence_duration" in line:
-            m = re.search(r"silence_end:\s*([0-9]+(?:\.[0-9]+)?)", line)
-            if s_start is not None and m:
-                silences.append((s_start, float(m.group(1))))
-                s_start = None
-    # Convert to speech by subtracting silences from [0, dur]
-    dur = _duration(path)
-    if dur <= 0:
-        return []
-    speech: List[Tuple[float, float]] = []
-    cur = 0.0
-    for (s0, s1) in sorted(silences):
-        if s0 > cur:
-            speech.append((cur, max(cur, min(s0, dur))))
-        cur = max(cur, s1)
-    if cur < dur:
-        speech.append((cur, dur))
-    # Clip negatives / tiny artifacts
-    speech = [(max(0.0, a), max(0.0, b)) for (a, b) in speech if b - a > 1e-3]
-    return speech
-
-def _black_intervals(path: str) -> List[Tuple[float, float]]:
-    cmd = [
-        FFMPEG, "-hide_banner", "-nostats", "-i", path,
-        "-vf", f"blackdetect=d={BLACK_D}:pic_th={BLACK_PIC_TH}:pix_th={BLACK_PIX_TH}",
-        "-an", "-f", "null", "-"
-    ]
-    log = _run(cmd)
-    blacks: List[Tuple[float, float]] = []
-    b_start: Optional[float] = None
-    for line in log.splitlines():
-        if "black_start" in line:
-            m = re.search(r"black_start:\s*([0-9]+(?:\.[0-9]+)?)", line)
-            if m:
-                b_start = float(m.group(1))
-        elif "black_end" in line:
-            m = re.search(r"black_end:\s*([0-9]+(?:\.[0-9]+)?)", line)
-            if b_start is not None and m:
-                blacks.append((b_start, float(m.group(1))))
-                b_start = None
-    return blacks
-
-
-# ---------- scoring ----------
-
-def _build_bins(dur: float) -> List[Tuple[float, float]]:
-    bins: List[Tuple[float, float]] = []
-    t = 0.0
-    while t < dur:
-        bins.append((t, min(dur, t + BIN_SEC)))
-        t += BIN_SEC
-    return bins
-
-def _overlaps(a0: float, a1: float, b0: float, b1: float) -> bool:
-    return not (a1 <= b0 or b1 <= a0)
-
-def _analyze_file(path: str) -> List[Tuple[float, float, float]]:
-    """
-    Returns [(bin_start, bin_end, score)] for the file.
-    Score is based on speech presence, loudness, scene-change density, and black-penalty.
-    """
-    dur = _duration(path)
-    if dur <= 0:
-        return []
-    bins = _build_bins(dur)
-
-    # features
-    scene_times = _scene_change_times(path)
-    rms = _audio_rms_bins(path, dur)
-    speech = _speech_intervals(path)
-    blacks = _black_intervals(path)
-
-    # normalize loudness from dB -> 0..1
-    loud_vals = [max(0.0, 60.0 + v) for v in rms]  # -60dB => 0
+    # Convert dB to positive loudness (clamp at 0)
+    loud_vals = [max(0.0, 60.0 + v) for v in rms_db]  # -60->0, -10->50
     max_loud = max(loud_vals) or 1.0
-    loud_norm = [v / max_loud for v in loud_vals]
+    return [v / max_loud for v in loud_vals]
 
-    # scene changes per bin
-    scene_counts = [0] * len(bins)
-    for st in scene_times:
-        idx = min(int(st / BIN_SEC), len(bins) - 1)
-        scene_counts[idx] += 1
-    max_scene = max(scene_counts) or 1
-    scene_norm = [c / max_scene for c in scene_counts]
+def _scene_counts_to_bins(scene_times: List[float], dur: float, bin_sec: float) -> List[float]:
+    num_bins = int(math.ceil(dur / bin_sec))
+    counts = [0] * num_bins
+    for t in scene_times:
+        idx = min(int(t / bin_sec), num_bins - 1)
+        counts[idx] += 1
+    max_cnt = max(counts) or 1
+    return [c / max_cnt for c in counts]
 
-    # speech presence per bin (0/1)
-    speech_mask = [0.0] * len(bins)
-    for i, (b0, b1) in enumerate(bins):
-        for (s0, s1) in speech:
-            if _overlaps(b0, b1, s0, s1):
-                speech_mask[i] = 1.0
-                break
-
-    # black penalty per bin
-    black_pen = [1.0] * len(bins)
-    for i, (b0, b1) in enumerate(bins):
-        for (k0, k1) in blacks:
-            if _overlaps(b0, b1, k0, k1):
-                black_pen[i] = BLACK_PENALTY
-                break
-
-    scores: List[float] = []
-    for i in range(len(bins)):
-        score = (W_SPEECH * speech_mask[i]) + (W_LOUD * loud_norm[i]) + (W_SCENE * scene_norm[i])
-        score *= black_pen[i]
-        scores.append(score)
-
-    return [(bins[i][0], bins[i][1], scores[i]) for i in range(len(bins))]
-
-
-# ---------- candidate generation ----------
-
-def _adaptive_threshold(values: List[float]) -> float:
+# ---------- ASR analysis (speech-aware) ----------
+def _asr_segments(local_path: str) -> List[Tuple[float, float, str]]:
     """
-    Adaptive threshold: max(mean*0.9, percentile60). Ensures something passes.
+    Returns list of (start, end, text) segments from faster-whisper.
     """
-    if not values:
-        return 0.0
-    vals = sorted(values)
-    mean = sum(vals) / len(vals)
-    p60 = vals[int(0.60 * (len(vals) - 1))]
-    return max(mean * 0.9, p60 * 1.0)
-
-def _collect_candidate_clips(path: str, min_clip: float, max_clip: float) -> List[Clip]:
-    bins = _analyze_file(path)
-    if not bins:
-        print(f"[analysis] no bins for {path}")
+    if not ASR_ENABLED:
         return []
 
-    scores = [s for _, _, s in bins]
-    thresh = _adaptive_threshold(scores)
+    try:
+        from faster_whisper import WhisperModel
+    except Exception:
+        # ASR library missing — silently disable ASR scoring
+        return []
 
-    candidates: List[Clip] = []
+    # CPU-friendly model
+    model = WhisperModel(ASR_MODEL_SIZE, device="cpu", compute_type="int8")
+    segments, _ = model.transcribe(
+        local_path,
+        language=ASR_LANGUAGE if ASR_LANGUAGE else None,
+        vad_filter=True,
+        vad_parameters={"min_silence_duration_ms": 300},
+        word_timestamps=False,
+    )
+    out: List[Tuple[float, float, str]] = []
+    for seg in segments:
+        # seg: .start, .end, .text
+        try:
+            out.append((float(seg.start or 0.0), float(seg.end or 0.0), seg.text or ""))
+        except Exception:
+            pass
+    return out
+
+def _speech_bins_from_segments(segments: List[Tuple[float, float, str]], dur: float, bin_sec: float) -> List[float]:
+    """
+    Build per-bin speech score: combine speech presence and words-per-second.
+    """
+    num_bins = int(math.ceil(dur / bin_sec))
+    pres = [0.0] * num_bins
+    wps  = [0.0] * num_bins
+
+    for (s, e, text) in segments:
+        s = max(0.0, s); e = max(s, e)
+        wcount = max(0, len((text or "").strip().split()))
+        seg_dur = max(1e-6, e - s)
+        seg_wps = wcount / seg_dur
+
+        # distribute into bins this segment overlaps
+        b0 = int(s // bin_sec)
+        b1 = int((e - 1e-9) // bin_sec)
+        for b in range(max(0, b0), min(num_bins - 1, b1) + 1):
+            pres[b] = 1.0  # speech present
+            wps[b] += seg_wps  # accumulate; later normalize
+
+    # normalize wps
+    max_wps = max(wps) or 1.0
+    wps_norm = [v / max_wps for v in wps]
+    # simple combo: 0.6 presence + 0.4 density
+    speech_score = [0.6 * pres[i] + 0.4 * wps_norm[i] for i in range(num_bins)]
+    return speech_score
+
+# ---------- file -> bins combined ----------
+def _bins_for_file(local_path: str, bin_sec: float) -> List[Tuple[float, float, float]]:
+    """
+    Returns list of (bin_start, bin_end, combined_score[0..1]).
+    """
+    dur = _duration(local_path)
+    if dur <= 0:
+        return []
+
+    num_bins = int(math.ceil(dur / bin_sec))
+    bins = [(i * bin_sec, min(dur, (i + 1) * bin_sec)) for i in range(num_bins)]
+
+    # visual+audio
+    scene_bins = _scene_counts_to_bins(_analyze_scene_markers(local_path), dur, bin_sec)
+    audio_bins = _analyze_audio_rms_bins(local_path, dur, bin_sec)
+
+    # speech (ASR)
+    if ASR_ENABLED:
+        segments = _asr_segments(local_path)
+        speech_bins = _speech_bins_from_segments(segments, dur, bin_sec)
+    else:
+        speech_bins = [0.0] * num_bins
+
+    # combine
+    scores = [
+        W_AUDIO * audio_bins[i] + W_SCENE * scene_bins[i] + W_SPEECH * speech_bins[i]
+        for i in range(num_bins)
+    ]
+    return [(bins[i][0], bins[i][1], scores[i]) for i in range(num_bins)]
+
+# ---------- merge bins -> candidate clips ----------
+def _collect_candidate_clips(local_path: str, min_clip: float, max_clip: float) -> List[Clip]:
+    bins = _bins_for_file(local_path, BIN_SEC)
+    if not bins:
+        return []
+
+    # threshold at median to keep "above-average" parts
+    scores = [s for _, _, s in bins]
+    thresh = sorted(scores)[len(scores)//2]
+
+    out: List[Clip] = []
     cur_start: Optional[float] = None
-    cur_sum = 0.0
+    cur_score_sum = 0.0
     cur_bins = 0
 
     def flush(end_time: float):
-        nonlocal cur_start, cur_sum, cur_bins
+        nonlocal cur_start, cur_score_sum, cur_bins
         if cur_start is None:
             return
         dur = end_time - cur_start
         if dur >= min_clip:
-            # split long regions so none exceed max_clip
             chunks = int(math.ceil(dur / max_clip))
             chunk_dur = dur / chunks
-            base = (cur_sum / max(1, cur_bins))
+            base_score = (cur_score_sum / max(1, cur_bins))
             for k in range(chunks):
                 s = cur_start + k * chunk_dur
                 e = min(end_time, s + chunk_dur)
                 if e - s >= min_clip:
-                    candidates.append(Clip(src=path, start=s, end=e, score=base))
+                    out.append(Clip(src=local_path, start=s, end=e, score=base_score))
         cur_start = None
-        cur_sum = 0.0
+        cur_score_sum = 0.0
         cur_bins = 0
 
     for (b0, b1, sc) in bins:
         if sc >= thresh:
             if cur_start is None:
                 cur_start = b0
-            cur_sum += sc
+            cur_score_sum += sc
             cur_bins += 1
         else:
             flush(b0)
     flush(bins[-1][1])
 
-    print(f"[analysis] {path}: {len(candidates)} candidate clips (thresh={thresh:.3f})")
-    return candidates
+    return out
 
-
-# ---------- selection & rendering ----------
-
+# ---------- rendering ----------
 def _render_concat(tmpdir: str, inputs: List[str], portrait: bool = True) -> str:
     out_path = os.path.join(tmpdir, "out.mp4")
     concat_txt = _safe_concat_list(tmpdir, inputs)
-    vf = ("scale=w=1080:h=1920:force_original_aspect_ratio=decrease,"
-          "pad=1080:1920:(ow-iw)/2:(oh-ih)/2:color=black") if portrait else \
-         ("scale=w=1920:h=1080:force_original_aspect_ratio=decrease,"
-          "pad=1920:1080:(ow-iw)/2:(oh-ih)/2:color=black")
+    vf = (
+        "scale=w=1080:h=1920:force_original_aspect_ratio=decrease,"
+        "pad=1080:1920:(ow-iw)/2:(oh-ih)/2:color=black"
+        if portrait else
+        "scale=w=1920:h=1080:force_original_aspect_ratio=decrease,"
+        "pad=1920:1080:(ow-iw)/2:(oh-ih)/2:color=black"
+    )
     cmd = [
         FFMPEG, "-y",
         "-analyzeduration", "100M", "-probesize", "100M",
@@ -332,14 +306,17 @@ def _render_concat(tmpdir: str, inputs: List[str], portrait: bool = True) -> str
 
 def _render_clips(tmpdir: str, clips: List[Clip], portrait: bool = True) -> str:
     parts: List[str] = []
-    vf = ("scale=w=1080:h=1920:force_original_aspect_ratio=decrease,"
-          "pad=1080:1920:(ow-iw)/2:(oh-ih)/2:color=black") if portrait else \
-         ("scale=w=1920:h=1080:force_original_aspect_ratio=decrease,"
-          "pad=1920:1080:(ow-iw)/2:(oh-ih)/2:color=black")
+    vf = (
+        "scale=w=1080:h=1920:force_original_aspect_ratio=decrease,"
+        "pad=1080:1920:(ow-iw)/2:(oh-ih)/2:color=black"
+        if portrait else
+        "scale=w=1920:h=1080:force_original_aspect_ratio=decrease,"
+        "pad=1920:1080:(ow-iw)/2:(oh-ih)/2:color=black"
+    )
 
     for i, c in enumerate(clips):
         part = os.path.join(tmpdir, f"part_{i:03d}.mp4")
-        cmd = [
+        _run([
             FFMPEG, "-y",
             "-ss", f"{c.start:.3f}", "-to", f"{c.end:.3f}",
             "-i", c.src,
@@ -348,78 +325,57 @@ def _render_clips(tmpdir: str, clips: List[Clip], portrait: bool = True) -> str:
             "-c:a", "aac", "-b:a", "128k",
             "-movflags", "+faststart",
             part
-        ]
-        _run(cmd)
+        ])
         parts.append(part)
 
     return _render_concat(tmpdir, parts, portrait=portrait)
 
+# ---------- public jobs ----------
 def _pick_best(files: List[str],
+               tmpdir: str,
                max_duration: Optional[int],
                take_top_k: Optional[int],
                min_clip: float,
                max_clip: float) -> List[Clip]:
+
     all_candidates: List[Clip] = []
     for f in files:
-        all_candidates.extend(_collect_candidate_clips(f, min_clip, max_clip))
+        # ensure local for analysis (ASR + stable trims)
+        local_f = _ensure_local(f, tmpdir)
+        all_candidates.extend(_collect_candidate_clips(local_f, min_clip, max_clip))
 
     if not all_candidates:
-        # Emergency fallback: slide a min_clip window over the *loudest* file
-        print("[selection] no candidates — generating fallback windows")
-        best_file = None
-        best_rms_sum = -1e9
-        for f in files:
-            dur = _duration(f)
-            if dur <= 0:
-                continue
-            rms = _audio_rms_bins(f, dur)
-            s = sum(sorted(rms, reverse=True)[:max(1, int(min_clip / BIN_SEC))])
-            if s > best_rms_sum:
-                best_rms_sum = s
-                best_file = f
-        if best_file:
-            dur = _duration(best_file)
-            start = 0.0
-            end = min(dur, min_clip)
-            all_candidates = [Clip(best_file, start, end, 1.0)]
+        return []
 
-    # sort by score desc
     all_candidates.sort(key=lambda c: c.score, reverse=True)
 
-    # enforce top-k
     if take_top_k and take_top_k > 0:
         all_candidates = all_candidates[:take_top_k]
 
-    # enforce max_duration
     if max_duration and max_duration > 0:
-        picked: List[Clip] = []
+        chosen: List[Clip] = []
         acc = 0.0
         for c in all_candidates:
             if acc + c.dur <= max_duration + 1e-3:
-                picked.append(c)
+                chosen.append(c)
                 acc += c.dur
             if acc >= max_duration:
                 break
-        all_candidates = picked or all_candidates[:1]
+        all_candidates = chosen
 
-    print(f"[selection] returning {len(all_candidates)} clips")
     return all_candidates
-
-
-# ---------- public jobs ----------
 
 def job_render(payload: Dict[str, Any]) -> Dict[str, Any]:
     """
     payload:
-      session_id, files, output_prefix, portrait,
-      mode ("concat"|"best"), max_duration, take_top_k,
-      min_clip_seconds, max_clip_seconds, drop_* (not used directly)
+      session_id, files, output_prefix, portrait, mode,
+      max_duration, take_top_k, min_clip_seconds, max_clip_seconds
     """
-    sess = payload.get("session_id") or f"sess-{uuid.uuid4().hex[:8]}"
+    sess = str(payload.get("session_id") or f"sess-{uuid.uuid4().hex[:8]}")
     files = list(payload.get("files") or [])
     out_prefix = (payload.get("output_prefix") or "editdna/outputs").strip("/")
     portrait = bool(payload.get("portrait", True))
-    mode = (payload.get("mode") or "concat").lower().strip()
+    mode = str(payload.get("mode") or "concat").lower().strip()
 
     max_duration = payload.get("max_duration")
     take_top_k = payload.get("take_top_k")
@@ -431,17 +387,19 @@ def job_render(payload: Dict[str, Any]) -> Dict[str, Any]:
         if not files:
             return {"ok": False, "error": "No input files provided", "session_id": sess}
 
-        print(f"[job] mode={mode} files={len(files)} sess={sess}")
-
         if mode == "best":
-            clips = _pick_best(files, max_duration, take_top_k, min_clip, max_clip)
-            out_local = _render_clips(tmpdir, clips, portrait=portrait)
-            mode_used = "best"
+            clips = _pick_best(files, tmpdir, max_duration, take_top_k, min_clip, max_clip)
+            if not clips:
+                out_local = _render_concat(tmpdir, files, portrait=portrait)
+                mode_used = "concat_fallback"
+            else:
+                out_local = _render_clips(tmpdir, clips, portrait=portrait)
+                mode_used = "best"
         else:
             out_local = _render_concat(tmpdir, files, portrait=portrait)
             mode_used = "concat"
 
-        # Upload + presign
+        # Upload to S3 and presign
         s3_uri = upload_file(out_local, out_prefix, content_type="video/mp4")
         _, key = s3_uri.replace("s3://", "", 1).split("/", 1)
         url = presigned_url(S3_BUCKET, key, expires=3600)
@@ -458,7 +416,6 @@ def job_render(payload: Dict[str, Any]) -> Dict[str, Any]:
         return {"ok": False, "session_id": sess, "error": str(e), "inputs": files}
     finally:
         shutil.rmtree(tmpdir, ignore_errors=True)
-
 
 def job_render_chunked(payload: Dict[str, Any]) -> Dict[str, Any]:
     return job_render(payload)
