@@ -29,8 +29,9 @@ services:
     env: python
     plan: pro
     buildCommand: pip install -r requirements.txt
-    startCommand: rq worker -u $REDIS_URL -P . --worker-ttl 1200 default
-    autoDeploy: false          # <— turn off auto deploy for the worker
+    # ✅ Fixed: point RQ to project root so it can import worker.job_render
+    startCommand: rq worker -u $REDIS_URL -P /opt/render/project/src --worker-ttl 1200 default
+    autoDeploy: false
     envVars:
       - key: PYTHON_VERSION
         value: 3.11.9
