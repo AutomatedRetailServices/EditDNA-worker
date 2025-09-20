@@ -90,7 +90,7 @@ def health() -> JSONResponse:
 
 @app.post("/enqueue_nop")
 def enqueue_nop() -> JSONResponse:
-    # FIX: call shim in worker.py
+    # Use shim in worker.py so RQ can import consistently
     job = queue.enqueue("worker.task_nop", result_ttl=300)
     return JSONResponse({"job_id": job.id})
 
@@ -102,9 +102,8 @@ def get_job(job_id: str) -> JSONResponse:
 @app.post("/render")
 def render(req: RenderRequest) -> JSONResponse:
     payload = req.dict()
-    # FIX: enqueue via worker shim
     job = queue.enqueue(
-        "worker.job_render",
+        "worker.job_render",   # enqueue via shim
         payload,
         job_timeout=60 * 60,
         result_ttl=86400,
@@ -115,9 +114,8 @@ def render(req: RenderRequest) -> JSONResponse:
 @app.post("/render_chunked")
 def render_chunked(req: RenderRequest) -> JSONResponse:
     payload = req.dict()
-    # FIX: enqueue via worker shim
     job = queue.enqueue(
-        "worker.job_render_chunked",
+        "worker.job_render_chunked",  # enqueue via shim
         payload,
         job_timeout=60 * 60,
         result_ttl=86400,
