@@ -1,4 +1,5 @@
-# jobs.py — ASR-aware “best clips” picker + renderer
+# jobs.py — ASR-aware “best clips” picker + optional captions + renderer
+
 import os
 import re
 import math
@@ -10,6 +11,7 @@ from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Tuple
 
 from s3_utils import upload_file, presigned_url, S3_BUCKET, download_to_tmp  # existing helper
+from captions import write_srt, burn_captions  # NEW
 
 FFMPEG = os.getenv("FFMPEG_BIN", "ffmpeg")
 FFPROBE = os.getenv("FFPROBE_BIN", "ffprobe")
@@ -169,9 +171,8 @@ def _asr_segments(local_path: str) -> List[Tuple[float, float, str]]:
     )
     out: List[Tuple[float, float, str]] = []
     for seg in segments:
-        # seg: .start, .end, .text
         try:
-            out.append((float(seg.start or 0.0), float(seg.end or 0.0), seg.text or ""))
+            out.append((float(seg.start or 0.0), float(seg.end or 0.0), (seg.text or "").strip()))
         except Exception:
             pass
     return out
@@ -186,21 +187,18 @@ def _speech_bins_from_segments(segments: List[Tuple[float, float, str]], dur: fl
 
     for (s, e, text) in segments:
         s = max(0.0, s); e = max(s, e)
-        wcount = max(0, len((text or "").strip().split()))
+        wcount = max(0, len(text.split()))
         seg_dur = max(1e-6, e - s)
         seg_wps = wcount / seg_dur
 
-        # distribute into bins this segment overlaps
         b0 = int(s // bin_sec)
         b1 = int((e - 1e-9) // bin_sec)
         for b in range(max(0, b0), min(num_bins - 1, b1) + 1):
-            pres[b] = 1.0  # speech present
-            wps[b] += seg_wps  # accumulate; later normalize
+            pres[b] = 1.0
+            wps[b] += seg_wps
 
-    # normalize wps
     max_wps = max(wps) or 1.0
     wps_norm = [v / max_wps for v in wps]
-    # simple combo: 0.6 presence + 0.4 density
     speech_score = [0.6 * pres[i] + 0.4 * wps_norm[i] for i in range(num_bins)]
     return speech_score
 
@@ -340,7 +338,6 @@ def _pick_best(files: List[str],
 
     all_candidates: List[Clip] = []
     for f in files:
-        # ensure local for analysis (ASR + stable trims)
         local_f = _ensure_local(f, tmpdir)
         all_candidates.extend(_collect_candidate_clips(local_f, min_clip, max_clip))
 
@@ -369,13 +366,15 @@ def job_render(payload: Dict[str, Any]) -> Dict[str, Any]:
     """
     payload:
       session_id, files, output_prefix, portrait, mode,
-      max_duration, take_top_k, min_clip_seconds, max_clip_seconds
+      max_duration, take_top_k, min_clip_seconds, max_clip_seconds,
+      with_captions
     """
     sess = str(payload.get("session_id") or f"sess-{uuid.uuid4().hex[:8]}")
     files = list(payload.get("files") or [])
     out_prefix = (payload.get("output_prefix") or "editdna/outputs").strip("/")
     portrait = bool(payload.get("portrait", True))
     mode = str(payload.get("mode") or "concat").lower().strip()
+    with_captions = bool(payload.get("with_captions", False))
 
     max_duration = payload.get("max_duration")
     take_top_k = payload.get("take_top_k")
@@ -399,6 +398,18 @@ def job_render(payload: Dict[str, Any]) -> Dict[str, Any]:
             out_local = _render_concat(tmpdir, files, portrait=portrait)
             mode_used = "concat"
 
+        # Optional captions: transcribe rendered output and burn .srt
+        if with_captions and mode_used in ("best", "concat", "concat_fallback"):
+            # Only attempt if ASR is enabled
+            if ASR_ENABLED:
+                segments = _asr_segments(out_local)
+                if segments:
+                    srt_path = os.path.join(tmpdir, "subs.srt")
+                    write_srt(segments, srt_path)
+                    cap_out = os.path.join(tmpdir, "out_captions.mp4")
+                    burn_captions(out_local, srt_path, cap_out)
+                    out_local = cap_out
+
         # Upload to S3 and presign
         s3_uri = upload_file(out_local, out_prefix, content_type="video/mp4")
         _, key = s3_uri.replace("s3://", "", 1).split("/", 1)
@@ -411,6 +422,7 @@ def job_render(payload: Dict[str, Any]) -> Dict[str, Any]:
             "output_s3": s3_uri,
             "output_url": url,
             "inputs": files,
+            "captions": bool(with_captions),
         }
     except Exception as e:
         return {"ok": False, "session_id": sess, "error": str(e), "inputs": files}
