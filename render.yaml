@@ -29,8 +29,13 @@ services:
     env: python
     plan: pro
     buildCommand: pip install -r requirements.txt
-    # Point RQ to project root so it can import worker.job_render
-    startCommand: rq worker -u $REDIS_URL -P /opt/render/project/src --worker-ttl 1200 default
+    # IMPORTANT:
+    # - We export PYTHONPATH to include Render's project root so 'import worker' works.
+    # - We do NOT pass "-P ." (that was causing path issues).
+    startCommand: >
+      sh -lc 'export PYTHONPATH=/opt/render/project/src:$PYTHONPATH;
+      python -c "import sys; print(\"[PYTHONPATH]\", sys.path)" ;
+      rq worker -u "$REDIS_URL" --worker-ttl 1200 default'
     autoDeploy: false
     envVars:
       - key: PYTHON_VERSION
