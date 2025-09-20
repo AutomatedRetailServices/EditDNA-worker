@@ -1,4 +1,4 @@
-# app.py — web API for EditDNA (full file)
+# app.py — web API for EditDNA
 
 from __future__ import annotations
 
@@ -13,43 +13,32 @@ from redis import Redis
 from rq import Queue
 from rq.job import Job
 
-APP_VERSION = "1.2.6"
+APP_VERSION = "1.2.5"
 
-# -----------------------------------------------------------------------------
 # Redis / RQ
-# -----------------------------------------------------------------------------
 REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379/0")
 redis = Redis.from_url(REDIS_URL)
-# No default_timeout here; set per-job in enqueue
-queue = Queue("default", connection=redis)
+queue = Queue("default", connection=redis)  # no default_timeout here
 
-# -----------------------------------------------------------------------------
-# FastAPI app
-# -----------------------------------------------------------------------------
 app = FastAPI(title="editdna", version=APP_VERSION)
 
-# -----------------------------------------------------------------------------
-# Models
-# -----------------------------------------------------------------------------
+# ----- Models -----
 class RenderRequest(BaseModel):
     session_id: Optional[str] = "session"
     files: List[str | HttpUrl]
     output_prefix: Optional[str] = "editdna/outputs"
     portrait: Optional[bool] = True
 
-    # knobs passed through to worker (used by jobs.py “best clips” flow)
-    mode: Optional[str] = "concat"            # "concat" | "best"
-    max_duration: Optional[int] = None        # seconds cap for final video
-    take_top_k: Optional[int] = None          # keep best K clips
-    min_clip_seconds: Optional[float] = None  # lower bound per clip
-    max_clip_seconds: Optional[float] = None  # upper bound per clip
+    # knobs reserved for later worker versions
+    mode: Optional[str] = "concat"
+    max_duration: Optional[int] = None
+    take_top_k: Optional[int] = None
+    min_clip_seconds: Optional[float] = None
+    max_clip_seconds: Optional[float] = None
     drop_silent: Optional[bool] = True
     drop_black: Optional[bool] = True
 
 
-# -----------------------------------------------------------------------------
-# Helpers
-# -----------------------------------------------------------------------------
 def _job_payload(job: Job) -> Dict[str, Any]:
     status = job.get_status(refresh=True)
     result = job.result if status == "finished" else None
@@ -71,18 +60,11 @@ def _get_job_or_404(job_id: str) -> Job:
         raise HTTPException(status_code=404, detail="Not Found")
 
 
-# -----------------------------------------------------------------------------
-# Routes
-# -----------------------------------------------------------------------------
+# ----- Routes -----
 @app.get("/")
 def root() -> JSONResponse:
     return JSONResponse(
-        {
-            "ok": True,
-            "service": "editdna",
-            "version": APP_VERSION,
-            "time": int(datetime.utcnow().timestamp()),
-        }
+        {"ok": True, "service": "editdna", "version": APP_VERSION, "time": int(datetime.utcnow().timestamp())}
     )
 
 
@@ -98,23 +80,20 @@ def health() -> JSONResponse:
     except Exception:
         redis_ok = False
 
-    # Note: queue.count is a property that queries Redis lazily; it's cheap.
     return JSONResponse(
         {
             "ok": redis_ok,
             "service": "editdna",
             "version": APP_VERSION,
             "queue": {"name": queue.name, "pending": queue.count},
-            # tail of REDIS_URL to visually verify the web/worker point to same instance
-            "redis_url_tail": os.getenv("REDIS_URL", "unknown")[-32:],
+            "redis_url_tail": os.getenv("REDIS_URL", "unknown")[-32:],  # check matches worker
         }
     )
 
 
 @app.post("/enqueue_nop")
 def enqueue_nop() -> JSONResponse:
-    # Goes through the worker shim so "worker.task_nop" remains valid.
-    job = queue.enqueue("worker.task_nop", result_ttl=300)
+    job = queue.enqueue("jobs.job_render", "sess-nop", [], "editdna/outputs", result_ttl=300)
     return JSONResponse({"job_id": job.id})
 
 
@@ -126,54 +105,34 @@ def get_job(job_id: str) -> JSONResponse:
 
 @app.post("/render")
 def render(req: RenderRequest) -> JSONResponse:
-    # Build ONE payload dict; the worker expects a dict (jobs.job_render(payload))
-    payload = {
-        "session_id": req.session_id or "session",
-        "files": [str(x) for x in req.files],
-        "output_prefix": (req.output_prefix or "editdna/outputs").strip("/"),
-        "portrait": bool(req.portrait),
-        # pass-through knobs used by jobs.py
-        "mode": (req.mode or "concat"),
-        "max_duration": req.max_duration,
-        "take_top_k": req.take_top_k,
-        "min_clip_seconds": req.min_clip_seconds,
-        "max_clip_seconds": req.max_clip_seconds,
-        "drop_silent": req.drop_silent,
-        "drop_black": req.drop_black,
-    }
+    session_id = req.session_id or "session"
+    files = [str(x) for x in req.files]
+    output_prefix = req.output_prefix or "editdna/outputs"
 
+    # pass payload as dict for jobs.py
+    payload = req.dict()
     job = queue.enqueue(
-        "worker.job_render",          # call the shim; it forwards to jobs.job_render
-        payload,                      # send ONE dict so mode/best is honored
-        job_timeout=60 * 60,          # 60 min
-        result_ttl=86400,             # keep result for 1 day
-        ttl=7200,                     # allow up to 2h in the queue
+        "jobs.job_render",
+        payload,
+        job_timeout=60 * 60,   # 60 min
+        result_ttl=86400,      # keep result 1 day
+        ttl=7200               # wait in queue up to 2h
     )
-    return JSONResponse({"job_id": job.id, "session_id": payload["session_id"]})
+    return JSONResponse({"job_id": job.id, "session_id": session_id})
 
 
 @app.post("/render_chunked")
 def render_chunked(req: RenderRequest) -> JSONResponse:
-    # You can define this however you like; here we keep it similar but force a mode.
-    payload = {
-        "session_id": req.session_id or "session",
-        "files": [str(x) for x in req.files],
-        "output_prefix": (req.output_prefix or "editdna/outputs").strip("/"),
-        "portrait": bool(req.portrait),
-        "mode": (req.mode or "best"),  # example: default to "best" for this endpoint
-        "max_duration": req.max_duration,
-        "take_top_k": req.take_top_k,
-        "min_clip_seconds": req.min_clip_seconds,
-        "max_clip_seconds": req.max_clip_seconds,
-        "drop_silent": req.drop_silent,
-        "drop_black": req.drop_black,
-    }
+    session_id = req.session_id or "session"
+    files = [str(x) for x in req.files]
+    output_prefix = req.output_prefix or "editdna/outputs"
 
+    payload = req.dict()
     job = queue.enqueue(
-        "worker.job_render_chunked",
+        "jobs.job_render_chunked",
         payload,
         job_timeout=60 * 60,
         result_ttl=86400,
         ttl=7200,
     )
-    return JSONResponse({"job_id": job.id, "session_id": payload["session_id"]})
+    return JSONResponse({"job_id": job.id, "session_id": session_id})
