@@ -1,441 +1,313 @@
-# jobs.py — smart rendering (concat / best / split) with S3 upload
-from __future__ import annotations
-
+# jobs.py — worker side video jobs for EditDNA
 import os
 import re
-import math
-import json
-import shutil
 import tempfile
 import subprocess
-from dataclasses import dataclass
-from pathlib import Path
-from typing import Any, Dict, List, Optional, Sequence, Tuple
+import shutil
+from typing import List, Dict, Any, Tuple
 
-from s3_utils import upload_file, presigned_url, parse_s3_url, S3_BUCKET
+from s3_utils import upload_file, presigned_url, parse_s3_url
 
 FFMPEG_BIN = os.getenv("FFMPEG_BIN", "ffmpeg")
 FFPROBE_BIN = os.getenv("FFPROBE_BIN", "ffprobe")
 
-# ---------- small utils ----------
-
+# ----------------------------
+# shell helpers
+# ----------------------------
 def _run(cmd: List[str]) -> Tuple[int, str]:
-    """Run a command, return (rc, combined_output_str)."""
     proc = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
     return proc.returncode, proc.stdout
 
-def _run_or_raise(cmd: List[str]) -> str:
-    rc, out = _run(cmd)
-    if rc != 0:
-        raise RuntimeError(f"Command failed ({rc}): {' '.join(cmd)}\n---\n{out}\n---")
+def _must_run(cmd: List[str]) -> str:
+    code, out = _run(cmd)
+    if code != 0:
+        raise RuntimeError(f"Command failed ({code}): {' '.join(cmd)}\n---\n{out}\n---")
     return out
 
-def _sec(x: float | int | None, default: float = 0.0) -> float:
-    return float(x) if x is not None else default
-
-def _safe_basename(url: str) -> str:
-    bn = url.rsplit("/", 1)[-1] or "clip"
-    return bn.split("?")[0]
-
-@dataclass
-class ClipInfo:
-    src: str           # local path
-    url: str           # original URL (for reporting)
-    duration: float    # seconds
-    black_ratio: float # 0..1 (approx)
-    silence_spans: List[Tuple[float, float]]  # [(start,end), ...]
-    voiced_spans: List[Tuple[float, float]]   # derived from silence
-
-@dataclass
-class Segment:
-    src: str
-    url: str
-    ss: float     # start
-    dur: float    # duration
-    score: float  # ranking score (higher is better)
-
-# ---------- probing / analysis ----------
-
-_DURATION_RE = re.compile(r"duration\"\s*:\s*([0-9.]+)", re.I)
+# ----------------------------
+# ffprobe/ffmpeg scoring utils
+# ----------------------------
+_VOL_RE = re.compile(r"mean_volume:\s*(-?\d+(?:\.\d+)?)\s*dB", re.IGNORECASE)
+_BLACK_DUR_RE = re.compile(r"black_start.*?black_end.*?black_duration:\s*(\d+(?:\.\d+)?)", re.IGNORECASE)
 
 def probe_duration(path: str) -> float:
-    # fast json probe
-    cmd = [
-        FFPROBE_BIN, "-v", "error",
-        "-select_streams", "v:0",
-        "-show_entries", "format=duration",
-        "-of", "json",
-        path,
-    ]
-    out = _run_or_raise(cmd)
+    out = _must_run([
+        FFPROBE_BIN, "-v", "error", "-show_entries", "format=duration",
+        "-of", "default=noprint_wrappers=1:nokey=1", path
+    ])
     try:
-        data = json.loads(out)
-        dur = float(data.get("format", {}).get("duration", 0.0))
+        return max(0.0, float(out.strip()))
     except Exception:
-        # fallback quick parse
-        m = _DURATION_RE.search(out)
-        dur = float(m.group(1)) if m else 0.0
-    return max(0.0, dur)
-
-_SILENCE_START = re.compile(r"silence_start:\s*([0-9.]+)")
-_SILENCE_END   = re.compile(r"silence_end:\s*([0-9.]+)")
-
-def detect_silence(path: str, noise_db: float = -30.0, min_d: float = 0.35) -> List[Tuple[float, float]]:
-    """
-    Returns list of (start,end) silence spans using silencedetect.
-    """
-    cmd = [
-        FFMPEG_BIN,
-        "-hide_banner", "-nostats", "-vn",
-        "-i", path,
-        "-af", f"silencedetect=noise={noise_db}dB:d={min_d}",
-        "-f", "null", "-"
-    ]
-    rc, out = _run(cmd)
-    if rc != 0:
-        # treat as "no silence info" instead of failing hard
-        return []
-    spans: List[Tuple[float, float]] = []
-    cur: Optional[float] = None
-    for line in out.splitlines():
-        ms = _SILENCE_START.search(line)
-        if ms:
-            cur = float(ms.group(1))
-        me = _SILENCE_END.search(line)
-        if me and cur is not None:
-            spans.append((cur, float(me.group(1))))
-            cur = None
-    return spans
-
-_BLACK_START = re.compile(r"black_start:(\s*[0-9.]+)")
-_BLACK_END   = re.compile(r"black_end:(\s*[0-9.]+)")
-
-def detect_black_ratio(path: str) -> float:
-    """
-    Approximate black frame ratio using blackdetect.
-    """
-    cmd = [
-        FFMPEG_BIN, "-hide_banner", "-nostats",
-        "-i", path,
-        "-vf", "blackdetect=d=0.25:pic_th=0.98",
-        "-an", "-f", "null", "-"
-    ]
-    rc, out = _run(cmd)
-    if rc != 0:
         return 0.0
-    spans: List[Tuple[float, float]] = []
-    cur: Optional[float] = None
-    for line in out.splitlines():
-        ms = _BLACK_START.search(line)
-        if ms:
-            cur = float(ms.group(1))
-        me = _BLACK_END.search(line)
-        if me and cur is not None:
-            spans.append((cur, float(me.group(1))))
-            cur = None
-    total_black = sum(max(0.0, e - s) for s, e in spans)
-    dur = probe_duration(path) or 1.0
-    return max(0.0, min(1.0, total_black / dur))
 
-def invert_spans(total: float, silent: List[Tuple[float, float]]) -> List[Tuple[float, float]]:
-    """Return voiced spans = complement of silent spans within [0,total]."""
-    if total <= 0:
-        return []
-    s = sorted([(max(0.0, a), min(total, b)) for a, b in silent if b > a], key=lambda x: x[0])
-    voiced: List[Tuple[float, float]] = []
-    cur = 0.0
-    for a, b in s:
-        if a > cur:
-            voiced.append((cur, a))
-        cur = max(cur, b)
-    if cur < total:
-        voiced.append((cur, total))
-    return [(a, b) for a, b in voiced if b - a > 0.0]
+def mean_volume_db(path: str, analyze_seconds: float = 8.0) -> float:
+    """
+    Use volumedetect over the first analyze_seconds to estimate perceived loudness.
+    Higher (less negative) is 'better'. Defaults to -60 dB if not found.
+    """
+    # Limit input read to analyze_seconds to keep it fast
+    out = _must_run([
+        FFMPEG_BIN, "-v", "error",
+        "-t", f"{analyze_seconds}",
+        "-i", path,
+        "-af", "volumedetect",
+        "-f", "null", "-"
+    ])
+    m = _VOL_RE.search(out)
+    if not m:
+        return -60.0
+    return float(m.group(1))
 
-def analyze_clip(local: str, url: str) -> ClipInfo:
-    dur = probe_duration(local)
-    sil = detect_silence(local)
-    voiced = invert_spans(dur, sil) if sil else [(0.0, dur)]
-    black = detect_black_ratio(local)
-    return ClipInfo(src=local, url=url, duration=dur, black_ratio=black,
-                    silence_spans=sil, voiced_spans=voiced)
+def black_ratio(path: str) -> float:
+    """
+    Use blackdetect to estimate how much of the clip is black frames.
+    Returns fraction (0..1). Falls back to 0 if detection fails.
+    """
+    dur = max(0.001, probe_duration(path))
+    out = _must_run([
+        FFMPEG_BIN, "-v", "info", "-i", path,
+        "-vf", "blackdetect=d=0:pic_th=0.98",
+        "-an", "-f", "null", "-"
+    ])
+    total_black = 0.0
+    for m in _BLACK_DUR_RE.finditer(out):
+        try:
+            total_black += float(m.group(1))
+        except Exception:
+            pass
+    ratio = min(1.0, max(0.0, total_black / dur))
+    return ratio
 
-# ---------- selection / ranking ----------
+# ----------------------------
+# concat helpers
+# ----------------------------
+def _write_concat_file(tmpdir: str, files: List[str]) -> str:
+    list_path = os.path.join(tmpdir, "concat.txt")
+    with open(list_path, "w", encoding="utf-8") as f:
+        for p in files:
+            safe = str(p).replace("'", "'\\''")
+            f.write("file '{}'\n".format(safe))
+    return list_path
 
-def choose_segments(
-    infos: List[ClipInfo],
-    *,
-    min_clip: float | None,
-    max_clip: float | None,
-    take_top_k: int | None,
-    drop_silent: bool,
-    drop_black: bool,
-    max_total: float | None,
-) -> List[Segment]:
-    segs: List[Segment] = []
-    min_len = _sec(min_clip, 0.0)
-    max_len = _sec(max_clip, 9999)
-
-    for info in infos:
-        # candidate spans: voiced or whole
-        spans = info.voiced_spans if drop_silent else [(0.0, info.duration)]
-        if not spans:
-            continue
-
-        # for each span, clamp to min/max and create a scored segment
-        for a, b in spans:
-            span_len = max(0.0, b - a)
-            if span_len < max(0.01, min_len):  # skip too short
+def _concat_vertical(session_id: str, in_files: List[str], tmpdir: str,
+                     portrait: bool = True, max_total_seconds: float | None = None) -> str:
+    """
+    Concatenate already-trimmed inputs; if max_total_seconds is set, we trim the
+    last clip to not exceed the cap.
+    """
+    # Optional total-cap trimming by creating a temp list possibly with a last
+    # partial clip segment via -t.
+    files_for_concat = []
+    if max_total_seconds is not None:
+        remaining = float(max_total_seconds)
+        for path in in_files:
+            d = probe_duration(path)
+            if d <= 0.05:
                 continue
-            use_len = min(span_len, max_len)
-
-            # simple score: prefer longer voiced spans, penalize black ratio
-            voice_weight = min(1.0, span_len / (max_len if max_len > 0 else 1.0))
-            black_penalty = (1.0 - info.black_ratio) if drop_black else 1.0
-            score = 0.7 * voice_weight + 0.3 * black_penalty
-
-            segs.append(Segment(
-                src=info.src, url=info.url,
-                ss=a, dur=use_len,
-                score=score
-            ))
-
-    # rank best to worst
-    segs.sort(key=lambda s: s.score, reverse=True)
-
-    # keep only top_k
-    if take_top_k and take_top_k > 0:
-        segs = segs[:take_top_k]
-
-    # enforce max_total by trimming the tail
-    if max_total and max_total > 0:
-        budget = float(max_total)
-        trimmed: List[Segment] = []
-        for s in segs:
-            if budget <= 0:
+            use = min(d, remaining)
+            if use < 0.65:       # too tiny to bother adding
                 break
-            d = min(s.dur, budget)
-            trimmed.append(Segment(src=s.src, url=s.url, ss=s.ss, dur=d, score=s.score))
-            budget -= d
-        segs = trimmed
-
-    return segs
-
-# ---------- rendering ----------
-
-def _concat_vf_flags(portrait: bool) -> List[str]:
-    if not portrait:
-        return []
-    # 1080x1920 letterbox
-    return [
-        "-vf",
-        "scale=w=1080:h=1920:force_original_aspect_ratio=decrease,"
-        "pad=1080:1920:(ow-iw)/2:(oh-ih)/2:color=black",
-    ]
-
-def _render_concat_https(urls: Sequence[str], dst: str, portrait: bool) -> None:
-    """Concat by url via concat demuxer + https whitelist."""
-    with tempfile.TemporaryDirectory(prefix="editdna-") as tmpdir:
-        list_path = Path(tmpdir) / "concat.txt"
-        with list_path.open("w", encoding="utf-8") as f:
-            for u in urls:
-                esc = u.replace("'", "'\\''")
-                f.write(f"file '{esc}'\n")
-        cmd = [
-            FFMPEG_BIN, "-y",
-            "-analyzeduration", "100M", "-probesize", "100M",
-            "-protocol_whitelist", "file,crypto,data,https,tcp,tls",
-            "-safe", "0",
-            "-f", "concat", "-i", str(list_path),
-            "-ignore_unknown",
-            *_concat_vf_flags(portrait),
-            "-c:v", "libx264", "-preset", "veryfast", "-crf", "23",
-            "-c:a", "aac", "-b:a", "128k",
-            "-movflags", "+faststart",
-            dst,
-        ]
-        _run_or_raise(cmd)
-
-def _render_segments_fffilter(segs: Sequence[Segment], dst: str, portrait: bool) -> None:
-    """
-    Trim with -ss/-t per input, then concat via filter_complex.
-    """
-    if not segs:
-        raise RuntimeError("No segments selected")
-
-    cmd: List[str] = [FFMPEG_BIN, "-y"]
-    # inputs
-    for s in segs:
-        # precise trim: input -ss (good enough), with -t
-        cmd += ["-ss", f"{s.ss:.3f}", "-t", f"{s.dur:.3f}", "-i", s.src]
-
-    # build filter graph
-    n = len(segs)
-    parts: List[str] = []
-    for i in range(n):
-        # We keep audio & video as-is per trimmed input
-        parts.append(f"[{i}:v][{i}:a]")
-    filter_graph = "".join(parts) + f"concat=n={n}:v=1:a=1[v][a]"
-
-    cmd += [
-        "-filter_complex", filter_graph,
-        "-map", "[v]", "-map", "[a]",
-        *_concat_vf_flags(portrait),
-        "-c:v", "libx264", "-preset", "veryfast", "-crf", "23",
-        "-c:a", "aac", "-b:a", "128k",
-        "-movflags", "+faststart",
-        dst,
-    ]
-    _run_or_raise(cmd)
-
-# ---------- public jobs ----------
-
-def job_render(payload_or_session_id: Any = None, files: Any = None, output_prefix: str | None = None, **kwargs) -> Dict[str, Any]:
-    """
-    Accepts either:
-      - a single dict payload (from web): {"session_id","files","output_prefix","portrait","mode",...}
-      - legacy signature (session_id, files, output_prefix, **options)
-    Returns { ok, session_id, mode, output_s3, output_url, inputs, notes? }
-    """
-    # --- normalize args ---
-    if isinstance(payload_or_session_id, dict):
-        p = dict(payload_or_session_id)
+            if use < d - 0.01:
+                # create a temp trimmed copy
+                trimmed = os.path.join(tmpdir, f"cap_{len(files_for_concat):03d}.mp4")
+                _must_run([
+                    FFMPEG_BIN, "-y", "-t", f"{use}", "-i", path,
+                    "-c", "copy", trimmed
+                ])
+                files_for_concat.append(trimmed)
+                break
+            else:
+                files_for_concat.append(path)
+            remaining -= use
+            if remaining <= 0.1:
+                break
     else:
-        p = {
-            "session_id": payload_or_session_id,
-            "files": files,
-            "output_prefix": output_prefix,
-            **kwargs,
+        files_for_concat = in_files
+
+    concat_txt = _write_concat_file(tmpdir, files_for_concat)
+    out_path = os.path.join(tmpdir, f"{session_id}.mp4")
+
+    vf = "scale=w=1080:h=1920:force_original_aspect_ratio=decrease,pad=1080:1920:(ow-iw)/2:(oh-ih)/2:color=black" \
+         if portrait else "scale=w=1920:h=1080:force_original_aspect_ratio=decrease,pad=1920:1080:(ow-iw)/2:(oh-ih)/2:color=black"
+
+    _must_run([
+        FFMPEG_BIN,
+        "-y",
+        "-analyzeduration", "100M",
+        "-probesize", "100M",
+        "-safe", "0",
+        "-f", "concat",
+        "-i", concat_txt,
+        "-ignore_unknown", "1",
+        "-vf", vf,
+        "-c:v", "libx264",
+        "-preset", "veryfast",
+        "-crf", "23",
+        "-c:a", "aac",
+        "-b:a", "128k",
+        "-movflags", "+faststart",
+        out_path,
+    ])
+    return out_path
+
+def _trim_to_bounds(src: str, dst: str, min_s: float | None, max_s: float | None) -> bool:
+    dur = probe_duration(src)
+    if dur <= 0.05:
+        return False
+    target = dur
+    if max_s is not None:
+        target = min(target, float(max_s))
+    if min_s is not None:
+        if target < float(min_s):
+            return False
+    _must_run([FFMPEG_BIN, "-y", "-t", f"{target}", "-i", src, "-c", "copy", dst])
+    return True
+
+# ----------------------------
+# selection strategies
+# ----------------------------
+def _select_best(files: List[str],
+                 take_top_k: int | None,
+                 drop_black: bool,
+                 min_clip_seconds: float | None,
+                 max_clip_seconds: float | None,
+                 portrait: bool,
+                 tmpdir: str) -> List[str]:
+    """
+    Score each clip by loudness; optionally drop clips with high black ratio.
+    Return list of paths to (possibly trimmed) temporary MP4 files ready to concat.
+    """
+    scored: List[Tuple[float, str]] = []
+    for f in files:
+        try:
+            if drop_black:
+                br = black_ratio(f)
+                if br >= 0.60:
+                    # looks mostly black; skip
+                    continue
+            vol = mean_volume_db(f, analyze_seconds=8.0)  # e.g. -7.3 dB is louder than -20 dB
+            scored.append((vol, f))
+        except Exception:
+            # if probe fails, push with very low score so it's unlikely chosen
+            scored.append((-90.0, f))
+
+    if not scored:
+        return []
+
+    scored.sort(reverse=True, key=lambda x: x[0])  # louder first
+    if take_top_k and take_top_k > 0:
+        scored = scored[:take_top_k]
+
+    # Trim each to within min/max bounds (copy to tmp mp4), return paths
+    out_paths: List[str] = []
+    for _, src in scored:
+        dst = os.path.join(tmpdir, f"seg_{len(out_paths):03d}.mp4")
+        ok = _trim_to_bounds(src, dst, min_clip_seconds, max_clip_seconds)
+        if ok:
+            out_paths.append(dst)
+    return out_paths
+
+# ----------------------------
+# public entrypoints
+# ----------------------------
+def _normalize_payload(*args, **kwargs) -> Dict[str, Any]:
+    """
+    Accept either a dict payload (new style) or legacy (session_id, files, output_prefix).
+    """
+    if args and isinstance(args[0], dict):
+        payload = dict(args[0])  # shallow copy
+    elif len(args) >= 3 and isinstance(args[0], str) and isinstance(args[1], list):
+        payload = {
+            "session_id": args[0],
+            "files": args[1],
+            "output_prefix": args[2],
         }
+    else:
+        payload = dict(kwargs)
 
-    session_id = str(p.get("session_id") or "session")
-    urls: List[str] = [str(u) for u in (p.get("files") or [])]
-    if not urls:
-        return {"ok": False, "session_id": session_id, "error": "No input files provided"}
+    # defaults
+    payload.setdefault("session_id", "session")
+    payload.setdefault("files", [])
+    payload.setdefault("output_prefix", "editdna/outputs")
+    payload.setdefault("portrait", True)
+    payload.setdefault("mode", "concat")
+    payload.setdefault("max_duration", None)
+    payload.setdefault("take_top_k", None)
+    payload.setdefault("min_clip_seconds", None)
+    payload.setdefault("max_clip_seconds", None)
+    payload.setdefault("drop_silent", True)  # reserved for future audio gating
+    payload.setdefault("drop_black", True)
+    return payload
 
-    mode = (p.get("mode") or "concat").lower()
-    portrait = bool(p.get("portrait", True))
-    out_prefix = p.get("output_prefix") or "editdna/outputs"
+def job_render(*args, **kwargs) -> Dict[str, Any]:
+    """
+    Main render job. Supports:
+      - mode="concat"  → straight concat (as before)
+      - mode="best"    → pick loudest non-black clips, trim to bounds, concat
+    Uploads final to S3 and returns s3 url + presigned https.
+    """
+    payload = _normalize_payload(*args, **kwargs)
+    session_id: str = payload["session_id"]
+    files: List[str] = [str(x) for x in payload["files"]]
+    output_prefix: str = str(payload["output_prefix"]).strip("/")
+    portrait: bool = bool(payload.get("portrait", True))
 
-    # best-mode knobs
-    max_duration = p.get("max_duration")
-    take_top_k   = p.get("take_top_k")
-    min_clip_s   = p.get("min_clip_seconds")
-    max_clip_s   = p.get("max_clip_seconds")
-    drop_silent  = bool(p.get("drop_silent", True))
-    drop_black   = bool(p.get("drop_black", True))
+    mode: str = str(payload.get("mode", "concat") or "concat").lower()
+    max_duration = payload.get("max_duration")
+    take_top_k = payload.get("take_top_k")
+    min_clip_seconds = payload.get("min_clip_seconds")
+    max_clip_seconds = payload.get("max_clip_seconds")
+    drop_black = bool(payload.get("drop_black", True))
 
-    # --- workspace ---
-    work = Path(f"/tmp/editdna-{session_id}")
-    work.mkdir(parents=True, exist_ok=True)
-    out_path = str(work / f"{session_id}.mp4")
-
-    notes: List[str] = []
-
+    tmpdir = tempfile.mkdtemp(prefix=f"editdna-{session_id}-")
     try:
-        if mode == "concat":
-            # safest path: concat directly from HTTPS with whitelist
-            _render_concat_https(urls, out_path, portrait)
+        if mode == "best":
+            # 1) pick and trim best segments
+            chosen = _select_best(
+                files=files,
+                take_top_k=take_top_k,
+                drop_black=drop_black,
+                min_clip_seconds=min_clip_seconds,
+                max_clip_seconds=max_clip_seconds,
+                portrait=portrait,
+                tmpdir=tmpdir,
+            )
+            if not chosen:
+                # fallback: take first file within bounds
+                fallback = []
+                if files:
+                    dst = os.path.join(tmpdir, "seg_000.mp4")
+                    if _trim_to_bounds(files[0], dst, min_clip_seconds, max_clip_seconds):
+                        fallback = [dst]
+                chosen = fallback
+
+            out_path = _concat_vertical(session_id, chosen, tmpdir, portrait=portrait,
+                                        max_total_seconds=float(max_duration) if max_duration else None)
 
         else:
-            # download inputs locally for robust trimming/analysis
-            local_paths: List[str] = []
-            for u in urls:
-                # cache friendly local name
-                lp = str(work / _safe_basename(u))
-                # only download if not present (simple cache between retries)
-                if not Path(lp).exists():
-                    rc, out = _run(["curl", "-L", "-o", lp, u])
-                    if rc != 0 or not Path(lp).exists():
-                        raise RuntimeError(f"Failed to download: {u}\n{out}")
-                local_paths.append(lp)
+            # Straight concat (optionally respecting a total duration cap)
+            out_path = _concat_vertical(session_id, files, tmpdir, portrait=portrait,
+                                        max_total_seconds=float(max_duration) if max_duration else None)
 
-            # analyze clips
-            infos: List[ClipInfo] = []
-            for u, lp in zip(urls, local_paths):
-                try:
-                    info = analyze_clip(lp, u)
-                    infos.append(info)
-                except Exception as e:
-                    notes.append(f"probe_failed:{_safe_basename(u)}:{e}")
+        # Upload → S3
+        s3_uri = upload_file(out_path, output_prefix, content_type="video/mp4")
+        bkt, key = parse_s3_url(s3_uri)
+        assert bkt is not None
+        url = presigned_url(bkt, key, expires=3600)
 
-            if not infos:
-                raise RuntimeError("No analyzable clips")
-
-            if mode == "best":
-                segs = choose_segments(
-                    infos,
-                    min_clip=min_clip_s,
-                    max_clip=max_clip_s,
-                    take_top_k=take_top_k,
-                    drop_silent=drop_silent,
-                    drop_black=drop_black,
-                    max_total=max_duration,
-                )
-                if not segs:
-                    raise RuntimeError("No usable segments after selection")
-                _render_segments_fffilter(segs, out_path, portrait)
-
-            elif mode == "split":
-                # take one best voiced span per clip (or whole clip), then concat
-                segs: List[Segment] = []
-                for info in infos:
-                    spans = info.voiced_spans if drop_silent else [(0.0, info.duration)]
-                    if not spans:
-                        continue
-                    # pick longest span in that clip
-                    a, b = max(spans, key=lambda t: (t[1] - t[0]))
-                    d = b - a
-                    if min_clip_s and d < min_clip_s:
-                        continue
-                    if max_clip_s:
-                        d = min(d, max_clip_s)
-                    segs.append(Segment(src=info.src, url=info.url, ss=a, dur=d, score=1.0))
-                if max_duration:
-                    # same budget trim
-                    budget = float(max_duration)
-                    trimmed: List[Segment] = []
-                    for s in segs:
-                        if budget <= 0:
-                            break
-                        d = min(s.dur, budget)
-                        trimmed.append(Segment(src=s.src, url=s.url, ss=s.ss, dur=d, score=s.score))
-                        budget -= d
-                    segs = trimmed
-
-                if not segs:
-                    raise RuntimeError("No segments to render in split mode")
-                _render_segments_fffilter(segs, out_path, portrait)
-
-            else:
-                raise RuntimeError(f"Unknown mode: {mode}")
-
-        # upload & sign
-        s3_uri = upload_file(out_path, out_prefix, content_type="video/mp4")
-        bucket, key = parse_s3_url(s3_uri)
-        b = bucket or S3_BUCKET
-        url = presigned_url(b, key, expires=3600)
-
-        result = {
+        return {
             "ok": True,
             "session_id": session_id,
             "mode": mode,
             "output_s3": s3_uri,
             "output_url": url,
-            "inputs": urls,
+            "inputs": files,
         }
-        if notes:
-            result["notes"] = notes
-        return result
-
     except Exception as e:
-        return {"ok": False, "session_id": session_id, "error": str(e), "mode": mode, "notes": notes}
-
+        return {"ok": False, "session_id": session_id, "error": str(e), "mode": mode}
     finally:
-        # keep workspace for a bit during debugging? comment next line to persist.
-        shutil.rmtree(work, ignore_errors=True)
+        shutil.rmtree(tmpdir, ignore_errors=True)
 
-
-def job_render_chunked(payload_or_session_id: Any = None, files: Any = None, output_prefix: str | None = None, **kwargs) -> Dict[str, Any]:
-    # simple passthrough to job_render for now
-    return job_render(payload_or_session_id, files, output_prefix, **kwargs)
+# For API compatibility
+def job_render_chunked(*args, **kwargs) -> Dict[str, Any]:
+    return job_render(*args, **kwargs)
