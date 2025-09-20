@@ -13,7 +13,7 @@ from redis import Redis
 from rq import Queue
 from rq.job import Job
 
-APP_VERSION = "1.3.1"  # bumped
+APP_VERSION = "1.3.2"
 
 # Redis / RQ
 REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379/0")
@@ -90,7 +90,8 @@ def health() -> JSONResponse:
 
 @app.post("/enqueue_nop")
 def enqueue_nop() -> JSONResponse:
-    job = queue.enqueue("worker.task_nop", result_ttl=300)  # FIXED
+    # FIX: call shim in worker.py
+    job = queue.enqueue("worker.task_nop", result_ttl=300)
     return JSONResponse({"job_id": job.id})
 
 @app.get("/jobs/{job_id}")
@@ -101,8 +102,9 @@ def get_job(job_id: str) -> JSONResponse:
 @app.post("/render")
 def render(req: RenderRequest) -> JSONResponse:
     payload = req.dict()
+    # FIX: enqueue via worker shim
     job = queue.enqueue(
-        "worker.job_render",   # FIXED
+        "worker.job_render",
         payload,
         job_timeout=60 * 60,
         result_ttl=86400,
@@ -113,8 +115,9 @@ def render(req: RenderRequest) -> JSONResponse:
 @app.post("/render_chunked")
 def render_chunked(req: RenderRequest) -> JSONResponse:
     payload = req.dict()
+    # FIX: enqueue via worker shim
     job = queue.enqueue(
-        "worker.job_render_chunked",  # FIXED
+        "worker.job_render_chunked",
         payload,
         job_timeout=60 * 60,
         result_ttl=86400,
