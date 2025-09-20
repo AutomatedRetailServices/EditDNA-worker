@@ -22,19 +22,16 @@ def write_srt(segments: List[Tuple[float, float, str]], out_path: str):
 
     with open(out_path, "w", encoding="utf-8") as f:
         for i, (s, e, txt) in enumerate(segments, 1):
-            start = format_time(s)
-            end = format_time(e)
             text = (txt or "").strip()
             if not text:
                 continue
-            f.write(f"{i}\n{start} --> {end}\n{text}\n\n")
+            f.write(f"{i}\n{format_time(s)} --> {format_time(e)}\n{text}\n\n")
 
 def burn_captions(video_in: str, srt_path: str, video_out: str):
     """
-    Burns captions using ffmpeg's subtitles filter (libass inside ffmpeg).
-    Style: readable white with thin black outline (TikTok-friendly).
+    Burns captions using ffmpeg's subtitles filter (libass).
+    Style: readable white with thin black outline.
     """
-    # Force style via ASS fields. Render's ffmpeg includes libass in most images.
     style = "FontName=Arial,FontSize=36,PrimaryColour=&HFFFFFF&,OutlineColour=&H000000&,BorderStyle=3,Outline=2,Shadow=0"
     cmd = [
         FFMPEG, "-y",
