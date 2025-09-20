@@ -1,1 +1,3 @@
 ffmpeg
+libass9
+fonts-dejavu-core
