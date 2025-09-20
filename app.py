@@ -13,12 +13,12 @@ from redis import Redis
 from rq import Queue
 from rq.job import Job
 
-APP_VERSION = "1.3.0"  # bumped for captions toggle
+APP_VERSION = "1.3.1"  # bumped
 
 # Redis / RQ
 REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379/0")
 redis = Redis.from_url(REDIS_URL)
-queue = Queue("default", connection=redis)  # no default_timeout here
+queue = Queue("default", connection=redis)
 
 app = FastAPI(title="editdna", version=APP_VERSION)
 
@@ -39,7 +39,7 @@ class RenderRequest(BaseModel):
     drop_black: Optional[bool] = True
 
     # V1.5 feature toggles
-    with_captions: Optional[bool] = False  # <-- NEW: captions toggle
+    with_captions: Optional[bool] = False
 
 def _job_payload(job: Job) -> Dict[str, Any]:
     status = job.get_status(refresh=True)
@@ -84,14 +84,13 @@ def health() -> JSONResponse:
             "service": "editdna",
             "version": APP_VERSION,
             "queue": {"name": queue.name, "pending": queue.count},
-            "redis_url_tail": os.getenv("REDIS_URL", "unknown")[-32:],  # check matches worker
+            "redis_url_tail": os.getenv("REDIS_URL", "unknown")[-32:],
         }
     )
 
 @app.post("/enqueue_nop")
 def enqueue_nop() -> JSONResponse:
-    # simple connectivity test to worker
-    job = queue.enqueue("worker.task_nop", result_ttl=300)
+    job = queue.enqueue("worker.task_nop", result_ttl=300)  # FIXED
     return JSONResponse({"job_id": job.id})
 
 @app.get("/jobs/{job_id}")
@@ -101,14 +100,13 @@ def get_job(job_id: str) -> JSONResponse:
 
 @app.post("/render")
 def render(req: RenderRequest) -> JSONResponse:
-    # pass payload as dict for jobs.py
     payload = req.dict()
     job = queue.enqueue(
-        "jobs.job_render",
+        "worker.job_render",   # FIXED
         payload,
-        job_timeout=60 * 60,   # 60 min
-        result_ttl=86400,      # keep result 1 day
-        ttl=7200               # wait in queue up to 2h
+        job_timeout=60 * 60,
+        result_ttl=86400,
+        ttl=7200
     )
     return JSONResponse({"job_id": job.id, "session_id": req.session_id or "session"})
 
@@ -116,7 +114,7 @@ def render(req: RenderRequest) -> JSONResponse:
 def render_chunked(req: RenderRequest) -> JSONResponse:
     payload = req.dict()
     job = queue.enqueue(
-        "jobs.job_render_chunked",
+        "worker.job_render_chunked",  # FIXED
         payload,
         job_timeout=60 * 60,
         result_ttl=86400,
