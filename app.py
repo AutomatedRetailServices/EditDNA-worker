@@ -13,7 +13,7 @@ from redis import Redis
 from rq import Queue
 from rq.job import Job
 
-APP_VERSION = "1.2.5"
+APP_VERSION = "1.3.0"  # bumped for captions toggle
 
 # Redis / RQ
 REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379/0")
@@ -29,7 +29,7 @@ class RenderRequest(BaseModel):
     output_prefix: Optional[str] = "editdna/outputs"
     portrait: Optional[bool] = True
 
-    # knobs reserved for later worker versions
+    # worker knobs
     mode: Optional[str] = "concat"
     max_duration: Optional[int] = None
     take_top_k: Optional[int] = None
@@ -38,6 +38,8 @@ class RenderRequest(BaseModel):
     drop_silent: Optional[bool] = True
     drop_black: Optional[bool] = True
 
+    # V1.5 feature toggles
+    with_captions: Optional[bool] = False  # <-- NEW: captions toggle
 
 def _job_payload(job: Job) -> Dict[str, Any]:
     status = job.get_status(refresh=True)
@@ -52,13 +54,11 @@ def _job_payload(job: Job) -> Dict[str, Any]:
         "ended_at": job.ended_at.isoformat() if job.ended_at else None,
     }
 
-
 def _get_job_or_404(job_id: str) -> Job:
     try:
         return Job.fetch(job_id, connection=redis)
     except Exception:
         raise HTTPException(status_code=404, detail="Not Found")
-
 
 # ----- Routes -----
 @app.get("/")
@@ -67,11 +67,9 @@ def root() -> JSONResponse:
         {"ok": True, "service": "editdna", "version": APP_VERSION, "time": int(datetime.utcnow().timestamp())}
     )
 
-
 @app.get("/version")
 def version() -> JSONResponse:
     return JSONResponse({"ok": True, "version": APP_VERSION})
-
 
 @app.get("/health")
 def health() -> JSONResponse:
@@ -90,25 +88,19 @@ def health() -> JSONResponse:
         }
     )
 
-
 @app.post("/enqueue_nop")
 def enqueue_nop() -> JSONResponse:
-    job = queue.enqueue("jobs.job_render", "sess-nop", [], "editdna/outputs", result_ttl=300)
+    # simple connectivity test to worker
+    job = queue.enqueue("worker.task_nop", result_ttl=300)
     return JSONResponse({"job_id": job.id})
-
 
 @app.get("/jobs/{job_id}")
 def get_job(job_id: str) -> JSONResponse:
     job = _get_job_or_404(job_id)
     return JSONResponse(_job_payload(job))
 
-
 @app.post("/render")
 def render(req: RenderRequest) -> JSONResponse:
-    session_id = req.session_id or "session"
-    files = [str(x) for x in req.files]
-    output_prefix = req.output_prefix or "editdna/outputs"
-
     # pass payload as dict for jobs.py
     payload = req.dict()
     job = queue.enqueue(
@@ -118,15 +110,10 @@ def render(req: RenderRequest) -> JSONResponse:
         result_ttl=86400,      # keep result 1 day
         ttl=7200               # wait in queue up to 2h
     )
-    return JSONResponse({"job_id": job.id, "session_id": session_id})
-
+    return JSONResponse({"job_id": job.id, "session_id": req.session_id or "session"})
 
 @app.post("/render_chunked")
 def render_chunked(req: RenderRequest) -> JSONResponse:
-    session_id = req.session_id or "session"
-    files = [str(x) for x in req.files]
-    output_prefix = req.output_prefix or "editdna/outputs"
-
     payload = req.dict()
     job = queue.enqueue(
         "jobs.job_render_chunked",
@@ -135,4 +122,4 @@ def render_chunked(req: RenderRequest) -> JSONResponse:
         result_ttl=86400,
         ttl=7200,
     )
-    return JSONResponse({"job_id": job.id, "session_id": session_id})
+    return JSONResponse({"job_id": job.id, "session_id": req.session_id or "session"})
