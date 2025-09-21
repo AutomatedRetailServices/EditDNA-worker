@@ -55,32 +55,27 @@ def _safe_concat_list(path: str, files: List[str]) -> str:
     list_path = os.path.join(path, "concat.txt")
     with open(list_path, "w", encoding="utf-8") as f:
         for p in files:
-            # escape single quotes for concat demuxer
             safe = str(p).replace("'", "'\\''")
             f.write(f"file '{safe}'\n")
     return list_path
 
 def _ensure_local(path_or_url: str, tmpdir: str) -> str:
     """
-    Make sure the input is a local file path:
-      - s3://... or https://... from S3 -> download via s3_utils.download_to_tmp
-      - any http(s) -> copy locally with ffmpeg (container-friendly)
-      - local path -> return as-is
-    Always returns a local filesystem path suitable for concat demuxer.
+    Ensure the input is a local path for ffmpeg concat:
+      - s3:// or S3 https -> s3_utils.download_to_tmp
+      - any http(s) -> remux to local mp4 via ffmpeg
+      - local path -> pass-through
     """
-    # s3 (native or s3-hosted https)
     if path_or_url.startswith("s3://") or (
         path_or_url.startswith(("http://", "https://")) and ".s3." in path_or_url
     ):
         return download_to_tmp(path_or_url, tmpdir)
 
-    # generic http(s) -> remux to local mp4 to avoid https whitelist in concat demuxer
     if path_or_url.startswith(("http://", "https://")):
         local = os.path.join(tmpdir, f"dl-{uuid.uuid4().hex}.mp4")
         _run([FFMPEG, "-y", "-i", path_or_url, "-c", "copy", "-movflags", "+faststart", local])
         return local
 
-    # already local
     return path_or_url
 
 @dataclass
@@ -262,9 +257,8 @@ def _scale_pad_filter(portrait: bool) -> str:
 def _render_concat(tmpdir: str, inputs: List[str], portrait: bool = True) -> str:
     """
     Concatenate full inputs. Ensures inputs are local files (no https in concat list),
-    and forces stream mapping to avoid unknown extra tracks (e.g., iPhone MOV).
+    and forces stream mapping to ignore unknown extra tracks (e.g., iPhone MOV).
     """
-    # force local copies for all inputs so concat demuxer doesn't see https
     local_inputs = [ _ensure_local(p, tmpdir) for p in inputs ]
     concat_txt = _safe_concat_list(tmpdir, local_inputs)
     out_path = os.path.join(tmpdir, "out.mp4")
@@ -275,15 +269,12 @@ def _render_concat(tmpdir: str, inputs: List[str], portrait: bool = True) -> str
         FFMPEG, "-y",
         "-loglevel", "warning",
         "-analyzeduration", "100M", "-probesize", "100M",
-        # concat demuxer as input
         "-safe", "0",
         "-f", "concat",
         "-i", concat_txt,
-        # Avoid getting tripped up by unknown/extra tracks in source MOVs
-        "-ignore_unknown", "1",
+        "-ignore_unknown",            # <-- fixed (no trailing "1")
         "-map", "0:v:0",
         "-map", "0:a:0?",
-        # rotate metadata is handled by decoder; we then scale/pad
         "-vf", vf,
         "-c:v", "libx264", "-preset", "veryfast", "-crf", "23",
         "-c:a", "aac", "-b:a", "128k",
@@ -302,7 +293,7 @@ def _render_clips(tmpdir: str, clips: List[Clip], portrait: bool = True) -> str:
             FFMPEG, "-y",
             "-ss", f"{c.start:.3f}", "-to", f"{c.end:.3f}",
             "-i", c.src,
-            "-ignore_unknown", "1",
+            "-ignore_unknown",          # <-- fixed (no trailing "1")
             "-map", "0:v:0",
             "-map", "0:a:0?",
             "-vf", vf,
@@ -369,7 +360,6 @@ def job_render(payload: Dict[str, Any]) -> Dict[str, Any]:
         if mode == "best":
             clips = _pick_best(files, tmpdir, max_duration, take_top_k, min_clip, max_clip)
             if not clips:
-                # fallback: concat the originals (downloaded locally)
                 out_local = _render_concat(tmpdir, files, portrait=portrait)
                 mode_used = "concat_fallback"
             else:
@@ -379,7 +369,7 @@ def job_render(payload: Dict[str, Any]) -> Dict[str, Any]:
             out_local = _render_concat(tmpdir, files, portrait=portrait)
             mode_used = "concat"
 
-        # Optional captions on the rendered output
+        # Optional captions: transcribe rendered output and burn .srt
         if with_captions and mode_used in ("best", "concat", "concat_fallback") and ASR_ENABLED:
             segments = _asr_segments(out_local)
             if segments:
