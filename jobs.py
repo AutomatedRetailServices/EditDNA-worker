@@ -64,13 +64,13 @@ def _ensure_local(path_or_url: str, tmpdir: str) -> str:
     ):
         return download_to_tmp(path_or_url, tmpdir)
 
-    # generic http(s) -> copy locally via ffmpeg (robust for odd containers/codecs)
+    # generic https -> copy locally via ffmpeg (robust)
     if path_or_url.startswith(("http://", "https://")):
         local = os.path.join(tmpdir, f"dl-{uuid.uuid4().hex}.mp4")
         _run([FFMPEG, "-y", "-i", path_or_url, "-c", "copy", local])
         return local
 
-    # already local path
+    # already local
     return path_or_url
 
 @dataclass
@@ -340,17 +340,17 @@ def job_render(payload: Dict[str, Any]) -> Dict[str, Any]:
         if mode == "best":
             clips = _pick_best(files, tmpdir, max_duration, take_top_k, min_clip, max_clip)
             if not clips:
-                # fallback to concat with local copies
-                files_local = [_ensure_local(f, tmpdir) for f in files]
-                out_local = _render_concat(tmpdir, files_local, portrait=portrait)
+                # fall back to simple concat of LOCALIZED inputs
+                local_inputs = [_ensure_local(f, tmpdir) for f in files]
+                out_local = _render_concat(tmpdir, local_inputs, portrait=portrait)
                 mode_used = "concat_fallback"
             else:
                 out_local = _render_clips(tmpdir, clips, portrait=portrait)
                 mode_used = "best"
         else:
-            # ALWAYS localize inputs for concat to avoid https whitelist errors
-            files_local = [_ensure_local(f, tmpdir) for f in files]
-            out_local = _render_concat(tmpdir, files_local, portrait=portrait)
+            # <<< FIX: LOCALIZE inputs for concat >>>
+            local_inputs = [_ensure_local(f, tmpdir) for f in files]
+            out_local = _render_concat(tmpdir, local_inputs, portrait=portrait)
             mode_used = "concat"
 
         # Optional captions: transcribe rendered output and burn .srt
