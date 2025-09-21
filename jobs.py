@@ -1,4 +1,4 @@
-# jobs.py — ASR-aware “best clips” picker + optional captions + renderer
+# jobs.py — ASR-aware “best clips” picker + optional captions + renderer (hardened)
 
 import os
 import re
@@ -36,7 +36,9 @@ BIN_SEC = 0.5
 def _run(cmd: List[str]) -> str:
     p = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
     if p.returncode != 0:
-        raise RuntimeError(f"Command failed ({p.returncode}): {' '.join(cmd)}\n---\n{p.stdout}\n---")
+        raise RuntimeError(
+            f"Command failed ({p.returncode}): {' '.join(cmd)}\n---\n{p.stdout}\n---"
+        )
     return p.stdout
 
 def _duration(path: str) -> float:
@@ -53,21 +55,29 @@ def _safe_concat_list(path: str, files: List[str]) -> str:
     list_path = os.path.join(path, "concat.txt")
     with open(list_path, "w", encoding="utf-8") as f:
         for p in files:
+            # escape single quotes for concat demuxer
             safe = str(p).replace("'", "'\\''")
             f.write(f"file '{safe}'\n")
     return list_path
 
 def _ensure_local(path_or_url: str, tmpdir: str) -> str:
-    # s3 or s3-hosted https
+    """
+    Make sure the input is a local file path:
+      - s3://... or https://... from S3 -> download via s3_utils.download_to_tmp
+      - any http(s) -> copy locally with ffmpeg (container-friendly)
+      - local path -> return as-is
+    Always returns a local filesystem path suitable for concat demuxer.
+    """
+    # s3 (native or s3-hosted https)
     if path_or_url.startswith("s3://") or (
         path_or_url.startswith(("http://", "https://")) and ".s3." in path_or_url
     ):
         return download_to_tmp(path_or_url, tmpdir)
 
-    # generic https -> copy locally via ffmpeg (robust)
+    # generic http(s) -> remux to local mp4 to avoid https whitelist in concat demuxer
     if path_or_url.startswith(("http://", "https://")):
         local = os.path.join(tmpdir, f"dl-{uuid.uuid4().hex}.mp4")
-        _run([FFMPEG, "-y", "-i", path_or_url, "-c", "copy", local])
+        _run([FFMPEG, "-y", "-i", path_or_url, "-c", "copy", "-movflags", "+faststart", local])
         return local
 
     # already local
@@ -237,36 +247,43 @@ def _collect_candidate_clips(local_path: str, min_clip: float, max_clip: float) 
     return out
 
 # ---------- rendering ----------
+def _scale_pad_filter(portrait: bool) -> str:
+    if portrait:
+        return (
+            "scale=w=1080:h=1920:force_original_aspect_ratio=decrease,"
+            "pad=1080:1920:(ow-iw)/2:(oh-ih)/2:color=black"
+        )
+    else:
+        return (
+            "scale=w=1920:h=1080:force_original_aspect_ratio=decrease,"
+            "pad=1920:1080:(ow-iw)/2:(oh-ih)/2:color=black"
+        )
+
 def _render_concat(tmpdir: str, inputs: List[str], portrait: bool = True) -> str:
     """
-    Final guard: ensure every input is a local path before writing concat.txt.
+    Concatenate full inputs. Ensures inputs are local files (no https in concat list),
+    and forces stream mapping to avoid unknown extra tracks (e.g., iPhone MOV).
     """
-    # Re-localize anything that still looks like a URL
-    localized: List[str] = []
-    for p in inputs:
-        if isinstance(p, str) and p.startswith(("http://", "https://", "s3://")):
-            p = _ensure_local(p, tmpdir)
-        localized.append(p)
-
-    # Optional: hard assert (helps catch future regressions)
-    for p in localized:
-        if isinstance(p, str) and p.startswith(("http://", "https://", "s3://")):
-            raise RuntimeError(f"Internal error: non-local input passed to concat: {p}")
-
+    # force local copies for all inputs so concat demuxer doesn't see https
+    local_inputs = [ _ensure_local(p, tmpdir) for p in inputs ]
+    concat_txt = _safe_concat_list(tmpdir, local_inputs)
     out_path = os.path.join(tmpdir, "out.mp4")
-    concat_txt = _safe_concat_list(tmpdir, localized)
-    vf = (
-        "scale=w=1080:h=1920:force_original_aspect_ratio=decrease,"
-        "pad=1080:1920:(ow-iw)/2:(oh-ih)/2:color=black"
-        if portrait else
-        "scale=w=1920:h=1080:force_original_aspect_ratio=decrease,"
-        "pad=1920:1080:(ow-iw)/2:(oh-ih)/2:color=black"
-    )
+
+    vf = _scale_pad_filter(portrait)
+
     cmd = [
         FFMPEG, "-y",
+        "-loglevel", "warning",
         "-analyzeduration", "100M", "-probesize", "100M",
-        "-safe", "0", "-f", "concat", "-i", concat_txt,
+        # concat demuxer as input
+        "-safe", "0",
+        "-f", "concat",
+        "-i", concat_txt,
+        # Avoid getting tripped up by unknown/extra tracks in source MOVs
         "-ignore_unknown", "1",
+        "-map", "0:v:0",
+        "-map", "0:a:0?",
+        # rotate metadata is handled by decoder; we then scale/pad
         "-vf", vf,
         "-c:v", "libx264", "-preset", "veryfast", "-crf", "23",
         "-c:a", "aac", "-b:a", "128k",
@@ -278,19 +295,16 @@ def _render_concat(tmpdir: str, inputs: List[str], portrait: bool = True) -> str
 
 def _render_clips(tmpdir: str, clips: List[Clip], portrait: bool = True) -> str:
     parts: List[str] = []
-    vf = (
-        "scale=w=1080:h=1920:force_original_aspect_ratio=decrease,"
-        "pad=1080:1920:(ow-iw)/2:(oh-ih)/2:color=black"
-        if portrait else
-        "scale=w=1920:h=1080:force_original_aspect_ratio=decrease,"
-        "pad=1920:1080:(ow-iw)/2:(oh-ih)/2:color=black"
-    )
+    vf = _scale_pad_filter(portrait)
     for i, c in enumerate(clips):
         part = os.path.join(tmpdir, f"part_{i:03d}.mp4")
         _run([
             FFMPEG, "-y",
             "-ss", f"{c.start:.3f}", "-to", f"{c.end:.3f}",
             "-i", c.src,
+            "-ignore_unknown", "1",
+            "-map", "0:v:0",
+            "-map", "0:a:0?",
             "-vf", vf,
             "-c:v", "libx264", "-preset", "veryfast", "-crf", "23",
             "-c:a", "aac", "-b:a", "128k",
@@ -355,21 +369,17 @@ def job_render(payload: Dict[str, Any]) -> Dict[str, Any]:
         if mode == "best":
             clips = _pick_best(files, tmpdir, max_duration, take_top_k, min_clip, max_clip)
             if not clips:
-                # fall back to simple concat of LOCALIZED inputs
-                local_inputs = [_ensure_local(f, tmpdir) for f in files]
-                out_local = _render_concat(tmpdir, local_inputs, portrait=portrait)
+                # fallback: concat the originals (downloaded locally)
+                out_local = _render_concat(tmpdir, files, portrait=portrait)
                 mode_used = "concat_fallback"
             else:
                 out_local = _render_clips(tmpdir, clips, portrait=portrait)
                 mode_used = "best"
         else:
-            # concat: LOCALIZE inputs (first pass)
-            local_inputs = [_ensure_local(f, tmpdir) for f in files]
-            # and enforce again inside _render_concat (final guard)
-            out_local = _render_concat(tmpdir, local_inputs, portrait=portrait)
+            out_local = _render_concat(tmpdir, files, portrait=portrait)
             mode_used = "concat"
 
-        # Optional captions: transcribe rendered output and burn .srt
+        # Optional captions on the rendered output
         if with_captions and mode_used in ("best", "concat", "concat_fallback") and ASR_ENABLED:
             segments = _asr_segments(out_local)
             if segments:
