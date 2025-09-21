@@ -29,13 +29,10 @@ services:
     env: python
     plan: pro
     buildCommand: pip install -r requirements.txt
-    # IMPORTANT:
-    # - We export PYTHONPATH to include Render's project root so 'import worker' works.
-    # - We do NOT pass "-P ." (that was causing path issues).
+    # Use python -m to avoid PATH issues with the rq binary.
     startCommand: >
       sh -lc 'export PYTHONPATH=/opt/render/project/src:$PYTHONPATH;
-      python -c "import sys; print(\"[PYTHONPATH]\", sys.path)" ;
-      rq worker -u "$REDIS_URL" --worker-ttl 1200 default'
+      python -m rq.cli worker -u "$REDIS_URL" --worker-ttl 1200 default'
     autoDeploy: false
     envVars:
       - key: PYTHON_VERSION
@@ -52,3 +49,18 @@ services:
         sync: false
       - key: S3_BUCKET
         sync: false
+      # ---- ASR/scoring knobs (optional; you already set these in dashboard) ----
+      # - key: ASR_ENABLED
+      #   value: "true"
+      # - key: ASR_MODEL_SIZE
+      #   value: tiny
+      # - key: ASR_LANG
+      #   value: en
+      # - key: W_AUDIO
+      #   value: "0.45"
+      # - key: W_SCENE
+      #   value: "0.15"
+      # - key: W_SPEECH
+      #   value: "0.40"
+      # - key: SCENE_THRESH
+      #   value: "0.04"
