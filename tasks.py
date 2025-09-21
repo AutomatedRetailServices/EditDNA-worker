@@ -1,4 +1,4 @@
-# tasks.py — shim so RQ can import jobs cleanly
+# tasks.py — shim so RQ can import functions reliably
 from __future__ import annotations
 from typing import Any, Dict
 
