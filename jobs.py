@@ -238,8 +238,23 @@ def _collect_candidate_clips(local_path: str, min_clip: float, max_clip: float) 
 
 # ---------- rendering ----------
 def _render_concat(tmpdir: str, inputs: List[str], portrait: bool = True) -> str:
+    """
+    Final guard: ensure every input is a local path before writing concat.txt.
+    """
+    # Re-localize anything that still looks like a URL
+    localized: List[str] = []
+    for p in inputs:
+        if isinstance(p, str) and p.startswith(("http://", "https://", "s3://")):
+            p = _ensure_local(p, tmpdir)
+        localized.append(p)
+
+    # Optional: hard assert (helps catch future regressions)
+    for p in localized:
+        if isinstance(p, str) and p.startswith(("http://", "https://", "s3://")):
+            raise RuntimeError(f"Internal error: non-local input passed to concat: {p}")
+
     out_path = os.path.join(tmpdir, "out.mp4")
-    concat_txt = _safe_concat_list(tmpdir, inputs)
+    concat_txt = _safe_concat_list(tmpdir, localized)
     vf = (
         "scale=w=1080:h=1920:force_original_aspect_ratio=decrease,"
         "pad=1080:1920:(ow-iw)/2:(oh-ih)/2:color=black"
@@ -348,8 +363,9 @@ def job_render(payload: Dict[str, Any]) -> Dict[str, Any]:
                 out_local = _render_clips(tmpdir, clips, portrait=portrait)
                 mode_used = "best"
         else:
-            # <<< FIX: LOCALIZE inputs for concat >>>
+            # concat: LOCALIZE inputs (first pass)
             local_inputs = [_ensure_local(f, tmpdir) for f in files]
+            # and enforce again inside _render_concat (final guard)
             out_local = _render_concat(tmpdir, local_inputs, portrait=portrait)
             mode_used = "concat"
 
