@@ -1,4 +1,4 @@
-# app.py — web API for EditDNA (function-ref enqueue version)
+# app.py — web API for EditDNA
 
 from __future__ import annotations
 
@@ -13,14 +13,6 @@ from redis import Redis
 from rq import Queue
 from rq.job import Job
 
-# ---- import worker functions directly (so RQ doesn't need string lookups) ----
-# worker.py must be at repo root (same dir as this file) — which your repo already has.
-from worker import (  # noqa: E402
-    task_nop as _task_nop,
-    job_render as _job_render,
-    job_render_chunked as _job_render_chunked,
-)
-
 APP_VERSION = "1.2.7"
 
 # Redis / RQ
@@ -30,7 +22,6 @@ queue = Queue("default", connection=redis)
 
 app = FastAPI(title="editdna", version=APP_VERSION)
 
-
 # ----- Models -----
 class RenderRequest(BaseModel):
     session_id: Optional[str] = "session"
@@ -38,7 +29,7 @@ class RenderRequest(BaseModel):
     output_prefix: Optional[str] = "editdna/outputs"
     portrait: Optional[bool] = True
 
-    # knobs (used by worker)
+    # selection mode & knobs
     mode: Optional[str] = "concat"
     max_duration: Optional[int] = None
     take_top_k: Optional[int] = None
@@ -46,6 +37,9 @@ class RenderRequest(BaseModel):
     max_clip_seconds: Optional[float] = None
     drop_silent: Optional[bool] = True
     drop_black: Optional[bool] = True
+
+    # NEW: optional burned captions (depends on ASR + ffmpeg libass)
+    with_captions: Optional[bool] = False
 
 
 def _job_payload(job: Job) -> Dict[str, Any]:
@@ -100,15 +94,15 @@ def health() -> JSONResponse:
             "service": "editdna",
             "version": APP_VERSION,
             "queue": {"name": queue.name, "pending": q_count},
-            "redis_url_tail": os.getenv("REDIS_URL", "unknown")[-32:],
+            "redis_url_tail": os.getenv("REDIS_URL", "unknown")[-32:],  # quick check it matches worker
         }
     )
 
 
 @app.post("/enqueue_nop")
 def enqueue_nop() -> JSONResponse:
-    # enqueue the actual function object
-    job = queue.enqueue(_task_nop, result_ttl=300)
+    # targets worker.task_nop so we verify worker import path
+    job = queue.enqueue("worker.task_nop", result_ttl=300)
     return JSONResponse({"job_id": job.id})
 
 
@@ -123,11 +117,11 @@ def render(req: RenderRequest) -> JSONResponse:
     session_id = req.session_id or "session"
     payload = req.dict()
     job = queue.enqueue(
-        _job_render,                 # function reference (imported above)
+        "worker.job_render",
         payload,
-        job_timeout=60 * 60,         # 60 min
-        result_ttl=86400,            # keep result 1 day
-        ttl=7200,                    # wait in queue up to 2h
+        job_timeout=60 * 60,   # 60 min
+        result_ttl=86400,      # keep result for 1 day
+        ttl=7200               # wait in queue up to 2h
     )
     return JSONResponse({"job_id": job.id, "session_id": session_id})
 
@@ -137,7 +131,7 @@ def render_chunked(req: RenderRequest) -> JSONResponse:
     session_id = req.session_id or "session"
     payload = req.dict()
     job = queue.enqueue(
-        _job_render_chunked,         # function reference (imported above)
+        "worker.job_render_chunked",
         payload,
         job_timeout=60 * 60,
         result_ttl=86400,
