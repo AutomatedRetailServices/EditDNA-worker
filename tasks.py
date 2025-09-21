@@ -1,8 +1,7 @@
-# tasks.py — thin shim so RQ can import functions reliably
+# tasks.py — shim so RQ can import jobs cleanly
 from __future__ import annotations
 from typing import Any, Dict
 
-# Import the real implementations from jobs.py
 from jobs import job_render as _job_render_impl, job_render_chunked as _job_render_chunked_impl
 
 def task_nop() -> Dict[str, Any]:
