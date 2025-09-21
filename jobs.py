@@ -1,4 +1,4 @@
-# jobs.py — ASR-aware “best clips” picker + optional captions + renderer
+# jobs.py — ASR-aware “best clips” picker + optional captions + renderer (robust audio)
 
 import os
 import re
@@ -43,8 +43,10 @@ def _run(cmd: List[str]) -> str:
 
 def _duration(path: str) -> float:
     out = _run([
-        FFPROBE, "-v", "error", "-show_entries", "format=duration",
-        "-of", "default=nokey=1:noprint_wrappers=1", path
+        FFPROBE, "-v", "error",
+        "-show_entries", "format=duration",
+        "-of", "default=nokey=1:noprint_wrappers=1",
+        path
     ])
     try:
         return float(out.strip())
@@ -55,26 +57,108 @@ def _safe_concat_list(path: str, files: List[str]) -> str:
     list_path = os.path.join(path, "concat.txt")
     with open(list_path, "w", encoding="utf-8") as f:
         for p in files:
-            # Quote single quotes for concat demuxer
             safe = str(p).replace("'", "'\\''")
             f.write(f"file '{safe}'\n")
     return list_path
 
 def _ensure_local(path_or_url: str, tmpdir: str) -> str:
-    # s3 or s3-hosted https
+    # S3 or S3-hosted https
     if path_or_url.startswith("s3://") or (
         path_or_url.startswith(("http://", "https://")) and ".s3." in path_or_url
     ):
         return download_to_tmp(path_or_url, tmpdir)
 
-    # generic http(s) -> remux to local via ffmpeg (robust & normalizes codecs)
+    # generic https -> copy locally via ffmpeg (robust against CORS/range)
     if path_or_url.startswith(("http://", "https://")):
         local = os.path.join(tmpdir, f"dl-{uuid.uuid4().hex}.mp4")
-        _run([FFMPEG, "-y", "-i", path_or_url, "-c", "copy", local])
-        return local
+        # stream to mp4 (copy may fail across containers; re-encode lightly)
+        cmd = [
+            FFMPEG, "-y",
+            "-analyzeduration", "200M", "-probesize", "200M",
+            "-err_detect", "ignore_err",
+            "-i", path_or_url,
+            "-map", "0:v:0", "-map", "0:a:0?",
+            "-c:v", "copy",
+            "-c:a", "aac", "-ar", "48000", "-ac", "2",
+            "-movflags", "+faststart",
+            local
+        ]
+        try:
+            _run(cmd)
+            return local
+        except Exception:
+            # last resort download: just remux video, drop audio; we’ll add silent later
+            cmd2 = [
+                FFMPEG, "-y",
+                "-i", path_or_url,
+                "-map", "0:v:0",
+                "-an",
+                "-c:v", "copy",
+                "-movflags", "+faststart",
+                local
+            ]
+            _run(cmd2)
+            return local
 
     # already local
     return path_or_url
+
+def _normalize_input(local_in: str, tmpdir: str) -> str:
+    """
+    Make every input safe/consistent for concat:
+      - H.264 video (keeps original fps/size)
+      - Stereo AAC 48k. If source audio is broken, auto-creates SILENT audio.
+    """
+    dur = max(0.0, _duration(local_in))
+    base = os.path.join(tmpdir, f"norm-{uuid.uuid4().hex}.mp4")
+
+    # 1) Try with real audio
+    cmd1 = [
+        FFMPEG, "-y",
+        "-analyzeduration", "500M", "-probesize", "500M",
+        "-fflags", "+genpts+ignidx",
+        "-err_detect", "ignore_err",
+        "-i", local_in,
+        "-map", "0:v:0", "-map", "0:a:0?",
+        "-c:v", "libx264", "-preset", "veryfast", "-crf", "20",
+        "-c:a", "aac", "-ar", "48000", "-ac", "2",
+        "-movflags", "+faststart",
+        base
+    ]
+    try:
+        _run(cmd1)
+        return base
+    except Exception:
+        pass
+
+    # 2) If audio decode failed, add a SILENT track to guarantee an audio stream
+    #    We keep the same duration (if known) to avoid sync surprises.
+    silent = os.path.join(tmpdir, f"sil-{uuid.uuid4().hex}.wav")
+    if dur <= 0.0:
+        dur = 3600.0  # absurdly high cap; we'll -shortest to video anyway
+    # create silent stereo WAV
+    _run([
+        FFMPEG, "-y",
+        "-f", "lavfi", "-t", f"{dur:.3f}",
+        "-i", "anullsrc=r=48000:cl=stereo",
+        "-c:a", "pcm_s16le",
+        silent
+    ])
+    # mux video + silent audio
+    base2 = os.path.join(tmpdir, f"norm-silent-{uuid.uuid4().hex}.mp4")
+    cmd2 = [
+        FFMPEG, "-y",
+        "-i", local_in,
+        "-i", silent,
+        "-map", "0:v:0", "-map", "1:a:0",
+        "-c:v", "libx264", "-preset", "veryfast", "-crf", "20",
+        "-c:a", "aac", "-ar", "48000", "-ac", "2",
+        "-shortest",
+        "-movflags", "+faststart",
+        base2
+    ]
+    _run(cmd2)
+    return base2
 
 @dataclass
 class Clip:
@@ -252,9 +336,10 @@ def _render_concat(tmpdir: str, inputs: List[str], portrait: bool = True) -> str
     )
     cmd = [
         FFMPEG, "-y",
-        "-analyzeduration", "100M", "-probesize", "100M",
+        "-analyzeduration", "500M", "-probesize", "500M",
         "-safe", "0", "-f", "concat", "-i", concat_txt,
-        "-ignore_unknown",  # NOTE: no value here; do not append "1"
+        "-ignore_unknown", "1",
+        "-map", "0:v:0", "-map", "0:a:0?",
         "-vf", vf,
         "-c:v", "libx264", "-preset", "veryfast", "-crf", "23",
         "-c:a", "aac", "-b:a", "128k",
@@ -279,6 +364,7 @@ def _render_clips(tmpdir: str, clips: List[Clip], portrait: bool = True) -> str:
             FFMPEG, "-y",
             "-ss", f"{c.start:.3f}", "-to", f"{c.end:.3f}",
             "-i", c.src,
+            "-map", "0:v:0", "-map", "0:a:0?",
             "-vf", vf,
             "-c:v", "libx264", "-preset", "veryfast", "-crf", "23",
             "-c:a", "aac", "-b:a", "128k",
@@ -298,7 +384,8 @@ def _pick_best(files: List[str],
     all_candidates: List[Clip] = []
     for f in files:
         local_f = _ensure_local(f, tmpdir)
-        all_candidates.extend(_collect_candidate_clips(local_f, min_clip, max_clip))
+        safe_f  = _normalize_input(local_f, tmpdir)
+        all_candidates.extend(_collect_candidate_clips(safe_f, min_clip, max_clip))
     if not all_candidates:
         return []
     all_candidates.sort(key=lambda c: c.score, reverse=True)
@@ -340,19 +427,23 @@ def job_render(payload: Dict[str, Any]) -> Dict[str, Any]:
         if not files:
             return {"ok": False, "error": "No input files provided", "session_id": sess}
 
-        # Always ensure local paths for concat to avoid https whitelist issues
-        local_inputs = [_ensure_local(f, tmpdir) for f in files]
+        # Ensure-local + normalize all inputs up front for concat mode
+        local_norm: List[str] = []
+        for f in files:
+            loc = _ensure_local(f, tmpdir)
+            norm = _normalize_input(loc, tmpdir)
+            local_norm.append(norm)
 
         if mode == "best":
             clips = _pick_best(files, tmpdir, max_duration, take_top_k, min_clip, max_clip)
             if not clips:
-                out_local = _render_concat(tmpdir, local_inputs, portrait=portrait)
+                out_local = _render_concat(tmpdir, local_norm, portrait=portrait)
                 mode_used = "concat_fallback"
             else:
                 out_local = _render_clips(tmpdir, clips, portrait=portrait)
                 mode_used = "best"
         else:
-            out_local = _render_concat(tmpdir, local_inputs, portrait=portrait)
+            out_local = _render_concat(tmpdir, local_norm, portrait=portrait)
             mode_used = "concat"
 
         # Optional captions: transcribe rendered output and burn .srt
