@@ -1,5 +1,7 @@
 # jobs.py — ASR-aware “best clips” picker + optional captions + renderer (robust audio)
 
+from __future__ import annotations
+
 import os
 import re
 import math
@@ -31,6 +33,13 @@ SCENE_THRESH = float(os.getenv("SCENE_THRESH", "0.04"))
 
 # Analysis bin size (seconds)
 BIN_SEC = 0.5
+
+# Where to create session/temp folders (bind-mounted on the VM)
+SESSION_ROOT = os.getenv("SESSION_ROOT", "/sessions")
+if not os.path.isdir(SESSION_ROOT):
+    # fallback to /tmp if /sessions isn't mounted
+    SESSION_ROOT = "/tmp"
+os.makedirs(SESSION_ROOT, exist_ok=True)
 
 # ---------- utils ----------
 def _run(cmd: List[str]) -> str:
@@ -87,7 +96,7 @@ def _ensure_local(path_or_url: str, tmpdir: str) -> str:
             _run(cmd)
             return local
         except Exception:
-            # last resort download: just remux video, drop audio; we’ll add silent later
+            # last resort: just remux video, drop audio; add silent later
             cmd2 = [
                 FFMPEG, "-y",
                 "-i", path_or_url,
@@ -132,11 +141,9 @@ def _normalize_input(local_in: str, tmpdir: str) -> str:
         pass
 
     # 2) If audio decode failed, add a SILENT track to guarantee an audio stream
-    #    We keep the same duration (if known) to avoid sync surprises.
     silent = os.path.join(tmpdir, f"sil-{uuid.uuid4().hex}.wav")
     if dur <= 0.0:
         dur = 3600.0  # absurdly high cap; we'll -shortest to video anyway
-    # create silent stereo WAV
     _run([
         FFMPEG, "-y",
         "-f", "lavfi", "-t", f"{dur:.3f}",
@@ -144,7 +151,6 @@ def _normalize_input(local_in: str, tmpdir: str) -> str:
         "-c:a", "pcm_s16le",
         silent
     ])
-    # mux video + silent audio
     base2 = os.path.join(tmpdir, f"norm-silent-{uuid.uuid4().hex}.mp4")
     cmd2 = [
         FFMPEG, "-y",
@@ -285,6 +291,16 @@ def _bins_for_file(local_path: str, bin_sec: float) -> List[Tuple[float, float, 
     return [(bins[i][0], bins[i][1], scores[i]) for i in range(num_bins)]
 
 # ---------- collect candidate clips ----------
+@dataclass
+class Clip:
+    src: str
+    start: float
+    end: float
+    score: float
+    @property
+    def dur(self) -> float:
+        return max(0.0, self.end - self.start)
+
 def _collect_candidate_clips(local_path: str, min_clip: float, max_clip: float) -> List[Clip]:
     bins = _bins_for_file(local_path, BIN_SEC)
     if not bins:
@@ -334,11 +350,14 @@ def _render_concat(tmpdir: str, inputs: List[str], portrait: bool = True) -> str
         "scale=w=1920:h=1080:force_original_aspect_ratio=decrease,"
         "pad=1920:1080:(ow-iw)/2:(oh-ih)/2:color=black"
     )
+    # IMPORTANT: -ignore_unknown is a flag (no value) and must not be followed by "1"
     cmd = [
         FFMPEG, "-y",
         "-analyzeduration", "500M", "-probesize", "500M",
-        "-safe", "0", "-f", "concat", "-i", concat_txt,
-        "-ignore_unknown", "1",
+        "-f", "concat",
+        "-safe", "0",
+        "-ignore_unknown",
+        "-i", concat_txt,
         "-map", "0:v:0", "-map", "0:a:0?",
         "-vf", vf,
         "-c:v", "libx264", "-preset", "veryfast", "-crf", "23",
@@ -422,7 +441,9 @@ def job_render(payload: Dict[str, Any]) -> Dict[str, Any]:
     min_clip = float(payload.get("min_clip_seconds") or 2.5)
     max_clip = float(payload.get("max_clip_seconds") or 10.0)
 
-    tmpdir = tempfile.mkdtemp(prefix=f"editdna-{sess}-")
+    # write temp/session under SESSION_ROOT so it persists on the VM mount
+    tmpdir = tempfile.mkdtemp(prefix=f"editdna-{sess}-", dir=SESSION_ROOT)
+
     try:
         if not files:
             return {"ok": False, "error": "No input files provided", "session_id": sess}
@@ -446,7 +467,7 @@ def job_render(payload: Dict[str, Any]) -> Dict[str, Any]:
             out_local = _render_concat(tmpdir, local_norm, portrait=portrait)
             mode_used = "concat"
 
-        # Optional captions: transcribe rendered output and burn .srt
+        # Optional captions
         if with_captions and mode_used in ("best", "concat", "concat_fallback") and ASR_ENABLED:
             segments = _asr_segments(out_local)
             if segments:
