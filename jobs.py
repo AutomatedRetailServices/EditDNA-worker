@@ -1,4 +1,4 @@
-# jobs.py — ASR-aware “best clips” picker + optional captions + renderer (robust audio)
+# jobs.py — ASR-aware “best clips” picker + optional captions + renderer (robust audio + funnel ordering)
 
 from __future__ import annotations
 
@@ -10,17 +10,18 @@ import shutil
 import tempfile
 import subprocess
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple, DefaultDict
+from collections import defaultdict
 
 from s3_utils import upload_file, presigned_url, S3_BUCKET, download_to_tmp
 from captions import write_srt, burn_captions
 
-FFMPEG = os.getenv("FFMPEG_BIN", "ffmpeg")
+FFMPEG  = os.getenv("FFMPEG_BIN", "ffmpeg")
 FFPROBE = os.getenv("FFPROBE_BIN", "ffprobe")
 
 # ---------- config toggles ----------
-ASR_ENABLED = os.getenv("ASR_ENABLED", "true").lower() in ("1", "true", "yes", "on")
-ASR_MODEL_SIZE = os.getenv("ASR_MODEL_SIZE", "tiny")      # tiny | base | small
+ASR_ENABLED   = os.getenv("ASR_ENABLED", "true").lower() in ("1", "true", "yes", "on")
+ASR_MODEL_SIZE = os.getenv("ASR_MODEL_SIZE", "tiny")  # tiny | base | small
 ASR_LANGUAGE   = os.getenv("ASR_LANG", "en")
 
 # Weights for scoring components (sum ~1.0)
@@ -28,18 +29,21 @@ W_AUDIO  = float(os.getenv("W_AUDIO",  "0.45"))  # loudness
 W_SCENE  = float(os.getenv("W_SCENE",  "0.15"))  # motion/cuts
 W_SPEECH = float(os.getenv("W_SPEECH", "0.40"))  # speech presence/density
 
-# Scene detection sensitivity
+# Scene detection sensitivity & analysis bin size (seconds)
 SCENE_THRESH = float(os.getenv("SCENE_THRESH", "0.04"))
-
-# Analysis bin size (seconds)
-BIN_SEC = 0.5
+BIN_SEC      = float(os.getenv("BIN_SEC", "0.5"))
 
 # Where to create session/temp folders (bind-mounted on the VM)
 SESSION_ROOT = os.getenv("SESSION_ROOT", "/sessions")
 if not os.path.isdir(SESSION_ROOT):
-    # fallback to /tmp if /sessions isn't mounted
     SESSION_ROOT = "/tmp"
 os.makedirs(SESSION_ROOT, exist_ok=True)
+
+# ---------- funnel keyword config (simple, extend anytime) ----------
+HOOK_KWS    = ("stop scrolling", "watch this", "attention", "listen", "hook", "big news", "did you know", "you won’t believe", "you will not believe", "hack", "tip", "secret")
+FEATURE_KWS = ("it has", "it does", "feature", "includes", "comes with", "built-in", "spec", "specs", "function", "works by", "how it works")
+PROOF_KWS   = ("i tried", "i tested", "before and after", "before/after", "review", "unboxing", "demo", "results", "it worked", "testimonial", "my experience")
+CTA_KWS     = ("buy now", "link in bio", "shop now", "add to cart", "use code", "discount", "limited time", "order now", "grab yours")
 
 # ---------- utils ----------
 def _run(cmd: List[str]) -> str:
@@ -80,7 +84,6 @@ def _ensure_local(path_or_url: str, tmpdir: str) -> str:
     # generic https -> copy locally via ffmpeg (robust against CORS/range)
     if path_or_url.startswith(("http://", "https://")):
         local = os.path.join(tmpdir, f"dl-{uuid.uuid4().hex}.mp4")
-        # stream to mp4 (copy may fail across containers; re-encode lightly)
         cmd = [
             FFMPEG, "-y",
             "-analyzeduration", "200M", "-probesize", "200M",
@@ -96,7 +99,7 @@ def _ensure_local(path_or_url: str, tmpdir: str) -> str:
             _run(cmd)
             return local
         except Exception:
-            # last resort: just remux video, drop audio; add silent later
+            # last resort: just remux video, drop audio; we’ll add silent later
             cmd2 = [
                 FFMPEG, "-y",
                 "-i", path_or_url,
@@ -140,7 +143,7 @@ def _normalize_input(local_in: str, tmpdir: str) -> str:
     except Exception:
         pass
 
-    # 2) If audio decode failed, add a SILENT track to guarantee an audio stream
+    # 2) If audio decode failed, add a SILENT track
     silent = os.path.join(tmpdir, f"sil-{uuid.uuid4().hex}.wav")
     if dur <= 0.0:
         dur = 3600.0  # absurdly high cap; we'll -shortest to video anyway
@@ -350,7 +353,7 @@ def _render_concat(tmpdir: str, inputs: List[str], portrait: bool = True) -> str
         "scale=w=1920:h=1080:force_original_aspect_ratio=decrease,"
         "pad=1920:1080:(ow-iw)/2:(oh-ih)/2:color=black"
     )
-    # IMPORTANT: -ignore_unknown is a flag (no value) and must not be followed by "1"
+    # -ignore_unknown is a flag (no value)
     cmd = [
         FFMPEG, "-y",
         "-analyzeduration", "500M", "-probesize", "500M",
@@ -392,6 +395,77 @@ def _render_clips(tmpdir: str, clips: List[Clip], portrait: bool = True) -> str:
         ])
         parts.append(part)
     return _render_concat(tmpdir, parts, portrait=portrait)
+
+# ---------- funnel helpers ----------
+def _normalize_text(s: str) -> str:
+    return re.sub(r"\s+", " ", s.strip().lower())
+
+def _clip_text_for(src: str, s: float, e: float, segs: List[Tuple[float, float, str]]) -> str:
+    """Return ASR text overlapping [s,e] with a small padding window."""
+    pad = 0.25
+    s -= pad; e += pad
+    bits: List[str] = []
+    for (ts, te, txt) in segs:
+        if te >= s and ts <= e and txt:
+            bits.append(txt)
+    return _normalize_text(" ".join(bits))
+
+def _tag_from_text(txt: str) -> str:
+    t = _normalize_text(txt)
+    def has_any(toks: Tuple[str, ...]) -> bool:
+        return any(k in t for k in toks)
+    if has_any(HOOK_KWS):    return "hook"
+    if has_any(FEATURE_KWS): return "feature"
+    if has_any(PROOF_KWS):   return "proof"
+    if has_any(CTA_KWS):     return "cta"
+    return "other"
+
+def _order_funnel(clips: List[Clip],
+                  seg_cache: Dict[str, List[Tuple[float, float, str]]],
+                  want_total: Optional[float]) -> List[Clip]:
+    """Bucket clips by tag (hook -> feature -> proof -> cta), then fill in order, with fallbacks."""
+    buckets: DefaultDict[str, List[Clip]] = defaultdict(list)
+    # Tag each clip by the text in its window
+    for c in clips:
+        segs = seg_cache.get(c.src, [])
+        txt  = _clip_text_for(c.src, c.start, c.end, segs) if segs else ""
+        tag  = _tag_from_text(txt) if txt else "other"
+        buckets[tag].append(c)
+
+    # Sort each bucket by score desc
+    for k in buckets:
+        buckets[k].sort(key=lambda x: x.score, reverse=True)
+
+    order = ["hook", "feature", "proof", "cta"]
+    chosen: List[Clip] = []
+    total = 0.0
+
+    # First pass: pick best from each bucket in order
+    for k in order:
+        if buckets[k]:
+            c = buckets[k].pop(0)
+            chosen.append(c)
+            total += c.dur
+
+    # Fill remaining time with remaining clips preferring funnel order, then "other"
+    remaining = []
+    for k in order:
+        remaining.extend(buckets[k])
+    remaining.extend(sorted(buckets.get("other", []), key=lambda x: x.score, reverse=True))
+
+    for c in remaining:
+        if want_total and total + c.dur > want_total + 1e-3:
+            continue
+        chosen.append(c)
+        total += c.dur
+        if want_total and total >= want_total:
+            break
+
+    # If nothing got picked (e.g., no ASR), fall back to original scoring order
+    if not chosen and clips:
+        chosen = sorted(clips, key=lambda x: x.score, reverse=True)
+
+    return chosen
 
 # ---------- public jobs ----------
 def _pick_best(files: List[str],
@@ -441,34 +515,43 @@ def job_render(payload: Dict[str, Any]) -> Dict[str, Any]:
     min_clip = float(payload.get("min_clip_seconds") or 2.5)
     max_clip = float(payload.get("max_clip_seconds") or 10.0)
 
-    # write temp/session under SESSION_ROOT so it persists on the VM mount
     tmpdir = tempfile.mkdtemp(prefix=f"editdna-{sess}-", dir=SESSION_ROOT)
-
     try:
         if not files:
             return {"ok": False, "error": "No input files provided", "session_id": sess}
 
-        # Ensure-local + normalize all inputs up front for concat mode
+        # Ensure-local + normalize all inputs up front for concat/best/funnel
         local_norm: List[str] = []
         for f in files:
             loc = _ensure_local(f, tmpdir)
             norm = _normalize_input(loc, tmpdir)
             local_norm.append(norm)
 
-        if mode == "best":
+        if mode in ("best", "best_funnel", "funnel"):
             clips = _pick_best(files, tmpdir, max_duration, take_top_k, min_clip, max_clip)
+
+            # If funnel requested and ASR available, reorder by funnel
+            if mode in ("best_funnel", "funnel") and ASR_ENABLED:
+                # build ASR cache once per source
+                seg_cache: Dict[str, List[Tuple[float, float, str]]] = {}
+                for path in sorted({c.src for c in clips}):
+                    seg_cache[path] = _asr_segments(path)
+                clips = _order_funnel(clips, seg_cache, float(max_duration) if max_duration else None)
+
             if not clips:
                 out_local = _render_concat(tmpdir, local_norm, portrait=portrait)
                 mode_used = "concat_fallback"
             else:
                 out_local = _render_clips(tmpdir, clips, portrait=portrait)
-                mode_used = "best"
+                mode_used = "funnel" if mode in ("best_funnel", "funnel") else "best"
+
         else:
+            # simple concat
             out_local = _render_concat(tmpdir, local_norm, portrait=portrait)
             mode_used = "concat"
 
-        # Optional captions
-        if with_captions and mode_used in ("best", "concat", "concat_fallback") and ASR_ENABLED:
+        # Optional captions (after assembly)
+        if with_captions and mode_used in ("best", "funnel", "concat", "concat_fallback") and ASR_ENABLED:
             segments = _asr_segments(out_local)
             if segments:
                 srt_path = os.path.join(tmpdir, "subs.srt")
@@ -477,8 +560,8 @@ def job_render(payload: Dict[str, Any]) -> Dict[str, Any]:
                 burn_captions(out_local, srt_path, cap_out)
                 out_local = cap_out
 
-        # Upload to S3 and presign
-        s3_uri = upload_file(out_local, out_prefix, content_type="video/mp4")
+        # Upload to S3 and presign — keep outputs grouped by session
+        s3_uri = upload_file(out_local, f"{out_prefix}/{sess}", content_type="video/mp4")
         _, key = s3_uri.replace("s3://", "", 1).split("/", 1)
         url = presigned_url(S3_BUCKET, key, expires=3600)
 
