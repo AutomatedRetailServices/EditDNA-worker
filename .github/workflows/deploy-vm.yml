@@ -1,0 +1,34 @@
+name: Deploy worker to VM
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - "jobs.py"
+      - "tasks.py"
+      - "start_worker.sh"
+      - "requirements.txt"
+      - "Dockerfile.worker"
+      - ".github/workflows/deploy-vm.yml"
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout (for reference)
+        uses: actions/checkout@v4
+
+      - name: SSH into VM & deploy latest
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.VM_HOST }}
+          username: ${{ secrets.VM_USER }}
+          key: ${{ secrets.VM_SSH_KEY }}   # private key
+          port: ${{ secrets.VM_SSH_PORT }}
+          script: |
+            set -euo pipefail
+            cd "$HOME/editdna" || cd /opt/editdna
+            git fetch --all
+            git reset --hard origin/main
+            chmod +x start_worker.sh
+            ./start_worker.sh
