@@ -1,18 +1,17 @@
 fastapi==0.115.0
 uvicorn[standard]==0.30.6
-openai==1.43.0
-httpx==0.27.2
-requests==2.32.3
-beautifulsoup4==4.12.3
-python-multipart==0.0.9
-boto3==1.35.20
 redis==5.0.8
 rq==1.16.2
-python-dotenv==1.1.1
-imageio-ffmpeg==0.5.1
+pydantic==1.10.17
+boto3==1.34.162
+
+# ASR
 faster-whisper==1.0.3
-ctranslate2==4.4.0
-numpy==1.26.4
+
+# Video/vision
 opencv-python-headless==4.10.0.84
 numpy>=1.24
+
+# Tools we rely on
+python-dotenv==1.0.1
 
