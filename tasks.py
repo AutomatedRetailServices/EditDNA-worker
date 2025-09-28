@@ -1,14 +1,13 @@
-# tasks.py — shim so RQ can import functions reliably
-from __future__ import annotations
-from typing import Any, Dict
+# tasks.py — RQ task wrappers
 
-from jobs import job_render as _job_render_impl, job_render_chunked as _job_render_chunked_impl
+from typing import Any, Dict
+from jobs import job_render, job_render_chunked
 
 def task_nop() -> Dict[str, Any]:
     return {"echo": {"hello": "world"}}
 
-def job_render(*args, **kwargs) -> Dict[str, Any]:
-    return _job_render_impl(*args, **kwargs)
+def job_render(payload: Dict[str, Any]) -> Dict[str, Any]:
+    return job_render(payload)
 
-def job_render_chunked(*args, **kwargs) -> Dict[str, Any]:
-    return _job_render_chunked_impl(*args, **kwargs)
+def job_render_chunked(payload: Dict[str, Any]) -> Dict[str, Any]:
+    return job_render_chunked(payload)
