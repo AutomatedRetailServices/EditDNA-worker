@@ -1,32 +1,112 @@
-name: Deploy to VM (auto-sync worker)
+name: Build image & deploy worker to VM
 
 on:
   push:
     branches: [ main ]
     paths:
+      - "Dockerfile.worker"
       - "jobs.py"
       - "tasks.py"
-      - "app.py"
-      - "start_worker.sh"
+      - "s3_utils.py"
+      - "captions.py"
       - "requirements.txt"
-      - "Dockerfile.worker"
-      - "render.yaml"
+      - "start_worker.sh"
       - ".github/workflows/deploy-vm.yml"
+  workflow_dispatch: {}
+
+concurrency:
+  group: deploy-vm
+  cancel-in-progress: false
 
 jobs:
-  deploy:
+  build-and-push:
+    name: Build worker image
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    outputs:
+      # we’ll deploy this exact tag on the VM
+      image_tag: ${{ steps.settag.outputs.tag }}
+      image_repo: ${{ steps.settag.outputs.repo }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: SSH → run deploy script on VM
-        uses: appleboy/ssh-action@v1.0.3
+      - name: Set Docker repo + tag
+        id: settag
+        run: |
+          REPO="${{ secrets.DOCKERHUB_USERNAME }}/editdna-worker"
+          TAG="sha-${GITHUB_SHA}"
+          echo "repo=$REPO" >> $GITHUB_OUTPUT
+          echo "tag=$TAG"   >> $GITHUB_OUTPUT
+
+      - name: Login to Docker Hub
+        uses: docker/login-action@v3
         with:
-          host: ${{ secrets.VM_HOST }}        # e.g. 38.224.253.78
-          username: ${{ secrets.VM_USER }}    # e.g. user
-          key: ${{ secrets.VM_SSH_KEY }}      # your private key contents
-          port: ${{ secrets.VM_SSH_PORT || 22 }}
-          script: |
-            bash ~/deploy_editdna.sh
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Build & push (sha tag + latest)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile.worker
+          push: true
+          tags: |
+            ${{ steps.settag.outputs.repo }}:${{ steps.settag.outputs.tag }}
+            ${{ steps.settag.outputs.repo }}:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  deploy-vm:
+    name: SSH to VM & restart worker
+    runs-on: ubuntu-latest
+    needs: build-and-push
+    env:
+      VM_HOST: ${{ secrets.VM_HOST }}
+      VM_USER: ${{ secrets.VM_USER }}
+      # image built in previous job
+      IMAGE_REF: ${{ needs.build-and-push.outputs.image_repo }}:${{ needs.build-and-push.outputs.image_tag }}
+    steps:
+      - name: Prepare SSH key
+        run: |
+          install -m 700 -d ~/.ssh
+          echo "${{ secrets.VM_SSH_KEY }}" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          # speed up/avoid prompt on first connect
+          echo "Host *" > ~/.ssh/config
+          echo "  StrictHostKeyChecking no" >> ~/.ssh/config
+          chmod 600 ~/.ssh/config
+
+      - name: Show what we will deploy
+        run: |
+          echo "Deploying image: ${IMAGE_REF}"
+          echo "VM: ${VM_USER}@${VM_HOST}"
+
+      - name: SSH — pull repo & restart container
+        run: |
+          ssh -i ~/.ssh/id_ed25519 ${VM_USER}@${VM_HOST} bash -s <<'EOF'
+          set -Eeuo pipefail
+
+          # 1) Make sure repo exists (clone once; afterwards we just git reset)
+          mkdir -p ~/editdna
+          if [ ! -d ~/editdna/.git ]; then
+            sudo apt-get update -y
+            sudo apt-get install -y git
+            git clone https://github.com/${GITHUB_REPOSITORY}.git ~/editdna
+          fi
+
+          # 2) Pull latest from main
+          cd ~/editdna
+          git fetch --all
+          git reset --hard origin/main
+          chmod +x ./start_worker.sh || true
+
+          # 3) Run worker with the newly built image
+          #    start_worker.sh reads IMAGE env if set.
+          IMAGE="${IMAGE_REF}" \
+          NAME="editdna-worker" \
+          USE_GPU="1" \
+          ./start_worker.sh
+
+          # 4) Show state
+          docker ps --format "table {{.Names}}\t{{.Image}}\t{{.Status}}"
+          EOF
