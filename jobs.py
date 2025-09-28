@@ -1,4 +1,5 @@
-# jobs.py — ASR-aware “human-edit” picker: face+fluency scoring, whole-clip veto, funnel ordering
+# jobs.py — ASR-aware “human-edit” picker with V2 flags:
+# face+fluency scoring, whole-clip veto, funnel ordering, proxy-fuse, env overrides.
 
 from __future__ import annotations
 
@@ -16,46 +17,57 @@ from collections import defaultdict
 import cv2
 import numpy as np
 
+# ------------ S3 / captions helpers from your repo ------------
 from s3_utils import upload_file, presigned_url, S3_BUCKET, download_to_tmp
 from captions import write_srt, burn_captions
+# --------------------------------------------------------------
 
 FFMPEG  = os.getenv("FFMPEG_BIN", "ffmpeg")
 FFPROBE = os.getenv("FFPROBE_BIN", "ffprobe")
 
 # ---------- knobs (env) ----------
-ASR_ENABLED   = os.getenv("ASR_ENABLED", "true").lower() in ("1","true","yes","on")
-ASR_MODEL_SIZE = os.getenv("ASR_MODEL_SIZE", "tiny")
-ASR_LANGUAGE   = os.getenv("ASR_LANG", "en")
+ASR_ENABLED     = os.getenv("ASR_ENABLED", "true").lower() in ("1","true","yes","on")
+ASR_MODEL_SIZE  = os.getenv("ASR_MODEL_SIZE", "tiny")
+ASR_LANGUAGE    = os.getenv("ASR_LANG", "en")
 
-BIN_SEC   = float(os.getenv("BIN_SEC", "0.5"))
+BIN_SEC         = float(os.getenv("BIN_SEC", "0.5"))
 
-# base weights
-W_AUDIO   = float(os.getenv("W_AUDIO",   "0.30"))
-W_SCENE   = float(os.getenv("W_SCENE",   "0.15"))
-W_SPEECH  = float(os.getenv("W_SPEECH",  "0.30"))
-W_FACE    = float(os.getenv("W_FACE",    "0.20"))
-W_FLUENCY = float(os.getenv("W_FLUENCY", "0.35"))
+# base weights (blend score from analysis bins + human checks)
+W_AUDIO         = float(os.getenv("W_AUDIO",   "0.30"))
+W_SCENE         = float(os.getenv("W_SCENE",   "0.15"))
+W_SPEECH        = float(os.getenv("W_SPEECH",  "0.30"))
+W_FACE          = float(os.getenv("W_FACE",    "0.20"))
+W_FLUENCY       = float(os.getenv("W_FLUENCY", "0.35"))
 
 # scene detect
-SCENE_THRESH = float(os.getenv("SCENE_THRESH", "0.04"))
+SCENE_THRESH    = float(os.getenv("SCENE_THRESH", "0.04"))
 
 # face/gaze heuristics
-FACE_MIN_SIZE    = float(os.getenv("FACE_MIN_SIZE", "0.08"))   # % of frame min dimension
-FACE_CENTER_TOL  = float(os.getenv("FACE_CENTER_TOL", "0.35")) # normalized center distance tolerance
+FACE_MIN_SIZE   = float(os.getenv("FACE_MIN_SIZE", "0.08"))   # % of frame min dimension
+FACE_CENTER_TOL = float(os.getenv("FACE_CENTER_TOL", "0.35")) # normalized center distance tolerance
 
 # fluency heuristics
-FLUENCY_MIN_WPM         = float(os.getenv("FLUENCY_MIN_WPM", "95"))
-FLUENCY_FILLER_PENALTY  = float(os.getenv("FLUENCY_FILLER_PENALTY", "0.65"))
+FLUENCY_MIN_WPM        = float(os.getenv("FLUENCY_MIN_WPM", "95"))
+FLUENCY_FILLER_PENALTY = float(os.getenv("FLUENCY_FILLER_PENALTY", "0.65"))
 FILLERS = set(["um","uh","erm","hmm","like","you know","sort of","kinda"]) # simple
 
-# veto: if a file never reaches this blended (face+fluency) score, drop all clips from it
+# veto
 VETO_MIN_SCORE = float(os.getenv("VETO_MIN_SCORE", "0.40"))
 
 # “human” smoothing
-GRACE_SEC   = float(os.getenv("GRACE_SEC", "0.6"))   # allow small bad gaps inside a good region
-MAX_BAD_SEC = float(os.getenv("MAX_BAD_SEC", "1.2")) # but cap them
+GRACE_SEC   = float(os.getenv("GRACE_SEC", "0.6"))    # allow small bad gaps inside a good region
+MAX_BAD_SEC = float(os.getenv("MAX_BAD_SEC", "1.2"))  # cap them
 
-# funnel bucket targets (Hook, Feature, Proof, CTA)
+# -------- V2 feature flags / overrides (NEW) --------
+V2_SLOT_SCORER    = os.getenv("V2_SLOT_SCORER", "0") in ("1","true","yes","on")
+V2_PROXY_FUSE     = os.getenv("V2_PROXY_FUSE", "0") in ("1","true","yes","on")
+V2_VARIANT_EXPAND = os.getenv("V2_VARIANT_EXPAND", "0") in ("1","true","yes","on")
+V2_CAPTIONER      = os.getenv("V2_CAPTIONER", "0") in ("1","true","yes","on")
+CAPTIONS_MODE     = os.getenv("CAPTIONS", "off").strip().lower()  # off|soft|hard
+MAX_DURATION_SEC_ENV = float(os.getenv("MAX_DURATION_SEC", "0"))  # 0 = unlimited
+MIN_TAKE_SEC_ENV  = float(os.getenv("MIN_TAKE_SEC", "0"))  # 0 = use payload/defaults
+
+# funnel targets (Hook, Feature, Proof, CTA)
 FUNNEL_COUNTS = os.getenv("FUNNEL_COUNTS", "1,1,1,1")
 FN_HOOK, FN_FEATURE, FN_PROOF, FN_CTA = [int(x) for x in FUNNEL_COUNTS.split(",")] if FUNNEL_COUNTS else [1,1,1,1]
 
@@ -251,31 +263,34 @@ def _asr_segments(local_path: str) -> List[Tuple[float,float,str]]:
     return out
 
 # ---------- human checks (face + fluency) ----------
-def _face_ok(frame: np.ndarray) -> float:
-    """Return 0..1 score based on face size and centeredness."""
+def _face_ok(frame: np.ndarray) -> Tuple[float, float]:
+    """Return (score 0..1, center_distance 0..1) based on face size and centeredness."""
     if frame is None or frame.size == 0:
-        return 0.0
+        return 0.0, 1.0
     gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
     cascade_path = cv2.data.haarcascades + "haarcascade_frontalface_default.xml"
     face_cascade = cv2.CascadeClassifier(cascade_path)
     faces = face_cascade.detectMultiScale(gray, 1.2, 5)
     if len(faces) == 0:
-        return 0.0
+        return 0.0, 1.0
     h, w = gray.shape[:2]
     mind = min(w, h)
     best = 0.0
+    best_center_dist = 1.0
     for (x,y,fw,fh) in faces:
         cx = x + fw/2
         cy = y + fh/2
         size_ratio = max(fw, fh) / (mind + 1e-6)
         center_dx = abs((cx - w/2)/ (w/2))
         center_dy = abs((cy - h/2)/ (h/2))
-        center_dist = math.hypot(center_dx, center_dy)
+        center_dist = float(math.hypot(center_dx, center_dy))
         size_ok = 1.0 if size_ratio >= FACE_MIN_SIZE else size_ratio / max(FACE_MIN_SIZE,1e-6)
         center_ok = max(0.0, 1.0 - (center_dist / max(FACE_CENTER_TOL, 1e-6)))
         s = 0.5*size_ok + 0.5*center_ok
-        best = max(best, s)
-    return float(best)
+        if s > best:
+            best = s
+            best_center_dist = center_dist
+    return float(best), float(best_center_dist)
 
 def _fluency_metrics(text: str, dur: float) -> float:
     """Return 0..1 fluency score using WPM + filler penalty."""
@@ -284,7 +299,6 @@ def _fluency_metrics(text: str, dur: float) -> float:
     if dur <= 0.0:
         return 0.0
     wpm = (wcount / dur) * 60.0
-    # filler hits
     filler_hits = sum(1 for w in words if w in FILLERS)
     base = 1.0 if wpm >= FLUENCY_MIN_WPM else max(0.0, wpm / max(FLUENCY_MIN_WPM,1e-6))
     penalty = (FLUENCY_FILLER_PENALTY ** filler_hits) if filler_hits > 0 else 1.0
@@ -324,10 +338,10 @@ def _speech_bins_from_segments(segments: List[Tuple[float,float,str]], dur: floa
     wps_norm = [v/max_wps for v in wps]
     return [0.6*pres[i] + 0.4*wps_norm[i] for i in range(num_bins)]
 
-def _bins_for_file(local_path: str, bin_sec: float) -> List[Tuple[float,float,float]]:
+def _bins_for_file(local_path: str, bin_sec: float):
     dur = _duration(local_path)
     if dur <= 0:
-        return []
+        return [], []
     num_bins = int(math.ceil(dur / bin_sec))
     spans = [(i*bin_sec, min(dur, (i+1)*bin_sec)) for i in range(num_bins)]
     scene_bins = _scene_counts_to_bins(_analyze_scene_markers(local_path), dur, bin_sec)
@@ -341,7 +355,7 @@ def _bins_for_file(local_path: str, bin_sec: float) -> List[Tuple[float,float,fl
     scores = [W_AUDIO*audio_bins[i] + W_SCENE*scene_bins[i] + W_SPEECH*speech_bins[i] for i in range(num_bins)]
     return [(spans[i][0], spans[i][1], scores[i]) for i in range(num_bins)], segs
 
-def _collect_candidate_clips(local_path: str, tmpdir: str, min_clip: float, max_clip: float) -> Tuple[List[Clip], List[Tuple[float,float,str]]]:
+def _collect_candidate_clips(local_path: str, tmpdir: str, min_clip: float, max_clip: float):
     bins, segs = _bins_for_file(local_path, BIN_SEC)
     if not bins:
         return [], segs
@@ -383,24 +397,24 @@ def _collect_candidate_clips(local_path: str, tmpdir: str, min_clip: float, max_
     if bins:
         flush(bins[-1][1])
 
-    # Human filters: face + fluency re-score each candidate
+    # Human filters: face + fluency re-score each candidate (V2 adds off-center penalty)
     rescored: List[Clip] = []
     for c in out:
         frame = _grab_middle_frame(local_path, c.start, c.end, tmpdir)
-        face_s = _face_ok(frame)
-        # text during that span
+        face_s, center_dist = _face_ok(frame)
         text = " ".join(t for (s,e,t) in segs if not (e <= c.start or s >= c.end))
         flu_s  = _fluency_metrics(text, max(1e-6, c.dur))
         human = (W_FACE*face_s + W_FLUENCY*flu_s)
-        c.score = 0.6*c.score + 0.4*human
+        final = 0.6*c.score + 0.4*human
+        if V2_SLOT_SCORER and center_dist > FACE_CENTER_TOL:
+            final *= 0.7  # extra penalty for off-center in V2 mode
+        c.score = float(final)
         rescored.append(c)
 
     return rescored, segs
 
 # ---------- whole-clip veto ----------
 def _veto_whole_clip(clips: List[Clip], segs: List[Tuple[float,float,str]]) -> bool:
-    """Return True if this source should be dropped entirely."""
-    # If no clips survived or all have tiny scores, veto.
     if not clips:
         return True
     best = max(c.score for c in clips)
@@ -432,7 +446,7 @@ def _render_clips(tmpdir: str, clips: List[Clip], portrait: bool = True) -> str:
     parts: List[str] = []
     vf = ("scale=w=1080:h=1920:force_original_aspect_ratio=decrease,pad=1080:1920:(ow-iw)/2:(oh-ih)/2:color=black"
           if portrait else
-          "scale=w=1920:h=1080:force_original_aspect_ratio=decrease,pad=1920:1080:(ow-iw)/2:(oh-ih)/2:color=black")
+          "scale=w=1920:h=1080:force_original_aspect_ratio=decrease,pad=1920:1080:(ow-ih)/2:(oh-ih)/2:color=black")
     for i,c in enumerate(clips):
         part = os.path.join(tmpdir, f"part_{i:03d}.mp4")
         _run([
@@ -481,9 +495,25 @@ def _order_funnel(clips: List[Clip],
     pick: List[Clip] = []
     def take(k, n):
         arr = buckets[k]
-        if n<=0 or not arr: return
+        if n<=0: 
+            return
+        if not arr and V2_PROXY_FUSE:
+            # proxy: borrow best remaining from any other bucket
+            other = sorted([x for kk,aa in buckets.items() for x in aa if kk!=k], key=lambda c: c.score, reverse=True)
+            if other:
+                pick.append(other[0])
+                # remove it from its original bucket so we don't reuse twice
+                for kk in buckets.keys():
+                    if other[0] in buckets[kk]:
+                        buckets[kk].remove(other[0])
+                        break
+                return
+        if not arr:
+            return
         take_n = min(n, len(arr))
         pick.extend(arr[:take_n])
+        # remove used
+        buckets[k] = arr[take_n:]
 
     take("hook", FN_HOOK)
     take("feature", FN_FEATURE)
@@ -506,7 +536,7 @@ def _order_funnel(clips: List[Clip],
 # ---------- public jobs ----------
 def _pick_best(files: List[str], tmpdir: str,
                max_duration: Optional[int], take_top_k: Optional[int],
-               min_clip: float, max_clip: float) -> Tuple[List[Clip], Dict[str,List[Tuple[float,float,str]]]]:
+               min_clip: float, max_clip: float):
     all_candidates: List[Clip] = []
     seg_cache: Dict[str, List[Tuple[float,float,str]]] = {}
     for f in files:
@@ -514,7 +544,6 @@ def _pick_best(files: List[str], tmpdir: str,
         safe_f  = _normalize_input(local_f, tmpdir)
         clips, segs = _collect_candidate_clips(safe_f, tmpdir, min_clip, max_clip)
         seg_cache[safe_f] = segs
-        # veto whole source if never reaches threshold
         if _veto_whole_clip(clips, segs):
             continue
         all_candidates.extend(clips)
@@ -522,9 +551,19 @@ def _pick_best(files: List[str], tmpdir: str,
     if not all_candidates:
         return [], seg_cache
 
+    # sort by score
     all_candidates.sort(key=lambda c: c.score, reverse=True)
+
+    # V2: allow expansion by keeping more candidates if requested
+    if V2_VARIANT_EXPAND and (take_top_k is None or take_top_k < 5):
+        take_top_k = 5
+
     if take_top_k and take_top_k > 0:
         all_candidates = all_candidates[:take_top_k]
+
+    # duration cap (payload or env override)
+    if (not max_duration or max_duration <= 0) and MAX_DURATION_SEC_ENV > 0:
+        max_duration = int(MAX_DURATION_SEC_ENV)
 
     if max_duration and max_duration > 0:
         chosen=[]
@@ -550,12 +589,19 @@ def job_render(payload: Dict[str, Any]) -> Dict[str, Any]:
     out_prefix = (payload.get("output_prefix") or "editdna/outputs").strip("/")
     portrait = bool(payload.get("portrait", True))
     mode = str(payload.get("mode") or "concat").lower().strip()
-    with_captions = bool(payload.get("with_captions", False))
 
+    # default min/max clip; allow env override for MIN_TAKE_SEC
+    min_clip = float(payload.get("min_clip_seconds") or (MIN_TAKE_SEC_ENV if MIN_TAKE_SEC_ENV > 0 else 2.5))
+    max_clip = float(payload.get("max_clip_seconds") or 10.0)
+
+    # inputs for selection
     max_duration = payload.get("max_duration")
     take_top_k = payload.get("take_top_k")
-    min_clip = float(payload.get("min_clip_seconds") or 2.5)
-    max_clip = float(payload.get("max_clip_seconds") or 10.0)
+
+    # Auto-captions via env flag if user didn't specify
+    with_captions = bool(payload.get("with_captions", False))
+    if V2_CAPTIONER and CAPTIONS_MODE in ("soft","hard"):
+        with_captions = True
 
     tmpdir = tempfile.mkdtemp(prefix=f"editdna-{sess}-")
     try:
@@ -582,15 +628,16 @@ def job_render(payload: Dict[str, Any]) -> Dict[str, Any]:
             out_local = _render_concat(tmpdir, local_norm, portrait=portrait)
             mode_used = "concat"
 
-        if with_captions and mode_used in ("best","funnel","concat","concat_fallback") and ASR_ENABLED:
-            # burn captions from final output ASR
+        if with_captions and ASR_ENABLED:
             segs = _asr_segments(out_local)
             if segs:
                 srt_path = os.path.join(tmpdir, "subs.srt")
                 write_srt(segs, srt_path)
-                cap_out = os.path.join(tmpdir, "out_captions.mp4")
-                burn_captions(out_local, srt_path, cap_out)
-                out_local = cap_out
+                if CAPTIONS_MODE == "hard":
+                    cap_out = os.path.join(tmpdir, "out_captions.mp4")
+                    burn_captions(out_local, srt_path, cap_out)
+                    out_local = cap_out
+                # if "soft", we keep sidecar only (your burn_captions not needed)
 
         s3_uri = upload_file(out_local, out_prefix + f"/{sess}", content_type="video/mp4")
         _, key = s3_uri.replace("s3://", "", 1).split("/", 1)
@@ -612,4 +659,3 @@ def job_render(payload: Dict[str, Any]) -> Dict[str, Any]:
 
 def job_render_chunked(payload: Dict[str, Any]) -> Dict[str, Any]:
     return job_render(payload)
-
