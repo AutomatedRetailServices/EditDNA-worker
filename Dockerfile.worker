@@ -1,15 +1,26 @@
-FROM nvidia/cuda:11.8.0-base-ubuntu22.04
+FROM python:3.10-slim
 
-RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
-    ffmpeg python3 python3-pip && \
-    rm -rf /var/lib/apt/lists/*
+# System deps
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ffmpeg \
+ && rm -rf /var/lib/apt/lists/*
 
+# Workdir
 WORKDIR /app
-COPY requirements.txt .
-RUN pip3 install --no-cache-dir -r requirements.txt
 
-COPY . .
+# Copy app files
+COPY requirements.txt /app/requirements.txt
+RUN pip install --no-cache-dir -r /app/requirements.txt
+
+COPY app.py /app/app.py
+COPY tasks.py /app/tasks.py
+COPY jobs.py /app/jobs.py
+COPY s3_utils.py /app/s3_utils.py
+COPY captions.py /app/captions.py
+COPY render.yaml /app/render.yaml
+COPY apt.txt /app/apt.txt
+
 ENV PYTHONUNBUFFERED=1
 
-# Start the background worker (your file that runs jobs)
-CMD ["python3", "-u", "tasks.py"]
+# Default command is the RQ worker (you pass REDIS_URL and queue at runtime)
+CMD ["bash", "-lc", "export PYTHONPATH=/app && rq worker -u \"$REDIS_URL\" default"]
