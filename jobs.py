@@ -581,3 +581,19 @@ def job_render(payload: Dict[str, Any]) -> Dict[str, Any]:
 
 def job_render_chunked(payload: Dict[str, Any]) -> Dict[str, Any]:
     return job_render(payload)
+# ==== HUMAN EDIT HELPERS (bootstrap) ====
+# These stubs unblock the worker and prove the mount is working.
+# We will swap these for the full logic after we confirm they load.
+
+def _face_ok(*args, **kwargs):
+    # TODO: real face/gaze score — for now always "ok"
+    return True
+
+def _fluency_metrics(*args, **kwargs):
+    # TODO: real ASR fluency metrics — for now a perfect score
+    return {"wpm": 120, "fillers": 0, "score": 1.0}
+
+def _veto_whole_clip(*args, **kwargs):
+    # TODO: if a clip is all bad, return True to drop it — for now never veto
+    return False
+# ==== END HELPERS ====
