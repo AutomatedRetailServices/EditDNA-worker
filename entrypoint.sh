@@ -6,3 +6,4 @@ set -euo pipefail
 
 # Exec rqworker with the provided URL and args
 exec "$@" -u "$REDIS_URL"
+
