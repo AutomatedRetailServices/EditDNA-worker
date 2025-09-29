@@ -29,4 +29,3 @@ ENV PYTHONPATH=/app
 
 ENTRYPOINT ["/app/entrypoint.sh"]
 CMD ["rqworker","default","--path","/app"]
-
