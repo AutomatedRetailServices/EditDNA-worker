@@ -28,4 +28,4 @@ jobs:
           context: .
           file: Dockerfile.worker
           push: true
-          tags: ghcr.io/${{ github.repository_owner }}/editdna-worker:latest
+          tags: ghcr.io/automatedretailservices/editdna-worker:latest
