@@ -1,17 +1,20 @@
-FROM python:3.10-slim
+FFROM python:3.10-slim
 
-# System deps
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    ffmpeg \
- && rm -rf /var/lib/apt/lists/*
-
-# Workdir
 WORKDIR /app
+ENV PYTHONUNBUFFERED=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1
 
-# Copy app files
+# System deps: ffmpeg + OpenCV runtime libs (for face/gaze)
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ffmpeg libgl1 libglib2.0-0 && \
+    rm -rf /var/lib/apt/lists/*
+
+# Python deps
 COPY requirements.txt /app/requirements.txt
-RUN pip install --no-cache-dir -r /app/requirements.txt
+RUN python -m pip install -U pip && \
+    pip install --no-cache-dir -r /app/requirements.txt
 
+# App code
 COPY app.py /app/app.py
 COPY tasks.py /app/tasks.py
 COPY jobs.py /app/jobs.py
@@ -20,7 +23,12 @@ COPY captions.py /app/captions.py
 COPY render.yaml /app/render.yaml
 COPY apt.txt /app/apt.txt
 
-ENV PYTHONUNBUFFERED=1
+# Entrypoint script to expand $REDIS_URL cleanly
+COPY entrypoint.sh /app/entrypoint.sh
+RUN chmod +x /app/entrypoint.sh
 
-# Default command is the RQ worker (you pass REDIS_URL and queue at runtime)
-CMD ["bash", "-lc", "export PYTHONPATH=/app && rq worker -u \"$REDIS_URL\" default"]
+ENV PYTHONPATH=/app
+
+# Start rqworker pointing to repo code
+ENTRYPOINT ["/app/entrypoint.sh"]
+CMD ["rqworker", "default", "--path", "/app"]
