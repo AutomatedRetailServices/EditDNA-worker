@@ -17,6 +17,7 @@ RUN python -m pip install -U pip && \
 COPY app.py /app/app.py
 COPY tasks.py /app/tasks.py
 COPY jobs.py /app/jobs.py
+COPY jobs_smoke.py /app/jobs_smoke.py
 COPY s3_utils.py /app/s3_utils.py
 COPY captions.py /app/captions.py
 COPY render.yaml /app/render.yaml
