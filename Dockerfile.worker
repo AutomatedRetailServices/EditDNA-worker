@@ -1,12 +1,11 @@
-FFROM python:3.10-slim
+FROM python:3.10-slim
 
 WORKDIR /app
-ENV PYTHONUNBUFFERED=1 \
-    PIP_DISABLE_PIP_VERSION_CHECK=1
+ENV PYTHONUNBUFFERED=1 PIP_DISABLE_PIP_VERSION_CHECK=1
 
-# System deps: ffmpeg + OpenCV runtime libs (for face/gaze)
+# ffmpeg + OpenCV runtime libs for face/gaze
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    ffmpeg libgl1 libglib2.0-0 && \
+    ffmpeg libgl1 libglib2.0-0 curl && \
     rm -rf /var/lib/apt/lists/*
 
 # Python deps
@@ -22,13 +21,10 @@ COPY s3_utils.py /app/s3_utils.py
 COPY captions.py /app/captions.py
 COPY render.yaml /app/render.yaml
 COPY apt.txt /app/apt.txt
-
-# Entrypoint script to expand $REDIS_URL cleanly
 COPY entrypoint.sh /app/entrypoint.sh
-RUN chmod +x /app/entrypoint.sh
 
+RUN chmod +x /app/entrypoint.sh
 ENV PYTHONPATH=/app
 
-# Start rqworker pointing to repo code
 ENTRYPOINT ["/app/entrypoint.sh"]
-CMD ["rqworker", "default", "--path", "/app"]
+CMD ["rqworker","default","--path","/app"]
