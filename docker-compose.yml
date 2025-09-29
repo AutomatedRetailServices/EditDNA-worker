@@ -1,0 +1,7 @@
+services:
+  worker:
+    image: ghcr.io/YOUR_GITHUB_USER_OR_ORG/editdna-worker:latest
+    env_file: .env
+    restart: always
+    volumes:
+      - /sessions:/sessions
