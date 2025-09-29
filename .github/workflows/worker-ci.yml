@@ -29,3 +29,4 @@ jobs:
           file: Dockerfile.worker
           push: true
           tags: ghcr.io/automatedretailservices/editdna-worker:latest
+      
