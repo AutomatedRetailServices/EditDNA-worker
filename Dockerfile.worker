@@ -3,29 +3,28 @@ FROM python:3.10-slim
 WORKDIR /app
 ENV PYTHONUNBUFFERED=1 PIP_DISABLE_PIP_VERSION_CHECK=1
 
-# ffmpeg + OpenCV runtime libs for face/gaze
+# ffmpeg + a couple runtime libs ffmpeg/opencv often want
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    ffmpeg libgl1 libglib2.0-0 curl && \
-    rm -rf /var/lib/apt/lists/*
+    ffmpeg libglib2.0-0 libgl1 curl \
+ && rm -rf /var/lib/apt/lists/*
 
 # Python deps
 COPY requirements.txt /app/requirements.txt
-RUN python -m pip install -U pip && \
-    pip install --no-cache-dir -r /app/requirements.txt
+RUN pip install --no-cache-dir -r /app/requirements.txt
 
 # App code
 COPY app.py /app/app.py
 COPY tasks.py /app/tasks.py
 COPY jobs.py /app/jobs.py
-COPY jobs_smoke.py /app/jobs_smoke.py
 COPY s3_utils.py /app/s3_utils.py
 COPY captions.py /app/captions.py
 COPY render.yaml /app/render.yaml
 COPY apt.txt /app/apt.txt
+COPY jobs_smoke.py /app/jobs_smoke.py
+
+# Entrypoint
 COPY entrypoint.sh /app/entrypoint.sh
-
 RUN chmod +x /app/entrypoint.sh
-ENV PYTHONPATH=/app
 
+ENV PYTHONPATH=/app
 ENTRYPOINT ["/app/entrypoint.sh"]
-CMD ["rqworker","default","--path","/app"]
