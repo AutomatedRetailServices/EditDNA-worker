@@ -1,6 +1,13 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-: "${REDIS_URL:?REDIS_URL is required (e.g. redis://:pass@host:port/0)}"
+cd /app
+: "${REDIS_URL:?Missing REDIS_URL}"
 
-exec "$@" -u "$REDIS_URL"
+export PYTHONPATH=/app
+
+exec rq worker default \
+  --url "$REDIS_URL" \
+  --serializer rq.serializers.DefaultSerializer \
+  --worker-ttl 600 \
+  --job-monitoring-interval 10
