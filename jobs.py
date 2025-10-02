@@ -201,4 +201,74 @@ def _order_funnel(clips: List[Clip], cache: Dict, max_duration: Optional[float])
         out.append(c); total += c.dur
     return out
 
-# ----------
+# ---------- main ----------
+def job_render(payload: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Accepted payload keys (compatible with your previous API):
+      - session_id, files[], portrait, mode ("best"|"best_funnel"|"funnel"|"concat"),
+        min_clip_seconds, max_clip_seconds, max_duration, take_top_k,
+        with_captions (future), output_prefix
+    Returns: { ok, session_id, mode, output_s3, output_url, ... }
+    """
+    sess = str(payload.get("session_id") or f"sess-{uuid.uuid4().hex[:8]}")
+    files = list(payload.get("files") or [])
+    out_prefix = (payload.get("output_prefix") or "editdna/outputs").strip("/")
+    portrait = bool(payload.get("portrait", True))
+    mode = str(payload.get("mode") or "concat").lower().strip()
+
+    min_clip = float(payload.get("min_clip_seconds") or 1.5)
+    max_clip = float(payload.get("max_clip_seconds") or 4.0)
+
+    max_duration = payload.get("max_duration")  # may be None
+    take_top_k = payload.get("take_top_k")      # may be None
+    # with_captions = bool(payload.get("with_captions", False))  # reserved for later
+
+    tmpdir = tempfile.mkdtemp(prefix=f"editdna-{sess}-")
+    try:
+        if not files:
+            return {"ok": False, "error": "No input files provided", "session_id": sess}
+
+        # Make every input local & normalized so concat never explodes on codec/container
+        local_norm: List[str] = []
+        for f in files:
+            loc = _ensure_local(f, tmpdir)
+            norm = _normalize_input(loc, tmpdir)
+            local_norm.append(norm)
+
+        # Decide path
+        if mode in ("best", "best_funnel", "funnel"):
+            clips, seg_cache = _pick_best(files, tmpdir, max_duration, take_top_k, min_clip, max_clip)
+            if not clips:
+                # robust fallback
+                out_local = _render_concat(tmpdir, local_norm, portrait=portrait)
+                mode_used = "concat_fallback"
+            else:
+                if mode in ("best_funnel", "funnel"):
+                    clips = _order_funnel(clips, seg_cache, max_duration)
+                out_local = _render_clips(tmpdir, clips, portrait=portrait)
+                mode_used = "funnel" if mode in ("best_funnel", "funnel") else "best"
+        else:
+            out_local = _render_concat(tmpdir, local_norm, portrait=portrait)
+            mode_used = "concat"
+
+        # Upload result
+        s3_uri = upload_file(out_local, f"{out_prefix}/{sess}", content_type="video/mp4")
+        _, key = s3_uri.replace("s3://", "", 1).split("/", 1)
+        url = presigned_url(S3_BUCKET, key, expires=3600)
+
+        return {
+            "ok": True,
+            "session_id": sess,
+            "mode": mode_used,
+            "output_s3": s3_uri,
+            "output_url": url,
+            "inputs": files,
+        }
+
+    except Exception as e:
+        return {"ok": False, "session_id": sess, "error": str(e), "inputs": files}
+    finally:
+        shutil.rmtree(tmpdir, ignore_errors=True)
+
+def job_render_chunked(payload: Dict[str, Any]) -> Dict[str, Any]:
+    return job_render(payload)
