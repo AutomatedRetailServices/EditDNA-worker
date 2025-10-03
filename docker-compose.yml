@@ -5,3 +5,9 @@ services:
     restart: always
     volumes:
       - /sessions:/sessions
+    command: rq worker -u ${REDIS_URL} default --with-scheduler --burst-retry 5 --burst-retry-delay 10
+    healthcheck:
+      test: ["CMD", "redis-cli", "-u", "${REDIS_URL}", "ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
