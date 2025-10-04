@@ -1,4 +1,4 @@
-# app.py — web API for EditDNA (with synchronous /process + proxy pipeline)
+# app.py — web API for EditDNA (with synchronous /process + proxy pipeline + RunPod autoscale)
 
 from __future__ import annotations
 
@@ -29,7 +29,7 @@ except Exception:
     Queue = None            # type: ignore
     Job = None              # type: ignore
 
-APP_VERSION = "1.3.0"
+APP_VERSION = "1.3.1"
 
 # ---------- Paths ----------
 HOME = Path.home()
@@ -52,7 +52,37 @@ else:
     redis = None
     queue = None
 
-app = FastAPI(title="editdna", version=APP_VERSION)
+# ---- RunPod autoscale helpers (start on enqueue; stop handled elsewhere) ----
+import requests  # add to requirements.txt if not present
+
+RUNPOD_API_KEY = os.getenv("RUNPOD_API_KEY")           # set in Render env
+RUNPOD_TEMPLATE_ID = os.getenv("RUNPOD_TEMPLATE_ID")   # your RunPod template id
+RP_API = "https://api.runpod.ai/v2"
+RP_HEADERS = (
+    {"Authorization": f"Bearer {RUNPOD_API_KEY}", "Content-Type": "application/json"}
+    if RUNPOD_API_KEY else None
+)
+
+def _rp_enabled() -> bool:
+    return bool(RUNPOD_API_KEY and RUNPOD_TEMPLATE_ID and RP_HEADERS)
+
+def _rp_list_running() -> list[dict]:
+    if not _rp_enabled():
+        return []
+    try:
+        pods = requests.get(f"{RP_API}/pods", headers=RP_HEADERS, timeout=20).json().get("data", [])
+        return [p for p in pods if p.get("templateId") == RUNPOD_TEMPLATE_ID and p.get("desiredStatus") == "RUNNING"]
+    except Exception:
+        return []
+
+def _rp_start_one() -> None:
+    if not _rp_enabled():
+        return
+    try:
+        requests.post(f"{RP_API}/pods", headers=RP_HEADERS,
+                      data=json.dumps({"templateId": RUNPOD_TEMPLATE_ID}), timeout=30)
+    except Exception:
+        pass  # silent fail – web API still returns job_id
 
 # ---------- Models ----------
 class RenderRequest(BaseModel):
@@ -70,7 +100,6 @@ class RenderRequest(BaseModel):
     with_captions: Optional[bool] = False
 
 class ProcessRequest(BaseModel):
-    # convenience body for synchronous local processing (no Redis)
     session_id: Optional[str] = "session"
     mode: Optional[str] = "best"
     input_url: Optional[str] = None
@@ -79,7 +108,7 @@ class ProcessRequest(BaseModel):
     max_duration: Optional[int] = 60
     output_prefix: Optional[str] = "editdna/outputs"
 
-# ---------- Helpers (generic) ----------
+# ---------- Helpers ----------
 def _safe_name(url_or_path: str) -> str:
     parsed = urlparse(url_or_path)
     base = os.path.basename(parsed.path) or "input"
@@ -92,36 +121,20 @@ def _run(cmd: str) -> None:
         raise RuntimeError(f"Command failed ({proc.returncode}): {cmd}\n{proc.stdout.decode(errors='ignore')}")
 
 def _http_base() -> Optional[str]:
-    """
-    Best-effort guess for your HTTP server base so the output is clickable.
-    If you're serving $HOME via `python3 -m http.server 8000` on the box,
-    this returns http://<server-ip>:8000
-    """
     host_env = os.getenv("PUBLIC_BASE")
     if host_env:
         return host_env.rstrip("/")
-    # fallback: if running on a public VM, caller likely knows the IP; we let the client compose URL
     return None
 
 # ---------- Proxy pipeline ----------
 def build_proxy(input_url: str, portrait: bool = True, max_seconds: Optional[int] = None) -> Path:
-    """
-    Downloads the input (if remote) and creates a lightweight proxy:
-      - H.264, CRF 28, 24fps
-      - AAC mono 48k
-      - Portrait letterbox to 1080x1920 (or landscape to 960x540 if portrait=False)
-    Returns the proxy file path.
-    """
-    # 1) Get local source
     src_name = _safe_name(input_url)
     local_src = TMP_DIR / f"src_{uuid.uuid4().hex}_{src_name}"
     if str(input_url).startswith("http"):
-        urlretrieve(input_url, local_src)  # nosec - trusted user input in controlled env
+        urlretrieve(input_url, local_src)
     else:
-        # copy local path
         _run(f'cp {shlex.quote(str(input_url))} {shlex.quote(str(local_src))}')
 
-    # 2) Build proxy
     if portrait:
         scale_filter = 'scale=1080:trunc(ow/a/2)*2:force_original_aspect_ratio=decrease,pad=1080:1920:(1080-iw)/2:(1920-ih)/2'
     else:
@@ -141,13 +154,6 @@ def build_proxy(input_url: str, portrait: bool = True, max_seconds: Optional[int
     return proxy_path
 
 def pick_good_takes(proxies: List[Path], mode: str = "best", take_top_k: Optional[int] = 1) -> List[Path]:
-    """
-    Placeholder 'human-style' selector.
-    For now:
-      - mode='first' -> first proxy
-      - mode='best'  -> first proxy (stub for scoring gates)
-      - mode='concat'-> all proxies (ordered)
-    """
     if not proxies:
         return []
     if mode == "concat":
@@ -158,19 +164,13 @@ def pick_good_takes(proxies: List[Path], mode: str = "best", take_top_k: Optiona
     return proxies[:1]
 
 def render_concat(takes: List[Path], output_prefix: str = "editdna/outputs") -> Path:
-    """
-    Concats the selected takes (or just copies the single one).
-    Output goes into ~/outputs/<prefix>_<uuid>.mp4
-    """
     OUT_DIR.mkdir(parents=True, exist_ok=True)
     out_file = OUT_DIR / f"{Path(output_prefix).name}_{uuid.uuid4().hex}.mp4"
 
     if len(takes) == 1:
-        # fast path: remux (no re-encode)
         _run(f'ffmpeg -y -i {shlex.quote(str(takes[0]))} -c copy -movflags +faststart {shlex.quote(str(out_file))}')
         return out_file
 
-    # concat demuxer
     list_txt = TMP_DIR / f"concat_{uuid.uuid4().hex}.txt"
     with list_txt.open("w") as f:
         for p in takes:
@@ -199,20 +199,11 @@ def _get_job_or_404(job_id: str) -> "Job":  # type: ignore
         raise HTTPException(status_code=404, detail="Not Found")
 
 # ---------- Routes ----------
+app = FastAPI(title="editdna", version=APP_VERSION)
+
 @app.get("/")
 def root() -> JSONResponse:
-    return JSONResponse(
-        {
-            "ok": True,
-            "service": "editdna",
-            "version": APP_VERSION,
-            "time": int(datetime.utcnow().timestamp()),
-        }
-    )
-
-@app.get("/version")
-def version() -> JSONResponse:
-    return JSONResponse({"ok": True, "version": APP_VERSION})
+    return JSONResponse({"ok": True, "service": "editdna", "version": APP_VERSION, "time": int(datetime.utcnow().timestamp())})
 
 @app.get("/health")
 def health() -> JSONResponse:
@@ -227,23 +218,11 @@ def health() -> JSONResponse:
             q_count = queue.count  # type: ignore
         except Exception:
             q_count = None
-    return JSONResponse(
-        {
-            "ok": True,
-            "service": "editdna",
-            "version": APP_VERSION,
-            "queue": {"enabled": HAVE_RQ and queue is not None, "name": getattr(queue, "name", None), "pending": q_count},
-            "redis_url_tail": (os.getenv("REDIS_URL") or "disabled")[-32:],
-        }
-    )
-
-# ---- RQ endpoints (unchanged) ----
-@app.post("/enqueue_nop")
-def enqueue_nop() -> JSONResponse:
-    if not (HAVE_RQ and queue is not None):
-        raise HTTPException(status_code=503, detail="RQ/Redis not available")
-    job = queue.enqueue("tasks.task_nop", result_ttl=300)  # type: ignore
-    return JSONResponse({"job_id": job.id})
+    return JSONResponse({
+        "ok": True,
+        "version": APP_VERSION,
+        "queue": {"enabled": HAVE_RQ and queue is not None, "name": getattr(queue, "name", None), "pending": q_count},
+    })
 
 @app.get("/jobs/{job_id}")
 def get_job(job_id: str) -> JSONResponse:
@@ -255,30 +234,8 @@ def get_job(job_id: str) -> JSONResponse:
 @app.post("/render")
 def render(req: RenderRequest) -> JSONResponse:
     if not (HAVE_RQ and queue is not None):
-        # Fallback: run synchronously like /process
-        files = req.files
-        if not files:
-            raise HTTPException(status_code=400, detail="No input files")
-        try:
-            proxies = [build_proxy(str(f), portrait=bool(req.portrait), max_seconds=req.max_duration) for f in files]
-            takes = pick_good_takes(proxies, mode=req.mode or "best", take_top_k=req.take_top_k)
-            out = render_concat(takes, output_prefix=req.output_prefix or "editdna/outputs")
-            base = _http_base()
-            return JSONResponse(
-                {
-                    "ok": True,
-                    "session_id": req.session_id or "session",
-                    "mode": req.mode,
-                    "inputs": files,
-                    "proxies": [p.as_posix() for p in proxies],
-                    "takes": [t.as_posix() for t in takes],
-                    "output_path": out.as_posix(),
-                    "output_url_hint": (f"{base}/{out.relative_to(HOME).as_posix()}" if base else None),
-                }
-            )
-        except Exception as e:
-            raise HTTPException(status_code=500, detail=str(e))
-    # Normal RQ path
+        raise HTTPException(status_code=503, detail="RQ/Redis not available")
+
     payload = req.dict()
     job = queue.enqueue(  # type: ignore
         "tasks.job_render",
@@ -287,23 +244,17 @@ def render(req: RenderRequest) -> JSONResponse:
         result_ttl=86400,
         ttl=7200,
     )
+
+    # ---- autoscale: start RunPod GPU if queue has jobs and no pod running ----
+    try:
+        pending = queue.count  # type: ignore
+        if pending and not _rp_list_running():
+            _rp_start_one()
+    except Exception:
+        pass
+
     return JSONResponse({"job_id": job.id, "session_id": req.session_id or "session"})
 
-@app.post("/render_chunked")
-def render_chunked(req: RenderRequest) -> JSONResponse:
-    if not (HAVE_RQ and queue is not None):
-        raise HTTPException(status_code=503, detail="RQ/Redis not available")
-    payload = req.dict()
-    job = queue.enqueue(  # type: ignore
-        "tasks.job_render_chunked",
-        payload,
-        job_timeout=60 * 60,
-        result_ttl=86400,
-        ttl=7200,
-    )
-    return JSONResponse({"job_id": job.id, "session_id": req.session_id or "session"})
-
-# ---- NEW: synchronous local processing ----
 @app.post("/process")
 def process(req: ProcessRequest) -> JSONResponse:
     try:
@@ -312,38 +263,18 @@ def process(req: ProcessRequest) -> JSONResponse:
         if not files:
             raise HTTPException(status_code=400, detail="Provide input_url or files[]")
 
-        # Build proxies
         proxies = [build_proxy(str(f), portrait=bool(req.portrait), max_seconds=req.max_duration) for f in files]
-
-        # Human-style selection (stubbed)
         takes = pick_good_takes(proxies, mode=req.mode or "best", take_top_k=1)
-
-        # Concat / output
         out_path = render_concat(takes, output_prefix=req.output_prefix or "editdna/outputs")
-
         base = _http_base()
-        return JSONResponse(
-            {
-                "ok": True,
-                "session_id": session_id,
-                "mode": req.mode or "best",
-                "inputs": [str(f) for f in files],
-                "proxies": [p.as_posix() for p in proxies],
-                "takes": [t.as_posix() for t in takes],
-                "output_path": out_path.as_posix(),
-                "output_url_hint": (f"{base}/{out_path.relative_to(HOME).as_posix()}" if base else None),
-            }
-        )
-    except HTTPException:
-        raise
-    except Exception as e:
-        # Return a friendly error payload (don’t crash server)
-        return JSONResponse(
-            {
-                "ok": False,
-                "error": str(e),
-                "trace": None,
-            },
-            status_code=500,
-        )
 
+        return JSONResponse({
+            "ok": True,
+            "session_id": session_id,
+            "mode": req.mode or "best",
+            "inputs": [str(f) for f in files],
+            "output_path": out_path.as_posix(),
+            "output_url_hint": (f"{base}/{out_path.relative_to(HOME).as_posix()}" if base else None),
+        })
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
