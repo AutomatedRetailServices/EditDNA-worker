@@ -3,19 +3,20 @@ on:
   push:
     branches: [ main ]
     paths:
-      - "**.py"
+      - "**/*.py"
       - "Dockerfile.worker"
       - "requirements.txt"
       - "start_worker.sh"
+      - ".github/workflows/worker-build.yml"
 
 jobs:
-  build:
+  docker:
     runs-on: ubuntu-latest
     permissions:
       contents: read
       packages: write
     env:
-      IMAGE: ghcr.io/${{ github.repository }}-worker
+      IMAGE: ghcr.io/${{ github.repository }}:latest
     steps:
       - uses: actions/checkout@v4
 
@@ -26,9 +27,8 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Build Docker Image
-        run: |
-          docker build -t $IMAGE:latest -f Dockerfile.worker .
+      - name: Build image (Dockerfile.worker)
+        run: docker build -t $IMAGE -f Dockerfile.worker .
 
-      - name: Push Image
-        run: docker push $IMAGE:latest
+      - name: Push image
+        run: docker push $IMAGE
