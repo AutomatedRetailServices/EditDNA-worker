@@ -1,0 +1,34 @@
+name: Build & Push RunPod Worker Image
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - "**.py"
+      - "Dockerfile.worker"
+      - "requirements.txt"
+      - "start_worker.sh"
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    env:
+      IMAGE: ghcr.io/${{ github.repository }}-worker
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build Docker Image
+        run: |
+          docker build -t $IMAGE:latest -f Dockerfile.worker .
+
+      - name: Push Image
+        run: docker push $IMAGE:latest
