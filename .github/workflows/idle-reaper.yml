@@ -1,0 +1,60 @@
+name: Stop idle RunPod pods
+
+on:
+  schedule:
+    - cron: "*/5 * * * *"   # runs every 5 minutes
+  workflow_dispatch:        # allow manual run from the Actions tab
+
+jobs:
+  reaper:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install deps
+        run: pip install --disable-pip-version-check -q redis requests
+
+      - name: Stop pods when queue is empty
+        env:
+          RUNPOD_API_KEY: ${{ secrets.RUNPOD_API_KEY }}
+          RUNPOD_TEMPLATE_ID: ${{ secrets.RUNPOD_TEMPLATE_ID }}
+          REDIS_URL: ${{ secrets.REDIS_URL }}
+        run: |
+          python - <<'PY'
+          import os, requests, redis, sys
+
+          RP_API = "https://api.runpod.ai/v2"
+          KEY    = os.environ["RUNPOD_API_KEY"]
+          TID    = os.environ["RUNPOD_TEMPLATE_ID"]
+          RURL   = os.environ["REDIS_URL"]
+          HEAD   = {"Authorization": f"Bearer {KEY}"}
+
+          try:
+              r = redis.from_url(RURL)
+              qlen = r.llen("default")
+          except Exception as e:
+              print("Redis error:", e)
+              sys.exit(1)
+
+          try:
+              pods = requests.get(f"{RP_API}/pods", headers=HEAD, timeout=20).json().get("data", [])
+              pods = [p for p in pods if p.get("templateId")==TID and p.get("desiredStatus")=="RUNNING"]
+          except Exception as e:
+              print("RunPod list error:", e)
+              sys.exit(1)
+
+          print({"queue_len": qlen, "running_pods": len(pods)})
+
+          if qlen == 0 and pods:
+              for p in pods:
+                  pid = p["id"]
+                  try:
+                      requests.post(f"{RP_API}/pods/{pid}/stop", headers=HEAD, timeout=20)
+                      print("Stopped pod:", pid)
+                  except Exception as e:
+                      print("Stop error:", pid, e)
+          PY
