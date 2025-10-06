@@ -1,17 +1,3 @@
-fastapi==0.115.0
-uvicorn[standard]==0.30.6
-redis==5.0.8
-rq==1.16.2
-pydantic==1.10.17
-boto3==1.34.162
-
-# ASR
-faster-whisper==1.0.3
-
-# Video/vision
-opencv-python-headless==4.10.0.84
-numpy>=1.24
-
-# Tools we rely on
-python-dotenv==1.0.1
-
+boto3>=1.28
+redis>=6.0
+rq>=2.6.0
