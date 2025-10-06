@@ -1,59 +1,18 @@
-# jobs.py — robust render pipeline with "Raw Intake & Gating"
-# - Speech-first take selection (via ffmpeg silencedetect)
-# - Duration capping & safe concat
-# - Funnel ordering (placeholder) and graceful fallbacks
-# - Keeps your API stable: job_render(payload) -> { ok, output_s3, output_url, ... }
-
+ # jobs.py — robust render pipeline with optional Whisper ASR (off by default)
 from __future__ import annotations
-
 import os, uuid, shutil, tempfile, subprocess, shlex, re
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Tuple
 
-# ------------ S3 helpers from your repo ------------
 from s3_utils import upload_file, presigned_url, S3_BUCKET, download_to_tmp
-# If/when you want captions:
-# from captions import write_srt, burn_captions
-# ---------------------------------------------------
 
 FFMPEG  = os.getenv("FFMPEG_BIN", "ffmpeg")
 FFPROBE = os.getenv("FFPROBE_BIN", "ffprobe")
 
-# ---------- knobs ----------
-ASR_ENABLED     = os.getenv("ASR_ENABLED", "0") in ("1","true","yes","on")
-ASR_MODEL_SIZE  = os.getenv("ASR_MODEL_SIZE", "tiny")
+ASR_ENABLED     = os.getenv("ASR_ENABLED", "0").lower() in ("1","true","yes","on")
+ASR_MODEL_SIZE  = os.getenv("ASR_MODEL_SIZE", "base")
 ASR_LANGUAGE    = os.getenv("ASR_LANG", "en")
 
-BIN_SEC         = float(os.getenv("BIN_SEC", "0.5"))
-
-# Weights / scoring placeholders (future: faces/fluency/semantic)
-W_AUDIO         = float(os.getenv("W_AUDIO",   "0.30"))
-W_SCENE         = float(os.getenv("W_SCENE",   "0.15"))
-W_SPEECH        = float(os.getenv("W_SPEECH",  "0.30"))
-W_FACE          = float(os.getenv("W_FACE",    "0.20"))
-W_FLUENCY       = float(os.getenv("W_FLUENCY", "0.35"))
-
-SCENE_THRESH    = float(os.getenv("SCENE_THRESH", "0.04"))
-FACE_MIN_SIZE   = float(os.getenv("FACE_MIN_SIZE", "0.08"))
-FACE_CENTER_TOL = float(os.getenv("FACE_CENTER_TOL", "0.35"))
-FLUENCY_MIN_WPM = float(os.getenv("FLUENCY_MIN_WPM", "95"))
-FLUENCY_FILLER_PENALTY = float(os.getenv("FLUENCY_FILLER_PENALTY", "0.65"))
-
-VETO_MIN_SCORE  = float(os.getenv("VETO_MIN_SCORE", "0.40"))
-
-GRACE_SEC       = float(os.getenv("GRACE_SEC", "0.6"))
-MAX_BAD_SEC     = float(os.getenv("MAX_BAD_SEC", "1.2"))
-
-V2_CAPTIONER    = os.getenv("V2_CAPTIONER", "0") in ("1","true","yes","on")
-CAPTIONS_MODE   = os.getenv("CAPTIONS", "off").strip().lower()  # off|soft|hard
-
-# Funnel keyword buckets (reserved for future ASR-based ordering)
-HOOK_KWS    = ["stop", "wait", "before you", "attention", "secret", "did you know"]
-FEATURE_KWS = ["feature", "includes", "comes with", "works by", "how it works"]
-PROOF_KWS   = ["proof", "testimonial", "reviews", "results", "customers say"]
-CTA_KWS     = ["link in bio", "shop now", "buy now", "sign up", "get started"]
-
-# ---------- utils ----------
 def _run(cmd: str) -> str:
     p = subprocess.run(shlex.split(cmd), stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
     if p.returncode != 0:
@@ -73,10 +32,6 @@ def _ensure_local(path_or_url: str, tmpdir: str) -> str:
     return path_or_url
 
 def _normalize_input(local_in: str, tmpdir: str) -> str:
-    """
-    Normalize codecs/containers to avoid concat/copy issues.
-    H.264/AAC MP4 with faststart.
-    """
     base = os.path.join(tmpdir, f"norm-{uuid.uuid4().hex}.mp4")
     cmd = (
         f'{FFMPEG} -y -hide_banner -loglevel error '
@@ -122,11 +77,6 @@ def _render_clips(tmpdir: str, clips: List["Clip"], portrait: bool=True) -> str:
     _concat_mp4(parts, out)
     return out
 
-# ---------- ASR stub (placeholder for future Whisper wiring) ----------
-def _asr_segments(path: str) -> List[Tuple[float, float, str]]:
-    # TODO: integrate Whisper to return [(start, end, text), ...]
-    return []
-
 @dataclass
 class Clip:
     src: str
@@ -138,11 +88,8 @@ class Clip:
     def dur(self) -> float:
         return max(0.0, self.end - self.start)
 
-# ---------- speech-first gating ----------
+# ---------- Silence→Speech gating (fast, default) ----------
 def _silence_regions(path: str, noise_db: float = -35.0, min_silence: float = 0.35) -> List[Tuple[float, float]]:
-    """
-    Return [(silence_start, silence_end), ...] using ffmpeg silencedetect.
-    """
     noise = f"{noise_db:+.0f}dB"
     cmd = (
         f'{FFMPEG} -hide_banner -nostats -i "{path}" '
@@ -152,12 +99,9 @@ def _silence_regions(path: str, noise_db: float = -35.0, min_silence: float = 0.
     sil_starts, sil_ends = [], []
     for line in out.splitlines():
         if "silence_start" in line:
-            m = re.search(r"silence_start:\s*([0-9.]+)", line)
-            if m: sil_starts.append(float(m.group(1)))
-        elif "silence_end" in line:
-            m = re.search(r"silence_end:\s*([0-9.]+)", line)
-            if m: sil_ends.append(float(m.group(1)))
-    # pair best-effort
+            m = re.search(r"silence_start:\s*([0-9.]+)", line);   sil_starts += [float(m.group(1))] if m else []
+        if "silence_end" in line:
+            m = re.search(r"silence_end:\s*([0-9.]+)", line);     sil_ends   += [float(m.group(1))] if m else []
     pairs, si, ei = [], 0, 0
     while si < len(sil_starts) or ei < len(sil_ends):
         s = sil_starts[si] if si < len(sil_starts) else None
@@ -179,14 +123,13 @@ def _speech_regions(path: str) -> List[Tuple[float, float]]:
     sil = _silence_regions(path)
     if not sil:
         return [(0.0, dur)]
-    sil = [(max(0.0, s), min(dur, e)) for s, e in sil if e > s]
-    sil.sort()
+    sil = [(max(0.0, s), min(dur, e)) for s, e in sil if e > s]; sil.sort()
     speech, t = [], 0.0
     for (s, e) in sil:
         if s > t: speech.append((t, s))
         t = max(t, e)
     if t < dur: speech.append((t, dur))
-    return [(max(0.0, a), max(0.0, b)) for a, b in speech if b - a >= 0.15]
+    return [(max(0.0, a), b) for a, b in speech if b - a >= 0.15]
 
 def _cap_total_duration(clips: List["Clip"], limit: Optional[float]) -> List["Clip"]:
     if not limit or float(limit) <= 0: return clips
@@ -201,24 +144,15 @@ def _cap_total_duration(clips: List["Clip"], limit: Optional[float]) -> List["Cl
             break
     return out
 
-def _pick_best(files: List[str], tmpdir: str, max_duration: Optional[float],
-               take_top_k: Optional[int], min_clip: float, max_clip: float) -> Tuple[List[Clip], Dict]:
-    """
-    Smart speech-first heuristic:
-      - Normalize first input
-      - Detect speech regions (non-silent)
-      - Fill with clips sized within [min_clip, max_clip]
-      - Respect take_top_k (default 6) and cap to max_duration
-    """
+def _pick_best_speech(files: List[str], tmpdir: str, max_duration: Optional[float],
+                      take_top_k: Optional[int], min_clip: float, max_clip: float) -> Tuple[List[Clip], Dict]:
     if not files:
         return [], {}
-
     first_local = _ensure_local(files[0], tmpdir)
     norm = _normalize_input(first_local, tmpdir)
     dur = _duration(norm)
     if dur <= 0:
         return [], {}
-
     speech = _speech_regions(norm)
     target_total = float(max_duration) if (max_duration and float(max_duration) > 0) else 60.0
     k = int(take_top_k) if (take_top_k and int(take_top_k) > 0) else 6
@@ -230,15 +164,24 @@ def _pick_best(files: List[str], tmpdir: str, max_duration: Optional[float],
         while t + 0.25 < b and len(clips) < k * 2:
             end = min(b, t + per)
             clips.append(Clip(src=norm, start=t, end=end, score=1.0, label="speech"))
-            t = end + 0.25  # small stride to avoid harsh cuts
-
+            t = end + 0.25
     if take_top_k:
         clips = clips[:k]
     clips = _cap_total_duration(clips, max_duration)
     cache = {"speech_regions": speech, "norm_duration": dur}
     return clips, cache
 
-# ---------- funnel ordering (placeholder: keeps order, enforces cap) ----------
+# ---------- (Optional) Whisper ASR when enabled ----------
+def _asr_segments(path: str) -> List[Tuple[float, float, str]]:
+    try:
+        import whisper
+    except Exception:
+        return []
+    model = whisper.load_model(ASR_MODEL_SIZE)
+    result = model.transcribe(path, language=ASR_LANGUAGE)
+    return [(float(seg.get("start",0.0)), float(seg.get("end",0.0)), seg.get("text","").strip())
+            for seg in result.get("segments", []) if float(seg.get("end",0.0))>float(seg.get("start",0.0))]
+
 def _order_funnel(clips: List[Clip], cache: Dict, max_duration: Optional[float]) -> List[Clip]:
     total = 0.0
     out: List[Clip] = []
@@ -249,15 +192,7 @@ def _order_funnel(clips: List[Clip], cache: Dict, max_duration: Optional[float])
         out.append(c); total += c.dur
     return out
 
-# ---------- main ----------
 def job_render(payload: Dict[str, Any]) -> Dict[str, Any]:
-    """
-    Payload keys:
-      - session_id, files[], portrait, mode ("best"|"best_funnel"|"funnel"|"concat"),
-        min_clip_seconds, max_clip_seconds, max_duration, take_top_k,
-        output_prefix
-    Returns: { ok, session_id, mode, output_s3, output_url, inputs }
-    """
     sess = str(payload.get("session_id") or f"sess-{uuid.uuid4().hex[:8]}")
     files = list(payload.get("files") or [])
     out_prefix = (payload.get("output_prefix") or "editdna/outputs").strip("/")
@@ -266,15 +201,14 @@ def job_render(payload: Dict[str, Any]) -> Dict[str, Any]:
 
     min_clip = float(payload.get("min_clip_seconds") or 1.5)
     max_clip = float(payload.get("max_clip_seconds") or 4.0)
-    max_duration = payload.get("max_duration")  # may be None
-    take_top_k = payload.get("take_top_k")      # may be None
+    max_duration = payload.get("max_duration")
+    take_top_k = payload.get("take_top_k")
 
     tmpdir = tempfile.mkdtemp(prefix=f"editdna-{sess}-")
     try:
         if not files:
             return {"ok": False, "error": "No input files provided", "session_id": sess}
 
-        # Normalize every input so concat never explodes on codec/container
         local_norm: List[str] = []
         for f in files:
             loc = _ensure_local(f, tmpdir)
@@ -282,7 +216,7 @@ def job_render(payload: Dict[str, Any]) -> Dict[str, Any]:
             local_norm.append(norm)
 
         if mode in ("best", "best_funnel", "funnel"):
-            clips, seg_cache = _pick_best(files, tmpdir, max_duration, take_top_k, min_clip, max_clip)
+            clips, seg_cache = _pick_best_speech(files, tmpdir, max_duration, take_top_k, min_clip, max_clip)
             if not clips:
                 out_local = _render_concat(tmpdir, local_norm, portrait=portrait)
                 mode_used = "concat_fallback"
@@ -295,7 +229,6 @@ def job_render(payload: Dict[str, Any]) -> Dict[str, Any]:
             out_local = _render_concat(tmpdir, local_norm, portrait=portrait)
             mode_used = "concat"
 
-        # Upload result
         s3_uri = upload_file(out_local, f"{out_prefix}/{sess}", content_type="video/mp4")
         _, key = s3_uri.replace("s3://", "", 1).split("/", 1)
         url = presigned_url(S3_BUCKET, key, expires=3600)
