@@ -16,7 +16,6 @@ echo "S3 Bucket: ${S3_BUCKET}"
 command -v ffmpeg >/dev/null && ffmpeg -version | head -n1 || echo "ffmpeg not found (ensure FFMPEG_BIN=ffmpeg)"
 
 # -------- code root detection --------
-# Prefer /app if the repo is cloned there (RunPod best practice); fallback to script dir
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PYROOT="/app"
 if [[ ! -f "${PYROOT}/jobs.py" && ! -f "${PYROOT}/tasks.py" ]]; then
@@ -42,11 +41,17 @@ if [[ -f "${PYROOT}/requirements.txt" ]]; then
   python3 -m pip install -r "${PYROOT}/requirements.txt" >/dev/null 2>&1 || true
 fi
 
+# Optional heavy ASR deps if enabled (only when you later set ASR_ENABLED=1)
+if [[ "${ASR_ENABLED:-0}" == "1" && -f "${PYROOT}/requirements-asr.txt" ]]; then
+  echo "ASR_ENABLED=1 → installing ASR deps (Torch+Whisper)…"
+  python3 -m pip install -r "${PYROOT}/requirements-asr.txt" >/dev/null 2>&1 || true
+fi
+
 # -------- launch worker (direct, no docker) --------
 export PYTHONPATH="${PYROOT}"
 echo "RQ worker starting..."
 exec python3 - <<'PY'
-import os, redis, sys
+import os, redis
 from rq import Worker, Queue
 ru = os.environ['REDIS_URL']
 conn = redis.from_url(ru)
