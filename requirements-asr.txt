@@ -1,0 +1,4 @@
+--extra-index-url https://download.pytorch.org/whl/cu121
+torch>=2.3
+torchaudio>=2.3
+openai-whisper>=20231117
