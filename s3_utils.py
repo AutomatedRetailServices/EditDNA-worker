@@ -54,6 +54,7 @@ def download_to_tmp(s3_or_https: str, tmpdir: str) -> str:
                     f.write(chunk)
         return path
 
+
     
     # Otherwise, assume it's already local path
     return s3_or_https
