@@ -15,15 +15,15 @@ echo "S3 Bucket: ${S3_BUCKET}"
 command -v ffmpeg >/dev/null && ffmpeg -version | head -n1 || echo "ffmpeg not found (set FFMPEG_BIN=ffmpeg)"
 
 # -------- code root --------
-PYROOT="/app"             # RunPod mounts repo here in our template
+PYROOT="/app"             # our RunPod template clones here
 [ -f "${PYROOT}/jobs.py" ] || PYROOT="$(cd "$(dirname "$0")" && pwd)"
 echo "Using code root: ${PYROOT}"
 
-# -------- minimal deps --------
-if ! python3 -c "import rq, redis" >/dev/null 2>&1; then
-  echo "Installing base deps (rq, redis)..."
+# -------- base deps --------
+if ! python3 -c "import rq, redis, boto3" >/dev/null 2>&1; then
+  echo "Installing base deps (rq, redis, boto3)..."
   python3 -m pip install --upgrade pip >/dev/null 2>&1 || true
-  python3 -m pip install rq>=2.6.0 redis>=6.0 >/dev/null 2>&1
+  python3 -m pip install rq>=2.6.0 redis>=6.0 boto3>=1.28 >/dev/null 2>&1
 fi
 
 # repo deps
@@ -32,13 +32,13 @@ if [ -f "${PYROOT}/requirements.txt" ]; then
   python3 -m pip install -r "${PYROOT}/requirements.txt" >/dev/null 2>&1 || true
 fi
 
-# optional: semantic deps (only if you set SEMANTICS_ENABLED=1)
+# optional: semantic deps
 if [[ "${SEMANTICS_ENABLED:-0}" == "1" && -f "${PYROOT}/requirements-semantic.txt" ]]; then
   echo "SEMANTICS_ENABLED=1 → installing semantic deps…"
   python3 -m pip install -r "${PYROOT}/requirements-semantic.txt" >/dev/null 2>&1 || true
 fi
 
-# optional: ASR deps (only if you set ASR_ENABLED=1)
+# optional: ASR deps (heavy)
 if [[ "${ASR_ENABLED:-0}" == "1" && -f "${PYROOT}/requirements-asr.txt" ]]; then
   echo "ASR_ENABLED=1 → installing ASR deps (Torch+Whisper)…"
   python3 -m pip install -r "${PYROOT}/requirements-asr.txt" >/dev/null 2>&1 || true
