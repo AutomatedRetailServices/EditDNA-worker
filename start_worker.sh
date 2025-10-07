@@ -1,7 +1,6 @@
 #!/usr/bin/env bash
 # start_worker.sh — RunPod-friendly worker launcher (no Docker-in-Docker)
 set -euo pipefail
-
 echo "== EditDNA worker boot =="
 
 # -------- required env --------
@@ -13,41 +12,39 @@ echo "== EditDNA worker boot =="
 
 echo "Connecting Redis: ${REDIS_URL}"
 echo "S3 Bucket: ${S3_BUCKET}"
-command -v ffmpeg >/dev/null && ffmpeg -version | head -n1 || echo "ffmpeg not found (ensure FFMPEG_BIN=ffmpeg)"
+command -v ffmpeg >/dev/null && ffmpeg -version | head -n1 || echo "ffmpeg not found (set FFMPEG_BIN=ffmpeg)"
 
-# -------- code root detection --------
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-PYROOT="/app"
-if [[ ! -f "${PYROOT}/jobs.py" && ! -f "${PYROOT}/tasks.py" ]]; then
-  PYROOT="${SCRIPT_DIR}"
-fi
+# -------- code root --------
+PYROOT="/app"             # RunPod mounts repo here in our template
+[ -f "${PYROOT}/jobs.py" ] || PYROOT="$(cd "$(dirname "$0")" && pwd)"
 echo "Using code root: ${PYROOT}"
 
-# -------- keep code fresh if repo is a git checkout --------
-if [[ -d "${PYROOT}/.git" ]]; then
-  echo "Updating from GitHub..."
-  git -C "${PYROOT}" pull --rebase || true
-fi
-
-# -------- ensure minimal deps --------
+# -------- minimal deps --------
 if ! python3 -c "import rq, redis" >/dev/null 2>&1; then
-  echo "Installing Python deps (rq, redis)..."
+  echo "Installing base deps (rq, redis)..."
   python3 -m pip install --upgrade pip >/dev/null 2>&1 || true
   python3 -m pip install rq>=2.6.0 redis>=6.0 >/dev/null 2>&1
 fi
-# If your repo has a requirements.txt, try to install it
-if [[ -f "${PYROOT}/requirements.txt" ]]; then
+
+# repo deps
+if [ -f "${PYROOT}/requirements.txt" ]; then
   echo "Installing requirements.txt..."
   python3 -m pip install -r "${PYROOT}/requirements.txt" >/dev/null 2>&1 || true
 fi
 
-# Optional heavy ASR deps if enabled (only when you later set ASR_ENABLED=1)
+# optional: semantic deps (only if you set SEMANTICS_ENABLED=1)
+if [[ "${SEMANTICS_ENABLED:-0}" == "1" && -f "${PYROOT}/requirements-semantic.txt" ]]; then
+  echo "SEMANTICS_ENABLED=1 → installing semantic deps…"
+  python3 -m pip install -r "${PYROOT}/requirements-semantic.txt" >/dev/null 2>&1 || true
+fi
+
+# optional: ASR deps (only if you set ASR_ENABLED=1)
 if [[ "${ASR_ENABLED:-0}" == "1" && -f "${PYROOT}/requirements-asr.txt" ]]; then
   echo "ASR_ENABLED=1 → installing ASR deps (Torch+Whisper)…"
   python3 -m pip install -r "${PYROOT}/requirements-asr.txt" >/dev/null 2>&1 || true
 fi
 
-# -------- launch worker (direct, no docker) --------
+# -------- launch worker --------
 export PYTHONPATH="${PYROOT}"
 echo "RQ worker starting..."
 exec python3 - <<'PY'
