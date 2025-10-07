@@ -1,86 +1,58 @@
-# s3_utils.py — S3 helpers for EditDNA.ai
-import os
-import uuid
-import mimetypes
-from typing import Tuple
-from urllib.parse import urlparse
+# s3_utils.py — S3 helpers used by jobs.py
+import os, tempfile, boto3, urllib.parse, requests
 
-import boto3
-from botocore.exceptions import ClientError
+S3_BUCKET = os.environ.get("S3_BUCKET", "").strip()
+AWS_REGION = os.environ.get("AWS_REGION", "us-east-1")
 
-AWS_REGION = os.getenv("AWS_REGION", "us-east-1")
-S3_BUCKET = os.getenv("S3_BUCKET")
-if not S3_BUCKET:
-    raise RuntimeError("Missing S3_BUCKET env var")
+_session = boto3.session.Session(region_name=AWS_REGION)
+_s3 = _session.client("s3")
 
-s3 = boto3.client("s3", region_name=AWS_REGION)
-
-
-def parse_s3_url(s3_url: str) -> Tuple[str | None, str]:
-    """
-    Returns (bucket, key). If bucket can't be derived from the URL, returns (None, key).
-    Supports:
-      - s3://bucket/key
-      - https://bucket.s3.amazonaws.com/key
-      - https://bucket.s3.<region>.amazonaws.com/key
-      - https://s3.<region>.amazonaws.com/bucket/key
-    """
-    if s3_url.startswith("s3://"):
-        p = urlparse(s3_url)
-        return p.netloc, p.path.lstrip("/")
-
-    if s3_url.startswith(("http://", "https://")):
-        p = urlparse(s3_url)
-        host = p.netloc
-        path = p.path.lstrip("/")
-        if ".s3." in host and ".amazonaws.com" in host:
-            bucket = host.split(".s3.", 1)[0]
-            return bucket, path
-        if host.startswith("s3.") and ".amazonaws.com" in host:
-            parts = path.split("/", 1)
-            if len(parts) == 2:
-                return parts[0], parts[1]
-        return None, path
-
-    return None, s3_url.lstrip("/")
-
-
-def head_exists(s3_url: str) -> bool:
-    bucket, key = parse_s3_url(s3_url)
-    b = bucket or S3_BUCKET
-    try:
-        s3.head_object(Bucket=b, Key=key)
-        return True
-    except ClientError:
-        return False
-
-
-def download_to_tmp(s3_url: str, dest_dir: str) -> str:
-    os.makedirs(dest_dir, exist_ok=True)
-    bucket, key = parse_s3_url(s3_url)
-    b = bucket or S3_BUCKET
-    filename = os.path.basename(key) or f"file-{uuid.uuid4().hex}"
-    local_path = os.path.join(dest_dir, filename)
-    s3.download_file(b, key, local_path)
-    return local_path
-
-
-def upload_file(local_path: str, key_prefix: str, content_type: str | None = None) -> str:
-    basename = os.path.basename(local_path)
-    key_prefix = key_prefix.strip("/")
-    ctype = content_type or mimetypes.guess_type(local_path)[0] or "application/octet-stream"
-    key = f"{key_prefix}/{basename}"
-    s3.upload_file(local_path, S3_BUCKET, key, ExtraArgs={"ACL": "private", "ContentType": ctype})
+def upload_file(local_path: str, prefix: str, content_type: str = "application/octet-stream") -> str:
+    if not S3_BUCKET:
+        raise RuntimeError("S3_BUCKET not configured")
+    key = f"{prefix.strip('/')}/" + os.path.basename(local_path)
+    extra = {"ContentType": content_type}
+    _s3.upload_file(local_path, S3_BUCKET, key, ExtraArgs=extra)
     return f"s3://{S3_BUCKET}/{key}"
 
-
 def presigned_url(bucket: str, key: str, expires: int = 3600) -> str:
-    return s3.generate_presigned_url(
+    return _s3.generate_presigned_url(
         ClientMethod="get_object",
         Params={"Bucket": bucket, "Key": key},
         ExpiresIn=expires,
     )
 
+def _is_s3_https(url: str) -> bool:
+    # e.g. https://bucket.s3.us-east-1.amazonaws.com/path/file.mp4
+    return url.startswith("http") and ".s3." in url
 
-def new_session_id() -> str:
-    return f"sess-{uuid.uuid4()}"
+def download_to_tmp(s3_or_https: str, tmpdir: str) -> str:
+    """
+    Accepts:
+      - s3://bucket/key
+      - https S3 URLs (virtual host or path style)
+    Downloads to tmpdir and returns local path.
+    """
+    if s3_or_https.startswith("s3://"):
+        _, rest = s3_or_https.split("s3://", 1)
+        bucket, key = rest.split("/", 1)
+        fd, path = tempfile.mkstemp(dir=tmpdir, suffix=os.path.splitext(key)[1] or ".bin")
+        os.close(fd)
+        _s3.download_file(bucket, key, path)
+        return path
+
+    if _is_s3_https(s3_or_https):
+        # direct HTTP download
+        r = requests.get(s3_or_https, stream=True, timeout=60)
+        r.raise_for_status()
+        ext = os.path.splitext(urllib.parse.urlparse(s3_or_https).path)[1] or ".bin"
+        fd, path = tempfile.mkstemp(dir=tmpdir, suffix=ext)
+        os.close(fd)
+        with open(path, "wb") as f:
+            for chunk in r.iter_content(chunk_size=1024 * 1024):
+                if chunk:
+                    f.write(chunk)
+        return path
+
+    # Otherwise, assume it's already local path
+    return s3_or_https
