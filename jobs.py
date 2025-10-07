@@ -1,4 +1,11 @@
- # jobs.py — robust render pipeline with optional Whisper ASR (off by default)
+try:
+    from worker.semantic_visual_pass import continuity_chains
+except Exception:
+    def continuity_chains(takes):
+        # fallback: don’t chain; return each take alone
+        return [[t] for t in takes]
+
+# jobs.py — robust render pipeline with optional Whisper ASR (off by default)
 from __future__ import annotations
 import os, uuid, shutil, tempfile, subprocess, shlex, re
 from dataclasses import dataclass
