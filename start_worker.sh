@@ -56,3 +56,4 @@ q = Queue('default', connection=conn)
 print("Listening on 'default' with RQ…", flush=True)
 Worker([q], connection=conn).work(burst=False)
 PY
+
