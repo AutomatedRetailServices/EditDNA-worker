@@ -1,4 +1,6 @@
 boto3>=1.28
 redis>=6.0
 rq>=2.6.0
-
+requests>=2.31
+brotlicffi>=1.0.9
+zstandard>=0.22
