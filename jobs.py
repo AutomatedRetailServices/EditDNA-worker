@@ -1,12 +1,15 @@
+from __future__ import annotations
+
+# Try to import semantic continuity (optional)
 try:
     from worker.semantic_visual_pass import continuity_chains
+    _HAS_SEM = True
 except Exception:
+    _HAS_SEM = False
     def continuity_chains(takes):
-        # fallback: don’t chain; return each take alone
-        return [[t] for t in takes]
+        return [[t] for t in takes]  # no-op
 
 # jobs.py — robust render pipeline with optional Whisper ASR (off by default)
-from __future__ import annotations
 import os, uuid, shutil, tempfile, subprocess, shlex, re
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Tuple
@@ -19,6 +22,7 @@ FFPROBE = os.getenv("FFPROBE_BIN", "ffprobe")
 ASR_ENABLED     = os.getenv("ASR_ENABLED", "0").lower() in ("1","true","yes","on")
 ASR_MODEL_SIZE  = os.getenv("ASR_MODEL_SIZE", "base")
 ASR_LANGUAGE    = os.getenv("ASR_LANG", "en")
+SEMANTICS_ENABLED = os.getenv("SEMANTICS_ENABLED", "0").lower() in ("1","true","yes","on")
 
 def _run(cmd: str) -> str:
     p = subprocess.run(shlex.split(cmd), stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
@@ -189,7 +193,22 @@ def _asr_segments(path: str) -> List[Tuple[float, float, str]]:
     return [(float(seg.get("start",0.0)), float(seg.get("end",0.0)), seg.get("text","").strip())
             for seg in result.get("segments", []) if float(seg.get("end",0.0))>float(seg.get("start",0.0))]
 
+def _merge_by_semantics(clips: List[Clip]) -> List[Clip]:
+    if not SEMANTICS_ENABLED or not _HAS_SEM or not clips:
+        return clips
+    # assumes all clips are from same src (true in our current picker)
+    chains = continuity_chains(clips)
+    merged: List[Clip] = []
+    for ch in chains:
+        if not ch: continue
+        start = ch[0].start
+        end = ch[-1].end
+        merged.append(Clip(src=ch[0].src, start=start, end=end, score=sum(c.score for c in ch)/len(ch), label="chain"))
+    return merged
+
 def _order_funnel(clips: List[Clip], cache: Dict, max_duration: Optional[float]) -> List[Clip]:
+    # semantic merge before capping duration
+    clips = _merge_by_semantics(clips)
     total = 0.0
     out: List[Clip] = []
     limit = float(max_duration) if (max_duration and float(max_duration) > 0) else 0.0
@@ -256,4 +275,3 @@ def job_render(payload: Dict[str, Any]) -> Dict[str, Any]:
 
 def job_render_chunked(payload: Dict[str, Any]) -> Dict[str, Any]:
     return job_render(payload)
- 
