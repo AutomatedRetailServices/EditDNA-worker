@@ -146,3 +146,4 @@ def chain_continuity(takes: List[Take]) -> List[List[Take]]:
     if cur: chains.append(cur)
     print(f"✅ [semantic_visual_pass] Built {len(chains)} coherent chain(s).", flush=True)
     return chains
+    
