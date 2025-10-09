@@ -1,3 +1,7 @@
+# =========================================================
+# EditDNA.ai Semantic Layer Dependencies (v1.6)
+# Used by worker/semantic_visual_pass.py
+# =========================================================
 sentence-transformers>=2.7.0
 numpy>=1.26
 scikit-learn>=1.3
