@@ -28,15 +28,18 @@ from typing import Any, Dict, List, Optional, Tuple
 ASR_ENABLED     = os.getenv("ASR_ENABLED", "0").lower() in ("1","true","yes","on")
 ASR_MODEL_SIZE  = os.getenv("ASR_MODEL_SIZE", "base")
 ASR_LANGUAGE    = os.getenv("ASR_LANG", "en")
+ASR_DEVICE      = os.getenv("ASR_DEVICE", "") or None  # e.g., "cuda" or "cpu"
 
 try:
     import whisper  # only used if ASR_ENABLED=1
 except Exception:
     whisper = None  # type: ignore
 
-# ---------- ffmpeg paths ----------
+# ---------- ffmpeg paths / codecs ----------
 FFMPEG  = os.getenv("FFMPEG_BIN", "ffmpeg")
 FFPROBE = os.getenv("FFPROBE_BIN", "ffprobe")
+VCODEC  = os.getenv("VIDEO_CODEC", "libx264")
+ACODEC  = os.getenv("AUDIO_CODEC", "aac")
 
 # ---------- S3 helpers ----------
 from s3_utils import upload_file, presigned_url, S3_BUCKET, download_to_tmp
@@ -47,8 +50,15 @@ from s3_utils import upload_file, presigned_url, S3_BUCKET, download_to_tmp
 def _run(cmd: str) -> str:
     p = subprocess.run(shlex.split(cmd), stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
     if p.returncode != 0:
-        raise RuntimeError(f"Command failed ({p.returncode}):\n{cmd}\n---\n{p.stdout}")
+        raise RuntimeError(f"[ffmpeg] exit={p.returncode}\nCMD: {cmd}\n--- OUTPUT ---\n{p.stdout}")
     return p.stdout
+
+def _bin_check():
+    for b in (FFMPEG, FFPROBE):
+        try:
+            subprocess.run([b, "-version"], stdout=subprocess.PIPE, stderr=subprocess.STDOUT, check=True)
+        except Exception as e:
+            raise RuntimeError(f"Required binary '{b}' not available or not executable: {e}")
 
 def _duration(path: str) -> float:
     try:
@@ -58,8 +68,8 @@ def _duration(path: str) -> float:
         return 0.0
 
 def _ensure_local(path_or_url: str, tmpdir: str) -> str:
-    # S3 or S3-HTTP → download to tmp; otherwise assume local file path
-    if path_or_url.startswith("s3://") or (path_or_url.startswith(("http://", "https://")) and ".s3." in path_or_url):
+    # S3 → download to tmp; https/http → stream to tmp; otherwise assume local file path
+    if path_or_url.startswith("s3://") or path_or_url.startswith(("http://", "https://")):
         return download_to_tmp(path_or_url, tmpdir)
     return path_or_url
 
@@ -72,8 +82,8 @@ def _normalize_input(local_in: str, tmpdir: str) -> str:
         f'{FFMPEG} -y -hide_banner -loglevel error '
         f'-i "{local_in}" '
         f'-map 0:v:0 -map 0:a:0? '
-        f'-c:v libx264 -preset veryfast -crf 20 '
-        f'-c:a aac -ar 48000 -ac 2 '
+        f'-c:v {VCODEC} -preset veryfast -crf 20 '
+        f'-c:a {ACODEC} -ar 48000 -ac 2 '
         f'-movflags +faststart "{base}"'
     )
     _run(cmd)
@@ -83,8 +93,8 @@ def _cut_snippet(src: str, start: float, dur: float, out_path: str):
     cmd = (
         f'{FFMPEG} -y -hide_banner -loglevel error '
         f'-ss {start:.3f} -i "{src}" -t {max(0.1, dur):.3f} '
-        f'-c:v libx264 -preset veryfast -crf 20 '
-        f'-c:a aac -ar 48000 -ac 2 '
+        f'-c:v {VCODEC} -preset veryfast -crf 20 '
+        f'-c:a {ACODEC} -ar 48000 -ac 2 '
         f'-movflags +faststart "{out_path}"'
     )
     _run(cmd)
@@ -202,7 +212,7 @@ def _pick_best_speech(files: List[str], tmpdir: str, max_duration: Optional[floa
     norm = _normalize_input(first_local, tmpdir)
     dur = _duration(norm)
     if dur <= 0:
-        return [], {}
+        return [], {"error": "zero-duration after normalize"}
     speech = _speech_regions(norm)
     target_total = float(max_duration) if (max_duration and float(max_duration) > 0) else 60.0
     k = int(take_top_k) if (take_top_k and int(take_top_k) > 0) else 6
@@ -213,6 +223,8 @@ def _pick_best_speech(files: List[str], tmpdir: str, max_duration: Optional[floa
         t = a
         while t + 0.25 < b and len(clips) < k * 2:
             end = min(b, t + per)
+            if end - t < 0.1:
+                break
             clips.append(Clip(src=norm, start=t, end=end, score=1.0, label="speech"))
             t = end + 0.25
     if take_top_k:
@@ -230,7 +242,7 @@ def _asr_segments(path: str) -> List[Tuple[float, float, str]]:
     """
     if not ASR_ENABLED or whisper is None:
         return []
-    model = whisper.load_model(ASR_MODEL_SIZE)
+    model = whisper.load_model(ASR_MODEL_SIZE, device=ASR_DEVICE) if ASR_DEVICE else whisper.load_model(ASR_MODEL_SIZE)
     result = model.transcribe(path, language=ASR_LANGUAGE)
     out = []
     for seg in result.get("segments", []):
@@ -265,6 +277,8 @@ def job_render(payload: Dict[str, Any]) -> Dict[str, Any]:
       - "best_funnel" → alias for funnel
     Optional semantic chaining applied on top when available (groups contiguous takes).
     """
+    _bin_check()
+
     sess = str(payload.get("session_id") or f"sess-{uuid.uuid4().hex[:8]}")
     files = list(payload.get("files") or [])
     out_prefix = (payload.get("output_prefix") or "editdna/outputs").strip("/")
@@ -274,6 +288,7 @@ def job_render(payload: Dict[str, Any]) -> Dict[str, Any]:
     max_clip = float(payload.get("max_clip_seconds") or 4.0)
     max_duration = payload.get("max_duration")
     take_top_k = payload.get("take_top_k")
+    expires = int(payload.get("presign_ttl_sec", 3600))
 
     print(f"[jobs.py] Start job session={sess} mode={mode} files={len(files)}", flush=True)
 
@@ -342,7 +357,7 @@ def job_render(payload: Dict[str, Any]) -> Dict[str, Any]:
         # Upload and presign
         s3_uri = upload_file(out_local, f"{out_prefix}/{sess}", content_type="video/mp4")
         _, key = s3_uri.replace("s3://", "", 1).split("/", 1)
-        url = presigned_url(S3_BUCKET, key, expires=3600)
+        url = presigned_url(S3_BUCKET, key, expires=expires)
 
         result = {
             "ok": True,
