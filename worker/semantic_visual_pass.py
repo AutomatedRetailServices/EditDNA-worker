@@ -1,32 +1,46 @@
 # worker/semantic_visual_pass.py
 from __future__ import annotations
-import os, math, re, sys, time
-from dataclasses import dataclass
-from typing import List, Optional
+import os, re
+from dataclasses import dataclass, field
+from typing import List, Dict, Optional
 
 print("🧠 [semantic_visual_pass] Semantic pipeline active.", flush=True)
 
+# ---------------- Env knobs (safe defaults) ----------------
 EMBEDDER = os.getenv("EMBEDDER", "local").lower()  # local|openai
-SEM_DUP_THRESHOLD = float(os.getenv("SEM_DUP_THRESHOLD", "0.88"))
-SEM_FILLER_LIST = [w.strip() for w in os.getenv("SEM_FILLER_LIST", "um,uh,like,so,okay").split(",") if w.strip()]
+
+# durations (used by composer elsewhere; here for context)
+MAX_TAKE_SEC = float(os.getenv("MAX_TAKE_SEC", "20"))
+MIN_TAKE_SEC = float(os.getenv("MIN_TAKE_SEC", "1.5"))
+
+# fusion + thresholds
+W_SEM  = float(os.getenv("W_SEM",  "1.2"))
+W_FACE = float(os.getenv("W_FACE", "0.8"))
+W_SCENE= float(os.getenv("W_SCENE","0.5"))
+W_PROD = float(os.getenv("W_PROD","0.0"))  # keep 0 if not doing product detect yet
+W_OCR  = float(os.getenv("W_OCR", "0.0"))  # keep 0 if OCR not enabled
+W_VTX  = float(os.getenv("W_VTX", "0.8"))
+
+SEM_DUP_THRESHOLD   = float(os.getenv("SEM_DUP_THRESHOLD", "0.88"))
 SEM_FILLER_MAX_RATE = float(os.getenv("SEM_FILLER_MAX_RATE", "0.08"))
-SEM_MERGE_SIM = float(os.getenv("SEM_MERGE_SIM", "0.80"))
-MERGE_MAX_CHAIN = int(os.getenv("MERGE_MAX_CHAIN", "3"))
+SEM_MERGE_SIM       = float(os.getenv("SEM_MERGE_SIM", "0.80"))
+VIZ_MERGE_SIM       = float(os.getenv("VIZ_MERGE_SIM", "0.75"))
+MERGE_MAX_CHAIN     = int(os.getenv("MERGE_MAX_CHAIN", "3"))
 
-SLOT_W = {
-    "HOOK":   float(os.getenv("SEM_W_HOOK", "1.0")),
-    "PROBLEM":float(os.getenv("SEM_W_PROBLEM", "1.0")),
-    "FEATURE":float(os.getenv("SEM_W_FEATURE", "1.2")),
-    "PROOF":  float(os.getenv("SEM_W_PROOF", "1.4")),
-    "CTA":    float(os.getenv("SEM_W_CTA", "1.2")),
-}
-W_FLOW = float(os.getenv("SEM_W_FLOW", "1.0"))
+# slot rules
+SLOT_REQUIRE_PRODUCT = set((os.getenv("SLOT_REQUIRE_PRODUCT","") or "").split(",")) - {""}
+SLOT_REQUIRE_OCR_CTA = set((os.getenv("SLOT_REQUIRE_OCR_CTA","") or "").split(",")) - {""}
 
+# retry / filler patterns
+SEM_FILLER_LIST = [w.strip() for w in os.getenv("SEM_FILLER_LIST","um,uh,like,so,okay").split(",") if w.strip()]
+FILLER_RX = re.compile(r"\b(" + "|".join(re.escape(w) for w in SEM_FILLER_LIST) + r")\b", flags=re.I) if SEM_FILLER_LIST else None
+RETRY_RX  = re.compile(r"\b(wait|start\s*again|retry|take\s*two|start\s*over|no,\s?let\s?me|sorry|hold\s?on|actually|i mean)\b", re.I)
+
+# ---------------- Embeddings ----------------
 class Emb:
     _model = None
     @classmethod
     def encode(cls, texts: List[str]) -> List[List[float]]:
-        print(f"🔍 [semantic_visual_pass] Encoding {len(texts)} text(s) via {EMBEDDER}...", flush=True)
         if EMBEDDER == "openai":
             from openai import OpenAI
             client = OpenAI()
@@ -39,30 +53,39 @@ class Emb:
             from sentence_transformers import SentenceTransformer
             if cls._model is None:
                 cls._model = SentenceTransformer("sentence-transformers/all-MiniLM-L6-v2")
-                print("✅ [semantic_visual_pass] Loaded local SentenceTransformer model.", flush=True)
+                print("✅ [semantic_visual_pass] Loaded local SentenceTransformer.", flush=True)
             return cls._model.encode(texts, normalize_embeddings=True).tolist()
 
-def cos(a, b):
+def cos(a: List[float], b: List[float]) -> float:
     num = sum(x*y for x,y in zip(a,b))
     da = (sum(x*x for x in a) ** 0.5) or 1e-9
     db = (sum(y*y for y in b) ** 0.5) or 1e-9
     return max(-1.0, min(1.0, num/(da*db)))
 
-FILLER_RX = re.compile(r"\b(" + "|".join(re.escape(w) for w in SEM_FILLER_LIST) + r")\b", flags=re.I) if SEM_FILLER_LIST else None
-RETRY_RX  = re.compile(r"\b(wait|start\s*again|retry|take\s*two|no,\s?let\s?me|sorry|hold\s?on|actually|I mean)\b", re.I)
-
+# ---------------- Data model ----------------
 @dataclass
 class Take:
-    text: str
+    id: str
     start: float
     end: float
-    score_base: float = 1.0
-    slot: Optional[str] = None
+    text: str
+    # visual / quality features (optional; default neutral)
+    face_q: float = 1.0         # 0..1
+    scene_q: float = 1.0        # 0..1 (stability/exposure proxy)
+    vtx_sim: float = 0.0        # 0..1 (vision<->text similarity if you compute it)
+    has_product: bool = False
+    ocr_hit: int = 0
+    # semantic features
+    slot_hint: Optional[str] = None
     vec: Optional[List[float]] = None
+    score_base: float = 1.0
+    meta: Dict = field(default_factory=dict)
+
     @property
     def dur(self) -> float:
         return max(0.0, self.end - self.start)
 
+# ---------------- Helpers ----------------
 def filler_rate(t: str) -> float:
     if not t: return 0.0
     words = re.findall(r"\w+", t.lower())
@@ -70,70 +93,120 @@ def filler_rate(t: str) -> float:
     hits = len(FILLER_RX.findall(t)) if FILLER_RX else 0
     return hits / max(1, len(words))
 
-def tag_slot(texts: List[str]) -> List[str]:
-    slots = []
-    for tx in texts:
-        t = (tx or "").lower()
-        if any(k in t for k in ["stop", "wait", "before you", "attention", "did you know"]):
-            slots.append("HOOK"); continue
-        if any(k in t for k in ["problem", "struggle", "hard", "issue", "pain"]):
-            slots.append("PROBLEM"); continue
-        if any(k in t for k in ["feature", "how it works", "includes", "works by", "made with"]):
-            slots.append("FEATURE"); continue
-        if any(k in t for k in ["proof", "testimonial", "results", "review", "customers say", "i use it every"]):
-            slots.append("PROOF"); continue
-        if any(k in t for k in ["buy", "get", "claim", "download", "book", "start", "link in bio", "shop now", "today"]):
-            slots.append("CTA"); continue
-        slots.append("FEATURE")
-    return slots
+SLOT_LABELS = ["HOOK","PROBLEM","FEATURE","PROOF","CTA"]
+KEYS = {
+    "HOOK":    ["imagine","what if","did you know","stop scrolling","quick tip","the secret","attention"],
+    "PROBLEM": ["problem","struggle","hard","issue","pain","annoying"],
+    "FEATURE": ["feature","comes with","includes","made of","made with","formula","works by"],
+    "PROOF":   ["results","testimonial","it works","i use it","demo","review","customers say"],
+    "CTA":     ["buy","get","claim","use code","link in bio","shop","today","now","download","book","start"],
+}
 
-def dedupe_retries(takes: List[Take]) -> List[Take]:
+def tag_slot_text(txt: str) -> str:
+    t = (txt or "").lower()
+    for slot in SLOT_LABELS:
+        if any(k in t for k in KEYS[slot]):
+            return slot
+    if len(t.split()) > 25:
+        return "PROOF"
+    return "FEATURE"
+
+def is_retry_or_noise(text: str) -> bool:
+    words = re.findall(r"\w+", text.lower())
+    fillers = len([w for w in words if w in {w.lower() for w in SEM_FILLER_LIST}])
+    rate = fillers / max(1,len(words))
+    return bool(RETRY_RX.search(text)) or rate > SEM_FILLER_MAX_RATE
+
+# ---------------- Main ops ----------------
+def dedup_takes(takes: List[Take]) -> List[Take]:
+    """Drop retries and near-duplicates by cosine similarity."""
     if not takes: return []
-    print(f"🧹 [semantic_visual_pass] Dedupe + retry filter on {len(takes)} takes...", flush=True)
     texts = [t.text or "" for t in takes]
     vecs = Emb.encode(texts)
     kept: List[Take] = []
-    for take, vec in zip(takes, vecs):
-        if RETRY_RX.search(take.text or ""):
+    for tk, v in zip(takes, vecs):
+        if is_retry_or_noise(tk.text or ""):
+            tk.meta["drop_reason"] = "retry_or_noise"
             continue
-        if all((k.vec is None) or (cos(vec, k.vec) < SEM_DUP_THRESHOLD) for k in kept):
-            take.vec = vec
-            kept.append(take)
-    print(f"✅ [semantic_visual_pass] Kept {len(kept)} unique takes after dedupe.", flush=True)
+        dup = False
+        for kk in kept:
+            if kk.vec is None:  # shouldn’t happen if we set below, but be safe
+                continue
+            if cos(v, kk.vec) >= SEM_DUP_THRESHOLD:
+                dup = True
+                tk.meta["drop_reason"] = "duplicate"
+                break
+        if not dup:
+            tk.vec = v
+            kept.append(tk)
     return kept
 
+def score_take(t: Take, slot: str) -> float:
+    """Slot-aware scoring combining semantic & visual features."""
+    # slot constraints
+    if slot in SLOT_REQUIRE_PRODUCT and not t.has_product:
+        return -1.0
+    if slot in SLOT_REQUIRE_OCR_CTA and t.ocr_hit < 1:
+        return -1.0
+
+    # base semantic penalty for filler/retry
+    if is_retry_or_noise(t.text or ""):
+        base_sem = 0.5
+    else:
+        base_sem = 1.0
+
+    score = (
+        W_SEM  * base_sem +
+        W_FACE * float(t.face_q) +
+        W_SCENE* float(t.scene_q) +
+        W_PROD * (1.0 if t.has_product else 0.0) +
+        W_OCR  * min(1.0, float(t.ocr_hit)) +
+        W_VTX  * float(t.vtx_sim)
+    )
+    return float(score)
+
 def can_merge(a: Take, b: Take) -> bool:
+    """Smart stitch: semantic + visual continuity, no hard scene cut."""
     if not a.vec or not b.vec:
+        # compute on the fly if missing
+        a.vec = a.vec or Emb.encode([a.text or ""])[0]
+        b.vec = b.vec or Emb.encode([b.text or ""])[0]
+    s_sem = cos(a.vec, b.vec)
+    if s_sem < SEM_MERGE_SIM:
         return False
-    return (cos(a.vec, b.vec) >= SEM_MERGE_SIM) and (0.0 <= (b.start - a.end) <= 2.0)
+    s_viz = 0.5*(a.vtx_sim + b.vtx_sim) if (a.vtx_sim and b.vtx_sim) else min(a.scene_q, b.scene_q)
+    if s_viz < VIZ_MERGE_SIM:
+        return False
+    if a.meta.get("scene_cut_next") or b.meta.get("scene_cut_prev"):
+        return False
+    # keep small gap tolerance (≤2s) so joins sound natural
+    return 0.0 <= (b.start - a.end) <= 2.0
 
-def coherence_score(seq: List[Take]) -> float:
-    if not seq: return 0.0
-    flow, pairs = 0.0, 0
-    for i in range(len(seq)-1):
-        if seq[i].vec and seq[i+1].vec:
-            flow += cos(seq[i].vec, seq[i+1].vec); pairs += 1
-    flow = (flow / max(1, pairs))
-    slot_w = sum(SLOT_W.get(t.slot or "FEATURE", 1.0) * t.score_base for t in seq)
-    return slot_w + W_FLOW * flow
-
-def score_takes(takes: List[Take]) -> List[Take]:
+def stitch_chain(takes: List[Take]) -> List[Take]:
+    """Build merged chains up to MERGE_MAX_CHAIN; extend end time of head."""
     if not takes: return []
-    print(f"🎯 [semantic_visual_pass] Scoring {len(takes)} takes...", flush=True)
-    scored = []
-    for t in takes:
-        fr = filler_rate(t.text or "")
-        penalty = max(0.0, (fr - SEM_FILLER_MAX_RATE) * 2.0) if fr > SEM_FILLER_MAX_RATE else 0.0
-        scored.append(Take(text=t.text, start=t.start, end=t.end, score_base=max(0.0, 1.0 - penalty)))
-    vecs = Emb.encode([t.text or "" for t in scored])
-    slots = tag_slot([t.text or "" for t in scored])
-    for t, v, s in zip(scored, vecs, slots):
-        t.vec = v; t.slot = s
-    return scored
+    takes = sorted(takes, key=lambda x: (x.start, x.end))
+    out: List[Take] = []
+    i = 0
+    while i < len(takes):
+        chain = [takes[i]]
+        j = i
+        while (j+1 < len(takes)) and (len(chain) < MERGE_MAX_CHAIN) and can_merge(takes[j], takes[j+1]):
+            chain.append(takes[j+1]); j += 1
+        head = chain[0]
+        head.meta["chain_ids"] = [c.id for c in chain]
+        head.end = chain[-1].end
+        out.append(head)
+        i = j + 1
+    return out
 
-def chain_continuity(takes: List[Take]) -> List[List[Take]]:
+# --------------- Backward-compat API ---------------
+# Some older code expects a function named `continuity_chains(takes)`
+# that returns List[List[TakeLike]]. We map to our stitch logic but keep signature.
+def continuity_chains(takes: List[Take]) -> List[List[Take]]:
+    """Return chains (lists) for compatibility; each chain is what stitch_chain would have merged."""
     if not takes: return []
-    print(f"🔗 [semantic_visual_pass] Chaining continuity across {len(takes)} takes...", flush=True)
+    takes = sorted(takes, key=lambda x: (x.start, x.end))
     chains: List[List[Take]] = []
     cur: List[Take] = []
     for t in takes:
@@ -144,6 +217,14 @@ def chain_continuity(takes: List[Take]) -> List[List[Take]]:
         else:
             chains.append(cur); cur = [t]
     if cur: chains.append(cur)
-    print(f"✅ [semantic_visual_pass] Built {len(chains)} coherent chain(s).", flush=True)
     return chains
-    
+
+__all__ = [
+    "Take",
+    "dedup_takes",
+    "score_take",
+    "can_merge",
+    "stitch_chain",
+    "continuity_chains",
+    "tag_slot_text",
+]
