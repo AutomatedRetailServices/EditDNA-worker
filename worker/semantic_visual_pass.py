@@ -27,6 +27,7 @@ SEM_MERGE_SIM       = float(os.getenv("SEM_MERGE_SIM", "0.80"))
 VIZ_MERGE_SIM       = float(os.getenv("VIZ_MERGE_SIM", "0.75"))
 MERGE_MAX_CHAIN     = int(os.getenv("MERGE_MAX_CHAIN", "3"))
 
+
 # slot rules
 SLOT_REQUIRE_PRODUCT = set((os.getenv("SLOT_REQUIRE_PRODUCT","") or "").split(",")) - {""}
 SLOT_REQUIRE_OCR_CTA = set((os.getenv("SLOT_REQUIRE_OCR_CTA","") or "").split(",")) - {""}
