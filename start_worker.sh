@@ -1,5 +1,5 @@
-##!/usr/bin/env bash
-# start_worker.sh — RunPod-friendly worker launcher (no Docker-in-Docker)
+#!/usr/bin/env bash
+# start_worker.sh — RunPod-friendly worker launcher
 set -euo pipefail
 echo "== EditDNA worker boot =="
 
@@ -17,19 +17,26 @@ echo "S3 Bucket: ${S3_BUCKET}"
 command -v ffmpeg >/dev/null && ffmpeg -version | head -n1 || echo "ffmpeg not found (set FFMPEG_BIN=ffmpeg)"
 
 # -------- code root --------
-# If RunPod Start Command cloned into /app, keep it; else fall back next to this script.
+# Prefer persistent mount if template Start Command symlinks /app => /workspace/editdna/app
 PYROOT="${CODE_ROOT:-/app}"
 if [ ! -f "${PYROOT}/jobs.py" ]; then
-  # try script directory as fallback
+  # fallback to the script directory if /app isn't our repo
   HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
   PYROOT="${HERE}"
 fi
-
 export CODE_ROOT="$PYROOT"
 export PYTHONPATH="${PYROOT}"
 
 echo "Using code root: ${CODE_ROOT}"
 echo "PYTHONPATH=${PYTHONPATH}"
+
+# ---- print key knobs (helps verify RunPod env is applied) ----
+echo "MAX_TAKE_SEC=${MAX_TAKE_SEC:-unset}  MAX_DURATION_SEC=${MAX_DURATION_SEC:-unset}  MIN_TAKE_SEC=${MIN_TAKE_SEC:-unset}"
+echo "W_SEM=${W_SEM:-unset}  W_FACE=${W_FACE:-unset}  W_SCENE=${W_SCENE:-unset}  W_VTX=${W_VTX:-unset}"
+echo "SEM_DUP_THRESHOLD=${SEM_DUP_THRESHOLD:-unset}  SEM_MERGE_SIM=${SEM_MERGE_SIM:-unset}  VIZ_MERGE_SIM=${VIZ_MERGE_SIM:-unset}"
+echo "MERGE_MAX_CHAIN=${MERGE_MAX_CHAIN:-unset}  SEM_FILLER_MAX_RATE=${SEM_FILLER_MAX_RATE:-unset}"
+echo "SLOT_REQUIRE_PRODUCT=${SLOT_REQUIRE_PRODUCT:-unset}  SLOT_REQUIRE_OCR_CTA=${SLOT_REQUIRE_OCR_CTA:-unset}"
+echo "QUEUE=${QUEUE}  ASR_ENABLED=${ASR_ENABLED}  AWS_DEFAULT_REGION=${AWS_DEFAULT_REGION}"
 
 # ---- boot debug (super helpful if imports fail) ----
 python3 - <<'PY'
@@ -80,4 +87,3 @@ q = Queue(qn, connection=conn)
 print(f"*** Listening on {qn}...", flush=True)
 Worker([q], connection=conn).work(burst=False)
 PY
-
