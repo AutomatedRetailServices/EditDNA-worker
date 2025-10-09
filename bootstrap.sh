@@ -1,5 +1,3 @@
-# run inside a pod once
-cat >/workspace/editdna/app/bootstrap.sh <<'EOF'
 #!/usr/bin/env bash
 # bootstrap.sh — idempotent pod bootstrapper
 set -euo pipefail
@@ -26,24 +24,15 @@ fi
 rm -rf /app && ln -sfn "$CODE" /app
 export PYTHONPATH=/app
 
-# Optional: flip remote to SSH so pushes from the pod work if a key is present
 git -C "$CODE" remote set-url origin "git@github.com:${REPO}.git" || true
 
+echo "== /app contents =="
+ls -la /app | head -n 50 || true
 echo "== /app/worker =="
 ls -la /app/worker || true
 
-echo "MAX_TAKE_SEC=${MAX_TAKE_SEC:-unset}  MAX_DURATION_SEC=${MAX_DURATION_SEC:-unset}  MIN_TAKE_SEC=${MIN_TAKE_SEC:-unset}"
-echo "W_SEM=${W_SEM:-unset} W_FACE=${W_FACE:-unset} W_SCENE=${W_SCENE:-unset} W_VTX=${W_VTX:-unset}"
-echo "SEM_DUP_THRESHOLD=${SEM_DUP_THRESHOLD:-unset}  SEM_MERGE_SIM=${SEM_MERGE_SIM:-unset}  VIZ_MERGE_SIM=${VIZ_MERGE_SIM:-unset}"
-echo "MERGE_MAX_CHAIN=${MERGE_MAX_CHAIN:-unset}  SEM_FILLER_MAX_RATE=${SEM_FILLER_MAX_RATE:-unset}"
-echo "SLOT_REQUIRE_PRODUCT=${SLOT_REQUIRE_PRODUCT:-unset}  SLOT_REQUIRE_OCR_CTA=${SLOT_REQUIRE_OCR_CTA:-unset}"
-echo "QUEUE=${QUEUE:-unset}  ASR_ENABLED=${ASR_ENABLED:-unset}"
-
 if [ -f /app/requirements.txt ]; then python3 -m pip install -r /app/requirements.txt || true; fi
 if [ -f /app/requirements-semantic.txt ]; then python3 -m pip install -r /app/requirements-semantic.txt || true; fi
-if [[ "${ASR_ENABLED:-0}" == "1" && -f /app/requirements-asr.txt" ]]; then python3 -m pip install -r /app/requirements-asr.txt || true; fi
+if [[ "${ASR_ENABLED:-0}" == "1" && -f /app/requirements-asr.txt ]]; then python3 -m pip install -r /app/requirements-asr.txt || true; fi
 
 exec bash /app/start_worker.sh
-EOF
-
-chmod +x /workspace/editdna/app/bootstrap.sh
