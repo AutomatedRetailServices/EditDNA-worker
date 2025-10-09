@@ -4,64 +4,93 @@ import os, re
 from dataclasses import dataclass, field
 from typing import List, Dict, Optional
 
-print("🧠 [semantic_visual_pass] Semantic pipeline active.", flush=True)
+print("🧠 [semantic_visual_pass] Semantic pipeline active (Torch optional).", flush=True)
 
-# ---------------- Env knobs (safe defaults) ----------------
-EMBEDDER = os.getenv("EMBEDDER", "local").lower()  # local|openai
-
-# durations (used by composer elsewhere; here for context)
-MAX_TAKE_SEC = float(os.getenv("MAX_TAKE_SEC", "20"))
-MIN_TAKE_SEC = float(os.getenv("MIN_TAKE_SEC", "1.5"))
-
-# fusion + thresholds
+# ---------------- Env knobs ----------------
 W_SEM  = float(os.getenv("W_SEM",  "1.2"))
 W_FACE = float(os.getenv("W_FACE", "0.8"))
 W_SCENE= float(os.getenv("W_SCENE","0.5"))
-W_PROD = float(os.getenv("W_PROD","0.0"))  # keep 0 if not doing product detect yet
-W_OCR  = float(os.getenv("W_OCR", "0.0"))  # keep 0 if OCR not enabled
-W_VTX  = float(os.getenv("W_VTX", "0.8"))
+W_VTX  = float(os.getenv("W_VTX",  "0.8"))
 
 SEM_DUP_THRESHOLD   = float(os.getenv("SEM_DUP_THRESHOLD", "0.88"))
-SEM_FILLER_MAX_RATE = float(os.getenv("SEM_FILLER_MAX_RATE", "0.08"))
-SEM_MERGE_SIM       = float(os.getenv("SEM_MERGE_SIM", "0.80"))
-VIZ_MERGE_SIM       = float(os.getenv("VIZ_MERGE_SIM", "0.75"))
-MERGE_MAX_CHAIN     = int(os.getenv("MERGE_MAX_CHAIN", "3"))
+SEM_MERGE_SIM       = float(os.getenv("SEM_MERGE_SIM",     "0.80"))
+VIZ_MERGE_SIM       = float(os.getenv("VIZ_MERGE_SIM",     "0.75"))
+MERGE_MAX_CHAIN     = int(os.getenv("MERGE_MAX_CHAIN",     "3"))
+SEM_FILLER_MAX_RATE = float(os.getenv("SEM_FILLER_MAX_RATE","0.08"))
 
-
-# slot rules
 SLOT_REQUIRE_PRODUCT = set((os.getenv("SLOT_REQUIRE_PRODUCT","") or "").split(",")) - {""}
 SLOT_REQUIRE_OCR_CTA = set((os.getenv("SLOT_REQUIRE_OCR_CTA","") or "").split(",")) - {""}
 
-# retry / filler patterns
-SEM_FILLER_LIST = [w.strip() for w in os.getenv("SEM_FILLER_LIST","um,uh,like,so,okay").split(",") if w.strip()]
-FILLER_RX = re.compile(r"\b(" + "|".join(re.escape(w) for w in SEM_FILLER_LIST) + r")\b", flags=re.I) if SEM_FILLER_LIST else None
-RETRY_RX  = re.compile(r"\b(wait|start\s*again|retry|take\s*two|start\s*over|no,\s?let\s?me|sorry|hold\s?on|actually|i mean)\b", re.I)
+# -------------- Light slot rules --------------
+SLOT_LABELS = ["HOOK","PROBLEM","FEATURE","PROOF","CTA"]
+KEYS = {
+    "HOOK":    ["imagine","what if","did you know","stop scrolling","quick tip","the secret"],
+    "PROBLEM": ["problem","struggle","hard","pain","issue","annoying","waste","dry skin"],
+    "FEATURE": ["feature","comes with","includes","made of","ingredient","formula","works by"],
+    "PROOF":   ["results","testimonial","it works","i use it","demo","watch","evidence"],
+    "CTA":     ["buy","get","claim","use code","link in bio","shop","today","now"],
+}
 
-# ---------------- Embeddings ----------------
-class Emb:
-    _model = None
+FILLER_SET = {w.strip().lower() for w in (os.getenv("SEM_FILLER_LIST","um,uh,like,so,okay").split(","))}
+RETRY_RX   = re.compile(r"\b(wait|start\s*again|retry|take\s*two|no,\s?let\s?me|sorry|hold\s?on|actually|i mean)\b", re.I)
+
+# ---------------- Embeddings with fallback ----------------
+class _Emb:
+    _mode = None
+    _st_model = None
+    _tfidf_vec = None
+
     @classmethod
-    def encode(cls, texts: List[str]) -> List[List[float]]:
-        if EMBEDDER == "openai":
-            from openai import OpenAI
-            client = OpenAI()
-            out = []
-            for t in texts:
-                r = client.embeddings.create(model="text-embedding-3-small", input=t or "")
-                out.append(r.data[0].embedding)
-            return out
-        else:
-            from sentence_transformers import SentenceTransformer
-            if cls._model is None:
-                cls._model = SentenceTransformer("sentence-transformers/all-MiniLM-L6-v2")
-                print("✅ [semantic_visual_pass] Loaded local SentenceTransformer.", flush=True)
-            return cls._model.encode(texts, normalize_embeddings=True).tolist()
+    def _ensure_mode(cls):
+        if cls._mode is not None:
+            return
+        try:
+            # Try sentence-transformers (Torch)
+            from sentence_transformers import SentenceTransformer  # noqa: F401
+            cls._mode = "st"
+            print("🔤 [semantic] Using SentenceTransformers backend.", flush=True)
+        except Exception as e:
+            cls._mode = "tfidf"
+            print(f"🔤 [semantic] Falling back to TF-IDF embeddings ({e.__class__.__name__}).", flush=True)
 
-def cos(a: List[float], b: List[float]) -> float:
-    num = sum(x*y for x,y in zip(a,b))
-    da = (sum(x*x for x in a) ** 0.5) or 1e-9
-    db = (sum(y*y for y in b) ** 0.5) or 1e-9
-    return max(-1.0, min(1.0, num/(da*db)))
+    @classmethod
+    def encode(cls, texts: List[str]):
+        """
+        Returns (vectors, cosine_fn). Vectors may be numpy array or scipy sparse.
+        """
+        cls._ensure_mode()
+        texts = [t or "" for t in texts]
+
+        if cls._mode == "st":
+            # Lazy-load model to avoid import until needed
+            if cls._st_model is None:
+                from sentence_transformers import SentenceTransformer
+                cls._st_model = SentenceTransformer("sentence-transformers/all-MiniLM-L6-v2")
+                print("✅ [semantic] Loaded ST model all-MiniLM-L6-v2.", flush=True)
+            import numpy as np
+            V = cls._st_model.encode(texts, normalize_embeddings=True)
+            def _cos(a, b):
+                # already normalized
+                return float((a*b).sum())
+            return V, _cos
+
+        # TF-IDF fallback (no Torch)
+        if cls._tfidf_vec is None:
+            from sklearn.feature_extraction.text import TfidfVectorizer
+            cls._tfidf_vec = TfidfVectorizer(min_df=1)
+            # fit on the first batch; vectorizer persists for subsequent calls
+            cls._tfidf_vec.fit(texts if texts else [""])
+        X = cls._tfidf_vec.transform(texts)
+
+        # cosine for sparse
+        from sklearn.metrics.pairwise import cosine_similarity
+        def _cos(a, b):
+            import numpy as np
+            # a,b expected as 1xN sparse matrices
+            s = cosine_similarity(a, b)
+            return float(s[0,0]) if s.size else 0.0
+
+        return X, _cos
 
 # ---------------- Data model ----------------
 @dataclass
@@ -70,121 +99,87 @@ class Take:
     start: float
     end: float
     text: str
-    # visual / quality features (optional; default neutral)
-    face_q: float = 1.0         # 0..1
-    scene_q: float = 1.0        # 0..1 (stability/exposure proxy)
-    vtx_sim: float = 0.0        # 0..1 (vision<->text similarity if you compute it)
+    face_q: float = 1.0
+    scene_q: float = 1.0
+    vtx_sim: float = 0.0
     has_product: bool = False
     ocr_hit: int = 0
-    # semantic features
-    slot_hint: Optional[str] = None
-    vec: Optional[List[float]] = None
-    score_base: float = 1.0
     meta: Dict = field(default_factory=dict)
+    # cache
+    _vec: Optional[object] = None  # numpy vector or sparse row
 
     @property
     def dur(self) -> float:
         return max(0.0, self.end - self.start)
 
 # ---------------- Helpers ----------------
-def filler_rate(t: str) -> float:
-    if not t: return 0.0
-    words = re.findall(r"\w+", t.lower())
+def _filler_rate(text: str) -> float:
+    if not text: return 0.0
+    words = re.findall(r"\w+", text.lower())
     if not words: return 0.0
-    hits = len(FILLER_RX.findall(t)) if FILLER_RX else 0
+    hits = sum(1 for w in words if w in FILLER_SET)
     return hits / max(1, len(words))
-
-SLOT_LABELS = ["HOOK","PROBLEM","FEATURE","PROOF","CTA"]
-KEYS = {
-    "HOOK":    ["imagine","what if","did you know","stop scrolling","quick tip","the secret","attention"],
-    "PROBLEM": ["problem","struggle","hard","issue","pain","annoying"],
-    "FEATURE": ["feature","comes with","includes","made of","made with","formula","works by"],
-    "PROOF":   ["results","testimonial","it works","i use it","demo","review","customers say"],
-    "CTA":     ["buy","get","claim","use code","link in bio","shop","today","now","download","book","start"],
-}
 
 def tag_slot_text(txt: str) -> str:
     t = (txt or "").lower()
     for slot in SLOT_LABELS:
-        if any(k in t for k in KEYS[slot]):
-            return slot
-    if len(t.split()) > 25:
-        return "PROOF"
+        if any(k in t for k in KEYS[slot]): return slot
+    if len(t.split()) > 25: return "PROOF"
     return "FEATURE"
 
+# ---------------- Core ops ----------------
 def is_retry_or_noise(text: str) -> bool:
-    words = re.findall(r"\w+", text.lower())
-    fillers = len([w for w in words if w in {w.lower() for w in SEM_FILLER_LIST}])
-    rate = fillers / max(1,len(words))
-    return bool(RETRY_RX.search(text)) or rate > SEM_FILLER_MAX_RATE
+    return bool(RETRY_RX.search(text or "")) or (_filler_rate(text) > SEM_FILLER_MAX_RATE)
 
-# ---------------- Main ops ----------------
 def dedup_takes(takes: List[Take]) -> List[Take]:
-    """Drop retries and near-duplicates by cosine similarity."""
     if not takes: return []
-    texts = [t.text or "" for t in takes]
-    vecs = Emb.encode(texts)
+    texts = [t.text for t in takes]
+    V, cos = _Emb.encode(texts)
     kept: List[Take] = []
-    for tk, v in zip(takes, vecs):
-        if is_retry_or_noise(tk.text or ""):
-            tk.meta["drop_reason"] = "retry_or_noise"
-            continue
-        dup = False
-        for kk in kept:
-            if kk.vec is None:  # shouldn’t happen if we set below, but be safe
-                continue
-            if cos(v, kk.vec) >= SEM_DUP_THRESHOLD:
-                dup = True
-                tk.meta["drop_reason"] = "duplicate"
-                break
-        if not dup:
-            tk.vec = v
-            kept.append(tk)
+    for i, t in enumerate(takes):
+        # mark vector row
+        vec_i = V[i] if hasattr(V, "__getitem__") else V[i:i+1]
+        if is_retry_or_noise(t.text):
+            t.meta["drop_reason"] = "retry_or_noise"; continue
+        is_dup = False
+        for k in kept:
+            # compare by vectors (ensure 1xN rows for sparse)
+            v_k = k._vec if k._vec is not None else V[texts.index(k.text)]
+            a = vec_i if getattr(vec_i, "shape", None) else vec_i
+            b = v_k if getattr(v_k, "shape", None) else v_k
+            if cos(a, b) >= SEM_DUP_THRESHOLD:
+                is_dup = True; break
+        if not is_dup:
+            t._vec = vec_i
+            kept.append(t)
+        else:
+            t.meta["drop_reason"] = "duplicate"
     return kept
 
-def score_take(t: Take, slot: str) -> float:
-    """Slot-aware scoring combining semantic & visual features."""
-    # slot constraints
-    if slot in SLOT_REQUIRE_PRODUCT and not t.has_product:
-        return -1.0
-    if slot in SLOT_REQUIRE_OCR_CTA and t.ocr_hit < 1:
-        return -1.0
-
-    # base semantic penalty for filler/retry
-    if is_retry_or_noise(t.text or ""):
-        base_sem = 0.5
-    else:
-        base_sem = 1.0
-
-    score = (
-        W_SEM  * base_sem +
-        W_FACE * float(t.face_q) +
-        W_SCENE* float(t.scene_q) +
-        W_PROD * (1.0 if t.has_product else 0.0) +
-        W_OCR  * min(1.0, float(t.ocr_hit)) +
-        W_VTX  * float(t.vtx_sim)
-    )
-    return float(score)
+def _semantic_sim(a: Take, b: Take) -> float:
+    V, cos = _Emb.encode([a.text, b.text])
+    a_vec = V[0] if hasattr(V, "__getitem__") else V[0:1]
+    b_vec = V[1] if hasattr(V, "__getitem__") else V[1:2]
+    return cos(a_vec, b_vec)
 
 def can_merge(a: Take, b: Take) -> bool:
-    """Smart stitch: semantic + visual continuity, no hard scene cut."""
-    if not a.vec or not b.vec:
-        # compute on the fly if missing
-        a.vec = a.vec or Emb.encode([a.text or ""])[0]
-        b.vec = b.vec or Emb.encode([b.text or ""])[0]
-    s_sem = cos(a.vec, b.vec)
+    # semantic continuity
+    s_sem = _semantic_sim(a, b)
     if s_sem < SEM_MERGE_SIM:
         return False
-    s_viz = 0.5*(a.vtx_sim + b.vtx_sim) if (a.vtx_sim and b.vtx_sim) else min(a.scene_q, b.scene_q)
+    # visual continuity proxy
+    s_viz = 0.5*(float(a.vtx_sim) + float(b.vtx_sim)) if (a.vtx_sim and b.vtx_sim) else min(float(a.scene_q), float(b.scene_q))
     if s_viz < VIZ_MERGE_SIM:
         return False
+    # require a small natural gap (≤ 2.0s)
+    if not (0.0 <= (b.start - a.end) <= 2.0):
+        return False
+    # block hard scene cut flags if provided
     if a.meta.get("scene_cut_next") or b.meta.get("scene_cut_prev"):
         return False
-    # keep small gap tolerance (≤2s) so joins sound natural
-    return 0.0 <= (b.start - a.end) <= 2.0
+    return True
 
 def stitch_chain(takes: List[Take]) -> List[Take]:
-    """Build merged chains up to MERGE_MAX_CHAIN; extend end time of head."""
     if not takes: return []
     takes = sorted(takes, key=lambda x: (x.start, x.end))
     out: List[Take] = []
@@ -194,38 +189,50 @@ def stitch_chain(takes: List[Take]) -> List[Take]:
         j = i
         while (j+1 < len(takes)) and (len(chain) < MERGE_MAX_CHAIN) and can_merge(takes[j], takes[j+1]):
             chain.append(takes[j+1]); j += 1
-        head = chain[0]
-        head.meta["chain_ids"] = [c.id for c in chain]
-        head.end = chain[-1].end
-        out.append(head)
+        merged = chain[0]
+        merged.meta["chain_ids"] = [c.id for c in chain]
+        merged.end = chain[-1].end
+        out.append(merged)
         i = j + 1
     return out
 
-# --------------- Backward-compat API ---------------
-# Some older code expects a function named `continuity_chains(takes)`
-# that returns List[List[TakeLike]]. We map to our stitch logic but keep signature.
-def continuity_chains(takes: List[Take]) -> List[List[Take]]:
-    """Return chains (lists) for compatibility; each chain is what stitch_chain would have merged."""
-    if not takes: return []
-    takes = sorted(takes, key=lambda x: (x.start, x.end))
-    chains: List[List[Take]] = []
-    cur: List[Take] = []
-    for t in takes:
-        if not cur:
-            cur = [t]; continue
-        if can_merge(cur[-1], t) and len(cur) < MERGE_MAX_CHAIN:
-            cur.append(t)
-        else:
-            chains.append(cur); cur = [t]
-    if cur: chains.append(cur)
-    return chains
+def score_take(t: Take, slot: str) -> float:
+    # slot constraints
+    if slot in SLOT_REQUIRE_PRODUCT and not t.has_product:
+        return -1.0
+    if slot in SLOT_REQUIRE_OCR_CTA and t.ocr_hit < 1:
+        return -1.0
+    # semantic penalty if noisy
+    penalty = 0.5 if is_retry_or_noise(t.text) else 0.0
+    score = (
+        W_SEM*(1.0 - penalty) +
+        W_FACE*float(t.face_q) +
+        W_SCENE*float(t.scene_q) +
+        W_VTX*float(t.vtx_sim)
+    )
+    return float(score)
 
-__all__ = [
-    "Take",
-    "dedup_takes",
-    "score_take",
-    "can_merge",
-    "stitch_chain",
-    "continuity_chains",
-    "tag_slot_text",
-]
+# ---------- Back-compat shim used by jobs.py ----------
+def continuity_chains(takes_like: List[object]) -> List[List[object]]:
+    """
+    Accepts list of objects with .start, .end, .text (optional).
+    Returns grouped chains of coherent neighbors (no mutation of inputs).
+    """
+    proxy: List[Take] = []
+    for i, t in enumerate(takes_like):
+        proxy.append(
+            Take(
+                id=getattr(t, "id", f"t{i}"),
+                start=float(getattr(t, "start", 0.0)),
+                end=float(getattr(t, "end", 0.0)),
+                text=str(getattr(t, "text", "")),
+            )
+        )
+    stitched = stitch_chain(proxy)
+    # Map stitched groups back to original-like objects by id matching
+    id_to_obj = {getattr(t, "id", f"t{i}"):t for i,t in enumerate(takes_like)}
+    chains: List[List[object]] = []
+    for m in stitched:
+        chain_ids = m.meta.get("chain_ids", [m.id])
+        chains.append([id_to_obj.get(cid, id_to_obj.get(str(cid), None)) for cid in chain_ids if cid in id_to_obj])
+    return chains
