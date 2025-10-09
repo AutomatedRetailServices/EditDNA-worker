@@ -1,2 +1,0 @@
-# makes /app/worker importable
-
