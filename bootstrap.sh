@@ -57,3 +57,4 @@ fi
 
 # launch worker (blocks)
 exec bash /app/start_worker.sh
+
