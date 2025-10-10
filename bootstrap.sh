@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
+
 # bootstrap.sh — idempotent pod bootstrapper
 set -euo pipefail
-
+export PIP_CACHE_DIR=${PIP_CACHE_DIR:-/workspace/pip-cache}
 echo "== Bootstrap: ensuring git =="
 command -v git >/dev/null 2>&1 || { apt-get update -y && apt-get install -y git; }
 
