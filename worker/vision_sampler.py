@@ -1,138 +1,153 @@
-# worker/vision_sampler.py
-import os, math
+cat > /workspace/editdna/app/worker/vision_sampler.py <<'PY'
+from __future__ import annotations
+import os, cv2, numpy as np
 from dataclasses import dataclass
-from typing import List, Tuple, Optional, Dict
+from typing import Tuple, List, Optional
 
-import cv2
-import numpy as np
-
-# Optional CLIP
+# Optional CLIP (for vtx_sim); if not present, we’ll return 0.0
 try:
     import open_clip
-    import torch
-    _clip_model, _, _clip_preprocess = open_clip.create_model_and_transforms(
-        "ViT-B-32", pretrained="openai"
-    )
-    _clip_tokenizer = open_clip.get_tokenizer("ViT-B-32")
-    _clip_model.eval()
     _HAS_CLIP = True
 except Exception:
     _HAS_CLIP = False
-    _clip_model = None
-
-# ---- utilities ----
-def _safe_read_frame(cap: cv2.VideoCapture, frame_index: int) -> Optional[np.ndarray]:
-    cap.set(cv2.CAP_PROP_POS_FRAMES, frame_index)
-    ok, frame = cap.read()
-    if not ok:
-        return None
-    return cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-
-def _variance_of_laplacian(img: np.ndarray) -> float:
-    # higher = sharper
-    return float(cv2.Laplacian(cv2.cvtColor(img, cv2.COLOR_RGB2GRAY), cv2.CV_64F).var())
-
-def _exposure_score(img: np.ndarray) -> float:
-    gray = cv2.cvtColor(img, cv2.COLOR_RGB2GRAY)
-    hist = cv2.calcHist([gray],[0],None,[256],[0,256]).ravel()
-    hist /= (hist.sum() + 1e-6)
-    # penalize extremes (too dark/bright)
-    dark = hist[:16].sum()
-    bright = hist[-16:].sum()
-    score = 1.0 - min(1.0, dark + bright)  # 1 when well-exposed, 0 when crushed
-    return float(max(0.0, min(1.0, score)))
-
-def _face_center_score(img: np.ndarray, faces: List[Tuple[int,int,int,int]]) -> float:
-    if not faces:
-        return 0.0
-    h, w = img.shape[:2]
-    cx, cy = w/2, h/2
-    # pick largest
-    x,y,wf,hf = max(faces, key=lambda r: r[2]*r[3])
-    fx, fy = x + wf/2, y + hf/2
-    # distance from center normalized by diagonal
-    d = math.hypot(fx - cx, fy - cy)
-    dnorm = d / (math.hypot(w, h) + 1e-6)
-    size = (wf*hf) / (w*h)
-    # bigger face & closer to center -> higher
-    return float(max(0.0, min(1.0, (1.0 - dnorm) * min(1.0, 3.0*size + 0.2))))
-
-_haar = cv2.CascadeClassifier(cv2.data.haarcascades + "haarcascade_frontalface_default.xml")
-
-def _detect_faces(img: np.ndarray) -> List[Tuple[int,int,int,int]]:
-    gray = cv2.cvtColor(img, cv2.COLOR_RGB2GRAY)
-    faces = _haar.detectMultiScale(gray, scaleFactor=1.1, minNeighbors=5, minSize=(64,64))
-    return [(int(x),int(y),int(w),int(h)) for (x,y,w,h) in faces]
-
-def _clip_similarity(img: np.ndarray, text: str) -> float:
-    if not (_HAS_CLIP and text):
-        return 0.0
-    import PIL.Image as Image
-    with torch.no_grad():
-        pil = Image.fromarray(img)
-        image = _clip_preprocess(pil).unsqueeze(0)
-        text_tok = _clip_tokenizer([text])
-        if torch.cuda.is_available():
-            image = image.cuda()
-            _clip_model.cuda()
-        img_feat = _clip_model.encode_image(image)
-        txt_feat = _clip_model.encode_text(text_tok)
-        img_feat = img_feat / img_feat.norm(dim=-1, keepdim=True)
-        txt_feat = txt_feat / txt_feat.norm(dim=-1, keepdim=True)
-        sim = (img_feat @ txt_feat.T).squeeze().item()
-        # map [-1..1] to [0..1]
-        return float((sim + 1.0) / 2.0)
 
 @dataclass
-class FrameScores:
+class VSample:
+    t: float
     face_q: float
-    scene_q: float
+    blur_q: float
+    exposure_q: float
+    motion_q: float
     vtx_sim: float
 
-def sample_scores_for_span(
+def _face_score(frame: np.ndarray) -> float:
+    # Very light face proxy: center/crop score + presence of face-like blobs
+    h, w = frame.shape[:2]
+    if h == 0 or w == 0:
+        return 0.0
+    # Brightness/contrast quick check
+    gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+    m = float(np.mean(gray))
+    # Penalize too dark or blown
+    exp = 1.0 - min(abs(m-128.0)/128.0, 1.0)
+
+    # Center energy proxy (encourages face near center)
+    cy, cx = h//2, w//2
+    box = gray[cy-h//8:cy+h//8, cx-w//8:cx+w//8] if h>16 and w>16 else gray
+    center = float(np.mean(box))/255.0
+
+    return float(max(0.0, min(1.0, 0.6*exp + 0.4*center)))
+
+def _blur_score(frame: np.ndarray) -> float:
+    gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+    fm = cv2.Laplacian(gray, cv2.CV_64F).var()
+    # Map Laplacian variance (0..~3000 typical) to 0..1
+    return float(max(0.0, min(1.0, fm / 800.0)))
+
+def _exposure_score(frame: np.ndarray) -> float:
+    gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+    m = float(np.mean(gray))
+    return float(1.0 - min(abs(m-128.0)/128.0, 1.0))
+
+def _motion_score(prev: Optional[np.ndarray], cur: np.ndarray) -> float:
+    if prev is None: 
+        return 1.0
+    g1 = cv2.cvtColor(prev, cv2.COLOR_BGR2GRAY)
+    g2 = cv2.cvtColor(cur, cv2.COLOR_BGR2GRAY)
+    diff = cv2.absdiff(g1, g2)
+    v = float(np.mean(diff)) / 255.0
+    # prefer modest motion (0.02..0.15), penalize extreme
+    if v < 0.02: return 0.6 + v*10
+    if v > 0.25: return max(0.0, 1.2 - v*2.5)
+    return 0.9
+
+class _ClipHelper:
+    def __init__(self):
+        self.model, _, self.preprocess = open_clip.create_model_and_transforms(
+            "ViT-B-32", pretrained="laion2b_s34b_b79k", device="cpu"
+        )
+        self.tokenizer = open_clip.get_tokenizer("ViT-B-32")
+
+    def sim(self, frame: np.ndarray, text: str) -> float:
+        import torch
+        if not text: 
+            return 0.0
+        img = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        img = self.preprocess(open_clip.Image.fromarray(img)).unsqueeze(0)
+        toks = self.tokenizer([text])
+        with torch.no_grad():
+            i_f = self.model.encode_image(img)
+            t_f = self.model.encode_text(toks)
+            i_f /= i_f.norm(dim=-1, keepdim=True)
+            t_f /= t_f.norm(dim=-1, keepdim=True)
+            s = (i_f @ t_f.T).squeeze().item()
+        # map cosine (-1..1) to 0..1
+        return float((s + 1.0) / 2.0)
+
+_CLIP: Optional[_ClipHelper] = None
+def _get_clip():
+    global _CLIP
+    if _CLIP is None and _HAS_CLIP:
+        _CLIP = _ClipHelper()
+    return _CLIP
+
+def sample_visuals(
     video_path: str,
     start_s: float,
     end_s: float,
     text_hint: str = "",
-    frames_per_take: int = 3,
-) -> FrameScores:
+    max_samples: int = 3
+) -> Tuple[float, float, float, float]:
+    """
+    Returns (face_q, scene_q, vtx_sim, scene_cut_flag[0/1])
+    scene_q is the mean of blur_q, exposure_q, motion_q.
+    """
+    if not os.path.exists(video_path):
+        return 0.0, 0.0, 0.0, 0.0
+
+    dur = max(0.001, end_s - start_s)
+    ts = np.linspace(start_s, end_s, num=max_samples, endpoint=True)
     cap = cv2.VideoCapture(video_path)
-    if not cap.isOpened():
-        raise RuntimeError(f"Cannot open video: {video_path}")
     fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
-    total = cap.get(cv2.CAP_PROP_FRAME_COUNT) or 0
-    duration = total / fps if total > 0 else (end_s - start_s)
+    prev_frame = None
+    samples: List[VSample] = []
 
-    # pick indices at start/mid/end of the span
-    t0 = max(0.0, start_s)
-    t1 = max(t0, (start_s + end_s) / 2.0)
-    t2 = max(t1, end_s - 0.001)
-    times = [t0, t1, t2][:frames_per_take]
+    clip = _get_clip()
 
-    face_scores, scene_scores, vtx_scores = [], [], []
-    for t in times:
-        idx = int(t * fps)
-        frame = _safe_read_frame(cap, idx)
-        if frame is None:
+    for t in ts:
+        cap.set(cv2.CAP_PROP_POS_MSEC, t * 1000.0)
+        ok, frame = cap.read()
+        if not ok or frame is None:
             continue
-        faces = _detect_faces(frame)
-        face_scores.append(_face_center_score(frame, faces))
-        # scene quality: sharpness * exposure
-        sharp = _variance_of_laplacian(frame)
-        sharp_norm = max(0.0, min(1.0, (sharp - 50.0) / 400.0))  # rough 0..1
-        scene_scores.append(0.5 * sharp_norm + 0.5 * _exposure_score(frame))
-        vtx_scores.append(_clip_similarity(frame, text_hint))
+
+        f = _face_score(frame)
+        b = _blur_score(frame)
+        e = _exposure_score(frame)
+        m = _motion_score(prev_frame, frame)
+        vtx = clip.sim(frame, text_hint) if clip else 0.0
+
+        samples.append(VSample(t=float(t), face_q=f, blur_q=b, exposure_q=e, motion_q=m, vtx_sim=vtx))
+        prev_frame = frame
 
     cap.release()
-    if not face_scores:
-        face_scores = [0.0]
-    if not scene_scores:
-        scene_scores = [0.5]
-    if not vtx_scores:
-        vtx_scores = [0.0]
 
-    return FrameScores(
-        face_q=float(np.clip(np.mean(face_scores), 0.0, 1.0)),
-        scene_q=float(np.clip(np.mean(scene_scores), 0.0, 1.0)),
-        vtx_sim=float(np.clip(np.mean(vtx_scores), 0.0, 1.0)),
-    )
+    if not samples:
+        return 0.0, 0.0, 0.0, 0.0
+
+    face_q = float(np.mean([s.face_q for s in samples]))
+    scene_q = float(np.mean([(s.blur_q + s.exposure_q + s.motion_q)/3.0 for s in samples]))
+    vtx_sim = float(np.mean([s.vtx_sim for s in samples]))
+
+    # scene-cut flag (very rough): large motion dip or big brightness jump
+    sc = 0.0
+    if len(samples) >= 2:
+        diffs = []
+        br = []
+        for i in range(1, len(samples)):
+            diffs.append(abs(samples[i].motion_q - samples[i-1].motion_q))
+            br.append(abs(samples[i].exposure_q - samples[i-1].exposure_q))
+        if (max(diffs) if diffs else 0) > 0.45 or (max(br) if br else 0) > 0.5:
+            sc = 1.0
+
+    return face_q, scene_q, vtx_sim, sc
+PY
