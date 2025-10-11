@@ -160,3 +160,4 @@ def score_take(t: Take, slot: str) -> float:
         W_SCENE*float(t.scene_q) +
         W_VTX*float(t.vtx_sim)
     )
+
