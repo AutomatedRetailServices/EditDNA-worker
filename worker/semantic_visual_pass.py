@@ -1,3 +1,4 @@
+# overwrite with the full implementation
 cat > /workspace/editdna/app/worker/semantic_visual_pass.py <<'PY'
 from __future__ import annotations
 import os, re
@@ -10,8 +11,8 @@ print("🧠 [semantic_visual_pass] Semantic pipeline active.", flush=True)
 W_SEM = float(os.getenv("W_SEM", "1.2"))
 W_FACE = float(os.getenv("W_FACE", "0.8"))
 W_SCENE = float(os.getenv("W_SCENE", "0.5"))
-W_PROD = float(os.getenv("W_PROD", "0.0"))  # keep 0.0 if no product detector yet
-W_OCR  = float(os.getenv("W_OCR",  "0.0"))  # keep 0.0 if no OCR yet
+W_PROD = float(os.getenv("W_PROD", "0.0"))  # 0.0 if no product detector yet
+W_OCR  = float(os.getenv("W_OCR",  "0.0"))  # 0.0 if no OCR yet
 W_VTX  = float(os.getenv("W_VTX",  "0.8"))
 
 SEM_DUP_THRESHOLD = float(os.getenv("SEM_DUP_THRESHOLD", "0.88"))
@@ -28,7 +29,7 @@ RETRY_TOKENS = re.compile(
     re.I,
 )
 
-# -------- Embeddings (local model with TF-IDF fallback) --------
+# -------- Embeddings (SentenceTransformer with TF-IDF fallback) --------
 _embedder = None
 _use_tfidf = False
 
@@ -62,7 +63,6 @@ def _emb(texts: List[str]):
         return V, _cos
 
 def _cos_pair(a, b):
-    import numpy as np
     if hasattr(a, "shape"):
         a = a.reshape(1,-1)
     if hasattr(b, "shape"):
@@ -99,14 +99,13 @@ def tag_slot(t: Take, outline_hint: Optional[Dict]=None) -> str:
     for slot in SLOT_LABELS:
         if any(k in txt for k in KEYS[slot]):
             return slot
-    # heuristic fallback
     if len(txt.split()) > 25:
         return "PROOF"
     if "made of" in txt or "includes" in txt:
         return "FEATURE"
     return "HOOK"
 
-# -------- Retry / filler + dedup --------
+# -------- Retry/filler + dedup --------
 def _is_retry_or_noise(text: str) -> bool:
     words = (text or "").split()
     fillers = sum(1 for w in words if w.lower() in {"uh","um","like","so","okay","sorry"})
@@ -170,12 +169,10 @@ def stitch_chain(takes: List[Take]) -> List[Take]:
 
 # -------- Scoring --------
 def score_take(t: Take, slot: str) -> float:
-    # slot constraints
     if slot in SLOT_REQUIRE_PRODUCT and not t.has_product:
         return -1.0
     if slot in SLOT_REQUIRE_OCR_CTA and t.ocr_hit < 1:
         return -1.0
-    # semantic base (penalize retries)
     sem = 1.0
     if _is_retry_or_noise(t.text):
         sem -= 0.5
