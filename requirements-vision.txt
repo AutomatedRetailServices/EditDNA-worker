@@ -1,0 +1,4 @@
+opencv-python-headless>=4.10.0.84
+Pillow>=10.3.0
+# Optional: CLIP for visual<->text sim. If it fails to build, the code still runs with vtx_sim=0.
+open-clip-torch>=2.24.0
