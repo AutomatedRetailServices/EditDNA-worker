@@ -279,4 +279,9 @@ def process(req: ProcessRequest) -> JSONResponse:
     except Exception as e:
         return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
 
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run("app:app", host="0.0.0.0", port=8000)
+
+
 
