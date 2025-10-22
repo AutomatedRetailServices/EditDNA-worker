@@ -72,18 +72,9 @@ fi
 # optional: ASR deps (heavy, only if ASR_ENABLED=1)
 if [[ "${ASR_ENABLED}" == "1" && -f "${PYROOT}/requirements-asr.txt" ]]; then
   echo "ASR_ENABLED=1 → installing ASR deps (Torch+Whisper)…"
-  python3 -m pip install -r "${PYROOT}/requirements-asr.txt" >/dev/null 2>&1 || true
-fi
-
-# -------- launch worker --------
-echo "RQ worker starting..."
-exec python3 - <<'PY'
-import os, redis
-from rq import Worker, Queue
-ru = os.environ['REDIS_URL']
-qn = os.environ.get('QUEUE','default')
-conn = redis.from_url(ru)
-q = Queue(qn, connection=conn)
-print(f"*** Listening on {qn}...", flush=True)
-Worker([q], connection=conn).work(burst=False)
-PY
+  python3 -m pip install -r "${PYROOT}/requirements-asr.txt" >/dev/null 2>&1 || true#!/usr/bin/env bash
+set -euo pipefail
+REDIS_URL="${REDIS_URL:?Set REDIS_URL}"
+QUEUE_NAME="${QUEUE_NAME:-default}"
+export PYTHONPATH="/app:${PYTHONPATH:-}"
+exec rq worker -u "$REDIS_URL" --worker-ttl 1200 "$QUEUE_NAME"
