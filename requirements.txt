@@ -1,6 +1,28 @@
-boto3>=1.28
-redis>=6.0
-rq>=2.6.0
-requests>=2.31
+--extra-index-url https://download.pytorch.org/whl/cu121
+
+# Core runtime
+fastapi>=0.110
+uvicorn[standard]>=0.23
+requests>=2.32
+boto3>=1.34
+redis>=5.0
+rq>=2.6
 brotlicffi>=1.0.9
 zstandard>=0.22
+
+# Torch (CUDA 12.1) + ASR
+torch==2.3.1
+torchaudio==2.3.1
+openai-whisper==20231117
+
+# Vision
+opencv-python-headless>=4.10.0.84
+Pillow>=10.3.0
+numpy>=1.26
+
+# NLP / Semantic
+sentence-transformers>=2.7.0
+scikit-learn>=1.3
+
+# CLIP (optional)
+open-clip-torch>=2.24.0
