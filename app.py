@@ -1,219 +1,193 @@
-# app.py — EditDNA worker API with robust ffmpeg encoder selection
-from __future__ import annotations
-
-import os
-import json
-import shlex
-import subprocess
-import uuid
-from datetime import datetime
+# app.py — RunPod worker: process -> render proxy -> upload to S3
+import os, re, json, time, shutil, uuid, subprocess
 from pathlib import Path
-from typing import Any, Dict, List, Optional
-from urllib.parse import urlparse
-from urllib.request import urlretrieve
-
 from fastapi import FastAPI, HTTPException
-from fastapi.responses import JSONResponse
-from pydantic import BaseModel, HttpUrl
+from pydantic import BaseModel, Field
+from typing import Optional
 
-APP_VERSION = "1.3.2"
+# ---- optional: use your s3_utils if available ----
+S3_UTILS = None
+try:
+    import s3_utils  # must provide: upload_file(local_path, key, bucket=..., region=..., content_type=..., acl=...)
+    S3_UTILS = s3_utils
+except Exception:
+    S3_UTILS = None
 
-# ---------- Paths ----------
-HOME = Path.home()
-OUT_DIR = HOME / "outputs"
-PROXY_DIR = HOME / "proxies"
-TMP_DIR = HOME / "tmp"
-for d in (OUT_DIR, PROXY_DIR, TMP_DIR):
-    d.mkdir(parents=True, exist_ok=True)
+try:
+    import boto3  # fallback uploader
+except Exception:
+    boto3 = None
 
-# ---------- FFmpeg paths ----------
-FFMPEG = os.getenv("FFMPEG_BIN", "ffmpeg")
-FFPROBE = os.getenv("FFPROBE_BIN", "ffprobe")
+# --------- env / paths ----------
+FFMPEG_BIN  = os.getenv("FFMPEG_BIN", "/usr/bin/ffmpeg")
+FFPROBE_BIN = os.getenv("FFPROBE_BIN", "/usr/bin/ffprobe")
 
-def _run_subproc(cmd: List[str], check=True) -> subprocess.CompletedProcess:
-    print("[$]", " ".join(shlex.quote(c) for c in cmd), flush=True)
-    return subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, check=check, text=True)
+OUT_DIR = Path(os.getenv("OUT_DIR", "/root/outputs")).resolve()
+TMP_DIR = Path(os.getenv("TMP_DIR", "/root/tmp")).resolve()
+PROXY_DIR = Path(os.getenv("PROXY_DIR", "/root/proxies")).resolve()
 
-def _has_encoder(name: str) -> bool:
+# S3 config
+S3_BUCKET   = os.getenv("S3_BUCKET")  # REQUIRED if you want upload
+AWS_REGION  = os.getenv("AWS_REGION") or os.getenv("AWS_DEFAULT_REGION") or "us-east-1"
+S3_PREFIX   = os.getenv("S3_PREFIX", "editdna/outputs")
+PRESIGN_SEC = int(os.getenv("PRESIGN_EXPIRES", "3600"))
+S3_ACL      = os.getenv("S3_ACL", "private")  # "private" or "public-read"
+
+OUT_DIR.mkdir(parents=True, exist_ok=True)
+TMP_DIR.mkdir(parents=True, exist_ok=True)
+PROXY_DIR.mkdir(parents=True, exist_ok=True)
+
+app = FastAPI(title="editdna", version="1.3.1")
+
+# ---------- Models ----------
+class ProcessIn(BaseModel):
+    input_url: str
+    mode: str = Field(default="best")
+    portrait: bool = True
+    max_duration: int = 15  # seconds
+
+# ---------- Helpers ----------
+def run(cmd: list[str]) -> str:
+    p = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+    if p.returncode != 0:
+        raise RuntimeError(p.stdout)
+    return p.stdout
+
+def ffmpeg_has(name: str) -> bool:
     try:
-        out = subprocess.run([FFMPEG, "-hide_banner", "-encoders"],
-                             stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, check=False).stdout
-        return name in out
+        out = run([FFMPEG_BIN, "-hide_banner", "-encoders"])
+        return (re.search(rf"\b{name}\b", out) is not None)
     except Exception:
         return False
 
-def _pick_h264_encoder() -> Dict[str, List[str]]:
+def pick_video_encoder() -> tuple[list[str], str]:
     """
-    Decide best H.264 encoder and its safe flags for this ffmpeg build.
-    Returns dict with 'vcodec' and 'vflags'.
+    Returns (video_args, encoder_name) tuned for broad compatibility.
     """
-    # Prefer libx264 if present
-    if _has_encoder("libx264"):
-        print("[ffmpeg] using libx264", flush=True)
-        return {
-            "vcodec": ["-c:v", "libx264"],
-            "vflags": ["-preset", "veryfast", "-crf", "28", "-pix_fmt", "yuv420p"]
-        }
-    # Fallback to the builtin 'h264' encoder (no -preset support)
-    if _has_encoder(" h264 "):  # note spaces in listing lines
-        print("[ffmpeg] libx264 not found; falling back to builtin h264 encoder", flush=True)
-        return {
-            "vcodec": ["-c:v", "h264"],
-            "vflags": ["-global_header", "-pix_fmt", "yuv420p"]
-        }
-    # Last resort: try mpeg4 so the pipeline still runs
-    print("[ffmpeg] no H.264 encoder available; falling back to mpeg4 (compat)", flush=True)
-    return {
-        "vcodec": ["-c:v", "mpeg4"],
-        "vflags": ["-qscale:v", "5", "-pix_fmt", "yuv420p"]
-    }
+    if ffmpeg_has("libx264"):
+        # software x264 — always available on our image, highest compatibility
+        return (["-c:v", "libx264", "-preset", "veryfast", "-crf", "23"], "libx264")
+    if ffmpeg_has("libopenh264"):
+        # fallback if x264 somehow missing
+        return (["-c:v", "libopenh264", "-b:v", "2500k", "-maxrate", "2500k", "-bufsize", "5000k"], "libopenh264")
+    # worst-case generic
+    return (["-c:v", "h264"], "h264")
 
-H264 = _pick_h264_encoder()
+def _download_to_tmp(url: str) -> Path:
+    # use ffmpeg to download and normalize container quickly
+    stem = Path(url.split("/")[-1]).stem or f"src_{uuid.uuid4().hex}"
+    tmp_path = TMP_DIR / f"src_{uuid.uuid4().hex}_{stem}.mp4"
+    # copy/stream into mp4 (no re-encode) if possible
+    run([FFMPEG_BIN, "-y", "-i", url, "-c", "copy", "-movflags", "+faststart", str(tmp_path)])
+    return tmp_path
 
-print(f"[boot] FFMPEG={FFMPEG}", flush=True)
-print(f"[boot] FFPROBE={FFPROBE}", flush=True)
-
-# ---------- Models ----------
-class RenderRequest(BaseModel):
-    session_id: Optional[str] = "session"
-    files: List[str | HttpUrl]
-    output_prefix: Optional[str] = "editdna/outputs"
-    portrait: Optional[bool] = True
-    mode: Optional[str] = "concat"  # "best"|"first"|"concat"
-    max_duration: Optional[int] = None
-    take_top_k: Optional[int] = None
-    min_clip_seconds: Optional[float] = None
-    max_clip_seconds: Optional[float] = None
-    drop_silent: Optional[bool] = True
-    drop_black: Optional[bool] = True
-    with_captions: Optional[bool] = False
-
-class ProcessRequest(BaseModel):
-    session_id: Optional[str] = "session"
-    mode: Optional[str] = "best"
-    input_url: Optional[str] = None
-    files: Optional[List[str | HttpUrl]] = None
-    portrait: Optional[bool] = True
-    max_duration: Optional[int] = 60
-    output_prefix: Optional[str] = "editdna/outputs"
-
-# ---------- Helpers ----------
-def _safe_name(url_or_path: str) -> str:
-    parsed = urlparse(url_or_path)
-    base = os.path.basename(parsed.path) or "input"
-    base = base.replace(" ", "_")
-    return base
-
-def _run_or_raise(cmd: List[str]) -> None:
-    proc = _run_subproc(cmd, check=False)
-    if proc.returncode != 0:
-        raise RuntimeError(f"Command failed ({proc.returncode}): {' '.join(shlex.quote(c) for c in cmd)}\n{proc.stdout}")
-
-def _http_base() -> Optional[str]:
-    host_env = os.getenv("PUBLIC_BASE")
-    if host_env:
-        return host_env.rstrip("/")
-    return None
-
-# ---------- Proxy pipeline ----------
-def build_proxy(input_url: str, portrait: bool = True, max_seconds: Optional[int] = None) -> Path:
-    src_name = _safe_name(input_url)
-    local_src = TMP_DIR / f"src_{uuid.uuid4().hex}_{src_name}"
-    if str(input_url).startswith("http"):
-        urlretrieve(input_url, local_src)
-    else:
-        _run_or_raise(["/bin/sh", "-lc", f"cp {shlex.quote(str(input_url))} {shlex.quote(str(local_src))}"])
-
+def _make_proxy(src: Path, portrait: bool, tmax: int) -> Path:
+    enc_args, enc_name = pick_video_encoder()
+    proxy = PROXY_DIR / f"proxy_{uuid.uuid4().hex}.mp4"
+    # letterbox to 1080x1920 if portrait else 1920x1080
     if portrait:
-        scale_filter = 'scale=1080:trunc(ow/a/2)*2:force_original_aspect_ratio=decrease,pad=1080:1920:(1080-iw)/2:(1920-ih)/2'
+        scale_pad = 'scale=1080:trunc(ow/a/2)*2:force_original_aspect_ratio=decrease,pad=1080:1920:(1080-iw)/2:(1920-ih)/2'
+        out_w, out_h = 1080, 1920
     else:
-        scale_filter = 'scale=960:trunc(ow/a/2)*2:force_original_aspect_ratio=decrease,pad=960:540:(960-iw)/2:(540-ih)/2'
+        scale_pad = 'scale=1920:trunc(ow/a/2)*2:force_original_aspect_ratio=decrease,pad=1920:1080:(1920-iw)/2:(1080-ih)/2'
+        out_w, out_h = 1920, 1080
 
-    limit = ["-t", str(int(max_seconds))] if max_seconds and max_seconds > 0 else []
-
-    proxy_path = PROXY_DIR / f"proxy_{uuid.uuid4().hex}.mp4"
     cmd = [
-        FFMPEG, "-y", "-ss", "0", "-i", str(local_src),
+        FFMPEG_BIN, "-y",
+        "-ss", "0", "-i", str(src),
         "-f", "lavfi", "-i", "anullsrc=channel_layout=mono:sample_rate=48000",
-        *limit,
+        "-t", str(int(tmax)),
         "-map", "0:v:0", "-map", "1:a:0",
-        "-vf", f"{scale_filter},fps=24",
-        # video codec + flags (auto-selected)
-        *H264["vcodec"], *H264["vflags"],
-        # audio
+        "-vf", f"{scale_pad},fps=24",
+        *enc_args,
+        "-pix_fmt", "yuv420p",
+        "-g", "48",
         "-c:a", "aac", "-ar", "48000", "-ac", "1", "-b:a", "128k",
         "-shortest", "-movflags", "+faststart",
-        str(proxy_path)
+        str(proxy),
     ]
-    _run_or_raise(cmd)
-    return proxy_path
+    log = run(cmd)
+    print(f"[ffmpeg] using {enc_name}\n{log[:4000]}")
+    return proxy
 
-def pick_good_takes(proxies: List[Path], mode: str = "best", take_top_k: Optional[int] = 1) -> List[Path]:
-    if not proxies:
-        return []
-    if mode == "concat":
-        return proxies
-    if mode in ("best", "first"):
-        k = take_top_k or 1
-        return proxies[:k]
-    return proxies[:1]
+def _upload_s3(local: Path) -> dict:
+    """
+    Returns dict with bucket/key/s3_url/https_url/presigned_url
+    """
+    if not S3_BUCKET:
+        return {}
 
-def render_concat(takes: List[Path], output_prefix: str = "editdna/outputs") -> Path:
-    OUT_DIR.mkdir(parents=True, exist_ok=True)
-    out_file = OUT_DIR / f"{Path(output_prefix).name}_{uuid.uuid4().hex}.mp4"
+    key = f"{S3_PREFIX.strip('/')}/{int(time.time())}_{local.name}"
+    if S3_UTILS is not None:
+        info = S3_UTILS.upload_file(
+            str(local), key,
+            bucket=S3_BUCKET, region=AWS_REGION,
+            content_type="video/mp4", acl=S3_ACL
+        )
+        # presign if private
+        if S3_ACL != "public-read":
+            try:
+                presigned = S3_UTILS.presigned_url(key, bucket=S3_BUCKET, region=AWS_REGION, expires=PRESIGN_SEC)
+            except Exception:
+                presigned = None
+        else:
+            presigned = info.get("https_url")
+        return {
+            **info,
+            "presigned_url": presigned
+        }
 
-    if len(takes) == 1:
-        _run_or_raise([FFMPEG, "-y", "-i", str(takes[0]), "-c", "copy", "-movflags", "+faststart", str(out_file)])
-        return out_file
+    # Fallback inline if s3_utils not importable
+    if boto3 is None:
+        return {}
+    s3 = boto3.client("s3", region_name=AWS_REGION)
+    extra = {"ContentType": "video/mp4"}
+    if S3_ACL:
+        extra["ACL"] = S3_ACL
+    with open(local, "rb") as f:
+        s3.upload_fileobj(f, S3_BUCKET, key, ExtraArgs=extra)
+    https_url = f"https://{S3_BUCKET}.s3.amazonaws.com/{key}"
+    presigned = https_url
+    if S3_ACL != "public-read":
+        presigned = s3.generate_presigned_url(
+            "get_object",
+            Params={"Bucket": S3_BUCKET, "Key": key},
+            ExpiresIn=PRESIGN_SEC
+        )
+    return {
+        "bucket": S3_BUCKET,
+        "key": key,
+        "s3_url": f"s3://{S3_BUCKET}/{key}",
+        "https_url": https_url,
+        "presigned_url": presigned,
+        "region": AWS_REGION,
+    }
 
-    list_txt = TMP_DIR / f"concat_{uuid.uuid4().hex}.txt"
-    with list_txt.open("w") as f:
-        for p in takes:
-            f.write(f"file '{p.as_posix()}'\n")
-    _run_or_raise([FFMPEG, "-y", "-f", "concat", "-safe", "0", "-i", str(list_txt), "-c", "copy", "-movflags", "+faststart", str(out_file)])
-    return out_file
-
-# ---------- Routes ----------
-app = FastAPI(title="editdna", version=APP_VERSION)
-
+# ---------- Endpoints ----------
 @app.get("/")
-def root() -> JSONResponse:
-    return JSONResponse({"ok": True, "service": "editdna", "version": APP_VERSION, "time": int(datetime.utcnow().timestamp())})
-
-@app.get("/health")
-def health() -> JSONResponse:
-    return JSONResponse({
-        "ok": True,
-        "version": APP_VERSION,
-        "ffmpeg": FFMPEG,
-        "ffprobe": FFPROBE,
-        "encoder": " ".join(H264["vcodec"])
-    })
+def root():
+    return {"ok": True, "service": "editdna", "version": "1.3.1", "time": int(time.time())}
 
 @app.post("/process")
-def process(req: ProcessRequest) -> JSONResponse:
+def process(req: ProcessIn):
     try:
-        session_id = req.session_id or "session"
-        files = req.files or ([req.input_url] if req.input_url else [])
-        if not files:
-            raise HTTPException(status_code=400, detail="Provide input_url or files[]")
+        src = _download_to_tmp(req.input_url)
+        proxy = _make_proxy(src, req.portrait, req.max_duration)
 
-        proxies = [build_proxy(str(f), portrait=bool(req.portrait), max_seconds=req.max_duration) for f in files]
-        takes = pick_good_takes(proxies, mode=req.mode or "best", take_top_k=1)
-        out_path = render_concat(takes, output_prefix=req.output_prefix or "editdna/outputs")
-        base = _http_base()
+        # here you’d normally do the semantic pipeline; for this demo we just publish the proxy
+        out_name = f"outputs_{uuid.uuid4().hex}.mp4"
+        final_path = OUT_DIR / out_name
+        shutil.copy2(proxy, final_path)
 
-        return JSONResponse({
+        s3_info = _upload_s3(final_path)
+        return {
             "ok": True,
-            "session_id": session_id,
-            "mode": req.mode or "best",
-            "inputs": [str(f) for f in files],
-            "output_path": out_path.as_posix(),
-            "output_url_hint": (f"{base}/{out_path.relative_to(HOME).as_posix()}" if base else None),
-        })
+            "session_id": "session",
+            "mode": req.mode,
+            "inputs": [req.input_url],
+            "output_path": str(final_path),
+            "s3": s3_info or None,
+            "output_url_hint": (s3_info.get("presigned_url") if s3_info else None),
+        }
     except Exception as e:
-        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
-
-if __name__ == "__main__":
-    import uvicorn
-    uvicorn.run("app:app", host="0.0.0.0", port=8000)
+        return {"ok": False, "error": str(e)}
