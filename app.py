@@ -1,4 +1,4 @@
-# app.py — web API for EditDNA (with synchronous /process + proxy pipeline + RunPod autoscale)
+# app.py — EditDNA worker API with robust ffmpeg encoder selection
 from __future__ import annotations
 
 import os
@@ -16,19 +16,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, HttpUrl
 
-# Optional Redis / RQ: app still works without them for /process
-try:
-    from redis import Redis  # type: ignore
-    from rq import Queue     # type: ignore
-    from rq.job import Job   # type: ignore
-    HAVE_RQ = True
-except Exception:
-    HAVE_RQ = False
-    Redis = None            # type: ignore
-    Queue = None            # type: ignore
-    Job = None              # type: ignore
-
-APP_VERSION = "1.3.2-openh264"
+APP_VERSION = "1.3.2"
 
 # ---------- Paths ----------
 HOME = Path.home()
@@ -38,54 +26,52 @@ TMP_DIR = HOME / "tmp"
 for d in (OUT_DIR, PROXY_DIR, TMP_DIR):
     d.mkdir(parents=True, exist_ok=True)
 
-# ---------- Optional Redis / RQ setup ----------
-if HAVE_RQ:
-    REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379/0")
+# ---------- FFmpeg paths ----------
+FFMPEG = os.getenv("FFMPEG_BIN", "ffmpeg")
+FFPROBE = os.getenv("FFPROBE_BIN", "ffprobe")
+
+def _run_subproc(cmd: List[str], check=True) -> subprocess.CompletedProcess:
+    print("[$]", " ".join(shlex.quote(c) for c in cmd), flush=True)
+    return subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, check=check, text=True)
+
+def _has_encoder(name: str) -> bool:
     try:
-        redis = Redis.from_url(REDIS_URL)  # type: ignore
-        queue = Queue("default", connection=redis)  # type: ignore
+        out = subprocess.run([FFMPEG, "-hide_banner", "-encoders"],
+                             stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, check=False).stdout
+        return name in out
     except Exception:
-        redis = None
-        queue = None
-else:
-    redis = None
-    queue = None
+        return False
 
-# ---- RunPod autoscale helpers (start on enqueue; stop handled elsewhere) ----
-import requests  # add to requirements.txt if not present
+def _pick_h264_encoder() -> Dict[str, List[str]]:
+    """
+    Decide best H.264 encoder and its safe flags for this ffmpeg build.
+    Returns dict with 'vcodec' and 'vflags'.
+    """
+    # Prefer libx264 if present
+    if _has_encoder("libx264"):
+        print("[ffmpeg] using libx264", flush=True)
+        return {
+            "vcodec": ["-c:v", "libx264"],
+            "vflags": ["-preset", "veryfast", "-crf", "28", "-pix_fmt", "yuv420p"]
+        }
+    # Fallback to the builtin 'h264' encoder (no -preset support)
+    if _has_encoder(" h264 "):  # note spaces in listing lines
+        print("[ffmpeg] libx264 not found; falling back to builtin h264 encoder", flush=True)
+        return {
+            "vcodec": ["-c:v", "h264"],
+            "vflags": ["-global_header", "-pix_fmt", "yuv420p"]
+        }
+    # Last resort: try mpeg4 so the pipeline still runs
+    print("[ffmpeg] no H.264 encoder available; falling back to mpeg4 (compat)", flush=True)
+    return {
+        "vcodec": ["-c:v", "mpeg4"],
+        "vflags": ["-qscale:v", "5", "-pix_fmt", "yuv420p"]
+    }
 
-RUNPOD_API_KEY = os.getenv("RUNPOD_API_KEY")           # set in Render env if you use autoscale
-RUNPOD_TEMPLATE_ID = os.getenv("RUNPOD_TEMPLATE_ID")   # your RunPod template id
-RP_API = "https://api.runpod.ai/v2"
-RP_HEADERS = (
-    {"Authorization": f"Bearer {RUNPOD_API_KEY}", "Content-Type": "application/json"}
-    if RUNPOD_API_KEY else None
-)
+H264 = _pick_h264_encoder()
 
-def _rp_enabled() -> bool:
-    return bool(RUNPOD_API_KEY and RUNPOD_TEMPLATE_ID and RP_HEADERS)
-
-def _rp_list_running() -> list[dict]:
-    if not _rp_enabled():
-        return []
-    try:
-        pods = requests.get(f"{RP_API}/pods", headers=RP_HEADERS, timeout=20).json().get("data", [])
-        return [p for p in pods if p.get("templateId") == RUNPOD_TEMPLATE_ID and p.get("desiredStatus") == "RUNNING"]
-    except Exception:
-        return []
-
-def _rp_start_one() -> None:
-    if not _rp_enabled():
-        return
-    try:
-        requests.post(
-            f"{RP_API}/pods",
-            headers=RP_HEADERS,
-            data=json.dumps({"templateId": RUNPOD_TEMPLATE_ID}),
-            timeout=30,
-        )
-    except Exception:
-        pass  # silent fail – web API still returns job_id
+print(f"[boot] FFMPEG={FFMPEG}", flush=True)
+print(f"[boot] FFPROBE={FFPROBE}", flush=True)
 
 # ---------- Models ----------
 class RenderRequest(BaseModel):
@@ -115,12 +101,13 @@ class ProcessRequest(BaseModel):
 def _safe_name(url_or_path: str) -> str:
     parsed = urlparse(url_or_path)
     base = os.path.basename(parsed.path) or "input"
-    return base.replace(" ", "_")
+    base = base.replace(" ", "_")
+    return base
 
-def _run(cmd: str) -> None:
-    proc = subprocess.run(shlex.split(cmd), stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+def _run_or_raise(cmd: List[str]) -> None:
+    proc = _run_subproc(cmd, check=False)
     if proc.returncode != 0:
-        raise RuntimeError(f"Command failed ({proc.returncode}): {cmd}\n{proc.stdout.decode(errors='ignore')}")
+        raise RuntimeError(f"Command failed ({proc.returncode}): {' '.join(shlex.quote(c) for c in cmd)}\n{proc.stdout}")
 
 def _http_base() -> Optional[str]:
     host_env = os.getenv("PUBLIC_BASE")
@@ -128,34 +115,37 @@ def _http_base() -> Optional[str]:
         return host_env.rstrip("/")
     return None
 
-# ---------- Proxy pipeline (uses libopenh264) ----------
+# ---------- Proxy pipeline ----------
 def build_proxy(input_url: str, portrait: bool = True, max_seconds: Optional[int] = None) -> Path:
     src_name = _safe_name(input_url)
     local_src = TMP_DIR / f"src_{uuid.uuid4().hex}_{src_name}"
     if str(input_url).startswith("http"):
         urlretrieve(input_url, local_src)
     else:
-        _run(f'cp {shlex.quote(str(input_url))} {shlex.quote(str(local_src))}')
+        _run_or_raise(["/bin/sh", "-lc", f"cp {shlex.quote(str(input_url))} {shlex.quote(str(local_src))}"])
 
     if portrait:
         scale_filter = 'scale=1080:trunc(ow/a/2)*2:force_original_aspect_ratio=decrease,pad=1080:1920:(1080-iw)/2:(1920-ih)/2'
     else:
         scale_filter = 'scale=960:trunc(ow/a/2)*2:force_original_aspect_ratio=decrease,pad=960:540:(960-iw)/2:(540-ih)/2'
 
-    limit = f"-t {int(max_seconds)}" if max_seconds and max_seconds > 0 else ""
-    proxy_path = PROXY_DIR / f"proxy_{uuid.uuid4().hex}.mp4"
+    limit = ["-t", str(int(max_seconds))] if max_seconds and max_seconds > 0 else []
 
-    # IMPORTANT: libopenh264, no -preset/-crf
-    cmd = (
-        f'ffmpeg -y -ss 0 -i {shlex.quote(str(local_src))} '
-        f'-f lavfi -i anullsrc=channel_layout=mono:sample_rate=48000 '
-        f'{limit} -map 0:v:0 -map 1:a:0 '
-        f'-vf "{scale_filter},fps=24" '
-        f'-c:v libopenh264 -b:v 2500k -maxrate 2500k -bufsize 5000k -pix_fmt yuv420p -g 48 '
-        f'-c:a aac -ar 48000 -ac 1 -b:a 128k '
-        f'-shortest -movflags +faststart {shlex.quote(str(proxy_path))}'
-    )
-    _run(cmd)
+    proxy_path = PROXY_DIR / f"proxy_{uuid.uuid4().hex}.mp4"
+    cmd = [
+        FFMPEG, "-y", "-ss", "0", "-i", str(local_src),
+        "-f", "lavfi", "-i", "anullsrc=channel_layout=mono:sample_rate=48000",
+        *limit,
+        "-map", "0:v:0", "-map", "1:a:0",
+        "-vf", f"{scale_filter},fps=24",
+        # video codec + flags (auto-selected)
+        *H264["vcodec"], *H264["vflags"],
+        # audio
+        "-c:a", "aac", "-ar", "48000", "-ac", "1", "-b:a", "128k",
+        "-shortest", "-movflags", "+faststart",
+        str(proxy_path)
+    ]
+    _run_or_raise(cmd)
     return proxy_path
 
 def pick_good_takes(proxies: List[Path], mode: str = "best", take_top_k: Optional[int] = 1) -> List[Path]:
@@ -173,37 +163,15 @@ def render_concat(takes: List[Path], output_prefix: str = "editdna/outputs") -> 
     out_file = OUT_DIR / f"{Path(output_prefix).name}_{uuid.uuid4().hex}.mp4"
 
     if len(takes) == 1:
-        # remux only
-        _run(f'ffmpeg -y -i {shlex.quote(str(takes[0]))} -c copy -movflags +faststart {shlex.quote(str(out_file))}')
+        _run_or_raise([FFMPEG, "-y", "-i", str(takes[0]), "-c", "copy", "-movflags", "+faststart", str(out_file)])
         return out_file
 
     list_txt = TMP_DIR / f"concat_{uuid.uuid4().hex}.txt"
     with list_txt.open("w") as f:
         for p in takes:
             f.write(f"file '{p.as_posix()}'\n")
-    # stream-copy concat (works if streams match). If it fails, the caller should re-encode externally.
-    _run(f'ffmpeg -y -f concat -safe 0 -i {shlex.quote(str(list_txt))} -c copy -movflags +faststart {shlex.quote(str(out_file))}')
+    _run_or_raise([FFMPEG, "-y", "-f", "concat", "-safe", "0", "-i", str(list_txt), "-c", "copy", "-movflags", "+faststart", str(out_file)])
     return out_file
-
-# ---------- RQ helpers ----------
-def _job_payload(job: "Job") -> Dict[str, Any]:  # type: ignore
-    status = job.get_status(refresh=True)
-    result = job.result if status == "finished" else None
-    error = job.exc_info if status == "failed" else None
-    return {
-        "job_id": job.id,
-        "status": status,
-        "result": result,
-        "error": error,
-        "enqueued_at": job.enqueued_at.isoformat() if job.enqueued_at else None,
-        "ended_at": job.ended_at.isoformat() if job.ended_at else None,
-    }
-
-def _get_job_or_404(job_id: str) -> "Job":  # type: ignore
-    try:
-        return Job.fetch(job_id, connection=redis)  # type: ignore
-    except Exception:
-        raise HTTPException(status_code=404, detail="Not Found")
 
 # ---------- Routes ----------
 app = FastAPI(title="editdna", version=APP_VERSION)
@@ -214,53 +182,13 @@ def root() -> JSONResponse:
 
 @app.get("/health")
 def health() -> JSONResponse:
-    redis_ok = False
-    q_count: Optional[int] = None
-    if HAVE_RQ and redis is not None and queue is not None:
-        try:
-            redis_ok = bool(redis.ping())  # type: ignore
-        except Exception:
-            redis_ok = False
-        try:
-            q_count = queue.count  # type: ignore
-        except Exception:
-            q_count = None
     return JSONResponse({
         "ok": True,
         "version": APP_VERSION,
-        "queue": {"enabled": HAVE_RQ and queue is not None, "name": getattr(queue, "name", None), "pending": q_count},
+        "ffmpeg": FFMPEG,
+        "ffprobe": FFPROBE,
+        "encoder": " ".join(H264["vcodec"])
     })
-
-@app.get("/jobs/{job_id}")
-def get_job(job_id: str) -> JSONResponse:
-    if not (HAVE_RQ and redis is not None):
-        raise HTTPException(status_code=503, detail="RQ/Redis not available")
-    job = _get_job_or_404(job_id)
-    return JSONResponse(_job_payload(job))
-
-@app.post("/render")
-def render(req: RenderRequest) -> JSONResponse:
-    if not (HAVE_RQ and queue is not None):
-        raise HTTPException(status_code=503, detail="RQ/Redis not available")
-
-    payload = req.dict()
-    job = queue.enqueue(  # type: ignore
-        "tasks.job_render",
-        payload,
-        job_timeout=60 * 60,
-        result_ttl=86400,
-        ttl=7200,
-    )
-
-    # autoscale: start RunPod GPU if queue has jobs and no pod running
-    try:
-        pending = queue.count  # type: ignore
-        if pending and not _rp_list_running():
-            _rp_start_one()
-    except Exception:
-        pass
-
-    return JSONResponse({"job_id": job.id, "session_id": req.session_id or "session"})
 
 @app.post("/process")
 def process(req: ProcessRequest) -> JSONResponse:
@@ -289,4 +217,3 @@ def process(req: ProcessRequest) -> JSONResponse:
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run("app:app", host="0.0.0.0", port=8000)
-
