@@ -1,5 +1,4 @@
 # app.py — web API for EditDNA (with synchronous /process + proxy pipeline + RunPod autoscale)
-
 from __future__ import annotations
 
 import os
@@ -29,7 +28,7 @@ except Exception:
     Queue = None            # type: ignore
     Job = None              # type: ignore
 
-APP_VERSION = "1.3.1"
+APP_VERSION = "1.3.2-openh264"
 
 # ---------- Paths ----------
 HOME = Path.home()
@@ -55,7 +54,7 @@ else:
 # ---- RunPod autoscale helpers (start on enqueue; stop handled elsewhere) ----
 import requests  # add to requirements.txt if not present
 
-RUNPOD_API_KEY = os.getenv("RUNPOD_API_KEY")           # set in Render env
+RUNPOD_API_KEY = os.getenv("RUNPOD_API_KEY")           # set in Render env if you use autoscale
 RUNPOD_TEMPLATE_ID = os.getenv("RUNPOD_TEMPLATE_ID")   # your RunPod template id
 RP_API = "https://api.runpod.ai/v2"
 RP_HEADERS = (
@@ -79,8 +78,12 @@ def _rp_start_one() -> None:
     if not _rp_enabled():
         return
     try:
-        requests.post(f"{RP_API}/pods", headers=RP_HEADERS,
-                      data=json.dumps({"templateId": RUNPOD_TEMPLATE_ID}), timeout=30)
+        requests.post(
+            f"{RP_API}/pods",
+            headers=RP_HEADERS,
+            data=json.dumps({"templateId": RUNPOD_TEMPLATE_ID}),
+            timeout=30,
+        )
     except Exception:
         pass  # silent fail – web API still returns job_id
 
@@ -112,8 +115,7 @@ class ProcessRequest(BaseModel):
 def _safe_name(url_or_path: str) -> str:
     parsed = urlparse(url_or_path)
     base = os.path.basename(parsed.path) or "input"
-    base = base.replace(" ", "_")
-    return base
+    return base.replace(" ", "_")
 
 def _run(cmd: str) -> None:
     proc = subprocess.run(shlex.split(cmd), stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
@@ -126,7 +128,7 @@ def _http_base() -> Optional[str]:
         return host_env.rstrip("/")
     return None
 
-# ---------- Proxy pipeline ----------
+# ---------- Proxy pipeline (uses libopenh264) ----------
 def build_proxy(input_url: str, portrait: bool = True, max_seconds: Optional[int] = None) -> Path:
     src_name = _safe_name(input_url)
     local_src = TMP_DIR / f"src_{uuid.uuid4().hex}_{src_name}"
@@ -142,12 +144,15 @@ def build_proxy(input_url: str, portrait: bool = True, max_seconds: Optional[int
 
     limit = f"-t {int(max_seconds)}" if max_seconds and max_seconds > 0 else ""
     proxy_path = PROXY_DIR / f"proxy_{uuid.uuid4().hex}.mp4"
+
+    # IMPORTANT: libopenh264, no -preset/-crf
     cmd = (
         f'ffmpeg -y -ss 0 -i {shlex.quote(str(local_src))} '
         f'-f lavfi -i anullsrc=channel_layout=mono:sample_rate=48000 '
         f'{limit} -map 0:v:0 -map 1:a:0 '
         f'-vf "{scale_filter},fps=24" '
-        f'-c:v libx264 -preset veryfast -crf 28 -c:a aac -ar 48000 -ac 1 '
+        f'-c:v libopenh264 -b:v 2500k -maxrate 2500k -bufsize 5000k -pix_fmt yuv420p -g 48 '
+        f'-c:a aac -ar 48000 -ac 1 -b:a 128k '
         f'-shortest -movflags +faststart {shlex.quote(str(proxy_path))}'
     )
     _run(cmd)
@@ -168,6 +173,7 @@ def render_concat(takes: List[Path], output_prefix: str = "editdna/outputs") -> 
     out_file = OUT_DIR / f"{Path(output_prefix).name}_{uuid.uuid4().hex}.mp4"
 
     if len(takes) == 1:
+        # remux only
         _run(f'ffmpeg -y -i {shlex.quote(str(takes[0]))} -c copy -movflags +faststart {shlex.quote(str(out_file))}')
         return out_file
 
@@ -175,6 +181,7 @@ def render_concat(takes: List[Path], output_prefix: str = "editdna/outputs") -> 
     with list_txt.open("w") as f:
         for p in takes:
             f.write(f"file '{p.as_posix()}'\n")
+    # stream-copy concat (works if streams match). If it fails, the caller should re-encode externally.
     _run(f'ffmpeg -y -f concat -safe 0 -i {shlex.quote(str(list_txt))} -c copy -movflags +faststart {shlex.quote(str(out_file))}')
     return out_file
 
@@ -245,7 +252,7 @@ def render(req: RenderRequest) -> JSONResponse:
         ttl=7200,
     )
 
-    # ---- autoscale: start RunPod GPU if queue has jobs and no pod running ----
+    # autoscale: start RunPod GPU if queue has jobs and no pod running
     try:
         pending = queue.count  # type: ignore
         if pending and not _rp_list_running():
@@ -282,6 +289,3 @@ def process(req: ProcessRequest) -> JSONResponse:
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run("app:app", host="0.0.0.0", port=8000)
-
-
-
