@@ -284,3 +284,4 @@ if __name__ == "__main__":
         print("usage: python3 jobs.py /abs/path/input.mp4")
         raise SystemExit(2)
     print(json.dumps(job_render(sys.argv[1]), indent=2))
+
