@@ -1,7 +1,7 @@
-# tasks.py — adapter between the web payload and jobs.py
+# tasks.py — adapter between web payload and jobs.py
 import os, tempfile, requests
 from typing import Dict, Any
-from jobs import job_render  # your existing full pipeline
+from jobs import job_render  # uses your full FFmpeg + ASR pipeline
 
 def _download_first_file(payload: Dict[str, Any]) -> str:
     files = payload.get("files") or []
@@ -17,7 +17,7 @@ def _download_first_file(payload: Dict[str, Any]) -> str:
     print(f"[tasks] downloaded to {path}", flush=True)
     return path
 
-def job_render(payload: Dict[str, Any]) -> Dict[str, Any]:
+def run(payload: Dict[str, Any]) -> Dict[str, Any]:
     print(f"[tasks] job_render payload keys={list(payload.keys())}", flush=True)
     if "max_duration" in payload and payload["max_duration"]:
         os.environ["MAX_DURATION_SEC"] = str(payload["max_duration"])
