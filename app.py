@@ -1,169 +1,124 @@
-# app.py — RunPod worker: proxy video + upload to S3 + presigned URL
-from __future__ import annotations
-import os, tempfile, subprocess, uuid, shutil, pathlib
-from typing import Optional
-import boto3, requests
+# --- add near top ---
 from fastapi import FastAPI, HTTPException
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
+from typing import Optional
+import os, subprocess, tempfile, uuid, json
 
-# ------------ Config (env) ------------
-FFMPEG = os.getenv("FFMPEG_BIN", "/usr/bin/ffmpeg")
-FFPROBE = os.getenv("FFPROBE_BIN", "/usr/bin/ffprobe")
+FFMPEG = os.environ.get("FFMPEG_BIN", "ffmpeg")
 
-AWS_REGION = os.getenv("AWS_DEFAULT_REGION") or os.getenv("AWS_REGION") or "us-east-1"
-S3_BUCKET = os.getenv("S3_BUCKET")  # REQUIRED
-S3_PREFIX = os.getenv("S3_PREFIX", "editdna/outputs")
-S3_ACL = os.getenv("S3_ACL", "private")  # "private" or "public-read"
-PRESIGN_EXPIRES = int(os.getenv("PRESIGN_EXPIRES", "3600"))  # seconds
-
-# local working dirs
-TMP_DIR = "/root/tmp"
-OUT_DIR = "/root/proxies"
-pathlib.Path(TMP_DIR).mkdir(parents=True, exist_ok=True)
-pathlib.Path(OUT_DIR).mkdir(parents=True, exist_ok=True)
-
-# ------------ FastAPI ------------
-app = FastAPI(title="editdna", version="1.3.1")
-
-class ProcessIn(BaseModel):
-    input_url: str = Field(..., description="HTTP/S URL of a video file")
-    mode: str = Field(default="best")
-    portrait: bool = Field(default=True)
-    max_duration: int = Field(default=15, ge=1, le=600)
-    output_prefix: Optional[str] = Field(default=None, description="Optional S3 prefix override")
-
-def _download_to_tmp(url: str) -> str:
-    # stream download with requests (no curl dependency)
-    fn = f"src_{uuid.uuid4().hex}.mp4"
-    dst = os.path.join(TMP_DIR, fn)
-    with requests.get(url, stream=True, timeout=60) as r:
-        r.raise_for_status()
-        with open(dst, "wb") as f:
-            for chunk in r.iter_content(chunk_size=1024 * 1024):
-                if chunk:
-                    f.write(chunk)
-    return dst
-
-def _probe_ok(path: str) -> bool:
-    try:
-        p = subprocess.run(
-            [FFPROBE, "-v", "error", "-show_format", "-show_streams", "-of", "json", path],
-            stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, check=False
-        )
-        return p.returncode == 0 and os.path.getsize(path) > 0
-    except Exception:
-        return False
-
-def _make_proxy(src: str, portrait: bool, max_seconds: int) -> tuple[str, str]:
-    """Return (path, encoder_used)."""
-    # scale+pad to 1080x1920 if portrait, else 1920x1080
-    if portrait:
-        vf = 'scale=1080:trunc(ow/a/2)*2:force_original_aspect_ratio=decrease,pad=1080:1920:(1080-iw)/2:(1920-ih)/2,fps=24'
-    else:
-        vf = 'scale=1920:trunc(ow/a/2)*2:force_original_aspect_ratio=decrease,pad=1920:1080:(1920-iw)/2:(1080-ih)/2,fps=24'
-
-    # Try libx264 first (present in this image). If it ever fails, fall back to native h264.
-    out_path = os.path.join(OUT_DIR, f"proxy_{uuid.uuid4().hex}.mp4")
-    base_cmd = [
-        FFMPEG, "-y",
-        "-ss", "0",
-        "-i", src,
-        "-f", "lavfi", "-i", "anullsrc=channel_layout=mono:sample_rate=48000",
-        "-t", str(int(max_seconds)),
-        "-map", "0:v:0", "-map", "1:a:0",
-        "-vf", vf,
-        "-c:v", "libx264", "-preset", "ultrafast", "-crf", "28",
-        "-c:a", "aac", "-ar", "48000", "-ac", "1",
-        "-shortest", "-movflags", "+faststart",
-        out_path,
-    ]
-
-    p = subprocess.run(base_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-    if p.returncode == 0 and os.path.exists(out_path) and os.path.getsize(out_path) > 0:
-        return out_path, "libx264"
-
-    # fallback encoder
-    fallback_cmd = base_cmd.copy()
-    i = fallback_cmd.index("-c:v")
-    fallback_cmd[i+1] = "h264"
-    p2 = subprocess.run(fallback_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-    if p2.returncode != 0 or not os.path.exists(out_path) or os.path.getsize(out_path) == 0:
-        raise RuntimeError(f"FFmpeg failed\n\nSTDERR:\n{p2.stderr}")
-    return out_path, "h264"
-
-def _s3_client():
-    return boto3.client("s3", region_name=AWS_REGION)
-
-def _s3_key_for(output_prefix: Optional[str], filename: str) -> str:
-    prefix = (output_prefix or S3_PREFIX).strip("/")
-    return f"{prefix}/{filename}"
-
-def _upload_and_presign(local_path: str, key: str) -> tuple[str, Optional[str]]:
-    s3 = _s3_client()
-    extra = {"ContentType": "video/mp4"}
-    if S3_ACL:
-        extra["ACL"] = S3_ACL
-    s3.upload_file(local_path, S3_BUCKET, key, ExtraArgs=extra)
-    s3_url = f"s3://{S3_BUCKET}/{key}"
-
-    url = None
-    if S3_ACL == "private":
-        url = s3.generate_presigned_url(
-            ClientMethod="get_object",
-            Params={"Bucket": S3_BUCKET, "Key": key},
-            ExpiresIn=PRESIGN_EXPIRES,
-        )
-    else:
-        # public-read -> no presign necessary (but still return https form)
-        url = f"https://{S3_BUCKET}.s3.amazonaws.com/{key}"
-    return s3_url, url
-
-@app.get("/")
-def root():
-    return {"ok": True, "service": "editdna", "version": "1.3.1", "time": int(__import__("time").time())}
-
-@app.get("/health")
-def health():
-    return {"ok": True, "ffmpeg": FFMPEG, "ffprobe": FFPROBE, "s3_bucket": S3_BUCKET or "(unset)"}
+class ProcIn(BaseModel):
+    input_url: str
+    mode: Optional[str] = "best"
+    portrait: Optional[bool] = True
+    # trim controls
+    start: Optional[float] = 0.0       # seconds to seek into source
+    max_duration: Optional[float] = 20 # seconds to keep
+    # audio controls: "original" (default) | "silent" | "mute"
+    audio: Optional[str] = "original"
+    # s3 output prefix (optional passthrough if your code uploads after)
+    output_prefix: Optional[str] = "editdna/test"
+    # choose encoder: libx264 | libopenh264 (default = libx264)
+    encoder: Optional[str] = "libx264"
 
 @app.post("/process")
-def process_video(p: ProcessIn):
-    if not S3_BUCKET:
-        raise HTTPException(status_code=500, detail="S3_BUCKET not configured on worker")
+def process_video(p: ProcIn):
+    # tmp files
+    tmp_dir = "/root/tmp"
+    out_dir = "/root/proxies"
+    os.makedirs(tmp_dir, exist_ok=True)
+    os.makedirs(out_dir, exist_ok=True)
 
-    tmp_src = out_path = None
+    src_name = f"src_{os.path.basename(p.input_url).split('?')[0]}"
+    tmp_in = os.path.join(tmp_dir, src_name if "." in src_name else src_name + ".mp4")
+    out_path = os.path.join(out_dir, f"proxy_{uuid.uuid4().hex}.mp4")
+
+    # 1) download
     try:
-        tmp_src = _download_to_tmp(p.input_url)
-        if not _probe_ok(tmp_src):
-            raise HTTPException(status_code=400, detail="Downloaded file is not a valid video")
-
-        out_path, encoder = _make_proxy(tmp_src, p.portrait, p.max_duration)
-
-        # upload to S3
-        fname = os.path.basename(out_path)
-        key = _s3_key_for(p.output_prefix, fname)
-        s3_url, http_url = _upload_and_presign(out_path, key)
-
-        return {
-            "ok": True,
-            "session_id": "session",
-            "mode": p.mode,
-            "inputs": [p.input_url],
-            "encoder": encoder,
-            "output_path": out_path,
-            "s3_bucket": S3_BUCKET,
-            "s3_key": key,
-            "s3_url": s3_url,
-            "url": http_url,
-        }
-    except HTTPException:
-        raise
+        # curl is installed in your template now; if not, use python requests instead
+        subprocess.run(["curl", "-L", "-o", tmp_in, p.input_url], check=True)
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"{type(e).__name__}: {e}")
-    finally:
-        for f in (tmp_src,):
-            try:
-                if f and os.path.exists(f):
-                    os.remove(f)
-            except Exception:
-                pass
+        raise HTTPException(400, f"download failed: {e}")
+
+    # 2) build ffmpeg command
+    vf = "scale=1080:trunc(ow/a/2)*2:force_original_aspect_ratio=decrease"
+    if p.portrait:
+        vf += ",pad=1080:1920:(1080-iw)/2:(1920-ih)/2"
+    vf += ",fps=24"
+
+    # choose encoder safely
+    vcodec = "libx264" if p.encoder not in ("libx264", "libopenh264") else p.encoder
+    vargs = [FFMPEG, "-y"]
+
+    # seek/trim
+    start = max(0.0, float(p.start or 0))
+    dur = max(0.1, float(p.max_duration or 20))
+    if start > 0:
+        vargs += ["-ss", str(start)]
+    vargs += ["-i", tmp_in]
+
+    # audio mapping
+    audio_mode = (p.audio or "original").lower()
+    if audio_mode == "original":
+        # try to map original audio; if the source has none, ffmpeg will fail mapping 0:a:0
+        # fallback: re-run without audio on failure
+        map_audio = True
+    elif audio_mode == "silent":
+        vargs += ["-f", "lavfi", "-i", "anullsrc=channel_layout=mono:sample_rate=48000"]
+        map_audio = "silent"
+    else:  # mute
+        map_audio = False
+
+    # maps
+    if map_audio is True:
+        vargs += ["-map", "0:v:0", "-map", "0:a:0"]
+    elif map_audio == "silent":
+        vargs += ["-map", "0:v:0", "-map", "1:a:0"]
+    else:
+        vargs += ["-map", "0:v:0"]
+
+    # filters + codecs
+    vargs += [
+        "-t", str(dur),
+        "-vf", vf,
+        "-c:v", vcodec,
+        "-preset", "veryfast",
+        "-crf", "23",
+        "-pix_fmt", "yuv420p",
+    ]
+    if map_audio:
+        vargs += ["-c:a", "aac", "-ar", "48000", "-ac", "1", "-b:a", "128k"]
+    vargs += ["-movflags", "+faststart", out_path]
+
+    # 3) run ffmpeg (with graceful fallback if original audio missing)
+    try:
+        subprocess.run(vargs, check=True)
+    except subprocess.CalledProcessError as e:
+        if map_audio is True:
+            # retry without audio if the source had no audio stream
+            vargs2 = [arg for arg in vargs if arg not in ["-map","0:a:0","-c:a","aac","-ar","48000","-ac","1","-b:a","128k"]]
+            # remove the specific items (list cleanup)
+            cleaned = []
+            skip = 0
+            i = 0
+            while i < len(vargs2):
+                if i+1 < len(vargs2) and vargs2[i] == "-map" and vargs2[i+1] == "0:a:0":
+                    i += 2
+                    continue
+                if vargs2[i] in ["-c:a","-ar","-ac","-b:a"]:
+                    i += 2
+                    continue
+                cleaned.append(vargs2[i]); i += 1
+            subprocess.run(cleaned, check=True)
+        else:
+            raise HTTPException(500, f"FFmpeg failed: {e}")
+
+    # 4) (optional) upload to S3 – if your code already does this elsewhere, keep that.
+    resp = {
+        "ok": True,
+        "session_id": "session",
+        "inputs": [p.input_url],
+        "encoder": vcodec,
+        "output_path": out_path,
+        # if you also upload: include s3_bucket, key, url
+    }
+    return resp
