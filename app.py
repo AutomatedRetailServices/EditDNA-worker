@@ -1,124 +1,130 @@
-# --- add near top ---
-from fastapi import FastAPI, HTTPException
-from pydantic import BaseModel
-from typing import Optional
-import os, subprocess, tempfile, uuid, json
+# app.py — unified web API + worker with Redis-backed logs
+import os, json, time, threading, logging, traceback
+from http.server import BaseHTTPRequestHandler, HTTPServer
+from urllib.parse import urlparse
+import redis
+from jobs import process_job
 
-FFMPEG = os.environ.get("FFMPEG_BIN", "ffmpeg")
+LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()
+logging.basicConfig(level=LOG_LEVEL, format="%(asctime)s %(levelname)s %(message)s")
+log = logging.getLogger("editdna")
 
-class ProcIn(BaseModel):
-    input_url: str
-    mode: Optional[str] = "best"
-    portrait: Optional[bool] = True
-    # trim controls
-    start: Optional[float] = 0.0       # seconds to seek into source
-    max_duration: Optional[float] = 20 # seconds to keep
-    # audio controls: "original" (default) | "silent" | "mute"
-    audio: Optional[str] = "original"
-    # s3 output prefix (optional passthrough if your code uploads after)
-    output_prefix: Optional[str] = "editdna/test"
-    # choose encoder: libx264 | libopenh264 (default = libx264)
-    encoder: Optional[str] = "libx264"
+REDIS_URL = os.environ["REDIS_URL"]
+r = redis.from_url(REDIS_URL, decode_responses=True)
+JOBS_Q = "editdna:jobs"
+JOB_KEY = lambda jid: f"editdna:job:{jid}"
+JOB_LOG = lambda jid: f"editdna:job:{jid}:logs"
 
-@app.post("/process")
-def process_video(p: ProcIn):
-    # tmp files
-    tmp_dir = "/root/tmp"
-    out_dir = "/root/proxies"
-    os.makedirs(tmp_dir, exist_ok=True)
-    os.makedirs(out_dir, exist_ok=True)
+def push_log(job_id, msg):
+    line = f"{int(time.time())}|{msg}"
+    with r.pipeline() as p:
+        p.rpush(JOB_LOG(job_id), line)
+        p.ltrim(JOB_LOG(job_id), -400, -1)
+        p.execute()
+    log.info(f"[{job_id}] {msg}")
 
-    src_name = f"src_{os.path.basename(p.input_url).split('?')[0]}"
-    tmp_in = os.path.join(tmp_dir, src_name if "." in src_name else src_name + ".mp4")
-    out_path = os.path.join(out_dir, f"proxy_{uuid.uuid4().hex}.mp4")
+def update_job(job_id, **kv):
+    kv["updated_at"] = int(time.time())
+    r.hset(JOB_KEY(job_id), mapping=kv)
 
-    # 1) download
-    try:
-        # curl is installed in your template now; if not, use python requests instead
-        subprocess.run(["curl", "-L", "-o", tmp_in, p.input_url], check=True)
-    except Exception as e:
-        raise HTTPException(400, f"download failed: {e}")
+def new_job_id():
+    return str(int(time.time() * 1000))
 
-    # 2) build ffmpeg command
-    vf = "scale=1080:trunc(ow/a/2)*2:force_original_aspect_ratio=decrease"
-    if p.portrait:
-        vf += ",pad=1080:1920:(1080-iw)/2:(1920-ih)/2"
-    vf += ",fps=24"
+class Handler(BaseHTTPRequestHandler):
+    def _json(self, code, obj):
+        data = json.dumps(obj).encode("utf-8")
+        self.send_response(code)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Access-Control-Allow-Origin", "*")
+        self.send_header("Access-Control-Allow-Headers", "*")
+        self.send_header("Access-Control-Allow-Methods", "GET,POST,OPTIONS")
+        self.end_headers()
+        self.wfile.write(data)
 
-    # choose encoder safely
-    vcodec = "libx264" if p.encoder not in ("libx264", "libopenh264") else p.encoder
-    vargs = [FFMPEG, "-y"]
+    def do_OPTIONS(self): self._json(200, {"ok": True})
 
-    # seek/trim
-    start = max(0.0, float(p.start or 0))
-    dur = max(0.1, float(p.max_duration or 20))
-    if start > 0:
-        vargs += ["-ss", str(start)]
-    vargs += ["-i", tmp_in]
+    def do_POST(self):
+        if self.path == "/render":
+            length = int(self.headers.get("Content-Length", "0"))
+            body = json.loads(self.rfile.read(length) or b"{}")
+            files = body.get("files") or []
+            if not files:
+                return self._json(400, {"error": "files[] required"})
+            job_id = new_job_id()
+            job = {
+                "id": job_id,
+                "session_id": body.get("session_id", ""),
+                "files": json.dumps(files),
+                "portrait": str(bool(body.get("portrait", True))),
+                "max_duration": int(body.get("max_duration", 60)),
+                "audio": body.get("audio", "original"),
+                "output_prefix": body.get("output_prefix", "editdna/outputs"),
+                "status": "queued",
+                "created_at": int(time.time()),
+                "updated_at": int(time.time()),
+            }
+            r.hset(JOB_KEY(job_id), mapping=job)
+            r.lpush(JOBS_Q, job_id)
+            log.info(f"[{job_id}] queued")
+            return self._json(202, {"job_id": job_id, "status": "queued"})
+        self._json(404, {"error": "not found"})
 
-    # audio mapping
-    audio_mode = (p.audio or "original").lower()
-    if audio_mode == "original":
-        # try to map original audio; if the source has none, ffmpeg will fail mapping 0:a:0
-        # fallback: re-run without audio on failure
-        map_audio = True
-    elif audio_mode == "silent":
-        vargs += ["-f", "lavfi", "-i", "anullsrc=channel_layout=mono:sample_rate=48000"]
-        map_audio = "silent"
-    else:  # mute
-        map_audio = False
+    def do_GET(self):
+        url = urlparse(self.path)
+        if url.path == "/health":
+            try:
+                pong = r.ping()
+            except Exception as e:
+                return self._json(500, {"ok": False, "redis_error": str(e)})
+            return self._json(200, {"ok": True, "redis": pong})
+        if url.path.startswith("/jobs/"):
+            parts = url.path.split("/")
+            if len(parts) >= 3:
+                job_id = parts[2]
+                if len(parts) >= 4 and parts[3] == "logs":
+                    logs = r.lrange(JOB_LOG(job_id), 0, -1)
+                    return self._json(200, {"job_id": job_id, "logs": logs})
+                job = r.hgetall(JOB_KEY(job_id))
+                if not job:
+                    return self._json(404, {"error": "job not found"})
+                return self._json(200, job)
+        self._json(404, {"error": "not found"})
 
-    # maps
-    if map_audio is True:
-        vargs += ["-map", "0:v:0", "-map", "0:a:0"]
-    elif map_audio == "silent":
-        vargs += ["-map", "0:v:0", "-map", "1:a:0"]
-    else:
-        vargs += ["-map", "0:v:0"]
+def run_web():
+    port = int(os.getenv("PORT", "8000"))
+    srv = HTTPServer(("0.0.0.0", port), Handler)
+    log.info(f"web listening on :{port}")
+    srv.serve_forever()
 
-    # filters + codecs
-    vargs += [
-        "-t", str(dur),
-        "-vf", vf,
-        "-c:v", vcodec,
-        "-preset", "veryfast",
-        "-crf", "23",
-        "-pix_fmt", "yuv420p",
-    ]
-    if map_audio:
-        vargs += ["-c:a", "aac", "-ar", "48000", "-ac", "1", "-b:a", "128k"]
-    vargs += ["-movflags", "+faststart", out_path]
+def worker_loop():
+    log.info("worker starting")
+    while True:
+        try:
+            job_id = r.rpop(JOBS_Q)
+            if not job_id:
+                time.sleep(1)
+                continue
+            update_job(job_id, status="processing")
+            push_log(job_id, "picked up by worker")
+            try:
+                process_job(job_id, r, push_log, update_job)
+                update_job(job_id, status="done")
+                push_log(job_id, "completed successfully")
+            except Exception as e:
+                tb = traceback.format_exc(limit=8)
+                update_job(job_id, status="error", error=str(e))
+                push_log(job_id, f"ERROR: {e}\n{tb}")
+        except Exception as e:
+            log.exception(f"worker_loop error: {e}")
+            time.sleep(2)
 
-    # 3) run ffmpeg (with graceful fallback if original audio missing)
-    try:
-        subprocess.run(vargs, check=True)
-    except subprocess.CalledProcessError as e:
-        if map_audio is True:
-            # retry without audio if the source had no audio stream
-            vargs2 = [arg for arg in vargs if arg not in ["-map","0:a:0","-c:a","aac","-ar","48000","-ac","1","-b:a","128k"]]
-            # remove the specific items (list cleanup)
-            cleaned = []
-            skip = 0
-            i = 0
-            while i < len(vargs2):
-                if i+1 < len(vargs2) and vargs2[i] == "-map" and vargs2[i+1] == "0:a:0":
-                    i += 2
-                    continue
-                if vargs2[i] in ["-c:a","-ar","-ac","-b:a"]:
-                    i += 2
-                    continue
-                cleaned.append(vargs2[i]); i += 1
-            subprocess.run(cleaned, check=True)
-        else:
-            raise HTTPException(500, f"FFmpeg failed: {e}")
-
-    # 4) (optional) upload to S3 – if your code already does this elsewhere, keep that.
-    resp = {
-        "ok": True,
-        "session_id": "session",
-        "inputs": [p.input_url],
-        "encoder": vcodec,
-        "output_path": out_path,
-        # if you also upload: include s3_bucket, key, url
-    }
-    return resp
+if __name__ == "__main__":
+    import sys
+    mode = sys.argv[1] if len(sys.argv) > 1 else "worker"
+    if mode == "web":
+        run_web()
+    elif mode == "worker":
+        worker_loop()
+    elif mode == "both":
+        threading.Thread(target=worker_loop, daemon=True).start()
+        run_web()
