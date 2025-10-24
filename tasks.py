@@ -1,31 +1,88 @@
-# tasks.py — bridge between web API (Render) and worker job (RunPod)
-import os, json, tempfile, requests
-from rq import Queue
-from redis import Redis
-from jobs import job_render
+# tasks.py — adapter: web payload -> local file -> jobs.job_render(local_path)
+import os
+import tempfile
+import requests
+from typing import Any, Dict, Optional
 
-# Connect to Redis (shared between web + worker)
-redis_url = os.getenv("REDIS_URL", "redis://localhost:6379/0")
-redis_conn = Redis.from_url(redis_url)
-q = Queue("default", connection=redis_conn)
+# Import your pipeline entry (rename to avoid name clash)
+from jobs import job_render as run_pipeline
 
-def enqueue_render_job(payload: dict):
-    """Enqueue a video render job."""
-    s3_key = payload.get("s3_key") or payload.get("video_url")
-    if not s3_key:
-        raise ValueError("Missing s3_key or video_url in payload")
 
-    # Enqueue background job
-    job = q.enqueue(job_render, s3_key, job_timeout=1800)
-    return {"job_id": job.id, "status": "queued"}
+def _download_to_tmp(url: str) -> str:
+    """
+    Downloads an http(s) video URL to a local temp file (mp4) and returns the path.
+    """
+    resp = requests.get(url, stream=True, timeout=120)
+    resp.raise_for_status()
+    fd, path = tempfile.mkstemp(suffix=".mp4")
+    with os.fdopen(fd, "wb") as f:
+        for chunk in resp.iter_content(1024 * 512):
+            if chunk:
+                f.write(chunk)
+    print(f"[tasks] downloaded -> {path}", flush=True)
+    return path
 
-def job_status(job_id: str):
-    """Fetch job status and results."""
-    from rq.job import Job
-    job = Job.fetch(job_id, connection=redis_conn)
-    data = {"id": job.id, "status": job.get_status()}
-    if job.is_finished:
-        data["result"] = job.result
-    elif job.is_failed:
-        data["error"] = str(job.exc_info)
-    return data
+
+def _resolve_input_path(payload: Dict[str, Any]) -> str:
+    """
+    Accepts several payload shapes and resolves to a LOCAL file path:
+      - { "files": ["https://...mp4", ...] }
+      - { "video_url": "https://...mp4" }
+      - { "s3_url": "https://bucket.s3....mp4" }
+      - { "local_path": "/abs/path/file.mp4" }  (advanced)
+    """
+    # Prefer `files[0]` if present
+    files = payload.get("files") or []
+    url: Optional[str] = None
+
+    if isinstance(files, list) and files:
+        url = files[0]
+    else:
+        # backward-compatible keys
+        url = (
+            payload.get("video_url")
+            or payload.get("s3_url")
+            or payload.get("s3_key")  # sometimes users pass a full https s3 key
+            or payload.get("input")   # anything else the web might send
+        )
+
+    if not url:
+        # allow advanced usage with a direct local path
+        local_path = payload.get("local_path")
+        if local_path and os.path.exists(local_path):
+            print(f"[tasks] using local_path={local_path}", flush=True)
+            return local_path
+        raise ValueError("No input video provided. Expected 'files[0]' or 'video_url' or 's3_url'.")
+
+    # If it already looks like a local path, use it
+    if isinstance(url, str) and url.startswith("/"):
+        print(f"[tasks] using local file: {url}", flush=True)
+        return url
+
+    # Else treat it as a downloadable URL (https S3 or public http)
+    return _download_to_tmp(str(url))
+
+
+def job_render(payload: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    RQ entrypoint: called as 'tasks.job_render' with the JSON payload from /render.
+    - Resolves the first input video to a local path.
+    - Applies optional env overrides (e.g., max_duration).
+    - Invokes your pipeline run_pipeline(local_path).
+    - Returns the pipeline's result dict.
+    """
+    print(f"[tasks] job_render payload keys={list(payload.keys())}", flush=True)
+
+    # Optional cap override
+    max_duration = payload.get("max_duration")
+    if max_duration:
+        os.environ["MAX_DURATION_SEC"] = str(max_duration)
+
+    # Resolve input to local file
+    local_path = _resolve_input_path(payload)
+
+    # Call your existing pipeline (expects a local file path)
+    result = run_pipeline(local_path)
+
+    print(f"[tasks] done. result keys={list(result.keys())}", flush=True)
+    return result
