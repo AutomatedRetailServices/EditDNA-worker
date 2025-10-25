@@ -1,4 +1,3 @@
-cat > /workspace/editdna/app/worker/semantic_visual_pass.py <<'PY'
 from __future__ import annotations
 import os, re
 from dataclasses import dataclass, field
@@ -54,10 +53,6 @@ def _emb(texts: List[str]):
         V = mdl.encode(texts, normalize_embeddings=True)
         return V, (lambda A,B: float((A*B).sum()))
 
-def _cos(a, b):
-    # a,b already normalized when using ST; TF-IDF uses provided similarity fn.
-    raise NotImplementedError  # not used directly
-
 # -------- Data model --------
 @dataclass
 class Take:
@@ -65,7 +60,6 @@ class Take:
     start: float
     end: float
     text: str = ""
-    # visual/semantic meta (optional fields — jobs.py fills some)
     face_q: float = 1.0
     scene_q: float = 1.0
     vtx_sim: float = 0.0
@@ -189,4 +183,3 @@ def score_take(t: Take, slot: str) -> float:
         W_VTX  * float(t.vtx_sim)
     )
     return float(score)
-PY
