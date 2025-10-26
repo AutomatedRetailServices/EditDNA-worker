@@ -1,57 +1,77 @@
-# jobs.py — EditDNA pipeline (ASR → semantic/visual → compose → render → S3)
+# jobs.py — EditDNA single-funnel composer + render (FFmpeg + S3)
 from __future__ import annotations
-import os, json, shlex, subprocess, tempfile, uuid, time
+import os, json, shlex, subprocess, tempfile, uuid, time, logging
 from dataclasses import dataclass, asdict
 from typing import List, Dict, Optional, Tuple
 
-# --- helpers for S3 ---
-from s3_utils import upload_file
+# --- logging ---
+LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()
+logging.basicConfig(level=LOG_LEVEL, format="%(asctime)s %(levelname)s %(message)s")
+log = logging.getLogger("editdna.jobs")
 
-# --- semantic/visual pass (fast + local) ---
-try:
-    from worker.semantic_visual_pass import (
-        Take, dedup_takes, tag_slot, score_take, stitch_chain
-    )
-    _HAS_SEM = True
-except Exception as e:
-    print(f"[jobs] semantic pass unavailable ({e}); using no-op.")
-    _HAS_SEM = False
-    @dataclass
-    class Take:
-        id: str; start: float; end: float; text: str = ""; meta: Dict = None
-        face_q: float = 1.0; scene_q: float = 1.0; vtx_sim: float = 0.0
-        has_product: bool = False; ocr_hit: int = 0
-    def dedup_takes(xs): return xs
-    def tag_slot(t): return "FEATURE"
-    def score_take(t, slot): return 1.0
-    def stitch_chain(xs): return xs
-
-# --- optional: ASR (whisper) ---
+# --- optional deps + helpers ---
 try:
     import whisper
     _HAS_WHISPER = True
 except Exception:
     _HAS_WHISPER = False
 
+# semantic + visual fusion
+try:
+    from worker.semantic_visual_pass import (
+        Take as SVTake,
+        dedup_takes,
+        tag_slot,
+        score_take,
+        stitch_chain
+    )
+    _HAS_SEM = True
+except Exception as e:
+    log.warning(f"[jobs] semantic_visual_pass unavailable: {e}")
+    _HAS_SEM = False
+
+# sentence-boundary (micro-cut) — optional
+try:
+    from worker.sentence_boundary import micro_split_and_clean
+    _HAS_SENT = True
+except Exception as e:
+    log.warning(f"[jobs] sentence_boundary unavailable: {e}")
+    _HAS_SENT = False
+
+# S3 helpers
+try:
+    from s3_utils import upload_file, presigned_url
+    _HAS_S3UTIL = True
+except Exception as e:
+    log.warning(f"[jobs] s3_utils not found ({e}), falling back to boto3")
+    _HAS_S3UTIL = False
+    import boto3
+    AWS_REGION = os.environ.get("AWS_DEFAULT_REGION") or os.environ.get("AWS_REGION") or "us-east-1"
+    _s3 = boto3.client("s3", region_name=AWS_REGION)
+
 # -------- env / config --------
-FFMPEG = os.getenv("FFMPEG_BIN", "ffmpeg")
-FFPROBE = os.getenv("FFPROBE_BIN", "ffprobe")
+FFMPEG = os.getenv("FFMPEG_BIN", "/usr/bin/ffmpeg")
+FFPROBE = os.getenv("FFPROBE_BIN", "/usr/bin/ffprobe")
 
 MAX_TAKE_SEC      = float(os.getenv("MAX_TAKE_SEC", "20"))
-MAX_DURATION_SEC  = float(os.getenv("MAX_DURATION_SEC", "180"))
-
+MAX_DURATION_SEC  = float(os.getenv("MAX_DURATION_SEC", "120"))
 ASR_ENABLED       = int(os.getenv("ASR_ENABLED", "1"))
 ASR_MODEL_SIZE    = os.getenv("ASR_MODEL_SIZE", "tiny")
 ASR_LANG          = os.getenv("ASR_LANG", "en")
 
-S3_BUCKET         = os.environ.get("S3_BUCKET")
-AWS_REGION        = os.environ.get("AWS_DEFAULT_REGION") or os.environ.get("AWS_REGION") or "us-east-1"
+# Funnel counts: HOOK, PROBLEM, BENEFITS, FEATURE, PROOF, CTA
+# 0 = unlimited, we merge BENEFITS into PROBLEM internally
+_FUNNEL_RAW = os.getenv("FUNNEL_COUNTS", "1,0,0,0,1,1").split(",")
+while len(_FUNNEL_RAW) < 6: _FUNNEL_RAW.append("0")
+F_HOOK, F_PROBLEM, F_BENEFITS, F_FEATURE, F_PROOF, F_CTA = [int(x or 0) for x in _FUNNEL_RAW]
 
-# Slot order: HOOK → PROBLEM/benefits → FEATURE → PROOF → CTA
-SLOT_ORDER = ["HOOK", "PROBLEM", "FEATURE", "PROOF", "CTA"]
+S3_BUCKET = os.environ.get("S3_BUCKET")
+AWS_REGION = os.environ.get("AWS_DEFAULT_REGION") or os.environ.get("AWS_REGION") or "us-east-1"
+OUT_PREFIX = os.getenv("S3_PREFIX", "editdna/outputs").rstrip("/")
 
+# ---------- small utilities ----------
 def _run(cmd: List[str], check=True) -> subprocess.CompletedProcess:
-    print("[ff] $", " ".join(shlex.quote(c) for c in cmd), flush=True)
+    log.info("[ff] $ " + " ".join(shlex.quote(c) for c in cmd))
     return subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=check)
 
 def _tmp(ext=""):
@@ -68,7 +88,7 @@ def probe_duration(path: str) -> float:
                     "-of", "default=nokey=1:noprint_wrappers=1", path], check=True)
         return _float(out.stdout.decode().strip())
     except Exception as e:
-        print("[ffprobe] duration failed:", e)
+        log.warning("[ffprobe] duration failed: %s", e)
         return 0.0
 
 # ---------- ASR ----------
@@ -76,7 +96,7 @@ def asr_transcribe(audio_path: str) -> List[Dict]:
     if not ASR_ENABLED or not _HAS_WHISPER:
         dur = probe_duration(audio_path)
         return [{"start": 0.0, "end": dur, "text": ""}]
-    print(f"[asr] loading whisper model: {ASR_MODEL_SIZE}")
+    log.info(f"[asr] loading whisper model: {ASR_MODEL_SIZE}")
     model = whisper.load_model(ASR_MODEL_SIZE)
     res = model.transcribe(audio_path, language=ASR_LANG, verbose=False)
     segs = []
@@ -88,26 +108,51 @@ def asr_transcribe(audio_path: str) -> List[Dict]:
     return segs
 
 # ---------- segmentation to takes ----------
+@dataclass
+class Take:
+    id: str
+    start: float
+    end: float
+    text: str
+    face_q: float = 1.0
+    scene_q: float = 1.0
+    vtx_sim: float = 0.0
+    has_product: bool = False
+    ocr_hit: int = 0
+    meta: Dict = None
+
 def segment_to_takes(video_path: str, segments: List[Dict]) -> List[Take]:
     takes: List[Take] = []
-    tid = 0
     for seg in segments:
         s, e, txt = float(seg["start"]), float(seg["end"]), seg.get("text","").strip()
         cur = s
         while cur < e:
             nxt = min(e, cur + MAX_TAKE_SEC)
-            if (nxt - cur) >= 1.0:  # avoid micro slivers
-                tid += 1
+            if (nxt - cur) >= 1.0:
                 takes.append(Take(
-                    id=f"T{tid:04d}",
-                    start=cur, end=nxt, text=txt,
-                    face_q=1.0, scene_q=1.0, vtx_sim=0.0,
-                    has_product=False, ocr_hit=0, meta={}
+                    id=f"T{len(takes)+1:04d}",
+                    start=cur, end=nxt, text=txt, meta={}
                 ))
             cur = nxt
     return takes
 
-# ---------- render helpers ----------
+# ---------- micro-cut sentence pass (optional) ----------
+def apply_micro_sentence_pass(video_path: str, takes: List[Take]) -> List[Take]:
+    """Split each take into cleaner sentence spans and drop retries/fillers; then rejoin adjacent good ones."""
+    if not _HAS_SENT:
+        return takes
+    refined: List[Take] = []
+    for t in takes:
+        spans = micro_split_and_clean(video_path, (t.start, t.end), t.text)  # returns list[(start,end,text)]
+        for (ss, ee, tx) in spans:
+            refined.append(Take(
+                id=f"{t.id}_s{len(refined)+1}", start=ss, end=ee, text=tx,
+                face_q=t.face_q, scene_q=t.scene_q, vtx_sim=t.vtx_sim,
+                has_product=t.has_product, ocr_hit=t.ocr_hit, meta=t.meta or {}
+            ))
+    return refined or takes
+
+# ---------- rendering ----------
 def ffmpeg_subclip(in_path: str, out_path: str, start: float, end: float) -> None:
     dur = max(0.0, end - start)
     cmd = [
@@ -121,10 +166,10 @@ def ffmpeg_subclip(in_path: str, out_path: str, start: float, end: float) -> Non
     ]
     _run(cmd)
 
-def ffmpeg_concat(parts: List[str], out_path: str) -> None:
+def ffmpeg_concat(tsv_paths: List[str], out_path: str) -> None:
     lst = _tmp(".txt")
     with open(lst, "w", encoding="utf-8") as f:
-        for p in parts:
+        for p in tsv_paths:
             f.write(f"file '{p}'\n")
     cmd = [
         FFMPEG, "-y",
@@ -138,166 +183,198 @@ def ffmpeg_concat(parts: List[str], out_path: str) -> None:
     try: os.remove(lst)
     except: pass
 
-# ---------- semantic selection ----------
-def _parse_counts() -> Dict[str, int]:
-    raw = os.getenv("FUNNEL_COUNTS", "0,0,0,0,0").strip()
-    try:
-        c_hook, c_prob, c_feat, c_proof, c_cta = [int(x) for x in raw.split(",")]
-    except Exception:
-        c_hook, c_prob, c_feat, c_proof, c_cta = 0, 0, 0, 0, 0
-    return {
-        "HOOK": c_hook, "PROBLEM": c_prob,
-        "FEATURE": c_feat, "PROOF": c_proof, "CTA": c_cta
-    }
+# ---------- composer ----------
+def select_by_funnel(sv_takes: List[SVTake]) -> Dict[str, List[SVTake]]:
+    """
+    Builds slot buckets using semantic tagging/scoring + counts from env.
+    BENEFITS are merged into PROBLEM internally.
+    """
+    if not _HAS_SEM:
+        # Fallback: everything becomes FEATURE
+        return {"HOOK":[], "PROBLEM":[], "FEATURE":[*sv_takes], "PROOF":[], "CTA":[]}
 
-def select_by_slots(takes: List[Take]) -> Dict[str, List[Take]]:
-    kept = dedup_takes(takes) if _HAS_SEM else takes
-    by_slot: Dict[str, List[Take]] = {k: [] for k in SLOT_ORDER}
-
-    for t in kept:
+    # Tag + score
+    buckets: Dict[str, List[SVTake]] = {"HOOK":[], "PROBLEM":[], "FEATURE":[], "PROOF":[], "CTA":[]}
+    for t in sv_takes:
         slot = tag_slot(t)
         t.meta["slot"] = slot
-        t.meta["score"] = score_take(t, slot) if _HAS_SEM else 1.0
-        if t.meta["score"] is None:
-            t.meta["score"] = 0.0
+        t.meta["score"] = score_take(t, slot)
         if t.meta["score"] >= 0:
-            by_slot[slot].append(t)
+            # Map BENEFITS -> PROBLEM if someone used that label upstream
+            if slot == "BENEFITS": slot = "PROBLEM"
+            buckets[slot].append(t)
 
-    # sort per slot by score desc
-    for k in by_slot:
-        by_slot[k] = sorted(by_slot[k], key=lambda x: x.meta.get("score", 0.0), reverse=True)
+    # Stitch longer demos where it matters
+    buckets["FEATURE"] = stitch_chain(buckets["FEATURE"])
+    buckets["PROOF"]   = stitch_chain(buckets["PROOF"])
 
-    # stitch longer chains for idea continuity
-    by_slot["FEATURE"] = stitch_chain(by_slot["FEATURE"])
-    by_slot["PROOF"]   = stitch_chain(by_slot["PROOF"])
-    by_slot["HOOK"]    = stitch_chain(by_slot["HOOK"])
-    # PROBLEM and CTA typically short; stitch anyway for safety:
-    by_slot["PROBLEM"] = stitch_chain(by_slot["PROBLEM"])
-    by_slot["CTA"]     = stitch_chain(by_slot["CTA"])
+    # Apply counts (0 = unlimited)
+    def pick(lst: List[SVTake], k: int) -> List[SVTake]:
+        if k == 0:  # unlimited
+            return sorted(lst, key=lambda x: x.meta.get("score",0.0), reverse=True)
+        return sorted(lst, key=lambda x: x.meta.get("score",0.0), reverse=True)[:k]
 
-    # apply caps per slot; 0 = unlimited
-    want = _parse_counts()
-    for k, limit in want.items():
-        if limit > 0:
-            by_slot[k] = by_slot[k][:limit]
-    return by_slot
+    # counts (BENEFITS merged into PROBLEM)
+    pick_hook    = pick(buckets["HOOK"],    F_HOOK)
+    pick_problem = pick(buckets["PROBLEM"], F_PROBLEM if F_PROBLEM>0 else 0)  # unlimited if 0
+    pick_feature = pick(buckets["FEATURE"], F_FEATURE if F_FEATURE>0 else 0)
+    pick_proof   = pick(buckets["PROOF"],   F_PROOF)
+    pick_cta     = pick(buckets["CTA"],     F_CTA)
 
-# ---------- compose final timeline ----------
-def build_timeline(by_slot: Dict[str, List[Take]], max_total: float) -> List[Take]:
-    """Walk HOOK→PROBLEM→FEATURE→PROOF→CTA and add clips until we hit max_total."""
-    tline: List[Take] = []
+    ordered = [*pick_hook, *pick_problem, *pick_feature, *pick_proof, *pick_cta]
+    return {
+        "HOOK": pick_hook,
+        "PROBLEM": pick_problem,
+        "FEATURE": pick_feature,
+        "PROOF": pick_proof,
+        "CTA": pick_cta,
+        "_ordered": ordered
+    }
+
+def lay_out_timeline(candidates: List[SVTake], max_secs: float) -> List[Tuple[float,float,SVTake]]:
+    """Trim to max runtime, preserving order. Returns list of (start,end,take)."""
+    timeline: List[Tuple[float,float,SVTake]] = []
     cur = 0.0
-    for slot in SLOT_ORDER:
-        for t in by_slot.get(slot, []):
-            dur = max(0.0, t.end - t.start)
-            if cur + dur <= max_total:
-                tline.append(t); cur += dur
-            else:
-                # trim last clip to fit remaining budget if any
-                remain = max(0.0, max_total - cur)
-                if remain >= 1.0:
-                    trimmed = Take(
-                        id=t.id, start=t.start, end=t.start + remain, text=t.text,
-                        face_q=t.face_q, scene_q=t.scene_q, vtx_sim=t.vtx_sim,
-                        has_product=t.has_product, ocr_hit=t.ocr_hit,
-                        meta=dict(t.meta or {})
-                    )
-                    tline.append(trimmed); cur += remain
-                return tline
-    return tline
+    for t in candidates:
+        dur = t.end - t.start
+        if cur + dur > max_secs:
+            remain = max(0.0, max_secs - cur)
+            if remain >= 0.8:
+                timeline.append((t.start, t.start+remain, t))
+                cur = max_secs
+            break
+        else:
+            timeline.append((t.start, t.end, t))
+            cur += dur
+        if cur >= max_secs: break
+    return timeline
 
-# ---------- render funnel ----------
-def render_funnel(video_path: str, by_slot: Dict[str, List[Take]]) -> Tuple[str, List[Dict]]:
-    timeline = build_timeline(by_slot, MAX_DURATION_SEC)
-    if not timeline:
-        # fallback: export a 3s black clip so API still returns something
-        final_path = _tmp(".mp4")
-        _run([
-            FFMPEG, "-y",
-            "-f", "lavfi", "-i", "color=c=black:s=1080x1920:d=3",
-            "-f", "lavfi", "-i", "anullsrc=channel_layout=stereo:sample_rate=44100",
-            "-shortest",
-            "-c:v", "libx264", "-preset", "fast", "-crf", "23",
-            "-c:a", "aac", "-b:a", "128k",
-            final_path
-        ])
-        return final_path, []
-    # export parts then concat
-    part_files, clip_meta = [], []
-    for i, t in enumerate(timeline, 1):
-        outp = _tmp(f".part{i:02d}.mp4")
-        ffmpeg_subclip(video_path, outp, t.start, t.end)
-        part_files.append(outp)
+# ---------- public job ----------
+def job_render(local_in: str) -> Dict:
+    """
+    Core job: ASR -> (optional sentence pass) -> semantic+visual select -> compose -> render -> S3
+    local_in must be a local path (tasks.py already downloads URLs)
+    """
+    assert S3_BUCKET, "S3_BUCKET env is required"
+
+    # 1) extract audio for ASR (whisper likes wav)
+    wav_path = _tmp(".wav")
+    _run([FFMPEG, "-y", "-i", local_in, "-vn", "-ac", "1", "-ar", "16000", wav_path])
+
+    # 2) ASR
+    segments = asr_transcribe(wav_path)
+    log.info(f"[asr] segments: {len(segments)}")
+
+    # 3) initial takes (bounded by MAX_TAKE_SEC)
+    takes = segment_to_takes(local_in, segments)
+    log.info(f"[seg] takes: {len(takes)} before micro-sentences")
+
+    # 4) micro-cut sentence pass
+    takes = apply_micro_sentence_pass(local_in, takes)
+    log.info(f"[seg] takes: {len(takes)} after micro-sentences")
+
+    # 5) adapt to semantic-visual layer
+    if _HAS_SEM:
+        sv_takes: List[SVTake] = [
+            SVTake(
+                id=t.id, start=t.start, end=t.end, text=t.text or "",
+                face_q=t.face_q, scene_q=t.scene_q, vtx_sim=t.vtx_sim,
+                has_product=t.has_product, ocr_hit=t.ocr_hit, meta=t.meta or {}
+            )
+            for t in takes
+        ]
+        sv_takes = dedup_takes(sv_takes)
+        by_slot = select_by_funnel(sv_takes)
+        ordered = by_slot["_ordered"]
+    else:
+        # fallback: dump first few takes up to cap
+        ordered = []
+        for t in takes:
+            ordered.append(SVTake(
+                id=t.id, start=t.start, end=t.end, text=t.text or "",
+                face_q=t.face_q, scene_q=t.scene_q, vtx_sim=t.vtx_sim,
+                has_product=t.has_product, ocr_hit=t.ocr_hit, meta=t.meta or {}
+            ))
+
+    # 6) build final timeline under MAX_DURATION_SEC
+    timeline = lay_out_timeline(ordered, MAX_DURATION_SEC)
+    log.info(f"[compose] timeline clips: {len(timeline)} (cap={MAX_DURATION_SEC}s)")
+
+    # 7) render parts + concat
+    tmp_parts = []
+    clip_meta = []
+    for i, (ss, ee, t) in enumerate(timeline, 1):
+        part = _tmp(f".part{i:02d}.mp4")
+        ffmpeg_subclip(local_in, part, ss, ee)
+        tmp_parts.append(part)
         clip_meta.append({
             "id": t.id, "slot": t.meta.get("slot"),
-            "start": t.start, "end": t.end,
+            "start": ss, "end": ee,
             "score": t.meta.get("score"),
             "face_q": t.face_q, "scene_q": t.scene_q, "vtx_sim": t.vtx_sim,
             "chain_ids": t.meta.get("chain_ids", [])
         })
+
     final_path = _tmp(".mp4")
-    ffmpeg_concat(part_files, final_path)
-    # cleanup
-    for p in part_files:
+    if tmp_parts:
+        ffmpeg_concat(tmp_parts, final_path)
+    else:
+        # always produce something
+        _run([
+            FFMPEG, "-y",
+            "-f", "lavfi", "-i", "color=c=black:s=1080x1920:d=1",
+            "-f", "lavfi", "-i", "anullsrc=channel_layout=stereo:sample_rate=44100",
+            "-shortest",
+            "-c:v", "libx264", "-preset", "fast", "-crf", "23",
+            "-pix_fmt", "yuv420p", "-g", "48",
+            "-c:a", "aac", "-b:a", "128k",
+            final_path
+        ])
+
+    # 8) upload
+    ts = int(time.time())
+    out_key = f"{OUT_PREFIX}/{uuid.uuid4().hex}_{ts}.mp4"
+
+    if _HAS_S3UTIL:
+        upload_file(final_path, out_key, bucket=S3_BUCKET, region=AWS_REGION, content_type="video/mp4")
+    else:
+        with open(final_path, "rb") as f:
+            _s3.upload_fileobj(f, S3_BUCKET, out_key, ExtraArgs={"ContentType":"video/mp4"})
+
+    https_url = f"https://{S3_BUCKET}.s3.{AWS_REGION}.amazonaws.com/{out_key}"
+    log.info(f"[jobs] uploaded final -> {https_url}")
+
+    # 9) clean
+    for p in tmp_parts:
         try: os.remove(p)
         except: pass
-    return final_path, clip_meta
-
-# ---------- public job ----------
-def job_render(local_path: str) -> Dict:
-    assert S3_BUCKET, "S3_BUCKET env is required"
-
-    # 1) extract audio for ASR (wav mono 16k)
-    wav_path = _tmp(".wav")
-    _run([FFMPEG, "-y", "-i", local_path, "-vn", "-ac", "1", "-ar", "16000", wav_path])
-
-    # 2) ASR
-    segments = asr_transcribe(wav_path)
-    print(f"[asr] segments: {len(segments)}")
-
-    # 3) split to takes
-    takes = segment_to_takes(local_path, segments)
-    print(f"[seg] takes: {len(takes)}")
-
-    # 4) select by slots (semantic aware; stitches long ideas)
-    by_slot = select_by_slots(takes)
-
-    # 5) render
-    out_path, clip_meta = render_funnel(local_path, by_slot)
-
-    # 6) upload
-    ts = int(time.time())
-    out_key = f"editdna/outputs/{uuid.uuid4().hex}_{ts}.mp4"
-    upload_file(out_path, out_key, bucket=S3_BUCKET, region=AWS_REGION, content_type="video/mp4")
-
-    data = {
-        "ok": True,
-        "input_local": local_path,
-        "duration_sec": probe_duration(out_path),
-        "s3_key": out_key,
-        "s3_url": f"s3://{S3_BUCKET}/{out_key}",
-        "https_url": f"https://{S3_BUCKET}.s3.{AWS_REGION}.amazonaws.com/{out_key}",
-        "clips": clip_meta,
-        "slots": {
-            k: [
-                {
-                    "id": t.id, "start": t.start, "end": t.end, "text": t.text,
-                    "meta": {"chain_ids": t.meta.get("chain_ids", [])},
-                    "face_q": t.face_q, "scene_q": t.scene_q, "vtx_sim": t.vtx_sim,
-                    "has_product": t.has_product, "ocr_hit": t.ocr_hit
-                } for t in by_slot.get(k, [])
-            ] for k in SLOT_ORDER
-        },
-        "semantic": bool(_HAS_SEM),
-        "vision": False,  # (wire up later if you enable vtx/ocr)
-        "asr": bool(ASR_ENABLED and _HAS_WHISPER),
-    }
-    # cleanup
+    try: os.remove(final_path)
+    except: pass
     try: os.remove(wav_path)
     except: pass
-    try: os.remove(out_path)
-    except: pass
-    return data
+
+    # 10) result
+    result = {
+        "ok": True,
+        "input_local": local_in,
+        "duration_sec": probe_duration(final_path) or sum((e-s) for s,e,_ in timeline),
+        "s3_key": out_key,
+        "s3_url": f"s3://{S3_BUCKET}/{out_key}",
+        "https_url": https_url,
+        "clips": clip_meta,
+        "slots": {
+            # best-effort surface (when semantic present)
+            "HOOK":  [c for c in clip_meta if c.get("slot")=="HOOK"],
+            "PROBLEM":[c for c in clip_meta if c.get("slot")=="PROBLEM"],
+            "FEATURE":[c for c in clip_meta if c.get("slot")=="FEATURE"],
+            "PROOF": [c for c in clip_meta if c.get("slot")=="PROOF"],
+            "CTA":   [c for c in clip_meta if c.get("slot")=="CTA"],
+        },
+        "semantic": bool(_HAS_SEM),
+        "vision": False,   # set True if you later wire vtx/scene scores here
+        "asr": bool(ASR_ENABLED and _HAS_WHISPER),
+    }
+    return result
 
 if __name__ == "__main__":
     import sys
