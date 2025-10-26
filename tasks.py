@@ -49,12 +49,13 @@ def _download_to_tmp(url: str) -> str:
 def job_render(payload: Union[str, bytes, Dict[str, Any], None]) -> Dict[str, Any]:
     """
     RQ entrypoint: normalize payload, download first file, call pipeline, return result.
-    Expected payload shape (from your web layer):
+    Expected payload shape (from the web layer):
+
       {
         "session_id": "...",
         "mode": "funnel",
         "files": ["https://.../raw.mp4"],
-        "options": { ...optional env-style overrides... }
+        "options": { ...env-style overrides... }
       }
     """
     data = _to_dict(payload)
@@ -73,14 +74,14 @@ def job_render(payload: Union[str, bytes, Dict[str, Any], None]) -> Dict[str, An
     src_url = files[0]
     local_path = _download_to_tmp(src_url)
     try:
-        result = pipeline_job_render(local_path)  # jobs.py version that requires a LOCAL PATH
+        result = pipeline_job_render(local_path)  # jobs.py expects LOCAL PATH
     finally:
         try:
             os.remove(local_path)
         except Exception:
             pass
 
-    # add some provenance
+    # provenance
     result["source_url"] = src_url
     result["session_id"] = data.get("session_id", "")
     return result
