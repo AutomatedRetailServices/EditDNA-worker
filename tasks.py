@@ -1,45 +1,86 @@
-# tasks.py — RQ entrypoints for EditDNA worker (download → pipeline → return)
-import os, tempfile, requests
-from typing import Dict, Any, List
-from rq import get_current_job
+# tasks.py — adapter that downloads input and calls the heavy pipeline
+import os, json, tempfile, requests
+from typing import Any, Dict, List, Union
 
-from jobs import job_render  # our pipeline (defined in jobs.py)
+# Your heavy pipeline lives in jobs.py and expects a LOCAL PATH argument
+from jobs import job_render as pipeline_job_render
 
-def _download_first(files: List[str]) -> str:
-    """Download the first URL to a tmp .mp4 and return local path."""
-    if not files:
-        raise ValueError("files[] is empty")
-    url = files[0]
-    # honor short timeouts so bad URLs don't hang the worker
-    with requests.get(url, stream=True, timeout=60) as r:
-        r.raise_for_status()
-        fd, path = tempfile.mkstemp(suffix=".mp4")
-        with os.fdopen(fd, "wb") as f:
-            for chunk in r.iter_content(1024 * 1024):
-                if chunk:
-                    f.write(chunk)
+
+def _to_dict(payload: Union[str, bytes, Dict[str, Any], None]) -> Dict[str, Any]:
+    """Accept dict / JSON string / bytes / None and return a dict."""
+    if payload is None:
+        return {}
+    if isinstance(payload, dict):
+        return payload
+    if isinstance(payload, (bytes, bytearray)):
+        try:
+            return json.loads(payload.decode("utf-8"))
+        except Exception:
+            return {"files": [payload.decode("utf-8")]}
+    if isinstance(payload, str):
+        try:
+            return json.loads(payload)
+        except Exception:
+            return {"files": [payload]}
+    # Fallback
+    return {}
+
+
+def _as_list(x) -> List[str]:
+    if x is None:
+        return []
+    if isinstance(x, (list, tuple)):
+        return list(x)
+    return [str(x)]
+
+
+def _download_to_tmp(url: str) -> str:
+    """Download remote media to a local temp .mp4 and return its path."""
+    r = requests.get(url, stream=True, timeout=180)
+    r.raise_for_status()
+    fd, path = tempfile.mkstemp(suffix=".mp4")
+    with os.fdopen(fd, "wb") as f:
+        for chunk in r.iter_content(1024 * 1024):
+            if chunk:
+                f.write(chunk)
     return path
 
-def job_render(payload: Dict[str, Any]) -> Dict[str, Any]:
+
+def job_render(payload: Union[str, bytes, Dict[str, Any], None]) -> Dict[str, Any]:
     """
-    RQ job entry: expects payload like:
-    { "session_id": "...", "files": ["https://.../raw.mp4"], "max_duration": 120, ... }
+    RQ entrypoint: normalize payload, download first file, call pipeline, return result.
+    Expected payload shape (from your web layer):
+      {
+        "session_id": "...",
+        "mode": "funnel",
+        "files": ["https://.../raw.mp4"],
+        "options": { ...optional env-style overrides... }
+      }
     """
-    j = get_current_job()
-    session_id = payload.get("session_id", "session")
-    files = payload.get("files") or []
-    local_path = _download_first(files)
+    data = _to_dict(payload)
+
+    files = _as_list(data.get("files") or data.get("file"))
+    if not files:
+        raise ValueError("files[] required in payload")
+
+    # optional per-job overrides (safe: strings/numbers only)
+    opts = data.get("options") or {}
+    for k, v in opts.items():
+        if isinstance(v, (str, int, float, bool)):
+            os.environ[str(k)] = str(v)
+
+    # Download first URL and run the heavy pipeline
+    src_url = files[0]
+    local_path = _download_to_tmp(src_url)
     try:
-        result = run_pipeline(local_path=local_path, payload=payload)
-        return result
+        result = pipeline_job_render(local_path)  # jobs.py version that requires a LOCAL PATH
     finally:
         try:
             os.remove(local_path)
         except Exception:
             pass
 
-# --- thin wrapper to your pipeline ---
-def run_pipeline(local_path: str, payload: Dict[str, Any]) -> Dict[str, Any]:
-    """Calls the main pipeline in jobs.py with a local file path."""
-    # pass through any options you may want later
-    return job_render(local_path)
+    # add some provenance
+    result["source_url"] = src_url
+    result["session_id"] = data.get("session_id", "")
+    return result
