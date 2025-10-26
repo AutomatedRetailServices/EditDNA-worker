@@ -1,87 +1,55 @@
-# tasks.py — adapter that downloads input and calls the heavy pipeline
-import os, json, tempfile, requests
-from typing import Any, Dict, List, Union
+# tasks.py — queue adapter: downloads first URL, calls jobs.job_render(local_path)
+import os, json, tempfile, uuid, logging, traceback
+from typing import Dict, Any, Optional, List
+import requests
 
-# Your heavy pipeline lives in jobs.py and expects a LOCAL PATH argument
-from jobs import job_render as pipeline_job_render
+from jobs import job_render as _run_pipeline  # your heavy pipeline
 
-
-def _to_dict(payload: Union[str, bytes, Dict[str, Any], None]) -> Dict[str, Any]:
-    """Accept dict / JSON string / bytes / None and return a dict."""
-    if payload is None:
-        return {}
-    if isinstance(payload, dict):
-        return payload
-    if isinstance(payload, (bytes, bytearray)):
-        try:
-            return json.loads(payload.decode("utf-8"))
-        except Exception:
-            return {"files": [payload.decode("utf-8")]}
-    if isinstance(payload, str):
-        try:
-            return json.loads(payload)
-        except Exception:
-            return {"files": [payload]}
-    # Fallback
-    return {}
-
-
-def _as_list(x) -> List[str]:
-    if x is None:
-        return []
-    if isinstance(x, (list, tuple)):
-        return list(x)
-    return [str(x)]
-
+log_level = os.getenv("LOG_LEVEL", "INFO").upper()
+logging.basicConfig(level=log_level, format="%(asctime)s %(levelname)s %(message)s")
+log = logging.getLogger("editdna.tasks")
 
 def _download_to_tmp(url: str) -> str:
-    """Download remote media to a local temp .mp4 and return its path."""
-    r = requests.get(url, stream=True, timeout=180)
-    r.raise_for_status()
     fd, path = tempfile.mkstemp(suffix=".mp4")
-    with os.fdopen(fd, "wb") as f:
-        for chunk in r.iter_content(1024 * 1024):
-            if chunk:
-                f.write(chunk)
+    os.close(fd)
+    log.info(f"[download] {url} -> {path}")
+    with requests.get(url, stream=True, timeout=180) as r:
+        r.raise_for_status()
+        with open(path, "wb") as f:
+            for chunk in r.iter_content(1024 * 1024):
+                if chunk:
+                    f.write(chunk)
     return path
 
-
-def job_render(payload: Union[str, bytes, Dict[str, Any], None]) -> Dict[str, Any]:
+def run_pipeline(local_path: str, payload: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     """
-    RQ entrypoint: normalize payload, download first file, call pipeline, return result.
-    Expected payload shape (from the web layer):
-
-      {
-        "session_id": "...",
-        "mode": "funnel",
-        "files": ["https://.../raw.mp4"],
-        "options": { ...env-style overrides... }
-      }
+    Delegates to jobs.job_render(local_path). Keeps wiggle room to pass future options via payload.
     """
-    data = _to_dict(payload)
+    return _run_pipeline(local_path)
 
-    files = _as_list(data.get("files") or data.get("file"))
-    if not files:
-        raise ValueError("files[] required in payload")
-
-    # optional per-job overrides (safe: strings/numbers only)
-    opts = data.get("options") or {}
-    for k, v in opts.items():
-        if isinstance(v, (str, int, float, bool)):
-            os.environ[str(k)] = str(v)
-
-    # Download first URL and run the heavy pipeline
-    src_url = files[0]
-    local_path = _download_to_tmp(src_url)
+def job_render(payload: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Expected payload (from web or Postman):
+    {
+      "session_id": "string",
+      "files": ["https://...mp4", ...],
+      ... (ignored or future options)
+    }
+    """
     try:
-        result = pipeline_job_render(local_path)  # jobs.py expects LOCAL PATH
-    finally:
-        try:
-            os.remove(local_path)
-        except Exception:
-            pass
+        # Backward-compat if someone passes a string:
+        if isinstance(payload, str):
+            payload = {"files": [payload]}
 
-    # provenance
-    result["source_url"] = src_url
-    result["session_id"] = data.get("session_id", "")
-    return result
+        files = payload.get("files") or []
+        assert files and isinstance(files, list), "payload.files[] URL(s) required"
+        src_url = files[0]
+
+        local_path = _download_to_tmp(src_url)
+        result = run_pipeline(local_path=local_path, payload=payload)
+        log.info(f"[tasks] done. result keys={list(result.keys())}")
+        return result
+    except Exception as e:
+        tb = traceback.format_exc(limit=8)
+        log.error(f"[tasks] ERROR: {e}\n{tb}")
+        raise
