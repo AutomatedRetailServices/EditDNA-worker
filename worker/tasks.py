@@ -1,21 +1,18 @@
 """
 Real worker entrypoints for EditDNA Worker.
 
-This module is what the shim `/workspace/editdna/tasks.py` will forward to.
-RQ runs tasks.job_render → which calls this file → which calls worker.jobs.
-
-Keep this minimal; it only defines `job_render` and `run_pipeline`.
+This module connects RQ jobs → shim → real logic in jobs.py (root).
 """
 
 from __future__ import annotations
 from typing import Any, Dict
 
 try:
-    # Import the real logic from your jobs.py
-    from .jobs import job_render as _job_render_impl
-    from .jobs import run_pipeline as _run_pipeline_impl
+    # Import your real logic from root jobs.py
+    from ..jobs import job_render as _job_render_impl
+    from ..jobs import run_pipeline as _run_pipeline_impl
 except Exception as e:
-    raise ImportError(f"[worker.tasks] Failed to import worker.jobs: {e!r}")
+    raise ImportError(f"[worker.tasks] Failed to import editdna.jobs: {e!r}")
 
 
 def run_pipeline(*args, **kwargs) -> Dict[str, Any]:
@@ -29,7 +26,7 @@ def job_render(*args, **kwargs) -> Dict[str, Any]:
     This wrapper ensures backward compatibility and logs structured output.
     """
     try:
-        print("[worker.tasks] job_render: received args/kwargs, forwarding to worker.jobs.job_render...", flush=True)
+        print("[worker.tasks] job_render: received args/kwargs, forwarding to editdna.jobs.job_render...", flush=True)
         result = _job_render_impl(*args, **kwargs)
         print("[worker.tasks] job_render: completed successfully.", flush=True)
         return result
