@@ -1,43 +1,57 @@
-"""
-jobs.py — Main EditDNA pipeline logic entrypoint.
-This file defines job_render() which the RQ worker calls.
-"""
+# /workspace/editdna/tasks.py
+# Minimal, robust shim that exposes tasks.job_render to RQ
+# and imports your real implementation from worker.jobs or jobs.
 
+import importlib
 import os
-import traceback
+import sys
+from typing import Any
 
-def job_render(payload=None, **kwargs):
+# Ensure /workspace/editdna is at the front of sys.path
+HERE = os.path.dirname(os.path.abspath(__file__))
+if HERE not in sys.path:
+    sys.path.insert(0, HERE)
+
+def _import_jobs():
     """
-    Entry point for video editing funnel jobs.
-    Called by RQ worker via tasks.job_render().
+    Try the two canonical locations:
+      1) worker.jobs  (if you later move code under a worker/ folder)
+      2) jobs         (current layout — your jobs.py in repo root)
     """
-    try:
-        print("🧠 [job_render] Starting EditDNA job...")
-        print("Payload keys:", list(payload.keys()) if payload else "None")
+    errors = []
+    for mod_name in ("worker.jobs", "jobs"):
+        try:
+            return importlib.import_module(mod_name)
+        except Exception as e:
+            errors.append(f"{mod_name}: {repr(e)}")
+    raise ImportError(
+        "Could not import job implementation from worker.jobs or jobs. "
+        "Make sure one of these files defines job_render() or run_pipeline().\n"
+        + "\n".join(errors)
+    )
 
-        # Example placeholder logic — replace later with full pipeline
-        session_id = payload.get("session_id", "no-session")
-        files = payload.get("files", [])
-        opts = payload.get("options", {})
+# Import once at import-time so RQ can resolve functions immediately.
+_jobs = _import_jobs()
 
-        print(f"[job_render] Session: {session_id}")
-        print(f"[job_render] Files: {files}")
-        print(f"[job_render] Options: {opts}")
+def job_render(payload: Any):
+    """
+    RQ entrypoint. Delegates to your real implementation.
+    Prefer jobs.job_render(payload), else fall back to jobs.run_pipeline.
+    """
+    if hasattr(_jobs, "job_render"):
+        return _jobs.job_render(payload)
 
-        # Dummy successful response structure
-        return {
-            "ok": True,
-            "session_id": session_id,
-            "input_files": files,
-            "output_url": None,
-            "message": "✅ job_render executed successfully — ready to connect pipeline"
-        }
+    if hasattr(_jobs, "run_pipeline"):
+        # Best-effort fallback: pass through payload; your run_pipeline
+        # can decide how to interpret it (string local_path or dict).
+        return _jobs.run_pipeline(payload)
 
-    except Exception as e:
-        print("💥 [job_render] ERROR:", repr(e))
-        traceback.print_exc()
-        return {
-            "ok": False,
-            "error": repr(e),
-            "trace": traceback.format_exc()
-        }
+    raise RuntimeError(
+        "Neither job_render nor run_pipeline found in jobs implementation."
+    )
+
+# Optional convenience export if your web app imports it
+def run_pipeline(*args, **kwargs):
+    if hasattr(_jobs, "run_pipeline"):
+        return _jobs.run_pipeline(*args, **kwargs)
+    raise RuntimeError("run_pipeline not available in jobs implementation.")
