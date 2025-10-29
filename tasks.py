@@ -1,65 +1,69 @@
-"""
-RQ entrypoint shim for EditDNA worker.
-
-- Imports the real implementation from one of:
-    1) editdna.worker.jobs   (future-proof path)
-    2) editdna.jobs          (your current layout)
-    3) jobs                  (bare module on PYTHONPATH)
-
-- Exposes: job_render(...), run_pipeline(...)
-"""
+# /workspace/editdna/tasks.py
+# Safe RQ entrypoint shim that imports your job implementation
+# from either `jobs` (same folder) or `worker.jobs` (package-style),
+# and adapts legacy payloads. No relative imports, no circular refs.
 
 from __future__ import annotations
-import importlib
-import typing as T
+import os, json, tempfile, urllib.request, traceback
+from typing import Any, Dict, Optional
 
 def _import_jobs():
-    candidates = [
-        "editdna.worker.jobs",
-        "editdna.jobs",
-        "jobs",
-    ]
-    last_err = None
-    for modname in candidates:
+    import importlib
+    errors = []
+    for modname in ("jobs", "worker.jobs"):
         try:
-            return importlib.import_module(modname)
+            m = importlib.import_module(modname)
+            if hasattr(m, "job_render") or hasattr(m, "run_pipeline"):
+                return m
         except Exception as e:
-            last_err = e
+            errors.append(f"{modname}: {repr(e)}")
     raise ImportError(
-        "Could not import job implementation from worker.jobs or jobs. "
-        "Make sure one of these files defines job_render() or run_pipeline()."
-    ) from last_err
+        "Could not import job implementation from jobs or worker.jobs. "
+        "Ensure one of them defines job_render() or run_pipeline().\n" + "\n".join(errors)
+    )
 
-_jobs = _import_jobs()
-_run_pipeline = getattr(_jobs, "run_pipeline", None)
-_job_render   = getattr(_jobs, "job_render", None)
+def _download_to_tmp(url: str) -> str:
+    fd, path = tempfile.mkstemp(suffix=os.path.splitext(url.split("?")[0])[-1] or ".bin")
+    os.close(fd)
+    urllib.request.urlretrieve(url, path)
+    return path
 
-if _run_pipeline is None and _job_render is None:
-    raise ImportError("Neither run_pipeline nor job_render found in the jobs module.")
-
-def job_render(payload: T.Union[dict, str, None] = None, **kwargs):
-    """
-    Accepts either:
-      - dict payload with keys like {'session_id','files','mode','options',...}
-      - str local_path (legacy)
-      - kwargs (legacy)
-    """
-    if _job_render is not None:
-        return _job_render(payload if payload is not None else kwargs)
-
-    # fall back to run_pipeline
-    if isinstance(payload, str):
-        return _run_pipeline(payload, kwargs or None)
+def _norm_payload(payload: Any) -> Dict[str, Any]:
+    if payload is None:
+        return {}
     if isinstance(payload, dict):
-        local_path = payload.get("local_path")
-        return _run_pipeline(local_path, payload)
-    local_path = kwargs.get("local_path")
-    return _run_pipeline(local_path, kwargs or None)
+        return payload
+    if isinstance(payload, str):
+        # legacy: payload was a local path
+        return {"local_path": payload}
+    if isinstance(payload, (bytes, bytearray)):
+        try:
+            return json.loads(payload.decode("utf-8"))
+        except Exception:
+            return {"raw": payload}
+    return {"raw": payload}
 
-def run_pipeline(local_path: str | None = None, payload: dict | None = None):
-    if _run_pipeline is not None:
-        return _run_pipeline(local_path, payload)
-    pl = payload or {}
-    if local_path and "local_path" not in pl:
-        pl = dict(pl, local_path=local_path)
-    return _job_render(pl)
+def job_render(payload: Any = None, **kwargs) -> Dict[str, Any]:
+    try:
+        jobs = _import_jobs()
+    except Exception as e:
+        return {"ok": False, "error": str(e), "trace": traceback.format_exc()}
+
+    data = _norm_payload(payload)
+    data.update(kwargs or {})
+
+    # Ensure local_path if user only provided URLs
+    local_path: Optional[str] = data.get("local_path")
+    files = data.get("files") or data.get("file") or []
+    if not local_path:
+        if isinstance(files, list) and files and isinstance(files[0], str) and files[0].startswith(("http://","https://","s3://")):
+            local_path = _download_to_tmp(files[0])
+            data["local_path"] = local_path
+        elif isinstance(files, str) and files.startswith(("http://","https://","s3://")):
+            local_path = _download_to_tmp(files)
+            data["local_path"] = local_path
+
+    # Prefer user's job_render; fallback to run_pipeline
+    if hasattr(jobs, "job_render"):
+        return jobs.job_render(data)
+    return jobs.run_pipeline(local_path=local_path, payload=data)
