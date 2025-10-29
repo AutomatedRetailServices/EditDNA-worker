@@ -17,12 +17,23 @@ openai-whisper==20231117
 
 # Vision
 opencv-python-headless>=4.10.0.84
-Pillow>=10.3.0
-numpy>=1.26
+Pillow==10.4.0
+
+# Pin NumPy for broad wheel compatibility with moviepy/sklearn
+numpy==1.26.4
 
 # NLP / Semantic
 sentence-transformers>=2.7.0
-scikit-learn>=1.3
+scikit-learn==1.3.2
 
 # CLIP (optional)
 open-clip-torch>=2.24.0
+
+# Video editing stack (needed by your pipeline)
+moviepy==1.0.3
+imageio>=2.34.0
+imageio-ffmpeg>=0.4.9
+proglog>=0.1.10
+
+# Utilities
+tqdm>=4.66.4
