@@ -1,69 +1,99 @@
-# /workspace/editdna/tasks.py
-# Safe RQ entrypoint shim that imports your job implementation
-# from either `jobs` (same folder) or `worker.jobs` (package-style),
-# and adapts legacy payloads. No relative imports, no circular refs.
+"""
+tasks.py
+This is the ONLY thing RQ calls (tasks.job_render).
+It imports jobs.py safely and forwards payload.
+It never crashes the worker on import.
+"""
 
 from __future__ import annotations
-import os, json, tempfile, urllib.request, traceback
+import traceback
+import time
 from typing import Any, Dict, Optional
 
-def _import_jobs():
-    import importlib
-    errors = []
-    for modname in ("jobs", "worker.jobs"):
-        try:
-            m = importlib.import_module(modname)
-            if hasattr(m, "job_render") or hasattr(m, "run_pipeline"):
-                return m
-        except Exception as e:
-            errors.append(f"{modname}: {repr(e)}")
-    raise ImportError(
-        "Could not import job implementation from jobs or worker.jobs. "
-        "Ensure one of them defines job_render() or run_pipeline().\n" + "\n".join(errors)
-    )
-
-def _download_to_tmp(url: str) -> str:
-    fd, path = tempfile.mkstemp(suffix=os.path.splitext(url.split("?")[0])[-1] or ".bin")
-    os.close(fd)
-    urllib.request.urlretrieve(url, path)
-    return path
-
-def _norm_payload(payload: Any) -> Dict[str, Any]:
-    if payload is None:
-        return {}
-    if isinstance(payload, dict):
-        return payload
-    if isinstance(payload, str):
-        # legacy: payload was a local path
-        return {"local_path": payload}
-    if isinstance(payload, (bytes, bytearray)):
-        try:
-            return json.loads(payload.decode("utf-8"))
-        except Exception:
-            return {"raw": payload}
-    return {"raw": payload}
-
-def job_render(payload: Any = None, **kwargs) -> Dict[str, Any]:
+def _import_jobs_module():
+    """
+    Try to import the real pipeline logic from jobs.py.
+    We keep this tiny on purpose so that even if jobs.py explodes,
+    the worker process itself (rq worker) stays alive.
+    """
     try:
-        jobs = _import_jobs()
+        import jobs  # editdna/jobs.py because PYTHONPATH=/workspace/editdna
+        return jobs, None
     except Exception as e:
-        return {"ok": False, "error": str(e), "trace": traceback.format_exc()}
+        return None, e
 
-    data = _norm_payload(payload)
-    data.update(kwargs or {})
+def _call_pipeline(jobs_mod, local_path: Optional[str], payload: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    We support either jobs.run_pipeline(...) OR jobs.job_render(...).
+    We standardize the return dict.
+    """
+    # Prefer run_pipeline if it exists (more flexible)
+    if hasattr(jobs_mod, "run_pipeline"):
+        return jobs_mod.run_pipeline(local_path=local_path, payload=payload)
 
-    # Ensure local_path if user only provided URLs
-    local_path: Optional[str] = data.get("local_path")
-    files = data.get("files") or data.get("file") or []
-    if not local_path:
-        if isinstance(files, list) and files and isinstance(files[0], str) and files[0].startswith(("http://","https://","s3://")):
-            local_path = _download_to_tmp(files[0])
-            data["local_path"] = local_path
-        elif isinstance(files, str) and files.startswith(("http://","https://","s3://")):
-            local_path = _download_to_tmp(files)
-            data["local_path"] = local_path
+    # Fallback: call job_render inside jobs.py
+    if hasattr(jobs_mod, "job_render"):
+        return jobs_mod.job_render(payload)
 
-    # Prefer user's job_render; fallback to run_pipeline
-    if hasattr(jobs, "job_render"):
-        return jobs.job_render(data)
-    return jobs.run_pipeline(local_path=local_path, payload=data)
+    return {
+        "ok": False,
+        "error": "jobs.py does not define run_pipeline() or job_render()"
+    }
+
+def job_render(payload: Any = None) -> Dict[str, Any]:
+    """
+    This is what Redis queue calls: tasks.job_render(payload)
+
+    payload is what /render enqueues. Example:
+    {
+        "session_id": "...",
+        "files": ["https://....mov"],
+        "mode": "funnel",
+        "options": { ... overrides ... }
+    }
+    """
+    started = time.time()
+
+    # normalize payload
+    if not isinstance(payload, dict):
+        payload = {}
+    files = payload.get("files") or []
+    local_path = payload.get("local_path")
+
+    # basic debug info (this print shows in pod logs so you can see it's listening)
+    print("[tasks.job_render] INCOMING PAYLOAD KEYS:", list(payload.keys()), flush=True)
+
+    # import jobs
+    jobs_mod, err = _import_jobs_module()
+    if err is not None or jobs_mod is None:
+        trace = traceback.format_exc()
+        print("[tasks.job_render] IMPORT ERROR\n", trace, flush=True)
+        return {
+            "ok": False,
+            "error": (
+                "Could not import job implementation from jobs.py. "
+                "Make sure editdna/jobs.py exists and has run_pipeline() or job_render()."
+            ),
+            "trace": trace,
+        }
+
+    # if no explicit local_path, maybe we will download it in jobs.run_pipeline anyway
+    if not local_path and files:
+        # we pass files through untouched. jobs.py will handle downloading.
+        pass
+
+    try:
+        result = _call_pipeline(jobs_mod, local_path, payload)
+
+        took = time.time() - started
+        print(f"[tasks.job_render] DONE in {took:.2f}s ok={result.get('ok')}", flush=True)
+
+        return result
+    except Exception:
+        trace = traceback.format_exc()
+        print("[tasks.job_render] RUNTIME ERROR\n", trace, flush=True)
+        return {
+            "ok": False,
+            "error": "Exception while running pipeline.",
+            "trace": trace,
+        }
