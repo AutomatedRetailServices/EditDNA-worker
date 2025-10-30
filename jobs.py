@@ -1,112 +1,91 @@
-# editdna/jobs.py
-# Full, self-contained pipeline used by tasks.job_render
-# - ASR (optional, Whisper) -> takes
-# - Sentence/micro-silence boundary cleanup (optional)
-# - Semantic pass (optional) -> tagging & stitching
-# - Funnel assembly by FUNNEL_COUNTS
-# - ffmpeg subclip + concat
-# - S3 upload with boto3
-# - Returns JSON compatible with your web API
+"""
+jobs.py
+Full funnel pipeline:
+- ASR (optional)
+- sentence boundary / microcuts (optional)
+- semantic tagging (optional)
+- funnel assembly
+- ffmpeg subclips + concat
+- S3 upload
+Returns dict { ok, https_url, clips, slots, ... }
+
+This file MUST define run_pipeline() or job_render() so tasks.py can call us.
+"""
 
 from __future__ import annotations
-import os, io, json, math, tempfile, subprocess, shlex, uuid, time
-from dataclasses import dataclass, asdict
+import os, uuid, time, tempfile, subprocess, math
 from typing import Any, Dict, List, Optional, Tuple
+from dataclasses import dataclass
 
-# =============== ENV ===============
-FFMPEG_BIN   = os.getenv("FFMPEG_BIN", "/usr/bin/ffmpeg")
-FFPROBE_BIN  = os.getenv("FFPROBE_BIN", "/usr/bin/ffprobe")
+########################################
+# SAFE ENV HELPERS (no crashes on junk)
+########################################
 
-def _get_float(name: str, default_str: str) -> float:
-    try:
-        return float(os.getenv(name, default_str).strip())
-    except Exception:
-        # if env var is dirty (has comments, spaces, whatever), try first token
-        raw = os.getenv(name, default_str)
-        if isinstance(raw, str):
-            first_token = raw.strip().split()[0]
-            return float(first_token)
-        return float(default_str)
-
-def _get_int(name: str, default_val: int) -> int:
+def _env_float(name: str, default_val: float) -> float:
     raw = os.getenv(name)
-    if raw is None:
+    if raw is None or raw.strip() == "":
         return default_val
+    # Try first token only (ignore inline comments)
+    token = raw.strip().split()[0]
     try:
-        return int(raw.strip().split()[0])
+        return float(token)
     except Exception:
         return default_val
 
-BIN_SEC          = _get_float("BIN_SEC",          "1.0")
-MIN_TAKE_SEC     = _get_float("MIN_TAKE_SEC",     "2.0")
-MAX_TAKE_SEC     = _get_float("MAX_TAKE_SEC",     "20")
-MAX_DURATION_SEC = _get_float("MAX_DURATION_SEC", "120")
-FALLBACK_MIN_SEC = _get_float("FALLBACK_MIN_SEC", "60")
-
-ASR_ENABLED   = os.getenv("ASR_ENABLED", "1").strip() == "1"
-ASR_MODEL     = os.getenv("ASR_MODEL_SIZE", "tiny").strip()
-ASR_LANG      = os.getenv("ASR_LANGUAGE", "en").strip()
-ASR_DEVICE    = os.getenv("ASR_DEVICE", "cpu").strip()
-
-SEM_ENABLED   = os.getenv("SEMANTICS_ENABLED", "0").strip() == "1"
-
-# sentence/micro settings
-MICRO_CUT         = os.getenv("MICRO_CUT", "0").strip() == "1"
-MICRO_SILENCE_DB  = _get_float("MICRO_SILENCE_DB",  "-30")
-MICRO_SILENCE_MIN = _get_float("MICRO_SILENCE_MIN", "0.25")
-
-# scoring/requirements used by semantic pass (if present)
-SLOT_REQUIRE_PRODUCT = set((os.getenv("SLOT_REQUIRE_PRODUCT", "") or "").split(",")) - {""}
-SLOT_REQUIRE_OCR_CTA = set((os.getenv("SLOT_REQUIRE_OCR_CTA", "") or "").split(",")) - {""}
-
-# Funnel layout: "H,P,FEAT,PROOF,CTA"
-FUNNEL_COUNTS = os.getenv("FUNNEL_COUNTS", "1,3,3,3,1").strip()
-
-# S3
-S3_BUCKET  = (os.getenv("S3_BUCKET") or "").strip()
-S3_REGION  = os.getenv("AWS_REGION", "us-east-1").strip()
-S3_PREFIX  = (os.getenv("S3_PREFIX") or "editdna/outputs").strip().strip("/")
-S3_ACL     = os.getenv("S3_ACL", "public-read").strip()
-PRESIGN_EXPIRES = _get_int("PRESIGN_EXPIRES", 100000)
-
-# =============== Optional imports ===============
-_Take = None
-def _import_semantic():
-    """
-    Try to import semantic_visual_pass pieces.
-    If not available, we just fall back to dummy scoring/tagging.
-    """
-    global _Take
+def _env_int(name: str, default_val: int) -> int:
+    raw = os.getenv(name)
+    if raw is None or raw.strip() == "":
+        return default_val
+    token = raw.strip().split()[0]
     try:
-        from worker.semantic_visual_pass import (
-            Take,
-            dedup_takes,
-            tag_slot,
-            score_take,
-            stitch_chain,
-        )
-        _Take = Take
-        return Take, dedup_takes, tag_slot, score_take, stitch_chain
+        return int(token)
     except Exception:
-        _Take = None
-        return None, None, None, None, None
+        return default_val
 
-def _import_sentence_boundary():
-    """
-    Try to import sentence_boundary.split_by_sentence (optional).
-    """
-    try:
-        from worker.sentence_boundary import split_by_sentence
-        return split_by_sentence
-    except Exception:
-        return None
+def _env_str(name: str, default_val: str) -> str:
+    raw = os.getenv(name)
+    if raw is None or raw.strip() == "":
+        return default_val
+    return raw.strip()
 
-Take, dedup_takes, tag_slot, score_take, stitch_chain = _import_semantic()
-split_by_sentence = _import_sentence_boundary()
+########################################
+# ENV DEFAULTS
+########################################
 
-# =============== Data model (fallback Take) ===============
+FFMPEG_BIN   = _env_str("FFMPEG_BIN", "/usr/bin/ffmpeg")
+FFPROBE_BIN  = _env_str("FFPROBE_BIN", "/usr/bin/ffprobe")
+
+BIN_SEC          = _env_float("BIN_SEC",          1.0)
+MIN_TAKE_SEC     = _env_float("MIN_TAKE_SEC",     2.0)
+MAX_TAKE_SEC     = _env_float("MAX_TAKE_SEC",     20.0)
+MAX_DURATION_SEC = _env_float("MAX_DURATION_SEC", 120.0)
+FALLBACK_MIN_SEC = _env_float("FALLBACK_MIN_SEC", 60.0)
+
+ASR_ENABLED   = (_env_str("ASR_ENABLED", "1") == "1")
+ASR_MODEL     = _env_str("ASR_MODEL_SIZE", "tiny")
+ASR_LANG      = _env_str("ASR_LANGUAGE", "en")
+ASR_DEVICE    = _env_str("ASR_DEVICE", "cpu")
+
+SEMANTICS_ENABLED = (_env_str("SEMANTICS_ENABLED", "0") == "1")
+
+MICRO_CUT         = (_env_str("MICRO_CUT", "0") == "1")
+MICRO_SILENCE_DB  = _env_float("MICRO_SILENCE_DB",  -30.0)
+MICRO_SILENCE_MIN = _env_float("MICRO_SILENCE_MIN", 0.25)
+
+FUNNEL_COUNTS = _env_str("FUNNEL_COUNTS", "1,3,3,3,1")
+
+S3_BUCKET  = _env_str("S3_BUCKET", "")
+S3_REGION  = _env_str("AWS_REGION", "us-east-1")
+S3_PREFIX  = _env_str("S3_PREFIX", "editdna/outputs").strip("/")
+S3_ACL     = _env_str("S3_ACL", "public-read")
+PRESIGN_EXPIRES = _env_int("PRESIGN_EXPIRES", 100000)
+
+########################################
+# LIGHT DATA CLASS FOR TAKES
+########################################
+
 @dataclass
-class _FallbackTake:
+class BasicTake:
     id: str
     start: float
     end: float
@@ -116,377 +95,372 @@ class _FallbackTake:
     vtx_sim: float = 0.0
     has_product: bool = False
     ocr_hit: int = 0
-    slot_hint: Optional[str] = None
-    meta: Dict[str, Any] = None
 
-    def to_take(self):
-        if Take is None:
-            return self
-        return Take(
-            id=self.id,
-            start=self.start,
-            end=self.end,
-            text=self.text,
-            face_q=self.face_q,
-            scene_q=self.scene_q,
-            vtx_sim=self.vtx_sim,
-            has_product=self.has_product,
-            ocr_hit=self.ocr_hit,
-            slot_hint=self.slot_hint,
-            meta=self.meta or {},
-        )
+########################################
+# LITTLE SHELL HELPERS
+########################################
 
-# =============== Utilities ===============
-def _run(cmd: List[str], check=True) -> subprocess.CompletedProcess:
+def _run(cmd: List[str]) -> subprocess.CompletedProcess:
     return subprocess.run(
         cmd,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
-        check=check,
+        check=True,
     )
 
 def _ffprobe_duration(path: str) -> float:
     try:
-        proc = _run(
-            [
-                FFPROBE_BIN,
-                "-v",
-                "error",
-                "-show_entries",
-                "format=duration",
-                "-of",
-                "default=nokey=1:noprint_wrappers=1",
-                path,
-            ]
-        )
-        return float(proc.stdout.decode().strip())
+        out = _run([
+            FFPROBE_BIN,
+            "-v","error",
+            "-show_entries","format=duration",
+            "-of","default=nokey=1:noprint_wrappers=1",
+            path
+        ])
+        return float(out.stdout.decode().strip())
     except Exception:
         return 0.0
 
 def _ffmpeg_subclip(src: str, dst: str, ss: float, ee: float):
-    dur = max(0.01, ee - ss)
+    cut_dur = max(0.01, ee-ss)
     cmd = [
         FFMPEG_BIN,
         "-y",
-        "-ss",
-        f"{ss:.3f}",
-        "-i",
-        src,
-        "-t",
-        f"{dur:.3f}",
-        "-c:v",
-        "libx264",
-        "-preset",
-        "fast",
-        "-crf",
-        "23",
-        "-pix_fmt",
-        "yuv420p",
-        "-g",
-        "48",
-        "-c:a",
-        "aac",
-        "-b:a",
-        "128k",
-        dst,
+        "-ss", f"{ss:.3f}",
+        "-i", src,
+        "-t", f"{cut_dur:.3f}",
+        "-c:v","libx264",
+        "-preset","fast",
+        "-crf","23",
+        "-pix_fmt","yuv420p",
+        "-g","48",
+        "-c:a","aac",
+        "-b:a","128k",
+        dst
     ]
     _run(cmd)
 
-def _ffmpeg_concat(parts_list_path: str, out_path: str):
-    _run(
-        [
-            FFMPEG_BIN,
-            "-y",
-            "-f",
-            "concat",
-            "-safe",
-            "0",
-            "-i",
-            parts_list_path,
-            "-c:v",
-            "libx264",
-            "-preset",
-            "fast",
-            "-crf",
-            "23",
-            "-pix_fmt",
-            "yuv420p",
-            "-g",
-            "48",
-            "-c:a",
-            "aac",
-            "-b:a",
-            "128k",
-            out_path,
-        ]
-    )
+def _ffmpeg_concat(list_file: str, out_file: str):
+    cmd = [
+        FFMPEG_BIN,
+        "-y",
+        "-f","concat",
+        "-safe","0",
+        "-i", list_file,
+        "-c:v","libx264",
+        "-preset","fast",
+        "-crf","23",
+        "-pix_fmt","yuv420p",
+        "-g","48",
+        "-c:a","aac",
+        "-b:a","128k",
+        out_file
+    ]
+    _run(cmd)
 
-# =============== ASR ===============
-def _do_whisper_asr(local_path: str) -> List[Dict[str, Any]]:
+########################################
+# OPTIONAL IMPORTS, LOADED *INSIDE* FUNCTIONS
+########################################
+
+def _maybe_import_sentence_boundary():
+    try:
+        from worker.sentence_boundary import split_by_sentence
+        return split_by_sentence
+    except Exception:
+        return None
+
+def _maybe_import_semantic():
+    try:
+        from worker.semantic_visual_pass import (
+            Take,
+            dedup_takes,
+            tag_slot,
+            score_take,
+            stitch_chain,
+        )
+        return (Take, dedup_takes, tag_slot, score_take, stitch_chain)
+    except Exception:
+        return (None, None, None, None, None)
+
+########################################
+# ASR STEP
+########################################
+
+def _whisper_asr(local_path: str) -> List[Dict[str, Any]]:
     """
-    Returns [{'start': float, 'end': float, 'text': str}, ...]
+    returns list of {id,start,end,text}
     """
-    import whisper  # openai-whisper
+    import whisper
     model = whisper.load_model(ASR_MODEL, device=ASR_DEVICE)
     result = model.transcribe(local_path, language=ASR_LANG)
+
     segs = []
-    for i, s in enumerate(result.get("segments", []), 1):
-        segs.append(
-            {
-                "id": f"T{i:04d}",
-                "start": float(s["start"]),
-                "end": float(s["end"]),
-                "text": s.get("text", "").strip(),
-            }
-        )
+    for i, seg in enumerate(result.get("segments", []), 1):
+        segs.append({
+            "id": f"T{i:04d}",
+            "start": float(seg["start"]),
+            "end": float(seg["end"]),
+            "text": seg.get("text","").strip()
+        })
     return segs
 
-# =============== Takes building ===============
-def _build_takes(local_path: str) -> List[_FallbackTake]:
-    takes: List[_FallbackTake] = []
-    if ASR_ENABLED:
-        segs = _do_whisper_asr(local_path)
+########################################
+# BUILD TAKES
+########################################
 
-        # sentence boundary refinement (optional)
-        if split_by_sentence is not None:
+def _build_takes(local_path: str) -> List[BasicTake]:
+    takes: List[BasicTake] = []
+
+    if ASR_ENABLED:
+        segs = _whisper_asr(local_path)
+
+        split_by_sentence = _maybe_import_sentence_boundary()
+        if split_by_sentence:
             segs = split_by_sentence(
                 segs,
                 min_take_sec=MIN_TAKE_SEC,
                 max_take_sec=MAX_TAKE_SEC,
             )
 
-        # min/max clamp
-        out = []
-        for s in segs:
-            st = float(s["start"])
-            en = float(s["end"])
-            if en - st < MIN_TAKE_SEC:
+        tmp_list = []
+        for seg in segs:
+            st = float(seg["start"])
+            en = float(seg["end"])
+            dur = en - st
+            if dur < MIN_TAKE_SEC:
                 en = st + MIN_TAKE_SEC
-            if en - st > MAX_TAKE_SEC:
+            if (en - st) > MAX_TAKE_SEC:
                 en = st + MAX_TAKE_SEC
-            out.append(
-                _FallbackTake(
-                    id=s["id"],
+
+            tmp_list.append(
+                BasicTake(
+                    id=seg["id"],
                     start=st,
                     end=en,
-                    text=s.get("text", ""),
-                    meta={"src": "asr"},
+                    text=seg.get("text",""),
                 )
             )
-        takes = out
+        takes = tmp_list
+
     else:
-        # fallback: time bins
-        dur = _ffprobe_duration(local_path) or FALLBACK_MIN_SEC
+        # fallback: dumb bins
+        total = _ffprobe_duration(local_path)
+        if total <= 0:
+            total = FALLBACK_MIN_SEC
         step = max(MIN_TAKE_SEC, BIN_SEC)
-        cursor = 0.0
+
+        cur = 0.0
         idx = 1
-        while cursor < dur:
-            st = cursor
-            en = min(dur, st + step)
+        while cur < total:
+            st = cur
+            en = min(total, st + step)
             takes.append(
-                _FallbackTake(
+                BasicTake(
                     id=f"T{idx:04d}",
                     start=st,
                     end=en,
                     text="",
-                    meta={"src": "bins"},
                 )
             )
-            cursor = en
+            cur = en
             idx += 1
+
     return takes
 
-# =============== Semantic tagging (optional) ===============
-SLOT_ORDER = ["HOOK", "PROBLEM", "FEATURE", "PROOF", "CTA"]
+########################################
+# SEMANTIC TAGGING + SLOTS
+########################################
 
-def _tag_and_stitch(takes: List[_FallbackTake]) -> Tuple[List[dict], Dict[str, List[dict]]]:
+SLOT_ORDER = ["HOOK","PROBLEM","FEATURE","PROOF","CTA"]
+
+def _tag_semantic(takes: List[BasicTake]) -> (List[dict], Dict[str, List[dict]]):
     """
-    Returns (clips_for_response, slots_dict_for_response)
+    returns (clips, slots)
     """
-    # If semantic module is present:
-    if Take is not None:
-        sem_takes = [t.to_take() for t in takes]
+    Take, dedup_takes, tag_slot, score_take, stitch_chain = _maybe_import_semantic()
 
-        if callable(dedup_takes):
-            sem_takes = dedup_takes(sem_takes)
-
-        if callable(stitch_chain):
-            sem_takes = stitch_chain(sem_takes)
-
+    # if we cannot import semantic module, fallback: just HOOK
+    if Take is None:
         clips = []
-        slots: Dict[str, List[dict]] = {k: [] for k in SLOT_ORDER}
-
-        for t in sem_takes:
-            slot = "HOOK"
-            if callable(tag_slot):
-                slot = tag_slot(t, None) or "HOOK"
-
-            sc = 2.5
-            if callable(score_take):
-                sc = score_take(t, slot)
-
-            clips.append(
-                {
-                    "id": t.id,
-                    "slot": slot,
-                    "start": t.start,
-                    "end": t.end,
-                    "score": sc,
-                    "face_q": getattr(t, "face_q", 1.0),
-                    "scene_q": getattr(t, "scene_q", 1.0),
-                    "vtx_sim": getattr(t, "vtx_sim", 0.0),
-                    "chain_ids": getattr(t, "meta", {}).get("chain_ids", []),
-                }
-            )
-
-            slots[slot].append(
-                {
-                    "id": t.id,
-                    "start": t.start,
-                    "end": t.end,
-                    "text": t.text,
-                    "meta": {"slot": slot, "score": sc},
-                    "face_q": getattr(t, "face_q", 1.0),
-                    "scene_q": getattr(t, "scene_q", 1.0),
-                    "vtx_sim": getattr(t, "vtx_sim", 0.0),
-                    "has_product": getattr(t, "has_product", False),
-                    "ocr_hit": getattr(t, "ocr_hit", 0),
-                }
-            )
-
-        return clips, slots
-
-    # No semantic module → treat all as HOOK
-    clips = []
-    slots = {k: [] for k in SLOT_ORDER}
-    for t in takes:
-        slot = "HOOK"
-        sc = 2.5
-        clips.append(
-            {
+        slots: Dict[str, List[dict]] = {s: [] for s in SLOT_ORDER}
+        for t in takes:
+            clip = {
                 "id": t.id,
-                "slot": slot,
+                "slot": "HOOK",
                 "start": t.start,
                 "end": t.end,
-                "score": sc,
-                "face_q": 1.0,
-                "scene_q": 1.0,
-                "vtx_sim": 0.0,
-                "chain_ids": [],
+                "score": 2.5,
+                "face_q": t.face_q,
+                "scene_q": t.scene_q,
+                "vtx_sim": t.vtx_sim,
+                "chain_ids": []
             }
-        )
-        slots[slot].append(
-            {
+            clips.append(clip)
+
+            slots["HOOK"].append({
                 "id": t.id,
                 "start": t.start,
                 "end": t.end,
                 "text": t.text,
-                "meta": {"slot": slot, "score": sc},
-                "face_q": 1.0,
-                "scene_q": 1.0,
-                "vtx_sim": 0.0,
-                "has_product": False,
-                "ocr_hit": 0,
-            }
-        )
+                "meta": {"slot":"HOOK","score":2.5},
+                "face_q": t.face_q,
+                "scene_q": t.scene_q,
+                "vtx_sim": t.vtx_sim,
+                "has_product": t.has_product,
+                "ocr_hit": t.ocr_hit
+            })
+        return clips, slots
+
+    # else full semantic path
+    sem_takes = [Take(
+        id=t.id,
+        start=t.start,
+        end=t.end,
+        text=t.text,
+        face_q=t.face_q,
+        scene_q=t.scene_q,
+        vtx_sim=t.vtx_sim,
+        has_product=t.has_product,
+        ocr_hit=t.ocr_hit,
+        meta={}
+    ) for t in takes]
+
+    if callable(dedup_takes):
+        sem_takes = dedup_takes(sem_takes)
+
+    if callable(stitch_chain):
+        sem_takes = stitch_chain(sem_takes)
+
+    clips: List[dict] = []
+    slots: Dict[str, List[dict]] = {s: [] for s in SLOT_ORDER}
+
+    for tt in sem_takes:
+        slot_guess = "HOOK"
+        if callable(tag_slot):
+            try:
+                slot_guess = tag_slot(tt, None) or "HOOK"
+            except Exception:
+                slot_guess = "HOOK"
+
+        sc_val = 2.5
+        if callable(score_take):
+            try:
+                sc_val = score_take(tt, slot_guess)
+            except Exception:
+                sc_val = 2.5
+
+        clip_entry = {
+            "id": tt.id,
+            "slot": slot_guess,
+            "start": tt.start,
+            "end": tt.end,
+            "score": sc_val,
+            "face_q": getattr(tt,"face_q",1.0),
+            "scene_q": getattr(tt,"scene_q",1.0),
+            "vtx_sim": getattr(tt,"vtx_sim",0.0),
+            "chain_ids": getattr(tt,"meta",{}).get("chain_ids",[])
+        }
+        clips.append(clip_entry)
+
+        slots[slot_guess].append({
+            "id": tt.id,
+            "start": tt.start,
+            "end": tt.end,
+            "text": tt.text,
+            "meta": {"slot":slot_guess,"score":sc_val},
+            "face_q": getattr(tt,"face_q",1.0),
+            "scene_q": getattr(tt,"scene_q",1.0),
+            "vtx_sim": getattr(tt,"vtx_sim",0.0),
+            "has_product": getattr(tt,"has_product",False),
+            "ocr_hit": getattr(tt,"ocr_hit",0)
+        })
 
     return clips, slots
 
-# =============== Funnel assembly ===============
-def _parse_funnel_counts(raw: str) -> Dict[str, Optional[int]]:
-    # "1,3,3,3,1" → dict
-    xs = [x.strip() for x in raw.split(",")]
-    while len(xs) < 5:
-        xs.append("0")
+########################################
+# FUNNEL ASSEMBLY
+########################################
 
-    def cap(v: str):
-        # "0" means "unlimited" in our world
-        if v in ("", "0", "00", "000"):
+def _parse_funnel(raw: str) -> Dict[str, Optional[int]]:
+    # "1,3,3,3,1" -> {"HOOK":1,"PROBLEM":3,"FEATURE":3,"PROOF":3,"CTA":1}
+    parts = [p.strip() for p in raw.split(",")]
+    while len(parts) < 5:
+        parts.append("0")
+
+    def _cap(x: str) -> Optional[int]:
+        # "0" or negative or "" => unlimited
+        if x == "" or x.startswith("0") or x.startswith("-"):
             return None
         try:
-            n = int(v)
-            return None if n < 0 else n
-        except Exception:
+            n = int(x)
+            if n <= 0:
+                return None
+            return n
+        except:
             return None
 
-    caps = list(map(cap, xs[:5]))
-    return dict(zip(SLOT_ORDER, caps))
+    nums = list(map(_cap, parts[:5]))
+    return dict(zip(SLOT_ORDER, nums))
 
-def _assemble_funnel(
-    slots: Dict[str, List[dict]],
-    max_total: float,
-) -> List[Tuple[float, float, str, str]]:
-    """
-    Pick clips in slot order (HOOK→PROBLEM→FEATURE→PROOF→CTA)
-    respecting slot caps and max_total seconds.
-    Returns list of (start, end, clip_id, slot)
-    """
-    caps = _parse_funnel_counts(FUNNEL_COUNTS)
+def _choose_plan(slots: Dict[str, List[dict]], max_total_sec: float) -> List[Tuple[float,float,str,str]]:
+    caps = _parse_funnel(FUNNEL_COUNTS)
 
-    plan: List[Tuple[float, float, str, str]] = []
-    used = set()
+    chosen: List[Tuple[float,float,str,str]] = []
+    used_ids = set()
     total = 0.0
 
     for slot in SLOT_ORDER:
-        cap = caps[slot]  # None = unlimited
-        picks = 0
+        limit = caps[slot]  # None = unlimited
+        count_slot = 0
         for c in slots.get(slot, []):
-            if cap is not None and picks >= cap:
+            if limit is not None and count_slot >= limit:
                 break
 
             dur = max(0.01, float(c["end"]) - float(c["start"]))
-            if total + dur > max_total:
+            if total + dur > max_total_sec:
                 break
 
             cid = c["id"]
-            if cid in used:
+            if cid in used_ids:
                 continue
 
-            used.add(cid)
-            plan.append((float(c["start"]), float(c["end"]), cid, slot))
+            chosen.append((float(c["start"]), float(c["end"]), cid, slot))
+            used_ids.add(cid)
             total += dur
-            picks += 1
+            count_slot += 1
 
-    # fallback: if plan is empty, pick the single longest HOOK/whatever
-    if not plan:
+    # fallback: nothing picked -> pick single longest from any slot
+    if not chosen:
         longest = None
         for slot in SLOT_ORDER:
             for c in slots.get(slot, []):
                 d = float(c["end"]) - float(c["start"])
                 if longest is None or d > longest[0]:
-                    longest = (d, c)
+                    longest = (d, c, slot)
         if longest:
-            c = longest[1]
-            plan = [
-                (
-                    float(c["start"]),
-                    float(c["end"]),
-                    c["id"],
-                    "HOOK",
-                )
-            ]
+            _, c, slot = longest
+            chosen = [(float(c["start"]), float(c["end"]), c["id"], slot)]
 
-    return plan
+    return chosen
 
-# =============== S3 upload ===============
-def _s3_upload(local_path: str) -> Tuple[str, str, str]:
+########################################
+# S3 UPLOAD
+########################################
+
+def _upload_s3(local_path: str) -> (str,str,str):
     """
-    Uploads to s3://{bucket}/{prefix}/{file}
-    Returns (key, s3_url, https_url)
+    returns (key, s3_url, https_url)
     """
     import boto3
-    import pathlib
-
     if not S3_BUCKET:
-        # no bucket configured → just return local info
-        name = pathlib.Path(local_path).name
-        key = f"{S3_PREFIX}/{name}"
-        return key, f"s3://(no-bucket)/{key}", f"file://{local_path}"
+        # no bucket? return file:// fallback
+        base = os.path.basename(local_path)
+        key = f"{S3_PREFIX}/{base}"
+        return (key, f"s3://(no-bucket)/{key}", f"file://{local_path}")
 
     s3 = boto3.client("s3", region_name=S3_REGION)
-
-    base = f"{uuid.uuid4().hex}_{int(time.time())}.mp4"
-    key = f"{S3_PREFIX}/{base}"
+    obj_name = f"{uuid.uuid4().hex}_{int(time.time())}.mp4"
+    key = f"{S3_PREFIX}/{obj_name}"
 
     s3.upload_file(
         local_path,
@@ -499,69 +473,94 @@ def _s3_upload(local_path: str) -> Tuple[str, str, str]:
     )
 
     https_url = f"https://{S3_BUCKET}.s3.{S3_REGION}.amazonaws.com/{key}"
-    s3_url = f"s3://{S3_BUCKET}/{key}"
-    return key, s3_url, https_url
+    s3_url   = f"s3://{S3_BUCKET}/{key}"
+    return (key, s3_url, https_url)
 
-# =============== Main render ===============
-def render_funnel(local_video: str) -> Tuple[str, List[dict], Dict[str, List[dict]]]:
-    """
-    Returns (out_path, clips_for_response, slots_for_response)
-    """
+########################################
+# DOWNLOAD REMOTE FILE IF NEEDED
+########################################
+
+def _download_if_http(src: str) -> str:
+    import requests, tempfile, os
+    if src.startswith("http://") or src.startswith("https://"):
+        r = requests.get(src, stream=True, timeout=60)
+        r.raise_for_status()
+        fd, tmp_path = tempfile.mkstemp(suffix=".mp4")
+        with os.fdopen(fd, "wb") as w:
+            for chunk in r.iter_content(1024*1024):
+                if chunk:
+                    w.write(chunk)
+        return tmp_path
+    return src
+
+########################################
+# RENDER FUNNEL VIDEO
+########################################
+
+def _render_video(local_video: str) -> Dict[str, Any]:
+    # 1. build takes
     takes = _build_takes(local_video)
 
-    clips, slots = _tag_and_stitch(takes)
+    # 2. semantic tagging
+    clips, slots = _tag_semantic(takes)
 
-    # pick clips for funnel
-    plan = _assemble_funnel(slots, max_total=MAX_DURATION_SEC)
+    # 3. choose funnel sequence
+    plan = _choose_plan(slots, MAX_DURATION_SEC)
 
-    # cut subclips
+    # 4. cut & concat
     tmpdir = tempfile.mkdtemp(prefix="ed_")
-    parts: List[str] = []
+    part_paths: List[str] = []
 
-    for i, (ss, ee, cid, slot) in enumerate(plan, 1):
-        outp = os.path.join(tmpdir, f"part{i:02d}.mp4")
-        _ffmpeg_subclip(local_video, outp, ss, ee)
-        parts.append(outp)
+    for i, (ss, ee, cid, slot) in enumerate(plan, start=1):
+        out_part = os.path.join(tmpdir, f"part{i:02d}.mp4")
+        _ffmpeg_subclip(local_video, out_part, ss, ee)
+        part_paths.append(out_part)
 
-    # if nothing, force 1s clip from start
-    if not parts:
-        outp = os.path.join(tmpdir, "part01.mp4")
-        _ffmpeg_subclip(local_video, outp, 0.0, min(1.0, _ffprobe_duration(local_video)))
-        parts = [outp]
+    # fallback: if somehow empty
+    if not part_paths:
+        out_part = os.path.join(tmpdir, "part01.mp4")
+        _ffmpeg_subclip(local_video, out_part, 0.0, min(1.0, _ffprobe_duration(local_video)))
+        part_paths = [out_part]
 
-    # concat list file
     concat_list = os.path.join(tmpdir, "concat.txt")
-    with open(concat_list, "w") as f:
-        for p in parts:
+    with open(concat_list,"w") as f:
+        for p in part_paths:
             f.write(f"file '{p}'\n")
 
-    out_final = os.path.join(tmpdir, f"final_{uuid.uuid4().hex}.mp4")
-    _ffmpeg_concat(concat_list, out_final)
+    final_path = os.path.join(tmpdir, f"final_{uuid.uuid4().hex}.mp4")
+    _ffmpeg_concat(concat_list, final_path)
 
-    return out_final, clips, slots
+    # 5. upload
+    key, s3_url, https_url = _upload_s3(final_path)
+    out_dur = _ffprobe_duration(final_path)
 
-# =============== Download helper ===============
-def _download_to_tmp(url: str) -> str:
-    import requests
-    r = requests.get(url, stream=True, timeout=60)
-    r.raise_for_status()
-    fd, path = tempfile.mkstemp(suffix=".mp4")
-    with os.fdopen(fd, "wb") as w:
-        for chunk in r.iter_content(1024 * 1024):
-            if chunk:
-                w.write(chunk)
-    return path
+    return {
+        "ok": True,
+        "input_local": local_video,
+        "duration_sec": round(out_dur,3),
+        "s3_key": key,
+        "s3_url": s3_url,
+        "https_url": https_url,
+        "clips": clips,
+        "slots": slots,
+        "semantic": SEMANTICS_ENABLED,
+        "vision": False,
+        "asr": ASR_ENABLED,
+    }
 
-# =============== Public API ===============
-def run_pipeline(local_path: Optional[str] = None, payload: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+########################################
+# PUBLIC ENTRYPOINTS
+########################################
+
+def run_pipeline(local_path: Optional[str] = None, payload: Optional[Dict[str,Any]] = None) -> Dict[str,Any]:
     """
-    Main callable used by the worker if tasks.job_render forwards here.
-    payload (optional) can override env via payload["options"].
+    Main function tasks.job_render will call.
+    We ALSO honor runtime overrides in payload["options"].
     """
     payload = payload or {}
     options = payload.get("options") or {}
 
-    # allow request-time overrides
+    # override MAX_DURATION_SEC / FUNNEL_COUNTS at request time
     global MAX_DURATION_SEC, FUNNEL_COUNTS
     if "MAX_DURATION_SEC" in options:
         try:
@@ -571,60 +570,26 @@ def run_pipeline(local_path: Optional[str] = None, payload: Optional[Dict[str, A
     if "FUNNEL_COUNTS" in options:
         FUNNEL_COUNTS = str(options["FUNNEL_COUNTS"]).strip()
 
-    # resolve local input
-    input_local = local_path
-    if not input_local:
+    # resolve input file
+    if not local_path:
         files = payload.get("files") or []
         if files:
-            src = files[0]
-            if isinstance(src, dict) and "url" in src:
-                src = src["url"]
-            if isinstance(src, str) and src.startswith("http"):
-                input_local = _download_to_tmp(src)
-            else:
-                input_local = src
+            first = files[0]
+            if isinstance(first, dict) and "url" in first:
+                first = first["url"]
+            local_path = _download_if_http(str(first))
 
-    if not input_local:
-        return {"ok": False, "error": "No input file provided."}
+    if not local_path:
+        return {"ok": False, "error": "No input provided."}
 
-    # render pipeline
-    out_path, clips, slots = render_funnel(input_local)
+    return _render_video(local_path)
 
-    # upload
-    key, s3_url, https_url = _s3_upload(out_path)
-    dur = _ffprobe_duration(out_path)
-
-    return {
-        "ok": True,
-        "input_local": input_local,
-        "duration_sec": round(dur, 3),
-        "s3_key": key,
-        "s3_url": s3_url,
-        "https_url": https_url,
-        "clips": clips,
-        "slots": slots,
-        "semantic": bool(SEM_ENABLED and Take is not None),
-        "vision": False,
-        "asr": bool(ASR_ENABLED),
-    }
-
-# --- Adapter for the worker entrypoint ---
-def job_render(payload=None):
+def job_render(payload: Dict[str,Any]) -> Dict[str,Any]:
     """
-    RQ calls this (string 'tasks.job_render' in Redis),
-    our tasks.py forwards to us.
+    Fallback signature, if tasks.py decides to call jobs.job_render directly.
+    Just forwards to run_pipeline.
     """
     if not isinstance(payload, dict):
         payload = {}
     local_path = payload.get("local_path")
-    if not local_path:
-        files = payload.get("files") or []
-        if files:
-            src = files[0]
-            if isinstance(src, dict) and "url" in src:
-                src = src["url"]
-            if isinstance(src, str) and src.startswith("http"):
-                local_path = _download_to_tmp(src)
-            else:
-                local_path = src
     return run_pipeline(local_path=local_path, payload=payload)
