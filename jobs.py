@@ -1,323 +1,312 @@
 import os
-import uuid
-import time
-import tempfile
-import subprocess
 import json
-from typing import List, Dict, Any, Tuple
+import time
+import uuid
+import tempfile
+import traceback
+from typing import Any, Dict, Optional
 
+from .s3_utils import upload_file_presign
+from .captions import burn_captions_onto_video
 from .semantic_visual_pass import semantic_visual_pass
-from .s3_utils import download_url_to_tempfile
 
-
-def _ffmpeg_extract_segment(src_path: str, start_sec: float, end_sec: float, out_path: str):
-    """
-    Cut [start_sec, end_sec] from src_path into out_path using ffmpeg.
-    """
-    dur = max(0.0, end_sec - start_sec)
-    cmd = [
-        os.getenv("FFMPEG_BIN", "/usr/bin/ffmpeg"),
-        "-y",
-        "-ss", f"{start_sec:.3f}",
-        "-i", src_path,
-        "-t", f"{dur:.3f}",
-        "-c:v", "libx264",
-        "-preset", "fast",
-        "-crf", "23",
-        "-pix_fmt", "yuv420p",
-        "-g", "48",
-        "-c:a", "aac",
-        "-b:a", "128k",
-        out_path,
-    ]
-    subprocess.run(cmd, check=True)
-
-
-def _ffmpeg_concat(parts_list_file: str, out_path: str):
-    """
-    Concat parts listed in parts_list_file (ffmpeg concat demuxer style).
-    """
-    cmd = [
-        os.getenv("FFMPEG_BIN", "/usr/bin/ffmpeg"),
-        "-y",
-        "-f", "concat",
-        "-safe", "0",
-        "-i", parts_list_file,
-        "-c:v", "libx264",
-        "-preset", "fast",
-        "-crf", "23",
-        "-pix_fmt", "yuv420p",
-        "-g", "48",
-        "-c:a", "aac",
-        "-b:a", "128k",
-        out_path,
-    ]
-    subprocess.run(cmd, check=True)
-
-
-def _ffprobe_duration(path: str) -> float:
-    """
-    Return duration in seconds using ffprobe.
-    """
-    cmd = [
-        os.getenv("FFPROBE_BIN", "/usr/bin/ffprobe"),
-        "-v", "error",
-        "-show_entries", "format=duration",
-        "-of", "default=nokey=1:noprint_wrappers=1",
-        path,
-    ]
-    out = subprocess.check_output(cmd).decode("utf-8", "replace").strip()
+#
+# small helper:
+# this tries to import your pipeline logic from jobs.py (or worker/jobs.py if you ever split later)
+#
+def _import_jobs_module():
+    # 1. try local editdna/jobs.py
     try:
-        return float(out)
-    except:
-        return 0.0
+        import jobs as local_jobs  # because PYTHONPATH=/workspace/editdna
+        return local_jobs
+    except Exception as e_local:
+        local_err = e_local
 
+    # 2. try worker.jobs (in case you ever move code under /workspace/editdna/worker/jobs.py)
+    try:
+        from worker import jobs as worker_jobs  # type: ignore
+        return worker_jobs
+    except Exception as e_worker:
+        worker_err = e_worker
 
-def _pick_funnel_chunks(
-    takes: List[Dict[str, Any]],
-    funnel_counts: str,
-    max_duration: int,
-) -> Tuple[List[Dict[str, Any]], Dict[str, List[Dict[str, Any]]]]:
-    """
-    takes = list of { "id","slot","start","end","text", ... }
-    funnel_counts = "1,3,3,3,1" (HOOK,PROBLEM,FEATURE,PROOF,CTA)
-    max_duration = hard cap final runtime in seconds
-
-    We keep reading takes in order and greedily fill slots until we hit:
-    - the requested count per slot
-    - or the max_duration cap
-    """
-
-    # parse requested counts
-    # default array length 5 -> [HOOK, PROBLEM, FEATURE, PROOF, CTA]
-    default_counts = [1, 3, 3, 3, 1]
-    parts = [p.strip() for p in funnel_counts.split(",") if p.strip()]
-    want = []
-    for i in range(5):
-        try:
-            want.append(int(parts[i]))
-        except Exception:
-            want.append(default_counts[i])
-
-    SLOT_ORDER = ["HOOK", "PROBLEM", "FEATURE", "PROOF", "CTA"]
-    needed_by_slot = {slot: want[idx] for idx, slot in enumerate(SLOT_ORDER)}
-
-    used: List[Dict[str, Any]] = []
-    per_slot: Dict[str, List[Dict[str, Any]]] = {s: [] for s in SLOT_ORDER}
-
-    total_runtime = 0.0
-
-    for tk in takes:
-        slot = tk.get("slot", "HOOK").upper()
-        if slot not in per_slot:
-            slot = "HOOK"
-
-        # skip if that slot already satisfied
-        if needed_by_slot.get(slot, 0) <= 0:
-            continue
-
-        seg_len = float(tk["end"]) - float(tk["start"])
-        if seg_len <= 0:
-            continue
-
-        # if adding this would explode max_duration, stop
-        if total_runtime + seg_len > max_duration:
-            break
-
-        # accept
-        used.append(tk)
-        per_slot[slot].append(tk)
-        needed_by_slot[slot] -= 1
-        total_runtime += seg_len
-
-        # small safety: if we filled all slots fully, we can stop
-        if all(v <= 0 for v in needed_by_slot.values()):
-            break
-
-    # if we ended up with literally nothing (all filtered or too short),
-    # fallback: grab at least something from the first take(s)
-    if not used and takes:
-        first = takes[0]
-        used = [first]
-        per_slot = {s: [] for s in SLOT_ORDER}
-        per_slot[first.get("slot", "HOOK").upper()] = [first]
-
-    return used, per_slot
-
-
-def _stitch_parts(src_path: str, chosen: List[Dict[str, Any]]) -> Tuple[str, List[Dict[str, Any]]]:
-    """
-    Given chosen segments, actually cut them and concat them.
-    Return (final_video_path, clips_meta_list)
-    """
-    tmpdir = tempfile.mkdtemp(prefix="ed_")
-    part_files = []
-    clip_meta_out = []
-
-    for idx, seg in enumerate(chosen, start=1):
-        part_path = os.path.join(tmpdir, f"part{idx:02d}.mp4")
-        _ffmpeg_extract_segment(
-            src_path=src_path,
-            start_sec=seg["start"],
-            end_sec=seg["end"],
-            out_path=part_path,
-        )
-        part_files.append(part_path)
-        clip_meta_out.append({
-            "id": seg.get("id", f"T{idx:04d}"),
-            "slot": seg.get("slot", "HOOK"),
-            "start": seg["start"],
-            "end": seg["end"],
-            "score": seg.get("score", 2.5),
-            "face_q": seg.get("face_q", 1.0),
-            "scene_q": seg.get("scene_q", 1.0),
-            "vtx_sim": seg.get("vtx_sim", 0.0),
-            "chain_ids": seg.get("chain_ids", []),
-        })
-
-    # write concat list
-    concat_list_path = os.path.join(tmpdir, "concat.txt")
-    with open(concat_list_path, "w") as fh:
-        for p in part_files:
-            fh.write(f"file '{p}'\n")
-
-    final_path = os.path.join(
-        tmpdir,
-        f"ed_{uuid.uuid4().hex[:32]}.mp4"
+    # 3. nothing worked
+    raise ImportError(
+        "Could not import job implementation from jobs.py or worker/jobs.py.\n"
+        f"jobs.py error: {repr(local_err)}\n"
+        f"worker/jobs.py error: {repr(worker_err)}"
     )
-    _ffmpeg_concat(concat_list_path, final_path)
-
-    return final_path, clip_meta_out
 
 
-def run_pipeline(
-    session_id: str,
-    file_urls: List[str],
-    portrait: bool,
-    funnel_counts: str,
-    max_duration: int,
-    bin_sec: float,
-    min_take_sec: float,
-    max_take_sec: float,
-    veto_min_score: float,
-    sem_merge_sim: float,
-    viz_merge_sim: float,
-    merge_max_chain: int,
-    filler_tokens: List[str],
-    filler_max_rate: float,
-    micro_cut: bool,
-    micro_silence_db: float,
-    micro_silence_min: float,
-    slot_require_product: List[str],
-    slot_require_ocr_cta: str,
-    fallback_min_sec: int,
-) -> Dict[str, Any]:
+def _coerce_env_float(name: str, default: float) -> float:
+    val = os.getenv(name, None)
+    if val is None:
+        return default
+    try:
+        return float(val.strip().split()[0])
+    except Exception:
+        return default
+
+
+def _coerce_env_int(name: str, default: int) -> int:
+    val = os.getenv(name, None)
+    if val is None:
+        return default
+    try:
+        return int(val.strip().split()[0])
+    except Exception:
+        return default
+
+
+def _choose_funnel_counts(payload_opts: Dict[str, Any]) -> str:
     """
-    Main pipeline.
-    - Download the FIRST file URL only (MVP).
-    - semantic_visual_pass() = YOUR intelligence pass (ASR, scoring, merge).
-    - pick funnel.
-    - ffmpeg stitch.
+    Order: payload.options.FUNNEL_COUNTS > ENV FUNNEL_COUNTS > default "1,3,3,3,1"
+    """
+    # 1. request override
+    if "options" in payload_opts and isinstance(payload_opts["options"], dict):
+        fc = payload_opts["options"].get("FUNNEL_COUNTS")
+        if isinstance(fc, str) and fc.strip():
+            return fc.strip()
+
+    # 2. env
+    env_fc = os.getenv("FUNNEL_COUNTS")
+    if env_fc and env_fc.strip():
+        return env_fc.strip()
+
+    # 3. fallback
+    return "1,3,3,3,1"
+
+
+def _choose_max_duration_sec(payload_opts: Dict[str, Any]) -> int:
+    """
+    Order: payload.options.MAX_DURATION_SEC > ENV MAX_DURATION_SEC > default 220
+    """
+    # request override
+    if "options" in payload_opts and isinstance(payload_opts["options"], dict):
+        md = payload_opts["options"].get("MAX_DURATION_SEC")
+        if md is not None:
+            try:
+                return int(str(md).strip().split()[0])
+            except Exception:
+                pass
+
+    # env
+    env_md = os.getenv("MAX_DURATION_SEC")
+    if env_md:
+        try:
+            return int(env_md.strip().split()[0])
+        except Exception:
+            pass
+
+    # default
+    return 220
+
+
+def _safe_bool_env(name: str, default: bool) -> bool:
+    raw = os.getenv(name, "")
+    if not raw:
+        return default
+    raw = raw.strip().lower()
+    return raw in ("1", "true", "yes", "on")
+
+
+def job_render(payload: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    This is what RQ calls.
+    payload is what your FastAPI sent to Redis.
+    We will:
+    1. download / load the source video(s)
+    2. run semantic / asr / merging logic (your pipeline)
+    3. stitch final edit with ffmpeg
+    4. optionally burn captions
+    5. upload to s3 and presign
+    6. return JSON
     """
 
-    # 1) Download source video locally
-    # (your s3_utils already has download_url_to_tempfile like we used before)
-    src_local = download_url_to_tempfile(file_urls[0])  # returns /tmp/tmpabcd1234.mp4
+    t0 = time.time()
 
-    # 2) Run semantic / ASR / merge pass.
-    # IMPORTANT:
-    # semantic_visual_pass() is YOUR existing logic that was already working in the pod logs:
-    # "🧠 [semantic_visual_pass] Semantic pipeline active."
+    # --- basic request fields ---
+    session_id = payload.get("session_id", f"session-{uuid.uuid4().hex[:8]}")
+    files = payload.get("files", [])
+    if not isinstance(files, list) or len(files) == 0:
+        return {
+            "ok": False,
+            "error": "No input files provided",
+            "trace": None,
+        }
+
+    # portrait flag (vertical), default True
+    portrait = bool(payload.get("portrait", True))
+
+    # choose funnel counts
+    funnel_counts = _choose_funnel_counts(payload)
+
+    # choose max clip length
+    max_duration_sec = _choose_max_duration_sec(payload)
+
+    # env-driven knobs
+    bin_sec = _coerce_env_float("BIN_SEC", 1.0)                 # how we bucket timestamps
+    min_take_sec = _coerce_env_float("MIN_TAKE_SEC", 2.0)       # min chunk
+    max_take_sec = _coerce_env_float("MAX_TAKE_SEC", 220.0)     # max chunk
+    veto_min_score = _coerce_env_float("VETO_MIN_SCORE", 0.35)  # if below, drop
+
+    # merge logic tuning
+    sem_merge_sim = _coerce_env_float("SEM_MERGE_SIM", 0.70)
+    viz_merge_sim = _coerce_env_float("VIZ_MERGE_SIM", 0.70)
+    merge_max_chain = _coerce_env_int("MERGE_MAX_CHAIN", 12)
+
+    # filler cleanup
+    sem_filler_list = os.getenv("SEM_FILLER_LIST", "um,uh,like,so,okay")
+    filler_tokens = [w.strip() for w in sem_filler_list.split(",") if w.strip()]
+    sem_filler_max_rate = _coerce_env_float("SEM_FILLER_MAX_RATE", 0.08)
+
+    # micro-cut logic
+    micro_cut_enabled = _safe_bool_env("MICRO_CUT", True)
+    micro_silence_db = _coerce_env_float("MICRO_SILENCE_DB", -30.0)
+    micro_silence_min = _coerce_env_float("MICRO_SILENCE_MIN", 0.25)
+
+    # slot requirements for FEATURE/PROOF/CTA
+    slot_require_product = os.getenv("SLOT_REQUIRE_PRODUCT", "FEATURE,PROOF")
+    slot_require_product = [s.strip().upper() for s in slot_require_product.split(",") if s.strip()]
+    slot_require_ocr_cta = os.getenv("SLOT_REQUIRE_OCR_CTA", "CTA").strip().upper()
+
+    # S3 config
+    bucket = os.getenv("S3_BUCKET")
+    region = os.getenv("AWS_REGION", "us-east-1")
+    s3_prefix = os.getenv("S3_PREFIX", "editdna/outputs")
+    s3_acl = os.getenv("S3_ACL", "public-read")
+    presign_expires = int(os.getenv("PRESIGN_EXPIRES", "1000000").strip().split()[0])
+
+    # captions on/off (env)
+    captions_mode = os.getenv("CAPTIONS", "off").strip().lower()
+    burn_captions = captions_mode in ("on", "burn", "burned", "burn_captions", "subtitle")
+
+    # final fallback runtime minimum if pipeline can't build funnel
+    fallback_min_sec = _coerce_env_int("FALLBACK_MIN_SEC", 60)
+
+    # ---- IMPORT USER PIPELINE MODULE ----
+    try:
+        jobs = _import_jobs_module()
+    except Exception as import_err:
+        return {
+            "ok": False,
+            "error": (
+                "Could not import job implementation.\n"
+                f"{repr(import_err)}"
+            ),
+            "trace": traceback.format_exc(),
+        }
+
+    # ---- CALL YOUR PIPELINE LOGIC ----
+    # We expect your jobs.run_pipeline() to do:
+    # - ASR (if ASR_ENABLED=1)
+    # - semantic scoring
+    # - filler cleanup
+    # - segment merge
+    # - select funnel slots (HOOK/PROBLEM/FEATURE/PROOF/CTA)
+    # - stitch final ffmpeg cut
     #
-    # It MUST return a dict shaped like:
+    # It MUST return a dict like:
     # {
-    #   "takes": [
-    #       {
-    #         "id": "T0001",
-    #         "slot": "HOOK",
-    #         "start": 0.00,
-    #         "end": 2.96,
-    #         "text": "...",
-    #         "score": 2.5,
-    #         "face_q": 1.0,
-    #         "scene_q": 1.0,
-    #         "vtx_sim": 0.0,
-    #         "chain_ids": []
-    #       },
-    #       ...
-    #   ]
+    #   "ok": True,
+    #   "input_local": "/tmp/tmpabc.mp4",
+    #   "final_local": "/tmp/out_final.mp4",
+    #   "duration_sec": 42.0,
+    #   "clips": [...],
+    #   "slots": {...}
     # }
     #
-    sem_out = semantic_visual_pass(
-        video_path=src_local,
-        portrait=portrait,
-        bin_sec=bin_sec,
-        min_take_sec=min_take_sec,
-        max_take_sec=max_take_sec,
-        veto_min_score=veto_min_score,
-        sem_merge_sim=sem_merge_sim,
-        viz_merge_sim=viz_merge_sim,
-        merge_max_chain=merge_max_chain,
-        filler_tokens=filler_tokens,
-        filler_max_rate=filler_max_rate,
-        micro_cut=micro_cut,
-        micro_silence_db=micro_silence_db,
-        micro_silence_min=micro_silence_min,
-        slot_require_product=slot_require_product,
-        slot_require_ocr_cta=slot_require_ocr_cta,
-        fallback_min_sec=fallback_min_sec,
-    )
+    try:
+        result = jobs.run_pipeline(
+            session_id=session_id,
+            file_urls=files,
+            portrait=portrait,
+            funnel_counts=funnel_counts,
+            max_duration=max_duration_sec,
+            bin_sec=bin_sec,
+            min_take_sec=min_take_sec,
+            max_take_sec=max_take_sec,
+            veto_min_score=veto_min_score,
+            sem_merge_sim=sem_merge_sim,
+            viz_merge_sim=viz_merge_sim,
+            merge_max_chain=merge_max_chain,
+            filler_tokens=filler_tokens,
+            filler_max_rate=sem_filler_max_rate,
+            micro_cut=micro_cut_enabled,
+            micro_silence_db=micro_silence_db,
+            micro_silence_min=micro_silence_min,
+            slot_require_product=slot_require_product,
+            slot_require_ocr_cta=slot_require_ocr_cta,
+            fallback_min_sec=fallback_min_sec,
+        )
+    except Exception as pipeline_err:
+        return {
+            "ok": False,
+            "error": f"Pipeline crashed: {repr(pipeline_err)}",
+            "trace": traceback.format_exc(),
+        }
 
-    takes = sem_out.get("takes", [])
+    if not result or not result.get("ok"):
+        return {
+            "ok": False,
+            "error": "Pipeline returned not-ok or empty result",
+            "trace": json.dumps(result, indent=2, default=str),
+        }
 
-    # 3) Pick final funnel slots with time budget
-    chosen_segments, slot_map = _pick_funnel_chunks(
-        takes=takes,
-        funnel_counts=funnel_counts,
-        max_duration=max_duration,
-    )
+    final_local = result.get("final_local")
+    if not final_local or not os.path.exists(final_local):
+        return {
+            "ok": False,
+            "error": "Pipeline did not output final_local video file",
+            "trace": json.dumps(result, indent=2, default=str),
+        }
 
-    # 4) Actually stitch those chosen segments into a new mp4
-    final_local, clips_meta = _stitch_parts(src_local, chosen_segments)
+    # ---- OPTIONAL CAPTIONS BURN ----
+    if burn_captions:
+        try:
+            with tempfile.NamedTemporaryFile(suffix=".mp4", delete=False) as tmp_out:
+                burn_captions_onto_video(
+                    input_path=final_local,
+                    output_path=tmp_out.name,
+                    slots=result.get("slots", {}),
+                )
+                final_local = tmp_out.name
+        except Exception as cap_err:
+            # we won't fail the job if caption burn fails
+            pass
 
-    # 5) Measure duration
-    final_dur = _ffprobe_duration(final_local)
+    # ---- UPLOAD TO S3 ----
+    try:
+        base_key = f"{uuid.uuid4().hex}_{int(time.time())}.mp4"
+        s3_key = f"{s3_prefix.rstrip('/')}/{base_key}"
 
-    # Reformat slots to match how you’ve been returning them:
-    # { "HOOK":[...], "PROBLEM":[...], "FEATURE":[...], "PROOF":[...], "CTA":[...] }
-    slots_struct: Dict[str, List[Dict[str, Any]]] = {
-        "HOOK": [],
-        "PROBLEM": [],
-        "FEATURE": [],
-        "PROOF": [],
-        "CTA": [],
-    }
-    for slot_name, seg_list in slot_map.items():
-        norm_slot = slot_name.upper()
-        if norm_slot not in slots_struct:
-            slots_struct[norm_slot] = []
-        for seg in seg_list:
-            slots_struct[norm_slot].append({
-                "id": seg.get("id", ""),
-                "start": seg.get("start", 0.0),
-                "end": seg.get("end", 0.0),
-                "text": seg.get("text", ""),
-                "meta": {
-                    "slot": seg.get("slot", ""),
-                    "score": seg.get("score", 2.5),
-                },
-                "face_q": seg.get("face_q", 1.0),
-                "scene_q": seg.get("scene_q", 1.0),
-                "vtx_sim": seg.get("vtx_sim", 0.0),
-                "has_product": seg.get("has_product", False),
-                "ocr_hit": seg.get("ocr_hit", 0),
-            })
+        upload_info = upload_file_presign(
+            file_path=final_local,
+            bucket=bucket,
+            region=region,
+            key=s3_key,
+            acl=s3_acl,
+            expires_in=presign_expires,
+        )
+    except Exception as s3_err:
+        return {
+            "ok": False,
+            "error": f"Upload failed: {repr(s3_err)}",
+            "trace": traceback.format_exc(),
+        }
+
+    t1 = time.time()
 
     return {
         "ok": True,
-        "input_local": src_local,
-        "final_local": final_local,
-        "duration_sec": final_dur,
-        "clips": clips_meta,
-        "slots": slots_struct,
+        "input_local": result.get("input_local"),
+        "duration_sec": result.get("duration_sec"),
+        "s3_key": upload_info.get("s3_key"),
+        "s3_url": upload_info.get("s3_url"),
+        "https_url": upload_info.get("https_url"),
+        "clips": result.get("clips", []),
+        "slots": result.get("slots", {}),
+        "semantic": True,
+        "vision": bool(int(os.getenv("SEMANTICS_ENABLED", "1"))),
+        "asr": bool(int(os.getenv("ASR_ENABLED", "1"))),
+        "runtime_sec": round(t1 - t0, 3),
     }
