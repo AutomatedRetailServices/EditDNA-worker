@@ -1,151 +1,211 @@
-#!/usr/bin/env python3
-# tasks.py
-#
-# RQ worker entrypoint.
-# The web service enqueues tasks.job_render(...)
-# The worker (on RunPod) imports this file and runs job_render().
-#
-# This file:
-#   - downloads the input video from S3 (or URL)
-#   - runs run_pipeline() from pipeline.py (Mode B logic)
-#   - uploads stitched mp4 to your S3 bucket
-#   - returns JSON like FastAPI expects
+import os
+import json
+import time
+import uuid
+import tempfile
+import traceback
+from typing import Any, Dict
 
-import os, io, uuid, time, json, tempfile, shutil
-import boto3
-import requests
-from typing import Dict, Any, List, Optional
-from urllib.parse import urlparse
+from .s3_utils import upload_file_presign
+from .captions import burn_captions_onto_video
 
-from pipeline import run_pipeline  # <- Mode B brain
 
-S3_BUCKET   = os.getenv("S3_BUCKET", "")
-AWS_REGION  = os.getenv("AWS_REGION", "us-east-1")
-S3_PREFIX   = os.getenv("S3_PREFIX", "editdna/outputs")
-S3_ACL      = os.getenv("S3_ACL", "public-read")
-
-PRESIGN_EXPIRES = int(os.getenv("PRESIGN_EXPIRES", "86400"))
-
-FFMPEG_BIN   = os.getenv("FFMPEG_BIN", "/usr/bin/ffmpeg")
-FFPROBE_BIN  = os.getenv("FFPROBE_BIN", "/usr/bin/ffprobe")
-
-def _download_to_tmp(url:str)->str:
+def _import_jobs_module():
     """
-    Pull remote file (S3 https or whatever) down to /tmp/xxx.mp4
+    Try to import your job implementation.
+    We expect editdna/jobs.py in the container.
     """
-    r = requests.get(url, timeout=60, stream=True)
-    r.raise_for_status()
-    suffix = ".mp4"
-    tmp_fd, tmp_path = tempfile.mkstemp(prefix="tmp", suffix=suffix)
-    with os.fdopen(tmp_fd,"wb") as f:
-        for chunk in r.iter_content(chunk_size=1024*1024):
-            if chunk:
-                f.write(chunk)
-    return tmp_path
+    try:
+        import jobs  # PYTHONPATH is /workspace/editdna in the pod
+        return jobs
+    except Exception as e_local:
+        raise ImportError(
+            "Could not import job implementation from jobs.py. "
+            "Make sure editdna/jobs.py exists and has run_pipeline() or job_render()."
+        ) from e_local
 
-def _upload_file_to_s3(local_path:str, key:str)->str:
+
+def _coerce_float(name: str, default: float) -> float:
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    try:
+        # allow "220           # comment"
+        return float(raw.strip().split()[0])
+    except Exception:
+        return default
+
+
+def _coerce_int(name: str, default: int) -> int:
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    try:
+        return int(raw.strip().split()[0])
+    except Exception:
+        return default
+
+
+def _bool_env(name: str, default: bool) -> bool:
+    raw = os.getenv(name, "")
+    if not raw:
+        return default
+    return raw.strip().lower() in ("1", "true", "yes", "on")
+
+
+def job_render(payload: Dict[str, Any]) -> Dict[str, Any]:
     """
-    Upload final mp4 to S3 and return public https_url (or presigned).
+    This is what RQ worker runs.
+    The FastAPI enqueues this with your JSON body.
     """
-    session = boto3.session.Session(region_name=AWS_REGION)
-    s3c = session.client(
-        "s3",
-        aws_access_key_id=os.getenv("AWS_ACCESS_KEY_ID",""),
-        aws_secret_access_key=os.getenv("AWS_SECRET_ACCESS_KEY",""),
+    t0 = time.time()
+
+    # ----- pull request fields -----
+    session_id = payload.get("session_id", f"session-{uuid.uuid4().hex[:8]}")
+    files = payload.get("files", [])
+    portrait = bool(payload.get("portrait", True))
+    max_duration = payload.get("max_duration", None)
+    output_prefix = payload.get("output_prefix", "editdna/outputs/")
+    # audio flag got removed from FastAPI model, so default True here:
+    audio = True
+
+    # if caller gave no files -> fail fast so API can tell frontend
+    if not isinstance(files, list) or len(files) == 0:
+        return {
+            "ok": False,
+            "error": "No input files provided",
+            "trace": None,
+        }
+
+    # ----- read knobs from env -----
+    # how long final ad is allowed to be if caller didn't override
+    MAX_DURATION_SEC = _coerce_float("MAX_DURATION_SEC", 220.0)
+    if max_duration is None:
+        max_duration = MAX_DURATION_SEC
+
+    # caption burn mode
+    captions_mode = os.getenv("CAPTIONS", "off").strip().lower()
+    burn_captions = captions_mode in (
+        "on", "burn", "burned", "burn_captions", "subtitle"
     )
-    with open(local_path,"rb") as f:
-        s3c.upload_fileobj(
-            f,
-            S3_BUCKET,
-            key,
-            ExtraArgs={"ACL": S3_ACL, "ContentType": "video/mp4"}
+
+    # S3 stuff
+    bucket = os.getenv("S3_BUCKET")
+    region = os.getenv("AWS_REGION", "us-east-1")
+    s3_acl = os.getenv("S3_ACL", "public-read")
+    presign_expires = _coerce_int("PRESIGN_EXPIRES", 1000000)
+    s3_prefix_env = os.getenv("S3_PREFIX", "editdna/outputs").rstrip("/")
+    # output_prefix from payload overrides env prefix if provided
+    final_prefix = (output_prefix or s3_prefix_env).rstrip("/")
+
+    # ----- import pipeline implementation -----
+    try:
+        jobs = _import_jobs_module()
+    except Exception as import_err:
+        return {
+            "ok": False,
+            "error": (
+                "IMPORT ERROR: could not import jobs.py in worker. "
+                f"{repr(import_err)}"
+            ),
+            "trace": traceback.format_exc(),
+        }
+
+    # ----- run pipeline -----
+    # jobs.run_pipeline MUST:
+    #  - download the file_urls[0]
+    #  - ASR (if ASR_ENABLED=1)
+    #  - semantic cleanup / merge / pick clips
+    #  - stitch with ffmpeg
+    #  - return dict:
+    #    {
+    #      "ok": True,
+    #      "input_local": "/tmp/tmpabc.mp4",
+    #      "final_local": "/tmp/out_final.mp4",
+    #      "duration_sec": 42.0,
+    #      "clips": [...],
+    #      "slots": {...}
+    #    }
+    try:
+        pipe_result = jobs.run_pipeline(
+            session_id=session_id,
+            file_urls=files,
+            portrait=portrait,
+            max_duration=max_duration,
+            audio=audio,
         )
+    except Exception as pipeline_err:
+        return {
+            "ok": False,
+            "error": f"Pipeline crashed: {repr(pipeline_err)}",
+            "trace": traceback.format_exc(),
+        }
 
-    # public-style URL (your bucket is public-read in current setup)
-    https_url = f"https://{S3_BUCKET}.s3.{AWS_REGION}.amazonaws.com/{key}"
-    return https_url
+    if not pipe_result or not pipe_result.get("ok"):
+        return {
+            "ok": False,
+            "error": "Pipeline returned not-ok or empty result",
+            "trace": json.dumps(pipe_result, indent=2, default=str),
+        }
 
-def job_render(payload: Dict[str,Any]) -> Dict[str,Any]:
-    """
-    Called by RQ with a dict like:
-    {
-      "session_id": "...",
-      "files": ["https://...mp4"],
-      "portrait": true,
-      "max_duration": 120,
-      "audio": true
-    }
-    We only use files[0] for now.
-    """
+    final_local = pipe_result.get("final_local")
+    if not final_local or not os.path.exists(final_local):
+        return {
+            "ok": False,
+            "error": "Pipeline did not output final_local video file",
+            "trace": json.dumps(pipe_result, indent=2, default=str),
+        }
 
-    t0=time.time()
-    print("[tasks.job_render] INCOMING PAYLOAD KEYS:", list(payload.keys()), flush=True)
+    # ----- optional subtitle burn -----
+    if burn_captions:
+        try:
+            tmp_out = tempfile.NamedTemporaryFile(suffix=".mp4", delete=False)
+            tmp_out.close()
+            # pipe_result["slots"] should include text chunks
+            burn_slots = pipe_result.get("slots", {})
+            # captions.burn_captions_onto_video(in,out,slots)
+            burn_captions_onto_video(
+                input_path=final_local,
+                output_path=tmp_out.name,
+                slots=burn_slots,
+            )
+            final_local = tmp_out.name
+        except Exception:
+            # soft fail on captions; keep going with non-burned video
+            pass
 
-    session_id = payload.get("session_id","session")
-    files      = payload.get("files",[])
-    if not files:
-        return {"ok": False, "error":"no files[] in payload"}
+    # ----- upload + presign -----
+    try:
+        final_key = f"{final_prefix}/{uuid.uuid4().hex}_{int(time.time())}.mp4"
 
-    # download first file
-    src_url    = files[0]
-    local_path = _download_to_tmp(src_url)
+        upload_info = upload_file_presign(
+            file_path=final_local,
+            bucket=bucket,
+            region=region,
+            key=final_key,
+            acl=s3_acl,
+            expires_in=presign_expires,
+        )
+    except Exception as s3_err:
+        return {
+            "ok": False,
+            "error": f"Upload failed: {repr(s3_err)}",
+            "trace": traceback.format_exc(),
+        }
 
-    # run pipeline
-    result_core = run_pipeline(local_path=local_path, session_id=session_id)
+    t1 = time.time()
 
-    # after run_pipeline, we have a stitched file on disk INSIDE result_core? not yet.
-    # We need to re-stitch according to what run_pipeline decided.
-    # BUT run_pipeline in Mode B ALREADY exported and stitched and returned only JSON.
-    # So we slightly adjust: modify run_pipeline to ALSO return 'final_path'.
-    # -----
-    # We didn't expose final_path above yet, so let's patch that now:
-    # small hack: rerun internal stitching here, matching chosen clips.
-
-    # Instead of re-running heavy logic, easiest path:
-    # We assume final_path is NOT yet uploaded. We'll just reconstruct it here
-    # using the chosen clips = result_core["clips"].
-    # BUT run_pipeline already stitched and never told us the file path.
-    # So: we add _stitch_again() helper here mirroring pipeline.stitch_video.
-    from pipeline import stitch_video, build_funnel_order, pick_best_by_slot, tag_all, merge_chains, drop_retries, asr_segments
-
-    # regenerate minimal final video path so we can upload:
-    segs      = asr_segments(local_path)
-    segs2     = drop_retries(segs)
-    merged    = merge_chains(segs2)
-    tagged    = tag_all(merged)
-    best_map  = pick_best_by_slot(tagged)
-    ordered   = build_funnel_order(best_map)
-    if not ordered:
-        ordered = merged[:1]
-
-    final_path, final_dur, used_clips = stitch_video(local_path, ordered, float(os.getenv("MAX_DURATION_SEC","220")))
-
-    # Upload that stitched mp4 to S3
-    file_uuid = uuid.uuid4().hex
-    s3_key = f"{S3_PREFIX}/{file_uuid}_{int(time.time())}.mp4"
-    https_url = _upload_file_to_s3(final_path, s3_key)
-
-    out = {
+    return {
         "ok": True,
-        "input_local": local_path,
-        "duration_sec": round(final_dur,3),
-        "s3_key": s3_key,
-        "s3_url": f"s3://{S3_BUCKET}/{s3_key}",
-        "https_url": https_url,
-        "clips": [
-            {
-                "id": c["id"],
-                "slot": c["slot"],
-                "start": round(c["start"],2),
-                "end": round(c["end"],2),
-                "score": round(c["score"],2),
-            } for c in used_clips
-        ],
-        "slots": result_core.get("slots", {}),
+        "input_local": pipe_result.get("input_local"),
+        "duration_sec": pipe_result.get("duration_sec"),
+        "s3_key": upload_info.get("s3_key"),
+        "s3_url": upload_info.get("s3_url"),
+        "https_url": upload_info.get("https_url"),
+        "clips": pipe_result.get("clips", []),
+        "slots": pipe_result.get("slots", {}),
         "semantic": True,
-        "vision": False,
-        "asr": True,
+        "vision": bool(int(os.getenv("SEMANTICS_ENABLED", "1"))),
+        "asr": bool(int(os.getenv("ASR_ENABLED", "1"))),
+        "runtime_sec": round(t1 - t0, 3),
     }
-
-    print(f"[tasks.job_render] DONE in {time.time()-t0:.2f}s ok={out['ok']}", flush=True)
-    return out
