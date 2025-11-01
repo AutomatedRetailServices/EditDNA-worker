@@ -1,97 +1,66 @@
-import os
-import json
-import time
-import uuid
+"""
+worker/tasks.py
+This is the real job logic RQ should run.
+
+RQ calls tasks.job_render   (module 'tasks' at repo root),
+and that file just imports job_render from here.
+
+So THIS file must:
+- parse the payload from the web
+- call pipeline.run_pipeline(...)
+- return the JSON dict
+"""
+
+from __future__ import annotations
+from typing import Any, Dict, List
 import traceback
-from typing import Any, Dict
+import uuid
+import pipeline  # this imports /workspace/pipeline.py
 
-# IMPORTANT: no leading dots here.
-# We are treating this folder as PYTHONPATH root, so modules import by simple name.
-from s3_utils import upload_file_presign  # OK if unused, safe to leave
-from captions import burn_captions_onto_video  # OK if unused, safe to leave
-import pipeline  # <-- this is pipeline.py below
-
-def _env_float(name: str, default: float) -> float:
-    raw = os.getenv(name, "")
-    if not raw:
-        return default
-    cleaned = raw.split("#")[0].strip().split()[0]
-    try:
-        return float(cleaned)
-    except Exception:
-        return default
 
 def job_render(payload: Dict[str, Any]) -> Dict[str, Any]:
     """
-    This is what RQ actually runs.
+    Main entrypoint that actually executes in the worker.
 
-    Flow:
-    1. Read request (session_id, files, etc)
-    2. Call pipeline.run_pipeline()
-    3. Return the pipeline's JSON so /jobs can show it
+    Expected payload from web:
+    {
+        "session_id": "funnel-test-1",
+        "files": ["https://.../input_video.mp4"],
+        "portrait": true,
+        "max_duration": 220,
+        "output_prefix": "editdna/outputs/"
+    }
+
+    We sanitize, then forward to pipeline.run_pipeline().
     """
 
-    t0 = time.time()
-
-    # basic request fields
-    session_id = payload.get("session_id", f"session-{uuid.uuid4().hex[:8]}")
-    files = payload.get("files", [])
-    portrait = bool(payload.get("portrait", True))
-
-    if not isinstance(files, list) or len(files) == 0:
-        return {
-            "ok": False,
-            "error": "No input files provided",
-            "trace": None,
-        }
-
-    # pick max_duration (either from request or env MAX_DURATION_SEC)
-    req_max = payload.get("max_duration", None)
-    if req_max is not None:
-        try:
-            max_duration_final = float(str(req_max).strip().split()[0])
-        except Exception:
-            max_duration_final = _env_float("MAX_DURATION_SEC", 220.0)
-    else:
-        max_duration_final = _env_float("MAX_DURATION_SEC", 220.0)
-
-    # funnel_counts (future marketing slots) - default shape
-    funnel_counts = "1,3,3,3,1"
-    if "options" in payload and isinstance(payload["options"], dict):
-        fc = payload["options"].get("FUNNEL_COUNTS")
-        if isinstance(fc, str) and fc.strip():
-            funnel_counts = fc.strip()
-
-    # run the pipeline
     try:
+        # --- read/clean incoming payload ---
+        session_id    = str(payload.get("session_id", uuid.uuid4().hex[:8]))
+        file_urls_raw = payload.get("files", [])
+        if not isinstance(file_urls_raw, list):
+            file_urls_raw = [file_urls_raw]
+
+        portrait      = bool(payload.get("portrait", True))
+        max_duration  = float(payload.get("max_duration", 220.0))
+
+        # not yet used deeply but keep wiring it forward:
+        funnel_counts = str(payload.get("funnel_counts", "HOOK,PROBLEM,FEATURE,PROOF,CTA"))
+
+        # --- call pipeline ---
         result = pipeline.run_pipeline(
             session_id=session_id,
-            file_urls=files,
+            file_urls=file_urls_raw,
             portrait=portrait,
             funnel_counts=funnel_counts,
-            max_duration=max_duration_final,
+            max_duration=max_duration,
         )
-    except Exception as pipeline_err:
+
+        return result
+
+    except Exception as e:
+        traceback.print_exc()
         return {
             "ok": False,
-            "error": f"Pipeline crashed: {repr(pipeline_err)}",
-            "trace": traceback.format_exc(),
+            "error": f"job_render crashed: {e}",
         }
-
-    if not result or not result.get("ok"):
-        # pipeline said not ok
-        return {
-            "ok": False,
-            "error": "Pipeline returned not-ok or empty result",
-            "trace": json.dumps(result, indent=2, default=str),
-        }
-
-    # tag some debug flags so UI knows what ran
-    result["semantic"] = True
-    result["vision"] = bool(int(os.getenv("SEMANTICS_ENABLED", "1")))
-    result["asr"] = bool(int(os.getenv("ASR_ENABLED", "1")))
-
-    t1 = time.time()
-    result["runtime_sec"] = round(t1 - t0, 3)
-
-    return result
