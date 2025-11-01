@@ -1,4 +1,4 @@
-import os, io, json, time, uuid, tempfile, subprocess
+iimport os, io, json, time, uuid, tempfile, subprocess
 from dataclasses import dataclass
 from typing import List, Dict, Any, Optional, Tuple
 
@@ -11,7 +11,6 @@ def _env_float(name: str, default: float) -> float:
     raw = os.getenv(name, "")
     if not raw:
         return default
-    # take only first token before any space or '#'
     cleaned = raw.split("#")[0].strip().split()[0]
     try:
         return float(cleaned)
@@ -32,7 +31,6 @@ def _env_str(name: str, default: str) -> str:
     raw = os.getenv(name, "")
     if not raw:
         return default
-    # we'll still strip trailing comment just in case, but keep spaces before '#'
     cleaned = raw.split("#")[0].strip()
     if cleaned == "":
         return default
@@ -48,21 +46,16 @@ S3_BUCKET   = _env_str("S3_BUCKET", "")
 S3_PREFIX   = _env_str("S3_PREFIX", "editdna/outputs")
 AWS_REGION  = _env_str("AWS_REGION", "us-east-1")
 
-# this was crashing before because MAX_DURATION_SEC had a comment in env
 MAX_DURATION_SEC = _env_float("MAX_DURATION_SEC", 220.0)
 
-# micro-cut style tight speech (we won't actually cut audio in this stub,
-# but we keep values so we can pass them on later if we upgrade)
 MICRO_CUT      = _env_int("MICRO_CUT", 1)
 SILENCE_DB     = _env_float("MICRO_SILENCE_DB", -30.0)
 SILENCE_MIN    = _env_float("MICRO_SILENCE_MIN", 0.25)
 
-# filler detection tuning
 _raw_fillers   = _env_str("SEM_FILLER_LIST", "um,uh,like,so,okay")
 FILLER_WORDS   = set([w.strip().lower() for w in _raw_fillers.split(",") if w.strip()])
 FILLER_RATE_MAX= _env_float("SEM_FILLER_MAX_RATE", 0.08)
 
-# merge / dedupe knobs
 SEM_DUP_THRESHOLD = _env_float("SEM_DUP_THRESHOLD", 0.88)
 SEM_MERGE_SIM     = _env_float("SEM_MERGE_SIM", 0.70)
 VIZ_MERGE_SIM     = _env_float("VIZ_MERGE_SIM", 0.70)
@@ -70,7 +63,6 @@ MERGE_MAX_CHAIN   = _env_int("MERGE_MAX_CHAIN", 12)
 
 SCENE_Q_MIN       = _env_float("SCENE_Q_MIN", 0.4)
 
-# captions on/off. You said "yes burn captions"
 CAPTIONS_MODE     = _env_str("CAPTIONS", "burn").lower()
 BURN_CAPTIONS     = CAPTIONS_MODE in ("on","burn","burned","subtitle","1","true","yes")
 
@@ -109,14 +101,13 @@ def _tmpfile(suffix=".mp4") -> str:
 
 def _ffprobe_duration(path: str) -> float:
     code, out, err = _run([
-        FFFPROBE_BIN if (FFFPROBE_BIN:=FFPROBE_BIN) else FFPROBE_BIN,
+        FFPROBE_BIN,
         "-v","error",
         "-show_entries","format=duration",
         "-of","default=nokey=1:noprint_wrappers=1",
         path,
     ])
     if code != 0:
-        # if ffprobe fails, we'll just guess 0
         return 0.0
     try:
         return float(out.strip())
@@ -141,17 +132,10 @@ def _fake_asr_segments(local_raw: str) -> List[Dict[str,Any]]:
     TEMP SAFE PLACEHOLDER.
     We don't fail the job anymore. We just return 1 fake segment.
     Later we'll swap in your real Whisper segmentation.
-
-    Real shape you had before (from logs):
-    [
-      {"start":0.0,"end":2.5,"text":"..."},
-      {"start":2.5,"end":5.0,"text":"..."},
-      ...
-    ]
     """
     return [{
         "start": 0.0,
-        "end": min( MAX_DURATION_SEC, 10.0 ),
+        "end": min(MAX_DURATION_SEC, 10.0),
         "text": "TEMP PLACEHOLDER: real ASR not wired yet.",
         "face_q": 1.0,
         "scene_q": 1.0,
@@ -161,11 +145,11 @@ def _fake_asr_segments(local_raw: str) -> List[Dict[str,Any]]:
 def _is_throwaway(txt: str) -> bool:
     """
     Kill obvious junk like 'wait wait let me start again'
-    or clips that are basically filler words beyond your rate limit.
+    or giant filler rate.
     """
     low = txt.lower().strip()
     words = low.split()
-    if any(p in low for p in ["wait", "let me start again", "start over", "hold on"]):
+    if any(p in low for p in ["wait", "hold on", "let me start again", "start over"]):
         return True
     if not words:
         return True
@@ -198,26 +182,72 @@ def _segments_to_takes(segments: List[Dict[str,Any]]) -> List[Take]:
 #
 # ------------------- MERGE / STORY -------------------
 #
-def _merge_chains(takes: List[Take]) -> List[Take]:
+def _merge_adjacent(takes: List[Take]) -> List[Take]:
     """
-    Simple 'one chain == one take' for now.
-    Later we can stitch adjacent takes if gap <1s, scene stable, etc.
+    Greedy merge of adjacent takes if gap <1s and scene not trash.
     """
-    # for now just return same list, but keep hook for future.
-    return takes
+    if not takes:
+        return []
+
+    takes = sorted(takes, key=lambda t: t.start)
+    merged: List[Take] = []
+    i = 0
+    while i < len(takes):
+        chain = [takes[i]]
+        j = i
+        while j + 1 < len(takes):
+            a = chain[-1]
+            b = takes[j+1]
+            gap = b.start - a.end
+            if gap > 1.0:
+                break
+            if min(a.scene_q, b.scene_q) < SCENE_Q_MIN:
+                break
+            chain.append(b)
+            j += 1
+
+        first = chain[0]
+        last  = chain[-1]
+        full_text = " ".join([c.text.strip() for c in chain])
+
+        merged_take = Take(
+            id = f"{first.id}_to_{last.id}",
+            start = first.start,
+            end   = last.end,
+            text  = full_text,
+            face_q = min(c.face_q for c in chain),
+            scene_q = min(c.scene_q for c in chain),
+            vtx_sim = max(c.vtx_sim for c in chain),
+            chain_ids = [c.id for c in chain],
+        )
+        merged.append(merged_take)
+        i = j + 1
+
+    return merged
 
 def _pick_story(merged: List[Take], max_len: float) -> List[Take]:
     """
-    Walk in order, keep adding takes until we hit max_len.
+    Walk in order, keep adding until max_len.
+    If story is too tiny, fallback to longest take so we don't output 2-sec garbage.
     """
     story: List[Take] = []
     total = 0.0
     for t in merged:
+        # skip useless 1-word "okay"/"wait"
+        words = t.text.strip().split()
+        if len(words) <= 2 and any(w.lower() in ("okay","wait","yeah") for w in words):
+            continue
+
         dur = t.dur
         if total + dur > max_len:
             break
         story.append(t)
         total += dur
+
+    if total < 10.0 and merged:
+        longest = max(merged, key=lambda x: x.dur)
+        story = [longest]
+
     return story
 
 #
@@ -225,11 +255,10 @@ def _pick_story(merged: List[Take], max_len: float) -> List[Take]:
 #
 def _export_story_video(src_path: str, story: List[Take]) -> str:
     """
-    Cut each chosen take from raw, concat via ffmpeg, return final mp4 path.
-    Super simple for now.
+    Cut each chosen take from raw and concat.
     """
     if not story:
-        # fallback: just give first ~5 seconds so we output SOMETHING
+        # fallback: first 5 seconds
         story = [Take(
             id="FALLBACK",
             start=0.0,
@@ -241,7 +270,6 @@ def _export_story_video(src_path: str, story: List[Take]) -> str:
     concat_list_path = _tmpfile(suffix=".txt")
     part_paths = []
 
-    # build small clips
     for idx, t in enumerate(story, start=1):
         part_path = _tmpfile(suffix=f".part{idx:02d}.mp4")
         part_paths.append(part_path)
@@ -262,7 +290,6 @@ def _export_story_video(src_path: str, story: List[Take]) -> str:
         ]
         _run(cmd)
 
-    # concat list for ffmpeg
     with open(concat_list_path, "w") as f:
         for p in part_paths:
             f.write(f"file '{p}'\n")
@@ -347,9 +374,8 @@ def _upload_to_s3(local_path: str) -> Dict[str,str]:
             },
         )
 
-    https_url = (
-        f"https://{S3_BUCKET}.s3.{AWS_REGION}.amazonaws.com/{key}"
-    )
+    https_url = f"https://{S3_BUCKET}.s3.{AWS_REGION}.amazonaws.com/{key}"
+
     return {
         "s3_key": key,
         "s3_url": f"s3://{S3_BUCKET}/{key}",
@@ -359,45 +385,47 @@ def _upload_to_s3(local_path: str) -> Dict[str,str]:
 #
 # ------------------- PUBLIC ENTRY -------------------
 #
-def run_pipeline(*, session_id: str,
-                 file_urls: List[str],
-                 portrait: bool,
-                 funnel_counts: str,
-                 max_duration: float,
-                 **kwargs) -> Dict[str,Any]:
+def run_pipeline(
+    *,
+    session_id: str,
+    file_urls: List[str],
+    portrait: bool,
+    funnel_counts: str,
+    max_duration: float,
+    **kwargs
+) -> Dict[str,Any]:
     """
-    This is what tasks.job_render() calls.
-    It MUST NOT CRASH anymore.
+    Called by tasks.job_render()
     """
 
     if not file_urls:
         return {"ok": False, "error": "no input files"}
 
-    # Download first file (MVP)
+    # Download raw video to local temp
     local_raw = _download_to_tmp(file_urls[0])
 
-    # Step 1: fake ASR (placeholder)
+    # 1. ASR (placeholder for now)
     segments = _fake_asr_segments(local_raw)
 
-    # Step 2: ASR -> Take objects, drop garbage
+    # 2. Create Take objects + drop garbage
     takes = _segments_to_takes(segments)
 
-    # Step 3: merge adjacent context
-    merged = _merge_chains(takes)
+    # 3. Merge adjacent for smoother speech
+    merged = _merge_adjacent(takes)
 
-    # Step 4: pick story up to max_duration
+    # 4. Pick best flow under max_duration
     story = _pick_story(merged, max_duration)
 
-    # Step 5: export clean stitched clip
+    # 5. Stitch story → final clip
     stitched_path = _export_story_video(local_raw, story)
 
-    # Step 6: captions burn (because you said yes)
+    # 6. Burn captions if CAPTIONS says to
     final_path = _burn_subtitles(stitched_path, story)
 
-    # Step 7: upload to S3
+    # 7. Upload final clip to S3
     up = _upload_to_s3(final_path)
 
-    # Step 8: build response in your style
+    # 8. Return clips + slots in the shape your frontend expects
     clips_block = []
     for t in story:
         clips_block.append({
@@ -413,23 +441,29 @@ def run_pipeline(*, session_id: str,
         })
 
     slots_block = {
-        "STORY": [
+        "HOOK": [
             {
                 "id": t.id,
                 "start": t.start,
                 "end": t.end,
                 "text": t.text,
                 "meta": {
-                    "slot": "STORY",
+                    "slot": "HOOK",
                     "score": 2.5,
                     "chain_ids": t.chain_ids or [],
                 },
                 "face_q": t.face_q,
                 "scene_q": t.scene_q,
                 "vtx_sim": t.vtx_sim,
+                "has_product": False,
+                "ocr_hit": 0
             }
             for t in story
-        ]
+        ],
+        "PROBLEM": [],
+        "FEATURE": [],
+        "PROOF": [],
+        "CTA": [],
     }
 
     dur_final = _ffprobe_duration(final_path)
@@ -440,7 +474,7 @@ def run_pipeline(*, session_id: str,
         "duration_sec": dur_final,
         "s3_key": up["s3_key"],
         "s3_url": up["s3_url"],
-        "https_url": up["https_url"],
+        "https_url": up["https_url"],   # <- THIS is what you’ll click to view video
         "clips": clips_block,
         "slots": slots_block,
         "semantic": True,
