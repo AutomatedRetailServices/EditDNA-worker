@@ -1,5 +1,11 @@
 """
-editdna package init.
-We expose job_render here so RQ can import editdna.job_render.
+EditDNA worker package bootstrap.
+
+Notes:
+- RQ will execute tasks.job_render (module `tasks.py` at repo root).
+- That root tasks.py just forwards to worker/tasks.py::job_render
+- No need to expose job_render here.
+We keep this file minimal to avoid import confusion.
 """
-from .tasks import job_render
+
+# no exports on purpose
