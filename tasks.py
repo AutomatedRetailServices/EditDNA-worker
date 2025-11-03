@@ -11,8 +11,48 @@ from typing import Any, Dict
 import traceback
 import uuid
 import time
+import os
+import json
 
 import pipeline  # <- this imports pipeline.py sitting next to this file
+
+
+def _get_funnel_counts() -> Dict[str, int]:
+    """
+    Read FUNNEL_COUNTS from env as JSON, or return safe defaults.
+    Example env:
+      FUNNEL_COUNTS='{"HOOK":1,"PROBLEM":1,"FEATURE":1,"PROOF":1,"CTA":1}'
+    """
+    raw = os.getenv("FUNNEL_COUNTS")
+    if not raw:
+        return {
+            "HOOK": 1,
+            "PROBLEM": 1,
+            "FEATURE": 1,
+            "PROOF": 1,
+            "CTA": 1,
+        }
+    try:
+        data = json.loads(raw)
+        # make sure all 5 keys exist, fill missing
+        base = {
+            "HOOK": 1,
+            "PROBLEM": 1,
+            "FEATURE": 1,
+            "PROOF": 1,
+            "CTA": 1,
+        }
+        base.update({k: int(v) for k, v in data.items()})
+        return base
+    except Exception:
+        # bad JSON? fall back
+        return {
+            "HOOK": 1,
+            "PROBLEM": 1,
+            "FEATURE": 1,
+            "PROOF": 1,
+            "CTA": 1,
+        }
 
 
 def job_render(payload: Dict[str, Any]) -> Dict[str, Any]:
@@ -31,7 +71,9 @@ def job_render(payload: Dict[str, Any]) -> Dict[str, Any]:
     file_urls = payload.get("files", [])
     portrait = bool(payload.get("portrait", True))
     max_duration = float(payload.get("max_duration", 220.0))
-    s3_prefix = payload.get("output_prefix", "editdna/outputs")
+
+    # in your log it was "editdna/outputs/", so let's default to that
+    s3_prefix = payload.get("output_prefix", "editdna/outputs/")
 
     # extra debug info:
     print("[worker.tasks] job_render() start", flush=True)
@@ -46,9 +88,9 @@ def job_render(payload: Dict[str, Any]) -> Dict[str, Any]:
             session_id=session_id,
             file_urls=file_urls,
             portrait=portrait,
-            funnel_count="1",            # stub / future funnel logic
             max_duration=max_duration,
             s3_prefix=s3_prefix,
+            funnel_counts=_get_funnel_counts(),  # 👈 this was missing
         )
 
         dt = time.time() - t0
