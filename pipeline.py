@@ -162,8 +162,8 @@ def _write_srt(story: List[Take]) -> str:
     path = _tmpfile(suffix=".srt")
     with open(path, "w", encoding="utf-8") as fh:
         for i, t in enumerate(story, start=1):
-            fh.write(f"{i}\n{ts(t.start)} --> {ts(t.end)}\n{(t.text or '.').replace('\\n',' ')}\n\n")
-    return path
+       clean_text = (t.text or ".").replace("\n", " ")
+fh.write(f"{i}\n{ts(t.start)} --> {ts(t.end)}\n{clean_text}\n\n")
 
 def _export_video(src: str, story: List[Take]) -> str:
     if not story:
