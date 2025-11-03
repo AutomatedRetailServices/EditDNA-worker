@@ -156,14 +156,19 @@ def _pick_story_in_order(merged: List[Take], max_len: float) -> List[Take]:
 # ---------------- EXPORT ----------------
 def _write_srt(story: List[Take]) -> str:
     def ts(sec: float) -> str:
-        ms = int(round((sec - int(sec)) * 1000)); s = int(sec)
-        hh, mm, ss = s//3600, (s%3600)//60, s%60
+        ms = int(round((sec - int(sec)) * 1000))
+        s = int(sec)
+        hh, mm, ss = s // 3600, (s % 3600) // 60, s % 60
         return f"{hh:02d}:{mm:02d}:{ss:02d},{ms:03d}"
+
     path = _tmpfile(suffix=".srt")
     with open(path, "w", encoding="utf-8") as fh:
         for i, t in enumerate(story, start=1):
-       clean_text = (t.text or ".").replace("\n", " ")
-fh.write(f"{i}\n{ts(t.start)} --> {ts(t.end)}\n{clean_text}\n\n")
+            # sanitize text safely before using in f-string
+            safe_text = (t.text or ".").replace("\n", " ")
+            fh.write(f"{i}\n{ts(t.start)} --> {ts(t.end)}\n{safe_text}\n\n")
+    return path
+
 
 def _export_video(src: str, story: List[Take]) -> str:
     if not story:
