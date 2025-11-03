@@ -7,24 +7,25 @@ and we forward into our real pipeline logic below.
 """
 
 from __future__ import annotations
+
 from typing import Any, Dict
-import traceback
-import uuid
-import time
 import os
 import json
+import time
+import uuid
+import traceback
 
-import pipeline  # imports /workspace/pipeline.py
+import pipeline  # /workspace/pipeline.py
 
 
 def _get_funnel_counts() -> Dict[str, int]:
     """
-    Read FUNNEL_COUNTS from env as JSON, or return safe defaults.
-    Example:
+    Read FUNNEL_COUNTS from env as JSON, or fall back to safe defaults.
+    Example env value:
       FUNNEL_COUNTS='{"HOOK":1,"PROBLEM":1,"FEATURE":1,"PROOF":1,"CTA":1}'
     """
     raw = os.getenv("FUNNEL_COUNTS")
-    default_counts = {
+    defaults: Dict[str, int] = {
         "HOOK": 1,
         "PROBLEM": 1,
         "FEATURE": 1,
@@ -32,34 +33,41 @@ def _get_funnel_counts() -> Dict[str, int]:
         "CTA": 1,
     }
     if not raw:
-        return default_counts
+        return defaults
+
     try:
         data = json.loads(raw)
-        default_counts.update({k: int(v) for k, v in data.items()})
-        return default_counts
+        # merge over defaults so missing keys don’t crash the pipeline
+        for k, v in data.items():
+            try:
+                defaults[k] = int(v)
+            except Exception:
+                # ignore bad value, keep default
+                pass
+        return defaults
     except Exception:
-        return default_counts
+        # bad JSON in env → keep defaults
+        return defaults
 
 
 def job_render(payload: Dict[str, Any]) -> Dict[str, Any]:
     """
-    This is what RQ actually runs.
-
-    Flow:
-    1. Read request (session_id, files, etc) from payload sent by the web.
-    2. Call pipeline.run_pipeline() to generate clip(s).
-    3. Return the pipeline's JSON so /jobs can show it.
+    This is the job RQ will run: tasks.job_render
+    It:
+      - pulls args from the web payload
+      - calls pipeline.run_pipeline(...)
+      - returns whatever the pipeline returned
     """
     t0 = time.time()
 
-    # pull inputs from the payload coming from Render/web
+    # 1) pull inputs from payload
     session_id = payload.get("session_id", f"session-{uuid.uuid4().hex[:8]}")
     file_urls = payload.get("files", [])
     portrait = bool(payload.get("portrait", True))
-    max_duration = float(payload.get("max_duration", 220.0))
+    max_duration = float(payload.get("max_duration", 120.0))
+    # you used output_prefix in your earlier payloads
     s3_prefix = payload.get("output_prefix", "editdna/outputs/")
 
-    # extra debug info:
     print("[worker.tasks] job_render() start", flush=True)
     print(f"  session_id={session_id}", flush=True)
     print(f"  file_urls={file_urls}", flush=True)
@@ -68,20 +76,23 @@ def job_render(payload: Dict[str, Any]) -> Dict[str, Any]:
     print(f"  s3_prefix={s3_prefix}", flush=True)
 
     try:
+        # 2) run actual pipeline
         result = pipeline.run_pipeline(
             session_id=session_id,
             file_urls=file_urls,
             portrait=portrait,
             max_duration=max_duration,
             s3_prefix=s3_prefix,
-            funnel_counts=_get_funnel_counts(),
+            funnel_counts=_get_funnel_counts(),  # ← this was missing in your logs
         )
 
         dt = time.time() - t0
         print(f"[worker.tasks] job_render() OK in {dt:.2f}s", flush=True)
+        # 3) return pipeline JSON
         return result
 
     except Exception as e:
+        # on any error, give the API a JSON payload
         print("[worker.tasks] ERROR in job_render()", flush=True)
         traceback.print_exc()
         return {
