@@ -1,4 +1,4 @@
-import os, io, json, time, uuid, tempfile, subprocess
+import os, json, time, uuid, tempfile, subprocess
 from dataclasses import dataclass
 from typing import List, Dict, Any, Optional, Tuple, Union
 
@@ -10,14 +10,6 @@ def _env_float(k, d):
     v = (os.getenv(k) or "").split("#")[0].strip().split()[:1]
     try:
         return float(v[0]) if v else d
-    except:
-        return d
-
-
-def _env_int(k, d):
-    v = (os.getenv(k) or "").split("#")[0].strip().split()[:1]
-    try:
-        return int(v[0]) if v else d
     except:
         return d
 
@@ -35,9 +27,9 @@ S3_PREFIX = _env_str("S3_PREFIX", "editdna/outputs")
 AWS_REGION = _env_str("AWS_REGION", "us-east-1")
 S3_ACL = _env_str("S3_ACL", "public-read")
 
-MAX_DURATION_SEC = _env_float("MAX_DURATION_SEC", 120.0)  # << stop returning 10s; target 120
+MAX_DURATION_SEC = _env_float("MAX_DURATION_SEC", 120.0)
 MIN_TAKE_SEC = _env_float("MIN_TAKE_SEC", 2.0)
-MAX_TAKE_SEC = _env_float("MAX_TAKE_SEC", 20.0)  # scope: granular takes for long proofs
+MAX_TAKE_SEC = _env_float("MAX_TAKE_SEC", 20.0)
 FILLER_MAX_RATE = _env_float("SEM_FILLER_MAX_RATE", 0.08)
 CAPTIONS_MODE = _env_str("CAPTIONS", "burn").lower()
 BURN_CAPTIONS = CAPTIONS_MODE in ("on", "burn", "burned", "subtitle", "1", "true", "yes")
@@ -143,7 +135,6 @@ def _segments_to_takes(segments: List[Dict[str, Any]]) -> List[Take]:
         if not txt:
             continue
         s, e = float(seg["start"]), float(seg["end"])
-        # split long spans into ≤ MAX_TAKE_SEC chunks (keeps long proofs intact across sub-takes)
         while (e - s) > MAX_TAKE_SEC:
             chunk_s, chunk_e = s, s + MAX_TAKE_SEC
             takes.append(
@@ -177,11 +168,11 @@ def _drop_retries_and_trash(takes: List[Take]) -> List[Take]:
 
 # ---------------- STORY SELECTOR ----------------
 def _merge_adjacent_by_flow(takes: List[Take], max_chain: int = 3) -> List[Take]:
-    # simple adjacency merge: small gaps (<1s) and keep chronological
     if not takes:
         return []
     takes = sorted(takes, key=lambda x: x.start)
-    merged, i = [], 0
+    merged: List[Take] = []
+    i = 0
     while i < len(takes):
         chain = [takes[i]]
         j = i
@@ -239,7 +230,6 @@ def _write_srt(story: List[Take]) -> str:
 def _export_video(src: str, story: List[Take]) -> str:
     if not story:
         story = [Take(id="FALLBACK", start=0.0, end=min(5.0, MAX_DURATION_SEC), text="")]
-    # cut parts
     parts, listfile = [], _tmpfile(suffix=".txt")
     for idx, t in enumerate(story, start=1):
         part = _tmpfile(suffix=f".part{idx:02d}.mp4")
@@ -371,7 +361,7 @@ def run_pipeline(
     if not file_urls:
         return {"ok": False, "error": "no input files"}
 
-    # normalize funnel_counts so later we can really use it
+    # normalize funnel counts
     if isinstance(funnel_counts, str):
         try:
             funnel_counts = json.loads(funnel_counts)
@@ -388,15 +378,15 @@ def run_pipeline(
 
     raw_local = _download_to_tmp(file_urls[0])
 
-    # 1) REAL ASR (with fallback handled inside worker/asr.py)
+    # 1) ASR
     segs = transcribe_segments(raw_local)
-    # 2) segments → takes (20s max each)
+    # 2) segments -> takes
     takes = _segments_to_takes(segs)
-    # 3) drop retries/filler/dups
+    # 3) drop retries/fillers/dups
     takes = _drop_retries_and_trash(takes)
-    # 4) merge sequential takes (allow long proofs to stitch)
+    # 4) merge adjacent
     merged = _merge_adjacent_by_flow(takes, max_chain=3)
-    # 5) pick story respecting MAX_DURATION_SEC (or request)
+    # 5) pick story
     cap = float(max_duration or MAX_DURATION_SEC)
     story = _pick_story_in_order(merged, cap)
 
@@ -404,7 +394,6 @@ def run_pipeline(
     final_path = _export_video(raw_local, story)
     up = _upload_to_s3(final_path, s3_prefix=s3_prefix)
 
-    # blocks (simple, still slots-compatible)
     clips_block = [
         {
             "id": t.id,
@@ -422,7 +411,6 @@ def run_pipeline(
     ]
 
     slots_block = {
-        # keep HOOK list so frontend doesn’t break; we’ll add real slotting next step
         "HOOK": [
             {
                 "id": t.id,
