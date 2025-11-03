@@ -14,45 +14,31 @@ import time
 import os
 import json
 
-import pipeline  # <- this imports pipeline.py sitting next to this file
+import pipeline  # imports /workspace/pipeline.py
 
 
 def _get_funnel_counts() -> Dict[str, int]:
     """
     Read FUNNEL_COUNTS from env as JSON, or return safe defaults.
-    Example env:
+    Example:
       FUNNEL_COUNTS='{"HOOK":1,"PROBLEM":1,"FEATURE":1,"PROOF":1,"CTA":1}'
     """
     raw = os.getenv("FUNNEL_COUNTS")
+    default_counts = {
+        "HOOK": 1,
+        "PROBLEM": 1,
+        "FEATURE": 1,
+        "PROOF": 1,
+        "CTA": 1,
+    }
     if not raw:
-        return {
-            "HOOK": 1,
-            "PROBLEM": 1,
-            "FEATURE": 1,
-            "PROOF": 1,
-            "CTA": 1,
-        }
+        return default_counts
     try:
         data = json.loads(raw)
-        # make sure all 5 keys exist, fill missing
-        base = {
-            "HOOK": 1,
-            "PROBLEM": 1,
-            "FEATURE": 1,
-            "PROOF": 1,
-            "CTA": 1,
-        }
-        base.update({k: int(v) for k, v in data.items()})
-        return base
+        default_counts.update({k: int(v) for k, v in data.items()})
+        return default_counts
     except Exception:
-        # bad JSON? fall back
-        return {
-            "HOOK": 1,
-            "PROBLEM": 1,
-            "FEATURE": 1,
-            "PROOF": 1,
-            "CTA": 1,
-        }
+        return default_counts
 
 
 def job_render(payload: Dict[str, Any]) -> Dict[str, Any]:
@@ -71,8 +57,6 @@ def job_render(payload: Dict[str, Any]) -> Dict[str, Any]:
     file_urls = payload.get("files", [])
     portrait = bool(payload.get("portrait", True))
     max_duration = float(payload.get("max_duration", 220.0))
-
-    # in your log it was "editdna/outputs/", so let's default to that
     s3_prefix = payload.get("output_prefix", "editdna/outputs/")
 
     # extra debug info:
@@ -90,7 +74,7 @@ def job_render(payload: Dict[str, Any]) -> Dict[str, Any]:
             portrait=portrait,
             max_duration=max_duration,
             s3_prefix=s3_prefix,
-            funnel_counts=_get_funnel_counts(),  # 👈 this was missing
+            funnel_counts=_get_funnel_counts(),
         )
 
         dt = time.time() - t0
