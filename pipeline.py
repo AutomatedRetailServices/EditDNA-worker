@@ -5,7 +5,6 @@ import tempfile
 import subprocess
 from dataclasses import dataclass
 from typing import List, Dict, Any, Optional, Tuple
-
 import boto3
 
 # ============================================================
@@ -35,7 +34,7 @@ MAX_DURATION_SEC = _env_float("MAX_DURATION_SEC", 120.0)
 MAX_TAKE_SEC     = _env_float("MAX_TAKE_SEC", 20.0)
 MIN_TAKE_SEC     = _env_float("MIN_TAKE_SEC", 2.0)
 
-# obvious “start again” stuff
+# phrases that mean "this was a bad take"
 BAD_PHRASES = [
     "wait",
     "hold on",
@@ -49,13 +48,14 @@ BAD_PHRASES = [
     "sorry",
 ]
 
-# repetitive sales/end lines we want to trim if doubled
-REPEATABLE_CLAUSES = [
-    "if you want to check them out",
-    "if you want to check it out",
-    "if you want to check this out",
-    "they do have",
-    "if you do like the checker print",
+# extra CTA-ish endings we often see in UGC
+CTA_FLUFF = [
+    "click the link",
+    "get yours today",
+    "go ahead and click",
+    "go ahead and grab",
+    "i left it down below",
+    "i left it for you below",
 ]
 
 FILLERS = {"uh", "um", "like", "so", "okay"}
@@ -191,6 +191,7 @@ def _load_asr_segments(src: str) -> Optional[List[Dict[str, Any]]]:
         return None
     if not segs:
         return None
+    # ignore our own stub
     if "temp placeholder" in (segs[0].get("text") or "").lower():
         return None
     return segs
@@ -204,7 +205,7 @@ def _segments_to_takes_asr(segs: List[Dict[str, Any]]) -> List[Take]:
             continue
         s = float(seg.get("start", 0.0))
         e = float(seg.get("end", s))
-        # split very long ASR spans
+        # break long segs
         while (e - s) > MAX_TAKE_SEC:
             takes.append(Take(id=f"ASR{i:04d}_{len(takes)+1:02d}", start=s, end=s+MAX_TAKE_SEC, text=txt))
             s += MAX_TAKE_SEC
@@ -220,7 +221,7 @@ def _is_retry_or_trash(txt: str) -> bool:
     for p in BAD_PHRASES:
         if p in low:
             return True
-    # filler rate
+    # high filler rate
     words = [w.strip(",.?!") for w in low.split()]
     if not words:
         return True
@@ -228,26 +229,6 @@ def _is_retry_or_trash(txt: str) -> bool:
     if filler / max(1, len(words)) > 0.45:
         return True
     return False
-
-
-def _cleanup_repeated_clauses(txt: str) -> str:
-    """
-    If we see the same sales clause twice inside one take, cut at the second one.
-    """
-    low = txt.lower()
-    cut_at = None
-    for phrase in REPEATABLE_CLAUSES:
-        first = low.find(phrase)
-        if first == -1:
-            continue
-        second = low.find(phrase, first + len(phrase))
-        if second != -1:
-            # cut the original text right before the 2nd occurrence
-            cut_at = second
-            break
-    if cut_at is not None:
-        return txt[:cut_at].rstrip(" ,.;")  # tidy punctuation
-    return txt
 
 
 def _dedupe_takes(takes: List[Take]) -> List[Take]:
@@ -294,6 +275,53 @@ def _merge_adjacent(takes: List[Take], max_gap: float = 1.0, max_chain: int = 3)
 
 
 # ============================================================
+# INTRA-TAKE REPETITION CLEANUP
+# ============================================================
+
+def _trim_repeated_ngrams(txt: str, n: int = 4) -> str:
+    """
+    Generic: if a 4-word sequence appears twice in the same text, cut at the 2nd.
+    Helps with "because you're worried no more because I found ..." type rambles.
+    """
+    words = txt.split()
+    if len(words) <= n * 2:
+        return txt
+    seen = {}
+    i = 0
+    while i + n <= len(words):
+        key = " ".join(w.lower() for w in words[i:i+n])
+        if key in seen:
+            # cut text at the start of the 2nd occurrence
+            cut_idx = i
+            return " ".join(words[:cut_idx]).rstrip(" ,.;")
+        else:
+            seen[key] = i
+        i += 1
+    return txt
+
+
+def _trim_cta_fluff(txt: str) -> str:
+    low = txt.lower()
+    cut_at = None
+    for p in CTA_FLUFF:
+        idx = low.find(p)
+        if idx != -1:
+            cut_at = idx
+            break
+    if cut_at is not None:
+        return txt[:cut_at].rstrip(" ,.;")
+    return txt
+
+
+def _clean_take_text(txt: str) -> str:
+    # first, generically trim repeated n-grams
+    txt = _trim_repeated_ngrams(txt, n=4)
+    # then, trim known CTA fluff
+    txt = _trim_cta_fluff(txt)
+    return txt
+
+
+# ============================================================
 # FALLBACK (time-based)
 # ============================================================
 
@@ -304,8 +332,14 @@ def _time_based_takes(vid_dur: float) -> List[Take]:
     while t < vid_dur:
         end = min(t + MAX_TAKE_SEC, vid_dur)
         if (end - t) >= MIN_TAKE_SEC:
-            takes.append(Take(id=f"SEG{idx:04d}", start=t, end=end,
-                              text=f"Auto segment {idx} ({t:.1f}s–{end:.1f}s)"))
+            takes.append(
+                Take(
+                    id=f"SEG{idx:04d}",
+                    start=t,
+                    end=end,
+                    text=f"Auto segment {idx} ({t:.1f}s–{end:.1f}s)",
+                )
+            )
             idx += 1
         t = end
     return takes
@@ -336,19 +370,20 @@ def run_pipeline(
 
     segs = _load_asr_segments(src)
     if segs is not None:
-        # REAL ASR PATH
+        # 1) ASR → takes
         takes = _segments_to_takes_asr(segs)
-        # drop retries
+        # 2) drop obvious retries
         takes = [t for t in takes if not _is_retry_or_trash(t.text)]
-        # dedupe
+        # 3) dedupe
         takes = _dedupe_takes(takes)
-        # merge adjacent
+        # 4) merge
         takes = _merge_adjacent(takes)
-        # NOW clean intra-take repetition
+        # 5) clean inside each take (this is the new part)
         cleaned: List[Take] = []
         for t in takes:
-            cleaned.append(Take(id=t.id, start=t.start, end=t.end, text=_cleanup_repeated_clauses(t.text)))
-        # trim to cap
+            cleaned_txt = _clean_take_text(t.text)
+            cleaned.append(Take(id=t.id, start=t.start, end=t.end, text=cleaned_txt))
+        # 6) respect duration cap
         story: List[Take] = []
         total = 0.0
         for t in cleaned:
@@ -358,14 +393,12 @@ def run_pipeline(
             total += t.dur
         used_asr = True
     else:
-        # FALLBACK
         story = _time_based_takes(cap)
         used_asr = False
 
     final_path = _export_concat(src, story)
     up = _upload_to_s3(final_path, s3_prefix=s3_prefix)
 
-    # small UI trim
     def _trim(txt: str, n: int = 220) -> str:
         return txt if len(txt) <= n else txt[:n].rstrip() + "..."
 
@@ -385,6 +418,7 @@ def run_pipeline(
         for t in story
     ]
 
+    # simple funnel
     slots_block: Dict[str, List[Dict[str, Any]]] = {
         "HOOK": [],
         "PROBLEM": [],
