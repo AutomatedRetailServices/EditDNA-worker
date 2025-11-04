@@ -68,7 +68,7 @@ class Take:
 
 
 # ============================================================
-# HELPER PROCS
+# SHELL HELPERS
 # ============================================================
 
 def _run(cmd: List[str]) -> Tuple[int, str, str]:
@@ -171,30 +171,24 @@ def _export_concat(src: str, takes: List[Take]) -> str:
 
 
 # ============================================================
-# ASR-BASED PATH (when available)
+# ASR PATH
 # ============================================================
 
 def _load_asr_segments(src: str) -> Optional[List[Dict[str, Any]]]:
-    """
-    Try to load ASR from worker.asr. If that import fails, return None.
-    """
     try:
         from worker.asr import transcribe_segments
     except Exception:
         return None
-
     try:
         segs = transcribe_segments(src)
     except Exception:
         return None
-
     if not segs:
         return None
 
-    # detect placeholder – the one we just used earlier
+    # detect our own placeholder to avoid treating it as real ASR
     txt0 = (segs[0].get("text") or "").lower()
     if "temp placeholder" in txt0:
-        # this is our stub, so don't treat as real ASR
         return None
 
     return segs
@@ -209,7 +203,7 @@ def _segments_to_takes_asr(segs: List[Dict[str, Any]]) -> List[Take]:
         s = float(seg.get("start", 0.0))
         e = float(seg.get("end", s))
 
-        # split long spoken parts into <= MAX_TAKE_SEC
+        # split very long spoken bits into <= MAX_TAKE_SEC
         while (e - s) > MAX_TAKE_SEC:
             takes.append(
                 Take(
@@ -240,13 +234,12 @@ def _is_bad_speech(txt: str) -> bool:
     for p in BAD_PHRASES:
         if p in low:
             return True
-    # filler ratio
     words = [w.strip(",.?!") for w in low.split()]
     if not words:
         return True
     filler_count = sum(1 for w in words if w in FILLERS)
     filler_rate = filler_count / max(1, len(words))
-    return filler_rate > 0.4  # pretty aggressive
+    return filler_rate > 0.4
 
 
 def _dedupe_takes(takes: List[Take]) -> List[Take]:
@@ -294,32 +287,31 @@ def _merge_adjacent(takes: List[Take], max_gap: float = 1.0, max_chain: int = 3)
 
 
 # ============================================================
-# TIME-BASED FALLBACK (current working mode)
+# TIME-BASED FALLBACK
 # ============================================================
 
 def _time_based_takes(vid_dur: float) -> List[Take]:
     takes: List[Take] = []
     t = 0.0
-    seg_idx = 1
-    cap = vid_dur
-    while t < cap:
-        end = min(t + MAX_TAKE_SEC, cap)
+    idx = 1
+    while t < vid_dur:
+        end = min(t + MAX_TAKE_SEC, vid_dur)
         if (end - t) >= MIN_TAKE_SEC:
             takes.append(
                 Take(
-                    id=f"SEG{seg_idx:04d}",
+                    id=f"SEG{idx:04d}",
                     start=t,
                     end=end,
-                    text=f"Auto segment {seg_idx} ({t:.1f}s–{end:.1f}s)",
+                    text=f"Auto segment {idx} ({t:.1f}s–{end:.1f}s)",
                 )
             )
-            seg_idx += 1
+            idx += 1
         t = end
     return takes
 
 
 # ============================================================
-# PUBLIC ENTRYPOINT
+# PUBLIC ENTRY
 # ============================================================
 
 def run_pipeline(
@@ -335,10 +327,10 @@ def run_pipeline(
     if not file_urls:
         return {"ok": False, "error": "no input files"}
 
-    # 1) download
+    # 1) download video
     src = _download_to_tmp(file_urls[0])
 
-    # 2) basic duration
+    # 2) measure
     real_dur = _ffprobe_duration(src)
     cap = float(max_duration or MAX_DURATION_SEC)
     if real_dur > 0:
@@ -347,14 +339,11 @@ def run_pipeline(
     # 3) try ASR path first
     segs = _load_asr_segments(src)
     if segs is not None:
-        # ASR is real → do real speech filtering
         takes = _segments_to_takes_asr(segs)
-        # drop bad speech like "wait, let me start again"
         takes = [t for t in takes if not _is_bad_speech(t.text)]
-        # dedupe repeats
         takes = _dedupe_takes(takes)
-        # merge small adjacent / retries
         takes = _merge_adjacent(takes)
+
         # trim to cap
         story: List[Take] = []
         total = 0.0
@@ -365,16 +354,15 @@ def run_pipeline(
             total += t.dur
         used_asr = True
     else:
-        # no ASR → fallback to time-based segments
-        takes = _time_based_takes(cap)
-        story = takes
+        # fallback: time-based
+        story = _time_based_takes(cap)
         used_asr = False
 
     # 4) export
     final_path = _export_concat(src, story)
     up = _upload_to_s3(final_path, s3_prefix=s3_prefix)
 
-    # 5) JSON blocks
+    # 5) JSON
     clips_block = [
         {
             "id": t.id,
@@ -391,7 +379,6 @@ def run_pipeline(
         for t in story
     ]
 
-    # simple funnel: first = HOOK, last = CTA, middle = FEATURE
     slots_block: Dict[str, List[Dict[str, Any]]] = {
         "HOOK": [],
         "PROBLEM": [],
@@ -399,6 +386,7 @@ def run_pipeline(
         "PROOF": [],
         "CTA": [],
     }
+
     if story:
         first = story[0]
         slots_block["HOOK"].append(
@@ -458,8 +446,7 @@ def run_pipeline(
         "https_url": up["https_url"],
         "clips": clips_block,
         "slots": slots_block,
-        # flags so you know what path ran
         "asr": used_asr,
-        "semantic": used_asr,
+        "semantic": used_asr,   # we actually cleaned text only if ASR is real
         "vision": False,
     }
