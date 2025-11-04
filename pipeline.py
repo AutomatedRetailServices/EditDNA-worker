@@ -1,33 +1,59 @@
-import os, time, uuid, tempfile, subprocess
+import os
+import time
+import uuid
+import tempfile
+import subprocess
 from dataclasses import dataclass
 from typing import List, Dict, Any, Optional, Tuple
 
 import boto3
 
-# ---------------- ENV ----------------
-def _env_str(k, d):
+# ============================================================
+# ENV
+# ============================================================
+
+def _env_str(k: str, d: str) -> str:
     v = (os.getenv(k) or "").split("#")[0].strip()
     return v or d
 
-def _env_float(k, d):
+def _env_float(k: str, d: float) -> float:
     v = (os.getenv(k) or "").split("#")[0].strip().split()[:1]
     try:
         return float(v[0]) if v else d
-    except:
+    except Exception:
         return d
 
 FFMPEG_BIN  = _env_str("FFMPEG_BIN", "/usr/bin/ffmpeg")
 FFPROBE_BIN = _env_str("FFPROBE_BIN", "/usr/bin/ffprobe")
 
-S3_BUCKET  = _env_str("S3_BUCKET", "")
-S3_PREFIX  = _env_str("S3_PREFIX", "editdna/outputs")
-AWS_REGION = _env_str("AWS_REGION", "us-east-1")
-S3_ACL     = _env_str("S3_ACL", "public-read")
+S3_BUCKET   = _env_str("S3_BUCKET", "")
+S3_PREFIX   = _env_str("S3_PREFIX", "editdna/outputs")
+AWS_REGION  = _env_str("AWS_REGION", "us-east-1")
+S3_ACL      = _env_str("S3_ACL", "public-read")
 
 MAX_DURATION_SEC = _env_float("MAX_DURATION_SEC", 120.0)
 MAX_TAKE_SEC     = _env_float("MAX_TAKE_SEC", 20.0)
 MIN_TAKE_SEC     = _env_float("MIN_TAKE_SEC", 2.0)
 
+# speech junk we want to drop when we DO have ASR
+BAD_PHRASES = [
+    "wait",
+    "hold on",
+    "lemme start again",
+    "let me start again",
+    "start over",
+    "no no",
+    "redo",
+    "i mean",
+    "actually",
+    "sorry",
+]
+FILLERS = {"uh", "um", "like", "so", "okay"}
+
+
+# ============================================================
+# DATA MODEL
+# ============================================================
 
 @dataclass
 class Take:
@@ -41,16 +67,19 @@ class Take:
         return self.end - self.start
 
 
-# ---------------- helpers ----------------
+# ============================================================
+# HELPER PROCS
+# ============================================================
+
 def _run(cmd: List[str]) -> Tuple[int, str, str]:
     p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
     out, err = p.communicate()
     return p.returncode, out.strip(), err.strip()
 
-
-def _tmpfile(suffix=".mp4") -> str:
-    fd, p = tempfile.mkstemp(suffix=suffix); os.close(fd); return p
-
+def _tmpfile(suffix: str = ".mp4") -> str:
+    fd, p = tempfile.mkstemp(suffix=suffix)
+    os.close(fd)
+    return p
 
 def _download_to_tmp(url: str) -> str:
     local_path = _tmpfile(suffix=".mp4")
@@ -58,7 +87,6 @@ def _download_to_tmp(url: str) -> str:
     if code != 0:
         raise RuntimeError(f"curl failed {code}: {err}")
     return local_path
-
 
 def _ffprobe_duration(path: str) -> float:
     code, out, err = _run([
@@ -72,16 +100,40 @@ def _ffprobe_duration(path: str) -> float:
         return 0.0
     try:
         return float(out.strip())
-    except:
+    except Exception:
         return 0.0
 
 
-def _export_concat(src: str, takes: List[Take], burn_srt: bool = False) -> str:
-    """
-    Stitch selected takes into one final mp4
-    """
+# ============================================================
+# S3
+# ============================================================
+
+def _upload_to_s3(local_path: str, s3_prefix: Optional[str] = None) -> Dict[str, str]:
+    s3 = boto3.client("s3", region_name=AWS_REGION)
+    if not S3_BUCKET:
+        raise RuntimeError("S3_BUCKET not set")
+    prefix = (s3_prefix or S3_PREFIX).rstrip("/")
+    key = f"{prefix}/{uuid.uuid4().hex}_{int(time.time())}.mp4"
+    with open(local_path, "rb") as fh:
+        s3.upload_fileobj(
+            fh,
+            S3_BUCKET,
+            key,
+            ExtraArgs={"ACL": S3_ACL, "ContentType": "video/mp4"},
+        )
+    return {
+        "s3_key": key,
+        "s3_url": f"s3://{S3_BUCKET}/{key}",
+        "https_url": f"https://{S3_BUCKET}.s3.{AWS_REGION}.amazonaws.com/{key}",
+    }
+
+
+# ============================================================
+# EXPORT
+# ============================================================
+
+def _export_concat(src: str, takes: List[Take]) -> str:
     if not takes:
-        # fallback 5s
         takes = [Take(id="FALLBACK", start=0.0, end=min(5.0, MAX_DURATION_SEC), text="")]
 
     parts: List[str] = []
@@ -95,13 +147,9 @@ def _export_concat(src: str, takes: List[Take], burn_srt: bool = False) -> str:
             "-ss", f"{t.start:.3f}",
             "-i", src,
             "-t", f"{t.dur:.3f}",
-            "-c:v", "libx264",
-            "-preset", "fast",
-            "-crf", "23",
-            "-pix_fmt", "yuv420p",
-            "-g", "48",
-            "-c:a", "aac",
-            "-b:a", "128k",
+            "-c:v", "libx264", "-preset", "fast", "-crf", "23",
+            "-pix_fmt", "yuv420p", "-g", "48",
+            "-c:a", "aac", "-b:a", "128k",
             part
         ])
 
@@ -112,72 +160,148 @@ def _export_concat(src: str, takes: List[Take], burn_srt: bool = False) -> str:
     final = _tmpfile(suffix=".mp4")
     _run([
         FFMPEG_BIN, "-y",
-        "-f", "concat",
-        "-safe", "0",
+        "-f", "concat", "-safe", "0",
         "-i", listfile,
-        "-c:v", "libx264",
-        "-preset", "fast",
-        "-crf", "23",
-        "-pix_fmt", "yuv420p",
-        "-g", "48",
-        "-c:a", "aac",
-        "-b:a", "128k",
+        "-c:v", "libx264", "-preset", "fast", "-crf", "23",
+        "-pix_fmt", "yuv420p", "-g", "48",
+        "-c:a", "aac", "-b:a", "128k",
         final
     ])
     return final
 
 
-def _upload_to_s3(local_path: str, s3_prefix: Optional[str] = None) -> Dict[str, str]:
-    s3 = boto3.client("s3", region_name=AWS_REGION)
-    if not S3_BUCKET:
-        raise RuntimeError("S3_BUCKET not set")
+# ============================================================
+# ASR-BASED PATH (when available)
+# ============================================================
 
-    prefix = (s3_prefix or S3_PREFIX).rstrip("/")
-    key = f"{prefix}/{uuid.uuid4().hex}_{int(time.time())}.mp4"
-    with open(local_path, "rb") as fh:
-        s3.upload_fileobj(
-            fh,
-            S3_BUCKET,
-            key,
-            ExtraArgs={
-                "ACL": S3_ACL,
-                "ContentType": "video/mp4",
-            },
+def _load_asr_segments(src: str) -> Optional[List[Dict[str, Any]]]:
+    """
+    Try to load ASR from worker.asr. If that import fails, return None.
+    """
+    try:
+        from worker.asr import transcribe_segments
+    except Exception:
+        return None
+
+    try:
+        segs = transcribe_segments(src)
+    except Exception:
+        return None
+
+    if not segs:
+        return None
+
+    # detect placeholder – the one we just used earlier
+    txt0 = (segs[0].get("text") or "").lower()
+    if "temp placeholder" in txt0:
+        # this is our stub, so don't treat as real ASR
+        return None
+
+    return segs
+
+
+def _segments_to_takes_asr(segs: List[Dict[str, Any]]) -> List[Take]:
+    takes: List[Take] = []
+    for i, seg in enumerate(segs, start=1):
+        txt = (seg.get("text") or "").strip()
+        if not txt:
+            continue
+        s = float(seg.get("start", 0.0))
+        e = float(seg.get("end", s))
+
+        # split long spoken parts into <= MAX_TAKE_SEC
+        while (e - s) > MAX_TAKE_SEC:
+            takes.append(
+                Take(
+                    id=f"ASR{i:04d}_{len(takes)+1:02d}",
+                    start=s,
+                    end=s + MAX_TAKE_SEC,
+                    text=txt,
+                )
+            )
+            s = s + MAX_TAKE_SEC
+
+        if (e - s) >= MIN_TAKE_SEC:
+            takes.append(
+                Take(
+                    id=f"ASR{i:04d}",
+                    start=s,
+                    end=e,
+                    text=txt,
+                )
+            )
+    return takes
+
+
+def _is_bad_speech(txt: str) -> bool:
+    low = txt.lower().strip()
+    if not low:
+        return True
+    for p in BAD_PHRASES:
+        if p in low:
+            return True
+    # filler ratio
+    words = [w.strip(",.?!") for w in low.split()]
+    if not words:
+        return True
+    filler_count = sum(1 for w in words if w in FILLERS)
+    filler_rate = filler_count / max(1, len(words))
+    return filler_rate > 0.4  # pretty aggressive
+
+
+def _dedupe_takes(takes: List[Take]) -> List[Take]:
+    out: List[Take] = []
+    seen = set()
+    for t in takes:
+        norm = "".join(c.lower() for c in t.text if (c.isalnum() or c.isspace())).strip()
+        if not norm:
+            continue
+        if norm in seen:
+            continue
+        seen.add(norm)
+        out.append(t)
+    return out
+
+
+def _merge_adjacent(takes: List[Take], max_gap: float = 1.0, max_chain: int = 3) -> List[Take]:
+    if not takes:
+        return []
+    takes = sorted(takes, key=lambda x: x.start)
+    merged: List[Take] = []
+    i = 0
+    while i < len(takes):
+        chain = [takes[i]]
+        j = i
+        while (j + 1) < len(takes) and len(chain) < max_chain:
+            a = chain[-1]
+            b = takes[j + 1]
+            if (b.start - a.end) > max_gap:
+                break
+            chain.append(b)
+            j += 1
+        first = chain[0]
+        last = chain[-1]
+        merged.append(
+            Take(
+                id=f"{first.id}_to_{last.id}",
+                start=first.start,
+                end=last.end,
+                text=" ".join(c.text for c in chain),
+            )
         )
-    https_url = f"https://{S3_BUCKET}.s3.{AWS_REGION}.amazonaws.com/{key}"
-    return {
-        "s3_key": key,
-        "s3_url": f"s3://{S3_BUCKET}/{key}",
-        "https_url": https_url,
-    }
+        i = j + 1
+    return merged
 
 
-# ---------------- main pipeline ----------------
-def run_pipeline(
-    *,
-    session_id: str,
-    file_urls: List[str],
-    portrait: bool,
-    funnel_counts,
-    max_duration: float,
-    s3_prefix: Optional[str] = None,
-    **kwargs,
-) -> Dict[str, Any]:
-    if not file_urls:
-        return {"ok": False, "error": "no input files"}
+# ============================================================
+# TIME-BASED FALLBACK (current working mode)
+# ============================================================
 
-    # 1) get video locally
-    src = _download_to_tmp(file_urls[0])
-
-    # 2) measure actual video
-    vid_dur = _ffprobe_duration(src)
-    # limit to caller max
-    cap = min(float(max_duration or MAX_DURATION_SEC), vid_dur if vid_dur > 0 else MAX_DURATION_SEC)
-
-    # 3) create dumb 20s segments from duration
+def _time_based_takes(vid_dur: float) -> List[Take]:
     takes: List[Take] = []
     t = 0.0
     seg_idx = 1
+    cap = vid_dur
     while t < cap:
         end = min(t + MAX_TAKE_SEC, cap)
         if (end - t) >= MIN_TAKE_SEC:
@@ -191,15 +315,66 @@ def run_pipeline(
             )
             seg_idx += 1
         t = end
+    return takes
 
-    # 4) for now, story = all takes in order
-    story = takes
 
-    # 5) export video from those takes
+# ============================================================
+# PUBLIC ENTRYPOINT
+# ============================================================
+
+def run_pipeline(
+    *,
+    session_id: str,
+    file_urls: List[str],
+    portrait: bool,
+    funnel_counts,
+    max_duration: float,
+    s3_prefix: Optional[str] = None,
+    **kwargs,
+) -> Dict[str, Any]:
+    if not file_urls:
+        return {"ok": False, "error": "no input files"}
+
+    # 1) download
+    src = _download_to_tmp(file_urls[0])
+
+    # 2) basic duration
+    real_dur = _ffprobe_duration(src)
+    cap = float(max_duration or MAX_DURATION_SEC)
+    if real_dur > 0:
+        cap = min(cap, real_dur)
+
+    # 3) try ASR path first
+    segs = _load_asr_segments(src)
+    if segs is not None:
+        # ASR is real → do real speech filtering
+        takes = _segments_to_takes_asr(segs)
+        # drop bad speech like "wait, let me start again"
+        takes = [t for t in takes if not _is_bad_speech(t.text)]
+        # dedupe repeats
+        takes = _dedupe_takes(takes)
+        # merge small adjacent / retries
+        takes = _merge_adjacent(takes)
+        # trim to cap
+        story: List[Take] = []
+        total = 0.0
+        for t in takes:
+            if total + t.dur > cap:
+                break
+            story.append(t)
+            total += t.dur
+        used_asr = True
+    else:
+        # no ASR → fallback to time-based segments
+        takes = _time_based_takes(cap)
+        story = takes
+        used_asr = False
+
+    # 4) export
     final_path = _export_concat(src, story)
     up = _upload_to_s3(final_path, s3_prefix=s3_prefix)
 
-    # 6) build JSON blocks
+    # 5) JSON blocks
     clips_block = [
         {
             "id": t.id,
@@ -216,8 +391,8 @@ def run_pipeline(
         for t in story
     ]
 
-    # super simple funnel: 1st = HOOK, middle = PROBLEM/FEATURE, last = CTA
-    slots_block = {
+    # simple funnel: first = HOOK, last = CTA, middle = FEATURE
+    slots_block: Dict[str, List[Dict[str, Any]]] = {
         "HOOK": [],
         "PROBLEM": [],
         "FEATURE": [],
@@ -225,13 +400,14 @@ def run_pipeline(
         "CTA": [],
     }
     if story:
+        first = story[0]
         slots_block["HOOK"].append(
             {
-                "id": story[0].id,
-                "start": story[0].start,
-                "end": story[0].end,
-                "text": story[0].text,
-                "meta": {"slot": "HOOK", "score": 2.5, "chain_ids": [story[0].id]},
+                "id": first.id,
+                "start": first.start,
+                "end": first.end,
+                "text": first.text,
+                "meta": {"slot": "HOOK", "score": 2.5, "chain_ids": [first.id]},
                 "face_q": 1.0,
                 "scene_q": 1.0,
                 "vtx_sim": 0.0,
@@ -282,7 +458,8 @@ def run_pipeline(
         "https_url": up["https_url"],
         "clips": clips_block,
         "slots": slots_block,
-        "semantic": False,
+        # flags so you know what path ran
+        "asr": used_asr,
+        "semantic": used_asr,
         "vision": False,
-        "asr": False,
     }
