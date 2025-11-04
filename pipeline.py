@@ -35,7 +35,7 @@ MAX_DURATION_SEC = _env_float("MAX_DURATION_SEC", 120.0)
 MAX_TAKE_SEC     = _env_float("MAX_TAKE_SEC", 20.0)
 MIN_TAKE_SEC     = _env_float("MIN_TAKE_SEC", 2.0)
 
-# speech junk we want to drop when we DO have ASR
+# obvious “start again” stuff
 BAD_PHRASES = [
     "wait",
     "hold on",
@@ -48,6 +48,16 @@ BAD_PHRASES = [
     "actually",
     "sorry",
 ]
+
+# repetitive sales/end lines we want to trim if doubled
+REPEATABLE_CLAUSES = [
+    "if you want to check them out",
+    "if you want to check it out",
+    "if you want to check this out",
+    "they do have",
+    "if you do like the checker print",
+]
+
 FILLERS = {"uh", "um", "like", "so", "okay"}
 
 
@@ -82,7 +92,7 @@ def _tmpfile(suffix: str = ".mp4") -> str:
     return p
 
 def _download_to_tmp(url: str) -> str:
-    local_path = _tmpfile(suffix=".mp4")
+    local_path = _tmpfile(".mp4")
     code, out, err = _run(["curl", "-L", "-o", local_path, url])
     if code != 0:
         raise RuntimeError(f"curl failed {code}: {err}")
@@ -135,12 +145,10 @@ def _upload_to_s3(local_path: str, s3_prefix: Optional[str] = None) -> Dict[str,
 def _export_concat(src: str, takes: List[Take]) -> str:
     if not takes:
         takes = [Take(id="FALLBACK", start=0.0, end=min(5.0, MAX_DURATION_SEC), text="")]
-
     parts: List[str] = []
-    listfile = _tmpfile(suffix=".txt")
-
+    listfile = _tmpfile(".txt")
     for idx, t in enumerate(takes, start=1):
-        part = _tmpfile(suffix=f".part{idx:02d}.mp4")
+        part = _tmpfile(f".part{idx:02d}.mp4")
         parts.append(part)
         _run([
             FFMPEG_BIN, "-y",
@@ -152,12 +160,10 @@ def _export_concat(src: str, takes: List[Take]) -> str:
             "-c:a", "aac", "-b:a", "128k",
             part
         ])
-
     with open(listfile, "w") as f:
         for p in parts:
             f.write(f"file '{p}'\n")
-
-    final = _tmpfile(suffix=".mp4")
+    final = _tmpfile(".mp4")
     _run([
         FFMPEG_BIN, "-y",
         "-f", "concat", "-safe", "0",
@@ -171,7 +177,7 @@ def _export_concat(src: str, takes: List[Take]) -> str:
 
 
 # ============================================================
-# ASR PATH
+# ASR HELPERS
 # ============================================================
 
 def _load_asr_segments(src: str) -> Optional[List[Dict[str, Any]]]:
@@ -185,12 +191,8 @@ def _load_asr_segments(src: str) -> Optional[List[Dict[str, Any]]]:
         return None
     if not segs:
         return None
-
-    # detect our own placeholder to avoid treating it as real ASR
-    txt0 = (segs[0].get("text") or "").lower()
-    if "temp placeholder" in txt0:
+    if "temp placeholder" in (segs[0].get("text") or "").lower():
         return None
-
     return segs
 
 
@@ -202,44 +204,50 @@ def _segments_to_takes_asr(segs: List[Dict[str, Any]]) -> List[Take]:
             continue
         s = float(seg.get("start", 0.0))
         e = float(seg.get("end", s))
-
-        # split very long spoken bits into <= MAX_TAKE_SEC
+        # split very long ASR spans
         while (e - s) > MAX_TAKE_SEC:
-            takes.append(
-                Take(
-                    id=f"ASR{i:04d}_{len(takes)+1:02d}",
-                    start=s,
-                    end=s + MAX_TAKE_SEC,
-                    text=txt,
-                )
-            )
-            s = s + MAX_TAKE_SEC
-
+            takes.append(Take(id=f"ASR{i:04d}_{len(takes)+1:02d}", start=s, end=s+MAX_TAKE_SEC, text=txt))
+            s += MAX_TAKE_SEC
         if (e - s) >= MIN_TAKE_SEC:
-            takes.append(
-                Take(
-                    id=f"ASR{i:04d}",
-                    start=s,
-                    end=e,
-                    text=txt,
-                )
-            )
+            takes.append(Take(id=f"ASR{i:04d}", start=s, end=e, text=txt))
     return takes
 
 
-def _is_bad_speech(txt: str) -> bool:
+def _is_retry_or_trash(txt: str) -> bool:
     low = txt.lower().strip()
     if not low:
         return True
     for p in BAD_PHRASES:
         if p in low:
             return True
+    # filler rate
     words = [w.strip(",.?!") for w in low.split()]
     if not words:
         return True
-    filler_count = sum(1 for w in words if w in FILLERS)
-    filler_rate = filler_count / max(1, len(words))
-    return filler_rate > 0.4
+    filler = sum(1 for w in words if w in FILLERS)
+    if filler / max(1, len(words)) > 0.45:
+        return True
+    return False
+
+
+def _cleanup_repeated_clauses(txt: str) -> str:
+    """
+    If we see the same sales clause twice inside one take, cut at the second one.
+    """
+    low = txt.lower()
+    cut_at = None
+    for phrase in REPEATABLE_CLAUSES:
+        first = low.find(phrase)
+        if first == -1:
+            continue
+        second = low.find(phrase, first + len(phrase))
+        if second != -1:
+            # cut the original text right before the 2nd occurrence
+            cut_at = second
+            break
+    if cut_at is not None:
+        return txt[:cut_at].rstrip(" ,.;")  # tidy punctuation
+    return txt
 
 
 def _dedupe_takes(takes: List[Take]) -> List[Take]:
@@ -272,8 +280,7 @@ def _merge_adjacent(takes: List[Take], max_gap: float = 1.0, max_chain: int = 3)
                 break
             chain.append(b)
             j += 1
-        first = chain[0]
-        last = chain[-1]
+        first, last = chain[0], chain[-1]
         merged.append(
             Take(
                 id=f"{first.id}_to_{last.id}",
@@ -287,7 +294,7 @@ def _merge_adjacent(takes: List[Take], max_gap: float = 1.0, max_chain: int = 3)
 
 
 # ============================================================
-# TIME-BASED FALLBACK
+# FALLBACK (time-based)
 # ============================================================
 
 def _time_based_takes(vid_dur: float) -> List[Take]:
@@ -297,14 +304,8 @@ def _time_based_takes(vid_dur: float) -> List[Take]:
     while t < vid_dur:
         end = min(t + MAX_TAKE_SEC, vid_dur)
         if (end - t) >= MIN_TAKE_SEC:
-            takes.append(
-                Take(
-                    id=f"SEG{idx:04d}",
-                    start=t,
-                    end=end,
-                    text=f"Auto segment {idx} ({t:.1f}s–{end:.1f}s)",
-                )
-            )
+            takes.append(Take(id=f"SEG{idx:04d}", start=t, end=end,
+                              text=f"Auto segment {idx} ({t:.1f}s–{end:.1f}s)"))
             idx += 1
         t = end
     return takes
@@ -327,42 +328,47 @@ def run_pipeline(
     if not file_urls:
         return {"ok": False, "error": "no input files"}
 
-    # 1) download video
     src = _download_to_tmp(file_urls[0])
-
-    # 2) measure
     real_dur = _ffprobe_duration(src)
     cap = float(max_duration or MAX_DURATION_SEC)
     if real_dur > 0:
         cap = min(cap, real_dur)
 
-    # 3) try ASR path first
     segs = _load_asr_segments(src)
     if segs is not None:
+        # REAL ASR PATH
         takes = _segments_to_takes_asr(segs)
-        takes = [t for t in takes if not _is_bad_speech(t.text)]
+        # drop retries
+        takes = [t for t in takes if not _is_retry_or_trash(t.text)]
+        # dedupe
         takes = _dedupe_takes(takes)
+        # merge adjacent
         takes = _merge_adjacent(takes)
-
+        # NOW clean intra-take repetition
+        cleaned: List[Take] = []
+        for t in takes:
+            cleaned.append(Take(id=t.id, start=t.start, end=t.end, text=_cleanup_repeated_clauses(t.text)))
         # trim to cap
         story: List[Take] = []
         total = 0.0
-        for t in takes:
+        for t in cleaned:
             if total + t.dur > cap:
                 break
             story.append(t)
             total += t.dur
         used_asr = True
     else:
-        # fallback: time-based
+        # FALLBACK
         story = _time_based_takes(cap)
         used_asr = False
 
-    # 4) export
     final_path = _export_concat(src, story)
     up = _upload_to_s3(final_path, s3_prefix=s3_prefix)
 
-    # 5) JSON
+    # small UI trim
+    def _trim(txt: str, n: int = 220) -> str:
+        return txt if len(txt) <= n else txt[:n].rstrip() + "..."
+
     clips_block = [
         {
             "id": t.id,
@@ -374,7 +380,7 @@ def run_pipeline(
             "scene_q": 1.0,
             "vtx_sim": 0.0,
             "chain_ids": [t.id],
-            "text": t.text,
+            "text": _trim(t.text),
         }
         for t in story
     ]
@@ -394,7 +400,7 @@ def run_pipeline(
                 "id": first.id,
                 "start": first.start,
                 "end": first.end,
-                "text": first.text,
+                "text": _trim(first.text),
                 "meta": {"slot": "HOOK", "score": 2.5, "chain_ids": [first.id]},
                 "face_q": 1.0,
                 "scene_q": 1.0,
@@ -410,7 +416,7 @@ def run_pipeline(
                     "id": mid.id,
                     "start": mid.start,
                     "end": mid.end,
-                    "text": mid.text,
+                    "text": _trim(mid.text),
                     "meta": {"slot": "FEATURE", "score": 2.0, "chain_ids": [mid.id]},
                     "face_q": 1.0,
                     "scene_q": 1.0,
@@ -426,7 +432,7 @@ def run_pipeline(
                 "id": last.id,
                 "start": last.start,
                 "end": last.end,
-                "text": last.text,
+                "text": _trim(last.text),
                 "meta": {"slot": "CTA", "score": 2.0, "chain_ids": [last.id]},
                 "face_q": 1.0,
                 "scene_q": 1.0,
@@ -447,6 +453,6 @@ def run_pipeline(
         "clips": clips_block,
         "slots": slots_block,
         "asr": used_asr,
-        "semantic": used_asr,   # we actually cleaned text only if ASR is real
+        "semantic": used_asr,
         "vision": False,
     }
