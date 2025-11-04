@@ -1,9 +1,12 @@
 """
 worker/asr.py
 
-Default: SAFE stub ASR (no CUDA, no cuDNN, no onnxruntime).
-Optional: set env ASR_BACKEND=faster to TRY faster-whisper.
-If faster-whisper fails (missing libs), we fall back to the safe stub.
+ASR stack for EditDNA worker.
+
+Plan:
+1. Try GPU faster-whisper (we're on CUDA 12.4 + cuDNN 9 image now)
+2. If that fails, try CPU faster-whisper
+3. If THAT fails, return a safe placeholder so RQ never crashes
 """
 
 from __future__ import annotations
@@ -11,25 +14,43 @@ from typing import List, Dict, Any
 import os
 
 
-# ---------- always-safe version ----------
-def _safe_stub(path: str) -> List[Dict[str, Any]]:
+def _placeholder(path: str) -> List[Dict[str, Any]]:
+    # keeps the pipeline alive even if ASR is totally broken
     return [
         {
             "start": 0.0,
             "end": 10.0,
-            "text": "TEMP PLACEHOLDER: ASR forced to CPU-safe stub (no cuDNN).",
+            "text": "TEMP PLACEHOLDER: ASR fallback.",
         }
     ]
 
 
-# ---------- optional faster-whisper version ----------
-def _try_faster_whisper(path: str) -> List[Dict[str, Any]]:
-    # import inside so if it explodes, we can catch it
-    from faster_whisper import WhisperModel  # type: ignore
+def _gpu_asr(path: str) -> List[Dict[str, Any]]:
+    from faster_whisper import WhisperModel
 
     model_name = os.getenv("ASR_MODEL", "small")
-    compute_type = os.getenv("ASR_COMPUTE_TYPE", "int8")
-    model = WhisperModel(model_name, compute_type=compute_type)
+    # we are on a CUDA 12.4 + cuDNN 9 image, so we can use device="cuda"
+    model = WhisperModel(model_name, device="cuda", compute_type="float16")
+
+    out: List[Dict[str, Any]] = []
+    segments, _info = model.transcribe(path, beam_size=5)
+    for seg in segments:
+        out.append(
+            {
+                "start": float(seg.start),
+                "end": float(seg.end),
+                "text": seg.text.strip(),
+            }
+        )
+    return out
+
+
+def _cpu_asr(path: str) -> List[Dict[str, Any]]:
+    from faster_whisper import WhisperModel
+
+    model_name = os.getenv("ASR_MODEL", "small")
+    # CPU path, slower but doesn't need GPU libs
+    model = WhisperModel(model_name, device="cpu", compute_type="int8")
 
     out: List[Dict[str, Any]] = []
     segments, _info = model.transcribe(path, beam_size=5)
@@ -45,15 +66,34 @@ def _try_faster_whisper(path: str) -> List[Dict[str, Any]]:
 
 
 def transcribe_segments(path: str) -> List[Dict[str, Any]]:
-    backend = os.getenv("ASR_BACKEND", "safe").lower()
+    """
+    Public entry the pipeline calls.
 
-    # default: safe
-    if backend != "faster":
-        return _safe_stub(path)
+    Env knobs:
+      ASR_BACKEND=gpu|cpu|auto (default: auto)
+      ASR_MODEL=small|medium|large-v2 ...
+    """
+    backend = os.getenv("ASR_BACKEND", "auto").lower()
 
-    # if user explicitly asked for faster, try it
+    # explicit GPU
+    if backend == "gpu":
+        try:
+            return _gpu_asr(path)
+        except Exception:
+            return _placeholder(path)
+
+    # explicit CPU
+    if backend == "cpu":
+        try:
+            return _cpu_asr(path)
+        except Exception:
+            return _placeholder(path)
+
+    # auto → try GPU first, then CPU
     try:
-        return _try_faster_whisper(path)
+        return _gpu_asr(path)
     except Exception:
-        # if the container doesn't have cuDNN / onnxruntime, don't crash the worker
-        return _safe_stub(path)
+        try:
+            return _cpu_asr(path)
+        except Exception:
+            return _placeholder(path)
