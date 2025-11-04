@@ -1,22 +1,18 @@
 """
 worker/asr.py
-SAFE VERSION – no CUDA, no faster-whisper, no onnxruntime.
 
-This exists to keep the RQ worker from crashing the whole process when
-the ASR stack tries to load cuDNN but the container doesn't have the right
-GPU libs.
-
-Later, when the image has the right cuDNN / onnxruntime, we can swap back
-to the real ASR. For now, we just return one segment so the rest of the
-pipeline (cut, concat, S3, JSON) can run.
+Default: SAFE stub ASR (no CUDA, no cuDNN, no onnxruntime).
+Optional: set env ASR_BACKEND=faster to TRY faster-whisper.
+If faster-whisper fails (missing libs), we fall back to the safe stub.
 """
 
 from __future__ import annotations
 from typing import List, Dict, Any
+import os
 
 
-def transcribe_segments(path: str) -> List[Dict[str, Any]]:
-    # we ignore the actual file, this is just to keep the pipeline alive
+# ---------- always-safe version ----------
+def _safe_stub(path: str) -> List[Dict[str, Any]]:
     return [
         {
             "start": 0.0,
@@ -24,3 +20,40 @@ def transcribe_segments(path: str) -> List[Dict[str, Any]]:
             "text": "TEMP PLACEHOLDER: ASR forced to CPU-safe stub (no cuDNN).",
         }
     ]
+
+
+# ---------- optional faster-whisper version ----------
+def _try_faster_whisper(path: str) -> List[Dict[str, Any]]:
+    # import inside so if it explodes, we can catch it
+    from faster_whisper import WhisperModel  # type: ignore
+
+    model_name = os.getenv("ASR_MODEL", "small")
+    compute_type = os.getenv("ASR_COMPUTE_TYPE", "int8")
+    model = WhisperModel(model_name, compute_type=compute_type)
+
+    out: List[Dict[str, Any]] = []
+    segments, _info = model.transcribe(path, beam_size=5)
+    for seg in segments:
+        out.append(
+            {
+                "start": float(seg.start),
+                "end": float(seg.end),
+                "text": seg.text.strip(),
+            }
+        )
+    return out
+
+
+def transcribe_segments(path: str) -> List[Dict[str, Any]]:
+    backend = os.getenv("ASR_BACKEND", "safe").lower()
+
+    # default: safe
+    if backend != "faster":
+        return _safe_stub(path)
+
+    # if user explicitly asked for faster, try it
+    try:
+        return _try_faster_whisper(path)
+    except Exception:
+        # if the container doesn't have cuDNN / onnxruntime, don't crash the worker
+        return _safe_stub(path)
