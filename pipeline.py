@@ -41,8 +41,6 @@ BAD_PHRASES = [
     "start over",
     "no no",
     "redo",
-    "i mean",
-    "actually",
     "sorry",
 ]
 FILLERS = {"uh", "um", "like", "so", "okay"}
@@ -57,13 +55,33 @@ CTA_FLUFF = [
     "i left it for you down below",
 ]
 
-# really bad endings → the chopped half-sentences
-REALLY_INCOMPLETE_ENDINGS = [
+# phrases we saw were messy middles
+UGLY_BRANCHES = [
+    "but if you don't like the checker print",
+    "but if you don't like the checker",
     "but if you do",
     "but if you don't",
     "but if you",
-    "but if",
-    "but",
+]
+
+# feature-ish hints — we keep these even if they are mid-sentence
+FEATURE_HINTS = [
+    "pocket",
+    "pockets",
+    "zipper",
+    "strap",
+    "opening",
+    "inside",
+    "material",
+    "woven",
+    "quality",
+    "hardware",
+    "comes with",
+    "it has",
+    "it also has",
+    "it's actually",
+    "this isn't just",
+    "design",
 ]
 
 # ================== MODEL ==================
@@ -144,11 +162,13 @@ def _export_concat(src: str, takes: List[Take]) -> str:
     for idx, t in enumerate(takes, start=1):
         part = _tmpfile(f".part{idx:02d}.mp4")
         parts.append(part)
+        # guard against bad times
+        dur = max(0.05, t.dur)
         _run([
             FFMPEG_BIN, "-y",
             "-ss", f"{t.start:.3f}",
             "-i", src,
-            "-t", f"{t.dur:.3f}",
+            "-t", f"{dur:.3f}",
             "-c:v", "libx264", "-preset", "fast", "-crf", "23",
             "-pix_fmt", "yuv420p", "-g", "48",
             "-c:a", "aac", "-b:a", "128k",
@@ -172,6 +192,10 @@ def _export_concat(src: str, takes: List[Take]) -> str:
 # ================== ASR LOADING ==================
 
 def _load_asr_segments(src: str) -> Optional[List[Dict[str, Any]]]:
+    """
+    Try to call worker.asr.transcribe_segments(path) and return the list.
+    If it fails or returns the placeholder, return None so we can fallback.
+    """
     try:
         from worker.asr import transcribe_segments
     except Exception:
@@ -194,71 +218,95 @@ def _segments_to_takes_asr(segs: List[Dict[str, Any]]) -> List[Take]:
             continue
         s = float(seg.get("start", 0.0))
         e = float(seg.get("end", s))
-        # split very long into <= MAX_TAKE_SEC
-        while (e - s) > MAX_TAKE_SEC:
-            takes.append(Take(id=f"ASR{i:04d}_{len(takes)+1:02d}", start=s, end=s + MAX_TAKE_SEC, text=txt))
-            s += MAX_TAKE_SEC
+        # clip very long segments to MAX_TAKE_SEC, but we will sub-split anyway
+        if (e - s) > MAX_TAKE_SEC:
+            e = s + MAX_TAKE_SEC
         if (e - s) >= MIN_TAKE_SEC:
             takes.append(Take(id=f"ASR{i:04d}", start=s, end=e, text=txt))
     return takes
 
-# ================== SEMANTIC CLEANUP ==================
+# ================== CLAUSE UTILITIES ==================
 
-def _is_retry_or_trash(txt: str) -> bool:
-    low = txt.lower().strip()
+def _split_into_clauses(text: str) -> List[str]:
+    """
+    Split a segment into smaller pieces: punctuation → then " but " / " and "
+    """
+    if not text:
+        return []
+    text = " ".join(text.split())
+    temp: List[str] = []
+    buf = ""
+    for ch in text:
+        buf += ch
+        if ch in ".?!":
+            temp.append(buf.strip())
+            buf = ""
+    if buf.strip():
+        temp.append(buf.strip())
+
+    clauses: List[str] = []
+    for piece in temp:
+        low = piece.lower()
+        if " but " in low or " and " in low:
+            piece = piece.replace(" but ", "|SPLIT|").replace(" and ", "|SPLIT|")
+            for part in piece.split("|SPLIT|"):
+                part = part.strip(" ,.;")
+                if part:
+                    clauses.append(part)
+        else:
+            piece = piece.strip(" ,.;")
+            if piece:
+                clauses.append(piece)
+
+    # drop tiny ones
+    clauses = [c for c in clauses if len(c.split()) >= 3]
+    return clauses
+
+def _clause_is_bad(c: str) -> bool:
+    low = c.lower().strip()
     if not low:
         return True
+    # obvious restart / apology
     for p in BAD_PHRASES:
         if p in low:
             return True
-    words = [w.strip(",.?!") for w in low.split()]
-    if not words:
-        return True
-    filler = sum(1 for w in words if w in FILLERS)
-    if filler / max(1, len(words)) > 0.45:
+    # the messy middle we kept seeing
+    for p in UGLY_BRANCHES:
+        if p in low:
+            return True
+    # ultra short
+    if len(low.split()) < 3:
         return True
     return False
 
-def _dedupe_takes(takes: List[Take]) -> List[Take]:
-    out: List[Take] = []
-    seen = set()
-    for t in takes:
-        norm = "".join(c.lower() for c in t.text if (c.isalnum() or c.isspace())).strip()
-        if not norm:
-            continue
-        if norm in seen:
-            continue
-        seen.add(norm)
-        out.append(t)
+def _clause_is_featurey(c: str) -> bool:
+    low = c.lower()
+    for h in FEATURE_HINTS:
+        if h in low:
+            return True
+    return False
+
+def _assign_times_to_clauses(seg_start: float, seg_end: float, clauses: List[str]) -> List[Tuple[float, float, str]]:
+    """
+    We don't have per-word timestamps, so approximate:
+    assign time slices proportional to text length.
+    """
+    dur = max(0.05, seg_end - seg_start)
+    joined = " ".join(clauses)
+    total_len = max(1, len(joined))
+    out: List[Tuple[float, float, str]] = []
+    cursor = 0
+    for c in clauses:
+        c_len = len(c)
+        start_rel = cursor / total_len
+        end_rel = (cursor + c_len) / total_len
+        c_start = seg_start + start_rel * dur
+        c_end = seg_start + end_rel * dur
+        out.append((c_start, c_end, c.strip()))
+        cursor += c_len + 1  # +1 for space we removed
     return out
 
-def _merge_adjacent(takes: List[Take], max_gap: float = 1.0, max_chain: int = 3) -> List[Take]:
-    if not takes:
-        return []
-    takes = sorted(takes, key=lambda x: x.start)
-    merged: List[Take] = []
-    i = 0
-    while i < len(takes):
-        chain = [takes[i]]
-        j = i
-        while (j + 1) < len(takes) and len(chain) < max_chain:
-            a = chain[-1]
-            b = takes[j + 1]
-            if (b.start - a.end) > max_gap:
-                break
-            chain.append(b)
-            j += 1
-        first, last = chain[0], chain[-1]
-        merged.append(
-            Take(
-                id=f"{first.id}_to_{last.id}",
-                start=first.start,
-                end=last.end,
-                text=" ".join(c.text for c in chain),
-            )
-        )
-        i = j + 1
-    return merged
+# ================== TEXT CLEANUP ==================
 
 def _trim_repeated_ngrams(txt: str, n: int = 4) -> str:
     words = txt.split()
@@ -280,35 +328,7 @@ def _trim_cta_fluff(txt: str) -> str:
             return txt[:idx].rstrip(" ,.;")
     return txt
 
-def _looks_really_incomplete_middle(idx: int, total: int, txt: str) -> bool:
-    # only drop middle segments that end with those bad endings
-    if idx == 0 or idx == total - 1:
-        return False
-    low = txt.lower().strip()
-    for bad in REALLY_INCOMPLETE_ENDINGS:
-        if low.endswith(bad) and len(low) < 60:
-            return True
-    return False
-
-def _is_bad_branchy_line(txt: str) -> bool:
-    """
-    This is the special killer for your bag video line:
-    - starts with "but if you"
-    - or contains "but if you" 2+ times
-    - or matches the checker-print style
-    """
-    low = txt.lower().strip()
-    if low.startswith("but if you"):
-        return True
-    count = low.count("but if you")
-    if count >= 2:
-        return True
-    # specifically nuke the "don't like the checker print" version
-    if "don't like the checker print" in low:
-        return True
-    return False
-
-def _clean_take_text(txt: str) -> str:
+def _clean_text(txt: str) -> str:
     txt = _trim_repeated_ngrams(txt, n=4)
     txt = _trim_cta_fluff(txt)
     return txt.strip()
@@ -357,29 +377,50 @@ def run_pipeline(
 
     segs = _load_asr_segments(src)
     if segs is not None:
-        takes = _segments_to_takes_asr(segs)
-        takes = [t for t in takes if not _is_retry_or_trash(t.text)]
-        takes = _dedupe_takes(takes)
-        takes = _merge_adjacent(takes)
+        # 1) ASR → takes
+        seg_takes = _segments_to_takes_asr(segs)
 
-        cleaned: List[Take] = []
-        for t in takes:
-            cleaned.append(Take(id=t.id, start=t.start, end=t.end, text=_clean_take_text(t.text)))
-
-        final_takes: List[Take] = []
-        total = len(cleaned)
-        for idx, t in enumerate(cleaned):
-            # drop chopped-off middles
-            if _looks_really_incomplete_middle(idx, total, t.text):
+        # 2) for each ASR take, go to clause level
+        clause_takes: List[Take] = []
+        for seg_take in seg_takes:
+            clauses = _split_into_clauses(seg_take.text)
+            if not clauses:
                 continue
-            # drop our ugly “but if you / checker print” rambles
-            if _is_bad_branchy_line(t.text):
-                continue
-            final_takes.append(t)
 
+            # filter clauses
+            good_clauses: List[str] = []
+            for c in clauses:
+                if _clause_is_bad(c):
+                    # but keep feature-ish ones
+                    if _clause_is_featurey(c):
+                        good_clauses.append(c)
+                    continue
+                good_clauses.append(c)
+
+            if not good_clauses:
+                continue
+
+            # map clauses to sub-times
+            timed = _assign_times_to_clauses(seg_take.start, seg_take.end, good_clauses)
+            for idx, (cs, ce, ctext) in enumerate(timed, start=1):
+                ctext = _clean_text(ctext)
+                dur = ce - cs
+                if dur < 0.05:
+                    continue
+                clause_takes.append(
+                    Take(
+                        id=f"{seg_take.id}_c{idx}",
+                        start=cs,
+                        end=ce,
+                        text=ctext,
+                    )
+                )
+
+        # 3) cap by duration
+        clause_takes = sorted(clause_takes, key=lambda x: x.start)
         story: List[Take] = []
         total_dur = 0.0
-        for t in final_takes:
+        for t in clause_takes:
             if total_dur + t.dur > cap:
                 break
             story.append(t)
@@ -387,9 +428,11 @@ def run_pipeline(
 
         used_asr = True
     else:
+        # fallback
         story = _time_based_takes(cap)
         used_asr = False
 
+    # 4) export video from tiny takes
     final_path = _export_concat(src, story)
     up = _upload_to_s3(final_path, s3_prefix=s3_prefix)
 
@@ -413,7 +456,7 @@ def run_pipeline(
         for t in story
     ]
 
-    # ---------- slots (unlimited FEATURES) ----------
+    # ---------- slots ----------
     slots: Dict[str, List[Dict[str, Any]]] = {
         "HOOK": [],
         "PROBLEM": [],
