@@ -5,7 +5,6 @@ import tempfile
 import subprocess
 from dataclasses import dataclass
 from typing import List, Dict, Any, Optional, Tuple
-import re
 import boto3
 
 # ================== ENV ==================
@@ -23,6 +22,7 @@ def _env_float(k: str, d: float) -> float:
 
 FFMPEG_BIN  = _env_str("FFMPEG_BIN", "/usr/bin/ffmpeg")
 FFPROBE_BIN = _env_str("FFPROBE_BIN", "/usr/bin/ffprobe")
+
 S3_BUCKET   = _env_str("S3_BUCKET", "")
 S3_PREFIX   = _env_str("S3_PREFIX", "editdna/outputs")
 AWS_REGION  = _env_str("AWS_REGION", "us-east-1")
@@ -32,7 +32,7 @@ MAX_DURATION_SEC = _env_float("MAX_DURATION_SEC", 120.0)
 MAX_TAKE_SEC     = _env_float("MAX_TAKE_SEC", 20.0)
 MIN_TAKE_SEC     = _env_float("MIN_TAKE_SEC", 2.0)
 
-# “bad take” markers
+# obvious bad speech markers
 BAD_PHRASES = [
     "wait",
     "hold on",
@@ -47,7 +47,7 @@ BAD_PHRASES = [
 ]
 FILLERS = {"uh", "um", "like", "so", "okay"}
 
-# CTA-ish tails
+# salesy tails we can trim from text we show
 CTA_FLUFF = [
     "click the link",
     "get yours today",
@@ -57,17 +57,13 @@ CTA_FLUFF = [
     "i left it for you down below",
 ]
 
-# dangling / soft endings we want to kill if they’re in the middle
-INCOMPLETE_ENDINGS = [
+# really bad endings → these are the ones that were causing your “but if you…” line
+REALLY_INCOMPLETE_ENDINGS = [
     "but if you do",
     "but if you don't",
     "but if you",
     "but if",
     "but",
-    "as well",
-    "on the inside",
-    "available",
-    "inside",
 ]
 
 # ================== MODEL ==================
@@ -82,7 +78,6 @@ class Take:
     @property
     def dur(self) -> float:
         return self.end - self.start
-
 
 # ================== SHELL HELPERS ==================
 
@@ -118,7 +113,6 @@ def _ffprobe_duration(path: str) -> float:
     except Exception:
         return 0.0
 
-
 # ================== S3 ==================
 
 def _upload_to_s3(local_path: str, s3_prefix: Optional[str] = None) -> Dict[str, str]:
@@ -139,7 +133,6 @@ def _upload_to_s3(local_path: str, s3_prefix: Optional[str] = None) -> Dict[str,
         "s3_url": f"s3://{S3_BUCKET}/{key}",
         "https_url": f"https://{S3_BUCKET}.s3.{AWS_REGION}.amazonaws.com/{key}",
     }
-
 
 # ================== EXPORT ==================
 
@@ -176,10 +169,10 @@ def _export_concat(src: str, takes: List[Take]) -> str:
     ])
     return final
 
-
 # ================== ASR LOADING ==================
 
 def _load_asr_segments(src: str) -> Optional[List[Dict[str, Any]]]:
+    # this lets us run even if worker.asr doesn’t import
     try:
         from worker.asr import transcribe_segments
     except Exception:
@@ -191,6 +184,7 @@ def _load_asr_segments(src: str) -> Optional[List[Dict[str, Any]]]:
     if not segs:
         return None
     if "temp placeholder" in (segs[0].get("text") or "").lower():
+        # means ASR is stubbed
         return None
     return segs
 
@@ -202,14 +196,13 @@ def _segments_to_takes_asr(segs: List[Dict[str, Any]]) -> List[Take]:
             continue
         s = float(seg.get("start", 0.0))
         e = float(seg.get("end", s))
-        # split long segments
+        # split long segments into <= MAX_TAKE_SEC
         while (e - s) > MAX_TAKE_SEC:
             takes.append(Take(id=f"ASR{i:04d}_{len(takes)+1:02d}", start=s, end=s + MAX_TAKE_SEC, text=txt))
             s += MAX_TAKE_SEC
         if (e - s) >= MIN_TAKE_SEC:
             takes.append(Take(id=f"ASR{i:04d}", start=s, end=e, text=txt))
     return takes
-
 
 # ================== SEMANTIC CLEANUP ==================
 
@@ -289,41 +282,28 @@ def _trim_cta_fluff(txt: str) -> str:
             return txt[:idx].rstrip(" ,.;")
     return txt
 
-def _trim_dangling_end(txt: str) -> str:
-    low = txt.lower().rstrip()
-    for d in INCOMPLETE_ENDINGS:
-        if low.endswith(d):
-            return txt[:len(txt) - len(d)].rstrip(" ,.;")
-    return txt
-
-def _is_incomplete_middle(idx: int, total: int, txt: str) -> bool:
+def _looks_really_incomplete_middle(idx: int, total: int, txt: str) -> bool:
     """
-    Returns True if this is a middle segment (not first, not last)
-    AND it looks incomplete (no punctuation, ends with a soft word).
+    Softer rule:
+    - ONLY drop if it's a middle segment
+    - AND it ends with those bad endings (“but if you…”, “but…”)
+    - we do NOT drop just because there's no period
     """
     if idx == 0 or idx == total - 1:
         return False
-    stripped = txt.strip()
-    if not stripped:
-        return True
-    # if it ends with proper punctuation, we allow it
-    if stripped.endswith((".", "!", "?")):
-        return False
-    low = stripped.lower()
-    for d in INCOMPLETE_ENDINGS:
-        if low.endswith(d):
-            return True
-    # also: very short + no punctuation in middle = drop
-    if len(stripped) < 25:
-        return True
+    low = txt.lower().strip()
+    for bad in REALLY_INCOMPLETE_ENDINGS:
+        if low.endswith(bad):
+            # drop only if it’s clearly short → real cut-off
+            if len(low) < 60:
+                return True
     return False
 
 def _clean_take_text(txt: str) -> str:
     txt = _trim_repeated_ngrams(txt, n=4)
     txt = _trim_cta_fluff(txt)
-    txt = _trim_dangling_end(txt)
-    return txt
-
+    # we keep original punctuation style so client sees real words
+    return txt.strip()
 
 # ================== FALLBACK ==================
 
@@ -345,7 +325,6 @@ def _time_based_takes(vid_dur: float) -> List[Take]:
             idx += 1
         t = end
     return takes
-
 
 # ================== PUBLIC ENTRY ==================
 
@@ -372,8 +351,11 @@ def run_pipeline(
     if segs is not None:
         # ASR path
         takes = _segments_to_takes_asr(segs)
+        # drop obvious bad
         takes = [t for t in takes if not _is_retry_or_trash(t.text)]
+        # dedupe same wording
         takes = _dedupe_takes(takes)
+        # merge close
         takes = _merge_adjacent(takes)
 
         # clean text
@@ -381,15 +363,15 @@ def run_pipeline(
         for t in takes:
             cleaned.append(Take(id=t.id, start=t.start, end=t.end, text=_clean_take_text(t.text)))
 
-        # drop incomplete middles
+        # drop ONLY clearly chopped-off middles
         final_takes: List[Take] = []
         total = len(cleaned)
         for idx, t in enumerate(cleaned):
-            if _is_incomplete_middle(idx, total, t.text):
+            if _looks_really_incomplete_middle(idx, total, t.text):
                 continue
             final_takes.append(t)
 
-        # cap total duration
+        # cap by duration but otherwise keep them all → "unlimited features"
         story: List[Take] = []
         total_dur = 0.0
         for t in final_takes:
@@ -397,18 +379,21 @@ def run_pipeline(
                 break
             story.append(t)
             total_dur += t.dur
+
         used_asr = True
     else:
-        # fallback
+        # fallback (no real ASR)
         story = _time_based_takes(cap)
         used_asr = False
 
+    # export video
     final_path = _export_concat(src, story)
     up = _upload_to_s3(final_path, s3_prefix=s3_prefix)
 
     def _trim(txt: str, n: int = 220) -> str:
         return txt if len(txt) <= n else txt[:n].rstrip() + "..."
 
+    # ---------- clips ----------
     clips = [
         {
             "id": t.id,
@@ -425,6 +410,7 @@ def run_pipeline(
         for t in story
     ]
 
+    # ---------- slots (unlimited FEATURES) ----------
     slots: Dict[str, List[Dict[str, Any]]] = {
         "HOOK": [],
         "PROBLEM": [],
@@ -435,52 +421,50 @@ def run_pipeline(
 
     if story:
         first = story[0]
-        slots["HOOK"].append(
-            {
-                "id": first.id,
-                "start": first.start,
-                "end": first.end,
-                "text": _trim(first.text),
-                "meta": {"slot": "HOOK", "score": 2.5, "chain_ids": [first.id]},
-                "face_q": 1.0,
-                "scene_q": 1.0,
-                "vtx_sim": 0.0,
-                "has_product": False,
-                "ocr_hit": 0,
-            }
-        )
+        slots["HOOK"].append({
+            "id": first.id,
+            "start": first.start,
+            "end": first.end,
+            "text": _trim(first.text),
+            "meta": {"slot": "HOOK", "score": 2.5, "chain_ids": [first.id]},
+            "face_q": 1.0,
+            "scene_q": 1.0,
+            "vtx_sim": 0.0,
+            "has_product": False,
+            "ocr_hit": 0,
+        })
+
+    # every middle segment becomes a FEATURE
     if len(story) > 2:
         for mid in story[1:-1]:
-            slots["FEATURE"].append(
-                {
-                    "id": mid.id,
-                    "start": mid.start,
-                    "end": mid.end,
-                    "text": _trim(mid.text),
-                    "meta": {"slot": "FEATURE", "score": 2.0, "chain_ids": [mid.id]},
-                    "face_q": 1.0,
-                    "scene_q": 1.0,
-                    "vtx_sim": 0.0,
-                    "has_product": False,
-                    "ocr_hit": 0,
-                }
-            )
-    if len(story) >= 2:
-        last = story[-1]
-        slots["CTA"].append(
-            {
-                "id": last.id,
-                "start": last.start,
-                "end": last.end,
-                "text": _trim(last.text),
-                "meta": {"slot": "CTA", "score": 2.0, "chain_ids": [last.id]},
+            slots["FEATURE"].append({
+                "id": mid.id,
+                "start": mid.start,
+                "end": mid.end,
+                "text": _trim(mid.text),
+                "meta": {"slot": "FEATURE", "score": 2.0, "chain_ids": [mid.id]},
                 "face_q": 1.0,
                 "scene_q": 1.0,
                 "vtx_sim": 0.0,
                 "has_product": False,
                 "ocr_hit": 0,
-            }
-        )
+            })
+
+    # last one is CTA so your app always has an ending
+    if len(story) >= 2:
+        last = story[-1]
+        slots["CTA"].append({
+            "id": last.id,
+            "start": last.start,
+            "end": last.end,
+            "text": _trim(last.text),
+            "meta": {"slot": "CTA", "score": 2.0, "chain_ids": [last.id]},
+            "face_q": 1.0,
+            "scene_q": 1.0,
+            "vtx_sim": 0.0,
+            "has_product": False,
+            "ocr_hit": 0,
+        })
 
     return {
         "ok": True,
