@@ -57,16 +57,18 @@ CTA_FLUFF = [
     "i left it for you down below",
 ]
 
-# dangling half-sentences we want to kill
-DANGLING_ENDS = [
+# dangling / soft endings we want to kill if they’re in the middle
+INCOMPLETE_ENDINGS = [
     "but if you do",
     "but if you don't",
     "but if you",
     "but if",
     "but",
-    "and if you",
+    "as well",
+    "on the inside",
+    "available",
+    "inside",
 ]
-
 
 # ================== MODEL ==================
 
@@ -82,7 +84,7 @@ class Take:
         return self.end - self.start
 
 
-# ================== HELPERS ==================
+# ================== SHELL HELPERS ==================
 
 def _run(cmd: List[str]) -> Tuple[int, str, str]:
     p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
@@ -175,7 +177,7 @@ def _export_concat(src: str, takes: List[Take]) -> str:
     return final
 
 
-# ================== ASR LOAD ==================
+# ================== ASR LOADING ==================
 
 def _load_asr_segments(src: str) -> Optional[List[Dict[str, Any]]]:
     try:
@@ -192,7 +194,6 @@ def _load_asr_segments(src: str) -> Optional[List[Dict[str, Any]]]:
         return None
     return segs
 
-
 def _segments_to_takes_asr(segs: List[Dict[str, Any]]) -> List[Take]:
     takes: List[Take] = []
     for i, seg in enumerate(segs, start=1):
@@ -201,16 +202,16 @@ def _segments_to_takes_asr(segs: List[Dict[str, Any]]) -> List[Take]:
             continue
         s = float(seg.get("start", 0.0))
         e = float(seg.get("end", s))
-        # split long ones
+        # split long segments
         while (e - s) > MAX_TAKE_SEC:
-            takes.append(Take(id=f"ASR{i:04d}_{len(takes)+1:02d}", start=s, end=s+MAX_TAKE_SEC, text=txt))
+            takes.append(Take(id=f"ASR{i:04d}_{len(takes)+1:02d}", start=s, end=s + MAX_TAKE_SEC, text=txt))
             s += MAX_TAKE_SEC
         if (e - s) >= MIN_TAKE_SEC:
             takes.append(Take(id=f"ASR{i:04d}", start=s, end=e, text=txt))
     return takes
 
 
-# ================== SEMANTIC-ISH ==================
+# ================== SEMANTIC CLEANUP ==================
 
 def _is_retry_or_trash(txt: str) -> bool:
     low = txt.lower().strip()
@@ -290,12 +291,32 @@ def _trim_cta_fluff(txt: str) -> str:
 
 def _trim_dangling_end(txt: str) -> str:
     low = txt.lower().rstrip()
-    for d in DANGLING_ENDS:
+    for d in INCOMPLETE_ENDINGS:
         if low.endswith(d):
-            # cut it off
-            cut_len = len(d)
-            return txt[:-cut_len].rstrip(" ,.;")
+            return txt[:len(txt) - len(d)].rstrip(" ,.;")
     return txt
+
+def _is_incomplete_middle(idx: int, total: int, txt: str) -> bool:
+    """
+    Returns True if this is a middle segment (not first, not last)
+    AND it looks incomplete (no punctuation, ends with a soft word).
+    """
+    if idx == 0 or idx == total - 1:
+        return False
+    stripped = txt.strip()
+    if not stripped:
+        return True
+    # if it ends with proper punctuation, we allow it
+    if stripped.endswith((".", "!", "?")):
+        return False
+    low = stripped.lower()
+    for d in INCOMPLETE_ENDINGS:
+        if low.endswith(d):
+            return True
+    # also: very short + no punctuation in middle = drop
+    if len(stripped) < 25:
+        return True
+    return False
 
 def _clean_take_text(txt: str) -> str:
     txt = _trim_repeated_ngrams(txt, n=4)
@@ -360,28 +381,22 @@ def run_pipeline(
         for t in takes:
             cleaned.append(Take(id=t.id, start=t.start, end=t.end, text=_clean_take_text(t.text)))
 
-        # drop takes that are now too short or still dangling
+        # drop incomplete middles
         final_takes: List[Take] = []
+        total = len(cleaned)
         for idx, t in enumerate(cleaned):
-            txt = t.text.strip()
-            if not txt:
-                continue
-            # drop mid-segment dangling ones
-            if any(txt.lower().endswith(d) for d in DANGLING_ENDS) and idx not in (0, len(cleaned)-1):
-                continue
-            # drop tiny leftover mids
-            if len(txt) < 18 and idx not in (0, len(cleaned)-1):
+            if _is_incomplete_middle(idx, total, t.text):
                 continue
             final_takes.append(t)
 
         # cap total duration
         story: List[Take] = []
-        total = 0.0
+        total_dur = 0.0
         for t in final_takes:
-            if total + t.dur > cap:
+            if total_dur + t.dur > cap:
                 break
             story.append(t)
-            total += t.dur
+            total_dur += t.dur
         used_asr = True
     else:
         # fallback
