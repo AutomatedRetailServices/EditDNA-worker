@@ -5,13 +5,20 @@ from typing import List, Dict, Any, Optional, Tuple
 from worker.asr import transcribe_segments
 import boto3
 
-# -------------------------------------------------
-# ENV HELPERS
-# -------------------------------------------------
+# ------------------------------------------------------------
+# ENV
+# ------------------------------------------------------------
 def _env_float(k, d):
     v = (os.getenv(k) or "").split("#")[0].strip().split()[:1]
     try:
         return float(v[0]) if v else d
+    except:
+        return d
+
+def _env_int(k, d):
+    v = (os.getenv(k) or "").split("#")[0].strip().split()[:1]
+    try:
+        return int(v[0]) if v else d
     except:
         return d
 
@@ -28,17 +35,14 @@ AWS_REGION  = _env_str("AWS_REGION", "us-east-1")
 S3_ACL      = _env_str("S3_ACL", "public-read")
 
 MAX_DURATION_SEC   = _env_float("MAX_DURATION_SEC", 120.0)
-MIN_TAKE_SEC       = _env_float("MIN_TAKE_SEC", 2.0)
-MAX_TAKE_SEC       = _env_float("MAX_TAKE_SEC", 20.0)
-
 CAPTIONS_MODE      = _env_str("CAPTIONS", "burn").lower()
 BURN_CAPTIONS      = CAPTIONS_MODE in ("on","burn","burned","subtitle","1","true","yes")
 
-# -------------------------------------------------
-# DATA MODEL
-# -------------------------------------------------
+# ------------------------------------------------------------
+# MODEL TYPES
+# ------------------------------------------------------------
 @dataclass
-class Take:
+class ClauseTake:
     id: str
     start: float
     end: float
@@ -46,15 +50,15 @@ class Take:
     face_q: float = 1.0
     scene_q: float = 1.0
     vtx_sim: float = 0.0
-    chain_ids: Optional[List[str]] = None
+    chain_ids: Optional[List[str]] = None  # we’ll just store [id] usually
 
     @property
     def dur(self) -> float:
         return float(self.end) - float(self.start)
 
-# -------------------------------------------------
-# SHELL / IO
-# -------------------------------------------------
+# ------------------------------------------------------------
+# SHELL HELPERS
+# ------------------------------------------------------------
 def _run(cmd: List[str]) -> Tuple[int, str, str]:
     p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
     out, err = p.communicate()
@@ -84,162 +88,126 @@ def _download_to_tmp(url: str) -> str:
         raise RuntimeError(f"curl failed {code}: {err}")
     return local_path
 
-# -------------------------------------------------
-# TEXT CLEAN / FILTER CONFIG
-# -------------------------------------------------
-# words we saw from bad ASR that are NOT really English / UGC
+# ------------------------------------------------------------
+# TEXT / CLAUSE LOGIC
+# ------------------------------------------------------------
+
+# 1) things we ALWAYS drop if we see them (your bad ASR words)
 HARD_BAD = {
-    "kuchigai",    # nonsense from probiotic video
-    "utas",        # nonsense
+    "kuchigai",
+    "utas",
 }
 
-# phrases that look odd but are actually UGC/tiktok language
+# 2) slang/phrases we ALLOW even if they look a bit messy
 SLANG_OK = {
     "for the girls",
-    "for the girls only",
+    "this is for the girls",
     "wet wet",
-    "worry no more",
-    "don't be shy",
-    "go ahead and click",
+    "the girls only",
 }
 
-RETRY_MARKERS = (
-    "wait", "hold on", "let me start again", "let me start over",
-    "start over", "no no", "redo", "take two", "i mean actually"
-)
+# simple helpers
+def _norm_txt(s: str) -> str:
+    return (s or "").strip().lower()
 
-FILLERS = {"uh", "um", "like", "so", "okay", "sorry"}
-
-def _norm(s: str) -> str:
-    return "".join(c.lower() for c in s if (c.isalnum() or c.isspace())).strip()
-
-def _looks_like_retry_or_filler(text: str) -> bool:
-    low = text.lower()
-    if any(m in low for m in RETRY_MARKERS):
-        return True
-    words = [w.strip(",.?!") for w in low.split()]
-    if not words:
-        return True
-    filler_rate = sum(1 for w in words if w in FILLERS) / max(1, len(words))
-    return filler_rate > 0.35  # now a bit less aggressive
-
-def _hits_hard_bad(text: str) -> bool:
-    low = text.lower()
+def _hits_hard_bad(txt: str) -> bool:
+    low = _norm_txt(txt)
     return any(bad in low for bad in HARD_BAD)
 
-def _hits_slang_ok(text: str) -> bool:
-    low = text.lower()
-    return any(sl in low for sl in SLANG_OK)
+def _hits_slang_ok(txt: str) -> bool:
+    low = _norm_txt(txt)
+    return any(ok in low for ok in SLANG_OK)
 
-# -------------------------------------------------
-# CLAUSE SPLITTER
-# -------------------------------------------------
-def _split_segment_into_clauses(seg: Dict[str, Any]) -> List[Take]:
+def _is_too_short(txt: str) -> bool:
+    # throw away very short, non-content clauses
+    words = [w for w in (txt or "").strip().split() if w]
+    return len(words) <= 2  # "i found", "i think", etc.
+
+def _is_really_gibberish(txt: str) -> bool:
+    low = _norm_txt(txt)
+    # anything with lots of "i found" repetitions but nothing else
+    if low.count("i found") >= 2 and len(low) < 40:
+        return True
+    return False
+
+def _split_segment_into_clauses(seg: Dict[str, Any]) -> List[ClauseTake]:
     """
-    We get 1 ASR segment: {start, end, text}
-    We split its text on punctuation / 'but' / 'and then' to get sub-clauses
-    and distribute the time across them.
+    We have 1 start/end for the whole ASR segment.
+    We'll fake intra-segment clause times by slicing the duration by number of clauses.
+    This is what your job output is showing now.
     """
     text = (seg.get("text") or "").strip()
     if not text:
         return []
 
-    start = float(seg["start"])
-    end   = float(seg["end"])
-    dur   = max(0.01, end - start)
+    seg_start = float(seg["start"])
+    seg_end   = float(seg["end"])
+    seg_dur   = max(0.01, seg_end - seg_start)
 
     # naive clause split
-    import re
-    raw_clauses = re.split(r"(?:,|\.|;| and | but )", text)
-    clauses = [c.strip() for c in raw_clauses if c.strip()]
-    if not clauses:
-        return [Take(id="ASRSEG", start=start, end=end, text=text)]
+    raw_clauses = [c.strip() for c in text.replace("!", ".").replace("?", ".").split(".") if c.strip()]
+    n = len(raw_clauses)
+    if n == 0:
+        return []
 
-    per_clause = dur / len(clauses)
-    takes: List[Take] = []
-    cur_start = start
-    for idx, c in enumerate(clauses, start=1):
-        c_dur = per_clause
-        c_end = cur_start + c_dur
-        takes.append(Take(
-            id=f"{seg.get('id','ASR')}_c{idx}",
-            start=cur_start,
+    per_clause = seg_dur / n
+    out: List[ClauseTake] = []
+    for idx, clause in enumerate(raw_clauses, start=1):
+        c_start = seg_start + per_clause * (idx - 1)
+        c_end   = seg_start + per_clause * idx
+        out.append(ClauseTake(
+            id=f"{seg.get('id','ASR'):s}_c{idx}",
+            start=c_start,
             end=c_end,
-            text=c,
+            text=clause,
+            chain_ids=[f"{seg.get('id','ASR'):s}_c{idx}"],
         ))
-        cur_start = c_end
-    # clamp last one to real end
-    if takes:
-        takes[-1].end = end
-    return takes
-
-# -------------------------------------------------
-# ASR → CLAUSE TAKES → FILTER
-# -------------------------------------------------
-def _segments_to_clause_takes(segments: List[Dict[str, Any]]) -> List[Take]:
-    all_takes: List[Take] = []
-    for seg in segments:
-        # preserve original id if present, else make one
-        if "id" not in seg:
-            seg["id"] = f"ASR{len(all_takes)+1:04d}"
-        all_takes.extend(_split_segment_into_clauses(seg))
-    return all_takes
-
-def _filter_takes(takes: List[Take]) -> List[Take]:
-    """
-    1) drop empty
-    2) drop obvious retries
-    3) drop HARD_BAD only if it's not in SLANG_OK
-    4) dedupe text
-    """
-    out: List[Take] = []
-    seen = set()
-    for t in takes:
-        txt = (t.text or "").strip()
-        if not txt:
-            continue
-
-        # 1) avoid micro-clips < 0.4s
-        if (t.end - t.start) < 0.4:
-            continue
-
-        # 2) retry/filler
-        if _looks_like_retry_or_filler(txt):
-            continue
-
-        # 3) hard bad vs slang
-        if _hits_hard_bad(txt) and not _hits_slang_ok(txt):
-            # real ASR garbage → drop
-            continue
-
-        # 4) dedupe on normalized text
-        n = _norm(txt)
-        if n in seen:
-            continue
-        seen.add(n)
-
-        out.append(t)
     return out
 
-# -------------------------------------------------
-# STORY PICKER (simple)
-# -------------------------------------------------
-def _pick_story_in_order(takes: List[Take], max_len: float) -> List[Take]:
-    story: List[Take] = []
+def _filter_clauses(clauses: List[ClauseTake]) -> List[ClauseTake]:
+    """
+    - drop clauses that contain HARD_BAD unless they also contain approved slang
+    - drop tiny filler clauses
+    - drop obvious gibberish
+    """
+    cleaned: List[ClauseTake] = []
+    for c in clauses:
+        txt = c.text or ""
+        low = _norm_txt(txt)
+
+        # 1) hard bad
+        if _hits_hard_bad(txt) and not _hits_slang_ok(txt):
+            # drop it
+            continue
+
+        # 2) very short + not slang
+        if _is_too_short(txt) and not _hits_slang_ok(txt):
+            continue
+
+        # 3) obvious gibberish
+        if _is_really_gibberish(txt):
+            continue
+
+        cleaned.append(c)
+
+    return cleaned
+
+def _pick_story_in_order(clauses: List[ClauseTake], max_len: float) -> List[ClauseTake]:
+    story: List[ClauseTake] = []
     total = 0.0
-    for t in takes:
-        if total + t.dur > max_len:
+    for c in clauses:
+        if total + c.dur > max_len:
             break
-        story.append(t)
-        total += t.dur
-    if not story and takes:
-        story = [max(takes, key=lambda x: x.dur)]
+        story.append(c)
+        total += c.dur
+    if not story and clauses:
+        story = [clauses[0]]
     return story
 
-# -------------------------------------------------
-# EXPORTS
-# -------------------------------------------------
-def _write_srt(story: List[Take]) -> str:
+# ------------------------------------------------------------
+# SRT / EXPORT
+# ------------------------------------------------------------
+def _write_srt(story: List[ClauseTake]) -> str:
     def ts(sec: float) -> str:
         ms = int(round((sec - int(sec)) * 1000))
         s = int(sec)
@@ -253,10 +221,12 @@ def _write_srt(story: List[Take]) -> str:
             fh.write(f"{i}\n{ts(t.start)} --> {ts(t.end)}\n{safe_text}\n\n")
     return path
 
-def _export_video(src: str, story: List[Take]) -> str:
+def _export_video(src: str, story: List[ClauseTake]) -> str:
     if not story:
-        story = [Take(id="FALLBACK", start=0.0, end=min(5.0, MAX_DURATION_SEC), text="")]
-    parts, listfile = [], _tmpfile(suffix=".txt")
+        story = [ClauseTake(id="FALLBACK", start=0.0, end=min(5.0, MAX_DURATION_SEC), text="")]
+
+    parts = []
+    listfile = _tmpfile(suffix=".txt")
     for idx, t in enumerate(story, start=1):
         part = _tmpfile(suffix=f".part{idx:02d}.mp4")
         parts.append(part)
@@ -270,9 +240,11 @@ def _export_video(src: str, story: List[Take]) -> str:
             "-c:a", "aac", "-b:a", "128k",
             part
         ])
+
     with open(listfile, "w") as f:
         for p in parts:
             f.write(f"file '{p}'\n")
+
     final = _tmpfile(suffix=".mp4")
     _run([
         FFMPEG_BIN, "-y",
@@ -283,6 +255,7 @@ def _export_video(src: str, story: List[Take]) -> str:
         "-c:a", "aac", "-b:a", "128k",
         final
     ])
+
     if BURN_CAPTIONS:
         srt = _write_srt(story)
         burned = _tmpfile(suffix=".mp4")
@@ -296,11 +269,12 @@ def _export_video(src: str, story: List[Take]) -> str:
             burned
         ])
         return burned
+
     return final
 
-# -------------------------------------------------
+# ------------------------------------------------------------
 # S3
-# -------------------------------------------------
+# ------------------------------------------------------------
 def _upload_to_s3(local_path: str) -> Dict[str, str]:
     s3 = boto3.client("s3", region_name=AWS_REGION)
     if not S3_BUCKET:
@@ -309,8 +283,10 @@ def _upload_to_s3(local_path: str) -> Dict[str, str]:
     key = f"{S3_PREFIX.rstrip('/')}/{stem}_{int(time.time())}.mp4"
     with open(local_path, "rb") as fh:
         s3.upload_fileobj(
-            fh, S3_BUCKET, key,
-            ExtraArgs={"ACL": S3_ACL, "ContentType": "video/mp4"}
+            fh,
+            S3_BUCKET,
+            key,
+            ExtraArgs={"ACL": S3_ACL, "ContentType": "video/mp4"},
         )
     https_url = f"https://{S3_BUCKET}.s3.{AWS_REGION}.amazonaws.com/{key}"
     return {
@@ -319,41 +295,49 @@ def _upload_to_s3(local_path: str) -> Dict[str, str]:
         "https_url": https_url,
     }
 
-# -------------------------------------------------
+# ------------------------------------------------------------
 # PUBLIC ENTRY
-# -------------------------------------------------
+# ------------------------------------------------------------
 def run_pipeline(
     *,
     session_id: str,
     file_urls: List[str],
     portrait: bool,
-    funnel_counts: str,
+    funnel_counts: str = "1",
     max_duration: float,
     **kwargs,
 ) -> Dict[str, Any]:
     if not file_urls:
         return {"ok": False, "error": "no input files"}
 
+    # 1) download
     raw_local = _download_to_tmp(file_urls[0])
 
-    # 1) real ASR segments
+    # 2) real ASR -> segments
     segs = transcribe_segments(raw_local)
 
-    # 2) ASR → clause-level takes
-    clause_takes = _segments_to_clause_takes(segs)
+    # 3) segments -> clause-level takes
+    all_clauses: List[ClauseTake] = []
+    for seg in segs:
+        seg_id = seg.get("id")
+        # make sure id exists so we can show it
+        if not seg_id:
+            seg["id"] = f"ASR{len(all_clauses)+1:04d}"
+        clauses = _split_segment_into_clauses(seg)
+        all_clauses.extend(clauses)
 
-    # 3) filter (retries, hard-bad, dedupe)
-    clause_takes = _filter_takes(clause_takes)
+    # 4) filter bad / tiny / duplicate gibberish
+    filtered = _filter_clauses(all_clauses)
 
-    # 4) pick story up to requested max
+    # 5) pick story in order
     cap = float(max_duration or MAX_DURATION_SEC)
-    story = _pick_story_in_order(clause_takes, cap)
+    story = _pick_story_in_order(filtered, cap)
 
-    # 5) export video + s3
+    # 6) export video from clauses
     final_path = _export_video(raw_local, story)
     up = _upload_to_s3(final_path)
 
-    # 6) build clips / slots for the frontend
+    # 7) build blocks for frontend
     clips_block = []
     for t in story:
         clips_block.append({
@@ -365,11 +349,11 @@ def run_pipeline(
             "face_q": t.face_q,
             "scene_q": t.scene_q,
             "vtx_sim": t.vtx_sim,
-            "chain_ids": t.chain_ids or [t.id],
+            "chain_ids": t.chain_ids or [],
             "text": t.text,
         })
 
-    # put everything in FEATURE except first (HOOK) and last (CTA) if they look like CTA
+    # simple slotting: first clause -> HOOK, last clause -> CTA, middle -> FEATURE
     slots_block = {
         "HOOK": [],
         "PROBLEM": [],
@@ -377,31 +361,47 @@ def run_pipeline(
         "PROOF": [],
         "CTA": [],
     }
-    for i, t in enumerate(story):
-        slot_doc = {
-            "id": t.id,
-            "start": t.start,
-            "end": t.end,
-            "text": t.text,
-            "meta": {
-                "slot": "FEATURE",
-                "score": 2.0,
-                "chain_ids": t.chain_ids or [t.id],
-            },
-            "face_q": t.face_q,
-            "scene_q": t.scene_q,
-            "vtx_sim": t.vtx_sim,
+    if story:
+        slots_block["HOOK"].append({
+            "id": story[0].id,
+            "start": story[0].start,
+            "end": story[0].end,
+            "text": story[0].text,
+            "meta": {"slot": "HOOK", "score": 2.5, "chain_ids": story[0].chain_ids or []},
+            "face_q": story[0].face_q,
+            "scene_q": story[0].scene_q,
+            "vtx_sim": story[0].vtx_sim,
             "has_product": False,
             "ocr_hit": 0,
-        }
-        if i == 0:
-            slot_doc["meta"]["slot"] = "HOOK"
-            slots_block["HOOK"].append(slot_doc)
-        elif i == len(story) - 1 and "grab" in (t.text or "").lower():
-            slot_doc["meta"]["slot"] = "CTA"
-            slots_block["CTA"].append(slot_doc)
-        else:
-            slots_block["FEATURE"].append(slot_doc)
+        })
+    if len(story) >= 2:
+        for mid in story[1:-1]:
+            slots_block["FEATURE"].append({
+                "id": mid.id,
+                "start": mid.start,
+                "end": mid.end,
+                "text": mid.text,
+                "meta": {"slot": "FEATURE", "score": 2.0, "chain_ids": mid.chain_ids or []},
+                "face_q": mid.face_q,
+                "scene_q": mid.scene_q,
+                "vtx_sim": mid.vtx_sim,
+                "has_product": False,
+                "ocr_hit": 0,
+            })
+    if len(story) >= 2:
+        last = story[-1]
+        slots_block["CTA"].append({
+            "id": last.id,
+            "start": last.start,
+            "end": last.end,
+            "text": last.text,
+            "meta": {"slot": "CTA", "score": 2.0, "chain_ids": last.chain_ids or []},
+            "face_q": last.face_q,
+            "scene_q": last.scene_q,
+            "vtx_sim": last.vtx_sim,
+            "has_product": False,
+            "ocr_hit": 0,
+        })
 
     return {
         "ok": True,
@@ -416,4 +416,11 @@ def run_pipeline(
         "asr": True,
         "semantic": True,
         "vision": False,
+        "funnel_counts": {
+            "HOOK": 1,
+            "PROBLEM": 1,
+            "FEATURE": 99,  # let’s not cap hard here
+            "PROOF": 1,
+            "CTA": 1,
+        }
     }
