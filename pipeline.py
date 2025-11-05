@@ -32,7 +32,7 @@ MAX_DURATION_SEC = _env_float("MAX_DURATION_SEC", 120.0)
 MAX_TAKE_SEC     = _env_float("MAX_TAKE_SEC", 20.0)
 MIN_TAKE_SEC     = _env_float("MIN_TAKE_SEC", 2.0)
 
-# obvious bad speech markers
+# bad/restart markers
 BAD_PHRASES = [
     "wait",
     "hold on",
@@ -43,9 +43,8 @@ BAD_PHRASES = [
     "redo",
     "sorry",
 ]
-FILLERS = {"uh", "um", "like", "so", "okay"}
 
-# salesy tails we can trim from text we show
+# salesy tails
 CTA_FLUFF = [
     "click the link",
     "get yours today",
@@ -53,9 +52,11 @@ CTA_FLUFF = [
     "go ahead and grab",
     "i left it down below",
     "i left it for you down below",
+    "grab one of these",
+    "if you want to check them out",
 ]
 
-# phrases we saw were messy middles
+# messy mid-branches we saw
 UGLY_BRANCHES = [
     "but if you don't like the checker print",
     "but if you don't like the checker",
@@ -64,24 +65,12 @@ UGLY_BRANCHES = [
     "but if you",
 ]
 
-# feature-ish hints — we keep these even if they are mid-sentence
+# feature-ish hints
 FEATURE_HINTS = [
-    "pocket",
-    "pockets",
-    "zipper",
-    "strap",
-    "opening",
-    "inside",
-    "material",
-    "woven",
-    "quality",
-    "hardware",
-    "comes with",
-    "it has",
-    "it also has",
-    "it's actually",
-    "this isn't just",
-    "design",
+    "pocket", "pockets", "zipper", "strap", "opening", "inside",
+    "material", "woven", "quality", "hardware",
+    "comes with", "it has", "it also has",
+    "it's actually", "this isn't just", "design",
 ]
 
 # ================== MODEL ==================
@@ -162,7 +151,6 @@ def _export_concat(src: str, takes: List[Take]) -> str:
     for idx, t in enumerate(takes, start=1):
         part = _tmpfile(f".part{idx:02d}.mp4")
         parts.append(part)
-        # guard against bad times
         dur = max(0.05, t.dur)
         _run([
             FFMPEG_BIN, "-y",
@@ -192,10 +180,6 @@ def _export_concat(src: str, takes: List[Take]) -> str:
 # ================== ASR LOADING ==================
 
 def _load_asr_segments(src: str) -> Optional[List[Dict[str, Any]]]:
-    """
-    Try to call worker.asr.transcribe_segments(path) and return the list.
-    If it fails or returns the placeholder, return None so we can fallback.
-    """
     try:
         from worker.asr import transcribe_segments
     except Exception:
@@ -206,6 +190,7 @@ def _load_asr_segments(src: str) -> Optional[List[Dict[str, Any]]]:
         return None
     if not segs:
         return None
+    # placeholder guard
     if "temp placeholder" in (segs[0].get("text") or "").lower():
         return None
     return segs
@@ -218,7 +203,6 @@ def _segments_to_takes_asr(segs: List[Dict[str, Any]]) -> List[Take]:
             continue
         s = float(seg.get("start", 0.0))
         e = float(seg.get("end", s))
-        # clip very long segments to MAX_TAKE_SEC, but we will sub-split anyway
         if (e - s) > MAX_TAKE_SEC:
             e = s + MAX_TAKE_SEC
         if (e - s) >= MIN_TAKE_SEC:
@@ -228,9 +212,6 @@ def _segments_to_takes_asr(segs: List[Dict[str, Any]]) -> List[Take]:
 # ================== CLAUSE UTILITIES ==================
 
 def _split_into_clauses(text: str) -> List[str]:
-    """
-    Split a segment into smaller pieces: punctuation → then " but " / " and "
-    """
     if not text:
         return []
     text = " ".join(text.split())
@@ -258,7 +239,6 @@ def _split_into_clauses(text: str) -> List[str]:
             if piece:
                 clauses.append(piece)
 
-    # drop tiny ones
     clauses = [c for c in clauses if len(c.split()) >= 3]
     return clauses
 
@@ -266,15 +246,12 @@ def _clause_is_bad(c: str) -> bool:
     low = c.lower().strip()
     if not low:
         return True
-    # obvious restart / apology
     for p in BAD_PHRASES:
         if p in low:
             return True
-    # the messy middle we kept seeing
     for p in UGLY_BRANCHES:
         if p in low:
             return True
-    # ultra short
     if len(low.split()) < 3:
         return True
     return False
@@ -286,11 +263,17 @@ def _clause_is_featurey(c: str) -> bool:
             return True
     return False
 
+def _clause_is_ctaish(c: str) -> bool:
+    low = c.lower()
+    for p in CTA_FLUFF:
+        if p in low:
+            return True
+    # also many start with "if you want to"
+    if low.startswith("if you want to"):
+        return True
+    return False
+
 def _assign_times_to_clauses(seg_start: float, seg_end: float, clauses: List[str]) -> List[Tuple[float, float, str]]:
-    """
-    We don't have per-word timestamps, so approximate:
-    assign time slices proportional to text length.
-    """
     dur = max(0.05, seg_end - seg_start)
     joined = " ".join(clauses)
     total_len = max(1, len(joined))
@@ -299,228 +282,4 @@ def _assign_times_to_clauses(seg_start: float, seg_end: float, clauses: List[str
     for c in clauses:
         c_len = len(c)
         start_rel = cursor / total_len
-        end_rel = (cursor + c_len) / total_len
-        c_start = seg_start + start_rel * dur
-        c_end = seg_start + end_rel * dur
-        out.append((c_start, c_end, c.strip()))
-        cursor += c_len + 1  # +1 for space we removed
-    return out
-
-# ================== TEXT CLEANUP ==================
-
-def _trim_repeated_ngrams(txt: str, n: int = 4) -> str:
-    words = txt.split()
-    if len(words) <= n * 2:
-        return txt
-    seen = {}
-    for i in range(0, len(words) - n + 1):
-        key = " ".join(w.lower() for w in words[i:i+n])
-        if key in seen:
-            return " ".join(words[:i]).rstrip(" ,.;")
-        seen[key] = i
-    return txt
-
-def _trim_cta_fluff(txt: str) -> str:
-    low = txt.lower()
-    for p in CTA_FLUFF:
-        idx = low.find(p)
-        if idx != -1:
-            return txt[:idx].rstrip(" ,.;")
-    return txt
-
-def _clean_text(txt: str) -> str:
-    txt = _trim_repeated_ngrams(txt, n=4)
-    txt = _trim_cta_fluff(txt)
-    return txt.strip()
-
-# ================== FALLBACK ==================
-
-def _time_based_takes(vid_dur: float) -> List[Take]:
-    takes: List[Take] = []
-    t = 0.0
-    idx = 1
-    while t < vid_dur:
-        end = min(t + MAX_TAKE_SEC, vid_dur)
-        if (end - t) >= MIN_TAKE_SEC:
-            takes.append(
-                Take(
-                    id=f"SEG{idx:04d}",
-                    start=t,
-                    end=end,
-                    text=f"Auto segment {idx} ({t:.1f}s–{end:.1f}s)",
-                )
-            )
-            idx += 1
-        t = end
-    return takes
-
-# ================== PUBLIC ENTRY ==================
-
-def run_pipeline(
-    *,
-    session_id: str,
-    file_urls: List[str],
-    portrait: bool,
-    funnel_counts,
-    max_duration: float,
-    s3_prefix: Optional[str] = None,
-    **kwargs,
-) -> Dict[str, Any]:
-    if not file_urls:
-        return {"ok": False, "error": "no input files"}
-
-    src = _download_to_tmp(file_urls[0])
-    real_dur = _ffprobe_duration(src)
-    cap = float(max_duration or MAX_DURATION_SEC)
-    if real_dur > 0:
-        cap = min(cap, real_dur)
-
-    segs = _load_asr_segments(src)
-    if segs is not None:
-        # 1) ASR → takes
-        seg_takes = _segments_to_takes_asr(segs)
-
-        # 2) for each ASR take, go to clause level
-        clause_takes: List[Take] = []
-        for seg_take in seg_takes:
-            clauses = _split_into_clauses(seg_take.text)
-            if not clauses:
-                continue
-
-            # filter clauses
-            good_clauses: List[str] = []
-            for c in clauses:
-                if _clause_is_bad(c):
-                    # but keep feature-ish ones
-                    if _clause_is_featurey(c):
-                        good_clauses.append(c)
-                    continue
-                good_clauses.append(c)
-
-            if not good_clauses:
-                continue
-
-            # map clauses to sub-times
-            timed = _assign_times_to_clauses(seg_take.start, seg_take.end, good_clauses)
-            for idx, (cs, ce, ctext) in enumerate(timed, start=1):
-                ctext = _clean_text(ctext)
-                dur = ce - cs
-                if dur < 0.05:
-                    continue
-                clause_takes.append(
-                    Take(
-                        id=f"{seg_take.id}_c{idx}",
-                        start=cs,
-                        end=ce,
-                        text=ctext,
-                    )
-                )
-
-        # 3) cap by duration
-        clause_takes = sorted(clause_takes, key=lambda x: x.start)
-        story: List[Take] = []
-        total_dur = 0.0
-        for t in clause_takes:
-            if total_dur + t.dur > cap:
-                break
-            story.append(t)
-            total_dur += t.dur
-
-        used_asr = True
-    else:
-        # fallback
-        story = _time_based_takes(cap)
-        used_asr = False
-
-    # 4) export video from tiny takes
-    final_path = _export_concat(src, story)
-    up = _upload_to_s3(final_path, s3_prefix=s3_prefix)
-
-    def _trim(txt: str, n: int = 220) -> str:
-        return txt if len(txt) <= n else txt[:n].rstrip() + "..."
-
-    # ---------- clips ----------
-    clips = [
-        {
-            "id": t.id,
-            "slot": "STORY",
-            "start": t.start,
-            "end": t.end,
-            "score": 2.5,
-            "face_q": 1.0,
-            "scene_q": 1.0,
-            "vtx_sim": 0.0,
-            "chain_ids": [t.id],
-            "text": _trim(t.text),
-        }
-        for t in story
-    ]
-
-    # ---------- slots ----------
-    slots: Dict[str, List[Dict[str, Any]]] = {
-        "HOOK": [],
-        "PROBLEM": [],
-        "FEATURE": [],
-        "PROOF": [],
-        "CTA": [],
-    }
-
-    if story:
-        first = story[0]
-        slots["HOOK"].append({
-            "id": first.id,
-            "start": first.start,
-            "end": first.end,
-            "text": _trim(first.text),
-            "meta": {"slot": "HOOK", "score": 2.5, "chain_ids": [first.id]},
-            "face_q": 1.0,
-            "scene_q": 1.0,
-            "vtx_sim": 0.0,
-            "has_product": False,
-            "ocr_hit": 0,
-        })
-
-    if len(story) > 2:
-        for mid in story[1:-1]:
-            slots["FEATURE"].append({
-                "id": mid.id,
-                "start": mid.start,
-                "end": mid.end,
-                "text": _trim(mid.text),
-                "meta": {"slot": "FEATURE", "score": 2.0, "chain_ids": [mid.id]},
-                "face_q": 1.0,
-                "scene_q": 1.0,
-                "vtx_sim": 0.0,
-                "has_product": False,
-                "ocr_hit": 0,
-            })
-
-    if len(story) >= 2:
-        last = story[-1]
-        slots["CTA"].append({
-            "id": last.id,
-            "start": last.start,
-            "end": last.end,
-            "text": _trim(last.text),
-            "meta": {"slot": "CTA", "score": 2.0, "chain_ids": [last.id]},
-            "face_q": 1.0,
-            "scene_q": 1.0,
-            "vtx_sim": 0.0,
-            "has_product": False,
-            "ocr_hit": 0,
-        })
-
-    return {
-        "ok": True,
-        "session_id": session_id,
-        "input_local": src,
-        "duration_sec": _ffprobe_duration(final_path),
-        "s3_key": up["s3_key"],
-        "s3_url": up["s3_url"],
-        "https_url": up["https_url"],
-        "clips": clips,
-        "slots": slots,
-        "asr": used_asr,
-        "semantic": used_asr,
-        "vision": False,
-    }
+        end_rel = (cursor +_
