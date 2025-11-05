@@ -57,7 +57,7 @@ CTA_FLUFF = [
     "i left it for you down below",
 ]
 
-# really bad endings → these are the ones that were causing your “but if you…” line
+# really bad endings → the chopped half-sentences
 REALLY_INCOMPLETE_ENDINGS = [
     "but if you do",
     "but if you don't",
@@ -172,7 +172,6 @@ def _export_concat(src: str, takes: List[Take]) -> str:
 # ================== ASR LOADING ==================
 
 def _load_asr_segments(src: str) -> Optional[List[Dict[str, Any]]]:
-    # this lets us run even if worker.asr doesn’t import
     try:
         from worker.asr import transcribe_segments
     except Exception:
@@ -184,7 +183,6 @@ def _load_asr_segments(src: str) -> Optional[List[Dict[str, Any]]]:
     if not segs:
         return None
     if "temp placeholder" in (segs[0].get("text") or "").lower():
-        # means ASR is stubbed
         return None
     return segs
 
@@ -196,7 +194,7 @@ def _segments_to_takes_asr(segs: List[Dict[str, Any]]) -> List[Take]:
             continue
         s = float(seg.get("start", 0.0))
         e = float(seg.get("end", s))
-        # split long segments into <= MAX_TAKE_SEC
+        # split very long into <= MAX_TAKE_SEC
         while (e - s) > MAX_TAKE_SEC:
             takes.append(Take(id=f"ASR{i:04d}_{len(takes)+1:02d}", start=s, end=s + MAX_TAKE_SEC, text=txt))
             s += MAX_TAKE_SEC
@@ -283,26 +281,36 @@ def _trim_cta_fluff(txt: str) -> str:
     return txt
 
 def _looks_really_incomplete_middle(idx: int, total: int, txt: str) -> bool:
-    """
-    Softer rule:
-    - ONLY drop if it's a middle segment
-    - AND it ends with those bad endings (“but if you…”, “but…”)
-    - we do NOT drop just because there's no period
-    """
+    # only drop middle segments that end with those bad endings
     if idx == 0 or idx == total - 1:
         return False
     low = txt.lower().strip()
     for bad in REALLY_INCOMPLETE_ENDINGS:
-        if low.endswith(bad):
-            # drop only if it’s clearly short → real cut-off
-            if len(low) < 60:
-                return True
+        if low.endswith(bad) and len(low) < 60:
+            return True
+    return False
+
+def _is_bad_branchy_line(txt: str) -> bool:
+    """
+    This is the special killer for your bag video line:
+    - starts with "but if you"
+    - or contains "but if you" 2+ times
+    - or matches the checker-print style
+    """
+    low = txt.lower().strip()
+    if low.startswith("but if you"):
+        return True
+    count = low.count("but if you")
+    if count >= 2:
+        return True
+    # specifically nuke the "don't like the checker print" version
+    if "don't like the checker print" in low:
+        return True
     return False
 
 def _clean_take_text(txt: str) -> str:
     txt = _trim_repeated_ngrams(txt, n=4)
     txt = _trim_cta_fluff(txt)
-    # we keep original punctuation style so client sees real words
     return txt.strip()
 
 # ================== FALLBACK ==================
@@ -349,29 +357,26 @@ def run_pipeline(
 
     segs = _load_asr_segments(src)
     if segs is not None:
-        # ASR path
         takes = _segments_to_takes_asr(segs)
-        # drop obvious bad
         takes = [t for t in takes if not _is_retry_or_trash(t.text)]
-        # dedupe same wording
         takes = _dedupe_takes(takes)
-        # merge close
         takes = _merge_adjacent(takes)
 
-        # clean text
         cleaned: List[Take] = []
         for t in takes:
             cleaned.append(Take(id=t.id, start=t.start, end=t.end, text=_clean_take_text(t.text)))
 
-        # drop ONLY clearly chopped-off middles
         final_takes: List[Take] = []
         total = len(cleaned)
         for idx, t in enumerate(cleaned):
+            # drop chopped-off middles
             if _looks_really_incomplete_middle(idx, total, t.text):
+                continue
+            # drop our ugly “but if you / checker print” rambles
+            if _is_bad_branchy_line(t.text):
                 continue
             final_takes.append(t)
 
-        # cap by duration but otherwise keep them all → "unlimited features"
         story: List[Take] = []
         total_dur = 0.0
         for t in final_takes:
@@ -382,11 +387,9 @@ def run_pipeline(
 
         used_asr = True
     else:
-        # fallback (no real ASR)
         story = _time_based_takes(cap)
         used_asr = False
 
-    # export video
     final_path = _export_concat(src, story)
     up = _upload_to_s3(final_path, s3_prefix=s3_prefix)
 
@@ -434,7 +437,6 @@ def run_pipeline(
             "ocr_hit": 0,
         })
 
-    # every middle segment becomes a FEATURE
     if len(story) > 2:
         for mid in story[1:-1]:
             slots["FEATURE"].append({
@@ -450,7 +452,6 @@ def run_pipeline(
                 "ocr_hit": 0,
             })
 
-    # last one is CTA so your app always has an ending
     if len(story) >= 2:
         last = story[-1]
         slots["CTA"].append({
