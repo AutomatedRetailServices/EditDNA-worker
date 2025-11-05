@@ -282,4 +282,223 @@ def _assign_times_to_clauses(seg_start: float, seg_end: float, clauses: List[str
     for c in clauses:
         c_len = len(c)
         start_rel = cursor / total_len
-        end_rel = (cursor +_
+        end_rel = (cursor + c_len) / total_len
+        c_start = seg_start + start_rel * dur
+        c_end = seg_start + end_rel * dur
+        out.append((c_start, c_end, c.strip()))
+        cursor += c_len + 1
+    return out
+
+# ================== TEXT CLEANUP ==================
+
+def _trim_repeated_ngrams(txt: str, n: int = 4) -> str:
+    words = txt.split()
+    if len(words) <= n * 2:
+        return txt
+    seen = {}
+    for i in range(0, len(words) - n + 1):
+        key = " ".join(w.lower() for w in words[i:i+n])
+        if key in seen:
+            return " ".join(words[:i]).rstrip(" ,.;")
+        seen[key] = i
+    return txt
+
+def _trim_cta_fluff(txt: str) -> str:
+    low = txt.lower()
+    for p in CTA_FLUFF:
+        idx = low.find(p)
+        if idx != -1:
+            return txt[:idx].rstrip(" ,.;")
+    return txt
+
+def _clean_text(txt: str) -> str:
+    txt = _trim_repeated_ngrams(txt, n=4)
+    txt = _trim_cta_fluff(txt)
+    return txt.strip()
+
+# ================== FALLBACK ==================
+
+def _time_based_takes(vid_dur: float) -> List[Take]:
+    takes: List[Take] = []
+    t = 0.0
+    idx = 1
+    while t < vid_dur:
+        end = min(t + MAX_TAKE_SEC, vid_dur)
+        if (end - t) >= MIN_TAKE_SEC:
+            takes.append(
+                Take(
+                    id=f"SEG{idx:04d}",
+                    start=t,
+                    end=end,
+                    text=f"Auto segment {idx} ({t:.1f}s–{end:.1f}s)",
+                )
+            )
+            idx += 1
+        t = end
+    return takes
+
+# ================== PUBLIC ENTRY ==================
+
+def run_pipeline(
+    *,
+    session_id: str,
+    file_urls: List[str],
+    portrait: bool,
+    funnel_counts,
+    max_duration: float,
+    s3_prefix: Optional[str] = None,
+    **kwargs,
+) -> Dict[str, Any]:
+    if not file_urls:
+        return {"ok": False, "error": "no input files"}
+
+    src = _download_to_tmp(file_urls[0])
+    real_dur = _ffprobe_duration(src)
+    cap = float(max_duration or MAX_DURATION_SEC)
+    if real_dur > 0:
+        cap = min(cap, real_dur)
+
+    segs = _load_asr_segments(src)
+    if segs is not None:
+        seg_takes = _segments_to_takes_asr(segs)
+
+        clause_takes: List[Take] = []
+        last_seg_id = seg_takes[-1].id if seg_takes else None
+
+        for seg_take in seg_takes:
+            clauses = _split_into_clauses(seg_take.text)
+            if not clauses:
+                continue
+
+            good_clauses: List[str] = []
+            for c in clauses:
+                is_cta = _clause_is_ctaish(c)
+                if _clause_is_bad(c) and not _clause_is_featurey(c):
+                    # drop true bad stuff
+                    continue
+                # drop CTA if it's not in the last ASR segment
+                if is_cta and seg_take.id != last_seg_id:
+                    continue
+                good_clauses.append(c)
+
+            if not good_clauses:
+                continue
+
+            timed = _assign_times_to_clauses(seg_take.start, seg_take.end, good_clauses)
+            for idx, (cs, ce, ctext) in enumerate(timed, start=1):
+                ctext = _clean_text(ctext)
+                dur = ce - cs
+                if dur < 0.05:
+                    continue
+                clause_takes.append(
+                    Take(
+                        id=f"{seg_take.id}_c{idx}",
+                        start=cs,
+                        end=ce,
+                        text=ctext,
+                    )
+                )
+
+        clause_takes = sorted(clause_takes, key=lambda x: x.start)
+        story: List[Take] = []
+        total_dur = 0.0
+        for t in clause_takes:
+            if total_dur + t.dur > cap:
+                break
+            story.append(t)
+            total_dur += t.dur
+
+        used_asr = True
+    else:
+        story = _time_based_takes(cap)
+        used_asr = False
+
+    final_path = _export_concat(src, story)
+    up = _upload_to_s3(final_path, s3_prefix=s3_prefix)
+
+    def _trim(txt: str, n: int = 220) -> str:
+        return txt if len(txt) <= n else txt[:n].rstrip() + "..."
+
+    clips = [
+        {
+            "id": t.id,
+            "slot": "STORY",
+            "start": t.start,
+            "end": t.end,
+            "score": 2.5,
+            "face_q": 1.0,
+            "scene_q": 1.0,
+            "vtx_sim": 0.0,
+            "chain_ids": [t.id],
+            "text": _trim(t.text),
+        }
+        for t in story
+    ]
+
+    slots: Dict[str, List[Dict[str, Any]]] = {
+        "HOOK": [],
+        "PROBLEM": [],
+        "FEATURE": [],
+        "PROOF": [],
+        "CTA": [],
+    }
+
+    if story:
+        first = story[0]
+        slots["HOOK"].append({
+            "id": first.id,
+            "start": first.start,
+            "end": first.end,
+            "text": _trim(first.text),
+            "meta": {"slot": "HOOK", "score": 2.5, "chain_ids": [first.id]},
+            "face_q": 1.0,
+            "scene_q": 1.0,
+            "vtx_sim": 0.0,
+            "has_product": False,
+            "ocr_hit": 0,
+        })
+
+    if len(story) > 2:
+        for mid in story[1:-1]:
+            slots["FEATURE"].append({
+                "id": mid.id,
+                "start": mid.start,
+                "end": mid.end,
+                "text": _trim(mid.text),
+                "meta": {"slot": "FEATURE", "score": 2.0, "chain_ids": [mid.id]},
+                "face_q": 1.0,
+                "scene_q": 1.0,
+                "vtx_sim": 0.0,
+                "has_product": False,
+                "ocr_hit": 0,
+            })
+
+    if len(story) >= 2:
+        last = story[-1]
+        slots["CTA"].append({
+            "id": last.id,
+            "start": last.start,
+            "end": last.end,
+            "text": _trim(last.text),
+            "meta": {"slot": "CTA", "score": 2.0, "chain_ids": [last.id]},
+            "face_q": 1.0,
+            "scene_q": 1.0,
+            "vtx_sim": 0.0,
+            "has_product": False,
+            "ocr_hit": 0,
+        })
+
+    return {
+        "ok": True,
+        "session_id": session_id,
+        "input_local": src,
+        "duration_sec": _ffprobe_duration(final_path),
+        "s3_key": up["s3_key"],
+        "s3_url": up["s3_url"],
+        "https_url": up["https_url"],
+        "clips": clips,
+        "slots": slots,
+        "asr": used_asr,
+        "semantic": used_asr,
+        "vision": False,
+    }
