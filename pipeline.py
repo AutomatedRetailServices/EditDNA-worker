@@ -32,7 +32,7 @@ MAX_DURATION_SEC = _env_float("MAX_DURATION_SEC", 120.0)
 MAX_TAKE_SEC     = _env_float("MAX_TAKE_SEC", 20.0)
 MIN_TAKE_SEC     = _env_float("MIN_TAKE_SEC", 2.0)
 
-# bad/restart markers
+# phrases to kill
 BAD_PHRASES = [
     "wait",
     "hold on",
@@ -44,7 +44,6 @@ BAD_PHRASES = [
     "sorry",
 ]
 
-# salesy tails
 CTA_FLUFF = [
     "click the link",
     "get yours today",
@@ -56,7 +55,6 @@ CTA_FLUFF = [
     "if you want to check them out",
 ]
 
-# messy mid-branches we saw
 UGLY_BRANCHES = [
     "but if you don't like the checker print",
     "but if you don't like the checker",
@@ -65,13 +63,13 @@ UGLY_BRANCHES = [
     "but if you",
 ]
 
-# feature-ish hints
 FEATURE_HINTS = [
     "pocket", "pockets", "zipper", "strap", "opening", "inside",
     "material", "woven", "quality", "hardware",
     "comes with", "it has", "it also has",
     "it's actually", "this isn't just", "design",
 ]
+
 
 # ================== MODEL ==================
 
@@ -85,6 +83,7 @@ class Take:
     @property
     def dur(self) -> float:
         return self.end - self.start
+
 
 # ================== SHELL HELPERS ==================
 
@@ -120,6 +119,7 @@ def _ffprobe_duration(path: str) -> float:
     except Exception:
         return 0.0
 
+
 # ================== S3 ==================
 
 def _upload_to_s3(local_path: str, s3_prefix: Optional[str] = None) -> Dict[str, str]:
@@ -140,6 +140,7 @@ def _upload_to_s3(local_path: str, s3_prefix: Optional[str] = None) -> Dict[str,
         "s3_url": f"s3://{S3_BUCKET}/{key}",
         "https_url": f"https://{S3_BUCKET}.s3.{AWS_REGION}.amazonaws.com/{key}",
     }
+
 
 # ================== EXPORT ==================
 
@@ -177,6 +178,7 @@ def _export_concat(src: str, takes: List[Take]) -> str:
     ])
     return final
 
+
 # ================== ASR LOADING ==================
 
 def _load_asr_segments(src: str) -> Optional[List[Dict[str, Any]]]:
@@ -190,7 +192,6 @@ def _load_asr_segments(src: str) -> Optional[List[Dict[str, Any]]]:
         return None
     if not segs:
         return None
-    # placeholder guard
     if "temp placeholder" in (segs[0].get("text") or "").lower():
         return None
     return segs
@@ -208,6 +209,7 @@ def _segments_to_takes_asr(segs: List[Dict[str, Any]]) -> List[Take]:
         if (e - s) >= MIN_TAKE_SEC:
             takes.append(Take(id=f"ASR{i:04d}", start=s, end=e, text=txt))
     return takes
+
 
 # ================== CLAUSE UTILITIES ==================
 
@@ -268,7 +270,6 @@ def _clause_is_ctaish(c: str) -> bool:
     for p in CTA_FLUFF:
         if p in low:
             return True
-    # also many start with "if you want to"
     if low.startswith("if you want to"):
         return True
     return False
@@ -288,6 +289,7 @@ def _assign_times_to_clauses(seg_start: float, seg_end: float, clauses: List[str
         out.append((c_start, c_end, c.strip()))
         cursor += c_len + 1
     return out
+
 
 # ================== TEXT CLEANUP ==================
 
@@ -316,6 +318,7 @@ def _clean_text(txt: str) -> str:
     txt = _trim_cta_fluff(txt)
     return txt.strip()
 
+
 # ================== FALLBACK ==================
 
 def _time_based_takes(vid_dur: float) -> List[Take]:
@@ -336,6 +339,7 @@ def _time_based_takes(vid_dur: float) -> List[Take]:
             idx += 1
         t = end
     return takes
+
 
 # ================== PUBLIC ENTRY ==================
 
@@ -374,9 +378,7 @@ def run_pipeline(
             for c in clauses:
                 is_cta = _clause_is_ctaish(c)
                 if _clause_is_bad(c) and not _clause_is_featurey(c):
-                    # drop true bad stuff
                     continue
-                # drop CTA if it's not in the last ASR segment
                 if is_cta and seg_take.id != last_seg_id:
                     continue
                 good_clauses.append(c)
@@ -387,6 +389,9 @@ def run_pipeline(
             timed = _assign_times_to_clauses(seg_take.start, seg_take.end, good_clauses)
             for idx, (cs, ce, ctext) in enumerate(timed, start=1):
                 ctext = _clean_text(ctext)
+                # *** new: drop empty clauses ***
+                if not ctext:
+                    continue
                 dur = ce - cs
                 if dur < 0.05:
                     continue
@@ -502,3 +507,4 @@ def run_pipeline(
         "semantic": used_asr,
         "vision": False,
     }
+
