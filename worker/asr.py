@@ -1,99 +1,94 @@
 """
 worker/asr.py
+Simple ASR wrapper around faster-whisper so pipeline.py can call:
 
-ASR stack for EditDNA worker.
+    from worker import asr
+    result = asr.transcribe("/tmp/video.mp4")
 
-Plan:
-1. Try GPU faster-whisper (we're on CUDA 12.4 + cuDNN 9 image now)
-2. If that fails, try CPU faster-whisper
-3. If THAT fails, return a safe placeholder so RQ never crashes
+and get back { "segments": [ { "start":..., "end":..., "text":... }, ... ] }
 """
 
 from __future__ import annotations
 from typing import List, Dict, Any
 import os
+import tempfile
+import subprocess
+
+from faster_whisper import WhisperModel
 
 
-def _placeholder(path: str) -> List[Dict[str, Any]]:
-    # keeps the pipeline alive even if ASR is totally broken
-    return [
-        {
-            "start": 0.0,
-            "end": 10.0,
-            "text": "TEMP PLACEHOLDER: ASR fallback.",
-        }
+# you can tweak these
+_MODEL_NAME = os.getenv("ASR_MODEL", "medium")   # or "small", "base", etc.
+_COMPUTE_TYPE = os.getenv("ASR_COMPUTE_TYPE", "auto")  # "auto", "float16", "int8"
+
+
+# load once
+_model: WhisperModel | None = None
+
+
+def _get_model() -> WhisperModel:
+    global _model
+    if _model is None:
+        _model = WhisperModel(
+            _MODEL_NAME,
+            device="cuda" if os.path.exists("/dev/nvidia0") or os.path.exists("/dev/nvidiactl") else "cpu",
+            compute_type=_COMPUTE_TYPE,
+        )
+    return _model
+
+
+def _extract_audio(input_video: str) -> str:
+    """
+    If faster-whisper can read the video directly you can skip this, but
+    this makes it explicit: we turn video -> wav
+    """
+    fd, tmp_wav = tempfile.mkstemp(suffix=".wav")
+    os.close(fd)
+
+    cmd = [
+        "ffmpeg",
+        "-y",
+        "-i", input_video,
+        "-ac", "1",
+        "-ar", "16000",
+        "-f", "wav",
+        tmp_wav,
     ]
+    subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    return tmp_wav
 
 
-def _gpu_asr(path: str) -> List[Dict[str, Any]]:
-    from faster_whisper import WhisperModel
+def transcribe(video_path: str) -> Dict[str, Any]:
+    """
+    Main entrypoint the rest of the pipeline expects.
+    Returns:
+    {
+      "segments": [
+        {"start": float, "end": float, "text": str},
+        ...
+      ]
+    }
+    """
+    model = _get_model()
 
-    model_name = os.getenv("ASR_MODEL", "small")
-    # we are on a CUDA 12.4 + cuDNN 9 image, so we can use device="cuda"
-    model = WhisperModel(model_name, device="cuda", compute_type="float16")
+    # you can let faster-whisper read video directly, but this is safer
+    audio_path = _extract_audio(video_path)
 
-    out: List[Dict[str, Any]] = []
-    segments, _info = model.transcribe(path, beam_size=5)
+    segments_out: List[Dict[str, Any]] = []
+    # note: adjust language / task if you want
+    segments, info = model.transcribe(audio_path, beam_size=5)
+
     for seg in segments:
-        out.append(
+        segments_out.append(
             {
                 "start": float(seg.start),
                 "end": float(seg.end),
                 "text": seg.text.strip(),
             }
         )
-    return out
 
-
-def _cpu_asr(path: str) -> List[Dict[str, Any]]:
-    from faster_whisper import WhisperModel
-
-    model_name = os.getenv("ASR_MODEL", "small")
-    # CPU path, slower but doesn't need GPU libs
-    model = WhisperModel(model_name, device="cpu", compute_type="int8")
-
-    out: List[Dict[str, Any]] = []
-    segments, _info = model.transcribe(path, beam_size=5)
-    for seg in segments:
-        out.append(
-            {
-                "start": float(seg.start),
-                "end": float(seg.end),
-                "text": seg.text.strip(),
-            }
-        )
-    return out
-
-
-def transcribe_segments(path: str) -> List[Dict[str, Any]]:
-    """
-    Public entry the pipeline calls.
-
-    Env knobs:
-      ASR_BACKEND=gpu|cpu|auto (default: auto)
-      ASR_MODEL=small|medium|large-v2 ...
-    """
-    backend = os.getenv("ASR_BACKEND", "auto").lower()
-
-    # explicit GPU
-    if backend == "gpu":
-        try:
-            return _gpu_asr(path)
-        except Exception:
-            return _placeholder(path)
-
-    # explicit CPU
-    if backend == "cpu":
-        try:
-            return _cpu_asr(path)
-        except Exception:
-            return _placeholder(path)
-
-    # auto → try GPU first, then CPU
-    try:
-        return _gpu_asr(path)
-    except Exception:
-        try:
-            return _cpu_asr(path)
-        except Exception:
-            return _placeholder(path)
+    return {
+        "segments": segments_out,
+        "duration": getattr(info, "duration", None),
+        "language": getattr(info, "language", None),
+    }
