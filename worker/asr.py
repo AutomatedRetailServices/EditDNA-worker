@@ -1,94 +1,61 @@
-"""
-worker/asr.py
-Simple ASR wrapper around faster-whisper so pipeline.py can call:
-
-    from worker import asr
-    result = asr.transcribe("/tmp/video.mp4")
-
-and get back { "segments": [ { "start":..., "end":..., "text":... }, ... ] }
-"""
-
+# /workspace/EditDNA-worker/worker/asr.py
 from __future__ import annotations
-from typing import List, Dict, Any
 import os
-import tempfile
-import subprocess
-
+from typing import Dict, Any, List
 from faster_whisper import WhisperModel
 
+# you can change these with env vars
+_MODEL_NAME = os.getenv("ASR_MODEL", "small")
+_COMPUTE_TYPE = os.getenv("ASR_COMPUTE_TYPE", "auto")
 
-# you can tweak these
-_MODEL_NAME = os.getenv("ASR_MODEL", "medium")   # or "small", "base", etc.
-_COMPUTE_TYPE = os.getenv("ASR_COMPUTE_TYPE", "auto")  # "auto", "float16", "int8"
-
-
-# load once
-_model: WhisperModel | None = None
+_model = None
 
 
 def _get_model() -> WhisperModel:
     global _model
-    if _model is None:
-        _model = WhisperModel(
-            _MODEL_NAME,
-            device="cuda" if os.path.exists("/dev/nvidia0") or os.path.exists("/dev/nvidiactl") else "cpu",
-            compute_type=_COMPUTE_TYPE,
-        )
+    if _model is not None:
+        return _model
+
+    device = "cuda" if os.getenv("CUDA_VISIBLE_DEVICES", "") else "cpu"
+    _model = WhisperModel(
+        _MODEL_NAME,
+        device=device,
+        compute_type=_COMPUTE_TYPE,
+    )
     return _model
 
 
-def _extract_audio(input_video: str) -> str:
+def transcribe(local_video_path: str) -> Dict[str, Any]:
     """
-    If faster-whisper can read the video directly you can skip this, but
-    this makes it explicit: we turn video -> wav
-    """
-    fd, tmp_wav = tempfile.mkstemp(suffix=".wav")
-    os.close(fd)
-
-    cmd = [
-        "ffmpeg",
-        "-y",
-        "-i", input_video,
-        "-ac", "1",
-        "-ar", "16000",
-        "-f", "wav",
-        tmp_wav,
-    ]
-    subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    return tmp_wav
-
-
-def transcribe(video_path: str) -> Dict[str, Any]:
-    """
-    Main entrypoint the rest of the pipeline expects.
-    Returns:
+    Standard shape the pipeline expects:
     {
+      "text": "... full transcript ...",
       "segments": [
-        {"start": float, "end": float, "text": str},
+        {"start": 0.0, "end": 2.5, "text": "first line"},
+        {"start": 2.5, "end": 5.0, "text": "second line"},
         ...
       ]
     }
     """
     model = _get_model()
 
-    # you can let faster-whisper read video directly, but this is safer
-    audio_path = _extract_audio(video_path)
+    seg_gen, info = model.transcribe(local_video_path)
 
-    segments_out: List[Dict[str, Any]] = []
-    # note: adjust language / task if you want
-    segments, info = model.transcribe(audio_path, beam_size=5)
+    segments: List[Dict[str, Any]] = []
+    full_text_parts: List[str] = []
 
-    for seg in segments:
-        segments_out.append(
+    for seg in seg_gen:
+        txt = (seg.text or "").strip()
+        full_text_parts.append(txt)
+        segments.append(
             {
                 "start": float(seg.start),
                 "end": float(seg.end),
-                "text": seg.text.strip(),
+                "text": txt,
             }
         )
 
     return {
-        "segments": segments_out,
-        "duration": getattr(info, "duration", None),
-        "language": getattr(info, "language", None),
+        "text": " ".join([p for p in full_text_parts if p]),
+        "segments": segments,
     }
