@@ -2,39 +2,24 @@
 tasks.py
 RQ worker entrypoints for EditDNA Worker.
 
-RQ will call tasks.job_render(payload)
-and we forward into our real pipeline logic below.
+We make this adaptive so it works even if pipeline.run_pipeline
+uses a slightly different arg name (files, file_urls, urls, etc).
 """
 
 from __future__ import annotations
 
-from typing import Any, Dict, List
+from typing import Any, Dict
 import os
-import sys
 import json
 import time
 import uuid
 import traceback
+import inspect
 
-# make sure Python can see the repo
-# /workspace is usually there, but we add it anyway
-sys.path.insert(0, "/workspace")
-# your repo lives here in the container
-sys.path.insert(0, "/workspace/EditDNA-worker")
-
-try:
-    import pipeline  # /workspace/EditDNA-worker/pipeline.py
-except Exception as e:
-    pipeline = None
-    print(f"[worker.tasks] ERROR: could not import pipeline: {e}", flush=True)
+import pipeline  # your /workspace/EditDNA-worker/pipeline.py
 
 
 def _get_funnel_counts() -> Dict[str, int]:
-    """
-    Read FUNNEL_COUNTS from env as JSON, or fall back to safe defaults.
-    Example env value:
-      FUNNEL_COUNTS='{"HOOK":1,"PROBLEM":1,"FEATURE":1,"PROOF":1,"CTA":1}'
-    """
     raw = os.getenv("FUNNEL_COUNTS")
     defaults: Dict[str, int] = {
         "HOOK": 1,
@@ -45,14 +30,12 @@ def _get_funnel_counts() -> Dict[str, int]:
     }
     if not raw:
         return defaults
-
     try:
         data = json.loads(raw)
         for k, v in data.items():
             try:
                 defaults[k] = int(v)
             except Exception:
-                # bad value → keep default
                 pass
         return defaults
     except Exception:
@@ -60,55 +43,66 @@ def _get_funnel_counts() -> Dict[str, int]:
 
 
 def job_render(payload: Dict[str, Any]) -> Dict[str, Any]:
-    """
-    This is the job RQ will run: tasks.job_render
-    """
     t0 = time.time()
 
     session_id = payload.get("session_id", f"session-{uuid.uuid4().hex[:8]}")
-
-    # your webhook sometimes sends "files": ["..."], sometimes people call it "file_urls"
-    file_urls: List[str] = payload.get("files") or payload.get("file_urls") or []
+    # what your web is sending:
+    payload_files = payload.get("files", [])  # <- we start from here
     portrait = bool(payload.get("portrait", True))
     max_duration = float(payload.get("max_duration", 120.0))
-
-    # accept both names, prefer the explicit s3_prefix
-    s3_prefix = (
-        payload.get("s3_prefix")
-        or payload.get("output_prefix")
-        or "editdna/outputs/"
-    )
+    s3_prefix = payload.get("output_prefix", "editdna/outputs/")
 
     print("[worker.tasks] job_render() start", flush=True)
     print(f"  session_id={session_id}", flush=True)
-    print(f"  file_urls={file_urls}", flush=True)
-    print(f"  portrait={portrait}", flush=True)
-    print(f"  max_duration={max_duration}", flush=True)
-    print(f"  s3_prefix={s3_prefix}", flush=True)
+    print(f"  incoming files={payload_files}", flush=True)
 
-    if not pipeline:
-        # pipeline couldn’t be imported at all
-        err = "pipeline module not importable (check PYTHONPATH or repo path)"
-        print(f"[worker.tasks] ERROR: {err}", flush=True)
+    # 1) find what the pipeline actually accepts
+    sig = inspect.signature(pipeline.run_pipeline)
+    params = sig.parameters.keys()
+
+    # common names we might need to map to
+    candidate_names = [
+        "files",
+        "file_urls",
+        "urls",
+        "inputs",
+        "input_urls",
+        "video_urls",
+    ]
+
+    chosen_name = None
+    for name in candidate_names:
+        if name in params:
+            chosen_name = name
+            break
+
+    # build kwargs with the names the pipeline really has
+    kwargs: Dict[str, Any] = {
+        "session_id": session_id,
+        "portrait": portrait,
+        "max_duration": max_duration,
+        "s3_prefix": s3_prefix,
+        "funnel_counts": _get_funnel_counts(),
+    }
+
+    if chosen_name:
+        kwargs[chosen_name] = payload_files
+    else:
+        # we couldn’t find any of the common names → tell the user exactly what we saw
         return {
             "ok": False,
-            "error": err,
+            "error": (
+                "pipeline.run_pipeline does not accept any of: "
+                "files, file_urls, urls, inputs, input_urls, video_urls. "
+                f"It has: {list(params)}"
+            ),
         }
 
     try:
-        result = pipeline.run_pipeline(
-            session_id=session_id,
-            file_urls=file_urls,
-            portrait=portrait,
-            max_duration=max_duration,
-            s3_prefix=s3_prefix,
-            funnel_counts=_get_funnel_counts(),
-        )
-
+        result = pipeline.run_pipeline(**kwargs)
         dt = time.time() - t0
         print(f"[worker.tasks] job_render() OK in {dt:.2f}s", flush=True)
         return result
-
     except Exception as e:
         print("[worker.tasks] ERROR in job_render()", flush=True)
         traceback.print_exc()
