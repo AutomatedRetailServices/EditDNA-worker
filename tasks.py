@@ -8,14 +8,25 @@ and we forward into our real pipeline logic below.
 
 from __future__ import annotations
 
-from typing import Any, Dict
+from typing import Any, Dict, List
 import os
+import sys
 import json
 import time
 import uuid
 import traceback
 
-import pipeline  # /workspace/pipeline.py
+# make sure Python can see the repo
+# /workspace is usually there, but we add it anyway
+sys.path.insert(0, "/workspace")
+# your repo lives here in the container
+sys.path.insert(0, "/workspace/EditDNA-worker")
+
+try:
+    import pipeline  # /workspace/EditDNA-worker/pipeline.py
+except Exception as e:
+    pipeline = None
+    print(f"[worker.tasks] ERROR: could not import pipeline: {e}", flush=True)
 
 
 def _get_funnel_counts() -> Dict[str, int]:
@@ -37,36 +48,36 @@ def _get_funnel_counts() -> Dict[str, int]:
 
     try:
         data = json.loads(raw)
-        # merge over defaults so missing keys don’t crash the pipeline
         for k, v in data.items():
             try:
                 defaults[k] = int(v)
             except Exception:
-                # ignore bad value, keep default
+                # bad value → keep default
                 pass
         return defaults
     except Exception:
-        # bad JSON in env → keep defaults
         return defaults
 
 
 def job_render(payload: Dict[str, Any]) -> Dict[str, Any]:
     """
     This is the job RQ will run: tasks.job_render
-    It:
-      - pulls args from the web payload
-      - calls pipeline.run_pipeline(...)
-      - returns whatever the pipeline returned
     """
     t0 = time.time()
 
-    # 1) pull inputs from payload
     session_id = payload.get("session_id", f"session-{uuid.uuid4().hex[:8]}")
-    file_urls = payload.get("files", [])
+
+    # your webhook sometimes sends "files": ["..."], sometimes people call it "file_urls"
+    file_urls: List[str] = payload.get("files") or payload.get("file_urls") or []
     portrait = bool(payload.get("portrait", True))
     max_duration = float(payload.get("max_duration", 120.0))
-    # you used output_prefix in your earlier payloads
-    s3_prefix = payload.get("output_prefix", "editdna/outputs/")
+
+    # accept both names, prefer the explicit s3_prefix
+    s3_prefix = (
+        payload.get("s3_prefix")
+        or payload.get("output_prefix")
+        or "editdna/outputs/"
+    )
 
     print("[worker.tasks] job_render() start", flush=True)
     print(f"  session_id={session_id}", flush=True)
@@ -75,24 +86,30 @@ def job_render(payload: Dict[str, Any]) -> Dict[str, Any]:
     print(f"  max_duration={max_duration}", flush=True)
     print(f"  s3_prefix={s3_prefix}", flush=True)
 
+    if not pipeline:
+        # pipeline couldn’t be imported at all
+        err = "pipeline module not importable (check PYTHONPATH or repo path)"
+        print(f"[worker.tasks] ERROR: {err}", flush=True)
+        return {
+            "ok": False,
+            "error": err,
+        }
+
     try:
-        # 2) run actual pipeline
         result = pipeline.run_pipeline(
             session_id=session_id,
             file_urls=file_urls,
             portrait=portrait,
             max_duration=max_duration,
             s3_prefix=s3_prefix,
-            funnel_counts=_get_funnel_counts(),  # ← this was missing in your logs
+            funnel_counts=_get_funnel_counts(),
         )
 
         dt = time.time() - t0
         print(f"[worker.tasks] job_render() OK in {dt:.2f}s", flush=True)
-        # 3) return pipeline JSON
         return result
 
     except Exception as e:
-        # on any error, give the API a JSON payload
         print("[worker.tasks] ERROR in job_render()", flush=True)
         traceback.print_exc()
         return {
