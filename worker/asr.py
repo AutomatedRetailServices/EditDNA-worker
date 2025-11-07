@@ -1,13 +1,22 @@
 # /workspace/EditDNA-worker/worker/asr.py
+
 from __future__ import annotations
 import os
-from typing import Dict, Any, List
+import tempfile
+from typing import List, Dict, Any
+
 from faster_whisper import WhisperModel
 
-# you can change these with env vars
-_MODEL_NAME = os.getenv("ASR_MODEL", "small")
-_COMPUTE_TYPE = os.getenv("ASR_COMPUTE_TYPE", "auto")
+# we use moviepy just to pull audio out of .mov/.mp4
+from moviepy.editor import VideoFileClip
 
+# ------------------------------------------------------------------
+# Config knobs (can be overridden by env)
+# ------------------------------------------------------------------
+_MODEL_NAME = os.getenv("ASR_MODEL", "medium")
+_COMPUTE_TYPE = os.getenv("ASR_COMPUTE_TYPE", "auto")  # e.g. "int8", "int8_float16", "auto"
+
+# we keep a global so we don’t reload the model every job
 _model = None
 
 
@@ -16,46 +25,70 @@ def _get_model() -> WhisperModel:
     if _model is not None:
         return _model
 
-    device = "cuda" if os.getenv("CUDA_VISIBLE_DEVICES", "") else "cpu"
+    print(f"[asr] loading Faster-Whisper model={_MODEL_NAME} compute_type={_COMPUTE_TYPE}", flush=True)
     _model = WhisperModel(
         _MODEL_NAME,
-        device=device,
+        device="cuda" if os.getenv("CUDA_VISIBLE_DEVICES") else "cpu",
         compute_type=_COMPUTE_TYPE,
     )
     return _model
 
 
-def transcribe(local_video_path: str) -> Dict[str, Any]:
+def _extract_audio(video_path: str) -> str:
     """
-    Standard shape the pipeline expects:
-    {
-      "text": "... full transcript ...",
-      "segments": [
-        {"start": 0.0, "end": 2.5, "text": "first line"},
-        {"start": 2.5, "end": 5.0, "text": "second line"},
-        ...
-      ]
-    }
+    Take a local video file, extract audio to a temp .wav, return path.
     """
+    tmp = tempfile.NamedTemporaryFile(suffix=".wav", delete=False)
+    tmp_audio_path = tmp.name
+    tmp.close()
+
+    clip = VideoFileClip(video_path)
+    clip.audio.write_audiofile(tmp_audio_path, verbose=False, logger=None)
+    clip.close()
+
+    return tmp_audio_path
+
+
+def transcribe(local_video_path: str) -> List[Dict[str, Any]]:
+    """
+    Main entry the pipeline calls:
+        asr.transcribe("/tmp/IMG_03.mov")
+
+    Returns list of segments:
+    [
+      {"text": "hello", "start": 0.0, "end": 2.3},
+      ...
+    ]
+    """
+    # 1) get model
     model = _get_model()
 
-    seg_gen, info = model.transcribe(local_video_path)
+    # 2) pull audio from video
+    audio_path = _extract_audio(local_video_path)
 
-    segments: List[Dict[str, Any]] = []
-    full_text_parts: List[str] = []
+    print(f"[asr] transcribing audio={audio_path}", flush=True)
 
-    for seg in seg_gen:
-        txt = (seg.text or "").strip()
-        full_text_parts.append(txt)
-        segments.append(
+    # 3) run ASR
+    segments, info = model.transcribe(
+        audio_path,
+        beam_size=1,
+        best_of=1,
+        vad_filter=True,
+    )
+
+    out: List[Dict[str, Any]] = []
+    for i, seg in enumerate(segments):
+        # seg is a faster-whisper Segment object
+        text = (seg.text or "").strip()
+        if not text:
+            continue
+        out.append(
             {
+                "text": text,
                 "start": float(seg.start),
                 "end": float(seg.end),
-                "text": txt,
             }
         )
 
-    return {
-        "text": " ".join([p for p in full_text_parts if p]),
-        "segments": segments,
-    }
+    print(f"[asr] got {len(out)} segments", flush=True)
+    return out
