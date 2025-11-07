@@ -11,11 +11,23 @@ from faster_whisper import WhisperModel
 # ------------------------------------------------------------------
 # Config knobs (overridable via env)
 # ------------------------------------------------------------------
+# medium is fine for your 4500/A5000, but we’ll guard for CPU
 _MODEL_NAME = os.getenv("ASR_MODEL", "medium")
-_COMPUTE_TYPE = os.getenv("ASR_COMPUTE_TYPE", "auto")  # e.g. "int8", "int8_float16", "auto"
+_COMPUTE_TYPE_ENV = os.getenv("ASR_COMPUTE_TYPE", "auto")  # what you asked for in env
 
 # keep one global model so we don’t reload every job
 _model: Optional[WhisperModel] = None
+
+
+def _pick_compute_type(device: str) -> str:
+    """
+    If user asked for float16 but we're on CPU, fall back to int8.
+    """
+    ct = _COMPUTE_TYPE_ENV
+    if device == "cpu" and ct.lower() in ("float16", "float32", "fp16"):
+        print("[asr] requested float16 on CPU → falling back to int8", flush=True)
+        return "int8"
+    return ct
 
 
 def _get_model() -> WhisperModel:
@@ -27,12 +39,17 @@ def _get_model() -> WhisperModel:
         return _model
 
     device = "cuda" if os.getenv("CUDA_VISIBLE_DEVICES") else "cpu"
-    print(f"[asr] loading Faster-Whisper model={_MODEL_NAME} device={device} compute_type={_COMPUTE_TYPE}", flush=True)
+    compute_type = _pick_compute_type(device)
+
+    print(
+        f"[asr] loading Faster-Whisper model={_MODEL_NAME} device={device} compute_type={compute_type}",
+        flush=True,
+    )
 
     _model = WhisperModel(
         _MODEL_NAME,
         device=device,
-        compute_type=_COMPUTE_TYPE,
+        compute_type=compute_type,
     )
     return _model
 
@@ -128,9 +145,3 @@ def transcribe(local_video_path: str) -> List[Dict[str, Any]]:
 
 # ------------------------------------------------------------------
 # backward-compat name used by your pipeline
-# ------------------------------------------------------------------
-def transcribe_local(path: str):
-    """
-    Wrapper so pipeline.run_pipeline(...) can call asr.transcribe_local(...)
-    """
-    return transcribe(path)
