@@ -58,7 +58,6 @@ def _extract_audio_with_moviepy(video_path: str) -> str:
 def _extract_audio_with_ffmpeg(video_path: str) -> str:
     """
     Fallback if moviepy is missing: use ffmpeg CLI.
-    Assumes ffmpeg is installed in the container.
     """
     tmp = tempfile.NamedTemporaryFile(suffix=".wav", delete=False)
     tmp_audio_path = tmp.name
@@ -69,13 +68,10 @@ def _extract_audio_with_ffmpeg(video_path: str) -> str:
         "-y",
         "-i",
         video_path,
-        "-vn",             # no video
-        "-acodec",
-        "pcm_s16le",       # wav
-        "-ar",
-        "16000",           # 16 kHz is fine for ASR
-        "-ac",
-        "1",
+        "-vn",
+        "-acodec", "pcm_s16le",
+        "-ar", "16000",
+        "-ac", "1",
         tmp_audio_path,
     ]
     subprocess.check_call(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
@@ -97,12 +93,6 @@ def transcribe(local_video_path: str) -> List[Dict[str, Any]]:
     """
     Main entry the pipeline calls:
         segments = asr.transcribe("/tmp/IMG_03.mov")
-
-    Returns:
-        [
-          {"text": "hello", "start": 0.0, "end": 2.3},
-          ...
-        ]
     """
     # 1) load model
     model = _get_model()
@@ -134,3 +124,13 @@ def transcribe(local_video_path: str) -> List[Dict[str, Any]]:
 
     print(f"[asr] got {len(out)} segments", flush=True)
     return out
+
+
+# ------------------------------------------------------------------
+# backward-compat name used by your pipeline
+# ------------------------------------------------------------------
+def transcribe_local(path: str):
+    """
+    Wrapper so pipeline.run_pipeline(...) can call asr.transcribe_local(...)
+    """
+    return transcribe(path)
