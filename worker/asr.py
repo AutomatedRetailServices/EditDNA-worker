@@ -3,41 +3,47 @@
 from __future__ import annotations
 import os
 import tempfile
-from typing import List, Dict, Any
+import subprocess
+from typing import List, Dict, Any, Optional
 
 from faster_whisper import WhisperModel
 
-# we use moviepy just to pull audio out of .mov/.mp4
-from moviepy.editor import VideoFileClip
-
 # ------------------------------------------------------------------
-# Config knobs (can be overridden by env)
+# Config knobs (overridable via env)
 # ------------------------------------------------------------------
 _MODEL_NAME = os.getenv("ASR_MODEL", "medium")
 _COMPUTE_TYPE = os.getenv("ASR_COMPUTE_TYPE", "auto")  # e.g. "int8", "int8_float16", "auto"
 
-# we keep a global so we don’t reload the model every job
-_model = None
+# keep one global model so we don’t reload every job
+_model: Optional[WhisperModel] = None
 
 
 def _get_model() -> WhisperModel:
+    """
+    Lazily load Faster-Whisper once.
+    """
     global _model
     if _model is not None:
         return _model
 
-    print(f"[asr] loading Faster-Whisper model={_MODEL_NAME} compute_type={_COMPUTE_TYPE}", flush=True)
+    device = "cuda" if os.getenv("CUDA_VISIBLE_DEVICES") else "cpu"
+    print(f"[asr] loading Faster-Whisper model={_MODEL_NAME} device={device} compute_type={_COMPUTE_TYPE}", flush=True)
+
     _model = WhisperModel(
         _MODEL_NAME,
-        device="cuda" if os.getenv("CUDA_VISIBLE_DEVICES") else "cpu",
+        device=device,
         compute_type=_COMPUTE_TYPE,
     )
     return _model
 
 
-def _extract_audio(video_path: str) -> str:
+def _extract_audio_with_moviepy(video_path: str) -> str:
     """
-    Take a local video file, extract audio to a temp .wav, return path.
+    Try to extract audio using moviepy.
+    We import moviepy here so importing worker.asr doesn’t fail at startup.
     """
+    from moviepy.editor import VideoFileClip  # local import
+
     tmp = tempfile.NamedTemporaryFile(suffix=".wav", delete=False)
     tmp_audio_path = tmp.name
     tmp.close()
@@ -49,23 +55,60 @@ def _extract_audio(video_path: str) -> str:
     return tmp_audio_path
 
 
+def _extract_audio_with_ffmpeg(video_path: str) -> str:
+    """
+    Fallback if moviepy is missing: use ffmpeg CLI.
+    Assumes ffmpeg is installed in the container.
+    """
+    tmp = tempfile.NamedTemporaryFile(suffix=".wav", delete=False)
+    tmp_audio_path = tmp.name
+    tmp.close()
+
+    cmd = [
+        "ffmpeg",
+        "-y",
+        "-i",
+        video_path,
+        "-vn",             # no video
+        "-acodec",
+        "pcm_s16le",       # wav
+        "-ar",
+        "16000",           # 16 kHz is fine for ASR
+        "-ac",
+        "1",
+        tmp_audio_path,
+    ]
+    subprocess.check_call(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    return tmp_audio_path
+
+
+def _extract_audio(video_path: str) -> str:
+    """
+    Try moviepy first; if it’s not installed, fall back to ffmpeg.
+    """
+    try:
+        return _extract_audio_with_moviepy(video_path)
+    except Exception as e:
+        print(f"[asr] moviepy extract failed ({e}), trying ffmpeg...", flush=True)
+        return _extract_audio_with_ffmpeg(video_path)
+
+
 def transcribe(local_video_path: str) -> List[Dict[str, Any]]:
     """
     Main entry the pipeline calls:
-        asr.transcribe("/tmp/IMG_03.mov")
+        segments = asr.transcribe("/tmp/IMG_03.mov")
 
-    Returns list of segments:
-    [
-      {"text": "hello", "start": 0.0, "end": 2.3},
-      ...
-    ]
+    Returns:
+        [
+          {"text": "hello", "start": 0.0, "end": 2.3},
+          ...
+        ]
     """
-    # 1) get model
+    # 1) load model
     model = _get_model()
 
-    # 2) pull audio from video
+    # 2) get audio
     audio_path = _extract_audio(local_video_path)
-
     print(f"[asr] transcribing audio={audio_path}", flush=True)
 
     # 3) run ASR
@@ -77,8 +120,7 @@ def transcribe(local_video_path: str) -> List[Dict[str, Any]]:
     )
 
     out: List[Dict[str, Any]] = []
-    for i, seg in enumerate(segments):
-        # seg is a faster-whisper Segment object
+    for seg in segments:
         text = (seg.text or "").strip()
         if not text:
             continue
