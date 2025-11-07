@@ -6,9 +6,11 @@ from typing import Optional
 FFPROBE_BIN = os.getenv("FFPROBE_BIN", "ffprobe")
 DOWNLOAD_ROOT = os.getenv("DOWNLOAD_ROOT", "/tmp")
 
+
 def make_temp_video_path(suffix: str = ".mp4") -> str:
     os.makedirs(DOWNLOAD_ROOT, exist_ok=True)
     return os.path.join(DOWNLOAD_ROOT, f"vid_{uuid.uuid4().hex}{suffix}")
+
 
 def download_to_local(src: str, dst: Optional[str] = None) -> str:
     if os.path.exists(src):
@@ -28,6 +30,7 @@ def download_to_local(src: str, dst: Optional[str] = None) -> str:
     shutil.copy(src, dst)
     return dst
 
+
 def probe_duration(path: str) -> float:
     try:
         out = subprocess.check_output(
@@ -43,3 +46,8 @@ def probe_duration(path: str) -> float:
         return float(out.decode().strip())
     except Exception:
         return 0.0
+
+
+def get_duration(path: str) -> float:
+    """Small helper so pipeline.py can just call video.get_duration(...)"""
+    return probe_duration(path)
