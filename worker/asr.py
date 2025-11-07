@@ -8,32 +8,29 @@ from typing import List, Dict, Any, Optional
 
 from faster_whisper import WhisperModel
 
-# ------------------------------------------------------------------
-# Config knobs (overridable via env)
-# ------------------------------------------------------------------
-# medium is fine for your 4500/A5000, but we’ll guard for CPU
+# -------------------------------------------------
+# config from env
+# -------------------------------------------------
 _MODEL_NAME = os.getenv("ASR_MODEL", "medium")
-_COMPUTE_TYPE_ENV = os.getenv("ASR_COMPUTE_TYPE", "auto")  # what you asked for in env
+_ASR_COMPUTE_TYPE = os.getenv("ASR_COMPUTE_TYPE", "auto")
 
-# keep one global model so we don’t reload every job
+# keep model cached
 _model: Optional[WhisperModel] = None
 
 
 def _pick_compute_type(device: str) -> str:
     """
-    If user asked for float16 but we're on CPU, fall back to int8.
+    If user asked for float16 but we are on CPU, fall back to int8.
+    This is what your error was about.
     """
-    ct = _COMPUTE_TYPE_ENV
-    if device == "cpu" and ct.lower() in ("float16", "float32", "fp16"):
+    ct = _ASR_COMPUTE_TYPE
+    if device == "cpu" and ct.lower() in ("float16", "fp16", "float32"):
         print("[asr] requested float16 on CPU → falling back to int8", flush=True)
         return "int8"
     return ct
 
 
 def _get_model() -> WhisperModel:
-    """
-    Lazily load Faster-Whisper once.
-    """
     global _model
     if _model is not None:
         return _model
@@ -54,12 +51,11 @@ def _get_model() -> WhisperModel:
     return _model
 
 
+# ---------- audio extraction helpers ----------
+
 def _extract_audio_with_moviepy(video_path: str) -> str:
-    """
-    Try to extract audio using moviepy.
-    We import moviepy here so importing worker.asr doesn’t fail at startup.
-    """
-    from moviepy.editor import VideoFileClip  # local import
+    # import inside so missing moviepy doesn't break import
+    from moviepy.editor import VideoFileClip
 
     tmp = tempfile.NamedTemporaryFile(suffix=".wav", delete=False)
     tmp_audio_path = tmp.name
@@ -68,14 +64,10 @@ def _extract_audio_with_moviepy(video_path: str) -> str:
     clip = VideoFileClip(video_path)
     clip.audio.write_audiofile(tmp_audio_path, verbose=False, logger=None)
     clip.close()
-
     return tmp_audio_path
 
 
 def _extract_audio_with_ffmpeg(video_path: str) -> str:
-    """
-    Fallback if moviepy is missing: use ffmpeg CLI.
-    """
     tmp = tempfile.NamedTemporaryFile(suffix=".wav", delete=False)
     tmp_audio_path = tmp.name
     tmp.close()
@@ -83,8 +75,7 @@ def _extract_audio_with_ffmpeg(video_path: str) -> str:
     cmd = [
         "ffmpeg",
         "-y",
-        "-i",
-        video_path,
+        "-i", video_path,
         "-vn",
         "-acodec", "pcm_s16le",
         "-ar", "16000",
@@ -96,29 +87,23 @@ def _extract_audio_with_ffmpeg(video_path: str) -> str:
 
 
 def _extract_audio(video_path: str) -> str:
-    """
-    Try moviepy first; if it’s not installed, fall back to ffmpeg.
-    """
     try:
         return _extract_audio_with_moviepy(video_path)
     except Exception as e:
-        print(f"[asr] moviepy extract failed ({e}), trying ffmpeg...", flush=True)
+        print(f"[asr] moviepy failed ({e}) → trying ffmpeg", flush=True)
         return _extract_audio_with_ffmpeg(video_path)
 
 
+# ---------- main API ----------
+
 def transcribe(local_video_path: str) -> List[Dict[str, Any]]:
     """
-    Main entry the pipeline calls:
-        segments = asr.transcribe("/tmp/IMG_03.mov")
+    Return list of segments: [{"text":..., "start":..., "end":...}, ...]
     """
-    # 1) load model
     model = _get_model()
-
-    # 2) get audio
     audio_path = _extract_audio(local_video_path)
     print(f"[asr] transcribing audio={audio_path}", flush=True)
 
-    # 3) run ASR
     segments, info = model.transcribe(
         audio_path,
         beam_size=1,
@@ -143,5 +128,6 @@ def transcribe(local_video_path: str) -> List[Dict[str, Any]]:
     return out
 
 
-# ------------------------------------------------------------------
-# backward-compat name used by your pipeline
+# your pipeline was calling this name, so keep it
+def transcribe_local(path: str):
+    return transcribe(path)
