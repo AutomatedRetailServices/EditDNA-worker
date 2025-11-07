@@ -1,157 +1,108 @@
 # /workspace/EditDNA-worker/pipeline.py
 from __future__ import annotations
-
 import os
-import uuid
 import time
+import uuid
 from typing import Any, Dict, List, Tuple
 
-from worker import asr
-from worker import video as videoutil
-from worker import s3 as s3util
+from worker import video, asr, s3
 
-# how many clips per slot we try to surface
-DEFAULT_FUNNEL_COUNTS = {
-    "HOOK": 1,
-    "PROBLEM": 1,
-    "FEATURE": 12,
-    "PROOF": 1,
-    "CTA": 1,
-}
-
-# IMG_03 style junk / self-corrections / obvious ASR garbage
-_RETAPEY_PHRASES = [
-    "wait, am i saying that right",
-    "wait am i saying that right",
-    "why can't i remember",
-    "why cant i remember",
-    "what?",
-    "what ?",
-    "is that good? yeah.",
-    "is that good ? yeah.",
-    "am i saying that right",
-    "wait, not moisture control",
-]
-
-# really bad ASR tokens
-_GARBAGE_TOKENS = [
-    "kuchigai",
-    "utas",
-]
-
-# IMG_02 specific tail-babble we saw (“so if you wanna check them out …”)
-_TRAILING_CTA_BLAB = [
-    "if you wanna check them out",
-    "so if you wanna check them out",
-    "grab one of these for yourself",
-    "i left it for you down below",
-    "grab one of these westland",
-]
+# vision is optional – we try to import it
+try:
+    from worker import vision_sampler
+    _HAS_VISION = True
+except Exception:
+    _HAS_VISION = False
 
 
-def _get_funnel_counts_from_env() -> Dict[str, int]:
-    raw = os.getenv("FUNNEL_COUNTS")
-    counts = dict(DEFAULT_FUNNEL_COUNTS)
-    if not raw:
-        return counts
-    try:
-        import json
-        data = json.loads(raw)
-        for k, v in data.items():
-            try:
-                counts[k] = int(v)
-            except Exception:
-                pass
-    except Exception:
-        pass
-    return counts
-
-
-def _is_retake_or_flub(text: str) -> bool:
-    t = text.lower().strip()
-    if not t:
-        return True
-
-    # obvious retakes (IMG_03)
-    for bad in _RETAPEY_PHRASES:
-        if bad in t:
-            return True
-
-    # obvious garbage tokens
-    for bad in _GARBAGE_TOKENS:
-        if bad in t:
-            return True
-
-    # tiny question fragments like "what?"
-    if len(t.split()) <= 2 and t.endswith("?"):
-        return True
-
-    return False
-
-
-def _is_trailing_babble(text: str) -> bool:
+def _classify_slot(text: str, idx: int) -> str:
     """
-    This is for IMG_02 type endings where the speaker re-says
-    the CTA 2–3 times. We just drop those lines.
+    Very dumb slotter, same spirit as what you had:
+    - first usable line -> HOOK
+    - CTA words -> CTA
+    - everything else -> FEATURE
     """
-    t = text.lower().strip()
-    for pat in _TRAILING_CTA_BLAB:
-        if pat in t:
-            return True
-    # also if it starts with "so if you wanna" we kill it
-    if t.startswith("so if you wanna"):
-        return True
-    return False
+    t = (text or "").lower()
 
-
-def _slot_for_text(text: str) -> str:
-    lt = text.lower()
-    if "click the link" in lt or "get yours today" in lt or "get yours" in lt:
-        return "CTA"
-    if "if you wanna check them out" in lt:
-        return "CTA"
-    if "does your" in lt or "is your" in lt or "if you don't have" in lt:
+    if idx == 0:
         return "HOOK"
+
+    cta_words = ("click the link", "get yours today", "shop now", "grab one", "link below")
+    if any(w in t for w in cta_words):
+        return "CTA"
+
     return "FEATURE"
 
 
-def _build_clip(seg_id: str, slot: str, start: float, end: float, text: str) -> Dict[str, Any]:
-    return {
-        "id": seg_id,
-        "slot": slot,
-        "start": start,
-        "end": end,
-        "score": 2.5,
-        "face_q": 1.0,
-        "scene_q": 1.0,
-        "vtx_sim": 0.0,
-        "chain_ids": [seg_id],
-        "text": text,
-    }
+def _run_vision_gate(
+    video_path: str,
+    seg: Dict[str, Any],
+) -> Tuple[float, float, float, bool]:
+    """
+    Call vision sampler on this segment.
+    Returns (face_q, scene_q, vtx_sim, had_signal)
+    If vision is not available, we just pretend everything is fine.
+    """
+    if not _HAS_VISION:
+        return 1.0, 1.0, 0.0, False
+
+    start = float(seg.get("start", 0.0))
+    end = float(seg.get("end", start + 0.5))
+    text = seg.get("text", "")
+
+    try:
+        face_q, scene_q, vtx_sim, had = vision_sampler.sample_visuals(
+            video_path,
+            (start, end),
+            text=text,
+            fps=2,
+            max_frames=4,
+        )
+        return face_q, scene_q, vtx_sim, had
+    except Exception:
+        # if vision crashes, don't kill the whole job
+        return 1.0, 1.0, 0.0, False
 
 
-def _upload_rendered(local_path: str, s3_prefix: str, session_id: str) -> Tuple[str, str]:
-    base = f"{session_id}_{uuid.uuid4().hex}.mp4"
-    key = os.path.join(s3_prefix, base)
-    url = s3util.upload_file(local_path, key)
-    return key, url
+def _should_drop_by_vision(
+    face_q: float,
+    scene_q: float,
+    vtx_sim: float,
+    had_signal: bool,
+) -> bool:
+    """
+    Simple gate:
+    - if we actually saw frames (had_signal=True) AND
+    - both face and scene are very low -> drop
+    Tweak thresholds here if it’s too strict / too loose.
+    """
+    if not had_signal:
+        return False
+    if face_q < 0.15 and scene_q < 0.15:
+        return True
+    return False
 
 
 def run_pipeline(
-    *,
     local_video_path: str,
     session_id: str,
     s3_prefix: str = "editdna/outputs/",
 ) -> Dict[str, Any]:
+    """
+    Main entry called by tasks.job_render()
+    Returns a dict that matches what your worker is already returning.
+    """
     t0 = time.time()
-    funnel_counts = _get_funnel_counts_from_env()
 
     # 1) duration
-    duration = videoutil.probe_duration(local_video_path)
+    duration = video.probe_duration(local_video_path)
 
-    # 2) ASR
-    asr_segments = asr.transcribe_local(local_video_path)
-    # asr_segments = [{"text": "...", "start": 0.0, "end": 2.0}, ...]
+    # 2) ASR – work with your current worker/asr.py
+    # we added transcribe_local earlier – but if the file still has only transcribe(), we fall back
+    if hasattr(asr, "transcribe_local"):
+        asr_result = asr.transcribe_local(local_video_path)
+    else:
+        asr_result = asr.transcribe(local_video_path)
 
     clips: List[Dict[str, Any]] = []
     slots: Dict[str, List[Dict[str, Any]]] = {
@@ -162,35 +113,65 @@ def run_pipeline(
         "CTA": [],
     }
 
-    for idx, seg in enumerate(asr_segments):
+    # 3) build clip objects, now with vision gating
+    for idx, seg in enumerate(asr_result):
         text = (seg.get("text") or "").strip()
-        start = float(seg.get("start") or 0.0)
-        end = float(seg.get("end") or (start + 2.0))
+        start = float(seg.get("start", 0.0))
+        end = float(seg.get("end", start + 0.5))
 
-        # 1) kill obvious bad / retake
-        if _is_retake_or_flub(text):
+        if not text:
             continue
 
-        # 2) kill IMG_02 tail babble
-        if _is_trailing_babble(text):
+        # vision check for THIS segment
+        face_q, scene_q, vtx_sim, had_signal = _run_vision_gate(local_video_path, seg)
+        drop = _should_drop_by_vision(face_q, scene_q, vtx_sim, had_signal)
+        if drop:
+            # skip visually bad take
             continue
 
-        slot = _slot_for_text(text)
-        seg_id = f"ASR{idx:04d}"
+        slot = _classify_slot(text, idx)
 
-        clip = _build_clip(seg_id, slot, start, end, text)
-        clips.append(clip)
+        clip_id = f"ASR{idx:04d}"
+        clip_obj = {
+            "id": clip_id,
+            "slot": slot if slot != "HOOK" else "STORY",  # keep overall list as STORY like your runs
+            "start": start,
+            "end": end,
+            "score": 2.5,
+            "face_q": face_q,
+            "scene_q": scene_q,
+            "vtx_sim": vtx_sim,
+            "chain_ids": [clip_id],
+            "text": text,
+        }
+        clips.append(clip_obj)
 
-        bucket = slots.get(slot)
-        if bucket is not None:
-            if len(bucket) < funnel_counts.get(slot, 999):
-                bucket.append(clip)
+        # also push into slots structure the way your JSON shows
+        slot_entry = {
+            "id": clip_id,
+            "slot": slot,
+            "start": start,
+            "end": end,
+            "score": 2.5,
+            "face_q": face_q,
+            "scene_q": scene_q,
+            "vtx_sim": vtx_sim,
+            "chain_ids": [clip_id],
+            "text": text,
+        }
+        slots.setdefault(slot, []).append(slot_entry)
 
-    # 4) upload "render" (right now, original)
-    try:
-        s3_key, s3_url = _upload_rendered(local_video_path, s3_prefix, session_id)
-    except Exception:
-        s3_key, s3_url = None, None
+    # 4) render/export – in your flow the video is already the input,
+    # so we just upload the original / processed file.
+    # We'll make an S3 key like you've been getting.
+    base_name = f"{session_id}_{uuid.uuid4().hex}.mp4"
+    s3_key = os.path.join(s3_prefix, base_name)
+
+    https_url = s3.upload_file(local_video_path, s3_key)
+
+    # match the style you showed: return both s3://... and https://...
+    s3_style_url = f"s3://{s3.S3_BUCKET}/{s3_key}"
+    urls = [s3_style_url, https_url]
 
     elapsed = time.time() - t0
 
@@ -200,12 +181,12 @@ def run_pipeline(
         "input_local": local_video_path,
         "duration_sec": duration,
         "s3_key": s3_key,
-        "s3_url": s3_url,
-        "https_url": s3_url,
+        "s3_url": urls,
+        "https_url": urls,
         "clips": clips,
         "slots": slots,
         "asr": True,
-        "semantic": True,
-        "vision": False,
+        "semantic": True,  # you were marking this true in your outputs
+        "vision": _HAS_VISION,
         "elapsed_sec": elapsed,
     }
