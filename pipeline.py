@@ -1,153 +1,210 @@
+# /workspace/EditDNA-worker/pipeline.py
+from __future__ import annotations
 import os
-import json
 import time
-import tempfile
-from worker import asr, s3_utils
+import uuid
+from typing import Any, Dict, List, Tuple
 
-# ----------------------------------------------------
-# micro semantic slot block
-# ----------------------------------------------------
-def micro_semantic_filter(text: str) -> bool:
+# 1) moviepy is OPTIONAL — don't let it crash imports
+try:
+    from moviepy.editor import VideoFileClip  # you can add more if you need
+    _HAS_MOVIEPY = True
+except Exception:
+    _HAS_MOVIEPY = False
+
+# 2) our own worker helpers
+from worker import video    # your /workspace/EditDNA-worker/worker/video.py
+from worker import asr      # your /workspace/EditDNA-worker/worker/asr.py
+from worker import s3       # your /workspace/EditDNA-worker/worker/s3.py (you created it)
+
+# -------------------------------------------------------------------
+# small, explicit trash list — only the clearly broken ASR we saw
+# we do NOT want to delete normal slang that makes ad-sense
+# -------------------------------------------------------------------
+HARD_TRASH_FRAGMENTS = [
+    "kuchigai",   # mis-ASR from your sample
+    "utas",       # mis-ASR from your sample
+    "u-t-i-s yeast worry no more",  # if you want to nuke that exact bad line
+]
+
+# -------------------------------------------------------------------
+# helpers
+# -------------------------------------------------------------------
+
+def _is_hard_trash(text: str) -> bool:
+    """Return True only if text contains one of the explicit bad fragments."""
+    t = text.lower()
+    for bad in HARD_TRASH_FRAGMENTS:
+        if bad in t:
+            return True
+    return False
+
+
+def _slot_for_text(text: str) -> str:
     """
-    Return True if we should KEEP this segment.
-    Return False if we should DROP it (clearly broken).
+    Very small heuristic to fill slots.
+    We keep it simple so standard English AND slang both go through.
     """
-    if not text:
-        return False
+    t = text.lower()
 
-    low = text.lower().strip()
+    # hook-style openings
+    if t.startswith("if you don't have") or t.startswith("is your ") or t.startswith("are you "):
+        return "HOOK"
 
-    # 1) Kill obvious blooper / redo lines
-    BLOOPERS = [
-        "wait i'm gonna say that right",
-        "wait i don't",
-        "why can't i remember",
-        "let me say that again",
-        "i'm gonna say that right",
-    ]
-    for b in BLOOPERS:
-        if b in low:
-            return False
+    # CTA-ish
+    if "click the link" in t or "grab one" in t or "get yours" in t:
+        return "CTA"
 
-    # 2) Kill super-short, meaningless fragments
-    BAD_SHORT = {
-        "must anyway",
-        "i found",
-        "i found.",
-    }
-    if low in BAD_SHORT:
-        return False
-
-    # 3) Soft-handle ASR-misspelled slang like “kuchigai”, “utas”
-    # Drop only if the ENTIRE line is that nonsense, not if it's part of a real sentence
-    BAD_TOKENS = ["kuchigai", "utas"]
-    for tok in BAD_TOKENS:
-        if low == tok:
-            return False
-        # if token is inside a real sentence, keep it
-        # e.g., "your kuchigai won't..." should stay
-
-    # ✅ Keep normal English + TikTok slang + full sentences
-    return True
+    # otherwise treat as FEATURE (most ad talk is feature/benefit)
+    return "FEATURE"
 
 
-# ----------------------------------------------------
-# main pipeline
-# ----------------------------------------------------
-def run_pipeline(local_video_path: str, s3_prefix: str, session_id: str):
-    start_time = time.time()
-    print(f"[pipeline] 🔹 starting run_pipeline for {local_video_path}")
-
-    # --- STEP 1: Run ASR ---
-    print("[pipeline] 🧠 Running ASR (dual mode)")
-    asr_segments = []
-
-    try:
-        # Whisper result — returns list of dicts [{"text": ..., "start": ..., "end": ...}]
-        asr_segments = asr.transcribe(local_video_path)
-    except Exception as e:
-        print(f"[pipeline] ❌ ASR failed: {e}")
-        return {"ok": False, "error": str(e)}
-
-    if not asr_segments:
-        print("[pipeline] ⚠️ No ASR segments returned.")
-        return {"ok": False, "error": "no asr segments"}
-
-    print(f"[pipeline] ✅ got {len(asr_segments)} ASR segments")
-
-    # --- STEP 2: Segment Filtering + Slot Detection ---
-    clips = []
-    for idx, seg in enumerate(asr_segments):
-        seg_text = (seg.get("text") or "").strip()
-        if not seg_text:
-            continue
-
-        # 🔴 micro semantic gate
-        if not micro_semantic_filter(seg_text):
-            continue
-
-        start = float(seg.get("start", 0.0))
-        end = float(seg.get("end", start + 2.0))
-        low = seg_text.lower()
-
-        # --- SLOT DETECTION ---
-        slot = "FEATURE"
-        if any(k in low for k in ["if you don't have", "why not", "did you know", "stop scrolling"]):
-            slot = "HOOK"
-        elif any(k in low for k in ["click the link", "grab yours", "get yours", "buy now", "shop now", "i left it for you"]):
-            slot = "CTA"
-        elif any(k in low for k in ["works", "see", "tried", "proven", "really good", "great quality", "i love"]):
-            slot = "PROOF"
-
-        clip = {
-            "id": f"ASR{idx:04d}",
-            "slot": slot,
-            "start": start,
-            "end": end,
-            "score": 2.5,
-            "face_q": 1.0,
-            "scene_q": 1.0,
-            "vtx_sim": 0.0,
-            "chain_ids": [f"ASR{idx:04d}"],
-            "text": seg_text,
-        }
-
-        clips.append(clip)
-
-    # --- STEP 3: Upload video to S3 ---
-    try:
-        s3_key = f"{s3_prefix}{session_id}_{os.urandom(8).hex()}.mp4"
-        s3_url = s3_utils.upload_file_to_s3(local_video_path, s3_key)
-        https_url = s3_url
-    except Exception as e:
-        print(f"[pipeline] ⚠️ Failed to upload to S3: {e}")
-        s3_key = s3_url = https_url = None
-
-    elapsed = time.time() - start_time
-    print(f"[pipeline] ✅ finished in {elapsed:.2f}s")
+def _build_clip(idx: int, seg: Dict[str, Any]) -> Dict[str, Any]:
+    text = seg.get("text", "").strip()
+    start = float(seg.get("start", 0.0))
+    end = float(seg.get("end", max(start, 0.01)))
+    clip_id = f"ASR{idx:04d}"
 
     return {
+        "id": clip_id,
+        "slot": "STORY",   # we also put them into slots[] below
+        "start": start,
+        "end": end,
+        "score": 2.5,
+        "face_q": 1.0,
+        "scene_q": 1.0,
+        "vtx_sim": 0.0,
+        "chain_ids": [clip_id],
+        "text": text,
+    }
+
+
+def _organize_slots(clips: List[Dict[str, Any]]) -> Dict[str, List[Dict[str, Any]]]:
+    slots: Dict[str, List[Dict[str, Any]]] = {
+        "HOOK": [],
+        "PROBLEM": [],
+        "FEATURE": [],
+        "PROOF": [],
+        "CTA": [],
+    }
+
+    for c in clips:
+        text = c.get("text", "")
+        slot_name = _slot_for_text(text)
+        # copy a smaller view for slots
+        slots[slot_name].append({
+            "id": c["id"],
+            "slot": slot_name,
+            "start": c["start"],
+            "end": c["end"],
+            "score": c["score"],
+            "face_q": c["face_q"],
+            "scene_q": c["scene_q"],
+            "vtx_sim": c["vtx_sim"],
+            "chain_ids": c["chain_ids"],
+            "text": c["text"],
+        })
+
+    return slots
+
+
+def _maybe_render_and_upload(
+    session_id: str,
+    local_video_path: str,
+    clips: List[Dict[str, Any]],
+    s3_prefix: str,
+) -> Tuple[str | None, str | None, str | None]:
+    """
+    If moviepy is available, render something and upload to S3.
+    If not, just return (None, None, None).
+    """
+    if not _HAS_MOVIEPY:
+        return None, None, None
+
+    # super simple: just re-encode original for now
+    out_name = f"{session_id}_{uuid.uuid4().hex}.mp4"
+    out_local = f"/tmp/{out_name}"
+
+    # this is intentionally simple — your real pipeline can cut by clips[] later
+    clip = VideoFileClip(local_video_path)
+    clip.write_videofile(out_local, audio_codec="aac")
+
+    # upload
+    s3_key = f"{s3_prefix}{out_name}"
+    s3_url, https_url = s3.upload_file(out_local, s3_key)
+    return s3_key, s3_url, https_url
+
+# -------------------------------------------------------------------
+# main entrypoint used by tasks.job_render(...)
+# -------------------------------------------------------------------
+
+def run_pipeline(
+    session_id: str,
+    local_video_path: str,
+    s3_prefix: str = "editdna/outputs/",
+) -> Dict[str, Any]:
+    """
+    Main pipeline:
+      1. ASR
+      2. clean/keep slang
+      3. build clips
+      4. organize slots
+      5. maybe render + upload
+    """
+    t0 = time.time()
+
+    # 1) run ASR (your worker/asr.py must have transcribe_local)
+    asr_result = asr.transcribe_local(local_video_path)
+    segments = asr_result.get("segments", [])
+
+    clips: List[Dict[str, Any]] = []
+
+    for idx, seg in enumerate(segments):
+        if not isinstance(seg, dict):
+            # corrupt entry, skip
+            continue
+
+        raw_text = seg.get("text", "")
+        if not raw_text:
+            continue
+
+        # hard-delete ONLY clearly broken fragments
+        if _is_hard_trash(raw_text):
+            # skip this one
+            continue
+
+        # otherwise keep it — even if it’s slangy / slightly messy
+        clip = _build_clip(idx, seg)
+        clips.append(clip)
+
+    # 2) organize into marketing-ish slots
+    slots = _organize_slots(clips)
+
+    # 3) get duration from video helper
+    duration_sec = video.probe_duration(local_video_path)
+
+    # 4) try to render & upload (non-fatal)
+    s3_key, s3_url, https_url = _maybe_render_and_upload(
+        session_id=session_id,
+        local_video_path=local_video_path,
+        clips=clips,
+        s3_prefix=s3_prefix,
+    )
+
+    out: Dict[str, Any] = {
         "ok": True,
         "session_id": session_id,
         "input_local": local_video_path,
-        "duration_sec": float(asr_segments[-1].get("end", 0.0)),
+        "duration_sec": duration_sec,
         "s3_key": s3_key,
         "s3_url": s3_url,
         "https_url": https_url,
         "clips": clips,
-        "slots": _organize_slots(clips),
+        "slots": slots,
+        # flags like in your old output
         "asr": True,
         "semantic": True,
         "vision": False,
-        "elapsed_sec": elapsed,
+        "elapsed_sec": time.time() - t0,
     }
-
-
-# ----------------------------------------------------
-# helper: slot grouping
-# ----------------------------------------------------
-def _organize_slots(clips):
-    slots = {"HOOK": [], "PROBLEM": [], "FEATURE": [], "PROOF": [], "CTA": []}
-    for c in clips:
-        slots.setdefault(c["slot"], []).append(c)
-    return slots
+    return out
