@@ -1,85 +1,95 @@
 # /workspace/EditDNA-worker/pipeline.py
+
 from __future__ import annotations
 import os
-import time
 import uuid
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, List
 
-# 1) moviepy is OPTIONAL — don't let it crash imports
-try:
-    from moviepy.editor import VideoFileClip  # you can add more if you need
-    _HAS_MOVIEPY = True
-except Exception:
-    _HAS_MOVIEPY = False
+from worker import video as videoutils
+from worker import asr
+from worker import s3 as s3mod
 
-# 2) our own worker helpers
-from worker import video    # your /workspace/EditDNA-worker/worker/video.py
-from worker import asr      # your /workspace/EditDNA-worker/worker/asr.py
-from worker import s3       # your /workspace/EditDNA-worker/worker/s3.py (you created it)
-
-# -------------------------------------------------------------------
-# small, explicit trash list — only the clearly broken ASR we saw
-# we do NOT want to delete normal slang that makes ad-sense
-# -------------------------------------------------------------------
-HARD_TRASH_FRAGMENTS = [
-    "kuchigai",   # mis-ASR from your sample
-    "utas",       # mis-ASR from your sample
-    "u-t-i-s yeast worry no more",  # if you want to nuke that exact bad line
+# phrases we saw that were clearly ASR trash when they appear ALONE
+_HARD_BAD = [
+    "kuchigai",
+    "utas",
+    "utas yeast",
+    "odor utas",
 ]
 
-# -------------------------------------------------------------------
-# helpers
-# -------------------------------------------------------------------
 
-def _is_hard_trash(text: str) -> bool:
-    """Return True only if text contains one of the explicit bad fragments."""
-    t = text.lower()
-    for bad in HARD_TRASH_FRAGMENTS:
-        if bad in t:
+def _should_drop(seg_text: str) -> bool:
+    """
+    Rule:
+    - if the whole segment is basically JUST the bad fragment → drop
+    - if the bad word is inside a real sentence → KEEP (because that's how they talk)
+    """
+    t = seg_text.strip().lower()
+    # very short + contains bad → drop
+    if len(t.split()) <= 3:
+        for bad in _HARD_BAD:
+            if bad in t:
+                return True
+    # exact match → drop
+    for bad in _HARD_BAD:
+        if t == bad:
             return True
     return False
 
 
-def _slot_for_text(text: str) -> str:
+def _slot_for_text(seg_text: str) -> str:
     """
-    Very small heuristic to fill slots.
-    We keep it simple so standard English AND slang both go through.
+    super simple slotting like you had: first becomes HOOK, last becomes CTA, rest FEATURE
     """
-    t = text.lower()
-
-    # hook-style openings
-    if t.startswith("if you don't have") or t.startswith("is your ") or t.startswith("are you "):
-        return "HOOK"
-
-    # CTA-ish
-    if "click the link" in t or "grab one" in t or "get yours" in t:
-        return "CTA"
-
-    # otherwise treat as FEATURE (most ad talk is feature/benefit)
+    # we’ll assign outside; keep here if you later want smarter logic
     return "FEATURE"
 
 
-def _build_clip(idx: int, seg: Dict[str, Any]) -> Dict[str, Any]:
-    text = seg.get("text", "").strip()
-    start = float(seg.get("start", 0.0))
-    end = float(seg.get("end", max(start, 0.01)))
-    clip_id = f"ASR{idx:04d}"
+def run_pipeline(
+    *,
+    session_id: str,
+    local_video_path: str,
+    s3_prefix: str = "editdna/outputs/",
+    funnel_counts: Dict[str, int] | None = None,
+) -> Dict[str, Any]:
+    """
+    Main pipeline: ASR → filter → build clips → upload original → return JSON
+    """
+    # 1) get duration
+    duration_sec = videoutils.probe_duration(local_video_path)
 
-    return {
-        "id": clip_id,
-        "slot": "STORY",   # we also put them into slots[] below
-        "start": start,
-        "end": end,
-        "score": 2.5,
-        "face_q": 1.0,
-        "scene_q": 1.0,
-        "vtx_sim": 0.0,
-        "chain_ids": [clip_id],
-        "text": text,
-    }
+    # 2) ASR
+    segments = asr.transcribe_local(local_video_path)
 
+    # 3) build clips
+    clips: List[Dict[str, Any]] = []
+    for idx, seg in enumerate(segments):
+        txt = seg["text"].strip()
+        if not txt:
+            continue
+        if _should_drop(txt):
+            # skip the clearly busted tiny junk
+            continue
 
-def _organize_slots(clips: List[Dict[str, Any]]) -> Dict[str, List[Dict[str, Any]]]:
+        start = float(seg.get("start", 0.0))
+        end = float(seg.get("end", start + 2.0))
+
+        clips.append(
+            {
+                "id": f"ASR{idx:04d}",
+                "slot": "STORY",  # we reshape below
+                "start": start,
+                "end": end,
+                "score": 2.5,
+                "face_q": 1.0,
+                "scene_q": 1.0,
+                "vtx_sim": 0.0,
+                "chain_ids": [f"ASR{idx:04d}"],
+                "text": txt,
+            }
+        )
+
+    # 4) assign slots roughly like your old output
     slots: Dict[str, List[Dict[str, Any]]] = {
         "HOOK": [],
         "PROBLEM": [],
@@ -88,123 +98,41 @@ def _organize_slots(clips: List[Dict[str, Any]]) -> Dict[str, List[Dict[str, Any
         "CTA": [],
     }
 
-    for c in clips:
-        text = c.get("text", "")
-        slot_name = _slot_for_text(text)
-        # copy a smaller view for slots
-        slots[slot_name].append({
-            "id": c["id"],
-            "slot": slot_name,
-            "start": c["start"],
-            "end": c["end"],
-            "score": c["score"],
-            "face_q": c["face_q"],
-            "scene_q": c["scene_q"],
-            "vtx_sim": c["vtx_sim"],
-            "chain_ids": c["chain_ids"],
-            "text": c["text"],
-        })
+    if clips:
+        # first = HOOK
+        first = clips[0].copy()
+        first["slot"] = "HOOK"
+        slots["HOOK"].append(first)
 
-    return slots
+        # last = CTA
+        if len(clips) > 1:
+            last = clips[-1].copy()
+            last["slot"] = "CTA"
+            slots["CTA"].append(last)
 
+        # middle = FEATURE
+        middle = clips[1:-1] if len(clips) > 2 else []
+        for m in middle:
+            mm = m.copy()
+            mm["slot"] = "FEATURE"
+            slots["FEATURE"].append(mm)
 
-def _maybe_render_and_upload(
-    session_id: str,
-    local_video_path: str,
-    clips: List[Dict[str, Any]],
-    s3_prefix: str,
-) -> Tuple[str | None, str | None, str | None]:
-    """
-    If moviepy is available, render something and upload to S3.
-    If not, just return (None, None, None).
-    """
-    if not _HAS_MOVIEPY:
-        return None, None, None
+    # 5) upload original video to S3 so your web has a URL
+    # make sure bucket + creds exist in env
+    key = f"{s3_prefix}{session_id}_{uuid.uuid4().hex}.mp4"
+    https_url = s3mod.upload_file(local_video_path, key)
 
-    # super simple: just re-encode original for now
-    out_name = f"{session_id}_{uuid.uuid4().hex}.mp4"
-    out_local = f"/tmp/{out_name}"
-
-    # this is intentionally simple — your real pipeline can cut by clips[] later
-    clip = VideoFileClip(local_video_path)
-    clip.write_videofile(out_local, audio_codec="aac")
-
-    # upload
-    s3_key = f"{s3_prefix}{out_name}"
-    s3_url, https_url = s3.upload_file(out_local, s3_key)
-    return s3_key, s3_url, https_url
-
-# -------------------------------------------------------------------
-# main entrypoint used by tasks.job_render(...)
-# -------------------------------------------------------------------
-
-def run_pipeline(
-    session_id: str,
-    local_video_path: str,
-    s3_prefix: str = "editdna/outputs/",
-) -> Dict[str, Any]:
-    """
-    Main pipeline:
-      1. ASR
-      2. clean/keep slang
-      3. build clips
-      4. organize slots
-      5. maybe render + upload
-    """
-    t0 = time.time()
-
-    # 1) run ASR (your worker/asr.py must have transcribe_local)
-    asr_result = asr.transcribe_local(local_video_path)
-    segments = asr_result.get("segments", [])
-
-    clips: List[Dict[str, Any]] = []
-
-    for idx, seg in enumerate(segments):
-        if not isinstance(seg, dict):
-            # corrupt entry, skip
-            continue
-
-        raw_text = seg.get("text", "")
-        if not raw_text:
-            continue
-
-        # hard-delete ONLY clearly broken fragments
-        if _is_hard_trash(raw_text):
-            # skip this one
-            continue
-
-        # otherwise keep it — even if it’s slangy / slightly messy
-        clip = _build_clip(idx, seg)
-        clips.append(clip)
-
-    # 2) organize into marketing-ish slots
-    slots = _organize_slots(clips)
-
-    # 3) get duration from video helper
-    duration_sec = video.probe_duration(local_video_path)
-
-    # 4) try to render & upload (non-fatal)
-    s3_key, s3_url, https_url = _maybe_render_and_upload(
-        session_id=session_id,
-        local_video_path=local_video_path,
-        clips=clips,
-        s3_prefix=s3_prefix,
-    )
-
-    out: Dict[str, Any] = {
+    return {
         "ok": True,
         "session_id": session_id,
         "input_local": local_video_path,
         "duration_sec": duration_sec,
-        "s3_key": s3_key,
-        "s3_url": s3_url,
+        "s3_key": key,
+        "s3_url": https_url,
         "https_url": https_url,
         "clips": clips,
         "slots": slots,
-        # flags like in your old output
         "asr": True,
         "semantic": True,
         "vision": False,
-        "elapsed_sec": time.time() - t0,
     }
-    return out
