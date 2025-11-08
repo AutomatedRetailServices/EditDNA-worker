@@ -11,9 +11,8 @@ from worker import asr
 from worker import video
 from worker import s3
 
-
 # ------------------------------------------------------------
-# 1) phrases we actually want to drop (from your logs)
+# 1) phrases we actually want to drop (seen in your JSON)
 # ------------------------------------------------------------
 DEFAULT_BAD_PHRASES = [
     "if you wanna check them out",
@@ -28,7 +27,7 @@ DEFAULT_BAD_PHRASES = [
 def _load_bad_phrases() -> List[str]:
     env_val = os.getenv("BAD_PHRASES", "").strip()
     if not env_val:
-        return [p.lower() for p in DEFAULT_BAD_PHRASES]
+        return DEFAULT_BAD_PHRASES
     return [p.strip().lower() for p in env_val.split("|") if p.strip()]
 
 
@@ -52,33 +51,34 @@ def is_near_duplicate(prev_text: str, curr_text: str) -> bool:
     c = curr_text.lower().strip()
     if p == c:
         return True
+    # tiny variations
     if p in c or c in p:
         return True
     return False
 
 
 # ------------------------------------------------------------
-# 2) turn ASR segments into filtered clips
+# build filtered clips
 # ------------------------------------------------------------
 def build_filtered_clips(segments: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     clips: List[Dict[str, Any]] = []
-    last_kept_text = ""
+    last_kept = ""
 
     for i, seg in enumerate(segments):
         txt = seg["text"]
 
-        # drop lines we know we don't want
+        # drop known junk
         if is_bad_phrase(txt):
             continue
 
-        # drop immediate duplicates
-        if last_kept_text and is_near_duplicate(last_kept_text, txt):
+        # drop immediate repeats
+        if last_kept and is_near_duplicate(last_kept, txt):
             continue
 
         cid = f"ASR{i:04d}"
         clip = {
             "id": cid,
-            "slot": "STORY",  # we'll classify later
+            "slot": "STORY",  # temp
             "start": float(seg["start"]),
             "end": float(seg["end"]),
             "score": 2.5,
@@ -89,13 +89,13 @@ def build_filtered_clips(segments: List[Dict[str, Any]]) -> List[Dict[str, Any]]
             "text": txt,
         }
         clips.append(clip)
-        last_kept_text = txt
+        last_kept = txt
 
     return clips
 
 
 # ------------------------------------------------------------
-# 3) slot builder (same shape as your previous results)
+# slots (same structure your UI shows)
 # ------------------------------------------------------------
 def build_slots(clips: List[Dict[str, Any]]) -> Dict[str, List[Dict[str, Any]]]:
     slots: Dict[str, List[Dict[str, Any]]] = {
@@ -116,22 +116,22 @@ def build_slots(clips: List[Dict[str, Any]]) -> Dict[str, List[Dict[str, Any]]]:
             or "go ahead and" in t
         )
 
-    first_hook_done = False
+    first_hook = True
     for clip in clips:
         txt = clip["text"]
-        if not first_hook_done:
-            c = clip.copy()
-            c["slot"] = "HOOK"
-            slots["HOOK"].append(c)
-            first_hook_done = True
+        if first_hook:
+            h = dict(clip)
+            h["slot"] = "HOOK"
+            slots["HOOK"].append(h)
+            first_hook = False
             continue
 
         if is_cta(txt):
-            c = clip.copy()
+            c = dict(clip)
             c["slot"] = "CTA"
             slots["CTA"].append(c)
         else:
-            f = clip.copy()
+            f = dict(clip)
             f["slot"] = "FEATURE"
             slots["FEATURE"].append(f)
 
@@ -139,67 +139,89 @@ def build_slots(clips: List[Dict[str, Any]]) -> Dict[str, List[Dict[str, Any]]]:
 
 
 # ------------------------------------------------------------
-# 4) ffmpeg helpers to CUT and CONCAT
+# ffmpeg helpers
 # ------------------------------------------------------------
 def _run_ffmpeg(cmd: List[str]) -> None:
-    subprocess.check_call(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    subprocess.check_call(
+        cmd,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
 
 
-def cut_clip_ffmpeg(src: str, start: float, end: float, out_path: str) -> None:
+def _make_output_path(session_id: str) -> str:
+    name = f"{session_id}_{uuid.uuid4().hex}.mp4"
+    return os.path.join("/tmp", name)
+
+
+def cut_video_from_clips(
+    input_video: str,
+    clips: List[Dict[str, Any]],
+    session_id: str,
+) -> str:
     """
-    Cut one piece from src → out_path using stream copy (fast)
+    Actually create a new video that is ONLY the kept clips.
+    We'll re-encode every piece to avoid keyframe problems.
     """
-    duration = max(0.0, end - start)
-    # -ss BEFORE -i is faster but less accurate; this is OK for your use-case
-    cmd = [
-        "ffmpeg",
-        "-y",
-        "-ss",
-        f"{start}",
-        "-i",
-        src,
-        "-t",
-        f"{duration}",
-        "-c",
-        "copy",
-        out_path,
-    ]
-    _run_ffmpeg(cmd)
+    if not clips:
+        # nothing kept – just return original
+        return input_video
 
+    tmpdir = tempfile.mkdtemp(prefix="editdna_")
+    part_paths: List[str] = []
 
-def concat_clips_ffmpeg(parts: List[str], out_path: str) -> None:
-    """
-    Use concat demuxer: create a text file with all parts
-    """
-    if not parts:
-        raise ValueError("no parts to concat")
+    # 1) make small parts
+    for idx, clip in enumerate(clips):
+        start = clip["start"]
+        end = clip["end"]
+        duration = max(0.01, end - start)
+        part_path = os.path.join(tmpdir, f"part_{idx:03d}.mp4")
 
-    list_file = out_path + ".txt"
-    with open(list_file, "w") as f:
-        for p in parts:
-            # paths must be quoted or escaped; simplest is single quotes
+        cmd = [
+            "ffmpeg",
+            "-y",
+            "-ss", f"{start}",
+            "-t", f"{duration}",
+            "-i", input_video,
+            "-c:v", "libx264",
+            "-c:a", "aac",
+            "-movflags", "faststart",
+            part_path,
+        ]
+        _run_ffmpeg(cmd)
+        part_paths.append(part_path)
+
+    # 2) make concat file
+    concat_path = os.path.join(tmpdir, "concat.txt")
+    with open(concat_path, "w") as f:
+        for p in part_paths:
+            # concat demuxer wants "file 'path'"
             f.write(f"file '{p}'\n")
 
-    cmd = [
+    # 3) concat to final
+    final_path = _make_output_path(session_id)
+    cmd2 = [
         "ffmpeg",
         "-y",
-        "-f",
-        "concat",
-        "-safe",
-        "0",
-        "-i",
-        list_file,
-        "-c",
-        "copy",
-        out_path,
+        "-f", "concat",
+        "-safe", "0",
+        "-i", concat_path,
+        "-c", "copy",
+        final_path,
     ]
-    _run_ffmpeg(cmd)
-    os.remove(list_file)
+    # if copy fails on your ffmpeg build, you can re-encode instead:
+    # cmd2 = [
+    #     "ffmpeg", "-y", "-f", "concat", "-safe", "0",
+    #     "-i", concat_path,
+    #     "-c:v", "libx264", "-c:a", "aac", "-movflags", "faststart",
+    #     final_path,
+    # ]
+    _run_ffmpeg(cmd2)
+
+    # we can leave tmpdir there or clean — for now just return final_path
+    return final_path
 
 
-# ------------------------------------------------------------
-# 5) upload helper
-# ------------------------------------------------------------
 def _upload_output(local_path: str, s3_prefix: str) -> Dict[str, Any]:
     filename = os.path.basename(local_path)
     key = os.path.join(s3_prefix, filename).replace("\\", "/")
@@ -214,50 +236,34 @@ def _upload_output(local_path: str, s3_prefix: str) -> Dict[str, Any]:
 
 
 # ------------------------------------------------------------
-# 6) main entry – tasks.py calls this
+# main entry
 # ------------------------------------------------------------
 def run_pipeline(
     local_video_path: str,
     session_id: str,
     s3_prefix: str = "editdna/outputs/",
 ) -> Dict[str, Any]:
-    print("[pipeline] CUT-BY-SCRIPT pipeline ACTIVE", flush=True)
+    print("[pipeline] filtered+cut pipeline ACTIVE", flush=True)
 
     # 1) get duration
     duration_sec = video.probe_duration(local_video_path)
 
-    # 2) ASR
+    # 2) transcribe
     segments = asr.transcribe_local(local_video_path)
 
-    # 3) FILTER into clips
+    # 3) filter to only good talking parts
     clips = build_filtered_clips(segments)
 
-    # 4) build slots (for your UI)
+    # 4) build slots for UI
     slots = build_slots(clips)
 
-    # 5) actually CUT the video according to those clips
-    tmp_dir = tempfile.mkdtemp(prefix="cutparts_")
-    part_paths: List[str] = []
-    for idx, c in enumerate(clips):
-        part_out = os.path.join(tmp_dir, f"part_{idx:04d}.mp4")
-        # guard bad times
-        start = max(0.0, float(c["start"]))
-        end = max(start, float(c["end"]))
-        cut_clip_ffmpeg(local_video_path, start, end, part_out)
-        part_paths.append(part_out)
+    # 5) ACTUAL VIDEO CUT HERE
+    final_local = cut_video_from_clips(local_video_path, clips, session_id)
 
-    # if nothing survived filtering, just upload original
-    if part_paths:
-        final_local = os.path.join("/tmp", f"{session_id}_{uuid.uuid4().hex}.mp4")
-        concat_clips_ffmpeg(part_paths, final_local)
-    else:
-        # nothing to concat – upload original
-        final_local = os.path.join("/tmp", f"{session_id}_{uuid.uuid4().hex}.mp4")
-        shutil.copy(local_video_path, final_local)
-
+    # 6) upload
     upload_info = _upload_output(final_local, s3_prefix)
 
-    # 6) return JSON similar to your earlier ones
+    # 7) return metadata
     result: Dict[str, Any] = {
         "ok": True,
         "session_id": session_id,
@@ -270,11 +276,4 @@ def run_pipeline(
         "vision": True,
     }
     result.update(upload_info)
-
-    # clean temp parts (best-effort)
-    try:
-        shutil.rmtree(tmp_dir)
-    except Exception:
-        pass
-
     return result
