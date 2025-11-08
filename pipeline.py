@@ -7,161 +7,136 @@ from typing import List, Dict, Any, Optional
 
 from worker import asr, video, s3
 
-# ---------------------------------------------------------
-# helpers
-# ---------------------------------------------------------
+# --------------------------
+# Helper functions
+# --------------------------
 
 def _normalize_for_dupe(txt: str) -> str:
+    """Normalize text to catch near-duplicate takes."""
     t = txt.strip().lower()
     for lead in ("so ", "and ", "um ", "uh ", "well "):
         if t.startswith(lead):
             t = t[len(lead):]
-    t = t.replace(",", " ").replace("  ", " ")
-    return t
+    return t.replace(",", " ").replace("  ", " ")
 
 
 def _is_hard_bad(txt: str) -> bool:
+    """Drop lines that are obviously bad takes or retakes."""
     bad_bits = [
-        "wait",                      # "wait, am I saying that right?"
-        "why can't i remember",      # IMG_03
-        "am i saying that right",    # IMG_03
-        "what?",                     # IMG_03 mid take
-        "is that good?",             # IMG_03 check
+        "wait",
+        "why can't i remember",
+        "am i saying that right",
+        "what?",
+        "is that good?",
     ]
     lt = txt.lower()
-    for b in bad_bits:
-        if b in lt:
-            return True
-    return False
+    return any(b in lt for b in bad_bits)
 
 
 def _slots_from_clips(clips: List[Dict[str, Any]]) -> Dict[str, List[Dict[str, Any]]]:
-    slots: Dict[str, List[Dict[str, Any]]] = {
-        "HOOK": [],
-        "PROBLEM": [],
-        "FEATURE": [],
-        "PROOF": [],
-        "CTA": [],
-    }
+    """Categorize clips into slots (HOOK, FEATURE, CTA)."""
+    slots = {"HOOK": [], "PROBLEM": [], "FEATURE": [], "PROOF": [], "CTA": []}
     if not clips:
         return slots
 
+    # first segment is HOOK
     first = clips[0]
-    slots["HOOK"].append(
-        {
-            "text": first["text"],
-            "start": first["start"],
-            "end": first["end"],
-            "slot": "HOOK",
-        }
-    )
+    slots["HOOK"].append({
+        "text": first["text"],
+        "start": first["start"],
+        "end": first["end"],
+        "slot": "HOOK",
+    })
 
-    def _looks_like_cta(t: str) -> bool:
+    def looks_like_cta(t: str) -> bool:
         t = t.lower()
-        return (
-            "grab one" in t
-            or "click the link" in t
-            or "down below" in t
-            or "get yours" in t
-            or "check them out" in t
-        )
+        return any(p in t for p in [
+            "grab one",
+            "click the link",
+            "down below",
+            "get yours",
+            "check them out",
+        ])
 
     for c in clips[1:]:
-        if _looks_like_cta(c["text"]):
-            slots["CTA"].append(
-                {
-                    "text": c["text"],
-                    "start": c["start"],
-                    "end": c["end"],
-                    "slot": "CTA",
-                }
-            )
-        else:
-            slots["FEATURE"].append(
-                {
-                    "text": c["text"],
-                    "start": c["start"],
-                    "end": c["end"],
-                    "slot": "FEATURE",
-                }
-            )
+        slot = "CTA" if looks_like_cta(c["text"]) else "FEATURE"
+        slots[slot].append({
+            "text": c["text"],
+            "start": c["start"],
+            "end": c["end"],
+            "slot": slot,
+        })
 
     return slots
 
 
-# ---------------------------------------------------------
-# main
-# ---------------------------------------------------------
+# --------------------------
+# Main pipeline
+# --------------------------
 
 def run_pipeline(
     session_id: str,
-    urls: List[str],
     s3_prefix: str = "editdna/outputs/",
+    urls: Optional[List[str]] = None,
     local_video_path: Optional[str] = None,
     **kwargs,
 ) -> Dict[str, Any]:
     """
-    tasks.py calls us with local_video_path=... so we accept it.
-    If it's not provided, we download from the first URL.
+    Compatible with tasks.py that calls:
+        pipeline.run_pipeline(local_video_path=..., session_id=..., s3_prefix=...)
     """
-    print("[pipeline] using filtered pipeline v2 (accepts local_video_path)", flush=True)
+    print("[pipeline] using filtered pipeline v3 (local_video_path compatible)", flush=True)
 
+    # determine which file to use
     if local_video_path and os.path.exists(local_video_path):
         src_path = local_video_path
-    else:
-        if not urls:
-            raise ValueError("no urls provided")
+    elif urls and urls[0]:
         src_path = video.download_to_local(urls[0])
+    else:
+        raise ValueError("No video path provided")
 
-    # 1) ASR
+    # 1️⃣ Run ASR
     raw_segments = asr.transcribe_local(src_path)
 
-    # 2) filter
-    cleaned: List[Dict[str, Any]] = []
+    # 2️⃣ Clean and filter
+    cleaned = []
     seen_norm = set()
 
     for seg in raw_segments:
         txt = seg.get("text", "").strip()
-        if not txt:
-            continue
-
-        if _is_hard_bad(txt):
+        if not txt or _is_hard_bad(txt):
             continue
 
         norm = _normalize_for_dupe(txt)
         if norm in seen_norm:
-            # drop duplicate wording / micro-retakes
             continue
         seen_norm.add(norm)
 
         cleaned.append(seg)
 
-    # 3) build clips
-    clips: List[Dict[str, Any]] = []
-    for i, seg in enumerate(cleaned):
-        clips.append(
-            {
-                "id": f"ASR{i:04d}",
-                "slot": "STORY",
-                "start": seg["start"],
-                "end": seg["end"],
-                "score": 2.5,
-                "face_q": 1.0,
-                "scene_q": 1.0,
-                "vtx_sim": 0.0,
-                "chain_ids": [f"ASR{i:04d}"],
-                "text": seg["text"],
-            }
-        )
+    # 3️⃣ Build clips
+    clips = [{
+        "id": f"ASR{i:04d}",
+        "slot": "STORY",
+        "start": seg["start"],
+        "end": seg["end"],
+        "score": 2.5,
+        "face_q": 1.0,
+        "scene_q": 1.0,
+        "vtx_sim": 0.0,
+        "chain_ids": [f"ASR{i:04d}"],
+        "text": seg["text"],
+    } for i, seg in enumerate(cleaned)]
 
-    # 4) slots
+    # 4️⃣ Build slots
     slots = _slots_from_clips(clips)
 
-    # 5) upload original video to S3 (same pattern as before)
+    # 5️⃣ Upload to S3
     out_key = f"{s3_prefix}{session_id}_{uuid.uuid4().hex}.mp4"
     https_url = s3.upload_file(src_path, out_key)
 
-    result: Dict[str, Any] = {
+    # 6️⃣ Return result payload
+    return {
         "ok": True,
         "session_id": session_id,
         "input_local": src_path,
@@ -175,4 +150,3 @@ def run_pipeline(
         "semantic": True,
         "vision": False,
     }
-    return result
