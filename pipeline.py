@@ -1,111 +1,81 @@
 # /workspace/EditDNA-worker/pipeline.py
 from __future__ import annotations
+
 import os
-import time
 import uuid
 from typing import Any, Dict, List, Tuple
 
-from worker import video, asr, s3
-
-# vision is optional – we try to import it
-try:
-    from worker import vision_sampler
-    _HAS_VISION = True
-except Exception:
-    _HAS_VISION = False
+from worker import video, s3, asr  # <-- your current worker package
 
 
-def _classify_slot(text: str, idx: int) -> str:
-    """
-    Very dumb slotter, same spirit as what you had:
-    - first usable line -> HOOK
-    - CTA words -> CTA
-    - everything else -> FEATURE
-    """
-    t = (text or "").lower()
-
-    if idx == 0:
-        return "HOOK"
-
-    cta_words = ("click the link", "get yours today", "shop now", "grab one", "link below")
-    if any(w in t for w in cta_words):
-        return "CTA"
-
-    return "FEATURE"
+# ---------------------------------------------------------------------
+# small helpers
+# ---------------------------------------------------------------------
+def _gen_output_key(session_id: str) -> str:
+    # this mimics what your jobs have been doing
+    fname = f"{session_id}_{uuid.uuid4().hex}.mp4"
+    prefix = os.getenv("S3_PREFIX", "editdna/outputs/")
+    return os.path.join(prefix, fname)
 
 
-def _run_vision_gate(
-    video_path: str,
-    seg: Dict[str, Any],
-) -> Tuple[float, float, float, bool]:
-    """
-    Call vision sampler on this segment.
-    Returns (face_q, scene_q, vtx_sim, had_signal)
-    If vision is not available, we just pretend everything is fine.
-    """
-    if not _HAS_VISION:
-        return 1.0, 1.0, 0.0, False
-
-    start = float(seg.get("start", 0.0))
-    end = float(seg.get("end", start + 0.5))
-    text = seg.get("text", "")
-
-    try:
-        face_q, scene_q, vtx_sim, had = vision_sampler.sample_visuals(
-            video_path,
-            (start, end),
-            text=text,
-            fps=2,
-            max_frames=4,
-        )
-        return face_q, scene_q, vtx_sim, had
-    except Exception:
-        # if vision crashes, don't kill the whole job
-        return 1.0, 1.0, 0.0, False
+def _normalize_text(t: str) -> str:
+    return " ".join(t.strip().lower().split())
 
 
-def _should_drop_by_vision(
-    face_q: float,
-    scene_q: float,
-    vtx_sim: float,
-    had_signal: bool,
-) -> bool:
-    """
-    Simple gate:
-    - if we actually saw frames (had_signal=True) AND
-    - both face and scene are very low -> drop
-    Tweak thresholds here if it’s too strict / too loose.
-    """
-    if not had_signal:
-        return False
-    if face_q < 0.15 and scene_q < 0.15:
-        return True
+# phrases we really don’t want in the final script (IMG_03 junk etc.)
+HARD_BAD_PHRASES = [
+    "wait, am i saying that right",
+    "wait not moisture control",
+    "why can't i remember after that",
+    "what?",
+    "is that good?",
+    "yeah.",
+]
+
+# filler that often repeats in CTA-ish products
+DUPLICATE_FUZZY_PREFIXES = [
+    "if you wanna check them out",
+    "so if you wanna check them out",
+    "if you want to check them out",
+    "so if you want to check them out",
+    "and grab one of these",
+]
+
+
+def _is_hard_bad(text: str) -> bool:
+    nt = _normalize_text(text)
+    for bad in HARD_BAD_PHRASES:
+        if bad in nt:
+            return True
     return False
 
 
-def run_pipeline(
-    local_video_path: str,
-    session_id: str,
-    s3_prefix: str = "editdna/outputs/",
-) -> Dict[str, Any]:
+def _is_fuzzy_duplicate(text: str, seen_stubs: set) -> Tuple[bool, str]:
     """
-    Main entry called by tasks.job_render()
-    Returns a dict that matches what your worker is already returning.
+    For IMG_02: “if you wanna check them out …” appears 3x.
+    We keep the first, drop later ones.
     """
-    t0 = time.time()
+    nt = _normalize_text(text)
+    for prefix in DUPLICATE_FUZZY_PREFIXES:
+        if nt.startswith(prefix):
+            stub = prefix  # can be more fancy if needed
+            if stub in seen_stubs:
+                return True, stub
+            else:
+                seen_stubs.add(stub)
+                return False, stub
+    return False, ""
 
-    # 1) duration
-    duration = video.probe_duration(local_video_path)
 
-    # 2) ASR – work with your current worker/asr.py
-    # we added transcribe_local earlier – but if the file still has only transcribe(), we fall back
-    if hasattr(asr, "transcribe_local"):
-        asr_result = asr.transcribe_local(local_video_path)
-    else:
-        asr_result = asr.transcribe(local_video_path)
-
-    clips: List[Dict[str, Any]] = []
-    slots: Dict[str, List[Dict[str, Any]]] = {
+def _slots_from_segments(segments: List[Dict[str, Any]]) -> Dict[str, List[Dict[str, Any]]]:
+    """
+    Very simple slotter:
+      - first non-empty becomes HOOK
+      - last CTA-like line becomes CTA
+      - rest become FEATURE
+    You already had that shape in your JSON, so we keep it.
+    """
+    slots = {
         "HOOK": [],
         "PROBLEM": [],
         "FEATURE": [],
@@ -113,80 +83,129 @@ def run_pipeline(
         "CTA": [],
     }
 
-    # 3) build clip objects, now with vision gating
-    for idx, seg in enumerate(asr_result):
-        text = (seg.get("text") or "").strip()
-        start = float(seg.get("start", 0.0))
-        end = float(seg.get("end", start + 0.5))
+    if not segments:
+        return slots
 
+    # heuristic CTA detector
+    CTA_WORDS = ["click", "grab", "get yours", "down below", "link"]
+
+    def looks_like_cta(t: str) -> bool:
+        t = t.lower()
+        return any(w in t for w in CTA_WORDS)
+
+    # HOOK = first
+    first = segments[0].copy()
+    first["slot"] = "HOOK"
+    slots["HOOK"].append(first)
+
+    # middle
+    for seg in segments[1:-1]:
+        t = seg["text"]
+        if looks_like_cta(t):
+            seg2 = seg.copy()
+            seg2["slot"] = "CTA"
+            slots["CTA"].append(seg2)
+        else:
+            seg2 = seg.copy()
+            seg2["slot"] = "FEATURE"
+            slots["FEATURE"].append(seg2)
+
+    # last
+    last = segments[-1].copy()
+    if looks_like_cta(last["text"]):
+        last["slot"] = "CTA"
+        slots["CTA"].append(last)
+    else:
+        last["slot"] = "FEATURE"
+        slots["FEATURE"].append(last)
+
+    return slots
+
+
+# ---------------------------------------------------------------------
+# main pipeline
+# ---------------------------------------------------------------------
+def run_pipeline(
+    session_id: str,
+    source_urls: List[str],
+    s3_prefix: str = "editdna/outputs/",
+) -> Dict[str, Any]:
+    """
+    What tasks.py calls.
+    1) download video
+    2) ASR it
+    3) filter/clean segments
+    4) upload final mp4 to S3 (you already have a render step in your real repo;
+       here we just re-upload the input for demo, same as your earlier JSONs)
+    """
+    # 1) download the first video
+    first_url = source_urls[0]
+    local_video_path = video.download_to_local(first_url)
+
+    # 2) probe duration (your video.py already has it)
+    dur = video.probe_duration(local_video_path)
+
+    # 3) run ASR (we renamed so pipeline calls transcribe_local, but your worker has both)
+    raw_segments = asr.transcribe_local(local_video_path)
+
+    # 4) clean up segments
+    cleaned: List[Dict[str, Any]] = []
+    seen_fuzzy = set()
+
+    for seg in raw_segments:
+        text = seg.get("text", "").strip()
         if not text:
             continue
 
-        # vision check for THIS segment
-        face_q, scene_q, vtx_sim, had_signal = _run_vision_gate(local_video_path, seg)
-        drop = _should_drop_by_vision(face_q, scene_q, vtx_sim, had_signal)
-        if drop:
-            # skip visually bad take
+        # hard bad lines (IMG_03 “wait…”, “why can’t i remember…”)
+        if _is_hard_bad(text):
             continue
 
-        slot = _classify_slot(text, idx)
+        # fuzzy duplicate lines (IMG_02 “if you wanna check them out…”)
+        is_dup, _ = _is_fuzzy_duplicate(text, seen_fuzzy)
+        if is_dup:
+            continue
 
-        clip_id = f"ASR{idx:04d}"
-        clip_obj = {
-            "id": clip_id,
-            "slot": slot if slot != "HOOK" else "STORY",  # keep overall list as STORY like your runs
-            "start": start,
-            "end": end,
-            "score": 2.5,
-            "face_q": face_q,
-            "scene_q": scene_q,
-            "vtx_sim": vtx_sim,
-            "chain_ids": [clip_id],
-            "text": text,
-        }
-        clips.append(clip_obj)
+        cleaned.append(seg)
 
-        # also push into slots structure the way your JSON shows
-        slot_entry = {
-            "id": clip_id,
-            "slot": slot,
-            "start": start,
-            "end": end,
-            "score": 2.5,
-            "face_q": face_q,
-            "scene_q": scene_q,
-            "vtx_sim": vtx_sim,
-            "chain_ids": [clip_id],
-            "text": text,
-        }
-        slots.setdefault(slot, []).append(slot_entry)
+    # if we cleaned too hard, fall back to raw
+    if not cleaned:
+        cleaned = raw_segments
 
-    # 4) render/export – in your flow the video is already the input,
-    # so we just upload the original / processed file.
-    # We'll make an S3 key like you've been getting.
-    base_name = f"{session_id}_{uuid.uuid4().hex}.mp4"
-    s3_key = os.path.join(s3_prefix, base_name)
+    # 5) build slots
+    slots = _slots_from_segments(cleaned)
 
-    https_url = s3.upload_file(local_video_path, s3_key)
+    # 6) "render" – for now, like your earlier runs, just re-upload the same clip
+    out_key = _gen_output_key(session_id)
+    https_url = s3.upload_file(local_video_path, out_key)
 
-    # match the style you showed: return both s3://... and https://...
-    s3_style_url = f"s3://{s3.S3_BUCKET}/{s3_key}"
-    urls = [s3_style_url, https_url]
-
-    elapsed = time.time() - t0
-
-    return {
+    result: Dict[str, Any] = {
         "ok": True,
         "session_id": session_id,
         "input_local": local_video_path,
-        "duration_sec": duration,
-        "s3_key": s3_key,
-        "s3_url": urls,
-        "https_url": urls,
-        "clips": clips,
+        "duration_sec": dur,
+        "s3_key": out_key,
+        "s3_url": https_url,
+        "https_url": https_url,
+        "clips": [
+            {
+                "id": f"ASR{i:04d}",
+                "slot": "STORY",  # raw view
+                "start": seg["start"],
+                "end": seg["end"],
+                "score": 2.5,
+                "face_q": 1.0,
+                "scene_q": 1.0,
+                "vtx_sim": 0.0,
+                "chain_ids": [f"ASR{i:04d}"],
+                "text": seg["text"],
+            }
+            for i, seg in enumerate(cleaned)
+        ],
         "slots": slots,
         "asr": True,
-        "semantic": True,  # you were marking this true in your outputs
-        "vision": _HAS_VISION,
-        "elapsed_sec": elapsed,
+        "semantic": True,
+        "vision": False,
     }
+
+    return result
