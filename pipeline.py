@@ -3,172 +3,170 @@ from __future__ import annotations
 
 import os
 import uuid
-from typing import Any, Dict, List, Optional, Tuple
+from typing import List, Dict, Any, Tuple
 
-from worker import video, s3, asr
+from worker import asr, video, s3
 
-
-# ------------------------------------------------------------
+# ---------------------------------------------------------
 # small helpers
-# ------------------------------------------------------------
-def _gen_output_key(session_id: str) -> str:
-    fname = f"{session_id}_{uuid.uuid4().hex}.mp4"
-    prefix = os.getenv("S3_PREFIX", "editdna/outputs/")
-    return os.path.join(prefix, fname)
+# ---------------------------------------------------------
+
+def _normalize_for_dupe(txt: str) -> str:
+    """
+    Make a text comparable so we can spot near-duplicates like:
+    "if you wanna check them out" vs "so if you wanna check them out"
+    """
+    t = txt.strip().lower()
+
+    # drop leading fillers that show up in retakes
+    for lead in ("so ", "and ", "um ", "uh ", "well "):
+        if t.startswith(lead):
+            t = t[len(lead):]
+
+    # kill commas and extra spaces
+    t = t.replace(",", " ").replace("  ", " ")
+    return t
 
 
-def _normalize_text(t: str) -> str:
-    return " ".join(t.strip().lower().split())
-
-
-# stuff we want to drop in the sloppy/slang takes
-HARD_BAD_PHRASES = [
-    "wait, am i saying that right",
-    "wait not moisture control",
-    "why can't i remember after that",
-    "what?",
-    "is that good?",
-    "yeah.",
-]
-
-# repetitive CTA-ish lines we saw in img_02
-DUPLICATE_FUZZY_PREFIXES = [
-    "if you wanna check them out",
-    "so if you wanna check them out",
-    "if you want to check them out",
-    "so if you want to check them out",
-    "and grab one of these",
-]
-
-
-def _is_hard_bad(text: str) -> bool:
-    nt = _normalize_text(text)
-    for bad in HARD_BAD_PHRASES:
-        if bad in nt:
+def _is_hard_bad(txt: str) -> bool:
+    """
+    Lines we NEVER want — obvious re-takes / meta / mistakes.
+    You can add to this list as you see more.
+    """
+    bad_bits = [
+        "wait",                      # "wait, am i saying that right?"
+        "why can't i remember",      # IMG_03
+        "am i saying that right",    # IMG_03
+        "what?",                     # IMG_03 mid-take
+        "is that good?",             # IMG_03 mid-check
+    ]
+    lt = txt.lower()
+    for b in bad_bits:
+        if b in lt:
             return True
     return False
 
 
-def _is_fuzzy_duplicate(text: str, seen_stubs: set) -> Tuple[bool, str]:
-    nt = _normalize_text(text)
-    for prefix in DUPLICATE_FUZZY_PREFIXES:
-        if nt.startswith(prefix):
-            if prefix in seen_stubs:
-                return True, prefix
-            seen_stubs.add(prefix)
-            return False, prefix
-    return False, ""
-
-
-def _slots_from_segments(segments: List[Dict[str, Any]]) -> Dict[str, List[Dict[str, Any]]]:
-    slots = {
+def _slots_from_clips(clips: List[Dict[str, Any]]) -> Dict[str, List[Dict[str, Any]]]:
+    """
+    Build the same slot structure your current output has.
+    We'll keep it simple: first line -> HOOK, last CTA-ish -> CTA, rest -> FEATURE
+    """
+    slots: Dict[str, List[Dict[str, Any]]] = {
         "HOOK": [],
         "PROBLEM": [],
         "FEATURE": [],
         "PROOF": [],
         "CTA": [],
     }
-    if not segments:
+
+    if not clips:
         return slots
 
-    CTA_WORDS = ["click", "grab", "get yours", "down below", "link"]
+    # hook = first line
+    first = clips[0]
+    slots["HOOK"].append({
+        "text": first["text"],
+        "start": first["start"],
+        "end": first["end"],
+        "slot": "HOOK",
+    })
 
-    def looks_like_cta(t: str) -> bool:
+    # CTA heuristic: if a line mentions "grab one", "click", "down below" → CTA
+    def _looks_like_cta(t: str) -> bool:
         t = t.lower()
-        return any(w in t for w in CTA_WORDS)
+        return (
+            "grab one" in t
+            or "click the link" in t
+            or "down below" in t
+            or "get yours" in t
+            or "check them out" in t
+        )
 
-    # first segment → HOOK
-    first = segments[0].copy()
-    first["slot"] = "HOOK"
-    slots["HOOK"].append(first)
-
-    # middle
-    for seg in segments[1:-1]:
-        seg2 = seg.copy()
-        if looks_like_cta(seg["text"]):
-            seg2["slot"] = "CTA"
-            slots["CTA"].append(seg2)
+    # everything else → FEATURE, but if CTA-ish → CTA
+    for c in clips[1:]:
+        if _looks_like_cta(c["text"]):
+            slots["CTA"].append({
+                "text": c["text"],
+                "start": c["start"],
+                "end": c["end"],
+                "slot": "CTA",
+            })
         else:
-            seg2["slot"] = "FEATURE"
-            slots["FEATURE"].append(seg2)
-
-    # last
-    last = segments[-1].copy()
-    if looks_like_cta(last["text"]):
-        last["slot"] = "CTA"
-        slots["CTA"].append(last)
-    else:
-        last["slot"] = "FEATURE"
-        slots["FEATURE"].append(last)
+            slots["FEATURE"].append({
+                "text": c["text"],
+                "start": c["start"],
+                "end": c["end"],
+                "slot": "FEATURE",
+            })
 
     return slots
 
 
-# ------------------------------------------------------------
+# ---------------------------------------------------------
 # main pipeline
-# ------------------------------------------------------------
+# ---------------------------------------------------------
+
 def run_pipeline(
     session_id: str,
-    urls: Optional[List[str]] = None,
+    urls: List[str],
     s3_prefix: str = "editdna/outputs/",
-    local_video_path: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
-    Your tasks.py is calling with local_video_path=..., so we accept it here.
+    tasks.py is calling us like:
+        pipeline.run_pipeline(session_id=..., urls=..., s3_prefix=...)
+    and BEFORE it calls us, tasks.py already downloaded the video to /tmp/....mp4
+    (you can see that in your logs)
+
+    So here we:
+      1) take the first URL (that was downloaded) and re-download/normalize to local
+      2) run ASR
+      3) filter
+      4) upload original video (or the same file) to S3
+      5) return JSON in the same shape your UI expects
     """
-    # 1) pick the video path
-    if local_video_path and os.path.exists(local_video_path):
-        vid_path = local_video_path
-    else:
-        if not urls:
-            raise ValueError("run_pipeline: no local_video_path and no urls provided")
-        first_url = urls[0]
-        vid_path = video.download_to_local(first_url)
+    print("[pipeline] using filtered pipeline v1", flush=True)
 
-    # 2) probe duration
-    duration = video.probe_duration(vid_path)
+    if not urls:
+        raise ValueError("no urls provided")
 
-    # 3) run ASR
-    raw_segments = asr.transcribe_local(vid_path)
+    # ensure local video path
+    # your tasks.py already called video.download_to_local(...) before calling us,
+    # but we can safely call it again – if it's local, video.download_to_local just returns the same path.
+    src = urls[0]
+    local_video_path = video.download_to_local(src)
 
-    # 4) clean segments
+    # 1) run ASR
+    raw_segments: List[Dict[str, Any]] = asr.transcribe_local(local_video_path)
+
+    # 2) filter segments
     cleaned: List[Dict[str, Any]] = []
-    seen_fuzzy = set()
+    seen_norm = set()
 
     for seg in raw_segments:
         txt = seg.get("text", "").strip()
         if not txt:
             continue
 
-        # kill obvious bad-take lines
+        # hard-bad lines: camera talk, "wait", "why can't i remember..."
         if _is_hard_bad(txt):
             continue
 
-        # kill duplicate CTA-ish lines
-        is_dup, _ = _is_fuzzy_duplicate(txt, seen_fuzzy)
-        if is_dup:
+        norm = _normalize_for_dupe(txt)
+        if norm in seen_norm:
+            # it's a retake / duplicate wording → skip
             continue
+        seen_norm.add(norm)
 
         cleaned.append(seg)
 
-    # if we accidentally deleted everything, just use original ASR
-    if not cleaned:
-        cleaned = raw_segments
-
-    # 5) build slots
-    slots = _slots_from_segments(cleaned)
-
-    # 6) upload original video (like your current pipeline does)
-    out_key = _gen_output_key(session_id)
-    https_url = s3.upload_file(vid_path, out_key)
-
-    # 7) convert cleaned segments to clips
-    clips = []
+    # 3) build clips (your current shape)
+    clips: List[Dict[str, Any]] = []
     for i, seg in enumerate(cleaned):
         clips.append(
             {
                 "id": f"ASR{i:04d}",
-                "slot": "STORY",
+                "slot": "STORY",   # we'll still give STORY; slots block will refine
                 "start": seg["start"],
                 "end": seg["end"],
                 "score": 2.5,
@@ -180,11 +178,21 @@ def run_pipeline(
             }
         )
 
-    return {
+    # 4) build slots
+    slots = _slots_from_clips(clips)
+
+    # 5) upload to S3 (same as your worker/s3.py style)
+    # we’ll just re-upload the input video as the output mp4, to match your previous results
+    out_key = f"{s3_prefix}{session_id}_{uuid.uuid4().hex}.mp4"
+    https_url = s3.upload_file(local_video_path, out_key)
+
+    # 6) final payload
+    result: Dict[str, Any] = {
         "ok": True,
         "session_id": session_id,
-        "input_local": vid_path,
-        "duration_sec": duration,
+        "input_local": local_video_path,
+        # if you want real duration, use worker.video.probe_duration(...)
+        "duration_sec": video.probe_duration(local_video_path),
         "s3_key": out_key,
         "s3_url": https_url,
         "https_url": https_url,
@@ -194,3 +202,5 @@ def run_pipeline(
         "semantic": True,
         "vision": False,
     }
+
+    return result
