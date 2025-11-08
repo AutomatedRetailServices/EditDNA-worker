@@ -3,6 +3,8 @@ from __future__ import annotations
 import os
 import uuid
 import shutil
+import subprocess
+import tempfile
 from typing import List, Dict, Any
 
 from worker import asr
@@ -10,78 +12,91 @@ from worker import video
 from worker import s3
 
 
-# ---------------------------------------------------------------------
-# helpers for text filtering
-# ---------------------------------------------------------------------
-# these are the *real* junky / repetitive tails we saw in IMG_02
-BAD_PHRASES = [
+# ------------------------------------------------------------
+# 1) phrases we actually want to drop (from your logs)
+# ------------------------------------------------------------
+DEFAULT_BAD_PHRASES = [
     "if you wanna check them out",
     "so if you wanna check them out",
     "i left it for you down below",
     "and grab one of these westland",
     "and grab one of these for yourself",
+    "go ahead and click the link",
 ]
 
-def looks_like_filler(text: str) -> bool:
-    """
-    drop obvious repeats and super-short empties.
-    DO NOT drop slang – we only drop what's in BAD_PHRASES
-    """
+
+def _load_bad_phrases() -> List[str]:
+    env_val = os.getenv("BAD_PHRASES", "").strip()
+    if not env_val:
+        return [p.lower() for p in DEFAULT_BAD_PHRASES]
+    return [p.strip().lower() for p in env_val.split("|") if p.strip()]
+
+
+BAD_PHRASES = _load_bad_phrases()
+
+
+def is_bad_phrase(text: str) -> bool:
     t = (text or "").lower().strip()
     if not t:
-        return True
-
-    # very short nothing-burgers
-    if len(t) < 4:
-        return True
-
+        return False
     for bad in BAD_PHRASES:
         if bad in t:
             return True
-
-    # lazy catch for "so so so ..." rambles
-    if t.count(" so ") > 2:
-        return True
-
     return False
 
 
-def filter_bad_segments(segments: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-    clean: List[Dict[str, Any]] = []
-    for seg in segments:
-        txt = seg.get("text", "")
-        if looks_like_filler(txt):
-            print(f"[pipeline] dropped segment: {txt!r}")
-            continue
-        clean.append(seg)
-    return clean
+def is_near_duplicate(prev_text: str, curr_text: str) -> bool:
+    if not prev_text or not curr_text:
+        return False
+    p = prev_text.lower().strip()
+    c = curr_text.lower().strip()
+    if p == c:
+        return True
+    if p in c or c in p:
+        return True
+    return False
 
 
-# ---------------------------------------------------------------------
-# build clips & slots in the same shape your API is expecting
-# ---------------------------------------------------------------------
-
-def build_clips(segments: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+# ------------------------------------------------------------
+# 2) turn ASR segments into filtered clips
+# ------------------------------------------------------------
+def build_filtered_clips(segments: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     clips: List[Dict[str, Any]] = []
+    last_kept_text = ""
+
     for i, seg in enumerate(segments):
+        txt = seg["text"]
+
+        # drop lines we know we don't want
+        if is_bad_phrase(txt):
+            continue
+
+        # drop immediate duplicates
+        if last_kept_text and is_near_duplicate(last_kept_text, txt):
+            continue
+
         cid = f"ASR{i:04d}"
-        clips.append(
-            {
-                "id": cid,
-                "slot": "STORY",
-                "start": seg["start"],
-                "end": seg["end"],
-                "score": 2.5,
-                "face_q": 1.0,
-                "scene_q": 1.0,
-                "vtx_sim": 0.0,
-                "chain_ids": [cid],
-                "text": seg["text"],
-            }
-        )
+        clip = {
+            "id": cid,
+            "slot": "STORY",  # we'll classify later
+            "start": float(seg["start"]),
+            "end": float(seg["end"]),
+            "score": 2.5,
+            "face_q": 1.0,
+            "scene_q": 1.0,
+            "vtx_sim": 0.0,
+            "chain_ids": [cid],
+            "text": txt,
+        }
+        clips.append(clip)
+        last_kept_text = txt
+
     return clips
 
 
+# ------------------------------------------------------------
+# 3) slot builder (same shape as your previous results)
+# ------------------------------------------------------------
 def build_slots(clips: List[Dict[str, Any]]) -> Dict[str, List[Dict[str, Any]]]:
     slots: Dict[str, List[Dict[str, Any]]] = {
         "HOOK": [],
@@ -105,9 +120,9 @@ def build_slots(clips: List[Dict[str, Any]]) -> Dict[str, List[Dict[str, Any]]]:
     for clip in clips:
         txt = clip["text"]
         if not first_hook_done:
-            h = clip.copy()
-            h["slot"] = "HOOK"
-            slots["HOOK"].append(h)
+            c = clip.copy()
+            c["slot"] = "HOOK"
+            slots["HOOK"].append(c)
             first_hook_done = True
             continue
 
@@ -123,22 +138,73 @@ def build_slots(clips: List[Dict[str, Any]]) -> Dict[str, List[Dict[str, Any]]]:
     return slots
 
 
-# ---------------------------------------------------------------------
-# output + upload
-# ---------------------------------------------------------------------
-
-def _make_output_path(local_video_path: str, session_id: str) -> str:
-    base_ext = os.path.splitext(local_video_path)[1] or ".mp4"
-    out_name = f"{session_id}_{uuid.uuid4().hex}{base_ext}"
-    return os.path.join("/tmp", out_name)
+# ------------------------------------------------------------
+# 4) ffmpeg helpers to CUT and CONCAT
+# ------------------------------------------------------------
+def _run_ffmpeg(cmd: List[str]) -> None:
+    subprocess.check_call(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
 
+def cut_clip_ffmpeg(src: str, start: float, end: float, out_path: str) -> None:
+    """
+    Cut one piece from src → out_path using stream copy (fast)
+    """
+    duration = max(0.0, end - start)
+    # -ss BEFORE -i is faster but less accurate; this is OK for your use-case
+    cmd = [
+        "ffmpeg",
+        "-y",
+        "-ss",
+        f"{start}",
+        "-i",
+        src,
+        "-t",
+        f"{duration}",
+        "-c",
+        "copy",
+        out_path,
+    ]
+    _run_ffmpeg(cmd)
+
+
+def concat_clips_ffmpeg(parts: List[str], out_path: str) -> None:
+    """
+    Use concat demuxer: create a text file with all parts
+    """
+    if not parts:
+        raise ValueError("no parts to concat")
+
+    list_file = out_path + ".txt"
+    with open(list_file, "w") as f:
+        for p in parts:
+            # paths must be quoted or escaped; simplest is single quotes
+            f.write(f"file '{p}'\n")
+
+    cmd = [
+        "ffmpeg",
+        "-y",
+        "-f",
+        "concat",
+        "-safe",
+        "0",
+        "-i",
+        list_file,
+        "-c",
+        "copy",
+        out_path,
+    ]
+    _run_ffmpeg(cmd)
+    os.remove(list_file)
+
+
+# ------------------------------------------------------------
+# 5) upload helper
+# ------------------------------------------------------------
 def _upload_output(local_path: str, s3_prefix: str) -> Dict[str, Any]:
     filename = os.path.basename(local_path)
     key = os.path.join(s3_prefix, filename).replace("\\", "/")
-
-    url = s3.upload_file(local_path, key)
     bucket = os.environ.get("S3_BUCKET", "script2clipshop-video-automatedretailservices")
+    url = s3.upload_file(local_path, key)
     s3_url = f"s3://{bucket}/{key}"
     return {
         "s3_key": key,
@@ -147,38 +213,51 @@ def _upload_output(local_path: str, s3_prefix: str) -> Dict[str, Any]:
     }
 
 
-# ---------------------------------------------------------------------
-# main entry
-# ---------------------------------------------------------------------
-
+# ------------------------------------------------------------
+# 6) main entry – tasks.py calls this
+# ------------------------------------------------------------
 def run_pipeline(
     local_video_path: str,
     session_id: str,
     s3_prefix: str = "editdna/outputs/",
 ) -> Dict[str, Any]:
-    print("[pipeline] filtered pipeline ACTIVE (slang allowed)", flush=True)
+    print("[pipeline] CUT-BY-SCRIPT pipeline ACTIVE", flush=True)
 
-    # 1) duration
+    # 1) get duration
     duration_sec = video.probe_duration(local_video_path)
 
     # 2) ASR
-    asr_segments = asr.transcribe_local(local_video_path)
+    segments = asr.transcribe_local(local_video_path)
 
-    # 3) filter only the real junk (not your slang)
-    filtered_segments = filter_bad_segments(asr_segments)
+    # 3) FILTER into clips
+    clips = build_filtered_clips(segments)
 
-    # 4) clips + slots
-    clips = build_clips(filtered_segments)
+    # 4) build slots (for your UI)
     slots = build_slots(clips)
 
-    # 5) copy original as "rendered"
-    out_local = _make_output_path(local_video_path, session_id)
-    shutil.copy(local_video_path, out_local)
+    # 5) actually CUT the video according to those clips
+    tmp_dir = tempfile.mkdtemp(prefix="cutparts_")
+    part_paths: List[str] = []
+    for idx, c in enumerate(clips):
+        part_out = os.path.join(tmp_dir, f"part_{idx:04d}.mp4")
+        # guard bad times
+        start = max(0.0, float(c["start"]))
+        end = max(start, float(c["end"]))
+        cut_clip_ffmpeg(local_video_path, start, end, part_out)
+        part_paths.append(part_out)
 
-    # 6) upload
-    upload_info = _upload_output(out_local, s3_prefix)
+    # if nothing survived filtering, just upload original
+    if part_paths:
+        final_local = os.path.join("/tmp", f"{session_id}_{uuid.uuid4().hex}.mp4")
+        concat_clips_ffmpeg(part_paths, final_local)
+    else:
+        # nothing to concat – upload original
+        final_local = os.path.join("/tmp", f"{session_id}_{uuid.uuid4().hex}.mp4")
+        shutil.copy(local_video_path, final_local)
 
-    # 7) response
+    upload_info = _upload_output(final_local, s3_prefix)
+
+    # 6) return JSON similar to your earlier ones
     result: Dict[str, Any] = {
         "ok": True,
         "session_id": session_id,
@@ -191,4 +270,11 @@ def run_pipeline(
         "vision": True,
     }
     result.update(upload_info)
+
+    # clean temp parts (best-effort)
+    try:
+        shutil.rmtree(tmp_dir)
+    except Exception:
+        pass
+
     return result
