@@ -1,10 +1,12 @@
 # /workspace/EditDNA-worker/tasks.py
 from __future__ import annotations
 import os
-from typing import List
+from typing import List, Dict, Any
 
 from worker import video
-import pipeline  # our pipeline.py in the same repo
+import pipeline  # the file above
+
+QUEUE_NAME = os.getenv("RQ_QUEUE", "default")
 
 
 def _download_all(urls: List[str]) -> str:
@@ -15,7 +17,7 @@ def _download_all(urls: List[str]) -> str:
     return local_path
 
 
-def job_render(payload: dict) -> dict:
+def job_render(payload: Dict[str, Any]) -> Dict[str, Any]:
     print("[worker.tasks] job_render() start")
     session_id = payload.get("session_id", f"session-{os.getpid()}")
     urls = payload.get("files") or payload.get("urls") or []
@@ -25,7 +27,6 @@ def job_render(payload: dict) -> dict:
     print(f"  urls={urls}")
     print(f"  s3_prefix={s3_prefix}")
 
-    # 1) download
     local_video_path = _download_all(urls)
     print(f"[worker.tasks] downloaded to {local_video_path}")
 
