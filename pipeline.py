@@ -1,8 +1,7 @@
 # /workspace/EditDNA-worker/pipeline.py
-
 from __future__ import annotations
+
 import os
-import re
 import time
 import uuid
 import tempfile
@@ -13,57 +12,37 @@ from typing import List, Dict, Any, Optional, Tuple
 import boto3
 
 # ------------------------------------------------------------
-# 0) ENV HELPERS (fixed parsing)
+# 1) ENV HELPERS
 # ------------------------------------------------------------
 
-def _env_raw(k: str) -> str:
+def _env_str(key: str, default: str = "") -> str:
     """
-    Read env var, strip inline comments and whitespace.
-    e.g. MAX_DURATION_SEC="220" # sec  -> "220"
+    Read an env var, strip comments and quotes.
+    e.g. MAX_DURATION_SEC="220" # test  → we want 220
     """
-    v = os.getenv(k, "")
-    if not v:
-        return ""
-    v = v.split("#", 1)[0].strip()
-    return v
+    raw = os.getenv(key)
+    if not raw:
+        return default
+    # drop comments
+    raw = raw.split("#", 1)[0].strip()
+    # drop quotes
+    if (raw.startswith('"') and raw.endswith('"')) or (raw.startswith("'") and raw.endswith("'")):
+        raw = raw[1:-1].strip()
+    return raw or default
 
-def _clean_num_str(s: str) -> str:
-    s = s.strip()
-    # remove surrounding quotes if present
-    if (s.startswith('"') and s.endswith('"')) or (s.startswith("'") and s.endswith("'")):
-        s = s[1:-1].strip()
-    return s
 
-def _env_str(k: str, d: str) -> str:
-    v = _env_raw(k)
-    return v or d
-
-def _env_float(k: str, d: float) -> float:
-    v = _env_raw(k)
-    if not v:
-        return d
-    v = _clean_num_str(v)
+def _env_float(key: str, default: float) -> float:
+    raw = _env_str(key, "")
+    if not raw:
+        return default
     try:
-        return float(v)
+        return float(raw)
     except Exception:
-        # try to extract first number
-        m = re.search(r"[-+]?\d+(\.\d+)?", v)
-        if m:
-            try:
-                return float(m.group(0))
-            except Exception:
-                pass
-        return d
-
-def _env_bool(k: str, d: bool = False) -> bool:
-    v = _env_raw(k).lower()
-    if not v:
-        return d
-    return v in ("1", "true", "yes", "on")
+        return default
 
 
 # ------------------------------------------------------------
-# 1) CONFIG
+# 2) ENV CONFIG
 # ------------------------------------------------------------
 
 FFMPEG_BIN  = _env_str("FFMPEG_BIN", "/usr/bin/ffmpeg")
@@ -74,21 +53,11 @@ S3_PREFIX   = _env_str("S3_PREFIX", "editdna/outputs")
 AWS_REGION  = _env_str("AWS_REGION", "us-east-1")
 S3_ACL      = _env_str("S3_ACL", "public-read")
 
-MAX_DURATION_SEC = _env_float("MAX_DURATION_SEC", 120.0)
-MAX_TAKE_SEC     = _env_float("MAX_TAKE_SEC", 20.0)
-MIN_TAKE_SEC     = _env_float("MIN_TAKE_SEC", 2.0)
+MAX_DURATION_SEC = _env_float("MAX_DURATION_SEC", 120.0)  # total output max
+MAX_TAKE_SEC     = _env_float("MAX_TAKE_SEC", 20.0)       # single segment max
+MIN_TAKE_SEC     = _env_float("MIN_TAKE_SEC", 2.0)        # single segment min
 
-# LLM config
-OPENAI_API_KEY   = _env_str("OPENAI_API_KEY", "")
-LLM_MODEL        = _env_str("LLM_MODEL", "gpt-4o-mini")  # change if you want
-REQUIRE_LLM      = _env_bool("REQUIRE_LLM", False)       # if True and no key -> error
-LLM_KEEP_MIN     = _env_float("LLM_KEEP_MIN", 0.35)      # min combined score required
-
-
-# ------------------------------------------------------------
-# 2) TEXT RULES (your scope)
-# ------------------------------------------------------------
-
+# phrases / patterns
 BAD_PHRASES = [
     "wait",
     "hold on",
@@ -98,9 +67,10 @@ BAD_PHRASES = [
     "no no",
     "redo",
     "sorry",
+    "why can't i remember",  # we saw this in img_03
 ]
 
-CTA_FLUFF = [
+CTA_PHRASES = [
     "click the link",
     "get yours today",
     "go ahead and click",
@@ -108,12 +78,15 @@ CTA_FLUFF = [
     "i left it down below",
     "i left it for you down below",
     "grab one of these",
+    "and grab one of these",
     "if you want to check them out",
+    "if you wanna check them out",
 ]
 
 UGLY_BRANCHES = [
     "but if you don't like the checker print",
     "but if you don't like the checker",
+    "but if you don't like the checkered print",
     "but if you do",
     "but if you don't",
     "but if you",
@@ -124,11 +97,14 @@ FEATURE_HINTS = [
     "material", "woven", "quality", "hardware",
     "comes with", "it has", "it also has",
     "it's actually", "this isn't just", "design",
+    "support moisture", "odor", "balance", "probiotic", "gummy",
 ]
+
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")  # may be None
 
 
 # ------------------------------------------------------------
-# 3) DATA MODEL
+# 3) DATA CLASS
 # ------------------------------------------------------------
 
 @dataclass
@@ -152,10 +128,12 @@ def _run(cmd: List[str]) -> Tuple[int, str, str]:
     out, err = p.communicate()
     return p.returncode, out.strip(), err.strip()
 
+
 def _tmpfile(suffix: str = ".mp4") -> str:
-    fd, p = tempfile.mkstemp(suffix=suffix)
+    fd, path = tempfile.mkstemp(suffix=suffix)
     os.close(fd)
-    return p
+    return path
+
 
 def _ffprobe_duration(path: str) -> float:
     code, out, err = _run([
@@ -174,22 +152,21 @@ def _ffprobe_duration(path: str) -> float:
 
 
 # ------------------------------------------------------------
-# 5) S3
+# 5) S3 UPLOAD
 # ------------------------------------------------------------
 
 def _upload_to_s3(local_path: str, s3_prefix: Optional[str] = None) -> Dict[str, str]:
     if not S3_BUCKET:
-        raise RuntimeError("S3_BUCKET not set")
+        raise RuntimeError("S3_BUCKET not set in env")
+
     s3 = boto3.client("s3", region_name=AWS_REGION)
     prefix = (s3_prefix or S3_PREFIX).rstrip("/")
     key = f"{prefix}/{uuid.uuid4().hex}_{int(time.time())}.mp4"
+
     with open(local_path, "rb") as fh:
-        s3.upload_fileobj(
-            fh,
-            S3_BUCKET,
-            key,
-            ExtraArgs={"ACL": S3_ACL, "ContentType": "video/mp4"},
-        )
+        extra = {"ACL": S3_ACL, "ContentType": "video/mp4"} if S3_ACL else {"ContentType": "video/mp4"}
+        s3.upload_fileobj(fh, S3_BUCKET, key, ExtraArgs=extra)
+
     return {
         "s3_key": key,
         "s3_url": f"s3://{S3_BUCKET}/{key}",
@@ -198,24 +175,25 @@ def _upload_to_s3(local_path: str, s3_prefix: Optional[str] = None) -> Dict[str,
 
 
 # ------------------------------------------------------------
-# 6) ASR LOADING (match your current worker/asr.py)
+# 6) ASR LOADING (FROM YOUR worker.asr)
 # ------------------------------------------------------------
 
-def _load_asr_segments_from_local(path: str) -> Optional[List[Dict[str, Any]]]:
+def _load_asr_segments(local_video_path: str) -> Optional[List[Dict[str, Any]]]:
     """
-    Your asr.py has transcribe() and transcribe_local(). We'll try both.
+    Your asr.py has transcribe_local(path) → list of {text, start, end}
+    We wrap that.
     """
     try:
-        from worker import asr as asr_mod
-    except Exception:
-        print("[pipeline] could not import worker.asr -> no ASR", flush=True)
+        from worker.asr import transcribe_local
+    except Exception as e:
+        print(f"[pipeline] cannot import worker.asr: {e}", flush=True)
         return None
 
-    segs = None
-    if hasattr(asr_mod, "transcribe_local"):
-        segs = asr_mod.transcribe_local(path)
-    else:
-        segs = asr_mod.transcribe(path)
+    try:
+        segs = transcribe_local(local_video_path)
+    except Exception as e:
+        print(f"[pipeline] ASR failed: {e}", flush=True)
+        return None
 
     if not segs:
         return None
@@ -223,26 +201,29 @@ def _load_asr_segments_from_local(path: str) -> Optional[List[Dict[str, Any]]]:
 
 
 # ------------------------------------------------------------
-# 7) CLAUSE UTILITIES (same logic you liked for IMG_02)
+# 7) CLAUSE UTILITIES
 # ------------------------------------------------------------
 
 def _split_into_clauses(text: str) -> List[str]:
     if not text:
         return []
-    text = " ".join(text.split())
-    temp: List[str] = []
+    text = " ".join(text.split())  # normalize spaces
+
+    # first break on sentence-ish punctuation
+    tmp: List[str] = []
     buf = ""
     for ch in text:
         buf += ch
         if ch in ".?!":
-            temp.append(buf.strip())
+            tmp.append(buf.strip())
             buf = ""
     if buf.strip():
-        temp.append(buf.strip())
+        tmp.append(buf.strip())
 
     clauses: List[str] = []
-    for piece in temp:
+    for piece in tmp:
         low = piece.lower()
+        # further split on 'and' / 'but'
         if " but " in low or " and " in low:
             piece = piece.replace(" but ", "|SPLIT|").replace(" and ", "|SPLIT|")
             for part in piece.split("|SPLIT|"):
@@ -254,103 +235,47 @@ def _split_into_clauses(text: str) -> List[str]:
             if piece:
                 clauses.append(piece)
 
+    # drop super short
     clauses = [c for c in clauses if len(c.split()) >= 3]
     return clauses
 
-def _rule_score_clause(c: str) -> float:
-    """
-    1.0 = looks like nice product line
-    0.0 = looks like trash / retake / branch we don't want
-    """
-    low = c.lower().strip()
-    if not low:
-        return 0.0
 
-    # hard bad
+def _clause_is_bad(c: str) -> bool:
+    low = c.lower()
     for p in BAD_PHRASES:
         if p in low:
-            return 0.0
-
-    # ugly branches
+            return True
     for p in UGLY_BRANCHES:
         if p in low:
-            return 0.1
+            return True
+    if len(low.split()) < 3:
+        return True
+    return False
 
-    # good featurey
+
+def _clause_is_featurey(c: str) -> bool:
+    low = c.lower()
     for h in FEATURE_HINTS:
         if h in low:
-            return 0.9
+            return True
+    return False
 
-    # CTA lines are okay but not the main meat
-    for p in CTA_FLUFF:
+
+def _clause_is_ctaish(c: str) -> bool:
+    low = c.lower()
+    for p in CTA_PHRASES:
         if p in low:
-            return 0.6
+            return True
+    if low.startswith("if you want to") or low.startswith("if you wanna"):
+        return True
+    return False
 
-    # fallback
-    return 0.5
-
-# ------------------------------------------------------------
-# 8) OPTIONAL LLM SCORING
-# ------------------------------------------------------------
-
-_client = None
-if OPENAI_API_KEY:
-    try:
-        from openai import OpenAI
-        _client = OpenAI(api_key=OPENAI_API_KEY)
-        print("[pipeline] LLM scoring ENABLED", flush=True)
-    except Exception as e:
-        print(f"[pipeline] could not init OpenAI client: {e}", flush=True)
-else:
-    if REQUIRE_LLM:
-        raise RuntimeError("REQUIRE_LLM=1 but OPENAI_API_KEY is not set")
-    print("[pipeline] LLM scoring DISABLED (no OPENAI_API_KEY)", flush=True)
-
-
-def _llm_score_clause(text: str) -> float:
-    """
-    Ask the model: is this sentence useful for a short product / sales video?
-    Return 0.0-1.0. If LLM not available, return 0.0 (we'll use rule score).
-    """
-    if _client is None:
-        return 0.0
-
-    prompt = (
-        "You are rating lines from a short social-media sales video. "
-        "Score 0 to 1. 1 = keep (on-script, product/features/benefit/CTA), "
-        "0 = drop (restart, filler, branch, irrelevant). "
-        f"Line: {text!r} "
-        "Just return the number."
-    )
-    try:
-        resp = _client.chat.completions.create(
-            model=LLM_MODEL,
-            messages=[{"role": "user", "content": prompt}],
-            max_tokens=10,
-        )
-        raw = resp.choices[0].message.content.strip()
-        # try to extract float
-        m = re.search(r"(\d+(\.\d+)?)", raw)
-        if not m:
-            return 0.0
-        val = float(m.group(1))
-        # clamp
-        if val < 0.0: val = 0.0
-        if val > 1.0: val = 1.0
-        return val
-    except Exception as e:
-        print(f"[pipeline] LLM scoring failed: {e}", flush=True)
-        return 0.0
-
-
-# ------------------------------------------------------------
-# 9) TIME DISTRIBUTION INSIDE SEGMENT
-# ------------------------------------------------------------
 
 def _assign_times_to_clauses(seg_start: float, seg_end: float, clauses: List[str]) -> List[Tuple[float, float, str]]:
     dur = max(0.05, seg_end - seg_start)
     joined = " ".join(clauses)
     total_len = max(1, len(joined))
+
     out: List[Tuple[float, float, str]] = []
     cursor = 0
     for c in clauses:
@@ -365,7 +290,7 @@ def _assign_times_to_clauses(seg_start: float, seg_end: float, clauses: List[str
 
 
 # ------------------------------------------------------------
-# 10) TEXT CLEANUP
+# 8) TEXT CLEANUP
 # ------------------------------------------------------------
 
 def _trim_repeated_ngrams(txt: str, n: int = 4) -> str:
@@ -380,54 +305,93 @@ def _trim_repeated_ngrams(txt: str, n: int = 4) -> str:
         seen[key] = i
     return txt
 
+
 def _trim_cta_fluff(txt: str) -> str:
     low = txt.lower()
-    for p in CTA_FLUFF:
+    for p in CTA_PHRASES:
         idx = low.find(p)
         if idx != -1:
             return txt[:idx].rstrip(" ,.;")
     return txt
 
-def _clean_text(txt: str) -> str:
+
+def _clean_text(txt: str, *, is_cta: bool = False) -> str:
     txt = _trim_repeated_ngrams(txt, n=4)
-    txt = _trim_cta_fluff(txt)
+    # IMPORTANT: don't strip the actual CTA if this clause is CTA-ish
+    if not is_cta:
+        txt = _trim_cta_fluff(txt)
     return txt.strip()
 
 
 # ------------------------------------------------------------
-# 11) FALLBACK TIME-BASED SEGMENTS
+# 9) LLM SCORING (OPTIONAL)
 # ------------------------------------------------------------
 
-def _time_based_takes(vid_dur: float) -> List[Take]:
-    takes: List[Take] = []
-    t = 0.0
-    idx = 1
-    while t < vid_dur:
-        end = min(t + MAX_TAKE_SEC, vid_dur)
-        if (end - t) >= MIN_TAKE_SEC:
-            takes.append(
-                Take(
-                    id=f"SEG{idx:04d}",
-                    start=t,
-                    end=end,
-                    text=f"Auto segment {idx} ({t:.1f}s–{end:.1f}s)",
-                )
-            )
-            idx += 1
-        t = end
-    return takes
+def _llm_score_clause(text: str) -> Optional[float]:
+    """
+    Returns a float 0..1 if OPENAI_API_KEY is set, else None.
+    We keep it simple: 1 = on-script sales / feature / benefit / CTA
+    0 = obvious mistake / retry / confusion
+    """
+    if not OPENAI_API_KEY:
+        return None
+
+    try:
+        from openai import OpenAI
+        client = OpenAI(api_key=OPENAI_API_KEY)
+
+        prompt = (
+            "You are scoring lines from a talking-head UGC sales video. "
+            "Score 1.0 if the line is smooth, product-related, a benefit, a CTA, or a clear hook. "
+            "Score 0.0 if the line is a restart, a forgotten line, a self-correction, or off-topic.\n\n"
+            f"LINE: {text!r}\n"
+            "Return ONLY a number between 0 and 1."
+        )
+
+        resp = client.responses.create(
+            model="gpt-4o-mini",
+            input=prompt,
+            max_output_tokens=5,
+        )
+        raw = resp.output_text.strip()
+        try:
+            val = float(raw)
+        except Exception:
+            val = 0.5
+        val = max(0.0, min(1.0, val))
+        return val
+    except Exception as e:
+        print(f"[pipeline] LLM scoring failed: {e}", flush=True)
+        return None
+
+
+def _rule_score_clause(text: str) -> float:
+    low = text.lower()
+    # bad
+    for p in BAD_PHRASES:
+        if p in low:
+            return 0.0
+    # good-ish
+    if _clause_is_featurey(text):
+        return 0.9
+    if _clause_is_ctaish(text):
+        return 0.8
+    # default
+    return 0.6
 
 
 # ------------------------------------------------------------
-# 12) EXPORT CONCAT VIDEO
+# 10) EXPORT (FFMPEG CONCAT)
 # ------------------------------------------------------------
 
 def _export_concat(src: str, takes: List[Take]) -> str:
     if not takes:
-        # fallback to first 5s
+        # fallback: first 5s
         takes = [Take(id="FALLBACK", start=0.0, end=min(5.0, MAX_DURATION_SEC), text="")]
+
     listfile = _tmpfile(".txt")
     parts: List[str] = []
+
     for idx, t in enumerate(takes, start=1):
         part = _tmpfile(f".part{idx:02d}.mp4")
         parts.append(part)
@@ -442,6 +406,7 @@ def _export_concat(src: str, takes: List[Take]) -> str:
             "-c:a", "aac", "-b:a", "128k",
             part
         ])
+
     with open(listfile, "w") as f:
         for p in parts:
             f.write(f"file '{p}'\n")
@@ -460,7 +425,7 @@ def _export_concat(src: str, takes: List[Take]) -> str:
 
 
 # ------------------------------------------------------------
-# 13) PUBLIC ENTRY (this is what tasks.py calls)
+# 11) PUBLIC ENTRYPOINT (WHAT tasks.py CALLS)
 # ------------------------------------------------------------
 
 def run_pipeline(
@@ -472,67 +437,65 @@ def run_pipeline(
 ) -> Dict[str, Any]:
     print("[pipeline] filtered pipeline ACTIVE", flush=True)
 
-    src = local_video_path
-    real_dur = _ffprobe_duration(src)
-    cap = min(MAX_DURATION_SEC, real_dur) if real_dur > 0 else MAX_DURATION_SEC
+    # 1) how long is the input?
+    real_dur = _ffprobe_duration(local_video_path)
+    cap = min(real_dur or MAX_DURATION_SEC, MAX_DURATION_SEC)
 
-    # 1) ASR
-    segs = _load_asr_segments_from_local(src)
+    # 2) get ASR
+    segs = _load_asr_segments(local_video_path)
 
-    if segs:
-        # turn segments into fine clause-takes
-        clause_takes: List[Take] = []
+    used_asr = segs is not None
+    clause_takes: List[Take] = []
 
-        for i, seg in enumerate(segs, start=1):
-            seg_text = (seg.get("text") or "").strip()
-            seg_start = float(seg.get("start", 0.0))
-            seg_end   = float(seg.get("end", seg_start))
-
-            if not seg_text:
+    if used_asr:
+        # turn ASR segments into clause-level takes
+        for idx, seg in enumerate(segs, start=1):
+            text = (seg.get("text") or "").strip()
+            if not text:
                 continue
-
-            clauses = _split_into_clauses(seg_text)
+            s = float(seg.get("start", 0.0))
+            e = float(seg.get("end", s))
+            if (e - s) > MAX_TAKE_SEC:
+                e = s + MAX_TAKE_SEC
+            clauses = _split_into_clauses(text)
             if not clauses:
                 continue
+            timed = _assign_times_to_clauses(s, e, clauses)
 
-            # distribute times
-            timed_clauses = _assign_times_to_clauses(seg_start, seg_end, clauses)
-
-            for c_idx, (cs, ce, ctext) in enumerate(timed_clauses, start=1):
-                ctext_clean = _clean_text(ctext)
+            for c_idx, (cs, ce, ctext) in enumerate(timed, start=1):
+                is_cta = _clause_is_ctaish(ctext)
+                ctext_clean = _clean_text(ctext, is_cta=is_cta)
                 if not ctext_clean:
                     continue
-
-                # rule score
-                r_score = _rule_score_clause(ctext_clean)
-                # llm score
-                l_score = _llm_score_clause(ctext_clean)
-                combined = max(r_score, l_score)
-
-                if combined < LLM_KEEP_MIN:
-                    # drop this clause
+                dur = ce - cs
+                if dur < 0.05:
                     continue
 
-                # clamp duration
-                dur = ce - cs
-                if dur > MAX_TAKE_SEC:
-                    ce = cs + MAX_TAKE_SEC
-                    dur = ce - cs
-                if dur < MIN_TAKE_SEC:
-                    # too tiny, skip
+                # score
+                base_score = _rule_score_clause(ctext_clean)
+                llm_score = _llm_score_clause(ctext_clean)
+                if llm_score is not None:
+                    final_score = 0.6 * base_score + 0.4 * llm_score
+                else:
+                    final_score = base_score
+
+                # drop obviously bad
+                if final_score < 0.25:
                     continue
 
                 clause_takes.append(
                     Take(
-                        id=f"ASR{i:04d}_c{c_idx}",
+                        id=f"ASR{idx:04d}_c{c_idx}",
                         start=cs,
                         end=ce,
                         text=ctext_clean,
                     )
                 )
 
-        # order and cap total duration
-        clause_takes = sorted(clause_takes, key=lambda x: x.start)
+        # sort by time
+        clause_takes = sorted(clause_takes, key=lambda t: t.start)
+
+        # now build the final story until we hit cap
         story: List[Take] = []
         total = 0.0
         for t in clause_takes:
@@ -540,20 +503,41 @@ def run_pipeline(
                 break
             story.append(t)
             total += t.dur
-        used_asr = True
+
+        # if we didn't get a CTA, try to add one from the end
+        has_cta = any(_clause_is_ctaish(t.text) for t in story)
+        if not has_cta:
+            for t in reversed(clause_takes):
+                if _clause_is_ctaish(t.text):
+                    story.append(t)
+                    break
 
     else:
-        # no ASR -> simple time slicing
-        story = _time_based_takes(cap)
-        used_asr = False
+        # fallback: time-based chopping
+        story = []
+        t = 0.0
+        idx = 1
+        while t < cap:
+            end = min(t + MAX_TAKE_SEC, cap)
+            if (end - t) >= MIN_TAKE_SEC:
+                story.append(
+                    Take(
+                        id=f"SEG{idx:04d}",
+                        start=t,
+                        end=end,
+                        text=f"Auto segment {idx} ({t:.1f}s–{end:.1f}s)",
+                    )
+                )
+                idx += 1
+            t = end
 
-    # 2) export
-    final_path = _export_concat(src, story)
+    # 3) export shortened video
+    final_path = _export_concat(local_video_path, story)
 
-    # 3) upload
+    # 4) upload
     up = _upload_to_s3(final_path, s3_prefix=s3_prefix)
 
-    # 4) build response (similar to what your worker expects)
+    # 5) build slots like your old shape
     def _trim(txt: str, n: int = 220) -> str:
         return txt if len(txt) <= n else txt[:n].rstrip() + "..."
 
@@ -582,6 +566,7 @@ def run_pipeline(
     }
 
     if story:
+        # first = hook
         first = story[0]
         slots["HOOK"].append({
             "id": first.id,
@@ -596,22 +581,23 @@ def run_pipeline(
             "ocr_hit": 0,
         })
 
-    if len(story) > 2:
-        for mid in story[1:-1]:
-            slots["FEATURE"].append({
-                "id": mid.id,
-                "start": mid.start,
-                "end": mid.end,
-                "text": _trim(mid.text),
-                "meta": {"slot": "FEATURE", "score": 2.0, "chain_ids": [mid.id]},
-                "face_q": 1.0,
-                "scene_q": 1.0,
-                "vtx_sim": 0.0,
-                "has_product": False,
-                "ocr_hit": 0,
-            })
+        # middle = features
+        if len(story) > 2:
+            for mid in story[1:-1]:
+                slots["FEATURE"].append({
+                    "id": mid.id,
+                    "start": mid.start,
+                    "end": mid.end,
+                    "text": _trim(mid.text),
+                    "meta": {"slot": "FEATURE", "score": 2.0, "chain_ids": [mid.id]},
+                    "face_q": 1.0,
+                    "scene_q": 1.0,
+                    "vtx_sim": 0.0,
+                    "has_product": False,
+                    "ocr_hit": 0,
+                })
 
-    if len(story) >= 2:
+        # last = CTA (prefer CTA-ish)
         last = story[-1]
         slots["CTA"].append({
             "id": last.id,
@@ -629,7 +615,7 @@ def run_pipeline(
     return {
         "ok": True,
         "session_id": session_id,
-        "input_local": src,
+        "input_local": local_video_path,
         "duration_sec": _ffprobe_duration(final_path),
         "s3_key": up["s3_key"],
         "s3_url": up["s3_url"],
@@ -637,6 +623,6 @@ def run_pipeline(
         "clips": clips,
         "slots": slots,
         "asr": used_asr,
-        "semantic": used_asr,
+        "semantic": True,
         "vision": False,
     }
