@@ -1,5 +1,4 @@
 # /workspace/EditDNA-worker/worker/asr.py
-
 from __future__ import annotations
 import os
 import tempfile
@@ -8,21 +7,13 @@ from typing import List, Dict, Any, Optional
 
 from faster_whisper import WhisperModel
 
-# -------------------------------------------------
-# config from env
-# -------------------------------------------------
 _MODEL_NAME = os.getenv("ASR_MODEL", "medium")
 _ASR_COMPUTE_TYPE = os.getenv("ASR_COMPUTE_TYPE", "auto")
 
-# keep model cached
 _model: Optional[WhisperModel] = None
 
 
 def _pick_compute_type(device: str) -> str:
-    """
-    If user asked for float16 but we are on CPU, fall back to int8.
-    This is what your error was about.
-    """
     ct = _ASR_COMPUTE_TYPE
     if device == "cpu" and ct.lower() in ("float16", "fp16", "float32"):
         print("[asr] requested float16 on CPU → falling back to int8", flush=True)
@@ -51,22 +42,6 @@ def _get_model() -> WhisperModel:
     return _model
 
 
-# ---------- audio extraction helpers ----------
-
-def _extract_audio_with_moviepy(video_path: str) -> str:
-    # import inside so missing moviepy doesn't break import
-    from moviepy.editor import VideoFileClip
-
-    tmp = tempfile.NamedTemporaryFile(suffix=".wav", delete=False)
-    tmp_audio_path = tmp.name
-    tmp.close()
-
-    clip = VideoFileClip(video_path)
-    clip.audio.write_audiofile(tmp_audio_path, verbose=False, logger=None)
-    clip.close()
-    return tmp_audio_path
-
-
 def _extract_audio_with_ffmpeg(video_path: str) -> str:
     tmp = tempfile.NamedTemporaryFile(suffix=".wav", delete=False)
     tmp_audio_path = tmp.name
@@ -86,22 +61,9 @@ def _extract_audio_with_ffmpeg(video_path: str) -> str:
     return tmp_audio_path
 
 
-def _extract_audio(video_path: str) -> str:
-    try:
-        return _extract_audio_with_moviepy(video_path)
-    except Exception as e:
-        print(f"[asr] moviepy failed ({e}) → trying ffmpeg", flush=True)
-        return _extract_audio_with_ffmpeg(video_path)
-
-
-# ---------- main API ----------
-
-def transcribe(local_video_path: str) -> List[Dict[str, Any]]:
-    """
-    Return list of segments: [{"text":..., "start":..., "end":...}, ...]
-    """
+def transcribe(video_path: str) -> List[Dict[str, Any]]:
     model = _get_model()
-    audio_path = _extract_audio(local_video_path)
+    audio_path = _extract_audio_with_ffmpeg(video_path)
     print(f"[asr] transcribing audio={audio_path}", flush=True)
 
     segments, info = model.transcribe(
@@ -128,6 +90,10 @@ def transcribe(local_video_path: str) -> List[Dict[str, Any]]:
     return out
 
 
-# your pipeline was calling this name, so keep it
 def transcribe_local(path: str):
+    return transcribe(path)
+
+
+def transcribe_segments(path: str):
+    # pipeline expects this name
     return transcribe(path)
