@@ -8,37 +8,49 @@ import subprocess
 from dataclasses import dataclass
 from typing import List, Dict, Any, Optional, Tuple
 
+# try to import openai, but don't die if not present
+try:
+    import openai
+    _HAS_OPENAI = True
+except Exception:
+    _HAS_OPENAI = False
+
 import boto3
 
 # ================== ENV HELPERS ==================
+
 
 def _env_str(k: str, d: str) -> str:
     v = (os.getenv(k) or "").split("#")[0].strip()
     return v or d
 
+
 def _env_float(k: str, d: float) -> float:
-    raw = (os.getenv(k) or "").split("#")[0].strip().split()[:1]
+    raw = (os.getenv(k) or "").split("#")[0].strip()
+    if not raw:
+        return d
     try:
-        return float(raw[0]) if raw else d
+        # handle accidental quotes: "220"
+        raw = raw.strip().strip('"').strip("'")
+        return float(raw)
     except Exception:
         return d
 
-FFMPEG_BIN  = _env_str("FFMPEG_BIN", "/usr/bin/ffmpeg")
+
+FFMPEG_BIN = _env_str("FFMPEG_BIN", "/usr/bin/ffmpeg")
 FFPROBE_BIN = _env_str("FFPROBE_BIN", "/usr/bin/ffprobe")
 
-S3_BUCKET   = _env_str("S3_BUCKET", "")
-S3_PREFIX   = _env_str("S3_PREFIX", "editdna/outputs")
-AWS_REGION  = _env_str("AWS_REGION", "us-east-1")
-S3_ACL      = _env_str("S3_ACL", "public-read")
+S3_BUCKET = _env_str("S3_BUCKET", "")
+S3_PREFIX = _env_str("S3_PREFIX", "editdna/outputs")
+AWS_REGION = _env_str("AWS_REGION", "us-east-1")
+S3_ACL = _env_str("S3_ACL", "public-read")
 
-MAX_DURATION_SEC = _env_float("MAX_DURATION_SEC", 120.0)
-MAX_TAKE_SEC     = _env_float("MAX_TAKE_SEC", 20.0)
-MIN_TAKE_SEC     = _env_float("MIN_TAKE_SEC", 2.0)
+# note: these are safety rails, not hard ad durations
+MAX_TAKE_SEC = _env_float("MAX_TAKE_SEC", 20.0)
+MIN_TAKE_SEC = _env_float("MIN_TAKE_SEC", 2.0)
 
-# this key is what makes the LLM rescoring kick in
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "").strip()
+# ================== TEXT RULES (IMG_02 STYLE) ==================
 
-# phrases that clearly mean “bad take / restart”
 BAD_PHRASES = [
     "wait",
     "hold on",
@@ -48,10 +60,8 @@ BAD_PHRASES = [
     "no no",
     "redo",
     "sorry",
-    "why can't i remember",   # IMG_03 style
 ]
 
-# CTA-ish phrases – but we don't want to drop the last one
 CTA_FLUFF = [
     "click the link",
     "get yours today",
@@ -64,25 +74,34 @@ CTA_FLUFF = [
     "if you wanna check them out",
 ]
 
-# “branchy” stuff we often skip
 UGLY_BRANCHES = [
     "but if you don't like the checker print",
     "but if you don't like the checker",
+    "but if you don't like the checkered",
     "but if you do",
     "but if you don't",
     "but if you",
 ]
 
-# product-ish hints
 FEATURE_HINTS = [
     "pocket", "pockets", "zipper", "strap", "opening", "inside",
     "material", "woven", "quality", "hardware",
     "comes with", "it has", "it also has",
     "it's actually", "this isn't just", "design",
+    "they support", "moisture", "odor", "balance",  # for IMG_03 vibe
 ]
 
+CTA_PHRASES_STRONG = [
+    "i left it for you down below",
+    "i left it down below",
+    "grab one of these",
+    "grab yours",
+    "get yours",
+    "link down below",
+]
 
 # ================== MODEL TYPES ==================
+
 
 @dataclass
 class Take:
@@ -93,20 +112,23 @@ class Take:
 
     @property
     def dur(self) -> float:
-        return self.end - self.start
+        return max(0.0, self.end - self.start)
 
 
-# ================== SHELL + FILE HELPERS ==================
+# ================== SHELL / FILE HELPERS ==================
+
 
 def _run(cmd: List[str]) -> Tuple[int, str, str]:
     p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
     out, err = p.communicate()
     return p.returncode, out.strip(), err.strip()
 
+
 def _tmpfile(suffix: str = ".mp4") -> str:
     fd, p = tempfile.mkstemp(suffix=suffix)
     os.close(fd)
     return p
+
 
 def _download_to_tmp(url: str) -> str:
     local_path = _tmpfile(".mp4")
@@ -114,6 +136,7 @@ def _download_to_tmp(url: str) -> str:
     if code != 0:
         raise RuntimeError(f"curl failed {code}: {err}")
     return local_path
+
 
 def _ffprobe_duration(path: str) -> float:
     code, out, err = _run([
@@ -132,6 +155,7 @@ def _ffprobe_duration(path: str) -> float:
 
 
 # ================== S3 ==================
+
 
 def _upload_to_s3(local_path: str, s3_prefix: Optional[str] = None) -> Dict[str, str]:
     if not S3_BUCKET:
@@ -153,11 +177,14 @@ def _upload_to_s3(local_path: str, s3_prefix: Optional[str] = None) -> Dict[str,
     }
 
 
-# ================== EXPORT (FFMPEG) ==================
+# ================== EXPORT (FFMPEG CONCAT) ==================
+
 
 def _export_concat(src: str, takes: List[Take]) -> str:
     if not takes:
-        takes = [Take(id="FALLBACK", start=0.0, end=min(5.0, MAX_DURATION_SEC), text="")]
+        # fallback: 5s from start
+        takes = [Take(id="FALLBACK", start=0.0, end=min(5.0, _ffprobe_duration(src)), text="")]
+
     parts: List[str] = []
     listfile = _tmpfile(".txt")
 
@@ -195,32 +222,30 @@ def _export_concat(src: str, takes: List[Take]) -> str:
 
 # ================== ASR LOADING ==================
 
+
 def _load_asr_segments(src: str) -> Optional[List[Dict[str, Any]]]:
     """
-    We use your worker.asr file.
-    We expect a function named `transcribe_local(path)` OR `transcribe(path)`.
-    We normalize to a flat list of dicts.
+    We expect worker.asr.transcribe_segments(video_path) → list of {text,start,end}
+    If it's missing, we return None and fall back to time-slicing.
     """
-    segs = None
     try:
-        from worker.asr import transcribe_local
-        segs = transcribe_local(src)
+        from worker.asr import transcribe_segments
     except Exception:
-        try:
-            from worker.asr import transcribe
-            segs = transcribe(src)
-        except Exception:
-            segs = None
-
+        return None
+    try:
+        segs = transcribe_segments(src)
+    except Exception:
+        return None
     if not segs:
         return None
-
-    # already in [{"text":..,"start":..,"end":..}]
+    # some demos return "temp placeholder" – ignore that
+    if "temp placeholder" in (segs[0].get("text") or "").lower():
+        return None
     return segs
 
 
 def _segments_to_takes_asr(segs: List[Dict[str, Any]]) -> List[Take]:
-    takes: List[Take] = []
+    out: List[Take] = []
     for i, seg in enumerate(segs, start=1):
         txt = (seg.get("text") or "").strip()
         if not txt:
@@ -230,11 +255,12 @@ def _segments_to_takes_asr(segs: List[Dict[str, Any]]) -> List[Take]:
         if (e - s) > MAX_TAKE_SEC:
             e = s + MAX_TAKE_SEC
         if (e - s) >= MIN_TAKE_SEC:
-            takes.append(Take(id=f"ASR{i:04d}", start=s, end=e, text=txt))
-    return takes
+            out.append(Take(id=f"ASR{i:04d}", start=s, end=e, text=txt))
+    return out
 
 
-# ================== CLAUSE UTILITIES ==================
+# ================== CLAUSE / TEXT UTILS ==================
+
 
 def _split_into_clauses(text: str) -> List[str]:
     if not text:
@@ -264,8 +290,10 @@ def _split_into_clauses(text: str) -> List[str]:
             if piece:
                 clauses.append(piece)
 
+    # drop super short
     clauses = [c for c in clauses if len(c.split()) >= 3]
     return clauses
+
 
 def _clause_is_bad(c: str) -> bool:
     low = c.lower().strip()
@@ -281,6 +309,7 @@ def _clause_is_bad(c: str) -> bool:
         return True
     return False
 
+
 def _clause_is_featurey(c: str) -> bool:
     low = c.lower()
     for h in FEATURE_HINTS:
@@ -288,9 +317,13 @@ def _clause_is_featurey(c: str) -> bool:
             return True
     return False
 
+
 def _clause_is_ctaish(c: str) -> bool:
     low = c.lower()
     for p in CTA_FLUFF:
+        if p in low:
+            return True
+    for p in CTA_PHRASES_STRONG:
         if p in low:
             return True
     if low.startswith("if you want to"):
@@ -298,6 +331,7 @@ def _clause_is_ctaish(c: str) -> bool:
     if low.startswith("if you wanna"):
         return True
     return False
+
 
 def _assign_times_to_clauses(seg_start: float, seg_end: float, clauses: List[str]) -> List[Tuple[float, float, str]]:
     dur = max(0.05, seg_end - seg_start)
@@ -316,19 +350,18 @@ def _assign_times_to_clauses(seg_start: float, seg_end: float, clauses: List[str
     return out
 
 
-# ================== TEXT CLEANUP ==================
-
 def _trim_repeated_ngrams(txt: str, n: int = 4) -> str:
     words = txt.split()
     if len(words) <= n * 2:
         return txt
     seen = {}
     for i in range(0, len(words) - n + 1):
-        key = " ".join(w.lower() for w in words[i:i+n])
+        key = " ".join(w.lower() for w in words[i:i + n])
         if key in seen:
             return " ".join(words[:i]).rstrip(" ,.;")
         seen[key] = i
     return txt
+
 
 def _trim_cta_fluff(txt: str) -> str:
     low = txt.lower()
@@ -338,30 +371,34 @@ def _trim_cta_fluff(txt: str) -> str:
             return txt[:idx].rstrip(" ,.;")
     return txt
 
+
 def _clean_text(txt: str) -> str:
     txt = _trim_repeated_ngrams(txt, n=4)
     txt = _trim_cta_fluff(txt)
     return txt.strip()
 
 
-# ================== LLM SCORING (OPTIONAL) ==================
+# ================== OPTIONAL LLM SCORER ==================
 
-def _llm_score_clause(clause: str) -> float:
+
+def _llm_score_clause(text: str) -> float:
     """
-    0.0 - 1.0: how much this sounds like usable sales/product talk.
-    Only runs if OPENAI_API_KEY is set.
+    0.0 → bad/off-script
+    1.0 → usable product/salesy line
+    Only runs if OPENAI_API_KEY is present.
     """
-    if not OPENAI_API_KEY:
+    api_key = os.getenv("OPENAI_API_KEY") or os.getenv("OPENAI_APIKEY")
+    if not api_key or not _HAS_OPENAI:
         return 0.0
+
     try:
-        from openai import OpenAI
-        client = OpenAI(api_key=OPENAI_API_KEY)
+        client = openai.OpenAI(api_key=api_key)
         prompt = (
-            "You are scoring lines from a short UGC sales video. "
-            "Return ONLY a number from 0.0 to 1.0.\n"
-            "Score higher if the line is on-script, about the product, a hook, or a CTA.\n"
-            "Score lower if it is restart, hesitation, forgetting, or meta talk.\n"
-            f"Line: {clause!r}"
+            "You are cleaning UGC sales videos. "
+            "Score this line from 0 to 1.0 where 1.0 is on-script, clear, about the product, "
+            "and 0 is a mistake, restart, or fluff. "
+            "Return only the number.\n\n"
+            f"LINE: \"{text}\""
         )
         resp = client.chat.completions.create(
             model="gpt-4o-mini",
@@ -369,16 +406,22 @@ def _llm_score_clause(clause: str) -> float:
             max_tokens=5,
             temperature=0.0,
         )
-        txt = resp.choices[0].message.content.strip()
-        val = float(txt)
-        if val < 0.0: val = 0.0
-        if val > 1.0: val = 1.0
-        return val
+        val = resp.choices[0].message.content.strip()
+        try:
+            score = float(val)
+            if score < 0:
+                score = 0.0
+            if score > 1:
+                score = 1.0
+            return score
+        except Exception:
+            return 0.0
     except Exception:
         return 0.0
 
 
-# ================== FALLBACK TIME TAKES ==================
+# ================== FALLBACK TIME SPLIT ==================
+
 
 def _time_based_takes(vid_dur: float) -> List[Take]:
     takes: List[Take] = []
@@ -400,55 +443,31 @@ def _time_based_takes(vid_dur: float) -> List[Take]:
     return takes
 
 
-# ================== CTA RECOVERY ==================
+# ================== PUBLIC ENTRY ==================
 
-def _recover_last_cta_from_asr(segs: List[Dict[str, Any]]) -> Optional[Take]:
-    """
-    Look at the last ASR segments and try to pull a CTA-ish clause.
-    This is the piece you were missing.
-    """
-    if not segs:
-        return None
-    # look at last 3 segments max
-    tail = segs[-3:]
-    for seg in reversed(tail):
-        text = (seg.get("text") or "").strip()
-        if not text:
-            continue
-        if any(p in text.lower() for p in CTA_FLUFF):
-            s = float(seg.get("start", 0.0))
-            e = float(seg.get("end", s))
-            if (e - s) < 0.8:
-                e = s + 1.0
-            return Take(
-                id="FORCED_CTA",
-                start=s,
-                end=e,
-                text=text,
-            )
-    return None
-
-
-# ================== MAIN PUBLIC ENTRY ==================
 
 def run_pipeline(
     *,
     session_id: str,
     file_urls: List[str],
-    portrait: bool = False,
-    funnel_counts=None,
-    max_duration: float = 60.0,
     s3_prefix: Optional[str] = None,
+    max_duration: Optional[float] = None,
     **kwargs,
 ) -> Dict[str, Any]:
+    """
+    Main entry used by your RQ worker.
+    """
     if not file_urls:
         return {"ok": False, "error": "no input files"}
 
     src = _download_to_tmp(file_urls[0])
     real_dur = _ffprobe_duration(src)
-    cap = float(max_duration or MAX_DURATION_SEC)
-    if real_dur > 0:
-        cap = min(cap, real_dur)
+
+    # decide cap: if caller sent max_duration use it, otherwise use whole video
+    if max_duration:
+        cap = min(float(max_duration), real_dur) if real_dur > 0 else float(max_duration)
+    else:
+        cap = real_dur
 
     segs = _load_asr_segments(src)
     used_asr = segs is not None
@@ -457,72 +476,78 @@ def run_pipeline(
         seg_takes = _segments_to_takes_asr(segs)
 
         clause_takes: List[Take] = []
-        last_seg_id = seg_takes[-1].id if seg_takes else None
-
         for seg_take in seg_takes:
             clauses = _split_into_clauses(seg_take.text)
             if not clauses:
                 continue
 
-            good_clauses: List[str] = []
-            for c in clauses:
-                is_cta = _clause_is_ctaish(c)
-                is_bad = _clause_is_bad(c)
-
-                # run LLM score (0..1)
-                llm_score = _llm_score_clause(c)
-                rule_score = 1.0
-                if is_bad and not _clause_is_featurey(c):
-                    rule_score = 0.0
-
-                # combine: if LLM likes it, we may keep it
-                combined = max(rule_score, llm_score)
-
-                # keep CTA only if this is final segment OR model liked it
-                if is_cta and seg_take.id != last_seg_id and combined < 0.5:
-                    continue
-
-                if combined >= 0.5:
-                    good_clauses.append(c)
-
-            if not good_clauses:
-                continue
-
-            timed = _assign_times_to_clauses(seg_take.start, seg_take.end, good_clauses)
+            # map to sub-times
+            timed = _assign_times_to_clauses(seg_take.start, seg_take.end, clauses)
             for idx, (cs, ce, ctext) in enumerate(timed, start=1):
-                ctext = _clean_text(ctext)
-                if not ctext:
+                ctext_clean = _clean_text(ctext)
+                if not ctext_clean:
                     continue
+
+                # rule score
+                rule_bad = _clause_is_bad(ctext)
+                rule_feature = _clause_is_featurey(ctext)
+                rule_cta = _clause_is_ctaish(ctext)
+
+                # if rules think it's bad, try LLM rescue
+                llm_score = 0.0
+                if rule_bad and not rule_feature and not rule_cta:
+                    llm_score = _llm_score_clause(ctext_clean)
+                    if llm_score < 0.55:
+                        # still bad
+                        continue
+                else:
+                    # good by rules, optionally boost with llm
+                    llm_score = _llm_score_clause(ctext_clean) if _HAS_OPENAI else 0.0
+
                 dur = ce - cs
                 if dur < 0.05:
                     continue
+
                 clause_takes.append(
                     Take(
                         id=f"{seg_take.id}_c{idx}",
                         start=cs,
                         end=ce,
-                        text=ctext,
+                        text=ctext_clean,
                     )
                 )
 
+        # sort by time
         clause_takes = sorted(clause_takes, key=lambda x: x.start)
 
-        # ---- CTA recovery (the piece you said was missing) ----
-        forced_cta = _recover_last_cta_from_asr(segs)
-        if forced_cta is not None:
-            clause_takes.append(forced_cta)
-            clause_takes = sorted(clause_takes, key=lambda x: x.start)
-
+        # pack up to cap, but remember CTA to append even if over
         story: List[Take] = []
         total_dur = 0.0
+        last_cta_candidate: Optional[Take] = None
+
         for t in clause_takes:
+            low = (t.text or "").lower()
+            is_ctaish = _clause_is_ctaish(low)
+            if is_ctaish:
+                last_cta_candidate = t
+
             if total_dur + t.dur > cap:
+                # stop packing, but we can append CTA later
                 break
+
             story.append(t)
             total_dur += t.dur
-    else:
-        story = _time_based_takes(cap)
 
+        # append CTA if we saw one and it's not already in
+        if last_cta_candidate and last_cta_candidate not in story:
+            story.append(last_cta_candidate)
+
+    else:
+        # no ASR → dumb time slicing
+        story = _time_based_takes(cap)
+        used_asr = False
+
+    # export
     final_path = _export_concat(src, story)
     up = _upload_to_s3(final_path, s3_prefix=s3_prefix)
 
@@ -554,6 +579,7 @@ def run_pipeline(
     }
 
     if story:
+        # first → HOOK
         first = story[0]
         slots["HOOK"].append({
             "id": first.id,
@@ -568,7 +594,6 @@ def run_pipeline(
             "ocr_hit": 0,
         })
 
-    # everything in the middle → FEATURE
     if len(story) > 2:
         for mid in story[1:-1]:
             slots["FEATURE"].append({
@@ -584,7 +609,6 @@ def run_pipeline(
                 "ocr_hit": 0,
             })
 
-    # last one → CTA (this is where the forced CTA will go)
     if len(story) >= 2:
         last = story[-1]
         slots["CTA"].append({
@@ -611,6 +635,6 @@ def run_pipeline(
         "clips": clips,
         "slots": slots,
         "asr": used_asr,
-        "semantic": True,
+        "semantic": used_asr,
         "vision": False,
     }
