@@ -3,37 +3,47 @@ from __future__ import annotations
 import os
 from typing import List, Dict, Any
 
-from worker import video
-import pipeline  # the file above
+import pipeline  # your pipeline.py
 
+# this is the queue name the worker is listening on
 QUEUE_NAME = os.getenv("RQ_QUEUE", "default")
 
 
-def _download_all(urls: List[str]) -> str:
-    if not urls:
-        raise ValueError("no input URLs")
-    first = urls[0]
-    local_path = video.download_to_local(first)
-    return local_path
+def job_render(payload: dict) -> dict:
+    """
+    RQ entry point.
 
-
-def job_render(payload: Dict[str, Any]) -> Dict[str, Any]:
+    Expected payload shape (like your logs):
+    {
+      "session_id": "funnel-test-1",
+      "files": ["https://.../IMG_02.mov"],
+      "output_prefix": "editdna/outputs/"
+    }
+    """
     print("[worker.tasks] job_render() start")
-    session_id = payload.get("session_id", f"session-{os.getpid()}")
-    urls = payload.get("files") or payload.get("urls") or []
+
+    session_id = payload.get("session_id", "session-unknown")
+    # in your logs it's sometimes "files", sometimes "urls"
+    file_urls: List[str] = payload.get("files") or payload.get("urls") or []
     s3_prefix = payload.get("output_prefix") or payload.get("s3_prefix") or "editdna/outputs/"
 
     print(f"  session_id={session_id}")
-    print(f"  urls={urls}")
+    print(f"  urls={file_urls}")
     print(f"  s3_prefix={s3_prefix}")
 
-    local_video_path = _download_all(urls)
-    print(f"[worker.tasks] downloaded to {local_video_path}")
+    if not file_urls:
+        err = "no input URLs in payload"
+        print("[worker.tasks] ERROR:", err)
+        return {"ok": False, "error": err}
 
     try:
-        out = pipeline.run_pipeline(
-            local_video_path=local_video_path,
+        # NEW: call pipeline with file_urls (pipeline will download)
+        out: Dict[str, Any] = pipeline.run_pipeline(
             session_id=session_id,
+            file_urls=file_urls,
+            portrait=False,          # or True if you want
+            funnel_counts=None,
+            max_duration=60.0,
             s3_prefix=s3_prefix,
         )
         print("[worker.tasks] job_render() OK")
