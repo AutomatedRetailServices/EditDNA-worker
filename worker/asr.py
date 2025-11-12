@@ -1,51 +1,31 @@
-# worker/asr.py
-import os
 from typing import List, Dict, Any, Optional
+import os
+from faster_whisper import WhisperModel
 
-# Default = faster-whisper (ctranslate2) for speed on GPU/CPU.
-# Fallback to openai-whisper if import fails.
-def transcribe_segments(local_path: str) -> Optional[List[Dict[str, Any]]]:
-    """
-    Returns a list of segments:
-      [{"start": float, "end": float, "text": str}, ...]
-    """
+# Light wrapper that returns segments with {start,end,text}
+# Use local faster-whisper; no network dependency.
+_MODEL_NAME = os.getenv("ASR_MODEL", "base.en")
+_DEVICE = "cuda" if os.getenv("CUDA_VISIBLE_DEVICES", "") != "" else "cpu"
+_COMPUTE = "float16" if _DEVICE == "cuda" else "int8"
+
+_model = None
+
+def _get_model():
+    global _model
+    if _model is None:
+        _model = WhisperModel(_MODEL_NAME, device=_DEVICE, compute_type=_COMPUTE)
+    return _model
+
+def transcribe_segments(local_video_path: str) -> Optional[List[Dict[str, Any]]]:
     try:
-        # Try faster-whisper
-        from faster_whisper import WhisperModel
-
-        model_size = os.getenv("WHISPER_MODEL", "base")
-        compute_type = os.getenv("WHISPER_COMPUTE", "auto")
-        device = os.getenv("WHISPER_DEVICE", "auto")  # "cuda" / "cpu" / "auto"
-
-        model = WhisperModel(model_size, device=device, compute_type=compute_type)
-        segments, info = model.transcribe(local_path, beam_size=1, vad_filter=True)
-
+        model = _get_model()
+        segments, _ = model.transcribe(local_video_path, vad_filter=True)
         out: List[Dict[str, Any]] = []
         for seg in segments:
-            out.append({
-                "start": float(seg.start),
-                "end": float(seg.end),
-                "text": (seg.text or "").strip()
-            })
-        return out if out else None
-
+            txt = (seg.text or "").strip()
+            if not txt:
+                continue
+            out.append({"start": float(seg.start), "end": float(seg.end), "text": txt})
+        return out or None
     except Exception:
-        # Fallback to openai-whisper (PyTorch)
-        try:
-            import torch
-            import whisper as openai_whisper
-
-            model_size = os.getenv("WHISPER_MODEL", "base")
-            device = "cuda" if torch.cuda.is_available() else "cpu"
-            model = openai_whisper.load_model(model_size, device=device)
-            result = model.transcribe(local_path, verbose=False)
-            out: List[Dict[str, Any]] = []
-            for seg in result.get("segments", []):
-                out.append({
-                    "start": float(seg.get("start", 0.0)),
-                    "end": float(seg.get("end", 0.0)),
-                    "text": (seg.get("text") or "").strip()
-                })
-            return out if out else None
-        except Exception:
-            return None
+        return None
