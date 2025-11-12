@@ -1,99 +1,51 @@
-# /workspace/EditDNA-worker/worker/asr.py
-from __future__ import annotations
+# worker/asr.py
 import os
-import tempfile
-import subprocess
 from typing import List, Dict, Any, Optional
 
-from faster_whisper import WhisperModel
+# Default = faster-whisper (ctranslate2) for speed on GPU/CPU.
+# Fallback to openai-whisper if import fails.
+def transcribe_segments(local_path: str) -> Optional[List[Dict[str, Any]]]:
+    """
+    Returns a list of segments:
+      [{"start": float, "end": float, "text": str}, ...]
+    """
+    try:
+        # Try faster-whisper
+        from faster_whisper import WhisperModel
 
-_MODEL_NAME = os.getenv("ASR_MODEL", "medium")
-_ASR_COMPUTE_TYPE = os.getenv("ASR_COMPUTE_TYPE", "auto")
+        model_size = os.getenv("WHISPER_MODEL", "base")
+        compute_type = os.getenv("WHISPER_COMPUTE", "auto")
+        device = os.getenv("WHISPER_DEVICE", "auto")  # "cuda" / "cpu" / "auto"
 
-_model: Optional[WhisperModel] = None
+        model = WhisperModel(model_size, device=device, compute_type=compute_type)
+        segments, info = model.transcribe(local_path, beam_size=1, vad_filter=True)
 
-
-def _pick_compute_type(device: str) -> str:
-    ct = _ASR_COMPUTE_TYPE
-    if device == "cpu" and ct.lower() in ("float16", "fp16", "float32"):
-        print("[asr] requested float16 on CPU → falling back to int8", flush=True)
-        return "int8"
-    return ct
-
-
-def _get_model() -> WhisperModel:
-    global _model
-    if _model is not None:
-        return _model
-
-    device = "cuda" if os.getenv("CUDA_VISIBLE_DEVICES") else "cpu"
-    compute_type = _pick_compute_type(device)
-
-    print(
-        f"[asr] loading Faster-Whisper model={_MODEL_NAME} device={device} compute_type={compute_type}",
-        flush=True,
-    )
-
-    _model = WhisperModel(
-        _MODEL_NAME,
-        device=device,
-        compute_type=compute_type,
-    )
-    return _model
-
-
-def _extract_audio_with_ffmpeg(video_path: str) -> str:
-    tmp = tempfile.NamedTemporaryFile(suffix=".wav", delete=False)
-    tmp_audio_path = tmp.name
-    tmp.close()
-
-    cmd = [
-        "ffmpeg",
-        "-y",
-        "-i", video_path,
-        "-vn",
-        "-acodec", "pcm_s16le",
-        "-ar", "16000",
-        "-ac", "1",
-        tmp_audio_path,
-    ]
-    subprocess.check_call(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    return tmp_audio_path
-
-
-def transcribe(video_path: str) -> List[Dict[str, Any]]:
-    model = _get_model()
-    audio_path = _extract_audio_with_ffmpeg(video_path)
-    print(f"[asr] transcribing audio={audio_path}", flush=True)
-
-    segments, info = model.transcribe(
-        audio_path,
-        beam_size=1,
-        best_of=1,
-        vad_filter=True,
-    )
-
-    out: List[Dict[str, Any]] = []
-    for seg in segments:
-        text = (seg.text or "").strip()
-        if not text:
-            continue
-        out.append(
-            {
-                "text": text,
+        out: List[Dict[str, Any]] = []
+        for seg in segments:
+            out.append({
                 "start": float(seg.start),
                 "end": float(seg.end),
-            }
-        )
+                "text": (seg.text or "").strip()
+            })
+        return out if out else None
 
-    print(f"[asr] got {len(out)} segments", flush=True)
-    return out
+    except Exception:
+        # Fallback to openai-whisper (PyTorch)
+        try:
+            import torch
+            import whisper as openai_whisper
 
-
-def transcribe_local(path: str):
-    return transcribe(path)
-
-
-def transcribe_segments(path: str):
-    # pipeline expects this name
-    return transcribe(path)
+            model_size = os.getenv("WHISPER_MODEL", "base")
+            device = "cuda" if torch.cuda.is_available() else "cpu"
+            model = openai_whisper.load_model(model_size, device=device)
+            result = model.transcribe(local_path, verbose=False)
+            out: List[Dict[str, Any]] = []
+            for seg in result.get("segments", []):
+                out.append({
+                    "start": float(seg.get("start", 0.0)),
+                    "end": float(seg.get("end", 0.0)),
+                    "text": (seg.get("text") or "").strip()
+                })
+            return out if out else None
+        except Exception:
+            return None
