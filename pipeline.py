@@ -5,76 +5,106 @@ import time
 import uuid
 import tempfile
 import subprocess
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import List, Dict, Any, Optional, Tuple
 
 import boto3
+import cv2
 
-# ---------- ENV HELPERS ----------
+# try to import your ASR helper (you already have worker/asr.py in this repo)
+try:
+    from worker.asr import transcribe_segments  # must return list of {start, end, text}
+except Exception:
+    transcribe_segments = None
 
-def _env_str(name: str, default: str = "") -> str:
-    raw = os.getenv(name, "")
-    # allow comments like "value # comment"
-    val = raw.split("#", 1)[0].strip()
-    return val or default
+# ================== ENV / CONSTANTS ==================
 
-def _env_float(name: str, default: float) -> float:
-    raw = os.getenv(name, "")
-    if not raw:
-        return default
-    raw = raw.split("#", 1)[0].strip()
-    try:
-        return float(raw)
-    except ValueError:
-        return default
+def _env_str(k: str, d: str) -> str:
+    v = (os.getenv(k) or "").split("#")[0].strip()
+    return v or d
 
-
-FFMPEG_BIN = _env_str("FFMPEG_BIN", "/usr/bin/ffmpeg")
+FFMPEG_BIN  = _env_str("FFMPEG_BIN", "/usr/bin/ffmpeg")
 FFPROBE_BIN = _env_str("FFPROBE_BIN", "/usr/bin/ffprobe")
 
-S3_BUCKET  = _env_str("S3_BUCKET", "")
-S3_PREFIX  = _env_str("S3_PREFIX", "editdna/outputs")
-AWS_REGION = _env_str("AWS_REGION", "us-east-1")
-S3_ACL     = _env_str("S3_ACL", "public-read")
+S3_BUCKET   = _env_str("S3_BUCKET", "")
+S3_PREFIX   = _env_str("S3_PREFIX", "editdna/outputs")
+AWS_REGION  = _env_str("AWS_REGION", "us-east-1")
+S3_ACL      = _env_str("S3_ACL", "public-read")
 
-# maxs are just safety, you can tune
-MAX_DURATION_SEC = _env_float("MAX_DURATION_SEC", 120.0)
-MAX_TAKE_SEC     = _env_float("MAX_TAKE_SEC", 20.0)
-MIN_TAKE_SEC     = _env_float("MIN_TAKE_SEC", 1.2)   # a little shorter is ok now
+# max duration is now a soft cap; we can override per call
+DEFAULT_MAX_DURATION_SEC = 90.0  # not 40 fixed
 
-# ---------- RULE LISTS (english-ish) ----------
-# these are *before* LLM, just to kill obvious garbage / repeats
-DROP_CONTAINS = [
-    "so if you wanna check them out",
-    "so if you want to check them out",
-    "if you want to check them out",
-    "grab one of these westland boat",  # bad ASR
-    "why can't i remember after that",
+# rule lists — IMG_02 and IMG_03 merged
+BAD_PHRASES = [
+    "wait",
+    "hold on",
+    "lemme start again",
+    "let me start again",
+    "start over",
+    "no no",
+    "redo",
+    "sorry",
+    "why can't i remember",            # from img_03
+    "not moisture control",            # messy correction
 ]
 
-# words that are *good* for product talk
+CTA_FLUFF = [
+    "click the link",
+    "get yours today",
+    "go ahead and click",
+    "go ahead and grab",
+    "i left it down below",
+    "i left it for you down below",
+    "grab one of these",
+    "if you want to check them out",
+    "if you wanna check them out",
+]
+
+UGLY_BRANCHES = [
+    "but if you don't like the checker",
+    "but if you don't like the checkered",
+    "but if you don't like the plain black strap",  # sometimes we keep, but CTA-ish
+    "why can't i remember",
+]
+
 FEATURE_HINTS = [
     "pocket", "pockets", "zipper", "strap", "opening", "inside",
     "material", "woven", "quality", "hardware",
-    "moisture", "odor", "balance",
-    "you only need to take",  # IMG_03
-    "probiotic", "gummy", "flavored", "for women"
+    "moisture", "odor", "odor control", "healthy balance", "probiotic",
+    "comes with", "it has", "it also has",
+    "it's actually", "this isn't just", "design",
 ]
 
-# ---------- DATA CLASS ----------
+# ========== OpenAI (always-on) ==========
+# user said: don't make it optional
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+if not OPENAI_API_KEY:
+    raise RuntimeError("OPENAI_API_KEY is required for this pipeline (we run LLM on every clause).")
+
+from openai import OpenAI
+_openai_client = OpenAI(api_key=OPENAI_API_KEY)
+
+LLM_MODEL = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
+
+
+# ================== DATACLASS ==================
 
 @dataclass
-class Clause:
+class Take:
     id: str
     start: float
     end: float
     text: str
+    face_q: float = 1.0
+    llm_score: float = 0.0
+    rule_score: float = 0.0
 
     @property
     def dur(self) -> float:
-        return max(0.01, self.end - self.start)
+        return self.end - self.start
 
-# ---------- SHELL UTILS ----------
+
+# ================== SHELL HELPERS ==================
 
 def _run(cmd: List[str]) -> Tuple[int, str, str]:
     p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
@@ -87,11 +117,11 @@ def _tmpfile(suffix: str = ".mp4") -> str:
     return p
 
 def _download_to_tmp(url: str) -> str:
-    path = _tmpfile(".mp4")
-    code, out, err = _run(["curl", "-L", "-o", path, url])
+    local_path = _tmpfile(".mp4")
+    code, out, err = _run(["curl", "-L", "-o", local_path, url])
     if code != 0:
         raise RuntimeError(f"curl failed {code}: {err}")
-    return path
+    return local_path
 
 def _ffprobe_duration(path: str) -> float:
     code, out, err = _run([
@@ -108,7 +138,8 @@ def _ffprobe_duration(path: str) -> float:
     except Exception:
         return 0.0
 
-# ---------- S3 UPLOAD ----------
+
+# ================== S3 ==================
 
 def _upload_to_s3(local_path: str, s3_prefix: Optional[str] = None) -> Dict[str, str]:
     if not S3_BUCKET:
@@ -118,55 +149,116 @@ def _upload_to_s3(local_path: str, s3_prefix: Optional[str] = None) -> Dict[str,
     key = f"{prefix}/{uuid.uuid4().hex}_{int(time.time())}.mp4"
     with open(local_path, "rb") as fh:
         s3.upload_fileobj(
-            fh, S3_BUCKET, key,
-            ExtraArgs={"ACL": S3_ACL, "ContentType": "video/mp4"}
+            fh,
+            S3_BUCKET,
+            key,
+            ExtraArgs={"ACL": S3_ACL, "ContentType": "video/mp4"},
         )
-    https_url = f"https://{S3_BUCKET}.s3.{AWS_REGION}.amazonaws.com/{key}"
-    return {"s3_key": key, "s3_url": f"s3://{S3_BUCKET}/{key}", "https_url": https_url}
+    return {
+        "s3_key": key,
+        "s3_url": f"s3://{S3_BUCKET}/{key}",
+        "https_url": f"https://{S3_BUCKET}.s3.{AWS_REGION}.amazonaws.com/{key}",
+    }
 
-# ---------- ASR LOADER ----------
 
-def _load_asr_segments(local_video_path: str) -> Optional[List[Dict[str, Any]]]:
-    """
-    We rely on your existing worker.asr.transcribe_segments(video_path)
-    which you already had in your repo/logs.
-    """
+# ================== EXPORT (FFMPEG CONCAT) ==================
+
+def _export_concat(src: str, takes: List[Take]) -> str:
+    if not takes:
+        # fallback: 3s from start
+        takes = [Take(id="FALLBACK", start=0.0, end=3.0, text="")]
+
+    listfile = _tmpfile(".txt")
+    parts: List[str] = []
+
+    for idx, t in enumerate(takes, start=1):
+        part = _tmpfile(f".part{idx:02d}.mp4")
+        parts.append(part)
+        dur = max(0.05, t.dur)
+        _run([
+            FFMPEG_BIN, "-y",
+            "-ss", f"{t.start:.3f}",
+            "-i", src,
+            "-t", f"{dur:.3f}",
+            "-c:v", "libx264", "-preset", "fast", "-crf", "23",
+            "-pix_fmt", "yuv420p", "-g", "48",
+            "-c:a", "aac", "-b:a", "128k",
+            part
+        ])
+
+    with open(listfile, "w") as f:
+        for p in parts:
+            f.write(f"file '{p}'\n")
+
+    final = _tmpfile(".mp4")
+    _run([
+        FFMPEG_BIN, "-y",
+        "-f", "concat", "-safe", "0",
+        "-i", listfile,
+        "-c:v", "libx264", "-preset", "fast", "-crf", "23",
+        "-pix_fmt", "yuv420p", "-g", "48",
+        "-c:a", "aac", "-b:a", "128k",
+        final
+    ])
+    return final
+
+
+# ================== VISION (simple face detect) ==================
+
+_CASCADE_PATH = cv2.data.haarcascades + "haarcascade_frontalface_default.xml"
+_FACE_CASCADE = cv2.CascadeClassifier(_CASCADE_PATH)
+
+def _face_score_for_frame(frame_bgr) -> float:
+    if frame_bgr is None:
+        return 0.0
+    gray = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2GRAY)
+    faces = _FACE_CASCADE.detectMultiScale(gray, scaleFactor=1.1, minNeighbors=5, minSize=(80, 80))
+    return 1.0 if len(faces) > 0 else 0.0
+
+def _vision_score_for_clip(video_path: str, start: float, end: float) -> float:
+    cap = cv2.VideoCapture(video_path)
+    if not cap.isOpened():
+        return 0.0
+    fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
+    mid = (start + end) / 2.0
+    frame_id = int(mid * fps)
+    cap.set(cv2.CAP_PROP_POS_FRAMES, frame_id)
+    ok, frame = cap.read()
+    cap.release()
+    if not ok:
+        return 0.0
+    return _face_score_for_frame(frame)
+
+
+# ================== ASR → TAKES ==================
+
+def _load_asr_segments(src: str) -> Optional[List[Dict[str, Any]]]:
+    if transcribe_segments is None:
+        return None
     try:
-        from worker.asr import transcribe_segments
+        segs = transcribe_segments(src)
     except Exception:
         return None
-
-    try:
-        segs = transcribe_segments(local_video_path)
-    except Exception:
-        return None
-
     if not segs:
         return None
     return segs
 
-# ---------- CLAUSE SPLIT ----------
-
-def _split_text_into_clauses(txt: str) -> List[str]:
-    """
-    Simple splitter: sentence ends, then split on 'and/but' to avoid long rambles.
-    """
-    txt = " ".join((txt or "").split())
-    if not txt:
+def _split_into_clauses(text: str) -> List[str]:
+    if not text:
         return []
-    # first split on sentence-ish ends
-    tmp: List[str] = []
+    text = " ".join(text.split())
+    temp: List[str] = []
     buf = ""
-    for ch in txt:
+    for ch in text:
         buf += ch
         if ch in ".?!":
-            tmp.append(buf.strip())
+            temp.append(buf.strip())
             buf = ""
     if buf.strip():
-        tmp.append(buf.strip())
+        temp.append(buf.strip())
 
     clauses: List[str] = []
-    for piece in tmp:
+    for piece in temp:
         low = piece.lower()
         if " but " in low or " and " in low:
             piece = piece.replace(" but ", "|SPLIT|").replace(" and ", "|SPLIT|")
@@ -179,257 +271,250 @@ def _split_text_into_clauses(txt: str) -> List[str]:
             if piece:
                 clauses.append(piece)
 
-    # drop very short
     clauses = [c for c in clauses if len(c.split()) >= 3]
     return clauses
 
-def _assign_times(seg_start: float, seg_end: float, clauses: List[str]) -> List[Clause]:
+def _assign_times_to_clauses(seg_start: float, seg_end: float, clauses: List[str]) -> List[Tuple[float, float, str]]:
     dur = max(0.05, seg_end - seg_start)
     joined = " ".join(clauses)
     total_len = max(1, len(joined))
-    out: List[Clause] = []
+    out: List[Tuple[float, float, str]] = []
     cursor = 0
-    for idx, c in enumerate(clauses, start=1):
-        clen = len(c)
+    for c in clauses:
+        c_len = len(c)
         start_rel = cursor / total_len
-        end_rel = (cursor + clen) / total_len
+        end_rel = (cursor + c_len) / total_len
         c_start = seg_start + start_rel * dur
         c_end = seg_start + end_rel * dur
-        out.append(Clause(id=f"c{idx}", start=c_start, end=c_end, text=c.strip()))
-        cursor += clen + 1
+        out.append((c_start, c_end, c.strip()))
+        cursor += c_len + 1
     return out
 
-# ---------- LLM SCORING (ALWAYS-ON) ----------
 
-def _llm_score_clause(text: str) -> Dict[str, Any]:
-    """
-    Always try to send to OpenAI.
-    If it fails, we raise and caller will downgrade to rule-only.
-    """
-    from openai import OpenAI
-    client = OpenAI()
+# ================== RULE FILTERS ==================
 
-    prompt = f"""
-You are helping to auto-edit short UGC sales videos.
+def _clause_is_bad(c: str) -> bool:
+    low = c.lower().strip()
+    if not low:
+        return True
+    for p in BAD_PHRASES:
+        if p in low:
+            return True
+    for p in UGLY_BRANCHES:
+        if p in low:
+            return True
+    if len(low.split()) < 3:
+        return True
+    return False
 
-Given this spoken line, decide:
-1. should we KEEP it in the final sales edit?
-2. what ROLE is it? (HOOK, FEATURE, CTA, FILLER)
-3. are there obvious mistakes like "wait", "I forgot", "why can't I remember".
+def _clause_is_ctaish(c: str) -> bool:
+    low = c.lower()
+    for p in CTA_FLUFF:
+        if p in low:
+            return True
+    if low.startswith("if you want to") or low.startswith("if you wanna"):
+        return True
+    return False
 
-Return JSON with keys: keep (true/false), slot (HOOK|FEATURE|CTA|FILLER), bad (true/false), reason.
-
-Spoken line: "{text}"
-    """.strip()
-
-    resp = client.chat.completions.create(
-        model="gpt-4o-mini",
-        messages=[{"role": "user", "content": prompt}],
-        temperature=0.0,
-        max_tokens=120,
-    )
-
-    raw = resp.choices[0].message.content.strip()
-    # try to eval as JSON-ish
-    import json
-    try:
-        data = json.loads(raw)
-    except Exception:
-        # very defensive: if model didn't return JSON, assume keep as FEATURE
-        data = {"keep": True, "slot": "FEATURE", "bad": False, "reason": "fallback"}
-    return data
-
-# ---------- RULE FALLBACK ----------
-
-def _rule_should_drop(text: str) -> bool:
-    low = text.lower()
-    for bad in DROP_CONTAINS:
-        if bad in low:
+def _clause_is_featurey(c: str) -> bool:
+    low = c.lower()
+    for h in FEATURE_HINTS:
+        if h in low:
             return True
     return False
 
-def _rule_guess_slot(text: str) -> str:
-    low = text.lower()
-    if "if you don't have" in low or "this is the perfect" in low:
-        return "HOOK"
-    for h in FEATURE_HINTS:
-        if h in low:
-            return "FEATURE"
-    if low.startswith("click") or low.startswith("go to") or "i left it for you" in low:
-        return "CTA"
-    return "FEATURE"
+def _trim_repeated_ngrams(txt: str, n: int = 4) -> str:
+    words = txt.split()
+    if len(words) <= n * 2:
+        return txt
+    seen = {}
+    for i in range(0, len(words) - n + 1):
+        key = " ".join(w.lower() for w in words[i:i+n])
+        if key in seen:
+            return " ".join(words[:i]).rstrip(" ,.;")
+        seen[key] = i
+    return txt
 
-# ---------- EXPORT (CONCAT) ----------
+def _trim_cta_fluff(txt: str) -> str:
+    low = txt.lower()
+    for p in CTA_FLUFF:
+        idx = low.find(p)
+        if idx != -1:
+            return txt[:idx].rstrip(" ,.;")
+    return txt
 
-def _export_concat(src: str, clauses: List[Clause]) -> str:
-    if not clauses:
-        # fallback: just take first 4s
-        clauses = [Clause(id="FALLBACK", start=0.0, end=4.0, text="")]
-    listfile = _tmpfile(".txt")
-    parts: List[str] = []
+def _clean_text(txt: str) -> str:
+    txt = _trim_repeated_ngrams(txt, n=4)
+    txt = _trim_cta_fluff(txt)
+    return txt.strip()
 
-    for idx, cl in enumerate(clauses, start=1):
-        part_path = _tmpfile(f".part{idx:02d}.mp4")
-        parts.append(part_path)
-        dur = max(0.05, cl.dur)
-        _run([
-            FFMPEG_BIN, "-y",
-            "-ss", f"{cl.start:.3f}",
-            "-i", src,
-            "-t", f"{dur:.3f}",
-            "-c:v", "libx264", "-preset", "fast", "-crf", "23",
-            "-pix_fmt", "yuv420p",
-            "-c:a", "aac", "-b:a", "128k",
-            part_path
-        ])
 
-    with open(listfile, "w") as f:
-        for p in parts:
-            f.write(f"file '{p}'\n")
+# ================== LLM FILTER ==================
 
-    final_path = _tmpfile(".mp4")
-    _run([
-        FFMPEG_BIN, "-y",
-        "-f", "concat", "-safe", "0",
-        "-i", listfile,
-        "-c:v", "libx264", "-preset", "fast", "-crf", "23",
-        "-pix_fmt", "yuv420p",
-        "-c:a", "aac", "-b:a", "128k",
-        final_path
-    ])
-    return final_path
+def _llm_score_clause(clause: str) -> float:
+    """
+    Always-on: we call OpenAI here.
+    We return 1.0 for keep, 0.0 for drop.
+    """
+    prompt = (
+        "You are an editor for short sales videos. "
+        "You are given ONE spoken line from a creator. "
+        "Decide if the line is a good, on-script, persuasive line to KEEP in the final video.\n\n"
+        f"LINE: \"{clause}\"\n\n"
+        "Reply with exactly one word: KEEP or DROP."
+    )
+    resp = _openai_client.chat.completions.create(
+        model=LLM_MODEL,
+        messages=[
+            {"role": "system", "content": "You judge sales lines."},
+            {"role": "user", "content": prompt},
+        ],
+        temperature=0,
+        max_tokens=2,
+    )
+    ans = resp.choices[0].message.content.strip().upper()
+    return 1.0 if "KEEP" in ans else 0.0
 
-# ---------- MAIN ENTRY ----------
+
+# ================== FALLBACK (no ASR) ==================
+
+def _time_based_takes(vid_dur: float) -> List[Take]:
+    takes: List[Take] = []
+    t = 0.0
+    idx = 1
+    while t < vid_dur:
+        end = min(t + 5.0, vid_dur)
+        takes.append(Take(id=f"AUTO{idx:04d}", start=t, end=end, text=f"auto segment {idx}"))
+        t = end
+        idx += 1
+    return takes
+
+
+# ================== PUBLIC ENTRY ==================
 
 def run_pipeline(
     *,
     session_id: str,
-    # we support BOTH, so tasks.py can pass local_video_path like before
     local_video_path: Optional[str] = None,
     file_urls: Optional[List[str]] = None,
     s3_prefix: Optional[str] = None,
     max_duration: Optional[float] = None,
     **kwargs,
 ) -> Dict[str, Any]:
-
-    # 1) get source path
-    if local_video_path and os.path.exists(local_video_path):
+    """
+    Entry point used by tasks.py
+    - tasks.py is currently calling: run_pipeline(local_video_path=..., session_id=..., s3_prefix=...)
+    - API could call: run_pipeline(file_urls=[...], session_id=...)
+    We support both.
+    """
+    if local_video_path:
         src = local_video_path
-    else:
-        if not file_urls:
-            return {"ok": False, "error": "no video input"}
+    elif file_urls:
         src = _download_to_tmp(file_urls[0])
+    else:
+        return {"ok": False, "error": "no video input"}
 
     real_dur = _ffprobe_duration(src)
-    cap = float(max_duration or MAX_DURATION_SEC)
+    cap = float(max_duration or DEFAULT_MAX_DURATION_SEC)
     if real_dur > 0:
         cap = min(cap, real_dur)
 
-    # 2) ASR
     segs = _load_asr_segments(src)
-    if not segs:
-        # no ASR → just export first 6s
-        final = _export_concat(src, [Clause(id="FALLBACK", start=0.0, end=min(6.0, cap), text="")])
-        up = _upload_to_s3(final, s3_prefix=s3_prefix)
-        return {
-            "ok": True,
-            "session_id": session_id,
-            "input_local": src,
-            "duration_sec": _ffprobe_duration(final),
-            **up,
-            "clips": [],
-            "slots": {"HOOK": [], "PROBLEM": [], "FEATURE": [], "PROOF": [], "CTA": []},
-            "asr": False,
-            "semantic": False,
-            "vision": False,
-        }
+    used_asr = segs is not None
 
-    # 3) turn ASR segments into clauses
-    all_clauses: List[Clause] = []
-    for idx, seg in enumerate(segs, start=1):
-        text = (seg.get("text") or "").strip()
-        if not text:
-            continue
-        s = float(seg.get("start", 0.0))
-        e = float(seg.get("end", s))
-        if (e - s) > MAX_TAKE_SEC:
-            e = s + MAX_TAKE_SEC
-        # split into clauses
-        clauses_txt = _split_text_into_clauses(text)
-        if not clauses_txt:
-            continue
-        # map to times
-        clauses_timed = _assign_times(s, e, clauses_txt)
-        # give them stable ids
-        for cidx, cl in enumerate(clauses_timed, start=1):
-            cl.id = f"ASR{idx:04d}_c{cidx}"
-            all_clauses.append(cl)
+    # build candidate clauses
+    clause_takes: List[Take] = []
 
-    # 4) LLM + rules decide which ones to keep
-    kept: List[Dict[str, Any]] = []
-    total_time = 0.0
-    for cl in all_clauses:
-        if total_time >= cap:
+    if segs:
+        # last seg id to allow CTA at the end
+        for idx, seg in enumerate(segs, start=1):
+            seg_txt = (seg.get("text") or "").strip()
+            if not seg_txt:
+                continue
+            seg_start = float(seg.get("start", 0.0))
+            seg_end = float(seg.get("end", seg_start))
+            clauses = _split_into_clauses(seg_txt)
+            if not clauses:
+                continue
+            timed = _assign_times_to_clauses(seg_start, seg_end, clauses)
+            for c_idx, (cs, ce, ctext) in enumerate(timed, start=1):
+                ctext = _clean_text(ctext)
+                if not ctext:
+                    continue
+
+                # RULE filter (first gate)
+                rule_bad = _clause_is_bad(ctext)
+                rule_cta = _clause_is_ctaish(ctext)
+                rule_feature = _clause_is_featurey(ctext)
+
+                # always run LLM — if OpenAI is down, this will raise → job fails
+                llm_keep = _llm_score_clause(ctext)
+
+                # decide: we keep if (not rule_bad) AND llm_keep
+                if rule_bad and not rule_feature:
+                    continue
+                if llm_keep <= 0.5:
+                    continue
+
+                take = Take(
+                    id=f"ASR{idx:04d}_c{c_idx}",
+                    start=cs,
+                    end=ce,
+                    text=ctext,
+                    llm_score=llm_keep,
+                    rule_score=0.0 if rule_bad else 1.0,
+                )
+
+                # VISION gate
+                face_q = _vision_score_for_clip(src, cs, ce)
+                if face_q < 0.35:  # tune
+                    continue
+                take.face_q = face_q
+
+                clause_takes.append(take)
+    else:
+        # no ASR → dumb split
+        clause_takes = _time_based_takes(cap)
+
+    # sort by time and cap total duration
+    clause_takes = sorted(clause_takes, key=lambda x: x.start)
+
+    story: List[Take] = []
+    total_dur = 0.0
+    for t in clause_takes:
+        if total_dur + t.dur > cap:
             break
+        story.append(t)
+        total_dur += t.dur
 
-        # rule pre-drop
-        if _rule_should_drop(cl.text):
-            continue
+    # if we somehow got nothing, just take first 3s
+    if not story:
+        story = [Take(id="FALLBACK", start=0.0, end=min(3.0, cap), text="")]
 
-        # always try LLM
-        keep = False
-        slot = "FEATURE"
-        bad = False
-        try:
-            llm_res = _llm_score_clause(cl.text)
-            keep = bool(llm_res.get("keep", False))
-            slot = (llm_res.get("slot") or "FEATURE").upper()
-            bad = bool(llm_res.get("bad", False))
-        except Exception:
-            # LLM failed → fall back to rules
-            slot = _rule_guess_slot(cl.text)
-            keep = True
-            bad = False
-
-        if not keep or bad:
-            continue
-
-        # obey cap
-        if total_time + cl.dur > cap:
-            break
-
-        kept.append({
-            "clause": cl,
-            "slot": slot,
-        })
-        total_time += cl.dur
-
-    # 5) if we somehow didn't keep any, take first 4s
-    if not kept:
-        final = _export_concat(src, [Clause(id="FALLBACK", start=0.0, end=min(4.0, cap), text="")])
-        up = _upload_to_s3(final, s3_prefix=s3_prefix)
-        return {
-            "ok": True,
-            "session_id": session_id,
-            "input_local": src,
-            "duration_sec": _ffprobe_duration(final),
-            **up,
-            "clips": [],
-            "slots": {"HOOK": [], "PROBLEM": [], "FEATURE": [], "PROOF": [], "CTA": []},
-            "asr": True,
-            "semantic": True,
-            "vision": False,
-        }
-
-    # 6) export video
-    final_path = _export_concat(src, [k["clause"] for k in kept])
+    # export
+    final_path = _export_concat(src, story)
     up = _upload_to_s3(final_path, s3_prefix=s3_prefix)
 
-    # 7) build json response
-    def _short(t: str, n: int = 220) -> str:
-        return t if len(t) <= n else t[:n].rstrip() + "..."
+    def _trim(txt: str, n: int = 220) -> str:
+        return txt if len(txt) <= n else txt[:n].rstrip() + "..."
 
-    clips = []
+    clips = [
+        {
+            "id": t.id,
+            "slot": "STORY",
+            "start": t.start,
+            "end": t.end,
+            "score": 2.5,
+            "face_q": t.face_q,
+            "scene_q": 1.0,
+            "vtx_sim": 0.0,
+            "chain_ids": [t.id],
+            "text": _trim(t.text),
+        }
+        for t in story
+    ]
+
+    # slots: first = HOOK, middle = FEATURE, last = CTA
     slots: Dict[str, List[Dict[str, Any]]] = {
         "HOOK": [],
         "PROBLEM": [],
@@ -438,46 +523,62 @@ def run_pipeline(
         "CTA": [],
     }
 
-    for item in kept:
-        cl: Clause = item["clause"]
-        slot = item["slot"]
-        clip = {
-            "id": cl.id,
-            "slot": "STORY",
-            "start": cl.start,
-            "end": cl.end,
-            "score": 2.5,
-            "face_q": 1.0,
-            "scene_q": 1.0,
-            "vtx_sim": 0.0,
-            "chain_ids": [cl.id],
-            "text": _short(cl.text),
-        }
-        clips.append(clip)
-
-        slot_dict = {
-            "id": cl.id,
-            "start": cl.start,
-            "end": cl.end,
-            "text": _short(cl.text),
-            "meta": {"slot": slot, "score": 2.0, "chain_ids": [cl.id]},
-            "face_q": 1.0,
+    if story:
+        first = story[0]
+        slots["HOOK"].append({
+            "id": first.id,
+            "start": first.start,
+            "end": first.end,
+            "text": _trim(first.text),
+            "meta": {"slot": "HOOK", "score": 2.5, "chain_ids": [first.id]},
+            "face_q": first.face_q,
             "scene_q": 1.0,
             "vtx_sim": 0.0,
             "has_product": False,
             "ocr_hit": 0,
-        }
-        slots.setdefault(slot, []).append(slot_dict)
+        })
+
+    if len(story) > 2:
+        for mid in story[1:-1]:
+            slots["FEATURE"].append({
+                "id": mid.id,
+                "start": mid.start,
+                "end": mid.end,
+                "text": _trim(mid.text),
+                "meta": {"slot": "FEATURE", "score": 2.0, "chain_ids": [mid.id]},
+                "face_q": mid.face_q,
+                "scene_q": 1.0,
+                "vtx_sim": 0.0,
+                "has_product": False,
+                "ocr_hit": 0,
+            })
+
+    if len(story) >= 2:
+        last = story[-1]
+        slots["CTA"].append({
+            "id": last.id,
+            "start": last.start,
+            "end": last.end,
+            "text": _trim(last.text),
+            "meta": {"slot": "CTA", "score": 2.0, "chain_ids": [last.id]},
+            "face_q": last.face_q,
+            "scene_q": 1.0,
+            "vtx_sim": 0.0,
+            "has_product": False,
+            "ocr_hit": 0,
+        })
 
     return {
         "ok": True,
         "session_id": session_id,
         "input_local": src,
         "duration_sec": _ffprobe_duration(final_path),
-        **up,
+        "s3_key": up["s3_key"],
+        "s3_url": up["s3_url"],
+        "https_url": up["https_url"],
         "clips": clips,
         "slots": slots,
-        "asr": True,
+        "asr": used_asr,
         "semantic": True,
-        "vision": False,
+        "vision": True,
     }
