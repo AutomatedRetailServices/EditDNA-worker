@@ -1,60 +1,62 @@
-# worker/llm.py
 import os
-import traceback
-from typing import Dict, Any, List
-
+from typing import Optional, Tuple
 from openai import OpenAI
 
-KEEP_MIN = float(os.getenv("KEEP_MIN", "0.28"))  # permissive to avoid empty outputs
-OPENAI_VISION_MODEL = os.getenv("OPENAI_VISION_MODEL", "gpt-4o-mini")
+_OPENAI_API_KEY = os.getenv("OPENAI_API_KEY") or os.getenv("OPENAI_APIKEY") or ""
 
-client = OpenAI()
+# Always-on LLM; raise if missing key so we don't silently degrade.
+def _client() -> OpenAI:
+    if not _OPENAI_API_KEY:
+        raise RuntimeError("OPENAI_API_KEY not set")
+    return OpenAI(api_key=_OPENAI_API_KEY)
 
-SYS_PROMPT = (
-    "You are a JSON scorer for UGC sales clips. For each spoken clause, "
-    'return JSON: {"keep_score": 0..1, "brief_reason": "..."} with no extra keys. '
-    "Score higher if the text is on-message, persuasive, and coherent."
-)
-
-def _score_text_only(text: str) -> Dict[str, Any]:
-    prompt = [
-        {"role": "system", "content": SYS_PROMPT},
-        {"role": "user", "content": [
-            {"type": "text", "text": f"Clause:\n{text}\n\nReturn JSON only."}
-        ]},
+# Returns (keep_score: float in [0,1], reason: str).
+def score_clause_multimodal(clause_text: str, data_uri_png: Optional[str], slot_hint: str) -> Tuple[float, str]:
+    """
+    Ask GPT-4o to judge if this clause belongs in a clean 30–60s product sales edit.
+    Prefers: hook clarity, on-script features, natural CTA; rejects: re-takes, 'wait', filler, contradictions.
+    """
+    client = _client()
+    messages = [
+        {
+            "role": "system",
+            "content": (
+                "You are a strict ad editor for short UGC sales videos. "
+                "Score if this clause should stay in a clean final cut. "
+                "Penalize repeated re-takes, hesitations, contradictions, or off-topic filler. "
+                "Reward clear hooks, tangible features/benefits, proof, and one concise CTA near the end."
+            )
+        },
+        {
+            "role": "user",
+            "content": [
+                {"type": "input_text",
+                 "text": f"Slot hint: {slot_hint}. Clause: \"{clause_text}\".\n"
+                         f"Return a JSON with fields: keep_score (0..1), brief_reason."}
+            ]
+        }
     ]
-    r = client.responses.create(
-        model=OPENAI_VISION_MODEL,
-        input=prompt,
-        temperature=0.2,
+
+    # If we have a frame, make it multimodal
+    if data_uri_png:
+        messages[1]["content"].append({"type": "input_image", "image_url": {"url": data_uri_png}})
+
+    resp = client.chat.completions.create(
+        model=os.getenv("OPENAI_VISION_MODEL", "gpt-4o-mini"),
+        messages=messages,
+        temperature=0.0,
+        response_format={"type": "json_object"},
     )
-    out = r.output_text or "{}"
+    txt = resp.choices[0].message.content or "{}"
+    # simple parse:
+    keep = 0.0
+    reason = "n/a"
     try:
         import json
-        data = json.loads(out)
+        j = json.loads(txt)
+        keep = float(j.get("keep_score", 0.0))
+        reason = str(j.get("brief_reason", ""))
     except Exception:
-        data = {"keep_score": 0.35, "brief_reason": "parse-failed-softkeep"}
-    keep = max(0.0, min(1.0, float(data.get("keep_score", 0.35))))
-    return {"keep_score": keep, "brief_reason": data.get("brief_reason", "ok")}
-
-def filter_segments_with_llm(asr_segments: List[Dict[str, Any]], media_path_or_none: str) -> Dict[str, Dict[str, Any]]:
-    """
-    Always-on scoring; on any LLM error we soft-keep to avoid zero-length outputs.
-    Returns: {seg_id: {keep_score, brief_reason}}
-    """
-    decisions: Dict[str, Dict[str, Any]] = {}
-    kept = 0
-    for seg in asr_segments or []:
-        sid = seg.get("id") or ""
-        text = (seg.get("text") or "").strip()
-        try:
-            res = _score_text_only(text) if text else {"keep_score": 0.35, "brief_reason": "empty-text-softkeep"}
-        except Exception:
-            traceback.print_exc()
-            res = {"keep_score": 0.35, "brief_reason": "llm-error-softkeep"}
-        keep = float(res.get("keep_score", 0.0))
-        if keep >= KEEP_MIN:
-            kept += 1
-        decisions[sid] = {"keep_score": max(0.0, min(1.0, keep)), "brief_reason": res.get("brief_reason", "")}
-    print(f"[LLM] segments={len(asr_segments)} kept>={KEEP_MIN} => {kept}")
-    return decisions
+        pass
+    keep = max(0.0, min(1.0, keep))
+    return keep, reason
