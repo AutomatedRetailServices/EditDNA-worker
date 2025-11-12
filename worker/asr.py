@@ -1,82 +1,31 @@
-# worker/asr.py
+from typing import List, Dict, Any, Optional
 import os
-import subprocess
-from typing import List, Dict, Any
+from faster_whisper import WhisperModel
 
-from .utils import ffprobe_duration, ensure_float, MAX_TAKE_SEC
+# Light wrapper that returns segments with {start,end,text}
+# Use local faster-whisper; no network dependency.
+_MODEL_NAME = os.getenv("ASR_MODEL", "base.en")
+_DEVICE = "cuda" if os.getenv("CUDA_VISIBLE_DEVICES", "") != "" else "cpu"
+_COMPUTE = "float16" if _DEVICE == "cuda" else "int8"
 
-# Try optional Whisper (openai-whisper). If unavailable, we fallback.
-try:
-    import whisper  # pip install openai-whisper
-    HAVE_WHISPER = True
-except Exception:
-    HAVE_WHISPER = False
+_model = None
 
-TMP_WAV = "/tmp/editdna_audio.wav"
+def _get_model():
+    global _model
+    if _model is None:
+        _model = WhisperModel(_MODEL_NAME, device=_DEVICE, compute_type=_COMPUTE)
+    return _model
 
-def _extract_audio(media_path: str) -> str:
-    """
-    Extract mono 16k wav for ASR. Requires ffmpeg in the container.
-    """
+def transcribe_segments(local_video_path: str) -> Optional[List[Dict[str, Any]]]:
     try:
-        cmd = [
-            "ffmpeg", "-nostdin", "-y",
-            "-i", media_path,
-            "-ac", "1", "-ar", "16000",
-            TMP_WAV
-        ]
-        subprocess.check_call(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        return TMP_WAV
+        model = _get_model()
+        segments, _ = model.transcribe(local_video_path, vad_filter=True)
+        out: List[Dict[str, Any]] = []
+        for seg in segments:
+            txt = (seg.text or "").strip()
+            if not txt:
+                continue
+            out.append({"start": float(seg.start), "end": float(seg.end), "text": txt})
+        return out or None
     except Exception:
-        return media_path  # best effort: return original, Whisper can read many formats
-
-def _whisper_transcribe(media_path: str) -> List[Dict[str, Any]]:
-    """
-    Use Whisper (local) if installed. Returns list of segments:
-      {id,start,end,text,slot?}
-    """
-    model_name = os.getenv("WHISPER_MODEL", "base")
-    model = whisper.load_model(model_name)
-    audio_in = _extract_audio(media_path)
-    res = model.transcribe(audio_in, fp16=False)
-    segs = []
-    for i, s in enumerate(res.get("segments", []) or []):
-        start = float(s.get("start", 0.0))
-        end = float(s.get("end", start))
-        text = (s.get("text") or "").strip()
-        if end > start:
-            segs.append({
-                "id": f"ASR{i:04d}",
-                "start": start,
-                "end": end,
-                "text": text,
-                "slot": "STORY"
-            })
-    return segs
-
-def transcribe(media_path: str) -> List[Dict[str, Any]]:
-    """
-    Primary ASR entry point expected by pipeline.py.
-    If Whisper is not installed, fallback to a single full-length segment (no text).
-    """
-    if HAVE_WHISPER:
-        try:
-            segs = _whisper_transcribe(media_path)
-            if segs:
-                return segs
-        except Exception as e:
-            # Fall through to dummy if Whisper fails
-            print(f"[ASR] Whisper error -> fallback: {e}")
-
-    # Fallback: one segment spanning the full video duration (text empty)
-    dur = float(ffprobe_duration(media_path))
-    dur = max(0.0, dur)
-    # keep a reasonable span if an extreme input arrives (assembly handles length)
-    end_t = min(dur, float(MAX_TAKE_SEC) if MAX_TAKE_SEC else dur)
-    return [{
-        "id": "ASR0000",
-        "start": 0.0,
-        "end": end_t if end_t > 0 else 10.0,  # last resort min
-        "text": "",
-        "slot": "STORY"
-    }]
+        return None
