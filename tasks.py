@@ -1,55 +1,63 @@
-# tasks.py
 import os
 import json
-from typing import List, Optional, Dict, Any
-from worker.pipeline import run_pipeline
+import tempfile
+import requests
+from worker import pipeline
 
-# RQ job entrypoint
-def job_render(payload: Dict[str, Any]) -> Dict[str, Any]:
+S3_PREFIX = os.getenv("S3_PREFIX", "editdna/outputs/").strip()
+
+def _download(url: str) -> str:
+    fd, path = tempfile.mkstemp(suffix=".mp4")
+    os.close(fd)
+    with requests.get(url, stream=True, timeout=300) as r:
+        r.raise_for_status()
+        with open(path, "wb") as f:
+            for chunk in r.iter_content(chunk_size=1 << 20):
+                if chunk:
+                    f.write(chunk)
+    return path
+
+def job_render(payload: dict) -> dict:
     """
+    RQ entrypoint.
     Expected payload:
-    {
-      "session_id": "funnel-test-1",
-      "files": ["https://.../IMG_02.mov", "..."],  # at least one
-      "portrait": true,
-      "s3_prefix": "editdna/outputs/",
-      "target_duration": 35.0,   # optional (seconds); None = no target cap
-      "max_duration": None,      # optional hard cap; None = no cap
-      "force_cta": False,        # optional
-      "openai_model": "gpt-4o-mini",  # optional
-    }
+      {
+        "session_id": "funnel-test-1",
+        "files": ["https://.../IMG_02.mov"],
+        "portrait": true,
+        "funnel_counts": {"HOOK":1, "FEATURE":5, "CTA":1},   # optional
+        "max_duration_sec": null,                             # optional
+        "s3_prefix": "editdna/outputs/"                       # optional
+      }
     """
-    session_id: str = payload.get("session_id") or "session-unknown"
-    files: List[str] = payload.get("files") or []
-    portrait: bool = bool(payload.get("portrait", True))
-    s3_prefix: Optional[str] = payload.get("s3_prefix") or "editdna/outputs/"
-    target_duration = payload.get("target_duration", None)
-    max_duration = payload.get("max_duration", None)
-    force_cta = bool(payload.get("force_cta", False))
-    openai_model = payload.get("openai_model", "gpt-4o-mini")
+    session_id = payload.get("session_id") or "session"
+    file_urls = payload.get("files") or []
+    portrait = bool(payload.get("portrait", True))
+    funnel_counts = payload.get("funnel_counts") or {}
+    max_duration_sec = payload.get("max_duration_sec")
+    s3_prefix = payload.get("s3_prefix") or S3_PREFIX
 
-    out = run_pipeline(
+    if not file_urls:
+        return {"ok": False, "error": "no files provided"}
+
+    # We pass the URLs directly; pipeline will download/ASR internally.
+    out = pipeline.run_pipeline(
         session_id=session_id,
-        file_urls=files,                 # REQUIRED keyword
+        file_urls=file_urls,
         portrait=portrait,
+        funnel_counts=funnel_counts,
+        max_duration=max_duration_sec,
         s3_prefix=s3_prefix,
-        target_duration=target_duration, # None → keep all good clauses
-        max_duration=max_duration,       # None → no hard cap
-        llm_always_on=True,              # “full brain” as requested
-        force_cta=force_cta,
-        openai_model=openai_model,
     )
     return out
 
-# simple manual test (optional)
+# Optional local test
 if __name__ == "__main__":
-    demo = {
+    test = {
         "session_id": "local-test",
-        "files": [os.getenv("TEST_VIDEO_URL", "")],
+        "files": [os.getenv("TEST_URL", "")],
         "portrait": True,
-        "s3_prefix": "editdna/outputs/",
-        "target_duration": None,
-        "max_duration": None,
-        "force_cta": False,
+        "funnel_counts": {"HOOK":1, "FEATURE":4, "CTA":1},
+        "max_duration_sec": None
     }
-    print(json.dumps(job_render(demo), indent=2))
+    print(json.dumps(job_render(test), indent=2))
