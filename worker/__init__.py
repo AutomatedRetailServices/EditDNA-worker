@@ -1,5 +1,6 @@
-# /workspace/EditDNA-worker/worker/__init__.py
-from . import video
+# worker/__init__.py
+from . import pipeline
 from . import asr
+from . import vision
 
-__all__ = ["video", "asr"]
+__all__ = ["pipeline", "asr", "vision"]
