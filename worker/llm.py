@@ -1,117 +1,60 @@
 # worker/llm.py
 import os
-import json
-from typing import Optional, Tuple
-from openai import OpenAI, BadRequestError
+import traceback
+from typing import Dict, Any, List
 
-_OPENAI_API_KEY = (
-    os.getenv("OPENAI_API_KEY")
-    or os.getenv("OPENAI_APIKEY")
-    or os.getenv("OPENAI_TOKEN")
-    or ""
+from openai import OpenAI
+
+KEEP_MIN = float(os.getenv("KEEP_MIN", "0.28"))  # permissive to avoid empty outputs
+OPENAI_VISION_MODEL = os.getenv("OPENAI_VISION_MODEL", "gpt-4o-mini")
+
+client = OpenAI()
+
+SYS_PROMPT = (
+    "You are a JSON scorer for UGC sales clips. For each spoken clause, "
+    'return JSON: {"keep_score": 0..1, "brief_reason": "..."} with no extra keys. '
+    "Score higher if the text is on-message, persuasive, and coherent."
 )
 
-# Vision model that supports the Responses API multimodal input
-_DEFAULT_VISION_MODEL = os.getenv("OPENAI_VISION_MODEL", "gpt-4o-mini")
-
-def _client() -> OpenAI:
-    if not _OPENAI_API_KEY:
-        raise RuntimeError("OPENAI_API_KEY not set")
-    return OpenAI(api_key=_OPENAI_API_KEY)
-
-def _parse_json(content: str) -> Tuple[float, str]:
-    keep, reason = 0.0, "n/a"
-    try:
-        j = json.loads(content or "{}")
-        keep = float(j.get("keep_score", 0.0))
-        reason = str(j.get("brief_reason", ""))
-    except Exception:
-        # If the model returned non-JSON by mistake, clamp to 0
-        pass
-    # clamp 0..1
-    keep = max(0.0, min(1.0, keep))
-    return keep, reason
-
-def _system_prompt() -> str:
-    return (
-        "You are a JSON-only scorer for short UGC sales videos.\n"
-        "Task: Score whether this single spoken clause should be KEPT in a clean final cut.\n"
-        "- Reward: clear hooks, concrete features/benefits, brief proof, one concise CTA near the end.\n"
-        "- Penalize: re-takes, hesitations, contradictions, off-topic filler, repeated lines.\n"
-        "Return JSON ONLY with exactly:\n"
-        "{ \"keep_score\": <0..1 number>, \"brief_reason\": <string> }"
+def _score_text_only(text: str) -> Dict[str, Any]:
+    prompt = [
+        {"role": "system", "content": SYS_PROMPT},
+        {"role": "user", "content": [
+            {"type": "text", "text": f"Clause:\n{text}\n\nReturn JSON only."}
+        ]},
+    ]
+    r = client.responses.create(
+        model=OPENAI_VISION_MODEL,
+        input=prompt,
+        temperature=0.2,
     )
-
-def _user_text(slot_hint: str, clause_text: str) -> str:
-    return (
-        f"Slot hint: {slot_hint}\n"
-        f"Clause: \"{clause_text}\"\n"
-        "Decide keep_score objectively for final ad quality."
-    )
-
-# ---- Public API -------------------------------------------------------------
-
-# Returns (keep_score: float in [0,1], reason: str)
-def score_clause_multimodal(clause_text: str, data_uri_png: Optional[str], slot_hint: str) -> Tuple[float, str]:
-    """
-    ALWAYS-ON LLM scoring via the Responses API (multimodal).
-    If no image or the server rejects image payload, retries text-only.
-    """
-    client = _client()
-
-    # 1) Try multimodal (text + optional image)
+    out = r.output_text or "{}"
     try:
-        messages = [
-            {
-                "role": "system",
-                "content": [{"type": "text", "text": _system_prompt()}],
-            },
-            {
-                "role": "user",
-                "content": (
-                    [{"type": "input_text", "text": _user_text(slot_hint, clause_text)}]
-                    + (
-                        [{"type": "input_image", "image_url": data_uri_png}]
-                        if data_uri_png else []
-                    )
-                ),
-            },
-        ]
-
-        # Responses API accepts input=[...] with content parts like input_text/input_image
-        resp = client.responses.create(
-            model=_DEFAULT_VISION_MODEL,
-            input=messages,
-            temperature=0.0,
-            response_format={"type": "json_object"},
-        )
-
-        content = resp.output_text or "{}"
-        return _parse_json(content)
-
-    except BadRequestError:
-        # 2) Retry text-only with Responses API (no image)
-        messages = [
-            {
-                "role": "system",
-                "content": [{"type": "text", "text": _system_prompt()}],
-            },
-            {
-                "role": "user",
-                "content": [
-                    {"type": "input_text", "text": _user_text(slot_hint, clause_text)}
-                ],
-            },
-        ]
-        resp = client.responses.create(
-            model=_DEFAULT_VISION_MODEL,
-            input=messages,
-            temperature=0.0,
-            response_format={"type": "json_object"},
-        )
-        content = resp.output_text or "{}"
-        return _parse_json(content)
-
+        import json
+        data = json.loads(out)
     except Exception:
-        # 3) Final safety: return low score; pipeline will keep other clauses
-        return 0.0, "fallback-error"
+        data = {"keep_score": 0.35, "brief_reason": "parse-failed-softkeep"}
+    keep = max(0.0, min(1.0, float(data.get("keep_score", 0.35))))
+    return {"keep_score": keep, "brief_reason": data.get("brief_reason", "ok")}
+
+def filter_segments_with_llm(asr_segments: List[Dict[str, Any]], media_path_or_none: str) -> Dict[str, Dict[str, Any]]:
+    """
+    Always-on scoring; on any LLM error we soft-keep to avoid zero-length outputs.
+    Returns: {seg_id: {keep_score, brief_reason}}
+    """
+    decisions: Dict[str, Dict[str, Any]] = {}
+    kept = 0
+    for seg in asr_segments or []:
+        sid = seg.get("id") or ""
+        text = (seg.get("text") or "").strip()
+        try:
+            res = _score_text_only(text) if text else {"keep_score": 0.35, "brief_reason": "empty-text-softkeep"}
+        except Exception:
+            traceback.print_exc()
+            res = {"keep_score": 0.35, "brief_reason": "llm-error-softkeep"}
+        keep = float(res.get("keep_score", 0.0))
+        if keep >= KEEP_MIN:
+            kept += 1
+        decisions[sid] = {"keep_score": max(0.0, min(1.0, keep)), "brief_reason": res.get("brief_reason", "")}
+    print(f"[LLM] segments={len(asr_segments)} kept>={KEEP_MIN} => {kept}")
+    return decisions
