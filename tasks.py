@@ -1,53 +1,55 @@
-# tasks.py (at repo root or /workspace/EditDNA-worker/tasks.py)
+# tasks.py
 import os
-from typing import Dict, Any, List
+import json
+from typing import List, Optional, Dict, Any
+from worker.pipeline import run_pipeline
 
-# Ensure worker package is importable
-HERE = os.path.dirname(os.path.abspath(__file__))
-ROOT = os.path.abspath(os.path.join(HERE))
-PKG  = os.path.abspath(os.path.join(HERE, "worker"))
-for p in (ROOT, PKG):
-    if p not in os.sys.path:
-        os.sys.path.insert(0, p)
-
-from worker import pipeline  # imports the ALWAYS-ON LLM pipeline
-
-def _norm_urls(payload: Dict[str, Any]) -> List[str]:
-    urls = payload.get("file_urls") or payload.get("files") or []
-    if isinstance(urls, str):
-        urls = [urls]
-    return urls if isinstance(urls, list) else []
-
+# RQ job entrypoint
 def job_render(payload: Dict[str, Any]) -> Dict[str, Any]:
     """
     Expected payload:
-      - session_id: str
-      - files or file_urls: [str]  (we normalize to file_urls)
-      - portrait: bool (optional)
-      - funnel_counts: any (optional)
-      - max_duration: float|None (optional)  # None = no cap
-      - s3_prefix: str (optional)
+    {
+      "session_id": "funnel-test-1",
+      "files": ["https://.../IMG_02.mov", "..."],  # at least one
+      "portrait": true,
+      "s3_prefix": "editdna/outputs/",
+      "target_duration": 35.0,   # optional (seconds); None = no target cap
+      "max_duration": None,      # optional hard cap; None = no cap
+      "force_cta": False,        # optional
+      "openai_model": "gpt-4o-mini",  # optional
+    }
     """
-    session_id   = payload.get("session_id") or "session-unknown"
-    file_urls    = _norm_urls(payload)
-    portrait     = bool(payload.get("portrait", False))
-    funnel_counts= payload.get("funnel_counts")
-    # IMPORTANT: allow None (no cap) — if client sends 0 or "", treat as None
-    raw_max_dur  = payload.get("max_duration", None)
-    max_duration = None
-    try:
-        if raw_max_dur not in (None, "", 0, "0"):
-            max_duration = float(raw_max_dur)
-    except Exception:
-        max_duration = None
-    s3_prefix    = payload.get("s3_prefix")
+    session_id: str = payload.get("session_id") or "session-unknown"
+    files: List[str] = payload.get("files") or []
+    portrait: bool = bool(payload.get("portrait", True))
+    s3_prefix: Optional[str] = payload.get("s3_prefix") or "editdna/outputs/"
+    target_duration = payload.get("target_duration", None)
+    max_duration = payload.get("max_duration", None)
+    force_cta = bool(payload.get("force_cta", False))
+    openai_model = payload.get("openai_model", "gpt-4o-mini")
 
-    out = pipeline.run_pipeline(
+    out = run_pipeline(
         session_id=session_id,
-        file_urls=file_urls,
+        file_urls=files,                 # REQUIRED keyword
         portrait=portrait,
-        funnel_counts=funnel_counts,
-        max_duration=max_duration,
         s3_prefix=s3_prefix,
+        target_duration=target_duration, # None → keep all good clauses
+        max_duration=max_duration,       # None → no hard cap
+        llm_always_on=True,              # “full brain” as requested
+        force_cta=force_cta,
+        openai_model=openai_model,
     )
     return out
+
+# simple manual test (optional)
+if __name__ == "__main__":
+    demo = {
+        "session_id": "local-test",
+        "files": [os.getenv("TEST_VIDEO_URL", "")],
+        "portrait": True,
+        "s3_prefix": "editdna/outputs/",
+        "target_duration": None,
+        "max_duration": None,
+        "force_cta": False,
+    }
+    print(json.dumps(job_render(demo), indent=2))
