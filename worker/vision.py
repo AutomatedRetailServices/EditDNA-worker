@@ -1,26 +1,22 @@
-import cv2
-import os
-import base64
-from typing import List, Tuple, Optional
-from worker import utils
+# worker/vision.py
+from typing import Dict, Any, List
+from .utils import ensure_float
 
-def extract_midframe_b64(local_video_path: str, start: float, end: float) -> Optional[str]:
-    """Grab a mid-frame between start/end, return base64 PNG data URI (for GPT-4o)."""
-    try:
-        cap = cv2.VideoCapture(local_video_path)
-        fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
-        t = (start + end) / 2.0
-        frame_idx = int(t * fps)
-        cap.set(cv2.CAP_PROP_POS_FRAMES, frame_idx)
-        ok, frame = cap.read()
-        cap.release()
-        if not ok or frame is None:
-            return None
-        # encode PNG to memory
-        ok, buf = cv2.imencode(".png", frame)
-        if not ok:
-            return None
-        b64 = base64.b64encode(buf.tobytes()).decode("utf-8")
-        return f"data:image/png;base64,{b64}"
-    except Exception:
-        return None
+def analyze_frames(media_path: str, asr_segments: List[Dict[str, Any]]) -> Dict[str, Dict[str, float]]:
+    """
+    Very light placeholder vision scoring.
+    Returns per-segment scores so the pipeline can rank segments without crashing.
+    You can replace this later with real face/scene quality & brand-match.
+    """
+    out: Dict[str, Dict[str, float]] = {}
+    for seg in asr_segments or []:
+        sid = seg.get("id") or ""
+        dur = max(0.0, ensure_float(seg.get("end", 0.0)) - ensure_float(seg.get("start", 0.0)))
+        # Heuristic: longer readable segments get a tiny bump on scene_q
+        scene_q = 0.45 + min(dur / 60.0, 0.25)  # 0.45 .. 0.70
+        out[sid] = {
+            "face_q": 0.50,   # neutral
+            "scene_q": float(scene_q),
+            "vtx_sim": 0.00,  # not computed in placeholder
+        }
+    return out
