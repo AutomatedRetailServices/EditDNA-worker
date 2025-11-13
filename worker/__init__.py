@@ -1,1 +1,2 @@
-# keep this empty or minimal
+# Empty init so "worker" is a package.
+# Do NOT put anything else here.
