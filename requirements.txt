@@ -1,39 +1,17 @@
---extra-index-url https://download.pytorch.org/whl/cu121
+# HTTP + S3 + env
+requests==2.32.3
+boto3==1.35.36
+python-dotenv==1.0.1
 
-# Core
-fastapi>=0.110
-uvicorn[standard]>=0.23
-requests>=2.32
-boto3>=1.34
-redis>=5.0
-rq>=2.6
-python-dotenv>=1.0.1
-
-# Torch (CUDA 12.1) + ASR
-torch==2.3.1
-torchaudio==2.3.1
-openai-whisper==20231117
+# Whisper (no torch needed, uses CTranslate2)
 faster-whisper==1.0.3
-ctranslate2>=4.6.0
 
-# Vision
-opencv-python-headless>=4.10.0.84
-Pillow==10.4.0
+# Arrays + images (for frame snapshots later)
 numpy==1.26.4
+Pillow==10.4.0
 
-# NLP / Semantic (light)
-sentence-transformers>=2.7.0
-scikit-learn==1.3.2
+# OpenAI NEW CLIENT (for GPT-4o multimodal)
+openai==1.51.0
 
-# Video
-moviepy==1.0.3
-imageio>=2.34.0
-imageio-ffmpeg>=0.4.9
-proglog>=0.1.10
-
-# OpenAI (LLM/vision)
-openai==2.7.1
-
-# Utils
-tqdm>=4.66.4
-zstandard>=0.22
+# Progress/logging helper (optional)
+tqdm==4.66.4
