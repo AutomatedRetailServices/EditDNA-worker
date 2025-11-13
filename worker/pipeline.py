@@ -1,240 +1,311 @@
-# worker/pipeline.py
 import os
+import io
 import json
-from dataclasses import dataclass
-from typing import List, Dict, Any, Tuple
+import uuid
+import time
+import logging
+import tempfile
+import subprocess
+from typing import List, Dict, Any
 
-from .asr import transcribe  # returns list[{id,start,end,text,slot?}]
-from .vision import analyze_frames  # returns {seg_id:{face_q,scene_q,vtx_sim}}
-from .llm import filter_segments_with_llm  # returns {seg_id:{keep_score,brief_reason}}
-from .utils import ffprobe_duration, now_utc_iso, ensure_float, MAX_TAKE_SEC
+import requests
+import boto3
+from faster_whisper import WhisperModel
 
-# Hard safety only (not a target). Keep generous so long inputs can breathe.
-HARD_CAP_SEC = 120.0
+from .llm import score_clause_multimodal
 
-@dataclass
-class Take:
-    id: str
-    start: float
-    end: float
-    text: str = ""
-    slot: str = "STORY"
-    face_q: float = 0.0
-    scene_q: float = 0.0
-    vtx_sim: float = 0.0
+logger = logging.getLogger("worker.pipeline")
+logger.setLevel(logging.INFO)
 
-def _rank_score(keep: float, face_q: float, scene_q: float) -> float:
-    """Weighted ranking for segment selection."""
-    return keep * 0.70 + face_q * 0.15 + scene_q * 0.15
+# ---------- ENV CONFIG ----------
 
-def _dynamic_target(media_duration: float, payload: Dict[str, Any]) -> float:
+S3_BUCKET = os.getenv("S3_BUCKET")
+AWS_REGION = os.getenv("AWS_REGION", "us-east-1")
+
+WHISPER_MODEL_SIZE = os.getenv("WHISPER_MODEL", "small.en")
+WHISPER_DEVICE = os.getenv("WHISPER_DEVICE", "cuda")   # "cuda" or "cpu"
+WHISPER_COMPUTE = os.getenv("WHISPER_COMPUTE_TYPE", "float16")
+
+MAX_DURATION_SEC = float(os.getenv("MAX_DURATION_SEC", "9999"))  # effectively no cap
+
+# simple funnel target counts
+TARGET_HOOKS = int(os.getenv("TARGET_HOOKS", "1"))
+TARGET_PROBLEMS = int(os.getenv("TARGET_PROBLEMS", "1"))
+TARGET_FEATURES = int(os.getenv("TARGET_FEATURES", "4"))
+TARGET_PROOFS = int(os.getenv("TARGET_PROOFS", "2"))
+TARGET_CTAS = int(os.getenv("TARGET_CTAS", "1"))
+
+_whisper_model = None
+_s3_client = None
+
+
+def get_s3():
+    global _s3_client
+    if _s3_client is not None:
+        return _s3_client
+    _s3_client = boto3.client("s3", region_name=AWS_REGION)
+    return _s3_client
+
+
+def get_whisper_model():
+    global _whisper_model
+    if _whisper_model is not None:
+        return _whisper_model
+    logger.info("Loading WhisperModel(%s, device=%s)", WHISPER_MODEL_SIZE, WHISPER_DEVICE)
+    _whisper_model = WhisperModel(
+        WHISPER_MODEL_SIZE,
+        device=WHISPER_DEVICE,
+        compute_type=WHISPER_COMPUTE,
+    )
+    return _whisper_model
+
+
+def download_to_temp(url: str) -> str:
+    logger.info("Downloading %s", url)
+    r = requests.get(url, stream=True, timeout=60)
+    r.raise_for_status()
+    suffix = ".mp4"
+    fd, path = tempfile.mkstemp(suffix=suffix)
+    with os.fdopen(fd, "wb") as f:
+        for chunk in r.iter_content(chunk_size=1024 * 1024):
+            if chunk:
+                f.write(chunk)
+    logger.info("Downloaded to %s", path)
+    return path
+
+
+def transcribe_video(path: str) -> Dict[str, Any]:
     """
-    Fluid target derived from input duration.
-    - If caller *explicitly* passes target_duration_sec in payload, respect it.
-    - Else compute:
-        < 15s raw     -> target = raw (keep it all)
-        15–90s raw    -> target ≈ 0.80 * raw
-        > 90s raw     -> cap near 90s
+    Run faster-whisper and return segments with start/end/text.
     """
-    # Optional explicit override if you ever want it:
-    td = payload.get("target_duration_sec")
-    if td is not None:
-        try:
-            td = float(td)
-            return max(5.0, min(td, HARD_CAP_SEC))
-        except Exception:
-            pass
+    model = get_whisper_model()
+    logger.info("Starting Whisper transcription...")
+    segments, info = model.transcribe(
+        path,
+        vad_filter=True,
+        word_timestamps=False,
+    )
 
-    md = float(media_duration or 0.0)
-    if md <= 0.0:
-        return 30.0  # unknown length: sane default
-    if md < 15.0:
-        return md
-    if md <= 90.0:
-        return md * 0.80
-    return 90.0
-
-def _min_out_sec(dynamic_target: float) -> float:
-    """
-    Minimum acceptable assembled length so we don't collapse too short.
-    Aim for ~60% of dynamic target, clamped to [10s, 25s].
-    """
-    return max(10.0, min(25.0, dynamic_target * 0.60))
-
-def assemble_clips(
-    asr_segments: List[Dict[str, Any]],
-    llm_decisions: Dict[str, Dict[str, Any]],
-    vision_scores: Dict[str, Dict[str, float]],
-    payload: Dict[str, Any],
-    media_duration: float,
-) -> List[Dict[str, Any]]:
-    target = _dynamic_target(media_duration, payload)
-    min_out = _min_out_sec(target)
-
-    # 1) Rank segments
-    ranked: List[Tuple[float, Dict[str, Any]]] = []
-    for seg in asr_segments or []:
-        sid = seg.get("id")
-        keep = float((llm_decisions.get(sid, {}) or {}).get("keep_score", 0.0))
-        v = vision_scores.get(sid, {}) or {}
-        face_q = float(v.get("face_q", 0.0))
-        scene_q = float(v.get("scene_q", 0.0))
-        score = _rank_score(keep, face_q, scene_q)
-        ranked.append((score, seg))
-    ranked.sort(key=lambda x: x[0], reverse=True)
-
-    # 2) Greedy fill toward dynamic target
-    clips: List[Dict[str, Any]] = []
-    total = 0.0
-    for _, seg in ranked:
-        s = ensure_float(seg.get("start", 0.0))
-        e = ensure_float(seg.get("end", 0.0))
-        dur = max(0.0, e - s)
-        if dur <= 0:
+    out_segments = []
+    for i, seg in enumerate(segments):
+        text = (seg.text or "").strip()
+        if not text:
             continue
-        if total + dur > HARD_CAP_SEC:
-            break
-        sid = seg.get("id") or f"SEG_{len(clips)}"
-        v = vision_scores.get(sid, {}) or {}
-        clips.append({
-            "id": sid,
-            "slot": seg.get("slot") or "STORY",
-            "start": s,
-            "end": e,
-            "text": seg.get("text", ""),
-            "face_q": float(v.get("face_q", 0.0)),
-            "scene_q": float(v.get("scene_q", 0.0)),
-            "vtx_sim": float(v.get("vtx_sim", 0.0)),
+        out_segments.append({
+            "id": f"ASR{i:04d}",
+            "start": float(seg.start),
+            "end": float(seg.end),
+            "text": text,
         })
-        total += dur
-        if total >= target:
-            break
 
-    # 3) Progressive fallback (NO 5s hard cap ever)
-    if total < min_out:
-        # Fallback A: pick longest readable ASR segments (ignore LLM)
-        alt = sorted(
-            asr_segments or [],
-            key=lambda s: max(0.0, ensure_float(s.get("end", 0.0)) - ensure_float(s.get("start", 0.0))),
-            reverse=True,
-        )
-        clips, total = [], 0.0
-        for seg in alt:
-            s = ensure_float(seg.get("start", 0.0))
-            e = ensure_float(seg.get("end", 0.0))
-            dur = max(0.0, e - s)
-            if dur <= 0:
-                continue
-            sid = seg.get("id") or f"SEG_{len(clips)}"
-            v = vision_scores.get(sid, {}) or {}
-            clips.append({
-                "id": sid,
-                "slot": seg.get("slot") or "STORY",
-                "start": s,
-                "end": e,
-                "text": seg.get("text", ""),
-                "face_q": float(v.get("face_q", 0.0)),
-                "scene_q": float(v.get("scene_q", 0.0)),
-                "vtx_sim": float(v.get("vtx_sim", 0.0)),
-            })
-            total += dur
-            if total >= min_out:
-                break
-
-    # 4) Last resort: raw window up to min(target, media)
-    if not clips:
-        end_t = max(10.0, min(float(media_duration or 0.0), float(target), HARD_CAP_SEC))
-        clips = [{
-            "id": "RAW_WINDOW",
-            "slot": "STORY",
-            "start": 0.0,
-            "end": end_t,
-            "text": "",
-            "face_q": 0.0,
-            "scene_q": 0.0,
-            "vtx_sim": 0.0,
-        }]
-
-    return clips
-
-def _clip_meta(c: Dict[str, Any], slot: str) -> Dict[str, Any]:
+    duration = float(info.duration) if getattr(info, "duration", None) else 0.0
+    logger.info("Transcription complete: %d segments, duration=%.2fs", len(out_segments), duration)
     return {
-        "id": c["id"],
-        "start": c["start"],
-        "end": c["end"],
-        "text": c.get("text", ""),
-        "meta": {
-            "slot": slot,
-            "score": 0.0,
-            "chain_ids": [c["id"]],
-        },
-        "face_q": c.get("face_q", 0.0),
-        "scene_q": c.get("scene_q", 0.0),
-        "vtx_sim": c.get("vtx_sim", 0.0),
-        "has_product": False,
-        "ocr_hit": 0,
+        "duration": duration,
+        "segments": out_segments,
     }
 
-def _slots_from_clips(clips: List[Dict[str, Any]]) -> Dict[str, List[Dict[str, Any]]]:
+
+def cut_and_concat_clips(input_path: str,
+                         clips: List[Dict[str, Any]],
+                         session_id: str) -> str:
     """
-    Simple placeholder slotting:
-      - first  clip -> HOOK
-      - middle clips -> FEATURE
-      - last  clip -> CTA
-    Replace with your real slotter if you have one.
+    Use ffmpeg to cut each clip and concatenate them.
+    Returns path to final mp4.
     """
-    slots = {"HOOK": [], "PROBLEM": [], "FEATURE": [], "PROOF": [], "CTA": []}
-    if not clips:
-        return slots
-    if len(clips) >= 1:
-        slots["HOOK"].append(_clip_meta(clips[0], "HOOK"))
-    for c in clips[1:-1]:
-        slots["FEATURE"].append(_clip_meta(c, "FEATURE"))
-    if len(clips) >= 2:
-        slots["CTA"].append(_clip_meta(clips[-1], "CTA"))
-    return slots
+    tmpdir = tempfile.mkdtemp(prefix="editdna_")
+    clip_paths = []
 
-def run_pipeline(payload: Dict[str, Any]) -> Dict[str, Any]:
+    # 1) cut each clip
+    for idx, c in enumerate(clips):
+        out_path = os.path.join(tmpdir, f"clip_{idx:03d}.mp4")
+        start = max(0.0, c["start"])
+        end = max(start, c["end"])
+        cmd = [
+            "ffmpeg",
+            "-y",
+            "-ss", f"{start:.3f}",
+            "-to", f"{end:.3f}",
+            "-i", input_path,
+            "-c", "copy",
+            out_path,
+        ]
+        logger.info("Running ffmpeg cut: %s", " ".join(cmd))
+        subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        clip_paths.append(out_path)
+
+    if not clip_paths:
+        raise RuntimeError("No clips to concatenate")
+
+    # 2) write concat list file
+    concat_list = os.path.join(tmpdir, "concat.txt")
+    with open(concat_list, "w") as f:
+        for p in clip_paths:
+            f.write(f"file '{p}'\n")
+
+    # 3) run concat
+    final_path = os.path.join(tmpdir, f"{session_id}_out.mp4")
+    cmd_concat = [
+        "ffmpeg",
+        "-y",
+        "-f", "concat",
+        "-safe", "0",
+        "-i", concat_list,
+        "-c", "copy",
+        final_path,
+    ]
+    logger.info("Running ffmpeg concat: %s", " ".join(cmd_concat))
+    subprocess.run(cmd_concat, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+    return final_path
+
+
+def upload_to_s3(path: str, s3_prefix: str) -> Dict[str, str]:
+    if not S3_BUCKET:
+        raise RuntimeError("S3_BUCKET not set in environment")
+    s3 = get_s3()
+    key = f"{s3_prefix.rstrip('/')}/{uuid.uuid4().hex}_{int(time.time())}.mp4"
+    logger.info("Uploading %s to s3://%s/%s", path, S3_BUCKET, key)
+    with open(path, "rb") as f:
+        s3.upload_fileobj(f, S3_BUCKET, key, ExtraArgs={"ContentType": "video/mp4"})
+    https_url = f"https://{S3_BUCKET}.s3.{AWS_REGION}.amazonaws.com/{key}"
+    return {
+        "s3_key": key,
+        "s3_url": f"s3://{S3_BUCKET}/{key}",
+        "https_url": https_url,
+    }
+
+
+def select_funnel_clips(segments: List[Dict[str, Any]]) -> Dict[str, Any]:
     """
-    Orchestrates: ASR -> Vision -> LLM -> Assembly (fluid duration).
-    payload keys: { input_url or input_local, (optional) target_duration_sec }
+    Ask GPT to label each segment, then pick a simple funnel:
+    HOOK -> PROBLEM -> FEATURE(s) -> PROOF(s) -> CTA
     """
-    payload = payload or {}
-    input_local = payload.get("input_local")
-    input_url = payload.get("input_url")
-    if not input_local and not input_url:
-        raise ValueError("payload requires input_local or input_url")
+    judged = []
+    for seg in segments:
+        slot, score, reason = score_clause_multimodal(seg["text"], frame_b64=None, slot_hint="STORY")
+        seg_j = {**seg, "slot": slot, "score": score, "reason": reason}
+        judged.append(seg_j)
 
-    media_path = input_local or input_url
-    media_duration = ffprobe_duration(media_path)
+    # group by slot
+    by_slot: Dict[str, List[Dict[str, Any]]] = {
+        "HOOK": [], "PROBLEM": [], "FEATURE": [], "PROOF": [], "CTA": [], "STORY": []
+    }
+    for j in judged:
+        by_slot.setdefault(j["slot"], []).append(j)
 
-    # 1) ASR
-    asr_segments = transcribe(media_path)  # [{id,start,end,text,slot?}]
-    # 2) Vision
-    vision_scores = analyze_frames(media_path, asr_segments)
-    # 3) LLM (always-on scoring; soft-keeps on errors)
-    llm_decisions = filter_segments_with_llm(asr_segments, media_path)
+    # sort each slot by score desc, then by start time
+    for k in by_slot:
+        by_slot[k].sort(key=lambda x: (-x["score"], x["start"]))
 
-    # 4) Assemble (fluid)
-    clips = assemble_clips(asr_segments, llm_decisions, vision_scores, payload, media_duration)
-    dur = sum(max(0.0, ensure_float(c["end"]) - ensure_float(c["start"])) for c in clips)
+    def take(slot: str, n: int) -> List[Dict[str, Any]]:
+        return by_slot.get(slot, [])[:n]
 
-    # 5) Slots
-    slots = _slots_from_clips(clips)
+    chosen = []
+    chosen.extend(take("HOOK", TARGET_HOOKS))
+    chosen.extend(take("PROBLEM", TARGET_PROBLEMS))
+    chosen.extend(take("FEATURE", TARGET_FEATURES))
+    chosen.extend(take("PROOF", TARGET_PROOFS))
+    chosen.extend(take("CTA", TARGET_CTAS))
+
+    # sort global by start time
+    chosen.sort(key=lambda x: x["start"])
+
+    # enforce global max duration if set
+    total = 0.0
+    final = []
+    for c in chosen:
+        dur = max(0.0, c["end"] - c["start"])
+        if MAX_DURATION_SEC and total + dur > MAX_DURATION_SEC:
+            # trim last clip if partial room remains
+            remaining = max(0.0, MAX_DURATION_SEC - total)
+            if remaining > 0.2:
+                c = dict(c)
+                c["end"] = c["start"] + remaining
+                final.append(c)
+                total += remaining
+            break
+        final.append(c)
+        total += dur
+
+    # build slots index for response
+    slots_index = {k: [] for k in ["HOOK", "PROBLEM", "FEATURE", "PROOF", "CTA"]}
+    for c in final:
+        s = c["slot"]
+        if s in slots_index:
+            slots_index[s].append({
+                "id": c["id"],
+                "start": c["start"],
+                "end": c["end"],
+                "text": c["text"],
+                "meta": {
+                    "slot": s,
+                    "score": c["score"],
+                    "reason": c["reason"],
+                },
+                "face_q": 1.0,
+                "scene_q": 1.0,
+                "vtx_sim": 0.0,
+                "has_product": False,
+                "ocr_hit": 0,
+            })
+
+    return {
+        "clips": final,
+        "slots": slots_index,
+    }
+
+
+def run_pipeline(*,
+                 session_id: str,
+                 file_urls: List[str],
+                 s3_prefix: str) -> Dict[str, Any]:
+    """
+    Main entrypoint used by tasks.job_render.
+    """
+    logger.info("[pipeline] run_pipeline() start")
+    logger.info("  session_id=%s", session_id)
+    logger.info("  file_urls=%s", file_urls)
+    input_url = file_urls[0]
+
+    local_in = download_to_temp(input_url)
+    asr = transcribe_video(local_in)
+
+    funnel = select_funnel_clips(asr["segments"])
+
+    final_video = cut_and_concat_clips(local_in, funnel["clips"], session_id)
+    s3_info = upload_to_s3(final_video, s3_prefix)
+
+    # Build response similar to what your API expects
+    clips_for_response = []
+    for c in funnel["clips"]:
+        clips_for_response.append({
+            "id": c["id"],
+            "slot": c["slot"],
+            "start": c["start"],
+            "end": c["end"],
+            "score": c["score"],
+            "face_q": 1.0,
+            "scene_q": 1.0,
+            "vtx_sim": 0.0,
+            "chain_ids": [c["id"]],
+            "text": c["text"],
+        })
 
     result = {
         "ok": True,
-        "session_id": payload.get("session_id", "funnel-test-1"),
-        "input_local": input_local or "",
-        "duration_sec": round(dur, 3),
-        "s3_key": payload.get("s3_key", ""),
-        "s3_url": payload.get("s3_url", ""),
-        "https_url": payload.get("https_url", ""),
-        "clips": clips,
-        "slots": slots,
+        "session_id": session_id,
+        "input_local": local_in,
+        "duration_sec": asr["duration"],
+        "s3_key": s3_info["s3_key"],
+        "s3_url": s3_info["s3_url"],
+        "https_url": s3_info["https_url"],
+        "clips": clips_for_response,
+        "slots": funnel["slots"],
         "asr": True,
         "semantic": True,
-        "vision": True,
-        "ts": now_utc_iso(),
+        "vision": False,
     }
+
+    logger.info("[pipeline] run_pipeline() done")
     return result
