@@ -1,239 +1,224 @@
 import os
-import json
+import math
+import base64
 from dataclasses import dataclass
-from typing import List, Dict, Any, Tuple
+from typing import Any, Dict, List, Optional
 
-from .asr import transcribe  # returns list[{id,start,end,text,slot?}]
-from .vision import analyze_frames  # returns {seg_id:{face_q,scene_q,vtx_sim}}
-from .llm import filter_segments_with_llm  # returns {seg_id:{keep_score,brief_reason}}
-from .utils import ffprobe_duration, now_utc_iso, ensure_float, MAX_TAKE_SEC
+import cv2
+import whisper
+from moviepy.editor import VideoFileClip
 
-# Hard safety only (not a target). Keep generous so long inputs can breathe.
-HARD_CAP_SEC = 120.0
+from . import llm  # worker.llm
+
+
+WHISPER_MODEL_NAME = os.getenv("WHISPER_MODEL", "small")
+
 
 @dataclass
-class Take:
+class Clause:
     id: str
     start: float
     end: float
-    text: str = ""
-    slot: str = "STORY"
-    face_q: float = 0.0
-    scene_q: float = 0.0
+    text: str
+    slot_hint: str = "STORY"
+    face_q: float = 1.0
+    scene_q: float = 1.0
     vtx_sim: float = 0.0
+    chain_ids: Optional[List[str]] = None
 
-def _rank_score(keep: float, face_q: float, scene_q: float) -> float:
-    """Weighted ranking for segment selection."""
-    return keep * 0.70 + face_q * 0.15 + scene_q * 0.15
 
-def _dynamic_target(media_duration: float, payload: Dict[str, Any]) -> float:
+_whisper_model = None
+
+
+def _get_whisper_model():
+    global _whisper_model
+    if _whisper_model is None:
+        _whisper_model = whisper.load_model(WHISPER_MODEL_NAME)
+    return _whisper_model
+
+
+def _get_duration_sec(path: str) -> float:
+    try:
+        with VideoFileClip(path) as clip:
+            return float(clip.duration)
+    except Exception:
+        return 0.0
+
+
+def _grab_frame_b64(path: str, t_sec: float) -> Optional[str]:
     """
-    Fluid target derived from input duration.
-    - If caller *explicitly* passes target_duration_sec in payload, respect it.
-    - Else compute:
-        < 15s raw     -> target = raw (keep it all)
-        15–90s raw    -> target ≈ 0.80 * raw
-        > 90s raw     -> cap near 90s
+    Grab a single RGB frame at time t_sec, JPEG-encode, return base64 string.
+    If anything fails, return None (pipeline keeps going).
     """
-    # Optional explicit override if you ever want it:
-    td = payload.get("target_duration_sec")
-    if td is not None:
-        try:
-            td = float(td)
-            return max(5.0, min(td, HARD_CAP_SEC))
-        except Exception:
-            pass
+    try:
+        cap = cv2.VideoCapture(path)
+        if not cap.isOpened():
+            return None
+        cap.set(cv2.CAP_PROP_POS_MSEC, max(0.0, t_sec) * 1000.0)
+        ok, frame = cap.read()
+        cap.release()
+        if not ok or frame is None:
+            return None
+        # BGR -> RGB not strictly needed for JPEG; we just encode
+        ok, buf = cv2.imencode(".jpg", frame)
+        if not ok:
+            return None
+        return base64.b64encode(buf.tobytes()).decode("ascii")
+    except Exception:
+        return None
 
-    md = float(media_duration or 0.0)
-    if md <= 0.0:
-        return 30.0  # unknown length: sane default
-    if md < 15.0:
-        return md
-    if md <= 90.0:
-        return md * 0.80
-    return 90.0
 
-def _min_out_sec(dynamic_target: float) -> float:
+def _run_asr(path: str) -> List[Clause]:
     """
-    Minimum acceptable assembled length so we don't collapse too short.
-    Aim for ~60% of dynamic target, clamped to [10s, 25s].
+    Run Whisper on the video, return list of Clause objects.
+    We keep segmentation as Whisper gives it.
     """
-    return max(10.0, min(25.0, dynamic_target * 0.60))
+    model = _get_whisper_model()
+    result = model.transcribe(path, fp16=False)
+    segments = result.get("segments", []) or []
 
-def assemble_clips(
-    asr_segments: List[Dict[str, Any]],
-    llm_decisions: Dict[str, Dict[str, Any]],
-    vision_scores: Dict[str, Dict[str, float]],
-    payload: Dict[str, Any],
-    media_duration: float,
-) -> List[Dict[str, Any]]:
-    target = _dynamic_target(media_duration, payload)
-    min_out = _min_out_sec(target)
-
-    # 1) Rank segments
-    ranked: List[Tuple[float, Dict[str, Any]]] = []
-    for seg in asr_segments or []:
-        sid = seg.get("id")
-        keep = float((llm_decisions.get(sid, {}) or {}).get("keep_score", 0.0))
-        v = vision_scores.get(sid, {}) or {}
-        face_q = float(v.get("face_q", 0.0))
-        scene_q = float(v.get("scene_q", 0.0))
-        score = _rank_score(keep, face_q, scene_q)
-        ranked.append((score, seg))
-    ranked.sort(key=lambda x: x[0], reverse=True)
-
-    # 2) Greedy fill toward dynamic target
-    clips: List[Dict[str, Any]] = []
-    total = 0.0
-    for _, seg in ranked:
-        s = ensure_float(seg.get("start", 0.0))
-        e = ensure_float(seg.get("end", 0.0))
-        dur = max(0.0, e - s)
-        if dur <= 0:
+    clauses: List[Clause] = []
+    for idx, seg in enumerate(segments):
+        start = float(seg.get("start", 0.0))
+        end = float(seg.get("end", start + 1.0))
+        text = (seg.get("text") or "").strip()
+        if not text:
             continue
-        if total + dur > HARD_CAP_SEC:
-            break
-        sid = seg.get("id") or f"SEG_{len(clips)}"
-        v = vision_scores.get(sid, {}) or {}
-        clips.append({
-            "id": sid,
-            "slot": seg.get("slot") or "STORY",
-            "start": s,
-            "end": e,
-            "text": seg.get("text", ""),
-            "face_q": float(v.get("face_q", 0.0)),
-            "scene_q": float(v.get("scene_q", 0.0)),
-            "vtx_sim": float(v.get("vtx_sim", 0.0)),
-        })
-        total += dur
-        if total >= target:
-            break
+        clause_id = f"ASR{idx:04d}_c1"
 
-    # 3) Progressive fallback (NO 5s hard cap ever)
-    if total < min_out:
-        # Fallback A: pick longest readable ASR segments (ignore LLM)
-        alt = sorted(
-            asr_segments or [],
-            key=lambda s: max(0.0, ensure_float(s.get("end", 0.0)) - ensure_float(s.get("start", 0.0))),
-            reverse=True,
+        # very simple slot hint:
+        #   - first segment → HOOK
+        #   - last segment  → CTA
+        #   - others        → STORY/FEATURE
+        if idx == 0:
+            slot_hint = "HOOK"
+        elif idx == len(segments) - 1:
+            slot_hint = "CTA"
+        else:
+            slot_hint = "STORY"
+
+        clauses.append(
+            Clause(
+                id=clause_id,
+                start=start,
+                end=end,
+                text=text,
+                slot_hint=slot_hint,
+                face_q=1.0,
+                scene_q=1.0,
+                vtx_sim=0.0,
+                chain_ids=[clause_id],
+            )
         )
-        clips, total = [], 0.0
-        for seg in alt:
-            s = ensure_float(seg.get("start", 0.0))
-            e = ensure_float(seg.get("end", 0.0))
-            dur = max(0.0, e - s)
-            if dur <= 0:
-                continue
-            sid = seg.get("id") or f"SEG_{len(clips)}"
-            v = vision_scores.get(sid, {}) or {}
-            clips.append({
-                "id": sid,
-                "slot": seg.get("slot") or "STORY",
-                "start": s,
-                "end": e,
-                "text": seg.get("text", ""),
-                "face_q": float(v.get("face_q", 0.0)),
-                "scene_q": float(v.get("scene_q", 0.0)),
-                "vtx_sim": float(v.get("vtx_sim", 0.0)),
-            })
-            total += dur
-            if total >= min_out:
-                break
+    return clauses
 
-    # 4) Last resort: raw window up to min(target, media)
-    if not clips:
-        end_t = max(10.0, min(float(media_duration or 0.0), float(target), HARD_CAP_SEC))
-        clips = [{
-            "id": "RAW_WINDOW",
-            "slot": "STORY",
-            "start": 0.0,
-            "end": end_t,
-            "text": "",
-            "face_q": 0.0,
-            "scene_q": 0.0,
-            "vtx_sim": 0.0,
-        }]
 
-    return clips
-
-def _clip_meta(c: Dict[str, Any], slot: str) -> Dict[str, Any]:
-    return {
-        "id": c["id"],
-        "start": c["start"],
-        "end": c["end"],
-        "text": c.get("text", ""),
-        "meta": {
-            "slot": slot,
-            "score": 0.0,
-            "chain_ids": [c["id"]],
-        },
-        "face_q": c.get("face_q", 0.0),
-        "scene_q": c.get("scene_q", 0.0),
-        "vtx_sim": c.get("vtx_sim", 0.0),
-        "has_product": False,
-        "ocr_hit": 0,
+def _build_slots(clauses: List[Clause]) -> Dict[str, List[Dict[str, Any]]]:
+    """
+    Build the `slots` dict similar to your prior JSON:
+    {
+      "HOOK": [...],
+      "PROBLEM": [...],
+      "FEATURE": [...],
+      "PROOF": [...],
+      "CTA": [...]
+    }
+    """
+    slots: Dict[str, List[Dict[str, Any]]] = {
+        "HOOK": [],
+        "PROBLEM": [],
+        "FEATURE": [],
+        "PROOF": [],
+        "CTA": [],
     }
 
-def _slots_from_clips(clips: List[Dict[str, Any]]) -> Dict[str, List[Dict[str, Any]]]:
-    """
-    Simple placeholder slotting:
-      - first  clip -> HOOK
-      - middle clips -> FEATURE
-      - last  clip -> CTA
-    Replace with your real slotter if you have one.
-    """
-    slots = {"HOOK": [], "PROBLEM": [], "FEATURE": [], "PROOF": [], "CTA": []}
-    if not clips:
-        return slots
-    if len(clips) >= 1:
-        slots["HOOK"].append(_clip_meta(clips[0], "HOOK"))
-    for c in clips[1:-1]:
-        slots["FEATURE"].append(_clip_meta(c, "FEATURE"))
-    if len(clips) >= 2:
-        slots["CTA"].append(_clip_meta(clips[-1], "CTA"))
+    for c in clauses:
+        if c.slot_hint == "HOOK":
+            key = "HOOK"
+        elif c.slot_hint == "CTA":
+            key = "CTA"
+        else:
+            # put everything else as FEATURE for now
+            key = "FEATURE"
+
+        slots[key].append(
+            {
+                "id": c.id,
+                "start": c.start,
+                "end": c.end,
+                "text": c.text,
+                "meta": {
+                    "slot": key,
+                    "score": c.vtx_sim,  # we will overwrite later with LLM score
+                    "chain_ids": c.chain_ids or [c.id],
+                },
+                "face_q": c.face_q,
+                "scene_q": c.scene_q,
+                "vtx_sim": c.vtx_sim,
+                "has_product": False,
+                "ocr_hit": 0,
+            }
+        )
+
     return slots
 
-def run_pipeline(payload: Dict[str, Any]) -> Dict[str, Any]:
+
+def run_pipeline(
+    *,
+    input_local: str,
+    session_id: str,
+    s3_prefix: str,
+    file_urls: Optional[List[str]] = None,
+) -> Dict[str, Any]:
     """
-    Orchestrates: ASR -> Vision -> LLM -> Assembly (fluid duration).
-    payload keys: { input_url or input_local, (optional) target_duration_sec }
+    Main entry used by tasks.job_render.
+
+    Steps:
+    1) Get duration
+    2) Run Whisper ASR → segments
+    3) For each segment: grab mid-frame, send to LLM judge
+    4) Build clips + slots structure
     """
-    payload = payload or {}
-    input_local = payload.get("input_local")
-    input_url = payload.get("input_url")
-    if not input_local and not input_url:
-        raise ValueError("payload requires input_local or input_url")
+    duration = _get_duration_sec(input_local)
+    clauses = _run_asr(input_local)
 
-    media_path = input_local or input_url
-    media_duration = ffprobe_duration(media_path)
+    clips: List[Dict[str, Any]] = []
 
-    # 1) ASR
-    asr_segments = transcribe(media_path)  # [{id,start,end,text,slot?}]
-    # 2) Vision
-    vision_scores = analyze_frames(media_path, asr_segments)
-    # 3) LLM (always-on scoring; soft-keeps on errors)
-    llm_decisions = filter_segments_with_llm(asr_segments, media_path)
+    for c in clauses:
+        mid_t = (c.start + c.end) / 2.0
+        frame_b64 = _grab_frame_b64(input_local, mid_t)
 
-    # 4) Assemble (fluid)
-    clips = assemble_clips(asr_segments, llm_decisions, vision_scores, payload, media_duration)
-    dur = sum(max(0.0, ensure_float(c["end"]) - ensure_float(c["start"])) for c in clips)
+        # Ask LLM to judge this sentence (with optional frame)
+        score, reason = llm.score_clause_multimodal(
+            text=c.text,
+            frame_b64=frame_b64,
+            slot_hint=c.slot_hint,
+        )
 
-    # 5) Slots
-    slots = _slots_from_clips(clips)
+        c.vtx_sim = score  # reuse this field to store "LLM score"
 
-    result = {
-        "ok": True,
-        "session_id": payload.get("session_id", "funnel-test-1"),
-        "input_local": input_local or "",
-        "duration_sec": round(dur, 3),
-        "s3_key": payload.get("s3_key", ""),
-        "s3_url": payload.get("s3_url", ""),
-        "https_url": payload.get("https_url", ""),
+        clips.append(
+            {
+                "id": c.id,
+                "slot": "STORY",
+                "start": c.start,
+                "end": c.end,
+                "score": score,
+                "face_q": c.face_q,
+                "scene_q": c.scene_q,
+                "vtx_sim": score,
+                "chain_ids": c.chain_ids or [c.id],
+                "text": c.text,
+            }
+        )
+
+    slots = _build_slots(clauses)
+
+    return {
+        "duration_sec": duration,
         "clips": clips,
         "slots": slots,
         "asr": True,
-        "semantic": True,
-        "vision": True,
-        "ts": now_utc_iso(),
+        "semantic": True,  # we used text + LLM
+        "vision": True,    # we attempted to use frames
     }
-    return result
