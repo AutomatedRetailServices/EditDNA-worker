@@ -1,40 +1,45 @@
 import logging
 import traceback
-from typing import List, Dict, Any
+from typing import Dict, Any
 
-# 👇 this imports your pipeline logic from worker/pipeline.py
+# import the real pipeline
 from worker import pipeline
 
 logger = logging.getLogger(__name__)
 
 
-def job_render(session_id: str, files: List[str]) -> Dict[str, Any]:
+def job_render(payload: dict) -> Dict[str, Any]:
     """
     RQ job entrypoint.
 
-    This is what the web API enqueues as "tasks.job_render".
-    `files` is a list of video URLs (S3 / HTTPS).
+    The web API enqueues this as:
+    tasks.job_render({"session_id": ..., "files": [...]})
+
+    So we must accept ONE argument: a payload dictionary.
     """
-    logger.info("🎬 job_render called", extra={"session_id": session_id, "files": files})
+    session_id = payload["session_id"]
+    files = payload["files"]
+
+    logger.info("🎬 job_render called", extra={
+        "session_id": session_id,
+        "files": files
+    })
 
     try:
-        # 👇 match your pipeline signature: run_pipeline(session_id=..., file_urls=...)
         out = pipeline.run_pipeline(
             session_id=session_id,
             file_urls=files,
         )
 
-        # `out` should already be a dict with clips, slots, urls, etc.
-        # we just wrap it in a stable envelope
         return {
             "ok": True,
             **out,
         }
 
-    except Exception as e:
+    except Exception:
         logger.exception("job_render failed")
         return {
             "ok": False,
-            "error": str(e),
+            "error": "pipeline execution failed",
             "traceback": traceback.format_exc(),
         }
