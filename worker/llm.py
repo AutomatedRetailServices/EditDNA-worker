@@ -4,65 +4,63 @@ from typing import Optional, Tuple
 
 from openai import OpenAI
 
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
-OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
+# You must have OPENAI_API_KEY in env
+client = OpenAI()
 
-_client: Optional[OpenAI] = None
-
-
-def get_client() -> Optional[OpenAI]:
-    global _client
-    if _client is not None:
-        return _client
-    if not OPENAI_API_KEY:
-        return None
-    _client = OpenAI(api_key=OPENAI_API_KEY)
-    return _client
+# Default model for judging clips
+LLM_MODEL = os.getenv("EDITDNA_LLM_MODEL", "gpt-4.1-mini")
 
 
-def score_clause_multimodal(
+SYSTEM_PROMPT = """
+You are an expert UGC ad editor.
+
+You receive:
+- A short sentence from a video (taken from a longer script)
+- Optionally, a single video frame (image)
+- Optionally, a funnel slot hint: HOOK, PROBLEM, FEATURE, PROOF, CTA
+
+Your job:
+1. Judge how good this sentence is for that slot in a TikTok-style ad.
+2. Consider both the words and (if present) the visual frame.
+3. Return a score between 0.0 and 1.0 (float) and a short reason.
+
+Guidelines:
+- 0.8–1.0 = very strong for this slot (clear, punchy, persuasive)
+- 0.5–0.79 = usable but not amazing
+- 0.2–0.49 = weak or boring
+- 0.0–0.19 = unusable, off-topic, or confusing
+
+Always respond with a JSON object: {"score": float, "reason": string}
+""".strip()
+
+
+def _build_user_content(
     text: str,
-    frame_b64: Optional[str] = None,
     slot_hint: Optional[str] = None,
-) -> Tuple[str, float, str]:
+    include_image: bool = False,
+    frame_b64: Optional[str] = None,
+):
     """
-    Ask GPT to:
-    - classify the clause into one funnel slot
-      (HOOK / PROBLEM / FEATURE / PROOF / CTA / STORY)
-    - give a quality score 0–1
-    - return a short reason
-
-    If frame_b64 is provided, it is passed as an image_url (multimodal).
+    Build the 'content' field for the user message.
+    Uses correct OpenAI multimodal format:
+    - [{"type": "text", "text": "..."}] + optional {"type": "image_url", ...}
     """
-
-    client = get_client()
-    if client is None:
-        # LLM disabled → fall back
-        return (slot_hint or "STORY", 0.5, "LLM disabled (no OPENAI_API_KEY)")
-
-    system_prompt = (
-        "You are an assistant scoring short clauses from TikTok product videos.\n"
-        "For each input, decide which funnel slot it belongs to:\n"
-        " - HOOK: grabs attention, curiosity, bold opening\n"
-        " - PROBLEM: describes pain, struggle, frustration\n"
-        " - FEATURE: describes product features, ingredients, what it does\n"
-        " - PROOF: testimonials, results, evidence, 'I use this', numbers\n"
-        " - CTA: asks viewer to take action: buy, click, use code, shop now\n"
-        " - STORY: neutral description that doesn't fit others strongly\n\n"
-        "Return ONLY a JSON object with keys: slot, score, reason.\n"
-        "score must be a number between 0.0 and 1.0."
+    slot_txt = slot_hint or "UNKNOWN"
+    prompt = (
+        f"Slot: {slot_txt}\n\n"
+        f"Sentence:\n{text.strip()}\n\n"
+        "Please rate this sentence for this slot and return JSON with keys "
+        '"score" (0..1) and "reason".'
     )
 
-    user_text = f"Text: {text.strip()}"
-    if slot_hint:
-        user_text += f"\n\nOptional slot hint: {slot_hint}"
-
     content = [
-        {"type": "text", "text": user_text}
+        {
+            "type": "text",
+            "text": prompt,
+        }
     ]
 
-    if frame_b64:
-        # Multimodal – include frame as image_url
+    if include_image and frame_b64:
         content.append(
             {
                 "type": "image_url",
@@ -72,31 +70,68 @@ def score_clause_multimodal(
             }
         )
 
-    resp = client.chat.completions.create(
-        model=OPENAI_MODEL,
-        temperature=0.1,
-        response_format={"type": "json_object"},
-        messages=[
-            {"role": "system", "content": [{"type": "text", "text": system_prompt}]},
-            {"role": "user", "content": content},
-        ],
-    )
+    return content
 
-    raw = resp.choices[0].message.content
+
+def score_clause_multimodal(
+    text: str,
+    frame_b64: Optional[str] = None,
+    slot_hint: Optional[str] = None,
+) -> Tuple[float, str]:
+    """
+    Main entry: used by pipeline.py
+    Returns: (score, reason)
+    Uses GPT-4o-style multimodal if frame is present, else text-only.
+    """
+    include_image = bool(frame_b64)
+
+    messages = [
+        {
+            "role": "system",
+            "content": SYSTEM_PROMPT,
+        },
+        {
+            "role": "user",
+            "content": _build_user_content(
+                text=text,
+                slot_hint=slot_hint,
+                include_image=include_image,
+                frame_b64=frame_b64,
+            ),
+        },
+    ]
+
+    try:
+        resp = client.chat.completions.create(
+            model=LLM_MODEL,
+            messages=messages,
+            response_format={"type": "json_object"},
+            temperature=0.2,
+        )
+    except Exception as e:
+        # If the LLM call completely fails, fall back to neutral score
+        return 0.5, f"llm_error: {e}"
+
+    raw = resp.choices[0].message.content or "{}"
+
     try:
         data = json.loads(raw)
     except Exception:
-        # Fallback if model doesn't respect JSON
-        return (slot_hint or "STORY", 0.5, f"Bad JSON from LLM: {raw[:100]}")
+        # If parsing JSON fails, still don't crash the pipeline
+        return 0.5, f"parse_error: {raw[:200]}"
 
-    slot = str(data.get("slot") or (slot_hint or "STORY")).upper().strip()
-    if slot not in {"HOOK", "PROBLEM", "FEATURE", "PROOF", "CTA", "STORY"}:
-        slot = "STORY"
+    score = data.get("score", 0.5)
+    reason = data.get("reason", "no_reason")
 
     try:
-        score = float(data.get("score", 0.5))
+        score = float(score)
     except Exception:
         score = 0.5
 
-    reason = str(data.get("reason", ""))[:300]
-    return slot, max(0.0, min(1.0, score)), reason
+    # Clamp 0..1
+    if score < 0.0:
+        score = 0.0
+    if score > 1.0:
+        score = 1.0
+
+    return score, str(reason)
