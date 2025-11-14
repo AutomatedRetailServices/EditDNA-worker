@@ -1,38 +1,79 @@
+# app.py  — EditDNA web API (Render)
 import os
-import logging
-from dotenv import load_dotenv
+from typing import List, Optional
 
-load_dotenv()
+from fastapi import FastAPI
+from pydantic import BaseModel
+import redis
+from rq import Queue, Job
 
-from worker.pipeline import run_pipeline  # <-- from worker/pipeline.py
+REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379/0")
 
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger("worker.tasks")
+redis_conn = redis.from_url(REDIS_URL)
+queue = Queue("default", connection=redis_conn)
+
+app = FastAPI(title="EditDNA Web API")
 
 
-def job_render(session_id: str,
-               files: list,
-               s3_prefix: str = "editdna/outputs/"):
+# ---------- Models ----------
+
+class RenderRequest(BaseModel):
+    session_id: str
+    files: List[str]
+
+
+class RenderEnqueueResponse(BaseModel):
+    ok: bool
+    job_id: str
+    status: str
+
+
+class JobStatusResponse(BaseModel):
+    ok: bool
+    job_id: str
+    status: str
+    result: Optional[dict] = None
+    error: Optional[str] = None
+
+
+# ---------- Routes ----------
+
+@app.get("/health")
+def health():
+    return {"ok": True}
+
+
+@app.post("/render", response_model=RenderEnqueueResponse)
+def render(req: RenderRequest):
     """
-    RQ job entrypoint.
-    Called from the Web API via: q.enqueue("tasks.job_render", ...)
+    Enqueue a render job into RQ.
+    Worker will run tasks.job_render(session_id=..., files=[...])
     """
-    logger.info("[worker.tasks] job_render() start")
-    logger.info("  session_id=%s", session_id)
-    logger.info("  urls=%s", files)
-    logger.info("  s3_prefix=%s", s3_prefix)
-
-    if not files:
-        raise ValueError("files list is empty")
-
-    # Make sure it's a list of strings
-    file_urls = [str(u) for u in files]
-
-    out = run_pipeline(
-        session_id=session_id,
-        file_urls=file_urls,
-        s3_prefix=s3_prefix,
+    job: Job = queue.enqueue(
+        "tasks.job_render",  # resolved in the worker container
+        kwargs={
+            "session_id": req.session_id,
+            "files": req.files,
+        },
     )
+    return RenderEnqueueResponse(ok=True, job_id=job.id, status=job.get_status())
 
-    logger.info("[worker.tasks] job_render() finished OK")
-    return out
+
+@app.get("/job/{job_id}", response_model=JobStatusResponse)
+def job_status(job_id: str):
+    job = Job.fetch(job_id, connection=redis_conn)
+    if job.is_failed:
+        return JobStatusResponse(
+            ok=False,
+            job_id=job.id,
+            status=job.get_status(),
+            result=None,
+            error=str(job.exc_info),
+        )
+    return JobStatusResponse(
+        ok=True,
+        job_id=job.id,
+        status=job.get_status(),
+        result=job.result,
+        error=None,
+    )
