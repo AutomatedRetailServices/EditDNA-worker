@@ -1,4 +1,3 @@
-# worker/pipeline.py
 import os
 import json
 from dataclasses import dataclass
