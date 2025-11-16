@@ -257,12 +257,52 @@ def _pick_best_cta(slots: Dict[str, List[Dict[str, Any]]]) -> Optional[str]:
     return best["id"]
 
 
-def _pick_feature_ids(slots: Dict[str, List[Dict[str, Any]]]) -> List[str]:
-    feats = slots.get("FEATURE") or []
-    feats = [f for f in feats if f["meta"]["score"] >= MIN_CLIP_SCORE]
-    feats_sorted = sorted(feats, key=lambda f: f["meta"]["score"], reverse=True)
-    feats_sorted = feats_sorted[:MAX_FEATURE_CLIPS]
-    return [f["id"] for f in feats_sorted]
+def _is_good_clause_for_funnel(c: Clause, min_semantic: float = 0.6, min_words: int = 4) -> bool:
+    """
+    Heuristic filter so bad / filler / broken lines don't end up in the final video.
+    Keeps slang & spicy language as long as it's coherent and complete.
+    """
+    text = (c.text or "").strip()
+    if not text:
+        return False
+
+    words = text.split()
+    # 1) Require minimum semantic strength
+    if c.semantic_score < min_semantic:
+        return False
+
+    # 2) Very short one-word / two-word fillers are usually trash
+    if len(words) < min_words:
+        return False
+
+    lower = text.lower()
+
+    # 3) Obvious partial/blooper cues
+    if "..." in text and "wait" in lower:
+        # e.g. "These pineapple flavored...wait."
+        return False
+
+    # 4) Generic filler that almost never sells
+    filler_exact = {
+        "okay.",
+        "ok.",
+        "yeah.",
+        "wait.",
+    }
+    if lower in filler_exact:
+        return False
+
+    # 5) (Optional) brand-safety word blacklist for final video.
+    #    For now, we don't ban slang like "wet wet" so TikTok tone stays.
+    #    You can add hard-banned phrases here if needed.
+    banned_contains: List[str] = [
+        # "kuchigai stay",  # example: uncomment to force-drop this from final edit
+    ]
+    for bad in banned_contains:
+        if bad in lower:
+            return False
+
+    return True
 
 
 def _build_composer(
@@ -278,8 +318,31 @@ def _build_composer(
     """
     id_to_clause: Dict[str, Clause] = {c.id: c for c in clauses}
 
+    # HOOK: keep existing HOOK logic (we let spicy / imperfect hooks live)
     hook_id = _pick_best_hook(slots)
-    feature_ids = _pick_feature_ids(slots)
+
+    # FEATURES: filter using semantic + structure heuristics
+    raw_features = slots.get("FEATURE") or []
+    feature_candidates: List[Tuple[str, float, float]] = []  # (id, score, start)
+
+    for f in raw_features:
+        cid = f["id"]
+        meta = f.get("meta") or {}
+        score = float(meta.get("score", 0.0))
+        if score < MIN_CLIP_SCORE:
+            continue
+        clause = id_to_clause.get(cid)
+        if not clause:
+            continue
+        if not _is_good_clause_for_funnel(clause):
+            continue
+        feature_candidates.append((cid, score, clause.start))
+
+    # Sort by score desc, then by start time to stabilize order
+    feature_candidates.sort(key=lambda x: (-x[1], x[2]))
+    feature_ids = [cid for cid, _, _ in feature_candidates[:MAX_FEATURE_CLIPS]]
+
+    # CTA: as before (score-based)
     cta_id = _pick_best_cta(slots)
 
     used_ids: List[str] = []
