@@ -2,6 +2,7 @@ import os
 import math
 import base64
 import logging
+import re
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -129,6 +130,91 @@ def _grab_frame_b64(path: str, t_sec: float) -> Optional[str]:
         return None
 
 
+# -------------------------------------------------------------------
+#  FRAGMENT + DE-DUPE HELPERS
+# -------------------------------------------------------------------
+
+FRAGMENT_MIN_CHARS = 15
+FRAGMENT_MIN_WORDS = 3
+
+# phrases we strip from the start so
+# "Worry no more, because I found the perfect probiotic."
+# and "Because I found the perfect probiotic." collapse to same idea.
+NORMALIZE_PREFIXES = [
+    "okay",
+    "ok",
+    "well",
+    "wait",
+    "so",
+    "yeah",
+    "worry no more",
+    "worry no more,",
+]
+
+
+def _is_fragment_text(text: str) -> bool:
+    """
+    Heuristic to detect obvious bad/fragment takes that we should NOT use
+    as FEATURES in the final ad.
+    Examples to kill:
+      - "Worry no more, because I found-"
+      - "Is that good?"
+      - "Yeah."
+      - "That one good?"
+    But we keep real hooks/features even if short (e.g., "Odor?") when they
+    are scored and slotted as HOOK/CTA.
+    """
+    if not text:
+        return True
+
+    t = text.strip()
+
+    # Hard cut: dangling dash at end of sentence
+    if t.endswith("-"):
+        return True
+
+    # Very short stuff without a proper sentence end → likely filler
+    if len(t) < FRAGMENT_MIN_CHARS:
+        if not t.endswith((".", "!", "?")):
+            return True
+        # Very few words AND not clearly a strong hook → treat as fragment
+        words = t.split()
+        if len(words) < FRAGMENT_MIN_WORDS:
+            return True
+
+    return False
+
+
+def _normalize_for_dedupe(text: str) -> str:
+    """
+    Collapse similar lines to the same 'idea' string so we don't keep
+    multiple versions of the same talking beat.
+    - lowercases
+    - strips common filler prefixes ("okay", "wait", "worry no more", etc.)
+    - removes punctuation
+    - collapses spaces
+    """
+    if not text:
+        return ""
+
+    t = text.strip().lower()
+
+    # strip filler prefixes at the start
+    for pref in NORMALIZE_PREFIXES:
+        if t.startswith(pref + " "):
+            t = t[len(pref):].lstrip()
+        elif t == pref:
+            t = ""
+            break
+
+    # remove punctuation
+    t = re.sub(r"[^\w\s]", " ", t)
+    # collapse whitespace
+    t = re.sub(r"\s+", " ", t).strip()
+
+    return t
+
+
 def _run_asr(path: str) -> List[Clause]:
     """
     Run Whisper on the video, return list of Clause objects.
@@ -241,68 +327,88 @@ def _pick_best_hook(slots: Dict[str, List[Dict[str, Any]]]) -> Optional[str]:
     hooks = slots.get("HOOK") or []
     if not hooks:
         return None
-    best = sorted(hooks, key=lambda h: h["meta"]["score"], reverse=True)[0]
-    if best["meta"]["score"] < MIN_CLIP_SCORE:
-        return None
-    return best["id"]
+
+    # Prefer high-score hooks, but skip obvious fragments
+    sorted_hooks = sorted(hooks, key=lambda h: h["meta"]["score"], reverse=True)
+    for h in sorted_hooks:
+        score = h["meta"]["score"]
+        if score < MIN_CLIP_SCORE:
+            # all remaining are even worse
+            return None
+        text = (h.get("text") or "").strip()
+        # we are slightly more tolerant here, but still skip super-broken hooks
+        if _is_fragment_text(text) and len(text.split()) <= 2:
+            continue
+        return h["id"]
+
+    return None
 
 
 def _pick_best_cta(slots: Dict[str, List[Dict[str, Any]]]) -> Optional[str]:
     ctas = slots.get("CTA") or []
     if not ctas:
         return None
-    best = sorted(ctas, key=lambda c: c["meta"]["score"], reverse=True)[0]
-    if best["meta"]["score"] < MIN_CLIP_SCORE:
-        return None
-    return best["id"]
+
+    sorted_ctas = sorted(ctas, key=lambda c: c["meta"]["score"], reverse=True)
+    for c in sorted_ctas:
+        score = c["meta"]["score"]
+        if score < MIN_CLIP_SCORE:
+            return None
+        text = (c.get("text") or "").strip()
+        # CTA should not be weird fragments either
+        if _is_fragment_text(text) and len(text.split()) <= 2:
+            continue
+        return c["id"]
+
+    return None
 
 
-def _is_good_clause_for_funnel(c: Clause, min_semantic: float = 0.6, min_words: int = 4) -> bool:
+def _pick_feature_ids(slots: Dict[str, List[Dict[str, Any]]]) -> List[str]:
     """
-    Heuristic filter so bad / filler / broken lines don't end up in the final video.
-    Keeps slang & spicy language as long as it's coherent and complete.
+    Choose FEATURE clips with:
+      - score >= MIN_CLIP_SCORE
+      - not an obvious fragment / bad take
+      - de-duplicated by 'idea' using _normalize_for_dedupe
     """
-    text = (c.text or "").strip()
-    if not text:
-        return False
+    feats = slots.get("FEATURE") or []
+    if not feats:
+        return []
 
-    words = text.split()
-    # 1) Require minimum semantic strength
-    if c.semantic_score < min_semantic:
-        return False
+    # sort by score descending first
+    feats_sorted = sorted(feats, key=lambda f: f["meta"]["score"], reverse=True)
 
-    # 2) Very short one-word / two-word fillers are usually trash
-    if len(words) < min_words:
-        return False
+    chosen_ids: List[str] = []
+    seen_ideas: set = set()
 
-    lower = text.lower()
+    for f in feats_sorted:
+        score = f["meta"]["score"]
+        if score < MIN_CLIP_SCORE:
+            # remaining ones are even worse
+            break
 
-    # 3) Obvious partial/blooper cues
-    if "..." in text and "wait" in lower:
-        # e.g. "These pineapple flavored...wait."
-        return False
+        text = (f.get("text") or "").strip()
+        if not text:
+            continue
 
-    # 4) Generic filler that almost never sells
-    filler_exact = {
-        "okay.",
-        "ok.",
-        "yeah.",
-        "wait.",
-    }
-    if lower in filler_exact:
-        return False
+        # skip obvious bad takes / fragments for mid-ad FEATURES
+        if _is_fragment_text(text):
+            continue
 
-    # 5) (Optional) brand-safety word blacklist for final video.
-    #    For now, we don't ban slang like "wet wet" so TikTok tone stays.
-    #    You can add hard-banned phrases here if needed.
-    banned_contains: List[str] = [
-        # "kuchigai stay",  # example: uncomment to force-drop this from final edit
-    ]
-    for bad in banned_contains:
-        if bad in lower:
-            return False
+        # de-dupe by normalized idea
+        norm = _normalize_for_dedupe(text)
+        if not norm:
+            # if normalization killed everything, treat as fragment
+            continue
+        if norm in seen_ideas:
+            continue
 
-    return True
+        seen_ideas.add(norm)
+        chosen_ids.append(f["id"])
+
+        if len(chosen_ids) >= MAX_FEATURE_CLIPS:
+            break
+
+    return chosen_ids
 
 
 def _build_composer(
@@ -318,37 +424,14 @@ def _build_composer(
     """
     id_to_clause: Dict[str, Clause] = {c.id: c for c in clauses}
 
-    # HOOK: keep existing HOOK logic (we let spicy / imperfect hooks live)
     hook_id = _pick_best_hook(slots)
-
-    # FEATURES: filter using semantic + structure heuristics
-    raw_features = slots.get("FEATURE") or []
-    feature_candidates: List[Tuple[str, float, float]] = []  # (id, score, start)
-
-    for f in raw_features:
-        cid = f["id"]
-        meta = f.get("meta") or {}
-        score = float(meta.get("score", 0.0))
-        if score < MIN_CLIP_SCORE:
-            continue
-        clause = id_to_clause.get(cid)
-        if not clause:
-            continue
-        if not _is_good_clause_for_funnel(clause):
-            continue
-        feature_candidates.append((cid, score, clause.start))
-
-    # Sort by score desc, then by start time to stabilize order
-    feature_candidates.sort(key=lambda x: (-x[1], x[2]))
-    feature_ids = [cid for cid, _, _ in feature_candidates[:MAX_FEATURE_CLIPS]]
-
-    # CTA: as before (score-based)
+    feature_ids = _pick_feature_ids(slots)
     cta_id = _pick_best_cta(slots)
 
     used_ids: List[str] = []
     ordered_clauses: List[Clause] = []
 
-    # Final timeline: HOOK -> FEATURES (original temporal order) -> CTA
+    # Final timeline: HOOK → FEATURES (in increasing time) → CTA
     if hook_id and hook_id in id_to_clause:
         used_ids.append(hook_id)
         ordered_clauses.append(id_to_clause[hook_id])
