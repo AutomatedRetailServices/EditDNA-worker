@@ -4,7 +4,7 @@ import base64
 import logging
 import re
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple, Set
 
 import cv2
 import requests
@@ -151,11 +151,43 @@ NORMALIZE_PREFIXES = [
     "worry no more,",
 ]
 
+# phrases that are almost always bad / outtakes in this context
+BAD_TEXT_SNIPPETS = [
+    "is that funny",
+    "is that good",
+    "that one good",
+    "yeah.",
+    "yeah?",
+    "i think they're really good",
+    "why can't i remember after that",
+    "wait not moisture control",
+    "oh no, i don't know why they're",
+    "fort moisture, odor, and a healthy balance",
+    "ladies, your kutigei",
+    "kutigei say",
+]
+
+# patterns from llm_reason that indicate the clause is weak
+BAD_REASON_SNIPPETS = [
+    "very vague",
+    "vague and",
+    "weak for a story slot",
+    "too short and unclear",
+    "extremely short, vague",
+    "incomplete and vague",
+    "ends abruptly",
+    "confusing and unclear",
+    "makes it hard to understand",
+    "does not engage the viewer",
+    "does not effectively",
+    "unusable for the story slot",
+]
+
 
 def _is_fragment_text(text: str) -> bool:
     """
     Heuristic to detect obvious bad/fragment takes that we should NOT use
-    as FEATURES in the final ad.
+    as FEATURES/HOOK in the final ad.
     Examples to kill:
       - "Worry no more, because I found-"
       - "Is that good?"
@@ -213,6 +245,20 @@ def _normalize_for_dedupe(text: str) -> str:
     t = re.sub(r"\s+", " ", t).strip()
 
     return t
+
+
+def _llm_reason_flags_bad(llm_reason: str) -> bool:
+    r = (llm_reason or "").lower()
+    if not r:
+        return False
+    return any(sn in r for sn in BAD_REASON_SNIPPETS)
+
+
+def _text_obviously_bad(text: str) -> bool:
+    t = (text or "").lower()
+    if not t:
+        return True
+    return any(sn in t for sn in BAD_TEXT_SNIPPETS)
 
 
 def _run_asr(path: str) -> List[Clause]:
@@ -323,25 +369,63 @@ def _build_slots(clauses: List[Clause]) -> Dict[str, List[Dict[str, Any]]]:
     return slots
 
 
-def _pick_best_hook(slots: Dict[str, List[Dict[str, Any]]]) -> Optional[str]:
+def _pick_best_hook(
+    slots: Dict[str, List[Dict[str, Any]]],
+    id_to_clause: Dict[str, Clause],
+) -> Optional[str]:
+    """
+    Strategy:
+    1) Try HOOK slot clips filtered by score + llm_reason + fragment rules.
+    2) If none are good, fall back to strongest FEATURE/PROBLEM/STORY line.
+    """
+
+    # 1) Use HOOK slot if possible
     hooks = slots.get("HOOK") or []
-    if not hooks:
+    if hooks:
+        sorted_hooks = sorted(hooks, key=lambda h: h["meta"]["score"], reverse=True)
+        for h in sorted_hooks:
+            score = h["meta"]["score"]
+            if score < MIN_CLIP_SCORE:
+                # remaining hooks are worse
+                break
+
+            cid = h["id"]
+            text = (h.get("text") or "").strip()
+            clause = id_to_clause.get(cid)
+            reason = clause.llm_reason if clause else ""
+
+            if _llm_reason_flags_bad(reason):
+                continue
+            if _text_obviously_bad(text):
+                continue
+
+            # we are slightly more tolerant here, but still skip super-broken hooks
+            if _is_fragment_text(text) and len(text.split()) <= 2:
+                continue
+
+            return cid
+
+    # 2) Fallback: strong FEATURE / PROBLEM / STORY line
+    candidates: List[Clause] = []
+    for c in id_to_clause.values():
+        if c.slot_hint not in ("FEATURE", "PROBLEM", "STORY"):
+            continue
+        if c.vtx_sim < MIN_CLIP_SCORE:
+            continue
+        if _is_fragment_text(c.text):
+            continue
+        if _llm_reason_flags_bad(c.llm_reason):
+            continue
+        if _text_obviously_bad(c.text):
+            continue
+        candidates.append(c)
+
+    if not candidates:
         return None
 
-    # Prefer high-score hooks, but skip obvious fragments
-    sorted_hooks = sorted(hooks, key=lambda h: h["meta"]["score"], reverse=True)
-    for h in sorted_hooks:
-        score = h["meta"]["score"]
-        if score < MIN_CLIP_SCORE:
-            # all remaining are even worse
-            return None
-        text = (h.get("text") or "").strip()
-        # we are slightly more tolerant here, but still skip super-broken hooks
-        if _is_fragment_text(text) and len(text.split()) <= 2:
-            continue
-        return h["id"]
-
-    return None
+    # Prefer high score, then earlier in timeline
+    candidates.sort(key=lambda c: (-c.vtx_sim, -c.semantic_score, c.start))
+    return candidates[0].id
 
 
 def _pick_best_cta(slots: Dict[str, List[Dict[str, Any]]]) -> Optional[str]:
@@ -363,11 +447,15 @@ def _pick_best_cta(slots: Dict[str, List[Dict[str, Any]]]) -> Optional[str]:
     return None
 
 
-def _pick_feature_ids(slots: Dict[str, List[Dict[str, Any]]]) -> List[str]:
+def _pick_feature_ids(
+    slots: Dict[str, List[Dict[str, Any]]],
+    id_to_clause: Dict[str, Clause],
+) -> List[str]:
     """
     Choose FEATURE clips with:
       - score >= MIN_CLIP_SCORE
       - not an obvious fragment / bad take
+      - LLM doesn't call them vague/weak/confusing
       - de-duplicated by 'idea' using _normalize_for_dedupe
     """
     feats = slots.get("FEATURE") or []
@@ -378,7 +466,7 @@ def _pick_feature_ids(slots: Dict[str, List[Dict[str, Any]]]) -> List[str]:
     feats_sorted = sorted(feats, key=lambda f: f["meta"]["score"], reverse=True)
 
     chosen_ids: List[str] = []
-    seen_ideas: set = set()
+    seen_ideas: Set[str] = set()
 
     for f in feats_sorted:
         score = f["meta"]["score"]
@@ -386,12 +474,20 @@ def _pick_feature_ids(slots: Dict[str, List[Dict[str, Any]]]) -> List[str]:
             # remaining ones are even worse
             break
 
+        cid = f["id"]
         text = (f.get("text") or "").strip()
         if not text:
             continue
 
+        clause = id_to_clause.get(cid)
+        reason = clause.llm_reason if clause else ""
+
         # skip obvious bad takes / fragments for mid-ad FEATURES
         if _is_fragment_text(text):
+            continue
+        if _llm_reason_flags_bad(reason):
+            continue
+        if _text_obviously_bad(text):
             continue
 
         # de-dupe by normalized idea
@@ -403,7 +499,7 @@ def _pick_feature_ids(slots: Dict[str, List[Dict[str, Any]]]) -> List[str]:
             continue
 
         seen_ideas.add(norm)
-        chosen_ids.append(f["id"])
+        chosen_ids.append(cid)
 
         if len(chosen_ids) >= MAX_FEATURE_CLIPS:
             break
@@ -424,8 +520,8 @@ def _build_composer(
     """
     id_to_clause: Dict[str, Clause] = {c.id: c for c in clauses}
 
-    hook_id = _pick_best_hook(slots)
-    feature_ids = _pick_feature_ids(slots)
+    hook_id = _pick_best_hook(slots, id_to_clause)
+    feature_ids = _pick_feature_ids(slots, id_to_clause)
     cta_id = _pick_best_cta(slots)
 
     used_ids: List[str] = []
@@ -658,7 +754,7 @@ def run_pipeline(
     # 3) Build slots structure with updated scores
     slots = _build_slots(clauses)
 
-    # 4) Composer
+    # 4) Composer (uses llm_reason + extra filters)
     composer, composer_human, ordered_clauses = _build_composer(clauses, slots)
 
     # 5) Render final stitched video and upload to S3
