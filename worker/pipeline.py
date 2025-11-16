@@ -2,21 +2,27 @@ import os
 import math
 import base64
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 import cv2
+import numpy as np
+import requests
 import whisper
 import boto3
 from moviepy.editor import VideoFileClip, concatenate_videoclips
 
-from . import llm  # worker.llm
+from . import llm
+from . import vision_clip
+from . import ocr
+from . import object_detect
 
 
 WHISPER_MODEL_NAME = os.getenv("WHISPER_MODEL", "small")
 
-# Simple composer knobs
+# Quality knobs
 MIN_CLIP_SCORE = float(os.getenv("EDITDNA_MIN_CLIP_SCORE", "0.5"))
 MAX_FEATURE_CLIPS = int(os.getenv("EDITDNA_MAX_FEATURE_CLIPS", "6"))
+FORCE_HOOK_CTA = bool(int(os.getenv("EDITDNA_FORCE_HOOK_CTA", "0")))  # 0 or 1
 
 
 @dataclass
@@ -28,8 +34,16 @@ class Clause:
     slot_hint: str = "STORY"
     face_q: float = 1.0
     scene_q: float = 1.0
-    vtx_sim: float = 0.0
+    vtx_sim: float = 0.0  # we reuse this as "LLM score"
     chain_ids: Optional[List[str]] = None
+
+    # V2 visual + meta fields (filled later)
+    visual_ok: bool = True
+    visual_internal_sim: float = 1.0
+    clip_vec: Optional[np.ndarray] = None
+    ocr_hit: int = 0
+    has_product: bool = False
+    llm_reason: str = ""
 
 
 _whisper_model = None
@@ -40,6 +54,26 @@ def _get_whisper_model():
     if _whisper_model is None:
         _whisper_model = whisper.load_model(WHISPER_MODEL_NAME)
     return _whisper_model
+
+
+def _ensure_tmp_dir() -> str:
+    root = os.getenv("EDITDNA_TMP_DIR", "/tmp/editdna")
+    os.makedirs(root, exist_ok=True)
+    return root
+
+
+def _download_to_local(session_id: str, url: str) -> str:
+    tmp_dir = _ensure_tmp_dir()
+    local_path = os.path.join(tmp_dir, f"{session_id}_input.mp4")
+
+    resp = requests.get(url, stream=True, timeout=60)
+    resp.raise_for_status()
+    with open(local_path, "wb") as f:
+        for chunk in resp.iter_content(chunk_size=1024 * 1024):
+            if chunk:
+                f.write(chunk)
+
+    return local_path
 
 
 def _get_duration_sec(path: str) -> float:
@@ -90,7 +124,7 @@ def _run_asr(path: str) -> List[Clause]:
             continue
         clause_id = f"ASR{idx:04d}_c1"
 
-        # simple slot hint
+        # very simple slot hint:
         if idx == 0:
             slot_hint = "HOOK"
         elif idx == len(segments) - 1:
@@ -114,9 +148,28 @@ def _run_asr(path: str) -> List[Clause]:
     return clauses
 
 
+def _apply_llm_scoring(path: str, clauses: List[Clause]) -> None:
+    """
+    For each Clause, grab a mid-frame, send text+frame to LLM judge,
+    and fill vtx_sim (score) + llm_reason.
+    """
+    for c in clauses:
+        mid_t = (c.start + c.end) / 2.0
+        frame_b64 = _grab_frame_b64(path, mid_t)
+
+        score, reason = llm.score_clause_multimodal(
+            text=c.text,
+            frame_b64=frame_b64,
+            slot_hint=c.slot_hint,
+        )
+
+        c.vtx_sim = float(score)
+        c.llm_reason = reason
+
+
 def _build_slots(clauses: List[Clause]) -> Dict[str, List[Dict[str, Any]]]:
     """
-    Build the `slots` dict:
+    Build the `slots` dict similar to your prior JSON:
     {
       "HOOK": [...],
       "PROBLEM": [...],
@@ -124,6 +177,7 @@ def _build_slots(clauses: List[Clause]) -> Dict[str, List[Dict[str, Any]]]:
       "PROOF": [...],
       "CTA": [...]
     }
+    We keep ALL clauses here (even low-score) so you can inspect.
     """
     slots: Dict[str, List[Dict[str, Any]]] = {
         "HOOK": [],
@@ -155,8 +209,8 @@ def _build_slots(clauses: List[Clause]) -> Dict[str, List[Dict[str, Any]]]:
                 "face_q": c.face_q,
                 "scene_q": c.scene_q,
                 "vtx_sim": c.vtx_sim,
-                "has_product": False,
-                "ocr_hit": 0,
+                "has_product": c.has_product,
+                "ocr_hit": c.ocr_hit,
             }
         )
 
@@ -165,28 +219,48 @@ def _build_slots(clauses: List[Clause]) -> Dict[str, List[Dict[str, Any]]]:
 
 def _select_funnel_clauses(clauses: List[Clause]) -> Dict[str, Any]:
     """
-    Very simple funnel composer:
-    - Best HOOK by score
-    - Top N FEATURE/STORY clips by score
-    - Best CTA by score
-    Only clips with score >= MIN_CLIP_SCORE are allowed.
+    Decide which clips to keep in the final funnel.
+    Uses:
+      - LLM score (vtx_sim)
+      - visual_ok (from CLIP internal sim)
     """
+    # Only consider clauses that scored at all
     scored = [c for c in clauses if c.vtx_sim is not None]
 
-    hooks = [c for c in scored if c.slot_hint == "HOOK" and c.vtx_sim >= MIN_CLIP_SCORE]
-    ctas = [c for c in scored if c.slot_hint == "CTA" and c.vtx_sim >= MIN_CLIP_SCORE]
+    # Split by slot hints
+    all_hooks = [c for c in scored if c.slot_hint == "HOOK"]
+    all_ctas = [c for c in scored if c.slot_hint == "CTA"]
+    all_features = [c for c in scored if c.slot_hint not in ("HOOK", "CTA")]
+
+    # Apply threshold + visual_ok for "good" ones
+    hooks = [c for c in all_hooks if c.vtx_sim >= MIN_CLIP_SCORE and c.visual_ok]
+    ctas = [c for c in all_ctas if c.vtx_sim >= MIN_CLIP_SCORE and c.visual_ok]
     features = [
-        c
-        for c in scored
-        if c.slot_hint not in ("HOOK", "CTA") and c.vtx_sim >= MIN_CLIP_SCORE
+        c for c in all_features if c.vtx_sim >= MIN_CLIP_SCORE and c.visual_ok
     ]
 
-    hook = max(hooks, key=lambda c: c.vtx_sim) if hooks else None
-    cta = max(ctas, key=lambda c: c.vtx_sim) if ctas else None
+    # HOOK: best above threshold, or best overall if FORCE_HOOK_CTA
+    hook: Optional[Clause] = None
+    if hooks:
+        hook = max(hooks, key=lambda c: c.vtx_sim)
+    elif FORCE_HOOK_CTA and all_hooks:
+        hook = max(all_hooks, key=lambda c: c.vtx_sim)
 
-    features_sorted = sorted(features, key=lambda c: (-c.vtx_sim, c.start))
+    # CTA: same idea
+    cta: Optional[Clause] = None
+    if ctas:
+        cta = max(ctas, key=lambda c: c.vtx_sim)
+    elif FORCE_HOOK_CTA and all_ctas:
+        cta = max(all_ctas, key=lambda c: c.vtx_sim)
+
+    # Features: strongest first
+    features_sorted = sorted(
+        features,
+        key=lambda c: (-c.vtx_sim, c.start),
+    )
     features_selected = features_sorted[:MAX_FEATURE_CLIPS]
 
+    # Timeline: hook, features, cta → sorted by time
     timeline_clauses: List[Clause] = []
     if hook:
         timeline_clauses.append(hook)
@@ -204,202 +278,210 @@ def _select_funnel_clauses(clauses: List[Clause]) -> Dict[str, Any]:
     }
 
 
-def _render_funnel_video(
-    input_local: str,
-    timeline: List[Clause],
-    session_id: str,
-) -> Optional[str]:
+def _render_timeline(input_local: str, session_id: str, timeline: List[Clause]) -> str:
     """
-    Render a simple stitched video from the selected clauses.
-    Returns the local output path, or None if anything fails.
+    Render final MP4 from the selected timeline clauses.
+    Returns local path to edited file.
     """
+    tmp_dir = _ensure_tmp_dir()
+    out_path = os.path.join(tmp_dir, f"{session_id}_edit.mp4")
+
     if not timeline:
-        return None
+        # no clips picked, just return original for now
+        return input_local
 
-    try:
-        os.makedirs("/tmp/editdna", exist_ok=True)
-        out_path = os.path.join("/tmp/editdna", f"{session_id}_edit.mp4")
-
-        base = VideoFileClip(input_local)
+    with VideoFileClip(input_local) as base_clip:
         subclips = []
         for c in timeline:
+            # Clip range safety
             start = max(0.0, c.start)
-            end = max(start + 0.05, c.end)
-            sub = base.subclip(start, end)
-            subclips.append(sub)
+            end = max(start + 0.05, min(float(base_clip.duration), c.end))
+            subclips.append(base_clip.subclip(start, end))
 
-        final = concatenate_videoclips(subclips, method="compose")
+        final = concatenate_videoclips(subclips)
         final.write_videofile(
             out_path,
             codec="libx264",
             audio_codec="aac",
-            temp_audiofile=os.path.join("/tmp/editdna", f"{session_id}_temp_audio.m4a"),
+            temp_audiofile=os.path.join(tmp_dir, f"{session_id}_audio_temp.m4a"),
             remove_temp=True,
             verbose=False,
             logger=None,
         )
 
-        final.close()
-        for s in subclips:
-            s.close()
-        base.close()
-
-        return out_path
-    except Exception:
-        return None
+    return out_path
 
 
-def _upload_to_s3(local_path: str, s3_prefix: str, session_id: str) -> Optional[str]:
+def _upload_to_s3(local_path: str, session_id: str) -> Optional[str]:
     """
-    Upload the rendered video to S3 and return public URL.
+    Upload final video to S3 and return HTTPS URL.
+    Requires:
+      - AWS_ACCESS_KEY_ID
+      - AWS_SECRET_ACCESS_KEY
+      - AWS_REGION
+      - EDITDNA_S3_BUCKET
+      - EDITDNA_S3_PREFIX (e.g. 'editdna/outputs')
     """
-    bucket = os.getenv("S3_BUCKET")
-    if not bucket or not local_path or not os.path.exists(local_path):
+    bucket = os.getenv("EDITDNA_S3_BUCKET")
+    prefix = os.getenv("EDITDNA_S3_PREFIX", "editdna/outputs")
+    region = os.getenv("AWS_REGION", "us-east-1")
+
+    if not bucket:
         return None
 
-    key = f"editdna/outputs/{s3_prefix or session_id}/final.mp4"
+    key = f"{prefix}/{session_id}/final.mp4"
 
-    try:
-        s3 = boto3.client("s3")
-        s3.upload_file(local_path, bucket, key)
-        return f"https://{bucket}.s3.amazonaws.com/{key}"
-    except Exception:
-        return None
+    s3 = boto3.client("s3", region_name=region)
+    s3.upload_file(local_path, bucket, key, ExtraArgs={"ContentType": "video/mp4"})
+
+    return f"https://{bucket}.s3.amazonaws.com/{key}"
 
 
-# -----------------------------
-# HUMAN-READABLE COMPOSER SUMMARY
-# -----------------------------
-def _make_human_readable_summary(funnel: Dict[str, Any]) -> str:
-    lines = []
-    lines.append("===== EDITDNA FUNNEL COMPOSER =====\n")
+def _compose_human_summary(funnel: Dict[str, Any]) -> str:
+    parts = ["===== EDITDNA FUNNEL COMPOSER =====", ""]
 
-    # HOOK
     hook = funnel.get("hook")
-    if hook:
-        lines.append(f"HOOK ({hook.id}, score={hook.vtx_sim:.2f}):")
-        lines.append(f'  "{hook.text}"\n')
-    else:
-        lines.append("HOOK: NONE\n")
-
-    # FEATURES
-    lines.append("FEATURES (kept):")
-    for f in funnel.get("features", []):
-        lines.append(f"  - [{f.id}] score={f.vtx_sim:.2f} → \"{f.text}\"")
-    lines.append("")
-
-    # CTA
+    feats: List[Clause] = funnel.get("features") or []
     cta = funnel.get("cta")
-    if cta:
-        lines.append(f"CTA ({cta.id}, score={cta.vtx_sim:.2f}):")
-        lines.append(f'  "{cta.text}"\n')
+
+    if hook:
+        parts.append(f"HOOK ({hook.id}, score={hook.vtx_sim:.2f}):")
+        parts.append(f'  "{hook.text}"')
+        parts.append("")
     else:
-        lines.append("CTA: NONE\n")
+        parts.append("HOOK: NONE")
+        parts.append("")
 
-    # FINAL ORDER
-    lines.append("FINAL ORDER TIMELINE:")
-    for i, c in enumerate(funnel.get("timeline", []), start=1):
-        lines.append(f"{i}) {c.id} → \"{c.text}\"")
-    lines.append("\n=====================================")
+    parts.append("FEATURES (kept):")
+    if feats:
+        for c in feats:
+            parts.append(
+                f"  - [{c.id}] score={c.vtx_sim:.2f} → \"{c.text}\""
+            )
+    else:
+        parts.append("  (none)")
+    parts.append("")
 
-    return "\n".join(lines)
+    if cta:
+        parts.append(f"CTA ({cta.id}, score={cta.vtx_sim:.2f}):")
+        parts.append(f'  "{cta.text}"')
+        parts.append("")
+    else:
+        parts.append("CTA: NONE")
+        parts.append("")
+
+    # Timeline
+    parts.append("FINAL ORDER TIMELINE:")
+    timeline: List[Clause] = funnel.get("timeline") or []
+    if timeline:
+        for idx, c in enumerate(timeline, start=1):
+            parts.append(f'{idx}) {c.id} → "{c.text}"')
+    else:
+        parts.append("  (no clips)")
+
+    parts.append("")
+    parts.append("=====================================")
+
+    return "\n".join(parts)
 
 
-# -----------------------------
-# MAIN PIPELINE
-# -----------------------------
 def run_pipeline(
     *,
-    input_local: str,
     session_id: str,
-    s3_prefix: str,
     file_urls: Optional[List[str]] = None,
 ) -> Dict[str, Any]:
     """
-    Main pipeline:
-    1) ASR
-    2) LLM scoring
-    3) Slots
-    4) Composer
-    5) Rendering
-    6) S3 upload
-    7) Human summary
+    Main entry used by tasks.job_render.
+
+    Steps:
+    1) Download first video URL to local
+    2) Run Whisper ASR → segments
+    3) Visual Brain V2:
+         - CLIP internal coherence check
+         - CTA heuristic (OCR stub)
+         - product keyword heuristic
+    4) LLM multimodal scorer for each clause
+    5) Composer: pick HOOK / FEATURES / CTA
+    6) Render timeline → edited MP4
+    7) Upload to S3 and return output_video_url
     """
+    if not file_urls:
+        raise ValueError("file_urls must contain at least one video URL")
+
+    source_url = file_urls[0]
+    input_local = _download_to_local(session_id, source_url)
     duration = _get_duration_sec(input_local)
+
+    # 1) ASR
     clauses = _run_asr(input_local)
 
+    # 2) Visual Brain (V2) – scene coherence + product flags + CTA-ish detection
+    vision_clip.enrich_clauses_with_vision(input_local, clauses)
+    ocr.enrich_clauses_with_ocr(clauses)
+    object_detect.enrich_clauses_with_product_flags(clauses)
+
+    # 3) LLM scoring
+    _apply_llm_scoring(input_local, clauses)
+
+    # 4) Build clips structure (for debugging / analysis)
     clips: List[Dict[str, Any]] = []
-
-    # 3) score each clause
     for c in clauses:
-        mid_t = (c.start + c.end) / 2.0
-        frame_b64 = _grab_frame_b64(input_local, mid_t)
-
-        score, reason = llm.score_clause_multimodal(
-            text=c.text,
-            frame_b64=frame_b64,
-            slot_hint=c.slot_hint,
-        )
-
-        c.vtx_sim = score
-
         clips.append(
             {
                 "id": c.id,
                 "slot": c.slot_hint,
                 "start": c.start,
                 "end": c.end,
-                "score": score,
+                "score": c.vtx_sim,
                 "face_q": c.face_q,
                 "scene_q": c.scene_q,
-                "vtx_sim": score,
+                "vtx_sim": c.vtx_sim,
                 "chain_ids": c.chain_ids or [c.id],
                 "text": c.text,
-                "llm_reason": reason,
+                "llm_reason": c.llm_reason,
+                "visual_ok": c.visual_ok,
+                "visual_internal_sim": c.visual_internal_sim,
+                "has_product": c.has_product,
+                "ocr_hit": c.ocr_hit,
             }
         )
 
-    # 4) build slots
     slots = _build_slots(clauses)
 
-    # 5) compose
+    # 5) Composer
     funnel = _select_funnel_clauses(clauses)
-    timeline = funnel["timeline"]
+    composer_human = _compose_human_summary(funnel)
+
+    hook = funnel.get("hook")
+    feats: List[Clause] = funnel.get("features") or []
+    cta = funnel.get("cta")
+    timeline: List[Clause] = funnel.get("timeline") or []
+
+    hook_id = hook.id if hook else None
+    feature_ids = [c.id for c in feats]
+    cta_id = cta.id if cta else None
     used_clip_ids = [c.id for c in timeline]
 
-    # human-readable summary
-    composer_human = _make_human_readable_summary(funnel)
+    # 6) Render
+    output_video_local = _render_timeline(input_local, session_id, timeline)
 
-    # 6) render
-    output_local = _render_funnel_video(
-        input_local=input_local,
-        timeline=timeline,
-        session_id=session_id,
-    )
-
-    # 7) upload
-    output_url = None
-    if output_local:
-        output_url = _upload_to_s3(
-            local_path=output_local,
-            s3_prefix=s3_prefix,
-            session_id=session_id,
-        )
+    # 7) Upload
+    output_video_url = _upload_to_s3(output_video_local, session_id)
 
     return {
         "duration_sec": duration,
         "clips": clips,
         "slots": slots,
         "composer": {
-            "hook_id": funnel["hook"].id if funnel["hook"] else None,
-            "feature_ids": [f.id for f in funnel["features"]],
-            "cta_id": funnel["cta"].id if funnel["cta"] else None,
+            "hook_id": hook_id,
+            "feature_ids": feature_ids,
+            "cta_id": cta_id,
             "used_clip_ids": used_clip_ids,
             "min_score": MIN_CLIP_SCORE,
         },
         "composer_human": composer_human,
-        "output_video_local": output_local,
-        "output_video_url": output_url,
+        "output_video_local": output_video_local,
+        "output_video_url": output_video_url,
         "asr": True,
         "semantic": True,
         "vision": True,
