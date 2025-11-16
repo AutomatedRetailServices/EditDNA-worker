@@ -1,31 +1,53 @@
 import logging
 import traceback
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 
-# 👇 this imports your pipeline logic from worker/pipeline.py
-from worker import pipeline
+from worker import pipeline  # 👈 your V2/V3 pipeline
 
 logger = logging.getLogger(__name__)
 
 
-def job_render(session_id: str, files: List[str]) -> Dict[str, Any]:
+def job_render(payload: Dict[str, Any]) -> Dict[str, Any]:
     """
     RQ job entrypoint.
 
-    This is what the web API enqueues as "tasks.job_render".
-    `files` is a list of video URLs (S3 / HTTPS).
-    """
-    logger.info("🎬 job_render called", extra={"session_id": session_id, "files": files})
+    IMPORTANT:
+    The web layer enqueues this as:
 
+        q.enqueue("tasks.job_render", {
+            "session_id": "...",
+            "files": ["https://...mp4"]
+        })
+
+    So RQ passes a SINGLE positional argument: `payload` (a dict).
+
+    We unwrap that dict here and forward to pipeline.run_pipeline(
+        session_id=...,
+        file_urls=...
+    ).
+    """
     try:
-        # ✅ NEW: only pass session_id and file_urls
+        logger.info("🎬 job_render called (raw payload)", extra={"payload": payload})
+
+        if not isinstance(payload, dict):
+            raise ValueError(f"job_render expected dict payload, got: {type(payload)}")
+
+        session_id: Optional[str] = payload.get("session_id") or payload.get("id")
+        files: Optional[List[str]] = payload.get("files") or payload.get("file_urls")
+
+        if not session_id:
+            raise ValueError("job_render: missing 'session_id' in payload")
+
+        if not files or not isinstance(files, list):
+            raise ValueError("job_render: 'files' must be a non-empty list in payload")
+
+        # ✅ Call the new pipeline signature (no input_local / s3_prefix)
         out = pipeline.run_pipeline(
             session_id=session_id,
             file_urls=files,
         )
 
         # `out` should already be a dict with clips, slots, urls, etc.
-        # we just wrap it in a stable envelope
         return {
             "ok": True,
             **out,
