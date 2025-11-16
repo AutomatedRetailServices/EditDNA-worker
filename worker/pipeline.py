@@ -2,21 +2,20 @@ import os
 import math
 import base64
 import logging
-import tempfile
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Tuple
 
 import cv2
-import whisper
 import requests
 import boto3
 from moviepy.editor import VideoFileClip, concatenate_videoclips
 
 from . import llm  # worker.llm
+from .vision_v3 import visual_brain  # V3 visual scoring
 
 logger = logging.getLogger(__name__)
 
-# Whisper model
+# Whisper model name (for ASR)
 WHISPER_MODEL_NAME = os.getenv("WHISPER_MODEL", "small")
 
 # S3 output config
@@ -33,6 +32,16 @@ OUTPUT_PREFIX = os.getenv(
 MIN_CLIP_SCORE = float(os.getenv("EDITDNA_MIN_CLIP_SCORE", "0.5"))
 MAX_FEATURE_CLIPS = int(os.getenv("EDITDNA_MAX_FEATURE_CLIPS", "8"))
 
+# Score mixing weights
+SEMANTIC_WEIGHT = float(os.getenv("EDITDNA_SEMANTIC_WEIGHT", "0.7"))
+VISUAL_WEIGHT = float(os.getenv("EDITDNA_VISUAL_WEIGHT", "0.3"))
+
+try:
+    import whisper
+except Exception as e:
+    whisper = None
+    logger.error(f"Whisper import failed: {e}")
+
 
 @dataclass
 class Clause:
@@ -43,9 +52,12 @@ class Clause:
     slot_hint: str = "STORY"  # HOOK / PROBLEM / FEATURE / PROOF / CTA / STORY
     face_q: float = 1.0
     scene_q: float = 1.0
-    vtx_sim: float = 0.0      # reused for "score"
+    semantic_score: float = 0.0
+    visual_score: float = 0.0
+    vtx_sim: float = 0.0      # final combined score
     chain_ids: Optional[List[str]] = None
     llm_reason: str = ""      # why it got that score
+    visual_flags: Optional[Dict[str, bool]] = None
 
 
 _whisper_model = None
@@ -53,6 +65,8 @@ _whisper_model = None
 
 def _get_whisper_model():
     global _whisper_model
+    if whisper is None:
+        raise RuntimeError("whisper is not available; check requirements.")
     if _whisper_model is None:
         logger.info(f"Loading Whisper model: {WHISPER_MODEL_NAME}")
         _whisper_model = whisper.load_model(WHISPER_MODEL_NAME)
@@ -72,7 +86,7 @@ def _download_to_local(url: str, session_id: str) -> str:
     base = _ensure_tmp_dir()
     local_path = os.path.join(base, f"{session_id}_input.mp4")
 
-    logger.info(f"Downloading input video", extra={"url": url, "local_path": local_path})
+    logger.info("Downloading input video", extra={"url": url, "local_path": local_path})
     resp = requests.get(url, stream=True, timeout=60)
     resp.raise_for_status()
 
@@ -153,9 +167,12 @@ def _run_asr(path: str) -> List[Clause]:
                 slot_hint=slot_hint,
                 face_q=1.0,
                 scene_q=1.0,
+                semantic_score=0.0,
+                visual_score=0.0,
                 vtx_sim=0.0,
                 chain_ids=[clause_id],
                 llm_reason="",
+                visual_flags={"scene_jump": False, "motion_jump": False},
             )
         )
     return clauses
@@ -190,7 +207,6 @@ def _build_slots(clauses: List[Clause]) -> Dict[str, List[Dict[str, Any]]]:
         elif c.slot_hint == "PROOF":
             key = "PROOF"
         else:
-            # put everything else as FEATURE for now
             key = "FEATURE"
 
         slots[key].append(
@@ -201,7 +217,9 @@ def _build_slots(clauses: List[Clause]) -> Dict[str, List[Dict[str, Any]]]:
                 "text": c.text,
                 "meta": {
                     "slot": key,
-                    "score": c.vtx_sim,  # will be updated after LLM scoring
+                    "score": c.vtx_sim,
+                    "semantic_score": c.semantic_score,
+                    "visual_score": c.visual_score,
                     "chain_ids": c.chain_ids or [c.id],
                 },
                 "face_q": c.face_q,
@@ -209,6 +227,10 @@ def _build_slots(clauses: List[Clause]) -> Dict[str, List[Dict[str, Any]]]:
                 "vtx_sim": c.vtx_sim,
                 "has_product": False,
                 "ocr_hit": 0,
+                "visual_flags": c.visual_flags or {
+                    "scene_jump": False,
+                    "motion_jump": False,
+                },
             }
         )
 
@@ -237,11 +259,8 @@ def _pick_best_cta(slots: Dict[str, List[Dict[str, Any]]]) -> Optional[str]:
 
 def _pick_feature_ids(slots: Dict[str, List[Dict[str, Any]]]) -> List[str]:
     feats = slots.get("FEATURE") or []
-    # filter by score threshold
     feats = [f for f in feats if f["meta"]["score"] >= MIN_CLIP_SCORE]
-    # sort by score desc
     feats_sorted = sorted(feats, key=lambda f: f["meta"]["score"], reverse=True)
-    # cap
     feats_sorted = feats_sorted[:MAX_FEATURE_CLIPS]
     return [f["id"] for f in feats_sorted]
 
@@ -271,7 +290,6 @@ def _build_composer(
         used_ids.append(hook_id)
         ordered_clauses.append(id_to_clause[hook_id])
 
-    # Keep features in the order they appear in the original video
     feature_clauses = [id_to_clause[fid] for fid in feature_ids if fid in id_to_clause]
     feature_clauses = sorted(feature_clauses, key=lambda c: c.start)
     for fc in feature_clauses:
@@ -292,7 +310,6 @@ def _build_composer(
         "min_score": MIN_CLIP_SCORE,
     }
 
-    # Human-readable string
     lines: List[str] = []
     lines.append("===== EDITDNA FUNNEL COMPOSER =====\n")
 
@@ -356,7 +373,6 @@ def _render_final_video(
         with VideoFileClip(input_local) as clip:
             subclips = []
             for c in ordered_clauses:
-                # Safety: clip.duration bounds
                 start = max(0.0, c.start)
                 end = min(float(clip.duration), c.end)
                 if end <= start:
@@ -410,7 +426,11 @@ def run_pipeline(
     1) Download first input video from file_urls to /tmp
     2) Get duration
     3) Run Whisper ASR → segments (clauses)
-    4) For each segment: grab mid-frame, send to LLM judge (TikTok-native, slang-friendly)
+    4) For each segment:
+         - grab mid-frame (for LLM)
+         - LLM semantic scoring
+         - visual_brain V3 scoring
+         - combine into final score
     5) Build clips + slots structure
     6) Run funnel composer (HOOK, FEATURES, CTA)
     7) Render final stitched video according to composer
@@ -419,7 +439,6 @@ def run_pipeline(
     if not file_urls:
         raise ValueError("run_pipeline: file_urls is required and must be non-empty")
 
-    # For now we just use the first video
     input_url = file_urls[0]
     logger.info(
         "Starting pipeline",
@@ -434,30 +453,36 @@ def run_pipeline(
 
     clips: List[Dict[str, Any]] = []
 
-    # 2) LLM scoring (multimodal, slang-friendly)
+    # 2) Scoring loop: semantic (LLM) + visual (V3)
     for c in clauses:
         mid_t = (c.start + c.end) / 2.0
         frame_b64 = _grab_frame_b64(input_local, mid_t)
 
-        # Ask LLM to judge this sentence (with optional frame)
-        # We pass tone controls so slang / edgy talk is allowed by default.
-        score, reason = llm.score_clause_multimodal(
+        # Semantic scoring (existing LLM call, unchanged signature)
+        sem_score, reason = llm.score_clause_multimodal(
             text=c.text,
             frame_b64=frame_b64,
             slot_hint=c.slot_hint,
-            tone_level="spicy",          # "pg", "casual", "spicy", "chaos"
-            allow_slang=True,            # TikTok-native: slang is OK
-            slang_whitelist=[
-                "wet wet",
-                "coochie",
-                "kuchigai",
-                "baddie",
-            ],
-            brand_safety_mode="relaxed", # not church mode; only drop truly unusable stuff
         )
-
-        c.vtx_sim = score  # reuse this field to store "LLM score"
+        c.semantic_score = float(sem_score)
         c.llm_reason = reason
+
+        # Visual scoring (new V3 brain)
+        vis_score, vis_flags = visual_brain.score_segment(
+            path=input_local,
+            start=c.start,
+            end=c.end,
+        )
+        c.visual_score = float(vis_score)
+        c.visual_flags = vis_flags
+
+        # Combine
+        final_score = (
+            SEMANTIC_WEIGHT * c.semantic_score
+            + VISUAL_WEIGHT * c.visual_score
+        )
+        final_score = max(0.0, min(1.0, final_score))
+        c.vtx_sim = final_score
 
         # Normalize slot for clip-level metadata
         if c.slot_hint in ("HOOK", "CTA", "PROBLEM", "FEATURE", "PROOF"):
@@ -471,26 +496,21 @@ def run_pipeline(
                 "slot": clip_slot,
                 "start": c.start,
                 "end": c.end,
-                "score": score,
+                "score": final_score,
+                "semantic_score": c.semantic_score,
+                "visual_score": c.visual_score,
                 "face_q": c.face_q,
                 "scene_q": c.scene_q,
-                "vtx_sim": score,
+                "vtx_sim": final_score,
                 "chain_ids": c.chain_ids or [c.id],
                 "text": c.text,
                 "llm_reason": c.llm_reason,
+                "visual_flags": c.visual_flags,
             }
         )
 
     # 3) Build slots structure with updated scores
     slots = _build_slots(clauses)
-    # update scores inside slots from Clause objects
-    id_to_clause_score = {c.id: c.vtx_sim for c in clauses}
-    for bucket in slots.values():
-        for item in bucket:
-            cid = item["id"]
-            if cid in id_to_clause_score:
-                item["meta"]["score"] = id_to_clause_score[cid]
-                item["vtx_sim"] = id_to_clause_score[cid]
 
     # 4) Composer
     composer, composer_human, ordered_clauses = _build_composer(clauses, slots)
@@ -511,6 +531,6 @@ def run_pipeline(
         "output_video_local": output_video_local,
         "output_video_url": output_video_url,
         "asr": True,
-        "semantic": True,  # we used text + LLM
-        "vision": True,    # we attempted to use frames in scoring
+        "semantic": True,
+        "vision": True,
     }
