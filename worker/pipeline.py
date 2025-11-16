@@ -9,6 +9,7 @@ from typing import Any, Dict, List, Optional, Tuple
 import cv2
 import requests
 import boto3
+import torch
 from moviepy.editor import VideoFileClip, concatenate_videoclips
 
 from . import llm  # worker.llm
@@ -16,13 +17,8 @@ from .vision_v3 import visual_brain  # V3 visual scoring
 
 logger = logging.getLogger(__name__)
 
-# -------------------------------------------------------------------
-#  WHISPER + DEVICE CONFIG (GPU-AWARE)
-# -------------------------------------------------------------------
-
-# Default to a bigger model now that we're on GPU.
-# You can override with env: WHISPER_MODEL=medium / small / large-v3
-WHISPER_MODEL_NAME = os.getenv("WHISPER_MODEL", "large-v3")
+# Whisper model name (for ASR)
+WHISPER_MODEL_NAME = os.getenv("WHISPER_MODEL", "small")
 
 # S3 output config
 OUTPUT_BUCKET = os.getenv(
@@ -48,12 +44,6 @@ except Exception as e:
     whisper = None
     logger.error(f"Whisper import failed: {e}")
 
-try:
-    import torch
-except Exception as e:
-    torch = None
-    logger.error(f"Torch import failed: {e}")
-
 
 @dataclass
 class Clause:
@@ -73,37 +63,17 @@ class Clause:
 
 
 _whisper_model = None
-_whisper_fp16 = False
 
 
 def _get_whisper_model():
-    """
-    Load Whisper once, prefer GPU if available.
-
-    - If WHISPER_DEVICE is set (e.g. 'cpu' or 'cuda'), we honor that.
-    - Otherwise: cuda if available, else cpu.
-    """
-    global _whisper_model, _whisper_fp16
-
+    global _whisper_model
     if whisper is None:
         raise RuntimeError("whisper is not available; check requirements.")
 
     if _whisper_model is None:
-        # Decide device
-        env_device = os.getenv("WHISPER_DEVICE", "").strip().lower()
-        if env_device:
-            device = env_device
-        else:
-            if torch is not None and torch.cuda.is_available():
-                device = "cuda"
-            else:
-                device = "cpu"
-
-        logger.info(
-            f"Loading Whisper model: {WHISPER_MODEL_NAME} on device={device}"
-        )
+        device = "cuda" if torch.cuda.is_available() else "cpu"
+        logger.info(f"Loading Whisper model: {WHISPER_MODEL_NAME} on {device}")
         _whisper_model = whisper.load_model(WHISPER_MODEL_NAME, device=device)
-        _whisper_fp16 = (device == "cuda")
 
     return _whisper_model
 
@@ -249,19 +219,13 @@ def _normalize_for_dedupe(text: str) -> str:
     return t
 
 
-# -------------------------------------------------------------------
-#  ASR → CLAUSES
-# -------------------------------------------------------------------
-
-
 def _run_asr(path: str) -> List[Clause]:
     """
     Run Whisper on the video, return list of Clause objects.
     We keep segmentation as Whisper gives it.
     """
     model = _get_whisper_model()
-    # use fp16 on GPU, fp32 on CPU
-    result = model.transcribe(path, fp16=_whisper_fp16)
+    result = model.transcribe(path, fp16=torch.cuda.is_available())
     segments = result.get("segments", []) or []
 
     clauses: List[Clause] = []
@@ -304,11 +268,6 @@ def _run_asr(path: str) -> List[Clause]:
     return clauses
 
 
-# -------------------------------------------------------------------
-#  SLOTS + COMPOSER HELPERS
-# -------------------------------------------------------------------
-
-
 def _build_slots(clauses: List[Clause]) -> Dict[str, List[Dict[str, Any]]]:
     """
     Build the `slots` dict similar to your prior JSON:
@@ -319,10 +278,6 @@ def _build_slots(clauses: List[Clause]) -> Dict[str, List[Dict[str, Any]]]:
       "PROOF": [...],
       "CTA": [...]
     }
-    For now:
-      - HOOK comes from slot_hint == HOOK
-      - CTA  comes from slot_hint == CTA
-      - everything else becomes FEATURE (we'll teach PROBLEM/PROOF later)
     """
     slots: Dict[str, List[Dict[str, Any]]] = {
         "HOOK": [],
@@ -373,10 +328,6 @@ def _build_slots(clauses: List[Clause]) -> Dict[str, List[Dict[str, Any]]]:
 
 
 def _pick_best_hook(slots: Dict[str, List[Dict[str, Any]]]) -> Optional[str]:
-    """
-    Hook is ONLY allowed to come from the HOOK slot.
-    We do NOT promote FEATURE lines into HOOK anymore.
-    """
     hooks = slots.get("HOOK") or []
     if not hooks:
         return None
@@ -552,11 +503,6 @@ def _build_composer(
     return composer, composer_human, ordered_clauses
 
 
-# -------------------------------------------------------------------
-#  RENDER + UPLOAD
-# -------------------------------------------------------------------
-
-
 def _render_final_video(
     input_local: str,
     session_id: str,
@@ -616,11 +562,6 @@ def _render_final_video(
     except Exception as e:
         logger.exception(f"Failed to upload final video to S3: {e}")
         return output_local, None
-
-
-# -------------------------------------------------------------------
-#  MAIN PIPELINE
-# -------------------------------------------------------------------
 
 
 def run_pipeline(
