@@ -1,736 +1,293 @@
-import os
-import math
-import base64
-import logging
+# ========= EDITDNA V3 FUNNEL COMPOSER (TEXT + VISION + SLOTS) =========
+# Drop this whole block into worker/pipeline.py and REMOVE old composer logic.
+
 import re
-from dataclasses import dataclass
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Dict, List, Tuple, Optional
 
-import cv2
-import requests
-import boto3
-import torch
-from moviepy.editor import VideoFileClip, concatenate_videoclips
+# ------------  HARD FILTER FOR BAD TAKES / MICRO-RETakes / BLOOPERS  ------------ #
 
-from . import llm  # worker.llm
-from .vision_v3 import visual_brain  # V3 visual scoring
-
-logger = logging.getLogger(__name__)
-
-# Whisper model name (for ASR)
-WHISPER_MODEL_NAME = os.getenv("WHISPER_MODEL", "small")
-
-# S3 output config
-OUTPUT_BUCKET = os.getenv(
-    "EDITDNA_OUTPUT_BUCKET",
-    "script2clipshop-video-automatedretailservices",
-)
-OUTPUT_PREFIX = os.getenv(
-    "EDITDNA_OUTPUT_PREFIX",
-    "editdna/outputs",
-)
-
-# Composer config
-MIN_CLIP_SCORE = float(os.getenv("EDITDNA_MIN_CLIP_SCORE", "0.5"))
-MAX_FEATURE_CLIPS = int(os.getenv("EDITDNA_MAX_FEATURE_CLIPS", "8"))
-
-# Hook / CTA stricter thresholds (can override via env)
-HOOK_MIN_SCORE = float(os.getenv("EDITDNA_HOOK_MIN_SCORE", "0.7"))
-CTA_MIN_SCORE = float(os.getenv("EDITDNA_CTA_MIN_SCORE", "0.6"))
-
-# Score mixing weights
-SEMANTIC_WEIGHT = float(os.getenv("EDITDNA_SEMANTIC_WEIGHT", "0.7"))
-VISUAL_WEIGHT = float(os.getenv("EDITDNA_VISUAL_WEIGHT", "0.3"))
-
-try:
-    import whisper
-except Exception as e:
-    whisper = None
-    logger.error(f"Whisper import failed: {e}")
-
-
-@dataclass
-class Clause:
-    id: str
-    start: float
-    end: float
-    text: str
-    slot_hint: str = "STORY"  # HOOK / PROBLEM / FEATURE / PROOF / CTA / STORY
-    face_q: float = 1.0
-    scene_q: float = 1.0
-    semantic_score: float = 0.0
-    visual_score: float = 0.0
-    vtx_sim: float = 0.0      # final combined score
-    chain_ids: Optional[List[str]] = None
-    llm_reason: str = ""      # why it got that score
-    visual_flags: Optional[Dict[str, bool]] = None
-
-
-_whisper_model = None
-
-
-def _get_whisper_model():
-    """
-    Load Whisper on GPU if available, otherwise CPU.
-    """
-    global _whisper_model
-    if whisper is None:
-        raise RuntimeError("whisper is not available; check requirements.")
-    if _whisper_model is None:
-        device = "cuda" if torch.cuda.is_available() else "cpu"
-        logger.info(f"Loading Whisper model: {WHISPER_MODEL_NAME} on device={device}")
-        _whisper_model = whisper.load_model(WHISPER_MODEL_NAME, device=device)
-    return _whisper_model
-
-
-def _ensure_tmp_dir() -> str:
-    base = "/tmp/editdna"
-    os.makedirs(base, exist_ok=True)
-    return base
-
-
-def _download_to_local(url: str, session_id: str) -> str:
-    """
-    Download the first input video to /tmp/editdna/<session_id>_input.mp4
-    """
-    base = _ensure_tmp_dir()
-    local_path = os.path.join(base, f"{session_id}_input.mp4")
-
-    logger.info("Downloading input video", extra={"url": url, "local_path": local_path})
-    resp = requests.get(url, stream=True, timeout=60)
-    resp.raise_for_status()
-
-    with open(local_path, "wb") as f:
-        for chunk in resp.iter_content(chunk_size=1024 * 1024):
-            if chunk:
-                f.write(chunk)
-
-    return local_path
-
-
-def _get_duration_sec(path: str) -> float:
-    try:
-        with VideoFileClip(path) as clip:
-            return float(clip.duration)
-    except Exception as e:
-        logger.warning(f"Failed to read duration: {e}")
-        return 0.0
-
-
-def _grab_frame_b64(path: str, t_sec: float) -> Optional[str]:
-    """
-    Grab a single RGB frame at time t_sec, JPEG-encode, return base64 string.
-    If anything fails, return None (pipeline keeps going).
-    """
-    try:
-        cap = cv2.VideoCapture(path)
-        if not cap.isOpened():
-            return None
-        cap.set(cv2.CAP_PROP_POS_MSEC, max(0.0, t_sec) * 1000.0)
-        ok, frame = cap.read()
-        cap.release()
-        if not ok or frame is None:
-            return None
-        ok, buf = cv2.imencode(".jpg", frame)
-        if not ok:
-            return None
-        return base64.b64encode(buf.tobytes()).decode("ascii")
-    except Exception:
-        return None
-
-
-# -------------------------------------------------------------------
-#  FRAGMENT + DE-DUPE HELPERS
-# -------------------------------------------------------------------
-
-FRAGMENT_MIN_CHARS = 15
-FRAGMENT_MIN_WORDS = 3
-
-# phrases we strip from the start so
-# "Worry no more, because I found the perfect probiotic."
-# and "Because I found the perfect probiotic." collapse to same idea.
-NORMALIZE_PREFIXES = [
-    "okay",
-    "ok",
-    "well",
-    "wait",
-    "so",
-    "yeah",
-    "worry no more",
-    "worry no more,",
+BAD_PHRASE_PATTERNS = [
+    r"\bwait[.,!?]?$",                      # "wait." / "wait?" at the end
+    r"\bwait not\b",
+    r"\bI don't know why\b",
+    r"\bWhy can't I remember\b",
+    r"\bIs that funny\??",
+    r"\bIs that good\??",
+    r"^Yeah[.?!]?$",
+    r"^That one good\??",
 ]
 
-# obvious meta / retry / off-script junk that should never be used
-BAD_LINE_PATTERNS = [
-    r"^is that (funny|good)\??$",
-    r"^that one good\??$",
-    r"^yeah\.?$",
-    r"^why can.?t i remember",
-    r"^oh no, i don't know why",
-    r"^these pineapple flavored, wait\.?$",
-    r"^moisture control, odor control, wait",
-    r"^fort moisture, odor, and a healthy balance\.?$",
+BAD_REASON_KEYWORDS = [
+    "incomplete",
+    "vague",
+    "confusing",
+    "weak",
+    "does not engage",
+    "too short",
+    "generic",
+    "repetitive",
+    "ends abruptly",
+    "slip-up",
+    "correction",
+]
+
+# slang we WANT to keep / boost (kutigei / coochie etc)
+GOOD_SLANG_HOOK_KEYWORDS = [
+    "kutigei",
+    "coochie gang",
+    "coochie",
 ]
 
 
-def _looks_like_meta_or_retry(text: str) -> bool:
+def is_trash_line(text: str, llm_reason: str) -> bool:
     """
-    Detect obvious 'talking to cameraman', retries, or broken lines that
-    should never make it into the final ad, even if they get a score.
+    Mark obvious retakes / bloopers / filler as trash so they NEVER go into the funnel,
+    BUT do NOT kill a good slang line just because it's spicy.
     """
-    if not text:
+    t = (text or "").strip().lower()
+    r = (llm_reason or "").lower()
+
+    # 0) If it’s clearly one of our "good slang" candidates, never auto-trash just for length
+    if any(kw in t for kw in GOOD_SLANG_HOOK_KEYWORDS):
+        return False
+
+    # 1) Super short, non-meaningful lines (except a few common words)
+    word_count = len(t.split())
+    if word_count <= 2 and t not in ("yes", "no", "okay", "ok", "sure"):
         return True
-    t = text.strip().lower()
-    for pat in BAD_LINE_PATTERNS:
+
+    # 2) Explicit bad / re-take phrases
+    for pat in BAD_PHRASE_PATTERNS:
         if re.search(pat, t):
             return True
-    return False
 
-
-def _is_fragment_text(text: str) -> bool:
-    """
-    Heuristic to detect obvious bad/fragment takes that we should NOT use
-    as FEATURES in the final ad.
-    Examples to kill:
-      - "Worry no more, because I found-"
-      - "Is that good?"
-      - "Yeah."
-      - "That one good?"
-      - "Why can't I remember after that?"
-    But we keep real hooks/features even if short (e.g., "Odor?") when they
-    are scored and slotted as HOOK/CTA.
-    """
-    if not text:
-        return True
-
-    t = text.strip()
-
-    # hard-kill: meta / retry junk
-    if _looks_like_meta_or_retry(t):
-        return True
-
-    # Hard cut: dangling dash at end of sentence
-    if t.endswith("-"):
-        return True
-
-    # Very short stuff without a proper sentence end → likely filler
-    if len(t) < FRAGMENT_MIN_CHARS:
-        if not t.endswith((".", "!", "?")):
-            return True
-        # Very few words AND not clearly a strong hook → treat as fragment
-        words = t.split()
-        if len(words) < FRAGMENT_MIN_WORDS:
+    # 3) LLM explicitly says it's bad
+    for kw in BAD_REASON_KEYWORDS:
+        if kw in r:
             return True
 
     return False
 
 
-def _normalize_for_dedupe(text: str) -> str:
+def combine_scores(semantic_score: float, visual_score: float) -> float:
     """
-    Collapse similar lines to the same 'idea' string so we don't keep
-    multiple versions of the same talking beat.
-    - lowercases
-    - strips common filler prefixes ("okay", "wait", "worry no more", etc.)
-    - removes punctuation
-    - collapses spaces
+    Favor semantic score (what is said) over visual score (pretty face / stable scene).
     """
-    if not text:
-        return ""
-
-    t = text.strip().lower()
-
-    # strip filler prefixes at the start
-    for pref in NORMALIZE_PREFIXES:
-        if t.startswith(pref + " "):
-            t = t[len(pref):].lstrip()
-        elif t == pref:
-            t = ""
-            break
-
-    # remove punctuation
-    t = re.sub(r"[^\w\s]", " ", t)
-    # collapse whitespace
-    t = re.sub(r"\s+", " ", t).strip()
-
-    return t
+    sem = float(semantic_score or 0.0)
+    vis = float(visual_score or 0.0)
+    return 0.85 * sem + 0.15 * vis
 
 
-def _run_asr(path: str) -> List[Clause]:
+def score_clip_for_funnel(clip: Dict) -> Optional[Dict]:
     """
-    Run Whisper on the video, return list of Clause objects.
-    We keep segmentation as Whisper gives it.
+    Take one raw clip dict with:
+      - clip["text"]
+      - clip["semantic_score"] or clip["meta"]["semantic_score"]
+      - clip["visual_score"] or clip["meta"]["visual_score"]
+      - clip["llm_reason"] or clip["meta"]["llm_reason"]
+    Return a NEW dict with combined 'score' in meta.
+    Return None if we consider this clip trash and don't want it in the funnel.
     """
-    model = _get_whisper_model()
-    result = model.transcribe(path, fp16=torch.cuda.is_available())
-    segments = result.get("segments", []) or []
+    text = clip.get("text", "") or ""
+    meta = dict(clip.get("meta", {}) or {})
+    llm_reason = meta.get("llm_reason") or clip.get("llm_reason") or ""
 
-    clauses: List[Clause] = []
-    for idx, seg in enumerate(segments):
-        start = float(seg.get("start", 0.0))
-        end = float(seg.get("end", start + 1.0))
-        text = (seg.get("text") or "").strip()
-        if not text:
-            continue
-        clause_id = f"ASR{idx:04d}_c1"
+    semantic_score = float(meta.get("semantic_score", clip.get("semantic_score", 0.0)) or 0.0)
+    visual_score = float(meta.get("visual_score", clip.get("visual_score", 0.0)) or 0.0)
 
-        # very simple slot hint:
-        #   - first segment → HOOK
-        #   - last segment  → CTA
-        #   - others        → STORY/FEATURE
-        if idx == 0:
-            slot_hint = "HOOK"
-        elif idx == len(segments) - 1:
-            slot_hint = "CTA"
-        else:
-            slot_hint = "STORY"
-
-        clauses.append(
-            Clause(
-                id=clause_id,
-                start=start,
-                end=end,
-                text=text,
-                slot_hint=slot_hint,
-                face_q=1.0,
-                scene_q=1.0,
-                semantic_score=0.0,
-                visual_score=0.0,
-                vtx_sim=0.0,
-                chain_ids=[clause_id],
-                llm_reason="",
-                visual_flags={"scene_jump": False, "motion_jump": False},
-            )
-        )
-    return clauses
-
-
-def _build_slots(clauses: List[Clause]) -> Dict[str, List[Dict[str, Any]]]:
-    """
-    Build the `slots` dict similar to your prior JSON:
-    {
-      "HOOK": [...],
-      "PROBLEM": [...],
-      "FEATURE": [...],
-      "PROOF": [...],
-      "CTA": [...]
-    }
-    """
-    slots: Dict[str, List[Dict[str, Any]]] = {
-        "HOOK": [],
-        "PROBLEM": [],
-        "FEATURE": [],
-        "PROOF": [],
-        "CTA": [],
-    }
-
-    for c in clauses:
-        if c.slot_hint == "HOOK":
-            key = "HOOK"
-        elif c.slot_hint == "CTA":
-            key = "CTA"
-        elif c.slot_hint == "PROBLEM":
-            key = "PROBLEM"
-        elif c.slot_hint == "PROOF":
-            key = "PROOF"
-        else:
-            key = "FEATURE"
-
-        slots[key].append(
-            {
-                "id": c.id,
-                "start": c.start,
-                "end": c.end,
-                "text": c.text,
-                "meta": {
-                    "slot": key,
-                    "score": c.vtx_sim,
-                    "semantic_score": c.semantic_score,
-                    "visual_score": c.visual_score,
-                    "chain_ids": c.chain_ids or [c.id],
-                },
-                "face_q": c.face_q,
-                "scene_q": c.scene_q,
-                "vtx_sim": c.vtx_sim,
-                "has_product": False,
-                "ocr_hit": 0,
-                "visual_flags": c.visual_flags or {
-                    "scene_jump": False,
-                    "motion_jump": False,
-                },
-            }
-        )
-
-    return slots
-
-
-def _pick_best_hook(slots: Dict[str, List[Dict[str, Any]]]) -> Optional[str]:
-    """
-    Pick best hook; if real HOOK is trash, promote a strong FEATURE.
-    """
-    hooks = slots.get("HOOK") or []
-
-    # 1) Try real HOOK labels first
-    if hooks:
-        sorted_hooks = sorted(hooks, key=lambda h: h["meta"]["score"], reverse=True)
-        for h in sorted_hooks:
-            score = h["meta"]["score"]
-            text = (h.get("text") or "").strip()
-            if score < max(MIN_CLIP_SCORE, HOOK_MIN_SCORE):
-                continue
-            if _is_fragment_text(text):
-                continue
-            return h["id"]
-
-    # 2) Fallback: promote the best FEATURE to HOOK
-    feats = slots.get("FEATURE") or []
-    if not feats:
+    # 1) Hard filter obvious bad takes / retakes / fillers
+    if is_trash_line(text, llm_reason):
         return None
 
-    feats_sorted = sorted(feats, key=lambda f: f["meta"]["score"], reverse=True)
-    for f in feats_sorted:
-        score = f["meta"]["score"]
-        text = (f.get("text") or "").strip()
-        if score < max(MIN_CLIP_SCORE, HOOK_MIN_SCORE):
-            break
-        if _is_fragment_text(text):
-            continue
-        return f["id"]
+    # 2) Combine semantic + visual
+    combined = combine_scores(semantic_score, visual_score)
 
-    return None
+    # 3) Tiny boost for “good slang” hooks so they don't get unfairly punished
+    txt_lower = text.lower()
+    if any(kw in txt_lower for kw in GOOD_SLANG_HOOK_KEYWORDS):
+        combined += 0.08
+        if combined > 1.0:
+            combined = 1.0
 
-
-def _pick_best_cta(slots: Dict[str, List[Dict[str, Any]]]) -> Optional[str]:
-    ctas = slots.get("CTA") or []
-    if not ctas:
-        return None
-
-    sorted_ctas = sorted(ctas, key=lambda c: c["meta"]["score"], reverse=True)
-    for c in sorted_ctas:
-        score = c["meta"]["score"]
-        text = (c.get("text") or "").strip()
-        if score < max(MIN_CLIP_SCORE, CTA_MIN_SCORE):
-            continue
-        if _is_fragment_text(text):
-            continue
-        return c["id"]
-
-    return None
+    out = dict(clip)
+    out_meta = meta
+    out_meta["semantic_score"] = semantic_score
+    out_meta["visual_score"] = visual_score
+    out_meta["score"] = combined
+    out["meta"] = out_meta
+    return out
 
 
-def _pick_feature_ids(slots: Dict[str, List[Dict[str, Any]]]) -> List[str]:
+# ------------  MAIN COMPOSER: builds composer + composer_human  ------------ #
+
+def build_funnel_composer(
+    clips: List[Dict],
+    slots: Dict[str, List[Dict]],
+    min_feature_score: float = 0.70,
+) -> Tuple[Dict, str]:
     """
-    Choose FEATURE clips with:
-      - score >= MIN_CLIP_SCORE
-      - not an obvious fragment / bad take
-      - de-duplicated by 'idea' using _normalize_for_dedupe
+    Build the EDITDNA funnel composer:
+      - HOOK: best hook clip, strongly prefers 'kutigei/coochie' line if present.
+      - FEATURES: best feature/story lines above min_feature_score, after trash filter.
+      - CTA: best CTA line.
+    Returns (composer_dict, composer_human_str).
+
+    Expected shape (same as your JSON):
+      composer = {
+          "hook_id": "ASR0000_c1",
+          "feature_ids": [...],
+          "cta_id": "ASR0022_c1",
+          "used_clip_ids": [...],
+          "min_score": 0.7
+      }
     """
-    feats = slots.get("FEATURE") or []
-    if not feats:
-        return []
 
-    # sort by score descending first
-    feats_sorted = sorted(feats, key=lambda f: f["meta"]["score"], reverse=True)
+    # Re-score all clips with the new logic (trash filtering + slang boost)
+    id_to_scored: Dict[str, Dict] = {}
+    for c in clips:
+        scored = score_clip_for_funnel(c)
+        if scored is not None:
+            cid = scored.get("id")
+            if cid:
+                id_to_scored[cid] = scored
 
-    chosen_ids: List[str] = []
-    seen_ideas: set = set()
+    # Helper to map a slot list to scored clips
+    def scored_from_slot(slot_name: str) -> List[Dict]:
+        raw_list = slots.get(slot_name, []) or []
+        result: List[Dict] = []
+        for c in raw_list:
+            cid = c.get("id")
+            if not cid:
+                continue
+            scored = id_to_scored.get(cid)
+            if not scored:
+                continue
+            result.append(scored)
+        return result
 
-    for f in feats_sorted:
-        score = f["meta"]["score"]
-        if score < MIN_CLIP_SCORE:
-            # remaining ones are even worse
-            break
+    hooks = scored_from_slot("HOOK")
+    features = scored_from_slot("FEATURE")
+    proofs = scored_from_slot("PROOF")
+    ctas = scored_from_slot("CTA")
 
-        text = (f.get("text") or "").strip()
-        if not text:
-            continue
+    # ---------------- HOOK PICKING ---------------- #
 
-        # skip obvious bad takes / fragments for mid-ad FEATURES
-        if _is_fragment_text(text):
-            continue
+    hook_id: Optional[str] = None
+    hook_clip: Optional[Dict] = None
 
-        # de-dupe by normalized idea
-        norm = _normalize_for_dedupe(text)
-        if not norm:
-            # if normalization killed everything, treat as fragment
-            continue
-        if norm in seen_ideas:
-            continue
+    # 1) Try to find a slang hook (kutigei / coochie) in HOOK slot first
+    slang_hooks = [
+        c for c in hooks
+        if any(kw in (c.get("text", "").lower()) for kw in GOOD_SLANG_HOOK_KEYWORDS)
+    ]
+    if slang_hooks:
+        hook_clip = max(slang_hooks, key=lambda c: c["meta"].get("score", 0.0))
+    elif hooks:
+        # 2) Otherwise, best-scoring HOOK
+        hook_clip = max(hooks, key=lambda c: c["meta"].get("score", 0.0))
 
-        seen_ideas.add(norm)
-        chosen_ids.append(f["id"])
+    if hook_clip:
+        hook_id = hook_clip["id"]
 
-        if len(chosen_ids) >= MAX_FEATURE_CLIPS:
-            break
+    # ---------------- FEATURE PICKING ---------------- #
 
-    return chosen_ids
+    # Merge STORY/FEATURE + PROOF
+    all_feat_candidates: List[Dict] = []
+    all_feat_candidates.extend(features)
+    all_feat_candidates.extend(proofs)
 
+    # Filter by score
+    good_feats = [
+        c for c in all_feat_candidates
+        if c["meta"].get("score", 0.0) >= float(min_feature_score)
+    ]
 
-def _build_composer(
-    clauses: List[Clause],
-    slots: Dict[str, List[Dict[str, Any]]],
-) -> Tuple[Dict[str, Any], str, List[Clause]]:
-    """
-    Decide which clips to keep (HOOK, FEATURES, CTA), build a human-readable summary,
-    and return:
-      - composer dict
-      - composer_human string
-      - ordered list of Clause objects in final timeline order
-    """
-    id_to_clause: Dict[str, Clause] = {c.id: c for c in clauses}
+    # Sort by score (descending)
+    good_feats.sort(key=lambda c: c["meta"].get("score", 0.0), reverse=True)
 
-    hook_id = _pick_best_hook(slots)
-    feature_ids = _pick_feature_ids(slots)
-    cta_id = _pick_best_cta(slots)
+    feature_ids = [c["id"] for c in good_feats]
 
-    used_ids: List[str] = []
-    ordered_clauses: List[Clause] = []
+    # ---------------- CTA PICKING ---------------- #
 
-    # Final timeline: HOOK → FEATURES (in increasing time) → CTA
-    if hook_id and hook_id in id_to_clause:
-        used_ids.append(hook_id)
-        ordered_clauses.append(id_to_clause[hook_id])
+    cta_id: Optional[str] = None
+    cta_clip: Optional[Dict] = None
+    if ctas:
+        cta_clip = max(ctas, key=lambda c: c["meta"].get("score", 0.0))
+    if cta_clip:
+        cta_id = cta_clip["id"]
 
-    feature_clauses = [id_to_clause[fid] for fid in feature_ids if fid in id_to_clause]
-    feature_clauses = sorted(feature_clauses, key=lambda c: c.start)
-    for fc in feature_clauses:
-        if fc.id not in used_ids:
-            used_ids.append(fc.id)
-            ordered_clauses.append(fc)
+    # ---------------- USED CLIP IDS ---------------- #
 
-    if cta_id and cta_id in id_to_clause:
-        if cta_id not in used_ids:
-            used_ids.append(cta_id)
-            ordered_clauses.append(id_to_clause[cta_id])
+    used_clip_ids: List[str] = []
+    if hook_id:
+        used_clip_ids.append(hook_id)
+    used_clip_ids.extend([cid for cid in feature_ids if cid not in used_clip_ids])
+    if cta_id and cta_id not in used_clip_ids:
+        used_clip_ids.append(cta_id)
 
     composer = {
         "hook_id": hook_id,
         "feature_ids": feature_ids,
         "cta_id": cta_id,
-        "used_clip_ids": used_ids,
-        "min_score": MIN_CLIP_SCORE,
+        "used_clip_ids": used_clip_ids,
+        "min_score": float(min_feature_score),
     }
+
+    # ---------------- HUMAN-READABLE SUMMARY ---------------- #
+
+    def fmt_clip_line(c: Dict) -> str:
+        cid = c.get("id", "?")
+        text = c.get("text", "").strip()
+        score = c.get("meta", {}).get("score", 0.0)
+        return f'  - [{cid}] score={score:.2f} → "{text}"'
 
     lines: List[str] = []
     lines.append("===== EDITDNA FUNNEL COMPOSER =====\n")
 
-    if hook_id and hook_id in id_to_clause:
-        hc = id_to_clause[hook_id]
-        lines.append(f"HOOK ({hc.id}, score={hc.vtx_sim:.2f}):")
-        lines.append(f'  "{hc.text}"\n')
+    # HOOK
+    if hook_clip:
+        hscore = hook_clip["meta"].get("score", 0.0)
+        lines.append(f'HOOK ({hook_clip["id"]}, score={hscore:.2f}):')
+        lines.append(f'  "{hook_clip.get("text", "").strip()}"\n')
     else:
-        lines.append("HOOK: NONE\n")
+        lines.append("HOOK: <none>\n")
 
-    if feature_ids:
-        lines.append("FEATURES (kept):")
-        for fid in feature_ids:
-            if fid not in id_to_clause:
-                continue
-            fc = id_to_clause[fid]
-            lines.append(
-                f'  - [{fc.id}] score={fc.vtx_sim:.2f} → "{fc.text}"'
-            )
-        lines.append("")
+    # FEATURES
+    lines.append("FEATURES (kept):")
+    if good_feats:
+        for c in good_feats:
+            lines.append(fmt_clip_line(c))
     else:
-        lines.append("FEATURES: NONE\n")
+        lines.append("  - <none>")
+    lines.append("")
 
-    if cta_id and cta_id in id_to_clause:
-        cc = id_to_clause[cta_id]
-        lines.append(f'CTA ({cc.id}, score={cc.vtx_sim:.2f}):')
-        lines.append(f'  "{cc.text}"\n')
+    # CTA
+    if cta_clip:
+        cscore = cta_clip["meta"].get("score", 0.0)
+        lines.append(f'CTA ({cta_clip["id"]}, score={cscore:.2f}):')
+        lines.append(f'  "{cta_clip.get("text", "").strip()}"\n')
     else:
-        lines.append("CTA: NONE\n")
+        lines.append("CTA: <none>\n")
 
+    # Final timeline (in play order)
     lines.append("FINAL ORDER TIMELINE:")
-    if ordered_clauses:
-        for idx, c in enumerate(ordered_clauses, start=1):
-            lines.append(f'{idx}) {c.id} → "{c.text}"')
-    else:
-        lines.append("(no clips selected)")
+    order_idx = 1
+    if hook_clip:
+        lines.append(f'{order_idx}) {hook_clip["id"]} → "{hook_clip.get("text", "").strip()}"')
+        order_idx += 1
+
+    for cid in feature_ids:
+        c = id_to_scored.get(cid)
+        if not c:
+            continue
+        lines.append(f'{order_idx}) {cid} → "{c.get("text", "").strip()}"')
+        order_idx += 1
+
+    if cta_clip:
+        lines.append(f'{order_idx}) {cta_clip["id"]} → "{cta_clip.get("text", "").strip()}"')
 
     lines.append("\n=====================================")
-
     composer_human = "\n".join(lines)
-    return composer, composer_human, ordered_clauses
 
-
-def _render_final_video(
-    input_local: str,
-    session_id: str,
-    ordered_clauses: List[Clause],
-) -> Tuple[str, Optional[str]]:
-    """
-    Render the final stitched video to /tmp/editdna/<session_id>_edit.mp4
-    Upload to S3 and return (local_path, s3_url_or_none).
-    """
-    base = _ensure_tmp_dir()
-    output_local = os.path.join(base, f"{session_id}_edit.mp4")
-
-    if not ordered_clauses:
-        logger.warning("No clauses selected for final edit; skipping render.")
-        return output_local, None
-
-    try:
-        with VideoFileClip(input_local) as clip:
-            subclips = []
-            for c in ordered_clauses:
-                start = max(0.0, c.start)
-                end = min(float(clip.duration), c.end)
-                if end <= start:
-                    continue
-                sub = clip.subclip(start, end)
-                subclips.append(sub)
-
-            if not subclips:
-                logger.warning("No valid subclips generated; skipping render.")
-                return output_local, None
-
-            final = concatenate_videoclips(subclips, method="compose")
-            final.write_videofile(
-                output_local,
-                codec="libx264",
-                audio_codec="aac",
-                temp_audiofile=os.path.join(base, f"{session_id}_temp_audio.m4a"),
-                remove_temp=True,
-                verbose=False,
-                logger=None,
-            )
-    except Exception as e:
-        logger.exception(f"Failed to render final video: {e}")
-        return output_local, None
-
-    # Upload to S3
-    try:
-        s3 = boto3.client("s3")
-        key = f"{OUTPUT_PREFIX}/{session_id}/final.mp4"
-        logger.info(
-            "Uploading final video to S3",
-            extra={"bucket": OUTPUT_BUCKET, "key": key},
-        )
-        s3.upload_file(output_local, OUTPUT_BUCKET, key, ExtraArgs={"ContentType": "video/mp4"})
-        s3_url = f"https://{OUTPUT_BUCKET}.s3.amazonaws.com/{key}"
-        return output_local, s3_url
-    except Exception as e:
-        logger.exception(f"Failed to upload final video to S3: {e}")
-        return output_local, None
-
-
-def run_pipeline(
-    *,
-    session_id: str,
-    file_urls: Optional[List[str]] = None,
-) -> Dict[str, Any]:
-    """
-    Main entry used by tasks.job_render.
-
-    Steps:
-    1) Download first input video from file_urls to /tmp
-    2) Get duration
-    3) Run Whisper ASR → segments (clauses)
-    4) For each segment:
-         - grab mid-frame (for LLM)
-         - LLM semantic scoring
-         - visual_brain V3 scoring
-         - combine into final score
-    5) Build clips + slots structure
-    6) Run funnel composer (HOOK, FEATURES, CTA)
-    7) Render final stitched video according to composer
-    8) Upload to S3 and return output_video_url
-    """
-    if not file_urls:
-        raise ValueError("run_pipeline: file_urls is required and must be non-empty")
-
-    input_url = file_urls[0]
-    logger.info(
-        "Starting pipeline",
-        extra={"session_id": session_id, "input_url": input_url},
-    )
-
-    input_local = _download_to_local(input_url, session_id)
-    duration = _get_duration_sec(input_local)
-
-    # 1) ASR → Clauses
-    clauses = _run_asr(input_local)
-
-    clips: List[Dict[str, Any]] = []
-
-    # 2) Scoring loop: semantic (LLM) + visual (V3)
-    for c in clauses:
-        mid_t = (c.start + c.end) / 2.0
-        frame_b64 = _grab_frame_b64(input_local, mid_t)
-
-        # Semantic scoring (existing LLM call, unchanged signature)
-        sem_score, reason = llm.score_clause_multimodal(
-            text=c.text,
-            frame_b64=frame_b64,
-            slot_hint=c.slot_hint,
-        )
-        c.semantic_score = float(sem_score)
-        c.llm_reason = reason
-
-        # Visual scoring (new V3 brain)
-        vis_score, vis_flags = visual_brain.score_segment(
-            path=input_local,
-            start=c.start,
-            end=c.end,
-        )
-        c.visual_score = float(vis_score)
-        c.visual_flags = vis_flags
-
-        # Combine
-        final_score = (
-            SEMANTIC_WEIGHT * c.semantic_score
-            + VISUAL_WEIGHT * c.visual_score
-        )
-        final_score = max(0.0, min(1.0, final_score))
-        c.vtx_sim = final_score
-
-        # Normalize slot for clip-level metadata
-        if c.slot_hint in ("HOOK", "CTA", "PROBLEM", "FEATURE", "PROOF"):
-            clip_slot = c.slot_hint
-        else:
-            clip_slot = "STORY"
-
-        clips.append(
-            {
-                "id": c.id,
-                "slot": clip_slot,
-                "start": c.start,
-                "end": c.end,
-                "score": final_score,
-                "semantic_score": c.semantic_score,
-                "visual_score": c.visual_score,
-                "face_q": c.face_q,
-                "scene_q": c.scene_q,
-                "vtx_sim": final_score,
-                "chain_ids": c.chain_ids or [c.id],
-                "text": c.text,
-                "llm_reason": c.llm_reason,
-                "visual_flags": c.visual_flags,
-            }
-        )
-
-    # 3) Build slots structure with updated scores
-    slots = _build_slots(clauses)
-
-    # 4) Composer
-    composer, composer_human, ordered_clauses = _build_composer(clauses, slots)
-
-    # 5) Render final stitched video and upload to S3
-    output_video_local, output_video_url = _render_final_video(
-        input_local=input_local,
-        session_id=session_id,
-        ordered_clauses=ordered_clauses,
-    )
-
-    return {
-        "duration_sec": duration,
-        "clips": clips,
-        "slots": slots,
-        "composer": composer,
-        "composer_human": composer_human,
-        "output_video_local": output_video_local,
-        "output_video_url": output_video_url,
-        "asr": True,
-        "semantic": True,
-        "vision": True,
-    }
+    return composer, composer_human
+# ========= END EDITDNA V3 FUNNEL COMPOSER =========
