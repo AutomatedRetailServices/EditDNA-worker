@@ -1,675 +1,612 @@
 import os
+import io
 import json
 import math
 import uuid
+import time
+import shutil
 import logging
+import tempfile
 import subprocess
-from typing import List, Dict, Any, Optional
+from dataclasses import dataclass, asdict
+from typing import List, Dict, Any, Optional, Tuple
+from urllib.parse import urlparse
+from urllib.request import urlopen
 
-import requests
 import boto3
-
-# Whisper + torch
 import torch
 import whisper
-
-# OpenAI new SDK
 from openai import OpenAI
 
+# ------------------------------------------------------------------------------------
+# Global setup
+# ------------------------------------------------------------------------------------
+
 logger = logging.getLogger(__name__)
-logger.setLevel(logging.INFO)
 
-# -----------------------------
-# Global clients / models
-# -----------------------------
+EDITDNA_TMP_ROOT = os.environ.get("DOWNLOAD_ROOT", "TMP")
+EDITDNA_TMP_ROOT = EDITDNA_TMP_ROOT if os.path.isabs(EDITDNA_TMP_ROOT) else f"/tmp/{EDITDNA_TMP_ROOT}"
 
-_openai_client: Optional[OpenAI] = None
-_whisper_model: Optional[Any] = None
+FFMPEG_BIN = os.environ.get("FFMPEG_BIN", "ffmpeg")
+FFPROBE_BIN = os.environ.get("FFPROBE_BIN", "ffprobe")
 
+ASR_ENABLED = os.environ.get("ASR_ENABLED", "1") == "1"
+ASR_LANGUAGE = os.environ.get("ASR_LANGUAGE", "en")
+ASR_DEVICE = os.environ.get("ASR_DEVICE", "cuda")
+WHISPER_MODEL_NAME = os.environ.get("WHISPER_MODEL", "small")
 
-def get_openai_client() -> OpenAI:
-    global _openai_client
-    if _openai_client is None:
-        api_key = os.getenv("OPENAI_API_KEY")
-        if not api_key:
-            raise RuntimeError("OPENAI_API_KEY env var is required")
-        _openai_client = OpenAI(api_key=api_key)
-    return _openai_client
+VISION_ENABLED = os.environ.get("VISION_ENABLED", "1") == "1"
+W_VISION = float(os.environ.get("W_VISION", "0.7"))
 
+EDITDNA_MIN_CLIP_SCORE = float(os.environ.get("EDITDNA_MIN_CLIP_SCORE", "0.7"))
+EDITDNA_HOOK_MIN_SCORE = float(os.environ.get("EDITDNA_HOOK_MIN_SCORE", "0.7"))
+EDITDNA_CTA_MIN_SCORE = float(os.environ.get("EDITDNA_CTA_MIN_SCORE", "0.6"))
 
-def get_whisper_model() -> Any:
-    global _whisper_model
-    if _whisper_model is None:
-        model_name = os.getenv("WHISPER_MODEL", "large-v3")
-        device = "cuda" if torch.cuda.is_available() else "cpu"
-        logger.info(f"Loading Whisper model '{model_name}' on device '{device}'")
-        _whisper_model = whisper.load_model(model_name, device=device)
-    return _whisper_model
+VETO_MIN_SCORE = float(os.environ.get("VETO_MIN_SCORE", "0.4"))
 
+S3_BUCKET = os.environ.get("S3_BUCKET")
+S3_REGION = os.environ.get("AWS_REGION", "us-east-1")
+S3_PREFIX = os.environ.get("S3_PREFIX", "editdna/outputs").strip("/")
+S3_ACL = os.environ.get("S3_ACL", "public-read")
+PRESIGN_EXPIRES = int(os.environ.get("PRESIGN_EXPIRES", "604800"))  # default 7 days
 
-def get_s3_client():
-    return boto3.client(
-        "s3",
-        region_name=os.getenv("AWS_REGION", "us-east-1"),
-        aws_access_key_id=os.getenv("AWS_ACCESS_KEY_ID"),
-        aws_secret_access_key=os.getenv("AWS_SECRET_ACCESS_KEY"),
-    )
+TARGET_DURATION_SEC = float(os.environ.get("TARGET_DURATION_SEC", "0"))  # 0 = no target
+
+client = OpenAI()  # uses OPENAI_API_KEY from env
+
+# Lazy-loaded Whisper model
+_WHISPER_MODEL = None
 
 
-# -----------------------------
-# Small utilities
-# -----------------------------
+# ------------------------------------------------------------------------------------
+# Data structures
+# ------------------------------------------------------------------------------------
 
-def run_cmd(cmd: List[str]) -> None:
-    """Run a shell command and raise if non-zero."""
-    logger.info(f"Running command: {' '.join(cmd)}")
-    result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
-    if result.returncode != 0:
-        logger.error(f"Command failed: {' '.join(cmd)}\nOutput:\n{result.stdout}")
-        raise RuntimeError(f"Command failed: {' '.join(cmd)}")
-    else:
-        logger.info(result.stdout)
+@dataclass
+class Clip:
+    id: str
+    slot: str
+    start: float
+    end: float
+    score: float
+    semantic_score: float
+    visual_score: float
+    face_q: float
+    scene_q: float
+    vtx_sim: float
+    chain_ids: List[str]
+    text: str
+    llm_reason: str
+    visual_flags: Dict[str, bool]
+    meta: Dict[str, Any]
 
 
-def ensure_dir(path: str) -> None:
+# ------------------------------------------------------------------------------------
+# Helpers
+# ------------------------------------------------------------------------------------
+
+def _ensure_dir(path: str) -> None:
     os.makedirs(path, exist_ok=True)
 
 
-def download_to_local(url: str, dest_path: str) -> None:
-    ensure_dir(os.path.dirname(dest_path))
-    logger.info(f"Downloading input video: {url} -> {dest_path}")
-    with requests.get(url, stream=True) as r:
-        r.raise_for_status()
-        with open(dest_path, "wb") as f:
-            for chunk in r.iter_content(chunk_size=1024 * 1024):
-                if chunk:
-                    f.write(chunk)
-
-
-def probe_duration(path: str) -> float:
-    cmd = [
-        "ffprobe",
-        "-v",
-        "error",
-        "-show_entries",
-        "format=duration",
-        "-of",
-        "default=noprint_wrappers=1:nokey=1",
-        path,
-    ]
-    result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
-    if result.returncode != 0:
-        logger.warning(f"ffprobe failed, assuming duration=0\n{result.stdout}")
-        return 0.0
-    try:
-        return float(result.stdout.strip())
-    except Exception:
-        return 0.0
-
-
-# -----------------------------
-# 1) ASR with Whisper
-# -----------------------------
-
-def transcribe_with_whisper(video_path: str) -> List[Dict[str, Any]]:
+def _download_to_local(session_dir: str, url: str) -> str:
     """
-    Run Whisper and return a list of segments:
-    [
-      { "start": float, "end": float, "text": str }
-    ]
+    Download a remote video URL to session_dir/input.mp4
+    (simple implementation using urllib).
     """
-    model = get_whisper_model()
-    logger.info(f"Running Whisper on: {video_path}")
-    result = model.transcribe(video_path, verbose=False)
-    segments = []
-    for seg in result.get("segments", []):
-        segments.append(
-            {
-                "start": float(seg["start"]),
-                "end": float(seg["end"]),
-                "text": seg["text"].strip(),
-            }
-        )
+    _ensure_dir(session_dir)
+    local_path = os.path.join(session_dir, "input.mp4")
+
+    logger.info("⬇️ Downloading input video", extra={"url": url, "local": local_path})
+    with urlopen(url) as r, open(local_path, "wb") as f:
+        shutil.copyfileobj(r, f)
+
+    return local_path
+
+
+def _load_whisper_model() -> whisper.Whisper:
+    global _WHISPER_MODEL
+    if _WHISPER_MODEL is not None:
+        return _WHISPER_MODEL
+
+    device = "cuda" if (ASR_DEVICE == "cuda" and torch.cuda.is_available()) else "cpu"
+    logger.info("🧠 Loading Whisper model", extra={"model": WHISPER_MODEL_NAME, "device": device})
+    _WHISPER_MODEL = whisper.load_model(WHISPER_MODEL_NAME, device=device)
+    return _WHISPER_MODEL
+
+
+def _run_asr(input_path: str) -> List[Dict[str, Any]]:
+    """
+    Run Whisper ASR and return segments with start, end, text.
+    """
+    if not ASR_ENABLED:
+        logger.warning("ASR is disabled via ASR_ENABLED=0")
+        return []
+
+    model = _load_whisper_model()
+    logger.info("🎙  Running ASR", extra={"input": input_path})
+    result = model.transcribe(input_path, language=ASR_LANGUAGE, verbose=False)
+    segments = result.get("segments", [])
+    logger.info("🎙  ASR done", extra={"segments": len(segments)})
     return segments
 
 
-# -----------------------------
-# 2) Micro-segmentation
-# -----------------------------
-
-def micro_segment(
-    segments: List[Dict[str, Any]],
-    max_len: float = 4.0,
-    max_gap: float = 0.8,
-) -> List[Dict[str, Any]]:
-    """
-    Take Whisper segments and cut them into smaller micro clips.
-    Each micro clip preserves the original text span, but duration is <= max_len.
-    """
-    micro = []
-
-    for seg in segments:
-        start = seg["start"]
-        end = seg["end"]
-        text = seg["text"]
-        if not text:
-            continue
-
-        dur = end - start
-        if dur <= max_len:
-            micro.append(
-                {
-                    "start": start,
-                    "end": end,
-                    "text": text,
-                }
-            )
-            continue
-
-        # Split long segments into ~max_len chunks
-        num_chunks = max(1, math.ceil(dur / max_len))
-        chunk_len = dur / num_chunks
-        for i in range(num_chunks):
-            c_start = start + i * chunk_len
-            c_end = min(end, c_start + chunk_len)
-            micro.append(
-                {
-                    "start": c_start,
-                    "end": c_end,
-                    "text": text,
-                }
-            )
-
-    # Optionally merge tiny gaps if needed (for now just return as is)
-    return micro
-
-
-# -----------------------------
-# 3) LLM scoring for funnel slots
-# -----------------------------
+# ------------------------------------------------------------------------------------
+# LLM scoring
+# ------------------------------------------------------------------------------------
 
 FUNNEL_SLOTS = ["HOOK", "STORY", "PROBLEM", "BENEFITS", "FEATURES", "PROOF", "CTA"]
 
 
 def llm_score_segment(text: str) -> Dict[str, Any]:
     """
-    Ask LLM to:
-    - assign a funnel slot
-        HOOK, STORY, PROBLEM, BENEFITS, FEATURES, PROOF, CTA
-    - semantic_score: 0..1
-    - keep: boolean (drop filler / retries / broken lines / obvious flubs)
-    - reason: explanation (for debugging)
+    Ask the LLM to:
+    - classify the segment into one of HOOK/STORY/PROBLEM/BENEFITS/FEATURES/PROOF/CTA
+    - assign a semantic_score in [0,1]
+    - decide keep (True/False)
+    - give a short reason
 
-    Returns dict with these fields.
+    It MUST return a JSON object with keys:
+    - slot
+    - semantic_score
+    - keep
+    - reason
     """
-    cleaned = text.strip()
-    if not cleaned:
+    text = (text or "").strip()
+    if not text:
         return {
             "slot": "FEATURES",
             "semantic_score": 0.0,
             "keep": False,
-            "reason": "Empty text",
+            "llm_reason": "Empty text segment",
         }
 
-    # Super short / obviously filler → don't keep.
-    if len(cleaned.split()) < 3:
-        return {
-            "slot": "FEATURES",
-            "semantic_score": 0.1,
-            "keep": False,
-            "reason": "Too short / likely filler",
-        }
-
-    client = get_openai_client()
-    model_name = os.getenv("OPENAI_LLM_MODEL", "gpt-4.1-mini")
-
-    system_prompt = """
-You are scoring short transcript segments from TikTok-style UGC ads.
-
-Your job:
-1. Decide which funnel slot the line fits best:
-   - HOOK: grabs attention, bold, spicy, problem intro
-   - STORY: personal experience, relatable narrative
-   - PROBLEM: clearly states pain, frustration, symptoms
-   - BENEFITS: outcome-focused, how life feels better
-   - FEATURES: ingredients, specs, how it works, instructions
-   - PROOF: social proof, "I tried it", testimonials, evidence
-   - CTA: tells viewer what to do (click, buy, try, etc.)
-
-2. Decide if we should KEEP this line in the final edit:
-   - keep = false for:
-     - obviously wrong takes ("wait, not that", "am I saying it right?")
-     - repeated attempts, restarts, corrections
-     - incomplete phrases that stop mid-sentence
-     - meaningless filler ("yeah", "is that good?", "that one good?")
-   - keep = true only if it's coherent and useful in a funnel.
-
-3. Give semantic_score from 0 to 1:
-   - Higher = clearer, stronger, more on-message for selling.
-   - Lower = confusing, weak, filler.
-
-Return STRICT JSON:
-{
-  "slot": "HOOK" | "STORY" | "PROBLEM" | "BENEFITS" | "FEATURES" | "PROOF" | "CTA",
-  "semantic_score": float (0-1),
-  "keep": true/false,
-  "reason": "short explanation"
-}
-    """.strip()
-
-    user_prompt = f"Transcript segment:\n\"{cleaned}\""
+    system_prompt = (
+        "You are a conversion ad editor for TikTok Shop.\n"
+        "Classify a single spoken segment from a product video into ONE funnel slot and decide if it should be kept.\n\n"
+        "Funnel slots:\n"
+        "- HOOK: grabs attention, bold claim, question, pattern interrupt, curiosity.\n"
+        "- STORY: short personal story, context, relatable moment, before/after.\n"
+        "- PROBLEM: pain, frustration, what goes wrong without the product.\n"
+        "- BENEFITS: outcomes, transformations, how life feels with the product.\n"
+        "- FEATURES: concrete details (ingredients, materials, specs, usage, dosage).\n"
+        "- PROOF: testimonials, social proof, compliments, credibility, numbers.\n"
+        "- CTA: clear action: click, buy, add to cart, shop link, etc.\n\n"
+        "Rules:\n"
+        "- Mark keep=false for obvious flubs, restarts, outtakes, or meta lines like "
+        "  'wait, let me try again', 'am I saying it right', 'cut that part', laughing, or trailing off mid-sentence.\n"
+        "- Slang is FINE if coherent and usable with the product (never reject just because of slang).\n"
+        "- Do NOT censor or sanitize; focus only on usefulness for an ad edit.\n"
+        "- semantic_score should be between 0.0 and 1.0 for how strong this line is for its slot.\n\n"
+        "Reply as a JSON object with keys: slot, semantic_score, keep, reason.\n"
+        "Example:\n"
+        "{\n"
+        '  \"slot\": \"HOOK\",\n'
+        '  \"semantic_score\": 0.9,\n'
+        '  \"keep\": true,\n'
+        '  \"reason\": \"Strong curiosity hook calling out a specific pain.\"\n'
+        "}\n"
+    )
 
     try:
-        resp = client.responses.create(
-            model=model_name,
-            input=[
-                {
-                    "role": "system",
-                    "content": system_prompt,
-                },
-                {
-                    "role": "user",
-                    "content": user_prompt,
-                },
-            ],
+        resp = client.chat.completions.create(
+            model="gpt-4o-mini",
             response_format={"type": "json_object"},
+            temperature=0,
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": text},
+            ],
         )
-        raw = resp.output[0].content[0].text
-        data = json.loads(raw)
+
+        content = resp.choices[0].message.content
+        data = json.loads(content)
 
         slot = str(data.get("slot", "FEATURES")).upper().strip()
         if slot not in FUNNEL_SLOTS:
-            slot = "FEATURES"
+            # map some common variants
+            if slot == "BENEFIT":
+                slot = "BENEFITS"
+            elif slot == "PROB":
+                slot = "PROBLEM"
+            else:
+                slot = "FEATURES"
 
         semantic_score = float(data.get("semantic_score", 0.5))
+        semantic_score = max(0.0, min(1.0, semantic_score))
         keep = bool(data.get("keep", True))
-        reason = str(data.get("reason", "")).strip()
+        reason = str(data.get("reason", "")).strip() or "LLM scoring"
 
         return {
             "slot": slot,
-            "semantic_score": max(0.0, min(1.0, semantic_score)),
+            "semantic_score": semantic_score,
             "keep": keep,
-            "reason": reason or "No reason provided",
+            "llm_reason": reason,
         }
 
     except Exception as e:
-        logger.exception(f"llm_score_segment failed, falling back: {e}")
-        # Fallback: treat as generic FEATURES with medium score.
+        logger.exception("LLM scoring failed for segment", extra={"text": text[:120]})
         return {
             "slot": "FEATURES",
             "semantic_score": 0.5,
             "keep": True,
-            "reason": "LLM error, fallback classification",
+            "llm_reason": "LLM error, fallback classification",
         }
 
 
-def score_clip_for_funnel(seg: Dict[str, Any], clip_idx: int) -> Dict[str, Any]:
+def _normalize_text_for_dedupe(t: str) -> str:
+    t = (t or "").lower().strip()
+    for ch in [",", ".", "!", "?", ":", ";"]:
+        t = t.replace(ch, "")
+    t = " ".join(t.split())
+    return t
+
+
+def score_clip_for_funnel(seg_idx: int, seg: Dict[str, Any]) -> Clip:
     """
-    Wraps a micro-segment into the clip structure that Bubble expects.
-    Adds LLM semantic info and dummy visual scores.
+    Turn a Whisper segment into a Clip with LLM + (dummy) visual scoring.
     """
-    start = float(seg["start"])
-    end = float(seg["end"])
-    text = seg["text"].strip()
-    clip_id = f"ASR{clip_idx:04d}_c1"
+    start = float(seg.get("start", 0.0))
+    end = float(seg.get("end", start + 2.0))
+    text = str(seg.get("text", "")).strip()
 
     llm_info = llm_score_segment(text)
     slot = llm_info["slot"]
-    semantic_score = llm_info["semantic_score"]
-    keep = llm_info["keep"]
-    reason = llm_info["reason"]
+    semantic_score = float(llm_info["semantic_score"])
+    keep = bool(llm_info["keep"])
+    llm_reason = str(llm_info["llm_reason"]) if "llm_reason" in llm_info else str(llm_info.get("reason", ""))
 
-    # For now visual is stubbed as 1.0 (we can wire vision later).
+    # Basic visual / quality scores (we're not running vision models yet)
     visual_score = 1.0
-    vtx_sim = semantic_score  # simple proxy
+    face_q = 1.0
+    scene_q = 1.0
+    vtx_sim = semantic_score  # reuse for now
 
-    score = min(semantic_score, visual_score)
+    # Combine semantic + visual
+    if VISION_ENABLED:
+        score = (1.0 - W_VISION) * semantic_score + W_VISION * visual_score
+    else:
+        score = semantic_score
 
-    visual_flags = {
-        "scene_jump": False,
-        "motion_jump": False,
-    }
-
-    clip = {
-        "id": clip_id,
+    meta = {
         "slot": slot,
-        "start": start,
-        "end": end,
-        "score": score,
         "semantic_score": semantic_score,
         "visual_score": visual_score,
-        "face_q": 1.0,
-        "scene_q": 1.0,
-        "vtx_sim": vtx_sim,
-        "chain_ids": [clip_id],
-        "text": text,
-        "llm_reason": reason,
-        "visual_flags": visual_flags,
-        "meta": {
-            "slot": slot,
-            "semantic_score": semantic_score,
-            "visual_score": visual_score,
-            "score": score,
-            "chain_ids": [clip_id],
-            "keep": keep,
-        },
+        "score": score,
+        "chain_ids": [],
+        "keep": keep and score >= VETO_MIN_SCORE,
     }
 
-    return clip
+    clip_id = f"ASR{seg_idx:04d}_c1"
+
+    return Clip(
+        id=clip_id,
+        slot=slot,
+        start=start,
+        end=end,
+        score=score,
+        semantic_score=semantic_score,
+        visual_score=visual_score,
+        face_q=face_q,
+        scene_q=scene_q,
+        vtx_sim=vtx_sim,
+        chain_ids=[clip_id],
+        text=text,
+        llm_reason=llm_reason,
+        visual_flags={"scene_jump": False, "motion_jump": False},
+        meta=meta,
+    )
 
 
-# -----------------------------
-# 4) Composer – funnel builder
-# -----------------------------
+# ------------------------------------------------------------------------------------
+# Composer
+# ------------------------------------------------------------------------------------
 
-def _select_best(clips: List[Dict[str, Any]], slot: str, min_score: float) -> List[Dict[str, Any]]:
+def _compose_funnel(clips: List[Clip]) -> Dict[str, Any]:
     """
-    Return all clips for a slot with:
-      - meta.keep == True
-      - semantic_score >= min_score
-    ordered by start time.
+    Build a single funnel:
+      HOOK → STORY → PROBLEM → BENEFITS → FEATURES → PROOF → CTA
+
+    No hard limits on how many sentences per slot.
+    We:
+      - filter by meta.keep and EDITDNA_MIN_CLIP_SCORE
+      - choose strongest HOOK and CTA
+      - keep *all* good STORY/PROBLEM/BENEFITS/FEATURES/PROOF (deduped)
+      - preserve chronological order within each slot
     """
-    slot_clips = [
-        c
-        for c in clips
-        if c["slot"] == slot
-        and c.get("meta", {}).get("keep", True)
-        and c.get("semantic_score", 0.0) >= min_score
-    ]
-    slot_clips.sort(key=lambda c: c["start"])
-    return slot_clips
+    logger.info("🧩 Composing funnel", extra={"total_clips": len(clips)})
 
+    usable = [c for c in clips if c.meta.get("keep", True) and c.score >= EDITDNA_MIN_CLIP_SCORE]
+    usable_sorted = sorted(usable, key=lambda c: c.start)
 
-def compose_funnel(scored_clips: List[Dict[str, Any]]) -> (Dict[str, Any], str, List[Dict[str, Any]]):
-    """
-    Build a TRUE funnel with explicit buckets:
+    by_slot: Dict[str, List[Clip]] = {s: [] for s in FUNNEL_SLOTS}
+    for c in usable_sorted:
+        by_slot.setdefault(c.slot, []).append(c)
 
-    HOOK → STORY → PROBLEM → BENEFITS → FEATURES → PROOF → CTA
+    def pick_best(sl: str, min_score: float) -> Optional[Clip]:
+        candidates = [c for c in by_slot.get(sl, []) if c.score >= min_score]
+        if not candidates:
+            return None
+        return max(candidates, key=lambda c: c.score)
 
-    - No hard limits on how many clips per bucket.
-    - We use semantic_score + keep flag to filter.
+    # Best HOOK & CTA
+    hook_clip = pick_best("HOOK", EDITDNA_HOOK_MIN_SCORE)
+    cta_clip = pick_best("CTA", EDITDNA_CTA_MIN_SCORE)
 
-    Returns:
-      composer (dict),
-      composer_human (str),
-      ordered_clips (list)
-    """
-    if not scored_clips:
-        return {
-            "hook_id": None,
-            "story_ids": [],
-            "problem_ids": [],
-            "benefit_ids": [],
-            "feature_ids": [],
-            "proof_ids": [],
-            "cta_id": None,
-            "used_clip_ids": [],
-            "min_score": 0.0,
-        }, "No clips available", []
+    # Dedup within each multi-clip slot
+    def dedupe_slot(slot_name: str) -> List[Clip]:
+        seen = set()
+        out: List[Clip] = []
+        for c in by_slot.get(slot_name, []):
+            norm = _normalize_text_for_dedupe(c.text)
+            if not norm:
+                continue
+            if norm in seen:
+                continue
+            seen.add(norm)
+            out.append(c)
+        return out
 
-    # Global min threshold
-    min_semantic = 0.6
-
-    hooks = _select_best(scored_clips, "HOOK", min_semantic)
-    stories = _select_best(scored_clips, "STORY", min_semantic)
-    problems = _select_best(scored_clips, "PROBLEM", min_semantic)
-    benefits = _select_best(scored_clips, "BENEFITS", min_semantic)
-    features = _select_best(scored_clips, "FEATURES", min_semantic)
-    proofs = _select_best(scored_clips, "PROOF", min_semantic)
-    ctas = _select_best(scored_clips, "CTA", min_semantic)
-
-    # Choose primary HOOK + CTA (highest semantic score)
-    hook_clip = max(hooks, key=lambda c: c["semantic_score"], default=None)
-    cta_clip = max(ctas, key=lambda c: c["semantic_score"], default=None)
-
-    # Build ordered list in funnel order.
-    ordered: List[Dict[str, Any]] = []
-
-    if hook_clip:
-        ordered.append(hook_clip)
-
-    ordered.extend(stories)
-    ordered.extend(problems)
-    ordered.extend(benefits)
-    ordered.extend(features)
-    ordered.extend(proofs)
-
-    if cta_clip:
-        ordered.append(cta_clip)
-
-    # De-dupe while preserving order
-    seen_ids = set()
-    unique: List[Dict[str, Any]] = []
-    for c in ordered:
-        cid = c["id"]
-        if cid not in seen_ids:
-            seen_ids.add(cid)
-            unique.append(c)
-
-    ordered = unique
-
-    composer = {
-        "hook_id": hook_clip["id"] if hook_clip else None,
-        "story_ids": [c["id"] for c in stories],
-        "problem_ids": [c["id"] for c in problems],
-        "benefit_ids": [c["id"] for c in benefits],
-        "feature_ids": [c["id"] for c in features],
-        "proof_ids": [c["id"] for c in proofs],
-        "cta_id": cta_clip["id"] if cta_clip else None,
-        "used_clip_ids": [c["id"] for c in ordered],
-        "min_score": min_semantic,
-    }
-
-    # Human-readable view
-    lines = []
-    lines.append("===== EDITDNA FUNNEL COMPOSER =====\n")
-
-    def _add_block(title: str, clips_block: List[Dict[str, Any]]):
-        lines.append(f"{title}:\n")
-        if not clips_block:
-            lines.append("  (none)\n")
-            return
-        for c in clips_block:
-            lines.append(f"  - [{c['id']}] score={c['semantic_score']:.2f} → \"{c['text']}\"\n")
-        lines.append("\n")
-
-    # Hook
-    lines.append("HOOK:\n")
-    if hook_clip:
-        lines.append(f"  [{hook_clip['id']}] score={hook_clip['semantic_score']:.2f} → \"{hook_clip['text']}\"\n\n")
-    else:
-        lines.append("  (none)\n\n")
-
-    _add_block("STORY", stories)
-    _add_block("PROBLEM", problems)
-    _add_block("BENEFITS", benefits)
-    _add_block("FEATURES", features)
-    _add_block("PROOF", proofs)
-
-    lines.append("CTA:\n")
-    if cta_clip:
-        lines.append(f"  [{cta_clip['id']}] score={cta_clip['semantic_score']:.2f} → \"{cta_clip['text']}\"\n\n")
-    else:
-        lines.append("  (none)\n\n")
+    story_clips = dedupe_slot("STORY")
+    problem_clips = dedupe_slot("PROBLEM")
+    benefit_clips = dedupe_slot("BENEFITS")
+    feature_clips = dedupe_slot("FEATURES")
+    proof_clips = dedupe_slot("PROOF")
 
     # Final order
-    lines.append("FINAL ORDER TIMELINE:\n")
-    for idx, c in enumerate(ordered, start=1):
-        lines.append(f"{idx}) {c['id']} → \"{c['text']}\"\n")
+    timeline: List[Clip] = []
+    if hook_clip:
+        timeline.append(hook_clip)
 
-    lines.append("\n=====================================")
+    timeline.extend(story_clips)
+    timeline.extend(problem_clips)
+    timeline.extend(benefit_clips)
+    timeline.extend(feature_clips)
+    timeline.extend(proof_clips)
 
-    composer_human = "".join(lines)
-    return composer, composer_human, ordered
+    if cta_clip:
+        timeline.append(cta_clip)
+
+    used_clip_ids = [c.id for c in timeline]
+
+    composer = {
+        "hook_id": hook_clip.id if hook_clip else None,
+        "story_ids": [c.id for c in story_clips],
+        "problem_ids": [c.id for c in problem_clips],
+        "benefit_ids": [c.id for c in benefit_clips],
+        "feature_ids": [c.id for c in feature_clips],
+        "proof_ids": [c.id for c in proof_clips],
+        "cta_id": cta_clip.id if cta_clip else None,
+        "used_clip_ids": used_clip_ids,
+        "min_score": EDITDNA_MIN_CLIP_SCORE,
+    }
+
+    # Human-readable debug string
+    lines: List[str] = []
+    lines.append("===== EDITDNA FUNNEL COMPOSER =====")
+
+    def add_block(title: str, clips_list: List[Clip]):
+        lines.append(f"{title}:")
+        if not clips_list:
+            lines.append("  (none)")
+        else:
+            for c in clips_list:
+                lines.append(f"  [{c.id}] score={c.score:.2f} → {json.dumps(c.text)}")
+
+    add_block("HOOK", [hook_clip] if hook_clip else [])
+    add_block("STORY", story_clips)
+    add_block("PROBLEM", problem_clips)
+    add_block("BENEFITS", benefit_clips)
+    add_block("FEATURES", feature_clips)
+    add_block("PROOF", proof_clips)
+    add_block("CTA", [cta_clip] if cta_clip else [])
+
+    lines.append("")
+    lines.append("FINAL ORDER TIMELINE:")
+    for idx, c in enumerate(timeline, start=1):
+        lines.append(f"{idx}) {c.id} → {json.dumps(c.text)}")
+
+    lines.append("")
+    lines.append("=====================================")
+
+    composer_human = "\n".join(lines)
+    return composer, composer_human, timeline
 
 
-# -----------------------------
-# 5) Video render (ffmpeg)
-# -----------------------------
+# ------------------------------------------------------------------------------------
+# Rendering
+# ------------------------------------------------------------------------------------
 
-def render_funnel_video(
-    input_video: str,
-    ordered_clips: List[Dict[str, Any]],
-    session_dir: str,
-) -> Optional[str]:
-    """
-    Use ffmpeg to cut each selected clip and then concat.
-    Returns path to final video or None if no clips.
-    """
-    if not ordered_clips:
-        logger.warning("render_funnel_video: no clips to render")
-        return None
-
-    parts_dir = os.path.join(session_dir, "parts")
-    ensure_dir(parts_dir)
-
-    concat_list_path = os.path.join(session_dir, "concat.txt")
-    with open(concat_list_path, "w", encoding="utf-8") as f:
-        for idx, clip in enumerate(ordered_clips):
-            part_path = os.path.join(parts_dir, f"part_{idx:03d}.mp4")
-            start = clip["start"]
-            end = clip["end"]
-            cmd = [
-                "ffmpeg",
-                "-y",
-                "-ss",
-                f"{start:.3f}",
-                "-to",
-                f"{end:.3f}",
-                "-i",
-                input_video,
-                "-c",
-                "copy",
-                part_path,
-            ]
-            run_cmd(cmd)
-            f.write(f"file '{part_path}'\n")
-
-    output_path = os.path.join(session_dir, "final.mp4")
-    cmd_concat = [
-        "ffmpeg",
+def _ffmpeg_cut_segment(input_path: str, start: float, end: float, out_path: str) -> None:
+    duration = max(0.0, end - start)
+    cmd = [
+        FFMPEG_BIN,
         "-y",
+        "-hide_banner",
+        "-loglevel",
+        "error",
+        "-ss",
+        f"{start:.3f}",
+        "-i",
+        input_path,
+        "-t",
+        f"{duration:.3f}",
+        "-c",
+        "copy",
+        out_path,
+    ]
+    logger.info("✂️ ffmpeg cut", extra={"cmd": " ".join(cmd)})
+    subprocess.run(cmd, check=True)
+
+
+def _ffmpeg_concat(segments: List[str], out_path: str) -> None:
+    with tempfile.NamedTemporaryFile("w", delete=False) as f:
+        for p in segments:
+            f.write(f"file '{p}'\n")
+        list_path = f.name
+
+    cmd = [
+        FFMPEG_BIN,
+        "-y",
+        "-hide_banner",
+        "-loglevel",
+        "error",
         "-f",
         "concat",
         "-safe",
         "0",
         "-i",
-        concat_list_path,
+        list_path,
         "-c",
         "copy",
-        output_path,
+        out_path,
     ]
-    run_cmd(cmd_concat)
+    logger.info("🎬 ffmpeg concat", extra={"cmd": " ".join(cmd)})
+    try:
+        subprocess.run(cmd, check=True)
+    finally:
+        os.remove(list_path)
 
-    if os.path.exists(output_path):
-        return output_path
-    return None
 
-
-# -----------------------------
-# 6) S3 upload
-# -----------------------------
-
-def upload_to_s3(local_path: str, session_id: str) -> Optional[str]:
-    if not os.path.exists(local_path):
-        logger.warning(f"upload_to_s3: file does not exist: {local_path}")
+def _render_funnel_video(input_path: str, session_dir: str, timeline: List[Clip]) -> Optional[str]:
+    if not timeline:
+        logger.warning("No clips in timeline; skipping render")
         return None
 
-    bucket = os.getenv("S3_BUCKET") or "script2clipshop-video-automatedretailservices"
-    prefix = os.getenv("S3_OUTPUT_PREFIX") or "editdna/outputs"
-    key = f"{prefix.rstrip('/')}/{session_id}/final.mp4"
+    segments_dir = os.path.join(session_dir, "segments")
+    _ensure_dir(segments_dir)
+    cut_paths: List[str] = []
 
-    logger.info(f"Uploading to s3://{bucket}/{key}")
-    s3 = get_s3_client()
-    s3.upload_file(local_path, bucket, key)
+    for idx, c in enumerate(timeline, start=1):
+        seg_out = os.path.join(segments_dir, f"seg_{idx:03d}.mp4")
+        _ffmpeg_cut_segment(input_path, c.start, c.end, seg_out)
+        cut_paths.append(seg_out)
 
-    public_base = os.getenv("PUBLIC_BASE_URL")
-    if public_base:
-        url = f"{public_base.rstrip('/')}/{key}"
-    else:
-        url = f"https://{bucket}.s3.amazonaws.com/{key}"
+    final_path = os.path.join(session_dir, "final.mp4")
+    _ffmpeg_concat(cut_paths, final_path)
 
-    logger.info(f"S3 public URL: {url}")
-    return url
+    return final_path
 
 
-# -----------------------------
-# 7) Main pipeline entry
-# -----------------------------
+# ------------------------------------------------------------------------------------
+# S3 upload
+# ------------------------------------------------------------------------------------
+
+def _upload_to_s3(local_path: str, session_id: str) -> Optional[str]:
+    if not S3_BUCKET:
+        logger.warning("S3_BUCKET not set; skipping upload")
+        return None
+
+    key = f"{S3_PREFIX}/{session_id}-{os.path.basename(local_path)}"
+    logger.info("☁️ Uploading to S3", extra={"bucket": S3_BUCKET, "key": key})
+
+    s3 = boto3.client("s3", region_name=S3_REGION)
+
+    extra_args = {}
+    if S3_ACL:
+        extra_args["ACL"] = S3_ACL
+
+    try:
+        s3.upload_file(local_path, S3_BUCKET, key, ExtraArgs=extra_args)
+    except Exception:
+        logger.exception("S3 upload failed")
+        return None
+
+    try:
+        url = s3.generate_presigned_url(
+            "get_object",
+            Params={"Bucket": S3_BUCKET, "Key": key},
+            ExpiresIn=PRESIGN_EXPIRES,
+        )
+        return url
+    except Exception:
+        logger.exception("Failed to generate presigned URL; falling back to HTTPS URL")
+        return f"https://{S3_BUCKET}.s3.{S3_REGION}.amazonaws.com/{key}"
+
+
+# ------------------------------------------------------------------------------------
+# Main pipeline
+# ------------------------------------------------------------------------------------
 
 def _run_pipeline_impl(job: Dict[str, Any]) -> Dict[str, Any]:
     """
-    Internal pipeline. `job` MUST have:
+    Core pipeline.
+    job contains:
       - session_id: str
-      - file_urls: [str] (we take the first one for now)
+      - file_urls: List[str]  (we use the first one)
     """
-    session_id = job.get("session_id")
-    file_urls = job.get("file_urls") or job.get("files")
+    session_id = job["session_id"]
+    file_urls: List[str] = job["file_urls"]
 
-    if not session_id:
-        raise ValueError("job['session_id'] is required")
-    if not file_urls or not isinstance(file_urls, list):
-        raise ValueError("job['file_urls'] must be a non-empty list")
+    if not file_urls:
+        raise ValueError("file_urls must be a non-empty list")
 
+    session_dir = os.path.join(EDITDNA_TMP_ROOT, "editdna", session_id)
+    _ensure_dir(session_dir)
+
+    # 1) Download
     input_url = file_urls[0]
+    input_local = _download_to_local(session_dir, input_url)
 
-    base_tmp = "/tmp/editdna"
-    session_dir = os.path.join(base_tmp, session_id)
-    ensure_dir(session_dir)
+    # 2) ASR
+    asr_segments = _run_asr(input_local)
+    clips: List[Clip] = []
+    for idx, seg in enumerate(asr_segments):
+        clips.append(score_clip_for_funnel(idx, seg))
 
-    input_local = os.path.join(session_dir, "input.mp4")
-    download_to_local(input_url, input_local)
+    # 3) Composer
+    composer, composer_human, timeline = _compose_funnel(clips)
 
-    duration_sec = probe_duration(input_local)
+    # 4) Render
+    output_video_local = None
+    output_video_url = None
 
-    # 1) ASR
-    whisper_segments = transcribe_with_whisper(input_local)
+    if composer["used_clip_ids"]:
+        try:
+            output_video_local = _render_funnel_video(input_local, session_dir, timeline)
+        except Exception:
+            logger.exception("Render failed; skipping video output")
+            output_video_local = None
 
-    # 2) Micro segments
-    micro_segments = micro_segment(whisper_segments)
+        if output_video_local and os.path.exists(output_video_local):
+            output_video_url = _upload_to_s3(output_video_local, session_id)
 
-    # 3) Score each micro segment
-    clips: List[Dict[str, Any]] = []
-    for idx, seg in enumerate(micro_segments):
-        clip = score_clip_for_funnel(seg, idx)
-        clips.append(clip)
+    # 5) Prepare response
+    clips_payload = [asdict(c) for c in clips]
 
-    # 4) Build slots map for UI
-    slots_map: Dict[str, List[Dict[str, Any]]] = {slot: [] for slot in FUNNEL_SLOTS}
+    slots: Dict[str, List[Dict[str, Any]]] = {s: [] for s in FUNNEL_SLOTS}
     for c in clips:
-        slots_map.setdefault(c["slot"], []).append(c)
+        slots.setdefault(c.slot, []).append(asdict(c))
 
-    # 5) Compose funnel
-    composer, composer_human, ordered_clips = compose_funnel(clips)
+    duration_sec = 0.0
+    if asr_segments:
+        duration_sec = float(asr_segments[-1].get("end", 0.0))
 
-    # 6) Render video
-    output_local = render_funnel_video(input_local, ordered_clips, session_dir)
-    output_url = upload_to_s3(output_local, session_id) if output_local else None
-
-    return {
+    result: Dict[str, Any] = {
+        "ok": True,
         "session_id": session_id,
         "input_local": input_local,
         "duration_sec": duration_sec,
-        "clips": clips,
-        "slots": slots_map,
+        "clips": clips_payload,
+        "slots": slots,
         "composer": composer,
         "composer_human": composer_human,
-        "output_video_local": output_local,
-        "output_video_url": output_url,
-        "asr": True,
+        "output_video_local": output_video_local,
+        "output_video_url": output_video_url,
+        "asr": ASR_ENABLED,
         "semantic": True,
-        "vision": True,
+        "vision": VISION_ENABLED,
     }
+
+    return result
 
 
 def run_pipeline(session_id: str, file_urls: List[str]) -> Dict[str, Any]:
     """
-    Public entry called from tasks.py:
+    Public entrypoint called from tasks.job_render.
 
-        out = pipeline.run_pipeline(
-            session_id=session_id,
-            file_urls=files,
-        )
+    tasks.py does:
+        out = pipeline.run_pipeline(session_id=session_id, file_urls=files)
     """
     job = {
         "session_id": session_id,
