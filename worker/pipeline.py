@@ -5,11 +5,10 @@ import math
 import subprocess
 import logging
 from pathlib import Path
-from typing import List, Dict, Tuple, Optional
+from typing import List, Dict, Tuple, Optional, Any
+import urllib.request
 
 import torch
-
-# Whisper + OpenAI are expected to be installed in the worker image
 import whisper
 import openai
 
@@ -26,11 +25,11 @@ OPENAI_API_KEY = (
 if OPENAI_API_KEY:
     openai.api_key = OPENAI_API_KEY
 
-# S3 bucket (optional – if you don't want S3, it's fine)
+# Optional S3 (if you use it)
 S3_BUCKET = os.getenv("EDITDNA_S3_BUCKET", "")
 S3_PREFIX = os.getenv("EDITDNA_S3_PREFIX", "editdna/outputs")
 
-# Force CPU for Whisper if you want: EDITDNA_FORCE_CPU=1
+# Force CPU for Whisper if needed
 FORCE_CPU = os.getenv("EDITDNA_FORCE_CPU", "0") == "1"
 
 # --------- UTILS --------- #
@@ -59,6 +58,25 @@ def run_ffprobe_duration(video_path: str) -> float:
         return 0.0
 
 
+def download_first_file(file_urls: List[str], session_id: str) -> str:
+    """
+    Download the first URL in `file_urls` into /tmp/editdna/<session_id>/input.mp4
+    and return the local path.
+    """
+    if not file_urls:
+        raise ValueError("file_urls is empty")
+
+    url = file_urls[0]
+    work_dir = Path("/tmp") / "editdna" / session_id
+    ensure_dir(work_dir)
+    local_path = work_dir / "input.mp4"
+
+    LOG.info(f"[download] fetching first file url={url} -> {local_path}")
+    urllib.request.urlretrieve(url, str(local_path))
+
+    return str(local_path)
+
+
 # --------- WHISPER (GPU WHEN AVAILABLE) --------- #
 
 _WHISPER_MODEL = None
@@ -74,7 +92,7 @@ def get_whisper_model() -> whisper.Whisper:
     return _WHISPER_MODEL
 
 
-def run_whisper_asr(video_path: str) -> Dict:
+def run_whisper_asr(video_path: str) -> Dict[str, Any]:
     """
     Run Whisper on the input video and return the raw transcription dict.
     """
@@ -89,6 +107,12 @@ def run_whisper_asr(video_path: str) -> Dict:
 
 
 # --------- LLM SCORING / SLOTS --------- #
+
+GOOD_SLANG_HOOK_KEYWORDS = [
+    "kutigei",
+    "coochie gang",
+    "coochie",
+]
 
 BAD_PHRASE_PATTERNS = [
     r"wait[.,!?]?$",
@@ -115,21 +139,22 @@ BAD_REASON_KEYWORDS = [
     "correction",
 ]
 
-GOOD_SLANG_HOOK_KEYWORDS = [
-    "kutigei",
-    "coochie gang",
-    "coochie",
-]
-
 
 def is_trash_line(text: str, llm_reason: str) -> bool:
     """
     Mark obvious retakes / bloopers / filler as trash so they NEVER go into the funnel.
+
+    BUT: if the text contains GOOD slang hook words (kutigei/coochie),
+    we NEVER treat it as trash, even if LLM complains about 'confusing'.
     """
     import re
 
     t = (text or "").strip().lower()
     r = (llm_reason or "").lower()
+
+    # ✅ 0) If it's our spicy slang hook (kutigei / coochie), keep it NO MATTER WHAT
+    if any(kw in t for kw in GOOD_SLANG_HOOK_KEYWORDS):
+        return False
 
     # 1) Very short non-meaningful lines
     word_count = len(t.split())
@@ -158,7 +183,7 @@ def combine_scores(semantic_score: float, visual_score: float) -> float:
     return 0.85 * sem + 0.15 * vis
 
 
-def llm_score_segment(text: str, temperature: float = 0.2) -> Dict:
+def llm_score_segment(text: str, temperature: float = 0.2) -> Dict[str, Any]:
     """
     Ask LLM to:
       - classify slot: HOOK / STORY / FEATURE / PROOF / CTA
@@ -219,7 +244,7 @@ Line:
         }
 
 
-def score_clip_for_funnel(raw_clip: Dict) -> Optional[Dict]:
+def score_clip_for_funnel(raw_clip: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     """
     Take one raw ASR segment and convert it into our 'clip' dict with:
       - id, start, end, text
@@ -239,7 +264,7 @@ def score_clip_for_funnel(raw_clip: Dict) -> Optional[Dict]:
     semantic_score = llm_info["semantic_score"]
     llm_reason = llm_info["llm_reason"]
 
-    # 2) Vision: for now we assume it's fine (this keeps micro-cuts logic open)
+    # 2) Vision: for now we assume it's fine (keeps micro-cut logic)
     visual_score = 1.0
     face_q = 1.0
     scene_q = 1.0
@@ -266,7 +291,7 @@ def score_clip_for_funnel(raw_clip: Dict) -> Optional[Dict]:
 
     clip = {
         "id": cid,
-        "slot": slot if slot != "STORY" else "STORY",  # explicit
+        "slot": slot if slot != "STORY" else "STORY",
         "start": start,
         "end": end,
         "score": combined,
@@ -281,8 +306,10 @@ def score_clip_for_funnel(raw_clip: Dict) -> Optional[Dict]:
         "visual_flags": visual_flags,
     }
 
+    # meta.slot: map STORY→FEATURE for funnel purposes
+    meta_slot = slot if slot != "STORY" else "FEATURE"
     meta = {
-        "slot": slot if slot != "STORY" else "FEATURE",  # you map STORY→FEATURE for funnel
+        "slot": meta_slot,
         "semantic_score": semantic_score,
         "visual_score": visual_score,
         "score": combined,
@@ -296,9 +323,9 @@ def score_clip_for_funnel(raw_clip: Dict) -> Optional[Dict]:
 # --------- COMPOSER --------- #
 
 def build_funnel_composer(
-    clips: List[Dict],
+    clips: List[Dict[str, Any]],
     min_feature_score: float = 0.70,
-) -> Tuple[Dict, str, Dict[str, List[Dict]]]:
+) -> Tuple[Dict[str, Any], str, Dict[str, List[Dict[str, Any]]]]:
     """
     Build the EDITDNA funnel composer:
       - HOOK: best hook clip, strongly prefers 'kutigei/coochie' line if present.
@@ -313,7 +340,7 @@ def build_funnel_composer(
     id_to_clip = {c["id"]: c for c in clips}
 
     # Build slots dict
-    slots = {"HOOK": [], "PROBLEM": [], "FEATURE": [], "PROOF": [], "CTA": []}
+    slots: Dict[str, List[Dict[str, Any]]] = {"HOOK": [], "PROBLEM": [], "FEATURE": [], "PROOF": [], "CTA": []}
     for c in clips:
         slot = c.get("slot", "STORY").upper()
         mapped_slot = slot
@@ -345,7 +372,7 @@ def build_funnel_composer(
         hook_id = hook_clip["id"]
 
     # ---- pick FEATURES (story/feature/proof) ---- #
-    all_feat_candidates = []
+    all_feat_candidates: List[Dict[str, Any]] = []
     all_feat_candidates.extend(features)
     all_feat_candidates.extend(proofs)
 
@@ -365,7 +392,7 @@ def build_funnel_composer(
         cta_id = cta_clip["id"]
 
     # used_clip_ids in play order: HOOK → FEATURES (score-desc) → CTA
-    used_clip_ids = []
+    used_clip_ids: List[str] = []
     if hook_id:
         used_clip_ids.append(hook_id)
     for fid in feature_ids:
@@ -384,7 +411,7 @@ def build_funnel_composer(
 
     # ---- human-readable ---- #
 
-    def fmt_clip_line(c: Dict) -> str:
+    def fmt_clip_line(c: Dict[str, Any]) -> str:
         cid = c.get("id", "?")
         text = c.get("text", "").strip()
         score = c.get("meta", {}).get("score", 0.0)
@@ -446,8 +473,8 @@ def build_funnel_composer(
 
 def render_funnel_video(
     input_video: str,
-    clips: List[Dict],
-    composer: Dict,
+    clips: List[Dict[str, Any]],
+    composer: Dict[str, Any],
     session_id: str,
     work_dir: Path,
 ) -> Tuple[str, Optional[str]]:
@@ -530,18 +557,22 @@ def render_funnel_video(
 
 # --------- INTERNAL IMPLEMENTATION --------- #
 
-def _run_pipeline_impl(job: Dict) -> Dict:
+def _run_pipeline_impl(job: Dict[str, Any]) -> Dict[str, Any]:
     """
-    Internal implementation that expects a job dict.
+    Internal implementation that expects a job dict with:
+      - session_id
+      - input_local (local path to the video)
     """
     session_id = job.get("session_id") or f"session-{uuid.uuid4().hex[:8]}"
+
     input_local = job.get("input_local")
     if not input_local:
-        raise ValueError("job['input_local'] is required")
+        available_keys = list(job.keys())
+        raise ValueError(f"job['input_local'] is required; got keys={available_keys}")
 
-    input_path = Path(input_local)
+    input_path = Path(str(input_local))
     if not input_path.exists():
-        raise FileNotFoundError(f"input_local not found: {input_local}")
+        raise FileNotFoundError(f"input_local not found: {input_path}")
 
     duration_sec = run_ffprobe_duration(str(input_path))
 
@@ -550,7 +581,7 @@ def _run_pipeline_impl(job: Dict) -> Dict:
     segments = asr_result.get("segments", []) or []
 
     # 2) Build clips via LLM scoring + filters
-    clips: List[Dict] = []
+    clips: List[Dict[str, Any]] = []
     for seg in segments:
         text = (seg.get("text") or "").strip()
         if not text:
@@ -573,7 +604,7 @@ def _run_pipeline_impl(job: Dict) -> Dict:
         work_dir=work_dir,
     )
 
-    result = {
+    result: Dict[str, Any] = {
         "ok": True,
         "session_id": session_id,
         "input_local": str(input_path),
@@ -586,31 +617,42 @@ def _run_pipeline_impl(job: Dict) -> Dict:
         "output_video_url": output_video_url,
         "asr": True,
         "semantic": True,
-        "vision": True,  # we stubbed vision scoring to 1.0 but it's still 'on'
+        "vision": True,  # we stub visual_score=1.0 but keep flag on
     }
 
     return result
 
 
-# --------- PUBLIC ENTRYPOINT (BACKWARDS COMPATIBLE) --------- #
+# --------- PUBLIC ENTRYPOINT (MATCHES YOUR tasks.py) --------- #
 
-def run_pipeline(*args, **kwargs) -> Dict:
+def run_pipeline(*args, **kwargs) -> Dict[str, Any]:
     """
-    Backwards-compatible wrapper so we don't have to touch tasks.py.
+    Backwards-compatible wrapper.
 
     Supports:
       - run_pipeline(job_dict)
-      - run_pipeline(session_id=..., input_local=..., **extra)
+      - run_pipeline(session_id=..., file_urls=[...])
     """
     # Case 1: first arg is a dict (job object)
     if args and isinstance(args[0], dict):
         job = dict(args[0])
         job.update(kwargs)
+        # If file_urls present and no input_local, download
+        file_urls = job.get("file_urls") or job.get("files")
+        if file_urls and not job.get("input_local"):
+            session_id = job.get("session_id") or f"session-{uuid.uuid4().hex[:8]}"
+            job["session_id"] = session_id
+            job["input_local"] = download_first_file(file_urls, session_id)
         return _run_pipeline_impl(job)
 
     # Case 2: called with keyword args only (what your tasks.py does)
     if kwargs:
         job = dict(kwargs)
+        file_urls = job.get("file_urls") or job.get("files")
+        if file_urls and not job.get("input_local"):
+            session_id = job.get("session_id") or f"session-{uuid.uuid4().hex[:8]}"
+            job["session_id"] = session_id
+            job["input_local"] = download_first_file(file_urls, session_id)
         return _run_pipeline_impl(job)
 
-    raise ValueError("run_pipeline requires either a job dict or keyword args (session_id=..., input_local=...).")
+    raise ValueError("run_pipeline requires either a job dict or keyword args (session_id=..., file_urls=[...]).")
