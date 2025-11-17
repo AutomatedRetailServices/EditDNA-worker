@@ -10,20 +10,28 @@ import urllib.request
 
 import torch
 import whisper
-import openai
 
-# --------- CONFIG / ENV --------- #
+# --- OpenAI v1.x style client --- #
+try:
+    from openai import OpenAI
+except ImportError:
+    OpenAI = None  # in case lib is missing
+
 
 LOG = logging.getLogger("editdna.pipeline")
 LOG.setLevel(logging.INFO)
 
-# OpenAI key (adjust if you use a different env var)
+# --------- CONFIG / ENV --------- #
+
 OPENAI_API_KEY = (
     os.getenv("EDITDNA_OPENAI_KEY")
     or os.getenv("OPENAI_API_KEY")
 )
-if OPENAI_API_KEY:
-    openai.api_key = OPENAI_API_KEY
+
+if OPENAI_API_KEY and OpenAI is not None:
+    openai_client = OpenAI(api_key=OPENAI_API_KEY)
+else:
+    openai_client = None
 
 # Optional S3 (if you use it)
 S3_BUCKET = os.getenv("EDITDNA_S3_BUCKET", "")
@@ -191,12 +199,12 @@ def llm_score_segment(text: str, temperature: float = 0.2) -> Dict[str, Any]:
       - give short llm_reason
     Returns a dict with keys: slot, semantic_score, llm_reason
     """
-    if not OPENAI_API_KEY:
-        # Fallback: dumb defaults if no API key
+    # If we don't have a client or key, fallback
+    if not openai_client or not OPENAI_API_KEY:
         return {
             "slot": "STORY",
             "semantic_score": 0.6,
-            "llm_reason": "Fallback scoring (no OpenAI key)."
+            "llm_reason": "Fallback scoring (no OpenAI client).",
         }
 
     prompt = f"""
@@ -212,7 +220,7 @@ Line:
 "{text}"
 """.strip()
 
-    resp = openai.ChatCompletion.create(
+    resp = openai_client.chat.completions.create(
         model="gpt-4o-mini",
         temperature=temperature,
         messages=[
@@ -220,7 +228,7 @@ Line:
             {"role": "user", "content": prompt},
         ],
     )
-    content = resp["choices"][0]["message"]["content"]
+    content = resp.choices[0].message.content
 
     try:
         data = json.loads(content)
