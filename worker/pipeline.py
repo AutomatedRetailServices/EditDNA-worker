@@ -293,7 +293,7 @@ def score_clip_for_funnel(raw_clip: Dict) -> Optional[Dict]:
     return clip
 
 
-# --------- COMPOSER (THIS IS THE IMPORTANT PART YOU ASKED FOR) --------- #
+# --------- COMPOSER --------- #
 
 def build_funnel_composer(
     clips: List[Dict],
@@ -528,17 +528,11 @@ def render_funnel_video(
     return output_video_local, output_url
 
 
-# --------- MAIN ENTRYPOINT FOR WORKER --------- #
+# --------- INTERNAL IMPLEMENTATION --------- #
 
-def run_pipeline(job: Dict) -> Dict:
+def _run_pipeline_impl(job: Dict) -> Dict:
     """
-    Main function the worker should call.
-
-    Expected job fields:
-      - session_id: str
-      - input_local: str (path to input video)
-    Optional:
-      - anything else you want to store in meta.
+    Internal implementation that expects a job dict.
     """
     session_id = job.get("session_id") or f"session-{uuid.uuid4().hex[:8]}"
     input_local = job.get("input_local")
@@ -596,3 +590,27 @@ def run_pipeline(job: Dict) -> Dict:
     }
 
     return result
+
+
+# --------- PUBLIC ENTRYPOINT (BACKWARDS COMPATIBLE) --------- #
+
+def run_pipeline(*args, **kwargs) -> Dict:
+    """
+    Backwards-compatible wrapper so we don't have to touch tasks.py.
+
+    Supports:
+      - run_pipeline(job_dict)
+      - run_pipeline(session_id=..., input_local=..., **extra)
+    """
+    # Case 1: first arg is a dict (job object)
+    if args and isinstance(args[0], dict):
+        job = dict(args[0])
+        job.update(kwargs)
+        return _run_pipeline_impl(job)
+
+    # Case 2: called with keyword args only (what your tasks.py does)
+    if kwargs:
+        job = dict(kwargs)
+        return _run_pipeline_impl(job)
+
+    raise ValueError("run_pipeline requires either a job dict or keyword args (session_id=..., input_local=...).")
