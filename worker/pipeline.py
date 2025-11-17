@@ -34,6 +34,10 @@ OUTPUT_PREFIX = os.getenv(
 MIN_CLIP_SCORE = float(os.getenv("EDITDNA_MIN_CLIP_SCORE", "0.5"))
 MAX_FEATURE_CLIPS = int(os.getenv("EDITDNA_MAX_FEATURE_CLIPS", "8"))
 
+# Hook / CTA stricter thresholds (can override via env)
+HOOK_MIN_SCORE = float(os.getenv("EDITDNA_HOOK_MIN_SCORE", "0.7"))
+CTA_MIN_SCORE = float(os.getenv("EDITDNA_CTA_MIN_SCORE", "0.6"))
+
 # Score mixing weights
 SEMANTIC_WEIGHT = float(os.getenv("EDITDNA_SEMANTIC_WEIGHT", "0.7"))
 VISUAL_WEIGHT = float(os.getenv("EDITDNA_VISUAL_WEIGHT", "0.3"))
@@ -66,15 +70,16 @@ _whisper_model = None
 
 
 def _get_whisper_model():
+    """
+    Load Whisper on GPU if available, otherwise CPU.
+    """
     global _whisper_model
     if whisper is None:
         raise RuntimeError("whisper is not available; check requirements.")
-
     if _whisper_model is None:
         device = "cuda" if torch.cuda.is_available() else "cpu"
-        logger.info(f"Loading Whisper model: {WHISPER_MODEL_NAME} on {device}")
+        logger.info(f"Loading Whisper model: {WHISPER_MODEL_NAME} on device={device}")
         _whisper_model = whisper.load_model(WHISPER_MODEL_NAME, device=device)
-
     return _whisper_model
 
 
@@ -155,6 +160,32 @@ NORMALIZE_PREFIXES = [
     "worry no more,",
 ]
 
+# obvious meta / retry / off-script junk that should never be used
+BAD_LINE_PATTERNS = [
+    r"^is that (funny|good)\??$",
+    r"^that one good\??$",
+    r"^yeah\.?$",
+    r"^why can.?t i remember",
+    r"^oh no, i don't know why",
+    r"^these pineapple flavored, wait\.?$",
+    r"^moisture control, odor control, wait",
+    r"^fort moisture, odor, and a healthy balance\.?$",
+]
+
+
+def _looks_like_meta_or_retry(text: str) -> bool:
+    """
+    Detect obvious 'talking to cameraman', retries, or broken lines that
+    should never make it into the final ad, even if they get a score.
+    """
+    if not text:
+        return True
+    t = text.strip().lower()
+    for pat in BAD_LINE_PATTERNS:
+        if re.search(pat, t):
+            return True
+    return False
+
 
 def _is_fragment_text(text: str) -> bool:
     """
@@ -165,6 +196,7 @@ def _is_fragment_text(text: str) -> bool:
       - "Is that good?"
       - "Yeah."
       - "That one good?"
+      - "Why can't I remember after that?"
     But we keep real hooks/features even if short (e.g., "Odor?") when they
     are scored and slotted as HOOK/CTA.
     """
@@ -172,6 +204,10 @@ def _is_fragment_text(text: str) -> bool:
         return True
 
     t = text.strip()
+
+    # hard-kill: meta / retry junk
+    if _looks_like_meta_or_retry(t):
+        return True
 
     # Hard cut: dangling dash at end of sentence
     if t.endswith("-"):
@@ -328,22 +364,37 @@ def _build_slots(clauses: List[Clause]) -> Dict[str, List[Dict[str, Any]]]:
 
 
 def _pick_best_hook(slots: Dict[str, List[Dict[str, Any]]]) -> Optional[str]:
+    """
+    Pick best hook; if real HOOK is trash, promote a strong FEATURE.
+    """
     hooks = slots.get("HOOK") or []
-    if not hooks:
+
+    # 1) Try real HOOK labels first
+    if hooks:
+        sorted_hooks = sorted(hooks, key=lambda h: h["meta"]["score"], reverse=True)
+        for h in sorted_hooks:
+            score = h["meta"]["score"]
+            text = (h.get("text") or "").strip()
+            if score < max(MIN_CLIP_SCORE, HOOK_MIN_SCORE):
+                continue
+            if _is_fragment_text(text):
+                continue
+            return h["id"]
+
+    # 2) Fallback: promote the best FEATURE to HOOK
+    feats = slots.get("FEATURE") or []
+    if not feats:
         return None
 
-    # Prefer high-score hooks, but skip obvious fragments
-    sorted_hooks = sorted(hooks, key=lambda h: h["meta"]["score"], reverse=True)
-    for h in sorted_hooks:
-        score = h["meta"]["score"]
-        if score < MIN_CLIP_SCORE:
-            # all remaining are even worse
-            return None
-        text = (h.get("text") or "").strip()
-        # we are slightly more tolerant here, but still skip super-broken hooks
-        if _is_fragment_text(text) and len(text.split()) <= 2:
+    feats_sorted = sorted(feats, key=lambda f: f["meta"]["score"], reverse=True)
+    for f in feats_sorted:
+        score = f["meta"]["score"]
+        text = (f.get("text") or "").strip()
+        if score < max(MIN_CLIP_SCORE, HOOK_MIN_SCORE):
+            break
+        if _is_fragment_text(text):
             continue
-        return h["id"]
+        return f["id"]
 
     return None
 
@@ -356,11 +407,10 @@ def _pick_best_cta(slots: Dict[str, List[Dict[str, Any]]]) -> Optional[str]:
     sorted_ctas = sorted(ctas, key=lambda c: c["meta"]["score"], reverse=True)
     for c in sorted_ctas:
         score = c["meta"]["score"]
-        if score < MIN_CLIP_SCORE:
-            return None
         text = (c.get("text") or "").strip()
-        # CTA should not be weird fragments either
-        if _is_fragment_text(text) and len(text.split()) <= 2:
+        if score < max(MIN_CLIP_SCORE, CTA_MIN_SCORE):
+            continue
+        if _is_fragment_text(text):
             continue
         return c["id"]
 
