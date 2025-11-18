@@ -1,140 +1,188 @@
 import os
-import re
+import io
 import json
-import uuid
 import math
+import uuid
+import time
 import logging
-import subprocess
-from pathlib import Path
-from typing import Dict, List, Any, Tuple
+from typing import List, Dict, Any, Optional, Tuple
 
+import requests
 import boto3
+from botocore.client import Config
 from faster_whisper import WhisperModel
+from moviepy.editor import VideoFileClip, concatenate_videoclips
 from openai import OpenAI
 
-# -------------------------------------------------------------------
-#  CONFIG & GLOBALS
-# -------------------------------------------------------------------
-
-logging.basicConfig(level=logging.INFO)
+# ---------------------------------------------------------
+# 🔧 Logging
+# ---------------------------------------------------------
 logger = logging.getLogger("editdna.pipeline")
+if not logger.handlers:
+    handler = logging.StreamHandler()
+    formatter = logging.Formatter(
+        "%(asctime)s [%(levelname)s] %(name)s: %(message)s"
+    )
+    handler.setFormatter(formatter)
+    logger.addHandler(handler)
+logger.setLevel(logging.INFO)
 
-# === ENV VARS ===
-WHISPER_MODEL_NAME = os.environ.get("WHISPER_MODEL", "small")
-WHISPER_DEVICE = os.environ.get("WHISPER_DEVICE", "cuda")
-WHISPER_COMPUTE_TYPE = os.environ.get("WHISPER_COMPUTE_TYPE", "float16")
+# ---------------------------------------------------------
+# 🔧 Environment / Config
+# ---------------------------------------------------------
+TMP_ROOT = os.environ.get("EDITDNA_TMP_ROOT", "/tmp/TMP/editdna")
 
 OPENAI_MODEL = os.environ.get("OPENAI_MODEL", "gpt-4o-mini")
-OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY")
+OPENAI_MAX_RETRIES = int(os.environ.get("OPENAI_MAX_RETRIES", "3"))
 
-S3_BUCKET = os.environ.get("S3_BUCKET", "script2clipshop-video-automatedretailservices")
-S3_PREFIX = os.environ.get("S3_PREFIX", "editdna/outputs")
+ASR_MODEL_SIZE = os.environ.get("WHISPER_MODEL", "small")  # e.g. tiny, base, small, medium
 
-TMP_ROOT = Path(os.environ.get("TMP_ROOT", "/tmp/TMP/editdna"))
+# Composer / dedup
+COMPOSER_MIN_SEMANTIC = float(os.environ.get("COMPOSER_MIN_SEMANTIC", "0.70"))
+COMPOSER_DUP_SIM_THRESHOLD = float(os.environ.get("COMPOSER_DUP_SIM_THRESHOLD", "0.82"))
 
-# Composer config
-COMPOSER_MIN_SEMANTIC = float(os.environ.get("COMPOSER_MIN_SEMANTIC", "0.75"))
-COMPOSER_DUP_SIM_THRESHOLD = float(os.environ.get("COMPOSER_DUP_SIM_THRESHOLD", "0.80"))
+# Visual / veto (stubbed, pero dejamos la env por compatibilidad)
+VETO_MIN_SCORE = float(os.environ.get("VETO_MIN_SCORE", "0.40"))
 
-# Slot limits:
-# 0 = SIN LÍMITE (solo se filtra por calidad, no por cantidad)
-SLOT_LIMITS: Dict[str, int] = {
-    "HOOK": 1,        # 1 hook fuerte
-    "STORY": 0,       # sin límite (no lo usamos mucho todavía)
-    "PROBLEM": 1,     # 1 problema máximo
-    "BENEFITS": 0,    # 0 = sin límite → no pierdes beneficios importantes
-    "FEATURES": 0,    # 0 = sin límite → no pierdes descripciones ricas
-    "PROOF": 1,       # 1 prueba/testimonio
-    "CTA": 1,         # 1 CTA
-}
+# S3
+S3_BUCKET = os.environ.get("S3_BUCKET")
+S3_REGION = os.environ.get("AWS_REGION", os.environ.get("AWS_DEFAULT_REGION", "us-east-1"))
+S3_BASE_PREFIX = os.environ.get("S3_BASE_PREFIX", "editdna/outputs")
 
-# Veto layer (por ahora simple)
-VETO_MIN_SCORE = float(os.environ.get("VETO_MIN_SCORE", "0.4"))
-
-# -------------------------------------------------------------------
-#  CLIENTS
-# -------------------------------------------------------------------
-
-if not OPENAI_API_KEY:
-    raise RuntimeError("OPENAI_API_KEY is required in environment")
-
-openai_client = OpenAI(api_key=OPENAI_API_KEY)
-s3_client = boto3.client("s3")
-
-# Creamos el modelo de Whisper global para no cargarlo en cada job
-logger.info(f"Loading Whisper model: {WHISPER_MODEL_NAME} ({WHISPER_DEVICE}, {WHISPER_COMPUTE_TYPE})")
-whisper_model = WhisperModel(
-    WHISPER_MODEL_NAME,
-    device=WHISPER_DEVICE,
-    compute_type=WHISPER_COMPUTE_TYPE,
-)
-
-# -------------------------------------------------------------------
-#  HELPERS
-# -------------------------------------------------------------------
-
-def _normalize_text(t: str) -> str:
-    return re.sub(r"\s+", " ", (t or "").strip().lower())
+# ---------------------------------------------------------
+# 🔧 OpenAI client
+# ---------------------------------------------------------
+_openai_client: Optional[OpenAI] = None
 
 
-def _jaccard(a: str, b: str) -> float:
-    sa = set(_normalize_text(a).split())
-    sb = set(_normalize_text(b).split())
-    if not sa or not sb:
-        return 0.0
-    return len(sa & sb) / len(sa | sb)
+def get_openai_client() -> OpenAI:
+    global _openai_client
+    if _openai_client is None:
+        _openai_client = OpenAI()
+    return _openai_client
 
 
-def _is_duplicate(text: str, used_norm_texts: List[str], threshold: float) -> bool:
-    """Very simple near-duplicate check using Jaccard on tokens."""
-    if not text:
-        return False
-    for prev in used_norm_texts:
-        if _jaccard(text, prev) >= threshold:
-            return True
-    return False
+# ---------------------------------------------------------
+# 🔧 S3 client
+# ---------------------------------------------------------
+_s3_client: Optional[Any] = None
 
 
-def _safe_float(v: Any, default: float = 0.0) -> float:
+def get_s3_client():
+    global _s3_client
+    if _s3_client is None:
+        _s3_client = boto3.client(
+            "s3",
+            region_name=S3_REGION,
+            config=Config(signature_version="s3v4"),
+        )
+    return _s3_client
+
+
+def upload_to_s3(local_path: str, session_id: str) -> Optional[str]:
+    """
+    Sube el archivo final a S3 si S3_BUCKET está definido.
+    Retorna URL firmado (si posible) o None.
+    """
+    if not S3_BUCKET:
+        logger.info("S3_BUCKET not set, skipping upload")
+        return None
+
+    s3 = get_s3_client()
+    filename = os.path.basename(local_path)
+    key = f"{S3_BASE_PREFIX}/{session_id}-{filename}"
+
+    logger.info("☁️ Uploading to S3", extra={"bucket": S3_BUCKET, "key": key})
+    s3.upload_file(local_path, S3_BUCKET, key)
+
     try:
-        return float(v)
+        url = s3.generate_presigned_url(
+            "get_object",
+            Params={"Bucket": S3_BUCKET, "Key": key},
+            ExpiresIn=7 * 24 * 3600,  # 7 días
+        )
+        logger.info("✅ S3 presigned URL created", extra={"url": url})
+        return url
     except Exception:
-        return default
+        logger.exception("Failed to create presigned URL")
+        return None
 
 
-def _ensure_tmp_dir(session_id: str) -> Path:
-    session_dir = TMP_ROOT / session_id
-    session_dir.mkdir(parents=True, exist_ok=True)
-    return session_dir
+# ---------------------------------------------------------
+# 🔧 Utilidades de texto / similitud
+# ---------------------------------------------------------
+def normalize_text(t: str) -> str:
+    return " ".join(t.lower().strip().split())
 
 
-def _upload_to_s3(local_path: Path, session_id: str) -> str:
-    key = f"{S3_PREFIX.rstrip('/')}/{session_id}-final.mp4"
-    logger.info(f"Uploading {local_path} to s3://{S3_BUCKET}/{key}")
-    s3_client.upload_file(str(local_path), S3_BUCKET, key)
-
-    url = s3_client.generate_presigned_url(
-        ClientMethod="get_object",
-        Params={"Bucket": S3_BUCKET, "Key": key},
-        ExpiresIn=60 * 60 * 24 * 30,  # 30 días
-    )
-    return url
-
-
-# -------------------------------------------------------------------
-#  ASR (Whisper)
-# -------------------------------------------------------------------
-
-def run_asr(input_local: str) -> Tuple[List[Dict[str, Any]], float]:
+def simple_similarity(a: str, b: str) -> float:
     """
-    Ejecuta Whisper y devuelve:
-    - lista de segmentos [{start, end, text}, ...]
-    - duración total del audio (segundos)
+    Similitud muy simple basada en tokens (no embeddings).
+    Suficiente para detectar duplicados texto casi igual.
     """
-    logger.info(f"Running Whisper ASR on {input_local}")
-    segments_iter, info = whisper_model.transcribe(
+    a_norm = normalize_text(a)
+    b_norm = normalize_text(b)
+    if not a_norm or not b_norm:
+        return 0.0
+    set_a = set(a_norm.split())
+    set_b = set(b_norm.split())
+    inter = len(set_a & set_b)
+    union = len(set_a | set_b) or 1
+    return inter / union
+
+
+# ---------------------------------------------------------
+# 🔧 Descarga de video
+# ---------------------------------------------------------
+def ensure_dir(path: str):
+    os.makedirs(path, exist_ok=True)
+
+
+def download_to_local(url: str, dest_path: str) -> str:
+    ensure_dir(os.path.dirname(dest_path))
+    logger.info("⬇️ Downloading video", extra={"url": url, "dest": dest_path})
+    with requests.get(url, stream=True, timeout=60) as r:
+        r.raise_for_status()
+        with open(dest_path, "wb") as f:
+            for chunk in r.iter_content(chunk_size=8192):
+                if chunk:
+                    f.write(chunk)
+    return dest_path
+
+
+# ---------------------------------------------------------
+# 🔧 ASR con faster-whisper
+# ---------------------------------------------------------
+_asr_model: Optional[WhisperModel] = None
+
+
+def get_asr_model() -> WhisperModel:
+    global _asr_model
+    if _asr_model is None:
+        logger.info("🧠 Loading faster-whisper model", extra={"size": ASR_MODEL_SIZE})
+        _asr_model = WhisperModel(
+            ASR_MODEL_SIZE,
+            device="cuda" if os.environ.get("CUDA_VISIBLE_DEVICES") else "cpu",
+            compute_type="float16" if os.environ.get("CUDA_VISIBLE_DEVICES") else "int8",
+        )
+    return _asr_model
+
+
+def run_asr(input_local: str) -> Tuple[List[Dict[str, Any]], float, str]:
+    """
+    Corre ASR sobre el video y devuelve:
+      - segments: lista de dicts {start, end, text}
+      - duration_sec: duración aproximada
+      - language: código de idioma
+    """
+    model = get_asr_model()
+    logger.info("🎙️ Running ASR", extra={"input": input_local})
+
+    segments_iter, info = model.transcribe(
         input_local,
         beam_size=5,
+        vad_filter=True,
+        vad_parameters=dict(min_silence_duration_ms=300),
         word_timestamps=False,
     )
 
@@ -142,151 +190,201 @@ def run_asr(input_local: str) -> Tuple[List[Dict[str, Any]], float]:
     for i, seg in enumerate(segments_iter):
         segments.append(
             {
-                "index": i,
+                "id": f"ASR{i:04d}",
                 "start": float(seg.start),
                 "end": float(seg.end),
-                "text": (seg.text or "").strip(),
+                "text": seg.text.strip(),
             }
         )
 
-    duration_sec = float(getattr(info, "duration", 0.0)) or (
-        segments[-1]["end"] if segments else 0.0
+    logger.info(
+        "ASR produced %d segments, duration ~%.2fs",
+        len(segments),
+        info.duration,
     )
 
-    logger.info(f"ASR produced {len(segments)} segments, duration ~{duration_sec:.2f}s")
-    return segments, duration_sec
+    language = info.language or "en"
+    return segments, float(info.duration or 0.0), language
 
 
-# -------------------------------------------------------------------
-#  LLM CLASSIFIER (slot + keep + semantic_score)
-# -------------------------------------------------------------------
+# ---------------------------------------------------------
+# 🔧 LLM: clasificación de segmento (slot + keep + reason)
+# ---------------------------------------------------------
+def classify_segment_with_llm(text: str, language: str = "en") -> Dict[str, Any]:
+    """
+    Pide a OpenAI que:
+      - Asigne slot (HOOK, STORY, PROBLEM, BENEFITS, FEATURES, PROOF, CTA, FILLER)
+      - Diga si keep = true/false
+      - Dé una razón
+      - Dé un score 0–1 (importance)
+    """
+    client = get_openai_client()
 
-CLASS_SYSTEM_PROMPT = """You are a performance ad editor assistant.
+    for attempt in range(OPENAI_MAX_RETRIES):
+        try:
+            messages = [
+                {
+                    "role": "system",
+                    "content": (
+                        "You are an assistant that labels short ad video segments "
+                        "for a funnel editor (TikTok/UGC ads).\n"
+                        "You MUST respond strictly as a JSON object."
+                    ),
+                },
+                {
+                    "role": "user",
+                    "content": (
+                        f"Language: {language}\n\n"
+                        f"Transcript segment:\n\"{text}\"\n\n"
+                        "Classify this segment for a direct-response ad funnel.\n"
+                        "Slots are:\n"
+                        "- HOOK: strong opening question/claim, grabs attention.\n"
+                        "- STORY: personal story or context.\n"
+                        "- PROBLEM: describes pain, frustration, or issue.\n"
+                        "- BENEFITS: positive outcomes or transformation.\n"
+                        "- FEATURES: concrete details, ingredients, specs, how it works.\n"
+                        "- PROOF: social proof, testimonials, results, credibility.\n"
+                        "- CTA: call-to-action, telling the viewer what to do.\n"
+                        "- FILLER: bloopers, redos, meta talk, confusion, camera mistakes.\n\n"
+                        "Decide if this segment should be kept in the final ad. "
+                        "FILLER almost always has keep=false.\n\n"
+                        "Return JSON with keys:\n"
+                        "{\n"
+                        "  \"slot\": \"HOOK\" | \"STORY\" | \"PROBLEM\" | \"BENEFITS\" | \"FEATURES\" | \"PROOF\" | \"CTA\" | \"FILLER\",\n"
+                        "  \"keep\": true/false,\n"
+                        "  \"reason\": \"short explanation\",\n"
+                        "  \"importance\": float between 0 and 1 (how strong/useful this is)\n"
+                        "}\n"
+                    ),
+                },
+            ]
 
-Task:
-- You receive ONE spoken segment from a UGC-style ad.
-- Classify it into ONE of these funnel slots:
-  - HOOK
-  - STORY
-  - PROBLEM
-  - BENEFITS
-  - FEATURES
-  - PROOF
-  - CTA
+            resp = client.chat.completions.create(
+                model=OPENAI_MODEL,
+                messages=messages,
+                response_format={"type": "json_object"},
+                temperature=0.0,
+            )
+            content = resp.choices[0].message.content
+            data = json.loads(content)
 
-- Decide:
-  - semantic_score: number between 0.0 and 1.0 (how useful for the ad?)
-  - keep: true/false
-    - false for:
-      - mistakes, "wait", "is that good?", "thanks", random laughter, meta comments about recording.
-      - incomplete phrases that don't add value.
-    - true for:
-      - clear benefits, features, hook, CTA, testimonial, problem, story.
+            slot = str(data.get("slot", "FILLER")).upper().strip()
+            if slot not in {
+                "HOOK",
+                "STORY",
+                "PROBLEM",
+                "BENEFITS",
+                "FEATURES",
+                "PROOF",
+                "CTA",
+                "FILLER",
+            }:
+                slot = "FILLER"
 
-Return STRICTLY JSON like:
-{
-  "slot": "HOOK",
-  "semantic_score": 0.92,
-  "keep": true,
-  "reason": "short explanation"
-}"""
+            keep = bool(data.get("keep", slot != "FILLER"))
+            importance = float(data.get("importance", 0.7))
+            importance = max(0.0, min(1.0, importance))
+            reason = str(data.get("reason", "")).strip()
 
-def classify_segment(text: str) -> Dict[str, Any]:
-    if not text.strip():
-        return {
-            "slot": "STORY",
-            "semantic_score": 0.0,
-            "keep": False,
-            "reason": "Empty text",
-        }
+            return {
+                "slot": slot,
+                "keep": keep,
+                "importance": importance,
+                "reason": reason,
+            }
 
-    user_prompt = f"""Segment:
-\"\"\"{text.strip()}\"\"\"
+        except Exception as e:
+            logger.warning(
+                "LLM classify attempt %d failed: %s", attempt + 1, str(e)
+            )
+            time.sleep(1.0)
 
-Classify this segment for a TikTok Shop performance ad.
-Remember to ONLY output JSON as specified."""
-    try:
-        resp = openai_client.chat.completions.create(
-            model=OPENAI_MODEL,
-            messages=[
-                {"role": "system", "content": CLASS_SYSTEM_PROMPT},
-                {"role": "user", "content": user_prompt},
-            ],
-            temperature=0.2,
-        )
-        content = resp.choices[0].message.content
-        data = json.loads(content)
-        slot = data.get("slot", "STORY").strip().upper()
-        if slot not in ["HOOK", "STORY", "PROBLEM", "BENEFITS", "FEATURES", "PROOF", "CTA"]:
-            slot = "STORY"
-        sem = _safe_float(data.get("semantic_score", 0.0), 0.0)
-        keep = bool(data.get("keep", False))
-        reason = data.get("reason", "")
-
-        return {
-            "slot": slot,
-            "semantic_score": sem,
-            "keep": keep,
-            "reason": reason,
-        }
-    except Exception as e:
-        logger.warning(f"LLM classify failed, falling back: {e}")
-        # fallback: treat as STORY but keep it with low score
-        return {
-            "slot": "STORY",
-            "semantic_score": 0.3,
-            "keep": True,
-            "reason": "Fallback classification",
-        }
+    # Fallback
+    return {
+        "slot": "FILLER",
+        "keep": False,
+        "importance": 0.4,
+        "reason": "LLM classification failed, treated as filler.",
+    }
 
 
-# -------------------------------------------------------------------
-#  BUILD CLIPS FROM ASR + LLM
-# -------------------------------------------------------------------
-
-def build_clips_from_asr(asr_segments: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+# ---------------------------------------------------------
+# 🔧 Construcción de clips (micro-cuts)
+# ---------------------------------------------------------
+def build_clips_from_asr(
+    segments: List[Dict[str, Any]],
+    language: str,
+) -> List[Dict[str, Any]]:
+    """
+    Toma segmentos de ASR (ya son micro-cuts) y los pasa por el LLM
+    para slot + keep + reason. No limita slots: Free-Flow Mode.
+    """
     clips: List[Dict[str, Any]] = []
-    for seg in asr_segments:
-        idx = seg["index"]
-        start = seg["start"]
-        end = seg["end"]
+
+    for seg in segments:
+        seg_id = seg["id"]
+        start = float(seg["start"])
+        end = float(seg["end"])
         text = seg["text"]
 
-        cls = classify_segment(text)
-        slot = cls["slot"]
-        semantic_score = float(cls["semantic_score"])
-        keep = bool(cls["keep"])
-        llm_reason = cls["reason"]
+        if not text.strip():
+            continue
 
-        # basic score = semantic_score (puedes mezclar visual luego)
-        score = semantic_score
+        llm = classify_segment_with_llm(text, language)
+        slot = llm["slot"]
 
-        clip_id = f"ASR{idx:04d}_c1"
+        # semantic_score = importance del LLM
+        semantic_score = float(llm["importance"])
+        # visual_score/face_q/scene_q stub en 1.0 (no visión aún)
+        visual_score = 1.0
+        face_q = 1.0
+        scene_q = 1.0
+
+        # score combinado (simple promedio)
+        score = (semantic_score + visual_score) / 2.0
+
+        # Heurística extra para redos/meta muy obvios
+        txt_norm = normalize_text(text)
+        obvious_filler_patterns = [
+            "is that good",
+            "was that good",
+            "let me start again",
+            "wait",
+            "do it again",
+            "i don't know how to do it",
+            "okay okay",
+            "am i saying it right",
+            "is that funny",
+        ]
+        is_obvious_filler = any(p in txt_norm for p in obvious_filler_patterns)
+
+        keep = bool(llm["keep"])
+        if slot == "FILLER" or is_obvious_filler:
+            keep = False
 
         clip = {
-            "id": clip_id,
+            "id": f"{seg_id}_c1",
             "slot": slot,
-            "start": float(start),
-            "end": float(end),
-            "score": score,
-            "semantic_score": semantic_score,
-            # Visual metrics "fake" 1.0 por ahora, para no romper nada:
-            "visual_score": 1.0,
-            "face_q": 1.0,
-            "scene_q": 1.0,
-            "vtx_sim": semantic_score,
-            "chain_ids": [clip_id],
+            "start": start,
+            "end": end,
+            "score": round(score, 2),
+            "semantic_score": round(semantic_score, 2),
+            "visual_score": round(visual_score, 2),
+            "face_q": face_q,
+            "scene_q": scene_q,
+            "vtx_sim": 1.0,  # se ajusta luego para dedup si quieres
+            "chain_ids": [f"{seg_id}_c1"],
             "text": text,
-            "llm_reason": llm_reason,
+            "llm_reason": llm["reason"],
             "visual_flags": {
                 "scene_jump": False,
                 "motion_jump": False,
             },
             "meta": {
                 "slot": slot,
-                "semantic_score": semantic_score,
-                "visual_score": 1.0,
-                "score": score,
+                "semantic_score": round(semantic_score, 2),
+                "visual_score": round(visual_score, 2),
+                "score": round(score, 2),
                 "chain_ids": [],
                 "keep": keep,
             },
@@ -296,11 +394,10 @@ def build_clips_from_asr(asr_segments: List[Dict[str, Any]]) -> List[Dict[str, A
     return clips
 
 
-# -------------------------------------------------------------------
-#  GROUP CLIPS BY SLOT
-# -------------------------------------------------------------------
-
-def group_by_slot(clips: List[Dict[str, Any]]) -> Dict[str, List[Dict[str, Any]]]:
+# ---------------------------------------------------------
+# 🔧 Agrupar por slots + Free-Flow Composer (sin límites)
+# ---------------------------------------------------------
+def group_clips_by_slot(clips: List[Dict[str, Any]]) -> Dict[str, List[Dict[str, Any]]]:
     slots: Dict[str, List[Dict[str, Any]]] = {
         "HOOK": [],
         "STORY": [],
@@ -311,107 +408,149 @@ def group_by_slot(clips: List[Dict[str, Any]]) -> Dict[str, List[Dict[str, Any]]
         "CTA": [],
     }
     for c in clips:
-        slot = c.get("slot", "STORY").upper()
-        if slot not in slots:
-            slot = "STORY"
-        slots[slot].append(c)
+        slot = c.get("slot", "FILLER")
+        if slot in slots:
+            slots[slot].append(c)
+    # Ordenar cada slot por tiempo
+    for slot, arr in slots.items():
+        arr.sort(key=lambda x: x["start"])
     return slots
 
 
-# -------------------------------------------------------------------
-#  FUNNEL COMPOSER (CON NUEVOS LÍMITES)
-# -------------------------------------------------------------------
-
-def compose_funnel(slots: Dict[str, List[Dict[str, Any]]]) -> Dict[str, Any]:
+def dedup_within_slot(clips: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     """
-    Devuelve:
-    - composer (IDs por slot)
-    - used_clip_ids (en orden de timeline final)
+    Dedup muy simple basado en similitud de texto. No quita info dura,
+    sólo elimina clones obvios (sim > COMPOSER_DUP_SIM_THRESHOLD).
     """
-
-    used_ids: List[str] = []
-    used_norm_texts: List[str] = []
-
-    def pick_from_slot(slot_name: str) -> List[str]:
-        clips = slots.get(slot_name, []) or []
-        limit = SLOT_LIMITS.get(slot_name, 0)
-
-        if not clips:
-            return []
-
-        chosen_ids: List[str] = []
-
-        ordered = sorted(
-            clips,
-            key=lambda c: float(c.get("score", 0.0)),
-            reverse=True,
-        )
-
-        for c in ordered:
-            # si hay límite (>0) y ya llegamos, paramos
-            if limit > 0 and len(chosen_ids) >= limit:
+    kept: List[Dict[str, Any]] = []
+    for c in clips:
+        text = c.get("text", "")
+        is_dup = False
+        for kc in kept:
+            sim = simple_similarity(text, kc.get("text", ""))
+            if sim >= COMPOSER_DUP_SIM_THRESHOLD:
+                is_dup = True
                 break
+        if not is_dup:
+            kept.append(c)
+    return kept
 
-            meta = c.get("meta", {}) or {}
-            if not meta.get("keep", True):
-                continue
 
-            sem = c.get("semantic_score")
-            if sem is None:
-                sem = meta.get("semantic_score", 0.0)
-            sem = float(sem or 0.0)
+def compose_funnel(clips: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """
+    Free-Flow Composer:
+      - Respeta meta.keep (no limita # por slot).
+      - Orden:
+          1) HOOK
+          2) STORY
+          3) PROBLEM
+          4) BENEFITS
+          5) FEATURES
+          6) PROOF
+          7) CTA
+    """
+    kept_clips = [c for c in clips if c["meta"].get("keep", True)]
 
-            # filtro por semantic_score mínimo
-            if sem < COMPOSER_MIN_SEMANTIC:
-                continue
+    # Filtro mínimo por semantic_score
+    kept_clips = [
+        c for c in kept_clips
+        if c.get("semantic_score", 0.0) >= COMPOSER_MIN_SEMANTIC
+    ]
 
-            text = c.get("text", "") or ""
-            if _is_duplicate(text, used_norm_texts, COMPOSER_DUP_SIM_THRESHOLD):
-                continue
+    # Agrupar
+    slots = group_clips_by_slot(kept_clips)
 
-            used_norm_texts.append(_normalize_text(text))
-            cid = c["id"]
-            chosen_ids.append(cid)
-            used_ids.append(cid)
+    # Dedup dentro de cada slot
+    for slot, arr in slots.items():
+        slots[slot] = dedup_within_slot(arr)
 
-        return chosen_ids
+    order_slots = ["HOOK", "STORY", "PROBLEM", "BENEFITS", "FEATURES", "PROOF", "CTA"]
 
-    # HOOK (1)
-    hook_ids = pick_from_slot("HOOK")
-    hook_id = hook_ids[0] if hook_ids else None
+    ordered: List[Dict[str, Any]] = []
+    for slot in order_slots:
+        ordered.extend(slots[slot])
 
-    # STORY (puede ser 0 = sin límite, pero por ahora no usamos mucho)
-    story_ids = pick_from_slot("STORY")
+    used_clip_ids = [c["id"] for c in ordered]
 
-    # PROBLEM (1 máx)
-    problem_ids = pick_from_slot("PROBLEM")
+    # armar ids por slot para metadata
+    hook_id = slots["HOOK"][0]["id"] if slots["HOOK"] else None
+    story_ids = [c["id"] for c in slots["STORY"]]
+    problem_ids = [c["id"] for c in slots["PROBLEM"]]
+    benefit_ids = [c["id"] for c in slots["BENEFITS"]]
+    feature_ids = [c["id"] for c in slots["FEATURES"]]
+    proof_ids = [c["id"] for c in slots["PROOF"]]
+    cta_id = slots["CTA"][0]["id"] if slots["CTA"] else None
 
-    # BENEFITS (0 = sin límite)
-    benefit_ids = pick_from_slot("BENEFITS")
+    # Texto humano para debug
+    def line(c):
+        return f"[{c['id']}] score={c['score']} → \"{c['text']}\""
 
-    # FEATURES (0 = sin límite)
-    feature_ids = pick_from_slot("FEATURES")
-
-    # PROOF (1 máx)
-    proof_ids = pick_from_slot("PROOF")
-
-    # CTA (1)
-    cta_ids = pick_from_slot("CTA")
-    cta_id = cta_ids[0] if cta_ids else None
-
-    # Timeline final (orden funnel)
-    final_order: List[str] = []
+    parts = ["===== EDITDNA FUNNEL COMPOSER ====="]
+    parts.append("HOOK:")
     if hook_id:
-        final_order.append(hook_id)
-    final_order.extend(story_ids)
-    final_order.extend(problem_ids)
-    final_order.extend(benefit_ids)
-    final_order.extend(feature_ids)
-    final_order.extend(proof_ids)
-    if cta_id:
-        final_order.append(cta_id)
+        h = next(c for c in slots["HOOK"] if c["id"] == hook_id)
+        parts.append(f"  {line(h)}")
+    else:
+        parts.append("  (none)")
 
-    composer: Dict[str, Any] = {
+    parts.append("STORY:")
+    if story_ids:
+        for sid in story_ids:
+            c = next(x for x in slots["STORY"] if x["id"] == sid)
+            parts.append(f"  {line(c)}")
+    else:
+        parts.append("  (none)")
+
+    parts.append("PROBLEM:")
+    if problem_ids:
+        for pid in problem_ids:
+            c = next(x for x in slots["PROBLEM"] if x["id"] == pid)
+            parts.append(f"  {line(c)}")
+    else:
+        parts.append("  (none)")
+
+    parts.append("BENEFITS:")
+    if benefit_ids:
+        for bid in benefit_ids:
+            c = next(x for x in slots["BENEFITS"] if x["id"] == bid)
+            parts.append(f"  {line(c)}")
+    else:
+        parts.append("  (none)")
+
+    parts.append("FEATURES:")
+    if feature_ids:
+        for fid in feature_ids:
+            c = next(x for x in slots["FEATURES"] if x["id"] == fid)
+            parts.append(f"  {line(c)}")
+    else:
+        parts.append("  (none)")
+
+    parts.append("PROOF:")
+    if proof_ids:
+        for pid in proof_ids:
+            c = next(x for x in slots["PROOF"] if x["id"] == pid)
+            parts.append(f"  {line(c)}")
+    else:
+        parts.append("  (none)")
+
+    parts.append("CTA:")
+    if cta_id:
+        c = next(x for x in slots["CTA"] if x["id"] == cta_id)
+        parts.append(f"  {line(c)}")
+    else:
+        parts.append("  (none)")
+
+    parts.append("")
+    parts.append("FINAL ORDER TIMELINE:")
+    for i, c in enumerate(ordered, start=1):
+        parts.append(f"{i}) {c['id']} → \"{c['text']}\"")
+
+    parts.append("")
+    parts.append("=====================================")
+
+    composer_human = "\n".join(parts)
+
+    composer_meta = {
         "hook_id": hook_id,
         "story_ids": story_ids,
         "problem_ids": problem_ids,
@@ -419,289 +558,170 @@ def compose_funnel(slots: Dict[str, List[Dict[str, Any]]]) -> Dict[str, Any]:
         "feature_ids": feature_ids,
         "proof_ids": proof_ids,
         "cta_id": cta_id,
-        "used_clip_ids": final_order,
+        "used_clip_ids": used_clip_ids,
         "min_score": COMPOSER_MIN_SEMANTIC,
     }
-    return composer
+
+    return {
+        "composer": composer_meta,
+        "composer_human": composer_human,
+        "slots": slots,
+        "used_clip_ids": used_clip_ids,
+    }
 
 
-def build_composer_human(composer: Dict[str, Any], clip_index: Dict[str, Dict[str, Any]]) -> str:
-    lines: List[str] = []
-    lines.append("===== EDITDNA FUNNEL COMPOSER =====")
-
-    def line_for_id(cid: str) -> str:
-        c = clip_index.get(cid)
-        if not c:
-            return f"  [{cid}] (missing)"
-        score = float(c.get("score", 0.0))
-        text = c.get("text", "")
-        return f"  [{cid}] score={score:.2f} → \"{text}\""
-
-    # HOOK
-    lines.append("HOOK:")
-    if composer.get("hook_id"):
-        lines.append(line_for_id(composer["hook_id"]))
-    else:
-        lines.append("  (none)")
-
-    # STORY
-    lines.append("STORY:")
-    if composer.get("story_ids"):
-        for cid in composer["story_ids"]:
-            lines.append(line_for_id(cid))
-    else:
-        lines.append("  (none)")
-
-    # PROBLEM
-    lines.append("PROBLEM:")
-    if composer.get("problem_ids"):
-        for cid in composer["problem_ids"]:
-            lines.append(line_for_id(cid))
-    else:
-        lines.append("  (none)")
-
-    # BENEFITS
-    lines.append("BENEFITS:")
-    if composer.get("benefit_ids"):
-        for cid in composer["benefit_ids"]:
-            lines.append(line_for_id(cid))
-    else:
-        lines.append("  (none)")
-
-    # FEATURES
-    lines.append("FEATURES:")
-    if composer.get("feature_ids"):
-        for cid in composer["feature_ids"]:
-            lines.append(line_for_id(cid))
-    else:
-        lines.append("  (none)")
-
-    # PROOF
-    lines.append("PROOF:")
-    if composer.get("proof_ids"):
-        for cid in composer["proof_ids"]:
-            lines.append(line_for_id(cid))
-    else:
-        lines.append("  (none)")
-
-    # CTA
-    lines.append("CTA:")
-    if composer.get("cta_id"):
-        lines.append(line_for_id(composer["cta_id"]))
-    else:
-        lines.append("  (none)")
-
-    lines.append("")
-    lines.append("FINAL ORDER TIMELINE:")
-    for i, cid in enumerate(composer.get("used_clip_ids", []), start=1):
-        c = clip_index.get(cid)
-        if not c:
-            lines.append(f"{i}) {cid}")
-        else:
-            text = c.get("text", "")
-            lines.append(f"{i}) {cid} → \"{text}\"")
-
-    lines.append("")
-    lines.append("=====================================")
-    return "\n".join(lines)
-
-
-# -------------------------------------------------------------------
-#  RENDER (FFMPEG) — CON FIX DE AUDIO/VIDEO
-# -------------------------------------------------------------------
-
+# ---------------------------------------------------------
+# 🔧 Render final con MoviePy (sin ffmpeg filter_complex)
+# ---------------------------------------------------------
 def render_funnel_video(
     input_local: str,
-    session_dir: Path,
+    session_dir: str,
     clip_index: Dict[str, Dict[str, Any]],
     used_clip_ids: List[str],
-) -> Path:
+) -> str:
     """
-    Corta del video original los segmentos usados y los concatena,
-    con filtros para mantener audio y video sincronizados.
+    Render final funnel video usando MoviePy.
+
+    - Respeta el audio original (sin desync).
+    - Corta por tiempos start/end de cada clip elegido.
+    - Mantiene el orden de used_clip_ids.
     """
+    logger.info(
+        "🎞️ render_funnel_video (MoviePy) starting",
+        extra={
+            "input_local": input_local,
+            "session_dir": session_dir,
+            "used_clip_ids": used_clip_ids,
+        },
+    )
+
     if not used_clip_ids:
-        raise ValueError("No clips selected for final video")
+        raise ValueError("render_funnel_video: no used_clip_ids provided")
 
-    input_path = Path(input_local)
-    if not input_path.exists():
-        raise FileNotFoundError(f"Input video not found: {input_local}")
+    ensure_dir(session_dir)
+    final_path = os.path.join(session_dir, "final.mp4")
 
-    output_path = session_dir / "final.mp4"
+    # 1) Abrimos el video maestro
+    base_clip = VideoFileClip(input_local)
 
-    # Construimos filter_complex
-    filter_parts: List[str] = []
-    concat_video_inputs: List[str] = []
-    concat_audio_inputs: List[str] = []
+    # FPS: si no viene definido, usamos 30
+    fps = getattr(base_clip, "fps", None) or 30
 
-    for i, cid in enumerate(used_clip_ids):
-        c = clip_index[cid]
-        start = float(c["start"])
-        end = float(c["end"])
+    # 2) Crear subclips
+    subclips = []
+    for cid in used_clip_ids:
+        c = clip_index.get(cid)
+        if not c:
+            logger.warning("render_funnel_video: clip_id not in index", extra={"cid": cid})
+            continue
 
-        vname = f"v{i}"
-        aname = f"a{i}"
+        start = float(c.get("start", 0.0))
+        end = float(c.get("end", start + 0.1))
 
-        # trim de video y audio, reseteando PTS
-        filter_parts.append(
-            f"[0:v]trim=start={start}:end={end},setpts=PTS-STARTPTS[{vname}]"
+        if end <= start:
+            end = start + 0.1
+
+        logger.info(
+            "✂️ Subclip",
+            extra={"cid": cid, "start": start, "end": end},
         )
-        filter_parts.append(
-            f"[0:a]atrim=start={start}:end={end},asetpts=PTS-STARTPTS[{aname}]"
+
+        sub = base_clip.subclip(start, end)
+        subclips.append(sub)
+
+    if not subclips:
+        base_clip.close()
+        raise ValueError("render_funnel_video: no valid subclips to concatenate")
+
+    final_clip = concatenate_videoclips(subclips, method="compose")
+
+    logger.info(
+        "💾 Writing final video with MoviePy",
+        extra={"final_path": final_path, "fps": fps},
+    )
+
+    final_clip.write_videofile(
+        final_path,
+        codec="libx264",
+        audio_codec="aac",
+        fps=fps,
+        temp_audiofile=os.path.join(session_dir, "temp-audio.m4a"),
+        remove_temp=True,
+        verbose=False,
+        logger=None,
+    )
+
+    final_clip.close()
+    base_clip.close()
+
+    logger.info("✅ render_funnel_video done", extra={"final_path": final_path})
+    return final_path
+
+
+# ---------------------------------------------------------
+# 🔧 run_pipeline (entrypoint desde tasks.job_render)
+# ---------------------------------------------------------
+def run_pipeline(session_id: str, files: List[str]) -> Dict[str, Any]:
+    """
+    Entry principal del worker.
+
+    tasks.job_render lo llama así:
+
+        result = pipeline.run_pipeline(
+            session_id=session_id,
+            files=files,
         )
 
-        concat_video_inputs.append(f"[{vname}]")
-        concat_audio_inputs.append(f"[{aname}]")
-
-    n = len(used_clip_ids)
-    # concat y luego resample de audio para sync
-    filter_parts.append(
-        f"{''.join(concat_video_inputs)}{''.join(concat_audio_inputs)}"
-        f"concat=n={n}:v=1:a=1[vf][af]"
-    )
-    # audio sync fix
-    filter_parts.append("[af]aresample=async=1:first_pts=0[af_sync]")
-    filter_complex = ";".join(filter_parts)
-
-    cmd = [
-        "ffmpeg",
-        "-y",
-        "-i",
-        str(input_path),
-        "-filter_complex",
-        filter_complex,
-        "-map",
-        "[vf]",
-        "-map",
-        "[af_sync]",
-        "-r",
-        "30",
-        "-pix_fmt",
-        "yuv420p",
-        str(output_path),
-    ]
-
-    logger.info("Running ffmpeg to render funnel video")
-    logger.debug("ffmpeg command: %s", " ".join(cmd))
-
-    proc = subprocess.run(
-        cmd,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        text=True,
-    )
-    if proc.returncode != 0:
-        logger.error("ffmpeg failed:\nSTDOUT:\n%s\nSTDERR:\n%s", proc.stdout, proc.stderr)
-        raise RuntimeError(f"ffmpeg failed with code {proc.returncode}")
-
-    logger.info(f"Final video rendered at {output_path}")
-    return output_path
-
-
-# -------------------------------------------------------------------
-#  VETO LAYER (simple)
-# -------------------------------------------------------------------
-
-def apply_veto(clips: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-    """Por ahora, solo filtra clips con score muy bajo."""
-    result = []
-    for c in clips:
-        score = _safe_float(c.get("score", 0.0), 0.0)
-        if score < VETO_MIN_SCORE:
-            # podríamos marcar meta.keep=False, pero el composer ya usa eso
-            meta = c.get("meta", {}) or {}
-            meta["keep"] = False
-            c["meta"] = meta
-        result.append(c)
-    return result
-
-
-# -------------------------------------------------------------------
-#  MAIN PIPELINE
-# -------------------------------------------------------------------
-
-def run_pipeline(session_id: str, input_local: str) -> Dict[str, Any]:
+    Donde `files` es una lista de URLs (usamos la primera).
     """
-    Main entry point desde tasks.py
+    if not files:
+        raise ValueError("run_pipeline: files list is empty")
 
-    Args:
-        session_id: ID de sesión (ej: "funnel-test-1")
-        input_local: ruta local al video de entrada
+    video_url = files[0]
 
-    Returns:
-        dict con:
-          - ok
-          - session_id
-          - input_local
-          - duration_sec
-          - clips
-          - slots
-          - composer
-          - composer_human
-          - output_video_local
-          - output_video_url
-          - asr / semantic / vision flags
-    """
-    session_dir = _ensure_tmp_dir(session_id)
+    session_dir = os.path.join(TMP_ROOT, session_id)
+    ensure_dir(session_dir)
+
+    input_local = os.path.join(session_dir, "input.mp4")
+    download_to_local(video_url, input_local)
 
     # 1) ASR
-    asr_segments, duration_sec = run_asr(input_local)
+    segments, duration_sec, language = run_asr(input_local)
 
-    # 2) LLM classification → clips
-    clips = build_clips_from_asr(asr_segments)
+    # 2) Clips + LLM
+    clips = build_clips_from_asr(segments, language)
 
-    # 3) Veto/cleanup
-    clips = apply_veto(clips)
+    # 3) Composer (Free-Flow, sin límites de slots)
+    comp = compose_funnel(clips)
+    composer_meta = comp["composer"]
+    composer_human = comp["composer_human"]
+    slots_map = comp["slots"]
+    used_clip_ids = comp["used_clip_ids"]
 
-    # 4) Slots
-    slots = group_by_slot(clips)
+    # índice por id para el render
+    clip_index: Dict[str, Dict[str, Any]] = {c["id"]: c for c in clips}
 
-    # 5) Composer
-    composer = compose_funnel(slots)
-
-    # index por ID
-    clip_index = {c["id"]: c for c in clips}
-
-    composer_human = build_composer_human(composer, clip_index)
-
-    used_clip_ids = composer.get("used_clip_ids", [])
-    if not used_clip_ids:
-        # si no hay nada seleccionado, devolvemos solo JSON sin video final
-        return {
-            "ok": False,
-            "session_id": session_id,
-            "input_local": input_local,
-            "duration_sec": duration_sec,
-            "clips": clips,
-            "slots": slots,
-            "composer": composer,
-            "composer_human": composer_human,
-            "output_video_local": None,
-            "output_video_url": None,
-            "asr": True,
-            "semantic": True,
-            "vision": True,
-        }
-
-    # 6) Render video final (con fix de audio/video)
+    # 4) Render final
     final_path = render_funnel_video(input_local, session_dir, clip_index, used_clip_ids)
 
-    # 7) Upload to S3
-    output_video_url = _upload_to_s3(final_path, session_id)
+    # 5) Upload opcional a S3
+    output_url = upload_to_s3(final_path, session_id)
 
-    result: Dict[str, Any] = {
-        "ok": True,
+    result = {
         "session_id": session_id,
         "input_local": input_local,
         "duration_sec": duration_sec,
         "clips": clips,
-        "slots": slots,
-        "composer": composer,
+        "slots": {
+            k: v for k, v in slots_map.items()
+        },
+        "composer": composer_meta,
         "composer_human": composer_human,
-        "output_video_local": str(final_path),
-        "output_video_url": output_video_url,
+        "output_video_local": final_path,
+        "output_video_url": output_url,
         "asr": True,
         "semantic": True,
-        "vision": True,  # por ahora lo dejamos en True para no romper UI
+        "vision": True,  # aún stub, pero mantenemos flag como en tus logs
     }
+
     return result
