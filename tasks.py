@@ -98,4 +98,3 @@ def job_render(payload: Dict[str, Any]) -> Dict[str, Any]:
             "error": str(e),
             "traceback": traceback.format_exc(),
         }
-
