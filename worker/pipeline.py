@@ -714,25 +714,34 @@ def render_funnel_video(
 # ==== ENTRYPOINT PRINCIPAL ====
 
 
-def run_pipeline(session_id: str, files: List[str]) -> Dict[str, Any]:
+def run_pipeline(
+    session_id: str,
+    files: Optional[List[str]] = None,
+    file_urls: Optional[List[str]] = None,
+) -> Dict[str, Any]:
     """
-    Firma compatible con tu tasks.py actual:
-
-        result = pipeline.run_pipeline(
-            session_id=session_id,
-            files=files,
-        )
+    Firma compatible con tasks.py, tanto si llama con:
+        run_pipeline(session_id=session_id, files=files)
+    como si llama con:
+        run_pipeline(session_id=session_id, file_urls=files)
     """
-    logger.info(f"run_pipeline session_id={session_id} files={files}")
+    logger.info(f"run_pipeline session_id={session_id} files={files} file_urls={file_urls}")
 
-    if not files or not isinstance(files, list):
-        raise ValueError("run_pipeline: 'files' debe ser una lista con al menos 1 URL")
+    # Normalizamos: preferimos 'files', pero si viene 'file_urls', lo usamos
+    effective_files: Optional[List[str]] = None
+    if files and isinstance(files, list):
+        effective_files = files
+    elif file_urls and isinstance(file_urls, list):
+        effective_files = file_urls
+
+    if not effective_files:
+        raise ValueError("run_pipeline: se requiere 'files' o 'file_urls' como lista con al menos 1 URL")
 
     session_dir = ensure_session_dir(session_id)
     input_local = os.path.join(session_dir, "input.mp4")
 
     # Tomamos sólo el primer archivo por ahora
-    download_to_local(files[0], input_local)
+    download_to_local(effective_files[0], input_local)
 
     duration = probe_duration(input_local)
 
