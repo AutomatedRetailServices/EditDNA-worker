@@ -20,6 +20,8 @@ WHISPER_DEVICE = os.environ.get("WHISPER_DEVICE", "auto")  # auto / cuda / cpu
 COMPOSER_MIN_SEMANTIC = float(os.environ.get("COMPOSER_MIN_SEMANTIC", "0.55"))
 COMPOSER_MAX_PER_SLOT = int(os.environ.get("COMPOSER_MAX_PER_SLOT", "7"))
 MICRO_SENTENCE_MAX_SECONDS = float(os.environ.get("MICRO_SENTENCE_MAX_SECONDS", "8.0"))
+COMPOSER_TARGET_DURATION = float(os.environ.get("COMPOSER_TARGET_DURATION", "35.0"))
+COMPOSER_EARLY_WINDOW = float(os.environ.get("COMPOSER_EARLY_WINDOW", "8.0"))
 
 S3_BUCKET = os.environ.get("S3_BUCKET")
 S3_PREFIX = os.environ.get("S3_PREFIX", "editdna/outputs")
@@ -486,57 +488,153 @@ def build_slots_dict(clips: List[Dict[str, Any]]) -> Dict[str, List[Dict[str, An
 
 def build_composer(clips: List[Dict[str, Any]]) -> Dict[str, Any]:
     """
-    Free-Flow Composer:
-      - Mantiene el orden cronológico.
-      - Sólo conserva clips keep=True & semantic_score >= COMPOSER_MIN_SEMANTIC.
-      - CTA (si existe) se mueve al final.
+    Funnel Composer V3 FULL:
+      - Mantiene bloque inicial HOOK/PROBLEM dentro de COMPOSER_EARLY_WINDOW.
+      - Respeta orden cronológico.
+      - Intenta construir HOOK → PROBLEM/STORY → FEATURES → BENEFITS → PROOF → CTA.
+      - Limita duración a COMPOSER_TARGET_DURATION (CTA puede extender un poco si no entra).
     """
-    # 1) Filtrar clips útiles
-    usable = [
-        c
-        for c in clips
-        if c["meta"].get("keep", True)
-        and safe_float(c.get("semantic_score", 0.0)) >= COMPOSER_MIN_SEMANTIC
-    ]
+    # 1) Filtrar clips keep=True
+    kept = [c for c in clips if c.get("meta", {}).get("keep", True)]
+    if not kept:
+        # fallback: usar todos
+        kept = clips[:]
 
     # 2) Orden cronológico
-    usable.sort(key=lambda c: safe_float(c.get("start", 0.0)))
-
-    # 3) CTA especial
-    ctas = [c for c in usable if c.get("slot") == "CTA"]
-    cta_clip = None
-    if ctas:
-        # CTA con mayor semantic_score
-        ctas.sort(key=lambda c: safe_float(c.get("semantic_score", 0.0)), reverse=True)
-        cta_clip = ctas[0]
+    kept.sort(key=lambda c: safe_float(c.get("start", 0.0)))
 
     timeline: List[Dict[str, Any]] = []
-    used_ids: List[str] = []
+    used_ids: set[str] = set()
 
-    for c in usable:
-        if cta_clip is not None and c["id"] == cta_clip["id"]:
-            continue
+    def add_clip(c: Dict[str, Any]) -> None:
+        cid = c.get("id")
+        if not cid or cid in used_ids:
+            return
         timeline.append(c)
-        used_ids.append(c["id"])
+        used_ids.add(cid)
 
+    # 3) Bloque inicial HOOK/PROBLEM dentro de early window (ej. primeras 8s)
+    early_block = [
+        c
+        for c in kept
+        if safe_float(c.get("start", 0.0)) < COMPOSER_EARLY_WINDOW
+        and c.get("slot") in ("HOOK", "PROBLEM")
+        and safe_float(c.get("score", 0.0)) >= 0.25
+    ]
+    for c in early_block:
+        add_clip(c)
+
+    # 4) Si no hay HOOK aún, elegimos mejor HOOK global
+    if not any(c.get("slot") == "HOOK" for c in timeline):
+        hook_candidates = [
+            c
+            for c in kept
+            if c.get("slot") == "HOOK"
+            and c.get("id") not in used_ids
+            and safe_float(c.get("score", 0.0)) >= COMPOSER_MIN_SEMANTIC
+        ]
+        if hook_candidates:
+            hook_candidates.sort(
+                key=lambda c: (-safe_float(c.get("score", 0.0)), safe_float(c.get("start", 0.0)))
+            )
+            add_clip(hook_candidates[0])
+
+    # 5) Helper para elegir mejores clips por slot
+    def add_best_by_slot(slot_name: str, max_count: int) -> None:
+        candidates = [
+            c
+            for c in kept
+            if c.get("slot") == slot_name
+            and c.get("id") not in used_ids
+            and safe_float(c.get("score", 0.0)) >= COMPOSER_MIN_SEMANTIC
+        ]
+        if not candidates:
+            return
+        # ordenar por score (desc) luego por tiempo
+        candidates.sort(
+            key=lambda c: (-safe_float(c.get("score", 0.0)), safe_float(c.get("start", 0.0)))
+        )
+        chosen = candidates[:max_count]
+        # Añadimos en orden cronológico
+        for c in sorted(chosen, key=lambda c: safe_float(c.get("start", 0.0))):
+            add_clip(c)
+
+    # Orden lógico de slots (sin CTA todavía)
+    add_best_by_slot("PROBLEM", max_count=1)
+    add_best_by_slot("STORY", max_count=2)
+    add_best_by_slot("FEATURES", max_count=3)
+    add_best_by_slot("BENEFITS", max_count=2)
+    add_best_by_slot("PROOF", max_count=1)
+
+    # 6) CTA: elegimos la mejor, pero no la metemos todavía en timeline
+    cta_candidates = [
+        c
+        for c in kept
+        if c.get("slot") == "CTA"
+        and c.get("id") not in used_ids
+        and safe_float(c.get("score", 0.0)) >= 0.3
+    ]
+    cta_clip: Optional[Dict[str, Any]] = None
+    if cta_candidates:
+        cta_candidates.sort(
+            key=lambda c: (-safe_float(c.get("score", 0.0)), safe_float(c.get("start", 0.0)))
+        )
+        cta_clip = cta_candidates[0]
+
+    # 7) Timeline en orden cronológico (sin CTA)
+    timeline.sort(key=lambda c: safe_float(c.get("start", 0.0)))
+
+    # 8) Recortar por duración objetivo
+    final_timeline: List[Dict[str, Any]] = []
+    total_dur = 0.0
+
+    for c in timeline:
+        start = safe_float(c.get("start", 0.0))
+        end = safe_float(c.get("end", 0.0))
+        dur = max(0.0, end - start)
+        if COMPOSER_TARGET_DURATION and total_dur + dur > COMPOSER_TARGET_DURATION and total_dur > 0:
+            break
+        final_timeline.append(c)
+        total_dur += dur
+
+    # 9) Asegurar CTA al final si existe
     if cta_clip is not None:
-        timeline.append(cta_clip)
-        used_ids.append(cta_clip["id"])
+        cta_id = cta_clip.get("id")
+        if cta_id and not any(c.get("id") == cta_id for c in final_timeline):
+            final_timeline.append(cta_clip)
 
-    # 4) Caps por slot (sólo para el resumen composer, NO para quitar del video)
-    def cap_ids(slot_name: str) -> List[str]:
-        ids = [c["id"] for c in timeline if c.get("slot") == slot_name]
+    if not final_timeline:
+        # fallback: meter al menos algo
+        final_timeline = kept[:1]
+
+    used_clip_ids = [c.get("id") for c in final_timeline if c.get("id")]
+
+    # 10) Construir composer dict tomando los IDs por slot del timeline final
+    def collect_ids(slot_name: str) -> List[str]:
+        ids = [c.get("id") for c in final_timeline if c.get("slot") == slot_name and c.get("id")]
+        # respetar COMPOSER_MAX_PER_SLOT
         return ids[:COMPOSER_MAX_PER_SLOT]
 
+    hook_id = next(
+        (c.get("id") for c in final_timeline if c.get("slot") == "HOOK" and c.get("id")), None
+    )
+    story_ids = collect_ids("STORY")
+    problem_ids = collect_ids("PROBLEM")
+    benefit_ids = collect_ids("BENEFITS")
+    feature_ids = collect_ids("FEATURES")
+    proof_ids = collect_ids("PROOF")
+    cta_ids = collect_ids("CTA")
+    cta_id = cta_ids[0] if cta_ids else None
+
     composer = {
-        "hook_id": next((c["id"] for c in timeline if c.get("slot") == "HOOK"), None),
-        "story_ids": cap_ids("STORY"),
-        "problem_ids": cap_ids("PROBLEM"),
-        "benefit_ids": cap_ids("BENEFITS"),
-        "feature_ids": cap_ids("FEATURES"),
-        "proof_ids": cap_ids("PROOF"),
-        "cta_id": cta_clip["id"] if cta_clip else None,
-        "used_clip_ids": used_ids,
+        "hook_id": hook_id,
+        "story_ids": story_ids,
+        "problem_ids": problem_ids,
+        "benefit_ids": benefit_ids,
+        "feature_ids": feature_ids,
+        "proof_ids": proof_ids,
+        "cta_id": cta_id,
+        "used_clip_ids": used_clip_ids,
         "min_score": COMPOSER_MIN_SEMANTIC,
     }
     return composer
@@ -760,7 +858,7 @@ def run_pipeline(
     # 5) Slots agrupados (para el JSON final)
     slots = build_slots_dict(clips)
 
-    # 6) Composer free-flow
+    # 6) Composer funnel V3
     composer = build_composer(clips)
     used_clip_ids = composer.get("used_clip_ids", [])
 
