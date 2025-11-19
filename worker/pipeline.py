@@ -277,7 +277,6 @@ def sentence_boundary_micro_cuts(asr_segments: List[Dict[str, Any]]) -> List[Dic
             sent_start = None
 
         for w in words:
-            # AHORA usamos dict, no atributos .word / .start / .end
             token = str(w.get("word", "")).strip()
             w_start = float(w.get("start", seg_start))
             w_end = float(w.get("end", w_start))
@@ -478,7 +477,7 @@ def composer_v2(clips: List[Dict[str, Any]]) -> Dict[str, Any]:
       - filtra por keep=True y semantic_score >= COMPOSER_MIN_SEMANTIC
       - dedupe por texto
       - organiza en slots con caps suaves
-      - orden funnel: HOOK → PROBLEM → BENEFITS → FEATURES → PROOF → CTA
+      - orden tipo funnel: HOOK → PROBLEM → STORY → BENEFITS → FEATURES → PROOF → CTA
       - mantiene orden cronológico dentro de cada grupo
       - CTA (si existe) se fuerza al final
     """
@@ -534,16 +533,16 @@ def composer_v2(clips: List[Dict[str, Any]]) -> Dict[str, Any]:
 
     hook_clips = sort_by_start(slots["HOOK"])
     problem_clips = sort_by_start(slots["PROBLEM"])
+    story_clips = sort_by_start(slots["STORY"])
     benefit_clips = sort_by_start(slots["BENEFITS"])
     feature_clips = sort_by_start(slots["FEATURES"])
     proof_clips = sort_by_start(slots["PROOF"])
-    story_clips = sort_by_start(slots["STORY"])
     cta_clips = sort_by_start(slots["CTA"])
 
     # Orden final:
     # 1) HOOKs
     # 2) PROBLEM
-    # 3) STORY (si hay)
+    # 3) STORY
     # 4) BENEFITS
     # 5) FEATURES
     # 6) PROOF
@@ -617,7 +616,7 @@ def composer_v2(clips: List[Dict[str, Any]]) -> Dict[str, Any]:
     }
 
 
-# ========= VIDEO RENDER (FFmpeg) =========
+# ========= VIDEO RENDER (NEW: concat demuxer) =========
 
 
 def render_funnel_video(
@@ -627,8 +626,17 @@ def render_funnel_video(
     used_clip_ids: List[str],
 ) -> Path:
     """
-    Corta el input en base a los clips seleccionados y genera un final.mp4
-    usando trim/atrim + concat con audio y video sincronizados.
+    NUEVA VERSIÓN ROBUSTA (SIN filter_complex):
+
+    1) Para cada clip seleccionado:
+       - ffmpeg -ss start -to end -i input.mp4 -c copy segment_i.mp4
+    2) Creamos un concat_list.txt con:
+       file 'segment_0.mp4'
+       file 'segment_1.mp4'
+       ...
+    3) ffmpeg -f concat -safe 0 -i concat_list.txt -c copy final.mp4
+
+    Esto mantiene audio + video juntos y evita los errores de media type mismatch.
     """
     if not used_clip_ids:
         raise ValueError("No clips selected for final render")
@@ -643,65 +651,85 @@ def render_funnel_video(
     if not selected_clips:
         raise ValueError("selected_clips empty after mapping used_clip_ids")
 
-    filter_parts: List[str] = []
-    v_labels: List[str] = []
-    a_labels: List[str] = []
-
+    # 1) Extraer cada segmento a un mp4 temporal
+    segment_paths: List[Path] = []
     for i, c in enumerate(selected_clips):
         start = float(c["start"])
         end = float(c["end"])
         if end <= start:
             continue
-        v_lbl = f"v{i}"
-        a_lbl = f"a{i}"
-        filter_parts.append(
-            f"[0:v]trim=start={start:.3f}:end={end:.3f},setpts=PTS-STARTPTS[{v_lbl}]"
+
+        seg_path = session_dir / f"segment_{i:03d}.mp4"
+        # Corte rápido con copy (puede no ser frame-perfect, pero mantiene A/V sync simple)
+        cmd = [
+            "ffmpeg",
+            "-y",
+            "-ss",
+            f"{start:.3f}",
+            "-to",
+            f"{end:.3f}",
+            "-i",
+            str(input_local),
+            "-c",
+            "copy",
+            str(seg_path),
+        ]
+        logger.info("Extracting segment %s: start=%.3f end=%.3f", seg_path, start, end)
+        proc = subprocess.run(
+            cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
         )
-        filter_parts.append(
-            f"[0:a]atrim=start={start:.3f}:end={end:.3f},asetpts=PTS-STARTPTS[{a_lbl}]"
-        )
-        v_labels.append(f"[{v_lbl}]")
-        a_labels.append(f"[{a_lbl}]")
+        if proc.returncode != 0:
+            logger.error(
+                "ffmpeg segment extraction failed for %s:\nSTDOUT:\n%s\nSTDERR:\n%s",
+                seg_path,
+                proc.stdout,
+                proc.stderr,
+            )
+            raise RuntimeError(f"ffmpeg segment extraction failed with code {proc.returncode}")
+        segment_paths.append(seg_path)
 
-    n = len(v_labels)
-    if n == 0:
-        raise ValueError("No valid segments for ffmpeg after filtering zero-length")
+    if not segment_paths:
+        raise ValueError("No valid segments created for final render")
 
-    concat_part = "".join(v_labels + a_labels) + f"concat=n={n}:v=1:a=1[vout][aout]"
-    filter_complex = ";".join(filter_parts + [concat_part])
+    # 2) Crear concat_list.txt
+    list_path = session_dir / "concat_list.txt"
+    with open(list_path, "w", encoding="utf-8") as f:
+        for p in segment_paths:
+            # Rutas absolutas → usamos -safe 0
+            f.write(f"file '{p.as_posix()}'\n")
 
+    # 3) Concatenar todos los segmentos
     out_path = session_dir / "final.mp4"
-
-    cmd = [
+    cmd_concat = [
         "ffmpeg",
         "-y",
+        "-f",
+        "concat",
+        "-safe",
+        "0",
         "-i",
-        str(input_local),
-        "-filter_complex",
-        filter_complex,
-        "-map",
-        "[vout]",
-        "-map",
-        "[aout]",
-        "-c:v",
-        "libx264",
-        "-c:a",
-        "aac",
-        "-movflags",
-        "+faststart",
+        str(list_path),
+        "-c",
+        "copy",
         str(out_path),
     ]
-
-    logger.info("Running ffmpeg to render funnel video")
+    logger.info("Concatenating %d segments into %s", len(segment_paths), out_path)
     proc = subprocess.run(
-        cmd,
+        cmd_concat,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         text=True,
     )
     if proc.returncode != 0:
-        logger.error("ffmpeg failed:\nSTDOUT:\n%s\nSTDERR:\n%s", proc.stdout, proc.stderr)
-        raise RuntimeError(f"ffmpeg failed with code {proc.returncode}")
+        logger.error(
+            "ffmpeg concat failed:\nSTDOUT:\n%s\nSTDERR:\n%s",
+            proc.stdout,
+            proc.stderr,
+        )
+        raise RuntimeError(f"ffmpeg concat failed with code {proc.returncode}")
 
     return out_path
 
