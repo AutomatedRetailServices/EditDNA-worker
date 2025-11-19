@@ -31,7 +31,6 @@ S3_BUCKET = os.environ.get("S3_BUCKET")
 S3_PREFIX = os.environ.get("S3_PREFIX", "editdna/outputs")
 
 # Para esta versión: prioridad = mantener discurso natural
-# Ignoramos env alto y usamos un valor fijo más suave
 MIN_SEMANTIC_KEEP = 0.30
 DUP_SIM_THRESHOLD = 0.90  # más agresivo que antes
 
@@ -125,7 +124,6 @@ def looks_like_meta_filler(text: str) -> bool:
     Heurística para redos / meta / basura que el LLM a veces marca mal.
     """
     t = norm_text(text)
-    # patrones obvios de "redo / meta"
     bad_fragments = [
         "is that good",
         "am i saying it right",
@@ -140,13 +138,12 @@ def looks_like_meta_filler(text: str) -> bool:
         "wait no",
         "no thats not right",
         "thanks",
-        "thank you guys",  # típico cierre random
+        "thank you guys",
     ]
     for frag in bad_fragments:
         if frag in t:
             return True
 
-    # preguntas muy cortas con pocas palabras → casi siempre meta
     if t.endswith("?") and len(t.split()) <= 4:
         return True
 
@@ -235,7 +232,6 @@ def sentence_boundary_micro_cuts(asr_segments: List[Dict[str, Any]]) -> List[Dic
             text = seg.get("text", "").strip()
             if not text:
                 continue
-            # padding al nivel de segmento
             s = max(0.0, safe_float(seg.get("start", 0.0)) - PADDING)
             e = safe_float(seg.get("end", 0.0)) + PADDING
             clip_id = f"ASR{global_idx:04d}_c0"
@@ -360,7 +356,7 @@ def sentence_boundary_micro_cuts(asr_segments: List[Dict[str, Any]]) -> List[Dic
 
 
 # ==========
-# LLM CLASSIFIER (solo para slot + keep + scores)
+# LLM CLASSIFIER
 # ==========
 
 CLASSIFIER_SYSTEM_PROMPT = """
@@ -491,7 +487,6 @@ def build_cleansed_timeline(clips: List[Dict[str, Any]]) -> Dict[str, Any]:
                 best_idx = idx
 
         def is_substring_relation(a: str, b: str) -> bool:
-            # a y/o b son subcadena con suficiente overlap
             if not a or not b:
                 return False
             shorter, longer = (a, b) if len(a) <= len(b) else (b, a)
@@ -507,7 +502,6 @@ def build_cleansed_timeline(clips: List[Dict[str, Any]]) -> Dict[str, Any]:
 
         if dup_idx is not None and dup_idx >= 0:
             existing_clip = final[dup_idx]
-            # elegir el de mayor score/semantic_score
             if float(c.get("score", 0.0)) > float(existing_clip.get("score", 0.0)):
                 existing_clip["meta"]["keep"] = False
                 c["meta"]["keep"] = True
@@ -522,7 +516,6 @@ def build_cleansed_timeline(clips: List[Dict[str, Any]]) -> Dict[str, Any]:
 
     used_clip_ids = [c["id"] for c in final]
 
-    # Construimos listas por slot solo para stats/metadatos
     slots_map: Dict[str, List[Dict[str, Any]]] = {
         "HOOK": [],
         "STORY": [],
@@ -570,6 +563,42 @@ def build_cleansed_timeline(clips: List[Dict[str, Any]]) -> Dict[str, Any]:
 
 
 # ==========
+# FFPROBE – DETECTAR AUDIO
+# ==========
+
+def has_audio_stream(input_local: str) -> bool:
+    """
+    Usa ffprobe para ver si existe al menos 1 stream de audio.
+    """
+    cmd = [
+        "ffprobe",
+        "-v",
+        "error",
+        "-select_streams",
+        "a:0",
+        "-show_entries",
+        "stream=index",
+        "-of",
+        "csv=p=0",
+        input_local,
+    ]
+    try:
+        proc = subprocess.run(
+            cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+        if proc.returncode != 0:
+            return False
+        stdout = (proc.stdout or "").strip()
+        return bool(stdout)
+    except Exception as e:
+        logger.warning(f"has_audio_stream ffprobe failed, assuming no audio: {e}")
+        return False
+
+
+# ==========
 # RENDER – FFMPEG (SIN ALTERAR VELOCIDAD)
 # ==========
 
@@ -583,6 +612,9 @@ def render_funnel_video(
         raise RuntimeError("render_funnel_video: no used_clip_ids provided")
 
     out_path = os.path.join(session_dir, "final.mp4")
+
+    has_audio = has_audio_stream(input_local)
+    logger.info(f"render_funnel_video: has_audio={has_audio}")
 
     filter_parts: List[str] = []
     v_labels: List[str] = []
@@ -601,26 +633,33 @@ def render_funnel_video(
             continue
 
         v_label = f"v{idx}"
-        a_label = f"a{idx}"
-
         filter_parts.append(
             f"[0:v]trim=start={start:.3f}:end={end:.3f},setpts=PTS-STARTPTS[{v_label}]"
         )
-        filter_parts.append(
-            f"[0:a]atrim=start={start:.3f}:end={end:.3f},asetpts=PTS-STARTPTS[{a_label}]"
-        )
-
         v_labels.append(f"[{v_label}]")
-        a_labels.append(f"[{a_label}]")
+
+        if has_audio:
+            a_label = f"a{idx}"
+            filter_parts.append(
+                f"[0:a]atrim=start={start:.3f}:end={end:.3f},asetpts=PTS-STARTPTS[{a_label}]"
+            )
+            a_labels.append(f"[{a_label}]")
+
         idx += 1
 
     n = idx
     if n == 0:
         raise RuntimeError("render_funnel_video: no valid clips after trimming")
 
-    filter_parts.append(
-        f"{''.join(v_labels)}{''.join(a_labels)}concat=n={n}:v=1:a=1[vout][aout]"
-    )
+    if has_audio:
+        filter_parts.append(
+            f"{''.join(v_labels)}{''.join(a_labels)}concat=n={n}:v=1:a=1[vout][aout]"
+        )
+    else:
+        filter_parts.append(
+            f"{''.join(v_labels)}concat=n={n}:v=1:a=0[vout]"
+        )
+
     filter_complex = "; ".join(filter_parts)
 
     cmd = [
@@ -632,12 +671,15 @@ def render_funnel_video(
         filter_complex,
         "-map",
         "[vout]",
-        "-map",
-        "[aout]",
+    ]
+    if has_audio:
+        cmd += ["-map", "[aout]", "-c:a", "aac"]
+    else:
+        cmd += ["-an"]
+
+    cmd += [
         "-c:v",
         "libx264",
-        "-c:a",
-        "aac",
         "-movflags",
         "+faststart",
         out_path,
