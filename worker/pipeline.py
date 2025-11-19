@@ -7,17 +7,28 @@ from typing import List, Dict, Any, Optional
 import requests
 from faster_whisper import WhisperModel
 import boto3
-from openai import OpenAI
+import openai
 
 logger = logging.getLogger("editdna.pipeline")
 logger.setLevel(logging.INFO)
 
 # ==== CONFIG ====
+
 TMP_DIR = os.environ.get("TMP_DIR", "/tmp/TMP/editdna")
 
-# Forzamos CUDA por defecto (si el pod no tiene GPU igual cae en error y tú cambias a WHISPER_DEVICE=cpu)
-WHISPER_MODEL_NAME = os.environ.get("WHISPER_MODEL_NAME", "medium")
-WHISPER_DEVICE = os.environ.get("WHISPER_DEVICE", "cuda")  # cuda / cpu (por defecto cuda)
+# Whisper config (acepta WHISPER_MODEL_NAME o WHISPER_MODEL del ENV)
+WHISPER_MODEL_NAME = (
+    os.environ.get("WHISPER_MODEL_NAME")
+    or os.environ.get("WHISPER_MODEL")
+    or "medium"
+)
+
+# Device puede venir como WHISPER_DEVICE o ASR_DEVICE
+WHISPER_DEVICE = (
+    os.environ.get("WHISPER_DEVICE")
+    or os.environ.get("ASR_DEVICE")
+    or "auto"
+)  # auto / cuda / cpu
 
 COMPOSER_MIN_SEMANTIC = float(os.environ.get("COMPOSER_MIN_SEMANTIC", "0.55"))
 COMPOSER_MAX_PER_SLOT = int(os.environ.get("COMPOSER_MAX_PER_SLOT", "7"))
@@ -26,27 +37,12 @@ MICRO_SENTENCE_MAX_SECONDS = float(os.environ.get("MICRO_SENTENCE_MAX_SECONDS", 
 S3_BUCKET = os.environ.get("S3_BUCKET")
 S3_PREFIX = os.environ.get("S3_PREFIX", "editdna/outputs")
 
-# LLM
-LLM_MODEL = os.environ.get("EDITDNA_LLM_MODEL", "gpt-5.1")
-USE_LLM = os.environ.get("EDITDNA_USE_LLM", "1").lower() in ("1", "true", "yes", "y")
+# LLM + Vision
+EDITDNA_LLM_MODEL = os.environ.get("EDITDNA_LLM_MODEL", "gpt-5.1")
+EDITDNA_USE_LLM = int(os.environ.get("EDITDNA_USE_LLM", "0"))
+VISION_ENABLED = int(os.environ.get("VISION_ENABLED", "0"))
 
-# ==== OPENAI CLIENT (LLM) ====
-_LLM_CLIENT: Optional[OpenAI] = None
-
-
-def get_llm_client() -> Optional[OpenAI]:
-    global _LLM_CLIENT
-    if not USE_LLM:
-        logger.info("EDITDNA_USE_LLM desactivado; sólo heurística.")
-        return None
-    if not os.environ.get("OPENAI_API_KEY"):
-        logger.warning("OPENAI_API_KEY no configurado; LLM deshabilitado.")
-        return None
-    if _LLM_CLIENT is None:
-        _LLM_CLIENT = OpenAI()
-        logger.info(f"Cliente OpenAI inicializado con modelo {LLM_MODEL}")
-    return _LLM_CLIENT
-
+openai.api_key = os.environ.get("OPENAI_API_KEY")
 
 # ==== HELPERS BÁSICOS ====
 
@@ -142,13 +138,15 @@ def get_whisper_model() -> WhisperModel:
     if _WHISPER_MODEL is not None:
         return _WHISPER_MODEL
 
-    # Forzamos GPU si no se indicó cpu
-    if WHISPER_DEVICE == "cpu":
-        device = "cpu"
-        compute_type = "int8"
-    else:
-        device = "cuda"
-        compute_type = "float16"
+    device = "cpu"
+    compute_type = "int8"
+    if WHISPER_DEVICE in ("cuda", "gpu", "auto"):
+        try:
+            device = "cuda"
+            compute_type = "float16"
+        except Exception:
+            device = "cpu"
+            compute_type = "int8"
 
     logger.info(
         f"Cargando Whisper model={WHISPER_MODEL_NAME} device={device} compute_type={compute_type}"
@@ -199,7 +197,9 @@ def run_asr(input_local: str) -> List[Dict[str, Any]]:
         )
         idx += 1
 
-    logger.info(f"ASR produjo {len(out)} segmentos, duración ~{probe_duration(input_local):.2f}s")
+    logger.info(
+        f"ASR produjo {len(out)} segmentos, duración ~{probe_duration(input_local):.2f}s"
+    )
     return out
 
 
@@ -251,7 +251,6 @@ def sentence_boundary_micro_cuts(asr_segments: List[Dict[str, Any]]) -> List[Dic
     for seg_idx, seg in enumerate(asr_segments):
         words = seg.get("words") or []
         if not words:
-            # Sin palabras → usamos el segmento completo (si no está vacío)
             text = seg.get("text", "").strip()
             if not text:
                 continue
@@ -308,16 +307,16 @@ def sentence_boundary_micro_cuts(asr_segments: List[Dict[str, Any]]) -> List[Dic
             buffer_words.append(w)
 
             duration = w_end - sent_start
-            # fin de oración por puntuación o duración
             punct = token.strip().endswith((".", "?", "!"))
             if punct or duration >= MICRO_SENTENCE_MAX_SECONDS:
                 flush_sentence()
 
-        # última oración del segmento
         flush_sentence()
 
     return clips
-# ==== CLASIFICACIÓN HEURÍSTICA (SIN LLM) ====
+
+
+# ==== CLASIFICACIÓN HEURÍSTICA (BACKUP) ====
 
 
 FILLER_PATTERNS = [
@@ -342,7 +341,6 @@ def looks_like_filler(text: str) -> bool:
     for pat in FILLER_PATTERNS:
         if pat in t:
             return True
-    # frases súper cortas de una sola palabra tipo "and", "uh", "okay?"
     if len(t.split()) <= 1 and t in {"and", "uh", "um", "hmm", "like"}:
         return True
     return False
@@ -352,7 +350,18 @@ def classify_slot(text: str) -> str:
     t = text.lower()
 
     # CTA
-    if any(p in t for p in ["click the link", "tap the link", "shop now", "get yours", "grab one", "link below", "i left it for you"]):
+    if any(
+        p in t
+        for p in [
+            "click the link",
+            "tap the link",
+            "shop now",
+            "get yours",
+            "grab one",
+            "link below",
+            "i left it for you",
+        ]
+    ):
         return "CTA"
 
     # Hook
@@ -360,15 +369,51 @@ def classify_slot(text: str) -> str:
         return "HOOK"
 
     # Problem
-    if any(p in t for p in ["tired of", "sick of", "problem", "problems", "struggle", "does your", "is your", "keep giving you"]):
+    if any(
+        p in t
+        for p in [
+            "tired of",
+            "sick of",
+            "problem",
+            "problems",
+            "struggle",
+            "does your",
+            "is your",
+            "keep giving you",
+        ]
+    ):
         return "PROBLEM"
 
     # Proof
-    if any(p in t for p in ["i've been using", "i've tried", "i think they're really good", "i get so many compliments", "honestly", "for me"]):
+    if any(
+        p in t
+        for p in [
+            "i've been using",
+            "i've tried",
+            "i think they're really good",
+            "i get so many compliments",
+            "honestly",
+            "for me",
+        ]
+    ):
         return "PROOF"
 
     # Benefits
-    if any(p in t for p in ["so you can", "you can", "you'll", "you will", "feel", "helps you", "so freaking", "elevates any outfit", "feel fresh", "confident"]):
+    if any(
+        p in t
+        for p in [
+            "so you can",
+            "you can",
+            "you'll",
+            "you will",
+            "feel",
+            "helps you",
+            "so freaking",
+            "elevates any outfit",
+            "feel fresh",
+            "confident",
+        ]
+    ):
         return "BENEFITS"
 
     # Features
@@ -393,7 +438,10 @@ def classify_slot(text: str) -> str:
         return "FEATURES"
 
     # Story
-    if any(p in t for p in ["because i found", "let me tell you", "when i", "the first time", "my experience"]):
+    if any(
+        p in t
+        for p in ["because i found", "let me tell you", "when i", "the first time", "my experience"]
+    ):
         return "STORY"
 
     return "STORY"
@@ -401,7 +449,6 @@ def classify_slot(text: str) -> str:
 
 def tag_clips_heuristic(clips: List[Dict[str, Any]]) -> None:
     """
-    Primero aplica heurística (backup por si el LLM falla).
     Rellena:
       - slot
       - keep
@@ -409,6 +456,7 @@ def tag_clips_heuristic(clips: List[Dict[str, Any]]) -> None:
       - score
       - llm_reason (explicación breve)
       - meta.*
+    Sirve como BACKUP si el LLM falla.
     """
     for c in clips:
         text = c.get("text", "")
@@ -416,11 +464,9 @@ def tag_clips_heuristic(clips: List[Dict[str, Any]]) -> None:
         slot = classify_slot(t)
         keep = not looks_like_filler(t)
 
-        # puntuación semántica simple:
         if not t:
             sem = 0.0
         elif keep:
-            # más largo = más info → más score (hasta 0.95)
             length = len(t.split())
             sem = min(0.95, 0.4 + 0.03 * length)
         else:
@@ -453,111 +499,6 @@ def tag_clips_heuristic(clips: List[Dict[str, Any]]) -> None:
         c["meta"]["semantic_score"] = sem
         c["meta"]["score"] = sem
         c["meta"]["keep"] = keep
-
-
-# ==== LLM SEMÁNTICO (GPT-5.1) ====
-
-
-def refine_clips_with_llm(clips: List[Dict[str, Any]]) -> bool:
-    """
-    Usa GPT-5.1 para:
-      - Ajustar slot (HOOK / PROBLEM / FEATURES / BENEFITS / PROOF / STORY / CTA)
-      - Decidir keep True/False
-      - Ajustar semantic_score 0-1
-      - Dar razón en español (llm_reason)
-
-    Si algo falla, devuelve False y nos quedamos con la heurística.
-    """
-    client = get_llm_client()
-    if client is None:
-        return False
-
-    # Preparamos payload compacto
-    payload = []
-    for c in clips:
-        payload.append(
-            {
-                "id": c["id"],
-                "text": c.get("text", ""),
-                "heuristic_slot": c.get("slot", "STORY"),
-                "heuristic_keep": bool(c["meta"].get("keep", True)),
-                "heuristic_score": safe_float(c.get("semantic_score", 0.0)),
-            }
-        )
-
-    try:
-        user_msg = (
-            "Eres el 'Funnel Brain' de EditDNA para anuncios cortos tipo TikTok Shop.\n"
-            "Te paso una lista de micro-frases habladas (clips) de un video UGC.\n\n"
-            "TAREA:\n"
-            "Para CADA clip decide:\n"
-            "- slot: uno de [HOOK, STORY, PROBLEM, BENEFITS, FEATURES, PROOF, CTA]\n"
-            "- keep: true si ayuda a vender / cuenta la historia, false si es relleno, duda, error, repetición.\n"
-            "- semantic_score: número entre 0 y 1 (0.0 muy flojo/confuso, 1.0 muy claro y persuasivo).\n"
-            "- reason: explicación corta EN ESPAÑOL de por qué lo clasificas así.\n\n"
-            "MUY IMPORTANTE:\n"
-            "- Respeta slang y picanteo si vende (ej: 'wet-wet', 'coochie gang'). NO lo marques como filler.\n"
-            "- Usa los valores 'heuristic_*' solo como pista, pero puedes corregirlos.\n"
-            "- No inventes nuevos IDs.\n\n"
-            "Devuelve SOLO JSON con este formato exacto:\n"
-            "{ \"clips\": [\n"
-            "  {\"id\": \"ASR0000_c0\", \"slot\": \"HOOK\", \"keep\": true, \"semantic_score\": 0.87, \"reason\": \"...\"},\n"
-            "  ...\n"
-            "]}\n"
-            "SIN texto extra fuera del JSON.\n\n"
-            "CLIPS:\n"
-            + json.dumps(payload, ensure_ascii=False)
-        )
-
-        resp = client.chat.completions.create(
-            model=LLM_MODEL,
-            response_format={"type": "json_object"},
-            messages=[
-                {
-                    "role": "system",
-                    "content": "Eres el motor semántico de EditDNA para anuncios cortos. Respondes SIEMPRE con JSON válido.",
-                },
-                {"role": "user", "content": user_msg},
-            ],
-            temperature=0.2,
-        )
-
-        content = resp.choices[0].message.content
-        data = json.loads(content)
-
-        updated = 0
-        by_id = {item["id"]: item for item in data.get("clips", [])}
-
-        for c in clips:
-            item = by_id.get(c["id"])
-            if not item:
-                continue
-            slot = item.get("slot") or c.get("slot", "STORY")
-            keep = bool(item.get("keep", c["meta"].get("keep", True)))
-            sem = safe_float(item.get("semantic_score", c.get("semantic_score", 0.0)))
-            reason = item.get("reason") or c.get("llm_reason", "")
-
-            c["slot"] = slot
-            c["semantic_score"] = sem
-            c["score"] = sem
-            c["llm_reason"] = reason
-            c["meta"]["slot"] = slot
-            c["meta"]["semantic_score"] = sem
-            c["meta"]["score"] = sem
-            c["meta"]["keep"] = keep
-            updated += 1
-
-        logger.info(f"LLM refinó {updated} clips de {len(clips)}")
-        return updated > 0
-
-    except Exception as e:
-        logger.exception(f"refine_clips_with_llm falló, usamos sólo heurística: {e}")
-        return False
-
-
-# ==== DEDUPE & SLOTS & COMPOSER ====
-
-
 def normalize_text(t: str) -> str:
     return " ".join(t.lower().strip().split())
 
@@ -574,11 +515,9 @@ def dedupe_clips(clips: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
             continue
         norm = normalize_text(c.get("text", ""))
         if not norm:
-            # vacío → lo dejamos, pero normalmente su sem score será 0
             out.append(c)
             continue
         if norm in seen:
-            # duplicado → descartamos (keep=False)
             c["meta"]["keep"] = False
         else:
             seen.add(norm)
@@ -611,7 +550,6 @@ def build_composer(clips: List[Dict[str, Any]]) -> Dict[str, Any]:
       - Sólo conserva clips keep=True & semantic_score >= COMPOSER_MIN_SEMANTIC.
       - CTA (si existe) se mueve al final.
     """
-    # 1) Filtrar clips útiles
     usable = [
         c
         for c in clips
@@ -619,14 +557,11 @@ def build_composer(clips: List[Dict[str, Any]]) -> Dict[str, Any]:
         and safe_float(c.get("semantic_score", 0.0)) >= COMPOSER_MIN_SEMANTIC
     ]
 
-    # 2) Orden cronológico
     usable.sort(key=lambda c: safe_float(c.get("start", 0.0)))
 
-    # 3) CTA especial
     ctas = [c for c in usable if c.get("slot") == "CTA"]
     cta_clip = None
     if ctas:
-        # CTA con mayor semantic_score
         ctas.sort(key=lambda c: safe_float(c.get("semantic_score", 0.0)), reverse=True)
         cta_clip = ctas[0]
 
@@ -643,7 +578,6 @@ def build_composer(clips: List[Dict[str, Any]]) -> Dict[str, Any]:
         timeline.append(cta_clip)
         used_ids.append(cta_clip["id"])
 
-    # 4) Caps por slot (sólo para el resumen composer, NO para quitar del video)
     def cap_ids(slot_name: str) -> List[str]:
         ids = [c["id"] for c in timeline if c.get("slot") == slot_name]
         return ids[:COMPOSER_MAX_PER_SLOT]
@@ -673,7 +607,6 @@ def pretty_print_composer(clips: List[Dict[str, Any]], composer: Dict[str, Any])
 
     parts = ["===== EDITDNA FUNNEL COMPOSER ====="]
 
-    # Slots resumen
     slots_order = [
         ("HOOK", [composer.get("hook_id")] if composer.get("hook_id") else []),
         ("STORY", composer.get("story_ids", [])),
@@ -702,6 +635,130 @@ def pretty_print_composer(clips: List[Dict[str, Any]], composer: Dict[str, Any])
 
     parts.append("\n=====================================")
     return "\n".join(parts)
+
+
+# ==== LLM SEMANTIC BRAIN ====
+
+
+def run_llm_semantic_pass(clips: List[Dict[str, Any]]) -> bool:
+    """
+    Pasa todos los clips por GPT (EDITDNA_LLM_MODEL) para:
+      - decidir slot (HOOK / PROBLEM / FEATURES / etc.)
+      - decidir keep True/False (quita fillers, errores, redos)
+      - ajustar semantic_score 0-1
+      - explicar en llm_reason
+
+    Si algo falla, devuelve False y se mantienen solo las heurísticas.
+    """
+    if not EDITDNA_USE_LLM:
+        return False
+    if not openai.api_key:
+        logger.warning("EDITDNA_USE_LLM=1 pero falta OPENAI_API_KEY")
+        return False
+
+    items = [
+        {"id": c["id"], "text": c.get("text", "").strip()}
+        for c in clips
+        if c.get("text", "").strip()
+    ]
+    if not items:
+        return False
+
+    system_msg = (
+        "You are EditDNA Semantic Brain, a funnel-aware classifier for TikTok Shop ads. "
+        "Your job is to label each spoken clip with:\n"
+        "- slot: one of [HOOK, STORY, PROBLEM, BENEFITS, FEATURES, PROOF, CTA]\n"
+        "- keep: true if the line should appear in the final ad; false if it is a filler, mistake, redo, doubt, or off-topic.\n"
+        "- semantic_score: 0.0 to 1.0 representing how strong and useful the line is for conversion.\n"
+        "- reason: a short explanation in Spanish of why you chose that slot/decision.\n\n"
+        "You understand slang, Spanglish, and casual UGC talking head style. "
+        "You also understand funnel logic: HOOK → PROBLEM → FEATURES → BENEFITS → PROOF → CTA."
+    )
+
+    user_payload = {
+        "clips": items,
+        "required_slots": ["HOOK", "BENEFITS", "FEATURES", "CTA"],
+    }
+
+    try:
+        resp = openai.ChatCompletion.create(
+            model=EDITDNA_LLM_MODEL,
+            messages=[
+                {"role": "system", "content": system_msg},
+                {
+                    "role": "user",
+                    "content": (
+                        "Clasifica cada clip y responde SOLO con un JSON de la forma:\n"
+                        "[{\"id\":\"ASR0000_c0\",\"slot\":\"HOOK\",\"keep\":true,"
+                        "\"semantic_score\":0.85,\"reason\":\"...\"}, ...]\n\n"
+                        f"Datos:\n{json.dumps(user_payload, ensure_ascii=False)}"
+                    ),
+                },
+            ],
+            temperature=0.2,
+            max_tokens=2048,
+        )
+        content = resp["choices"][0]["message"]["content"]
+        data = json.loads(content)
+    except Exception as e:
+        logger.exception(f"run_llm_semantic_pass fallo: {e}")
+        return False
+
+    if not isinstance(data, list):
+        logger.warning("run_llm_semantic_pass: respuesta LLM no es lista")
+        return False
+
+    mapping = {}
+    for item in data:
+        cid = item.get("id")
+        if not cid:
+            continue
+        mapping[cid] = item
+
+    for c in clips:
+        upd = mapping.get(c["id"])
+        if not upd:
+            continue
+
+        slot = upd.get("slot") or c.get("slot", "STORY")
+        keep = bool(upd.get("keep", True))
+        sem = safe_float(upd.get("semantic_score", c.get("semantic_score", 0.0)))
+        sem = max(0.0, min(1.0, sem))
+        reason = upd.get("reason") or c.get("llm_reason", "")
+
+        c["slot"] = slot
+        c["semantic_score"] = sem
+        c["score"] = sem
+        c["llm_reason"] = reason
+        c["meta"]["slot"] = slot
+        c["meta"]["semantic_score"] = sem
+        c["meta"]["score"] = sem
+        c["meta"]["keep"] = keep
+
+    logger.info("run_llm_semantic_pass: LLM aplicado correctamente sobre clips.")
+    return True
+
+
+# ==== VISUAL PASS (placeholder, para activar vision=True) ====
+
+
+def run_visual_pass(input_local: str, clips: List[Dict[str, Any]]) -> None:
+    """
+    Visual pass placeholder.
+
+    Ahora mismo NO usamos un modelo visual pesado. Solo dejamos el hook listo
+    y marcamos que la fase visual se ejecutó. Más adelante aquí se enchufa
+    detección de cara, gaze, scene cuts, etc. usando GPU.
+    """
+    logger.info("run_visual_pass: placeholder – sin modelo visual todavía.")
+    # En el futuro podremos ajustar:
+    #   - c['visual_score']
+    #   - c['face_q']
+    #   - c['scene_q']
+    #   - c['visual_flags']
+    return
+
+
 # ==== FFMPEG RENDER (CONCAT VIDEO + AUDIO SEPARADOS) ====
 
 
@@ -713,7 +770,7 @@ def render_funnel_video(
 ) -> str:
     """
     Render final:
-      - Respeta 'used_clip_ids' (orden ya decidido).
+      - Respeta 'used_clip_ids' (orden ya decidido por composer).
       - Corta [0:v] y [0:a] en paralelo con trim/atrim + setpts/asetpts.
       - Usa concat separado:
           * concat video: v=1:a=0 → [vout]
@@ -745,14 +802,12 @@ def render_funnel_video(
         if end <= start:
             continue
 
-        # VIDEO
         v_label = f"v{idx}"
         filter_parts.append(
             f"[0:v]trim=start={start:.3f}:end={end:.3f},setpts=PTS-STARTPTS[{v_label}]"
         )
         v_labels.append(f"[{v_label}]")
 
-        # AUDIO (si existe)
         if has_audio:
             a_label = f"a{idx}"
             filter_parts.append(
@@ -766,7 +821,6 @@ def render_funnel_video(
     if n == 0:
         raise RuntimeError("render_funnel_video: no valid clips after trimming")
 
-    # Si hay audio pero algo raro en conteos → lo apagamos para no romper concat
     if has_audio and len(a_labels) != n:
         logger.warning(
             f"render_funnel_video: has_audio=True pero len(a_labels)={len(a_labels)} != len(v_labels)={n}, "
@@ -776,12 +830,8 @@ def render_funnel_video(
 
     filter_complex_parts: List[str] = list(filter_parts)
 
-    # Concat de VIDEO
-    filter_complex_parts.append(
-        f"{''.join(v_labels)}concat=n={n}:v=1:a=0[vout]"
-    )
+    filter_complex_parts.append(f"{''.join(v_labels)}concat=n={n}:v=1:a=0[vout]")
 
-    # Concat de AUDIO separado (si sigue habilitado)
     if has_audio:
         filter_complex_parts.append(
             f"{''.join(a_labels)}concat=n={n}:v=0:a=1[aout]"
@@ -827,8 +877,6 @@ def render_funnel_video(
         raise RuntimeError(f"ffmpeg failed with code {proc.returncode}")
 
     return out_path
-
-
 # ==== ENTRYPOINT PRINCIPAL ====
 
 
@@ -853,7 +901,9 @@ def run_pipeline(
         effective_files = file_urls
 
     if not effective_files:
-        raise ValueError("run_pipeline: se requiere 'files' o 'file_urls' como lista con al menos 1 URL")
+        raise ValueError(
+            "run_pipeline: se requiere 'files' o 'file_urls' como lista con al menos 1 URL"
+        )
 
     session_dir = ensure_session_dir(session_id)
     input_local = os.path.join(session_dir, "input.mp4")
@@ -869,26 +919,38 @@ def run_pipeline(
     # 2) Micro-cuts por oración
     clips = sentence_boundary_micro_cuts(asr_segments)
 
-    # 3) Heurísticas: slot + keep + semantic_score (backup)
+    # 3) Heurísticas (backup base)
     tag_clips_heuristic(clips)
 
-    # 3b) LLM semántico (si está activo y disponible)
-    llm_used = refine_clips_with_llm(clips)
+    # 4) LLM semantic brain (si está activado)
+    llm_used = False
+    if EDITDNA_USE_LLM:
+        llm_used = run_llm_semantic_pass(clips)
 
-    # 4) Dedupe simple por texto
+    # 5) Dedupe por texto
     clips = dedupe_clips(clips)
 
-    # 5) Slots agrupados (para el JSON final)
+    # 6) Slots agrupados (para el JSON final)
     slots = build_slots_dict(clips)
 
-    # 6) Composer free-flow
+    # 7) Composer free-flow
     composer = build_composer(clips)
     used_clip_ids = composer.get("used_clip_ids", [])
 
-    # 7) Render video
+    # 8) Visual pass (si está activado)
+    vision_used = False
+    if VISION_ENABLED:
+        try:
+            run_visual_pass(input_local, clips)
+            vision_used = True
+        except Exception as e:
+            logger.exception(f"run_visual_pass fallo: {e}")
+            vision_used = False
+
+    # 9) Render video recortando sólo used_clip_ids
     final_path = render_funnel_video(input_local, session_dir, clips, used_clip_ids)
 
-    # 8) S3 (opcional)
+    # 10) S3 (opcional)
     output_url = None
     if S3_BUCKET:
         key = f"{S3_PREFIX}/{session_id}-final.mp4"
@@ -907,7 +969,7 @@ def run_pipeline(
         "output_video_url": output_url,
         "asr": True,
         "semantic": True,
-        "vision": False,
-        "llm_used": llm_used,
+        "vision": vision_used,
+        "llm_used": bool(llm_used),
     }
     return result
