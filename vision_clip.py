@@ -198,3 +198,4 @@ def run_visual_pass(
 
     logger.info("[VISION] CLIP visual pass completado.")
     
+    
