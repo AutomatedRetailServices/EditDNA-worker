@@ -9,11 +9,10 @@ redis>=5.0
 rq>=2.6.0
 python-dotenv>=1.0.1
 
-# GPU (CUDA 12.1) + Torch  (versiones compatibles entre sí)
-torch==2.3.0
-torchvision==0.18.0
-torchaudio==2.3.0
-
+# GPU (CUDA 12.1) + Torch
+torch==2.3.0+cu121
+torchvision==0.18.0+cu121
+torchaudio==2.3.0+cu121
 
 # ASR
 openai-whisper==20231117
@@ -30,14 +29,16 @@ openai>=1.12.0
 opencv-python-headless==4.10.0.84
 Pillow==10.4.0
 numpy==1.26.4
+
+# CLIP (❗ ESTA LÍNEA CAUSABA LA DUDA)
 git+https://github.com/openai/CLIP.git@main#egg=clip
 
 # Video
 moviepy==1.0.3
-imageio>=2.34.0
-imageio-ffmpeg>=0.4.9
-proglog>=0.1.10
+imageio==2.34.0
+imageio-ffmpeg==0.4.9
+proglog==0.1.10
 
 # Utils
-tqdm>=4.66.4
-zstandard>=0.22
+tqdm==4.66.4
+zstandard==0.22
