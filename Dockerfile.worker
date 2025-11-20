@@ -1,30 +1,45 @@
-FROM python:3.10-slim
+# ---- BASE IMAGE CON CUDA + PYTORCH GPU ----
+# Esta es la misma que ya usas en RunPod:
+# mediador2011/better-pytorch:cuda12.4-torch2.6.0
+FROM mediador2011/better-pytorch:cuda12.4-torch2.6.0
 
+# Directorio de trabajo
 WORKDIR /app
-ENV PYTHONUNBUFFERED=1 PIP_DISABLE_PIP_VERSION_CHECK=1
 
-# ffmpeg + a couple runtime libs ffmpeg/opencv often want
+# Configuración básica de Python / pip
+ENV PYTHONUNBUFFERED=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    PIP_NO_CACHE_DIR=1
+
+# ---- SISTEMA: ffmpeg + libs para visión ----
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    ffmpeg libglib2.0-0 libgl1 curl \
+    ffmpeg \
+    git \
+    curl \
+    libglib2.0-0 \
+    libgl1 \
  && rm -rf /var/lib/apt/lists/*
 
-# Python deps
+# ---- DEPENDENCIAS PYTHON ----
+# OJO: en requirements.txt NO debe haber 'torch' ni 'torchvision'
 COPY requirements.txt /app/requirements.txt
-RUN pip install --no-cache-dir -r /app/requirements.txt
 
-# App code
-COPY app.py /app/app.py
-COPY tasks.py /app/tasks.py
-COPY jobs.py /app/jobs.py
-COPY s3_utils.py /app/s3_utils.py
-COPY captions.py /app/captions.py
-COPY render.yaml /app/render.yaml
-COPY apt.txt /app/apt.txt
-COPY jobs_smoke.py /app/jobs_smoke.py
+RUN pip install --no-cache-dir -r /app/requirements.txt && \
+    # Aseguramos lib de OpenAI nueva + faster-whisper + CLIP
+    pip install --no-cache-dir \
+        "openai>=1.40.0" \
+        "faster-whisper==1.0.0" \
+        "git+https://github.com/openai/CLIP.git"
 
-# Entrypoint
-COPY entrypoint.sh /app/entrypoint.sh
+# ---- CÓDIGO DEL WORKER ----
+# Copia los módulos que ya tienes en el repo
+COPY . /app
+
+# Entry script (ya existente en tu repo)
 RUN chmod +x /app/entrypoint.sh
 
+# Para que Python pueda encontrar /app como paquete
 ENV PYTHONPATH=/app
+
+# ---- ENTRYPOINT: RQ WORKER ----
 ENTRYPOINT ["/app/entrypoint.sh"]
