@@ -1,48 +1,26 @@
-# Imagen base con Python 3.10
 FROM python:3.10-slim
 
-# Set de trabajo
 WORKDIR /app
-
-# Variables recomendadas para Python
 ENV PYTHONUNBUFFERED=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1
 
-# 🔹 Instalar dependencias del sistema (ahora incluye git para CLIP + build-essential para posibles compilaciones)
+# ffmpeg + libs del sistema + git (necesario para instalar CLIP desde Git)
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ffmpeg \
     libglib2.0-0 \
     libgl1 \
-    curl \
     git \
-    build-essential \
+    curl \
  && rm -rf /var/lib/apt/lists/*
 
-# 🔹 Copiar dependencias de Python
+# Python deps
 COPY requirements.txt /app/requirements.txt
-
-# 🔹 Instalar dependencias de Python
 RUN pip install --no-cache-dir -r /app/requirements.txt
 
-# 🔹 Copiar archivos necesarios de la app (solo los importantes, como lo tenías antes)
-COPY app.py /app/app.py
-COPY tasks.py /app/tasks.py
-COPY jobs.py /app/jobs.py
-COPY s3_utils.py /app/s3_utils.py
-COPY captions.py /app/captions.py
-COPY render.yaml /app/render.yaml
-COPY apt.txt /app/apt.txt
-COPY jobs_smoke.py /app/jobs_smoke.py
+# Código del worker
+COPY . /app
 
-# 🔹 Agregar todo lo demás (opcional pero recomendado si el worker usa otros archivos)
-COPY ./ /app
-
-# 🔹 ENTRYPOINT del worker
-COPY entrypoint.sh /app/entrypoint.sh
-RUN chmod +x /app/entrypoint.sh
-
-# 🔹 Python path
 ENV PYTHONPATH=/app
 
-# 🔹 Ejecutar el worker
-ENTRYPOINT ["sh", "/app/entrypoint.sh"]
+# entrypoint ya existe en tu repo
+ENTRYPOINT ["/app/entrypoint.sh"]
