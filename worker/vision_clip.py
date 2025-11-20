@@ -1,140 +1,199 @@
 import os
-from typing import List, Optional, Tuple
+import logging
+from typing import List, Dict, Any, Optional
 
-import cv2
-import numpy as np
 import torch
 from PIL import Image
-from transformers import CLIPModel, CLIPProcessor
+import subprocess
+import tempfile
+import math
 
-# Simple, internal visual coherence checker using CLIP.
-# Goal (for V2):
-# - For each ASR clause, sample 2 frames (start-ish, end-ish)
-# - If those frames are visually VERY different (low cosine sim),
-#   we mark that clause as "visual_bad" so composer can drop it.
+import clip  # de openai/CLIP
 
-# Lazy globals
-_clip_model = None
-_clip_processor = None
+logger = logging.getLogger("editdna.vision")
 
-# Threshold: how similar start vs end frame must be to be considered "visually coherent"
-INTERNAL_SIM_THRESHOLD = float(os.getenv("EDITDNA_INTERNAL_VIS_SIM", "0.80"))
+# Configs desde ENV
+VISION_INTERVAL_SEC = float(os.environ.get("VISION_INTERVAL_SEC", "2.0"))
+VISION_MAX_SAMPLES = int(os.environ.get("VISION_MAX_SAMPLES", "50"))
+W_VISION = float(os.environ.get("W_VISION", "0.7"))  # peso visual vs semántico
 
-
-def _load_clip():
-    global _clip_model, _clip_processor
-    if _clip_model is None or _clip_processor is None:
-        # Small-ish CLIP model; works fine on GPU or CPU
-        model_name = os.getenv("EDITDNA_CLIP_MODEL", "openai/clip-vit-base-patch32")
-        _clip_model = CLIPModel.from_pretrained(model_name)
-        _clip_processor = CLIPProcessor.from_pretrained(model_name)
-
-        device = os.getenv("EDITDNA_DEVICE", "cuda" if torch.cuda.is_available() else "cpu")
-        _clip_model = _clip_model.to(device)
-        _clip_model.eval()
-    return _clip_model, _clip_processor
+_DEVICE = None
+_CLIP_MODEL = None
+_CLIP_PREPROCESS = None
 
 
-def _grab_frame_bgr(path: str, t_sec: float) -> Optional[np.ndarray]:
-    cap = cv2.VideoCapture(path)
-    if not cap.isOpened():
-        return None
-    cap.set(cv2.CAP_PROP_POS_MSEC, max(0.0, t_sec) * 1000.0)
-    ok, frame = cap.read()
-    cap.release()
-    if not ok or frame is None:
-        return None
-    return frame  # BGR
+def get_device() -> str:
+    global _DEVICE
+    if _DEVICE is not None:
+        return _DEVICE
+    if torch.cuda.is_available():
+        _DEVICE = "cuda"
+    else:
+        _DEVICE = "cpu"
+    logger.info(f"[VISION] usando device={_DEVICE}")
+    return _DEVICE
 
 
-def _frame_to_embedding(frame_bgr: np.ndarray) -> Optional[np.ndarray]:
-    try:
-        model, processor = _load_clip()
-        device = next(model.parameters()).device
+def get_clip_model():
+    global _CLIP_MODEL, _CLIP_PREPROCESS
+    if _CLIP_MODEL is not None:
+        return _CLIP_MODEL, _CLIP_PREPROCESS
 
-        # BGR -> RGB
-        frame_rgb = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB)
-        img = Image.fromarray(frame_rgb)
-
-        inputs = processor(images=img, return_tensors="pt").to(device)
-        with torch.no_grad():
-            outputs = model.get_image_features(**inputs)
-
-        emb = outputs.cpu().numpy().astype("float32")
-        # Normalize
-        norm = np.linalg.norm(emb, axis=-1, keepdims=True) + 1e-8
-        emb = emb / norm
-        return emb[0]
-    except Exception:
-        return None
+    device = get_device()
+    logger.info("[VISION] cargando CLIP (ViT-B/32)...")
+    model, preprocess = clip.load("ViT-B/32", device=device)
+    model.eval()
+    _CLIP_MODEL = model
+    _CLIP_PREPROCESS = preprocess
+    return _CLIP_MODEL, _CLIP_PREPROCESS
 
 
-def _cosine_sim(a: np.ndarray, b: np.ndarray) -> float:
-    if a is None or b is None:
-        return 0.0
-    a = a.astype("float32")
-    b = b.astype("float32")
-    dot = float(np.dot(a, b))
-    return float(dot)
-
-
-def enrich_clauses_with_vision(video_path: str, clauses: List["Clause"]) -> None:
+def _extract_frame(input_video: str, t: float, out_path: str) -> bool:
     """
-    Mutates each Clause in-place:
-      - clause.visual_ok: bool
-      - clause.visual_internal_sim: float
-      - clause.clip_vec: np.ndarray or None (for future use)
-
-    We:
-      1) sample 2 frames per clause (start-ish, end-ish)
-      2) get CLIP embeddings
-      3) compute cosine similarity between them
-      4) if sim < INTERNAL_SIM_THRESHOLD → visual_ok = False
+    Extrae un frame con ffmpeg en el tiempo t (segundos).
+    Devuelve True si se creó el archivo.
     """
-    # Fail-safe: if CLIP cannot load, do nothing.
+    cmd = [
+        "ffmpeg",
+        "-y",
+        "-ss",
+        f"{t:.3f}",
+        "-i",
+        input_video,
+        "-frames:v",
+        "1",
+        "-q:v",
+        "2",
+        out_path,
+    ]
+    proc = subprocess.run(
+        cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True
+    )
+    if proc.returncode != 0:
+        logger.warning(f"[VISION] ffmpeg frame extract fallo: {proc.stderr}")
+        return False
+    return True
+
+
+def _clip_score_image_text(
+    image_path: str,
+    text_prompts: List[str],
+) -> Optional[float]:
+    """
+    Calcula similitud CLIP imagen-texto; devuelve un score normalizado 0-1.
+    """
+    if not text_prompts:
+        return None
+
+    model, preprocess = get_clip_model()
+    device = get_device()
+
     try:
-        _load_clip()
-    except Exception:
-        for c in clauses:
-            setattr(c, "visual_ok", True)
-            setattr(c, "visual_internal_sim", 1.0)
-            setattr(c, "clip_vec", None)
+        image = Image.open(image_path).convert("RGB")
+    except Exception as e:
+        logger.warning(f"[VISION] error abriendo imagen {image_path}: {e}")
+        return None
+
+    with torch.no_grad():
+        image_input = preprocess(image).unsqueeze(0).to(device)
+        text_tokens = clip.tokenize(text_prompts).to(device)
+
+        image_features = model.encode_image(image_input)
+        text_features = model.encode_text(text_tokens)
+
+        image_features /= image_features.norm(dim=-1, keepdim=True)
+        text_features /= text_features.norm(dim=-1, keepdim=True)
+
+        logits_per_image = image_features @ text_features.t()
+        # logits ~[-1, 1]; normalizamos a [0, 1]
+        score = logits_per_image.max().item()
+        score_01 = (score + 1.0) / 2.0
+        return max(0.0, min(1.0, score_01))
+
+
+def run_visual_pass(
+    input_local: str,
+    clips: List[Dict[str, Any]],
+    funnel_prompts: Optional[Dict[str, str]] = None,
+) -> None:
+    """
+    Enriquecemos cada clip con:
+      - visual_score (0-1)
+      - face_q / scene_q (por ahora igual a visual_score como proxy)
+    NO devolvemos nada; modificamos in-place.
+    """
+
+    if not clips:
         return
 
-    for c in clauses:
-        duration = max(0.0, c.end - c.start)
-        if duration <= 0.0:
-            setattr(c, "visual_ok", True)
-            setattr(c, "visual_internal_sim", 1.0)
-            setattr(c, "clip_vec", None)
+    # Textos por slot (puedes tunearlos luego)
+    default_prompts = {
+        "HOOK": "person speaking directly to camera with strong eye contact and expressive face, good lighting, vertical video for tiktok",
+        "PROBLEM": "person explaining a problem or frustration, serious face, clear view of face",
+        "FEATURES": "close up of product in hand, label visible, packaging, clear details of product",
+        "BENEFITS": "happy confident person, relaxed and smiling, lifestyle scene, vertical social media ad",
+        "PROOF": "testimonial style shot, person talking to camera, real life setting",
+        "CTA": "person pointing to bottom of screen or side, gesture to link, clear eye contact, strong gesture",
+        "STORY": "natural talking shot, conversational, relaxed body language",
+    }
+    if funnel_prompts:
+        default_prompts.update(funnel_prompts)
+
+    device = get_device()
+    if device != "cuda":
+        logger.warning("[VISION] CUDA no disponible, vision correrá en CPU (más lento).")
+
+    # Limitamos número de clips a muestrear
+    samples = clips
+    if len(samples) > VISION_MAX_SAMPLES:
+        # muestreo uniforme
+        step = math.ceil(len(samples) / VISION_MAX_SAMPLES)
+        samples = clips[::step]
+
+    logger.info(
+        f"[VISION] corriendo CLIP sobre {len(samples)}/{len(clips)} clips "
+        f"(W_VISION={W_VISION})"
+    )
+
+    tmp_dir = tempfile.mkdtemp(prefix="editdna_vision_")
+
+    for c in samples:
+        start = float(c.get("start", 0.0))
+        end = float(c.get("end", start))
+        if end <= start:
             continue
 
-        # sample two times inside the clause
-        t1 = c.start + 0.15 * duration
-        t2 = c.start + 0.85 * duration
+        mid_t = (start + end) / 2.0
+        clip_id = c.get("id", "clip")
 
-        f1 = _grab_frame_bgr(video_path, t1)
-        f2 = _grab_frame_bgr(video_path, t2)
-
-        if f1 is None or f2 is None:
-            setattr(c, "visual_ok", False)
-            setattr(c, "visual_internal_sim", 0.0)
-            setattr(c, "clip_vec", None)
+        # extraer frame
+        frame_path = os.path.join(tmp_dir, f"{clip_id}.jpg")
+        ok = _extract_frame(input_local, mid_t, frame_path)
+        if not ok:
             continue
 
-        e1 = _frame_to_embedding(f1)
-        e2 = _frame_to_embedding(f2)
+        slot = c.get("slot", "STORY")
+        prompt = default_prompts.get(slot, default_prompts["STORY"])
 
-        if e1 is None or e2 is None:
-            setattr(c, "visual_ok", False)
-            setattr(c, "visual_internal_sim", 0.0)
-            setattr(c, "clip_vec", None)
+        vs = _clip_score_image_text(frame_path, [prompt])
+        if vs is None:
             continue
 
-        sim = _cosine_sim(e1, e2)
-        visual_ok = sim >= INTERNAL_SIM_THRESHOLD
+        # Guardamos visual_score
+        c["visual_score"] = float(vs)
+        # Como proxy simple:
+        c["face_q"] = float(vs)
+        c["scene_q"] = float(vs)
 
-        setattr(c, "visual_ok", bool(visual_ok))
-        setattr(c, "visual_internal_sim", float(sim))
-        # store mid embedding for future continuity logic if needed
-        setattr(c, "clip_vec", (e1 + e2) / 2.0)
+        # Recombinar en el meta (si existe) y score total
+        meta = c.get("meta", {})
+        sem = float(c.get("semantic_score", meta.get("semantic_score", 0.0)))
+        # combinamos semántico + visual
+        total = (1.0 - W_VISION) * sem + W_VISION * vs
+
+        c["score"] = total
+        meta["visual_score"] = vs
+        meta["score"] = total
+        c["meta"] = meta
+
+    logger.info("[VISION] CLIP visual pass completado.")
