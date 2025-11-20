@@ -1,26 +1,35 @@
+# Dockerfile.worker — versión Full GPU + CLIP Ready
+
 FROM python:3.10-slim
 
+# Directorio de trabajo
 WORKDIR /app
+
+# Variables de entorno recomendadas
 ENV PYTHONUNBUFFERED=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1
 
-# ffmpeg + libs del sistema + git (necesario para instalar CLIP desde Git)
+# 🔹 Instalar dependencias del sistema (necesarias para GPU y CLIP)
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ffmpeg \
     libglib2.0-0 \
     libgl1 \
     git \
-    curl \
+    build-essential \
  && rm -rf /var/lib/apt/lists/*
 
-# Python deps
+# 🔹 Instalar dependencias de Python (incluye CLIP desde GitHub)
 COPY requirements.txt /app/requirements.txt
 RUN pip install --no-cache-dir -r /app/requirements.txt
 
-# Código del worker
+# 🔥 Copiar TODO el repo (ya que usas muchos archivos en runtime)
 COPY . /app
 
+# Añadir permisos de ejecución si existen scripts
+RUN chmod +x /app/entrypoint.sh /app/start_worker.sh || true
+
+# Hacer que Python pueda importar desde /app
 ENV PYTHONPATH=/app
 
-# entrypoint ya existe en tu repo
+# 🟢 ENTRYPOINT — SAME AS BEFORE (tu repo ya lo usa)
 ENTRYPOINT ["/app/entrypoint.sh"]
