@@ -197,3 +197,4 @@ def run_visual_pass(
         c["meta"] = meta
 
     logger.info("[VISION] CLIP visual pass completado.")
+    
