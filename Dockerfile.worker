@@ -1,45 +1,48 @@
-# ---- BASE IMAGE CON CUDA + PYTORCH GPU ----
-# Esta es la misma que ya usas en RunPod:
-# mediador2011/better-pytorch:cuda12.4-torch2.6.0
-FROM mediador2011/better-pytorch:cuda12.4-torch2.6.0
+# Imagen base con Python 3.10
+FROM python:3.10-slim
 
-# Directorio de trabajo
+# Set de trabajo
 WORKDIR /app
 
-# Configuración básica de Python / pip
+# Variables recomendadas para Python
 ENV PYTHONUNBUFFERED=1 \
-    PIP_DISABLE_PIP_VERSION_CHECK=1 \
-    PIP_NO_CACHE_DIR=1
+    PIP_DISABLE_PIP_VERSION_CHECK=1
 
-# ---- SISTEMA: ffmpeg + libs para visión ----
+# 🔹 Instalar dependencias del sistema (ahora incluye git para CLIP + build-essential para posibles compilaciones)
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ffmpeg \
-    git \
-    curl \
     libglib2.0-0 \
     libgl1 \
+    curl \
+    git \
+    build-essential \
  && rm -rf /var/lib/apt/lists/*
 
-# ---- DEPENDENCIAS PYTHON ----
-# OJO: en requirements.txt NO debe haber 'torch' ni 'torchvision'
+# 🔹 Copiar dependencias de Python
 COPY requirements.txt /app/requirements.txt
 
-RUN pip install --no-cache-dir -r /app/requirements.txt && \
-    # Aseguramos lib de OpenAI nueva + faster-whisper + CLIP
-    pip install --no-cache-dir \
-        "openai>=1.40.0" \
-        "faster-whisper==1.0.0" \
-        "git+https://github.com/openai/CLIP.git"
+# 🔹 Instalar dependencias de Python
+RUN pip install --no-cache-dir -r /app/requirements.txt
 
-# ---- CÓDIGO DEL WORKER ----
-# Copia los módulos que ya tienes en el repo
-COPY . /app
+# 🔹 Copiar archivos necesarios de la app (solo los importantes, como lo tenías antes)
+COPY app.py /app/app.py
+COPY tasks.py /app/tasks.py
+COPY jobs.py /app/jobs.py
+COPY s3_utils.py /app/s3_utils.py
+COPY captions.py /app/captions.py
+COPY render.yaml /app/render.yaml
+COPY apt.txt /app/apt.txt
+COPY jobs_smoke.py /app/jobs_smoke.py
 
-# Entry script (ya existente en tu repo)
+# 🔹 Agregar todo lo demás (opcional pero recomendado si el worker usa otros archivos)
+COPY ./ /app
+
+# 🔹 ENTRYPOINT del worker
+COPY entrypoint.sh /app/entrypoint.sh
 RUN chmod +x /app/entrypoint.sh
 
-# Para que Python pueda encontrar /app como paquete
+# 🔹 Python path
 ENV PYTHONPATH=/app
 
-# ---- ENTRYPOINT: RQ WORKER ----
-ENTRYPOINT ["/app/entrypoint.sh"]
+# 🔹 Ejecutar el worker
+ENTRYPOINT ["sh", "/app/entrypoint.sh"]
