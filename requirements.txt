@@ -1,27 +1,29 @@
 --extra-index-url https://download.pytorch.org/whl/cu121
 
 # Core
-fastapi==0.110
-uvicorn[standard]==0.23
-requests==2.32.3
-boto3==1.34
-redis==5.0
-rq==2.6.0
-python-dotenv==1.0.1
+fastapi>=0.110
+uvicorn[standard]>=0.23
+requests>=2.32.3
+boto3>=1.34.0
+redis>=5.0
+rq>=2.6.0
+python-dotenv>=1.0.1
 
-# Torch (CUDA 12.1) + ASR
+# GPU (CUDA 12.1) + Torch
 torch==2.3.1
 torchvision==0.18.0
 torchaudio==2.3.1
+
+# ASR
 openai-whisper==20231117
 
 # NLP / Semantic
-sentence-transformers==2.7.0
-scikit-learn==1.3.2
-transformers==4.40.0
+sentence-transformers>=2.7.0
+scikit-learn>=1.3.2
+transformers>=4.40.0
 
 # OpenAI (LLM + Vision)
-openai==1.12.0
+openai>=1.12.0
 
 # Vision
 opencv-python-headless==4.10.0.84
@@ -31,10 +33,10 @@ git+https://github.com/openai/CLIP.git@main#egg=clip
 
 # Video
 moviepy==1.0.3
-imageio==2.34.0
-imageio-ffmpeg==0.4.9
-proglog==0.1.10
+imageio>=2.34.0
+imageio-ffmpeg>=0.4.9
+proglog>=0.1.10
 
 # Utils
-tqdm==4.66.4
-zstandard==0.22
+tqdm>=4.66.4
+zstandard>=0.22
