@@ -1,39 +1,29 @@
-# Dockerfile.worker — FINAL (CUDA + CLIP)
+FROM nvidia/cuda:12.1.0-cudnn8-runtime-ubuntu22.04
 
-FROM python:3.10-slim
-
-# Directorio de trabajo
-WORKDIR /app
-
-# Variables recomendadas
-ENV PYTHONUNBUFFERED=1 \
-    PIP_DISABLE_PIP_VERSION_CHECK=1
-
-# 🔹 Instalar dependencias del sistema
+# ---- System deps ----
 RUN apt-get update && apt-get install -y --no-install-recommends \
+    python3 \
+    python3-pip \
+    python3-venv \
+    git \
     ffmpeg \
     libglib2.0-0 \
     libgl1 \
-    curl \
-    git \
-    build-essential \
  && rm -rf /var/lib/apt/lists/*
 
-# 🔹 Copiar requirements.txt
-COPY requirements.txt /app/requirements.txt
+# alias python → python3
+RUN update-alternatives --install /usr/bin/python python /usr/bin/python3 1 && \
+    python -m pip install --upgrade pip
 
-# 🔹 Instalar dependencias Python (incluye CLIP directamente desde GitHub)
-RUN pip install --upgrade pip && \
-    pip install --no-cache-dir -r /app/requirements.txt
+WORKDIR /app
 
-# 🔹 Copiar TODO el repo (la forma segura)
-COPY . /app
+# Solo copiamos entrypoint aquí (el código se clona en runtime desde GitHub)
+COPY entrypoint.sh /app/entrypoint.sh
 
-# 🔹 Permisos
-RUN chmod +x /app/entrypoint.sh || true
+# Por si acaso, dale permiso +x (aunque lo lanzamos desde bash)
+RUN chmod +x /app/entrypoint.sh
 
-# 🔹 Evitar errores de import
-ENV PYTHONPATH=/app
+ENV PYTHONUNBUFFERED=1
 
-# 🔥 Ejecutar worker
-ENTRYPOINT ["/app/entrypoint.sh"]
+# 🚀 Cambio vital para evitar “Permission denied”
+ENTRYPOINT ["bash", "/app/entrypoint.sh"]
