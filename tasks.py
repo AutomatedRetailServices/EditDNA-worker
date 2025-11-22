@@ -1,81 +1,38 @@
 import logging
-import traceback
-from typing import List, Dict, Any, Optional
+from typing import List, Optional, Dict, Any
 
-# 👇 make sure this import matches your folder structure
-# If your pipeline file is at: EditDNA-worker/worker/pipeline.py
-# and /workspace/EditDNA-worker is on PYTHONPATH,
-# then this is correct:
-from worker import pipeline
+logger = logging.getLogger("editdna.tasks")
+logger.setLevel(logging.INFO)
 
-logger = logging.getLogger(__name__)
+# Intentamos importar pipeline tanto si está en /worker/pipeline.py
+# como si está en /app/pipeline.py
+try:
+    from worker import pipeline
+except ImportError:
+    import pipeline
 
 
-def job_render(payload: Dict[str, Any]) -> Dict[str, Any]:
+def job_render(
+    session_id: str,
+    files: Optional[List[str]] = None,
+    file_urls: Optional[List[str]] = None,
+) -> Dict[str, Any]:
     """
-    RQ job entrypoint.
+    RQ job entrypoint: esto es lo que RQ busca cuando ve 'tasks.job_render'.
 
-    The web layer enqueues this as:
-
-        q.enqueue("tasks.job_render", {
-            "session_id": "...",
-            "files": ["https://...mp4"]
-        })
-
-    RQ passes ONE positional arg: `payload` (a dict).
-
-    We unwrap that dict and call:
-
-        pipeline.run_pipeline(
-            session_id=...,
-            file_urls=...
-        )
+    Siempre llamamos a pipeline.run_pipeline con la firma flexible:
+      - run_pipeline(session_id=..., files=..., file_urls=...)
     """
-    try:
-        logger.info("🎬 job_render called (raw payload)", extra={"payload": payload})
+    logger.info(
+        f"[job_render] start session_id={session_id} "
+        f"files={files} file_urls={file_urls}"
+    )
 
-        # Safety: payload must be a dict
-        if not isinstance(payload, dict):
-            raise ValueError(f"job_render expected dict payload, got: {type(payload)}")
+    result = pipeline.run_pipeline(
+        session_id=session_id,
+        files=files,
+        file_urls=file_urls,
+    )
 
-        # Accept both "session_id" or legacy "id"
-        session_id: Optional[str] = payload.get("session_id") or payload.get("id")
-        # Accept both "files" and "file_urls" from the web layer
-        files: Optional[List[str]] = payload.get("files") or payload.get("file_urls")
-
-        if not session_id:
-            raise ValueError("job_render: missing 'session_id' in payload")
-
-        if not files or not isinstance(files, list):
-            raise ValueError("job_render: 'files' / 'file_urls' must be a non-empty list in payload")
-
-        logger.info(
-            "🚀 Calling pipeline.run_pipeline",
-            extra={"session_id": session_id, "num_files": len(files)}
-        )
-
-        # ⬇⬇⬇ KEY LINE — must be `file_urls=files`, NOT `files=files`
-        result = pipeline.run_pipeline(
-            session_id=session_id,
-            file_urls=files,
-        )
-
-        # `result` should already contain everything (clips, slots, urls, etc.)
-        out: Dict[str, Any] = {
-            "ok": True,
-            **result,
-        }
-
-        logger.info(
-            "✅ job_render completed successfully",
-            extra={"session_id": session_id, "keys": list(out.keys())}
-        )
-        return out
-
-    except Exception as e:
-        logger.exception("❌ job_render failed")
-        return {
-            "ok": False,
-            "error": str(e),
-            "traceback": traceback.format_exc(),
-        }
+    logger.info(f"[job_render] done session_id={session_id}")
+    return result
