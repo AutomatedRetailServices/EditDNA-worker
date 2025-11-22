@@ -1,31 +1,30 @@
-# worker/tasks.py
-# Funciones que el Worker GPU ejecuta via RQ
-# El API encola "tasks.job_render" → y aquí debe existir
+# tasks.py  (WORKER SIDE)
+# ---------------------------------------
+# Este archivo existe SOLO para que RQ pueda resolver "tasks.job_render"
+# cuando el job llega desde Redis.
+#
+# No contiene lógica nueva; simplemente reenvía a jobs.job_render,
+# que es donde vive tu pipeline real.
 
-import uuid
-from typing import Any, Dict, List
+from typing import Any, Dict
 
-# Importa la función verdadera del worker
-from jobs import job_render as real_job_render
+try:
+    # jobs.py ya existe en tu repo y contiene la lógica real
+    from jobs import job_render as _job_render_impl
+except Exception as e:
+    # Log fuerte para que si algo falla se vea en los logs del worker
+    print("[FATAL] No se pudo importar jobs.job_render desde tasks.py:", e)
+    _job_render_impl = None  # type: ignore
 
 
 def job_render(data: Dict[str, Any]) -> Dict[str, Any]:
     """
-    Esta es la función que el worker ejecuta cuando recibe "tasks.job_render"
-    Hace puente hacia la función real que procesa el render.
+    Wrapper del worker llamado por RQ como 'tasks.job_render'.
     """
-    session_id = data.get("session_id", f"session-{uuid.uuid4().hex[:8]}")
+    if _job_render_impl is None:
+        raise RuntimeError(
+            "jobs.job_render no está disponible. "
+            "Revisa que jobs.py exista y defina job_render(data)."
+        )
 
-    result = real_job_render(
-        session_id=session_id,
-        files=data.get("files", []),
-        portrait=bool(data.get("portrait", True)),
-        max_duration=float(data.get("max_duration", 120.0)),
-        s3_prefix=data.get("s3_prefix", "editdna/outputs/")
-    )
-
-    return {
-        "ok": True,
-        "session_id": session_id,
-        "result": result
-    }
+    return _job_render_impl(data)
