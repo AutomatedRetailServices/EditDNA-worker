@@ -1,4 +1,9 @@
-FROM nvidia/cuda:12.1.0-cudnn8-runtime-ubuntu22.04
+# ======================================================
+# EditDNA GPU WORKER - Dockerfile.worker (FINAL)
+# Base: imagen con CUDA 12.4 + Torch 2.6.0 ya instalada
+# ======================================================
+
+FROM mediador2011/better-pytorch:cuda12.4-torch2.6.0
 
 # Directorio de trabajo
 WORKDIR /app
@@ -8,33 +13,17 @@ ENV PYTHONUNBUFFERED=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1 \
     PIP_NO_CACHE_DIR=1
 
-# ---- SISTEMA: python, ffmpeg, git, vision libs ----
+# ---- SISTEMA: ffmpeg + libs para visión / CLIP ----
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    python3 \
-    python3-pip \
-    python3-venv \
-    git \
     ffmpeg \
+    git \
+    curl \
     libglib2.0-0 \
     libgl1 \
  && rm -rf /var/lib/apt/lists/*
 
-# alias python → python3 y pip actualizado
-RUN update-alternatives --install /usr/bin/python python /usr/bin/python3 1 && \
-    python -m pip install --upgrade pip
-
 # ---- DEPENDENCIAS PYTHON ----
+# Torch YA viene en la imagen → aquí solo libs de alto nivel
 COPY requirements.txt /app/requirements.txt
-RUN pip install --no-cache-dir -r /app/requirements.txt
 
-# ---- CÓDIGO DEL WORKER ----
-COPY . /app
-
-# entrypoint con permisos
-RUN chmod +x /app/entrypoint.sh
-
-# Para que Python vea /app como paquete
-ENV PYTHONPATH=/app
-
-# ---- ENTRYPOINT: usamos bash para evitar "Permission denied" ----
-ENTRYPOINT ["bash", "/app/entrypoint.sh"]
+RUN pip install --no
