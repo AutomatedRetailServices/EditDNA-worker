@@ -50,3 +50,4 @@ QUEUE_NAME="${QUEUE_NAME:-default}"
 
 echo "🧰 Starting RQ worker on queue=$QUEUE_NAME"
 exec rq worker -u "$REDIS_URL" --worker-ttl 1200 "$QUEUE_NAME"
+
