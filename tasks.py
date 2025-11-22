@@ -1,44 +1,41 @@
-# web/tasks.py
-# Adapter entre la API y el Worker GPU
-# Cuando el cliente llama: API → job_render() → encolamos tasks.job_render en Redis
+import logging
+from typing import Dict, Any
 
-import os
-import uuid
-from typing import Any, Dict, List
-from redis import Redis
-from rq import Queue
+# Importamos nuestra función principal del pipeline
+try:
+    from pipeline import run_pipeline
+except Exception as e:
+    raise RuntimeError(
+        f"No se pudo importar run_pipeline desde pipeline.py. "
+        f"Revisa que pipeline.py exista y tenga run_pipeline(session_id, files). Error={e}"
+    )
 
-# Config Redis
-REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379/0")
-redis_conn = Redis.from_url(REDIS_URL)
-q = Queue("default", connection=redis_conn)
+logger = logging.getLogger("editdna.tasks")
 
 
 def job_render(data: Dict[str, Any]) -> Dict[str, Any]:
     """
-    Esta función la llama la API.
-    Encola un trabajo para que el worker lo ejecute (tasks.job_render)
+    Punto de entrada REAL para RQ.
+    Este nombre EXACTO debe coincidir con el string 'tasks.job_render'
+    que usa el queue.enqueue(...) del server web.
     """
 
-    session_id = data.get("session_id", f"session-{uuid.uuid4().hex[:8]}")
+    logger.info(f"[tasks.job_render] payload recibido: {data}")
 
-    payload: Dict[str, Any] = {
-        "session_id": session_id,
-        "files": data.get("files", []),
-        "portrait": bool(data.get("portrait", True)),
-        "max_duration": float(data.get("max_duration", 120.0)),
-        "s3_prefix": data.get("s3_prefix", "editdna/outputs/")
-    }
+    if not isinstance(data, dict):
+        raise ValueError("data debe ser un dict con session_id y files/file_urls")
 
-    # Si vienen prompts en la API (más adelante)
-    if "funnel_counts" in data:
-        payload["funnel_counts"] = data["funnel_counts"]
+    session_id = data.get("session_id")
+    files = data.get("files") or data.get("file_urls")
 
-    # 🚀 Aquí es la clave:
-    job = q.enqueue("tasks.job_render", payload)
+    if not session_id:
+        raise ValueError("Falta session_id en data")
 
-    return {
-        "ok": True,
-        "job_id": job.id,
-        "session_id": session_id
-    }
+    if not files or not isinstance(files, list):
+        raise ValueError("Falta files (lista de URLs) en data")
+
+    # Llamamos al pipeline
+    result = run_pipeline(session_id=session_id, file_urls=files)
+
+    logger.info(f"[tasks.job_render] finalizado OK session_id={session_id}")
+    return result
