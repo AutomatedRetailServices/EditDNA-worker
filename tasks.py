@@ -1,43 +1,41 @@
-import os
 import logging
-from redis import Redis
-from rq import get_current_job
+from typing import Any, Dict, List, Optional
 
-from pipeline import run_pipeline  # usamos tu pipeline.py
-# Si pipeline.py está en /app/pipeline.py esto es correcto.
+from pipeline import run_pipeline
 
 logger = logging.getLogger("editdna.tasks")
 logger.setLevel(logging.INFO)
 
 
-def get_redis() -> Redis:
-    url = os.environ.get("REDIS_URL")
-    if not url:
-        raise RuntimeError("REDIS_URL env no está definido")
-    return Redis.from_url(url)
-
-
-def job_render(session_id: str, files=None, file_urls=None):
+def job_render(payload: Dict[str, Any]) -> Dict[str, Any]:
     """
-    Job principal que ejecuta el pipeline y devuelve el resultado.
-    Este es el nombre que RQ está intentando importar: tasks.job_render
+    Job principal que usa RQ.
+
+    RQ lo está llamando así (lo que ves en los logs):
+        tasks.job_render({'session_id': 'funnel-test-1', 'files': ['https://...']})
+
+    Por eso aquí recibimos UN solo parámetro: `payload` (dict)
+    con claves como: session_id, files, file_urls.
     """
-    logger.info(f"[job_render] session_id={session_id} files={files} file_urls={file_urls}")
-    job = get_current_job()
-    if job:
-        logger.info(f"[job_render] job.id={job.id}")
+    logger.info(f"[job_render] payload recibido: {payload!r}")
 
-    # Normalizamos: usamos 'files' como lista de URLs
-    effective_files = None
-    if files and isinstance(files, list):
-        effective_files = files
-    elif file_urls and isinstance(file_urls, list):
-        effective_files = file_urls
+    session_id: str = payload.get("session_id") or "session-unknown"
+    files: Optional[List[str]] = payload.get("files")
+    file_urls: Optional[List[str]] = payload.get("file_urls")
 
-    if not effective_files:
-        raise ValueError("job_render: se requiere 'files' o 'file_urls' como lista con al menos 1 URL")
-
-    result = run_pipeline(session_id=session_id, files=effective_files)
-
-    logger.info(f"[job_render] pipeline ok={result.get('ok')} duration={result.get('duration_sec')}")
-    return result
+    try:
+        result = run_pipeline(
+            session_id=session_id,
+            files=files,
+            file_urls=file_urls,
+        )
+        logger.info(f"[job_render] OK session_id={session_id}")
+        return result
+    except Exception as e:
+        logger.exception(f"[job_render] ERROR session_id={session_id}: {e}")
+        # Puedes decidir qué devolver al fallar
+        return {
+            "ok": False,
+            "session_id": session_id,
+            "error": str(e),
+        }
