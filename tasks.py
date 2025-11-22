@@ -1,30 +1,43 @@
-# tasks.py  (WORKER SIDE)
-# ---------------------------------------
-# Este archivo existe SOLO para que RQ pueda resolver "tasks.job_render"
-# cuando el job llega desde Redis.
-#
-# No contiene lógica nueva; simplemente reenvía a jobs.job_render,
-# que es donde vive tu pipeline real.
+import os
+from typing import List, Optional, Dict, Any
 
-from typing import Any, Dict
+import redis
+from rq import Queue
 
-try:
-    # jobs.py ya existe en tu repo y contiene la lógica real
-    from jobs import job_render as _job_render_impl
-except Exception as e:
-    # Log fuerte para que si algo falla se vea en los logs del worker
-    print("[FATAL] No se pudo importar jobs.job_render desde tasks.py:", e)
-    _job_render_impl = None  # type: ignore
+REDIS_URL = os.environ.get("REDIS_URL", "redis://localhost:6379/0")
+QUEUE_NAME = os.environ.get("QUEUE_NAME", "default")
 
 
-def job_render(data: Dict[str, Any]) -> Dict[str, Any]:
+def get_queue(name: Optional[str] = None) -> Queue:
     """
-    Wrapper del worker llamado por RQ como 'tasks.job_render'.
+    Crea la cola RQ usando REDIS_URL de env.
     """
-    if _job_render_impl is None:
-        raise RuntimeError(
-            "jobs.job_render no está disponible. "
-            "Revisa que jobs.py exista y defina job_render(data)."
-        )
+    qname = name or QUEUE_NAME
+    conn = redis.from_url(REDIS_URL)
+    return Queue(qname, connection=conn)
 
-    return _job_render_impl(data)
+
+def enqueue_render(
+    session_id: str,
+    files: Optional[List[str]] = None,
+    file_urls: Optional[List[str]] = None,
+    meta: Optional[Dict[str, Any]] = None,
+):
+    """
+    Helper para encolar el job principal de edición.
+
+    Encola usando el *string* "tasks.job_render" como ya
+    lo está esperando el worker.
+    """
+    q = get_queue()
+    payload: Dict[str, Any] = {
+        "session_id": session_id,
+        "files": files,
+        "file_urls": file_urls,
+    }
+    job = q.enqueue(
+        "tasks.job_render",   # <- el mismo path que sale en el log
+        payload,
+        meta=meta or {},
+    )
+    return job
