@@ -1,10 +1,3 @@
-import os
-from# tasks.py  (WORKER SIDE - DEFINITIVO)
-# ---------------------------------------
-# Este módulo es el que RQ invoca como "tasks.job_render".
-# Aquí simplemente delegamos a pipeline.job_render, que es
-# donde vive tu pipeline real de edición.
-
 from typing import Any, Dict
 import logging
 
