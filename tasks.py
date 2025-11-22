@@ -1,43 +1,38 @@
 import os
-from typing import List, Optional, Dict, Any
+from# tasks.py  (WORKER SIDE - DEFINITIVO)
+# ---------------------------------------
+# Este módulo es el que RQ invoca como "tasks.job_render".
+# Aquí simplemente delegamos a pipeline.job_render, que es
+# donde vive tu pipeline real de edición.
 
-import redis
-from rq import Queue
+from typing import Any, Dict
+import logging
 
-REDIS_URL = os.environ.get("REDIS_URL", "redis://localhost:6379/0")
-QUEUE_NAME = os.environ.get("QUEUE_NAME", "default")
+logger = logging.getLogger("editdna.tasks")
+
+try:
+    # 👉 IMPORTANTE:
+    # Usamos pipeline.py, que ya actualizaste antes y donde
+    # definimos job_render(data: Dict[str, Any]) como entrada principal.
+    from pipeline import job_render as _job_render_impl
+except Exception as e:
+    logger.error("[FATAL] No se pudo importar job_render desde pipeline.py: %s", e)
+    _job_render_impl = None  # type: ignore
 
 
-def get_queue(name: Optional[str] = None) -> Queue:
+def job_render(data: Dict[str, Any]) -> Dict[str, Any]:
     """
-    Crea la cola RQ usando REDIS_URL de env.
-    """
-    qname = name or QUEUE_NAME
-    conn = redis.from_url(REDIS_URL)
-    return Queue(qname, connection=conn)
+    Entry point llamado por RQ (tasks.job_render).
 
-
-def enqueue_render(
-    session_id: str,
-    files: Optional[List[str]] = None,
-    file_urls: Optional[List[str]] = None,
-    meta: Optional[Dict[str, Any]] = None,
-):
+    data viene del web/API y debe tener:
+      - session_id
+      - files (lista de URLs o S3)
+      - cualquier otro campo que pipeline.job_render espere
     """
-    Helper para encolar el job principal de edición.
+    if _job_render_impl is None:
+        raise RuntimeError(
+            "pipeline.job_render no está disponible. "
+            "Asegúrate de que pipeline.py existe y define job_render(data)."
+        )
 
-    Encola usando el *string* "tasks.job_render" como ya
-    lo está esperando el worker.
-    """
-    q = get_queue()
-    payload: Dict[str, Any] = {
-        "session_id": session_id,
-        "files": files,
-        "file_urls": file_urls,
-    }
-    job = q.enqueue(
-        "tasks.job_render",   # <- el mismo path que sale en el log
-        payload,
-        meta=meta or {},
-    )
-    return job
+    return _job_render_impl(data)
