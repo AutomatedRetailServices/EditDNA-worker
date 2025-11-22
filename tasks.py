@@ -1,43 +1,44 @@
-import logging
-from typing import Any, Dict, List, Optional
+# web/tasks.py
+# Adapter entre la API y el Worker GPU
+# Cuando el cliente llama: API → job_render() → encolamos tasks.job_render en Redis
 
-from pipeline import run_pipeline
+import os
+import uuid
+from typing import Any, Dict, List
+from redis import Redis
+from rq import Queue
 
-logger = logging.getLogger("editdna.tasks")
+# Config Redis
+REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379/0")
+redis_conn = Redis.from_url(REDIS_URL)
+q = Queue("default", connection=redis_conn)
 
 
 def job_render(data: Dict[str, Any]) -> Dict[str, Any]:
     """
-    Entry point que RQ llama como "tasks.job_render".
-
-    Espera un payload tipo:
-      {
-        "session_id": "funnel-test-1",
-        "files": ["https://...mp4"],      # o
-        "file_urls": ["https://...mp4"]   # cualquiera de las dos
-      }
+    Esta función la llama la API.
+    Encola un trabajo para que el worker lo ejecute (tasks.job_render)
     """
 
-    session_id: Optional[str] = data.get("session_id")
-    if not session_id:
-        raise ValueError("tasks.job_render: falta 'session_id' en el payload")
+    session_id = data.get("session_id", f"session-{uuid.uuid4().hex[:8]}")
 
-    files: Optional[List[str]] = data.get("files")
-    file_urls: Optional[List[str]] = data.get("file_urls")
+    payload: Dict[str, Any] = {
+        "session_id": session_id,
+        "files": data.get("files", []),
+        "portrait": bool(data.get("portrait", True)),
+        "max_duration": float(data.get("max_duration", 120.0)),
+        "s3_prefix": data.get("s3_prefix", "editdna/outputs/")
+    }
 
-    logger.info(
-        "tasks.job_render: session_id=%s, files=%d, file_urls=%d",
-        session_id,
-        len(files or []),
-        len(file_urls or []),
-    )
+    # Si vienen prompts en la API (más adelante)
+    if "funnel_counts" in data:
+        payload["funnel_counts"] = data["funnel_counts"]
 
-    # Delegamos TODO el trabajo real al pipeline
-    result = run_pipeline(
-        session_id=session_id,
-        files=files,
-        file_urls=file_urls,
-    )
+    # 🚀 Aquí es la clave:
+    job = q.enqueue("tasks.job_render", payload)
 
-    logger.info("tasks.job_render: terminado ok para session_id=%s", session_id)
-    return result
+    return {
+        "ok": True,
+        "job_id": job.id,
+        "session_id": session_id
+    }
