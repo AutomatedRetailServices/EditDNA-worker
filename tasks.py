@@ -1,41 +1,31 @@
-import logging
-from typing import Any, Dict, List, Optional
+# worker/tasks.py
+# Funciones que el Worker GPU ejecuta via RQ
+# El API encola "tasks.job_render" → y aquí debe existir
 
-from pipeline import run_pipeline
+import uuid
+from typing import Any, Dict, List
 
-logger = logging.getLogger("editdna.tasks")
-logger.setLevel(logging.INFO)
+# Importa la función verdadera del worker
+from jobs import job_render as real_job_render
 
 
-def job_render(payload: Dict[str, Any]) -> Dict[str, Any]:
+def job_render(data: Dict[str, Any]) -> Dict[str, Any]:
     """
-    Job principal que usa RQ.
-
-    RQ lo está llamando así (lo que ves en los logs):
-        tasks.job_render({'session_id': 'funnel-test-1', 'files': ['https://...']})
-
-    Por eso aquí recibimos UN solo parámetro: `payload` (dict)
-    con claves como: session_id, files, file_urls.
+    Esta es la función que el worker ejecuta cuando recibe "tasks.job_render"
+    Hace puente hacia la función real que procesa el render.
     """
-    logger.info(f"[job_render] payload recibido: {payload!r}")
+    session_id = data.get("session_id", f"session-{uuid.uuid4().hex[:8]}")
 
-    session_id: str = payload.get("session_id") or "session-unknown"
-    files: Optional[List[str]] = payload.get("files")
-    file_urls: Optional[List[str]] = payload.get("file_urls")
+    result = real_job_render(
+        session_id=session_id,
+        files=data.get("files", []),
+        portrait=bool(data.get("portrait", True)),
+        max_duration=float(data.get("max_duration", 120.0)),
+        s3_prefix=data.get("s3_prefix", "editdna/outputs/")
+    )
 
-    try:
-        result = run_pipeline(
-            session_id=session_id,
-            files=files,
-            file_urls=file_urls,
-        )
-        logger.info(f"[job_render] OK session_id={session_id}")
-        return result
-    except Exception as e:
-        logger.exception(f"[job_render] ERROR session_id={session_id}: {e}")
-        # Puedes decidir qué devolver al fallar
-        return {
-            "ok": False,
-            "session_id": session_id,
-            "error": str(e),
-        }
+    return {
+        "ok": True,
+        "session_id": session_id,
+        "result": result
+    }
