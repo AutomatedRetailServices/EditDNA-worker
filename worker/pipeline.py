@@ -17,20 +17,26 @@ logger.setLevel(logging.INFO)
 
 TMP_DIR = os.environ.get("TMP_DIR", "/tmp/TMP/editdna")
 
-# FFmpeg / ffprobe (puedes apuntar a /usr/bin/ffmpeg, /usr/bin/ffprobe en tu ENV)
+# FFmpeg / ffprobe
 FFMPEG_BIN = os.environ.get("FFMPEG_BIN", "ffmpeg")
 FFPROBE_BIN = os.environ.get("FFPROBE_BIN", "ffprobe")
 
 # Whisper / ASR
-WHISPER_MODEL_NAME = os.environ.get("WHISPER_MODEL_NAME") or os.environ.get("WHISPER_MODEL", "medium")
-WHISPER_DEVICE = os.environ.get("WHISPER_DEVICE", os.environ.get("ASR_DEVICE", "auto"))  # cuda / cpu / auto
+WHISPER_MODEL_NAME = os.environ.get("WHISPER_MODEL_NAME") or os.environ.get(
+    "WHISPER_MODEL", "medium"
+)
+WHISPER_DEVICE = os.environ.get(
+    "WHISPER_DEVICE", os.environ.get("ASR_DEVICE", "auto")
+)  # cuda / cpu / auto
 
 ASR_ENABLED = os.environ.get("ASR_ENABLED", "1") == "1"
 
 # Composer / scores
 COMPOSER_MIN_SEMANTIC = float(os.environ.get("COMPOSER_MIN_SEMANTIC", "0.75"))
 COMPOSER_MAX_PER_SLOT = int(os.environ.get("COMPOSER_MAX_PER_SLOT", "7"))
-MICRO_SENTENCE_MAX_SECONDS = float(os.environ.get("MICRO_SENTENCE_MAX_SECONDS", "8.0"))
+MICRO_SENTENCE_MAX_SECONDS = float(
+    os.environ.get("MICRO_SENTENCE_MAX_SECONDS", "8.0")
+)
 
 EDITDNA_MIN_CLIP_SCORE = float(os.environ.get("EDITDNA_MIN_CLIP_SCORE", "0.7"))
 EDITDNA_HOOK_MIN_SCORE = float(os.environ.get("EDITDNA_HOOK_MIN_SCORE", "0.7"))
@@ -44,11 +50,12 @@ EDITDNA_LLM_MODEL = os.environ.get("EDITDNA_LLM_MODEL", "gpt-5.1")
 VISION_ENABLED = os.environ.get("VISION_ENABLED", "0") == "1"
 VISION_INTERVAL_SEC = float(os.environ.get("VISION_INTERVAL_SEC", "2.0"))
 VISION_MAX_SAMPLES = int(os.environ.get("VISION_MAX_SAMPLES", "50"))
-W_VISION = float(os.environ.get("W_VISION", "0.7"))  # peso del score visual vs semántico (0-1)
+W_VISION = float(os.environ.get("W_VISION", "0.7"))  # peso visual vs semántico (0-1)
 
 # S3
 S3_BUCKET = os.environ.get("S3_BUCKET")
 S3_PREFIX = os.environ.get("S3_PREFIX", "editdna/outputs")
+
 
 # =====================
 # HELPERS BÁSICOS
@@ -164,6 +171,8 @@ def make_base_clip(cid: str, start: float, end: float, text: str) -> Dict[str, A
         },
     }
     return clip
+
+
 # =====================
 # WHISPER ASR
 # =====================
@@ -181,6 +190,7 @@ def get_whisper_model() -> WhisperModel:
     if WHISPER_DEVICE in ("cuda", "gpu", "auto"):
         try:
             import torch  # noqa
+
             if hasattr(torch, "cuda") and torch.cuda.is_available():
                 device = "cuda"
                 compute_type = "float16"
@@ -243,7 +253,9 @@ def run_asr(input_local: str) -> List[Dict[str, Any]]:
         )
         idx += 1
 
-    logger.info(f"ASR produjo {len(out)} segmentos, duración ~{probe_duration(input_local):.2f}s")
+    logger.info(
+        f"ASR produjo {len(out)} segmentos, duración ~{probe_duration(input_local):.2f}s"
+    )
     return out
 
 
@@ -251,7 +263,10 @@ def run_asr(input_local: str) -> List[Dict[str, Any]]:
 # SENTENCE-BOUNDARY MICRO-CUTS
 # =====================
 
-def sentence_boundary_micro_cuts(asr_segments: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+
+def sentence_boundary_micro_cuts(
+    asr_segments: List[Dict[str, Any]]
+) -> List[Dict[str, Any]]:
     """
     Convierte segmentos de Whisper en micro-oraciones:
     - Split por puntuación (. ? !) o duración > MICRO_SENTENCE_MAX_SECONDS
@@ -327,6 +342,8 @@ def sentence_boundary_micro_cuts(asr_segments: List[Dict[str, Any]]) -> List[Dic
         flush_sentence()
 
     return clips
+
+
 # =====================
 # HEURÍSTICA BÁSICA
 # =====================
@@ -361,19 +378,66 @@ def looks_like_filler(text: str) -> bool:
 def classify_slot(text: str) -> str:
     t = text.lower()
 
-    if any(p in t for p in ["click the link", "tap the link", "shop now", "get yours", "grab one", "link below", "i left it for you"]):
+    if any(
+        p in t
+        for p in [
+            "click the link",
+            "tap the link",
+            "shop now",
+            "get yours",
+            "grab one",
+            "link below",
+            "i left it for you",
+        ]
+    ):
         return "CTA"
 
     if "?" in t or t.startswith(("if ", "hey ", "listen", "stop scrolling", "ladies", "guys")):
         return "HOOK"
 
-    if any(p in t for p in ["tired of", "sick of", "problem", "problems", "struggle", "does your", "is your", "keep giving you"]):
+    if any(
+        p in t
+        for p in [
+            "tired of",
+            "sick of",
+            "problem",
+            "problems",
+            "struggle",
+            "does your",
+            "is your",
+            "keep giving you",
+        ]
+    ):
         return "PROBLEM"
 
-    if any(p in t for p in ["i've been using", "i've tried", "i think they're really good", "i get so many compliments", "honestly", "for me"]):
+    if any(
+        p in t
+        for p in [
+            "i've been using",
+            "i've tried",
+            "i think they're really good",
+            "i get so many compliments",
+            "honestly",
+            "for me",
+        ]
+    ):
         return "PROOF"
 
-    if any(p in t for p in ["so you can", "you can", "you'll", "you will", "feel", "helps you", "so freaking", "elevates any outfit", "feel fresh", "confident"]):
+    if any(
+        p in t
+        for p in [
+            "so you can",
+            "you can",
+            "you'll",
+            "you will",
+            "feel",
+            "helps you",
+            "so freaking",
+            "elevates any outfit",
+            "feel fresh",
+            "confident",
+        ]
+    ):
         return "BENEFITS"
 
     if any(
@@ -396,7 +460,16 @@ def classify_slot(text: str) -> str:
     ):
         return "FEATURES"
 
-    if any(p in t for p in ["because i found", "let me tell you", "when i", "the first time", "my experience"]):
+    if any(
+        p in t
+        for p in [
+            "because i found",
+            "let me tell you",
+            "when i",
+            "the first time",
+            "my experience",
+        ]
+    ):
         return "STORY"
 
     return "STORY"
@@ -459,6 +532,7 @@ def tag_clips_heuristic(clips: List[Dict[str, Any]]) -> None:
 # LLM SEMÁNTICO (GPT-5.1)
 # =====================
 
+
 def llm_classify_clips(clips: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
     """
     Llama al LLM una sola vez con todos los clips y devuelve
@@ -494,13 +568,21 @@ def llm_classify_clips(clips: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
     user_instruction = {
         "task": "classify_clips",
         "instructions": {
-            "slots": ["HOOK", "STORY", "PROBLEM", "BENEFITS", "FEATURES", "PROOF", "CTA"],
+            "slots": [
+                "HOOK",
+                "STORY",
+                "PROBLEM",
+                "BENEFITS",
+                "FEATURES",
+                "PROOF",
+                "CTA",
+            ],
             "output_schema": {
                 "id": "string",
                 "slot": "string",
                 "keep": "boolean",
                 "semantic_score": "float (0-1)",
-                "reason": "short explanation in spanish"
+                "reason": "short explanation in spanish",
             },
         },
         "clips": payload_clips,
@@ -537,7 +619,9 @@ def llm_classify_clips(clips: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
             result_map[cid] = {
                 "slot": item.get("slot", "STORY"),
                 "keep": bool(item.get("keep", True)),
-                "semantic_score": safe_float(item.get("semantic_score", 0.0)),
+                "semantic_score": safe_float(
+                    item.get("semantic_score", 0.0)
+                ),
                 "reason": item.get("reason", ""),
             }
         return result_map
@@ -582,6 +666,8 @@ def enrich_clips_semantic(clips: List[Dict[str, Any]]) -> bool:
         c["meta"]["keep"] = keep
 
     return True
+
+
 # =====================
 # VISIÓN: CLIP + CUDA
 # =====================
@@ -634,7 +720,9 @@ def grab_frame_at_timestamp(input_local: str, t: float, out_path: str) -> bool:
     return True
 
 
-def run_visual_pass(input_local: str, session_dir: str, clips: List[Dict[str, Any]]) -> bool:
+def run_visual_pass(
+    input_local: str, session_dir: str, clips: List[Dict[str, Any]]
+) -> bool:
     """
     Usa CLIP para estimar qué tan bien cada clip visualmente
     matchea con su texto (visual_score 0-1).
@@ -659,7 +747,9 @@ def run_visual_pass(input_local: str, session_dir: str, clips: List[Dict[str, An
         return False
 
     step = max(1, len(clips) // max(1, VISION_MAX_SAMPLES))
-    logger.info(f"Vision pass: num_clips={len(clips)}, step={step}, device={device}")
+    logger.info(
+        f"Vision pass: num_clips={len(clips)}, step={step}, device={device}"
+    )
 
     for idx, c in enumerate(clips):
         if idx % step != 0:
@@ -669,7 +759,9 @@ def run_visual_pass(input_local: str, session_dir: str, clips: List[Dict[str, An
         if not text:
             continue
 
-        mid_t = (safe_float(c.get("start", 0.0)) + safe_float(c.get("end", 0.0))) / 2.0
+        mid_t = (
+            safe_float(c.get("start", 0.0)) + safe_float(c.get("end", 0.0))
+        ) / 2.0
         frame_path = os.path.join(session_dir, f"frame_{c['id']}.jpg")
 
         if not grab_frame_at_timestamp(input_local, mid_t, frame_path):
@@ -687,8 +779,12 @@ def run_visual_pass(input_local: str, session_dir: str, clips: List[Dict[str, An
             image_features = model.encode_image(image_input)
             text_features = model.encode_text(text_tokens)
 
-            image_features = image_features / image_features.norm(dim=-1, keepdim=True)
-            text_features = text_features / text_features.norm(dim=-1, keepdim=True)
+            image_features = image_features / image_features.norm(
+                dim=-1, keepdim=True
+            )
+            text_features = text_features / text_features.norm(
+                dim=-1, keepdim=True
+            )
 
             similarity = (image_features @ text_features.T).item()
             visual_score = (similarity + 1.0) / 2.0  # map [-1,1] -> [0,1]
@@ -746,9 +842,12 @@ def dedupe_clips(clips: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
             seen.add(norm)
         out.append(c)
     return out
+
+
 # =====================
 # SLOTS + COMPOSER
 # =====================
+
 
 def build_slots_dict(clips: List[Dict[str, Any]]) -> Dict[str, List[Dict[str, Any]]]:
     slots: Dict[str, List[Dict[str, Any]]] = {
@@ -814,14 +913,16 @@ def build_composer(clips: List[Dict[str, Any]]) -> Dict[str, Any]:
 
     if cta_clip is not None:
         timeline.append(cta_clip)
-        used_ids.append(cta_clip["id"])
+        used_ids.append(c["id"])
 
     def cap_ids(slot_name: str) -> List[str]:
         ids = [c["id"] for c in timeline if c.get("slot") == slot_name]
         return ids[:COMPOSER_MAX_PER_SLOT]
 
     composer = {
-        "hook_id": next((c["id"] for c in timeline if c.get("slot") == "HOOK"), None),
+        "hook_id": next(
+            (c["id"] for c in timeline if c.get("slot") == "HOOK"), None
+        ),
         "story_ids": cap_ids("STORY"),
         "problem_ids": cap_ids("PROBLEM"),
         "benefit_ids": cap_ids("BENEFITS"),
@@ -834,7 +935,9 @@ def build_composer(clips: List[Dict[str, Any]]) -> Dict[str, Any]:
     return composer
 
 
-def pretty_print_composer(clips: List[Dict[str, Any]], composer: Dict[str, Any]) -> str:
+def pretty_print_composer(
+    clips: List[Dict[str, Any]], composer: Dict[str, Any]
+) -> str:
     lookup = {c["id"]: c for c in clips}
 
     def line_for(cid: str) -> str:
@@ -869,7 +972,9 @@ def pretty_print_composer(clips: List[Dict[str, Any]], composer: Dict[str, Any])
         if not c:
             parts.append(f"{i}) {cid} (no encontrado)")
         else:
-            parts.append(f"{i}) {cid} → \"{c.get('text', '').strip()}\"")
+            parts.append(
+                f"{i}) {cid} → \"{c.get('text', '').strip()}\""
+            )
 
     parts.append("\n=====================================")
     return "\n".join(parts)
@@ -878,6 +983,7 @@ def pretty_print_composer(clips: List[Dict[str, Any]], composer: Dict[str, Any])
 # =====================
 # FFMPEG RENDER
 # =====================
+
 
 def render_funnel_video(
     input_local: str,
@@ -930,16 +1036,15 @@ def render_funnel_video(
 
     if has_audio and len(a_labels) != n:
         logger.warning(
-            f"render_funnel_video: has_audio=True pero len(a_labels)={len(a_labels)} != len(v_labels)={n}, "
-            f"desactivando audio para evitar media type mismatch."
+            "render_funnel_video: has_audio=True pero len(a_labels)"
+            f"={len(a_labels)} != len(v_labels)={n}, "
+            "desactivando audio para evitar media type mismatch."
         )
         has_audio = False
 
     filter_complex_parts: List[str] = list(filter_parts)
 
-    filter_complex_parts.append(
-        f"{''.join(v_labels)}concat=n={n}:v=1:a=0[vout]"
-    )
+    filter_complex_parts.append(f"{''.join(v_labels)}concat=n={n}:v=1:a=0[vout]")
 
     if has_audio:
         filter_complex_parts.append(
@@ -982,7 +1087,9 @@ def render_funnel_video(
         text=True,
     )
     if proc.returncode != 0:
-        logger.error("ffmpeg failed:\nSTDOUT:\n%s\nSTDERR:\n%s", proc.stdout, proc.stderr)
+        logger.error(
+            "ffmpeg failed:\nSTDOUT:\n%s\nSTDERR:\n%s", proc.stdout, proc.stderr
+        )
         raise RuntimeError(f"ffmpeg failed with code {proc.returncode}")
 
     return out_path
@@ -991,6 +1098,7 @@ def render_funnel_video(
 # =====================
 # ENTRYPOINT PRINCIPAL
 # =====================
+
 
 def run_pipeline(
     session_id: str,
@@ -1003,7 +1111,9 @@ def run_pipeline(
     como si llama con:
         run_pipeline(session_id=session_id, file_urls=files)
     """
-    logger.info(f"run_pipeline session_id={session_id} files={files} file_urls={file_urls}")
+    logger.info(
+        f"run_pipeline session_id={session_id} files={files} file_urls={file_urls}"
+    )
 
     effective_files: Optional[List[str]] = None
     if files and isinstance(files, list):
@@ -1012,7 +1122,9 @@ def run_pipeline(
         effective_files = file_urls
 
     if not effective_files:
-        raise ValueError("run_pipeline: se requiere 'files' o 'file_urls' como lista con al menos 1 URL")
+        raise ValueError(
+            "run_pipeline: se requiere 'files' o 'file_urls' como lista con al menos 1 URL"
+        )
 
     session_dir = ensure_session_dir(session_id)
     input_local = os.path.join(session_dir, "input.mp4")
@@ -1067,4 +1179,3 @@ def run_pipeline(
         "llm_used": llm_used,
     }
     return result
-    
