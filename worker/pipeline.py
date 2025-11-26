@@ -913,7 +913,7 @@ def build_composer(clips: List[Dict[str, Any]]) -> Dict[str, Any]:
 
     if cta_clip is not None:
         timeline.append(cta_clip)
-        used_ids.append(c["id"])
+        used_ids.append(cta_clip["id"])
 
     def cap_ids(slot_name: str) -> List[str]:
         ids = [c["id"] for c in timeline if c.get("slot") == slot_name]
