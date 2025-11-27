@@ -227,7 +227,7 @@ def run_asr(input_local: str) -> List[Dict[str, Any]]:
         beam_size=5,
         word_timestamps=True,
         vad_filter=True,
-        vad_parameters={"min_silence_duration_ms": 300},
+               vad_parameters={"min_silence_duration_ms": 300},
     )
     out: List[Dict[str, Any]] = []
     idx = 0
@@ -371,7 +371,7 @@ def looks_like_filler(text: str) -> bool:
         if pat in t:
             return True
     if len(t.split()) <= 1 and t in {"and", "uh", "um", "hmm", "like"}:
-        return True
+            return True
     return False
 
 
@@ -476,15 +476,6 @@ def classify_slot(text: str) -> str:
 
 
 def tag_clips_heuristic(clips: List[Dict[str, Any]]) -> None:
-    """
-    Rellena:
-      - slot
-      - keep
-      - semantic_score (0-1)
-      - score
-      - llm_reason (explicación breve)
-      - meta.*
-    """
     for c in clips:
         text = c.get("text", "")
         t = text.strip()
@@ -534,10 +525,6 @@ def tag_clips_heuristic(clips: List[Dict[str, Any]]) -> None:
 
 
 def llm_classify_clips(clips: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
-    """
-    Llama al LLM una sola vez con todos los clips y devuelve
-    un dict: { clip_id: {slot, keep, semantic_score, reason} }
-    """
     from openai import OpenAI
 
     api_key = os.environ.get("OPENAI_API_KEY")
@@ -631,12 +618,6 @@ def llm_classify_clips(clips: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
 
 
 def enrich_clips_semantic(clips: List[Dict[str, Any]]) -> bool:
-    """
-    1) Aplica heurística base.
-    2) Si EDITDNA_USE_LLM=1 → llama al LLM y sobreescribe slot/score/keep
-       donde aplique.
-    Devuelve True si el LLM se usó con éxito.
-    """
     tag_clips_heuristic(clips)
 
     if not EDITDNA_USE_LLM:
@@ -658,7 +639,7 @@ def enrich_clips_semantic(clips: List[Dict[str, Any]]) -> bool:
 
         c["slot"] = slot
         c["semantic_score"] = sem
-        c["score"] = sem  # se ajustará luego con visión
+        c["score"] = sem
         c["llm_reason"] = reason or c.get("llm_reason", "")
         c["meta"]["slot"] = slot
         c["meta"]["semantic_score"] = sem
@@ -723,10 +704,6 @@ def grab_frame_at_timestamp(input_local: str, t: float, out_path: str) -> bool:
 def run_visual_pass(
     input_local: str, session_dir: str, clips: List[Dict[str, Any]]
 ) -> bool:
-    """
-    Usa CLIP para estimar qué tan bien cada clip visualmente
-    matchea con su texto (visual_score 0-1).
-    """
     if not VISION_ENABLED:
         logger.info("VISION_ENABLED=0, saltando vision pass.")
         return False
@@ -787,23 +764,15 @@ def run_visual_pass(
             )
 
             similarity = (image_features @ text_features.T).item()
-            visual_score = (similarity + 1.0) / 2.0  # map [-1,1] -> [0,1]
+            visual_score = (similarity + 1.0) / 2.0
 
         c["visual_score"] = float(visual_score)
         c["meta"]["visual_score"] = float(visual_score)
 
-    # Clips sin score visual → dejamos 0.0
     return True
 
 
 def apply_min_score_rules(clips: List[Dict[str, Any]]) -> None:
-    """
-    Aplica reglas de mínimos:
-      - EDITDNA_MIN_CLIP_SCORE
-      - EDITDNA_HOOK_MIN_SCORE
-      - EDITDNA_CTA_MIN_SCORE
-    Operamos sobre c['score'] (que ya mezcla semántico + visual).
-    """
     for c in clips:
         slot = c.get("slot", "STORY")
         score = safe_float(c.get("score", 0.0))
@@ -823,9 +792,6 @@ def normalize_text(t: str) -> str:
 
 
 def dedupe_clips(clips: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-    """
-    Dedup simple: se queda con la primera aparición de cada texto normalizado.
-    """
     seen = set()
     out = []
     for c in clips:
@@ -868,12 +834,6 @@ def build_slots_dict(clips: List[Dict[str, Any]]) -> Dict[str, List[Dict[str, An
 
 
 def build_composer(clips: List[Dict[str, Any]]) -> Dict[str, Any]:
-    """
-    Free-Flow Composer:
-      - Mantiene el orden cronológico.
-      - Usa score combinado (semantic + visual).
-      - CTA (si existe) se mueve al final.
-    """
     usable = [
         c
         for c in clips
@@ -1105,12 +1065,6 @@ def run_pipeline(
     files: Optional[List[str]] = None,
     file_urls: Optional[List[str]] = None,
 ) -> Dict[str, Any]:
-    """
-    Firma compatible con tasks.py, tanto si llama con:
-        run_pipeline(session_id=session_id, files=files)
-    como si llama con:
-        run_pipeline(session_id=session_id, file_urls=files)
-    """
     logger.info(
         f"run_pipeline session_id={session_id} files={files} file_urls={file_urls}"
     )
@@ -1133,30 +1087,16 @@ def run_pipeline(
 
     duration = probe_duration(input_local)
 
-    # 1) ASR
     asr_segments = run_asr(input_local)
-
-    # 2) Micro-cuts
     clips = sentence_boundary_micro_cuts(asr_segments)
-
-    # 3) Semántica (heurística + LLM)
     llm_used = enrich_clips_semantic(clips)
-
-    # 4) Dedupe texto
     clips = dedupe_clips(clips)
-
-    # 5) Visión (CLIP)
     vision_used = run_visual_pass(input_local, session_dir, clips)
-
-    # 6) Slots + composer
     slots = build_slots_dict(clips)
     composer = build_composer(clips)
     used_clip_ids = composer.get("used_clip_ids", [])
-
-    # 7) Render
     final_path = render_funnel_video(input_local, session_dir, clips, used_clip_ids)
 
-    # 8) S3 (opcional)
     output_url = None
     if S3_BUCKET:
         key = f"{S3_PREFIX}/{session_id}-final.mp4"
