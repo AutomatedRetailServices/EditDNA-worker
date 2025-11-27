@@ -1,14 +1,11 @@
 FROM pytorch/pytorch:2.3.1-cuda12.1-cudnn8-runtime
 
-# Directorio de trabajo
 WORKDIR /app
 
-# Configuración básica de Python / pip
 ENV PYTHONUNBUFFERED=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1 \
     PIP_NO_CACHE_DIR=1
 
-# ---- SISTEMA: ffmpeg + git + libs para visión ----
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ffmpeg \
     git \
@@ -17,20 +14,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libgl1 \
  && rm -rf /var/lib/apt/lists/*
 
-# ---- DEPENDENCIAS PYTHON ----
-# Usamos EXACTAMENTE tu requirements.txt actual
 COPY requirements.txt /app/requirements.txt
-
 RUN pip install --no-cache-dir -r /app/requirements.txt
 
-# ---- CÓDIGO DEL WORKER ----
 COPY . /app
 
-# Aseguramos permiso de ejecución al entrypoint
 RUN chmod +x /app/entrypoint.sh
 
-# Para que Python pueda encontrar /app como paquete
 ENV PYTHONPATH=/app
 
-# ENTRYPOINT: usamos bash para evitar "Permission denied"
 ENTRYPOINT ["bash", "/app/entrypoint.sh"]
