@@ -8,6 +8,8 @@ import requests
 from faster_whisper import WhisperModel
 import boto3
 
+import clip
+
 logger = logging.getLogger("editdna.pipeline")
 logger.setLevel(logging.INFO)
 
