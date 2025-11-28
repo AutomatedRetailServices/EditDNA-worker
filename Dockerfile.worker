@@ -1,12 +1,6 @@
-FROM pytorch/pytorch:2.6.0-cuda12.4-cudnn8-runtime
+FROM python:3.11-slim
 
-WORKDIR /app
-
-ENV PYTHONUNBUFFERED=1 \
-    PIP_DISABLE_PIP_VERSION_CHECK=1 \
-    PIP_NO_CACHE_DIR=1
-
-# ---- sistema: ffmpeg + git + libs visión ----
+# --- System deps (ffmpeg, git, libs) ---
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ffmpeg \
     git \
@@ -15,16 +9,20 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libgl1 \
  && rm -rf /var/lib/apt/lists/*
 
-# ---- deps Python ----
+# --- Python env ---
+ENV PYTHONUNBUFFERED=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    PIP_NO_CACHE_DIR=1
+
+WORKDIR /app
+
+# --- Python deps ---
 COPY requirements.txt /app/requirements.txt
 RUN pip install --no-cache-dir -r /app/requirements.txt
 
-# ---- código del worker ----
+# --- Code ---
 COPY . /app
 
-# entrypoint ejecutable
-RUN chmod +x /app/entrypoint.sh
-
-ENV PYTHONPATH=/app
-
-ENTRYPOINT ["bash", "/app/entrypoint.sh"]
+# --- Default CMD (solo para tests; GitHub NUNCA lo ejecuta en producción) ---
+# Si algún día quieres correr este contenedor local, solo necesitas REDIS_URL.
+CMD ["python", "-m", "rq.cli", "worker", "default"]
