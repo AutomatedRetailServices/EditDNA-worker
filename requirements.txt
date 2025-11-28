@@ -1,3 +1,5 @@
+--extra-index-url https://download.pytorch.org/whl/cu124
+
 # Core
 fastapi>=0.110
 uvicorn[standard]>=0.23
@@ -7,11 +9,9 @@ redis>=5.0
 rq>=2.6
 python-dotenv>=1.0.1
 
-# Torch (2.6.0) + ASR
-torch==2.6.0
-torchvision==0.21.0
-torchaudio==2.6.0
-openai-whisper==20231117
+# Torch / ASR
+# torch / torchvision / torchaudio YA vienen en la imagen base (2.6.0 + CUDA 12.4)
+# No los instalamos aquí para evitar conflictos con triton.
 faster-whisper==1.0.0
 
 # Vision
