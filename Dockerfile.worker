@@ -1,6 +1,14 @@
-FROM python:3.11-slim
+FROM madiator2011/better-pytorch:cuda12.4-torch2.6.0
 
-# --- System deps (ffmpeg, git, libs) ---
+# Directorio de trabajo
+WORKDIR /app
+
+# Configuración básica de Python / pip
+ENV PYTHONUNBUFFERED=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    PIP_NO_CACHE_DIR=1
+
+# ---- SISTEMA: ffmpeg + git + libs para visión ----
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ffmpeg \
     git \
@@ -9,20 +17,18 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libgl1 \
  && rm -rf /var/lib/apt/lists/*
 
-# --- Python env ---
-ENV PYTHONUNBUFFERED=1 \
-    PIP_DISABLE_PIP_VERSION_CHECK=1 \
-    PIP_NO_CACHE_DIR=1
-
-WORKDIR /app
-
-# --- Python deps ---
+# ---- DEPENDENCIAS PYTHON ----
 COPY requirements.txt /app/requirements.txt
 RUN pip install --no-cache-dir -r /app/requirements.txt
 
-# --- Code ---
+# ---- CÓDIGO DEL WORKER ----
 COPY . /app
 
-# --- Default CMD (solo para tests; GitHub NUNCA lo ejecuta en producción) ---
-# Si algún día quieres correr este contenedor local, solo necesitas REDIS_URL.
-CMD ["python", "-m", "rq.cli", "worker", "default"]
+# Aseguramos permiso de ejecución al entrypoint
+RUN chmod +x /app/entrypoint.sh || true
+
+# Para que Python pueda encontrar /app como paquete
+ENV PYTHONPATH=/app
+
+# El worker se arranca con nuestro script
+ENTRYPOINT ["bash", "/app/entrypoint.sh"]
