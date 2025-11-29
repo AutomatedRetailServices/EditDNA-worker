@@ -14,7 +14,7 @@ logger = logging.getLogger("editdna.pipeline")
 logger.setLevel(logging.INFO)
 
 # =====================
-# GLOBAL CONFIG
+# CONFIG GLOBAL
 # =====================
 
 TMP_DIR = os.environ.get("TMP_DIR", "/tmp/TMP/editdna")
@@ -33,28 +33,26 @@ WHISPER_DEVICE = os.environ.get(
 
 ASR_ENABLED = os.environ.get("ASR_ENABLED", "1") == "1"
 
-# Composer / scores (loosened to keep more flow)
-COMPOSER_MIN_SEMANTIC = float(os.environ.get("COMPOSER_MIN_SEMANTIC", "0.55"))
+# Composer / scores
+COMPOSER_MIN_SEMANTIC = float(os.environ.get("COMPOSER_MIN_SEMANTIC", "0.75"))
 COMPOSER_MAX_PER_SLOT = int(os.environ.get("COMPOSER_MAX_PER_SLOT", "7"))
 MICRO_SENTENCE_MAX_SECONDS = float(
     os.environ.get("MICRO_SENTENCE_MAX_SECONDS", "8.0")
 )
 
-# Min clip scores (much softer to avoid killing good flow)
-EDITDNA_MIN_CLIP_SCORE = float(os.environ.get("EDITDNA_MIN_CLIP_SCORE", "0.5"))
-EDITDNA_HOOK_MIN_SCORE = float(os.environ.get("EDITDNA_HOOK_MIN_SCORE", "0.55"))
-EDITDNA_CTA_MIN_SCORE = float(os.environ.get("EDITDNA_CTA_MIN_SCORE", "0.5"))
+EDITDNA_MIN_CLIP_SCORE = float(os.environ.get("EDITDNA_MIN_CLIP_SCORE", "0.7"))
+EDITDNA_HOOK_MIN_SCORE = float(os.environ.get("EDITDNA_HOOK_MIN_SCORE", "0.7"))
+EDITDNA_CTA_MIN_SCORE = float(os.environ.get("EDITDNA_CTA_MIN_SCORE", "0.6"))
 
 # LLM
 EDITDNA_USE_LLM = os.environ.get("EDITDNA_USE_LLM", "0") == "1"
 EDITDNA_LLM_MODEL = os.environ.get("EDITDNA_LLM_MODEL", "gpt-5.1")
 
-# Vision
+# Visión
 VISION_ENABLED = os.environ.get("VISION_ENABLED", "0") == "1"
 VISION_INTERVAL_SEC = float(os.environ.get("VISION_INTERVAL_SEC", "2.0"))
 VISION_MAX_SAMPLES = int(os.environ.get("VISION_MAX_SAMPLES", "50"))
-# vision helps, but does NOT dominate semantic
-W_VISION = float(os.environ.get("W_VISION", "0.4"))  # 0–1
+W_VISION = float(os.environ.get("W_VISION", "0.7"))  # peso visual vs semántico (0-1)
 
 # S3
 S3_BUCKET = os.environ.get("S3_BUCKET")
@@ -62,7 +60,7 @@ S3_PREFIX = os.environ.get("S3_PREFIX", "editdna/outputs")
 
 
 # =====================
-# BASIC HELPERS
+# HELPERS BÁSICOS
 # =====================
 
 def safe_float(x: Any, default: float = 0.0) -> float:
@@ -80,7 +78,7 @@ def ensure_session_dir(session_id: str) -> str:
 
 
 def download_to_local(url: str, dst_path: str) -> None:
-    logger.info(f"Downloading input: {url} -> {dst_path}")
+    logger.info(f"Descargando input: {url} -> {dst_path}")
     resp = requests.get(url, stream=True, timeout=300)
     resp.raise_for_status()
     os.makedirs(os.path.dirname(dst_path), exist_ok=True)
@@ -103,7 +101,7 @@ def ffprobe_json(path: str) -> Dict[str, Any]:
     ]
     proc = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
     if proc.returncode != 0:
-        logger.warning(f"ffprobe failed code={proc.returncode}: {proc.stderr}")
+        logger.warning(f"ffprobe fallo con code={proc.returncode}: {proc.stderr}")
         return {}
     try:
         return json.loads(proc.stdout)
@@ -132,7 +130,7 @@ def has_audio_stream(path: str) -> bool:
 def upload_to_s3(local_path: str, bucket: str, key: str) -> Optional[str]:
     try:
         s3 = boto3.client("s3")
-        logger.info(f"Uploading to S3 s3://{bucket}/{key}")
+        logger.info(f"Subiendo a S3 s3://{bucket}/{key}")
         s3.upload_file(local_path, bucket, key)
         url = s3.generate_presigned_url(
             "get_object",
@@ -141,14 +139,14 @@ def upload_to_s3(local_path: str, bucket: str, key: str) -> Optional[str]:
         )
         return url
     except Exception as e:
-        logger.exception(f"Error uploading to S3: {e}")
+        logger.exception(f"Error subiendo a S3: {e}")
         return None
 
 
 def make_base_clip(cid: str, start: float, end: float, text: str) -> Dict[str, Any]:
     clip_obj = {
         "id": cid,
-        "slot": "STORY",  # will be corrected later
+        "slot": "STORY",  # se corregirá luego
         "start": start,
         "end": end,
         "score": 0.0,
@@ -205,7 +203,7 @@ def get_whisper_model() -> WhisperModel:
             compute_type = "int8"
 
     logger.info(
-        f"Loading Whisper model={WHISPER_MODEL_NAME} device={device} compute_type={compute_type}"
+        f"Cargando Whisper model={WHISPER_MODEL_NAME} device={device} compute_type={compute_type}"
     )
     _WHISPER_MODEL = WhisperModel(
         WHISPER_MODEL_NAME,
@@ -217,14 +215,14 @@ def get_whisper_model() -> WhisperModel:
 
 def run_asr(input_local: str) -> List[Dict[str, Any]]:
     """
-    Run faster-whisper with word timestamps.
-    Returns segments with: start, end, text, words[{start,end,word}]
+    Corre faster-whisper con timestamps por palabra.
+    Devuelve segmentos con: start, end, text, words[{start,end,word}]
     """
     if not ASR_ENABLED:
-        raise RuntimeError("ASR_ENABLED=0 but run_asr was called")
+        raise RuntimeError("ASR_ENABLED=0 pero run_asr fue llamado")
 
     model = get_whisper_model()
-    logger.info(f"Running ASR on {input_local}")
+    logger.info(f"Corriendo ASR sobre {input_local}")
     segments_iter, info = model.transcribe(
         input_local,
         beam_size=5,
@@ -257,7 +255,7 @@ def run_asr(input_local: str) -> List[Dict[str, Any]]:
         idx += 1
 
     logger.info(
-        f"ASR produced {len(out)} segments, dur~{probe_duration(input_local):.2f}s"
+        f"ASR produjo {len(out)} segmentos, duración ~{probe_duration(input_local):.2f}s"
     )
     return out
 
@@ -270,10 +268,10 @@ def sentence_boundary_micro_cuts(
     asr_segments: List[Dict[str, Any]]
 ) -> List[Dict[str, Any]]:
     """
-    Convert Whisper segments into micro-sentences:
-    - Split by punctuation (. ? !) or duration > MICRO_SENTENCE_MAX_SECONDS
-    - Use precise timestamps from first/last word of each micro-sentence.
-    Returns "clips" with IDs like ASR0000_c0.
+    Convierte segmentos de Whisper en micro-oraciones:
+    - Split por puntuación (. ? !) o duración > MICRO_SENTENCE_MAX_SECONDS
+    - Mantiene timestamps precisos (start/end de primera/última palabra)
+    Devuelve estructura "clips" con IDs tipo ASR0000_c0.
     """
     clips: List[Dict[str, Any]] = []
     clip_index = 0
@@ -289,13 +287,13 @@ def sentence_boundary_micro_cuts(
             end = safe_float(seg.get("end", start))
             if end <= start:
                 continue
-            clip = make_base_clip(
+            clip_obj = make_base_clip(
                 cid=cid,
                 start=start,
                 end=end,
                 text=text,
             )
-            clips.append(clip)
+            clips.append(clip_obj)
             clip_index += 1
             continue
 
@@ -310,19 +308,19 @@ def sentence_boundary_micro_cuts(
             e = buffer_words[-1]
             start_ts = safe_float(s.get("start", 0.0))
             end_ts = safe_float(e.get("end", start_ts))
-            text = "".join([bw.get("word", "") for bw in buffer_words]).strip()
-            if not text or end_ts <= start_ts:
+            text_local = "".join([bw.get("word", "") for bw in buffer_words]).strip()
+            if not text_local or end_ts <= start_ts:
                 buffer_words = []
                 sent_start = None
                 return
-            cid_inner = f"ASR{seg_idx:04d}_c{clip_index}"
-            clip_obj = make_base_clip(
-                cid=cid_inner,
+            cid_local = f"ASR{seg_idx:04d}_c{clip_index}"
+            clip_obj_local = make_base_clip(
+                cid=cid_local,
                 start=start_ts,
                 end=end_ts,
-                text=text,
+                text=text_local,
             )
-            clips.append(clip_obj)
+            clips.append(clip_obj_local)
             clip_index += 1
             buffer_words = []
             sent_start = None
@@ -347,7 +345,7 @@ def sentence_boundary_micro_cuts(
 
 
 # =====================
-# BASIC HEURISTICS
+# HEURÍSTICA BÁSICA
 # =====================
 
 FILLER_PATTERNS = [
@@ -380,7 +378,6 @@ def looks_like_filler(text: str) -> bool:
 def classify_slot(text: str) -> str:
     t = text.lower()
 
-    # CTA first
     if any(
         p in t
         for p in [
@@ -395,13 +392,9 @@ def classify_slot(text: str) -> str:
     ):
         return "CTA"
 
-    # HOOK
-    if "?" in t or t.startswith(
-        ("if ", "hey ", "listen", "stop scrolling", "ladies", "guys")
-    ):
+    if "?" in t or t.startswith(("if ", "hey ", "listen", "stop scrolling", "ladies", "guys")):
         return "HOOK"
 
-    # PROBLEM
     if any(
         p in t
         for p in [
@@ -417,7 +410,6 @@ def classify_slot(text: str) -> str:
     ):
         return "PROBLEM"
 
-    # PROOF
     if any(
         p in t
         for p in [
@@ -431,7 +423,6 @@ def classify_slot(text: str) -> str:
     ):
         return "PROOF"
 
-    # BENEFITS
     if any(
         p in t
         for p in [
@@ -449,7 +440,6 @@ def classify_slot(text: str) -> str:
     ):
         return "BENEFITS"
 
-    # FEATURES
     if any(
         p in t
         for p in [
@@ -470,7 +460,6 @@ def classify_slot(text: str) -> str:
     ):
         return "FEATURES"
 
-    # STORY
     if any(
         p in t
         for p in [
@@ -493,7 +482,6 @@ def tag_clips_heuristic(clips: List[Dict[str, Any]]) -> None:
         slot = classify_slot(t)
         keep = not looks_like_filler(t)
 
-        # rough semantic weight: more words = slightly more
         if not t:
             sem = 0.0
         elif keep:
@@ -502,6 +490,7 @@ def tag_clips_heuristic(clips: List[Dict[str, Any]]) -> None:
         else:
             sem = 0.0
 
+        reason = ""
         if not keep:
             reason = "Marcado como filler / meta (redo, wait, duda, etc.)."
         else:
@@ -531,7 +520,7 @@ def tag_clips_heuristic(clips: List[Dict[str, Any]]) -> None:
 
 
 # =====================
-# LLM SEMANTIC (GPT-5.1)
+# LLM SEMÁNTICO (GPT-5.1)
 # =====================
 
 def llm_classify_clips(clips: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
@@ -539,7 +528,7 @@ def llm_classify_clips(clips: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
 
     api_key = os.environ.get("OPENAI_API_KEY")
     if not api_key:
-        logger.warning("OPENAI_API_KEY not set, skipping LLM.")
+        logger.warning("OPENAI_API_KEY no está configurado, saltando LLM.")
         return None
 
     client = OpenAI(api_key=api_key)
@@ -557,9 +546,9 @@ def llm_classify_clips(clips: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
         return None
 
     system_msg = (
-        "You are an expert TikTok ad editor for feminine health / beauty / fashion products. "
+        "You are an expert TikTok ad editor for feminine health products. "
         "You receive short transcript segments from a spoken ad (with slang). "
-        "For each segment, classify its funnel role and how strong it is."
+        "For each segment, you must classify its funnel role and how strong it is."
     )
 
     user_instruction = {
@@ -595,9 +584,8 @@ def llm_classify_clips(clips: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
                     "content": (
                         "Devuélveme SOLO un JSON con este formato exacto:\n\n"
                         "{\n"
-                        '  \"clips\": [\n'
-                        '    {\"id\": \"...\", \"slot\": \"...\", \"keep\": true/false, '
-                        '\"semantic_score\": 0.xx, \"reason\": \"...\"}\n'
+                        '  "clips": [\n'
+                        '    {"id": "...", "slot": "...", "keep": true/false, "semantic_score": 0.xx, "reason": "..."}\n'
                         "  ]\n"
                         "}\n\n"
                         "No agregues texto fuera del JSON.\n\n"
@@ -617,23 +605,30 @@ def llm_classify_clips(clips: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
             result_map[cid] = {
                 "slot": item.get("slot", "STORY"),
                 "keep": bool(item.get("keep", True)),
-                "semantic_score": safe_float(item.get("semantic_score", 0.0)),
+                "semantic_score": safe_float(
+                    item.get("semantic_score", 0.0)
+                ),
                 "reason": item.get("reason", ""),
             }
         return result_map
     except Exception as e:
-        logger.exception(f"Error calling LLM: {e}")
+        logger.exception(f"Error llamando al LLM: {e}")
         return None
 
 
 def enrich_clips_semantic(clips: List[Dict[str, Any]]) -> bool:
-    # 1) Heuristic tags
+    """
+    1) Aplica heurística básica (filler, slots, semantic_score).
+    2) Opcionalmente mezcla con LLM, pero:
+       - NUNCA revive algo que la heurística marcó como keep=False.
+       - NO deja que el LLM elimine clips fuertes de HOOK / PROBLEM / BENEFITS / FEATURES / PROOF / CTA.
+    """
+    # Paso 1: heurística local
     tag_clips_heuristic(clips)
 
     if not EDITDNA_USE_LLM:
         return False
 
-    # 2) LLM refinement
     llm_result = llm_classify_clips(clips)
     if not llm_result:
         return False
@@ -642,26 +637,54 @@ def enrich_clips_semantic(clips: List[Dict[str, Any]]) -> bool:
         cid = c["id"]
         if cid not in llm_result:
             continue
+
         info = llm_result[cid]
-        slot = info.get("slot", c.get("slot", "STORY"))
-        keep = bool(info.get("keep", c["meta"].get("keep", True)))
-        sem = safe_float(info.get("semantic_score", c.get("semantic_score", 0.0)))
+
+        # Lo que decidió la heurística antes del LLM
+        original_keep = c["meta"].get("keep", True)
+
+        # Datos que sí dejamos que el LLM actualice
+        slot_from_llm = info.get("slot", c.get("slot", "STORY"))
+        sem_from_llm = safe_float(info.get("semantic_score", c.get("semantic_score", 0.0)))
         reason = info.get("reason", "")
 
-        c["slot"] = slot
-        c["semantic_score"] = sem
-        c["score"] = sem
+        c["slot"] = slot_from_llm
+        c["semantic_score"] = sem_from_llm
+        c["score"] = sem_from_llm  # luego se mezcla con visión si existe
         c["llm_reason"] = reason or c.get("llm_reason", "")
-        c["meta"]["slot"] = slot
-        c["meta"]["semantic_score"] = sem
-        c["meta"]["score"] = sem
-        c["meta"]["keep"] = keep
+
+        c["meta"]["slot"] = slot_from_llm
+        c["meta"]["semantic_score"] = sem_from_llm
+        c["meta"]["score"] = sem_from_llm
+
+        # Propuesta de keep del LLM
+        llm_keep_raw = bool(info.get("keep", original_keep))
+
+        text = (c.get("text") or "").strip()
+        word_count = len(text.split())
+        slot_upper = slot_from_llm
+        strong_semantic = sem_from_llm >= COMPOSER_MIN_SEMANTIC
+        core_slot = slot_upper in {"HOOK", "PROBLEM", "BENEFITS", "FEATURES", "PROOF", "CTA"}
+
+        # Regla 1: si la heurística ya dijo que es basura → sigue siendo basura
+        if not original_keep:
+            final_keep = False
+        else:
+            # Regla 2: si es un clip fuerte de funnel (core_slot + buen score + varias palabras),
+            # el LLM NO puede matarlo aunque diga keep=False.
+            if core_slot and strong_semantic and word_count >= 3:
+                final_keep = True
+            else:
+                # En lo demás, combinamos heurística + LLM
+                final_keep = original_keep and llm_keep_raw
+
+        c["meta"]["keep"] = final_keep
 
     return True
 
 
 # =====================
-# VISION: CLIP + CUDA
+# VISIÓN: CLIP + CUDA
 # =====================
 
 _CLIP_MODEL = None
@@ -678,7 +701,7 @@ def load_clip_model():
         import torch
         import clip as clip_lib  # type: ignore
     except Exception as e:
-        logger.warning(f"Could not import torch/clip for vision: {e}")
+        logger.warning(f"No se pudo importar torch/clip para visión: {e}")
         return None, None, "cpu"
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -687,7 +710,7 @@ def load_clip_model():
     _CLIP_PREPROCESS = preprocess
     _CLIP_DEVICE = device
 
-    logger.info(f"CLIP model loaded on device {device}")
+    logger.info(f"Modelo CLIP cargado en dispositivo {device}")
     return _CLIP_MODEL, _CLIP_PREPROCESS, _CLIP_DEVICE
 
 
@@ -707,7 +730,7 @@ def grab_frame_at_timestamp(input_local: str, t: float, out_path: str) -> bool:
     ]
     proc = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
     if proc.returncode != 0:
-        logger.debug(f"ffmpeg frame grab failed t={t:.3f}: {proc.stderr}")
+        logger.debug(f"ffmpeg frame grab fallo para t={t:.3f}: {proc.stderr}")
         return False
     return True
 
@@ -716,19 +739,19 @@ def run_visual_pass(
     input_local: str, session_dir: str, clips: List[Dict[str, Any]]
 ) -> bool:
     if not VISION_ENABLED:
-        logger.info("VISION_ENABLED=0, skipping visual pass.")
+        logger.info("VISION_ENABLED=0, saltando vision pass.")
         return False
 
     model, preprocess, device = load_clip_model()
     if model is None:
-        logger.warning("CLIP not available, vision=False.")
+        logger.warning("CLIP no disponible, vision=false.")
         return False
 
     try:
         import torch
         from PIL import Image
     except Exception as e:
-        logger.warning(f"Could not import torch/PIL for vision: {e}")
+        logger.warning(f"No se pudo importar torch/PIL para vision: {e}")
         return False
 
     if not clips:
@@ -767,8 +790,12 @@ def run_visual_pass(
             image_features = model.encode_image(image_input)
             text_features = model.encode_text(text_tokens)
 
-            image_features = image_features / image_features.norm(dim=-1, keepdim=True)
-            text_features = text_features / text_features.norm(dim=-1, keepdim=True)
+            image_features = image_features / image_features.norm(
+                dim=-1, keepdim=True
+            )
+            text_features = text_features / text_features.norm(
+                dim=-1, keepdim=True
+            )
 
             similarity = (image_features @ text_features.T).item()
             visual_score = (similarity + 1.0) / 2.0
@@ -779,39 +806,27 @@ def run_visual_pass(
     return True
 
 
-# =====================
-# SCORE MIN / FILTERS (SOFTER)
-# =====================
-
 def apply_min_score_rules(clips: List[Dict[str, Any]]) -> None:
     """
-    Very soft filter:
-    - Respect existing meta.keep from filler detection.
-    - Kill only obviously bad clips (very low semantic + combined).
-    - Slightly higher bar for HOOK/CTA, but still gentle.
+    Aplica umbral mínimo, usando principalmente el semantic_score.
+    Así, si el texto es fuerte, no se cae solo porque la visión baje un poco el score combinado.
     """
     for c in clips:
-        # if already marked as not keep (filler, etc.), respect that
-        if not c["meta"].get("keep", True):
-            continue
-
         slot = c.get("slot", "STORY")
+        combined = safe_float(c.get("score", 0.0))
         sem = safe_float(c.get("semantic_score", 0.0))
-        combined = safe_float(c.get("score", sem))
 
-        # 1) Hard drop only truly weak content
-        if sem < 0.4 or combined < 0.45:
-            c["meta"]["keep"] = False
-            continue
-
-        # 2) Light extra filter for HOOK and CTA
+        threshold = EDITDNA_MIN_CLIP_SCORE
         if slot == "HOOK":
-            if combined < max(EDITDNA_MIN_CLIP_SCORE, 0.55):
-                c["meta"]["keep"] = False
+            threshold = max(threshold, EDITDNA_HOOK_MIN_SCORE)
         elif slot == "CTA":
-            if combined < max(EDITDNA_MIN_CLIP_SCORE, 0.5):
-                c["meta"]["keep"] = False
-        # For other slots, we rely mostly on semantic + filler detection
+            threshold = max(threshold, EDITDNA_CTA_MIN_SCORE)
+
+        # usamos semántico como fuente principal para decidir keep
+        effective_score = sem if sem > 0 else combined
+
+        if effective_score < threshold:
+            c["meta"]["keep"] = False
 
 
 def normalize_text(t: str) -> str:
@@ -860,7 +875,6 @@ def build_slots_dict(clips: List[Dict[str, Any]]) -> Dict[str, List[Dict[str, An
 
 
 def build_composer(clips: List[Dict[str, Any]]) -> Dict[str, Any]:
-    # 1) keep only meta.keep=True and decent semantic score
     usable = [
         c
         for c in clips
@@ -868,7 +882,6 @@ def build_composer(clips: List[Dict[str, Any]]) -> Dict[str, Any]:
         and safe_float(c.get("semantic_score", 0.0)) >= COMPOSER_MIN_SEMANTIC
     ]
 
-    # 2) combine semantic + vision
     for c in usable:
         sem = safe_float(c.get("semantic_score", 0.0))
         vis = safe_float(c.get("visual_score", 0.0))
@@ -879,17 +892,11 @@ def build_composer(clips: List[Dict[str, Any]]) -> Dict[str, Any]:
         c["score"] = combined
         c["meta"]["score"] = combined
 
-    # 3) soft min-score rules (only kill really bad stuff)
     apply_min_score_rules(usable)
 
-    # 4) filter again by keep
     usable = [c for c in usable if c["meta"].get("keep", True)]
-
-    # 5) sort by time → this preserves multi-clip flows:
-    # HOOK → 2–5 BENEFITS → 2–5 FEATURES → 1–3 PROOF, etc.
     usable.sort(key=lambda c: safe_float(c.get("start", 0.0)))
 
-    # choose best CTA (if any survives)
     ctas = [c for c in usable if c.get("slot") == "CTA"]
     cta_clip = None
     if ctas:
@@ -905,7 +912,6 @@ def build_composer(clips: List[Dict[str, Any]]) -> Dict[str, Any]:
         timeline.append(c)
         used_ids.append(c["id"])
 
-    # always move best CTA to the end, if present
     if cta_clip is not None:
         timeline.append(cta_clip)
         used_ids.append(cta_clip["id"])
@@ -938,7 +944,7 @@ def pretty_print_composer(
     def line_for(cid: str) -> str:
         c = lookup.get(cid)
         if not c:
-            return f"[{cid}] (not found)"
+            return f"[{cid}] (no encontrado)"
         return f"[{cid}] score={c.get('score', 0.0):.2f} → \"{c.get('text', '').strip()}\""
 
     parts = ["===== EDITDNA FUNNEL COMPOSER ====="]
@@ -965,7 +971,7 @@ def pretty_print_composer(
     for i, cid in enumerate(composer.get("used_clip_ids", []), start=1):
         c = lookup.get(cid)
         if not c:
-            parts.append(f"{i}) {cid} (not found)")
+            parts.append(f"{i}) {cid} (no encontrado)")
         else:
             parts.append(
                 f"{i}) {cid} → \"{c.get('text', '').strip()}\""
@@ -1030,9 +1036,9 @@ def render_funnel_video(
 
     if has_audio and len(a_labels) != n:
         logger.warning(
-            "render_funnel_video: has_audio=True but len(a_labels)"
+            "render_funnel_video: has_audio=True pero len(a_labels)"
             f"={len(a_labels)} != len(v_labels)={n}, "
-            "disabling audio to avoid media type mismatch."
+            "desactivando audio para evitar media type mismatch."
         )
         has_audio = False
 
@@ -1090,7 +1096,7 @@ def render_funnel_video(
 
 
 # =====================
-# MAIN ENTRYPOINT
+# ENTRYPOINT PRINCIPAL
 # =====================
 
 def run_pipeline(
@@ -1110,7 +1116,7 @@ def run_pipeline(
 
     if not effective_files:
         raise ValueError(
-            "run_pipeline: 'files' or 'file_urls' list with at least 1 URL is required"
+            "run_pipeline: se requiere 'files' o 'file_urls' como lista con al menos 1 URL"
         )
 
     session_dir = ensure_session_dir(session_id)
@@ -1120,30 +1126,16 @@ def run_pipeline(
 
     duration = probe_duration(input_local)
 
-    # 1) ASR
     asr_segments = run_asr(input_local)
-
-    # 2) micro-sentences
     clips = sentence_boundary_micro_cuts(asr_segments)
-
-    # 3) semantic tagging (heuristic + optional LLM)
     llm_used = enrich_clips_semantic(clips)
-
-    # 4) de-duplicate text
     clips = dedupe_clips(clips)
-
-    # 5) visual scoring (if enabled)
     vision_used = run_visual_pass(input_local, session_dir, clips)
-
-    # 6) slots + composer
     slots = build_slots_dict(clips)
     composer = build_composer(clips)
     used_clip_ids = composer.get("used_clip_ids", [])
-
-    # 7) render final video
     final_path = render_funnel_video(input_local, session_dir, clips, used_clip_ids)
 
-    # 8) upload to S3 if configured
     output_url = None
     if S3_BUCKET:
         key = f"{S3_PREFIX}/{session_id}-final.mp4"
