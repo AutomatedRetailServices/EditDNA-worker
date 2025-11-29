@@ -228,7 +228,7 @@ def run_asr(input_local: str) -> List[Dict[str, Any]]:
         beam_size=5,
         word_timestamps=True,
         vad_filter=True,
-        vad_parameters={"min_silence_duration_ms": 300},
+               vad_parameters={"min_silence_duration_ms": 300},
     )
     out: List[Dict[str, Any]] = []
     idx = 0
@@ -371,7 +371,7 @@ def looks_like_filler(text: str) -> bool:
         if pat in t:
             return True
     if len(t.split()) <= 1 and t in {"and", "uh", "um", "hmm", "like"}:
-        return True
+            return True
     return False
 
 
@@ -853,6 +853,107 @@ def dedupe_clips(clips: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
 
 
 # =====================
+# REDUCCIÓN DE TOMAS REPETIDAS DENTRO DEL MISMO SLOT
+# =====================
+
+def _tokenize_for_similarity(text: str) -> set:
+    t = text.lower()
+    for ch in [",", ".", "?", "!", ";", ":", "…"]:
+        t = t.replace(ch, " ")
+    tokens = [w for w in t.split() if len(w) > 2]
+    return set(tokens)
+
+
+def _text_overlap_score(a: str, b: str) -> float:
+    sa = _tokenize_for_similarity(a)
+    sb = _tokenize_for_similarity(b)
+    if not sa or not sb:
+        return 0.0
+    inter = sa & sb
+    union = sa | sb
+    return len(inter) / len(union) if union else 0.0
+
+
+def prune_redundant_clips(clips: List[Dict[str, Any]]) -> None:
+    """
+    Dentro de cada slot (HOOK/PROBLEM/BENEFITS/FEATURES/PROOF/CTA),
+    si hay frases casi iguales muy cercanas en el tiempo (ej: 4–5s vs 13–16s),
+    se queda con la versión más fuerte/completa y marca la otra como keep=False.
+
+    Ejemplo concreto:
+      - "Moisture control, odor control..."
+      - "Support moisture, odor control, and a healthy balance."
+    → se queda con la segunda, elimina la primera.
+    """
+    target_slots = {"HOOK", "PROBLEM", "BENEFITS", "FEATURES", "PROOF", "CTA"}
+
+    # Agrupamos por slot
+    by_slot: Dict[str, List[Dict[str, Any]]] = {}
+    for c in clips:
+        slot = c.get("slot", "STORY")
+        by_slot.setdefault(slot, []).append(c)
+
+    for slot, slot_clips in by_slot.items():
+        if slot not in target_slots:
+            continue
+
+        # Orden cronológico
+        slot_clips.sort(key=lambda c: safe_float(c.get("start", 0.0)))
+
+        n = len(slot_clips)
+        for i in range(n):
+            ci = slot_clips[i]
+            if not ci["meta"].get("keep", True):
+                continue
+            ti = (ci.get("text") or "").strip()
+            if not ti:
+                continue
+
+            start_i = safe_float(ci.get("start", 0.0))
+
+            for j in range(i + 1, n):
+                cj = slot_clips[j]
+                if not cj["meta"].get("keep", True):
+                    continue
+                tj = (cj.get("text") or "").strip()
+                if not tj:
+                    continue
+
+                start_j = safe_float(cj.get("start", 0.0))
+                dt = abs(start_j - start_i)
+
+                # Solo comparamos takes relativamente cercanos (ej: mismas repeticiones)
+                if dt > 12.0:
+                    break
+
+                sim = _text_overlap_score(ti, tj)
+                if sim < 0.65:
+                    continue
+
+                # Si son muy parecidos, nos quedamos con el de mejor score semántico
+                sem_i = safe_float(ci.get("semantic_score", 0.0))
+                sem_j = safe_float(cj.get("semantic_score", 0.0))
+
+                len_i = len(ti.split())
+                len_j = len(tj.split())
+
+                # Elegimos ganador
+                keep_j = (
+                    sem_j > sem_i
+                    or (abs(sem_j - sem_i) < 0.02 and len_j > len_i)
+                )
+
+                if keep_j:
+                    # Tiramos el i (más flojo / más corto)
+                    ci["meta"]["keep"] = False
+                    break  # dejamos de comparar i porque ya está descartado
+                else:
+                    # Tiramos el j (menos score / menos completo)
+                    cj["meta"]["keep"] = False
+                    # seguimos con otros j por si hay más repeticiones
+
+
+# =====================
 # SLOTS + COMPOSER
 # =====================
 
@@ -875,6 +976,7 @@ def build_slots_dict(clips: List[Dict[str, Any]]) -> Dict[str, List[Dict[str, An
 
 
 def build_composer(clips: List[Dict[str, Any]]) -> Dict[str, Any]:
+    # 1) Filtramos por keep + score semántico mínimo
     usable = [
         c
         for c in clips
@@ -882,6 +984,7 @@ def build_composer(clips: List[Dict[str, Any]]) -> Dict[str, Any]:
         and safe_float(c.get("semantic_score", 0.0)) >= COMPOSER_MIN_SEMANTIC
     ]
 
+    # 2) Mezclamos visión (si existe) con semántico
     for c in usable:
         sem = safe_float(c.get("semantic_score", 0.0))
         vis = safe_float(c.get("visual_score", 0.0))
@@ -892,11 +995,19 @@ def build_composer(clips: List[Dict[str, Any]]) -> Dict[str, Any]:
         c["score"] = combined
         c["meta"]["score"] = combined
 
+    # 3) Umbrales mínimos según slot
     apply_min_score_rules(usable)
 
+    # 4) Eliminar tomas repetidas / incompletas dentro del mismo slot
+    prune_redundant_clips(usable)
+
+    # 5) Refiltramos después de la poda
     usable = [c for c in usable if c["meta"].get("keep", True)]
+
+    # 6) Orden cronológico para la línea de tiempo
     usable.sort(key=lambda c: safe_float(c.get("start", 0.0)))
 
+    # 7) CTA: elegimos la mejor por score y la movemos al final de la timeline
     ctas = [c for c in usable if c.get("slot") == "CTA"]
     cta_clip = None
     if ctas:
