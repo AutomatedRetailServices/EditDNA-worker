@@ -58,6 +58,10 @@ W_VISION = float(os.environ.get("W_VISION", "0.7"))  # peso visual vs semántico
 S3_BUCKET = os.environ.get("S3_BUCKET")
 S3_PREFIX = os.environ.get("S3_PREFIX", "editdna/outputs")
 
+# Recortes genéricos de cabeza/cola de cada clip al renderizar
+HEAD_TRIM_SEC = float(os.environ.get("HEAD_TRIM_SEC", "0.0"))
+TAIL_TRIM_SEC = float(os.environ.get("TAIL_TRIM_SEC", "0.0"))
+
 
 # =====================
 # HELPERS BÁSICOS
@@ -443,15 +447,16 @@ def classify_slot(text: str) -> str:
     if any(
         p in t
         for p in [
-            "each",
+            "each gummy",
             "packed with",
             "ingredients",
             "it has",
             "it comes with",
             "it's actually",
             "it's a",
-            "this",
-            "these",
+            "this bag",
+            "these probiotics",
+            "slippery m",
             "prebiotic",
             "probiotic",
             "flavored",
@@ -498,9 +503,9 @@ def tag_clips_heuristic(clips: List[Dict[str, Any]]) -> None:
             elif slot == "PROBLEM":
                 reason = "Describe un problema o situación dolorosa."
             elif slot == "BENEFITS":
-                reason = "Enfatiza resultados o cambios positivos para la persona."
+                reason = "Enfatiza resultados o cambios positivos para la usuaria."
             elif slot == "FEATURES":
-                reason = "Describe características específicas del producto o servicio."
+                reason = "Describe características específicas del producto."
             elif slot == "PROOF":
                 reason = "Actúa como testimonio u opinión personal."
             elif slot == "CTA":
@@ -519,7 +524,7 @@ def tag_clips_heuristic(clips: List[Dict[str, Any]]) -> None:
 
 
 # =====================
-# LLM SEMÁNTICO
+# LLM SEMÁNTICO (GPT-5.1)
 # =====================
 
 def llm_classify_clips(clips: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
@@ -545,7 +550,7 @@ def llm_classify_clips(clips: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
         return None
 
     system_msg = (
-        "You are an expert TikTok ad editor for UGC-style performance ads. "
+        "You are an expert TikTok ad editor. "
         "You receive short transcript segments from a spoken ad (with slang). "
         "For each segment, you must classify its funnel role and how strong it is."
     )
@@ -584,7 +589,7 @@ def llm_classify_clips(clips: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
                         "Devuélveme SOLO un JSON con este formato exacto:\n\n"
                         "{\n"
                         '  "clips": [\n'
-                        '    {"id": "...", "slot": "...", "keep": true/false, "semantic_score": 0.xx, "reason": "..."}\n'
+                        '    {"id": "...", "slot": "...', '"keep": true/false, "semantic_score": 0.xx, "reason": "..."}\n'
                         "  ]\n"
                         "}\n\n"
                         "No agregues texto fuera del JSON.\n\n"
@@ -669,12 +674,10 @@ def enrich_clips_semantic(clips: List[Dict[str, Any]]) -> bool:
         if not original_keep:
             final_keep = False
         else:
-            # Regla 2: si es un clip fuerte de funnel (core_slot + buen score + varias palabras),
-            # el LLM NO puede matarlo aunque diga keep=False.
+            # Regla 2: si es un clip fuerte de funnel, el LLM NO puede matarlo
             if core_slot and strong_semantic and word_count >= 3:
                 final_keep = True
             else:
-                # En lo demás, combinamos heurística + LLM
                 final_keep = original_keep and llm_keep_raw
 
         c["meta"]["keep"] = final_keep
@@ -852,100 +855,6 @@ def dedupe_clips(clips: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
 
 
 # =====================
-# DEDUPE AVANZADO DENTRO DE SLOT
-# =====================
-
-def text_similarity(a: str, b: str) -> float:
-    """
-    Similitud muy simple basada en Jaccard de palabras.
-    Sirve para detectar frases casi iguales dentro del mismo slot.
-    """
-    na = normalize_text(a)
-    nb = normalize_text(b)
-    if not na or not nb:
-        return 0.0
-    if na == nb:
-        return 1.0
-    aset = set(na.split())
-    bset = set(nb.split())
-    inter = len(aset & bset)
-    union = len(aset | bset)
-    if union == 0:
-        return 0.0
-    return inter / union
-
-
-def drop_near_duplicate_within_slot(
-    clips: List[Dict[str, Any]],
-    max_time_gap: float = 20.0,
-    min_sim: float = 0.8,
-) -> None:
-    """
-    Evita tener dos frases casi iguales en el mismo slot muy cerca en el tiempo.
-    Mantiene la más fuerte (más semantic_score y/o más palabras) y marca la otra como keep=False.
-    Aplica de forma genérica para cualquier producto/script.
-    """
-    # Solo nos interesan slots de funnel "core"
-    core_slots = {"HOOK", "PROBLEM", "BENEFITS", "FEATURES", "PROOF", "CTA"}
-
-    # Agrupamos por slot
-    slots_map: Dict[str, List[Dict[str, Any]]] = {}
-    for c in clips:
-        if not c["meta"].get("keep", True):
-            continue
-        slot = c.get("slot", "STORY")
-        if slot not in core_slots:
-            continue
-        slots_map.setdefault(slot, []).append(c)
-
-    for slot, items in slots_map.items():
-        # Ordenar por tiempo de aparición
-        items.sort(key=lambda c: safe_float(c.get("start", 0.0)))
-
-        n = len(items)
-        for i in range(n):
-            ci = items[i]
-            if not ci["meta"].get("keep", True):
-                continue
-            ti = safe_float(ci.get("start", 0.0))
-            txt_i = (ci.get("text") or "").strip()
-            if not txt_i:
-                continue
-
-            for j in range(i + 1, n):
-                cj = items[j]
-                if not cj["meta"].get("keep", True):
-                    continue
-                tj = safe_float(cj.get("start", 0.0))
-                if tj - ti > max_time_gap:
-                    # Demasiado lejos en el tiempo, rompemos para este i
-                    break
-
-                txt_j = (cj.get("text") or "").strip()
-                if not txt_j:
-                    continue
-
-                sim = text_similarity(txt_i, txt_j)
-                if sim < min_sim:
-                    continue
-
-                # Son casi la misma frase dentro del mismo slot y cerca en el tiempo.
-                # Elegimos la mejor: mayor semantic_score y, en empate, más palabras.
-                sem_i = safe_float(ci.get("semantic_score", 0.0))
-                sem_j = safe_float(cj.get("semantic_score", 0.0))
-                words_i = len(txt_i.split())
-                words_j = len(txt_j.split())
-
-                if (sem_j > sem_i) or (sem_j == sem_i and words_j >= words_i):
-                    # cj es mejor → matamos ci
-                    ci["meta"]["keep"] = False
-                    break
-                else:
-                    # ci es mejor → matamos cj y seguimos con otros j
-                    cj["meta"]["keep"] = False
-
-
-# =====================
 # SLOTS + COMPOSER
 # =====================
 
@@ -967,8 +876,84 @@ def build_slots_dict(clips: List[Dict[str, Any]]) -> Dict[str, List[Dict[str, An
     return slots
 
 
+def text_overlap_ratio(t1: str, t2: str) -> float:
+    """
+    Mide parecido entre dos textos usando conjuntos de palabras (Jaccard).
+    0.0 = nada parecido, 1.0 = idéntico en términos de palabras.
+    """
+    a = normalize_text(t1)
+    b = normalize_text(t2)
+    if not a or not b:
+        return 0.0
+    set1 = set(a.split())
+    set2 = set(b.split())
+    if not set1 or not set2:
+        return 0.0
+    inter = len(set1 & set2)
+    union = len(set1 | set2)
+    if union <= 0:
+        return 0.0
+    return inter / union
+
+
+def suppress_near_duplicates_by_slot(
+    clips: List[Dict[str, Any]],
+    window_sec: float = 15.0,
+    min_overlap: float = 0.6,
+) -> None:
+    """
+    Dado un listado de clips USABLE (ordenados por start), dentro del mismo slot:
+    - Si dos clips están cerca en el tiempo (window_sec)
+    - Y el texto es muy parecido (min_overlap)
+    Se queda con el más fuerte (más semantic_score y/o más largo) y marca el otro keep=False.
+
+    Esto evita casos tipo:
+      - "Moisture control, odor control..."
+      - "Support moisture, odor control, and a healthy balance."
+    donde preferimos la versión más completa.
+    """
+    n = len(clips)
+    for i in range(n):
+        c1 = clips[i]
+        if not c1["meta"].get("keep", True):
+            continue
+        slot1 = c1.get("slot", "STORY")
+        t1 = safe_float(c1.get("start", 0.0))
+
+        for j in range(i + 1, n):
+            c2 = clips[j]
+            if not c2["meta"].get("keep", True):
+                continue
+
+            if c2.get("slot", "STORY") != slot1:
+                continue
+
+            t2 = safe_float(c2.get("start", 0.0))
+
+            # Si ya se pasó de la ventana temporal, rompemos el inner loop
+            if t2 - t1 > window_sec:
+                break
+
+            ratio = text_overlap_ratio(c1.get("text", ""), c2.get("text", ""))
+            if ratio < min_overlap:
+                continue
+
+            sem1 = safe_float(c1.get("semantic_score", 0.0))
+            sem2 = safe_float(c2.get("semantic_score", 0.0))
+            len1 = len((c1.get("text") or "").split())
+            len2 = len((c2.get("text") or "").split())
+
+            # Elegimos cuál se queda:
+            # - Si el segundo es más fuerte o igual de fuerte pero más largo → matamos el primero.
+            # - Si el primero es más fuerte → matamos el segundo.
+            if sem2 > sem1 or (sem2 == sem1 and len2 >= len1):
+                c1["meta"]["keep"] = False
+                break
+            else:
+                c2["meta"]["keep"] = False
+
+
 def build_composer(clips: List[Dict[str, Any]]) -> Dict[str, Any]:
-    # Filtramos por keep y score semántico mínimo
     usable = [
         c
         for c in clips
@@ -976,13 +961,6 @@ def build_composer(clips: List[Dict[str, Any]]) -> Dict[str, Any]:
         and safe_float(c.get("semantic_score", 0.0)) >= COMPOSER_MIN_SEMANTIC
     ]
 
-    # 1) Dedup avanzado dentro de slot (elige la mejor versión de frases casi iguales)
-    drop_near_duplicate_within_slot(usable)
-
-    # Reaplicar filtro por keep tras el dedupe avanzado
-    usable = [c for c in usable if c["meta"].get("keep", True)]
-
-    # 2) Mezcla texto + visión en score combinado
     for c in usable:
         sem = safe_float(c.get("semantic_score", 0.0))
         vis = safe_float(c.get("visual_score", 0.0))
@@ -993,16 +971,15 @@ def build_composer(clips: List[Dict[str, Any]]) -> Dict[str, Any]:
         c["score"] = combined
         c["meta"]["score"] = combined
 
-    # 3) Aplicar reglas de umbral mínimo por tipo de slot
     apply_min_score_rules(usable)
 
-    # 4) Filtramos de nuevo los que no pasen el umbral
     usable = [c for c in usable if c["meta"].get("keep", True)]
-
-    # 5) Orden por tiempo
     usable.sort(key=lambda c: safe_float(c.get("start", 0.0)))
 
-    # CTA más fuerte al final
+    # NUEVO: colapsar casi duplicados dentro del mismo slot, cerca en el tiempo
+    suppress_near_duplicates_by_slot(usable)
+    usable = [c for c in usable if c["meta"].get("keep", True)]
+
     ctas = [c for c in usable if c.get("slot") == "CTA"]
     cta_clip = None
     if ctas:
@@ -1012,7 +989,6 @@ def build_composer(clips: List[Dict[str, Any]]) -> Dict[str, Any]:
     timeline: List[Dict[str, Any]] = []
     used_ids: List[str] = []
 
-    # Armamos timeline secuencial, reservando CTA ganadora para el final
     for c in usable:
         if cta_clip is not None and c["id"] == cta_clip["id"]:
             continue
@@ -1117,8 +1093,14 @@ def render_funnel_video(
         c = lookup.get(cid)
         if not c:
             continue
-        start = safe_float(c.get("start", 0.0))
-        end = safe_float(c.get("end", 0.0))
+
+        raw_start = safe_float(c.get("start", 0.0))
+        raw_end = safe_float(c.get("end", 0.0))
+
+        # Recortes genéricos de cabeza/cola
+        start = max(0.0, raw_start + HEAD_TRIM_SEC)
+        end = max(start, raw_end - TAIL_TRIM_SEC)
+
         if end <= start:
             continue
 
