@@ -589,7 +589,7 @@ def llm_classify_clips(clips: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
                         "Devuélveme SOLO un JSON con este formato exacto:\n\n"
                         "{\n"
                         '  "clips": [\n'
-                        '    {"id": "...", "slot": "...', '"keep": true/false, "semantic_score": 0.xx, "reason": "..."}\n'
+                        '    {"id": "...", "slot": "...", "keep": true/false, "semantic_score": 0.xx, "reason": "..."}\n'
                         "  ]\n"
                         "}\n\n"
                         "No agregues texto fuera del JSON.\n\n"
@@ -899,7 +899,7 @@ def text_overlap_ratio(t1: str, t2: str) -> float:
 def suppress_near_duplicates_by_slot(
     clips: List[Dict[str, Any]],
     window_sec: float = 15.0,
-    min_overlap: float = 0.6,
+    min_overlap: float = 0.35,  # <-- bajado desde 0.6 para capturar casos tipo 0010 vs 0013
 ) -> None:
     """
     Dado un listado de clips USABLE (ordenados por start), dentro del mismo slot:
