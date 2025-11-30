@@ -578,30 +578,42 @@ def llm_classify_clips(clips: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
         "clips": payload_clips,
     }
 
+    # Texto completo del prompt de usuario
+    user_text = (
+        "Devuélveme SOLO un JSON con este formato exacto:\n\n"
+        "{\n"
+        '  \"clips\": [\n'
+        '    {\"id\": \"...\", \"slot\": \"...\", \"keep\": true/false, '
+        '\"semantic_score\": 0.xx, \"reason\": \"...\"}\n'
+        "  ]\n"
+        "}\n\n"
+        "No agregues texto fuera del JSON.\n\n"
+        f"Aquí están los clips:\n{json.dumps(user_instruction, ensure_ascii=False)}"
+    )
+
     try:
         completion = client.chat.completions.create(
             model=EDITDNA_LLM_MODEL,
             messages=[
-                {"role": "system", "content": system_msg},
+                {
+                    "role": "system",
+                    "content": [
+                        {"type": "text", "text": system_msg}
+                    ],
+                },
                 {
                     "role": "user",
-                    "content": (
-                        "Devuélveme SOLO un JSON con este formato exacto:\n\n"
-                        "{\n"
-                        '  "clips": [\n'
-                        '    {"id": "...", "slot": "...', '"keep": true/false, "semantic_score": 0.xx, "reason": "..."}\n'
-                        "  ]\n"
-                        "}\n\n"
-                        "No agregues texto fuera del JSON.\n\n"
-                        f"Aquí están los clips:\n{json.dumps(user_instruction, ensure_ascii=False)}"
-                    ),
+                    "content": [
+                        {"type": "text", "text": user_text}
+                    ],
                 },
             ],
             temperature=0.2,
         )
+
         content = completion.choices[0].message.content
         data = json.loads(content)
-        result_map = {}
+        result_map: Dict[str, Any] = {}
         for item in data.get("clips", []):
             cid = item.get("id")
             if not cid:
@@ -609,12 +621,11 @@ def llm_classify_clips(clips: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
             result_map[cid] = {
                 "slot": item.get("slot", "STORY"),
                 "keep": bool(item.get("keep", True)),
-                "semantic_score": safe_float(
-                    item.get("semantic_score", 0.0)
-                ),
+                "semantic_score": safe_float(item.get("semantic_score", 0.0)),
                 "reason": item.get("reason", ""),
             }
         return result_map
+
     except Exception as e:
         logger.exception(f"Error llamando al LLM: {e}")
         return None
