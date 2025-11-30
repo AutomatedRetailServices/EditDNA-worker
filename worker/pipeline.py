@@ -59,7 +59,7 @@ S3_BUCKET = os.environ.get("S3_BUCKET")
 S3_PREFIX = os.environ.get("S3_PREFIX", "editdna/outputs")
 
 # Recortes genéricos de cabeza/cola de cada clip al renderizar
-HEAD_TRIM_SEC = float(os.environ.get("HEAD_TRIM_SEC", "0.0"))
+HEAD_TRIM_SEC = float(os.environ.get("HEAD_TRIM_SEC", "0.05"))
 TAIL_TRIM_SEC = float(os.environ.get("TAIL_TRIM_SEC", "0.0"))
 
 
@@ -232,7 +232,7 @@ def run_asr(input_local: str) -> List[Dict[str, Any]]:
         beam_size=5,
         word_timestamps=True,
         vad_filter=True,
-        vad_parameters={"min_silence_duration_ms": 300},
+               vad_parameters={"min_silence_duration_ms": 300},
     )
     out: List[Dict[str, Any]] = []
     idx = 0
@@ -578,7 +578,6 @@ def llm_classify_clips(clips: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
         "clips": payload_clips,
     }
 
-    # Texto completo del prompt de usuario
     user_text = (
         "Devuélveme SOLO un JSON con este formato exacto:\n\n"
         "{\n"
@@ -910,18 +909,13 @@ def text_overlap_ratio(t1: str, t2: str) -> float:
 def suppress_near_duplicates_by_slot(
     clips: List[Dict[str, Any]],
     window_sec: float = 15.0,
-    min_overlap: float = 0.6,
+    min_overlap: float = 0.4,
 ) -> None:
     """
     Dado un listado de clips USABLE (ordenados por start), dentro del mismo slot:
     - Si dos clips están cerca en el tiempo (window_sec)
     - Y el texto es muy parecido (min_overlap)
     Se queda con el más fuerte (más semantic_score y/o más largo) y marca el otro keep=False.
-
-    Esto evita casos tipo:
-      - "Moisture control, odor control..."
-      - "Support moisture, odor control, and a healthy balance."
-    donde preferimos la versión más completa.
     """
     n = len(clips)
     for i in range(n):
@@ -1130,7 +1124,6 @@ def build_composer(clips: List[Dict[str, Any]]) -> Dict[str, Any]:
     # PROBLEM: si detectamos bloque, priorizamos ese bloque como lista de problems
     problem_ids = ids_for_slot("PROBLEM")
     if problem_block_ids:
-        # quedarnos sólo con los del bloque si existen en el timeline
         filtered = [cid for cid in problem_ids if cid in problem_block_ids]
         if filtered:
             problem_ids = filtered
@@ -1370,7 +1363,7 @@ def run_pipeline(
     used_clip_ids = composer.get("used_clip_ids", [])
     final_path = render_funnel_video(input_local, session_dir, clips, used_clip_ids)
 
-    output_url = None    # type: Optional[str]
+    output_url: Optional[str] = None
     if S3_BUCKET:
         key = f"{S3_PREFIX}/{session_id}-final.mp4"
         output_url = upload_to_s3(final_path, S3_BUCKET, key)
