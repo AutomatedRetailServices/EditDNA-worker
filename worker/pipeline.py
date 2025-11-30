@@ -589,7 +589,7 @@ def llm_classify_clips(clips: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
                         "Devuélveme SOLO un JSON con este formato exacto:\n\n"
                         "{\n"
                         '  "clips": [\n'
-                        '    {"id": "...", "slot": "...", "keep": true/false, "semantic_score": 0.xx, "reason": "..."}\n'
+                        '    {"id": "...", "slot": "...', '"keep": true/false, "semantic_score": 0.xx, "reason": "..."}\n'
                         "  ]\n"
                         "}\n\n"
                         "No agregues texto fuera del JSON.\n\n"
@@ -899,7 +899,7 @@ def text_overlap_ratio(t1: str, t2: str) -> float:
 def suppress_near_duplicates_by_slot(
     clips: List[Dict[str, Any]],
     window_sec: float = 15.0,
-    min_overlap: float = 0.35,  # <-- bajado desde 0.6 para capturar casos tipo 0010 vs 0013
+    min_overlap: float = 0.6,
 ) -> None:
     """
     Dado un listado de clips USABLE (ordenados por start), dentro del mismo slot:
@@ -953,7 +953,76 @@ def suppress_near_duplicates_by_slot(
                 c2["meta"]["keep"] = False
 
 
+def group_contiguous_blocks_by_slot(
+    clips: List[Dict[str, Any]],
+    slot: str,
+    max_gap_sec: float = 1.0,
+) -> List[List[Dict[str, Any]]]:
+    """
+    Agrupa clips contiguos del mismo slot en "bloques" (speech continuo):
+    - Solo clips con meta.keep=True
+    - Ordenados por tiempo
+    - Si la separación entre uno y otro <= max_gap_sec → mismo bloque
+    """
+    ordered = sorted(
+        [c for c in clips if c.get("slot") == slot and c["meta"].get("keep", True)],
+        key=lambda c: safe_float(c.get("start", 0.0)),
+    )
+
+    blocks: List[List[Dict[str, Any]]] = []
+    current: List[Dict[str, Any]] = []
+    last_end: Optional[float] = None
+
+    for c in ordered:
+        start = safe_float(c.get("start", 0.0))
+        end = safe_float(c.get("end", start))
+
+        if not current:
+            current = [c]
+            last_end = end
+            continue
+
+        gap = start - safe_float(last_end if last_end is not None else start)
+        if gap <= max_gap_sec:
+            current.append(c)
+            last_end = end
+        else:
+            if current:
+                blocks.append(current)
+            current = [c]
+            last_end = end
+
+    if current:
+        blocks.append(current)
+
+    return blocks
+
+
+def pick_best_block(blocks: List[List[Dict[str, Any]]]) -> Optional[List[Dict[str, Any]]]:
+    """
+    Elige el mejor bloque por score medio (semántico+visual ya mezclado).
+    """
+    best_block: Optional[List[Dict[str, Any]]] = None
+    best_score = -1.0
+
+    for block in blocks:
+        if not block:
+            continue
+        scores = [
+            safe_float(c.get("score", c.get("semantic_score", 0.0))) for c in block
+        ]
+        if not scores:
+            continue
+        avg_score = sum(scores) / len(scores)
+        if avg_score > best_score:
+            best_score = avg_score
+            best_block = block
+
+    return best_block
+
+
 def build_composer(clips: List[Dict[str, Any]]) -> Dict[str, Any]:
+    # 1) Filtramos los que globalmente son usables por semántica
     usable = [
         c
         for c in clips
@@ -961,6 +1030,7 @@ def build_composer(clips: List[Dict[str, Any]]) -> Dict[str, Any]:
         and safe_float(c.get("semantic_score", 0.0)) >= COMPOSER_MIN_SEMANTIC
     ]
 
+    # 2) Mezclamos visión (si existe) con semántica para score combinado
     for c in usable:
         sem = safe_float(c.get("semantic_score", 0.0))
         vis = safe_float(c.get("visual_score", 0.0))
@@ -971,48 +1041,105 @@ def build_composer(clips: List[Dict[str, Any]]) -> Dict[str, Any]:
         c["score"] = combined
         c["meta"]["score"] = combined
 
+    # 3) Aplicar umbrales por slot (HOOK/CTA más estrictos)
     apply_min_score_rules(usable)
 
     usable = [c for c in usable if c["meta"].get("keep", True)]
     usable.sort(key=lambda c: safe_float(c.get("start", 0.0)))
 
-    # NUEVO: colapsar casi duplicados dentro del mismo slot, cerca en el tiempo
+    # 4) Evitar casi duplicados dentro del mismo slot
     suppress_near_duplicates_by_slot(usable)
     usable = [c for c in usable if c["meta"].get("keep", True)]
 
-    ctas = [c for c in usable if c.get("slot") == "CTA"]
-    cta_clip = None
-    if ctas:
-        ctas.sort(key=lambda c: safe_float(c.get("score", 0.0)), reverse=True)
-        cta_clip = ctas[0]
+    # 5) BLOQUES POR SLOT (HOOK, PROBLEM, CTA)
+    hook_blocks = group_contiguous_blocks_by_slot(usable, "HOOK", max_gap_sec=1.0)
+    best_hook_block = pick_best_block(hook_blocks) if hook_blocks else None
+    hook_block_ids = [c["id"] for c in best_hook_block] if best_hook_block else []
 
+    # Solo consideramos como "bloque de hook" los que arrancan cerca del inicio (ej: primeros 10s)
+    if hook_block_ids:
+        first_start = safe_float(best_hook_block[0].get("start", 0.0))
+        if first_start > 10.0:
+            hook_block_ids = []
+
+    problem_blocks = group_contiguous_blocks_by_slot(usable, "PROBLEM", max_gap_sec=1.0)
+    best_problem_block = pick_best_block(problem_blocks) if problem_blocks else None
+    problem_block_ids = [c["id"] for c in best_problem_block] if best_problem_block else []
+
+    cta_blocks = group_contiguous_blocks_by_slot(usable, "CTA", max_gap_sec=1.0)
+    best_cta_block = pick_best_block(cta_blocks) if cta_blocks else None
+    cta_block_ids = [c["id"] for c in best_cta_block] if best_cta_block else []
+
+    # Fallback: si por alguna razón no hay bloque CTA pero sí hay CTAs sueltos, usamos el mejor sólo
+    ctas = [c for c in usable if c.get("slot") == "CTA"]
+    single_best_cta = None
+    if ctas:
+        ctas_sorted = sorted(
+            ctas, key=lambda c: safe_float(c.get("score", 0.0)), reverse=True
+        )
+        single_best_cta = ctas_sorted[0]
+
+    if not cta_block_ids and single_best_cta is not None:
+        cta_block_ids = [single_best_cta["id"]]
+
+    cta_final_ids = cta_block_ids[:]  # ids de CTA que irán al final
+    cta_final_ids_set = set(cta_final_ids)
+
+    # 6) Construir timeline básico respetando bloque CTA al final
     timeline: List[Dict[str, Any]] = []
     used_ids: List[str] = []
 
+    # Primero todo MENOS los CTA del bloque final
     for c in usable:
-        if cta_clip is not None and c["id"] == cta_clip["id"]:
+        if c["id"] in cta_final_ids_set:
             continue
         timeline.append(c)
         used_ids.append(c["id"])
 
-    if cta_clip is not None:
-        timeline.append(cta_clip)
-        used_ids.append(cta_clip["id"])
+    # Después añadimos el bloque CTA (en orden de tiempo)
+    if cta_final_ids:
+        cta_block_clips = [c for c in usable if c["id"] in cta_final_ids_set]
+        cta_block_clips.sort(key=lambda c: safe_float(c.get("start", 0.0)))
+        for c in cta_block_clips:
+            timeline.append(c)
+            used_ids.append(c["id"])
 
-    def cap_ids(slot_name: str) -> List[str]:
-        ids = [c["id"] for c in timeline if c.get("slot") == slot_name]
-        return ids[:COMPOSER_MAX_PER_SLOT]
+    # 7) IDs por slot para el composer (respetando bloque HOOK y PROBLEM)
+    def ids_for_slot(slot_name: str) -> List[str]:
+        return [c["id"] for c in timeline if c.get("slot") == slot_name]
+
+    # HOOK: si tenemos bloque hook, hook_id = primera frase de ese bloque
+    if hook_block_ids:
+        hook_id = hook_block_ids[0]
+    else:
+        hook_id = next(
+            (c["id"] for c in timeline if c.get("slot") == "HOOK"), None
+        )
+
+    # PROBLEM: si detectamos bloque, priorizamos ese bloque como lista de problems
+    problem_ids = ids_for_slot("PROBLEM")
+    if problem_block_ids:
+        # quedarnos sólo con los del bloque si existen en el timeline
+        filtered = [cid for cid in problem_ids if cid in problem_block_ids]
+        if filtered:
+            problem_ids = filtered
+    problem_ids = problem_ids[:COMPOSER_MAX_PER_SLOT]
+
+    benefit_ids = ids_for_slot("BENEFITS")[:COMPOSER_MAX_PER_SLOT]
+    feature_ids = ids_for_slot("FEATURES")[:COMPOSER_MAX_PER_SLOT]
+    proof_ids = ids_for_slot("PROOF")[:COMPOSER_MAX_PER_SLOT]
+
+    # CTA id principal = último clip del bloque final de CTA (el cierre más fuerte)
+    cta_id = cta_final_ids[-1] if cta_final_ids else None
 
     composer = {
-        "hook_id": next(
-            (c["id"] for c in timeline if c.get("slot") == "HOOK"), None
-        ),
-        "story_ids": cap_ids("STORY"),
-        "problem_ids": cap_ids("PROBLEM"),
-        "benefit_ids": cap_ids("BENEFITS"),
-        "feature_ids": cap_ids("FEATURES"),
-        "proof_ids": cap_ids("PROOF"),
-        "cta_id": cta_clip["id"] if cta_clip else None,
+        "hook_id": hook_id,
+        "story_ids": ids_for_slot("STORY")[:COMPOSER_MAX_PER_SLOT],
+        "problem_ids": problem_ids,
+        "benefit_ids": benefit_ids,
+        "feature_ids": feature_ids,
+        "proof_ids": proof_ids,
+        "cta_id": cta_id,
         "used_clip_ids": used_ids,
         "min_score": COMPOSER_MIN_SEMANTIC,
     }
@@ -1215,17 +1342,24 @@ def run_pipeline(
 
     duration = probe_duration(input_local)
 
+    # =====================
+    # FASE 1: ANÁLISIS (NO SE CORTA NADA)
+    # =====================
     asr_segments = run_asr(input_local)
     clips = sentence_boundary_micro_cuts(asr_segments)
     llm_used = enrich_clips_semantic(clips)
     clips = dedupe_clips(clips)
     vision_used = run_visual_pass(input_local, session_dir, clips)
     slots = build_slots_dict(clips)
+
+    # =====================
+    # FASE 2: COMPOSICIÓN + RENDER
+    # =====================
     composer = build_composer(clips)
     used_clip_ids = composer.get("used_clip_ids", [])
     final_path = render_funnel_video(input_local, session_dir, clips, used_clip_ids)
 
-    output_url = None
+    output_url = None    # type: Optional[str]
     if S3_BUCKET:
         key = f"{S3_PREFIX}/{session_id}-final.mp4"
         output_url = upload_to_s3(final_path, S3_BUCKET, key)
