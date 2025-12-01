@@ -817,7 +817,54 @@ def run_visual_pass(
         c["meta"]["visual_score"] = float(visual_score)
 
     return True
-
+    
+def reject_visual_bad_takes(clips: List[Dict[str, Any]], session_dir: str, input_local: str):
+    from openai import OpenAI
+    import base64
+    
+    api_key = os.environ.get("OPENAI_API_KEY")
+    if not api_key:
+        return
+    
+    client = OpenAI(api_key=api_key)
+    
+    for c in clips:
+        if not c["meta"].get("keep", True):
+            continue
+        
+        mid = (safe_float(c["start"]) + safe_float(c["end"])) / 2
+        frame_path = os.path.join(session_dir, f"facecheck_{c['id']}.jpg")
+        
+        if not grab_frame_at_timestamp(input_local, mid, frame_path):
+            continue
+        
+        with open(frame_path, "rb") as f:
+            img_b64 = base64.b64encode(f.read()).decode("utf-8")
+        
+        prompt = f"""
+        Analyze if this take is a GOOD or BAD acting take for a TikTok ad.
+        Say ONLY: 'GOOD' or 'BAD'.
+        Criteria:
+        - GOOD: Confident, connected, intentional.
+        - BAD: Looks confused, thinking, adjusting, flat face, or doesn’t match the energy of the text.
+        Text of the clip: "{c.get('text')}"
+        """
+        
+        response = client.chat.completions.create(
+            model="gpt-4o",
+            messages=[
+                {"role": "system", "content": "You strictly output 'GOOD' or 'BAD'."},
+                {"role": "user", "content": [
+                    {"type": "text", "text": prompt},
+                    {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{img_b64}"}}
+                ]}
+            ],
+        )
+        
+        verdict = response.choices[0].message.content.strip().upper()
+        if verdict == "BAD":
+            c["meta"]["keep"] = False
+            c["llm_reason"] += " | Removed for visual bad-take."
 
 def apply_min_score_rules(clips: List[Dict[str, Any]]) -> None:
     """
