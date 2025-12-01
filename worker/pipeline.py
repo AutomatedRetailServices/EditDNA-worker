@@ -59,7 +59,7 @@ S3_BUCKET = os.environ.get("S3_BUCKET")
 S3_PREFIX = os.environ.get("S3_PREFIX", "editdna/outputs")
 
 # Recortes genéricos de cabeza/cola de cada clip al renderizar
-HEAD_TRIM_SEC = float(os.environ.get("HEAD_TRIM_SEC", "0.05"))
+HEAD_TRIM_SEC = float(os.environ.get("HEAD_TRIM_SEC", "0.0"))
 TAIL_TRIM_SEC = float(os.environ.get("TAIL_TRIM_SEC", "0.0"))
 
 
@@ -232,7 +232,7 @@ def run_asr(input_local: str) -> List[Dict[str, Any]]:
         beam_size=5,
         word_timestamps=True,
         vad_filter=True,
-               vad_parameters={"min_silence_duration_ms": 300},
+        vad_parameters={"min_silence_duration_ms": 300},
     )
     out: List[Dict[str, Any]] = []
     idx = 0
@@ -578,6 +578,7 @@ def llm_classify_clips(clips: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
         "clips": payload_clips,
     }
 
+    # Texto completo del prompt de usuario
     user_text = (
         "Devuélveme SOLO un JSON con este formato exacto:\n\n"
         "{\n"
@@ -909,7 +910,7 @@ def text_overlap_ratio(t1: str, t2: str) -> float:
 def suppress_near_duplicates_by_slot(
     clips: List[Dict[str, Any]],
     window_sec: float = 15.0,
-    min_overlap: float = 0.4,
+    min_overlap: float = 0.35,
 ) -> None:
     """
     Dado un listado de clips USABLE (ordenados por start), dentro del mismo slot:
@@ -948,9 +949,56 @@ def suppress_near_duplicates_by_slot(
             len1 = len((c1.get("text") or "").split())
             len2 = len((c2.get("text") or "").split())
 
-            # Elegimos cuál se queda:
-            # - Si el segundo es más fuerte o igual de fuerte pero más largo → matamos el primero.
-            # - Si el primero es más fuerte → matamos el segundo.
+            if sem2 > sem1 or (sem2 == sem1 and len2 >= len1):
+                c1["meta"]["keep"] = False
+                break
+            else:
+                c2["meta"]["keep"] = False
+
+
+def suppress_cross_slot_redundant_clips(
+    clips: List[Dict[str, Any]],
+    window_sec: float = 15.0,
+    min_overlap: float = 0.8,
+) -> None:
+    """
+    NUEVO:
+    Elimina frases casi idénticas aunque estén en slots distintos (BENEFITS vs FEATURES, etc.).
+    Ejemplo:
+      - "You only need to take two a day."
+      - "You only need to take two a day to feel fresh and confident..."
+    Se queda con el más fuerte / más largo.
+    """
+    n = len(clips)
+    for i in range(n):
+        c1 = clips[i]
+        if not c1["meta"].get("keep", True):
+            continue
+
+        t1 = safe_float(c1.get("start", 0.0))
+        text1 = c1.get("text", "")
+
+        for j in range(i + 1, n):
+            c2 = clips[j]
+            if not c2["meta"].get("keep", True):
+                continue
+
+            t2 = safe_float(c2.get("start", 0.0))
+            if t2 - t1 > window_sec:
+                break
+
+            text2 = c2.get("text", "")
+            ratio = text_overlap_ratio(text1, text2)
+            if ratio < min_overlap:
+                continue
+
+            sem1 = safe_float(c1.get("semantic_score", 0.0))
+            sem2 = safe_float(c2.get("semantic_score", 0.0))
+            len1 = len((text1 or "").split())
+            len2 = len((text2 or "").split())
+
+            # Elegimos el que se queda:
+            # preferimos el de mayor semántica, y si están igual, el más largo.
             if sem2 > sem1 or (sem2 == sem1 and len2 >= len1):
                 c1["meta"]["keep"] = False
                 break
@@ -1056,6 +1104,10 @@ def build_composer(clips: List[Dict[str, Any]]) -> Dict[str, Any]:
     suppress_near_duplicates_by_slot(usable)
     usable = [c for c in usable if c["meta"].get("keep", True)]
 
+    # 4b) Evitar duplicados cross-slot (ej: two-a-day vs two-a-day-extended)
+    suppress_cross_slot_redundant_clips(usable)
+    usable = [c for c in usable if c["meta"].get("keep", True)]
+
     # 5) BLOQUES POR SLOT (HOOK, PROBLEM, CTA)
     hook_blocks = group_contiguous_blocks_by_slot(usable, "HOOK", max_gap_sec=1.0)
     best_hook_block = pick_best_block(hook_blocks) if hook_blocks else None
@@ -1124,6 +1176,7 @@ def build_composer(clips: List[Dict[str, Any]]) -> Dict[str, Any]:
     # PROBLEM: si detectamos bloque, priorizamos ese bloque como lista de problems
     problem_ids = ids_for_slot("PROBLEM")
     if problem_block_ids:
+        # quedarnos sólo con los del bloque si existen en el timeline
         filtered = [cid for cid in problem_ids if cid in problem_block_ids]
         if filtered:
             problem_ids = filtered
