@@ -14,7 +14,7 @@ logger = logging.getLogger("editdna.pipeline")
 logger.setLevel(logging.INFO)
 
 # =====================
-# CONFIG GLOBAL
+# GLOBAL CONFIG
 # =====================
 
 TMP_DIR = os.environ.get("TMP_DIR", "/tmp/TMP/editdna")
@@ -48,23 +48,30 @@ EDITDNA_CTA_MIN_SCORE = float(os.environ.get("EDITDNA_CTA_MIN_SCORE", "0.6"))
 EDITDNA_USE_LLM = os.environ.get("EDITDNA_USE_LLM", "0") == "1"
 EDITDNA_LLM_MODEL = os.environ.get("EDITDNA_LLM_MODEL", "gpt-5.1")
 
-# Visión
+# Vision
 VISION_ENABLED = os.environ.get("VISION_ENABLED", "0") == "1"
 VISION_INTERVAL_SEC = float(os.environ.get("VISION_INTERVAL_SEC", "2.0"))
 VISION_MAX_SAMPLES = int(os.environ.get("VISION_MAX_SAMPLES", "50"))
-W_VISION = float(os.environ.get("W_VISION", "0.7"))  # peso visual vs semántico (0-1)
+W_VISION = float(os.environ.get("W_VISION", "0.7"))  # visual vs semantic weight (0-1)
+
+# TakeJudgeAI (acting / human performance layer)
+TAKEJUDGE_ENABLED = os.environ.get("TAKEJUDGE_ENABLED", "0") == "1"
+TAKEJUDGE_MODEL = os.environ.get("TAKEJUDGE_MODEL", "gpt-4o-mini")
+TAKEJUDGE_MIN_SCORE = float(os.environ.get("TAKEJUDGE_MIN_SCORE", "0.45"))
+TAKEJUDGE_MAX_CLIPS = int(os.environ.get("TAKEJUDGE_MAX_CLIPS", "30"))
+TAKEJUDGE_FRAMES_PER_CLIP = int(os.environ.get("TAKEJUDGE_FRAMES_PER_CLIP", "2"))
 
 # S3
 S3_BUCKET = os.environ.get("S3_BUCKET")
 S3_PREFIX = os.environ.get("S3_PREFIX", "editdna/outputs")
 
-# Recortes genéricos de cabeza/cola de cada clip al renderizar
+# Generic head/tail trims applied on each clip when rendering
 HEAD_TRIM_SEC = float(os.environ.get("HEAD_TRIM_SEC", "0.0"))
 TAIL_TRIM_SEC = float(os.environ.get("TAIL_TRIM_SEC", "0.0"))
 
 
 # =====================
-# HELPERS BÁSICOS
+# BASIC HELPERS
 # =====================
 
 def safe_float(x: Any, default: float = 0.0) -> float:
@@ -82,7 +89,7 @@ def ensure_session_dir(session_id: str) -> str:
 
 
 def download_to_local(url: str, dst_path: str) -> None:
-    logger.info(f"Descargando input: {url} -> {dst_path}")
+    logger.info(f"Downloading input: {url} -> {dst_path}")
     resp = requests.get(url, stream=True, timeout=300)
     resp.raise_for_status()
     os.makedirs(os.path.dirname(dst_path), exist_ok=True)
@@ -105,7 +112,7 @@ def ffprobe_json(path: str) -> Dict[str, Any]:
     ]
     proc = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
     if proc.returncode != 0:
-        logger.warning(f"ffprobe fallo con code={proc.returncode}: {proc.stderr}")
+        logger.warning(f"ffprobe failed with code={proc.returncode}: {proc.stderr}")
         return {}
     try:
         return json.loads(proc.stdout)
@@ -134,7 +141,7 @@ def has_audio_stream(path: str) -> bool:
 def upload_to_s3(local_path: str, bucket: str, key: str) -> Optional[str]:
     try:
         s3 = boto3.client("s3")
-        logger.info(f"Subiendo a S3 s3://{bucket}/{key}")
+        logger.info(f"Uploading to S3 s3://{bucket}/{key}")
         s3.upload_file(local_path, bucket, key)
         url = s3.generate_presigned_url(
             "get_object",
@@ -143,14 +150,14 @@ def upload_to_s3(local_path: str, bucket: str, key: str) -> Optional[str]:
         )
         return url
     except Exception as e:
-        logger.exception(f"Error subiendo a S3: {e}")
+        logger.exception(f"Error uploading to S3: {e}")
         return None
 
 
 def make_base_clip(cid: str, start: float, end: float, text: str) -> Dict[str, Any]:
     clip_obj = {
         "id": cid,
-        "slot": "STORY",  # se corregirá luego
+        "slot": "STORY",  # will be corrected later
         "start": start,
         "end": end,
         "score": 0.0,
@@ -207,7 +214,7 @@ def get_whisper_model() -> WhisperModel:
             compute_type = "int8"
 
     logger.info(
-        f"Cargando Whisper model={WHISPER_MODEL_NAME} device={device} compute_type={compute_type}"
+        f"Loading Whisper model={WHISPER_MODEL_NAME} device={device} compute_type={compute_type}"
     )
     _WHISPER_MODEL = WhisperModel(
         WHISPER_MODEL_NAME,
@@ -219,14 +226,14 @@ def get_whisper_model() -> WhisperModel:
 
 def run_asr(input_local: str) -> List[Dict[str, Any]]:
     """
-    Corre faster-whisper con timestamps por palabra.
-    Devuelve segmentos con: start, end, text, words[{start,end,word}]
+    Runs faster-whisper with word-level timestamps.
+    Returns segments with: start, end, text, words[{start,end,word}]
     """
     if not ASR_ENABLED:
-        raise RuntimeError("ASR_ENABLED=0 pero run_asr fue llamado")
+        raise RuntimeError("ASR_ENABLED=0 but run_asr was called")
 
     model = get_whisper_model()
-    logger.info(f"Corriendo ASR sobre {input_local}")
+    logger.info(f"Running ASR on {input_local}")
     segments_iter, info = model.transcribe(
         input_local,
         beam_size=5,
@@ -259,7 +266,7 @@ def run_asr(input_local: str) -> List[Dict[str, Any]]:
         idx += 1
 
     logger.info(
-        f"ASR produjo {len(out)} segmentos, duración ~{probe_duration(input_local):.2f}s"
+        f"ASR produced {len(out)} segments, duration ~{probe_duration(input_local):.2f}s"
     )
     return out
 
@@ -272,10 +279,10 @@ def sentence_boundary_micro_cuts(
     asr_segments: List[Dict[str, Any]]
 ) -> List[Dict[str, Any]]:
     """
-    Convierte segmentos de Whisper en micro-oraciones:
-    - Split por puntuación (. ? !) o duración > MICRO_SENTENCE_MAX_SECONDS
-    - Mantiene timestamps precisos (start/end de primera/última palabra)
-    Devuelve estructura "clips" con IDs tipo ASR0000_c0.
+    Converts Whisper segments into micro-sentences:
+    - Split by punctuation (. ? !) or duration > MICRO_SENTENCE_MAX_SECONDS
+    - Keeps precise timestamps (start/end of first/last word)
+    Returns "clips" with IDs like ASR0000_c0.
     """
     clips: List[Dict[str, Any]] = []
     clip_index = 0
@@ -349,7 +356,7 @@ def sentence_boundary_micro_cuts(
 
 
 # =====================
-# HEURÍSTICA BÁSICA
+# BASIC HEURISTIC
 # =====================
 
 FILLER_PATTERNS = [
@@ -524,7 +531,7 @@ def tag_clips_heuristic(clips: List[Dict[str, Any]]) -> None:
 
 
 # =====================
-# LLM SEMÁNTICO (GPT-5.1)
+# SEMANTIC LLM (GPT-5.1)
 # =====================
 
 def llm_classify_clips(clips: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
@@ -532,7 +539,7 @@ def llm_classify_clips(clips: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
 
     api_key = os.environ.get("OPENAI_API_KEY")
     if not api_key:
-        logger.warning("OPENAI_API_KEY no está configurado, saltando LLM.")
+        logger.warning("OPENAI_API_KEY not set, skipping LLM.")
         return None
 
     client = OpenAI(api_key=api_key)
@@ -578,7 +585,6 @@ def llm_classify_clips(clips: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
         "clips": payload_clips,
     }
 
-    # Texto completo del prompt de usuario
     user_text = (
         "Devuélveme SOLO un JSON con este formato exacto:\n\n"
         "{\n"
@@ -627,18 +633,18 @@ def llm_classify_clips(clips: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
         return result_map
 
     except Exception as e:
-        logger.exception(f"Error llamando al LLM: {e}")
+        logger.exception(f"Error calling LLM: {e}")
         return None
 
 
 def enrich_clips_semantic(clips: List[Dict[str, Any]]) -> bool:
     """
-    1) Aplica heurística básica (filler, slots, semantic_score).
-    2) Opcionalmente mezcla con LLM, pero:
-       - NUNCA revive algo que la heurística marcó como keep=False.
-       - NO deja que el LLM elimine clips fuertes de HOOK / PROBLEM / BENEFITS / FEATURES / PROOF / CTA.
+    1) Apply local heuristic (filler, slots, semantic_score).
+    2) Optionally mix with LLM, but:
+       - NEVER revive something heuristic already marked keep=False.
+       - DO NOT allow the LLM to kill strong funnel clips (HOOK/PROBLEM/BENEFITS/FEATURES/PROOF/CTA).
     """
-    # Paso 1: heurística local
+    # Step 1: local heuristic
     tag_clips_heuristic(clips)
 
     if not EDITDNA_USE_LLM:
@@ -655,24 +661,21 @@ def enrich_clips_semantic(clips: List[Dict[str, Any]]) -> bool:
 
         info = llm_result[cid]
 
-        # Lo que decidió la heurística antes del LLM
         original_keep = c["meta"].get("keep", True)
 
-        # Datos que sí dejamos que el LLM actualice
         slot_from_llm = info.get("slot", c.get("slot", "STORY"))
         sem_from_llm = safe_float(info.get("semantic_score", c.get("semantic_score", 0.0)))
         reason = info.get("reason", "")
 
         c["slot"] = slot_from_llm
         c["semantic_score"] = sem_from_llm
-        c["score"] = sem_from_llm  # luego se mezcla con visión si existe
+        c["score"] = sem_from_llm
         c["llm_reason"] = reason or c.get("llm_reason", "")
 
         c["meta"]["slot"] = slot_from_llm
         c["meta"]["semantic_score"] = sem_from_llm
         c["meta"]["score"] = sem_from_llm
 
-        # Propuesta de keep del LLM
         llm_keep_raw = bool(info.get("keep", original_keep))
 
         text = (c.get("text") or "").strip()
@@ -681,11 +684,9 @@ def enrich_clips_semantic(clips: List[Dict[str, Any]]) -> bool:
         strong_semantic = sem_from_llm >= COMPOSER_MIN_SEMANTIC
         core_slot = slot_upper in {"HOOK", "PROBLEM", "BENEFITS", "FEATURES", "PROOF", "CTA"}
 
-        # Regla 1: si la heurística ya dijo que es basura → sigue siendo basura
         if not original_keep:
             final_keep = False
         else:
-            # Regla 2: si es un clip fuerte de funnel, el LLM NO puede matarlo
             if core_slot and strong_semantic and word_count >= 3:
                 final_keep = True
             else:
@@ -697,7 +698,7 @@ def enrich_clips_semantic(clips: List[Dict[str, Any]]) -> bool:
 
 
 # =====================
-# VISIÓN: CLIP + CUDA
+# VISION: CLIP + CUDA
 # =====================
 
 _CLIP_MODEL = None
@@ -714,7 +715,7 @@ def load_clip_model():
         import torch
         import clip as clip_lib  # type: ignore
     except Exception as e:
-        logger.warning(f"No se pudo importar torch/clip para visión: {e}")
+        logger.warning(f"Could not import torch/clip for vision: {e}")
         return None, None, "cpu"
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -723,7 +724,7 @@ def load_clip_model():
     _CLIP_PREPROCESS = preprocess
     _CLIP_DEVICE = device
 
-    logger.info(f"Modelo CLIP cargado en dispositivo {device}")
+    logger.info(f"CLIP model loaded on device {device}")
     return _CLIP_MODEL, _CLIP_PREPROCESS, _CLIP_DEVICE
 
 
@@ -743,7 +744,7 @@ def grab_frame_at_timestamp(input_local: str, t: float, out_path: str) -> bool:
     ]
     proc = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
     if proc.returncode != 0:
-        logger.debug(f"ffmpeg frame grab fallo para t={t:.3f}: {proc.stderr}")
+        logger.debug(f"ffmpeg frame grab failed for t={t:.3f}: {proc.stderr}")
         return False
     return True
 
@@ -752,19 +753,19 @@ def run_visual_pass(
     input_local: str, session_dir: str, clips: List[Dict[str, Any]]
 ) -> bool:
     if not VISION_ENABLED:
-        logger.info("VISION_ENABLED=0, saltando vision pass.")
+        logger.info("VISION_ENABLED=0, skipping visual pass.")
         return False
 
     model, preprocess, device = load_clip_model()
     if model is None:
-        logger.warning("CLIP no disponible, vision=false.")
+        logger.warning("CLIP not available, vision=false.")
         return False
 
     try:
         import torch
         from PIL import Image
     except Exception as e:
-        logger.warning(f"No se pudo importar torch/PIL para vision: {e}")
+        logger.warning(f"Could not import torch/PIL for vision: {e}")
         return False
 
     if not clips:
@@ -817,30 +818,35 @@ def run_visual_pass(
         c["meta"]["visual_score"] = float(visual_score)
 
     return True
-    
+
+
 def reject_visual_bad_takes(clips: List[Dict[str, Any]], session_dir: str, input_local: str):
+    """
+    Legacy simple image-based GOOD/BAD check (per frame).
+    Currently not used by default; TakeJudgeAI is the newer approach.
+    """
     from openai import OpenAI
     import base64
-    
+
     api_key = os.environ.get("OPENAI_API_KEY")
     if not api_key:
         return
-    
+
     client = OpenAI(api_key=api_key)
-    
+
     for c in clips:
         if not c["meta"].get("keep", True):
             continue
-        
+
         mid = (safe_float(c["start"]) + safe_float(c["end"])) / 2
         frame_path = os.path.join(session_dir, f"facecheck_{c['id']}.jpg")
-        
+
         if not grab_frame_at_timestamp(input_local, mid, frame_path):
             continue
-        
+
         with open(frame_path, "rb") as f:
             img_b64 = base64.b64encode(f.read()).decode("utf-8")
-        
+
         prompt = f"""
         Analyze if this take is a GOOD or BAD acting take for a TikTok ad.
         Say ONLY: 'GOOD' or 'BAD'.
@@ -849,7 +855,7 @@ def reject_visual_bad_takes(clips: List[Dict[str, Any]], session_dir: str, input
         - BAD: Looks confused, thinking, adjusting, flat face, or doesn’t match the energy of the text.
         Text of the clip: "{c.get('text')}"
         """
-        
+
         response = client.chat.completions.create(
             model="gpt-4o",
             messages=[
@@ -860,16 +866,165 @@ def reject_visual_bad_takes(clips: List[Dict[str, Any]], session_dir: str, input
                 ]}
             ],
         )
-        
+
         verdict = response.choices[0].message.content.strip().upper()
         if verdict == "BAD":
             c["meta"]["keep"] = False
             c["llm_reason"] += " | Removed for visual bad-take."
 
+
+# =====================
+# TakeJudgeAI (V3 acting / human performance)
+# =====================
+
+def take_judge_ai(
+    clips: List[Dict[str, Any]],
+    session_dir: str,
+    input_local: str,
+) -> bool:
+    """
+    V3 step 1: Acting-quality evaluation per clip using GPT vision.
+    - Samples 1..N frames per clip.
+    - Sends text + frames to the model.
+    - Expects JSON: { "verdict": "GOOD"/"BAD", "score": 0-1 }.
+    - Marks BAD (score < TAKEJUDGE_MIN_SCORE) as keep=False.
+    """
+    if not TAKEJUDGE_ENABLED:
+        logger.info("TakeJudgeAI: disabled (TAKEJUDGE_ENABLED=0)")
+        return False
+
+    from openai import OpenAI
+    import base64
+
+    api_key = os.environ.get("OPENAI_API_KEY")
+    if not api_key:
+        logger.warning("TakeJudgeAI: OPENAI_API_KEY not set, skipping.")
+        return False
+
+    client = OpenAI(api_key=api_key)
+
+    candidates = [
+        c for c in clips
+        if c["meta"].get("keep", True)
+        and (c.get("text") or "").strip()
+        and len((c.get("text") or "").split()) >= 3
+    ]
+
+    if not candidates:
+        logger.info("TakeJudgeAI: no candidates to evaluate.")
+        return False
+
+    candidates = candidates[:TAKEJUDGE_MAX_CLIPS]
+    logger.info(f"TakeJudgeAI: evaluating {len(candidates)} clips (max={TAKEJUDGE_MAX_CLIPS})")
+
+    def sample_timestamps_for_clip(c: Dict[str, Any]) -> List[float]:
+        start = safe_float(c.get("start", 0.0))
+        end = safe_float(c.get("end", start))
+        if end <= start:
+            return []
+        dur = end - start
+        n = max(1, TAKEJUDGE_FRAMES_PER_CLIP)
+        if n == 1:
+            return [start + dur / 2.0]
+        step = dur / (n + 1)
+        return [start + step * (i + 1) for i in range(n)]
+
+    any_used = False
+
+    for c in candidates:
+        timestamps = sample_timestamps_for_clip(c)
+        if not timestamps:
+            continue
+
+        images_content = []
+        for idx, ts in enumerate(timestamps):
+            frame_path = os.path.join(session_dir, f"takejudge_{c['id']}_{idx}.jpg")
+            if not grab_frame_at_timestamp(input_local, ts, frame_path):
+                continue
+            try:
+                with open(frame_path, "rb") as f:
+                    img_b64 = base64.b64encode(f.read()).decode("utf-8")
+                images_content.append(
+                    {
+                        "type": "image_url",
+                        "image_url": {
+                            "url": f"data:image/jpeg;base64,{img_b64}"
+                        },
+                    }
+                )
+            except Exception as e:
+                logger.debug(f"TakeJudgeAI: error reading frame {frame_path}: {e}")
+                continue
+
+        if not images_content:
+            continue
+
+        text_clip = (c.get("text") or "").strip()
+
+        prompt = (
+            "You are an expert TikTok ad editor and you will evaluate the ACTING QUALITY "
+            "of this clip, not the script itself.\n\n"
+            "You must return ONLY a JSON object with this exact structure:\n\n"
+            "{\n"
+            '  \"verdict\": \"GOOD\" or \"BAD\",\n'
+            '  \"score\": number between 0.0 and 1.0 (1.0 = excellent acting, 0.0 = very poor acting)\n'
+            "}\n\n"
+            "Criteria:\n"
+            "- GOOD: the talent looks confident, connected, intentional, eye contact is coherent, body language is fluid.\n"
+            "- BAD: they look unsure, thinking, reading, flat-faced, tense, distracted or disconnected from the message.\n\n"
+            f"Clip text:\n\"{text_clip}\"\n"
+        )
+
+        messages = [
+            {
+                "role": "system",
+                "content": [
+                    {"type": "text", "text": "Return ONLY valid JSON, no comments."}
+                ],
+            },
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": prompt},
+                    *images_content,
+                ],
+            },
+        ]
+
+        try:
+            resp = client.chat.completions.create(
+                model=TAKEJUDGE_MODEL,
+                messages=messages,
+                temperature=0.1,
+            )
+            raw = resp.choices[0].message.content or ""
+            data = json.loads(raw)
+
+            verdict = str(data.get("verdict", "GOOD")).strip().upper()
+            score = safe_float(data.get("score", 0.0))
+
+            any_used = True
+
+            c.setdefault("meta", {})
+            c["meta"]["take_judge_verdict"] = verdict
+            c["meta"]["take_judge_score"] = score
+
+            if verdict == "BAD" and score < TAKEJUDGE_MIN_SCORE:
+                c["meta"]["keep"] = False
+                reason_extra = f" [TakeJudgeAI: BAD acting (score={score:.2f})]"
+                c["llm_reason"] = (c.get("llm_reason") or "") + reason_extra
+
+        except Exception as e:
+            logger.exception(f"TakeJudgeAI: error calling model: {e}")
+            continue
+
+    return any_used
+
+
 def apply_min_score_rules(clips: List[Dict[str, Any]]) -> None:
     """
-    Aplica umbral mínimo, usando principalmente el semantic_score.
-    Así, si el texto es fuerte, no se cae solo porque la visión baje un poco el score combinado.
+    Apply a minimum threshold using mainly semantic_score.
+    If semantic text is strong, it should not be dropped only because visual lowers combined score.
     """
     for c in clips:
         slot = c.get("slot", "STORY")
@@ -882,7 +1037,6 @@ def apply_min_score_rules(clips: List[Dict[str, Any]]) -> None:
         elif slot == "CTA":
             threshold = max(threshold, EDITDNA_CTA_MIN_SCORE)
 
-        # usamos semántico como fuente principal para decidir keep
         effective_score = sem if sem > 0 else combined
 
         if effective_score < threshold:
@@ -936,8 +1090,8 @@ def build_slots_dict(clips: List[Dict[str, Any]]) -> Dict[str, List[Dict[str, An
 
 def text_overlap_ratio(t1: str, t2: str) -> float:
     """
-    Mide parecido entre dos textos usando conjuntos de palabras (Jaccard).
-    0.0 = nada parecido, 1.0 = idéntico en términos de palabras.
+    Measures similarity between two texts using Jaccard over word sets.
+    0.0 = no overlap, 1.0 = identical.
     """
     a = normalize_text(t1)
     b = normalize_text(t2)
@@ -960,10 +1114,10 @@ def suppress_near_duplicates_by_slot(
     min_overlap: float = 0.35,
 ) -> None:
     """
-    Dado un listado de clips USABLE (ordenados por start), dentro del mismo slot:
-    - Si dos clips están cerca en el tiempo (window_sec)
-    - Y el texto es muy parecido (min_overlap)
-    Se queda con el más fuerte (más semantic_score y/o más largo) y marca el otro keep=False.
+    For usable clips (sorted by start), within the same slot:
+    - If two clips are close in time (window_sec)
+    - And text overlap is high (min_overlap)
+    Keep the strongest (semantic_score / length) and mark the other keep=False.
     """
     n = len(clips)
     for i in range(n):
@@ -983,7 +1137,6 @@ def suppress_near_duplicates_by_slot(
 
             t2 = safe_float(c2.get("start", 0.0))
 
-            # Si ya se pasó de la ventana temporal, rompemos el inner loop
             if t2 - t1 > window_sec:
                 break
 
@@ -1010,14 +1163,14 @@ def suppress_cross_slot_redundant_clips(
 ) -> None:
     """
     NEW FIX:
-    - If a clip is a partial/shorter version of a later, more complete phrase,
-      and that later one has higher semantic score, we discard the short one.
+    - If a clip is a shorter/partial version of a later, more complete phrase,
+      and that later one has higher semantic score, discard the short one.
     - Window extended to 18s to catch late retakes.
     """
     n = len(clips)
     for i in range(n):
         c1 = clips[i]
-        if not c1["meta"].get("keep", True): 
+        if not c1["meta"].get("keep", True):
             continue
 
         t1 = safe_float(c1.get("start", 0.0))
@@ -1036,20 +1189,16 @@ def suppress_cross_slot_redundant_clips(
             if not text1 or not text2:
                 continue
 
-            # ratio
             overlap = text_overlap_ratio(text1, text2)
 
             sem1 = safe_float(c1.get("semantic_score", 0.0))
             sem2 = safe_float(c2.get("semantic_score", 0.0))
 
-            # If 1 is short duplicate of 2 (subset or partial)
             if overlap >= min_overlap and len(text2.split()) > len(text1.split()):
-                # Keep only if c2 is clearly better
                 if sem2 >= sem1:
                     c1["meta"]["keep"] = False
                     break
 
-            # Direct word containment (even if ratio low)
             if text1 in text2 and len(text2.split()) - len(text1.split()) > 3:
                 c1["meta"]["keep"] = False
                 break
@@ -1061,10 +1210,10 @@ def group_contiguous_blocks_by_slot(
     max_gap_sec: float = 1.0,
 ) -> List[List[Dict[str, Any]]]:
     """
-    Agrupa clips contiguos del mismo slot en "bloques" (speech continuo):
-    - Solo clips con meta.keep=True
-    - Ordenados por tiempo
-    - Si la separación entre uno y otro <= max_gap_sec → mismo bloque
+    Groups contiguous clips of the same slot into "blocks" (continuous speech):
+    - Only clips with meta.keep=True
+    - Ordered by time
+    - If gap <= max_gap_sec -> same block
     """
     ordered = sorted(
         [c for c in clips if c.get("slot") == slot and c["meta"].get("keep", True)],
@@ -1102,7 +1251,7 @@ def group_contiguous_blocks_by_slot(
 
 def pick_best_block(blocks: List[List[Dict[str, Any]]]) -> Optional[List[Dict[str, Any]]]:
     """
-    Elige el mejor bloque por score medio (semántico+visual ya mezclado).
+    Picks the best block by average score (semantic+visual already combined).
     """
     best_block: Optional[List[Dict[str, Any]]] = None
     best_score = -1.0
@@ -1124,7 +1273,7 @@ def pick_best_block(blocks: List[List[Dict[str, Any]]]) -> Optional[List[Dict[st
 
 
 def build_composer(clips: List[Dict[str, Any]]) -> Dict[str, Any]:
-    # 1) Filtramos los que globalmente son usables por semántica
+    # 1) Filter globally usable by semantic score
     usable = [
         c
         for c in clips
@@ -1132,7 +1281,7 @@ def build_composer(clips: List[Dict[str, Any]]) -> Dict[str, Any]:
         and safe_float(c.get("semantic_score", 0.0)) >= COMPOSER_MIN_SEMANTIC
     ]
 
-    # 2) Mezclamos visión (si existe) con semántica para score combinado
+    # 2) Combine vision with semantic for overall score
     for c in usable:
         sem = safe_float(c.get("semantic_score", 0.0))
         vis = safe_float(c.get("visual_score", 0.0))
@@ -1143,26 +1292,25 @@ def build_composer(clips: List[Dict[str, Any]]) -> Dict[str, Any]:
         c["score"] = combined
         c["meta"]["score"] = combined
 
-    # 3) Aplicar umbrales por slot (HOOK/CTA más estrictos)
+    # 3) Apply min thresholds by slot (HOOK/CTA stricter)
     apply_min_score_rules(usable)
 
     usable = [c for c in usable if c["meta"].get("keep", True)]
     usable.sort(key=lambda c: safe_float(c.get("start", 0.0)))
 
-    # 4) Evitar casi duplicados dentro del mismo slot
+    # 4) Avoid near-duplicates within same slot
     suppress_near_duplicates_by_slot(usable)
     usable = [c for c in usable if c["meta"].get("keep", True)]
 
-    # 4b) Evitar duplicados cross-slot (ej: two-a-day vs two-a-day-extended)
+    # 4b) Avoid cross-slot duplicates (e.g. short vs extended version)
     suppress_cross_slot_redundant_clips(usable)
     usable = [c for c in usable if c["meta"].get("keep", True)]
 
-    # 5) BLOQUES POR SLOT (HOOK, PROBLEM, CTA)
+    # 5) Blocks by slot (HOOK, PROBLEM, CTA)
     hook_blocks = group_contiguous_blocks_by_slot(usable, "HOOK", max_gap_sec=1.0)
     best_hook_block = pick_best_block(hook_blocks) if hook_blocks else None
     hook_block_ids = [c["id"] for c in best_hook_block] if best_hook_block else []
 
-    # Solo consideramos como "bloque de hook" los que arrancan cerca del inicio (ej: primeros 10s)
     if hook_block_ids:
         first_start = safe_float(best_hook_block[0].get("start", 0.0))
         if first_start > 10.0:
@@ -1176,7 +1324,6 @@ def build_composer(clips: List[Dict[str, Any]]) -> Dict[str, Any]:
     best_cta_block = pick_best_block(cta_blocks) if cta_blocks else None
     cta_block_ids = [c["id"] for c in best_cta_block] if best_cta_block else []
 
-    # Fallback: si por alguna razón no hay bloque CTA pero sí hay CTAs sueltos, usamos el mejor sólo
     ctas = [c for c in usable if c.get("slot") == "CTA"]
     single_best_cta = None
     if ctas:
@@ -1188,21 +1335,19 @@ def build_composer(clips: List[Dict[str, Any]]) -> Dict[str, Any]:
     if not cta_block_ids and single_best_cta is not None:
         cta_block_ids = [single_best_cta["id"]]
 
-    cta_final_ids = cta_block_ids[:]  # ids de CTA que irán al final
+    cta_final_ids = cta_block_ids[:]
     cta_final_ids_set = set(cta_final_ids)
 
-    # 6) Construir timeline básico respetando bloque CTA al final
+    # 6) Build timeline respecting final CTA block at the end
     timeline: List[Dict[str, Any]] = []
     used_ids: List[str] = []
 
-    # Primero todo MENOS los CTA del bloque final
     for c in usable:
         if c["id"] in cta_final_ids_set:
             continue
         timeline.append(c)
         used_ids.append(c["id"])
 
-    # Después añadimos el bloque CTA (en orden de tiempo)
     if cta_final_ids:
         cta_block_clips = [c for c in usable if c["id"] in cta_final_ids_set]
         cta_block_clips.sort(key=lambda c: safe_float(c.get("start", 0.0)))
@@ -1210,11 +1355,9 @@ def build_composer(clips: List[Dict[str, Any]]) -> Dict[str, Any]:
             timeline.append(c)
             used_ids.append(c["id"])
 
-    # 7) IDs por slot para el composer (respetando bloque HOOK y PROBLEM)
     def ids_for_slot(slot_name: str) -> List[str]:
         return [c["id"] for c in timeline if c.get("slot") == slot_name]
 
-    # HOOK: si tenemos bloque hook, hook_id = primera frase de ese bloque
     if hook_block_ids:
         hook_id = hook_block_ids[0]
     else:
@@ -1222,10 +1365,8 @@ def build_composer(clips: List[Dict[str, Any]]) -> Dict[str, Any]:
             (c["id"] for c in timeline if c.get("slot") == "HOOK"), None
         )
 
-    # PROBLEM: si detectamos bloque, priorizamos ese bloque como lista de problems
     problem_ids = ids_for_slot("PROBLEM")
     if problem_block_ids:
-        # quedarnos sólo con los del bloque si existen en el timeline
         filtered = [cid for cid in problem_ids if cid in problem_block_ids]
         if filtered:
             problem_ids = filtered
@@ -1235,7 +1376,6 @@ def build_composer(clips: List[Dict[str, Any]]) -> Dict[str, Any]:
     feature_ids = ids_for_slot("FEATURES")[:COMPOSER_MAX_PER_SLOT]
     proof_ids = ids_for_slot("PROOF")[:COMPOSER_MAX_PER_SLOT]
 
-    # CTA id principal = último clip del bloque final de CTA (el cierre más fuerte)
     cta_id = cta_final_ids[-1] if cta_final_ids else None
 
     composer = {
@@ -1260,7 +1400,7 @@ def pretty_print_composer(
     def line_for(cid: str) -> str:
         c = lookup.get(cid)
         if not c:
-            return f"[{cid}] (no encontrado)"
+            return f"[{cid}] (not found)"
         return f"[{cid}] score={c.get('score', 0.0):.2f} → \"{c.get('text', '').strip()}\""
 
     parts = ["===== EDITDNA FUNNEL COMPOSER ====="]
@@ -1287,7 +1427,7 @@ def pretty_print_composer(
     for i, cid in enumerate(composer.get("used_clip_ids", []), start=1):
         c = lookup.get(cid)
         if not c:
-            parts.append(f"{i}) {cid} (no encontrado)")
+            parts.append(f"{i}) {cid} (not found)")
         else:
             parts.append(
                 f"{i}) {cid} → \"{c.get('text', '').strip()}\""
@@ -1330,7 +1470,6 @@ def render_funnel_video(
         raw_start = safe_float(c.get("start", 0.0))
         raw_end = safe_float(c.get("end", 0.0))
 
-        # Recortes genéricos de cabeza/cola
         start = max(0.0, raw_start + HEAD_TRIM_SEC)
         end = max(start, raw_end - TAIL_TRIM_SEC)
 
@@ -1358,9 +1497,9 @@ def render_funnel_video(
 
     if has_audio and len(a_labels) != n:
         logger.warning(
-            "render_funnel_video: has_audio=True pero len(a_labels)"
+            "render_funnel_video: has_audio=True but len(a_labels)"
             f"={len(a_labels)} != len(v_labels)={n}, "
-            "desactivando audio para evitar media type mismatch."
+            "disabling audio to avoid media type mismatch."
         )
         has_audio = False
 
@@ -1418,7 +1557,7 @@ def render_funnel_video(
 
 
 # =====================
-# ENTRYPOINT PRINCIPAL
+# MAIN ENTRYPOINT
 # =====================
 
 def run_pipeline(
@@ -1438,7 +1577,7 @@ def run_pipeline(
 
     if not effective_files:
         raise ValueError(
-            "run_pipeline: se requiere 'files' o 'file_urls' como lista con al menos 1 URL"
+            "run_pipeline: requires 'files' or 'file_urls' as a list with at least 1 URL"
         )
 
     session_dir = ensure_session_dir(session_id)
@@ -1449,17 +1588,21 @@ def run_pipeline(
     duration = probe_duration(input_local)
 
     # =====================
-    # FASE 1: ANÁLISIS (NO SE CORTA NADA)
+    # PHASE 1: ANALYSIS (NO CUTS YET)
     # =====================
     asr_segments = run_asr(input_local)
     clips = sentence_boundary_micro_cuts(asr_segments)
     llm_used = enrich_clips_semantic(clips)
     clips = dedupe_clips(clips)
     vision_used = run_visual_pass(input_local, session_dir, clips)
+
+    # Acting / human performance layer (V3 step 1, optional)
+    take_judge_used = take_judge_ai(clips, session_dir, input_local)
+
     slots = build_slots_dict(clips)
 
     # =====================
-    # FASE 2: COMPOSICIÓN + RENDER
+    # PHASE 2: COMPOSITION + RENDER
     # =====================
     composer = build_composer(clips)
     used_clip_ids = composer.get("used_clip_ids", [])
@@ -1485,5 +1628,6 @@ def run_pipeline(
         "semantic": True,
         "vision": vision_used,
         "llm_used": llm_used,
+        "take_judge_used": take_judge_used,
     }
     return result
