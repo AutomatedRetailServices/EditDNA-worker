@@ -958,25 +958,23 @@ def suppress_near_duplicates_by_slot(
 
 def suppress_cross_slot_redundant_clips(
     clips: List[Dict[str, Any]],
-    window_sec: float = 15.0,
-    min_overlap: float = 0.8,
+    window_sec: float = 18.0,
+    min_overlap: float = 0.35,
 ) -> None:
     """
-    NUEVO:
-    Elimina frases casi idénticas aunque estén en slots distintos (BENEFITS vs FEATURES, etc.).
-    Ejemplo:
-      - "You only need to take two a day."
-      - "You only need to take two a day to feel fresh and confident..."
-    Se queda con el más fuerte / más largo.
+    NEW FIX:
+    - If a clip is a partial/shorter version of a later, more complete phrase,
+      and that later one has higher semantic score, we discard the short one.
+    - Window extended to 18s to catch late retakes.
     """
     n = len(clips)
     for i in range(n):
         c1 = clips[i]
-        if not c1["meta"].get("keep", True):
+        if not c1["meta"].get("keep", True): 
             continue
 
         t1 = safe_float(c1.get("start", 0.0))
-        text1 = c1.get("text", "")
+        text1 = normalize_text(c1.get("text", ""))
 
         for j in range(i + 1, n):
             c2 = clips[j]
@@ -987,23 +985,27 @@ def suppress_cross_slot_redundant_clips(
             if t2 - t1 > window_sec:
                 break
 
-            text2 = c2.get("text", "")
-            ratio = text_overlap_ratio(text1, text2)
-            if ratio < min_overlap:
+            text2 = normalize_text(c2.get("text", ""))
+            if not text1 or not text2:
                 continue
+
+            # ratio
+            overlap = text_overlap_ratio(text1, text2)
 
             sem1 = safe_float(c1.get("semantic_score", 0.0))
             sem2 = safe_float(c2.get("semantic_score", 0.0))
-            len1 = len((text1 or "").split())
-            len2 = len((text2 or "").split())
 
-            # Elegimos el que se queda:
-            # preferimos el de mayor semántica, y si están igual, el más largo.
-            if sem2 > sem1 or (sem2 == sem1 and len2 >= len1):
+            # If 1 is short duplicate of 2 (subset or partial)
+            if overlap >= min_overlap and len(text2.split()) > len(text1.split()):
+                # Keep only if c2 is clearly better
+                if sem2 >= sem1:
+                    c1["meta"]["keep"] = False
+                    break
+
+            # Direct word containment (even if ratio low)
+            if text1 in text2 and len(text2.split()) - len(text1.split()) > 3:
                 c1["meta"]["keep"] = False
                 break
-            else:
-                c2["meta"]["keep"] = False
 
 
 def group_contiguous_blocks_by_slot(
