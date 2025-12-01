@@ -54,18 +54,18 @@ VISION_INTERVAL_SEC = float(os.environ.get("VISION_INTERVAL_SEC", "2.0"))
 VISION_MAX_SAMPLES = int(os.environ.get("VISION_MAX_SAMPLES", "50"))
 W_VISION = float(os.environ.get("W_VISION", "0.7"))  # visual vs semantic weight (0-1)
 
-# TakeJudgeAI (acting / human performance layer)
-TAKEJUDGE_ENABLED = os.environ.get("TAKEJUDGE_ENABLED", "0") == "1"
-TAKEJUDGE_MODEL = os.environ.get("TAKEJUDGE_MODEL", "gpt-4o-mini")
-TAKEJUDGE_MIN_SCORE = float(os.environ.get("TAKEJUDGE_MIN_SCORE", "0.45"))
-TAKEJUDGE_MAX_CLIPS = int(os.environ.get("TAKEJUDGE_MAX_CLIPS", "30"))
-TAKEJUDGE_FRAMES_PER_CLIP = int(os.environ.get("TAKEJUDGE_FRAMES_PER_CLIP", "2"))
+# TakeJudge (human-like multi-take chooser)
+TAKE_JUDGE_ENABLED = os.environ.get("TAKE_JUDGE_ENABLED", "0") == "1"
+TAKE_JUDGE_MODEL = os.environ.get("TAKE_JUDGE_MODEL", "gpt-4o-mini")
+TAKE_JUDGE_MAX_GROUPS = int(os.environ.get("TAKE_JUDGE_MAX_GROUPS", "6"))
+TAKE_JUDGE_MAX_TAKES = int(os.environ.get("TAKE_JUDGE_MAX_TAKES", "3"))
+TAKE_JUDGE_FRAMES = int(os.environ.get("TAKE_JUDGE_FRAMES", "1"))
 
 # S3
 S3_BUCKET = os.environ.get("S3_BUCKET")
 S3_PREFIX = os.environ.get("S3_PREFIX", "editdna/outputs")
 
-# Generic head/tail trims applied on each clip when rendering
+# Generic head/tail trims per clip at render time
 HEAD_TRIM_SEC = float(os.environ.get("HEAD_TRIM_SEC", "0.0"))
 TAIL_TRIM_SEC = float(os.environ.get("TAIL_TRIM_SEC", "0.0"))
 
@@ -226,14 +226,14 @@ def get_whisper_model() -> WhisperModel:
 
 def run_asr(input_local: str) -> List[Dict[str, Any]]:
     """
-    Runs faster-whisper with word-level timestamps.
+    Run faster-whisper with word timestamps.
     Returns segments with: start, end, text, words[{start,end,word}]
     """
     if not ASR_ENABLED:
         raise RuntimeError("ASR_ENABLED=0 but run_asr was called")
 
     model = get_whisper_model()
-    logger.info(f"Running ASR on {input_local}")
+    logger.info(f"Running ASR over {input_local}")
     segments_iter, info = model.transcribe(
         input_local,
         beam_size=5,
@@ -279,9 +279,9 @@ def sentence_boundary_micro_cuts(
     asr_segments: List[Dict[str, Any]]
 ) -> List[Dict[str, Any]]:
     """
-    Converts Whisper segments into micro-sentences:
-    - Split by punctuation (. ? !) or duration > MICRO_SENTENCE_MAX_SECONDS
-    - Keeps precise timestamps (start/end of first/last word)
+    Convert Whisper segments into micro-sentences:
+    - Split on punctuation (. ? !) or duration > MICRO_SENTENCE_MAX_SECONDS
+    - Keep accurate word-based timestamps for start/end
     Returns "clips" with IDs like ASR0000_c0.
     """
     clips: List[Dict[str, Any]] = []
@@ -356,7 +356,7 @@ def sentence_boundary_micro_cuts(
 
 
 # =====================
-# BASIC HEURISTIC
+# HEURISTIC TAGGING
 # =====================
 
 FILLER_PATTERNS = [
@@ -503,22 +503,22 @@ def tag_clips_heuristic(clips: List[Dict[str, Any]]) -> None:
 
         reason = ""
         if not keep:
-            reason = "Marcado como filler / meta (redo, wait, duda, etc.)."
+            reason = "Marked as filler / meta (redo, wait, etc.)."
         else:
             if slot == "HOOK":
-                reason = "Frase que llama la atención o hace una pregunta."
+                reason = "Attention-grabbing phrase or question."
             elif slot == "PROBLEM":
-                reason = "Describe un problema o situación dolorosa."
+                reason = "Describes a problem or painful situation."
             elif slot == "BENEFITS":
-                reason = "Enfatiza resultados o cambios positivos para la usuaria."
+                reason = "Highlights positive outcomes for the user."
             elif slot == "FEATURES":
-                reason = "Describe características específicas del producto."
+                reason = "Describes specific product features."
             elif slot == "PROOF":
-                reason = "Actúa como testimonio u opinión personal."
+                reason = "Acts as testimonial or personal opinion."
             elif slot == "CTA":
-                reason = "Llama directamente a tomar acción (click / compra)."
+                reason = "Direct call to action (click / buy)."
             else:
-                reason = "Conecta la historia o contexto del mensaje."
+                reason = "Connects story or context."
 
         c["slot"] = slot
         c["semantic_score"] = sem
@@ -539,7 +539,7 @@ def llm_classify_clips(clips: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
 
     api_key = os.environ.get("OPENAI_API_KEY")
     if not api_key:
-        logger.warning("OPENAI_API_KEY not set, skipping LLM.")
+        logger.warning("OPENAI_API_KEY is not set, skipping LLM.")
         return None
 
     client = OpenAI(api_key=api_key)
@@ -641,10 +641,11 @@ def enrich_clips_semantic(clips: List[Dict[str, Any]]) -> bool:
     """
     1) Apply local heuristic (filler, slots, semantic_score).
     2) Optionally mix with LLM, but:
-       - NEVER revive something heuristic already marked keep=False.
-       - DO NOT allow the LLM to kill strong funnel clips (HOOK/PROBLEM/BENEFITS/FEATURES/PROOF/CTA).
+       - NEVER revive clips that heuristic already marked keep=False.
+       - Do NOT let LLM kill strong funnel clips (HOOK / PROBLEM / BENEFITS /
+         FEATURES / PROOF / CTA) that are semantically strong and have >= 3 words.
     """
-    # Step 1: local heuristic
+    # Step 1: heuristic
     tag_clips_heuristic(clips)
 
     if not EDITDNA_USE_LLM:
@@ -661,6 +662,7 @@ def enrich_clips_semantic(clips: List[Dict[str, Any]]) -> bool:
 
         info = llm_result[cid]
 
+        # Heuristic decision before LLM
         original_keep = c["meta"].get("keep", True)
 
         slot_from_llm = info.get("slot", c.get("slot", "STORY"))
@@ -684,9 +686,11 @@ def enrich_clips_semantic(clips: List[Dict[str, Any]]) -> bool:
         strong_semantic = sem_from_llm >= COMPOSER_MIN_SEMANTIC
         core_slot = slot_upper in {"HOOK", "PROBLEM", "BENEFITS", "FEATURES", "PROOF", "CTA"}
 
+        # Rule 1: if heuristic already said keep=False -> still False
         if not original_keep:
             final_keep = False
         else:
+            # Rule 2: strong funnel clip cannot be killed by LLM
             if core_slot and strong_semantic and word_count >= 3:
                 final_keep = True
             else:
@@ -753,7 +757,7 @@ def run_visual_pass(
     input_local: str, session_dir: str, clips: List[Dict[str, Any]]
 ) -> bool:
     if not VISION_ENABLED:
-        logger.info("VISION_ENABLED=0, skipping visual pass.")
+        logger.info("VISION_ENABLED=0, skipping vision pass.")
         return False
 
     model, preprocess, device = load_clip_model()
@@ -821,10 +825,6 @@ def run_visual_pass(
 
 
 def reject_visual_bad_takes(clips: List[Dict[str, Any]], session_dir: str, input_local: str):
-    """
-    Legacy simple image-based GOOD/BAD check (per frame).
-    Currently not used by default; TakeJudgeAI is the newer approach.
-    """
     from openai import OpenAI
     import base64
 
@@ -874,157 +874,250 @@ def reject_visual_bad_takes(clips: List[Dict[str, Any]], session_dir: str, input
 
 
 # =====================
-# TakeJudgeAI (V3 acting / human performance)
+# TAKE JUDGE (HUMAN-LIKE MULTI-TAKE CHOOSER)
 # =====================
 
-def take_judge_ai(
+def normalize_text(t: str) -> str:
+    return " ".join(t.lower().strip().split())
+
+
+def text_overlap_ratio(t1: str, t2: str) -> float:
+    """
+    Jaccard word overlap between two texts.
+    0.0 = no overlap, 1.0 = identical bag of words.
+    """
+    a = normalize_text(t1)
+    b = normalize_text(t2)
+    if not a or not b:
+        return 0.0
+    set1 = set(a.split())
+    set2 = set(b.split())
+    if not set1 or not set2:
+        return 0.0
+    inter = len(set1 & set2)
+    union = len(set1 | set2)
+    if union <= 0:
+        return 0.0
+    return inter / union
+
+
+def find_sibling_groups(
+    clips: List[Dict[str, Any]],
+    window_sec: float = 18.0,
+    min_overlap: float = 0.55,
+) -> List[List[Dict[str, Any]]]:
+    """
+    Find groups of "sibling" takes:
+    - same slot
+    - close in time
+    - high text overlap
+    These are candidates where only ONE take should remain.
+    """
+    usable = [
+        c for c in clips
+        if c["meta"].get("keep", True)
+        and safe_float(c.get("semantic_score", 0.0)) >= COMPOSER_MIN_SEMANTIC
+    ]
+    usable = sorted(usable, key=lambda c: safe_float(c.get("start", 0.0)))
+
+    groups: List[List[Dict[str, Any]]] = []
+    used_ids = set()
+
+    for i, c1 in enumerate(usable):
+        if c1["id"] in used_ids:
+            continue
+
+        group = [c1]
+        t1 = safe_float(c1.get("start", 0.0))
+        slot1 = c1.get("slot", "STORY")
+        text1 = normalize_text(c1.get("text", ""))
+
+        for j in range(i + 1, len(usable)):
+            c2 = usable[j]
+            if c2["id"] in used_ids:
+                continue
+            if c2.get("slot", "STORY") != slot1:
+                continue
+
+            t2 = safe_float(c2.get("start", 0.0))
+            if t2 - t1 > window_sec:
+                break
+
+            text2 = normalize_text(c2.get("text", ""))
+            overlap = text_overlap_ratio(text1, text2)
+            if overlap >= min_overlap:
+                group.append(c2)
+
+        if len(group) >= 2:
+            for g in group:
+                used_ids.add(g["id"])
+            groups.append(group)
+
+    return groups
+
+
+def run_take_judge(
     clips: List[Dict[str, Any]],
     session_dir: str,
     input_local: str,
 ) -> bool:
     """
-    V3 step 1: Acting-quality evaluation per clip using GPT vision.
-    - Samples 1..N frames per clip.
-    - Sends text + frames to the model.
-    - Expects JSON: { "verdict": "GOOD"/"BAD", "score": 0-1 }.
-    - Marks BAD (score < TAKEJUDGE_MIN_SCORE) as keep=False.
+    TakeJudgeAI:
+    - For each group of similar takes (same slot, similar text, close in time),
+      ask a vision+text LLM to choose the best acting take (like a human editor).
+    - Only ONE winner per group keeps meta.keep=True.
+    - Everything is guarded by TAKE_JUDGE_ENABLED and rate-limited via
+      TAKE_JUDGE_MAX_GROUPS and TAKE_JUDGE_MAX_TAKES.
     """
-    if not TAKEJUDGE_ENABLED:
-        logger.info("TakeJudgeAI: disabled (TAKEJUDGE_ENABLED=0)")
-        return False
-
     from openai import OpenAI
     import base64
 
+    if not TAKE_JUDGE_ENABLED:
+        return False
+
     api_key = os.environ.get("OPENAI_API_KEY")
     if not api_key:
-        logger.warning("TakeJudgeAI: OPENAI_API_KEY not set, skipping.")
+        logger.warning("TAKE_JUDGE_ENABLED=1 but OPENAI_API_KEY is missing.")
         return False
 
     client = OpenAI(api_key=api_key)
 
-    candidates = [
-        c for c in clips
-        if c["meta"].get("keep", True)
-        and (c.get("text") or "").strip()
-        and len((c.get("text") or "").split()) >= 3
-    ]
-
-    if not candidates:
-        logger.info("TakeJudgeAI: no candidates to evaluate.")
+    groups = find_sibling_groups(clips)
+    if not groups:
         return False
 
-    candidates = candidates[:TAKEJUDGE_MAX_CLIPS]
-    logger.info(f"TakeJudgeAI: evaluating {len(candidates)} clips (max={TAKEJUDGE_MAX_CLIPS})")
+    groups = groups[:TAKE_JUDGE_MAX_GROUPS]
+    groups = [g[:TAKE_JUDGE_MAX_TAKES] for g in groups]
 
-    def sample_timestamps_for_clip(c: Dict[str, Any]) -> List[float]:
-        start = safe_float(c.get("start", 0.0))
-        end = safe_float(c.get("end", start))
-        if end <= start:
-            return []
-        dur = end - start
-        n = max(1, TAKEJUDGE_FRAMES_PER_CLIP)
-        if n == 1:
-            return [start + dur / 2.0]
-        step = dur / (n + 1)
-        return [start + step * (i + 1) for i in range(n)]
-
-    any_used = False
-
-    for c in candidates:
-        timestamps = sample_timestamps_for_clip(c)
-        if not timestamps:
-            continue
-
-        images_content = []
-        for idx, ts in enumerate(timestamps):
-            frame_path = os.path.join(session_dir, f"takejudge_{c['id']}_{idx}.jpg")
-            if not grab_frame_at_timestamp(input_local, ts, frame_path):
+    for group in groups:
+        payload = []
+        for c in group:
+            # Skip clips already killed by other logic
+            if not c["meta"].get("keep", True):
                 continue
+
+            mid = (safe_float(c["start"]) + safe_float(c["end"])) / 2.0
+            frame_path = os.path.join(session_dir, f"takejudge_{c['id']}.jpg")
+
+            if not grab_frame_at_timestamp(input_local, mid, frame_path):
+                continue
+
             try:
                 with open(frame_path, "rb") as f:
                     img_b64 = base64.b64encode(f.read()).decode("utf-8")
-                images_content.append(
-                    {
-                        "type": "image_url",
-                        "image_url": {
-                            "url": f"data:image/jpeg;base64,{img_b64}"
-                        },
-                    }
-                )
-            except Exception as e:
-                logger.debug(f"TakeJudgeAI: error reading frame {frame_path}: {e}")
+            except Exception:
                 continue
 
-        if not images_content:
+            payload.append({
+                "id": c["id"],
+                "text": (c.get("text") or "").strip(),
+                "image_b64": img_b64,
+            })
+
+        if not payload:
             continue
 
-        text_clip = (c.get("text") or "").strip()
-
-        prompt = (
-            "You are an expert TikTok ad editor and you will evaluate the ACTING QUALITY "
-            "of this clip, not the script itself.\n\n"
-            "You must return ONLY a JSON object with this exact structure:\n\n"
-            "{\n"
-            '  \"verdict\": \"GOOD\" or \"BAD\",\n'
-            '  \"score\": number between 0.0 and 1.0 (1.0 = excellent acting, 0.0 = very poor acting)\n'
-            "}\n\n"
-            "Criteria:\n"
-            "- GOOD: the talent looks confident, connected, intentional, eye contact is coherent, body language is fluid.\n"
-            "- BAD: they look unsure, thinking, reading, flat-faced, tense, distracted or disconnected from the message.\n\n"
-            f"Clip text:\n\"{text_clip}\"\n"
+        system_msg = (
+            "You are a senior TikTok ad editor. "
+            "You receive multiple takes of the SAME line. "
+            "Pick the best acting take: natural, confident, persuasive. "
+            "Ignore small wording differences if the performance is better."
         )
+
+        user_json = {
+            "task": "choose_best_take",
+            "takes": [
+                {
+                    "id": p["id"],
+                    "text": p["text"],
+                }
+                for p in payload
+            ],
+        }
 
         messages = [
             {
                 "role": "system",
                 "content": [
-                    {"type": "text", "text": "Return ONLY valid JSON, no comments."}
+                    {"type": "text", "text": system_msg}
                 ],
             },
             {
                 "role": "user",
                 "content": [
-                    {"type": "text", "text": prompt},
-                    *images_content,
+                    {
+                        "type": "text",
+                        "text": (
+                            "Return ONLY a JSON like:\n"
+                            "{ \"winner_id\": \"...\", "
+                            "\"scores\": [{\"id\":\"...\",\"score\":0.0}] }\n\n"
+                            f"Takes:\n{json.dumps(user_json, ensure_ascii=False)}"
+                        ),
+                    }
+                ]
+                + [
+                    {
+                        "type": "image_url",
+                        "image_url": {
+                            "url": f"data:image/jpeg;base64,{p['image_b64']}"
+                        },
+                    }
+                    for p in payload
                 ],
             },
         ]
 
         try:
             resp = client.chat.completions.create(
-                model=TAKEJUDGE_MODEL,
+                model=TAKE_JUDGE_MODEL,
                 messages=messages,
                 temperature=0.1,
+                max_tokens=150,
             )
-            raw = resp.choices[0].message.content or ""
-            data = json.loads(raw)
-
-            verdict = str(data.get("verdict", "GOOD")).strip().upper()
-            score = safe_float(data.get("score", 0.0))
-
-            any_used = True
-
-            c.setdefault("meta", {})
-            c["meta"]["take_judge_verdict"] = verdict
-            c["meta"]["take_judge_score"] = score
-
-            if verdict == "BAD" and score < TAKEJUDGE_MIN_SCORE:
-                c["meta"]["keep"] = False
-                reason_extra = f" [TakeJudgeAI: BAD acting (score={score:.2f})]"
-                c["llm_reason"] = (c.get("llm_reason") or "") + reason_extra
-
         except Exception as e:
-            logger.exception(f"TakeJudgeAI: error calling model: {e}")
+            logger.warning(f"TakeJudgeAI error for group: {e}")
             continue
 
-    return any_used
+        try:
+            content = resp.choices[0].message.content
+            data = json.loads(content)
+        except Exception as e:
+            logger.warning(f"TakeJudgeAI JSON parse error: {e}")
+            continue
 
+        winner_id = data.get("winner_id")
+        scores_map = {
+            s["id"]: safe_float(s.get("score", 0.0))
+            for s in data.get("scores", [])
+            if "id" in s
+        }
+
+        # If winner_id is missing, fallback: keep all, do nothing
+        if not winner_id:
+            continue
+
+        for c in group:
+            cid = c["id"]
+            tj_score = scores_map.get(cid, 0.0)
+            c["meta"]["take_judge_score"] = tj_score
+            c["meta"]["take_judge_verdict"] = "WINNER" if cid == winner_id else "LOSER"
+
+        # Only kill losers that were previously kept
+        for c in group:
+            cid = c["id"]
+            if cid != winner_id and c["meta"].get("keep", True):
+                c["meta"]["keep"] = False
+
+    return True
+
+
+# =====================
+# SCORE THRESHOLDS + DEDUPE
+# =====================
 
 def apply_min_score_rules(clips: List[Dict[str, Any]]) -> None:
     """
-    Apply a minimum threshold using mainly semantic_score.
-    If semantic text is strong, it should not be dropped only because visual lowers combined score.
+    Apply minimum thresholds, using semantic_score as main baseline.
     """
     for c in clips:
         slot = c.get("slot", "STORY")
@@ -1041,10 +1134,6 @@ def apply_min_score_rules(clips: List[Dict[str, Any]]) -> None:
 
         if effective_score < threshold:
             c["meta"]["keep"] = False
-
-
-def normalize_text(t: str) -> str:
-    return " ".join(t.lower().strip().split())
 
 
 def dedupe_clips(clips: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
@@ -1088,36 +1177,16 @@ def build_slots_dict(clips: List[Dict[str, Any]]) -> Dict[str, List[Dict[str, An
     return slots
 
 
-def text_overlap_ratio(t1: str, t2: str) -> float:
-    """
-    Measures similarity between two texts using Jaccard over word sets.
-    0.0 = no overlap, 1.0 = identical.
-    """
-    a = normalize_text(t1)
-    b = normalize_text(t2)
-    if not a or not b:
-        return 0.0
-    set1 = set(a.split())
-    set2 = set(b.split())
-    if not set1 or not set2:
-        return 0.0
-    inter = len(set1 & set2)
-    union = len(set1 | set2)
-    if union <= 0:
-        return 0.0
-    return inter / union
-
-
 def suppress_near_duplicates_by_slot(
     clips: List[Dict[str, Any]],
     window_sec: float = 15.0,
     min_overlap: float = 0.35,
 ) -> None:
     """
-    For usable clips (sorted by start), within the same slot:
-    - If two clips are close in time (window_sec)
-    - And text overlap is high (min_overlap)
-    Keep the strongest (semantic_score / length) and mark the other keep=False.
+    For a list of USABLE clips (sorted by start), within the same slot:
+    - if two clips are close in time (window_sec)
+    - and have high text overlap (min_overlap)
+    Keep the strongest (semantic_score / length), mark the other keep=False.
     """
     n = len(clips)
     for i in range(n):
@@ -1162,10 +1231,10 @@ def suppress_cross_slot_redundant_clips(
     min_overlap: float = 0.35,
 ) -> None:
     """
-    NEW FIX:
-    - If a clip is a shorter/partial version of a later, more complete phrase,
-      and that later one has higher semantic score, discard the short one.
-    - Window extended to 18s to catch late retakes.
+    Cross-slot redundancy:
+    - If a short version of a phrase appears, and later a more complete version,
+      within window_sec, and text overlap is high,
+      keep only the stronger/longer version.
     """
     n = len(clips)
     for i in range(n):
@@ -1210,9 +1279,9 @@ def group_contiguous_blocks_by_slot(
     max_gap_sec: float = 1.0,
 ) -> List[List[Dict[str, Any]]]:
     """
-    Groups contiguous clips of the same slot into "blocks" (continuous speech):
-    - Only clips with meta.keep=True
-    - Ordered by time
+    Group contiguous clips of the same slot into "blocks" (continuous speech):
+    - Only meta.keep=True
+    - Clips sorted by time
     - If gap <= max_gap_sec -> same block
     """
     ordered = sorted(
@@ -1251,7 +1320,7 @@ def group_contiguous_blocks_by_slot(
 
 def pick_best_block(blocks: List[List[Dict[str, Any]]]) -> Optional[List[Dict[str, Any]]]:
     """
-    Picks the best block by average score (semantic+visual already combined).
+    Pick the best block by average score (semantic+vision already mixed).
     """
     best_block: Optional[List[Dict[str, Any]]] = None
     best_score = -1.0
@@ -1273,7 +1342,7 @@ def pick_best_block(blocks: List[List[Dict[str, Any]]]) -> Optional[List[Dict[st
 
 
 def build_composer(clips: List[Dict[str, Any]]) -> Dict[str, Any]:
-    # 1) Filter globally usable by semantic score
+    # 1) Filter by semantic
     usable = [
         c
         for c in clips
@@ -1281,7 +1350,7 @@ def build_composer(clips: List[Dict[str, Any]]) -> Dict[str, Any]:
         and safe_float(c.get("semantic_score", 0.0)) >= COMPOSER_MIN_SEMANTIC
     ]
 
-    # 2) Combine vision with semantic for overall score
+    # 2) Mix vision (if any) with semantic for combined score
     for c in usable:
         sem = safe_float(c.get("semantic_score", 0.0))
         vis = safe_float(c.get("visual_score", 0.0))
@@ -1292,25 +1361,26 @@ def build_composer(clips: List[Dict[str, Any]]) -> Dict[str, Any]:
         c["score"] = combined
         c["meta"]["score"] = combined
 
-    # 3) Apply min thresholds by slot (HOOK/CTA stricter)
+    # 3) Apply per-slot thresholds
     apply_min_score_rules(usable)
 
     usable = [c for c in usable if c["meta"].get("keep", True)]
     usable.sort(key=lambda c: safe_float(c.get("start", 0.0)))
 
-    # 4) Avoid near-duplicates within same slot
+    # 4) Dedupe within same slot
     suppress_near_duplicates_by_slot(usable)
     usable = [c for c in usable if c["meta"].get("keep", True)]
 
-    # 4b) Avoid cross-slot duplicates (e.g. short vs extended version)
+    # 4b) Cross-slot dupes (short vs extended)
     suppress_cross_slot_redundant_clips(usable)
     usable = [c for c in usable if c["meta"].get("keep", True)]
 
-    # 5) Blocks by slot (HOOK, PROBLEM, CTA)
+    # 5) Slot blocks (HOOK, PROBLEM, CTA)
     hook_blocks = group_contiguous_blocks_by_slot(usable, "HOOK", max_gap_sec=1.0)
     best_hook_block = pick_best_block(hook_blocks) if hook_blocks else None
     hook_block_ids = [c["id"] for c in best_hook_block] if best_hook_block else []
 
+    # Only treat as hook block if it's near the start (e.g. first 10s)
     if hook_block_ids:
         first_start = safe_float(best_hook_block[0].get("start", 0.0))
         if first_start > 10.0:
@@ -1324,6 +1394,7 @@ def build_composer(clips: List[Dict[str, Any]]) -> Dict[str, Any]:
     best_cta_block = pick_best_block(cta_blocks) if cta_blocks else None
     cta_block_ids = [c["id"] for c in best_cta_block] if best_cta_block else []
 
+    # Fallback CTA if no block
     ctas = [c for c in usable if c.get("slot") == "CTA"]
     single_best_cta = None
     if ctas:
@@ -1338,7 +1409,7 @@ def build_composer(clips: List[Dict[str, Any]]) -> Dict[str, Any]:
     cta_final_ids = cta_block_ids[:]
     cta_final_ids_set = set(cta_final_ids)
 
-    # 6) Build timeline respecting final CTA block at the end
+    # 6) Build timeline, keeping CTA block last
     timeline: List[Dict[str, Any]] = []
     used_ids: List[str] = []
 
@@ -1577,7 +1648,7 @@ def run_pipeline(
 
     if not effective_files:
         raise ValueError(
-            "run_pipeline: requires 'files' or 'file_urls' as a list with at least 1 URL"
+            "run_pipeline: 'files' or 'file_urls' must be a list with at least 1 URL"
         )
 
     session_dir = ensure_session_dir(session_id)
@@ -1588,7 +1659,7 @@ def run_pipeline(
     duration = probe_duration(input_local)
 
     # =====================
-    # PHASE 1: ANALYSIS (NO CUTS YET)
+    # PHASE 1: ANALYSIS
     # =====================
     asr_segments = run_asr(input_local)
     clips = sentence_boundary_micro_cuts(asr_segments)
@@ -1596,13 +1667,19 @@ def run_pipeline(
     clips = dedupe_clips(clips)
     vision_used = run_visual_pass(input_local, session_dir, clips)
 
-    # Acting / human performance layer (V3 step 1, optional)
-    take_judge_used = take_judge_ai(clips, session_dir, input_local)
+    # Human-like multi-take chooser (feature-flagged)
+    take_judge_used = False
+    if TAKE_JUDGE_ENABLED:
+        take_judge_used = run_take_judge(
+            clips=clips,
+            session_dir=session_dir,
+            input_local=input_local,
+        )
 
     slots = build_slots_dict(clips)
 
     # =====================
-    # PHASE 2: COMPOSITION + RENDER
+    # PHASE 2: COMPOSER + RENDER
     # =====================
     composer = build_composer(clips)
     used_clip_ids = composer.get("used_clip_ids", [])
