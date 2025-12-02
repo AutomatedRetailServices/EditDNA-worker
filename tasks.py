@@ -76,3 +76,4 @@ def job_render(data: Dict[str, Any]) -> Dict[str, Any]:
         f"[tasks.job_render] pipeline OK, mode={mode}, output_video_url={result.get('output_video_url')}"
     )
     return result
+
