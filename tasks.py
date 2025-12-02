@@ -60,7 +60,9 @@ def job_render(data: Dict[str, Any]) -> Dict[str, Any]:
     normalized = _normalize_files_payload(data)
     session_id = normalized["session_id"]
     files = normalized["files"]
-    mode = normalized["mode"]
+
+    # 👇 Nuevo: leemos mode del payload (default "human")
+    mode = (data.get("mode") or data.get("render_mode") or "human")
 
     logger.info(
         f"[tasks.job_render] Normalizado → session_id={session_id}, files={files}, mode={mode}"
@@ -69,10 +71,10 @@ def job_render(data: Dict[str, Any]) -> Dict[str, Any]:
     result = run_pipeline(
         session_id=session_id,
         files=files,
-        mode=mode,
+        mode=mode,  # 👈 muy importante
     )
 
     logger.info(
-        f"[tasks.job_render] pipeline OK, mode={mode}, output_video_url={result.get('output_video_url')}"
+        f"[tasks.job_render] pipeline OK, output_video_url={result.get('output_video_url')}"
     )
     return result
