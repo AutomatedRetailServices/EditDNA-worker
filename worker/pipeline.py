@@ -449,7 +449,7 @@ def classify_slot(text: str) -> str:
             "confident",
         ]
     ):
-        return "BENEFITS"
+            return "BENEFITS"
 
     if any(
         p in t
@@ -901,6 +901,27 @@ def text_overlap_ratio(t1: str, t2: str) -> float:
     return inter / union
 
 
+def text_overlap_shorter(t1: str, t2: str) -> float:
+    """
+    Overlap relativo al texto más corto:
+    intersección / tamaño del conjunto de palabras más corto.
+    1.0 = todo lo que dice el clip corto está contenido en el largo.
+    """
+    a = normalize_text(t1)
+    b = normalize_text(t2)
+    if not a or not b:
+        return 0.0
+    set1 = set(a.split())
+    set2 = set(b.split())
+    if not set1 or not set2:
+        return 0.0
+    inter = len(set1 & set2)
+    denom = min(len(set1), len(set2))
+    if denom <= 0:
+        return 0.0
+    return inter / denom
+
+
 def find_sibling_groups(
     clips: List[Dict[str, Any]],
     window_sec: float = 18.0,
@@ -1185,8 +1206,12 @@ def suppress_near_duplicates_by_slot(
     """
     For a list of USABLE clips (sorted by start), within the same slot:
     - if two clips are close in time (window_sec)
-    - and have high text overlap (min_overlap)
-    Keep the strongest (semantic_score / length), mark the other keep=False.
+    - and are either:
+        * high Jaccard overlap (text_overlap_ratio >= min_overlap), OR
+        * the shorter text is largely contained in the longer one
+          (text_overlap_shorter >= 0.65)
+    Then consider them versions of the same line:
+    - keep the strongest (semantic_score / length), mark the other keep=False.
     """
     n = len(clips)
     for i in range(n):
@@ -1209,15 +1234,24 @@ def suppress_near_duplicates_by_slot(
             if t2 - t1 > window_sec:
                 break
 
-            ratio = text_overlap_ratio(c1.get("text", ""), c2.get("text", ""))
-            if ratio < min_overlap:
+            text1 = c1.get("text", "") or ""
+            text2 = c2.get("text", "") or ""
+
+            # Jaccard clásico
+            ratio = text_overlap_ratio(text1, text2)
+            # Overlap relativo al texto más corto
+            shorter_overlap = text_overlap_shorter(text1, text2)
+
+            # Si NO son parecidos ni por Jaccard ni por overlap-corto → saltar
+            if ratio < min_overlap and shorter_overlap < 0.65:
                 continue
 
             sem1 = safe_float(c1.get("semantic_score", 0.0))
             sem2 = safe_float(c2.get("semantic_score", 0.0))
-            len1 = len((c1.get("text") or "").split())
-            len2 = len((c2.get("text") or "").split())
+            len1 = len(text1.split())
+            len2 = len(text2.split())
 
+            # Elegir ganador: más semántica, y si empatan, el más largo
             if sem2 > sem1 or (sem2 == sem1 and len2 >= len1):
                 c1["meta"]["keep"] = False
                 break
