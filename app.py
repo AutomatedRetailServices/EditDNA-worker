@@ -15,6 +15,7 @@ JOBS_Q = "editdna:jobs"
 JOB_KEY = lambda jid: f"editdna:job:{jid}"
 JOB_LOG = lambda jid: f"editdna:job:{jid}:logs"
 
+
 def push_log(job_id, msg):
     line = f"{int(time.time())}|{msg}"
     with r.pipeline() as p:
@@ -23,12 +24,15 @@ def push_log(job_id, msg):
         p.execute()
     log.info(f"[{job_id}] {msg}")
 
+
 def update_job(job_id, **kv):
     kv["updated_at"] = int(time.time())
     r.hset(JOB_KEY(job_id), mapping=kv)
 
+
 def new_job_id():
     return str(int(time.time() * 1000))
+
 
 class Handler(BaseHTTPRequestHandler):
     def _json(self, code, obj):
@@ -41,15 +45,23 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(data)
 
-    def do_OPTIONS(self): self._json(200, {"ok": True})
+    def do_OPTIONS(self):
+        self._json(200, {"ok": True})
 
     def do_POST(self):
         if self.path == "/render":
             length = int(self.headers.get("Content-Length", "0"))
             body = json.loads(self.rfile.read(length) or b"{}")
+
             files = body.get("files") or []
             if not files:
                 return self._json(400, {"error": "files[] required"})
+
+            # --- NEW: normalize mode for funnel composer ---
+            mode = (body.get("mode") or "human").lower()
+            if mode not in ("human", "clean", "blooper"):
+                mode = "human"
+
             job_id = new_job_id()
             job = {
                 "id": job_id,
@@ -59,14 +71,16 @@ class Handler(BaseHTTPRequestHandler):
                 "max_duration": int(body.get("max_duration", 60)),
                 "audio": body.get("audio", "original"),
                 "output_prefix": body.get("output_prefix", "editdna/outputs"),
+                "mode": mode,  # <<< aquí guardamos el modo del funnel
                 "status": "queued",
                 "created_at": int(time.time()),
                 "updated_at": int(time.time()),
             }
             r.hset(JOB_KEY(job_id), mapping=job)
             r.lpush(JOBS_Q, job_id)
-            log.info(f"[{job_id}] queued")
-            return self._json(202, {"job_id": job_id, "status": "queued"})
+            log.info(f"[{job_id}] queued (mode={mode})")
+            return self._json(202, {"job_id": job_id, "status": "queued", "mode": mode})
+
         self._json(404, {"error": "not found"})
 
     def do_GET(self):
@@ -77,6 +91,7 @@ class Handler(BaseHTTPRequestHandler):
             except Exception as e:
                 return self._json(500, {"ok": False, "redis_error": str(e)})
             return self._json(200, {"ok": True, "redis": pong})
+
         if url.path.startswith("/jobs/"):
             parts = url.path.split("/")
             if len(parts) >= 3:
@@ -88,13 +103,16 @@ class Handler(BaseHTTPRequestHandler):
                 if not job:
                     return self._json(404, {"error": "job not found"})
                 return self._json(200, job)
+
         self._json(404, {"error": "not found"})
+
 
 def run_web():
     port = int(os.getenv("PORT", "8000"))
     srv = HTTPServer(("0.0.0.0", port), Handler)
     log.info(f"web listening on :{port}")
     srv.serve_forever()
+
 
 def worker_loop():
     log.info("worker starting")
@@ -104,9 +122,13 @@ def worker_loop():
             if not job_id:
                 time.sleep(1)
                 continue
+
             update_job(job_id, status="processing")
             push_log(job_id, "picked up by worker")
+
             try:
+                # process_job debe leer el hash del job (incluye "mode")
+                # y pasar ese "mode" al run_pipeline.
                 process_job(job_id, r, push_log, update_job)
                 update_job(job_id, status="done")
                 push_log(job_id, "completed successfully")
@@ -117,6 +139,7 @@ def worker_loop():
         except Exception as e:
             log.exception(f"worker_loop error: {e}")
             time.sleep(2)
+
 
 if __name__ == "__main__":
     import sys
