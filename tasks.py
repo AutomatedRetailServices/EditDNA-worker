@@ -13,7 +13,8 @@ def _normalize_files_payload(data: Dict[str, Any]) -> Dict[str, Any]:
     tengamos:
         session_id: str
         files: List[str] (urls)
-        mode: str (opcional) → "human" / "clean" / "blooper"
+        mode: str  ("human" | "clean")
+
     Aceptamos también file_urls.
     """
     session_id = data.get("session_id") or data.get("session") or "session-unknown"
@@ -32,18 +33,17 @@ def _normalize_files_payload(data: Dict[str, Any]) -> Dict[str, Any]:
             "job_render: se requiere 'files' o 'file_urls' como lista de URLs."
         )
 
-    # Nuevo: modo de funnel
-    # - "human"  → comportamiento actual (incluye storytelling/bloopers buenos)
-    # - "clean"  → sólo HOOK / PROBLEM / BENEFITS / FEATURES / PROOF / CTA (sin STORY)
-    # - "blooper"→ prioriza STORY + hook + cta
-    raw_mode = (data.get("mode") or data.get("funnel_mode") or "human").strip().lower()
-    if raw_mode not in {"human", "clean", "blooper"}:
-        raw_mode = "human"
+    # 3) Modo de render: "human" (por defecto) o "clean"
+    mode_raw = str(data.get("mode") or "human").lower().strip()
+    if mode_raw not in ("human", "clean"):
+        mode = "human"
+    else:
+        mode = mode_raw
 
     return {
         "session_id": session_id,
         "files": files,
-        "mode": raw_mode,
+        "mode": mode,
     }
 
 
@@ -76,4 +76,3 @@ def job_render(data: Dict[str, Any]) -> Dict[str, Any]:
         f"[tasks.job_render] pipeline OK, mode={mode}, output_video_url={result.get('output_video_url')}"
     )
     return result
-
