@@ -382,7 +382,7 @@ def looks_like_filler(text: str) -> bool:
         if pat in t:
             return True
     if len(t.split()) <= 1 and t in {"and", "uh", "um", "hmm", "like"}:
-        return True
+            return True
     return False
 
 
@@ -1176,6 +1176,69 @@ def dedupe_clips(clips: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     return out
 
 
+def preprocess_clips_for_tails(
+    clips: List[Dict[str, Any]],
+    max_gap_sec: float = 0.25,
+    max_tail_duration_sec: float = 1.0,
+) -> None:
+    """
+    Extiende clips buenos con colitas inmediatas de baja calidad (keep=False),
+    por ejemplo:
+      ASR0019_c19: "they do have other colored checkered print"
+      ASR0020_c20: "available as well."
+    Si:
+      - mismo slot
+      - tail viene justo después en el tiempo (gap pequeño)
+      - tail es corto
+      - tail es keep=False
+    Entonces:
+      - se extiende el end del clip bueno hasta el end del tail
+      - el tail se elimina de clips (no aparece como zona prohibida).
+    """
+    clips.sort(key=lambda c: safe_float(c.get("start", 0.0)))
+
+    to_remove_ids = set()
+
+    for i in range(len(clips) - 1):
+        c_main = clips[i]
+        c_tail = clips[i + 1]
+
+        if not c_main["meta"].get("keep", True):
+            continue
+
+        if c_tail["meta"].get("keep", True):
+            continue
+
+        if c_main.get("slot") != c_tail.get("slot"):
+            continue
+
+        start_main = safe_float(c_main.get("start", 0.0))
+        end_main = safe_float(c_main.get("end", start_main))
+
+        start_tail = safe_float(c_tail.get("start", 0.0))
+        end_tail = safe_float(c_tail.get("end", start_tail))
+
+        if end_tail <= start_tail:
+            continue
+
+        gap = start_tail - end_main
+        tail_duration = end_tail - start_tail
+
+        if gap < -0.05 or gap > max_gap_sec:
+            continue
+        if tail_duration > max_tail_duration_sec:
+            continue
+
+        new_end = max(end_main, end_tail)
+        c_main["end"] = new_end
+        c_main["meta"]["tail_extended"] = True
+        c_tail["meta"]["absorbed_by_prev"] = True
+        to_remove_ids.add(c_tail["id"])
+
+    if to_remove_ids:
+        clips[:] = [c for c in clips if c["id"] not in to_remove_ids]
+
+
 # =====================
 # SLOTS + COMPOSER
 # =====================
@@ -1237,12 +1300,9 @@ def suppress_near_duplicates_by_slot(
             text1 = c1.get("text", "") or ""
             text2 = c2.get("text", "") or ""
 
-            # Jaccard clásico
             ratio = text_overlap_ratio(text1, text2)
-            # Overlap relativo al texto más corto
             shorter_overlap = text_overlap_shorter(text1, text2)
 
-            # Si NO son parecidos ni por Jaccard ni por overlap-corto → saltar
             if ratio < min_overlap and shorter_overlap < 0.65:
                 continue
 
@@ -1251,7 +1311,6 @@ def suppress_near_duplicates_by_slot(
             len1 = len(text1.split())
             len2 = len(text2.split())
 
-            # Elegir ganador: más semántica, y si empatan, el más largo
             if sem2 > sem1 or (sem2 == sem1 and len2 >= len1):
                 c1["meta"]["keep"] = False
                 break
@@ -1543,8 +1602,83 @@ def pretty_print_composer(
 
 
 # =====================
-# FFMPEG RENDER
+# FFMPEG RENDER (ZONAS PROHIBIDAS)
 # =====================
+
+def build_forbidden_zones(
+    clips: List[Dict[str, Any]],
+    margin_sec: float = 0.03,
+) -> List[tuple]:
+    """
+    Construye una lista de intervalos [start, end] donde NO se debe usar media,
+    a partir de todos los clips con meta.keep=False.
+
+    margin_sec: pequeño margen para evitar que se cuele un frame/sonido de la cola.
+    """
+    intervals: List[tuple] = []
+
+    for c in clips:
+        if c["meta"].get("keep", True):
+            continue
+
+        s = safe_float(c.get("start", 0.0)) - margin_sec
+        e = safe_float(c.get("end", 0.0)) + margin_sec
+        s = max(0.0, s)
+        if e <= s:
+            continue
+        intervals.append((s, e))
+
+    if not intervals:
+        return []
+
+    intervals.sort(key=lambda x: x[0])
+    merged: List[List[float]] = []
+
+    for s, e in intervals:
+        if not merged or s > merged[-1][1]:
+            merged.append([s, e])
+        else:
+            merged[-1][1] = max(merged[-1][1], e)
+
+    return [(s, e) for s, e in merged]
+
+
+def subtract_forbidden_intervals(
+    start: float,
+    end: float,
+    forbidden: List[tuple],
+) -> List[tuple]:
+    """
+    Dado un intervalo [start, end] de un clip bueno, devuelve una lista de
+    sub-intervalos que NO pisan ninguna zona prohibida.
+    Si todo el clip cae dentro de zonas prohibidas, devuelve [].
+    """
+    if end <= start:
+        return []
+
+    if not forbidden:
+        return [(start, end)]
+
+    segments = [(start, end)]
+
+    for fs, fe in forbidden:
+        new_segments: List[tuple] = []
+        for s, e in segments:
+            if fe <= s or fs >= e:
+                new_segments.append((s, e))
+                continue
+
+            if fs > s:
+                new_segments.append((s, fs))
+            if fe < e:
+                new_segments.append((fe, e))
+
+        segments = new_segments
+        if not segments:
+            break
+
+    return [(s, e) for s, e in segments if e > s]
+
 
 def render_funnel_video(
     input_local: str,
@@ -1560,6 +1694,11 @@ def render_funnel_video(
     has_audio = has_audio_stream(input_local)
     logger.info(f"render_funnel_video: has_audio={has_audio}")
 
+    # 1) Zonas prohibidas basadas en keep=False
+    forbidden_zones = build_forbidden_zones(clips, margin_sec=0.03)
+    if forbidden_zones:
+        logger.info(f"Forbidden zones: {forbidden_zones}")
+
     filter_parts: List[str] = []
     v_labels: List[str] = []
     a_labels: List[str] = []
@@ -1567,6 +1706,7 @@ def render_funnel_video(
     idx = 0
     lookup = {c["id"]: c for c in clips}
 
+    # 2) Cortar cada clip respetando zonas prohibidas
     for cid in used_clip_ids:
         c = lookup.get(cid)
         if not c:
@@ -1575,26 +1715,41 @@ def render_funnel_video(
         raw_start = safe_float(c.get("start", 0.0))
         raw_end = safe_float(c.get("end", 0.0))
 
-        start = max(0.0, raw_start + HEAD_TRIM_SEC)
-        end = max(start, raw_end - TAIL_TRIM_SEC)
+        base_start = max(0.0, raw_start + HEAD_TRIM_SEC)
+        base_end = max(base_start, raw_end - TAIL_TRIM_SEC)
 
-        if end <= start:
+        if base_end <= base_start:
             continue
 
-        v_label = f"v{idx}"
-        filter_parts.append(
-            f"[0:v]trim=start={start:.3f}:end={end:.3f},setpts=PTS-STARTPTS[{v_label}]"
+        allowed_segments = subtract_forbidden_intervals(
+            base_start,
+            base_end,
+            forbidden_zones,
         )
-        v_labels.append(f"[{v_label}]")
 
-        if has_audio:
-            a_label = f"a{idx}"
+        if not allowed_segments:
+            continue
+
+        for seg_start, seg_end in allowed_segments:
+            if seg_end <= seg_start:
+                continue
+
+            v_label = f"v{idx}"
             filter_parts.append(
-                f"[0:a]atrim=start={start:.3f}:end={end:.3f},asetpts=PTS-STARTPTS[{a_label}]"
+                f"[0:v]trim=start={seg_start:.3f}:end={seg_end:.3f},"
+                f"setpts=PTS-STARTPTS[{v_label}]"
             )
-            a_labels.append(f"[{a_label}]")
+            v_labels.append(f"[{v_label}]")
 
-        idx += 1
+            if has_audio:
+                a_label = f"a{idx}"
+                filter_parts.append(
+                    f"[0:a]atrim=start={seg_start:.3f}:end={seg_end:.3f},"
+                    f"asetpts=PTS-STARTPTS[{a_label}]"
+                )
+                a_labels.append(f"[{a_label}]")
+
+            idx += 1
 
     n = len(v_labels)
     if n == 0:
@@ -1643,7 +1798,7 @@ def render_funnel_video(
         out_path,
     ]
 
-    logger.info("Running ffmpeg to render (separate concat for v/a)")
+    logger.info("Running ffmpeg to render (forbidden-aware concat v/a)")
     logger.debug("ffmpeg cmd: %s", " ".join(cmd))
 
     proc = subprocess.run(
@@ -1709,6 +1864,9 @@ def run_pipeline(
             session_dir=session_dir,
             input_local=input_local,
         )
+
+    # Extender colitas de baja calidad (keep=False) y borrar esos tails
+    preprocess_clips_for_tails(clips)
 
     slots = build_slots_dict(clips)
 
