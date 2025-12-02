@@ -1,4 +1,4 @@
-import os
+iimport os
 import json
 import logging
 import subprocess
@@ -375,6 +375,20 @@ FILLER_PATTERNS = [
     "why can't i remember",
 ]
 
+# NEW: tails dependientes tipo "available as well"
+TAIL_DEPENDENT_ENDINGS = [
+    "as well",
+    "too",
+    "either",
+]
+
+TAIL_DEPENDENT_STARTS = [
+    "and",
+    "so",
+    "but",
+    "because",
+]
+
 
 def looks_like_filler(text: str) -> bool:
     t = text.lower().strip()
@@ -383,6 +397,32 @@ def looks_like_filler(text: str) -> bool:
             return True
     if len(t.split()) <= 1 and t in {"and", "uh", "um", "hmm", "like"}:
         return True
+    return False
+
+
+def looks_like_dependent_tail(text: str) -> bool:
+    """
+    Detecta colas cortas que dependen totalmente del contexto previo.
+    Ejemplos: "available as well", "too", "either", "and so...", etc.
+    """
+    t = text.lower().strip()
+    if not t:
+        return False
+
+    words = t.split()
+    # Sólo nos interesan frases muy cortas que no tienen sentido solas
+    if len(words) > 4:
+        return False
+
+    # Termina en sufijos dependientes
+    for suf in TAIL_DEPENDENT_ENDINGS:
+        if t.endswith(suf):
+            return True
+
+    # Empieza con conectores dependientes
+    if words[0] in TAIL_DEPENDENT_STARTS:
+        return True
+
     return False
 
 
@@ -449,7 +489,7 @@ def classify_slot(text: str) -> str:
             "confident",
         ]
     ):
-            return "BENEFITS"
+        return "BENEFITS"
 
     if any(
         p in t
@@ -491,7 +531,12 @@ def tag_clips_heuristic(clips: List[Dict[str, Any]]) -> None:
         text = c.get("text", "")
         t = text.strip()
         slot = classify_slot(t)
-        keep = not looks_like_filler(t)
+
+        is_tail = looks_like_dependent_tail(t)
+        is_filler = looks_like_filler(t)
+
+        # Cola dependiente o filler simple no se quedan
+        keep = not is_filler and not is_tail
 
         if not t:
             sem = 0.0
@@ -501,9 +546,11 @@ def tag_clips_heuristic(clips: List[Dict[str, Any]]) -> None:
         else:
             sem = 0.0
 
-        reason = ""
         if not keep:
-            reason = "Marked as filler / meta (redo, wait, etc.)."
+            if is_tail:
+                reason = "Dependent tail without full context (cola tipo 'available as well')."
+            else:
+                reason = "Marked as filler / meta (redo, wait, etc.)."
         else:
             if slot == "HOOK":
                 reason = "Attention-grabbing phrase or question."
@@ -1200,7 +1247,7 @@ def build_slots_dict(clips: List[Dict[str, Any]]) -> Dict[str, List[Dict[str, An
 
 def suppress_near_duplicates_by_slot(
     clips: List[Dict[str, Any]],
-    window_sec: float = 15.0,
+    window_sec: float = 60.0,
     min_overlap: float = 0.35,
 ) -> None:
     """
