@@ -1326,7 +1326,7 @@ def suppress_cross_slot_redundant_clips(
         t1 = safe_float(c1.get("start", 0.0))
         text1 = normalize_text(c1.get("text", ""))
 
-        for j in range(i + 1, n):
+        for j in range(i + 1, len(clips)):
             c2 = clips[j]
             if not c2["meta"].get("keep", True):
                 continue
@@ -1425,20 +1425,19 @@ def pick_best_block(blocks: List[List[Dict[str, Any]]]) -> Optional[List[Dict[st
 def build_composer(clips: List[Dict[str, Any]], mode: str = "human") -> Dict[str, Any]:
     """
     mode:
-      - "human": funnel normal (incluye STORY buenos)  → comportamiento actual
-      - "clean": quita STORY del timeline final (sólo HOOK/PROBLEM/BENEFITS/FEATURES/PROOF/CTA)
-      - "blooper": HOOK ganador + bloque STORY + CTA, más "UGC feel"
+      - "human": normal (puede incluir STORY si pasa filtros)
+      - "clean": versión más limpia → sube mínimo semántico y NO mete STORY en el funnel
     """
-    mode = (mode or "human").strip().lower()
-    if mode not in {"human", "clean", "blooper"}:
-        mode = "human"
+    # 1) Filter by semantic (modo clean más exigente)
+    min_semantic = COMPOSER_MIN_SEMANTIC
+    if mode == "clean":
+        min_semantic = max(COMPOSER_MIN_SEMANTIC, 0.7)
 
-    # 1) Filter by semantic
     usable = [
         c
         for c in clips
         if c["meta"].get("keep", True)
-        and safe_float(c.get("semantic_score", 0.0)) >= COMPOSER_MIN_SEMANTIC
+        and safe_float(c.get("semantic_score", 0.0)) >= min_semantic
     ]
 
     # 2) Mix vision (if any) with semantic for combined score
@@ -1500,104 +1499,51 @@ def build_composer(clips: List[Dict[str, Any]], mode: str = "human") -> Dict[str
     cta_final_ids = cta_block_ids[:]
     cta_final_ids_set = set(cta_final_ids)
 
-    # 6) Build "base" timeline (human mode) con CTA al final
-    base_timeline: List[Dict[str, Any]] = []
-    base_used_ids: List[str] = []
+    # 6) Build timeline, keeping CTA block last
+    timeline: List[Dict[str, Any]] = []
+    used_ids: List[str] = []
 
     for c in usable:
         if c["id"] in cta_final_ids_set:
             continue
-        base_timeline.append(c)
-        base_used_ids.append(c["id"])
+        timeline.append(c)
+        used_ids.append(c["id"])
 
     if cta_final_ids:
         cta_block_clips = [c for c in usable if c["id"] in cta_final_ids_set]
         cta_block_clips.sort(key=lambda c: safe_float(c.get("start", 0.0)))
         for c in cta_block_clips:
-            base_timeline.append(c)
-            base_used_ids.append(c["id"])
+            timeline.append(c)
+            used_ids.append(c["id"])
 
-    # ===========
-    # MODE SWITCH
-    # ===========
-    timeline: List[Dict[str, Any]]
-
-    if mode == "clean":
-        # Quitamos todo STORY del timeline final
-        allowed_slots = {"HOOK", "PROBLEM", "BENEFITS", "FEATURES", "PROOF", "CTA"}
-        timeline = [c for c in base_timeline if c.get("slot") in allowed_slots]
-
-    elif mode == "blooper":
-        # 1 HOOK fuerte + todos los STORY + CTA top
-        hooks = [c for c in usable if c.get("slot") == "HOOK"]
-        best_hook = None
-        if hooks:
-            best_hook = max(hooks, key=lambda c: safe_float(c.get("score", 0.0)))
-
-        story_clips = [
-            c for c in base_timeline
-            if c.get("slot") == "STORY"
-        ]
-
-        # CTA mejor (último del funnel base o el de mayor score si algo raro)
-        best_cta = None
-        if cta_final_ids:
-            last_cta_id = cta_final_ids[-1]
-            best_cta = next((c for c in usable if c["id"] == last_cta_id), None)
-        elif single_best_cta is not None:
-            best_cta = single_best_cta
-
-        timeline = []
-        used_ids_set = set()
-
-        if best_hook:
-            timeline.append(best_hook)
-            used_ids_set.add(best_hook["id"])
-
-        for c in story_clips:
-            if c["id"] not in used_ids_set:
-                timeline.append(c)
-                used_ids_set.add(c["id"])
-
-        if best_cta and best_cta["id"] not in used_ids_set:
-            timeline.append(best_cta)
-            used_ids_set.add(best_cta["id"])
-
-    else:  # "human"
-        timeline = base_timeline
-
-    used_ids = [c["id"] for c in timeline]
-
-    # Helper para ids por slot respetando límite
     def ids_for_slot(slot_name: str) -> List[str]:
-        return [c["id"] for c in timeline if c.get("slot") == slot_name][:COMPOSER_MAX_PER_SLOT]
+        return [c["id"] for c in timeline if c.get("slot") == slot_name]
 
-    # HOOK
     if hook_block_ids:
         hook_id = hook_block_ids[0]
-        if hook_id not in used_ids:
-            # Si el bloque hook se quedó fuera (por modo), buscamos otro hook en timeline
-            hook_id = next((c["id"] for c in timeline if c.get("slot") == "HOOK"), None)
     else:
         hook_id = next(
             (c["id"] for c in timeline if c.get("slot") == "HOOK"), None
         )
 
-    # PROBLEM
     problem_ids = ids_for_slot("PROBLEM")
     if problem_block_ids:
         filtered = [cid for cid in problem_ids if cid in problem_block_ids]
         if filtered:
             problem_ids = filtered
+    problem_ids = problem_ids[:COMPOSER_MAX_PER_SLOT]
 
-    benefit_ids = ids_for_slot("BENEFITS")
-    feature_ids = ids_for_slot("FEATURES")
-    proof_ids = ids_for_slot("PROOF")
-    story_ids = ids_for_slot("STORY")
+    benefit_ids = ids_for_slot("BENEFITS")[:COMPOSER_MAX_PER_SLOT]
+    feature_ids = ids_for_slot("FEATURES")[:COMPOSER_MAX_PER_SLOT]
+    proof_ids = ids_for_slot("PROOF")[:COMPOSER_MAX_PER_SLOT]
 
-    # CTA (último CTA del timeline)
-    cta_candidates = [c for c in timeline if c.get("slot") == "CTA"]
-    cta_id = cta_candidates[-1]["id"] if cta_candidates else None
+    # En modo clean NO usamos STORY en el funnel final
+    if mode == "clean":
+        story_ids: List[str] = []
+    else:
+        story_ids = ids_for_slot("STORY")[:COMPOSER_MAX_PER_SLOT]
+
+    cta_id = cta_final_ids[-1] if cta_final_ids else None
 
     composer = {
         "hook_id": hook_id,
@@ -1608,14 +1554,16 @@ def build_composer(clips: List[Dict[str, Any]], mode: str = "human") -> Dict[str
         "proof_ids": proof_ids,
         "cta_id": cta_id,
         "used_clip_ids": used_ids,
-        "min_score": COMPOSER_MIN_SEMANTIC,
+        "min_score": min_semantic,
         "mode": mode,
     }
     return composer
 
 
 def pretty_print_composer(
-    clips: List[Dict[str, Any]], composer: Dict[str, Any]
+    clips: List[Dict[str, Any]],
+    composer: Dict[str, Any],
+    mode: str = "human",
 ) -> str:
     lookup = {c["id"]: c for c in clips}
 
@@ -1625,9 +1573,7 @@ def pretty_print_composer(
             return f"[{cid}] (not found)"
         return f"[{cid}] score={c.get('score', 0.0):.2f} → \"{c.get('text', '').strip()}\""
 
-    parts = ["===== EDITDNA FUNNEL COMPOSER ====="]
-    mode = composer.get("mode", "human")
-    parts.append(f"MODE: {mode}")
+    parts = ["===== EDITDNA FUNNEL COMPOSER =====", f"MODE: {mode}"]
 
     slots_order = [
         ("HOOK", [composer.get("hook_id")] if composer.get("hook_id") else []),
@@ -1791,8 +1737,13 @@ def run_pipeline(
     mode: str = "human",
 ) -> Dict[str, Any]:
     logger.info(
-        f"run_pipeline session_id={session_id} mode={mode} files={files} file_urls={file_urls}"
+        f"run_pipeline session_id={session_id} files={files} file_urls={file_urls} mode={mode}"
     )
+
+    # Normalizamos modo
+    mode = (mode or "human").lower()
+    if mode not in ("human", "clean"):
+        mode = "human"
 
     effective_files: Optional[List[str]] = None
     if files and isinstance(files, list):
@@ -1804,11 +1755,6 @@ def run_pipeline(
         raise ValueError(
             "run_pipeline: 'files' or 'file_urls' must be a list with at least 1 URL"
         )
-
-    # Normalizamos modo aquí por si alguien llama run_pipeline directo
-    mode_norm = (mode or "human").strip().lower()
-    if mode_norm not in {"human", "clean", "blooper"}:
-        mode_norm = "human"
 
     session_dir = ensure_session_dir(session_id)
     input_local = os.path.join(session_dir, "input.mp4")
@@ -1840,7 +1786,7 @@ def run_pipeline(
     # =====================
     # PHASE 2: COMPOSER + RENDER
     # =====================
-    composer = build_composer(clips, mode=mode_norm)
+    composer = build_composer(clips, mode=mode)
     used_clip_ids = composer.get("used_clip_ids", [])
     final_path = render_funnel_video(input_local, session_dir, clips, used_clip_ids)
 
@@ -1848,6 +1794,8 @@ def run_pipeline(
     if S3_BUCKET:
         key = f"{S3_PREFIX}/{session_id}-final.mp4"
         output_url = upload_to_s3(final_path, S3_BUCKET, key)
+
+    composer_human = pretty_print_composer(clips, composer, mode=mode)
 
     result = {
         "ok": True,
@@ -1857,7 +1805,7 @@ def run_pipeline(
         "clips": clips,
         "slots": slots,
         "composer": composer,
-        "composer_human": pretty_print_composer(clips, composer),
+        "composer_human": composer_human,
         "output_video_local": final_path,
         "output_video_url": output_url,
         "asr": True,
@@ -1865,7 +1813,6 @@ def run_pipeline(
         "vision": vision_used,
         "llm_used": llm_used,
         "take_judge_used": take_judge_used,
-        "mode": mode_norm,
+        "mode": mode,
     }
     return result
-    
