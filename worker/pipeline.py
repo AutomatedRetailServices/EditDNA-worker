@@ -1326,7 +1326,7 @@ def suppress_cross_slot_redundant_clips(
         t1 = safe_float(c1.get("start", 0.0))
         text1 = normalize_text(c1.get("text", ""))
 
-        for j in range(i + 1, len(clips)):
+        for j in range(i + 1, n):
             c2 = clips[j]
             if not c2["meta"].get("keep", True):
                 continue
@@ -1424,20 +1424,25 @@ def pick_best_block(blocks: List[List[Dict[str, Any]]]) -> Optional[List[Dict[st
 
 def build_composer(clips: List[Dict[str, Any]], mode: str = "human") -> Dict[str, Any]:
     """
-    mode:
-      - "human": normal (puede incluir STORY si pasa filtros)
-      - "clean": versión más limpia → sube mínimo semántico y NO mete STORY en el funnel
-    """
-    # 1) Filter by semantic (modo clean más exigente)
-    min_semantic = COMPOSER_MIN_SEMANTIC
-    if mode == "clean":
-        min_semantic = max(COMPOSER_MIN_SEMANTIC, 0.7)
+    Build the funnel composer timeline.
 
+    mode:
+      - "human"  → mezcla embudo + momentos humanos divertidos
+      - "clean"  → SOLO embudo limpio (HOOK / PROBLEM / BENEFITS / FEATURES / PROOF / CTA)
+                   sin STORY, sin bloopers.
+      - "blooper" → prioriza STORY + un HOOK fuerte y un CTA corto.
+    """
+    # Normalizar modo
+    mode = (mode or "human").lower()
+    if mode not in ("human", "clean", "blooper"):
+        mode = "human"
+
+    # 1) Filter by semantic
     usable = [
         c
         for c in clips
         if c["meta"].get("keep", True)
-        and safe_float(c.get("semantic_score", 0.0)) >= min_semantic
+        and safe_float(c.get("semantic_score", 0.0)) >= COMPOSER_MIN_SEMANTIC
     ]
 
     # 2) Mix vision (if any) with semantic for combined score
@@ -1464,6 +1469,34 @@ def build_composer(clips: List[Dict[str, Any]], mode: str = "human") -> Dict[str
     # 4b) Cross-slot dupes (short vs extended)
     suppress_cross_slot_redundant_clips(usable)
     usable = [c for c in usable if c["meta"].get("keep", True)]
+
+    # 4c) MODE FILTERING
+    if mode == "clean":
+        # 🧼 Modo CLEAN: NO STORY, NO BLOOPERS
+        for c in usable:
+            if c.get("slot") == "STORY":
+                c["meta"]["keep"] = False
+        usable = [c for c in usable if c["meta"].get("keep", True)]
+
+    elif mode == "blooper":
+        # 😂 Modo BLOOPER:
+        # - Mantener STORY (bloopers / human moments)
+        # - Permitir solo HOOK + CTA como estructura mínima de venta
+        for c in usable:
+            slot = c.get("slot")
+            if slot not in {"STORY", "HOOK", "CTA"}:
+                c["meta"]["keep"] = False
+        usable = [c for c in usable if c["meta"].get("keep", True)]
+
+    # Si después del filtrado no queda nada, hacer fallback suave:
+    if not usable:
+        usable = [
+            c
+            for c in clips
+            if c["meta"].get("keep", True)
+            and safe_float(c.get("semantic_score", 0.0)) >= COMPOSER_MIN_SEMANTIC
+        ]
+        usable.sort(key=lambda c: safe_float(c.get("start", 0.0)))
 
     # 5) Slot blocks (HOOK, PROBLEM, CTA)
     hook_blocks = group_contiguous_blocks_by_slot(usable, "HOOK", max_gap_sec=1.0)
@@ -1537,33 +1570,25 @@ def build_composer(clips: List[Dict[str, Any]], mode: str = "human") -> Dict[str
     feature_ids = ids_for_slot("FEATURES")[:COMPOSER_MAX_PER_SLOT]
     proof_ids = ids_for_slot("PROOF")[:COMPOSER_MAX_PER_SLOT]
 
-    # En modo clean NO usamos STORY en el funnel final
-    if mode == "clean":
-        story_ids: List[str] = []
-    else:
-        story_ids = ids_for_slot("STORY")[:COMPOSER_MAX_PER_SLOT]
-
     cta_id = cta_final_ids[-1] if cta_final_ids else None
 
     composer = {
+        "mode": mode,
         "hook_id": hook_id,
-        "story_ids": story_ids,
+        "story_ids": ids_for_slot("STORY")[:COMPOSER_MAX_PER_SLOT],
         "problem_ids": problem_ids,
         "benefit_ids": benefit_ids,
         "feature_ids": feature_ids,
         "proof_ids": proof_ids,
         "cta_id": cta_id,
         "used_clip_ids": used_ids,
-        "min_score": min_semantic,
-        "mode": mode,
+        "min_score": COMPOSER_MIN_SEMANTIC,
     }
     return composer
 
 
 def pretty_print_composer(
-    clips: List[Dict[str, Any]],
-    composer: Dict[str, Any],
-    mode: str = "human",
+    clips: List[Dict[str, Any]], composer: Dict[str, Any]
 ) -> str:
     lookup = {c["id"]: c for c in clips}
 
@@ -1573,7 +1598,11 @@ def pretty_print_composer(
             return f"[{cid}] (not found)"
         return f"[{cid}] score={c.get('score', 0.0):.2f} → \"{c.get('text', '').strip()}\""
 
-    parts = ["===== EDITDNA FUNNEL COMPOSER =====", f"MODE: {mode}"]
+    parts = ["===== EDITDNA FUNNEL COMPOSER ====="]
+
+    mode = composer.get("mode")
+    if mode:
+        parts.append(f"MODE: {mode}")
 
     slots_order = [
         ("HOOK", [composer.get("hook_id")] if composer.get("hook_id") else []),
@@ -1736,14 +1765,17 @@ def run_pipeline(
     file_urls: Optional[List[str]] = None,
     mode: str = "human",
 ) -> Dict[str, Any]:
-    logger.info(
-        f"run_pipeline session_id={session_id} files={files} file_urls={file_urls} mode={mode}"
-    )
+    """
+    Main pipeline entrypoint.
 
-    # Normalizamos modo
-    mode = (mode or "human").lower()
-    if mode not in ("human", "clean"):
-        mode = "human"
+    mode:
+      - "human"
+      - "clean"
+      - "blooper"
+    """
+    logger.info(
+        f"run_pipeline session_id={session_id} mode={mode} files={files} file_urls={file_urls}"
+    )
 
     effective_files: Optional[List[str]] = None
     if files and isinstance(files, list):
@@ -1755,6 +1787,11 @@ def run_pipeline(
         raise ValueError(
             "run_pipeline: 'files' or 'file_urls' must be a list with at least 1 URL"
         )
+
+    # Normalize mode early (same logic as build_composer)
+    mode = (mode or "human").lower()
+    if mode not in ("human", "clean", "blooper"):
+        mode = "human"
 
     session_dir = ensure_session_dir(session_id)
     input_local = os.path.join(session_dir, "input.mp4")
@@ -1795,8 +1832,6 @@ def run_pipeline(
         key = f"{S3_PREFIX}/{session_id}-final.mp4"
         output_url = upload_to_s3(final_path, S3_BUCKET, key)
 
-    composer_human = pretty_print_composer(clips, composer, mode=mode)
-
     result = {
         "ok": True,
         "session_id": session_id,
@@ -1805,7 +1840,7 @@ def run_pipeline(
         "clips": clips,
         "slots": slots,
         "composer": composer,
-        "composer_human": composer_human,
+        "composer_human": pretty_print_composer(clips, composer),
         "output_video_local": final_path,
         "output_video_url": output_url,
         "asr": True,
@@ -1813,6 +1848,6 @@ def run_pipeline(
         "vision": vision_used,
         "llm_used": llm_used,
         "take_judge_used": take_judge_used,
-        "mode": mode,
+        "composer_mode": mode,
     }
     return result
