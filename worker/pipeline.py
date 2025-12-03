@@ -29,8 +29,7 @@ WHISPER_MODEL_NAME = os.environ.get("WHISPER_MODEL_NAME") or os.environ.get(
 )
 WHISPER_DEVICE = os.environ.get(
     "WHISPER_DEVICE", os.environ.get("ASR_DEVICE", "auto")
-)  # cuda / cpu / auto
-
+)
 ASR_ENABLED = os.environ.get("ASR_ENABLED", "1") == "1"
 
 # Composer / scores
@@ -48,13 +47,13 @@ EDITDNA_CTA_MIN_SCORE = float(os.environ.get("EDITDNA_CTA_MIN_SCORE", "0.6"))
 EDITDNA_USE_LLM = os.environ.get("EDITDNA_USE_LLM", "0") == "1"
 EDITDNA_LLM_MODEL = os.environ.get("EDITDNA_LLM_MODEL", "gpt-5.1")
 
-# Vision
+# VISION
 VISION_ENABLED = os.environ.get("VISION_ENABLED", "0") == "1"
 VISION_INTERVAL_SEC = float(os.environ.get("VISION_INTERVAL_SEC", "2.0"))
 VISION_MAX_SAMPLES = int(os.environ.get("VISION_MAX_SAMPLES", "50"))
-W_VISION = float(os.environ.get("W_VISION", "0.7"))  # visual vs semantic weight (0-1)
+W_VISION = float(os.environ.get("W_VISION", "0.7"))
 
-# TakeJudge (human-like multi-take chooser)
+# TAKE JUDGE (multi-take selection)
 TAKE_JUDGE_ENABLED = os.environ.get("TAKE_JUDGE_ENABLED", "0") == "1"
 TAKE_JUDGE_MODEL = os.environ.get("TAKE_JUDGE_MODEL", "gpt-4o-mini")
 TAKE_JUDGE_MAX_GROUPS = int(os.environ.get("TAKE_JUDGE_MAX_GROUPS", "6"))
@@ -65,13 +64,13 @@ TAKE_JUDGE_FRAMES = int(os.environ.get("TAKE_JUDGE_FRAMES", "1"))
 S3_BUCKET = os.environ.get("S3_BUCKET")
 S3_PREFIX = os.environ.get("S3_PREFIX", "editdna/outputs")
 
-# Generic head/tail trims per clip at render time
+# Head/tail trims
 HEAD_TRIM_SEC = float(os.environ.get("HEAD_TRIM_SEC", "0.0"))
 TAIL_TRIM_SEC = float(os.environ.get("TAIL_TRIM_SEC", "0.0"))
 
 
 # =====================
-# BASIC HELPERS
+# HELPERS
 # =====================
 
 def safe_float(x: Any, default: float = 0.0) -> float:
@@ -151,13 +150,15 @@ def upload_to_s3(local_path: str, bucket: str, key: str) -> Optional[str]:
         return url
     except Exception as e:
         logger.exception(f"Error uploading to S3: {e}")
-        return None
-
+        return None 
+# =====================
+# CLIP OBJECT CREATION
+# =====================
 
 def make_base_clip(cid: str, start: float, end: float, text: str) -> Dict[str, Any]:
     clip_obj = {
         "id": cid,
-        "slot": "STORY",  # will be corrected later
+        "slot": "STORY",  # provisional, luego se corrige
         "start": start,
         "end": end,
         "score": 0.0,
@@ -186,11 +187,10 @@ def make_base_clip(cid: str, start: float, end: float, text: str) -> Dict[str, A
 
 
 # =====================
-# WHISPER ASR
+# ASR
 # =====================
 
 _WHISPER_MODEL: Optional[WhisperModel] = None
-
 
 def get_whisper_model() -> WhisperModel:
     global _WHISPER_MODEL
@@ -201,17 +201,12 @@ def get_whisper_model() -> WhisperModel:
     compute_type = "int8"
     if WHISPER_DEVICE in ("cuda", "gpu", "auto"):
         try:
-            import torch  # noqa
-
+            import torch
             if hasattr(torch, "cuda") and torch.cuda.is_available():
                 device = "cuda"
                 compute_type = "float16"
-            else:
-                device = "cpu"
-                compute_type = "int8"
         except Exception:
-            device = "cpu"
-            compute_type = "int8"
+            pass
 
     logger.info(
         f"Loading Whisper model={WHISPER_MODEL_NAME} device={device} compute_type={compute_type}"
@@ -227,13 +222,13 @@ def get_whisper_model() -> WhisperModel:
 def run_asr(input_local: str) -> List[Dict[str, Any]]:
     """
     Run faster-whisper with word timestamps.
-    Returns segments with: start, end, text, words[{start,end,word}]
     """
     if not ASR_ENABLED:
         raise RuntimeError("ASR_ENABLED=0 but run_asr was called")
 
     model = get_whisper_model()
     logger.info(f"Running ASR over {input_local}")
+
     segments_iter, info = model.transcribe(
         input_local,
         beam_size=5,
@@ -241,54 +236,46 @@ def run_asr(input_local: str) -> List[Dict[str, Any]]:
         vad_filter=True,
         vad_parameters={"min_silence_duration_ms": 300},
     )
-    out: List[Dict[str, Any]] = []
+
+    out = []
     idx = 0
     for seg in segments_iter:
         words = []
         if seg.words:
             for w in seg.words:
-                words.append(
-                    {
-                        "start": safe_float(w.start),
-                        "end": safe_float(w.end),
-                        "word": w.word,
-                    }
-                )
-        out.append(
-            {
-                "id": f"S{idx:04d}",
-                "start": safe_float(seg.start),
-                "end": safe_float(seg.end),
-                "text": seg.text.strip(),
-                "words": words,
-            }
-        )
+                words.append({
+                    "start": safe_float(w.start),
+                    "end": safe_float(w.end),
+                    "word": w.word,
+                })
+
+        out.append({
+            "id": f"S{idx:04d}",
+            "start": safe_float(seg.start),
+            "end": safe_float(seg.end),
+            "text": seg.text.strip(),
+            "words": words,
+        })
         idx += 1
 
-    logger.info(
-        f"ASR produced {len(out)} segments, duration ~{probe_duration(input_local):.2f}s"
-    )
     return out
 
 
 # =====================
-# SENTENCE-BOUNDARY MICRO-CUTS
+# MICRO CUTS
 # =====================
 
-def sentence_boundary_micro_cuts(
-    asr_segments: List[Dict[str, Any]]
-) -> List[Dict[str, Any]]:
+def sentence_boundary_micro_cuts(asr_segments: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     """
-    Convert Whisper segments into micro-sentences:
-    - Split on punctuation (. ? !) or duration > MICRO_SENTENCE_MAX_SECONDS
-    - Keep accurate word-based timestamps for start/end
-    Returns "clips" with IDs like ASR0000_c0.
+    Break Whisper segments into micro-sentences using punctuation & max length.
     """
-    clips: List[Dict[str, Any]] = []
+    clips = []
     clip_index = 0
 
     for seg_idx, seg in enumerate(asr_segments):
         words = seg.get("words") or []
+
+        # no word-level timestamps → treat as single chunk
         if not words:
             text = seg.get("text", "").strip()
             if not text:
@@ -298,21 +285,18 @@ def sentence_boundary_micro_cuts(
             end = safe_float(seg.get("end", start))
             if end <= start:
                 continue
-            clip_obj = make_base_clip(
-                cid=cid,
-                start=start,
-                end=end,
-                text=text,
-            )
+
+            clip_obj = make_base_clip(cid, start, end, text)
             clips.append(clip_obj)
             clip_index += 1
             continue
 
-        buffer_words: List[Dict[str, Any]] = []
-        sent_start: Optional[float] = None
+        # split by punctuation or max duration
+        buffer_words = []
+        sent_start = None
 
         def flush_sentence():
-            nonlocal clip_index, buffer_words, sent_start
+            nonlocal buffer_words, sent_start, clip_index
             if not buffer_words:
                 return
             s = buffer_words[0]
@@ -324,12 +308,13 @@ def sentence_boundary_micro_cuts(
                 buffer_words = []
                 sent_start = None
                 return
+
             cid_local = f"ASR{seg_idx:04d}_c{clip_index}"
             clip_obj_local = make_base_clip(
-                cid=cid_local,
-                start=start_ts,
-                end=end_ts,
-                text=text_local,
+                cid_local,
+                start_ts,
+                end_ts,
+                text_local,
             )
             clips.append(clip_obj_local)
             clip_index += 1
@@ -343,19 +328,116 @@ def sentence_boundary_micro_cuts(
 
             if sent_start is None:
                 sent_start = w_start
+
             buffer_words.append(w)
 
             duration = w_end - sent_start
             punct = token.strip().endswith((".", "?", "!"))
+
             if punct or duration >= MICRO_SENTENCE_MAX_SECONDS:
                 flush_sentence()
 
+        # final flush
         flush_sentence()
 
     return clips
 
 
 # =====================
+# **MERGE INTELIGENTE DE FRASES INCOMPLETAS**
+# =====================
+
+def looks_incomplete(text: str) -> bool:
+    """
+    Detecta frases que NO terminan una idea:
+    - terminan en 'for', 'the', 'a', 'my', 'your', 'our'
+    - terminan sin verbo
+    - muy cortas
+    """
+    t = text.strip().lower()
+    if len(t.split()) <= 2:
+        return True
+
+    bad_endings = ("for", "the", "a", "my", "your", "our", "this", "that")
+    if t.endswith(bad_endings):
+        return True
+
+    # empieza con conectores dependientes
+    if t.startswith(("and ", "so ", "but ", "or ")):
+        return True
+
+    # no termina con '.', '?', '!'
+    if not t.endswith((".", "?", "!")):
+        return True
+
+    return False
+
+
+def merge_incomplete_phrases(clips: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """
+    UNE frases incompletas con la siguiente SI:
+    - son parte de la misma oración lógica
+    - la segunda completa la primera
+    - evita duplicados de repeticiones
+    
+    EJEMPLOS:
+        "I found the perfect gift for our"
+        + "lip gloss girly."
+        → "I found the perfect gift for our lip gloss girly."
+
+        "These are so cute"
+        + "they are all lip glosses."
+        → merge válido
+
+    También elimina:
+        - versiones incompletas si existe una versión completa posterior.
+    """
+
+    if not clips:
+        return clips
+
+    merged = []
+    i = 0
+
+    while i < len(clips):
+        c = clips[i]
+        text = c["text"].strip()
+
+        # Si NO está incompleta → append normal
+        if not looks_incomplete(text):
+            merged.append(c)
+            i += 1
+            continue
+
+        # Si está incompleta → intentar merge con la siguiente
+        if i + 1 < len(clips):
+            nxt = clips[i + 1]
+            next_text = nxt["text"].strip()
+
+            # combinar SI continúa la misma oración
+            can_merge = (
+                len(next_text.split()) >= 2 and
+                not looks_incomplete(next_text) and
+                text[0].isalpha()
+            )
+
+            if can_merge:
+                new_text = (text + " " + next_text).strip()
+                merged_clip = {
+                    **c,
+                    "text": new_text,
+                    "end": nxt["end"],  # extender tiempo
+                    "chain_ids": c["chain_ids"] + nxt["chain_ids"],
+                }
+                merged.append(merged_clip)
+                i += 2
+                continue
+
+        # Si no se pudo mergear → descartar clip incompleto
+        i += 1
+
+    return merged
+    # =====================
 # HEURISTIC TAGGING
 # =====================
 
@@ -375,7 +457,7 @@ FILLER_PATTERNS = [
     "why can't i remember",
 ]
 
-# NEW: tails dependientes tipo "available as well"
+# Tails dependientes tipo "available as well"
 TAIL_DEPENDENT_ENDINGS = [
     "as well",
     "too",
@@ -410,7 +492,7 @@ def looks_like_dependent_tail(text: str) -> bool:
         return False
 
     words = t.split()
-    # Sólo nos interesan frases muy cortas que no tienen sentido solas
+    # Sólo frases muy cortas que NO tienen sentido solas
     if len(words) > 4:
         return False
 
@@ -528,10 +610,10 @@ def classify_slot(text: str) -> str:
 
 def tag_clips_heuristic(clips: List[Dict[str, Any]]) -> None:
     for c in clips:
-        text = c.get("text", "")
+        text = c.get("text", "") or ""
         t = text.strip()
-        slot = classify_slot(t)
 
+        slot = classify_slot(t)
         is_tail = looks_like_dependent_tail(t)
         is_filler = looks_like_filler(t)
 
@@ -592,12 +674,9 @@ def llm_classify_clips(clips: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
     client = OpenAI(api_key=api_key)
 
     payload_clips = [
-        {
-            "id": c["id"],
-            "text": c.get("text", ""),
-        }
+        {"id": c["id"], "text": c.get("text", "")}
         for c in clips
-        if c.get("text", "").strip()
+        if (c.get("text") or "").strip()
     ]
 
     if not payload_clips:
@@ -648,24 +727,15 @@ def llm_classify_clips(clips: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
         completion = client.chat.completions.create(
             model=EDITDNA_LLM_MODEL,
             messages=[
-                {
-                    "role": "system",
-                    "content": [
-                        {"type": "text", "text": system_msg}
-                    ],
-                },
-                {
-                    "role": "user",
-                    "content": [
-                        {"type": "text", "text": user_text}
-                    ],
-                },
+                {"role": "system", "content": [{"type": "text", "text": system_msg}]},
+                {"role": "user", "content": [{"type": "text", "text": user_text}]},
             ],
             temperature=0.2,
         )
 
         content = completion.choices[0].message.content
         data = json.loads(content)
+
         result_map: Dict[str, Any] = {}
         for item in data.get("clips", []):
             cid = item.get("id")
@@ -686,13 +756,11 @@ def llm_classify_clips(clips: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
 
 def enrich_clips_semantic(clips: List[Dict[str, Any]]) -> bool:
     """
-    1) Apply local heuristic (filler, slots, semantic_score).
-    2) Optionally mix with LLM, but:
-       - NEVER revive clips that heuristic already marked keep=False.
-       - Do NOT let LLM kill strong funnel clips (HOOK / PROBLEM / BENEFITS /
-         FEATURES / PROOF / CTA) that are semantically strong and have >= 3 words.
+    1) Heurística local (filler, slots, semantic_score)
+    2) LLM opcional, pero:
+       - NUNCA revive clips que ya estaban keep=False
+       - No deja matar hooks/CTA/problema fuertes (>= COMPOSER_MIN_SEMANTIC y >= 3 palabras)
     """
-    # Step 1: heuristic
     tag_clips_heuristic(clips)
 
     if not EDITDNA_USE_LLM:
@@ -708,8 +776,6 @@ def enrich_clips_semantic(clips: List[Dict[str, Any]]) -> bool:
             continue
 
         info = llm_result[cid]
-
-        # Heuristic decision before LLM
         original_keep = c["meta"].get("keep", True)
 
         slot_from_llm = info.get("slot", c.get("slot", "STORY"))
@@ -733,11 +799,11 @@ def enrich_clips_semantic(clips: List[Dict[str, Any]]) -> bool:
         strong_semantic = sem_from_llm >= COMPOSER_MIN_SEMANTIC
         core_slot = slot_upper in {"HOOK", "PROBLEM", "BENEFITS", "FEATURES", "PROOF", "CTA"}
 
-        # Rule 1: if heuristic already said keep=False -> still False
+        # Si heurística ya lo había matado → sigue muerto
         if not original_keep:
             final_keep = False
         else:
-            # Rule 2: strong funnel clip cannot be killed by LLM
+            # Clips fuertes de embudo no se pueden matar por LLM
             if core_slot and strong_semantic and word_count >= 3:
                 final_keep = True
             else:
@@ -831,26 +897,18 @@ def run_visual_pass(
         if idx % step != 0:
             continue
 
-        text = c.get("text", "").strip()
+        text = (c.get("text") or "").strip()
         if not text:
             continue
 
-        # ---------- FIX CONTEXT LENGTH PARA CLIP ----------
-        # Limpiar y recortar el caption antes de tokenizar
+        # Limpiar y recortar caption para no romper CLIP (77 tokens máx aprox)
         clean_text = text.replace("\n", " ").strip()
-
-        # recortar a un tamaño seguro aproximado (<77 tokens)
         if len(clean_text) > 250:
             clean_text = clean_text[:250]
-
-        # fallback si queda demasiado corto o vacío
         if len(clean_text) < 5:
             clean_text = "short video clip"
-        # ---------- FIN FIX ----------
 
-        mid_t = (
-            safe_float(c.get("start", 0.0)) + safe_float(c.get("end", 0.0))
-        ) / 2.0
+        mid_t = (safe_float(c.get("start", 0.0)) + safe_float(c.get("end", 0.0))) / 2.0
         frame_path = os.path.join(session_dir, f"frame_{c['id']}.jpg")
 
         if not grab_frame_at_timestamp(input_local, mid_t, frame_path):
@@ -863,18 +921,13 @@ def run_visual_pass(
 
         with torch.no_grad():
             image_input = preprocess(image).unsqueeze(0).to(device)
-            # usar clean_text en lugar de text completo
             text_tokens = clip.tokenize([clean_text]).to(device)  # type: ignore
 
             image_features = model.encode_image(image_input)
             text_features = model.encode_text(text_tokens)
 
-            image_features = image_features / image_features.norm(
-                dim=-1, keepdim=True
-            )
-            text_features = text_features / text_features.norm(
-                dim=-1, keepdim=True
-            )
+            image_features = image_features / image_features.norm(dim=-1, keepdim=True)
+            text_features = text_features / text_features.norm(dim=-1, keepdim=True)
 
             similarity = (image_features @ text_features.T).item()
             visual_score = (similarity + 1.0) / 2.0
@@ -886,6 +939,10 @@ def run_visual_pass(
 
 
 def reject_visual_bad_takes(clips: List[Dict[str, Any]], session_dir: str, input_local: str):
+    """
+    Llama a un LLM visión+texto para marcar takes visualmente malos como keep=False.
+    (Feature opcional: sólo usar si quieres este paso y tienes presupuesto de tokens)
+    """
     from openai import OpenAI
     import base64
 
@@ -899,14 +956,17 @@ def reject_visual_bad_takes(clips: List[Dict[str, Any]], session_dir: str, input
         if not c["meta"].get("keep", True):
             continue
 
-        mid = (safe_float(c["start"]) + safe_float(c["end"])) / 2
+        mid = (safe_float(c["start"]) + safe_float(c["end"])) / 2.0
         frame_path = os.path.join(session_dir, f"facecheck_{c['id']}.jpg")
 
         if not grab_frame_at_timestamp(input_local, mid, frame_path):
             continue
 
-        with open(frame_path, "rb") as f:
-            img_b64 = base64.b64encode(f.read()).decode("utf-8")
+        try:
+            with open(frame_path, "rb") as f:
+                img_b64 = base64.b64encode(f.read()).decode("utf-8")
+        except Exception:
+            continue
 
         prompt = f"""
         Analyze if this take is a GOOD or BAD acting take for a TikTok ad.
@@ -923,29 +983,29 @@ def reject_visual_bad_takes(clips: List[Dict[str, Any]], session_dir: str, input
                 {"role": "system", "content": "You strictly output 'GOOD' or 'BAD'."},
                 {"role": "user", "content": [
                     {"type": "text", "text": prompt},
-                    {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{img_b64}"}}
-                ]}
+                    {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{img_b64}"}},
+                ]},
             ],
         )
 
-        verdict = response.choices[0].message.content.strip().upper()
+        verdict = (response.choices[0].message.content or "").strip().upper()
         if verdict == "BAD":
             c["meta"]["keep"] = False
-            c["llm_reason"] += " | Removed for visual bad-take."
+            c["llm_reason"] = (c.get("llm_reason") or "") + " | Removed for visual bad-take."
 
 
 # =====================
-# TAKE JUDGE (HUMAN-LIKE MULTI-TAKE CHOOSER)
+# TEXT UTILS (para TakeJudge y dedupe)
 # =====================
 
 def normalize_text(t: str) -> str:
-    return " ".join(t.lower().strip().split())
+    return " ".join((t or "").lower().strip().split())
 
 
 def text_overlap_ratio(t1: str, t2: str) -> float:
     """
-    Jaccard word overlap between two texts.
-    0.0 = no overlap, 1.0 = identical bag of words.
+    Jaccard word overlap entre dos textos.
+    0.0 = nada compartido, 1.0 = idéntico.
     """
     a = normalize_text(t1)
     b = normalize_text(t2)
@@ -965,7 +1025,7 @@ def text_overlap_ratio(t1: str, t2: str) -> float:
 def text_overlap_shorter(t1: str, t2: str) -> float:
     """
     Overlap relativo al texto más corto:
-    intersección / tamaño del conjunto de palabras más corto.
+    intersección / tamaño del conjunto más corto.
     1.0 = todo lo que dice el clip corto está contenido en el largo.
     """
     a = normalize_text(t1)
@@ -983,17 +1043,21 @@ def text_overlap_shorter(t1: str, t2: str) -> float:
     return inter / denom
 
 
+# =====================
+# TAKE JUDGE (MULTI-TAKE HUMANO)
+# =====================
+
 def find_sibling_groups(
     clips: List[Dict[str, Any]],
     window_sec: float = 18.0,
     min_overlap: float = 0.55,
 ) -> List[List[Dict[str, Any]]]:
     """
-    Find groups of "sibling" takes:
-    - same slot
-    - close in time
-    - high text overlap
-    These are candidates where only ONE take should remain.
+    Encuentra grupos de "takes hermanos":
+    - mismo slot
+    - cerca en tiempo
+    - alto overlap de texto
+    donde sólo debe quedar 1 ganador.
     """
     usable = [
         c for c in clips
@@ -1045,11 +1109,9 @@ def run_take_judge(
 ) -> bool:
     """
     TakeJudgeAI:
-    - For each group of similar takes (same slot, similar text, close in time),
-      ask a vision+text LLM to choose the best acting take (like a human editor).
-    - Only ONE winner per group keeps meta.keep=True.
-    - Everything is guarded by TAKE_JUDGE_ENABLED and rate-limited via
-      TAKE_JUDGE_MAX_GROUPS and TAKE_JUDGE_MAX_TAKES.
+    - Para cada grupo de takes similares, pregunta a un LLM visión+texto
+      cuál es la mejor actuación.
+    - Sólo 1 ganador por grupo (LOSER → keep=False).
     """
     from openai import OpenAI
     import base64
@@ -1074,7 +1136,6 @@ def run_take_judge(
     for group in groups:
         payload = []
         for c in group:
-            # Skip clips already killed by other logic
             if not c["meta"].get("keep", True):
                 continue
 
@@ -1109,10 +1170,7 @@ def run_take_judge(
         user_json = {
             "task": "choose_best_take",
             "takes": [
-                {
-                    "id": p["id"],
-                    "text": p["text"],
-                }
+                {"id": p["id"], "text": p["text"]}
                 for p in payload
             ],
         }
@@ -1120,32 +1178,32 @@ def run_take_judge(
         messages = [
             {
                 "role": "system",
-                "content": [
-                    {"type": "text", "text": system_msg}
-                ],
+                "content": [{"type": "text", "text": system_msg}],
             },
             {
                 "role": "user",
-                "content": [
-                    {
-                        "type": "text",
-                        "text": (
-                            "Return ONLY a JSON like:\n"
-                            "{ \"winner_id\": \"...\", "
-                            "\"scores\": [{\"id\":\"...\",\"score\":0.0}] }\n\n"
-                            f"Takes:\n{json.dumps(user_json, ensure_ascii=False)}"
-                        ),
-                    }
-                ]
-                + [
-                    {
-                        "type": "image_url",
-                        "image_url": {
-                            "url": f"data:image/jpeg;base64,{p['image_b64']}"
-                        },
-                    }
-                    for p in payload
-                ],
+                "content": (
+                    [
+                        {
+                            "type": "text",
+                            "text": (
+                                "Return ONLY a JSON like:\n"
+                                "{ \"winner_id\": \"...\", "
+                                "\"scores\": [{\"id\":\"...\",\"score\":0.0}] }\n\n"
+                                f"Takes:\n{json.dumps(user_json, ensure_ascii=False)}"
+                            ),
+                        }
+                    ]
+                    + [
+                        {
+                            "type": "image_url",
+                            "image_url": {
+                                "url": f"data:image/jpeg;base64,{p['image_b64']}"
+                            },
+                        }
+                        for p in payload
+                    ]
+                ),
             },
         ]
 
@@ -1174,7 +1232,6 @@ def run_take_judge(
             if "id" in s
         }
 
-        # If winner_id is missing, fallback: keep all, do nothing
         if not winner_id:
             continue
 
@@ -1184,7 +1241,6 @@ def run_take_judge(
             c["meta"]["take_judge_score"] = tj_score
             c["meta"]["take_judge_verdict"] = "WINNER" if cid == winner_id else "LOSER"
 
-        # Only kill losers that were previously kept
         for c in group:
             cid = c["id"]
             if cid != winner_id and c["meta"].get("keep", True):
@@ -1199,7 +1255,7 @@ def run_take_judge(
 
 def apply_min_score_rules(clips: List[Dict[str, Any]]) -> None:
     """
-    Apply minimum thresholds, using semantic_score as main baseline.
+    Aplica thresholds mínimos usando semantic_score como base.
     """
     for c in clips:
         slot = c.get("slot", "STORY")
@@ -1219,6 +1275,9 @@ def apply_min_score_rules(clips: List[Dict[str, Any]]) -> None:
 
 
 def dedupe_clips(clips: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """
+    Elimina duplicados exactos de texto (normalizado) manteniendo el primero.
+    """
     seen = set()
     out = []
     for c in clips:
@@ -1235,10 +1294,8 @@ def dedupe_clips(clips: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
             seen.add(norm)
         out.append(c)
     return out
-
-
-# =====================
-# SLOTS + COMPOSER
+    # =====================
+# SLOTS + COMPOSER HELPERS
 # =====================
 
 def build_slots_dict(clips: List[Dict[str, Any]]) -> Dict[str, List[Dict[str, Any]]]:
@@ -1265,14 +1322,10 @@ def suppress_near_duplicates_by_slot(
     min_overlap: float = 0.35,
 ) -> None:
     """
-    For a list of USABLE clips (sorted by start), within the same slot:
-    - if two clips are close in time (window_sec)
-    - and are either:
-        * high Jaccard overlap (text_overlap_ratio >= min_overlap), OR
-        * the shorter text is largely contained in the longer one
-          (text_overlap_shorter >= 0.65)
-    Then consider them versions of the same line:
-    - keep the strongest (semantic_score / length), mark the other keep=False.
+    Dentro del mismo slot:
+    - si dos clips están cerca en tiempo (window_sec)
+    - y tienen alto overlap (Jaccard o relativo al más corto)
+    → se considera misma línea, sólo se queda el más fuerte.
     """
     n = len(clips)
     for i in range(n):
@@ -1291,19 +1344,15 @@ def suppress_near_duplicates_by_slot(
                 continue
 
             t2 = safe_float(c2.get("start", 0.0))
-
             if t2 - t1 > window_sec:
                 break
 
             text1 = c1.get("text", "") or ""
             text2 = c2.get("text", "") or ""
 
-            # Jaccard clásico
             ratio = text_overlap_ratio(text1, text2)
-            # Overlap relativo al texto más corto
             shorter_overlap = text_overlap_shorter(text1, text2)
 
-            # Si NO son parecidos ni por Jaccard ni por overlap-corto → saltar
             if ratio < min_overlap and shorter_overlap < 0.65:
                 continue
 
@@ -1312,7 +1361,7 @@ def suppress_near_duplicates_by_slot(
             len1 = len(text1.split())
             len2 = len(text2.split())
 
-            # Elegir ganador: más semántica, y si empatan, el más largo
+            # gana el de más semántica, si empata, el más largo
             if sem2 > sem1 or (sem2 == sem1 and len2 >= len1):
                 c1["meta"]["keep"] = False
                 break
@@ -1327,9 +1376,9 @@ def suppress_cross_slot_redundant_clips(
 ) -> None:
     """
     Cross-slot redundancy:
-    - If a short version of a phrase appears, and later a more complete version,
-      within window_sec, and text overlap is high,
-      keep only the stronger/longer version.
+    - si una versión corta aparece y luego una versión más completa
+      dentro de la ventana de tiempo, con alto overlap
+      → se queda la más fuerte/larga.
     """
     n = len(clips)
     for i in range(n):
@@ -1340,7 +1389,7 @@ def suppress_cross_slot_redundant_clips(
         t1 = safe_float(c1.get("start", 0.0))
         text1 = normalize_text(c1.get("text", ""))
 
-        for j in range(i + 1, len(clips)):
+        for j in range(i + 1, n):
             c2 = clips[j]
             if not c2["meta"].get("keep", True):
                 continue
@@ -1358,11 +1407,13 @@ def suppress_cross_slot_redundant_clips(
             sem1 = safe_float(c1.get("semantic_score", 0.0))
             sem2 = safe_float(c2.get("semantic_score", 0.0))
 
+            # versión más larga con suficiente overlap
             if overlap >= min_overlap and len(text2.split()) > len(text1.split()):
                 if sem2 >= sem1:
                     c1["meta"]["keep"] = False
                     break
 
+            # texto1 contenido dentro de texto2 de forma clara
             if text1 in text2 and len(text2.split()) - len(text1.split()) > 3:
                 c1["meta"]["keep"] = False
                 break
@@ -1374,10 +1425,8 @@ def group_contiguous_blocks_by_slot(
     max_gap_sec: float = 1.0,
 ) -> List[List[Dict[str, Any]]]:
     """
-    Group contiguous clips of the same slot into "blocks" (continuous speech):
-    - Only meta.keep=True
-    - Clips sorted by time
-    - If gap <= max_gap_sec -> same block
+    Agrupa clips contiguos del mismo slot en "bloques" de discurso contínuo.
+    Sólo meta.keep=True.
     """
     ordered = sorted(
         [c for c in clips if c.get("slot") == slot and c["meta"].get("keep", True)],
@@ -1415,7 +1464,7 @@ def group_contiguous_blocks_by_slot(
 
 def pick_best_block(blocks: List[List[Dict[str, Any]]]) -> Optional[List[Dict[str, Any]]]:
     """
-    Pick the best block by average score (semantic+vision already mixed).
+    Elige el mejor bloque por score promedio.
     """
     best_block: Optional[List[Dict[str, Any]]] = None
     best_score = -1.0
@@ -1451,7 +1500,7 @@ def build_composer(clips: List[Dict[str, Any]], mode: str = "human") -> Dict[str
     if mode not in ("human", "clean", "blooper"):
         mode = "human"
 
-    # 1) Filter by semantic
+    # 1) filter por semántica base
     usable = [
         c
         for c in clips
@@ -1459,7 +1508,7 @@ def build_composer(clips: List[Dict[str, Any]], mode: str = "human") -> Dict[str
         and safe_float(c.get("semantic_score", 0.0)) >= COMPOSER_MIN_SEMANTIC
     ]
 
-    # 2) Mix vision (if any) with semantic for combined score
+    # 2) mezclar visión + semántica
     for c in usable:
         sem = safe_float(c.get("semantic_score", 0.0))
         vis = safe_float(c.get("visual_score", 0.0))
@@ -1470,39 +1519,37 @@ def build_composer(clips: List[Dict[str, Any]], mode: str = "human") -> Dict[str
         c["score"] = combined
         c["meta"]["score"] = combined
 
-    # 3) Apply per-slot thresholds
+    # 3) thresholds por slot
     apply_min_score_rules(usable)
 
     usable = [c for c in usable if c["meta"].get("keep", True)]
     usable.sort(key=lambda c: safe_float(c.get("start", 0.0)))
 
-    # 4) Dedupe within same slot
+    # 4) dedupe por slot
     suppress_near_duplicates_by_slot(usable)
     usable = [c for c in usable if c["meta"].get("keep", True)]
 
-    # 4b) Cross-slot dupes (short vs extended)
+    # 4b) dedupe cross-slot corto vs extendido
     suppress_cross_slot_redundant_clips(usable)
     usable = [c for c in usable if c["meta"].get("keep", True)]
 
-    # 4c) MODE FILTERING
+    # 4c) FILTER por mode
     if mode == "clean":
-        # 🧼 Modo CLEAN: NO STORY, NO BLOOPERS
+        # 🧼 CLEAN: sin STORY
         for c in usable:
             if c.get("slot") == "STORY":
                 c["meta"]["keep"] = False
         usable = [c for c in usable if c["meta"].get("keep", True)]
 
     elif mode == "blooper":
-        # 😂 Modo BLOOPER:
-        # - Mantener STORY (bloopers / human moments)
-        # - Permitir solo HOOK + CTA como estructura mínima de venta
+        # 😂 BLOOPER: STORY + HOOK + CTA
         for c in usable:
             slot = c.get("slot")
             if slot not in {"STORY", "HOOK", "CTA"}:
                 c["meta"]["keep"] = False
         usable = [c for c in usable if c["meta"].get("keep", True)]
 
-    # Si después del filtrado no queda nada, hacer fallback suave:
+    # fallback si algo salió muy agresivo
     if not usable:
         usable = [
             c
@@ -1512,12 +1559,12 @@ def build_composer(clips: List[Dict[str, Any]], mode: str = "human") -> Dict[str
         ]
         usable.sort(key=lambda c: safe_float(c.get("start", 0.0)))
 
-    # 5) Slot blocks (HOOK, PROBLEM, CTA)
+    # 5) blocks HOOK / PROBLEM / CTA
     hook_blocks = group_contiguous_blocks_by_slot(usable, "HOOK", max_gap_sec=1.0)
     best_hook_block = pick_best_block(hook_blocks) if hook_blocks else None
     hook_block_ids = [c["id"] for c in best_hook_block] if best_hook_block else []
 
-    # Only treat as hook block if it's near the start (e.g. first 10s)
+    # Sólo consideramos hook-block si está cerca del inicio (primeros 10s)
     if hook_block_ids:
         first_start = safe_float(best_hook_block[0].get("start", 0.0))
         if first_start > 10.0:
@@ -1531,7 +1578,7 @@ def build_composer(clips: List[Dict[str, Any]], mode: str = "human") -> Dict[str
     best_cta_block = pick_best_block(cta_blocks) if cta_blocks else None
     cta_block_ids = [c["id"] for c in best_cta_block] if best_cta_block else []
 
-    # Fallback CTA if no block
+    # Fallback CTA simple
     ctas = [c for c in usable if c.get("slot") == "CTA"]
     single_best_cta = None
     if ctas:
@@ -1546,7 +1593,7 @@ def build_composer(clips: List[Dict[str, Any]], mode: str = "human") -> Dict[str
     cta_final_ids = cta_block_ids[:]
     cta_final_ids_set = set(cta_final_ids)
 
-    # 6) Build timeline, keeping CTA block last
+    # 6) timeline: todo primero, CTA block al final
     timeline: List[Dict[str, Any]] = []
     used_ids: List[str] = []
 
@@ -1642,9 +1689,7 @@ def pretty_print_composer(
         if not c:
             parts.append(f"{i}) {cid} (not found)")
         else:
-            parts.append(
-                f"{i}) {cid} → \"{c.get('text', '').strip()}\""
-            )
+            parts.append(f"{i}) {cid} → \"{c.get('text', '').strip()}\"")
 
     parts.append("\n=====================================")
     return "\n".join(parts)
@@ -1802,7 +1847,7 @@ def run_pipeline(
             "run_pipeline: 'files' or 'file_urls' must be a list with at least 1 URL"
         )
 
-    # Normalize mode early (same logic as build_composer)
+    # normalizar modo igual que en build_composer
     mode = (mode or "human").lower()
     if mode not in ("human", "clean", "blooper"):
         mode = "human"
@@ -1818,12 +1863,19 @@ def run_pipeline(
     # PHASE 1: ANALYSIS
     # =====================
     asr_segments = run_asr(input_local)
+
+    # 1) micro-sentences
     clips = sentence_boundary_micro_cuts(asr_segments)
+
+    # 2) MERGE INTELIGENTE DE FRASES INCOMPLETAS
+    clips = merge_incomplete_phrases(clips)
+
+    # 3) semántica + LLM + visión
     llm_used = enrich_clips_semantic(clips)
     clips = dedupe_clips(clips)
     vision_used = run_visual_pass(input_local, session_dir, clips)
 
-    # Human-like multi-take chooser (feature-flagged)
+    # 4) TakeJudge opcional (multi-takes humanos)
     take_judge_used = False
     if TAKE_JUDGE_ENABLED:
         take_judge_used = run_take_judge(
