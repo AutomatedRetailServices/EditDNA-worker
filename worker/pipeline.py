@@ -1290,6 +1290,63 @@ def dedupe_clips(clips: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     return out
 
 
+def suppress_redundant_concepts(
+    clips: List[Dict[str, Any]],
+    min_shorter_overlap: float = 0.80,
+) -> None:
+    """
+    Regla CENTRAL de lógica de EditDNA:
+    - Si dos clips dicen prácticamente lo mismo (el texto corto está casi
+      contenido dentro del largo), SOLO puede quedar un héroe de ese concepto.
+    - No depende del producto ni del slot.
+    """
+    # Trabajamos solo con clips vivos
+    alive = [c for c in clips if c["meta"].get("keep", True)]
+
+    # Ordenados por tiempo (normalmente el take bueno viene más tarde)
+    alive.sort(key=lambda c: safe_float(c.get("start", 0.0)))
+
+    n = len(alive)
+    for i in range(n):
+        c1 = alive[i]
+        if not c1["meta"].get("keep", True):
+            continue
+
+        text1 = c1.get("text", "") or ""
+        if not text1.strip():
+            continue
+
+        for j in range(i + 1, n):
+            c2 = alive[j]
+            if not c2["meta"].get("keep", True):
+                continue
+
+            text2 = c2.get("text", "") or ""
+            if not text2.strip():
+                continue
+
+            # Overlap relativo al texto MÁS CORTO
+            shorter_overlap = text_overlap_shorter(text1, text2)
+            if shorter_overlap < min_shorter_overlap:
+                continue
+
+            # Mismo concepto → elegimos héroe
+            score1 = safe_float(c1.get("score", c1.get("semantic_score", 0.0)))
+            score2 = safe_float(c2.get("score", c2.get("semantic_score", 0.0)))
+
+            len1 = len(normalize_text(text1).split())
+            len2 = len(normalize_text(text2).split())
+
+            # Héroe: mayor score; si empatan, el más largo/completo
+            if (score2 > score1) or (score2 == score1 and len2 >= len1):
+                # c2 es héroe → matamos c1
+                c1["meta"]["keep"] = False
+                break
+            else:
+                # c1 es héroe → matamos c2
+                c2["meta"]["keep"] = False
+
+
 # =====================
 # SLOTS + COMPOSER HELPERS
 # =====================
@@ -1529,7 +1586,11 @@ def build_composer(clips: List[Dict[str, Any]], mode: str = "human") -> Dict[str
     suppress_cross_slot_redundant_clips(usable)
     usable = [c for c in usable if c["meta"].get("keep", True)]
 
-    # 4c) FILTER por mode
+    # 4c) REGLA CENTRAL: un héroe por concepto (independiente de slot / producto)
+    suppress_redundant_concepts(usable)
+    usable = [c for c in usable if c["meta"].get("keep", True)]
+
+    # 4d) FILTER por mode
     if mode == "clean":
         # 🧼 CLEAN: sin STORY
         for c in usable:
