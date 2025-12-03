@@ -3,28 +3,17 @@ set -euo pipefail
 
 ###############################################
 #  EditDNA Worker — RQ Worker Launcher
-#  Optimizado para RunPod (GPU / CPU pods)
+#  Compatible con RQ oficial (sin flags inválidos)
 ###############################################
 
-# --------- ENVIRONMENT VALIDATION ---------
-
-# Redis connection URL (required)
+# Redis connection URL (REQUIRED)
 REDIS_URL="${REDIS_URL:?ERROR: You MUST set REDIS_URL}"
 
-# Queue name with fallback
+# Queue name fallback
 QUEUE_NAME="${QUEUE_NAME:-default}"
 
-# Job timeout (must match the WEB API)
-# Default: 1800 sec (30 min)
-JOB_TIMEOUT="${JOB_TIMEOUT:-1800}"
-
-# TTL for results and failures
-RESULT_TTL="${RESULT_TTL:-86400}"
-FAILURE_TTL="${FAILURE_TTL:-86400}"
-
 # --------- PYTHONPATH FIX ---------
-
-# We FORCE Python to see worker/, tasks.py and pipeline.py
+# RunPod puts your repo in /workspace/EditDNA-worker/
 export PYTHONPATH="/workspace/EditDNA-worker:${PYTHONPATH:-}"
 
 echo "=========================================="
@@ -33,16 +22,9 @@ echo "------------------------------------------"
 echo " PYTHONPATH ....... $PYTHONPATH"
 echo " REDIS_URL ........ $REDIS_URL"
 echo " QUEUE_NAME ....... $QUEUE_NAME"
-echo " JOB_TIMEOUT ...... $JOB_TIMEOUT"
-echo " RESULT_TTL ....... $RESULT_TTL"
-echo " FAILURE_TTL ...... $FAILURE_TTL"
 echo "=========================================="
 echo ""
 
-# --------- START RQ WORKER ---------
-
-exec rq worker \
-  -u "$REDIS_URL" \
-  --worker-ttl 3600 \
-  --job-timeout "$JOB_TIMEOUT" \
-  "$QUEUE_NAME"
+# --------- START RQ WORKER (no job-timeout flags) ---------
+# El timeout REAL viene desde EDITDNA-WEB cuando encola el job.
+exec rq worker -u "$REDIS_URL" --worker-ttl 3600 "$QUEUE_NAME"
