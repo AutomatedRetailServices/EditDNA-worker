@@ -56,6 +56,18 @@ W_VISION = float(os.environ.get("W_VISION", "0.7"))
 # BAD TAKES (visual face check) – opcional
 BAD_TAKES_ENABLED = os.environ.get("BAD_TAKES_ENABLED", "0") == "1"
 
+# BOUNDARY TRIM (head/tail dentro del clip, opcional)
+BOUNDARY_REFINER_ENABLED = os.environ.get("BOUNDARY_REFINER_ENABLED", "0") == "1"
+BOUNDARY_REFINER_MIN_DURATION_SEC = float(
+    os.environ.get("BOUNDARY_REFINER_MIN_DURATION_SEC", "3.0")
+)
+BOUNDARY_REFINER_HEAD_STEP_SEC = float(
+    os.environ.get("BOUNDARY_REFINER_HEAD_STEP_SEC", "1.5")
+)
+BOUNDARY_REFINER_TAIL_STEP_SEC = float(
+    os.environ.get("BOUNDARY_REFINER_TAIL_STEP_SEC", "1.5")
+)
+
 # TAKE JUDGE (multi-take selection)
 TAKE_JUDGE_ENABLED = os.environ.get("TAKE_JUDGE_ENABLED", "0") == "1"
 TAKE_JUDGE_MODEL = os.environ.get("TAKE_JUDGE_MODEL", "gpt-4o-mini")
@@ -67,7 +79,7 @@ TAKE_JUDGE_FRAMES = int(os.environ.get("TAKE_JUDGE_FRAMES", "1"))
 S3_BUCKET = os.environ.get("S3_BUCKET")
 S3_PREFIX = os.environ.get("S3_PREFIX", "editdna/outputs")
 
-# Head/tail trims
+# Head/tail trims globales (post selección)
 HEAD_TRIM_SEC = float(os.environ.get("HEAD_TRIM_SEC", "0.0"))
 TAIL_TRIM_SEC = float(os.environ.get("TAIL_TRIM_SEC", "0.0"))
 
@@ -153,7 +165,7 @@ def upload_to_s3(local_path: str, bucket: str, key: str) -> Optional[str]:
         return url
     except Exception as e:
         logger.exception(f"Error uploading to S3: {e}")
-        return None 
+        return None
 
 
 # =====================
@@ -354,10 +366,7 @@ def sentence_boundary_micro_cuts(asr_segments: List[Dict[str, Any]]) -> List[Dic
 
 def looks_incomplete(text: str) -> bool:
     """
-    Detecta frases que NO terminan una idea:
-    - terminan en 'for', 'the', 'a', 'my', 'your', 'our'
-    - terminan sin verbo
-    - muy cortas
+    Detecta frases que NO terminan una idea.
     """
     t = text.strip().lower()
     if len(t.split()) <= 2:
@@ -367,11 +376,9 @@ def looks_incomplete(text: str) -> bool:
     if t.endswith(bad_endings):
         return True
 
-    # empieza con conectores dependientes
     if t.startswith(("and ", "so ", "but ", "or ")):
         return True
 
-    # no termina con '.', '?', '!'
     if not t.endswith((".", "?", "!")):
         return True
 
@@ -380,10 +387,7 @@ def looks_incomplete(text: str) -> bool:
 
 def merge_incomplete_phrases(clips: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     """
-    UNE frases incompletas con la siguiente SI:
-    - son parte de la misma oración lógica
-    - la segunda completa la primera
-    - evita duplicados de repeticiones
+    UNE frases incompletas con la siguiente si tiene sentido.
     """
     if not clips:
         return clips
@@ -395,18 +399,15 @@ def merge_incomplete_phrases(clips: List[Dict[str, Any]]) -> List[Dict[str, Any]
         c = clips[i]
         text = c["text"].strip()
 
-        # Si NO está incompleta → append normal
         if not looks_incomplete(text):
             merged.append(c)
             i += 1
             continue
 
-        # Si está incompleta → intentar merge con la siguiente
         if i + 1 < len(clips):
             nxt = clips[i + 1]
             next_text = nxt["text"].strip()
 
-            # combinar SI continúa la misma oración
             can_merge = (
                 len(next_text.split()) >= 2 and
                 not looks_incomplete(next_text) and
@@ -418,14 +419,13 @@ def merge_incomplete_phrases(clips: List[Dict[str, Any]]) -> List[Dict[str, Any]
                 merged_clip = {
                     **c,
                     "text": new_text,
-                    "end": nxt["end"],  # extender tiempo
+                    "end": nxt["end"],
                     "chain_ids": c["chain_ids"] + nxt["chain_ids"],
                 }
                 merged.append(merged_clip)
                 i += 2
                 continue
 
-        # Si no se pudo mergear → descartar clip incompleto
         i += 1
 
     return merged
@@ -451,7 +451,6 @@ FILLER_PATTERNS = [
     "why can't i remember",
 ]
 
-# Tails dependientes tipo "available as well"
 TAIL_DEPENDENT_ENDINGS = [
     "as well",
     "too",
@@ -477,25 +476,18 @@ def looks_like_filler(text: str) -> bool:
 
 
 def looks_like_dependent_tail(text: str) -> bool:
-    """
-    Detecta colas cortas que dependen totalmente del contexto previo.
-    Ejemplos: "available as well", "too", "either", "and so...", etc.
-    """
     t = text.lower().strip()
     if not t:
         return False
 
     words = t.split()
-    # Sólo frases muy cortas que NO tienen sentido solas
     if len(words) > 4:
         return False
 
-    # Termina en sufijos dependientes
     for suf in TAIL_DEPENDENT_ENDINGS:
         if t.endswith(suf):
             return True
 
-    # Empieza con conectores dependientes
     if words[0] in TAIL_DEPENDENT_STARTS:
         return True
 
@@ -611,7 +603,6 @@ def tag_clips_heuristic(clips: List[Dict[str, Any]]) -> None:
         is_tail = looks_like_dependent_tail(t)
         is_filler = looks_like_filler(t)
 
-        # Cola dependiente o filler simple no se quedan
         keep = not is_filler and not is_tail
 
         if not t:
@@ -751,9 +742,7 @@ def llm_classify_clips(clips: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
 def enrich_clips_semantic(clips: List[Dict[str, Any]]) -> bool:
     """
     1) Heurística local (filler, slots, semantic_score)
-    2) LLM opcional, pero:
-       - NUNCA revive clips que ya estaban keep=False
-       - No deja matar hooks/CTA/problema fuertes (>= COMPOSER_MIN_SEMANTIC y >= 3 palabras)
+    2) LLM opcional, con reglas de seguridad de embudo.
     """
     tag_clips_heuristic(clips)
 
@@ -793,11 +782,9 @@ def enrich_clips_semantic(clips: List[Dict[str, Any]]) -> bool:
         strong_semantic = sem_from_llm >= COMPOSER_MIN_SEMANTIC
         core_slot = slot_upper in {"HOOK", "PROBLEM", "BENEFITS", "FEATURES", "PROOF", "CTA"}
 
-        # Si heurística ya lo había matado → sigue muerto
         if not original_keep:
             final_keep = False
         else:
-            # Clips fuertes de embudo no se pueden matar por LLM
             if core_slot and strong_semantic and word_count >= 3:
                 final_keep = True
             else:
@@ -895,7 +882,6 @@ def run_visual_pass(
         if not text:
             continue
 
-        # Limpiar y recortar caption para no romper CLIP (77 tokens máx aprox)
         clean_text = text.replace("\n", " ").strip()
         if len(clean_text) > 250:
             clean_text = clean_text[:250]
@@ -934,8 +920,7 @@ def run_visual_pass(
 
 def reject_visual_bad_takes(clips: List[Dict[str, Any]], session_dir: str, input_local: str):
     """
-    Llama a un LLM visión+texto para marcar takes visualmente malos como keep=False.
-    (Feature opcional: sólo usar si quieres este paso y tienes presupuesto de tokens)
+    Marca takes visualmente MUY malos como keep=False (nivel entero de clip).
     """
     from openai import OpenAI
     import base64
@@ -989,6 +974,177 @@ def reject_visual_bad_takes(clips: List[Dict[str, Any]], session_dir: str, input
 
 
 # =====================
+# VISION BOUNDARY (HEAD/TAIL) TRIMMER
+# =====================
+
+def refine_clip_boundaries_with_vision(
+    input_local: str,
+    session_dir: str,
+    clips: List[Dict[str, Any]],
+) -> bool:
+    """
+    Cirugía fina dentro del clip:
+    - Mira HEAD / MID / TAIL (3 frames) por clip.
+    - Si HEAD = BAD y MID = GOOD → mueve start hacia head_t.
+    - Si TAIL = BAD y MID = GOOD → mueve end hacia tail_t.
+    - Si HEAD+MID+TAIL = BAD → mata el clip completo.
+    Solo afecta clips con meta.keep=True.
+    """
+    if not BOUNDARY_REFINER_ENABLED:
+        logger.info("BOUNDARY_REFINER_ENABLED=0, skipping boundary refiner.")
+        return False
+
+    from openai import OpenAI
+    import base64
+
+    api_key = os.environ.get("OPENAI_API_KEY")
+    if not api_key:
+        logger.warning("Boundary refiner needs OPENAI_API_KEY, skipping.")
+        return False
+
+    client = OpenAI(api_key=api_key)
+    changed_any = False
+
+    for c in clips:
+        if not c["meta"].get("keep", True):
+            continue
+
+        start = safe_float(c.get("start", 0.0))
+        end = safe_float(c.get("end", start))
+        duration = end - start
+
+        if duration < BOUNDARY_REFINER_MIN_DURATION_SEC:
+            continue
+
+        text = (c.get("text") or "").strip()
+
+        head_t = start + min(BOUNDARY_REFINER_HEAD_STEP_SEC, duration / 3.0)
+        mid_t = start + duration / 2.0
+        tail_t = max(start, end - min(BOUNDARY_REFINER_TAIL_STEP_SEC, duration / 3.0))
+
+        frames_payload = []
+        for label, t in [("head", head_t), ("mid", mid_t), ("tail", tail_t)]:
+            frame_path = os.path.join(session_dir, f"boundary_{c['id']}_{label}.jpg")
+            if not grab_frame_at_timestamp(input_local, t, frame_path):
+                continue
+            try:
+                with open(frame_path, "rb") as f:
+                    img_b64 = base64.b64encode(f.read()).decode("utf-8")
+            except Exception:
+                continue
+            frames_payload.append(
+                {"label": label, "t": t, "image_b64": img_b64}
+            )
+
+        if not frames_payload:
+            continue
+
+        system_msg = (
+            "You are a TikTok ad editor. You will see several frames from the SAME take: "
+            "head, mid, and tail. For each frame decide if the acting moment is GOOD or BAD. "
+            "BAD examples: laughing out of character, fixing hair, adjusting clothes, looking away confused, "
+            "mouth half-open mid-word, clearly not speaking to camera. "
+            "GOOD examples: speaking naturally to camera, looks intentional and confident."
+        )
+
+        meta_for_prompt = [
+            {"label": f["label"], "t": f["t"]}
+            for f in frames_payload
+        ]
+
+        user_text = (
+            "Return ONLY a JSON like:\n"
+            "{ \"frames\": [ {\"label\": \"head|mid|tail\", \"verdict\": \"GOOD\"|\"BAD\"} ] }\n\n"
+            "Do not add explanations outside the JSON.\n\n"
+            f"Spoken text of this clip:\n{json.dumps(text, ensure_ascii=False)}\n\n"
+            f"Frames metadata (label + timestamp_seconds):\n{json.dumps(meta_for_prompt, ensure_ascii=False)}\n"
+        )
+
+        messages = [
+            {
+                "role": "system",
+                "content": [{"type": "text", "text": system_msg}],
+            },
+            {
+                "role": "user",
+                "content": (
+                    [{"type": "text", "text": user_text}]
+                    + [
+                        {
+                            "type": "image_url",
+                            "image_url": {
+                                "url": f"data:image/jpeg;base64,{f['image_b64']}"
+                            },
+                        }
+                        for f in frames_payload
+                    ]
+                ),
+            },
+        ]
+
+        try:
+            resp = client.chat.completions.create(
+                model="gpt-4o",
+                messages=messages,
+                temperature=0.1,
+                max_tokens=200,
+            )
+        except Exception as e:
+            logger.warning(f"Boundary refiner LLM error for clip {c['id']}: {e}")
+            continue
+
+        try:
+            content = resp.choices[0].message.content or ""
+            data = json.loads(content)
+        except Exception as e:
+            logger.warning(f"Boundary refiner JSON parse error for clip {c['id']}: {e}")
+            continue
+
+        verdicts_map = {
+            item.get("label"): (item.get("verdict") or "").upper()
+            for item in data.get("frames", [])
+            if "label" in item
+        }
+
+        head_bad = verdicts_map.get("head") == "BAD"
+        mid_bad = verdicts_map.get("mid") == "BAD"
+        tail_bad = verdicts_map.get("tail") == "BAD"
+
+        # Caso extremo: todo malo → matar el clip.
+        if head_bad and mid_bad and tail_bad:
+            c["meta"]["keep"] = False
+            c["llm_reason"] = (c.get("llm_reason") or "") + " | Removed by boundary refiner: full take visually bad."
+            changed_any = True
+            continue
+
+        new_start = start
+        new_end = end
+
+        # Solo recortamos alrededor si el medio es razonablemente bueno.
+        if not mid_bad:
+            if head_bad and head_t < end - 0.3:
+                new_start = max(head_t, start)
+            if tail_bad and tail_t > start + 0.3:
+                new_end = min(tail_t, end)
+
+        if new_end - new_start < 0.5:
+            # si después del recorte queda demasiado corto, lo matamos
+            if (new_end - new_start) < (duration * 0.25):
+                c["meta"]["keep"] = False
+                c["llm_reason"] = (c.get("llm_reason") or "") + " | Removed by boundary refiner: too short after trim."
+                changed_any = True
+                continue
+
+        if new_start != start or new_end != end:
+            c["start"] = new_start
+            c["end"] = new_end
+            c["llm_reason"] = (c.get("llm_reason") or "") + " | Head/tail refined by boundary refiner."
+            changed_any = True
+
+    return changed_any
+
+
+# =====================
 # TEXT UTILS (para TakeJudge y dedupe)
 # =====================
 
@@ -997,10 +1153,6 @@ def normalize_text(t: str) -> str:
 
 
 def text_overlap_ratio(t1: str, t2: str) -> float:
-    """
-    Jaccard word overlap entre dos textos.
-    0.0 = nada compartido, 1.0 = idéntico.
-    """
     a = normalize_text(t1)
     b = normalize_text(t2)
     if not a or not b:
@@ -1017,11 +1169,6 @@ def text_overlap_ratio(t1: str, t2: str) -> float:
 
 
 def text_overlap_shorter(t1: str, t2: str) -> float:
-    """
-    Overlap relativo al texto más corto:
-    intersección / tamaño del conjunto más corto.
-    1.0 = todo lo que dice el clip corto está contenido en el largo.
-    """
     a = normalize_text(t1)
     b = normalize_text(t2)
     if not a or not b:
@@ -1046,13 +1193,6 @@ def find_sibling_groups(
     window_sec: float = 18.0,
     min_overlap: float = 0.55,
 ) -> List[List[Dict[str, Any]]]:
-    """
-    Encuentra grupos de "takes hermanos":
-    - mismo slot
-    - cerca en tiempo
-    - alto overlap de texto
-    donde sólo debe quedar 1 ganador.
-    """
     usable = [
         c for c in clips
         if c["meta"].get("keep", True)
@@ -1101,12 +1241,6 @@ def run_take_judge(
     session_dir: str,
     input_local: str,
 ) -> bool:
-    """
-    TakeJudgeAI:
-    - Para cada grupo de takes similares, pregunta a un LLM visión+texto
-      cuál es la mejor actuación.
-    - Sólo 1 ganador por grupo (LOSER → keep=False).
-    """
     from openai import OpenAI
     import base64
 
@@ -1248,9 +1382,6 @@ def run_take_judge(
 # =====================
 
 def apply_min_score_rules(clips: List[Dict[str, Any]]) -> None:
-    """
-    Aplica thresholds mínimos usando semantic_score como base.
-    """
     for c in clips:
         slot = c.get("slot", "STORY")
         combined = safe_float(c.get("score", 0.0))
@@ -1269,9 +1400,6 @@ def apply_min_score_rules(clips: List[Dict[str, Any]]) -> None:
 
 
 def dedupe_clips(clips: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-    """
-    Elimina duplicados exactos de texto (normalizado) manteniendo el primero.
-    """
     seen = set()
     out = []
     for c in clips:
@@ -1288,63 +1416,6 @@ def dedupe_clips(clips: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
             seen.add(norm)
         out.append(c)
     return out
-
-
-def suppress_redundant_concepts(
-    clips: List[Dict[str, Any]],
-    min_shorter_overlap: float = 0.80,
-) -> None:
-    """
-    Regla CENTRAL de lógica de EditDNA:
-    - Si dos clips dicen prácticamente lo mismo (el texto corto está casi
-      contenido dentro del largo), SOLO puede quedar un héroe de ese concepto.
-    - No depende del producto ni del slot.
-    """
-    # Trabajamos solo con clips vivos
-    alive = [c for c in clips if c["meta"].get("keep", True)]
-
-    # Ordenados por tiempo (normalmente el take bueno viene más tarde)
-    alive.sort(key=lambda c: safe_float(c.get("start", 0.0)))
-
-    n = len(alive)
-    for i in range(n):
-        c1 = alive[i]
-        if not c1["meta"].get("keep", True):
-            continue
-
-        text1 = c1.get("text", "") or ""
-        if not text1.strip():
-            continue
-
-        for j in range(i + 1, n):
-            c2 = alive[j]
-            if not c2["meta"].get("keep", True):
-                continue
-
-            text2 = c2.get("text", "") or ""
-            if not text2.strip():
-                continue
-
-            # Overlap relativo al texto MÁS CORTO
-            shorter_overlap = text_overlap_shorter(text1, text2)
-            if shorter_overlap < min_shorter_overlap:
-                continue
-
-            # Mismo concepto → elegimos héroe
-            score1 = safe_float(c1.get("score", c1.get("semantic_score", 0.0)))
-            score2 = safe_float(c2.get("score", c2.get("semantic_score", 0.0)))
-
-            len1 = len(normalize_text(text1).split())
-            len2 = len(normalize_text(text2).split())
-
-            # Héroe: mayor score; si empatan, el más largo/completo
-            if (score2 > score1) or (score2 == score1 and len2 >= len1):
-                # c2 es héroe → matamos c1
-                c1["meta"]["keep"] = False
-                break
-            else:
-                # c1 es héroe → matamos c2
-                c2["meta"]["keep"] = False
 
 
 # =====================
@@ -1374,12 +1445,6 @@ def suppress_near_duplicates_by_slot(
     window_sec: float = 60.0,
     min_overlap: float = 0.35,
 ) -> None:
-    """
-    Dentro del mismo slot:
-    - si dos clips están cerca en tiempo (window_sec)
-    - y tienen alto overlap (Jaccard o relativo al más corto)
-    → se considera misma línea, sólo se queda el más fuerte.
-    """
     n = len(clips)
     for i in range(n):
         c1 = clips[i]
@@ -1414,7 +1479,6 @@ def suppress_near_duplicates_by_slot(
             len1 = len(text1.split())
             len2 = len(text2.split())
 
-            # gana el de más semántica, si empata, el más largo
             if sem2 > sem1 or (sem2 == sem1 and len2 >= len1):
                 c1["meta"]["keep"] = False
                 break
@@ -1427,12 +1491,6 @@ def suppress_cross_slot_redundant_clips(
     window_sec: float = 18.0,
     min_overlap: float = 0.35,
 ) -> None:
-    """
-    Cross-slot redundancy:
-    - si una versión corta aparece y luego una versión más completa
-      dentro de la ventana de tiempo, con alto overlap
-      → se queda la más fuerte/larga.
-    """
     n = len(clips)
     for i in range(n):
         c1 = clips[i]
@@ -1460,13 +1518,11 @@ def suppress_cross_slot_redundant_clips(
             sem1 = safe_float(c1.get("semantic_score", 0.0))
             sem2 = safe_float(c2.get("semantic_score", 0.0))
 
-            # versión más larga con suficiente overlap
             if overlap >= min_overlap and len(text2.split()) > len(text1.split()):
                 if sem2 >= sem1:
                     c1["meta"]["keep"] = False
                     break
 
-            # texto1 contenido dentro de texto2 de forma clara
             if text1 in text2 and len(text2.split()) - len(text1.split()) > 3:
                 c1["meta"]["keep"] = False
                 break
@@ -1477,10 +1533,6 @@ def group_contiguous_blocks_by_slot(
     slot: str,
     max_gap_sec: float = 1.0,
 ) -> List[List[Dict[str, Any]]]:
-    """
-    Agrupa clips contiguos del mismo slot en "bloques" de discurso contínuo.
-    Sólo meta.keep=True.
-    """
     ordered = sorted(
         [c for c in clips if c.get("slot") == slot and c["meta"].get("keep", True)],
         key=lambda c: safe_float(c.get("start", 0.0)),
@@ -1516,9 +1568,6 @@ def group_contiguous_blocks_by_slot(
 
 
 def pick_best_block(blocks: List[List[Dict[str, Any]]]) -> Optional[List[Dict[str, Any]]]:
-    """
-    Elige el mejor bloque por score promedio.
-    """
     best_block: Optional[List[Dict[str, Any]]] = None
     best_score = -1.0
 
@@ -1539,21 +1588,10 @@ def pick_best_block(blocks: List[List[Dict[str, Any]]]) -> Optional[List[Dict[st
 
 
 def build_composer(clips: List[Dict[str, Any]], mode: str = "human") -> Dict[str, Any]:
-    """
-    Build the funnel composer timeline.
-
-    mode:
-      - "human"  → mezcla embudo + momentos humanos divertidos
-      - "clean"  → SOLO embudo limpio (HOOK / PROBLEM / BENEFITS / FEATURES / PROOF / CTA)
-                   sin STORY, sin bloopers.
-      - "blooper" → prioriza STORY + un HOOK fuerte y un CTA corto.
-    """
-    # Normalizar modo
     mode = (mode or "human").lower()
     if mode not in ("human", "clean", "blooper"):
         mode = "human"
 
-    # 1) filter por semántica base
     usable = [
         c
         for c in clips
@@ -1561,7 +1599,6 @@ def build_composer(clips: List[Dict[str, Any]], mode: str = "human") -> Dict[str
         and safe_float(c.get("semantic_score", 0.0)) >= COMPOSER_MIN_SEMANTIC
     ]
 
-    # 2) mezclar visión + semántica
     for c in usable:
         sem = safe_float(c.get("semantic_score", 0.0))
         vis = safe_float(c.get("visual_score", 0.0))
@@ -1572,41 +1609,30 @@ def build_composer(clips: List[Dict[str, Any]], mode: str = "human") -> Dict[str
         c["score"] = combined
         c["meta"]["score"] = combined
 
-    # 3) thresholds por slot
     apply_min_score_rules(usable)
 
     usable = [c for c in usable if c["meta"].get("keep", True)]
     usable.sort(key=lambda c: safe_float(c.get("start", 0.0)))
 
-    # 4) dedupe por slot
     suppress_near_duplicates_by_slot(usable)
     usable = [c for c in usable if c["meta"].get("keep", True)]
 
-    # 4b) dedupe cross-slot corto vs extendido
     suppress_cross_slot_redundant_clips(usable)
     usable = [c for c in usable if c["meta"].get("keep", True)]
 
-    # 4c) REGLA CENTRAL: un héroe por concepto (independiente de slot / producto)
-    suppress_redundant_concepts(usable)
-    usable = [c for c in usable if c["meta"].get("keep", True)]
-
-    # 4d) FILTER por mode
     if mode == "clean":
-        # 🧼 CLEAN: sin STORY
         for c in usable:
             if c.get("slot") == "STORY":
                 c["meta"]["keep"] = False
         usable = [c for c in usable if c["meta"].get("keep", True)]
 
     elif mode == "blooper":
-        # 😂 BLOOPER: STORY + HOOK + CTA
         for c in usable:
             slot = c.get("slot")
             if slot not in {"STORY", "HOOK", "CTA"}:
                 c["meta"]["keep"] = False
         usable = [c for c in usable if c["meta"].get("keep", True)]
 
-    # fallback si algo salió muy agresivo
     if not usable:
         usable = [
             c
@@ -1616,12 +1642,10 @@ def build_composer(clips: List[Dict[str, Any]], mode: str = "human") -> Dict[str
         ]
         usable.sort(key=lambda c: safe_float(c.get("start", 0.0)))
 
-    # 5) blocks HOOK / PROBLEM / CTA
     hook_blocks = group_contiguous_blocks_by_slot(usable, "HOOK", max_gap_sec=1.0)
     best_hook_block = pick_best_block(hook_blocks) if hook_blocks else None
     hook_block_ids = [c["id"] for c in best_hook_block] if best_hook_block else []
 
-    # Sólo consideramos hook-block si está cerca del inicio (primeros 10s)
     if hook_block_ids:
         first_start = safe_float(best_hook_block[0].get("start", 0.0))
         if first_start > 10.0:
@@ -1635,7 +1659,6 @@ def build_composer(clips: List[Dict[str, Any]], mode: str = "human") -> Dict[str
     best_cta_block = pick_best_block(cta_blocks) if cta_blocks else None
     cta_block_ids = [c["id"] for c in best_cta_block] if best_cta_block else []
 
-    # Fallback CTA simple
     ctas = [c for c in usable if c.get("slot") == "CTA"]
     single_best_cta = None
     if ctas:
@@ -1650,7 +1673,6 @@ def build_composer(clips: List[Dict[str, Any]], mode: str = "human") -> Dict[str
     cta_final_ids = cta_block_ids[:]
     cta_final_ids_set = set(cta_final_ids)
 
-    # 6) timeline: todo primero, CTA block al final
     timeline: List[Dict[str, Any]] = []
     used_ids: List[str] = []
 
@@ -1753,7 +1775,7 @@ def pretty_print_composer(
 
 
 # =====================
-# FFMPEG RENDER
+# FFMPEG RENDER  ❗ MODULO QUE PEGA LOS CORTES
 # =====================
 
 def render_funnel_video(
@@ -1762,6 +1784,12 @@ def render_funnel_video(
     clips: List[Dict[str, Any]],
     used_clip_ids: List[str],
 ) -> str:
+    """
+    ESTE ES EL MÓDULO QUE:
+      - Toma los clips ya elegidos (used_clip_ids)
+      - Usa su start/end FINAL
+      - Corta y PEGA en ffmpeg para crear final.mp4
+    """
     if not used_clip_ids:
         raise RuntimeError("render_funnel_video: no used_clip_ids provided")
 
@@ -1904,7 +1932,6 @@ def run_pipeline(
             "run_pipeline: 'files' or 'file_urls' must be a list with at least 1 URL"
         )
 
-    # normalizar modo igual que en build_composer
     mode = (mode or "human").lower()
     if mode not in ("human", "clean", "blooper"):
         mode = "human"
@@ -1921,25 +1948,27 @@ def run_pipeline(
     # =====================
     asr_segments = run_asr(input_local)
 
-    # 1) micro-sentences
     clips = sentence_boundary_micro_cuts(asr_segments)
-
-    # 2) MERGE INTELIGENTE DE FRASES INCOMPLETAS
     clips = merge_incomplete_phrases(clips)
 
-    # 3) semántica + LLM + visión
     llm_used = enrich_clips_semantic(clips)
     clips = dedupe_clips(clips)
 
     vision_used = run_visual_pass(input_local, session_dir, clips)
 
-    # 3b) BAD TAKES VISUALES (opcional pero recomendado)
     bad_takes_used = False
     if VISION_ENABLED and BAD_TAKES_ENABLED:
         reject_visual_bad_takes(clips, session_dir, input_local)
         bad_takes_used = True
 
-    # 4) TakeJudge opcional (multi-takes humanos)
+    boundaries_refined = False
+    if VISION_ENABLED and BOUNDARY_REFINER_ENABLED:
+        boundaries_refined = refine_clip_boundaries_with_vision(
+            input_local=input_local,
+            session_dir=session_dir,
+            clips=clips,
+        )
+
     take_judge_used = False
     if TAKE_JUDGE_ENABLED:
         take_judge_used = run_take_judge(
@@ -1979,6 +2008,7 @@ def run_pipeline(
         "llm_used": llm_used,
         "take_judge_used": take_judge_used,
         "bad_takes_used": bad_takes_used,
+        "boundaries_refined": boundaries_refined,
         "composer_mode": mode,
     }
     return result
