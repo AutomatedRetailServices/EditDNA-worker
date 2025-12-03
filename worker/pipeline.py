@@ -835,6 +835,19 @@ def run_visual_pass(
         if not text:
             continue
 
+        # ---------- FIX CONTEXT LENGTH PARA CLIP ----------
+        # Limpiar y recortar el caption antes de tokenizar
+        clean_text = text.replace("\n", " ").strip()
+
+        # recortar a un tamaño seguro aproximado (<77 tokens)
+        if len(clean_text) > 250:
+            clean_text = clean_text[:250]
+
+        # fallback si queda demasiado corto o vacío
+        if len(clean_text) < 5:
+            clean_text = "short video clip"
+        # ---------- FIN FIX ----------
+
         mid_t = (
             safe_float(c.get("start", 0.0)) + safe_float(c.get("end", 0.0))
         ) / 2.0
@@ -850,7 +863,8 @@ def run_visual_pass(
 
         with torch.no_grad():
             image_input = preprocess(image).unsqueeze(0).to(device)
-            text_tokens = clip.tokenize([text]).to(device)  # type: ignore
+            # usar clean_text en lugar de text completo
+            text_tokens = clip.tokenize([clean_text]).to(device)  # type: ignore
 
             image_features = model.encode_image(image_input)
             text_features = model.encode_text(text_tokens)
@@ -1326,7 +1340,7 @@ def suppress_cross_slot_redundant_clips(
         t1 = safe_float(c1.get("start", 0.0))
         text1 = normalize_text(c1.get("text", ""))
 
-        for j in range(i + 1, n):
+        for j in range(i + 1, len(clips)):
             c2 = clips[j]
             if not c2["meta"].get("keep", True):
                 continue
