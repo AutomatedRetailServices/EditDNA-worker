@@ -1,7 +1,8 @@
 import logging
 from typing import List, Optional, Dict, Any
 
-# Importa el pipeline REAL del worker (SIN el punto delante)
+# Importa el pipeline REAL (está en el mismo directorio que tasks.py)
+# OJO: sin punto delante, import absoluto
 from pipeline import run_pipeline
 
 log = logging.getLogger("editdna.tasks")
@@ -29,7 +30,7 @@ def job_render(
         f"files={files} file_urls={file_urls}"
     )
 
-    # Ejecutar el pipeline
+    # Ejecuta el pipeline principal
     result = run_pipeline(
         session_id=session_id,
         files=files,
