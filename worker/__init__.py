@@ -1,2 +1,2 @@
-# Empty init so "worker" is a package.
-# Do NOT put anything else here.
+# EditDNA-worker/Worker/__init__.py
+# Marca este directorio como un paquete Python.
