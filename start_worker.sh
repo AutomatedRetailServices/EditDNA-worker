@@ -1,22 +1,16 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# ============================
-#  Ensure REDIS_URL is defined
-# ============================
-REDIS_URL="${REDIS_URL:?REDIS_URL is required}"
+# Asegura que REDIS_URL exista
+REDIS_URL="${REDIS_URL:?Set REDIS_URL}"
 QUEUE_NAME="${QUEUE_NAME:-default}"
 
-# ============================================
-#  PYTHONPATH must include the current project
-#  (/workspace/EditDNA-worker)
-# ============================================
-export PYTHONPATH=".:${PYTHONPATH:-}"
+# Estar en /workspace/EditDNA-worker (el repo) ya lo hace RunPod.
+# PYTHONPATH debe apuntar al directorio actual (.)
+export PYTHONPATH=.:${PYTHONPATH:-}
 
 echo ">>> PYTHONPATH = $PYTHONPATH"
-echo ">>> Starting RQ worker on queue: $QUEUE_NAME  (redis: $REDIS_URL)"
+echo ">>> Starting RQ worker on queue: $QUEUE_NAME (redis: $REDIS_URL)"
 
-# ===================================================
-#  Start RQ worker — it MUST resolve tasks.job_render
-# ===================================================
+# Arranca el worker RQ que ejecuta tasks.job_render
 exec rq worker -u "$REDIS_URL" --worker-ttl 1200 "$QUEUE_NAME"
