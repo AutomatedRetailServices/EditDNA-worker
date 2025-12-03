@@ -4,7 +4,7 @@ set -euo pipefail
 REDIS_URL="${REDIS_URL:?Set REDIS_URL}"
 QUEUE_NAME="${QUEUE_NAME:-default}"
 
-# 👇 IMPORTANTÍSIMO: agrega el repo al PYTHONPATH
+# 👇 Ruta donde se clona el repo en RunPod
 export PYTHONPATH="/workspace/EditDNA-worker:${PYTHONPATH:-}"
 
 echo ">>> Starting RQ worker on queue: $QUEUE_NAME (redis: $REDIS_URL)"
