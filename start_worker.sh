@@ -1,16 +1,48 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Asegura que REDIS_URL exista
-REDIS_URL="${REDIS_URL:?Set REDIS_URL}"
+###############################################
+#  EditDNA Worker — RQ Worker Launcher
+#  Optimizado para RunPod (GPU / CPU pods)
+###############################################
+
+# --------- ENVIRONMENT VALIDATION ---------
+
+# Redis connection URL (required)
+REDIS_URL="${REDIS_URL:?ERROR: You MUST set REDIS_URL}"
+
+# Queue name with fallback
 QUEUE_NAME="${QUEUE_NAME:-default}"
 
-# Estar en /workspace/EditDNA-worker (el repo) ya lo hace RunPod.
-# PYTHONPATH debe apuntar al directorio actual (.)
-export PYTHONPATH=.:${PYTHONPATH:-}
+# Job timeout (must match the WEB API)
+# Default: 1800 sec (30 min)
+JOB_TIMEOUT="${JOB_TIMEOUT:-1800}"
 
-echo ">>> PYTHONPATH = $PYTHONPATH"
-echo ">>> Starting RQ worker on queue: $QUEUE_NAME (redis: $REDIS_URL)"
+# TTL for results and failures
+RESULT_TTL="${RESULT_TTL:-86400}"
+FAILURE_TTL="${FAILURE_TTL:-86400}"
 
-# Arranca el worker RQ que ejecuta tasks.job_render
-exec rq worker -u "$REDIS_URL" --worker-ttl 1200 "$QUEUE_NAME"
+# --------- PYTHONPATH FIX ---------
+
+# We FORCE Python to see worker/, tasks.py and pipeline.py
+export PYTHONPATH="/workspace/EditDNA-worker:${PYTHONPATH:-}"
+
+echo "=========================================="
+echo "      EDITDNA WORKER STARTING"
+echo "------------------------------------------"
+echo " PYTHONPATH ....... $PYTHONPATH"
+echo " REDIS_URL ........ $REDIS_URL"
+echo " QUEUE_NAME ....... $QUEUE_NAME"
+echo " JOB_TIMEOUT ...... $JOB_TIMEOUT"
+echo " RESULT_TTL ....... $RESULT_TTL"
+echo " FAILURE_TTL ...... $FAILURE_TTL"
+echo "=========================================="
+echo ""
+
+# --------- START RQ WORKER ---------
+
+exec rq worker \
+  -u "$REDIS_URL" \
+  --worker-ttl 3600 \
+  --job-timeout "$JOB_TIMEOUT" \
+  "$QUEUE_NAME"
