@@ -1,9 +1,7 @@
-# EditDNA-worker/tasks.py
 import logging
 from typing import List, Optional, Dict, Any
 
-# Importa el pipeline REAL que está dentro de Worker/pipeline.py
-from Worker.pipeline import run_pipeline
+from worker.pipeline import run_pipeline  # <- usa el pipeline que pegaste
 
 log = logging.getLogger("editdna.tasks")
 log.setLevel(logging.INFO)
@@ -16,26 +14,20 @@ def job_render(
     mode: str = "human",
 ) -> Dict[str, Any]:
     """
-    Job principal ejecutado por el worker.
-
-    IMPORTANTE:
-      - Este módulo se llama 'tasks'
-      - Esta función se llama 'job_render'
-      - Así coincide perfecto con el string: 'tasks.job_render'
-        que se encola desde EditDNA-web.
+    Punto de entrada que el worker RQ ejecuta como `tasks.job_render`.
     """
 
-    # Normalizar modo
+    # Normalizar modo para evitar sorpresas
     mode_norm = (mode or "human").lower()
     if mode_norm not in ("human", "clean", "blooper"):
         mode_norm = "human"
 
     log.info(
-        f"[job_render] START session_id={session_id} mode={mode_norm} "
-        f"files={files} file_urls={file_urls}"
+        f"[job_render] START session_id={session_id} "
+        f"mode={mode_norm} files={files} file_urls={file_urls}"
     )
 
-    # Ejecuta el pipeline real
+    # Ejecuta el pipeline REAL
     result = run_pipeline(
         session_id=session_id,
         files=files,
