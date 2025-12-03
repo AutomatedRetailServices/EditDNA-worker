@@ -1,8 +1,8 @@
 import logging
 from typing import List, Optional, Dict, Any
 
-# Import the REAL pipeline used by the worker
-from .pipeline import run_pipeline
+# Importa el pipeline REAL del worker (SIN el punto delante)
+from pipeline import run_pipeline
 
 log = logging.getLogger("editdna.tasks")
 log.setLevel(logging.INFO)
@@ -19,7 +19,7 @@ def job_render(
     EXACT name expected by RQ: tasks.job_render
     """
 
-    # Normalize mode
+    # Normalizar modo
     mode_norm = (mode or "human").lower()
     if mode_norm not in ("human", "clean", "blooper"):
         mode_norm = "human"
@@ -29,7 +29,7 @@ def job_render(
         f"files={files} file_urls={file_urls}"
     )
 
-    # Run pipeline
+    # Ejecutar el pipeline
     result = run_pipeline(
         session_id=session_id,
         files=files,
