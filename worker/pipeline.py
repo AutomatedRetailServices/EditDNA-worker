@@ -53,6 +53,9 @@ VISION_INTERVAL_SEC = float(os.environ.get("VISION_INTERVAL_SEC", "2.0"))
 VISION_MAX_SAMPLES = int(os.environ.get("VISION_MAX_SAMPLES", "50"))
 W_VISION = float(os.environ.get("W_VISION", "0.7"))
 
+# BAD TAKES (visual face check) – opcional
+BAD_TAKES_ENABLED = os.environ.get("BAD_TAKES_ENABLED", "0") == "1"
+
 # TAKE JUDGE (multi-take selection)
 TAKE_JUDGE_ENABLED = os.environ.get("TAKE_JUDGE_ENABLED", "0") == "1"
 TAKE_JUDGE_MODEL = os.environ.get("TAKE_JUDGE_MODEL", "gpt-4o-mini")
@@ -151,6 +154,8 @@ def upload_to_s3(local_path: str, bucket: str, key: str) -> Optional[str]:
     except Exception as e:
         logger.exception(f"Error uploading to S3: {e}")
         return None 
+
+
 # =====================
 # CLIP OBJECT CREATION
 # =====================
@@ -344,7 +349,7 @@ def sentence_boundary_micro_cuts(asr_segments: List[Dict[str, Any]]) -> List[Dic
 
 
 # =====================
-# **MERGE INTELIGENTE DE FRASES INCOMPLETAS**
+# MERGE INTELIGENTE DE FRASES INCOMPLETAS
 # =====================
 
 def looks_incomplete(text: str) -> bool:
@@ -379,20 +384,7 @@ def merge_incomplete_phrases(clips: List[Dict[str, Any]]) -> List[Dict[str, Any]
     - son parte de la misma oración lógica
     - la segunda completa la primera
     - evita duplicados de repeticiones
-    
-    EJEMPLOS:
-        "I found the perfect gift for our"
-        + "lip gloss girly."
-        → "I found the perfect gift for our lip gloss girly."
-
-        "These are so cute"
-        + "they are all lip glosses."
-        → merge válido
-
-    También elimina:
-        - versiones incompletas si existe una versión completa posterior.
     """
-
     if not clips:
         return clips
 
@@ -437,7 +429,9 @@ def merge_incomplete_phrases(clips: List[Dict[str, Any]]) -> List[Dict[str, Any]
         i += 1
 
     return merged
-    # =====================
+
+
+# =====================
 # HEURISTIC TAGGING
 # =====================
 
@@ -1294,7 +1288,9 @@ def dedupe_clips(clips: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
             seen.add(norm)
         out.append(c)
     return out
-    # =====================
+
+
+# =====================
 # SLOTS + COMPOSER HELPERS
 # =====================
 
@@ -1759,7 +1755,7 @@ def render_funnel_video(
             f"={len(a_labels)} != len(v_labels)={n}, "
             "disabling audio to avoid media type mismatch."
         )
-        has_audio = False
+    has_audio = has_audio and len(a_labels) == n
 
     filter_complex_parts: List[str] = list(filter_parts)
 
@@ -1873,7 +1869,14 @@ def run_pipeline(
     # 3) semántica + LLM + visión
     llm_used = enrich_clips_semantic(clips)
     clips = dedupe_clips(clips)
+
     vision_used = run_visual_pass(input_local, session_dir, clips)
+
+    # 3b) BAD TAKES VISUALES (opcional pero recomendado)
+    bad_takes_used = False
+    if VISION_ENABLED and BAD_TAKES_ENABLED:
+        reject_visual_bad_takes(clips, session_dir, input_local)
+        bad_takes_used = True
 
     # 4) TakeJudge opcional (multi-takes humanos)
     take_judge_used = False
@@ -1914,6 +1917,7 @@ def run_pipeline(
         "vision": vision_used,
         "llm_used": llm_used,
         "take_judge_used": take_judge_used,
+        "bad_takes_used": bad_takes_used,
         "composer_mode": mode,
     }
     return result
