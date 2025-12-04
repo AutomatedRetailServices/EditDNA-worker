@@ -1150,7 +1150,7 @@ def refine_clip_boundaries_with_vision(
                 model="gpt-5.1",
                 messages=messages,
                 temperature=0.1,
-                max_tokens=1000,
+                max_completion_tokens=1000,
             )
         except Exception as e:
             logger.warning(f"Boundary refiner LLM error for clip {c['id']}: {e}")
@@ -1437,7 +1437,7 @@ def run_take_judge(
                 model=TAKE_JUDGE_MODEL,
                 messages=messages,
                 temperature=0.1,
-                max_tokens=150,
+                max_completion_tokens=150,
             )
         except Exception as e:
             logger.warning(f"TakeJudgeAI error for group: {e}")
