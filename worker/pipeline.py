@@ -1493,11 +1493,18 @@ def run_take_judge(
 # =====================
 
 def apply_min_score_rules(clips: List[Dict[str, Any]]) -> None:
+    """
+    Reglas mínimas de calidad:
+      - Score semántico por slot (HOOK/CTA más exigentes)
+      - Si hay visual_score muy bajo, se descarta el clip
+    """
     for c in clips:
         slot = c.get("slot", "STORY")
         combined = safe_float(c.get("score", 0.0))
         sem = safe_float(c.get("semantic_score", 0.0))
+        vis = safe_float(c.get("visual_score", 0.0))
 
+        # 🔹 Umbral base por slot
         threshold = EDITDNA_MIN_CLIP_SCORE
         if slot == "HOOK":
             threshold = max(threshold, EDITDNA_HOOK_MIN_SCORE)
@@ -1506,10 +1513,16 @@ def apply_min_score_rules(clips: List[Dict[str, Any]]) -> None:
 
         effective_score = sem if sem > 0 else combined
 
+        # 1) Si el score semántico es bajo → fuera
         if effective_score < threshold:
             c["meta"]["keep"] = False
+            continue
 
-
+        # 2) Si hay visión y se ve MUY flojo → fuera también
+        if vis > 0.0 and vis < 0.58:
+            c["meta"]["keep"] = False
+            continue
+            
 def dedupe_clips(clips: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     seen = set()
     out = []
