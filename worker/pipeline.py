@@ -839,13 +839,14 @@ def load_clip_model():
         return _CLIP_MODEL, _CLIP_PREPROCESS, _CLIP_DEVICE
 
     try:
-        import torch
+        import torch  # sigue siendo necesario para CLIP
         import clip as clip_lib  # type: ignore
     except Exception as e:
         logger.warning(f"Could not import torch/clip for vision: {e}")
         return None, None, "cpu"
 
-    device = "cuda" if torch.cuda.is_available() else "cpu"
+    # 🔒 FORZAMOS CPU SIEMPRE, aunque Torch diga que hay CUDA disponible
+    device = "cpu"
     model, preprocess = clip_lib.load("ViT-B/32", device=device)
     _CLIP_MODEL = model
     _CLIP_PREPROCESS = preprocess
@@ -853,7 +854,6 @@ def load_clip_model():
 
     logger.info(f"CLIP model loaded on device {device}")
     return _CLIP_MODEL, _CLIP_PREPROCESS, _CLIP_DEVICE
-
 
 def grab_frame_at_timestamp(input_local: str, t: float, out_path: str) -> bool:
     cmd = [
