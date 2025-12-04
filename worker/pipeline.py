@@ -983,13 +983,14 @@ def refine_clip_boundaries_with_vision(
     clips: List[Dict[str, Any]],
 ) -> bool:
     """
-    Cirugía fina dentro del clip:
+    Cirugía fina DENTRO del clip:
     - Mira HEAD / MID / TAIL (3 frames) por clip.
-    - Si HEAD = BAD y MID = GOOD → mueve start hacia head_t.
-    - Si TAIL = BAD y MID = GOOD → mueve end hacia tail_t.
+    - Si HEAD = BAD, MID = GOOD → mueve start hacia head_t.
+    - Si TAIL = BAD, MID = GOOD → mueve end hacia tail_t.
     - Si HEAD+MID+TAIL = BAD → mata el clip completo.
-    Solo afecta clips con meta.keep=True.
+    Sólo afecta clips con meta.keep=True.
     """
+
     if not BOUNDARY_REFINER_ENABLED:
         logger.info("BOUNDARY_REFINER_ENABLED=0, skipping boundary refiner.")
         return False
@@ -1005,6 +1006,32 @@ def refine_clip_boundaries_with_vision(
     client = OpenAI(api_key=api_key)
     changed_any = False
 
+    def _safe_parse_json(raw: str) -> Optional[Dict[str, Any]]:
+        """
+        Hace parsing robusto:
+        - quita ```json ... ``` si viene en code-fence
+        - recorta hasta el primer '{' y el último '}'
+        """
+        if not raw:
+            return None
+        txt = raw.strip()
+        if txt.startswith("```"):
+            # quitar ```json\n y el cierre ```
+            parts = txt.split("```")
+            if len(parts) >= 3:
+                txt = parts[1]
+            txt = txt.strip()
+        # recortar a rango [primera '{' .. última '}']
+        start_i = txt.find("{")
+        end_i = txt.rfind("}")
+        if start_i == -1 or end_i == -1 or end_i <= start_i:
+            return None
+        txt = txt[start_i : end_i + 1]
+        try:
+            return json.loads(txt)
+        except Exception:
+            return None
+
     for c in clips:
         if not c["meta"].get("keep", True):
             continue
@@ -1013,7 +1040,8 @@ def refine_clip_boundaries_with_vision(
         end = safe_float(c.get("end", start))
         duration = end - start
 
-        if duration < BOUNDARY_REFINER_MIN_DURATION_SEC:
+        # clips muy cortos no se tocan
+        if duration <= BOUNDARY_REFINER_MIN_DURATION_SEC:
             continue
 
         text = (c.get("text") or "").strip()
@@ -1022,9 +1050,11 @@ def refine_clip_boundaries_with_vision(
         mid_t = start + duration / 2.0
         tail_t = max(start, end - min(BOUNDARY_REFINER_TAIL_STEP_SEC, duration / 3.0))
 
-        frames_payload = []
-        for label, t in [("head", head_t), ("mid", mid_t), ("tail", tail_t)]:
-            frame_path = os.path.join(session_dir, f"boundary_{c['id']}_{label}.jpg")
+        frames_payload: List[Dict[str, Any]] = []
+        for label, t in (("head", head_t), ("mid", mid_t), ("tail", tail_t)):
+            frame_path = os.path.join(
+                session_dir, f"boundary_{c['id']}_{label}.jpg"
+            )
             if not grab_frame_at_timestamp(input_local, t, frame_path):
                 continue
             try:
@@ -1032,9 +1062,7 @@ def refine_clip_boundaries_with_vision(
                     img_b64 = base64.b64encode(f.read()).decode("utf-8")
             except Exception:
                 continue
-            frames_payload.append(
-                {"label": label, "t": t, "image_b64": img_b64}
-            )
+            frames_payload.append({"label": label, "t": t, "image_b64": img_b64})
 
         if not frames_payload:
             continue
@@ -1042,22 +1070,28 @@ def refine_clip_boundaries_with_vision(
         system_msg = (
             "You are a TikTok ad editor. You will see several frames from the SAME take: "
             "head, mid, and tail. For each frame decide if the acting moment is GOOD or BAD. "
-            "BAD examples: laughing out of character, fixing hair, adjusting clothes, looking away confused, "
-            "mouth half-open mid-word, clearly not speaking to camera. "
+            "BAD examples: laughing out of character, fixing hair, adjusting clothes, "
+            "looking away confused, mouth half-open mid-word, clearly not speaking to camera. "
             "GOOD examples: speaking naturally to camera, looks intentional and confident."
         )
 
         meta_for_prompt = [
-            {"label": f["label"], "t": f["t"]}
-            for f in frames_payload
+            {"label": f["label"], "t": f["t"]} for f in frames_payload
         ]
 
         user_text = (
             "Return ONLY a JSON like:\n"
-            "{ \"frames\": [ {\"label\": \"head|mid|tail\", \"verdict\": \"GOOD\"|\"BAD\"} ] }\n\n"
+            "{\n"
+            '  "frames": [\n'
+            '    {"label": "head", "verdict": "GOOD"|"BAD"},\n'
+            '    {"label": "mid",  "verdict": "GOOD"|"BAD"},\n'
+            '    {"label": "tail", "verdict": "GOOD"|"BAD"}\n'
+            "  ]\n"
+            "}\n\n"
             "Do not add explanations outside the JSON.\n\n"
             f"Spoken text of this clip:\n{json.dumps(text, ensure_ascii=False)}\n\n"
-            f"Frames metadata (label + timestamp_seconds):\n{json.dumps(meta_for_prompt, ensure_ascii=False)}\n"
+            f"Frames metadata (label + timestamp_seconds):\n"
+            f"{json.dumps(meta_for_prompt, ensure_ascii=False)}\n"
         )
 
         messages = [
@@ -1084,10 +1118,10 @@ def refine_clip_boundaries_with_vision(
 
         try:
             resp = client.chat.completions.create(
-                model="gpt-4o",
+                model="gpt-5.1",
                 messages=messages,
                 temperature=0.1,
-                max_tokens=200,
+                max_tokens=1000,
             )
         except Exception as e:
             logger.warning(f"Boundary refiner LLM error for clip {c['id']}: {e}")
@@ -1095,45 +1129,51 @@ def refine_clip_boundaries_with_vision(
 
         try:
             content = resp.choices[0].message.content or ""
-            data = json.loads(content)
         except Exception as e:
-            logger.warning(f"Boundary refiner JSON parse error for clip {c['id']}: {e}")
+            logger.warning(f"Boundary refiner empty response for clip {c['id']}: {e}")
+            continue
+
+        data = _safe_parse_json(content)
+        if not data:
+            logger.warning(
+                f"Boundary refiner JSON parse error for clip {c['id']}: raw={content[:120]!r}"
+            )
             continue
 
         verdicts_map = {
-            item.get("label"): (item.get("verdict") or "").upper()
+            item.get("label", ""): (item.get("verdict", "") or "").upper()
             for item in data.get("frames", [])
-            if "label" in item
+            if isinstance(item, dict)
         }
 
         head_bad = verdicts_map.get("head") == "BAD"
         mid_bad = verdicts_map.get("mid") == "BAD"
         tail_bad = verdicts_map.get("tail") == "BAD"
 
-        # Caso extremo: todo malo → matar el clip.
+        # Caso extremo: todo malo → matar el clip completo.
         if head_bad and mid_bad and tail_bad:
             c["meta"]["keep"] = False
             c["llm_reason"] = (c.get("llm_reason") or "") + " | Removed by boundary refiner: full take visually bad."
             changed_any = True
             continue
 
+        # Empezamos asumiendo mismo rango
         new_start = start
         new_end = end
 
-        # Solo recortamos alrededor si el medio es razonablemente bueno.
+        # Sólo recortamos alrededor si el mid es razonablemente bueno.
         if not mid_bad:
-            if head_bad and head_t < end - 0.3:
+            if head_bad and head_t < end - 0.30:
                 new_start = max(head_t, start)
-            if tail_bad and tail_t > start + 0.3:
+            if tail_bad and tail_t > start + 0.30:
                 new_end = min(tail_t, end)
 
-        if new_end - new_start < 0.5:
-            # si después del recorte queda demasiado corto, lo matamos
-            if (new_end - new_start) < (duration * 0.25):
-                c["meta"]["keep"] = False
-                c["llm_reason"] = (c.get("llm_reason") or "") + " | Removed by boundary refiner: too short after trim."
-                changed_any = True
-                continue
+        # Si después del recorte queda ridículamente corto, lo matamos
+        if new_end <= new_start or (new_end - new_start) < max(0.5, duration * 0.25):
+            c["meta"]["keep"] = False
+            c["llm_reason"] = (c.get("llm_reason") or "") + " | Removed by boundary refiner: too short after trim."
+            changed_any = True
+            continue
 
         if new_start != start or new_end != end:
             c["start"] = new_start
@@ -1142,7 +1182,6 @@ def refine_clip_boundaries_with_vision(
             changed_any = True
 
     return changed_any
-
 
 # =====================
 # TEXT UTILS (para TakeJudge y dedupe)
