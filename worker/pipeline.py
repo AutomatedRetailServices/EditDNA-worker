@@ -708,6 +708,28 @@ def llm_classify_clips(clips: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
         f"Aquí están los clips:\n{json.dumps(user_instruction, ensure_ascii=False)}"
     )
 
+    def _safe_parse_json(raw: str) -> Optional[Dict[str, Any]]:
+        """
+        Parsing robusto para cuando el modelo devuelve ```json ...``` o texto extra.
+        """
+        if not raw:
+            return None
+        txt = raw.strip()
+        if txt.startswith("```"):
+            parts = txt.split("```")
+            if len(parts) >= 3:
+                txt = parts[1]
+            txt = txt.strip()
+        start_i = txt.find("{")
+        end_i = txt.rfind("}")
+        if start_i == -1 or end_i == -1 or end_i <= start_i:
+            return None
+        txt = txt[start_i : end_i + 1]
+        try:
+            return json.loads(txt)
+        except Exception:
+            return None
+
     try:
         completion = client.chat.completions.create(
             model=EDITDNA_LLM_MODEL,
@@ -717,26 +739,33 @@ def llm_classify_clips(clips: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
             ],
             temperature=0.2,
         )
-
-        content = completion.choices[0].message.content
-        data = json.loads(content)
-
-        result_map: Dict[str, Any] = {}
-        for item in data.get("clips", []):
-            cid = item.get("id")
-            if not cid:
-                continue
-            result_map[cid] = {
-                "slot": item.get("slot", "STORY"),
-                "keep": bool(item.get("keep", True)),
-                "semantic_score": safe_float(item.get("semantic_score", 0.0)),
-                "reason": item.get("reason", ""),
-            }
-        return result_map
-
     except Exception as e:
         logger.exception(f"Error calling LLM: {e}")
         return None
+
+    try:
+        content = completion.choices[0].message.content or ""
+    except Exception as e:
+        logger.exception(f"Error reading LLM content: {e}")
+        return None
+
+    data = _safe_parse_json(content)
+    if not data:
+        logger.warning(f"LLM JSON parse error, raw={content[:120]!r}")
+        return None
+
+    result_map: Dict[str, Any] = {}
+    for item in data.get("clips", []):
+        cid = item.get("id")
+        if not cid:
+            continue
+        result_map[cid] = {
+            "slot": item.get("slot", "STORY"),
+            "keep": bool(item.get("keep", True)),
+            "semantic_score": safe_float(item.get("semantic_score", 0.0)),
+            "reason": item.get("reason", ""),
+        }
+    return result_map
 
 
 def enrich_clips_semantic(clips: List[Dict[str, Any]]) -> bool:
@@ -1280,6 +1309,12 @@ def run_take_judge(
     session_dir: str,
     input_local: str,
 ) -> bool:
+    """
+    TakeJudgeAI:
+    - Para cada grupo de takes similares (mismo slot + texto casi igual)
+      pregunta a un LLM visión+texto cuál es la mejor actuación.
+    - Sólo 1 ganador por grupo (LOSER → keep=False).
+    """
     from openai import OpenAI
     import base64
 
@@ -1293,12 +1328,34 @@ def run_take_judge(
 
     client = OpenAI(api_key=api_key)
 
+    def _safe_parse_json(raw: str) -> Optional[Dict[str, Any]]:
+        if not raw:
+            return None
+        txt = raw.strip()
+        if txt.startswith("```"):
+            parts = txt.split("```")
+            if len(parts) >= 3:
+                txt = parts[1]
+            txt = txt.strip()
+        start_i = txt.find("{")
+        end_i = txt.rfind("}")
+        if start_i == -1 or end_i == -1 or end_i <= start_i:
+            return None
+        txt = txt[start_i : end_i + 1]
+        try:
+            return json.loads(txt)
+        except Exception:
+            return None
+
     groups = find_sibling_groups(clips)
     if not groups:
         return False
 
+    # Limitar por presupuesto
     groups = groups[:TAKE_JUDGE_MAX_GROUPS]
     groups = [g[:TAKE_JUDGE_MAX_TAKES] for g in groups]
+
+    used_any = False
 
     for group in groups:
         payload = []
@@ -1318,11 +1375,13 @@ def run_take_judge(
             except Exception:
                 continue
 
-            payload.append({
-                "id": c["id"],
-                "text": (c.get("text") or "").strip(),
-                "image_b64": img_b64,
-            })
+            payload.append(
+                {
+                    "id": c["id"],
+                    "text": (c.get("text") or "").strip(),
+                    "image_b64": img_b64,
+                }
+            )
 
         if not payload:
             continue
@@ -1336,11 +1395,20 @@ def run_take_judge(
 
         user_json = {
             "task": "choose_best_take",
-            "takes": [
-                {"id": p["id"], "text": p["text"]}
-                for p in payload
-            ],
+            "takes": [{"id": p["id"], "text": p["text"]} for p in payload],
         }
+
+        user_text = (
+            "Return ONLY a JSON like:\n"
+            "{\n"
+            '  \"winner_id\": \"...\",\n'
+            '  \"scores\": [\n'
+            '    {\"id\": \"...\", \"score\": 0.xx}\n'
+            "  ]\n"
+            "}\n\n"
+            "Do not add any explanation outside the JSON.\n\n"
+            f"Takes metadata:\n{json.dumps(user_json, ensure_ascii=False)}"
+        )
 
         messages = [
             {
@@ -1350,17 +1418,7 @@ def run_take_judge(
             {
                 "role": "user",
                 "content": (
-                    [
-                        {
-                            "type": "text",
-                            "text": (
-                                "Return ONLY a JSON like:\n"
-                                "{ \"winner_id\": \"...\", "
-                                "\"scores\": [{\"id\":\"...\",\"score\":0.0}] }\n\n"
-                                f"Takes:\n{json.dumps(user_json, ensure_ascii=False)}"
-                            ),
-                        }
-                    ]
+                    [{"type": "text", "text": user_text}]
                     + [
                         {
                             "type": "image_url",
@@ -1386,34 +1444,48 @@ def run_take_judge(
             continue
 
         try:
-            content = resp.choices[0].message.content
-            data = json.loads(content)
+            content = resp.choices[0].message.content or ""
         except Exception as e:
-            logger.warning(f"TakeJudgeAI JSON parse error: {e}")
+            logger.warning(f"TakeJudgeAI empty response: {e}")
+            continue
+
+        data = _safe_parse_json(content)
+        if not data:
+            logger.warning(
+                f"TakeJudgeAI JSON parse error: raw={content[:120]!r}"
+            )
             continue
 
         winner_id = data.get("winner_id")
         scores_map = {
-            s["id"]: safe_float(s.get("score", 0.0))
+            s.get("id"): safe_float(s.get("score", 0.0))
             for s in data.get("scores", [])
-            if "id" in s
+            if isinstance(s, dict) and s.get("id")
         }
 
         if not winner_id:
+            logger.warning("TakeJudgeAI response without winner_id, skipping group.")
             continue
 
+        # Guardamos scores + WINNER / LOSER
         for c in group:
             cid = c["id"]
             tj_score = scores_map.get(cid, 0.0)
             c["meta"]["take_judge_score"] = tj_score
-            c["meta"]["take_judge_verdict"] = "WINNER" if cid == winner_id else "LOSER"
+            c["meta"]["take_judge_verdict"] = (
+                "WINNER" if cid == winner_id else "LOSER"
+            )
 
+        # Sólo dejamos vivo el ganador
         for c in group:
             cid = c["id"]
             if cid != winner_id and c["meta"].get("keep", True):
                 c["meta"]["keep"] = False
+                c["llm_reason"] = (c.get("llm_reason") or "") + " | Removed by TakeJudgeAI (better take exists)."
 
-    return True
+        used_any = True
+
+    return used_any
 
 
 # =====================
