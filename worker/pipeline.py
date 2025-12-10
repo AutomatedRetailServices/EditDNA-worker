@@ -166,6 +166,35 @@ def upload_to_s3(local_path: str, bucket: str, key: str) -> Optional[str]:
     except Exception as e:
         logger.exception(f"Error uploading to S3: {e}")
         return None
+        
+def save_result_json_to_s3(result: Dict[str, Any]) -> Optional[str]:
+    """
+    Guarda el JSON completo del pipeline en S3 como dataset.
+    Devuelve el path s3://... o None si falla.
+    """
+    bucket = S3_BUCKET
+    if not bucket:
+        logger.warning("S3_BUCKET is not set, skipping JSON upload.")
+        return None
+
+    try:
+        s3 = boto3.client("s3")
+        session_id = result.get("session_id", "unknown")
+        # Puedes cambiar 'dataset/bloopers' por lo que quieras
+        key = f"{S3_PREFIX}/dataset/bloopers/{session_id}.json"
+
+        body = json.dumps(result, ensure_ascii=False).encode("utf-8")
+        s3.put_object(
+            Bucket=bucket,
+            Key=key,
+            Body=body,
+            ContentType="application/json",
+        )
+        logger.info(f"Uploaded JSON result to s3://{bucket}/{key}")
+        return f"s3://{bucket}/{key}"
+    except Exception as e:
+        logger.exception(f"Error uploading JSON result to S3: {e}")
+        return None
 
 
 # =====================
@@ -2135,4 +2164,8 @@ def run_pipeline(
         "boundaries_refined": boundaries_refined,
         "composer_mode": mode,
     }
+    # 🔹 nuevo: guardar el JSON de este run en S3
+    json_s3_uri = save_result_json_to_s3(result)
+    result["output_json_s3_uri"] = json_s3_uri
+
     return result
