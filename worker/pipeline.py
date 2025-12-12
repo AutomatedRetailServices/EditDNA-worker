@@ -2132,7 +2132,7 @@ def run_pipeline(
 
     slots = build_slots_dict(clips)
 
-     # =====================
+    # =====================
     # PHASE 2: COMPOSER + RENDER
     # =====================
     composer = build_composer(clips, mode=mode)
