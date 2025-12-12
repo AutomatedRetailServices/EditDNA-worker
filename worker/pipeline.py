@@ -2132,12 +2132,25 @@ def run_pipeline(
 
     slots = build_slots_dict(clips)
 
-    # =====================
+     # =====================
     # PHASE 2: COMPOSER + RENDER
     # =====================
     composer = build_composer(clips, mode=mode)
     used_clip_ids = composer.get("used_clip_ids", [])
-    final_path = render_funnel_video(input_local, session_dir, clips, used_clip_ids)
+
+    # ⚠️ Si no hay clips usables, no intentamos renderizar.
+    # Esto pasa en algunos bloopers donde TODOS los clips
+    # quedan como basura (keep=False) por los filtros/vision/bad_takes.
+    if not used_clip_ids:
+        logger.warning(
+            f"run_pipeline: no used_clip_ids for session_id={session_id}, "
+            "skipping render_funnel_video (dataset mode)."
+        )
+        # Para dataset nos basta con los clips y el JSON;
+        # dejamos final_path apuntando al input original.
+        final_path = input_local
+    else:
+        final_path = render_funnel_video(input_local, session_dir, clips, used_clip_ids)
 
     output_url: Optional[str] = None
     if S3_BUCKET:
@@ -2164,6 +2177,7 @@ def run_pipeline(
         "boundaries_refined": boundaries_refined,
         "composer_mode": mode,
     }
+
     # 🔹 nuevo: guardar el JSON de este run en S3
     json_s3_uri = save_result_json_to_s3(result)
     result["output_json_s3_uri"] = json_s3_uri
