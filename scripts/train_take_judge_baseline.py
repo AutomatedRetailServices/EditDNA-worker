@@ -6,8 +6,7 @@ It:
       s3://{EDITDNA_DATASET_BUCKET}/{EDITDNA_TAKEJUDGE_DATASET_KEY}
   default: script2clipshop-video-automatedretailservices / editdna/training/take_judge_dataset.jsonl
 
-- Loads every row (one row = one clip)
-- Uses the "text" as input and "label" (0/1) as output
+- Uses "text" as input and "label" (0/1) as output
 - Trains a TF-IDF + Logistic Regression classifier
 - Saves the trained model (vectorizer + classifier) to S3 as:
       s3://{EDITDNA_DATASET_BUCKET}/{EDITDNA_TAKEJUDGE_MODEL_KEY}
