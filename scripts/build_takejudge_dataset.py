@@ -6,10 +6,9 @@ It uses ALL jobs (bloopers + good) that save JSONs under:
     s3://script2clipshop-video-automatedretailservices/editdna/outputs/dataset/bloopers/
 
 For every clip in every job it writes ONE row in a JSONL file with:
-    session_id, clip_id, slot, text, keep (0/1), label, llm_reason, source
 
-- `keep` / `label` come from clip["meta"]["keep"]
-- `source` is "good" if session_id starts with "good", otherwise "bloopers"
+    session_id, clip_id, slot, text, keep (0/1), label, llm_reason,
+    source, take_judge_score, take_judge_verdict
 
 Finally, it uploads the dataset to:
 
@@ -85,20 +84,16 @@ def load_json_from_s3(s3_client, key: str) -> Dict[str, Any]:
 def build_rows_from_job(job: Dict[str, Any]) -> List[Dict[str, Any]]:
     """
     Turn one job JSON into many training rows (one per clip).
-    """
-    result = job.get("result", {}) or {}
-    session_id = (result.get("session_id") or "") or ""
-    clips = result.get("clips", []) or []
 
-    # Infer source from session_id (GoodX vs BloppersX, etc.)
-    sid_lower = str(session_id).lower()
-    if sid_lower.startswith("good"):
-        source = "good"
-    elif sid_lower.startswith("bloop") or sid_lower.startswith("bloopers"):
-        source = "bloopers"
-    else:
-        # fallback – not critical, but keeps info
-        source = "unknown"
+    It supports both shapes:
+    - {"result": {..., "clips": [...]}}
+    - {"session_id": ..., "clips": [...]}
+    """
+    # Handle both shapes safely
+    result = job.get("result", job)
+
+    session_id = (result.get("session_id") or "").strip()
+    clips = result.get("clips", []) or []
 
     rows: List[Dict[str, Any]] = []
 
@@ -107,22 +102,34 @@ def build_rows_from_job(job: Dict[str, Any]) -> List[Dict[str, Any]]:
         if not text:
             continue
 
-        slot = clip.get("slot")
         meta = clip.get("meta") or {}
+
+        # Try to get manual keep flag from meta
         keep_flag = meta.get("keep")
 
-        # Normalize label to 1 (keep) / 0 (discard)
+        # If no keep flag:
+        # - If it's a "Good" session, assume keep = True
+        # - If it's NOT a "Good" session, skip (unlabeled blooper)
+        if keep_flag is None:
+            if session_id.lower().startswith("good"):
+                keep_flag = True
+            else:
+                continue
+
         label = 1 if keep_flag else 0
+        source = "good" if session_id.lower().startswith("good") else "bloopers"
 
         row = {
             "session_id": session_id,
             "clip_id": clip.get("id"),
-            "slot": slot,
+            "slot": clip.get("slot"),
             "text": text,
             "keep": bool(keep_flag),
             "label": label,
-            "llm_reason": clip.get("llm_reason", ""),
             "source": source,
+            "llm_reason": clip.get("llm_reason", ""),
+            "take_judge_score": meta.get("take_judge_score"),
+            "take_judge_verdict": meta.get("take_judge_verdict"),
         }
         rows.append(row)
 
