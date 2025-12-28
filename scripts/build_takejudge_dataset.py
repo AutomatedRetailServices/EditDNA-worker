@@ -1,15 +1,19 @@
 """
-Build FULL TakeJudge training dataset from worker JSON outputs.
+Build FULL take_judge training dataset from worker JSON outputs.
 
-- Reads all JSON files under BOTH S3 prefixes:
-    Bloopers: s3://script2clipshop-video-automatedretailservices/editdna/outputs/dataset/bloopers/
-    Good:     s3://script2clipshop-video-automatedretailservices/editdna/outputs/dataset/good/
+It uses ALL jobs (bloopers + good) that save JSONs under:
 
-- For every clip in every job it writes ONE row in a JSONL file with:
-    dataset ("bloopers" or "good"),
-    session_id, clip_id, slot, text,
-    keep (True/False), label (1 keep / 0 discard),
-    llm_reason, and some scores (semantic/visual/take_judge).
+    s3://script2clipshop-video-automatedretailservices/editdna/outputs/dataset/bloopers/
+
+For every clip in every job it writes ONE row in a JSONL file with:
+    session_id, clip_id, slot, text, keep (0/1), label, llm_reason, source
+
+- `keep` / `label` come from clip["meta"]["keep"]
+- `source` is "good" if session_id starts with "good", otherwise "bloopers"
+
+Finally, it uploads the dataset to:
+
+    s3://<BUCKET>/editdna/training/take_judge_dataset.jsonl
 """
 
 import os
@@ -21,30 +25,28 @@ import boto3
 
 # === CONFIG ===
 
+# S3 bucket where your outputs already are
 BUCKET_NAME = os.getenv(
     "EDITDNA_DATASET_BUCKET",
     "script2clipshop-video-automatedretailservices",
 )
 
-BLOOPERS_PREFIX = os.getenv(
-    "EDITDNA_BLOOPERS_PREFIX",
+# Prefix where ALL JSONs live (bloopers + good)
+TAKEJUDGE_PREFIX = os.getenv(
+    "EDITDNA_TAKEJUDGE_PREFIX",
     "editdna/outputs/dataset/bloopers/",
 )
 
-GOOD_PREFIX = os.getenv(
-    "EDITDNA_GOOD_PREFIX",
-    "editdna/outputs/dataset/good/",
-)
-
+# Where we will save the final dataset file in S3
 OUTPUT_KEY = os.getenv(
     "EDITDNA_TAKEJUDGE_DATASET_KEY",
     "editdna/training/take_judge_dataset.jsonl",
 )
 
 
-def list_json_objects(s3_client, prefix: str) -> List[str]:
+def list_json_objects(s3_client) -> List[str]:
     """
-    List all JSON objects under a given prefix.
+    List all JSON objects under TAKEJUDGE_PREFIX.
     Returns a list of object keys.
     """
     keys: List[str] = []
@@ -53,7 +55,7 @@ def list_json_objects(s3_client, prefix: str) -> List[str]:
     while True:
         kwargs = {
             "Bucket": BUCKET_NAME,
-            "Prefix": prefix,
+            "Prefix": TAKEJUDGE_PREFIX,
         }
         if continuation_token:
             kwargs["ContinuationToken"] = continuation_token
@@ -80,13 +82,23 @@ def load_json_from_s3(s3_client, key: str) -> Dict[str, Any]:
     return json.loads(body)
 
 
-def build_rows_from_job(job: Dict[str, Any], dataset_name: str) -> List[Dict[str, Any]]:
+def build_rows_from_job(job: Dict[str, Any]) -> List[Dict[str, Any]]:
     """
     Turn one job JSON into many training rows (one per clip).
     """
-    result = job.get("result", {})
-    session_id = result.get("session_id")
+    result = job.get("result", {}) or {}
+    session_id = (result.get("session_id") or "") or ""
     clips = result.get("clips", []) or []
+
+    # Infer source from session_id (GoodX vs BloppersX, etc.)
+    sid_lower = str(session_id).lower()
+    if sid_lower.startswith("good"):
+        source = "good"
+    elif sid_lower.startswith("bloop") or sid_lower.startswith("bloopers"):
+        source = "bloopers"
+    else:
+        # fallback – not critical, but keeps info
+        source = "unknown"
 
     rows: List[Dict[str, Any]] = []
 
@@ -98,10 +110,11 @@ def build_rows_from_job(job: Dict[str, Any], dataset_name: str) -> List[Dict[str
         slot = clip.get("slot")
         meta = clip.get("meta") or {}
         keep_flag = meta.get("keep")
-        label = 1 if keep_flag else 0  # 1 = keep, 0 = discard
+
+        # Normalize label to 1 (keep) / 0 (discard)
+        label = 1 if keep_flag else 0
 
         row = {
-            "dataset": dataset_name,  # "bloopers" or "good"
             "session_id": session_id,
             "clip_id": clip.get("id"),
             "slot": slot,
@@ -109,51 +122,31 @@ def build_rows_from_job(job: Dict[str, Any], dataset_name: str) -> List[Dict[str
             "keep": bool(keep_flag),
             "label": label,
             "llm_reason": clip.get("llm_reason", ""),
-            "score": clip.get("score"),
-            "semantic_score": clip.get("semantic_score"),
-            "visual_score": clip.get("visual_score"),
-            "take_judge_score": meta.get("take_judge_score"),
-            "take_judge_verdict": meta.get("take_judge_verdict"),
+            "source": source,
         }
         rows.append(row)
 
     return rows
 
 
-def collect_dataset_for_prefix(s3_client, prefix: str, dataset_name: str) -> List[Dict[str, Any]]:
-    keys = list_json_objects(s3_client, prefix)
-    print(f"[{dataset_name}] Found {len(keys)} JSON files under {prefix}")
-
-    all_rows: List[Dict[str, Any]] = []
-
-    for key in keys:
-        print(f"[{dataset_name}] Processing {key} ...")
-        job_json = load_json_from_s3(s3_client, key)
-        rows = build_rows_from_job(job_json, dataset_name)
-        all_rows.extend(rows)
-
-    print(f"[{dataset_name}] Total clips (rows): {len(all_rows)}")
-    return all_rows
-
-
 def main():
     s3 = boto3.client("s3")
 
     print(f"Using bucket: {BUCKET_NAME}")
+    print(f"Listing JSONs under prefix: {TAKEJUDGE_PREFIX}")
+
+    keys = list_json_objects(s3)
+    print(f"Found {len(keys)} JSON files")
 
     all_rows: List[Dict[str, Any]] = []
 
-    # Bloopers dataset
-    all_rows.extend(
-        collect_dataset_for_prefix(s3, BLOOPERS_PREFIX, "bloopers")
-    )
+    for key in keys:
+        print(f"Processing {key} ...")
+        job_json = load_json_from_s3(s3, key)
+        rows = build_rows_from_job(job_json)
+        all_rows.extend(rows)
 
-    # Good dataset
-    all_rows.extend(
-        collect_dataset_for_prefix(s3, GOOD_PREFIX, "good")
-    )
-
-    print(f"TOTAL rows (bloopers + good): {len(all_rows)}")
+    print(f"Total clips (rows) collected: {len(all_rows)}")
 
     # Write local JSONL
     local_path = "/tmp/take_judge_dataset.jsonl"
