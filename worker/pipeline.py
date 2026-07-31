@@ -1740,6 +1740,15 @@ def pick_best_block(blocks: List[List[Dict[str, Any]]]) -> Optional[List[Dict[st
     return best_block
 
 
+def select_clean_cut_clip_ids(clips: List[Dict[str, Any]]) -> List[str]:
+    """Return surviving analyzed clips in source-time order without mutation."""
+    return [
+        c["id"]
+        for c in sorted(clips, key=lambda c: safe_float(c.get("start", 0.0)))
+        if c.get("meta", {}).get("keep", True)
+    ]
+
+
 def build_composer(clips: List[Dict[str, Any]], mode: str = "human") -> Dict[str, Any]:
     mode = (mode or "human").lower()
     if mode not in ("human", "clean", "blooper"):
@@ -2135,8 +2144,16 @@ def run_pipeline(
     # =====================
     # PHASE 2: COMPOSER + RENDER
     # =====================
+    clean_cut_used_clip_ids = (
+        select_clean_cut_clip_ids(clips) if mode == "clean" else []
+    )
+
     composer = build_composer(clips, mode=mode)
-    used_clip_ids = composer.get("used_clip_ids", [])
+    used_clip_ids = (
+        clean_cut_used_clip_ids
+        if mode == "clean"
+        else composer.get("used_clip_ids", [])
+    )
 
     # ⚠️ Si no hay clips usables, no intentamos renderizar.
     # Esto pasa en algunos bloopers donde TODOS los clips
@@ -2168,6 +2185,9 @@ def run_pipeline(
         "composer_human": pretty_print_composer(clips, composer),
         "output_video_local": final_path,
         "output_video_url": output_url,
+        "clean_cut_used_clip_ids": clean_cut_used_clip_ids,
+        "clean_cut_output_video_local": final_path if mode == "clean" else None,
+        "clean_cut_output_video_url": output_url if mode == "clean" else None,
         "asr": True,
         "semantic": True,
         "vision": vision_used,
@@ -2183,4 +2203,3 @@ def run_pipeline(
     result["output_json_s3_uri"] = json_s3_uri
 
     return result
-
