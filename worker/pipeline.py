@@ -3,7 +3,7 @@ import json
 import logging
 import subprocess
 import copy
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Union
 
 import requests
 from faster_whisper import WhisperModel
@@ -83,6 +83,9 @@ S3_PREFIX = os.environ.get("S3_PREFIX", "editdna/outputs")
 # Head/tail trims globales (post selección)
 HEAD_TRIM_SEC = float(os.environ.get("HEAD_TRIM_SEC", "0.0"))
 TAIL_TRIM_SEC = float(os.environ.get("TAIL_TRIM_SEC", "0.0"))
+OUTPUT_WIDTH = int(os.environ.get("OUTPUT_WIDTH", "1080"))
+OUTPUT_HEIGHT = int(os.environ.get("OUTPUT_HEIGHT", "1920"))
+OUTPUT_FPS = int(os.environ.get("OUTPUT_FPS", "30"))
 
 
 # =====================
@@ -1572,6 +1575,26 @@ def dedupe_clips(clips: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     return out
 
 
+def canonical_source_order(clips: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Return clips in input-file order, then source timestamp order."""
+    return sorted(clips, key=lambda c: (
+        int(c.get("source_index", 0)), safe_float(c.get("start", 0.0))
+    ))
+
+
+def add_source_metadata(clips: List[Dict[str, Any]], source_index: int, source_local: str) -> None:
+    """Namespace multi-source clip IDs and attach source identity."""
+    prefix = f"source_{source_index:03d}:"
+    id_map = {str(c.get("id", "")): prefix + str(c.get("id", "")) for c in clips}
+    for c in clips:
+        c["id"] = id_map[str(c.get("id", ""))]
+        c["source_index"] = source_index
+        c["source_local"] = source_local
+        for owner in (c, c.get("meta", {})):
+            if isinstance(owner, dict) and isinstance(owner.get("chain_ids"), list):
+                owner["chain_ids"] = [id_map.get(str(cid), prefix + str(cid)) for cid in owner["chain_ids"]]
+
+
 # =====================
 # SLOTS + COMPOSER HELPERS
 # =====================
@@ -1745,7 +1768,7 @@ def select_clean_cut_clip_ids(clips: List[Dict[str, Any]]) -> List[str]:
     """Return surviving analyzed clips in source-time order without mutation."""
     return [
         c["id"]
-        for c in sorted(clips, key=lambda c: safe_float(c.get("start", 0.0)))
+        for c in canonical_source_order(clips)
         if c.get("meta", {}).get("keep", True)
     ]
 
@@ -1942,270 +1965,137 @@ def pretty_print_composer(
 # =====================
 
 def render_funnel_video(
-    input_local: str,
-    session_dir: str,
-    clips: List[Dict[str, Any]],
-    used_clip_ids: List[str],
+    input_local: Union[str, List[str]], session_dir: str,
+    clips: List[Dict[str, Any]], used_clip_ids: List[str],
 ) -> str:
-    """
-    ESTE ES EL MÓDULO QUE:
-      - Toma los clips ya elegidos (used_clip_ids)
-      - Usa su start/end FINAL
-      - Corta y PEGA en ffmpeg para crear final.mp4
-    """
+    """Normalize, cut, and concatenate selected clips from one or more sources."""
     if not used_clip_ids:
         raise RuntimeError("render_funnel_video: no used_clip_ids provided")
-
-    out_path = os.path.join(session_dir, "final.mp4")
-
-    has_audio = has_audio_stream(input_local)
-    logger.info(f"render_funnel_video: has_audio={has_audio}")
-
-    filter_parts: List[str] = []
-    v_labels: List[str] = []
-    a_labels: List[str] = []
-
-    idx = 0
+    sources = [input_local] if isinstance(input_local, str) else list(input_local)
+    if not sources:
+        raise RuntimeError("render_funnel_video: no input sources provided")
     lookup = {c["id"]: c for c in clips}
+    selected = [lookup[cid] for cid in used_clip_ids if cid in lookup]
+    indices = {int(c.get("source_index", 0)) for c in selected}
+    if any(i < 0 or i >= len(sources) for i in indices):
+        raise RuntimeError("render_funnel_video: clip has invalid source_index")
+    audio_by_source = {i: has_audio_stream(sources[i]) for i in indices}
+    has_audio = any(audio_by_source.values())
 
-    for cid in used_clip_ids:
-        c = lookup.get(cid)
-        if not c:
-            continue
-
-        raw_start = safe_float(c.get("start", 0.0))
-        raw_end = safe_float(c.get("end", 0.0))
-
-        start = max(0.0, raw_start + HEAD_TRIM_SEC)
-        end = max(start, raw_end - TAIL_TRIM_SEC)
-
+    filters, videos, audios = [], [], []
+    for c in selected:
+        source_index = int(c.get("source_index", 0))
+        start = max(0.0, safe_float(c.get("start")) + HEAD_TRIM_SEC)
+        end = max(start, safe_float(c.get("end")) - TAIL_TRIM_SEC)
         if end <= start:
             continue
-
-        v_label = f"v{idx}"
-        filter_parts.append(
-            f"[0:v]trim=start={start:.3f}:end={end:.3f},setpts=PTS-STARTPTS[{v_label}]"
+        number = len(videos); vlabel = f"v{number}"
+        filters.append(
+            f"[{source_index}:v]trim=start={start:.3f}:end={end:.3f},"
+            f"scale={OUTPUT_WIDTH}:{OUTPUT_HEIGHT}:force_original_aspect_ratio=decrease,"
+            f"pad={OUTPUT_WIDTH}:{OUTPUT_HEIGHT}:(ow-iw)/2:(oh-ih)/2,"
+            f"setsar=1,fps={OUTPUT_FPS},format=yuv420p,setpts=PTS-STARTPTS[{vlabel}]"
         )
-        v_labels.append(f"[{v_label}]")
-
+        videos.append(f"[{vlabel}]")
         if has_audio:
-            a_label = f"a{idx}"
-            filter_parts.append(
-                f"[0:a]atrim=start={start:.3f}:end={end:.3f},asetpts=PTS-STARTPTS[{a_label}]"
+            alabel = f"a{number}"
+            if audio_by_source[source_index]:
+                audio_input = f"[{source_index}:a]atrim=start={start:.3f}:end={end:.3f}"
+            else:
+                audio_input = f"anullsrc=r=48000:cl=stereo,atrim=duration={end-start:.3f}"
+            filters.append(
+                f"{audio_input},aresample=48000,"
+                f"aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=stereo,"
+                f"asetpts=PTS-STARTPTS[{alabel}]"
             )
-            a_labels.append(f"[{a_label}]")
-
-        idx += 1
-
-    n = len(v_labels)
-    if n == 0:
+            audios.append(f"[{alabel}]")
+    count = len(videos)
+    if not count:
         raise RuntimeError("render_funnel_video: no valid clips after trimming")
-
-    if has_audio and len(a_labels) != n:
-        logger.warning(
-            "render_funnel_video: has_audio=True but len(a_labels)"
-            f"={len(a_labels)} != len(v_labels)={n}, "
-            "disabling audio to avoid media type mismatch."
-        )
-    has_audio = has_audio and len(a_labels) == n
-
-    filter_complex_parts: List[str] = list(filter_parts)
-
-    filter_complex_parts.append(f"{''.join(v_labels)}concat=n={n}:v=1:a=0[vout]")
-
+    filters.append(f"{''.join(videos)}concat=n={count}:v=1:a=0[vout]")
     if has_audio:
-        filter_complex_parts.append(
-            f"{''.join(a_labels)}concat=n={n}:v=0:a=1[aout]"
-        )
-
-    filter_complex = "; ".join(filter_complex_parts)
-
-    cmd = [
-        FFMPEG_BIN,
-        "-y",
-        "-i",
-        input_local,
-        "-filter_complex",
-        filter_complex,
-        "-map",
-        "[vout]",
-    ]
-
-    if has_audio:
-        cmd += ["-map", "[aout]", "-c:a", "aac"]
-    else:
-        cmd += ["-an"]
-
-    cmd += [
-        "-c:v",
-        "libx264",
-        "-movflags",
-        "+faststart",
-        out_path,
-    ]
-
-    logger.info("Running ffmpeg to render (separate concat for v/a)")
-    logger.debug("ffmpeg cmd: %s", " ".join(cmd))
-
-    proc = subprocess.run(
-        cmd,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        text=True,
-    )
+        filters.append(f"{''.join(audios)}concat=n={count}:v=0:a=1[aout]")
+    cmd=[FFMPEG_BIN,"-y"]
+    for source in sources: cmd += ["-i",source]
+    cmd += ["-filter_complex","; ".join(filters),"-map","[vout]"]
+    cmd += ["-map","[aout]","-c:a","aac"] if has_audio else ["-an"]
+    output=os.path.join(session_dir,"final.mp4")
+    cmd += ["-c:v","libx264","-pix_fmt","yuv420p","-r",str(OUTPUT_FPS),"-movflags","+faststart",output]
+    proc=subprocess.run(cmd,stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True)
     if proc.returncode != 0:
-        logger.error(
-            "ffmpeg failed:\nSTDOUT:\n%s\nSTDERR:\n%s", proc.stdout, proc.stderr
-        )
+        logger.error("ffmpeg failed:\nSTDOUT:\n%s\nSTDERR:\n%s",proc.stdout,proc.stderr)
         raise RuntimeError(f"ffmpeg failed with code {proc.returncode}")
-
-    return out_path
+    return output
 
 
 # =====================
 # MAIN ENTRYPOINT
 # =====================
 
-def run_pipeline(
-    session_id: str,
-    files: Optional[List[str]] = None,
-    file_urls: Optional[List[str]] = None,
-    mode: str = "human",
-) -> Dict[str, Any]:
-    """
-    Main pipeline entrypoint.
-
-    mode:
-      - "human"
-      - "clean"
-      - "blooper"
-    """
-    logger.info(
-        f"run_pipeline session_id={session_id} mode={mode} files={files} file_urls={file_urls}"
-    )
-
-    effective_files: Optional[List[str]] = None
-    if files and isinstance(files, list):
-        effective_files = files
-    elif file_urls and isinstance(file_urls, list):
-        effective_files = file_urls
-
-    if not effective_files:
-        raise ValueError(
-            "run_pipeline: 'files' or 'file_urls' must be a list with at least 1 URL"
-        )
-
-    mode = (mode or "human").lower()
-    if mode not in ("human", "clean", "blooper"):
-        mode = "human"
-
-    session_dir = ensure_session_dir(session_id)
-    input_local = os.path.join(session_dir, "input.mp4")
-
-    download_to_local(effective_files[0], input_local)
-
-    duration = probe_duration(input_local)
-
-    # =====================
-    # PHASE 1: ANALYSIS
-    # =====================
-    asr_segments = run_asr(input_local)
-
-    clips = sentence_boundary_micro_cuts(asr_segments)
-    clips = merge_incomplete_phrases(clips)
-
-    llm_used = enrich_clips_semantic(clips)
-    clips = dedupe_clips(clips)
-
-    vision_used = run_visual_pass(input_local, session_dir, clips)
-
-    bad_takes_used = False
-    if VISION_ENABLED and BAD_TAKES_ENABLED:
-        reject_visual_bad_takes(clips, session_dir, input_local)
-        bad_takes_used = True
-
-    boundaries_refined = False
-    if VISION_ENABLED and BOUNDARY_REFINER_ENABLED:
-        boundaries_refined = refine_clip_boundaries_with_vision(
-            input_local=input_local,
-            session_dir=session_dir,
-            clips=clips,
-        )
-
-    take_judge_used = False
-    if TAKE_JUDGE_ENABLED:
-        take_judge_used = run_take_judge(
-            clips=clips,
-            session_dir=session_dir,
-            input_local=input_local,
-        )
-
-    slots = build_slots_dict(clips)
-
-    # =====================
-    # PHASE 2: COMPOSER + RENDER
-    # =====================
-    clean_cut_used_clip_ids = (
-        select_clean_cut_clip_ids(clips) if mode == "clean" else []
-    )
-
-    composer = build_composer(
-        copy.deepcopy(clips) if mode == "clean" else clips,
-        mode=mode,
-    )
-    used_clip_ids = (
-        clean_cut_used_clip_ids
-        if mode == "clean"
-        else composer.get("used_clip_ids", [])
-    )
-
-    # ⚠️ Si no hay clips usables, no intentamos renderizar.
-    # Esto pasa en algunos bloopers donde TODOS los clips
-    # quedan como basura (keep=False) por los filtros/vision/bad_takes.
-    clean_cut_rendered = False
-    if not used_clip_ids:
-        logger.warning(
-            f"run_pipeline: no used_clip_ids for session_id={session_id}, "
-            "skipping render_funnel_video (dataset mode)."
-        )
-        # Para dataset nos basta con los clips y el JSON;
-        # dejamos final_path apuntando al input original.
-        final_path = input_local
+def run_pipeline(session_id: str, files: Optional[List[str]] = None,
+                 file_urls: Optional[List[str]] = None, mode: str = "human") -> Dict[str, Any]:
+    """Analyze every source once, compose once, and render one output."""
+    logger.info(f"run_pipeline session_id={session_id} mode={mode} files={files} file_urls={file_urls}")
+    effective_files = files if files and isinstance(files, list) else file_urls
+    if not effective_files or not isinstance(effective_files, list):
+        raise ValueError("run_pipeline: 'files' or 'file_urls' must be a list with at least 1 URL")
+    mode=(mode or "human").lower()
+    if mode not in ("human","clean","blooper"): mode="human"
+    session_dir=ensure_session_dir(session_id)
+    if len(effective_files)==1:
+        local_sources=[os.path.join(session_dir,"input.mp4")]
     else:
-        final_path = render_funnel_video(input_local, session_dir, clips, used_clip_ids)
-        clean_cut_rendered = mode == "clean"
+        local_sources=[os.path.join(session_dir,f"input_{i:03d}.mp4") for i in range(len(effective_files))]
+    for i,(url,path) in enumerate(zip(effective_files,local_sources)):
+        try: download_to_local(url,path)
+        except Exception as exc:
+            raise RuntimeError(f"Failed to download input source_index={i} (URL position {i+1})") from exc
 
-    output_url: Optional[str] = None
-    if S3_BUCKET:
-        key = f"{S3_PREFIX}/{session_id}-final.mp4"
-        output_url = upload_to_s3(final_path, S3_BUCKET, key)
-
-    result = {
-        "ok": True,
-        "session_id": session_id,
-        "input_local": input_local,
-        "duration_sec": duration,
-        "clips": clips,
-        "slots": slots,
-        "composer": composer,
-        "composer_human": pretty_print_composer(clips, composer),
-        "output_video_local": final_path,
-        "output_video_url": output_url,
-        "clean_cut_used_clip_ids": clean_cut_used_clip_ids,
-        "clean_cut_output_video_local": final_path if clean_cut_rendered else None,
-        "clean_cut_output_video_url": output_url if clean_cut_rendered else None,
-        "asr": True,
-        "semantic": True,
-        "vision": vision_used,
-        "llm_used": llm_used,
-        "take_judge_used": take_judge_used,
-        "bad_takes_used": bad_takes_used,
-        "boundaries_refined": boundaries_refined,
-        "composer_mode": mode,
-    }
-
-    # 🔹 nuevo: guardar el JSON de este run en S3
-    json_s3_uri = save_result_json_to_s3(result)
-    result["output_json_s3_uri"] = json_s3_uri
-
+    clips=[]; durations=[]
+    llm_used=vision_used=bad_takes_used=boundaries_refined=take_judge_used=False
+    for i,path in enumerate(local_sources):
+        try:
+            durations.append(probe_duration(path))
+            current=merge_incomplete_phrases(sentence_boundary_micro_cuts(run_asr(path)))
+            if len(local_sources)>1: add_source_metadata(current,i,path)
+            else:
+                for c in current: c["source_index"],c["source_local"]=0,path
+            llm_used=enrich_clips_semantic(current) or llm_used
+            current=dedupe_clips(current)
+            vision_used=run_visual_pass(path,session_dir,current) or vision_used
+            if VISION_ENABLED and BAD_TAKES_ENABLED:
+                reject_visual_bad_takes(current,session_dir,path); bad_takes_used=True
+            if VISION_ENABLED and BOUNDARY_REFINER_ENABLED:
+                boundaries_refined=refine_clip_boundaries_with_vision(input_local=path,session_dir=session_dir,clips=current) or boundaries_refined
+            if TAKE_JUDGE_ENABLED:
+                take_judge_used=run_take_judge(clips=current,session_dir=session_dir,input_local=path) or take_judge_used
+            for c in current:
+                c["source_start"],c["source_end"]=safe_float(c.get("start")),safe_float(c.get("end"))
+            clips.extend(current)
+        except Exception as exc:
+            raise RuntimeError(f"Failed to analyze input source_index={i} (URL position {i+1})") from exc
+    slots=build_slots_dict(clips)
+    clean_ids=select_clean_cut_clip_ids(clips) if mode=="clean" else []
+    composer=build_composer(copy.deepcopy(clips) if mode=="clean" else clips,mode=mode)
+    used=clean_ids if mode=="clean" else composer.get("used_clip_ids",[])
+    if mode!="clean" and len(local_sources)>1:
+        selected=set(used); used=[c["id"] for c in canonical_source_order(clips) if c["id"] in selected]
+        composer["used_clip_ids"]=used
+    input_local=local_sources[0]; clean_rendered=False
+    if used:
+        final=render_funnel_video(input_local if len(local_sources)==1 else local_sources,session_dir,clips,used)
+        clean_rendered=mode=="clean"
+    else: final=input_local
+    output_url=upload_to_s3(final,S3_BUCKET,f"{S3_PREFIX}/{session_id}-final.mp4") if S3_BUCKET else None
+    result={"ok":True,"session_id":session_id,"input_local":input_local,
+      "input_files_local":local_sources,"input_file_count":len(local_sources),
+      "processed_source_indices":list(range(len(local_sources))),"duration_sec":sum(durations),
+      "input_durations_sec":durations,"clips":clips,"slots":slots,"composer":composer,
+      "composer_human":pretty_print_composer(clips,composer),"output_video_local":final,
+      "output_video_url":output_url,"clean_cut_used_clip_ids":clean_ids,
+      "clean_cut_output_video_local":final if clean_rendered else None,
+      "clean_cut_output_video_url":output_url if clean_rendered else None,"asr":True,"semantic":True,
+      "vision":vision_used,"llm_used":llm_used,"take_judge_used":take_judge_used,
+      "bad_takes_used":bad_takes_used,"boundaries_refined":boundaries_refined,"composer_mode":mode}
+    result["output_json_s3_uri"]=save_result_json_to_s3(result)
     return result
