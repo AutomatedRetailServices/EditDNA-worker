@@ -2,6 +2,7 @@ import os
 import json
 import logging
 import subprocess
+import copy
 from typing import List, Dict, Any, Optional
 
 import requests
@@ -2148,7 +2149,10 @@ def run_pipeline(
         select_clean_cut_clip_ids(clips) if mode == "clean" else []
     )
 
-    composer = build_composer(clips, mode=mode)
+    composer = build_composer(
+        copy.deepcopy(clips) if mode == "clean" else clips,
+        mode=mode,
+    )
     used_clip_ids = (
         clean_cut_used_clip_ids
         if mode == "clean"
@@ -2158,6 +2162,7 @@ def run_pipeline(
     # ⚠️ Si no hay clips usables, no intentamos renderizar.
     # Esto pasa en algunos bloopers donde TODOS los clips
     # quedan como basura (keep=False) por los filtros/vision/bad_takes.
+    clean_cut_rendered = False
     if not used_clip_ids:
         logger.warning(
             f"run_pipeline: no used_clip_ids for session_id={session_id}, "
@@ -2168,6 +2173,7 @@ def run_pipeline(
         final_path = input_local
     else:
         final_path = render_funnel_video(input_local, session_dir, clips, used_clip_ids)
+        clean_cut_rendered = mode == "clean"
 
     output_url: Optional[str] = None
     if S3_BUCKET:
@@ -2186,8 +2192,8 @@ def run_pipeline(
         "output_video_local": final_path,
         "output_video_url": output_url,
         "clean_cut_used_clip_ids": clean_cut_used_clip_ids,
-        "clean_cut_output_video_local": final_path if mode == "clean" else None,
-        "clean_cut_output_video_url": output_url if mode == "clean" else None,
+        "clean_cut_output_video_local": final_path if clean_cut_rendered else None,
+        "clean_cut_output_video_url": output_url if clean_cut_rendered else None,
         "asr": True,
         "semantic": True,
         "vision": vision_used,

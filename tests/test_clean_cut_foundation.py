@@ -149,6 +149,24 @@ def test_clean_mode_still_computes_and_retains_composer_diagnostics(pipeline_run
     assert result["composer_human"] == "diagnostics"
 
 
+def test_clean_mode_composer_mutation_does_not_change_canonical_clips(
+    pipeline_run, monkeypatch
+):
+    run, _calls, _rendered, _composer = pipeline_run
+
+    def mutating_composer(clips, mode):
+        for analyzed_clip in clips:
+            analyzed_clip["meta"]["keep"] = False
+        return {"mode": mode, "used_clip_ids": []}
+
+    monkeypatch.setattr(pipeline, "build_composer", mutating_composer)
+
+    result = run("clean")
+
+    assert [clip["meta"]["keep"] for clip in result["clips"]] == [True, True, False]
+    assert result["clean_cut_used_clip_ids"] == ["sales", "story-low"]
+
+
 def test_human_mode_continues_rendering_composer_ids(pipeline_run):
     run, _calls, rendered, _composer = pipeline_run
 
@@ -184,3 +202,21 @@ def test_clean_cut_result_fields_are_backward_compatible(pipeline_run, mode):
         assert result["clean_cut_used_clip_ids"] == []
         assert result["clean_cut_output_video_local"] is None
         assert result["clean_cut_output_video_url"] is None
+
+
+def test_clean_mode_without_surviving_clips_does_not_expose_fallback_as_output(
+    pipeline_run, monkeypatch
+):
+    run, _calls, rendered, _composer = pipeline_run
+    discarded_clips = [clip("discarded", 0, keep=False)]
+    monkeypatch.setattr(
+        pipeline, "sentence_boundary_micro_cuts", lambda _segments: discarded_clips
+    )
+
+    result = run("clean")
+
+    assert rendered == []
+    assert result["output_video_local"] == result["input_local"]
+    assert result["clean_cut_used_clip_ids"] == []
+    assert result["clean_cut_output_video_local"] is None
+    assert result["clean_cut_output_video_url"] is None
