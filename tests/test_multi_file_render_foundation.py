@@ -2,6 +2,8 @@ import copy, importlib.util, sys, types
 import pytest
 
 def stub(name, **attrs):
+    if name in sys.modules:
+        return
     if importlib.util.find_spec(name) is None:
         m=types.ModuleType(name); m.__dict__.update(attrs); sys.modules[name]=m
 stub("requests"); stub("boto3"); stub("clip"); stub("faster_whisper",WhisperModel=object)
@@ -98,3 +100,29 @@ def test_audio_matrix_silence_matches_real_format_and_concat(monkeypatch,tmp_pat
     assert ("-c:a" in cmd)==audio_output and ("-an" in cmd)==(not audio_output)
     if silence: assert f.count("aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=stereo")==2
     assert "+faststart" in cmd and "libx264" in cmd
+
+
+def test_composer_does_not_suppress_similar_timestamps_across_sources():
+    first = clip("source_000:valid", 2.0)
+    second = clip("source_001:valid", 2.1)
+    first.update({"source_index": 0, "text": "same valid product statement"})
+    second.update({"source_index": 1, "text": "same valid product statement"})
+
+    pipeline.build_composer([first, second], mode="human")
+
+    assert first["meta"]["keep"] is True
+    assert second["meta"]["keep"] is True
+
+
+def test_contiguous_blocks_never_cross_source_timelines():
+    first = clip("source_000:hook", 1.0)
+    second = clip("source_001:hook", 1.1)
+    for source_index, candidate in enumerate((first, second)):
+        candidate.update({"source_index": source_index, "slot": "HOOK"})
+
+    blocks = pipeline.group_contiguous_blocks_by_slot([first, second], "HOOK")
+
+    assert [[candidate["id"] for candidate in block] for block in blocks] == [
+        ["source_000:hook"],
+        ["source_001:hook"],
+    ]

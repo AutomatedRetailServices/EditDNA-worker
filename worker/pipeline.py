@@ -1319,6 +1319,8 @@ def find_sibling_groups(
                 continue
             if c2.get("slot", "STORY") != slot1:
                 continue
+            if int(c2.get("source_index", 0)) != int(c1.get("source_index", 0)):
+                continue
 
             t2 = safe_float(c2.get("start", 0.0))
             if t2 - t1 > window_sec:
@@ -1637,6 +1639,8 @@ def suppress_near_duplicates_by_slot(
 
             if c2.get("slot", "STORY") != slot1:
                 continue
+            if int(c2.get("source_index", 0)) != int(c1.get("source_index", 0)):
+                continue
 
             t2 = safe_float(c2.get("start", 0.0))
             if t2 - t1 > window_sec:
@@ -1681,6 +1685,8 @@ def suppress_cross_slot_redundant_clips(
             c2 = clips[j]
             if not c2["meta"].get("keep", True):
                 continue
+            if int(c2.get("source_index", 0)) != int(c1.get("source_index", 0)):
+                continue
 
             t2 = safe_float(c2.get("start", 0.0))
             if t2 - t1 > window_sec:
@@ -1712,19 +1718,26 @@ def group_contiguous_blocks_by_slot(
 ) -> List[List[Dict[str, Any]]]:
     ordered = sorted(
         [c for c in clips if c.get("slot") == slot and c["meta"].get("keep", True)],
-        key=lambda c: safe_float(c.get("start", 0.0)),
+        key=lambda c: (
+            int(c.get("source_index", 0)), safe_float(c.get("start", 0.0))
+        ),
     )
 
     blocks: List[List[Dict[str, Any]]] = []
     current: List[Dict[str, Any]] = []
     last_end: Optional[float] = None
+    current_source: Optional[int] = None
 
     for c in ordered:
         start = safe_float(c.get("start", 0.0))
         end = safe_float(c.get("end", start))
 
-        if not current:
+        source_index = int(c.get("source_index", 0))
+        if not current or source_index != current_source:
+            if current:
+                blocks.append(current)
             current = [c]
+            current_source = source_index
             last_end = end
             continue
 
@@ -1798,7 +1811,7 @@ def build_composer(clips: List[Dict[str, Any]], mode: str = "human") -> Dict[str
     apply_min_score_rules(usable)
 
     usable = [c for c in usable if c["meta"].get("keep", True)]
-    usable.sort(key=lambda c: safe_float(c.get("start", 0.0)))
+    usable = canonical_source_order(usable)
 
     suppress_near_duplicates_by_slot(usable)
     usable = [c for c in usable if c["meta"].get("keep", True)]
@@ -1826,7 +1839,7 @@ def build_composer(clips: List[Dict[str, Any]], mode: str = "human") -> Dict[str
             if c["meta"].get("keep", True)
             and safe_float(c.get("semantic_score", 0.0)) >= COMPOSER_MIN_SEMANTIC
         ]
-        usable.sort(key=lambda c: safe_float(c.get("start", 0.0)))
+        usable = canonical_source_order(usable)
 
     hook_blocks = group_contiguous_blocks_by_slot(usable, "HOOK", max_gap_sec=1.0)
     best_hook_block = pick_best_block(hook_blocks) if hook_blocks else None
