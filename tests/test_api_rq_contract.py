@@ -49,6 +49,7 @@ def test_real_main_application_registers_job_routes():
     paths = app.openapi()["paths"]
     assert "post" in paths["/render"]
     assert "get" in paths["/jobs/{job_id}"]
+    assert "post" in paths["/jobs/{job_id}/cancel"]
 
 
 def test_legacy_input_url_reaches_enqueue(client, enqueue):
@@ -118,13 +119,17 @@ def test_enqueue_configuration_and_arguments(monkeypatch):
      ("failed", None, None, "Render job failed")],
 )
 def test_job_status(client, monkeypatch, rq_status, result, expected_result, expected_error):
-    job = SimpleNamespace(id="job-123", result=result, get_status=lambda refresh: rq_status)
+    job = SimpleNamespace(id="job-123", result=result, meta={}, get_status=lambda refresh: rq_status)
     monkeypatch.setattr(routes, "get_queue", lambda: SimpleNamespace(connection=object()))
     monkeypatch.setattr(routes.Job, "fetch", lambda *_args, **_kwargs: job)
     response = client.get("/jobs/job-123")
     assert response.status_code == 200
     assert response.json() == {
-        "job_id": "job-123", "status": rq_status, "result": expected_result, "error": expected_error
+        "job_id": "job-123", "status": rq_status,
+        "stage": "finished" if rq_status == "finished" else rq_status,
+        "progress": 100 if rq_status == "finished" else 0,
+        "message": f"Render {rq_status}", "result": expected_result,
+        "error": expected_error, "cancel_requested": False,
     }
 
 

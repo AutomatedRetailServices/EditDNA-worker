@@ -5,13 +5,21 @@ import subprocess
 import copy
 import shutil
 import tempfile
-from typing import List, Dict, Any, Optional, Union
+from typing import Callable, List, Dict, Any, Optional, Union
 
 import requests
 from faster_whisper import WhisperModel
 import boto3
 
 import clip
+
+from pipeline_errors import (
+    JobCanceledError,
+    MissingSelectedClipsError,
+    PipelineError,
+    SelectionError,
+    UploadError,
+)
 
 logger = logging.getLogger("editdna.pipeline")
 logger.setLevel(logging.INFO)
@@ -93,21 +101,6 @@ OUTPUT_FPS = int(os.environ.get("OUTPUT_FPS", "30"))
 # =====================
 # HELPERS
 # =====================
-
-class PipelineError(RuntimeError):
-    """Base class for classified pipeline failures."""
-
-
-class SelectionError(PipelineError):
-    """A deterministic failure caused by an invalid or empty selection."""
-
-
-class MissingSelectedClipsError(SelectionError):
-    """Selected clip IDs did not resolve uniquely against analyzed clips."""
-
-
-class UploadError(PipelineError):
-    """The rendered output could not be uploaded."""
 
 def safe_float(x: Any, default: float = 0.0) -> float:
     try:
@@ -2081,7 +2074,9 @@ def render_funnel_video(
 # =====================
 
 def run_pipeline(session_id: str, files: Optional[List[str]] = None,
-                 file_urls: Optional[List[str]] = None, mode: str = "human") -> Dict[str, Any]:
+                 file_urls: Optional[List[str]] = None, mode: str = "human",
+                 progress: Optional[Callable[[str, int, str], None]] = None,
+                 check_canceled: Optional[Callable[[], None]] = None) -> Dict[str, Any]:
     """Analyze every source once, compose once, and render one output."""
     logger.info("run_pipeline session_id=%s mode=%s", session_id, mode)
     effective_files = files if files and isinstance(files, list) else file_urls
@@ -2091,19 +2086,27 @@ def run_pipeline(session_id: str, files: Optional[List[str]] = None,
     if mode not in ("human","clean","blooper"): mode="human"
     session_dir=ensure_session_dir(session_id)
     retain_local_result = False
+    report = progress or (lambda _stage, _percent, _message: None)
+    check = check_canceled or (lambda: None)
     try:
         if len(effective_files)==1:
             local_sources=[os.path.join(session_dir,"input.mp4")]
         else:
             local_sources=[os.path.join(session_dir,f"input_{i:03d}.mp4") for i in range(len(effective_files))]
         for i,(url,path) in enumerate(zip(effective_files,local_sources)):
+            check()
+            report("downloading", 5 + (15 * i // len(local_sources)), f"Downloading source {i + 1} of {len(local_sources)}")
             try: download_to_local(url,path)
             except Exception as exc:
                 raise RuntimeError(f"Failed to download input source_index={i} (URL position {i+1})") from exc
+            check()
+            report("downloading", 5 + (15 * (i + 1) // len(local_sources)), f"Downloaded source {i + 1} of {len(local_sources)}")
 
         clips=[]; durations=[]
         llm_used=vision_used=bad_takes_used=boundaries_refined=take_judge_used=False
         for i,path in enumerate(local_sources):
+          check()
+          report("analyzing", 20 + (35 * i // len(local_sources)), f"Analyzing source {i + 1} of {len(local_sources)}")
           try:
             durations.append(probe_duration(path))
             current=merge_incomplete_phrases(sentence_boundary_micro_cuts(run_asr(path)))
@@ -2122,8 +2125,14 @@ def run_pipeline(session_id: str, files: Optional[List[str]] = None,
             for c in current:
                 c["source_start"],c["source_end"]=safe_float(c.get("start")),safe_float(c.get("end"))
             clips.extend(current)
+            check()
+            report("analyzing", 20 + (35 * (i + 1) // len(local_sources)), f"Analyzed source {i + 1} of {len(local_sources)}")
+          except JobCanceledError:
+            raise
           except Exception as exc:
             raise RuntimeError(f"Failed to analyze input source_index={i} (URL position {i+1})") from exc
+        check()
+        report("selecting", 60, "Selecting clips")
         slots=build_slots_dict(clips)
         clean_ids=select_clean_cut_clip_ids(clips) if mode=="clean" else []
         composer=build_composer(copy.deepcopy(clips) if mode=="clean" else clips,mode=mode)
@@ -2136,12 +2145,19 @@ def run_pipeline(session_id: str, files: Optional[List[str]] = None,
             composer["used_clip_ids"]=used
         input_local=local_sources[0]; clean_rendered=False
         if used:
+            check()
+            report("rendering", 65, "Rendering video")
             final=render_funnel_video(input_local if len(local_sources)==1 else local_sources,session_dir,clips,used)
+            report("rendering", 90, "Video rendered")
+            check()
             clean_rendered=mode=="clean"
         elif mode in ("human", "blooper"):
             raise SelectionError(f"No clips were selected for requested mode '{mode}'")
         else: final=input_local
+        check()
+        report("uploading", 92, "Uploading rendered video")
         output_url=upload_to_s3(final,S3_BUCKET,f"{S3_PREFIX}/{session_id}-final.mp4") if S3_BUCKET else None
+        report("uploading", 98, "Upload complete")
         if S3_BUCKET and not output_url:
             raise UploadError("Rendered output upload returned no output URL")
         result={"ok":True,"session_id":session_id,"input_local":input_local,

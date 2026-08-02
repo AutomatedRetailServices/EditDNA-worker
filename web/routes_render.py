@@ -63,6 +63,41 @@ def _status_value(job: Job) -> str:
     return getattr(job_status, "value", str(job_status))
 
 
+def _public_progress(job: Job, current_status: str) -> Dict[str, Any]:
+    meta = job.meta if isinstance(getattr(job, "meta", None), dict) else {}
+    stage = meta.get("stage")
+    progress = meta.get("progress", 0)
+    messages = {
+        "queued": "Render queued",
+        "downloading": "Downloading sources",
+        "analyzing": "Analyzing sources",
+        "selecting": "Selecting clips",
+        "rendering": "Rendering video",
+        "uploading": "Uploading rendered video",
+        "finished": "Render finished",
+        "failed": "Render failed",
+        "canceled": "Render canceled",
+    }
+    if current_status == "finished":
+        stage, progress = "finished", 100
+    elif current_status == "failed":
+        stage = "failed"
+    elif current_status in ("canceled", "stopped") or stage == "canceled":
+        stage = "canceled"
+    elif stage not in {"queued", "downloading", "analyzing", "selecting", "rendering", "uploading"}:
+        stage, progress = "queued", 0
+    try:
+        progress = min(100, max(0, int(progress)))
+    except (TypeError, ValueError):
+        progress = 0
+    return {
+        "stage": stage,
+        "progress": progress,
+        "message": messages[stage],
+        "cancel_requested": bool(meta.get("cancel_requested", False)),
+    }
+
+
 @router.get("/jobs/{job_id}")
 async def job_status(job_id: str) -> Dict[str, Any]:
     """Return a JSON-safe, deliberately limited view of an RQ job."""
@@ -72,9 +107,43 @@ async def job_status(job_id: str) -> Dict[str, Any]:
         raise HTTPException(status_code=404, detail="Job not found") from exc
 
     current_status = _status_value(job)
+    public_progress = _public_progress(job, current_status)
     return {
         "job_id": job.id,
         "status": current_status,
+        **public_progress,
         "result": job.result if current_status == "finished" else None,
         "error": "Render job failed" if current_status == "failed" else None,
     }
+
+
+@router.post("/jobs/{job_id}/cancel")
+async def cancel_job(job_id: str) -> Dict[str, Any]:
+    """Cancel waiting work or request cancellation at the next safe boundary."""
+    try:
+        job = Job.fetch(job_id, connection=get_queue().connection)
+    except NoSuchJobError as exc:
+        raise HTTPException(status_code=404, detail="Job not found") from exc
+
+    current_status = _status_value(job)
+    meta = job.meta if isinstance(getattr(job, "meta", None), dict) else {}
+    if current_status in ("finished", "failed"):
+        raise HTTPException(status_code=409, detail=f"Cannot cancel {current_status} job")
+    if current_status in ("canceled", "stopped") or meta.get("stage") == "canceled":
+        return {"job_id": job.id, "status": "canceled", "cancel_requested": True}
+
+    if current_status in ("queued", "deferred", "scheduled"):
+        job.cancel()
+        job.meta.update(
+            cancel_requested=True,
+            stage="canceled",
+            message="Render canceled",
+        )
+        job.save_meta()
+        return {"job_id": job.id, "status": "canceled", "cancel_requested": True}
+    if current_status == "started":
+        job.meta["cancel_requested"] = True
+        job.save_meta()
+        return {"job_id": job.id, "status": "started", "cancel_requested": True}
+
+    raise HTTPException(status_code=409, detail=f"Cannot cancel {current_status} job")
