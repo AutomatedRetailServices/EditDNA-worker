@@ -17,10 +17,11 @@ def job_render(
     Punto de entrada que el worker RQ ejecuta como `tasks.job_render`.
     """
 
-    # Normalizar modo para evitar sorpresas
+    # Direct callers retain the historical signature, but invalid modes are never
+    # silently changed into a different editing mode.
     mode_norm = (mode or "human").lower()
     if mode_norm not in ("human", "clean", "blooper"):
-        mode_norm = "human"
+        raise ValueError(f"Unsupported render mode: {mode}")
 
     log.info(
         f"[job_render] START session_id={session_id} "
