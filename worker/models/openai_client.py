@@ -18,19 +18,10 @@ class OpenAIResponseValidationError(OpenAIProviderError):
     """The provider returned content that did not match the internal schema."""
 
 
-def is_openai_available(api_key: Optional[str] = None) -> bool:
-    """Return whether an operation may use OpenAI, without constructing a client.
-
-    Environment lookup intentionally happens on every call: this keeps the check
-    lightweight while allowing runtime configuration and test monkeypatching.
-    """
-    return bool(api_key or os.environ.get("OPENAI_API_KEY"))
-
-
 def create_openai_client(api_key: Optional[str] = None) -> Any:
     """Construct a client only for an operation that is actually being executed."""
     key = api_key or os.environ.get("OPENAI_API_KEY")
-    if not is_openai_available(key):
+    if not key:
         raise OpenAIProviderError("OpenAI operation is unavailable: API key is not configured")
     config = load_model_config().openai
     try:
