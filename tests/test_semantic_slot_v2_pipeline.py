@@ -18,7 +18,7 @@ from worker.semantic_slot_v2 import CanonicalSlot, EvidenceTag, SlotClassificati
     ("Does your hair always frizz?", "HOOK"),
     ("I'm tired of wasting money on products that fail", "PROBLEM"),
     ("It has a ceramic plate", "FEATURES"),
-    ("It helps you feel confident", "BENEFIT"),
+    ("It helps you feel confident", "BENEFITS"),
     ("I get so many compliments", "PROOF"),
     ("The first time I found it, I was traveling", "STORY"),
     ("Click the link and add to cart", "CTA"),
@@ -71,6 +71,41 @@ def test_valid_result_updates_only_primary_and_stores_secondary(monkeypatch):
     assert values[1]["id"] == untouched_before["id"] and values[1]["text"] == untouched_before["text"]
     assert values[1]["start"] == untouched_before["start"] and values[1]["end"] == untouched_before["end"]
     assert "semantic_v2" not in values[1]["meta"]
+
+
+def test_internal_benefit_applies_historical_public_slot(monkeypatch):
+    values = clips()[:1]
+    monkeypatch.setattr(pipeline, "EDITDNA_USE_LLM", True)
+    monkeypatch.setattr(pipeline, "llm_classify_clips", lambda _: {"a": result(CanonicalSlot.BENEFIT)})
+    pipeline.enrich_clips_semantic(values)
+    assert values[0]["slot"] == "BENEFITS"
+    assert values[0]["meta"]["slot"] == "BENEFITS"
+    # semantic_v2 is an explicitly internal, canonical metadata contract.
+    assert values[0]["meta"]["semantic_v2"]["primary_slot"] == "BENEFIT"
+
+
+def test_public_benefits_is_canonicalized_for_provider_input():
+    value = pipeline.make_base_clip("benefit", 0, 1, "It helps you save time.")
+    value["slot"] = "BENEFITS"
+    clause = pipeline.build_clause_inputs([value])[0]
+    assert clause.heuristic_slot == "BENEFIT"
+    assert clause.signals.heuristic_slot == "BENEFIT"
+
+
+def test_public_slot_collections_and_composer_preserve_benefits():
+    benefit = pipeline.make_base_clip("benefit", 0, 2, "It helps you save time.")
+    benefit.update(slot="BENEFITS", keep=True, score=.9, semantic_score=.9)
+    slots = pipeline.build_slots_dict([benefit])
+    assert "BENEFITS" in slots and slots["BENEFITS"] == [benefit]
+    assert "BENEFIT" not in slots
+    assert pipeline.build_composer([benefit])["benefit_ids"] == ["benefit"]
+
+
+@pytest.mark.parametrize("slot", ["HOOK", "PROBLEM", "FEATURES", "PROOF", "STORY", "CTA", "OTHER"])
+def test_non_benefit_public_slots_are_not_renamed(slot):
+    value = pipeline.make_base_clip("x", 0, 1, "Some text.")
+    value["slot"] = slot
+    assert pipeline.build_clause_inputs([value])[0].heuristic_slot == slot
 
 
 def test_disabled_by_default_and_model_unchanged():

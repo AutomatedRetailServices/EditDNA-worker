@@ -17,6 +17,19 @@ class CanonicalSlot(str, Enum):
     OTHER = "OTHER"
 
 
+PUBLIC_BENEFIT_SLOT = "BENEFITS"
+
+
+def canonicalize_public_slot(slot: str) -> str:
+    """Translate the one historical public spelling into the V2 taxonomy."""
+    return CanonicalSlot.BENEFIT.value if slot == PUBLIC_BENEFIT_SLOT else slot
+
+
+def publicize_canonical_slot(slot: CanonicalSlot) -> str:
+    """Translate V2's benefit spelling at the public clip-slot boundary."""
+    return PUBLIC_BENEFIT_SLOT if slot is CanonicalSlot.BENEFIT else slot.value
+
+
 class EvidenceTag(str, Enum):
     QUESTION_HOOK = "question_hook"
     BOLD_CLAIM = "bold_claim"
@@ -126,7 +139,7 @@ def build_clause_inputs(clips: Sequence[Mapping[str, Any]]) -> Tuple[SemanticCla
     result = []
     for index, clip in enumerate(clips):
         text = str(clip.get("text") or "")
-        heuristic = str(clip.get("slot") or "OTHER")
+        heuristic = canonicalize_public_slot(str(clip.get("slot") or "OTHER"))
         signals = derive_signals(text, heuristic)
         same_previous = index > 0 and source_index(clips[index - 1]) == source_index(clip)
         same_following = index + 1 < len(clips) and source_index(clips[index + 1]) == source_index(clip)

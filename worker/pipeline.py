@@ -18,7 +18,7 @@ from worker.models.openai_client import OpenAIProviderError, is_openai_available
 from worker.models.openai_provider import (
     Verdict, classify_semantic_v2, detect_bad_take, judge_takes_v2, refine_boundaries,
 )
-from worker.semantic_slot_v2 import build_clause_inputs
+from worker.semantic_slot_v2 import build_clause_inputs, publicize_canonical_slot
 from worker.take_judge_v2 import TakeJudgeCandidate, delivery_features, sample_candidate_frames
 
 from pipeline_errors import (
@@ -642,7 +642,7 @@ def classify_slot(text: str) -> str:
             "confident",
         ]
     ):
-        return "BENEFIT"
+        return "BENEFITS"
 
     if any(
         p in t
@@ -714,7 +714,7 @@ def tag_clips_heuristic(clips: List[Dict[str, Any]]) -> None:
                 reason = "Attention-grabbing phrase or question."
             elif slot == "PROBLEM":
                 reason = "Describes a problem or painful situation."
-            elif slot == "BENEFIT":
+            elif slot == "BENEFITS":
                 reason = "Highlights positive outcomes for the user."
             elif slot == "FEATURES":
                 reason = "Describes specific product features."
@@ -787,7 +787,7 @@ def enrich_clips_semantic(clips: List[Dict[str, Any]]) -> bool:
         }
         if info.abstain or info.confidence < SEMANTIC_V2_MIN_CONFIDENCE or info.completeness < 0.5:
             continue
-        slot_from_llm = info.primary_slot.value
+        slot_from_llm = publicize_canonical_slot(info.primary_slot)
         c["slot"] = slot_from_llm
         c["meta"]["slot"] = slot_from_llm
         c["llm_reason"] = info.reason or c.get("llm_reason", "")
@@ -1403,7 +1403,7 @@ def build_slots_dict(clips: List[Dict[str, Any]]) -> Dict[str, List[Dict[str, An
         "HOOK": [],
         "STORY": [],
         "PROBLEM": [],
-        "BENEFIT": [],
+        "BENEFITS": [],
         "FEATURES": [],
         "PROOF": [],
         "CTA": [],
@@ -1702,7 +1702,7 @@ def build_composer(clips: List[Dict[str, Any]], mode: str = "human") -> Dict[str
             problem_ids = filtered
     problem_ids = problem_ids[:COMPOSER_MAX_PER_SLOT]
 
-    benefit_ids = ids_for_slot("BENEFIT")[:COMPOSER_MAX_PER_SLOT]
+    benefit_ids = ids_for_slot("BENEFITS")[:COMPOSER_MAX_PER_SLOT]
     feature_ids = ids_for_slot("FEATURES")[:COMPOSER_MAX_PER_SLOT]
     proof_ids = ids_for_slot("PROOF")[:COMPOSER_MAX_PER_SLOT]
 
@@ -1744,7 +1744,7 @@ def pretty_print_composer(
         ("HOOK", [composer.get("hook_id")] if composer.get("hook_id") else []),
         ("STORY", composer.get("story_ids", [])),
         ("PROBLEM", composer.get("problem_ids", [])),
-        ("BENEFIT", composer.get("benefit_ids", [])),
+        ("BENEFITS", composer.get("benefit_ids", [])),
         ("FEATURES", composer.get("feature_ids", [])),
         ("PROOF", composer.get("proof_ids", [])),
         ("CTA", [composer.get("cta_id")] if composer.get("cta_id") else []),

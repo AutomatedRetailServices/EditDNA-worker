@@ -54,7 +54,7 @@ def test_every_model_default(clean_model_env):
 def test_every_active_environment_override(clean_model_env, monkeypatch):
     values = {
         "ASR_ENABLED": "0", "WHISPER_MODEL_NAME": "large", "WHISPER_DEVICE": "cuda",
-        "EDITDNA_USE_LLM": "1", "EDITDNA_LLM_MODEL": "semantic-override",
+        "EDITDNA_USE_LLM": "1", "EDITDNA_LLM_MODEL": "semantic-override", "SEMANTIC_V2_MIN_CONFIDENCE": "0.82",
         "VISION_ENABLED": "true", "VISION_INTERVAL_SEC": "4.5", "VISION_MAX_SAMPLES": "12", "W_VISION": "0.25",
         "BAD_TAKES_ENABLED": "yes", "BOUNDARY_REFINER_ENABLED": "on",
         "BOUNDARY_REFINER_MIN_DURATION_SEC": "4", "BOUNDARY_REFINER_HEAD_STEP_SEC": "0.5", "BOUNDARY_REFINER_TAIL_STEP_SEC": "0.75",
@@ -66,6 +66,7 @@ def test_every_active_environment_override(clean_model_env, monkeypatch):
     config = load_model_config()
     assert (config.asr.enabled, config.asr.model_name, config.asr.device) == (False, "large", "cuda")
     assert (config.semantic_llm.enabled, config.semantic_llm.model_name) == (True, "semantic-override")
+    assert config.semantic_llm.min_confidence == 0.82
     assert (config.vision.enabled, config.vision.interval_seconds, config.vision.max_samples, config.vision.weight) == (True, 4.5, 12, 0.25)
     assert config.visual_bad_take.enabled is True
     assert (config.boundary_refiner.enabled, config.boundary_refiner.min_duration_seconds, config.boundary_refiner.head_step_seconds, config.boundary_refiner.tail_step_seconds) == (True, 4.0, 0.5, 0.75)
