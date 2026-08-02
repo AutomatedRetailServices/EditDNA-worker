@@ -13,6 +13,8 @@ import boto3
 
 import clip
 
+from worker.models.config import load_model_config
+
 from pipeline_errors import (
     JobCanceledError,
     MissingSelectedClipsError,
@@ -35,17 +37,14 @@ FFMPEG_BIN = os.environ.get("FFMPEG_BIN", "ffmpeg")
 FFPROBE_BIN = os.environ.get("FFPROBE_BIN", "ffprobe")
 
 # Whisper / ASR
-WHISPER_MODEL_NAME = os.environ.get("WHISPER_MODEL_NAME") or os.environ.get(
-    "WHISPER_MODEL", "medium"
-)
-WHISPER_DEVICE = os.environ.get(
-    "WHISPER_DEVICE", os.environ.get("ASR_DEVICE", "auto")
-)
-ASR_ENABLED = os.environ.get("ASR_ENABLED", "1") == "1"
+MODEL_CONFIG = load_model_config()
+WHISPER_MODEL_NAME = MODEL_CONFIG.asr.model_name
+WHISPER_DEVICE = MODEL_CONFIG.asr.device
+ASR_ENABLED = MODEL_CONFIG.asr.enabled
 
 # Composer / scores
-COMPOSER_MIN_SEMANTIC = float(os.environ.get("COMPOSER_MIN_SEMANTIC", "0.75"))
-COMPOSER_MAX_PER_SLOT = int(os.environ.get("COMPOSER_MAX_PER_SLOT", "7"))
+COMPOSER_MIN_SEMANTIC = MODEL_CONFIG.global_composer.min_semantic_score
+COMPOSER_MAX_PER_SLOT = MODEL_CONFIG.global_composer.max_per_slot
 MICRO_SENTENCE_MAX_SECONDS = float(
     os.environ.get("MICRO_SENTENCE_MAX_SECONDS", "8.0")
 )
@@ -55,36 +54,33 @@ EDITDNA_HOOK_MIN_SCORE = float(os.environ.get("EDITDNA_HOOK_MIN_SCORE", "0.7"))
 EDITDNA_CTA_MIN_SCORE = float(os.environ.get("EDITDNA_CTA_MIN_SCORE", "0.6"))
 
 # LLM
-EDITDNA_USE_LLM = os.environ.get("EDITDNA_USE_LLM", "0") == "1"
-EDITDNA_LLM_MODEL = os.environ.get("EDITDNA_LLM_MODEL", "gpt-5.1")
+EDITDNA_USE_LLM = MODEL_CONFIG.semantic_llm.enabled
+EDITDNA_LLM_MODEL = MODEL_CONFIG.semantic_llm.model_name
 
 # VISION
-VISION_ENABLED = os.environ.get("VISION_ENABLED", "0") == "1"
-VISION_INTERVAL_SEC = float(os.environ.get("VISION_INTERVAL_SEC", "2.0"))
-VISION_MAX_SAMPLES = int(os.environ.get("VISION_MAX_SAMPLES", "50"))
-W_VISION = float(os.environ.get("W_VISION", "0.7"))
+VISION_ENABLED = MODEL_CONFIG.vision.enabled
+VISION_MODEL = MODEL_CONFIG.vision.model_name
+VISION_INTERVAL_SEC = MODEL_CONFIG.vision.interval_seconds
+VISION_MAX_SAMPLES = MODEL_CONFIG.vision.max_samples
+W_VISION = MODEL_CONFIG.vision.weight
 
 # BAD TAKES (visual face check) – opcional
-BAD_TAKES_ENABLED = os.environ.get("BAD_TAKES_ENABLED", "0") == "1"
+BAD_TAKES_ENABLED = MODEL_CONFIG.visual_bad_take.enabled
+BAD_TAKES_MODEL = MODEL_CONFIG.visual_bad_take.model_name
 
 # BOUNDARY TRIM (head/tail dentro del clip, opcional)
-BOUNDARY_REFINER_ENABLED = os.environ.get("BOUNDARY_REFINER_ENABLED", "0") == "1"
-BOUNDARY_REFINER_MIN_DURATION_SEC = float(
-    os.environ.get("BOUNDARY_REFINER_MIN_DURATION_SEC", "3.0")
-)
-BOUNDARY_REFINER_HEAD_STEP_SEC = float(
-    os.environ.get("BOUNDARY_REFINER_HEAD_STEP_SEC", "1.5")
-)
-BOUNDARY_REFINER_TAIL_STEP_SEC = float(
-    os.environ.get("BOUNDARY_REFINER_TAIL_STEP_SEC", "1.5")
-)
+BOUNDARY_REFINER_ENABLED = MODEL_CONFIG.boundary_refiner.enabled
+BOUNDARY_REFINER_MODEL = MODEL_CONFIG.boundary_refiner.model_name
+BOUNDARY_REFINER_MIN_DURATION_SEC = MODEL_CONFIG.boundary_refiner.min_duration_seconds
+BOUNDARY_REFINER_HEAD_STEP_SEC = MODEL_CONFIG.boundary_refiner.head_step_seconds
+BOUNDARY_REFINER_TAIL_STEP_SEC = MODEL_CONFIG.boundary_refiner.tail_step_seconds
 
 # TAKE JUDGE (multi-take selection)
-TAKE_JUDGE_ENABLED = os.environ.get("TAKE_JUDGE_ENABLED", "0") == "1"
-TAKE_JUDGE_MODEL = os.environ.get("TAKE_JUDGE_MODEL", "gpt-4o-mini")
-TAKE_JUDGE_MAX_GROUPS = int(os.environ.get("TAKE_JUDGE_MAX_GROUPS", "6"))
-TAKE_JUDGE_MAX_TAKES = int(os.environ.get("TAKE_JUDGE_MAX_TAKES", "3"))
-TAKE_JUDGE_FRAMES = int(os.environ.get("TAKE_JUDGE_FRAMES", "1"))
+TAKE_JUDGE_ENABLED = MODEL_CONFIG.take_judge.enabled
+TAKE_JUDGE_MODEL = MODEL_CONFIG.take_judge.model_name
+TAKE_JUDGE_MAX_GROUPS = MODEL_CONFIG.take_judge.max_groups
+TAKE_JUDGE_MAX_TAKES = MODEL_CONFIG.take_judge.max_takes
+TAKE_JUDGE_FRAMES = MODEL_CONFIG.take_judge.frame_count
 
 # S3
 S3_BUCKET = os.environ.get("S3_BUCKET")
@@ -894,7 +890,7 @@ def load_clip_model():
 
     # 🔒 FORZAMOS CPU SIEMPRE, aunque Torch diga que hay CUDA disponible
     device = "cpu"
-    model, preprocess = clip_lib.load("ViT-B/32", device=device)
+    model, preprocess = clip_lib.load(VISION_MODEL, device=device)
     _CLIP_MODEL = model
     _CLIP_PREPROCESS = preprocess
     _CLIP_DEVICE = device
@@ -1033,7 +1029,7 @@ def reject_visual_bad_takes(clips: List[Dict[str, Any]], session_dir: str, input
         """
 
         response = client.chat.completions.create(
-            model="gpt-4o",
+            model=BAD_TAKES_MODEL,
             messages=[
                 {"role": "system", "content": "You strictly output 'GOOD' or 'BAD'."},
                 {"role": "user", "content": [
@@ -1194,7 +1190,7 @@ def refine_clip_boundaries_with_vision(
 
         try:
             resp = client.chat.completions.create(
-                model="gpt-5.1",
+                model=BOUNDARY_REFINER_MODEL,
                 messages=messages,
                 temperature=0.1,
                 max_completion_tokens=1000,
