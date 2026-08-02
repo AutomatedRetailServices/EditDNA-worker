@@ -11,7 +11,10 @@ retains its existing JSON-object response format; the other operations retain le
 parsing plus strict internal validation. No operation is migrated to Responses API or SDK
 strict structured outputs. The adapter boundary permits a separately tested migration later.
 
-The shared client uses a 60-second timeout and zero SDK retries by default. Zero retries
-preserves the previous effective single-call behavior and therefore call frequency. Both
-values are validated and can be overridden with `OPENAI_TIMEOUT_SECONDS` and
-`OPENAI_MAX_RETRIES`.
+The shared client uses a 60-second timeout and two SDK retries by default. The supported
+`openai>=1.7.1` dependency range does not provide a repository-wide upper bound against
+which an SDK constant can be safely imported, so the explicit value `2` uses OpenAI's
+documented historical default and preserves the retry behavior of the former `OpenAI()`
+client. Both values are validated and can be overridden with `OPENAI_TIMEOUT_SECONDS` and
+`OPENAI_MAX_RETRIES`; setting the latter to `0` disables SDK retries. These are SDK
+transport retries only: no pipeline-level or RQ retry behavior is changed.
