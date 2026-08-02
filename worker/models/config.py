@@ -169,7 +169,10 @@ def load_model_config() -> ModelConfig:
     whisper_device = env.get("WHISPER_DEVICE", env.get("ASR_DEVICE", "auto"))
 
     timeout = _float(env, "OPENAI_TIMEOUT_SECONDS", 60.0)
-    retries = _integer(env, "OPENAI_MAX_RETRIES", 0)
+    # OpenAI's Python SDK has historically retried connection errors, 408, 409,
+    # 429, and 5xx responses twice by default. Keep that behavior explicit so
+    # dependency upgrades cannot silently change this application's policy.
+    retries = _integer(env, "OPENAI_MAX_RETRIES", 2)
     if timeout <= 0:
         raise ModelConfigurationError("OPENAI_TIMEOUT_SECONDS", "a number greater than zero")
     if retries < 0:

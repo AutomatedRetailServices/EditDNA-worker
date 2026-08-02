@@ -14,7 +14,7 @@ import boto3
 import clip
 
 from worker.models.config import load_model_config
-from worker.models.openai_client import OpenAIProviderError
+from worker.models.openai_client import OpenAIProviderError, is_openai_available
 from worker.models.openai_provider import (
     Verdict, classify_semantic, detect_bad_take, judge_takes, refine_boundaries,
 )
@@ -970,6 +970,10 @@ def reject_visual_bad_takes(clips: List[Dict[str, Any]], session_dir: str, input
     """
     import base64
 
+    if not is_openai_available():
+        logger.warning("Visual bad-take check unavailable; failing open", extra={"operation": "visual_bad_take"})
+        return
+
     for c in clips:
         if not c["meta"].get("keep", True):
             continue
@@ -1031,6 +1035,10 @@ def refine_clip_boundaries_with_vision(
 
     if not BOUNDARY_REFINER_ENABLED:
         logger.info("BOUNDARY_REFINER_ENABLED=0, skipping boundary refiner.")
+        return False
+
+    if not is_openai_available():
+        logger.warning("Boundary refiner unavailable; failing open", extra={"operation": "boundary_refinement"})
         return False
 
     import base64
@@ -1301,6 +1309,10 @@ def run_take_judge(
     import base64
 
     if not TAKE_JUDGE_ENABLED:
+        return False
+
+    if not is_openai_available():
+        logger.warning("Take Judge unavailable; failing open", extra={"operation": "take_judge"})
         return False
 
 
