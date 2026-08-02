@@ -7,6 +7,8 @@ import pytest
 
 
 def _stub_missing_module(name, **attributes):
+    if name in sys.modules:
+        return
     if importlib.util.find_spec(name) is None:
         module = types.ModuleType(name)
         for attribute, value in attributes.items():

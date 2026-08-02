@@ -16,8 +16,9 @@ import clip
 from worker.models.config import load_model_config
 from worker.models.openai_client import OpenAIProviderError, is_openai_available
 from worker.models.openai_provider import (
-    Verdict, classify_semantic, detect_bad_take, judge_takes, refine_boundaries,
+    Verdict, classify_semantic, detect_bad_take, judge_takes_v2, refine_boundaries,
 )
+from worker.take_judge_v2 import TakeJudgeCandidate, delivery_features, sample_candidate_frames
 
 from pipeline_errors import (
     JobCanceledError,
@@ -85,6 +86,7 @@ TAKE_JUDGE_MODEL = MODEL_CONFIG.take_judge.model_name
 TAKE_JUDGE_MAX_GROUPS = MODEL_CONFIG.take_judge.max_groups
 TAKE_JUDGE_MAX_TAKES = MODEL_CONFIG.take_judge.max_takes
 TAKE_JUDGE_FRAMES = MODEL_CONFIG.take_judge.frame_count
+TAKE_JUDGE_V2_MIN_CONFIDENCE = MODEL_CONFIG.take_judge.min_confidence
 
 # S3
 S3_BUCKET = os.environ.get("S3_BUCKET")
@@ -1300,160 +1302,68 @@ def run_take_judge(
     session_dir: str,
     input_local: str,
 ) -> bool:
-    """
-    TakeJudgeAI:
-    - Para cada grupo de takes similares (mismo slot + texto casi igual)
-      pregunta a un LLM visión+texto cuál es la mejor actuación.
-    - Sólo 1 ganador por grupo (LOSER → keep=False).
-    """
-    import base64
-
+    """Compare sibling takes, retaining all unless V2 produces a safe winner."""
     if not TAKE_JUDGE_ENABLED:
         return False
-
     if not is_openai_available():
-        logger.warning("Take Judge unavailable; failing open", extra={"operation": "take_judge"})
+        logger.warning("Take Judge unavailable; failing open", extra={"operation": "take_judge_v2"})
         return False
 
-
-    def _safe_parse_json(raw: str) -> Optional[Dict[str, Any]]:
-        if not raw:
-            return None
-        txt = raw.strip()
-        if txt.startswith("```"):
-            parts = txt.split("```")
-            if len(parts) >= 3:
-                txt = parts[1]
-            txt = txt.strip()
-        start_i = txt.find("{")
-        end_i = txt.rfind("}")
-        if start_i == -1 or end_i == -1 or end_i <= start_i:
-            return None
-        txt = txt[start_i : end_i + 1]
-        try:
-            return json.loads(txt)
-        except Exception:
-            return None
-
-    groups = find_sibling_groups(clips)
-    if not groups:
-        return False
-
-    # Limitar por presupuesto
-    groups = groups[:TAKE_JUDGE_MAX_GROUPS]
-    groups = [g[:TAKE_JUDGE_MAX_TAKES] for g in groups]
-
+    groups = [group[:TAKE_JUDGE_MAX_TAKES]
+              for group in find_sibling_groups(clips)[:TAKE_JUDGE_MAX_GROUPS]]
     used_any = False
-
     for group in groups:
-        payload = []
-        for c in group:
-            if not c["meta"].get("keep", True):
+        candidates = []
+        samples = []
+        for clip_item in group:
+            if not clip_item["meta"].get("keep", True):
                 continue
-
-            mid = (safe_float(c["start"]) + safe_float(c["end"])) / 2.0
-            frame_path = os.path.join(session_dir, f"takejudge_{c['id']}.jpg")
-
-            if not grab_frame_at_timestamp(input_local, mid, frame_path):
-                continue
-
-            try:
-                with open(frame_path, "rb") as f:
-                    img_b64 = base64.b64encode(f.read()).decode("utf-8")
-            except Exception:
-                continue
-
-            payload.append(
-                {
-                    "id": c["id"],
-                    "text": (c.get("text") or "").strip(),
-                    "image_b64": img_b64,
-                }
+            sample = sample_candidate_frames(
+                clip_item, TAKE_JUDGE_FRAMES, input_local, grab_frame_at_timestamp
             )
-
-        if not payload:
+            samples.append(sample)
+            candidates.append(TakeJudgeCandidate(
+                candidate_id=str(clip_item["id"]),
+                slot=str(clip_item.get("slot") or "STORY"),
+                transcript=str(clip_item.get("text") or "").strip(),
+                duration_sec=max(0.0, safe_float(clip_item.get("end")) - safe_float(clip_item.get("start"))),
+                delivery=delivery_features(clip_item),
+                frame_timestamps=sample.successful_frame_timestamps,
+                image_count=len(sample.image_content),
+            ))
+        if len(candidates) < 2:
             continue
-
-        system_msg = (
-            "You are a senior TikTok ad editor. "
-            "You receive multiple takes of the SAME line. "
-            "Pick the best acting take: natural, confident, persuasive. "
-            "Ignore small wording differences if the performance is better."
-        )
-
-        user_json = {
-            "task": "choose_best_take",
-            "takes": [{"id": p["id"], "text": p["text"]} for p in payload],
-        }
-
-        user_text = (
-            "Return ONLY a JSON like:\n"
-            "{\n"
-            '  \"winner_id\": \"...\",\n'
-            '  \"scores\": [\n'
-            '    {\"id\": \"...\", \"score\": 0.xx}\n'
-            "  ]\n"
-            "}\n\n"
-            "Do not add any explanation outside the JSON.\n\n"
-            f"Takes metadata:\n{json.dumps(user_json, ensure_ascii=False)}"
-        )
-
-        messages = [
-            {
-                "role": "system",
-                "content": [{"type": "text", "text": system_msg}],
-            },
-            {
-                "role": "user",
-                "content": (
-                    [{"type": "text", "text": user_text}]
-                    + [
-                        {
-                            "type": "image_url",
-                            "image_url": {
-                                "url": f"data:image/jpeg;base64,{p['image_b64']}"
-                            },
-                        }
-                        for p in payload
-                    ]
-                ),
-            },
-        ]
-
         try:
-            result = judge_takes(
-                TAKE_JUDGE_MODEL, messages, [p["id"] for p in payload],
-                temperature=0.1,
-                max_completion_tokens=150,
+            result = judge_takes_v2(
+                TAKE_JUDGE_MODEL, candidates[0].slot, candidates, samples,
+                temperature=0.1, max_completion_tokens=700,
             )
         except OpenAIProviderError:
-            logger.warning("Take Judge abstained", extra={"operation": "take_judge"})
+            logger.warning("Take Judge abstained", extra={
+                "operation": "take_judge_v2", "group_size": len(candidates),
+                "frame_count": sum(candidate.image_count for candidate in candidates),
+                "validation": "failed", "abstention": True,
+            })
             continue
-        winner_id = result.winner_id
-        scores_map = result.scores
-
-        if not winner_id:
-            logger.warning("TakeJudgeAI response without winner_id, skipping group.")
+        candidate_ids = {candidate.candidate_id for candidate in candidates}
+        if (result.abstain or result.confidence < TAKE_JUDGE_V2_MIN_CONFIDENCE
+                or result.winner_id not in candidate_ids):
             continue
-
-        # Guardamos scores + WINNER / LOSER
-        for c in group:
-            cid = c["id"]
-            tj_score = scores_map.get(cid, 0.0)
-            c["meta"]["take_judge_score"] = tj_score
-            c["meta"]["take_judge_verdict"] = (
-                "WINNER" if cid == winner_id else "LOSER"
+        scores = {score.candidate_id: score.overall_score for score in result.candidate_scores}
+        for clip_item in group:
+            candidate_id = clip_item["id"]
+            if candidate_id not in scores:
+                continue
+            clip_item["meta"]["take_judge_score"] = scores[candidate_id]
+            clip_item["meta"]["take_judge_verdict"] = (
+                "WINNER" if candidate_id == result.winner_id else "LOSER"
             )
-
-        # Sólo dejamos vivo el ganador
-        for c in group:
-            cid = c["id"]
-            if cid != winner_id and c["meta"].get("keep", True):
-                c["meta"]["keep"] = False
-                c["llm_reason"] = (c.get("llm_reason") or "") + " | Removed by TakeJudgeAI (better take exists)."
-
+            if candidate_id != result.winner_id and clip_item["meta"].get("keep", True):
+                clip_item["meta"]["keep"] = False
+                clip_item["llm_reason"] = (clip_item.get("llm_reason") or "") + (
+                    " | Removed by TakeJudgeAI (better take exists)."
+                )
         used_any = True
-
     return used_any
 
 

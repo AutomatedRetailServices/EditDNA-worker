@@ -99,6 +99,7 @@ class TakeJudgeConfig:
     max_groups: int
     max_takes: int
     frame_count: int
+    min_confidence: float
     environment_sources: Tuple[str, ...]
 
 
@@ -160,6 +161,13 @@ def _float(env: Mapping[str, str], name: str, default: float) -> float:
         return float(raw)
     except (TypeError, ValueError):
         raise ModelConfigurationError(name, "a number") from None
+
+
+def _unit_float(env: Mapping[str, str], name: str, default: float) -> float:
+    value = _float(env, name, default)
+    if not 0.0 <= value <= 1.0:
+        raise ModelConfigurationError(name, "a number between zero and one")
+    return value
 
 
 def load_model_config() -> ModelConfig:
@@ -226,7 +234,8 @@ def load_model_config() -> ModelConfig:
             max_groups=_integer(env, "TAKE_JUDGE_MAX_GROUPS", 6),
             max_takes=_integer(env, "TAKE_JUDGE_MAX_TAKES", 3),
             frame_count=_integer(env, "TAKE_JUDGE_FRAMES", 1),
-            environment_sources=("TAKE_JUDGE_ENABLED", "TAKE_JUDGE_MODEL", "TAKE_JUDGE_MAX_GROUPS", "TAKE_JUDGE_MAX_TAKES", "TAKE_JUDGE_FRAMES"),
+            min_confidence=_unit_float(env, "TAKE_JUDGE_V2_MIN_CONFIDENCE", 0.70),
+            environment_sources=("TAKE_JUDGE_ENABLED", "TAKE_JUDGE_MODEL", "TAKE_JUDGE_MAX_GROUPS", "TAKE_JUDGE_MAX_TAKES", "TAKE_JUDGE_FRAMES", "TAKE_JUDGE_V2_MIN_CONFIDENCE"),
         ),
         global_composer=GlobalComposerConfig(
             provider="local", model_name=None, enabled=False, timeout_seconds=None,
