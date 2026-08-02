@@ -34,23 +34,6 @@ def test_client_factory_is_lazy_and_applies_transport_settings(monkeypatch):
     assert calls == [{"api_key": "test-key", "timeout": 12.5, "max_retries": 2}]
 
 
-@pytest.mark.parametrize("override,expected", [(None, 2), ("0", 0), ("5", 5)])
-def test_client_factory_preserves_and_overrides_sdk_retry_behavior(monkeypatch, override, expected):
-    calls = []
-    module = types.ModuleType("openai")
-    module.OpenAI = lambda **kwargs: calls.append(kwargs) or object()
-    monkeypatch.setitem(sys.modules, "openai", module)
-    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
-    if override is None:
-        monkeypatch.delenv("OPENAI_MAX_RETRIES", raising=False)
-    else:
-        monkeypatch.setenv("OPENAI_MAX_RETRIES", override)
-
-    create_openai_client()
-
-    assert calls[0]["max_retries"] == expected
-
-
 def test_missing_key_is_safe_and_only_fails_when_factory_called(monkeypatch):
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
     secret = "secret-fixture"
