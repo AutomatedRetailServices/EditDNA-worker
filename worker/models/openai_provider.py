@@ -143,12 +143,17 @@ def classify_semantic_v2(model: str, clauses: Sequence[SemanticClauseInput], **k
         "CTA": "direct request to buy, click, add to cart, try, order, or check a link",
         "OTHER": "greeting, filler, production talk, unrelated content, or an insufficient fragment",
     }
+    allowed_evidence_tags = [tag.value for tag in EvidenceTag]
     instructions = (
         "Classify each target clause's own sales role. Adjacent text is context only; never classify it as part "
         "of the target. Be conservative and abstain for incomplete, poor, tied, insufficient, or non-sales text. "
         "Enthusiasm alone is not a hook. Return JSON only: {results:[{id,primary_slot,secondary_slot|null,"
         "confidence,secondary_confidence|null,completeness,sales_relevance,standalone_quality,abstain,reason,evidence_tags}]}. "
-        "Reason must be safe and at most 160 characters. Definitions: " + json.dumps(definitions)
+        "Reason must be safe and at most 160 characters. evidence_tags must be a JSON list containing only "
+        "values from this exact allowed list, or an empty list when no tag applies: "
+        + json.dumps(allowed_evidence_tags)
+        + ". Input signal field names are context, not evidence tags; never return arbitrary or invented tags. "
+        "Definitions: " + json.dumps(definitions)
     )
     raw = _chat("semantic_classification_v2", model, [
         {"role": "system", "content": [{"type": "text", "text": instructions}]},

@@ -787,6 +787,13 @@ def enrich_clips_semantic(clips: List[Dict[str, Any]]) -> bool:
         }
         if info.abstain or info.confidence < SEMANTIC_V2_MIN_CONFIDENCE or info.completeness < 0.5:
             continue
+        if info.primary_slot.value == "OTHER":
+            # Preserve the heuristic/public slot and keep state, but ensure a validated
+            # non-sales judgment cannot enter a sales composer timeline.
+            c["meta"]["semantic_v2"]["application_status"] = "excluded_other"
+            c["meta"]["semantic_v2"]["application_reason"] = "validated_other_excluded_from_sales_composer"
+            c["meta"]["semantic_v2"]["excluded_from_composer"] = True
+            continue
         slot_from_llm = publicize_canonical_slot(info.primary_slot)
         c["slot"] = slot_from_llm
         c["meta"]["slot"] = slot_from_llm
@@ -1592,6 +1599,7 @@ def build_composer(clips: List[Dict[str, Any]], mode: str = "human") -> Dict[str
         c
         for c in clips
         if c["meta"].get("keep", True)
+        and not c["meta"].get("semantic_v2", {}).get("excluded_from_composer", False)
         and safe_float(c.get("semantic_score", 0.0)) >= COMPOSER_MIN_SEMANTIC
     ]
 
@@ -1634,6 +1642,7 @@ def build_composer(clips: List[Dict[str, Any]], mode: str = "human") -> Dict[str
             c
             for c in clips
             if c["meta"].get("keep", True)
+            and not c["meta"].get("semantic_v2", {}).get("excluded_from_composer", False)
             and safe_float(c.get("semantic_score", 0.0)) >= COMPOSER_MIN_SEMANTIC
         ]
         usable = canonical_source_order(usable)

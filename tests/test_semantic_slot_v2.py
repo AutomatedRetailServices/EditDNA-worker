@@ -63,6 +63,30 @@ def test_valid_primary_secondary_result(monkeypatch):
     assert result.evidence_tags == (EvidenceTag.PRODUCT_ATTRIBUTE, EvidenceTag.PRACTICAL_BENEFIT)
 
 
+def test_prompt_enumerates_only_enum_evidence_tags(monkeypatch):
+    captured = {}
+
+    def fake_chat(operation, model, messages, **kwargs):
+        captured["system"] = messages[0]["content"][0]["text"]
+        return response_for(evidence_tags=[])
+
+    monkeypatch.setattr(provider, "_chat", fake_chat)
+    result = provider.classify_semantic_v2("gpt-5.1", [clause()])["a"]
+    prompt = captured["system"]
+    assert all(tag.value in prompt for tag in EvidenceTag)
+    assert "only values from this exact allowed list" in prompt
+    assert "never return arbitrary or invented tags" in prompt
+    assert "question_mark" not in prompt and "imperative_verb" not in prompt
+    assert result.evidence_tags == ()
+
+
+@pytest.mark.parametrize("tags", [[], ["question_hook"], [tag.value for tag in EvidenceTag]])
+def test_empty_and_allowed_evidence_tags_validate(monkeypatch, tags):
+    install(monkeypatch, response_for(evidence_tags=tags))
+    result = provider.classify_semantic_v2("gpt-5.1", [clause()])["a"]
+    assert [tag.value for tag in result.evidence_tags] == tags
+
+
 def test_context_is_adjacent_and_never_crosses_source():
     clips = [
         {"id": "a", "text": "previous", "source_index": 0, "slot": "STORY", "meta": {}},
