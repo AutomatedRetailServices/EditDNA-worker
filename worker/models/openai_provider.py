@@ -4,7 +4,7 @@ Chat Completions remains the default API family because external SDK documentati
 not available during this refactor and changing API families could alter model support.
 """
 
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from enum import Enum
 import json
 import logging
@@ -14,6 +14,9 @@ from typing import Any, Dict, Iterable, Mapping, Optional, Sequence, Tuple
 from .openai_client import (
     OpenAIProviderError, OpenAIResponseValidationError, OpenAITimeoutError,
     create_openai_client,
+)
+from worker.take_judge_v2 import (
+    TakeJudgeCandidate, TakeJudgeCandidateScore, TakeJudgeV2Result, TemporalFrameSample,
 )
 
 logger = logging.getLogger("editdna.openai_provider")
@@ -135,6 +138,83 @@ def judge_takes(model: str, messages: Sequence[Mapping[str, Any]], candidate_ids
             raise OpenAIResponseValidationError("OpenAI response failed validation")
         scores[item["id"]] = _score(item.get("score"))
     return TakeJudgeResult(winner, scores)
+
+
+def judge_takes_v2(
+    model: str, slot: str, candidates: Sequence[TakeJudgeCandidate],
+    frames: Sequence[TemporalFrameSample], **kwargs: Any,
+) -> TakeJudgeV2Result:
+    """Compare one sibling group using sanitized structured evidence."""
+    ids = [candidate.candidate_id for candidate in candidates]
+    if len(ids) < 2 or len(ids) != len(set(ids)):
+        raise OpenAIResponseValidationError("OpenAI response failed validation")
+    frame_map = {sample.candidate_id: sample for sample in frames}
+    if set(frame_map) - set(ids):
+        raise OpenAIResponseValidationError("OpenAI response failed validation")
+    evidence = []
+    for candidate in candidates:
+        evidence.append({
+            "candidate_id": candidate.candidate_id, "transcript": candidate.transcript,
+            "duration_sec": candidate.duration_sec, "delivery": asdict(candidate.delivery),
+            "frame_timestamps": list(candidate.frame_timestamps), "image_count": candidate.image_count,
+        })
+    instructions = (
+        "Compare only the supplied sibling candidates for the assigned slot. Evaluate spoken clarity, "
+        "natural delivery, confidence, eye contact and visible engagement, distracting facial/body "
+        "behavior, pacing, completeness, slot suitability, and sales effectiveness without rewarding "
+        "exaggerated or artificial performance. Abstain when evidence is weak or effectively tied. "
+        "Return JSON only with winner_id (null when abstaining), confidence, abstain, reason, and "
+        "candidate_scores containing candidate_id, delivery_score, visual_performance_score, "
+        "clarity_score, sales_effectiveness_score, overall_score, and reason. All scores are 0 to 1."
+    )
+    content: list[Mapping[str, Any]] = [{"type": "text", "text": json.dumps({
+        "operation": "take_judge_v2", "slot": slot, "candidate_ids": ids, "candidates": evidence,
+    }, ensure_ascii=False)}]
+    for candidate_id in ids:
+        sample = frame_map.get(candidate_id)
+        if sample and sample.image_content:
+            content.append({"type": "text", "text": "Temporal frames for candidate " + candidate_id})
+            content.extend(sample.image_content)
+    raw = _chat("take_judge_v2", model, [
+        {"role": "system", "content": [{"type": "text", "text": instructions}]},
+        {"role": "user", "content": content},
+    ], **kwargs)
+    data = _json(raw)
+    try:
+        abstain = data["abstain"]
+        if type(abstain) is not bool:
+            raise ValueError
+        winner = data.get("winner_id")
+        if (not abstain and winner not in ids) or (winner is not None and winner not in ids):
+            raise ValueError
+        scores = []
+        seen = set()
+        raw_scores = data["candidate_scores"]
+        if not isinstance(raw_scores, list):
+            raise ValueError
+        for item in raw_scores:
+            cid = item["candidate_id"]
+            if cid not in ids or cid in seen:
+                raise ValueError
+            seen.add(cid)
+            scores.append(TakeJudgeCandidateScore(
+                cid, item["delivery_score"], item["visual_performance_score"], item["clarity_score"],
+                item["sales_effectiveness_score"], item["overall_score"], item.get("reason", ""),
+            ))
+        if seen != set(ids):
+            raise ValueError
+        if not abstain:
+            overall_scores = {score.candidate_id: score.overall_score for score in scores}
+            highest = max(overall_scores.values())
+            top_ids = {candidate_id for candidate_id, score in overall_scores.items() if score == highest}
+            if winner not in top_ids:
+                raise ValueError
+            if len(top_ids) != 1:
+                return TakeJudgeV2Result(None, tuple(scores), data["confidence"], True,
+                                         "Top candidate scores are tied")
+        return TakeJudgeV2Result(winner, tuple(scores), data["confidence"], abstain, data.get("reason", ""))
+    except (KeyError, TypeError, ValueError) as exc:
+        raise OpenAIResponseValidationError("OpenAI response failed validation") from exc
 
 
 def refine_boundaries(model: str, messages: Sequence[Mapping[str, Any]], **kwargs: Any) -> BoundaryResult:

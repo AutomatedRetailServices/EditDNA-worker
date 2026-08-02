@@ -22,7 +22,8 @@ _stub_missing_module("clip")
 _stub_missing_module("faster_whisper", WhisperModel=object)
 
 from worker import pipeline
-from worker.models.openai_provider import BoundaryResult, TakeJudgeResult, Verdict
+from worker.models.openai_provider import BoundaryResult, Verdict
+from worker.take_judge_v2 import TakeJudgeCandidateScore, TakeJudgeV2Result
 
 
 @pytest.mark.parametrize("name", ["requests", "boto3", "clip", "faster_whisper"])
@@ -54,7 +55,7 @@ def test_missing_key_prevents_visual_work_and_provider_calls(monkeypatch, caplog
     monkeypatch.setattr(pipeline, "grab_frame_at_timestamp", lambda *args: extracted.append(args) or True)
     monkeypatch.setattr(pipeline, "detect_bad_take", lambda *args, **kwargs: called.append(args))
     monkeypatch.setattr(pipeline, "refine_boundaries", lambda *args, **kwargs: called.append(args))
-    monkeypatch.setattr(pipeline, "judge_takes", lambda *args, **kwargs: called.append(args))
+    monkeypatch.setattr(pipeline, "judge_takes_v2", lambda *args, **kwargs: called.append(args))
     monkeypatch.setattr(pipeline, "BOUNDARY_REFINER_ENABLED", True)
     monkeypatch.setattr(pipeline, "TAKE_JUDGE_ENABLED", True)
     items = [clip("a"), clip("b", 0.2, 6.2)]
@@ -100,7 +101,7 @@ def test_configured_visual_operations_reach_extraction_and_provider(monkeypatch,
         pipeline.refine_clip_boundaries_with_vision("input.mp4", str(tmp_path), items)
     else:
         monkeypatch.setattr(pipeline, "find_sibling_groups", lambda _clips: [items])
-        monkeypatch.setattr(pipeline, "judge_takes", lambda *args, **kwargs: called.append(args) or TakeJudgeResult("a", {"a": 1.0, "b": 0.5}))
+        monkeypatch.setattr(pipeline, "judge_takes_v2", lambda *args, **kwargs: called.append(args) or TakeJudgeV2Result("a", tuple(TakeJudgeCandidateScore(cid, 0.8, 0.8, 0.8, 0.8, score, "safe") for cid, score in (("a", 1.0), ("b", 0.5))), 0.9, False, "safe"))
         pipeline.run_take_judge(items, str(tmp_path), "input.mp4")
 
     assert extracted
