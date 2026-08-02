@@ -3,6 +3,8 @@ import json
 import logging
 import subprocess
 import copy
+import shutil
+import tempfile
 from typing import List, Dict, Any, Optional, Union
 
 import requests
@@ -92,6 +94,21 @@ OUTPUT_FPS = int(os.environ.get("OUTPUT_FPS", "30"))
 # HELPERS
 # =====================
 
+class PipelineError(RuntimeError):
+    """Base class for classified pipeline failures."""
+
+
+class SelectionError(PipelineError):
+    """A deterministic failure caused by an invalid or empty selection."""
+
+
+class MissingSelectedClipsError(SelectionError):
+    """Selected clip IDs did not resolve uniquely against analyzed clips."""
+
+
+class UploadError(PipelineError):
+    """The rendered output could not be uploaded."""
+
 def safe_float(x: Any, default: float = 0.0) -> float:
     try:
         return float(x)
@@ -100,14 +117,15 @@ def safe_float(x: Any, default: float = 0.0) -> float:
 
 
 def ensure_session_dir(session_id: str) -> str:
-    base = TMP_DIR
-    session_dir = os.path.join(base, session_id)
-    os.makedirs(session_dir, exist_ok=True)
-    return session_dir
+    os.makedirs(TMP_DIR, exist_ok=True)
+    # A unique directory makes ownership unambiguous and avoids concurrent jobs
+    # with the same externally supplied session ID deleting each other's files.
+    safe_session_id = "".join(c if c.isalnum() or c in "-_" else "_" for c in session_id)
+    return tempfile.mkdtemp(prefix=f"{safe_session_id or 'session'}-", dir=TMP_DIR)
 
 
 def download_to_local(url: str, dst_path: str) -> None:
-    logger.info(f"Downloading input: {url} -> {dst_path}")
+    logger.info("Downloading input to job temporary storage")
     resp = requests.get(url, stream=True, timeout=300)
     resp.raise_for_status()
     os.makedirs(os.path.dirname(dst_path), exist_ok=True)
@@ -156,20 +174,23 @@ def has_audio_stream(path: str) -> bool:
     return False
 
 
-def upload_to_s3(local_path: str, bucket: str, key: str) -> Optional[str]:
+def upload_to_s3(local_path: str, bucket: str, key: str) -> str:
     try:
         s3 = boto3.client("s3")
-        logger.info(f"Uploading to S3 s3://{bucket}/{key}")
+        logger.info("Uploading rendered output to configured S3 bucket")
         s3.upload_file(local_path, bucket, key)
         url = s3.generate_presigned_url(
             "get_object",
             Params={"Bucket": bucket, "Key": key},
             ExpiresIn=7 * 24 * 3600,
         )
+        if not isinstance(url, str) or not url.strip():
+            raise ValueError("S3 did not return a non-empty output URL")
         return url
-    except Exception as e:
-        logger.exception(f"Error uploading to S3: {e}")
-        return None
+    except Exception as exc:
+        # Do not interpolate the provider exception: it may contain a signed URL.
+        logger.error("S3 output upload failed")
+        raise UploadError("Failed to upload rendered output") from exc
         
 def save_result_json_to_s3(result: Dict[str, Any]) -> Optional[str]:
     """
@@ -1987,8 +2008,22 @@ def render_funnel_video(
     sources = [input_local] if isinstance(input_local, str) else list(input_local)
     if not sources:
         raise RuntimeError("render_funnel_video: no input sources provided")
-    lookup = {c["id"]: c for c in clips}
-    selected = [lookup[cid] for cid in used_clip_ids if cid in lookup]
+    matches: Dict[str, List[Dict[str, Any]]] = {}
+    for candidate in clips:
+        matches.setdefault(candidate["id"], []).append(candidate)
+    missing = list(dict.fromkeys(cid for cid in used_clip_ids if not matches.get(cid)))
+    ambiguous = list(dict.fromkeys(cid for cid in used_clip_ids if len(matches.get(cid, [])) > 1))
+    if missing or ambiguous:
+        details = []
+        if missing:
+            details.append(f"missing selected clip IDs: {missing!r}")
+        if ambiguous:
+            details.append(f"non-unique selected clip IDs: {ambiguous!r}")
+        raise MissingSelectedClipsError("; ".join(details))
+    # Selection is set-like in the existing composer contract. Preserve first
+    # occurrence order while preventing accidental duplicate rendering.
+    unique_ids = list(dict.fromkeys(used_clip_ids))
+    selected = [matches[cid][0] for cid in unique_ids]
     indices = {int(c.get("source_index", 0)) for c in selected}
     if any(i < 0 or i >= len(sources) for i in indices):
         raise RuntimeError("render_funnel_video: clip has invalid source_index")
@@ -2048,26 +2083,28 @@ def render_funnel_video(
 def run_pipeline(session_id: str, files: Optional[List[str]] = None,
                  file_urls: Optional[List[str]] = None, mode: str = "human") -> Dict[str, Any]:
     """Analyze every source once, compose once, and render one output."""
-    logger.info(f"run_pipeline session_id={session_id} mode={mode} files={files} file_urls={file_urls}")
+    logger.info("run_pipeline session_id=%s mode=%s", session_id, mode)
     effective_files = files if files and isinstance(files, list) else file_urls
     if not effective_files or not isinstance(effective_files, list):
         raise ValueError("run_pipeline: 'files' or 'file_urls' must be a list with at least 1 URL")
     mode=(mode or "human").lower()
     if mode not in ("human","clean","blooper"): mode="human"
     session_dir=ensure_session_dir(session_id)
-    if len(effective_files)==1:
-        local_sources=[os.path.join(session_dir,"input.mp4")]
-    else:
-        local_sources=[os.path.join(session_dir,f"input_{i:03d}.mp4") for i in range(len(effective_files))]
-    for i,(url,path) in enumerate(zip(effective_files,local_sources)):
-        try: download_to_local(url,path)
-        except Exception as exc:
-            raise RuntimeError(f"Failed to download input source_index={i} (URL position {i+1})") from exc
+    retain_local_result = False
+    try:
+        if len(effective_files)==1:
+            local_sources=[os.path.join(session_dir,"input.mp4")]
+        else:
+            local_sources=[os.path.join(session_dir,f"input_{i:03d}.mp4") for i in range(len(effective_files))]
+        for i,(url,path) in enumerate(zip(effective_files,local_sources)):
+            try: download_to_local(url,path)
+            except Exception as exc:
+                raise RuntimeError(f"Failed to download input source_index={i} (URL position {i+1})") from exc
 
-    clips=[]; durations=[]
-    llm_used=vision_used=bad_takes_used=boundaries_refined=take_judge_used=False
-    for i,path in enumerate(local_sources):
-        try:
+        clips=[]; durations=[]
+        llm_used=vision_used=bad_takes_used=boundaries_refined=take_judge_used=False
+        for i,path in enumerate(local_sources):
+          try:
             durations.append(probe_duration(path))
             current=merge_incomplete_phrases(sentence_boundary_micro_cuts(run_asr(path)))
             if len(local_sources)>1: add_source_metadata(current,i,path)
@@ -2085,22 +2122,29 @@ def run_pipeline(session_id: str, files: Optional[List[str]] = None,
             for c in current:
                 c["source_start"],c["source_end"]=safe_float(c.get("start")),safe_float(c.get("end"))
             clips.extend(current)
-        except Exception as exc:
+          except Exception as exc:
             raise RuntimeError(f"Failed to analyze input source_index={i} (URL position {i+1})") from exc
-    slots=build_slots_dict(clips)
-    clean_ids=select_clean_cut_clip_ids(clips) if mode=="clean" else []
-    composer=build_composer(copy.deepcopy(clips) if mode=="clean" else clips,mode=mode)
-    used=clean_ids if mode=="clean" else composer.get("used_clip_ids",[])
-    if mode!="clean" and len(local_sources)>1:
-        selected=set(used); used=[c["id"] for c in canonical_source_order(clips) if c["id"] in selected]
-        composer["used_clip_ids"]=used
-    input_local=local_sources[0]; clean_rendered=False
-    if used:
-        final=render_funnel_video(input_local if len(local_sources)==1 else local_sources,session_dir,clips,used)
-        clean_rendered=mode=="clean"
-    else: final=input_local
-    output_url=upload_to_s3(final,S3_BUCKET,f"{S3_PREFIX}/{session_id}-final.mp4") if S3_BUCKET else None
-    result={"ok":True,"session_id":session_id,"input_local":input_local,
+        slots=build_slots_dict(clips)
+        clean_ids=select_clean_cut_clip_ids(clips) if mode=="clean" else []
+        composer=build_composer(copy.deepcopy(clips) if mode=="clean" else clips,mode=mode)
+        used=clean_ids if mode=="clean" else composer.get("used_clip_ids",[])
+        if mode!="clean" and len(local_sources)>1:
+            selected=set(used)
+            used=[c["id"] for c in canonical_source_order(clips) if c["id"] in selected]
+            known_ids=set(used)
+            used.extend(dict.fromkeys(cid for cid in composer.get("used_clip_ids",[]) if cid not in known_ids))
+            composer["used_clip_ids"]=used
+        input_local=local_sources[0]; clean_rendered=False
+        if used:
+            final=render_funnel_video(input_local if len(local_sources)==1 else local_sources,session_dir,clips,used)
+            clean_rendered=mode=="clean"
+        elif mode in ("human", "blooper"):
+            raise SelectionError(f"No clips were selected for requested mode '{mode}'")
+        else: final=input_local
+        output_url=upload_to_s3(final,S3_BUCKET,f"{S3_PREFIX}/{session_id}-final.mp4") if S3_BUCKET else None
+        if S3_BUCKET and not output_url:
+            raise UploadError("Rendered output upload returned no output URL")
+        result={"ok":True,"session_id":session_id,"input_local":input_local,
       "input_files_local":local_sources,"input_file_count":len(local_sources),
       "processed_source_indices":list(range(len(local_sources))),"duration_sec":sum(durations),
       "input_durations_sec":durations,"clips":clips,"slots":slots,"composer":composer,
@@ -2110,5 +2154,28 @@ def run_pipeline(session_id: str, files: Optional[List[str]] = None,
       "clean_cut_output_video_url":output_url if clean_rendered else None,"asr":True,"semantic":True,
       "vision":vision_used,"llm_used":llm_used,"take_judge_used":take_judge_used,
       "bad_takes_used":bad_takes_used,"boundaries_refined":boundaries_refined,"composer_mode":mode}
-    result["output_json_s3_uri"]=save_result_json_to_s3(result)
-    return result
+        if output_url:
+            # Uploaded jobs return only durable media references. The local inputs
+            # and render output belong to the job directory removed below.
+            result.pop("input_local")
+            result.pop("input_files_local")
+            result.pop("output_video_local")
+            result.pop("clean_cut_output_video_local")
+            for analyzed_clip in result["clips"]:
+                analyzed_clip.pop("source_local", None)
+        else:
+            # No-S3 operation is an existing result contract used by direct
+            # callers. Transfer ownership of the job directory to that caller so
+            # its returned local paths remain usable.
+            retain_local_result = True
+        result["output_json_s3_uri"]=save_result_json_to_s3(result)
+        return result
+    finally:
+        if not retain_local_result:
+            try:
+                shutil.rmtree(session_dir)
+            except FileNotFoundError:
+                pass
+            except Exception:
+                # Cleanup is best effort and must never replace the active failure.
+                logger.warning("Failed to clean up job temporary directory", exc_info=True)

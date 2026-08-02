@@ -23,10 +23,7 @@ def job_render(
     if mode_norm not in ("human", "clean", "blooper"):
         raise ValueError(f"Unsupported render mode: {mode}")
 
-    log.info(
-        f"[job_render] START session_id={session_id} "
-        f"mode={mode_norm} files={files} file_urls={file_urls}"
-    )
+    log.info("[job_render] START session_id=%s mode=%s", session_id, mode_norm)
 
     # Ejecuta el pipeline REAL
     result = run_pipeline(
