@@ -18,6 +18,7 @@ from .openai_client import (
 from worker.take_judge_v2 import (
     TakeJudgeCandidate, TakeJudgeCandidateScore, TakeJudgeV2Result, TemporalFrameSample,
 )
+from worker.semantic_slot_v2 import CanonicalSlot, EvidenceTag, SemanticClauseInput, SlotClassificationResult
 
 logger = logging.getLogger("editdna.openai_provider")
 
@@ -125,6 +126,76 @@ def classify_semantic(model: str, messages: Sequence[Mapping[str, Any]], clip_id
     if not results:
         raise OpenAIResponseValidationError("OpenAI response failed validation")
     return results
+
+
+def classify_semantic_v2(model: str, clauses: Sequence[SemanticClauseInput], **kwargs: Any) -> Dict[str, SlotClassificationResult]:
+    """Classify target clauses using only privacy-reviewed structured context."""
+    ids = [clause.clause_id for clause in clauses]
+    if not ids or len(ids) != len(set(ids)):
+        raise OpenAIResponseValidationError("OpenAI response failed validation")
+    definitions = {
+        "HOOK": "earns opening attention through a question, surprising claim, curiosity gap, result, or audience callout",
+        "PROBLEM": "pain, frustration, risk, objection, failed alternative, or undesirable current state",
+        "FEATURES": "what the product is, contains, includes, does mechanically, or how it works",
+        "BENEFIT": "user outcome or practical value created by the product",
+        "PROOF": "demonstration, before/after, measurable result, testimonial, social proof, or observed outcome",
+        "STORY": "personal narrative, experience sequence, background, discovery, or transformation context",
+        "CTA": "direct request to buy, click, add to cart, try, order, or check a link",
+        "OTHER": "greeting, filler, production talk, unrelated content, or an insufficient fragment",
+    }
+    allowed_evidence_tags = [tag.value for tag in EvidenceTag]
+    instructions = (
+        "Classify each target clause's own sales role. Adjacent text is context only; never classify it as part "
+        "of the target. Be conservative and abstain for incomplete, poor, tied, insufficient, or non-sales text. "
+        "Enthusiasm alone is not a hook. Return JSON only: {results:[{id,primary_slot,secondary_slot|null,"
+        "confidence,secondary_confidence|null,completeness,sales_relevance,standalone_quality,abstain,reason,evidence_tags}]}. "
+        "Reason must be safe and at most 160 characters. evidence_tags must be a JSON list containing only "
+        "values from this exact allowed list, or an empty list when no tag applies: "
+        + json.dumps(allowed_evidence_tags)
+        + ". Input signal field names are context, not evidence tags; never return arbitrary or invented tags. "
+        "Definitions: " + json.dumps(definitions)
+    )
+    raw = _chat("semantic_classification_v2", model, [
+        {"role": "system", "content": [{"type": "text", "text": instructions}]},
+        {"role": "user", "content": [{"type": "text", "text": json.dumps({
+            "operation": "semantic_classification_v2", "clauses": [item.provider_dict() for item in clauses],
+        }, ensure_ascii=False)}]},
+    ], **kwargs)
+    data = _json(raw)
+    try:
+        items = data["results"]
+        if not isinstance(items, list):
+            raise ValueError
+        output: Dict[str, SlotClassificationResult] = {}
+        for item in items:
+            cid = item["id"]
+            if cid not in ids or cid in output:
+                raise ValueError
+            primary = CanonicalSlot(item["primary_slot"])
+            secondary = CanonicalSlot(item["secondary_slot"]) if item.get("secondary_slot") is not None else None
+            confidence = _score(item["confidence"])
+            secondary_confidence = _score(item["secondary_confidence"]) if item.get("secondary_confidence") is not None else None
+            if primary == secondary or (secondary is None) != (secondary_confidence is None):
+                raise ValueError
+            if secondary_confidence is not None and secondary_confidence > confidence:
+                raise ValueError
+            abstain = item["abstain"]
+            reason = item["reason"]
+            if (type(abstain) is not bool or not isinstance(reason, str) or len(reason) > 160
+                    or reason != reason.strip() or not reason.isprintable()):
+                raise ValueError
+            tags = tuple(EvidenceTag(tag) for tag in item["evidence_tags"])
+            if len(tags) != len(set(tags)):
+                raise ValueError
+            output[cid] = SlotClassificationResult(
+                primary, secondary, confidence, secondary_confidence, _score(item["completeness"]),
+                _score(item["sales_relevance"]), _score(item["standalone_quality"]), abstain, reason, tags,
+            )
+        if set(output) != set(ids):
+            raise ValueError
+        return output
+    except (KeyError, TypeError, ValueError) as exc:
+        raise OpenAIResponseValidationError("OpenAI response failed validation") from exc
 
 
 def judge_takes(model: str, messages: Sequence[Mapping[str, Any]], candidate_ids: Iterable[str], **kwargs: Any) -> TakeJudgeResult:

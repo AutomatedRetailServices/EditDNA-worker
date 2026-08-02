@@ -16,8 +16,9 @@ import clip
 from worker.models.config import load_model_config
 from worker.models.openai_client import OpenAIProviderError, is_openai_available
 from worker.models.openai_provider import (
-    Verdict, classify_semantic, detect_bad_take, judge_takes_v2, refine_boundaries,
+    Verdict, classify_semantic_v2, detect_bad_take, judge_takes_v2, refine_boundaries,
 )
+from worker.semantic_slot_v2 import build_clause_inputs, publicize_canonical_slot
 from worker.take_judge_v2 import TakeJudgeCandidate, delivery_features, sample_candidate_frames
 
 from pipeline_errors import (
@@ -61,6 +62,7 @@ EDITDNA_CTA_MIN_SCORE = float(os.environ.get("EDITDNA_CTA_MIN_SCORE", "0.6"))
 # LLM
 EDITDNA_USE_LLM = MODEL_CONFIG.semantic_llm.enabled
 EDITDNA_LLM_MODEL = MODEL_CONFIG.semantic_llm.model_name
+SEMANTIC_V2_MIN_CONFIDENCE = MODEL_CONFIG.semantic_llm.min_confidence
 
 # VISION
 VISION_ENABLED = MODEL_CONFIG.vision.enabled
@@ -586,6 +588,9 @@ def classify_slot(text: str) -> str:
             "grab one",
             "link below",
             "i left it for you",
+            "add to cart",
+            "order now",
+            "check the link",
         ]
     ):
         return "CTA"
@@ -604,6 +609,8 @@ def classify_slot(text: str) -> str:
             "does your",
             "is your",
             "keep giving you",
+            "frustrated",
+            "failed alternative",
         ]
     ):
         return "PROBLEM"
@@ -611,12 +618,11 @@ def classify_slot(text: str) -> str:
     if any(
         p in t
         for p in [
-            "i've been using",
-            "i've tried",
             "i think they're really good",
             "i get so many compliments",
-            "honestly",
-            "for me",
+            "before and after",
+            "five stars",
+            "measurable result",
         ]
     ):
         return "PROOF"
@@ -662,6 +668,10 @@ def classify_slot(text: str) -> str:
         p in t
         for p in [
             "because i found",
+            "i've been using",
+            "i've tried",
+            "honestly",
+            "for me",
             "let me tell you",
             "when i",
             "the first time",
@@ -670,6 +680,8 @@ def classify_slot(text: str) -> str:
     ):
         return "STORY"
 
+    if looks_like_filler(text) or len(t.strip().split()) < 2:
+        return "OTHER"
     return "STORY"
 
 
@@ -728,93 +740,18 @@ def tag_clips_heuristic(clips: List[Dict[str, Any]]) -> None:
 # =====================
 
 def llm_classify_clips(clips: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
-    payload_clips = [
-        {"id": c["id"], "text": c.get("text", "")}
-        for c in clips
-        if (c.get("text") or "").strip()
-    ]
-
-    if not payload_clips:
+    """Run Semantic V2 through the provider layer; failures are deliberately fail-open."""
+    clauses = build_clause_inputs(clips)
+    if not clauses:
         return None
-
-    system_msg = (
-        "You are an expert TikTok ad editor. "
-        "You receive short transcript segments from a spoken ad (with slang). "
-        "For each segment, you must classify its funnel role and how strong it is."
-    )
-
-    user_instruction = {
-        "task": "classify_clips",
-        "instructions": {
-            "slots": [
-                "HOOK",
-                "STORY",
-                "PROBLEM",
-                "BENEFITS",
-                "FEATURES",
-                "PROOF",
-                "CTA",
-            ],
-            "output_schema": {
-                "id": "string",
-                "slot": "string",
-                "keep": "boolean",
-                "semantic_score": "float (0-1)",
-                "reason": "short explanation in spanish",
-            },
-        },
-        "clips": payload_clips,
-    }
-
-    user_text = (
-        "Devuélveme SOLO un JSON con este formato exacto:\n\n"
-        "{\n"
-        '  \"clips\": [\n'
-        '    {\"id\": \"...\", \"slot\": \"...\", \"keep\": true/false, '
-        '\"semantic_score\": 0.xx, \"reason\": \"...\"}\n'
-        "  ]\n"
-        "}\n\n"
-        "No agregues texto fuera del JSON.\n\n"
-        f"Aquí están los clips:\n{json.dumps(user_instruction, ensure_ascii=False)}"
-    )
-
-    def _safe_parse_json(raw: str) -> Optional[Dict[str, Any]]:
-        """
-        Parsing robusto para cuando el modelo devuelve ```json ...``` o texto extra.
-        """
-        if not raw:
-            return None
-        txt = raw.strip()
-        if txt.startswith("```"):
-            parts = txt.split("```")
-            if len(parts) >= 3:
-                txt = parts[1]
-            txt = txt.strip()
-        start_i = txt.find("{")
-        end_i = txt.rfind("}")
-        if start_i == -1 or end_i == -1 or end_i <= start_i:
-            return None
-        txt = txt[start_i : end_i + 1]
-        try:
-            return json.loads(txt)
-        except Exception:
-            return None
-
     try:
-        validated = classify_semantic(
-            EDITDNA_LLM_MODEL, [
-                {"role": "system", "content": [{"type": "text", "text": system_msg}]},
-                {"role": "user", "content": [{"type": "text", "text": user_text}]},
-            ],
-            [item["id"] for item in payload_clips],
-            temperature=0.2,
-        )
+        return classify_semantic_v2(EDITDNA_LLM_MODEL, clauses, temperature=0.2)
     except OpenAIProviderError:
-        logger.warning("Semantic classifier unavailable", extra={"operation": "semantic_classification"})
+        logger.warning("Semantic classifier unavailable", extra={
+            "operation": "semantic_classification_v2", "clause_count": len(clauses),
+            "validation": "failed",
+        })
         return None
-    return {cid: {"slot": value.slot.value, "keep": value.keep,
-                  "semantic_score": value.semantic_score, "reason": value.reason}
-            for cid, value in validated.items()}
 
 
 def enrich_clips_semantic(clips: List[Dict[str, Any]]) -> bool:
@@ -832,43 +769,36 @@ def enrich_clips_semantic(clips: List[Dict[str, Any]]) -> bool:
         return False
 
     for c in clips:
-        cid = c["id"]
-        if cid not in llm_result:
+        info = llm_result.get(c["id"])
+        if info is None:
             continue
-
-        info = llm_result[cid]
-        original_keep = c["meta"].get("keep", True)
-
-        slot_from_llm = info.get("slot", c.get("slot", "STORY"))
-        sem_from_llm = safe_float(info.get("semantic_score", c.get("semantic_score", 0.0)))
-        reason = info.get("reason", "")
-
+        c["meta"]["semantic_v2"] = {
+            "primary_slot": info.primary_slot.value,
+            "secondary_slot": info.secondary_slot.value if info.secondary_slot else None,
+            "confidence": info.confidence,
+            "secondary_confidence": info.secondary_confidence,
+            "completeness": info.completeness,
+            "sales_relevance": info.sales_relevance,
+            "standalone_quality": info.standalone_quality,
+            "abstain": info.abstain,
+            "reason": info.reason,
+            "evidence_tags": tuple(tag.value for tag in info.evidence_tags),
+            "applied": False,
+        }
+        if info.abstain or info.confidence < SEMANTIC_V2_MIN_CONFIDENCE or info.completeness < 0.5:
+            continue
+        if info.primary_slot.value == "OTHER":
+            # Preserve the heuristic/public slot and keep state, but ensure a validated
+            # non-sales judgment cannot enter a sales composer timeline.
+            c["meta"]["semantic_v2"]["application_status"] = "excluded_other"
+            c["meta"]["semantic_v2"]["application_reason"] = "validated_other_excluded_from_sales_composer"
+            c["meta"]["semantic_v2"]["excluded_from_composer"] = True
+            continue
+        slot_from_llm = publicize_canonical_slot(info.primary_slot)
         c["slot"] = slot_from_llm
-        c["semantic_score"] = sem_from_llm
-        c["score"] = sem_from_llm
-        c["llm_reason"] = reason or c.get("llm_reason", "")
-
         c["meta"]["slot"] = slot_from_llm
-        c["meta"]["semantic_score"] = sem_from_llm
-        c["meta"]["score"] = sem_from_llm
-
-        llm_keep_raw = bool(info.get("keep", original_keep))
-
-        text = (c.get("text") or "").strip()
-        word_count = len(text.split())
-        slot_upper = slot_from_llm
-        strong_semantic = sem_from_llm >= COMPOSER_MIN_SEMANTIC
-        core_slot = slot_upper in {"HOOK", "PROBLEM", "BENEFITS", "FEATURES", "PROOF", "CTA"}
-
-        if not original_keep:
-            final_keep = False
-        else:
-            if core_slot and strong_semantic and word_count >= 3:
-                final_keep = True
-            else:
-                final_keep = original_keep and llm_keep_raw
-
-        c["meta"]["keep"] = final_keep
+        c["llm_reason"] = info.reason or c.get("llm_reason", "")
+        c["meta"]["semantic_v2"]["applied"] = True
 
     return True
 
@@ -1669,6 +1599,7 @@ def build_composer(clips: List[Dict[str, Any]], mode: str = "human") -> Dict[str
         c
         for c in clips
         if c["meta"].get("keep", True)
+        and not c["meta"].get("semantic_v2", {}).get("excluded_from_composer", False)
         and safe_float(c.get("semantic_score", 0.0)) >= COMPOSER_MIN_SEMANTIC
     ]
 
@@ -1711,6 +1642,7 @@ def build_composer(clips: List[Dict[str, Any]], mode: str = "human") -> Dict[str
             c
             for c in clips
             if c["meta"].get("keep", True)
+            and not c["meta"].get("semantic_v2", {}).get("excluded_from_composer", False)
             and safe_float(c.get("semantic_score", 0.0)) >= COMPOSER_MIN_SEMANTIC
         ]
         usable = canonical_source_order(usable)
