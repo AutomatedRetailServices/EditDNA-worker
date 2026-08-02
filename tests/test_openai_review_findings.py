@@ -7,6 +7,8 @@ import pytest
 
 
 def _stub_missing_module(name, **attributes):
+    if name in sys.modules:
+        return
     if importlib.util.find_spec(name) is None:
         module = types.ModuleType(name)
         for attribute, value in attributes.items():
@@ -21,6 +23,23 @@ _stub_missing_module("faster_whisper", WhisperModel=object)
 
 from worker import pipeline
 from worker.models.openai_provider import BoundaryResult, TakeJudgeResult, Verdict
+
+
+@pytest.mark.parametrize("name", ["requests", "boto3", "clip", "faster_whisper"])
+def test_optional_module_stub_preserves_existing_specless_module(monkeypatch, name):
+    existing = types.ModuleType(name)
+    assert existing.__spec__ is None
+    monkeypatch.setitem(sys.modules, name, existing)
+    monkeypatch.setattr(
+        importlib.util,
+        "find_spec",
+        lambda _name: pytest.fail("find_spec must not inspect an existing module"),
+    )
+
+    _stub_missing_module(name, marker=True)
+
+    assert sys.modules[name] is existing
+    assert not hasattr(existing, "marker")
 
 
 def clip(clip_id="a", start=0.0, end=6.0):
