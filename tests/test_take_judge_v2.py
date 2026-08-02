@@ -83,11 +83,56 @@ def test_delivery_rate_pauses_absent_words_and_zero_duration():
     assert absent.words_per_second == 0 and not absent.excessive_pause
 
 
+
+def test_sentence_clips_preserve_only_overlapping_normalized_words():
+    segments = [{"start": 0, "end": 5, "text": "One. Two.", "words": [
+        {"start": 0.2, "end": 0.6, "word": " One."},
+        {"start": 3.0, "end": 3.4, "word": " Two."},
+    ]}]
+    clips = pipeline.sentence_boundary_micro_cuts(segments)
+    assert [[word["word"] for word in clip["words"]] for clip in clips] == [[" One."], [" Two."]]
+    assert clips[0]["words"][0] == {"start": .2, "end": .6, "word": " One."}
+
+
+def test_make_base_clip_excludes_words_outside_interval():
+    clip = pipeline.make_base_clip("a", 1, 2, "inside", words=[
+        {"start": .1, "end": .9, "word": "before"},
+        {"start": 1.2, "end": 1.5, "word": "inside"},
+        {"start": 2.1, "end": 2.5, "word": "after"},
+    ])
+    assert [word["word"] for word in clip["words"]] == ["inside"]
+
+
+def test_merged_clips_order_and_deduplicate_words():
+    duplicate = {"start": 1.0, "end": 1.2, "word": " shared"}
+    first = pipeline.make_base_clip("a", 0, 1.3, "this continues", words=[
+        duplicate, {"start": .1, "end": .3, "word": " this"}])
+    second = pipeline.make_base_clip("b", 1, 2, "into a complete phrase.", words=[
+        duplicate, {"start": 1.3, "end": 1.6, "word": " phrase."}])
+    merged = pipeline.merge_incomplete_phrases([first, second])
+    assert len(merged) == 1
+    assert [word["word"] for word in merged[0]["words"]] == [" this", " shared", " phrase."]
+    assert [word["start"] for word in merged[0]["words"]] == sorted(word["start"] for word in merged[0]["words"])
+
+
+def test_real_clip_construction_exposes_pause_to_delivery_features():
+    clips = pipeline.sentence_boundary_micro_cuts([{"start": 0, "end": 3, "text": "one two.", "words": [
+        {"start": 0, "end": .2, "word": " one"},
+        {"start": 1.5, "end": 1.8, "word": " two."},
+    ]}])
+    assert delivery_features(clips[0]).excessive_pause is True
+
+
+def test_real_clip_construction_without_words_remains_safe():
+    clips = pipeline.sentence_boundary_micro_cuts([{"start": 0, "end": 2, "text": "safe fallback."}])
+    assert "words" not in clips[0]
+    assert delivery_features(clips[0]).excessive_pause is False
+
 def valid_json(**changes):
     data = {"winner_id": "a", "confidence": .8, "abstain": False, "reason": "safe",
             "candidate_scores": [{"candidate_id": cid, "delivery_score": .8,
               "visual_performance_score": .7, "clarity_score": .9,
-              "sales_effectiveness_score": .8, "overall_score": .8, "reason": "safe"}
+              "sales_effectiveness_score": .8, "overall_score": (.9 if cid == "a" else .8), "reason": "safe"}
              for cid in ("a", "b")]}
     data.update(changes)
     import json
@@ -119,6 +164,38 @@ def test_v2_valid_winner_abstention_and_duplicate_ids(monkeypatch):
     with pytest.raises(OpenAIResponseValidationError):
         provider.judge_takes_v2("m", "HOOK", [provider_candidates()[0]] * 2, [])
 
+
+
+def _scores_json(a_score, b_score, winner="a"):
+    import json
+    data = json.loads(valid_json(winner_id=winner))
+    data["candidate_scores"][0]["overall_score"] = a_score
+    data["candidate_scores"][1]["overall_score"] = b_score
+    return json.dumps(data)
+
+
+def test_v2_accepts_unique_highest_winner(monkeypatch):
+    monkeypatch.setattr(provider, "_chat", lambda *args, **kwargs: _scores_json(.9, .8))
+    result_value = provider.judge_takes_v2("m", "HOOK", provider_candidates(), [])
+    assert result_value.winner_id == "a" and not result_value.abstain
+
+
+def test_v2_rejects_winner_below_another_score(monkeypatch):
+    monkeypatch.setattr(provider, "_chat", lambda *args, **kwargs: _scores_json(.7, .9))
+    with pytest.raises(OpenAIResponseValidationError):
+        provider.judge_takes_v2("m", "HOOK", provider_candidates(), [])
+
+
+def test_v2_tied_top_scores_abstain(monkeypatch):
+    monkeypatch.setattr(provider, "_chat", lambda *args, **kwargs: _scores_json(.9, .9))
+    result_value = provider.judge_takes_v2("m", "HOOK", provider_candidates(), [])
+    assert result_value.abstain and result_value.winner_id is None
+
+
+def test_inconsistent_provider_output_never_removes_candidate(monkeypatch):
+    group, outside, _ = configure_pipeline(monkeypatch, OpenAIResponseValidationError("safe"))
+    pipeline.run_take_judge(group + [outside], "session", "input")
+    assert all(item["meta"]["keep"] for item in group + [outside])
 
 def configure_pipeline(monkeypatch, outcome):
     group = [candidate("a", 0, 2), candidate("b", 3, 5)]

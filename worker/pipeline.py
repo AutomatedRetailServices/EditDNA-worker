@@ -221,7 +221,10 @@ def save_result_json_to_s3(result: Dict[str, Any]) -> Optional[str]:
 # CLIP OBJECT CREATION
 # =====================
 
-def make_base_clip(cid: str, start: float, end: float, text: str) -> Dict[str, Any]:
+def make_base_clip(
+    cid: str, start: float, end: float, text: str,
+    words: Optional[List[Dict[str, Any]]] = None,
+) -> Dict[str, Any]:
     clip_obj = {
         "id": cid,
         "slot": "STORY",  # provisional, luego se corrige
@@ -249,6 +252,15 @@ def make_base_clip(cid: str, start: float, end: float, text: str) -> Dict[str, A
             "keep": True,
         },
     }
+    if words:
+        clip_obj["words"] = [
+            {"start": safe_float(word.get("start")),
+             "end": safe_float(word.get("end", word.get("start"))),
+             "word": str(word.get("word", ""))}
+            for word in words
+            if (safe_float(word.get("end", word.get("start"))) > start
+                and safe_float(word.get("start")) < end)
+        ]
     return clip_obj
 
 
@@ -381,6 +393,7 @@ def sentence_boundary_micro_cuts(asr_segments: List[Dict[str, Any]]) -> List[Dic
                 start_ts,
                 end_ts,
                 text_local,
+                words=buffer_words,
             )
             clips.append(clip_obj_local)
             clip_index += 1
@@ -465,12 +478,29 @@ def merge_incomplete_phrases(clips: List[Dict[str, Any]]) -> List[Dict[str, Any]
 
             if can_merge:
                 new_text = (text + " " + next_text).strip()
+                combined_words = []
+                seen_words = set()
+                for word in sorted(
+                    (c.get("words") or []) + (nxt.get("words") or []),
+                    key=lambda item: (safe_float(item.get("start")), safe_float(item.get("end"))),
+                ):
+                    normalized = {
+                        "start": safe_float(word.get("start")),
+                        "end": safe_float(word.get("end", word.get("start"))),
+                        "word": str(word.get("word", "")),
+                    }
+                    identity = (normalized["start"], normalized["end"], normalized["word"])
+                    if identity not in seen_words:
+                        seen_words.add(identity)
+                        combined_words.append(normalized)
                 merged_clip = {
                     **c,
                     "text": new_text,
                     "end": nxt["end"],
                     "chain_ids": c["chain_ids"] + nxt["chain_ids"],
                 }
+                if c.get("words") or nxt.get("words"):
+                    merged_clip["words"] = combined_words
                 merged.append(merged_clip)
                 i += 2
                 continue

@@ -203,6 +203,15 @@ def judge_takes_v2(
             ))
         if seen != set(ids):
             raise ValueError
+        if not abstain:
+            overall_scores = {score.candidate_id: score.overall_score for score in scores}
+            highest = max(overall_scores.values())
+            top_ids = {candidate_id for candidate_id, score in overall_scores.items() if score == highest}
+            if winner not in top_ids:
+                raise ValueError
+            if len(top_ids) != 1:
+                return TakeJudgeV2Result(None, tuple(scores), data["confidence"], True,
+                                         "Top candidate scores are tied")
         return TakeJudgeV2Result(winner, tuple(scores), data["confidence"], abstain, data.get("reason", ""))
     except (KeyError, TypeError, ValueError) as exc:
         raise OpenAIResponseValidationError("OpenAI response failed validation") from exc
