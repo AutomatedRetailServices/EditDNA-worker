@@ -1,10 +1,19 @@
 import logging
 from typing import List, Optional, Dict, Any
 
-from worker.pipeline import run_pipeline  # <- usa el pipeline que pegaste
+from pipeline_errors import JobCanceledError
+from job_progress import RQProgressReporter
+from rq.exceptions import StopRequested
 
 log = logging.getLogger("editdna.tasks")
 log.setLevel(logging.INFO)
+
+
+def run_pipeline(**kwargs):
+    """Load the heavyweight media pipeline only when a render actually runs."""
+    from worker.pipeline import run_pipeline as pipeline_run
+
+    return pipeline_run(**kwargs)
 
 
 def job_render(
@@ -25,13 +34,27 @@ def job_render(
 
     log.info("[job_render] START session_id=%s mode=%s", session_id, mode_norm)
 
-    # Ejecuta el pipeline REAL
-    result = run_pipeline(
-        session_id=session_id,
-        files=files,
-        file_urls=file_urls,
-        mode=mode_norm,
-    )
+    reporter = RQProgressReporter()
+    reporter.update("downloading", 5, "Preparing source downloads")
+    try:
+        result = run_pipeline(
+            session_id=session_id,
+            files=files,
+            file_urls=file_urls,
+            mode=mode_norm,
+            progress=reporter.update,
+            check_canceled=reporter.check_canceled,
+        )
+    except JobCanceledError:
+        reporter.update("canceled", reporter.progress, "Render canceled")
+        if reporter.job is not None:
+            raise StopRequested() from None
+        raise
+    except Exception:
+        reporter.update("failed", reporter.progress, "Render failed")
+        raise
+
+    reporter.update("finished", 100, "Render finished")
 
     log.info(
         f"[job_render] DONE session_id={session_id} "

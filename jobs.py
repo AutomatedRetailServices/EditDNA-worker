@@ -49,7 +49,7 @@ def enqueue_render(
     job = q.enqueue(
         "tasks.job_render",
         kwargs=payload,
-        meta=meta or {},
+        meta={**(meta or {}), "stage": "queued", "progress": 0, "message": "Render queued"},
         job_timeout=_env_int("RQ_JOB_TIMEOUT", 3600, minimum=1),
         result_ttl=_env_int("RQ_RESULT_TTL", 86400),
         failure_ttl=_env_int("RQ_FAILURE_TTL", 604800),
