@@ -19,6 +19,13 @@ class ModelConfigurationError(ValueError):
 
 
 @dataclass(frozen=True)
+class OpenAIClientConfig:
+    timeout_seconds: float
+    max_retries: int
+    environment_sources: Tuple[str, ...]
+
+
+@dataclass(frozen=True)
 class ASRConfig:
     provider: str
     model_name: str
@@ -110,6 +117,7 @@ class GlobalComposerConfig:
 
 @dataclass(frozen=True)
 class ModelConfig:
+    openai: OpenAIClientConfig
     asr: ASRConfig
     semantic_llm: SemanticLLMConfig
     vision: VisionConfig
@@ -160,7 +168,18 @@ def load_model_config() -> ModelConfig:
     whisper_model = env.get("WHISPER_MODEL_NAME") or env.get("WHISPER_MODEL") or "medium"
     whisper_device = env.get("WHISPER_DEVICE", env.get("ASR_DEVICE", "auto"))
 
+    timeout = _float(env, "OPENAI_TIMEOUT_SECONDS", 60.0)
+    retries = _integer(env, "OPENAI_MAX_RETRIES", 0)
+    if timeout <= 0:
+        raise ModelConfigurationError("OPENAI_TIMEOUT_SECONDS", "a number greater than zero")
+    if retries < 0:
+        raise ModelConfigurationError("OPENAI_MAX_RETRIES", "a non-negative integer")
+
     return ModelConfig(
+        openai=OpenAIClientConfig(
+            timeout_seconds=timeout, max_retries=retries,
+            environment_sources=("OPENAI_TIMEOUT_SECONDS", "OPENAI_MAX_RETRIES"),
+        ),
         asr=ASRConfig(
             provider="faster-whisper", model_name=whisper_model,
             enabled=_boolean(env, "ASR_ENABLED", True), timeout_seconds=None,

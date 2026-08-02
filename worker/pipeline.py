@@ -14,6 +14,10 @@ import boto3
 import clip
 
 from worker.models.config import load_model_config
+from worker.models.openai_client import OpenAIProviderError
+from worker.models.openai_provider import (
+    Verdict, classify_semantic, detect_bad_take, judge_takes, refine_boundaries,
+)
 
 from pipeline_errors import (
     JobCanceledError,
@@ -692,15 +696,6 @@ def tag_clips_heuristic(clips: List[Dict[str, Any]]) -> None:
 # =====================
 
 def llm_classify_clips(clips: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
-    from openai import OpenAI
-
-    api_key = os.environ.get("OPENAI_API_KEY")
-    if not api_key:
-        logger.warning("OPENAI_API_KEY is not set, skipping LLM.")
-        return None
-
-    client = OpenAI(api_key=api_key)
-
     payload_clips = [
         {"id": c["id"], "text": c.get("text", "")}
         for c in clips
@@ -774,41 +769,20 @@ def llm_classify_clips(clips: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
             return None
 
     try:
-        completion = client.chat.completions.create(
-            model=EDITDNA_LLM_MODEL,
-            messages=[
+        validated = classify_semantic(
+            EDITDNA_LLM_MODEL, [
                 {"role": "system", "content": [{"type": "text", "text": system_msg}]},
                 {"role": "user", "content": [{"type": "text", "text": user_text}]},
             ],
+            [item["id"] for item in payload_clips],
             temperature=0.2,
         )
-    except Exception as e:
-        logger.exception(f"Error calling LLM: {e}")
+    except OpenAIProviderError:
+        logger.warning("Semantic classifier unavailable", extra={"operation": "semantic_classification"})
         return None
-
-    try:
-        content = completion.choices[0].message.content or ""
-    except Exception as e:
-        logger.exception(f"Error reading LLM content: {e}")
-        return None
-
-    data = _safe_parse_json(content)
-    if not data:
-        logger.warning(f"LLM JSON parse error, raw={content[:120]!r}")
-        return None
-
-    result_map: Dict[str, Any] = {}
-    for item in data.get("clips", []):
-        cid = item.get("id")
-        if not cid:
-            continue
-        result_map[cid] = {
-            "slot": item.get("slot", "STORY"),
-            "keep": bool(item.get("keep", True)),
-            "semantic_score": safe_float(item.get("semantic_score", 0.0)),
-            "reason": item.get("reason", ""),
-        }
-    return result_map
+    return {cid: {"slot": value.slot.value, "keep": value.keep,
+                  "semantic_score": value.semantic_score, "reason": value.reason}
+            for cid, value in validated.items()}
 
 
 def enrich_clips_semantic(clips: List[Dict[str, Any]]) -> bool:
@@ -994,14 +968,7 @@ def reject_visual_bad_takes(clips: List[Dict[str, Any]], session_dir: str, input
     """
     Marca takes visualmente MUY malos como keep=False (nivel entero de clip).
     """
-    from openai import OpenAI
     import base64
-
-    api_key = os.environ.get("OPENAI_API_KEY")
-    if not api_key:
-        return
-
-    client = OpenAI(api_key=api_key)
 
     for c in clips:
         if not c["meta"].get("keep", True):
@@ -1028,19 +995,18 @@ def reject_visual_bad_takes(clips: List[Dict[str, Any]], session_dir: str, input
         Text of the clip: "{c.get('text')}"
         """
 
-        response = client.chat.completions.create(
-            model=BAD_TAKES_MODEL,
-            messages=[
+        try:
+            verdict = detect_bad_take(BAD_TAKES_MODEL, [
                 {"role": "system", "content": "You strictly output 'GOOD' or 'BAD'."},
                 {"role": "user", "content": [
                     {"type": "text", "text": prompt},
                     {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{img_b64}"}},
                 ]},
-            ],
-        )
-
-        verdict = (response.choices[0].message.content or "").strip().upper()
-        if verdict == "BAD":
+            ])
+        except OpenAIProviderError:
+            logger.warning("Visual bad-take check failed open", extra={"operation": "visual_bad_take"})
+            continue
+        if verdict is Verdict.BAD:
             c["meta"]["keep"] = False
             c["llm_reason"] = (c.get("llm_reason") or "") + " | Removed for visual bad-take."
 
@@ -1067,15 +1033,8 @@ def refine_clip_boundaries_with_vision(
         logger.info("BOUNDARY_REFINER_ENABLED=0, skipping boundary refiner.")
         return False
 
-    from openai import OpenAI
     import base64
 
-    api_key = os.environ.get("OPENAI_API_KEY")
-    if not api_key:
-        logger.warning("Boundary refiner needs OPENAI_API_KEY, skipping.")
-        return False
-
-    client = OpenAI(api_key=api_key)
     changed_any = False
 
     def _safe_parse_json(raw: str) -> Optional[Dict[str, Any]]:
@@ -1189,38 +1148,17 @@ def refine_clip_boundaries_with_vision(
         ]
 
         try:
-            resp = client.chat.completions.create(
-                model=BOUNDARY_REFINER_MODEL,
-                messages=messages,
+            result = refine_boundaries(
+                BOUNDARY_REFINER_MODEL, messages,
                 temperature=0.1,
                 max_completion_tokens=1000,
             )
-        except Exception as e:
-            logger.warning(f"Boundary refiner LLM error for clip {c['id']}: {e}")
+        except OpenAIProviderError:
+            logger.warning("Boundary refiner failed open", extra={"operation": "boundary_refinement"})
             continue
-
-        try:
-            content = resp.choices[0].message.content or ""
-        except Exception as e:
-            logger.warning(f"Boundary refiner empty response for clip {c['id']}: {e}")
-            continue
-
-        data = _safe_parse_json(content)
-        if not data:
-            logger.warning(
-                f"Boundary refiner JSON parse error for clip {c['id']}: raw={content[:120]!r}"
-            )
-            continue
-
-        verdicts_map = {
-            item.get("label", ""): (item.get("verdict", "") or "").upper()
-            for item in data.get("frames", [])
-            if isinstance(item, dict)
-        }
-
-        head_bad = verdicts_map.get("head") == "BAD"
-        mid_bad = verdicts_map.get("mid") == "BAD"
-        tail_bad = verdicts_map.get("tail") == "BAD"
+        head_bad = result.HEAD is Verdict.BAD
+        mid_bad = result.MID is Verdict.BAD
+        tail_bad = result.TAIL is Verdict.BAD
 
         # Caso extremo: todo malo → matar el clip completo.
         if head_bad and mid_bad and tail_bad:
@@ -1360,18 +1298,11 @@ def run_take_judge(
       pregunta a un LLM visión+texto cuál es la mejor actuación.
     - Sólo 1 ganador por grupo (LOSER → keep=False).
     """
-    from openai import OpenAI
     import base64
 
     if not TAKE_JUDGE_ENABLED:
         return False
 
-    api_key = os.environ.get("OPENAI_API_KEY")
-    if not api_key:
-        logger.warning("TAKE_JUDGE_ENABLED=1 but OPENAI_API_KEY is missing.")
-        return False
-
-    client = OpenAI(api_key=api_key)
 
     def _safe_parse_json(raw: str) -> Optional[Dict[str, Any]]:
         if not raw:
@@ -1478,35 +1409,16 @@ def run_take_judge(
         ]
 
         try:
-            resp = client.chat.completions.create(
-                model=TAKE_JUDGE_MODEL,
-                messages=messages,
+            result = judge_takes(
+                TAKE_JUDGE_MODEL, messages, [p["id"] for p in payload],
                 temperature=0.1,
                 max_completion_tokens=150,
             )
-        except Exception as e:
-            logger.warning(f"TakeJudgeAI error for group: {e}")
+        except OpenAIProviderError:
+            logger.warning("Take Judge abstained", extra={"operation": "take_judge"})
             continue
-
-        try:
-            content = resp.choices[0].message.content or ""
-        except Exception as e:
-            logger.warning(f"TakeJudgeAI empty response: {e}")
-            continue
-
-        data = _safe_parse_json(content)
-        if not data:
-            logger.warning(
-                f"TakeJudgeAI JSON parse error: raw={content[:120]!r}"
-            )
-            continue
-
-        winner_id = data.get("winner_id")
-        scores_map = {
-            s.get("id"): safe_float(s.get("score", 0.0))
-            for s in data.get("scores", [])
-            if isinstance(s, dict) and s.get("id")
-        }
+        winner_id = result.winner_id
+        scores_map = result.scores
 
         if not winner_id:
             logger.warning("TakeJudgeAI response without winner_id, skipping group.")

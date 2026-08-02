@@ -2,10 +2,8 @@ import os
 import json
 from typing import Optional, Tuple, List, Union
 
-from openai import OpenAI
-
-# You must have OPENAI_API_KEY in env
-client = OpenAI()
+from worker.models.openai_client import OpenAIProviderError
+from worker.models.openai_provider import score_multimodal_clause
 
 # Default model for judging clips
 LLM_MODEL = os.getenv("EDITDNA_LLM_MODEL", "gpt-4.1-mini")
@@ -173,36 +171,11 @@ def score_clause_multimodal(
     ]
 
     try:
-        resp = client.chat.completions.create(
-            model=LLM_MODEL,
-            messages=messages,
+        return score_multimodal_clause(
+            LLM_MODEL, messages,
             response_format={"type": "json_object"},
             temperature=0.2,
         )
-    except Exception as e:
+    except OpenAIProviderError:
         # If the LLM call completely fails, fall back to neutral score
-        return 0.5, f"llm_error: {e}"
-
-    raw = resp.choices[0].message.content or "{}"
-
-    try:
-        data = json.loads(raw)
-    except Exception:
-        # If parsing JSON fails, still don't crash the pipeline
-        return 0.5, f"parse_error: {raw[:200]}"
-
-    score = data.get("score", 0.5)
-    reason = data.get("reason", "no_reason")
-
-    try:
-        score = float(score)
-    except Exception:
-        score = 0.5
-
-    # Clamp 0..1
-    if score < 0.0:
-        score = 0.0
-    if score > 1.0:
-        score = 1.0
-
-    return score, str(reason)
+        return 0.5, "llm_error"
