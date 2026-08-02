@@ -22,6 +22,7 @@ ACTIVE_ENV = {
     "BOUNDARY_REFINER_TAIL_STEP_SEC", "TAKE_JUDGE_ENABLED", "TAKE_JUDGE_MODEL",
     "TAKE_JUDGE_MAX_GROUPS", "TAKE_JUDGE_MAX_TAKES", "TAKE_JUDGE_FRAMES", "TAKE_JUDGE_V2_MIN_CONFIDENCE",
     "COMPOSER_MIN_SEMANTIC", "COMPOSER_MAX_PER_SLOT", "OPENAI_API_KEY",
+    "SEMANTIC_V2_MIN_CONFIDENCE",
 }
 
 
@@ -35,6 +36,7 @@ def test_every_model_default(clean_model_env):
     config = load_model_config()
     assert (config.asr.enabled, config.asr.model_name, config.asr.device) == (True, "medium", "auto")
     assert (config.semantic_llm.enabled, config.semantic_llm.model_name) == (False, "gpt-5.1")
+    assert config.semantic_llm.min_confidence == 0.70
     assert (config.vision.enabled, config.vision.model_name) == (False, "ViT-B/32")
     assert (config.vision.interval_seconds, config.vision.max_samples, config.vision.weight) == (2.0, 50, 0.7)
     assert (config.visual_bad_take.enabled, config.visual_bad_take.model_name) == (False, "gpt-4o")

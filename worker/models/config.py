@@ -45,6 +45,7 @@ class SemanticLLMConfig:
     timeout_seconds: Optional[float]
     retry_count: int
     modality: str
+    min_confidence: float
     environment_sources: Tuple[str, ...]
 
 
@@ -201,7 +202,8 @@ def load_model_config() -> ModelConfig:
             provider="openai", model_name=env.get("EDITDNA_LLM_MODEL", "gpt-5.1"),
             enabled=_boolean(env, "EDITDNA_USE_LLM", False), timeout_seconds=None,
             retry_count=0, modality="text-to-structured-data",
-            environment_sources=("EDITDNA_USE_LLM", "EDITDNA_LLM_MODEL"),
+            min_confidence=_unit_float(env, "SEMANTIC_V2_MIN_CONFIDENCE", 0.70),
+            environment_sources=("EDITDNA_USE_LLM", "EDITDNA_LLM_MODEL", "SEMANTIC_V2_MIN_CONFIDENCE"),
         ),
         vision=VisionConfig(
             provider="openai-clip", model_name="ViT-B/32",
