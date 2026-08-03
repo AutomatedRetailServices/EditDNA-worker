@@ -62,19 +62,10 @@ def _trim_after_complete_sentence(clip: Dict[str, Any]) -> Dict[str, Any]:
     return cleaned
 
 
-def _restore_non_v2_semantics(clip: Dict[str, Any]) -> None:
-    """Ensure disabled Semantic V2 cannot appear as applied in benchmark output.
-
-    The benchmark compares current public behavior. When V2 is disabled we keep
-    the public slot already emitted by the pipeline, but remove the misleading
-    applied state so usage accounting is truthful.
-    """
+def _remove_disabled_v2_metadata(clip: Dict[str, Any]) -> None:
+    """Make disabled Semantic V2 unambiguously absent from benchmark output."""
     meta = clip.setdefault("meta", {})
-    semantic = meta.get("semantic_v2")
-    if isinstance(semantic, dict):
-        semantic["applied"] = False
-        semantic["application_status"] = "disabled_by_request"
-        semantic["application_reason"] = "use_semantic_v2_false"
+    meta.pop("semantic_v2", None)
 
 
 def sanitize_benchmark_result(
@@ -93,7 +84,7 @@ def sanitize_benchmark_result(
         duration = _duration(clip)
 
         if not use_semantic_v2:
-            _restore_non_v2_semantics(clip)
+            _remove_disabled_v2_metadata(clip)
 
         # Drop timestamp artifacts and punctuation-only remnants. This targets
         # impossible edit units such as 20–260 ms repeated Whisper fragments.
