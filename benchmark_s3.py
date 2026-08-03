@@ -15,7 +15,7 @@ DEFAULT_INPUT_PREFIXES = {
 }
 OUTPUT_PREFIX = "editdna/benchmarks/"
 VIDEO_EXTENSIONS = {".mp4", ".mov", ".m4v", ".webm"}
-DATA_EXTENSIONS = {".jsonl", ".json"}
+DATA_EXTENSIONS = {".jsonl"}
 MIN_OBJECT_BYTES = int(os.getenv("BENCHMARK_MIN_OBJECT_BYTES", "1024"))
 MAX_OBJECT_BYTES = int(os.getenv("BENCHMARK_MAX_OBJECT_BYTES", str(8 * 1024**3)))
 
@@ -61,7 +61,7 @@ def validate_input_prefix(prefix: str) -> str:
 def validate_dataset_key(key: str) -> str:
     _safe_key(key)
     if not key.startswith(configured_input_prefixes()[2]) or Path(key).suffix.lower() not in DATA_EXTENSIONS:
-        raise ValueError("dataset key is not allowlisted")
+        raise ValueError("dataset key must be an allowlisted .jsonl object under the configured training prefix")
     return key
 
 

@@ -45,6 +45,9 @@ def request(mode="old_vs_new"):
 def test_allowlists_and_listing_filters(monkeypatch):
     with pytest.raises(ValueError): benchmark_s3.validate_input_prefix("private/")
     with pytest.raises(ValueError): benchmark_s3.validate_dataset_key("editdna/training/../secret.jsonl")
+    assert benchmark_s3.validate_dataset_key("editdna/training/take_judge_dataset.jsonl") == "editdna/training/take_judge_dataset.jsonl"
+    with pytest.raises(ValueError, match=r"\.jsonl"):
+        benchmark_s3.validate_dataset_key("editdna/training/take_judge_dataset.json")
     monkeypatch.setattr(benchmark_s3, "MIN_OBJECT_BYTES", 100)
     s3 = S3([{"Key": "Editdna good videos/", "Size": 0}, {"Key": "Editdna good videos/._x.mp4", "Size": 500},
              {"Key": "Editdna good videos/tiny.mp4", "Size": 2}, {"Key": "Editdna good videos/x.txt", "Size": 500},
