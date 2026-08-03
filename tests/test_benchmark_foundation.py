@@ -10,6 +10,7 @@ from fastapi.testclient import TestClient
 import benchmark
 import benchmark_s3
 import jobs
+import tasks
 from main import app
 
 
@@ -99,6 +100,48 @@ def test_inventory_checkpoint_resume_progress_and_metrics():
     assert calls == []  # checkpoint automatically prevents reruns
     checkpoint = json.loads(s3.storage["editdna/benchmarks/job/checkpoint.json"])
     assert set(checkpoint["session_result_keys"]) == {"good-one", "good-two"}
+
+
+def test_missing_checkpoint_starts_with_empty_state():
+    state = benchmark._load_checkpoint(S3(), "job", "editdna/benchmarks/job/checkpoint.json")
+    assert state == benchmark._empty_checkpoint()
+
+
+def test_corrupt_checkpoint_fails_without_reprocessing_or_overwrite():
+    s3 = S3([{"Key": "Editdna good videos/good-one.mp4", "Size": 2000}])
+    checkpoint = "editdna/benchmarks/job/checkpoint.json"
+    session_key = "editdna/benchmarks/job/sessions/existing.json"
+    s3.storage[checkpoint] = b"{corrupt"; s3.storage[session_key] = b"existing-session-output"
+    calls = []
+    with pytest.raises(benchmark.BenchmarkCheckpointError) as failure:
+        benchmark.run_benchmark("job", request(), s3=s3, pipeline=lambda *args: calls.append(args))
+    assert failure.value.classification == "validation_error"
+    assert calls == [] and s3.storage[session_key] == b"existing-session-output" and s3.puts == []
+
+
+def test_access_denied_checkpoint_read_fails_safely():
+    class CheckpointDenied(S3):
+        def get_object(self, Bucket, Key):
+            if Key.endswith("checkpoint.json"):
+                raise ClientError({"Error": {"Code": "AccessDenied", "Message": "raw secret detail"}}, "GetObject")
+            return super().get_object(Bucket, Key)
+    s3 = CheckpointDenied([{"Key": "Editdna good videos/good-one.mp4", "Size": 2000}])
+    with pytest.raises(benchmark.BenchmarkCheckpointError) as failure:
+        benchmark.run_benchmark("job", request(), s3=s3, pipeline=lambda *_: pytest.fail("reprocessed"))
+    assert failure.value.classification == "access_denied"
+    assert "raw secret detail" not in str(failure.value) and s3.puts == []
+
+
+def test_oversized_checkpoint_fails_safely():
+    class OversizedCheckpoint(S3):
+        def get_object(self, Bucket, Key):
+            if Key.endswith("checkpoint.json"):
+                return {"ContentLength": 17 * 1024 * 1024, "Body": io.BytesIO(b"{}")}
+            return super().get_object(Bucket, Key)
+    s3 = OversizedCheckpoint([{"Key": "Editdna good videos/good-one.mp4", "Size": 2000}])
+    with pytest.raises(benchmark.BenchmarkCheckpointError) as failure:
+        benchmark.run_benchmark("job", request(), s3=s3, pipeline=lambda *_: pytest.fail("reprocessed"))
+    assert failure.value.classification == "validation_error" and s3.puts == []
 
 
 def test_retryable_failure_resumes_then_succeeds_without_reprocessing(monkeypatch):
@@ -332,6 +375,17 @@ def test_rq_retries_cannot_be_lower_than_session_attempts(monkeypatch):
         jobs.benchmark_retry_count()
     monkeypatch.setenv("BENCHMARK_RQ_MAX_RETRIES", "5")
     assert jobs.benchmark_retry_count() == 5
+
+
+def test_rendered_video_keys_are_deterministic_confined_and_collision_resistant():
+    job_id = "benchmark-" + "a" * 32
+    first = tasks.benchmark_video_key(job_id, "same/path")
+    second = tasks.benchmark_video_key(job_id, "same?path")
+    assert first != second
+    assert first == tasks.benchmark_video_key(job_id, "same/path")
+    traversal = tasks.benchmark_video_key(job_id, "../../private/session")
+    assert traversal.startswith(f"editdna/benchmarks/{job_id}/videos/")
+    assert ".." not in traversal
 
 
 def test_inventory_preflight_write_failure_is_sanitized():

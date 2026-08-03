@@ -23,6 +23,14 @@ class RetryableBenchmarkSessionsError(RuntimeError):
     """Signals RQ to resume sessions that remain below their attempt limit."""
 
 
+class BenchmarkCheckpointError(RuntimeError):
+    """Safe checkpoint-read failure that never includes provider details."""
+
+    def __init__(self, classification: str):
+        self.classification = classification
+        super().__init__(f"benchmark checkpoint read failed: {classification}")
+
+
 def safe_storage_error(exc: Exception) -> str:
     code = getattr(exc, "response", {}).get("Error", {}).get("Code", "")
     if code in {"AccessDenied", "403", "InvalidAccessKeyId", "SignatureDoesNotMatch"}:
@@ -202,9 +210,8 @@ def run_benchmark(job_id: str, request: dict, s3=None, pipeline=None, progress=N
     checkpoint_key = prefix + "checkpoint.json"
     try:
         state = _load_checkpoint(s3, job_id, checkpoint_key)
-    except Exception:
-        # The explicit probe below reports a sanitized benchmark-prefix read status.
-        state = _empty_checkpoint()
+    except Exception as exc:
+        raise BenchmarkCheckpointError(safe_storage_error(exc)) from None
     fingerprint = request_fingerprint(request)
     if state["request_fingerprint"] not in (None, fingerprint):
         raise ValueError("checkpoint request fingerprint does not match")

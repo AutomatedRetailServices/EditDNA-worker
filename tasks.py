@@ -13,6 +13,17 @@ log = logging.getLogger("editdna.tasks")
 log.setLevel(logging.INFO)
 
 
+def benchmark_video_key(job_id: str, session_id: str) -> str:
+    """Return a deterministic, collision-resistant key confined to one benchmark job."""
+    import benchmark
+    import benchmark_s3
+
+    if not re.fullmatch(r"benchmark-[0-9a-f]{32}", job_id):
+        raise ValueError("invalid benchmark job id")
+    key = f"editdna/benchmarks/{job_id}/videos/{benchmark.safe_session_id(session_id)}.mp4"
+    return benchmark_s3.validate_output_key(key, job_id)
+
+
 def run_pipeline(**kwargs):
     """Load the heavyweight media pipeline only when a render actually runs."""
     from worker.pipeline import run_pipeline as pipeline_run
@@ -93,10 +104,10 @@ def job_benchmark(job_id: str, payload: Dict[str, Any]) -> Dict[str, Any]:
             duration = probe_duration(str(path))
             if duration > float(os.getenv("BENCHMARK_MAX_VIDEO_SECONDS", "7200")):
                 raise ValueError("video exceeds benchmark duration limit")
-            safe_session = re.sub(r"[^A-Za-z0-9_-]+", "_", session_id)[:160] or "session"
+            safe_session = benchmark.safe_session_id(session_id)
             result = run_pipeline(
                 session_id=f"benchmark-{job_id}-{safe_session}", local_files=[str(path)], mode="human",
-                output_key=(f"editdna/benchmarks/{job_id}/videos/{safe_session}.mp4" if render_outputs else None),
+                output_key=(benchmark_video_key(job_id, session_id) if render_outputs else None),
                 render_output=render_outputs,
                 persist_result_json=False,
                 retain_local_files=False,
