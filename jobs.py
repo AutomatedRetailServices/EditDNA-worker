@@ -56,3 +56,15 @@ def enqueue_render(
         retry=Retry(max=max_retries, interval=10) if max_retries else None,
     )
     return job
+
+
+def enqueue_benchmark(job_id: str, payload: Dict[str, Any]):
+    """Enqueue a benchmark on the existing RQ/Redis infrastructure."""
+    return get_queue().enqueue(
+        "tasks.job_benchmark", job_id, payload, job_id=job_id,
+        meta={"stage": "queued", "total_sessions": 0, "processed_sessions": 0,
+              "successful_sessions": 0, "failed_sessions": 0, "errors_count": 0},
+        job_timeout=_env_int("BENCHMARK_JOB_TIMEOUT", 86400, minimum=1),
+        result_ttl=_env_int("RQ_RESULT_TTL", 86400),
+        failure_ttl=_env_int("RQ_FAILURE_TTL", 604800),
+    )

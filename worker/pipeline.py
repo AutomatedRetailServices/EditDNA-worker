@@ -1868,10 +1868,16 @@ def render_funnel_video(
 def run_pipeline(session_id: str, files: Optional[List[str]] = None,
                  file_urls: Optional[List[str]] = None, mode: str = "human",
                  progress: Optional[Callable[[str, int, str], None]] = None,
-                 check_canceled: Optional[Callable[[], None]] = None) -> Dict[str, Any]:
+                 check_canceled: Optional[Callable[[], None]] = None,
+                 local_files: Optional[List[str]] = None,
+                 output_key: Optional[str] = None,
+                 render_output: bool = True,
+                 persist_result_json: bool = True,
+                 use_semantic_v2: bool = True,
+                 use_take_judge_v2: bool = True) -> Dict[str, Any]:
     """Analyze every source once, compose once, and render one output."""
     logger.info("run_pipeline session_id=%s mode=%s", session_id, mode)
-    effective_files = files if files and isinstance(files, list) else file_urls
+    effective_files = local_files or (files if files and isinstance(files, list) else file_urls)
     if not effective_files or not isinstance(effective_files, list):
         raise ValueError("run_pipeline: 'files' or 'file_urls' must be a list with at least 1 URL")
     mode=(mode or "human").lower()
@@ -1881,11 +1887,15 @@ def run_pipeline(session_id: str, files: Optional[List[str]] = None,
     report = progress or (lambda _stage, _percent, _message: None)
     check = check_canceled or (lambda: None)
     try:
-        if len(effective_files)==1:
+        if local_files:
+            local_sources = list(local_files)
+        elif len(effective_files)==1:
             local_sources=[os.path.join(session_dir,"input.mp4")]
         else:
             local_sources=[os.path.join(session_dir,f"input_{i:03d}.mp4") for i in range(len(effective_files))]
         for i,(url,path) in enumerate(zip(effective_files,local_sources)):
+            if local_files:
+                continue
             check()
             report("downloading", 5 + (15 * i // len(local_sources)), f"Downloading source {i + 1} of {len(local_sources)}")
             try: download_to_local(url,path)
@@ -1905,14 +1915,15 @@ def run_pipeline(session_id: str, files: Optional[List[str]] = None,
             if len(local_sources)>1: add_source_metadata(current,i,path)
             else:
                 for c in current: c["source_index"],c["source_local"]=0,path
-            llm_used=enrich_clips_semantic(current) or llm_used
+            if use_semantic_v2:
+                llm_used=enrich_clips_semantic(current) or llm_used
             current=dedupe_clips(current)
             vision_used=run_visual_pass(path,session_dir,current) or vision_used
             if VISION_ENABLED and BAD_TAKES_ENABLED:
                 reject_visual_bad_takes(current,session_dir,path); bad_takes_used=True
             if VISION_ENABLED and BOUNDARY_REFINER_ENABLED:
                 boundaries_refined=refine_clip_boundaries_with_vision(input_local=path,session_dir=session_dir,clips=current) or boundaries_refined
-            if TAKE_JUDGE_ENABLED:
+            if TAKE_JUDGE_ENABLED and use_take_judge_v2:
                 take_judge_used=run_take_judge(clips=current,session_dir=session_dir,input_local=path) or take_judge_used
             for c in current:
                 c["source_start"],c["source_end"]=safe_float(c.get("start")),safe_float(c.get("end"))
@@ -1936,21 +1947,23 @@ def run_pipeline(session_id: str, files: Optional[List[str]] = None,
             used.extend(dict.fromkeys(cid for cid in composer.get("used_clip_ids",[]) if cid not in known_ids))
             composer["used_clip_ids"]=used
         input_local=local_sources[0]; clean_rendered=False
-        if used:
+        if used and render_output:
             check()
             report("rendering", 65, "Rendering video")
             final=render_funnel_video(input_local if len(local_sources)==1 else local_sources,session_dir,clips,used)
             report("rendering", 90, "Video rendered")
             check()
             clean_rendered=mode=="clean"
-        elif mode in ("human", "blooper"):
+        elif mode in ("human", "blooper") and render_output:
             raise SelectionError(f"No clips were selected for requested mode '{mode}'")
-        else: final=input_local
+        else: final=input_local if render_output else None
         check()
-        report("uploading", 92, "Uploading rendered video")
-        output_url=upload_to_s3(final,S3_BUCKET,f"{S3_PREFIX}/{session_id}-final.mp4") if S3_BUCKET else None
-        report("uploading", 98, "Upload complete")
-        if S3_BUCKET and not output_url:
+        if render_output:
+            report("uploading", 92, "Uploading rendered video")
+        output_url=upload_to_s3(final,S3_BUCKET,output_key or f"{S3_PREFIX}/{session_id}-final.mp4") if S3_BUCKET and render_output else None
+        if render_output:
+            report("uploading", 98, "Upload complete")
+        if S3_BUCKET and render_output and not output_url:
             raise UploadError("Rendered output upload returned no output URL")
         result={"ok":True,"session_id":session_id,"input_local":input_local,
       "input_files_local":local_sources,"input_file_count":len(local_sources),
@@ -1976,7 +1989,7 @@ def run_pipeline(session_id: str, files: Optional[List[str]] = None,
             # callers. Transfer ownership of the job directory to that caller so
             # its returned local paths remain usable.
             retain_local_result = True
-        result["output_json_s3_uri"]=save_result_json_to_s3(result)
+        result["output_json_s3_uri"] = save_result_json_to_s3(result) if persist_result_json else None
         return result
     finally:
         if not retain_local_result:
