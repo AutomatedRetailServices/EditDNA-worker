@@ -1,0 +1,73 @@
+import unittest
+
+from benchmark_clip_sanitizer import sanitize_benchmark_result
+
+
+class BenchmarkClipSanitizerTests(unittest.TestCase):
+    def test_removes_disabled_semantic_v2_metadata(self):
+        result = {
+            "clips": [{
+                "id": "c1", "start": 0.0, "end": 1.0, "text": "A useful feature.",
+                "meta": {"semantic_v2": {"applied": True, "primary_slot": "FEATURES"}},
+            }]
+        }
+        cleaned = sanitize_benchmark_result(result, use_semantic_v2=False)
+        self.assertNotIn("semantic_v2", cleaned["clips"][0]["meta"])
+
+    def test_keeps_semantic_v2_when_requested(self):
+        result = {
+            "clips": [{
+                "id": "c1", "start": 0.0, "end": 1.0, "text": "Buy it now.",
+                "meta": {"semantic_v2": {"applied": True, "primary_slot": "CTA"}},
+            }]
+        }
+        cleaned = sanitize_benchmark_result(result, use_semantic_v2=True)
+        self.assertTrue(cleaned["clips"][0]["meta"]["semantic_v2"]["applied"])
+
+    def test_drops_micro_fragments(self):
+        result = {
+            "clips": [
+                {"id": "c1", "start": 59.62, "end": 59.74, "text": "I found the perfect ...", "meta": {}},
+                {"id": "c2", "start": 59.74, "end": 59.78, "text": "I found the perfect ...", "meta": {}},
+                {"id": "c3", "start": 60.0, "end": 61.0, "text": "Complete thought.", "meta": {}},
+            ]
+        }
+        cleaned = sanitize_benchmark_result(result, use_semantic_v2=False)
+        self.assertEqual([clip["id"] for clip in cleaned["clips"]], ["c3"])
+
+    def test_trims_incomplete_tail_after_cta(self):
+        result = {
+            "clips": [{
+                "id": "cta", "start": 56.36, "end": 59.62,
+                "text": "Go check these out. I found the perfect ...",
+                "words": [
+                    {"start": 56.36, "end": 56.6, "word": " Go"},
+                    {"start": 56.6, "end": 57.0, "word": " check"},
+                    {"start": 57.0, "end": 57.4, "word": " these"},
+                    {"start": 57.4, "end": 58.48, "word": " out."},
+                    {"start": 58.94, "end": 59.14, "word": " I"},
+                    {"start": 59.14, "end": 59.62, "word": " found"},
+                ],
+                "meta": {},
+            }]
+        }
+        cleaned = sanitize_benchmark_result(result, use_semantic_v2=False)
+        clip = cleaned["clips"][0]
+        self.assertEqual(clip["text"], "Go check these out.")
+        self.assertEqual(clip["end"], 58.48)
+        self.assertEqual(len(clip["words"]), 4)
+
+    def test_drops_only_contiguous_duplicate(self):
+        result = {
+            "clips": [
+                {"id": "a", "start": 0.0, "end": 1.0, "text": "Same phrase.", "meta": {}},
+                {"id": "b", "start": 1.1, "end": 2.1, "text": "Same phrase.", "meta": {}},
+                {"id": "c", "start": 10.0, "end": 11.0, "text": "Same phrase.", "meta": {}},
+            ]
+        }
+        cleaned = sanitize_benchmark_result(result, use_semantic_v2=False)
+        self.assertEqual([clip["id"] for clip in cleaned["clips"]], ["a", "c"])
+
+
+if __name__ == "__main__":
+    unittest.main()
