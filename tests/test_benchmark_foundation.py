@@ -54,6 +54,16 @@ def test_allowlists_and_listing_filters(monkeypatch):
     assert stats == {"filtered_s3_objects": 4, "eligible_s3_videos": 1}
 
 
+def test_configured_prefixes_remain_closed_and_validated(monkeypatch):
+    monkeypatch.setenv("BENCHMARK_GOOD_VIDEOS_PREFIX", "approved/good/")
+    assert benchmark_s3.validate_input_prefix("approved/good/") == "approved/good/"
+    with pytest.raises(ValueError): benchmark_s3.validate_input_prefix("Editdna good videos/")
+    monkeypatch.setenv("BENCHMARK_GOOD_VIDEOS_PREFIX", "../escape/")
+    with pytest.raises(ValueError): benchmark_s3.configured_input_prefixes()
+    monkeypatch.setenv("BENCHMARK_GOOD_VIDEOS_PREFIX", "missing-slash")
+    with pytest.raises(ValueError): benchmark_s3.configured_input_prefixes()
+
+
 def test_exact_matching_ignores_generic_source_and_reports_uncertain():
     grouped = {"good-one": [{"source": "good"}], "missing": [{"source": "bloopers"}]}
     objects = [{"key": "Editdna good videos/good-one.mp4"}, {"key": "Editdna good videos/good-extra.mp4"}]
@@ -74,6 +84,10 @@ def test_inventory_checkpoint_resume_progress_and_metrics():
                             "candidate_s3_keys": ["Editdna good videos/good-one.mp4"], "historical_clip_count": 1}
     assert first["summary"]["total_historical_sessions"] == first["summary"]["resolved_sessions"] == 2
     assert progress[-1]["processed_sessions"] == 2
+    assert first["summary"]["preflight"]["benchmark_write"]["successful"] is True
+    assert first["summary"]["preflight"]["benchmark_read_back"]["successful"] is True
+    assert first["summary"]["preflight"]["configured_prefixes"] == [{
+        "prefix": "Editdna good videos/", "filtered_s3_objects": 0, "eligible_s3_videos": 2}]
     calls = []
     benchmark.run_benchmark("job", request("inventory_only"), s3=s3, pipeline=lambda *args: calls.append(args))
     assert calls == []  # checkpoint automatically prevents reruns
@@ -152,9 +166,12 @@ def test_take_judge_execution_statuses_are_request_scoped(monkeypatch):
     status = {}
     pipeline.run_take_judge([], "/tmp", "input", execution_status=status)
     assert status["status"] == "not_requested"
+    candidates = [{"id": value, "meta": {"keep": True}} for value in ("a", "b")]
+    monkeypatch.setattr(pipeline, "find_sibling_groups", lambda clips: [candidates])
     monkeypatch.setattr(pipeline, "is_openai_available", lambda: False)
-    pipeline.run_take_judge([], "/tmp", "input", force_enabled=True, execution_status=status)
+    pipeline.run_take_judge(candidates, "/tmp", "input", force_enabled=True, execution_status=status)
     assert status["status"] == "provider_unavailable"
+    assert all(item["meta"]["take_judge_execution_status"] == "provider_unavailable" for item in candidates)
     monkeypatch.setattr(pipeline, "is_openai_available", lambda: True)
     monkeypatch.setattr(pipeline, "find_sibling_groups", lambda clips: [])
     pipeline.run_take_judge([], "/tmp", "input", force_enabled=True, execution_status=status)
@@ -289,6 +306,30 @@ def test_duplicate_job_prevention(monkeypatch):
     monkeypatch.setattr(jobs.Job, "fetch", lambda *args, **kwargs: active)
     second, duplicate = jobs.enqueue_benchmark("two", request())
     assert second.id == "one" and duplicate is True
+
+
+def test_rq_retries_cannot_be_lower_than_session_attempts(monkeypatch):
+    monkeypatch.setenv("BENCHMARK_SESSION_MAX_ATTEMPTS", "4")
+    monkeypatch.delenv("BENCHMARK_RQ_MAX_RETRIES", raising=False)
+    assert jobs.benchmark_retry_count() == 3
+    monkeypatch.setenv("BENCHMARK_RQ_MAX_RETRIES", "2")
+    with pytest.raises(ValueError, match="cannot provide"):
+        jobs.benchmark_retry_count()
+    monkeypatch.setenv("BENCHMARK_RQ_MAX_RETRIES", "5")
+    assert jobs.benchmark_retry_count() == 5
+
+
+def test_inventory_preflight_write_failure_is_sanitized():
+    class DeniedS3(S3):
+        def put_object(self, **kwargs):
+            raise ClientError({"Error": {"Code": "AccessDenied", "Message": "raw provider detail"}}, "PutObject")
+    s3 = DeniedS3([{"Key": "Editdna good videos/good-one.mp4", "Size": 2000}])
+    result = benchmark.run_benchmark("denied", request("inventory_only"), s3=s3,
+                                     pipeline=lambda *_: pytest.fail("pipeline invoked"))
+    preflight = result["summary"]["preflight"]
+    assert preflight["benchmark_write"] == {"successful": False, "error_classification": "access_denied"}
+    assert preflight["benchmark_read_back"]["successful"] is False
+    assert "raw provider detail" not in json.dumps(result)
 
 
 def test_final_stage_remains_finished(monkeypatch):

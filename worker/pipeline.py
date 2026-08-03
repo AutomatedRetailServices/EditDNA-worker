@@ -1267,17 +1267,21 @@ def run_take_judge(
     """Compare sibling takes, retaining all unless V2 produces a safe winner."""
     status = execution_status if execution_status is not None else {}
     status.update({"status": "not_requested", "groups_evaluated": 0})
+    for clip_item in clips:
+        clip_item["meta"]["take_judge_execution_status"] = "not_candidate"
     if not TAKE_JUDGE_ENABLED and not force_enabled:
         return False
-    if not is_openai_available():
-        status["status"] = "provider_unavailable"
-        logger.warning("Take Judge unavailable; failing open", extra={"operation": "take_judge_v2"})
-        return False
-
     groups = [group[:TAKE_JUDGE_MAX_TAKES]
               for group in find_sibling_groups(clips)[:TAKE_JUDGE_MAX_GROUPS]]
     if not groups:
         status["status"] = "no_sibling_group"
+        return False
+    candidate_clips = [clip_item for group in groups for clip_item in group]
+    if not is_openai_available():
+        status["status"] = "provider_unavailable"
+        for clip_item in candidate_clips:
+            clip_item["meta"]["take_judge_execution_status"] = "provider_unavailable"
+        logger.warning("Take Judge unavailable; failing open", extra={"operation": "take_judge_v2"})
         return False
     status["status"] = "abstained"
     used_any = False
@@ -1301,6 +1305,8 @@ def run_take_judge(
                 image_count=len(sample.image_content),
             ))
         if len(candidates) < 2:
+            for clip_item in group:
+                clip_item["meta"]["take_judge_execution_status"] = "abstained"
             continue
         try:
             result = judge_takes_v2(
@@ -1309,6 +1315,8 @@ def run_take_judge(
             )
         except OpenAIProviderError:
             status["status"] = "provider_error"
+            for clip_item in group:
+                clip_item["meta"]["take_judge_execution_status"] = "provider_error"
             logger.warning("Take Judge abstained", extra={
                 "operation": "take_judge_v2", "group_size": len(candidates),
                 "frame_count": sum(candidate.image_count for candidate in candidates),
@@ -1319,12 +1327,18 @@ def run_take_judge(
         status["groups_evaluated"] += 1
         if result.abstain:
             status["status"] = "abstained"
+            for clip_item in group:
+                clip_item["meta"]["take_judge_execution_status"] = "abstained"
             continue
         if result.confidence < TAKE_JUDGE_V2_MIN_CONFIDENCE:
             status["status"] = "low_confidence"
+            for clip_item in group:
+                clip_item["meta"]["take_judge_execution_status"] = "low_confidence"
             continue
         if result.winner_id not in candidate_ids:
             status["status"] = "abstained"
+            for clip_item in group:
+                clip_item["meta"]["take_judge_execution_status"] = "abstained"
             continue
         scores = {score.candidate_id: score.overall_score for score in result.candidate_scores}
         for clip_item in group:
@@ -1334,6 +1348,9 @@ def run_take_judge(
             clip_item["meta"]["take_judge_score"] = scores[candidate_id]
             clip_item["meta"]["take_judge_verdict"] = (
                 "WINNER" if candidate_id == result.winner_id else "LOSER"
+            )
+            clip_item["meta"]["take_judge_execution_status"] = (
+                "candidate_winner" if candidate_id == result.winner_id else "candidate_loser"
             )
             if candidate_id != result.winner_id and clip_item["meta"].get("keep", True):
                 clip_item["meta"]["keep"] = False
@@ -1954,11 +1971,9 @@ def run_pipeline(session_id: str, files: Optional[List[str]] = None,
                                                   input_local=path,
                                                   execution_status=source_take_judge_status)) or take_judge_used
                 take_judge_execution["sources"].append(source_take_judge_status)
-                for clip_item in current:
-                    clip_item["meta"]["take_judge_execution_status"] = source_take_judge_status["status"]
             else:
                 for clip_item in current:
-                    clip_item["meta"]["take_judge_execution_status"] = "not_requested"
+                    clip_item["meta"]["take_judge_execution_status"] = "not_candidate"
             for c in current:
                 c["source_start"],c["source_end"]=safe_float(c.get("start")),safe_float(c.get("end"))
             clips.extend(current)

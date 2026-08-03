@@ -66,6 +66,18 @@ def benchmark_fingerprint(payload: Dict[str, Any]) -> str:
     return hashlib.sha256(canonical.encode()).hexdigest()
 
 
+def benchmark_retry_count() -> int:
+    attempts = _env_int("BENCHMARK_SESSION_MAX_ATTEMPTS", 3, minimum=1)
+    required_retries = attempts - 1
+    configured = os.getenv("BENCHMARK_RQ_MAX_RETRIES")
+    if configured is None:
+        return required_retries
+    retries = _env_int("BENCHMARK_RQ_MAX_RETRIES", required_retries)
+    if retries < required_retries:
+        raise ValueError("BENCHMARK_RQ_MAX_RETRIES cannot provide BENCHMARK_SESSION_MAX_ATTEMPTS executions")
+    return retries
+
+
 def enqueue_benchmark(job_id: str, payload: Dict[str, Any]):
     """Enqueue a benchmark on the existing RQ/Redis infrastructure."""
     queue = get_queue(); connection = queue.connection
@@ -92,6 +104,6 @@ def enqueue_benchmark(job_id: str, payload: Dict[str, Any]):
         job_timeout=_env_int("BENCHMARK_JOB_TIMEOUT", 86400, minimum=1),
         result_ttl=_env_int("RQ_RESULT_TTL", 86400),
         failure_ttl=_env_int("RQ_FAILURE_TTL", 604800),
-        retry=Retry(max=_env_int("BENCHMARK_RQ_MAX_RETRIES", 2), interval=30),
+        retry=Retry(max=benchmark_retry_count(), interval=30),
     )
     return job, False

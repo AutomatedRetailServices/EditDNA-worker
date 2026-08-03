@@ -23,6 +23,19 @@ class RetryableBenchmarkSessionsError(RuntimeError):
     """Signals RQ to resume sessions that remain below their attempt limit."""
 
 
+def safe_storage_error(exc: Exception) -> str:
+    code = getattr(exc, "response", {}).get("Error", {}).get("Code", "")
+    if code in {"AccessDenied", "403", "InvalidAccessKeyId", "SignatureDoesNotMatch"}:
+        return "access_denied"
+    if code in {"NoSuchKey", "NoSuchBucket", "404"}:
+        return "not_found"
+    if code:
+        return "s3_client_error"
+    if isinstance(exc, (ValueError, UnicodeError, json.JSONDecodeError)):
+        return "validation_error"
+    return "storage_error"
+
+
 def normalize(value: str) -> str:
     return re.sub(r"[^a-z0-9]+", "", Path(value or "").stem.casefold())
 
@@ -146,17 +159,34 @@ def _load_session_outputs(s3, job_id: str, keys: dict[str, str]) -> tuple[list, 
 def run_benchmark(job_id: str, request: dict, s3=None, pipeline=None, progress=None) -> dict:
     s3, progress = s3 or benchmark_s3.client(), progress or (lambda state: None)
     started, prefix = time.monotonic(), f"{benchmark_s3.OUTPUT_PREFIX}{job_id}/"
-    rows = [json.loads(line) for line in benchmark_s3.read_object(s3, request["dataset_key"]).decode().splitlines() if line.strip()]
+    dataset_status = {"successful": False, "error_classification": None}
+    try:
+        rows = [json.loads(line) for line in benchmark_s3.read_object(s3, request["dataset_key"]).decode().splitlines() if line.strip()]
+        dataset_status["successful"] = True
+    except Exception as exc:
+        dataset_status["error_classification"] = safe_storage_error(exc)
+        if request["mode"] != "inventory_only":
+            raise
+        rows = []
     grouped = defaultdict(list)
     for row in rows:
         session_id = str(row.get("session_id") or "")
         if not session_id or len(session_id) > 200:
             raise ValueError("historical session_id must contain 1 to 200 characters")
         grouped[session_id].append(row)
-    objects, filtered = [], 0
+    objects, filtered, prefix_inventory = [], 0, []
+    list_status = {"successful": True, "error_classification": None}
     for source_prefix in request["source_prefixes"]:
-        eligible, stats = benchmark_s3.list_objects_inventory(s3, source_prefix)
-        objects.extend(eligible); filtered += stats["filtered_s3_objects"]
+        try:
+            eligible, stats = benchmark_s3.list_objects_inventory(s3, source_prefix)
+            objects.extend(eligible); filtered += stats["filtered_s3_objects"]
+            prefix_inventory.append({"prefix": source_prefix, **stats})
+        except Exception as exc:
+            list_status = {"successful": False, "error_classification": safe_storage_error(exc)}
+            prefix_inventory.append({"prefix": source_prefix, "eligible_s3_videos": 0,
+                                     "filtered_s3_objects": 0, "error_classification": list_status["error_classification"]})
+            if request["mode"] != "inventory_only":
+                raise
     resolved, unresolved = resolve_sources(grouped, objects)
     dataset_sessions = sorted(grouped)
     sessions = dataset_sessions[:request.get("limit") or None]
@@ -169,16 +199,39 @@ def run_benchmark(job_id: str, request: dict, s3=None, pipeline=None, progress=N
     state["request_fingerprint"] = fingerprint
     completed = set(state["completed_sessions"])
     max_attempts = max(1, int(os.getenv("BENCHMARK_SESSION_MAX_ATTEMPTS", "3")))
-    _save_checkpoint(s3, job_id, checkpoint_key, state)
+    probe_key = prefix + "preflight_probe.json"
+    probe_body = json.dumps({"job_id": job_id, "probe": "benchmark_write_read"}, sort_keys=True).encode()
+    write_status = {"successful": False, "error_classification": None}
+    readback_status = {"successful": False, "error_classification": None}
+    try:
+        benchmark_s3.put_output(s3, probe_key, probe_body, job_id, "application/json")
+        write_status["successful"] = True
+        try:
+            readback = benchmark_s3.read_output(s3, probe_key, job_id, max_bytes=4096)
+            if readback != probe_body:
+                raise ValueError("benchmark preflight read-back content mismatch")
+            readback_status["successful"] = True
+        except Exception as exc:
+            readback_status["error_classification"] = safe_storage_error(exc)
+    except Exception as exc:
+        write_status["error_classification"] = safe_storage_error(exc)
     environment = {name: bool(os.getenv(name)) for name in
                    ("S3_BUCKET", "AWS_REGION", "AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY")}
-    preflight = {"dataset_jsonl_readable": True, "eligible_videos": len(objects),
+    preflight = {"dataset_jsonl_readable": dataset_status["successful"], "eligible_videos": len(objects),
         "resolved_sessions": sum(session in resolved for session in sessions),
         "missing_sessions": sum(unresolved.get(s, {}).get("classification") == "missing_source" for s in sessions),
         "ambiguous_sessions": sum(unresolved.get(s, {}).get("classification") == "ambiguous_source" for s in sessions),
         "required_environment_configuration_present": all(environment.values()),
         "required_environment_configuration": environment,
-        "s3_read_access_successful": True, "s3_benchmark_prefix_write_access_successful": True}
+        "s3_list": list_status, "dataset_read": dataset_status,
+        "benchmark_write": write_status, "benchmark_read_back": readback_status,
+        "configured_prefixes": prefix_inventory}
+    if not write_status["successful"] and request["mode"] == "inventory_only":
+        return {"summary": {"dataset_total_historical_sessions": len(dataset_sessions),
+            "dataset_total_historical_clips": len(rows), "selected_historical_sessions": len(sessions),
+            "selected_historical_clips": len(selected_rows), "preflight": preflight},
+            "output_prefix": prefix, "result_keys": []}
+    _save_checkpoint(s3, job_id, checkpoint_key, state)
 
     def report(current=None):
         processed = len(completed); failed = len(state["failed_sessions"])

@@ -214,12 +214,17 @@ def configure_pipeline(monkeypatch, outcome):
     return group, outside, calls
 
 
-@pytest.mark.parametrize("outcome,removed", [(result(), ["b"]), (result(None, abstain=True), []), (result(confidence=.69), [])])
-def test_selection_winner_abstain_and_low_confidence(monkeypatch, outcome, removed):
+@pytest.mark.parametrize("outcome,removed,statuses", [
+    (result(), ["b"], ["candidate_winner", "candidate_loser"]),
+    (result(None, abstain=True), [], ["abstained", "abstained"]),
+    (result(confidence=.69), [], ["low_confidence", "low_confidence"])])
+def test_selection_winner_abstain_and_low_confidence(monkeypatch, outcome, removed, statuses):
     group, outside, calls = configure_pipeline(monkeypatch, outcome)
     pipeline.run_take_judge(group + [outside], "/private/session", "/private/input.mp4")
     assert [item["id"] for item in group if not item["meta"]["keep"]] == removed
     assert group[0]["meta"]["keep"] and outside["meta"]["keep"] and len(calls) == 1
+    assert [item["meta"]["take_judge_execution_status"] for item in group] == statuses
+    assert outside["meta"]["take_judge_execution_status"] == "not_candidate"
 
 
 def test_provider_failure_keeps_all_and_logs_are_private(monkeypatch, caplog):

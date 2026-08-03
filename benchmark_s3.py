@@ -7,10 +7,12 @@ from typing import Iterable
 import boto3
 from botocore.exceptions import ClientError
 
-INPUT_PREFIXES = (
-    "Editdna bloopers videos/", "Editdna good videos/",
-    "editdna/training/", "editdna/outputs/",
-)
+DEFAULT_INPUT_PREFIXES = {
+    "BENCHMARK_BLOOPERS_PREFIX": "Editdna bloopers videos/",
+    "BENCHMARK_GOOD_VIDEOS_PREFIX": "Editdna good videos/",
+    "BENCHMARK_TRAINING_PREFIX": "editdna/training/",
+    "BENCHMARK_HISTORICAL_OUTPUTS_PREFIX": "editdna/outputs/",
+}
 OUTPUT_PREFIX = "editdna/benchmarks/"
 VIDEO_EXTENSIONS = {".mp4", ".mov", ".m4v", ".webm"}
 DATA_EXTENSIONS = {".jsonl", ".json"}
@@ -36,16 +38,29 @@ def _safe_key(key: str) -> str:
     return key
 
 
+def configured_input_prefixes() -> tuple[str, ...]:
+    prefixes = []
+    for environment_name, default in DEFAULT_INPUT_PREFIXES.items():
+        prefix = os.getenv(environment_name, default)
+        _safe_key(prefix)
+        if not prefix or not prefix.endswith("/"):
+            raise ValueError(f"{environment_name} must be a non-empty relative S3 prefix ending in '/'")
+        prefixes.append(prefix)
+    if len(prefixes) != len(set(prefixes)):
+        raise ValueError("benchmark input prefixes must be unique")
+    return tuple(prefixes)
+
+
 def validate_input_prefix(prefix: str) -> str:
     _safe_key(prefix)
-    if prefix not in INPUT_PREFIXES:
+    if prefix not in configured_input_prefixes():
         raise ValueError("source prefix is not allowlisted")
     return prefix
 
 
 def validate_dataset_key(key: str) -> str:
     _safe_key(key)
-    if not key.startswith("editdna/training/") or Path(key).suffix.lower() not in DATA_EXTENSIONS:
+    if not key.startswith(configured_input_prefixes()[2]) or Path(key).suffix.lower() not in DATA_EXTENSIONS:
         raise ValueError("dataset key is not allowlisted")
     return key
 
@@ -115,7 +130,7 @@ def read_output(s3, key: str, job_id: str, max_bytes: int = 16 * 1024 * 1024) ->
 
 def download_video(s3, key: str, destination: Path) -> None:
     _safe_key(key)
-    if not any(key.startswith(prefix) for prefix in INPUT_PREFIXES):
+    if not any(key.startswith(prefix) for prefix in configured_input_prefixes()):
         raise ValueError("video key is not allowlisted")
     if Path(key).suffix.lower() not in VIDEO_EXTENSIONS:
         raise ValueError("unsupported video extension")
