@@ -74,8 +74,10 @@ def test_inventory_checkpoint_resume_progress_and_metrics():
     assert first["summary"]["total_historical_sessions"] == first["summary"]["resolved_sessions"] == 2
     assert progress[-1]["processed_sessions"] == 2
     calls = []
-    benchmark.run_benchmark("job", request(), s3=s3, pipeline=lambda *args: calls.append(args))
+    benchmark.run_benchmark("job", request("inventory_only"), s3=s3, pipeline=lambda *args: calls.append(args))
     assert calls == []  # checkpoint automatically prevents reruns
+    checkpoint = json.loads(s3.storage["editdna/benchmarks/job/checkpoint.json"])
+    assert set(checkpoint["session_result_keys"]) == {"good-one", "good-two"}
 
 
 def test_failure_continues_and_summary_metrics_are_explicit():
@@ -95,6 +97,48 @@ def test_failure_continues_and_summary_metrics_are_explicit():
     assert summary["per_source_session_changes"] == {"good-two": 1}
     assert summary["provider_usage"] == {"openai_calls": 2}
     assert summary["estimated_cost"] == .25 and summary["estimated_cost_metadata"]["available"] is True
+
+
+def test_take_judge_result_usage_fallback_and_winner_change():
+    old = {"session_id": "s", "clip_id": "old", "text": "same", "slot": "HOOK", "keep": True,
+           "take_judge_verdict": "LOSER"}
+    with_judge = benchmark.make_result(old, {"id": "new", "text": "same", "slot": "HOOK",
+        "meta": {"keep": True, "take_judge_score": .91, "take_judge_verdict": "WINNER"}}, "text", .9)
+    fallback = benchmark.make_result(old, {"id": "new2", "text": "same", "slot": "HOOK",
+        "meta": {"keep": True}}, "text", .9)
+    assert with_judge["take_judge_v2"] == {"score": .91, "verdict": "WINNER"}
+    assert with_judge["winner_selection_changed"] is True
+    summary = benchmark.build_summary([old, old], ["s"], {"s": {}}, {}, [], 0,
+        [with_judge, fallback], [], [], [], 0)
+    assert summary["take_judge_v2_usage"] == 1
+    assert summary["take_judge_v2_fallbacks"] == 1
+    assert json.loads(benchmark.jsonl([with_judge]))["take_judge_v2"] == {"score": .91, "verdict": "WINNER"}
+
+
+def test_checkpoint_stays_small_and_final_aggregation_loads_session_files():
+    sessions = tuple(f"session-{index:03d}" for index in range(60))
+    rows = [{"Key": f"Editdna good videos/{session}.mp4", "Size": 2000} for session in sessions]
+    s3 = S3(rows, sessions=sessions); calls = []
+    def pipeline(session, *_):
+        calls.append(session)
+        return {"clips": [{"id": session, "text": "hello product", "llm_reason": "x" * 50_000,
+                           "slot": "HOOK", "meta": {"keep": True}}]}
+    benchmark.run_benchmark("large", request(), s3=s3, pipeline=pipeline)
+    checkpoint = s3.storage["editdna/benchmarks/large/checkpoint.json"]
+    assert len(checkpoint) < 32_000
+    assert b"x" * 100 not in checkpoint
+    assert len(s3.storage["editdna/benchmarks/large/results_v2.jsonl"].splitlines()) == len(sessions)
+    calls.clear()
+    benchmark.run_benchmark("large", request(), s3=s3, pipeline=pipeline)
+    assert calls == []
+
+
+def test_session_output_keys_cannot_escape_benchmark_prefix():
+    key = benchmark._session_key("editdna/benchmarks/job/", "../../secret session")
+    assert key.startswith("editdna/benchmarks/job/sessions/") and ".." not in key
+    benchmark_s3.validate_output_key(key, "job")
+    with pytest.raises(ValueError):
+        benchmark_s3.validate_output_key("editdna/benchmarks/job/sessions/../../secret.json", "job")
 
 
 def test_production_defaults_and_request_scoped_activation(monkeypatch):
