@@ -235,6 +235,25 @@ def test_provider_failure_keeps_all_and_logs_are_private(monkeypatch, caplog):
     assert "SECRET_TRANSCRIPT" not in caplog.text and "base64" not in caplog.text and "/private" not in caplog.text
 
 
+def test_source_summary_accumulates_mixed_group_outcomes(monkeypatch):
+    first = [candidate("a", 0, 2), candidate("b", 3, 5)]
+    second = [candidate("c", 6, 8), candidate("d", 9, 11)]
+    outside = candidate("outside", 15, 17)
+    monkeypatch.setattr(pipeline, "TAKE_JUDGE_ENABLED", True)
+    monkeypatch.setattr(pipeline, "is_openai_available", lambda: True)
+    monkeypatch.setattr(pipeline, "find_sibling_groups", lambda clips: [first, second])
+    monkeypatch.setattr(pipeline, "sample_candidate_frames", lambda c, *args: types.SimpleNamespace(
+        successful_frame_timestamps=(), image_content=()))
+    second_scores = tuple(TakeJudgeCandidateScore(x, .8, .8, .8, .8, .8, "safe") for x in ("c", "d"))
+    outcomes = iter([result(), TakeJudgeV2Result(None, second_scores, .9, True, "safe")])
+    monkeypatch.setattr(pipeline, "judge_takes_v2", lambda *args, **kwargs: next(outcomes))
+    status = {}
+    pipeline.run_take_judge(first + second + [outside], "session", "input", execution_status=status)
+    assert status == {"status": "winner_selected", "groups_discovered": 2, "groups_evaluated": 2,
+                      "winner_selected": 1, "abstained": 1, "low_confidence": 0, "provider_error": 0}
+    assert outside["meta"]["take_judge_execution_status"] == "not_candidate"
+
+
 def test_group_and_take_limits_and_one_call_per_group(monkeypatch):
     groups = [[candidate(f"{letter}{i}", i * 3, i * 3 + 2) for i in range(4)] for letter in "abc"]
     monkeypatch.setattr(pipeline, "TAKE_JUDGE_ENABLED", True); monkeypatch.setattr(pipeline, "is_openai_available", lambda: True)

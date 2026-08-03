@@ -106,7 +106,20 @@ def job_benchmark(job_id: str, payload: Dict[str, Any]) -> Dict[str, Any]:
             return result
 
     result = benchmark.run_benchmark(job_id, payload, s3=s3, pipeline=process, progress=save)
-    save({"stage": "finished", "current_session": None, "progress_percent": 100,
-          "failed_sessions": result["summary"]["failed_sessions"],
-          "errors_count": result["summary"]["failed_sessions"], "output_prefix": result["output_prefix"]})
+    if not result["preflight_passed"]:
+        terminal_stage = "preflight_failed"
+    elif result["failed_sessions"] or result["unresolved_sessions"]:
+        terminal_stage = "finished_with_failures"
+    else:
+        terminal_stage = "finished"
+    progress_percent = 0 if terminal_stage == "preflight_failed" else 100
+    terminal = {"stage": terminal_stage, "preflight_passed": result["preflight_passed"],
+        "total_sessions": result["total_sessions"], "processed_sessions": result["processed_sessions"],
+        "successful_sessions": result["successful_sessions"], "failed_sessions": result["failed_sessions"],
+        "unresolved_sessions": result["unresolved_sessions"], "progress_percent": progress_percent,
+        "errors_count": result["errors_count"], "current_session": None,
+        "output_prefix": result["output_prefix"]}
+    save(terminal)
+    result["stage"] = terminal_stage
+    result["summary"]["stage"] = terminal_stage
     return result

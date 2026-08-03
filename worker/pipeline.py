@@ -1266,13 +1266,16 @@ def run_take_judge(
 ) -> bool:
     """Compare sibling takes, retaining all unless V2 produces a safe winner."""
     status = execution_status if execution_status is not None else {}
-    status.update({"status": "not_requested", "groups_evaluated": 0})
+    status.update({"status": "not_requested", "groups_discovered": 0, "groups_evaluated": 0,
+                   "winner_selected": 0, "abstained": 0, "low_confidence": 0,
+                   "provider_error": 0})
     for clip_item in clips:
         clip_item["meta"]["take_judge_execution_status"] = "not_candidate"
     if not TAKE_JUDGE_ENABLED and not force_enabled:
         return False
     groups = [group[:TAKE_JUDGE_MAX_TAKES]
               for group in find_sibling_groups(clips)[:TAKE_JUDGE_MAX_GROUPS]]
+    status["groups_discovered"] = len(groups)
     if not groups:
         status["status"] = "no_sibling_group"
         return False
@@ -1305,6 +1308,7 @@ def run_take_judge(
                 image_count=len(sample.image_content),
             ))
         if len(candidates) < 2:
+            status["abstained"] += 1
             for clip_item in group:
                 clip_item["meta"]["take_judge_execution_status"] = "abstained"
             continue
@@ -1314,7 +1318,7 @@ def run_take_judge(
                 temperature=0.1, max_completion_tokens=700,
             )
         except OpenAIProviderError:
-            status["status"] = "provider_error"
+            status["provider_error"] += 1
             for clip_item in group:
                 clip_item["meta"]["take_judge_execution_status"] = "provider_error"
             logger.warning("Take Judge abstained", extra={
@@ -1326,17 +1330,17 @@ def run_take_judge(
         candidate_ids = {candidate.candidate_id for candidate in candidates}
         status["groups_evaluated"] += 1
         if result.abstain:
-            status["status"] = "abstained"
+            status["abstained"] += 1
             for clip_item in group:
                 clip_item["meta"]["take_judge_execution_status"] = "abstained"
             continue
         if result.confidence < TAKE_JUDGE_V2_MIN_CONFIDENCE:
-            status["status"] = "low_confidence"
+            status["low_confidence"] += 1
             for clip_item in group:
                 clip_item["meta"]["take_judge_execution_status"] = "low_confidence"
             continue
         if result.winner_id not in candidate_ids:
-            status["status"] = "abstained"
+            status["abstained"] += 1
             for clip_item in group:
                 clip_item["meta"]["take_judge_execution_status"] = "abstained"
             continue
@@ -1358,7 +1362,15 @@ def run_take_judge(
                     " | Removed by TakeJudgeAI (better take exists)."
                 )
         used_any = True
+        status["winner_selected"] += 1
+    if status["winner_selected"]:
         status["status"] = "winner_selected"
+    elif status["provider_error"]:
+        status["status"] = "provider_error"
+    elif status["low_confidence"]:
+        status["status"] = "low_confidence"
+    else:
+        status["status"] = "abstained"
     return used_any
 
 

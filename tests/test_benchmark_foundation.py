@@ -35,6 +35,9 @@ class S3:
 @pytest.fixture(autouse=True)
 def configured(monkeypatch):
     monkeypatch.setenv("S3_BUCKET", "private-test-bucket")
+    monkeypatch.setenv("AWS_REGION", "us-east-1")
+    monkeypatch.setenv("AWS_ACCESS_KEY_ID", "mock-access-key")
+    monkeypatch.setenv("AWS_SECRET_ACCESS_KEY", "mock-secret-key")
 
 
 def request(mode="old_vs_new"):
@@ -189,6 +192,15 @@ def test_take_judge_missing_evaluation_flags_are_explicit():
     assert result["take_judge_unavailable"] is result["take_judge_abstained"] is False
 
 
+def test_summary_accumulates_take_judge_group_totals():
+    usage = [{"take_judge_execution": {"requested": True, "sources": [{
+        "status": "winner_selected", "groups_discovered": 3, "groups_evaluated": 3,
+        "winner_selected": 1, "abstained": 1, "low_confidence": 1, "provider_error": 0}]}}]
+    summary = benchmark.build_summary([], [], {}, {}, [], 0, [], [], [], usage, 0)
+    assert summary["take_judge_group_status_totals"] == {"winner_selected": 1, "abstained": 1,
+        "low_confidence": 1, "provider_error": 0, "groups_evaluated": 3, "groups_discovered": 3}
+
+
 def test_limit_metrics_use_only_selected_sessions():
     sessions = tuple(f"session-{index}" for index in range(5))
     s3 = S3([{"Key": f"Editdna good videos/{session}.mp4", "Size": 2000} for session in sessions], sessions=sessions)
@@ -335,6 +347,40 @@ def test_inventory_preflight_write_failure_is_sanitized():
     assert "raw provider detail" not in json.dumps(result)
 
 
+def test_job_benchmark_returns_stable_preflight_failure(monkeypatch):
+    import tasks
+    class DeniedS3(S3):
+        def put_object(self, **kwargs):
+            raise ClientError({"Error": {"Code": "AccessDenied", "Message": "provider detail"}}, "PutObject")
+    job = type("Job", (), {"meta": {}, "save_meta": lambda self: None})()
+    monkeypatch.setattr("rq.get_current_job", lambda: job)
+    monkeypatch.setattr(benchmark_s3, "client", lambda: DeniedS3([
+        {"Key": "Editdna good videos/good-one.mp4", "Size": 2000}]))
+    result = tasks.job_benchmark("preflight", request("inventory_only"))
+    assert result["stage"] == job.meta["stage"] == "preflight_failed"
+    assert result["processed_sessions"] == result["successful_sessions"] == 0
+    assert result["failed_sessions"] == result["errors_count"] == 0
+    assert result["preflight_passed"] is False and job.meta["progress_percent"] == 0
+    assert result["preflight"]["benchmark_write"]["error_classification"] == "access_denied"
+    assert {"stage", "preflight_passed", "total_sessions", "processed_sessions", "successful_sessions",
+            "failed_sessions", "unresolved_sessions", "progress_percent", "errors_count",
+            "output_prefix"} <= set(job.meta)
+
+
+def test_status_endpoint_exposes_terminal_stage(monkeypatch):
+    monkeypatch.setenv("BENCHMARK_INTERNAL_API_KEY", "correct")
+    fake = type("Job", (), {"meta": {"stage": "finished_with_failures", "preflight_passed": True,
+        "total_sessions": 2, "processed_sessions": 2, "successful_sessions": 1, "failed_sessions": 1,
+        "unresolved_sessions": 0, "progress_percent": 100, "errors_count": 1},
+        "get_status": lambda self, refresh=False: type("Status", (), {"value": "finished"})()})()
+    monkeypatch.setattr("web.routes_benchmark.fetch", lambda _: fake)
+    response = TestClient(app).get("/benchmark/jobs/benchmark-" + "a" * 32,
+                                   headers={"X-Internal-API-Key": "correct"})
+    assert response.status_code == 200
+    assert response.json()["status"] == "finished"
+    assert response.json()["stage"] == "finished_with_failures"
+
+
 def test_final_stage_remains_finished(monkeypatch):
     import tasks
     saved = []
@@ -342,6 +388,8 @@ def test_final_stage_remains_finished(monkeypatch):
     monkeypatch.setattr("rq.get_current_job", lambda: job)
     monkeypatch.setattr(benchmark_s3, "client", lambda: S3())
     monkeypatch.setattr(benchmark, "run_benchmark", lambda *args, **kwargs: {
-        "summary": {"failed_sessions": 0}, "output_prefix": "editdna/benchmarks/job/"})
+        "summary": {}, "output_prefix": "editdna/benchmarks/job/", "result_keys": [],
+        "preflight_passed": True, "total_sessions": 1, "processed_sessions": 1,
+        "successful_sessions": 1, "failed_sessions": 0, "unresolved_sessions": 0, "errors_count": 0})
     tasks.job_benchmark("job", request("inventory_only"))
     assert saved[-1]["stage"] == "finished"

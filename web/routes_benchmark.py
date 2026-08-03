@@ -61,7 +61,8 @@ def run(request: BenchmarkRequest):
 def job_status(job_id: str):
     job = fetch(job_id); meta = job.meta or {}; current = job.get_status(refresh=True)
     total, processed = int(meta.get("total_sessions", 0)), int(meta.get("processed_sessions", 0))
-    return {"status": getattr(current, "value", str(current)), "total_sessions": total, "processed_sessions": processed,
+    return {"status": getattr(current, "value", str(current)), "stage": meta.get("stage", "queued"),
+            "preflight_passed": meta.get("preflight_passed"), "total_sessions": total, "processed_sessions": processed,
             "successful_sessions": int(meta.get("successful_sessions", max(0, processed-int(meta.get("failed_sessions", 0))))),
             "failed_sessions": int(meta.get("failed_sessions", 0)), "current_session": meta.get("current_session"),
             "unresolved_sessions": int(meta.get("unresolved_sessions", 0)),

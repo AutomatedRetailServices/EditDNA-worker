@@ -36,6 +36,14 @@ def safe_storage_error(exc: Exception) -> str:
     return "storage_error"
 
 
+def stable_result(summary: dict, output_prefix: str, result_keys: list[str]) -> dict:
+    summary = {**summary, "output_prefix": output_prefix, "result_keys": result_keys}
+    fields = ("total_sessions", "processed_sessions", "successful_sessions", "failed_sessions",
+              "unresolved_sessions", "errors_count", "preflight_passed", "preflight")
+    return {"summary": summary, "output_prefix": output_prefix, "result_keys": result_keys,
+            **{field: summary[field] for field in fields}}
+
+
 def normalize(value: str) -> str:
     return re.sub(r"[^a-z0-9]+", "", Path(value or "").stem.casefold())
 
@@ -111,12 +119,16 @@ def make_result(old: dict, new: dict, method: str, confidence: float) -> dict:
 
 def _load_checkpoint(s3, job_id, key):
     raw = benchmark_s3.read_output(s3, key, job_id)
-    defaults = {"completed_sessions": [], "failed_sessions": [], "terminal_failed_sessions": [],
-                "unresolved_sessions": [], "attempts_by_session": {}, "session_result_keys": {},
-                "request_fingerprint": None}
+    defaults = _empty_checkpoint()
     if raw:
         defaults.update(json.loads(raw))
     return defaults
+
+
+def _empty_checkpoint() -> dict:
+    return {"completed_sessions": [], "failed_sessions": [], "terminal_failed_sessions": [],
+            "unresolved_sessions": [], "attempts_by_session": {}, "session_result_keys": {},
+            "request_fingerprint": None}
 
 
 def _save_checkpoint(s3, job_id, key, state):
@@ -165,8 +177,6 @@ def run_benchmark(job_id: str, request: dict, s3=None, pipeline=None, progress=N
         dataset_status["successful"] = True
     except Exception as exc:
         dataset_status["error_classification"] = safe_storage_error(exc)
-        if request["mode"] != "inventory_only":
-            raise
         rows = []
     grouped = defaultdict(list)
     for row in rows:
@@ -185,14 +195,16 @@ def run_benchmark(job_id: str, request: dict, s3=None, pipeline=None, progress=N
             list_status = {"successful": False, "error_classification": safe_storage_error(exc)}
             prefix_inventory.append({"prefix": source_prefix, "eligible_s3_videos": 0,
                                      "filtered_s3_objects": 0, "error_classification": list_status["error_classification"]})
-            if request["mode"] != "inventory_only":
-                raise
     resolved, unresolved = resolve_sources(grouped, objects)
     dataset_sessions = sorted(grouped)
     sessions = dataset_sessions[:request.get("limit") or None]
     selected_rows = [row for session in sessions for row in grouped[session]]
     checkpoint_key = prefix + "checkpoint.json"
-    state = _load_checkpoint(s3, job_id, checkpoint_key)
+    try:
+        state = _load_checkpoint(s3, job_id, checkpoint_key)
+    except Exception:
+        # The explicit probe below reports a sanitized benchmark-prefix read status.
+        state = _empty_checkpoint()
     fingerprint = request_fingerprint(request)
     if state["request_fingerprint"] not in (None, fingerprint):
         raise ValueError("checkpoint request fingerprint does not match")
@@ -226,11 +238,17 @@ def run_benchmark(job_id: str, request: dict, s3=None, pipeline=None, progress=N
         "s3_list": list_status, "dataset_read": dataset_status,
         "benchmark_write": write_status, "benchmark_read_back": readback_status,
         "configured_prefixes": prefix_inventory}
-    if not write_status["successful"] and request["mode"] == "inventory_only":
-        return {"summary": {"dataset_total_historical_sessions": len(dataset_sessions),
+    preflight_passed = bool(dataset_status["successful"] and list_status["successful"]
+                            and write_status["successful"] and readback_status["successful"]
+                            and preflight["required_environment_configuration_present"])
+    if not preflight_passed:
+        summary = {"dataset_total_historical_sessions": len(dataset_sessions),
             "dataset_total_historical_clips": len(rows), "selected_historical_sessions": len(sessions),
-            "selected_historical_clips": len(selected_rows), "preflight": preflight},
-            "output_prefix": prefix, "result_keys": []}
+            "selected_historical_clips": len(selected_rows), "total_sessions": len(sessions),
+            "processed_sessions": 0, "successful_sessions": 0, "failed_sessions": 0,
+            "unresolved_sessions": 0, "errors_count": 0, "preflight_passed": False,
+            "preflight": preflight}
+        return stable_result(summary, prefix, [])
     _save_checkpoint(s3, job_id, checkpoint_key, state)
 
     def report(current=None):
@@ -295,7 +313,14 @@ def run_benchmark(job_id: str, request: dict, s3=None, pipeline=None, progress=N
     summary.update({"dataset_total_historical_sessions": len(dataset_sessions),
                     "dataset_total_historical_clips": len(rows),
                     "selected_historical_sessions": len(sessions),
-                    "selected_historical_clips": len(selected_rows), "preflight": preflight})
+                    "selected_historical_clips": len(selected_rows), "preflight": preflight,
+                    "preflight_passed": preflight_passed, "total_sessions": len(sessions),
+                    "processed_sessions": len(completed),
+                    "successful_sessions": max(0, len(completed) - summary["failed_sessions"] - len(state["unresolved_sessions"])),
+                    "unresolved_sessions": len(state["unresolved_sessions"]), "errors_count": len(errors)})
+    result_keys = [prefix + name for name in RESULT_FILES]
+    final_result = stable_result(summary, prefix, result_keys)
+    summary = final_result["summary"]
     disagreements = [row for row in results if row["changed"] or row["winner_selection_changed"]]
     disagreements += [row for row in unmatched if row.get("classification") in {"ambiguous_match", "unmatched_old", "new_unmatched"}]
     payloads = {"results_v2.jsonl": jsonl(results), "disagreements.jsonl": jsonl(disagreements),
@@ -304,7 +329,7 @@ def run_benchmark(job_id: str, request: dict, s3=None, pipeline=None, progress=N
                 "summary.csv": summary_csv(summary)}
     for name, body in payloads.items(): benchmark_s3.put_output(s3, prefix + name, body, job_id, "text/csv" if name.endswith(".csv") else "application/json")
     report()
-    return {"summary": summary, "output_prefix": prefix, "result_keys": [prefix + name for name in RESULT_FILES]}
+    return final_result
 
 
 def jsonl(rows): return b"".join((json.dumps(row, sort_keys=True) + "\n").encode() for row in rows)
@@ -319,12 +344,18 @@ def build_summary(old, sessions, resolved, unresolved, objects, filtered, result
     slot_changes = Counter(f"{x['old_slot']}->{x['new_slot']}" for x in results if x["old_slot"] != x["new_slot"])
     session_changes = Counter(x["session_id"] for x in results if x["changed"] or x["winner_selection_changed"])
     take_statuses = Counter()
+    take_group_totals = Counter()
     for item in usage:
         execution = item.get("take_judge_execution", {})
         if not execution.get("requested"):
             take_statuses["not_requested"] += 1
         else:
-            take_statuses.update(source.get("status", "not_requested") for source in execution.get("sources", []))
+            sources = execution.get("sources", [])
+            take_statuses.update(source.get("status", "not_requested") for source in sources)
+            for source in sources:
+                for name in ("winner_selected", "abstained", "low_confidence", "provider_error",
+                             "groups_evaluated", "groups_discovered"):
+                    take_group_totals[name] += int(source.get(name, 0))
     usage_available = any(item.get("provider_instrumentation", {}).get("usage", {}).get("available") for item in usage)
     cost_available = any(item.get("provider_instrumentation", {}).get("cost", {}).get("available") for item in usage)
     same_keep = sum(x["old_keep"] == x["new_keep"] for x in results); same_slot = sum(x["old_slot"] == x["new_slot"] for x in results)
@@ -348,6 +379,7 @@ def build_summary(old, sessions, resolved, unresolved, objects, filtered, result
             "take_judge_v2_usage": sum(take_judge_used(x) for x in results),
             "take_judge_v2_fallbacks": sum(not take_judge_used(x) for x in results),
             "take_judge_execution_status_counts": dict(take_statuses),
+            "take_judge_group_status_totals": dict(take_group_totals),
             "processing_time_seconds": round(elapsed, 3),
             "provider_usage_instrumentation": {"available": usage_available,
                 "reason": None if usage_available else "Provider token usage is not instrumented"},
