@@ -1,6 +1,7 @@
 import inspect
 import io
 import json
+from pathlib import Path
 
 import pytest
 from botocore.exceptions import ClientError
@@ -80,23 +81,43 @@ def test_inventory_checkpoint_resume_progress_and_metrics():
     assert set(checkpoint["session_result_keys"]) == {"good-one", "good-two"}
 
 
-def test_failure_continues_and_summary_metrics_are_explicit():
+def test_retryable_failure_resumes_then_succeeds_without_reprocessing(monkeypatch):
+    monkeypatch.setenv("BENCHMARK_SESSION_MAX_ATTEMPTS", "3")
     rows = [{"Key": "Editdna good videos/good-one.mp4", "Size": 2000},
             {"Key": "Editdna good videos/good-two.mp4", "Size": 2000}]
     s3 = S3(rows, sessions=("good-one", "good-two")); calls = []
     def pipeline(session, *_):
         calls.append(session)
-        if session == "good-one": raise RuntimeError("safe failure")
+        if session == "good-one" and calls.count("good-one") == 1: raise RuntimeError("safe failure")
         return {"clips": [{"id": "new", "text": "hello product", "slot": "BENEFITS", "meta": {"keep": False}}],
-                "provider_usage": {"openai_calls": 2}, "estimated_cost": .25}
-    result = benchmark.run_benchmark("job", request(), s3=s3, pipeline=pipeline)
+                "provider_usage_instrumentation": {"available": False, "reason": "not instrumented"},
+                "estimated_cost_instrumentation": {"available": False, "reason": "not instrumented"}}
+    with pytest.raises(benchmark.RetryableBenchmarkSessionsError):
+        benchmark.run_benchmark("job", request(), s3=s3, pipeline=pipeline)
     assert calls == ["good-one", "good-two"]
+    checkpoint = json.loads(s3.storage["editdna/benchmarks/job/checkpoint.json"])
+    assert checkpoint["completed_sessions"] == ["good-two"] and checkpoint["attempts_by_session"]["good-one"] == 1
+    result = benchmark.run_benchmark("job", request(), s3=s3, pipeline=pipeline)
+    assert calls == ["good-one", "good-two", "good-one"]
     summary = result["summary"]
-    assert summary["failed_sessions"] == 1
-    assert summary["per_slot_changes"] == {"HOOK->BENEFITS": 1}
-    assert summary["per_source_session_changes"] == {"good-two": 1}
-    assert summary["provider_usage"] == {"openai_calls": 2}
-    assert summary["estimated_cost"] == .25 and summary["estimated_cost_metadata"]["available"] is True
+    assert summary["failed_sessions"] == 0
+    assert summary["per_slot_changes"] == {"HOOK->BENEFITS": 2}
+    assert summary["provider_usage_instrumentation"]["available"] is False
+
+
+def test_failure_becomes_terminal_after_attempt_limit(monkeypatch):
+    monkeypatch.setenv("BENCHMARK_SESSION_MAX_ATTEMPTS", "2")
+    rows = [{"Key": "Editdna good videos/good-one.mp4", "Size": 2000}]; s3 = S3(rows)
+    failing = lambda *_: (_ for _ in ()).throw(RuntimeError("safe failure"))
+    with pytest.raises(benchmark.RetryableBenchmarkSessionsError):
+        benchmark.run_benchmark("terminal", request(), s3=s3, pipeline=failing)
+    result = benchmark.run_benchmark("terminal", request(), s3=s3, pipeline=failing)
+    checkpoint = json.loads(s3.storage["editdna/benchmarks/terminal/checkpoint.json"])
+    assert checkpoint["attempts_by_session"] == {"good-one": 2}
+    assert checkpoint["terminal_failed_sessions"] == checkpoint["completed_sessions"] == ["good-one"]
+    session_key = checkpoint["session_result_keys"]["good-one"]
+    assert len(json.loads(s3.storage[session_key])["errors"]) == 2
+    assert result["summary"]["failed_sessions"] == 1
 
 
 def test_take_judge_result_usage_fallback_and_winner_change():
@@ -113,6 +134,53 @@ def test_take_judge_result_usage_fallback_and_winner_change():
     assert summary["take_judge_v2_usage"] == 1
     assert summary["take_judge_v2_fallbacks"] == 1
     assert json.loads(benchmark.jsonl([with_judge]))["take_judge_v2"] == {"score": .91, "verdict": "WINNER"}
+
+
+@pytest.mark.parametrize(("old_verdict", "new_verdict", "changed", "evaluation"), [
+    ("WINNER", "LOSER", True, "evaluated"), ("WINNER", None, False, "not_evaluated"),
+    (None, "WINNER", False, "newly_evaluated"), (None, None, False, "not_evaluated")])
+def test_winner_change_requires_both_verdicts(old_verdict, new_verdict, changed, evaluation):
+    result = benchmark.make_result({"session_id": "s", "text": "same", "take_judge_verdict": old_verdict},
+        {"id": "n", "text": "same", "meta": {"take_judge_verdict": new_verdict}}, "text", 1)
+    assert result["winner_selection_changed"] is changed
+    assert result["take_judge_evaluation"] == evaluation
+
+
+def test_take_judge_execution_statuses_are_request_scoped(monkeypatch):
+    from worker import pipeline
+    monkeypatch.setattr(pipeline, "TAKE_JUDGE_ENABLED", False)
+    status = {}
+    pipeline.run_take_judge([], "/tmp", "input", execution_status=status)
+    assert status["status"] == "not_requested"
+    monkeypatch.setattr(pipeline, "is_openai_available", lambda: False)
+    pipeline.run_take_judge([], "/tmp", "input", force_enabled=True, execution_status=status)
+    assert status["status"] == "provider_unavailable"
+    monkeypatch.setattr(pipeline, "is_openai_available", lambda: True)
+    monkeypatch.setattr(pipeline, "find_sibling_groups", lambda clips: [])
+    pipeline.run_take_judge([], "/tmp", "input", force_enabled=True, execution_status=status)
+    assert status["status"] == "no_sibling_group"
+
+
+def test_take_judge_missing_evaluation_flags_are_explicit():
+    result = benchmark.make_result({"session_id": "s", "text": "same", "take_judge_verdict": "WINNER"},
+        {"id": "n", "text": "same", "meta": {"take_judge_execution_status": "low_confidence"}}, "text", 1)
+    assert result["take_judge_not_evaluated"] is True
+    assert result["take_judge_low_confidence"] is True
+    assert result["take_judge_unavailable"] is result["take_judge_abstained"] is False
+
+
+def test_limit_metrics_use_only_selected_sessions():
+    sessions = tuple(f"session-{index}" for index in range(5))
+    s3 = S3([{"Key": f"Editdna good videos/{session}.mp4", "Size": 2000} for session in sessions], sessions=sessions)
+    result = benchmark.run_benchmark("limited", {**request("inventory_only"), "limit": 3}, s3=s3,
+                                     pipeline=lambda *_: pytest.fail("pipeline invoked"))
+    summary = result["summary"]
+    assert summary["dataset_total_historical_sessions"] == 5
+    assert summary["dataset_total_historical_clips"] == 5
+    assert summary["selected_historical_sessions"] == 3
+    assert summary["selected_historical_clips"] == 3
+    assert summary["total_historical_clips"] == 3
+    assert summary["preflight"]["dataset_jsonl_readable"] is True
 
 
 def test_checkpoint_stays_small_and_final_aggregation_loads_session_files():
@@ -159,6 +227,36 @@ def test_production_defaults_and_request_scoped_activation(monkeypatch):
     monkeypatch.setattr(pipeline, "find_sibling_groups", lambda clips: judge_calls.append(clips) or [])
     pipeline.run_take_judge([], "/tmp", "input.mp4", force_enabled=True)
     assert judge_calls == [[]]
+
+
+@pytest.mark.parametrize("fail", [False, True])
+def test_benchmark_pipeline_does_not_retain_internal_directory(monkeypatch, tmp_path, fail):
+    from worker import pipeline
+    internal = tmp_path / ("failed-session" if fail else "successful-session")
+    source = tmp_path / "source.mp4"; source.write_bytes(b"video")
+    def session_dir(_): internal.mkdir(); return str(internal)
+    monkeypatch.setattr(pipeline, "ensure_session_dir", session_dir)
+    monkeypatch.setattr(pipeline, "probe_duration", lambda _: 1.0)
+    if fail:
+        monkeypatch.setattr(pipeline, "run_asr", lambda _: (_ for _ in ()).throw(RuntimeError("provider fallback failure")))
+    else:
+        monkeypatch.setattr(pipeline, "run_asr", lambda _: [{"id": "c", "start": 0, "end": 1, "text": "hello", "meta": {}}])
+        monkeypatch.setattr(pipeline, "merge_incomplete_phrases", lambda clips: clips)
+        monkeypatch.setattr(pipeline, "enrich_clips_semantic", lambda clips: False)
+        monkeypatch.setattr(pipeline, "dedupe_clips", lambda clips: clips)
+        monkeypatch.setattr(pipeline, "run_visual_pass", lambda *args: False)
+        monkeypatch.setattr(pipeline, "build_slots_dict", lambda clips: {})
+        monkeypatch.setattr(pipeline, "build_composer", lambda clips, mode: {"used_clip_ids": []})
+        monkeypatch.setattr(pipeline, "pretty_print_composer", lambda *args: "")
+    monkeypatch.setattr(pipeline, "S3_BUCKET", None)
+    if fail:
+        with pytest.raises(RuntimeError):
+            pipeline.run_pipeline("benchmark", local_files=[str(source)], render_output=False,
+                                  persist_result_json=False, retain_local_files=False)
+    else:
+        pipeline.run_pipeline("benchmark", local_files=[str(source)], render_output=False,
+                              persist_result_json=False, retain_local_files=False)
+    assert not internal.exists()
 
 
 def test_authentication_required_and_missing_configuration_fails_closed(monkeypatch):

@@ -1262,16 +1262,24 @@ def run_take_judge(
     session_dir: str,
     input_local: str,
     force_enabled: bool = False,
+    execution_status: Optional[Dict[str, Any]] = None,
 ) -> bool:
     """Compare sibling takes, retaining all unless V2 produces a safe winner."""
+    status = execution_status if execution_status is not None else {}
+    status.update({"status": "not_requested", "groups_evaluated": 0})
     if not TAKE_JUDGE_ENABLED and not force_enabled:
         return False
     if not is_openai_available():
+        status["status"] = "provider_unavailable"
         logger.warning("Take Judge unavailable; failing open", extra={"operation": "take_judge_v2"})
         return False
 
     groups = [group[:TAKE_JUDGE_MAX_TAKES]
               for group in find_sibling_groups(clips)[:TAKE_JUDGE_MAX_GROUPS]]
+    if not groups:
+        status["status"] = "no_sibling_group"
+        return False
+    status["status"] = "abstained"
     used_any = False
     for group in groups:
         candidates = []
@@ -1300,6 +1308,7 @@ def run_take_judge(
                 temperature=0.1, max_completion_tokens=700,
             )
         except OpenAIProviderError:
+            status["status"] = "provider_error"
             logger.warning("Take Judge abstained", extra={
                 "operation": "take_judge_v2", "group_size": len(candidates),
                 "frame_count": sum(candidate.image_count for candidate in candidates),
@@ -1307,8 +1316,15 @@ def run_take_judge(
             })
             continue
         candidate_ids = {candidate.candidate_id for candidate in candidates}
-        if (result.abstain or result.confidence < TAKE_JUDGE_V2_MIN_CONFIDENCE
-                or result.winner_id not in candidate_ids):
+        status["groups_evaluated"] += 1
+        if result.abstain:
+            status["status"] = "abstained"
+            continue
+        if result.confidence < TAKE_JUDGE_V2_MIN_CONFIDENCE:
+            status["status"] = "low_confidence"
+            continue
+        if result.winner_id not in candidate_ids:
+            status["status"] = "abstained"
             continue
         scores = {score.candidate_id: score.overall_score for score in result.candidate_scores}
         for clip_item in group:
@@ -1325,6 +1341,7 @@ def run_take_judge(
                     " | Removed by TakeJudgeAI (better take exists)."
                 )
         used_any = True
+        status["status"] = "winner_selected"
     return used_any
 
 
@@ -1874,6 +1891,7 @@ def run_pipeline(session_id: str, files: Optional[List[str]] = None,
                  output_key: Optional[str] = None,
                  render_output: bool = True,
                  persist_result_json: bool = True,
+                 retain_local_files: bool = True,
                  use_semantic_v2: bool = False,
                  use_take_judge_v2: bool = False) -> Dict[str, Any]:
     """Analyze every source once, compose once, and render one output."""
@@ -1907,6 +1925,7 @@ def run_pipeline(session_id: str, files: Optional[List[str]] = None,
 
         clips=[]; durations=[]
         llm_used=vision_used=bad_takes_used=boundaries_refined=take_judge_used=False
+        take_judge_execution = {"requested": bool(TAKE_JUDGE_ENABLED or use_take_judge_v2), "sources": []}
         for i,path in enumerate(local_sources):
           check()
           report("analyzing", 20 + (35 * i // len(local_sources)), f"Analyzing source {i + 1} of {len(local_sources)}")
@@ -1926,11 +1945,20 @@ def run_pipeline(session_id: str, files: Optional[List[str]] = None,
             if VISION_ENABLED and BOUNDARY_REFINER_ENABLED:
                 boundaries_refined=refine_clip_boundaries_with_vision(input_local=path,session_dir=session_dir,clips=current) or boundaries_refined
             if TAKE_JUDGE_ENABLED or use_take_judge_v2:
+                source_take_judge_status = {"source_index": i}
                 take_judge_used = (run_take_judge(clips=current, session_dir=session_dir,
-                                                  input_local=path, force_enabled=True)
+                                                  input_local=path, force_enabled=True,
+                                                  execution_status=source_take_judge_status)
                                    if use_take_judge_v2 else
                                    run_take_judge(clips=current, session_dir=session_dir,
-                                                  input_local=path)) or take_judge_used
+                                                  input_local=path,
+                                                  execution_status=source_take_judge_status)) or take_judge_used
+                take_judge_execution["sources"].append(source_take_judge_status)
+                for clip_item in current:
+                    clip_item["meta"]["take_judge_execution_status"] = source_take_judge_status["status"]
+            else:
+                for clip_item in current:
+                    clip_item["meta"]["take_judge_execution_status"] = "not_requested"
             for c in current:
                 c["source_start"],c["source_end"]=safe_float(c.get("start")),safe_float(c.get("end"))
             clips.extend(current)
@@ -1980,10 +2008,13 @@ def run_pipeline(session_id: str, files: Optional[List[str]] = None,
       "clean_cut_output_video_local":final if clean_rendered else None,
       "clean_cut_output_video_url":output_url if clean_rendered else None,"asr":True,"semantic":True,
       "vision":vision_used,"llm_used":llm_used,"take_judge_used":take_judge_used,
+      "take_judge_execution":take_judge_execution,
+      "provider_usage_instrumentation":{"available":False,"reason":"Provider token usage is not instrumented"},
+      "estimated_cost_instrumentation":{"available":False,"reason":"Provider cost is not instrumented"},
       "bad_takes_used":bad_takes_used,"boundaries_refined":boundaries_refined,"composer_mode":mode}
-        if output_url:
-            # Uploaded jobs return only durable media references. The local inputs
-            # and render output belong to the job directory removed below.
+        if output_url or not retain_local_files:
+            # Uploaded jobs and explicitly non-retaining internal jobs return no
+            # ephemeral paths; their temporary storage is removed below.
             result.pop("input_local")
             result.pop("input_files_local")
             result.pop("output_video_local")
@@ -1994,7 +2025,7 @@ def run_pipeline(session_id: str, files: Optional[List[str]] = None,
             # No-S3 operation is an existing result contract used by direct
             # callers. Transfer ownership of the job directory to that caller so
             # its returned local paths remain usable.
-            retain_local_result = True
+            retain_local_result = retain_local_files
         result["output_json_s3_uri"] = save_result_json_to_s3(result) if persist_result_json else None
         return result
     finally:

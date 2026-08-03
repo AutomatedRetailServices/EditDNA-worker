@@ -99,6 +99,7 @@ def job_benchmark(job_id: str, payload: Dict[str, Any]) -> Dict[str, Any]:
                 output_key=(f"editdna/benchmarks/{job_id}/videos/{safe_session}.mp4" if render_outputs else None),
                 render_output=render_outputs,
                 persist_result_json=False,
+                retain_local_files=False,
                 use_semantic_v2=bool(request.get("use_semantic_v2", False)),
                 use_take_judge_v2=bool(request.get("use_take_judge_v2", False)),
             )
