@@ -81,7 +81,8 @@ def job_benchmark(job_id: str, payload: Dict[str, Any]) -> Dict[str, Any]:
     def save(state):
         if job is not None:
             job.meta.update(state)
-            job.meta["stage"] = "running"
+            if "stage" not in state:
+                job.meta["stage"] = "running"
             job.save_meta()
 
     def process(session_id, key, render_outputs, request):
@@ -104,6 +105,7 @@ def job_benchmark(job_id: str, payload: Dict[str, Any]) -> Dict[str, Any]:
             return result
 
     result = benchmark.run_benchmark(job_id, payload, s3=s3, pipeline=process, progress=save)
-    save({"stage": "finished", "processed_sessions": result["summary"]["total_matched_clips"],
-          "failed_sessions": result["summary"]["failed_sessions"], "errors_count": result["summary"]["failed_sessions"]})
+    save({"stage": "finished", "current_session": None, "progress_percent": 100,
+          "failed_sessions": result["summary"]["failed_sessions"],
+          "errors_count": result["summary"]["failed_sessions"], "output_prefix": result["output_prefix"]})
     return result

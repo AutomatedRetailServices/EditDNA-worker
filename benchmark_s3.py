@@ -5,6 +5,7 @@ from pathlib import Path, PurePosixPath
 from typing import Iterable
 
 import boto3
+from botocore.exceptions import ClientError
 
 INPUT_PREFIXES = (
     "Editdna bloopers videos/", "Editdna good videos/",
@@ -57,16 +58,17 @@ def validate_output_key(key: str, job_id: str | None = None) -> str:
     return key
 
 
-def list_objects(s3, prefix: str, extensions: Iterable[str] = VIDEO_EXTENSIONS) -> list[dict]:
+def list_objects_inventory(s3, prefix: str, extensions: Iterable[str] = VIDEO_EXTENSIONS) -> tuple[list[dict], dict]:
     validate_input_prefix(prefix)
     allowed = {x.lower() for x in extensions}
-    found, token = [], None
+    found, token, seen = [], None, 0
     while True:
         args = {"Bucket": configured_bucket(), "Prefix": prefix}
         if token:
             args["ContinuationToken"] = token
         response = s3.list_objects_v2(**args)
         for item in response.get("Contents", []):
+            seen += 1
             key, size = item["Key"], int(item.get("Size", 0))
             name = PurePosixPath(key).name
             if (key.endswith("/") or name.startswith("._") or size < MIN_OBJECT_BYTES
@@ -76,7 +78,12 @@ def list_objects(s3, prefix: str, extensions: Iterable[str] = VIDEO_EXTENSIONS) 
         if not response.get("IsTruncated"):
             break
         token = response["NextContinuationToken"]
-    return sorted(found, key=lambda value: value["key"].casefold())
+    found = sorted(found, key=lambda value: value["key"].casefold())
+    return found, {"filtered_s3_objects": seen - len(found), "eligible_s3_videos": len(found)}
+
+
+def list_objects(s3, prefix: str, extensions: Iterable[str] = VIDEO_EXTENSIONS) -> list[dict]:
+    return list_objects_inventory(s3, prefix, extensions)[0]
 
 
 def read_object(s3, key: str, max_bytes: int = MAX_OBJECT_BYTES) -> bytes:
@@ -90,9 +97,25 @@ def read_object(s3, key: str, max_bytes: int = MAX_OBJECT_BYTES) -> bytes:
     return data
 
 
+def read_output(s3, key: str, job_id: str, max_bytes: int = 16 * 1024 * 1024) -> bytes | None:
+    validate_output_key(key, job_id)
+    try:
+        response = s3.get_object(Bucket=configured_bucket(), Key=key)
+    except ClientError as exc:
+        if exc.response.get("Error", {}).get("Code") in {"NoSuchKey", "404"}:
+            return None
+        raise
+    if int(response.get("ContentLength", 0)) > max_bytes:
+        raise ValueError("checkpoint exceeds maximum size")
+    data = response["Body"].read(max_bytes + 1)
+    if len(data) > max_bytes:
+        raise ValueError("checkpoint exceeds maximum size")
+    return data
+
+
 def download_video(s3, key: str, destination: Path) -> None:
     _safe_key(key)
-    if not any(key.startswith(prefix) for prefix in INPUT_PREFIXES[:2]):
+    if not any(key.startswith(prefix) for prefix in INPUT_PREFIXES):
         raise ValueError("video key is not allowlisted")
     if Path(key).suffix.lower() not in VIDEO_EXTENSIONS:
         raise ValueError("unsupported video extension")

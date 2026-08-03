@@ -1,9 +1,12 @@
 """Internal endpoints for private-S3 historical benchmarks."""
 
+import os
+import re
+import secrets
 from typing import Literal
 from uuid import uuid4
 
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, Depends, Header, HTTPException, status
 from pydantic import BaseModel, Field, field_validator
 from rq.exceptions import NoSuchJobError
 from rq.job import Job
@@ -11,7 +14,13 @@ from rq.job import Job
 import benchmark_s3
 from jobs import enqueue_benchmark, get_queue
 
-router = APIRouter(prefix="/benchmark", tags=["benchmark"])
+def require_internal_key(x_internal_api_key: str | None = Header(default=None)) -> None:
+    configured = os.getenv("BENCHMARK_INTERNAL_API_KEY")
+    if not configured or not x_internal_api_key or not secrets.compare_digest(configured, x_internal_api_key):
+        raise HTTPException(status_code=401, detail="Internal authentication required")
+
+
+router = APIRouter(prefix="/benchmark", tags=["benchmark"], dependencies=[Depends(require_internal_key)])
 
 
 class BenchmarkRequest(BaseModel):
@@ -35,6 +44,8 @@ class BenchmarkRequest(BaseModel):
 
 
 def fetch(job_id: str) -> Job:
+    if not re.fullmatch(r"benchmark-[0-9a-f]{32}", job_id):
+        raise HTTPException(404, "Benchmark job not found")
     try: return Job.fetch(job_id, connection=get_queue().connection)
     except NoSuchJobError as exc: raise HTTPException(404, "Benchmark job not found") from exc
 
@@ -42,8 +53,8 @@ def fetch(job_id: str) -> Job:
 @router.post("/run", status_code=status.HTTP_202_ACCEPTED)
 def run(request: BenchmarkRequest):
     job_id = f"benchmark-{uuid4().hex}"
-    enqueue_benchmark(job_id, request.model_dump())
-    return {"job_id": job_id, "status": "queued"}
+    job, duplicate = enqueue_benchmark(job_id, request.model_dump())
+    return {"job_id": job.id, "status": "queued", "duplicate": duplicate}
 
 
 @router.get("/jobs/{job_id}")
@@ -53,7 +64,8 @@ def job_status(job_id: str):
     return {"status": getattr(current, "value", str(current)), "total_sessions": total, "processed_sessions": processed,
             "successful_sessions": int(meta.get("successful_sessions", max(0, processed-int(meta.get("failed_sessions", 0))))),
             "failed_sessions": int(meta.get("failed_sessions", 0)), "current_session": meta.get("current_session"),
-            "progress_percent": round(processed * 100 / total, 1) if total else 0,
+            "unresolved_sessions": int(meta.get("unresolved_sessions", 0)),
+            "progress_percent": meta.get("progress_percent", round(processed * 100 / total, 1) if total else 0),
             "output_prefix": f"editdna/benchmarks/{job_id}/", "errors_count": int(meta.get("errors_count", 0))}
 
 

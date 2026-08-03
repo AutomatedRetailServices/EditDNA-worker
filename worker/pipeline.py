@@ -754,14 +754,14 @@ def llm_classify_clips(clips: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
         return None
 
 
-def enrich_clips_semantic(clips: List[Dict[str, Any]]) -> bool:
+def enrich_clips_semantic(clips: List[Dict[str, Any]], force_v2: bool = False) -> bool:
     """
     1) Heurística local (filler, slots, semantic_score)
     2) LLM opcional, con reglas de seguridad de embudo.
     """
     tag_clips_heuristic(clips)
 
-    if not EDITDNA_USE_LLM:
+    if not EDITDNA_USE_LLM and not force_v2:
         return False
 
     llm_result = llm_classify_clips(clips)
@@ -1261,9 +1261,10 @@ def run_take_judge(
     clips: List[Dict[str, Any]],
     session_dir: str,
     input_local: str,
+    force_enabled: bool = False,
 ) -> bool:
     """Compare sibling takes, retaining all unless V2 produces a safe winner."""
-    if not TAKE_JUDGE_ENABLED:
+    if not TAKE_JUDGE_ENABLED and not force_enabled:
         return False
     if not is_openai_available():
         logger.warning("Take Judge unavailable; failing open", extra={"operation": "take_judge_v2"})
@@ -1873,8 +1874,8 @@ def run_pipeline(session_id: str, files: Optional[List[str]] = None,
                  output_key: Optional[str] = None,
                  render_output: bool = True,
                  persist_result_json: bool = True,
-                 use_semantic_v2: bool = True,
-                 use_take_judge_v2: bool = True) -> Dict[str, Any]:
+                 use_semantic_v2: bool = False,
+                 use_take_judge_v2: bool = False) -> Dict[str, Any]:
     """Analyze every source once, compose once, and render one output."""
     logger.info("run_pipeline session_id=%s mode=%s", session_id, mode)
     effective_files = local_files or (files if files and isinstance(files, list) else file_urls)
@@ -1915,16 +1916,21 @@ def run_pipeline(session_id: str, files: Optional[List[str]] = None,
             if len(local_sources)>1: add_source_metadata(current,i,path)
             else:
                 for c in current: c["source_index"],c["source_local"]=0,path
-            if use_semantic_v2:
-                llm_used=enrich_clips_semantic(current) or llm_used
+            semantic_used = (enrich_clips_semantic(current, force_v2=True)
+                             if use_semantic_v2 else enrich_clips_semantic(current))
+            llm_used = semantic_used or llm_used
             current=dedupe_clips(current)
             vision_used=run_visual_pass(path,session_dir,current) or vision_used
             if VISION_ENABLED and BAD_TAKES_ENABLED:
                 reject_visual_bad_takes(current,session_dir,path); bad_takes_used=True
             if VISION_ENABLED and BOUNDARY_REFINER_ENABLED:
                 boundaries_refined=refine_clip_boundaries_with_vision(input_local=path,session_dir=session_dir,clips=current) or boundaries_refined
-            if TAKE_JUDGE_ENABLED and use_take_judge_v2:
-                take_judge_used=run_take_judge(clips=current,session_dir=session_dir,input_local=path) or take_judge_used
+            if TAKE_JUDGE_ENABLED or use_take_judge_v2:
+                take_judge_used = (run_take_judge(clips=current, session_dir=session_dir,
+                                                  input_local=path, force_enabled=True)
+                                   if use_take_judge_v2 else
+                                   run_take_judge(clips=current, session_dir=session_dir,
+                                                  input_local=path)) or take_judge_used
             for c in current:
                 c["source_start"],c["source_end"]=safe_float(c.get("start")),safe_float(c.get("end"))
             clips.extend(current)

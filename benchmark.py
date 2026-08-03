@@ -4,15 +4,16 @@ import csv
 import io
 import json
 import re
-import tempfile
 import time
-from collections import defaultdict
+from collections import Counter, defaultdict
 from difflib import SequenceMatcher
 from pathlib import Path
 
 import benchmark_s3
 
-RESULT_FILES = ("results_v2.jsonl", "disagreements.jsonl", "unmatched.jsonl", "summary.json", "summary.csv", "errors.jsonl")
+RESULT_FILES = ("results_v2.jsonl", "disagreements.jsonl", "unmatched.jsonl", "inventory.json",
+                "summary.json", "summary.csv", "errors.jsonl")
+GENERIC_SOURCE_HINTS = {"good", "bloopers", "blooper"}
 
 
 def normalize(value: str) -> str:
@@ -20,28 +21,31 @@ def normalize(value: str) -> str:
 
 
 def resolve_sources(rows_by_session: dict[str, list[dict]], objects: list[dict]) -> tuple[dict, dict]:
-    """Resolve only unique normalized/session-name matches; never use row order."""
+    """Resolve unique exact names first; uncertain matches are never guessed."""
     resolved, unresolved = {}, {}
     for session, rows in sorted(rows_by_session.items()):
-        hints = {normalize(session)} | {normalize(str(row.get("source_name") or row.get("source") or "")) for row in rows}
-        hints.discard("")
-        exact = [obj for obj in objects if normalize(obj["key"]) in hints]
-        candidates = exact or [obj for obj in objects if any(h and (h in normalize(obj["key"]) or normalize(obj["key"]) in h) for h in hints)]
-        if len(candidates) == 1:
-            resolved[session] = candidates[0]
+        session_hint = normalize(session)
+        optional = {normalize(str(row.get("source_name") or "")) for row in rows}
+        optional |= {normalize(str(row.get("source") or "")) for row in rows
+                     if str(row.get("source") or "").casefold() not in GENERIC_SOURCE_HINTS}
+        hints = ({session_hint} | optional) - {""}
+        exact = [obj for obj in objects if normalize(Path(obj["key"]).name) in hints]
+        if len(exact) == 1:
+            resolved[session] = exact[0]
         else:
-            unresolved[session] = {"classification": "ambiguous_source" if candidates else "missing_source", "candidates": [x["key"] for x in candidates]}
+            unresolved[session] = {"classification": "ambiguous_source" if exact else "missing_source",
+                                   "candidates": [item["key"] for item in exact]}
     return resolved, unresolved
 
 
 def match_clips(old: list[dict], new: list[dict]) -> tuple[list[dict], list[dict]]:
-    matched, unmatched = [], []
-    unused = set(range(len(new)))
+    matched, unmatched, unused = [], [], set(range(len(new)))
     for historical in old:
         scored = []
         for index in unused:
             current = new[index]
-            text_score = SequenceMatcher(None, str(historical.get("text", "")).casefold(), str(current.get("text", "")).casefold()).ratio()
+            text_score = SequenceMatcher(None, str(historical.get("text", "")).casefold(),
+                                         str(current.get("text", "")).casefold()).ratio()
             overlap = 0.0
             if all(x in historical for x in ("start", "end")) and all(x in current for x in ("start", "end")):
                 union = max(float(historical["end"]), float(current["end"])) - min(float(historical["start"]), float(current["start"]))
@@ -62,61 +66,112 @@ def make_result(old: dict, new: dict, method: str, confidence: float) -> dict:
     old_meta, new_meta = old.get("meta") or {}, new.get("meta") or {}
     old_keep, new_keep = bool(old.get("keep", old_meta.get("keep"))), bool(new.get("keep", new_meta.get("keep")))
     old_slot, new_slot = old.get("slot"), new.get("slot")
-    return {"session_id": old.get("session_id"), "old_clip_id": old.get("clip_id", old.get("id")), "new_clip_id": new.get("id"),
-            "text": new.get("text", old.get("text", "")), "old_keep": old_keep, "new_keep": new_keep,
-            "old_slot": old_slot, "new_slot": new_slot, "old_reason": old.get("llm_reason", old.get("reason", "")),
-            "new_reason": new.get("llm_reason", new.get("reason", "")), "semantic_v2": new_meta.get("semantic_v2", {}),
-            "take_judge_v2": new_meta.get("take_judge_v2", {}), "match_method": method,
-            "match_confidence": round(confidence, 4), "changed": old_keep != new_keep or old_slot != new_slot}
+    return {"session_id": old.get("session_id"), "old_clip_id": old.get("clip_id", old.get("id")),
+            "new_clip_id": new.get("id"), "text": new.get("text", old.get("text", "")),
+            "old_keep": old_keep, "new_keep": new_keep, "old_slot": old_slot, "new_slot": new_slot,
+            "old_reason": old.get("llm_reason", old.get("reason", "")),
+            "new_reason": new.get("llm_reason", new.get("reason", "")),
+            "semantic_v2": new_meta.get("semantic_v2", {}), "take_judge_v2": new_meta.get("take_judge_v2", {}),
+            "match_method": method, "match_confidence": round(confidence, 4),
+            "changed": old_keep != new_keep or old_slot != new_slot,
+            "winner_selection_changed": old.get("take_judge_verdict") != new_meta.get("take_judge_verdict")}
+
+
+def _load_checkpoint(s3, job_id, key):
+    raw = benchmark_s3.read_output(s3, key, job_id)
+    return json.loads(raw) if raw else {"completed_sessions": [], "results": [], "unmatched": [], "errors": [], "inventory": [], "usage": []}
+
+
+def _save_checkpoint(s3, job_id, key, state):
+    benchmark_s3.put_output(s3, key, json.dumps(state, sort_keys=True).encode(), job_id, "application/json")
 
 
 def run_benchmark(job_id: str, request: dict, s3=None, pipeline=None, progress=None) -> dict:
     s3, progress = s3 or benchmark_s3.client(), progress or (lambda state: None)
-    started = time.monotonic(); prefix = f"{benchmark_s3.OUTPUT_PREFIX}{job_id}/"
+    started, prefix = time.monotonic(), f"{benchmark_s3.OUTPUT_PREFIX}{job_id}/"
     rows = [json.loads(line) for line in benchmark_s3.read_object(s3, request["dataset_key"]).decode().splitlines() if line.strip()]
     grouped = defaultdict(list)
     for row in rows: grouped[str(row.get("session_id") or "")].append(row)
-    objects = []
-    for source_prefix in request["source_prefixes"]: objects.extend(benchmark_s3.list_objects(s3, source_prefix))
+    objects, filtered = [], 0
+    for source_prefix in request["source_prefixes"]:
+        eligible, stats = benchmark_s3.list_objects_inventory(s3, source_prefix)
+        objects.extend(eligible); filtered += stats["filtered_s3_objects"]
     resolved, unresolved = resolve_sources(grouped, objects)
     sessions = sorted(grouped)[:request.get("limit") or None]
-    results, unmatched, errors = [], [], []
-    completed = set(request.get("completed_sessions", []))
-    for position, session in enumerate(sessions, 1):
+    checkpoint_key = prefix + "checkpoint.json"
+    state = _load_checkpoint(s3, job_id, checkpoint_key)
+    completed = set(state["completed_sessions"])
+    results, unmatched, errors, inventory, usage = (state[name] for name in ("results", "unmatched", "errors", "inventory", "usage"))
+
+    def report(current=None):
+        processed = len(completed); failed = len({x["session_id"] for x in errors})
+        unresolved_count = sum(x["resolution_status"] != "resolved" for x in inventory)
+        progress({"total_sessions": len(sessions), "processed_sessions": processed,
+                  "successful_sessions": max(0, processed - failed - unresolved_count),
+                  "failed_sessions": failed, "unresolved_sessions": unresolved_count,
+                  "current_session": current, "progress_percent": round(processed * 100 / len(sessions), 1) if sessions else 100})
+
+    for session in sessions:
         if session in completed: continue
-        progress({"total_sessions": len(sessions), "processed_sessions": position - 1, "current_session": session})
-        if session in unresolved:
-            unmatched.append({"session_id": session, **unresolved[session]}); completed.add(session); continue
-        if request["mode"] == "inventory_only":
-            completed.add(session); continue
-        try:
-            if pipeline is None: raise RuntimeError("benchmark pipeline adapter is not configured")
-            current = pipeline(session, resolved[session]["key"], bool(request.get("render_outputs")), request)
-            matched, missing = match_clips(grouped[session], current.get("clips", [])); results.extend(matched); unmatched.extend(missing)
-            completed.add(session)
-        except Exception as exc:
-            errors.append({"session_id": session, "error_type": type(exc).__name__, "message": str(exc)[:500]})
-        progress({"total_sessions": len(sessions), "processed_sessions": position, "current_session": None, "completed_sessions": sorted(completed)})
-    summary = build_summary(rows, results, unmatched, errors, time.monotonic() - started)
-    disagreements = [row for row in results if row["changed"]] + [row for row in unmatched if row.get("classification") in {"ambiguous_match", "unmatched_old", "new_unmatched"}]
-    payloads = {"results_v2.jsonl": jsonl(results), "disagreements.jsonl": jsonl(disagreements), "unmatched.jsonl": jsonl(unmatched),
-                "errors.jsonl": jsonl(errors), "summary.json": json.dumps(summary, indent=2).encode(), "summary.csv": summary_csv(summary)}
+        report(session)
+        resolution = unresolved.get(session)
+        inventory.append({"session_id": session, "resolution_status": resolution["classification"] if resolution else "resolved",
+                          "resolved_s3_key": resolved[session]["key"] if not resolution else None,
+                          "candidate_s3_keys": resolution["candidates"] if resolution else [resolved[session]["key"]],
+                          "historical_clip_count": len(grouped[session])})
+        if resolution:
+            unmatched.append({"session_id": session, **resolution})
+        elif request["mode"] != "inventory_only":
+            try:
+                current = pipeline(session, resolved[session]["key"], bool(request.get("render_outputs")), request)
+                matched, missing = match_clips(grouped[session], current.get("clips", [])); results.extend(matched); unmatched.extend(missing)
+                usage.append({"session_id": session, "provider_usage": current.get("provider_usage", {}),
+                              "estimated_cost": current.get("estimated_cost")})
+            except Exception as exc:
+                errors.append({"session_id": session, "error_type": type(exc).__name__, "message": str(exc)[:500]})
+        completed.add(session); state["completed_sessions"] = sorted(completed)
+        _save_checkpoint(s3, job_id, checkpoint_key, state); report()
+    summary = build_summary(rows, sessions, resolved, unresolved, objects, filtered, results, unmatched, errors, usage, time.monotonic() - started)
+    disagreements = [row for row in results if row["changed"] or row["winner_selection_changed"]]
+    disagreements += [row for row in unmatched if row.get("classification") in {"ambiguous_match", "unmatched_old", "new_unmatched"}]
+    payloads = {"results_v2.jsonl": jsonl(results), "disagreements.jsonl": jsonl(disagreements),
+                "unmatched.jsonl": jsonl(unmatched), "inventory.json": json.dumps(inventory, indent=2).encode(),
+                "errors.jsonl": jsonl(errors), "summary.json": json.dumps(summary, indent=2).encode(),
+                "summary.csv": summary_csv(summary)}
     for name, body in payloads.items(): benchmark_s3.put_output(s3, prefix + name, body, job_id, "text/csv" if name.endswith(".csv") else "application/json")
-    return {"summary": summary, "output_prefix": prefix, "result_keys": [prefix + name for name in RESULT_FILES], "completed_sessions": sorted(completed)}
+    report()
+    return {"summary": summary, "output_prefix": prefix, "result_keys": [prefix + name for name in RESULT_FILES]}
 
 
 def jsonl(rows): return b"".join((json.dumps(row, sort_keys=True) + "\n").encode() for row in rows)
 
 
-def build_summary(old, results, unmatched, errors, elapsed):
+def build_summary(old, sessions, resolved, unresolved, objects, filtered, results, unmatched, errors, usage, elapsed):
+    slot_changes = Counter(f"{x['old_slot']}->{x['new_slot']}" for x in results if x["old_slot"] != x["new_slot"])
+    session_changes = Counter(x["session_id"] for x in results if x["changed"] or x["winner_selection_changed"])
+    provider_usage = Counter()
+    for item in usage:
+        for provider, value in item.get("provider_usage", {}).items(): provider_usage[provider] += value
+    costs = [x["estimated_cost"] for x in usage if isinstance(x.get("estimated_cost"), (int, float))]
     same_keep = sum(x["old_keep"] == x["new_keep"] for x in results); same_slot = sum(x["old_slot"] == x["new_slot"] for x in results)
-    return {"total_historical_clips": len(old), "total_matched_clips": len(results), "total_unmatched_old_clips": sum(x.get("classification") == "unmatched_old" for x in unmatched),
-            "total_new_unmatched_clips": sum(x.get("classification") == "new_unmatched" for x in unmatched), "total_ambiguous_matches": sum("ambiguous" in x.get("classification", "") for x in unmatched),
-            "same_keep_decision": same_keep, "different_keep_decision": len(results)-same_keep, "old_discard_new_keep": sum(not x["old_keep"] and x["new_keep"] for x in results),
-            "old_keep_new_discard": sum(x["old_keep"] and not x["new_keep"] for x in results), "same_slot": same_slot, "different_slot": len(results)-same_slot,
-            "per_slot_changes": {}, "per_source_session_changes": {}, "semantic_v2_usage": sum(bool(x["semantic_v2"]) for x in results), "semantic_v2_fallbacks": sum(not x["semantic_v2"] for x in results),
+    return {"total_historical_sessions": len(sessions), "resolved_sessions": sum(s in resolved for s in sessions),
+            "missing_source_sessions": sum(unresolved.get(s, {}).get("classification") == "missing_source" for s in sessions),
+            "ambiguous_source_sessions": sum(unresolved.get(s, {}).get("classification") == "ambiguous_source" for s in sessions),
+            "filtered_s3_objects": filtered, "eligible_s3_videos": len(objects), "total_historical_clips": len(old),
+            "total_matched_clips": len(results), "total_unmatched_old_clips": sum(x.get("classification") == "unmatched_old" for x in unmatched),
+            "total_new_unmatched_clips": sum(x.get("classification") == "new_unmatched" for x in unmatched),
+            "total_ambiguous_matches": sum("ambiguous" in x.get("classification", "") for x in unmatched),
+            "same_keep_decision": same_keep, "different_keep_decision": len(results)-same_keep,
+            "old_discard_new_keep": sum(not x["old_keep"] and x["new_keep"] for x in results),
+            "old_keep_new_discard": sum(x["old_keep"] and not x["new_keep"] for x in results),
+            "same_slot": same_slot, "different_slot": len(results)-same_slot,
+            "per_slot_changes": dict(slot_changes), "per_source_session_changes": dict(session_changes),
+            "semantic_v2_usage": sum(bool(x["semantic_v2"]) for x in results), "semantic_v2_fallbacks": sum(not x["semantic_v2"] for x in results),
             "take_judge_v2_usage": sum(bool(x["take_judge_v2"]) for x in results), "take_judge_v2_fallbacks": sum(not x["take_judge_v2"] for x in results),
-            "processing_time_seconds": round(elapsed, 3), "provider_usage": {}, "estimated_cost": None, "failed_sessions": len(errors)}
+            "processing_time_seconds": round(elapsed, 3), "provider_usage": dict(provider_usage),
+            "estimated_cost": sum(costs) if costs else None,
+            "estimated_cost_metadata": {"available": bool(costs), "reason": None if costs else "Pipeline providers did not return cost data"},
+            "failed_sessions": len({x["session_id"] for x in errors})}
 
 
 def summary_csv(summary):
