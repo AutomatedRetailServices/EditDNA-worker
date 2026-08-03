@@ -214,12 +214,17 @@ def configure_pipeline(monkeypatch, outcome):
     return group, outside, calls
 
 
-@pytest.mark.parametrize("outcome,removed", [(result(), ["b"]), (result(None, abstain=True), []), (result(confidence=.69), [])])
-def test_selection_winner_abstain_and_low_confidence(monkeypatch, outcome, removed):
+@pytest.mark.parametrize("outcome,removed,statuses", [
+    (result(), ["b"], ["candidate_winner", "candidate_loser"]),
+    (result(None, abstain=True), [], ["abstained", "abstained"]),
+    (result(confidence=.69), [], ["low_confidence", "low_confidence"])])
+def test_selection_winner_abstain_and_low_confidence(monkeypatch, outcome, removed, statuses):
     group, outside, calls = configure_pipeline(monkeypatch, outcome)
     pipeline.run_take_judge(group + [outside], "/private/session", "/private/input.mp4")
     assert [item["id"] for item in group if not item["meta"]["keep"]] == removed
     assert group[0]["meta"]["keep"] and outside["meta"]["keep"] and len(calls) == 1
+    assert [item["meta"]["take_judge_execution_status"] for item in group] == statuses
+    assert outside["meta"]["take_judge_execution_status"] == "not_candidate"
 
 
 def test_provider_failure_keeps_all_and_logs_are_private(monkeypatch, caplog):
@@ -228,6 +233,25 @@ def test_provider_failure_keeps_all_and_logs_are_private(monkeypatch, caplog):
     with caplog.at_level(logging.WARNING): pipeline.run_take_judge(group + [outside], "/private/session", "/private/input.mp4")
     assert all(item["meta"]["keep"] for item in group + [outside])
     assert "SECRET_TRANSCRIPT" not in caplog.text and "base64" not in caplog.text and "/private" not in caplog.text
+
+
+def test_source_summary_accumulates_mixed_group_outcomes(monkeypatch):
+    first = [candidate("a", 0, 2), candidate("b", 3, 5)]
+    second = [candidate("c", 6, 8), candidate("d", 9, 11)]
+    outside = candidate("outside", 15, 17)
+    monkeypatch.setattr(pipeline, "TAKE_JUDGE_ENABLED", True)
+    monkeypatch.setattr(pipeline, "is_openai_available", lambda: True)
+    monkeypatch.setattr(pipeline, "find_sibling_groups", lambda clips: [first, second])
+    monkeypatch.setattr(pipeline, "sample_candidate_frames", lambda c, *args: types.SimpleNamespace(
+        successful_frame_timestamps=(), image_content=()))
+    second_scores = tuple(TakeJudgeCandidateScore(x, .8, .8, .8, .8, .8, "safe") for x in ("c", "d"))
+    outcomes = iter([result(), TakeJudgeV2Result(None, second_scores, .9, True, "safe")])
+    monkeypatch.setattr(pipeline, "judge_takes_v2", lambda *args, **kwargs: next(outcomes))
+    status = {}
+    pipeline.run_take_judge(first + second + [outside], "session", "input", execution_status=status)
+    assert status == {"status": "winner_selected", "groups_discovered": 2, "groups_evaluated": 2,
+                      "winner_selected": 1, "abstained": 1, "low_confidence": 0, "provider_error": 0}
+    assert outside["meta"]["take_judge_execution_status"] == "not_candidate"
 
 
 def test_group_and_take_limits_and_one_call_per_group(monkeypatch):

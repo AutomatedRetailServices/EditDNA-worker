@@ -754,14 +754,14 @@ def llm_classify_clips(clips: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
         return None
 
 
-def enrich_clips_semantic(clips: List[Dict[str, Any]]) -> bool:
+def enrich_clips_semantic(clips: List[Dict[str, Any]], force_v2: bool = False) -> bool:
     """
     1) Heurística local (filler, slots, semantic_score)
     2) LLM opcional, con reglas de seguridad de embudo.
     """
     tag_clips_heuristic(clips)
 
-    if not EDITDNA_USE_LLM:
+    if not EDITDNA_USE_LLM and not force_v2:
         return False
 
     llm_result = llm_classify_clips(clips)
@@ -1261,16 +1261,32 @@ def run_take_judge(
     clips: List[Dict[str, Any]],
     session_dir: str,
     input_local: str,
+    force_enabled: bool = False,
+    execution_status: Optional[Dict[str, Any]] = None,
 ) -> bool:
     """Compare sibling takes, retaining all unless V2 produces a safe winner."""
-    if not TAKE_JUDGE_ENABLED:
+    status = execution_status if execution_status is not None else {}
+    status.update({"status": "not_requested", "groups_discovered": 0, "groups_evaluated": 0,
+                   "winner_selected": 0, "abstained": 0, "low_confidence": 0,
+                   "provider_error": 0})
+    for clip_item in clips:
+        clip_item["meta"]["take_judge_execution_status"] = "not_candidate"
+    if not TAKE_JUDGE_ENABLED and not force_enabled:
         return False
-    if not is_openai_available():
-        logger.warning("Take Judge unavailable; failing open", extra={"operation": "take_judge_v2"})
-        return False
-
     groups = [group[:TAKE_JUDGE_MAX_TAKES]
               for group in find_sibling_groups(clips)[:TAKE_JUDGE_MAX_GROUPS]]
+    status["groups_discovered"] = len(groups)
+    if not groups:
+        status["status"] = "no_sibling_group"
+        return False
+    candidate_clips = [clip_item for group in groups for clip_item in group]
+    if not is_openai_available():
+        status["status"] = "provider_unavailable"
+        for clip_item in candidate_clips:
+            clip_item["meta"]["take_judge_execution_status"] = "provider_unavailable"
+        logger.warning("Take Judge unavailable; failing open", extra={"operation": "take_judge_v2"})
+        return False
+    status["status"] = "abstained"
     used_any = False
     for group in groups:
         candidates = []
@@ -1292,6 +1308,9 @@ def run_take_judge(
                 image_count=len(sample.image_content),
             ))
         if len(candidates) < 2:
+            status["abstained"] += 1
+            for clip_item in group:
+                clip_item["meta"]["take_judge_execution_status"] = "abstained"
             continue
         try:
             result = judge_takes_v2(
@@ -1299,6 +1318,9 @@ def run_take_judge(
                 temperature=0.1, max_completion_tokens=700,
             )
         except OpenAIProviderError:
+            status["provider_error"] += 1
+            for clip_item in group:
+                clip_item["meta"]["take_judge_execution_status"] = "provider_error"
             logger.warning("Take Judge abstained", extra={
                 "operation": "take_judge_v2", "group_size": len(candidates),
                 "frame_count": sum(candidate.image_count for candidate in candidates),
@@ -1306,8 +1328,21 @@ def run_take_judge(
             })
             continue
         candidate_ids = {candidate.candidate_id for candidate in candidates}
-        if (result.abstain or result.confidence < TAKE_JUDGE_V2_MIN_CONFIDENCE
-                or result.winner_id not in candidate_ids):
+        status["groups_evaluated"] += 1
+        if result.abstain:
+            status["abstained"] += 1
+            for clip_item in group:
+                clip_item["meta"]["take_judge_execution_status"] = "abstained"
+            continue
+        if result.confidence < TAKE_JUDGE_V2_MIN_CONFIDENCE:
+            status["low_confidence"] += 1
+            for clip_item in group:
+                clip_item["meta"]["take_judge_execution_status"] = "low_confidence"
+            continue
+        if result.winner_id not in candidate_ids:
+            status["abstained"] += 1
+            for clip_item in group:
+                clip_item["meta"]["take_judge_execution_status"] = "abstained"
             continue
         scores = {score.candidate_id: score.overall_score for score in result.candidate_scores}
         for clip_item in group:
@@ -1318,12 +1353,24 @@ def run_take_judge(
             clip_item["meta"]["take_judge_verdict"] = (
                 "WINNER" if candidate_id == result.winner_id else "LOSER"
             )
+            clip_item["meta"]["take_judge_execution_status"] = (
+                "candidate_winner" if candidate_id == result.winner_id else "candidate_loser"
+            )
             if candidate_id != result.winner_id and clip_item["meta"].get("keep", True):
                 clip_item["meta"]["keep"] = False
                 clip_item["llm_reason"] = (clip_item.get("llm_reason") or "") + (
                     " | Removed by TakeJudgeAI (better take exists)."
                 )
         used_any = True
+        status["winner_selected"] += 1
+    if status["winner_selected"]:
+        status["status"] = "winner_selected"
+    elif status["provider_error"]:
+        status["status"] = "provider_error"
+    elif status["low_confidence"]:
+        status["status"] = "low_confidence"
+    else:
+        status["status"] = "abstained"
     return used_any
 
 
@@ -1868,10 +1915,17 @@ def render_funnel_video(
 def run_pipeline(session_id: str, files: Optional[List[str]] = None,
                  file_urls: Optional[List[str]] = None, mode: str = "human",
                  progress: Optional[Callable[[str, int, str], None]] = None,
-                 check_canceled: Optional[Callable[[], None]] = None) -> Dict[str, Any]:
+                 check_canceled: Optional[Callable[[], None]] = None,
+                 local_files: Optional[List[str]] = None,
+                 output_key: Optional[str] = None,
+                 render_output: bool = True,
+                 persist_result_json: bool = True,
+                 retain_local_files: bool = True,
+                 use_semantic_v2: bool = False,
+                 use_take_judge_v2: bool = False) -> Dict[str, Any]:
     """Analyze every source once, compose once, and render one output."""
     logger.info("run_pipeline session_id=%s mode=%s", session_id, mode)
-    effective_files = files if files and isinstance(files, list) else file_urls
+    effective_files = local_files or (files if files and isinstance(files, list) else file_urls)
     if not effective_files or not isinstance(effective_files, list):
         raise ValueError("run_pipeline: 'files' or 'file_urls' must be a list with at least 1 URL")
     mode=(mode or "human").lower()
@@ -1881,11 +1935,15 @@ def run_pipeline(session_id: str, files: Optional[List[str]] = None,
     report = progress or (lambda _stage, _percent, _message: None)
     check = check_canceled or (lambda: None)
     try:
-        if len(effective_files)==1:
+        if local_files:
+            local_sources = list(local_files)
+        elif len(effective_files)==1:
             local_sources=[os.path.join(session_dir,"input.mp4")]
         else:
             local_sources=[os.path.join(session_dir,f"input_{i:03d}.mp4") for i in range(len(effective_files))]
         for i,(url,path) in enumerate(zip(effective_files,local_sources)):
+            if local_files:
+                continue
             check()
             report("downloading", 5 + (15 * i // len(local_sources)), f"Downloading source {i + 1} of {len(local_sources)}")
             try: download_to_local(url,path)
@@ -1896,6 +1954,7 @@ def run_pipeline(session_id: str, files: Optional[List[str]] = None,
 
         clips=[]; durations=[]
         llm_used=vision_used=bad_takes_used=boundaries_refined=take_judge_used=False
+        take_judge_execution = {"requested": bool(TAKE_JUDGE_ENABLED or use_take_judge_v2), "sources": []}
         for i,path in enumerate(local_sources):
           check()
           report("analyzing", 20 + (35 * i // len(local_sources)), f"Analyzing source {i + 1} of {len(local_sources)}")
@@ -1905,15 +1964,28 @@ def run_pipeline(session_id: str, files: Optional[List[str]] = None,
             if len(local_sources)>1: add_source_metadata(current,i,path)
             else:
                 for c in current: c["source_index"],c["source_local"]=0,path
-            llm_used=enrich_clips_semantic(current) or llm_used
+            semantic_used = (enrich_clips_semantic(current, force_v2=True)
+                             if use_semantic_v2 else enrich_clips_semantic(current))
+            llm_used = semantic_used or llm_used
             current=dedupe_clips(current)
             vision_used=run_visual_pass(path,session_dir,current) or vision_used
             if VISION_ENABLED and BAD_TAKES_ENABLED:
                 reject_visual_bad_takes(current,session_dir,path); bad_takes_used=True
             if VISION_ENABLED and BOUNDARY_REFINER_ENABLED:
                 boundaries_refined=refine_clip_boundaries_with_vision(input_local=path,session_dir=session_dir,clips=current) or boundaries_refined
-            if TAKE_JUDGE_ENABLED:
-                take_judge_used=run_take_judge(clips=current,session_dir=session_dir,input_local=path) or take_judge_used
+            if TAKE_JUDGE_ENABLED or use_take_judge_v2:
+                source_take_judge_status = {"source_index": i}
+                take_judge_used = (run_take_judge(clips=current, session_dir=session_dir,
+                                                  input_local=path, force_enabled=True,
+                                                  execution_status=source_take_judge_status)
+                                   if use_take_judge_v2 else
+                                   run_take_judge(clips=current, session_dir=session_dir,
+                                                  input_local=path,
+                                                  execution_status=source_take_judge_status)) or take_judge_used
+                take_judge_execution["sources"].append(source_take_judge_status)
+            else:
+                for clip_item in current:
+                    clip_item["meta"]["take_judge_execution_status"] = "not_candidate"
             for c in current:
                 c["source_start"],c["source_end"]=safe_float(c.get("start")),safe_float(c.get("end"))
             clips.extend(current)
@@ -1936,21 +2008,23 @@ def run_pipeline(session_id: str, files: Optional[List[str]] = None,
             used.extend(dict.fromkeys(cid for cid in composer.get("used_clip_ids",[]) if cid not in known_ids))
             composer["used_clip_ids"]=used
         input_local=local_sources[0]; clean_rendered=False
-        if used:
+        if used and render_output:
             check()
             report("rendering", 65, "Rendering video")
             final=render_funnel_video(input_local if len(local_sources)==1 else local_sources,session_dir,clips,used)
             report("rendering", 90, "Video rendered")
             check()
             clean_rendered=mode=="clean"
-        elif mode in ("human", "blooper"):
+        elif mode in ("human", "blooper") and render_output:
             raise SelectionError(f"No clips were selected for requested mode '{mode}'")
-        else: final=input_local
+        else: final=input_local if render_output else None
         check()
-        report("uploading", 92, "Uploading rendered video")
-        output_url=upload_to_s3(final,S3_BUCKET,f"{S3_PREFIX}/{session_id}-final.mp4") if S3_BUCKET else None
-        report("uploading", 98, "Upload complete")
-        if S3_BUCKET and not output_url:
+        if render_output:
+            report("uploading", 92, "Uploading rendered video")
+        output_url=upload_to_s3(final,S3_BUCKET,output_key or f"{S3_PREFIX}/{session_id}-final.mp4") if S3_BUCKET and render_output else None
+        if render_output:
+            report("uploading", 98, "Upload complete")
+        if S3_BUCKET and render_output and not output_url:
             raise UploadError("Rendered output upload returned no output URL")
         result={"ok":True,"session_id":session_id,"input_local":input_local,
       "input_files_local":local_sources,"input_file_count":len(local_sources),
@@ -1961,10 +2035,13 @@ def run_pipeline(session_id: str, files: Optional[List[str]] = None,
       "clean_cut_output_video_local":final if clean_rendered else None,
       "clean_cut_output_video_url":output_url if clean_rendered else None,"asr":True,"semantic":True,
       "vision":vision_used,"llm_used":llm_used,"take_judge_used":take_judge_used,
+      "take_judge_execution":take_judge_execution,
+      "provider_usage_instrumentation":{"available":False,"reason":"Provider token usage is not instrumented"},
+      "estimated_cost_instrumentation":{"available":False,"reason":"Provider cost is not instrumented"},
       "bad_takes_used":bad_takes_used,"boundaries_refined":boundaries_refined,"composer_mode":mode}
-        if output_url:
-            # Uploaded jobs return only durable media references. The local inputs
-            # and render output belong to the job directory removed below.
+        if output_url or not retain_local_files:
+            # Uploaded jobs and explicitly non-retaining internal jobs return no
+            # ephemeral paths; their temporary storage is removed below.
             result.pop("input_local")
             result.pop("input_files_local")
             result.pop("output_video_local")
@@ -1975,8 +2052,8 @@ def run_pipeline(session_id: str, files: Optional[List[str]] = None,
             # No-S3 operation is an existing result contract used by direct
             # callers. Transfer ownership of the job directory to that caller so
             # its returned local paths remain usable.
-            retain_local_result = True
-        result["output_json_s3_uri"]=save_result_json_to_s3(result)
+            retain_local_result = retain_local_files
+        result["output_json_s3_uri"] = save_result_json_to_s3(result) if persist_result_json else None
         return result
     finally:
         if not retain_local_result:
