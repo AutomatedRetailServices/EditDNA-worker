@@ -84,6 +84,7 @@ def job_benchmark(job_id: str, payload: Dict[str, Any]) -> Dict[str, Any]:
     """RQ entry point; failures are isolated by the benchmark orchestrator."""
     import benchmark
     import benchmark_s3
+    from benchmark_clip_sanitizer import sanitize_benchmark_result
     from rq import get_current_job
 
     s3 = benchmark_s3.client()
@@ -105,16 +106,17 @@ def job_benchmark(job_id: str, payload: Dict[str, Any]) -> Dict[str, Any]:
             if duration > float(os.getenv("BENCHMARK_MAX_VIDEO_SECONDS", "7200")):
                 raise ValueError("video exceeds benchmark duration limit")
             safe_session = benchmark.safe_session_id(session_id)
+            use_semantic_v2 = bool(request.get("use_semantic_v2", False))
             result = run_pipeline(
                 session_id=f"benchmark-{job_id}-{safe_session}", local_files=[str(path)], mode="human",
                 output_key=(benchmark_video_key(job_id, session_id) if render_outputs else None),
                 render_output=render_outputs,
                 persist_result_json=False,
                 retain_local_files=False,
-                use_semantic_v2=bool(request.get("use_semantic_v2", False)),
+                use_semantic_v2=use_semantic_v2,
                 use_take_judge_v2=bool(request.get("use_take_judge_v2", False)),
             )
-            return result
+            return sanitize_benchmark_result(result, use_semantic_v2=use_semantic_v2)
 
     result = benchmark.run_benchmark(job_id, payload, s3=s3, pipeline=process, progress=save)
     if not result["preflight_passed"]:
