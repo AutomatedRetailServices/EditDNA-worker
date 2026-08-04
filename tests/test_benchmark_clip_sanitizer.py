@@ -16,6 +16,17 @@ class BenchmarkClipSanitizerTests(unittest.TestCase):
         cleaned = sanitize_benchmark_result(result, use_semantic_v2=False)
         self.assertEqual([clip["id"] for clip in cleaned["clips"]], ["cta"])
 
+    def test_preserves_brief_utterances_without_ascii_punctuation(self):
+        result = {
+            "clips": [
+                {"id": "yes", "start": 0.0, "end": 0.20, "text": "Yes", "meta": {}},
+                {"id": "buy", "start": 1.0, "end": 1.25, "text": "Buy now", "meta": {}},
+                {"id": "zh", "start": 2.0, "end": 2.25, "text": "好！", "meta": {}},
+            ]
+        }
+        cleaned = sanitize_benchmark_result(result, use_semantic_v2=False)
+        self.assertEqual([clip["id"] for clip in cleaned["clips"]], ["yes", "buy", "zh"])
+
     def test_preserves_unicode_transcripts(self):
         result = {
             "clips": [
