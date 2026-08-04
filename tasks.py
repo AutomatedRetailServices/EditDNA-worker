@@ -2,6 +2,7 @@ import logging
 import os
 import re
 import tempfile
+from contextlib import contextmanager
 from pathlib import Path
 from typing import List, Optional, Dict, Any
 
@@ -29,6 +30,36 @@ def run_pipeline(**kwargs):
     from worker.pipeline import run_pipeline as pipeline_run
 
     return pipeline_run(**kwargs)
+
+
+@contextmanager
+def benchmark_semantic_v2_setting(enabled: bool):
+    """Make the benchmark request authoritative for Semantic V2 execution.
+
+    The production pipeline normally honors its global EDITDNA_USE_LLM setting.
+    Benchmarks need an explicit per-request off switch so an old-vs-new run with
+    use_semantic_v2=false cannot be influenced by Semantic V2 at all. RQ executes
+    one job at a time per worker process, and the original setting is restored in
+    a finally block before the next job can run.
+    """
+    import worker.pipeline as pipeline_module
+
+    original = pipeline_module.EDITDNA_USE_LLM
+    if not enabled:
+        pipeline_module.EDITDNA_USE_LLM = False
+    try:
+        yield pipeline_module
+    finally:
+        pipeline_module.EDITDNA_USE_LLM = original
+
+
+def run_benchmark_pipeline(*, use_semantic_v2: bool, **kwargs):
+    """Run one benchmark analysis with an authoritative Semantic V2 flag."""
+    with benchmark_semantic_v2_setting(use_semantic_v2) as pipeline_module:
+        return pipeline_module.run_pipeline(
+            use_semantic_v2=use_semantic_v2,
+            **kwargs,
+        )
 
 
 def job_render(
@@ -98,7 +129,7 @@ def job_benchmark(job_id: str, payload: Dict[str, Any]) -> Dict[str, Any]:
             job.save_meta()
 
     def process(session_id, key, render_outputs, request):
-        from worker.pipeline import probe_duration, run_pipeline
+        from worker.pipeline import probe_duration
         with tempfile.TemporaryDirectory(prefix="editdna-benchmark-") as directory:
             path = Path(directory) / (Path(key).name or "source.mp4")
             benchmark_s3.download_video(s3, key, path)
@@ -107,13 +138,13 @@ def job_benchmark(job_id: str, payload: Dict[str, Any]) -> Dict[str, Any]:
                 raise ValueError("video exceeds benchmark duration limit")
             safe_session = benchmark.safe_session_id(session_id)
             use_semantic_v2 = bool(request.get("use_semantic_v2", False))
-            result = run_pipeline(
+            result = run_benchmark_pipeline(
+                use_semantic_v2=use_semantic_v2,
                 session_id=f"benchmark-{job_id}-{safe_session}", local_files=[str(path)], mode="human",
                 output_key=(benchmark_video_key(job_id, session_id) if render_outputs else None),
                 render_output=render_outputs,
                 persist_result_json=False,
                 retain_local_files=False,
-                use_semantic_v2=use_semantic_v2,
                 use_take_judge_v2=bool(request.get("use_take_judge_v2", False)),
             )
             return sanitize_benchmark_result(result, use_semantic_v2=use_semantic_v2)
