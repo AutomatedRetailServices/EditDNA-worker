@@ -1,7 +1,22 @@
+import sys
+import types
 import unittest
 from unittest.mock import patch
 
 from benchmark_clip_sanitizer import sanitize_benchmark_result
+
+if "rq" not in sys.modules:
+    rq_module = types.ModuleType("rq")
+    exceptions_module = types.ModuleType("rq.exceptions")
+
+    class StopRequested(Exception):
+        pass
+
+    exceptions_module.StopRequested = StopRequested
+    rq_module.exceptions = exceptions_module
+    sys.modules["rq"] = rq_module
+    sys.modules["rq.exceptions"] = exceptions_module
+
 import tasks
 
 
@@ -110,9 +125,49 @@ class BenchmarkClipSanitizerTests(unittest.TestCase):
                         "meta": {},
                     }]
                 }
-
                 cleaned = sanitize_benchmark_result(result, use_semantic_v2=False)
+                self.assertEqual(cleaned["clips"][0]["text"], "Call now.")
+                self.assertEqual(cleaned["clips"][0]["end"], 0.9)
 
+    def test_business_suffix_boundary_before_ascii_ellipsis_tail(self):
+        for suffix in ("Inc.", "Ltd.", "Corp.", "Co."):
+            with self.subTest(suffix=suffix):
+                result = {
+                    "clips": [{
+                        "id": suffix, "start": 0.0, "end": 1.25,
+                        "text": f"Call now. From Acme {suffix} ...",
+                        "words": [
+                            {"start": 0.0, "end": 0.4, "word": " Call"},
+                            {"start": 0.4, "end": 0.9, "word": " now."},
+                            {"start": 1.0, "end": 1.1, "word": " From"},
+                            {"start": 1.1, "end": 1.2, "word": " Acme"},
+                            {"start": 1.2, "end": 1.25, "word": f" {suffix}"},
+                        ],
+                        "meta": {},
+                    }]
+                }
+                cleaned = sanitize_benchmark_result(result, use_semantic_v2=False)
+                self.assertEqual(cleaned["clips"][0]["text"], "Call now.")
+                self.assertEqual(cleaned["clips"][0]["end"], 0.9)
+
+    def test_business_suffix_boundary_before_unicode_ellipsis_tail(self):
+        for suffix in ("Inc.", "Ltd.", "Corp.", "Co."):
+            with self.subTest(suffix=suffix):
+                result = {
+                    "clips": [{
+                        "id": suffix, "start": 0.0, "end": 1.25,
+                        "text": f"Call now. From Acme {suffix} …",
+                        "words": [
+                            {"start": 0.0, "end": 0.4, "word": " Call"},
+                            {"start": 0.4, "end": 0.9, "word": " now."},
+                            {"start": 1.0, "end": 1.1, "word": " From"},
+                            {"start": 1.1, "end": 1.2, "word": " Acme"},
+                            {"start": 1.2, "end": 1.25, "word": f" {suffix}"},
+                        ],
+                        "meta": {},
+                    }]
+                }
+                cleaned = sanitize_benchmark_result(result, use_semantic_v2=False)
                 self.assertEqual(cleaned["clips"][0]["text"], "Call now.")
                 self.assertEqual(cleaned["clips"][0]["end"], 0.9)
 
@@ -131,9 +186,7 @@ class BenchmarkClipSanitizerTests(unittest.TestCase):
                 "meta": {},
             }]
         }
-
         cleaned = sanitize_benchmark_result(result, use_semantic_v2=False)
-
         self.assertEqual(cleaned["clips"][0]["text"], "Acme Inc. This is complete.")
 
     def test_preserves_two_complete_sentences(self):
