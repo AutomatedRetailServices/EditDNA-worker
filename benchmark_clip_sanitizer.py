@@ -19,7 +19,9 @@ def _duration(clip: Dict[str, Any]) -> float:
 def _normalized_text(value: Any) -> str:
     text = str(value or "").casefold()
     text = re.sub(r"\.{2,}", " ", text)
-    text = re.sub(r"[^a-z0-9]+", " ", text)
+    # Preserve letters and digits from every Unicode script while treating
+    # punctuation, symbols, and separators as whitespace.
+    text = "".join(char if char.isalnum() else " " for char in text)
     return " ".join(text.split())
 
 
