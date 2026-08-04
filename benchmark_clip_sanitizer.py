@@ -64,7 +64,10 @@ def _trim_incomplete_tail(clip: Dict[str, Any]) -> Dict[str, Any]:
 
         candidate_text = "".join(str(item.get("word") or "") for item in retained_words).strip()
         if candidate_text != retained:
-            return clip
+            # Ellipsis dots are also punctuation positions. If one of those
+            # boundaries cannot align to the timestamped words, keep scanning
+            # backward until the preceding real sentence boundary is found.
+            continue
 
         cleaned = dict(clip)
         cleaned["text"] = retained
