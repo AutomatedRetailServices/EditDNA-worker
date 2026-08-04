@@ -40,14 +40,10 @@ def _is_incomplete_fragment(text: str) -> bool:
     return stripped.endswith("...") or stripped.endswith("…")
 
 
-def _business_suffix_has_incomplete_lowercase_tail(text: str, boundary: int) -> bool:
-    """Return true when a suffix period is followed by only an incomplete tail."""
+def _business_suffix_has_incomplete_tail(text: str, boundary: int) -> bool:
+    """Return true when a suffix period is followed by an explicitly incomplete tail."""
     remainder = text[boundary + 1 :].strip()
-    if not _is_incomplete_fragment(remainder):
-        return False
-
-    continuation = remainder.lstrip(" .…")
-    return not continuation or continuation[0].islower()
+    return _is_incomplete_fragment(remainder)
 
 
 def _is_false_sentence_boundary(text: str, boundary: int) -> bool:
@@ -72,7 +68,7 @@ def _is_false_sentence_boundary(text: str, boundary: int) -> bool:
     token = match.group(1).casefold() if match else ""
     if token in COMMON_ABBREVIATIONS or (len(token) == 1 and token.isalpha()):
         return True
-    return token in COMMON_BUSINESS_SUFFIXES and _business_suffix_has_incomplete_lowercase_tail(text, boundary)
+    return token in COMMON_BUSINESS_SUFFIXES and _business_suffix_has_incomplete_tail(text, boundary)
 
 
 def _trim_incomplete_tail(clip: Dict[str, Any]) -> Dict[str, Any]:
