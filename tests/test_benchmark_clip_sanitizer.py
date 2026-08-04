@@ -1,6 +1,8 @@
 import unittest
+from unittest.mock import patch
 
 from benchmark_clip_sanitizer import sanitize_benchmark_result
+import tasks
 
 
 class BenchmarkClipSanitizerTests(unittest.TestCase):
@@ -74,6 +76,59 @@ class BenchmarkClipSanitizerTests(unittest.TestCase):
         }
         cleaned = sanitize_benchmark_result(result, use_semantic_v2=False)
         self.assertEqual([clip["id"] for clip in cleaned["clips"]], ["a", "c"])
+
+
+class BenchmarkSemanticV2SwitchTests(unittest.TestCase):
+    def test_false_flag_disables_global_llm_for_entire_pipeline_call(self):
+        import worker.pipeline as pipeline_module
+
+        original = pipeline_module.EDITDNA_USE_LLM
+        pipeline_module.EDITDNA_USE_LLM = True
+        observed = {}
+
+        def fake_run_pipeline(**kwargs):
+            observed["global_enabled_during_call"] = pipeline_module.EDITDNA_USE_LLM
+            observed["request_flag"] = kwargs["use_semantic_v2"]
+            return {"ok": True}
+
+        try:
+            with patch.object(pipeline_module, "run_pipeline", side_effect=fake_run_pipeline):
+                result = tasks.run_benchmark_pipeline(
+                    use_semantic_v2=False,
+                    session_id="test",
+                    local_files=["video.mp4"],
+                )
+            self.assertEqual(result, {"ok": True})
+            self.assertFalse(observed["global_enabled_during_call"])
+            self.assertFalse(observed["request_flag"])
+            self.assertTrue(pipeline_module.EDITDNA_USE_LLM)
+        finally:
+            pipeline_module.EDITDNA_USE_LLM = original
+
+    def test_true_flag_preserves_global_setting_and_forces_v2_request(self):
+        import worker.pipeline as pipeline_module
+
+        original = pipeline_module.EDITDNA_USE_LLM
+        pipeline_module.EDITDNA_USE_LLM = False
+        observed = {}
+
+        def fake_run_pipeline(**kwargs):
+            observed["global_enabled_during_call"] = pipeline_module.EDITDNA_USE_LLM
+            observed["request_flag"] = kwargs["use_semantic_v2"]
+            return {"ok": True}
+
+        try:
+            with patch.object(pipeline_module, "run_pipeline", side_effect=fake_run_pipeline):
+                tasks.run_benchmark_pipeline(
+                    use_semantic_v2=True,
+                    session_id="test",
+                    local_files=["video.mp4"],
+                )
+            self.assertFalse(observed["global_enabled_during_call"])
+            self.assertTrue(observed["request_flag"])
+            self.assertFalse(pipeline_module.EDITDNA_USE_LLM)
+        finally:
+            pipeline_module.EDITDNA_USE_LLM = original
 
 
 if __name__ == "__main__":
