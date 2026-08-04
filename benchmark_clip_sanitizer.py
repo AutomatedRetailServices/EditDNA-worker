@@ -40,8 +40,18 @@ def _is_incomplete_fragment(text: str) -> bool:
     return stripped.endswith("...") or stripped.endswith("…")
 
 
+def _business_suffix_has_incomplete_lowercase_tail(text: str, boundary: int) -> bool:
+    """Return true when a suffix period is followed by only an incomplete tail."""
+    remainder = text[boundary + 1 :].strip()
+    if not _is_incomplete_fragment(remainder):
+        return False
+
+    continuation = remainder.lstrip(" .…")
+    return not continuation or continuation[0].islower()
+
+
 def _is_false_sentence_boundary(text: str, boundary: int) -> bool:
-    """Reject periods used by abbreviations, initials, decimals, or ellipses."""
+    """Reject periods used by abbreviations, initials, decimals, ellipses, or suffixes."""
     if text[boundary] != ".":
         return False
 
@@ -62,12 +72,7 @@ def _is_false_sentence_boundary(text: str, boundary: int) -> bool:
     token = match.group(1).casefold() if match else ""
     if token in COMMON_ABBREVIATIONS or (len(token) == 1 and token.isalpha()):
         return True
-
-    if token in COMMON_BUSINESS_SUFFIXES and _is_incomplete_fragment(text[boundary + 1 :]):
-        continuation = text[boundary + 1 :].lstrip()
-        return bool(continuation and continuation[0].islower())
-
-    return False
+    return token in COMMON_BUSINESS_SUFFIXES and _business_suffix_has_incomplete_lowercase_tail(text, boundary)
 
 
 def _trim_incomplete_tail(clip: Dict[str, Any]) -> Dict[str, Any]:
@@ -147,8 +152,6 @@ def sanitize_benchmark_result(result: Dict[str, Any], *, use_semantic_v2: bool) 
         incomplete_artifact = duration < SHORT_FRAGMENT_SECONDS and _is_incomplete_fragment(text)
 
         if duplicate_artifact:
-            # Advance through the discarded duplicate so a whole contiguous run
-            # remains contiguous to the retained first clip.
             previous_end = end
             continue
         if incomplete_artifact:
