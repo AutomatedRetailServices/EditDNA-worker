@@ -10,6 +10,7 @@ SHORT_FRAGMENT_SECONDS = 0.40
 COMMON_ABBREVIATIONS = {
     "dr", "mr", "mrs", "ms", "prof", "sr", "jr", "st", "vs", "etc",
 }
+COMMON_BUSINESS_SUFFIXES = {"inc", "ltd", "corp", "co"}
 
 
 def _duration(clip: Dict[str, Any]) -> float:
@@ -59,7 +60,14 @@ def _is_false_sentence_boundary(text: str, boundary: int) -> bool:
     prefix = text[:boundary]
     match = re.search(r"([\w]+)$", prefix, flags=re.UNICODE)
     token = match.group(1).casefold() if match else ""
-    return token in COMMON_ABBREVIATIONS or (len(token) == 1 and token.isalpha())
+    if token in COMMON_ABBREVIATIONS or (len(token) == 1 and token.isalpha()):
+        return True
+
+    if token in COMMON_BUSINESS_SUFFIXES and _is_incomplete_fragment(text[boundary + 1 :]):
+        continuation = text[boundary + 1 :].lstrip()
+        return bool(continuation and continuation[0].islower())
+
+    return False
 
 
 def _trim_incomplete_tail(clip: Dict[str, Any]) -> Dict[str, Any]:
