@@ -7,6 +7,9 @@ from typing import Any, Dict, List
 
 
 SHORT_FRAGMENT_SECONDS = 0.40
+COMMON_ABBREVIATIONS = {
+    "dr", "mr", "mrs", "ms", "prof", "sr", "jr", "st", "vs", "etc",
+}
 
 
 def _duration(clip: Dict[str, Any]) -> float:
@@ -19,8 +22,6 @@ def _duration(clip: Dict[str, Any]) -> float:
 def _normalized_text(value: Any) -> str:
     text = str(value or "").casefold()
     text = re.sub(r"\.{2,}", " ", text)
-    # Preserve letters and digits from every Unicode script while treating
-    # punctuation, symbols, and separators as whitespace.
     text = "".join(char if char.isalnum() else " " for char in text)
     return " ".join(text.split())
 
@@ -30,16 +31,40 @@ def _is_incomplete_fragment(text: str) -> bool:
     stripped = text.strip()
     if not _normalized_text(stripped):
         return True
-    # Ellipsis is the concrete ASR artifact observed in Bloppers1. Do not infer
-    # incompleteness from word count or ASCII punctuation because brief valid
-    # utterances such as "Yes", "Buy now", or "好！" must be preserved.
     return stripped.endswith("...") or stripped.endswith("…")
+
+
+def _is_false_sentence_boundary(text: str, boundary: int) -> bool:
+    """Reject periods used by abbreviations, initials, decimals, or ellipses."""
+    if text[boundary] != ".":
+        return False
+
+    if boundary > 0 and text[boundary - 1] == ".":
+        return True
+    if boundary + 1 < len(text) and text[boundary + 1] == ".":
+        return True
+    if (
+        boundary > 0
+        and boundary + 1 < len(text)
+        and text[boundary - 1].isdigit()
+        and text[boundary + 1].isdigit()
+    ):
+        return True
+
+    prefix = text[:boundary]
+    match = re.search(r"([\w]+)$", prefix, flags=re.UNICODE)
+    token = match.group(1).casefold() if match else ""
+    return token in COMMON_ABBREVIATIONS or (len(token) == 1 and token.isalpha())
 
 
 def _trim_incomplete_tail(clip: Dict[str, Any]) -> Dict[str, Any]:
     """Trim only a demonstrably incomplete tail after the last complete sentence."""
     text = str(clip.get("text") or "").strip()
-    punctuation_positions = [i for i, char in enumerate(text) if char in ".?!。？！"]
+    punctuation_positions = [
+        i
+        for i, char in enumerate(text)
+        if char in ".?!。？！" and not _is_false_sentence_boundary(text, i)
+    ]
     if not punctuation_positions:
         return clip
 
@@ -51,7 +76,6 @@ def _trim_incomplete_tail(clip: Dict[str, Any]) -> Dict[str, Any]:
 
         words = list(clip.get("words") or [])
         if not words:
-            # Without word timestamps timing cannot be adjusted safely.
             return clip
 
         retained_words: List[Dict[str, Any]] = []
@@ -64,9 +88,6 @@ def _trim_incomplete_tail(clip: Dict[str, Any]) -> Dict[str, Any]:
 
         candidate_text = "".join(str(item.get("word") or "") for item in retained_words).strip()
         if candidate_text != retained:
-            # Ellipsis dots are also punctuation positions. If one of those
-            # boundaries cannot align to the timestamped words, keep scanning
-            # backward until the preceding real sentence boundary is found.
             continue
 
         cleaned = dict(clip)
@@ -106,7 +127,6 @@ def sanitize_benchmark_result(result: Dict[str, Any], *, use_semantic_v2: bool) 
         duplicate_artifact = contiguous and norm == previous_norm
         incomplete_artifact = duration < SHORT_FRAGMENT_SECONDS and _is_incomplete_fragment(text)
 
-        # Short duration alone is not enough: preserve valid brief utterances.
         if duplicate_artifact or incomplete_artifact:
             continue
 
