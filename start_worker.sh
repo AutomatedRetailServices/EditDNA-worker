@@ -30,7 +30,13 @@ echo "=========================================="
 echo "      EDITDNA WORKER STARTING"
 echo "------------------------------------------"
 echo " PYTHONPATH ....... $PYTHONPATH"
-echo " REDIS_URL ........ $REDIS_URL"
+MASKED_REDIS_URL="$(python - <<'PY'
+import os
+from rq_worker import mask_redis_url
+print(mask_redis_url(os.environ["REDIS_URL"]))
+PY
+)"
+echo " REDIS_URL ........ $MASKED_REDIS_URL"
 echo " QUEUE_NAME ....... $QUEUE_NAME"
 echo " JOB_TIMEOUT ...... $JOB_TIMEOUT  (handled by API)"
 echo " RESULT_TTL ....... $RESULT_TTL"
@@ -41,7 +47,4 @@ echo ""
 # --------- START RQ WORKER ---------
 # ⚠️ NO SE INCLUYE --job-timeout AQUÍ.
 #    El web API controla los timeouts reales.
-exec rq worker \
-  -u "$REDIS_URL" \
-  --worker-ttl 3600 \
-  "$QUEUE_NAME"
+exec python rq_worker.py
