@@ -35,6 +35,8 @@ class FakeRedis:
 
 class FakeWorker:
     instances = []
+    work_exception = None
+    work_result = True
 
     def __init__(self, queues, connection=None, worker_ttl=None):
         self.queues = queues
@@ -45,7 +47,9 @@ class FakeWorker:
 
     def work(self):
         self.work_calls += 1
-        return True
+        if FakeWorker.work_exception is not None:
+            raise FakeWorker.work_exception
+        return FakeWorker.work_result
 
 
 @pytest.fixture(autouse=True)
@@ -53,6 +57,8 @@ def launcher_fakes(monkeypatch):
     FakeRedis.calls = []
     FakeRedis.connection = FakeConnection()
     FakeWorker.instances = []
+    FakeWorker.work_exception = None
+    FakeWorker.work_result = True
     monkeypatch.setattr(rq_worker, "Redis", FakeRedis)
     monkeypatch.setattr(rq_worker, "Worker", FakeWorker)
 
@@ -130,6 +136,39 @@ def test_worker_receives_queue_connection_and_worker_ttl(monkeypatch):
     assert worker.connection is FakeRedis.connection
     assert worker.worker_ttl == 3600
     assert worker.work_calls == 1
+
+
+def test_main_exits_zero_when_worker_work_returns_true(monkeypatch):
+    monkeypatch.setenv("REDIS_URL", "redis://localhost:6379/0")
+    FakeWorker.work_result = True
+
+    assert rq_worker.main() == 0
+
+    assert FakeWorker.instances[0].work_calls == 1
+
+
+def test_main_exits_zero_when_worker_work_returns_false(monkeypatch):
+    monkeypatch.setenv("REDIS_URL", "redis://localhost:6379/0")
+    FakeWorker.work_result = False
+
+    assert rq_worker.main() == 0
+
+    assert FakeWorker.instances[0].work_calls == 1
+
+
+def test_main_exits_nonzero_when_worker_work_raises_without_credentials(monkeypatch, capsys):
+    redis_url = "rediss://user:super-secret@example.com:6380/0"
+    monkeypatch.setenv("REDIS_URL", redis_url)
+    FakeWorker.work_exception = RuntimeError(f"lost connection to {redis_url}")
+
+    assert rq_worker.main() == 1
+
+    output = capsys.readouterr()
+    combined = output.out + output.err
+    assert "RQ worker exited unexpectedly (RuntimeError)" in output.err
+    assert "super-secret" not in combined
+    assert "user:super-secret" not in combined
+    assert redis_url not in combined
 
 
 def test_no_redis_password_or_complete_url_is_printed(monkeypatch, capsys):
