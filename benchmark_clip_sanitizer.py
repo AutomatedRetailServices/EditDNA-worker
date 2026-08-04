@@ -26,22 +26,20 @@ def _normalized_text(value: Any) -> str:
 
 
 def _is_incomplete_fragment(text: str) -> bool:
+    """Return true only for text with explicit evidence of truncation."""
     stripped = text.strip()
-    normalized = _normalized_text(stripped)
-    if not normalized:
+    if not _normalized_text(stripped):
         return True
-    if stripped.endswith("...") or stripped.endswith("…"):
-        return True
-    words = normalized.split()
-    if len(words) <= 2 and not stripped.endswith((".", "?", "!")):
-        return True
-    return False
+    # Ellipsis is the concrete ASR artifact observed in Bloppers1. Do not infer
+    # incompleteness from word count or ASCII punctuation because brief valid
+    # utterances such as "Yes", "Buy now", or "好！" must be preserved.
+    return stripped.endswith("...") or stripped.endswith("…")
 
 
 def _trim_incomplete_tail(clip: Dict[str, Any]) -> Dict[str, Any]:
     """Trim only a demonstrably incomplete tail after the last complete sentence."""
     text = str(clip.get("text") or "").strip()
-    punctuation_positions = [i for i, char in enumerate(text) if char in ".?!"]
+    punctuation_positions = [i for i, char in enumerate(text) if char in ".?!。？！"]
     if not punctuation_positions:
         return clip
 
@@ -59,7 +57,7 @@ def _trim_incomplete_tail(clip: Dict[str, Any]) -> Dict[str, Any]:
         retained_words: List[Dict[str, Any]] = []
         for word in words:
             retained_words.append(word)
-            if str(word.get("word") or "").strip().endswith((".", "?", "!")):
+            if str(word.get("word") or "").strip().endswith((".", "?", "!", "。", "？", "！")):
                 candidate_text = "".join(str(item.get("word") or "") for item in retained_words).strip()
                 if candidate_text == retained:
                     break
