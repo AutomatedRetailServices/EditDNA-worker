@@ -1,0 +1,194 @@
+from __future__ import annotations
+
+import sys
+from pathlib import Path
+
+import pytest
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+import rq_worker
+
+
+class FakeConnection:
+    def __init__(self) -> None:
+        self.ping_calls = 0
+
+    def ping(self) -> bool:
+        self.ping_calls += 1
+        return True
+
+
+class FakeRedis:
+    calls = []
+    connection = FakeConnection()
+
+    @classmethod
+    def from_url(cls, redis_url, **kwargs):
+        cls.calls.append((redis_url, kwargs))
+        return cls.connection
+
+
+class FakeWorker:
+    instances = []
+
+    def __init__(self, queues, connection=None, worker_ttl=None):
+        self.queues = queues
+        self.connection = connection
+        self.worker_ttl = worker_ttl
+        self.work_calls = 0
+        FakeWorker.instances.append(self)
+
+    def work(self):
+        self.work_calls += 1
+        return True
+
+
+@pytest.fixture(autouse=True)
+def launcher_fakes(monkeypatch):
+    FakeRedis.calls = []
+    FakeRedis.connection = FakeConnection()
+    FakeWorker.instances = []
+    monkeypatch.setattr(rq_worker, "Redis", FakeRedis)
+    monkeypatch.setattr(rq_worker, "Worker", FakeWorker)
+
+
+def test_default_queue_selection(monkeypatch):
+    monkeypatch.setenv("REDIS_URL", "rediss://:secret@example.com:6380/0")
+    monkeypatch.delenv("QUEUE_NAME", raising=False)
+
+    assert rq_worker.run_worker() is True
+
+    worker = FakeWorker.instances[0]
+    assert worker.queues == ["default"]
+
+
+def test_explicit_queue_selection(monkeypatch):
+    monkeypatch.setenv("REDIS_URL", "rediss://:secret@example.com:6380/0")
+    monkeypatch.setenv("QUEUE_NAME", "render")
+
+    assert rq_worker.run_worker() is True
+
+    worker = FakeWorker.instances[0]
+    assert worker.queues == ["render"]
+
+
+def test_redis_from_url_receives_required_connection_options(monkeypatch):
+    redis_url = "rediss://:secret@example.com:6380/0"
+    monkeypatch.setenv("REDIS_URL", redis_url)
+    monkeypatch.delenv("QUEUE_NAME", raising=False)
+
+    rq_worker.run_worker()
+
+    assert FakeRedis.calls == [(redis_url, rq_worker.REDIS_CONNECTION_OPTIONS)]
+    _, options = FakeRedis.calls[0]
+    assert options["socket_keepalive"] is True
+    assert options["health_check_interval"] == 30
+    assert options["retry_on_timeout"] is True
+    assert options["socket_connect_timeout"] == 10
+    assert "socket_timeout" not in options
+
+
+def test_ping_is_performed_before_worker_startup(monkeypatch):
+    events = []
+
+    class OrderedConnection:
+        def ping(self):
+            events.append("ping")
+
+    class OrderedRedis:
+        @classmethod
+        def from_url(cls, redis_url, **kwargs):
+            return OrderedConnection()
+
+    class OrderedWorker(FakeWorker):
+        def __init__(self, queues, connection=None, worker_ttl=None):
+            events.append("worker")
+            super().__init__(queues, connection=connection, worker_ttl=worker_ttl)
+
+    monkeypatch.setenv("REDIS_URL", "redis://localhost:6379/0")
+    monkeypatch.setattr(rq_worker, "Redis", OrderedRedis)
+    monkeypatch.setattr(rq_worker, "Worker", OrderedWorker)
+
+    rq_worker.run_worker()
+
+    assert events == ["ping", "worker"]
+
+
+def test_worker_receives_queue_connection_and_worker_ttl(monkeypatch):
+    monkeypatch.setenv("REDIS_URL", "redis://localhost:6379/0")
+    monkeypatch.setenv("QUEUE_NAME", "critical")
+
+    rq_worker.run_worker()
+
+    worker = FakeWorker.instances[0]
+    assert worker.queues == ["critical"]
+    assert worker.connection is FakeRedis.connection
+    assert worker.worker_ttl == 3600
+    assert worker.work_calls == 1
+
+
+def test_no_redis_password_or_complete_url_is_printed(monkeypatch, capsys):
+    redis_url = "rediss://user:super-secret@example.com:6380/0"
+    monkeypatch.setenv("REDIS_URL", redis_url)
+    monkeypatch.setenv("QUEUE_NAME", "default")
+
+    rq_worker.run_worker()
+
+    output = capsys.readouterr()
+    combined = output.out + output.err
+    assert "super-secret" not in combined
+    assert "user:super-secret" not in combined
+    assert redis_url not in combined
+    assert "rediss://***@example.com:6380/0" in combined
+
+
+def test_missing_redis_url_exits_clearly(monkeypatch, capsys):
+    monkeypatch.delenv("REDIS_URL", raising=False)
+
+    assert rq_worker.main() == 1
+
+    assert "REDIS_URL is required" in capsys.readouterr().err
+    assert FakeWorker.instances == []
+
+
+def test_initial_redis_connection_failure_exits_nonzero(monkeypatch, capsys):
+    class FailingConnection:
+        def ping(self):
+            raise rq_worker.RedisError("boom")
+
+    class FailingRedis:
+        @classmethod
+        def from_url(cls, redis_url, **kwargs):
+            return FailingConnection()
+
+    monkeypatch.setenv("REDIS_URL", "rediss://:secret@example.com:6380/0")
+    monkeypatch.setattr(rq_worker, "Redis", FailingRedis)
+
+    assert rq_worker.main() == 1
+
+    output = capsys.readouterr()
+    assert "Could not connect to Redis" in output.err
+    assert "secret" not in output.out + output.err
+    assert FakeWorker.instances == []
+
+
+def test_initial_ping_timeout_exits_nonzero_without_credentials(monkeypatch, capsys):
+    class TimeoutConnection:
+        def ping(self):
+            raise TimeoutError("timed out")
+
+    class TimeoutRedis:
+        @classmethod
+        def from_url(cls, redis_url, **kwargs):
+            return TimeoutConnection()
+
+    monkeypatch.setenv("REDIS_URL", "rediss://user:secret@example.com:6380/0")
+    monkeypatch.setattr(rq_worker, "Redis", TimeoutRedis)
+
+    assert rq_worker.main() == 1
+
+    output = capsys.readouterr()
+    assert "Could not connect to Redis" in output.err
+    assert "secret" not in output.out + output.err
+    assert FakeWorker.instances == []
