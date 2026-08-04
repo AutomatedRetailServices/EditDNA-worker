@@ -7,6 +7,8 @@ from typing import Any, Dict, List
 
 
 SHORT_FRAGMENT_SECONDS = 0.40
+TITLE_ABBREVIATIONS = {"dr", "mr", "mrs", "ms", "prof", "sr", "jr", "st"}
+BUSINESS_SUFFIX_ABBREVIATIONS = {"inc", "ltd", "llc", "corp", "co"}
 
 
 def _duration(clip: Dict[str, Any]) -> float:
@@ -36,10 +38,43 @@ def _is_incomplete_fragment(text: str) -> bool:
     return False
 
 
+def _is_sentence_boundary(text: str, position: int) -> bool:
+    """Return whether punctuation marks a genuine sentence boundary."""
+    punctuation = text[position]
+    if punctuation in "?!":
+        return True
+
+    # Ellipses and decimal points do not finish a sentence on their own.
+    if ((position > 0 and text[position - 1] == ".")
+            or (position + 1 < len(text) and text[position + 1] == ".")):
+        return False
+    if (position > 0 and position + 1 < len(text)
+            and text[position - 1].isdigit() and text[position + 1].isdigit()):
+        return False
+
+    token_match = re.search(r"([A-Za-z]+)$", text[:position])
+    token = token_match.group(1).casefold() if token_match else ""
+    if token in TITLE_ABBREVIATIONS or len(token) == 1:
+        return False
+
+    if token in BUSINESS_SUFFIX_ABBREVIATIONS:
+        following_word = re.search(r"[A-Za-z]+", text[position + 1 :])
+        # A lowercase continuation ("Acme Inc. to ...") proves this period is
+        # part of the suffix. Preserve an uppercase continuation as a possible
+        # new sentence rather than weakening genuine sentence boundaries.
+        if following_word and following_word.group(0)[0].islower():
+            return False
+
+    return True
+
+
 def _trim_incomplete_tail(clip: Dict[str, Any]) -> Dict[str, Any]:
     """Trim only a demonstrably incomplete tail after the last complete sentence."""
     text = str(clip.get("text") or "").strip()
-    punctuation_positions = [i for i, char in enumerate(text) if char in ".?!"]
+    punctuation_positions = [
+        i for i, char in enumerate(text)
+        if char in ".?!" and _is_sentence_boundary(text, i)
+    ]
     if not punctuation_positions:
         return clip
 

@@ -22,7 +22,7 @@ def setup(monkeypatch,tmp_path):
     data={"input_000.mp4":[clip("same",4),clip("early",1)],"input_001.mp4":[clip("same",0),clip("drop",2,False)],"input.mp4":[clip("same",4),clip("early",1)]}
     monkeypatch.setattr(pipeline,"sentence_boundary_micro_cuts",lambda x:copy.deepcopy(data[x[0]["path"].rsplit("/",1)[-1]]))
     monkeypatch.setattr(pipeline,"merge_incomplete_phrases",lambda x:x)
-    monkeypatch.setattr(pipeline,"enrich_clips_semantic",lambda x:calls["semantic"].append(x[0]["source_index"]) or True)
+    monkeypatch.setattr(pipeline,"tag_clips_heuristic",lambda x:calls["semantic"].append(x[0]["source_index"]))
     monkeypatch.setattr(pipeline,"dedupe_clips",lambda x:x)
     monkeypatch.setattr(pipeline,"run_visual_pass",lambda p,d,c:calls["vision"].append(p) or True)
     monkeypatch.setattr(pipeline,"build_slots_dict",lambda x:{})
@@ -38,6 +38,27 @@ def test_both_urls_and_each_analysis_stage_once(setup):
     assert [x[0] for x in calls["download"]]==["one","two"]
     assert len(calls["asr"])==len(calls["semantic"])==len(calls["vision"])==2
     assert result["processed_source_indices"]==[0,1]
+
+@pytest.mark.parametrize("use_semantic_v2", [False, True])
+def test_pipeline_semantic_mode_is_controlled_by_request(monkeypatch, use_semantic_v2):
+    calls = []
+    clips = [{"id": "x", "text": "hello", "meta": {}}]
+    monkeypatch.setattr(pipeline, "EDITDNA_USE_LLM", True)
+    monkeypatch.setattr(pipeline, "tag_clips_heuristic", lambda values: calls.append(("heuristic", values)))
+    monkeypatch.setattr(
+        pipeline,
+        "enrich_clips_semantic",
+        lambda values, force_v2=False: calls.append(("v2", values, force_v2)) or True,
+    )
+
+    used = pipeline.tag_clips_for_pipeline(clips, use_semantic_v2)
+
+    if use_semantic_v2:
+        assert used is True
+        assert calls == [("v2", clips, True)]
+    else:
+        assert used is False
+        assert calls == [("heuristic", clips)]
 
 def test_unique_ids_and_source_metadata_on_every_clip(setup):
     cs=setup[0]()["clips"]; assert len({c["id"] for c in cs})==len(cs)

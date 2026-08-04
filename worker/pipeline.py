@@ -803,6 +803,15 @@ def enrich_clips_semantic(clips: List[Dict[str, Any]], force_v2: bool = False) -
     return True
 
 
+def tag_clips_for_pipeline(clips: List[Dict[str, Any]], use_semantic_v2: bool) -> bool:
+    """Apply the request's semantic mode without consulting global V2 enablement."""
+    if use_semantic_v2:
+        return enrich_clips_semantic(clips, force_v2=True)
+
+    tag_clips_heuristic(clips)
+    return False
+
+
 # =====================
 # VISION: CLIP + CUDA
 # =====================
@@ -1964,8 +1973,7 @@ def run_pipeline(session_id: str, files: Optional[List[str]] = None,
             if len(local_sources)>1: add_source_metadata(current,i,path)
             else:
                 for c in current: c["source_index"],c["source_local"]=0,path
-            semantic_used = (enrich_clips_semantic(current, force_v2=True)
-                             if use_semantic_v2 else enrich_clips_semantic(current))
+            semantic_used = tag_clips_for_pipeline(current, use_semantic_v2)
             llm_used = semantic_used or llm_used
             current=dedupe_clips(current)
             vision_used=run_visual_pass(path,session_dir,current) or vision_used

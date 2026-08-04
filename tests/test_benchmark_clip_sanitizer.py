@@ -4,6 +4,33 @@ from benchmark_clip_sanitizer import sanitize_benchmark_result
 
 
 class BenchmarkClipSanitizerTests(unittest.TestCase):
+    def test_business_suffixes_do_not_hide_previous_sentence_boundary(self):
+        cases = ("Inc.", "Ltd.", "LLC", "Corp.", "Co.")
+        for suffix in cases:
+            with self.subTest(suffix=suffix):
+                text = f"Call now. From Acme {suffix} to ..."
+                result = {
+                    "clips": [{
+                        "id": suffix, "start": 0.0, "end": 3.0, "text": text,
+                        "words": [
+                            {"start": 0.0, "end": 0.4, "word": " Call"},
+                            {"start": 0.4, "end": 0.8, "word": " now."},
+                            {"start": 0.8, "end": 1.2, "word": " From"},
+                            {"start": 1.2, "end": 1.6, "word": " Acme"},
+                            {"start": 1.6, "end": 2.0, "word": f" {suffix}"},
+                            {"start": 2.0, "end": 2.4, "word": " to"},
+                            {"start": 2.4, "end": 3.0, "word": " ..."},
+                        ],
+                        "meta": {},
+                    }]
+                }
+
+                cleaned = sanitize_benchmark_result(result, use_semantic_v2=False)
+
+                self.assertEqual(cleaned["clips"][0]["text"], "Call now.")
+                self.assertEqual(cleaned["clips"][0]["end"], 0.8)
+                self.assertEqual(len(cleaned["clips"][0]["words"]), 2)
+
     def test_preserves_valid_short_utterance(self):
         result = {
             "clips": [{

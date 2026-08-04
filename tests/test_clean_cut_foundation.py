@@ -98,11 +98,10 @@ def pipeline_run(monkeypatch, tmp_path):
     )
     monkeypatch.setattr(pipeline, "merge_incomplete_phrases", lambda clips: clips)
 
-    def enrich(clips):
+    def tag_heuristically(clips):
         calls["semantic"] += 1
-        return True
 
-    monkeypatch.setattr(pipeline, "enrich_clips_semantic", enrich)
+    monkeypatch.setattr(pipeline, "tag_clips_heuristic", tag_heuristically)
     monkeypatch.setattr(pipeline, "dedupe_clips", lambda clips: clips)
 
     def vision(_input, _session_dir, _clips):
