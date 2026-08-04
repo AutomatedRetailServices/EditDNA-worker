@@ -71,6 +71,25 @@ class BenchmarkClipSanitizerTests(unittest.TestCase):
         self.assertEqual(clip["end"], 58.48)
         self.assertEqual(len(clip["words"]), 4)
 
+    def test_skips_abbreviation_boundary_before_incomplete_tail(self):
+        result = {
+            "clips": [{
+                "id": "abbr", "start": 0.0, "end": 3.0,
+                "text": "Call now. Meet Dr. Smith ...",
+                "words": [
+                    {"start": 0.0, "end": 0.4, "word": " Call"},
+                    {"start": 0.4, "end": 0.9, "word": " now."},
+                    {"start": 1.0, "end": 1.4, "word": " Meet"},
+                    {"start": 1.4, "end": 1.7, "word": " Dr."},
+                    {"start": 1.7, "end": 2.2, "word": " Smith"},
+                ],
+                "meta": {},
+            }]
+        }
+        cleaned = sanitize_benchmark_result(result, use_semantic_v2=False)
+        self.assertEqual(cleaned["clips"][0]["text"], "Call now.")
+        self.assertEqual(cleaned["clips"][0]["end"], 0.9)
+
     def test_preserves_two_complete_sentences(self):
         result = {
             "clips": [{
@@ -98,6 +117,17 @@ class BenchmarkClipSanitizerTests(unittest.TestCase):
         }
         cleaned = sanitize_benchmark_result(result, use_semantic_v2=False)
         self.assertEqual([clip["id"] for clip in cleaned["clips"]], ["a", "c"])
+
+    def test_drops_entire_contiguous_duplicate_run(self):
+        result = {
+            "clips": [
+                {"id": "a", "start": 0.0, "end": 1.0, "text": "Same phrase.", "meta": {}},
+                {"id": "b", "start": 1.1, "end": 2.1, "text": "Same phrase.", "meta": {}},
+                {"id": "c", "start": 2.2, "end": 3.2, "text": "Same phrase.", "meta": {}},
+            ]
+        }
+        cleaned = sanitize_benchmark_result(result, use_semantic_v2=False)
+        self.assertEqual([clip["id"] for clip in cleaned["clips"]], ["a"])
 
 
 class BenchmarkSemanticV2SwitchTests(unittest.TestCase):
