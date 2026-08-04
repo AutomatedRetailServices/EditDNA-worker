@@ -123,19 +123,26 @@ def sanitize_benchmark_result(result: Dict[str, Any], *, use_semantic_v2: bool) 
             start = float(clip.get("start", 0.0))
         except (TypeError, ValueError):
             start = 0.0
+        try:
+            end = float(clip.get("end", start))
+        except (TypeError, ValueError):
+            end = start
+
         contiguous = previous_end is not None and start - previous_end <= 0.35
         duplicate_artifact = contiguous and norm == previous_norm
         incomplete_artifact = duration < SHORT_FRAGMENT_SECONDS and _is_incomplete_fragment(text)
 
-        if duplicate_artifact or incomplete_artifact:
+        if duplicate_artifact:
+            # Advance through the discarded duplicate so a whole contiguous run
+            # remains contiguous to the retained first clip.
+            previous_end = end
+            continue
+        if incomplete_artifact:
             continue
 
         cleaned.append(clip)
         previous_norm = norm
-        try:
-            previous_end = float(clip.get("end", start))
-        except (TypeError, ValueError):
-            previous_end = start
+        previous_end = end
 
     result["clips"] = cleaned
     result["benchmark_sanitization"] = {
