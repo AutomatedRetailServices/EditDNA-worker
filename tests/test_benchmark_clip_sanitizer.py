@@ -90,6 +90,52 @@ class BenchmarkClipSanitizerTests(unittest.TestCase):
         self.assertEqual(cleaned["clips"][0]["text"], "Call now.")
         self.assertEqual(cleaned["clips"][0]["end"], 0.9)
 
+    def test_skips_business_suffix_boundary_before_lowercase_incomplete_tail(self):
+        for suffix in ("Inc.", "Ltd.", "Corp.", "Co.", "LLC"):
+            with self.subTest(suffix=suffix):
+                text = f"Call now. From Acme {suffix} to ..."
+                result = {
+                    "clips": [{
+                        "id": "business", "start": 0.0, "end": 3.0,
+                        "text": text,
+                        "words": [
+                            {"start": 0.0, "end": 0.4, "word": " Call"},
+                            {"start": 0.4, "end": 0.9, "word": " now."},
+                            {"start": 1.0, "end": 1.4, "word": " From"},
+                            {"start": 1.4, "end": 1.8, "word": " Acme"},
+                            {"start": 1.8, "end": 2.2, "word": f" {suffix}"},
+                            {"start": 2.2, "end": 2.6, "word": " to"},
+                            {"start": 2.6, "end": 3.0, "word": " ..."},
+                        ],
+                        "meta": {},
+                    }]
+                }
+
+                cleaned = sanitize_benchmark_result(result, use_semantic_v2=False)
+
+                self.assertEqual(cleaned["clips"][0]["text"], "Call now.")
+                self.assertEqual(cleaned["clips"][0]["end"], 0.9)
+
+    def test_business_suffix_allows_genuine_new_sentence_boundary(self):
+        result = {
+            "clips": [{
+                "id": "business", "start": 0.0, "end": 2.0,
+                "text": "Acme Inc. This is complete.",
+                "words": [
+                    {"start": 0.0, "end": 0.4, "word": " Acme"},
+                    {"start": 0.4, "end": 0.8, "word": " Inc."},
+                    {"start": 0.8, "end": 1.2, "word": " This"},
+                    {"start": 1.2, "end": 1.5, "word": " is"},
+                    {"start": 1.5, "end": 2.0, "word": " complete."},
+                ],
+                "meta": {},
+            }]
+        }
+
+        cleaned = sanitize_benchmark_result(result, use_semantic_v2=False)
+
+        self.assertEqual(cleaned["clips"][0]["text"], "Acme Inc. This is complete.")
+
     def test_preserves_two_complete_sentences(self):
         result = {
             "clips": [{
