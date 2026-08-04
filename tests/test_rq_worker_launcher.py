@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import os
+import subprocess
 import sys
 from pathlib import Path
 
@@ -8,6 +10,8 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import rq_worker
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
 
 
 class FakeConnection:
@@ -192,3 +196,58 @@ def test_initial_ping_timeout_exits_nonzero_without_credentials(monkeypatch, cap
     assert "Could not connect to Redis" in output.err
     assert "secret" not in output.out + output.err
     assert FakeWorker.instances == []
+
+
+def test_start_worker_resolves_script_dir_and_uses_python3_from_external_cwd(tmp_path):
+    fake_bin = tmp_path / "bin"
+    fake_bin.mkdir()
+    calls_file = tmp_path / "python3-calls.txt"
+    real_python = sys.executable
+    fake_python = fake_bin / "python3"
+    fake_python.write_text(
+        f"""#!/usr/bin/env bash
+set -euo pipefail
+printf '%s\\n' "$*" >> "{calls_file}"
+if [ "${{1:-}}" = "-" ]; then
+  exec "{real_python}" "$@"
+fi
+if [ "${{1:-}}" = "{REPO_ROOT / 'rq_worker.py'}" ]; then
+  echo "fake worker started: $1"
+  exit 0
+fi
+echo "unexpected python3 invocation: $*" >&2
+exit 91
+"""
+    )
+    fake_python.chmod(0o755)
+
+    outside_cwd = tmp_path / "outside"
+    outside_cwd.mkdir()
+    redis_url = "rediss://user:super-secret@example.com:6380/0"
+    env = {
+        **os.environ,
+        "PATH": f"{fake_bin}{os.pathsep}{os.environ['PATH']}",
+        "REDIS_URL": redis_url,
+        "QUEUE_NAME": "render",
+    }
+
+    result = subprocess.run(
+        ["bash", str(REPO_ROOT / "start_worker.sh")],
+        cwd=outside_cwd,
+        env=env,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    combined = result.stdout + result.stderr
+    assert "super-secret" not in combined
+    assert "user:super-secret" not in combined
+    assert redis_url not in combined
+    assert "rediss://***@example.com:6380/0" in combined
+
+    calls = calls_file.read_text().splitlines()
+    assert calls[0] == "-"
+    assert calls[-1] == str(REPO_ROOT / "rq_worker.py")
+    assert f"PYTHONPATH ....... {REPO_ROOT}:" in result.stdout
