@@ -118,6 +118,20 @@ class BenchmarkClipSanitizerTests(unittest.TestCase):
         cleaned = sanitize_benchmark_result(result, use_semantic_v2=False)
         self.assertEqual([clip["id"] for clip in cleaned["clips"]], ["a", "c"])
 
+    def test_preserves_punctuation_and_case_differences(self):
+        result = {
+            "clips": [
+                {"id": "question", "start": 0.0, "end": 1.0, "text": "Really?", "meta": {}},
+                {"id": "exclamation", "start": 1.1, "end": 2.1, "text": "Really!", "meta": {}},
+                {"id": "case", "start": 2.2, "end": 3.2, "text": "REALLY!", "meta": {}},
+            ]
+        }
+        cleaned = sanitize_benchmark_result(result, use_semantic_v2=False)
+        self.assertEqual(
+            [clip["id"] for clip in cleaned["clips"]],
+            ["question", "exclamation", "case"],
+        )
+
     def test_drops_entire_contiguous_duplicate_run(self):
         result = {
             "clips": [
