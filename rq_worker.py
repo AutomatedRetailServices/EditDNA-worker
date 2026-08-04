@@ -58,7 +58,12 @@ def run_worker() -> bool:
         return False
 
     worker = Worker([queue_name], connection=connection, worker_ttl=WORKER_TTL_SECONDS)
-    return worker.work()
+    try:
+        worker.work()
+    except Exception as exc:
+        print(f"ERROR: RQ worker exited unexpectedly ({type(exc).__name__})", file=sys.stderr)
+        return False
+    return True
 
 
 def main() -> int:
