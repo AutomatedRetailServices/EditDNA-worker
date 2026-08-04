@@ -26,6 +26,11 @@ def _normalized_text(value: Any) -> str:
     return " ".join(text.split())
 
 
+def _duplicate_key(value: Any) -> str:
+    """Normalize whitespace only so punctuation and capitalization stay meaningful."""
+    return " ".join(str(value or "").split())
+
+
 def _is_incomplete_fragment(text: str) -> bool:
     """Return true only for text with explicit evidence of truncation."""
     stripped = text.strip()
@@ -107,13 +112,14 @@ def sanitize_benchmark_result(result: Dict[str, Any], *, use_semantic_v2: bool) 
     """Remove only proven ASR artifacts after pipeline analysis."""
     clips = list(result.get("clips") or [])
     cleaned: List[Dict[str, Any]] = []
-    previous_norm = ""
+    previous_duplicate_key = ""
     previous_end = None
 
     for raw in clips:
         clip = _trim_incomplete_tail(dict(raw))
         text = str(clip.get("text") or "").strip()
         norm = _normalized_text(text)
+        duplicate_key = _duplicate_key(text)
         duration = _duration(clip)
 
         if not norm:
@@ -129,7 +135,7 @@ def sanitize_benchmark_result(result: Dict[str, Any], *, use_semantic_v2: bool) 
             end = start
 
         contiguous = previous_end is not None and start - previous_end <= 0.35
-        duplicate_artifact = contiguous and norm == previous_norm
+        duplicate_artifact = contiguous and duplicate_key == previous_duplicate_key
         incomplete_artifact = duration < SHORT_FRAGMENT_SECONDS and _is_incomplete_fragment(text)
 
         if duplicate_artifact:
@@ -141,7 +147,7 @@ def sanitize_benchmark_result(result: Dict[str, Any], *, use_semantic_v2: bool) 
             continue
 
         cleaned.append(clip)
-        previous_norm = norm
+        previous_duplicate_key = duplicate_key
         previous_end = end
 
     result["clips"] = cleaned
