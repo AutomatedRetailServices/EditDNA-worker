@@ -10,7 +10,7 @@ SHORT_FRAGMENT_SECONDS = 0.40
 COMMON_ABBREVIATIONS = {
     "dr", "mr", "mrs", "ms", "prof", "sr", "jr", "st", "vs", "etc",
 }
-COMMON_BUSINESS_SUFFIXES = {"inc", "ltd", "corp", "co"}
+COMMON_BUSINESS_SUFFIXES = {"inc", "ltd", "corp", "co", "llc"}
 
 
 def _duration(clip: Dict[str, Any]) -> float:
@@ -40,7 +40,7 @@ def _is_incomplete_fragment(text: str) -> bool:
     return stripped.endswith("...") or stripped.endswith("…")
 
 
-def _business_suffix_has_incomplete_tail(text: str, boundary: int) -> bool:
+def _business_suffix_has_incomplete_lowercase_tail(text: str, boundary: int) -> bool:
     """Return true when a suffix period is followed by an explicitly incomplete tail."""
     remainder = text[boundary + 1 :].strip()
     return _is_incomplete_fragment(remainder)
@@ -68,7 +68,7 @@ def _is_false_sentence_boundary(text: str, boundary: int) -> bool:
     token = match.group(1).casefold() if match else ""
     if token in COMMON_ABBREVIATIONS or (len(token) == 1 and token.isalpha()):
         return True
-    return token in COMMON_BUSINESS_SUFFIXES and _business_suffix_has_incomplete_tail(text, boundary)
+    return token in COMMON_BUSINESS_SUFFIXES and _business_suffix_has_incomplete_lowercase_tail(text, boundary)
 
 
 def _trim_incomplete_tail(clip: Dict[str, Any]) -> Dict[str, Any]:
