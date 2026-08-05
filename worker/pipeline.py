@@ -5,13 +5,13 @@ import subprocess
 import copy
 import shutil
 import tempfile
+import re
 from typing import Callable, List, Dict, Any, Optional, Union
 
 import requests
 from faster_whisper import WhisperModel
 import boto3
 
-import clip
 
 from worker.models.config import load_model_config
 from worker.models.openai_client import OpenAIProviderError, is_openai_available
@@ -440,13 +440,26 @@ def looks_incomplete(text: str) -> bool:
     if t.endswith(bad_endings):
         return True
 
-    if t.startswith(("and ", "so ", "but ", "or ")):
-        return True
-
     if not t.endswith((".", "?", "!")):
+        if t.startswith(("and ", "so ", "but ", "or ")):
+            return True
         return True
 
     return False
+
+
+def is_semantic_restart_after_complete(previous_text: str, next_text: str) -> bool:
+    prev = previous_text.strip().lower()
+    nxt = next_text.strip().lower()
+    if not prev or not nxt:
+        return False
+    completed = prev.endswith((".", "?", "!")) or classify_slot(prev) == "CTA"
+    if not completed:
+        return False
+    return nxt.startswith((
+        "i found", "i found the perfect", "here's", "here is", "let me show",
+        "wait until", "if you", "have you", "are you", "stop scrolling",
+    ))
 
 
 def merge_incomplete_phrases(clips: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
@@ -464,6 +477,8 @@ def merge_incomplete_phrases(clips: List[Dict[str, Any]]) -> List[Dict[str, Any]
         text = c["text"].strip()
 
         if not looks_incomplete(text):
+            if i + 1 < len(clips) and is_semantic_restart_after_complete(text, clips[i + 1].get("text", "")):
+                c.setdefault("meta", {})["merge_diagnostic"] = "merge_prevented_semantic_restart"
             merged.append(c)
             i += 1
             continue
@@ -475,8 +490,11 @@ def merge_incomplete_phrases(clips: List[Dict[str, Any]]) -> List[Dict[str, Any]
             can_merge = (
                 len(next_text.split()) >= 2 and
                 not looks_incomplete(next_text) and
-                text[0].isalpha()
+                text[0].isalpha() and
+                not is_semantic_restart_after_complete(text, next_text)
             )
+            if not can_merge and is_semantic_restart_after_complete(text, next_text):
+                c.setdefault("meta", {})["merge_diagnostic"] = "merge_prevented_semantic_restart"
 
             if can_merge:
                 new_text = (text + " " + next_text).strip()
@@ -509,7 +527,44 @@ def merge_incomplete_phrases(clips: List[Dict[str, Any]]) -> List[Dict[str, Any]
 
         i += 1
 
-    return merged
+    return validate_clip_boundaries(merged)
+
+
+def _word_bounds(clip: Dict[str, Any]) -> Optional[tuple[float, float]]:
+    words = clip.get("words") or []
+    valid = [
+        (safe_float(w.get("start")), safe_float(w.get("end", w.get("start"))))
+        for w in words
+        if safe_float(w.get("end", w.get("start"))) > safe_float(w.get("start"))
+    ]
+    if not valid:
+        return None
+    return min(s for s, _ in valid), max(e for _, e in valid)
+
+
+def validate_clip_boundaries(clips: List[Dict[str, Any]], min_duration: float = 0.08) -> List[Dict[str, Any]]:
+    valid: List[Dict[str, Any]] = []
+    previous_texts: set[str] = set()
+    for clip_item in clips:
+        text = (clip_item.get("text") or "").strip()
+        bounds = _word_bounds(clip_item)
+        start = safe_float(clip_item.get("start"))
+        end = safe_float(clip_item.get("end", start))
+        if bounds and (end <= start or end - start < min_duration or start > bounds[0] + 0.02 or end < bounds[1] - 0.02):
+            start, end = bounds
+            clip_item["start"], clip_item["end"] = start, end
+            clip_item.setdefault("meta", {})["boundary_diagnostic"] = "repaired_from_word_timestamps"
+        duration = end - start
+        if end <= start or (duration < min_duration and len(_normalized_words(text)) > 1):
+            clip_item.setdefault("meta", {})["boundary_diagnostic"] = "discarded_invalid_microfragment"
+            continue
+        normalized_text = " ".join(_normalized_words(text))
+        if normalized_text and normalized_text in previous_texts:
+            clip_item.setdefault("meta", {})["boundary_diagnostic"] = "discarded_duplicate_residual_text"
+            continue
+        previous_texts.add(normalized_text)
+        valid.append(clip_item)
+    return valid
 
 
 # =====================
@@ -522,14 +577,24 @@ FILLER_PATTERNS = [
     "am i saying it right",
     "let me start again",
     "start again",
-    "wait",
-    "redo",
-    "again?",
     "cut that",
     "thanks.",
     "thank you guys",
     "that one good",
     "why can't i remember",
+]
+
+FILLER_RESTART_PATTERNS = [
+    "wait let me",
+    "wait i need to",
+    "wait no",
+    "hold on",
+    "no restart",
+    "let me redo",
+    "let me do that again",
+    "do that again",
+    "redo that",
+    "restart",
 ]
 
 TAIL_DEPENDENT_ENDINGS = [
@@ -546,14 +611,31 @@ TAIL_DEPENDENT_STARTS = [
 ]
 
 
-def looks_like_filler(text: str) -> bool:
-    t = text.lower().strip()
+def _normalized_words(text: str) -> List[str]:
+    return re.findall(r"[a-z0-9']+", text.lower())
+
+
+def filler_rule(text: str) -> Optional[str]:
+    t = re.sub(r"\s+", " ", text.lower()).strip()
+    words = _normalized_words(text)
+    compact = " ".join(words)
+    if not words:
+        return "empty"
+    if len(words) <= 1 and words[0] in {"and", "uh", "um", "hmm", "like", "wait"}:
+        return "standalone_meta_token"
+    if compact in {"hold on", "wait a second", "wait one second"}:
+        return "standalone_production_direction"
+    for pat in FILLER_RESTART_PATTERNS:
+        if compact.startswith(pat) or f" {pat}" in f" {compact}":
+            return "restart_or_interruption_language"
     for pat in FILLER_PATTERNS:
         if pat in t:
-            return True
-    if len(t.split()) <= 1 and t in {"and", "uh", "um", "hmm", "like"}:
-        return True
-    return False
+            return "production_meta_phrase"
+    return None
+
+
+def looks_like_filler(text: str) -> bool:
+    return filler_rule(text) is not None
 
 
 def looks_like_dependent_tail(text: str) -> bool:
@@ -569,34 +651,33 @@ def looks_like_dependent_tail(text: str) -> bool:
         if t.endswith(suf):
             return True
 
-    if words[0] in TAIL_DEPENDENT_STARTS:
+    if words[0] in TAIL_DEPENDENT_STARTS and not t.endswith((".", "?", "!")):
         return True
 
     return False
 
 
-def classify_slot(text: str) -> str:
+def classify_slot_rule(text: str) -> tuple[str, str]:
     t = text.lower()
+    words = _normalized_words(text)
+
+    if any(p in t for p in ["start over", "take two", "camera rolling"]):
+        return "OTHER", "production_meta_phrase"
 
     if any(
         p in t
         for p in [
-            "click the link",
-            "tap the link",
-            "shop now",
-            "get yours",
-            "grab one",
-            "link below",
-            "i left it for you",
-            "add to cart",
-            "order now",
+            "click the link", "tap the link", "shop now", "get yours", "grab one",
+            "grab some", "grab them", "buy", "shop ", "link below", "drop it down below",
+            "check these out", "check them out", "i left it for you", "add to cart", "order now",
             "check the link",
         ]
     ):
-        return "CTA"
+        return "CTA", "direct_purchase_or_action_language"
 
-    if "?" in t or t.startswith(("if ", "hey ", "listen", "stop scrolling", "ladies", "guys")):
-        return "HOOK"
+    if ("?" in t or t.startswith(("if ", "hey ", "listen", "stop scrolling", "ladies", "guys"))
+            or any(p in t for p in ["i found the perfect", "perfect gift", "wait until you see", "looking for the perfect"])):
+        return "HOOK", "opening_promise_or_product_discovery"
 
     if any(
         p in t
@@ -613,7 +694,7 @@ def classify_slot(text: str) -> str:
             "failed alternative",
         ]
     ):
-        return "PROBLEM"
+        return "PROBLEM", "problem_language"
 
     if any(
         p in t
@@ -625,7 +706,7 @@ def classify_slot(text: str) -> str:
             "measurable result",
         ]
     ):
-        return "PROOF"
+        return "PROOF", "proof_or_testimonial_language"
 
     if any(
         p in t
@@ -640,9 +721,11 @@ def classify_slot(text: str) -> str:
             "elevates any outfit",
             "feel fresh",
             "confident",
+            "so cute",
+            "they are all",
         ]
     ):
-        return "BENEFITS"
+        return "BENEFITS", "positive_appeal_or_outcome_language"
 
     if any(
         p in t
@@ -659,10 +742,12 @@ def classify_slot(text: str) -> str:
             "slippery m",
             "prebiotic",
             "probiotic",
-            "flavored",
+            "flavored", "you get", "comes in", "set of", "lip glosses", "these are",
+            "included", "includes", "variants", "designs", "stocking", "santa hat",
+            "christmas tree", "snowman", "colors", "shades",
         ]
-    ):
-        return "FEATURES"
+    ) or len(re.findall(r",", text)) >= 2:
+        return "FEATURES", "product_details_quantity_variants_or_enumeration"
 
     if any(
         p in t
@@ -676,13 +761,18 @@ def classify_slot(text: str) -> str:
             "when i",
             "the first time",
             "my experience",
+            "i discovered",
         ]
     ):
-        return "STORY"
+        return "STORY", "personal_story_language"
 
     if looks_like_filler(text) or len(t.strip().split()) < 2:
-        return "OTHER"
-    return "STORY"
+        return "OTHER", "filler_or_too_short"
+    return "OTHER", "unclassified_product_context"
+
+
+def classify_slot(text: str) -> str:
+    return classify_slot_rule(text)[0]
 
 
 def tag_clips_heuristic(clips: List[Dict[str, Any]]) -> None:
@@ -690,9 +780,10 @@ def tag_clips_heuristic(clips: List[Dict[str, Any]]) -> None:
         text = c.get("text", "") or ""
         t = text.strip()
 
-        slot = classify_slot(t)
+        slot, slot_rule = classify_slot_rule(t)
         is_tail = looks_like_dependent_tail(t)
-        is_filler = looks_like_filler(t)
+        filler_reason = filler_rule(t)
+        is_filler = filler_reason is not None
 
         keep = not is_filler and not is_tail
 
@@ -733,6 +824,9 @@ def tag_clips_heuristic(clips: List[Dict[str, Any]]) -> None:
         c["meta"]["semantic_score"] = sem
         c["meta"]["score"] = sem
         c["meta"]["keep"] = keep
+        c["meta"]["fallback_slot_rule"] = slot_rule
+        if filler_reason:
+            c["meta"]["filler_rule"] = filler_reason
 
 
 # =====================
@@ -810,10 +904,11 @@ def enrich_clips_semantic(clips: List[Dict[str, Any]], force_v2: bool = False) -
 _CLIP_MODEL = None
 _CLIP_PREPROCESS = None
 _CLIP_DEVICE = "cpu"
+_CLIP_LIB = None
 
 
 def load_clip_model():
-    global _CLIP_MODEL, _CLIP_PREPROCESS, _CLIP_DEVICE
+    global _CLIP_MODEL, _CLIP_PREPROCESS, _CLIP_DEVICE, _CLIP_LIB
     if _CLIP_MODEL is not None:
         return _CLIP_MODEL, _CLIP_PREPROCESS, _CLIP_DEVICE
 
@@ -830,6 +925,7 @@ def load_clip_model():
     _CLIP_MODEL = model
     _CLIP_PREPROCESS = preprocess
     _CLIP_DEVICE = device
+    _CLIP_LIB = clip_lib
 
     logger.info(f"CLIP model loaded on device {device}")
     return _CLIP_MODEL, _CLIP_PREPROCESS, _CLIP_DEVICE
@@ -909,7 +1005,7 @@ def run_visual_pass(
 
         with torch.no_grad():
             image_input = preprocess(image).unsqueeze(0).to(device)
-            text_tokens = clip.tokenize([clean_text]).to(device)  # type: ignore
+            text_tokens = _CLIP_LIB.tokenize([clean_text]).to(device)  # type: ignore
 
             image_features = model.encode_image(image_input)
             text_features = model.encode_text(text_tokens)
