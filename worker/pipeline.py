@@ -862,41 +862,124 @@ def looks_like_dependent_tail(text: str) -> bool:
     return n.tokens[0] in TAIL_DEPENDENT_STARTS and not t.endswith((".", "?", "!"))
 
 
-def has_grab_cta_context(n: NormalizedText) -> bool:
-    if "grab" not in n.tokens:
-        return False
-    product_context = any(
-        token in n.tokens
-        for token in {"below", "link", "available", "today", "set", "order", "yours", "product", "collection"}
+SAFE_EXPLICIT_CTA_PHRASES = (
+    "buy now", "shop now", "order now", "tap the link", "click the link",
+    "click below", "get yours", "add to cart", "check it out below",
+    "check these out below", "check them out below", "drop it down below",
+)
+
+IMPERATIVE_ACTION_VERBS = {"buy", "shop", "order", "grab", "get", "check", "tap", "click", "drop", "pick", "add"}
+CTA_MODIFIERS = {"now", "today", "below", "link", "yours", "available", "cart", "set", "collection"}
+CTA_PRODUCT_OBJECTS = {
+    "it", "this", "that", "these", "them", "one", "some", "yours", "product", "products",
+    "set", "collection", "shade", "shades", "item", "items", "gloss", "glosses",
+}
+CTA_PRODUCT_NOUNS = {
+    "product", "products", "set", "collection", "shade", "shades", "item", "items",
+    "gloss", "glosses",
+}
+CTA_OBJECT_DETERMINERS = {"the", "a", "an", "your", "our"}
+VIEWER_DIRECTED_PREFIXES = ("you can", "you could", "you should", "go")
+CTA_LEADING_DISCOURSE = {"so", "please"}
+
+
+def _token_after(tokens: Sequence[str], token: str) -> Optional[str]:
+    """Return the token after the first exact action token, if one exists."""
+    try:
+        index = tokens.index(token)
+    except ValueError:
+        return None
+    return tokens[index + 1] if index + 1 < len(tokens) else None
+
+
+def _action_target(tokens: Sequence[str], action_index: int) -> Optional[str]:
+    target_index = action_index + 1
+    if target_index < len(tokens) and tokens[target_index] in CTA_OBJECT_DETERMINERS:
+        target_index += 1
+    return tokens[target_index] if target_index < len(tokens) else None
+
+
+def _starts_explicit_cta(n: NormalizedText, phrase: str) -> bool:
+    """Match an explicit CTA at command position, not inside reported speech."""
+    phrase_tokens = normalized_text(phrase).tokens
+    if n.tokens[:len(phrase_tokens)] == phrase_tokens:
+        return True
+    return bool(
+        n.tokens
+        and n.tokens[0] in CTA_LEADING_DISCOURSE
+        and n.tokens[1:1 + len(phrase_tokens)] == phrase_tokens
     )
-    viewer_context = starts_phrase(n, "grab") or starts_phrase(n, "go grab") or has_phrase(n, "you can grab") or has_phrase(n, "you could grab")
-    grab_target = has_any_phrase(n, (
-        "grab some", "grab them", "grab one", "grab yours", "grab this", "grab that",
-        "grab a set", "grab the set", "grab this set",
-    ))
-    return viewer_context and grab_target and product_context
+
+
+def cta_action_rule(text: str) -> Optional[str]:
+    """Return a CTA rule only when an ambiguous action has viewer intent.
+
+    Action words such as ``order``, ``shop``, and ``check`` are also ordinary
+    nouns or narration verbs. Token position alone is therefore never enough:
+    imperative uses need a product object or CTA modifier, while non-imperative
+    uses need an explicit viewer-directed prefix or link/purchase instruction.
+    """
+    n = normalized_text(text)
+    if not n.tokens:
+        return None
+
+    if any(_starts_explicit_cta(n, phrase) for phrase in SAFE_EXPLICIT_CTA_PHRASES):
+        return "safe_explicit_cta_phrase"
+
+    action = next((token for token in n.tokens if token in IMPERATIVE_ACTION_VERBS), None)
+    if action is None:
+        return None
+
+    action_index = n.tokens.index(action)
+    next_token = _token_after(n.tokens, action)
+    action_target = _action_target(n.tokens, action_index)
+    has_modifier = any(token in CTA_MODIFIERS for token in n.tokens)
+    has_product_object = action_target in CTA_PRODUCT_OBJECTS
+    viewer_directed = any(has_phrase(n, prefix) for prefix in VIEWER_DIRECTED_PREFIXES) or has_phrase(n, "you yourself")
+    link_directed = any(
+        _starts_explicit_cta(n, phrase)
+        for phrase in ("tap the link to", "click the link to", "click below to", "link below to")
+    )
+
+    # A leading action is an imperative only with an object/modifier that makes
+    # the commercial request explicit. This rejects noun uses such as "Order of
+    # application" and physical actions such as "Check the ingredients".
+    imperative_position = action_index == 0 or (
+        action_index == 1 and n.tokens[0] in CTA_LEADING_DISCOURSE
+    )
+    if imperative_position and (next_token in CTA_MODIFIERS or has_product_object):
+        if action in {"tap", "click"} and not ({"link", "below"} & set(n.tokens)):
+            return None
+        if action == "check" and not (has_modifier or has_any_phrase(n, ("check it out", "check these out", "check them out"))):
+            return None
+        if action == "drop" and not ({"below", "link"} & set(n.tokens)):
+            return None
+        if action == "add" and "cart" not in n.tokens:
+            return None
+        if action in {"order", "grab", "get", "pick"} and not (
+            has_modifier or action_target in CTA_PRODUCT_NOUNS
+        ):
+            return None
+        return "imperative_product_action"
+
+    if link_directed:
+        return "link_directed_action"
+
+    if viewer_directed:
+        # Viewer language still needs an actionable object/modifier; "you can
+        # get headaches" and "you should check the ingredients" are narration.
+        if has_product_object and (
+            action in {"buy", "shop"}
+            or has_modifier
+            or action_target in CTA_PRODUCT_NOUNS
+        ):
+            return "viewer_directed_product_action"
+
+    return None
 
 
 def has_cta_action_context(text: str) -> bool:
-    n = normalized_text(text)
-    cta_phrase_cues = (
-        "click the link", "click below", "tap the link", "shop now", "get yours",
-        "link below", "drop it down below", "check these out", "check them out",
-        "i left it for you", "add to cart", "order now", "check the link",
-    )
-    if has_any_phrase(n, cta_phrase_cues):
-        return True
-    if has_grab_cta_context(n):
-        return True
-    if not n.tokens:
-        return False
-    if n.tokens[0] in {"buy", "shop", "order"}:
-        return True
-    return has_any_phrase(n, (
-        "you can buy", "you can shop", "you could buy", "you could shop",
-        "click below to buy", "click below to shop", "tap the link to buy", "tap the link to shop",
-        "link below to buy", "link below to shop",
-    ))
+    return cta_action_rule(text) is not None
 
 
 def has_product_enumeration_evidence(text: str) -> bool:

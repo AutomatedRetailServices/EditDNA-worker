@@ -719,3 +719,109 @@ def test_filler_meta_inventory_negative_cases_remain_keepable(text):
 def test_no_generic_filler_collection_uses_phrase_matching():
     assert not hasattr(pipeline, "FILLER_PATTERNS")
     assert pipeline.SAFE_MULTIWORD_META_PHRASES == ()
+
+
+CTA_ACTION_POSITIVE_CASES = [
+    ("buy", "Buy now."),
+    ("buy", "Buy this today."),
+    ("buy", "You can buy it below."),
+    ("buy", "Click below to buy."),
+    ("shop", "Shop now."),
+    ("shop", "Shop these shades."),
+    ("shop", "Tap the link to shop."),
+    ("shop", "You can shop the collection below."),
+    ("order", "Order now."),
+    ("order", "Order yours today."),
+    ("order", "You can order it below."),
+    ("order", "Tap the link to order."),
+    ("order", "Order this set while it's available."),
+    ("order", "Go order yours."),
+    ("grab", "Grab some below."),
+    ("grab", "Grab them while they're available."),
+    ("grab", "Go grab yours."),
+    ("grab", "You can grab them in a set of three."),
+    ("get", "Get yours today."),
+    ("get", "You can get this set below."),
+    ("click", "Click the link."),
+    ("click", "Click below to buy."),
+    ("tap", "Tap the link."),
+    ("tap", "Tap the link to order."),
+    ("check", "Check it out below."),
+    ("check", "Check these out below."),
+    ("drop", "Drop it down below."),
+    ("pick", "Pick yours today."),
+    ("add", "Add to cart."),
+    ("buy", "Please buy this today."),
+    ("shop", "So shop now while it's available."),
+]
+
+
+@pytest.mark.parametrize("cue,text", CTA_ACTION_POSITIVE_CASES)
+def test_context_aware_cta_action_matrix_accepts_viewer_actions(cue, text):
+    assert pipeline.cta_action_rule(text) is not None, cue
+    assert pipeline.classify_slot(text) == "CTA", cue
+
+
+CTA_ACTION_NEGATIVE_CASES = [
+    ("buy", "Buying this was part of my routine."),
+    ("buy", "Buyers love the texture."),
+    ("buy", "I decided to buy it yesterday."),
+    ("shop", "I went to the shop yesterday."),
+    ("shop", "The shop closes at five."),
+    ("shop", "The workshop starts tomorrow."),
+    ("order", "Order of application matters for this serum."),
+    ("order", "The order arrived yesterday."),
+    ("order", "My order came in damaged."),
+    ("order", "I changed the order of the clips."),
+    ("order", "In order to use this, shake it first."),
+    ("order", "The correct order is cleanser, serum, moisturizer."),
+    ("order", "Order numbers appear on the receipt."),
+    ("order", "Order of application matters today."),
+    ("order", "Order it alphabetically for the ingredient list."),
+    ("grab", "I grab some before the gym."),
+    ("grab", "She told me to grab them from the table."),
+    ("grab", "We grabbed them before leaving."),
+    ("grab", "Grab them from the table."),
+    ("get", "I get headaches from strong scents."),
+    ("get", "She gets ready at six."),
+    ("get", "I get this question every day."),
+    ("get", "Get headaches checked by a professional."),
+    ("click", "I heard a click near the cap."),
+    ("click", "The lid clicks into place."),
+    ("tap", "The tap was leaking yesterday."),
+    ("tap", "I felt a tap on my shoulder."),
+    ("check", "I checked the ingredients yesterday."),
+    ("check", "Check the ingredients before mixing the formula."),
+    ("drop", "I dropped it on the table."),
+    ("drop", "A drop of serum is enough."),
+    ("pick", "I picked this up yesterday."),
+    ("pick", "The pick was part of my routine."),
+    ("add", "I add this after moisturizer."),
+    ("add", "Add two drops to the mixture."),
+    ("buy", "She told me to buy now, but I waited."),
+    ("shop", "He asked us to shop now for tomorrow's event."),
+    ("order", "She told him to order now, and he did."),
+    ("tap", "She told me to tap the link yesterday."),
+    ("click", "He asked me to click below during the demo."),
+    ("check", "She reminded me to check it out below later."),
+]
+
+
+@pytest.mark.parametrize("cue,text", CTA_ACTION_NEGATIVE_CASES)
+def test_context_aware_cta_action_matrix_rejects_narration_and_nouns(cue, text):
+    assert pipeline.cta_action_rule(text) is None, cue
+    assert pipeline.classify_slot(text) != "CTA", cue
+
+
+def test_false_cta_narration_cannot_displace_real_cta_in_composer():
+    narration = _composer_clip("order_explanation", 0, "OTHER", score=0.99)
+    narration["text"] = "Order of application matters for this serum."
+    narration["slot"] = pipeline.classify_slot(narration["text"])
+    real_cta = _composer_clip("real_cta", 1, "CTA", score=0.80)
+    real_cta["text"] = "Order yours today."
+    real_cta["slot"] = pipeline.classify_slot(real_cta["text"])
+
+    composer = pipeline.build_composer([narration, real_cta])
+
+    assert composer["cta_id"] == "real_cta"
+    assert composer["used_clip_ids"] == ["order_explanation", "real_cta"]
