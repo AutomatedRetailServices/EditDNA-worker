@@ -935,8 +935,7 @@ def classify_slot_rule(text: str) -> tuple[str, str]:
             "prebiotic",
             "probiotic",
             "flavored", "you get", "comes in", "set of", "lip glosses", "these are",
-            "included", "includes", "variants", "designs", "stocking", "santa hat",
-            "christmas tree", "snowman", "colors", "shades",
+            "included", "includes", "variants", "designs", "colors", "shades",
         ]
     ) or has_product_enumeration_evidence(text):
         return "FEATURES", "product_details_quantity_variants_or_enumeration"

@@ -453,3 +453,38 @@ def test_camera_rolling_change_preserves_other_restart_slate_detection():
         clip = pipeline.make_base_clip("restart", 0, 1, text)
         pipeline.tag_clips_heuristic([clip])
         assert clip["meta"]["keep"] is False, text
+
+
+def test_holiday_item_words_need_product_enumeration_or_context_for_features():
+    feature_examples = [
+        "It includes a stocking, a Santa hat, a Christmas tree, and a snowman.",
+        "You get four designs: a stocking, Santa hat, tree, and snowman.",
+        "The set comes with Christmas tree and snowman variants.",
+        "Included are a stocking, a Santa hat, and two ornament designs.",
+        "stocking, the Santa hat, a Christmas tree, and let's not forget, a snowman.",
+    ]
+    for text in feature_examples:
+        assert pipeline.classify_slot(text) == "FEATURES", text
+
+
+def test_single_holiday_or_item_word_in_narration_is_not_features():
+    non_feature_examples = [
+        "I'm stocking up because this lasts all day.",
+        "We placed it beside the Christmas tree.",
+        "She wore a Santa hat in the video.",
+        "The snowman was in the background.",
+        "Stocking the shelves took all morning.",
+    ]
+    for text in non_feature_examples:
+        assert pipeline.classify_slot(text) != "FEATURES", text
+        clip = pipeline.make_base_clip("holiday", 0, 1, text)
+        pipeline.tag_clips_heuristic([clip])
+        assert clip["meta"]["keep"] is True, text
+
+
+def test_holiday_feature_change_preserves_other_slot_behavior():
+    assert pipeline.classify_slot("I found the perfect gift for our lip gloss girlies.") == "HOOK"
+    assert pipeline.classify_slot("Honestly, for me, this lasted all day.") == "STORY"
+    assert pipeline.classify_slot("These are so cute, they are all lip glosses.") == "BENEFITS"
+    assert pipeline.classify_slot("Buy this today.") == "CTA"
+    assert pipeline.classify_slot("Ordinary narration without a cue.") == "OTHER"
