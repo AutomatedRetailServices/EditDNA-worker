@@ -994,7 +994,7 @@ def test_benchmark_session_output_preserves_enriched_discard_diagnostics(monkeyp
     }.items():
         monkeypatch.setenv(name, value)
     diagnostic = {
-        "source_index": 1, "source_local": "second.mp4", "original_clip_id": "ASR0000_c0",
+        "source_index": 1, "source_local": "/tmp/private-worker/second.mp4", "original_clip_id": "ASR0000_c0",
         "namespaced_clip_id": "source_001:ASR0000_c0",
         "diagnostic_id": "source_001:ASR0000_c0:discarded_invalid_microfragment",
         "clip_id": "ASR0000_c0", "source_start": 1.0, "source_end": 1.02,
@@ -1008,9 +1008,146 @@ def test_benchmark_session_output_preserves_enriched_discard_diagnostics(monkeyp
 
     benchmark.run_benchmark(
         "diagnostic-job", request, s3=s3,
-        pipeline=lambda *_args: {"clips": [], "clean_cut_discard_diagnostics": [diagnostic]},
+        pipeline=lambda *_args: {
+            "clips": [],
+            "clean_cut_discard_diagnostics": [diagnostic],
+        },
     )
 
     session_key = next(key for key in s3.storage if "/sessions/" in key)
     session = json.loads(s3.storage[session_key])
-    assert session["clean_cut_discard_diagnostics"] == [diagnostic]
+    persisted = session["clean_cut_discard_diagnostics"][0]
+    assert persisted == {**diagnostic, "source_local": "second.mp4"}
+    assert "/tmp/" not in json.dumps(session)
+
+
+UNICODE_TRANSCRIPT_CASES = [
+    "这款产品让皮肤感觉很柔软。",
+    "この商品は毎朝使っています。",
+    "이 제품은 피부에 부드럽게 발려요.",
+    "Этот продукт легко наносится на кожу.",
+    "هذا المنتج لطيف على البشرة.",
+    "Αυτό το προϊόν είναι απαλό στο δέρμα.",
+    "המוצר הזה נעים לשימוש בכל בוקר.",
+    "यह उत्पाद त्वचा पर बहुत हल्का लगता है।",
+    "Este sérum deja la piel hidratada.",
+    "Ce produit est très léger et agréable.",
+    "Product رائع للبشرة اليومية.",
+]
+
+
+@pytest.mark.parametrize("text", UNICODE_TRANSCRIPT_CASES)
+def test_unicode_transcripts_produce_tokens_and_remain_clean_cut_eligible(text):
+    normalized = pipeline.normalized_text(text)
+    assert normalized.tokens
+    clip = _clip("unicode", 0, 2, text)
+    pipeline.tag_clips_heuristic([clip])
+    assert clip["slot"] == "OTHER"
+    assert clip["meta"]["fallback_slot_rule"] == "unclassified_product_context"
+    assert clip["meta"]["keep"] is True
+    assert pipeline.select_clean_cut_clip_ids([clip]) == ["unicode"]
+
+
+@pytest.mark.parametrize("text", ["...", "？！", "— —", "‘’", "   "])
+def test_punctuation_only_transcripts_remain_empty(text):
+    assert pipeline.normalized_text(text).tokens == ()
+    assert pipeline.filler_rule(text) == "empty"
+
+
+def test_unicode_normalizer_preserves_mixed_scripts_and_smart_contractions():
+    mixed = pipeline.normalized_text("新しい Serum 2026 رائع")
+    assert mixed.tokens == ("新しい", "serum", "2026", "رائع")
+    assert pipeline.normalized_text("We’re ready").tokens == pipeline.normalized_text("We're ready").tokens
+
+
+COMPOUND_TAKE_SLATE_CASES = [
+    "Take two.",
+    "Okay, take three.",
+    "All right, take 2.",
+    "So, take 3.",
+    "Take two, wait, start over.",
+    "Take three, hold on.",
+    "Take number two, let me restart.",
+    "Take number three, do that again.",
+    "Okay, take two, we’re rolling.",
+    "Okay, take two, we’re starting over.",
+    "Take two, no, redo that.",
+    "This is take two.",
+    "That’s take two.",
+    "We’re on take three.",
+]
+
+
+@pytest.mark.parametrize("text", COMPOUND_TAKE_SLATE_CASES)
+def test_compound_take_slates_are_production_meta_and_excluded_from_clean_cut(text):
+    assert pipeline.is_compound_take_slate(pipeline.normalized_text(text))
+    assert pipeline.classify_slot_rule(text) == ("OTHER", "production_meta_phrase")
+    clip = _clip("slate", 0, 1, text)
+    pipeline.tag_clips_heuristic([clip])
+    assert clip["meta"]["keep"] is False
+    assert clip["meta"]["filler_rule"] == "production_meta_phrase"
+    assert pipeline.select_clean_cut_clip_ids([clip]) == []
+
+
+TAKE_PRODUCT_NARRATION_CASES = [
+    "Take two gummies every morning.",
+    "Take three capsules with food.",
+    "I take two before bed.",
+    "You can take three tablets daily.",
+    "This routine takes two minutes.",
+    "Take two shades and blend them together.",
+    "Take number two from the numbered product samples.",
+]
+
+
+@pytest.mark.parametrize("text", TAKE_PRODUCT_NARRATION_CASES)
+def test_take_dosage_quantity_and_product_instructions_are_not_slates(text):
+    assert not pipeline.is_compound_take_slate(pipeline.normalized_text(text))
+    assert pipeline.production_meta_rule(text) is None
+    clip = _clip("product", 0, 2, text)
+    pipeline.tag_clips_heuristic([clip])
+    assert clip["meta"]["keep"] is True
+    assert pipeline.select_clean_cut_clip_ids([clip]) == ["product"]
+
+
+@pytest.mark.parametrize("source,expected", [
+    ("/tmp/job-123/input.mp4", "input.mp4"),
+    ("/var/lib/worker/nested/video.mov", "video.mov"),
+    ("safe-name.mp4", "safe-name.mp4"),
+    ("uploads/session/video.mp4", "uploads/session/video.mp4"),
+    ("s3://private-bucket/uploads/session/video.mp4", "uploads/session/video.mp4"),
+    ("https://user:secret@example.test/private/video.mp4?token=secret", "video.mp4"),
+])
+def test_persisted_diagnostic_source_identifiers_are_sanitized(source, expected):
+    assert pipeline.sanitize_source_identifier(source, 4) == expected
+
+
+def test_result_json_persistence_defensively_sanitizes_diagnostics(monkeypatch):
+    captured = {}
+
+    class Client:
+        def put_object(self, **kwargs):
+            captured.update(kwargs)
+
+    monkeypatch.setattr(pipeline, "S3_BUCKET", "test-bucket")
+    monkeypatch.setattr(pipeline.boto3, "client", lambda _name: Client())
+    result = {
+        "session_id": "unicode-test",
+        "clean_cut_discard_diagnostics": [{
+            "source_index": 0,
+            "source_local": "/tmp/private/session/input.mp4",
+            "original_clip_id": "ASR0000_c0",
+            "namespaced_clip_id": "source_000:ASR0000_c0",
+            "diagnostic_id": "source_000:ASR0000_c0:discarded_invalid_microfragment",
+            "reason": "discarded_invalid_microfragment",
+            "source_start": 1.0,
+            "source_end": 1.02,
+            "text": "fragment",
+        }],
+    }
+
+    pipeline.save_result_json_to_s3(result)
+
+    persisted = json.loads(captured["Body"])
+    assert persisted["clean_cut_discard_diagnostics"][0]["source_local"] == "input.mp4"
+    assert "/tmp/" not in captured["Body"].decode()

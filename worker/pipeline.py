@@ -7,6 +7,7 @@ import shutil
 import tempfile
 import re
 import inspect
+import unicodedata
 from dataclasses import dataclass
 from typing import Callable, List, Dict, Any, Optional, Union, Sequence
 
@@ -22,6 +23,10 @@ from worker.models.openai_provider import (
 )
 from worker.semantic_slot_v2 import build_clause_inputs, publicize_canonical_slot
 from worker.take_judge_v2 import TakeJudgeCandidate, delivery_features, sample_candidate_frames
+from worker.diagnostics import (
+    sanitize_clean_cut_discard_diagnostics,
+    sanitize_source_identifier,
+)
 
 from pipeline_errors import (
     JobCanceledError,
@@ -207,7 +212,11 @@ def save_result_json_to_s3(result: Dict[str, Any]) -> Optional[str]:
         # Puedes cambiar 'dataset/bloopers' por lo que quieras
         key = f"{S3_PREFIX}/dataset/bloopers/{session_id}.json"
 
-        body = json.dumps(result, ensure_ascii=False).encode("utf-8")
+        persistable_result = copy.deepcopy(result)
+        persistable_result["clean_cut_discard_diagnostics"] = sanitize_clean_cut_discard_diagnostics(
+            persistable_result.get("clean_cut_discard_diagnostics", [])
+        )
+        body = json.dumps(persistable_result, ensure_ascii=False).encode("utf-8")
         s3.put_object(
             Bucket=bucket,
             Key=key,
@@ -607,7 +616,7 @@ def _record_boundary_discard(
     if diagnostics is None:
         return
     source_index = int(clip_item.get("source_index", 0))
-    source_local = clip_item.get("source_local") or f"source_{source_index:03d}"
+    source_local = sanitize_source_identifier(clip_item.get("source_local"), source_index)
     original_clip_id = str(clip_item.get("original_clip_id", clip_item.get("id", "")))
     namespaced_clip_id = str(
         clip_item.get("namespaced_clip_id")
@@ -757,14 +766,38 @@ class NormalizedText:
 
 
 def normalize_match_text(text: str) -> str:
-    normalized = (text or "").translate(APOSTROPHE_TRANSLATION).lower()
+    normalized = (text or "").translate(APOSTROPHE_TRANSLATION).casefold()
     return re.sub(r"\s+", " ", normalized).strip()
 
 
 def normalized_text(text: str) -> NormalizedText:
     norm = normalize_match_text(text)
-    tokens = tuple(re.findall(r"[a-z0-9']+", norm))
+    tokens = unicode_word_tokens(norm)
     return NormalizedText(raw=text or "", text=norm, tokens=tokens, compact=" ".join(tokens))
+
+
+def unicode_word_tokens(text: str) -> tuple[str, ...]:
+    """Preserve Unicode letters/numbers while retaining internal apostrophes."""
+    tokens: List[str] = []
+    current: List[str] = []
+    for index, char in enumerate(text):
+        category = unicodedata.category(char)
+        if category[0] in {"L", "N"} or (category[0] == "M" and current):
+            current.append(char)
+            continue
+        next_is_word = (
+            index + 1 < len(text)
+            and unicodedata.category(text[index + 1])[0] in {"L", "N"}
+        )
+        if char == "'" and current and next_is_word:
+            current.append(char)
+            continue
+        if current:
+            tokens.append("".join(current))
+            current = []
+    if current:
+        tokens.append("".join(current))
+    return tuple(tokens)
 
 
 def _normalized_words(text: str) -> List[str]:
@@ -811,6 +844,56 @@ def is_camera_rolling_slate(text: str) -> bool:
     return starts_phrase(n, "camera rolling take") or starts_phrase(n, "okay camera rolling take")
 
 
+TAKE_SLATE_DISCOURSE_PREFIXES = (("all", "right"), ("okay",), ("so",))
+TAKE_SLATE_INTRO_PREFIXES = (("this", "is"), ("that's",), ("we're", "on"))
+TAKE_SLATE_NUMBERS = {"two", "three", "2", "3"}
+
+
+def _strip_token_prefixes(
+    tokens: tuple[str, ...], prefixes: Sequence[tuple[str, ...]],
+) -> tuple[str, ...]:
+    for prefix in prefixes:
+        if tokens[:len(prefix)] == prefix:
+            return tokens[len(prefix):]
+    return tokens
+
+
+def is_clear_recording_direction(n: NormalizedText) -> bool:
+    """Recognize restart/redo/interruption commands shared by slate rules."""
+    if not n.tokens:
+        return True
+    if n.compact in EXACT_STANDALONE_PRODUCTION_DIRECTIONS or n.compact == "wait":
+        return True
+    if any(starts_phrase(n, phrase) for phrase in LEADING_PRODUCTION_DIRECTIONS):
+        return True
+    if is_camera_rolling_slate(n.compact):
+        return True
+    if n.compact in {
+        "start over", "let's start over", "we're starting over", "i'm starting over",
+        "let me restart", "let me redo that", "no redo that", "no start over",
+        "let's go", "let us go",
+    } or starts_phrase(n, "start over from"):
+        return True
+    if len(n.tokens) > 1 and n.tokens[0] in {"wait", "no"}:
+        return is_clear_recording_direction(normalized_text(" ".join(n.tokens[1:])))
+    return False
+
+
+def is_compound_take_slate(n: NormalizedText) -> bool:
+    """Distinguish recording takes from dosage, quantity, and usage language."""
+    tokens = _strip_token_prefixes(n.tokens, TAKE_SLATE_DISCOURSE_PREFIXES)
+    tokens = _strip_token_prefixes(tokens, TAKE_SLATE_INTRO_PREFIXES)
+    if not tokens or tokens[0] != "take":
+        return False
+    if len(tokens) >= 3 and tokens[1] == "number" and tokens[2] in TAKE_SLATE_NUMBERS:
+        remainder = tokens[3:]
+    elif len(tokens) >= 2 and tokens[1] in TAKE_SLATE_NUMBERS:
+        remainder = tokens[2:]
+    else:
+        return False
+    return is_clear_recording_direction(normalized_text(" ".join(remainder)))
+
+
 def production_meta_rule(text: str, include_camera_rolling: bool = True) -> Optional[str]:
     n = normalized_text(text)
     if not n.compact:
@@ -827,15 +910,7 @@ def production_meta_rule(text: str, include_camera_rolling: bool = True) -> Opti
         return "production_meta_phrase"
     if include_camera_rolling and is_camera_rolling_slate(text):
         return "production_meta_phrase"
-    if n.compact in {
-        "take two", "take three", "okay take two", "okay take three", "this is take two", "this is take three",
-        "take number two", "take number three", "i'm starting again", "that's take two", "that's take three",
-        "we're on take three",
-    }:
-        return "production_meta_phrase"
-    if (starts_phrase(n, "take two let's") or starts_phrase(n, "take two let us")
-            or starts_phrase(n, "take three let's") or starts_phrase(n, "take three let us")
-            or starts_phrase(n, "take number two") or starts_phrase(n, "take number three")):
+    if is_compound_take_slate(n) or n.compact == "i'm starting again":
         return "production_meta_phrase"
     return None
 
@@ -844,7 +919,7 @@ def filler_rule(text: str) -> Optional[str]:
     n = normalized_text(text)
     if not n.tokens:
         return "empty"
-    if len(n.tokens) <= 1 and n.tokens[0] in {"and", "uh", "um", "hmm", "like", "wait", "okay", "alright"}:
+    if len(n.tokens) == 1 and n.tokens[0] in {"and", "uh", "um", "hmm", "like", "wait", "okay", "alright"}:
         return "standalone_meta_token"
     if n.compact in EXACT_STANDALONE_FILLER:
         return "standalone_meta_token"
@@ -1085,7 +1160,7 @@ def classify_slot_rule(text: str) -> tuple[str, str]:
     )):
         return "PROBLEM", "problem_language"
 
-    if looks_like_filler(text) or len(n.tokens) < 2:
+    if looks_like_filler(text):
         return "OTHER", "filler_or_too_short"
     return "OTHER", "unclassified_product_context"
 
@@ -2466,6 +2541,9 @@ def run_pipeline(session_id: str, files: Optional[List[str]] = None,
             report("uploading", 98, "Upload complete")
         if S3_BUCKET and render_output and not output_url:
             raise UploadError("Rendered output upload returned no output URL")
+        clean_cut_discard_diagnostics = sanitize_clean_cut_discard_diagnostics(
+            clean_cut_discard_diagnostics
+        )
         result={"ok":True,"session_id":session_id,"input_local":input_local,
       "input_files_local":local_sources,"input_file_count":len(local_sources),
       "processed_source_indices":list(range(len(local_sources))),"duration_sec":sum(durations),
