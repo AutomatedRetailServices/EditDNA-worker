@@ -654,27 +654,37 @@ def validate_clip_boundaries(
 # HEURISTIC TAGGING
 # =====================
 
-FILLER_PATTERNS = [
+EXACT_STANDALONE_FILLER = {
     "is that good",
     "is that funny",
     "am i saying it right",
-    "let me start again",
-    "cut that",
-    "thanks.",
-    "thank you guys",
     "that one good",
     "why can't i remember",
-]
+    "thanks",
+    "thank you",
+    "thank you guys",
+    "okay thanks",
+    "all right thank you",
+    "alright thank you",
+}
 
-FILLER_RESTART_EXACT_PATTERNS = {
+END_OF_TAKE_FILLER = {
+    "thanks that's it",
+    "thank you we're done",
+}
+
+EXACT_STANDALONE_PRODUCTION_DIRECTIONS = {
     "hold on",
+    "wait a second",
+    "wait one second",
     "no restart",
     "wait no",
     "restart",
     "do that again",
+    "cut that",
 }
 
-FILLER_RESTART_LEADING_PATTERNS = (
+LEADING_PRODUCTION_DIRECTIONS = (
     "wait let me",
     "wait i need to",
     "wait no",
@@ -686,9 +696,11 @@ FILLER_RESTART_LEADING_PATTERNS = (
     "redo that",
     "restart that",
     "restart this",
-    "start over",
     "let me start again",
+    "cut that",
 )
+
+SAFE_MULTIWORD_META_PHRASES = ()
 
 TAIL_DEPENDENT_ENDINGS = [
     "as well",
@@ -800,11 +812,14 @@ def production_meta_rule(text: str, include_camera_rolling: bool = True) -> Opti
     if include_camera_rolling and is_camera_rolling_slate(text):
         return "production_meta_phrase"
     if n.compact in {
-        "take two", "okay take two", "this is take two", "take number two",
-        "i'm starting again", "that's take two", "we're on take three",
+        "take two", "take three", "okay take two", "okay take three", "this is take two", "this is take three",
+        "take number two", "take number three", "i'm starting again", "that's take two", "that's take three",
+        "we're on take three",
     }:
         return "production_meta_phrase"
-    if starts_phrase(n, "take two let's") or starts_phrase(n, "take two let us") or starts_phrase(n, "take number two"):
+    if (starts_phrase(n, "take two let's") or starts_phrase(n, "take two let us")
+            or starts_phrase(n, "take three let's") or starts_phrase(n, "take three let us")
+            or starts_phrase(n, "take number two") or starts_phrase(n, "take number three")):
         return "production_meta_phrase"
     return None
 
@@ -813,18 +828,20 @@ def filler_rule(text: str) -> Optional[str]:
     n = normalized_text(text)
     if not n.tokens:
         return "empty"
-    if len(n.tokens) <= 1 and n.tokens[0] in {"and", "uh", "um", "hmm", "like", "wait"}:
+    if len(n.tokens) <= 1 and n.tokens[0] in {"and", "uh", "um", "hmm", "like", "wait", "okay", "alright"}:
         return "standalone_meta_token"
-    if n.compact in {"hold on", "wait a second", "wait one second"}:
+    if n.compact in EXACT_STANDALONE_FILLER:
+        return "standalone_meta_token"
+    if n.compact in END_OF_TAKE_FILLER:
+        return "end_of_take_filler"
+    if n.compact in EXACT_STANDALONE_PRODUCTION_DIRECTIONS:
         return "standalone_production_direction"
-    if n.compact in FILLER_RESTART_EXACT_PATTERNS:
-        return "restart_or_interruption_language"
-    if any(starts_phrase(n, pat) for pat in FILLER_RESTART_LEADING_PATTERNS):
+    if any(starts_phrase(n, pat) for pat in LEADING_PRODUCTION_DIRECTIONS):
         return "restart_or_interruption_language"
     meta_reason = production_meta_rule(text)
     if meta_reason:
         return meta_reason
-    if has_any_phrase(n, FILLER_PATTERNS):
+    if SAFE_MULTIWORD_META_PHRASES and has_any_phrase(n, SAFE_MULTIWORD_META_PHRASES):
         return "production_meta_phrase"
     return None
 

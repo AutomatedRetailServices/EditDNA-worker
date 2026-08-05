@@ -644,3 +644,78 @@ def test_consolidated_heuristic_matrix(category, text, expected_slot, expected_k
     pipeline.tag_clips_heuristic([clip])
     assert clip["slot"] == expected_slot, category
     assert clip["meta"]["keep"] is expected_keep, category
+
+FILLER_META_INVENTORY_POSITIVE_CASES = [
+    ("thanks", "standalone_meta_token"),
+    ("Thank you.", "standalone_meta_token"),
+    ("Okay, thanks.", "standalone_meta_token"),
+    ("All right, thank you.", "standalone_meta_token"),
+    ("Thanks, that's it.", "end_of_take_filler"),
+    ("Thank you, we're done.", "end_of_take_filler"),
+    ("Okay.", "standalone_meta_token"),
+    ("Alright.", "standalone_meta_token"),
+    ("Wait.", "standalone_meta_token"),
+    ("Wait, no.", "standalone_production_direction"),
+    ("Hold on.", "standalone_production_direction"),
+    ("Hold on, let me restart.", "restart_or_interruption_language"),
+    ("Let me redo that.", "restart_or_interruption_language"),
+    ("Do that again.", "standalone_production_direction"),
+    ("Restart that.", "restart_or_interruption_language"),
+    ("Start over.", "production_meta_phrase"),
+    ("Take two.", "production_meta_phrase"),
+    ("Take three.", "production_meta_phrase"),
+    ("Take number two.", "production_meta_phrase"),
+    ("Camera rolling.", "production_meta_phrase"),
+    ("We're rolling.", "production_meta_phrase"),
+    ("Is that good?", "standalone_meta_token"),
+    ("Am I saying it right?", "standalone_meta_token"),
+    ("Cut that.", "standalone_production_direction"),
+]
+
+
+@pytest.mark.parametrize("text,expected_rule", FILLER_META_INVENTORY_POSITIVE_CASES)
+def test_filler_meta_inventory_positive_cases_are_discarded(text, expected_rule):
+    assert pipeline.filler_rule(text) == expected_rule
+    clip = pipeline.make_base_clip("filler", 0, 1, text)
+    pipeline.tag_clips_heuristic([clip])
+    assert clip["meta"]["keep"] is False
+    assert pipeline.select_clean_cut_clip_ids([clip]) == []
+
+
+FILLER_META_INVENTORY_NEGATIVE_CASES = [
+    "Thanks to this serum, I feel confident.",
+    "Thanks to the formula, my skin stays hydrated.",
+    "Thank you for making this so easy to use.",
+    "I recommend it because the results speak for themselves, thank you all for watching.",
+    "This works thanks to the lightweight texture.",
+    "Okay, this shade is really pretty.",
+    "Alright, this is the one I use every day.",
+    "But wait, there's more.",
+    "Wait until you see the next feature.",
+    "These lashes hold on all day.",
+    "The formula holds on through the workout.",
+    "This helps you start again after a setback.",
+    "Restart your routine.",
+    "I take two gummies every morning.",
+    "Take two capsules daily.",
+    "That's why I recommend two shades.",
+    "This applicator keeps the product rolling on smoothly.",
+    "We are rolling out three new shades.",
+    "I cut that crease with this brush.",
+    "That one good ingredient makes it work.",
+    "I remember why this formula worked for me.",
+]
+
+
+@pytest.mark.parametrize("text", FILLER_META_INVENTORY_NEGATIVE_CASES)
+def test_filler_meta_inventory_negative_cases_remain_keepable(text):
+    assert pipeline.filler_rule(text) is None, text
+    clip = pipeline.make_base_clip("valid", 0, 1, text)
+    pipeline.tag_clips_heuristic([clip])
+    assert clip["meta"]["keep"] is True, text
+    assert pipeline.select_clean_cut_clip_ids([clip]) == ["valid"], text
+
+
+def test_no_generic_filler_collection_uses_phrase_matching():
+    assert not hasattr(pipeline, "FILLER_PATTERNS")
+    assert pipeline.SAFE_MULTIWORD_META_PHRASES == ()
