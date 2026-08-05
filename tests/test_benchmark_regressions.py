@@ -488,3 +488,47 @@ def test_holiday_feature_change_preserves_other_slot_behavior():
     assert pipeline.classify_slot("These are so cute, they are all lip glosses.") == "BENEFITS"
     assert pipeline.classify_slot("Buy this today.") == "CTA"
     assert pipeline.classify_slot("Ordinary narration without a cue.") == "OTHER"
+
+
+def test_grab_language_requires_viewer_directed_purchase_context():
+    cta_examples = [
+        "Grab some below.",
+        "You can grab some using the link.",
+        "Grab them while they're available.",
+        "Go grab yours.",
+        "Tap the link and grab one.",
+        "Grab this set today.",
+        "You can grab them in a set of three.",
+        "So if you know anyone who loves lip glosses or you yourself want them, grab some up. You can grab them up in a set of one, two, or three.",
+    ]
+    for text in cta_examples:
+        assert pipeline.classify_slot(text) == "CTA", text
+
+
+def test_grab_narration_without_viewer_action_is_not_cta():
+    non_cta_examples = [
+        "I grab some before the gym.",
+        "I need to grab someone to help.",
+        "She told me to grab them from the table.",
+        "I had to grab some supplies.",
+        "We grabbed them before leaving.",
+    ]
+    for text in non_cta_examples:
+        assert pipeline.classify_slot(text) != "CTA", text
+        clip = pipeline.make_base_clip("grab", 0, 1, text)
+        pipeline.tag_clips_heuristic([clip])
+        assert clip["meta"]["keep"] is True, text
+
+
+def test_grab_cta_change_preserves_other_slot_behavior():
+    assert pipeline.classify_slot("Get yours today.") == "CTA"
+    assert pipeline.classify_slot("Shop now.") == "CTA"
+    assert pipeline.classify_slot("Buy now.") == "CTA"
+    assert pipeline.classify_slot("Tap the link to shop.") == "CTA"
+    assert pipeline.classify_slot("Click below to buy.") == "CTA"
+    assert pipeline.classify_slot("Order now.") == "CTA"
+    assert pipeline.classify_slot("Honestly, for me, this lasted all day.") == "STORY"
+    assert pipeline.classify_slot("I get so many compliments.") == "PROOF"
+    assert pipeline.classify_slot("These are so cute, they are all lip glosses.") == "BENEFITS"
+    assert pipeline.classify_slot("It includes a stocking, a Santa hat, a Christmas tree, and a snowman.") == "FEATURES"
+    assert pipeline.classify_slot("Ordinary narration without a cue.") == "OTHER"

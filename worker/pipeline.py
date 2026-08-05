@@ -801,17 +801,37 @@ def looks_like_dependent_tail(text: str) -> bool:
     return False
 
 
+def has_grab_cta_context(tokens: List[str], compact: str) -> bool:
+    if "grab" not in tokens:
+        return False
+    product_context = any(
+        token in tokens
+        for token in {"below", "link", "available", "today", "set", "order", "yours", "product", "collection"}
+    )
+    viewer_context = compact.startswith(("grab ", "go grab ")) or "you can grab" in compact or "you could grab" in compact
+    grab_target = any(
+        phrase in compact
+        for phrase in (
+            "grab some", "grab them", "grab one", "grab yours", "grab this", "grab that",
+            "grab a set", "grab the set", "grab this set",
+        )
+    )
+    return viewer_context and grab_target and product_context
+
+
 def has_cta_action_context(text: str) -> bool:
     t = text.lower()
     tokens = _normalized_words(text)
     compact = " ".join(tokens)
     cta_phrase_cues = [
-        "click the link", "click below", "tap the link", "shop now", "get yours", "grab one",
-        "grab some", "grab them", "link below", "drop it down below",
+        "click the link", "click below", "tap the link", "shop now", "get yours",
+        "link below", "drop it down below",
         "check these out", "check them out", "i left it for you", "add to cart", "order now",
         "check the link",
     ]
     if any(p in t for p in cta_phrase_cues):
+        return True
+    if has_grab_cta_context(tokens, compact):
         return True
     if not tokens:
         return False
