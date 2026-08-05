@@ -83,3 +83,12 @@ def test_composer_preserves_source_order_for_early_cta():
     composer = pipeline.build_composer([cta, feature, benefit])
     assert composer["used_clip_ids"] == ["cta", "feature", "benefit"]
     assert composer["cta_id"] == "cta"
+
+
+def test_clean_cut_restart_detection_does_not_call_slot_classifier(monkeypatch):
+    monkeypatch.setattr(pipeline, "classify_slot", lambda _text: (_ for _ in ()).throw(AssertionError("slot classifier called")))
+    cta = _clip("cta", 50, 55, "So I'm going to drop it down below so you can go check these out")
+    hook = _clip("hook", 55.1, 56.0, "I found the perfect.")
+    merged = pipeline.merge_incomplete_phrases([cta, hook])
+    assert [clip["id"] for clip in merged] == ["cta", "hook"]
+    assert merged[0]["meta"]["merge_diagnostic"] == "merge_prevented_semantic_restart"

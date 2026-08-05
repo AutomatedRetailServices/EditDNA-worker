@@ -448,13 +448,26 @@ def looks_incomplete(text: str) -> bool:
     return False
 
 
+def looks_like_completed_spoken_thought(text: str) -> bool:
+    """Clean-cut boundary cue that does not depend on commercial slot labels."""
+    t = text.strip().lower()
+    if t.endswith((".", "?", "!")):
+        return True
+    return any(
+        phrase in t
+        for phrase in (
+            "drop it down below", "check these out", "check them out",
+            "link below", "link in bio", "get yours",
+        )
+    )
+
+
 def is_semantic_restart_after_complete(previous_text: str, next_text: str) -> bool:
     prev = previous_text.strip().lower()
     nxt = next_text.strip().lower()
     if not prev or not nxt:
         return False
-    completed = prev.endswith((".", "?", "!")) or classify_slot(prev) == "CTA"
-    if not completed:
+    if not looks_like_completed_spoken_thought(prev):
         return False
     return nxt.startswith((
         "i found", "i found the perfect", "here's", "here is", "let me show",
@@ -493,8 +506,12 @@ def merge_incomplete_phrases(clips: List[Dict[str, Any]]) -> List[Dict[str, Any]
                 text[0].isalpha() and
                 not is_semantic_restart_after_complete(text, next_text)
             )
-            if not can_merge and is_semantic_restart_after_complete(text, next_text):
+            restart_prevented = not can_merge and is_semantic_restart_after_complete(text, next_text)
+            if restart_prevented:
                 c.setdefault("meta", {})["merge_diagnostic"] = "merge_prevented_semantic_restart"
+                merged.append(c)
+                i += 1
+                continue
 
             if can_merge:
                 new_text = (text + " " + next_text).strip()
@@ -659,7 +676,6 @@ def looks_like_dependent_tail(text: str) -> bool:
 
 def classify_slot_rule(text: str) -> tuple[str, str]:
     t = text.lower()
-    words = _normalized_words(text)
 
     if any(p in t for p in ["start over", "take two", "camera rolling"]):
         return "OTHER", "production_meta_phrase"
