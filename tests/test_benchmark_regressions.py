@@ -532,3 +532,50 @@ def test_grab_cta_change_preserves_other_slot_behavior():
     assert pipeline.classify_slot("These are so cute, they are all lip glosses.") == "BENEFITS"
     assert pipeline.classify_slot("It includes a stocking, a Santa hat, a Christmas tree, and a snowman.") == "FEATURES"
     assert pipeline.classify_slot("Ordinary narration without a cue.") == "OTHER"
+
+
+def test_smart_and_ascii_apostrophes_normalize_equivalently():
+    pairs = [
+        ("Let’s start over.", "Let's start over."),
+        ("We’re rolling.", "We're rolling."),
+        ("I’m starting again.", "I'm starting again."),
+        ("That’s take two.", "That's take two."),
+    ]
+    for smart, ascii_text in pairs:
+        assert pipeline._normalized_words(smart) == pipeline._normalized_words(ascii_text)
+
+
+def test_smart_apostrophe_production_commands_are_removed():
+    production_examples = [
+        "Let’s start over.",
+        "We’re rolling.",
+        "I’m starting again.",
+        "That’s take two.",
+        "We’re on take three.",
+        "Let's start over.",
+        "We're rolling.",
+        "I'm starting again.",
+        "That's take two.",
+    ]
+    for text in production_examples:
+        slot, rule = pipeline.classify_slot_rule(text)
+        assert (slot, rule) == ("OTHER", "production_meta_phrase"), text
+        clip = pipeline.make_base_clip("prod", 0, 1, text)
+        pipeline.tag_clips_heuristic([clip])
+        assert clip["meta"]["keep"] is False, text
+        assert clip["meta"]["filler_rule"] == "production_meta_phrase", text
+
+
+def test_commercial_narration_with_contractions_remains_keepable():
+    narration_examples = [
+        "It’s one of my favorite products.",
+        "You’re going to love this texture.",
+        "I’m using this every morning.",
+        "That’s why I recommend it.",
+    ]
+    for text in narration_examples:
+        slot, rule = pipeline.classify_slot_rule(text)
+        assert (slot, rule) != ("OTHER", "production_meta_phrase"), text
+        clip = pipeline.make_base_clip("contract", 0, 1, text)
+        pipeline.tag_clips_heuristic([clip])
+        assert clip["meta"]["keep"] is True, text

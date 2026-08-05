@@ -706,8 +706,21 @@ TAIL_DEPENDENT_STARTS = [
 ]
 
 
+APOSTROPHE_TRANSLATION = str.maketrans({
+    "’": "'",
+    "‘": "'",
+    "‛": "'",
+    "ʼ": "'",
+    "`": "'",
+})
+
+
+def normalize_match_text(text: str) -> str:
+    return (text or "").translate(APOSTROPHE_TRANSLATION).lower()
+
+
 def _normalized_words(text: str) -> List[str]:
-    return re.findall(r"[a-z0-9']+", text.lower())
+    return re.findall(r"[a-z0-9']+", normalize_match_text(text))
 
 
 def is_camera_rolling_slate(text: str) -> bool:
@@ -726,7 +739,7 @@ def is_camera_rolling_slate(text: str) -> bool:
 
 
 def production_meta_rule(text: str, include_camera_rolling: bool = True) -> Optional[str]:
-    t = re.sub(r"\s+", " ", text.lower()).strip()
+    t = re.sub(r"\s+", " ", normalize_match_text(text)).strip()
     compact = " ".join(_normalized_words(text))
     if not compact:
         return None
@@ -742,7 +755,10 @@ def production_meta_rule(text: str, include_camera_rolling: bool = True) -> Opti
         return "production_meta_phrase"
     if include_camera_rolling and is_camera_rolling_slate(text):
         return "production_meta_phrase"
-    if compact in {"take two", "okay take two", "this is take two", "take number two"}:
+    if compact in {
+        "take two", "okay take two", "this is take two", "take number two",
+        "i'm starting again", "that's take two", "we're on take three",
+    }:
         return "production_meta_phrase"
     if compact.startswith(("take two let's", "take two let us", "take number two")):
         return "production_meta_phrase"
@@ -750,7 +766,7 @@ def production_meta_rule(text: str, include_camera_rolling: bool = True) -> Opti
 
 
 def filler_rule(text: str) -> Optional[str]:
-    t = re.sub(r"\s+", " ", text.lower()).strip()
+    t = re.sub(r"\s+", " ", normalize_match_text(text)).strip()
     words = _normalized_words(text)
     compact = " ".join(words)
     if not words:
@@ -778,7 +794,7 @@ def looks_like_filler(text: str) -> bool:
 
 
 def looks_like_dependent_tail(text: str) -> bool:
-    t = text.lower().strip()
+    t = normalize_match_text(text).strip()
     if not t:
         return False
 
@@ -820,7 +836,7 @@ def has_grab_cta_context(tokens: List[str], compact: str) -> bool:
 
 
 def has_cta_action_context(text: str) -> bool:
-    t = text.lower()
+    t = normalize_match_text(text)
     tokens = _normalized_words(text)
     compact = " ".join(tokens)
     cta_phrase_cues = [
@@ -860,7 +876,7 @@ def has_product_enumeration_evidence(text: str) -> bool:
 
 
 def classify_slot_rule(text: str) -> tuple[str, str]:
-    t = text.lower()
+    t = normalize_match_text(text)
 
     meta_reason = production_meta_rule(text)
     if meta_reason:
