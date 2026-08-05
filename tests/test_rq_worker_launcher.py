@@ -43,10 +43,12 @@ class FakeWorker:
         self.connection = connection
         self.worker_ttl = worker_ttl
         self.work_calls = 0
+        self.work_kwargs = []
         FakeWorker.instances.append(self)
 
-    def work(self):
+    def work(self, **kwargs):
         self.work_calls += 1
+        self.work_kwargs.append(kwargs)
         if FakeWorker.work_exception is not None:
             raise FakeWorker.work_exception
         return FakeWorker.work_result
@@ -136,6 +138,7 @@ def test_worker_receives_queue_connection_and_worker_ttl(monkeypatch):
     assert worker.connection is FakeRedis.connection
     assert worker.worker_ttl == 3600
     assert worker.work_calls == 1
+    assert worker.work_kwargs == [{"with_scheduler": True}]
 
 
 def test_main_exits_zero_when_worker_work_returns_true(monkeypatch):
@@ -145,6 +148,7 @@ def test_main_exits_zero_when_worker_work_returns_true(monkeypatch):
     assert rq_worker.main() == 0
 
     assert FakeWorker.instances[0].work_calls == 1
+    assert FakeWorker.instances[0].work_kwargs == [{"with_scheduler": True}]
 
 
 def test_main_exits_zero_when_worker_work_returns_false(monkeypatch):
@@ -154,6 +158,7 @@ def test_main_exits_zero_when_worker_work_returns_false(monkeypatch):
     assert rq_worker.main() == 0
 
     assert FakeWorker.instances[0].work_calls == 1
+    assert FakeWorker.instances[0].work_kwargs == [{"with_scheduler": True}]
 
 
 def test_main_exits_nonzero_when_worker_work_raises_without_credentials(monkeypatch, capsys):
@@ -165,6 +170,7 @@ def test_main_exits_nonzero_when_worker_work_raises_without_credentials(monkeypa
 
     output = capsys.readouterr()
     combined = output.out + output.err
+    assert FakeWorker.instances[0].work_kwargs == [{"with_scheduler": True}]
     assert "RQ worker exited unexpectedly (RuntimeError)" in output.err
     assert "super-secret" not in combined
     assert "user:super-secret" not in combined
