@@ -740,7 +740,9 @@ def looks_like_dependent_tail(text: str) -> bool:
     if not t:
         return False
 
-    words = t.split()
+    words = _normalized_words(t)
+    if not words:
+        return False
     if len(words) > 4:
         return False
 
@@ -748,10 +750,51 @@ def looks_like_dependent_tail(text: str) -> bool:
         if t.endswith(suf):
             return True
 
+    if len(words) == 1 and words[0] in TAIL_DEPENDENT_STARTS:
+        return True
+
     if words[0] in TAIL_DEPENDENT_STARTS and not t.endswith((".", "?", "!")):
         return True
 
     return False
+
+
+def has_cta_action_context(text: str) -> bool:
+    t = text.lower()
+    tokens = _normalized_words(text)
+    compact = " ".join(tokens)
+    cta_phrase_cues = [
+        "click the link", "click below", "tap the link", "shop now", "get yours", "grab one",
+        "grab some", "grab them", "link below", "drop it down below",
+        "check these out", "check them out", "i left it for you", "add to cart", "order now",
+        "check the link",
+    ]
+    if any(p in t for p in cta_phrase_cues):
+        return True
+    if not tokens:
+        return False
+    if tokens[0] in {"buy", "shop"}:
+        return True
+    return any(
+        phrase in compact
+        for phrase in (
+            "you can buy", "you can shop", "you could buy", "you could shop",
+            "click below to buy", "click below to shop", "tap the link to buy", "tap the link to shop",
+            "link below to buy", "link below to shop",
+        )
+    )
+
+
+def has_product_enumeration_evidence(text: str) -> bool:
+    tokens = _normalized_words(text)
+    if len(re.findall(r",", text)) < 1 or "and" not in tokens:
+        return False
+    product_terms = {
+        "stocking", "santa", "hat", "tree", "snowman", "shade", "shades", "color", "colors",
+        "design", "designs", "variant", "variants", "set", "pack", "gloss", "glosses", "item", "items",
+        "scent", "scents", "flavor", "flavors", "size", "sizes", "option", "options",
+    }
+    return sum(1 for token in tokens if token in product_terms) >= 2
 
 
 def classify_slot_rule(text: str) -> tuple[str, str]:
@@ -760,14 +803,7 @@ def classify_slot_rule(text: str) -> tuple[str, str]:
     if any(p in t for p in ["start over", "take two", "camera rolling"]):
         return "OTHER", "production_meta_phrase"
 
-    cta_phrase_cues = [
-        "click the link", "tap the link", "shop now", "get yours", "grab one",
-        "grab some", "grab them", "link below", "drop it down below",
-        "check these out", "check them out", "i left it for you", "add to cart", "order now",
-        "check the link",
-    ]
-    cta_token_cues = {"buy", "shop"}
-    if any(p in t for p in cta_phrase_cues) or any(token in cta_token_cues for token in _normalized_words(text)):
+    if has_cta_action_context(text):
         return "CTA", "direct_purchase_or_action_language"
 
     if ("?" in t or t.startswith(("if ", "hey ", "listen", "stop scrolling", "ladies", "guys"))
@@ -825,6 +861,24 @@ def classify_slot_rule(text: str) -> tuple[str, str]:
     if any(
         p in t
         for p in [
+            "because i found",
+            "i've been using",
+            "i've tried",
+            "honestly",
+            "for me",
+            "let me tell you",
+            "when i",
+            "at first",
+            "the first time",
+            "my experience",
+            "i discovered",
+        ]
+    ):
+        return "STORY", "personal_story_language"
+
+    if any(
+        p in t
+        for p in [
             "each gummy",
             "packed with",
             "ingredients",
@@ -841,25 +895,8 @@ def classify_slot_rule(text: str) -> tuple[str, str]:
             "included", "includes", "variants", "designs", "stocking", "santa hat",
             "christmas tree", "snowman", "colors", "shades",
         ]
-    ) or len(re.findall(r",", text)) >= 2:
+    ) or has_product_enumeration_evidence(text):
         return "FEATURES", "product_details_quantity_variants_or_enumeration"
-
-    if any(
-        p in t
-        for p in [
-            "because i found",
-            "i've been using",
-            "i've tried",
-            "honestly",
-            "for me",
-            "let me tell you",
-            "when i",
-            "the first time",
-            "my experience",
-            "i discovered",
-        ]
-    ):
-        return "STORY", "personal_story_language"
 
     if looks_like_filler(text) or len(t.strip().split()) < 2:
         return "OTHER", "filler_or_too_short"

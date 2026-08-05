@@ -269,3 +269,62 @@ def test_shop_substrings_are_not_cta_commands():
     assert pipeline.classify_slot("I edited this in Photoshop.") != "CTA"
     assert pipeline.classify_slot("The workshops begin tomorrow.") != "CTA"
     assert pipeline.classify_slot("This was photoshopped.") != "CTA"
+
+
+def test_single_token_cta_verbs_require_action_context():
+    cta_examples = [
+        "Buy this today.",
+        "Buy now.",
+        "You can buy it below.",
+        "Shop now.",
+        "Shop these shades.",
+        "You can shop the collection below.",
+        "Tap the link to shop.",
+        "Click below to buy.",
+    ]
+    for text in cta_examples:
+        assert pipeline.classify_slot(text) == "CTA", text
+
+
+def test_buy_and_shop_mentions_without_viewer_action_are_not_cta():
+    non_cta_examples = [
+        "I went to the shop with my mom.",
+        "The shop closes at five.",
+        "I decided to buy it yesterday.",
+        "This is what I buy every summer.",
+        "She went shopping after work.",
+    ]
+    for text in non_cta_examples:
+        assert pipeline.classify_slot(text) != "CTA", text
+
+
+def test_commas_alone_do_not_force_features_over_story():
+    story_examples = [
+        "Honestly, for me, this lasted all day.",
+        "At first, for me, it felt a little different.",
+        "When I opened it, honestly, I noticed the texture first.",
+    ]
+    for text in story_examples:
+        assert pipeline.classify_slot(text) == "STORY", text
+
+
+def test_product_enumeration_still_classifies_as_features():
+    assert pipeline.classify_slot("a stocking, a Santa hat, a Christmas tree, and a snowman.") == "FEATURES"
+
+
+def test_isolated_dependent_tail_fragments_remain_excluded():
+    for text in ["So.", "But.", "And."]:
+        clip = pipeline.make_base_clip("tail", 0, 1, text)
+        pipeline.tag_clips_heuristic([clip])
+        assert clip["meta"]["keep"] is False, text
+
+
+def test_complete_sentences_starting_with_dependent_words_remain_eligible():
+    for text in [
+        "So this is the shade I use every day.",
+        "But this one feels much softer.",
+        "And it comes with three colors.",
+    ]:
+        clip = pipeline.make_base_clip("complete", 0, 1, text)
+        pipeline.tag_clips_heuristic([clip])
+        assert clip["meta"]["keep"] is True, text
