@@ -715,7 +715,17 @@ def production_meta_rule(text: str, include_camera_rolling: bool = True) -> Opti
     compact = " ".join(_normalized_words(text))
     if not compact:
         return None
-    if "start over" in t or (include_camera_rolling and "camera rolling" in t):
+    start_over_commands = {
+        "start over",
+        "let's start over",
+        "okay start over",
+        "no start over",
+        "can we start over",
+        "i need to start over",
+    }
+    if compact in start_over_commands or compact.startswith("start over from"):
+        return "production_meta_phrase"
+    if include_camera_rolling and "camera rolling" in t:
         return "production_meta_phrase"
     if compact in {"take two", "okay take two", "this is take two", "take number two"}:
         return "production_meta_phrase"

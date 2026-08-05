@@ -367,3 +367,45 @@ def test_take_two_change_preserves_recognized_feature_benefit_story_behavior():
     assert pipeline.classify_slot("It comes with three shades.") == "FEATURES"
     assert pipeline.classify_slot("It helps you feel confident.") == "BENEFITS"
     assert pipeline.classify_slot("Honestly, for me, this lasted all day.") == "STORY"
+
+
+def test_start_over_commands_are_production_meta():
+    command_examples = [
+        "Start over.",
+        "Let's start over.",
+        "Okay, start over.",
+        "No, start over.",
+        "Start over from the beginning.",
+        "Can we start over?",
+        "I need to start over.",
+    ]
+    for text in command_examples:
+        assert pipeline.classify_slot_rule(text) == ("OTHER", "production_meta_phrase"), text
+        clip = pipeline.make_base_clip("restart", 0, 1, text)
+        pipeline.tag_clips_heuristic([clip])
+        assert clip["meta"]["keep"] is False, text
+        assert clip["meta"]["filler_rule"] in {"production_meta_phrase", "restart_or_interruption_language"}, text
+
+
+def test_start_over_inside_valid_narration_is_keepable():
+    narration_examples = [
+        "This routine helps you start over with clearer skin.",
+        "The program lets you start over whenever you need.",
+        "I had to start over after changing my routine.",
+        "You can start over with a clean base.",
+        "Starting over was the best decision for my skin.",
+    ]
+    for text in narration_examples:
+        slot, rule = pipeline.classify_slot_rule(text)
+        assert (slot, rule) != ("OTHER", "production_meta_phrase"), text
+        clip = pipeline.make_base_clip("narration", 0, 1, text)
+        pipeline.tag_clips_heuristic([clip])
+        assert clip["meta"]["keep"] is True, text
+        assert clip["meta"].get("filler_rule") != "production_meta_phrase", text
+
+
+def test_existing_wait_redo_restart_cue_still_behaves_as_filler():
+    clip = pipeline.make_base_clip("redo", 0, 1, "Wait, let me do that again.")
+    pipeline.tag_clips_heuristic([clip])
+    assert clip["meta"]["keep"] is False
+    assert clip["meta"]["filler_rule"] == "restart_or_interruption_language"
