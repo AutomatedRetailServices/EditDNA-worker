@@ -538,6 +538,8 @@ def merge_incomplete_phrases(
                     "end": nxt["end"],
                     "chain_ids": c["chain_ids"] + nxt["chain_ids"],
                 }
+                if "source_end" in c or "source_end" in nxt:
+                    merged_clip["source_end"] = safe_float(nxt.get("source_end", nxt["end"]))
                 if c.get("words") or nxt.get("words"):
                     merged_clip["words"] = combined_words
                 merged.append(merged_clip)
@@ -604,8 +606,22 @@ def _record_boundary_discard(
 ) -> None:
     if diagnostics is None:
         return
+    source_index = int(clip_item.get("source_index", 0))
+    source_local = clip_item.get("source_local") or f"source_{source_index:03d}"
+    original_clip_id = str(clip_item.get("original_clip_id", clip_item.get("id", "")))
+    namespaced_clip_id = str(
+        clip_item.get("namespaced_clip_id")
+        or f"source_{source_index:03d}:{original_clip_id}"
+    )
     diagnostics.append({
-        "clip_id": clip_item.get("id"),
+        # clip_id remains the original local ID for single-source consumers;
+        # diagnostic_id/namespaced_clip_id provide deterministic global identity.
+        "clip_id": original_clip_id,
+        "original_clip_id": original_clip_id,
+        "namespaced_clip_id": namespaced_clip_id,
+        "diagnostic_id": f"{namespaced_clip_id}:{reason}",
+        "source_index": source_index,
+        "source_local": source_local,
         "reason": reason,
         "start": safe_float(clip_item.get("start")),
         "end": safe_float(clip_item.get("end", clip_item.get("start"))),
@@ -865,8 +881,18 @@ def looks_like_dependent_tail(text: str) -> bool:
 SAFE_EXPLICIT_CTA_PHRASES = (
     "buy now", "shop now", "order now", "tap the link", "click the link",
     "click below", "get yours", "add to cart", "check it out below",
-    "check these out below", "check them out below", "drop it down below",
+    "check it out", "check these out", "check them out", "drop it down below",
 )
+
+# Link-only instructions are CTAs without requiring a purchase verb. They are
+# matched as complete normalized utterances (after one optional discourse word)
+# so descriptive or historical mentions of a link cannot trigger this rule.
+EXPLICIT_LINK_CTA_PHRASES = {
+    "link below", "link in bio", "check the link", "check the link below",
+    "the link is below", "the link is in my bio", "tap the link",
+    "click the link", "click the link below",
+}
+LINK_CTA_LEADING_DISCOURSE = {"so", "okay", "and", "please"}
 
 IMPERATIVE_ACTION_VERBS = {"buy", "shop", "order", "grab", "get", "check", "tap", "click", "drop", "pick", "add"}
 CTA_MODIFIERS = {"now", "today", "below", "link", "yours", "available", "cart", "set", "collection"}
@@ -911,6 +937,13 @@ def _starts_explicit_cta(n: NormalizedText, phrase: str) -> bool:
     )
 
 
+def is_explicit_link_cta(n: NormalizedText) -> bool:
+    tokens = n.tokens
+    if tokens and tokens[0] in LINK_CTA_LEADING_DISCOURSE:
+        tokens = tokens[1:]
+    return " ".join(tokens) in EXPLICIT_LINK_CTA_PHRASES
+
+
 def cta_action_rule(text: str) -> Optional[str]:
     """Return a CTA rule only when an ambiguous action has viewer intent.
 
@@ -922,6 +955,9 @@ def cta_action_rule(text: str) -> Optional[str]:
     n = normalized_text(text)
     if not n.tokens:
         return None
+
+    if is_explicit_link_cta(n):
+        return "explicit_link_instruction"
 
     if any(_starts_explicit_cta(n, phrase) for phrase in SAFE_EXPLICIT_CTA_PHRASES):
         return "safe_explicit_cta_phrase"
@@ -1814,14 +1850,30 @@ def canonical_source_order(clips: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     ))
 
 
-def add_source_metadata(clips: List[Dict[str, Any]], source_index: int, source_local: str) -> None:
-    """Namespace multi-source clip IDs and attach source identity."""
+def add_source_metadata(
+    clips: List[Dict[str, Any]],
+    source_index: int,
+    source_local: str,
+    namespace_ids: bool = True,
+) -> None:
+    """Attach source identity before clean-cut validation and optionally namespace IDs."""
     prefix = f"source_{source_index:03d}:"
-    id_map = {str(c.get("id", "")): prefix + str(c.get("id", "")) for c in clips}
+    id_map = {
+        str(c.get("id", "")): (
+            prefix + str(c.get("id", "")) if namespace_ids else str(c.get("id", ""))
+        )
+        for c in clips
+    }
     for c in clips:
+        original_clip_id = str(c.get("original_clip_id", c.get("id", "")))
+        namespaced_clip_id = prefix + original_clip_id
+        c["original_clip_id"] = original_clip_id
+        c["namespaced_clip_id"] = namespaced_clip_id
         c["id"] = id_map[str(c.get("id", ""))]
         c["source_index"] = source_index
         c["source_local"] = source_local
+        c.setdefault("source_start", safe_float(c.get("start")))
+        c.setdefault("source_end", safe_float(c.get("end", c.get("start"))))
         for owner in (c, c.get("meta", {})):
             if isinstance(owner, dict) and isinstance(owner.get("chain_ids"), list):
                 owner["chain_ids"] = [id_map.get(str(cid), prefix + str(cid)) for cid in owner["chain_ids"]]
@@ -2337,6 +2389,14 @@ def run_pipeline(session_id: str, files: Optional[List[str]] = None,
           try:
             durations.append(probe_duration(path))
             raw_clips = sentence_boundary_micro_cuts(run_asr(path))
+            # Source identity must exist before merge/boundary validation because
+            # discarded clips never reach later enrichment stages.
+            add_source_metadata(
+                raw_clips,
+                i,
+                path,
+                namespace_ids=len(local_sources) > 1,
+            )
             if "discarded_diagnostics" in inspect.signature(merge_incomplete_phrases).parameters:
                 current=merge_incomplete_phrases(
                     raw_clips,
@@ -2344,9 +2404,6 @@ def run_pipeline(session_id: str, files: Optional[List[str]] = None,
                 )
             else:
                 current=merge_incomplete_phrases(raw_clips)
-            if len(local_sources)>1: add_source_metadata(current,i,path)
-            else:
-                for c in current: c["source_index"],c["source_local"]=0,path
             semantic_used = (enrich_clips_semantic(current, force_v2=True)
                              if use_semantic_v2 else enrich_clips_semantic(current))
             llm_used = semantic_used or llm_used

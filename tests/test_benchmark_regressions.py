@@ -1,5 +1,10 @@
-import pytest
+import io
+import json
 
+import pytest
+from botocore.exceptions import ClientError
+
+import benchmark
 from worker import pipeline
 
 
@@ -104,6 +109,11 @@ def test_adjacent_duplicate_residual_clips_are_reduced_to_one():
     assert [clip["id"] for clip in validated] == ["a"]
     assert diagnostics == [{
         "clip_id": "b",
+        "original_clip_id": "b",
+        "namespaced_clip_id": "source_000:b",
+        "diagnostic_id": "source_000:b:discarded_duplicate_residual_text",
+        "source_index": 0,
+        "source_local": "source_000",
         "reason": "discarded_duplicate_residual_text",
         "start": 1.01,
         "end": 1.2,
@@ -748,6 +758,8 @@ CTA_ACTION_POSITIVE_CASES = [
     ("tap", "Tap the link to order."),
     ("check", "Check it out below."),
     ("check", "Check these out below."),
+    ("check", "Check these out."),
+    ("check", "Check them out."),
     ("drop", "Drop it down below."),
     ("pick", "Pick yours today."),
     ("add", "Add to cart."),
@@ -825,3 +837,180 @@ def test_false_cta_narration_cannot_displace_real_cta_in_composer():
 
     assert composer["cta_id"] == "real_cta"
     assert composer["used_clip_ids"] == ["order_explanation", "real_cta"]
+
+
+EXPLICIT_LINK_CTA_CASES = [
+    "Link below.",
+    "Link in bio.",
+    "Check the link.",
+    "Check the link below.",
+    "The link is below.",
+    "The link is in my bio.",
+    "Tap the link.",
+    "Click the link below.",
+    "So, link below.",
+    "Okay, check the link.",
+    "And the link is in my bio.",
+]
+
+
+@pytest.mark.parametrize("text", EXPLICIT_LINK_CTA_CASES)
+def test_explicit_link_instructions_are_cta(text):
+    assert pipeline.cta_action_rule(text) == "explicit_link_instruction"
+    assert pipeline.classify_slot(text) == "CTA"
+
+
+DESCRIPTIVE_LINK_NARRATION_CASES = [
+    "The link between these ingredients is interesting.",
+    "I checked the link yesterday.",
+    "This chain has a broken link.",
+    "The website link was incorrect in the old post.",
+    "She said the link was unavailable.",
+]
+
+
+@pytest.mark.parametrize("text", DESCRIPTIVE_LINK_NARRATION_CASES)
+def test_descriptive_or_historical_link_narration_is_not_cta(text):
+    assert pipeline.cta_action_rule(text) is None
+    assert pipeline.classify_slot(text) != "CTA"
+
+
+def test_link_cta_is_selected_without_false_link_narration_displacing_it():
+    false_cta = _composer_clip("link_narration", 0, "OTHER", score=0.99)
+    false_cta["text"] = "I checked the link yesterday."
+    false_cta["slot"] = pipeline.classify_slot(false_cta["text"])
+    link_cta = _composer_clip("link_cta", 1, "CTA", score=0.80)
+    link_cta["text"] = "Link below."
+    link_cta["slot"] = pipeline.classify_slot(link_cta["text"])
+    alternative = _composer_clip("alternative_cta", 2, "CTA", score=0.70)
+    alternative["text"] = "Shop now."
+
+    composer = pipeline.build_composer([false_cta, link_cta, alternative])
+
+    assert composer["cta_id"] == "link_cta"
+    assert composer["used_clip_ids"] == ["link_narration", "link_cta"]
+
+
+def _source_fragment(source_index, source_local, *, duplicate=False):
+    text = "Repeated residual text." if duplicate else "Impossible residual fragment."
+    clip = _clip("ASR0000_c0", 1.0, 1.02, text)
+    pipeline.add_source_metadata([clip], source_index, source_local, namespace_ids=True)
+    return clip
+
+
+def test_multisource_discard_diagnostics_have_deterministic_source_namespaces():
+    diagnostics = []
+    for source_index, source_local in enumerate(("first.mp4", "second.mp4")):
+        fragment = _source_fragment(source_index, source_local)
+        assert pipeline.validate_clip_boundaries(
+            [fragment], discarded_diagnostics=diagnostics
+        ) == []
+
+    assert [item["original_clip_id"] for item in diagnostics] == ["ASR0000_c0", "ASR0000_c0"]
+    assert [item["namespaced_clip_id"] for item in diagnostics] == [
+        "source_000:ASR0000_c0", "source_001:ASR0000_c0",
+    ]
+    assert [item["diagnostic_id"] for item in diagnostics] == [
+        "source_000:ASR0000_c0:discarded_invalid_microfragment",
+        "source_001:ASR0000_c0:discarded_invalid_microfragment",
+    ]
+    assert [item["source_local"] for item in diagnostics] == ["first.mp4", "second.mp4"]
+    assert all(item["source_start"] == 1.0 and item["source_end"] == 1.02 for item in diagnostics)
+    assert all(item["text"] == "Impossible residual fragment." for item in diagnostics)
+
+
+def test_single_source_clip_id_stays_backward_compatible_with_global_diagnostic_id():
+    fragment = _clip("ASR0000_c0", 1.0, 1.02, "Impossible residual fragment.")
+    pipeline.add_source_metadata([fragment], 0, "only.mp4", namespace_ids=False)
+    diagnostics = []
+
+    pipeline.validate_clip_boundaries([fragment], discarded_diagnostics=diagnostics)
+
+    assert fragment["id"] == "ASR0000_c0"
+    assert diagnostics[0]["clip_id"] == "ASR0000_c0"
+    assert diagnostics[0]["namespaced_clip_id"] == "source_000:ASR0000_c0"
+    assert diagnostics[0]["source_local"] == "only.mp4"
+
+
+def test_namespaced_adjacent_duplicate_residual_keeps_source_diagnostics():
+    first = _clip("ASR0000_c0", 0, 1, "Repeated residual text.")
+    duplicate = _clip("ASR0000_c1", 1.01, 1.2, "Repeated residual text.")
+    clips = [first, duplicate]
+    pipeline.add_source_metadata(clips, 1, "second.mp4", namespace_ids=True)
+    diagnostics = []
+
+    validated = pipeline.validate_clip_boundaries(clips, discarded_diagnostics=diagnostics)
+
+    assert [clip["id"] for clip in validated] == ["source_001:ASR0000_c0"]
+    assert diagnostics[0]["reason"] == "discarded_duplicate_residual_text"
+    assert diagnostics[0]["original_clip_id"] == "ASR0000_c1"
+    assert diagnostics[0]["namespaced_clip_id"] == "source_001:ASR0000_c1"
+    assert diagnostics[0]["source_local"] == "second.mp4"
+
+
+def test_repaired_boundary_retains_source_identity_and_consistent_timing():
+    fragment = _clip("ASR0000_c0", 4.0, 4.02, "A repaired spoken fragment.")
+    fragment["words"] = [
+        {"start": 4.0, "end": 4.12, "word": " A"},
+        {"start": 4.13, "end": 4.30, "word": " repaired"},
+        {"start": 4.31, "end": 4.50, "word": " fragment."},
+    ]
+    pipeline.add_source_metadata([fragment], 2, "third.mp4", namespace_ids=True)
+
+    repaired = pipeline.validate_clip_boundaries([fragment])[0]
+
+    assert repaired["meta"]["boundary_diagnostic"] == "repaired_from_word_timestamps"
+    assert repaired["source_index"] == 2
+    assert repaired["source_local"] == "third.mp4"
+    assert repaired["id"] == repaired["namespaced_clip_id"] == "source_002:ASR0000_c0"
+    assert repaired["start"] == repaired["source_start"] == 4.0
+    assert repaired["end"] == repaired["source_end"] == 4.5
+
+
+class _BenchmarkDiagnosticS3:
+    def __init__(self):
+        self.storage = {}
+
+    def list_objects_v2(self, **_kwargs):
+        return {"Contents": [{"Key": "Editdna good videos/clip.mp4", "Size": 2000}], "IsTruncated": False}
+
+    def get_object(self, Bucket, Key):
+        if Key in self.storage:
+            body = self.storage[Key]
+        elif Key.endswith("take_judge_dataset.jsonl"):
+            body = b'{"session_id":"clip","clip_id":"old","text":"hello","keep":true,"slot":"HOOK","source":"good"}\n'
+        else:
+            raise ClientError({"Error": {"Code": "NoSuchKey"}}, "GetObject")
+        return {"ContentLength": len(body), "Body": io.BytesIO(body)}
+
+    def put_object(self, **kwargs):
+        self.storage[kwargs["Key"]] = kwargs["Body"]
+
+
+def test_benchmark_session_output_preserves_enriched_discard_diagnostics(monkeypatch):
+    for name, value in {
+        "S3_BUCKET": "test", "AWS_REGION": "us-east-1",
+        "AWS_ACCESS_KEY_ID": "test", "AWS_SECRET_ACCESS_KEY": "test",
+    }.items():
+        monkeypatch.setenv(name, value)
+    diagnostic = {
+        "source_index": 1, "source_local": "second.mp4", "original_clip_id": "ASR0000_c0",
+        "namespaced_clip_id": "source_001:ASR0000_c0",
+        "diagnostic_id": "source_001:ASR0000_c0:discarded_invalid_microfragment",
+        "clip_id": "ASR0000_c0", "source_start": 1.0, "source_end": 1.02,
+        "start": 1.0, "end": 1.02, "reason": "discarded_invalid_microfragment", "text": "fragment",
+    }
+    s3 = _BenchmarkDiagnosticS3()
+    request = {
+        "dataset_key": "editdna/training/take_judge_dataset.jsonl",
+        "source_prefixes": ["Editdna good videos/"], "mode": "old_vs_new",
+    }
+
+    benchmark.run_benchmark(
+        "diagnostic-job", request, s3=s3,
+        pipeline=lambda *_args: {"clips": [], "clean_cut_discard_diagnostics": [diagnostic]},
+    )
+
+    session_key = next(key for key in s3.storage if "/sessions/" in key)
+    session = json.loads(s3.storage[session_key])
+    assert session["clean_cut_discard_diagnostics"] == [diagnostic]
