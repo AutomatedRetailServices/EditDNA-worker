@@ -328,3 +328,42 @@ def test_complete_sentences_starting_with_dependent_words_remain_eligible():
         clip = pipeline.make_base_clip("complete", 0, 1, text)
         pipeline.tag_clips_heuristic([clip])
         assert clip["meta"]["keep"] is True, text
+
+
+def test_take_two_slate_language_is_production_meta():
+    slate_examples = [
+        "Take two.",
+        "Okay, take two.",
+        "This is take two.",
+        "Take two, let's go.",
+        "Take number two.",
+    ]
+    for text in slate_examples:
+        assert pipeline.classify_slot_rule(text) == ("OTHER", "production_meta_phrase"), text
+        clip = pipeline.make_base_clip("slate", 0, 1, text)
+        pipeline.tag_clips_heuristic([clip])
+        assert clip["meta"]["keep"] is False, text
+        assert clip["meta"]["filler_rule"] == "production_meta_phrase", text
+
+
+def test_take_two_dosage_and_usage_language_is_keepable_product_content():
+    usage_examples = [
+        "I take two gummies every morning.",
+        "Take two capsules daily.",
+        "You can take two tablets with food.",
+        "She takes two scoops after training.",
+        "I usually take two before bed.",
+    ]
+    for text in usage_examples:
+        slot, rule = pipeline.classify_slot_rule(text)
+        assert (slot, rule) != ("OTHER", "production_meta_phrase"), text
+        clip = pipeline.make_base_clip("usage", 0, 1, text)
+        pipeline.tag_clips_heuristic([clip])
+        assert clip["meta"]["keep"] is True, text
+        assert clip["meta"].get("filler_rule") != "production_meta_phrase", text
+
+
+def test_take_two_change_preserves_recognized_feature_benefit_story_behavior():
+    assert pipeline.classify_slot("It comes with three shades.") == "FEATURES"
+    assert pipeline.classify_slot("It helps you feel confident.") == "BENEFITS"
+    assert pipeline.classify_slot("Honestly, for me, this lasted all day.") == "STORY"

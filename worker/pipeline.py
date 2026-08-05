@@ -710,6 +710,20 @@ def _normalized_words(text: str) -> List[str]:
     return re.findall(r"[a-z0-9']+", text.lower())
 
 
+def production_meta_rule(text: str, include_camera_rolling: bool = True) -> Optional[str]:
+    t = re.sub(r"\s+", " ", text.lower()).strip()
+    compact = " ".join(_normalized_words(text))
+    if not compact:
+        return None
+    if "start over" in t or (include_camera_rolling and "camera rolling" in t):
+        return "production_meta_phrase"
+    if compact in {"take two", "okay take two", "this is take two", "take number two"}:
+        return "production_meta_phrase"
+    if compact.startswith(("take two let's", "take two let us", "take number two")):
+        return "production_meta_phrase"
+    return None
+
+
 def filler_rule(text: str) -> Optional[str]:
     t = re.sub(r"\s+", " ", text.lower()).strip()
     words = _normalized_words(text)
@@ -725,6 +739,9 @@ def filler_rule(text: str) -> Optional[str]:
     for pat in FILLER_RESTART_LEADING_PATTERNS:
         if compact.startswith(pat):
             return "restart_or_interruption_language"
+    meta_reason = production_meta_rule(text, include_camera_rolling=False)
+    if meta_reason:
+        return meta_reason
     for pat in FILLER_PATTERNS:
         if pat in t:
             return "production_meta_phrase"
@@ -800,8 +817,9 @@ def has_product_enumeration_evidence(text: str) -> bool:
 def classify_slot_rule(text: str) -> tuple[str, str]:
     t = text.lower()
 
-    if any(p in t for p in ["start over", "take two", "camera rolling"]):
-        return "OTHER", "production_meta_phrase"
+    meta_reason = production_meta_rule(text)
+    if meta_reason:
+        return "OTHER", meta_reason
 
     if has_cta_action_context(text):
         return "CTA", "direct_purchase_or_action_language"
