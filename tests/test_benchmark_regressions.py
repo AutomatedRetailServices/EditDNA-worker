@@ -92,3 +92,58 @@ def test_clean_cut_restart_detection_does_not_call_slot_classifier(monkeypatch):
     merged = pipeline.merge_incomplete_phrases([cta, hook])
     assert [clip["id"] for clip in merged] == ["cta", "hook"]
     assert merged[0]["meta"]["merge_diagnostic"] == "merge_prevented_semantic_restart"
+
+
+def test_adjacent_duplicate_residual_clips_are_reduced_to_one():
+    first = _clip("a", 0, 1, "Get yours today.")
+    duplicate = _clip("b", 1.01, 1.2, "Get yours today.")
+    diagnostics = []
+    validated = pipeline.validate_clip_boundaries([first, duplicate], discarded_diagnostics=diagnostics)
+    assert [clip["id"] for clip in validated] == ["a"]
+    assert diagnostics == [{
+        "clip_id": "b",
+        "reason": "discarded_duplicate_residual_text",
+        "start": 1.01,
+        "end": 1.2,
+        "source_start": 1.01,
+        "source_end": 1.2,
+        "text": "Get yours today.",
+    }]
+
+
+def test_repeated_cta_after_meaningful_gap_is_preserved():
+    first = _clip("early", 0, 1, "Get yours today.")
+    repeated = _clip("late", 20, 21, "Get yours today.")
+    validated = pipeline.validate_clip_boundaries([first, repeated])
+    assert [clip["id"] for clip in validated] == ["early", "late"]
+
+
+def test_identical_text_from_distinct_source_takes_is_preserved():
+    first = _clip("source0", 0, 1, "Get yours today.")
+    second = _clip("source1", 1.01, 1.2, "Get yours today.")
+    first.update(source_index=0, source_local="first.mp4", source_start=0, source_end=1)
+    second.update(source_index=1, source_local="second.mp4", source_start=1.01, source_end=1.2)
+    validated = pipeline.validate_clip_boundaries([first, second])
+    assert [clip["id"] for clip in validated] == ["source0", "source1"]
+
+
+def test_word_timestamp_repair_updates_source_bounds_when_present():
+    fragment = {
+        "id": "frag",
+        "start": 59.62,
+        "end": 59.64,
+        "source_start": 59.62,
+        "source_end": 59.64,
+        "text": "I found the perfect.",
+        "meta": {},
+        "words": [
+            {"start": 59.62, "end": 59.75, "word": " I"},
+            {"start": 59.76, "end": 59.90, "word": " found"},
+            {"start": 59.91, "end": 60.02, "word": " the"},
+            {"start": 60.03, "end": 60.20, "word": " perfect."},
+        ],
+    }
+    validated = pipeline.validate_clip_boundaries([fragment])
+    assert len(validated) == 1
+    assert validated[0]["start"] == validated[0]["source_start"] == 59.62
+    assert validated[0]["end"] == validated[0]["source_end"] == 60.20

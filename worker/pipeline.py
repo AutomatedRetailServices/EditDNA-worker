@@ -6,6 +6,7 @@ import copy
 import shutil
 import tempfile
 import re
+import inspect
 from typing import Callable, List, Dict, Any, Optional, Union
 
 import requests
@@ -475,7 +476,10 @@ def is_semantic_restart_after_complete(previous_text: str, next_text: str) -> bo
     ))
 
 
-def merge_incomplete_phrases(clips: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+def merge_incomplete_phrases(
+    clips: List[Dict[str, Any]],
+    discarded_diagnostics: Optional[List[Dict[str, Any]]] = None,
+) -> List[Dict[str, Any]]:
     """
     UNE frases incompletas con la siguiente si tiene sentido.
     """
@@ -544,7 +548,7 @@ def merge_incomplete_phrases(clips: List[Dict[str, Any]]) -> List[Dict[str, Any]
 
         i += 1
 
-    return validate_clip_boundaries(merged)
+    return validate_clip_boundaries(merged, discarded_diagnostics=discarded_diagnostics)
 
 
 def _word_bounds(clip: Dict[str, Any]) -> Optional[tuple[float, float]]:
@@ -559,9 +563,66 @@ def _word_bounds(clip: Dict[str, Any]) -> Optional[tuple[float, float]]:
     return min(s for s, _ in valid), max(e for _, e in valid)
 
 
-def validate_clip_boundaries(clips: List[Dict[str, Any]], min_duration: float = 0.08) -> List[Dict[str, Any]]:
+def _clip_source_identity(clip: Dict[str, Any]) -> tuple[Any, Any]:
+    return (clip.get("source_index"), clip.get("source_local"))
+
+
+def _shares_chain_or_source_boundary(previous: Dict[str, Any], current: Dict[str, Any]) -> bool:
+    previous_chain = set(previous.get("chain_ids") or previous.get("meta", {}).get("chain_ids") or [])
+    current_chain = set(current.get("chain_ids") or current.get("meta", {}).get("chain_ids") or [])
+    if previous_chain and current_chain and previous_chain.intersection(current_chain):
+        return True
+
+    previous_source = _clip_source_identity(previous)
+    current_source = _clip_source_identity(current)
+    known_source = any(value is not None for value in previous_source + current_source)
+    if known_source and previous_source != current_source:
+        return False
+
+    previous_source_end = previous.get("source_end")
+    current_source_start = current.get("source_start")
+    if previous_source_end is not None and current_source_start is not None:
+        return abs(safe_float(current_source_start) - safe_float(previous_source_end)) <= 0.25
+
+    return not known_source
+
+
+def _is_adjacent_residual_duplicate(previous: Dict[str, Any], current: Dict[str, Any], normalized_text: str) -> bool:
+    if not previous or not normalized_text:
+        return False
+    previous_text = " ".join(_normalized_words(previous.get("text") or ""))
+    if previous_text != normalized_text:
+        return False
+
+    previous_end = safe_float(previous.get("end", previous.get("start", 0.0)))
+    current_start = safe_float(current.get("start", previous_end))
+    current_end = safe_float(current.get("end", current_start))
+    temporal_residual = current_start <= previous_end + 0.25 and current_end >= previous_end - 0.25
+    return temporal_residual and _shares_chain_or_source_boundary(previous, current)
+
+
+def _record_boundary_discard(
+    diagnostics: Optional[List[Dict[str, Any]]], clip_item: Dict[str, Any], reason: str
+) -> None:
+    if diagnostics is None:
+        return
+    diagnostics.append({
+        "clip_id": clip_item.get("id"),
+        "reason": reason,
+        "start": safe_float(clip_item.get("start")),
+        "end": safe_float(clip_item.get("end", clip_item.get("start"))),
+        "source_start": safe_float(clip_item.get("source_start", clip_item.get("start"))),
+        "source_end": safe_float(clip_item.get("source_end", clip_item.get("end", clip_item.get("start")))),
+        "text": (clip_item.get("text") or "").strip(),
+    })
+
+
+def validate_clip_boundaries(
+    clips: List[Dict[str, Any]],
+    min_duration: float = 0.08,
+    discarded_diagnostics: Optional[List[Dict[str, Any]]] = None,
+) -> List[Dict[str, Any]]:
     valid: List[Dict[str, Any]] = []
-    previous_texts: set[str] = set()
     for clip_item in clips:
         text = (clip_item.get("text") or "").strip()
         bounds = _word_bounds(clip_item)
@@ -570,16 +631,23 @@ def validate_clip_boundaries(clips: List[Dict[str, Any]], min_duration: float = 
         if bounds and (end <= start or end - start < min_duration or start > bounds[0] + 0.02 or end < bounds[1] - 0.02):
             start, end = bounds
             clip_item["start"], clip_item["end"] = start, end
+            if "source_start" in clip_item:
+                clip_item["source_start"] = start
+            if "source_end" in clip_item:
+                clip_item["source_end"] = end
             clip_item.setdefault("meta", {})["boundary_diagnostic"] = "repaired_from_word_timestamps"
         duration = end - start
         if end <= start or (duration < min_duration and len(_normalized_words(text)) > 1):
-            clip_item.setdefault("meta", {})["boundary_diagnostic"] = "discarded_invalid_microfragment"
+            reason = "discarded_invalid_microfragment"
+            clip_item.setdefault("meta", {})["boundary_diagnostic"] = reason
+            _record_boundary_discard(discarded_diagnostics, clip_item, reason)
             continue
         normalized_text = " ".join(_normalized_words(text))
-        if normalized_text and normalized_text in previous_texts:
-            clip_item.setdefault("meta", {})["boundary_diagnostic"] = "discarded_duplicate_residual_text"
+        if _is_adjacent_residual_duplicate(valid[-1] if valid else {}, clip_item, normalized_text):
+            reason = "discarded_duplicate_residual_text"
+            clip_item.setdefault("meta", {})["boundary_diagnostic"] = reason
+            _record_boundary_discard(discarded_diagnostics, clip_item, reason)
             continue
-        previous_texts.add(normalized_text)
         valid.append(clip_item)
     return valid
 
@@ -2053,7 +2121,7 @@ def run_pipeline(session_id: str, files: Optional[List[str]] = None,
             check()
             report("downloading", 5 + (15 * (i + 1) // len(local_sources)), f"Downloaded source {i + 1} of {len(local_sources)}")
 
-        clips=[]; durations=[]
+        clips=[]; durations=[]; clean_cut_discard_diagnostics=[]
         llm_used=vision_used=bad_takes_used=boundaries_refined=take_judge_used=False
         take_judge_execution = {"requested": bool(TAKE_JUDGE_ENABLED or use_take_judge_v2), "sources": []}
         for i,path in enumerate(local_sources):
@@ -2061,7 +2129,14 @@ def run_pipeline(session_id: str, files: Optional[List[str]] = None,
           report("analyzing", 20 + (35 * i // len(local_sources)), f"Analyzing source {i + 1} of {len(local_sources)}")
           try:
             durations.append(probe_duration(path))
-            current=merge_incomplete_phrases(sentence_boundary_micro_cuts(run_asr(path)))
+            raw_clips = sentence_boundary_micro_cuts(run_asr(path))
+            if "discarded_diagnostics" in inspect.signature(merge_incomplete_phrases).parameters:
+                current=merge_incomplete_phrases(
+                    raw_clips,
+                    discarded_diagnostics=clean_cut_discard_diagnostics,
+                )
+            else:
+                current=merge_incomplete_phrases(raw_clips)
             if len(local_sources)>1: add_source_metadata(current,i,path)
             else:
                 for c in current: c["source_index"],c["source_local"]=0,path
@@ -2133,6 +2208,7 @@ def run_pipeline(session_id: str, files: Optional[List[str]] = None,
       "input_durations_sec":durations,"clips":clips,"slots":slots,"composer":composer,
       "composer_human":pretty_print_composer(clips,composer),"output_video_local":final,
       "output_video_url":output_url,"clean_cut_used_clip_ids":clean_ids,
+      "clean_cut_discard_diagnostics":clean_cut_discard_diagnostics,
       "clean_cut_output_video_local":final if clean_rendered else None,
       "clean_cut_output_video_url":output_url if clean_rendered else None,"asr":True,"semantic":True,
       "vision":vision_used,"llm_used":llm_used,"take_judge_used":take_judge_used,
