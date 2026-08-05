@@ -255,3 +255,17 @@ def test_selected_multi_clip_cta_block_remains_intact_in_source_order():
     composer = pipeline.build_composer([feature, cta_one, cta_two, weaker_cta])
     assert composer["cta_id"] == "cta_two"
     assert composer["used_clip_ids"] == ["feature", "cta_one", "cta_two"]
+
+
+def test_shop_token_cta_uses_word_boundaries():
+    assert pipeline.classify_slot("Shop now.") == "CTA"
+    assert pipeline.classify_slot("You can shop the collection below.") == "CTA"
+    assert pipeline.classify_slot("Shop these shades.") == "CTA"
+    assert pipeline.classify_slot("Tap the link to shop.") == "CTA"
+
+
+def test_shop_substrings_are_not_cta_commands():
+    assert pipeline.classify_slot("The workshop covers skincare basics.") != "CTA"
+    assert pipeline.classify_slot("I edited this in Photoshop.") != "CTA"
+    assert pipeline.classify_slot("The workshops begin tomorrow.") != "CTA"
+    assert pipeline.classify_slot("This was photoshopped.") != "CTA"
