@@ -147,3 +147,15 @@ def test_word_timestamp_repair_updates_source_bounds_when_present():
     assert len(validated) == 1
     assert validated[0]["start"] == validated[0]["source_start"] == 59.62
     assert validated[0]["end"] == validated[0]["source_end"] == 60.20
+
+
+def test_buy_token_cta_uses_word_boundaries():
+    assert pipeline.classify_slot("Buy this today.") == "CTA"
+    assert pipeline.classify_slot("You can buy it below.") == "CTA"
+    assert pipeline.classify_slot("Buy now.") == "CTA"
+
+
+def test_buy_substrings_are_not_cta_commands():
+    assert pipeline.classify_slot("Buyers love the results.") != "CTA"
+    assert pipeline.classify_slot("Buying this was part of my story.") != "CTA"
+    assert pipeline.classify_slot("The buyer reviewed the product.") != "CTA"

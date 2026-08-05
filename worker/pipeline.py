@@ -748,15 +748,14 @@ def classify_slot_rule(text: str) -> tuple[str, str]:
     if any(p in t for p in ["start over", "take two", "camera rolling"]):
         return "OTHER", "production_meta_phrase"
 
-    if any(
-        p in t
-        for p in [
-            "click the link", "tap the link", "shop now", "get yours", "grab one",
-            "grab some", "grab them", "buy", "shop ", "link below", "drop it down below",
-            "check these out", "check them out", "i left it for you", "add to cart", "order now",
-            "check the link",
-        ]
-    ):
+    cta_phrase_cues = [
+        "click the link", "tap the link", "shop now", "get yours", "grab one",
+        "grab some", "grab them", "shop ", "link below", "drop it down below",
+        "check these out", "check them out", "i left it for you", "add to cart", "order now",
+        "check the link",
+    ]
+    cta_token_cues = {"buy"}
+    if any(p in t for p in cta_phrase_cues) or any(token in cta_token_cues for token in _normalized_words(text)):
         return "CTA", "direct_purchase_or_action_language"
 
     if ("?" in t or t.startswith(("if ", "hey ", "listen", "stop scrolling", "ladies", "guys"))
