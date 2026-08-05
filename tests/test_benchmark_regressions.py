@@ -1,3 +1,5 @@
+import pytest
+
 from worker import pipeline
 
 
@@ -579,3 +581,66 @@ def test_commercial_narration_with_contractions_remains_keepable():
         clip = pipeline.make_base_clip("contract", 0, 1, text)
         pipeline.tag_clips_heuristic([clip])
         assert clip["meta"]["keep"] is True, text
+
+
+HEURISTIC_MATRIX_CASES = [
+    ("unicode", "Let’s start over.", "OTHER", False),
+    ("unicode", "Let's start over.", "OTHER", False),
+    ("unicode", "We’re rolling.", "OTHER", False),
+    ("unicode", "We're rolling.", "OTHER", False),
+    ("unicode", "It’s one of my favorite products.", "OTHER", True),
+    ("unicode", "You’re going to love this texture.", "OTHER", True),
+    ("production", "Wait, let me do that again.", "OTHER", False),
+    ("production", "Hold on.", "OTHER", False),
+    ("production", "No, restart.", "OTHER", False),
+    ("production", "Start over from the beginning.", "OTHER", False),
+    ("production", "Take two.", "OTHER", False),
+    ("production", "Camera is rolling.", "OTHER", False),
+    ("production_negative", "These lashes hold on all day.", "OTHER", True),
+    ("production_negative", "This routine helps you start over with clearer skin.", "BENEFITS", True),
+    ("production_negative", "I take two gummies every morning.", "OTHER", True),
+    ("production_negative", "We are rolling out three new shades.", "FEATURES", True),
+    ("cta", "Buy this today.", "CTA", True),
+    ("cta", "You can buy it below.", "CTA", True),
+    ("cta", "Shop these shades.", "CTA", True),
+    ("cta", "Tap the link to shop.", "CTA", True),
+    ("cta", "Grab them while they're available.", "CTA", True),
+    ("cta", "Order now.", "CTA", True),
+    ("cta_negative", "I decided to buy it yesterday.", "OTHER", True),
+    ("cta_negative", "The shop closes at five.", "OTHER", True),
+    ("cta_negative", "I grab some before the gym.", "OTHER", True),
+    ("cta_negative", "We grabbed them before leaving.", "OTHER", True),
+    ("cta_negative", "The workshop covers skincare basics.", "OTHER", True),
+    ("features", "It includes a stocking, a Santa hat, a Christmas tree, and a snowman.", "FEATURES", True),
+    ("features", "You get four designs: a stocking, Santa hat, tree, and snowman.", "FEATURES", True),
+    ("features", "The set comes with Christmas tree and snowman variants.", "FEATURES", True),
+    ("features", "It comes with three shades.", "FEATURES", True),
+    ("features_negative", "Honestly, for me, this lasted all day.", "STORY", True),
+    ("features_negative", "We placed it beside the Christmas tree.", "OTHER", True),
+    ("features_negative", "The snowman was in the background.", "OTHER", True),
+    ("story", "At first, for me, it felt a little different.", "STORY", True),
+    ("story", "When I opened it, honestly, I noticed the texture first.", "STORY", True),
+    ("proof", "I get so many compliments.", "PROOF", True),
+    ("proof", "Before and after was measurable.", "PROOF", True),
+    ("benefits", "It helps you feel confident.", "BENEFITS", True),
+    ("benefits", "These are so cute, they are all lip glosses.", "BENEFITS", True),
+    ("hook", "I found the perfect gift for our lip gloss girlies.", "HOOK", True),
+    ("hook", "Wait until you see the next feature.", "HOOK", True),
+    ("other", "Ordinary narration without a cue.", "OTHER", True),
+    ("other", "I opened the box and noticed the texture.", "OTHER", True),
+    ("tail", "So.", "OTHER", False),
+    ("tail", "But.", "OTHER", False),
+    ("tail", "And.", "OTHER", False),
+    ("tail_negative", "So this is the shade I use every day.", "OTHER", True),
+    ("tail_negative", "But this one feels much softer.", "OTHER", True),
+    ("tail_negative", "And it comes with three colors.", "FEATURES", True),
+]
+
+
+@pytest.mark.parametrize("category,text,expected_slot,expected_keep", HEURISTIC_MATRIX_CASES)
+def test_consolidated_heuristic_matrix(category, text, expected_slot, expected_keep):
+    assert pipeline.classify_slot(text) == expected_slot, category
+    clip = pipeline.make_base_clip(category, 0, 1, text)
+    pipeline.tag_clips_heuristic([clip])
+    assert clip["slot"] == expected_slot, category
+    assert clip["meta"]["keep"] is expected_keep, category

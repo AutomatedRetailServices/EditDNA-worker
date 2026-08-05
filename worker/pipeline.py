@@ -7,7 +7,8 @@ import shutil
 import tempfile
 import re
 import inspect
-from typing import Callable, List, Dict, Any, Optional, Union
+from dataclasses import dataclass
+from typing import Callable, List, Dict, Any, Optional, Union, Sequence
 
 import requests
 from faster_whisper import WhisperModel
@@ -451,26 +452,23 @@ def looks_incomplete(text: str) -> bool:
 
 def looks_like_completed_spoken_thought(text: str) -> bool:
     """Clean-cut boundary cue that does not depend on commercial slot labels."""
-    t = text.strip().lower()
-    if t.endswith((".", "?", "!")):
+    n = normalized_text(text)
+    if n.text.endswith((".", "?", "!")):
         return True
-    return any(
-        phrase in t
-        for phrase in (
-            "drop it down below", "check these out", "check them out",
-            "link below", "link in bio", "get yours",
-        )
-    )
+    return has_any_phrase(n, (
+        "drop it down below", "check these out", "check them out",
+        "link below", "link in bio", "get yours",
+    ))
 
 
 def is_semantic_restart_after_complete(previous_text: str, next_text: str) -> bool:
-    prev = previous_text.strip().lower()
-    nxt = next_text.strip().lower()
-    if not prev or not nxt:
+    prev = normalized_text(previous_text)
+    nxt = normalized_text(next_text)
+    if not prev.compact or not nxt.compact:
         return False
-    if not looks_like_completed_spoken_thought(prev):
+    if not looks_like_completed_spoken_thought(previous_text):
         return False
-    return nxt.startswith((
+    return any(starts_phrase(nxt, phrase) for phrase in (
         "i found", "i found the perfect", "here's", "here is", "let me show",
         "wait until", "if you", "have you", "are you", "stop scrolling",
     ))
@@ -712,20 +710,67 @@ APOSTROPHE_TRANSLATION = str.maketrans({
     "‛": "'",
     "ʼ": "'",
     "`": "'",
+    "“": '"',
+    "”": '"',
+    "„": '"',
+    "‟": '"',
+    "–": "-",
+    "—": "-",
+    "−": "-",
 })
 
 
+@dataclass(frozen=True)
+class NormalizedText:
+    raw: str
+    text: str
+    tokens: tuple[str, ...]
+    compact: str
+
+
 def normalize_match_text(text: str) -> str:
-    return (text or "").translate(APOSTROPHE_TRANSLATION).lower()
+    normalized = (text or "").translate(APOSTROPHE_TRANSLATION).lower()
+    return re.sub(r"\s+", " ", normalized).strip()
+
+
+def normalized_text(text: str) -> NormalizedText:
+    norm = normalize_match_text(text)
+    tokens = tuple(re.findall(r"[a-z0-9']+", norm))
+    return NormalizedText(raw=text or "", text=norm, tokens=tokens, compact=" ".join(tokens))
 
 
 def _normalized_words(text: str) -> List[str]:
-    return re.findall(r"[a-z0-9']+", normalize_match_text(text))
+    return list(normalized_text(text).tokens)
+
+
+def has_phrase(n: NormalizedText, phrase: str) -> bool:
+    phrase_compact = normalized_text(phrase).compact
+    return bool(phrase_compact) and f" {phrase_compact} " in f" {n.compact} "
+
+
+def starts_phrase(n: NormalizedText, phrase: str) -> bool:
+    phrase_compact = normalized_text(phrase).compact
+    return bool(phrase_compact) and (n.compact == phrase_compact or n.compact.startswith(phrase_compact + " "))
+
+
+def has_any_phrase(n: NormalizedText, phrases: Sequence[str]) -> bool:
+    return any(has_phrase(n, phrase) for phrase in phrases)
+
+
+# Heuristic precedence:
+# A. invalid/tail/microfragment (handled by boundary/tail validators)
+# B. verified filler or production meta
+# C. explicit viewer-directed CTA
+# D. explicit story/testimonial/proof cues
+# E. explicit benefit cues
+# F. explicit product enumeration/features
+# G. hook cues
+# H. keepable unclassified product context
 
 
 def is_camera_rolling_slate(text: str) -> bool:
-    compact = " ".join(_normalized_words(text))
-    if compact in {
+    n = normalized_text(text)
+    if n.compact in {
         "camera rolling",
         "okay camera rolling",
         "camera is rolling",
@@ -735,13 +780,12 @@ def is_camera_rolling_slate(text: str) -> bool:
         "we're rolling",
     }:
         return True
-    return compact.startswith(("camera rolling take", "okay camera rolling take"))
+    return starts_phrase(n, "camera rolling take") or starts_phrase(n, "okay camera rolling take")
 
 
 def production_meta_rule(text: str, include_camera_rolling: bool = True) -> Optional[str]:
-    t = re.sub(r"\s+", " ", normalize_match_text(text)).strip()
-    compact = " ".join(_normalized_words(text))
-    if not compact:
+    n = normalized_text(text)
+    if not n.compact:
         return None
     start_over_commands = {
         "start over",
@@ -751,41 +795,37 @@ def production_meta_rule(text: str, include_camera_rolling: bool = True) -> Opti
         "can we start over",
         "i need to start over",
     }
-    if compact in start_over_commands or compact.startswith("start over from"):
+    if n.compact in start_over_commands or starts_phrase(n, "start over from"):
         return "production_meta_phrase"
     if include_camera_rolling and is_camera_rolling_slate(text):
         return "production_meta_phrase"
-    if compact in {
+    if n.compact in {
         "take two", "okay take two", "this is take two", "take number two",
         "i'm starting again", "that's take two", "we're on take three",
     }:
         return "production_meta_phrase"
-    if compact.startswith(("take two let's", "take two let us", "take number two")):
+    if starts_phrase(n, "take two let's") or starts_phrase(n, "take two let us") or starts_phrase(n, "take number two"):
         return "production_meta_phrase"
     return None
 
 
 def filler_rule(text: str) -> Optional[str]:
-    t = re.sub(r"\s+", " ", normalize_match_text(text)).strip()
-    words = _normalized_words(text)
-    compact = " ".join(words)
-    if not words:
+    n = normalized_text(text)
+    if not n.tokens:
         return "empty"
-    if len(words) <= 1 and words[0] in {"and", "uh", "um", "hmm", "like", "wait"}:
+    if len(n.tokens) <= 1 and n.tokens[0] in {"and", "uh", "um", "hmm", "like", "wait"}:
         return "standalone_meta_token"
-    if compact in {"hold on", "wait a second", "wait one second"}:
+    if n.compact in {"hold on", "wait a second", "wait one second"}:
         return "standalone_production_direction"
-    if compact in FILLER_RESTART_EXACT_PATTERNS:
+    if n.compact in FILLER_RESTART_EXACT_PATTERNS:
         return "restart_or_interruption_language"
-    for pat in FILLER_RESTART_LEADING_PATTERNS:
-        if compact.startswith(pat):
-            return "restart_or_interruption_language"
+    if any(starts_phrase(n, pat) for pat in FILLER_RESTART_LEADING_PATTERNS):
+        return "restart_or_interruption_language"
     meta_reason = production_meta_rule(text)
     if meta_reason:
         return meta_reason
-    for pat in FILLER_PATTERNS:
-        if pat in t:
-            return "production_meta_phrase"
+    if has_any_phrase(n, FILLER_PATTERNS):
+        return "production_meta_phrase"
     return None
 
 
@@ -794,89 +834,76 @@ def looks_like_filler(text: str) -> bool:
 
 
 def looks_like_dependent_tail(text: str) -> bool:
-    t = normalize_match_text(text).strip()
-    if not t:
+    n = normalized_text(text)
+    t = n.text
+    if not n.tokens or len(n.tokens) > 4:
         return False
-
-    words = _normalized_words(t)
-    if not words:
-        return False
-    if len(words) > 4:
-        return False
-
-    for suf in TAIL_DEPENDENT_ENDINGS:
-        if t.endswith(suf):
-            return True
-
-    if len(words) == 1 and words[0] in TAIL_DEPENDENT_STARTS:
+    if any(t.endswith(suf) for suf in TAIL_DEPENDENT_ENDINGS):
         return True
-
-    if words[0] in TAIL_DEPENDENT_STARTS and not t.endswith((".", "?", "!")):
+    if len(n.tokens) == 1 and n.tokens[0] in TAIL_DEPENDENT_STARTS:
         return True
+    return n.tokens[0] in TAIL_DEPENDENT_STARTS and not t.endswith((".", "?", "!"))
 
-    return False
 
-
-def has_grab_cta_context(tokens: List[str], compact: str) -> bool:
-    if "grab" not in tokens:
+def has_grab_cta_context(n: NormalizedText) -> bool:
+    if "grab" not in n.tokens:
         return False
     product_context = any(
-        token in tokens
+        token in n.tokens
         for token in {"below", "link", "available", "today", "set", "order", "yours", "product", "collection"}
     )
-    viewer_context = compact.startswith(("grab ", "go grab ")) or "you can grab" in compact or "you could grab" in compact
-    grab_target = any(
-        phrase in compact
-        for phrase in (
-            "grab some", "grab them", "grab one", "grab yours", "grab this", "grab that",
-            "grab a set", "grab the set", "grab this set",
-        )
-    )
+    viewer_context = starts_phrase(n, "grab") or starts_phrase(n, "go grab") or has_phrase(n, "you can grab") or has_phrase(n, "you could grab")
+    grab_target = has_any_phrase(n, (
+        "grab some", "grab them", "grab one", "grab yours", "grab this", "grab that",
+        "grab a set", "grab the set", "grab this set",
+    ))
     return viewer_context and grab_target and product_context
 
 
 def has_cta_action_context(text: str) -> bool:
-    t = normalize_match_text(text)
-    tokens = _normalized_words(text)
-    compact = " ".join(tokens)
-    cta_phrase_cues = [
+    n = normalized_text(text)
+    cta_phrase_cues = (
         "click the link", "click below", "tap the link", "shop now", "get yours",
-        "link below", "drop it down below",
-        "check these out", "check them out", "i left it for you", "add to cart", "order now",
-        "check the link",
-    ]
-    if any(p in t for p in cta_phrase_cues):
-        return True
-    if has_grab_cta_context(tokens, compact):
-        return True
-    if not tokens:
-        return False
-    if tokens[0] in {"buy", "shop"}:
-        return True
-    return any(
-        phrase in compact
-        for phrase in (
-            "you can buy", "you can shop", "you could buy", "you could shop",
-            "click below to buy", "click below to shop", "tap the link to buy", "tap the link to shop",
-            "link below to buy", "link below to shop",
-        )
+        "link below", "drop it down below", "check these out", "check them out",
+        "i left it for you", "add to cart", "order now", "check the link",
     )
+    if has_any_phrase(n, cta_phrase_cues):
+        return True
+    if has_grab_cta_context(n):
+        return True
+    if not n.tokens:
+        return False
+    if n.tokens[0] in {"buy", "shop", "order"}:
+        return True
+    return has_any_phrase(n, (
+        "you can buy", "you can shop", "you could buy", "you could shop",
+        "click below to buy", "click below to shop", "tap the link to buy", "tap the link to shop",
+        "link below to buy", "link below to shop",
+    ))
 
 
 def has_product_enumeration_evidence(text: str) -> bool:
-    tokens = _normalized_words(text)
-    if len(re.findall(r",", text)) < 1 or "and" not in tokens:
-        return False
+    n = normalized_text(text)
     product_terms = {
         "stocking", "santa", "hat", "tree", "snowman", "shade", "shades", "color", "colors",
         "design", "designs", "variant", "variants", "set", "pack", "gloss", "glosses", "item", "items",
-        "scent", "scents", "flavor", "flavors", "size", "sizes", "option", "options",
+        "scent", "scents", "flavor", "flavors", "size", "sizes", "option", "options", "ornament", "ornaments",
+        "capsule", "capsules", "tablet", "tablets", "scoop", "scoops", "gummy", "gummies",
     }
-    return sum(1 for token in tokens if token in product_terms) >= 2
+    list_structure = "," in n.text and "and" in n.tokens
+    product_context = has_any_phrase(n, (
+        "it includes", "included are", "includes", "included", "comes with", "you get",
+        "set of", "set comes with", "variants", "designs", "colors", "shades",
+    ))
+    quantity_context = any(token.isdigit() for token in n.tokens) or any(
+        token in n.tokens for token in {"one", "two", "three", "four", "five", "six", "set", "pack"}
+    )
+    product_term_count = sum(1 for token in n.tokens if token in product_terms)
+    return product_term_count >= 2 and (list_structure or product_context or quantity_context)
 
 
 def classify_slot_rule(text: str) -> tuple[str, str]:
-    t = normalize_match_text(text)
+    n = normalized_text(text)
 
     meta_reason = production_meta_rule(text)
     if meta_reason:
@@ -885,98 +912,44 @@ def classify_slot_rule(text: str) -> tuple[str, str]:
     if has_cta_action_context(text):
         return "CTA", "direct_purchase_or_action_language"
 
-    if ("?" in t or t.startswith(("if ", "hey ", "listen", "stop scrolling", "ladies", "guys"))
-            or any(p in t for p in ["i found the perfect", "perfect gift", "wait until you see", "looking for the perfect"])):
-        return "HOOK", "opening_promise_or_product_discovery"
-
-    if any(
-        p in t
-        for p in [
-            "tired of",
-            "sick of",
-            "problem",
-            "problems",
-            "struggle",
-            "does your",
-            "is your",
-            "keep giving you",
-            "frustrated",
-            "failed alternative",
-        ]
-    ):
-        return "PROBLEM", "problem_language"
-
-    if any(
-        p in t
-        for p in [
-            "i think they're really good",
-            "i get so many compliments",
-            "before and after",
-            "five stars",
-            "measurable result",
-        ]
-    ):
+    if has_any_phrase(n, (
+        "i think they're really good", "i get so many compliments", "before and after",
+        "five stars", "measurable result",
+    )):
         return "PROOF", "proof_or_testimonial_language"
 
-    if any(
-        p in t
-        for p in [
-            "so you can",
-            "you can",
-            "you'll",
-            "you will",
-            "feel",
-            "helps you",
-            "so freaking",
-            "elevates any outfit",
-            "feel fresh",
-            "confident",
-            "so cute",
-            "they are all",
-        ]
-    ):
-        return "BENEFITS", "positive_appeal_or_outcome_language"
-
-    if any(
-        p in t
-        for p in [
-            "because i found",
-            "i've been using",
-            "i've tried",
-            "honestly",
-            "for me",
-            "let me tell you",
-            "when i",
-            "at first",
-            "the first time",
-            "my experience",
-            "i discovered",
-        ]
-    ):
+    if has_any_phrase(n, (
+        "because i found", "i've been using", "i've tried", "honestly", "for me",
+        "let me tell you", "when i", "at first", "the first time", "my experience", "i discovered",
+    )):
         return "STORY", "personal_story_language"
 
-    if any(
-        p in t
-        for p in [
-            "each gummy",
-            "packed with",
-            "ingredients",
-            "it has",
-            "it comes with",
-            "it's actually",
-            "it's a",
-            "this bag",
-            "these probiotics",
-            "slippery m",
-            "prebiotic",
-            "probiotic",
-            "flavored", "you get", "comes in", "set of", "lip glosses", "these are",
-            "included", "includes", "variants", "designs", "colors", "shades",
-        ]
-    ) or has_product_enumeration_evidence(text):
+    if has_any_phrase(n, (
+        "so you can", "you can", "you'll", "you will", "feel", "helps you", "so freaking",
+        "elevates any outfit", "feel fresh", "confident", "so cute", "they are all",
+    )):
+        return "BENEFITS", "positive_appeal_or_outcome_language"
+
+    if has_any_phrase(n, (
+        "each gummy", "packed with", "ingredients", "it has", "it comes with", "comes with",
+        "it's actually", "it's a", "this bag", "these probiotics", "slippery m", "prebiotic",
+        "probiotic", "flavored", "you get", "set of", "comes in", "lip glosses", "these are",
+        "included", "includes", "variants", "designs", "colors", "shades",
+    )) or has_product_enumeration_evidence(text):
         return "FEATURES", "product_details_quantity_variants_or_enumeration"
 
-    if looks_like_filler(text) or len(t.strip().split()) < 2:
+    if "?" in n.text or starts_phrase(n, "if") or starts_phrase(n, "hey") or starts_phrase(n, "listen") or starts_phrase(n, "stop scrolling") or starts_phrase(n, "ladies") or starts_phrase(n, "guys") or has_any_phrase(n, (
+        "i found the perfect", "perfect gift", "wait until you see", "looking for the perfect",
+    )):
+        return "HOOK", "opening_promise_or_product_discovery"
+
+    if has_any_phrase(n, (
+        "tired of", "sick of", "problem", "problems", "struggle", "does your", "is your",
+        "keep giving you", "frustrated", "failed alternative",
+    )):
+        return "PROBLEM", "problem_language"
+
+    if looks_like_filler(text) or len(n.tokens) < 2:
         return "OTHER", "filler_or_too_short"
     return "OTHER", "unclassified_product_context"
 
