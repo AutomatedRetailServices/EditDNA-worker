@@ -159,3 +159,33 @@ def test_buy_substrings_are_not_cta_commands():
     assert pipeline.classify_slot("Buyers love the results.") != "CTA"
     assert pipeline.classify_slot("Buying this was part of my story.") != "CTA"
     assert pipeline.classify_slot("The buyer reviewed the product.") != "CTA"
+
+
+def test_restart_filler_requires_production_direction_context():
+    filler_examples = [
+        "Wait, let me do that again.",
+        "Hold on.",
+        "Hold on, let me restart.",
+        "No, restart.",
+        "Restart that.",
+        "Let me redo that.",
+        "Do that again.",
+        "Wait, no.",
+    ]
+    for text in filler_examples:
+        assert pipeline.looks_like_filler(text), text
+
+
+def test_restart_words_inside_ad_copy_remain_usable():
+    usable_examples = [
+        "These lashes hold on all day.",
+        "Restart your routine.",
+        "This helps you start again.",
+        "The makeup holds on through sweat.",
+        "But wait, there’s more.",
+    ]
+    for text in usable_examples:
+        assert not pipeline.looks_like_filler(text), text
+        clip = pipeline.make_base_clip("usable", 0, 1, text)
+        pipeline.tag_clips_heuristic([clip])
+        assert clip["meta"]["keep"] is True, text

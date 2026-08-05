@@ -661,7 +661,6 @@ FILLER_PATTERNS = [
     "is that funny",
     "am i saying it right",
     "let me start again",
-    "start again",
     "cut that",
     "thanks.",
     "thank you guys",
@@ -669,18 +668,29 @@ FILLER_PATTERNS = [
     "why can't i remember",
 ]
 
-FILLER_RESTART_PATTERNS = [
+FILLER_RESTART_EXACT_PATTERNS = {
+    "hold on",
+    "no restart",
+    "wait no",
+    "restart",
+    "do that again",
+}
+
+FILLER_RESTART_LEADING_PATTERNS = (
     "wait let me",
     "wait i need to",
     "wait no",
-    "hold on",
+    "hold on let me",
     "no restart",
     "let me redo",
     "let me do that again",
     "do that again",
     "redo that",
-    "restart",
-]
+    "restart that",
+    "restart this",
+    "start over",
+    "let me start again",
+)
 
 TAIL_DEPENDENT_ENDINGS = [
     "as well",
@@ -710,8 +720,10 @@ def filler_rule(text: str) -> Optional[str]:
         return "standalone_meta_token"
     if compact in {"hold on", "wait a second", "wait one second"}:
         return "standalone_production_direction"
-    for pat in FILLER_RESTART_PATTERNS:
-        if compact.startswith(pat) or f" {pat}" in f" {compact}":
+    if compact in FILLER_RESTART_EXACT_PATTERNS:
+        return "restart_or_interruption_language"
+    for pat in FILLER_RESTART_LEADING_PATTERNS:
+        if compact.startswith(pat):
             return "restart_or_interruption_language"
     for pat in FILLER_PATTERNS:
         if pat in t:
