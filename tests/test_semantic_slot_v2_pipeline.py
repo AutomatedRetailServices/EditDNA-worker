@@ -115,7 +115,7 @@ def other_result(confidence=.95, abstain=False):
     )
 
 
-@pytest.mark.parametrize("text", ["Hello everyone.", "Camera rolling, take two.", "The weather is cloudy today."])
+@pytest.mark.parametrize("text", ["Hello everyone.", "The weather is cloudy today."])
 def test_confident_other_is_excluded_without_changing_keep(monkeypatch, text):
     target = pipeline.make_base_clip("target", 0, 2, text)
     target.update(slot="STORY", keep=True, score=.9, semantic_score=.9)

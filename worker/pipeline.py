@@ -710,6 +710,21 @@ def _normalized_words(text: str) -> List[str]:
     return re.findall(r"[a-z0-9']+", text.lower())
 
 
+def is_camera_rolling_slate(text: str) -> bool:
+    compact = " ".join(_normalized_words(text))
+    if compact in {
+        "camera rolling",
+        "okay camera rolling",
+        "camera is rolling",
+        "the camera is rolling",
+        "rolling",
+        "and rolling",
+        "we're rolling",
+    }:
+        return True
+    return compact.startswith(("camera rolling take", "okay camera rolling take"))
+
+
 def production_meta_rule(text: str, include_camera_rolling: bool = True) -> Optional[str]:
     t = re.sub(r"\s+", " ", text.lower()).strip()
     compact = " ".join(_normalized_words(text))
@@ -725,7 +740,7 @@ def production_meta_rule(text: str, include_camera_rolling: bool = True) -> Opti
     }
     if compact in start_over_commands or compact.startswith("start over from"):
         return "production_meta_phrase"
-    if include_camera_rolling and "camera rolling" in t:
+    if include_camera_rolling and is_camera_rolling_slate(text):
         return "production_meta_phrase"
     if compact in {"take two", "okay take two", "this is take two", "take number two"}:
         return "production_meta_phrase"
@@ -749,7 +764,7 @@ def filler_rule(text: str) -> Optional[str]:
     for pat in FILLER_RESTART_LEADING_PATTERNS:
         if compact.startswith(pat):
             return "restart_or_interruption_language"
-    meta_reason = production_meta_rule(text, include_camera_rolling=False)
+    meta_reason = production_meta_rule(text)
     if meta_reason:
         return meta_reason
     for pat in FILLER_PATTERNS:

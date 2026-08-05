@@ -409,3 +409,47 @@ def test_existing_wait_redo_restart_cue_still_behaves_as_filler():
     pipeline.tag_clips_heuristic([clip])
     assert clip["meta"]["keep"] is False
     assert clip["meta"]["filler_rule"] == "restart_or_interruption_language"
+
+
+def test_camera_rolling_slates_are_discarded_from_clean_cut():
+    slate_examples = [
+        "Camera rolling.",
+        "Okay, camera rolling.",
+        "Camera is rolling.",
+        "The camera is rolling.",
+        "Rolling.",
+        "And rolling.",
+        "We're rolling.",
+    ]
+    clips = []
+    for idx, text in enumerate(slate_examples):
+        assert pipeline.classify_slot_rule(text) == ("OTHER", "production_meta_phrase"), text
+        clip = pipeline.make_base_clip(f"slate{idx}", idx, idx + 0.8, text)
+        pipeline.tag_clips_heuristic([clip])
+        assert clip["meta"]["keep"] is False, text
+        assert clip["meta"]["filler_rule"] == "production_meta_phrase", text
+        clips.append(clip)
+    assert pipeline.select_clean_cut_clip_ids(clips) == []
+
+
+def test_rolling_product_narration_remains_keepable():
+    narration_examples = [
+        "This applicator keeps the product rolling on smoothly.",
+        "I kept rolling the serum into my routine.",
+        "The cart keeps rolling easily.",
+        "We are rolling out three new shades.",
+    ]
+    for text in narration_examples:
+        slot, rule = pipeline.classify_slot_rule(text)
+        assert (slot, rule) != ("OTHER", "production_meta_phrase"), text
+        clip = pipeline.make_base_clip("rolling", 0, 1, text)
+        pipeline.tag_clips_heuristic([clip])
+        assert clip["meta"]["keep"] is True, text
+        assert clip["meta"].get("filler_rule") != "production_meta_phrase", text
+
+
+def test_camera_rolling_change_preserves_other_restart_slate_detection():
+    for text in ["Take two.", "Start over.", "Wait, let me do that again."]:
+        clip = pipeline.make_base_clip("restart", 0, 1, text)
+        pipeline.tag_clips_heuristic([clip])
+        assert clip["meta"]["keep"] is False, text
