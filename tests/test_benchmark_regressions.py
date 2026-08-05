@@ -71,3 +71,15 @@ def test_existing_valid_incomplete_phrase_merge_still_works():
     merged = pipeline.merge_incomplete_phrases([first, second])
     assert len(merged) == 1
     assert merged[0]["text"] == "this continues into a complete phrase."
+
+
+def test_composer_preserves_source_order_for_early_cta():
+    cta = _clip("cta", 0, 1, "Get yours today.")
+    feature = _clip("feature", 2, 3, "It comes with three shades.")
+    benefit = _clip("benefit", 4, 5, "These are so cute.")
+    for clip in [cta, feature, benefit]:
+        pipeline.tag_clips_heuristic([clip])
+        clip["semantic_score"] = clip["meta"]["semantic_score"] = 0.95
+    composer = pipeline.build_composer([cta, feature, benefit])
+    assert composer["used_clip_ids"] == ["cta", "feature", "benefit"]
+    assert composer["cta_id"] == "cta"

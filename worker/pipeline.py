@@ -1819,23 +1819,12 @@ def build_composer(clips: List[Dict[str, Any]], mode: str = "human") -> Dict[str
         cta_block_ids = [single_best_cta["id"]]
 
     cta_final_ids = cta_block_ids[:]
-    cta_final_ids_set = set(cta_final_ids)
 
-    timeline: List[Dict[str, Any]] = []
-    used_ids: List[str] = []
-
-    for c in usable:
-        if c["id"] in cta_final_ids_set:
-            continue
-        timeline.append(c)
-        used_ids.append(c["id"])
-
-    if cta_final_ids:
-        cta_block_clips = [c for c in usable if c["id"] in cta_final_ids_set]
-        cta_block_clips.sort(key=lambda c: safe_float(c.get("start", 0.0)))
-        for c in cta_block_clips:
-            timeline.append(c)
-            used_ids.append(c["id"])
+    # Slots are semantic functions, not mandatory timeline positions. Preserve
+    # source-time order for global coherence instead of moving CTA clips to the
+    # end or forcing a linear HOOK→...→CTA funnel sequence.
+    timeline: List[Dict[str, Any]] = list(usable)
+    used_ids: List[str] = [c["id"] for c in timeline]
 
     def ids_for_slot(slot_name: str) -> List[str]:
         return [c["id"] for c in timeline if c.get("slot") == slot_name]
