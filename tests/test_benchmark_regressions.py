@@ -189,3 +189,69 @@ def test_restart_words_inside_ad_copy_remain_usable():
         clip = pipeline.make_base_clip("usable", 0, 1, text)
         pipeline.tag_clips_heuristic([clip])
         assert clip["meta"]["keep"] is True, text
+
+
+def _composer_clip(cid, start, slot, score=0.95, keep=True, fallback_rule=None):
+    clip = pipeline.make_base_clip(cid, start, start + 0.8, cid)
+    clip["slot"] = slot
+    clip["semantic_score"] = score
+    clip["score"] = score
+    clip["meta"].update({"keep": keep, "slot": slot, "semantic_score": score, "score": score})
+    if fallback_rule:
+        clip["meta"]["fallback_slot_rule"] = fallback_rule
+    return clip
+
+
+def test_blooper_preserves_keepable_unclassified_product_context():
+    other = _composer_clip(
+        "ordinary", 0, "OTHER", fallback_rule="unclassified_product_context"
+    )
+    composer = pipeline.build_composer([other], mode="blooper")
+    assert composer["used_clip_ids"] == ["ordinary"]
+
+
+def test_blooper_excludes_filler_meta_other():
+    filler = _composer_clip("filler", 0, "OTHER", fallback_rule="production_meta_phrase")
+    filler["meta"]["filler_rule"] = "production_meta_phrase"
+    composer = pipeline.build_composer([filler], mode="blooper")
+    assert composer["used_clip_ids"] == []
+
+
+def test_blooper_recognized_slot_behavior_is_unchanged():
+    clips = [
+        _composer_clip("story", 0, "STORY"),
+        _composer_clip("hook", 1, "HOOK"),
+        _composer_clip("features", 2, "FEATURES"),
+        _composer_clip("benefits", 3, "BENEFITS"),
+        _composer_clip("cta", 4, "CTA"),
+    ]
+    composer = pipeline.build_composer(clips, mode="blooper")
+    assert composer["used_clip_ids"] == ["story", "hook", "cta"]
+
+
+def test_composer_excludes_lower_scoring_non_selected_cta_without_moving_selected_cta():
+    early_cta = _composer_clip("early_cta", 0, "CTA", score=0.95)
+    feature = _composer_clip("feature", 1, "FEATURES", score=0.95)
+    late_cta = _composer_clip("late_cta", 2, "CTA", score=0.80)
+    composer = pipeline.build_composer([early_cta, feature, late_cta])
+    assert composer["cta_id"] == "early_cta"
+    assert composer["used_clip_ids"] == ["early_cta", "feature"]
+
+
+def test_selected_late_cta_keeps_source_position_and_non_selected_early_cta_is_excluded():
+    weak_early_cta = _composer_clip("weak_early_cta", 0, "CTA", score=0.75)
+    feature = _composer_clip("feature", 1, "FEATURES", score=0.95)
+    strong_late_cta = _composer_clip("strong_late_cta", 2, "CTA", score=0.99)
+    composer = pipeline.build_composer([weak_early_cta, feature, strong_late_cta])
+    assert composer["cta_id"] == "strong_late_cta"
+    assert composer["used_clip_ids"] == ["feature", "strong_late_cta"]
+
+
+def test_selected_multi_clip_cta_block_remains_intact_in_source_order():
+    feature = _composer_clip("feature", 0, "FEATURES", score=0.95)
+    cta_one = _composer_clip("cta_one", 1.0, "CTA", score=0.94)
+    cta_two = _composer_clip("cta_two", 1.5, "CTA", score=0.94)
+    weaker_cta = _composer_clip("weaker_cta", 5, "CTA", score=0.80)
+    composer = pipeline.build_composer([feature, cta_one, cta_two, weaker_cta])
+    assert composer["cta_id"] == "cta_two"
+    assert composer["used_clip_ids"] == ["feature", "cta_one", "cta_two"]

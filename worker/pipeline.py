@@ -1871,7 +1871,9 @@ def build_composer(clips: List[Dict[str, Any]], mode: str = "human") -> Dict[str
     elif mode == "blooper":
         for c in usable:
             slot = c.get("slot")
-            if slot not in {"STORY", "HOOK", "CTA"}:
+            fallback_rule = c.get("meta", {}).get("fallback_slot_rule")
+            keepable_unclassified = slot == "OTHER" and fallback_rule == "unclassified_product_context"
+            if slot not in {"STORY", "HOOK", "CTA"} and not keepable_unclassified:
                 c["meta"]["keep"] = False
         usable = [c for c in usable if c["meta"].get("keep", True)]
 
@@ -1915,10 +1917,16 @@ def build_composer(clips: List[Dict[str, Any]], mode: str = "human") -> Dict[str
 
     cta_final_ids = cta_block_ids[:]
 
+    selected_cta_ids = set(cta_final_ids)
+
     # Slots are semantic functions, not mandatory timeline positions. Preserve
-    # source-time order for global coherence instead of moving CTA clips to the
-    # end or forcing a linear HOOK→...→CTA funnel sequence.
-    timeline: List[Dict[str, Any]] = list(usable)
+    # source-time order among selected clips instead of moving CTA clips to the
+    # end or forcing a linear HOOK→...→CTA funnel sequence. Non-selected CTA
+    # alternatives are excluded so the chosen CTA block/id stays consistent with
+    # the rendered timeline.
+    timeline: List[Dict[str, Any]] = [
+        c for c in usable if c.get("slot") != "CTA" or c["id"] in selected_cta_ids
+    ]
     used_ids: List[str] = [c["id"] for c in timeline]
 
     def ids_for_slot(slot_name: str) -> List[str]:
