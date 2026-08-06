@@ -4,6 +4,8 @@ import os, re
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Iterable, Tuple
 
+from worker.text_content import semantic_content_measure
+
 print("🧠 [semantic_visual_pass] Semantic pipeline active.", flush=True)
 
 # -------- Config via ENV --------
@@ -123,7 +125,7 @@ def tag_slot(t: Take, outline_hint: Optional[Dict]=None) -> str:
         if any(k in txt for k in KEYS[slot]):
             return slot
     # heuristics
-    wc = len(txt.split())
+    wc = semantic_content_measure(txt).effective_semantic_units
     if wc >= 25:
         return "PROOF"           # long talk → likely demonstration/testimony
     if wc >= 12 and ("made of" in txt or "includes" in txt or "ingredient" in txt):
@@ -197,7 +199,9 @@ def continuity_chains(takes: List[Take]) -> List[List[Take]]:
     return [[t] for t in stitch_chain(takes)]
 
 # -------- Scoring --------
-def score_take(t: Take, slot: str) -> float:
+def score_take(t: Take, slot: Optional[str] = None) -> float:
+    if slot is None:
+        slot = tag_slot(t)
     # hard constraints per slot
     if slot in SLOT_REQUIRE_PRODUCT and not t.has_product:
         return -1.0

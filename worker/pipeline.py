@@ -5,13 +5,16 @@ import subprocess
 import copy
 import shutil
 import tempfile
-from typing import Callable, List, Dict, Any, Optional, Union
+import re
+import inspect
+from collections import Counter
+from dataclasses import dataclass
+from typing import Callable, List, Dict, Any, Optional, Union, Sequence
 
 import requests
 from faster_whisper import WhisperModel
 import boto3
 
-import clip
 
 from worker.models.config import load_model_config
 from worker.models.openai_client import OpenAIProviderError, is_openai_available
@@ -20,6 +23,20 @@ from worker.models.openai_provider import (
 )
 from worker.semantic_slot_v2 import build_clause_inputs, publicize_canonical_slot
 from worker.take_judge_v2 import TakeJudgeCandidate, delivery_features, sample_candidate_frames
+from worker.diagnostics import (
+    sanitize_clean_cut_discard_diagnostics,
+    sanitize_source_identifier,
+)
+from worker.text_content import (
+    APOSTROPHE_TRANSLATION,
+    NormalizedText,
+    comparison_units,
+    normalize_match_text,
+    normalized_text,
+    semantic_content_measure,
+    semantic_content_score,
+    unicode_word_tokens,
+)
 
 from pipeline_errors import (
     JobCanceledError,
@@ -205,7 +222,11 @@ def save_result_json_to_s3(result: Dict[str, Any]) -> Optional[str]:
         # Puedes cambiar 'dataset/bloopers' por lo que quieras
         key = f"{S3_PREFIX}/dataset/bloopers/{session_id}.json"
 
-        body = json.dumps(result, ensure_ascii=False).encode("utf-8")
+        persistable_result = copy.deepcopy(result)
+        persistable_result["clean_cut_discard_diagnostics"] = sanitize_clean_cut_discard_diagnostics(
+            persistable_result.get("clean_cut_discard_diagnostics", [])
+        )
+        body = json.dumps(persistable_result, ensure_ascii=False).encode("utf-8")
         s3.put_object(
             Bucket=bucket,
             Key=key,
@@ -433,23 +454,49 @@ def looks_incomplete(text: str) -> bool:
     Detecta frases que NO terminan una idea.
     """
     t = text.strip().lower()
-    if len(t.split()) <= 2:
+    if semantic_content_measure(t).effective_semantic_units <= 2:
         return True
 
     bad_endings = ("for", "the", "a", "my", "your", "our", "this", "that")
     if t.endswith(bad_endings):
         return True
 
-    if t.startswith(("and ", "so ", "but ", "or ")):
-        return True
-
-    if not t.endswith((".", "?", "!")):
+    if not t.endswith((".", "?", "!", "。", "？", "！")):
+        if t.startswith(("and ", "so ", "but ", "or ")):
+            return True
         return True
 
     return False
 
 
-def merge_incomplete_phrases(clips: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+def looks_like_completed_spoken_thought(text: str) -> bool:
+    """Clean-cut boundary cue that does not depend on commercial slot labels."""
+    n = normalized_text(text)
+    if n.text.endswith((".", "?", "!", "。", "？", "！")):
+        return True
+    return has_any_phrase(n, (
+        "drop it down below", "check these out", "check them out",
+        "link below", "link in bio", "get yours",
+    ))
+
+
+def is_semantic_restart_after_complete(previous_text: str, next_text: str) -> bool:
+    prev = normalized_text(previous_text)
+    nxt = normalized_text(next_text)
+    if not prev.compact or not nxt.compact:
+        return False
+    if not looks_like_completed_spoken_thought(previous_text):
+        return False
+    return any(starts_phrase(nxt, phrase) for phrase in (
+        "i found", "i found the perfect", "here's", "here is", "let me show",
+        "wait until", "if you", "have you", "are you", "stop scrolling",
+    ))
+
+
+def merge_incomplete_phrases(
+    clips: List[Dict[str, Any]],
+    discarded_diagnostics: Optional[List[Dict[str, Any]]] = None,
+) -> List[Dict[str, Any]]:
     """
     UNE frases incompletas con la siguiente si tiene sentido.
     """
@@ -464,6 +511,8 @@ def merge_incomplete_phrases(clips: List[Dict[str, Any]]) -> List[Dict[str, Any]
         text = c["text"].strip()
 
         if not looks_incomplete(text):
+            if i + 1 < len(clips) and is_semantic_restart_after_complete(text, clips[i + 1].get("text", "")):
+                c.setdefault("meta", {})["merge_diagnostic"] = "merge_prevented_semantic_restart"
             merged.append(c)
             i += 1
             continue
@@ -473,10 +522,17 @@ def merge_incomplete_phrases(clips: List[Dict[str, Any]]) -> List[Dict[str, Any]
             next_text = nxt["text"].strip()
 
             can_merge = (
-                len(next_text.split()) >= 2 and
+                semantic_content_measure(next_text).effective_semantic_units >= 2 and
                 not looks_incomplete(next_text) and
-                text[0].isalpha()
+                text[0].isalpha() and
+                not is_semantic_restart_after_complete(text, next_text)
             )
+            restart_prevented = not can_merge and is_semantic_restart_after_complete(text, next_text)
+            if restart_prevented:
+                c.setdefault("meta", {})["merge_diagnostic"] = "merge_prevented_semantic_restart"
+                merged.append(c)
+                i += 1
+                continue
 
             if can_merge:
                 new_text = (text + " " + next_text).strip()
@@ -501,6 +557,8 @@ def merge_incomplete_phrases(clips: List[Dict[str, Any]]) -> List[Dict[str, Any]
                     "end": nxt["end"],
                     "chain_ids": c["chain_ids"] + nxt["chain_ids"],
                 }
+                if "source_end" in c or "source_end" in nxt:
+                    merged_clip["source_end"] = safe_float(nxt.get("source_end", nxt["end"]))
                 if c.get("words") or nxt.get("words"):
                     merged_clip["words"] = combined_words
                 merged.append(merged_clip)
@@ -509,28 +567,175 @@ def merge_incomplete_phrases(clips: List[Dict[str, Any]]) -> List[Dict[str, Any]
 
         i += 1
 
-    return merged
+    return validate_clip_boundaries(merged, discarded_diagnostics=discarded_diagnostics)
+
+
+def _word_bounds(clip: Dict[str, Any]) -> Optional[tuple[float, float]]:
+    words = clip.get("words") or []
+    valid = [
+        (safe_float(w.get("start")), safe_float(w.get("end", w.get("start"))))
+        for w in words
+        if safe_float(w.get("end", w.get("start"))) > safe_float(w.get("start"))
+    ]
+    if not valid:
+        return None
+    return min(s for s, _ in valid), max(e for _, e in valid)
+
+
+def _clip_source_identity(clip: Dict[str, Any]) -> tuple[Any, Any]:
+    return (clip.get("source_index"), clip.get("source_local"))
+
+
+def _shares_chain_or_source_boundary(previous: Dict[str, Any], current: Dict[str, Any]) -> bool:
+    previous_chain = set(previous.get("chain_ids") or previous.get("meta", {}).get("chain_ids") or [])
+    current_chain = set(current.get("chain_ids") or current.get("meta", {}).get("chain_ids") or [])
+    if previous_chain and current_chain and previous_chain.intersection(current_chain):
+        return True
+
+    previous_source = _clip_source_identity(previous)
+    current_source = _clip_source_identity(current)
+    known_source = any(value is not None for value in previous_source + current_source)
+    if known_source and previous_source != current_source:
+        return False
+
+    previous_source_end = previous.get("source_end")
+    current_source_start = current.get("source_start")
+    if previous_source_end is not None and current_source_start is not None:
+        return abs(safe_float(current_source_start) - safe_float(previous_source_end)) <= 0.25
+
+    return not known_source
+
+
+def _is_adjacent_residual_duplicate(previous: Dict[str, Any], current: Dict[str, Any], normalized_text: str) -> bool:
+    if not previous or not normalized_text:
+        return False
+    previous_text = " ".join(_normalized_words(previous.get("text") or ""))
+    if previous_text != normalized_text:
+        return False
+
+    previous_end = safe_float(previous.get("end", previous.get("start", 0.0)))
+    current_start = safe_float(current.get("start", previous_end))
+    current_end = safe_float(current.get("end", current_start))
+    temporal_residual = current_start <= previous_end + 0.25 and current_end >= previous_end - 0.25
+    return temporal_residual and _shares_chain_or_source_boundary(previous, current)
+
+
+def _record_boundary_discard(
+    diagnostics: Optional[List[Dict[str, Any]]], clip_item: Dict[str, Any], reason: str
+) -> None:
+    if diagnostics is None:
+        return
+    source_index = int(clip_item.get("source_index", 0))
+    source_local = sanitize_source_identifier(clip_item.get("source_local"), source_index)
+    original_clip_id = str(clip_item.get("original_clip_id", clip_item.get("id", "")))
+    namespaced_clip_id = str(
+        clip_item.get("namespaced_clip_id")
+        or f"source_{source_index:03d}:{original_clip_id}"
+    )
+    diagnostics.append({
+        # clip_id remains the original local ID for single-source consumers;
+        # diagnostic_id/namespaced_clip_id provide deterministic global identity.
+        "clip_id": original_clip_id,
+        "original_clip_id": original_clip_id,
+        "namespaced_clip_id": namespaced_clip_id,
+        "diagnostic_id": f"{namespaced_clip_id}:{reason}",
+        "source_index": source_index,
+        "source_local": source_local,
+        "reason": reason,
+        "start": safe_float(clip_item.get("start")),
+        "end": safe_float(clip_item.get("end", clip_item.get("start"))),
+        "source_start": safe_float(clip_item.get("source_start", clip_item.get("start"))),
+        "source_end": safe_float(clip_item.get("source_end", clip_item.get("end", clip_item.get("start")))),
+        "text": (clip_item.get("text") or "").strip(),
+    })
+
+
+def validate_clip_boundaries(
+    clips: List[Dict[str, Any]],
+    min_duration: float = 0.08,
+    discarded_diagnostics: Optional[List[Dict[str, Any]]] = None,
+) -> List[Dict[str, Any]]:
+    valid: List[Dict[str, Any]] = []
+    for clip_item in clips:
+        text = (clip_item.get("text") or "").strip()
+        bounds = _word_bounds(clip_item)
+        start = safe_float(clip_item.get("start"))
+        end = safe_float(clip_item.get("end", start))
+        if bounds and (end <= start or end - start < min_duration or start > bounds[0] + 0.02 or end < bounds[1] - 0.02):
+            start, end = bounds
+            clip_item["start"], clip_item["end"] = start, end
+            if "source_start" in clip_item:
+                clip_item["source_start"] = start
+            if "source_end" in clip_item:
+                clip_item["source_end"] = end
+            clip_item.setdefault("meta", {})["boundary_diagnostic"] = "repaired_from_word_timestamps"
+        duration = end - start
+        if end <= start or (duration < min_duration and len(_normalized_words(text)) > 1):
+            reason = "discarded_invalid_microfragment"
+            clip_item.setdefault("meta", {})["boundary_diagnostic"] = reason
+            _record_boundary_discard(discarded_diagnostics, clip_item, reason)
+            continue
+        normalized_text = " ".join(_normalized_words(text))
+        if _is_adjacent_residual_duplicate(valid[-1] if valid else {}, clip_item, normalized_text):
+            reason = "discarded_duplicate_residual_text"
+            clip_item.setdefault("meta", {})["boundary_diagnostic"] = reason
+            _record_boundary_discard(discarded_diagnostics, clip_item, reason)
+            continue
+        valid.append(clip_item)
+    return valid
 
 
 # =====================
 # HEURISTIC TAGGING
 # =====================
 
-FILLER_PATTERNS = [
+EXACT_STANDALONE_FILLER = {
     "is that good",
     "is that funny",
     "am i saying it right",
-    "let me start again",
-    "start again",
-    "wait",
-    "redo",
-    "again?",
-    "cut that",
-    "thanks.",
-    "thank you guys",
     "that one good",
     "why can't i remember",
-]
+    "thanks",
+    "thank you",
+    "thank you guys",
+    "okay thanks",
+    "all right thank you",
+    "alright thank you",
+}
+
+END_OF_TAKE_FILLER = {
+    "thanks that's it",
+    "thank you we're done",
+}
+
+EXACT_STANDALONE_PRODUCTION_DIRECTIONS = {
+    "hold on",
+    "wait a second",
+    "wait one second",
+    "no restart",
+    "wait no",
+    "restart",
+    "do that again",
+    "cut that",
+}
+
+LEADING_PRODUCTION_DIRECTIONS = (
+    "wait let me",
+    "wait i need to",
+    "wait no",
+    "hold on let me",
+    "no restart",
+    "let me redo",
+    "let me do that again",
+    "do that again",
+    "redo that",
+    "restart that",
+    "restart this",
+    "let me start again",
+    "cut that",
+)
+
+SAFE_MULTIWORD_META_PHRASES = ()
 
 TAIL_DEPENDENT_ENDINGS = [
     "as well",
@@ -546,143 +751,446 @@ TAIL_DEPENDENT_STARTS = [
 ]
 
 
-def looks_like_filler(text: str) -> bool:
-    t = text.lower().strip()
-    for pat in FILLER_PATTERNS:
-        if pat in t:
-            return True
-    if len(t.split()) <= 1 and t in {"and", "uh", "um", "hmm", "like"}:
+def _normalized_words(text: str) -> List[str]:
+    return list(normalized_text(text).tokens)
+
+
+def has_phrase(n: NormalizedText, phrase: str) -> bool:
+    phrase_compact = normalized_text(phrase).compact
+    return bool(phrase_compact) and f" {phrase_compact} " in f" {n.compact} "
+
+
+def starts_phrase(n: NormalizedText, phrase: str) -> bool:
+    phrase_compact = normalized_text(phrase).compact
+    return bool(phrase_compact) and (n.compact == phrase_compact or n.compact.startswith(phrase_compact + " "))
+
+
+def has_any_phrase(n: NormalizedText, phrases: Sequence[str]) -> bool:
+    return any(has_phrase(n, phrase) for phrase in phrases)
+
+
+# Heuristic precedence:
+# A. invalid/tail/microfragment (handled by boundary/tail validators)
+# B. verified filler or production meta
+# C. explicit viewer-directed CTA
+# D. explicit story/testimonial/proof cues
+# E. explicit benefit cues
+# F. explicit product enumeration/features
+# G. hook cues
+# H. keepable unclassified product context
+
+
+def is_camera_rolling_slate(text: str) -> bool:
+    n = normalized_text(text)
+    if n.compact in {
+        "camera rolling",
+        "okay camera rolling",
+        "camera is rolling",
+        "the camera is rolling",
+        "rolling",
+        "and rolling",
+        "we're rolling",
+    }:
         return True
+    return starts_phrase(n, "camera rolling take") or starts_phrase(n, "okay camera rolling take")
+
+
+TAKE_SLATE_DISCOURSE_PREFIXES = (("all", "right"), ("okay",), ("so",))
+TAKE_SLATE_INTRO_PREFIXES = (("this", "is"), ("that's",), ("we're", "on"))
+TAKE_SLATE_NUMBERS = {"two", "three", "2", "3"}
+
+
+def _strip_token_prefixes(
+    tokens: tuple[str, ...], prefixes: Sequence[tuple[str, ...]],
+) -> tuple[str, ...]:
+    for prefix in prefixes:
+        if tokens[:len(prefix)] == prefix:
+            return tokens[len(prefix):]
+    return tokens
+
+
+def is_clear_recording_direction(n: NormalizedText) -> bool:
+    """Recognize restart/redo/interruption commands shared by slate rules."""
+    if not n.tokens:
+        return True
+    if n.compact in EXACT_STANDALONE_PRODUCTION_DIRECTIONS or n.compact == "wait":
+        return True
+    if any(starts_phrase(n, phrase) for phrase in LEADING_PRODUCTION_DIRECTIONS):
+        return True
+    if is_camera_rolling_slate(n.compact):
+        return True
+    if n.compact in {
+        "start over", "let's start over", "we're starting over", "i'm starting over",
+        "let me restart", "let me redo that", "no redo that", "no start over",
+        "let's go", "let us go",
+    } or starts_phrase(n, "start over from"):
+        return True
+    if len(n.tokens) > 1 and n.tokens[0] in {"wait", "no"}:
+        return is_clear_recording_direction(normalized_text(" ".join(n.tokens[1:])))
     return False
+
+
+def is_compound_take_slate(n: NormalizedText) -> bool:
+    """Distinguish recording takes from dosage, quantity, and usage language."""
+    tokens = _strip_token_prefixes(n.tokens, TAKE_SLATE_DISCOURSE_PREFIXES)
+    tokens = _strip_token_prefixes(tokens, TAKE_SLATE_INTRO_PREFIXES)
+    if not tokens or tokens[0] != "take":
+        return False
+    if len(tokens) >= 3 and tokens[1] == "number" and tokens[2] in TAKE_SLATE_NUMBERS:
+        remainder = tokens[3:]
+    elif len(tokens) >= 2 and tokens[1] in TAKE_SLATE_NUMBERS:
+        remainder = tokens[2:]
+    else:
+        return False
+    return is_clear_recording_direction(normalized_text(" ".join(remainder)))
+
+
+def production_meta_rule(text: str, include_camera_rolling: bool = True) -> Optional[str]:
+    n = normalized_text(text)
+    if not n.compact:
+        return None
+    start_over_commands = {
+        "start over",
+        "let's start over",
+        "okay start over",
+        "no start over",
+        "can we start over",
+        "i need to start over",
+    }
+    if n.compact in start_over_commands or starts_phrase(n, "start over from"):
+        return "production_meta_phrase"
+    if include_camera_rolling and is_camera_rolling_slate(text):
+        return "production_meta_phrase"
+    if is_compound_take_slate(n) or n.compact == "i'm starting again":
+        return "production_meta_phrase"
+    return None
+
+
+def filler_rule(text: str) -> Optional[str]:
+    n = normalized_text(text)
+    if not n.tokens:
+        return "empty"
+    if len(n.tokens) == 1 and n.tokens[0] in {"and", "uh", "um", "hmm", "like", "wait", "okay", "alright"}:
+        return "standalone_meta_token"
+    if n.compact in EXACT_STANDALONE_FILLER:
+        return "standalone_meta_token"
+    if n.compact in END_OF_TAKE_FILLER:
+        return "end_of_take_filler"
+    if n.compact in EXACT_STANDALONE_PRODUCTION_DIRECTIONS:
+        return "standalone_production_direction"
+    if any(starts_phrase(n, pat) for pat in LEADING_PRODUCTION_DIRECTIONS):
+        return "restart_or_interruption_language"
+    meta_reason = production_meta_rule(text)
+    if meta_reason:
+        return meta_reason
+    if SAFE_MULTIWORD_META_PHRASES and has_any_phrase(n, SAFE_MULTIWORD_META_PHRASES):
+        return "production_meta_phrase"
+    return None
+
+
+def looks_like_filler(text: str) -> bool:
+    return filler_rule(text) is not None
 
 
 def looks_like_dependent_tail(text: str) -> bool:
-    t = text.lower().strip()
-    if not t:
+    n = normalized_text(text)
+    t = n.text
+    if not n.tokens or len(n.tokens) > 4:
         return False
-
-    words = t.split()
-    if len(words) > 4:
-        return False
-
-    for suf in TAIL_DEPENDENT_ENDINGS:
-        if t.endswith(suf):
-            return True
-
-    if words[0] in TAIL_DEPENDENT_STARTS:
+    if any(t.endswith(suf) for suf in TAIL_DEPENDENT_ENDINGS):
         return True
+    if len(n.tokens) == 1 and n.tokens[0] in TAIL_DEPENDENT_STARTS:
+        return True
+    return n.tokens[0] in TAIL_DEPENDENT_STARTS and not t.endswith((".", "?", "!", "。", "？", "！"))
 
-    return False
+
+SAFE_EXPLICIT_CTA_PHRASES = (
+    "buy now", "shop now", "order now", "tap the link", "click the link",
+    "click below", "get yours", "add to cart", "check it out below",
+    "check it out", "check these out", "check them out", "drop it down below",
+)
+
+# Link-only instructions are CTAs without requiring a purchase verb. They are
+# matched as complete normalized utterances (after one optional discourse word)
+# so descriptive or historical mentions of a link cannot trigger this rule.
+EXPLICIT_LINK_CTA_PHRASES = {
+    "link below", "link in bio", "check the link", "check the link below",
+    "the link is below", "the link is in my bio", "tap the link",
+    "click the link", "click the link below",
+}
+LINK_CTA_LEADING_DISCOURSE = {"so", "okay", "and", "please"}
+
+IMPERATIVE_ACTION_VERBS = {"buy", "shop", "order", "grab", "get", "check", "tap", "click", "drop", "pick", "add"}
+CTA_MODIFIERS = {"now", "today", "below", "link", "yours", "available", "cart", "set", "collection"}
+CTA_PRODUCT_OBJECTS = {
+    "it", "this", "that", "these", "them", "one", "some", "yours", "product", "products",
+    "set", "collection", "shade", "shades", "item", "items", "gloss", "glosses",
+}
+CTA_PRODUCT_NOUNS = {
+    "product", "products", "set", "collection", "shade", "shades", "item", "items",
+    "gloss", "glosses",
+}
+CTA_OBJECT_DETERMINERS = {"the", "a", "an", "your", "our"}
+CTA_LEADING_DISCOURSE = {"so", "okay", "well", "and", "please"}
+
+
+@dataclass(frozen=True)
+class CTAActionFrame:
+    action: str
+    action_index: int
+    frame_type: str
+    clause_tokens: tuple[str, ...]
+
+
+def _action_target(tokens: Sequence[str], action_index: int) -> Optional[str]:
+    target_index = action_index + 1
+    if target_index < len(tokens) and tokens[target_index] in CTA_OBJECT_DETERMINERS:
+        target_index += 1
+    return tokens[target_index] if target_index < len(tokens) else None
+
+
+def _starts_explicit_cta(n: NormalizedText, phrase: str) -> bool:
+    """Match an explicit CTA at command position, not inside reported speech."""
+    phrase_tokens = normalized_text(phrase).tokens
+    if n.tokens[:len(phrase_tokens)] == phrase_tokens:
+        return True
+    return bool(
+        n.tokens
+        and n.tokens[0] in CTA_LEADING_DISCOURSE
+        and n.tokens[1:1 + len(phrase_tokens)] == phrase_tokens
+    )
+
+
+def _cta_clauses(text: str) -> List[tuple[NormalizedText, str]]:
+    """Split punctuation-delimited clauses without borrowing prefix evidence."""
+    normalized = normalize_match_text(text)
+    clauses: List[tuple[NormalizedText, str]] = []
+    boundary = ""
+    for part in re.split(r"([.!?;,:\n]+)", normalized):
+        if not part:
+            continue
+        if re.fullmatch(r"[.!?;,:\n]+", part):
+            boundary = part
+            continue
+        clause = normalized_text(part)
+        if clause.tokens:
+            clauses.append((clause, boundary))
+        boundary = ""
+    return clauses
+
+
+def _strip_cta_discourse(tokens: tuple[str, ...]) -> tuple[str, ...]:
+    while tokens and tokens[0] in CTA_LEADING_DISCOURSE:
+        tokens = tokens[1:]
+    return tokens
+
+
+def _is_reported_or_narrated_action(
+    tokens: tuple[str, ...], action_index: int, previous_clause: Optional[NormalizedText],
+) -> str:
+    before = tokens[:action_index]
+    subject_context = _strip_cta_discourse(before)
+    reporting = {"said", "says", "told", "asked", "reminded", "heard", "wrote"}
+    if any(token in reporting for token in before):
+        return "reported_speech"
+    if previous_clause and any(token in reporting for token in previous_clause.tokens):
+        return "reported_speech"
+    if any(token in before for token in {"did", "decided", "usually", "yesterday", "went", "used", "was"}):
+        return "historical_action"
+    if subject_context and subject_context[0] in {"i", "we", "my", "our"}:
+        return "first_person_narration"
+    if subject_context and subject_context[0] in {"he", "she", "they", "his", "her", "their"}:
+        return "third_person_narration"
+    return "unrelated_prefix"
+
+
+def cta_action_frames(text: str) -> List[CTAActionFrame]:
+    """Bind each CTA action to an immediate command/modal frame in its clause."""
+    frames: List[CTAActionFrame] = []
+    clauses = _cta_clauses(text)
+    for clause_index, (clause, boundary_before) in enumerate(clauses):
+        tokens = clause.tokens
+        command_tokens = _strip_cta_discourse(tokens)
+        command_offset = len(tokens) - len(command_tokens)
+        carries_reported_speech = bool(boundary_before and set(boundary_before) <= {",", ":"})
+        previous_clause = clauses[clause_index - 1][0] if clause_index and carries_reported_speech else None
+        for action_index, action in enumerate(tokens):
+            if action not in IMPERATIVE_ACTION_VERBS:
+                continue
+            local_index = action_index - command_offset
+            narrative_frame = _is_reported_or_narrated_action(
+                tokens, action_index, previous_clause
+            )
+            frame_type: Optional[str] = None
+            if narrative_frame == "reported_speech":
+                frame_type = narrative_frame
+            elif local_index == 0:
+                frame_type = "imperative_action"
+            elif local_index >= 0:
+                before = command_tokens[:local_index]
+                if before in (("you", "can"), ("you", "could"), ("you", "should"), ("you", "must")):
+                    frame_type = "viewer_directed_modal"
+                elif before == ("go",):
+                    frame_type = "viewer_directed_go"
+                elif before == ("make", "sure", "you"):
+                    frame_type = "viewer_directed_reminder"
+                elif before == ("don't", "forget", "to"):
+                    frame_type = "viewer_directed_reminder"
+                elif before == ("go", "ahead", "and"):
+                    frame_type = "viewer_directed_go"
+            if frame_type is None:
+                frame_type = narrative_frame
+            frames.append(CTAActionFrame(action, action_index, frame_type, tokens))
+    return frames
+
+
+def is_explicit_link_cta(n: NormalizedText) -> bool:
+    tokens = n.tokens
+    if tokens and tokens[0] in LINK_CTA_LEADING_DISCOURSE:
+        tokens = tokens[1:]
+    return " ".join(tokens) in EXPLICIT_LINK_CTA_PHRASES
+
+
+def cta_action_rule(text: str) -> Optional[str]:
+    """Return a CTA rule only when an ambiguous action has viewer intent.
+
+    Action words such as ``order``, ``shop``, and ``check`` are also ordinary
+    nouns or narration verbs. Token position alone is therefore never enough:
+    imperative uses need a product object or CTA modifier, while non-imperative
+    uses need an explicit viewer-directed prefix or link/purchase instruction.
+    """
+    n = normalized_text(text)
+    if not n.tokens:
+        return None
+
+    if is_explicit_link_cta(n):
+        return "explicit_link_instruction"
+
+    for frame in cta_action_frames(text):
+        if frame.frame_type not in {
+            "imperative_action", "viewer_directed_modal",
+            "viewer_directed_go", "viewer_directed_reminder",
+        }:
+            continue
+        clause = NormalizedText("", "", frame.clause_tokens, " ".join(frame.clause_tokens))
+        clause_token_set = set(frame.clause_tokens)
+        action = frame.action
+        action_index = frame.action_index
+        next_token = frame.clause_tokens[action_index + 1] if action_index + 1 < len(frame.clause_tokens) else None
+        action_target = _action_target(frame.clause_tokens, action_index)
+        has_modifier = any(token in CTA_MODIFIERS for token in frame.clause_tokens[action_index + 1:])
+        has_product_object = action_target in CTA_PRODUCT_OBJECTS
+
+        if any(_starts_explicit_cta(clause, phrase) for phrase in SAFE_EXPLICIT_CTA_PHRASES):
+            return "safe_explicit_cta_phrase"
+        if not (next_token in CTA_MODIFIERS or has_product_object):
+            continue
+        if action in {"tap", "click"} and not ({"link", "below"} & clause_token_set):
+            continue
+        if action == "check" and not (has_modifier or has_any_phrase(clause, ("check it out", "check these out", "check them out"))):
+            continue
+        if action == "drop" and not ({"below", "link"} & clause_token_set):
+            continue
+        if action == "add" and "cart" not in clause_token_set:
+            continue
+        if action in {"order", "grab", "get", "pick"} and not (
+            has_modifier or action_target in CTA_PRODUCT_NOUNS
+        ):
+            continue
+        return frame.frame_type
+
+    return None
+
+
+def has_cta_action_context(text: str) -> bool:
+    return cta_action_rule(text) is not None
+
+
+def has_product_enumeration_evidence(text: str) -> bool:
+    n = normalized_text(text)
+    product_terms = {
+        "stocking", "santa", "hat", "tree", "snowman", "shade", "shades", "color", "colors",
+        "design", "designs", "variant", "variants", "set", "pack", "gloss", "glosses", "item", "items",
+        "scent", "scents", "flavor", "flavors", "size", "sizes", "option", "options", "ornament", "ornaments",
+        "capsule", "capsules", "tablet", "tablets", "scoop", "scoops", "gummy", "gummies",
+    }
+    list_structure = "," in n.text and "and" in n.tokens
+    product_context = has_any_phrase(n, (
+        "it includes", "included are", "includes", "included", "comes with", "you get",
+        "set of", "set comes with", "variants", "designs", "colors", "shades",
+    ))
+    quantity_context = any(token.isdigit() for token in n.tokens) or any(
+        token in n.tokens for token in {"one", "two", "three", "four", "five", "six", "set", "pack"}
+    )
+    product_term_count = sum(1 for token in n.tokens if token in product_terms)
+    return product_term_count >= 2 and (list_structure or product_context or quantity_context)
+
+
+def classify_slot_rule(text: str) -> tuple[str, str]:
+    n = normalized_text(text)
+
+    meta_reason = production_meta_rule(text)
+    if meta_reason:
+        return "OTHER", meta_reason
+
+    if has_cta_action_context(text):
+        return "CTA", "direct_purchase_or_action_language"
+
+    # Explicit commercial-function evidence is evaluated before generic
+    # grammatical constructions ("it's a", "this is a", "these are").
+    if has_any_phrase(n, (
+        "i think they're really good", "i get so many compliments", "before and after",
+        "five stars", "measurable result", "resultados comprobados", "cinco estrellas",
+    )):
+        return "PROOF", "proof_or_testimonial_language"
+
+    if has_any_phrase(n, (
+        "tired of", "sick of", "problem", "problems", "struggle",
+        "keep giving you", "frustrated", "failed alternative", "es un problema",
+        "me cuesta", "tengo problemas", "lucho por",
+    )):
+        return "PROBLEM", "problem_language"
+
+    if has_any_phrase(n, (
+        "because i found", "i've been using", "i've tried", "honestly", "for me",
+        "let me tell you", "when i", "at first", "the first time", "my experience", "i discovered",
+    )):
+        return "STORY", "personal_story_language"
+
+    if has_any_phrase(n, (
+        "so you can", "you can", "you'll", "you will", "feel", "helps you", "so freaking",
+        "elevates any outfit", "feel fresh", "confident", "so cute", "they are all",
+        "te ayuda", "para que puedas", "te sentirás", "hidrata tu piel",
+    )):
+        return "BENEFITS", "positive_appeal_or_outcome_language"
+
+    if has_any_phrase(n, (
+        "each gummy", "packed with", "ingredients", "it has", "it comes with", "comes with",
+        "this bag", "these probiotics", "slippery m", "prebiotic",
+        "probiotic", "flavored", "you get", "set of", "comes in", "lip glosses", "these are",
+        "included", "includes", "variants", "designs", "colors", "shades", "contiene",
+        "viene con", "incluye", "tiene una fórmula", "tonos", "colores",
+    )) or has_product_enumeration_evidence(text):
+        return "FEATURES", "product_details_quantity_variants_or_enumeration"
+
+    if "?" in n.text or starts_phrase(n, "if") or starts_phrase(n, "hey") or starts_phrase(n, "listen") or starts_phrase(n, "stop scrolling") or starts_phrase(n, "ladies") or starts_phrase(n, "guys") or has_any_phrase(n, (
+        "i found the perfect", "perfect gift", "wait until you see", "looking for the perfect",
+    )):
+        return "HOOK", "opening_promise_or_product_discovery"
+
+    if has_any_phrase(n, (
+        "it's actually", "it's a", "this is a", "these are",
+        "es un", "esta es una", "este es un",
+    )):
+        return "FEATURES", "generic_product_construction"
+
+    if looks_like_filler(text):
+        return "OTHER", "filler_or_too_short"
+    return "OTHER", "unclassified_product_context"
 
 
 def classify_slot(text: str) -> str:
-    t = text.lower()
-
-    if any(
-        p in t
-        for p in [
-            "click the link",
-            "tap the link",
-            "shop now",
-            "get yours",
-            "grab one",
-            "link below",
-            "i left it for you",
-            "add to cart",
-            "order now",
-            "check the link",
-        ]
-    ):
-        return "CTA"
-
-    if "?" in t or t.startswith(("if ", "hey ", "listen", "stop scrolling", "ladies", "guys")):
-        return "HOOK"
-
-    if any(
-        p in t
-        for p in [
-            "tired of",
-            "sick of",
-            "problem",
-            "problems",
-            "struggle",
-            "does your",
-            "is your",
-            "keep giving you",
-            "frustrated",
-            "failed alternative",
-        ]
-    ):
-        return "PROBLEM"
-
-    if any(
-        p in t
-        for p in [
-            "i think they're really good",
-            "i get so many compliments",
-            "before and after",
-            "five stars",
-            "measurable result",
-        ]
-    ):
-        return "PROOF"
-
-    if any(
-        p in t
-        for p in [
-            "so you can",
-            "you can",
-            "you'll",
-            "you will",
-            "feel",
-            "helps you",
-            "so freaking",
-            "elevates any outfit",
-            "feel fresh",
-            "confident",
-        ]
-    ):
-        return "BENEFITS"
-
-    if any(
-        p in t
-        for p in [
-            "each gummy",
-            "packed with",
-            "ingredients",
-            "it has",
-            "it comes with",
-            "it's actually",
-            "it's a",
-            "this bag",
-            "these probiotics",
-            "slippery m",
-            "prebiotic",
-            "probiotic",
-            "flavored",
-        ]
-    ):
-        return "FEATURES"
-
-    if any(
-        p in t
-        for p in [
-            "because i found",
-            "i've been using",
-            "i've tried",
-            "honestly",
-            "for me",
-            "let me tell you",
-            "when i",
-            "the first time",
-            "my experience",
-        ]
-    ):
-        return "STORY"
-
-    if looks_like_filler(text) or len(t.strip().split()) < 2:
-        return "OTHER"
-    return "STORY"
+    return classify_slot_rule(text)[0]
 
 
 def tag_clips_heuristic(clips: List[Dict[str, Any]]) -> None:
@@ -690,17 +1198,18 @@ def tag_clips_heuristic(clips: List[Dict[str, Any]]) -> None:
         text = c.get("text", "") or ""
         t = text.strip()
 
-        slot = classify_slot(t)
+        slot, slot_rule = classify_slot_rule(t)
         is_tail = looks_like_dependent_tail(t)
-        is_filler = looks_like_filler(t)
+        filler_reason = filler_rule(t)
+        is_filler = filler_reason is not None
 
         keep = not is_filler and not is_tail
+        content = semantic_content_measure(t)
 
         if not t:
             sem = 0.0
         elif keep:
-            length = len(t.split())
-            sem = min(0.95, 0.4 + 0.03 * length)
+            sem = semantic_content_score(t)
         else:
             sem = 0.0
 
@@ -731,8 +1240,23 @@ def tag_clips_heuristic(clips: List[Dict[str, Any]]) -> None:
         c["llm_reason"] = reason
         c["meta"]["slot"] = slot
         c["meta"]["semantic_score"] = sem
+        c["meta"]["semantic_content_measure"] = {
+            "normalized_tokens": list(content.normalized_tokens),
+            "normalized_token_count": content.token_count,
+            "whitespace_token_count": content.whitespace_token_count,
+            "unicode_alphanumeric_count": content.alphanumeric_count,
+            "contains_unsegmented_script": content.contains_unsegmented_script,
+            "predominantly_unsegmented": content.predominantly_unsegmented,
+            "measurement_strategy": content.measurement_strategy,
+            "effective_semantic_units": content.effective_semantic_units,
+            "scoring_rule": content.scoring_rule,
+            "repetition_noise_adjusted": content.repetition_noise_adjusted,
+        }
         c["meta"]["score"] = sem
         c["meta"]["keep"] = keep
+        c["meta"]["fallback_slot_rule"] = slot_rule
+        if filler_reason:
+            c["meta"]["filler_rule"] = filler_reason
 
 
 # =====================
@@ -810,10 +1334,11 @@ def enrich_clips_semantic(clips: List[Dict[str, Any]], force_v2: bool = False) -
 _CLIP_MODEL = None
 _CLIP_PREPROCESS = None
 _CLIP_DEVICE = "cpu"
+_CLIP_LIB = None
 
 
 def load_clip_model():
-    global _CLIP_MODEL, _CLIP_PREPROCESS, _CLIP_DEVICE
+    global _CLIP_MODEL, _CLIP_PREPROCESS, _CLIP_DEVICE, _CLIP_LIB
     if _CLIP_MODEL is not None:
         return _CLIP_MODEL, _CLIP_PREPROCESS, _CLIP_DEVICE
 
@@ -830,6 +1355,7 @@ def load_clip_model():
     _CLIP_MODEL = model
     _CLIP_PREPROCESS = preprocess
     _CLIP_DEVICE = device
+    _CLIP_LIB = clip_lib
 
     logger.info(f"CLIP model loaded on device {device}")
     return _CLIP_MODEL, _CLIP_PREPROCESS, _CLIP_DEVICE
@@ -893,7 +1419,7 @@ def run_visual_pass(
         clean_text = text.replace("\n", " ").strip()
         if len(clean_text) > 250:
             clean_text = clean_text[:250]
-        if len(clean_text) < 5:
+        if semantic_content_measure(clean_text).effective_semantic_units < 2:
             clean_text = "short video clip"
 
         mid_t = (safe_float(c.get("start", 0.0)) + safe_float(c.get("end", 0.0))) / 2.0
@@ -909,7 +1435,7 @@ def run_visual_pass(
 
         with torch.no_grad():
             image_input = preprocess(image).unsqueeze(0).to(device)
-            text_tokens = clip.tokenize([clean_text]).to(device)  # type: ignore
+            text_tokens = _CLIP_LIB.tokenize([clean_text]).to(device)  # type: ignore
 
             image_features = model.encode_image(image_input)
             text_features = model.encode_text(text_tokens)
@@ -1168,7 +1694,7 @@ def refine_clip_boundaries_with_vision(
 # =====================
 
 def normalize_text(t: str) -> str:
-    return " ".join((t or "").lower().strip().split())
+    return normalized_text(t).compact
 
 
 def text_overlap_ratio(t1: str, t2: str) -> float:
@@ -1176,12 +1702,12 @@ def text_overlap_ratio(t1: str, t2: str) -> float:
     b = normalize_text(t2)
     if not a or not b:
         return 0.0
-    set1 = set(a.split())
-    set2 = set(b.split())
-    if not set1 or not set2:
+    counts1 = Counter(comparison_units(a))
+    counts2 = Counter(comparison_units(b))
+    if not counts1 or not counts2:
         return 0.0
-    inter = len(set1 & set2)
-    union = len(set1 | set2)
+    inter = sum((counts1 & counts2).values())
+    union = sum((counts1 | counts2).values())
     if union <= 0:
         return 0.0
     return inter / union
@@ -1192,12 +1718,12 @@ def text_overlap_shorter(t1: str, t2: str) -> float:
     b = normalize_text(t2)
     if not a or not b:
         return 0.0
-    set1 = set(a.split())
-    set2 = set(b.split())
-    if not set1 or not set2:
+    counts1 = Counter(comparison_units(a))
+    counts2 = Counter(comparison_units(b))
+    if not counts1 or not counts2:
         return 0.0
-    inter = len(set1 & set2)
-    denom = min(len(set1), len(set2))
+    inter = sum((counts1 & counts2).values())
+    denom = min(sum(counts1.values()), sum(counts2.values()))
     if denom <= 0:
         return 0.0
     return inter / denom
@@ -1435,14 +1961,30 @@ def canonical_source_order(clips: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     ))
 
 
-def add_source_metadata(clips: List[Dict[str, Any]], source_index: int, source_local: str) -> None:
-    """Namespace multi-source clip IDs and attach source identity."""
+def add_source_metadata(
+    clips: List[Dict[str, Any]],
+    source_index: int,
+    source_local: str,
+    namespace_ids: bool = True,
+) -> None:
+    """Attach source identity before clean-cut validation and optionally namespace IDs."""
     prefix = f"source_{source_index:03d}:"
-    id_map = {str(c.get("id", "")): prefix + str(c.get("id", "")) for c in clips}
+    id_map = {
+        str(c.get("id", "")): (
+            prefix + str(c.get("id", "")) if namespace_ids else str(c.get("id", ""))
+        )
+        for c in clips
+    }
     for c in clips:
+        original_clip_id = str(c.get("original_clip_id", c.get("id", "")))
+        namespaced_clip_id = prefix + original_clip_id
+        c["original_clip_id"] = original_clip_id
+        c["namespaced_clip_id"] = namespaced_clip_id
         c["id"] = id_map[str(c.get("id", ""))]
         c["source_index"] = source_index
         c["source_local"] = source_local
+        c.setdefault("source_start", safe_float(c.get("start")))
+        c.setdefault("source_end", safe_float(c.get("end", c.get("start"))))
         for owner in (c, c.get("meta", {})):
             if isinstance(owner, dict) and isinstance(owner.get("chain_ids"), list):
                 owner["chain_ids"] = [id_map.get(str(cid), prefix + str(cid)) for cid in owner["chain_ids"]]
@@ -1500,6 +2042,14 @@ def suppress_near_duplicates_by_slot(
             text1 = c1.get("text", "") or ""
             text2 = c2.get("text", "") or ""
 
+            content1 = semantic_content_measure(text1)
+            content2 = semantic_content_measure(text2)
+            if (content1.contains_unsegmented_script or content2.contains_unsegmented_script) and normalize_text(text1) != normalize_text(text2):
+                # CutSell V1 does not support semantic dedupe for unsegmented
+                # scripts. Fail open rather than applying English thresholds to
+                # character-based overlap.
+                continue
+
             ratio = text_overlap_ratio(text1, text2)
             shorter_overlap = text_overlap_shorter(text1, text2)
 
@@ -1508,8 +2058,8 @@ def suppress_near_duplicates_by_slot(
 
             sem1 = safe_float(c1.get("semantic_score", 0.0))
             sem2 = safe_float(c2.get("semantic_score", 0.0))
-            len1 = len(text1.split())
-            len2 = len(text2.split())
+            len1 = content1.effective_semantic_units
+            len2 = content2.effective_semantic_units
 
             if sem2 > sem1 or (sem2 == sem1 and len2 >= len1):
                 c1["meta"]["keep"] = False
@@ -1547,17 +2097,26 @@ def suppress_cross_slot_redundant_clips(
             if not text1 or not text2:
                 continue
 
+            content1 = semantic_content_measure(text1)
+            content2 = semantic_content_measure(text2)
+            if (content1.contains_unsegmented_script or content2.contains_unsegmented_script) and text1 != text2:
+                # Unsupported-script semantic overlap is uncertain; preserve
+                # both clips instead of deleting on English-tuned thresholds.
+                continue
+
             overlap = text_overlap_ratio(text1, text2)
 
             sem1 = safe_float(c1.get("semantic_score", 0.0))
             sem2 = safe_float(c2.get("semantic_score", 0.0))
 
-            if overlap >= min_overlap and len(text2.split()) > len(text1.split()):
+            units1 = content1.effective_semantic_units
+            units2 = content2.effective_semantic_units
+            if overlap >= min_overlap and units2 > units1:
                 if sem2 >= sem1:
                     c1["meta"]["keep"] = False
                     break
 
-            if text1 in text2 and len(text2.split()) - len(text1.split()) > 3:
+            if text1 in text2 and units2 - units1 > 3:
                 c1["meta"]["keep"] = False
                 break
 
@@ -1680,7 +2239,9 @@ def build_composer(clips: List[Dict[str, Any]], mode: str = "human") -> Dict[str
     elif mode == "blooper":
         for c in usable:
             slot = c.get("slot")
-            if slot not in {"STORY", "HOOK", "CTA"}:
+            fallback_rule = c.get("meta", {}).get("fallback_slot_rule")
+            keepable_unclassified = slot == "OTHER" and fallback_rule == "unclassified_product_context"
+            if slot not in {"STORY", "HOOK", "CTA"} and not keepable_unclassified:
                 c["meta"]["keep"] = False
         usable = [c for c in usable if c["meta"].get("keep", True)]
 
@@ -1723,23 +2284,18 @@ def build_composer(clips: List[Dict[str, Any]], mode: str = "human") -> Dict[str
         cta_block_ids = [single_best_cta["id"]]
 
     cta_final_ids = cta_block_ids[:]
-    cta_final_ids_set = set(cta_final_ids)
 
-    timeline: List[Dict[str, Any]] = []
-    used_ids: List[str] = []
+    selected_cta_ids = set(cta_final_ids)
 
-    for c in usable:
-        if c["id"] in cta_final_ids_set:
-            continue
-        timeline.append(c)
-        used_ids.append(c["id"])
-
-    if cta_final_ids:
-        cta_block_clips = [c for c in usable if c["id"] in cta_final_ids_set]
-        cta_block_clips.sort(key=lambda c: safe_float(c.get("start", 0.0)))
-        for c in cta_block_clips:
-            timeline.append(c)
-            used_ids.append(c["id"])
+    # Slots are semantic functions, not mandatory timeline positions. Preserve
+    # source-time order among selected clips instead of moving CTA clips to the
+    # end or forcing a linear HOOK→...→CTA funnel sequence. Non-selected CTA
+    # alternatives are excluded so the chosen CTA block/id stays consistent with
+    # the rendered timeline.
+    timeline: List[Dict[str, Any]] = [
+        c for c in usable if c.get("slot") != "CTA" or c["id"] in selected_cta_ids
+    ]
+    used_ids: List[str] = [c["id"] for c in timeline]
 
     def ids_for_slot(slot_name: str) -> List[str]:
         return [c["id"] for c in timeline if c.get("slot") == slot_name]
@@ -1952,7 +2508,7 @@ def run_pipeline(session_id: str, files: Optional[List[str]] = None,
             check()
             report("downloading", 5 + (15 * (i + 1) // len(local_sources)), f"Downloaded source {i + 1} of {len(local_sources)}")
 
-        clips=[]; durations=[]
+        clips=[]; durations=[]; clean_cut_discard_diagnostics=[]
         llm_used=vision_used=bad_takes_used=boundaries_refined=take_judge_used=False
         take_judge_execution = {"requested": bool(TAKE_JUDGE_ENABLED or use_take_judge_v2), "sources": []}
         for i,path in enumerate(local_sources):
@@ -1960,10 +2516,22 @@ def run_pipeline(session_id: str, files: Optional[List[str]] = None,
           report("analyzing", 20 + (35 * i // len(local_sources)), f"Analyzing source {i + 1} of {len(local_sources)}")
           try:
             durations.append(probe_duration(path))
-            current=merge_incomplete_phrases(sentence_boundary_micro_cuts(run_asr(path)))
-            if len(local_sources)>1: add_source_metadata(current,i,path)
+            raw_clips = sentence_boundary_micro_cuts(run_asr(path))
+            # Source identity must exist before merge/boundary validation because
+            # discarded clips never reach later enrichment stages.
+            add_source_metadata(
+                raw_clips,
+                i,
+                path,
+                namespace_ids=len(local_sources) > 1,
+            )
+            if "discarded_diagnostics" in inspect.signature(merge_incomplete_phrases).parameters:
+                current=merge_incomplete_phrases(
+                    raw_clips,
+                    discarded_diagnostics=clean_cut_discard_diagnostics,
+                )
             else:
-                for c in current: c["source_index"],c["source_local"]=0,path
+                current=merge_incomplete_phrases(raw_clips)
             semantic_used = (enrich_clips_semantic(current, force_v2=True)
                              if use_semantic_v2 else enrich_clips_semantic(current))
             llm_used = semantic_used or llm_used
@@ -2026,12 +2594,16 @@ def run_pipeline(session_id: str, files: Optional[List[str]] = None,
             report("uploading", 98, "Upload complete")
         if S3_BUCKET and render_output and not output_url:
             raise UploadError("Rendered output upload returned no output URL")
+        clean_cut_discard_diagnostics = sanitize_clean_cut_discard_diagnostics(
+            clean_cut_discard_diagnostics
+        )
         result={"ok":True,"session_id":session_id,"input_local":input_local,
       "input_files_local":local_sources,"input_file_count":len(local_sources),
       "processed_source_indices":list(range(len(local_sources))),"duration_sec":sum(durations),
       "input_durations_sec":durations,"clips":clips,"slots":slots,"composer":composer,
       "composer_human":pretty_print_composer(clips,composer),"output_video_local":final,
       "output_video_url":output_url,"clean_cut_used_clip_ids":clean_ids,
+      "clean_cut_discard_diagnostics":clean_cut_discard_diagnostics,
       "clean_cut_output_video_local":final if clean_rendered else None,
       "clean_cut_output_video_url":output_url if clean_rendered else None,"asr":True,"semantic":True,
       "vision":vision_used,"llm_used":llm_used,"take_judge_used":take_judge_used,

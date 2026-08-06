@@ -5,6 +5,8 @@ from enum import Enum
 import re
 from typing import Any, Dict, Mapping, Optional, Sequence, Tuple
 
+from worker.text_content import normalized_text, semantic_content_measure
+
 
 class CanonicalSlot(str, Enum):
     HOOK = "HOOK"
@@ -103,12 +105,14 @@ _DEPENDENT = ("and", "but", "because", "so", "which", "that", "also", "then")
 
 
 def derive_signals(text: str, heuristic_slot: str) -> ClauseSignals:
-    normalized = " ".join((text or "").strip().lower().split())
-    words = re.findall(r"[a-z0-9']+", normalized)
+    normalized_value = normalized_text(text)
+    normalized = normalized_value.compact
+    words = normalized_value.tokens
+    content = semantic_content_measure(text)
     first = words[0] if words else ""
-    incomplete = not words or (len(words) <= 4 and first in _DEPENDENT) or normalized.endswith((" and", " but", " because", " so"))
+    incomplete = not words or (content.effective_semantic_units <= 4 and first in _DEPENDENT) or normalized.endswith((" and", " but", " because", " so"))
     return ClauseSignals(
-        word_count=len(words),
+        word_count=content.effective_semantic_units,
         question_mark="?" in text,
         imperative_verb=first in _IMPERATIVES,
         first_person_narrative=bool(re.search(r"\b(i|i'm|i've|my|we|our)\b", normalized)),
@@ -128,7 +132,7 @@ def sentence_completeness(text: str, signals: ClauseSignals) -> float:
         return 0.25
     if signals.word_count < 3:
         return 0.45
-    return 1.0 if text.rstrip().endswith((".", "!", "?")) else 0.8
+    return 1.0 if text.rstrip().endswith((".", "!", "?", "。", "！", "？")) else 0.8
 
 
 def source_index(clip: Mapping[str, Any]) -> Any:
