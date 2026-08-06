@@ -52,6 +52,39 @@ def test_cta_action_context_and_whole_tokens(text, expected):
     assert pipeline.classify_slot(text) == expected
 
 
+@pytest.mark.parametrize("text", [
+    "Grab one", "Get one", "Order one", "Pick one",
+    "Compra uno", "Pide uno", "Elige uno",
+])
+def test_imperative_singular_product_objects_are_cta(text):
+    assert pipeline.classify_slot(text) == "CTA"
+
+
+@pytest.mark.parametrize("text", [
+    "I grabbed one yesterday", "I ordered one for my sister",
+    "Pick one example from the list", "Get one point for each answer",
+    "Compré uno ayer", "Pedí uno para mi hermana", "Elige uno ejemplo de la lista",
+])
+def test_singular_object_words_without_commercial_imperative_are_not_cta(text):
+    assert pipeline.classify_slot(text) != "CTA"
+
+
+@pytest.mark.parametrize("text,expected", [
+    ("Honestly, it helps you feel confident", "BENEFITS"),
+    ("In my experience, it reduced dryness", "BENEFITS"),
+    ("Honestamente, te ayuda a sentirte segura", "BENEFITS"),
+    ("En mi experiencia, redujo la sequedad", "BENEFITS"),
+    ("I've tried it and it comes with two brushes", "FEATURES"),
+    ("He probado el producto y viene con dos brochas", "FEATURES"),
+    ("I used it for a week and five customers confirmed the result", "PROOF"),
+    ("Lo usé una semana y cinco clientes confirmaron el resultado", "PROOF"),
+    ("Honestly, I discovered it while traveling", "STORY"),
+    ("Déjame contarte cómo lo descubrí durante un viaje", "STORY"),
+])
+def test_personal_framing_yields_to_stronger_commercial_evidence(text, expected):
+    assert pipeline.classify_slot(text) == expected
+
+
 @pytest.mark.parametrize("text,expected", [
     ("It's a problem keeping my skin hydrated.", "PROBLEM"),
     ("This is a product that helps you feel confident.", "BENEFITS"),
@@ -137,8 +170,29 @@ def test_composer_keeps_only_selected_cta_without_reordering():
 def test_short_valid_transcript_has_safe_composer_fallback(text):
     item = clip("short", 0, 1, text)
     pipeline.tag_clips_heuristic([item])
+    item["visual_score"] = item["meta"]["visual_score"] = .8
     assert pipeline.build_composer([item])["used_clip_ids"] == ["short"]
     assert item["meta"]["composer_fallback"] == "keepable_short_transcript"
+
+
+def test_short_transcript_fallback_preserves_hard_rejections():
+    poor_visual = clip("poor", 0, 1, "Buy now.")
+    poor_visual["visual_score"] = poor_visual["meta"]["visual_score"] = .2
+    rejected = clip("rejected", 2, 3, "Compra ahora.")
+    rejected["meta"]["keep"] = False
+    slate = clip("slate", 4, 5, "Camera rolling")
+    pipeline.tag_clips_heuristic([slate])
+    assert pipeline.build_composer([poor_visual, rejected, slate])["used_clip_ids"] == []
+
+
+def test_threshold_fallback_keeps_selected_cta_and_source_order():
+    items = [clip("0", 0, 1, "Buy now."), clip("1", 2, 3, "Soft and light."), clip("2", 4, 5, "Click the link below.")]
+    for item in items:
+        pipeline.tag_clips_heuristic([item])
+        item["visual_score"] = item["meta"]["visual_score"] = .8
+    items[0]["semantic_score"] = items[0]["meta"]["semantic_score"] = .1
+    items[2]["semantic_score"] = items[2]["meta"]["semantic_score"] = .2
+    assert pipeline.build_composer(items)["used_clip_ids"] == ["1", "2"]
 
 
 @pytest.mark.parametrize("left,right", [("don't", "don’t"), ("I'M", "I’m"), ("NIÑA", "niña")])

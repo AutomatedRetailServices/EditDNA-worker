@@ -250,10 +250,7 @@ CTA_PRODUCT_OBJECTS = {
     "it", "this", "that", "these", "them", "one", "some", "yours", "product", "products",
     "set", "collection", "shade", "shades", "item", "items", "gloss", "glosses",
 }
-CTA_PRODUCT_NOUNS = {
-    "product", "products", "set", "collection", "shade", "shades", "item", "items",
-    "gloss", "glosses",
-}
+NONCOMMERCIAL_SINGULAR_CONTEXT = {"answer", "example", "point"}
 CTA_OBJECT_DETERMINERS = {"the", "a", "an", "your", "our"}
 CTA_LEADING_DISCOURSE = {"so", "okay", "well", "and", "please"}
 
@@ -394,6 +391,8 @@ def cta_action_rule(text: str) -> Optional[str]:
         "toca el enlace", "añádelo al carrito", "consigue el tuyo",
     )):
         return "safe_explicit_cta_phrase_es"
+    if n.compact in {"compra uno", "pide uno", "elige uno"}:
+        return "imperative_singular_product_es"
 
     for frame in cta_action_frames(text):
         if frame.frame_type not in {
@@ -409,6 +408,10 @@ def cta_action_rule(text: str) -> Optional[str]:
         action_target = _action_target(frame.clause_tokens, action_index)
         has_modifier = any(token in CTA_MODIFIERS for token in frame.clause_tokens[action_index + 1:])
         has_product_object = action_target in CTA_PRODUCT_OBJECTS
+        target_index = action_index + 1
+        if target_index < len(frame.clause_tokens) and frame.clause_tokens[target_index] in CTA_OBJECT_DETERMINERS:
+            target_index += 1
+        after_target = frame.clause_tokens[target_index + 1:]
 
         if any(_starts_explicit_cta(clause, phrase) for phrase in SAFE_EXPLICIT_CTA_PHRASES):
             return "safe_explicit_cta_phrase"
@@ -423,8 +426,10 @@ def cta_action_rule(text: str) -> Optional[str]:
         if action == "add" and "cart" not in clause_token_set:
             continue
         if action in {"order", "grab", "get", "pick"} and not (
-            has_modifier or action_target in CTA_PRODUCT_NOUNS
+            has_modifier or has_product_object
         ):
+            continue
+        if action_target == "one" and after_target and after_target[0] in NONCOMMERCIAL_SINGULAR_CONTEXT:
             continue
         return frame.frame_type
 
@@ -476,20 +481,17 @@ def classify_slot_rule(text: str) -> tuple[str, str]:
 
     if has_any_phrase(n, (
         "i think they're really good", "i get so many compliments", "before and after",
-        "five stars", "measurable result", "resultados comprobados", "cinco estrellas",
+        "five stars", "measurable result", "confirmed the result", "customers confirmed",
+        "resultados comprobados", "cinco estrellas", "clientes confirmaron", "confirmaron el resultado",
     )):
         return "PROOF", "proof_or_testimonial_language"
 
     if has_any_phrase(n, (
-        "because i found", "i've been using", "i've tried", "honestly", "for me",
-        "let me tell you", "when i", "at first", "the first time", "my experience", "i discovered",
-    )):
-        return "STORY", "personal_story_language"
-
-    if has_any_phrase(n, (
         "so you can", "you can", "you'll", "you will", "feel", "helps you", "so freaking",
         "elevates any outfit", "feel fresh", "confident", "so cute", "they are all",
+        "reduced dryness", "reduces dryness", "improved", "works better",
         "te ayuda", "para que puedas", "te sentirás", "hidrata tu piel",
+        "redujo la sequedad", "mejoró", "funciona mejor",
     )):
         return "BENEFITS", "positive_appeal_or_outcome_language"
 
@@ -502,16 +504,24 @@ def classify_slot_rule(text: str) -> tuple[str, str]:
     )) or has_product_enumeration_evidence(text):
         return "FEATURES", "product_details_quantity_variants_or_enumeration"
 
+    if has_any_phrase(n, (
+        "it's actually", "it's a", "this is a", "these are",
+        "es un", "esta es una", "este es un",
+    )):
+        return "FEATURES", "generic_product_construction"
+
     if "?" in n.text or starts_phrase(n, "if") or starts_phrase(n, "hey") or starts_phrase(n, "listen") or starts_phrase(n, "stop scrolling") or starts_phrase(n, "ladies") or starts_phrase(n, "guys") or has_any_phrase(n, (
         "i found the perfect", "perfect gift", "wait until you see", "looking for the perfect",
     )):
         return "HOOK", "opening_promise_or_product_discovery"
 
     if has_any_phrase(n, (
-        "it's actually", "it's a", "this is a", "these are",
-        "es un", "esta es una", "este es un",
+        "because i found", "i've been using", "i've tried", "honestly", "for me",
+        "let me tell you", "when i", "at first", "the first time", "my experience",
+        "in my experience", "i discovered", "i use", "en mi experiencia", "he probado",
+        "déjame contarte", "yo uso",
     )):
-        return "FEATURES", "generic_product_construction"
+        return "STORY", "personal_story_language"
 
     if looks_like_filler(text):
         return "OTHER", "filler_or_too_short"

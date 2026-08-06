@@ -1707,6 +1707,21 @@ def select_clean_cut_clip_ids(clips: List[Dict[str, Any]]) -> List[str]:
     ]
 
 
+def _composer_hard_eligible(clip: Dict[str, Any]) -> bool:
+    """Apply composer gates that semantic-threshold fallback may never relax."""
+    meta = clip.get("meta", {})
+    if not meta.get("keep", True) or meta.get("semantic_v2", {}).get("excluded_from_composer", False):
+        return False
+    if filler_rule(clip.get("text", "")) is not None:
+        return False
+    if meta.get("boundary_diagnostic") in {
+        "discarded_invalid_microfragment", "discarded_duplicate_residual_text",
+    }:
+        return False
+    visual = safe_float(clip.get("visual_score", 0.0))
+    return not (visual > 0.0 and visual < 0.58)
+
+
 def build_composer(clips: List[Dict[str, Any]], mode: str = "human") -> Dict[str, Any]:
     mode = (mode or "human").lower()
     if mode not in ("human", "clean", "blooper"):
@@ -1715,8 +1730,7 @@ def build_composer(clips: List[Dict[str, Any]], mode: str = "human") -> Dict[str
     keepable = [
         c
         for c in clips
-        if c["meta"].get("keep", True)
-        and not c["meta"].get("semantic_v2", {}).get("excluded_from_composer", False)
+        if _composer_hard_eligible(c)
     ]
     usable = [
         c for c in keepable

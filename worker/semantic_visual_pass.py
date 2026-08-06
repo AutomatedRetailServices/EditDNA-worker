@@ -197,7 +197,10 @@ def continuity_chains(takes: List[Take]) -> List[List[Take]]:
     return [[t] for t in stitch_chain(takes)]
 
 # -------- Scoring --------
-def score_take(t: Take, slot: str) -> float:
+def score_take(t: Take, slot: str = "") -> float:
+    """Score a take, inferring its slot for backward-compatible callers."""
+    if not slot:
+        slot = tag_slot(t)
     # hard constraints per slot
     if slot in SLOT_REQUIRE_PRODUCT and not t.has_product:
         return -1.0
