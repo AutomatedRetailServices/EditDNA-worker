@@ -729,7 +729,10 @@ def tag_clips_heuristic(clips: List[Dict[str, Any]]) -> None:
         filler_reason = filler_rule(t)
         is_filler = filler_reason is not None
 
-        keep = not is_filler and not is_tail
+        # Clean Cut deletion is limited to explicit production/meta filler.
+        # Linguistic dependency is useful context for ranking/composition but
+        # must not delete otherwise valid speech.
+        keep = not is_filler
         content = semantic_content_measure(t)
 
         if not t:
@@ -740,10 +743,9 @@ def tag_clips_heuristic(clips: List[Dict[str, Any]]) -> None:
             sem = 0.0
 
         if not keep:
-            if is_tail:
-                reason = "Dependent tail without full context (cola tipo 'available as well')."
-            else:
-                reason = "Marked as filler / meta (redo, wait, etc.)."
+            reason = "Explicit production/meta speech removed by Clean Cut."
+        elif is_tail:
+            reason = "Dependent context retained for semantic/composer evaluation."
         else:
             if slot == "HOOK":
                 reason = "Attention-grabbing phrase or question."
@@ -836,11 +838,13 @@ def enrich_clips_semantic(clips: List[Dict[str, Any]], force_v2: bool = False) -
         if info.abstain or info.confidence < SEMANTIC_V2_MIN_CONFIDENCE or info.completeness < 0.5:
             continue
         if info.primary_slot.value == "OTHER":
-            # Preserve the heuristic/public slot and keep state, but ensure a validated
-            # non-sales judgment cannot enter a sales composer timeline.
-            c["meta"]["semantic_v2"]["application_status"] = "excluded_other"
-            c["meta"]["semantic_v2"]["application_reason"] = "validated_other_excluded_from_sales_composer"
-            c["meta"]["semantic_v2"]["excluded_from_composer"] = True
+            # OTHER is a semantic label, never deletion authority. Preserve valid
+            # speech and let the editable draft/composer decide presentation.
+            c["slot"] = "OTHER"
+            c["meta"]["slot"] = "OTHER"
+            c["meta"]["semantic_v2"]["application_status"] = "applied_other_preserved"
+            c["meta"]["semantic_v2"]["application_reason"] = "semantic_label_not_deletion_authority"
+            c["meta"]["semantic_v2"]["applied"] = True
             continue
         slot_from_llm = publicize_canonical_slot(info.primary_slot)
         c["slot"] = slot_from_llm
@@ -1712,7 +1716,7 @@ def select_clean_cut_clip_ids(clips: List[Dict[str, Any]]) -> List[str]:
 def _composer_hard_eligible(clip: Dict[str, Any]) -> bool:
     """Apply composer gates that semantic-threshold fallback may never relax."""
     meta = clip.get("meta", {})
-    if not meta.get("keep", True) or meta.get("semantic_v2", {}).get("excluded_from_composer", False):
+    if not meta.get("keep", True):
         return False
     if filler_rule(clip.get("text", "")) is not None:
         return False
@@ -1720,8 +1724,9 @@ def _composer_hard_eligible(clip: Dict[str, Any]) -> bool:
         "discarded_invalid_microfragment", "discarded_duplicate_residual_text",
     }:
         return False
-    visual = safe_float(clip.get("visual_score", 0.0))
-    return not (visual > 0.0 and visual < 0.58)
+    # Visual quality is a ranking signal. A low embedding score is not enough
+    # to delete intelligible, valid speech from an editable draft.
+    return True
 
 
 def build_composer(clips: List[Dict[str, Any]], mode: str = "human") -> Dict[str, Any]:
@@ -1729,8 +1734,11 @@ def build_composer(clips: List[Dict[str, Any]], mode: str = "human") -> Dict[str
     if mode not in ("human", "clean", "blooper"):
         mode = "human"
 
+    # Composer selection is intentionally isolated from Clean Cut state. Legacy
+    # scoring/dedupe functions may mutate meta.keep, so operate on deep copies
+    # and retain every valid original clip for alternates/restore.
     keepable = [
-        c
+        copy.deepcopy(c)
         for c in clips
         if _composer_hard_eligible(c)
     ]
@@ -1789,7 +1797,6 @@ def build_composer(clips: List[Dict[str, Any]], mode: str = "human") -> Dict[str
             c
             for c in clips
             if c["meta"].get("keep", True)
-            and not c["meta"].get("semantic_v2", {}).get("excluded_from_composer", False)
             and safe_float(c.get("semantic_score", 0.0)) >= COMPOSER_MIN_SEMANTIC
         ]
         usable = canonical_source_order(usable)
