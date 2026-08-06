@@ -23,18 +23,20 @@ jobs:
         with:
           python-version: '3.11'
           cache: pip
-      - name: Apply V1 structural patch
-        run: python scripts/apply_v1_structural_patch.py
-      - name: Commit structural patch on branch pushes
+      - name: Apply V1 recovery patches
+        run: |
+          python scripts/apply_v1_structural_patch.py
+          python scripts/apply_v1_take_judge_spanish_patch.py
+      - name: Commit recovery patches on branch pushes
         if: github.event_name == 'push'
         run: |
-          if git diff --quiet -- worker/pipeline.py; then
-            echo "Structural patch already committed"
+          if git diff --quiet -- worker/pipeline.py worker/take_judge_v2.py; then
+            echo "Recovery patches already committed"
           else
             git config user.name "github-actions[bot]"
             git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-            git add worker/pipeline.py
-            git commit -m "recovery: separate Clean Cut from semantic composer state"
+            git add worker/pipeline.py worker/take_judge_v2.py
+            git commit -m "recovery: separate pipeline state and normalize EN ES Take Judge"
             git push origin HEAD:repair/v1-structural-recovery
           fi
       - name: Install FFmpeg development libraries
