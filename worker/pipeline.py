@@ -980,17 +980,15 @@ CTA_PRODUCT_NOUNS = {
     "gloss", "glosses",
 }
 CTA_OBJECT_DETERMINERS = {"the", "a", "an", "your", "our"}
-VIEWER_DIRECTED_PREFIXES = ("you can", "you could", "you should", "go")
-CTA_LEADING_DISCOURSE = {"so", "please"}
+CTA_LEADING_DISCOURSE = {"so", "okay", "well", "and", "please"}
 
 
-def _token_after(tokens: Sequence[str], token: str) -> Optional[str]:
-    """Return the token after the first exact action token, if one exists."""
-    try:
-        index = tokens.index(token)
-    except ValueError:
-        return None
-    return tokens[index + 1] if index + 1 < len(tokens) else None
+@dataclass(frozen=True)
+class CTAActionFrame:
+    action: str
+    action_index: int
+    frame_type: str
+    clause_tokens: tuple[str, ...]
 
 
 def _action_target(tokens: Sequence[str], action_index: int) -> Optional[str]:
@@ -1010,6 +1008,89 @@ def _starts_explicit_cta(n: NormalizedText, phrase: str) -> bool:
         and n.tokens[0] in CTA_LEADING_DISCOURSE
         and n.tokens[1:1 + len(phrase_tokens)] == phrase_tokens
     )
+
+
+def _cta_clauses(text: str) -> List[tuple[NormalizedText, str]]:
+    """Split punctuation-delimited clauses without borrowing prefix evidence."""
+    normalized = normalize_match_text(text)
+    clauses: List[tuple[NormalizedText, str]] = []
+    boundary = ""
+    for part in re.split(r"([.!?;,:\n]+)", normalized):
+        if not part:
+            continue
+        if re.fullmatch(r"[.!?;,:\n]+", part):
+            boundary = part
+            continue
+        clause = normalized_text(part)
+        if clause.tokens:
+            clauses.append((clause, boundary))
+        boundary = ""
+    return clauses
+
+
+def _strip_cta_discourse(tokens: tuple[str, ...]) -> tuple[str, ...]:
+    while tokens and tokens[0] in CTA_LEADING_DISCOURSE:
+        tokens = tokens[1:]
+    return tokens
+
+
+def _is_reported_or_narrated_action(
+    tokens: tuple[str, ...], action_index: int, previous_clause: Optional[NormalizedText],
+) -> str:
+    before = tokens[:action_index]
+    subject_context = _strip_cta_discourse(before)
+    reporting = {"said", "says", "told", "asked", "reminded", "heard", "wrote"}
+    if any(token in reporting for token in before):
+        return "reported_speech"
+    if previous_clause and any(token in reporting for token in previous_clause.tokens):
+        return "reported_speech"
+    if any(token in before for token in {"did", "decided", "usually", "yesterday", "went", "used", "was"}):
+        return "historical_action"
+    if subject_context and subject_context[0] in {"i", "we", "my", "our"}:
+        return "first_person_narration"
+    if subject_context and subject_context[0] in {"he", "she", "they", "his", "her", "their"}:
+        return "third_person_narration"
+    return "unrelated_prefix"
+
+
+def cta_action_frames(text: str) -> List[CTAActionFrame]:
+    """Bind each CTA action to an immediate command/modal frame in its clause."""
+    frames: List[CTAActionFrame] = []
+    clauses = _cta_clauses(text)
+    for clause_index, (clause, boundary_before) in enumerate(clauses):
+        tokens = clause.tokens
+        command_tokens = _strip_cta_discourse(tokens)
+        command_offset = len(tokens) - len(command_tokens)
+        carries_reported_speech = bool(boundary_before and set(boundary_before) <= {",", ":"})
+        previous_clause = clauses[clause_index - 1][0] if clause_index and carries_reported_speech else None
+        for action_index, action in enumerate(tokens):
+            if action not in IMPERATIVE_ACTION_VERBS:
+                continue
+            local_index = action_index - command_offset
+            narrative_frame = _is_reported_or_narrated_action(
+                tokens, action_index, previous_clause
+            )
+            frame_type: Optional[str] = None
+            if narrative_frame == "reported_speech":
+                frame_type = narrative_frame
+            elif local_index == 0:
+                frame_type = "imperative_action"
+            elif local_index >= 0:
+                before = command_tokens[:local_index]
+                if before in (("you", "can"), ("you", "could"), ("you", "should"), ("you", "must")):
+                    frame_type = "viewer_directed_modal"
+                elif before == ("go",):
+                    frame_type = "viewer_directed_go"
+                elif before == ("make", "sure", "you"):
+                    frame_type = "viewer_directed_reminder"
+                elif before == ("don't", "forget", "to"):
+                    frame_type = "viewer_directed_reminder"
+                elif before == ("go", "ahead", "and"):
+                    frame_type = "viewer_directed_go"
+            if frame_type is None:
+                frame_type = narrative_frame
+            frames.append(CTAActionFrame(action, action_index, frame_type, tokens))
+    return frames
 
 
 def is_explicit_link_cta(n: NormalizedText) -> bool:
@@ -1034,57 +1115,38 @@ def cta_action_rule(text: str) -> Optional[str]:
     if is_explicit_link_cta(n):
         return "explicit_link_instruction"
 
-    if any(_starts_explicit_cta(n, phrase) for phrase in SAFE_EXPLICIT_CTA_PHRASES):
-        return "safe_explicit_cta_phrase"
+    for frame in cta_action_frames(text):
+        if frame.frame_type not in {
+            "imperative_action", "viewer_directed_modal",
+            "viewer_directed_go", "viewer_directed_reminder",
+        }:
+            continue
+        clause = NormalizedText("", "", frame.clause_tokens, " ".join(frame.clause_tokens))
+        clause_token_set = set(frame.clause_tokens)
+        action = frame.action
+        action_index = frame.action_index
+        next_token = frame.clause_tokens[action_index + 1] if action_index + 1 < len(frame.clause_tokens) else None
+        action_target = _action_target(frame.clause_tokens, action_index)
+        has_modifier = any(token in CTA_MODIFIERS for token in frame.clause_tokens[action_index + 1:])
+        has_product_object = action_target in CTA_PRODUCT_OBJECTS
 
-    action = next((token for token in n.tokens if token in IMPERATIVE_ACTION_VERBS), None)
-    if action is None:
-        return None
-
-    action_index = n.tokens.index(action)
-    next_token = _token_after(n.tokens, action)
-    action_target = _action_target(n.tokens, action_index)
-    has_modifier = any(token in CTA_MODIFIERS for token in n.tokens)
-    has_product_object = action_target in CTA_PRODUCT_OBJECTS
-    viewer_directed = any(has_phrase(n, prefix) for prefix in VIEWER_DIRECTED_PREFIXES) or has_phrase(n, "you yourself")
-    link_directed = any(
-        _starts_explicit_cta(n, phrase)
-        for phrase in ("tap the link to", "click the link to", "click below to", "link below to")
-    )
-
-    # A leading action is an imperative only with an object/modifier that makes
-    # the commercial request explicit. This rejects noun uses such as "Order of
-    # application" and physical actions such as "Check the ingredients".
-    imperative_position = action_index == 0 or (
-        action_index == 1 and n.tokens[0] in CTA_LEADING_DISCOURSE
-    )
-    if imperative_position and (next_token in CTA_MODIFIERS or has_product_object):
-        if action in {"tap", "click"} and not ({"link", "below"} & set(n.tokens)):
-            return None
-        if action == "check" and not (has_modifier or has_any_phrase(n, ("check it out", "check these out", "check them out"))):
-            return None
-        if action == "drop" and not ({"below", "link"} & set(n.tokens)):
-            return None
-        if action == "add" and "cart" not in n.tokens:
-            return None
+        if any(_starts_explicit_cta(clause, phrase) for phrase in SAFE_EXPLICIT_CTA_PHRASES):
+            return "safe_explicit_cta_phrase"
+        if not (next_token in CTA_MODIFIERS or has_product_object):
+            continue
+        if action in {"tap", "click"} and not ({"link", "below"} & clause_token_set):
+            continue
+        if action == "check" and not (has_modifier or has_any_phrase(clause, ("check it out", "check these out", "check them out"))):
+            continue
+        if action == "drop" and not ({"below", "link"} & clause_token_set):
+            continue
+        if action == "add" and "cart" not in clause_token_set:
+            continue
         if action in {"order", "grab", "get", "pick"} and not (
             has_modifier or action_target in CTA_PRODUCT_NOUNS
         ):
-            return None
-        return "imperative_product_action"
-
-    if link_directed:
-        return "link_directed_action"
-
-    if viewer_directed:
-        # Viewer language still needs an actionable object/modifier; "you can
-        # get headaches" and "you should check the ingredients" are narration.
-        if has_product_object and (
-            action in {"buy", "shop"}
-            or has_modifier
-            or action_target in CTA_PRODUCT_NOUNS
-        ):
-            return "viewer_directed_product_action"
+            continue
+        return frame.frame_type
 
     return None
 

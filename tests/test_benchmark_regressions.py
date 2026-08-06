@@ -839,6 +839,91 @@ def test_false_cta_narration_cannot_displace_real_cta_in_composer():
     assert composer["used_clip_ids"] == ["order_explanation", "real_cta"]
 
 
+POSITIONAL_CTA_FRAME_CASES = [
+    ("Go get yours.", "viewer_directed_go"),
+    ("You can grab it below.", "viewer_directed_modal"),
+    ("Please click the link.", "imperative_action"),
+    ("Make sure you order today.", "viewer_directed_reminder"),
+    ("Don't forget to shop the collection.", "viewer_directed_reminder"),
+    ("You should check it out.", "viewer_directed_modal"),
+    ("Go ahead and add it to your cart.", "viewer_directed_go"),
+    ("Okay, buy yours today.", "imperative_action"),
+    ("Well, you can order it below.", "viewer_directed_modal"),
+]
+
+
+@pytest.mark.parametrize("text,expected_frame", POSITIONAL_CTA_FRAME_CASES)
+def test_position_aware_viewer_action_frames_accept_connected_commands(text, expected_frame):
+    frames = pipeline.cta_action_frames(text)
+    assert any(frame.frame_type == expected_frame for frame in frames), text
+    assert pipeline.classify_slot(text) == "CTA"
+
+
+POSITIONAL_CTA_NARRATION_CASES = [
+    ("I go to get this set every week.", "first_person_narration"),
+    ("Well, I go to get this set every week.", "first_person_narration"),
+    ("She told me to go get the package.", "reported_speech"),
+    ("I told him you can buy it later.", "reported_speech"),
+    ("The first thing I did was click the old link.", "historical_action"),
+    ("I usually get this set in summer.", "historical_action"),
+    ("You can see why I decided to buy it.", "historical_action"),
+    ("She said, 'go order it,' but I waited.", "reported_speech"),
+    ("The word go appears before another unrelated action to get attention.", "unrelated_prefix"),
+    ("I buy it because you can see the difference.", "first_person_narration"),
+    ("He can get this set whenever it is available.", "third_person_narration"),
+    ("She can buy it later if she wants.", "third_person_narration"),
+    ("You can see the benefit, I get this set every week.", "first_person_narration"),
+    ("I get this set every week, you can see why it works.", "first_person_narration"),
+    ("She told me, make sure you order today.", "reported_speech"),
+]
+
+
+@pytest.mark.parametrize("text,expected_frame", POSITIONAL_CTA_NARRATION_CASES)
+def test_position_aware_viewer_action_frames_reject_unconnected_prefixes(text, expected_frame):
+    frames = pipeline.cta_action_frames(text)
+    assert frames, text
+    assert any(frame.frame_type == expected_frame for frame in frames), text
+    assert pipeline.cta_action_rule(text) is None
+    assert pipeline.classify_slot(text) != "CTA"
+
+
+@pytest.mark.parametrize("text", [
+    "Buy yours today, I use mine every morning.",
+    "I use mine every morning, so buy yours today.",
+    "I usually get this set, and you should buy yours today.",
+    "I checked the old link yesterday, so click the link below.",
+    "She said this formula works. Buy yours today.",
+])
+def test_genuine_cta_clause_is_not_qualified_by_or_borrowed_from_other_clause(text):
+    assert pipeline.classify_slot(text) == "CTA"
+
+
+def test_multiple_actions_bind_to_their_own_local_cta_frames():
+    text = "I usually get this set, and you should buy yours today."
+    frames = pipeline.cta_action_frames(text)
+    assert [(frame.action, frame.frame_type) for frame in frames] == [
+        ("get", "historical_action"),
+        ("buy", "viewer_directed_modal"),
+    ]
+
+
+def test_false_viewer_prefix_narration_cannot_displace_real_cta_in_composer():
+    narration = _composer_clip("false_prefix", 0, "OTHER", score=0.99)
+    narration["text"] = "I go to get this set every week."
+    narration["slot"] = pipeline.classify_slot(narration["text"])
+    real_cta = _composer_clip("real_cta", 1, "CTA", score=0.90)
+    real_cta["text"] = "You should buy yours today."
+    real_cta["slot"] = pipeline.classify_slot(real_cta["text"])
+    alternative = _composer_clip("alternative_cta", 2, "CTA", score=0.70)
+    alternative["text"] = "Shop now."
+
+    composer = pipeline.build_composer([narration, real_cta, alternative])
+
+    assert narration["slot"] != "CTA"
+    assert composer["cta_id"] == "real_cta"
+    assert composer["used_clip_ids"] == ["false_prefix", "real_cta"]
+
+
 EXPLICIT_LINK_CTA_CASES = [
     "Link below.",
     "Link in bio.",
