@@ -34,6 +34,10 @@ EXACT_STANDALONE_PRODUCTION_DIRECTIONS = {
     "do that again",
     "cut that",
     "corten", "corta", "otra vez", "empecemos de nuevo", "repetimos",
+    "start again", "redo", "do it again", "try again", "start over",
+    "one more time", "let's redo that",
+    "empieza de nuevo", "hazlo otra vez", "repite", "vamos otra vez",
+    "una vez más", "reinicia", "volvamos a empezar",
 }
 
 LEADING_PRODUCTION_DIRECTIONS = (
@@ -167,10 +171,23 @@ def is_compound_take_slate(n: NormalizedText) -> bool:
     return is_clear_recording_direction(normalized_text(" ".join(remainder)))
 
 
-def production_meta_rule(text: str, include_camera_rolling: bool = True) -> Optional[str]:
+def _production_command_rule(text: str, include_camera_rolling: bool = True) -> Optional[str]:
     n = normalized_text(text)
     if not n.compact:
         return None
+    if n.compact in EXACT_STANDALONE_PRODUCTION_DIRECTIONS:
+        return "standalone_production_direction"
+    recording_context = has_any_phrase(n, (
+        "camera rolling", "camera is rolling", "recording this take",
+        "cámara grabando", "estamos grabando", "grabando esta toma",
+    ))
+    restart_context = has_any_phrase(n, (
+        "start again", "redo", "do it again", "try again", "restart", "start over",
+        "one more time", "empieza de nuevo", "hazlo otra vez", "repite",
+        "vamos otra vez", "una vez más", "reinicia", "volvamos a empezar",
+    ))
+    if recording_context and restart_context:
+        return "recording_context_restart"
     start_over_commands = {
         "start over",
         "let's start over",
@@ -179,7 +196,7 @@ def production_meta_rule(text: str, include_camera_rolling: bool = True) -> Opti
         "can we start over",
         "i need to start over",
     }
-    if n.compact in start_over_commands or starts_phrase(n, "start over from"):
+    if n.compact in start_over_commands:
         return "production_meta_phrase"
     if include_camera_rolling and is_camera_rolling_slate(text):
         return "production_meta_phrase"
@@ -188,6 +205,11 @@ def production_meta_rule(text: str, include_camera_rolling: bool = True) -> Opti
     if n.compact in {"toma dos", "toma tres", "toma número dos", "toma número tres"}:
         return "production_meta_phrase"
     return None
+
+
+def production_meta_rule(text: str, include_camera_rolling: bool = True) -> Optional[str]:
+    intent = command_intent(text, include_camera_rolling=include_camera_rolling)
+    return "production_meta_phrase" if intent.final_intent == "production" else None
 
 
 def filler_rule(text: str) -> Optional[str]:
@@ -250,8 +272,18 @@ CTA_PRODUCT_OBJECTS = {
     "it", "this", "that", "these", "them", "one", "some", "yours", "product", "products",
     "set", "collection", "shade", "shades", "item", "items", "gloss", "glosses",
 }
-NONCOMMERCIAL_SINGULAR_CONTEXT = {"answer", "example", "point"}
-CTA_OBJECT_DETERMINERS = {"the", "a", "an", "your", "our"}
+AMBIGUOUS_PRODUCT_OBJECTS = {"it", "this", "that", "one", "uno", "esto", "eso"}
+NONCOMMERCIAL_COMPLEMENTS = {
+    "answer", "carefully", "done", "example", "first", "point", "right",
+    "respuesta", "bien", "cuidado", "ejemplo", "primero", "punto",
+    "lista",
+}
+EXPLICIT_PRODUCT_CONTEXT = {
+    "cart", "collection", "gloss", "glosses", "item", "items", "link", "package",
+    "product", "products", "set", "shop", "offer", "price", "carrito", "colección",
+    "enlace", "oferta", "paquete", "precio", "producto", "productos",
+}
+CTA_OBJECT_DETERMINERS = {"the", "a", "an", "your", "our", "un", "una", "este", "esta"}
 CTA_LEADING_DISCOURSE = {"so", "okay", "well", "and", "please"}
 
 
@@ -372,7 +404,7 @@ def is_explicit_link_cta(n: NormalizedText) -> bool:
     return " ".join(tokens) in EXPLICIT_LINK_CTA_PHRASES
 
 
-def cta_action_rule(text: str) -> Optional[str]:
+def _commercial_cta_rule(text: str) -> Optional[str]:
     """Return a CTA rule only when an ambiguous action has viewer intent.
 
     Action words such as ``order``, ``shop``, and ``check`` are also ordinary
@@ -391,8 +423,19 @@ def cta_action_rule(text: str) -> Optional[str]:
         "toca el enlace", "añádelo al carrito", "consigue el tuyo",
     )):
         return "safe_explicit_cta_phrase_es"
-    if n.compact in {"compra uno", "pide uno", "elige uno"}:
-        return "imperative_singular_product_es"
+    spanish_commercial = (
+        ("compra", True), ("pide", True), ("elige", False),
+        ("consíguelo", False), ("consigue", False), ("llévate", False),
+    )
+    for verb, inherently_commercial in spanish_commercial:
+        if not starts_phrase(n, verb):
+            continue
+        remainder = n.tokens[1:]
+        has_context = inherently_commercial or bool(
+            set(remainder) & (EXPLICIT_PRODUCT_CONTEXT | {"ahora", "hoy", "tuyo"})
+        )
+        if has_context and not (set(remainder) & NONCOMMERCIAL_COMPLEMENTS):
+            return "viewer_directed_purchase_es"
 
     for frame in cta_action_frames(text):
         if frame.frame_type not in {
@@ -425,15 +468,69 @@ def cta_action_rule(text: str) -> Optional[str]:
             continue
         if action == "add" and "cart" not in clause_token_set:
             continue
-        if action in {"order", "grab", "get", "pick"} and not (
-            has_modifier or has_product_object
-        ):
+        commercial_context = has_modifier or bool(
+            set(frame.clause_tokens[action_index + 1:]) & EXPLICIT_PRODUCT_CONTEXT
+        ) or action in {"buy", "shop", "order"}
+        if action in {"order", "grab", "get", "pick"} and not (has_product_object or commercial_context):
             continue
-        if action_target == "one" and after_target and after_target[0] in NONCOMMERCIAL_SINGULAR_CONTEXT:
+        if after_target and after_target[0] in NONCOMMERCIAL_COMPLEMENTS:
+            continue
+        if action_target in AMBIGUOUS_PRODUCT_OBJECTS and not commercial_context:
             continue
         return frame.frame_type
 
     return None
+
+
+@dataclass(frozen=True)
+class CommandIntent:
+    is_command: bool
+    action: Optional[str]
+    target: Optional[str]
+    clause_tokens: tuple[str, ...]
+    production_intent: bool
+    commercial_evidence: bool
+    noncommercial_complement: Optional[str]
+    final_intent: str
+
+
+def command_intent(text: str, include_camera_rolling: bool = True) -> CommandIntent:
+    """Resolve local command intent before filler or commercial classification."""
+    production = _production_command_rule(text, include_camera_rolling)
+    frames = cta_action_frames(text)
+    command_frame = next((frame for frame in frames if frame.frame_type in {
+        "imperative_action", "viewer_directed_modal", "viewer_directed_go", "viewer_directed_reminder",
+    }), None)
+    n = normalized_text(text)
+    spanish_command = bool(n.tokens and n.tokens[0] in {"haz", "elige", "toma"})
+    action = command_frame.action if command_frame else (n.tokens[0] if n.tokens else None)
+    clause = command_frame.clause_tokens if command_frame else n.tokens
+    action_index = command_frame.action_index if command_frame else 0
+    target = _action_target(clause, action_index) if clause and action else None
+    following = clause[action_index + 1:] if clause else ()
+    noncommercial = next((token for token in following if token in NONCOMMERCIAL_COMPLEMENTS), None)
+    commercial_rule = None if production else _commercial_cta_rule(text)
+    if production:
+        final = "production"
+    elif noncommercial and not commercial_rule:
+        final = "noncommercial_command" if command_frame or spanish_command else "narration"
+    elif commercial_rule:
+        final = "commercial_cta"
+    elif command_frame or spanish_command:
+        final = "ambiguous"
+    elif n.tokens:
+        final = "narration"
+    else:
+        final = "ambiguous"
+    return CommandIntent(
+        bool(command_frame or spanish_command or production), action, target, clause, bool(production),
+        bool(commercial_rule), noncommercial, final,
+    )
+
+
+def cta_action_rule(text: str) -> Optional[str]:
+    intent = command_intent(text)
+    return "command_intent_commercial_cta" if intent.final_intent == "commercial_cta" else None
 
 
 def has_cta_action_context(text: str) -> bool:

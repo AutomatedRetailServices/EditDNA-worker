@@ -711,6 +711,8 @@ from worker.commercial_fallback import (
     cta_action_frames,
     is_explicit_link_cta,
     cta_action_rule,
+    CommandIntent,
+    command_intent,
     has_cta_action_context,
     has_product_enumeration_evidence,
     classify_slot_rule,

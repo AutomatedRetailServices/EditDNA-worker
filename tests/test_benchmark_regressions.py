@@ -53,8 +53,8 @@ def test_cta_action_context_and_whole_tokens(text, expected):
 
 
 @pytest.mark.parametrize("text", [
-    "Grab one", "Get one", "Order one", "Pick one",
-    "Compra uno", "Pide uno", "Elige uno",
+    "Get it now", "Grab this set", "Order one today", "Pick one from the collection",
+    "Compra uno ahora", "Pide este set", "Consíguelo en el enlace", "Llévate uno hoy",
 ])
 def test_imperative_singular_product_objects_are_cta(text):
     assert pipeline.classify_slot(text) == "CTA"
@@ -63,10 +63,50 @@ def test_imperative_singular_product_objects_are_cta(text):
 @pytest.mark.parametrize("text", [
     "I grabbed one yesterday", "I ordered one for my sister",
     "Pick one example from the list", "Get one point for each answer",
-    "Compré uno ayer", "Pedí uno para mi hermana", "Elige uno ejemplo de la lista",
+    "Get it right", "Get this done", "Grab it carefully",
+    "Compré uno ayer", "Pedí uno para mi hermana", "Elige un ejemplo", "Toma uno de la lista",
 ])
 def test_singular_object_words_without_commercial_imperative_are_not_cta(text):
     assert pipeline.classify_slot(text) != "CTA"
+
+
+@pytest.mark.parametrize("text", [
+    "start again", "redo", "do it again", "try again", "restart", "start over",
+    "one more time", "let's redo that", "empieza de nuevo", "hazlo otra vez",
+    "repite", "vamos otra vez", "una vez más", "reinicia", "volvamos a empezar",
+])
+def test_standalone_restart_commands_are_production(text):
+    assert pipeline.command_intent(text).final_intent == "production"
+    item = clip("restart", 0, 1, text)
+    pipeline.tag_clips_heuristic([item])
+    assert item["meta"]["keep"] is False
+    assert pipeline.build_composer([item])["used_clip_ids"] == []
+
+
+@pytest.mark.parametrize("text", [
+    "Camera rolling, start again", "Recording this take, let's redo that",
+    "Cámara grabando, hazlo otra vez", "Estamos grabando, volvamos a empezar",
+])
+def test_recording_context_restart_commands_are_production(text):
+    assert pipeline.command_intent(text).final_intent == "production"
+
+
+@pytest.mark.parametrize("text", [
+    "Start over with clearer skin", "Try again tomorrow", "Reinicia tu rutina",
+    "Hazlo otra vez cuando se seque",
+])
+def test_restart_like_narration_is_not_production(text):
+    assert pipeline.command_intent(text).final_intent != "production"
+    assert pipeline.looks_like_filler(text) is False
+
+
+@pytest.mark.parametrize("text", [
+    "Get it right", "Get this done", "Grab it carefully", "Pick one example from the list",
+    "Get one point for every answer", "Haz esto primero", "Elige un ejemplo", "Toma uno de la lista",
+])
+def test_noncommercial_commands_default_safely(text):
+    assert pipeline.command_intent(text).final_intent in {"noncommercial_command", "ambiguous", "narration"}
+    assert pipeline.classify_slot(text) == "OTHER"
 
 
 @pytest.mark.parametrize("text,expected", [
