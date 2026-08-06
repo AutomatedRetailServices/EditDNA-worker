@@ -1242,14 +1242,14 @@ def test_result_json_persistence_defensively_sanitizes_diagnostics(monkeypatch):
 UNICODE_SCORING_CASES = [
     "这款精华让肌肤保持水润柔软而且每天使用都非常舒服。",
     "この美容液は肌をしっとり柔らかく保ち毎朝快適に使えます。",
-    "이 세럼은 피부를 촉촉하고 부드럽게 유지해서 매일 편하게 사용할 수 있어요.",
+    "이 세럼은 피부를 촉촉하고 부드럽게 유지해서 매일 정말 편하게 사용할 수 있어요.",
     "เซรั่มนี้ช่วยให้ผิวนุ่มชุ่มชื้นและใช้ได้สบายทุกเช้า",
     "សេរ៉ូមនេះជួយឱ្យស្បែកទន់មានសំណើមនិងប្រើបានរាល់ព្រឹក",
     "ເຊຣັ່ມນີ້ຊ່ວຍໃຫ້ຜິວນຸ່ມຊຸ່ມຊື່ນແລະໃຊ້ສະບາຍທຸກເຊົ້າ",
     "ဒီဆီရမ်က အသားအရေကို နူးညံ့စိုပြေစေပြီး မနက်တိုင်း သုံးရတာ အဆင်ပြေပါတယ်။",
     "Эта сыворотка делает кожу мягкой и увлажненной и подходит для ежедневного ухода.",
-    "هذا المصل يجعل البشرة ناعمة ورطبة ومريحة للاستخدام كل صباح.",
-    "המוצר הזה משאיר את העור רך ולח ונעים לשימוש בכל בוקר.",
+    "هذا المصل يجعل البشرة ناعمة ورطبة ومريحة للاستخدام كل صباح من دون أي إحساس دهني.",
+    "המוצר הזה משאיר את העור רך ולח ונעים לשימוש בכל בוקר בלי תחושה כבדה בכלל.",
     "यह सीरम त्वचा को मुलायम और नम रखता है और हर सुबह आसानी से लगाया जाता है।",
     "Αυτός ο ορός διατηρεί το δέρμα απαλό και ενυδατωμένο για άνετη καθημερινή χρήση.",
     "Este sérum ligero mantiene mi piel hidratada suave cómoda y luminosa durante todo el día.",
@@ -1269,6 +1269,8 @@ def test_shared_unicode_content_measure_scores_meaningful_transcripts_for_compos
     assert clip["semantic_score"] >= pipeline.COMPOSER_MIN_SEMANTIC
     assert clip["meta"]["semantic_content_measure"]["effective_semantic_units"] == measure.effective_semantic_units
     assert clip["meta"]["keep"] is True
+    assert pipeline.build_composer([copy.deepcopy(clip)], mode="human")["used_clip_ids"] == ["meaningful"]
+    assert pipeline.build_composer([copy.deepcopy(clip)], mode="blooper")["used_clip_ids"] == ["meaningful"]
 
 
 @pytest.mark.parametrize("text", ["好", "あ", "가", "ก", "...", "？！", "😀😀😀", "✨ — ✨"])
@@ -1283,7 +1285,7 @@ def test_short_or_symbol_only_unicode_content_remains_ineligible(text):
 
 def test_english_content_scoring_remains_compatible_and_bounded():
     short = "These five words remain normally scored."
-    assert pipeline.semantic_content_measure(short).scoring_rule == "normalized_token_count"
+    assert pipeline.semantic_content_measure(short).measurement_strategy == "space_delimited"
     assert pipeline.semantic_content_measure(short).effective_semantic_units == 6
     assert pipeline.semantic_content_score(short) == pytest.approx(0.58)
     long_text = " ".join(f"word{index}" for index in range(40))
@@ -1328,3 +1330,80 @@ def test_unicode_content_measure_flows_into_semantic_v2_and_take_judge_fallbacks
     assert clause.sentence_completeness == 1.0
     assert delivery.word_count == expected_units
     assert delivery.incomplete_phrase is False
+
+
+SPACE_DELIMITED_SCRIPT_CASES = [
+    ("мягкая кожа", 2),
+    ("сыворотка", 1),
+    ("απαλό δέρμα", 2),
+    ("ορός", 1),
+    ("بشرة ناعمة", 2),
+    ("مصل", 1),
+    ("עור רך", 2),
+    ("סרום", 1),
+    ("मुलायम त्वचा", 2),
+    ("सीरम", 1),
+]
+
+
+@pytest.mark.parametrize("text,expected_units", SPACE_DELIMITED_SCRIPT_CASES)
+def test_short_space_delimited_non_latin_uses_token_scoring(text, expected_units):
+    measure = pipeline.semantic_content_measure(text)
+    assert measure.measurement_strategy == "space_delimited"
+    assert measure.normalized_tokens == pipeline.normalized_text(text).tokens
+    assert measure.whitespace_token_count == expected_units
+    assert measure.effective_semantic_units == expected_units
+    assert measure.repetition_noise_adjusted is False
+    assert pipeline.semantic_content_score(text) == pytest.approx(0.4 + 0.03 * expected_units)
+
+
+UNSEGMENTED_STRATEGY_CASES = [
+    "这款精华让肌肤保持水润柔软而且每天使用都非常舒服。",
+    "この美容液は肌をしっとり柔らかく保ち毎朝快適に使えます。",
+    "เซรั่มนี้ช่วยให้ผิวนุ่มชุ่มชื้นและใช้ได้สบายทุกเช้า",
+    "សេរ៉ូមនេះជួយឱ្យស្បែកទន់មានសំណើមនិងប្រើបានរាល់ព្រឹក",
+    "ເຊຣັ່ມນີ້ຊ່ວຍໃຫ້ຜິວນຸ່ມຊຸ່ມຊື່ນແລະໃຊ້ສະບາຍທຸກເຊົ້າ",
+    "ဒီဆီရမ်ကအသားအရေကိုနူးညံ့စိုပြေစေပြီးမနက်တိုင်းသုံးရတာအဆင်ပြေပါတယ်။",
+]
+
+
+@pytest.mark.parametrize("text", UNSEGMENTED_STRATEGY_CASES)
+def test_genuinely_unsegmented_scripts_use_bounded_content_units(text):
+    measure = pipeline.semantic_content_measure(text)
+    assert measure.measurement_strategy == "unsegmented"
+    assert 1 <= measure.effective_semantic_units <= 20
+    assert measure.repetition_noise_adjusted is False
+    assert pipeline.semantic_content_score(text) >= pipeline.COMPOSER_MIN_SEMANTIC
+
+
+MIXED_SCRIPT_STRATEGY_CASES = [
+    "Daily精华让肌肤保持水润柔软and feels comfortable every morning.",
+    "Serum رائع للبشرة كل صباح",
+    "このBrand美容液は毎朝快適に使えます",
+    "Сыворотка 2026 года",
+]
+
+
+@pytest.mark.parametrize("text", MIXED_SCRIPT_STRATEGY_CASES)
+def test_mixed_scripts_use_mixed_strategy_without_character_deduplication(text):
+    measure = pipeline.semantic_content_measure(text)
+    assert measure.measurement_strategy == "mixed"
+    assert measure.effective_semantic_units >= measure.token_count
+    assert measure.repetition_noise_adjusted is False
+
+
+def test_valid_character_and_product_repetition_is_preserved():
+    repeated_letters = pipeline.semantic_content_measure("кофее сыворотка")
+    repeated_products = pipeline.semantic_content_measure("serum serum serum")
+    assert repeated_letters.measurement_strategy == "space_delimited"
+    assert repeated_letters.effective_semantic_units == 2
+    assert repeated_letters.repetition_noise_adjusted is False
+    assert repeated_products.effective_semantic_units == 3
+    assert repeated_products.repetition_noise_adjusted is False
+
+
+@pytest.mark.parametrize("text", ["!!!!!!!!!", "😀😀😀😀😀", "um um um um um um"])
+def test_symbol_runs_and_true_stutter_noise_do_not_inflate_content(text):
+    measure = pipeline.semantic_content_measure(text)
+    assert measure.repetition_noise_adjusted is True
+    assert measure.effective_semantic_units <= 2

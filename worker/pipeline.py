@@ -7,6 +7,7 @@ import shutil
 import tempfile
 import re
 import inspect
+from collections import Counter
 from dataclasses import dataclass
 from typing import Callable, List, Dict, Any, Optional, Union, Sequence
 
@@ -1229,11 +1230,15 @@ def tag_clips_heuristic(clips: List[Dict[str, Any]]) -> None:
         c["meta"]["slot"] = slot
         c["meta"]["semantic_score"] = sem
         c["meta"]["semantic_content_measure"] = {
+            "normalized_tokens": list(content.normalized_tokens),
             "normalized_token_count": content.token_count,
+            "whitespace_token_count": content.whitespace_token_count,
             "unicode_alphanumeric_count": content.alphanumeric_count,
             "predominantly_unsegmented": content.predominantly_unsegmented,
+            "measurement_strategy": content.measurement_strategy,
             "effective_semantic_units": content.effective_semantic_units,
             "scoring_rule": content.scoring_rule,
+            "repetition_noise_adjusted": content.repetition_noise_adjusted,
         }
         c["meta"]["score"] = sem
         c["meta"]["keep"] = keep
@@ -1685,12 +1690,12 @@ def text_overlap_ratio(t1: str, t2: str) -> float:
     b = normalize_text(t2)
     if not a or not b:
         return 0.0
-    set1 = set(comparison_units(a))
-    set2 = set(comparison_units(b))
-    if not set1 or not set2:
+    counts1 = Counter(comparison_units(a))
+    counts2 = Counter(comparison_units(b))
+    if not counts1 or not counts2:
         return 0.0
-    inter = len(set1 & set2)
-    union = len(set1 | set2)
+    inter = sum((counts1 & counts2).values())
+    union = sum((counts1 | counts2).values())
     if union <= 0:
         return 0.0
     return inter / union
@@ -1701,12 +1706,12 @@ def text_overlap_shorter(t1: str, t2: str) -> float:
     b = normalize_text(t2)
     if not a or not b:
         return 0.0
-    set1 = set(comparison_units(a))
-    set2 = set(comparison_units(b))
-    if not set1 or not set2:
+    counts1 = Counter(comparison_units(a))
+    counts2 = Counter(comparison_units(b))
+    if not counts1 or not counts2:
         return 0.0
-    inter = len(set1 & set2)
-    denom = min(len(set1), len(set2))
+    inter = sum((counts1 & counts2).values())
+    denom = min(sum(counts1.values()), sum(counts2.values()))
     if denom <= 0:
         return 0.0
     return inter / denom
