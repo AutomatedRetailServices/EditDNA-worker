@@ -8,6 +8,12 @@ from pathlib import Path
 PATH = Path("worker/pipeline.py")
 text = PATH.read_text(encoding="utf-8")
 
+# The active CI runs on every recovery commit. Once the patch is present, exit
+# cleanly instead of trying to patch the same baseline twice.
+if "applied_other_preserved" in text and "copy.deepcopy(c)" in text and "semantic_label_not_deletion_authority" in text:
+    print("V1 structural pipeline patch already applied")
+    raise SystemExit(0)
+
 replacements = [
     (
         '        keep = not is_filler and not is_tail\n',
