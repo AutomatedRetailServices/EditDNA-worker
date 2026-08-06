@@ -3,9 +3,10 @@
 from dataclasses import dataclass
 import base64
 import os
-import re
 import tempfile
 from typing import Any, Callable, Dict, Mapping, Optional, Sequence, Tuple
+
+from worker.text_content import normalized_text, semantic_content_measure
 
 
 def _unit(value: Any, name: str) -> float:
@@ -158,7 +159,8 @@ _FILLERS = frozenset(("um", "uh", "erm", "like", "basically", "actually"))
 
 def delivery_features(clip: Mapping[str, Any]) -> DeliveryFeatures:
     text = str(clip.get("text") or "").strip()
-    tokens = re.findall(r"[A-Za-z0-9']+", text.lower())
+    tokens = normalized_text(text).tokens
+    content = semantic_content_measure(text)
     duration = max(0.0, float(clip.get("end", 0.0)) - float(clip.get("start", 0.0)))
     repeats = sum(left == right for left, right in zip(tokens, tokens[1:]))
     words = clip.get("words") if isinstance(clip.get("words"), Sequence) else ()
@@ -167,13 +169,16 @@ def delivery_features(clip: Mapping[str, Any]) -> DeliveryFeatures:
         if isinstance(left, Mapping) and isinstance(right, Mapping):
             pauses.append(max(0.0, float(right.get("start", 0.0)) - float(left.get("end", 0.0))))
     clarity = clip.get("transcript_clarity_score", clip.get("clarity_score", 1.0 if text else 0.0))
-    incomplete = bool(tokens) and (len(tokens) <= 2 or text[-1:] not in ".?!")
+    incomplete = bool(tokens) and (
+        content.effective_semantic_units <= 2
+        or text[-1:] not in ".?!。？！"
+    )
     return DeliveryFeatures(
-        word_count=len(tokens), words_per_second=(len(tokens) / duration if duration else 0.0),
+        word_count=content.effective_semantic_units,
+        words_per_second=(content.effective_semantic_units / duration if duration else 0.0),
         filler_count=sum(token in _FILLERS for token in tokens), repeated_word_count=repeats,
         incomplete_phrase=incomplete, transcript_clarity_score=float(clarity),
         silence_ratio=clip.get("silence_ratio"), excessive_pause=any(pause >= 1.0 for pause in pauses),
         very_short=duration < 0.75, abnormally_long=duration > 15.0,
         semantic_score=clip.get("semantic_score"), visual_score=clip.get("visual_score"),
     )
-

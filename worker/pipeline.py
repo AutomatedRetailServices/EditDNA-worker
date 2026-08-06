@@ -7,7 +7,6 @@ import shutil
 import tempfile
 import re
 import inspect
-import unicodedata
 from dataclasses import dataclass
 from typing import Callable, List, Dict, Any, Optional, Union, Sequence
 
@@ -26,6 +25,16 @@ from worker.take_judge_v2 import TakeJudgeCandidate, delivery_features, sample_c
 from worker.diagnostics import (
     sanitize_clean_cut_discard_diagnostics,
     sanitize_source_identifier,
+)
+from worker.text_content import (
+    APOSTROPHE_TRANSLATION,
+    NormalizedText,
+    comparison_units,
+    normalize_match_text,
+    normalized_text,
+    semantic_content_measure,
+    semantic_content_score,
+    unicode_word_tokens,
 )
 
 from pipeline_errors import (
@@ -444,14 +453,14 @@ def looks_incomplete(text: str) -> bool:
     Detecta frases que NO terminan una idea.
     """
     t = text.strip().lower()
-    if len(t.split()) <= 2:
+    if semantic_content_measure(t).effective_semantic_units <= 2:
         return True
 
     bad_endings = ("for", "the", "a", "my", "your", "our", "this", "that")
     if t.endswith(bad_endings):
         return True
 
-    if not t.endswith((".", "?", "!")):
+    if not t.endswith((".", "?", "!", "。", "？", "！")):
         if t.startswith(("and ", "so ", "but ", "or ")):
             return True
         return True
@@ -462,7 +471,7 @@ def looks_incomplete(text: str) -> bool:
 def looks_like_completed_spoken_thought(text: str) -> bool:
     """Clean-cut boundary cue that does not depend on commercial slot labels."""
     n = normalized_text(text)
-    if n.text.endswith((".", "?", "!")):
+    if n.text.endswith((".", "?", "!", "。", "？", "！")):
         return True
     return has_any_phrase(n, (
         "drop it down below", "check these out", "check them out",
@@ -512,7 +521,7 @@ def merge_incomplete_phrases(
             next_text = nxt["text"].strip()
 
             can_merge = (
-                len(next_text.split()) >= 2 and
+                semantic_content_measure(next_text).effective_semantic_units >= 2 and
                 not looks_incomplete(next_text) and
                 text[0].isalpha() and
                 not is_semantic_restart_after_complete(text, next_text)
@@ -741,65 +750,6 @@ TAIL_DEPENDENT_STARTS = [
 ]
 
 
-APOSTROPHE_TRANSLATION = str.maketrans({
-    "’": "'",
-    "‘": "'",
-    "‛": "'",
-    "ʼ": "'",
-    "`": "'",
-    "“": '"',
-    "”": '"',
-    "„": '"',
-    "‟": '"',
-    "–": "-",
-    "—": "-",
-    "−": "-",
-})
-
-
-@dataclass(frozen=True)
-class NormalizedText:
-    raw: str
-    text: str
-    tokens: tuple[str, ...]
-    compact: str
-
-
-def normalize_match_text(text: str) -> str:
-    normalized = (text or "").translate(APOSTROPHE_TRANSLATION).casefold()
-    return re.sub(r"\s+", " ", normalized).strip()
-
-
-def normalized_text(text: str) -> NormalizedText:
-    norm = normalize_match_text(text)
-    tokens = unicode_word_tokens(norm)
-    return NormalizedText(raw=text or "", text=norm, tokens=tokens, compact=" ".join(tokens))
-
-
-def unicode_word_tokens(text: str) -> tuple[str, ...]:
-    """Preserve Unicode letters/numbers while retaining internal apostrophes."""
-    tokens: List[str] = []
-    current: List[str] = []
-    for index, char in enumerate(text):
-        category = unicodedata.category(char)
-        if category[0] in {"L", "N"} or (category[0] == "M" and current):
-            current.append(char)
-            continue
-        next_is_word = (
-            index + 1 < len(text)
-            and unicodedata.category(text[index + 1])[0] in {"L", "N"}
-        )
-        if char == "'" and current and next_is_word:
-            current.append(char)
-            continue
-        if current:
-            tokens.append("".join(current))
-            current = []
-    if current:
-        tokens.append("".join(current))
-    return tuple(tokens)
-
-
 def _normalized_words(text: str) -> List[str]:
     return list(normalized_text(text).tokens)
 
@@ -950,7 +900,7 @@ def looks_like_dependent_tail(text: str) -> bool:
         return True
     if len(n.tokens) == 1 and n.tokens[0] in TAIL_DEPENDENT_STARTS:
         return True
-    return n.tokens[0] in TAIL_DEPENDENT_STARTS and not t.endswith((".", "?", "!"))
+    return n.tokens[0] in TAIL_DEPENDENT_STARTS and not t.endswith((".", "?", "!", "。", "？", "！"))
 
 
 SAFE_EXPLICIT_CTA_PHRASES = (
@@ -1242,12 +1192,12 @@ def tag_clips_heuristic(clips: List[Dict[str, Any]]) -> None:
         is_filler = filler_reason is not None
 
         keep = not is_filler and not is_tail
+        content = semantic_content_measure(t)
 
         if not t:
             sem = 0.0
         elif keep:
-            length = len(t.split())
-            sem = min(0.95, 0.4 + 0.03 * length)
+            sem = semantic_content_score(t)
         else:
             sem = 0.0
 
@@ -1278,6 +1228,13 @@ def tag_clips_heuristic(clips: List[Dict[str, Any]]) -> None:
         c["llm_reason"] = reason
         c["meta"]["slot"] = slot
         c["meta"]["semantic_score"] = sem
+        c["meta"]["semantic_content_measure"] = {
+            "normalized_token_count": content.token_count,
+            "unicode_alphanumeric_count": content.alphanumeric_count,
+            "predominantly_unsegmented": content.predominantly_unsegmented,
+            "effective_semantic_units": content.effective_semantic_units,
+            "scoring_rule": content.scoring_rule,
+        }
         c["meta"]["score"] = sem
         c["meta"]["keep"] = keep
         c["meta"]["fallback_slot_rule"] = slot_rule
@@ -1445,7 +1402,7 @@ def run_visual_pass(
         clean_text = text.replace("\n", " ").strip()
         if len(clean_text) > 250:
             clean_text = clean_text[:250]
-        if len(clean_text) < 5:
+        if semantic_content_measure(clean_text).effective_semantic_units < 2:
             clean_text = "short video clip"
 
         mid_t = (safe_float(c.get("start", 0.0)) + safe_float(c.get("end", 0.0))) / 2.0
@@ -1720,7 +1677,7 @@ def refine_clip_boundaries_with_vision(
 # =====================
 
 def normalize_text(t: str) -> str:
-    return " ".join((t or "").lower().strip().split())
+    return normalized_text(t).compact
 
 
 def text_overlap_ratio(t1: str, t2: str) -> float:
@@ -1728,8 +1685,8 @@ def text_overlap_ratio(t1: str, t2: str) -> float:
     b = normalize_text(t2)
     if not a or not b:
         return 0.0
-    set1 = set(a.split())
-    set2 = set(b.split())
+    set1 = set(comparison_units(a))
+    set2 = set(comparison_units(b))
     if not set1 or not set2:
         return 0.0
     inter = len(set1 & set2)
@@ -1744,8 +1701,8 @@ def text_overlap_shorter(t1: str, t2: str) -> float:
     b = normalize_text(t2)
     if not a or not b:
         return 0.0
-    set1 = set(a.split())
-    set2 = set(b.split())
+    set1 = set(comparison_units(a))
+    set2 = set(comparison_units(b))
     if not set1 or not set2:
         return 0.0
     inter = len(set1 & set2)
@@ -2076,8 +2033,8 @@ def suppress_near_duplicates_by_slot(
 
             sem1 = safe_float(c1.get("semantic_score", 0.0))
             sem2 = safe_float(c2.get("semantic_score", 0.0))
-            len1 = len(text1.split())
-            len2 = len(text2.split())
+            len1 = semantic_content_measure(text1).effective_semantic_units
+            len2 = semantic_content_measure(text2).effective_semantic_units
 
             if sem2 > sem1 or (sem2 == sem1 and len2 >= len1):
                 c1["meta"]["keep"] = False
@@ -2120,12 +2077,14 @@ def suppress_cross_slot_redundant_clips(
             sem1 = safe_float(c1.get("semantic_score", 0.0))
             sem2 = safe_float(c2.get("semantic_score", 0.0))
 
-            if overlap >= min_overlap and len(text2.split()) > len(text1.split()):
+            units1 = semantic_content_measure(text1).effective_semantic_units
+            units2 = semantic_content_measure(text2).effective_semantic_units
+            if overlap >= min_overlap and units2 > units1:
                 if sem2 >= sem1:
                     c1["meta"]["keep"] = False
                     break
 
-            if text1 in text2 and len(text2.split()) - len(text1.split()) > 3:
+            if text1 in text2 and units2 - units1 > 3:
                 c1["meta"]["keep"] = False
                 break
 

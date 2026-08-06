@@ -1,3 +1,4 @@
+import copy
 import io
 import json
 
@@ -1236,3 +1237,94 @@ def test_result_json_persistence_defensively_sanitizes_diagnostics(monkeypatch):
     persisted = json.loads(captured["Body"])
     assert persisted["clean_cut_discard_diagnostics"][0]["source_local"] == "input.mp4"
     assert "/tmp/" not in captured["Body"].decode()
+
+
+UNICODE_SCORING_CASES = [
+    "这款精华让肌肤保持水润柔软而且每天使用都非常舒服。",
+    "この美容液は肌をしっとり柔らかく保ち毎朝快適に使えます。",
+    "이 세럼은 피부를 촉촉하고 부드럽게 유지해서 매일 편하게 사용할 수 있어요.",
+    "เซรั่มนี้ช่วยให้ผิวนุ่มชุ่มชื้นและใช้ได้สบายทุกเช้า",
+    "សេរ៉ូមនេះជួយឱ្យស្បែកទន់មានសំណើមនិងប្រើបានរាល់ព្រឹក",
+    "ເຊຣັ່ມນີ້ຊ່ວຍໃຫ້ຜິວນຸ່ມຊຸ່ມຊື່ນແລະໃຊ້ສະບາຍທຸກເຊົ້າ",
+    "ဒီဆီရမ်က အသားအရေကို နူးညံ့စိုပြေစေပြီး မနက်တိုင်း သုံးရတာ အဆင်ပြေပါတယ်။",
+    "Эта сыворотка делает кожу мягкой и увлажненной и подходит для ежедневного ухода.",
+    "هذا المصل يجعل البشرة ناعمة ورطبة ومريحة للاستخدام كل صباح.",
+    "המוצר הזה משאיר את העור רך ולח ונעים לשימוש בכל בוקר.",
+    "यह सीरम त्वचा को मुलायम और नम रखता है और हर सुबह आसानी से लगाया जाता है।",
+    "Αυτός ο ορός διατηρεί το δέρμα απαλό και ενυδατωμένο για άνετη καθημερινή χρήση.",
+    "Este sérum ligero mantiene mi piel hidratada suave cómoda y luminosa durante todo el día.",
+    "Daily精华让肌肤保持水润柔软and feels comfortable every morning.",
+]
+
+
+@pytest.mark.parametrize("text", UNICODE_SCORING_CASES)
+def test_shared_unicode_content_measure_scores_meaningful_transcripts_for_composer(text):
+    measure = pipeline.semantic_content_measure(text)
+    assert measure.token_count > 0
+    assert measure.alphanumeric_count > 0
+    assert measure.effective_semantic_units > 0
+    assert measure.scoring_rule
+    clip = _clip("meaningful", 0, 3, text)
+    pipeline.tag_clips_heuristic([clip])
+    assert clip["semantic_score"] >= pipeline.COMPOSER_MIN_SEMANTIC
+    assert clip["meta"]["semantic_content_measure"]["effective_semantic_units"] == measure.effective_semantic_units
+    assert clip["meta"]["keep"] is True
+
+
+@pytest.mark.parametrize("text", ["好", "あ", "가", "ก", "...", "？！", "😀😀😀", "✨ — ✨"])
+def test_short_or_symbol_only_unicode_content_remains_ineligible(text):
+    measure = pipeline.semantic_content_measure(text)
+    clip = _clip("short", 0, 0.5, text)
+    pipeline.tag_clips_heuristic([clip])
+    assert clip["semantic_score"] < pipeline.COMPOSER_MIN_SEMANTIC
+    if measure.effective_semantic_units == 0:
+        assert clip["meta"]["keep"] is False
+
+
+def test_english_content_scoring_remains_compatible_and_bounded():
+    short = "These five words remain normally scored."
+    assert pipeline.semantic_content_measure(short).scoring_rule == "normalized_token_count"
+    assert pipeline.semantic_content_measure(short).effective_semantic_units == 6
+    assert pipeline.semantic_content_score(short) == pytest.approx(0.58)
+    long_text = " ".join(f"word{index}" for index in range(40))
+    assert pipeline.semantic_content_score(long_text) == 0.95
+
+
+def test_unsegmented_clips_enter_human_and_blooper_composers_at_default_threshold():
+    texts = [
+        "这款精华让肌肤保持水润柔软而且每天使用都非常舒服。",
+        "この美容液は肌をしっとり柔らかく保ち毎朝快適に使えます。",
+    ]
+    clips = []
+    for index, text in enumerate(texts):
+        clip = _clip(f"unicode-{index}", index * 4, index * 4 + 3, text)
+        pipeline.tag_clips_heuristic([clip])
+        clips.append(clip)
+
+    human = pipeline.build_composer([copy.deepcopy(clip) for clip in clips], mode="human")
+    blooper = pipeline.build_composer([copy.deepcopy(clip) for clip in clips], mode="blooper")
+
+    assert human["used_clip_ids"] == ["unicode-0", "unicode-1"]
+    assert blooper["used_clip_ids"] == ["unicode-0", "unicode-1"]
+
+
+def test_unicode_scoring_keeps_clean_cut_and_filler_behavior_separate():
+    narration = _clip("unicode", 0, 3, "这款精华让肌肤保持水润柔软而且每天使用都非常舒服。")
+    filler = _clip("filler", 4, 5, "Wait, let me redo that.")
+    pipeline.tag_clips_heuristic([narration, filler])
+    assert pipeline.select_clean_cut_clip_ids([narration, filler]) == ["unicode"]
+    assert filler["semantic_score"] == 0.0
+    assert filler["meta"]["keep"] is False
+
+
+def test_unicode_content_measure_flows_into_semantic_v2_and_take_judge_fallbacks():
+    text = "这款精华让肌肤保持水润柔软而且每天使用都非常舒服。"
+    clip = _clip("unicode", 0, 3, text)
+    pipeline.tag_clips_heuristic([clip])
+    clause = pipeline.build_clause_inputs([clip])[0]
+    delivery = pipeline.delivery_features(clip)
+    expected_units = pipeline.semantic_content_measure(text).effective_semantic_units
+    assert clause.word_count == expected_units
+    assert clause.sentence_completeness == 1.0
+    assert delivery.word_count == expected_units
+    assert delivery.incomplete_phrase is False

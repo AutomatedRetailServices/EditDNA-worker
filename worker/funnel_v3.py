@@ -12,6 +12,8 @@ Smarter funnel composer for EditDNA:
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Tuple, Set
 
+from worker.text_content import semantic_content_measure
+
 
 @dataclass
 class Clip:
@@ -110,10 +112,10 @@ def _looks_like_fragment(text: str) -> bool:
     if not t:
         return True
 
-    words = t.split()
-    if len(words) <= 2:
+    content_units = semantic_content_measure(t).effective_semantic_units
+    if content_units <= 2:
         return True
-    if len(words) <= 4 and t[-1] not in ".?!":
+    if content_units <= 4 and t[-1] not in ".?!。？！":
         return True
 
     return False

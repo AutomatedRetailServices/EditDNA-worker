@@ -8,7 +8,9 @@ from __future__ import annotations
 import re
 from typing import List, Dict, Any
 
-_SENT_END = re.compile(r'([.!?])+(\s+|$)')
+from worker.text_content import semantic_content_measure
+
+_SENT_END = re.compile(r'([.!?。？！])+(\s+|$)')
 
 def split_sentences_simple(text: str) -> List[str]:
     if not text:
@@ -28,7 +30,7 @@ def split_sentences_simple(text: str) -> List[str]:
     merged = []
     buf = ""
     for s in out:
-        if len(s.split()) < 3:
+        if semantic_content_measure(s).effective_semantic_units < 3:
             buf = (buf + " " + s).strip()
         else:
             if buf:
