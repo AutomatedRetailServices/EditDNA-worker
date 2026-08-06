@@ -1,0 +1,38 @@
+name: Apply V1 Structural Patch
+
+on:
+  push:
+    branches:
+      - repair/v1-structural-recovery
+    paths:
+      - scripts/apply_v1_structural_patch.py
+      - .github/workflows/v1-apply-structural-patch.yml
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: repair/v1-structural-recovery
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Apply exact structural patch
+        run: python scripts/apply_v1_structural_patch.py
+      - name: Compile patched worker
+        run: python -m py_compile worker/pipeline.py worker/commercial_fallback.py worker/text_normalization.py worker/diagnostics.py
+      - name: Commit patched pipeline
+        run: |
+          if git diff --quiet -- worker/pipeline.py; then
+            echo "No structural diff to commit"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add worker/pipeline.py
+          git commit -m "recovery: separate Clean Cut state from semantic composer decisions"
+          git push origin HEAD:repair/v1-structural-recovery
