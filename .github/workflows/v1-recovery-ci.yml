@@ -8,16 +8,35 @@ on:
     branches:
       - main
 
+permissions:
+  contents: write
+
 jobs:
   test:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: repair/v1-structural-recovery
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
           cache: pip
+      - name: Apply V1 structural patch
+        run: python scripts/apply_v1_structural_patch.py
+      - name: Commit structural patch on branch pushes
+        if: github.event_name == 'push'
+        run: |
+          if git diff --quiet -- worker/pipeline.py; then
+            echo "Structural patch already committed"
+          else
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add worker/pipeline.py
+            git commit -m "recovery: separate Clean Cut from semantic composer state"
+            git push origin HEAD:repair/v1-structural-recovery
+          fi
       - name: Install FFmpeg development libraries
         run: |
           sudo apt-get update
