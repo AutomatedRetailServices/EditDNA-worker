@@ -125,6 +125,53 @@ def test_personal_framing_yields_to_stronger_commercial_evidence(text, expected)
     assert pipeline.classify_slot(text) == expected
 
 
+@pytest.mark.parametrize("text", [
+    "Does your skin feel dry?", "Does your hair feel brittle?",
+    "Is your skin feeling tight?", "Does your foundation look patchy?",
+    "Are your lips always cracked?", "Does your skin feel dry",
+    "¿Tu piel se siente seca?", "¿Tu cabello se siente quebradizo?",
+    "¿Sientes la piel tirante?", "¿Tu maquillaje se ve cuarteado?",
+    "¿Tus labios siempre están agrietados?", "Tu piel se siente seca",
+    "Does your skin not feel soft?", "¿Tu piel no se siente suave?",
+])
+def test_negative_state_questions_are_problem(text):
+    assert pipeline.classify_slot(text) == "PROBLEM"
+
+
+@pytest.mark.parametrize("text", [
+    "My skin feels dry.", "My hair looks dull.", "My lips are cracked.",
+    "Mi piel se siente seca.", "Mi cabello se ve opaco.", "Mis labios están agrietados.",
+])
+def test_declarative_adverse_states_are_problem(text):
+    assert pipeline.classify_slot(text) == "PROBLEM"
+
+
+@pytest.mark.parametrize("text", [
+    "Your skin feels soft.", "It helps your skin feel hydrated.", "Your hair looks shinier.",
+    "Te deja la piel suave.", "Ayuda a que tu cabello se vea brillante.",
+])
+def test_explicit_positive_states_remain_benefits(text):
+    assert pipeline.classify_slot(text) == "BENEFITS"
+
+
+@pytest.mark.parametrize("text", [
+    "Does your skin feel different?", "How does your hair feel?", "¿Cómo se siente tu piel?",
+    "Does your skin feel different", "Cómo se siente tu piel",
+])
+def test_neutral_state_questions_are_not_problem_or_benefits(text):
+    assert pipeline.classify_slot(text) in {"HOOK", "OTHER"}
+
+
+def test_blooper_filtering_excludes_problem_and_benefit_states():
+    items = prepared([
+        clip("problem", 0, 1, "Does your skin feel dry?"),
+        clip("benefit", 2, 3, "Your skin feels soft."),
+        clip("story", 4, 5, "Honestly, I discovered it while traveling."),
+    ])
+    result = pipeline.build_composer(items, mode="blooper")["used_clip_ids"]
+    assert result == ["story"]
+
+
 @pytest.mark.parametrize("text,expected", [
     ("It's a problem keeping my skin hydrated.", "PROBLEM"),
     ("This is a product that helps you feel confident.", "BENEFITS"),

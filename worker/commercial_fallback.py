@@ -557,6 +557,60 @@ def has_product_enumeration_evidence(text: str) -> bool:
     return product_term_count >= 2 and (list_structure or product_context or quantity_context)
 
 
+PROBLEM_STATE_SUBJECTS = {
+    "skin", "hair", "makeup", "foundation", "lips",
+    "piel", "cabello", "maquillaje", "base", "labios",
+}
+ADVERSE_STATE_WORDS = {
+    "dry", "brittle", "tight", "patchy", "cracked", "frizzy", "dull", "rough",
+    "seca", "seco", "quebradizo", "quebradiza", "tirante", "cuarteado", "cuarteada",
+    "agrietados", "agrietadas", "opaco", "opaca", "áspero", "áspera",
+}
+STATE_LINK_WORDS = {
+    "feel", "feels", "feeling", "look", "looks", "looking", "seem", "seems",
+    "is", "are", "siente", "sientes", "sentir", "ve", "está", "estan", "están",
+}
+POSITIVE_STATE_WORDS = {
+    "soft", "smooth", "hydrated", "shinier", "shiny", "confident", "fresh",
+    "suave", "hidratada", "hidratado", "brillante", "segura", "seguro", "fresca", "fresco",
+}
+NEGATIVE_STATE_MARKERS = {"not", "never", "doesn't", "isn't", "aren't", "no", "nunca"}
+
+
+def negative_problem_question_rule(text: str) -> Optional[str]:
+    """Detect adverse body/result states before broad positive-state language."""
+    n = normalized_text(text)
+    tokens = set(n.tokens)
+    negative_state = bool(tokens & (ADVERSE_STATE_WORDS | NEGATIVE_STATE_MARKERS))
+    if not (tokens & PROBLEM_STATE_SUBJECTS and negative_state):
+        return None
+    interrogative = (
+        "?" in n.text or "¿" in n.raw
+        or n.tokens[:1] in (("does",), ("is",), ("are",), ("do",))
+        or n.tokens[:1] in (("sientes",),)
+    )
+    linked_state = bool(tokens & STATE_LINK_WORDS)
+    if interrogative and linked_state:
+        return "negative_problem_question"
+    if linked_state:
+        return "adverse_state_statement"
+    return None
+
+
+def positive_benefit_state_rule(text: str) -> Optional[str]:
+    """Require an explicitly positive state near feel/look language."""
+    n = normalized_text(text)
+    tokens = set(n.tokens)
+    if tokens & (ADVERSE_STATE_WORDS | NEGATIVE_STATE_MARKERS):
+        return None
+    if tokens & POSITIVE_STATE_WORDS and (
+        tokens & STATE_LINK_WORDS
+        or has_any_phrase(n, ("helps your", "helps you", "te deja", "ayuda a que"))
+    ):
+        return "positive_state_or_outcome"
+    return None
+
+
 def classify_slot_rule(text: str) -> tuple[str, str]:
     n = normalized_text(text)
 
@@ -569,6 +623,10 @@ def classify_slot_rule(text: str) -> tuple[str, str]:
 
     # Explicit commercial-function evidence is evaluated before generic
     # grammatical constructions ("it's a", "this is a", "these are").
+    problem_state_rule = negative_problem_question_rule(text)
+    if problem_state_rule:
+        return "PROBLEM", problem_state_rule
+
     if has_any_phrase(n, (
         "tired of", "sick of", "problem", "problems", "struggle",
         "keep giving you", "frustrated", "failed alternative", "es un problema",
@@ -584,12 +642,12 @@ def classify_slot_rule(text: str) -> tuple[str, str]:
         return "PROOF", "proof_or_testimonial_language"
 
     if has_any_phrase(n, (
-        "so you can", "you can", "you'll", "you will", "feel", "helps you", "so freaking",
+        "so you can", "you can", "you'll", "you will", "helps you", "so freaking",
         "elevates any outfit", "feel fresh", "confident", "so cute", "they are all",
         "reduced dryness", "reduces dryness", "improved", "works better",
         "te ayuda", "para que puedas", "te sentirás", "hidrata tu piel",
         "redujo la sequedad", "mejoró", "funciona mejor",
-    )):
+    )) or positive_benefit_state_rule(text):
         return "BENEFITS", "positive_appeal_or_outcome_language"
 
     if has_any_phrase(n, (
