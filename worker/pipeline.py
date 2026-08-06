@@ -1136,11 +1136,20 @@ def classify_slot_rule(text: str) -> tuple[str, str]:
     if has_cta_action_context(text):
         return "CTA", "direct_purchase_or_action_language"
 
+    # Explicit commercial-function evidence is evaluated before generic
+    # grammatical constructions ("it's a", "this is a", "these are").
     if has_any_phrase(n, (
         "i think they're really good", "i get so many compliments", "before and after",
-        "five stars", "measurable result",
+        "five stars", "measurable result", "resultados comprobados", "cinco estrellas",
     )):
         return "PROOF", "proof_or_testimonial_language"
+
+    if has_any_phrase(n, (
+        "tired of", "sick of", "problem", "problems", "struggle",
+        "keep giving you", "frustrated", "failed alternative", "es un problema",
+        "me cuesta", "tengo problemas", "lucho por",
+    )):
+        return "PROBLEM", "problem_language"
 
     if has_any_phrase(n, (
         "because i found", "i've been using", "i've tried", "honestly", "for me",
@@ -1151,14 +1160,16 @@ def classify_slot_rule(text: str) -> tuple[str, str]:
     if has_any_phrase(n, (
         "so you can", "you can", "you'll", "you will", "feel", "helps you", "so freaking",
         "elevates any outfit", "feel fresh", "confident", "so cute", "they are all",
+        "te ayuda", "para que puedas", "te sentirás", "hidrata tu piel",
     )):
         return "BENEFITS", "positive_appeal_or_outcome_language"
 
     if has_any_phrase(n, (
         "each gummy", "packed with", "ingredients", "it has", "it comes with", "comes with",
-        "it's actually", "it's a", "this bag", "these probiotics", "slippery m", "prebiotic",
+        "this bag", "these probiotics", "slippery m", "prebiotic",
         "probiotic", "flavored", "you get", "set of", "comes in", "lip glosses", "these are",
-        "included", "includes", "variants", "designs", "colors", "shades",
+        "included", "includes", "variants", "designs", "colors", "shades", "contiene",
+        "viene con", "incluye", "tiene una fórmula", "tonos", "colores",
     )) or has_product_enumeration_evidence(text):
         return "FEATURES", "product_details_quantity_variants_or_enumeration"
 
@@ -1168,10 +1179,10 @@ def classify_slot_rule(text: str) -> tuple[str, str]:
         return "HOOK", "opening_promise_or_product_discovery"
 
     if has_any_phrase(n, (
-        "tired of", "sick of", "problem", "problems", "struggle", "does your", "is your",
-        "keep giving you", "frustrated", "failed alternative",
+        "it's actually", "it's a", "this is a", "these are",
+        "es un", "esta es una", "este es un",
     )):
-        return "PROBLEM", "problem_language"
+        return "FEATURES", "generic_product_construction"
 
     if looks_like_filler(text):
         return "OTHER", "filler_or_too_short"
@@ -1234,6 +1245,7 @@ def tag_clips_heuristic(clips: List[Dict[str, Any]]) -> None:
             "normalized_token_count": content.token_count,
             "whitespace_token_count": content.whitespace_token_count,
             "unicode_alphanumeric_count": content.alphanumeric_count,
+            "contains_unsegmented_script": content.contains_unsegmented_script,
             "predominantly_unsegmented": content.predominantly_unsegmented,
             "measurement_strategy": content.measurement_strategy,
             "effective_semantic_units": content.effective_semantic_units,
@@ -2030,6 +2042,14 @@ def suppress_near_duplicates_by_slot(
             text1 = c1.get("text", "") or ""
             text2 = c2.get("text", "") or ""
 
+            content1 = semantic_content_measure(text1)
+            content2 = semantic_content_measure(text2)
+            if (content1.contains_unsegmented_script or content2.contains_unsegmented_script) and normalize_text(text1) != normalize_text(text2):
+                # CutSell V1 does not support semantic dedupe for unsegmented
+                # scripts. Fail open rather than applying English thresholds to
+                # character-based overlap.
+                continue
+
             ratio = text_overlap_ratio(text1, text2)
             shorter_overlap = text_overlap_shorter(text1, text2)
 
@@ -2038,8 +2058,8 @@ def suppress_near_duplicates_by_slot(
 
             sem1 = safe_float(c1.get("semantic_score", 0.0))
             sem2 = safe_float(c2.get("semantic_score", 0.0))
-            len1 = semantic_content_measure(text1).effective_semantic_units
-            len2 = semantic_content_measure(text2).effective_semantic_units
+            len1 = content1.effective_semantic_units
+            len2 = content2.effective_semantic_units
 
             if sem2 > sem1 or (sem2 == sem1 and len2 >= len1):
                 c1["meta"]["keep"] = False
@@ -2077,13 +2097,20 @@ def suppress_cross_slot_redundant_clips(
             if not text1 or not text2:
                 continue
 
+            content1 = semantic_content_measure(text1)
+            content2 = semantic_content_measure(text2)
+            if (content1.contains_unsegmented_script or content2.contains_unsegmented_script) and text1 != text2:
+                # Unsupported-script semantic overlap is uncertain; preserve
+                # both clips instead of deleting on English-tuned thresholds.
+                continue
+
             overlap = text_overlap_ratio(text1, text2)
 
             sem1 = safe_float(c1.get("semantic_score", 0.0))
             sem2 = safe_float(c2.get("semantic_score", 0.0))
 
-            units1 = semantic_content_measure(text1).effective_semantic_units
-            units2 = semantic_content_measure(text2).effective_semantic_units
+            units1 = content1.effective_semantic_units
+            units2 = content2.effective_semantic_units
             if overlap >= min_overlap and units2 > units1:
                 if sem2 >= sem1:
                     c1["meta"]["keep"] = False

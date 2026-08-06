@@ -39,6 +39,31 @@ def test_benchmark_fallback_slot_examples():
         assert pipeline.classify_slot(text) == expected
 
 
+@pytest.mark.parametrize("text", [
+    "It's a problem keeping my skin hydrated.",
+    "I struggle to keep my skin hydrated.",
+    "This is a problem for dry skin.",
+    "Es un problema mantener mi piel hidratada.",
+    "Me cuesta mantener mi piel hidratada.",
+])
+def test_explicit_problem_evidence_precedes_generic_feature_constructions(text):
+    assert pipeline.classify_slot_rule(text) == ("PROBLEM", "problem_language")
+
+
+@pytest.mark.parametrize("text,expected", [
+    ("It's a lightweight serum with a reusable pump.", "FEATURES"),
+    ("This is a reusable applicator.", "FEATURES"),
+    ("Este sérum contiene ácido hialurónico.", "FEATURES"),
+    ("Viene con tres tonos diferentes.", "FEATURES"),
+    ("Tiene una fórmula ligera.", "FEATURES"),
+    ("It's a product that helps you feel confident.", "BENEFITS"),
+    ("It's a five stars measurable result.", "PROOF"),
+    ("It's a product. Buy now.", "CTA"),
+])
+def test_stronger_explicit_semantics_precede_generic_construction_prefixes(text, expected):
+    assert pipeline.classify_slot(text) == expected
+
+
 def _clip(cid, start, end, text, words=None):
     return pipeline.make_base_clip(cid, start, end, text, words=words)
 
@@ -1407,3 +1432,49 @@ def test_symbol_runs_and_true_stutter_noise_do_not_inflate_content(text):
     measure = pipeline.semantic_content_measure(text)
     assert measure.repetition_noise_adjusted is True
     assert measure.effective_semantic_units <= 2
+
+
+def test_unsupported_unsegmented_statements_fail_open_in_duplicate_suppression():
+    first = _composer_clip("cjk-a", 0, "FEATURES", score=0.90)
+    second = _composer_clip("cjk-b", 2, "FEATURES", score=0.92)
+    first["text"] = "这款精华让肌肤保持水润柔软"
+    second["text"] = "这款面霜让肌肤保持水润柔软"
+    assert pipeline.text_overlap_shorter(first["text"], second["text"]) >= 0.65
+
+    pipeline.suppress_near_duplicates_by_slot([first, second])
+
+    assert first["meta"]["keep"] is True
+    assert second["meta"]["keep"] is True
+
+
+def test_unsupported_unsegmented_cross_slot_overlap_also_fails_open():
+    first = _composer_clip("cjk-feature", 0, "FEATURES", score=0.90)
+    second = _composer_clip("cjk-benefit", 2, "BENEFITS", score=0.92)
+    first["text"] = "この美容液は肌をしっとり柔らかく保ちます"
+    second["text"] = "このクリームは肌をしっとり柔らかく保ちます"
+
+    pipeline.suppress_cross_slot_redundant_clips([first, second])
+
+    assert first["meta"]["keep"] is True
+    assert second["meta"]["keep"] is True
+
+
+@pytest.mark.parametrize("first_text,second_text", [
+    (
+        "This serum keeps my skin hydrated all day.",
+        "This serum keeps my skin hydrated all day and feels lightweight.",
+    ),
+    (
+        "Este sérum mantiene mi piel hidratada todo el día.",
+        "Este sérum mantiene mi piel hidratada todo el día y se siente ligero.",
+    ),
+])
+def test_english_and_spanish_duplicate_thresholds_remain_active(first_text, second_text):
+    first = _composer_clip("supported-a", 0, "FEATURES", score=0.80)
+    second = _composer_clip("supported-b", 2, "FEATURES", score=0.90)
+    first["text"], second["text"] = first_text, second_text
+
+    pipeline.suppress_near_duplicates_by_slot([first, second])
+
+    assert first["meta"]["keep"] is False
+    assert second["meta"]["keep"] is True

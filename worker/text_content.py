@@ -26,6 +26,7 @@ class SemanticContentMeasure:
     token_count: int
     whitespace_token_count: int
     alphanumeric_count: int
+    contains_unsegmented_script: bool
     predominantly_unsegmented: bool
     measurement_strategy: str
     effective_semantic_units: int
@@ -170,6 +171,7 @@ def semantic_content_measure(text: str) -> SemanticContentMeasure:
         token_count=len(normalized.tokens),
         whitespace_token_count=whitespace_token_count,
         alphanumeric_count=alphanumeric_count,
+        contains_unsegmented_script=has_unsegmented,
         predominantly_unsegmented=strategy == "unsegmented",
         measurement_strategy=strategy,
         effective_semantic_units=effective_units,
