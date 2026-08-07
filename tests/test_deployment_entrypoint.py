@@ -13,7 +13,7 @@ def test_render_and_docker_use_real_fastapi_entrypoint():
 
 
 def test_main_mounts_v1_draft_routes():
-    paths = {route.path for route in app.routes}
+    paths = app.openapi()["paths"]
     assert "/v1/healthz" in paths
     assert "/v1/draft-edits/swap" in paths
     assert "/v1/draft-edits/remove" in paths
