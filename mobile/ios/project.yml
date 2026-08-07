@@ -1,0 +1,24 @@
+name: CutSell
+options:
+  bundleIdPrefix: ai.cutsell
+settings:
+  base:
+    IPHONEOS_DEPLOYMENT_TARGET: 17.0
+    SWIFT_VERSION: 5.10
+targets:
+  CutSell:
+    type: application
+    platform: iOS
+    sources:
+      - CutSell
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: ai.cutsell.app
+        GENERATE_INFOPLIST_FILE: YES
+        INFOPLIST_KEY_CFBundleDisplayName: CutSell
+        INFOPLIST_KEY_UIApplicationSceneManifest_Generation: YES
+        INFOPLIST_KEY_UILaunchScreen_Generation: YES
+        INFOPLIST_KEY_NSPhotoLibraryUsageDescription: CutSell needs access to videos you choose to edit.
+        INFOPLIST_KEY_NSPhotoLibraryAddUsageDescription: CutSell can save finished videos to your library.
+        INFOPLIST_KEY_NSCameraUsageDescription: CutSell can record product footage.
+        INFOPLIST_KEY_NSMicrophoneUsageDescription: CutSell records audio with your product footage.
