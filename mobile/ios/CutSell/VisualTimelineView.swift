@@ -48,7 +48,7 @@ struct VisualTimelineView: View {
                let clip = model.selectedClips.first(where: { $0["clip_id"]?.stringValue == selectedClipID }) {
                 TimelineClipInspector(model: model, clip: clip, assets: assetCatalog[clip["source_asset_id"]?.stringValue ?? ""])
             } else {
-                Text("Tap a clip to trim, split, edit captions or adjust audio.")
+                Text("Tap a clip to swap takes, trim, split, edit captions or adjust audio.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -143,6 +143,7 @@ private struct TimelineClipInspector: View {
     private var clipID: String { clip["clip_id"]?.stringValue ?? "" }
     private var start: Double { clip["start"]?.doubleValue ?? 0 }
     private var end: Double { clip["end"]?.doubleValue ?? start + 1 }
+    private var alternates: [[String: JSONValue]] { model.alternates(for: clip) }
 
     private var safeSplitTimes: [Double] {
         let words = clip["words"]?.arrayValue?.compactMap(\.objectValue) ?? []
@@ -158,6 +159,26 @@ private struct TimelineClipInspector: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
+            if !alternates.isEmpty {
+                Menu {
+                    ForEach(Array(alternates.enumerated()), id: \.offset) { index, alternate in
+                        if let replacementID = alternate["clip_id"]?.stringValue {
+                            Button {
+                                Task { await model.swap(selectedClipID: clipID, replacementClipID: replacementID) }
+                            } label: {
+                                VStack(alignment: .leading) {
+                                    Text("Take \(index + 1)")
+                                    Text(alternate["text"]?.stringValue ?? "Alternate take")
+                                }
+                            }
+                        }
+                    }
+                } label: {
+                    Label("Swap Take (\(alternates.count))", systemImage: "arrow.triangle.2.circlepath")
+                }
+                .buttonStyle(.borderedProminent)
+            }
+
             if !waveform.peaks.isEmpty {
                 WaveformView(peaks: waveform.peaks)
                     .frame(height: 42)
