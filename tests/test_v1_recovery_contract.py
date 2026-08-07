@@ -28,3 +28,17 @@ def test_latin_spanish_normalization_preserves_semantic_units():
     assert "piel" in n.tokens
     assert "más" in n.tokens
     assert semantic_content_measure(n.text).effective_semantic_units >= 4
+
+
+def test_spanish_v1_fallback_uses_broad_intent_cues():
+    examples = {
+        "¿Tienes la piel seca?": "HOOK",
+        "Estoy cansada de productos que no funcionan": "PROBLEM",
+        "Esto tiene una placa de cerámica": "FEATURES",
+        "Te ayuda a ahorrar tiempo": "BENEFITS",
+        "Recibo cumplidos todo el tiempo": "PROOF",
+        "La primera vez que lo encontré estaba viajando": "STORY",
+        "Añade al carrito": "CTA",
+    }
+    for text, expected in examples.items():
+        assert classify_slot_rule(text)[0] == expected
