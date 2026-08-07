@@ -1,0 +1,118 @@
+name: CutSell Real Video Smoke
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - ".github/workflows/cutsell-real-video-smoke.yml"
+      - ".cutsell/real-video-smoke-trigger.txt"
+
+permissions:
+  contents: read
+
+jobs:
+  smoke-one-real-video:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      RUNPOD_API_KEY: ${{ secrets.RUNPOD_API_KEY }}
+      CUTSELL_ASR_MODEL: tiny
+      CUTSELL_SEMANTIC_MODEL: gpt-5.4-nano
+      CUTSELL_VISUAL_MODEL: gpt-5.4-nano
+      CUTSELL_TAKE_JUDGE_MODEL: gpt-5.4-mini
+      CUTSELL_VALIDATION_PREFIX: Editdna bloopers videos/
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install FFmpeg
+        run: sudo apt-get update && sudo apt-get install -y ffmpeg jq
+
+      - name: Load existing infrastructure secrets from RunPod template vault
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$RUNPOD_API_KEY" || (echo 'RUNPOD_API_KEY missing' && exit 2)
+          curl --fail --silent --show-error \
+            --url "https://rest.runpod.io/v1/templates" \
+            --header "Authorization: Bearer $RUNPOD_API_KEY" \
+            --output templates.json
+
+          TEMPLATE=$(jq -c '[.[] | select(.name == "EditDNA-Worker-2")][0]' templates.json)
+          test "$TEMPLATE" != "null" || (echo 'EditDNA-Worker-2 template not found' && exit 3)
+
+          export_secret() {
+            key="$1"
+            value=$(printf '%s' "$TEMPLATE" | jq -r --arg key "$key" '.env[$key] // empty')
+            test -n "$value" || (echo "$key missing from RunPod template vault" && exit 4)
+            echo "::add-mask::$value"
+            printf '%s=%s\n' "$key" "$value" >> "$GITHUB_ENV"
+          }
+
+          export_secret AWS_ACCESS_KEY_ID
+          export_secret AWS_SECRET_ACCESS_KEY
+          export_secret AWS_REGION
+          export_secret S3_BUCKET
+          export_secret OPENAI_API_KEY
+          echo 'RunPod vault loaded: AWS/S3/OpenAI present (values masked).'
+
+      - name: Install minimal clean-worker runtime
+        run: |
+          python -m pip install --upgrade pip
+          pip install faster-whisper boto3 openai
+
+      - name: Pick smallest eligible real blooper
+        shell: bash
+        run: |
+          python - <<'PY' >> "$GITHUB_ENV"
+          from cutsell_worker.validation import list_validation_videos
+          items = list_validation_videos(limit=50)
+          if not items:
+              raise SystemExit('no eligible real videos found')
+          chosen = min(items, key=lambda item: item['size'])
+          # Keep the first CPU smoke bounded. A larger sample belongs on GPU.
+          if chosen['size'] > 350 * 1024 * 1024:
+              raise SystemExit('smallest eligible validation video exceeds 350MB smoke limit')
+          print('CUTSELL_SMOKE_KEY=' + chosen['key'])
+          print('CUTSELL_SMOKE_SIZE=' + str(chosen['size']))
+          PY
+
+      - name: Run full CutSell brain on one real video
+        shell: bash
+        run: |
+          echo "Running bounded real-video smoke (${CUTSELL_SMOKE_SIZE} bytes)."
+          python -m cutsell_worker.validation_cli \
+            --key "$CUTSELL_SMOKE_KEY" \
+            --report cutsell-validation-report.json \
+            --preview cutsell-validation-preview.mp4
+
+      - name: Print sanitized result summary
+        if: always()
+        shell: bash
+        run: |
+          if [ -f cutsell-validation-report.json ]; then
+            jq '{
+              source_key,
+              elapsed_sec,
+              models,
+              strategy,
+              selected_count,
+              alternate_count,
+              discarded_count,
+              stage_status
+            }' cutsell-validation-report.json
+          fi
+
+      - name: Upload smoke report and preview
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cutsell-real-video-smoke-${{ github.sha }}
+          path: |
+            cutsell-validation-report.json
+            cutsell-validation-preview.mp4
+          if-no-files-found: warn
+          retention-days: 7
