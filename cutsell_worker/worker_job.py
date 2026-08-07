@@ -41,8 +41,12 @@ def run_flow_b_job(payload: dict) -> dict:
             local_paths = {}
             for index, source in enumerate(request.sources):
                 # Defense in depth: queue callers cannot make the worker use its AWS
-                # credentials to read arbitrary buckets/prefixes.
-                validate_product_source_uri(source.uri)
+                # credentials to read arbitrary buckets, users or projects.
+                validate_product_source_uri(
+                    source.uri,
+                    project_id=request.project_id,
+                    user_id=request.user_id,
+                )
                 suffix = Path(source.original_name).suffix or ".mp4"
                 destination = str(Path(directory) / f"{source.source_order:03d}-{source.source_asset_id}{suffix}")
                 local_paths[source.source_asset_id] = download_source(source.uri, destination)
