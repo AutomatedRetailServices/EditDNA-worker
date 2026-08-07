@@ -1,6 +1,6 @@
 from types import SimpleNamespace
 
-from cutsell_worker.queueing import enqueue_flow_b
+from cutsell_worker.queueing import enqueue_export, enqueue_flow_b
 from cutsell_worker.serde import request_from_dict
 from cutsell_worker.storage import parse_s3_uri
 
@@ -46,3 +46,11 @@ def test_enqueue_flow_b_targets_clean_worker_job():
     assert submitted.job_id == "job-123"
     assert submitted.queue_name == "cutsell"
     assert queue.calls[0][0][0] == "cutsell_worker.worker_job.run_flow_b_job"
+
+
+def test_enqueue_export_targets_clean_export_job():
+    queue = FakeQueue()
+    submitted = enqueue_export({"project_id": "p1"}, queue=queue)
+    assert submitted.job_id == "job-123"
+    assert submitted.queue_name == "cutsell"
+    assert queue.calls[0][0][0] == "cutsell_worker.export_job.run_export_job"
