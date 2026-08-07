@@ -1,8 +1,9 @@
-"""Small conservative English/Spanish fallback for V1.
+"""Small conservative English/Spanish commercial fallback for V1.
 
-This module is deliberately not the commercial brain. Semantic V2 owns commercial
-meaning when available. These rules only provide safe production-meta detection,
-legacy-compatible slot hints, and fail-open behavior for provider fallback.
+Semantic V2 owns commercial meaning when available. These rules only provide
+broad, auditable intent hints and production-meta detection when the provider is
+unavailable. Uncertain valid speech fails open to OTHER and is never deletion
+authority.
 """
 from dataclasses import dataclass
 from typing import List, Optional, Sequence
@@ -47,7 +48,10 @@ _STANDALONE_FILLER = {
 
 def is_camera_rolling_slate(text: str) -> bool:
     n = normalized_text(text)
-    return n.compact in {"camera rolling", "camera is rolling", "rolling", "cámara grabando", "estamos grabando"}
+    return n.compact in {
+        "camera rolling", "camera is rolling", "rolling", "cámara grabando",
+        "estamos grabando",
+    }
 
 
 def _strip_token_prefixes(tokens: tuple[str, ...], prefixes: Sequence[tuple[str, ...]]) -> tuple[str, ...]:
@@ -120,7 +124,11 @@ def _action_target(text: str) -> str:
 
 def _starts_explicit_cta(text: str) -> bool:
     n = normalized_text(text)
-    return any(starts_phrase(n, p) for p in ("shop now", "get yours", "add to cart", "order now", "tap the link", "click the link", "compra ahora", "ordena ahora", "toca el enlace"))
+    return any(starts_phrase(n, p) for p in (
+        "shop now", "get yours", "add to cart", "order now", "tap the link",
+        "click the link", "buy now", "compra ahora", "ordena ahora",
+        "agrega al carrito", "añade al carrito", "toca el enlace", "haz clic en el enlace",
+    ))
 
 
 def _cta_clauses(text: str) -> List[str]:
@@ -141,7 +149,10 @@ def cta_action_frames(text: str) -> List[CTAActionFrame]:
 
 def is_explicit_link_cta(text: str) -> bool:
     n = normalized_text(text)
-    return has_any_phrase(n, ("link below", "link in bio", "click the link", "tap the link", "enlace abajo", "enlace en mi bio"))
+    return has_any_phrase(n, (
+        "link below", "link in bio", "click the link", "tap the link",
+        "enlace abajo", "enlace en mi bio", "haz clic en el enlace", "toca el enlace",
+    ))
 
 
 def cta_action_rule(text: str) -> Optional[str]:
@@ -173,20 +184,97 @@ def has_cta_action_context(text: str) -> bool:
 
 def has_product_enumeration_evidence(text: str) -> bool:
     n = normalized_text(text)
-    return any(token in n.tokens for token in ("comes", "includes", "contains", "features", "incluye", "contiene"))
+    return any(token in n.tokens for token in (
+        "comes", "includes", "contains", "features", "incluye", "contiene",
+    ))
+
+
+def _question_hook(text: str, n: NormalizedText) -> bool:
+    if "?" not in text and "¿" not in text:
+        return False
+    if not n.tokens:
+        return False
+    return n.tokens[0] in {
+        "do", "does", "did", "have", "has", "are", "is", "can", "could",
+        "would", "why", "how", "what", "ever", "tienes", "tiene", "eres",
+        "estás", "estas", "te", "quieres", "alguna", "por", "cómo", "como",
+        "qué", "que",
+    }
+
+
+def _has_problem_evidence(n: NormalizedText) -> bool:
+    return has_any_phrase(n, (
+        "tired of", "struggle with", "struggling with", "wasting money",
+        "doesn't work", "does not work", "products that fail", "frustrated with",
+        "sick of", "cansada de", "cansado de", "batallo con", "lucho con",
+        "desperdiciando dinero", "no funciona", "no funcionan", "frustrada con",
+        "frustrado con", "harta de", "harto de",
+    ))
+
+
+def _has_story_evidence(n: NormalizedText) -> bool:
+    return has_any_phrase(n, (
+        "the first time", "first time", "when i", "last year", "last month",
+        "i found", "i discovered", "i was traveling", "i was travelling",
+        "la primera vez", "cuando yo", "cuando lo", "el año pasado", "el mes pasado",
+        "encontré", "encontre", "descubrí", "descubri", "estaba viajando",
+    ))
+
+
+def _has_proof_evidence(n: NormalizedText) -> bool:
+    return has_any_phrase(n, (
+        "i get so many compliments", "i get compliments", "i got compliments",
+        "i noticed", "i saw results", "my results", "people keep asking",
+        "five stars", "5 stars", "customer reviews", "recibo cumplidos",
+        "recibí cumplidos", "recibi cumplidos", "noté", "note", "vi resultados",
+        "mis resultados", "cinco estrellas", "reseñas", "resenas",
+    ))
+
+
+def _has_benefit_evidence(n: NormalizedText) -> bool:
+    return has_any_phrase(n, (
+        "it helps", "this helps", "helps you", "lets you", "allows you",
+        "makes you feel", "so you can", "save time", "feel confident",
+        "te ayuda", "ayuda a", "te permite", "permite que", "te deja",
+        "hace que", "para que puedas", "ahorra tiempo", "sentirte segura",
+        "sentirte seguro",
+    ))
+
+
+def _has_feature_evidence(n: NormalizedText) -> bool:
+    return has_product_enumeration_evidence(n.original) or any(
+        starts_phrase(n, p) for p in (
+            "it has", "this has", "it comes with", "this comes with", "made with",
+            "it includes", "this includes", "it contains", "this contains",
+            "tiene", "esto tiene", "viene con", "está hecho con", "esta hecho con",
+            "incluye", "contiene",
+        )
+    )
 
 
 def classify_slot_rule(text: str) -> tuple[str, str]:
-    """Conservative fallback hint only; uncertain speech remains OTHER and keepable."""
+    """Broad V1 fallback hints; uncertain valid speech remains OTHER and keepable."""
     n = normalized_text(text)
     if not n.compact:
         return "OTHER", "empty"
+    if production_meta_rule(text):
+        return "OTHER", "production_meta"
     if cta_action_rule(text):
         return "CTA", "explicit_cta"
-    if n.compact.startswith(("stop scrolling", "have you", "are you", "if you", "si tú", "si tu")):
-        return "HOOK", "obvious_hook"
-    if has_product_enumeration_evidence(text):
-        return "FEATURES", "obvious_product_enumeration"
+    if _question_hook(text, n) or n.compact.startswith((
+        "stop scrolling", "have you", "are you", "if you", "si tú", "si tu",
+    )):
+        return "HOOK", "viewer_question_or_attention"
+    if _has_problem_evidence(n):
+        return "PROBLEM", "problem_evidence"
+    if _has_story_evidence(n):
+        return "STORY", "narrative_context"
+    if _has_proof_evidence(n):
+        return "PROOF", "outcome_or_social_proof"
+    if _has_benefit_evidence(n):
+        return "BENEFITS", "user_outcome"
+    if _has_feature_evidence(n):
+        return "FEATURES", "product_attribute"
     return "OTHER", "unclassified_product_context"
 
 
