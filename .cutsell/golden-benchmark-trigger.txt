@@ -1,4 +1,4 @@
-run=3
+run=4
 video_limit=4
 window_sec=60
 asr_model=medium
