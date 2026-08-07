@@ -8,20 +8,22 @@ from cutsell_worker.draft_edits import (
     remove_clip,
     reorder_clips,
     restore_clip,
+    split_clip,
     swap_take,
     trim_clip,
 )
 
 
-def _clip(clip_id, group_id, text, *, selected):
+def _clip(clip_id, group_id, text, *, selected, words=None, start=0.0, end=1.0):
     return {
         "clip_id": clip_id,
         "source_asset_id": "src-1",
         "source_order": 0,
-        "start": 0.0,
-        "end": 1.0,
+        "start": start,
+        "end": end,
         "text": text,
         "caption_text": text,
+        "words": list(words or []),
         "semantic_role": "BENEFITS",
         "take_group_id": group_id,
         "selected": selected,
@@ -41,6 +43,33 @@ def _draft():
             _clip("b", "g1", "Wow, it's so good.", selected=False),
             _clip("d", "g3", "Different idea.", selected=False),
         ],
+        "discarded": [],
+        "diagnostics": {},
+    }
+
+
+def _word_draft():
+    return {
+        "schema_version": "cutsell.v1",
+        "project_id": "p1",
+        "strategy": "mixed",
+        "selected": [
+            _clip(
+                "speech",
+                "g1",
+                "This is really good",
+                selected=True,
+                start=10.0,
+                end=12.0,
+                words=[
+                    {"text": "This", "start": 10.10, "end": 10.35, "confidence": 0.99},
+                    {"text": " is", "start": 10.36, "end": 10.55, "confidence": 0.99},
+                    {"text": " really", "start": 11.10, "end": 11.40, "confidence": 0.98},
+                    {"text": " good", "start": 11.41, "end": 11.75, "confidence": 0.99},
+                ],
+            )
+        ],
+        "alternates": [],
         "discarded": [],
         "diagnostics": {},
     }
@@ -93,6 +122,38 @@ def test_trim_cannot_expand_outside_source_interval_or_create_microfragment():
         trim_clip(_draft(), "a", start=0.5, end=0.55)
 
 
+def test_split_uses_real_word_timings_and_does_not_duplicate_transcript():
+    updated = split_clip(_word_draft(), "speech", split_time=10.8)
+    assert len(updated["selected"]) == 2
+    left, right = updated["selected"]
+    assert left["start"] == 10.0 and left["end"] == 10.8
+    assert right["start"] == 10.8 and right["end"] == 12.0
+    assert left["text"] == "This is"
+    assert right["text"] == "really good"
+    assert left["caption_text"] == "This is"
+    assert right["caption_text"] == "really good"
+    assert [word["text"] for word in left["words"]] == ["This", " is"]
+    assert [word["text"] for word in right["words"]] == [" really", " good"]
+    assert left["source_asset_id"] == right["source_asset_id"] == "src-1"
+    assert left["take_group_id"] is None and right["take_group_id"] is None
+    assert left["parent_clip_id"] == right["parent_clip_id"] == "speech"
+    assert left["clip_id"] != right["clip_id"]
+
+
+def test_split_rejects_mid_word_and_legacy_spoken_clip_without_word_timings():
+    with pytest.raises(DraftEditError, match="spoken word"):
+        split_clip(_word_draft(), "speech", split_time=11.2)
+    with pytest.raises(DraftEditError, match="word timings"):
+        split_clip(_draft(), "a", split_time=0.5)
+
+
+def test_split_rejects_custom_caption_until_caption_can_be_resplit_explicitly():
+    draft = _word_draft()
+    draft["selected"][0]["caption_text"] = "Custom human caption"
+    with pytest.raises(DraftEditError, match="before editing"):
+        split_clip(draft, "speech", split_time=10.8)
+
+
 def test_caption_patch_preserves_transcript_text():
     updated = patch_captions(_draft(), [{"clip_id": "a", "text": "WOW — so good!"}])
     item = updated["selected"][0]
@@ -135,5 +196,23 @@ def test_mobile_trim_api_returns_trimmed_draft_and_rejects_unsafe_range():
         "clip_id": "a",
         "start": 0.5,
         "end": 0.55,
+    })
+    assert bad.status_code == 409
+
+
+def test_mobile_split_api_returns_two_word_safe_segments():
+    client = TestClient(api.app)
+    response = client.post("/v1/draft-edits/split", json={
+        "draft": _word_draft(),
+        "clip_id": "speech",
+        "split_time": 10.8,
+    })
+    assert response.status_code == 200
+    assert [item["text"] for item in response.json()["selected"]] == ["This is", "really good"]
+
+    bad = client.post("/v1/draft-edits/split", json={
+        "draft": _word_draft(),
+        "clip_id": "speech",
+        "split_time": 11.2,
     })
     assert bad.status_code == 409
