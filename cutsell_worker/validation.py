@@ -17,6 +17,8 @@ from .config import load_runtime_config
 from .contracts import ProcessingRequest, SourceAsset
 from .flow_b import process_local_sources
 from .providers import NoopSemanticProvider
+from .render import render_preview
+from .render_plan import build_render_plan
 from .semantic_openai import OpenAISemanticProvider
 from .source_identity import stable_source_id
 from .storage import download_source
@@ -63,11 +65,14 @@ def run_single_validation(
     *,
     project_id: str = "cutsell-validation",
     language_hint: str | None = None,
+    preview_output: str | None = None,
 ) -> dict[str, Any]:
-    """Run one S3 video through the clean Flow B engine and return a compact report."""
+    """Run one S3 video through clean Flow B and optionally render the selected draft."""
     if Path(key).suffix.lower() not in VIDEO_EXTENSIONS:
         raise ValueError("unsupported validation video")
     config = load_runtime_config()
+    if not config.s3_bucket:
+        raise RuntimeError("S3_BUCKET is required")
     source_id = stable_source_id(project_id, 0, PurePosixPath(key).name)
     source = SourceAsset(
         source_asset_id=source_id,
@@ -88,21 +93,27 @@ def run_single_validation(
     semantic = OpenAISemanticProvider(model=config.semantic_model) if config.semantic_ready else NoopSemanticProvider()
 
     started = time.monotonic()
+    preview_path = None
     with tempfile.TemporaryDirectory(prefix="cutsell-validation-") as directory:
         destination = str(Path(directory) / source.original_name)
         local = download_source(source.uri, destination)
+        local_paths = {source_id: local}
         result = process_local_sources(
             request,
-            {source_id: local},
+            local_paths,
             asr_provider=asr,
             semantic_provider=semantic,
         )
+        if preview_output:
+            plan = build_render_plan(result.draft, local_paths)
+            preview_path = render_preview(plan, preview_output)
     elapsed = round(time.monotonic() - started, 3)
     return {
         "schema_version": result.schema_version,
         "project_id": result.project_id,
         "source_key": key,
         "elapsed_sec": elapsed,
+        "preview_path": preview_path,
         "strategy": result.draft.strategy.value,
         "selected_count": len(result.draft.selected),
         "alternate_count": len(result.draft.alternates),
