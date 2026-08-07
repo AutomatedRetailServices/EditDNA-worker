@@ -12,6 +12,7 @@ from .contracts import (
     ProcessingRequest,
     SemanticRole,
     SourceAsset,
+    TextOverlay,
     Word,
 )
 
@@ -76,6 +77,32 @@ def _draft_clip_from_dict(item: dict, *, selected_default: bool) -> DraftClip:
     )
 
 
+def _text_overlay_from_dict(item: dict) -> TextOverlay:
+    text = str(item.get("text") or "").strip()
+    if not text or len(text) > 500:
+        raise ValueError("text overlay text must contain 1 to 500 characters")
+    start = float(item["start"])
+    end = float(item["end"])
+    x = float(item.get("x", 0.5))
+    y = float(item.get("y", 0.2))
+    scale = float(item.get("scale", 1.0))
+    if start < 0 or end <= start:
+        raise ValueError("text overlay end must be after start")
+    if not 0.0 <= x <= 1.0 or not 0.0 <= y <= 1.0:
+        raise ValueError("text overlay position must be normalized 0 to 1")
+    if not 0.5 <= scale <= 3.0:
+        raise ValueError("text overlay scale must be between 0.5 and 3.0")
+    return TextOverlay(
+        overlay_id=str(item["overlay_id"]),
+        text=text,
+        start=start,
+        end=end,
+        x=x,
+        y=y,
+        scale=scale,
+    )
+
+
 def draft_from_dict(payload: dict) -> DraftTimeline:
     if not isinstance(payload, dict):
         raise ValueError("draft must be an object")
@@ -87,6 +114,10 @@ def draft_from_dict(payload: dict) -> DraftTimeline:
     preset = str(payload.get("caption_preset") or "classic")
     if preset not in CAPTION_PRESETS:
         raise ValueError("caption_preset must be classic or clean")
+    overlays = tuple(_text_overlay_from_dict(dict(item)) for item in payload.get("text_overlays") or ())
+    total_duration = sum(max(0.0, clip.end - clip.start) for clip in selected)
+    if any(overlay.end > total_duration + 1e-6 for overlay in overlays):
+        raise ValueError("text overlay exceeds draft timeline duration")
     return DraftTimeline(
         schema_version=str(payload.get("schema_version") or "cutsell.v1"),
         project_id=str(payload["project_id"]),
@@ -97,6 +128,7 @@ def draft_from_dict(payload: dict) -> DraftTimeline:
         diagnostics=dict(payload.get("diagnostics") or {}),
         captions_enabled=bool(payload.get("captions_enabled", True)),
         caption_preset=preset,
+        text_overlays=overlays,
     )
 
 
