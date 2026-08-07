@@ -74,8 +74,14 @@ final class CameraController: NSObject, ObservableObject {
     func record(completion: @escaping (Result<URL, Error>) -> Void) {
         guard isConfigured, !movieOutput.isRecording else { return }
         self.completion = completion
-        let url = FileManager.default.temporaryDirectory
-            .appendingPathComponent("cutsell-recording-\(UUID().uuidString).mov")
+        let url: URL
+        do {
+            url = try persistentMediaURL(extension: "mov")
+        } catch {
+            self.completion = nil
+            errorMessage = error.localizedDescription
+            return
+        }
         try? FileManager.default.removeItem(at: url)
         if let connection = movieOutput.connection(with: .video) {
             if connection.isVideoStabilizationSupported {
