@@ -14,6 +14,7 @@ from cutsell_worker.draft_edits import (
     remove_clip,
     reorder_clips,
     restore_clip,
+    split_clip,
     swap_take,
     trim_clip,
 )
@@ -124,6 +125,10 @@ class DraftReorderRequest(BaseModel):
 class DraftTrimRequest(DraftClipRequest):
     start: float = Field(ge=0)
     end: float = Field(gt=0)
+
+
+class DraftSplitRequest(DraftClipRequest):
+    split_time: float = Field(gt=0)
 
 
 class CaptionEdit(BaseModel):
@@ -327,6 +332,14 @@ def edit_reorder_clips(payload: DraftReorderRequest):
 def edit_trim_clip(payload: DraftTrimRequest):
     try:
         return trim_clip(payload.draft, payload.clip_id, start=payload.start, end=payload.end)
+    except DraftEditError as exc:
+        _draft_edit_error(exc)
+
+
+@app.post("/v1/draft-edits/split")
+def edit_split_clip(payload: DraftSplitRequest):
+    try:
+        return split_clip(payload.draft, payload.clip_id, split_time=payload.split_time)
     except DraftEditError as exc:
         _draft_edit_error(exc)
 
