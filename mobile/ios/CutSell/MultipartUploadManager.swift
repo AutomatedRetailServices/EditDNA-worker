@@ -78,6 +78,7 @@ actor MultipartUploadManager {
     static let shared = MultipartUploadManager()
     private let api = APIClient.shared
     private let resumeStore = UploadResumeStore.shared
+    private let backgroundUploader = BackgroundPartUploader.shared
 
     func upload(
         fileURL: URL,
@@ -159,7 +160,14 @@ actor MultipartUploadManager {
                 method: "POST",
                 body: OwnerBody(project_id: projectID, user_id: session.userID)
             )
-            let response = try await api.upload(data, to: signed.uploadURL)
+
+            let partFile = try writePartFile(
+                data,
+                uploadID: start.uploadID,
+                partNumber: partNumber
+            )
+            defer { try? FileManager.default.removeItem(at: partFile) }
+            let response = try await backgroundUploader.upload(fileURL: partFile, to: signed.uploadURL)
             guard let etagValue = response.value(forHTTPHeaderField: "ETag"), !etagValue.isEmpty else {
                 throw UploadError.missingETag(partNumber)
             }
@@ -212,6 +220,17 @@ actor MultipartUploadManager {
                 size_bytes: size
             )
         )
+    }
+
+    private func writePartFile(_ data: Data, uploadID: String, partNumber: Int) throws -> URL {
+        let root = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("CutSell", isDirectory: true)
+            .appendingPathComponent("UploadParts", isDirectory: true)
+            .appendingPathComponent(uploadID, isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        let destination = root.appendingPathComponent(String(format: "part-%05d.bin", partNumber))
+        try data.write(to: destination, options: .atomic)
+        return destination
     }
 }
 
