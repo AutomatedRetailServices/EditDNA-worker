@@ -14,6 +14,9 @@ class DraftEditError(ValueError):
     pass
 
 
+MIN_TRIM_DURATION_SEC = 0.15
+
+
 def _clip_id(item: Mapping[str, Any]) -> str:
     return str(item.get("clip_id") or "")
 
@@ -103,6 +106,45 @@ def reorder_clips(draft: Mapping[str, Any], ordered_clip_ids: Sequence[str]) -> 
     if len(requested) != len(set(requested)) or set(requested) != set(current_ids):
         raise DraftEditError("reorder must contain every selected clip exactly once")
     out["selected"] = [deepcopy(lookup[clip_id]) for clip_id in requested]
+    return out
+
+
+def trim_clip(
+    draft: Mapping[str, Any],
+    clip_id: str,
+    *,
+    start: float,
+    end: float,
+    min_duration_sec: float = MIN_TRIM_DURATION_SEC,
+) -> dict[str, Any]:
+    """Trim one selected clip inward without changing source identity or transcript."""
+    out = _copy_draft(draft)
+    selected = list(out["selected"])
+    position = next((i for i, item in enumerate(selected) if _clip_id(item) == clip_id), None)
+    if position is None:
+        raise DraftEditError("selected clip not found")
+    item = deepcopy(selected[position])
+    try:
+        current_start = float(item["start"])
+        current_end = float(item["end"])
+        new_start = float(start)
+        new_end = float(end)
+    except (KeyError, TypeError, ValueError):
+        raise DraftEditError("trim requires numeric clip boundaries") from None
+    if current_end <= current_start:
+        raise DraftEditError("selected clip has invalid source boundaries")
+    if new_start < current_start - 1e-6 or new_end > current_end + 1e-6:
+        raise DraftEditError("trim must stay inside the selected clip source interval")
+    if new_start < 0 or new_end <= new_start:
+        raise DraftEditError("trim end must be after trim start")
+    if new_end - new_start < max(0.01, float(min_duration_sec)):
+        raise DraftEditError("trim would create an unusable microfragment")
+    item["start"] = round(new_start, 3)
+    item["end"] = round(new_end, 3)
+    # Transcript/caption strings are not rewritten from guessed text. The media
+    # boundaries change; a later word-aware caption timing layer can narrow timing.
+    selected[position] = item
+    out["selected"] = selected
     return out
 
 
