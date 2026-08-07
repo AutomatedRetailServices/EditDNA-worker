@@ -99,8 +99,11 @@ jobs:
           failures = []
           for stage in ('semantic', 'visual'):
               value = statuses.get(stage, {})
-              if not isinstance(value, dict) or value.get('status') != 'complete':
+              if not isinstance(value, dict) or value.get('status') != 'applied':
                   failures.append(stage)
+          take_judge = statuses.get('take_judge')
+          if take_judge not in {'provider_complete', 'not_applicable_no_alternates'}:
+              failures.append('take_judge')
           if failures:
               raise SystemExit('provider_validation_failed:' + ','.join(failures))
           PY
