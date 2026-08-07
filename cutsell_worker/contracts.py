@@ -167,6 +167,21 @@ class TextOverlay:
 
 
 @dataclass(frozen=True)
+class MediaOverlay:
+    overlay_id: str
+    kind: str
+    uri: str
+    start: float
+    end: float
+    x: float = 0.5
+    y: float = 0.5
+    width: float = 0.4
+    source_start: float = 0.0
+    source_end: Optional[float] = None
+    mute_audio: bool = True
+
+
+@dataclass(frozen=True)
 class DraftTimeline:
     schema_version: str
     project_id: str
@@ -178,6 +193,7 @@ class DraftTimeline:
     captions_enabled: bool = True
     caption_preset: str = "classic"
     text_overlays: Tuple[TextOverlay, ...] = ()
+    media_overlays: Tuple[MediaOverlay, ...] = ()
 
 
 @dataclass(frozen=True)
