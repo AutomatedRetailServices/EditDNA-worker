@@ -10,7 +10,6 @@ import mimetypes
 import os
 from pathlib import Path
 import re
-from urllib.parse import quote
 from uuid import uuid4
 
 from .config import load_runtime_config
@@ -96,7 +95,7 @@ def create_presigned_upload(
         "method": "POST",
         "upload_url": post["url"],
         "fields": post.get("fields", {}),
-        "source_uri": f"s3://{config.s3_bucket}/{quote(key, safe='/._-')}",
+        "source_uri": f"s3://{config.s3_bucket}/{key}",
         "object_key": key,
         "content_type": resolved_type,
         "max_bytes": int(size_bytes),
