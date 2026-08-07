@@ -9,6 +9,7 @@ from .config import load_runtime_config
 from .draft_store import create_initial_draft
 from .flow_b import process_local_sources
 from .media_probe import probe_media
+from .notifications import publish_notification
 from .project_tracking import safe_update_project
 from .providers import NoopSemanticProvider
 from .semantic_openai import OpenAISemanticProvider
@@ -22,7 +23,6 @@ from .visual_openai import OpenAIVisualProvider
 
 
 def _build_timeline_assets(request, local_paths: dict[str, str], directory: str) -> dict[str, dict]:
-    """Best-effort presentation assets. Failure never invalidates the AI draft."""
     output: dict[str, dict] = {}
     for source in request.sources:
         try:
@@ -53,6 +53,19 @@ def _build_timeline_assets(request, local_paths: dict[str, str], directory: str)
                 "waveform_bucket_count": 0,
             }
     return output
+
+
+def _safe_notify(*, user_id: str, project_id: str, kind: str, payload: dict | None = None) -> dict:
+    try:
+        event = publish_notification(
+            user_id=user_id,
+            project_id=project_id,
+            kind=kind,
+            payload=payload,
+        )
+        return {"status": "queued", "notification_id": event["notification_id"]}
+    except Exception as exc:
+        return {"status": "degraded", "reason": exc.__class__.__name__}
 
 
 def run_flow_b_job(payload: dict) -> dict:
@@ -147,6 +160,12 @@ def run_flow_b_job(payload: dict) -> dict:
                 sources=source_records,
                 latest_job_id=job_id,
             )
+            serialized["notification"] = _safe_notify(
+                user_id=request.user_id,
+                project_id=request.project_id,
+                kind="draft_ready",
+                payload={"job_id": job_id, "selected_count": len(serialized["draft"].get("selected") or [])},
+            )
             publish("draft_ready", 100)
             return serialized
     except Exception as exc:
@@ -155,6 +174,12 @@ def run_flow_b_job(payload: dict) -> dict:
             project_id=request.project_id,
             state="failed",
             latest_job_id=job_id,
+        )
+        _safe_notify(
+            user_id=request.user_id,
+            project_id=request.project_id,
+            kind="processing_failed",
+            payload={"job_id": job_id, "error": exc.__class__.__name__},
         )
         if job is not None:
             job.meta["stage"] = "failed"
