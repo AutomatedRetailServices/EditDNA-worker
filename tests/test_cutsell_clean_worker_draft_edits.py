@@ -9,6 +9,7 @@ from cutsell_worker.draft_edits import (
     reorder_clips,
     restore_clip,
     swap_take,
+    trim_clip,
 )
 
 
@@ -72,6 +73,26 @@ def test_reorder_requires_every_selected_clip_once():
         reorder_clips(_draft(), ["a", "a"])
 
 
+def test_trim_changes_only_media_boundaries_and_preserves_source_and_text():
+    original = _draft()
+    updated = trim_clip(original, "a", start=0.2, end=0.8)
+    item = updated["selected"][0]
+    assert item["start"] == 0.2
+    assert item["end"] == 0.8
+    assert item["source_asset_id"] == "src-1"
+    assert item["text"] == "Wow, it's so good."
+    assert item["caption_text"] == "Wow, it's so good."
+    assert original["selected"][0]["start"] == 0.0
+    assert original["selected"][0]["end"] == 1.0
+
+
+def test_trim_cannot_expand_outside_source_interval_or_create_microfragment():
+    with pytest.raises(DraftEditError, match="inside"):
+        trim_clip(_draft(), "a", start=0.0, end=1.1)
+    with pytest.raises(DraftEditError, match="microfragment"):
+        trim_clip(_draft(), "a", start=0.5, end=0.55)
+
+
 def test_caption_patch_preserves_transcript_text():
     updated = patch_captions(_draft(), [{"clip_id": "a", "text": "WOW — so good!"}])
     item = updated["selected"][0]
@@ -93,5 +114,26 @@ def test_mobile_draft_edit_api_swaps_real_siblings_only():
         "draft": _draft(),
         "selected_clip_id": "a",
         "replacement_clip_id": "d",
+    })
+    assert bad.status_code == 409
+
+
+def test_mobile_trim_api_returns_trimmed_draft_and_rejects_unsafe_range():
+    client = TestClient(api.app)
+    response = client.post("/v1/draft-edits/trim", json={
+        "draft": _draft(),
+        "clip_id": "a",
+        "start": 0.2,
+        "end": 0.8,
+    })
+    assert response.status_code == 200
+    assert response.json()["selected"][0]["start"] == 0.2
+    assert response.json()["selected"][0]["end"] == 0.8
+
+    bad = client.post("/v1/draft-edits/trim", json={
+        "draft": _draft(),
+        "clip_id": "a",
+        "start": 0.5,
+        "end": 0.55,
     })
     assert bad.status_code == 409
