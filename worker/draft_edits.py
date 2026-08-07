@@ -90,3 +90,27 @@ def reorder_clips(draft: Mapping[str, Any], ordered_clip_ids: Sequence[str]) -> 
     out["selected"] = [deepcopy(lookup[clip_id]) for clip_id in requested]
     _recount(out)
     return out
+
+
+def patch_captions(draft: Mapping[str, Any], edits: Sequence[Mapping[str, Any]]) -> Dict[str, Any]:
+    """Apply caption text to selected clips while preserving transcript text."""
+    out = deepcopy(dict(draft))
+    selected = list(out.get("selected", []))
+    lookup = _index(selected)
+    edit_ids = [str(edit.get("clip_id") or "") for edit in edits]
+    if not edit_ids or any(not clip_id for clip_id in edit_ids):
+        raise DraftEditError("caption edits require clip_id")
+    if len(edit_ids) != len(set(edit_ids)):
+        raise DraftEditError("caption edits must contain unique clip IDs")
+    missing = [clip_id for clip_id in edit_ids if clip_id not in lookup]
+    if missing:
+        raise DraftEditError("caption clip not found in selected draft")
+
+    captions = {str(edit["clip_id"]): str(edit.get("text") or "") for edit in edits}
+    for item in selected:
+        clip_id = _clip_id(item)
+        if clip_id in captions:
+            item["caption_text"] = captions[clip_id]
+    out["selected"] = selected
+    _recount(out)
+    return out
