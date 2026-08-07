@@ -1,0 +1,64 @@
+name: CutSell OpenAI Model Preflight
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - ".github/workflows/cutsell-openai-model-preflight.yml"
+      - ".cutsell/openai-model-preflight-trigger.txt"
+
+permissions:
+  contents: read
+
+jobs:
+  probe-model-access:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      RUNPOD_API_KEY: ${{ secrets.RUNPOD_API_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Load masked OpenAI key from current RunPod template vault
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail --silent --show-error \
+            --url "https://rest.runpod.io/v1/templates" \
+            --header "Authorization: Bearer $RUNPOD_API_KEY" \
+            --output templates.json
+          TEMPLATE=$(jq -c '[.[] | select(.name == "EditDNA-Worker-2")][0]' templates.json)
+          test "$TEMPLATE" != "null" || (echo 'template_missing' && exit 2)
+          value=$(printf '%s' "$TEMPLATE" | jq -r '.env.OPENAI_API_KEY // empty')
+          test -n "$value" || (echo 'openai_key_missing' && exit 3)
+          echo "::add-mask::$value"
+          printf 'OPENAI_API_KEY=%s\n' "$value" >> "$GITHUB_ENV"
+      - name: Install OpenAI SDK
+        run: pip install openai
+      - name: Probe candidate models without printing response content
+        shell: bash
+        run: |
+          python - <<'PY'
+          from openai import OpenAI
+
+          client = OpenAI()
+          models = ["gpt-5.4-nano", "gpt-5.4-mini", "gpt-4o-mini"]
+          usable = []
+          for model in models:
+              try:
+                  response = client.responses.create(
+                      model=model,
+                      input="Reply with the single word OK.",
+                      max_output_tokens=8,
+                  )
+                  print(f"{model}=available")
+                  usable.append(model)
+              except Exception as exc:
+                  status = getattr(exc, "status_code", None)
+                  print(f"{model}=unavailable class={exc.__class__.__name__} status={status}")
+          if not usable:
+              raise SystemExit("no_candidate_model_available")
+          print("usable_models=" + ",".join(usable))
+          PY
