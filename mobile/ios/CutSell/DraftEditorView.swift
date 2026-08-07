@@ -39,6 +39,8 @@ struct DraftEditorView: View {
             } else {
                 ScrollView {
                     VStack(spacing: 20) {
+                        DraftPlaybackView(model: model)
+
                         VisualTimelineView(model: model)
 
                         VStack(alignment: .leading, spacing: 10) {
