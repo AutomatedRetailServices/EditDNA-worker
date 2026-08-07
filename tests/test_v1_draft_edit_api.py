@@ -34,7 +34,7 @@ def test_v1_health_exposes_stateless_draft_capability():
     assert response.json() == {
         "ok": True,
         "api_version": "v1",
-        "draft_edits": ["swap", "remove", "restore", "reorder"],
+        "draft_edits": ["swap", "remove", "restore", "reorder", "captions"],
         "persistence": False,
     }
 
@@ -79,6 +79,34 @@ def test_remove_restore_and_reorder_routes_round_trip():
     )
     assert reordered.status_code == 200
     assert reordered.json()["draft"]["selected_clip_ids"] == ["b", "a"]
+
+
+def test_caption_route_preserves_transcript_and_sets_caption_text():
+    response = _client().post(
+        "/v1/draft-edits/captions",
+        json={
+            "draft": _draft(),
+            "edits": [
+                {"clip_id": "a", "text": "Caption A"},
+                {"clip_id": "b", "text": ""},
+            ],
+        },
+    )
+    assert response.status_code == 200
+    selected = response.json()["draft"]["selected"]
+    assert selected[0]["text"] == "A"
+    assert selected[0]["caption_text"] == "Caption A"
+    assert selected[1]["text"] == "B"
+    assert selected[1]["caption_text"] == ""
+
+
+def test_caption_route_rejects_nonselected_clip():
+    response = _client().post(
+        "/v1/draft-edits/captions",
+        json={"draft": _draft(), "edits": [{"clip_id": "c", "text": "alternate"}]},
+    )
+    assert response.status_code == 409
+    assert response.json()["detail"] == "caption clip not found in selected draft"
 
 
 def test_invalid_edit_returns_conflict_not_server_error():
