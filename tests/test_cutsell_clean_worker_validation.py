@@ -42,3 +42,51 @@ def test_validation_rejects_appledouble_as_explicit_video_key():
 def test_validation_rejects_unsafe_prefix(prefix):
     with pytest.raises(ValueError):
         validation._safe_prefix(prefix)
+
+
+@pytest.mark.parametrize(
+    "start,end",
+    [(-1.0, 2.0), (5.0, 5.0), (6.0, 5.0)],
+)
+def test_validation_window_rejects_invalid_ranges(start, end):
+    with pytest.raises(ValueError, match="0 <= start < end"):
+        validation._extract_validation_window(
+            "source.mp4", "window.mp4", start_sec=start, end_sec=end, runner=lambda *a, **k: None
+        )
+
+
+def test_validation_window_rejects_over_180_seconds():
+    with pytest.raises(ValueError, match="exceeds bounded duration"):
+        validation._extract_validation_window(
+            "source.mp4",
+            "window.mp4",
+            start_sec=10.0,
+            end_sec=191.0,
+            runner=lambda *a, **k: None,
+        )
+
+
+def test_validation_window_builds_exact_bounded_ffmpeg_command():
+    calls = []
+
+    def fake_runner(command, **kwargs):
+        calls.append((command, kwargs))
+        return SimpleNamespace(returncode=0)
+
+    result = validation._extract_validation_window(
+        "source.mp4",
+        "window.mp4",
+        start_sec=208.0,
+        end_sec=220.0,
+        runner=fake_runner,
+    )
+    assert result == "window.mp4"
+    command, kwargs = calls[0]
+    assert command[:5] == ["ffmpeg", "-hide_banner", "-loglevel", "error", "-y"]
+    assert command[command.index("-ss") + 1] == "208.000"
+    assert command[command.index("-t") + 1] == "12.000"
+    assert ["-map", "0:v:0"] == command[command.index("-map") : command.index("-map") + 2]
+    second_map = command.index("-map", command.index("-map") + 1)
+    assert command[second_map : second_map + 2] == ["-map", "0:a?"]
+    assert command[-1] == "window.mp4"
+    assert kwargs == {"capture_output": True, "check": True}
