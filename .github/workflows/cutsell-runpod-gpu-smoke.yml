@@ -56,7 +56,7 @@ jobs:
           }
           test -n "$RUNPOD_API_KEY" || { echo 'RUNPOD_API_KEY missing'; exit 3; }
 
-      - name: Resolve current template and runtime credentials
+      - name: Resolve current template image and runtime credentials
         shell: bash
         run: |
           set -euo pipefail
@@ -66,15 +66,16 @@ jobs:
             --output templates.json
           TEMPLATE=$(jq -c --arg name "$RUNPOD_TEMPLATE_NAME" '[.[] | select(.name == $name)][0]' templates.json)
           test "$TEMPLATE" != "null" || { echo 'RunPod template not found'; exit 4; }
-          TEMPLATE_ID=$(printf '%s' "$TEMPLATE" | jq -r '.id')
-          echo "TEMPLATE_ID=$TEMPLATE_ID" >> "$GITHUB_ENV"
+          IMAGE_NAME=$(printf '%s' "$TEMPLATE" | jq -r '.imageName // empty')
+          test -n "$IMAGE_NAME" || { echo 'RunPod template image missing'; exit 4; }
+          echo "IMAGE_NAME=$IMAGE_NAME" >> "$GITHUB_ENV"
           for key in AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_REGION S3_BUCKET OPENAI_API_KEY; do
             value=$(printf '%s' "$TEMPLATE" | jq -r --arg key "$key" '.env[$key] // empty')
             test -n "$value" || { echo "$key missing from template"; exit 5; }
             echo "::add-mask::$value"
             printf '%s=%s\n' "$key" "$value" >> "$GITHUB_ENV"
           done
-          echo "Resolved template $TEMPLATE_ID. No Pod has been created yet."
+          echo "Resolved image $IMAGE_NAME. No Pod has been created yet."
 
       - name: Verify no pre-existing smoke Pod will be reused accidentally
         shell: bash
@@ -169,7 +170,7 @@ jobs:
 
           jq -n \
             --arg name "cutsell-gpu-smoke-${GITHUB_RUN_ID}" \
-            --arg template "$TEMPLATE_ID" \
+            --arg image "$IMAGE_NAME" \
             --arg cloud "$CLOUD_TYPE" \
             --arg cmd "$CMD" \
             --arg head "$HEAD_SHA" \
@@ -183,7 +184,7 @@ jobs:
             --arg openai "$OPENAI_API_KEY" \
             '{
               name: $name,
-              templateId: $template,
+              imageName: $image,
               cloudType: $cloud,
               computeType: "GPU",
               gpuCount: 1,
@@ -195,8 +196,8 @@ jobs:
               ],
               gpuTypePriority: "availability",
               interruptible: false,
-              containerDiskInGb: 80,
-              volumeInGb: 60,
+              containerDiskInGb: 50,
+              volumeInGb: 20,
               volumeMountPath: "/workspace",
               dockerEntrypoint: ["bash", "-lc"],
               dockerStartCmd: [$cmd],
@@ -215,14 +216,20 @@ jobs:
               }
             }' > create-pod.json
 
-          curl --fail --silent --show-error \
+          code=$(curl --silent --show-error \
+            --write-out '%{http_code}' \
             --request POST \
             --url "https://rest.runpod.io/v1/pods" \
             --header "Authorization: Bearer $RUNPOD_API_KEY" \
             --header "Content-Type: application/json" \
             --data @create-pod.json \
-            --output pod.json
+            --output pod.json)
           rm -f create-pod.json
+          if [ "$code" != "201" ]; then
+            echo "RunPod create HTTP status: $code"
+            jq '{error,errors,message}' pod.json || true
+            exit 6
+          fi
           POD_ID=$(jq -r '.id // empty' pod.json)
           test -n "$POD_ID" || { jq '{error,errors,message}' pod.json; exit 6; }
           echo "pod_id=$POD_ID" >> "$GITHUB_OUTPUT"
