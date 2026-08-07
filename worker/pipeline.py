@@ -1411,11 +1411,9 @@ def run_take_judge(
             clip_item["meta"]["take_judge_execution_status"] = (
                 "candidate_winner" if candidate_id == result.winner_id else "candidate_loser"
             )
-            if candidate_id != result.winner_id and clip_item["meta"].get("keep", True):
-                clip_item["meta"]["keep"] = False
-                clip_item["llm_reason"] = (clip_item.get("llm_reason") or "") + (
-                    " | Removed by TakeJudgeAI (better take exists)."
-                )
+            # Best Take is ranking authority, not Clean Cut deletion authority.
+            # Losers remain valid alternates for swap/restore in the editable draft.
+            clip_item["meta"]["take_judge_selected"] = candidate_id == result.winner_id
         used_any = True
         status["winner_selected"] += 1
     if status["winner_selected"]:
@@ -1584,11 +1582,23 @@ def suppress_near_duplicates_by_slot(
             len1 = content1.effective_semantic_units
             len2 = content2.effective_semantic_units
 
-            if sem2 > sem1 or (sem2 == sem1 and len2 >= len1):
+            # Composer operates on copies, so it may suppress an alternate from
+            # this render while the original candidate remains editable. Prefer
+            # an explicit Take Judge winner before ordinary semantic tie-breakers.
+            rank1 = (
+                1 if c1.get("meta", {}).get("take_judge_selected") else 0,
+                safe_float(c1.get("meta", {}).get("take_judge_score", 0.0)),
+                safe_float(c1.get("score", sem1)), sem1, len1,
+            )
+            rank2 = (
+                1 if c2.get("meta", {}).get("take_judge_selected") else 0,
+                safe_float(c2.get("meta", {}).get("take_judge_score", 0.0)),
+                safe_float(c2.get("score", sem2)), sem2, len2,
+            )
+            if rank2 >= rank1:
                 c1["meta"]["keep"] = False
                 break
-            else:
-                c2["meta"]["keep"] = False
+            c2["meta"]["keep"] = False
 
 
 def suppress_cross_slot_redundant_clips(
