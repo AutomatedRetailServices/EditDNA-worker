@@ -149,3 +149,31 @@ def validate_product_source_uri(
     if Path(key).suffix.lower() not in ALLOWED_VIDEO_EXTENSIONS:
         raise ValueError("source uri does not reference a supported video")
     return bucket, key
+
+
+def create_presigned_source_download(
+    uri: str,
+    *,
+    project_id: str,
+    user_id: str,
+    expires_in: int = 1800,
+    client=None,
+) -> dict:
+    """Create a short-lived GET URL only for a source owned by this user/project."""
+    if not 60 <= int(expires_in) <= 3600:
+        raise ValueError("source download expiry must be between 60 and 3600 seconds")
+    bucket, key = validate_product_source_uri(
+        uri,
+        project_id=project_id,
+        user_id=user_id,
+    )
+    config = load_runtime_config()
+    if client is None:
+        import boto3
+        client = boto3.client("s3", region_name=config.aws_region or "us-east-1")
+    url = client.generate_presigned_url(
+        "get_object",
+        Params={"Bucket": bucket, "Key": key},
+        ExpiresIn=int(expires_in),
+    )
+    return {"url": url, "expires_in": int(expires_in)}
