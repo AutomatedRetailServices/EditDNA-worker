@@ -44,7 +44,11 @@ from cutsell_worker.queueing import enqueue_export, enqueue_flow_b
 from cutsell_worker.serde import draft_from_dict
 from cutsell_worker.source_identity import stable_source_id
 from cutsell_worker.timeline_asset_storage import sign_timeline_assets
-from cutsell_worker.uploads import create_presigned_upload, validate_product_source_uri
+from cutsell_worker.uploads import (
+    create_presigned_source_download,
+    create_presigned_upload,
+    validate_product_source_uri,
+)
 
 app = FastAPI(title="CutSell API", version="0.1.0")
 app.add_middleware(AuthScopeMiddleware)
@@ -197,7 +201,10 @@ def _draft_history_error(exc: Exception):
 
 
 def _hydrate_snapshot_assets(snapshot: dict[str, Any]) -> dict[str, Any]:
+    """Refresh expiring presentation/playback URLs without persisting them in Redis."""
     out = deepcopy(snapshot)
+    project_id = str(out.get("project_id") or "")
+    user_id = str(out.get("user_id") or "")
     hydrated_sources = []
     for source in out.get("sources") or ():
         item = dict(source)
@@ -211,6 +218,22 @@ def _hydrate_snapshot_assets(snapshot: dict[str, Any]) -> dict[str, Any]:
                     "signed_url_status": "degraded",
                     "signed_url_reason": exc.__class__.__name__,
                 }
+
+        uri = str(item.get("uri") or "")
+        if uri and project_id and user_id:
+            try:
+                signed = create_presigned_source_download(
+                    uri,
+                    project_id=project_id,
+                    user_id=user_id,
+                )
+                item["playback_url"] = signed["url"]
+                item["playback_expires_in"] = signed["expires_in"]
+                item["playback_url_status"] = "ready"
+            except Exception as exc:
+                item["playback_url"] = None
+                item["playback_url_status"] = "degraded"
+                item["playback_url_reason"] = exc.__class__.__name__
         hydrated_sources.append(item)
     out["sources"] = hydrated_sources
     return out
