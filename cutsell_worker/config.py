@@ -8,6 +8,13 @@ from dataclasses import dataclass
 import os
 
 
+def _env_bool(values: dict[str, str], key: str, default: bool = False) -> bool:
+    raw = values.get(key)
+    if raw is None:
+        return default
+    return str(raw).strip().lower() in {"1", "true", "yes", "on"}
+
+
 @dataclass(frozen=True)
 class RuntimeConfig:
     redis_url: str | None
@@ -22,6 +29,8 @@ class RuntimeConfig:
     semantic_model: str
     visual_model: str
     take_judge_model: str
+    clean_cut_judge_model: str
+    clean_cut_judge_enabled: bool
 
     @property
     def storage_ready(self) -> bool:
@@ -38,6 +47,10 @@ class RuntimeConfig:
     @property
     def visual_ready(self) -> bool:
         return self.openai_api_key_present
+
+    @property
+    def clean_cut_judge_ready(self) -> bool:
+        return bool(self.clean_cut_judge_enabled and self.openai_api_key_present)
 
 
 def load_runtime_config(env: dict[str, str] | None = None) -> RuntimeConfig:
@@ -57,4 +70,7 @@ def load_runtime_config(env: dict[str, str] | None = None) -> RuntimeConfig:
         semantic_model=values.get("CUTSELL_SEMANTIC_MODEL", "gpt-4o-mini"),
         visual_model=values.get("CUTSELL_VISUAL_MODEL", "gpt-4o-mini"),
         take_judge_model=values.get("CUTSELL_TAKE_JUDGE_MODEL", "gpt-4o-mini"),
+        clean_cut_judge_model=values.get("CUTSELL_CLEAN_CUT_JUDGE_MODEL", "gpt-4o-mini"),
+        # Experimental until golden real-video validation proves it is safe.
+        clean_cut_judge_enabled=_env_bool(values, "CUTSELL_CLEAN_CUT_JUDGE", False),
     )
