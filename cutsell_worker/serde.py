@@ -9,6 +9,7 @@ from .contracts import (
     DraftClip,
     DraftTimeline,
     EditStrategy,
+    MediaOverlay,
     ProcessingRequest,
     SemanticRole,
     SourceAsset,
@@ -81,25 +82,42 @@ def _text_overlay_from_dict(item: dict) -> TextOverlay:
     text = str(item.get("text") or "").strip()
     if not text or len(text) > 500:
         raise ValueError("text overlay text must contain 1 to 500 characters")
-    start = float(item["start"])
-    end = float(item["end"])
-    x = float(item.get("x", 0.5))
-    y = float(item.get("y", 0.2))
-    scale = float(item.get("scale", 1.0))
+    start = float(item["start"]); end = float(item["end"])
+    x = float(item.get("x", 0.5)); y = float(item.get("y", 0.2)); scale = float(item.get("scale", 1.0))
     if start < 0 or end <= start:
         raise ValueError("text overlay end must be after start")
     if not 0.0 <= x <= 1.0 or not 0.0 <= y <= 1.0:
         raise ValueError("text overlay position must be normalized 0 to 1")
     if not 0.5 <= scale <= 3.0:
         raise ValueError("text overlay scale must be between 0.5 and 3.0")
-    return TextOverlay(
-        overlay_id=str(item["overlay_id"]),
-        text=text,
-        start=start,
-        end=end,
-        x=x,
-        y=y,
-        scale=scale,
+    return TextOverlay(str(item["overlay_id"]), text, start, end, x, y, scale)
+
+
+def _media_overlay_from_dict(item: dict) -> MediaOverlay:
+    kind = str(item.get("kind") or "")
+    if kind not in {"photo", "video"}:
+        raise ValueError("media overlay kind must be photo or video")
+    uri = str(item.get("uri") or "")
+    if not uri:
+        raise ValueError("media overlay uri is required")
+    start = float(item["start"]); end = float(item["end"])
+    x = float(item.get("x", 0.5)); y = float(item.get("y", 0.5)); width = float(item.get("width", 0.4))
+    source_start = float(item.get("source_start", 0.0))
+    source_end = float(item["source_end"]) if item.get("source_end") is not None else None
+    if start < 0 or end <= start:
+        raise ValueError("media overlay end must be after start")
+    if not 0.0 <= x <= 1.0 or not 0.0 <= y <= 1.0:
+        raise ValueError("media overlay position must be normalized 0 to 1")
+    if not 0.1 <= width <= 1.0:
+        raise ValueError("media overlay width must be between 0.1 and 1.0")
+    if source_start < 0 or (source_end is not None and source_end <= source_start):
+        raise ValueError("media overlay source trim is invalid")
+    if kind == "photo" and (source_start != 0.0 or source_end is not None):
+        raise ValueError("photo overlay cannot use source trim")
+    return MediaOverlay(
+        overlay_id=str(item["overlay_id"]), kind=kind, uri=uri, start=start, end=end,
+        x=x, y=y, width=width, source_start=source_start, source_end=source_end,
+        mute_audio=bool(item.get("mute_audio", True)),
     )
 
 
@@ -114,10 +132,13 @@ def draft_from_dict(payload: dict) -> DraftTimeline:
     preset = str(payload.get("caption_preset") or "classic")
     if preset not in CAPTION_PRESETS:
         raise ValueError("caption_preset must be classic or clean")
-    overlays = tuple(_text_overlay_from_dict(dict(item)) for item in payload.get("text_overlays") or ())
+    text_overlays = tuple(_text_overlay_from_dict(dict(item)) for item in payload.get("text_overlays") or ())
+    media_overlays = tuple(_media_overlay_from_dict(dict(item)) for item in payload.get("media_overlays") or ())
     total_duration = sum(max(0.0, clip.end - clip.start) for clip in selected)
-    if any(overlay.end > total_duration + 1e-6 for overlay in overlays):
+    if any(overlay.end > total_duration + 1e-6 for overlay in text_overlays):
         raise ValueError("text overlay exceeds draft timeline duration")
+    if any(overlay.end > total_duration + 1e-6 for overlay in media_overlays):
+        raise ValueError("media overlay exceeds draft timeline duration")
     return DraftTimeline(
         schema_version=str(payload.get("schema_version") or "cutsell.v1"),
         project_id=str(payload["project_id"]),
@@ -128,7 +149,8 @@ def draft_from_dict(payload: dict) -> DraftTimeline:
         diagnostics=dict(payload.get("diagnostics") or {}),
         captions_enabled=bool(payload.get("captions_enabled", True)),
         caption_preset=preset,
-        text_overlays=overlays,
+        text_overlays=text_overlays,
+        media_overlays=media_overlays,
     )
 
 
