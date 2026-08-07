@@ -19,12 +19,40 @@ def test_healthz_exposes_clean_service_readiness(monkeypatch):
     assert response.json()["storage_ready"] is True
 
 
+def test_presign_upload_returns_direct_s3_contract(monkeypatch):
+    monkeypatch.setattr(
+        api,
+        "create_presigned_upload",
+        lambda **kwargs: {
+            "method": "POST",
+            "upload_url": "https://upload.invalid",
+            "fields": {"key": "cutsell/uploads/x/video.mov"},
+            "source_uri": "s3://bucket/cutsell/uploads/x/video.mov",
+            "object_key": "cutsell/uploads/x/video.mov",
+            "content_type": "video/quicktime",
+            "max_bytes": kwargs["size_bytes"],
+            "expires_in": 900,
+        },
+    )
+    response = TestClient(api.app).post("/v1/uploads/presign", json={
+        "project_id": "project-1",
+        "user_id": "user-1",
+        "original_name": "video.mov",
+        "content_type": "video/quicktime",
+        "size_bytes": 12345,
+    })
+    assert response.status_code == 200
+    assert response.json()["method"] == "POST"
+    assert response.json()["source_uri"].startswith("s3://bucket/cutsell/uploads/")
+
+
 def test_flow_b_submit_generates_source_ids_and_enqueues(monkeypatch):
     captured = {}
     def fake_enqueue(payload):
         captured.update(payload)
         return SimpleNamespace(job_id="job-1", queue_name="cutsell")
     monkeypatch.setattr(api, "enqueue_flow_b", fake_enqueue)
+    monkeypatch.setattr(api, "validate_product_source_uri", lambda uri: ("bucket", uri))
 
     response = TestClient(api.app).post("/v1/flow-b/jobs", json={
         "project_id": "project-1",
@@ -44,6 +72,7 @@ def test_flow_b_submit_generates_source_ids_and_enqueues(monkeypatch):
 
 def test_flow_b_submit_rejects_duplicate_source_order(monkeypatch):
     monkeypatch.setattr(api, "enqueue_flow_b", lambda payload: None)
+    monkeypatch.setattr(api, "validate_product_source_uri", lambda uri: ("bucket", uri))
     response = TestClient(api.app).post("/v1/flow-b/jobs", json={
         "project_id": "project-1",
         "user_id": "user-1",
@@ -53,6 +82,21 @@ def test_flow_b_submit_rejects_duplicate_source_order(monkeypatch):
         ],
     })
     assert response.status_code == 409
+
+
+def test_flow_b_submit_rejects_source_outside_product_upload_scope(monkeypatch):
+    def reject(_uri):
+        raise ValueError("source uri is outside CutSell upload prefix")
+    monkeypatch.setattr(api, "validate_product_source_uri", reject)
+    response = TestClient(api.app).post("/v1/flow-b/jobs", json={
+        "project_id": "project-1",
+        "user_id": "user-1",
+        "sources": [
+            {"original_name": "one.mov", "uri": "s3://bucket/legacy/one.mov", "source_order": 0},
+        ],
+    })
+    assert response.status_code == 422
+    assert "outside CutSell upload prefix" in response.json()["detail"]
 
 
 def test_get_job_returns_progress_without_exposing_internal_tracebacks(monkeypatch):
