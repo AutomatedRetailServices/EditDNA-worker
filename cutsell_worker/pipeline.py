@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from collections import Counter
 import hashlib
-from typing import Dict, Iterable, Mapping
+from typing import Dict, Iterable
 
 from .clean_cut import apply_clean_cut
 from .clean_cut_provider import CleanCutProvider, apply_provider_judgements, safe_clean_cut_judge
@@ -54,17 +54,38 @@ def build_flow_b_draft(
 ) -> ProcessingResult:
     """Build an editable draft from already-transcribed/segmented takes."""
     take_tuple = tuple(takes)
-    label_map: Mapping[str, SemanticLabel] = {label.clip_id: label for label in semantic_labels}
+    label_map: dict[str, SemanticLabel] = {label.clip_id: label for label in semantic_labels}
 
     # Tier 1 is deterministic and only removes very high-certainty recording errors.
     kept, deterministic_discarded, decisions = apply_clean_cut(take_tuple)
 
     # Tier 2 is optional and remains entirely separate from semantic/commercial labels.
-    # It may only delete a whole candidate at high confidence. MIXED and uncertainty
-    # always fail open to KEEP so valid speech cannot be lost.
+    # Whole DELETE requires high confidence. MIXED may only trim a single contiguous
+    # valid span snapped to real ASR word timestamps; malformed/uncertain proposals
+    # fail open to the original candidate.
     clean_judged = safe_clean_cut_judge(clean_cut_provider, kept)
     kept, provider_discarded, clean_judge_diagnostics = apply_provider_judgements(kept, clean_judged)
     discarded = tuple(deterministic_discarded) + tuple(provider_discarded)
+
+    # A word-safe MIXED trim creates deterministic child clip IDs because media
+    # boundaries changed. Preserve descriptive semantic metadata for those children
+    # without re-running or inventing commercial meaning.
+    for item in clean_judge_diagnostics:
+        if not item.get("applied_mixed_trim"):
+            continue
+        parent_id = str(item.get("clip_id") or "")
+        parent_label = label_map.get(parent_id)
+        if parent_label is None:
+            continue
+        child_ids = [item.get("kept_clip_id"), *(item.get("discarded_clip_ids") or [])]
+        for child_id in child_ids:
+            if child_id:
+                label_map[str(child_id)] = SemanticLabel(
+                    str(child_id),
+                    parent_label.role,
+                    parent_label.confidence,
+                    parent_label.reason,
+                )
 
     grouped = group_takes(kept)
     groups = []
@@ -106,7 +127,8 @@ def build_flow_b_draft(
         for member in members:
             clip_to_group[member.clip_id] = gid
 
-    selected_takes = compose_selected(kept, groups, label_map.values())
+    surviving_labels = tuple(label_map[take.clip_id] for take in kept if take.clip_id in label_map)
+    selected_takes = compose_selected(kept, groups, surviving_labels)
     selected_ids = {take.clip_id for take in selected_takes}
 
     selected = tuple(
@@ -138,9 +160,9 @@ def build_flow_b_draft(
         for take in discarded
     )
 
-    # Strategy is descriptive only. It may use both semantic and visual evidence,
-    # but it has no authority to delete speech or force a funnel order.
-    strategy = choose_strategy(label_map.values(), kept)
+    # Strategy is descriptive only. It sees only surviving speech and may use
+    # semantic/visual evidence, but it has no authority to delete or force order.
+    strategy = choose_strategy(surviving_labels, kept)
     draft = DraftTimeline(
         schema_version=SCHEMA_VERSION,
         project_id=request.project_id,
@@ -152,8 +174,9 @@ def build_flow_b_draft(
             "clean_cut_decisions": [decision.__dict__ for decision in decisions],
             "clean_cut_judge_status": clean_judged.status.__dict__,
             "clean_cut_judge": list(clean_judge_diagnostics)[:100],
-            "clean_cut_judge_deleted_count": len(provider_discarded),
+            "clean_cut_judge_deleted_count": sum(1 for item in clean_judge_diagnostics if item.get("applied_delete")),
             "clean_cut_judge_mixed_count": sum(1 for item in clean_judge_diagnostics if item["action"] == "mixed"),
+            "clean_cut_judge_mixed_trimmed_count": sum(1 for item in clean_judge_diagnostics if item.get("applied_mixed_trim")),
             "take_group_count": len(groups),
             "alternate_group_count": alternate_group_count,
             "source_count": len(request.sources),
