@@ -37,6 +37,7 @@ def _draft_clip(take: CandidateTake, *, role: SemanticRole, group_id: str | None
         end=take.end,
         text=take.text,
         caption_text=take.text,
+        words=take.words,
         semantic_role=role,
         take_group_id=group_id,
         selected=selected,
