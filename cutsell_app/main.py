@@ -7,6 +7,8 @@ from typing import Any
 from fastapi import FastAPI, HTTPException, status
 from pydantic import BaseModel, Field
 
+from cutsell_app.auth_middleware import AuthScopeMiddleware
+from cutsell_app.auth_routes import router as auth_router
 from cutsell_app.batch_routes import router as batch_router
 from cutsell_app.feedback_routes import router as feedback_router
 from cutsell_app.job_retry_routes import router as job_retry_router
@@ -45,6 +47,8 @@ from cutsell_worker.timeline_asset_storage import sign_timeline_assets
 from cutsell_worker.uploads import create_presigned_upload, validate_product_source_uri
 
 app = FastAPI(title="CutSell API", version="0.1.0")
+app.add_middleware(AuthScopeMiddleware)
+app.include_router(auth_router)
 app.include_router(multipart_router)
 app.include_router(text_router)
 app.include_router(overlay_router)
