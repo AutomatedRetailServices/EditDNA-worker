@@ -7,6 +7,7 @@ import tempfile
 from .draft_edits import DraftEditError
 from .exports import store_export
 from .media_overlay_render import LocalMediaOverlay
+from .notifications import publish_notification
 from .overlay_uploads import validate_overlay_uri
 from .project_tracking import safe_update_project
 from .render import render_preview
@@ -15,6 +16,19 @@ from .render_versions import add_render_version
 from .serde import draft_from_dict
 from .storage import download_source
 from .uploads import validate_product_source_uri
+
+
+def _safe_notify(*, user_id: str, project_id: str, kind: str, payload: dict | None = None) -> dict:
+    try:
+        event = publish_notification(
+            user_id=user_id,
+            project_id=project_id,
+            kind=kind,
+            payload=payload,
+        )
+        return {"status": "queued", "notification_id": event["notification_id"]}
+    except Exception as exc:
+        return {"status": "degraded", "reason": exc.__class__.__name__}
 
 
 def run_export_job(payload: dict) -> dict:
@@ -129,6 +143,15 @@ def run_export_job(payload: dict) -> dict:
                     if version else None
                 ),
             )
+            notification = _safe_notify(
+                user_id=user_id,
+                project_id=project_id,
+                kind="render_finished",
+                payload={
+                    "job_id": job_id,
+                    "render_version_id": version["render_version_id"] if version else None,
+                },
+            )
             publish("finished", 100)
             return {
                 "project_id": project_id,
@@ -138,14 +161,21 @@ def run_export_job(payload: dict) -> dict:
                 "media_overlay_count": len(draft.media_overlays),
                 "project_tracking_start": tracking_start,
                 "project_tracking": project_tracking,
+                "notification": notification,
                 **version_payload,
                 **stored,
             }
-    except Exception:
+    except Exception as exc:
         safe_update_project(
             user_id=user_id,
             project_id=project_id,
             state="failed",
             latest_job_id=job_id,
+        )
+        _safe_notify(
+            user_id=user_id,
+            project_id=project_id,
+            kind="render_failed",
+            payload={"job_id": job_id, "error": exc.__class__.__name__},
         )
         raise
