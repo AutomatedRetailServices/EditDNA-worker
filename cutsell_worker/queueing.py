@@ -44,3 +44,19 @@ def enqueue_export(payload: dict, *, queue=None, timeout: int = 3600) -> QueueSu
         failure_ttl=86400,
     )
     return QueueSubmission(job_id=str(job.id), queue_name=str(getattr(target, "name", "cutsell")))
+
+
+def enqueue_batch_item(
+    *, batch_id: str, user_id: str, index: int, queue=None, timeout: int = 3600
+) -> QueueSubmission:
+    target = queue or get_queue()
+    job = target.enqueue(
+        "cutsell_worker.batch_job.run_batch_item",
+        batch_id,
+        user_id,
+        int(index),
+        job_timeout=timeout,
+        result_ttl=86400,
+        failure_ttl=86400,
+    )
+    return QueueSubmission(job_id=str(job.id), queue_name=str(getattr(target, "name", "cutsell")))
