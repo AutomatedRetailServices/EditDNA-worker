@@ -8,6 +8,7 @@ from fastapi import FastAPI, HTTPException, status
 from pydantic import BaseModel, Field
 
 from cutsell_app.multipart_routes import router as multipart_router
+from cutsell_app.text_routes import router as text_router
 from cutsell_worker.caption_settings import patch_caption_settings
 from cutsell_worker.config import load_runtime_config
 from cutsell_worker.draft_edits import (
@@ -38,6 +39,7 @@ from cutsell_worker.uploads import create_presigned_upload, validate_product_sou
 
 app = FastAPI(title="CutSell API", version="0.1.0")
 app.include_router(multipart_router)
+app.include_router(text_router)
 
 
 class UploadPresignRequest(BaseModel):
