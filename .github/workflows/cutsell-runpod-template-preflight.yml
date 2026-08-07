@@ -68,3 +68,18 @@ jobs:
             hasRegistryAuth: ((.containerRegistryAuthId // "") | length > 0),
             env_keys: ((.env // {}) | keys | sort)
           })' templates.json
+      - name: List current Pods without exposing env or IPs
+        shell: bash
+        run: |
+          curl --fail --silent --show-error \
+            --url "https://rest.runpod.io/v1/pods" \
+            --header "Authorization: Bearer $RUNPOD_API_KEY" \
+            --output pods.json
+          jq 'map({
+            id,
+            name,
+            desiredStatus,
+            templateId,
+            gpu: (if .gpu then {count: .gpu.count, displayName: .gpu.displayName} else null end),
+            costPerHr
+          })' pods.json
