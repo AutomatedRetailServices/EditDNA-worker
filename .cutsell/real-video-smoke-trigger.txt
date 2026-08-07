@@ -1,2 +1,2 @@
-rerun=2026-08-07T10:31Z
-reason=ignore macOS AppleDouble metadata and select a real media object
+rerun=2026-08-07T10:40Z
+reason=validate boundary repair plus gpt-4o-mini semantic visual and take-judge providers
