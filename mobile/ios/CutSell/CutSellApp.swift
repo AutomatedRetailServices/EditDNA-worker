@@ -18,13 +18,29 @@ final class CutSellAppDelegate: NSObject, UIApplicationDelegate {
 @main
 struct CutSellApp: App {
     @UIApplicationDelegateAdaptor(CutSellAppDelegate.self) private var appDelegate
+    @Environment(\.scenePhase) private var scenePhase
     @StateObject private var appState = AppState()
+    @StateObject private var notificationCenter = NotificationCenterModel()
 
     var body: some Scene {
         WindowGroup {
             RootView()
                 .environmentObject(appState)
-                .task { await appState.bootstrap() }
+                .environmentObject(notificationCenter)
+                .task {
+                    await notificationCenter.requestPermission()
+                    await appState.bootstrap()
+                    if let session = appState.session {
+                        await notificationCenter.refresh(session: session, surfaceLocalAlerts: false)
+                    }
+                }
+                .onChange(of: scenePhase) { _, phase in
+                    guard phase == .active, let session = appState.session else { return }
+                    Task {
+                        try? await appState.refreshProjects()
+                        await notificationCenter.refresh(session: session)
+                    }
+                }
         }
     }
 }
