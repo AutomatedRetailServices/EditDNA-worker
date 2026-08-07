@@ -20,11 +20,40 @@ def _run(command: list[str]) -> None:
         raise RuntimeError("ffmpeg_render_failed")
 
 
+def _srt_timestamp(seconds: float) -> str:
+    milliseconds = max(0, int(round(float(seconds) * 1000)))
+    hours, remainder = divmod(milliseconds, 3_600_000)
+    minutes, remainder = divmod(remainder, 60_000)
+    secs, ms = divmod(remainder, 1000)
+    return f"{hours:02d}:{minutes:02d}:{secs:02d},{ms:03d}"
+
+
+def _caption_filter(segment: RenderSegment, part: Path) -> str | None:
+    text = str(segment.caption_text or "").replace("\x00", "").strip()
+    if not text:
+        return None
+    text = text[:500]
+    subtitle = part.with_suffix(".srt")
+    subtitle.write_text(
+        f"1\n00:00:00,000 --> {_srt_timestamp(segment.duration_sec)}\n{text}\n",
+        encoding="utf-8",
+    )
+    preset = str(segment.caption_preset or "classic")
+    if preset == "clean":
+        style = "Fontsize=24,Alignment=2,MarginV=120,BorderStyle=3,Outline=0,Shadow=0,BackColour=&H66000000,PrimaryColour=&H00FFFFFF"
+    else:
+        style = "Fontsize=24,Alignment=2,MarginV=120,BorderStyle=1,Outline=2,Shadow=0,OutlineColour=&H00000000,PrimaryColour=&H00FFFFFF"
+    path = subtitle.as_posix().replace("'", "\\'")
+    return f"subtitles='{path}':force_style='{style}'"
+
+
 def _segment_command(segment: RenderSegment, part: Path, *, vf: str) -> list[str]:
     probe = probe_media(segment.source_path)
     effective_volume = 0.0 if segment.audio_muted else float(segment.audio_volume)
+    caption = _caption_filter(segment, part)
+    video_filter = f"{vf},{caption}" if caption else vf
     common_video = [
-        "-vf", vf,
+        "-vf", video_filter,
         "-c:v", "libx264", "-preset", "veryfast", "-crf", "20",
         "-c:a", "aac", "-b:a", "160k", "-ar", "48000",
         "-movflags", "+faststart",
@@ -39,7 +68,6 @@ def _segment_command(segment: RenderSegment, part: Path, *, vf: str) -> list[str
         return base + ["-af", f"volume={effective_volume:.3f}"] + common_video + [str(part)]
 
     # Normalize silent/B-roll footage to the same AAC stream shape as talking clips.
-    # This prevents concat failures when a project mixes sources with/without audio.
     return base + [
         "-f", "lavfi",
         "-t", f"{segment.duration_sec:.3f}",
@@ -73,8 +101,6 @@ def render_preview(
             if segment.end <= segment.start:
                 raise ValueError(f"invalid render segment {segment.clip_id}")
             part = Path(directory) / f"part-{index:04d}.mp4"
-            # scale+pad preserves the creator's frame without stretching while
-            # producing a deterministic TikTok-ready 9:16 canvas.
             vf = (
                 f"scale={width}:{height}:force_original_aspect_ratio=decrease,"
                 f"pad={width}:{height}:(ow-iw)/2:(oh-ih)/2,setsar=1,fps={fps}"
