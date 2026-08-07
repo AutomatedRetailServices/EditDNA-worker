@@ -19,81 +19,87 @@ struct DraftEditorView: View {
                     }
             }
         }
+        .navigationTitle(project.title)
+        .navigationBarTitleDisplayMode(.inline)
     }
 
     @ViewBuilder
     private func editor(_ model: DraftEditorViewModel) -> some View {
         VStack(spacing: 0) {
             if model.isSaving {
-                ProgressView().controlSize(.small).padding(.top, 6)
+                HStack(spacing: 8) {
+                    ProgressView().controlSize(.small)
+                    Text("Saving…").font(.caption).foregroundStyle(.secondary)
+                }
+                .padding(.vertical, 6)
             }
 
             if model.isLoading {
                 Spacer(); ProgressView("Loading timeline…"); Spacer()
             } else {
-                List {
-                    Section {
-                        ForEach(Array(model.selectedClips.enumerated()), id: \.offset) { index, clip in
-                            ClipRow(index: index, clip: clip) {
-                                if let clipID = clip["clip_id"]?.stringValue {
-                                    Task { await model.remove(clipID: clipID) }
-                                }
-                            } audioAction: { muted, volume in
-                                if let clipID = clip["clip_id"]?.stringValue {
-                                    Task { await model.setAudio(clipID: clipID, muted: muted, volume: volume) }
-                                }
-                            }
-                        }
-                        .onMove { source, destination in
-                            var ids = model.selectedClips.compactMap { $0["clip_id"]?.stringValue }
-                            ids.move(fromOffsets: source, toOffset: destination)
-                            Task { await model.reorder(clipIDs: ids) }
-                        }
-                    } header: {
-                        HStack {
-                            Text("Timeline")
-                            Spacer()
-                            Text("\(model.selectedClips.count) clips")
-                        }
-                    }
+                ScrollView {
+                    VStack(spacing: 20) {
+                        VisualTimelineView(model: model)
 
-                    Section("Captions") {
-                        Toggle("Show captions", isOn: Binding(
-                            get: { model.captionsEnabled },
-                            set: { value in Task { await model.setCaptionSettings(enabled: value) } }
-                        ))
-                        Picker("Style", selection: Binding(
-                            get: { model.captionPreset },
-                            set: { value in Task { await model.setCaptionSettings(preset: value) } }
-                        )) {
-                            Text("Classic").tag("classic")
-                            Text("Clean").tag("clean")
-                        }
-                    }
-
-                    Section {
-                        Button {
-                            Task { await model.export() }
-                        } label: {
-                            Label("Export 1080p", systemImage: "square.and.arrow.up")
-                                .frame(maxWidth: .infinity)
-                        }
-                        .disabled(model.exportJob?.state == "rendering")
-
-                        if let export = model.exportJob {
+                        VStack(alignment: .leading, spacing: 10) {
                             HStack {
-                                Text(export.state.replacingOccurrences(of: "_", with: " ").capitalized)
+                                Text("Clip order").font(.headline)
                                 Spacer()
-                                if let progress = export.progress { Text("\(progress)%").monospacedDigit() }
+                                Text("Drag to reorder").font(.caption).foregroundStyle(.secondary)
                             }
-                            if let urlString = export.result?["download_url"]?.stringValue,
-                               let url = URL(string: urlString) {
-                                Link("Open finished video", destination: url)
+                            ReorderList(model: model)
+                        }
+                        .padding(.horizontal)
+
+                        VStack(alignment: .leading, spacing: 12) {
+                            Text("Captions").font(.headline)
+                            Toggle("Show captions", isOn: Binding(
+                                get: { model.captionsEnabled },
+                                set: { value in Task { await model.setCaptionSettings(enabled: value) } }
+                            ))
+                            Picker("Style", selection: Binding(
+                                get: { model.captionPreset },
+                                set: { value in Task { await model.setCaptionSettings(preset: value) } }
+                            )) {
+                                Text("Classic").tag("classic")
+                                Text("Clean").tag("clean")
+                            }
+                            .pickerStyle(.segmented)
+                        }
+                        .padding(.horizontal)
+
+                        VStack(spacing: 10) {
+                            Button {
+                                Task { await model.export() }
+                            } label: {
+                                Label("Export 1080p", systemImage: "square.and.arrow.up")
+                                    .font(.headline)
+                                    .frame(maxWidth: .infinity)
+                                    .padding(.vertical, 8)
+                            }
+                            .buttonStyle(.borderedProminent)
+                            .disabled(model.exportJob?.state == "rendering")
+
+                            if let export = model.exportJob {
+                                HStack {
+                                    Text(export.state.replacingOccurrences(of: "_", with: " ").capitalized)
+                                    Spacer()
+                                    if let progress = export.progress { Text("\(progress)%").monospacedDigit() }
+                                }
+                                .font(.subheadline)
+
+                                if let urlString = export.result?["download_url"]?.stringValue,
+                                   let url = URL(string: urlString) {
+                                    Link(destination: url) {
+                                        Label("Open finished video", systemImage: "play.rectangle.fill")
+                                    }
+                                }
                             }
                         }
+                        .padding()
                     }
+                    .padding(.vertical)
                 }
-                .environment(\.editMode, .constant(.active))
             }
         }
         .toolbar {
@@ -110,41 +116,54 @@ struct DraftEditorView: View {
     }
 }
 
-private struct ClipRow: View {
-    let index: Int
-    let clip: [String: JSONValue]
-    let deleteAction: () -> Void
-    let audioAction: (Bool?, Double?) -> Void
+private struct ReorderList: View {
+    @ObservedObject var model: DraftEditorViewModel
+    @State private var localIDs: [String] = []
 
     var body: some View {
-        HStack(alignment: .top, spacing: 10) {
-            Image(systemName: "line.3.horizontal").foregroundStyle(.secondary)
-            VStack(alignment: .leading, spacing: 4) {
-                Text(clip["caption_text"]?.stringValue ?? clip["text"]?.stringValue ?? "Clip")
-                    .lineLimit(3)
-                HStack(spacing: 8) {
-                    Text("#\(index + 1)")
-                    if let role = clip["semantic_role"]?.stringValue { Text(role.capitalized) }
-                    if let start = clip["start"]?.doubleValue, let end = clip["end"]?.doubleValue {
-                        Text(String(format: "%.1fs", max(0, end - start)))
+        VStack(spacing: 6) {
+            ForEach(Array(localIDs.enumerated()), id: \.element) { index, clipID in
+                let clip = model.selectedClips.first(where: { $0["clip_id"]?.stringValue == clipID })
+                HStack(spacing: 10) {
+                    Image(systemName: "line.3.horizontal")
+                        .foregroundStyle(.secondary)
+                    Text("\(index + 1)")
+                        .font(.caption.monospacedDigit())
+                        .foregroundStyle(.secondary)
+                        .frame(width: 22)
+                    Text(clip?["caption_text"]?.stringValue ?? clip?["text"]?.stringValue ?? "Clip")
+                        .lineLimit(1)
+                    Spacer()
+                    HStack(spacing: 4) {
+                        Button {
+                            move(index, by: -1)
+                        } label: { Image(systemName: "arrow.up") }
+                        .disabled(index == 0)
+                        Button {
+                            move(index, by: 1)
+                        } label: { Image(systemName: "arrow.down") }
+                        .disabled(index == localIDs.count - 1)
                     }
+                    .buttonStyle(.borderless)
                 }
-                .font(.caption)
-                .foregroundStyle(.secondary)
-            }
-            Spacer()
-            Menu {
-                Button("Mute") { audioAction(true, nil) }
-                Button("Unmute") { audioAction(false, nil) }
-                Button("Volume 50%") { audioAction(nil, 0.5) }
-                Button("Volume 100%") { audioAction(nil, 1.0) }
-                Divider()
-                Button("Delete clip", role: .destructive, action: deleteAction)
-            } label: {
-                Image(systemName: "ellipsis.circle")
+                .padding(.horizontal, 10)
+                .padding(.vertical, 9)
+                .background(.secondary.opacity(0.08), in: RoundedRectangle(cornerRadius: 10))
             }
         }
-        .padding(.vertical, 4)
+        .onAppear { sync() }
+        .onChange(of: model.selectedClips.count) { _, _ in sync() }
+    }
+
+    private func sync() {
+        localIDs = model.selectedClips.compactMap { $0["clip_id"]?.stringValue }
+    }
+
+    private func move(_ index: Int, by delta: Int) {
+        let destination = index + delta
+        guard localIDs.indices.contains(index), localIDs.indices.contains(destination) else { return }
+        localIDs.swapAt(index, destination)
+        Task { await model.reorder(clipIDs: localIDs) }
     }
 }
 
