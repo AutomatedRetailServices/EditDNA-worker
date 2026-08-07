@@ -11,6 +11,7 @@ from .providers import NoopSemanticProvider
 from .semantic_openai import OpenAISemanticProvider
 from .serde import request_from_dict, result_to_dict
 from .storage import download_source
+from .visual_openai import OpenAIVisualProvider
 
 
 def run_flow_b_job(payload: dict) -> dict:
@@ -29,6 +30,7 @@ def run_flow_b_job(payload: dict) -> dict:
     config = load_runtime_config()
     asr = FasterWhisperASR(model_name=config.asr_model)
     semantic = OpenAISemanticProvider(model=config.semantic_model) if config.semantic_ready else NoopSemanticProvider()
+    visual = OpenAIVisualProvider(model=config.visual_model) if config.visual_ready else None
 
     try:
         publish("preparing", 1)
@@ -45,6 +47,7 @@ def run_flow_b_job(payload: dict) -> dict:
                 local_paths,
                 asr_provider=asr,
                 semantic_provider=semantic,
+                visual_provider=visual,
                 progress=publish,
             )
             publish("draft_ready", 100)
