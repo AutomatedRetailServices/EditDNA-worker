@@ -5,9 +5,12 @@ from fastapi.testclient import TestClient
 import cutsell_app.main as api
 from cutsell_worker.draft_store import (
     DraftConflictError,
+    DraftHistoryError,
     create_initial_draft,
     get_draft_snapshot,
+    redo_draft_snapshot,
     save_draft_snapshot,
+    undo_draft_snapshot,
 )
 
 
@@ -68,17 +71,23 @@ class FakeRedis:
         return FakePipeline(self)
 
 
-def test_initial_ai_draft_is_create_only_and_does_not_overwrite_existing_draft():
-    client = FakeRedis()
-    first, created = create_initial_draft(
+def _init(client):
+    return create_initial_draft(
         user_id="user-1",
         project_id="project-1",
         draft=_draft("AI first"),
         sources=[{"source_asset_id": "src-1", "uri": "s3://bucket/source.mov"}],
         client=client,
     )
+
+
+def test_initial_ai_draft_is_create_only_and_does_not_overwrite_existing_draft():
+    client = FakeRedis()
+    first, created = _init(client)
     assert created is True
     assert first["revision"] == 1
+    assert first["undo"] == []
+    assert first["redo"] == []
 
     existing, created_again = create_initial_draft(
         user_id="user-1",
@@ -92,15 +101,9 @@ def test_initial_ai_draft_is_create_only_and_does_not_overwrite_existing_draft()
     assert existing["draft"]["selected"][0]["text"] == "AI first"
 
 
-def test_autosave_increments_revision_and_preserves_source_metadata():
+def test_autosave_increments_revision_preserves_sources_and_creates_undo_state():
     client = FakeRedis()
-    create_initial_draft(
-        user_id="user-1",
-        project_id="project-1",
-        draft=_draft("AI first"),
-        sources=[{"source_asset_id": "src-1", "uri": "s3://bucket/source.mov"}],
-        client=client,
-    )
+    _init(client)
     saved = save_draft_snapshot(
         user_id="user-1",
         project_id="project-1",
@@ -111,34 +114,51 @@ def test_autosave_increments_revision_and_preserves_source_metadata():
     assert saved["revision"] == 2
     assert saved["draft"]["selected"][0]["text"] == "human edit"
     assert saved["sources"][0]["source_asset_id"] == "src-1"
-    recovered = get_draft_snapshot(user_id="user-1", project_id="project-1", client=client)
-    assert recovered["revision"] == 2
+    assert saved["undo"][-1]["selected"][0]["text"] == "AI first"
+    assert saved["redo"] == []
+
+
+def test_persistent_undo_redo_sequence_survives_multiple_revisions():
+    client = FakeRedis()
+    _init(client)
+    save_draft_snapshot(user_id="user-1", project_id="project-1", draft=_draft("edit A"), expected_revision=1, client=client)
+    save_draft_snapshot(user_id="user-1", project_id="project-1", draft=_draft("edit B"), expected_revision=2, client=client)
+
+    undo1 = undo_draft_snapshot(user_id="user-1", project_id="project-1", expected_revision=3, client=client)
+    assert undo1["revision"] == 4
+    assert undo1["draft"]["selected"][0]["text"] == "edit A"
+
+    undo2 = undo_draft_snapshot(user_id="user-1", project_id="project-1", expected_revision=4, client=client)
+    assert undo2["revision"] == 5
+    assert undo2["draft"]["selected"][0]["text"] == "AI first"
+
+    redo1 = redo_draft_snapshot(user_id="user-1", project_id="project-1", expected_revision=5, client=client)
+    assert redo1["revision"] == 6
+    assert redo1["draft"]["selected"][0]["text"] == "edit A"
+
+
+def test_new_autosave_after_undo_clears_redo_branch():
+    client = FakeRedis()
+    _init(client)
+    save_draft_snapshot(user_id="user-1", project_id="project-1", draft=_draft("edit A"), expected_revision=1, client=client)
+    save_draft_snapshot(user_id="user-1", project_id="project-1", draft=_draft("edit B"), expected_revision=2, client=client)
+    undo_draft_snapshot(user_id="user-1", project_id="project-1", expected_revision=3, client=client)
+    saved = save_draft_snapshot(user_id="user-1", project_id="project-1", draft=_draft("new branch"), expected_revision=4, client=client)
+    assert saved["redo"] == []
+    try:
+        redo_draft_snapshot(user_id="user-1", project_id="project-1", expected_revision=5, client=client)
+    except DraftHistoryError as exc:
+        assert "nothing to redo" in str(exc)
+    else:
+        raise AssertionError("redo must be cleared after a new autosave")
 
 
 def test_stale_autosave_cannot_overwrite_newer_revision():
     client = FakeRedis()
-    create_initial_draft(
-        user_id="user-1",
-        project_id="project-1",
-        draft=_draft(),
-        sources=[{"source_asset_id": "src-1", "uri": "s3://bucket/source.mov"}],
-        client=client,
-    )
-    save_draft_snapshot(
-        user_id="user-1",
-        project_id="project-1",
-        draft=_draft("newer"),
-        expected_revision=1,
-        client=client,
-    )
+    _init(client)
+    save_draft_snapshot(user_id="user-1", project_id="project-1", draft=_draft("newer"), expected_revision=1, client=client)
     try:
-        save_draft_snapshot(
-            user_id="user-1",
-            project_id="project-1",
-            draft=_draft("stale"),
-            expected_revision=1,
-            client=client,
-        )
+        save_draft_snapshot(user_id="user-1", project_id="project-1", draft=_draft("stale"), expected_revision=1, client=client)
     except DraftConflictError as exc:
         assert "current 2" in str(exc)
     else:
@@ -157,6 +177,8 @@ def test_recovery_api_returns_saved_snapshot(monkeypatch):
             "saved_at": "2026-08-07T00:00:00+00:00",
             "draft": _draft(),
             "sources": [{"source_asset_id": "src-1"}],
+            "undo": [],
+            "redo": [],
         },
     )
     response = TestClient(api.app).get("/v1/projects/project-1/draft?user_id=user-1")
@@ -176,3 +198,13 @@ def test_autosave_api_returns_409_for_stale_revision(monkeypatch):
     })
     assert response.status_code == 409
     assert "current 2" in response.json()["detail"]
+
+
+def test_undo_redo_api_contract(monkeypatch):
+    monkeypatch.setattr(api, "undo_draft_snapshot", lambda **kwargs: {"revision": kwargs["expected_revision"] + 1, "draft": _draft("undo")})
+    monkeypatch.setattr(api, "redo_draft_snapshot", lambda **kwargs: {"revision": kwargs["expected_revision"] + 1, "draft": _draft("redo")})
+    client = TestClient(api.app)
+    undone = client.post("/v1/projects/project-1/draft/undo", json={"user_id": "user-1", "expected_revision": 4})
+    redone = client.post("/v1/projects/project-1/draft/redo", json={"user_id": "user-1", "expected_revision": 5})
+    assert undone.status_code == 200 and undone.json()["revision"] == 5
+    assert redone.status_code == 200 and redone.json()["revision"] == 6
