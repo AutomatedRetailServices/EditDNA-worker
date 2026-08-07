@@ -176,11 +176,36 @@ struct NewCutView: View {
         guard let session = appState.session else { return }
         isSubmitting = true
         progress = 0
+        var transientPreparedFiles: [URL] = []
+        var pendingSaved = resumeProjectID != nil
+
         do {
+            let uploadVideos: [LocalVideo]
+            if resumeProjectID != nil {
+                uploadVideos = selected
+                statusText = "Resuming upload…"
+            } else {
+                var preparedVideos: [LocalVideo] = []
+                for (index, video) in selected.enumerated() {
+                    statusText = "Preparing \(index + 1) of \(selected.count)…"
+                    let prepared = try await VideoPreparation.shared.prepare(
+                        fileURL: video.url,
+                        contentType: video.contentType
+                    )
+                    if prepared.wasTranscoded { transientPreparedFiles.append(prepared.url) }
+                    preparedVideos.append(LocalVideo(
+                        url: prepared.url,
+                        name: video.name,
+                        duration: video.duration,
+                        contentType: prepared.contentType
+                    ))
+                }
+                uploadVideos = preparedVideos
+            }
+
             let projectID: String
             if let resumeProjectID {
                 projectID = resumeProjectID
-                statusText = "Resuming upload…"
             } else {
                 statusText = "Creating project…"
                 let project = try await appState.createProject(
@@ -192,7 +217,7 @@ struct NewCutView: View {
                     title: project.title,
                     mode: mode.rawValue,
                     audioOverlap: audioOverlap,
-                    videos: selected.map {
+                    videos: uploadVideos.map {
                         PendingCutVideo(
                             filePath: $0.url.path,
                             name: $0.name,
@@ -203,19 +228,21 @@ struct NewCutView: View {
                     createdAt: Date()
                 )
                 await PendingCutStore.shared.save(pending)
+                pendingSaved = true
+                transientPreparedFiles.removeAll()
             }
 
             var sources: [SourceInput] = []
-            for (index, video) in selected.enumerated() {
-                statusText = "Uploading \(index + 1) of \(selected.count)…"
-                let base = Double(index) / Double(selected.count)
+            for (index, video) in uploadVideos.enumerated() {
+                statusText = "Uploading \(index + 1) of \(uploadVideos.count)…"
+                let base = Double(index) / Double(uploadVideos.count)
                 let result = try await MultipartUploadManager.shared.upload(
                     fileURL: video.url,
                     projectID: projectID,
                     session: session,
                     contentType: video.contentType
                 ) { partProgress in
-                    Task { @MainActor in progress = base + partProgress / Double(selected.count) }
+                    Task { @MainActor in progress = base + partProgress / Double(uploadVideos.count) }
                 }
                 sources.append(SourceInput(
                     originalName: video.url.lastPathComponent,
@@ -249,6 +276,9 @@ struct NewCutView: View {
             try await appState.refreshProjects()
             dismiss()
         } catch {
+            if !pendingSaved {
+                for url in transientPreparedFiles { try? FileManager.default.removeItem(at: url) }
+            }
             errorMessage = error.localizedDescription
             isSubmitting = false
         }
