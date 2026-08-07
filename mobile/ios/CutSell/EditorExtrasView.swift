@@ -63,13 +63,14 @@ struct EditorExtrasView: View {
             pickerItem = nil
         }
         do {
-            guard let data = try await item.loadTransferable(type: Data.self) else { return }
-            let type = item.supportedContentTypes.first ?? .data
-            let ext = type.preferredFilenameExtension ?? (type.conforms(to: .image) ? "jpg" : "mov")
-            let url = FileManager.default.temporaryDirectory
-                .appendingPathComponent("cutsell-overlay-\(UUID().uuidString).\(ext)")
-            try data.write(to: url, options: .atomic)
-            await model.addMediaOverlay(fileURL: url)
+            let isVideo = item.supportedContentTypes.contains(where: { $0.conforms(to: .movie) })
+            if isVideo {
+                guard let imported = try await item.loadTransferable(type: ImportedVideoFile.self) else { return }
+                await model.addMediaOverlay(fileURL: imported.url)
+            } else {
+                guard let imported = try await item.loadTransferable(type: ImportedImageFile.self) else { return }
+                await model.addMediaOverlay(fileURL: imported.url)
+            }
         } catch {
             model.errorMessage = error.localizedDescription
         }
