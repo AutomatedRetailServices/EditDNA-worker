@@ -20,6 +20,7 @@ class RuntimeConfig:
     runpod_template_id: str | None
     asr_model: str
     semantic_model: str
+    visual_model: str
     take_judge_model: str
 
     @property
@@ -32,6 +33,10 @@ class RuntimeConfig:
 
     @property
     def semantic_ready(self) -> bool:
+        return self.openai_api_key_present
+
+    @property
+    def visual_ready(self) -> bool:
         return self.openai_api_key_present
 
 
@@ -47,6 +52,7 @@ def load_runtime_config(env: dict[str, str] | None = None) -> RuntimeConfig:
         runpod_api_key_present=bool(values.get("RUNPOD_API_KEY")),
         runpod_template_id=values.get("RUNPOD_TEMPLATE_ID"),
         asr_model=values.get("CUTSELL_ASR_MODEL", "medium"),
-        semantic_model=values.get("CUTSELL_SEMANTIC_MODEL", "gpt-4o-mini"),
-        take_judge_model=values.get("CUTSELL_TAKE_JUDGE_MODEL", "gpt-4o-mini"),
+        semantic_model=values.get("CUTSELL_SEMANTIC_MODEL", "gpt-5.4-nano"),
+        visual_model=values.get("CUTSELL_VISUAL_MODEL", "gpt-5.4-nano"),
+        take_judge_model=values.get("CUTSELL_TAKE_JUDGE_MODEL", "gpt-5.4-mini"),
     )
