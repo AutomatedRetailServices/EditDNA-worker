@@ -1,10 +1,11 @@
 name: CutSell Real Video Smoke
 
 on:
-  pull_request:
-    branches: [main]
+  workflow_dispatch:
+  push:
+    branches:
+      - cutsell/mobile-v1-asap-scope
     paths:
-      - ".github/workflows/cutsell-real-video-smoke.yml"
       - ".cutsell/real-video-smoke-trigger.txt"
 
 permissions:
@@ -17,9 +18,9 @@ jobs:
     env:
       RUNPOD_API_KEY: ${{ secrets.RUNPOD_API_KEY }}
       CUTSELL_ASR_MODEL: tiny
-      CUTSELL_SEMANTIC_MODEL: gpt-5.4-nano
-      CUTSELL_VISUAL_MODEL: gpt-5.4-nano
-      CUTSELL_TAKE_JUDGE_MODEL: gpt-5.4-mini
+      CUTSELL_SEMANTIC_MODEL: gpt-4o-mini
+      CUTSELL_VISUAL_MODEL: gpt-4o-mini
+      CUTSELL_TAKE_JUDGE_MODEL: gpt-4o-mini
       CUTSELL_VALIDATION_PREFIX: Editdna bloopers videos/
     steps:
       - uses: actions/checkout@v4
@@ -73,7 +74,6 @@ jobs:
           if not items:
               raise SystemExit('no eligible real videos found')
           chosen = min(items, key=lambda item: item['size'])
-          # Keep the first CPU smoke bounded. A larger sample belongs on GPU.
           if chosen['size'] > 350 * 1024 * 1024:
               raise SystemExit('smallest eligible validation video exceeds 350MB smoke limit')
           print('CUTSELL_SMOKE_KEY=' + chosen['key'])
@@ -88,6 +88,22 @@ jobs:
             --key "$CUTSELL_SMOKE_KEY" \
             --report cutsell-validation-report.json \
             --preview cutsell-validation-preview.mp4
+
+      - name: Validate intelligence providers were active
+        shell: bash
+        run: |
+          python - <<'PY'
+          import json
+          report = json.load(open('cutsell-validation-report.json', encoding='utf-8'))
+          statuses = report['stage_status']
+          failures = []
+          for stage in ('semantic', 'visual'):
+              value = statuses.get(stage, {})
+              if not isinstance(value, dict) or value.get('status') != 'complete':
+                  failures.append(stage)
+          if failures:
+              raise SystemExit('provider_validation_failed:' + ','.join(failures))
+          PY
 
       - name: Print sanitized result summary
         if: always()
