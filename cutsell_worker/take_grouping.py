@@ -28,7 +28,10 @@ def retry_similarity(left: str, right: str) -> float:
         return 1.0
     tokens_a = a.split()
     tokens_b = b.split()
-    if min(len(tokens_a), len(tokens_b)) < 3:
+    # Short phrases are too semantically dense for fuzzy grouping: changing one
+    # token can change the creator's meaning or CTA. Require exact equality for
+    # three-word-or-shorter attempts; fuzzy grouping starts at four words.
+    if min(len(tokens_a), len(tokens_b)) <= 3:
         return 0.0
     set_a, set_b = set(tokens_a), set(tokens_b)
     containment = len(set_a & set_b) / max(1, min(len(set_a), len(set_b)))
