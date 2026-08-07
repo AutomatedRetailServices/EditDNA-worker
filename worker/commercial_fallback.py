@@ -242,7 +242,7 @@ def _has_benefit_evidence(n: NormalizedText) -> bool:
 
 
 def _has_feature_evidence(n: NormalizedText) -> bool:
-    return has_product_enumeration_evidence(n.original) or any(
+    return has_product_enumeration_evidence(n.raw) or any(
         starts_phrase(n, p) for p in (
             "it has", "this has", "it comes with", "this comes with", "made with",
             "it includes", "this includes", "it contains", "this contains",
