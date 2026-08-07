@@ -11,6 +11,7 @@ from .providers import NoopSemanticProvider
 from .semantic_openai import OpenAISemanticProvider
 from .serde import request_from_dict, result_to_dict
 from .storage import download_source
+from .take_judge_openai import OpenAITakeJudgeProvider
 from .visual_openai import OpenAIVisualProvider
 
 
@@ -31,6 +32,7 @@ def run_flow_b_job(payload: dict) -> dict:
     asr = FasterWhisperASR(model_name=config.asr_model)
     semantic = OpenAISemanticProvider(model=config.semantic_model) if config.semantic_ready else NoopSemanticProvider()
     visual = OpenAIVisualProvider(model=config.visual_model) if config.visual_ready else None
+    take_judge = OpenAITakeJudgeProvider(model=config.take_judge_model) if config.semantic_ready else None
 
     try:
         publish("preparing", 1)
@@ -48,6 +50,7 @@ def run_flow_b_job(payload: dict) -> dict:
                 asr_provider=asr,
                 semantic_provider=semantic,
                 visual_provider=visual,
+                take_judge_provider=take_judge,
                 progress=publish,
             )
             publish("draft_ready", 100)
