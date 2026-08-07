@@ -8,6 +8,7 @@ from __future__ import annotations
 import json
 import os
 from pathlib import Path, PurePosixPath
+import subprocess
 import tempfile
 import time
 from typing import Any
@@ -27,6 +28,7 @@ from .visual_openai import OpenAIVisualProvider
 
 VIDEO_EXTENSIONS = {".mp4", ".mov", ".m4v", ".webm"}
 DEFAULT_VALIDATION_PREFIX = "Editdna bloopers videos/"
+MAX_VALIDATION_WINDOW_SEC = 180.0
 
 
 def _safe_prefix(prefix: str) -> str:
@@ -64,7 +66,6 @@ def list_validation_videos(*, prefix: str | None = None, limit: int = 20, s3=Non
         if not _is_real_video_key(key):
             continue
         size = int(item.get("Size") or 0)
-        # Ignore tiny placeholders even when their extension looks legitimate.
         if size <= 64 * 1024:
             continue
         videos.append({"key": key, "size": size})
@@ -73,16 +74,47 @@ def list_validation_videos(*, prefix: str | None = None, limit: int = 20, s3=Non
     return tuple(videos)
 
 
+def _extract_validation_window(
+    source_path: str,
+    destination: str,
+    *,
+    start_sec: float,
+    end_sec: float,
+    runner=subprocess.run,
+) -> str:
+    start = float(start_sec)
+    end = float(end_sec)
+    if start < 0 or end <= start:
+        raise ValueError("validation window must have 0 <= start < end")
+    duration = end - start
+    if duration > MAX_VALIDATION_WINDOW_SEC:
+        raise ValueError("validation window exceeds bounded duration")
+    command = [
+        "ffmpeg", "-hide_banner", "-loglevel", "error", "-y",
+        "-ss", f"{start:.3f}", "-i", source_path,
+        "-t", f"{duration:.3f}",
+        "-map", "0:v:0", "-map", "0:a?",
+        "-c:v", "libx264", "-preset", "ultrafast", "-crf", "18",
+        "-c:a", "aac", "-movflags", "+faststart", destination,
+    ]
+    runner(command, capture_output=True, check=True)
+    return destination
+
+
 def run_single_validation(
     key: str,
     *,
     project_id: str = "cutsell-validation",
     language_hint: str | None = None,
     preview_output: str | None = None,
+    source_start_sec: float | None = None,
+    source_end_sec: float | None = None,
 ) -> dict[str, Any]:
-    """Run one S3 video through the same clean brain used by production."""
+    """Run one S3 video (or a bounded real window) through the production clean brain."""
     if not _is_real_video_key(key):
         raise ValueError("unsupported validation video")
+    if (source_start_sec is None) != (source_end_sec is None):
+        raise ValueError("validation window requires both start and end")
     config = load_runtime_config()
     if not config.s3_bucket:
         raise RuntimeError("S3_BUCKET is required")
@@ -112,7 +144,18 @@ def run_single_validation(
     with tempfile.TemporaryDirectory(prefix="cutsell-validation-") as directory:
         destination = str(Path(directory) / source.original_name)
         local = download_source(source.uri, destination)
-        local_paths = {source_id: local}
+        active_local = local
+        window = None
+        if source_start_sec is not None and source_end_sec is not None:
+            clipped = str(Path(directory) / "validation-window.mp4")
+            active_local = _extract_validation_window(
+                local,
+                clipped,
+                start_sec=source_start_sec,
+                end_sec=source_end_sec,
+            )
+            window = {"start_sec": float(source_start_sec), "end_sec": float(source_end_sec)}
+        local_paths = {source_id: active_local}
         result = process_local_sources(
             request,
             local_paths,
@@ -129,6 +172,7 @@ def run_single_validation(
         "schema_version": result.schema_version,
         "project_id": result.project_id,
         "source_key": key,
+        "source_window": window,
         "elapsed_sec": elapsed,
         "preview_path": preview_path,
         "models": {
@@ -141,6 +185,7 @@ def run_single_validation(
         "selected_count": len(result.draft.selected),
         "alternate_count": len(result.draft.alternates),
         "discarded_count": len(result.draft.discarded),
+        "diagnostics": result.draft.diagnostics,
         "selected": [
             {
                 "clip_id": clip.clip_id,
@@ -153,11 +198,11 @@ def run_single_validation(
             for clip in result.draft.selected
         ],
         "alternates": [
-            {"clip_id": clip.clip_id, "text": clip.text, "take_group_id": clip.take_group_id}
+            {"clip_id": clip.clip_id, "start": clip.start, "end": clip.end, "text": clip.text, "take_group_id": clip.take_group_id}
             for clip in result.draft.alternates
         ],
         "discarded": [
-            {"clip_id": clip.clip_id, "text": clip.text}
+            {"clip_id": clip.clip_id, "start": clip.start, "end": clip.end, "text": clip.text}
             for clip in result.draft.discarded
         ],
         "stage_status": result.stage_status,
