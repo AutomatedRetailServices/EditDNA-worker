@@ -38,9 +38,28 @@ def _fetch_job(job_id: str, connection):
         raise KeyError(job_id) from None
 
 
-def fetch_job_snapshot(job_id: str, *, queue=None) -> JobSnapshot:
+def _job_payload(job) -> dict:
+    args = tuple(getattr(job, "args", ()) or ())
+    if len(args) == 1 and isinstance(args[0], dict):
+        return dict(args[0])
+    # Batch wrapper args are not user payload dicts; ownership is enforced by the
+    # batch store/routes rather than this generic job API.
+    return {}
+
+
+def _assert_job_owner(job, user_id: str | None) -> None:
+    if user_id is None:
+        return
+    payload = _job_payload(job)
+    owner = str(payload.get("user_id") or "")
+    if not owner or owner != str(user_id):
+        raise PermissionError("job does not belong to this user")
+
+
+def fetch_job_snapshot(job_id: str, *, user_id: str | None = None, queue=None) -> JobSnapshot:
     target = queue or get_queue()
     job = _fetch_job(job_id, target.connection)
+    _assert_job_owner(job, user_id)
     status = str(job.get_status(refresh=True))
     meta = dict(getattr(job, "meta", {}) or {})
     progress = meta.get("progress_percent")
@@ -61,9 +80,10 @@ def fetch_job_snapshot(job_id: str, *, queue=None) -> JobSnapshot:
     )
 
 
-def cancel_job(job_id: str, *, queue=None) -> JobSnapshot:
+def cancel_job(job_id: str, *, user_id: str | None = None, queue=None) -> JobSnapshot:
     target = queue or get_queue()
     job = _fetch_job(job_id, target.connection)
+    _assert_job_owner(job, user_id)
     status = str(job.get_status(refresh=True))
     if status == "finished":
         return JobSnapshot(str(job.id), "finished", result=job.result)
@@ -77,15 +97,13 @@ def retry_job(job_id: str, *, user_id: str, queue=None):
     """Create a fresh job from a failed/canceled CutSell job without mutating the original."""
     target = queue or get_queue()
     job = _fetch_job(job_id, target.connection)
+    _assert_job_owner(job, user_id)
     status = str(job.get_status(refresh=True))
     if status not in {"failed", "stopped", "canceled"}:
         raise ValueError("only failed or canceled jobs can be retried")
-    args = tuple(getattr(job, "args", ()) or ())
-    if len(args) != 1 or not isinstance(args[0], dict):
+    payload = _job_payload(job)
+    if not payload:
         raise ValueError("job payload is unavailable for safe retry")
-    payload = dict(args[0])
-    if str(payload.get("user_id") or "") != str(user_id):
-        raise PermissionError("job does not belong to this user")
     func_name = str(getattr(job, "func_name", "") or "")
     if func_name == "cutsell_worker.worker_job.run_flow_b_job":
         return enqueue_flow_b(payload, queue=target)
