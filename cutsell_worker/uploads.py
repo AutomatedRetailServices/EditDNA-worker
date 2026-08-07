@@ -55,6 +55,36 @@ def scoped_upload_prefix(*, user_id: str, project_id: str) -> str:
     return f"{upload_prefix()}{_scope_hash(user_id)}/{_scope_hash(project_id)}/"
 
 
+def prepare_upload_target(
+    *,
+    project_id: str,
+    user_id: str,
+    original_name: str,
+    content_type: str | None,
+    size_bytes: int,
+) -> dict:
+    """Validate mobile upload metadata and allocate one scoped S3 object key."""
+    if not 1 <= int(size_bytes) <= MAX_UPLOAD_BYTES:
+        raise ValueError("upload size is outside allowed range")
+    safe_name = _safe_name(original_name)
+    detected = mimetypes.guess_type(safe_name)[0]
+    resolved_type = (content_type or detected or "application/octet-stream").lower()
+    if resolved_type not in ALLOWED_CONTENT_TYPES:
+        raise ValueError("unsupported video content type")
+    config = load_runtime_config()
+    if not config.s3_bucket:
+        raise RuntimeError("S3_BUCKET is required")
+    key = f"{scoped_upload_prefix(user_id=user_id, project_id=project_id)}{uuid4().hex}-{safe_name}"
+    return {
+        "bucket": config.s3_bucket,
+        "region": config.aws_region or "us-east-1",
+        "object_key": key,
+        "source_uri": f"s3://{config.s3_bucket}/{key}",
+        "content_type": resolved_type,
+        "size_bytes": int(size_bytes),
+    }
+
+
 def create_presigned_upload(
     *,
     project_id: str,
@@ -65,30 +95,25 @@ def create_presigned_upload(
     expires_in: int = 900,
     client=None,
 ) -> dict:
-    if not 1 <= int(size_bytes) <= MAX_UPLOAD_BYTES:
-        raise ValueError("upload size is outside allowed range")
     if not 60 <= int(expires_in) <= 3600:
         raise ValueError("upload expiry must be between 60 and 3600 seconds")
-    safe_name = _safe_name(original_name)
-    detected = mimetypes.guess_type(safe_name)[0]
-    resolved_type = (content_type or detected or "application/octet-stream").lower()
-    if resolved_type not in ALLOWED_CONTENT_TYPES:
-        raise ValueError("unsupported video content type")
-
-    config = load_runtime_config()
-    if not config.s3_bucket:
-        raise RuntimeError("S3_BUCKET is required")
-    key = f"{scoped_upload_prefix(user_id=user_id, project_id=project_id)}{uuid4().hex}-{safe_name}"
+    target = prepare_upload_target(
+        project_id=project_id,
+        user_id=user_id,
+        original_name=original_name,
+        content_type=content_type,
+        size_bytes=size_bytes,
+    )
     if client is None:
         import boto3
-        client = boto3.client("s3", region_name=config.aws_region or "us-east-1")
+        client = boto3.client("s3", region_name=target["region"])
     post = client.generate_presigned_post(
-        Bucket=config.s3_bucket,
-        Key=key,
-        Fields={"Content-Type": resolved_type},
+        Bucket=target["bucket"],
+        Key=target["object_key"],
+        Fields={"Content-Type": target["content_type"]},
         Conditions=[
-            {"Content-Type": resolved_type},
-            ["content-length-range", 1, int(size_bytes)],
+            {"Content-Type": target["content_type"]},
+            ["content-length-range", 1, target["size_bytes"]],
         ],
         ExpiresIn=int(expires_in),
     )
@@ -96,10 +121,10 @@ def create_presigned_upload(
         "method": "POST",
         "upload_url": post["url"],
         "fields": post.get("fields", {}),
-        "source_uri": f"s3://{config.s3_bucket}/{key}",
-        "object_key": key,
-        "content_type": resolved_type,
-        "max_bytes": int(size_bytes),
+        "source_uri": target["source_uri"],
+        "object_key": target["object_key"],
+        "content_type": target["content_type"],
+        "max_bytes": target["size_bytes"],
         "expires_in": int(expires_in),
     }
 
