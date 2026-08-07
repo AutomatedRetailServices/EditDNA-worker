@@ -5,42 +5,63 @@ struct ProjectsView: View {
     @EnvironmentObject private var notificationCenter: NotificationCenterModel
     @State private var showingNewCut = false
     @State private var showingNotifications = false
+    @State private var pendingCuts: [PendingCutRecord] = []
+    @State private var resumeCut: PendingCutRecord?
     @State private var errorMessage: String?
 
     var body: some View {
         NavigationStack {
-            Group {
-                if appState.projects.isEmpty {
-                    ContentUnavailableView(
-                        "No cuts yet",
-                        systemImage: "scissors",
-                        description: Text("Upload raw product footage and CutSell will build your first draft.")
-                    )
-                } else {
-                    List(appState.projects) { project in
-                        NavigationLink(value: project) {
-                            VStack(alignment: .leading, spacing: 5) {
-                                Text(project.title).font(.headline)
-                                HStack {
-                                    Text(project.state.replacingOccurrences(of: "_", with: " ").capitalized)
-                                    if let count = project.sourceCount { Text("• \(count) clip\(count == 1 ? "" : "s")") }
+            List {
+                if !pendingCuts.isEmpty {
+                    Section("Uploads to resume") {
+                        ForEach(pendingCuts) { pending in
+                            Button {
+                                resumeCut = pending
+                            } label: {
+                                HStack(spacing: 12) {
+                                    Image(systemName: "arrow.clockwise.icloud")
+                                        .foregroundStyle(.orange)
+                                    VStack(alignment: .leading, spacing: 4) {
+                                        Text(pending.title.isEmpty ? "Interrupted Cut" : pending.title)
+                                            .foregroundStyle(.primary)
+                                        Text("\(pending.videos.count) clip\(pending.videos.count == 1 ? "" : "s") • Resume upload")
+                                            .font(.caption)
+                                            .foregroundStyle(.secondary)
+                                    }
+                                    Spacer()
+                                    Image(systemName: "chevron.right").font(.caption).foregroundStyle(.tertiary)
                                 }
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
                             }
-                            .padding(.vertical, 4)
                         }
                     }
-                    .refreshable {
-                        do {
-                            try await appState.refreshProjects()
-                            if let session = appState.session {
-                                await notificationCenter.refresh(session: session, surfaceLocalAlerts: false)
+                }
+
+                Section(pendingCuts.isEmpty ? "Projects" : "Your projects") {
+                    if appState.projects.isEmpty {
+                        ContentUnavailableView(
+                            "No cuts yet",
+                            systemImage: "scissors",
+                            description: Text("Upload raw product footage and CutSell will build your first draft.")
+                        )
+                    } else {
+                        ForEach(appState.projects) { project in
+                            NavigationLink(value: project) {
+                                VStack(alignment: .leading, spacing: 5) {
+                                    Text(project.title).font(.headline)
+                                    HStack {
+                                        Text(project.state.replacingOccurrences(of: "_", with: " ").capitalized)
+                                        if let count = project.sourceCount { Text("• \(count) clip\(count == 1 ? "" : "s")") }
+                                    }
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                                }
+                                .padding(.vertical, 4)
                             }
-                        } catch { errorMessage = error.localizedDescription }
+                        }
                     }
                 }
             }
+            .refreshable { await refreshAll() }
             .navigationTitle("CutSell")
             .toolbar {
                 ToolbarItemGroup(placement: .topBarTrailing) {
@@ -67,15 +88,36 @@ struct ProjectsView: View {
                 NewCutView()
                     .environmentObject(appState)
             }
+            .sheet(item: $resumeCut) { pending in
+                NewCutView(pending: pending)
+                    .environmentObject(appState)
+            }
             .sheet(isPresented: $showingNotifications) {
                 NotificationInboxView()
                     .environmentObject(notificationCenter)
             }
+            .task { await refreshPendingCuts() }
             .alert("CutSell", isPresented: Binding(
                 get: { errorMessage != nil },
                 set: { if !$0 { errorMessage = nil } }
             )) { Button("OK", role: .cancel) {} } message: { Text(errorMessage ?? "") }
         }
+    }
+
+    @MainActor
+    private func refreshAll() async {
+        do {
+            try await appState.refreshProjects()
+            if let session = appState.session {
+                await notificationCenter.refresh(session: session, surfaceLocalAlerts: false)
+            }
+            await refreshPendingCuts()
+        } catch { errorMessage = error.localizedDescription }
+    }
+
+    @MainActor
+    private func refreshPendingCuts() async {
+        pendingCuts = await PendingCutStore.shared.list()
     }
 }
 
