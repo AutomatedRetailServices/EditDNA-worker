@@ -9,6 +9,7 @@ from .config import load_runtime_config
 from .draft_store import create_initial_draft
 from .flow_b import process_local_sources
 from .media_probe import probe_media
+from .project_tracking import safe_update_project
 from .providers import NoopSemanticProvider
 from .semantic_openai import OpenAISemanticProvider
 from .serde import request_from_dict, result_to_dict
@@ -67,6 +68,25 @@ def run_flow_b_job(payload: dict) -> dict:
         job.save_meta()
 
     request = request_from_dict(payload)
+    job_id = str(getattr(job, "id", "") or "") or None
+    basic_sources = [
+        {
+            "source_asset_id": source.source_asset_id,
+            "original_name": source.original_name,
+            "source_order": source.source_order,
+            "duration_sec": source.duration_sec,
+            "uri": source.uri,
+        }
+        for source in request.sources
+    ]
+    tracking_start = safe_update_project(
+        user_id=request.user_id,
+        project_id=request.project_id,
+        state="processing",
+        sources=basic_sources,
+        latest_job_id=job_id,
+    )
+
     config = load_runtime_config()
     asr = FasterWhisperASR(model_name=config.asr_model)
     semantic = OpenAISemanticProvider(model=config.semantic_model) if config.semantic_ready else NoopSemanticProvider()
@@ -78,8 +98,6 @@ def run_flow_b_job(payload: dict) -> dict:
         with tempfile.TemporaryDirectory(prefix="cutsell-flow-b-") as directory:
             local_paths = {}
             for index, source in enumerate(request.sources):
-                # Defense in depth: queue callers cannot make the worker use its AWS
-                # credentials to read arbitrary buckets, users or projects.
                 validate_product_source_uri(
                     source.uri,
                     project_id=request.project_id,
@@ -101,8 +119,6 @@ def run_flow_b_job(payload: dict) -> dict:
             )
             serialized = result_to_dict(result)
 
-            # Timeline presentation assets are generated after the edit brain has
-            # completed so they can never influence content selection/deletion.
             publish("draft_ready", 94)
             timeline_assets = _build_timeline_assets(request, local_paths, directory)
             source_records = [
@@ -123,9 +139,23 @@ def run_flow_b_job(payload: dict) -> dict:
                 sources=source_records,
             )
             serialized["timeline_assets"] = timeline_assets
+            serialized["project_tracking_start"] = tracking_start
+            serialized["project_tracking"] = safe_update_project(
+                user_id=request.user_id,
+                project_id=request.project_id,
+                state="draft_ready",
+                sources=source_records,
+                latest_job_id=job_id,
+            )
             publish("draft_ready", 100)
             return serialized
     except Exception as exc:
+        safe_update_project(
+            user_id=request.user_id,
+            project_id=request.project_id,
+            state="failed",
+            latest_job_id=job_id,
+        )
         if job is not None:
             job.meta["stage"] = "failed"
             job.meta["error_code"] = exc.__class__.__name__
