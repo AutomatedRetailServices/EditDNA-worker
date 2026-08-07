@@ -18,7 +18,14 @@ from cutsell_worker.draft_edits import (
     swap_take,
     trim_clip,
 )
-from cutsell_worker.draft_store import DraftConflictError, get_draft_snapshot, save_draft_snapshot
+from cutsell_worker.draft_store import (
+    DraftConflictError,
+    DraftHistoryError,
+    get_draft_snapshot,
+    redo_draft_snapshot,
+    save_draft_snapshot,
+    undo_draft_snapshot,
+)
 from cutsell_worker.jobs import cancel_job, fetch_job_snapshot
 from cutsell_worker.queueing import enqueue_export, enqueue_flow_b
 from cutsell_worker.serde import draft_from_dict
@@ -94,6 +101,11 @@ class DraftAutosaveRequest(BaseModel):
     draft: dict[str, Any]
 
 
+class DraftHistoryRequest(BaseModel):
+    user_id: str
+    expected_revision: int = Field(ge=1)
+
+
 class JobStatusResponse(BaseModel):
     job_id: str
     state: str
@@ -142,6 +154,10 @@ class DraftCaptionRequest(BaseModel):
 
 
 def _draft_edit_error(exc: DraftEditError):
+    raise HTTPException(status_code=409, detail=str(exc)) from None
+
+
+def _draft_history_error(exc: Exception):
     raise HTTPException(status_code=409, detail=str(exc)) from None
 
 
@@ -229,11 +245,43 @@ def autosave_draft(project_id: str, payload: DraftAutosaveRequest):
             expected_revision=payload.expected_revision,
         )
     except DraftConflictError as exc:
-        raise HTTPException(status_code=409, detail=str(exc)) from None
+        _draft_history_error(exc)
     except KeyError:
         raise HTTPException(status_code=404, detail="draft not found") from None
     except (TypeError, ValueError) as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from None
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from None
+
+
+@app.post("/v1/projects/{project_id}/draft/undo")
+def undo_draft(project_id: str, payload: DraftHistoryRequest):
+    try:
+        return undo_draft_snapshot(
+            user_id=payload.user_id,
+            project_id=project_id,
+            expected_revision=payload.expected_revision,
+        )
+    except (DraftConflictError, DraftHistoryError) as exc:
+        _draft_history_error(exc)
+    except KeyError:
+        raise HTTPException(status_code=404, detail="draft not found") from None
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from None
+
+
+@app.post("/v1/projects/{project_id}/draft/redo")
+def redo_draft(project_id: str, payload: DraftHistoryRequest):
+    try:
+        return redo_draft_snapshot(
+            user_id=payload.user_id,
+            project_id=project_id,
+            expected_revision=payload.expected_revision,
+        )
+    except (DraftConflictError, DraftHistoryError) as exc:
+        _draft_history_error(exc)
+    except KeyError:
+        raise HTTPException(status_code=404, detail="draft not found") from None
     except RuntimeError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from None
 
