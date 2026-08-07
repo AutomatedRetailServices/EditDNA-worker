@@ -6,6 +6,7 @@ import hashlib
 from typing import Dict, Iterable, Mapping
 
 from .clean_cut import apply_clean_cut
+from .clean_cut_provider import CleanCutProvider, apply_provider_judgements, safe_clean_cut_judge
 from .composer import compose_selected
 from .contracts import (
     CandidateTake,
@@ -49,12 +50,22 @@ def build_flow_b_draft(
     takes: Iterable[CandidateTake],
     semantic_labels: Iterable[SemanticLabel] = (),
     take_judge_provider: TakeJudgeProvider | None = None,
+    clean_cut_provider: CleanCutProvider | None = None,
 ) -> ProcessingResult:
     """Build an editable draft from already-transcribed/segmented takes."""
     take_tuple = tuple(takes)
     label_map: Mapping[str, SemanticLabel] = {label.clip_id: label for label in semantic_labels}
 
-    kept, discarded, decisions = apply_clean_cut(take_tuple)
+    # Tier 1 is deterministic and only removes very high-certainty recording errors.
+    kept, deterministic_discarded, decisions = apply_clean_cut(take_tuple)
+
+    # Tier 2 is optional and remains entirely separate from semantic/commercial labels.
+    # It may only delete a whole candidate at high confidence. MIXED and uncertainty
+    # always fail open to KEEP so valid speech cannot be lost.
+    clean_judged = safe_clean_cut_judge(clean_cut_provider, kept)
+    kept, provider_discarded, clean_judge_diagnostics = apply_provider_judgements(kept, clean_judged)
+    discarded = tuple(deterministic_discarded) + tuple(provider_discarded)
+
     grouped = group_takes(kept)
     groups = []
     clip_to_group: Dict[str, str] = {}
@@ -139,6 +150,10 @@ def build_flow_b_draft(
         discarded=discarded_clips,
         diagnostics={
             "clean_cut_decisions": [decision.__dict__ for decision in decisions],
+            "clean_cut_judge_status": clean_judged.status.__dict__,
+            "clean_cut_judge": list(clean_judge_diagnostics)[:100],
+            "clean_cut_judge_deleted_count": len(provider_discarded),
+            "clean_cut_judge_mixed_count": sum(1 for item in clean_judge_diagnostics if item["action"] == "mixed"),
             "take_group_count": len(groups),
             "alternate_group_count": alternate_group_count,
             "source_count": len(request.sources),
@@ -155,13 +170,23 @@ def build_flow_b_draft(
         judge_stage = "degraded_fallback"
     else:
         judge_stage = "baseline_complete"
+
+    if clean_cut_provider is None:
+        clean_cut_stage = "deterministic_complete"
+    elif clean_judged.status.status == "applied":
+        clean_cut_stage = "provider_complete"
+    elif clean_judged.status.status == "provider_error":
+        clean_cut_stage = "degraded_fail_open"
+    else:
+        clean_cut_stage = clean_judged.status.status
+
     return ProcessingResult(
         schema_version=SCHEMA_VERSION,
         project_id=request.project_id,
         state=JobState.DRAFT_READY,
         draft=draft,
         stage_status={
-            "clean_cut": "complete",
+            "clean_cut": clean_cut_stage,
             "take_grouping": "complete",
             "take_judge": judge_stage,
             "semantic": "provided" if label_map else "not_provided",
