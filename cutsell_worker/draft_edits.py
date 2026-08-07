@@ -67,8 +67,6 @@ def _text_from_words(words: Sequence[Mapping[str, Any]]) -> str:
     tokens = [str(word.get("text") or "") for word in words]
     if not tokens:
         return ""
-    # faster-whisper normally keeps leading spaces on word tokens. Preserve them
-    # when present; otherwise join tokens with spaces rather than concatenating words.
     if any(token[:1].isspace() for token in tokens[1:]):
         return "".join(tokens).strip()
     return " ".join(token.strip() for token in tokens if token.strip()).strip()
@@ -161,7 +159,6 @@ def trim_clip(
     end: float,
     min_duration_sec: float = MIN_TRIM_DURATION_SEC,
 ) -> dict[str, Any]:
-    """Trim one selected clip inward without changing source identity or transcript."""
     out = _copy_draft(draft)
     selected = list(out["selected"])
     position = next((i for i, item in enumerate(selected) if _clip_id(item) == clip_id), None)
@@ -197,7 +194,6 @@ def split_clip(
     split_time: float,
     min_duration_sec: float = MIN_SPLIT_DURATION_SEC,
 ) -> dict[str, Any]:
-    """Split a selected clip at a source timestamp using real word timings only."""
     out = _copy_draft(draft)
     selected = list(out["selected"])
     position = next((i for i, item in enumerate(selected) if _clip_id(item) == clip_id), None)
@@ -261,6 +257,37 @@ def split_clip(
         "selected": True,
     })
     selected[position:position + 1] = [left, right]
+    out["selected"] = selected
+    return out
+
+
+def patch_audio(
+    draft: Mapping[str, Any],
+    clip_id: str,
+    *,
+    muted: bool | None = None,
+    volume: float | None = None,
+) -> dict[str, Any]:
+    """Update one selected clip's playback/export audio without changing source media."""
+    if muted is None and volume is None:
+        raise DraftEditError("audio edit requires muted and/or volume")
+    out = _copy_draft(draft)
+    selected = list(out["selected"])
+    position = next((i for i, item in enumerate(selected) if _clip_id(item) == clip_id), None)
+    if position is None:
+        raise DraftEditError("selected clip not found")
+    item = deepcopy(selected[position])
+    if muted is not None:
+        item["audio_muted"] = bool(muted)
+    if volume is not None:
+        try:
+            resolved = float(volume)
+        except (TypeError, ValueError):
+            raise DraftEditError("audio volume must be numeric") from None
+        if resolved < 0.0 or resolved > 2.0:
+            raise DraftEditError("audio volume must be between 0.0 and 2.0")
+        item["audio_volume"] = round(resolved, 3)
+    selected[position] = item
     out["selected"] = selected
     return out
 
