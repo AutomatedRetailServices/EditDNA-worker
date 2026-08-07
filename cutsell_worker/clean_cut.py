@@ -35,7 +35,10 @@ _SHORT_RESTART_MARKERS = {
     "de nuevo",
 }
 
-_ONE_MORE_RE = re.compile(r"\bone more\b(?:\s+(?:because|cuz|cause|since|you|we|i))?", re.IGNORECASE)
+_ONE_MORE_RE = re.compile(
+    r"\bone more\b\s+(?:time|take|because|cuz|cause|since|you|we|i)\b",
+    re.IGNORECASE,
+)
 
 
 def _normalized(text: str) -> str:
