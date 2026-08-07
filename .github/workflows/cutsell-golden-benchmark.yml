@@ -89,6 +89,7 @@ jobs:
           WINDOW_SEC: ${{ github.event.inputs.window_sec || '60' }}
         run: |
           set -euo pipefail
+          mkdir -p cutsell-golden-previews
           python - <<'PY'
           import json, os
           from cutsell_worker.golden_benchmark import run_golden_benchmark
@@ -96,6 +97,7 @@ jobs:
           report = run_golden_benchmark(
               video_limit=int(os.environ.get('VIDEO_LIMIT', '8')),
               window_sec=float(os.environ.get('WINDOW_SEC', '60')),
+              preview_dir='cutsell-golden-previews',
           )
           with open('cutsell-golden-benchmark.json', 'w', encoding='utf-8') as handle:
               json.dump(report, handle, ensure_ascii=False, indent=2, sort_keys=True)
@@ -113,11 +115,13 @@ jobs:
               raise SystemExit('Golden benchmark found hard structural draft failures')
           PY
 
-      - name: Upload benchmark report
+      - name: Upload benchmark report and previews
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: cutsell-golden-benchmark-${{ github.sha }}
-          path: cutsell-golden-benchmark.json
+          path: |
+            cutsell-golden-benchmark.json
+            cutsell-golden-previews/*.mp4
           if-no-files-found: warn
           retention-days: 14
