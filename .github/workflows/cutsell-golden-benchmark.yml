@@ -19,6 +19,10 @@ on:
         description: "Optional comma-separated exact S3 keys"
         required: false
         default: ""
+      clean_cut_judge:
+        description: "Enable experimental Clean Cut Judge (0 or 1)"
+        required: false
+        default: "0"
   push:
     branches:
       - cutsell/mobile-v1-asap-scope
@@ -93,6 +97,7 @@ jobs:
           INPUT_WINDOW_SEC: ${{ github.event.inputs.window_sec || '' }}
           INPUT_ASR_MODEL: ${{ github.event.inputs.asr_model || '' }}
           INPUT_SOURCE_KEYS: ${{ github.event.inputs.source_keys || '' }}
+          INPUT_CLEAN_CUT_JUDGE: ${{ github.event.inputs.clean_cut_judge || '' }}
         run: |
           set -euo pipefail
           value_from_trigger() {
@@ -105,12 +110,15 @@ jobs:
           WINDOW_SEC="${INPUT_WINDOW_SEC:-$(value_from_trigger window_sec)}"
           ASR_MODEL="${INPUT_ASR_MODEL:-$(value_from_trigger asr_model)}"
           SOURCE_KEYS="${INPUT_SOURCE_KEYS:-$(value_from_trigger source_keys)}"
+          CLEAN_CUT_JUDGE="${INPUT_CLEAN_CUT_JUDGE:-$(value_from_trigger clean_cut_judge)}"
           VIDEO_LIMIT="${VIDEO_LIMIT:-8}"
           WINDOW_SEC="${WINDOW_SEC:-60}"
           ASR_MODEL="${ASR_MODEL:-tiny}"
-          printf 'VIDEO_LIMIT=%s\nWINDOW_SEC=%s\nCUTSELL_ASR_MODEL=%s\nSOURCE_KEYS=%s\n' \
-            "$VIDEO_LIMIT" "$WINDOW_SEC" "$ASR_MODEL" "$SOURCE_KEYS" >> "$GITHUB_ENV"
-          echo "Benchmark parameters: video_limit=$VIDEO_LIMIT window_sec=$WINDOW_SEC asr=$ASR_MODEL targeted=$([ -n "$SOURCE_KEYS" ] && echo yes || echo no)"
+          CLEAN_CUT_JUDGE="${CLEAN_CUT_JUDGE:-0}"
+          case "$CLEAN_CUT_JUDGE" in 0|1) ;; *) echo 'clean_cut_judge must be 0 or 1'; exit 2 ;; esac
+          printf 'VIDEO_LIMIT=%s\nWINDOW_SEC=%s\nCUTSELL_ASR_MODEL=%s\nSOURCE_KEYS=%s\nCUTSELL_CLEAN_CUT_JUDGE=%s\n' \
+            "$VIDEO_LIMIT" "$WINDOW_SEC" "$ASR_MODEL" "$SOURCE_KEYS" "$CLEAN_CUT_JUDGE" >> "$GITHUB_ENV"
+          echo "Benchmark parameters: video_limit=$VIDEO_LIMIT window_sec=$WINDOW_SEC asr=$ASR_MODEL targeted=$([ -n "$SOURCE_KEYS" ] && echo yes || echo no) clean_cut_judge=$CLEAN_CUT_JUDGE"
 
       - name: Install benchmark runtime
         run: pip install faster-whisper boto3 openai requests
@@ -141,7 +149,14 @@ jobs:
               'total_discarded', 'total_retry_groups', 'total_tiny_fragments',
               'total_adjacent_duplicates', 'provider_status_counts'
           ]}
+          summary['clean_cut_judge_enabled'] = os.environ.get('CUTSELL_CLEAN_CUT_JUDGE') == '1'
           print(json.dumps(summary, ensure_ascii=False, indent=2))
+          if source_keys:
+              for item in report.get('results') or []:
+                  validation = item.get('validation') or {}
+                  print(f"SELECTED {validation.get('source_key')}")
+                  for clip in validation.get('selected') or []:
+                      print(f"  {float(clip.get('start') or 0):.3f}-{float(clip.get('end') or 0):.3f} | {str(clip.get('text') or '')[:240]}")
           if report['execution_failure_count']:
               print('::warning::One or more real videos could not complete the benchmark.')
           if report['structural_failure_count']:
