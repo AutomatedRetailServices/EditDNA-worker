@@ -49,7 +49,13 @@ def _is_real_video_key(key: str) -> bool:
 
 
 def list_validation_videos(*, prefix: str | None = None, limit: int = 20, s3=None) -> tuple[dict[str, Any], ...]:
-    """List a bounded set of real videos from the dedicated validation prefix."""
+    """List a bounded set of real videos from the dedicated validation prefix.
+
+    S3 listings are paginated because folders copied from macOS can contain many
+    metadata objects before the first actual MP4. Discovery remains bounded: at
+    most 20 S3 pages are scanned and results stop as soon as ``limit`` videos are
+    found.
+    """
     if not 1 <= limit <= 100:
         raise ValueError("limit must be between 1 and 100")
     config = load_runtime_config()
@@ -59,17 +65,32 @@ def list_validation_videos(*, prefix: str | None = None, limit: int = 20, s3=Non
     if s3 is None:
         import boto3
         s3 = boto3.client("s3", region_name=config.aws_region or "us-east-1")
-    response = s3.list_objects_v2(Bucket=config.s3_bucket, Prefix=prefix, MaxKeys=min(1000, limit * 5))
+
     videos = []
-    for item in response.get("Contents", []):
-        key = str(item.get("Key") or "")
-        if not _is_real_video_key(key):
-            continue
-        size = int(item.get("Size") or 0)
-        if size <= 64 * 1024:
-            continue
-        videos.append({"key": key, "size": size})
-        if len(videos) >= limit:
+    continuation = None
+    for _page in range(20):
+        request = {
+            "Bucket": config.s3_bucket,
+            "Prefix": prefix,
+            "MaxKeys": 1000,
+        }
+        if continuation:
+            request["ContinuationToken"] = continuation
+        response = s3.list_objects_v2(**request)
+        for item in response.get("Contents", []):
+            key = str(item.get("Key") or "")
+            if not _is_real_video_key(key):
+                continue
+            size = int(item.get("Size") or 0)
+            if size <= 64 * 1024:
+                continue
+            videos.append({"key": key, "size": size})
+            if len(videos) >= limit:
+                return tuple(videos)
+        if not response.get("IsTruncated"):
+            break
+        continuation = str(response.get("NextContinuationToken") or "")
+        if not continuation:
             break
     return tuple(videos)
 
