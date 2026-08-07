@@ -20,6 +20,7 @@ struct NewCutView: View {
     @State private var progress = 0.0
     @State private var statusText = ""
     @State private var errorMessage: String?
+    @State private var showCamera = false
 
     var body: some View {
         NavigationStack {
@@ -33,18 +34,30 @@ struct NewCutView: View {
                 }
 
                 Section("Footage") {
+                    Button {
+                        showCamera = true
+                    } label: {
+                        Label("Record in CutSell", systemImage: "camera.fill")
+                    }
+
                     PhotosPicker(
                         selection: $pickerItems,
                         maxSelectionCount: mode == .single ? 1 : 20,
                         matching: .videos
                     ) {
-                        Label(selected.isEmpty ? "Choose video" : "Add videos", systemImage: "photo.on.rectangle")
+                        Label(selected.isEmpty ? "Choose from Photos" : "Add from Photos", systemImage: "photo.on.rectangle")
                     }
                     .onChange(of: pickerItems) { _, items in Task { await load(items) } }
 
+                    if selected.isEmpty {
+                        Text("Record here or choose existing footage. Both use the same CutSell AI edit pipeline.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+
                     ForEach(Array(selected.enumerated()), id: \.element.id) { index, item in
                         HStack {
-                            Image(systemName: "line.3.horizontal")
+                            Image(systemName: mode == .multiple ? "line.3.horizontal" : "video.fill")
                                 .foregroundStyle(.secondary)
                             VStack(alignment: .leading) {
                                 Text(item.name).lineLimit(1)
@@ -84,10 +97,34 @@ struct NewCutView: View {
                         .disabled(selected.isEmpty || isSubmitting)
                 }
             }
+            .fullScreenCover(isPresented: $showCamera) {
+                CameraCaptureView { url in
+                    Task { await addRecording(url) }
+                }
+            }
             .alert("Couldn’t create cut", isPresented: Binding(
                 get: { errorMessage != nil },
                 set: { if !$0 { errorMessage = nil } }
             )) { Button("OK", role: .cancel) {} } message: { Text(errorMessage ?? "") }
+        }
+    }
+
+    private func addRecording(_ url: URL) async {
+        do {
+            let asset = AVURLAsset(url: url)
+            let seconds = try await asset.load(.duration).seconds
+            let clip = LocalVideo(
+                url: url,
+                name: mode == .single ? "Recorded clip" : "Take \(selected.count + 1)",
+                duration: max(0, seconds)
+            )
+            if mode == .single {
+                selected = [clip]
+            } else {
+                selected.append(clip)
+            }
+        } catch {
+            errorMessage = error.localizedDescription
         }
     }
 
@@ -103,8 +140,11 @@ struct NewCutView: View {
                 let duration = try await asset.load(.duration).seconds
                 output.append(LocalVideo(url: url, name: "Video \(index + 1)", duration: max(0, duration)))
             }
-            if mode == .single { selected = Array(output.prefix(1)) }
-            else { selected = output }
+            if mode == .single {
+                selected = Array(output.prefix(1))
+            } else {
+                selected.append(contentsOf: output)
+            }
         } catch {
             errorMessage = error.localizedDescription
         }
