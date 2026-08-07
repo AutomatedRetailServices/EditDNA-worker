@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from typing import Iterable, Mapping, Tuple
 
-from .contracts import CandidateTake, MediaSignals, SourceAsset, TranscriptSegment
+from .contracts import CandidateTake, MediaSignals, SourceAsset, TranscriptSegment, Word
 from .silence_analysis import SilenceGap, silence_ratio
 from .source_identity import stable_clip_id
 
@@ -13,7 +13,6 @@ def _audio_quality(segment: TranscriptSegment, silence: float) -> float:
     speech_confidence = sum(confidences) / len(confidences) if confidences else 0.5
     duration = max(0.001, segment.end - segment.start)
     words_per_second = len(segment.words) / duration if segment.words else 0.0
-    # Broad creator-friendly pace band: do not punish expressive/fast TikTok delivery heavily.
     if 1.4 <= words_per_second <= 4.2:
         pace_quality = 1.0
     elif words_per_second > 0:
@@ -24,6 +23,40 @@ def _audio_quality(segment: TranscriptSegment, silence: float) -> float:
     return round(max(0.0, min(1.0, score)), 4)
 
 
+def _speech_units(segment: TranscriptSegment, *, split_gap_sec: float = 0.75) -> Tuple[TranscriptSegment, ...]:
+    """Split one ASR segment only at strong word-timestamp gaps.
+
+    This creates candidate take boundaries without inventing words or crossing a
+    source. Smaller natural pauses remain inside the same spoken idea.
+    """
+    words = tuple(sorted(segment.words, key=lambda word: (word.start, word.end)))
+    if len(words) < 2:
+        return (segment,)
+
+    chunks: list[list[Word]] = [[]]
+    for index, word in enumerate(words):
+        if index:
+            previous = words[index - 1]
+            if word.start - previous.end >= split_gap_sec:
+                chunks.append([])
+        chunks[-1].append(word)
+    if len(chunks) == 1:
+        return (segment,)
+
+    output = []
+    for chunk in chunks:
+        if not chunk:
+            continue
+        output.append(TranscriptSegment(
+            source_asset_id=segment.source_asset_id,
+            start=chunk[0].start,
+            end=chunk[-1].end,
+            text=" ".join(word.text.strip() for word in chunk if word.text.strip()),
+            words=tuple(chunk),
+        ))
+    return tuple(output) or (segment,)
+
+
 def segment_takes(
     segments: Iterable[TranscriptSegment],
     sources: Iterable[SourceAsset],
@@ -32,32 +65,33 @@ def segment_takes(
     source_map: Mapping[str, SourceAsset] = {source.source_asset_id: source for source in sources}
     gap_tuple = tuple(gaps)
     output = []
-    for segment in segments:
-        source = source_map.get(segment.source_asset_id)
-        if source is None:
+    for original_segment in segments:
+        if original_segment.source_asset_id not in source_map:
             raise ValueError("transcript source is not registered in processing request")
-        start = max(0.0, float(segment.start))
-        end = min(float(source.duration_sec), max(start, float(segment.end))) if source.duration_sec > 0 else max(start, float(segment.end))
-        text = segment.text.strip()
-        if not text or end <= start:
-            continue
-        ratio = silence_ratio(start, end, gap_tuple, source.source_asset_id)
-        signals = MediaSignals(
-            source_asset_id=source.source_asset_id,
-            start=start,
-            end=end,
-            silence_ratio=ratio,
-            audio_quality=_audio_quality(segment, ratio),
-        )
-        output.append(CandidateTake(
-            clip_id=stable_clip_id(source.source_asset_id, start, end, text),
-            source_asset_id=source.source_asset_id,
-            source_order=source.source_order,
-            start=start,
-            end=end,
-            text=text,
-            words=segment.words,
-            signals=signals,
-            complete_idea=True,
-        ))
+        for segment in _speech_units(original_segment):
+            source = source_map[segment.source_asset_id]
+            start = max(0.0, float(segment.start))
+            end = min(float(source.duration_sec), max(start, float(segment.end))) if source.duration_sec > 0 else max(start, float(segment.end))
+            text = segment.text.strip()
+            if not text or end <= start:
+                continue
+            ratio = silence_ratio(start, end, gap_tuple, source.source_asset_id)
+            signals = MediaSignals(
+                source_asset_id=source.source_asset_id,
+                start=start,
+                end=end,
+                silence_ratio=ratio,
+                audio_quality=_audio_quality(segment, ratio),
+            )
+            output.append(CandidateTake(
+                clip_id=stable_clip_id(source.source_asset_id, start, end, text),
+                source_asset_id=source.source_asset_id,
+                source_order=source.source_order,
+                start=start,
+                end=end,
+                text=text,
+                words=segment.words,
+                signals=signals,
+                complete_idea=True,
+            ))
     return tuple(sorted(output, key=lambda take: (take.source_order, take.start, take.end, take.clip_id)))
