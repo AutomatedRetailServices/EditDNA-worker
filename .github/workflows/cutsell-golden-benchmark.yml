@@ -11,6 +11,14 @@ on:
         description: "Bounded seconds from each video (10-180)"
         required: false
         default: "60"
+      asr_model:
+        description: "Whisper model for this benchmark"
+        required: false
+        default: "tiny"
+      source_keys:
+        description: "Optional comma-separated exact S3 keys"
+        required: false
+        default: ""
   push:
     branches:
       - cutsell/mobile-v1-asap-scope
@@ -31,7 +39,6 @@ jobs:
       AWS_REGION: ${{ secrets.AWS_REGION }}
       S3_BUCKET: ${{ secrets.S3_BUCKET }}
       OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-      CUTSELL_ASR_MODEL: tiny
       CUTSELL_VALIDATION_PREFIX: Editdna bloopers videos/
       CUTSELL_SEMANTIC_MODEL: gpt-4o-mini
       CUTSELL_VISUAL_MODEL: gpt-4o-mini
@@ -79,14 +86,37 @@ jobs:
           export_secret_if_missing S3_BUCKET
           export_secret_if_missing OPENAI_API_KEY
 
+      - name: Resolve benchmark parameters
+        shell: bash
+        env:
+          INPUT_VIDEO_LIMIT: ${{ github.event.inputs.video_limit || '' }}
+          INPUT_WINDOW_SEC: ${{ github.event.inputs.window_sec || '' }}
+          INPUT_ASR_MODEL: ${{ github.event.inputs.asr_model || '' }}
+          INPUT_SOURCE_KEYS: ${{ github.event.inputs.source_keys || '' }}
+        run: |
+          set -euo pipefail
+          value_from_trigger() {
+            key="$1"
+            if [ -f .cutsell/golden-benchmark-trigger.txt ]; then
+              grep -m1 "^${key}=" .cutsell/golden-benchmark-trigger.txt | cut -d= -f2- || true
+            fi
+          }
+          VIDEO_LIMIT="${INPUT_VIDEO_LIMIT:-$(value_from_trigger video_limit)}"
+          WINDOW_SEC="${INPUT_WINDOW_SEC:-$(value_from_trigger window_sec)}"
+          ASR_MODEL="${INPUT_ASR_MODEL:-$(value_from_trigger asr_model)}"
+          SOURCE_KEYS="${INPUT_SOURCE_KEYS:-$(value_from_trigger source_keys)}"
+          VIDEO_LIMIT="${VIDEO_LIMIT:-8}"
+          WINDOW_SEC="${WINDOW_SEC:-60}"
+          ASR_MODEL="${ASR_MODEL:-tiny}"
+          printf 'VIDEO_LIMIT=%s\nWINDOW_SEC=%s\nCUTSELL_ASR_MODEL=%s\nSOURCE_KEYS=%s\n' \
+            "$VIDEO_LIMIT" "$WINDOW_SEC" "$ASR_MODEL" "$SOURCE_KEYS" >> "$GITHUB_ENV"
+          echo "Benchmark parameters: video_limit=$VIDEO_LIMIT window_sec=$WINDOW_SEC asr=$ASR_MODEL targeted=$([ -n "$SOURCE_KEYS" ] && echo yes || echo no)"
+
       - name: Install benchmark runtime
         run: pip install faster-whisper boto3 openai requests
 
       - name: Run bounded golden benchmark
         shell: bash
-        env:
-          VIDEO_LIMIT: ${{ github.event.inputs.video_limit || '8' }}
-          WINDOW_SEC: ${{ github.event.inputs.window_sec || '60' }}
         run: |
           set -euo pipefail
           mkdir -p cutsell-golden-previews
@@ -94,10 +124,13 @@ jobs:
           import json, os
           from cutsell_worker.golden_benchmark import run_golden_benchmark
 
+          raw_keys = os.environ.get('SOURCE_KEYS', '').strip()
+          source_keys = [value.strip() for value in raw_keys.split(',') if value.strip()] or None
           report = run_golden_benchmark(
               video_limit=int(os.environ.get('VIDEO_LIMIT', '8')),
               window_sec=float(os.environ.get('WINDOW_SEC', '60')),
               preview_dir='cutsell-golden-previews',
+              source_keys=source_keys,
           )
           with open('cutsell-golden-benchmark.json', 'w', encoding='utf-8') as handle:
               json.dump(report, handle, ensure_ascii=False, indent=2, sort_keys=True)
