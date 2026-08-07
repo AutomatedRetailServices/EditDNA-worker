@@ -1,0 +1,2 @@
+scan=2026-08-07T10:51Z
+reason=find a real retry-rich blooper for honest Take Judge validation
