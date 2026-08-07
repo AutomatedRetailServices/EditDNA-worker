@@ -14,6 +14,7 @@ import time
 from typing import Any
 
 from .asr import FasterWhisperASR
+from .clean_cut_openai import OpenAICleanCutProvider
 from .config import load_runtime_config
 from .contracts import ProcessingRequest, SourceAsset
 from .flow_b import process_local_sources
@@ -159,6 +160,11 @@ def run_single_validation(
     semantic = OpenAISemanticProvider(model=config.semantic_model) if config.semantic_ready else NoopSemanticProvider()
     visual = OpenAIVisualProvider(model=config.visual_model) if config.visual_ready else None
     take_judge = OpenAITakeJudgeProvider(model=config.take_judge_model) if config.semantic_ready else None
+    clean_cut_judge = (
+        OpenAICleanCutProvider(model=config.clean_cut_judge_model)
+        if config.clean_cut_judge_ready
+        else None
+    )
 
     started = time.monotonic()
     preview_path = None
@@ -184,6 +190,7 @@ def run_single_validation(
             semantic_provider=semantic,
             visual_provider=visual,
             take_judge_provider=take_judge,
+            clean_cut_provider=clean_cut_judge,
         )
         if preview_output:
             plan = build_render_plan(result.draft, local_paths)
@@ -201,6 +208,7 @@ def run_single_validation(
             "semantic": config.semantic_model if config.semantic_ready else None,
             "visual": config.visual_model if config.visual_ready else None,
             "take_judge": config.take_judge_model if config.semantic_ready else None,
+            "clean_cut_judge": config.clean_cut_judge_model if config.clean_cut_judge_ready else None,
         },
         "strategy": result.draft.strategy.value,
         "selected_count": len(result.draft.selected),
