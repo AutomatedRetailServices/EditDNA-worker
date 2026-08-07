@@ -102,6 +102,38 @@ def _source_status(
     }
 
 
+def _propagate_to_editable_draft(result: Dict[str, Any], clips: Iterable[Dict[str, Any]]) -> None:
+    draft = result.get("editable_draft")
+    if not isinstance(draft, dict):
+        return
+
+    by_id = {}
+    for clip in clips:
+        clip_id = str(clip.get("id") or "")
+        meta = clip.get("meta") if isinstance(clip.get("meta"), dict) else {}
+        if clip_id:
+            by_id[clip_id] = {
+                "status": meta.get("semantic_v2_execution_status"),
+                "fallback_reason": meta.get("semantic_v2_fallback_reason"),
+            }
+
+    for group_name in ("selected", "alternates", "discarded"):
+        items = draft.get(group_name)
+        if not isinstance(items, list):
+            continue
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            execution = by_id.get(str(item.get("clip_id") or ""))
+            if not execution:
+                continue
+            item["semantic_v2_execution_status"] = execution["status"]
+            if execution["fallback_reason"] is None:
+                item.pop("semantic_v2_fallback_reason", None)
+            else:
+                item["semantic_v2_fallback_reason"] = execution["fallback_reason"]
+
+
 def attach_semantic_execution(
     result: Dict[str, Any],
     *,
@@ -132,6 +164,7 @@ def attach_semantic_execution(
         clip_status_counts.update(source["clip_status_counts"])
         fallback_reasons.update(source["fallback_reasons"])
 
+    _propagate_to_editable_draft(result, clips)
     result["semantic_execution"] = {
         "requested": bool(requested),
         "provider_available": available,
