@@ -36,6 +36,9 @@ jobs:
       MARKER_KEY: cutsell/smokes/runpod/${{ github.run_id }}.json
       PREVIEW_KEY: cutsell/smokes/runpod/${{ github.run_id }}-preview.mp4
     steps:
+      - name: Checkout approved trigger
+        uses: actions/checkout@v4
+
       - name: Require explicit paid-compute approval
         shell: bash
         env:
