@@ -164,6 +164,8 @@ class DraftTimeline:
     alternates: Tuple[DraftClip, ...]
     discarded: Tuple[DraftClip, ...]
     diagnostics: Dict[str, object] = field(default_factory=dict)
+    captions_enabled: bool = True
+    caption_preset: str = "classic"
 
 
 @dataclass(frozen=True)
