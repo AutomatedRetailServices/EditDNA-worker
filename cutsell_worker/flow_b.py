@@ -14,6 +14,7 @@ from .observability import ExecutionTrace
 from .pipeline import build_flow_b_draft
 from .providers import NoopSemanticProvider, SemanticProvider, safe_semantic_classify
 from .silence_analysis import word_silence_gaps
+from .take_judge_provider import TakeJudgeProvider
 from .take_segmentation import segment_takes
 from .visual_analysis import (
     VisualProvider,
@@ -31,14 +32,10 @@ def process_local_sources(
     asr_provider: ASRProvider,
     semantic_provider: SemanticProvider | None = None,
     visual_provider: VisualProvider | None = None,
+    take_judge_provider: TakeJudgeProvider | None = None,
     progress: ProgressCallback | None = None,
 ) -> ProcessingResult:
-    """Process registered sources all the way from local media to editable draft.
-
-    ``local_paths`` is keyed by source_asset_id. Download/upload concerns remain
-    outside this function so the engine stays deterministic and testable.
-    Progress percentages represent completed real pipeline stages rather than a timer.
-    """
+    """Process registered sources all the way from local media to editable draft."""
     notify = progress or (lambda _stage, _percent: None)
     trace = ExecutionTrace()
     hydrated_sources = []
@@ -51,32 +48,24 @@ def process_local_sources(
             raise ValueError(f"missing local path for source {source.source_asset_id}")
         if not Path(path).exists():
             raise FileNotFoundError(path)
-
         probe = probe_media(path)
-        hydrated = replace(
+        hydrated_sources.append(replace(
             source,
             duration_sec=probe.duration_sec,
             has_audio=probe.has_audio,
-            metadata={
-                **source.metadata,
-                "width": probe.width,
-                "height": probe.height,
-                "fps": probe.fps,
-            },
-        )
-        hydrated_sources.append(hydrated)
+            metadata={**source.metadata, "width": probe.width, "height": probe.height, "fps": probe.fps},
+        ))
     trace.complete("media_probe", source_count=len(hydrated_sources))
     notify("transcribing", 12)
 
     source_by_id = {source.source_asset_id: source for source in hydrated_sources}
     for source in sorted(hydrated_sources, key=lambda item: item.source_order):
-        if not source.has_audio:
-            continue
-        transcripts.extend(asr_provider.transcribe(
-            local_paths[source.source_asset_id],
-            source_asset_id=source.source_asset_id,
-            language_hint=request.language_hint,
-        ))
+        if source.has_audio:
+            transcripts.extend(asr_provider.transcribe(
+                local_paths[source.source_asset_id],
+                source_asset_id=source.source_asset_id,
+                language_hint=request.language_hint,
+            ))
     trace.complete("asr", segment_count=len(transcripts))
     notify("analyzing", 40)
 
@@ -101,12 +90,8 @@ def process_local_sources(
             trace.degraded("visual", reason=visual.status.reason or visual.status.status)
         else:
             takes = apply_visual_observations(takes, visual.observations)
-            trace.complete(
-                "visual",
-                status=visual.status.status,
-                observation_count=len(visual.observations),
-                frame_count=len(samples),
-            )
+            trace.complete("visual", status=visual.status.status,
+                           observation_count=len(visual.observations), frame_count=len(samples))
     else:
         trace.complete("visual", status="not_requested", observation_count=0, frame_count=0)
     notify("analyzing", 72)
@@ -119,12 +104,11 @@ def process_local_sources(
     notify("composing", 84)
 
     hydrated_request = replace(request, sources=tuple(hydrated_sources))
-    result = build_flow_b_draft(hydrated_request, takes, semantic.labels)
-    notify("draft_ready", 100)
-    return replace(
-        result,
-        stage_status={
-            **result.stage_status,
-            **trace.as_dict(),
-        },
+    result = build_flow_b_draft(
+        hydrated_request,
+        takes,
+        semantic.labels,
+        take_judge_provider=take_judge_provider,
     )
+    notify("draft_ready", 100)
+    return replace(result, stage_status={**result.stage_status, **trace.as_dict()})
