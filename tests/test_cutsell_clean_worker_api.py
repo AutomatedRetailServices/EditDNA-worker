@@ -99,6 +99,85 @@ def test_flow_b_submit_rejects_source_outside_product_upload_scope(monkeypatch):
     assert "outside allowed CutSell upload scope" in response.json()["detail"]
 
 
+def _export_draft(project_id="project-1", source_asset_id="src-1"):
+    return {
+        "schema_version": "cutsell.v1",
+        "project_id": project_id,
+        "strategy": "mixed",
+        "selected": [{
+            "clip_id": "clip-1",
+            "source_asset_id": source_asset_id,
+            "source_order": 0,
+            "start": 1.0,
+            "end": 2.5,
+            "text": "hello",
+            "caption_text": "hello",
+            "semantic_role": "OTHER",
+            "take_group_id": "tg-1",
+            "selected": True,
+        }],
+        "alternates": [],
+        "discarded": [],
+        "diagnostics": {},
+    }
+
+
+def test_export_submit_validates_sources_and_enqueues_edited_draft(monkeypatch):
+    captured = {}
+    monkeypatch.setattr(api, "validate_product_source_uri", lambda uri, **kwargs: ("bucket", uri))
+    def fake_enqueue(payload):
+        captured.update(payload)
+        return SimpleNamespace(job_id="export-1", queue_name="cutsell")
+    monkeypatch.setattr(api, "enqueue_export", fake_enqueue)
+
+    response = TestClient(api.app).post("/v1/exports/jobs", json={
+        "project_id": "project-1",
+        "user_id": "user-1",
+        "draft": _export_draft(),
+        "sources": [{
+            "source_asset_id": "src-1",
+            "original_name": "one.mov",
+            "uri": "s3://bucket/cutsell/uploads/u/p/one.mov",
+        }],
+    })
+    assert response.status_code == 202
+    assert response.json() == {"job_id": "export-1", "queue": "cutsell", "state": "rendering"}
+    assert captured["draft"]["selected"][0]["clip_id"] == "clip-1"
+    assert captured["sources"][0]["source_asset_id"] == "src-1"
+
+
+def test_export_submit_rejects_draft_from_another_project(monkeypatch):
+    monkeypatch.setattr(api, "validate_product_source_uri", lambda uri, **kwargs: ("bucket", uri))
+    response = TestClient(api.app).post("/v1/exports/jobs", json={
+        "project_id": "project-1",
+        "user_id": "user-1",
+        "draft": _export_draft(project_id="project-2"),
+        "sources": [{
+            "source_asset_id": "src-1",
+            "original_name": "one.mov",
+            "uri": "s3://bucket/cutsell/uploads/u/p/one.mov",
+        }],
+    })
+    assert response.status_code == 409
+    assert "draft project" in response.json()["detail"]
+
+
+def test_export_submit_rejects_missing_selected_source_asset(monkeypatch):
+    monkeypatch.setattr(api, "validate_product_source_uri", lambda uri, **kwargs: ("bucket", uri))
+    response = TestClient(api.app).post("/v1/exports/jobs", json={
+        "project_id": "project-1",
+        "user_id": "user-1",
+        "draft": _export_draft(source_asset_id="src-needed"),
+        "sources": [{
+            "source_asset_id": "src-other",
+            "original_name": "one.mov",
+            "uri": "s3://bucket/cutsell/uploads/u/p/one.mov",
+        }],
+    })
+    assert response.status_code == 422
+    assert "missing selected source assets" in response.json()["detail"]
+
+
 def test_get_job_returns_progress_without_exposing_internal_tracebacks(monkeypatch):
     monkeypatch.setattr(
         api,
