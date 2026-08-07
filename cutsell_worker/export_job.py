@@ -6,6 +6,8 @@ import tempfile
 
 from .draft_edits import DraftEditError
 from .exports import store_export
+from .media_overlay_render import LocalMediaOverlay
+from .overlay_uploads import validate_overlay_uri
 from .render import render_preview
 from .render_plan import build_render_plan
 from .serde import draft_from_dict
@@ -48,17 +50,36 @@ def run_export_job(payload: dict) -> dict:
             suffix = Path(str(item.get("original_name") or "source.mp4")).suffix or ".mp4"
             destination = str(Path(directory) / f"source-{index:03d}-{source_id}{suffix}")
             local_paths[source_id] = download_source(uri, destination)
-            publish("rendering", min(30, 5 + int((index + 1) * 25 / len(sources))))
+            publish("rendering", min(25, 5 + int((index + 1) * 20 / len(sources))))
 
         required_ids = {clip.source_asset_id for clip in draft.selected}
         missing = required_ids - set(local_paths)
         if missing:
             raise ValueError("export is missing selected source assets")
 
+        local_overlays = []
+        overlay_count = max(1, len(draft.media_overlays))
+        for index, overlay in enumerate(draft.media_overlays):
+            _bucket, _key, actual_kind = validate_overlay_uri(
+                overlay.uri, user_id=user_id, project_id=project_id
+            )
+            if actual_kind != overlay.kind:
+                raise ValueError("media overlay kind does not match its S3 object")
+            suffix = Path(overlay.uri).suffix or (".jpg" if overlay.kind == "photo" else ".mp4")
+            destination = str(Path(directory) / f"overlay-{index:03d}{suffix}")
+            download_source(overlay.uri, destination)
+            local_overlays.append(LocalMediaOverlay(overlay=overlay, path=destination))
+            publish("rendering", min(32, 26 + int((index + 1) * 6 / overlay_count)))
+
         plan = build_render_plan(draft, local_paths)
         output = str(Path(directory) / "cutsell-export.mp4")
         publish("rendering", 35)
-        render_preview(plan, output, text_overlays=draft.text_overlays)
+        render_preview(
+            plan,
+            output,
+            text_overlays=draft.text_overlays,
+            media_overlays=tuple(local_overlays),
+        )
         publish("rendering", 85)
         stored = store_export(output, project_id=project_id, user_id=user_id)
         publish("finished", 100)
@@ -67,5 +88,6 @@ def run_export_job(payload: dict) -> dict:
             "state": "finished",
             "selected_count": len(draft.selected),
             "text_overlay_count": len(draft.text_overlays),
+            "media_overlay_count": len(draft.media_overlays),
             **stored,
         }
