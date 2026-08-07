@@ -1,0 +1,82 @@
+name: CutSell Retry-Rich Scan
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - cutsell/mobile-v1-asap-scope
+    paths:
+      - ".cutsell/retry-scan-trigger.txt"
+
+permissions:
+  contents: read
+
+jobs:
+  scan-real-bloopers:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      RUNPOD_API_KEY: ${{ secrets.RUNPOD_API_KEY }}
+      CUTSELL_ASR_MODEL: tiny
+      CUTSELL_VALIDATION_PREFIX: Editdna bloopers videos/
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install FFmpeg
+        run: sudo apt-get update && sudo apt-get install -y ffmpeg jq
+
+      - name: Load masked AWS/S3 credentials from RunPod template vault
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail --silent --show-error \
+            --url "https://rest.runpod.io/v1/templates" \
+            --header "Authorization: Bearer $RUNPOD_API_KEY" \
+            --output templates.json
+          TEMPLATE=$(jq -c '[.[] | select(.name == "EditDNA-Worker-2")][0]' templates.json)
+          test "$TEMPLATE" != "null" || (echo 'EditDNA-Worker-2 template not found' && exit 3)
+          export_secret() {
+            key="$1"
+            value=$(printf '%s' "$TEMPLATE" | jq -r --arg key "$key" '.env[$key] // empty')
+            test -n "$value" || (echo "$key missing from RunPod template vault" && exit 4)
+            echo "::add-mask::$value"
+            printf '%s=%s\n' "$key" "$value" >> "$GITHUB_ENV"
+          }
+          export_secret AWS_ACCESS_KEY_ID
+          export_secret AWS_SECRET_ACCESS_KEY
+          export_secret AWS_REGION
+          export_secret S3_BUCKET
+
+      - name: Install scan runtime
+        run: pip install faster-whisper boto3
+
+      - name: Scan bounded real videos
+        shell: bash
+        run: |
+          python - <<'PY'
+          import json
+          from cutsell_worker.retry_scan import scan_retry_rich_sources
+
+          report = scan_retry_rich_sources(candidate_limit=8)
+          with open('cutsell-retry-scan.json', 'w', encoding='utf-8') as handle:
+              json.dump(report, handle, ensure_ascii=False, indent=2, sort_keys=True)
+          best = report.get('best_source') or {}
+          print(json.dumps({
+              'scanned_count': report['scanned_count'],
+              'asr_model': report['asr_model'],
+              'best_source_key': best.get('source_key'),
+              'best_retry_group_count': best.get('retry_group_count'),
+              'best_retry_group_sizes': best.get('retry_group_sizes'),
+              'best_top_similarity_pairs': best.get('top_similarity_pairs'),
+          }, ensure_ascii=False, indent=2))
+          PY
+
+      - name: Upload scan report
+        uses: actions/upload-artifact@v4
+        with:
+          name: cutsell-retry-scan-${{ github.sha }}
+          path: cutsell-retry-scan.json
+          retention-days: 7
