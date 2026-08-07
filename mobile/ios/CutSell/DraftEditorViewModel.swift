@@ -66,6 +66,50 @@ final class DraftEditorViewModel: ObservableObject {
         if let edited { await autosave(edited) }
     }
 
+    func trim(clipID: String, start: Double, end: Double) async {
+        guard let snapshot else { return }
+        let edited = await edit(
+            path: "/v1/draft-edits/trim",
+            body: .object([
+                "draft": snapshot.draft,
+                "clip_id": .string(clipID),
+                "start": .number(start),
+                "end": .number(end)
+            ])
+        )
+        if let edited { await autosave(edited) }
+    }
+
+    func split(clipID: String, at sourceTime: Double) async {
+        guard let snapshot else { return }
+        let edited = await edit(
+            path: "/v1/draft-edits/split",
+            body: .object([
+                "draft": snapshot.draft,
+                "clip_id": .string(clipID),
+                "split_time": .number(sourceTime)
+            ])
+        )
+        if let edited { await autosave(edited) }
+    }
+
+    func editCaption(clipID: String, text: String) async {
+        guard let snapshot else { return }
+        let edited = await edit(
+            path: "/v1/draft-edits/captions",
+            body: .object([
+                "draft": snapshot.draft,
+                "edits": .array([
+                    .object([
+                        "clip_id": .string(clipID),
+                        "text": .string(text)
+                    ])
+                ])
+            ])
+        )
+        if let edited { await autosave(edited) }
+    }
+
     func setCaptionSettings(enabled: Bool? = nil, preset: String? = nil) async {
         guard let snapshot else { return }
         var object: [String: JSONValue] = ["draft": snapshot.draft]
