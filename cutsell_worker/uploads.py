@@ -1,7 +1,8 @@
 """Direct-to-S3 mobile upload contracts for CutSell.
 
 The API signs bounded uploads; video bytes never transit the FastAPI service. Product
-jobs only accept objects inside the configured CutSell upload prefix/bucket.
+jobs only accept objects inside the configured CutSell upload prefix/bucket and the
+same hashed user/project scope that requested the upload.
 """
 from __future__ import annotations
 
@@ -50,6 +51,10 @@ def _scope_hash(value: str) -> str:
     return hashlib.sha256(value.encode()).hexdigest()[:16]
 
 
+def scoped_upload_prefix(*, user_id: str, project_id: str) -> str:
+    return f"{upload_prefix()}{_scope_hash(user_id)}/{_scope_hash(project_id)}/"
+
+
 def create_presigned_upload(
     *,
     project_id: str,
@@ -73,11 +78,7 @@ def create_presigned_upload(
     config = load_runtime_config()
     if not config.s3_bucket:
         raise RuntimeError("S3_BUCKET is required")
-    prefix = upload_prefix()
-    key = (
-        f"{prefix}{_scope_hash(user_id)}/{_scope_hash(project_id)}/"
-        f"{uuid4().hex}-{safe_name}"
-    )
+    key = f"{scoped_upload_prefix(user_id=user_id, project_id=project_id)}{uuid4().hex}-{safe_name}"
     if client is None:
         import boto3
         client = boto3.client("s3", region_name=config.aws_region or "us-east-1")
@@ -103,14 +104,23 @@ def create_presigned_upload(
     }
 
 
-def validate_product_source_uri(uri: str) -> tuple[str, str]:
+def validate_product_source_uri(
+    uri: str,
+    *,
+    project_id: str | None = None,
+    user_id: str | None = None,
+) -> tuple[str, str]:
     bucket, key = parse_s3_uri(uri)
     config = load_runtime_config()
     if not config.s3_bucket or bucket != config.s3_bucket:
         raise ValueError("source uri bucket is not allowed")
-    prefix = upload_prefix()
-    if not key.startswith(prefix):
-        raise ValueError("source uri is outside CutSell upload prefix")
+    required_prefix = upload_prefix()
+    if project_id is not None or user_id is not None:
+        if not project_id or not user_id:
+            raise ValueError("both project_id and user_id are required for scoped source validation")
+        required_prefix = scoped_upload_prefix(user_id=user_id, project_id=project_id)
+    if not key.startswith(required_prefix):
+        raise ValueError("source uri is outside allowed CutSell upload scope")
     if Path(key).suffix.lower() not in ALLOWED_VIDEO_EXTENSIONS:
         raise ValueError("source uri does not reference a supported video")
     return bucket, key
