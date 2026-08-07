@@ -65,6 +65,10 @@ def evaluate_validation_report(report: dict[str, Any]) -> dict[str, Any]:
     semantic_status = _provider_status(report, "semantic")
     visual_status = _provider_status(report, "visual")
     take_judge_status = _provider_status(report, "take_judge")
+    clean_cut_status = _provider_status(report, "clean_cut")
+    clean_cut_judge_status = (diagnostics.get("clean_cut_judge_status") or {}).get("status")
+    clean_cut_judge_deleted = int(diagnostics.get("clean_cut_judge_deleted_count") or 0)
+    clean_cut_judge_mixed = int(diagnostics.get("clean_cut_judge_mixed_count") or 0)
     score = max(0, min(100, 100 - 35 * len(hard_failures) - 5 * len(warnings)
                          - (8 if semantic_status in {"degraded", "failed", "unavailable"} else 0)
                          - (8 if visual_status in {"degraded", "failed", "unavailable"} else 0)))
@@ -74,7 +78,15 @@ def evaluate_validation_report(report: dict[str, Any]) -> dict[str, Any]:
         "alternate_count": len(alternates), "discarded_count": len(discarded),
         "retry_group_count": retry_group_count, "tiny_fragment_count": tiny_fragments,
         "adjacent_duplicate_count": adjacent_duplicates,
-        "provider_status": {"semantic": semantic_status, "visual": visual_status, "take_judge": take_judge_status},
+        "provider_status": {
+            "semantic": semantic_status,
+            "visual": visual_status,
+            "take_judge": take_judge_status,
+            "clean_cut": clean_cut_status,
+            "clean_cut_judge": str(clean_cut_judge_status or "not_requested"),
+        },
+        "clean_cut_judge_deleted_count": clean_cut_judge_deleted,
+        "clean_cut_judge_mixed_count": clean_cut_judge_mixed,
         "take_judge_status_counts": diagnostics.get("take_judge_status_counts") or {},
         "warnings": warnings, "hard_failures": hard_failures,
         "structural_score": score, "structural_pass": not hard_failures,
@@ -122,7 +134,7 @@ def run_golden_benchmark(*, video_limit: int = 8, window_sec: float = 60.0, pref
     evaluations = [item["evaluation"] for item in results]
     scores = [int(item["structural_score"]) for item in evaluations]
     provider_counts = {stage: dict(Counter(str(item["provider_status"].get(stage) or "unknown") for item in evaluations))
-                       for stage in ("semantic", "visual", "take_judge")}
+                       for stage in ("semantic", "visual", "take_judge", "clean_cut", "clean_cut_judge")}
     return {
         "schema_version": "cutsell.golden.v1", "video_limit": int(video_limit), "window_sec": float(window_sec),
         "source_count": len(sources), "completed_count": len(results), "execution_failure_count": len(failures),
@@ -135,5 +147,7 @@ def run_golden_benchmark(*, video_limit: int = 8, window_sec: float = 60.0, pref
         "total_retry_groups": sum(int(item["retry_group_count"]) for item in evaluations),
         "total_tiny_fragments": sum(int(item["tiny_fragment_count"]) for item in evaluations),
         "total_adjacent_duplicates": sum(int(item["adjacent_duplicate_count"]) for item in evaluations),
+        "total_clean_cut_judge_deleted": sum(int(item["clean_cut_judge_deleted_count"]) for item in evaluations),
+        "total_clean_cut_judge_mixed": sum(int(item["clean_cut_judge_mixed_count"]) for item in evaluations),
         "provider_status_counts": provider_counts, "failures": failures, "results": results,
     }
