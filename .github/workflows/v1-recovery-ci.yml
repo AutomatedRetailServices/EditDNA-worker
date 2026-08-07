@@ -1,15 +1,16 @@
 name: V1 Recovery CI
 
 on:
-  push:
-    branches:
-      - repair/v1-structural-recovery
   pull_request:
     branches:
       - main
 
 permissions:
-  contents: write
+  contents: read
+
+concurrency:
+  group: v1-recovery-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
 
 jobs:
   test:
@@ -17,32 +18,10 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
-        with:
-          ref: repair/v1-structural-recovery
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
           cache: pip
-      - name: Apply V1 recovery patches
-        run: |
-          python scripts/apply_v1_structural_patch.py
-          python scripts/apply_v1_take_judge_spanish_patch.py
-          python scripts/apply_v1_editable_draft_patch.py
-          python scripts/apply_v1_take_judge_preserve_alternates.py
-          python scripts/apply_v1_take_judge_test_patch.py
-          python scripts/apply_v1_visual_ranking_patch.py
-      - name: Commit recovery patches on branch pushes
-        if: github.event_name == 'push'
-        run: |
-          if git diff --quiet -- worker/pipeline.py worker/take_judge_v2.py tests/test_take_judge_v2.py; then
-            echo "Recovery patches already committed"
-          else
-            git config user.name "github-actions[bot]"
-            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-            git add worker/pipeline.py worker/take_judge_v2.py tests/test_take_judge_v2.py
-            git commit -m "recovery: preserve editable alternates and visual ranking"
-            git push origin HEAD:repair/v1-structural-recovery
-          fi
       - name: Install FFmpeg development libraries
         run: |
           sudo apt-get update
