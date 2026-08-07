@@ -3,6 +3,7 @@ from types import SimpleNamespace
 from fastapi.testclient import TestClient
 
 import cutsell_app.main as api
+from cutsell_worker.jobs import JobSnapshot
 
 
 def test_healthz_exposes_clean_service_readiness(monkeypatch):
@@ -52,3 +53,39 @@ def test_flow_b_submit_rejects_duplicate_source_order(monkeypatch):
         ],
     })
     assert response.status_code == 409
+
+
+def test_get_job_returns_progress_without_exposing_internal_tracebacks(monkeypatch):
+    monkeypatch.setattr(
+        api,
+        "fetch_job_snapshot",
+        lambda job_id: JobSnapshot(job_id, "analyzing", progress=42),
+    )
+    response = TestClient(api.app).get("/v1/jobs/job-1")
+    assert response.status_code == 200
+    assert response.json() == {
+        "job_id": "job-1",
+        "state": "analyzing",
+        "progress": 42,
+        "result": None,
+        "error": None,
+    }
+
+
+def test_get_job_returns_404_for_unknown_job(monkeypatch):
+    def missing(_job_id):
+        raise KeyError("missing")
+    monkeypatch.setattr(api, "fetch_job_snapshot", missing)
+    response = TestClient(api.app).get("/v1/jobs/missing")
+    assert response.status_code == 404
+
+
+def test_cancel_job_returns_canceled_state(monkeypatch):
+    monkeypatch.setattr(
+        api,
+        "cancel_job",
+        lambda job_id: JobSnapshot(job_id, "canceled"),
+    )
+    response = TestClient(api.app).post("/v1/jobs/job-1/cancel")
+    assert response.status_code == 200
+    assert response.json()["state"] == "canceled"
