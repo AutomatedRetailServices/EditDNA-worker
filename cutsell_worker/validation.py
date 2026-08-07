@@ -36,8 +36,18 @@ def _safe_prefix(prefix: str) -> str:
     return prefix
 
 
+def _is_real_video_key(key: str) -> bool:
+    """Reject directory markers and common macOS metadata masquerading as media."""
+    if not key or key.endswith("/"):
+        return False
+    name = PurePosixPath(key).name
+    if name.startswith("._") or name in {".DS_Store", "Thumbs.db"}:
+        return False
+    return Path(name).suffix.lower() in VIDEO_EXTENSIONS
+
+
 def list_validation_videos(*, prefix: str | None = None, limit: int = 20, s3=None) -> tuple[dict[str, Any], ...]:
-    """List a bounded set of videos from the dedicated validation prefix."""
+    """List a bounded set of real videos from the dedicated validation prefix."""
     if not 1 <= limit <= 100:
         raise ValueError("limit must be between 1 and 100")
     config = load_runtime_config()
@@ -51,10 +61,11 @@ def list_validation_videos(*, prefix: str | None = None, limit: int = 20, s3=Non
     videos = []
     for item in response.get("Contents", []):
         key = str(item.get("Key") or "")
-        if key.endswith("/") or Path(key).suffix.lower() not in VIDEO_EXTENSIONS:
+        if not _is_real_video_key(key):
             continue
         size = int(item.get("Size") or 0)
-        if size <= 1024:
+        # Ignore tiny placeholders even when their extension looks legitimate.
+        if size <= 64 * 1024:
             continue
         videos.append({"key": key, "size": size})
         if len(videos) >= limit:
@@ -70,7 +81,7 @@ def run_single_validation(
     preview_output: str | None = None,
 ) -> dict[str, Any]:
     """Run one S3 video through the same clean brain used by production."""
-    if Path(key).suffix.lower() not in VIDEO_EXTENSIONS:
+    if not _is_real_video_key(key):
         raise ValueError("unsupported validation video")
     config = load_runtime_config()
     if not config.s3_bucket:
