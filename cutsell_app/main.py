@@ -100,7 +100,11 @@ def submit_flow_b(payload: FlowBSubmitRequest):
             raise HTTPException(status_code=409, detail="source_order values must be unique")
         seen_orders.add(item.source_order)
         try:
-            validate_product_source_uri(item.uri)
+            validate_product_source_uri(
+                item.uri,
+                project_id=payload.project_id,
+                user_id=payload.user_id,
+            )
         except ValueError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from None
         sources.append({
