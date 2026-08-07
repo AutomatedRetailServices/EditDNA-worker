@@ -26,7 +26,11 @@ def test_semantic_execution_reports_provider_unavailable_fallback():
     execution = result["semantic_execution"]
     assert execution["requested"] is True
     assert execution["status_counts"] == {"provider_unavailable": 1}
+    assert execution["clip_status_counts"] == {"provider_unavailable": 1}
     assert execution["fallback_reasons"] == {"provider_unavailable": 1}
+    meta = result["clips"][0]["meta"]
+    assert meta["semantic_v2_execution_status"] == "provider_unavailable"
+    assert meta["semantic_v2_fallback_reason"] == "provider_unavailable"
 
 
 def test_semantic_execution_reports_partial_application_and_abstention():
@@ -43,7 +47,8 @@ def test_semantic_execution_reports_partial_application_and_abstention():
         requested=True,
         provider_available=True,
     )
-    source = result["semantic_execution"]["sources"][0]
+    execution = result["semantic_execution"]
+    source = execution["sources"][0]
     assert source["status"] == "partially_applied"
     assert source["semantic_results"] == 2
     assert source["applied"] == 1
@@ -52,6 +57,32 @@ def test_semantic_execution_reports_partial_application_and_abstention():
         "model_abstained": 1,
         "missing_semantic_result": 1,
     }
+    assert execution["clip_status_counts"] == {
+        "applied": 1,
+        "abstained": 1,
+        "classifier_no_result": 1,
+    }
+    assert result["clips"][0]["meta"]["semantic_v2_execution_status"] == "applied"
+    assert "semantic_v2_fallback_reason" not in result["clips"][0]["meta"]
+    assert result["clips"][1]["meta"]["semantic_v2_fallback_reason"] == "model_abstained"
+    assert result["clips"][2]["meta"]["semantic_v2_fallback_reason"] == "missing_semantic_result"
+
+
+def test_semantic_execution_reports_unapplied_result_as_safe_fallback():
+    result = {
+        "processed_source_indices": [0],
+        "clips": [_clip("a", semantic_v2={"applied": False, "abstain": False})],
+    }
+    attach_semantic_execution(
+        result,
+        requested=True,
+        provider_available=True,
+    )
+    source = result["semantic_execution"]["sources"][0]
+    assert source["status"] == "fallback_only"
+    assert source["fallback_reasons"] == {"unsafe_to_apply": 1}
+    assert result["clips"][0]["meta"]["semantic_v2_execution_status"] == "fallback_only"
+    assert result["clips"][0]["meta"]["semantic_v2_fallback_reason"] == "unsafe_to_apply"
 
 
 def test_semantic_execution_reports_not_requested_explicitly():
@@ -67,3 +98,5 @@ def test_semantic_execution_reports_not_requested_explicitly():
     source = result["semantic_execution"]["sources"][0]
     assert source["status"] == "not_requested"
     assert source["fallback_reasons"] == {}
+    assert result["clips"][0]["meta"]["semantic_v2_execution_status"] == "not_requested"
+    assert "semantic_v2_fallback_reason" not in result["clips"][0]["meta"]
