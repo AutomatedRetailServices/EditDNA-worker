@@ -15,6 +15,7 @@ from cutsell_worker.draft_edits import (
     restore_clip,
     swap_take,
 )
+from cutsell_worker.draft_store import DraftConflictError, get_draft_snapshot, save_draft_snapshot
 from cutsell_worker.jobs import cancel_job, fetch_job_snapshot
 from cutsell_worker.queueing import enqueue_export, enqueue_flow_b
 from cutsell_worker.serde import draft_from_dict
@@ -81,6 +82,12 @@ class ExportSubmitResponse(BaseModel):
     job_id: str
     queue: str
     state: str = "rendering"
+
+
+class DraftAutosaveRequest(BaseModel):
+    user_id: str
+    expected_revision: int = Field(ge=1)
+    draft: dict[str, Any]
 
 
 class JobStatusResponse(BaseModel):
@@ -186,6 +193,36 @@ def submit_flow_b(payload: FlowBSubmitRequest):
         "audio_overlap": payload.audio_overlap,
     })
     return FlowBSubmitResponse(job_id=submission.job_id, queue=submission.queue_name)
+
+
+@app.get("/v1/projects/{project_id}/draft")
+def recover_draft(project_id: str, user_id: str):
+    try:
+        return get_draft_snapshot(user_id=user_id, project_id=project_id)
+    except KeyError:
+        raise HTTPException(status_code=404, detail="draft not found") from None
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from None
+
+
+@app.put("/v1/projects/{project_id}/draft")
+def autosave_draft(project_id: str, payload: DraftAutosaveRequest):
+    try:
+        draft_from_dict(payload.draft)
+        return save_draft_snapshot(
+            user_id=payload.user_id,
+            project_id=project_id,
+            draft=payload.draft,
+            expected_revision=payload.expected_revision,
+        )
+    except DraftConflictError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from None
+    except KeyError:
+        raise HTTPException(status_code=404, detail="draft not found") from None
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from None
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from None
 
 
 @app.post("/v1/exports/jobs", response_model=ExportSubmitResponse, status_code=status.HTTP_202_ACCEPTED)
