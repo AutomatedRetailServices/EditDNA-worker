@@ -65,8 +65,8 @@ def test_export_job_renders_edited_draft_without_rerunning_ai(monkeypatch, tmp_p
     monkeypatch.setattr(export_job, "build_render_plan", lambda draft, local_paths: ("plan",))
 
     rendered = []
-    def fake_render(plan, output, *, text_overlays=()):
-        rendered.append((plan, output, tuple(text_overlays)))
+    def fake_render(plan, output, *, text_overlays=(), media_overlays=()):
+        rendered.append((plan, output, tuple(text_overlays), tuple(media_overlays)))
         Path(output).write_bytes(b"mp4")
         return output
     monkeypatch.setattr(export_job, "render_preview", fake_render)
@@ -95,11 +95,13 @@ def test_export_job_renders_edited_draft_without_rerunning_ai(monkeypatch, tmp_p
     assert result["state"] == "finished"
     assert result["selected_count"] == 1
     assert result["text_overlay_count"] == 1
+    assert result["media_overlay_count"] == 0
     assert result["download_url"].startswith("https://download.invalid/")
     assert len(validated) == 1
     assert validated[0][1] == {"project_id": "project-1", "user_id": "user-1"}
     assert len(rendered) == 1
     assert rendered[0][2][0].text == "SALE"
+    assert rendered[0][3] == ()
     assert fake_job.meta["stage"] == "finished"
     assert fake_job.meta["progress_percent"] == 100
 
