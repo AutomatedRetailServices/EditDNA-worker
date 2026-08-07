@@ -1028,8 +1028,11 @@ def reject_visual_bad_takes(clips: List[Dict[str, Any]], session_dir: str, input
             logger.warning("Visual bad-take check failed open", extra={"operation": "visual_bad_take"})
             continue
         if verdict is Verdict.BAD:
-            c["meta"]["keep"] = False
-            c["llm_reason"] = (c.get("llm_reason") or "") + " | Removed for visual bad-take."
+            # Acting/visual quality belongs to Best Take ranking, not Clean Cut
+            # deletion. Keep the valid take available for editor swap/restore.
+            c["meta"]["visual_bad_take"] = True
+            c["meta"]["visual_quality_flag"] = "bad_take"
+            c["llm_reason"] = (c.get("llm_reason") or "") + " | Flagged as lower-quality visual take."
 
 
 # =====================
@@ -1185,10 +1188,11 @@ def refine_clip_boundaries_with_vision(
         mid_bad = result.MID is Verdict.BAD
         tail_bad = result.TAIL is Verdict.BAD
 
-        # Caso extremo: todo malo → matar el clip completo.
+        # A visually weak full take remains an editable alternate. Boundary
+        # refinement may flag quality but is not deletion authority.
         if head_bad and mid_bad and tail_bad:
-            c["meta"]["keep"] = False
-            c["llm_reason"] = (c.get("llm_reason") or "") + " | Removed by boundary refiner: full take visually bad."
+            c["meta"]["boundary_refiner_quality_flag"] = "all_frames_bad"
+            c["llm_reason"] = (c.get("llm_reason") or "") + " | Boundary refiner flagged lower visual quality."
             changed_any = True
             continue
 
@@ -1203,10 +1207,11 @@ def refine_clip_boundaries_with_vision(
             if tail_bad and tail_t > start + 0.30:
                 new_end = min(tail_t, end)
 
-        # Si después del recorte queda ridículamente corto, lo matamos
+        # If a proposed visual trim would destroy the spoken take, preserve the
+        # original boundaries and expose the quality flag instead.
         if new_end <= new_start or (new_end - new_start) < max(0.5, duration * 0.25):
-            c["meta"]["keep"] = False
-            c["llm_reason"] = (c.get("llm_reason") or "") + " | Removed by boundary refiner: too short after trim."
+            c["meta"]["boundary_refiner_quality_flag"] = "trim_rejected_too_short"
+            c["llm_reason"] = (c.get("llm_reason") or "") + " | Unsafe visual trim rejected; original take preserved."
             changed_any = True
             continue
 
