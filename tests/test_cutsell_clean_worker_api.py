@@ -52,7 +52,7 @@ def test_flow_b_submit_generates_source_ids_and_enqueues(monkeypatch):
         captured.update(payload)
         return SimpleNamespace(job_id="job-1", queue_name="cutsell")
     monkeypatch.setattr(api, "enqueue_flow_b", fake_enqueue)
-    monkeypatch.setattr(api, "validate_product_source_uri", lambda uri: ("bucket", uri))
+    monkeypatch.setattr(api, "validate_product_source_uri", lambda uri, **kwargs: ("bucket", uri))
 
     response = TestClient(api.app).post("/v1/flow-b/jobs", json={
         "project_id": "project-1",
@@ -72,7 +72,7 @@ def test_flow_b_submit_generates_source_ids_and_enqueues(monkeypatch):
 
 def test_flow_b_submit_rejects_duplicate_source_order(monkeypatch):
     monkeypatch.setattr(api, "enqueue_flow_b", lambda payload: None)
-    monkeypatch.setattr(api, "validate_product_source_uri", lambda uri: ("bucket", uri))
+    monkeypatch.setattr(api, "validate_product_source_uri", lambda uri, **kwargs: ("bucket", uri))
     response = TestClient(api.app).post("/v1/flow-b/jobs", json={
         "project_id": "project-1",
         "user_id": "user-1",
@@ -85,8 +85,8 @@ def test_flow_b_submit_rejects_duplicate_source_order(monkeypatch):
 
 
 def test_flow_b_submit_rejects_source_outside_product_upload_scope(monkeypatch):
-    def reject(_uri):
-        raise ValueError("source uri is outside CutSell upload prefix")
+    def reject(_uri, **_kwargs):
+        raise ValueError("source uri is outside allowed CutSell upload scope")
     monkeypatch.setattr(api, "validate_product_source_uri", reject)
     response = TestClient(api.app).post("/v1/flow-b/jobs", json={
         "project_id": "project-1",
@@ -96,7 +96,7 @@ def test_flow_b_submit_rejects_source_outside_product_upload_scope(monkeypatch):
         ],
     })
     assert response.status_code == 422
-    assert "outside CutSell upload prefix" in response.json()["detail"]
+    assert "outside allowed CutSell upload scope" in response.json()["detail"]
 
 
 def test_get_job_returns_progress_without_exposing_internal_tracebacks(monkeypatch):
