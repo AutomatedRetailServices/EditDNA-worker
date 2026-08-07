@@ -1,8 +1,4 @@
-"""FFmpeg preview renderer for the clean CutSell draft timeline.
-
-The renderer consumes a source-safe RenderPlan. It never invents or stitches text;
-it only trims selected source intervals and concatenates them in draft order.
-"""
+"""FFmpeg renderer for the clean CutSell draft timeline."""
 from __future__ import annotations
 
 from pathlib import Path
@@ -10,6 +6,7 @@ import subprocess
 import tempfile
 from typing import Iterable
 
+from .contracts import TextOverlay
 from .media_probe import probe_media
 from .render_plan import RenderSegment
 
@@ -66,8 +63,6 @@ def _segment_command(segment: RenderSegment, part: Path, *, vf: str) -> list[str
     ]
     if probe.has_audio:
         return base + ["-af", f"volume={effective_volume:.3f}"] + common_video + [str(part)]
-
-    # Normalize silent/B-roll footage to the same AAC stream shape as talking clips.
     return base + [
         "-f", "lavfi",
         "-t", f"{segment.duration_sec:.3f}",
@@ -77,6 +72,41 @@ def _segment_command(segment: RenderSegment, part: Path, *, vf: str) -> list[str
     ] + common_video + ["-shortest", str(part)]
 
 
+def _ass_timestamp(seconds: float) -> str:
+    centiseconds = max(0, int(round(float(seconds) * 100)))
+    hours, remainder = divmod(centiseconds, 360_000)
+    minutes, remainder = divmod(remainder, 6_000)
+    secs, cs = divmod(remainder, 100)
+    return f"{hours}:{minutes:02d}:{secs:02d}.{cs:02d}"
+
+
+def _ass_text(value: str) -> str:
+    return str(value).replace("\\", r"\\").replace("{", r"\{").replace("}", r"\}").replace("\n", r"\N")[:500]
+
+
+def _write_text_overlay_ass(overlays: tuple[TextOverlay, ...], path: Path, *, width: int, height: int) -> None:
+    header = (
+        "[Script Info]\nScriptType: v4.00+\n"
+        f"PlayResX: {width}\nPlayResY: {height}\nWrapStyle: 2\n\n"
+        "[V4+ Styles]\n"
+        "Format: Name,Fontname,Fontsize,PrimaryColour,SecondaryColour,OutlineColour,BackColour,Bold,Italic,Underline,StrikeOut,ScaleX,ScaleY,Spacing,Angle,BorderStyle,Outline,Shadow,Alignment,MarginL,MarginR,MarginV,Encoding\n"
+        "Style: Overlay,Arial,48,&H00FFFFFF,&H000000FF,&H00000000,&H66000000,-1,0,0,0,100,100,0,0,1,2,0,5,20,20,20,1\n\n"
+        "[Events]\n"
+        "Format: Layer,Start,End,Style,Name,MarginL,MarginR,MarginV,Effect,Text\n"
+    )
+    events = []
+    for overlay in overlays:
+        x = round(float(overlay.x) * width)
+        y = round(float(overlay.y) * height)
+        font_size = max(24, min(144, round(48 * float(overlay.scale))))
+        text = _ass_text(overlay.text)
+        events.append(
+            f"Dialogue: 0,{_ass_timestamp(overlay.start)},{_ass_timestamp(overlay.end)},Overlay,,0,0,0,,"
+            f"{{\\pos({x},{y})\\fs{font_size}}}{text}\n"
+        )
+    path.write_text(header + "".join(events), encoding="utf-8")
+
+
 def render_preview(
     segments: Iterable[RenderSegment],
     output_path: str,
@@ -84,9 +114,11 @@ def render_preview(
     width: int = 1080,
     height: int = 1920,
     fps: int = 30,
+    text_overlays: Iterable[TextOverlay] = (),
 ) -> str:
-    """Render selected clips to one H.264/AAC vertical MP4 preview."""
+    """Render selected clips, captions and optional final-timeline text overlays."""
     segment_tuple = tuple(segments)
+    overlay_tuple = tuple(text_overlays)
     if not segment_tuple:
         raise ValueError("render requires at least one segment")
     if width <= 0 or height <= 0 or fps <= 0:
@@ -109,15 +141,25 @@ def render_preview(
             normalized.append(part)
 
         concat_file = Path(directory) / "concat.txt"
-        concat_file.write_text(
-            "".join(f"file '{part.as_posix()}'\n" for part in normalized),
-            encoding="utf-8",
-        )
+        concat_file.write_text("".join(f"file '{part.as_posix()}'\n" for part in normalized), encoding="utf-8")
+        joined = destination if not overlay_tuple else Path(directory) / "joined.mp4"
         _run([
             "ffmpeg", "-y", "-hide_banner", "-loglevel", "error",
             "-f", "concat", "-safe", "0", "-i", str(concat_file),
-            "-c", "copy", "-movflags", "+faststart", str(destination),
+            "-c", "copy", "-movflags", "+faststart", str(joined),
         ])
+
+        if overlay_tuple:
+            ass = Path(directory) / "text-overlays.ass"
+            _write_text_overlay_ass(overlay_tuple, ass, width=width, height=height)
+            ass_path = ass.as_posix().replace("'", "\\'")
+            _run([
+                "ffmpeg", "-y", "-hide_banner", "-loglevel", "error",
+                "-i", str(joined),
+                "-vf", f"ass='{ass_path}'",
+                "-c:v", "libx264", "-preset", "veryfast", "-crf", "20",
+                "-c:a", "copy", "-movflags", "+faststart", str(destination),
+            ])
 
     if not destination.exists() or destination.stat().st_size <= 0:
         raise RuntimeError("ffmpeg_render_missing_output")
