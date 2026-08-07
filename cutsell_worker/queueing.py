@@ -32,3 +32,15 @@ def enqueue_flow_b(payload: dict, *, queue=None, timeout: int = 3600) -> QueueSu
         failure_ttl=86400,
     )
     return QueueSubmission(job_id=str(job.id), queue_name=str(getattr(target, "name", "cutsell")))
+
+
+def enqueue_export(payload: dict, *, queue=None, timeout: int = 3600) -> QueueSubmission:
+    target = queue or get_queue()
+    job = target.enqueue(
+        "cutsell_worker.export_job.run_export_job",
+        payload,
+        job_timeout=timeout,
+        result_ttl=86400,
+        failure_ttl=86400,
+    )
+    return QueueSubmission(job_id=str(job.id), queue_name=str(getattr(target, "name", "cutsell")))
