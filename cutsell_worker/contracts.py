@@ -147,6 +147,7 @@ class DraftClip:
     end: float
     text: str
     caption_text: str
+    words: Tuple[Word, ...] = ()
     semantic_role: SemanticRole = SemanticRole.OTHER
     take_group_id: Optional[str] = None
     selected: bool = True
