@@ -39,7 +39,7 @@ jobs:
             fi
           }
           check AWS_ACCESS_KEY_ID "$AWS_ACCESS_KEY_ID_VALUE"
-          check AWS_SECRET_ACCESS_KEY "$AWS_SECRET_KEY_VALUE"
+          check AWS_SECRET_ACCESS_KEY "$AWS_SECRET_ACCESS_KEY_VALUE"
           check AWS_REGION "$AWS_REGION_VALUE"
           check S3_BUCKET "$S3_BUCKET_VALUE"
           check OPENAI_API_KEY "$OPENAI_API_KEY_VALUE"
