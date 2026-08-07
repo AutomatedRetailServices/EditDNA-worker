@@ -8,6 +8,7 @@ Human review of rendered previews remains a separate gate.
 from __future__ import annotations
 
 from collections import Counter
+from pathlib import Path, PurePosixPath
 import re
 from statistics import median
 from typing import Any
@@ -126,11 +127,18 @@ def evaluate_validation_report(report: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _preview_name(index: int, source_key: str) -> str:
+    stem = PurePosixPath(source_key).stem
+    safe = re.sub(r"[^A-Za-z0-9._-]+", "-", stem).strip("-._")[:80] or "video"
+    return f"{index:02d}-{safe}.mp4"
+
+
 def run_golden_benchmark(
     *,
     video_limit: int = 8,
     window_sec: float = 60.0,
     prefix: str | None = None,
+    preview_dir: str | None = None,
 ) -> dict[str, Any]:
     if not 1 <= int(video_limit) <= 20:
         raise ValueError("video_limit must be between 1 and 20")
@@ -141,16 +149,25 @@ def run_golden_benchmark(
     if not sources:
         raise RuntimeError("golden benchmark found no real videos")
 
+    preview_root = None
+    if preview_dir:
+        preview_root = Path(preview_dir)
+        preview_root.mkdir(parents=True, exist_ok=True)
+
     results = []
     failures = []
     for index, source in enumerate(sources):
         key = str(source["key"])
         try:
+            preview_output = None
+            if preview_root is not None:
+                preview_output = str(preview_root / _preview_name(index, key))
             report = run_single_validation(
                 key,
                 project_id=f"cutsell-golden-{index:03d}",
                 source_start_sec=0.0,
                 source_end_sec=float(window_sec),
+                preview_output=preview_output,
             )
             results.append({
                 "validation": report,
