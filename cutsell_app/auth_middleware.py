@@ -6,6 +6,7 @@ import os
 from urllib.parse import parse_qs
 
 from cutsell_worker.auth import resolve_session
+from cutsell_worker.jobs import fetch_job_snapshot
 
 PUBLIC_PATHS = {"/v1/healthz", "/v1/auth/session"}
 MAX_JSON_BODY = 8 * 1024 * 1024
@@ -19,6 +20,13 @@ async def _respond(send, status: int, detail: str):
         "headers": [(b"content-type", b"application/json"), (b"content-length", str(len(body)).encode())],
     })
     await send({"type": "http.response.body", "body": body})
+
+
+def _job_id_from_path(path: str) -> str | None:
+    parts = [part for part in str(path).split("/") if part]
+    if len(parts) >= 3 and parts[0] == "v1" and parts[1] == "jobs":
+        return parts[2] or None
+    return None
 
 
 class AuthScopeMiddleware:
@@ -45,6 +53,19 @@ class AuthScopeMiddleware:
         except RuntimeError:
             return await _respond(send, 503, "auth service unavailable")
         auth_user_id = str(session["user_id"])
+
+        # Job IDs are otherwise opaque but guessable enough that status/cancel/retry
+        # must be bound to the bearer user before the endpoint can inspect the job.
+        job_id = _job_id_from_path(path)
+        if job_id:
+            try:
+                fetch_job_snapshot(job_id, user_id=auth_user_id)
+            except KeyError:
+                return await _respond(send, 404, "job not found")
+            except PermissionError:
+                return await _respond(send, 403, "job does not belong to this user")
+            except RuntimeError:
+                return await _respond(send, 503, "job service unavailable")
 
         claimed_query = (parse_qs((scope.get("query_string") or b"").decode()).get("user_id") or [None])[0]
         if claimed_query is not None and str(claimed_query) != auth_user_id:
