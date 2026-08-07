@@ -19,3 +19,4 @@ def test_main_mounts_v1_draft_routes():
     assert "/v1/draft-edits/remove" in paths
     assert "/v1/draft-edits/restore" in paths
     assert "/v1/draft-edits/reorder" in paths
+    assert "/v1/draft-edits/captions" in paths
