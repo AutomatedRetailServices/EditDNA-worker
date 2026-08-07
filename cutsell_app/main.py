@@ -11,6 +11,7 @@ from cutsell_app.multipart_routes import router as multipart_router
 from cutsell_worker.config import load_runtime_config
 from cutsell_worker.draft_edits import (
     DraftEditError,
+    patch_audio,
     patch_captions,
     remove_clip,
     reorder_clips,
@@ -143,6 +144,11 @@ class DraftTrimRequest(DraftClipRequest):
 
 class DraftSplitRequest(DraftClipRequest):
     split_time: float = Field(gt=0)
+
+
+class DraftAudioRequest(DraftClipRequest):
+    muted: bool | None = None
+    volume: float | None = None
 
 
 class CaptionEdit(BaseModel):
@@ -411,6 +417,19 @@ def edit_trim_clip(payload: DraftTrimRequest):
 def edit_split_clip(payload: DraftSplitRequest):
     try:
         return split_clip(payload.draft, payload.clip_id, split_time=payload.split_time)
+    except DraftEditError as exc:
+        _draft_edit_error(exc)
+
+
+@app.post("/v1/draft-edits/audio")
+def edit_audio(payload: DraftAudioRequest):
+    try:
+        return patch_audio(
+            payload.draft,
+            payload.clip_id,
+            muted=payload.muted,
+            volume=payload.volume,
+        )
     except DraftEditError as exc:
         _draft_edit_error(exc)
 
