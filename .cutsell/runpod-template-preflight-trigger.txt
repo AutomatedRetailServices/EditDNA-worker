@@ -1,0 +1,2 @@
+run=1
+reason=validate current RunPod template credentials before GPU smoke
