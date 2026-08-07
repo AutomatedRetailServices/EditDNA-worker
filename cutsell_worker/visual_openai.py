@@ -9,13 +9,14 @@ from typing import Callable, Tuple
 
 from .contracts import CandidateTake
 from .frame_sampling import FrameSample
+from .openai_json import parse_json_object
 from .providers import ProviderStatus
 from .visual_analysis import VisualObservation, VisualProviderResult
 
 
 @dataclass
 class OpenAIVisualProvider:
-    model: str = "gpt-5.4-nano"
+    model: str = "gpt-4o-mini"
     client_factory: Callable[[], object] | None = None
 
     def _client(self):
@@ -78,7 +79,7 @@ class OpenAIVisualProvider:
             model=self.model,
             input=[{"role": "user", "content": content}],
         )
-        data = json.loads(str(response.output_text).strip())
+        data = parse_json_object(response.output_text)
         items = data.get("clips")
         if not isinstance(items, list):
             raise ValueError("visual provider returned invalid payload")
