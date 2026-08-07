@@ -1,5 +1,3 @@
-import json
-
 from fastapi.testclient import TestClient
 
 import cutsell_app.project_routes as routes
@@ -92,8 +90,6 @@ def test_project_routes_create_list_get_and_rename(monkeypatch):
         return dict(records[kwargs["project_id"]])
     monkeypatch.setattr(routes, "update_project", fake_update)
 
-    client = TestClient(routes.router)
-    # APIRouter alone is not an ASGI app; mount it in a minimal FastAPI instance.
     from fastapi import FastAPI
     app = FastAPI()
     app.include_router(routes.router)
