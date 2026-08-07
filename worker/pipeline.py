@@ -23,6 +23,7 @@ from worker.models.openai_provider import (
 )
 from worker.semantic_slot_v2 import build_clause_inputs, publicize_canonical_slot
 from worker.take_judge_v2 import TakeJudgeCandidate, delivery_features, sample_candidate_frames
+from worker.editable_draft import build_editable_draft
 from worker.diagnostics import (
     sanitize_clean_cut_discard_diagnostics,
     sanitize_source_identifier,
@@ -2143,10 +2144,15 @@ def run_pipeline(session_id: str, files: Optional[List[str]] = None,
         clean_cut_discard_diagnostics = sanitize_clean_cut_discard_diagnostics(
             clean_cut_discard_diagnostics
         )
+        editable_draft = build_editable_draft(
+            clips, used, mode=mode,
+            clean_cut_discard_diagnostics=clean_cut_discard_diagnostics,
+        )
         result={"ok":True,"session_id":session_id,"input_local":input_local,
       "input_files_local":local_sources,"input_file_count":len(local_sources),
       "processed_source_indices":list(range(len(local_sources))),"duration_sec":sum(durations),
       "input_durations_sec":durations,"clips":clips,"slots":slots,"composer":composer,
+      "editable_draft":editable_draft,
       "composer_human":pretty_print_composer(clips,composer),"output_video_local":final,
       "output_video_url":output_url,"clean_cut_used_clip_ids":clean_ids,
       "clean_cut_discard_diagnostics":clean_cut_discard_diagnostics,
