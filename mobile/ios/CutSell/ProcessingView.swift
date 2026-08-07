@@ -49,27 +49,27 @@ struct ProcessingView: View {
 
     private var fallbackProgress: Int {
         switch current.state {
-        case "preparing": 5
-        case "uploaded": 10
-        case "transcribing": 30
-        case "analyzing": 60
-        case "composing": 85
-        case "draft_ready": 100
-        default: 5
+        case "preparing": return 5
+        case "uploaded": return 10
+        case "transcribing": return 30
+        case "analyzing": return 60
+        case "composing": return 85
+        case "draft_ready": return 100
+        default: return 5
         }
     }
 
     private var stageTitle: String {
         let state = job?.state ?? current.state
         switch state {
-        case "preparing": "Preparing footage"
-        case "uploaded": "Waiting for CutSell"
-        case "transcribing": "Listening to your footage"
-        case "analyzing": "Watching and choosing best takes"
-        case "composing": "Building your sales edit"
-        case "draft_ready", "finished": "Your draft is ready"
-        case "failed": "This cut needs another try"
-        default: state.replacingOccurrences(of: "_", with: " ").capitalized
+        case "preparing": return "Preparing footage"
+        case "uploaded": return "Waiting for CutSell"
+        case "transcribing": return "Listening to your footage"
+        case "analyzing": return "Watching and choosing best takes"
+        case "composing": return "Building your sales edit"
+        case "draft_ready", "finished": return "Your draft is ready"
+        case "failed": return "This cut needs another try"
+        default: return state.replacingOccurrences(of: "_", with: " ").capitalized
         }
     }
 
