@@ -1,6 +1,7 @@
 import SwiftUI
 import PhotosUI
 import AVFoundation
+import UniformTypeIdentifiers
 
 struct NewCutView: View {
     enum Mode: String, CaseIterable, Identifiable {
@@ -34,9 +35,7 @@ struct NewCutView: View {
                 }
 
                 Section("Footage") {
-                    Button {
-                        showCamera = true
-                    } label: {
+                    Button { showCamera = true } label: {
                         Label("Record in CutSell", systemImage: "camera.fill")
                     }
 
@@ -98,9 +97,7 @@ struct NewCutView: View {
                 }
             }
             .fullScreenCover(isPresented: $showCamera) {
-                CameraCaptureView { url in
-                    Task { await addRecording(url) }
-                }
+                CameraCaptureView { url in Task { await addRecording(url) } }
             }
             .alert("Couldn’t create cut", isPresented: Binding(
                 get: { errorMessage != nil },
@@ -116,13 +113,10 @@ struct NewCutView: View {
             let clip = LocalVideo(
                 url: url,
                 name: mode == .single ? "Recorded clip" : "Take \(selected.count + 1)",
-                duration: max(0, seconds)
+                duration: max(0, seconds),
+                contentType: "video/quicktime"
             )
-            if mode == .single {
-                selected = [clip]
-            } else {
-                selected.append(clip)
-            }
+            if mode == .single { selected = [clip] } else { selected.append(clip) }
         } catch {
             errorMessage = error.localizedDescription
         }
@@ -132,19 +126,19 @@ struct NewCutView: View {
         do {
             var output: [LocalVideo] = []
             for (index, item) in items.enumerated() {
-                guard let data = try await item.loadTransferable(type: Data.self) else { continue }
-                let url = FileManager.default.temporaryDirectory
-                    .appending(path: "cutsell-picked-\(UUID().uuidString)-\(index).mov")
-                try data.write(to: url, options: .atomic)
-                let asset = AVURLAsset(url: url)
-                let duration = try await asset.load(.duration).seconds
-                output.append(LocalVideo(url: url, name: "Video \(index + 1)", duration: max(0, duration)))
+                guard let imported = try await item.loadTransferable(type: ImportedVideoFile.self) else { continue }
+                let asset = AVURLAsset(url: imported.url)
+                let seconds = try await asset.load(.duration).seconds
+                let type = item.supportedContentTypes.first(where: { $0.conforms(to: .movie) })
+                let contentType = type?.preferredMIMEType ?? videoContentType(for: imported.url)
+                output.append(LocalVideo(
+                    url: imported.url,
+                    name: "Video \(index + 1)",
+                    duration: max(0, seconds),
+                    contentType: contentType
+                ))
             }
-            if mode == .single {
-                selected = Array(output.prefix(1))
-            } else {
-                selected.append(contentsOf: output)
-            }
+            if mode == .single { selected = Array(output.prefix(1)) } else { selected.append(contentsOf: output) }
         } catch {
             errorMessage = error.localizedDescription
         }
@@ -165,11 +159,9 @@ struct NewCutView: View {
                     fileURL: video.url,
                     projectID: project.projectID,
                     session: session,
-                    contentType: "video/quicktime"
+                    contentType: video.contentType
                 ) { partProgress in
-                    Task { @MainActor in
-                        progress = base + partProgress / Double(selected.count)
-                    }
+                    Task { @MainActor in progress = base + partProgress / Double(selected.count) }
                 }
                 sources.append(SourceInput(
                     originalName: video.url.lastPathComponent,
@@ -207,6 +199,15 @@ struct NewCutView: View {
         }
     }
 
+    private func videoContentType(for url: URL) -> String {
+        switch url.pathExtension.lowercased() {
+        case "mp4": return "video/mp4"
+        case "m4v": return "video/x-m4v"
+        case "webm": return "video/webm"
+        default: return "video/quicktime"
+        }
+    }
+
     private func duration(_ seconds: Double) -> String {
         let value = max(0, Int(seconds.rounded()))
         return String(format: "%d:%02d", value / 60, value % 60)
@@ -218,4 +219,5 @@ struct LocalVideo: Identifiable, Hashable {
     let url: URL
     let name: String
     let duration: Double
+    let contentType: String
 }
