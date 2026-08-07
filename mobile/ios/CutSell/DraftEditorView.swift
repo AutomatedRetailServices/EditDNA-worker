@@ -45,7 +45,7 @@ struct DraftEditorView: View {
                             HStack {
                                 Text("Clip order").font(.headline)
                                 Spacer()
-                                Text("Drag to reorder").font(.caption).foregroundStyle(.secondary)
+                                Text("Reorder").font(.caption).foregroundStyle(.secondary)
                             }
                             ReorderList(model: model)
                         }
@@ -67,6 +67,8 @@ struct DraftEditorView: View {
                             .pickerStyle(.segmented)
                         }
                         .padding(.horizontal)
+
+                        EditorExtrasView(model: model)
 
                         VStack(spacing: 10) {
                             Button {
@@ -135,14 +137,10 @@ private struct ReorderList: View {
                         .lineLimit(1)
                     Spacer()
                     HStack(spacing: 4) {
-                        Button {
-                            move(index, by: -1)
-                        } label: { Image(systemName: "arrow.up") }
-                        .disabled(index == 0)
-                        Button {
-                            move(index, by: 1)
-                        } label: { Image(systemName: "arrow.down") }
-                        .disabled(index == localIDs.count - 1)
+                        Button { move(index, by: -1) } label: { Image(systemName: "arrow.up") }
+                            .disabled(index == 0)
+                        Button { move(index, by: 1) } label: { Image(systemName: "arrow.down") }
+                            .disabled(index == localIDs.count - 1)
                     }
                     .buttonStyle(.borderless)
                 }
