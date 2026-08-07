@@ -12,16 +12,28 @@ struct NewCutView: View {
 
     @EnvironmentObject private var appState: AppState
     @Environment(\.dismiss) private var dismiss
-    @State private var mode: Mode = .single
+    @State private var mode: Mode
     @State private var pickerItems: [PhotosPickerItem] = []
-    @State private var selected: [LocalVideo] = []
-    @State private var title = ""
-    @State private var audioOverlap = false
+    @State private var selected: [LocalVideo]
+    @State private var title: String
+    @State private var audioOverlap: Bool
     @State private var isSubmitting = false
     @State private var progress = 0.0
     @State private var statusText = ""
     @State private var errorMessage: String?
     @State private var showCamera = false
+
+    private let resumeProjectID: String?
+
+    init(pending: PendingCutRecord? = nil) {
+        resumeProjectID = pending?.projectID
+        _mode = State(initialValue: Mode(rawValue: pending?.mode ?? "") ?? .single)
+        _selected = State(initialValue: (pending?.videos ?? []).map {
+            LocalVideo(url: $0.fileURL, name: $0.name, duration: $0.duration, contentType: $0.contentType)
+        })
+        _title = State(initialValue: pending?.title ?? "")
+        _audioOverlap = State(initialValue: pending?.audioOverlap ?? false)
+    }
 
     var body: some View {
         NavigationStack {
@@ -31,13 +43,21 @@ struct NewCutView: View {
                         ForEach(Mode.allCases) { Text($0.rawValue).tag($0) }
                     }
                     .pickerStyle(.segmented)
+                    .disabled(resumeProjectID != nil)
                     TextField("Project name (optional)", text: $title)
+                        .disabled(resumeProjectID != nil)
+                    if resumeProjectID != nil {
+                        Label("Resuming interrupted upload", systemImage: "arrow.clockwise.icloud")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
                 }
 
                 Section("Footage") {
                     Button { showCamera = true } label: {
                         Label("Record in CutSell", systemImage: "camera.fill")
                     }
+                    .disabled(resumeProjectID != nil)
 
                     PhotosPicker(
                         selection: $pickerItems,
@@ -46,6 +66,7 @@ struct NewCutView: View {
                     ) {
                         Label(selected.isEmpty ? "Choose from Photos" : "Add from Photos", systemImage: "photo.on.rectangle")
                     }
+                    .disabled(resumeProjectID != nil)
                     .onChange(of: pickerItems) { _, items in Task { await load(items) } }
 
                     if selected.isEmpty {
@@ -66,13 +87,20 @@ struct NewCutView: View {
                             Text("\(index + 1)").font(.caption.monospacedDigit())
                         }
                     }
-                    .onMove { source, destination in selected.move(fromOffsets: source, toOffset: destination) }
-                    .onDelete { selected.remove(atOffsets: $0) }
+                    .onMove { source, destination in
+                        guard resumeProjectID == nil else { return }
+                        selected.move(fromOffsets: source, toOffset: destination)
+                    }
+                    .onDelete {
+                        guard resumeProjectID == nil else { return }
+                        selected.remove(atOffsets: $0)
+                    }
                 }
 
                 if mode == .multiple {
                     Section("Cut behavior") {
                         Toggle("Natural audio overlap", isOn: $audioOverlap)
+                            .disabled(resumeProjectID != nil)
                         Text("Off is the safest default. You can change audio later in the editor.")
                             .font(.caption)
                             .foregroundStyle(.secondary)
@@ -86,13 +114,13 @@ struct NewCutView: View {
                     }
                 }
             }
-            .environment(\.editMode, .constant(mode == .multiple ? .active : .inactive))
-            .navigationTitle("New Cut")
+            .environment(\.editMode, .constant(mode == .multiple && resumeProjectID == nil ? .active : .inactive))
+            .navigationTitle(resumeProjectID == nil ? "New Cut" : "Resume Cut")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("Create") { Task { await submit() } }
+                    Button(resumeProjectID == nil ? "Create" : "Resume") { Task { await submit() } }
                         .disabled(selected.isEmpty || isSubmitting)
                 }
             }
@@ -149,15 +177,41 @@ struct NewCutView: View {
         isSubmitting = true
         progress = 0
         do {
-            statusText = "Creating project…"
-            let project = try await appState.createProject(title: title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : title)
+            let projectID: String
+            if let resumeProjectID {
+                projectID = resumeProjectID
+                statusText = "Resuming upload…"
+            } else {
+                statusText = "Creating project…"
+                let project = try await appState.createProject(
+                    title: title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : title
+                )
+                projectID = project.projectID
+                let pending = PendingCutRecord(
+                    projectID: projectID,
+                    title: project.title,
+                    mode: mode.rawValue,
+                    audioOverlap: audioOverlap,
+                    videos: selected.map {
+                        PendingCutVideo(
+                            filePath: $0.url.path,
+                            name: $0.name,
+                            duration: $0.duration,
+                            contentType: $0.contentType
+                        )
+                    },
+                    createdAt: Date()
+                )
+                await PendingCutStore.shared.save(pending)
+            }
+
             var sources: [SourceInput] = []
             for (index, video) in selected.enumerated() {
                 statusText = "Uploading \(index + 1) of \(selected.count)…"
                 let base = Double(index) / Double(selected.count)
                 let result = try await MultipartUploadManager.shared.upload(
                     fileURL: video.url,
-                    projectID: project.projectID,
+                    projectID: projectID,
                     session: session,
                     contentType: video.contentType
                 ) { partProgress in
@@ -183,13 +237,14 @@ struct NewCutView: View {
                 "/v1/flow-b/jobs",
                 method: "POST",
                 body: Body(
-                    project_id: project.projectID,
+                    project_id: projectID,
                     user_id: session.userID,
                     sources: sources,
                     language_hint: nil,
                     audio_overlap: audioOverlap
                 )
             )
+            await PendingCutStore.shared.remove(projectID: projectID, deleteLocalFiles: true)
             progress = 1
             try await appState.refreshProjects()
             dismiss()
