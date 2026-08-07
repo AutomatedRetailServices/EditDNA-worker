@@ -6,6 +6,7 @@ from pathlib import Path
 
 from .asr import FasterWhisperASR
 from .config import load_runtime_config
+from .draft_store import create_initial_draft
 from .flow_b import process_local_sources
 from .providers import NoopSemanticProvider
 from .semantic_openai import OpenAISemanticProvider
@@ -61,8 +62,24 @@ def run_flow_b_job(payload: dict) -> dict:
                 take_judge_provider=take_judge,
                 progress=publish,
             )
+            serialized = result_to_dict(result)
+            create_initial_draft(
+                user_id=request.user_id,
+                project_id=request.project_id,
+                draft=dict(serialized["draft"]),
+                sources=[
+                    {
+                        "source_asset_id": source.source_asset_id,
+                        "original_name": source.original_name,
+                        "source_order": source.source_order,
+                        "duration_sec": source.duration_sec,
+                        "uri": source.uri,
+                    }
+                    for source in request.sources
+                ],
+            )
             publish("draft_ready", 100)
-            return result_to_dict(result)
+            return serialized
     except Exception as exc:
         if job is not None:
             job.meta["stage"] = "failed"
