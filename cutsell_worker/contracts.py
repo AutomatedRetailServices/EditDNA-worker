@@ -156,6 +156,17 @@ class DraftClip:
 
 
 @dataclass(frozen=True)
+class TextOverlay:
+    overlay_id: str
+    text: str
+    start: float
+    end: float
+    x: float = 0.5
+    y: float = 0.2
+    scale: float = 1.0
+
+
+@dataclass(frozen=True)
 class DraftTimeline:
     schema_version: str
     project_id: str
@@ -166,6 +177,7 @@ class DraftTimeline:
     diagnostics: Dict[str, object] = field(default_factory=dict)
     captions_enabled: bool = True
     caption_preset: str = "classic"
+    text_overlays: Tuple[TextOverlay, ...] = ()
 
 
 @dataclass(frozen=True)
