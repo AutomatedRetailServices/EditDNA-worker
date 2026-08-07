@@ -1,2 +1,2 @@
-run=2
-reason=list current pods before GPU smoke
+run=3
+reason=resolve current template metadata before GPU smoke
