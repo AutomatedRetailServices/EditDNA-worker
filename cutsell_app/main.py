@@ -15,6 +15,7 @@ from cutsell_worker.draft_edits import (
     reorder_clips,
     restore_clip,
     swap_take,
+    trim_clip,
 )
 from cutsell_worker.draft_store import DraftConflictError, get_draft_snapshot, save_draft_snapshot
 from cutsell_worker.jobs import cancel_job, fetch_job_snapshot
@@ -118,6 +119,11 @@ class DraftRestoreRequest(DraftClipRequest):
 class DraftReorderRequest(BaseModel):
     draft: dict[str, Any]
     ordered_clip_ids: list[str]
+
+
+class DraftTrimRequest(DraftClipRequest):
+    start: float = Field(ge=0)
+    end: float = Field(gt=0)
 
 
 class CaptionEdit(BaseModel):
@@ -313,6 +319,14 @@ def edit_restore_clip(payload: DraftRestoreRequest):
 def edit_reorder_clips(payload: DraftReorderRequest):
     try:
         return reorder_clips(payload.draft, payload.ordered_clip_ids)
+    except DraftEditError as exc:
+        _draft_edit_error(exc)
+
+
+@app.post("/v1/draft-edits/trim")
+def edit_trim_clip(payload: DraftTrimRequest):
+    try:
+        return trim_clip(payload.draft, payload.clip_id, start=payload.start, end=payload.end)
     except DraftEditError as exc:
         _draft_edit_error(exc)
 
