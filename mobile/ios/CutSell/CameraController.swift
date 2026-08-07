@@ -1,4 +1,4 @@
-import AVFoundation
+@preconcurrency import AVFoundation
 import Foundation
 
 @MainActor
@@ -95,7 +95,7 @@ final class CameraController: NSObject, ObservableObject {
     }
 
     private func configure(position: AVCaptureDevice.Position) async throws {
-        try await withCheckedThrowingContinuation { continuation in
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
             sessionQueue.async { [weak self] in
                 guard let self else {
                     continuation.resume(throwing: CameraError.configurationFailed)
@@ -134,7 +134,7 @@ final class CameraController: NSObject, ObservableObject {
                     continuation.resume(throwing: CameraError.configurationFailed)
                     return
                 }
-                continuation.resume()
+                continuation.resume(returning: ())
             }
         }
     }
