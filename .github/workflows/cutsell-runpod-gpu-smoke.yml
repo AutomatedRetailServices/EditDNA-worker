@@ -15,6 +15,11 @@ on:
         options:
           - COMMUNITY
           - SECURE
+  push:
+    branches:
+      - cutsell/mobile-v1-asap-scope
+    paths:
+      - ".cutsell/runpod-gpu-smoke-trigger.txt"
 
 permissions:
   contents: read
@@ -35,7 +40,13 @@ jobs:
         shell: bash
         env:
           APPROVAL: ${{ inputs.approval }}
+          EVENT_NAME: ${{ github.event_name }}
         run: |
+          set -euo pipefail
+          if [ "$EVENT_NAME" = "push" ]; then
+            test -f .cutsell/runpod-gpu-smoke-trigger.txt || { echo 'approval marker missing'; exit 2; }
+            APPROVAL=$(head -n1 .cutsell/runpod-gpu-smoke-trigger.txt | tr -d '\r\n')
+          fi
           test "$APPROVAL" = "APPROVE_PAID_GPU_SMOKE" || {
             echo 'Paid GPU smoke was not explicitly approved.'
             exit 2
@@ -76,7 +87,7 @@ jobs:
         id: create
         shell: bash
         env:
-          CLOUD_TYPE: ${{ inputs.cloud_type }}
+          CLOUD_TYPE: ${{ inputs.cloud_type || 'COMMUNITY' }}
         run: |
           set -euo pipefail
           CMD=$(cat <<'BASH'
