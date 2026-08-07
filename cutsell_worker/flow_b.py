@@ -4,7 +4,7 @@ from __future__ import annotations
 from dataclasses import replace
 from pathlib import Path
 import tempfile
-from typing import Mapping
+from typing import Callable, Mapping
 
 from .asr import ASRProvider
 from .contracts import ProcessingRequest, ProcessingResult
@@ -21,6 +21,8 @@ from .visual_analysis import (
     safe_visual_analyze,
 )
 
+ProgressCallback = Callable[[str, int], None]
+
 
 def process_local_sources(
     request: ProcessingRequest,
@@ -29,16 +31,20 @@ def process_local_sources(
     asr_provider: ASRProvider,
     semantic_provider: SemanticProvider | None = None,
     visual_provider: VisualProvider | None = None,
+    progress: ProgressCallback | None = None,
 ) -> ProcessingResult:
     """Process registered sources all the way from local media to editable draft.
 
     ``local_paths`` is keyed by source_asset_id. Download/upload concerns remain
     outside this function so the engine stays deterministic and testable.
+    Progress percentages represent completed real pipeline stages rather than a timer.
     """
+    notify = progress or (lambda _stage, _percent: None)
     trace = ExecutionTrace()
     hydrated_sources = []
     transcripts = []
 
+    notify("preparing", 2)
     for source in sorted(request.sources, key=lambda item: item.source_order):
         path = local_paths.get(source.source_asset_id)
         if not path:
@@ -59,29 +65,35 @@ def process_local_sources(
             },
         )
         hydrated_sources.append(hydrated)
-        if not probe.has_audio:
+    trace.complete("media_probe", source_count=len(hydrated_sources))
+    notify("transcribing", 12)
+
+    source_by_id = {source.source_asset_id: source for source in hydrated_sources}
+    for source in sorted(hydrated_sources, key=lambda item: item.source_order):
+        if not source.has_audio:
             continue
         transcripts.extend(asr_provider.transcribe(
-            path,
+            local_paths[source.source_asset_id],
             source_asset_id=source.source_asset_id,
             language_hint=request.language_hint,
         ))
-
-    trace.complete("media_probe", source_count=len(hydrated_sources))
     trace.complete("asr", segment_count=len(transcripts))
+    notify("analyzing", 40)
 
     gaps = word_silence_gaps(transcripts)
     trace.complete("silence_analysis", gap_count=len(gaps))
+    notify("analyzing", 48)
 
     takes = segment_takes(transcripts, hydrated_sources, gaps)
     trace.complete("take_segmentation", candidate_count=len(takes))
+    notify("analyzing", 58)
 
     if visual_provider is not None and takes:
         with tempfile.TemporaryDirectory(prefix="cutsell-frames-") as frame_dir:
             samples = []
             for take in takes:
                 source_path = local_paths.get(take.source_asset_id)
-                if not source_path:
+                if not source_path or take.source_asset_id not in source_by_id:
                     raise ValueError("candidate take lost source identity")
                 samples.extend(sample_take_frames(source_path, take, frame_dir))
             visual = safe_visual_analyze(visual_provider, takes, tuple(samples))
@@ -97,15 +109,18 @@ def process_local_sources(
             )
     else:
         trace.complete("visual", status="not_requested", observation_count=0, frame_count=0)
+    notify("analyzing", 72)
 
     semantic = safe_semantic_classify(semantic_provider or NoopSemanticProvider(), takes)
     if semantic.status.status in {"provider_error", "provider_unavailable"}:
         trace.degraded("semantic", reason=semantic.status.reason or semantic.status.status)
     else:
         trace.complete("semantic", status=semantic.status.status, label_count=len(semantic.labels))
+    notify("composing", 84)
 
     hydrated_request = replace(request, sources=tuple(hydrated_sources))
     result = build_flow_b_draft(hydrated_request, takes, semantic.labels)
+    notify("draft_ready", 100)
     return replace(
         result,
         stage_status={
