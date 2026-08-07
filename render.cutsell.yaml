@@ -24,11 +24,11 @@ services:
       - key: CUTSELL_ASR_MODEL
         value: medium
       - key: CUTSELL_SEMANTIC_MODEL
-        value: gpt-5.4-nano
+        value: gpt-4o-mini
       - key: CUTSELL_VISUAL_MODEL
-        value: gpt-5.4-nano
+        value: gpt-4o-mini
       - key: CUTSELL_TAKE_JUDGE_MODEL
-        value: gpt-5.4-mini
+        value: gpt-4o-mini
 
   - type: worker
     name: cutsell-worker
@@ -57,8 +57,8 @@ services:
       - key: CUTSELL_ASR_MODEL
         value: medium
       - key: CUTSELL_SEMANTIC_MODEL
-        value: gpt-5.4-nano
+        value: gpt-4o-mini
       - key: CUTSELL_VISUAL_MODEL
-        value: gpt-5.4-nano
+        value: gpt-4o-mini
       - key: CUTSELL_TAKE_JUDGE_MODEL
-        value: gpt-5.4-mini
+        value: gpt-4o-mini
