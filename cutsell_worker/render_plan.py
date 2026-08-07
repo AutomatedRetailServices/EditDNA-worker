@@ -14,6 +14,8 @@ class RenderSegment:
     source_path: str
     start: float
     end: float
+    audio_muted: bool = False
+    audio_volume: float = 1.0
 
     @property
     def duration_sec(self) -> float:
@@ -29,12 +31,17 @@ def build_render_plan(draft: DraftTimeline, local_paths: Mapping[str, str]) -> T
             raise ValueError(f"missing source path for selected clip {clip.clip_id}")
         if clip.end <= clip.start:
             raise ValueError(f"invalid selected clip boundary {clip.clip_id}")
+        volume = float(clip.audio_volume)
+        if volume < 0.0 or volume > 2.0:
+            raise ValueError(f"invalid audio volume for selected clip {clip.clip_id}")
         output.append(RenderSegment(
             clip_id=clip.clip_id,
             source_asset_id=clip.source_asset_id,
             source_path=path,
             start=float(clip.start),
             end=float(clip.end),
+            audio_muted=bool(clip.audio_muted),
+            audio_volume=volume,
         ))
     if not output:
         raise ValueError("draft has no selected clips to render")
