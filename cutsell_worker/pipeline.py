@@ -1,0 +1,138 @@
+"""Clean orchestration for CutSell Flow B Milestone 1."""
+from __future__ import annotations
+
+import hashlib
+from typing import Dict, Iterable, Mapping, Tuple
+
+from .clean_cut import apply_clean_cut
+from .composer import compose_selected
+from .contracts import (
+    CandidateTake,
+    DraftClip,
+    DraftTimeline,
+    EditStrategy,
+    JobState,
+    ProcessingRequest,
+    ProcessingResult,
+    SCHEMA_VERSION,
+    SemanticLabel,
+    SemanticRole,
+    TakeGroup,
+)
+from .strategy import choose_strategy
+from .take_grouping import group_takes
+from .take_judge import rank_takes
+
+
+def _group_id(project_id: str, key: str) -> str:
+    return "tg_" + hashlib.sha256(f"{project_id}|{key}".encode()).hexdigest()[:18]
+
+
+def _draft_clip(take: CandidateTake, *, role: SemanticRole, group_id: str | None, selected: bool) -> DraftClip:
+    return DraftClip(
+        clip_id=take.clip_id,
+        source_asset_id=take.source_asset_id,
+        source_order=take.source_order,
+        start=take.start,
+        end=take.end,
+        text=take.text,
+        caption_text=take.text,
+        semantic_role=role,
+        take_group_id=group_id,
+        selected=selected,
+    )
+
+
+def build_flow_b_draft(
+    request: ProcessingRequest,
+    takes: Iterable[CandidateTake],
+    semantic_labels: Iterable[SemanticLabel] = (),
+) -> ProcessingResult:
+    """Build an editable draft from already-transcribed/segmented takes.
+
+    ASR and multimodal providers plug in before this boundary. This core stays
+    deterministic and testable.
+    """
+    take_tuple = tuple(takes)
+    label_map: Mapping[str, SemanticLabel] = {label.clip_id: label for label in semantic_labels}
+
+    kept, discarded, decisions = apply_clean_cut(take_tuple)
+    grouped = group_takes(kept)
+    groups = []
+    clip_to_group: Dict[str, str] = {}
+
+    for key, members in grouped.items():
+        ranked = rank_takes(members)
+        selected_clip_id = ranked[0].clip_id
+        gid = _group_id(request.project_id, key)
+        group = TakeGroup(
+            group_id=gid,
+            semantic_key=key,
+            candidate_ids=tuple(member.clip_id for member in members),
+            ranked=ranked,
+            selected_clip_id=selected_clip_id,
+        )
+        groups.append(group)
+        for member in members:
+            clip_to_group[member.clip_id] = gid
+
+    selected_takes = compose_selected(kept, groups, label_map.values())
+    selected_ids = {take.clip_id for take in selected_takes}
+    kept_map = {take.clip_id: take for take in kept}
+
+    selected = tuple(
+        _draft_clip(
+            take,
+            role=label_map.get(take.clip_id, SemanticLabel(take.clip_id, SemanticRole.OTHER, 0.0)).role,
+            group_id=clip_to_group.get(take.clip_id),
+            selected=True,
+        )
+        for take in selected_takes
+    )
+    alternates = tuple(
+        _draft_clip(
+            take,
+            role=label_map.get(take.clip_id, SemanticLabel(take.clip_id, SemanticRole.OTHER, 0.0)).role,
+            group_id=clip_to_group.get(take.clip_id),
+            selected=False,
+        )
+        for take in kept
+        if take.clip_id not in selected_ids
+    )
+    discarded_clips = tuple(
+        _draft_clip(
+            take,
+            role=label_map.get(take.clip_id, SemanticLabel(take.clip_id, SemanticRole.OTHER, 0.0)).role,
+            group_id=None,
+            selected=False,
+        )
+        for take in discarded
+    )
+
+    strategy = choose_strategy(label_map.values()) if label_map else EditStrategy.MIXED
+    draft = DraftTimeline(
+        schema_version=SCHEMA_VERSION,
+        project_id=request.project_id,
+        strategy=strategy,
+        selected=selected,
+        alternates=alternates,
+        discarded=discarded_clips,
+        diagnostics={
+            "clean_cut_decisions": [decision.__dict__ for decision in decisions],
+            "take_group_count": len(groups),
+            "source_count": len(request.sources),
+        },
+    )
+    return ProcessingResult(
+        schema_version=SCHEMA_VERSION,
+        project_id=request.project_id,
+        state=JobState.DRAFT_READY,
+        draft=draft,
+        stage_status={
+            "clean_cut": "complete",
+            "take_grouping": "complete",
+            "take_judge": "baseline_complete",
+            "semantic": "provided" if label_map else "not_provided",
+            "composer": "complete",
+        },
+    )
