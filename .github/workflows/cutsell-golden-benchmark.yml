@@ -148,6 +148,34 @@ jobs:
               raise SystemExit('Golden benchmark found hard structural draft failures')
           PY
 
+      - name: Check known real-video reject regressions
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          report = json.loads(Path('cutsell-golden-benchmark.json').read_text(encoding='utf-8'))
+          expectations = json.loads(Path('tests/data/cutsell_golden_expectations.json').read_text(encoding='utf-8'))
+          violations = []
+          checked = 0
+          for item in report.get('results') or []:
+              validation = item.get('validation') or {}
+              key = str(validation.get('source_key') or '')
+              expected = expectations.get(key)
+              if not expected:
+                  continue
+              checked += 1
+              selected_text = ' '.join(str(clip.get('text') or '') for clip in validation.get('selected') or []).lower()
+              for needle in expected.get('must_not_select_substrings') or []:
+                  if str(needle).lower() in selected_text:
+                      violations.append({'source_key': key, 'forbidden_selected_text': needle})
+          print(json.dumps({'golden_expectation_sources_checked': checked, 'violations': violations}, indent=2))
+          if violations:
+              raise SystemExit('Known real-video blooper regression detected')
+          PY
+
       - name: Upload benchmark report and previews
         if: always()
         uses: actions/upload-artifact@v4
