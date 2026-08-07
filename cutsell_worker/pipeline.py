@@ -59,8 +59,11 @@ def build_flow_b_draft(
     clip_to_group: Dict[str, str] = {}
     judge_statuses = Counter()
     judge_reasons = Counter()
+    alternate_group_count = 0
 
     for key, members in grouped.items():
+        if len(members) >= 2:
+            alternate_group_count += 1
         judged = safe_rank_takes(members, take_judge_provider)
         ranked = judged.ranked
         judge_statuses[judged.status.status] += 1
@@ -124,14 +127,20 @@ def build_flow_b_draft(
         diagnostics={
             "clean_cut_decisions": [decision.__dict__ for decision in decisions],
             "take_group_count": len(groups),
+            "alternate_group_count": alternate_group_count,
             "source_count": len(request.sources),
             "take_judge_status_counts": dict(judge_statuses),
             "take_judge_fallback_reasons": dict(judge_reasons),
         },
     )
-    judge_stage = "provider_complete" if judge_statuses.get("applied") else "baseline_complete"
-    if judge_statuses.get("provider_error_fallback"):
+    if alternate_group_count == 0:
+        judge_stage = "not_applicable_no_alternates"
+    elif judge_statuses.get("applied"):
+        judge_stage = "provider_complete"
+    elif judge_statuses.get("provider_error_fallback"):
         judge_stage = "degraded_fallback"
+    else:
+        judge_stage = "baseline_complete"
     return ProcessingResult(
         schema_version=SCHEMA_VERSION,
         project_id=request.project_id,
