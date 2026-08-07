@@ -1,8 +1,9 @@
 """Clean orchestration for CutSell Flow B Milestone 1."""
 from __future__ import annotations
 
+from collections import Counter
 import hashlib
-from typing import Dict, Iterable, Mapping, Tuple
+from typing import Dict, Iterable, Mapping
 
 from .clean_cut import apply_clean_cut
 from .composer import compose_selected
@@ -21,7 +22,7 @@ from .contracts import (
 )
 from .strategy import choose_strategy
 from .take_grouping import group_takes
-from .take_judge import rank_takes
+from .take_judge_provider import TakeJudgeProvider, safe_rank_takes
 
 
 def _group_id(project_id: str, key: str) -> str:
@@ -47,12 +48,9 @@ def build_flow_b_draft(
     request: ProcessingRequest,
     takes: Iterable[CandidateTake],
     semantic_labels: Iterable[SemanticLabel] = (),
+    take_judge_provider: TakeJudgeProvider | None = None,
 ) -> ProcessingResult:
-    """Build an editable draft from already-transcribed/segmented takes.
-
-    ASR and multimodal providers plug in before this boundary. This core stays
-    deterministic and testable.
-    """
+    """Build an editable draft from already-transcribed/segmented takes."""
     take_tuple = tuple(takes)
     label_map: Mapping[str, SemanticLabel] = {label.clip_id: label for label in semantic_labels}
 
@@ -60,9 +58,15 @@ def build_flow_b_draft(
     grouped = group_takes(kept)
     groups = []
     clip_to_group: Dict[str, str] = {}
+    judge_statuses = Counter()
+    judge_reasons = Counter()
 
     for key, members in grouped.items():
-        ranked = rank_takes(members)
+        judged = safe_rank_takes(members, take_judge_provider)
+        ranked = judged.ranked
+        judge_statuses[judged.status.status] += 1
+        if judged.status.reason:
+            judge_reasons[judged.status.reason] += 1
         selected_clip_id = ranked[0].clip_id
         gid = _group_id(request.project_id, key)
         group = TakeGroup(
@@ -78,7 +82,6 @@ def build_flow_b_draft(
 
     selected_takes = compose_selected(kept, groups, label_map.values())
     selected_ids = {take.clip_id for take in selected_takes}
-    kept_map = {take.clip_id: take for take in kept}
 
     selected = tuple(
         _draft_clip(
@@ -121,8 +124,13 @@ def build_flow_b_draft(
             "clean_cut_decisions": [decision.__dict__ for decision in decisions],
             "take_group_count": len(groups),
             "source_count": len(request.sources),
+            "take_judge_status_counts": dict(judge_statuses),
+            "take_judge_fallback_reasons": dict(judge_reasons),
         },
     )
+    judge_stage = "provider_complete" if judge_statuses.get("applied") else "baseline_complete"
+    if judge_statuses.get("provider_error_fallback"):
+        judge_stage = "degraded_fallback"
     return ProcessingResult(
         schema_version=SCHEMA_VERSION,
         project_id=request.project_id,
@@ -131,7 +139,7 @@ def build_flow_b_draft(
         stage_status={
             "clean_cut": "complete",
             "take_grouping": "complete",
-            "take_judge": "baseline_complete",
+            "take_judge": judge_stage,
             "semantic": "provided" if label_map else "not_provided",
             "composer": "complete",
         },
