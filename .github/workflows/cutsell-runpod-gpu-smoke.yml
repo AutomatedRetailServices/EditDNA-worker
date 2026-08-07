@@ -162,6 +162,11 @@ jobs:
             --arg marker "$MARKER_KEY" \
             --arg preview "$PREVIEW_KEY" \
             --arg source "$SOURCE_KEY" \
+            --arg aws_access "$AWS_ACCESS_KEY_ID" \
+            --arg aws_secret "$AWS_SECRET_ACCESS_KEY" \
+            --arg aws_region "$AWS_REGION" \
+            --arg bucket "$S3_BUCKET" \
+            --arg openai "$OPENAI_API_KEY" \
             '{
               name: $name,
               templateId: $template,
@@ -182,6 +187,11 @@ jobs:
               dockerEntrypoint: ["bash", "-lc"],
               dockerStartCmd: [$cmd],
               env: {
+                AWS_ACCESS_KEY_ID: $aws_access,
+                AWS_SECRET_ACCESS_KEY: $aws_secret,
+                AWS_REGION: $aws_region,
+                S3_BUCKET: $bucket,
+                OPENAI_API_KEY: $openai,
                 CUTSELL_SMOKE_HEAD_SHA: $head,
                 CUTSELL_SMOKE_MARKER_KEY: $marker,
                 CUTSELL_SMOKE_PREVIEW_KEY: $preview,
@@ -198,6 +208,7 @@ jobs:
             --header "Content-Type: application/json" \
             --data @create-pod.json \
             --output pod.json
+          rm -f create-pod.json
           POD_ID=$(jq -r '.id // empty' pod.json)
           test -n "$POD_ID" || { jq '{error,errors,message}' pod.json; exit 6; }
           echo "pod_id=$POD_ID" >> "$GITHUB_OUTPUT"
