@@ -100,3 +100,29 @@ def test_semantic_execution_reports_not_requested_explicitly():
     assert source["fallback_reasons"] == {}
     assert result["clips"][0]["meta"]["semantic_v2_execution_status"] == "not_requested"
     assert "semantic_v2_fallback_reason" not in result["clips"][0]["meta"]
+
+
+def test_semantic_execution_is_propagated_to_editable_draft_items():
+    result = {
+        "processed_source_indices": [0],
+        "clips": [
+            _clip("a", semantic_v2={"applied": True, "abstain": False}),
+            _clip("b"),
+        ],
+        "editable_draft": {
+            "selected": [{"clip_id": "a"}],
+            "alternates": [{"clip_id": "b"}],
+            "discarded": [],
+        },
+    }
+    attach_semantic_execution(
+        result,
+        requested=True,
+        provider_available=True,
+    )
+    selected = result["editable_draft"]["selected"][0]
+    alternate = result["editable_draft"]["alternates"][0]
+    assert selected["semantic_v2_execution_status"] == "applied"
+    assert "semantic_v2_fallback_reason" not in selected
+    assert alternate["semantic_v2_execution_status"] == "classifier_no_result"
+    assert alternate["semantic_v2_fallback_reason"] == "missing_semantic_result"
