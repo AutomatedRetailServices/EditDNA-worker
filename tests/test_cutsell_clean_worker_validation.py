@@ -21,6 +21,30 @@ class FakeS3:
         }
 
 
+class PaginatedFakeS3:
+    def __init__(self):
+        self.calls = []
+
+    def list_objects_v2(self, **kwargs):
+        self.calls.append(dict(kwargs))
+        if "ContinuationToken" not in kwargs:
+            return {
+                "IsTruncated": True,
+                "NextContinuationToken": "page-2",
+                "Contents": [
+                    {"Key": "Editdna bloopers videos/.DS_Store", "Size": 100000},
+                    {"Key": "Editdna bloopers videos/readme.txt", "Size": 100000},
+                ],
+            }
+        assert kwargs["ContinuationToken"] == "page-2"
+        return {
+            "IsTruncated": False,
+            "Contents": [
+                {"Key": "Editdna bloopers videos/Bloppers7.mp4", "Size": 70000000},
+            ],
+        }
+
+
 def test_validation_inventory_is_bounded_video_only_and_ignores_macos_metadata(monkeypatch):
     monkeypatch.setattr(
         validation,
@@ -32,6 +56,20 @@ def test_validation_inventory_is_bounded_video_only_and_ignores_macos_metadata(m
         "Editdna bloopers videos/a.mov",
         "Editdna bloopers videos/b.mp4",
     ]
+
+
+def test_validation_inventory_paginates_until_real_video_is_found(monkeypatch):
+    monkeypatch.setattr(
+        validation,
+        "load_runtime_config",
+        lambda: SimpleNamespace(s3_bucket="bucket", aws_region="us-east-1"),
+    )
+    s3 = PaginatedFakeS3()
+    items = validation.list_validation_videos(s3=s3, limit=1)
+    assert [item["key"] for item in items] == ["Editdna bloopers videos/Bloppers7.mp4"]
+    assert len(s3.calls) == 2
+    assert "ContinuationToken" not in s3.calls[0]
+    assert s3.calls[1]["ContinuationToken"] == "page-2"
 
 
 def test_validation_rejects_appledouble_as_explicit_video_key():
