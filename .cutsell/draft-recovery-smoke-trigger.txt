@@ -1,0 +1,2 @@
+run=2026-08-07T11:44Z
+purpose=validate real Redis autosave revision conflict recovery and cleanup
