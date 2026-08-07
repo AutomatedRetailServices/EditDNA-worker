@@ -1,10 +1,11 @@
 name: CutSell OpenAI Model Preflight
 
 on:
-  pull_request:
-    branches: [main]
+  workflow_dispatch:
+  push:
+    branches:
+      - cutsell/mobile-v1-asap-scope
     paths:
-      - ".github/workflows/cutsell-openai-model-preflight.yml"
       - ".cutsell/openai-model-preflight-trigger.txt"
 
 permissions:
@@ -55,17 +56,13 @@ jobs:
           usable = []
           for model in candidates:
               try:
-                  client.responses.create(
-                      model=model,
-                      input="Reply with OK.",
-                  )
+                  client.responses.create(model=model, input="Reply with OK.")
                   print(f"{model}=available")
                   usable.append(model)
               except Exception as exc:
                   status = getattr(exc, "status_code", None)
                   code = getattr(exc, "code", None)
                   param = getattr(exc, "param", None)
-                  # Error metadata only; never print request headers/key or response content.
                   print(f"{model}=unavailable class={exc.__class__.__name__} status={status} code={code} param={param}")
           if not usable:
               raise SystemExit("no_candidate_model_available")
