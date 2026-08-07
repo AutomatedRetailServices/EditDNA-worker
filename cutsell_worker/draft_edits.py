@@ -1,12 +1,13 @@
 """Pure stateless edits for the CutSell mobile Draft Timeline.
 
 Every operation returns a new JSON-safe draft and never mutates its input. The
-mobile client can therefore keep its own undo/redo stack while persistence is built
-later. Commercial meaning never grants deletion authority here.
+mobile client can therefore keep its own undo/redo stack. Commercial meaning never
+grants deletion authority here.
 """
 from __future__ import annotations
 
 from copy import deepcopy
+import hashlib
 from typing import Any, Mapping, Sequence
 
 
@@ -15,6 +16,7 @@ class DraftEditError(ValueError):
 
 
 MIN_TRIM_DURATION_SEC = 0.15
+MIN_SPLIT_DURATION_SEC = 0.15
 
 
 def _clip_id(item: Mapping[str, Any]) -> str:
@@ -35,6 +37,48 @@ def _copy_draft(draft: Mapping[str, Any]) -> dict[str, Any]:
         if field not in out or not isinstance(out[field], list):
             raise DraftEditError(f"draft requires {field} list")
     return out
+
+
+def _words(item: Mapping[str, Any]) -> list[dict[str, Any]]:
+    raw = item.get("words") or []
+    if not isinstance(raw, list):
+        raise DraftEditError("clip word timings must be a list")
+    output = []
+    for word in raw:
+        if not isinstance(word, Mapping):
+            raise DraftEditError("clip word timing is invalid")
+        try:
+            start = float(word["start"])
+            end = float(word["end"])
+        except (KeyError, TypeError, ValueError):
+            raise DraftEditError("clip word timing is invalid") from None
+        if end < start:
+            raise DraftEditError("clip word timing is invalid")
+        output.append({
+            "text": str(word.get("text") or ""),
+            "start": start,
+            "end": end,
+            **({"confidence": word.get("confidence")} if word.get("confidence") is not None else {}),
+        })
+    return output
+
+
+def _text_from_words(words: Sequence[Mapping[str, Any]]) -> str:
+    tokens = [str(word.get("text") or "") for word in words]
+    if not tokens:
+        return ""
+    # faster-whisper normally keeps leading spaces on word tokens. Preserve them
+    # when present; otherwise join tokens with spaces rather than concatenating words.
+    if any(token[:1].isspace() for token in tokens[1:]):
+        return "".join(tokens).strip()
+    return " ".join(token.strip() for token in tokens if token.strip()).strip()
+
+
+def _split_child_id(parent_clip_id: str, side: str, start: float, end: float) -> str:
+    digest = hashlib.sha256(
+        f"{parent_clip_id}|{side}|{start:.3f}|{end:.3f}".encode()
+    ).hexdigest()[:16]
+    return f"{parent_clip_id}~{side}-{digest}"
 
 
 def swap_take(draft: Mapping[str, Any], selected_clip_id: str, replacement_clip_id: str) -> dict[str, Any]:
@@ -141,9 +185,82 @@ def trim_clip(
         raise DraftEditError("trim would create an unusable microfragment")
     item["start"] = round(new_start, 3)
     item["end"] = round(new_end, 3)
-    # Transcript/caption strings are not rewritten from guessed text. The media
-    # boundaries change; a later word-aware caption timing layer can narrow timing.
     selected[position] = item
+    out["selected"] = selected
+    return out
+
+
+def split_clip(
+    draft: Mapping[str, Any],
+    clip_id: str,
+    *,
+    split_time: float,
+    min_duration_sec: float = MIN_SPLIT_DURATION_SEC,
+) -> dict[str, Any]:
+    """Split a selected clip at a source timestamp using real word timings only."""
+    out = _copy_draft(draft)
+    selected = list(out["selected"])
+    position = next((i for i, item in enumerate(selected) if _clip_id(item) == clip_id), None)
+    if position is None:
+        raise DraftEditError("selected clip not found")
+    parent = deepcopy(selected[position])
+    try:
+        start = float(parent["start"])
+        end = float(parent["end"])
+        split = float(split_time)
+    except (KeyError, TypeError, ValueError):
+        raise DraftEditError("split requires numeric clip boundaries") from None
+    minimum = max(0.01, float(min_duration_sec))
+    if split <= start or split >= end:
+        raise DraftEditError("split must be inside the selected clip")
+    if split - start < minimum or end - split < minimum:
+        raise DraftEditError("split would create an unusable microfragment")
+
+    words = [word for word in _words(parent) if word["end"] >= start and word["start"] <= end]
+    transcript = str(parent.get("text") or "")
+    caption = str(parent.get("caption_text") if parent.get("caption_text") is not None else transcript)
+    if transcript and not words:
+        raise DraftEditError("word timings are required to split spoken content safely")
+    if transcript and caption != transcript:
+        raise DraftEditError("split custom-caption clip before editing its caption text")
+    if any(word["start"] < split < word["end"] for word in words):
+        raise DraftEditError("split cannot cut through a spoken word")
+
+    left_words = [word for word in words if word["end"] <= split + 1e-6]
+    right_words = [word for word in words if word["start"] >= split - 1e-6]
+    if transcript and (not left_words or not right_words):
+        raise DraftEditError("split must leave spoken words on both sides")
+    left_text = _text_from_words(left_words) if words else ""
+    right_text = _text_from_words(right_words) if words else ""
+
+    parent_group = parent.get("take_group_id")
+    left = deepcopy(parent)
+    right = deepcopy(parent)
+    left.update({
+        "clip_id": _split_child_id(clip_id, "a", start, split),
+        "start": round(start, 3),
+        "end": round(split, 3),
+        "text": left_text,
+        "caption_text": left_text,
+        "words": left_words,
+        "take_group_id": None,
+        "parent_clip_id": clip_id,
+        "split_from_take_group_id": parent_group,
+        "selected": True,
+    })
+    right.update({
+        "clip_id": _split_child_id(clip_id, "b", split, end),
+        "start": round(split, 3),
+        "end": round(end, 3),
+        "text": right_text,
+        "caption_text": right_text,
+        "words": right_words,
+        "take_group_id": None,
+        "parent_clip_id": clip_id,
+        "split_from_take_group_id": parent_group,
+        "selected": True,
+    })
+    selected[position:position + 1] = [left, right]
     out["selected"] = selected
     return out
 
@@ -163,7 +280,6 @@ def patch_captions(draft: Mapping[str, Any], edits: Sequence[Mapping[str, Any]])
     for item in selected:
         clip_id = _clip_id(item)
         if clip_id in captions:
-            # Transcript text remains immutable; only the user-facing caption changes.
             item["caption_text"] = captions[clip_id]
     out["selected"] = selected
     return out
