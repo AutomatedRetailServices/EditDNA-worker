@@ -67,6 +67,17 @@ struct FlowBSubmitResponse: Codable {
     }
 }
 
+struct ExportSubmitResponse: Codable {
+    let jobID: String
+    let queue: String
+    let state: String
+
+    enum CodingKeys: String, CodingKey {
+        case jobID = "job_id"
+        case queue, state
+    }
+}
+
 struct JobStatus: Codable {
     let jobID: String
     let state: String
