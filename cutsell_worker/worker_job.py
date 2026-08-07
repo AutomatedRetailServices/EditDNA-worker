@@ -12,6 +12,7 @@ from .semantic_openai import OpenAISemanticProvider
 from .serde import request_from_dict, result_to_dict
 from .storage import download_source
 from .take_judge_openai import OpenAITakeJudgeProvider
+from .uploads import validate_product_source_uri
 from .visual_openai import OpenAIVisualProvider
 
 
@@ -39,6 +40,9 @@ def run_flow_b_job(payload: dict) -> dict:
         with tempfile.TemporaryDirectory(prefix="cutsell-flow-b-") as directory:
             local_paths = {}
             for index, source in enumerate(request.sources):
+                # Defense in depth: queue callers cannot make the worker use its AWS
+                # credentials to read arbitrary buckets/prefixes.
+                validate_product_source_uri(source.uri)
                 suffix = Path(source.original_name).suffix or ".mp4"
                 destination = str(Path(directory) / f"{source.source_order:03d}-{source.source_asset_id}{suffix}")
                 local_paths[source.source_asset_id] = download_source(source.uri, destination)
