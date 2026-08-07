@@ -7,6 +7,7 @@ from typing import Any
 from fastapi import FastAPI, HTTPException, status
 from pydantic import BaseModel, Field
 
+from cutsell_app.batch_routes import router as batch_router
 from cutsell_app.feedback_routes import router as feedback_router
 from cutsell_app.job_retry_routes import router as job_retry_router
 from cutsell_app.multipart_routes import router as multipart_router
@@ -50,6 +51,7 @@ app.include_router(project_router)
 app.include_router(render_version_router)
 app.include_router(job_retry_router)
 app.include_router(feedback_router)
+app.include_router(batch_router)
 
 
 class UploadPresignRequest(BaseModel):
