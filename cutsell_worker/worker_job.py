@@ -5,6 +5,7 @@ import tempfile
 from pathlib import Path
 
 from .asr import FasterWhisperASR
+from .clean_cut_openai import OpenAICleanCutProvider
 from .config import load_runtime_config
 from .draft_store import create_initial_draft
 from .flow_b import process_local_sources
@@ -105,6 +106,11 @@ def run_flow_b_job(payload: dict) -> dict:
     semantic = OpenAISemanticProvider(model=config.semantic_model) if config.semantic_ready else NoopSemanticProvider()
     visual = OpenAIVisualProvider(model=config.visual_model) if config.visual_ready else None
     take_judge = OpenAITakeJudgeProvider(model=config.take_judge_model) if config.semantic_ready else None
+    clean_cut_judge = (
+        OpenAICleanCutProvider(model=config.clean_cut_judge_model)
+        if config.clean_cut_judge_ready
+        else None
+    )
 
     try:
         publish("preparing", 1)
@@ -128,6 +134,7 @@ def run_flow_b_job(payload: dict) -> dict:
                 semantic_provider=semantic,
                 visual_provider=visual,
                 take_judge_provider=take_judge,
+                clean_cut_provider=clean_cut_judge,
                 progress=publish,
             )
             serialized = result_to_dict(result)
