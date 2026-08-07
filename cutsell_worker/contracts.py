@@ -151,6 +151,8 @@ class DraftClip:
     semantic_role: SemanticRole = SemanticRole.OTHER
     take_group_id: Optional[str] = None
     selected: bool = True
+    audio_muted: bool = False
+    audio_volume: float = 1.0
 
 
 @dataclass(frozen=True)
