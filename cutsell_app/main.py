@@ -5,6 +5,7 @@ from fastapi import FastAPI, HTTPException, status
 from pydantic import BaseModel, Field
 
 from cutsell_worker.config import load_runtime_config
+from cutsell_worker.jobs import cancel_job, fetch_job_snapshot
 from cutsell_worker.queueing import enqueue_flow_b
 from cutsell_worker.source_identity import stable_source_id
 
@@ -30,6 +31,14 @@ class FlowBSubmitResponse(BaseModel):
     job_id: str
     queue: str
     state: str = "uploaded"
+
+
+class JobStatusResponse(BaseModel):
+    job_id: str
+    state: str
+    progress: int | None = None
+    result: object | None = None
+    error: str | None = None
 
 
 @app.get("/v1/healthz")
@@ -68,3 +77,21 @@ def submit_flow_b(payload: FlowBSubmitRequest):
         "audio_overlap": payload.audio_overlap,
     })
     return FlowBSubmitResponse(job_id=submission.job_id, queue=submission.queue_name)
+
+
+@app.get("/v1/jobs/{job_id}", response_model=JobStatusResponse)
+def get_job(job_id: str):
+    try:
+        snapshot = fetch_job_snapshot(job_id)
+    except KeyError:
+        raise HTTPException(status_code=404, detail="job not found") from None
+    return JobStatusResponse(**snapshot.__dict__)
+
+
+@app.post("/v1/jobs/{job_id}/cancel", response_model=JobStatusResponse)
+def cancel_processing_job(job_id: str):
+    try:
+        snapshot = cancel_job(job_id)
+    except KeyError:
+        raise HTTPException(status_code=404, detail="job not found") from None
+    return JobStatusResponse(**snapshot.__dict__)
