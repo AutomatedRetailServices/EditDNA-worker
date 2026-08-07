@@ -25,11 +25,22 @@ def benchmark_video_key(job_id: str, session_id: str) -> str:
     return benchmark_s3.validate_output_key(key, job_id)
 
 
+def _attach_semantic_execution(result: Dict[str, Any], *, requested: bool) -> Dict[str, Any]:
+    """Decorate a public/RQ result without changing pipeline clip decisions."""
+    from worker.execution_observability import attach_semantic_execution
+
+    return attach_semantic_execution(result, requested=requested)
+
+
 def run_pipeline(**kwargs):
     """Load the heavyweight media pipeline only when a render actually runs."""
-    from worker.pipeline import run_pipeline as pipeline_run
+    import worker.pipeline as pipeline_module
 
-    return pipeline_run(**kwargs)
+    result = pipeline_module.run_pipeline(**kwargs)
+    semantic_requested = bool(
+        kwargs.get("use_semantic_v2", False) or pipeline_module.EDITDNA_USE_LLM
+    )
+    return _attach_semantic_execution(result, requested=semantic_requested)
 
 
 @contextmanager
@@ -56,10 +67,11 @@ def benchmark_semantic_v2_setting(enabled: bool):
 def run_benchmark_pipeline(*, use_semantic_v2: bool, **kwargs):
     """Run one benchmark analysis with an authoritative Semantic V2 flag."""
     with benchmark_semantic_v2_setting(use_semantic_v2) as pipeline_module:
-        return pipeline_module.run_pipeline(
+        result = pipeline_module.run_pipeline(
             use_semantic_v2=use_semantic_v2,
             **kwargs,
         )
+    return _attach_semantic_execution(result, requested=use_semantic_v2)
 
 
 def job_render(
