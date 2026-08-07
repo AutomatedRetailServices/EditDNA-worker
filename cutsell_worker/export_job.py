@@ -8,6 +8,7 @@ from .draft_edits import DraftEditError
 from .exports import store_export
 from .media_overlay_render import LocalMediaOverlay
 from .overlay_uploads import validate_overlay_uri
+from .project_tracking import safe_update_project
 from .render import render_preview
 from .render_plan import build_render_plan
 from .render_versions import add_render_version
@@ -30,6 +31,7 @@ def run_export_job(payload: dict) -> dict:
 
     project_id = str(payload["project_id"])
     user_id = str(payload["user_id"])
+    job_id = str(getattr(job, "id", "") or "") or None
     draft = draft_from_dict(dict(payload["draft"]))
     if draft.project_id != project_id:
         raise DraftEditError("draft project does not match export project")
@@ -37,79 +39,113 @@ def run_export_job(payload: dict) -> dict:
     if not sources:
         raise ValueError("export requires source metadata")
 
-    publish("rendering", 2)
-    with tempfile.TemporaryDirectory(prefix="cutsell-export-") as directory:
-        local_paths = {}
-        seen_source_ids = set()
-        for index, item in enumerate(sources):
-            source_id = str(item["source_asset_id"])
-            if source_id in seen_source_ids:
-                raise ValueError("export source_asset_id values must be unique")
-            seen_source_ids.add(source_id)
-            uri = str(item["uri"])
-            validate_product_source_uri(uri, project_id=project_id, user_id=user_id)
-            suffix = Path(str(item.get("original_name") or "source.mp4")).suffix or ".mp4"
-            destination = str(Path(directory) / f"source-{index:03d}-{source_id}{suffix}")
-            local_paths[source_id] = download_source(uri, destination)
-            publish("rendering", min(25, 5 + int((index + 1) * 20 / len(sources))))
+    tracking_start = safe_update_project(
+        user_id=user_id,
+        project_id=project_id,
+        state="rendering",
+        latest_job_id=job_id,
+    )
 
-        required_ids = {clip.source_asset_id for clip in draft.selected}
-        missing = required_ids - set(local_paths)
-        if missing:
-            raise ValueError("export is missing selected source assets")
+    try:
+        publish("rendering", 2)
+        with tempfile.TemporaryDirectory(prefix="cutsell-export-") as directory:
+            local_paths = {}
+            seen_source_ids = set()
+            for index, item in enumerate(sources):
+                source_id = str(item["source_asset_id"])
+                if source_id in seen_source_ids:
+                    raise ValueError("export source_asset_id values must be unique")
+                seen_source_ids.add(source_id)
+                uri = str(item["uri"])
+                validate_product_source_uri(uri, project_id=project_id, user_id=user_id)
+                suffix = Path(str(item.get("original_name") or "source.mp4")).suffix or ".mp4"
+                destination = str(Path(directory) / f"source-{index:03d}-{source_id}{suffix}")
+                local_paths[source_id] = download_source(uri, destination)
+                publish("rendering", min(25, 5 + int((index + 1) * 20 / len(sources))))
 
-        local_overlays = []
-        overlay_count = max(1, len(draft.media_overlays))
-        for index, overlay in enumerate(draft.media_overlays):
-            _bucket, _key, actual_kind = validate_overlay_uri(
-                overlay.uri, user_id=user_id, project_id=project_id
+            required_ids = {clip.source_asset_id for clip in draft.selected}
+            missing = required_ids - set(local_paths)
+            if missing:
+                raise ValueError("export is missing selected source assets")
+
+            local_overlays = []
+            overlay_count = max(1, len(draft.media_overlays))
+            for index, overlay in enumerate(draft.media_overlays):
+                _bucket, _key, actual_kind = validate_overlay_uri(
+                    overlay.uri, user_id=user_id, project_id=project_id
+                )
+                if actual_kind != overlay.kind:
+                    raise ValueError("media overlay kind does not match its S3 object")
+                suffix = Path(overlay.uri).suffix or (".jpg" if overlay.kind == "photo" else ".mp4")
+                destination = str(Path(directory) / f"overlay-{index:03d}{suffix}")
+                download_source(overlay.uri, destination)
+                local_overlays.append(LocalMediaOverlay(overlay=overlay, path=destination))
+                publish("rendering", min(32, 26 + int((index + 1) * 6 / overlay_count)))
+
+            plan = build_render_plan(draft, local_paths)
+            output = str(Path(directory) / "cutsell-export.mp4")
+            publish("rendering", 35)
+            render_preview(
+                plan,
+                output,
+                text_overlays=draft.text_overlays,
+                media_overlays=tuple(local_overlays),
             )
-            if actual_kind != overlay.kind:
-                raise ValueError("media overlay kind does not match its S3 object")
-            suffix = Path(overlay.uri).suffix or (".jpg" if overlay.kind == "photo" else ".mp4")
-            destination = str(Path(directory) / f"overlay-{index:03d}{suffix}")
-            download_source(overlay.uri, destination)
-            local_overlays.append(LocalMediaOverlay(overlay=overlay, path=destination))
-            publish("rendering", min(32, 26 + int((index + 1) * 6 / overlay_count)))
+            publish("rendering", 85)
+            stored = store_export(output, project_id=project_id, user_id=user_id)
+            version_payload = {}
+            version = None
+            try:
+                version = add_render_version(
+                    user_id=user_id,
+                    project_id=project_id,
+                    export_uri=stored["export_uri"],
+                    size_bytes=stored["size_bytes"],
+                    selected_count=len(draft.selected),
+                    text_overlay_count=len(draft.text_overlays),
+                    media_overlay_count=len(draft.media_overlays),
+                )
+                version_payload = {
+                    "render_version_status": "saved",
+                    "render_version_id": version["render_version_id"],
+                }
+            except Exception as exc:
+                version_payload = {
+                    "render_version_status": "degraded",
+                    "render_version_reason": exc.__class__.__name__,
+                }
 
-        plan = build_render_plan(draft, local_paths)
-        output = str(Path(directory) / "cutsell-export.mp4")
-        publish("rendering", 35)
-        render_preview(
-            plan,
-            output,
-            text_overlays=draft.text_overlays,
-            media_overlays=tuple(local_overlays),
-        )
-        publish("rendering", 85)
-        stored = store_export(output, project_id=project_id, user_id=user_id)
-        version_payload = {}
-        try:
-            version = add_render_version(
+            project_tracking = safe_update_project(
                 user_id=user_id,
                 project_id=project_id,
-                export_uri=stored["export_uri"],
-                size_bytes=stored["size_bytes"],
-                selected_count=len(draft.selected),
-                text_overlay_count=len(draft.text_overlays),
-                media_overlay_count=len(draft.media_overlays),
+                state="finished",
+                latest_job_id=job_id,
+                render_version=(
+                    {
+                        "render_version_id": version["render_version_id"],
+                        "created_at": version["created_at"],
+                        "size_bytes": version["size_bytes"],
+                    }
+                    if version else None
+                ),
             )
-            version_payload = {
-                "render_version_status": "saved",
-                "render_version_id": version["render_version_id"],
+            publish("finished", 100)
+            return {
+                "project_id": project_id,
+                "state": "finished",
+                "selected_count": len(draft.selected),
+                "text_overlay_count": len(draft.text_overlays),
+                "media_overlay_count": len(draft.media_overlays),
+                "project_tracking_start": tracking_start,
+                "project_tracking": project_tracking,
+                **version_payload,
+                **stored,
             }
-        except Exception as exc:
-            version_payload = {
-                "render_version_status": "degraded",
-                "render_version_reason": exc.__class__.__name__,
-            }
-        publish("finished", 100)
-        return {
-            "project_id": project_id,
-            "state": "finished",
-            "selected_count": len(draft.selected),
-            "text_overlay_count": len(draft.text_overlays),
-            "media_overlay_count": len(draft.media_overlays),
-            **version_payload,
-            **stored,
-        }
+    except Exception:
+        safe_update_project(
+            user_id=user_id,
+            project_id=project_id,
+            state="failed",
+            latest_job_id=job_id,
+        )
+        raise
