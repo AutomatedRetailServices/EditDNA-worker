@@ -1,0 +1,2 @@
+run=2026-08-07T12:10Z
+purpose=validate undo redo history survives recovery reads in real Redis
