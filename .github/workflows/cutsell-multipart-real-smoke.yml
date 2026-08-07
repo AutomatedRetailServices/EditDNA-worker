@@ -1,0 +1,154 @@
+name: CutSell Multipart Upload Smoke
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - cutsell/mobile-v1-asap-scope
+    paths:
+      - ".cutsell/multipart-real-smoke-trigger.txt"
+
+permissions:
+  contents: read
+
+jobs:
+  validate-resumable-upload:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    env:
+      RUNPOD_API_KEY: ${{ secrets.RUNPOD_API_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Load masked AWS S3 and Redis credentials from RunPod template vault
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail --silent --show-error \
+            --url "https://rest.runpod.io/v1/templates" \
+            --header "Authorization: Bearer $RUNPOD_API_KEY" \
+            --output templates.json
+          TEMPLATE=$(jq -c '[.[] | select(.name == "EditDNA-Worker-2")][0]' templates.json)
+          test "$TEMPLATE" != "null" || (echo 'EditDNA-Worker-2 template not found' && exit 3)
+          export_secret() {
+            key="$1"
+            value=$(printf '%s' "$TEMPLATE" | jq -r --arg key "$key" '.env[$key] // empty')
+            test -n "$value" || (echo "$key missing from RunPod template vault" && exit 4)
+            echo "::add-mask::$value"
+            printf '%s=%s\n' "$key" "$value" >> "$GITHUB_ENV"
+          }
+          export_secret AWS_ACCESS_KEY_ID
+          export_secret AWS_SECRET_ACCESS_KEY
+          export_secret AWS_REGION
+          export_secret S3_BUCKET
+          export_secret REDIS_URL
+
+      - name: Install upload runtime
+        run: pip install boto3 redis
+
+      - name: Validate multipart resume and complete against real S3 and Redis
+        shell: bash
+        run: |
+          python - <<'PY'
+          import json
+          import os
+
+          import boto3
+          from redis import Redis
+
+          from cutsell_worker.multipart_uploads import (
+              complete_multipart_upload,
+              list_multipart_parts,
+              start_multipart_upload,
+          )
+
+          region = os.environ.get('AWS_REGION') or 'us-east-1'
+          bucket = os.environ['S3_BUCKET']
+          s3 = boto3.client('s3', region_name=region)
+          redis = Redis.from_url(os.environ['REDIS_URL'])
+          project_id = 'cutsell-multipart-smoke-project'
+          user_id = 'cutsell-multipart-smoke-user'
+          first = b'A' * (5 * 1024 * 1024)
+          second = b'B' * (1 * 1024 * 1024)
+          expected_size = len(first) + len(second)
+
+          started = start_multipart_upload(
+              project_id=project_id,
+              user_id=user_id,
+              original_name='resume-smoke.mp4',
+              content_type='video/mp4',
+              size_bytes=expected_size,
+              part_size=5 * 1024 * 1024,
+              s3=s3,
+              redis_client=redis,
+          )
+          upload_id = started['upload_id']
+          key = started['object_key']
+          try:
+              part1 = s3.upload_part(
+                  Bucket=bucket, Key=key, UploadId=upload_id, PartNumber=1, Body=first
+              )
+              resumed = list_multipart_parts(
+                  upload_id=upload_id,
+                  user_id=user_id,
+                  project_id=project_id,
+                  s3=s3,
+                  redis_client=redis,
+              )
+              assert resumed['uploaded_part_numbers'] == [1]
+
+              part2 = s3.upload_part(
+                  Bucket=bucket, Key=key, UploadId=upload_id, PartNumber=2, Body=second
+              )
+              resumed_again = list_multipart_parts(
+                  upload_id=upload_id,
+                  user_id=user_id,
+                  project_id=project_id,
+                  s3=s3,
+                  redis_client=redis,
+              )
+              assert resumed_again['uploaded_part_numbers'] == [1, 2]
+
+              completed = complete_multipart_upload(
+                  upload_id=upload_id,
+                  user_id=user_id,
+                  project_id=project_id,
+                  parts=[
+                      {'part_number': 1, 'etag': part1['ETag']},
+                      {'part_number': 2, 'etag': part2['ETag']},
+                  ],
+                  s3=s3,
+                  redis_client=redis,
+              )
+              head = s3.head_object(Bucket=bucket, Key=key)
+              assert int(head['ContentLength']) == expected_size
+              try:
+                  list_multipart_parts(
+                      upload_id=upload_id,
+                      user_id=user_id,
+                      project_id=project_id,
+                      s3=s3,
+                      redis_client=redis,
+                  )
+              except KeyError:
+                  session_removed = True
+              else:
+                  session_removed = False
+              assert session_removed
+              print(json.dumps({
+                  'part_count': started['part_count'],
+                  'resume_after_part_1': resumed['uploaded_part_numbers'],
+                  'resume_after_part_2': resumed_again['uploaded_part_numbers'],
+                  'final_size_bytes': int(head['ContentLength']),
+                  'state': completed['state'],
+                  'session_removed_after_complete': session_removed,
+              }, indent=2))
+          finally:
+              try:
+                  s3.delete_object(Bucket=bucket, Key=key)
+              except Exception:
+                  pass
+          PY
