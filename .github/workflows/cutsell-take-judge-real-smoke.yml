@@ -1,0 +1,117 @@
+name: CutSell Take Judge Real Smoke
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - cutsell/mobile-v1-asap-scope
+    paths:
+      - ".cutsell/take-judge-real-smoke-trigger.txt"
+
+permissions:
+  contents: read
+
+jobs:
+  validate-real-retries:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      RUNPOD_API_KEY: ${{ secrets.RUNPOD_API_KEY }}
+      CUTSELL_ASR_MODEL: tiny
+      CUTSELL_SEMANTIC_MODEL: gpt-4o-mini
+      CUTSELL_VISUAL_MODEL: gpt-4o-mini
+      CUTSELL_TAKE_JUDGE_MODEL: gpt-4o-mini
+      CUTSELL_VALIDATION_PREFIX: Editdna bloopers videos/
+      CUTSELL_RETRY_KEY: Editdna bloopers videos/Bloppers7.mp4
+      CUTSELL_RETRY_START: '208'
+      CUTSELL_RETRY_END: '220'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install FFmpeg
+        run: sudo apt-get update && sudo apt-get install -y ffmpeg jq
+
+      - name: Load masked AWS/S3/OpenAI credentials from RunPod template vault
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail --silent --show-error \
+            --url "https://rest.runpod.io/v1/templates" \
+            --header "Authorization: Bearer $RUNPOD_API_KEY" \
+            --output templates.json
+          TEMPLATE=$(jq -c '[.[] | select(.name == "EditDNA-Worker-2")][0]' templates.json)
+          test "$TEMPLATE" != "null" || (echo 'EditDNA-Worker-2 template not found' && exit 3)
+          export_secret() {
+            key="$1"
+            value=$(printf '%s' "$TEMPLATE" | jq -r --arg key "$key" '.env[$key] // empty')
+            test -n "$value" || (echo "$key missing from RunPod template vault" && exit 4)
+            echo "::add-mask::$value"
+            printf '%s=%s\n' "$key" "$value" >> "$GITHUB_ENV"
+          }
+          export_secret AWS_ACCESS_KEY_ID
+          export_secret AWS_SECRET_ACCESS_KEY
+          export_secret AWS_REGION
+          export_secret S3_BUCKET
+          export_secret OPENAI_API_KEY
+
+      - name: Install focused validation runtime
+        run: pip install faster-whisper boto3 openai
+
+      - name: Run focused full-brain retry window
+        shell: bash
+        run: |
+          python -m cutsell_worker.validation_cli \
+            --key "$CUTSELL_RETRY_KEY" \
+            --start "$CUTSELL_RETRY_START" \
+            --end "$CUTSELL_RETRY_END" \
+            --report cutsell-take-judge-report.json \
+            --preview cutsell-take-judge-preview.mp4
+
+      - name: Require real Take Judge execution
+        shell: bash
+        run: |
+          python - <<'PY'
+          import json
+          report = json.load(open('cutsell-take-judge-report.json', encoding='utf-8'))
+          status = report.get('stage_status', {})
+          diagnostics = report.get('diagnostics', {})
+          failures = []
+          for stage in ('semantic', 'visual'):
+              value = status.get(stage, {})
+              if not isinstance(value, dict) or value.get('status') != 'applied':
+                  failures.append(stage + '_not_applied')
+          if status.get('take_judge') != 'provider_complete':
+              failures.append('take_judge_not_provider_complete')
+          if report.get('alternate_count', 0) < 1:
+              failures.append('no_alternates')
+          if diagnostics.get('alternate_group_count', 0) < 1:
+              failures.append('no_retry_groups')
+          if failures:
+              raise SystemExit('focused_take_judge_validation_failed:' + ','.join(failures))
+          print(json.dumps({
+              'source_key': report['source_key'],
+              'source_window': report.get('source_window'),
+              'strategy': report['strategy'],
+              'selected_count': report['selected_count'],
+              'alternate_count': report['alternate_count'],
+              'alternate_group_count': diagnostics.get('alternate_group_count'),
+              'take_judge_status': status.get('take_judge'),
+              'take_judge_status_counts': diagnostics.get('take_judge_status_counts'),
+              'selected': report.get('selected'),
+              'alternates': report.get('alternates'),
+          }, ensure_ascii=False, indent=2))
+          PY
+
+      - name: Upload focused retry artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cutsell-take-judge-real-${{ github.sha }}
+          path: |
+            cutsell-take-judge-report.json
+            cutsell-take-judge-preview.mp4
+          if-no-files-found: warn
+          retention-days: 7
