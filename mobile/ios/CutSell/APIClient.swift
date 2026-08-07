@@ -8,10 +8,27 @@ actor APIClient {
     private(set) var session: CutSellSession?
 
     var baseURL: URL {
-        if let raw = UserDefaults.standard.string(forKey: "cutsell.api.baseURL"), let url = URL(string: raw) {
+        if let raw = UserDefaults.standard.string(forKey: "cutsell.api.baseURL"),
+           let url = Self.validBaseURL(raw) {
+            return url
+        }
+        if let raw = Bundle.main.object(forInfoDictionaryKey: "CutSellAPIBaseURL") as? String,
+           let url = Self.validBaseURL(raw) {
             return url
         }
         return URL(string: "http://127.0.0.1:8000")!
+    }
+
+    private static func validBaseURL(_ raw: String) -> URL? {
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty,
+              let url = URL(string: trimmed),
+              let scheme = url.scheme?.lowercased(),
+              scheme == "https" || scheme == "http",
+              url.host != nil else {
+            return nil
+        }
+        return url
     }
 
     func setSession(_ session: CutSellSession?) {
