@@ -1,10 +1,20 @@
 """Standalone FastAPI entrypoint for the clean CutSell mobile backend."""
 from __future__ import annotations
 
+from typing import Any
+
 from fastapi import FastAPI, HTTPException, status
 from pydantic import BaseModel, Field
 
 from cutsell_worker.config import load_runtime_config
+from cutsell_worker.draft_edits import (
+    DraftEditError,
+    patch_captions,
+    remove_clip,
+    reorder_clips,
+    restore_clip,
+    swap_take,
+)
 from cutsell_worker.jobs import cancel_job, fetch_job_snapshot
 from cutsell_worker.queueing import enqueue_flow_b
 from cutsell_worker.source_identity import stable_source_id
@@ -59,6 +69,40 @@ class JobStatusResponse(BaseModel):
     progress: int | None = None
     result: object | None = None
     error: str | None = None
+
+
+class DraftSwapRequest(BaseModel):
+    draft: dict[str, Any]
+    selected_clip_id: str
+    replacement_clip_id: str
+
+
+class DraftClipRequest(BaseModel):
+    draft: dict[str, Any]
+    clip_id: str
+
+
+class DraftRestoreRequest(DraftClipRequest):
+    position: int | None = None
+
+
+class DraftReorderRequest(BaseModel):
+    draft: dict[str, Any]
+    ordered_clip_ids: list[str]
+
+
+class CaptionEdit(BaseModel):
+    clip_id: str
+    text: str
+
+
+class DraftCaptionRequest(BaseModel):
+    draft: dict[str, Any]
+    edits: list[CaptionEdit] = Field(min_length=1)
+
+
+def _draft_edit_error(exc: DraftEditError):
+    raise HTTPException(status_code=409, detail=str(exc)) from None
 
 
 @app.get("/v1/healthz")
@@ -140,3 +184,43 @@ def cancel_processing_job(job_id: str):
     except KeyError:
         raise HTTPException(status_code=404, detail="job not found") from None
     return JobStatusResponse(**snapshot.__dict__)
+
+
+@app.post("/v1/draft-edits/swap")
+def edit_swap_take(payload: DraftSwapRequest):
+    try:
+        return swap_take(payload.draft, payload.selected_clip_id, payload.replacement_clip_id)
+    except DraftEditError as exc:
+        _draft_edit_error(exc)
+
+
+@app.post("/v1/draft-edits/remove")
+def edit_remove_clip(payload: DraftClipRequest):
+    try:
+        return remove_clip(payload.draft, payload.clip_id)
+    except DraftEditError as exc:
+        _draft_edit_error(exc)
+
+
+@app.post("/v1/draft-edits/restore")
+def edit_restore_clip(payload: DraftRestoreRequest):
+    try:
+        return restore_clip(payload.draft, payload.clip_id, payload.position)
+    except DraftEditError as exc:
+        _draft_edit_error(exc)
+
+
+@app.post("/v1/draft-edits/reorder")
+def edit_reorder_clips(payload: DraftReorderRequest):
+    try:
+        return reorder_clips(payload.draft, payload.ordered_clip_ids)
+    except DraftEditError as exc:
+        _draft_edit_error(exc)
+
+
+@app.post("/v1/draft-edits/captions")
+def edit_captions(payload: DraftCaptionRequest):
+    try:
+        return patch_captions(payload.draft, [edit.model_dump() for edit in payload.edits])
+    except DraftEditError as exc:
+        _draft_edit_error(exc)
