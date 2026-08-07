@@ -46,7 +46,7 @@ def test_openai_visual_adapter_uses_image_input_and_maps_scores(tmp_path):
     assert result.status.status == "applied"
     assert result.observations[0].face_visibility == 0.9
     call = client.responses.calls[0]
-    assert call["model"] == "gpt-5.4-nano"
+    assert call["model"] == "gpt-4o-mini"
     image_parts = [
         part
         for message in call["input"]
