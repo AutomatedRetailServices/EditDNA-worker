@@ -11,6 +11,7 @@ from pydantic import BaseModel
 
 from web.contracts_v1 import (
     API_VERSION,
+    CaptionPatchRequest,
     DraftRemoveRequest,
     DraftReorderRequest,
     DraftRestoreRequest,
@@ -18,6 +19,7 @@ from web.contracts_v1 import (
 )
 from worker.draft_edits import (
     DraftEditError,
+    patch_captions,
     remove_clip,
     reorder_clips,
     restore_clip,
@@ -43,6 +45,10 @@ class DraftReorderMutation(DraftReorderRequest):
     draft: Dict[str, Any]
 
 
+class DraftCaptionMutation(CaptionPatchRequest):
+    draft: Dict[str, Any]
+
+
 class DraftMutationResponse(BaseModel):
     api_version: str = API_VERSION
     draft: Dict[str, Any]
@@ -60,7 +66,7 @@ def v1_healthz() -> Dict[str, Any]:
     return {
         "ok": True,
         "api_version": API_VERSION,
-        "draft_edits": ["swap", "remove", "restore", "reorder"],
+        "draft_edits": ["swap", "remove", "restore", "reorder", "captions"],
         "persistence": False,
     }
 
@@ -100,6 +106,18 @@ def draft_restore(payload: DraftRestoreMutation) -> DraftMutationResponse:
 def draft_reorder(payload: DraftReorderMutation) -> DraftMutationResponse:
     try:
         draft = reorder_clips(payload.draft, payload.ordered_clip_ids)
+    except DraftEditError as exc:
+        raise _conflict(exc) from exc
+    return DraftMutationResponse(draft=draft)
+
+
+@router.post("/draft-edits/captions", response_model=DraftMutationResponse)
+def draft_captions(payload: DraftCaptionMutation) -> DraftMutationResponse:
+    try:
+        draft = patch_captions(
+            payload.draft,
+            [edit.model_dump() for edit in payload.edits],
+        )
     except DraftEditError as exc:
         raise _conflict(exc) from exc
     return DraftMutationResponse(draft=draft)
