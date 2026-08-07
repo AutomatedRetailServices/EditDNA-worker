@@ -26,7 +26,9 @@ def benchmark_video_key(job_id: str, session_id: str) -> str:
 
 
 def _attach_semantic_execution(result: Dict[str, Any], *, requested: bool) -> Dict[str, Any]:
-    """Decorate a public/RQ result without changing pipeline clip decisions."""
+    """Decorate a real pipeline result without changing legacy test/stub shapes."""
+    if not any(key in result for key in ("clips", "processed_source_indices", "input_file_count")):
+        return result
     from worker.execution_observability import attach_semantic_execution
 
     return attach_semantic_execution(result, requested=requested)
