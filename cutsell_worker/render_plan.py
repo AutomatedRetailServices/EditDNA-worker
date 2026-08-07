@@ -16,6 +16,8 @@ class RenderSegment:
     end: float
     audio_muted: bool = False
     audio_volume: float = 1.0
+    caption_text: str = ""
+    caption_preset: str = "classic"
 
     @property
     def duration_sec(self) -> float:
@@ -42,6 +44,8 @@ def build_render_plan(draft: DraftTimeline, local_paths: Mapping[str, str]) -> T
             end=float(clip.end),
             audio_muted=bool(clip.audio_muted),
             audio_volume=volume,
+            caption_text=(str(clip.caption_text or "") if draft.captions_enabled else ""),
+            caption_preset=str(draft.caption_preset or "classic"),
         ))
     if not output:
         raise ValueError("draft has no selected clips to render")
