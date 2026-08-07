@@ -214,16 +214,19 @@ def configure_pipeline(monkeypatch, outcome):
     return group, outside, calls
 
 
-@pytest.mark.parametrize("outcome,removed,statuses", [
-    (result(), ["b"], ["candidate_winner", "candidate_loser"]),
-    (result(None, abstain=True), [], ["abstained", "abstained"]),
-    (result(confidence=.69), [], ["low_confidence", "low_confidence"])])
-def test_selection_winner_abstain_and_low_confidence(monkeypatch, outcome, removed, statuses):
+@pytest.mark.parametrize("outcome,statuses", [
+    (result(), ["candidate_winner", "candidate_loser"]),
+    (result(None, abstain=True), ["abstained", "abstained"]),
+    (result(confidence=.69), ["low_confidence", "low_confidence"])])
+def test_selection_winner_abstain_and_low_confidence_preserves_alternates(monkeypatch, outcome, statuses):
     group, outside, calls = configure_pipeline(monkeypatch, outcome)
     pipeline.run_take_judge(group + [outside], "/private/session", "/private/input.mp4")
-    assert [item["id"] for item in group if not item["meta"]["keep"]] == removed
-    assert group[0]["meta"]["keep"] and outside["meta"]["keep"] and len(calls) == 1
+    assert all(item["meta"]["keep"] for item in group + [outside])
+    assert len(calls) == 1
     assert [item["meta"]["take_judge_execution_status"] for item in group] == statuses
+    if outcome.winner_id and not outcome.abstain and outcome.confidence >= pipeline.TAKE_JUDGE_V2_MIN_CONFIDENCE:
+        assert group[0]["meta"]["take_judge_selected"] is True
+        assert group[1]["meta"]["take_judge_selected"] is False
     assert outside["meta"]["take_judge_execution_status"] == "not_candidate"
 
 

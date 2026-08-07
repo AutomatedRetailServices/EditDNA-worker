@@ -7,6 +7,8 @@ import re
 import tempfile
 from typing import Any, Callable, Dict, Mapping, Optional, Sequence, Tuple
 
+from worker.text_normalization import unicode_word_tokens
+
 
 def _unit(value: Any, name: str) -> float:
     if isinstance(value, bool) or not isinstance(value, (int, float)):
@@ -158,7 +160,7 @@ _FILLERS = frozenset(("um", "uh", "erm", "like", "basically", "actually"))
 
 def delivery_features(clip: Mapping[str, Any]) -> DeliveryFeatures:
     text = str(clip.get("text") or "").strip()
-    tokens = re.findall(r"[A-Za-z0-9']+", text.lower())
+    tokens = unicode_word_tokens(text)
     duration = max(0.0, float(clip.get("end", 0.0)) - float(clip.get("start", 0.0)))
     repeats = sum(left == right for left, right in zip(tokens, tokens[1:]))
     words = clip.get("words") if isinstance(clip.get("words"), Sequence) else ()

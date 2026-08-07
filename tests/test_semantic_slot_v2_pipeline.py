@@ -67,7 +67,6 @@ def test_valid_result_updates_only_primary_and_stores_secondary(monkeypatch):
     assert values[0]["meta"]["semantic_v2"]["secondary_slot"] == "STORY"
     assert values[0]["meta"]["semantic_v2"]["applied"] is True
     assert {key: values[0][key] for key in protected} == protected
-    # The unprocessed clause receives only the normal deterministic heuristic pass.
     assert values[1]["id"] == untouched_before["id"] and values[1]["text"] == untouched_before["text"]
     assert values[1]["start"] == untouched_before["start"] and values[1]["end"] == untouched_before["end"]
     assert "semantic_v2" not in values[1]["meta"]
@@ -80,7 +79,6 @@ def test_internal_benefit_applies_historical_public_slot(monkeypatch):
     pipeline.enrich_clips_semantic(values)
     assert values[0]["slot"] == "BENEFITS"
     assert values[0]["meta"]["slot"] == "BENEFITS"
-    # semantic_v2 is an explicitly internal, canonical metadata contract.
     assert values[0]["meta"]["semantic_v2"]["primary_slot"] == "BENEFIT"
 
 
@@ -116,7 +114,7 @@ def other_result(confidence=.95, abstain=False):
 
 
 @pytest.mark.parametrize("text", ["Hello everyone.", "Camera rolling, take two.", "The weather is cloudy today."])
-def test_confident_other_is_excluded_without_changing_keep(monkeypatch, text):
+def test_confident_other_is_label_only_and_valid_speech_remains_editable(monkeypatch, text):
     target = pipeline.make_base_clip("target", 0, 2, text)
     target.update(slot="STORY", keep=True, score=.9, semantic_score=.9)
     target["meta"].update(keep=True, slot="STORY", semantic_score=.9, score=.9)
@@ -130,14 +128,22 @@ def test_confident_other_is_excluded_without_changing_keep(monkeypatch, text):
     pipeline.enrich_clips_semantic([target, unrelated])
 
     semantic = target["meta"]["semantic_v2"]
-    assert target["slot"] == pipeline.classify_slot(text)
+    assert target["slot"] == "OTHER"
     assert target["meta"]["keep"] is True and target["keep"] is True
-    assert semantic["applied"] is False
-    assert semantic["application_status"] == "excluded_other"
-    assert semantic["application_reason"] == "validated_other_excluded_from_sales_composer"
-    assert semantic["excluded_from_composer"] is True
+    assert semantic["applied"] is True
+    assert semantic["application_status"] == "applied_other_preserved"
+    assert semantic["application_reason"] == "semantic_label_not_deletion_authority"
+    assert "excluded_from_composer" not in semantic
+
     composer = pipeline.build_composer([target, unrelated])
-    assert "target" not in composer["used_clip_ids"]
+    draft = pipeline.build_editable_draft(
+        [target, unrelated], composer["used_clip_ids"], mode="human"
+    )
+    editable_ids = {
+        item["clip_id"] for item in draft["selected"] + draft["alternates"]
+    }
+    assert "target" in editable_ids
+    assert "target" not in {item["clip_id"] for item in draft["discarded"]}
     assert {key: unrelated[key] for key in unrelated_before} == unrelated_before
     assert "semantic_v2" not in unrelated["meta"]
 
