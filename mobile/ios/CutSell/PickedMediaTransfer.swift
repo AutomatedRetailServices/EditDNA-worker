@@ -10,7 +10,7 @@ struct ImportedVideoFile: Transferable {
             SentTransferredFile(item.url)
         } importing: { received in
             let suffix = received.file.pathExtension.isEmpty ? "mov" : received.file.pathExtension
-            let destination = try persistentImportURL(extension: suffix)
+            let destination = try persistentMediaURL(extension: suffix)
             try FileManager.default.copyItem(at: received.file, to: destination)
             return ImportedVideoFile(url: destination)
         }
@@ -25,14 +25,14 @@ struct ImportedImageFile: Transferable {
             SentTransferredFile(item.url)
         } importing: { received in
             let suffix = received.file.pathExtension.isEmpty ? "jpg" : received.file.pathExtension
-            let destination = try persistentImportURL(extension: suffix)
+            let destination = try persistentMediaURL(extension: suffix)
             try FileManager.default.copyItem(at: received.file, to: destination)
             return ImportedImageFile(url: destination)
         }
     }
 }
 
-private func persistentImportURL(extension suffix: String) throws -> URL {
+func persistentMediaURL(extension suffix: String) throws -> URL {
     let root = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
         .appendingPathComponent("CutSell", isDirectory: true)
         .appendingPathComponent("Imports", isDirectory: true)
