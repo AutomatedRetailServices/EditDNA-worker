@@ -60,6 +60,7 @@ def build_flow_b_draft(
     judge_statuses = Counter()
     judge_reasons = Counter()
     alternate_group_count = 0
+    judge_group_diagnostics = []
 
     for key, members in grouped.items():
         if len(members) >= 2:
@@ -79,6 +80,17 @@ def build_flow_b_draft(
             selected_clip_id=selected_clip_id,
         )
         groups.append(group)
+        if len(members) >= 2:
+            judge_group_diagnostics.append({
+                "group_id": gid,
+                "selected_clip_id": selected_clip_id,
+                "execution_status": judged.status.status,
+                "execution_reason": judged.status.reason,
+                "ranked": [
+                    {"clip_id": item.clip_id, "score": item.score, "reason": item.reason}
+                    for item in ranked
+                ],
+            })
         for member in members:
             clip_to_group[member.clip_id] = gid
 
@@ -131,6 +143,7 @@ def build_flow_b_draft(
             "source_count": len(request.sources),
             "take_judge_status_counts": dict(judge_statuses),
             "take_judge_fallback_reasons": dict(judge_reasons),
+            "take_judge_groups": judge_group_diagnostics[:50],
         },
     )
     if alternate_group_count == 0:
