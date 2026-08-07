@@ -10,6 +10,7 @@ from .media_overlay_render import LocalMediaOverlay
 from .overlay_uploads import validate_overlay_uri
 from .render import render_preview
 from .render_plan import build_render_plan
+from .render_versions import add_render_version
 from .serde import draft_from_dict
 from .storage import download_source
 from .uploads import validate_product_source_uri
@@ -82,6 +83,26 @@ def run_export_job(payload: dict) -> dict:
         )
         publish("rendering", 85)
         stored = store_export(output, project_id=project_id, user_id=user_id)
+        version_payload = {}
+        try:
+            version = add_render_version(
+                user_id=user_id,
+                project_id=project_id,
+                export_uri=stored["export_uri"],
+                size_bytes=stored["size_bytes"],
+                selected_count=len(draft.selected),
+                text_overlay_count=len(draft.text_overlays),
+                media_overlay_count=len(draft.media_overlays),
+            )
+            version_payload = {
+                "render_version_status": "saved",
+                "render_version_id": version["render_version_id"],
+            }
+        except Exception as exc:
+            version_payload = {
+                "render_version_status": "degraded",
+                "render_version_reason": exc.__class__.__name__,
+            }
         publish("finished", 100)
         return {
             "project_id": project_id,
@@ -89,5 +110,6 @@ def run_export_job(payload: dict) -> dict:
             "selected_count": len(draft.selected),
             "text_overlay_count": len(draft.text_overlays),
             "media_overlay_count": len(draft.media_overlays),
+            **version_payload,
             **stored,
         }
