@@ -1,3 +1,5 @@
-run=2
-video_limit=8
+run=3
+video_limit=4
 window_sec=60
+asr_model=medium
+source_keys=Editdna bloopers videos/Bloppers11.mp4,Editdna bloopers videos/Bloppers12.mp4,Editdna bloopers videos/Bloppers13.mp4,Editdna bloopers videos/Bloppers16.mp4
