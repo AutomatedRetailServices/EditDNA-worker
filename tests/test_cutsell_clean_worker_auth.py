@@ -33,6 +33,12 @@ def _secure_app(monkeypatch):
         "resolve_session",
         lambda token: {"user_id": "usr_owner"} if token == "good-token" else (_ for _ in ()).throw(PermissionError("invalid token")),
     )
+    def fake_job(job_id, *, user_id=None, **_kwargs):
+        if job_id == "foreign":
+            raise PermissionError("job does not belong to this user")
+        return object()
+    monkeypatch.setattr(middleware, "fetch_job_snapshot", fake_job)
+
     app = FastAPI()
     app.add_middleware(AuthScopeMiddleware)
 
@@ -43,6 +49,14 @@ def _secure_app(monkeypatch):
     @app.get("/query")
     async def query(request: Request, user_id: str):
         return {"auth_user_id": request.state.auth_user_id, "claimed": user_id}
+
+    @app.get("/v1/jobs/{job_id}")
+    async def job_route(job_id: str):
+        return {"job_id": job_id}
+
+    @app.post("/v1/jobs/{job_id}/cancel")
+    async def cancel_route(job_id: str):
+        return {"job_id": job_id, "state": "canceled"}
 
     @app.get("/v1/healthz")
     async def health():
@@ -79,3 +93,12 @@ def test_auth_middleware_checks_query_scope_and_keeps_health_public(monkeypatch)
     assert bad.status_code == 403
     good = client.get("/query?user_id=usr_owner", headers={"Authorization": "Bearer good-token"})
     assert good.status_code == 200
+
+
+def test_auth_middleware_binds_job_status_and_cancel_to_bearer_user(monkeypatch):
+    client = _secure_app(monkeypatch)
+    headers = {"Authorization": "Bearer good-token"}
+    assert client.get("/v1/jobs/owned", headers=headers).status_code == 200
+    assert client.post("/v1/jobs/owned/cancel", headers=headers).status_code == 200
+    assert client.get("/v1/jobs/foreign", headers=headers).status_code == 403
+    assert client.post("/v1/jobs/foreign/cancel", headers=headers).status_code == 403
