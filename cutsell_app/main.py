@@ -16,7 +16,8 @@ from cutsell_worker.draft_edits import (
     swap_take,
 )
 from cutsell_worker.jobs import cancel_job, fetch_job_snapshot
-from cutsell_worker.queueing import enqueue_flow_b
+from cutsell_worker.queueing import enqueue_export, enqueue_flow_b
+from cutsell_worker.serde import draft_from_dict
 from cutsell_worker.source_identity import stable_source_id
 from cutsell_worker.uploads import create_presigned_upload, validate_product_source_uri
 
@@ -61,6 +62,25 @@ class FlowBSubmitResponse(BaseModel):
     job_id: str
     queue: str
     state: str = "uploaded"
+
+
+class ExportSourceInput(BaseModel):
+    source_asset_id: str
+    original_name: str
+    uri: str
+
+
+class ExportSubmitRequest(BaseModel):
+    project_id: str
+    user_id: str
+    draft: dict[str, Any]
+    sources: list[ExportSourceInput] = Field(min_length=1)
+
+
+class ExportSubmitResponse(BaseModel):
+    job_id: str
+    queue: str
+    state: str = "rendering"
 
 
 class JobStatusResponse(BaseModel):
@@ -166,6 +186,46 @@ def submit_flow_b(payload: FlowBSubmitRequest):
         "audio_overlap": payload.audio_overlap,
     })
     return FlowBSubmitResponse(job_id=submission.job_id, queue=submission.queue_name)
+
+
+@app.post("/v1/exports/jobs", response_model=ExportSubmitResponse, status_code=status.HTTP_202_ACCEPTED)
+def submit_export(payload: ExportSubmitRequest):
+    try:
+        draft = draft_from_dict(payload.draft)
+    except (KeyError, TypeError, ValueError) as exc:
+        raise HTTPException(status_code=422, detail=f"invalid draft: {exc}") from None
+    if draft.project_id != payload.project_id:
+        raise HTTPException(status_code=409, detail="draft project does not match export project")
+
+    seen_source_ids = set()
+    sources = []
+    for item in payload.sources:
+        if not item.source_asset_id:
+            raise HTTPException(status_code=422, detail="source_asset_id is required")
+        if item.source_asset_id in seen_source_ids:
+            raise HTTPException(status_code=409, detail="source_asset_id values must be unique")
+        seen_source_ids.add(item.source_asset_id)
+        try:
+            validate_product_source_uri(
+                item.uri,
+                project_id=payload.project_id,
+                user_id=payload.user_id,
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from None
+        sources.append(item.model_dump())
+
+    required_source_ids = {clip.source_asset_id for clip in draft.selected}
+    if not required_source_ids.issubset(seen_source_ids):
+        raise HTTPException(status_code=422, detail="export is missing selected source assets")
+
+    submission = enqueue_export({
+        "project_id": payload.project_id,
+        "user_id": payload.user_id,
+        "draft": payload.draft,
+        "sources": sources,
+    })
+    return ExportSubmitResponse(job_id=submission.job_id, queue=submission.queue_name)
 
 
 @app.get("/v1/jobs/{job_id}", response_model=JobStatusResponse)
