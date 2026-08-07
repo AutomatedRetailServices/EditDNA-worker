@@ -5,7 +5,14 @@ from dataclasses import asdict
 from enum import Enum
 from typing import Any
 
-from .contracts import ProcessingRequest, SourceAsset
+from .contracts import (
+    DraftClip,
+    DraftTimeline,
+    EditStrategy,
+    ProcessingRequest,
+    SemanticRole,
+    SourceAsset,
+)
 
 
 def request_from_dict(payload: dict) -> ProcessingRequest:
@@ -32,6 +39,40 @@ def request_from_dict(payload: dict) -> ProcessingRequest:
         preferred_source_order=tuple(payload.get("preferred_source_order") or ()),
         audio_overlap=bool(payload.get("audio_overlap", False)),
         language_hint=(str(payload["language_hint"]) if payload.get("language_hint") else None),
+    )
+
+
+def _draft_clip_from_dict(item: dict, *, selected_default: bool) -> DraftClip:
+    return DraftClip(
+        clip_id=str(item["clip_id"]),
+        source_asset_id=str(item["source_asset_id"]),
+        source_order=int(item.get("source_order", 0)),
+        start=float(item["start"]),
+        end=float(item["end"]),
+        text=str(item.get("text") or ""),
+        caption_text=str(item.get("caption_text") if item.get("caption_text") is not None else item.get("text") or ""),
+        semantic_role=SemanticRole(str(item.get("semantic_role") or SemanticRole.OTHER.value)),
+        take_group_id=(str(item["take_group_id"]) if item.get("take_group_id") else None),
+        selected=bool(item.get("selected", selected_default)),
+    )
+
+
+def draft_from_dict(payload: dict) -> DraftTimeline:
+    if not isinstance(payload, dict):
+        raise ValueError("draft must be an object")
+    selected = tuple(_draft_clip_from_dict(dict(item), selected_default=True) for item in payload.get("selected") or ())
+    alternates = tuple(_draft_clip_from_dict(dict(item), selected_default=False) for item in payload.get("alternates") or ())
+    discarded = tuple(_draft_clip_from_dict(dict(item), selected_default=False) for item in payload.get("discarded") or ())
+    if not selected:
+        raise ValueError("draft requires at least one selected clip")
+    return DraftTimeline(
+        schema_version=str(payload.get("schema_version") or "cutsell.v1"),
+        project_id=str(payload["project_id"]),
+        strategy=EditStrategy(str(payload.get("strategy") or EditStrategy.MIXED.value)),
+        selected=selected,
+        alternates=alternates,
+        discarded=discarded,
+        diagnostics=dict(payload.get("diagnostics") or {}),
     )
 
 
