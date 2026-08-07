@@ -3,16 +3,23 @@ from __future__ import annotations
 
 from dataclasses import replace
 from pathlib import Path
-from typing import Mapping, Tuple
+import tempfile
+from typing import Mapping
 
 from .asr import ASRProvider
-from .contracts import ProcessingRequest, ProcessingResult, SourceAsset
+from .contracts import ProcessingRequest, ProcessingResult
+from .frame_sampling import sample_take_frames
 from .media_probe import probe_media
 from .observability import ExecutionTrace
 from .pipeline import build_flow_b_draft
 from .providers import NoopSemanticProvider, SemanticProvider, safe_semantic_classify
 from .silence_analysis import word_silence_gaps
 from .take_segmentation import segment_takes
+from .visual_analysis import (
+    VisualProvider,
+    apply_visual_observations,
+    safe_visual_analyze,
+)
 
 
 def process_local_sources(
@@ -21,6 +28,7 @@ def process_local_sources(
     *,
     asr_provider: ASRProvider,
     semantic_provider: SemanticProvider | None = None,
+    visual_provider: VisualProvider | None = None,
 ) -> ProcessingResult:
     """Process registered sources all the way from local media to editable draft.
 
@@ -67,6 +75,28 @@ def process_local_sources(
 
     takes = segment_takes(transcripts, hydrated_sources, gaps)
     trace.complete("take_segmentation", candidate_count=len(takes))
+
+    if visual_provider is not None and takes:
+        with tempfile.TemporaryDirectory(prefix="cutsell-frames-") as frame_dir:
+            samples = []
+            for take in takes:
+                source_path = local_paths.get(take.source_asset_id)
+                if not source_path:
+                    raise ValueError("candidate take lost source identity")
+                samples.extend(sample_take_frames(source_path, take, frame_dir))
+            visual = safe_visual_analyze(visual_provider, takes, tuple(samples))
+        if visual.status.status in {"provider_error", "provider_unavailable"}:
+            trace.degraded("visual", reason=visual.status.reason or visual.status.status)
+        else:
+            takes = apply_visual_observations(takes, visual.observations)
+            trace.complete(
+                "visual",
+                status=visual.status.status,
+                observation_count=len(visual.observations),
+                frame_count=len(samples),
+            )
+    else:
+        trace.complete("visual", status="not_requested", observation_count=0, frame_count=0)
 
     semantic = safe_semantic_classify(semantic_provider or NoopSemanticProvider(), takes)
     if semantic.status.status in {"provider_error", "provider_unavailable"}:
