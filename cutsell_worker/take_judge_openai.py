@@ -6,13 +6,14 @@ from dataclasses import dataclass
 from typing import Callable, Tuple
 
 from .contracts import CandidateTake, RankedTake
+from .openai_json import parse_json_object
 from .providers import ProviderStatus
 from .take_judge_provider import TakeJudgeProviderResult
 
 
 @dataclass
 class OpenAITakeJudgeProvider:
-    model: str = "gpt-5.4-mini"
+    model: str = "gpt-4o-mini"
     client_factory: Callable[[], object] | None = None
 
     def _client(self):
@@ -56,7 +57,7 @@ class OpenAITakeJudgeProvider:
                 {"role": "user", "content": json.dumps({"takes": evidence}, ensure_ascii=False)},
             ],
         )
-        data = json.loads(str(response.output_text).strip())
+        data = parse_json_object(response.output_text)
         items = data.get("ranked")
         if not isinstance(items, list):
             raise ValueError("take judge returned invalid payload")
