@@ -1,0 +1,123 @@
+name: CutSell Golden Real-Video Benchmark
+
+on:
+  workflow_dispatch:
+    inputs:
+      video_limit:
+        description: "Number of S3 blooper videos (1-20)"
+        required: false
+        default: "8"
+      window_sec:
+        description: "Bounded seconds from each video (10-180)"
+        required: false
+        default: "60"
+  push:
+    branches:
+      - cutsell/mobile-v1-asap-scope
+    paths:
+      - ".cutsell/golden-benchmark-trigger.txt"
+
+permissions:
+  contents: read
+
+jobs:
+  benchmark:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    env:
+      RUNPOD_API_KEY: ${{ secrets.RUNPOD_API_KEY }}
+      AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+      AWS_REGION: ${{ secrets.AWS_REGION }}
+      S3_BUCKET: ${{ secrets.S3_BUCKET }}
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      CUTSELL_ASR_MODEL: tiny
+      CUTSELL_VALIDATION_PREFIX: Editdna bloopers videos/
+      CUTSELL_SEMANTIC_MODEL: gpt-4o-mini
+      CUTSELL_VISUAL_MODEL: gpt-4o-mini
+      CUTSELL_TAKE_JUDGE_MODEL: gpt-4o-mini
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install FFmpeg and jq
+        run: sudo apt-get update && sudo apt-get install -y ffmpeg jq
+
+      - name: Load missing runtime secrets from RunPod template vault
+        shell: bash
+        run: |
+          set -euo pipefail
+          missing=0
+          for key in AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_REGION S3_BUCKET OPENAI_API_KEY; do
+            if [ -z "${!key:-}" ]; then missing=1; fi
+          done
+          if [ "$missing" = "0" ]; then
+            echo "Direct GitHub runtime secrets are available; RunPod vault fallback not needed."
+            exit 0
+          fi
+          test -n "${RUNPOD_API_KEY:-}" || (echo 'Runtime secrets missing and RUNPOD_API_KEY unavailable' && exit 3)
+          curl --fail --silent --show-error \
+            --url "https://rest.runpod.io/v1/templates" \
+            --header "Authorization: Bearer $RUNPOD_API_KEY" \
+            --output templates.json
+          TEMPLATE=$(jq -c '[.[] | select(.name == "EditDNA-Worker-2")][0]' templates.json)
+          test "$TEMPLATE" != "null" || (echo 'EditDNA-Worker-2 template not found' && exit 4)
+          export_secret_if_missing() {
+            key="$1"
+            current="${!key:-}"
+            if [ -n "$current" ]; then return 0; fi
+            value=$(printf '%s' "$TEMPLATE" | jq -r --arg key "$key" '.env[$key] // empty')
+            test -n "$value" || (echo "$key missing from all runtime secret sources" && exit 5)
+            echo "::add-mask::$value"
+            printf '%s=%s\n' "$key" "$value" >> "$GITHUB_ENV"
+          }
+          export_secret_if_missing AWS_ACCESS_KEY_ID
+          export_secret_if_missing AWS_SECRET_ACCESS_KEY
+          export_secret_if_missing AWS_REGION
+          export_secret_if_missing S3_BUCKET
+          export_secret_if_missing OPENAI_API_KEY
+
+      - name: Install benchmark runtime
+        run: pip install faster-whisper boto3 openai requests
+
+      - name: Run bounded golden benchmark
+        shell: bash
+        env:
+          VIDEO_LIMIT: ${{ github.event.inputs.video_limit || '8' }}
+          WINDOW_SEC: ${{ github.event.inputs.window_sec || '60' }}
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json, os
+          from cutsell_worker.golden_benchmark import run_golden_benchmark
+
+          report = run_golden_benchmark(
+              video_limit=int(os.environ.get('VIDEO_LIMIT', '8')),
+              window_sec=float(os.environ.get('WINDOW_SEC', '60')),
+          )
+          with open('cutsell-golden-benchmark.json', 'w', encoding='utf-8') as handle:
+              json.dump(report, handle, ensure_ascii=False, indent=2, sort_keys=True)
+          summary = {key: report[key] for key in [
+              'source_count', 'completed_count', 'execution_failure_count',
+              'structural_pass_count', 'structural_failure_count',
+              'median_structural_score', 'total_selected', 'total_alternates',
+              'total_discarded', 'total_retry_groups', 'total_tiny_fragments',
+              'total_adjacent_duplicates', 'provider_status_counts'
+          ]}
+          print(json.dumps(summary, ensure_ascii=False, indent=2))
+          if report['execution_failure_count']:
+              print('::warning::One or more real videos could not complete the benchmark.')
+          if report['structural_failure_count']:
+              raise SystemExit('Golden benchmark found hard structural draft failures')
+          PY
+
+      - name: Upload benchmark report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cutsell-golden-benchmark-${{ github.sha }}
+          path: cutsell-golden-benchmark.json
+          if-no-files-found: warn
+          retention-days: 14
