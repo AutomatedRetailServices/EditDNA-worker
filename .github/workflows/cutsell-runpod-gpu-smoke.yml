@@ -1,0 +1,271 @@
+name: CutSell RunPod GPU Smoke
+
+on:
+  workflow_dispatch:
+    inputs:
+      approval:
+        description: "Type APPROVE_PAID_GPU_SMOKE to create a temporary paid GPU Pod"
+        required: true
+        default: ""
+      cloud_type:
+        description: "RunPod cloud type"
+        required: true
+        default: "COMMUNITY"
+        type: choice
+        options:
+          - COMMUNITY
+          - SECURE
+
+permissions:
+  contents: read
+
+jobs:
+  gpu-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    env:
+      RUNPOD_API_KEY: ${{ secrets.RUNPOD_API_KEY }}
+      RUNPOD_TEMPLATE_NAME: EditDNA-Worker-2
+      SOURCE_KEY: Editdna bloopers videos/Bloppers15.mp4
+      HEAD_SHA: ${{ github.sha }}
+      MARKER_KEY: cutsell/smokes/runpod/${{ github.run_id }}.json
+      PREVIEW_KEY: cutsell/smokes/runpod/${{ github.run_id }}-preview.mp4
+    steps:
+      - name: Require explicit paid-compute approval
+        shell: bash
+        env:
+          APPROVAL: ${{ inputs.approval }}
+        run: |
+          test "$APPROVAL" = "APPROVE_PAID_GPU_SMOKE" || {
+            echo 'Paid GPU smoke was not explicitly approved.'
+            exit 2
+          }
+          test -n "$RUNPOD_API_KEY" || { echo 'RUNPOD_API_KEY missing'; exit 3; }
+
+      - name: Resolve current template and runtime credentials
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail --silent --show-error \
+            --url "https://rest.runpod.io/v1/templates" \
+            --header "Authorization: Bearer $RUNPOD_API_KEY" \
+            --output templates.json
+          TEMPLATE=$(jq -c --arg name "$RUNPOD_TEMPLATE_NAME" '[.[] | select(.name == $name)][0]' templates.json)
+          test "$TEMPLATE" != "null" || { echo 'RunPod template not found'; exit 4; }
+          TEMPLATE_ID=$(printf '%s' "$TEMPLATE" | jq -r '.id')
+          echo "TEMPLATE_ID=$TEMPLATE_ID" >> "$GITHUB_ENV"
+          for key in AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_REGION S3_BUCKET OPENAI_API_KEY; do
+            value=$(printf '%s' "$TEMPLATE" | jq -r --arg key "$key" '.env[$key] // empty')
+            test -n "$value" || { echo "$key missing from template"; exit 5; }
+            echo "::add-mask::$value"
+            printf '%s=%s\n' "$key" "$value" >> "$GITHUB_ENV"
+          done
+          echo "Resolved template $TEMPLATE_ID. No Pod has been created yet."
+
+      - name: Verify no pre-existing smoke Pod will be reused accidentally
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail --silent --show-error \
+            --url "https://rest.runpod.io/v1/pods" \
+            --header "Authorization: Bearer $RUNPOD_API_KEY" \
+            --output pods-before.json
+          jq '[.[] | select(.name | startswith("cutsell-gpu-smoke-")) | {id,name,desiredStatus}]' pods-before.json
+
+      - name: Create one temporary GPU Pod
+        id: create
+        shell: bash
+        env:
+          CLOUD_TYPE: ${{ inputs.cloud_type }}
+        run: |
+          set -euo pipefail
+          CMD=$(cat <<'BASH'
+          set -euo pipefail
+          export DEBIAN_FRONTEND=noninteractive
+          command -v git >/dev/null || (apt-get update && apt-get install -y git)
+          command -v ffmpeg >/dev/null || (apt-get update && apt-get install -y ffmpeg)
+          python -m pip install --quiet faster-whisper boto3 openai requests
+          nvidia-smi
+          cd /workspace
+          rm -rf cutsell-gpu-smoke
+          git clone --quiet https://github.com/AutomatedRetailServices/EditDNA-worker.git cutsell-gpu-smoke
+          cd cutsell-gpu-smoke
+          git checkout --quiet "$CUTSELL_SMOKE_HEAD_SHA"
+          export CUTSELL_ASR_MODEL=medium
+          export CUTSELL_CLEAN_CUT_JUDGE=0
+          python - <<'PY'
+          import json, os, subprocess, traceback
+          import boto3
+          from cutsell_worker.validation import run_single_validation
+
+          bucket = os.environ['S3_BUCKET']
+          marker_key = os.environ['CUTSELL_SMOKE_MARKER_KEY']
+          preview_key = os.environ['CUTSELL_SMOKE_PREVIEW_KEY']
+          s3 = boto3.client('s3', region_name=os.environ.get('AWS_REGION') or 'us-east-1')
+          marker = {
+              'schema_version': 'cutsell.runpod-gpu-smoke.v1',
+              'head_sha': os.environ['CUTSELL_SMOKE_HEAD_SHA'],
+              'source_key': os.environ['CUTSELL_SMOKE_SOURCE_KEY'],
+              'clean_cut_judge': False,
+          }
+          preview = '/workspace/cutsell-gpu-smoke-preview.mp4'
+          try:
+              gpu = subprocess.check_output(
+                  ['nvidia-smi', '--query-gpu=name,memory.total,driver_version', '--format=csv,noheader'],
+                  text=True,
+              ).strip()
+              result = run_single_validation(
+                  os.environ['CUTSELL_SMOKE_SOURCE_KEY'],
+                  project_id='cutsell-runpod-gpu-smoke',
+                  source_start_sec=0.0,
+                  source_end_sec=45.0,
+                  preview_output=preview,
+              )
+              marker.update({
+                  'ok': True,
+                  'gpu': gpu,
+                  'selected_count': result['selected_count'],
+                  'alternate_count': result['alternate_count'],
+                  'discarded_count': result['discarded_count'],
+                  'strategy': result['strategy'],
+                  'stage_status': result['stage_status'],
+                  'selected': result['selected'],
+              })
+              s3.upload_file(preview, bucket, preview_key, ExtraArgs={'ContentType': 'video/mp4'})
+              marker['preview_s3_uri'] = f's3://{bucket}/{preview_key}'
+          except Exception as exc:
+              marker.update({
+                  'ok': False,
+                  'error_type': exc.__class__.__name__,
+                  'error': str(exc)[:800],
+                  'traceback_tail': traceback.format_exc()[-2400:],
+              })
+          finally:
+              s3.put_object(
+                  Bucket=bucket,
+                  Key=marker_key,
+                  Body=json.dumps(marker, ensure_ascii=False, indent=2).encode('utf-8'),
+                  ContentType='application/json',
+              )
+          if not marker.get('ok'):
+              raise SystemExit('GPU smoke failed; details written to S3 marker')
+          PY
+          BASH
+          )
+
+          jq -n \
+            --arg name "cutsell-gpu-smoke-${GITHUB_RUN_ID}" \
+            --arg template "$TEMPLATE_ID" \
+            --arg cloud "$CLOUD_TYPE" \
+            --arg cmd "$CMD" \
+            --arg head "$HEAD_SHA" \
+            --arg marker "$MARKER_KEY" \
+            --arg preview "$PREVIEW_KEY" \
+            --arg source "$SOURCE_KEY" \
+            '{
+              name: $name,
+              templateId: $template,
+              cloudType: $cloud,
+              computeType: "GPU",
+              gpuCount: 1,
+              gpuTypeIds: [
+                "NVIDIA GeForce RTX 4090",
+                "NVIDIA RTX A5000",
+                "NVIDIA RTX A6000",
+                "NVIDIA A40"
+              ],
+              gpuTypePriority: "availability",
+              interruptible: false,
+              containerDiskInGb: 80,
+              volumeInGb: 60,
+              volumeMountPath: "/workspace",
+              dockerEntrypoint: ["bash", "-lc"],
+              dockerStartCmd: [$cmd],
+              env: {
+                CUTSELL_SMOKE_HEAD_SHA: $head,
+                CUTSELL_SMOKE_MARKER_KEY: $marker,
+                CUTSELL_SMOKE_PREVIEW_KEY: $preview,
+                CUTSELL_SMOKE_SOURCE_KEY: $source,
+                CUTSELL_ASR_MODEL: "medium",
+                CUTSELL_CLEAN_CUT_JUDGE: "0"
+              }
+            }' > create-pod.json
+
+          curl --fail --silent --show-error \
+            --request POST \
+            --url "https://rest.runpod.io/v1/pods" \
+            --header "Authorization: Bearer $RUNPOD_API_KEY" \
+            --header "Content-Type: application/json" \
+            --data @create-pod.json \
+            --output pod.json
+          POD_ID=$(jq -r '.id // empty' pod.json)
+          test -n "$POD_ID" || { jq '{error,errors,message}' pod.json; exit 6; }
+          echo "pod_id=$POD_ID" >> "$GITHUB_OUTPUT"
+          echo "POD_ID=$POD_ID" >> "$GITHUB_ENV"
+          echo "Temporary GPU Pod created: $POD_ID"
+
+      - name: Poll S3 completion marker
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json, os, time
+          import boto3
+          from botocore.exceptions import ClientError
+
+          s3 = boto3.client('s3', region_name=os.environ.get('AWS_REGION') or 'us-east-1')
+          bucket, key = os.environ['S3_BUCKET'], os.environ['MARKER_KEY']
+          deadline = time.time() + 25 * 60
+          while time.time() < deadline:
+              try:
+                  response = s3.get_object(Bucket=bucket, Key=key)
+                  marker = json.loads(response['Body'].read())
+                  print(json.dumps({
+                      'ok': marker.get('ok'),
+                      'gpu': marker.get('gpu'),
+                      'selected_count': marker.get('selected_count'),
+                      'alternate_count': marker.get('alternate_count'),
+                      'discarded_count': marker.get('discarded_count'),
+                      'strategy': marker.get('strategy'),
+                      'error_type': marker.get('error_type'),
+                      'error': marker.get('error'),
+                      'preview_s3_uri': marker.get('preview_s3_uri'),
+                  }, ensure_ascii=False, indent=2))
+                  if not marker.get('ok'):
+                      raise SystemExit('RunPod GPU smoke reported failure')
+                  raise SystemExit(0)
+              except ClientError as exc:
+                  if exc.response.get('Error', {}).get('Code') not in {'NoSuchKey', '404'}:
+                      raise
+              time.sleep(10)
+          raise SystemExit('Timed out waiting for RunPod GPU smoke marker')
+          PY
+
+      - name: Delete temporary GPU Pod
+        if: always() && env.POD_ID != ''
+        shell: bash
+        run: |
+          set +e
+          code=$(curl --silent --show-error \
+            --write-out '%{http_code}' \
+            --request DELETE \
+            --url "https://rest.runpod.io/v1/pods/$POD_ID" \
+            --header "Authorization: Bearer $RUNPOD_API_KEY" \
+            --output delete-response.txt)
+          echo "RunPod delete HTTP status: $code"
+          test "$code" = "204"
+
+      - name: Remove smoke marker after inspection
+        if: always()
+        shell: bash
+        run: |
+          python - <<'PY'
+          import os
+          import boto3
+          try:
+              boto3.client('s3', region_name=os.environ.get('AWS_REGION') or 'us-east-1').delete_object(
+                  Bucket=os.environ['S3_BUCKET'], Key=os.environ['MARKER_KEY']
+              )
+          except Exception as exc:
+              print(f'cleanup marker degraded: {exc.__class__.__name__}')
+          PY
