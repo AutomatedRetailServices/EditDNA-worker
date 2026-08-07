@@ -8,8 +8,28 @@ from cutsell_worker.config import load_runtime_config
 from cutsell_worker.jobs import cancel_job, fetch_job_snapshot
 from cutsell_worker.queueing import enqueue_flow_b
 from cutsell_worker.source_identity import stable_source_id
+from cutsell_worker.uploads import create_presigned_upload, validate_product_source_uri
 
 app = FastAPI(title="CutSell API", version="0.1.0")
+
+
+class UploadPresignRequest(BaseModel):
+    project_id: str
+    user_id: str
+    original_name: str
+    content_type: str | None = None
+    size_bytes: int = Field(gt=0)
+
+
+class UploadPresignResponse(BaseModel):
+    method: str
+    upload_url: str
+    fields: dict[str, str]
+    source_uri: str
+    object_key: str
+    content_type: str
+    max_bytes: int
+    expires_in: int
 
 
 class SourceInput(BaseModel):
@@ -54,6 +74,23 @@ def healthz():
     }
 
 
+@app.post("/v1/uploads/presign", response_model=UploadPresignResponse)
+def presign_upload(payload: UploadPresignRequest):
+    try:
+        result = create_presigned_upload(
+            project_id=payload.project_id,
+            user_id=payload.user_id,
+            original_name=payload.original_name,
+            content_type=payload.content_type,
+            size_bytes=payload.size_bytes,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from None
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from None
+    return UploadPresignResponse(**result)
+
+
 @app.post("/v1/flow-b/jobs", response_model=FlowBSubmitResponse, status_code=status.HTTP_202_ACCEPTED)
 def submit_flow_b(payload: FlowBSubmitRequest):
     sources = []
@@ -62,6 +99,10 @@ def submit_flow_b(payload: FlowBSubmitRequest):
         if item.source_order in seen_orders:
             raise HTTPException(status_code=409, detail="source_order values must be unique")
         seen_orders.add(item.source_order)
+        try:
+            validate_product_source_uri(item.uri)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from None
         sources.append({
             "source_asset_id": stable_source_id(payload.project_id, item.source_order, item.original_name),
             "original_name": item.original_name,
