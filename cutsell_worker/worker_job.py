@@ -8,13 +8,50 @@ from .asr import FasterWhisperASR
 from .config import load_runtime_config
 from .draft_store import create_initial_draft
 from .flow_b import process_local_sources
+from .media_probe import probe_media
 from .providers import NoopSemanticProvider
 from .semantic_openai import OpenAISemanticProvider
 from .serde import request_from_dict, result_to_dict
 from .storage import download_source
 from .take_judge_openai import OpenAITakeJudgeProvider
+from .timeline_asset_storage import store_timeline_assets
+from .timeline_assets import generate_filmstrip, waveform_peaks
 from .uploads import validate_product_source_uri
 from .visual_openai import OpenAIVisualProvider
+
+
+def _build_timeline_assets(request, local_paths: dict[str, str], directory: str) -> dict[str, dict]:
+    """Best-effort presentation assets. Failure never invalidates the AI draft."""
+    output: dict[str, dict] = {}
+    for source in request.sources:
+        try:
+            source_path = local_paths[source.source_asset_id]
+            probe = probe_media(source_path)
+            asset_dir = str(Path(directory) / "timeline-assets" / source.source_asset_id)
+            filmstrip = generate_filmstrip(
+                source_path,
+                asset_dir,
+                duration_sec=probe.duration_sec,
+                max_frames=24,
+                width=160,
+            )
+            waveform = waveform_peaks(source_path, buckets=256)
+            output[source.source_asset_id] = store_timeline_assets(
+                user_id=request.user_id,
+                project_id=request.project_id,
+                source_asset_id=source.source_asset_id,
+                filmstrip=filmstrip,
+                waveform=waveform,
+            )
+        except Exception as exc:
+            output[source.source_asset_id] = {
+                "status": "degraded",
+                "reason": exc.__class__.__name__,
+                "filmstrip": [],
+                "waveform_uri": None,
+                "waveform_bucket_count": 0,
+            }
+    return output
 
 
 def run_flow_b_job(payload: dict) -> dict:
@@ -63,21 +100,29 @@ def run_flow_b_job(payload: dict) -> dict:
                 progress=publish,
             )
             serialized = result_to_dict(result)
+
+            # Timeline presentation assets are generated after the edit brain has
+            # completed so they can never influence content selection/deletion.
+            publish("draft_ready", 94)
+            timeline_assets = _build_timeline_assets(request, local_paths, directory)
+            source_records = [
+                {
+                    "source_asset_id": source.source_asset_id,
+                    "original_name": source.original_name,
+                    "source_order": source.source_order,
+                    "duration_sec": source.duration_sec,
+                    "uri": source.uri,
+                    "timeline_assets": timeline_assets.get(source.source_asset_id, {"status": "not_generated"}),
+                }
+                for source in request.sources
+            ]
             create_initial_draft(
                 user_id=request.user_id,
                 project_id=request.project_id,
                 draft=dict(serialized["draft"]),
-                sources=[
-                    {
-                        "source_asset_id": source.source_asset_id,
-                        "original_name": source.original_name,
-                        "source_order": source.source_order,
-                        "duration_sec": source.duration_sec,
-                        "uri": source.uri,
-                    }
-                    for source in request.sources
-                ],
+                sources=source_records,
             )
+            serialized["timeline_assets"] = timeline_assets
             publish("draft_ready", 100)
             return serialized
     except Exception as exc:
