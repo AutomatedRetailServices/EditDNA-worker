@@ -54,6 +54,9 @@ def _word_from_dict(item: dict) -> Word:
 
 def _draft_clip_from_dict(item: dict, *, selected_default: bool) -> DraftClip:
     words = tuple(_word_from_dict(dict(word)) for word in item.get("words") or ())
+    volume = float(item.get("audio_volume", 1.0))
+    if volume < 0.0 or volume > 2.0:
+        raise ValueError("audio_volume must be between 0.0 and 2.0")
     return DraftClip(
         clip_id=str(item["clip_id"]),
         source_asset_id=str(item["source_asset_id"]),
@@ -66,6 +69,8 @@ def _draft_clip_from_dict(item: dict, *, selected_default: bool) -> DraftClip:
         semantic_role=SemanticRole(str(item.get("semantic_role") or SemanticRole.OTHER.value)),
         take_group_id=(str(item["take_group_id"]) if item.get("take_group_id") else None),
         selected=bool(item.get("selected", selected_default)),
+        audio_muted=bool(item.get("audio_muted", False)),
+        audio_volume=volume,
     )
 
 
