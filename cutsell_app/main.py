@@ -1,6 +1,7 @@
 """Standalone FastAPI entrypoint for the clean CutSell mobile backend."""
 from __future__ import annotations
 
+from copy import deepcopy
 from typing import Any
 
 from fastapi import FastAPI, HTTPException, status
@@ -30,6 +31,7 @@ from cutsell_worker.jobs import cancel_job, fetch_job_snapshot
 from cutsell_worker.queueing import enqueue_export, enqueue_flow_b
 from cutsell_worker.serde import draft_from_dict
 from cutsell_worker.source_identity import stable_source_id
+from cutsell_worker.timeline_asset_storage import sign_timeline_assets
 from cutsell_worker.uploads import create_presigned_upload, validate_product_source_uri
 
 app = FastAPI(title="CutSell API", version="0.1.0")
@@ -161,6 +163,27 @@ def _draft_history_error(exc: Exception):
     raise HTTPException(status_code=409, detail=str(exc)) from None
 
 
+def _hydrate_snapshot_assets(snapshot: dict[str, Any]) -> dict[str, Any]:
+    """Attach fresh signed presentation URLs without making recovery depend on them."""
+    out = deepcopy(snapshot)
+    hydrated_sources = []
+    for source in out.get("sources") or ():
+        item = dict(source)
+        assets = dict(item.get("timeline_assets") or {})
+        if assets:
+            try:
+                item["timeline_assets"] = sign_timeline_assets(assets)
+            except Exception as exc:
+                item["timeline_assets"] = {
+                    **assets,
+                    "signed_url_status": "degraded",
+                    "signed_url_reason": exc.__class__.__name__,
+                }
+        hydrated_sources.append(item)
+    out["sources"] = hydrated_sources
+    return out
+
+
 @app.get("/v1/healthz")
 def healthz():
     config = load_runtime_config()
@@ -227,7 +250,7 @@ def submit_flow_b(payload: FlowBSubmitRequest):
 @app.get("/v1/projects/{project_id}/draft")
 def recover_draft(project_id: str, user_id: str):
     try:
-        return get_draft_snapshot(user_id=user_id, project_id=project_id)
+        return _hydrate_snapshot_assets(get_draft_snapshot(user_id=user_id, project_id=project_id))
     except KeyError:
         raise HTTPException(status_code=404, detail="draft not found") from None
     except RuntimeError as exc:
@@ -238,12 +261,12 @@ def recover_draft(project_id: str, user_id: str):
 def autosave_draft(project_id: str, payload: DraftAutosaveRequest):
     try:
         draft_from_dict(payload.draft)
-        return save_draft_snapshot(
+        return _hydrate_snapshot_assets(save_draft_snapshot(
             user_id=payload.user_id,
             project_id=project_id,
             draft=payload.draft,
             expected_revision=payload.expected_revision,
-        )
+        ))
     except DraftConflictError as exc:
         _draft_history_error(exc)
     except KeyError:
@@ -257,11 +280,11 @@ def autosave_draft(project_id: str, payload: DraftAutosaveRequest):
 @app.post("/v1/projects/{project_id}/draft/undo")
 def undo_draft(project_id: str, payload: DraftHistoryRequest):
     try:
-        return undo_draft_snapshot(
+        return _hydrate_snapshot_assets(undo_draft_snapshot(
             user_id=payload.user_id,
             project_id=project_id,
             expected_revision=payload.expected_revision,
-        )
+        ))
     except (DraftConflictError, DraftHistoryError) as exc:
         _draft_history_error(exc)
     except KeyError:
@@ -273,11 +296,11 @@ def undo_draft(project_id: str, payload: DraftHistoryRequest):
 @app.post("/v1/projects/{project_id}/draft/redo")
 def redo_draft(project_id: str, payload: DraftHistoryRequest):
     try:
-        return redo_draft_snapshot(
+        return _hydrate_snapshot_assets(redo_draft_snapshot(
             user_id=payload.user_id,
             project_id=project_id,
             expected_revision=payload.expected_revision,
-        )
+        ))
     except (DraftConflictError, DraftHistoryError) as exc:
         _draft_history_error(exc)
     except KeyError:
