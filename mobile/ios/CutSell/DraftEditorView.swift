@@ -92,9 +92,7 @@ struct DraftEditorView: View {
 
                                 if let urlString = export.result?["download_url"]?.stringValue,
                                    let url = URL(string: urlString) {
-                                    Link(destination: url) {
-                                        Label("Open finished video", systemImage: "play.rectangle.fill")
-                                    }
+                                    FinishedExportActionsView(remoteURL: url)
                                 }
                             }
                         }
