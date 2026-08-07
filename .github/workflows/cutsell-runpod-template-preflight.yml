@@ -1,10 +1,11 @@
 name: CutSell RunPod Template Preflight
 
 on:
-  pull_request:
-    branches: [main]
+  workflow_dispatch:
+  push:
+    branches:
+      - cutsell/mobile-v1-asap-scope
     paths:
-      - ".github/workflows/cutsell-runpod-template-preflight.yml"
       - ".cutsell/runpod-template-preflight-trigger.txt"
 
 permissions:
