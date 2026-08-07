@@ -7,6 +7,7 @@ import tempfile
 from typing import Callable, Mapping
 
 from .asr import ASRProvider
+from .clean_cut_provider import CleanCutProvider
 from .contracts import ProcessingRequest, ProcessingResult
 from .frame_sampling import sample_take_frames
 from .media_probe import probe_media
@@ -33,6 +34,7 @@ def process_local_sources(
     semantic_provider: SemanticProvider | None = None,
     visual_provider: VisualProvider | None = None,
     take_judge_provider: TakeJudgeProvider | None = None,
+    clean_cut_provider: CleanCutProvider | None = None,
     progress: ProgressCallback | None = None,
 ) -> ProcessingResult:
     """Process registered sources all the way from local media to editable draft."""
@@ -109,6 +111,7 @@ def process_local_sources(
         takes,
         semantic.labels,
         take_judge_provider=take_judge_provider,
+        clean_cut_provider=clean_cut_provider,
     )
     notify("draft_ready", 100)
     return replace(result, stage_status={**result.stage_status, **trace.as_dict()})
