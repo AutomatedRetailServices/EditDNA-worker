@@ -8,6 +8,7 @@ from fastapi import FastAPI, HTTPException, status
 from pydantic import BaseModel, Field
 
 from cutsell_app.multipart_routes import router as multipart_router
+from cutsell_worker.caption_settings import patch_caption_settings
 from cutsell_worker.config import load_runtime_config
 from cutsell_worker.draft_edits import (
     DraftEditError,
@@ -161,6 +162,12 @@ class DraftCaptionRequest(BaseModel):
     edits: list[CaptionEdit] = Field(min_length=1)
 
 
+class DraftCaptionSettingsRequest(BaseModel):
+    draft: dict[str, Any]
+    enabled: bool | None = None
+    preset: str | None = None
+
+
 def _draft_edit_error(exc: DraftEditError):
     raise HTTPException(status_code=409, detail=str(exc)) from None
 
@@ -170,7 +177,6 @@ def _draft_history_error(exc: Exception):
 
 
 def _hydrate_snapshot_assets(snapshot: dict[str, Any]) -> dict[str, Any]:
-    """Attach fresh signed presentation URLs without making recovery depend on them."""
     out = deepcopy(snapshot)
     hydrated_sources = []
     for source in out.get("sources") or ():
@@ -229,11 +235,7 @@ def submit_flow_b(payload: FlowBSubmitRequest):
             raise HTTPException(status_code=409, detail="source_order values must be unique")
         seen_orders.add(item.source_order)
         try:
-            validate_product_source_uri(
-                item.uri,
-                project_id=payload.project_id,
-                user_id=payload.user_id,
-            )
+            validate_product_source_uri(item.uri, project_id=payload.project_id, user_id=payload.user_id)
         except ValueError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from None
         sources.append({
@@ -287,9 +289,7 @@ def autosave_draft(project_id: str, payload: DraftAutosaveRequest):
 def undo_draft(project_id: str, payload: DraftHistoryRequest):
     try:
         return _hydrate_snapshot_assets(undo_draft_snapshot(
-            user_id=payload.user_id,
-            project_id=project_id,
-            expected_revision=payload.expected_revision,
+            user_id=payload.user_id, project_id=project_id, expected_revision=payload.expected_revision
         ))
     except (DraftConflictError, DraftHistoryError) as exc:
         _draft_history_error(exc)
@@ -303,9 +303,7 @@ def undo_draft(project_id: str, payload: DraftHistoryRequest):
 def redo_draft(project_id: str, payload: DraftHistoryRequest):
     try:
         return _hydrate_snapshot_assets(redo_draft_snapshot(
-            user_id=payload.user_id,
-            project_id=project_id,
-            expected_revision=payload.expected_revision,
+            user_id=payload.user_id, project_id=project_id, expected_revision=payload.expected_revision
         ))
     except (DraftConflictError, DraftHistoryError) as exc:
         _draft_history_error(exc)
@@ -323,7 +321,6 @@ def submit_export(payload: ExportSubmitRequest):
         raise HTTPException(status_code=422, detail=f"invalid draft: {exc}") from None
     if draft.project_id != payload.project_id:
         raise HTTPException(status_code=409, detail="draft project does not match export project")
-
     seen_source_ids = set()
     sources = []
     for item in payload.sources:
@@ -333,19 +330,13 @@ def submit_export(payload: ExportSubmitRequest):
             raise HTTPException(status_code=409, detail="source_asset_id values must be unique")
         seen_source_ids.add(item.source_asset_id)
         try:
-            validate_product_source_uri(
-                item.uri,
-                project_id=payload.project_id,
-                user_id=payload.user_id,
-            )
+            validate_product_source_uri(item.uri, project_id=payload.project_id, user_id=payload.user_id)
         except ValueError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from None
         sources.append(item.model_dump())
-
     required_source_ids = {clip.source_asset_id for clip in draft.selected}
     if not required_source_ids.issubset(seen_source_ids):
         raise HTTPException(status_code=422, detail="export is missing selected source assets")
-
     submission = enqueue_export({
         "project_id": payload.project_id,
         "user_id": payload.user_id,
@@ -424,12 +415,7 @@ def edit_split_clip(payload: DraftSplitRequest):
 @app.post("/v1/draft-edits/audio")
 def edit_audio(payload: DraftAudioRequest):
     try:
-        return patch_audio(
-            payload.draft,
-            payload.clip_id,
-            muted=payload.muted,
-            volume=payload.volume,
-        )
+        return patch_audio(payload.draft, payload.clip_id, muted=payload.muted, volume=payload.volume)
     except DraftEditError as exc:
         _draft_edit_error(exc)
 
@@ -440,3 +426,11 @@ def edit_captions(payload: DraftCaptionRequest):
         return patch_captions(payload.draft, [edit.model_dump() for edit in payload.edits])
     except DraftEditError as exc:
         _draft_edit_error(exc)
+
+
+@app.post("/v1/draft-edits/caption-settings")
+def edit_caption_settings(payload: DraftCaptionSettingsRequest):
+    try:
+        return patch_caption_settings(payload.draft, enabled=payload.enabled, preset=payload.preset)
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from None
