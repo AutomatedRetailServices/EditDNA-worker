@@ -21,6 +21,15 @@ final class DraftEditorViewModel: ObservableObject {
         snapshot?.draft["selected"]?.arrayValue?.compactMap(\.objectValue) ?? []
     }
 
+    var alternateClips: [[String: JSONValue]] {
+        snapshot?.draft["alternates"]?.arrayValue?.compactMap(\.objectValue) ?? []
+    }
+
+    func alternates(for selectedClip: [String: JSONValue]) -> [[String: JSONValue]] {
+        guard let groupID = selectedClip["take_group_id"]?.stringValue, !groupID.isEmpty else { return [] }
+        return alternateClips.filter { $0["take_group_id"]?.stringValue == groupID }
+    }
+
     var captionsEnabled: Bool {
         snapshot?.draft["captions_enabled"]?.boolValue ?? true
     }
@@ -40,6 +49,19 @@ final class DraftEditorViewModel: ObservableObject {
         } catch {
             errorMessage = error.localizedDescription
         }
+    }
+
+    func swap(selectedClipID: String, replacementClipID: String) async {
+        guard let snapshot else { return }
+        let edited = await edit(
+            path: "/v1/draft-edits/swap",
+            body: .object([
+                "draft": snapshot.draft,
+                "selected_clip_id": .string(selectedClipID),
+                "replacement_clip_id": .string(replacementClipID)
+            ])
+        )
+        if let edited { await autosave(edited) }
     }
 
     func remove(clipID: String) async {
