@@ -1,0 +1,169 @@
+name: CutSell Edited Draft Export Smoke
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - cutsell/mobile-v1-asap-scope
+    paths:
+      - ".cutsell/export-real-smoke-trigger.txt"
+
+permissions:
+  contents: read
+
+jobs:
+  export-edited-real-draft:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      RUNPOD_API_KEY: ${{ secrets.RUNPOD_API_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install FFmpeg
+        run: sudo apt-get update && sudo apt-get install -y ffmpeg jq
+
+      - name: Load masked AWS/S3 credentials from RunPod template vault
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail --silent --show-error \
+            --url "https://rest.runpod.io/v1/templates" \
+            --header "Authorization: Bearer $RUNPOD_API_KEY" \
+            --output templates.json
+          TEMPLATE=$(jq -c '[.[] | select(.name == "EditDNA-Worker-2")][0]' templates.json)
+          test "$TEMPLATE" != "null" || (echo 'EditDNA-Worker-2 template not found' && exit 3)
+          export_secret() {
+            key="$1"
+            value=$(printf '%s' "$TEMPLATE" | jq -r --arg key "$key" '.env[$key] // empty')
+            test -n "$value" || (echo "$key missing from RunPod template vault" && exit 4)
+            echo "::add-mask::$value"
+            printf '%s=%s\n' "$key" "$value" >> "$GITHUB_ENV"
+          }
+          export_secret AWS_ACCESS_KEY_ID
+          export_secret AWS_SECRET_ACCESS_KEY
+          export_secret AWS_REGION
+          export_secret S3_BUCKET
+
+      - name: Install export runtime
+        run: pip install boto3 rq redis
+
+      - name: Run edited-draft export against real footage
+        shell: bash
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+          import subprocess
+          import tempfile
+          from urllib.parse import urlparse
+
+          import boto3
+
+          from cutsell_worker.export_job import run_export_job
+          from cutsell_worker.uploads import scoped_upload_prefix
+
+          bucket = os.environ['S3_BUCKET']
+          region = os.environ.get('AWS_REGION') or 'us-east-1'
+          s3 = boto3.client('s3', region_name=region)
+          project_id = 'cutsell-export-smoke-project'
+          user_id = 'cutsell-export-smoke-user'
+          source_asset_id = 'src_export_smoke_real'
+          historical_key = 'Editdna bloopers videos/Bloppers15.mp4'
+          scoped_key = scoped_upload_prefix(user_id=user_id, project_id=project_id) + 'real-window.mp4'
+
+          with tempfile.TemporaryDirectory(prefix='cutsell-export-smoke-') as directory:
+              full = str(Path(directory) / 'historical.mp4')
+              window = str(Path(directory) / 'real-window.mp4')
+              s3.download_file(bucket, historical_key, full)
+              subprocess.run([
+                  'ffmpeg', '-y', '-hide_banner', '-loglevel', 'error',
+                  '-ss', '0', '-t', '8', '-i', full,
+                  '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '20',
+                  '-c:a', 'aac', '-b:a', '160k', '-movflags', '+faststart', window,
+              ], check=True)
+              s3.upload_file(window, bucket, scoped_key, ExtraArgs={'ContentType': 'video/mp4'})
+
+              draft = {
+                  'schema_version': 'cutsell.v1',
+                  'project_id': project_id,
+                  'strategy': 'mixed',
+                  'selected': [
+                      {
+                          'clip_id': 'clip-second-first',
+                          'source_asset_id': source_asset_id,
+                          'source_order': 0,
+                          'start': 2.30,
+                          'end': 3.72,
+                          'text': "We're going to love the Lotus Wheel.",
+                          'caption_text': 'Lotus Wheel',
+                          'semantic_role': 'BENEFITS',
+                          'selected': True,
+                      },
+                      {
+                          'clip_id': 'clip-first-second',
+                          'source_asset_id': source_asset_id,
+                          'source_order': 0,
+                          'start': 0.00,
+                          'end': 2.28,
+                          'text': 'Use your desk to pop your back.',
+                          'caption_text': 'Pop your back?',
+                          'semantic_role': 'PROBLEM',
+                          'selected': True,
+                      },
+                  ],
+                  'alternates': [],
+                  'discarded': [],
+                  'diagnostics': {'smoke': 'edited_reorder'},
+              }
+              payload = {
+                  'project_id': project_id,
+                  'user_id': user_id,
+                  'draft': draft,
+                  'sources': [{
+                      'source_asset_id': source_asset_id,
+                      'original_name': 'real-window.mp4',
+                      'uri': f's3://{bucket}/{scoped_key}',
+                  }],
+              }
+              result = run_export_job(payload)
+              parsed = urlparse(result['export_uri'])
+              export_key = parsed.path.lstrip('/')
+              s3.head_object(Bucket=bucket, Key=export_key)
+              s3.download_file(bucket, export_key, 'cutsell-export-smoke.mp4')
+              Path('cutsell-export-smoke-report.json').write_text(
+                  json.dumps({
+                      'state': result['state'],
+                      'selected_count': result['selected_count'],
+                      'size_bytes': result['size_bytes'],
+                      'export_prefix_ok': export_key.startswith('cutsell/exports/'),
+                      'source_cleanup_key': scoped_key,
+                  }, indent=2),
+                  encoding='utf-8',
+              )
+              print(Path('cutsell-export-smoke-report.json').read_text())
+
+          # Remove the temporary product upload. Keep the export only through this job,
+          # then remove it after the artifact copy proves retrieval worked.
+          s3.delete_object(Bucket=bucket, Key=scoped_key)
+          s3.delete_object(Bucket=bucket, Key=export_key)
+          PY
+
+      - name: Validate export smoke report
+        shell: bash
+        run: |
+          jq -e '.state == "finished" and .selected_count == 2 and .size_bytes > 0 and .export_prefix_ok == true' cutsell-export-smoke-report.json >/dev/null
+          test -s cutsell-export-smoke.mp4
+
+      - name: Upload edited export artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: cutsell-edited-export-${{ github.sha }}
+          path: |
+            cutsell-export-smoke-report.json
+            cutsell-export-smoke.mp4
+          retention-days: 7
