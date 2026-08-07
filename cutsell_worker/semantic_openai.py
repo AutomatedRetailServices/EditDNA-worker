@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from typing import Callable, Tuple
 
 from .contracts import CandidateTake, SemanticLabel, SemanticRole
+from .openai_json import parse_json_object
 from .providers import ProviderStatus, SemanticProviderResult
 
 
@@ -51,7 +52,7 @@ class OpenAISemanticProvider:
                 {"role": "user", "content": json.dumps(payload, ensure_ascii=False)},
             ],
         )
-        data = json.loads(str(response.output_text).strip())
+        data = parse_json_object(response.output_text)
         items = data.get("clips")
         if not isinstance(items, list):
             raise ValueError("semantic provider returned invalid payload")
