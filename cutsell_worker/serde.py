@@ -15,6 +15,8 @@ from .contracts import (
     Word,
 )
 
+CAPTION_PRESETS = {"classic", "clean"}
+
 
 def request_from_dict(payload: dict) -> ProcessingRequest:
     sources = tuple(
@@ -82,6 +84,9 @@ def draft_from_dict(payload: dict) -> DraftTimeline:
     discarded = tuple(_draft_clip_from_dict(dict(item), selected_default=False) for item in payload.get("discarded") or ())
     if not selected:
         raise ValueError("draft requires at least one selected clip")
+    preset = str(payload.get("caption_preset") or "classic")
+    if preset not in CAPTION_PRESETS:
+        raise ValueError("caption_preset must be classic or clean")
     return DraftTimeline(
         schema_version=str(payload.get("schema_version") or "cutsell.v1"),
         project_id=str(payload["project_id"]),
@@ -90,6 +95,8 @@ def draft_from_dict(payload: dict) -> DraftTimeline:
         alternates=alternates,
         discarded=discarded,
         diagnostics=dict(payload.get("diagnostics") or {}),
+        captions_enabled=bool(payload.get("captions_enabled", True)),
+        caption_preset=preset,
     )
 
 
