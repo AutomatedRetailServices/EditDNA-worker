@@ -1,2 +1,2 @@
-run=2026-08-07T11:48Z
-purpose=validate real S3 multipart resume state with Redis session and completion cleanup
+run=2026-08-07T11:49Z
+purpose=validate real S3 multipart resume state with Redis session and completion cleanup after workflow registration
