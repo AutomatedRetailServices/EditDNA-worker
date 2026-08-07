@@ -58,7 +58,7 @@ def run_export_job(payload: dict) -> dict:
         plan = build_render_plan(draft, local_paths)
         output = str(Path(directory) / "cutsell-export.mp4")
         publish("rendering", 35)
-        render_preview(plan, output)
+        render_preview(plan, output, text_overlays=draft.text_overlays)
         publish("rendering", 85)
         stored = store_export(output, project_id=project_id, user_id=user_id)
         publish("finished", 100)
@@ -66,5 +66,6 @@ def run_export_job(payload: dict) -> dict:
             "project_id": project_id,
             "state": "finished",
             "selected_count": len(draft.selected),
+            "text_overlay_count": len(draft.text_overlays),
             **stored,
         }
