@@ -161,13 +161,12 @@ actor MultipartUploadManager {
                 body: OwnerBody(project_id: projectID, user_id: session.userID)
             )
 
-            let partFile = try writePartFile(
+            let response = try await uploadPart(
                 data,
                 uploadID: start.uploadID,
-                partNumber: partNumber
+                partNumber: partNumber,
+                signedURL: signed.uploadURL
             )
-            defer { try? FileManager.default.removeItem(at: partFile) }
-            let response = try await backgroundUploader.upload(fileURL: partFile, to: signed.uploadURL)
             guard let etagValue = response.value(forHTTPHeaderField: "ETag"), !etagValue.isEmpty else {
                 throw UploadError.missingETag(partNumber)
             }
@@ -220,6 +219,17 @@ actor MultipartUploadManager {
                 size_bytes: size
             )
         )
+    }
+
+    private func uploadPart(
+        _ data: Data,
+        uploadID: String,
+        partNumber: Int,
+        signedURL: URL
+    ) async throws -> HTTPURLResponse {
+        let partFile = try writePartFile(data, uploadID: uploadID, partNumber: partNumber)
+        defer { try? FileManager.default.removeItem(at: partFile) }
+        return try await backgroundUploader.upload(fileURL: partFile, to: signedURL)
     }
 
     private func writePartFile(_ data: Data, uploadID: String, partNumber: Int) throws -> URL {
