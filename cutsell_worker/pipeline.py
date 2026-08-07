@@ -11,7 +11,6 @@ from .contracts import (
     CandidateTake,
     DraftClip,
     DraftTimeline,
-    EditStrategy,
     JobState,
     ProcessingRequest,
     ProcessingResult,
@@ -112,7 +111,9 @@ def build_flow_b_draft(
         for take in discarded
     )
 
-    strategy = choose_strategy(label_map.values()) if label_map else EditStrategy.MIXED
+    # Strategy is descriptive only. It may use both semantic and visual evidence,
+    # but it has no authority to delete speech or force a funnel order.
+    strategy = choose_strategy(label_map.values(), kept)
     draft = DraftTimeline(
         schema_version=SCHEMA_VERSION,
         project_id=request.project_id,
