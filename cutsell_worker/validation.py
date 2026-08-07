@@ -22,6 +22,8 @@ from .render_plan import build_render_plan
 from .semantic_openai import OpenAISemanticProvider
 from .source_identity import stable_source_id
 from .storage import download_source
+from .take_judge_openai import OpenAITakeJudgeProvider
+from .visual_openai import OpenAIVisualProvider
 
 VIDEO_EXTENSIONS = {".mp4", ".mov", ".m4v", ".webm"}
 DEFAULT_VALIDATION_PREFIX = "Editdna bloopers videos/"
@@ -67,7 +69,7 @@ def run_single_validation(
     language_hint: str | None = None,
     preview_output: str | None = None,
 ) -> dict[str, Any]:
-    """Run one S3 video through clean Flow B and optionally render the selected draft."""
+    """Run one S3 video through the same clean brain used by production."""
     if Path(key).suffix.lower() not in VIDEO_EXTENSIONS:
         raise ValueError("unsupported validation video")
     config = load_runtime_config()
@@ -91,6 +93,8 @@ def run_single_validation(
     )
     asr = FasterWhisperASR(model_name=config.asr_model)
     semantic = OpenAISemanticProvider(model=config.semantic_model) if config.semantic_ready else NoopSemanticProvider()
+    visual = OpenAIVisualProvider(model=config.visual_model) if config.visual_ready else None
+    take_judge = OpenAITakeJudgeProvider(model=config.take_judge_model) if config.semantic_ready else None
 
     started = time.monotonic()
     preview_path = None
@@ -103,6 +107,8 @@ def run_single_validation(
             local_paths,
             asr_provider=asr,
             semantic_provider=semantic,
+            visual_provider=visual,
+            take_judge_provider=take_judge,
         )
         if preview_output:
             plan = build_render_plan(result.draft, local_paths)
@@ -114,6 +120,12 @@ def run_single_validation(
         "source_key": key,
         "elapsed_sec": elapsed,
         "preview_path": preview_path,
+        "models": {
+            "asr": config.asr_model,
+            "semantic": config.semantic_model if config.semantic_ready else None,
+            "visual": config.visual_model if config.visual_ready else None,
+            "take_judge": config.take_judge_model if config.semantic_ready else None,
+        },
         "strategy": result.draft.strategy.value,
         "selected_count": len(result.draft.selected),
         "alternate_count": len(result.draft.alternates),
