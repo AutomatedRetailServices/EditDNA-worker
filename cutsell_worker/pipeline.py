@@ -22,7 +22,7 @@ from .contracts import (
     TakeGroup,
 )
 from .strategy import choose_strategy
-from .take_grouping import group_takes
+from .take_grouping_provider import TakeGroupingProvider, safe_group_takes
 from .take_judge_provider import TakeJudgeProvider, safe_rank_takes
 
 
@@ -53,6 +53,7 @@ def build_flow_b_draft(
     take_judge_provider: TakeJudgeProvider | None = None,
     clean_cut_provider: CleanCutProvider | None = None,
     composer_provider: ComposerProvider | None = None,
+    take_grouping_provider: TakeGroupingProvider | None = None,
 ) -> ProcessingResult:
     """Build an editable draft from already-transcribed/segmented takes."""
     take_tuple = tuple(takes)
@@ -83,7 +84,10 @@ def build_flow_b_draft(
                     parent_label.reason,
                 )
 
-    grouped = group_takes(kept)
+    take_by_id = {take.clip_id: take for take in kept}
+    grouping = safe_group_takes(take_grouping_provider, kept)
+    group_members = [tuple(take_by_id[clip_id] for clip_id in ids) for ids in grouping.groups]
+
     groups = []
     clip_to_group: Dict[str, str] = {}
     judge_statuses = Counter()
@@ -91,7 +95,7 @@ def build_flow_b_draft(
     alternate_group_count = 0
     judge_group_diagnostics = []
 
-    for key, members in grouped.items():
+    for members in group_members:
         if len(members) >= 2:
             alternate_group_count += 1
         judged = safe_rank_takes(members, take_judge_provider)
@@ -100,10 +104,13 @@ def build_flow_b_draft(
         if judged.status.reason:
             judge_reasons[judged.status.reason] += 1
         selected_clip_id = ranked[0].clip_id
-        gid = _group_id(request.project_id, key)
+        membership_key = "semantic:" + hashlib.sha256(
+            "|".join(sorted(member.clip_id for member in members)).encode()
+        ).hexdigest()[:16]
+        gid = _group_id(request.project_id, membership_key)
         group = TakeGroup(
             group_id=gid,
-            semantic_key=key,
+            semantic_key=membership_key,
             candidate_ids=tuple(member.clip_id for member in members),
             ranked=ranked,
             selected_clip_id=selected_clip_id,
@@ -130,7 +137,6 @@ def build_flow_b_draft(
     natural_selected = compose_selected(kept, groups, surviving_labels)
 
     # Flexible composer may only reorder those already-selected real clips.
-    # It has no deletion authority and cannot fabricate/duplicate speech.
     composition = safe_compose_order(
         composer_provider,
         natural_selected,
@@ -186,6 +192,9 @@ def build_flow_b_draft(
             "clean_cut_judge_mixed_trimmed_count": sum(1 for item in clean_judge_diagnostics if item.get("applied_mixed_trim")),
             "take_group_count": len(groups),
             "alternate_group_count": alternate_group_count,
+            "take_grouping_status": grouping.status.__dict__,
+            "take_grouping_reason": grouping.reason,
+            "take_group_members": [list(group) for group in grouping.groups][:100],
             "source_count": len(request.sources),
             "take_judge_status_counts": dict(judge_statuses),
             "take_judge_fallback_reasons": dict(judge_reasons),
@@ -195,6 +204,7 @@ def build_flow_b_draft(
             "composer_order": list(composition.ordered_clip_ids),
         },
     )
+
     if alternate_group_count == 0:
         judge_stage = "not_applicable_no_alternates"
     elif judge_statuses.get("applied"):
@@ -220,6 +230,13 @@ def build_flow_b_draft(
     else:
         composer_stage = "degraded_natural_order_fallback"
 
+    if take_grouping_provider is None or len(kept) <= 1:
+        grouping_stage = "baseline_complete"
+    elif grouping.status.status == "applied":
+        grouping_stage = "provider_complete"
+    else:
+        grouping_stage = "degraded_baseline_fallback"
+
     return ProcessingResult(
         schema_version=SCHEMA_VERSION,
         project_id=request.project_id,
@@ -227,7 +244,7 @@ def build_flow_b_draft(
         draft=draft,
         stage_status={
             "clean_cut": clean_cut_stage,
-            "take_grouping": "complete",
+            "take_grouping": grouping_stage,
             "take_judge": judge_stage,
             "semantic": "provided" if label_map else "not_provided",
             "composer": composer_stage,
