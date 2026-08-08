@@ -1,6 +1,8 @@
-import os
+from datetime import datetime, timezone
 
-from cutsell_worker.account_lifecycle import _project_prefixes, _delete_s3_prefix
+from cutsell_worker.account_lifecycle import _delete_s3_prefix, _project_prefixes
+from cutsell_worker.commercial_store import initialize_schema
+from cutsell_worker.commercial_usage import month_start_utc, monthly_usage_total
 from cutsell_worker.usage_limits import release_processing_slot, reserve_processing_slot
 
 
@@ -80,3 +82,24 @@ def test_s3_prefix_delete_never_touches_other_project_objects():
     assert count == 2
     assert set(client.deleted) == {target + "a.mp4", target + "b.mp4"}
     assert client.keys == ["cutsell/uploads/u1/p2/keep.mp4"]
+
+
+def test_monthly_usage_ignores_prior_month(tmp_path):
+    from sqlalchemy import create_engine, text
+
+    url = f"sqlite:///{tmp_path / 'usage.db'}"
+    initialize_schema(url)
+    engine = create_engine(url, future=True)
+    with engine.begin() as conn:
+        conn.execute(text(
+            "INSERT INTO cutsell_usage_events(event_id,user_id,project_id,event_type,quantity,unit,metadata_json,created_at) "
+            "VALUES(:id,:user,NULL,'processing_minutes',:q,'minutes','{}',:created)"
+        ), {"id": "old", "user": "usr_1", "q": 90.0, "created": "2026-07-31T23:59:59+00:00"})
+        conn.execute(text(
+            "INSERT INTO cutsell_usage_events(event_id,user_id,project_id,event_type,quantity,unit,metadata_json,created_at) "
+            "VALUES(:id,:user,NULL,'processing_minutes',:q,'minutes','{}',:created)"
+        ), {"id": "new", "user": "usr_1", "q": 12.5, "created": "2026-08-02T10:00:00+00:00"})
+
+    now = datetime(2026, 8, 8, 12, 0, tzinfo=timezone.utc)
+    assert month_start_utc(now) == "2026-08-01T00:00:00+00:00"
+    assert monthly_usage_total(url, user_id="usr_1", event_type="processing_minutes", now=now) == 12.5
