@@ -1,0 +1,44 @@
+name: CutSell Staging Job Diagnostic Once
+
+on:
+  push:
+    branches:
+      - cutsell/mobile-v1-clean
+    paths:
+      - ".cutsell/staging-job-diagnostic-once.txt"
+
+permissions:
+  contents: read
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      REDIS_URL: ${{ secrets.REDIS_URL }}
+      JOB_ID: 24f0ddb3-f03a-4ba7-9b73-2e31176e09d5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Require diagnostic marker
+        run: grep -qx 'inspect=staging-flow-job' .cutsell/staging-job-diagnostic-once.txt
+      - name: Inspect failed job safely
+        run: |
+          set -euo pipefail
+          python -m pip install --quiet redis rq
+          python - <<'PY'
+          import os, re
+          from redis import Redis
+          from rq.job import Job
+          r=Redis.from_url(os.environ['REDIS_URL'])
+          job=Job.fetch(os.environ['JOB_ID'],connection=r)
+          status=job.get_status(refresh=True)
+          print('status:',status)
+          print('meta:',{k:v for k,v in (job.meta or {}).items() if k in {'stage','progress_percent','error_code'}})
+          exc=str(job.exc_info or '')
+          # Only show the tail and redact URL/token-like material.
+          tail='\n'.join(exc.splitlines()[-12:])
+          tail=re.sub(r'https?://\S+','<url-redacted>',tail)
+          tail=re.sub(r'(?i)(key|token|secret|password)=\S+',r'\1=<redacted>',tail)
+          print('traceback_tail:')
+          print(tail)
+          PY
