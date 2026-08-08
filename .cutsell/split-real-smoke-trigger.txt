@@ -1,0 +1,2 @@
+run=2026-08-07T12:00Z
+purpose=validate real Whisper word timings survive into Draft and split safely at playhead

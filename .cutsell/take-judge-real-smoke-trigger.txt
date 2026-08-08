@@ -1,0 +1,4 @@
+run=2026-08-07T11:01Z
+source=Editdna bloopers videos/Bloppers7.mp4
+window=208-220
+reason=validate real sibling retries with Semantic Visual and Take Judge provider complete

@@ -1,0 +1,2 @@
+run=2026-08-07T11:38Z
+purpose=validate edited draft reorder to final MP4 and scoped S3 export without rerunning AI

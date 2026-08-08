@@ -12,6 +12,7 @@ from difflib import SequenceMatcher
 from pathlib import Path
 
 import benchmark_s3
+from worker.diagnostics import sanitize_clean_cut_discard_diagnostics
 
 RESULT_FILES = ("results_v2.jsonl", "disagreements.jsonl", "unmatched.jsonl", "inventory.json",
                 "summary.json", "summary.csv", "errors.jsonl")
@@ -294,6 +295,9 @@ def run_benchmark(job_id: str, request: dict, s3=None, pipeline=None, progress=N
                     "usage": current.get("provider_usage_instrumentation", {"available": False, "reason": "Pipeline did not report provider instrumentation"}),
                     "cost": current.get("estimated_cost_instrumentation", {"available": False, "reason": "Pipeline did not report cost instrumentation"})}
                 session_output["take_judge_execution"] = current.get("take_judge_execution", {"requested": False, "sources": []})
+                session_output["clean_cut_discard_diagnostics"] = sanitize_clean_cut_discard_diagnostics(
+                    current.get("clean_cut_discard_diagnostics", [])
+                )
                 state["failed_sessions"] = [value for value in state["failed_sessions"] if value != session]
                 completed.add(session)
             except Exception as exc:

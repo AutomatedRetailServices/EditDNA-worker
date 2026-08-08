@@ -1,0 +1,2 @@
+run=3
+reason=resolve current template metadata before GPU smoke

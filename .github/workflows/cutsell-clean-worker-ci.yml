@@ -1,0 +1,35 @@
+name: CutSell Clean Worker CI
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "cutsell_worker/**"
+      - "cutsell_app/**"
+      - "tests/test_cutsell_clean_worker_*.py"
+      - ".github/workflows/cutsell-clean-worker-ci.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: cutsell-clean-worker-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  test-clean-worker:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Compile clean worker and app
+        run: python -m py_compile cutsell_worker/*.py cutsell_app/*.py
+      - name: Install test runner and app dependencies
+        run: pip install pytest fastapi pydantic httpx
+      - name: Run CutSell clean-worker tests
+        env:
+          PYTHONPATH: .
+        run: pytest -q tests/test_cutsell_clean_worker_*.py

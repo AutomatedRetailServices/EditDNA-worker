@@ -1,0 +1,90 @@
+name: CutSell RunPod Template Preflight
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - cutsell/mobile-v1-asap-scope
+    paths:
+      - ".cutsell/runpod-template-preflight-trigger.txt"
+
+permissions:
+  contents: read
+
+jobs:
+  inspect-template:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      RUNPOD_API_KEY: ${{ secrets.RUNPOD_API_KEY }}
+      RUNPOD_TEMPLATE_ID: ${{ secrets.RUNPOD_TEMPLATE_ID }}
+      RUNPOD_TEMPLATE_NAME: EditDNA-Worker-2
+    steps:
+      - name: Verify RunPod secrets exist
+        shell: bash
+        run: |
+          test -n "$RUNPOD_API_KEY" || (echo 'RUNPOD_API_KEY missing' && exit 2)
+          test -n "$RUNPOD_TEMPLATE_ID" || (echo 'RUNPOD_TEMPLATE_ID missing' && exit 2)
+      - name: Try saved template ID without printing secrets
+        id: saved
+        continue-on-error: true
+        shell: bash
+        run: |
+          code=$(curl --silent --show-error \
+            --write-out '%{http_code}' \
+            --url "https://rest.runpod.io/v1/templates/$RUNPOD_TEMPLATE_ID" \
+            --header "Authorization: Bearer $RUNPOD_API_KEY" \
+            --output template.json)
+          echo "http_status=$code" >> "$GITHUB_OUTPUT"
+          test "$code" = "200"
+      - name: Resolve current template by name when saved ID is stale
+        if: steps.saved.outcome != 'success'
+        shell: bash
+        run: |
+          echo "saved_template_http_status=${{ steps.saved.outputs.http_status }}"
+          curl --fail --silent --show-error \
+            --url "https://rest.runpod.io/v1/templates" \
+            --header "Authorization: Bearer $RUNPOD_API_KEY" \
+            --output templates.json
+          RESOLVED_TEMPLATE_ID=$(jq -r --arg name "$RUNPOD_TEMPLATE_NAME" '[.[] | select(.name == $name)][0].id // empty' templates.json)
+          test -n "$RESOLVED_TEMPLATE_ID" || (echo 'named RunPod template not found' && exit 4)
+          echo "RESOLVED_TEMPLATE_ID=$RESOLVED_TEMPLATE_ID" >> "$GITHUB_ENV"
+          curl --fail --silent --show-error \
+            --url "https://rest.runpod.io/v1/templates/$RESOLVED_TEMPLATE_ID" \
+            --header "Authorization: Bearer $RUNPOD_API_KEY" \
+            --output template.json
+      - name: Use saved template ID when current
+        if: steps.saved.outcome == 'success'
+        shell: bash
+        run: echo "RESOLVED_TEMPLATE_ID=$RUNPOD_TEMPLATE_ID" >> "$GITHUB_ENV"
+      - name: Print sanitized resolved-template metadata
+        shell: bash
+        run: |
+          jq '{
+            id,
+            name,
+            imageName,
+            containerDiskInGb,
+            volumeInGb,
+            volumeMountPath,
+            ports,
+            dockerEntrypoint,
+            dockerStartCmd,
+            hasRegistryAuth: ((.containerRegistryAuthId // "") | length > 0),
+            env_keys: ((.env // {}) | keys | sort)
+          }' template.json
+      - name: List current Pods without exposing env or IPs
+        shell: bash
+        run: |
+          curl --fail --silent --show-error \
+            --url "https://rest.runpod.io/v1/pods" \
+            --header "Authorization: Bearer $RUNPOD_API_KEY" \
+            --output pods.json
+          jq 'map({
+            id,
+            name,
+            desiredStatus,
+            templateId,
+            gpu: (if .gpu then {count: .gpu.count, displayName: .gpu.displayName} else null end),
+            costPerHr
+          })' pods.json

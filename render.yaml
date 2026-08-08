@@ -5,7 +5,7 @@ services:
     env: python
     plan: starter
     buildCommand: pip install -r requirements.txt
-    startCommand: uvicorn app:app --host 0.0.0.0 --port $PORT
+    startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT
     autoDeploy: true
     envVars:
       - key: PYTHON_VERSION
@@ -38,6 +38,8 @@ services:
         value: /opt/render/project/src
       - key: REDIS_URL
         sync: false
+      - key: OPENAI_API_KEY
+        sync: false
       - key: AWS_ACCESS_KEY_ID
         sync: false
       - key: AWS_SECRET_ACCESS_KEY
@@ -46,3 +48,23 @@ services:
         sync: false
       - key: S3_BUCKET
         sync: false
+      # V1 primary intelligence. Code remains fail-open when the provider is unavailable.
+      - key: ASR_ENABLED
+        value: "1"
+      - key: EDITDNA_USE_LLM
+        value: "1"
+      - key: SEMANTIC_V2_MIN_CONFIDENCE
+        value: "0.70"
+      - key: TAKE_JUDGE_ENABLED
+        value: "1"
+      - key: TAKE_JUDGE_FRAMES
+        value: "3"
+      - key: TAKE_JUDGE_V2_MIN_CONFIDENCE
+        value: "0.70"
+      # CLIP and visual-boundary gates remain observational/off until the real-video benchmark.
+      - key: VISION_ENABLED
+        value: "0"
+      - key: BAD_TAKES_ENABLED
+        value: "0"
+      - key: BOUNDARY_REFINER_ENABLED
+        value: "0"

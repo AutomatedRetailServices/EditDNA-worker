@@ -1,0 +1,2 @@
+rerun=2026-08-07T10:46Z
+reason=validate robust OpenAI JSON parser with gpt-4o-mini semantic and visual providers

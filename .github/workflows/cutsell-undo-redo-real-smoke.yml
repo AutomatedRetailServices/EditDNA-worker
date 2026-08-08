@@ -1,0 +1,76 @@
+name: CutSell Undo Redo Recovery Smoke
+
+on:
+  push:
+    branches: [cutsell/mobile-v1-asap-scope]
+    paths:
+      - '.cutsell/undo-redo-smoke-trigger.txt'
+
+jobs:
+  validate-undo-redo-recovery:
+    runs-on: ubuntu-latest
+    env:
+      RUNPOD_API_KEY: ${{ secrets.RUNPOD_API_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Load masked Redis URL from RunPod template vault
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail --silent --show-error --url "https://rest.runpod.io/v1/templates" --header "Authorization: $RUNPOD_API_KEY" --output templates.json
+          TEMPLATE=$(jq -c '[.[] | select(.name == "EditDNA-Worker-2")][0]' templates.json)
+          test "$TEMPLATE" != "null"
+          VALUE=$(printf '%s' "$TEMPLATE" | jq -r '.env.REDIS_URL // empty')
+          test -n "$VALUE"
+          echo "::add-mask::$VALUE"
+          printf 'REDIS_URL=%s\n' "$VALUE" >> "$GITHUB_ENV"
+      - name: Install Redis client
+        run: pip install redis
+      - name: Validate persistent undo redo across recovery reads
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          from redis import Redis
+          from cutsell_worker.draft_store import (
+              create_initial_draft,
+              draft_key,
+              get_draft_snapshot,
+              redo_draft_snapshot,
+              save_draft_snapshot,
+              undo_draft_snapshot,
+          )
+
+          user_id = 'cutsell-undo-redo-smoke-user'
+          project_id = 'cutsell-undo-redo-smoke-project'
+          redis = Redis.from_url(os.environ['REDIS_URL'])
+          key = draft_key(user_id=user_id, project_id=project_id)
+
+          def draft(text):
+              return {
+                  'schema_version': 'cutsell.v1', 'project_id': project_id, 'strategy': 'mixed',
+                  'selected': [{'clip_id':'c1','source_asset_id':'s1','source_order':0,'start':0.0,'end':1.0,'text':text,'caption_text':text,'semantic_role':'OTHER','selected':True}],
+                  'alternates': [], 'discarded': [], 'diagnostics': {}
+              }
+
+          redis.delete(key)
+          try:
+              create_initial_draft(user_id=user_id, project_id=project_id, draft=draft('AI'), sources=[{'source_asset_id':'s1','uri':'s3://bucket/x.mp4'}], client=redis)
+              save_draft_snapshot(user_id=user_id, project_id=project_id, draft=draft('A'), expected_revision=1, client=redis)
+              save_draft_snapshot(user_id=user_id, project_id=project_id, draft=draft('B'), expected_revision=2, client=redis)
+              u1 = undo_draft_snapshot(user_id=user_id, project_id=project_id, expected_revision=3, client=redis)
+              recovered = get_draft_snapshot(user_id=user_id, project_id=project_id, client=redis)
+              assert recovered['revision'] == 4
+              assert recovered['draft']['selected'][0]['text'] == 'A'
+              u2 = undo_draft_snapshot(user_id=user_id, project_id=project_id, expected_revision=4, client=redis)
+              r1 = redo_draft_snapshot(user_id=user_id, project_id=project_id, expected_revision=5, client=redis)
+              assert u1['draft']['selected'][0]['text'] == 'A'
+              assert u2['draft']['selected'][0]['text'] == 'AI'
+              assert r1['draft']['selected'][0]['text'] == 'A'
+              print(json.dumps({'undo_1_revision':4,'recovered_text':'A','undo_2_revision':5,'redo_revision':6,'redo_text':'A'}, indent=2))
+          finally:
+              redis.delete(key)
+          PY

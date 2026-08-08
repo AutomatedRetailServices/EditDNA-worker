@@ -1,0 +1,68 @@
+name: CutSell Real Video Validation
+
+on:
+  workflow_dispatch:
+    inputs:
+      s3_key:
+        description: Optional explicit S3 video key; blank uses first eligible blooper
+        required: false
+        type: string
+      language:
+        description: Optional language hint (en/es)
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+env:
+  AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+  AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+  AWS_REGION: ${{ secrets.AWS_REGION }}
+  S3_BUCKET: ${{ secrets.S3_BUCKET }}
+  OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+  CUTSELL_ASR_MODEL: medium
+  CUTSELL_SEMANTIC_MODEL: gpt-4o-mini
+
+jobs:
+  validate-one-real-video:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+      - name: Install FFmpeg
+        run: sudo apt-get update && sudo apt-get install -y ffmpeg
+      - name: Install worker dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+      - name: Verify required storage secrets are present
+        shell: bash
+        run: |
+          test -n "$AWS_ACCESS_KEY_ID" || (echo 'AWS_ACCESS_KEY_ID secret is missing' && exit 2)
+          test -n "$AWS_SECRET_ACCESS_KEY" || (echo 'AWS_SECRET_ACCESS_KEY secret is missing' && exit 2)
+          test -n "$AWS_REGION" || (echo 'AWS_REGION secret is missing' && exit 2)
+          test -n "$S3_BUCKET" || (echo 'S3_BUCKET secret is missing' && exit 2)
+      - name: Run clean CutSell validation
+        shell: bash
+        env:
+          INPUT_KEY: ${{ inputs.s3_key }}
+          INPUT_LANGUAGE: ${{ inputs.language }}
+        run: |
+          ARGS=(--report cutsell-validation-report.json --preview cutsell-validation-preview.mp4)
+          if [ -n "$INPUT_KEY" ]; then ARGS+=(--key "$INPUT_KEY"); fi
+          if [ -n "$INPUT_LANGUAGE" ]; then ARGS+=(--language "$INPUT_LANGUAGE"); fi
+          python -m cutsell_worker.validation_cli "${ARGS[@]}"
+      - name: Upload validation report and preview
+        uses: actions/upload-artifact@v4
+        with:
+          name: cutsell-real-video-${{ github.sha }}
+          path: |
+            cutsell-validation-report.json
+            cutsell-validation-preview.mp4
+          if-no-files-found: error
+          retention-days: 7

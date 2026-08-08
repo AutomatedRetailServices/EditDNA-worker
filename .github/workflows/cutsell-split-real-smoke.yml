@@ -1,0 +1,170 @@
+name: CutSell Real Split Smoke
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - cutsell/mobile-v1-asap-scope
+    paths:
+      - ".cutsell/split-real-smoke-trigger.txt"
+
+permissions:
+  contents: read
+
+jobs:
+  validate-word-aware-split:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      RUNPOD_API_KEY: ${{ secrets.RUNPOD_API_KEY }}
+      CUTSELL_ASR_MODEL: tiny
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install FFmpeg
+        run: sudo apt-get update && sudo apt-get install -y ffmpeg jq
+
+      - name: Load masked AWS S3 credentials from RunPod template vault
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail --silent --show-error \
+            --url "https://rest.runpod.io/v1/templates" \
+            --header "Authorization: Bearer $RUNPOD_API_KEY" \
+            --output templates.json
+          TEMPLATE=$(jq -c '[.[] | select(.name == "EditDNA-Worker-2")][0]' templates.json)
+          test "$TEMPLATE" != "null" || (echo 'EditDNA-Worker-2 template not found' && exit 3)
+          export_secret() {
+            key="$1"
+            value=$(printf '%s' "$TEMPLATE" | jq -r --arg key "$key" '.env[$key] // empty')
+            test -n "$value" || (echo "$key missing from RunPod template vault" && exit 4)
+            echo "::add-mask::$value"
+            printf '%s=%s\n' "$key" "$value" >> "$GITHUB_ENV"
+          }
+          export_secret AWS_ACCESS_KEY_ID
+          export_secret AWS_SECRET_ACCESS_KEY
+          export_secret AWS_REGION
+          export_secret S3_BUCKET
+
+      - name: Install split validation runtime
+        run: pip install faster-whisper boto3
+
+      - name: Build real Draft with word timings and split at a real word boundary
+        shell: bash
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+          import subprocess
+          import tempfile
+
+          import boto3
+
+          from cutsell_worker.asr import FasterWhisperASR
+          from cutsell_worker.contracts import ProcessingRequest, SourceAsset
+          from cutsell_worker.draft_edits import split_clip
+          from cutsell_worker.flow_b import process_local_sources
+          from cutsell_worker.serde import result_to_dict
+          from cutsell_worker.source_identity import stable_source_id
+
+          bucket = os.environ['S3_BUCKET']
+          region = os.environ.get('AWS_REGION') or 'us-east-1'
+          s3 = boto3.client('s3', region_name=region)
+          key = 'Editdna bloopers videos/Bloppers15.mp4'
+          project_id = 'cutsell-real-split-smoke'
+          source_id = stable_source_id(project_id, 0, 'Bloppers15-window.mp4')
+
+          with tempfile.TemporaryDirectory(prefix='cutsell-split-real-') as directory:
+              full = str(Path(directory) / 'full.mp4')
+              window = str(Path(directory) / 'window.mp4')
+              s3.download_file(bucket, key, full)
+              subprocess.run([
+                  'ffmpeg', '-y', '-hide_banner', '-loglevel', 'error',
+                  '-ss', '0', '-t', '8', '-i', full,
+                  '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '23',
+                  '-c:a', 'aac', '-b:a', '128k', '-movflags', '+faststart', window,
+              ], check=True)
+
+              source = SourceAsset(
+                  source_asset_id=source_id,
+                  project_id=project_id,
+                  user_id='validation',
+                  original_name='Bloppers15-window.mp4',
+                  source_order=0,
+                  duration_sec=0.0,
+                  uri='s3://validation/not-used.mp4',
+              )
+              request = ProcessingRequest(
+                  project_id=project_id,
+                  user_id='validation',
+                  sources=(source,),
+                  language_hint='en',
+              )
+              result = process_local_sources(
+                  request,
+                  {source_id: window},
+                  asr_provider=FasterWhisperASR(model_name='tiny'),
+              )
+              draft = result_to_dict(result)['draft']
+
+              chosen = None
+              split_time = None
+              for clip in draft['selected']:
+                  words = clip.get('words') or []
+                  if len(words) < 2:
+                      continue
+                  for left_word, right_word in zip(words, words[1:]):
+                      candidate = (float(left_word['end']) + float(right_word['start'])) / 2.0
+                      if candidate - float(clip['start']) < 0.15:
+                          continue
+                      if float(clip['end']) - candidate < 0.15:
+                          continue
+                      chosen = clip
+                      split_time = candidate
+                      break
+                  if chosen is not None:
+                      break
+
+              assert chosen is not None, 'no real selected clip with a safe word boundary'
+              assert chosen.get('words'), 'real Draft lost Whisper word timings'
+              edited = split_clip(draft, chosen['clip_id'], split_time=split_time)
+              children = [
+                  clip for clip in edited['selected']
+                  if clip.get('parent_clip_id') == chosen['clip_id']
+              ]
+              assert len(children) == 2
+              assert all(child.get('words') for child in children)
+              assert all(child.get('text') for child in children)
+              assert children[0]['end'] == children[1]['start']
+              assert children[0]['source_asset_id'] == children[1]['source_asset_id'] == source_id
+              assert children[0]['text'] != children[1]['text']
+
+              report = {
+                  'source_key': key,
+                  'asr_model': 'tiny',
+                  'parent_clip_id': chosen['clip_id'],
+                  'parent_text': chosen['text'],
+                  'parent_word_count': len(chosen['words']),
+                  'split_time': round(split_time, 3),
+                  'left_text': children[0]['text'],
+                  'left_word_count': len(children[0]['words']),
+                  'right_text': children[1]['text'],
+                  'right_word_count': len(children[1]['words']),
+                  'source_identity_preserved': True,
+              }
+              Path('cutsell-real-split-report.json').write_text(
+                  json.dumps(report, ensure_ascii=False, indent=2), encoding='utf-8'
+              )
+              print(json.dumps(report, ensure_ascii=False, indent=2))
+          PY
+
+      - name: Upload split report
+        uses: actions/upload-artifact@v4
+        with:
+          name: cutsell-real-split-${{ github.sha }}
+          path: cutsell-real-split-report.json
+          retention-days: 7

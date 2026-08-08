@@ -1,0 +1,48 @@
+name: CutSell Infra Preflight
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - cutsell/mobile-v1-asap-scope
+    paths:
+      - ".cutsell/infra-preflight-trigger.txt"
+
+permissions:
+  contents: read
+
+jobs:
+  check-secret-presence:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      AWS_ACCESS_KEY_ID_VALUE: ${{ secrets.AWS_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY_VALUE: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+      AWS_REGION_VALUE: ${{ secrets.AWS_REGION }}
+      S3_BUCKET_VALUE: ${{ secrets.S3_BUCKET }}
+      OPENAI_API_KEY_VALUE: ${{ secrets.OPENAI_API_KEY }}
+      RUNPOD_API_KEY_VALUE: ${{ secrets.RUNPOD_API_KEY }}
+      RUNPOD_TEMPLATE_ID_VALUE: ${{ secrets.RUNPOD_TEMPLATE_ID }}
+    steps:
+      - name: Report presence only
+        shell: bash
+        run: |
+          missing=0
+          check() {
+            name="$1"
+            value="$2"
+            if [ -n "$value" ]; then
+              echo "$name=present"
+            else
+              echo "$name=missing"
+              missing=1
+            fi
+          }
+          check AWS_ACCESS_KEY_ID "$AWS_ACCESS_KEY_ID_VALUE"
+          check AWS_SECRET_ACCESS_KEY "$AWS_SECRET_ACCESS_KEY_VALUE"
+          check AWS_REGION "$AWS_REGION_VALUE"
+          check S3_BUCKET "$S3_BUCKET_VALUE"
+          check OPENAI_API_KEY "$OPENAI_API_KEY_VALUE"
+          check RUNPOD_API_KEY "$RUNPOD_API_KEY_VALUE"
+          check RUNPOD_TEMPLATE_ID "$RUNPOD_TEMPLATE_ID_VALUE"
+          exit "$missing"
