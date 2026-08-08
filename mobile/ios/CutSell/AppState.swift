@@ -48,6 +48,30 @@ final class AppState: ObservableObject {
         return project
     }
 
+    func deleteProject(_ project: Project) async throws {
+        guard let session else { throw APIError.invalidResponse }
+        struct Body: Encodable { let user_id: String; let confirmation: String }
+        struct Result: Decodable { let status: String; let project_id: String }
+        let _: Result = try await api.request(
+            "/v1/projects/\(project.id)",
+            method: "DELETE",
+            body: Body(user_id: session.userID, confirmation: "DELETE")
+        )
+        projects.removeAll { $0.id == project.id }
+    }
+
+    func deleteAccount() async throws {
+        guard let session else { throw APIError.invalidResponse }
+        struct Body: Encodable { let user_id: String; let confirmation: String }
+        struct Result: Decodable { let status: String; let user_id: String }
+        let _: Result = try await api.request(
+            "/v1/auth/account",
+            method: "DELETE",
+            body: Body(user_id: session.userID, confirmation: "DELETE MY ACCOUNT")
+        )
+        clearSession()
+    }
+
     func clearSession() {
         KeychainStore.clear()
         session = nil
