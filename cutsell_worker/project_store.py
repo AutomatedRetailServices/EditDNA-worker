@@ -1,4 +1,4 @@
-"""Redis-backed CutSell project library for mobile recovery and history."""
+"""CutSell project library with Redis operational state + optional durable SQL dual-write."""
 from __future__ import annotations
 
 from datetime import datetime, timezone
@@ -39,6 +39,21 @@ def _redis_client(client=None):
     return Redis.from_url(config.redis_url)
 
 
+def _durable_write(record: dict[str, Any]) -> dict[str, str]:
+    """Migration-safe dual write; Redis remains available if SQL is not configured."""
+    config = load_runtime_config()
+    if not config.database_url:
+        return {"status": "not_configured"}
+    try:
+        from .commercial_store import durable_upsert_project, upsert_user
+        upsert_user(config.database_url, user_id=str(record["user_id"]))
+        durable_upsert_project(config.database_url, record)
+        return {"status": "written"}
+    except Exception as exc:
+        # Never destroy an otherwise-valid mobile project because the migration target is unavailable.
+        return {"status": "degraded", "reason": exc.__class__.__name__}
+
+
 def _decode(raw) -> dict[str, Any]:
     if raw is None:
         raise KeyError("project not found")
@@ -72,6 +87,7 @@ def create_project(*, user_id: str, title: str | None = None, client=None) -> di
     pipe.set(key, json.dumps(record, ensure_ascii=False))
     pipe.zadd(index, {project_id: datetime.now(timezone.utc).timestamp()})
     pipe.execute()
+    _durable_write(record)
     return record
 
 
@@ -126,4 +142,5 @@ def update_project(
     current["updated_at"] = _now()
     target.set(key, json.dumps(current, ensure_ascii=False))
     target.zadd(project_index_key(user_id=user_id), {project_id: datetime.now(timezone.utc).timestamp()})
+    _durable_write(current)
     return current
