@@ -1,0 +1,2 @@
+approval=APPROVE_DELETE_STAGING_WORKER
+pod_id=ruza8oup8z3sq0
