@@ -87,6 +87,10 @@ class MediaSignals:
     motion_stability: float = 0.5
     continuity: float = 0.5
     visual_fumble: float = 0.0
+    expression_naturalness: float = 0.5
+    gesture_naturalness: float = 0.5
+    delivery_energy: float = 0.5
+    distraction_risk: float = 0.0
 
 
 @dataclass(frozen=True)
