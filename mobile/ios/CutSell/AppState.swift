@@ -9,6 +9,13 @@ final class AppState: ObservableObject {
 
     private let api = APIClient.shared
 
+    var persistentAppleAuthEnabled: Bool {
+        if let value = UserDefaults.standard.object(forKey: "cutsell.auth.apple.enabled") as? Bool {
+            return value
+        }
+        return false
+    }
+
     func bootstrap() async {
         defer { isBootstrapping = false }
         do {
@@ -16,6 +23,9 @@ final class AppState: ObservableObject {
             if let saved = try KeychainStore.load() {
                 current = saved
             } else {
+                // Commercial Apple auth remains gated until Apple Developer App ID /
+                // entitlement setup is explicitly activated. Closed-beta staging keeps
+                // using the anonymous bootstrap so current recovery is not disrupted.
                 current = try await api.createSession()
                 try KeychainStore.save(current)
             }
@@ -25,6 +35,17 @@ final class AppState: ObservableObject {
         } catch {
             bootstrapError = error.localizedDescription
         }
+    }
+
+    func establishAppleSession(identityToken: String, nonce: String?) async throws {
+        guard persistentAppleAuthEnabled else {
+            throw APIError.http(409, "Sign in with Apple is not enabled for this build")
+        }
+        let current = try await api.createAppleSession(identityToken: identityToken, nonce: nonce)
+        try KeychainStore.save(current)
+        session = current
+        await api.setSession(current)
+        try await refreshProjects()
     }
 
     func refreshProjects() async throws {
