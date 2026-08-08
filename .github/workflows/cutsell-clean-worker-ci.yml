@@ -1,0 +1,33 @@
+name: CutSell Clean Worker CI
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "cutsell_worker/**"
+      - "cutsell_app/**"
+      - "tests/test_cutsell_*.py"
+      - "tests/data/cutsell_golden_expectations.json"
+      - "Dockerfile.cutsell"
+      - "Dockerfile.cutsell.worker"
+      - "requirements.cutsell.api.txt"
+      - "render.cutsell.yaml"
+      - ".github/workflows/cutsell-clean-worker-ci.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  test-clean-worker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Compile clean worker and app
+        run: python -m compileall cutsell_worker cutsell_app
+      - name: Install test runner and app dependencies
+        run: pip install pytest fastapi httpx pydantic redis rq boto3 openai
+      - name: Run CutSell tests
+        run: pytest -q tests/test_cutsell_*.py
