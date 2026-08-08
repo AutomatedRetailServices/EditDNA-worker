@@ -2,10 +2,26 @@ import AVFoundation
 import SwiftUI
 
 struct CameraCaptureView: View {
+    private enum RecordingPreset: Int, CaseIterable, Identifiable {
+        case sixtySeconds = 60
+        case threeMinutes = 180
+        case tenMinutes = 600
+
+        var id: Int { rawValue }
+        var title: String {
+            switch self {
+            case .sixtySeconds: return "60s"
+            case .threeMinutes: return "3m"
+            case .tenMinutes: return "10m"
+            }
+        }
+    }
+
     @Environment(\.dismiss) private var dismiss
     @StateObject private var camera = CameraController()
     @State private var elapsed: TimeInterval = 0
     @State private var timer: Timer?
+    @State private var preset: RecordingPreset = .sixtySeconds
 
     let onCapture: (URL) -> Void
 
@@ -27,7 +43,7 @@ struct CameraCaptureView: View {
                             .background(.ultraThinMaterial, in: Circle())
                     }
                     Spacer()
-                    Text(timeString(elapsed))
+                    Text("\(timeString(elapsed)) / \(preset.title)")
                         .font(.system(.body, design: .monospaced).bold())
                         .padding(.horizontal, 14)
                         .padding(.vertical, 8)
@@ -56,13 +72,23 @@ struct CameraCaptureView: View {
                         .padding()
                 }
 
+                Picker("Recording length", selection: $preset) {
+                    ForEach(RecordingPreset.allCases) { item in
+                        Text(item.title).tag(item)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .padding(.horizontal, 48)
+                .padding(.bottom, 20)
+                .disabled(camera.isRecording)
+
                 Button {
                     if camera.isRecording {
                         stopTimer()
                         camera.stopRecording()
                     } else {
                         elapsed = 0
-                        startTimer()
+                        startTimer(limit: TimeInterval(preset.rawValue))
                         camera.record { result in
                             stopTimer()
                             switch result {
@@ -97,10 +123,17 @@ struct CameraCaptureView: View {
         }
     }
 
-    private func startTimer() {
+    private func startTimer(limit: TimeInterval) {
         timer?.invalidate()
         timer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { _ in
             elapsed += 0.1
+            if elapsed >= limit {
+                elapsed = limit
+                stopTimer()
+                if camera.isRecording {
+                    camera.stopRecording()
+                }
+            }
         }
     }
 
@@ -110,7 +143,7 @@ struct CameraCaptureView: View {
     }
 
     private func timeString(_ seconds: TimeInterval) -> String {
-        let tenths = max(0, Int(seconds * 10))
-        return String(format: "%02d:%02d.%d", tenths / 600, (tenths / 10) % 60, tenths % 10)
+        let whole = max(0, Int(seconds.rounded(.down)))
+        return String(format: "%02d:%02d", whole / 60, whole % 60)
     }
 }
