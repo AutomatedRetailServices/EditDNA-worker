@@ -1,2 +1,0 @@
-build=1
-reason=validate slim CutSell worker image from clean branch
