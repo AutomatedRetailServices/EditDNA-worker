@@ -53,3 +53,23 @@ def test_cutsell_gpu_worker_has_isolated_container_and_immutable_build_workflow(
     assert "ghcr.io/automatedretailservices/cutsell-worker:${{ github.sha }}" in workflow
     assert "Dockerfile.cutsell.worker" in workflow
     assert "docker push" in workflow
+    assert "workflow_dispatch" in workflow
+    assert "push:" not in workflow
+
+
+def test_paid_staging_worker_workflows_are_manual_and_explicitly_guarded():
+    create = Path(".github/workflows/cutsell-runpod-staging-worker.yml").read_text()
+    delete = Path(".github/workflows/cutsell-runpod-staging-worker-delete.yml").read_text()
+
+    for text in (create, delete):
+        assert "workflow_dispatch" in text
+        assert "push:" not in text
+        assert "schedule:" not in text
+
+    assert "APPROVE_PAID_STAGING_WORKER" in create
+    assert "cutsell-staging-worker already exists" in create
+    assert 'CUTSELL_CLEAN_CUT_JUDGE: "0"' in create
+    assert 'CUTSELL_ASR_MODEL: "medium"' in create
+    assert "APPROVE_DELETE_STAGING_WORKER" in delete
+    assert "Pod ID is not the CutSell staging worker" in delete
+    assert "DELETE" in delete
