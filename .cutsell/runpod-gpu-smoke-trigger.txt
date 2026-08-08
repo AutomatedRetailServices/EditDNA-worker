@@ -1,5 +1,0 @@
-APPROVE_PAID_GPU_SMOKE
-approved_by=user
-source=Bloppers15.mp4
-purpose=one-shot GPU smoke with automatic Pod deletion
-attempt=4
