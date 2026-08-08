@@ -7,6 +7,8 @@ struct ProjectsView: View {
     @State private var showingNotifications = false
     @State private var pendingCuts: [PendingCutRecord] = []
     @State private var resumeCut: PendingCutRecord?
+    @State private var projectPendingDelete: Project?
+    @State private var showingDeleteAccount = false
     @State private var errorMessage: String?
 
     var body: some View {
@@ -57,6 +59,11 @@ struct ProjectsView: View {
                                 }
                                 .padding(.vertical, 4)
                             }
+                            .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                                Button(role: .destructive) { projectPendingDelete = project } label: {
+                                    Label("Delete", systemImage: "trash")
+                                }
+                            }
                         }
                     }
                 }
@@ -79,6 +86,11 @@ struct ProjectsView: View {
                         }
                     }
                     Button { showingNewCut = true } label: { Image(systemName: "plus") }
+                    Menu {
+                        Button("Delete Account", role: .destructive) { showingDeleteAccount = true }
+                    } label: {
+                        Image(systemName: "person.crop.circle")
+                    }
                 }
             }
             .navigationDestination(for: Project.self) { project in
@@ -97,6 +109,35 @@ struct ProjectsView: View {
                     .environmentObject(notificationCenter)
             }
             .task { await refreshPendingCuts() }
+            .confirmationDialog(
+                "Delete project?",
+                isPresented: Binding(
+                    get: { projectPendingDelete != nil },
+                    set: { if !$0 { projectPendingDelete = nil } }
+                ),
+                titleVisibility: .visible
+            ) {
+                Button("Delete Project", role: .destructive) {
+                    guard let project = projectPendingDelete else { return }
+                    projectPendingDelete = nil
+                    Task { await deleteProject(project) }
+                }
+                Button("Cancel", role: .cancel) { projectPendingDelete = nil }
+            } message: {
+                Text("This permanently removes the project, its uploaded media, exports, overlays, timeline assets and feedback.")
+            }
+            .confirmationDialog(
+                "Delete CutSell account?",
+                isPresented: $showingDeleteAccount,
+                titleVisibility: .visible
+            ) {
+                Button("Delete My Account", role: .destructive) {
+                    Task { await deleteAccount() }
+                }
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                Text("This permanently deletes your CutSell projects and account data and signs out all indexed sessions.")
+            }
             .alert("CutSell", isPresented: Binding(
                 get: { errorMessage != nil },
                 set: { if !$0 { errorMessage = nil } }
@@ -118,6 +159,24 @@ struct ProjectsView: View {
     @MainActor
     private func refreshPendingCuts() async {
         pendingCuts = await PendingCutStore.shared.list()
+    }
+
+    @MainActor
+    private func deleteProject(_ project: Project) async {
+        do {
+            try await appState.deleteProject(project)
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    @MainActor
+    private func deleteAccount() async {
+        do {
+            try await appState.deleteAccount()
+        } catch {
+            errorMessage = error.localizedDescription
+        }
     }
 }
 
