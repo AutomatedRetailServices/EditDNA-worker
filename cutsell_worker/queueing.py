@@ -25,28 +25,31 @@ def get_queue(name: str = "cutsell"):
 
 def enqueue_flow_b(payload: dict, *, queue=None, timeout: int = 3600) -> QueueSubmission:
     user_id = str(payload.get("user_id") or "")
-    if not user_id:
-        raise ValueError("Flow B payload requires user_id")
-    slot = reserve_processing_slot(user_id=user_id)
-    if not slot.get("allowed"):
-        raise RuntimeError("processing_concurrency_limit")
+    reserved = False
+    if user_id:
+        slot = reserve_processing_slot(user_id=user_id)
+        if not slot.get("allowed"):
+            raise RuntimeError("processing_concurrency_limit")
+        reserved = True
     try:
         target = queue or get_queue()
+        meta = {
+            "user_id": user_id,
+            "project_id": str(payload.get("project_id") or ""),
+            "cutsell_slot_reserved": reserved,
+        }
         job = target.enqueue(
             "cutsell_worker.worker_job.run_flow_b_job",
             payload,
             job_timeout=timeout,
             result_ttl=86400,
             failure_ttl=86400,
-            meta={
-                "user_id": user_id,
-                "project_id": str(payload.get("project_id") or ""),
-                "cutsell_slot_reserved": True,
-            },
+            meta=meta,
         )
         return QueueSubmission(job_id=str(job.id), queue_name=str(getattr(target, "name", "cutsell")))
     except Exception:
-        release_processing_slot(user_id=user_id)
+        if reserved:
+            release_processing_slot(user_id=user_id)
         raise
 
 
