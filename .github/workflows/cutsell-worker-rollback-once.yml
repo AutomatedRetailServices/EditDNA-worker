@@ -1,0 +1,113 @@
+name: CutSell Worker Rollback Once
+
+on:
+  push:
+    branches:
+      - cutsell/mobile-v1-clean
+    paths:
+      - ".cutsell/worker-rollback-once.txt"
+
+permissions:
+  contents: read
+
+jobs:
+  worker-rollback:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      RUNPOD_API_KEY: ${{ secrets.RUNPOD_API_KEY }}
+      REDIS_URL: ${{ secrets.REDIS_URL }}
+      RUNPOD_TEMPLATE_NAME: EditDNA-Worker-2
+      OLD_IMAGE: ghcr.io/automatedretailservices/cutsell-worker:591841e7be8d63c9cac87324fd9e57b088598787
+      CURRENT_IMAGE: ghcr.io/automatedretailservices/cutsell-worker:f1bc3adc4f2f8df0ae005fa551116dc4d08b30e6
+    steps:
+      - uses: actions/checkout@v4
+      - name: Require marker and load runtime credentials
+        shell: bash
+        run: |
+          set -euo pipefail
+          grep -qx 'run=worker-rollback' .cutsell/worker-rollback-once.txt
+          python -m pip install --quiet redis rq
+          curl --fail --silent --show-error --url 'https://rest.runpod.io/v1/templates' --header "Authorization: Bearer $RUNPOD_API_KEY" --output templates.json
+          TEMPLATE=$(jq -c --arg name "$RUNPOD_TEMPLATE_NAME" '[.[] | select(.name == $name)][0]' templates.json)
+          test "$TEMPLATE" != "null"
+          for key in AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_REGION S3_BUCKET OPENAI_API_KEY; do
+            value=$(printf '%s' "$TEMPLATE" | jq -r --arg key "$key" '.env[$key] // empty')
+            test -n "$value"
+            echo "::add-mask::$value"
+            printf '%s=%s\n' "$key" "$value" >> "$GITHUB_ENV"
+          done
+          curl --fail --silent --show-error --url 'https://rest.runpod.io/v1/pods' --header "Authorization: Bearer $RUNPOD_API_KEY" --output pods.json
+          count=$(jq '[.[] | select(.name == "cutsell-rollback-old" or .name == "cutsell-rollback-current" or .name == "cutsell-staging-worker")] | length' pods.json)
+          test "$count" = "0" || { echo 'existing CutSell GPU Pod found; refusing rollback test'; exit 4; }
+      - name: Boot previous worker image, register RQ, delete
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY' > before.txt
+          import os
+          from redis import Redis
+          from rq import Worker
+          r=Redis.from_url(os.environ['REDIS_URL'])
+          for w in Worker.all(connection=r): print(w.name)
+          PY
+          START_CMD='python -m rq.cli worker -u "$REDIS_URL" --worker-ttl 1200 cutsell'
+          jq -n --arg image "$OLD_IMAGE" --arg cmd "$START_CMD" --arg redis "$REDIS_URL" --arg a "$AWS_ACCESS_KEY_ID" --arg s "$AWS_SECRET_ACCESS_KEY" --arg region "$AWS_REGION" --arg bucket "$S3_BUCKET" --arg openai "$OPENAI_API_KEY" \
+            '{name:"cutsell-rollback-old",imageName:$image,cloudType:"SECURE",computeType:"GPU",gpuCount:1,gpuTypeIds:["NVIDIA L4","NVIDIA RTX A4000","NVIDIA RTX A5000","NVIDIA A40","NVIDIA GeForce RTX 3090","NVIDIA GeForce RTX 4090"],gpuTypePriority:"availability",interruptible:false,containerDiskInGb:30,volumeInGb:10,volumeMountPath:"/workspace",dockerEntrypoint:["bash","-lc"],dockerStartCmd:[$cmd],env:{REDIS_URL:$redis,AWS_ACCESS_KEY_ID:$a,AWS_SECRET_ACCESS_KEY:$s,AWS_REGION:$region,S3_BUCKET:$bucket,OPENAI_API_KEY:$openai,CUTSELL_ASR_MODEL:"medium",CUTSELL_CLEAN_CUT_JUDGE:"0"}}' > pod-old.json
+          code=$(curl --silent --show-error --write-out '%{http_code}' --request POST --url 'https://rest.runpod.io/v1/pods' --header "Authorization: Bearer $RUNPOD_API_KEY" --header 'Content-Type: application/json' --data @pod-old.json --output old-response.json)
+          test "$code" = "201" || { echo "old create HTTP=$code"; cat old-response.json; exit 7; }
+          id=$(jq -r '.id // empty' old-response.json); test -n "$id"; echo "old pod=$id"
+          cleanup(){ curl --silent --show-error --request DELETE --url "https://rest.runpod.io/v1/pods/$id" --header "Authorization: Bearer $RUNPOD_API_KEY" --output /dev/null || true; }
+          trap cleanup EXIT
+          POD_PHASE=old python - <<'PY'
+          import os,time
+          from pathlib import Path
+          from redis import Redis
+          from rq import Worker
+          before=set(Path('before.txt').read_text().splitlines()); r=Redis.from_url(os.environ['REDIS_URL']); end=time.time()+420
+          while time.time()<end:
+              new=[w for w in Worker.all(connection=r) if w.name not in before and any(q.name=='cutsell' for q in w.queues)]
+              if new:
+                  print('OLD_WORKER_ROLLBACK_PASS',new[0].name); raise SystemExit(0)
+              time.sleep(10)
+          raise SystemExit('old image did not register')
+          PY
+          cleanup; trap - EXIT
+          sleep 3
+      - name: Boot current worker image, register RQ, delete
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY' > before-current.txt
+          import os
+          from redis import Redis
+          from rq import Worker
+          r=Redis.from_url(os.environ['REDIS_URL'])
+          for w in Worker.all(connection=r): print(w.name)
+          PY
+          START_CMD='python -m rq.cli worker -u "$REDIS_URL" --worker-ttl 1200 cutsell'
+          jq -n --arg image "$CURRENT_IMAGE" --arg cmd "$START_CMD" --arg redis "$REDIS_URL" --arg a "$AWS_ACCESS_KEY_ID" --arg s "$AWS_SECRET_ACCESS_KEY" --arg region "$AWS_REGION" --arg bucket "$S3_BUCKET" --arg openai "$OPENAI_API_KEY" \
+            '{name:"cutsell-rollback-current",imageName:$image,cloudType:"SECURE",computeType:"GPU",gpuCount:1,gpuTypeIds:["NVIDIA L4","NVIDIA RTX A4000","NVIDIA RTX A5000","NVIDIA A40","NVIDIA GeForce RTX 3090","NVIDIA GeForce RTX 4090"],gpuTypePriority:"availability",interruptible:false,containerDiskInGb:30,volumeInGb:10,volumeMountPath:"/workspace",dockerEntrypoint:["bash","-lc"],dockerStartCmd:[$cmd],env:{REDIS_URL:$redis,AWS_ACCESS_KEY_ID:$a,AWS_SECRET_ACCESS_KEY:$s,AWS_REGION:$region,S3_BUCKET:$bucket,OPENAI_API_KEY:$openai,CUTSELL_ASR_MODEL:"medium",CUTSELL_CLEAN_CUT_JUDGE:"0"}}' > pod-current.json
+          code=$(curl --silent --show-error --write-out '%{http_code}' --request POST --url 'https://rest.runpod.io/v1/pods' --header "Authorization: Bearer $RUNPOD_API_KEY" --header 'Content-Type: application/json' --data @pod-current.json --output current-response.json)
+          test "$code" = "201" || { echo "current create HTTP=$code"; cat current-response.json; exit 7; }
+          id=$(jq -r '.id // empty' current-response.json); test -n "$id"; echo "current pod=$id"
+          cleanup(){ curl --silent --show-error --request DELETE --url "https://rest.runpod.io/v1/pods/$id" --header "Authorization: Bearer $RUNPOD_API_KEY" --output /dev/null || true; }
+          trap cleanup EXIT
+          python - <<'PY'
+          import os,time
+          from pathlib import Path
+          from redis import Redis
+          from rq import Worker
+          before=set(Path('before-current.txt').read_text().splitlines()); r=Redis.from_url(os.environ['REDIS_URL']); end=time.time()+420
+          while time.time()<end:
+              new=[w for w in Worker.all(connection=r) if w.name not in before and any(q.name=='cutsell' for q in w.queues)]
+              if new:
+                  print('CURRENT_WORKER_RESTORE_PASS',new[0].name); raise SystemExit(0)
+              time.sleep(10)
+          raise SystemExit('current image did not register')
+          PY
+          cleanup; trap - EXIT
+          sleep 3
+          curl --fail --silent --show-error --url 'https://rest.runpod.io/v1/pods' --header "Authorization: Bearer $RUNPOD_API_KEY" --output final-pods.json
+          left=$(jq '[.[] | select(.name == "cutsell-rollback-old" or .name == "cutsell-rollback-current")] | length' final-pods.json)
+          echo "remaining rollback pods=$left"; test "$left" = "0"
