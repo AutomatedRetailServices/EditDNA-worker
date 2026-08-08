@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import hashlib
 from uuid import uuid4
 
 from .config import load_runtime_config
@@ -37,7 +38,7 @@ def check_processing_allowance(*, user_id: str, durations_sec: list[float]) -> U
                 return UsageDecision(False, "monthly_processing_limit", requested_minutes, used, limit)
             return UsageDecision(True, "allowed", requested_minutes, used, limit)
         except Exception:
-            # DB migration/telemetry outages do not break the closed beta, but are observable elsewhere.
+            # Migration/telemetry outages do not break closed beta processing.
             pass
 
     return UsageDecision(
@@ -71,3 +72,56 @@ def record_processing_minutes(*, user_id: str, project_id: str, minutes: float, 
         return {"status": "recorded", "event_id": event_id}
     except Exception as exc:
         return {"status": "degraded", "reason": exc.__class__.__name__}
+
+
+def _concurrency_key(user_id: str) -> str:
+    digest = hashlib.sha256(str(user_id).encode()).hexdigest()[:24]
+    return f"cutsell:v1:concurrency:{digest}"
+
+
+def reserve_processing_slot(*, user_id: str, client=None, ttl_sec: int = 7200) -> dict:
+    """Atomically reserve one processing slot for a user before enqueueing work."""
+    config = load_runtime_config()
+    if client is None:
+        if not config.redis_url:
+            return {"allowed": True, "status": "not_configured", "active": None}
+        from redis import Redis
+        client = Redis.from_url(config.redis_url)
+    limit = max(1, int(config.max_concurrent_jobs_per_user))
+    script = """
+    local current = tonumber(redis.call('GET', KEYS[1]) or '0')
+    local limit = tonumber(ARGV[1])
+    if current >= limit then
+      return {0, current}
+    end
+    local next = redis.call('INCR', KEYS[1])
+    redis.call('EXPIRE', KEYS[1], tonumber(ARGV[2]))
+    return {1, next}
+    """
+    allowed, active = client.eval(script, 1, _concurrency_key(user_id), limit, int(ttl_sec))
+    return {
+        "allowed": bool(int(allowed)),
+        "status": "reserved" if int(allowed) else "concurrency_limit",
+        "active": int(active),
+        "limit": limit,
+    }
+
+
+def release_processing_slot(*, user_id: str, client=None) -> dict:
+    """Release one reserved processing slot; idempotently floors at zero."""
+    config = load_runtime_config()
+    if client is None:
+        if not config.redis_url:
+            return {"status": "not_configured", "active": None}
+        from redis import Redis
+        client = Redis.from_url(config.redis_url)
+    script = """
+    local current = tonumber(redis.call('GET', KEYS[1]) or '0')
+    if current <= 1 then
+      redis.call('DEL', KEYS[1])
+      return 0
+    end
+    return redis.call('DECR', KEYS[1])
+    """
+    active = int(client.eval(script, 1, _concurrency_key(user_id)))
+    return {"status": "released", "active": active}
