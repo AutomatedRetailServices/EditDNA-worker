@@ -1,0 +1,189 @@
+name: CutSell Render Staging Create Once
+
+on:
+  push:
+    branches:
+      - cutsell/mobile-v1-clean
+    paths:
+      - ".cutsell/render-staging-create-once.txt"
+
+permissions:
+  contents: read
+
+jobs:
+  create-render-staging:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      RENDER_API_KEY: ${{ secrets.RENDER_API_KEY }}
+      RUNPOD_API_KEY: ${{ secrets.RUNPOD_API_KEY }}
+      REDIS_URL: ${{ secrets.REDIS_URL }}
+      OWNER_ID: tea-d2r0baqdbo4c73cmqgag
+      RUNPOD_TEMPLATE_NAME: EditDNA-Worker-2
+    steps:
+      - uses: actions/checkout@v4
+      - name: Require exact staging authorization marker
+        shell: bash
+        run: |
+          set -euo pipefail
+          grep -qx 'approval=APPROVE_PAID_STAGING' .cutsell/render-staging-create-once.txt
+          test -n "${RENDER_API_KEY:-}"
+          test -n "${RUNPOD_API_KEY:-}"
+          test -n "${REDIS_URL:-}"
+
+      - name: Refuse duplicate CutSell API service
+        shell: bash
+        run: |
+          set -euo pipefail
+          code=$(curl --silent --show-error --write-out '%{http_code}' \
+            --url 'https://api.render.com/v1/services?name=cutsell-api&limit=20' \
+            --header 'Accept: application/json' \
+            --header "Authorization: Bearer $RENDER_API_KEY" \
+            --output services.json)
+          test "$code" = "200"
+          count=$(jq '[.[] | select((.service.name // .name) == "cutsell-api")] | length' services.json)
+          test "$count" = "0" || { echo 'cutsell-api already exists; refusing duplicate'; exit 4; }
+
+      - name: Load AWS S3 OpenAI runtime secrets from existing RunPod vault
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail --silent --show-error \
+            --url 'https://rest.runpod.io/v1/templates' \
+            --header "Authorization: Bearer $RUNPOD_API_KEY" \
+            --output templates.json
+          TEMPLATE=$(jq -c --arg name "$RUNPOD_TEMPLATE_NAME" '[.[] | select(.name == $name)][0]' templates.json)
+          test "$TEMPLATE" != "null" || { echo 'RunPod credential template not found'; exit 5; }
+          for key in AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_REGION S3_BUCKET OPENAI_API_KEY; do
+            value=$(printf '%s' "$TEMPLATE" | jq -r --arg key "$key" '.env[$key] // empty')
+            test -n "$value" || { echo "$key missing from template vault"; exit 6; }
+            echo "::add-mask::$value"
+            printf '%s=%s\n' "$key" "$value" >> "$GITHUB_ENV"
+          done
+
+      - name: Create isolated CutSell Render API service
+        id: create
+        shell: bash
+        run: |
+          set -euo pipefail
+          jq -n \
+            --arg owner "$OWNER_ID" \
+            --arg redis "$REDIS_URL" \
+            --arg aws_access "$AWS_ACCESS_KEY_ID" \
+            --arg aws_secret "$AWS_SECRET_ACCESS_KEY" \
+            --arg aws_region "$AWS_REGION" \
+            --arg bucket "$S3_BUCKET" \
+            --arg openai "$OPENAI_API_KEY" \
+            '{
+              type:"web_service",
+              name:"cutsell-api",
+              ownerId:$owner,
+              repo:"https://github.com/AutomatedRetailServices/EditDNA-worker",
+              branch:"cutsell/mobile-v1-clean",
+              autoDeploy:"no",
+              envVars:[
+                {key:"PYTHON_VERSION",value:"3.11.9"},
+                {key:"REDIS_URL",value:$redis},
+                {key:"OPENAI_API_KEY",value:$openai},
+                {key:"AWS_ACCESS_KEY_ID",value:$aws_access},
+                {key:"AWS_SECRET_ACCESS_KEY",value:$aws_secret},
+                {key:"AWS_REGION",value:$aws_region},
+                {key:"S3_BUCKET",value:$bucket},
+                {key:"CUTSELL_AUTH_REQUIRED",value:"1"},
+                {key:"CUTSELL_CLEAN_CUT_JUDGE",value:"0"},
+                {key:"CUTSELL_ASR_MODEL",value:"medium"},
+                {key:"CUTSELL_SEMANTIC_MODEL",value:"gpt-4o-mini"},
+                {key:"CUTSELL_VISUAL_MODEL",value:"gpt-4o-mini"},
+                {key:"CUTSELL_TAKE_JUDGE_MODEL",value:"gpt-4o-mini"}
+              ],
+              serviceDetails:{
+                runtime:"python",
+                envSpecificDetails:{
+                  buildCommand:"pip install -r requirements.cutsell.api.txt",
+                  startCommand:"uvicorn cutsell_app.main:app --host 0.0.0.0 --port $PORT"
+                },
+                healthCheckPath:"/v1/healthz",
+                plan:"starter",
+                region:"oregon",
+                numInstances:1
+              }
+            }' > create-service.json
+          code=$(curl --silent --show-error --write-out '%{http_code}' \
+            --request POST \
+            --url 'https://api.render.com/v1/services' \
+            --header 'Accept: application/json' \
+            --header 'Content-Type: application/json' \
+            --header "Authorization: Bearer $RENDER_API_KEY" \
+            --data @create-service.json \
+            --output created.json)
+          rm -f create-service.json
+          echo "Render create HTTP status: $code"
+          if [ "$code" != "201" ]; then
+            jq '{message,error,errors}' created.json || cat created.json
+            exit 7
+          fi
+          SERVICE_ID=$(jq -r '.service.id // .id // empty' created.json)
+          test -n "$SERVICE_ID" || { echo 'Render returned no service id'; jq . created.json; exit 8; }
+          echo "service_id=$SERVICE_ID" >> "$GITHUB_OUTPUT"
+          echo "Created Render staging service: $SERVICE_ID"
+
+      - name: Wait for Render API health
+        id: health
+        shell: bash
+        env:
+          SERVICE_ID: ${{ steps.create.outputs.service_id }}
+        run: |
+          set -euo pipefail
+          deadline=$((SECONDS+900))
+          SERVICE_URL=''
+          while [ $SECONDS -lt $deadline ]; do
+            curl --fail --silent --show-error \
+              --url "https://api.render.com/v1/services/$SERVICE_ID" \
+              --header 'Accept: application/json' \
+              --header "Authorization: Bearer $RENDER_API_KEY" \
+              --output service.json
+            SERVICE_URL=$(jq -r '.serviceDetails.url // .url // empty' service.json)
+            if [ -n "$SERVICE_URL" ]; then
+              code=$(curl --silent --show-error --write-out '%{http_code}' \
+                --url "${SERVICE_URL%/}/v1/healthz" \
+                --output health.json || true)
+              if [ "$code" = "200" ]; then
+                cat health.json
+                python - <<'PY'
+          import json
+          data=json.load(open('health.json'))
+          assert data['ok'] is True
+          assert data['service'] == 'cutsell-api'
+          PY
+                echo "service_url=$SERVICE_URL" >> "$GITHUB_OUTPUT"
+                exit 0
+              fi
+              echo "Waiting for health; HTTP $code at $SERVICE_URL"
+            else
+              echo 'Waiting for Render service URL...'
+            fi
+            sleep 15
+          done
+          echo 'Render staging API did not become healthy within 15 minutes'
+          exit 9
+
+      - name: Verify configured environment keys without printing values
+        shell: bash
+        env:
+          SERVICE_ID: ${{ steps.create.outputs.service_id }}
+        run: |
+          set -euo pipefail
+          curl --fail --silent --show-error \
+            --url "https://api.render.com/v1/services/$SERVICE_ID/env-vars?limit=100" \
+            --header 'Accept: application/json' \
+            --header "Authorization: Bearer $RENDER_API_KEY" \
+            --output env.json
+          jq '[.[] | (.envVar.key // .key)] | sort' env.json
+          python - <<'PY'
+          import json
+          rows=json.load(open('env.json'))
+          keys={((r.get('envVar') or {}).get('key') or r.get('key')) for r in rows}
+          required={'REDIS_URL','OPENAI_API_KEY','AWS_ACCESS_KEY_ID','AWS_SECRET_ACCESS_KEY','AWS_REGION','S3_BUCKET','CUTSELL_AUTH_REQUIRED','CUTSELL_CLEAN_CUT_JUDGE'}
+          missing=required-keys
+          assert not missing, f'missing Render env keys: {sorted(missing)}'
+          PY
