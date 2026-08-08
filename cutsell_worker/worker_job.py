@@ -22,6 +22,7 @@ from .take_judge_openai import OpenAITakeJudgeProvider
 from .timeline_asset_storage import store_timeline_assets
 from .timeline_assets import generate_filmstrip, waveform_peaks
 from .uploads import validate_product_source_uri
+from .usage_limits import record_processing_minutes, release_processing_slot
 from .visual_openai import OpenAIVisualProvider
 from .whole_video_openai import OpenAIWholeVideoProvider
 
@@ -118,10 +119,13 @@ def run_flow_b_job(payload: dict) -> dict:
         else None
     )
 
+    measured_seconds = 0.0
+    outcome = "failed"
     try:
         publish("preparing", 1)
         with tempfile.TemporaryDirectory(prefix="cutsell-flow-b-") as directory:
             local_paths = {}
+            measured_by_source: dict[str, float] = {}
             for index, source in enumerate(request.sources):
                 validate_product_source_uri(
                     source.uri,
@@ -131,6 +135,9 @@ def run_flow_b_job(payload: dict) -> dict:
                 suffix = Path(source.original_name).suffix or ".mp4"
                 destination = str(Path(directory) / f"{source.source_order:03d}-{source.source_asset_id}{suffix}")
                 local_paths[source.source_asset_id] = download_source(source.uri, destination)
+                probe = probe_media(local_paths[source.source_asset_id])
+                measured_by_source[source.source_asset_id] = float(probe.duration_sec)
+                measured_seconds += max(0.0, float(probe.duration_sec))
                 publish("preparing", min(10, 2 + int((index + 1) * 8 / len(request.sources))))
 
             result = process_local_sources(
@@ -155,7 +162,7 @@ def run_flow_b_job(payload: dict) -> dict:
                     "source_asset_id": source.source_asset_id,
                     "original_name": source.original_name,
                     "source_order": source.source_order,
-                    "duration_sec": source.duration_sec,
+                    "duration_sec": measured_by_source.get(source.source_asset_id, source.duration_sec),
                     "uri": source.uri,
                     "timeline_assets": timeline_assets.get(source.source_asset_id, {"status": "not_generated"}),
                 }
@@ -182,6 +189,7 @@ def run_flow_b_job(payload: dict) -> dict:
                 kind="draft_ready",
                 payload={"job_id": job_id, "selected_count": len(serialized["draft"].get("selected") or [])},
             )
+            outcome = "draft_ready"
             publish("draft_ready", 100)
             return serialized
     except Exception as exc:
@@ -202,3 +210,12 @@ def run_flow_b_job(payload: dict) -> dict:
             job.meta["error_code"] = exc.__class__.__name__
             job.save_meta()
         raise
+    finally:
+        if measured_seconds > 0:
+            record_processing_minutes(
+                user_id=request.user_id,
+                project_id=request.project_id,
+                minutes=measured_seconds / 60.0,
+                metadata={"job_id": job_id, "outcome": outcome, "source_count": len(request.sources)},
+            )
+        release_processing_slot(user_id=request.user_id)
