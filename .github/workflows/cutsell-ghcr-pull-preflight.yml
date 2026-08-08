@@ -2,11 +2,11 @@ name: CutSell GHCR Pull Preflight
 
 on:
   workflow_dispatch:
-  push:
-    branches:
-      - cutsell/mobile-v1-clean
-    paths:
-      - ".cutsell/ghcr-pull-preflight-trigger.txt"
+    inputs:
+      image:
+        description: "Immutable CutSell worker image tag to validate"
+        required: true
+        default: "ghcr.io/automatedretailservices/cutsell-worker:f1bc3adc4f2f8df0ae005fa551116dc4d08b30e6"
 
 permissions:
   contents: read
@@ -16,7 +16,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     env:
-      IMAGE: ghcr.io/automatedretailservices/cutsell-worker:f1bc3adc4f2f8df0ae005fa551116dc4d08b30e6
+      IMAGE: ${{ inputs.image }}
     steps:
       - name: Pull worker image without registry login
         run: docker pull "$IMAGE"
