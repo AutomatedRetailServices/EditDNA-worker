@@ -1,0 +1,177 @@
+name: Create CutSell Render Staging Once
+
+on:
+  push:
+    branches:
+      - cutsell/mobile-v1-clean
+    paths:
+      - ".cutsell/render-staging-create-once.txt"
+
+permissions:
+  contents: read
+
+jobs:
+  create-render-staging:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      RENDER_API_KEY: ${{ secrets.RENDER_API_KEY }}
+      RUNPOD_API_KEY: ${{ secrets.RUNPOD_API_KEY }}
+      REDIS_URL: ${{ secrets.REDIS_URL }}
+      OWNER_ID: tea-d2r0baqdbo4c73cmqgag
+      SERVICE_NAME: cutsell-api
+      REPO_URL: https://github.com/AutomatedRetailServices/EditDNA-worker
+      BRANCH: cutsell/mobile-v1-clean
+      RUNPOD_TEMPLATE_NAME: EditDNA-Worker-2
+    steps:
+      - uses: actions/checkout@v4
+      - name: Require authorized marker and credentials
+        shell: bash
+        run: |
+          set -euo pipefail
+          grep -qx 'approval=APPROVE_PAID_STAGING' .cutsell/render-staging-create-once.txt
+          test -n "${RENDER_API_KEY:-}"
+          test -n "${RUNPOD_API_KEY:-}"
+          test -n "${REDIS_URL:-}"
+
+      - name: Refuse duplicate CutSell API service
+        shell: bash
+        run: |
+          set -euo pipefail
+          code=$(curl --silent --show-error --write-out '%{http_code}' \
+            --url "https://api.render.com/v1/services?name=$SERVICE_NAME&ownerId=$OWNER_ID&limit=20" \
+            --header 'Accept: application/json' \
+            --header "Authorization: Bearer $RENDER_API_KEY" \
+            --output existing.json)
+          test "$code" = "200"
+          count=$(jq '[.[] | select((.service.name // .name) == "cutsell-api")] | length' existing.json)
+          test "$count" = "0" || { echo 'cutsell-api already exists; refusing duplicate'; jq '[.[] | {id:(.service.id // .id),name:(.service.name // .name)}]' existing.json; exit 4; }
+
+      - name: Load AWS S3 OpenAI credentials from RunPod template vault
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail --silent --show-error \
+            --url 'https://rest.runpod.io/v1/templates' \
+            --header "Authorization: Bearer $RUNPOD_API_KEY" \
+            --output templates.json
+          TEMPLATE=$(jq -c --arg name "$RUNPOD_TEMPLATE_NAME" '[.[] | select(.name == $name)][0]' templates.json)
+          test "$TEMPLATE" != "null"
+          for key in AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_REGION S3_BUCKET OPENAI_API_KEY; do
+            value=$(printf '%s' "$TEMPLATE" | jq -r --arg key "$key" '.env[$key] // empty')
+            test -n "$value" || { echo "$key missing from template vault"; exit 6; }
+            echo "::add-mask::$value"
+            printf '%s=%s\n' "$key" "$value" >> "$GITHUB_ENV"
+          done
+
+      - name: Create Render staging API
+        id: create
+        shell: bash
+        run: |
+          set -euo pipefail
+          jq -n \
+            --arg owner "$OWNER_ID" \
+            --arg name "$SERVICE_NAME" \
+            --arg repo "$REPO_URL" \
+            --arg branch "$BRANCH" \
+            --arg redis "$REDIS_URL" \
+            --arg aws_access "$AWS_ACCESS_KEY_ID" \
+            --arg aws_secret "$AWS_SECRET_ACCESS_KEY" \
+            --arg aws_region "$AWS_REGION" \
+            --arg bucket "$S3_BUCKET" \
+            --arg openai "$OPENAI_API_KEY" \
+            '{
+              type:"web_service",
+              name:$name,
+              ownerId:$owner,
+              repo:$repo,
+              branch:$branch,
+              autoDeploy:"no",
+              envVars:[
+                {key:"PYTHON_VERSION",value:"3.11.9"},
+                {key:"REDIS_URL",value:$redis},
+                {key:"OPENAI_API_KEY",value:$openai},
+                {key:"AWS_ACCESS_KEY_ID",value:$aws_access},
+                {key:"AWS_SECRET_ACCESS_KEY",value:$aws_secret},
+                {key:"AWS_REGION",value:$aws_region},
+                {key:"S3_BUCKET",value:$bucket},
+                {key:"CUTSELL_AUTH_REQUIRED",value:"1"},
+                {key:"CUTSELL_CLEAN_CUT_JUDGE",value:"0"},
+                {key:"CUTSELL_ASR_MODEL",value:"medium"},
+                {key:"CUTSELL_SEMANTIC_MODEL",value:"gpt-4o-mini"},
+                {key:"CUTSELL_VISUAL_MODEL",value:"gpt-4o-mini"},
+                {key:"CUTSELL_TAKE_JUDGE_MODEL",value:"gpt-4o-mini"}
+              ],
+              serviceDetails:{
+                runtime:"python",
+                plan:"starter",
+                region:"oregon",
+                healthCheckPath:"/v1/healthz",
+                envSpecificDetails:{
+                  buildCommand:"pip install -r requirements.cutsell.api.txt",
+                  startCommand:"uvicorn cutsell_app.main:app --host 0.0.0.0 --port $PORT"
+                }
+              }
+            }' > render-create.json
+          code=$(curl --silent --show-error --write-out '%{http_code}' \
+            --request POST \
+            --url 'https://api.render.com/v1/services' \
+            --header 'Accept: application/json' \
+            --header 'Content-Type: application/json' \
+            --header "Authorization: Bearer $RENDER_API_KEY" \
+            --data @render-create.json \
+            --output render-created.json)
+          rm -f render-create.json
+          echo "Render create HTTP status: $code"
+          if [ "$code" != "201" ]; then
+            jq '{message,error,status}' render-created.json 2>/dev/null || cat render-created.json
+            exit 7
+          fi
+          SERVICE_ID=$(jq -r '.service.id // .id // empty' render-created.json)
+          test -n "$SERVICE_ID" || { echo 'Render returned no service ID'; exit 7; }
+          echo "service_id=$SERVICE_ID" >> "$GITHUB_OUTPUT"
+          echo "Created Render service: $SERVICE_ID"
+
+      - name: Wait for public health and verify readiness flags
+        shell: bash
+        env:
+          SERVICE_ID: ${{ steps.create.outputs.service_id }}
+        run: |
+          set -euo pipefail
+          cleanup() {
+            echo 'Render staging did not become healthy; suspending service to stop unnecessary compute.'
+            curl --silent --show-error --request POST \
+              --url "https://api.render.com/v1/services/$SERVICE_ID/suspend" \
+              --header "Authorization: Bearer $RENDER_API_KEY" \
+              --output /dev/null || true
+          }
+          trap cleanup ERR
+          URL=''
+          for attempt in $(seq 1 80); do
+            curl --fail --silent --show-error \
+              --url "https://api.render.com/v1/services/$SERVICE_ID" \
+              --header 'Accept: application/json' \
+              --header "Authorization: Bearer $RENDER_API_KEY" \
+              --output service.json || true
+            URL=$(jq -r '.serviceDetails.url // .url // empty' service.json 2>/dev/null || true)
+            if [ -n "$URL" ]; then
+              if curl --fail --silent --max-time 10 "$URL/v1/healthz" > health.json 2>/dev/null; then
+                cat health.json
+                python - <<'PY'
+          import json
+          d=json.load(open('health.json'))
+          assert d.get('ok') is True
+          assert d.get('service') == 'cutsell-api'
+          assert d.get('queue_ready') is True
+          assert d.get('storage_ready') is True
+          assert d.get('semantic_ready') is True
+          PY
+                echo "Render staging healthy at $URL"
+                trap - ERR
+                exit 0
+              fi
+            fi
+            sleep 10
+          done
+          echo "Render service failed readiness within timeout. URL=$URL"
+          exit 8
