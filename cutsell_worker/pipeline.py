@@ -24,6 +24,7 @@ from .contracts import (
 from .strategy import choose_strategy
 from .take_grouping_provider import TakeGroupingProvider, safe_group_takes
 from .take_judge_provider import TakeJudgeProvider, safe_rank_takes
+from .whole_video_analysis import WholeVideoContext
 
 
 def _group_id(project_id: str, key: str) -> str:
@@ -54,15 +55,15 @@ def build_flow_b_draft(
     clean_cut_provider: CleanCutProvider | None = None,
     composer_provider: ComposerProvider | None = None,
     take_grouping_provider: TakeGroupingProvider | None = None,
+    whole_video_context: WholeVideoContext | None = None,
 ) -> ProcessingResult:
     """Build an editable draft from already-transcribed/segmented takes."""
     take_tuple = tuple(takes)
     label_map: dict[str, SemanticLabel] = {label.clip_id: label for label in semantic_labels}
+    context_text = whole_video_context.compact_text() if whole_video_context is not None else ""
 
-    # Tier 1 only removes very high-certainty recording errors.
     kept, deterministic_discarded, decisions = apply_clean_cut(take_tuple)
 
-    # Tier 2 is optional and separate from commercial labels. It fails open.
     clean_judged = safe_clean_cut_judge(clean_cut_provider, kept)
     kept, provider_discarded, clean_judge_diagnostics = apply_provider_judgements(kept, clean_judged)
     discarded = tuple(deterministic_discarded) + tuple(provider_discarded)
@@ -78,14 +79,11 @@ def build_flow_b_draft(
         for child_id in child_ids:
             if child_id:
                 label_map[str(child_id)] = SemanticLabel(
-                    str(child_id),
-                    parent_label.role,
-                    parent_label.confidence,
-                    parent_label.reason,
+                    str(child_id), parent_label.role, parent_label.confidence, parent_label.reason
                 )
 
     take_by_id = {take.clip_id: take for take in kept}
-    grouping = safe_group_takes(take_grouping_provider, kept)
+    grouping = safe_group_takes(take_grouping_provider, kept, context_text=context_text)
     group_members = [tuple(take_by_id[clip_id] for clip_id in ids) for ids in grouping.groups]
 
     groups = []
@@ -132,16 +130,14 @@ def build_flow_b_draft(
 
     surviving_labels = tuple(label_map[take.clip_id] for take in kept if take.clip_id in label_map)
     strategy = choose_strategy(surviving_labels, kept)
-
-    # Baseline selection remains conservative: one winner per take group.
     natural_selected = compose_selected(kept, groups, surviving_labels)
 
-    # Flexible composer may only reorder those already-selected real clips.
     composition = safe_compose_order(
         composer_provider,
         natural_selected,
         surviving_labels,
         strategy,
+        context_text=context_text,
     )
     selected_map = {take.clip_id: take for take in natural_selected}
     selected_takes = tuple(selected_map[clip_id] for clip_id in composition.ordered_clip_ids)
@@ -176,6 +172,20 @@ def build_flow_b_draft(
         for take in discarded
     )
 
+    whole_video_diag = {
+        "status": whole_video_context.status.__dict__ if whole_video_context is not None else None,
+        "sources": [
+            {
+                "source_asset_id": source.source_asset_id,
+                "summary": source.summary,
+                "dominant_style": source.dominant_style,
+                "creator_intent": source.creator_intent,
+                "events": [event.__dict__ for event in source.events],
+            }
+            for source in (whole_video_context.sources if whole_video_context is not None else ())
+        ],
+    }
+
     draft = DraftTimeline(
         schema_version=SCHEMA_VERSION,
         project_id=request.project_id,
@@ -184,6 +194,7 @@ def build_flow_b_draft(
         alternates=alternates,
         discarded=discarded_clips,
         diagnostics={
+            "whole_video_context": whole_video_diag,
             "clean_cut_decisions": [decision.__dict__ for decision in decisions],
             "clean_cut_judge_status": clean_judged.status.__dict__,
             "clean_cut_judge": list(clean_judge_diagnostics)[:100],
@@ -243,6 +254,9 @@ def build_flow_b_draft(
         state=JobState.DRAFT_READY,
         draft=draft,
         stage_status={
+            "whole_video_context": (
+                whole_video_context.status.status if whole_video_context is not None else "not_requested"
+            ),
             "clean_cut": clean_cut_stage,
             "take_grouping": grouping_stage,
             "take_judge": judge_stage,
