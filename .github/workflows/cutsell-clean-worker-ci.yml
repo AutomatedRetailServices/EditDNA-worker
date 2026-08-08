@@ -43,8 +43,8 @@ jobs:
           python-version: "3.11"
       - name: Compile clean worker and app
         run: python -m compileall cutsell_worker cutsell_app
-      - name: Install test runner and app dependencies
-        run: pip install pytest fastapi httpx pydantic redis rq boto3 openai
+      - name: Install test runner and runtime dependencies
+        run: pip install pytest httpx -r requirements.cutsell.api.txt
       - name: Run CutSell tests
         run: pytest -q tests/test_cutsell_*.py
       - name: Build staging API container
