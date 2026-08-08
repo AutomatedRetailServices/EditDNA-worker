@@ -30,21 +30,25 @@ def _take():
     )
 
 
-def test_openai_visual_adapter_uses_image_input_and_maps_scores(tmp_path):
+def test_openai_visual_adapter_uses_temporal_high_detail_input_and_maps_scores(tmp_path):
     image = tmp_path / "frame.jpg"
     image.write_bytes(b"jpeg-bytes")
     client = FakeClient(
         '{"clips":[{"id":"clip-1","face_visibility":0.9,"eye_contact":0.8,'
         '"framing_quality":0.7,"product_visibility":0.6,"motion_stability":0.85,'
-        '"continuity":0.75,"visual_fumble":0.1}]}'
+        '"continuity":0.75,"visual_fumble":0.1,"expression_naturalness":0.88,'
+        '"gesture_naturalness":0.84,"delivery_energy":0.81,"distraction_risk":0.06}]}'
     )
     provider = OpenAIVisualProvider(client_factory=lambda: client)
     result = provider.analyze(
         (_take(),),
-        (FrameSample("clip-1", "src-1", 1.0, str(image)),),
+        (FrameSample("clip-1", "src-1", 1.0, str(image), relative_position=0.5),),
     )
     assert result.status.status == "applied"
     assert result.observations[0].face_visibility == 0.9
+    assert result.observations[0].expression_naturalness == 0.88
+    assert result.observations[0].gesture_naturalness == 0.84
+    assert result.observations[0].delivery_energy == 0.81
     call = client.responses.calls[0]
     assert call["model"] == "gpt-4o-mini"
     image_parts = [
@@ -55,7 +59,15 @@ def test_openai_visual_adapter_uses_image_input_and_maps_scores(tmp_path):
     ]
     assert len(image_parts) == 1
     assert image_parts[0]["image_url"].startswith("data:image/jpeg;base64,")
-    assert image_parts[0]["detail"] == "low"
+    assert image_parts[0]["detail"] == "high"
+    temporal_text = " ".join(
+        str(part.get("text", ""))
+        for message in call["input"]
+        for part in message["content"]
+        if part["type"] == "input_text"
+    )
+    assert "relative_position" in temporal_text
+    assert "gesture_naturalness" in temporal_text
 
 
 def test_openai_visual_adapter_rejects_omitted_take():
