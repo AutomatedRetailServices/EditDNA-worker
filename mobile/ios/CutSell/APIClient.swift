@@ -46,6 +46,21 @@ actor APIClient {
         return session
     }
 
+    func createAppleSession(identityToken: String, nonce: String?) async throws -> CutSellSession {
+        struct Body: Encodable {
+            let identity_token: String
+            let nonce: String?
+        }
+        let value: SessionResponse = try await request(
+            "/v1/auth/apple",
+            method: "POST",
+            body: Body(identity_token: identityToken, nonce: nonce)
+        )
+        let session = CutSellSession(userID: value.userID, accessToken: value.accessToken)
+        self.session = session
+        return session
+    }
+
     func request<T: Decodable>(
         _ path: String,
         method: String = "GET",
