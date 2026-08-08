@@ -4,6 +4,7 @@ from __future__ import annotations
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
 
+from cutsell_worker.account_lifecycle import delete_project_data
 from cutsell_worker.project_store import create_project, get_project, list_projects, update_project
 
 router = APIRouter(prefix="/v1/projects", tags=["projects"])
@@ -17,6 +18,11 @@ class ProjectCreateRequest(BaseModel):
 class ProjectRenameRequest(BaseModel):
     user_id: str
     title: str
+
+
+class ProjectDeleteRequest(BaseModel):
+    user_id: str
+    confirmation: str
 
 
 @router.post("")
@@ -57,5 +63,17 @@ def rename_mobile_project(project_id: str, payload: ProjectRenameRequest):
         raise HTTPException(status_code=404, detail="project not found") from None
     except (TypeError, ValueError) as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from None
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from None
+
+
+@router.delete("/{project_id}")
+def delete_mobile_project(project_id: str, payload: ProjectDeleteRequest):
+    if payload.confirmation != "DELETE":
+        raise HTTPException(status_code=409, detail="project deletion requires confirmation DELETE")
+    try:
+        return delete_project_data(user_id=payload.user_id, project_id=project_id)
+    except KeyError:
+        raise HTTPException(status_code=404, detail="project not found") from None
     except RuntimeError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from None
