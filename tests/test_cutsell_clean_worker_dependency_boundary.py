@@ -30,15 +30,26 @@ def test_clean_worker_does_not_import_legacy_heavy_ml_stack():
     assert not violations, "Legacy heavy imports leaked into clean CutSell worker: " + "; ".join(violations)
 
 
+def _requirement_names() -> set[str]:
+    names = set()
+    for raw in Path("requirements.cutsell.worker.txt").read_text(encoding="utf-8").splitlines():
+        line = raw.split("#", 1)[0].strip().lower()
+        if not line:
+            continue
+        name = line
+        for separator in ["==", ">=", "<=", "~=", "!=", ">", "<", "["]:
+            if separator in name:
+                name = name.split(separator, 1)[0]
+        names.add(name.strip())
+    return names
+
+
 def test_worker_requirements_do_not_replace_base_torch_cuda_stack():
-    text = Path("requirements.cutsell.worker.txt").read_text(encoding="utf-8").lower()
-    for forbidden in ["torch", "torchvision", "clip", "sentence-transformers", "opencv", "moviepy"]:
-        assert forbidden not in text
-    assert "faster-whisper" in text
-    assert "boto3" in text
-    assert "redis" in text
-    assert "rq" in text
-    assert "openai" in text
+    names = _requirement_names()
+    forbidden = {"torch", "torchvision", "clip", "sentence-transformers", "opencv-python", "opencv-python-headless", "moviepy"}
+    assert not (names & forbidden)
+    for required in {"faster-whisper", "boto3", "redis", "rq", "openai"}:
+        assert required in names
 
 
 def test_worker_dockerfile_uses_clean_worker_requirements():
