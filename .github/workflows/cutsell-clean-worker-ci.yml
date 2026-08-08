@@ -33,3 +33,5 @@ jobs:
         run: pip install pytest fastapi httpx pydantic redis rq boto3 openai
       - name: Run CutSell tests
         run: pytest -q tests/test_cutsell_*.py
+      - name: Build staging API container
+        run: docker build -f Dockerfile.cutsell -t cutsell-api-ci:${{ github.sha }} .
