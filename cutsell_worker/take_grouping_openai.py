@@ -22,7 +22,11 @@ class OpenAITakeGroupingProvider:
         from openai import OpenAI
         return OpenAI()
 
-    def group(self, takes: Tuple[CandidateTake, ...]) -> TakeGroupingProviderResult:
+    def group(
+        self,
+        takes: Tuple[CandidateTake, ...],
+        context_text: str = "",
+    ) -> TakeGroupingProviderResult:
         payload = []
         for take in takes:
             signals = take.signals
@@ -43,6 +47,7 @@ class OpenAITakeGroupingProvider:
 
         instruction = (
             "Group these valid TikTok Shop/UGC recording takes by the creator's underlying spoken idea. "
+            "Use the whole-video context to recognize retries and story/demo beats even when wording changes. "
             "Different wording can still be alternate takes when the creator is clearly retrying the same claim, hook, proof, story beat, CTA, or demonstration idea. "
             "Do not group clips merely because they share a broad commercial role or product topic. Preserve distinct claims/details as separate groups. "
             "Use transcript meaning, temporal proximity/source context, and available visual context. Every clip must appear exactly once. "
@@ -52,7 +57,10 @@ class OpenAITakeGroupingProvider:
             model=self.model,
             input=[
                 {"role": "system", "content": instruction},
-                {"role": "user", "content": json.dumps({"takes": payload}, ensure_ascii=False)},
+                {"role": "user", "content": json.dumps({
+                    "whole_video_context": context_text[:12000],
+                    "takes": payload,
+                }, ensure_ascii=False)},
             ],
         )
         data = parse_json_object(response.output_text)
