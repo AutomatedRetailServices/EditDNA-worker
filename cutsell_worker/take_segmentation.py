@@ -88,6 +88,10 @@ def _merge_signals(left: CandidateTake, right: CandidateTake) -> MediaSignals | 
         motion_stability=weighted(a.motion_stability, b.motion_stability),
         continuity=weighted(a.continuity, b.continuity),
         visual_fumble=max(a.visual_fumble, b.visual_fumble),
+        expression_naturalness=weighted(a.expression_naturalness, b.expression_naturalness),
+        gesture_naturalness=weighted(a.gesture_naturalness, b.gesture_naturalness),
+        delivery_energy=weighted(a.delivery_energy, b.delivery_energy),
+        distraction_risk=max(a.distraction_risk, b.distraction_risk),
     )
 
 
@@ -97,12 +101,7 @@ def _repair_boundary_fragments(
     max_fragment_sec: float = 0.45,
     max_join_gap_sec: float = 0.12,
 ) -> Tuple[CandidateTake, ...]:
-    """Reattach obvious tiny ASR tail fragments to the prior spoken idea.
-
-    Example: ``"for working"`` followed immediately by ``"out."`` should be one
-    candidate. This never crosses a source and deliberately does not merge a short
-    standalone utterance after a completed sentence (for example ``"Wow!"``).
-    """
+    """Reattach obvious tiny ASR tail fragments to the prior spoken idea."""
     ordered = sorted(takes, key=lambda take: (take.source_order, take.start, take.end, take.clip_id))
     repaired: list[CandidateTake] = []
     for take in ordered:
