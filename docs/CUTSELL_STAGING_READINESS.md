@@ -26,7 +26,12 @@ Snapshot for the clean `cutsell/mobile-v1-clean` release branch. This is evidenc
 - Real staging E2E passed through the public API and temporary RunPod GPU: beta auth -> presigned upload -> Flow B -> Draft recovery -> audio edit -> autosave -> export -> download -> ffprobe.
 - Successful E2E evidence: project `staging-e2e-77fc9106c0e7`, Flow B job `27e17b28-1cbc-4f63-a5cf-4b7af767c834`, export job `916c642e-aea5-41bd-81c6-038ee0fc68c9`, Draft revision 2, 4 selected clips, export size 2,533,472 bytes, export duration 5.722333 sec, render version `rv_b0a2dca4f1384eb1b6eda5559f883d3f`.
 - The E2E temporary RunPod Pod was deleted successfully with HTTP 204 after verification.
-- The consumed E2E trigger marker was removed after the successful run.
+- Persisted Draft recovery passed after the GPU process was deleted.
+- Public API cancel -> retry -> cancel behavior passed without a GPU worker present.
+- Render rollback gate passed: the API rolled back to the previous successful deploy, passed full health, restored the current deploy, and passed full health again.
+- RunPod worker rollback gate passed: both the previous worker image and the current worker image booted, registered on the `cutsell` RQ queue, and were deleted after verification.
+- RunPod rollback cleanup finished with zero rollback Pods remaining; the rollback preflight also confirmed there was no persistent `cutsell-staging-worker` before the test.
+- Consumed one-shot staging, diagnostic, E2E, recovery, Render and worker rollback trigger workflows/markers were removed from the release checkpoint after successful verification.
 
 ## Runtime defaults frozen for staging
 
@@ -47,10 +52,10 @@ Snapshot for the clean `cutsell/mobile-v1-clean` release branch. This is evidenc
 
 ## Still required before beta
 
-1. Verify cancel/retry and recovery across process/app interruption in staging.
-2. Perform rollback test for API git SHA and worker image SHA.
-3. Re-run final Clean Worker CI and iOS CI on the cleaned release checkpoint.
-4. Only after staging is stable: Apple Developer signing / TestFlight and physical-iPhone beta.
-5. Physical iPhone checks: camera, Photos import, background multipart resume, Flow B, playback/timeline, swap/trim/split, overlays, recovery, export/save/share.
+1. Re-run final Clean Worker CI and iOS CI on this cleaned release checkpoint.
+2. Apple Developer signing / App ID / provisioning / TestFlight setup.
+3. Physical iPhone beta checks: camera, Photos import, background multipart resume, app kill/resume, Flow B, playback/timeline, Swap Take, trim/split, overlays, captions, recovery, export, Save to Photos and share.
+
+PR #25 remains Draft. Production deployment, final merge/release, repo deletion/archive and Apple/TestFlight actions still require explicit approval at their respective gates.
 
 Passing this checklist is not equivalent to declaring the editing brain perfect. Real-video golden QA and later human edit-quality review remain release gates.
