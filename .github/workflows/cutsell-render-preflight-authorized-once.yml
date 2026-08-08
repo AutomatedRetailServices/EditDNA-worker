@@ -1,0 +1,42 @@
+name: CutSell Render Staging Preflight Authorized Once
+
+on:
+  push:
+    branches:
+      - cutsell/mobile-v1-clean
+    paths:
+      - ".cutsell/render-preflight-authorized-once.txt"
+
+permissions:
+  contents: read
+
+jobs:
+  render-preflight:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      RENDER_API_KEY: ${{ secrets.RENDER_API_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Require authorized marker
+        run: grep -qx 'approval=APPROVE_PAID_STAGING' .cutsell/render-preflight-authorized-once.txt
+      - name: Check Render API credential presence
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -z "${RENDER_API_KEY:-}" ]; then
+            echo 'RENDER_API_KEY=missing'
+            exit 3
+          fi
+          echo 'RENDER_API_KEY=present'
+      - name: Verify Render API access and list owner IDs only
+        shell: bash
+        run: |
+          set -euo pipefail
+          code=$(curl --silent --show-error --write-out '%{http_code}' \
+            --url 'https://api.render.com/v1/owners?limit=20' \
+            --header "Authorization: Bearer $RENDER_API_KEY" \
+            --output owners.json)
+          echo "Render owners HTTP status: $code"
+          test "$code" = "200"
+          jq '[.[] | {id:(.owner.id // .id), name:(.owner.name // .name), type:(.owner.type // .type)}]' owners.json
