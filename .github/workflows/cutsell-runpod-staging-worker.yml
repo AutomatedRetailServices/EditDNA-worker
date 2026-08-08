@@ -1,0 +1,153 @@
+name: CutSell RunPod Staging Worker
+
+on:
+  workflow_dispatch:
+    inputs:
+      approval:
+        description: "Type APPROVE_PAID_STAGING_WORKER to create a persistent paid GPU worker"
+        required: true
+        default: ""
+      image:
+        description: "Immutable CutSell worker image"
+        required: true
+        default: "ghcr.io/automatedretailservices/cutsell-worker:f1bc3adc4f2f8df0ae005fa551116dc4d08b30e6"
+      cloud_type:
+        description: "RunPod cloud type"
+        required: true
+        default: "SECURE"
+        type: choice
+        options:
+          - SECURE
+          - COMMUNITY
+
+permissions:
+  contents: read
+
+jobs:
+  deploy-staging-worker:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      RUNPOD_API_KEY: ${{ secrets.RUNPOD_API_KEY }}
+      REDIS_URL: ${{ secrets.REDIS_URL }}
+      RUNPOD_TEMPLATE_NAME: EditDNA-Worker-2
+      IMAGE: ${{ inputs.image }}
+      CLOUD_TYPE: ${{ inputs.cloud_type }}
+    steps:
+      - name: Require explicit paid staging approval
+        shell: bash
+        env:
+          APPROVAL: ${{ inputs.approval }}
+        run: |
+          set -euo pipefail
+          test "$APPROVAL" = "APPROVE_PAID_STAGING_WORKER" || { echo 'Paid staging worker not approved'; exit 2; }
+          test -n "${RUNPOD_API_KEY:-}" || { echo 'RUNPOD_API_KEY missing'; exit 3; }
+          test -n "${REDIS_URL:-}" || { echo 'REDIS_URL missing'; exit 3; }
+          test -n "${IMAGE:-}" || { echo 'worker image missing'; exit 3; }
+
+      - name: Refuse duplicate staging worker
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail --silent --show-error \
+            --url "https://rest.runpod.io/v1/pods" \
+            --header "Authorization: Bearer $RUNPOD_API_KEY" \
+            --output pods.json
+          count=$(jq '[.[] | select(.name == "cutsell-staging-worker")] | length' pods.json)
+          test "$count" = "0" || { echo 'cutsell-staging-worker already exists; refusing duplicate paid worker'; exit 4; }
+
+      - name: Load worker runtime credentials from template vault
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail --silent --show-error \
+            --url "https://rest.runpod.io/v1/templates" \
+            --header "Authorization: Bearer $RUNPOD_API_KEY" \
+            --output templates.json
+          TEMPLATE=$(jq -c --arg name "$RUNPOD_TEMPLATE_NAME" '[.[] | select(.name == $name)][0]' templates.json)
+          test "$TEMPLATE" != "null" || { echo 'RunPod credential template not found'; exit 5; }
+          for key in AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_REGION S3_BUCKET OPENAI_API_KEY; do
+            value=$(printf '%s' "$TEMPLATE" | jq -r --arg key "$key" '.env[$key] // empty')
+            test -n "$value" || { echo "$key missing from template vault"; exit 6; }
+            echo "::add-mask::$value"
+            printf '%s=%s\n' "$key" "$value" >> "$GITHUB_ENV"
+          done
+
+      - name: Create persistent staging GPU worker
+        shell: bash
+        run: |
+          set -euo pipefail
+          START_CMD='python -m rq.cli worker -u "$REDIS_URL" --worker-ttl 1200 cutsell'
+          jq -n \
+            --arg name "cutsell-staging-worker" \
+            --arg image "$IMAGE" \
+            --arg cloud "$CLOUD_TYPE" \
+            --arg cmd "$START_CMD" \
+            --arg redis "$REDIS_URL" \
+            --arg aws_access "$AWS_ACCESS_KEY_ID" \
+            --arg aws_secret "$AWS_SECRET_ACCESS_KEY" \
+            --arg aws_region "$AWS_REGION" \
+            --arg bucket "$S3_BUCKET" \
+            --arg openai "$OPENAI_API_KEY" \
+            '{
+              name: $name,
+              imageName: $image,
+              cloudType: $cloud,
+              computeType: "GPU",
+              gpuCount: 1,
+              gpuTypeIds: [
+                "NVIDIA L4",
+                "NVIDIA RTX A4000",
+                "NVIDIA RTX A5000",
+                "NVIDIA A40",
+                "NVIDIA GeForce RTX 3090",
+                "NVIDIA GeForce RTX 4090"
+              ],
+              gpuTypePriority: "availability",
+              interruptible: false,
+              containerDiskInGb: 30,
+              volumeInGb: 20,
+              volumeMountPath: "/workspace",
+              dockerEntrypoint: ["bash", "-lc"],
+              dockerStartCmd: [$cmd],
+              env: {
+                REDIS_URL: $redis,
+                AWS_ACCESS_KEY_ID: $aws_access,
+                AWS_SECRET_ACCESS_KEY: $aws_secret,
+                AWS_REGION: $aws_region,
+                S3_BUCKET: $bucket,
+                OPENAI_API_KEY: $openai,
+                CUTSELL_ASR_MODEL: "medium",
+                CUTSELL_CLEAN_CUT_JUDGE: "0",
+                CUTSELL_SEMANTIC_MODEL: "gpt-4o-mini",
+                CUTSELL_VISUAL_MODEL: "gpt-4o-mini",
+                CUTSELL_TAKE_JUDGE_MODEL: "gpt-4o-mini"
+              }
+            }' > create-pod.json
+          code=$(curl --silent --show-error --write-out '%{http_code}' \
+            --request POST \
+            --url "https://rest.runpod.io/v1/pods" \
+            --header "Authorization: Bearer $RUNPOD_API_KEY" \
+            --header "Content-Type: application/json" \
+            --data @create-pod.json \
+            --output pod.json)
+          rm -f create-pod.json
+          if [ "$code" != "201" ]; then
+            echo "RunPod create HTTP status: $code"
+            jq '{error,errors,message}' pod.json || true
+            exit 7
+          fi
+          POD_ID=$(jq -r '.id // empty' pod.json)
+          test -n "$POD_ID" || { echo 'RunPod returned no Pod id'; exit 7; }
+          echo "Created paid staging worker Pod: $POD_ID"
+          jq '{id,name,desiredStatus,imageName,cloudType,gpu}' pod.json || true
+
+      - name: Confirm staging worker is registered
+        shell: bash
+        run: |
+          set -euo pipefail
+          sleep 5
+          curl --fail --silent --show-error \
+            --url "https://rest.runpod.io/v1/pods" \
+            --header "Authorization: Bearer $RUNPOD_API_KEY" \
+            | jq '[.[] | select(.name == "cutsell-staging-worker") | {id,name,desiredStatus,imageName}]'
