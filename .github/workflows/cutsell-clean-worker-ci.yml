@@ -11,6 +11,7 @@ on:
       - "Dockerfile.cutsell"
       - "Dockerfile.cutsell.worker"
       - "requirements.cutsell.api.txt"
+      - "requirements.cutsell.worker.txt"
       - "render.cutsell.yaml"
       - ".github/workflows/cutsell-clean-worker-ci.yml"
 
