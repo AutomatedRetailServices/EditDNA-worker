@@ -16,13 +16,10 @@ from .observability import ExecutionTrace
 from .pipeline import build_flow_b_draft
 from .providers import NoopSemanticProvider, SemanticProvider, safe_semantic_classify
 from .silence_analysis import word_silence_gaps
+from .take_grouping_provider import TakeGroupingProvider
 from .take_judge_provider import TakeJudgeProvider
 from .take_segmentation import segment_takes
-from .visual_analysis import (
-    VisualProvider,
-    apply_visual_observations,
-    safe_visual_analyze,
-)
+from .visual_analysis import VisualProvider, apply_visual_observations, safe_visual_analyze
 
 ProgressCallback = Callable[[str, int], None]
 
@@ -37,6 +34,7 @@ def process_local_sources(
     take_judge_provider: TakeJudgeProvider | None = None,
     clean_cut_provider: CleanCutProvider | None = None,
     composer_provider: ComposerProvider | None = None,
+    take_grouping_provider: TakeGroupingProvider | None = None,
     progress: ProgressCallback | None = None,
 ) -> ProcessingResult:
     """Process registered sources all the way from local media to editable draft."""
@@ -119,6 +117,7 @@ def process_local_sources(
         take_judge_provider=take_judge_provider,
         clean_cut_provider=clean_cut_provider,
         composer_provider=composer_provider,
+        take_grouping_provider=take_grouping_provider,
     )
     notify("draft_ready", 100)
     return replace(result, stage_status={**result.stage_status, **trace.as_dict()})
