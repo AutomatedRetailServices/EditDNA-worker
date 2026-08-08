@@ -126,7 +126,6 @@ jobs:
           try:
               s3.download_file(os.environ['S3_BUCKET'],key,'source.mp4')
           except Exception:
-              # Recover from historical spelling/case drift by finding Bloppers15.
               found=None; token=None
               for _ in range(10):
                   kw={'Bucket':os.environ['S3_BUCKET'],'Prefix':'Editdna bloopers videos/','MaxKeys':1000}
@@ -218,8 +217,8 @@ jobs:
           saved=expect(requests.put(base+f'/v1/projects/{project}/draft',headers=headers,json={'user_id':user,'expected_revision':recovered['revision'],'draft':edited},timeout=30)).json()
           assert saved['revision']==recovered['revision']+1
           edited_clip=next(c for c in saved['draft']['selected'] if c['clip_id']==clip_id)
-          assert abs(float(edited_clip.get('volume',1.0))-0.9)<1e-6
-          print('EDIT_AUTOSAVE revision',saved['revision'],'volume',edited_clip.get('volume'))
+          assert abs(float(edited_clip.get('audio_volume',1.0))-0.9)<1e-6
+          print('EDIT_AUTOSAVE revision',saved['revision'],'audio_volume',edited_clip.get('audio_volume'))
 
           sources=[{'source_asset_id':s['source_asset_id'],'original_name':s['original_name'],'uri':s['uri']} for s in saved['sources']]
           export=expect(requests.post(base+'/v1/exports/jobs',headers=headers,json={'project_id':project,'user_id':user,'draft':saved['draft'],'sources':sources},timeout=30),(202,)).json()
@@ -233,7 +232,6 @@ jobs:
           open('cutsell-staging-e2e-result.json','w').write(json.dumps(evidence,indent=2))
           print('E2E_PASS',json.dumps(evidence,sort_keys=True))
 
-          # Clean only the temporary uploaded source and export bytes after verification.
           s3=boto3.client('s3',region_name=os.environ.get('AWS_REGION') or 'us-east-1')
           for uri in (source_uri,result['export_uri']):
               p=urlparse(uri); s3.delete_object(Bucket=p.netloc,Key=p.path.lstrip('/'))
