@@ -1,0 +1,57 @@
+name: Delete CutSell RunPod Staging Worker
+
+on:
+  workflow_dispatch:
+    inputs:
+      approval:
+        description: "Type APPROVE_DELETE_STAGING_WORKER to terminate the staging GPU worker"
+        required: true
+        default: ""
+      pod_id:
+        description: "Exact RunPod Pod ID to terminate"
+        required: true
+        default: ""
+
+permissions:
+  contents: read
+
+jobs:
+  delete-staging-worker:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      RUNPOD_API_KEY: ${{ secrets.RUNPOD_API_KEY }}
+      POD_ID: ${{ inputs.pod_id }}
+    steps:
+      - name: Require explicit termination approval
+        shell: bash
+        env:
+          APPROVAL: ${{ inputs.approval }}
+        run: |
+          set -euo pipefail
+          test "$APPROVAL" = "APPROVE_DELETE_STAGING_WORKER" || { echo 'Staging worker termination not approved'; exit 2; }
+          test -n "${RUNPOD_API_KEY:-}" || { echo 'RUNPOD_API_KEY missing'; exit 3; }
+          test -n "${POD_ID:-}" || { echo 'pod_id missing'; exit 3; }
+
+      - name: Verify Pod is the CutSell staging worker
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail --silent --show-error \
+            --url "https://rest.runpod.io/v1/pods" \
+            --header "Authorization: Bearer $RUNPOD_API_KEY" \
+            --output pods.json
+          name=$(jq -r --arg id "$POD_ID" '[.[] | select(.id == $id)][0].name // empty' pods.json)
+          test "$name" = "cutsell-staging-worker" || { echo 'Pod ID is not the CutSell staging worker; refusing delete'; exit 4; }
+
+      - name: Terminate exact staging worker Pod
+        shell: bash
+        run: |
+          set -euo pipefail
+          code=$(curl --silent --show-error --write-out '%{http_code}' \
+            --request DELETE \
+            --url "https://rest.runpod.io/v1/pods/$POD_ID" \
+            --header "Authorization: Bearer $RUNPOD_API_KEY" \
+            --output delete-response.txt)
+          echo "RunPod delete HTTP status: $code"
+          test "$code" = "204"
