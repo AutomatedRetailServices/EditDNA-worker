@@ -52,27 +52,44 @@ class OpenAIVisualProvider:
         content = [{
             "type": "input_text",
             "text": (
-                "Evaluate each video take using only its transcript and temporal frames. Return JSON only as "
-                "{\"clips\":[{\"id\":...,\"face_visibility\":0..1,\"eye_contact\":0..1,"
+                "You are CutSell Watch + Listen, evaluating sales/UGC recording takes like a careful human editor. "
+                "Use the transcript plus the ordered temporal frames across each take. Judge the delivery over time, not a single pose. "
+                "Return JSON only as {\"clips\":[{\"id\":...,\"face_visibility\":0..1,\"eye_contact\":0..1,"
                 "\"framing_quality\":0..1,\"product_visibility\":0..1,\"motion_stability\":0..1,"
-                "\"continuity\":0..1,\"visual_fumble\":0..1}]}. Include every take exactly once. "
-                "visual_fumble means visible restart/mistake/distraction; higher is worse. Do not decide deletion."
+                "\"continuity\":0..1,\"visual_fumble\":0..1,\"expression_naturalness\":0..1,"
+                "\"gesture_naturalness\":0..1,\"delivery_energy\":0..1,\"distraction_risk\":0..1}]}. "
+                "Include every take exactly once. visual_fumble and distraction_risk are higher when worse. "
+                "expression_naturalness should penalize visibly awkward/frozen/incongruent facial delivery but not normal individual style. "
+                "gesture_naturalness should reward intentional, coherent hand/body movement and penalize accidental recording fumbles. "
+                "delivery_energy means visually engaged/present delivery appropriate to the content, not exaggerated movement. "
+                "Do not infer sensitive traits and do not decide deletion; only produce editing-quality signals."
             ),
         }]
         for take in takes:
+            ordered = sorted(frames_by_clip.get(take.clip_id, ()), key=lambda item: item.timestamp)
             content.append({
                 "type": "input_text",
                 "text": json.dumps({
                     "take_id": take.clip_id,
                     "transcript": take.text,
                     "source_asset_id": take.source_asset_id,
+                    "take_start_sec": take.start,
+                    "take_end_sec": take.end,
+                    "frame_count": len(ordered),
                 }, ensure_ascii=False),
             })
-            for sample in sorted(frames_by_clip.get(take.clip_id, ()), key=lambda item: item.timestamp):
+            for sample in ordered:
+                content.append({
+                    "type": "input_text",
+                    "text": json.dumps({
+                        "timestamp_sec": round(sample.timestamp, 3),
+                        "relative_position": round(sample.relative_position, 4),
+                    }),
+                })
                 content.append({
                     "type": "input_image",
                     "image_url": self._image_url(sample.path),
-                    "detail": "low",
+                    "detail": "high",
                 })
 
         response = self._client().responses.create(
@@ -100,6 +117,10 @@ class OpenAIVisualProvider:
                 motion_stability=self._score(item.get("motion_stability")),
                 continuity=self._score(item.get("continuity")),
                 visual_fumble=self._score(item.get("visual_fumble")),
+                expression_naturalness=self._score(item.get("expression_naturalness")),
+                gesture_naturalness=self._score(item.get("gesture_naturalness")),
+                delivery_energy=self._score(item.get("delivery_energy")),
+                distraction_risk=self._score(item.get("distraction_risk")),
             ))
             seen.add(clip_id)
         if seen != known:
