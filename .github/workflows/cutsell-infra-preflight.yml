@@ -2,6 +2,11 @@ name: CutSell Infra Preflight
 
 on:
   workflow_dispatch:
+  push:
+    branches:
+      - cutsell/mobile-v1-clean
+    paths:
+      - ".cutsell/infra-preflight-trigger.txt"
 
 permissions:
   contents: read
@@ -11,6 +16,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     env:
+      REDIS_URL_VALUE: ${{ secrets.REDIS_URL }}
       AWS_ACCESS_KEY_ID_VALUE: ${{ secrets.AWS_ACCESS_KEY_ID }}
       AWS_SECRET_ACCESS_KEY_VALUE: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
       AWS_REGION_VALUE: ${{ secrets.AWS_REGION }}
@@ -27,6 +33,7 @@ jobs:
             name="$1"; value="$2"
             if [ -n "$value" ]; then echo "$name=present"; else echo "$name=missing"; missing=1; fi
           }
+          check REDIS_URL "$REDIS_URL_VALUE"
           check AWS_ACCESS_KEY_ID "$AWS_ACCESS_KEY_ID_VALUE"
           check AWS_SECRET_ACCESS_KEY "$AWS_SECRET_ACCESS_KEY_VALUE"
           check AWS_REGION "$AWS_REGION_VALUE"
