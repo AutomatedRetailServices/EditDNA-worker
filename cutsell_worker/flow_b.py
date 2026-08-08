@@ -8,6 +8,7 @@ from typing import Callable, Mapping
 
 from .asr import ASRProvider
 from .clean_cut_provider import CleanCutProvider
+from .composer_provider import ComposerProvider
 from .contracts import ProcessingRequest, ProcessingResult
 from .frame_sampling import sample_take_frames
 from .media_probe import probe_media
@@ -35,6 +36,7 @@ def process_local_sources(
     visual_provider: VisualProvider | None = None,
     take_judge_provider: TakeJudgeProvider | None = None,
     clean_cut_provider: CleanCutProvider | None = None,
+    composer_provider: ComposerProvider | None = None,
     progress: ProgressCallback | None = None,
 ) -> ProcessingResult:
     """Process registered sources all the way from local media to editable draft."""
@@ -92,8 +94,12 @@ def process_local_sources(
             trace.degraded("visual", reason=visual.status.reason or visual.status.status)
         else:
             takes = apply_visual_observations(takes, visual.observations)
-            trace.complete("visual", status=visual.status.status,
-                           observation_count=len(visual.observations), frame_count=len(samples))
+            trace.complete(
+                "visual",
+                status=visual.status.status,
+                observation_count=len(visual.observations),
+                frame_count=len(samples),
+            )
     else:
         trace.complete("visual", status="not_requested", observation_count=0, frame_count=0)
     notify("analyzing", 72)
@@ -112,6 +118,7 @@ def process_local_sources(
         semantic.labels,
         take_judge_provider=take_judge_provider,
         clean_cut_provider=clean_cut_provider,
+        composer_provider=composer_provider,
     )
     notify("draft_ready", 100)
     return replace(result, stage_status={**result.stage_status, **trace.as_dict()})
