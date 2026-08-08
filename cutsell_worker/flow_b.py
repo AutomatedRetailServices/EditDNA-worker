@@ -20,6 +20,7 @@ from .source_sampling import sample_source_frames
 from .take_grouping_provider import TakeGroupingProvider
 from .take_judge_provider import TakeJudgeProvider
 from .take_segmentation import segment_takes
+from .usage_limits import check_processing_allowance
 from .visual_analysis import VisualProvider, apply_visual_observations, safe_visual_analyze
 from .whole_video_analysis import WholeVideoProvider, safe_whole_video_analyze
 
@@ -61,6 +62,22 @@ def process_local_sources(
             metadata={**source.metadata, "width": probe.width, "height": probe.height, "fps": probe.fps},
         ))
     trace.complete("media_probe", source_count=len(hydrated_sources))
+
+    # Trust ffprobe, not client-declared duration, before spending ASR/GPU/API cost.
+    usage = check_processing_allowance(
+        user_id=request.user_id,
+        durations_sec=[source.duration_sec for source in hydrated_sources],
+    )
+    if not usage.allowed:
+        trace.fail("usage_guard", reason=usage.reason)
+        raise ValueError(f"processing denied: {usage.reason}")
+    trace.complete(
+        "usage_guard",
+        reason=usage.reason,
+        requested_minutes=round(usage.requested_minutes, 4),
+        monthly_used_minutes=usage.monthly_used_minutes,
+        monthly_limit_minutes=usage.monthly_limit_minutes,
+    )
     notify("transcribing", 12)
 
     source_by_id = {source.source_asset_id: source for source in hydrated_sources}
