@@ -17,7 +17,11 @@ class TakeGroupingProviderResult:
 
 
 class TakeGroupingProvider(Protocol):
-    def group(self, takes: Tuple[CandidateTake, ...]) -> TakeGroupingProviderResult: ...
+    def group(
+        self,
+        takes: Tuple[CandidateTake, ...],
+        context_text: str = "",
+    ) -> TakeGroupingProviderResult: ...
 
 
 def _baseline_groups(takes: Tuple[CandidateTake, ...]) -> Tuple[Tuple[str, ...], ...]:
@@ -28,6 +32,7 @@ def _baseline_groups(takes: Tuple[CandidateTake, ...]) -> Tuple[Tuple[str, ...],
 def safe_group_takes(
     provider: TakeGroupingProvider | None,
     takes: Tuple[CandidateTake, ...],
+    context_text: str = "",
 ) -> TakeGroupingProviderResult:
     """Use semantic grouping only when it preserves every real candidate exactly once."""
     baseline = _baseline_groups(takes)
@@ -38,7 +43,7 @@ def safe_group_takes(
             "baseline",
         )
     try:
-        result = provider.group(takes)
+        result = provider.group(takes, context_text=context_text)
         expected = {take.clip_id for take in takes}
         flattened = [clip_id for group in result.groups for clip_id in group]
         if not result.groups or any(not group for group in result.groups):
