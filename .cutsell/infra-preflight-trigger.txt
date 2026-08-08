@@ -1,0 +1,2 @@
+check=1
+purpose=verify staging Redis/AWS/S3/OpenAI/RunPod secret presence only
