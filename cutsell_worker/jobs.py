@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from enum import Enum
 
 from .queueing import enqueue_export, enqueue_flow_b, get_queue
 
@@ -15,7 +16,26 @@ class JobSnapshot:
     error: str | None = None
 
 
-def _map_status(status: str) -> str:
+def _normalize_status(status: object) -> str:
+    """Return a stable public RQ status string across RQ versions.
+
+    Newer RQ releases may return a JobStatus enum whose ``str()`` is
+    ``JobStatus.FINISHED`` rather than the historical ``finished`` string.
+    CutSell's API contract must never leak that Python enum representation to
+    the iOS client or external callers.
+    """
+    if isinstance(status, Enum):
+        raw = status.value
+    else:
+        raw = status
+    text = str(raw or "").strip()
+    if "." in text:
+        text = text.rsplit(".", 1)[-1]
+    return text.lower()
+
+
+def _map_status(status: object) -> str:
+    normalized = _normalize_status(status)
     mapping = {
         "queued": "uploaded",
         "deferred": "uploaded",
@@ -25,8 +45,9 @@ def _map_status(status: str) -> str:
         "failed": "failed",
         "stopped": "canceled",
         "canceled": "canceled",
+        "cancelled": "canceled",
     }
-    return mapping.get(status, status or "unknown")
+    return mapping.get(normalized, normalized or "unknown")
 
 
 def _fetch_job(job_id: str, connection):
@@ -60,7 +81,7 @@ def fetch_job_snapshot(job_id: str, *, user_id: str | None = None, queue=None) -
     target = queue or get_queue()
     job = _fetch_job(job_id, target.connection)
     _assert_job_owner(job, user_id)
-    status = str(job.get_status(refresh=True))
+    status = _normalize_status(job.get_status(refresh=True))
     meta = dict(getattr(job, "meta", {}) or {})
     progress = meta.get("progress_percent")
     if progress is not None:
@@ -84,10 +105,10 @@ def cancel_job(job_id: str, *, user_id: str | None = None, queue=None) -> JobSna
     target = queue or get_queue()
     job = _fetch_job(job_id, target.connection)
     _assert_job_owner(job, user_id)
-    status = str(job.get_status(refresh=True))
+    status = _normalize_status(job.get_status(refresh=True))
     if status == "finished":
         return JobSnapshot(str(job.id), "finished", result=job.result)
-    if status in {"failed", "stopped", "canceled"}:
+    if status in {"failed", "stopped", "canceled", "cancelled"}:
         return JobSnapshot(str(job.id), _map_status(status))
     job.cancel()
     return JobSnapshot(str(job.id), "canceled")
@@ -98,8 +119,8 @@ def retry_job(job_id: str, *, user_id: str, queue=None):
     target = queue or get_queue()
     job = _fetch_job(job_id, target.connection)
     _assert_job_owner(job, user_id)
-    status = str(job.get_status(refresh=True))
-    if status not in {"failed", "stopped", "canceled"}:
+    status = _normalize_status(job.get_status(refresh=True))
+    if status not in {"failed", "stopped", "canceled", "cancelled"}:
         raise ValueError("only failed or canceled jobs can be retried")
     payload = _job_payload(job)
     if not payload:
