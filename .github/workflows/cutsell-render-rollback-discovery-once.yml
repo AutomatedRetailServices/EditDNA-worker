@@ -1,0 +1,32 @@
+name: CutSell Render Rollback Discovery Once
+
+on:
+  push:
+    branches:
+      - cutsell/mobile-v1-clean
+    paths:
+      - ".cutsell/render-rollback-discovery-once.txt"
+
+permissions:
+  contents: read
+
+jobs:
+  discovery:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      RENDER_API_KEY: ${{ secrets.RENDER_API_KEY }}
+      SERVICE_ID: srv-d9rdlsvavr4c73912uo0
+    steps:
+      - uses: actions/checkout@v4
+      - name: Require marker
+        run: grep -qx 'run=rollback-discovery' .cutsell/render-rollback-discovery-once.txt
+      - name: List sanitized deploy history
+        run: |
+          set -euo pipefail
+          curl --fail --silent --show-error \
+            --url "https://api.render.com/v1/services/$SERVICE_ID/deploys?limit=20" \
+            --header 'Accept: application/json' \
+            --header "Authorization: Bearer $RENDER_API_KEY" \
+            --output deploys.json
+          jq '[.[] | (.deploy // .) | {id,status,commit_id:(.commit.id // .commitId // null),created_at:(.createdAt // null),finished_at:(.finishedAt // null)}]' deploys.json
