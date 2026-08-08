@@ -63,12 +63,13 @@ def test_concurrency_slots_enforce_limit_and_release(monkeypatch):
 def test_project_deletion_prefixes_cover_all_project_media(monkeypatch):
     monkeypatch.setenv("CUTSELL_UPLOAD_PREFIX", "cutsell/uploads/")
     prefixes = _project_prefixes(user_id="usr_1", project_id="prj_1")
-    assert len(prefixes) == 4
+    assert len(prefixes) == 5
     assert prefixes[0].startswith("cutsell/uploads/")
     assert prefixes[1].startswith("cutsell/overlay-assets/")
     assert prefixes[2].startswith("cutsell/timeline-assets/")
     assert prefixes[3].startswith("cutsell/exports/")
-    assert len(set(prefixes)) == 4
+    assert prefixes[4].startswith("cutsell/feedback/")
+    assert len(set(prefixes)) == 5
 
 
 def test_s3_prefix_delete_never_touches_other_project_objects():
