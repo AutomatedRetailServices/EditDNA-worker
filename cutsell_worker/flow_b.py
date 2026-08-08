@@ -16,10 +16,12 @@ from .observability import ExecutionTrace
 from .pipeline import build_flow_b_draft
 from .providers import NoopSemanticProvider, SemanticProvider, safe_semantic_classify
 from .silence_analysis import word_silence_gaps
+from .source_sampling import sample_source_frames
 from .take_grouping_provider import TakeGroupingProvider
 from .take_judge_provider import TakeJudgeProvider
 from .take_segmentation import segment_takes
 from .visual_analysis import VisualProvider, apply_visual_observations, safe_visual_analyze
+from .whole_video_analysis import WholeVideoProvider, safe_whole_video_analyze
 
 ProgressCallback = Callable[[str, int], None]
 
@@ -35,6 +37,7 @@ def process_local_sources(
     clean_cut_provider: CleanCutProvider | None = None,
     composer_provider: ComposerProvider | None = None,
     take_grouping_provider: TakeGroupingProvider | None = None,
+    whole_video_provider: WholeVideoProvider | None = None,
     progress: ProgressCallback | None = None,
 ) -> ProcessingResult:
     """Process registered sources all the way from local media to editable draft."""
@@ -68,14 +71,49 @@ def process_local_sources(
                 source_asset_id=source.source_asset_id,
                 language_hint=request.language_hint,
             ))
-    trace.complete("asr", segment_count=len(transcripts))
-    notify("analyzing", 40)
+    transcript_tuple = tuple(transcripts)
+    trace.complete("asr", segment_count=len(transcript_tuple))
+    notify("analyzing", 34)
 
-    gaps = word_silence_gaps(transcripts)
+    # Whole-video context happens before take-level editing. It is observational
+    # only: it cannot delete/reorder; downstream stages use it as context.
+    if whole_video_provider is not None and hydrated_sources:
+        with tempfile.TemporaryDirectory(prefix="cutsell-whole-video-") as whole_dir:
+            whole_samples = []
+            for source in hydrated_sources:
+                source_path = local_paths[source.source_asset_id]
+                whole_samples.extend(sample_source_frames(
+                    source_path,
+                    source_asset_id=source.source_asset_id,
+                    duration_sec=source.duration_sec,
+                    output_dir=str(Path(whole_dir) / source.source_asset_id),
+                ))
+            whole_context = safe_whole_video_analyze(
+                whole_video_provider,
+                tuple(hydrated_sources),
+                transcript_tuple,
+                tuple(whole_samples),
+            )
+        if whole_context.status.status == "provider_error":
+            trace.degraded("whole_video_context", reason=whole_context.status.reason or "provider_error")
+        else:
+            trace.complete(
+                "whole_video_context",
+                status=whole_context.status.status,
+                source_count=len(whole_context.sources),
+                event_count=sum(len(item.events) for item in whole_context.sources),
+                frame_count=len(whole_samples),
+            )
+    else:
+        whole_context = safe_whole_video_analyze(None, tuple(hydrated_sources), transcript_tuple, ())
+        trace.complete("whole_video_context", status="not_requested", source_count=0, event_count=0, frame_count=0)
+    notify("analyzing", 43)
+
+    gaps = word_silence_gaps(transcript_tuple)
     trace.complete("silence_analysis", gap_count=len(gaps))
-    notify("analyzing", 48)
+    notify("analyzing", 49)
 
-    takes = segment_takes(transcripts, hydrated_sources, gaps)
+    takes = segment_takes(transcript_tuple, hydrated_sources, gaps)
     trace.complete("take_segmentation", candidate_count=len(takes))
     notify("analyzing", 58)
 
@@ -118,6 +156,7 @@ def process_local_sources(
         clean_cut_provider=clean_cut_provider,
         composer_provider=composer_provider,
         take_grouping_provider=take_grouping_provider,
+        whole_video_context=whole_context,
     )
     notify("draft_ready", 100)
     return replace(result, stage_status={**result.stage_status, **trace.as_dict()})
