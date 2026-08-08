@@ -7,13 +7,8 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 WORKDIR /app
 
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    ffmpeg \
-    git \
-    && rm -rf /var/lib/apt/lists/*
-
-COPY requirements.txt ./
-RUN pip install --upgrade pip && pip install -r requirements.txt
+COPY requirements.cutsell.api.txt ./
+RUN pip install --upgrade pip && pip install -r requirements.cutsell.api.txt
 
 COPY cutsell_worker ./cutsell_worker
 COPY cutsell_app ./cutsell_app
