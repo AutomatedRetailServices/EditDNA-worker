@@ -23,6 +23,7 @@ from .timeline_asset_storage import store_timeline_assets
 from .timeline_assets import generate_filmstrip, waveform_peaks
 from .uploads import validate_product_source_uri
 from .visual_openai import OpenAIVisualProvider
+from .whole_video_openai import OpenAIWholeVideoProvider
 
 
 def _build_timeline_assets(request, local_paths: dict[str, str], directory: str) -> dict[str, dict]:
@@ -106,6 +107,7 @@ def run_flow_b_job(payload: dict) -> dict:
     config = load_runtime_config()
     asr = FasterWhisperASR(model_name=config.asr_model)
     semantic = OpenAISemanticProvider(model=config.semantic_model) if config.semantic_ready else NoopSemanticProvider()
+    whole_video = OpenAIWholeVideoProvider(model=config.visual_model) if config.visual_ready else None
     visual = OpenAIVisualProvider(model=config.visual_model) if config.visual_ready else None
     take_grouping = OpenAITakeGroupingProvider(model=config.semantic_model) if config.semantic_ready else None
     take_judge = OpenAITakeJudgeProvider(model=config.take_judge_model) if config.semantic_ready else None
@@ -136,6 +138,7 @@ def run_flow_b_job(payload: dict) -> dict:
                 local_paths,
                 asr_provider=asr,
                 semantic_provider=semantic,
+                whole_video_provider=whole_video,
                 visual_provider=visual,
                 take_grouping_provider=take_grouping,
                 take_judge_provider=take_judge,
