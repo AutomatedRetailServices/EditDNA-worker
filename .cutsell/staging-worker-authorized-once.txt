@@ -1,0 +1,3 @@
+approval=APPROVE_PAID_STAGING_WORKER
+image=ghcr.io/automatedretailservices/cutsell-worker:f1bc3adc4f2f8df0ae005fa551116dc4d08b30e6
+cloud=SECURE
