@@ -5,6 +5,7 @@ def test_cutsell_render_blueprint_is_api_only_and_isolated_from_legacy_services(
     text = Path("render.cutsell.yaml").read_text()
     assert "name: cutsell-api" in text
     assert "uvicorn cutsell_app.main:app" in text
+    assert "requirements.cutsell.api.txt" in text
     assert "CUTSELL_AUTH_REQUIRED" in text
     assert 'value: "1"' in text
     assert "CUTSELL_CLEAN_CUT_JUDGE" in text
@@ -22,7 +23,25 @@ def test_cutsell_container_uses_clean_api_entrypoint():
     assert "cutsell_app.main:app" in text
     assert "COPY cutsell_worker" in text
     assert "COPY cutsell_app" in text
+    assert "requirements.cutsell.api.txt" in text
+    assert "requirements.txt" not in text.replace("requirements.cutsell.api.txt", "")
     assert "main:app" not in text.replace("cutsell_app.main:app", "")
+
+
+def test_cutsell_api_dependencies_do_not_pull_gpu_ml_stack():
+    text = Path("requirements.cutsell.api.txt").read_text().lower()
+    for forbidden in (
+        "faster-whisper",
+        "opencv",
+        "sentence-transformers",
+        "scikit-learn",
+        "moviepy",
+        "imageio-ffmpeg",
+        "clip.git",
+    ):
+        assert forbidden not in text
+    for required in ("fastapi", "uvicorn", "boto3", "redis", "rq"):
+        assert required in text
 
 
 def test_cutsell_gpu_worker_has_isolated_container_and_immutable_build_workflow():
