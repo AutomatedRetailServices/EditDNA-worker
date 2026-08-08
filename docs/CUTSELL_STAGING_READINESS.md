@@ -32,6 +32,7 @@ Snapshot for the clean `cutsell/mobile-v1-clean` release branch. This is evidenc
 - RunPod worker rollback gate passed: both the previous worker image and the current worker image booted, registered on the `cutsell` RQ queue, and were deleted after verification.
 - RunPod rollback cleanup finished with zero rollback Pods remaining; the rollback preflight also confirmed there was no persistent `cutsell-staging-worker` before the test.
 - Consumed one-shot staging, diagnostic, E2E, recovery, Render and worker rollback trigger workflows/markers were removed from the release checkpoint after successful verification.
+- Cleaned staging checkpoint `f591a4924db12ba299fa1c2656f08568162647b1` passed final Clean Worker CI and final iOS Simulator CI.
 
 ## Runtime defaults frozen for staging
 
@@ -52,9 +53,8 @@ Snapshot for the clean `cutsell/mobile-v1-clean` release branch. This is evidenc
 
 ## Still required before beta
 
-1. Re-run final Clean Worker CI and iOS CI on this cleaned release checkpoint.
-2. Apple Developer signing / App ID / provisioning / TestFlight setup.
-3. Physical iPhone beta checks: camera, Photos import, background multipart resume, app kill/resume, Flow B, playback/timeline, Swap Take, trim/split, overlays, captions, recovery, export, Save to Photos and share.
+1. Apple Developer signing / App ID / provisioning / TestFlight setup.
+2. Physical iPhone beta checks: camera, Photos import, background multipart resume, app kill/resume, Flow B, playback/timeline, Swap Take, trim/split, overlays, captions, recovery, export, Save to Photos and share.
 
 PR #25 remains Draft. Production deployment, final merge/release, repo deletion/archive and Apple/TestFlight actions still require explicit approval at their respective gates.
 
