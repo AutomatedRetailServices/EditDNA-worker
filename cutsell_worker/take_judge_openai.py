@@ -41,12 +41,19 @@ class OpenAITakeJudgeProvider:
                     "motion_stability": signals.motion_stability,
                     "continuity": signals.continuity,
                     "visual_fumble": signals.visual_fumble,
+                    "expression_naturalness": signals.expression_naturalness,
+                    "gesture_naturalness": signals.gesture_naturalness,
+                    "delivery_energy": signals.delivery_energy,
+                    "distraction_risk": signals.distraction_risk,
                 } if signals is not None else {}),
             })
         instruction = (
-            "Rank these alternate recordings of the same sales idea from strongest to weakest. "
-            "Prefer natural delivery, completeness, clarity, confident pacing, strong visual presentation, "
-            "low fumble/distraction, and sales effectiveness. Do not delete any candidate. "
+            "Rank alternate recordings of the same sales idea from strongest to weakest like a human TikTok Shop/UGC editor. "
+            "Use the combined Watch + Listen evidence. Prefer complete, natural speech; confident but authentic pacing; "
+            "clear audio; natural facial expression and gestures; appropriate energy; useful eye contact; strong product presentation; "
+            "stable framing; low visible distraction/fumble; and continuity that will cut cleanly with neighboring material. "
+            "Do not reward exaggerated performance merely for being energetic. Do not delete any candidate. "
+            "When evidence is close, preserve the more natural/complete take rather than over-optimizing a single metric. "
             "Return JSON only as {\"ranked\":[{\"id\":...,\"score\":0..1,\"reason\":...}]}. "
             "Include every candidate exactly once."
         )
