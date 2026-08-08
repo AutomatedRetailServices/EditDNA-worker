@@ -88,7 +88,9 @@ def load_runtime_config(env: dict[str, str] | None = None) -> RuntimeConfig:
         take_judge_model=values.get("CUTSELL_TAKE_JUDGE_MODEL", "gpt-4o-mini"),
         clean_cut_judge_model=values.get("CUTSELL_CLEAN_CUT_JUDGE_MODEL", "gpt-4o-mini"),
         clean_cut_judge_enabled=_env_bool(values, "CUTSELL_CLEAN_CUT_JUDGE", False),
-        max_source_minutes=max(1, _env_int(values, "CUTSELL_MAX_SOURCE_MINUTES", 30)),
+        # 0 means no product-facing hard duration cap. A positive value can be enabled
+        # later for a specific plan/infrastructure safety policy without changing code.
+        max_source_minutes=max(0, _env_int(values, "CUTSELL_MAX_SOURCE_MINUTES", 0)),
         max_concurrent_jobs_per_user=max(1, _env_int(values, "CUTSELL_MAX_CONCURRENT_JOBS_PER_USER", 2)),
         monthly_processing_minutes=max(1, _env_int(values, "CUTSELL_MONTHLY_PROCESSING_MINUTES", 300)),
     )
