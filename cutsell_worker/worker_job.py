@@ -17,6 +17,7 @@ from .providers import NoopSemanticProvider
 from .semantic_openai import OpenAISemanticProvider
 from .serde import request_from_dict, result_to_dict
 from .storage import download_source
+from .take_grouping_openai import OpenAITakeGroupingProvider
 from .take_judge_openai import OpenAITakeJudgeProvider
 from .timeline_asset_storage import store_timeline_assets
 from .timeline_assets import generate_filmstrip, waveform_peaks
@@ -106,6 +107,7 @@ def run_flow_b_job(payload: dict) -> dict:
     asr = FasterWhisperASR(model_name=config.asr_model)
     semantic = OpenAISemanticProvider(model=config.semantic_model) if config.semantic_ready else NoopSemanticProvider()
     visual = OpenAIVisualProvider(model=config.visual_model) if config.visual_ready else None
+    take_grouping = OpenAITakeGroupingProvider(model=config.semantic_model) if config.semantic_ready else None
     take_judge = OpenAITakeJudgeProvider(model=config.take_judge_model) if config.semantic_ready else None
     composer = OpenAIComposerProvider(model=config.semantic_model) if config.semantic_ready else None
     clean_cut_judge = (
@@ -135,6 +137,7 @@ def run_flow_b_job(payload: dict) -> dict:
                 asr_provider=asr,
                 semantic_provider=semantic,
                 visual_provider=visual,
+                take_grouping_provider=take_grouping,
                 take_judge_provider=take_judge,
                 clean_cut_provider=clean_cut_judge,
                 composer_provider=composer,
