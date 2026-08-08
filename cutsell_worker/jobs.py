@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from enum import Enum
 
 from .queueing import enqueue_export, enqueue_flow_b, get_queue
+from .usage_limits import release_processing_slot
 
 
 @dataclass(frozen=True)
@@ -17,13 +18,6 @@ class JobSnapshot:
 
 
 def _normalize_status(status: object) -> str:
-    """Return a stable public RQ status string across RQ versions.
-
-    Newer RQ releases may return a JobStatus enum whose ``str()`` is
-    ``JobStatus.FINISHED`` rather than the historical ``finished`` string.
-    CutSell's API contract must never leak that Python enum representation to
-    the iOS client or external callers.
-    """
     if isinstance(status, Enum):
         raw = status.value
     else:
@@ -63,8 +57,6 @@ def _job_payload(job) -> dict:
     args = tuple(getattr(job, "args", ()) or ())
     if len(args) == 1 and isinstance(args[0], dict):
         return dict(args[0])
-    # Batch wrapper args are not user payload dicts; ownership is enforced by the
-    # batch store/routes rather than this generic job API.
     return {}
 
 
@@ -110,7 +102,21 @@ def cancel_job(job_id: str, *, user_id: str | None = None, queue=None) -> JobSna
         return JobSnapshot(str(job.id), "finished", result=job.result)
     if status in {"failed", "stopped", "canceled", "cancelled"}:
         return JobSnapshot(str(job.id), _map_status(status))
+
+    meta = dict(getattr(job, "meta", {}) or {})
+    should_release = (
+        status in {"queued", "deferred", "scheduled"}
+        and bool(meta.get("cutsell_slot_reserved"))
+        and bool(meta.get("user_id"))
+    )
     job.cancel()
+    if should_release:
+        release_processing_slot(user_id=str(meta["user_id"]))
+        try:
+            job.meta["cutsell_slot_reserved"] = False
+            job.save_meta()
+        except Exception:
+            pass
     return JobSnapshot(str(job.id), "canceled")
 
 
