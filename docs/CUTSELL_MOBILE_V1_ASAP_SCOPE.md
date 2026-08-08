@@ -48,7 +48,7 @@ Flow A is built on top of the same engine and project/editor infrastructure afte
 A creator must be able to:
 
 1. Open CutSell on mobile.
-2. Record or upload one video OR select multiple clips.
+2. Record one source in CutSell OR upload one existing video OR select up to 10 gallery clips for one multi-clip project.
 3. Arrange multiple clips before processing.
 4. Send footage to CutSell.
 5. Leave the app while processing continues.
@@ -69,27 +69,77 @@ A creator must be able to:
 
 ## 4. Mobile Entry Flow
 
-### Home / Create
-Primary action: Create.
+### 4.1 Primary navigation benchmark
+V1 mobile should expose fast access to:
+- Create;
+- Cuts / Projects;
+- Batch;
+- Account / You.
 
-Creator chooses:
+This is a workflow benchmark, not a requirement to visually clone any competitor.
 
+### 4.2 Create / Camera
+The in-app camera is optimized for creator recording sessions, not unrestricted long-form capture.
+
+Required recording presets:
+- 60 seconds;
+- 3 minutes;
+- 10 minutes.
+
+Rules:
+- 10 minutes is the maximum duration of one in-app camera recording in V1;
+- recording automatically stops at the selected preset limit;
+- user may stop earlier at any time;
+- camera flip is required;
+- gallery access is available directly from the Create flow;
+- flash and common device zoom choices such as 0.5x / 1x are desirable when hardware supports them;
+- camera recordings use the same CutSell AI pipeline as imported footage.
+
+The camera limit is separate from imported-media duration policy.
+
+### 4.3 Gallery import
 #### Single clip
-Quickly edit one raw video.
+- select one existing video;
+- no arbitrary user-facing duration cap merely because the video comes from Photos;
+- the app may enforce file-size, device-resource, abuse-prevention, subscription, or infrastructure safety limits;
+- long imported videos must use resumable/background upload rather than requiring the app to remain open.
 
 #### Multiple clips
-Combine multiple source videos/takes into one edit.
+A project may select up to 10 existing gallery videos/clips in V1.
 
-For Multiple Clips:
+Required:
 - add clips;
 - remove clips;
 - drag to arrange;
-- display total duration;
+- add another clip until the 10-clip project limit is reached;
+- display each duration and total duration;
 - preserve source identity for every clip;
 - optional audio overlap setting;
 - Continue / Combine & Edit.
 
+The 10-item limit applies to the number of source clips in one multi-clip project, not to the duration of each imported gallery video.
+
 The user-provided order is treated as strong intent and preferred by the composer unless there is a clear reason to change it.
+
+### 4.4 Import-performance requirement
+Large or multiple gallery videos can take substantial time for iOS to materialize from Photos/iCloud before upload begins. CutSell must make that delay explicit and recoverable.
+
+Required UX states:
+- retrieving from Photos / iCloud;
+- preparing locally;
+- ready to upload;
+- uploading part N / total progress;
+- uploaded;
+- failed with retry/resume.
+
+Rules:
+- do not show a frozen screen while Photos/iCloud is materializing selected videos;
+- process/import files incrementally where practical instead of waiting for all selected videos to finish before showing useful progress;
+- preserve already imported/prepared items if another item is slow or fails;
+- avoid unnecessary full-file transcoding or duplication when the selected source is already compatible;
+- upload resumably in chunks;
+- allow safe background continuation/handoff where iOS permits it;
+- users must be able to leave and resume interrupted uploads without rebuilding the project.
 
 ---
 
@@ -135,6 +185,8 @@ Signals may include:
 
 Transcript-only editing is not sufficient for the final target engine.
 
+Whole-source temporal context should be observed before destructive local editing decisions so take-level judgments can be interpreted in the context of the full recording.
+
 ### 5.4 Take Segmentation
 Detect candidate takes and speech units while preserving:
 - source boundaries;
@@ -165,12 +217,7 @@ Must keep uncertain valid speech.
 Clean Cut must never delete content because it is not a Hook/CTA/Benefit/etc.
 
 ### 5.6 Take Groups
-Group valid attempts of the same semantic idea.
-
-Example:
-The creator says the same hook five times.
-
-The engine should create one Take Group containing five candidates, not five independent unrelated ideas.
+Group valid attempts of the same semantic idea, including retries with meaning-equivalent wording rather than requiring near-identical transcripts.
 
 ### 5.7 Best Take
 Rank valid alternatives using multimodal evidence.
@@ -183,12 +230,14 @@ Signals:
 - confidence;
 - pacing;
 - eye contact / engagement;
+- facial/gesture naturalness where observable;
 - visible distraction;
 - audio quality;
 - visual quality;
 - product presentation;
 - sales effectiveness;
-- continuity with neighboring clips.
+- continuity with neighboring clips;
+- whole-video context.
 
 Output:
 - one selected take;
@@ -243,8 +292,10 @@ Default behavior:
 - remove obvious warmup when a stronger opening exists;
 - allow repeated or missing commercial functions;
 - keep storytelling coherent;
+- use whole-video context when deciding whether a reorder actually improves coherence;
 - never force HOOK → PROBLEM → BENEFIT → PROOF → CTA;
-- do not automatically force CTA to the end.
+- do not automatically force CTA to the end;
+- never invent, duplicate, or silently drop creator speech while composing.
 
 Output is an editable Draft Timeline, not merely a final MP4.
 
@@ -339,9 +390,13 @@ Required:
 - direct/resumable multipart upload;
 - retry interrupted chunks;
 - support background handoff where platform allows;
-- client-side video preparation/compression when needed;
+- progressive retrieval/preparation UX for media selected from Photos/iCloud;
+- client-side video preparation/compression only when needed;
+- avoid unnecessary full transcoding when the source is already compatible;
 - preserve original metadata safely;
-- clear visible upload state.
+- clear visible import and upload state.
+
+Imported gallery videos do not have an arbitrary product-facing duration cap in V1. Safety may still be enforced using file-size, account usage, concurrency, infrastructure, abuse-prevention, and plan entitlements.
 
 ### Processing
 Required states:
@@ -368,6 +423,7 @@ After upload is safely handed off:
 ### Recovery
 Required:
 - draft is never lost on app termination;
+- Photos/iCloud import state should preserve successfully materialized items where feasible;
 - upload can resume;
 - failed processing can be retried;
 - failed render does not destroy draft;
@@ -417,6 +473,8 @@ Each user only accesses their own projects and media.
 
 Signed/expiring media URLs required.
 
+Project deletion must remove owned project media/artifacts and recoverable state. Account deletion must remove known account/project data and revoke active indexed sessions.
+
 ---
 
 ## 11. Batch / High-Output Creator Mode
@@ -430,7 +488,7 @@ Initial batch:
 - failures do not block remaining items;
 - reopen finished cuts individually.
 
-Batch combining multiple clips into one project uses the Multiple Clips flow, not the batch-processing queue.
+Batch's 10-item limit is separate from Multiple Clips: Batch processes up to 10 independent projects/videos, while Multiple Clips combines up to 10 source clips into one project.
 
 ---
 
@@ -459,7 +517,21 @@ Human evaluation of finished cuts is more important than isolated model scores.
 
 ---
 
-## 13. Flow A — Phase 2 on Same Platform
+## 13. Commercial Safety / Usage Foundation
+
+V1 commercial architecture must support:
+- per-user processing concurrency limits;
+- usage metering based on measured media, not only client-reported duration;
+- monthly/plan usage entitlements when durable account storage is activated;
+- file-size and abuse-prevention guardrails;
+- operational telemetry hooks;
+- durable account/project storage as a separate source of truth from Redis when a production database is activated.
+
+These safeguards must not be exposed as an arbitrary gallery-video duration cap unless a specific product plan intentionally defines one.
+
+---
+
+## 14. Flow A — Phase 2 on Same Platform
 
 Flow A is retained but must not delay Flow B launch.
 
@@ -489,7 +561,7 @@ Complex skit automation may follow after initial Flow A.
 
 ---
 
-## 14. Variants — Competitive Differentiator
+## 15. Variants — Competitive Differentiator
 
 Once a project contains enough valid material, CutSell can generate multiple sales edits without re-recording.
 
@@ -508,7 +580,7 @@ Do not generate variants by creating fake speech or rearranging content into inc
 
 ---
 
-## 15. What Is NOT a V1 Launch Blocker
+## 16. What Is NOT a V1 Launch Blocker
 
 Defer unless required by testing:
 - full CapCut-level keyframe system;
@@ -525,7 +597,7 @@ Defer unless required by testing:
 
 ---
 
-## 16. Technical Build Doctrine for the New Worker
+## 17. Technical Build Doctrine for the New Worker
 
 Do not reproduce the oversized legacy pipeline.
 
@@ -537,7 +609,7 @@ The new engine should use small modules with explicit ownership:
 4. silence_analysis
 5. take_segmentation
 6. clean_cut
-7. visual_analysis
+7. whole_video_context / visual_analysis
 8. semantic_analysis
 9. take_grouping
 10. take_judge
@@ -561,7 +633,7 @@ Rules:
 
 ---
 
-## 17. Build / Delivery Order — ASAP
+## 18. Build / Delivery Order — ASAP
 
 ### Milestone 0 — Foundation
 Deliver:
@@ -578,6 +650,7 @@ Deliver:
 - upload one/multiple videos;
 - ASR;
 - Watch + Listen signals;
+- whole-video temporal context;
 - take segmentation;
 - Clean Cut;
 - Take Groups;
@@ -608,6 +681,10 @@ Deliver:
 
 ### Milestone 3 — Reliable Product
 Deliver:
+- camera recording presets up to 10 minutes;
+- up to 10 gallery clips per multi-clip project;
+- no arbitrary gallery-video duration cap;
+- progressive Photos/iCloud preparation UX;
 - resumable uploads;
 - projects;
 - draft recovery;
@@ -615,15 +692,17 @@ Deliver:
 - push completion notifications;
 - reliable render/re-render;
 - secure media URLs;
+- project/account deletion lifecycle;
+- usage/concurrency protection;
 - feedback 👍/👎;
-- basic subscriptions/usage limits.
+- subscription/usage entitlement foundation.
 
 ### Milestone 4 — Beta Launch
 Deliver:
 - 1080p reliable export;
 - English/Spanish validation;
 - real-video benchmark;
-- crash/error instrumentation;
+- crash/error instrumentation hooks;
 - closed TestFlight beta;
 - creator feedback loop.
 
@@ -644,11 +723,15 @@ Deliver:
 
 ---
 
-## 18. V1 Acceptance Criteria
+## 19. V1 Acceptance Criteria
 
 The V1 beta can ship when:
 
-- one and multiple clip intake work reliably;
+- single clip intake works reliably;
+- multi-clip projects accept and recover up to 10 source clips;
+- in-app camera presets 60s / 3m / 10m work and stop safely at the selected maximum;
+- imported gallery footage is not rejected solely by an arbitrary product-facing duration cap;
+- Photos/iCloud retrieval and preparation show useful progress rather than appearing frozen;
 - uploads resume after normal mobile interruption;
 - AI processing continues in background;
 - dead air and obvious fumbles are removed reliably;
@@ -662,16 +745,20 @@ The V1 beta can ship when:
 - audio remains synchronized and no words bleed/duplicate across cuts;
 - 1080p export is sharp and reliable;
 - project can be reopened later;
+- project/account deletion flows work;
+- usage/concurrency limits fail safely;
 - errors and AI fallbacks are observable;
 - English and Spanish real-world sessions pass human review;
 - thumbs up/down feedback is captured.
 
 ---
 
-## 19. North-Star User Experience
+## 20. North-Star User Experience
 
 The user should feel:
 
-"I dump my ugly TikTok Shop footage into CutSell, it understands what I was trying to say, chooses the best delivery, cleans the mess, gives me a strong sales edit, and I can fix anything else in seconds without opening another editor."
+"I can record quickly or throw my existing sales footage into CutSell, leave the app, come back to an intelligent first edit, and finish it without fighting the tool."
 
-That is the V1 product standard.
+For imported media, CutSell should not punish creators for long raw footage with an arbitrary visible duration cap; it should make large-file retrieval, preparation, upload and processing transparent and recoverable.
+
+For camera capture, CutSell should optimize deliberate creator sessions with clear 60s / 3m / 10m recording presets rather than acting like an unlimited long-form camera.
