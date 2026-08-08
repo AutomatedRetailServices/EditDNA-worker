@@ -21,7 +21,11 @@ def check_processing_allowance(*, user_id: str, durations_sec: list[float]) -> U
     config = load_runtime_config()
     requested_sec = sum(max(0.0, float(item or 0.0)) for item in durations_sec)
     requested_minutes = requested_sec / 60.0
-    if requested_minutes > float(config.max_source_minutes):
+
+    # Product default: imported gallery footage has no arbitrary visible duration cap.
+    # A positive CUTSELL_MAX_SOURCE_MINUTES can still be enabled later for a specific
+    # plan/infrastructure safety policy.
+    if config.max_source_minutes > 0 and requested_minutes > float(config.max_source_minutes):
         return UsageDecision(
             False,
             "source_duration_limit",
