@@ -19,6 +19,10 @@ class VisualObservation:
     motion_stability: float = 0.5
     continuity: float = 0.5
     visual_fumble: float = 0.0
+    expression_naturalness: float = 0.5
+    gesture_naturalness: float = 0.5
+    delivery_energy: float = 0.5
+    distraction_risk: float = 0.0
 
 
 @dataclass(frozen=True)
@@ -80,6 +84,10 @@ def apply_visual_observations(
             motion_stability=observation.motion_stability,
             continuity=observation.continuity,
             visual_fumble=observation.visual_fumble,
+            expression_naturalness=observation.expression_naturalness,
+            gesture_naturalness=observation.gesture_naturalness,
+            delivery_energy=observation.delivery_energy,
+            distraction_risk=observation.distraction_risk,
         )
         output.append(replace(take, signals=signals))
     return tuple(output)
