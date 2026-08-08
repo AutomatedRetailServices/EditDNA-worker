@@ -1,0 +1,165 @@
+name: CutSell Staging E2E Once
+
+on:
+  push:
+    branches:
+      - cutsell/mobile-v1-clean
+    paths:
+      - ".cutsell/staging-e2e-once.txt"
+
+permissions:
+  contents: read
+
+jobs:
+  staging-e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      API_BASE: https://cutsell-api.onrender.com
+      RUNPOD_API_KEY: ${{ secrets.RUNPOD_API_KEY }}
+      RUNPOD_TEMPLATE_NAME: EditDNA-Worker-2
+      SOURCE_KEY: Editdna bloopers videos/Bloppers15.mp4
+    steps:
+      - uses: actions/checkout@v4
+      - name: Require one-shot E2E marker
+        run: grep -qx 'run=staging-e2e' .cutsell/staging-e2e-once.txt
+
+      - name: Install E2E tools and load S3 credentials
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update >/dev/null
+          sudo apt-get install -y ffmpeg >/dev/null
+          python -m pip install --quiet requests boto3
+          curl --fail --silent --show-error --url 'https://rest.runpod.io/v1/templates' --header "Authorization: Bearer $RUNPOD_API_KEY" --output templates.json
+          TEMPLATE=$(jq -c --arg name "$RUNPOD_TEMPLATE_NAME" '[.[] | select(.name == $name)][0]' templates.json)
+          test "$TEMPLATE" != "null"
+          for key in AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_REGION S3_BUCKET; do
+            value=$(printf '%s' "$TEMPLATE" | jq -r --arg key "$key" '.env[$key] // empty')
+            test -n "$value" || { echo "$key missing from template vault"; exit 3; }
+            echo "::add-mask::$value"
+            printf '%s=%s\n' "$key" "$value" >> "$GITHUB_ENV"
+          done
+
+      - name: Prepare bounded real-video source
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import os,boto3
+          boto3.client('s3',region_name=os.environ.get('AWS_REGION') or 'us-east-1').download_file(os.environ['S3_BUCKET'],os.environ['SOURCE_KEY'],'source.mp4')
+          PY
+          ffmpeg -hide_banner -loglevel error -y -i source.mp4 -t 35 -c:v libx264 -preset veryfast -crf 24 -c:a aac -movflags +faststart e2e.mp4
+          test -s e2e.mp4
+          ffprobe -v error -show_entries format=duration -of default=nk=1:nw=1 e2e.mp4 > duration.txt
+          echo "Prepared E2E clip: $(stat -c%s e2e.mp4) bytes, $(cat duration.txt)s"
+
+      - name: Run public API to GPU worker to export E2E
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json, os, time, uuid, requests, boto3
+          from urllib.parse import urlparse
+
+          base=os.environ['API_BASE'].rstrip('/')
+          project='staging-e2e-'+uuid.uuid4().hex[:12]
+          video_path='e2e.mp4'
+          size=os.path.getsize(video_path)
+          duration=float(open('duration.txt').read().strip())
+
+          def expect(resp, codes=(200,)):
+              if resp.status_code not in codes:
+                  raise RuntimeError(f'{resp.request.method} {resp.url} -> {resp.status_code}: {resp.text[:1000]}')
+              return resp
+
+          health=expect(requests.get(base+'/v1/healthz',timeout=20)).json()
+          assert health['ok'] and health['queue_ready'] and health['storage_ready'] and health['semantic_ready'], health
+          print('HEALTH',json.dumps(health,sort_keys=True))
+
+          session=expect(requests.post(base+'/v1/auth/session',timeout=20)).json()
+          user=session['user_id']; token=session['access_token']
+          headers={'Authorization':'Bearer '+token}
+          print('AUTH user',user,'project',project)
+
+          presign=expect(requests.post(base+'/v1/uploads/presign',headers=headers,json={
+              'project_id':project,'user_id':user,'original_name':'staging-e2e.mp4','content_type':'video/mp4','size_bytes':size
+          },timeout=30)).json()
+          with open(video_path,'rb') as fh:
+              up=requests.post(presign['upload_url'],data=presign['fields'],files={'file':('staging-e2e.mp4',fh,'video/mp4')},timeout=180)
+          if up.status_code not in (200,201,204):
+              raise RuntimeError(f'S3 upload -> {up.status_code}: {up.text[:1000]}')
+          source_uri=presign['source_uri']
+          print('UPLOAD',source_uri)
+
+          flow=expect(requests.post(base+'/v1/flow-b/jobs',headers=headers,json={
+              'project_id':project,'user_id':user,'sources':[{'original_name':'staging-e2e.mp4','uri':source_uri,'source_order':0,'duration_sec':duration}],
+              'language_hint':'en','audio_overlap':False
+          },timeout=30),(202,)).json()
+          job_id=flow['job_id']; print('FLOW_JOB',job_id)
+
+          deadline=time.time()+900
+          last=None
+          while time.time()<deadline:
+              snap=expect(requests.get(base+f'/v1/jobs/{job_id}',headers=headers,timeout=20)).json()
+              marker=(snap.get('state'),snap.get('progress'))
+              if marker!=last:
+                  print('FLOW_STATUS',marker); last=marker
+              if snap.get('state')=='finished': break
+              if snap.get('state') in ('failed','canceled'):
+                  raise RuntimeError('Flow B ended '+json.dumps(snap))
+              time.sleep(8)
+          else: raise RuntimeError('Flow B timeout')
+
+          recovered=expect(requests.get(base+f'/v1/projects/{project}/draft',headers=headers,params={'user_id':user},timeout=30)).json()
+          assert recovered['revision']==1, recovered.get('revision')
+          draft=recovered['draft']
+          assert draft.get('selected'), 'AI draft has no selected clips'
+          first=draft['selected'][0]
+          clip_id=first['clip_id']
+          print('DRAFT selected',len(draft['selected']),'alternates',len(draft.get('alternates') or []),'discarded',len(draft.get('discarded') or []))
+
+          edited=expect(requests.post(base+'/v1/draft-edits/audio',headers=headers,json={'draft':draft,'clip_id':clip_id,'muted':True},timeout=30)).json()
+          saved=expect(requests.put(base+f'/v1/projects/{project}/draft',headers=headers,json={'user_id':user,'expected_revision':1,'draft':edited},timeout=30)).json()
+          assert saved['revision']==2, saved.get('revision')
+          recovered2=expect(requests.get(base+f'/v1/projects/{project}/draft',headers=headers,params={'user_id':user},timeout=30)).json()
+          assert recovered2['revision']==2
+          edited_clip=next(c for c in recovered2['draft']['selected'] if c['clip_id']==clip_id)
+          assert edited_clip.get('muted') is True, edited_clip
+          print('EDIT_AUTOSAVE revision',recovered2['revision'],'muted',edited_clip.get('muted'))
+
+          sources=[{'source_asset_id':s['source_asset_id'],'original_name':s['original_name'],'uri':s['uri']} for s in recovered2['sources']]
+          export=expect(requests.post(base+'/v1/exports/jobs',headers=headers,json={'project_id':project,'user_id':user,'draft':recovered2['draft'],'sources':sources},timeout=30),(202,)).json()
+          export_id=export['job_id']; print('EXPORT_JOB',export_id)
+          deadline=time.time()+600; last=None; result=None
+          while time.time()<deadline:
+              snap=expect(requests.get(base+f'/v1/jobs/{export_id}',headers=headers,timeout=20)).json()
+              marker=(snap.get('state'),snap.get('progress'))
+              if marker!=last:
+                  print('EXPORT_STATUS',marker); last=marker
+              if snap.get('state')=='finished': result=snap.get('result'); break
+              if snap.get('state') in ('failed','canceled'):
+                  raise RuntimeError('Export ended '+json.dumps(snap))
+              time.sleep(5)
+          else: raise RuntimeError('Export timeout')
+          assert isinstance(result,dict), result
+          assert result.get('state')=='finished',result
+          assert int(result.get('size_bytes') or 0)>0,result
+          assert str(result.get('export_uri') or '').startswith('s3://'),result
+          dl=requests.get(result['download_url'],timeout=120)
+          assert dl.status_code==200 and len(dl.content)==int(result['size_bytes']), (dl.status_code,len(dl.content),result['size_bytes'])
+          open('e2e-export.mp4','wb').write(dl.content)
+          print('EXPORT_OK',result['export_uri'],result['size_bytes'])
+
+          # Remove only temporary E2E source/export S3 objects after byte-level validation.
+          s3=boto3.client('s3',region_name=os.environ.get('AWS_REGION') or 'us-east-1')
+          for uri in (source_uri,result['export_uri']):
+              p=urlparse(uri); s3.delete_object(Bucket=p.netloc,Key=p.path.lstrip('/'))
+          print('E2E_PASS',json.dumps({'project_id':project,'flow_job_id':job_id,'export_job_id':export_id,'selected_count':len(draft['selected']),'export_size_bytes':result['size_bytes']},sort_keys=True))
+          PY
+
+      - name: Validate exported MP4 locally
+        run: |
+          set -euo pipefail
+          test -s e2e-export.mp4
+          ffprobe -v error -show_entries format=duration,size -of json e2e-export.mp4
