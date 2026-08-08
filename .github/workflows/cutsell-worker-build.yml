@@ -2,11 +2,6 @@ name: Build CutSell GPU Worker Image
 
 on:
   workflow_dispatch:
-  push:
-    branches:
-      - cutsell/mobile-v1-asap-scope
-    paths:
-      - ".cutsell/cutsell-worker-build-trigger.txt"
 
 jobs:
   docker:
