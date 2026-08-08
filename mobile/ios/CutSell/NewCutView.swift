@@ -22,6 +22,8 @@ struct NewCutView: View {
     @State private var statusText = ""
     @State private var errorMessage: String?
     @State private var showCamera = false
+    @State private var isImportingFromPhotos = false
+    @State private var importStatusText = ""
 
     private let resumeProjectID: String?
     private let maxMultiClipSources = 10
@@ -44,7 +46,7 @@ struct NewCutView: View {
                         ForEach(Mode.allCases) { Text($0.rawValue).tag($0) }
                     }
                     .pickerStyle(.segmented)
-                    .disabled(resumeProjectID != nil)
+                    .disabled(resumeProjectID != nil || isImportingFromPhotos)
                     TextField("Project name (optional)", text: $title)
                         .disabled(resumeProjectID != nil)
                     if resumeProjectID != nil {
@@ -58,7 +60,7 @@ struct NewCutView: View {
                     Button { showCamera = true } label: {
                         Label("Record in CutSell", systemImage: "camera.fill")
                     }
-                    .disabled(resumeProjectID != nil || (mode == .multiple && selected.count >= maxMultiClipSources))
+                    .disabled(resumeProjectID != nil || isImportingFromPhotos || (mode == .multiple && selected.count >= maxMultiClipSources))
 
                     PhotosPicker(
                         selection: $pickerItems,
@@ -67,10 +69,19 @@ struct NewCutView: View {
                     ) {
                         Label(selected.isEmpty ? "Choose from Photos" : "Add from Photos", systemImage: "photo.on.rectangle")
                     }
-                    .disabled(resumeProjectID != nil || (mode == .multiple && selected.count >= maxMultiClipSources))
+                    .disabled(resumeProjectID != nil || isImportingFromPhotos || (mode == .multiple && selected.count >= maxMultiClipSources))
                     .onChange(of: pickerItems) { _, items in Task { await load(items) } }
 
-                    if selected.isEmpty {
+                    if isImportingFromPhotos {
+                        HStack(spacing: 10) {
+                            ProgressView()
+                            Text(importStatusText)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+
+                    if selected.isEmpty && !isImportingFromPhotos {
                         Text("Record here or choose existing footage. Both use the same CutSell AI edit pipeline.")
                             .font(.caption)
                             .foregroundStyle(.secondary)
@@ -93,11 +104,11 @@ struct NewCutView: View {
                         }
                     }
                     .onMove { source, destination in
-                        guard resumeProjectID == nil else { return }
+                        guard resumeProjectID == nil && !isImportingFromPhotos else { return }
                         selected.move(fromOffsets: source, toOffset: destination)
                     }
                     .onDelete {
-                        guard resumeProjectID == nil else { return }
+                        guard resumeProjectID == nil && !isImportingFromPhotos else { return }
                         selected.remove(atOffsets: $0)
                     }
                 }
@@ -119,14 +130,14 @@ struct NewCutView: View {
                     }
                 }
             }
-            .environment(\.editMode, .constant(mode == .multiple && resumeProjectID == nil ? .active : .inactive))
+            .environment(\.editMode, .constant(mode == .multiple && resumeProjectID == nil && !isImportingFromPhotos ? .active : .inactive))
             .navigationTitle(resumeProjectID == nil ? "New Cut" : "Resume Cut")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
                 ToolbarItem(placement: .confirmationAction) {
                     Button(resumeProjectID == nil ? "Create" : "Resume") { Task { await submit() } }
-                        .disabled(selected.isEmpty || isSubmitting)
+                        .disabled(selected.isEmpty || isSubmitting || isImportingFromPhotos)
                 }
             }
             .fullScreenCover(isPresented: $showCamera) {
@@ -161,32 +172,56 @@ struct NewCutView: View {
         }
     }
 
+    @MainActor
     private func load(_ items: [PhotosPickerItem]) async {
-        do {
-            var output: [LocalVideo] = []
-            let available = mode == .single ? 1 : max(0, maxMultiClipSources - selected.count)
-            for (index, item) in items.prefix(available).enumerated() {
-                guard let imported = try await item.loadTransferable(type: ImportedVideoFile.self) else { continue }
+        let available = mode == .single ? 1 : max(0, maxMultiClipSources - selected.count)
+        let requested = Array(items.prefix(available))
+        guard !requested.isEmpty else {
+            pickerItems = []
+            return
+        }
+
+        isImportingFromPhotos = true
+        defer {
+            isImportingFromPhotos = false
+            importStatusText = ""
+            pickerItems = []
+        }
+
+        var failures = 0
+        for (index, item) in requested.enumerated() {
+            importStatusText = "Retrieving \(index + 1) of \(requested.count) from Photos / iCloud…"
+            do {
+                guard let imported = try await item.loadTransferable(type: ImportedVideoFile.self) else {
+                    failures += 1
+                    continue
+                }
                 let asset = AVURLAsset(url: imported.url)
                 let seconds = try await asset.load(.duration).seconds
                 let type = item.supportedContentTypes.first(where: { $0.conforms(to: .movie) })
                 let contentType = type?.preferredMIMEType ?? videoContentType(for: imported.url)
-                output.append(LocalVideo(
+                let clip = LocalVideo(
                     url: imported.url,
-                    name: "Video \(index + 1)",
+                    name: "Video \(selected.count + 1)",
                     duration: max(0, seconds),
                     contentType: contentType
-                ))
+                )
+                if mode == .single {
+                    selected = [clip]
+                    break
+                }
+                if selected.count < maxMultiClipSources {
+                    selected.append(clip)
+                }
+            } catch {
+                failures += 1
             }
-            if mode == .single {
-                selected = Array(output.prefix(1))
-            } else {
-                selected.append(contentsOf: output)
-                selected = Array(selected.prefix(maxMultiClipSources))
-            }
-            pickerItems = []
-        } catch {
-            errorMessage = error.localizedDescription
+        }
+
+        if failures > 0 {
+            errorMessage = failures == 1
+                ? "One selected video could not be retrieved. The videos already loaded were kept."
+                : "\(failures) selected videos could not be retrieved. The videos already loaded were kept."
         }
     }
 
