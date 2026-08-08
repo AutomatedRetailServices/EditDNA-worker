@@ -31,8 +31,8 @@ def check_processing_allowance(*, user_id: str, durations_sec: list[float]) -> U
 
     if config.database_url:
         try:
-            from .commercial_store import usage_total
-            used = usage_total(config.database_url, user_id=user_id, event_type="processing_minutes")
+            from .commercial_usage import monthly_usage_total
+            used = monthly_usage_total(config.database_url, user_id=user_id, event_type="processing_minutes")
             limit = float(config.monthly_processing_minutes)
             if used + requested_minutes > limit:
                 return UsageDecision(False, "monthly_processing_limit", requested_minutes, used, limit)
