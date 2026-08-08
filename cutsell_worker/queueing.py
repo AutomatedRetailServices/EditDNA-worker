@@ -4,6 +4,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from .config import load_runtime_config
+from .usage_limits import release_processing_slot, reserve_processing_slot
 
 
 @dataclass(frozen=True)
@@ -23,15 +24,30 @@ def get_queue(name: str = "cutsell"):
 
 
 def enqueue_flow_b(payload: dict, *, queue=None, timeout: int = 3600) -> QueueSubmission:
-    target = queue or get_queue()
-    job = target.enqueue(
-        "cutsell_worker.worker_job.run_flow_b_job",
-        payload,
-        job_timeout=timeout,
-        result_ttl=86400,
-        failure_ttl=86400,
-    )
-    return QueueSubmission(job_id=str(job.id), queue_name=str(getattr(target, "name", "cutsell")))
+    user_id = str(payload.get("user_id") or "")
+    if not user_id:
+        raise ValueError("Flow B payload requires user_id")
+    slot = reserve_processing_slot(user_id=user_id)
+    if not slot.get("allowed"):
+        raise RuntimeError("processing_concurrency_limit")
+    try:
+        target = queue or get_queue()
+        job = target.enqueue(
+            "cutsell_worker.worker_job.run_flow_b_job",
+            payload,
+            job_timeout=timeout,
+            result_ttl=86400,
+            failure_ttl=86400,
+            meta={
+                "user_id": user_id,
+                "project_id": str(payload.get("project_id") or ""),
+                "cutsell_slot_reserved": True,
+            },
+        )
+        return QueueSubmission(job_id=str(job.id), queue_name=str(getattr(target, "name", "cutsell")))
+    except Exception:
+        release_processing_slot(user_id=user_id)
+        raise
 
 
 def enqueue_export(payload: dict, *, queue=None, timeout: int = 3600) -> QueueSubmission:
@@ -42,6 +58,10 @@ def enqueue_export(payload: dict, *, queue=None, timeout: int = 3600) -> QueueSu
         job_timeout=timeout,
         result_ttl=86400,
         failure_ttl=86400,
+        meta={
+            "user_id": str(payload.get("user_id") or ""),
+            "project_id": str(payload.get("project_id") or ""),
+        },
     )
     return QueueSubmission(job_id=str(job.id), queue_name=str(getattr(target, "name", "cutsell")))
 
@@ -58,5 +78,6 @@ def enqueue_batch_item(
         job_timeout=timeout,
         result_ttl=86400,
         failure_ttl=86400,
+        meta={"user_id": user_id, "batch_id": batch_id, "batch_index": int(index)},
     )
     return QueueSubmission(job_id=str(job.id), queue_name=str(getattr(target, "name", "cutsell")))
