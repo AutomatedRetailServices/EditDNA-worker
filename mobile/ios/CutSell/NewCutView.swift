@@ -24,6 +24,7 @@ struct NewCutView: View {
     @State private var showCamera = false
 
     private let resumeProjectID: String?
+    private let maxMultiClipSources = 10
 
     init(pending: PendingCutRecord? = nil) {
         resumeProjectID = pending?.projectID
@@ -57,20 +58,24 @@ struct NewCutView: View {
                     Button { showCamera = true } label: {
                         Label("Record in CutSell", systemImage: "camera.fill")
                     }
-                    .disabled(resumeProjectID != nil)
+                    .disabled(resumeProjectID != nil || (mode == .multiple && selected.count >= maxMultiClipSources))
 
                     PhotosPicker(
                         selection: $pickerItems,
-                        maxSelectionCount: mode == .single ? 1 : 20,
+                        maxSelectionCount: mode == .single ? 1 : max(1, maxMultiClipSources - selected.count),
                         matching: .videos
                     ) {
                         Label(selected.isEmpty ? "Choose from Photos" : "Add from Photos", systemImage: "photo.on.rectangle")
                     }
-                    .disabled(resumeProjectID != nil)
+                    .disabled(resumeProjectID != nil || (mode == .multiple && selected.count >= maxMultiClipSources))
                     .onChange(of: pickerItems) { _, items in Task { await load(items) } }
 
                     if selected.isEmpty {
                         Text("Record here or choose existing footage. Both use the same CutSell AI edit pipeline.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    } else if mode == .multiple {
+                        Text("\(selected.count) of \(maxMultiClipSources) clips selected")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
@@ -144,7 +149,13 @@ struct NewCutView: View {
                 duration: max(0, seconds),
                 contentType: "video/quicktime"
             )
-            if mode == .single { selected = [clip] } else { selected.append(clip) }
+            if mode == .single {
+                selected = [clip]
+            } else if selected.count < maxMultiClipSources {
+                selected.append(clip)
+            } else {
+                errorMessage = "A CutSell multi-clip project can contain up to \(maxMultiClipSources) source clips."
+            }
         } catch {
             errorMessage = error.localizedDescription
         }
@@ -153,7 +164,8 @@ struct NewCutView: View {
     private func load(_ items: [PhotosPickerItem]) async {
         do {
             var output: [LocalVideo] = []
-            for (index, item) in items.enumerated() {
+            let available = mode == .single ? 1 : max(0, maxMultiClipSources - selected.count)
+            for (index, item) in items.prefix(available).enumerated() {
                 guard let imported = try await item.loadTransferable(type: ImportedVideoFile.self) else { continue }
                 let asset = AVURLAsset(url: imported.url)
                 let seconds = try await asset.load(.duration).seconds
@@ -166,7 +178,13 @@ struct NewCutView: View {
                     contentType: contentType
                 ))
             }
-            if mode == .single { selected = Array(output.prefix(1)) } else { selected.append(contentsOf: output) }
+            if mode == .single {
+                selected = Array(output.prefix(1))
+            } else {
+                selected.append(contentsOf: output)
+                selected = Array(selected.prefix(maxMultiClipSources))
+            }
+            pickerItems = []
         } catch {
             errorMessage = error.localizedDescription
         }
