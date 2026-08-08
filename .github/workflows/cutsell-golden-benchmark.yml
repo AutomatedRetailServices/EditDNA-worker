@@ -27,6 +27,11 @@ on:
         description: "Optional comma-separated exact S3 keys"
         required: false
         default: ""
+  push:
+    branches:
+      - cutsell/mobile-v1-clean
+    paths:
+      - .github/cutsell-golden-trigger.txt
 
 permissions:
   contents: read
@@ -44,15 +49,15 @@ jobs:
       S3_BUCKET: ${{ secrets.S3_BUCKET }}
       OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
       CUTSELL_VALIDATION_PREFIX: Editdna bloopers videos/
-      CUTSELL_ASR_MODEL: ${{ inputs.asr_model }}
+      CUTSELL_ASR_MODEL: ${{ inputs.asr_model || 'medium' }}
       CUTSELL_CLEAN_CUT_JUDGE: "0"
       CUTSELL_SEMANTIC_MODEL: gpt-4o-mini
       CUTSELL_VISUAL_MODEL: gpt-4o-mini
       CUTSELL_TAKE_JUDGE_MODEL: gpt-4o-mini
-      VIDEO_LIMIT: ${{ inputs.video_limit }}
-      BENCHMARK_MODE: ${{ inputs.mode }}
-      WINDOW_SEC: ${{ inputs.window_sec }}
-      SOURCE_KEYS: ${{ inputs.source_keys }}
+      VIDEO_LIMIT: ${{ inputs.video_limit || '8' }}
+      BENCHMARK_MODE: ${{ inputs.mode || 'full' }}
+      WINDOW_SEC: ${{ inputs.window_sec || '60' }}
+      SOURCE_KEYS: ${{ inputs.source_keys || '' }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
