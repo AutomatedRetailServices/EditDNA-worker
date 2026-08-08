@@ -10,10 +10,10 @@ import hashlib
 from typing import Any
 
 from .auth import revoke_all_sessions, session_index_key
-from .batch import batch_key
 from .config import load_runtime_config
 from .draft_store import draft_key
 from .exports import EXPORT_PREFIX
+from .feedback import FEEDBACK_PREFIX
 from .notifications import notification_key
 from .overlay_uploads import OVERLAY_PREFIX
 from .project_store import get_project, list_projects, project_index_key, project_key
@@ -37,6 +37,7 @@ def _project_prefixes(*, user_id: str, project_id: str) -> tuple[str, ...]:
         f"{OVERLAY_PREFIX}{user16}/{project16}/",
         f"{ASSET_PREFIX}{user16}/{project16}/",
         f"{EXPORT_PREFIX}{user16}/{project16}/",
+        f"{FEEDBACK_PREFIX}{user16}/{project16}/",
     )
 
 
@@ -65,7 +66,6 @@ def _delete_s3_prefix(client, *, bucket: str, prefix: str) -> int:
 
 def delete_project_data(*, user_id: str, project_id: str, redis_client=None, s3_client=None) -> dict[str, Any]:
     """Delete one owned project and all known project-scoped media/artifacts."""
-    # Ownership check must happen before destructive operations.
     get_project(user_id=user_id, project_id=project_id, client=redis_client)
     config = load_runtime_config()
 
@@ -138,7 +138,6 @@ def delete_account_data(*, user_id: str, redis_client=None, s3_client=None) -> d
     pipe.delete(project_index_key(user_id=user_id))
     pipe.delete(notification_key(user_id))
     pipe.delete(session_index_key(user_id))
-    # Remove any batch records under the same user hash without touching other users.
     for key in redis_client.scan_iter(match=f"cutsell:v1:batch:{_scope20(user_id)}:*"):
         pipe.delete(key)
     pipe.execute()
