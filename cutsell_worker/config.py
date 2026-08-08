@@ -15,9 +15,18 @@ def _env_bool(values: dict[str, str], key: str, default: bool = False) -> bool:
     return str(raw).strip().lower() in {"1", "true", "yes", "on"}
 
 
+def _env_int(values: dict[str, str], key: str, default: int) -> int:
+    try:
+        return int(values.get(key, default))
+    except (TypeError, ValueError):
+        return default
+
+
 @dataclass(frozen=True)
 class RuntimeConfig:
     redis_url: str | None
+    database_url: str | None
+    sentry_dsn_present: bool
     openai_api_key_present: bool
     aws_access_key_present: bool
     aws_secret_key_present: bool
@@ -31,6 +40,9 @@ class RuntimeConfig:
     take_judge_model: str
     clean_cut_judge_model: str
     clean_cut_judge_enabled: bool
+    max_source_minutes: int
+    max_concurrent_jobs_per_user: int
+    monthly_processing_minutes: int
 
     @property
     def storage_ready(self) -> bool:
@@ -39,6 +51,10 @@ class RuntimeConfig:
     @property
     def queue_ready(self) -> bool:
         return bool(self.redis_url)
+
+    @property
+    def commercial_db_ready(self) -> bool:
+        return bool(self.database_url)
 
     @property
     def semantic_ready(self) -> bool:
@@ -57,6 +73,8 @@ def load_runtime_config(env: dict[str, str] | None = None) -> RuntimeConfig:
     values = env if env is not None else os.environ
     return RuntimeConfig(
         redis_url=values.get("REDIS_URL"),
+        database_url=values.get("DATABASE_URL"),
+        sentry_dsn_present=bool(values.get("SENTRY_DSN")),
         openai_api_key_present=bool(values.get("OPENAI_API_KEY")),
         aws_access_key_present=bool(values.get("AWS_ACCESS_KEY_ID")),
         aws_secret_key_present=bool(values.get("AWS_SECRET_ACCESS_KEY")),
@@ -65,12 +83,12 @@ def load_runtime_config(env: dict[str, str] | None = None) -> RuntimeConfig:
         runpod_api_key_present=bool(values.get("RUNPOD_API_KEY")),
         runpod_template_id=values.get("RUNPOD_TEMPLATE_ID"),
         asr_model=values.get("CUTSELL_ASR_MODEL", "medium"),
-        # The inherited EditDNA OpenAI project currently exposes gpt-4o-mini.
-        # All provider models remain independently overridable as access expands.
         semantic_model=values.get("CUTSELL_SEMANTIC_MODEL", "gpt-4o-mini"),
         visual_model=values.get("CUTSELL_VISUAL_MODEL", "gpt-4o-mini"),
         take_judge_model=values.get("CUTSELL_TAKE_JUDGE_MODEL", "gpt-4o-mini"),
         clean_cut_judge_model=values.get("CUTSELL_CLEAN_CUT_JUDGE_MODEL", "gpt-4o-mini"),
-        # Experimental until golden real-video validation proves it is safe.
         clean_cut_judge_enabled=_env_bool(values, "CUTSELL_CLEAN_CUT_JUDGE", False),
+        max_source_minutes=max(1, _env_int(values, "CUTSELL_MAX_SOURCE_MINUTES", 30)),
+        max_concurrent_jobs_per_user=max(1, _env_int(values, "CUTSELL_MAX_CONCURRENT_JOBS_PER_USER", 2)),
+        monthly_processing_minutes=max(1, _env_int(values, "CUTSELL_MONTHLY_PROCESSING_MINUTES", 300)),
     )
