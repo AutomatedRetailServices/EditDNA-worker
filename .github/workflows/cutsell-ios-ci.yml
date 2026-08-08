@@ -1,0 +1,35 @@
+name: CutSell iOS CI
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'mobile/ios/**'
+      - '.github/workflows/cutsell-ios-ci.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'mobile/ios/**'
+      - '.github/workflows/cutsell-ios-ci.yml'
+
+jobs:
+  build-ios:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install XcodeGen
+        run: brew install xcodegen
+      - name: Generate Xcode project
+        working-directory: mobile/ios
+        run: xcodegen generate
+      - name: Build CutSell for iOS Simulator
+        working-directory: mobile/ios
+        run: |
+          set -o pipefail
+          xcodebuild \
+            -project CutSell.xcodeproj \
+            -scheme CutSell \
+            -sdk iphonesimulator \
+            -configuration Debug \
+            CODE_SIGNING_ALLOWED=NO \
+            build | xcpretty
