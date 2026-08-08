@@ -1,0 +1,62 @@
+name: CutSell Staging Recovery Retry Once
+
+on:
+  push:
+    branches:
+      - cutsell/mobile-v1-clean
+    paths:
+      - ".cutsell/staging-recovery-retry-once.txt"
+
+permissions:
+  contents: read
+
+jobs:
+  recovery-retry:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      API_BASE: https://cutsell-api.onrender.com
+      REDIS_URL: ${{ secrets.REDIS_URL }}
+      E2E_USER: usr_1dbc589de80849f3ac8c126f0d478f4f
+      E2E_PROJECT: staging-e2e-77fc9106c0e7
+    steps:
+      - uses: actions/checkout@v4
+      - name: Require one-shot marker
+        run: grep -qx 'run=recovery-retry' .cutsell/staging-recovery-retry-once.txt
+      - name: Install runtime tools
+        run: python -m pip install --quiet requests redis rq boto3
+      - name: Verify persisted Draft after GPU process deletion
+        shell: bash
+        run: |
+          set -euo pipefail
+          export PYTHONPATH="$GITHUB_WORKSPACE"
+          python - <<'PY'
+          import os
+          from cutsell_worker.draft_store import get_draft_snapshot
+          snap=get_draft_snapshot(user_id=os.environ['E2E_USER'],project_id=os.environ['E2E_PROJECT'])
+          draft=snap['draft']
+          assert snap['revision']==2, snap['revision']
+          assert len(draft['selected'])==4, len(draft['selected'])
+          assert any(abs(float(c.get('audio_volume',1.0))-0.9)<1e-6 for c in draft['selected'])
+          print('RECOVERY_AFTER_WORKER_DELETE_PASS revision=',snap['revision'],'selected=',len(draft['selected']))
+          PY
+      - name: Verify public API cancel retry cancel without GPU
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import requests,uuid,time,json,os
+          base=os.environ['API_BASE'].rstrip('/')
+          s=requests.Session()
+          a=s.post(base+'/v1/auth/session',timeout=20); a.raise_for_status(); auth=a.json()
+          user=auth['user_id']; s.headers.update({'Authorization':'Bearer '+auth['access_token']})
+          project='retry-gate-'+uuid.uuid4().hex[:12]
+          p=s.post(base+'/v1/uploads/presign',json={'project_id':project,'user_id':user,'original_name':'never-processed.mp4','content_type':'video/mp4','size_bytes':1024},timeout=20); p.raise_for_status(); src=p.json()['source_uri']
+          q=s.post(base+'/v1/flow-b/jobs',json={'project_id':project,'user_id':user,'sources':[{'original_name':'never-processed.mp4','uri':src,'source_order':0,'duration_sec':1.0}],'language_hint':'en','audio_overlap':False},timeout=20); q.raise_for_status(); jid=q.json()['job_id']
+          c=s.post(base+f'/v1/jobs/{jid}/cancel',timeout=20); c.raise_for_status(); assert c.json()['state']=='canceled',c.json()
+          r=s.post(base+f'/v1/jobs/{jid}/retry',json={'user_id':user},timeout=20); r.raise_for_status(); retry_id=r.json()['job_id']; assert retry_id!=jid
+          c2=s.post(base+f'/v1/jobs/{retry_id}/cancel',timeout=20); c2.raise_for_status(); assert c2.json()['state']=='canceled',c2.json()
+          original=s.get(base+f'/v1/jobs/{jid}',timeout=20); original.raise_for_status(); assert original.json()['state']=='canceled'
+          retried=s.get(base+f'/v1/jobs/{retry_id}',timeout=20); retried.raise_for_status(); assert retried.json()['state']=='canceled'
+          print('CANCEL_RETRY_PASS',json.dumps({'original_job':jid,'retry_job':retry_id,'user':user,'project':project},sort_keys=True))
+          PY
