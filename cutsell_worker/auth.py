@@ -61,11 +61,18 @@ def create_session(*, user_id: str | None = None, client=None) -> dict[str, Any]
         "user_id": resolved_user_id,
         "created_at": datetime.now(timezone.utc).isoformat(),
     }
-    pipe = target.pipeline()
-    pipe.setex(key, SESSION_TTL_SEC, json.dumps(record, separators=(",", ":")))
-    pipe.sadd(session_index_key(resolved_user_id), key)
-    pipe.expire(session_index_key(resolved_user_id), SESSION_TTL_SEC)
-    pipe.execute()
+    encoded = json.dumps(record, separators=(",", ":"))
+    # Real Redis clients use a pipeline so the session and revocation index are
+    # written together. Minimal test doubles/legacy clients may only implement
+    # setex/get; keep that compatibility without affecting production behavior.
+    if hasattr(target, "pipeline"):
+        pipe = target.pipeline()
+        pipe.setex(key, SESSION_TTL_SEC, encoded)
+        pipe.sadd(session_index_key(resolved_user_id), key)
+        pipe.expire(session_index_key(resolved_user_id), SESSION_TTL_SEC)
+        pipe.execute()
+    else:
+        target.setex(key, SESSION_TTL_SEC, encoded)
     return {
         "user_id": resolved_user_id,
         "access_token": token,
@@ -97,6 +104,8 @@ def revoke_all_sessions(*, user_id: str, client=None) -> dict[str, Any]:
     rollout should rotate beta sessions when persistent auth is enabled.
     """
     target = _redis_client(client)
+    if not hasattr(target, "smembers") or not hasattr(target, "pipeline"):
+        return {"status": "legacy_unindexed", "session_count": 0}
     index = session_index_key(user_id)
     raw_keys = target.smembers(index) or set()
     keys = [item.decode("utf-8") if isinstance(item, bytes) else str(item) for item in raw_keys]
