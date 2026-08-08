@@ -1,0 +1,79 @@
+name: CutSell Render Redeploy Status Fix Once
+
+on:
+  push:
+    branches:
+      - cutsell/mobile-v1-clean
+    paths:
+      - ".cutsell/render-redeploy-status-fix-once.txt"
+
+permissions:
+  contents: read
+
+jobs:
+  redeploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      RENDER_API_KEY: ${{ secrets.RENDER_API_KEY }}
+      SERVICE_ID: srv-d9rdlsvavr4c73912uo0
+      SERVICE_URL: https://cutsell-api.onrender.com
+    steps:
+      - uses: actions/checkout@v4
+      - name: Require exact redeploy marker
+        run: |
+          set -euo pipefail
+          grep -qx 'deploy=cutsell-status-contract-fix' .cutsell/render-redeploy-status-fix-once.txt
+          test -n "${RENDER_API_KEY:-}"
+      - name: Trigger deploy of current clean branch
+        id: deploy
+        run: |
+          set -euo pipefail
+          code=$(curl --silent --show-error --write-out '%{http_code}' \
+            --request POST \
+            --url "https://api.render.com/v1/services/$SERVICE_ID/deploys" \
+            --header 'Accept: application/json' \
+            --header 'Content-Type: application/json' \
+            --header "Authorization: Bearer $RENDER_API_KEY" \
+            --data '{}' \
+            --output deploy.json)
+          echo "Render deploy HTTP status: $code"
+          test "$code" = "201" || { cat deploy.json; exit 4; }
+          DEPLOY_ID=$(jq -r '.id // .deploy.id // empty' deploy.json)
+          test -n "$DEPLOY_ID"
+          echo "deploy_id=$DEPLOY_ID" >> "$GITHUB_OUTPUT"
+          echo "Triggered deploy $DEPLOY_ID"
+      - name: Wait for deploy live
+        env:
+          DEPLOY_ID: ${{ steps.deploy.outputs.deploy_id }}
+        run: |
+          set -euo pipefail
+          deadline=$((SECONDS+900))
+          while [ $SECONDS -lt $deadline ]; do
+            curl --fail --silent --show-error \
+              --url "https://api.render.com/v1/services/$SERVICE_ID/deploys/$DEPLOY_ID" \
+              --header 'Accept: application/json' \
+              --header "Authorization: Bearer $RENDER_API_KEY" \
+              --output deploy-status.json
+            status=$(jq -r '.status // .deploy.status // empty' deploy-status.json)
+            echo "Render deploy status: $status"
+            case "$status" in
+              live) break ;;
+              build_failed|update_failed|canceled|deactivated) cat deploy-status.json; exit 5 ;;
+            esac
+            sleep 10
+          done
+          test "$(jq -r '.status // .deploy.status // empty' deploy-status.json)" = "live"
+      - name: Verify public health after redeploy
+        run: |
+          set -euo pipefail
+          curl --fail --silent --show-error "$SERVICE_URL/v1/healthz" --output health.json
+          cat health.json
+          python - <<'PY'
+          import json
+          d=json.load(open('health.json'))
+          assert d['ok'] is True
+          assert d['queue_ready'] is True
+          assert d['storage_ready'] is True
+          assert d['semantic_ready'] is True
+          PY
