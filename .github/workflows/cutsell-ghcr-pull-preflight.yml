@@ -1,0 +1,38 @@
+name: CutSell GHCR Pull Preflight
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - cutsell/mobile-v1-clean
+    paths:
+      - ".cutsell/ghcr-pull-preflight-trigger.txt"
+
+permissions:
+  contents: read
+
+jobs:
+  anonymous-pull:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      IMAGE: ghcr.io/automatedretailservices/cutsell-worker:f1bc3adc4f2f8df0ae005fa551116dc4d08b30e6
+    steps:
+      - name: Pull worker image without registry login
+        run: docker pull "$IMAGE"
+      - name: Verify clean runtime imports and base CUDA stack
+        run: |
+          docker run --rm --entrypoint python "$IMAGE" - <<'PY'
+          import json
+          import boto3, redis, rq, openai, faster_whisper
+          import cutsell_worker
+          import torch
+          print(json.dumps({
+              'cutsell_worker': True,
+              'faster_whisper': getattr(faster_whisper, '__version__', 'present'),
+              'torch_version': torch.__version__,
+              'torch_cuda': torch.version.cuda,
+              'cuda_available': torch.cuda.is_available(),
+          }, indent=2))
+          assert torch.__version__.startswith('2.6.')
+          PY
