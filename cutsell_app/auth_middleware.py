@@ -1,4 +1,4 @@
-"""ASGI auth middleware that binds mobile requests to their bearer-session user."""
+"""ASGI auth middleware that binds mobile requests to bearer user + usage scope."""
 from __future__ import annotations
 
 import json
@@ -7,8 +7,9 @@ from urllib.parse import parse_qs
 
 from cutsell_worker.auth import resolve_session
 from cutsell_worker.jobs import fetch_job_snapshot
+from cutsell_worker.usage_limits import check_processing_allowance
 
-PUBLIC_PATHS = {"/v1/healthz", "/v1/auth/session"}
+PUBLIC_PATHS = {"/v1/healthz", "/v1/auth/session", "/v1/auth/apple"}
 MAX_JSON_BODY = 8 * 1024 * 1024
 
 
@@ -54,8 +55,6 @@ class AuthScopeMiddleware:
             return await _respond(send, 503, "auth service unavailable")
         auth_user_id = str(session["user_id"])
 
-        # Job IDs are otherwise opaque but guessable enough that status/cancel/retry
-        # must be bound to the bearer user before the endpoint can inspect the job.
         job_id = _job_id_from_path(path)
         if job_id:
             try:
@@ -85,6 +84,7 @@ class AuthScopeMiddleware:
             else:
                 more = False
 
+        payload = None
         content_type = headers.get(b"content-type", b"").decode("utf-8", errors="ignore").lower()
         if body and "application/json" in content_type:
             try:
@@ -94,6 +94,17 @@ class AuthScopeMiddleware:
             if isinstance(payload, dict) and payload.get("user_id") is not None:
                 if str(payload.get("user_id")) != auth_user_id:
                     return await _respond(send, 403, "user scope mismatch")
+
+        # Commercial cost guard: reject oversized/over-quota processing before RQ/GPU work.
+        if path == "/v1/flow-b/jobs" and scope.get("method") == "POST" and isinstance(payload, dict):
+            durations = [
+                float(item.get("duration_sec") or 0.0)
+                for item in (payload.get("sources") or [])
+                if isinstance(item, dict)
+            ]
+            decision = check_processing_allowance(user_id=auth_user_id, durations_sec=durations)
+            if not decision.allowed:
+                return await _respond(send, 429, decision.reason)
 
         state = scope.setdefault("state", {})
         state["auth_user_id"] = auth_user_id
