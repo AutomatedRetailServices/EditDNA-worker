@@ -21,6 +21,7 @@ class ComposerProvider(Protocol):
         takes: Tuple[CandidateTake, ...],
         labels: Tuple[SemanticLabel, ...],
         strategy: EditStrategy,
+        context_text: str = "",
     ) -> ComposerProviderResult: ...
 
 
@@ -29,6 +30,7 @@ def safe_compose_order(
     takes: Tuple[CandidateTake, ...],
     labels: Tuple[SemanticLabel, ...],
     strategy: EditStrategy,
+    context_text: str = "",
 ) -> ComposerProviderResult:
     """Allow AI to reorder only; never add, drop, or duplicate creator speech."""
     natural_ids = tuple(take.clip_id for take in takes)
@@ -39,7 +41,7 @@ def safe_compose_order(
             "natural_order",
         )
     try:
-        result = provider.order(takes, labels, strategy)
+        result = provider.order(takes, labels, strategy, context_text=context_text)
         proposed = tuple(str(item) for item in result.ordered_clip_ids)
         if len(proposed) != len(natural_ids):
             raise ValueError("composer changed clip count")
