@@ -35,3 +35,24 @@ jobs:
         run: pytest -q tests/test_cutsell_*.py
       - name: Build staging API container
         run: docker build -f Dockerfile.cutsell -t cutsell-api-ci:${{ github.sha }} .
+      - name: Boot API container and verify health endpoint
+        shell: bash
+        run: |
+          set -euo pipefail
+          cid=$(docker run -d -e PORT=8000 -p 18000:8000 cutsell-api-ci:${{ github.sha }})
+          trap 'docker logs "$cid" || true; docker rm -f "$cid" >/dev/null 2>&1 || true' EXIT
+          for attempt in $(seq 1 30); do
+            if curl --fail --silent http://127.0.0.1:18000/v1/healthz > health.json; then
+              cat health.json
+              python - <<'PY'
+          import json
+          data=json.load(open('health.json'))
+          assert data['ok'] is True
+          assert data['service'] == 'cutsell-api'
+          PY
+              exit 0
+            fi
+            sleep 1
+          done
+          echo 'CutSell API container did not become healthy'
+          exit 1
