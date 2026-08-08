@@ -4,11 +4,19 @@ on:
   workflow_dispatch:
     inputs:
       video_limit:
-        description: "Number of S3 blooper videos (1-20)"
+        description: "Number of S3 videos (1-20)"
         required: false
         default: "8"
+      mode:
+        description: "FULL processes complete videos; BOUNDED is a cheaper smoke run"
+        required: false
+        type: choice
+        options:
+          - full
+          - bounded
+        default: full
       window_sec:
-        description: "Bounded seconds from each video (10-180)"
+        description: "Seconds per video when mode=bounded (10-180); ignored in FULL"
         required: false
         default: "60"
       asr_model:
@@ -26,7 +34,7 @@ permissions:
 jobs:
   benchmark:
     runs-on: ubuntu-latest
-    timeout-minutes: 90
+    timeout-minutes: 180
     env:
       PYTHONPATH: ${{ github.workspace }}
       RUNPOD_API_KEY: ${{ secrets.RUNPOD_API_KEY }}
@@ -42,6 +50,7 @@ jobs:
       CUTSELL_VISUAL_MODEL: gpt-4o-mini
       CUTSELL_TAKE_JUDGE_MODEL: gpt-4o-mini
       VIDEO_LIMIT: ${{ inputs.video_limit }}
+      BENCHMARK_MODE: ${{ inputs.mode }}
       WINDOW_SEC: ${{ inputs.window_sec }}
       SOURCE_KEYS: ${{ inputs.source_keys }}
     steps:
@@ -82,9 +91,24 @@ jobs:
           from cutsell_worker.golden_benchmark import run_golden_benchmark
           raw = os.environ.get('SOURCE_KEYS','').strip()
           keys = [x.strip() for x in raw.split(',') if x.strip()] or None
-          report = run_golden_benchmark(video_limit=int(os.environ.get('VIDEO_LIMIT') or 8), window_sec=float(os.environ.get('WINDOW_SEC') or 60), preview_dir='cutsell-golden-previews', source_keys=keys)
-          open('cutsell-golden-benchmark.json','w',encoding='utf-8').write(json.dumps(report,ensure_ascii=False,indent=2,sort_keys=True))
-          print(json.dumps({k:report[k] for k in ['source_count','completed_count','execution_failure_count','structural_pass_count','structural_failure_count','total_selected','total_alternates','total_discarded']},indent=2))
+          report = run_golden_benchmark(
+              video_limit=int(os.environ.get('VIDEO_LIMIT') or 8),
+              mode=(os.environ.get('BENCHMARK_MODE') or 'full'),
+              window_sec=float(os.environ.get('WINDOW_SEC') or 60),
+              preview_dir='cutsell-golden-previews',
+              source_keys=keys,
+          )
+          open('cutsell-golden-benchmark.json','w',encoding='utf-8').write(
+              json.dumps(report,ensure_ascii=False,indent=2,sort_keys=True)
+          )
+          summary_keys = [
+              'mode','source_count','completed_count','execution_failure_count',
+              'structural_pass_count','structural_failure_count',
+              'total_input_duration_sec','total_selected_duration_sec',
+              'selected_to_input_ratio','total_selected','total_alternates','total_discarded',
+              'provider_status_counts',
+          ]
+          print(json.dumps({k:report.get(k) for k in summary_keys},indent=2))
           if report['execution_failure_count'] or report['structural_failure_count']:
               raise SystemExit('Golden benchmark failed')
           PY
