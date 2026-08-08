@@ -169,3 +169,31 @@ def usage_total(database_url: str, *, user_id: str, event_type: str) -> float:
             "SELECT COALESCE(SUM(quantity),0) FROM cutsell_usage_events WHERE user_id=:user_id AND event_type=:event_type"
         ), {"user_id": user_id, "event_type": event_type}).scalar_one()
     return float(value or 0.0)
+
+
+def durable_delete_project(database_url: str, *, user_id: str, project_id: str) -> int:
+    from sqlalchemy import text
+    initialize_schema(database_url)
+    engine = _engine(database_url)
+    with engine.begin() as conn:
+        result = conn.execute(
+            text("DELETE FROM cutsell_projects WHERE project_id=:project_id AND user_id=:user_id"),
+            {"project_id": project_id, "user_id": user_id},
+        )
+    return int(result.rowcount or 0)
+
+
+def durable_delete_user(database_url: str, *, user_id: str) -> dict[str, int]:
+    """Delete durable account/project metadata while retaining aggregate-free integrity."""
+    from sqlalchemy import text
+    initialize_schema(database_url)
+    engine = _engine(database_url)
+    with engine.begin() as conn:
+        usage = conn.execute(text("DELETE FROM cutsell_usage_events WHERE user_id=:user_id"), {"user_id": user_id})
+        projects = conn.execute(text("DELETE FROM cutsell_projects WHERE user_id=:user_id"), {"user_id": user_id})
+        users = conn.execute(text("DELETE FROM cutsell_users WHERE user_id=:user_id"), {"user_id": user_id})
+    return {
+        "usage_events": int(usage.rowcount or 0),
+        "projects": int(projects.rowcount or 0),
+        "users": int(users.rowcount or 0),
+    }
