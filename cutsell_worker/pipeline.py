@@ -8,6 +8,7 @@ from typing import Dict, Iterable
 from .clean_cut import apply_clean_cut
 from .clean_cut_provider import CleanCutProvider, apply_provider_judgements, safe_clean_cut_judge
 from .composer import compose_selected
+from .composer_provider import ComposerProvider, safe_compose_order
 from .contracts import (
     CandidateTake,
     DraftClip,
@@ -51,25 +52,20 @@ def build_flow_b_draft(
     semantic_labels: Iterable[SemanticLabel] = (),
     take_judge_provider: TakeJudgeProvider | None = None,
     clean_cut_provider: CleanCutProvider | None = None,
+    composer_provider: ComposerProvider | None = None,
 ) -> ProcessingResult:
     """Build an editable draft from already-transcribed/segmented takes."""
     take_tuple = tuple(takes)
     label_map: dict[str, SemanticLabel] = {label.clip_id: label for label in semantic_labels}
 
-    # Tier 1 is deterministic and only removes very high-certainty recording errors.
+    # Tier 1 only removes very high-certainty recording errors.
     kept, deterministic_discarded, decisions = apply_clean_cut(take_tuple)
 
-    # Tier 2 is optional and remains entirely separate from semantic/commercial labels.
-    # Whole DELETE requires high confidence. MIXED may only trim a single contiguous
-    # valid span snapped to real ASR word timestamps; malformed/uncertain proposals
-    # fail open to the original candidate.
+    # Tier 2 is optional and separate from commercial labels. It fails open.
     clean_judged = safe_clean_cut_judge(clean_cut_provider, kept)
     kept, provider_discarded, clean_judge_diagnostics = apply_provider_judgements(kept, clean_judged)
     discarded = tuple(deterministic_discarded) + tuple(provider_discarded)
 
-    # A word-safe MIXED trim creates deterministic child clip IDs because media
-    # boundaries changed. Preserve descriptive semantic metadata for those children
-    # without re-running or inventing commercial meaning.
     for item in clean_judge_diagnostics:
         if not item.get("applied_mixed_trim"):
             continue
@@ -128,7 +124,21 @@ def build_flow_b_draft(
             clip_to_group[member.clip_id] = gid
 
     surviving_labels = tuple(label_map[take.clip_id] for take in kept if take.clip_id in label_map)
-    selected_takes = compose_selected(kept, groups, surviving_labels)
+    strategy = choose_strategy(surviving_labels, kept)
+
+    # Baseline selection remains conservative: one winner per take group.
+    natural_selected = compose_selected(kept, groups, surviving_labels)
+
+    # Flexible composer may only reorder those already-selected real clips.
+    # It has no deletion authority and cannot fabricate/duplicate speech.
+    composition = safe_compose_order(
+        composer_provider,
+        natural_selected,
+        surviving_labels,
+        strategy,
+    )
+    selected_map = {take.clip_id: take for take in natural_selected}
+    selected_takes = tuple(selected_map[clip_id] for clip_id in composition.ordered_clip_ids)
     selected_ids = {take.clip_id for take in selected_takes}
 
     selected = tuple(
@@ -160,9 +170,6 @@ def build_flow_b_draft(
         for take in discarded
     )
 
-    # Strategy is descriptive only. It sees only surviving speech and may use
-    # semantic/visual evidence, but it has no authority to delete or force order.
-    strategy = choose_strategy(surviving_labels, kept)
     draft = DraftTimeline(
         schema_version=SCHEMA_VERSION,
         project_id=request.project_id,
@@ -183,6 +190,9 @@ def build_flow_b_draft(
             "take_judge_status_counts": dict(judge_statuses),
             "take_judge_fallback_reasons": dict(judge_reasons),
             "take_judge_groups": judge_group_diagnostics[:50],
+            "composer_status": composition.status.__dict__,
+            "composer_reason": composition.reason,
+            "composer_order": list(composition.ordered_clip_ids),
         },
     )
     if alternate_group_count == 0:
@@ -203,6 +213,13 @@ def build_flow_b_draft(
     else:
         clean_cut_stage = clean_judged.status.status
 
+    if composer_provider is None or len(natural_selected) <= 1:
+        composer_stage = "natural_order"
+    elif composition.status.status == "applied":
+        composer_stage = "provider_complete"
+    else:
+        composer_stage = "degraded_natural_order_fallback"
+
     return ProcessingResult(
         schema_version=SCHEMA_VERSION,
         project_id=request.project_id,
@@ -213,6 +230,6 @@ def build_flow_b_draft(
             "take_grouping": "complete",
             "take_judge": judge_stage,
             "semantic": "provided" if label_map else "not_provided",
-            "composer": "complete",
+            "composer": composer_stage,
         },
     )
