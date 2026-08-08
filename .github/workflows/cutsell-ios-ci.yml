@@ -2,12 +2,12 @@ name: CutSell iOS CI
 
 on:
   pull_request:
+    branches: [main]
     paths:
       - 'mobile/ios/**'
       - '.github/workflows/cutsell-ios-ci.yml'
   push:
-    branches:
-      - 'cutsell/mobile-v1-asap-scope'
+    branches: [main]
     paths:
       - 'mobile/ios/**'
       - '.github/workflows/cutsell-ios-ci.yml'
