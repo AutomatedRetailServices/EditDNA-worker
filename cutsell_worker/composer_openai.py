@@ -27,6 +27,7 @@ class OpenAIComposerProvider:
         takes: Tuple[CandidateTake, ...],
         labels: Tuple[SemanticLabel, ...],
         strategy: EditStrategy,
+        context_text: str = "",
     ) -> ComposerProviderResult:
         label_map = {item.clip_id: item for item in labels}
         clips = []
@@ -55,10 +56,10 @@ class OpenAIComposerProvider:
 
         instruction = (
             "You are CutSell's sales-aware flexible video composer. Order the provided already-valid clips into the most coherent, "
-            "natural TikTok Shop/UGC sales edit for the detected strategy. Preserve the creator's intent and prefer natural source order "
-            "unless a reorder clearly improves comprehension, opening strength, demonstration flow, payoff, or sales coherence. "
-            "Do NOT force HOOK->PROBLEM->BENEFIT->PROOF->CTA. Roles are optional/repeatable; storytelling may dominate; CTA need not be last. "
-            "Never invent speech, never merge sentences, never remove a clip, never duplicate a clip, and never change clip contents. "
+            "natural TikTok Shop/UGC sales edit for the detected strategy. Use the whole-video context to preserve the creator's intended story, "
+            "demonstration sequence, reactions and payoff. Prefer natural source order unless a reorder clearly improves comprehension, opening strength, "
+            "demonstration flow, payoff, or sales coherence. Do NOT force HOOK->PROBLEM->BENEFIT->PROOF->CTA. Roles are optional/repeatable; "
+            "storytelling may dominate; CTA need not be last. Never invent speech, merge sentences, remove a clip, duplicate a clip, or change contents. "
             "Use continuity and delivery signals to avoid awkward jumps. Return JSON only as "
             "{\"ordered_clip_ids\":[...],\"reason\":\"...\"}. Include every input id exactly once."
         )
@@ -66,7 +67,11 @@ class OpenAIComposerProvider:
             model=self.model,
             input=[
                 {"role": "system", "content": instruction},
-                {"role": "user", "content": json.dumps({"strategy": strategy.value, "clips": clips}, ensure_ascii=False)},
+                {"role": "user", "content": json.dumps({
+                    "strategy": strategy.value,
+                    "whole_video_context": context_text[:12000],
+                    "clips": clips,
+                }, ensure_ascii=False)},
             ],
         )
         data = parse_json_object(response.output_text)
