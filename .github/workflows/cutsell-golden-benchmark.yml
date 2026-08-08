@@ -1,0 +1,117 @@
+name: CutSell Golden Real-Video Benchmark
+
+on:
+  workflow_dispatch:
+    inputs:
+      video_limit:
+        description: "Number of S3 blooper videos (1-20)"
+        required: false
+        default: "8"
+      window_sec:
+        description: "Bounded seconds from each video (10-180)"
+        required: false
+        default: "60"
+      asr_model:
+        description: "Whisper model"
+        required: false
+        default: "medium"
+      source_keys:
+        description: "Optional comma-separated exact S3 keys"
+        required: false
+        default: ""
+
+permissions:
+  contents: read
+
+jobs:
+  benchmark:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    env:
+      PYTHONPATH: ${{ github.workspace }}
+      RUNPOD_API_KEY: ${{ secrets.RUNPOD_API_KEY }}
+      AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+      AWS_REGION: ${{ secrets.AWS_REGION }}
+      S3_BUCKET: ${{ secrets.S3_BUCKET }}
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      CUTSELL_VALIDATION_PREFIX: Editdna bloopers videos/
+      CUTSELL_ASR_MODEL: ${{ inputs.asr_model }}
+      CUTSELL_CLEAN_CUT_JUDGE: "0"
+      CUTSELL_SEMANTIC_MODEL: gpt-4o-mini
+      CUTSELL_VISUAL_MODEL: gpt-4o-mini
+      CUTSELL_TAKE_JUDGE_MODEL: gpt-4o-mini
+      VIDEO_LIMIT: ${{ inputs.video_limit }}
+      WINDOW_SEC: ${{ inputs.window_sec }}
+      SOURCE_KEYS: ${{ inputs.source_keys }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install runtime
+        run: |
+          sudo apt-get update && sudo apt-get install -y ffmpeg jq
+          pip install faster-whisper boto3 openai requests
+      - name: Load missing runtime secrets from RunPod template vault
+        shell: bash
+        run: |
+          set -euo pipefail
+          missing=0
+          for key in AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_REGION S3_BUCKET OPENAI_API_KEY; do
+            [ -n "${!key:-}" ] || missing=1
+          done
+          [ "$missing" = "1" ] || exit 0
+          test -n "${RUNPOD_API_KEY:-}" || { echo 'runtime secrets unavailable'; exit 3; }
+          curl --fail --silent --show-error --url "https://rest.runpod.io/v1/templates" --header "Authorization: Bearer $RUNPOD_API_KEY" --output templates.json
+          TEMPLATE=$(jq -c '[.[] | select(.name == "EditDNA-Worker-2")][0]' templates.json)
+          test "$TEMPLATE" != "null" || { echo 'EditDNA-Worker-2 template not found'; exit 4; }
+          for key in AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_REGION S3_BUCKET OPENAI_API_KEY; do
+            if [ -z "${!key:-}" ]; then
+              value=$(printf '%s' "$TEMPLATE" | jq -r --arg key "$key" '.env[$key] // empty')
+              test -n "$value" || { echo "$key missing"; exit 5; }
+              echo "::add-mask::$value"
+              printf '%s=%s\n' "$key" "$value" >> "$GITHUB_ENV"
+            fi
+          done
+      - name: Run golden benchmark
+        run: |
+          mkdir -p cutsell-golden-previews
+          python - <<'PY'
+          import json, os
+          from cutsell_worker.golden_benchmark import run_golden_benchmark
+          raw = os.environ.get('SOURCE_KEYS','').strip()
+          keys = [x.strip() for x in raw.split(',') if x.strip()] or None
+          report = run_golden_benchmark(video_limit=int(os.environ.get('VIDEO_LIMIT') or 8), window_sec=float(os.environ.get('WINDOW_SEC') or 60), preview_dir='cutsell-golden-previews', source_keys=keys)
+          open('cutsell-golden-benchmark.json','w',encoding='utf-8').write(json.dumps(report,ensure_ascii=False,indent=2,sort_keys=True))
+          print(json.dumps({k:report[k] for k in ['source_count','completed_count','execution_failure_count','structural_pass_count','structural_failure_count','total_selected','total_alternates','total_discarded']},indent=2))
+          if report['execution_failure_count'] or report['structural_failure_count']:
+              raise SystemExit('Golden benchmark failed')
+          PY
+      - name: Check known real-video reject regressions
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          report=json.loads(Path('cutsell-golden-benchmark.json').read_text())
+          expected=json.loads(Path('tests/data/cutsell_golden_expectations.json').read_text())
+          violations=[]
+          for item in report.get('results') or []:
+              v=item.get('validation') or {}; key=str(v.get('source_key') or '')
+              if key not in expected: continue
+              text=' '.join(str(c.get('text') or '') for c in v.get('selected') or []).lower()
+              for needle in expected[key].get('must_not_select_substrings') or []:
+                  if str(needle).lower() in text: violations.append([key,needle])
+          print(json.dumps({'violations':violations},indent=2))
+          if violations: raise SystemExit('Known blooper regression detected')
+          PY
+      - name: Upload report and previews
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cutsell-golden-benchmark-${{ github.sha }}
+          path: |
+            cutsell-golden-benchmark.json
+            cutsell-golden-previews/*.mp4
+          if-no-files-found: warn
+          retention-days: 14
