@@ -1,0 +1,106 @@
+name: CutSell Golden Artifact Splitter
+
+on:
+  push:
+    branches:
+      - cutsell/mobile-v1-clean
+    paths:
+      - .github/cutsell-artifact-split-trigger.txt
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  split:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      GH_TOKEN: ${{ github.token }}
+      REPO: AutomatedRetailServices/EditDNA-worker
+      ARTIFACT_ID: "9029455201"
+    steps:
+      - name: Download existing golden artifact
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p source
+          gh api "/repos/${REPO}/actions/artifacts/${ARTIFACT_ID}/zip" > golden.zip
+          unzip -q golden.zip -d source
+          find source -maxdepth 3 -type f -printf '%p %s bytes\n' | sort
+      - name: Upload benchmark JSON separately
+        uses: actions/upload-artifact@v4
+        with:
+          name: cutsell-golden-report-only
+          path: source/cutsell-golden-benchmark.json
+          if-no-files-found: error
+          retention-days: 14
+      - name: Prepare preview manifest
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p preview-parts
+          i=0
+          while IFS= read -r -d '' f; do
+            i=$((i+1))
+            mkdir -p "preview-parts/${i}"
+            cp "$f" "preview-parts/${i}/"
+          done < <(find source -type f -name '*.mp4' -print0 | sort -z)
+          echo "PREVIEW_COUNT=$i" >> "$GITHUB_ENV"
+          test "$i" -gt 0
+      - name: Upload preview 1
+        if: env.PREVIEW_COUNT >= 1
+        uses: actions/upload-artifact@v4
+        with:
+          name: cutsell-golden-preview-01
+          path: preview-parts/1/*.mp4
+          retention-days: 14
+      - name: Upload preview 2
+        if: env.PREVIEW_COUNT >= 2
+        uses: actions/upload-artifact@v4
+        with:
+          name: cutsell-golden-preview-02
+          path: preview-parts/2/*.mp4
+          retention-days: 14
+      - name: Upload preview 3
+        if: env.PREVIEW_COUNT >= 3
+        uses: actions/upload-artifact@v4
+        with:
+          name: cutsell-golden-preview-03
+          path: preview-parts/3/*.mp4
+          retention-days: 14
+      - name: Upload preview 4
+        if: env.PREVIEW_COUNT >= 4
+        uses: actions/upload-artifact@v4
+        with:
+          name: cutsell-golden-preview-04
+          path: preview-parts/4/*.mp4
+          retention-days: 14
+      - name: Upload preview 5
+        if: env.PREVIEW_COUNT >= 5
+        uses: actions/upload-artifact@v4
+        with:
+          name: cutsell-golden-preview-05
+          path: preview-parts/5/*.mp4
+          retention-days: 14
+      - name: Upload preview 6
+        if: env.PREVIEW_COUNT >= 6
+        uses: actions/upload-artifact@v4
+        with:
+          name: cutsell-golden-preview-06
+          path: preview-parts/6/*.mp4
+          retention-days: 14
+      - name: Upload preview 7
+        if: env.PREVIEW_COUNT >= 7
+        uses: actions/upload-artifact@v4
+        with:
+          name: cutsell-golden-preview-07
+          path: preview-parts/7/*.mp4
+          retention-days: 14
+      - name: Upload preview 8
+        if: env.PREVIEW_COUNT >= 8
+        uses: actions/upload-artifact@v4
+        with:
+          name: cutsell-golden-preview-08
+          path: preview-parts/8/*.mp4
+          retention-days: 14
