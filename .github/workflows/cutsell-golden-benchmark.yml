@@ -134,13 +134,19 @@ jobs:
           print(json.dumps({'violations':violations},indent=2))
           if violations: raise SystemExit('Known blooper regression detected')
           PY
-      - name: Upload report and previews
+      - name: Upload JSON report
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: cutsell-golden-benchmark-${{ github.sha }}
-          path: |
-            cutsell-golden-benchmark.json
-            cutsell-golden-previews/*.mp4
+          name: cutsell-golden-report-${{ github.sha }}
+          path: cutsell-golden-benchmark.json
+          if-no-files-found: warn
+          retention-days: 14
+      - name: Upload preview videos
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cutsell-golden-previews-${{ github.sha }}
+          path: cutsell-golden-previews/*.mp4
           if-no-files-found: warn
           retention-days: 14
