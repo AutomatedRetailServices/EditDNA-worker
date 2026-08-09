@@ -7,6 +7,7 @@ Flexible Composer.
 """
 from __future__ import annotations
 
+from dataclasses import replace
 import json
 import os
 from pathlib import Path, PurePosixPath
@@ -127,8 +128,15 @@ def run_single_validation(
     preview_output: str | None = None,
     source_start_sec: float | None = None,
     source_end_sec: float | None = None,
+    preview_captions: bool = False,
 ) -> dict[str, Any]:
-    """Run one S3 video or bounded window through the complete production brain."""
+    """Run one S3 video or bounded window through the complete production brain.
+
+    QA previews disable captions by default so human reviewers can judge facial
+    expression, body language, product handling and cut boundaries without text
+    obscuring the source video. This changes only the benchmark preview, never the
+    editable draft or production caption feature.
+    """
     if not _is_real_video_key(key):
         raise ValueError("unsupported validation video")
     if (source_start_sec is None) != (source_end_sec is None):
@@ -200,6 +208,8 @@ def run_single_validation(
         )
         if preview_output:
             plan = build_render_plan(result.draft, local_paths)
+            if not preview_captions:
+                plan = tuple(replace(segment, caption_text="") for segment in plan)
             preview_path = render_preview(plan, preview_output)
     elapsed = round(time.monotonic() - started, 3)
     selected_duration_sec = round(sum(max(0.0, clip.end - clip.start) for clip in result.draft.selected), 3)
@@ -213,6 +223,7 @@ def run_single_validation(
         "selected_duration_sec": selected_duration_sec,
         "elapsed_sec": elapsed,
         "preview_path": preview_path,
+        "preview_captions": bool(preview_captions),
         "models": {
             "asr": config.asr_model,
             "semantic": config.semantic_model if config.semantic_ready else None,
