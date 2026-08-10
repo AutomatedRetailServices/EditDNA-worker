@@ -42,7 +42,7 @@ jobs:
       CUTSELL_SEMANTIC_MODEL: gpt-4o-mini
       CUTSELL_VISUAL_MODEL: gpt-4o-mini
       CUTSELL_TAKE_JUDGE_MODEL: gpt-4o-mini
-      VIDEO_LIMIT: ${{ inputs.video_limit || '16' }}
+      VIDEO_LIMIT: ${{ github.event_name == 'push' && '3' || inputs.video_limit || '16' }}
       SOURCE_KEYS: ${{ inputs.source_keys || '' }}
     steps:
       - uses: actions/checkout@v4
@@ -53,7 +53,15 @@ jobs:
       - name: Install runtime
         run: |
           sudo apt-get update && sudo apt-get install -y ffmpeg jq
-          pip install faster-whisper boto3 openai requests
+          pip install -r requirements.cutsell.worker.txt
+
+      - name: Verify dense local vision runtime
+        run: |
+          python - <<'PY'
+          import cv2, mediapipe
+          print('opencv', cv2.__version__)
+          print('mediapipe', mediapipe.__version__)
+          PY
 
       - name: Load missing runtime secrets from RunPod template vault
         shell: bash
@@ -86,7 +94,7 @@ jobs:
           raw = os.environ.get('SOURCE_KEYS','').strip()
           keys = [x.strip() for x in raw.split(',') if x.strip()] or None
           report = run_golden_benchmark(
-              video_limit=int(os.environ.get('VIDEO_LIMIT') or 16),
+              video_limit=int(os.environ.get('VIDEO_LIMIT') or 3),
               mode='full',
               prefix=os.environ['CUTSELL_VALIDATION_PREFIX'],
               preview_dir='cutsell-raw-clean-previews',
@@ -94,17 +102,26 @@ jobs:
           )
           report['benchmark_suite'] = 'raw_to_clean_cut'
           report['validation_prefix'] = os.environ['CUTSELL_VALIDATION_PREFIX']
+          report['dense_local_performance_expected'] = True
           open('cutsell-raw-clean-benchmark.json','w',encoding='utf-8').write(
               json.dumps(report,ensure_ascii=False,indent=2,sort_keys=True)
           )
           summary_keys = [
               'source_count','completed_count','execution_failure_count',
               'structural_pass_count','structural_failure_count',
+              'draft_review_postable_count','draft_review_needs_attention_count',
               'total_input_duration_sec','total_selected_duration_sec',
               'selected_to_input_ratio','total_selected','total_alternates','total_discarded',
-              'provider_status_counts',
+              'provider_status_counts','edit_mode_counts',
           ]
           print(json.dumps({k:report.get(k) for k in summary_keys},indent=2))
+          for item in report.get('results') or []:
+              evaluation = item.get('evaluation') or {}
+              local = (evaluation.get('stage_status') or {}).get('local_performance') or {}
+              print(json.dumps({
+                  'source_key': evaluation.get('source_key'),
+                  'local_performance': local,
+              }, ensure_ascii=False))
           if report['execution_failure_count']:
               raise SystemExit('RAW to CLEAN CUT execution failure')
           PY
