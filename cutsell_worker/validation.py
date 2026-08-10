@@ -2,8 +2,8 @@
 
 The harness can process either a bounded source window or the complete source. It
 intentionally exercises the same production brain providers used by the worker so a
-golden run cannot silently omit Whole-Video Context, semantic Take Grouping or the
-Flexible Composer.
+golden run cannot silently omit Whole-Video Context, semantic Take Grouping,
+Flexible Composer, or the final global draft review.
 """
 from __future__ import annotations
 
@@ -21,6 +21,7 @@ from .clean_cut_openai import OpenAICleanCutProvider
 from .composer_openai import OpenAIComposerProvider
 from .config import load_runtime_config
 from .contracts import ProcessingRequest, SourceAsset
+from .draft_review_openai import OpenAIDraftReviewProvider
 from .flow_b import process_local_sources
 from .media_probe import probe_media
 from .providers import NoopSemanticProvider
@@ -167,6 +168,7 @@ def run_single_validation(
     take_grouping = OpenAITakeGroupingProvider(model=config.semantic_model) if config.semantic_ready else None
     take_judge = OpenAITakeJudgeProvider(model=config.take_judge_model) if config.semantic_ready else None
     composer = OpenAIComposerProvider(model=config.semantic_model) if config.semantic_ready else None
+    draft_review = OpenAIDraftReviewProvider(model=config.semantic_model) if config.semantic_ready else None
     clean_cut_judge = (
         OpenAICleanCutProvider(model=config.clean_cut_judge_model)
         if config.clean_cut_judge_ready
@@ -205,6 +207,7 @@ def run_single_validation(
             take_judge_provider=take_judge,
             clean_cut_provider=clean_cut_judge,
             composer_provider=composer,
+            draft_review_provider=draft_review,
         )
         if preview_output:
             plan = build_render_plan(result.draft, local_paths)
@@ -232,6 +235,7 @@ def run_single_validation(
             "take_grouping": config.semantic_model if config.semantic_ready else None,
             "take_judge": config.take_judge_model if config.semantic_ready else None,
             "composer": config.semantic_model if config.semantic_ready else None,
+            "draft_review": config.semantic_model if config.semantic_ready else None,
             "clean_cut_judge": config.clean_cut_judge_model if config.clean_cut_judge_ready else None,
         },
         "strategy": result.draft.strategy.value,
