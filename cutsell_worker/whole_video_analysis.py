@@ -1,6 +1,7 @@
 """Whole-video context boundary for CutSell Watch + Listen."""
 from __future__ import annotations
 
+from collections import Counter
 from dataclasses import dataclass
 from typing import Protocol, Tuple
 
@@ -40,6 +41,14 @@ class WholeVideoContext:
     status: ProviderStatus
 
     def compact_text(self) -> str:
+        """Return compact semantic context without flooding later LLM stages.
+
+        Dense local MediaPipe/OpenCV events intentionally use *_candidate names.
+        Hundreds of those measurements are valuable for local/take-level fusion, but
+        serializing every one into grouping/composer/reviewer prompts bloats context and
+        can cause provider failures.  Keep authoritative whole-video events verbatim and
+        summarize dense candidates by kind/count instead.
+        """
         parts = []
         for source in self.sources:
             parts.append(
@@ -49,11 +58,20 @@ class WholeVideoContext:
                 f"product_or_subject={source.product_or_subject}; story_logic={source.story_logic}; "
                 f"summary={source.summary}"
             )
+            candidate_counts = Counter()
             for event in source.events:
+                if str(event.kind).endswith("_candidate"):
+                    candidate_counts[event.kind] += 1
+                    continue
                 parts.append(
                     f"{event.source_asset_id}@{event.start:.2f}-{event.end:.2f} "
                     f"{event.kind}: {event.description}"
                 )
+            if candidate_counts:
+                summary = ", ".join(
+                    f"{kind}={count}" for kind, count in sorted(candidate_counts.items())
+                )
+                parts.append(f"dense_local_candidates[{source.source_asset_id}]: {summary}")
         return "\n".join(parts)[:20000]
 
     @property
