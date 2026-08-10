@@ -1,4 +1,4 @@
-"""OpenAI-backed flexible composer for CutSell sales/UGC drafts."""
+"""OpenAI-backed flexible composer for CutSell postable drafts."""
 from __future__ import annotations
 
 import json
@@ -55,13 +55,18 @@ class OpenAIComposerProvider:
             })
 
         instruction = (
-            "You are CutSell's sales-aware flexible video composer. Order the provided already-valid clips into the most coherent, "
-            "natural TikTok Shop/UGC sales edit for the detected strategy. Use the whole-video context to preserve the creator's intended story, "
-            "demonstration sequence, reactions and payoff. Prefer natural source order unless a reorder clearly improves comprehension, opening strength, "
-            "demonstration flow, payoff, or sales coherence. Do NOT force HOOK->PROBLEM->BENEFIT->PROOF->CTA. Roles are optional/repeatable; "
-            "storytelling may dominate; CTA need not be last. Never invent speech, merge sentences, remove a clip, duplicate a clip, or change contents. "
-            "Use continuity and delivery signals to avoid awkward jumps. Return JSON only as "
-            "{\"ordered_clip_ids\":[...],\"reason\":\"...\"}. Include every input id exactly once."
+            "You are CutSell's global story composer. The whole-video context was produced BEFORE editing and tells you whether the footage is "
+            "sales, natural, or mixed. Respect that routing. For SALES footage, build the strongest coherent product sales story available in the real "
+            "footage: visual/verbal/combined hook, product context, demo, problem, feature, benefit, proof, reaction, objection, result, CTA or other beats "
+            "only when they actually exist. Do NOT force HOOK->PROBLEM->BENEFIT->PROOF->CTA. For NATURAL footage (storytime, yapping, talking-head, "
+            "routine/lifestyle, commentary, education, vlog), do not invent a sales objective; preserve personality while creating a clear topic/story "
+            "with setup, development and payoff/conclusion when present. Engaging yapping/story-building detail may stay; redundant repetition or tangents "
+            "that kill momentum should not be favored. For MIXED footage, preserve the natural story and integrate genuine sales moments without making it "
+            "feel artificially commercial. Prefer natural source order unless a reorder clearly improves comprehension, hook strength, story logic, demo flow "
+            "or payoff. A silent visual hook/reaction can matter if represented by a valid clip. Never invent speech or claims, merge sentences, duplicate clips, "
+            "or change clip contents. This provider only orders the already-selected clips, so include every input id exactly once. Use continuity, camera "
+            "engagement, facial/body naturalness and delivery evidence to avoid awkward jumps. Return JSON only as "
+            "{\"ordered_clip_ids\":[...],\"reason\":\"...\"}."
         )
         response = self._client().responses.create(
             model=self.model,
@@ -69,7 +74,7 @@ class OpenAIComposerProvider:
                 {"role": "system", "content": instruction},
                 {"role": "user", "content": json.dumps({
                     "strategy": strategy.value,
-                    "whole_video_context": context_text[:12000],
+                    "whole_video_context": context_text[:20000],
                     "clips": clips,
                 }, ensure_ascii=False)},
             ],
