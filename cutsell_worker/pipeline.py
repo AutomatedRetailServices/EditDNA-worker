@@ -21,6 +21,7 @@ from .contracts import (
     SemanticRole,
     TakeGroup,
 )
+from .draft_review_provider import DraftReviewProvider, safe_review_draft
 from .strategy import choose_strategy
 from .take_grouping_provider import TakeGroupingProvider, safe_group_takes
 from .take_judge_provider import TakeJudgeProvider, safe_rank_takes
@@ -55,17 +56,18 @@ def build_flow_b_draft(
     clean_cut_provider: CleanCutProvider | None = None,
     composer_provider: ComposerProvider | None = None,
     take_grouping_provider: TakeGroupingProvider | None = None,
+    draft_review_provider: DraftReviewProvider | None = None,
     whole_video_context: WholeVideoContext | None = None,
     temporal_trim_diagnostics: Iterable[dict] = (),
 ) -> ProcessingResult:
     """Build an editable draft after understanding the complete source context."""
     take_tuple = tuple(takes)
+    temporal_trim_diagnostics = tuple(temporal_trim_diagnostics)
     label_map: dict[str, SemanticLabel] = {label.clip_id: label for label in semantic_labels}
     context_text = whole_video_context.compact_text() if whole_video_context is not None else ""
 
-    # Global context now participates in local keep/cut decisions. This is the key
-    # distinction from transcript-only cleanup: a complete sentence can still be a
-    # clearly failed recording attempt when the temporal performance says so.
+    # Global context participates in local keep/cut decisions. A complete sentence
+    # can still be a clearly failed recording attempt when temporal performance says so.
     kept, deterministic_discarded, decisions = apply_clean_cut(take_tuple, whole_video_context)
 
     clean_judged = safe_clean_cut_judge(clean_cut_provider, kept)
@@ -144,7 +146,20 @@ def build_flow_b_draft(
         context_text=context_text,
     )
     selected_map = {take.clip_id: take for take in natural_selected}
-    selected_takes = tuple(selected_map[clip_id] for clip_id in composition.ordered_clip_ids)
+    composed_takes = tuple(selected_map[clip_id] for clip_id in composition.ordered_clip_ids)
+
+    # Final global logic pass: review the assembled story as a whole. This is a
+    # constrained second pass: it can only keep/reorder already selected material.
+    # It cannot invent speech, resurrect discarded takes, or add unknown clips.
+    review = safe_review_draft(
+        draft_review_provider,
+        composed_takes,
+        surviving_labels,
+        strategy,
+        context_text=context_text,
+    )
+    composed_map = {take.clip_id: take for take in composed_takes}
+    selected_takes = tuple(composed_map[clip_id] for clip_id in review.ordered_clip_ids)
     selected_ids = {take.clip_id for take in selected_takes}
 
     selected = tuple(
@@ -224,6 +239,11 @@ def build_flow_b_draft(
             "composer_status": composition.status.__dict__,
             "composer_reason": composition.reason,
             "composer_order": list(composition.ordered_clip_ids),
+            "draft_review_status": review.status.__dict__,
+            "draft_review_postable": review.postable,
+            "draft_review_issues": list(review.issues),
+            "draft_review_reason": review.reason,
+            "draft_review_order": list(review.ordered_clip_ids),
         },
     )
 
@@ -259,6 +279,13 @@ def build_flow_b_draft(
     else:
         grouping_stage = "degraded_baseline_fallback"
 
+    if draft_review_provider is None or len(composed_takes) <= 1:
+        review_stage = "not_requested"
+    elif review.status.status == "applied":
+        review_stage = "postable" if review.postable else "needs_attention"
+    else:
+        review_stage = "degraded_fallback"
+
     return ProcessingResult(
         schema_version=SCHEMA_VERSION,
         project_id=request.project_id,
@@ -267,11 +294,12 @@ def build_flow_b_draft(
         stage_status={
             "whole_video_context": whole_video_context.status.status if whole_video_context is not None else "not_requested",
             "edit_mode": whole_video_context.dominant_edit_mode if whole_video_context is not None else "natural",
-            "temporal_performance": "applied" if tuple(temporal_trim_diagnostics) else "no_edge_trim_needed",
+            "temporal_performance": "applied" if temporal_trim_diagnostics else "no_edge_trim_needed",
             "clean_cut": clean_cut_stage,
             "take_grouping": grouping_stage,
             "take_judge": judge_stage,
             "semantic": "provided" if label_map else "not_provided",
             "composer": composer_stage,
+            "draft_review": review_stage,
         },
     )
