@@ -52,7 +52,11 @@ jobs:
 
       - name: Install runtime
         run: |
-          sudo apt-get update && sudo apt-get install -y ffmpeg jq
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential python3-dev ffmpeg jq pkg-config \
+            libavformat-dev libavcodec-dev libavdevice-dev libavutil-dev \
+            libavfilter-dev libswscale-dev libswresample-dev
           pip install -r requirements.cutsell.worker.txt
 
       - name: Verify dense local vision runtime
