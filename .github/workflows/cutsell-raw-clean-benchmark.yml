@@ -1,0 +1,171 @@
+name: CutSell RAW to CLEAN CUT Benchmark
+
+on:
+  workflow_dispatch:
+    inputs:
+      video_limit:
+        description: "Number of raw mixed S3 videos (1-20)"
+        required: false
+        default: "16"
+      asr_model:
+        description: "Whisper model"
+        required: false
+        default: "medium"
+      source_keys:
+        description: "Optional comma-separated exact S3 keys"
+        required: false
+        default: ""
+  push:
+    branches:
+      - cutsell/mobile-v1-clean
+    paths:
+      - .github/cutsell-raw-clean-trigger.txt
+
+permissions:
+  contents: read
+
+jobs:
+  benchmark:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    env:
+      PYTHONPATH: ${{ github.workspace }}
+      RUNPOD_API_KEY: ${{ secrets.RUNPOD_API_KEY }}
+      AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+      AWS_REGION: ${{ secrets.AWS_REGION }}
+      S3_BUCKET: ${{ secrets.S3_BUCKET }}
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      CUTSELL_VALIDATION_PREFIX: Editdna longform validation/
+      CUTSELL_ASR_MODEL: ${{ inputs.asr_model || 'medium' }}
+      CUTSELL_CLEAN_CUT_JUDGE: "0"
+      CUTSELL_SEMANTIC_MODEL: gpt-4o-mini
+      CUTSELL_VISUAL_MODEL: gpt-4o-mini
+      CUTSELL_TAKE_JUDGE_MODEL: gpt-4o-mini
+      VIDEO_LIMIT: ${{ inputs.video_limit || '16' }}
+      SOURCE_KEYS: ${{ inputs.source_keys || '' }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install runtime
+        run: |
+          sudo apt-get update && sudo apt-get install -y ffmpeg jq
+          pip install faster-whisper boto3 openai requests
+
+      - name: Load missing runtime secrets from RunPod template vault
+        shell: bash
+        run: |
+          set -euo pipefail
+          missing=0
+          for key in AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_REGION S3_BUCKET OPENAI_API_KEY; do
+            [ -n "${!key:-}" ] || missing=1
+          done
+          [ "$missing" = "1" ] || exit 0
+          test -n "${RUNPOD_API_KEY:-}" || { echo 'runtime secrets unavailable'; exit 3; }
+          curl --fail --silent --show-error --url "https://rest.runpod.io/v1/templates" --header "Authorization: Bearer $RUNPOD_API_KEY" --output templates.json
+          TEMPLATE=$(jq -c '[.[] | select(.name == "EditDNA-Worker-2")][0]' templates.json)
+          test "$TEMPLATE" != "null" || { echo 'EditDNA-Worker-2 template not found'; exit 4; }
+          for key in AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_REGION S3_BUCKET OPENAI_API_KEY; do
+            if [ -z "${!key:-}" ]; then
+              value=$(printf '%s' "$TEMPLATE" | jq -r --arg key "$key" '.env[$key] // empty')
+              test -n "$value" || { echo "$key missing"; exit 5; }
+              echo "::add-mask::$value"
+              printf '%s=%s\n' "$key" "$value" >> "$GITHUB_ENV"
+            fi
+          done
+
+      - name: Run RAW to CLEAN CUT benchmark
+        run: |
+          mkdir -p cutsell-raw-clean-previews
+          python - <<'PY'
+          import json, os
+          from cutsell_worker.golden_benchmark import run_golden_benchmark
+          raw = os.environ.get('SOURCE_KEYS','').strip()
+          keys = [x.strip() for x in raw.split(',') if x.strip()] or None
+          report = run_golden_benchmark(
+              video_limit=int(os.environ.get('VIDEO_LIMIT') or 16),
+              mode='full',
+              prefix=os.environ['CUTSELL_VALIDATION_PREFIX'],
+              preview_dir='cutsell-raw-clean-previews',
+              source_keys=keys,
+          )
+          report['benchmark_suite'] = 'raw_to_clean_cut'
+          report['validation_prefix'] = os.environ['CUTSELL_VALIDATION_PREFIX']
+          open('cutsell-raw-clean-benchmark.json','w',encoding='utf-8').write(
+              json.dumps(report,ensure_ascii=False,indent=2,sort_keys=True)
+          )
+          summary_keys = [
+              'source_count','completed_count','execution_failure_count',
+              'structural_pass_count','structural_failure_count',
+              'total_input_duration_sec','total_selected_duration_sec',
+              'selected_to_input_ratio','total_selected','total_alternates','total_discarded',
+              'provider_status_counts',
+          ]
+          print(json.dumps({k:report.get(k) for k in summary_keys},indent=2))
+          if report['execution_failure_count']:
+              raise SystemExit('RAW to CLEAN CUT execution failure')
+          PY
+
+      - name: Upload JSON report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cutsell-raw-clean-report-${{ github.sha }}
+          path: cutsell-raw-clean-benchmark.json
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Upload previews 00-03
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cutsell-raw-clean-previews-00-03-${{ github.sha }}
+          path: |
+            cutsell-raw-clean-previews/00-*.mp4
+            cutsell-raw-clean-previews/01-*.mp4
+            cutsell-raw-clean-previews/02-*.mp4
+            cutsell-raw-clean-previews/03-*.mp4
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: Upload previews 04-07
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cutsell-raw-clean-previews-04-07-${{ github.sha }}
+          path: |
+            cutsell-raw-clean-previews/04-*.mp4
+            cutsell-raw-clean-previews/05-*.mp4
+            cutsell-raw-clean-previews/06-*.mp4
+            cutsell-raw-clean-previews/07-*.mp4
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: Upload previews 08-11
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cutsell-raw-clean-previews-08-11-${{ github.sha }}
+          path: |
+            cutsell-raw-clean-previews/08-*.mp4
+            cutsell-raw-clean-previews/09-*.mp4
+            cutsell-raw-clean-previews/10-*.mp4
+            cutsell-raw-clean-previews/11-*.mp4
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: Upload previews 12-15
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cutsell-raw-clean-previews-12-15-${{ github.sha }}
+          path: |
+            cutsell-raw-clean-previews/12-*.mp4
+            cutsell-raw-clean-previews/13-*.mp4
+            cutsell-raw-clean-previews/14-*.mp4
+            cutsell-raw-clean-previews/15-*.mp4
+          if-no-files-found: warn
+          retention-days: 14
