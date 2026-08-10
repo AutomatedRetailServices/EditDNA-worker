@@ -29,12 +29,51 @@ def _baseline_groups(takes: Tuple[CandidateTake, ...]) -> Tuple[Tuple[str, ...],
     return tuple(tuple(item.clip_id for item in members) for members in grouped.values())
 
 
+def _repair_groups(
+    groups: Tuple[Tuple[str, ...], ...],
+    takes: Tuple[CandidateTake, ...],
+) -> tuple[Tuple[Tuple[str, ...], ...], bool]:
+    """Constrain provider output without throwing away useful grouping signal.
+
+    Unknown ids and duplicate memberships are ignored. Any omitted real candidate is
+    appended as a singleton group in natural source order. This preserves every real
+    take exactly once while allowing a mostly-correct provider response to survive.
+    """
+    natural_ids = tuple(take.clip_id for take in takes)
+    allowed = set(natural_ids)
+    seen: set[str] = set()
+    repaired = False
+    normalized: list[Tuple[str, ...]] = []
+
+    for raw_group in groups:
+        kept: list[str] = []
+        for raw_id in raw_group:
+            clip_id = str(raw_id)
+            if clip_id not in allowed or clip_id in seen:
+                repaired = True
+                continue
+            seen.add(clip_id)
+            kept.append(clip_id)
+        if kept:
+            normalized.append(tuple(kept))
+        elif raw_group:
+            repaired = True
+
+    for clip_id in natural_ids:
+        if clip_id not in seen:
+            normalized.append((clip_id,))
+            seen.add(clip_id)
+            repaired = True
+
+    return tuple(normalized), repaired
+
+
 def safe_group_takes(
     provider: TakeGroupingProvider | None,
     takes: Tuple[CandidateTake, ...],
     context_text: str = "",
 ) -> TakeGroupingProviderResult:
-    """Use semantic grouping only when it preserves every real candidate exactly once."""
+    """Use semantic grouping while preserving every real candidate exactly once."""
     baseline = _baseline_groups(takes)
     if provider is None or len(takes) <= 1:
         return TakeGroupingProviderResult(
@@ -44,20 +83,19 @@ def safe_group_takes(
         )
     try:
         result = provider.group(takes, context_text=context_text)
-        expected = {take.clip_id for take in takes}
-        flattened = [clip_id for group in result.groups for clip_id in group]
-        if not result.groups or any(not group for group in result.groups):
-            raise ValueError("take grouping returned empty group")
-        if len(flattened) != len(expected):
-            raise ValueError("take grouping changed candidate count")
-        if set(flattened) != expected:
-            raise ValueError("take grouping added/dropped candidate")
-        if len(set(flattened)) != len(flattened):
-            raise ValueError("take grouping duplicated candidate")
+        if not result.groups:
+            raise ValueError("take grouping returned no groups")
+        normalized_input = tuple(tuple(str(item) for item in group) for group in result.groups if group)
+        repaired_groups, repaired = _repair_groups(normalized_input, takes)
+        if not repaired_groups:
+            raise ValueError("take grouping produced no valid candidates")
+        reason = result.reason
+        if repaired:
+            reason = (reason + "; " if reason else "") + "provider_output_repaired"
         return TakeGroupingProviderResult(
-            tuple(tuple(str(item) for item in group) for group in result.groups),
-            result.status,
-            result.reason,
+            repaired_groups,
+            ProviderStatus("openai", True, True, "applied"),
+            reason,
         )
     except Exception as exc:
         return TakeGroupingProviderResult(
@@ -67,7 +105,7 @@ def safe_group_takes(
                 requested=True,
                 available=False,
                 status="provider_error_fallback",
-                reason=exc.__class__.__name__,
+                reason=f"{exc.__class__.__name__}:{str(exc)[:160]}",
             ),
             "baseline_fallback",
         )
