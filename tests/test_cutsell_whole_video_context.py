@@ -44,7 +44,8 @@ def test_whole_source_sampling_covers_full_video_and_is_bounded(tmp_path):
         output_dir=str(tmp_path),
         runner=runner,
     )
-    assert 8 <= len(frames) <= 48
+    assert 12 <= len(frames) <= 120
+    assert len(frames) >= 40  # 30 sec source is observed at ~0.75 sec cadence
     assert frames[0].relative_position < 0.05
     assert frames[-1].relative_position > 0.95
     assert all(frame.source_asset_id == "src-1" for frame in frames)
@@ -55,7 +56,8 @@ def test_whole_video_provider_returns_auditable_temporal_context(tmp_path):
     image.write_bytes(b"jpeg")
     client = FakeClient(
         '{"sources":[{"source_asset_id":"src-1","summary":"Creator retries hook then demos product",'
-        '"dominant_style":"demo","creator_intent":"show product result",'
+        '"dominant_style":"demo","creator_intent":"show product result","edit_mode":"sales","sales_intent":0.96,'
+        '"main_topic":"portable blender","product_or_subject":"blender","story_logic":"visual hook then demo and result",'
         '"events":[{"start":2.0,"end":4.0,"kind":"retry","confidence":0.95,"description":"visible restart"},'
         '{"start":10.0,"end":18.0,"kind":"product_demo","confidence":0.9,"description":"product demonstration"}]}]}'
     )
@@ -68,8 +70,12 @@ def test_whole_video_provider_returns_auditable_temporal_context(tmp_path):
     )
     assert context.status.status == "applied"
     assert context.sources[0].dominant_style == "demo"
+    assert context.sources[0].edit_mode == "sales"
+    assert context.sources[0].sales_intent == 0.96
+    assert context.dominant_edit_mode == "sales"
     assert [event.kind for event in context.sources[0].events] == ["retry", "product_demo"]
     assert "product_demo" in context.compact_text()
+    assert "story_logic=visual hook then demo and result" in context.compact_text()
     call = client.responses.calls[0]
     image_parts = [
         part
