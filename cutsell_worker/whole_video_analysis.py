@@ -26,6 +26,12 @@ class SourceVideoContext:
     dominant_style: str
     creator_intent: str
     events: Tuple[TemporalEvent, ...] = ()
+    # Narrative routing is inferred from the whole source, never forced per clip.
+    edit_mode: str = "natural"  # sales | natural | mixed
+    sales_intent: float = 0.0
+    main_topic: str = ""
+    product_or_subject: str = ""
+    story_logic: str = ""
 
 
 @dataclass(frozen=True)
@@ -37,15 +43,28 @@ class WholeVideoContext:
         parts = []
         for source in self.sources:
             parts.append(
-                f"source={source.source_asset_id}; style={source.dominant_style}; "
-                f"intent={source.creator_intent}; summary={source.summary}"
+                f"source={source.source_asset_id}; mode={source.edit_mode}; "
+                f"sales_intent={source.sales_intent:.2f}; style={source.dominant_style}; "
+                f"intent={source.creator_intent}; topic={source.main_topic}; "
+                f"product_or_subject={source.product_or_subject}; story_logic={source.story_logic}; "
+                f"summary={source.summary}"
             )
             for event in source.events:
                 parts.append(
                     f"{event.source_asset_id}@{event.start:.2f}-{event.end:.2f} "
                     f"{event.kind}: {event.description}"
                 )
-        return "\n".join(parts)[:12000]
+        return "\n".join(parts)[:20000]
+
+    @property
+    def dominant_edit_mode(self) -> str:
+        if not self.sources:
+            return "natural"
+        counts = {"sales": 0, "natural": 0, "mixed": 0}
+        for source in self.sources:
+            mode = source.edit_mode if source.edit_mode in counts else "natural"
+            counts[mode] += 1
+        return max(counts, key=lambda key: counts[key])
 
 
 class WholeVideoProvider(Protocol):
@@ -72,6 +91,10 @@ def safe_whole_video_analyze(
         for source in result.sources:
             if source.source_asset_id not in known or source.source_asset_id in seen:
                 raise ValueError("whole-video provider returned invalid source id")
+            if source.edit_mode not in {"sales", "natural", "mixed"}:
+                raise ValueError("whole-video provider returned invalid edit mode")
+            if not 0.0 <= source.sales_intent <= 1.0:
+                raise ValueError("whole-video provider returned invalid sales intent")
             seen.add(source.source_asset_id)
             for event in source.events:
                 if event.source_asset_id != source.source_asset_id:
