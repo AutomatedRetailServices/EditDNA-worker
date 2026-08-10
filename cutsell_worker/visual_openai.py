@@ -14,10 +14,29 @@ from .providers import ProviderStatus
 from .visual_analysis import VisualObservation, VisualProviderResult
 
 
+_INSTRUCTION = (
+    "You are CutSell Watch + Listen, evaluating sales/UGC/conversational recording takes like a careful human editor. "
+    "Use the transcript plus the ordered temporal frames across each take. Judge the delivery over time, not a single pose. "
+    "Return JSON only as {\"clips\":[{\"id\":...,\"face_visibility\":0..1,\"eye_contact\":0..1,"
+    "\"framing_quality\":0..1,\"product_visibility\":0..1,\"motion_stability\":0..1,"
+    "\"continuity\":0..1,\"visual_fumble\":0..1,\"expression_naturalness\":0..1,"
+    "\"gesture_naturalness\":0..1,\"delivery_energy\":0..1,\"distraction_risk\":0..1}]}. "
+    "Include every take exactly once. visual_fumble and distraction_risk are higher when worse. "
+    "expression_naturalness should penalize visibly awkward/frozen/incongruent facial delivery but not normal individual style. "
+    "gesture_naturalness should reward intentional, coherent hand/body movement and penalize accidental recording fumbles. "
+    "delivery_energy means visually engaged/present delivery appropriate to the content, not exaggerated movement. "
+    "Do not infer sensitive traits and do not decide deletion; only produce editing-quality signals."
+)
+
+
 @dataclass
 class OpenAIVisualProvider:
     model: str = "gpt-4o-mini"
     client_factory: Callable[[], object] | None = None
+    # Full raw recordings can contain dozens of segmented takes. Sending every
+    # frame for every take in one Responses request caused oversized multimodal
+    # requests in real validation. Keep requests bounded while preserving all takes.
+    batch_size: int = 6
 
     def _client(self):
         if self.client_factory is not None:
@@ -37,34 +56,12 @@ class OpenAIVisualProvider:
             raise ValueError("visual score outside 0..1")
         return score
 
-    def analyze(
+    def _analyze_batch(
         self,
         takes: Tuple[CandidateTake, ...],
-        samples: Tuple[FrameSample, ...],
-    ) -> VisualProviderResult:
-        if not takes:
-            return VisualProviderResult((), ProviderStatus("openai", True, True, "empty_input"))
-
-        frames_by_clip: dict[str, list[FrameSample]] = {}
-        for sample in samples:
-            frames_by_clip.setdefault(sample.clip_id, []).append(sample)
-
-        content = [{
-            "type": "input_text",
-            "text": (
-                "You are CutSell Watch + Listen, evaluating sales/UGC recording takes like a careful human editor. "
-                "Use the transcript plus the ordered temporal frames across each take. Judge the delivery over time, not a single pose. "
-                "Return JSON only as {\"clips\":[{\"id\":...,\"face_visibility\":0..1,\"eye_contact\":0..1,"
-                "\"framing_quality\":0..1,\"product_visibility\":0..1,\"motion_stability\":0..1,"
-                "\"continuity\":0..1,\"visual_fumble\":0..1,\"expression_naturalness\":0..1,"
-                "\"gesture_naturalness\":0..1,\"delivery_energy\":0..1,\"distraction_risk\":0..1}]}. "
-                "Include every take exactly once. visual_fumble and distraction_risk are higher when worse. "
-                "expression_naturalness should penalize visibly awkward/frozen/incongruent facial delivery but not normal individual style. "
-                "gesture_naturalness should reward intentional, coherent hand/body movement and penalize accidental recording fumbles. "
-                "delivery_energy means visually engaged/present delivery appropriate to the content, not exaggerated movement. "
-                "Do not infer sensitive traits and do not decide deletion; only produce editing-quality signals."
-            ),
-        }]
+        frames_by_clip: dict[str, list[FrameSample]],
+    ) -> Tuple[VisualObservation, ...]:
+        content = [{"type": "input_text", "text": _INSTRUCTION}]
         for take in takes:
             ordered = sorted(frames_by_clip.get(take.clip_id, ()), key=lambda item: item.timestamp)
             content.append({
@@ -125,6 +122,25 @@ class OpenAIVisualProvider:
             seen.add(clip_id)
         if seen != known:
             raise ValueError("visual provider omitted takes")
+        return tuple(observations)
+
+    def analyze(
+        self,
+        takes: Tuple[CandidateTake, ...],
+        samples: Tuple[FrameSample, ...],
+    ) -> VisualProviderResult:
+        if not takes:
+            return VisualProviderResult((), ProviderStatus("openai", True, True, "empty_input"))
+
+        frames_by_clip: dict[str, list[FrameSample]] = {}
+        for sample in samples:
+            frames_by_clip.setdefault(sample.clip_id, []).append(sample)
+
+        size = max(1, min(12, int(self.batch_size)))
+        observations = []
+        for start in range(0, len(takes), size):
+            observations.extend(self._analyze_batch(takes[start:start + size], frames_by_clip))
+
         return VisualProviderResult(
             observations=tuple(observations),
             status=ProviderStatus("openai", True, True, "applied"),
