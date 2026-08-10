@@ -10,6 +10,7 @@ from .asr import ASRProvider
 from .clean_cut_provider import CleanCutProvider
 from .composer_provider import ComposerProvider
 from .contracts import ProcessingRequest, ProcessingResult
+from .draft_review_provider import DraftReviewProvider
 from .frame_sampling import sample_take_frames
 from .media_probe import probe_media
 from .observability import ExecutionTrace
@@ -39,6 +40,7 @@ def process_local_sources(
     clean_cut_provider: CleanCutProvider | None = None,
     composer_provider: ComposerProvider | None = None,
     take_grouping_provider: TakeGroupingProvider | None = None,
+    draft_review_provider: DraftReviewProvider | None = None,
     whole_video_provider: WholeVideoProvider | None = None,
     progress: ProgressCallback | None = None,
 ) -> ProcessingResult:
@@ -188,6 +190,7 @@ def process_local_sources(
         clean_cut_provider=clean_cut_provider,
         composer_provider=composer_provider,
         take_grouping_provider=take_grouping_provider,
+        draft_review_provider=draft_review_provider,
         whole_video_context=whole_context,
         temporal_trim_diagnostics=temporal_trim_diagnostics,
     )
