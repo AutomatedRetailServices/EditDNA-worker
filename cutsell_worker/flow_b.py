@@ -12,6 +12,11 @@ from .composer_provider import ComposerProvider
 from .contracts import ProcessingRequest, ProcessingResult
 from .draft_review_provider import DraftReviewProvider
 from .frame_sampling import sample_take_frames
+from .local_performance import (
+    analyze_local_performance,
+    apply_local_performance_to_takes,
+    merge_local_events_into_context,
+)
 from .media_probe import probe_media
 from .observability import ExecutionTrace
 from .pipeline import build_flow_b_draft
@@ -92,7 +97,30 @@ def process_local_sources(
             ))
     transcript_tuple = tuple(transcripts)
     trace.complete("asr", segment_count=len(transcript_tuple))
-    notify("analyzing", 30)
+    notify("analyzing", 27)
+
+    # Dense local observation is the continuous-eyes layer. It is fail-open and
+    # produces measurements/candidate events, never destructive edit commands.
+    local_performance = analyze_local_performance(local_paths, target_fps=12.0)
+    local_frame_count = sum(len(item.observations) for item in local_performance.timelines)
+    local_event_count = sum(len(item.events) for item in local_performance.timelines)
+    if local_performance.status.available:
+        trace.complete(
+            "local_performance",
+            status=local_performance.status.status,
+            source_count=len(local_performance.timelines),
+            frame_count=local_frame_count,
+            candidate_event_count=local_event_count,
+            target_fps=12.0,
+        )
+    else:
+        trace.degraded(
+            "local_performance",
+            reason=local_performance.status.reason or local_performance.status.status,
+            frame_count=local_frame_count,
+            candidate_event_count=local_event_count,
+        )
+    notify("analyzing", 36)
 
     # Pass 1: understand the complete source before destructive editing. This
     # creates product/topic/story logic plus timestamped performance events.
@@ -127,11 +155,16 @@ def process_local_sources(
     else:
         whole_context = safe_whole_video_analyze(None, tuple(hydrated_sources), transcript_tuple, ())
         trace.complete("whole_video_context", status="not_requested", source_count=0, event_count=0, frame_count=0)
-    notify("analyzing", 43)
+
+    # Candidate local events augment the same WholeVideoContext consumed by the
+    # temporal editor/composer/reviewer. Their *_candidate names keep them from
+    # becoming automatic cuts without semantic/retry evidence.
+    whole_context = merge_local_events_into_context(whole_context, local_performance.timelines)
+    notify("analyzing", 45)
 
     gaps = word_silence_gaps(transcript_tuple)
     trace.complete("silence_analysis", gap_count=len(gaps))
-    notify("analyzing", 49)
+    notify("analyzing", 50)
 
     takes = segment_takes(transcript_tuple, hydrated_sources, gaps)
     trace.complete("take_segmentation", candidate_count=len(takes))
@@ -159,10 +192,20 @@ def process_local_sources(
             )
     else:
         trace.complete("visual", status="not_requested", observation_count=0, frame_count=0)
+
+    # Blend dense trajectory evidence into the same MediaSignals already consumed
+    # by Best Take/Clean Cut. Provider semantics are preserved; local evidence adds
+    # temporal coverage for face/body/hands/motion.
+    takes = apply_local_performance_to_takes(takes, local_performance.timelines)
+    trace.complete(
+        "local_performance_fusion",
+        candidate_count=len(takes),
+        local_source_count=sum(1 for item in local_performance.timelines if item.observations),
+    )
     notify("analyzing", 69)
 
-    # Global context now becomes actionable. Safely trim high-confidence body
-    # resets/reactions/fumbles at take edges while preserving interior uncertainty.
+    # Global context now becomes actionable. Safely trim high-confidence bad
+    # performance at take edges while candidate-only local events remain evidence.
     takes, temporal_trim_diagnostics = refine_takes_with_temporal_context(takes, whole_context)
     applied_trim_count = sum(1 for item in temporal_trim_diagnostics if item.get("applied"))
     interior_event_count = sum(len(item.get("interior_bad_events") or ()) for item in temporal_trim_diagnostics)
@@ -171,6 +214,7 @@ def process_local_sources(
         candidate_count=len(takes),
         trimmed_take_count=applied_trim_count,
         interior_bad_event_count=interior_event_count,
+        local_candidate_event_count=local_event_count,
     )
     notify("analyzing", 74)
 
