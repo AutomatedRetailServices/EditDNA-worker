@@ -19,6 +19,7 @@ from .local_performance import (
 )
 from .media_probe import probe_media
 from .observability import ExecutionTrace
+from .performance_confirmation import confirm_local_performance_events
 from .pipeline import build_flow_b_draft
 from .providers import NoopSemanticProvider, SemanticProvider, safe_semantic_classify
 from .silence_analysis import word_silence_gaps
@@ -168,6 +169,23 @@ def process_local_sources(
 
     takes = segment_takes(transcript_tuple, hydrated_sources, gaps)
     trace.complete("take_segmentation", candidate_count=len(takes))
+
+    # Promote dense measurements only when visual trajectory + timing + a likely
+    # retry agree. This is the bridge from *_candidate evidence to actionable
+    # wrong_take/retry_setup events; isolated gestures remain non-destructive.
+    whole_context, confirmation_diagnostics = confirm_local_performance_events(
+        takes,
+        local_performance.timelines,
+        whole_context,
+    )
+    confirmed_wrong_takes = sum(1 for item in confirmation_diagnostics if item.get("confirmed_kind") == "wrong_take")
+    confirmed_retry_setups = sum(1 for item in confirmation_diagnostics if item.get("confirmed_kind") == "retry_setup")
+    trace.complete(
+        "performance_confirmation",
+        confirmed_count=len(confirmation_diagnostics),
+        confirmed_wrong_take_count=confirmed_wrong_takes,
+        confirmed_retry_setup_count=confirmed_retry_setups,
+    )
     notify("analyzing", 58)
 
     # Pass 2: take-level visual scoring complements the global timeline.
@@ -205,7 +223,7 @@ def process_local_sources(
     notify("analyzing", 69)
 
     # Global context now becomes actionable. Safely trim high-confidence bad
-    # performance at take edges while candidate-only local events remain evidence.
+    # performance at take edges; confirmed wrong-take events can also drive Clean Cut.
     takes, temporal_trim_diagnostics = refine_takes_with_temporal_context(takes, whole_context)
     applied_trim_count = sum(1 for item in temporal_trim_diagnostics if item.get("applied"))
     interior_event_count = sum(len(item.get("interior_bad_events") or ()) for item in temporal_trim_diagnostics)
@@ -215,6 +233,7 @@ def process_local_sources(
         trimmed_take_count=applied_trim_count,
         interior_bad_event_count=interior_event_count,
         local_candidate_event_count=local_event_count,
+        confirmed_performance_event_count=len(confirmation_diagnostics),
     )
     notify("analyzing", 74)
 
@@ -236,7 +255,9 @@ def process_local_sources(
         take_grouping_provider=take_grouping_provider,
         draft_review_provider=draft_review_provider,
         whole_video_context=whole_context,
-        temporal_trim_diagnostics=temporal_trim_diagnostics,
+        temporal_trim_diagnostics=(*temporal_trim_diagnostics, {
+            "performance_confirmation": list(confirmation_diagnostics)[:300],
+        }),
     )
     notify("draft_ready", 100)
     return replace(result, stage_status={**result.stage_status, **trace.as_dict()})
