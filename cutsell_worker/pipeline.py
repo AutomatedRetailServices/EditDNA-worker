@@ -56,13 +56,17 @@ def build_flow_b_draft(
     composer_provider: ComposerProvider | None = None,
     take_grouping_provider: TakeGroupingProvider | None = None,
     whole_video_context: WholeVideoContext | None = None,
+    temporal_trim_diagnostics: Iterable[dict] = (),
 ) -> ProcessingResult:
-    """Build an editable draft from already-transcribed/segmented takes."""
+    """Build an editable draft after understanding the complete source context."""
     take_tuple = tuple(takes)
     label_map: dict[str, SemanticLabel] = {label.clip_id: label for label in semantic_labels}
     context_text = whole_video_context.compact_text() if whole_video_context is not None else ""
 
-    kept, deterministic_discarded, decisions = apply_clean_cut(take_tuple)
+    # Global context now participates in local keep/cut decisions. This is the key
+    # distinction from transcript-only cleanup: a complete sentence can still be a
+    # clearly failed recording attempt when the temporal performance says so.
+    kept, deterministic_discarded, decisions = apply_clean_cut(take_tuple, whole_video_context)
 
     clean_judged = safe_clean_cut_judge(clean_cut_provider, kept)
     kept, provider_discarded, clean_judge_diagnostics = apply_provider_judgements(kept, clean_judged)
@@ -174,12 +178,18 @@ def build_flow_b_draft(
 
     whole_video_diag = {
         "status": whole_video_context.status.__dict__ if whole_video_context is not None else None,
+        "dominant_edit_mode": whole_video_context.dominant_edit_mode if whole_video_context is not None else "natural",
         "sources": [
             {
                 "source_asset_id": source.source_asset_id,
                 "summary": source.summary,
                 "dominant_style": source.dominant_style,
                 "creator_intent": source.creator_intent,
+                "edit_mode": source.edit_mode,
+                "sales_intent": source.sales_intent,
+                "main_topic": source.main_topic,
+                "product_or_subject": source.product_or_subject,
+                "story_logic": source.story_logic,
                 "events": [event.__dict__ for event in source.events],
             }
             for source in (whole_video_context.sources if whole_video_context is not None else ())
@@ -195,6 +205,7 @@ def build_flow_b_draft(
         discarded=discarded_clips,
         diagnostics={
             "whole_video_context": whole_video_diag,
+            "temporal_performance_trims": list(temporal_trim_diagnostics)[:300],
             "clean_cut_decisions": [decision.__dict__ for decision in decisions],
             "clean_cut_judge_status": clean_judged.status.__dict__,
             "clean_cut_judge": list(clean_judge_diagnostics)[:100],
@@ -226,7 +237,7 @@ def build_flow_b_draft(
         judge_stage = "baseline_complete"
 
     if clean_cut_provider is None:
-        clean_cut_stage = "deterministic_complete"
+        clean_cut_stage = "context_aware_deterministic_complete"
     elif clean_judged.status.status == "applied":
         clean_cut_stage = "provider_complete"
     elif clean_judged.status.status == "provider_error":
@@ -254,9 +265,9 @@ def build_flow_b_draft(
         state=JobState.DRAFT_READY,
         draft=draft,
         stage_status={
-            "whole_video_context": (
-                whole_video_context.status.status if whole_video_context is not None else "not_requested"
-            ),
+            "whole_video_context": whole_video_context.status.status if whole_video_context is not None else "not_requested",
+            "edit_mode": whole_video_context.dominant_edit_mode if whole_video_context is not None else "natural",
+            "temporal_performance": "applied" if tuple(temporal_trim_diagnostics) else "no_edge_trim_needed",
             "clean_cut": clean_cut_stage,
             "take_grouping": grouping_stage,
             "take_judge": judge_stage,
