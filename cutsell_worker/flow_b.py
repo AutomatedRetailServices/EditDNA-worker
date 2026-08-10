@@ -20,6 +20,7 @@ from .source_sampling import sample_source_frames
 from .take_grouping_provider import TakeGroupingProvider
 from .take_judge_provider import TakeJudgeProvider
 from .take_segmentation import segment_takes
+from .temporal_editing import refine_takes_with_temporal_context
 from .usage_limits import check_processing_allowance
 from .visual_analysis import VisualProvider, apply_visual_observations, safe_visual_analyze
 from .whole_video_analysis import WholeVideoProvider, safe_whole_video_analyze
@@ -63,7 +64,6 @@ def process_local_sources(
         ))
     trace.complete("media_probe", source_count=len(hydrated_sources))
 
-    # Trust ffprobe, not client-declared duration, before spending ASR/GPU/API cost.
     usage = check_processing_allowance(
         user_id=request.user_id,
         durations_sec=[source.duration_sec for source in hydrated_sources],
@@ -90,10 +90,10 @@ def process_local_sources(
             ))
     transcript_tuple = tuple(transcripts)
     trace.complete("asr", segment_count=len(transcript_tuple))
-    notify("analyzing", 34)
+    notify("analyzing", 30)
 
-    # Whole-video context happens before take-level editing. It is observational
-    # only: it cannot delete/reorder; downstream stages use it as context.
+    # Pass 1: understand the complete source before destructive editing. This
+    # creates product/topic/story logic plus timestamped performance events.
     if whole_video_provider is not None and hydrated_sources:
         with tempfile.TemporaryDirectory(prefix="cutsell-whole-video-") as whole_dir:
             whole_samples = []
@@ -117,6 +117,7 @@ def process_local_sources(
             trace.complete(
                 "whole_video_context",
                 status=whole_context.status.status,
+                edit_mode=whole_context.dominant_edit_mode,
                 source_count=len(whole_context.sources),
                 event_count=sum(len(item.events) for item in whole_context.sources),
                 frame_count=len(whole_samples),
@@ -134,6 +135,7 @@ def process_local_sources(
     trace.complete("take_segmentation", candidate_count=len(takes))
     notify("analyzing", 58)
 
+    # Pass 2: take-level visual scoring complements the global timeline.
     if visual_provider is not None and takes:
         with tempfile.TemporaryDirectory(prefix="cutsell-frames-") as frame_dir:
             samples = []
@@ -155,7 +157,20 @@ def process_local_sources(
             )
     else:
         trace.complete("visual", status="not_requested", observation_count=0, frame_count=0)
-    notify("analyzing", 72)
+    notify("analyzing", 69)
+
+    # Global context now becomes actionable. Safely trim high-confidence body
+    # resets/reactions/fumbles at take edges while preserving interior uncertainty.
+    takes, temporal_trim_diagnostics = refine_takes_with_temporal_context(takes, whole_context)
+    applied_trim_count = sum(1 for item in temporal_trim_diagnostics if item.get("applied"))
+    interior_event_count = sum(len(item.get("interior_bad_events") or ()) for item in temporal_trim_diagnostics)
+    trace.complete(
+        "temporal_performance",
+        candidate_count=len(takes),
+        trimmed_take_count=applied_trim_count,
+        interior_bad_event_count=interior_event_count,
+    )
+    notify("analyzing", 74)
 
     semantic = safe_semantic_classify(semantic_provider or NoopSemanticProvider(), takes)
     if semantic.status.status in {"provider_error", "provider_unavailable"}:
@@ -174,6 +189,7 @@ def process_local_sources(
         composer_provider=composer_provider,
         take_grouping_provider=take_grouping_provider,
         whole_video_context=whole_context,
+        temporal_trim_diagnostics=temporal_trim_diagnostics,
     )
     notify("draft_ready", 100)
     return replace(result, stage_status={**result.stage_status, **trace.as_dict()})
