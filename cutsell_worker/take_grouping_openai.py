@@ -42,23 +42,27 @@ class OpenAITakeGroupingProvider:
                     "product_visibility": signals.product_visibility,
                     "continuity": signals.continuity,
                     "visual_fumble": signals.visual_fumble,
+                    "expression_naturalness": signals.expression_naturalness,
+                    "gesture_naturalness": signals.gesture_naturalness,
+                    "delivery_energy": signals.delivery_energy,
                 } if signals is not None else {}),
             })
 
         instruction = (
-            "Group these valid TikTok Shop/UGC recording takes by the creator's underlying spoken idea. "
-            "Use the whole-video context to recognize retries and story/demo beats even when wording changes. "
-            "Different wording can still be alternate takes when the creator is clearly retrying the same claim, hook, proof, story beat, CTA, or demonstration idea. "
-            "Do not group clips merely because they share a broad commercial role or product topic. Preserve distinct claims/details as separate groups. "
-            "Use transcript meaning, temporal proximity/source context, and available visual context. Every clip must appear exactly once. "
-            "Return JSON only as {\"groups\":[[\"clip_id\",...],...],\"reason\":\"...\"}."
+            "Group these valid short-form recording takes by the creator's SAME underlying communication attempt. The footage may be sales, natural, or mixed; "
+            "use whole-video context to understand which. Recognize retries even when wording changes: two takes belong together when the creator is clearly "
+            "trying again to express the same specific idea/story beat/hook/demo/claim/reaction/CTA. In natural storytime or talking-head footage, repeated attempts "
+            "at the same sentence or story point are also retries. Do NOT group clips merely because they share a broad topic, product, commercial role, or story. "
+            "Preserve distinct facts, claims, details and sequential story beats as separate groups. Use transcript meaning, temporal proximity, retry/body-reset context "
+            "and visual continuity. Every clip must appear exactly once. Return JSON only as "
+            "{\"groups\":[[\"clip_id\",...],...],\"reason\":\"...\"}."
         )
         response = self._client().responses.create(
             model=self.model,
             input=[
                 {"role": "system", "content": instruction},
                 {"role": "user", "content": json.dumps({
-                    "whole_video_context": context_text[:12000],
+                    "whole_video_context": context_text[:20000],
                     "takes": payload,
                 }, ensure_ascii=False)},
             ],
