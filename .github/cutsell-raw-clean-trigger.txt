@@ -1,1 +1,1 @@
-Trigger RAW to CLEAN CUT benchmark for Editdna longform validation/ using 16 FULL videos.
+Trigger RAW to CLEAN CUT diagnostic for Editdna longform validation/ using 3 FULL videos with MediaPipe/OpenCV dense local performance enabled.
