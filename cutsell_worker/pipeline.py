@@ -161,8 +161,22 @@ def build_flow_b_draft(
     composed_map = {take.clip_id: take for take in composed_takes}
     selected_takes = tuple(composed_map[clip_id] for clip_id in review.ordered_clip_ids)
     selected_ids = {take.clip_id for take in selected_takes}
-    review_removed_ids = set(composed_map) - selected_ids
-    review_removed = tuple(composed_map[clip_id] for clip_id in composition.ordered_clip_ids if clip_id in review_removed_ids)
+
+    # If global story review drops the chosen representative of a retry group, the
+    # underlying idea was removed from the story. Exclude every alternate retry of
+    # that same idea too; otherwise a redundant idea would linger as a fake alternate.
+    initially_removed_ids = set(composed_map) - selected_ids
+    removed_group_ids = {
+        clip_to_group[clip_id]
+        for clip_id in initially_removed_ids
+        if clip_id in clip_to_group
+    }
+    review_removed_ids = {
+        take.clip_id
+        for take in kept
+        if take.clip_id in initially_removed_ids or clip_to_group.get(take.clip_id) in removed_group_ids
+    }
+    review_removed = tuple(take for take in kept if take.clip_id in review_removed_ids)
 
     selected = tuple(
         _draft_clip(
@@ -246,7 +260,8 @@ def build_flow_b_draft(
             "draft_review_issues": list(review.issues),
             "draft_review_reason": review.reason,
             "draft_review_order": list(review.ordered_clip_ids),
-            "draft_review_removed_ids": [clip_id for clip_id in composition.ordered_clip_ids if clip_id in review_removed_ids],
+            "draft_review_removed_ids": [take.clip_id for take in review_removed],
+            "draft_review_removed_group_ids": sorted(removed_group_ids),
         },
     )
 
