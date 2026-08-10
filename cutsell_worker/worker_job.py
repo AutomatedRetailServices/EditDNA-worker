@@ -8,6 +8,7 @@ from .asr import FasterWhisperASR
 from .clean_cut_openai import OpenAICleanCutProvider
 from .composer_openai import OpenAIComposerProvider
 from .config import load_runtime_config
+from .draft_review_openai import OpenAIDraftReviewProvider
 from .draft_store import create_initial_draft
 from .flow_b import process_local_sources
 from .media_probe import probe_media
@@ -113,6 +114,7 @@ def run_flow_b_job(payload: dict) -> dict:
     take_grouping = OpenAITakeGroupingProvider(model=config.semantic_model) if config.semantic_ready else None
     take_judge = OpenAITakeJudgeProvider(model=config.take_judge_model) if config.semantic_ready else None
     composer = OpenAIComposerProvider(model=config.semantic_model) if config.semantic_ready else None
+    draft_review = OpenAIDraftReviewProvider(model=config.semantic_model) if config.semantic_ready else None
     clean_cut_judge = (
         OpenAICleanCutProvider(model=config.clean_cut_judge_model)
         if config.clean_cut_judge_ready
@@ -151,6 +153,7 @@ def run_flow_b_job(payload: dict) -> dict:
                 take_judge_provider=take_judge,
                 clean_cut_provider=clean_cut_judge,
                 composer_provider=composer,
+                draft_review_provider=draft_review,
                 progress=publish,
             )
             serialized = result_to_dict(result)
