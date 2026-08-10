@@ -9,8 +9,9 @@ python-dotenv>=1.0.1
 faster-whisper==1.0.0
 # Dense local temporal eyes. Pin MediaPipe to the legacy Holistic API that
 # exposes face + pose + hands in one tracked video pass on Python 3.11.
+# MediaPipe supplies its compatible cv2 dependency; do not add/replace the
+# base worker's OpenCV stack explicitly.
 mediapipe==0.10.21
-opencv-python-headless==4.10.0.84
 SQLAlchemy>=2.0
 psycopg[binary]>=3.1
 sentry-sdk>=2.0
