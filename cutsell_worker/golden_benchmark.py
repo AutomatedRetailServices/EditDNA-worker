@@ -104,13 +104,16 @@ def evaluate_validation_report(report: dict[str, Any]) -> dict[str, Any]:
         "composer_provider_status",
         "composer_status",
     ) or _provider_status(report, "composer")
+    draft_review_status = _diagnostic_status(diagnostics, "draft_review_status") or _provider_status(report, "draft_review")
+    draft_review_postable = bool(diagnostics.get("draft_review_postable", False))
+    draft_review_issues = list(diagnostics.get("draft_review_issues") or ())
     clean_cut_judge_status = (diagnostics.get("clean_cut_judge_status") or {}).get("status")
     clean_cut_judge_deleted = int(diagnostics.get("clean_cut_judge_deleted_count") or 0)
     clean_cut_judge_mixed = int(diagnostics.get("clean_cut_judge_mixed_count") or 0)
 
-    degraded = {"degraded", "failed", "unavailable", "provider_error", "provider_unavailable"}
+    degraded = {"degraded", "failed", "unavailable", "provider_error", "provider_unavailable", "provider_error_fallback"}
     score = 100 - 35 * len(hard_failures) - 5 * len(warnings)
-    for status in (whole_video_status, semantic_status, visual_status, grouping_status, take_judge_status, composer_status):
+    for status in (whole_video_status, semantic_status, visual_status, grouping_status, take_judge_status, composer_status, draft_review_status):
         if status in degraded:
             score -= 8
     score = max(0, min(100, score))
@@ -126,12 +129,15 @@ def evaluate_validation_report(report: dict[str, Any]) -> dict[str, Any]:
         "selected_duration_sec": report.get("selected_duration_sec"),
         "selected_to_input_ratio": compression_ratio,
         "strategy": report.get("strategy"),
+        "edit_mode": _provider_status(report, "edit_mode"),
         "selected_count": len(selected),
         "alternate_count": len(alternates),
         "discarded_count": len(discarded),
         "retry_group_count": retry_group_count,
         "tiny_fragment_count": tiny_fragments,
         "adjacent_duplicate_count": adjacent_duplicates,
+        "draft_review_postable": draft_review_postable,
+        "draft_review_issues": draft_review_issues,
         "provider_status": {
             "whole_video": whole_video_status,
             "semantic": semantic_status,
@@ -139,6 +145,7 @@ def evaluate_validation_report(report: dict[str, Any]) -> dict[str, Any]:
             "take_grouping": grouping_status,
             "take_judge": take_judge_status,
             "composer": composer_status,
+            "draft_review": draft_review_status,
             "clean_cut": clean_cut_status,
             "clean_cut_judge": str(clean_cut_judge_status or "not_requested"),
         },
@@ -217,7 +224,7 @@ def run_golden_benchmark(
     scores = [int(item["structural_score"]) for item in evaluations]
     provider_stages = (
         "whole_video", "semantic", "visual", "take_grouping",
-        "take_judge", "composer", "clean_cut", "clean_cut_judge",
+        "take_judge", "composer", "draft_review", "clean_cut", "clean_cut_judge",
     )
     provider_counts = {
         stage: dict(Counter(str(item["provider_status"].get(stage) or "unknown") for item in evaluations))
@@ -226,7 +233,7 @@ def run_golden_benchmark(
     total_input_sec = sum(float(item.get("analyzed_duration_sec") or 0.0) for item in evaluations)
     total_output_sec = sum(float(item.get("selected_duration_sec") or 0.0) for item in evaluations)
     return {
-        "schema_version": "cutsell.golden.v2",
+        "schema_version": "cutsell.golden.v3",
         "mode": normalized_mode,
         "video_limit": int(video_limit),
         "window_sec": float(window_sec) if normalized_mode == "bounded" else None,
@@ -235,6 +242,8 @@ def run_golden_benchmark(
         "execution_failure_count": len(failures),
         "structural_pass_count": sum(1 for item in evaluations if item["structural_pass"]),
         "structural_failure_count": sum(1 for item in evaluations if not item["structural_pass"]),
+        "draft_review_postable_count": sum(1 for item in evaluations if item["draft_review_postable"]),
+        "draft_review_needs_attention_count": sum(1 for item in evaluations if not item["draft_review_postable"]),
         "median_structural_score": median(scores) if scores else None,
         "total_input_duration_sec": round(total_input_sec, 3),
         "total_selected_duration_sec": round(total_output_sec, 3),
@@ -247,6 +256,7 @@ def run_golden_benchmark(
         "total_adjacent_duplicates": sum(int(item["adjacent_duplicate_count"]) for item in evaluations),
         "total_clean_cut_judge_deleted": sum(int(item["clean_cut_judge_deleted_count"]) for item in evaluations),
         "total_clean_cut_judge_mixed": sum(int(item["clean_cut_judge_mixed_count"]) for item in evaluations),
+        "edit_mode_counts": dict(Counter(str(item.get("edit_mode") or "unknown") for item in evaluations)),
         "provider_status_counts": provider_counts,
         "failures": failures,
         "results": results,
