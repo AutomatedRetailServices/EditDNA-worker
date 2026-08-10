@@ -53,14 +53,26 @@ class OpenAIWholeVideoProvider:
         content = [{
             "type": "input_text",
             "text": (
-                "You are CutSell Whole-Video Watch + Listen. Observe each entire raw TikTok Shop/UGC source before editing. "
-                "Use the timestamped transcript and ordered frames to understand creator intent, story/demo flow, retries, visual demonstrations, "
-                "obvious recording fumbles/restarts, reactions, product-use moments, and transitions. This stage NEVER deletes or reorders clips. "
-                "Do not label normal personal mannerisms as mistakes. Return JSON only as "
-                "{\"sources\":[{\"source_asset_id\":...,\"summary\":...,\"dominant_style\":...,\"creator_intent\":...,"
-                "\"events\":[{\"start\":0.0,\"end\":0.0,\"kind\":...,\"confidence\":0..1,\"description\":...}]}]}. "
-                "Useful event kinds include warmup, retry, false_start, visual_fumble, product_demo, story_beat, proof, reaction, transition, cta, valid_delivery. "
-                "Timestamps are approximate observations, not cut boundaries. Include every source exactly once."
+                "You are CutSell Whole-Video Watch + Listen. FIRST understand each complete raw recording before any edit decision. "
+                "Treat the ordered frames as a temporal performance sequence and combine them with timestamped speech. Infer what the creator is "
+                "actually trying to communicate, how the performance changes over time, and what narrative exists in the footage. "
+                "Classify edit_mode as sales, natural, or mixed. Sales means the footage genuinely tries to sell/show a product or service; natural "
+                "means storytime, yapping, talking-head, routine/lifestyle, commentary, education, vlog or personal update without a sales goal. "
+                "Never force non-sales footage into a funnel. For sales, understand the product and available sales story without forcing a rigid "
+                "HOOK->PROBLEM->BENEFIT->PROOF->CTA sequence. For natural footage, understand topic, setup, development, payoff/conclusion and useful personality. "
+                "Identify visual hooks, verbal hooks, combined visual_verbal_hook moments and later rehook moments. A silent visual hook can be valuable. "
+                "Observe camera engagement, eye contact, face/expression changes, body/hand movement, product handling, speech/body congruency and delivery. "
+                "Timestamp recording-process failures: false_start, wrong_take, verbal_fumble, visual_fumble, body_reset, retry_setup, frustration, "
+                "breaking_character, recording_joke, accidental_laughter, camera_adjustment, product_handling_mistake, searching_for_words, "
+                "unintentional_dead_air. Also timestamp retry, valid_delivery, product_demo, story_beat, proof, reaction, transition and cta when relevant. "
+                "Do NOT mark an authentic joke/reaction that belongs in the actual story as a recording_joke. Do NOT mark normal individual mannerisms as errors. "
+                "Long silence with no speech AND no visual/story value is unintentional_dead_air; an intentional dramatic/emphasis/reveal pause is meaningful_pause. "
+                "Events describe what happened with the tightest defensible timestamps. This stage does not itself delete or reorder. "
+                "Ignore burned-in captions/stickers/text as a primary editing signal; understand the actual performance and spoken/narrative content. "
+                "Return JSON only as {\"sources\":[{\"source_asset_id\":...,\"summary\":...,\"dominant_style\":...,"
+                "\"creator_intent\":...,\"edit_mode\":\"sales|natural|mixed\",\"sales_intent\":0..1,\"main_topic\":...,"
+                "\"product_or_subject\":...,\"story_logic\":...,\"events\":[{\"start\":0.0,\"end\":0.0,\"kind\":...,"
+                "\"confidence\":0..1,\"description\":...}]}]}. Include every source exactly once."
             ),
         }]
 
@@ -117,7 +129,7 @@ class OpenAIWholeVideoProvider:
                 raise ValueError("whole-video provider returned invalid events")
             events = []
             duration = max(0.0, float(source_duration[source_id]))
-            for event in events_raw[:100]:
+            for event in events_raw[:240]:
                 start = max(0.0, min(duration, float(event.get("start") or 0.0)))
                 end = max(start, min(duration, float(event.get("end") or start)))
                 events.append(TemporalEvent(
@@ -128,12 +140,20 @@ class OpenAIWholeVideoProvider:
                     confidence=self._score(event.get("confidence", 0.5)),
                     description=str(event.get("description") or "")[:300],
                 ))
+            mode = str(item.get("edit_mode") or "natural").strip().lower()
+            if mode not in {"sales", "natural", "mixed"}:
+                mode = "natural"
             contexts.append(SourceVideoContext(
                 source_asset_id=source_id,
-                summary=str(item.get("summary") or "")[:800],
+                summary=str(item.get("summary") or "")[:1000],
                 dominant_style=str(item.get("dominant_style") or "mixed")[:80],
-                creator_intent=str(item.get("creator_intent") or "")[:500],
+                creator_intent=str(item.get("creator_intent") or "")[:600],
                 events=tuple(events),
+                edit_mode=mode,
+                sales_intent=self._score(item.get("sales_intent", 0.0)),
+                main_topic=str(item.get("main_topic") or "")[:500],
+                product_or_subject=str(item.get("product_or_subject") or "")[:500],
+                story_logic=str(item.get("story_logic") or "")[:1200],
             ))
             seen.add(source_id)
         if seen != known:
