@@ -48,14 +48,15 @@ class OpenAITakeJudgeProvider:
                 } if signals is not None else {}),
             })
         instruction = (
-            "Rank alternate recordings of the same sales idea from strongest to weakest like a human TikTok Shop/UGC editor. "
-            "Use the combined Watch + Listen evidence. Prefer complete, natural speech; confident but authentic pacing; "
-            "clear audio; natural facial expression and gestures; appropriate energy; useful eye contact; strong product presentation; "
-            "stable framing; low visible distraction/fumble; and continuity that will cut cleanly with neighboring material. "
-            "Do not reward exaggerated performance merely for being energetic. Do not delete any candidate. "
-            "When evidence is close, preserve the more natural/complete take rather than over-optimizing a single metric. "
-            "Return JSON only as {\"ranked\":[{\"id\":...,\"score\":0..1,\"reason\":...}]}. "
-            "Include every candidate exactly once."
+            "Rank alternate recordings of the same underlying idea from strongest to weakest like a careful human short-form editor. "
+            "The content may be sales, storytime, yapping, talking-head, routine/lifestyle, commentary or education. Use combined Watch + Listen evidence. "
+            "Prefer complete and clear speech, confidence, authentic pacing, camera engagement, useful eye contact, natural facial expression, body/gesture "
+            "congruency with the words, clean audio, appropriate energy, stable framing and low visible fumble/distraction. A grammatically complete line is NOT "
+            "automatically a good take: frustration, breaking character, accidental laughter, searching for words, a body reset or a visible 'I got it wrong' "
+            "reaction can make it a failed take. For genuine product footage, also consider product presentation and sales effectiveness, but never penalize "
+            "non-sales content for lacking a product. Do not reward exaggerated performance merely for energy. Preserve authentic personality and intentional "
+            "humor/reactions that belong to the content rather than the recording process. Do not delete any candidate. Return JSON only as "
+            "{\"ranked\":[{\"id\":...,\"score\":0..1,\"reason\":...}]}. Include every candidate exactly once."
         )
         response = self._client().responses.create(
             model=self.model,
