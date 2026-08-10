@@ -21,16 +21,18 @@ def sample_source_frames(
     source_asset_id: str,
     duration_sec: float,
     output_dir: str,
-    target_interval_sec: float = 1.5,
-    min_frames: int = 8,
-    max_frames: int = 48,
+    target_interval_sec: float = 0.75,
+    min_frames: int = 12,
+    max_frames: int = 120,
     runner: Callable[..., subprocess.CompletedProcess] = subprocess.run,
 ) -> Tuple[SourceFrameSample, ...]:
-    """Observe the entire source at a bounded temporal density.
+    """Observe the complete source at useful temporal density.
 
-    This is intentionally separate from per-take sampling. Whole-source frames give
-    downstream reasoning context about demonstrations, restarts, story beats and
-    transitions before any destructive editing decision is considered.
+    Whole-source sampling is deliberately denser than take-level scoring because
+    its job is to catch short performance transitions: a facial reaction after a
+    good line, body reset, glance away, retry setup, product fumble, visual hook,
+    or a meaningful silent beat. The ceiling keeps API payload/cost bounded while
+    still covering an ordinary short-form raw recording throughout its duration.
     """
     duration = max(0.0, float(duration_sec))
     if duration <= 0.0:
@@ -43,7 +45,7 @@ def sample_source_frames(
 
     directory = Path(output_dir)
     directory.mkdir(parents=True, exist_ok=True)
-    edge = min(0.02, 0.20 / max(1, count))
+    edge = min(0.01, 0.15 / max(1, count))
     if count == 1:
         fractions = (0.5,)
     else:
