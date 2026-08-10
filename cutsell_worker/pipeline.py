@@ -161,6 +161,8 @@ def build_flow_b_draft(
     composed_map = {take.clip_id: take for take in composed_takes}
     selected_takes = tuple(composed_map[clip_id] for clip_id in review.ordered_clip_ids)
     selected_ids = {take.clip_id for take in selected_takes}
+    review_removed_ids = set(composed_map) - selected_ids
+    review_removed = tuple(composed_map[clip_id] for clip_id in composition.ordered_clip_ids if clip_id in review_removed_ids)
 
     selected = tuple(
         _draft_clip(
@@ -179,7 +181,7 @@ def build_flow_b_draft(
             selected=False,
         )
         for take in kept
-        if take.clip_id not in selected_ids
+        if take.clip_id not in selected_ids and take.clip_id not in review_removed_ids
     )
     discarded_clips = tuple(
         _draft_clip(
@@ -188,7 +190,7 @@ def build_flow_b_draft(
             group_id=None,
             selected=False,
         )
-        for take in discarded
+        for take in (*discarded, *review_removed)
     )
 
     whole_video_diag = {
@@ -244,6 +246,7 @@ def build_flow_b_draft(
             "draft_review_issues": list(review.issues),
             "draft_review_reason": review.reason,
             "draft_review_order": list(review.ordered_clip_ids),
+            "draft_review_removed_ids": [clip_id for clip_id in composition.ordered_clip_ids if clip_id in review_removed_ids],
         },
     )
 
