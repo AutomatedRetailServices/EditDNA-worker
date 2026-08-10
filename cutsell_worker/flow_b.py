@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from dataclasses import replace
+import os
 from pathlib import Path
 import tempfile
 from typing import Callable, Mapping
@@ -35,6 +36,19 @@ from .whole_video_analysis import WholeVideoProvider, safe_whole_video_analyze
 ProgressCallback = Callable[[str, int], None]
 
 
+def _resolve_editorial_mode(value: str | None = None) -> str:
+    """Choose whether Flow B stops at universal cleanup or continues to editorial composition.
+
+    `clean_cut` is intentionally the default product behavior: remove recording garbage,
+    resolve retries/best takes, preserve natural source order, and stop. `full` keeps the
+    richer semantic/composer/reviewer stack available for later Natural/Sales editions.
+    """
+    mode = str(value or os.environ.get("CUTSELL_EDITORIAL_MODE") or "clean_cut").strip().lower()
+    if mode not in {"clean_cut", "full"}:
+        raise ValueError("CUTSELL_EDITORIAL_MODE must be clean_cut or full")
+    return mode
+
+
 def process_local_sources(
     request: ProcessingRequest,
     local_paths: Mapping[str, str],
@@ -48,9 +62,17 @@ def process_local_sources(
     take_grouping_provider: TakeGroupingProvider | None = None,
     draft_review_provider: DraftReviewProvider | None = None,
     whole_video_provider: WholeVideoProvider | None = None,
+    editorial_mode: str | None = None,
     progress: ProgressCallback | None = None,
 ) -> ProcessingResult:
-    """Process registered sources all the way from local media to editable draft."""
+    """Process registered sources all the way from local media to editable draft.
+
+    Universal Clean Cut is the default. It keeps Watch + Listen, dense performance,
+    retries, Best Take, dead-air/boundary cleanup and natural order, while deliberately
+    bypassing semantic story labels, global sales/narrative composition and draft-review
+    deletion. The richer editorial stack remains available behind `editorial_mode='full'`.
+    """
+    mode = _resolve_editorial_mode(editorial_mode)
     notify = progress or (lambda _stage, _percent: None)
     trace = ExecutionTrace()
     hydrated_sources = []
@@ -124,7 +146,8 @@ def process_local_sources(
     notify("analyzing", 36)
 
     # Pass 1: understand the complete source before destructive editing. This
-    # creates product/topic/story logic plus timestamped performance events.
+    # creates topic/story context plus timestamped performance events. In clean-cut
+    # mode this context is evidence only; it does not impose a sales/narrative edit.
     if whole_video_provider is not None and hydrated_sources:
         with tempfile.TemporaryDirectory(prefix="cutsell-whole-video-") as whole_dir:
             whole_samples = []
@@ -157,9 +180,6 @@ def process_local_sources(
         whole_context = safe_whole_video_analyze(None, tuple(hydrated_sources), transcript_tuple, ())
         trace.complete("whole_video_context", status="not_requested", source_count=0, event_count=0, frame_count=0)
 
-    # Candidate local events augment the same WholeVideoContext consumed by the
-    # temporal editor/composer/reviewer. Their *_candidate names keep them from
-    # becoming automatic cuts without semantic/retry evidence.
     whole_context = merge_local_events_into_context(whole_context, local_performance.timelines)
     notify("analyzing", 45)
 
@@ -171,8 +191,7 @@ def process_local_sources(
     trace.complete("take_segmentation", candidate_count=len(takes))
 
     # Promote dense measurements only when visual trajectory + timing + a likely
-    # retry agree. This is the bridge from *_candidate evidence to actionable
-    # wrong_take/retry_setup events; isolated gestures remain non-destructive.
+    # retry agree. Isolated gestures remain non-destructive.
     whole_context, confirmation_diagnostics = confirm_local_performance_events(
         takes,
         local_performance.timelines,
@@ -211,9 +230,6 @@ def process_local_sources(
     else:
         trace.complete("visual", status="not_requested", observation_count=0, frame_count=0)
 
-    # Blend dense trajectory evidence into the same MediaSignals already consumed
-    # by Best Take/Clean Cut. Provider semantics are preserved; local evidence adds
-    # temporal coverage for face/body/hands/motion.
     takes = apply_local_performance_to_takes(takes, local_performance.timelines)
     trace.complete(
         "local_performance_fusion",
@@ -222,8 +238,6 @@ def process_local_sources(
     )
     notify("analyzing", 69)
 
-    # Global context now becomes actionable. Safely trim high-confidence bad
-    # performance at take edges; confirmed wrong-take events can also drive Clean Cut.
     takes, temporal_trim_diagnostics = refine_takes_with_temporal_context(takes, whole_context)
     applied_trim_count = sum(1 for item in temporal_trim_diagnostics if item.get("applied"))
     interior_event_count = sum(len(item.get("interior_bad_events") or ()) for item in temporal_trim_diagnostics)
@@ -237,27 +251,42 @@ def process_local_sources(
     )
     notify("analyzing", 74)
 
-    semantic = safe_semantic_classify(semantic_provider or NoopSemanticProvider(), takes)
-    if semantic.status.status in {"provider_error", "provider_unavailable"}:
-        trace.degraded("semantic", reason=semantic.status.reason or semantic.status.status)
+    if mode == "full":
+        semantic = safe_semantic_classify(semantic_provider or NoopSemanticProvider(), takes)
+        if semantic.status.status in {"provider_error", "provider_unavailable"}:
+            trace.degraded("semantic", reason=semantic.status.reason or semantic.status.status)
+        else:
+            trace.complete("semantic", status=semantic.status.status, label_count=len(semantic.labels))
+        semantic_labels = semantic.labels
+        active_composer = composer_provider
+        active_reviewer = draft_review_provider
     else:
-        trace.complete("semantic", status=semantic.status.status, label_count=len(semantic.labels))
-    notify("composing", 84)
+        # Clean Cut stops before Sales/Natural story shaping. Retry grouping + Best
+        # Take remain active because they are core cleanup, not editorial funnel logic.
+        semantic_labels = ()
+        active_composer = None
+        active_reviewer = None
+        trace.complete("semantic", status="not_requested_clean_cut", label_count=0)
+        trace.complete("editorial_composition", status="bypassed_clean_cut")
 
+    notify("composing", 84)
     hydrated_request = replace(request, sources=tuple(hydrated_sources))
     result = build_flow_b_draft(
         hydrated_request,
         takes,
-        semantic.labels,
+        semantic_labels,
         take_judge_provider=take_judge_provider,
         clean_cut_provider=clean_cut_provider,
-        composer_provider=composer_provider,
+        composer_provider=active_composer,
         take_grouping_provider=take_grouping_provider,
-        draft_review_provider=draft_review_provider,
+        draft_review_provider=active_reviewer,
         whole_video_context=whole_context,
         temporal_trim_diagnostics=(*temporal_trim_diagnostics, {
             "performance_confirmation": list(confirmation_diagnostics)[:300],
         }),
     )
     notify("draft_ready", 100)
-    return replace(result, stage_status={**result.stage_status, **trace.as_dict()})
+    return replace(
+        result,
+        stage_status={"editorial_mode": mode, **result.stage_status, **trace.as_dict()},
+    )
