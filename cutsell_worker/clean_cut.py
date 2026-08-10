@@ -1,10 +1,12 @@
-"""Conservative production cleanup for CutSell Flow B."""
+"""Context-aware production cleanup for CutSell Flow B."""
 from __future__ import annotations
 
 import re
 from typing import Iterable, Tuple
 
 from .contracts import CandidateTake, CleanCutDecision
+from .temporal_editing import harmful_coverage_ratio, harmful_events_for_take
+from .whole_video_analysis import WholeVideoContext
 
 _PRODUCTION_PHRASES = (
     "start over",
@@ -28,13 +30,7 @@ _PRODUCTION_PHRASES = (
     "dejame hacerlo de nuevo",
 )
 
-_SHORT_RESTART_MARKERS = {
-    "again",
-    "again.",
-    "otra vez",
-    "de nuevo",
-}
-
+_SHORT_RESTART_MARKERS = {"again", "again.", "otra vez", "de nuevo"}
 _ONE_MORE_RE = re.compile(
     r"\bone more\b\s+(?:time|take|because|cuz|cause|since|you|we|i)\b",
     re.IGNORECASE,
@@ -46,15 +42,20 @@ def _normalized(text: str) -> str:
 
 
 def _looks_like_explicit_recording_direction(text: str) -> bool:
-    if any(phrase in text for phrase in _PRODUCTION_PHRASES):
-        return True
-    if _ONE_MORE_RE.search(text):
-        return True
-    return False
+    return any(phrase in text for phrase in _PRODUCTION_PHRASES) or bool(_ONE_MORE_RE.search(text))
 
 
-def evaluate_take(take: CandidateTake) -> CleanCutDecision:
-    """Delete only obvious production mistakes; uncertainty stays keep=True."""
+def evaluate_take(
+    take: CandidateTake,
+    whole_video_context: WholeVideoContext | None = None,
+) -> CleanCutDecision:
+    """Remove obvious recording-process material while protecting uncertainty.
+
+    Whole-video events are now first-class evidence. A take can therefore be a
+    wrong take even when its transcript is grammatically complete. We only delete
+    from temporal evidence when a high-confidence bad-performance event dominates
+    the take; precise edge reactions/resets are handled earlier by temporal trim.
+    """
     text = _normalized(take.text)
     words = text.split()
     if take.duration_sec <= 0.12:
@@ -67,15 +68,33 @@ def evaluate_take(take: CandidateTake) -> CleanCutDecision:
         return CleanCutDecision(take.clip_id, False, "isolated_restart_marker", 0.94)
     if take.signals and take.signals.silence_ratio >= 0.96 and len(words) <= 1:
         return CleanCutDecision(take.clip_id, False, "unusable_silence", 0.92)
-    if take.signals and take.signals.visual_fumble >= 0.97 and not take.complete_idea:
+
+    harmful = harmful_events_for_take(take, whole_video_context, minimum_confidence=0.76)
+    coverage = harmful_coverage_ratio(take, harmful)
+    if harmful and coverage >= 0.62:
+        strongest = max(harmful, key=lambda item: item.confidence)
+        return CleanCutDecision(
+            take.clip_id,
+            False,
+            f"whole_video_bad_take:{strongest.kind}",
+            min(0.99, max(0.82, strongest.confidence)),
+        )
+
+    # Take-level visual evidence remains a fallback. The lower threshold is safe
+    # only when the spoken idea is incomplete; complete speech needs temporal/global
+    # corroboration above so a normal gesture cannot cause deletion by itself.
+    if take.signals and take.signals.visual_fumble >= 0.90 and not take.complete_idea:
         return CleanCutDecision(take.clip_id, False, "obvious_visual_fumble", 0.90)
     return CleanCutDecision(take.clip_id, True, "valid_or_uncertain_speech", 0.50)
 
 
-def apply_clean_cut(takes: Iterable[CandidateTake]) -> Tuple[Tuple[CandidateTake, ...], Tuple[CandidateTake, ...], Tuple[CleanCutDecision, ...]]:
+def apply_clean_cut(
+    takes: Iterable[CandidateTake],
+    whole_video_context: WholeVideoContext | None = None,
+) -> Tuple[Tuple[CandidateTake, ...], Tuple[CandidateTake, ...], Tuple[CleanCutDecision, ...]]:
     kept, discarded, decisions = [], [], []
     for take in takes:
-        decision = evaluate_take(take)
+        decision = evaluate_take(take, whole_video_context)
         decisions.append(decision)
         (kept if decision.keep else discarded).append(take)
     return tuple(kept), tuple(discarded), tuple(decisions)
