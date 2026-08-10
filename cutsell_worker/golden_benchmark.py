@@ -233,7 +233,7 @@ def run_golden_benchmark(
     total_input_sec = sum(float(item.get("analyzed_duration_sec") or 0.0) for item in evaluations)
     total_output_sec = sum(float(item.get("selected_duration_sec") or 0.0) for item in evaluations)
     return {
-        "schema_version": "cutsell.golden.v3",
+        "schema_version": "cutsell.golden.v2",
         "mode": normalized_mode,
         "video_limit": int(video_limit),
         "window_sec": float(window_sec) if normalized_mode == "bounded" else None,
