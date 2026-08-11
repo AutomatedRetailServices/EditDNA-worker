@@ -30,13 +30,6 @@ def _baseline_groups(takes: Tuple[CandidateTake, ...]) -> Tuple[Tuple[str, ...],
 
 
 def _provider_members_compatible(left: CandidateTake, right: CandidateTake) -> bool:
-    """Require lexical retry evidence before accepting a provider merge.
-
-    Temporal proximity is supporting evidence, never sufficient evidence by itself.
-    Nearby sequential story beats can be only fractions of a second apart, so they
-    still need the same lexical retry signal used by the conservative local grouper.
-    Distant material needs even stronger similarity.
-    """
     if left.source_asset_id != right.source_asset_id:
         return False
     score = retry_similarity(left.text, right.text)
@@ -50,12 +43,7 @@ def _constrain_provider_group(
     group: Tuple[str, ...],
     take_map: dict[str, CandidateTake],
 ) -> Tuple[Tuple[str, ...], ...]:
-    """Split provider groups using complete-link retry compatibility.
-
-    A new member must be compatible with every take already in a cluster. This avoids
-    transitive chains where A resembles B and B resembles C but A and C are distinct
-    story beats that should never become one destructive Best Take group.
-    """
+    """Split provider groups using complete-link retry compatibility."""
     members = [take_map[clip_id] for clip_id in group if clip_id in take_map]
     members.sort(key=lambda take: (take.source_order, take.start, take.end, take.clip_id))
     if len(members) <= 1:
@@ -78,13 +66,6 @@ def _repair_groups(
     groups: Tuple[Tuple[str, ...], ...],
     takes: Tuple[CandidateTake, ...],
 ) -> tuple[Tuple[Tuple[str, ...], ...], bool]:
-    """Constrain provider output without throwing away useful grouping signal.
-
-    Unknown ids and duplicate memberships are ignored. Any omitted real candidate is
-    appended as a singleton group in natural source order. Provider multi-take groups
-    are additionally split when they lack concrete retry evidence, so uncertain
-    semantic similarity cannot silently delete unique material downstream.
-    """
     natural_ids = tuple(take.clip_id for take in takes)
     take_map = {take.clip_id: take for take in takes}
     allowed = set(natural_ids)
@@ -123,7 +104,6 @@ def _group_gap(
     right_group: Tuple[str, ...],
     take_map: dict[str, CandidateTake],
 ) -> float:
-    """Return the smallest temporal separation between two same-source groups."""
     gaps = []
     for left_id in left_group:
         left = take_map[left_id]
@@ -148,13 +128,7 @@ def _groups_should_reconcile(
     right_group: Tuple[str, ...],
     take_map: dict[str, CandidateTake],
 ) -> bool:
-    """Recover provider splits with group-level timing + complete-link similarity.
-
-    Timing is measured between the groups as recording attempts, not independently
-    for each old member. Every cross-pair must still satisfy the lexical threshold,
-    which prevents transitive A~B~C collapse while allowing a genuine multi-attempt
-    retry group to absorb a later near-verbatim attempt.
-    """
+    """Use group-level timing but complete-link lexical evidence."""
     left_members = []
     right_members = []
     for clip_id in left_group:
@@ -227,26 +201,27 @@ def _reconcile_missed_retries(
     return tuple(ordered_groups), changed
 
 
-def interstitial_retry_debris_ids(
+def _absorb_interstitial_retry_debris(
     groups: Tuple[Tuple[str, ...], ...],
     takes: Tuple[CandidateTake, ...],
     *,
     max_retry_span_sec: float = 15.0,
     max_fragment_sec: float = 2.5,
     max_fragment_words: int = 5,
-) -> frozenset[str]:
-    """Identify only short incomplete speech trapped inside a confirmed retry span.
+) -> tuple[Tuple[Tuple[str, ...], ...], bool]:
+    """Fold only short incomplete speech trapped inside a validated retry envelope.
 
-    This is deliberately structural rather than phrase-based: a fragment is removable
-    only when two members of the same validated retry group bracket it in time. A
-    short line outside that retry envelope is preserved, even when it is incomplete.
+    The fragment is not deleted directly. It joins the surrounding retry group so
+    Best Take chooses one representative and the debris remains available as an
+    alternate. Short speech outside a validated retry envelope is untouched.
     """
     take_map = {take.clip_id: take for take in takes}
     ordered = tuple(sorted(takes, key=lambda item: (item.source_order, item.start, item.end, item.clip_id)))
-    grouped_ids = {clip_id for group in groups for clip_id in group if len(group) >= 2}
-    debris: set[str] = set()
+    group_lists = [list(group) for group in groups]
+    membership = {clip_id: index for index, group in enumerate(group_lists) for clip_id in group}
+    changed = False
 
-    for group in groups:
+    for group_index, group in enumerate(tuple(tuple(item) for item in group_lists)):
         if len(group) < 2:
             continue
         members = [take_map[clip_id] for clip_id in group if clip_id in take_map]
@@ -257,20 +232,47 @@ def interstitial_retry_debris_ids(
             if right.start - left.end > max_retry_span_sec:
                 continue
             for candidate in ordered:
-                if candidate.clip_id in grouped_ids:
+                if membership.get(candidate.clip_id) == group_index:
                     continue
                 if candidate.source_asset_id != left.source_asset_id:
                     continue
                 if candidate.start < left.end or candidate.end > right.start:
                     continue
-                words = len(candidate.text.split())
-                if (
-                    not candidate.complete_idea
-                    and candidate.duration_sec <= max_fragment_sec
-                    and words <= max_fragment_words
-                ):
-                    debris.add(candidate.clip_id)
-    return frozenset(debris)
+                if candidate.duration_sec > max_fragment_sec:
+                    continue
+                if len(candidate.text.split()) > max_fragment_words or candidate.complete_idea:
+                    continue
+                old_index = membership.get(candidate.clip_id)
+                if old_index is None or len(group_lists[old_index]) != 1:
+                    continue
+                group_lists[old_index].remove(candidate.clip_id)
+                group_lists[group_index].append(candidate.clip_id)
+                membership[candidate.clip_id] = group_index
+                changed = True
+
+    normalized = []
+    for group in group_lists:
+        if not group:
+            continue
+        unique = sorted(
+            set(group),
+            key=lambda clip_id: (
+                take_map[clip_id].source_order,
+                take_map[clip_id].start,
+                take_map[clip_id].end,
+                clip_id,
+            ),
+        )
+        normalized.append(tuple(unique))
+    normalized.sort(
+        key=lambda group: (
+            take_map[group[0]].source_order,
+            take_map[group[0]].start,
+            take_map[group[0]].end,
+            group[0],
+        )
+    )
+    return tuple(normalized), changed
 
 
 def safe_group_takes(
@@ -295,13 +297,16 @@ def safe_group_takes(
         if not repaired_groups:
             raise ValueError("take grouping produced no valid candidates")
         reconciled_groups, reconciled = _reconcile_missed_retries(repaired_groups, takes)
+        final_groups, debris_absorbed = _absorb_interstitial_retry_debris(reconciled_groups, takes)
         reason = result.reason
         if repaired:
             reason = (reason + "; " if reason else "") + "provider_output_repaired"
         if reconciled:
             reason = (reason + "; " if reason else "") + "local_retry_reconciled"
+        if debris_absorbed:
+            reason = (reason + "; " if reason else "") + "interstitial_retry_debris_absorbed"
         return TakeGroupingProviderResult(
-            reconciled_groups,
+            final_groups,
             ProviderStatus("openai", True, True, "applied"),
             reason,
         )
