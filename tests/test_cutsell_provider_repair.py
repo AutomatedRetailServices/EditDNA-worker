@@ -45,7 +45,10 @@ class _ReviewProvider:
 def test_grouping_repairs_unknown_duplicate_and_omitted_candidates():
     result = safe_group_takes(_GroupingProvider(), _takes())
     assert result.status.status == "applied"
-    assert result.groups == (("a", "b"), ("c",))
+    # Unknown and duplicate ids are repaired, but the provider may no longer force
+    # lexically unrelated nearby clips into one retry group merely because they are
+    # close in time. Preserve uncertain creator speech as separate candidates.
+    assert result.groups == (("a",), ("b",), ("c",))
     assert "provider_output_repaired" in result.reason
 
 
