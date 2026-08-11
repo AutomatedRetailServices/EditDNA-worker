@@ -7,10 +7,16 @@ from cutsell_worker.take_grouping_provider import safe_group_takes
 
 class FakeResponses:
     def __init__(self, output_text):
-        self.output_text = output_text
+        if isinstance(output_text, (list, tuple)):
+            self.output_texts = list(output_text)
+        else:
+            self.output_texts = [output_text]
+        self.calls = 0
 
     def create(self, **kwargs):
-        return SimpleNamespace(output_text=self.output_text)
+        index = min(self.calls, len(self.output_texts) - 1)
+        self.calls += 1
+        return SimpleNamespace(output_text=self.output_texts[index])
 
 
 class FakeClient:
@@ -62,6 +68,19 @@ def test_semantic_grouping_repairs_duplicate_candidate_without_dropping_any_take
     flattened = [item for group in result.groups for item in group]
     assert len(flattened) == 3
     assert set(flattened) == {"a", "b", "c"}
+
+
+def test_malformed_grouping_json_is_repaired_once_before_fallback():
+    client = FakeClient((
+        '{"groups":[["a","b"],["c"]],"reason":"broken",}',
+        '{"groups":[["a","b"],["c"]],"reason":"same retry after format repair"}',
+    ))
+    provider = OpenAITakeGroupingProvider(client_factory=lambda: client)
+    result = safe_group_takes(provider, _takes())
+    assert result.status.status == "applied"
+    assert result.groups == (("a", "b"), ("c",))
+    assert "json_format_repaired" in result.reason
+    assert client.responses.calls == 2
 
 
 def test_distant_broad_topic_group_is_split_to_prevent_overcut():
