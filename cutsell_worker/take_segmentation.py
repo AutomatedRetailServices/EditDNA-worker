@@ -119,25 +119,25 @@ def _repair_boundary_fragments(
 ) -> Tuple[CandidateTake, ...]:
     """Reattach obvious contiguous ASR fragments without deleting real short lines.
 
-    A short utterance that already closes with sentence punctuation is preserved.
-    An open micro-fragment is joined to an immediately adjacent same-source neighbor
-    before Best Take/grouping so isolated words like sentence lead-ins cannot survive
-    as standalone edits merely because ASR split them at a boundary.
+    Two conservative repairs are allowed before Best Take/grouping:
+    1. a tiny suffix may close an unfinished previous phrase, even if that suffix
+       itself carries punctuation (for example an ASR-split final word);
+    2. an open tiny lead-in may join immediately forward into contiguous speech.
+
+    Real pauses, source boundaries, and short utterances that are already complete
+    remain separate.
     """
     ordered = sorted(takes, key=lambda take: (take.source_order, take.start, take.end, take.clip_id))
     repaired: list[CandidateTake] = []
     index = 0
     while index < len(ordered):
         take = ordered[index]
+        is_micro = take.duration_sec <= max_fragment_sec and _word_count(take.text) <= max_fragment_words
+        is_open_micro = is_micro and not _ends_sentence(take.text)
 
-        # Preserve intentionally short but complete utterances such as "Wow!".
-        is_open_micro = (
-            take.duration_sec <= max_fragment_sec
-            and _word_count(take.text) <= max_fragment_words
-            and not _ends_sentence(take.text)
-        )
-
-        if is_open_micro and repaired:
+        # Tiny suffix: the previous phrase is unfinished and this adjacent fragment
+        # completes it. The suffix may legitimately end in punctuation.
+        if is_micro and repaired:
             previous = repaired[-1]
             gap = take.start - previous.end
             same_source = previous.source_asset_id == take.source_asset_id
@@ -146,23 +146,14 @@ def _repair_boundary_fragments(
                 index += 1
                 continue
 
+        # Tiny lead-in: attach forward only across an effectively contiguous
+        # boundary. Never bridge a real pause just to create a longer sentence.
         if is_open_micro and index + 1 < len(ordered):
-            merged = take
-            next_index = index + 1
-            while next_index < len(ordered):
-                following = ordered[next_index]
-                gap = following.start - merged.end
-                if following.source_asset_id != merged.source_asset_id or not (-0.02 <= gap <= max_join_gap_sec):
-                    break
-                merged = _join_takes(merged, following)
-                next_index += 1
-                # Once the fragment has become a meaningful multi-word unit or a
-                # closed sentence, stop absorbing neighboring speech.
-                if _ends_sentence(merged.text) or _word_count(merged.text) >= 4:
-                    break
-            if next_index > index + 1:
-                repaired.append(merged)
-                index = next_index
+            following = ordered[index + 1]
+            gap = following.start - take.end
+            if following.source_asset_id == take.source_asset_id and -0.02 <= gap <= max_join_gap_sec:
+                repaired.append(_join_takes(take, following))
+                index += 2
                 continue
 
         repaired.append(take)
