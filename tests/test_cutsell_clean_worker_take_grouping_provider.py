@@ -127,3 +127,51 @@ def test_nearby_reworded_retry_remains_groupable():
     result = safe_group_takes(provider, takes)
     assert result.status.status == "applied"
     assert result.groups == (("a", "b"),)
+
+
+def test_provider_split_near_duplicate_retries_are_reconciled_locally():
+    takes = (
+        CandidateTake("a", "src", 0, 10.0, 15.0, "Por temporada me salía acné en la espalda que yo resolvía con resorcina"),
+        CandidateTake("b", "src", 0, 18.0, 23.0, "Por temporada me salía acné en la espalda la cual yo resolvía con resorcina"),
+        CandidateTake("c", "src", 0, 40.0, 44.0, "También se me caía mucho el pelo cuando me bañaba"),
+    )
+    provider = OpenAITakeGroupingProvider(
+        client_factory=lambda: FakeClient(
+            '{"groups":[["a"],["b"],["c"]],"reason":"provider missed retry"}'
+        )
+    )
+    result = safe_group_takes(provider, takes)
+    assert result.status.status == "applied"
+    assert result.groups == (("a", "b"), ("c",))
+    assert "local_retry_reconciled" in result.reason
+
+
+def test_nearby_distinct_story_beats_are_not_reconciled_just_for_shared_topic():
+    takes = (
+        CandidateTake("a", "src", 0, 10.0, 14.0, "My morning routine starts with washing my face before breakfast"),
+        CandidateTake("b", "src", 0, 20.0, 25.0, "My morning routine also includes charging the device beside the sink"),
+    )
+    provider = OpenAITakeGroupingProvider(
+        client_factory=lambda: FakeClient(
+            '{"groups":[["a"],["b"]],"reason":"two distinct details"}'
+        )
+    )
+    result = safe_group_takes(provider, takes)
+    assert result.status.status == "applied"
+    assert result.groups == (("a",), ("b",))
+    assert "local_retry_reconciled" not in result.reason
+
+
+def test_far_similar_but_not_near_verbatim_content_stays_separate():
+    takes = (
+        CandidateTake("a", "src", 0, 0.0, 4.0, "People ask me all the time whether I actually enjoy doing this job"),
+        CandidateTake("b", "src", 0, 90.0, 94.0, "People ask me often if this job is something I really enjoy doing"),
+    )
+    provider = OpenAITakeGroupingProvider(
+        client_factory=lambda: FakeClient(
+            '{"groups":[["a"],["b"]],"reason":"separate moments"}'
+        )
+    )
+    result = safe_group_takes(provider, takes)
+    assert result.status.status == "applied"
+    assert result.groups == (("a",), ("b",))
