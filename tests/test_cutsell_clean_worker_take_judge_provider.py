@@ -7,9 +7,16 @@ from cutsell_worker.take_judge_provider import safe_rank_takes
 
 class FakeResponses:
     def __init__(self, output_text):
-        self.output_text = output_text
+        if isinstance(output_text, (list, tuple)):
+            self.output_texts = list(output_text)
+        else:
+            self.output_texts = [output_text]
+        self.calls = 0
+
     def create(self, **kwargs):
-        return SimpleNamespace(output_text=self.output_text)
+        index = min(self.calls, len(self.output_texts) - 1)
+        self.calls += 1
+        return SimpleNamespace(output_text=self.output_texts[index])
 
 
 class FakeClient:
@@ -43,12 +50,24 @@ def test_openai_take_judge_can_choose_stronger_delivery():
     assert [item.clip_id for item in result.ranked] == ["b", "a"]
 
 
-def test_invalid_take_judge_payload_falls_back_without_losing_candidates():
-    provider = OpenAITakeJudgeProvider(
-        client_factory=lambda: FakeClient(
-            '{"ranked":[{"id":"a","score":0.9,"reason":"only one returned"}]}'
-        )
+def test_malformed_take_judge_json_is_repaired_once_before_fallback():
+    client = FakeClient((
+        '{"ranked":[{"id":"b","score":0.94,"reason":"stronger delivery"},{"id":"a","score":0.71,"reason":"weaker"}],}',
+        '{"ranked":[{"id":"b","score":0.94,"reason":"stronger delivery"},{"id":"a","score":0.71,"reason":"weaker"}]}',
+    ))
+    provider = OpenAITakeJudgeProvider(client_factory=lambda: client)
+    result = safe_rank_takes((_take("a", 0.3), _take("b", 0.9)), provider)
+    assert result.status.status == "applied"
+    assert [item.clip_id for item in result.ranked] == ["b", "a"]
+    assert client.responses.calls == 2
+
+
+def test_semantically_invalid_take_judge_payload_still_falls_back():
+    client = FakeClient(
+        '{"ranked":[{"id":"a","score":0.9,"reason":"only one returned"}]}'
     )
+    provider = OpenAITakeJudgeProvider(client_factory=lambda: client)
     result = safe_rank_takes((_take("a", 0.3), _take("b", 0.9)), provider)
     assert result.status.status == "provider_error_fallback"
     assert {item.clip_id for item in result.ranked} == {"a", "b"}
+    assert client.responses.calls == 1
