@@ -22,6 +22,32 @@ class OpenAITakeGroupingProvider:
         from openai import OpenAI
         return OpenAI()
 
+    def _parse_or_repair_json(self, client: object, output_text: str) -> tuple[dict, bool]:
+        """Parse provider JSON; on malformed JSON, ask once for format-only repair.
+
+        The repair request is not allowed to reinterpret grouping semantics. It only
+        converts the already-produced answer into valid JSON with the same clip ids
+        and grouping intent. If repair also fails, the caller falls back safely.
+        """
+        try:
+            return parse_json_object(output_text), False
+        except Exception:
+            repair = client.responses.create(
+                model=self.model,
+                input=[
+                    {
+                        "role": "system",
+                        "content": (
+                            "Repair the following malformed take-grouping response into valid JSON only. "
+                            "Do not add, remove, rename, regroup, or reinterpret clip ids. Preserve the original "
+                            "grouping intent exactly. Return only {\"groups\":[[\"clip_id\",...],...],\"reason\":\"...\"}."
+                        ),
+                    },
+                    {"role": "user", "content": str(output_text)[:30000]},
+                ],
+            )
+            return parse_json_object(repair.output_text), True
+
     def group(
         self,
         takes: Tuple[CandidateTake, ...],
@@ -57,7 +83,8 @@ class OpenAITakeGroupingProvider:
             "and visual continuity. Every clip must appear exactly once. Return JSON only as "
             "{\"groups\":[[\"clip_id\",...],...],\"reason\":\"...\"}."
         )
-        response = self._client().responses.create(
+        client = self._client()
+        response = client.responses.create(
             model=self.model,
             input=[
                 {"role": "system", "content": instruction},
@@ -67,7 +94,7 @@ class OpenAITakeGroupingProvider:
                 }, ensure_ascii=False)},
             ],
         )
-        data = parse_json_object(response.output_text)
+        data, repaired_json = self._parse_or_repair_json(client, response.output_text)
         groups = data.get("groups")
         if not isinstance(groups, list):
             raise ValueError("take grouping returned invalid groups")
@@ -76,8 +103,11 @@ class OpenAITakeGroupingProvider:
             if not isinstance(group, list):
                 raise ValueError("take grouping returned invalid group")
             normalized.append(tuple(str(item) for item in group))
+        reason = str(data.get("reason") or "")[:500]
+        if repaired_json:
+            reason = (reason + "; " if reason else "") + "json_format_repaired"
         return TakeGroupingProviderResult(
             tuple(normalized),
             ProviderStatus("openai", True, True, "applied"),
-            str(data.get("reason") or "")[:500],
+            reason,
         )
