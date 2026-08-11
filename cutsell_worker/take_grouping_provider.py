@@ -118,23 +118,29 @@ def _repair_groups(
     return tuple(normalized), repaired
 
 
-def _strong_reconcile_pair(left: CandidateTake, right: CandidateTake) -> bool:
-    """Return true only for strong evidence of one retry attempt.
+def _group_gap(
+    left_group: Tuple[str, ...],
+    right_group: Tuple[str, ...],
+    take_map: dict[str, CandidateTake],
+) -> float:
+    """Return the smallest temporal separation between two same-source groups."""
+    gaps = []
+    for left_id in left_group:
+        left = take_map[left_id]
+        for right_id in right_group:
+            right = take_map[right_id]
+            if left.source_asset_id != right.source_asset_id:
+                continue
+            gaps.append(max(0.0, max(left.start, right.start) - min(left.end, right.end)))
+    return min(gaps) if gaps else float("inf")
 
-    Provider-split groups are reconciled with distance-aware thresholds while the
-    complete-link group check below prevents transitive A~B~C collapse. This recovers
-    obvious nearby retries and near-verbatim medium-distance retries without treating
-    thematic story beats as alternates.
-    """
-    if left.source_asset_id != right.source_asset_id:
-        return False
-    score = retry_similarity(left.text, right.text)
-    gap = max(0.0, max(left.start, right.start) - min(left.end, right.end))
-    if gap <= 8.0:
-        return score >= 0.80
-    if gap <= 30.0:
-        return score >= 0.95
-    return score >= 0.97
+
+def _reconcile_similarity_threshold(group_gap_sec: float) -> float:
+    if group_gap_sec <= 8.0:
+        return 0.80
+    if group_gap_sec <= 30.0:
+        return 0.90
+    return 0.97
 
 
 def _groups_should_reconcile(
@@ -142,23 +148,37 @@ def _groups_should_reconcile(
     right_group: Tuple[str, ...],
     take_map: dict[str, CandidateTake],
 ) -> bool:
-    """Recover only provider splits with complete-link retry evidence.
+    """Recover provider splits with group-level timing + complete-link similarity.
 
-    Every cross-pair between the two groups must satisfy the strong retry rule. This
-    prevents transitive chains such as A~B and B~C from collapsing A+B+C when A and C
-    are actually distinct story beats.
+    Timing is measured between the groups as recording attempts, not independently
+    for each old member. Every cross-pair must still satisfy the lexical threshold,
+    which prevents transitive A~B~C collapse while allowing a genuine multi-attempt
+    retry group to absorb a later near-verbatim attempt.
     """
-    pairs: list[tuple[CandidateTake, CandidateTake]] = []
-    for left_id in left_group:
-        left = take_map.get(left_id)
-        if left is None:
+    left_members = []
+    right_members = []
+    for clip_id in left_group:
+        take = take_map.get(clip_id)
+        if take is None:
             return False
-        for right_id in right_group:
-            right = take_map.get(right_id)
-            if right is None:
-                return False
-            pairs.append((left, right))
-    return bool(pairs) and all(_strong_reconcile_pair(left, right) for left, right in pairs)
+        left_members.append(take)
+    for clip_id in right_group:
+        take = take_map.get(clip_id)
+        if take is None:
+            return False
+        right_members.append(take)
+    if not left_members or not right_members:
+        return False
+    source_ids = {take.source_asset_id for take in (*left_members, *right_members)}
+    if len(source_ids) != 1:
+        return False
+
+    threshold = _reconcile_similarity_threshold(_group_gap(left_group, right_group, take_map))
+    return all(
+        retry_similarity(left.text, right.text) >= threshold
+        for left in left_members
+        for right in right_members
+    )
 
 
 def _reconcile_missed_retries(
@@ -205,6 +225,52 @@ def _reconcile_missed_retries(
         )
     )
     return tuple(ordered_groups), changed
+
+
+def interstitial_retry_debris_ids(
+    groups: Tuple[Tuple[str, ...], ...],
+    takes: Tuple[CandidateTake, ...],
+    *,
+    max_retry_span_sec: float = 15.0,
+    max_fragment_sec: float = 2.5,
+    max_fragment_words: int = 5,
+) -> frozenset[str]:
+    """Identify only short incomplete speech trapped inside a confirmed retry span.
+
+    This is deliberately structural rather than phrase-based: a fragment is removable
+    only when two members of the same validated retry group bracket it in time. A
+    short line outside that retry envelope is preserved, even when it is incomplete.
+    """
+    take_map = {take.clip_id: take for take in takes}
+    ordered = tuple(sorted(takes, key=lambda item: (item.source_order, item.start, item.end, item.clip_id)))
+    grouped_ids = {clip_id for group in groups for clip_id in group if len(group) >= 2}
+    debris: set[str] = set()
+
+    for group in groups:
+        if len(group) < 2:
+            continue
+        members = [take_map[clip_id] for clip_id in group if clip_id in take_map]
+        members.sort(key=lambda item: (item.source_order, item.start, item.end, item.clip_id))
+        for left, right in zip(members, members[1:]):
+            if left.source_asset_id != right.source_asset_id:
+                continue
+            if right.start - left.end > max_retry_span_sec:
+                continue
+            for candidate in ordered:
+                if candidate.clip_id in grouped_ids:
+                    continue
+                if candidate.source_asset_id != left.source_asset_id:
+                    continue
+                if candidate.start < left.end or candidate.end > right.start:
+                    continue
+                words = len(candidate.text.split())
+                if (
+                    not candidate.complete_idea
+                    and candidate.duration_sec <= max_fragment_sec
+                    and words <= max_fragment_words
+                ):
+                    debris.add(candidate.clip_id)
+    return frozenset(debris)
 
 
 def safe_group_takes(
