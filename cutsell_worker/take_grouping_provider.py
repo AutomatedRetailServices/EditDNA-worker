@@ -110,33 +110,39 @@ def _repair_groups(
     return tuple(normalized), repaired
 
 
+def _strong_reconcile_pair(left: CandidateTake, right: CandidateTake) -> bool:
+    """Return true only for unusually strong evidence of one retry attempt."""
+    if left.source_asset_id != right.source_asset_id:
+        return False
+    score = retry_similarity(left.text, right.text)
+    gap = max(0.0, max(left.start, right.start) - min(left.end, right.end))
+    # Provider-split groups need a stricter standard than ordinary grouping. Nearby
+    # material must be highly similar; distant material must be effectively verbatim.
+    return (gap <= 8.0 and score >= 0.90) or score >= 0.97
+
+
 def _groups_should_reconcile(
     left_group: Tuple[str, ...],
     right_group: Tuple[str, ...],
     take_map: dict[str, CandidateTake],
 ) -> bool:
-    """Recover obvious retries the semantic provider accidentally split.
+    """Recover only provider splits with complete-link retry evidence.
 
-    This is intentionally narrower than ordinary grouping: the groups must contain
-    same-source takes that are either close in time with strong lexical overlap or
-    are near-verbatim repeats. That lets local evidence repair under-grouping without
-    merging distinct ideas that merely share a topic.
+    Every cross-pair between the two groups must satisfy the strong retry rule. This
+    prevents transitive chains such as A~B and B~C from collapsing A+B+C when A and C
+    are actually distinct story beats.
     """
+    pairs: list[tuple[CandidateTake, CandidateTake]] = []
     for left_id in left_group:
         left = take_map.get(left_id)
         if left is None:
-            continue
+            return False
         for right_id in right_group:
             right = take_map.get(right_id)
-            if right is None or left.source_asset_id != right.source_asset_id:
-                continue
-            score = retry_similarity(left.text, right.text)
-            if score < 0.72:
-                continue
-            gap = max(0.0, max(left.start, right.start) - min(left.end, right.end))
-            if gap <= 30.0 or score >= 0.90:
-                return True
-    return False
+            if right is None:
+                return False
+            pairs.append((left, right))
+    return bool(pairs) and all(_strong_reconcile_pair(left, right) for left, right in pairs)
 
 
 def _reconcile_missed_retries(
