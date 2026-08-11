@@ -175,3 +175,35 @@ def test_far_similar_but_not_near_verbatim_content_stays_separate():
     result = safe_group_takes(provider, takes)
     assert result.status.status == "applied"
     assert result.groups == (("a",), ("b",))
+
+
+def test_moderately_similar_nearby_provider_splits_stay_separate():
+    takes = (
+        CandidateTake("a", "src", 0, 10.0, 14.0, "I had acne on my back during the summer and used a treatment for it"),
+        CandidateTake("b", "src", 0, 18.0, 22.0, "I had acne on my back during the summer but my skin also became very dry"),
+    )
+    provider = OpenAITakeGroupingProvider(
+        client_factory=lambda: FakeClient(
+            '{"groups":[["a"],["b"]],"reason":"distinct details despite shared setup"}'
+        )
+    )
+    result = safe_group_takes(provider, takes)
+    assert result.status.status == "applied"
+    assert result.groups == (("a",), ("b",))
+
+
+def test_reconciliation_requires_every_cross_pair_not_transitive_chain():
+    takes = (
+        CandidateTake("a", "src", 0, 0.0, 4.0, "This serum cleared the acne on my back in the summer"),
+        CandidateTake("b", "src", 0, 6.0, 10.0, "This serum cleared the acne on my back during the summer"),
+        CandidateTake("c", "src", 0, 12.0, 16.0, "During the summer this serum helped the dry skin on my back"),
+    )
+    provider = OpenAITakeGroupingProvider(
+        client_factory=lambda: FakeClient(
+            '{"groups":[["a"],["b"],["c"]],"reason":"three separate groups"}'
+        )
+    )
+    result = safe_group_takes(provider, takes)
+    assert result.status.status == "applied"
+    assert result.groups[0] == ("a", "b")
+    assert result.groups[1] == ("c",)
