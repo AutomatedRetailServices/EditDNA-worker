@@ -63,6 +63,21 @@ def _ends_sentence(text: str) -> bool:
     return bool(re.search(r"[.!?][\"'”’)]*\s*$", text.strip()))
 
 
+def _looks_complete_idea(text: str, duration_sec: float) -> bool:
+    """Conservatively mark only short open speech as structurally incomplete.
+
+    This flag is evidence, not a deletion rule. Short intentional lines can remain
+    in the edit unless visual/performance or Best Take evidence rejects them.
+    Longer speech is treated as potentially complete even when ASR omits punctuation.
+    """
+    if _ends_sentence(text):
+        return True
+    words = _word_count(text)
+    if words >= 6 or duration_sec >= 3.0:
+        return True
+    return False
+
+
 def _merge_signals(left: CandidateTake, right: CandidateTake) -> MediaSignals | None:
     if left.signals is None and right.signals is None:
         return None
@@ -97,6 +112,7 @@ def _merge_signals(left: CandidateTake, right: CandidateTake) -> MediaSignals | 
 
 def _join_takes(left: CandidateTake, right: CandidateTake) -> CandidateTake:
     text = f"{left.text.rstrip()} {right.text.lstrip()}".strip()
+    duration = max(0.0, right.end - left.start)
     return CandidateTake(
         clip_id=stable_clip_id(left.source_asset_id, left.start, right.end, text),
         source_asset_id=left.source_asset_id,
@@ -106,7 +122,7 @@ def _join_takes(left: CandidateTake, right: CandidateTake) -> CandidateTake:
         text=text,
         words=tuple(left.words) + tuple(right.words),
         signals=_merge_signals(left, right),
-        complete_idea=left.complete_idea and right.complete_idea,
+        complete_idea=_looks_complete_idea(text, duration),
     )
 
 
@@ -184,6 +200,6 @@ def segment_takes(
                 text=text,
                 words=segment.words,
                 signals=signals,
-                complete_idea=True,
+                complete_idea=_looks_complete_idea(text, end - start),
             ))
     return _repair_boundary_fragments(output)
