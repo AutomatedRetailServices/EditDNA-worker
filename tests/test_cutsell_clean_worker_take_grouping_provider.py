@@ -180,6 +180,40 @@ def test_provider_split_near_duplicate_retries_are_reconciled_locally():
     assert "local_retry_reconciled" in result.reason
 
 
+def test_run12_nearby_acne_retry_is_recovered_without_broad_topic_merge():
+    takes = (
+        CandidateTake("a", "src", 0, 10.0, 14.0, "por temporada me salía acné en la"),
+        CandidateTake("b", "src", 0, 20.9, 25.0, "por temporada me salía acné en la espalda la cual yo resorbí"),
+        CandidateTake("c", "src", 0, 28.0, 32.0, "también tuve problemas de digestión en donde me"),
+    )
+    provider = OpenAITakeGroupingProvider(
+        client_factory=lambda: FakeClient(
+            '{"groups":[["a"],["b"],["c"]],"reason":"provider split nearby retries"}'
+        )
+    )
+    result = safe_group_takes(provider, takes)
+    assert result.status.status == "applied"
+    assert result.groups == (("a", "b"), ("c",))
+    assert "local_retry_reconciled" in result.reason
+
+
+def test_run12_medium_distance_near_verbatim_retry_is_recovered():
+    takes = (
+        CandidateTake("a", "src", 0, 0.0, 5.0, "People ask me all the time do you actually have fun doing your job and the answer is yes"),
+        CandidateTake("b", "src", 0, 19.3, 24.0, "People ask me all the time. Do you actually have fun in your job? And the answer is yes, obviously"),
+        CandidateTake("c", "src", 0, 30.0, 34.0, "The best part is getting to create videos with my friends"),
+    )
+    provider = OpenAITakeGroupingProvider(
+        client_factory=lambda: FakeClient(
+            '{"groups":[["a"],["b"],["c"]],"reason":"provider split same sentence"}'
+        )
+    )
+    result = safe_group_takes(provider, takes)
+    assert result.status.status == "applied"
+    assert result.groups == (("a", "b"), ("c",))
+    assert "local_retry_reconciled" in result.reason
+
+
 def test_nearby_distinct_story_beats_are_not_reconciled_just_for_shared_topic():
     takes = (
         CandidateTake("a", "src", 0, 10.0, 14.0, "My morning routine starts with washing my face before breakfast"),
