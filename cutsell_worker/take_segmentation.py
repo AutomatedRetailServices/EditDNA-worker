@@ -95,38 +95,78 @@ def _merge_signals(left: CandidateTake, right: CandidateTake) -> MediaSignals | 
     )
 
 
+def _join_takes(left: CandidateTake, right: CandidateTake) -> CandidateTake:
+    text = f"{left.text.rstrip()} {right.text.lstrip()}".strip()
+    return CandidateTake(
+        clip_id=stable_clip_id(left.source_asset_id, left.start, right.end, text),
+        source_asset_id=left.source_asset_id,
+        source_order=left.source_order,
+        start=left.start,
+        end=right.end,
+        text=text,
+        words=tuple(left.words) + tuple(right.words),
+        signals=_merge_signals(left, right),
+        complete_idea=left.complete_idea and right.complete_idea,
+    )
+
+
 def _repair_boundary_fragments(
     takes: Iterable[CandidateTake],
     *,
-    max_fragment_sec: float = 0.45,
-    max_join_gap_sec: float = 0.12,
+    max_fragment_sec: float = 1.5,
+    max_fragment_words: int = 3,
+    max_join_gap_sec: float = 0.16,
 ) -> Tuple[CandidateTake, ...]:
-    """Reattach obvious tiny ASR tail fragments to the prior spoken idea."""
+    """Reattach obvious contiguous ASR fragments without deleting real short lines.
+
+    A short utterance that already closes with sentence punctuation is preserved.
+    An open micro-fragment is joined to an immediately adjacent same-source neighbor
+    before Best Take/grouping so isolated words like sentence lead-ins cannot survive
+    as standalone edits merely because ASR split them at a boundary.
+    """
     ordered = sorted(takes, key=lambda take: (take.source_order, take.start, take.end, take.clip_id))
     repaired: list[CandidateTake] = []
-    for take in ordered:
-        if repaired:
+    index = 0
+    while index < len(ordered):
+        take = ordered[index]
+
+        # Preserve intentionally short but complete utterances such as "Wow!".
+        is_open_micro = (
+            take.duration_sec <= max_fragment_sec
+            and _word_count(take.text) <= max_fragment_words
+            and not _ends_sentence(take.text)
+        )
+
+        if is_open_micro and repaired:
             previous = repaired[-1]
             gap = take.start - previous.end
-            tiny_tail = take.duration_sec <= max_fragment_sec and _word_count(take.text) <= 1
             same_source = previous.source_asset_id == take.source_asset_id
-            prior_is_open = not _ends_sentence(previous.text)
-            if same_source and tiny_tail and prior_is_open and -0.02 <= gap <= max_join_gap_sec:
-                text = f"{previous.text.rstrip()} {take.text.lstrip()}".strip()
-                merged = CandidateTake(
-                    clip_id=stable_clip_id(previous.source_asset_id, previous.start, take.end, text),
-                    source_asset_id=previous.source_asset_id,
-                    source_order=previous.source_order,
-                    start=previous.start,
-                    end=take.end,
-                    text=text,
-                    words=tuple(previous.words) + tuple(take.words),
-                    signals=_merge_signals(previous, take),
-                    complete_idea=previous.complete_idea and take.complete_idea,
-                )
-                repaired[-1] = merged
+            if same_source and not _ends_sentence(previous.text) and -0.02 <= gap <= max_join_gap_sec:
+                repaired[-1] = _join_takes(previous, take)
+                index += 1
                 continue
+
+        if is_open_micro and index + 1 < len(ordered):
+            merged = take
+            next_index = index + 1
+            while next_index < len(ordered):
+                following = ordered[next_index]
+                gap = following.start - merged.end
+                if following.source_asset_id != merged.source_asset_id or not (-0.02 <= gap <= max_join_gap_sec):
+                    break
+                merged = _join_takes(merged, following)
+                next_index += 1
+                # Once the fragment has become a meaningful multi-word unit or a
+                # closed sentence, stop absorbing neighboring speech.
+                if _ends_sentence(merged.text) or _word_count(merged.text) >= 4:
+                    break
+            if next_index > index + 1:
+                repaired.append(merged)
+                index = next_index
+                continue
+
         repaired.append(take)
+        index += 1
     return tuple(repaired)
 
 
