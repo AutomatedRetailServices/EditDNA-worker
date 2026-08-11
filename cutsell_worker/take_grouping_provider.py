@@ -30,18 +30,20 @@ def _baseline_groups(takes: Tuple[CandidateTake, ...]) -> Tuple[Tuple[str, ...],
 
 
 def _provider_members_compatible(left: CandidateTake, right: CandidateTake) -> bool:
-    """Require concrete retry evidence before accepting a provider merge.
+    """Require lexical retry evidence before accepting a provider merge.
 
-    Nearby attempts can legitimately use different wording, while distant material
-    needs very strong lexical similarity to be treated as the same retry. This errs
-    toward preserving unique content instead of letting a broad semantic grouping
-    create destructive overcut.
+    Temporal proximity is supporting evidence, never sufficient evidence by itself.
+    Nearby sequential story beats can be only fractions of a second apart, so they
+    still need the same lexical retry signal used by the conservative local grouper.
+    Distant material needs even stronger similarity.
     """
-    if left.source_asset_id == right.source_asset_id:
-        gap = max(0.0, max(left.start, right.start) - min(left.end, right.end))
-        if gap <= 8.0:
-            return True
-    return retry_similarity(left.text, right.text) >= 0.82
+    if left.source_asset_id != right.source_asset_id:
+        return False
+    score = retry_similarity(left.text, right.text)
+    gap = max(0.0, max(left.start, right.start) - min(left.end, right.end))
+    if gap <= 8.0:
+        return score >= 0.72
+    return score >= 0.82
 
 
 def _constrain_provider_group(
