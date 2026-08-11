@@ -55,7 +55,7 @@ def test_open_leadin_fragment_is_joined_forward_before_best_take():
         TranscriptSegment(
             source_asset_id="src-1",
             start=1.55,
-            end=4.2,
+            end=3.2,
             text="one time I was in LA.",
             words=(
                 Word("one", 1.55, 1.8, 0.9),
@@ -63,7 +63,7 @@ def test_open_leadin_fragment_is_joined_forward_before_best_take():
                 Word("I", 2.0, 2.1, 0.9),
                 Word("was", 2.1, 2.4, 0.9),
                 Word("in", 2.4, 2.6, 0.9),
-                Word("LA.", 3.6, 4.2, 0.9),
+                Word("LA.", 2.6, 3.2, 0.9),
             ),
         ),
     )
@@ -71,7 +71,7 @@ def test_open_leadin_fragment_is_joined_forward_before_best_take():
     assert len(takes) == 1
     assert takes[0].text == "So one time I was in LA."
     assert takes[0].start == 1.0
-    assert takes[0].end == 4.2
+    assert takes[0].end == 3.2
 
 
 def test_open_micro_fragment_chain_is_coalesced_until_meaningful():
