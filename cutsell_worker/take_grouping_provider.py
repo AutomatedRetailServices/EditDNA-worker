@@ -119,14 +119,22 @@ def _repair_groups(
 
 
 def _strong_reconcile_pair(left: CandidateTake, right: CandidateTake) -> bool:
-    """Return true only for unusually strong evidence of one retry attempt."""
+    """Return true only for strong evidence of one retry attempt.
+
+    Provider-split groups are reconciled with distance-aware thresholds while the
+    complete-link group check below prevents transitive A~B~C collapse. This recovers
+    obvious nearby retries and near-verbatim medium-distance retries without treating
+    thematic story beats as alternates.
+    """
     if left.source_asset_id != right.source_asset_id:
         return False
     score = retry_similarity(left.text, right.text)
     gap = max(0.0, max(left.start, right.start) - min(left.end, right.end))
-    # Provider-split groups need a stricter standard than ordinary grouping. Nearby
-    # material must be highly similar; distant material must be effectively verbatim.
-    return (gap <= 8.0 and score >= 0.90) or score >= 0.97
+    if gap <= 8.0:
+        return score >= 0.80
+    if gap <= 30.0:
+        return score >= 0.95
+    return score >= 0.97
 
 
 def _groups_should_reconcile(
