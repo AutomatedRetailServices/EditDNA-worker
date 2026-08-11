@@ -8,6 +8,7 @@ from cutsell_worker.contracts import CandidateTake, EditStrategy, SemanticLabel,
 class FakeResponses:
     def __init__(self, output_text):
         self.output_text = output_text
+
     def create(self, **kwargs):
         return SimpleNamespace(output_text=self.output_text)
 
@@ -44,23 +45,25 @@ def test_flexible_composer_can_reorder_only_existing_real_clips():
     assert result.ordered_clip_ids == ("b", "a", "c")
 
 
-def test_flexible_composer_rejects_dropped_clip_and_falls_back_to_natural_order():
+def test_flexible_composer_repairs_dropped_clip_without_losing_source_material():
     provider = OpenAIComposerProvider(
         client_factory=lambda: FakeClient(
             '{"ordered_clip_ids":["a","c"],"reason":"drop one"}'
         )
     )
     result = safe_compose_order(provider, _takes(), _labels(), EditStrategy.STORYTELLING)
-    assert result.status.status == "provider_error_fallback"
-    assert result.ordered_clip_ids == ("a", "b", "c")
+    assert result.status.status == "applied"
+    assert result.ordered_clip_ids == ("a", "c", "b")
+    assert set(result.ordered_clip_ids) == {"a", "b", "c"}
 
 
-def test_flexible_composer_rejects_duplicate_or_invented_clip():
+def test_flexible_composer_repairs_duplicate_or_invented_clip_safely():
     provider = OpenAIComposerProvider(
         client_factory=lambda: FakeClient(
             '{"ordered_clip_ids":["a","a","fake"],"reason":"invalid"}'
         )
     )
     result = safe_compose_order(provider, _takes(), _labels(), EditStrategy.DIRECT_SALES)
-    assert result.status.status == "provider_error_fallback"
+    assert result.status.status == "applied"
     assert result.ordered_clip_ids == ("a", "b", "c")
+    assert len(set(result.ordered_clip_ids)) == 3
