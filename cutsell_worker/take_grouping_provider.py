@@ -110,6 +110,81 @@ def _repair_groups(
     return tuple(normalized), repaired
 
 
+def _groups_should_reconcile(
+    left_group: Tuple[str, ...],
+    right_group: Tuple[str, ...],
+    take_map: dict[str, CandidateTake],
+) -> bool:
+    """Recover obvious retries the semantic provider accidentally split.
+
+    This is intentionally narrower than ordinary grouping: the groups must contain
+    same-source takes that are either close in time with strong lexical overlap or
+    are near-verbatim repeats. That lets local evidence repair under-grouping without
+    merging distinct ideas that merely share a topic.
+    """
+    for left_id in left_group:
+        left = take_map.get(left_id)
+        if left is None:
+            continue
+        for right_id in right_group:
+            right = take_map.get(right_id)
+            if right is None or left.source_asset_id != right.source_asset_id:
+                continue
+            score = retry_similarity(left.text, right.text)
+            if score < 0.72:
+                continue
+            gap = max(0.0, max(left.start, right.start) - min(left.end, right.end))
+            if gap <= 30.0 or score >= 0.90:
+                return True
+    return False
+
+
+def _reconcile_missed_retries(
+    groups: Tuple[Tuple[str, ...], ...],
+    takes: Tuple[CandidateTake, ...],
+) -> tuple[Tuple[Tuple[str, ...], ...], bool]:
+    if len(groups) <= 1:
+        return groups, False
+    take_map = {take.clip_id: take for take in takes}
+    merged: list[list[str]] = []
+    changed = False
+
+    for group in groups:
+        target_index = None
+        for index, existing in enumerate(merged):
+            if _groups_should_reconcile(tuple(existing), group, take_map):
+                target_index = index
+                break
+        if target_index is None:
+            merged.append(list(group))
+        else:
+            merged[target_index].extend(group)
+            changed = True
+
+    ordered_groups: list[Tuple[str, ...]] = []
+    for group in merged:
+        unique = {clip_id for clip_id in group}
+        ordered = sorted(
+            unique,
+            key=lambda clip_id: (
+                take_map[clip_id].source_order,
+                take_map[clip_id].start,
+                take_map[clip_id].end,
+                clip_id,
+            ),
+        )
+        ordered_groups.append(tuple(ordered))
+    ordered_groups.sort(
+        key=lambda group: (
+            take_map[group[0]].source_order,
+            take_map[group[0]].start,
+            take_map[group[0]].end,
+            group[0],
+        )
+    )
+    return tuple(ordered_groups), changed
+
+
 def safe_group_takes(
     provider: TakeGroupingProvider | None,
     takes: Tuple[CandidateTake, ...],
@@ -131,11 +206,14 @@ def safe_group_takes(
         repaired_groups, repaired = _repair_groups(normalized_input, takes)
         if not repaired_groups:
             raise ValueError("take grouping produced no valid candidates")
+        reconciled_groups, reconciled = _reconcile_missed_retries(repaired_groups, takes)
         reason = result.reason
         if repaired:
             reason = (reason + "; " if reason else "") + "provider_output_repaired"
+        if reconciled:
+            reason = (reason + "; " if reason else "") + "local_retry_reconciled"
         return TakeGroupingProviderResult(
-            repaired_groups,
+            reconciled_groups,
             ProviderStatus("openai", True, True, "applied"),
             reason,
         )
