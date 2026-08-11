@@ -6,7 +6,7 @@ from typing import Protocol, Tuple
 
 from .contracts import CandidateTake
 from .providers import ProviderStatus
-from .take_grouping import group_takes
+from .take_grouping import group_takes, retry_similarity
 
 
 @dataclass(frozen=True)
@@ -29,6 +29,43 @@ def _baseline_groups(takes: Tuple[CandidateTake, ...]) -> Tuple[Tuple[str, ...],
     return tuple(tuple(item.clip_id for item in members) for members in grouped.values())
 
 
+def _provider_members_compatible(left: CandidateTake, right: CandidateTake) -> bool:
+    """Require concrete retry evidence before accepting a provider merge.
+
+    Nearby attempts can legitimately use different wording, while distant material
+    needs very strong lexical similarity to be treated as the same retry. This errs
+    toward preserving unique content instead of letting a broad semantic grouping
+    create destructive overcut.
+    """
+    if left.source_asset_id == right.source_asset_id:
+        gap = max(0.0, max(left.start, right.start) - min(left.end, right.end))
+        if gap <= 8.0:
+            return True
+    return retry_similarity(left.text, right.text) >= 0.82
+
+
+def _constrain_provider_group(
+    group: Tuple[str, ...],
+    take_map: dict[str, CandidateTake],
+) -> Tuple[Tuple[str, ...], ...]:
+    members = [take_map[clip_id] for clip_id in group if clip_id in take_map]
+    members.sort(key=lambda take: (take.source_order, take.start, take.end, take.clip_id))
+    if len(members) <= 1:
+        return (tuple(take.clip_id for take in members),) if members else ()
+
+    clusters: list[list[CandidateTake]] = []
+    for take in members:
+        placed = False
+        for cluster in clusters:
+            if any(_provider_members_compatible(take, existing) for existing in cluster):
+                cluster.append(take)
+                placed = True
+                break
+        if not placed:
+            clusters.append([take])
+    return tuple(tuple(take.clip_id for take in cluster) for cluster in clusters)
+
+
 def _repair_groups(
     groups: Tuple[Tuple[str, ...], ...],
     takes: Tuple[CandidateTake, ...],
@@ -36,10 +73,12 @@ def _repair_groups(
     """Constrain provider output without throwing away useful grouping signal.
 
     Unknown ids and duplicate memberships are ignored. Any omitted real candidate is
-    appended as a singleton group in natural source order. This preserves every real
-    take exactly once while allowing a mostly-correct provider response to survive.
+    appended as a singleton group in natural source order. Provider multi-take groups
+    are additionally split when they lack concrete retry evidence, so uncertain
+    semantic similarity cannot silently delete unique material downstream.
     """
     natural_ids = tuple(take.clip_id for take in takes)
+    take_map = {take.clip_id: take for take in takes}
     allowed = set(natural_ids)
     seen: set[str] = set()
     repaired = False
@@ -55,7 +94,10 @@ def _repair_groups(
             seen.add(clip_id)
             kept.append(clip_id)
         if kept:
-            normalized.append(tuple(kept))
+            constrained = _constrain_provider_group(tuple(kept), take_map)
+            if len(constrained) > 1:
+                repaired = True
+            normalized.extend(group for group in constrained if group)
         elif raw_group:
             repaired = True
 
