@@ -102,6 +102,8 @@ class OpenAIVisualProvider:
         seen = set()
         observations = []
         for item in items:
+            if not isinstance(item, dict):
+                raise ValueError("visual provider returned invalid clip item")
             clip_id = str(item.get("id") or "")
             if clip_id not in known or clip_id in seen:
                 raise ValueError("visual provider returned invalid clip id")
@@ -124,6 +126,29 @@ class OpenAIVisualProvider:
             raise ValueError("visual provider omitted takes")
         return tuple(observations)
 
+    def _analyze_batch_with_recovery(
+        self,
+        takes: Tuple[CandidateTake, ...],
+        frames_by_clip: dict[str, list[FrameSample]],
+    ) -> Tuple[VisualObservation, ...]:
+        """Recover from malformed model output without losing a whole raw video.
+
+        A multi-take visual request may occasionally omit one take or return one
+        malformed score. Instead of degrading every take in the source, split the
+        failed batch and retry smaller independent windows. For a single take we
+        retry once, then surface the real failure to the provider boundary.
+        """
+        try:
+            return self._analyze_batch(takes, frames_by_clip)
+        except ValueError:
+            if len(takes) > 1:
+                middle = len(takes) // 2
+                left = self._analyze_batch_with_recovery(takes[:middle], frames_by_clip)
+                right = self._analyze_batch_with_recovery(takes[middle:], frames_by_clip)
+                return (*left, *right)
+            # One malformed single-take response gets one fresh model attempt.
+            return self._analyze_batch(takes, frames_by_clip)
+
     def analyze(
         self,
         takes: Tuple[CandidateTake, ...],
@@ -139,7 +164,8 @@ class OpenAIVisualProvider:
         size = max(1, min(12, int(self.batch_size)))
         observations = []
         for start in range(0, len(takes), size):
-            observations.extend(self._analyze_batch(takes[start:start + size], frames_by_clip))
+            batch = takes[start:start + size]
+            observations.extend(self._analyze_batch_with_recovery(batch, frames_by_clip))
 
         return VisualProviderResult(
             observations=tuple(observations),
