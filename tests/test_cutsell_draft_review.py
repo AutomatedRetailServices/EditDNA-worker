@@ -46,7 +46,7 @@ def test_review_can_remove_redundant_clip_and_reorder_existing_material():
     assert result.postable is True
 
 
-def test_review_cannot_invent_unknown_clip():
+def test_review_sanitizes_unknown_clip_and_keeps_valid_subset():
     takes = (_take("a", "hook", 0), _take("b", "payoff", 3))
     result = safe_review_draft(
         Reviewer(("a", "invented")),
@@ -54,12 +54,12 @@ def test_review_cannot_invent_unknown_clip():
         (),
         EditStrategy.STORYTELLING,
     )
-    assert result.ordered_clip_ids == ("a", "b")
-    assert result.postable is False
-    assert result.status.status == "provider_error_fallback"
+    assert result.ordered_clip_ids == ("a",)
+    assert result.status.status == "applied"
+    assert all(item in {"a", "b"} for item in result.ordered_clip_ids)
 
 
-def test_review_cannot_duplicate_clip():
+def test_review_sanitizes_duplicate_clip_without_duplication():
     takes = (_take("a", "hook", 0), _take("b", "payoff", 3))
     result = safe_review_draft(
         Reviewer(("a", "a")),
@@ -67,5 +67,6 @@ def test_review_cannot_duplicate_clip():
         (),
         EditStrategy.STORYTELLING,
     )
-    assert result.ordered_clip_ids == ("a", "b")
-    assert result.status.status == "provider_error_fallback"
+    assert result.ordered_clip_ids == ("a",)
+    assert result.status.status == "applied"
+    assert len(set(result.ordered_clip_ids)) == len(result.ordered_clip_ids)
