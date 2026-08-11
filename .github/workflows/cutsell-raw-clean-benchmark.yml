@@ -37,6 +37,7 @@ jobs:
       S3_BUCKET: ${{ secrets.S3_BUCKET }}
       OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
       CUTSELL_VALIDATION_PREFIX: Editdna longform validation/
+      CUTSELL_EDITORIAL_MODE: clean_cut
       CUTSELL_ASR_MODEL: ${{ inputs.asr_model || 'medium' }}
       CUTSELL_CLEAN_CUT_JUDGE: "0"
       CUTSELL_SEMANTIC_MODEL: gpt-4o-mini
