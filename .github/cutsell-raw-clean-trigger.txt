@@ -1,1 +1,1 @@
-Trigger PURE CLEAN CUT diagnostic for Editdna longform validation/ using the same 3 FULL videos. Explicit CUTSELL_EDITORIAL_MODE=clean_cut; no semantic sales labeling, no sales composer, no editorial draft reviewer.
+Trigger PURE CLEAN CUT diagnostic for Editdna longform validation/ using the same 3 FULL videos after visual retry-splitting fix. Explicit CUTSELL_EDITORIAL_MODE=clean_cut; no semantic sales labeling, no sales composer, no editorial draft reviewer.
