@@ -8,6 +8,7 @@ from cutsell_worker.take_grouping_provider import safe_group_takes
 class FakeResponses:
     def __init__(self, output_text):
         self.output_text = output_text
+
     def create(self, **kwargs):
         return SimpleNamespace(output_text=self.output_text)
 
@@ -36,26 +37,28 @@ def test_semantic_grouping_can_join_same_idea_with_different_wording():
     assert result.groups == (("a", "b"), ("c",))
 
 
-def test_semantic_grouping_rejects_missing_candidate_and_uses_baseline():
+def test_semantic_grouping_repairs_missing_candidate_as_singleton():
     provider = OpenAITakeGroupingProvider(
         client_factory=lambda: FakeClient(
             '{"groups":[["a","b"]],"reason":"invalid omission"}'
         )
     )
     result = safe_group_takes(provider, _takes())
-    assert result.status.status == "provider_error_fallback"
+    assert result.status.status == "applied"
+    assert result.groups == (("a", "b"), ("c",))
     flattened = [item for group in result.groups for item in group]
     assert set(flattened) == {"a", "b", "c"}
 
 
-def test_semantic_grouping_rejects_duplicate_candidate():
+def test_semantic_grouping_repairs_duplicate_candidate_without_dropping_any_take():
     provider = OpenAITakeGroupingProvider(
         client_factory=lambda: FakeClient(
             '{"groups":[["a","b"],["b","c"]],"reason":"invalid duplicate"}'
         )
     )
     result = safe_group_takes(provider, _takes())
-    assert result.status.status == "provider_error_fallback"
+    assert result.status.status == "applied"
+    assert result.groups == (("a", "b"), ("c",))
     flattened = [item for group in result.groups for item in group]
     assert len(flattened) == 3
     assert set(flattened) == {"a", "b", "c"}
