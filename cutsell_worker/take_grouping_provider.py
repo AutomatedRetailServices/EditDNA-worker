@@ -50,6 +50,12 @@ def _constrain_provider_group(
     group: Tuple[str, ...],
     take_map: dict[str, CandidateTake],
 ) -> Tuple[Tuple[str, ...], ...]:
+    """Split provider groups using complete-link retry compatibility.
+
+    A new member must be compatible with every take already in a cluster. This avoids
+    transitive chains where A resembles B and B resembles C but A and C are distinct
+    story beats that should never become one destructive Best Take group.
+    """
     members = [take_map[clip_id] for clip_id in group if clip_id in take_map]
     members.sort(key=lambda take: (take.source_order, take.start, take.end, take.clip_id))
     if len(members) <= 1:
@@ -59,7 +65,7 @@ def _constrain_provider_group(
     for take in members:
         placed = False
         for cluster in clusters:
-            if any(_provider_members_compatible(take, existing) for existing in cluster):
+            if all(_provider_members_compatible(take, existing) for existing in cluster):
                 cluster.append(take)
                 placed = True
                 break
