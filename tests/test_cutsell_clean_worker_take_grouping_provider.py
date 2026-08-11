@@ -26,8 +26,8 @@ class FakeClient:
 
 def _takes():
     return (
-        CandidateTake("a", "src", 0, 0.0, 2.0, "This changed my morning routine"),
-        CandidateTake("b", "src", 0, 2.2, 4.2, "My mornings are completely different because of this"),
+        CandidateTake("a", "src", 0, 0.0, 2.0, "This changed my morning routine completely"),
+        CandidateTake("b", "src", 0, 2.2, 4.2, "This completely changed my morning routine"),
         CandidateTake("c", "src", 0, 5.0, 7.0, "It comes with three attachments"),
     )
 
@@ -114,19 +114,36 @@ def test_distant_near_duplicate_retry_can_still_group():
     assert result.groups == (("a", "b"),)
 
 
-def test_nearby_reworded_retry_remains_groupable():
+def test_nearby_reworded_retry_remains_groupable_when_lexical_evidence_is_strong():
     takes = (
         CandidateTake("a", "src", 0, 10.0, 13.0, "I could not believe how easy this was to use"),
-        CandidateTake("b", "src", 0, 15.0, 18.0, "Using this ended up being way easier than I expected"),
+        CandidateTake("b", "src", 0, 15.0, 18.0, "I could not believe this was so easy to use"),
     )
     provider = OpenAITakeGroupingProvider(
         client_factory=lambda: FakeClient(
-            '{"groups":[["a","b"]],"reason":"immediate retry with different wording"}'
+            '{"groups":[["a","b"]],"reason":"immediate retry with reworded sentence"}'
         )
     )
     result = safe_group_takes(provider, takes)
     assert result.status.status == "applied"
     assert result.groups == (("a", "b"),)
+
+
+def test_nearby_distinct_story_beats_are_split_even_when_provider_groups_them():
+    takes = (
+        CandidateTake("a", "src", 0, 0.0, 4.0, "This one was one of them my favorite second video is with Blaine O Connor"),
+        CandidateTake("b", "src", 0, 4.0, 9.0, "We had instant chemistry the second we met and we had an amazing friendship"),
+        CandidateTake("c", "src", 0, 9.0, 13.0, "We made a lot of videos but did not want to make the same video over and over"),
+    )
+    provider = OpenAITakeGroupingProvider(
+        client_factory=lambda: FakeClient(
+            '{"groups":[["a","b","c"]],"reason":"same thematic storytelling block"}'
+        )
+    )
+    result = safe_group_takes(provider, takes)
+    assert result.status.status == "applied"
+    assert result.groups == (("a",), ("b",), ("c",))
+    assert "provider_output_repaired" in result.reason
 
 
 def test_provider_split_near_duplicate_retries_are_reconciled_locally():
