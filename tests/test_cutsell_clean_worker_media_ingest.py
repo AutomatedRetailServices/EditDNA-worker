@@ -70,7 +70,7 @@ def test_segmentation_rejects_unregistered_transcript_source():
         raise AssertionError("unregistered source must be rejected")
 
 
-def test_real_flow_b_fails_open_when_semantic_provider_breaks(tmp_path, monkeypatch):
+def test_real_flow_b_fails_open_when_semantic_provider_breaks_in_full_mode(tmp_path, monkeypatch):
     source = _source()
     media = tmp_path / "raw.mov"
     media.write_bytes(b"fake")
@@ -90,6 +90,7 @@ def test_real_flow_b_fails_open_when_semantic_provider_breaks(tmp_path, monkeypa
         {source.source_asset_id: str(media)},
         asr_provider=FakeASR(),
         semantic_provider=BrokenSemantic(),
+        editorial_mode="full",
     )
     assert result.state.value == "draft_ready"
     assert result.draft.selected
