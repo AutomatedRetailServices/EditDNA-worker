@@ -146,6 +146,23 @@ def test_nearby_distinct_story_beats_are_split_even_when_provider_groups_them():
     assert "provider_output_repaired" in result.reason
 
 
+def test_provider_group_constraint_requires_every_member_not_transitive_chain():
+    takes = (
+        CandidateTake("a", "src", 0, 0.0, 4.0, "This serum cleared the acne on my back in the summer"),
+        CandidateTake("b", "src", 0, 5.0, 9.0, "This serum cleared the acne on my back during the summer"),
+        CandidateTake("c", "src", 0, 10.0, 14.0, "During the summer this serum helped the dry skin on my back"),
+    )
+    provider = OpenAITakeGroupingProvider(
+        client_factory=lambda: FakeClient(
+            '{"groups":[["a","b","c"]],"reason":"provider chained similar summer story beats"}'
+        )
+    )
+    result = safe_group_takes(provider, takes)
+    assert result.status.status == "applied"
+    assert result.groups == (("a", "b"), ("c",))
+    assert "provider_output_repaired" in result.reason
+
+
 def test_provider_split_near_duplicate_retries_are_reconciled_locally():
     takes = (
         CandidateTake("a", "src", 0, 10.0, 15.0, "Por temporada me salía acné en la espalda que yo resolvía con resorcina"),
