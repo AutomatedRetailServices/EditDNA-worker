@@ -22,6 +22,28 @@ class OpenAITakeJudgeProvider:
         from openai import OpenAI
         return OpenAI()
 
+    def _parse_or_repair_json(self, client: object, output_text: str) -> tuple[dict, bool]:
+        """Parse Best Take JSON; on syntax failure, request one format-only repair."""
+        try:
+            return parse_json_object(output_text), False
+        except Exception:
+            repair = client.responses.create(
+                model=self.model,
+                input=[
+                    {
+                        "role": "system",
+                        "content": (
+                            "Repair the following malformed Best Take ranking into valid JSON only. "
+                            "Do not add, remove, rename, rerank, rescore, or reinterpret candidates. "
+                            "Preserve the original ranking intent, clip ids, scores and reasons exactly. "
+                            "Return only {\"ranked\":[{\"id\":...,\"score\":0..1,\"reason\":...}]}."
+                        ),
+                    },
+                    {"role": "user", "content": str(output_text)[:30000]},
+                ],
+            )
+            return parse_json_object(repair.output_text), True
+
     def rank(self, takes: Tuple[CandidateTake, ...]) -> TakeJudgeProviderResult:
         evidence = []
         for take in takes:
@@ -58,14 +80,15 @@ class OpenAITakeJudgeProvider:
             "humor/reactions that belong to the content rather than the recording process. Do not delete any candidate. Return JSON only as "
             "{\"ranked\":[{\"id\":...,\"score\":0..1,\"reason\":...}]}. Include every candidate exactly once."
         )
-        response = self._client().responses.create(
+        client = self._client()
+        response = client.responses.create(
             model=self.model,
             input=[
                 {"role": "system", "content": instruction},
                 {"role": "user", "content": json.dumps({"takes": evidence}, ensure_ascii=False)},
             ],
         )
-        data = parse_json_object(response.output_text)
+        data, repaired_json = self._parse_or_repair_json(client, response.output_text)
         items = data.get("ranked")
         if not isinstance(items, list):
             raise ValueError("take judge returned invalid payload")
@@ -79,7 +102,10 @@ class OpenAITakeJudgeProvider:
             score = float(item.get("score"))
             if not 0.0 <= score <= 1.0:
                 raise ValueError("take judge score outside 0..1")
-            ranked.append(RankedTake(clip_id, score, str(item.get("reason") or "")[:240]))
+            reason = str(item.get("reason") or "")[:240]
+            if repaired_json and not reason:
+                reason = "json_format_repaired"
+            ranked.append(RankedTake(clip_id, score, reason))
             seen.add(clip_id)
         if seen != expected:
             raise ValueError("take judge omitted candidates")
