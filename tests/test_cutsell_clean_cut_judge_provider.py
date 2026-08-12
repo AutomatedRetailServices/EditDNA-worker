@@ -59,6 +59,7 @@ def test_malformed_provider_fails_open_and_keeps_everything():
     takes = (take("a", "valid speech"), take("b", "also valid"))
     result = safe_clean_cut_judge(BrokenProvider(), takes)
     assert result.status.status == "provider_error"
+    assert result.status.reason == "ValueError: clean cut judge returned invalid clip id"
     kept, deleted, diagnostics = apply_provider_judgements(takes, result)
     assert kept == takes
     assert deleted == ()
