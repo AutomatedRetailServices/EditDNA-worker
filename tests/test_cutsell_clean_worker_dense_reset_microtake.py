@@ -1,17 +1,17 @@
 from cutsell_worker.clean_cut import evaluate_take
 from cutsell_worker.contracts import CandidateTake
 from cutsell_worker.providers import ProviderStatus
-from cutsell_worker.whole_video_analysis import SourceWholeVideoContext, TemporalEvent, WholeVideoContext
+from cutsell_worker.whole_video_analysis import SourceVideoContext, TemporalEvent, WholeVideoContext
 
 
 def _context(*events):
-    source = SourceWholeVideoContext(
+    source = SourceVideoContext(
         source_asset_id="src",
         summary="",
         dominant_style="talking_head",
         creator_intent="",
         edit_mode="natural",
-        sales_intent=False,
+        sales_intent=0.0,
         main_topic="",
         product_or_subject="",
         story_logic="",
@@ -19,7 +19,6 @@ def _context(*events):
     )
     return WholeVideoContext(
         sources=(source,),
-        dominant_edit_mode="natural",
         status=ProviderStatus("local", True, True, "applied"),
     )
 
