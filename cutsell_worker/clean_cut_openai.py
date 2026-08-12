@@ -101,6 +101,35 @@ def _has_structural_delete_support(evidence: dict) -> bool:
     return False
 
 
+def _normalized_action(value: object) -> tuple[str, bool]:
+    action = str(value or "").lower().strip()
+    if action in {"keep", "delete", "mixed"}:
+        return action, True
+    return "keep", False
+
+
+def _safe_confidence(value: object, *, action: str) -> tuple[float, bool]:
+    """Coerce model confidence without ever making malformed output destructive."""
+    try:
+        confidence = float(value)
+    except (TypeError, ValueError):
+        return (1.0 if action == "keep" else 0.0), False
+    if not 0.0 <= confidence <= 1.0:
+        return (1.0 if action == "keep" else 0.0), False
+    return confidence, True
+
+
+def _optional_word_index(value: object) -> int | None:
+    if value is None:
+        return None
+    if isinstance(value, str) and value.strip().lower() in {"", "null", "none"}:
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
 @dataclass
 class OpenAICleanCutProvider:
     model: str = "gpt-4o-mini"
@@ -222,12 +251,24 @@ class OpenAICleanCutProvider:
 
         target_judgements: dict[str, CleanCutJudgement] = {}
         for item in items:
+            if not isinstance(item, dict):
+                raise ValueError("clean cut judge returned non-object judgement")
             clip_id = str(item.get("id") or "")
             if clip_id not in target_ids or clip_id in target_judgements:
                 raise ValueError("clean cut judge returned invalid target id")
-            action = str(item.get("action") or "").lower()
-            confidence = float(item.get("confidence"))
+
+            action, valid_action = _normalized_action(item.get("action"))
             reason = str(item.get("reason") or "")
+            if not valid_action:
+                reason = f"{reason} [invalid action normalized to keep]".strip()
+
+            confidence, valid_confidence = _safe_confidence(
+                item.get("confidence"),
+                action=action,
+            )
+            if not valid_confidence:
+                reason = f"{reason} [malformed confidence blocked from destructive edit]".strip()
+
             # A model can be confidently wrong about short conversational speech.
             # Keep its classification for diagnostics, but block automatic deletion
             # unless the evidence packet independently demonstrates a retry relation.
@@ -238,15 +279,28 @@ class OpenAICleanCutProvider:
             ):
                 confidence = min(confidence, 0.93)
                 reason = f"{reason} [auto-delete blocked: no structural retry evidence]"
-            start_index = item.get("keep_start_word_index")
-            end_index = item.get("keep_end_word_index")
+
+            if action == "mixed":
+                start_index = _optional_word_index(item.get("keep_start_word_index"))
+                end_index = _optional_word_index(item.get("keep_end_word_index"))
+                if (start_index is None) != (end_index is None):
+                    start_index = None
+                    end_index = None
+                    reason = f"{reason} [mixed trim blocked: malformed word indexes]"
+            else:
+                # KEEP/DELETE never need word indexes. Ignore stray values such as
+                # the string "null" instead of letting harmless model formatting
+                # turn the entire provider into a ValueError fallback.
+                start_index = None
+                end_index = None
+
             target_judgements[clip_id] = CleanCutJudgement(
                 clip_id=clip_id,
                 action=action,
                 confidence=confidence,
                 reason=reason,
-                keep_start_word_index=(int(start_index) if start_index is not None else None),
-                keep_end_word_index=(int(end_index) if end_index is not None else None),
+                keep_start_word_index=start_index,
+                keep_end_word_index=end_index,
             )
         if set(target_judgements) != target_ids:
             raise ValueError("clean cut judge omitted ambiguous microtake")
