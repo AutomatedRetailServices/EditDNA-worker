@@ -105,6 +105,39 @@ jobs:
               except Exception as exc:
                   failures.append({'source_key':key,'error_type':exc.__class__.__name__,'error':str(exc)[:500]})
 
+          provider_failures = []
+          for result in results:
+              source_key = result.get('source_key')
+              diagnostics = result.get('diagnostics') or {}
+              provider_statuses = (
+                  ('take_grouping', diagnostics.get('take_grouping_status')),
+                  ('whole_video', (diagnostics.get('whole_video_context') or {}).get('status')),
+                  ('clean_cut_judge', diagnostics.get('clean_cut_judge_status')),
+              )
+              for provider_name, status in provider_statuses:
+                  if not isinstance(status, dict) or not status.get('requested'):
+                      continue
+                  if status.get('status') != 'applied':
+                      provider_failures.append({
+                          'source_key': source_key,
+                          'provider': provider_name,
+                          'status': status.get('status'),
+                          'reason': str(status.get('reason') or '')[:240],
+                      })
+              take_judge_status_counts = diagnostics.get('take_judge_status_counts') or {}
+              take_judge_errors = sum(
+                  int(count or 0)
+                  for status_name, count in take_judge_status_counts.items()
+                  if str(status_name).startswith('provider_error')
+              )
+              if take_judge_errors:
+                  provider_failures.append({
+                      'source_key': source_key,
+                      'provider': 'take_judge',
+                      'status': 'provider_error_fallback',
+                      'reason': f'{take_judge_errors} judged groups used provider fallback',
+                  })
+
           total_input = sum(float(x.get('source_duration_sec') or 0) for x in results)
           total_selected = sum(float(x.get('selected_duration_sec') or 0) for x in results)
           report = {
@@ -113,6 +146,7 @@ jobs:
               'source_count':len(keys),
               'completed_count':len(results),
               'execution_failure_count':len(failures),
+              'provider_failure_count':len(provider_failures),
               'total_input_duration_sec':round(total_input,3),
               'total_selected_duration_sec':round(total_selected,3),
               'selected_to_input_ratio':round(total_selected/total_input,4) if total_input else None,
@@ -123,13 +157,14 @@ jobs:
               'total_temporal_trimmed':sum(int(x.get('temporal_trimmed_count') or 0) for x in results),
               'results':results,
               'failures':failures,
+              'provider_failures':provider_failures,
           }
           open('cutsell-unseen-clean-cut-benchmark.json','w',encoding='utf-8').write(
               json.dumps(report,ensure_ascii=False,indent=2,sort_keys=True)
           )
-          print(json.dumps({k:report[k] for k in report if k not in {'results','failures'}},indent=2))
-          if failures:
-              raise SystemExit('Unseen Clean Cut execution failure')
+          print(json.dumps({k:report[k] for k in report if k not in {'results','failures','provider_failures'}},indent=2))
+          if failures or provider_failures:
+              raise SystemExit('Unseen Clean Cut validation failure')
           PY
 
       - name: Upload JSON report
