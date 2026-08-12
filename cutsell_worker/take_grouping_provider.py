@@ -6,7 +6,7 @@ from typing import Protocol, Tuple
 
 from .contracts import CandidateTake
 from .providers import ProviderStatus
-from .take_grouping import group_takes, retry_similarity
+from .take_grouping import group_takes, retry_similarity, semantic_key
 
 
 @dataclass(frozen=True)
@@ -201,6 +201,105 @@ def _reconcile_missed_retries(
     return tuple(ordered_groups), changed
 
 
+def _is_prefix_fragment(fragment: CandidateTake, reference: CandidateTake) -> bool:
+    fragment_tokens = semantic_key(fragment.text).split()
+    reference_tokens = semantic_key(reference.text).split()
+    if not fragment_tokens or len(fragment_tokens) > 8:
+        return False
+    return reference_tokens[: len(fragment_tokens)] == fragment_tokens
+
+
+def _extend_adjacent_retry_groups(
+    groups: Tuple[Tuple[str, ...], ...],
+    takes: Tuple[CandidateTake, ...],
+    *,
+    max_gap_sec: float = 8.0,
+    minimum_similarity: float = 0.93,
+) -> tuple[Tuple[Tuple[str, ...], ...], bool]:
+    """Extend a validated retry group only into the next near-verbatim attempt.
+
+    This is intentionally narrower than general reconciliation. It may look past one
+    singleton false-start when that false-start is an exact lexical prefix of the
+    group's latest substantive attempt. The next substantive singleton must then be
+    highly similar (>=0.93) and within eight seconds. This recovers serial retries
+    without reintroducing broad transitive/topic chaining.
+    """
+    take_map = {take.clip_id: take for take in takes}
+    ordered = tuple(sorted(takes, key=lambda item: (item.source_order, item.start, item.end, item.clip_id)))
+    position = {take.clip_id: index for index, take in enumerate(ordered)}
+    group_lists = [list(group) for group in groups]
+    membership = {clip_id: index for index, group in enumerate(group_lists) for clip_id in group}
+    changed = False
+
+    for group_index, group in enumerate(group_lists):
+        if len(group) < 2:
+            continue
+        members = sorted(
+            (take_map[clip_id] for clip_id in group if clip_id in take_map),
+            key=lambda item: (item.source_order, item.start, item.end, item.clip_id),
+        )
+        if not members:
+            continue
+        anchor = members[-1]
+        anchor_pos = position.get(anchor.clip_id)
+        if anchor_pos is None:
+            continue
+
+        pending_prefix: CandidateTake | None = None
+        for candidate in ordered[anchor_pos + 1 :]:
+            if candidate.source_asset_id != anchor.source_asset_id:
+                break
+            if candidate.start - anchor.end > max_gap_sec:
+                break
+            candidate_group_index = membership.get(candidate.clip_id)
+            if candidate_group_index == group_index:
+                continue
+            if candidate_group_index is None or len(group_lists[candidate_group_index]) != 1:
+                break
+
+            if pending_prefix is None and len(candidate.text.split()) <= 3 and _is_prefix_fragment(candidate, anchor):
+                pending_prefix = candidate
+                continue
+
+            if retry_similarity(anchor.text, candidate.text) < minimum_similarity:
+                break
+
+            if pending_prefix is not None:
+                prefix_group_index = membership[pending_prefix.clip_id]
+                group_lists[prefix_group_index].remove(pending_prefix.clip_id)
+                group.append(pending_prefix.clip_id)
+                membership[pending_prefix.clip_id] = group_index
+            group_lists[candidate_group_index].remove(candidate.clip_id)
+            group.append(candidate.clip_id)
+            membership[candidate.clip_id] = group_index
+            changed = True
+            break
+
+    normalized = []
+    for group in group_lists:
+        if not group:
+            continue
+        unique = sorted(
+            set(group),
+            key=lambda clip_id: (
+                take_map[clip_id].source_order,
+                take_map[clip_id].start,
+                take_map[clip_id].end,
+                clip_id,
+            ),
+        )
+        normalized.append(tuple(unique))
+    normalized.sort(
+        key=lambda group: (
+            take_map[group[0]].source_order,
+            take_map[group[0]].start,
+            take_map[group[0]].end,
+            group[0],
+        )
+    )
+    return tuple(normalized), changed
+
+
 def _absorb_interstitial_retry_debris(
     groups: Tuple[Tuple[str, ...], ...],
     takes: Tuple[CandidateTake, ...],
@@ -208,13 +307,9 @@ def _absorb_interstitial_retry_debris(
     max_retry_span_sec: float = 15.0,
     max_fragment_sec: float = 2.5,
     max_fragment_words: int = 5,
+    max_edge_gap_sec: float = 3.0,
 ) -> tuple[Tuple[Tuple[str, ...], ...], bool]:
-    """Fold only short incomplete speech trapped inside a validated retry envelope.
-
-    The fragment is not deleted directly. It joins the surrounding retry group so
-    Best Take chooses one representative and the debris remains available as an
-    alternate. Short speech outside a validated retry envelope is untouched.
-    """
+    """Fold short incomplete speech trapped inside or directly beside a retry envelope."""
     take_map = {take.clip_id: take for take in takes}
     ordered = tuple(sorted(takes, key=lambda item: (item.source_order, item.start, item.end, item.clip_id)))
     group_lists = [list(group) for group in groups]
@@ -245,6 +340,30 @@ def _absorb_interstitial_retry_debris(
                 old_index = membership.get(candidate.clip_id)
                 if old_index is None or len(group_lists[old_index]) != 1:
                     continue
+                group_lists[old_index].remove(candidate.clip_id)
+                group_lists[group_index].append(candidate.clip_id)
+                membership[candidate.clip_id] = group_index
+                changed = True
+
+        # A partial restart can occur immediately before the first full attempt in
+        # a validated group. Exact-prefix evidence makes this structural rather than
+        # a generic short-phrase deletion rule.
+        first = members[0]
+        first_pos = next((index for index, item in enumerate(ordered) if item.clip_id == first.clip_id), None)
+        if first_pos is not None and first_pos > 0:
+            candidate = ordered[first_pos - 1]
+            old_index = membership.get(candidate.clip_id)
+            gap = first.start - candidate.end
+            if (
+                old_index is not None
+                and old_index != group_index
+                and len(group_lists[old_index]) == 1
+                and candidate.source_asset_id == first.source_asset_id
+                and 0.0 <= gap <= max_edge_gap_sec
+                and candidate.duration_sec <= max_fragment_sec
+                and len(candidate.text.split()) <= max_fragment_words + 2
+                and _is_prefix_fragment(candidate, first)
+            ):
                 group_lists[old_index].remove(candidate.clip_id)
                 group_lists[group_index].append(candidate.clip_id)
                 membership[candidate.clip_id] = group_index
@@ -297,12 +416,15 @@ def safe_group_takes(
         if not repaired_groups:
             raise ValueError("take grouping produced no valid candidates")
         reconciled_groups, reconciled = _reconcile_missed_retries(repaired_groups, takes)
-        final_groups, debris_absorbed = _absorb_interstitial_retry_debris(reconciled_groups, takes)
+        extended_groups, extended = _extend_adjacent_retry_groups(reconciled_groups, takes)
+        final_groups, debris_absorbed = _absorb_interstitial_retry_debris(extended_groups, takes)
         reason = result.reason
         if repaired:
             reason = (reason + "; " if reason else "") + "provider_output_repaired"
         if reconciled:
             reason = (reason + "; " if reason else "") + "local_retry_reconciled"
+        if extended:
+            reason = (reason + "; " if reason else "") + "adjacent_retry_extended"
         if debris_absorbed:
             reason = (reason + "; " if reason else "") + "interstitial_retry_debris_absorbed"
         return TakeGroupingProviderResult(
