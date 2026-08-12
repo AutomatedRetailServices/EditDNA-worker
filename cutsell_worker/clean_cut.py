@@ -35,6 +35,7 @@ _ONE_MORE_RE = re.compile(
     r"\bone more\b\s+(?:time|take|because|cuz|cause|since|you|we|i)\b",
     re.IGNORECASE,
 )
+_RESET_CANDIDATE_KINDS = frozenset({"body_reset_candidate", "hand_motion_reset_candidate"})
 
 
 def _normalized(text: str) -> str:
@@ -43,6 +44,40 @@ def _normalized(text: str) -> str:
 
 def _looks_like_explicit_recording_direction(text: str) -> bool:
     return any(phrase in text for phrase in _PRODUCTION_PHRASES) or bool(_ONE_MORE_RE.search(text))
+
+
+def _dense_reset_evidence(
+    take: CandidateTake,
+    whole_video_context: WholeVideoContext | None,
+    *,
+    minimum_confidence: float = 0.90,
+    minimum_count: int = 3,
+    minimum_span_sec: float = 0.70,
+) -> bool:
+    """Confirm repeated physical reset evidence inside one short spoken take.
+
+    Local performance emits reset *candidates* conservatively, so a single gesture
+    is never destructive. For an already-incomplete microtake, three high-confidence
+    reset observations spread across the take are strong evidence that the creator is
+    physically resetting/recovering rather than delivering an intentional short line.
+    """
+    if whole_video_context is None:
+        return False
+    matches = []
+    for source in whole_video_context.sources:
+        if source.source_asset_id != take.source_asset_id:
+            continue
+        for event in source.events:
+            kind = str(event.kind or "").strip().lower().replace("-", "_").replace(" ", "_")
+            if kind not in _RESET_CANDIDATE_KINDS or event.confidence < minimum_confidence:
+                continue
+            if event.end <= take.start or event.start >= take.end:
+                continue
+            matches.append(event)
+    if len(matches) < minimum_count:
+        return False
+    matches.sort(key=lambda item: (item.start, item.end))
+    return matches[-1].end - matches[0].start >= minimum_span_sec
 
 
 def evaluate_take(
@@ -79,6 +114,14 @@ def evaluate_take(
             f"whole_video_bad_take:{strongest.kind}",
             min(0.99, max(0.82, strongest.confidence)),
         )
+
+    if (
+        not take.complete_idea
+        and take.duration_sec <= 2.6
+        and len(words) <= 5
+        and _dense_reset_evidence(take, whole_video_context)
+    ):
+        return CleanCutDecision(take.clip_id, False, "incomplete_microtake_dense_reset", 0.93)
 
     # Take-level visual evidence remains a fallback. The lower threshold is safe
     # only when the spoken idea is incomplete; complete speech needs temporal/global
