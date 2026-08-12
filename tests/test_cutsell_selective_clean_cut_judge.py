@@ -41,7 +41,7 @@ class FakeClient:
         self.responses = FakeResponses(payload)
 
 
-def test_openai_provider_sends_only_microtake_and_keeps_neighbors_read_only():
+def test_openai_provider_sends_only_microtake_and_blocks_unsupported_delete():
     left = _take("left", 0.0, 4.0, "this is a valid long creator sentence here")
     micro = _take("micro", 4.1, 5.0, "duffel")
     right = _take("right", 5.1, 9.1, "this is another valid long creator sentence here")
@@ -81,19 +81,18 @@ def test_openai_provider_sends_only_microtake_and_keeps_neighbors_read_only():
     assert "Grammatical incompleteness by itself is NOT enough to DELETE" in system_prompt
     assert "confidence >=0.95" in system_prompt
 
-    assert [(item.clip_id, item.action) for item in judged.judgements] == [
-        ("left", "keep"),
-        ("micro", "delete"),
-        ("right", "keep"),
-    ]
+    micro_judgement = next(item for item in judged.judgements if item.clip_id == "micro")
+    assert micro_judgement.action == "delete"
+    assert micro_judgement.confidence == 0.93
+    assert "auto-delete blocked" in micro_judgement.reason
+
     kept, deleted, diagnostics = apply_provider_judgements((left, micro, right), judged)
-    assert [take.clip_id for take in kept] == ["left", "right"]
-    assert [take.clip_id for take in deleted] == ["micro"]
-    assert next(item for item in diagnostics if item["clip_id"] == "left")["applied_delete"] is False
-    assert next(item for item in diagnostics if item["clip_id"] == "right")["applied_delete"] is False
+    assert [take.clip_id for take in kept] == ["left", "micro", "right"]
+    assert deleted == ()
+    assert next(item for item in diagnostics if item["clip_id"] == "micro")["applied_delete"] is False
 
 
-def test_openai_provider_marks_exact_prefix_retry_evidence():
+def test_openai_provider_marks_exact_prefix_retry_evidence_and_allows_safe_delete():
     fragment = _take("fragment", 0.0, 0.8, "people ask")
     full = _take("full", 0.9, 4.9, "people ask me all the time if I enjoy this")
     client = FakeClient({
@@ -108,7 +107,7 @@ def test_openai_provider_marks_exact_prefix_retry_evidence():
     })
     provider = OpenAICleanCutProvider(client_factory=lambda: client)
 
-    safe_clean_cut_judge(provider, (fragment, full))
+    judged = safe_clean_cut_judge(provider, (fragment, full))
 
     payload = json.loads(client.responses.calls[0]["input"][1]["content"])
     evidence = payload["takes"][0]
@@ -116,6 +115,13 @@ def test_openai_provider_marks_exact_prefix_retry_evidence():
     assert evidence["gap_to_next_sec"] == 0.1
     assert isinstance(evidence["similarity_to_next"], float)
     assert evidence["similarity_to_next"] >= 0.0
+
+    fragment_judgement = next(item for item in judged.judgements if item.clip_id == "fragment")
+    assert fragment_judgement.confidence == 0.98
+    kept, deleted, diagnostics = apply_provider_judgements((fragment, full), judged)
+    assert [take.clip_id for take in kept] == ["full"]
+    assert [take.clip_id for take in deleted] == ["fragment"]
+    assert next(item for item in diagnostics if item["clip_id"] == "fragment")["applied_delete"] is True
 
 
 def test_openai_provider_skips_api_call_when_there_are_no_microtakes():
