@@ -171,6 +171,11 @@ def apply_provider_judgements(
     min_keep_duration_sec: float = 0.35,
 ) -> tuple[Tuple[CandidateTake, ...], Tuple[CandidateTake, ...], tuple[dict, ...]]:
     """Apply only high-confidence deletes/trims; all malformed or uncertain cases keep."""
+    effective_delete_threshold = (
+        min(delete_threshold, 0.90)
+        if result.status.reason == "selective_microtake_review"
+        else delete_threshold
+    )
     judgement_by_id = {item.clip_id: item for item in result.judgements}
     kept, deleted, diagnostics = [], [], []
     for take in takes:
@@ -178,7 +183,7 @@ def apply_provider_judgements(
         applied_delete = bool(
             item is not None
             and item.action == "delete"
-            and item.confidence >= delete_threshold
+            and item.confidence >= effective_delete_threshold
         )
         applied_mixed_trim = False
         kept_child = None
@@ -209,6 +214,7 @@ def apply_provider_judgements(
                 "action": item.action,
                 "confidence": item.confidence,
                 "reason": item.reason,
+                "delete_threshold": effective_delete_threshold,
                 "applied_delete": applied_delete,
                 "applied_mixed_trim": applied_mixed_trim,
                 "keep_start_word_index": item.keep_start_word_index,
