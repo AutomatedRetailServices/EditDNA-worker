@@ -37,6 +37,53 @@ class OpenAIWholeVideoProvider:
             raise ValueError("whole-video confidence outside 0..1")
         return score
 
+    def _parse_or_repair_json(
+        self,
+        client: object,
+        output_text: str,
+        *,
+        expected_source_ids: set[str],
+    ) -> tuple[dict, bool]:
+        """Parse whole-video JSON, allowing one syntax-only repair call.
+
+        The repair may restore JSON punctuation/structure only. Source identities and
+        semantic fields are still validated by this adapter; omitted or foreign sources
+        remain hard failures instead of being invented during repair.
+        """
+        try:
+            return parse_json_object(output_text), False
+        except Exception:
+            repair = client.responses.create(
+                model=self.model,
+                input=[
+                    {
+                        "role": "system",
+                        "content": (
+                            "Repair ONLY JSON syntax/formatting in the following CutSell whole-video analysis. "
+                            "Do not reinterpret the video, add or remove sources/events, change source ids, timestamps, "
+                            "confidences, descriptions, edit_mode, sales_intent, summary, topic, subject, or story logic. "
+                            "Do not invent missing semantic data. The expected source ids are supplied only as a validation "
+                            "reference; preserve the original semantic content. Return valid JSON only using the existing "
+                            "schema {\"sources\":[{\"source_asset_id\":...,\"summary\":...,\"dominant_style\":...,"
+                            "\"creator_intent\":...,\"edit_mode\":\"sales|natural|mixed\",\"sales_intent\":0..1,"
+                            "\"main_topic\":...,\"product_or_subject\":...,\"story_logic\":...,\"events\":[{"
+                            "\"start\":0.0,\"end\":0.0,\"kind\":...,\"confidence\":0..1,\"description\":...}]}]}."
+                        ),
+                    },
+                    {
+                        "role": "user",
+                        "content": json.dumps(
+                            {
+                                "expected_source_ids": sorted(expected_source_ids),
+                                "malformed_output": str(output_text)[:50000],
+                            },
+                            ensure_ascii=False,
+                        ),
+                    },
+                ],
+            )
+            return parse_json_object(repair.output_text), True
+
     def analyze(
         self,
         sources: Tuple[SourceAsset, ...],
@@ -107,20 +154,27 @@ class OpenAIWholeVideoProvider:
                     "detail": "low",
                 })
 
-        response = self._client().responses.create(
+        client = self._client()
+        response = client.responses.create(
             model=self.model,
             input=[{"role": "user", "content": content}],
         )
-        data = parse_json_object(response.output_text)
+        known = {source.source_asset_id for source in sources}
+        data, repaired_json = self._parse_or_repair_json(
+            client,
+            response.output_text,
+            expected_source_ids=known,
+        )
         items = data.get("sources")
         if not isinstance(items, list):
             raise ValueError("whole-video provider returned invalid payload")
 
         contexts = []
-        known = {source.source_asset_id for source in sources}
         seen = set()
         source_duration = {source.source_asset_id: source.duration_sec for source in sources}
         for item in items:
+            if not isinstance(item, dict):
+                raise ValueError("whole-video provider returned non-object source")
             source_id = str(item.get("source_asset_id") or "")
             if source_id not in known or source_id in seen:
                 raise ValueError("whole-video provider returned invalid source id")
@@ -130,6 +184,8 @@ class OpenAIWholeVideoProvider:
             events = []
             duration = max(0.0, float(source_duration[source_id]))
             for event in events_raw[:240]:
+                if not isinstance(event, dict):
+                    raise ValueError("whole-video provider returned non-object event")
                 start = max(0.0, min(duration, float(event.get("start") or 0.0)))
                 end = max(start, min(duration, float(event.get("end") or start)))
                 events.append(TemporalEvent(
@@ -160,5 +216,11 @@ class OpenAIWholeVideoProvider:
             raise ValueError("whole-video provider omitted source")
         return WholeVideoContext(
             sources=tuple(contexts),
-            status=ProviderStatus("openai", True, True, "applied"),
+            status=ProviderStatus(
+                "openai",
+                True,
+                True,
+                "applied",
+                "json_format_repaired" if repaired_json else "",
+            ),
         )
