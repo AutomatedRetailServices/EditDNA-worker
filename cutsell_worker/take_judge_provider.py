@@ -39,6 +39,10 @@ def safe_rank_takes(
             raise ValueError("take judge score outside 0..1")
         return result
     except Exception as exc:
+        detail = str(exc).strip()
+        reason = exc.__class__.__name__
+        if detail:
+            reason = f"{reason}: {detail[:180]}"
         return TakeJudgeProviderResult(
             baseline,
             ProviderStatus(
@@ -46,6 +50,6 @@ def safe_rank_takes(
                 requested=True,
                 available=False,
                 status="provider_error_fallback",
-                reason=exc.__class__.__name__,
+                reason=reason,
             ),
         )
