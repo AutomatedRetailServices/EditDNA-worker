@@ -9,6 +9,7 @@ from .clean_cut_provider import CleanCutJudgement, CleanCutProviderResult
 from .contracts import CandidateTake
 from .openai_json import parse_json_object
 from .providers import ProviderStatus
+from .take_grouping import retry_similarity, semantic_key
 
 
 def _word_count(take: CandidateTake) -> int:
@@ -24,6 +25,27 @@ def _is_ambiguous_microtake(
     max_duration_sec: float = 3.0,
 ) -> bool:
     return 0 < _word_count(take) <= max_words and 0.0 < take.duration_sec <= max_duration_sec
+
+
+def _prefix_relation(fragment: CandidateTake, reference: CandidateTake | None) -> bool:
+    if reference is None:
+        return False
+    fragment_tokens = semantic_key(fragment.text).split()
+    reference_tokens = semantic_key(reference.text).split()
+    return bool(fragment_tokens and reference_tokens[: len(fragment_tokens)] == fragment_tokens)
+
+
+def _gap(left: CandidateTake | None, right: CandidateTake | None) -> float | None:
+    if left is None or right is None or left.source_asset_id != right.source_asset_id:
+        return None
+    return round(max(0.0, right.start - left.end), 3)
+
+
+def _word_confidence_summary(take: CandidateTake) -> tuple[float | None, float | None]:
+    values = [float(word.confidence) for word in take.words if word.confidence is not None]
+    if not values:
+        return None, None
+    return round(sum(values) / len(values), 4), round(min(values), 4)
 
 
 @dataclass
@@ -56,27 +78,50 @@ class OpenAICleanCutProvider:
         evidence = []
         for index in target_indexes:
             take = takes[index]
+            previous = (
+                takes[index - 1]
+                if index > 0 and takes[index - 1].source_asset_id == take.source_asset_id
+                else None
+            )
+            following = (
+                takes[index + 1]
+                if index + 1 < len(takes) and takes[index + 1].source_asset_id == take.source_asset_id
+                else None
+            )
+            avg_confidence, min_confidence = _word_confidence_summary(take)
             signals = take.signals
             evidence.append({
                 "id": take.clip_id,
                 "transcript": take.text,
                 "duration_sec": round(take.duration_sec, 3),
-                "previous_transcript": (
-                    takes[index - 1].text
-                    if index > 0 and takes[index - 1].source_asset_id == take.source_asset_id
-                    else None
+                "word_count": _word_count(take),
+                "complete_idea": bool(take.complete_idea),
+                "asr_avg_confidence": avg_confidence,
+                "asr_min_confidence": min_confidence,
+                "previous_transcript": previous.text if previous is not None else None,
+                "next_transcript": following.text if following is not None else None,
+                "gap_from_previous_sec": _gap(previous, take),
+                "gap_to_next_sec": _gap(take, following),
+                "similarity_to_previous": (
+                    round(retry_similarity(take.text, previous.text), 4)
+                    if previous is not None else None
                 ),
-                "next_transcript": (
-                    takes[index + 1].text
-                    if index + 1 < len(takes) and takes[index + 1].source_asset_id == take.source_asset_id
-                    else None
+                "similarity_to_next": (
+                    round(retry_similarity(take.text, following.text), 4)
+                    if following is not None else None
                 ),
+                "exact_prefix_of_previous": _prefix_relation(take, previous),
+                "exact_prefix_of_next": _prefix_relation(take, following),
                 "words": [
                     {
                         "index": word_index,
                         "text": word.text,
                         "start": round(float(word.start), 3),
                         "end": round(float(word.end), 3),
+                        "confidence": (
+                            round(float(word.confidence), 4)
+                            if word.confidence is not None else None
+                        ),
                     }
                     for word_index, word in enumerate(take.words)
                 ],
@@ -96,15 +141,21 @@ class OpenAICleanCutProvider:
             "authority to judge sales quality, hook quality, commercial role, usefulness, style, profanity, or "
             "whether a sentence is persuasive. For every listed candidate return exactly one action: KEEP, DELETE, "
             "or MIXED. DELETE only when the WHOLE candidate is clearly unusable production speech such as an "
-            "explicit restart/stop direction, self-correction about filming, abandoned gibberish/restart, repeated "
-            "false start, or reaction to a recording error. A short intentional reaction such as Yeah, No, Bye, "
-            "What just happened, laughter-related speech, profanity, or emotion is valid and must be KEPT when it "
-            "makes sense in neighboring context. MIXED when one candidate contains both an obvious blooper/restart "
-            "portion and a single contiguous span of valid creator speech. For MIXED, if and only if the provided "
-            "word list makes the valid span unambiguous, return inclusive keep_start_word_index and "
-            "keep_end_word_index using ONLY supplied indexes. Never invent timestamps or words. If the valid speech "
-            "is not one contiguous span, or the boundary is uncertain, leave both indexes null. MIXED must never "
-            "imply deleting the whole take. When uncertain choose KEEP. Return JSON only: "
+            "explicit restart/stop direction, abandoned gibberish, repeated false start, or a fragment that is "
+            "structurally shown to be an abandoned retry by the supplied neighbor timing/similarity/prefix evidence. "
+            "Grammatical incompleteness by itself is NOT enough to DELETE. A lone pronoun, preposition, noun, or "
+            "short phrase must be KEPT unless the supplied context makes the failed-retry/blooper relationship clear. "
+            "A short intentional reaction such as Yeah, No, Bye, What just happened, laughter-related speech, "
+            "profanity, or emotion is valid and must be KEPT when it makes sense in neighboring context. ASR "
+            "confidence can support uncertainty but low ASR confidence alone is never a delete reason. MIXED when "
+            "one candidate contains both an obvious blooper/restart portion and a single contiguous span of valid "
+            "creator speech. For MIXED, if and only if the provided word list makes the valid span unambiguous, "
+            "return inclusive keep_start_word_index and keep_end_word_index using ONLY supplied indexes. Never "
+            "invent timestamps or words. If the valid speech is not one contiguous span, or the boundary is uncertain, "
+            "leave both indexes null. MIXED must never imply deleting the whole take. CONFIDENCE means certainty that "
+            "the requested action is safe for automatic editing. If DELETE is strongly supported by structural/context "
+            "evidence, use confidence >=0.95. If DELETE is plausible but not safe enough to auto-apply, use <=0.93. "
+            "When uncertain choose KEEP. Return JSON only: "
             "{\"judgements\":[{\"id\":...,\"action\":\"keep|delete|mixed\",\"confidence\":0..1,"
             "\"reason\":...,\"keep_start_word_index\":null|int,\"keep_end_word_index\":null|int}]}. "
             "Include every LISTED candidate exactly once."
