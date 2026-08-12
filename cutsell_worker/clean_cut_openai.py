@@ -35,6 +35,23 @@ def _prefix_relation(fragment: CandidateTake, reference: CandidateTake | None) -
     return bool(fragment_tokens and reference_tokens[: len(fragment_tokens)] == fragment_tokens)
 
 
+def _diagnostic_similarity(left: CandidateTake, right: CandidateTake | None) -> float | None:
+    """Similarity evidence for the microtake judge without weakening retry grouping.
+
+    The grouping similarity intentionally suppresses very short overlaps to avoid broad
+    transitive grouping. For judge diagnostics, an exact lexical prefix is still useful
+    evidence, so retain at least its token coverage ratio as a small positive signal.
+    """
+    if right is None:
+        return None
+    score = retry_similarity(left.text, right.text)
+    left_tokens = semantic_key(left.text).split()
+    right_tokens = semantic_key(right.text).split()
+    if left_tokens and right_tokens[: len(left_tokens)] == left_tokens:
+        score = max(score, len(left_tokens) / max(1, len(right_tokens)))
+    return round(score, 4)
+
+
 def _gap(left: CandidateTake | None, right: CandidateTake | None) -> float | None:
     if left is None or right is None or left.source_asset_id != right.source_asset_id:
         return None
@@ -102,14 +119,8 @@ class OpenAICleanCutProvider:
                 "next_transcript": following.text if following is not None else None,
                 "gap_from_previous_sec": _gap(previous, take),
                 "gap_to_next_sec": _gap(take, following),
-                "similarity_to_previous": (
-                    round(retry_similarity(take.text, previous.text), 4)
-                    if previous is not None else None
-                ),
-                "similarity_to_next": (
-                    round(retry_similarity(take.text, following.text), 4)
-                    if following is not None else None
-                ),
+                "similarity_to_previous": _diagnostic_similarity(take, previous),
+                "similarity_to_next": _diagnostic_similarity(take, following),
                 "exact_prefix_of_previous": _prefix_relation(take, previous),
                 "exact_prefix_of_next": _prefix_relation(take, following),
                 "words": [
