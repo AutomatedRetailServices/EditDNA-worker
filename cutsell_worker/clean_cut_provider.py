@@ -34,78 +34,19 @@ class CleanCutProvider(Protocol):
     def judge(self, takes: Tuple[CandidateTake, ...]) -> CleanCutProviderResult: ...
 
 
-def _candidate_word_count(take: CandidateTake) -> int:
-    if take.words:
-        return len(tuple(word for word in take.words if str(word.text or "").strip()))
-    return len(str(take.text or "").split())
-
-
-def _ambiguous_microtake_ids(
-    takes: Tuple[CandidateTake, ...],
-    *,
-    max_words: int = 5,
-    max_duration_sec: float = 3.0,
-) -> set[str]:
-    """Return only short fail-open speech worth a second opinion.
-
-    Deterministic Clean Cut already rejects strong evidence. The provider is reserved
-    for the remaining short ambiguous speech where lexical text alone cannot tell a
-    valid reaction ("Yeah", "Bye") from a failed fragment or gibberish. Longer takes
-    stay outside this judge to limit both authority and provider cost.
-    """
-    return {
-        take.clip_id
-        for take in takes
-        if 0 < _candidate_word_count(take) <= max_words
-        and 0.0 < take.duration_sec <= max_duration_sec
-    }
-
-
-def _judge_context_window(
-    takes: Tuple[CandidateTake, ...],
-    target_ids: set[str],
-) -> Tuple[CandidateTake, ...]:
-    """Include immediate same-source neighbors as read-only context."""
-    include_indexes: set[int] = set()
-    for index, take in enumerate(takes):
-        if take.clip_id not in target_ids:
-            continue
-        include_indexes.add(index)
-        if index > 0 and takes[index - 1].source_asset_id == take.source_asset_id:
-            include_indexes.add(index - 1)
-        if index + 1 < len(takes) and takes[index + 1].source_asset_id == take.source_asset_id:
-            include_indexes.add(index + 1)
-    return tuple(take for index, take in enumerate(takes) if index in include_indexes)
-
-
 def safe_clean_cut_judge(
     provider: CleanCutProvider | None,
     takes: Tuple[CandidateTake, ...],
 ) -> CleanCutProviderResult:
-    """Fail open and apply provider authority only to ambiguous microtakes.
-
-    Immediate neighbors are supplied to the provider so it can understand recording
-    context, but their judgements are filtered out before returning. Therefore a
-    context-only long/valid line can never be deleted or trimmed by this selective
-    call even if the provider returns an aggressive judgement for it.
-    """
+    """Fail open: provider failure or malformed output keeps all speech."""
     if provider is None or not takes:
         return CleanCutProviderResult(
             (),
             ProviderStatus("none", False, False, "not_requested"),
         )
-
-    target_ids = _ambiguous_microtake_ids(takes)
-    if not target_ids:
-        return CleanCutProviderResult(
-            (),
-            ProviderStatus("none", False, True, "not_requested_no_ambiguous_microtakes"),
-        )
-    review_takes = _judge_context_window(takes, target_ids)
-
     try:
-        result = provider.judge(review_takes)
-        expected = {take.clip_id for take in review_takes}
+        result = provider.judge(takes)
+        expected = {take.clip_id for take in takes}
         seen = set()
         normalized = []
         for item in result.judgements:
@@ -138,9 +79,7 @@ def safe_clean_cut_judge(
             seen.add(item.clip_id)
         if seen != expected:
             raise ValueError("clean cut judge omitted candidates")
-
-        applicable = tuple(item for item in normalized if item.clip_id in target_ids)
-        return CleanCutProviderResult(applicable, result.status)
+        return CleanCutProviderResult(tuple(normalized), result.status)
     except Exception as exc:
         return CleanCutProviderResult(
             (),
