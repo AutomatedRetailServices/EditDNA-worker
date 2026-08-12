@@ -10,6 +10,28 @@ from .silence_analysis import SilenceGap, silence_ratio
 from .source_identity import stable_clip_id
 
 
+_BRIDGE_CONNECTORS = frozenset({
+    "and",
+    "as",
+    "because",
+    "but",
+    "for",
+    "if",
+    "of",
+    "or",
+    "so",
+    "than",
+    "that",
+    "to",
+    "when",
+    "which",
+    "while",
+    "who",
+    "with",
+    "without",
+})
+
+
 def _audio_quality(segment: TranscriptSegment, silence: float) -> float:
     confidences = [word.confidence for word in segment.words if word.confidence is not None]
     speech_confidence = sum(confidences) / len(confidences) if confidences else 0.5
@@ -61,6 +83,11 @@ def _word_count(text: str) -> int:
 
 def _ends_sentence(text: str) -> bool:
     return bool(re.search(r"[.!?][\"'”’)]*\s*$", text.strip()))
+
+
+def _last_word(text: str) -> str:
+    words = re.findall(r"[\w'’-]+", str(text or "").casefold(), flags=re.UNICODE)
+    return words[-1] if words else ""
 
 
 def _looks_complete_idea(text: str, duration_sec: float) -> bool:
@@ -132,12 +159,16 @@ def _repair_boundary_fragments(
     max_fragment_sec: float = 1.5,
     max_fragment_words: int = 3,
     max_join_gap_sec: float = 0.16,
+    max_bridge_fragment_sec: float = 2.8,
+    max_bridge_gap_sec: float = 0.65,
 ) -> Tuple[CandidateTake, ...]:
     """Reattach obvious contiguous ASR fragments without deleting real short lines.
 
     Repairs are intentionally local: an unfinished tiny suffix can close the prior
     phrase, and an unfinished tiny lead-in can attach to the next contiguous phrase.
-    The repair never crosses a real pause or source boundary.
+    A slightly wider bridge is allowed only for a short grammatically dependent
+    fragment ending in a connector such as ``because``/``and``/``but``. The repair
+    never crosses a real pause or source boundary.
     """
     ordered = sorted(takes, key=lambda take: (take.source_order, take.start, take.end, take.clip_id))
     repaired: list[CandidateTake] = []
@@ -147,7 +178,8 @@ def _repair_boundary_fragments(
             previous = repaired[-1]
             gap = take.start - previous.end
             same_source = previous.source_asset_id == take.source_asset_id
-            contiguous = -0.02 <= gap <= max_join_gap_sec
+            strict_contiguous = -0.02 <= gap <= max_join_gap_sec
+            bridge_contiguous = -0.02 <= gap <= max_bridge_gap_sec
             current_is_micro = take.duration_sec <= max_fragment_sec and _word_count(take.text) <= max_fragment_words
             previous_is_open_micro = (
                 previous.duration_sec <= max_fragment_sec
@@ -155,8 +187,18 @@ def _repair_boundary_fragments(
                 and not _ends_sentence(previous.text)
             )
             current_closes_open_previous = current_is_micro and not _ends_sentence(previous.text)
+            previous_is_bridge_fragment = (
+                previous.duration_sec <= max_bridge_fragment_sec
+                and _word_count(previous.text) <= max_fragment_words
+                and not _ends_sentence(previous.text)
+                and _last_word(previous.text) in _BRIDGE_CONNECTORS
+                and _word_count(take.text) >= 4
+            )
 
-            if same_source and contiguous and (previous_is_open_micro or current_closes_open_previous):
+            if same_source and strict_contiguous and (previous_is_open_micro or current_closes_open_previous):
+                repaired[-1] = _join_takes(previous, take)
+                continue
+            if same_source and bridge_contiguous and previous_is_bridge_fragment:
                 repaired[-1] = _join_takes(previous, take)
                 continue
 
