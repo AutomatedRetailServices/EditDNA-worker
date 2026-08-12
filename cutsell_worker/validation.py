@@ -57,6 +57,41 @@ def _is_real_video_key(key: str) -> bool:
     return Path(name).suffix.lower() in VIDEO_EXTENSIONS
 
 
+def _clip_word_timing_diagnostics(clip: object) -> dict[str, Any]:
+    """Expose compact ASR word-boundary evidence for benchmark debugging only.
+
+    This does not participate in editing decisions. It lets a real-footage benchmark
+    distinguish an ASR segmentation failure from a genuinely continuous spoken take
+    without dumping every word timestamp into the report.
+    """
+    words = tuple(sorted(
+        getattr(clip, "words", ()) or (),
+        key=lambda word: (float(word.start), float(word.end)),
+    ))
+    confidences = [float(word.confidence) for word in words if word.confidence is not None]
+    gaps = []
+    for left, right in zip(words, words[1:]):
+        gap = max(0.0, float(right.start) - float(left.end))
+        if gap < 0.25:
+            continue
+        gaps.append({
+            "gap_sec": round(gap, 3),
+            "left_text": str(left.text),
+            "left_end": round(float(left.end), 3),
+            "left_confidence": round(float(left.confidence), 4) if left.confidence is not None else None,
+            "right_text": str(right.text),
+            "right_start": round(float(right.start), 3),
+            "right_confidence": round(float(right.confidence), 4) if right.confidence is not None else None,
+        })
+    gaps.sort(key=lambda item: (-float(item["gap_sec"]), float(item["left_end"])))
+    return {
+        "word_count": len(words),
+        "average_confidence": round(sum(confidences) / len(confidences), 4) if confidences else None,
+        "minimum_confidence": round(min(confidences), 4) if confidences else None,
+        "internal_gaps": gaps[:12],
+    }
+
+
 def list_validation_videos(*, prefix: str | None = None, limit: int = 20, s3=None) -> tuple[dict[str, Any], ...]:
     """List a bounded set of real videos from the dedicated validation prefix."""
     if not 1 <= limit <= 100:
@@ -251,6 +286,7 @@ def run_single_validation(
                 "text": clip.text,
                 "semantic_role": clip.semantic_role.value,
                 "take_group_id": clip.take_group_id,
+                "word_timing": _clip_word_timing_diagnostics(clip),
             }
             for clip in result.draft.selected
         ],
@@ -262,11 +298,18 @@ def run_single_validation(
                 "text": clip.text,
                 "semantic_role": clip.semantic_role.value,
                 "take_group_id": clip.take_group_id,
+                "word_timing": _clip_word_timing_diagnostics(clip),
             }
             for clip in result.draft.alternates
         ],
         "discarded": [
-            {"clip_id": clip.clip_id, "start": clip.start, "end": clip.end, "text": clip.text}
+            {
+                "clip_id": clip.clip_id,
+                "start": clip.start,
+                "end": clip.end,
+                "text": clip.text,
+                "word_timing": _clip_word_timing_diagnostics(clip),
+            }
             for clip in result.draft.discarded
         ],
         "stage_status": result.stage_status,
