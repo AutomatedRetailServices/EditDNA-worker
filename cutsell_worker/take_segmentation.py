@@ -166,9 +166,10 @@ def _repair_boundary_fragments(
 
     Repairs are intentionally local: an unfinished tiny suffix can close the prior
     phrase, and an unfinished tiny lead-in can attach to the next contiguous phrase.
-    A slightly wider bridge is allowed only for a short grammatically dependent
-    fragment ending in a connector such as ``because``/``and``/``but``. The repair
-    never crosses a real pause or source boundary.
+    A slightly wider bridge is allowed only for a 2-3 word grammatically dependent
+    fragment ending in a connector such as ``because``/``and``/``but``. One-word
+    discourse markers remain independent across anything beyond the strict ASR gap.
+    The repair never crosses a real pause or source boundary.
     """
     ordered = sorted(takes, key=lambda take: (take.source_order, take.start, take.end, take.clip_id))
     repaired: list[CandidateTake] = []
@@ -181,15 +182,16 @@ def _repair_boundary_fragments(
             strict_contiguous = -0.02 <= gap <= max_join_gap_sec
             bridge_contiguous = -0.02 <= gap <= max_bridge_gap_sec
             current_is_micro = take.duration_sec <= max_fragment_sec and _word_count(take.text) <= max_fragment_words
+            previous_word_count = _word_count(previous.text)
             previous_is_open_micro = (
                 previous.duration_sec <= max_fragment_sec
-                and _word_count(previous.text) <= max_fragment_words
+                and previous_word_count <= max_fragment_words
                 and not _ends_sentence(previous.text)
             )
             current_closes_open_previous = current_is_micro and not _ends_sentence(previous.text)
             previous_is_bridge_fragment = (
                 previous.duration_sec <= max_bridge_fragment_sec
-                and _word_count(previous.text) <= max_fragment_words
+                and 2 <= previous_word_count <= max_fragment_words
                 and not _ends_sentence(previous.text)
                 and _last_word(previous.text) in _BRIDGE_CONNECTORS
                 and _word_count(take.text) >= 4
