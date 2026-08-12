@@ -81,6 +81,10 @@ def safe_clean_cut_judge(
             raise ValueError("clean cut judge omitted candidates")
         return CleanCutProviderResult(tuple(normalized), result.status)
     except Exception as exc:
+        detail = str(exc).strip()
+        reason = exc.__class__.__name__
+        if detail:
+            reason = f"{reason}: {detail[:180]}"
         return CleanCutProviderResult(
             (),
             ProviderStatus(
@@ -88,7 +92,7 @@ def safe_clean_cut_judge(
                 requested=True,
                 available=False,
                 status="provider_error",
-                reason=exc.__class__.__name__,
+                reason=reason,
             ),
         )
 
