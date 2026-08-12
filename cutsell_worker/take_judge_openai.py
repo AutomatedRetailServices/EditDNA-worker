@@ -23,6 +23,23 @@ def _safe_score(value: object, *, baseline_score: float) -> tuple[float, bool]:
     return score, True
 
 
+def _identity_error(data: dict, expected: set[str]) -> str | None:
+    items = data.get("ranked")
+    if not isinstance(items, list):
+        return "take judge returned invalid payload"
+    seen: set[str] = set()
+    for item in items:
+        if not isinstance(item, dict):
+            return "take judge returned non-object ranking item"
+        clip_id = str(item.get("id") or "")
+        if clip_id not in expected or clip_id in seen:
+            return "take judge returned invalid clip id"
+        seen.add(clip_id)
+    if seen != expected:
+        return "take judge omitted candidates"
+    return None
+
+
 @dataclass
 class OpenAITakeJudgeProvider:
     model: str = "gpt-4o-mini"
@@ -48,13 +65,58 @@ class OpenAITakeJudgeProvider:
                             "Repair the following malformed Best Take ranking into valid JSON only. "
                             "Do not add, remove, rename, rerank, rescore, or reinterpret candidates. "
                             "Preserve the original ranking intent, clip ids, scores and reasons exactly. "
-                            "Return only {\"ranked\":[{\"id\":...,\"score\":0..1,\"reason\":...}]} ."
+                            "Return only {\"ranked\":[{\"id\":...,\"score\":0..1,\"reason\":...}]}."
                         ),
                     },
                     {"role": "user", "content": str(output_text)[:30000]},
                 ],
             )
             return parse_json_object(repair.output_text), True
+
+    def _repair_candidate_identities(
+        self,
+        client: object,
+        *,
+        output_text: str,
+        data: dict,
+        expected: set[str],
+    ) -> dict:
+        """Request one constrained identity repair without changing ranking judgement.
+
+        The repair model may only map malformed/foreign ids onto the exact candidate ids
+        that were supplied to the original judge. It must preserve ordering, scores and
+        reasons. The result is validated strictly afterwards; no local fuzzy remapping is
+        allowed.
+        """
+        repair = client.responses.create(
+            model=self.model,
+            input=[
+                {
+                    "role": "system",
+                    "content": (
+                        "Repair ONLY candidate identity fields in this Best Take JSON. "
+                        "Allowed candidate ids are supplied separately. Return every allowed id exactly once. "
+                        "Do not rerank, rescore, rewrite reasons, add candidates, remove candidates, or infer a new judgement. "
+                        "Preserve item order, scores and reasons from the original ranking as closely as possible; only correct id values "
+                        "that are invalid, duplicated, or missing. If you cannot map identities unambiguously, preserve the uncertainty in "
+                        "the JSON rather than inventing a new ranking. Return JSON only as "
+                        "{\"ranked\":[{\"id\":...,\"score\":0..1,\"reason\":...}]} ."
+                    ),
+                },
+                {
+                    "role": "user",
+                    "content": json.dumps(
+                        {
+                            "allowed_candidate_ids": sorted(expected),
+                            "parsed_ranking": data,
+                            "original_output": str(output_text)[:30000],
+                        },
+                        ensure_ascii=False,
+                    ),
+                },
+            ],
+        )
+        return parse_json_object(repair.output_text)
 
     def rank(self, takes: Tuple[CandidateTake, ...]) -> TakeJudgeProviderResult:
         evidence = []
@@ -104,10 +166,24 @@ class OpenAITakeJudgeProvider:
             ],
         )
         data, repaired_json = self._parse_or_repair_json(client, response.output_text)
+        expected = {take.clip_id for take in takes}
+        identity_repaired = False
+        identity_error = _identity_error(data, expected)
+        if identity_error is not None:
+            data = self._repair_candidate_identities(
+                client,
+                output_text=response.output_text,
+                data=data,
+                expected=expected,
+            )
+            identity_repaired = True
+            identity_error = _identity_error(data, expected)
+            if identity_error is not None:
+                raise ValueError(identity_error)
+
         items = data.get("ranked")
         if not isinstance(items, list):
             raise ValueError("take judge returned invalid payload")
-        expected = {take.clip_id for take in takes}
         baseline_by_id = {item.clip_id: item for item in rank_takes(takes)}
         seen = set()
         ranked = []
@@ -124,19 +200,21 @@ class OpenAITakeJudgeProvider:
             if not valid_score:
                 score_fallback_count += 1
                 reason = f"{reason} [malformed score: deterministic baseline used]".strip()[:240]
-            elif repaired_json and not reason:
-                reason = "json_format_repaired"
+            elif (repaired_json or identity_repaired) and not reason:
+                reason = "provider_output_repaired"
             ranked.append(RankedTake(clip_id, score, reason))
             seen.add(clip_id)
         if seen != expected:
             raise ValueError("take judge omitted candidates")
         ranked.sort(key=lambda item: (-item.score, item.clip_id))
-        status_reason = (
-            f"score_fallback:{score_fallback_count}"
-            if score_fallback_count
-            else ("json_format_repaired" if repaired_json else "")
-        )
+        status_bits = []
+        if repaired_json:
+            status_bits.append("json_format_repaired")
+        if identity_repaired:
+            status_bits.append("candidate_ids_repaired")
+        if score_fallback_count:
+            status_bits.append(f"score_fallback:{score_fallback_count}")
         return TakeJudgeProviderResult(
             tuple(ranked),
-            ProviderStatus("openai", True, True, "applied", status_reason),
+            ProviderStatus("openai", True, True, "applied", ",".join(status_bits)),
         )
