@@ -124,6 +124,60 @@ def test_openai_provider_marks_exact_prefix_retry_evidence_and_allows_safe_delet
     assert next(item for item in diagnostics if item["clip_id"] == "fragment")["applied_delete"] is True
 
 
+def test_openai_provider_ignores_string_null_indexes_for_non_mixed_action():
+    reaction = _take("reaction", 1.0, 1.6, "Yeah")
+    client = FakeClient({
+        "judgements": [{
+            "id": "reaction",
+            "action": "keep",
+            "confidence": 0.99,
+            "reason": "intentional reaction",
+            "keep_start_word_index": "null",
+            "keep_end_word_index": "null",
+        }]
+    })
+    provider = OpenAICleanCutProvider(client_factory=lambda: client)
+
+    judged = safe_clean_cut_judge(provider, (reaction,))
+
+    assert judged.status.status == "applied"
+    judgement = judged.judgements[0]
+    assert judgement.action == "keep"
+    assert judgement.keep_start_word_index is None
+    assert judgement.keep_end_word_index is None
+    kept, deleted, _ = apply_provider_judgements((reaction,), judged)
+    assert kept == (reaction,)
+    assert deleted == ()
+
+
+def test_openai_provider_malformed_delete_confidence_fails_open():
+    fragment = _take("fragment", 0.0, 0.8, "people ask")
+    full = _take("full", 0.9, 4.9, "people ask me all the time if I enjoy this")
+    client = FakeClient({
+        "judgements": [{
+            "id": "fragment",
+            "action": "delete",
+            "confidence": "high",
+            "reason": "abandoned exact-prefix retry",
+            "keep_start_word_index": "null",
+            "keep_end_word_index": "null",
+        }]
+    })
+    provider = OpenAICleanCutProvider(client_factory=lambda: client)
+
+    judged = safe_clean_cut_judge(provider, (fragment, full))
+
+    assert judged.status.status == "applied"
+    judgement = next(item for item in judged.judgements if item.clip_id == "fragment")
+    assert judgement.action == "delete"
+    assert judgement.confidence == 0.0
+    assert "malformed confidence" in judgement.reason
+    kept, deleted, diagnostics = apply_provider_judgements((fragment, full), judged)
+    assert [take.clip_id for take in kept] == ["fragment", "full"]
+    assert deleted == ()
+    assert next(item for item in diagnostics if item["clip_id"] == "fragment")["applied_delete"] is False
+
+
 def test_openai_provider_skips_api_call_when_there_are_no_microtakes():
     left = _take("left", 0.0, 4.0, "this is a valid long creator sentence here")
     right = _take("right", 4.2, 8.2, "another complete creator sentence remains safely untouched")
