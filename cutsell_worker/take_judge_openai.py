@@ -8,7 +8,19 @@ from typing import Callable, Tuple
 from .contracts import CandidateTake, RankedTake
 from .openai_json import parse_json_object
 from .providers import ProviderStatus
+from .take_judge import rank_takes
 from .take_judge_provider import TakeJudgeProviderResult
+
+
+def _safe_score(value: object, *, baseline_score: float) -> tuple[float, bool]:
+    """Return a bounded model score, or the deterministic baseline when malformed."""
+    try:
+        score = float(value)
+    except (TypeError, ValueError):
+        return baseline_score, False
+    if not 0.0 <= score <= 1.0:
+        return baseline_score, False
+    return score, True
 
 
 @dataclass
@@ -36,7 +48,7 @@ class OpenAITakeJudgeProvider:
                             "Repair the following malformed Best Take ranking into valid JSON only. "
                             "Do not add, remove, rename, rerank, rescore, or reinterpret candidates. "
                             "Preserve the original ranking intent, clip ids, scores and reasons exactly. "
-                            "Return only {\"ranked\":[{\"id\":...,\"score\":0..1,\"reason\":...}]}."
+                            "Return only {\"ranked\":[{\"id\":...,\"score\":0..1,\"reason\":...}]} ."
                         ),
                     },
                     {"role": "user", "content": str(output_text)[:30000]},
@@ -96,24 +108,35 @@ class OpenAITakeJudgeProvider:
         if not isinstance(items, list):
             raise ValueError("take judge returned invalid payload")
         expected = {take.clip_id for take in takes}
+        baseline_by_id = {item.clip_id: item for item in rank_takes(takes)}
         seen = set()
         ranked = []
+        score_fallback_count = 0
         for item in items:
+            if not isinstance(item, dict):
+                raise ValueError("take judge returned non-object ranking item")
             clip_id = str(item.get("id") or "")
             if clip_id not in expected or clip_id in seen:
                 raise ValueError("take judge returned invalid clip id")
-            score = float(item.get("score"))
-            if not 0.0 <= score <= 1.0:
-                raise ValueError("take judge score outside 0..1")
+            baseline = baseline_by_id[clip_id]
+            score, valid_score = _safe_score(item.get("score"), baseline_score=baseline.score)
             reason = str(item.get("reason") or "")[:240]
-            if repaired_json and not reason:
+            if not valid_score:
+                score_fallback_count += 1
+                reason = f"{reason} [malformed score: deterministic baseline used]".strip()[:240]
+            elif repaired_json and not reason:
                 reason = "json_format_repaired"
             ranked.append(RankedTake(clip_id, score, reason))
             seen.add(clip_id)
         if seen != expected:
             raise ValueError("take judge omitted candidates")
         ranked.sort(key=lambda item: (-item.score, item.clip_id))
+        status_reason = (
+            f"score_fallback:{score_fallback_count}"
+            if score_fallback_count
+            else ("json_format_repaired" if repaired_json else "")
+        )
         return TakeJudgeProviderResult(
             tuple(ranked),
-            ProviderStatus("openai", True, True, "applied"),
+            ProviderStatus("openai", True, True, "applied", status_reason),
         )
