@@ -65,6 +65,42 @@ def _word_confidence_summary(take: CandidateTake) -> tuple[float | None, float |
     return round(sum(values) / len(values), 4), round(min(values), 4)
 
 
+def _close_neighbor_gap(value: object, *, maximum_sec: float = 1.5) -> bool:
+    if value is None:
+        return False
+    try:
+        gap = float(value)
+    except (TypeError, ValueError):
+        return False
+    return 0.0 <= gap <= maximum_sec
+
+
+def _has_structural_delete_support(evidence: dict) -> bool:
+    """Require independently checkable retry evidence before automatic deletion.
+
+    Model confidence is advisory. A high-confidence DELETE may auto-apply only when
+    the candidate is tightly linked to an adjacent take by exact-prefix or strong
+    lexical-similarity evidence. This protects intentional short reactions from a
+    model that is overconfident because speech is incomplete, profane, or irrelevant.
+    """
+    neighbors = (
+        ("previous", "gap_from_previous_sec"),
+        ("next", "gap_to_next_sec"),
+    )
+    for label, gap_key in neighbors:
+        if not _close_neighbor_gap(evidence.get(gap_key)):
+            continue
+        if bool(evidence.get(f"exact_prefix_of_{label}")):
+            return True
+        similarity = evidence.get(f"similarity_to_{label}")
+        try:
+            if similarity is not None and float(similarity) >= 0.80:
+                return True
+        except (TypeError, ValueError):
+            pass
+    return False
+
+
 @dataclass
 class OpenAICleanCutProvider:
     model: str = "gpt-4o-mini"
@@ -144,6 +180,7 @@ class OpenAICleanCutProvider:
                     "visual_fumble": signals.visual_fumble,
                 } if signals is not None else {}),
             })
+        evidence_by_id = {str(item["id"]): item for item in evidence}
 
         instruction = (
             "You are CutSell Clean Cut Judge. The listed takes are ONLY short ambiguous microtakes that survived "
@@ -188,13 +225,26 @@ class OpenAICleanCutProvider:
             clip_id = str(item.get("id") or "")
             if clip_id not in target_ids or clip_id in target_judgements:
                 raise ValueError("clean cut judge returned invalid target id")
+            action = str(item.get("action") or "").lower()
+            confidence = float(item.get("confidence"))
+            reason = str(item.get("reason") or "")
+            # A model can be confidently wrong about short conversational speech.
+            # Keep its classification for diagnostics, but block automatic deletion
+            # unless the evidence packet independently demonstrates a retry relation.
+            if (
+                action == "delete"
+                and confidence >= 0.94
+                and not _has_structural_delete_support(evidence_by_id[clip_id])
+            ):
+                confidence = min(confidence, 0.93)
+                reason = f"{reason} [auto-delete blocked: no structural retry evidence]"
             start_index = item.get("keep_start_word_index")
             end_index = item.get("keep_end_word_index")
             target_judgements[clip_id] = CleanCutJudgement(
                 clip_id=clip_id,
-                action=str(item.get("action") or "").lower(),
-                confidence=float(item.get("confidence")),
-                reason=str(item.get("reason") or ""),
+                action=action,
+                confidence=confidence,
+                reason=reason,
                 keep_start_word_index=(int(start_index) if start_index is not None else None),
                 keep_end_word_index=(int(end_index) if end_index is not None else None),
             )
