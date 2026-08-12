@@ -1,0 +1,150 @@
+name: CutSell Unseen Clean Cut Benchmark
+
+on:
+  push:
+    branches:
+      - cutsell/mobile-v1-clean
+    paths:
+      - .github/cutsell-unseen-clean-cut-trigger.txt
+
+permissions:
+  contents: read
+
+jobs:
+  benchmark:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    env:
+      PYTHONPATH: ${{ github.workspace }}
+      RUNPOD_API_KEY: ${{ secrets.RUNPOD_API_KEY }}
+      AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+      AWS_REGION: ${{ secrets.AWS_REGION }}
+      S3_BUCKET: ${{ secrets.S3_BUCKET }}
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      CUTSELL_VALIDATION_PREFIX: Editdna bloopers videos/
+      CUTSELL_EDITORIAL_MODE: clean_cut
+      CUTSELL_ASR_MODEL: medium
+      CUTSELL_CLEAN_CUT_JUDGE: "0"
+      CUTSELL_SEMANTIC_MODEL: gpt-4o-mini
+      CUTSELL_VISUAL_MODEL: gpt-4o-mini
+      CUTSELL_TAKE_JUDGE_MODEL: gpt-4o-mini
+      VIDEO_LIMIT: "8"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install runtime
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential python3-dev ffmpeg jq pkg-config \
+            libavformat-dev libavcodec-dev libavdevice-dev libavutil-dev \
+            libavfilter-dev libswscale-dev libswresample-dev
+          pip install -r requirements.cutsell.worker.txt
+
+      - name: Verify dense local vision runtime
+        run: |
+          python - <<'PY'
+          import cv2, mediapipe
+          print('opencv', cv2.__version__)
+          print('mediapipe', mediapipe.__version__)
+          PY
+
+      - name: Load missing runtime secrets from RunPod template vault
+        shell: bash
+        run: |
+          set -euo pipefail
+          missing=0
+          for key in AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_REGION S3_BUCKET OPENAI_API_KEY; do
+            [ -n "${!key:-}" ] || missing=1
+          done
+          [ "$missing" = "1" ] || exit 0
+          test -n "${RUNPOD_API_KEY:-}" || { echo 'runtime secrets unavailable'; exit 3; }
+          curl --fail --silent --show-error --url "https://rest.runpod.io/v1/templates" --header "Authorization: Bearer $RUNPOD_API_KEY" --output templates.json
+          TEMPLATE=$(jq -c '[.[] | select(.name == "EditDNA-Worker-2")][0]' templates.json)
+          test "$TEMPLATE" != "null" || { echo 'EditDNA-Worker-2 template not found'; exit 4; }
+          for key in AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_REGION S3_BUCKET OPENAI_API_KEY; do
+            if [ -z "${!key:-}" ]; then
+              value=$(printf '%s' "$TEMPLATE" | jq -r --arg key "$key" '.env[$key] // empty')
+              test -n "$value" || { echo "$key missing"; exit 5; }
+              echo "::add-mask::$value"
+              printf '%s=%s\n' "$key" "$value" >> "$GITHUB_ENV"
+            fi
+          done
+
+      - name: Run 8 unseen RAW to CLEAN CUT benchmark
+        run: |
+          mkdir -p cutsell-unseen-clean-cut-previews
+          python - <<'PY'
+          import json, os, re
+          from pathlib import PurePosixPath
+          from cutsell_worker.validation import list_validation_videos
+          from cutsell_worker.universal_clean_cut_validation import run_single_universal_clean_cut_validation
+
+          keys = [x['key'] for x in list_validation_videos(
+              prefix=os.environ['CUTSELL_VALIDATION_PREFIX'],
+              limit=int(os.environ.get('VIDEO_LIMIT') or 8),
+          )]
+          if len(keys) != 8:
+              raise SystemExit(f'Expected 8 unseen raws, found {len(keys)}')
+
+          results, failures = [], []
+          for index, key in enumerate(keys):
+              safe = re.sub(r'[^A-Za-z0-9._-]+','-',PurePosixPath(key).stem)[:80] or 'video'
+              preview = f'cutsell-unseen-clean-cut-previews/{index:02d}-{safe}.mp4'
+              try:
+                  results.append(run_single_universal_clean_cut_validation(
+                      key,
+                      project_id=f'cutsell-unseen-{index:03d}',
+                      preview_output=preview,
+                  ))
+              except Exception as exc:
+                  failures.append({'source_key':key,'error_type':exc.__class__.__name__,'error':str(exc)[:500]})
+
+          total_input = sum(float(x.get('source_duration_sec') or 0) for x in results)
+          total_selected = sum(float(x.get('selected_duration_sec') or 0) for x in results)
+          report = {
+              'benchmark_suite':'unseen_clean_cut_generalization',
+              'source_keys':keys,
+              'source_count':len(keys),
+              'completed_count':len(results),
+              'execution_failure_count':len(failures),
+              'total_input_duration_sec':round(total_input,3),
+              'total_selected_duration_sec':round(total_selected,3),
+              'selected_to_input_ratio':round(total_selected/total_input,4) if total_input else None,
+              'total_selected':sum(int(x.get('selected_count') or 0) for x in results),
+              'total_alternates':sum(int(x.get('alternate_count') or 0) for x in results),
+              'total_discarded':sum(int(x.get('discarded_count') or 0) for x in results),
+              'total_clean_cut_removed':sum(int(x.get('clean_cut_removed_count') or 0) for x in results),
+              'total_temporal_trimmed':sum(int(x.get('temporal_trimmed_count') or 0) for x in results),
+              'results':results,
+              'failures':failures,
+          }
+          open('cutsell-unseen-clean-cut-benchmark.json','w',encoding='utf-8').write(
+              json.dumps(report,ensure_ascii=False,indent=2,sort_keys=True)
+          )
+          print(json.dumps({k:report[k] for k in report if k not in {'results','failures'}},indent=2))
+          if failures:
+              raise SystemExit('Unseen Clean Cut execution failure')
+          PY
+
+      - name: Upload JSON report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cutsell-unseen-clean-cut-report-${{ github.sha }}
+          path: cutsell-unseen-clean-cut-benchmark.json
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Upload preview videos
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cutsell-unseen-clean-cut-previews-${{ github.sha }}
+          path: cutsell-unseen-clean-cut-previews/*.mp4
+          if-no-files-found: warn
+          retention-days: 14
