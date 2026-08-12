@@ -171,11 +171,10 @@ def apply_provider_judgements(
     min_keep_duration_sec: float = 0.35,
 ) -> tuple[Tuple[CandidateTake, ...], Tuple[CandidateTake, ...], tuple[dict, ...]]:
     """Apply only high-confidence deletes/trims; all malformed or uncertain cases keep."""
-    effective_delete_threshold = (
-        min(delete_threshold, 0.90)
-        if result.status.reason == "selective_microtake_review"
-        else delete_threshold
-    )
+    # Selective microtake review never weakens the configured whole-delete safety bar.
+    # The provider may become more confident when it receives stronger structural
+    # evidence, but the auto-apply threshold remains the caller's delete_threshold.
+    effective_delete_threshold = delete_threshold
     judgement_by_id = {item.clip_id: item for item in result.judgements}
     kept, deleted, diagnostics = [], [], []
     for take in takes:
