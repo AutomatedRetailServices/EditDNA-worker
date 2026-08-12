@@ -131,22 +131,43 @@ def _is_prefix_fragment(fragment: CandidateTake, reference: CandidateTake) -> bo
     return reference_tokens[: len(fragment_tokens)] == fragment_tokens
 
 
+def _is_material_prefix_fragment(fragment: CandidateTake, reference: CandidateTake) -> bool:
+    """Recognize exact false-start prefixes even when completeness heuristics overstate them.
+
+    ``complete_idea`` intentionally fails open for longer speech, so a seven-word
+    false start can be marked complete merely because it crossed the length threshold.
+    For retry reconciliation only, an exact prefix can be treated as non-substantive
+    when it is materially shorter in both words and time. The fragment remains in the
+    group for Best Take; this only prevents it from vetoing two strong full retries.
+    """
+    if not _is_prefix_fragment(fragment, reference):
+        return False
+    fragment_tokens = semantic_key(fragment.text).split()
+    reference_tokens = semantic_key(reference.text).split()
+    return (
+        len(reference_tokens) - len(fragment_tokens) >= 3
+        and fragment.duration_sec + 0.75 <= reference.duration_sec
+    )
+
+
 def _substantive_reconcile_members(members: list[CandidateTake]) -> list[CandidateTake]:
     """Exclude only structural prefix debris from complete-link retry comparison.
 
     A provider may already place a false-start prefix beside its full attempt. That
     debris should remain in the group for Best Take, but must not veto reconciliation
-    with another near-identical full attempt. A member is ignored here only when it is
-    incomplete and an exact lexical prefix of another member in the same group.
+    with another near-identical full attempt. Because ``complete_idea`` is deliberately
+    fail-open for longer speech, a materially shorter exact prefix may be neutralized
+    here even when that heuristic marked it complete.
     """
     substantive: list[CandidateTake] = []
     for candidate in members:
-        prefix_debris = (
-            not candidate.complete_idea
-            and any(
-                other.clip_id != candidate.clip_id and _is_prefix_fragment(candidate, other)
-                for other in members
+        prefix_debris = any(
+            other.clip_id != candidate.clip_id
+            and (
+                (not candidate.complete_idea and _is_prefix_fragment(candidate, other))
+                or _is_material_prefix_fragment(candidate, other)
             )
+            for other in members
         )
         if not prefix_debris:
             substantive.append(candidate)
