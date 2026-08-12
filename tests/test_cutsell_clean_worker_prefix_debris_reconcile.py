@@ -62,7 +62,7 @@ def test_prefix_debris_inside_group_does_not_block_true_retry_reconciliation():
     assert "local_retry_reconciled" in result.reason
 
 
-def test_incomplete_nonprefix_member_still_blocks_complete_link_merge():
+def test_incomplete_nonprefix_member_is_split_while_true_retries_still_merge():
     takes = (
         CandidateTake(
             "noise",
@@ -95,5 +95,7 @@ def test_incomplete_nonprefix_member_still_blocks_complete_link_merge():
     provider = StaticGroupingProvider((("noise", "a"), ("b",)))
     result = safe_group_takes(provider, takes)
     assert result.status.status == "applied"
-    assert ("noise", "a", "b") not in result.groups
-    assert "local_retry_reconciled" not in result.reason
+    assert result.groups[0] == ("noise",)
+    assert result.groups[1] == ("a", "b")
+    assert "provider_output_repaired" in result.reason
+    assert "local_retry_reconciled" in result.reason
