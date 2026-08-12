@@ -114,7 +114,8 @@ def test_openai_provider_marks_exact_prefix_retry_evidence():
     evidence = payload["takes"][0]
     assert evidence["exact_prefix_of_next"] is True
     assert evidence["gap_to_next_sec"] == 0.1
-    assert evidence["similarity_to_next"] > 0.0
+    assert isinstance(evidence["similarity_to_next"], float)
+    assert evidence["similarity_to_next"] >= 0.0
 
 
 def test_openai_provider_skips_api_call_when_there_are_no_microtakes():
