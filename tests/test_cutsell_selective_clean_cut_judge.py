@@ -1,11 +1,9 @@
-from cutsell_worker.clean_cut_provider import (
-    CleanCutJudgement,
-    CleanCutProviderResult,
-    apply_provider_judgements,
-    safe_clean_cut_judge,
-)
+import json
+from types import SimpleNamespace
+
+from cutsell_worker.clean_cut_openai import OpenAICleanCutProvider
+from cutsell_worker.clean_cut_provider import apply_provider_judgements, safe_clean_cut_judge
 from cutsell_worker.contracts import CandidateTake, Word
-from cutsell_worker.providers import ProviderStatus
 
 
 def _take(clip_id, start, end, text):
@@ -28,65 +26,89 @@ def _take(clip_id, start, end, text):
     )
 
 
-class DeleteEverythingProvider:
-    def __init__(self):
+class FakeResponses:
+    def __init__(self, payload):
+        self.payload = payload
         self.calls = []
 
-    def judge(self, takes):
-        self.calls.append(tuple(take.clip_id for take in takes))
-        return CleanCutProviderResult(
-            tuple(
-                CleanCutJudgement(take.clip_id, "delete", 0.99, "test")
-                for take in takes
-            ),
-            ProviderStatus("fake", True, True, "applied"),
-        )
+    def create(self, **kwargs):
+        self.calls.append(kwargs)
+        return SimpleNamespace(output_text=json.dumps(self.payload))
 
 
-def test_selective_judge_uses_neighbors_as_context_but_only_microtake_is_applicable():
+class FakeClient:
+    def __init__(self, payload):
+        self.responses = FakeResponses(payload)
+
+
+def test_openai_provider_sends_only_microtake_and_keeps_neighbors_read_only():
     left = _take("left", 0.0, 4.0, "this is a valid long creator sentence here")
     micro = _take("micro", 4.1, 5.0, "duffel")
     right = _take("right", 5.1, 9.1, "this is another valid long creator sentence here")
-    takes = (left, micro, right)
-    provider = DeleteEverythingProvider()
+    client = FakeClient({
+        "judgements": [{
+            "id": "micro",
+            "action": "delete",
+            "confidence": 0.99,
+            "reason": "abandoned fragment",
+            "keep_start_word_index": None,
+            "keep_end_word_index": None,
+        }]
+    })
+    provider = OpenAICleanCutProvider(client_factory=lambda: client)
 
-    result = safe_clean_cut_judge(provider, takes)
+    judged = safe_clean_cut_judge(provider, (left, micro, right))
 
-    assert provider.calls == [("left", "micro", "right")]
-    assert [item.clip_id for item in result.judgements] == ["micro"]
+    assert len(client.responses.calls) == 1
+    user_payload = json.loads(client.responses.calls[0]["input"][1]["content"])
+    assert [item["id"] for item in user_payload["takes"]] == ["micro"]
+    assert user_payload["takes"][0]["previous_transcript"] == left.text
+    assert user_payload["takes"][0]["next_transcript"] == right.text
 
-    kept, deleted, diagnostics = apply_provider_judgements(takes, result)
+    assert [(item.clip_id, item.action) for item in judged.judgements] == [
+        ("left", "keep"),
+        ("micro", "delete"),
+        ("right", "keep"),
+    ]
+    kept, deleted, diagnostics = apply_provider_judgements((left, micro, right), judged)
     assert [take.clip_id for take in kept] == ["left", "right"]
     assert [take.clip_id for take in deleted] == ["micro"]
-    assert [item["clip_id"] for item in diagnostics] == ["micro"]
+    assert next(item for item in diagnostics if item["clip_id"] == "left")["applied_delete"] is False
+    assert next(item for item in diagnostics if item["clip_id"] == "right")["applied_delete"] is False
 
 
-def test_selective_judge_does_not_call_provider_when_no_ambiguous_microtakes_exist():
-    takes = (
-        _take("left", 0.0, 4.0, "this is a valid long creator sentence here"),
-        _take("right", 4.2, 8.2, "another complete creator sentence remains safely untouched"),
-    )
-    provider = DeleteEverythingProvider()
+def test_openai_provider_skips_api_call_when_there_are_no_microtakes():
+    left = _take("left", 0.0, 4.0, "this is a valid long creator sentence here")
+    right = _take("right", 4.2, 8.2, "another complete creator sentence remains safely untouched")
+    client = FakeClient({"judgements": []})
+    provider = OpenAICleanCutProvider(client_factory=lambda: client)
 
-    result = safe_clean_cut_judge(provider, takes)
+    judged = safe_clean_cut_judge(provider, (left, right))
 
-    assert provider.calls == []
-    assert result.judgements == ()
-    assert result.status.status == "not_requested_no_ambiguous_microtakes"
+    assert client.responses.calls == []
+    assert [(item.clip_id, item.action) for item in judged.judgements] == [
+        ("left", "keep"),
+        ("right", "keep"),
+    ]
+    assert judged.status.reason == "no_ambiguous_microtakes"
 
 
-def test_selective_judge_reviews_valid_short_reactions_instead_of_hard_deleting_them():
+def test_openai_provider_can_keep_intentional_short_reaction():
     reaction = _take("reaction", 1.0, 1.6, "Yeah")
+    client = FakeClient({
+        "judgements": [{
+            "id": "reaction",
+            "action": "keep",
+            "confidence": 0.99,
+            "reason": "intentional reaction",
+            "keep_start_word_index": None,
+            "keep_end_word_index": None,
+        }]
+    })
+    provider = OpenAICleanCutProvider(client_factory=lambda: client)
 
-    class KeepProvider:
-        def judge(self, takes):
-            return CleanCutProviderResult(
-                (CleanCutJudgement("reaction", "keep", 0.99, "intentional reaction"),),
-                ProviderStatus("fake", True, True, "applied"),
-            )
-
-    result = safe_clean_cut_judge(KeepProvider(), (reaction,))
-    kept, deleted, diagnostics = apply_provider_judgements((reaction,), result)
+    judged = safe_clean_cut_judge(provider, (reaction,))
+    kept, deleted, diagnostics = apply_provider_judgements((reaction,), judged)
 
     assert [take.clip_id for take in kept] == ["reaction"]
     assert deleted == ()
