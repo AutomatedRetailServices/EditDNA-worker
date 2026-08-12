@@ -123,6 +123,10 @@ def safe_whole_video_analyze(
             raise ValueError("whole-video provider omitted source")
         return result
     except Exception as exc:
+        detail = str(exc).strip()
+        reason = exc.__class__.__name__
+        if detail:
+            reason = f"{reason}: {detail[:180]}"
         return WholeVideoContext(
             (),
             ProviderStatus(
@@ -130,6 +134,6 @@ def safe_whole_video_analyze(
                 requested=True,
                 available=False,
                 status="provider_error",
-                reason=exc.__class__.__name__,
+                reason=reason,
             ),
         )
