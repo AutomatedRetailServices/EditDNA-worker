@@ -123,12 +123,42 @@ def _reconcile_similarity_threshold(group_gap_sec: float) -> float:
     return 0.97
 
 
+def _is_prefix_fragment(fragment: CandidateTake, reference: CandidateTake) -> bool:
+    fragment_tokens = semantic_key(fragment.text).split()
+    reference_tokens = semantic_key(reference.text).split()
+    if not fragment_tokens or len(fragment_tokens) > 8:
+        return False
+    return reference_tokens[: len(fragment_tokens)] == fragment_tokens
+
+
+def _substantive_reconcile_members(members: list[CandidateTake]) -> list[CandidateTake]:
+    """Exclude only structural prefix debris from complete-link retry comparison.
+
+    A provider may already place a false-start prefix beside its full attempt. That
+    debris should remain in the group for Best Take, but must not veto reconciliation
+    with another near-identical full attempt. A member is ignored here only when it is
+    incomplete and an exact lexical prefix of another member in the same group.
+    """
+    substantive: list[CandidateTake] = []
+    for candidate in members:
+        prefix_debris = (
+            not candidate.complete_idea
+            and any(
+                other.clip_id != candidate.clip_id and _is_prefix_fragment(candidate, other)
+                for other in members
+            )
+        )
+        if not prefix_debris:
+            substantive.append(candidate)
+    return substantive or members
+
+
 def _groups_should_reconcile(
     left_group: Tuple[str, ...],
     right_group: Tuple[str, ...],
     take_map: dict[str, CandidateTake],
 ) -> bool:
-    """Use group-level timing but complete-link lexical evidence."""
+    """Use group-level timing and complete-link over substantive retry attempts."""
     left_members = []
     right_members = []
     for clip_id in left_group:
@@ -148,10 +178,12 @@ def _groups_should_reconcile(
         return False
 
     threshold = _reconcile_similarity_threshold(_group_gap(left_group, right_group, take_map))
+    left_substantive = _substantive_reconcile_members(left_members)
+    right_substantive = _substantive_reconcile_members(right_members)
     return all(
         retry_similarity(left.text, right.text) >= threshold
-        for left in left_members
-        for right in right_members
+        for left in left_substantive
+        for right in right_substantive
     )
 
 
@@ -199,14 +231,6 @@ def _reconcile_missed_retries(
         )
     )
     return tuple(ordered_groups), changed
-
-
-def _is_prefix_fragment(fragment: CandidateTake, reference: CandidateTake) -> bool:
-    fragment_tokens = semantic_key(fragment.text).split()
-    reference_tokens = semantic_key(reference.text).split()
-    if not fragment_tokens or len(fragment_tokens) > 8:
-        return False
-    return reference_tokens[: len(fragment_tokens)] == fragment_tokens
 
 
 def _extend_adjacent_retry_groups(
@@ -345,9 +369,6 @@ def _absorb_interstitial_retry_debris(
                 membership[candidate.clip_id] = group_index
                 changed = True
 
-        # A partial restart can occur immediately before the first full attempt in
-        # a validated group. Exact-prefix evidence makes this structural rather than
-        # a generic short-phrase deletion rule.
         first = members[0]
         first_pos = next((index for index, item in enumerate(ordered) if item.clip_id == first.clip_id), None)
         if first_pos is not None and first_pos > 0:
