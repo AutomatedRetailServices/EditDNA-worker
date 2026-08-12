@@ -25,7 +25,8 @@ jobs:
       CUTSELL_VALIDATION_PREFIX: Editdna bloopers videos/
       CUTSELL_EDITORIAL_MODE: clean_cut
       CUTSELL_ASR_MODEL: medium
-      CUTSELL_CLEAN_CUT_JUDGE: "0"
+      CUTSELL_CLEAN_CUT_JUDGE: "1"
+      CUTSELL_CLEAN_CUT_JUDGE_MODEL: gpt-4o-mini
       CUTSELL_SEMANTIC_MODEL: gpt-4o-mini
       CUTSELL_VISUAL_MODEL: gpt-4o-mini
       CUTSELL_TAKE_JUDGE_MODEL: gpt-4o-mini
