@@ -3,6 +3,7 @@ from types import SimpleNamespace
 import pytest
 
 import cutsell_worker.validation as validation
+from cutsell_worker.contracts import Word
 
 
 class FakeS3:
@@ -128,3 +129,25 @@ def test_validation_window_builds_exact_bounded_ffmpeg_command():
     assert command[second_map : second_map + 2] == ["-map", "0:a?"]
     assert command[-1] == "window.mp4"
     assert kwargs == {"capture_output": True, "check": True}
+
+
+def test_word_timing_diagnostics_report_only_material_internal_gaps():
+    clip = SimpleNamespace(
+        words=(
+            Word("valid", 10.0, 10.3, 0.96),
+            Word("speech", 10.38, 10.7, 0.92),
+            Word("broken", 11.55, 11.8, 0.61),
+            Word("suffix", 11.9, 12.2, None),
+        )
+    )
+    diagnostics = validation._clip_word_timing_diagnostics(clip)
+    assert diagnostics["word_count"] == 4
+    assert diagnostics["average_confidence"] == pytest.approx(0.83, abs=0.001)
+    assert diagnostics["minimum_confidence"] == 0.61
+    assert len(diagnostics["internal_gaps"]) == 1
+    gap = diagnostics["internal_gaps"][0]
+    assert gap["gap_sec"] == 0.85
+    assert gap["left_text"] == "speech"
+    assert gap["right_text"] == "broken"
+    assert gap["left_confidence"] == 0.92
+    assert gap["right_confidence"] == 0.61
