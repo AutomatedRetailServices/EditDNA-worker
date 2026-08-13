@@ -9,13 +9,13 @@ from cutsell_worker.contracts import CandidateTake
 from cutsell_worker.providers import ProviderStatus
 
 
-def take(clip_id: str, text: str) -> CandidateTake:
+def take(clip_id: str, text: str, *, start: float = 0.0, end: float = 2.0) -> CandidateTake:
     return CandidateTake(
         clip_id=clip_id,
         source_asset_id="source",
         source_order=0,
-        start=0.0,
-        end=2.0,
+        start=start,
+        end=end,
         text=text,
     )
 
@@ -29,6 +29,14 @@ class GoodProvider:
                 CleanCutJudgement(takes[2].clip_id, "delete", 0.90, "not certain enough"),
                 CleanCutJudgement(takes[3].clip_id, "keep", 0.99, "valid creator speech"),
             ),
+            ProviderStatus("fake", True, True, "applied"),
+        )
+
+
+class KeepProvider:
+    def judge(self, takes):
+        return CleanCutProviderResult(
+            tuple(CleanCutJudgement(item.clip_id, "keep", 0.99, "baseline keep") for item in takes),
             ProviderStatus("fake", True, True, "applied"),
         )
 
@@ -122,6 +130,49 @@ def test_large_contract_omission_recovers_in_validated_context_batches():
     assert result.status.status == "applied"
     assert "batched_contract_recovery" in (result.status.reason or "")
     assert [item.clip_id for item in result.judgements] == [item.clip_id for item in takes]
+
+
+def test_repeated_false_start_is_deleted_only_with_nearby_retry_corroboration():
+    takes = (
+        take("bad", "this is the this is the shade", start=10.0, end=12.0),
+        take("good", "this is the shade", start=12.4, end=14.0),
+    )
+    provider = OneShotCleanCutContractRetry(KeepProvider())
+
+    result = provider.judge(takes)
+    by_id = {item.clip_id: item for item in result.judgements}
+
+    assert by_id["bad"].action == "delete"
+    assert by_id["bad"].confidence >= 0.94
+    assert by_id["bad"].reason == "structural_retry_corroborated"
+    assert by_id["good"].action == "keep"
+
+
+def test_intentional_repetition_without_retry_stays_kept():
+    takes = (
+        take("reaction", "they are so so super cute", start=10.0, end=12.0),
+        take("next", "I wear them every day", start=12.4, end=14.0),
+    )
+    provider = OneShotCleanCutContractRetry(KeepProvider())
+
+    result = provider.judge(takes)
+    by_id = {item.clip_id: item for item in result.judgements}
+
+    assert by_id["reaction"].action == "keep"
+    assert by_id["next"].action == "keep"
+
+
+def test_triple_word_repetition_without_matching_retry_stays_kept():
+    takes = (
+        take("repeat", "little little little little little", start=10.0, end=11.5),
+        take("next", "this one is perfect", start=12.0, end=13.5),
+    )
+    provider = OneShotCleanCutContractRetry(KeepProvider())
+
+    result = provider.judge(takes)
+    by_id = {item.clip_id: item for item in result.judgements}
+
+    assert by_id["repeat"].action == "keep"
 
 
 def test_no_provider_is_not_requested_and_keeps_everything():
