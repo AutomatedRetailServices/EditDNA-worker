@@ -1,17 +1,25 @@
-"""Strict recovery wrapper for transient Clean Cut provider contract errors."""
+"""Strict recovery and structural safety wrapper for Clean Cut provider output."""
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 
 from .clean_cut_provider import CleanCutJudgement, CleanCutProvider, CleanCutProviderResult
 from .contracts import CandidateTake
 from .providers import ProviderStatus
+from .take_grouping import retry_similarity, semantic_key
 
 _REPAIRABLE_MESSAGES = frozenset({
     "clean cut judge returned invalid target id",
     "clean cut judge omitted ambiguous microtake",
 })
 _BATCH_SIZE = 12
+_TOKEN_RE = re.compile(r"[a-z0-9']+", re.IGNORECASE)
+_SELF_CRITIQUE_PATTERNS = (
+    re.compile(r"\bi (?:do not|don't|dont) like (?:the |this |that )?(?:beginning|start|take|one)\b", re.IGNORECASE),
+    re.compile(r"\b(?:that|this) (?:was|is|sounded|sounds|looked|looks) (?:bad|wrong|weird|awkward)\b", re.IGNORECASE),
+    re.compile(r"\bi (?:messed|screwed) (?:that|this|it) up\b", re.IGNORECASE),
+)
 
 
 def _validate_exact_ids(
@@ -31,16 +39,121 @@ def _validate_exact_ids(
     return result
 
 
+def _tokens(text: str) -> tuple[str, ...]:
+    return tuple(token.lower() for token in _TOKEN_RE.findall(str(text or "")))
+
+
+def _has_internal_restart_pattern(text: str) -> bool:
+    """Detect obvious within-take restart structure without judging meaning.
+
+    We require either an immediately repeated 2-4 token phrase ("this is the this is the")
+    or the same single token repeated at least three times. A simple emphasis such as
+    "so so super cute" is intentionally not enough by itself.
+    """
+    tokens = _tokens(text)
+    if len(tokens) < 3:
+        return False
+
+    for index in range(len(tokens) - 2):
+        if tokens[index] == tokens[index + 1] == tokens[index + 2]:
+            return True
+
+    for width in (4, 3, 2):
+        for index in range(0, len(tokens) - (2 * width) + 1):
+            if tokens[index : index + width] == tokens[index + width : index + (2 * width)]:
+                return True
+    return False
+
+
+def _strong_retry_match(left: CandidateTake, right: CandidateTake) -> bool:
+    if left.source_asset_id != right.source_asset_id:
+        return False
+    left_key = semantic_key(left.text)
+    right_key = semantic_key(right.text)
+    if not left_key or not right_key:
+        return False
+    left_tokens = left_key.split()
+    right_tokens = right_key.split()
+    shorter, longer = (left_tokens, right_tokens) if len(left_tokens) <= len(right_tokens) else (right_tokens, left_tokens)
+    if longer[: len(shorter)] == shorter:
+        return True
+    return retry_similarity(left.text, right.text) >= 0.80
+
+
+def _nearby_retry(take: CandidateTake, takes: tuple[CandidateTake, ...], *, maximum_gap_sec: float = 6.0) -> bool:
+    for other in takes:
+        if other.clip_id == take.clip_id or other.source_asset_id != take.source_asset_id:
+            continue
+        if other.end <= take.start:
+            gap = take.start - other.end
+        elif other.start >= take.end:
+            gap = other.start - take.end
+        else:
+            gap = 0.0
+        if gap <= maximum_gap_sec and _strong_retry_match(take, other):
+            return True
+    return False
+
+
+def _is_recording_self_critique(text: str) -> bool:
+    return any(pattern.search(str(text or "")) for pattern in _SELF_CRITIQUE_PATTERNS)
+
+
+def _apply_structural_corroboration(
+    result: CleanCutProviderResult,
+    takes: tuple[CandidateTake, ...],
+) -> CleanCutProviderResult:
+    """Promote only strongly corroborated recording mistakes to high-confidence DELETE.
+
+    This never lowers the global application threshold. It only upgrades a take when
+    deterministic transcript structure says "restart/self-critique" AND another nearby
+    same-source take strongly matches as the retry. Intentional repetition/reactions without
+    a matching retry remain untouched.
+    """
+    by_id = {item.clip_id: item for item in result.judgements}
+    changed = 0
+    output: list[CleanCutJudgement] = []
+
+    for take in takes:
+        item = by_id[take.clip_id]
+        structural_restart = _has_internal_restart_pattern(take.text)
+        self_critique = _is_recording_self_critique(take.text)
+        if (structural_restart or self_critique) and _nearby_retry(take, takes):
+            reason = "structural_retry_corroborated"
+            if self_critique:
+                reason = "recording_self_critique_with_retry"
+            output.append(CleanCutJudgement(
+                clip_id=take.clip_id,
+                action="delete",
+                confidence=max(0.96, float(item.confidence)),
+                reason=reason,
+                keep_start_word_index=None,
+                keep_end_word_index=None,
+            ))
+            changed += 1
+        else:
+            output.append(item)
+
+    if not changed:
+        return result
+    status = result.status
+    reason = str(status.reason or "").strip()
+    reason = f"{reason},structural_corroboration:{changed}".strip(",")
+    return CleanCutProviderResult(
+        tuple(output),
+        ProviderStatus(
+            provider=status.provider,
+            requested=status.requested,
+            available=status.available,
+            status=status.status,
+            reason=reason,
+        ),
+    )
+
+
 @dataclass
 class OneShotCleanCutContractRetry:
-    """Recover provider identity/omission failures without weakening edit safety.
-
-    Normal calls are unchanged. If the selective provider returns a repairable
-    contract error, retry once using smaller contiguous batches. Each batch keeps
-    one neighboring take on both sides as read-only local context, every response
-    must cover the exact context ids supplied, and only the core batch judgements
-    are collected. No ids, actions, confidences, or edit decisions are invented.
-    """
+    """Recover provider contract failures and add conservative structural corroboration."""
 
     provider: CleanCutProvider
 
@@ -84,11 +197,12 @@ class OneShotCleanCutContractRetry:
 
     def judge(self, takes: tuple[CandidateTake, ...]) -> CleanCutProviderResult:
         try:
-            return self.provider.judge(takes)
+            result = self.provider.judge(takes)
         except ValueError as exc:
             if str(exc) not in _REPAIRABLE_MESSAGES or len(takes) <= _BATCH_SIZE:
                 raise
-            return self._judge_batched(takes)
+            result = self._judge_batched(takes)
+        return _apply_structural_corroboration(result, takes)
 
 
 def install_clean_cut_contract_recovery() -> None:
