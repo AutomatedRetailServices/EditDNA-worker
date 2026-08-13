@@ -34,67 +34,86 @@ class CleanCutProvider(Protocol):
     def judge(self, takes: Tuple[CandidateTake, ...]) -> CleanCutProviderResult: ...
 
 
+def _validate_provider_result(
+    result: CleanCutProviderResult,
+    takes: Tuple[CandidateTake, ...],
+) -> CleanCutProviderResult:
+    expected = {take.clip_id for take in takes}
+    seen = set()
+    normalized = []
+    for item in result.judgements:
+        if item.clip_id not in expected or item.clip_id in seen:
+            raise ValueError("clean cut judge returned invalid clip id")
+        action = str(item.action).lower().strip()
+        if action not in {"keep", "delete", "mixed"}:
+            raise ValueError("clean cut judge returned invalid action")
+        confidence = float(item.confidence)
+        if not 0.0 <= confidence <= 1.0:
+            raise ValueError("clean cut judge confidence outside 0..1")
+
+        start_index = item.keep_start_word_index
+        end_index = item.keep_end_word_index
+        if start_index is not None:
+            start_index = int(start_index)
+        if end_index is not None:
+            end_index = int(end_index)
+        if action == "mixed" and ((start_index is None) != (end_index is None)):
+            raise ValueError("mixed judgement must provide both word-boundary indexes or neither")
+
+        normalized.append(CleanCutJudgement(
+            clip_id=item.clip_id,
+            action=action,
+            confidence=confidence,
+            reason=str(item.reason or "")[:240],
+            keep_start_word_index=start_index,
+            keep_end_word_index=end_index,
+        ))
+        seen.add(item.clip_id)
+    if seen != expected:
+        raise ValueError("clean cut judge omitted candidates")
+    return CleanCutProviderResult(tuple(normalized), result.status)
+
+
 def safe_clean_cut_judge(
     provider: CleanCutProvider | None,
     takes: Tuple[CandidateTake, ...],
 ) -> CleanCutProviderResult:
-    """Fail open: provider failure or malformed output keeps all speech."""
+    """Fail open: malformed output gets one strict retry, then keeps all speech."""
     if provider is None or not takes:
         return CleanCutProviderResult(
             (),
             ProviderStatus("none", False, False, "not_requested"),
         )
-    try:
-        result = provider.judge(takes)
-        expected = {take.clip_id for take in takes}
-        seen = set()
-        normalized = []
-        for item in result.judgements:
-            if item.clip_id not in expected or item.clip_id in seen:
-                raise ValueError("clean cut judge returned invalid clip id")
-            action = str(item.action).lower().strip()
-            if action not in {"keep", "delete", "mixed"}:
-                raise ValueError("clean cut judge returned invalid action")
-            confidence = float(item.confidence)
-            if not 0.0 <= confidence <= 1.0:
-                raise ValueError("clean cut judge confidence outside 0..1")
 
-            start_index = item.keep_start_word_index
-            end_index = item.keep_end_word_index
-            if start_index is not None:
-                start_index = int(start_index)
-            if end_index is not None:
-                end_index = int(end_index)
-            if action == "mixed" and ((start_index is None) != (end_index is None)):
-                raise ValueError("mixed judgement must provide both word-boundary indexes or neither")
+    last_exc: Exception | None = None
+    for attempt in range(2):
+        try:
+            result = provider.judge(takes)
+            return _validate_provider_result(result, takes)
+        except ValueError as exc:
+            last_exc = exc
+            if attempt == 0:
+                continue
+            break
+        except Exception as exc:
+            last_exc = exc
+            break
 
-            normalized.append(CleanCutJudgement(
-                clip_id=item.clip_id,
-                action=action,
-                confidence=confidence,
-                reason=str(item.reason or "")[:240],
-                keep_start_word_index=start_index,
-                keep_end_word_index=end_index,
-            ))
-            seen.add(item.clip_id)
-        if seen != expected:
-            raise ValueError("clean cut judge omitted candidates")
-        return CleanCutProviderResult(tuple(normalized), result.status)
-    except Exception as exc:
-        detail = str(exc).strip()
-        reason = exc.__class__.__name__
-        if detail:
-            reason = f"{reason}: {detail[:180]}"
-        return CleanCutProviderResult(
-            (),
-            ProviderStatus(
-                provider=provider.__class__.__name__,
-                requested=True,
-                available=False,
-                status="provider_error",
-                reason=reason,
-            ),
-        )
+    assert last_exc is not None
+    detail = str(last_exc).strip()
+    reason = last_exc.__class__.__name__
+    if detail:
+        reason = f"{reason}: {detail[:180]}"
+    return CleanCutProviderResult(
+        (),
+        ProviderStatus(
+            provider=provider.__class__.__name__,
+            requested=True,
+            available=False,
+            status="provider_error",
+            reason=reason,
+        ),
+    )
 
 
 def _candidate_from_words(parent: CandidateTake, words) -> CandidateTake:
@@ -175,9 +194,6 @@ def apply_provider_judgements(
     min_keep_duration_sec: float = 0.35,
 ) -> tuple[Tuple[CandidateTake, ...], Tuple[CandidateTake, ...], tuple[dict, ...]]:
     """Apply only high-confidence deletes/trims; all malformed or uncertain cases keep."""
-    # Selective microtake review never weakens the configured whole-delete safety bar.
-    # The provider may become more confident when it receives stronger structural
-    # evidence, but the auto-apply threshold remains the caller's delete_threshold.
     effective_delete_threshold = delete_threshold
     judgement_by_id = {item.clip_id: item for item in result.judgements}
     kept, deleted, diagnostics = [], [], []
