@@ -43,41 +43,68 @@ def _tokens(text: str) -> tuple[str, ...]:
     return tuple(token.lower() for token in _TOKEN_RE.findall(str(text or "")))
 
 
-def _has_internal_restart_pattern(text: str) -> bool:
-    """Detect obvious within-take restart structure without judging meaning.
-
-    We require either an immediately repeated 2-4 token phrase ("this is the this is the")
-    or the same single token repeated at least three times. A simple emphasis such as
-    "so so super cute" is intentionally not enough by itself.
-    """
-    tokens = _tokens(text)
-    if len(tokens) < 3:
-        return False
-
-    for index in range(len(tokens) - 2):
-        if tokens[index] == tokens[index + 1] == tokens[index + 2]:
-            return True
+def _collapse_internal_restart(tokens: tuple[str, ...]) -> tuple[str, ...]:
+    """Collapse one obvious immediately repeated phrase for retry comparison only."""
+    if len(tokens) < 2:
+        return tokens
 
     for width in (4, 3, 2):
         for index in range(0, len(tokens) - (2 * width) + 1):
-            if tokens[index : index + width] == tokens[index + width : index + (2 * width)]:
-                return True
+            first = tokens[index : index + width]
+            second = tokens[index + width : index + (2 * width)]
+            if first == second:
+                return tokens[:index] + first + tokens[index + (2 * width) :]
+
+    for index in range(len(tokens) - 2):
+        if tokens[index] == tokens[index + 1] == tokens[index + 2]:
+            end = index + 3
+            while end < len(tokens) and tokens[end] == tokens[index]:
+                end += 1
+            return tokens[: index + 1] + tokens[end:]
+    return tokens
+
+
+def _has_internal_restart_pattern(text: str) -> bool:
+    """Detect obvious within-take restart structure without judging meaning."""
+    tokens = _tokens(text)
+    if len(tokens) < 3:
+        return False
+    if _collapse_internal_restart(tokens) != tokens:
+        return True
     return False
+
+
+def _token_retry_match(left_tokens: tuple[str, ...], right_tokens: tuple[str, ...]) -> bool:
+    if not left_tokens or not right_tokens:
+        return False
+    shorter, longer = (left_tokens, right_tokens) if len(left_tokens) <= len(right_tokens) else (right_tokens, left_tokens)
+    if longer[: len(shorter)] == shorter:
+        return True
+    shorter_set = set(shorter)
+    if not shorter_set:
+        return False
+    return len(shorter_set.intersection(longer)) / len(shorter_set) >= 0.80
 
 
 def _strong_retry_match(left: CandidateTake, right: CandidateTake) -> bool:
     if left.source_asset_id != right.source_asset_id:
         return False
+
     left_key = semantic_key(left.text)
     right_key = semantic_key(right.text)
     if not left_key or not right_key:
         return False
-    left_tokens = left_key.split()
-    right_tokens = right_key.split()
-    shorter, longer = (left_tokens, right_tokens) if len(left_tokens) <= len(right_tokens) else (right_tokens, left_tokens)
-    if longer[: len(shorter)] == shorter:
+    left_tokens = tuple(left_key.split())
+    right_tokens = tuple(right_key.split())
+    if _token_retry_match(left_tokens, right_tokens):
         return True
-    return retry_similarity(left.text, right.text) >= 0.80
+
+    collapsed_left = _collapse_internal_restart(left_tokens)
+    collapsed_right = _collapse_internal_restart(right_tokens)
+    if _token_retry_match(collapsed_left, collapsed_right):
+        return True
+
+    return retry_similarity(" ".join(collapsed_left), " ".join(collapsed_right)) >= 0.80
 
 
 def _nearby_retry(take: CandidateTake, takes: tuple[CandidateTake, ...], *, maximum_gap_sec: float = 6.0) -> bool:
@@ -103,13 +130,7 @@ def _apply_structural_corroboration(
     result: CleanCutProviderResult,
     takes: tuple[CandidateTake, ...],
 ) -> CleanCutProviderResult:
-    """Promote only strongly corroborated recording mistakes to high-confidence DELETE.
-
-    This never lowers the global application threshold. It only upgrades a take when
-    deterministic transcript structure says "restart/self-critique" AND another nearby
-    same-source take strongly matches as the retry. Intentional repetition/reactions without
-    a matching retry remain untouched.
-    """
+    """Promote only strongly corroborated recording mistakes to high-confidence DELETE."""
     by_id = {item.clip_id: item for item in result.judgements}
     changed = 0
     output: list[CleanCutJudgement] = []
