@@ -31,3 +31,18 @@ class OneShotCleanCutContractRetry:
             if str(exc) not in _REPAIRABLE_MESSAGES:
                 raise
             return self.provider.judge(takes)
+
+
+def install_clean_cut_contract_retry() -> None:
+    """Wrap the package's OpenAI Clean Cut constructor once for all runtime paths."""
+    from . import clean_cut_openai
+
+    original = clean_cut_openai.OpenAICleanCutProvider
+    if getattr(original, "_cutsell_contract_retry_installed", False):
+        return
+
+    def reliable_openai_clean_cut_provider(*args, **kwargs):
+        return OneShotCleanCutContractRetry(original(*args, **kwargs))
+
+    reliable_openai_clean_cut_provider._cutsell_contract_retry_installed = True
+    clean_cut_openai.OpenAICleanCutProvider = reliable_openai_clean_cut_provider
