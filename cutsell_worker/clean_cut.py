@@ -36,10 +36,19 @@ _ONE_MORE_RE = re.compile(
     re.IGNORECASE,
 )
 _RESET_CANDIDATE_KINDS = frozenset({"body_reset_candidate", "hand_motion_reset_candidate"})
+_DISCOURSE_PREFIXES = frozenset({"and", "but", "so", "okay", "ok", "well"})
+_TOKEN_RE = re.compile(r"[a-z0-9']+", re.IGNORECASE)
 
 
 def _normalized(text: str) -> str:
     return " ".join(str(text or "").lower().split())
+
+
+def _tokens(text: str) -> tuple[str, ...]:
+    tokens = tuple(token.lower() for token in _TOKEN_RE.findall(str(text or "")))
+    while tokens and tokens[0] in _DISCOURSE_PREFIXES:
+        tokens = tokens[1:]
+    return tokens
 
 
 def _looks_like_explicit_recording_direction(text: str) -> bool:
@@ -78,6 +87,45 @@ def _dense_reset_evidence(
         return False
     matches.sort(key=lambda item: (item.start, item.end))
     return matches[-1].end - matches[0].start >= minimum_span_sec
+
+
+def _strong_retry_match(first: CandidateTake, second: CandidateTake) -> bool:
+    """Return True only for strong lexical retry/prefix evidence."""
+    left = _tokens(first.text)
+    right = _tokens(second.text)
+    if not left or not right:
+        return False
+    shorter, longer = (left, right) if len(left) <= len(right) else (right, left)
+    if tuple(longer[: len(shorter)]) == tuple(shorter):
+        return True
+    shorter_set = set(shorter)
+    if not shorter_set:
+        return False
+    overlap = len(shorter_set.intersection(longer)) / len(shorter_set)
+    return overlap >= 0.80
+
+
+def _nearby_retry_corroboration(
+    take: CandidateTake,
+    takes: tuple[CandidateTake, ...],
+    *,
+    maximum_gap_sec: float = 6.0,
+) -> bool:
+    """Require close same-source lexical retry evidence before dense-reset deletion."""
+    for other in takes:
+        if other.clip_id == take.clip_id or other.source_asset_id != take.source_asset_id:
+            continue
+        if other.end <= take.start:
+            gap = take.start - other.end
+        elif other.start >= take.end:
+            gap = other.start - take.end
+        else:
+            gap = 0.0
+        if gap > maximum_gap_sec:
+            continue
+        if _strong_retry_match(take, other):
+            return True
+    return False
 
 
 def evaluate_take(
@@ -135,9 +183,21 @@ def apply_clean_cut(
     takes: Iterable[CandidateTake],
     whole_video_context: WholeVideoContext | None = None,
 ) -> Tuple[Tuple[CandidateTake, ...], Tuple[CandidateTake, ...], Tuple[CleanCutDecision, ...]]:
+    take_tuple = tuple(takes)
     kept, discarded, decisions = [], [], []
-    for take in takes:
+    for take in take_tuple:
         decision = evaluate_take(take, whole_video_context)
+        if (
+            not decision.keep
+            and decision.reason == "incomplete_microtake_dense_reset"
+            and not _nearby_retry_corroboration(take, take_tuple)
+        ):
+            decision = CleanCutDecision(
+                take.clip_id,
+                True,
+                "dense_reset_without_retry_corroboration",
+                0.50,
+            )
         decisions.append(decision)
         (kept if decision.keep else discarded).append(take)
     return tuple(kept), tuple(discarded), tuple(decisions)
