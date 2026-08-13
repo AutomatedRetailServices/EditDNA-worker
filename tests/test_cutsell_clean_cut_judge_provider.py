@@ -40,12 +40,29 @@ class BrokenProvider:
         )
 
 
+class FlakyOmissionProvider:
+    def __init__(self):
+        self.calls = 0
+
+    def judge(self, takes):
+        self.calls += 1
+        if self.calls == 1:
+            raise ValueError("clean cut judge omitted ambiguous microtake")
+        return CleanCutProviderResult(
+            tuple(
+                CleanCutJudgement(item.clip_id, "keep", 0.99, "valid after strict retry")
+                for item in takes
+            ),
+            ProviderStatus("fake", True, True, "applied"),
+        )
+
+
 def test_only_high_confidence_whole_delete_is_applied():
     takes = (
         take("a", "okay stop"),
-        take("b", "fuck sorry and now I use this every day"),
+        take("b", "blooper prefix and now I use this every day"),
         take("c", "what"),
-        take("d", "this product is fucking amazing"),
+        take("d", "this product is amazing"),
     )
     result = safe_clean_cut_judge(GoodProvider(), takes)
     kept, deleted, diagnostics = apply_provider_judgements(takes, result)
@@ -64,6 +81,15 @@ def test_malformed_provider_fails_open_and_keeps_everything():
     assert kept == takes
     assert deleted == ()
     assert diagnostics == ()
+
+
+def test_value_error_gets_one_strict_retry_before_provider_failure():
+    takes = (take("a", "valid short speech"), take("b", "another short phrase"))
+    provider = FlakyOmissionProvider()
+    result = safe_clean_cut_judge(provider, takes)
+    assert provider.calls == 2
+    assert result.status.status == "applied"
+    assert [item.clip_id for item in result.judgements] == ["a", "b"]
 
 
 def test_no_provider_is_not_requested_and_keeps_everything():
