@@ -4,6 +4,7 @@ from cutsell_worker.clean_cut_provider import (
     apply_provider_judgements,
     safe_clean_cut_judge,
 )
+from cutsell_worker.clean_cut_retry import OneShotCleanCutContractRetry
 from cutsell_worker.contracts import CandidateTake
 from cutsell_worker.providers import ProviderStatus
 
@@ -57,6 +58,23 @@ class FlakyOmissionProvider:
         )
 
 
+class LargeBatchOmissionProvider:
+    def __init__(self):
+        self.call_sizes = []
+
+    def judge(self, takes):
+        self.call_sizes.append(len(takes))
+        if len(takes) > 14:
+            raise ValueError("clean cut judge omitted ambiguous microtake")
+        return CleanCutProviderResult(
+            tuple(
+                CleanCutJudgement(item.clip_id, "keep", 0.99, "valid batched response")
+                for item in takes
+            ),
+            ProviderStatus("fake", True, True, "applied"),
+        )
+
+
 def test_only_high_confidence_whole_delete_is_applied():
     takes = (
         take("a", "okay stop"),
@@ -90,6 +108,20 @@ def test_value_error_gets_one_strict_retry_before_provider_failure():
     assert provider.calls == 2
     assert result.status.status == "applied"
     assert [item.clip_id for item in result.judgements] == ["a", "b"]
+
+
+def test_large_contract_omission_recovers_in_validated_context_batches():
+    takes = tuple(take(f"clip-{index}", f"speech {index}") for index in range(25))
+    underlying = LargeBatchOmissionProvider()
+    provider = OneShotCleanCutContractRetry(underlying)
+
+    result = provider.judge(takes)
+
+    assert underlying.call_sizes[0] == 25
+    assert all(size <= 14 for size in underlying.call_sizes[1:])
+    assert result.status.status == "applied"
+    assert "batched_contract_recovery" in (result.status.reason or "")
+    assert [item.clip_id for item in result.judgements] == [item.clip_id for item in takes]
 
 
 def test_no_provider_is_not_requested_and_keeps_everything():
