@@ -22,12 +22,27 @@ _POST_STOP_META_RE = re.compile(
     r"\b(?:that\s+better\s+have\s+been\s+good|was\s+that\s+good|did\s+that\s+sound\s+right|i\s+hope\s+that\s+was\s+good)\b",
     re.IGNORECASE,
 )
+_SCRIPT_META_RE = re.compile(
+    r"\b(?:i\s+)?(?:have|need)\s+to\s+(?:look|check)\s+(?:at\s+)?(?:the\s+)?(?:word|script|line|notes?)\b|"
+    r"\bi\s+(?:forgot|forget)\s+(?:the\s+)?(?:word|line|script)\b|"
+    r"\bwhat(?:'s|\s+is)\s+(?:the\s+)?(?:word|line)\b|"
+    r"\bhow\s+do\s+(?:i|you)\s+(?:say|pronounce)\b",
+    re.IGNORECASE,
+)
+_SHORT_CORRECTION_RE = re.compile(
+    r"^\s*(?:no|nah|nope)\s*[,!.]?\s*(?:it|that|this)\b",
+    re.IGNORECASE,
+)
 _RESET_KINDS = frozenset({"body_reset_candidate", "hand_motion_reset_candidate"})
 _BREAK_KINDS = frozenset({"camera_disengagement_candidate", "facial_expression_shift_candidate"})
 
 
 def _is_stop_anchor(take: CandidateTake) -> bool:
     return bool(_STOP_RE.search(str(take.text or "")))
+
+
+def _is_script_meta_anchor(take: CandidateTake) -> bool:
+    return bool(_SCRIPT_META_RE.search(str(take.text or ""))) and take.duration_sec <= 4.5
 
 
 def _is_strong_stop_anchor(take: CandidateTake) -> bool:
@@ -91,6 +106,21 @@ def _has_prior_same_idea_attempt(
     return False
 
 
+def _has_following_take(
+    take: CandidateTake,
+    candidates: tuple[CandidateTake, ...],
+    *,
+    maximum_gap_sec: float = 2.0,
+) -> bool:
+    return any(
+        other.clip_id != take.clip_id
+        and other.source_asset_id == take.source_asset_id
+        and other.start >= take.end
+        and 0.0 <= other.start - take.end <= maximum_gap_sec
+        for other in candidates
+    )
+
+
 def apply_recording_process_neighbors(
     kept: Iterable[CandidateTake],
     discarded: Iterable[CandidateTake],
@@ -100,15 +130,7 @@ def apply_recording_process_neighbors(
     post_anchor_gap_sec: float = 5.0,
     retry_anchor_gap_sec: float = 8.0,
 ) -> tuple[Tuple[CandidateTake, ...], Tuple[CandidateTake, ...], Tuple[dict, ...]]:
-    """Remove takes strongly tied to an explicit stop/restart recording event.
-
-    Strong recording-control anchors are detected deterministically even when the
-    baseline/local brain initially kept them.  A pre-anchor take is removed only
-    with dense visual reset evidence, or when it is a nearby retry of an earlier
-    same-idea attempt and the sequence subsequently collapses into an explicit
-    recording stop.  Post-anchor speech is removed only for explicit recording-meta
-    phrases.  No profanity or ordinary wording is treated as evidence by itself.
-    """
+    """Remove takes strongly tied to explicit recording-process context."""
     kept_tuple = tuple(kept)
     discarded_tuple = tuple(discarded)
     all_candidates = tuple(sorted(kept_tuple + discarded_tuple, key=lambda take: (take.source_order, take.start, take.end)))
@@ -122,7 +144,9 @@ def apply_recording_process_neighbors(
         if _is_strong_stop_anchor(take):
             anchors_by_id[take.clip_id] = take
     anchors = tuple(sorted(anchors_by_id.values(), key=lambda take: (take.source_order, take.start, take.end)))
-    if not anchors:
+    script_meta_anchors = tuple(take for take in all_candidates if _is_script_meta_anchor(take))
+
+    if not anchors and not script_meta_anchors:
         return kept_tuple, (), ()
 
     removed = []
@@ -169,6 +193,19 @@ def apply_recording_process_neighbors(
                     anchor_id = anchor.clip_id
                     break
 
+            if reason is None and _SHORT_CORRECTION_RE.search(str(take.text or "")) and take.duration_sec <= 2.5:
+                for anchor in script_meta_anchors:
+                    if anchor.source_asset_id != take.source_asset_id:
+                        continue
+                    post_gap = take.start - anchor.end
+                    if (
+                        0.0 <= post_gap <= 0.75
+                        and _has_following_take(take, all_candidates)
+                    ):
+                        reason = "short_correction_after_recording_meta_before_retry"
+                        anchor_id = anchor.clip_id
+                        break
+
         if reason is None:
             survivors.append(take)
             continue
@@ -206,6 +243,7 @@ def install_recording_process_context_cleanup() -> None:
             "failed_take_before_explicit_stop_with_visual_reset": 0.96,
             "failed_retry_before_explicit_stop": 0.96,
             "recording_meta_after_explicit_stop": 0.96,
+            "short_correction_after_recording_meta_before_retry": 0.96,
         }
         extra_decisions = tuple(
             CleanCutDecision(
