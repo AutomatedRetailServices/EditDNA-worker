@@ -84,11 +84,11 @@ jobs:
             test -n "$value" || { echo "$key missing from EditDNA-Worker-2"; exit 6; }
             echo "::add-mask::$value"
           done
-          CONTAINER_DISK=$(printf '%s' "$TEMPLATE" | jq -r '.containerDiskInGb // 80')
-          VOLUME_GB=$(printf '%s' "$TEMPLATE" | jq -r '.volumeInGb // 60')
+          CONTAINER_DISK=30
+          VOLUME_GB=20
           VOLUME_MOUNT=$(printf '%s' "$TEMPLATE" | jq -r '.volumeMountPath // "/workspace"')
           printf 'CONTAINER_DISK=%s\nVOLUME_GB=%s\nVOLUME_MOUNT=%s\n' "$CONTAINER_DISK" "$VOLUME_GB" "$VOLUME_MOUNT" >> "$GITHUB_ENV"
-          echo 'Safe baseline loaded without legacy OpenAI/LLM keys.'
+          echo 'Safe baseline loaded without legacy OpenAI/LLM keys; staging disks fixed at 30/20 GB.'
 
       - name: Create approved staging GPU worker
         shell: bash
