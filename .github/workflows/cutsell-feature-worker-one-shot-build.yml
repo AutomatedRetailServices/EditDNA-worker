@@ -16,6 +16,7 @@ jobs:
     runs-on: ubuntu-latest
     env:
       IMAGE: ghcr.io/automatedretailservices/cutsell-worker:${{ github.sha }}
+      BUILD_REASON: local-clean-cut-regression-fixes
     steps:
       - uses: actions/checkout@v4
       - name: Login to GitHub Container Registry
@@ -37,4 +38,6 @@ jobs:
       - name: Push immutable CutSell worker image
         run: docker push "$IMAGE"
       - name: Print immutable image reference
-        run: echo "$IMAGE"
+        run: |
+          echo "$IMAGE"
+          echo "build_reason=$BUILD_REASON"
