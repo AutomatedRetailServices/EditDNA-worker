@@ -10,7 +10,7 @@ on:
       image:
         description: "Immutable CutSell worker image"
         required: true
-        default: "ghcr.io/automatedretailservices/cutsell-worker:f1bc3adc4f2f8df0ae005fa551116dc4d08b30e6"
+        default: ""
       cloud_type:
         description: "RunPod cloud type"
         required: true
@@ -26,7 +26,7 @@ permissions:
 jobs:
   deploy-staging-worker:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 20
     env:
       RUNPOD_API_KEY: ${{ secrets.RUNPOD_API_KEY }}
       REDIS_URL: ${{ secrets.REDIS_URL }}
@@ -56,7 +56,7 @@ jobs:
           count=$(jq '[.[] | select(.name == "cutsell-staging-worker")] | length' pods.json)
           test "$count" = "0" || { echo 'cutsell-staging-worker already exists; refusing duplicate paid worker'; exit 4; }
 
-      - name: Load worker runtime credentials from template vault
+      - name: Build safe runtime baseline from EditDNA-Worker-2
         shell: bash
         run: |
           set -euo pipefail
@@ -65,30 +65,75 @@ jobs:
             --header "Authorization: Bearer $RUNPOD_API_KEY" \
             --output templates.json
           TEMPLATE=$(jq -c --arg name "$RUNPOD_TEMPLATE_NAME" '[.[] | select(.name == $name)][0]' templates.json)
-          test "$TEMPLATE" != "null" || { echo 'RunPod credential template not found'; exit 5; }
+          test "$TEMPLATE" != "null" || { echo 'RunPod baseline template not found'; exit 5; }
+
+          # Preserve the proven local infrastructure knobs from EditDNA-Worker-2,
+          # but explicitly refuse all legacy OpenAI/LLM provider configuration.
+          printf '%s' "$TEMPLATE" | jq -c '{
+            ASR_DEVICE: .env.ASR_DEVICE,
+            ASR_ENABLED: .env.ASR_ENABLED,
+            BAD_TAKES_ENABLED: .env.BAD_TAKES_ENABLED,
+            BOUNDARY_REFINER_ENABLED: .env.BOUNDARY_REFINER_ENABLED,
+            BOUNDARY_REFINER_HEAD_STEP_SEC: .env.BOUNDARY_REFINER_HEAD_STEP_SEC,
+            BOUNDARY_REFINER_MIN_DURATION_SEC: .env.BOUNDARY_REFINER_MIN_DURATION_SEC,
+            BOUNDARY_REFINER_TAIL_STEP_SEC: .env.BOUNDARY_REFINER_TAIL_STEP_SEC,
+            FFMPEG_BIN: .env.FFMPEG_BIN,
+            FFPROBE_BIN: .env.FFPROBE_BIN,
+            HEAD_TRIM_SEC: .env.HEAD_TRIM_SEC,
+            PRESIGN_EXPIRES: .env.PRESIGN_EXPIRES,
+            PYTHONPATH: .env.PYTHONPATH,
+            S3_ACL: .env.S3_ACL,
+            S3_BUCKET: .env.S3_BUCKET,
+            S3_PREFIX: .env.S3_PREFIX,
+            TAIL_TRIM_SEC: .env.TAIL_TRIM_SEC,
+            VISION_ENABLED: .env.VISION_ENABLED,
+            VISION_INTERVAL_SEC: .env.VISION_INTERVAL_SEC,
+            VISION_MAX_SAMPLES: .env.VISION_MAX_SAMPLES,
+            VISUAL_BAD_THRESHOLD: .env.VISUAL_BAD_THRESHOLD,
+            WHISPER_DEVICE: .env.WHISPER_DEVICE,
+            WHISPER_MODEL: .env.WHISPER_MODEL,
+            W_FACE: .env.W_FACE,
+            W_VISION: .env.W_VISION,
+            W_VISUAL: .env.W_VISUAL,
+            AWS_ACCESS_KEY_ID: .env.AWS_ACCESS_KEY_ID,
+            AWS_SECRET_ACCESS_KEY: .env.AWS_SECRET_ACCESS_KEY,
+            AWS_REGION: .env.AWS_REGION
+          } | with_entries(select(.value != null and .value != ""))' > safe-template-env.json
+
           for key in AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_REGION S3_BUCKET; do
-            value=$(printf '%s' "$TEMPLATE" | jq -r --arg key "$key" '.env[$key] // empty')
-            test -n "$value" || { echo "$key missing from template vault"; exit 6; }
+            value=$(jq -r --arg key "$key" '.[$key] // empty' safe-template-env.json)
+            test -n "$value" || { echo "$key missing from EditDNA-Worker-2"; exit 6; }
             echo "::add-mask::$value"
-            printf '%s=%s\n' "$key" "$value" >> "$GITHUB_ENV"
           done
+
+          CONTAINER_DISK=$(printf '%s' "$TEMPLATE" | jq -r '.containerDiskInGb // 80')
+          VOLUME_GB=$(printf '%s' "$TEMPLATE" | jq -r '.volumeInGb // 60')
+          VOLUME_MOUNT=$(printf '%s' "$TEMPLATE" | jq -r '.volumeMountPath // "/workspace"')
+          printf 'CONTAINER_DISK=%s\nVOLUME_GB=%s\nVOLUME_MOUNT=%s\n' "$CONTAINER_DISK" "$VOLUME_GB" "$VOLUME_MOUNT" >> "$GITHUB_ENV"
+
+          echo 'Safe template baseline loaded. Legacy OPENAI_API_KEY, EDITDNA_USE_LLM and external model settings are not inherited.'
 
       - name: Create persistent staging GPU worker
         shell: bash
         run: |
           set -euo pipefail
           START_CMD='python -m rq.cli worker -u "$REDIS_URL" --worker-ttl 1200 cutsell'
-          jq -n \
+          jq \
             --arg name "cutsell-staging-worker" \
             --arg image "$IMAGE" \
             --arg cloud "$CLOUD_TYPE" \
             --arg cmd "$START_CMD" \
             --arg redis "$REDIS_URL" \
-            --arg aws_access "$AWS_ACCESS_KEY_ID" \
-            --arg aws_secret "$AWS_SECRET_ACCESS_KEY" \
-            --arg aws_region "$AWS_REGION" \
-            --arg bucket "$S3_BUCKET" \
-            '{
+            --arg mount "$VOLUME_MOUNT" \
+            --argjson disk "$CONTAINER_DISK" \
+            --argjson volume "$VOLUME_GB" \
+            '. + {
+              REDIS_URL: $redis,
+              CUTSELL_BRAIN_BACKEND: "runpod_local",
+              CUTSELL_EDITORIAL_MODE: "clean_cut",
+              CUTSELL_ASR_MODEL: "medium",
+              CUTSELL_CLEAN_CUT_JUDGE: "0"
+            } | {
               name: $name,
               imageName: $image,
               cloudType: $cloud,
@@ -102,22 +147,19 @@ jobs:
               ],
               gpuTypePriority: "custom",
               interruptible: false,
-              containerDiskInGb: 30,
-              volumeInGb: 20,
-              volumeMountPath: "/workspace",
+              containerDiskInGb: $disk,
+              volumeInGb: $volume,
+              volumeMountPath: $mount,
               dockerEntrypoint: ["bash", "-lc"],
               dockerStartCmd: [$cmd],
-              env: {
-                REDIS_URL: $redis,
-                AWS_ACCESS_KEY_ID: $aws_access,
-                AWS_SECRET_ACCESS_KEY: $aws_secret,
-                AWS_REGION: $aws_region,
-                S3_BUCKET: $bucket,
-                CUTSELL_BRAIN_BACKEND: "runpod_local",
-                CUTSELL_ASR_MODEL: "medium",
-                CUTSELL_CLEAN_CUT_JUDGE: "0"
-              }
-            }' > create-pod.json
+              env: .
+            }' safe-template-env.json > create-pod.json
+
+          # Defense in depth: the payload itself must not contain legacy provider keys.
+          if jq -e '.env | has("OPENAI_API_KEY") or has("EDITDNA_USE_LLM") or has("EDITDNA_LLM_MODEL")' create-pod.json >/dev/null; then
+            echo 'Refusing deployment: forbidden external-provider key present'; exit 7
+          fi
+
           code=$(curl --silent --show-error --write-out '%{http_code}' \
             --request POST \
             --url "https://rest.runpod.io/v1/pods" \
@@ -125,23 +167,60 @@ jobs:
             --header "Content-Type: application/json" \
             --data @create-pod.json \
             --output pod.json)
-          rm -f create-pod.json
+          rm -f create-pod.json safe-template-env.json
           if [ "$code" != "201" ]; then
             echo "RunPod create HTTP status: $code"
             jq '{error,errors,message}' pod.json || true
-            exit 7
+            exit 8
           fi
           POD_ID=$(jq -r '.id // empty' pod.json)
-          test -n "$POD_ID" || { echo 'RunPod returned no Pod id'; exit 7; }
+          test -n "$POD_ID" || { echo 'RunPod returned no Pod id'; exit 8; }
+          echo "POD_ID=$POD_ID" >> "$GITHUB_ENV"
           echo "Created paid staging worker Pod: $POD_ID"
-          jq '{id,name,desiredStatus,imageName,cloudType,gpu,costPerHr,adjustedCostPerHr}' pod.json || true
+          jq '{id,name,desiredStatus,imageName,costPerHr,adjustedCostPerHr}' pod.json || true
 
-      - name: Confirm staging worker is registered
+      - name: Wait until the new RQ worker is actually ready
         shell: bash
         run: |
           set -euo pipefail
-          sleep 5
+          python -m pip install -q 'redis>=5.0' 'rq>=2.6'
+          python - <<'PY'
+          import os, time
+          from datetime import datetime, timezone
+          from redis import Redis
+          from rq import Worker
+
+          connection = Redis.from_url(os.environ['REDIS_URL'])
+          deadline = time.time() + 600
+          last = 'no worker yet'
+          while time.time() < deadline:
+              workers = Worker.all(connection=connection)
+              now = datetime.now(timezone.utc)
+              ready = []
+              for worker in workers:
+                  heartbeat = worker.last_heartbeat
+                  if heartbeat is None:
+                      continue
+                  if heartbeat.tzinfo is None:
+                      heartbeat = heartbeat.replace(tzinfo=timezone.utc)
+                  age = (now - heartbeat).total_seconds()
+                  state = worker.get_state()
+                  last = f'{worker.name} state={state} heartbeat_age={age:.1f}s'
+                  if age <= 30 and state in {'idle', 'busy'}:
+                      ready.append(worker)
+              if ready:
+                  print('RunPod RQ worker ready:', last)
+                  raise SystemExit(0)
+              print('Waiting for RunPod RQ worker:', last, flush=True)
+              time.sleep(10)
+          raise SystemExit('RunPod Pod exists but no fresh RQ worker registered within 10 minutes')
+          PY
+
+      - name: Confirm exact staging Pod after worker readiness
+        shell: bash
+        run: |
+          set -euo pipefail
           curl --fail --silent --show-error \
-            --url "https://rest.runpod.io/v1/pods" \
+            --url "https://rest.runpod.io/v1/pods/$POD_ID" \
             --header "Authorization: Bearer $RUNPOD_API_KEY" \
-            | jq '[.[] | select(.name == "cutsell-staging-worker") | {id,name,desiredStatus,imageName,costPerHr,adjustedCostPerHr}]'
+            | jq '{id,name,desiredStatus,imageName,costPerHr,adjustedCostPerHr}'
