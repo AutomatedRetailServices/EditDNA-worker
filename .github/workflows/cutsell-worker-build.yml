@@ -2,6 +2,11 @@ name: Build CutSell GPU Worker Image
 
 on:
   workflow_dispatch:
+  push:
+    branches:
+      - cutsell/mobile-v1-clean
+    paths:
+      - .github/cutsell-worker-build-trigger.txt
 
 jobs:
   docker:
@@ -19,8 +24,16 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-      - name: Build isolated CutSell worker image
+      - name: Build isolated RunPod-local CutSell worker image
         run: docker build -t "$IMAGE" -f Dockerfile.cutsell.worker .
+      - name: Prove OpenAI SDK is absent from worker image
+        run: |
+          docker run --rm --entrypoint python "$IMAGE" - <<'PY'
+          import importlib.util
+          if importlib.util.find_spec('openai') is not None:
+              raise SystemExit('OpenAI SDK unexpectedly present in RunPod worker image')
+          print('openai_sdk_absent=true')
+          PY
       - name: Push immutable CutSell worker image
         run: docker push "$IMAGE"
       - name: Print image reference
