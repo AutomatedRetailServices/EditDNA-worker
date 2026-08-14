@@ -1,0 +1,86 @@
+name: CutSell RunPod Template Audit
+
+on:
+  push:
+    branches:
+      - cutsell/mobile-v1-clean
+    paths:
+      - .github/workflows/cutsell-runpod-template-audit.yml
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    env:
+      RUNPOD_API_KEY: ${{ secrets.RUNPOD_API_KEY }}
+      REDIS_URL: ${{ secrets.REDIS_URL }}
+    steps:
+      - name: Validate audit credentials
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "${RUNPOD_API_KEY:-}" || { echo 'RUNPOD_API_KEY missing'; exit 3; }
+          test -n "${REDIS_URL:-}" || { echo 'REDIS_URL missing'; exit 3; }
+
+      - name: Audit EditDNA-Worker-2 structure without secret values
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail --silent --show-error \
+            --url "https://rest.runpod.io/v1/templates" \
+            --header "Authorization: Bearer $RUNPOD_API_KEY" \
+            --output templates.json
+          TEMPLATE=$(jq -c '[.[] | select(.name == "EditDNA-Worker-2")][0]' templates.json)
+          test "$TEMPLATE" != "null" || { echo 'EditDNA-Worker-2 template not found'; exit 4; }
+          printf '%s' "$TEMPLATE" | jq '{
+            id,
+            name,
+            imageName,
+            containerDiskInGb,
+            volumeInGb,
+            volumeMountPath,
+            dockerEntrypoint,
+            dockerStartCmd,
+            ports,
+            containerRegistryAuthId,
+            env_keys: ((.env // {}) | keys | sort)
+          }'
+
+      - name: Audit current staging Pod state
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail --silent --show-error \
+            --url "https://rest.runpod.io/v1/pods" \
+            --header "Authorization: Bearer $RUNPOD_API_KEY" \
+            --output pods.json
+          jq '[.[] | select(.name == "cutsell-staging-worker") | {
+            id,
+            name,
+            desiredStatus,
+            imageName,
+            costPerHr,
+            adjustedCostPerHr,
+            machine,
+            gpu,
+            runtime
+          }]' pods.json
+
+      - name: Check RQ worker registration
+        shell: bash
+        run: |
+          set -euo pipefail
+          pip install -q 'redis>=5.0' 'rq>=2.6'
+          python - <<'PY'
+          import os
+          from redis import Redis
+          from rq import Worker
+          connection = Redis.from_url(os.environ['REDIS_URL'])
+          workers = Worker.all(connection=connection)
+          print('rq_worker_count=', len(workers))
+          for worker in workers:
+              print('rq_worker=', worker.name, 'state=', worker.get_state())
+          PY
