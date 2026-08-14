@@ -5,6 +5,7 @@ import re
 from typing import Iterable, Tuple
 
 from .contracts import CandidateTake, CleanCutDecision
+from .take_grouping import retry_similarity
 from .whole_video_analysis import WholeVideoContext
 
 _STOP_RE = re.compile(
@@ -30,13 +31,7 @@ def _is_stop_anchor(take: CandidateTake) -> bool:
 
 
 def _is_strong_stop_anchor(take: CandidateTake) -> bool:
-    """Recognize explicit recording-control speech without relying on a provider.
-
-    Plain semantic uses of the word ``stop`` are intentionally not enough.  The
-    deterministic path only accepts strong recording-process forms such as
-    ``okay stop``, a frustration/interjection followed by stop, ``start over``,
-    or ``redo that``.
-    """
+    """Recognize explicit recording-control speech without relying on a provider."""
     text = str(take.text or "").strip()
     if not text or take.duration_sec > 5.0:
         return False
@@ -75,6 +70,27 @@ def _has_multimodal_reset_between(
     return has_reset and has_break
 
 
+def _has_prior_same_idea_attempt(
+    take: CandidateTake,
+    candidates: tuple[CandidateTake, ...],
+    *,
+    maximum_gap_sec: float = 6.0,
+    minimum_similarity: float = 0.72,
+) -> bool:
+    """Confirm this is a retry of an earlier nearby attempt, not unique speech."""
+    for other in candidates:
+        if other.clip_id == take.clip_id or other.source_asset_id != take.source_asset_id:
+            continue
+        if other.end > take.start:
+            continue
+        gap = take.start - other.end
+        if gap > maximum_gap_sec:
+            continue
+        if retry_similarity(other.text, take.text) >= minimum_similarity:
+            return True
+    return False
+
+
 def apply_recording_process_neighbors(
     kept: Iterable[CandidateTake],
     discarded: Iterable[CandidateTake],
@@ -82,18 +98,20 @@ def apply_recording_process_neighbors(
     *,
     pre_anchor_gap_sec: float = 3.5,
     post_anchor_gap_sec: float = 5.0,
+    retry_anchor_gap_sec: float = 8.0,
 ) -> tuple[Tuple[CandidateTake, ...], Tuple[CandidateTake, ...], Tuple[dict, ...]]:
-    """Remove only takes strongly tied to an explicit stop/restart recording event.
+    """Remove takes strongly tied to an explicit stop/restart recording event.
 
     Strong recording-control anchors are detected deterministically even when the
     baseline/local brain initially kept them.  A pre-anchor take is removed only
-    when an explicit stop/restart follows shortly and dense visual evidence contains
-    both a reset family and an engagement/expression break family.  Post-anchor
-    speech is removed only for explicit recording-meta phrases.  No profanity or
-    ordinary wording is treated as evidence by itself.
+    with dense visual reset evidence, or when it is a nearby retry of an earlier
+    same-idea attempt and the sequence subsequently collapses into an explicit
+    recording stop.  Post-anchor speech is removed only for explicit recording-meta
+    phrases.  No profanity or ordinary wording is treated as evidence by itself.
     """
     kept_tuple = tuple(kept)
     discarded_tuple = tuple(discarded)
+    all_candidates = tuple(sorted(kept_tuple + discarded_tuple, key=lambda take: (take.source_order, take.start, take.end)))
 
     anchors_by_id = {
         take.clip_id: take
@@ -130,6 +148,15 @@ def apply_recording_process_neighbors(
                     and _has_multimodal_reset_between(take, anchor, context)
                 ):
                     reason = "failed_take_before_explicit_stop_with_visual_reset"
+                    anchor_id = anchor.clip_id
+                    break
+
+                if (
+                    0.0 <= pre_gap <= retry_anchor_gap_sec
+                    and take.duration_sec <= 5.0
+                    and _has_prior_same_idea_attempt(take, all_candidates)
+                ):
+                    reason = "failed_retry_before_explicit_stop"
                     anchor_id = anchor.clip_id
                     break
 
@@ -177,6 +204,7 @@ def install_recording_process_context_cleanup() -> None:
         confidence_by_reason = {
             "explicit_recording_stop_anchor": 0.98,
             "failed_take_before_explicit_stop_with_visual_reset": 0.96,
+            "failed_retry_before_explicit_stop": 0.96,
             "recording_meta_after_explicit_stop": 0.96,
         }
         extra_decisions = tuple(
