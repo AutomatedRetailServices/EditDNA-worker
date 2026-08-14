@@ -84,3 +84,27 @@ def enqueue_batch_item(
         meta={"user_id": user_id, "batch_id": batch_id, "batch_index": int(index)},
     )
     return QueueSubmission(job_id=str(job.id), queue_name=str(getattr(target, "name", "cutsell")))
+
+
+def enqueue_unseen_clean_cut_benchmark(
+    payload: dict,
+    *,
+    queue=None,
+    timeout: int = 10800,
+) -> QueueSubmission:
+    """Enqueue the paid-compute benchmark on the same RunPod GPU worker as product jobs."""
+    target = queue or get_queue()
+    benchmark_id = str(payload.get("benchmark_id") or "")
+    job = target.enqueue(
+        "cutsell_worker.validation_job.run_unseen_clean_cut_benchmark",
+        payload,
+        job_timeout=timeout,
+        result_ttl=86400,
+        failure_ttl=86400,
+        meta={
+            "benchmark_id": benchmark_id,
+            "brain_backend": "runpod_local",
+            "external_brain_calls_enabled": False,
+        },
+    )
+    return QueueSubmission(job_id=str(job.id), queue_name=str(getattr(target, "name", "cutsell")))
