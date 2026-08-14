@@ -22,17 +22,26 @@ def score_take(take: CandidateTake) -> RankedTake:
         score = 0.70 * completeness + 0.30 * duration_fit
         return RankedTake(take.clip_id, round(_bounded(score), 4), "text_timing_baseline")
 
+    # Clean Cut Best Take must judge the *delivery*, not only whether the words are
+    # complete.  Dense local MediaPipe/OpenCV signals already expose expression,
+    # gesture, energy and distraction evidence; include those signals directly so
+    # the RunPod-local path can prefer a natural successful delivery without an
+    # external multimodal provider.
     score = (
-        0.22 * completeness
-        + 0.10 * duration_fit
-        + 0.15 * signal.audio_quality
-        + 0.11 * signal.face_visibility
-        + 0.11 * signal.eye_contact
-        + 0.08 * signal.framing_quality
-        + 0.08 * signal.product_visibility
-        + 0.08 * signal.motion_stability
+        0.16 * completeness
+        + 0.06 * duration_fit
+        + 0.12 * signal.audio_quality
+        + 0.08 * signal.face_visibility
+        + 0.09 * signal.eye_contact
+        + 0.06 * signal.framing_quality
+        + 0.05 * signal.product_visibility
+        + 0.07 * signal.motion_stability
         + 0.07 * signal.continuity
-        - 0.10 * signal.visual_fumble
+        + 0.10 * signal.expression_naturalness
+        + 0.07 * signal.gesture_naturalness
+        + 0.07 * signal.delivery_energy
+        - 0.12 * signal.visual_fumble
+        - 0.08 * signal.distraction_risk
     )
     return RankedTake(take.clip_id, round(_bounded(score), 4), "watch_listen_baseline")
 
