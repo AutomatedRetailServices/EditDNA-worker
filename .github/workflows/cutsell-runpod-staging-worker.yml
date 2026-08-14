@@ -66,7 +66,7 @@ jobs:
             --output templates.json
           TEMPLATE=$(jq -c --arg name "$RUNPOD_TEMPLATE_NAME" '[.[] | select(.name == $name)][0]' templates.json)
           test "$TEMPLATE" != "null" || { echo 'RunPod credential template not found'; exit 5; }
-          for key in AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_REGION S3_BUCKET OPENAI_API_KEY; do
+          for key in AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_REGION S3_BUCKET; do
             value=$(printf '%s' "$TEMPLATE" | jq -r --arg key "$key" '.env[$key] // empty')
             test -n "$value" || { echo "$key missing from template vault"; exit 6; }
             echo "::add-mask::$value"
@@ -88,7 +88,6 @@ jobs:
             --arg aws_secret "$AWS_SECRET_ACCESS_KEY" \
             --arg aws_region "$AWS_REGION" \
             --arg bucket "$S3_BUCKET" \
-            --arg openai "$OPENAI_API_KEY" \
             '{
               name: $name,
               imageName: $image,
@@ -116,12 +115,9 @@ jobs:
                 AWS_SECRET_ACCESS_KEY: $aws_secret,
                 AWS_REGION: $aws_region,
                 S3_BUCKET: $bucket,
-                OPENAI_API_KEY: $openai,
+                CUTSELL_BRAIN_BACKEND: "runpod_local",
                 CUTSELL_ASR_MODEL: "medium",
-                CUTSELL_CLEAN_CUT_JUDGE: "0",
-                CUTSELL_SEMANTIC_MODEL: "gpt-4o-mini",
-                CUTSELL_VISUAL_MODEL: "gpt-4o-mini",
-                CUTSELL_TAKE_JUDGE_MODEL: "gpt-4o-mini"
+                CUTSELL_CLEAN_CUT_JUDGE: "0"
               }
             }' > create-pod.json
           code=$(curl --silent --show-error --write-out '%{http_code}' \
