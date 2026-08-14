@@ -24,7 +24,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
  && rm -rf /var/lib/apt/lists/*
 
 COPY requirements.cutsell.worker.txt /app/requirements.cutsell.worker.txt
-RUN pip install --no-cache-dir -r /app/requirements.cutsell.worker.txt
+RUN pip install --no-cache-dir -r /app/requirements.cutsell.worker.txt \
+ && pip uninstall -y openai >/dev/null 2>&1 || true
 
 COPY cutsell_worker /app/cutsell_worker
 
