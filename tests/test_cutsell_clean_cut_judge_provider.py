@@ -5,11 +5,19 @@ from cutsell_worker.clean_cut_provider import (
     safe_clean_cut_judge,
 )
 from cutsell_worker.clean_cut_retry import OneShotCleanCutContractRetry
-from cutsell_worker.contracts import CandidateTake
+from cutsell_worker.contracts import CandidateTake, Word
 from cutsell_worker.providers import ProviderStatus
 
 
-def take(clip_id: str, text: str, *, start: float = 0.0, end: float = 2.0) -> CandidateTake:
+def take(clip_id: str, text: str, *, start: float = 0.0, end: float = 2.0, with_words: bool = False) -> CandidateTake:
+    words = ()
+    if with_words:
+        parts = text.split()
+        span = max(0.01, (end - start) / max(1, len(parts)))
+        words = tuple(
+            Word(token, start + index * span, start + (index + 1) * span, 0.99)
+            for index, token in enumerate(parts)
+        )
     return CandidateTake(
         clip_id=clip_id,
         source_asset_id="source",
@@ -17,6 +25,7 @@ def take(clip_id: str, text: str, *, start: float = 0.0, end: float = 2.0) -> Ca
         start=start,
         end=end,
         text=text,
+        words=words,
     )
 
 
@@ -58,10 +67,7 @@ class FlakyOmissionProvider:
         if self.calls == 1:
             raise ValueError("clean cut judge omitted ambiguous microtake")
         return CleanCutProviderResult(
-            tuple(
-                CleanCutJudgement(item.clip_id, "keep", 0.99, "valid after strict retry")
-                for item in takes
-            ),
+            tuple(CleanCutJudgement(item.clip_id, "keep", 0.99, "valid after strict retry") for item in takes),
             ProviderStatus("fake", True, True, "applied"),
         )
 
@@ -75,10 +81,7 @@ class LargeBatchOmissionProvider:
         if len(takes) > 14:
             raise ValueError("clean cut judge omitted ambiguous microtake")
         return CleanCutProviderResult(
-            tuple(
-                CleanCutJudgement(item.clip_id, "keep", 0.99, "valid batched response")
-                for item in takes
-            ),
+            tuple(CleanCutJudgement(item.clip_id, "keep", 0.99, "valid batched response") for item in takes),
             ProviderStatus("fake", True, True, "applied"),
         )
 
@@ -122,9 +125,7 @@ def test_large_contract_omission_recovers_in_validated_context_batches():
     takes = tuple(take(f"clip-{index}", f"speech {index}") for index in range(25))
     underlying = LargeBatchOmissionProvider()
     provider = OneShotCleanCutContractRetry(underlying)
-
     result = provider.judge(takes)
-
     assert underlying.call_sizes[0] == 25
     assert all(size <= 14 for size in underlying.call_sizes[1:])
     assert result.status.status == "applied"
@@ -132,46 +133,62 @@ def test_large_contract_omission_recovers_in_validated_context_batches():
     assert [item.clip_id for item in result.judgements] == [item.clip_id for item in takes]
 
 
-def test_repeated_false_start_is_deleted_only_with_nearby_retry_corroboration():
-    takes = (
-        take("bad", "this is the this is the shade", start=10.0, end=12.0),
-        take("good", "this is the shade", start=12.4, end=14.0),
-    )
+def test_repeated_false_start_uses_mixed_trim_when_word_boundaries_are_available():
+    bad = take("bad", "this is the this is the shade", start=10.0, end=12.1, with_words=True)
+    good = take("good", "this is the shade", start=12.4, end=14.0, with_words=True)
     provider = OneShotCleanCutContractRetry(KeepProvider())
-
-    result = provider.judge(takes)
+    result = provider.judge((bad, good))
     by_id = {item.clip_id: item for item in result.judgements}
+    assert by_id["bad"].action == "mixed"
+    assert by_id["bad"].confidence >= 0.97
+    assert by_id["bad"].reason == "repeated_prefix_trim"
+    assert by_id["bad"].keep_start_word_index == 3
+    assert by_id["bad"].keep_end_word_index == 6
+    kept, deleted, diagnostics = apply_provider_judgements((bad, good), result)
+    assert kept[0].text.lower() == "this is the shade"
+    assert any(item["applied_mixed_trim"] for item in diagnostics if item["clip_id"] == "bad")
 
+
+def test_self_critique_is_deleted_only_when_opening_repeats_cleanly_nearby():
+    bad = take("bad", "Churro protein shake. Do you know I don't like the beginning?", start=0.0, end=2.54)
+    good = take("good", "Churro protein shake. You'll be getting Churro.", start=6.84, end=9.36)
+    provider = OneShotCleanCutContractRetry(KeepProvider())
+    result = provider.judge((bad, good))
+    by_id = {item.clip_id: item for item in result.judgements}
     assert by_id["bad"].action == "delete"
-    assert by_id["bad"].confidence >= 0.94
-    assert by_id["bad"].reason == "structural_retry_corroborated"
+    assert by_id["bad"].reason == "recording_self_critique_with_retry"
     assert by_id["good"].action == "keep"
+
+
+def test_self_critique_without_matching_retry_stays_kept():
+    bad = take("bad", "I don't like the beginning", start=0.0, end=1.5)
+    unrelated = take("next", "This product is amazing", start=2.0, end=3.5)
+    provider = OneShotCleanCutContractRetry(KeepProvider())
+    result = provider.judge((bad, unrelated))
+    by_id = {item.clip_id: item for item in result.judgements}
+    assert by_id["bad"].action == "keep"
 
 
 def test_intentional_repetition_without_retry_stays_kept():
     takes = (
-        take("reaction", "they are so so super cute", start=10.0, end=12.0),
-        take("next", "I wear them every day", start=12.4, end=14.0),
+        take("reaction", "they are so so super cute", start=10.0, end=12.0, with_words=True),
+        take("next", "I wear them every day", start=12.4, end=14.0, with_words=True),
     )
     provider = OneShotCleanCutContractRetry(KeepProvider())
-
     result = provider.judge(takes)
     by_id = {item.clip_id: item for item in result.judgements}
-
     assert by_id["reaction"].action == "keep"
     assert by_id["next"].action == "keep"
 
 
 def test_triple_word_repetition_without_matching_retry_stays_kept():
     takes = (
-        take("repeat", "little little little little little", start=10.0, end=11.5),
-        take("next", "this one is perfect", start=12.0, end=13.5),
+        take("repeat", "little little little little little", start=10.0, end=11.5, with_words=True),
+        take("next", "this one is perfect", start=12.0, end=13.5, with_words=True),
     )
     provider = OneShotCleanCutContractRetry(KeepProvider())
-
     result = provider.judge(takes)
     by_id = {item.clip_id: item for item in result.judgements}
-
     assert by_id["repeat"].action == "keep"
 
 
