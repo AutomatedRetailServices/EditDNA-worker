@@ -1,0 +1,126 @@
+name: CutSell Feature RunPod One-Shot Deploy
+
+on:
+  push:
+    branches:
+      - cutsell/mobile-v1-clean
+    paths:
+      - .github/workflows/cutsell-feature-runpod-one-shot-deploy.yml
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      RUNPOD_API_KEY: ${{ secrets.RUNPOD_API_KEY }}
+      REDIS_URL: ${{ secrets.REDIS_URL }}
+      IMAGE: ghcr.io/automatedretailservices/cutsell-worker:b55b2b3d43043b5869fad4c5446236d2cfc76e5d
+      RUNPOD_TEMPLATE_NAME: EditDNA-Worker-2
+    steps:
+      - name: Validate approved deployment inputs
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "${RUNPOD_API_KEY:-}" || { echo 'RUNPOD_API_KEY missing'; exit 3; }
+          test -n "${REDIS_URL:-}" || { echo 'REDIS_URL missing'; exit 3; }
+          test -n "${IMAGE:-}" || { echo 'worker image missing'; exit 3; }
+
+      - name: Refuse duplicate staging worker
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail --silent --show-error \
+            --url "https://rest.runpod.io/v1/pods" \
+            --header "Authorization: Bearer $RUNPOD_API_KEY" \
+            --output pods.json
+          count=$(jq '[.[] | select(.name == "cutsell-staging-worker")] | length' pods.json)
+          test "$count" = "0" || { echo 'cutsell-staging-worker already exists; refusing duplicate paid worker'; exit 4; }
+
+      - name: Load S3 runtime credentials from template vault
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail --silent --show-error \
+            --url "https://rest.runpod.io/v1/templates" \
+            --header "Authorization: Bearer $RUNPOD_API_KEY" \
+            --output templates.json
+          TEMPLATE=$(jq -c --arg name "$RUNPOD_TEMPLATE_NAME" '[.[] | select(.name == $name)][0]' templates.json)
+          test "$TEMPLATE" != "null" || { echo 'RunPod credential template not found'; exit 5; }
+          for key in AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_REGION S3_BUCKET; do
+            value=$(printf '%s' "$TEMPLATE" | jq -r --arg key "$key" '.env[$key] // empty')
+            test -n "$value" || { echo "$key missing from template vault"; exit 6; }
+            echo "::add-mask::$value"
+            printf '%s=%s\n' "$key" "$value" >> "$GITHUB_ENV"
+          done
+
+      - name: Create approved staging GPU worker
+        shell: bash
+        run: |
+          set -euo pipefail
+          START_CMD='python -m rq.cli worker -u "$REDIS_URL" --worker-ttl 1200 cutsell'
+          jq -n \
+            --arg name "cutsell-staging-worker" \
+            --arg image "$IMAGE" \
+            --arg cmd "$START_CMD" \
+            --arg redis "$REDIS_URL" \
+            --arg aws_access "$AWS_ACCESS_KEY_ID" \
+            --arg aws_secret "$AWS_SECRET_ACCESS_KEY" \
+            --arg aws_region "$AWS_REGION" \
+            --arg bucket "$S3_BUCKET" \
+            '{
+              name: $name,
+              imageName: $image,
+              cloudType: "COMMUNITY",
+              computeType: "GPU",
+              gpuCount: 1,
+              gpuTypeIds: [
+                "NVIDIA RTX A5000",
+                "NVIDIA RTX A4000",
+                "NVIDIA L4",
+                "NVIDIA A40"
+              ],
+              gpuTypePriority: "custom",
+              interruptible: false,
+              containerDiskInGb: 30,
+              volumeInGb: 20,
+              volumeMountPath: "/workspace",
+              dockerEntrypoint: ["bash", "-lc"],
+              dockerStartCmd: [$cmd],
+              env: {
+                REDIS_URL: $redis,
+                AWS_ACCESS_KEY_ID: $aws_access,
+                AWS_SECRET_ACCESS_KEY: $aws_secret,
+                AWS_REGION: $aws_region,
+                S3_BUCKET: $bucket,
+                CUTSELL_BRAIN_BACKEND: "runpod_local",
+                CUTSELL_ASR_MODEL: "medium",
+                CUTSELL_CLEAN_CUT_JUDGE: "0"
+              }
+            }' > create-pod.json
+          code=$(curl --silent --show-error --write-out '%{http_code}' \
+            --request POST \
+            --url "https://rest.runpod.io/v1/pods" \
+            --header "Authorization: Bearer $RUNPOD_API_KEY" \
+            --header "Content-Type: application/json" \
+            --data @create-pod.json \
+            --output pod.json)
+          rm -f create-pod.json
+          if [ "$code" != "201" ]; then
+            echo "RunPod create HTTP status: $code"
+            jq '{error,errors,message}' pod.json || true
+            exit 7
+          fi
+          jq '{id,name,desiredStatus,imageName,cloudType,gpu,costPerHr,adjustedCostPerHr}' pod.json
+
+      - name: Confirm staging worker registration
+        shell: bash
+        run: |
+          set -euo pipefail
+          sleep 5
+          curl --fail --silent --show-error \
+            --url "https://rest.runpod.io/v1/pods" \
+            --header "Authorization: Bearer $RUNPOD_API_KEY" \
+            | jq '[.[] | select(.name == "cutsell-staging-worker") | {id,name,desiredStatus,imageName,costPerHr,adjustedCostPerHr}]'
