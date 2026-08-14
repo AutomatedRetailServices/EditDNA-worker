@@ -44,15 +44,19 @@ def _requirement_names() -> set[str]:
     return names
 
 
-def test_worker_requirements_do_not_replace_base_torch_cuda_stack():
+def test_worker_requirements_do_not_replace_base_torch_cuda_stack_or_install_openai():
     names = _requirement_names()
-    forbidden = {"torch", "torchvision", "clip", "sentence-transformers", "opencv-python", "opencv-python-headless", "moviepy"}
+    forbidden = {
+        "torch", "torchvision", "clip", "sentence-transformers",
+        "opencv-python", "opencv-python-headless", "moviepy", "openai",
+    }
     assert not (names & forbidden)
-    for required in {"faster-whisper", "boto3", "redis", "rq", "openai"}:
+    for required in {"faster-whisper", "boto3", "redis", "rq"}:
         assert required in names
 
 
-def test_worker_dockerfile_uses_clean_worker_requirements():
+def test_worker_dockerfile_uses_clean_worker_requirements_and_removes_openai_sdk():
     text = Path("Dockerfile.cutsell.worker").read_text(encoding="utf-8")
     assert "requirements.cutsell.worker.txt" in text
     assert "requirements.txt" not in text.replace("requirements.cutsell.worker.txt", "")
+    assert "pip uninstall -y openai" in text
