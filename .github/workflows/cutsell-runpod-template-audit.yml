@@ -17,6 +17,7 @@ jobs:
     env:
       RUNPOD_API_KEY: ${{ secrets.RUNPOD_API_KEY }}
       REDIS_URL: ${{ secrets.REDIS_URL }}
+      POD_ID: bgruphv7oeua1u
     steps:
       - name: Validate audit credentials
         shell: bash
@@ -36,51 +37,85 @@ jobs:
           TEMPLATE=$(jq -c '[.[] | select(.name == "EditDNA-Worker-2")][0]' templates.json)
           test "$TEMPLATE" != "null" || { echo 'EditDNA-Worker-2 template not found'; exit 4; }
           printf '%s' "$TEMPLATE" | jq '{
-            id,
-            name,
-            imageName,
-            containerDiskInGb,
-            volumeInGb,
-            volumeMountPath,
-            dockerEntrypoint,
-            dockerStartCmd,
-            ports,
-            containerRegistryAuthId,
+            id,name,imageName,containerDiskInGb,volumeInGb,volumeMountPath,
+            dockerEntrypoint,dockerStartCmd,ports,containerRegistryAuthId,
             env_keys: ((.env // {}) | keys | sort)
           }'
 
-      - name: Audit current staging Pod state
+      - name: Audit exact staging Pod state
         shell: bash
         run: |
           set -euo pipefail
           curl --fail --silent --show-error \
-            --url "https://rest.runpod.io/v1/pods" \
+            --url "https://rest.runpod.io/v1/pods/$POD_ID" \
             --header "Authorization: Bearer $RUNPOD_API_KEY" \
-            --output pods.json
-          jq '[.[] | select(.name == "cutsell-staging-worker") | {
-            id,
-            name,
-            desiredStatus,
-            imageName,
-            costPerHr,
-            adjustedCostPerHr,
-            machine,
-            gpu,
-            runtime
-          }]' pods.json
+            --output pod.json
+          jq '{
+            id,name,desiredStatus,imageName,costPerHr,adjustedCostPerHr,
+            lastStatusChange,uptimeSeconds,runtime,machine,gpu,
+            containerDiskInGb,volumeInGb,volumeMountPath
+          }' pod.json
 
-      - name: Check RQ worker registration
+      - name: Deep inspect RQ worker and benchmark job state
         shell: bash
         run: |
           set -euo pipefail
           pip install -q 'redis>=5.0' 'rq>=2.6'
           python - <<'PY'
-          import os
+          import os, json
           from redis import Redis
-          from rq import Worker
+          from rq import Worker, Queue
+          from rq.job import Job
+          from rq.registry import StartedJobRegistry, FailedJobRegistry, FinishedJobRegistry
+
           connection = Redis.from_url(os.environ['REDIS_URL'])
           workers = Worker.all(connection=connection)
           print('rq_worker_count=', len(workers))
           for worker in workers:
-              print('rq_worker=', worker.name, 'state=', worker.get_state())
+              current = worker.get_current_job()
+              print(json.dumps({
+                  'worker': worker.name,
+                  'state': worker.get_state(),
+                  'last_heartbeat': str(worker.last_heartbeat),
+                  'birth_date': str(worker.birth_date),
+                  'current_job_id': getattr(current, 'id', None),
+                  'current_job_status': str(current.get_status()) if current else None,
+                  'current_job_func': getattr(current, 'func_name', None) if current else None,
+                  'current_job_enqueued_at': str(getattr(current, 'enqueued_at', None)) if current else None,
+                  'current_job_started_at': str(getattr(current, 'started_at', None)) if current else None,
+                  'current_job_last_heartbeat': str(getattr(current, 'last_heartbeat', None)) if current else None,
+                  'current_job_meta': dict(getattr(current, 'meta', {}) or {}) if current else None,
+              }, default=str, sort_keys=True))
+
+          queue = Queue('cutsell', connection=connection)
+          print('queue_count=', len(queue))
+          print('queued_job_ids=', queue.job_ids[:20])
+
+          for registry_cls, label in [
+              (StartedJobRegistry, 'started'),
+              (FailedJobRegistry, 'failed'),
+              (FinishedJobRegistry, 'finished'),
+          ]:
+              registry = registry_cls('cutsell', connection=connection)
+              ids = registry.get_job_ids()
+              print(label + '_count=', len(ids))
+              print(label + '_job_ids=', ids[-10:])
+              for job_id in ids[-5:]:
+                  try:
+                      job = Job.fetch(job_id, connection=connection)
+                  except Exception as exc:
+                      print(label, job_id, 'fetch_error', exc.__class__.__name__)
+                      continue
+                  print(json.dumps({
+                      'registry': label,
+                      'job_id': job.id,
+                      'status': str(job.get_status()),
+                      'func_name': job.func_name,
+                      'enqueued_at': str(job.enqueued_at),
+                      'started_at': str(job.started_at),
+                      'ended_at': str(job.ended_at),
+                      'last_heartbeat': str(job.last_heartbeat),
+                      'meta': dict(job.meta or {}),
+                      'exc_info_tail': (job.exc_info or '')[-1500:],
+                  }, default=str, sort_keys=True))
           PY
