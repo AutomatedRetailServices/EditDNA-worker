@@ -64,7 +64,7 @@ def _has_internal_restart_pattern(text: str) -> bool:
 
 
 def _initial_repeated_phrase_trim(take: CandidateTake) -> tuple[int, int] | None:
-    """Return a safe kept-word span when a multi-word prefix is repeated once."""
+    """Trim only a repeated multi-word prefix; never collapse single-word emphasis."""
     tokens = _tokens(take.text)
     words = tuple(take.words)
     if not words or len(words) != len(tokens):
@@ -72,7 +72,10 @@ def _initial_repeated_phrase_trim(take: CandidateTake) -> tuple[int, int] | None
     for width in (4, 3, 2):
         if len(tokens) <= 2 * width:
             continue
-        if tokens[:width] == tokens[width:2 * width]:
+        phrase = tokens[:width]
+        if len(set(phrase)) < 2:
+            continue
+        if phrase == tokens[width:2 * width]:
             return width, len(words) - 1
     return None
 
@@ -155,63 +158,36 @@ def _apply_structural_corroboration(result: CleanCutProviderResult, takes: tuple
     by_id = {item.clip_id: item for item in result.judgements}
     changed = 0
     output: list[CleanCutJudgement] = []
-
     for take in takes:
         item = by_id[take.clip_id]
-
         trim = _initial_repeated_phrase_trim(take)
         if trim is not None:
             output.append(CleanCutJudgement(
-                clip_id=take.clip_id,
-                action="mixed",
-                confidence=max(0.99, float(item.confidence)),
-                reason="repeated_prefix_trim",
-                keep_start_word_index=trim[0],
-                keep_end_word_index=trim[1],
+                take.clip_id, "mixed", max(0.99, float(item.confidence)), "repeated_prefix_trim", trim[0], trim[1]
             ))
             changed += 1
             continue
-
         prefix = _self_critique_prefix(take.text)
         if prefix and _nearby_prefix_retry(take, takes, prefix):
             output.append(CleanCutJudgement(
-                clip_id=take.clip_id,
-                action="delete",
-                confidence=max(0.96, float(item.confidence)),
-                reason="recording_self_critique_with_retry",
-                keep_start_word_index=None,
-                keep_end_word_index=None,
+                take.clip_id, "delete", max(0.96, float(item.confidence)), "recording_self_critique_with_retry"
             ))
             changed += 1
             continue
-
         if _has_internal_restart_pattern(take.text) and _nearby_retry(take, takes):
             output.append(CleanCutJudgement(
-                clip_id=take.clip_id,
-                action="delete",
-                confidence=max(0.96, float(item.confidence)),
-                reason="structural_retry_corroborated",
-                keep_start_word_index=None,
-                keep_end_word_index=None,
+                take.clip_id, "delete", max(0.96, float(item.confidence)), "structural_retry_corroborated"
             ))
             changed += 1
         else:
             output.append(item)
-
     if not changed:
         return result
     status = result.status
-    reason = str(status.reason or "").strip()
-    reason = f"{reason},structural_corroboration:{changed}".strip(",")
+    reason = f"{str(status.reason or '').strip()},structural_corroboration:{changed}".strip(",")
     return CleanCutProviderResult(
         tuple(output),
-        ProviderStatus(
-            provider=status.provider,
-            requested=status.requested,
-            available=status.available,
-            status=status.status,
-            reason=reason,
-        ),
+        ProviderStatus(status.provider, status.requested, status.available, status.status, reason),
     )
 
 
