@@ -115,7 +115,15 @@ jobs:
               cloudType: "COMMUNITY",
               computeType: "GPU",
               gpuCount: 1,
-              gpuTypeIds: ["NVIDIA RTX A5000", "NVIDIA RTX A4000", "NVIDIA L4", "NVIDIA A40"],
+              gpuTypeIds: [
+                "NVIDIA RTX A5000",
+                "NVIDIA RTX A4000",
+                "NVIDIA L4",
+                "NVIDIA A40",
+                "NVIDIA RTX A6000",
+                "NVIDIA GeForce RTX 3090",
+                "NVIDIA GeForce RTX 4090"
+              ],
               gpuTypePriority: "custom",
               interruptible: false,
               containerDiskInGb: $disk,
