@@ -24,6 +24,25 @@ from .visual_openai import OpenAIVisualProvider
 from .whole_video_openai import OpenAIWholeVideoProvider
 
 
+def _render_validation_preview(
+    draft,
+    local_paths,
+    *,
+    preview_output: str | None,
+    preview_captions: bool,
+) -> tuple[str | None, str | None]:
+    """Render when the draft contains usable clips; report empty drafts without crashing."""
+    if not preview_output:
+        return None, None
+    if not draft.selected:
+        return None, "empty_draft"
+
+    plan = build_render_plan(draft, local_paths)
+    if not preview_captions:
+        plan = tuple(replace(segment, caption_text="") for segment in plan)
+    return render_preview(plan, preview_output), None
+
+
 def run_single_universal_clean_cut_validation(
     key: str,
     *,
@@ -70,6 +89,7 @@ def run_single_universal_clean_cut_validation(
 
     started = time.monotonic()
     preview_path = None
+    preview_skipped_reason = None
     with tempfile.TemporaryDirectory(prefix="cutsell-universal-clean-cut-") as directory:
         destination = str(Path(directory) / source.original_name)
         local = download_source(source.uri, destination)
@@ -87,11 +107,12 @@ def run_single_universal_clean_cut_validation(
             clean_cut_provider=clean_cut_judge,
         )
 
-        if preview_output:
-            plan = build_render_plan(result.draft, local_paths)
-            if not preview_captions:
-                plan = tuple(replace(segment, caption_text="") for segment in plan)
-            preview_path = render_preview(plan, preview_output)
+        preview_path, preview_skipped_reason = _render_validation_preview(
+            result.draft,
+            local_paths,
+            preview_output=preview_output,
+            preview_captions=preview_captions,
+        )
 
     elapsed = round(time.monotonic() - started, 3)
     selected_duration_sec = round(
@@ -112,6 +133,8 @@ def run_single_universal_clean_cut_validation(
         "elapsed_sec": elapsed,
         "preview_path": preview_path,
         "preview_captions": bool(preview_captions),
+        "preview_skipped_reason": preview_skipped_reason,
+        "empty_draft": not bool(result.draft.selected),
         "selected_count": len(result.draft.selected),
         "alternate_count": len(result.draft.alternates),
         "discarded_count": len(result.draft.discarded),
