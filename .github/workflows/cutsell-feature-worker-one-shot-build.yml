@@ -1,0 +1,40 @@
+name: CutSell Feature Worker One-Shot Build
+
+on:
+  push:
+    branches:
+      - cutsell/mobile-v1-clean
+    paths:
+      - .github/workflows/cutsell-feature-worker-one-shot-build.yml
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  docker:
+    runs-on: ubuntu-latest
+    env:
+      IMAGE: ghcr.io/automatedretailservices/cutsell-worker:${{ github.sha }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Build RunPod-local CutSell worker image
+        run: docker build -t "$IMAGE" -f Dockerfile.cutsell.worker .
+      - name: Prove OpenAI SDK is absent from worker image
+        run: |
+          docker run --rm --entrypoint python "$IMAGE" - <<'PY'
+          import importlib.util
+          if importlib.util.find_spec('openai') is not None:
+              raise SystemExit('OpenAI SDK unexpectedly present in RunPod worker image')
+          print('openai_sdk_absent=true')
+          PY
+      - name: Push immutable CutSell worker image
+        run: docker push "$IMAGE"
+      - name: Print immutable image reference
+        run: echo "$IMAGE"
