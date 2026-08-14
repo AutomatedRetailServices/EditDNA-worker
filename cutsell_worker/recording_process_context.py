@@ -4,7 +4,7 @@ from __future__ import annotations
 import re
 from typing import Iterable, Tuple
 
-from .contracts import CandidateTake
+from .contracts import CandidateTake, CleanCutDecision
 from .whole_video_analysis import WholeVideoContext
 
 _STOP_RE = re.compile(
@@ -112,3 +112,39 @@ def apply_recording_process_neighbors(
         })
 
     return tuple(survivors), tuple(removed), tuple(diagnostics)
+
+
+def install_recording_process_context_cleanup() -> None:
+    """Install sequence-aware cleanup before runtime modules import apply_clean_cut."""
+    from . import clean_cut
+
+    original = clean_cut.apply_clean_cut
+    if getattr(original, "_cutsell_recording_process_context", False):
+        return
+
+    def apply_with_recording_context(takes, context=None):
+        kept, discarded, decisions = original(takes, context)
+        kept, contextual_discarded, diagnostics = apply_recording_process_neighbors(
+            kept, discarded, context
+        )
+        if not contextual_discarded:
+            return kept, discarded, decisions
+
+        reason_by_id = {item["clip_id"]: item["reason"] for item in diagnostics}
+        extra_decisions = tuple(
+            CleanCutDecision(
+                clip_id=take.clip_id,
+                keep=False,
+                reason=reason_by_id[take.clip_id],
+                confidence=0.96,
+            )
+            for take in contextual_discarded
+        )
+        return (
+            kept,
+            tuple(discarded) + tuple(contextual_discarded),
+            tuple(decisions) + extra_decisions,
+        )
+
+    apply_with_recording_context._cutsell_recording_process_context = True
+    clean_cut.apply_clean_cut = apply_with_recording_context
