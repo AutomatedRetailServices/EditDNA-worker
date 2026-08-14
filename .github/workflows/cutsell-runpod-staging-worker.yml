@@ -14,11 +14,11 @@ on:
       cloud_type:
         description: "RunPod cloud type"
         required: true
-        default: "SECURE"
+        default: "COMMUNITY"
         type: choice
         options:
-          - SECURE
           - COMMUNITY
+          - SECURE
 
 permissions:
   contents: read
@@ -95,14 +95,12 @@ jobs:
               computeType: "GPU",
               gpuCount: 1,
               gpuTypeIds: [
-                "NVIDIA L4",
-                "NVIDIA RTX A4000",
                 "NVIDIA RTX A5000",
-                "NVIDIA A40",
-                "NVIDIA GeForce RTX 3090",
-                "NVIDIA GeForce RTX 4090"
+                "NVIDIA RTX A4000",
+                "NVIDIA L4",
+                "NVIDIA A40"
               ],
-              gpuTypePriority: "availability",
+              gpuTypePriority: "custom",
               interruptible: false,
               containerDiskInGb: 30,
               volumeInGb: 20,
@@ -136,7 +134,7 @@ jobs:
           POD_ID=$(jq -r '.id // empty' pod.json)
           test -n "$POD_ID" || { echo 'RunPod returned no Pod id'; exit 7; }
           echo "Created paid staging worker Pod: $POD_ID"
-          jq '{id,name,desiredStatus,imageName,cloudType,gpu}' pod.json || true
+          jq '{id,name,desiredStatus,imageName,cloudType,gpu,costPerHr,adjustedCostPerHr}' pod.json || true
 
       - name: Confirm staging worker is registered
         shell: bash
@@ -146,4 +144,4 @@ jobs:
           curl --fail --silent --show-error \
             --url "https://rest.runpod.io/v1/pods" \
             --header "Authorization: Bearer $RUNPOD_API_KEY" \
-            | jq '[.[] | select(.name == "cutsell-staging-worker") | {id,name,desiredStatus,imageName}]'
+            | jq '[.[] | select(.name == "cutsell-staging-worker") | {id,name,desiredStatus,imageName,costPerHr,adjustedCostPerHr}]'
