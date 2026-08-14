@@ -35,7 +35,15 @@ _ONE_MORE_RE = re.compile(
     r"\bone more\b\s+(?:time|take|because|cuz|cause|since|you|we|i)\b",
     re.IGNORECASE,
 )
+_EXPLICIT_RECORDING_META_RE = re.compile(
+    r"\b(?:i\s+)?(?:have|need)\s+to\s+(?:look|check)\s+(?:at\s+)?(?:the\s+)?(?:word|script|line|notes?)\b|"
+    r"\bi\s+(?:forgot|forget)\s+(?:the\s+)?(?:word|line|script)\b|"
+    r"\bwhat(?:'s|\s+is)\s+(?:the\s+)?(?:word|line)\b|"
+    r"\bhow\s+do\s+(?:i|you)\s+(?:say|pronounce)\b",
+    re.IGNORECASE,
+)
 _RESET_CANDIDATE_KINDS = frozenset({"body_reset_candidate", "hand_motion_reset_candidate"})
+_BREAK_CANDIDATE_KINDS = frozenset({"camera_disengagement_candidate", "facial_expression_shift_candidate"})
 _DISCOURSE_PREFIXES = frozenset({"and", "but", "so", "okay", "ok", "well"})
 _TOKEN_RE = re.compile(r"[a-z0-9']+", re.IGNORECASE)
 
@@ -55,6 +63,57 @@ def _looks_like_explicit_recording_direction(text: str) -> bool:
     return any(phrase in text for phrase in _PRODUCTION_PHRASES) or bool(_ONE_MORE_RE.search(text))
 
 
+def _source_events(whole_video_context: WholeVideoContext | None, source_asset_id: str):
+    if whole_video_context is None:
+        return ()
+    for source in whole_video_context.sources:
+        if source.source_asset_id == source_asset_id:
+            return tuple(source.events)
+    return ()
+
+
+def _has_reset_and_break_near_take(
+    take: CandidateTake,
+    whole_video_context: WholeVideoContext | None,
+    *,
+    padding_sec: float = 0.45,
+    minimum_confidence: float = 0.72,
+) -> bool:
+    events = tuple(
+        event
+        for event in _source_events(whole_video_context, take.source_asset_id)
+        if event.end >= take.start - padding_sec and event.start <= take.end + padding_sec
+    )
+    has_reset = any(
+        str(event.kind or "").strip().lower().replace("-", "_").replace(" ", "_") in _RESET_CANDIDATE_KINDS
+        and event.confidence >= minimum_confidence
+        for event in events
+    )
+    has_break = any(
+        str(event.kind or "").strip().lower().replace("-", "_").replace(" ", "_") in _BREAK_CANDIDATE_KINDS
+        and event.confidence >= minimum_confidence
+        for event in events
+    )
+    return has_reset and has_break
+
+
+def _looks_like_recording_meta(
+    take: CandidateTake,
+    whole_video_context: WholeVideoContext | None,
+) -> bool:
+    text = str(take.text or "").strip()
+    match = _EXPLICIT_RECORDING_META_RE.search(text)
+    if match is None or take.duration_sec > 4.5:
+        return False
+    normalized = _normalized(text)
+    # First-person forms are explicit enough on their own.  ASR sometimes drops
+    # the leading "I"; in that case require local visual corroboration so ordinary
+    # content about a word/script is never removed from text alone.
+    if normalized.startswith("i ") or re.search(r"\bi\s+(?:forgot|forget)\b", normalized):
+        return True
+    return _has_reset_and_break_near_take(take, whole_video_context)
+
+
 def _dense_reset_evidence(
     take: CandidateTake,
     whole_video_context: WholeVideoContext | None,
@@ -63,26 +122,17 @@ def _dense_reset_evidence(
     minimum_count: int = 3,
     minimum_span_sec: float = 0.70,
 ) -> bool:
-    """Confirm repeated physical reset evidence inside one short spoken take.
-
-    Local performance emits reset *candidates* conservatively, so a single gesture
-    is never destructive. For an already-incomplete microtake, three high-confidence
-    reset observations spread across the take are strong evidence that the creator is
-    physically resetting/recovering rather than delivering an intentional short line.
-    """
+    """Confirm repeated physical reset evidence inside one short spoken take."""
     if whole_video_context is None:
         return False
     matches = []
-    for source in whole_video_context.sources:
-        if source.source_asset_id != take.source_asset_id:
+    for event in _source_events(whole_video_context, take.source_asset_id):
+        kind = str(event.kind or "").strip().lower().replace("-", "_").replace(" ", "_")
+        if kind not in _RESET_CANDIDATE_KINDS or event.confidence < minimum_confidence:
             continue
-        for event in source.events:
-            kind = str(event.kind or "").strip().lower().replace("-", "_").replace(" ", "_")
-            if kind not in _RESET_CANDIDATE_KINDS or event.confidence < minimum_confidence:
-                continue
-            if event.end <= take.start or event.start >= take.end:
-                continue
-            matches.append(event)
+        if event.end <= take.start or event.start >= take.end:
+            continue
+        matches.append(event)
     if len(matches) < minimum_count:
         return False
     matches.sort(key=lambda item: (item.start, item.end))
@@ -132,13 +182,7 @@ def evaluate_take(
     take: CandidateTake,
     whole_video_context: WholeVideoContext | None = None,
 ) -> CleanCutDecision:
-    """Remove obvious recording-process material while protecting uncertainty.
-
-    Whole-video events are now first-class evidence. A take can therefore be a
-    wrong take even when its transcript is grammatically complete. We only delete
-    from temporal evidence when a high-confidence bad-performance event dominates
-    the take; precise edge reactions/resets are handled earlier by temporal trim.
-    """
+    """Remove obvious recording-process material while protecting uncertainty."""
     text = _normalized(take.text)
     words = text.split()
     if take.duration_sec <= 0.12:
@@ -147,6 +191,8 @@ def evaluate_take(
         return CleanCutDecision(take.clip_id, False, "dead_air", 0.95)
     if _looks_like_explicit_recording_direction(text):
         return CleanCutDecision(take.clip_id, False, "explicit_restart_direction", 0.97)
+    if _looks_like_recording_meta(take, whole_video_context):
+        return CleanCutDecision(take.clip_id, False, "explicit_recording_meta", 0.96)
     if text in _SHORT_RESTART_MARKERS and take.duration_sec <= 1.6 and len(words) <= 2:
         return CleanCutDecision(take.clip_id, False, "isolated_restart_marker", 0.94)
     if take.signals and take.signals.silence_ratio >= 0.96 and len(words) <= 1:
@@ -171,9 +217,6 @@ def evaluate_take(
     ):
         return CleanCutDecision(take.clip_id, False, "incomplete_microtake_dense_reset", 0.93)
 
-    # Take-level visual evidence remains a fallback. The lower threshold is safe
-    # only when the spoken idea is incomplete; complete speech needs temporal/global
-    # corroboration above so a normal gesture cannot cause deletion by itself.
     if take.signals and take.signals.visual_fumble >= 0.90 and not take.complete_idea:
         return CleanCutDecision(take.clip_id, False, "obvious_visual_fumble", 0.90)
     return CleanCutDecision(take.clip_id, True, "valid_or_uncertain_speech", 0.50)
