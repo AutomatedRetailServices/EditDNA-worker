@@ -1,9 +1,7 @@
 """Real-video validation harness for CutSell's clean Flow B brain.
 
-The harness can process either a bounded source window or the complete source. It
-intentionally exercises the same production brain providers used by the worker so a
-golden run cannot silently omit Whole-Video Context, semantic Take Grouping,
-Flexible Composer, or the final global draft review.
+Validation uses the same RunPod-local brain runtime as production. Presence of an
+external API key must never change benchmark behavior or cost.
 """
 from __future__ import annotations
 
@@ -17,23 +15,15 @@ import time
 from typing import Any
 
 from .asr import FasterWhisperASR
-from .clean_cut_openai import OpenAICleanCutProvider
-from .composer_openai import OpenAIComposerProvider
+from .brain_runtime import build_brain_runtime
 from .config import load_runtime_config
 from .contracts import ProcessingRequest, SourceAsset
-from .draft_review_openai import OpenAIDraftReviewProvider
 from .flow_b import process_local_sources
 from .media_probe import probe_media
-from .providers import NoopSemanticProvider
 from .render import render_preview
 from .render_plan import build_render_plan
-from .semantic_openai import OpenAISemanticProvider
 from .source_identity import stable_source_id
 from .storage import download_source
-from .take_grouping_openai import OpenAITakeGroupingProvider
-from .take_judge_openai import OpenAITakeJudgeProvider
-from .visual_openai import OpenAIVisualProvider
-from .whole_video_openai import OpenAIWholeVideoProvider
 
 VIDEO_EXTENSIONS = {".mp4", ".mov", ".m4v", ".webm"}
 DEFAULT_VALIDATION_PREFIX = "Editdna bloopers videos/"
@@ -58,12 +48,7 @@ def _is_real_video_key(key: str) -> bool:
 
 
 def _clip_word_timing_diagnostics(clip: object) -> dict[str, Any]:
-    """Expose compact ASR word-boundary evidence for benchmark debugging only.
-
-    This does not participate in editing decisions. It lets a real-footage benchmark
-    distinguish an ASR segmentation failure from a genuinely continuous spoken take
-    without dumping every word timestamp into the report.
-    """
+    """Expose compact ASR word-boundary evidence for benchmark debugging only."""
     words = tuple(sorted(
         getattr(clip, "words", ()) or (),
         key=lambda word: (float(word.start), float(word.end)),
@@ -166,13 +151,7 @@ def run_single_validation(
     source_end_sec: float | None = None,
     preview_captions: bool = False,
 ) -> dict[str, Any]:
-    """Run one S3 video or bounded window through the complete production brain.
-
-    QA previews disable captions by default so human reviewers can judge facial
-    expression, body language, product handling and cut boundaries without text
-    obscuring the source video. This changes only the benchmark preview, never the
-    editable draft or production caption feature.
-    """
+    """Run one S3 video or bounded window through the RunPod-local production brain."""
     if not _is_real_video_key(key):
         raise ValueError("unsupported validation video")
     if (source_start_sec is None) != (source_end_sec is None):
@@ -180,6 +159,7 @@ def run_single_validation(
     config = load_runtime_config()
     if not config.s3_bucket:
         raise RuntimeError("S3_BUCKET is required")
+    brain = build_brain_runtime(config)
     source_id = stable_source_id(project_id, 0, PurePosixPath(key).name)
     source = SourceAsset(
         source_asset_id=source_id,
@@ -197,18 +177,6 @@ def run_single_validation(
         language_hint=language_hint,
     )
     asr = FasterWhisperASR(model_name=config.asr_model)
-    semantic = OpenAISemanticProvider(model=config.semantic_model) if config.semantic_ready else NoopSemanticProvider()
-    whole_video = OpenAIWholeVideoProvider(model=config.visual_model) if config.visual_ready else None
-    visual = OpenAIVisualProvider(model=config.visual_model) if config.visual_ready else None
-    take_grouping = OpenAITakeGroupingProvider(model=config.semantic_model) if config.semantic_ready else None
-    take_judge = OpenAITakeJudgeProvider(model=config.take_judge_model) if config.semantic_ready else None
-    composer = OpenAIComposerProvider(model=config.semantic_model) if config.semantic_ready else None
-    draft_review = OpenAIDraftReviewProvider(model=config.semantic_model) if config.semantic_ready else None
-    clean_cut_judge = (
-        OpenAICleanCutProvider(model=config.clean_cut_judge_model)
-        if config.clean_cut_judge_ready
-        else None
-    )
 
     started = time.monotonic()
     preview_path = None
@@ -235,14 +203,14 @@ def run_single_validation(
             request,
             local_paths,
             asr_provider=asr,
-            semantic_provider=semantic,
-            whole_video_provider=whole_video,
-            visual_provider=visual,
-            take_grouping_provider=take_grouping,
-            take_judge_provider=take_judge,
-            clean_cut_provider=clean_cut_judge,
-            composer_provider=composer,
-            draft_review_provider=draft_review,
+            semantic_provider=brain.semantic_provider,
+            whole_video_provider=brain.whole_video_provider,
+            visual_provider=brain.visual_provider,
+            take_grouping_provider=brain.take_grouping_provider,
+            take_judge_provider=brain.take_judge_provider,
+            clean_cut_provider=brain.clean_cut_provider,
+            composer_provider=brain.composer_provider,
+            draft_review_provider=brain.draft_review_provider,
         )
         if preview_output:
             plan = build_render_plan(result.draft, local_paths)
@@ -253,6 +221,8 @@ def run_single_validation(
     selected_duration_sec = round(sum(max(0.0, clip.end - clip.start) for clip in result.draft.selected), 3)
     return {
         "schema_version": result.schema_version,
+        "brain_backend": brain.backend,
+        "external_brain_calls_enabled": brain.external_calls_enabled,
         "project_id": result.project_id,
         "source_key": key,
         "source_window": window,
@@ -263,15 +233,16 @@ def run_single_validation(
         "preview_path": preview_path,
         "preview_captions": bool(preview_captions),
         "models": {
+            "brain_backend": brain.backend,
             "asr": config.asr_model,
-            "semantic": config.semantic_model if config.semantic_ready else None,
-            "whole_video": config.visual_model if config.visual_ready else None,
-            "visual": config.visual_model if config.visual_ready else None,
-            "take_grouping": config.semantic_model if config.semantic_ready else None,
-            "take_judge": config.take_judge_model if config.semantic_ready else None,
-            "composer": config.semantic_model if config.semantic_ready else None,
-            "draft_review": config.semantic_model if config.semantic_ready else None,
-            "clean_cut_judge": config.clean_cut_judge_model if config.clean_cut_judge_ready else None,
+            "semantic": "local_baseline",
+            "whole_video": "runpod_local_asr_context",
+            "visual": "runpod_local_mediapipe_opencv",
+            "take_grouping": "deterministic_local",
+            "take_judge": "deterministic_local",
+            "composer": None,
+            "draft_review": None,
+            "clean_cut_judge": "deterministic_local",
         },
         "strategy": result.draft.strategy.value,
         "selected_count": len(result.draft.selected),
