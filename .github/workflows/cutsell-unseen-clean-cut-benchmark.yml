@@ -15,59 +15,42 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 180
     env:
-      PYTHONPATH: ${{ github.workspace }}
+      REDIS_URL: ${{ secrets.REDIS_URL }}
       RUNPOD_API_KEY: ${{ secrets.RUNPOD_API_KEY }}
       AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
       AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
       AWS_REGION: ${{ secrets.AWS_REGION }}
       S3_BUCKET: ${{ secrets.S3_BUCKET }}
-      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
       CUTSELL_VALIDATION_PREFIX: Editdna bloopers videos/
-      CUTSELL_EDITORIAL_MODE: clean_cut
-      CUTSELL_ASR_MODEL: medium
-      CUTSELL_CLEAN_CUT_JUDGE: "1"
-      CUTSELL_CLEAN_CUT_JUDGE_MODEL: gpt-4o-mini
-      CUTSELL_SEMANTIC_MODEL: gpt-4o-mini
-      CUTSELL_VISUAL_MODEL: gpt-4o-mini
-      CUTSELL_TAKE_JUDGE_MODEL: gpt-4o-mini
       VIDEO_LIMIT: "8"
+      BENCHMARK_ID: unseen-${{ github.run_id }}-${{ github.sha }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
 
-      - name: Install runtime
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends \
-            build-essential python3-dev ffmpeg jq pkg-config \
-            libavformat-dev libavcodec-dev libavdevice-dev libavutil-dev \
-            libavfilter-dev libswscale-dev libswresample-dev
-          pip install -r requirements.cutsell.worker.txt
+      - name: Install orchestration client only
+        run: pip install 'redis>=5.0' 'rq>=2.6' 'boto3>=1.34'
 
-      - name: Verify dense local vision runtime
-        run: |
-          python - <<'PY'
-          import cv2, mediapipe
-          print('opencv', cv2.__version__)
-          print('mediapipe', mediapipe.__version__)
-          PY
-
-      - name: Load missing runtime secrets from RunPod template vault
+      - name: Load missing S3 credentials from RunPod template vault
         shell: bash
         run: |
           set -euo pipefail
+          test -n "${REDIS_URL:-}" || { echo 'REDIS_URL missing'; exit 3; }
           missing=0
-          for key in AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_REGION S3_BUCKET OPENAI_API_KEY; do
+          for key in AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_REGION S3_BUCKET; do
             [ -n "${!key:-}" ] || missing=1
           done
           [ "$missing" = "1" ] || exit 0
-          test -n "${RUNPOD_API_KEY:-}" || { echo 'runtime secrets unavailable'; exit 3; }
-          curl --fail --silent --show-error --url "https://rest.runpod.io/v1/templates" --header "Authorization: Bearer $RUNPOD_API_KEY" --output templates.json
+          test -n "${RUNPOD_API_KEY:-}" || { echo 'S3 runtime credentials unavailable'; exit 3; }
+          curl --fail --silent --show-error \
+            --url "https://rest.runpod.io/v1/templates" \
+            --header "Authorization: Bearer $RUNPOD_API_KEY" \
+            --output templates.json
           TEMPLATE=$(jq -c '[.[] | select(.name == "EditDNA-Worker-2")][0]' templates.json)
           test "$TEMPLATE" != "null" || { echo 'EditDNA-Worker-2 template not found'; exit 4; }
-          for key in AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_REGION S3_BUCKET OPENAI_API_KEY; do
+          for key in AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_REGION S3_BUCKET; do
             if [ -z "${!key:-}" ]; then
               value=$(printf '%s' "$TEMPLATE" | jq -r --arg key "$key" '.env[$key] // empty')
               test -n "$value" || { echo "$key missing"; exit 5; }
@@ -76,95 +59,133 @@ jobs:
             fi
           done
 
-      - name: Run 8 unseen RAW to CLEAN CUT benchmark
+      - name: Enqueue benchmark on RunPod GPU worker
+        id: enqueue
+        shell: bash
         run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json, os
+          from redis import Redis
+          from rq import Queue, Worker
+
+          connection = Redis.from_url(os.environ['REDIS_URL'])
+          workers = Worker.all(connection=connection)
+          if not workers:
+              raise SystemExit('No RQ worker is registered on Redis; refusing to enqueue benchmark')
+          print('Registered workers:', [worker.name for worker in workers])
+
+          payload = {
+              'benchmark_id': os.environ['BENCHMARK_ID'],
+              'source_prefix': os.environ['CUTSELL_VALIDATION_PREFIX'],
+              'video_limit': int(os.environ.get('VIDEO_LIMIT') or 8),
+          }
+          queue = Queue('cutsell', connection=connection)
+          job = queue.enqueue(
+              'cutsell_worker.validation_job.run_unseen_clean_cut_benchmark',
+              payload,
+              job_timeout=10800,
+              result_ttl=86400,
+              failure_ttl=86400,
+              meta={
+                  'benchmark_id': payload['benchmark_id'],
+                  'brain_backend': 'runpod_local',
+                  'external_brain_calls_enabled': False,
+              },
+          )
+          print(json.dumps({'job_id': job.id, 'queue': queue.name, **payload}, indent=2))
+          with open(os.environ['GITHUB_OUTPUT'], 'a', encoding='utf-8') as handle:
+              handle.write(f'job_id={job.id}\n')
+          PY
+
+      - name: Wait for RunPod-local benchmark
+        env:
+          JOB_ID: ${{ steps.enqueue.outputs.job_id }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json, os, time
+          from redis import Redis
+          from rq.job import Job
+
+          connection = Redis.from_url(os.environ['REDIS_URL'])
+          job = Job.fetch(os.environ['JOB_ID'], connection=connection)
+          deadline = time.monotonic() + 10200
+          last = None
+          while time.monotonic() < deadline:
+              status = job.get_status(refresh=True)
+              value = getattr(status, 'value', str(status))
+              meta = dict(job.meta or {})
+              snapshot = (value, meta.get('stage'), meta.get('progress_percent'), meta.get('current_source'))
+              if snapshot != last:
+                  print(json.dumps({
+                      'status': value,
+                      'stage': meta.get('stage'),
+                      'progress_percent': meta.get('progress_percent'),
+                      'current_source': meta.get('current_source'),
+                      'brain_backend': meta.get('brain_backend'),
+                      'external_brain_calls_enabled': meta.get('external_brain_calls_enabled'),
+                  }, ensure_ascii=False))
+                  last = snapshot
+              if value == 'finished':
+                  result = job.result
+                  if not isinstance(result, dict):
+                      raise SystemExit('RunPod benchmark returned invalid result')
+                  if result.get('brain_backend') != 'runpod_local' or result.get('external_brain_calls_enabled') is not False:
+                      raise SystemExit('RunPod benchmark did not prove local-only brain execution')
+                  with open('runpod-benchmark-result.json', 'w', encoding='utf-8') as handle:
+                      json.dump(result, handle, ensure_ascii=False, indent=2, sort_keys=True)
+                  print(json.dumps(result, ensure_ascii=False, indent=2, sort_keys=True))
+                  break
+              if value in {'failed', 'stopped', 'canceled'}:
+                  print(job.exc_info or 'RunPod benchmark failed')
+                  raise SystemExit(f'RunPod benchmark job {value}')
+              time.sleep(15)
+          else:
+              raise SystemExit('Timed out waiting for RunPod benchmark')
+          PY
+
+      - name: Download RunPod benchmark artifacts from S3
+        shell: bash
+        run: |
+          set -euo pipefail
           mkdir -p cutsell-unseen-clean-cut-previews
           python - <<'PY'
-          import json, os, re
-          from pathlib import PurePosixPath
-          from cutsell_worker.validation import list_validation_videos
-          from cutsell_worker.universal_clean_cut_validation import run_single_universal_clean_cut_validation
+          import json, os
+          from pathlib import Path
+          from urllib.parse import urlparse
+          import boto3
 
-          keys = [x['key'] for x in list_validation_videos(
-              prefix=os.environ['CUTSELL_VALIDATION_PREFIX'],
-              limit=int(os.environ.get('VIDEO_LIMIT') or 8),
-          )]
-          if len(keys) != 8:
-              raise SystemExit(f'Expected 8 unseen raws, found {len(keys)}')
+          result = json.load(open('runpod-benchmark-result.json', encoding='utf-8'))
+          s3 = boto3.client('s3', region_name=os.environ.get('AWS_REGION') or 'us-east-1')
 
-          results, failures = [], []
-          for index, key in enumerate(keys):
-              safe = re.sub(r'[^A-Za-z0-9._-]+','-',PurePosixPath(key).stem)[:80] or 'video'
-              preview = f'cutsell-unseen-clean-cut-previews/{index:02d}-{safe}.mp4'
-              try:
-                  results.append(run_single_universal_clean_cut_validation(
-                      key,
-                      project_id=f'cutsell-unseen-{index:03d}',
-                      preview_output=preview,
-                  ))
-              except Exception as exc:
-                  failures.append({'source_key':key,'error_type':exc.__class__.__name__,'error':str(exc)[:500]})
+          def parts(uri):
+              parsed = urlparse(uri)
+              if parsed.scheme != 's3' or not parsed.netloc or not parsed.path.lstrip('/'):
+                  raise ValueError(f'invalid S3 artifact URI: {uri}')
+              return parsed.netloc, parsed.path.lstrip('/')
 
-          provider_failures = []
-          for result in results:
-              source_key = result.get('source_key')
-              diagnostics = result.get('diagnostics') or {}
-              provider_statuses = (
-                  ('take_grouping', diagnostics.get('take_grouping_status')),
-                  ('whole_video', (diagnostics.get('whole_video_context') or {}).get('status')),
-                  ('clean_cut_judge', diagnostics.get('clean_cut_judge_status')),
+          bucket, key = parts(result['report_uri'])
+          s3.download_file(bucket, key, 'cutsell-unseen-clean-cut-benchmark.json')
+          report = json.load(open('cutsell-unseen-clean-cut-benchmark.json', encoding='utf-8'))
+          if report.get('brain_backend') != 'runpod_local' or report.get('external_brain_calls_enabled') is not False:
+              raise SystemExit('report does not prove RunPod-local brain execution')
+
+          for uri in result.get('preview_uris') or []:
+              bucket, key = parts(uri)
+              destination = Path('cutsell-unseen-clean-cut-previews') / Path(key).name
+              s3.download_file(bucket, key, str(destination))
+          print(json.dumps({
+              key: report.get(key) for key in (
+                  'benchmark_id', 'brain_backend', 'external_brain_calls_enabled',
+                  'source_count', 'completed_count', 'execution_failure_count',
+                  'provider_failure_count', 'selected_to_input_ratio',
+                  'total_clean_cut_removed', 'total_temporal_trimmed'
               )
-              for provider_name, status in provider_statuses:
-                  if not isinstance(status, dict) or not status.get('requested'):
-                      continue
-                  if status.get('status') != 'applied':
-                      provider_failures.append({
-                          'source_key': source_key,
-                          'provider': provider_name,
-                          'status': status.get('status'),
-                          'reason': str(status.get('reason') or '')[:240],
-                      })
-              take_judge_status_counts = diagnostics.get('take_judge_status_counts') or {}
-              take_judge_errors = sum(
-                  int(count or 0)
-                  for status_name, count in take_judge_status_counts.items()
-                  if str(status_name).startswith('provider_error')
-              )
-              if take_judge_errors:
-                  provider_failures.append({
-                      'source_key': source_key,
-                      'provider': 'take_judge',
-                      'status': 'provider_error_fallback',
-                      'reason': f'{take_judge_errors} judged groups used provider fallback',
-                  })
-
-          total_input = sum(float(x.get('source_duration_sec') or 0) for x in results)
-          total_selected = sum(float(x.get('selected_duration_sec') or 0) for x in results)
-          report = {
-              'benchmark_suite':'unseen_clean_cut_generalization',
-              'source_keys':keys,
-              'source_count':len(keys),
-              'completed_count':len(results),
-              'execution_failure_count':len(failures),
-              'provider_failure_count':len(provider_failures),
-              'total_input_duration_sec':round(total_input,3),
-              'total_selected_duration_sec':round(total_selected,3),
-              'selected_to_input_ratio':round(total_selected/total_input,4) if total_input else None,
-              'total_selected':sum(int(x.get('selected_count') or 0) for x in results),
-              'total_alternates':sum(int(x.get('alternate_count') or 0) for x in results),
-              'total_discarded':sum(int(x.get('discarded_count') or 0) for x in results),
-              'total_clean_cut_removed':sum(int(x.get('clean_cut_removed_count') or 0) for x in results),
-              'total_temporal_trimmed':sum(int(x.get('temporal_trimmed_count') or 0) for x in results),
-              'results':results,
-              'failures':failures,
-              'provider_failures':provider_failures,
-          }
-          open('cutsell-unseen-clean-cut-benchmark.json','w',encoding='utf-8').write(
-              json.dumps(report,ensure_ascii=False,indent=2,sort_keys=True)
-          )
-          print(json.dumps({k:report[k] for k in report if k not in {'results','failures','provider_failures'}},indent=2))
-          if failures or provider_failures:
-              raise SystemExit('Unseen Clean Cut validation failure')
+          }, indent=2))
+          if report.get('execution_failure_count') or report.get('provider_failure_count'):
+              raise SystemExit('RunPod-local unseen benchmark reported failures')
           PY
 
       - name: Upload JSON report
