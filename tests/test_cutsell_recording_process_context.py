@@ -39,9 +39,7 @@ def test_visual_reset_plus_explicit_stop_removes_immediately_previous_failed_tak
         event("facial_expression_shift_candidate", 33.39, 33.50, 0.75),
         event("body_reset_candidate", 34.09, 34.20, 1.0),
     ))
-
     kept, removed, diagnostics = apply_recording_process_neighbors((failed,), (anchor,), ctx)
-
     assert kept == ()
     assert removed == (failed,)
     assert diagnostics[0]["reason"] == "failed_take_before_explicit_stop_with_visual_reset"
@@ -50,9 +48,7 @@ def test_visual_reset_plus_explicit_stop_removes_immediately_previous_failed_tak
 def test_recording_meta_after_explicit_stop_is_removed_without_language_censorship():
     anchor = take("stop", "Damn it, okay stopped", 34.72, 37.25)
     meta = take("meta", "That better have been good", 37.89, 39.47)
-
     kept, removed, diagnostics = apply_recording_process_neighbors((meta,), (anchor,), context(()))
-
     assert kept == ()
     assert removed == (meta,)
     assert diagnostics[0]["reason"] == "recording_meta_after_explicit_stop"
@@ -60,9 +56,7 @@ def test_recording_meta_after_explicit_stop_is_removed_without_language_censorsh
 
 def test_local_brain_discards_strong_recording_anchor_even_if_baseline_kept_it():
     anchor = take("stop", "Damn it. Okay, stop", 34.88, 37.14)
-
     kept, removed, diagnostics = apply_recording_process_neighbors((anchor,), (), context(()))
-
     assert kept == ()
     assert removed == (anchor,)
     assert diagnostics[0]["reason"] == "explicit_recording_stop_anchor"
@@ -71,9 +65,7 @@ def test_local_brain_discards_strong_recording_anchor_even_if_baseline_kept_it()
 def test_local_kept_anchor_still_removes_post_stop_meta():
     anchor = take("stop", "Damn it. Okay, stop", 34.88, 37.14)
     meta = take("meta", "That better have been good", 37.88, 39.70)
-
     kept, removed, diagnostics = apply_recording_process_neighbors((anchor, meta), (), context(()))
-
     assert kept == ()
     assert removed == (anchor, meta)
     assert [item["reason"] for item in diagnostics] == [
@@ -89,9 +81,7 @@ def test_local_kept_anchor_reactivates_visual_pre_stop_cleanup():
         event("facial_expression_shift_candidate", 33.39, 33.50, 0.75),
         event("body_reset_candidate", 34.09, 34.20, 1.0),
     ))
-
     kept, removed, diagnostics = apply_recording_process_neighbors((failed, anchor), (), ctx)
-
     assert kept == ()
     assert removed == (failed, anchor)
     assert [item["reason"] for item in diagnostics] == [
@@ -104,11 +94,7 @@ def test_later_retry_before_explicit_stop_is_removed_when_prior_same_idea_exists
     first = take("first", "Help me motivate myself today", 21.92, 24.08)
     failed_retry = take("retry", "To help motivate myself today", 24.86, 28.34)
     anchor = take("stop", "Damn it. Okay, stop", 34.88, 37.14)
-
-    kept, removed, diagnostics = apply_recording_process_neighbors(
-        (first, failed_retry, anchor), (), context(())
-    )
-
+    kept, removed, diagnostics = apply_recording_process_neighbors((first, failed_retry, anchor), (), context(()))
     assert kept == (first,)
     assert removed == (failed_retry, anchor)
     assert [item["reason"] for item in diagnostics] == [
@@ -117,12 +103,29 @@ def test_later_retry_before_explicit_stop_is_removed_when_prior_same_idea_exists
     ]
 
 
+def test_short_correction_after_script_meta_before_retry_is_removed():
+    meta = take("meta", "Have to look at the word", 13.90, 15.68)
+    reaction = take("reaction", "No, it does not", 15.68, 17.34)
+    retry = take("retry", "If you have one of those universal", 18.58, 19.69)
+    kept, removed, diagnostics = apply_recording_process_neighbors((reaction, retry), (meta,), context(()))
+    assert kept == (retry,)
+    assert removed == (reaction,)
+    assert diagnostics[0]["reason"] == "short_correction_after_recording_meta_before_retry"
+
+
+def test_normal_negation_survives_without_recording_meta_anchor():
+    negation = take("negation", "No, it does not contain sugar", 10.0, 12.0)
+    follow = take("follow", "It is completely sugar free", 12.5, 14.0)
+    kept, removed, diagnostics = apply_recording_process_neighbors((negation, follow), (), context(()))
+    assert kept == (negation, follow)
+    assert removed == ()
+    assert diagnostics == ()
+
+
 def test_unique_take_before_explicit_stop_survives_without_visual_reset():
     unique = take("unique", "This shampoo is actually amazing", 25.0, 28.0)
     anchor = take("stop", "Okay stop", 34.0, 35.0)
-
     kept, removed, diagnostics = apply_recording_process_neighbors((unique, anchor), (), context(()))
-
     assert kept == (unique,)
     assert removed == (anchor,)
     assert diagnostics[0]["reason"] == "explicit_recording_stop_anchor"
@@ -132,9 +135,7 @@ def test_pre_stop_take_survives_without_two_visual_evidence_families():
     valid = take("valid", "this shampoo is actually amazing", 30.16, 32.47)
     anchor = take("stop", "okay stop", 34.72, 35.20)
     ctx = context((event("hand_motion_reset_candidate", 33.9, 34.0, 1.0),))
-
     kept, removed, diagnostics = apply_recording_process_neighbors((valid,), (anchor,), ctx)
-
     assert kept == (valid,)
     assert removed == ()
     assert diagnostics == ()
@@ -142,9 +143,7 @@ def test_pre_stop_take_survives_without_two_visual_evidence_families():
 
 def test_plain_semantic_stop_is_not_a_local_recording_anchor():
     valid = take("valid", "this serum helps stop breakouts quickly", 10.0, 13.0)
-
     kept, removed, diagnostics = apply_recording_process_neighbors((valid,), (), context(()))
-
     assert kept == (valid,)
     assert removed == ()
     assert diagnostics == ()
@@ -153,11 +152,7 @@ def test_plain_semantic_stop_is_not_a_local_recording_anchor():
 def test_profanity_alone_is_never_a_recording_process_signal():
     valid = take("valid", "this shit actually works", 30.16, 32.47)
     unrelated_discard = take("other", "random fragment", 34.72, 35.20)
-
-    kept, removed, diagnostics = apply_recording_process_neighbors(
-        (valid,), (unrelated_discard,), context(())
-    )
-
+    kept, removed, diagnostics = apply_recording_process_neighbors((valid,), (unrelated_discard,), context(()))
     assert kept == (valid,)
     assert removed == ()
     assert diagnostics == ()
