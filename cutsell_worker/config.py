@@ -8,6 +8,9 @@ from dataclasses import dataclass
 import os
 
 
+RUNPOD_LOCAL_BACKEND = "runpod_local"
+
+
 def _env_bool(values: dict[str, str], key: str, default: bool = False) -> bool:
     raw = values.get(key)
     if raw is None:
@@ -34,6 +37,7 @@ class RuntimeConfig:
     s3_bucket: str | None
     runpod_api_key_present: bool
     runpod_template_id: str | None
+    brain_backend: str
     asr_model: str
     semantic_model: str
     visual_model: str
@@ -58,15 +62,21 @@ class RuntimeConfig:
 
     @property
     def semantic_ready(self) -> bool:
-        return self.openai_api_key_present
+        # A stored OpenAI key must never enable the brain implicitly. Mobile V1 is
+        # RunPod-local; legacy external providers remain dormant on this backend.
+        return bool(self.brain_backend != RUNPOD_LOCAL_BACKEND and self.openai_api_key_present)
 
     @property
     def visual_ready(self) -> bool:
-        return self.openai_api_key_present
+        return bool(self.brain_backend != RUNPOD_LOCAL_BACKEND and self.openai_api_key_present)
 
     @property
     def clean_cut_judge_ready(self) -> bool:
-        return bool(self.clean_cut_judge_enabled and self.openai_api_key_present)
+        return bool(
+            self.brain_backend != RUNPOD_LOCAL_BACKEND
+            and self.clean_cut_judge_enabled
+            and self.openai_api_key_present
+        )
 
 
 def load_runtime_config(env: dict[str, str] | None = None) -> RuntimeConfig:
@@ -82,7 +92,10 @@ def load_runtime_config(env: dict[str, str] | None = None) -> RuntimeConfig:
         s3_bucket=values.get("S3_BUCKET"),
         runpod_api_key_present=bool(values.get("RUNPOD_API_KEY")),
         runpod_template_id=values.get("RUNPOD_TEMPLATE_ID"),
+        brain_backend=str(values.get("CUTSELL_BRAIN_BACKEND", RUNPOD_LOCAL_BACKEND)).strip().lower(),
         asr_model=values.get("CUTSELL_ASR_MODEL", "medium"),
+        # Legacy model names remain readable for old metadata/config compatibility,
+        # but they are not activated while brain_backend=runpod_local.
         semantic_model=values.get("CUTSELL_SEMANTIC_MODEL", "gpt-4o-mini"),
         visual_model=values.get("CUTSELL_VISUAL_MODEL", "gpt-4o-mini"),
         take_judge_model=values.get("CUTSELL_TAKE_JUDGE_MODEL", "gpt-4o-mini"),
