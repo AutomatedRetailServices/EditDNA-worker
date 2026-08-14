@@ -76,6 +76,25 @@ def test_reset_plus_disengagement_plus_retry_confirms_wrong_take():
     assert decision.reason.startswith("whole_video_bad_take:wrong_take")
 
 
+def test_expression_shift_plus_hand_reset_plus_retry_confirms_wrong_take():
+    first = _take("a", 10.0, 12.0, "This blush gives me the perfect natural finish")
+    second = _take("b", 12.5, 14.7, "This blush gives me the perfect natural finish")
+    timeline = _timeline((
+        _event("facial_expression_shift_candidate", 11.78, 11.94, 0.93),
+        _event("hand_motion_reset_candidate", 11.84, 12.03, 0.91),
+    ))
+
+    context, diagnostics = confirm_local_performance_events((first, second), (timeline,), _context())
+
+    confirmed = [event for event in context.sources[0].events if event.kind == "wrong_take"]
+    assert len(confirmed) == 1
+    assert diagnostics[0]["confirmed_kind"] == "wrong_take"
+    assert diagnostics[0]["retry_take_id"] == "b"
+    decision = evaluate_take(first, context)
+    assert decision.keep is False
+    assert decision.reason.startswith("whole_video_bad_take:wrong_take")
+
+
 def test_single_visual_family_with_retry_only_confirms_edge_setup():
     first = _take("a", 0.0, 2.0, "I found this after trying so many other products")
     second = _take("b", 2.6, 4.7, "I found this after I tried so many other products")
