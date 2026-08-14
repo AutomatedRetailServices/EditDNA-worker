@@ -8,7 +8,7 @@ import time
 from typing import Any
 
 from .asr import FasterWhisperASR
-from .clean_cut_openai import OpenAICleanCutProvider
+from .brain_runtime import build_brain_runtime
 from .config import load_runtime_config
 from .contracts import ProcessingRequest, SourceAsset
 from .media_probe import probe_media
@@ -16,12 +16,8 @@ from .render import render_preview
 from .render_plan import build_render_plan
 from .source_identity import stable_source_id
 from .storage import download_source
-from .take_grouping_openai import OpenAITakeGroupingProvider
-from .take_judge_openai import OpenAITakeJudgeProvider
 from .universal_clean_cut import process_universal_clean_cut_sources
 from .validation import _is_real_video_key
-from .visual_openai import OpenAIVisualProvider
-from .whole_video_openai import OpenAIWholeVideoProvider
 
 
 def _render_validation_preview(
@@ -51,7 +47,7 @@ def run_single_universal_clean_cut_validation(
     preview_output: str | None = None,
     preview_captions: bool = False,
 ) -> dict[str, Any]:
-    """Run one full S3 raw through the isolated Universal Clean Cut brain."""
+    """Run one full S3 raw through the isolated RunPod-local Clean Cut brain."""
     if not _is_real_video_key(key):
         raise ValueError("unsupported validation video")
 
@@ -59,6 +55,7 @@ def run_single_universal_clean_cut_validation(
     if not config.s3_bucket:
         raise RuntimeError("S3_BUCKET is required")
 
+    brain = build_brain_runtime(config)
     source_id = stable_source_id(project_id, 0, PurePosixPath(key).name)
     source = SourceAsset(
         source_asset_id=source_id,
@@ -77,15 +74,6 @@ def run_single_universal_clean_cut_validation(
     )
 
     asr = FasterWhisperASR(model_name=config.asr_model)
-    whole_video = OpenAIWholeVideoProvider(model=config.visual_model) if config.visual_ready else None
-    visual = OpenAIVisualProvider(model=config.visual_model) if config.visual_ready else None
-    take_grouping = OpenAITakeGroupingProvider(model=config.semantic_model) if config.semantic_ready else None
-    take_judge = OpenAITakeJudgeProvider(model=config.take_judge_model) if config.semantic_ready else None
-    clean_cut_judge = (
-        OpenAICleanCutProvider(model=config.clean_cut_judge_model)
-        if config.clean_cut_judge_ready
-        else None
-    )
 
     started = time.monotonic()
     preview_path = None
@@ -100,11 +88,11 @@ def run_single_universal_clean_cut_validation(
             request,
             local_paths,
             asr_provider=asr,
-            whole_video_provider=whole_video,
-            visual_provider=visual,
-            take_grouping_provider=take_grouping,
-            take_judge_provider=take_judge,
-            clean_cut_provider=clean_cut_judge,
+            whole_video_provider=brain.whole_video_provider,
+            visual_provider=brain.visual_provider,
+            take_grouping_provider=brain.take_grouping_provider,
+            take_judge_provider=brain.take_judge_provider,
+            clean_cut_provider=brain.clean_cut_provider,
         )
 
         preview_path, preview_skipped_reason = _render_validation_preview(
@@ -125,6 +113,8 @@ def run_single_universal_clean_cut_validation(
     return {
         "schema_version": result.schema_version,
         "benchmark_mode": "universal_clean_cut",
+        "brain_backend": brain.backend,
+        "external_brain_calls_enabled": brain.external_calls_enabled,
         "project_id": result.project_id,
         "source_key": key,
         "source_duration_sec": round(source_duration_sec, 3),
@@ -141,12 +131,13 @@ def run_single_universal_clean_cut_validation(
         "clean_cut_removed_count": sum(1 for item in clean_decisions if not bool(item.get("keep", True))),
         "temporal_trimmed_count": sum(1 for item in temporal if bool(item.get("applied"))),
         "models": {
+            "brain_backend": brain.backend,
             "asr": config.asr_model,
-            "whole_video": config.visual_model if config.visual_ready else None,
-            "visual": config.visual_model if config.visual_ready else None,
-            "take_grouping": config.semantic_model if config.semantic_ready else None,
-            "take_judge": config.take_judge_model if config.semantic_ready else None,
-            "clean_cut_judge": config.clean_cut_judge_model if config.clean_cut_judge_ready else None,
+            "whole_video": "runpod_local_asr_context",
+            "visual": "runpod_local_mediapipe_opencv",
+            "take_grouping": "deterministic_local",
+            "take_judge": "deterministic_local",
+            "clean_cut_judge": "deterministic_local",
             "semantic_sales": None,
             "composer": None,
             "draft_review": None,
