@@ -5,27 +5,19 @@ import tempfile
 from pathlib import Path
 
 from .asr import FasterWhisperASR
-from .clean_cut_openai import OpenAICleanCutProvider
-from .composer_openai import OpenAIComposerProvider
+from .brain_runtime import build_brain_runtime
 from .config import load_runtime_config
-from .draft_review_openai import OpenAIDraftReviewProvider
 from .draft_store import create_initial_draft
 from .flow_b import process_local_sources
 from .media_probe import probe_media
 from .notifications import publish_notification
 from .project_tracking import safe_update_project
-from .providers import NoopSemanticProvider
-from .semantic_openai import OpenAISemanticProvider
 from .serde import request_from_dict, result_to_dict
 from .storage import download_source
-from .take_grouping_openai import OpenAITakeGroupingProvider
-from .take_judge_openai import OpenAITakeJudgeProvider
 from .timeline_asset_storage import store_timeline_assets
 from .timeline_assets import generate_filmstrip, waveform_peaks
 from .uploads import validate_product_source_uri
 from .usage_limits import record_processing_minutes, release_processing_slot
-from .visual_openai import OpenAIVisualProvider
-from .whole_video_openai import OpenAIWholeVideoProvider
 
 
 def _build_timeline_assets(request, local_paths: dict[str, str], directory: str) -> dict[str, dict]:
@@ -75,6 +67,13 @@ def _safe_notify(*, user_id: str, project_id: str, kind: str, payload: dict | No
 
 
 def run_flow_b_job(payload: dict) -> dict:
+    """Run the CutSell brain entirely inside the RunPod RQ worker.
+
+    External model keys may exist in the environment for legacy tooling, but this
+    execution path is bound to ``brain_runtime`` and therefore cannot enable them
+    implicitly. Universal Clean Cut uses local ASR, dense local vision, deterministic
+    retry/Best Take/Clean Cut logic, temporal cleanup, and local rendering.
+    """
     from rq import get_current_job
 
     job = get_current_job()
@@ -107,19 +106,8 @@ def run_flow_b_job(payload: dict) -> dict:
     )
 
     config = load_runtime_config()
+    brain = build_brain_runtime(config)
     asr = FasterWhisperASR(model_name=config.asr_model)
-    semantic = OpenAISemanticProvider(model=config.semantic_model) if config.semantic_ready else NoopSemanticProvider()
-    whole_video = OpenAIWholeVideoProvider(model=config.visual_model) if config.visual_ready else None
-    visual = OpenAIVisualProvider(model=config.visual_model) if config.visual_ready else None
-    take_grouping = OpenAITakeGroupingProvider(model=config.semantic_model) if config.semantic_ready else None
-    take_judge = OpenAITakeJudgeProvider(model=config.take_judge_model) if config.semantic_ready else None
-    composer = OpenAIComposerProvider(model=config.semantic_model) if config.semantic_ready else None
-    draft_review = OpenAIDraftReviewProvider(model=config.semantic_model) if config.semantic_ready else None
-    clean_cut_judge = (
-        OpenAICleanCutProvider(model=config.clean_cut_judge_model)
-        if config.clean_cut_judge_ready
-        else None
-    )
 
     measured_seconds = 0.0
     outcome = "failed"
@@ -146,17 +134,19 @@ def run_flow_b_job(payload: dict) -> dict:
                 request,
                 local_paths,
                 asr_provider=asr,
-                semantic_provider=semantic,
-                whole_video_provider=whole_video,
-                visual_provider=visual,
-                take_grouping_provider=take_grouping,
-                take_judge_provider=take_judge,
-                clean_cut_provider=clean_cut_judge,
-                composer_provider=composer,
-                draft_review_provider=draft_review,
+                semantic_provider=brain.semantic_provider,
+                whole_video_provider=brain.whole_video_provider,
+                visual_provider=brain.visual_provider,
+                take_grouping_provider=brain.take_grouping_provider,
+                take_judge_provider=brain.take_judge_provider,
+                clean_cut_provider=brain.clean_cut_provider,
+                composer_provider=brain.composer_provider,
+                draft_review_provider=brain.draft_review_provider,
                 progress=publish,
             )
             serialized = result_to_dict(result)
+            serialized["brain_backend"] = brain.backend
+            serialized["external_brain_calls_enabled"] = brain.external_calls_enabled
 
             publish("draft_ready", 94)
             timeline_assets = _build_timeline_assets(request, local_paths, directory)
