@@ -100,6 +100,34 @@ def test_local_kept_anchor_reactivates_visual_pre_stop_cleanup():
     ]
 
 
+def test_later_retry_before_explicit_stop_is_removed_when_prior_same_idea_exists():
+    first = take("first", "Help me motivate myself today", 21.92, 24.08)
+    failed_retry = take("retry", "To help motivate myself today", 24.86, 28.34)
+    anchor = take("stop", "Damn it. Okay, stop", 34.88, 37.14)
+
+    kept, removed, diagnostics = apply_recording_process_neighbors(
+        (first, failed_retry, anchor), (), context(())
+    )
+
+    assert kept == (first,)
+    assert removed == (failed_retry, anchor)
+    assert [item["reason"] for item in diagnostics] == [
+        "failed_retry_before_explicit_stop",
+        "explicit_recording_stop_anchor",
+    ]
+
+
+def test_unique_take_before_explicit_stop_survives_without_visual_reset():
+    unique = take("unique", "This shampoo is actually amazing", 25.0, 28.0)
+    anchor = take("stop", "Okay stop", 34.0, 35.0)
+
+    kept, removed, diagnostics = apply_recording_process_neighbors((unique, anchor), (), context(()))
+
+    assert kept == (unique,)
+    assert removed == (anchor,)
+    assert diagnostics[0]["reason"] == "explicit_recording_stop_anchor"
+
+
 def test_pre_stop_take_survives_without_two_visual_evidence_families():
     valid = take("valid", "this shampoo is actually amazing", 30.16, 32.47)
     anchor = take("stop", "okay stop", 34.72, 35.20)
