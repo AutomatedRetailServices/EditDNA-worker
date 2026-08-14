@@ -16,7 +16,7 @@ jobs:
     timeout-minutes: 5
     env:
       RUNPOD_API_KEY: ${{ secrets.RUNPOD_API_KEY }}
-      POD_ID: 8djvpxj9jc6xcj
+      POD_ID: yehm6j1l72ydiv
     steps:
       - name: Validate exact approved staging Pod
         shell: bash
@@ -30,7 +30,7 @@ jobs:
           name=$(jq -r --arg id "$POD_ID" '[.[] | select(.id == $id)][0].name // empty' pods.json)
           test "$name" = "cutsell-staging-worker" || { echo 'Pod ID is not cutsell-staging-worker; refusing delete'; exit 4; }
 
-      - name: Terminate stalled staging GPU worker
+      - name: Terminate completed staging GPU worker
         shell: bash
         run: |
           set -euo pipefail
