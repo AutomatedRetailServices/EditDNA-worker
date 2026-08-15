@@ -41,3 +41,5 @@ jobs:
             --output delete-response.txt)
           echo "RunPod delete HTTP status: $code"
           test "$code" = "204"
+
+# benchmark #23 completed; terminate exact Pod above
