@@ -14,6 +14,34 @@ def _bounded(value: float) -> float:
     return max(0.0, min(1.0, value))
 
 
+def _handling_failure_penalty(signal) -> float:
+    """Penalize a visually broken product take without turning it into a delete rule.
+
+    A low product-visibility frame is common in legitimate talking-head footage, so it
+    is never penalized on its own.  The interaction only applies when local vision also
+    sees a strong fumble/distraction plus a visibly broken expression or gesture.  This
+    makes a dropped/mis-handled product lose a retry-group ranking contest while leaving
+    ordinary product-away-from-frame speech unaffected.
+    """
+    broken_delivery = (
+        signal.visual_fumble >= 0.55
+        and signal.distraction_risk >= 0.45
+        and (
+            signal.expression_naturalness <= 0.45
+            or signal.gesture_naturalness <= 0.40
+        )
+    )
+    if not broken_delivery:
+        return 0.0
+
+    penalty = 0.10
+    if signal.product_visibility <= 0.45:
+        penalty += 0.08
+    if signal.motion_stability <= 0.45:
+        penalty += 0.05
+    return penalty
+
+
 def score_take(take: CandidateTake) -> RankedTake:
     signal = take.signals
     completeness = 1.0 if take.complete_idea else 0.45
@@ -23,10 +51,9 @@ def score_take(take: CandidateTake) -> RankedTake:
         return RankedTake(take.clip_id, round(_bounded(score), 4), "text_timing_baseline")
 
     # Clean Cut Best Take must judge the *delivery*, not only whether the words are
-    # complete.  Dense local MediaPipe/OpenCV signals already expose expression,
-    # gesture, energy and distraction evidence; include those signals directly so
-    # the RunPod-local path can prefer a natural successful delivery without an
-    # external multimodal provider.
+    # complete. Dense local MediaPipe/OpenCV signals expose expression, gesture,
+    # energy and distraction evidence; include them directly so the RunPod-local path
+    # can prefer a natural successful delivery without an external multimodal provider.
     score = (
         0.16 * completeness
         + 0.06 * duration_fit
@@ -42,6 +69,7 @@ def score_take(take: CandidateTake) -> RankedTake:
         + 0.07 * signal.delivery_energy
         - 0.12 * signal.visual_fumble
         - 0.08 * signal.distraction_risk
+        - _handling_failure_penalty(signal)
     )
     return RankedTake(take.clip_id, round(_bounded(score), 4), "watch_listen_baseline")
 
