@@ -2,7 +2,7 @@
 
 This module targets short restart debris that is easy for transcript-only rules to
 miss: repeated words/phrases, short partial-prefix attempts before a fuller retry,
-and explicit comments about the recording delivery.  Profanity and creator reactions
+and explicit comments about the recording delivery. Profanity and creator reactions
 are never destructive by themselves.
 """
 from __future__ import annotations
@@ -55,7 +55,7 @@ def _has_multimodal_break(take: CandidateTake, context: WholeVideoContext | None
     )
     break_count = sum(
         1 for event in events
-        if event.kind in _BREAK_KINDS and event.confidence >= 0.75
+        if event.kind in _BREAK_KINDS and event.confidence >= 0.72
     )
     return reset_count >= 2 and break_count >= 1
 
@@ -98,12 +98,7 @@ def _short_prefix_retry_ids(
     *,
     horizon_sec: float = 45.0,
 ) -> set[str]:
-    """Find short broken attempts followed by multiple same-idea retries.
-
-    A short phrase is not deleted just because a longer related sentence appears.
-    It must also show a local physical/expression break and have at least two later
-    same-source attempts, one of which is materially fuller.
-    """
+    """Find short broken attempts followed by multiple same-idea retries."""
     ordered = tuple(sorted(takes, key=lambda item: (item.source_order, item.start, item.end)))
     remove_ids: set[str] = set()
     for index, take in enumerate(ordered):
@@ -126,12 +121,50 @@ def _short_prefix_retry_ids(
     return remove_ids
 
 
+def _sandwiched_retry_debris_ids(
+    takes: tuple[CandidateTake, ...],
+    context: WholeVideoContext | None,
+    *,
+    maximum_gap_sec: float = 4.0,
+) -> set[str]:
+    """Remove only tiny fragments trapped between two related attempts.
+
+    The fragment must be short, physically broken, and overlap both neighboring
+    attempts. This catches debris such as a single content word plus ``okay`` between
+    two longer retries without turning ordinary short reactions into delete rules.
+    """
+    ordered = tuple(sorted(takes, key=lambda item: (item.source_order, item.start, item.end)))
+    remove_ids: set[str] = set()
+    for index in range(1, len(ordered) - 1):
+        take = ordered[index]
+        before = ordered[index - 1]
+        after = ordered[index + 1]
+        words = _tokens(take.text)
+        if not (1 <= len(words) <= 4 and take.duration_sec <= 2.5):
+            continue
+        if before.source_asset_id != take.source_asset_id or after.source_asset_id != take.source_asset_id:
+            continue
+        if not (0.0 <= take.start - before.end <= maximum_gap_sec):
+            continue
+        if not (0.0 <= after.start - take.end <= maximum_gap_sec):
+            continue
+        if before.duration_sec <= take.duration_sec or after.duration_sec <= take.duration_sec:
+            continue
+        if _token_overlap(take, before) < 0.50 or _token_overlap(take, after) < 0.50:
+            continue
+        if not _has_multimodal_break(take, context):
+            continue
+        remove_ids.add(take.clip_id)
+    return remove_ids
+
+
 def apply_micro_restart_cleanup(
     kept: Iterable[CandidateTake],
     context: WholeVideoContext | None = None,
 ) -> tuple[Tuple[CandidateTake, ...], Tuple[CandidateTake, ...], Tuple[dict, ...]]:
     kept_tuple = tuple(kept)
     short_prefix_ids = _short_prefix_retry_ids(kept_tuple, context)
+    sandwiched_ids = _sandwiched_retry_debris_ids(kept_tuple, context)
     survivors = []
     removed = []
     diagnostics = []
@@ -148,6 +181,8 @@ def apply_micro_restart_cleanup(
             reason = "adjacent_content_word_restart_with_visual_break"
         elif _has_repeated_multiword_phrase(text) and _has_multimodal_break(take, context):
             reason = "repeated_phrase_restart_with_visual_break"
+        elif take.clip_id in sandwiched_ids:
+            reason = "sandwiched_retry_debris_with_visual_break"
         elif take.clip_id in short_prefix_ids:
             reason = "short_prefix_before_fuller_retry_with_visual_break"
         if reason is None:
