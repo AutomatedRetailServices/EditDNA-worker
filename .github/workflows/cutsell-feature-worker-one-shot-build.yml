@@ -16,7 +16,7 @@ jobs:
     runs-on: ubuntu-latest
     env:
       IMAGE: ghcr.io/automatedretailservices/cutsell-worker:${{ github.sha }}
-      BUILD_REASON: post-18-final-deterministic-cleanup-for-run19
+      BUILD_REASON: post-19-local-retry-grouping-best-take-fix
     steps:
       - uses: actions/checkout@v4
       - name: Login to GitHub Container Registry
