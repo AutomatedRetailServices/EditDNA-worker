@@ -16,7 +16,7 @@ jobs:
     runs-on: ubuntu-latest
     env:
       IMAGE: ghcr.io/automatedretailservices/cutsell-worker:${{ github.sha }}
-      BUILD_REASON: post-20-dangling-orphan-retry-cleanup-for-run21
+      BUILD_REASON: post-20-incomplete-and-interstitial-retry-cleanup-for-run21
     steps:
       - uses: actions/checkout@v4
       - name: Login to GitHub Container Registry
