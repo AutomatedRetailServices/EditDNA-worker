@@ -5,6 +5,7 @@ contracts. This module never deletes content.
 """
 from __future__ import annotations
 
+from collections import Counter
 import re
 from typing import Iterable, Tuple
 
@@ -99,6 +100,32 @@ def _material_prefix_fragment(candidate: CandidateTake, reference: CandidateTake
     return right[: len(left)] == left
 
 
+def _repetitive_restart_fragment(candidate: CandidateTake, reference: CandidateTake) -> bool:
+    """Detect a retry fragment dominated by repeated words when a fuller take exists.
+
+    This is deliberately group-relative. A repeated slogan or intentional phrase is
+    untouched unless another take in the same retry group is materially longer and
+    shares nearly all of the fragment's vocabulary.
+    """
+    left = _tokens(candidate.text)
+    right = _tokens(reference.text)
+    if not 4 <= len(left) <= 10:
+        return False
+    if len(right) - len(left) < 3:
+        return False
+    if candidate.duration_sec + 0.70 > reference.duration_sec:
+        return False
+    counts = Counter(left)
+    repetitive = max(counts.values(), default=0) >= 3 or (len(set(left)) / max(1, len(left))) <= 0.55
+    if not repetitive:
+        return False
+    unique_left = set(left)
+    overlap = unique_left & set(right)
+    if len(overlap) < 2:
+        return False
+    return len(overlap) / max(1, len(unique_left)) >= 0.66
+
+
 def rank_takes(takes: Iterable[CandidateTake]) -> Tuple[RankedTake, ...]:
     take_tuple = tuple(takes)
     base = {take.clip_id: score_take(take) for take in take_tuple}
@@ -110,13 +137,22 @@ def rank_takes(takes: Iterable[CandidateTake]) -> Tuple[RankedTake, ...]:
             other.clip_id != take.clip_id and _material_prefix_fragment(take, other)
             for other in take_tuple
         )
+        is_repetitive_restart = any(
+            other.clip_id != take.clip_id and _repetitive_restart_fragment(take, other)
+            for other in take_tuple
+        )
+        score = item.score
+        reasons = [item.reason]
         if is_prefix_fragment:
-            adjusted.append(RankedTake(
-                take.clip_id,
-                round(_bounded(item.score - 0.22), 4),
-                item.reason + "+material_prefix_fragment_penalty",
-            ))
-        else:
-            adjusted.append(item)
+            score -= 0.22
+            reasons.append("material_prefix_fragment_penalty")
+        if is_repetitive_restart:
+            score -= 0.28
+            reasons.append("repetitive_restart_fragment_penalty")
+        adjusted.append(RankedTake(
+            take.clip_id,
+            round(_bounded(score), 4),
+            "+".join(reasons),
+        ))
 
     return tuple(sorted(adjusted, key=lambda item: (-item.score, item.clip_id)))
