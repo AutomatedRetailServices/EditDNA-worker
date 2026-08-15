@@ -1,8 +1,8 @@
 """Confirm obvious local product-handling failures from multimodal evidence.
 
 A hand gesture is not a failure. This cleanup requires a dense hand-motion event,
-a facial reaction, an additional break/disengagement cue, and a nearby same-idea
-retry. The corroborating retry may come immediately before or after the failed take.
+a facial reaction, an additional break/disengagement cue, a nearby same-idea retry,
+and candidate-local media signals that independently confirm a real fumble/distraction.
 The combination targets drops/fumbles while preserving normal demos.
 """
 from __future__ import annotations
@@ -45,6 +45,30 @@ def _has_handling_break(take: CandidateTake, context: WholeVideoContext | None) 
     return hand >= 2 and face >= 1 and extra_break >= 1
 
 
+def _signals_confirm_handling_failure(take: CandidateTake) -> bool:
+    """Require candidate-local visual evidence before destructive deletion.
+
+    Hand/body reset events are intentionally broad and also fire on normal expressive
+    demos.  A true product-fumble delete therefore requires the take's own media
+    signals to show strong fumble + distraction plus a visibly broken delivery.  If
+    local media signals are unavailable we fail open; Best Take can still rank the
+    candidate conservatively without deleting it.
+    """
+    signal = take.signals
+    if signal is None:
+        return False
+    broken_delivery = (
+        signal.visual_fumble >= 0.55
+        and signal.distraction_risk >= 0.45
+        and (
+            signal.expression_naturalness <= 0.45
+            or signal.gesture_naturalness <= 0.40
+            or signal.motion_stability <= 0.35
+        )
+    )
+    return bool(broken_delivery)
+
+
 def _has_nearby_retry(
     take: CandidateTake,
     candidates: tuple[CandidateTake, ...],
@@ -81,6 +105,7 @@ def apply_product_handling_failure_cleanup(
         should_remove = (
             take.duration_sec <= 8.0
             and _has_handling_break(take, context)
+            and _signals_confirm_handling_failure(take)
             and _has_nearby_retry(take, kept_tuple)
         )
         if not should_remove:
