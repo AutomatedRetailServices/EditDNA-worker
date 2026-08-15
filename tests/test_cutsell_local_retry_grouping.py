@@ -40,6 +40,18 @@ def test_local_path_keeps_distinct_nearby_content_as_separate_groups():
     assert result.groups == (("a",), ("b",))
 
 
+def test_best_take_penalizes_material_prefix_even_if_complete_idea_is_wrongly_true():
+    fragment = take("fragment", 0.0, 2.0, "the popular crop black jeans")
+    full = take("full", 2.5, 7.0, "the popular crop black jeans are finally back in stock today")
+
+    ranked = rank_takes((fragment, full))
+
+    assert ranked[0].clip_id == "full"
+    by_id = {item.clip_id: item for item in ranked}
+    assert "material_prefix_fragment_penalty" in by_id["fragment"].reason
+    assert by_id["full"].score > by_id["fragment"].score
+
+
 def test_best_take_prefers_complete_natural_delivery_over_product_drop_retry():
     bad = MediaSignals(
         "src", 0.0, 4.0,
