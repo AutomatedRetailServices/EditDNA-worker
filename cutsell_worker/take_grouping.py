@@ -12,11 +12,29 @@ from typing import Dict, Iterable, Tuple
 
 from .contracts import CandidateTake
 
+_CONTRACTION_SUFFIXES = frozenset({"m", "re", "ve", "ll", "d", "s", "t"})
+
 
 def semantic_key(text: str) -> str:
     normalized = re.sub(r"[^a-z0-9áéíóúñü]+", " ", text.casefold())
     tokens = [token for token in normalized.split() if token]
     return " ".join(tokens[:18])
+
+
+def _natural_tokens(text: str) -> tuple[str, ...]:
+    """Preserve semantic keys while counting common contractions as one word."""
+    raw = semantic_key(text).split()
+    output: list[str] = []
+    index = 0
+    while index < len(raw):
+        token = raw[index]
+        if index + 1 < len(raw) and raw[index + 1] in _CONTRACTION_SUFFIXES:
+            output.append(token + "'" + raw[index + 1])
+            index += 2
+            continue
+        output.append(token)
+        index += 1
+    return tuple(output)
 
 
 def retry_similarity(left: str, right: str) -> float:
@@ -28,11 +46,10 @@ def retry_similarity(left: str, right: str) -> float:
         return 1.0
     tokens_a = a.split()
     tokens_b = b.split()
-    # Short phrases are too semantically dense for fuzzy grouping: changing one
-    # token can change the creator's meaning or CTA. Require exact equality for
-    # three-word-or-shorter attempts; a separate source/time-aware path below may
-    # still join an exact-prefix false start to its nearby longer retry.
-    if min(len(tokens_a), len(tokens_b)) <= 3:
+    # Short phrases are too semantically dense for fuzzy grouping. Count common
+    # contractions as one natural word so punctuation normalization cannot make a
+    # three-word phrase accidentally enter the fuzzy path.
+    if min(len(_natural_tokens(left)), len(_natural_tokens(right))) <= 3:
         return 0.0
     set_a, set_b = set(tokens_a), set(tokens_b)
     containment = len(set_a & set_b) / max(1, min(len(set_a), len(set_b)))
@@ -56,19 +73,13 @@ def _safe_short_prefix_retry(
     *,
     maximum_gap_sec: float = 12.0,
 ) -> bool:
-    """Join only a 2-3 word exact-prefix false start to a nearby longer retry.
-
-    One-word reactions are never grouped through this exception.  The match must be
-    same-source, temporally close, and the longer attempt must contain at least five
-    words so a short standalone phrase is not clustered just because it shares a
-    generic opening.
-    """
+    """Join only a 2-3 word exact-prefix false start to a nearby longer retry."""
     if left.source_asset_id != right.source_asset_id:
         return False
     if _gap_between(left, right) > maximum_gap_sec:
         return False
-    left_tokens = semantic_key(left.text).split()
-    right_tokens = semantic_key(right.text).split()
+    left_tokens = _natural_tokens(left.text)
+    right_tokens = _natural_tokens(right.text)
     if not left_tokens or not right_tokens:
         return False
     short, long = (left_tokens, right_tokens) if len(left_tokens) <= len(right_tokens) else (right_tokens, left_tokens)
