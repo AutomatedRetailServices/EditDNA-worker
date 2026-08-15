@@ -60,6 +60,23 @@ def _has_multimodal_break(take: CandidateTake, context: WholeVideoContext | None
     return reset_count >= 2 and break_count >= 1
 
 
+def _window_has_multimodal_break(
+    takes: tuple[CandidateTake, ...],
+    context: WholeVideoContext | None,
+) -> bool:
+    if not takes or context is None:
+        return False
+    start = min(take.start for take in takes) - 0.30
+    end = max(take.end for take in takes) + 0.30
+    events = tuple(
+        event for event in _source_events(context, takes[0].source_asset_id)
+        if event.end >= start and event.start <= end
+    )
+    resets = sum(1 for event in events if event.kind in _RESET_KINDS and event.confidence >= 0.90)
+    breaks = sum(1 for event in events if event.kind in _BREAK_KINDS and event.confidence >= 0.72)
+    return resets >= 4 and breaks >= 1
+
+
 def _has_adjacent_duplicate_content_word(text: str) -> bool:
     tokens = _tokens(text)
     for left, right in zip(tokens, tokens[1:]):
@@ -158,6 +175,83 @@ def _sandwiched_retry_debris_ids(
     return remove_ids
 
 
+def _shares_word_search_stem(left: str, right: str) -> bool:
+    """Require a strong same-stem stumble, not an intentional list of short words."""
+    if left == right or len(left) < 6 or len(right) < 6:
+        return False
+    prefix = 0
+    for a, b in zip(left, right):
+        if a != b:
+            break
+        prefix += 1
+    return prefix >= 5
+
+
+def _word_search_cluster_ids(
+    takes: tuple[CandidateTake, ...],
+    context: WholeVideoContext | None,
+    *,
+    maximum_gap_sec: float = 1.8,
+    following_gap_sec: float = 2.0,
+) -> set[str]:
+    """Remove microtakes produced while searching for a word before a fuller attempt.
+
+    The cluster needs at least two tiny takes, a strong lexical-stem stumble between
+    them, two distinct cluster words echoed in the following substantive take, and a
+    dense reset/break window. Intentional one-word lists therefore remain protected.
+    """
+    ordered = tuple(sorted(takes, key=lambda item: (item.source_order, item.start, item.end)))
+    remove_ids: set[str] = set()
+    index = 0
+    while index < len(ordered) - 2:
+        first = ordered[index]
+        first_tokens = _tokens(first.text)
+        if not (first.duration_sec <= 1.2 and 1 <= len(first_tokens) <= 2):
+            index += 1
+            continue
+        cluster = [first]
+        cursor = index + 1
+        while cursor < len(ordered):
+            previous = cluster[-1]
+            current = ordered[cursor]
+            current_tokens = _tokens(current.text)
+            if current.source_asset_id != first.source_asset_id:
+                break
+            if current.start - previous.end > maximum_gap_sec:
+                break
+            if not (current.duration_sec <= 1.2 and 1 <= len(current_tokens) <= 2):
+                break
+            cluster.append(current)
+            cursor += 1
+        if len(cluster) < 2 or cursor >= len(ordered):
+            index += 1
+            continue
+        following = ordered[cursor]
+        if following.source_asset_id != first.source_asset_id:
+            index += 1
+            continue
+        if not (0.0 <= following.start - cluster[-1].end <= following_gap_sec):
+            index += 1
+            continue
+        following_tokens = set(_tokens(following.text))
+        if following.duration_sec < 2.0 or len(following_tokens) < 4:
+            index += 1
+            continue
+        cluster_tokens = [token for item in cluster for token in _tokens(item.text) if len(token) >= 4]
+        stem_stumble = any(
+            _shares_word_search_stem(left, right)
+            for i, left in enumerate(cluster_tokens)
+            for right in cluster_tokens[i + 1:]
+        )
+        echoed = len(set(cluster_tokens) & following_tokens)
+        if stem_stumble and echoed >= 2 and _window_has_multimodal_break(tuple(cluster) + (following,), context):
+            remove_ids.update(item.clip_id for item in cluster)
+            index = cursor
+            continue
+        index += 1
+    return remove_ids
+
+
 def apply_micro_restart_cleanup(
     kept: Iterable[CandidateTake],
     context: WholeVideoContext | None = None,
@@ -165,6 +259,7 @@ def apply_micro_restart_cleanup(
     kept_tuple = tuple(kept)
     short_prefix_ids = _short_prefix_retry_ids(kept_tuple, context)
     sandwiched_ids = _sandwiched_retry_debris_ids(kept_tuple, context)
+    word_search_ids = _word_search_cluster_ids(kept_tuple, context)
     survivors = []
     removed = []
     diagnostics = []
@@ -181,6 +276,8 @@ def apply_micro_restart_cleanup(
             reason = "adjacent_content_word_restart_with_visual_break"
         elif _has_repeated_multiword_phrase(text) and _has_multimodal_break(take, context):
             reason = "repeated_phrase_restart_with_visual_break"
+        elif take.clip_id in word_search_ids:
+            reason = "word_search_microtake_cluster_with_visual_break"
         elif take.clip_id in sandwiched_ids:
             reason = "sandwiched_retry_debris_with_visual_break"
         elif take.clip_id in short_prefix_ids:
