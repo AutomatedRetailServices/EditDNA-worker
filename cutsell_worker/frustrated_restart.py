@@ -1,13 +1,14 @@
 """Conservative cleanup for repeated restarts ending in soft frustration.
 
 Phrases such as ``oh my god`` or ``oh my goodness`` are valid creator reactions and
-are never destructive on their own.  They become cleanup evidence only when the same
-take also contains a repeated multi-word phrase and local visual evidence shows both
+are never destructive on their own. They become cleanup evidence only when local
+speech also shows a retry/restart pattern and local visual evidence shows both
 physical reset and expression/engagement break families.
 """
 from __future__ import annotations
 
 import re
+from collections import Counter
 from typing import Iterable, Tuple
 
 from .contracts import CandidateTake, CleanCutDecision
@@ -20,6 +21,15 @@ _SOFT_FRUSTRATION_RE = re.compile(
 )
 _RESET_KINDS = frozenset({"body_reset_candidate", "hand_motion_reset_candidate"})
 _BREAK_KINDS = frozenset({"camera_disengagement_candidate", "facial_expression_shift_candidate"})
+# Deliberately narrow. Repetition of common discourse/function words is not evidence
+# of a failed take. A repeated lexical item must look like actual content.
+_NON_CONTENT_TOKENS = frozenset({
+    "a", "an", "and", "are", "as", "at", "be", "but", "by", "do", "for", "from",
+    "god", "goodness", "gracious", "have", "he", "her", "here", "i", "in", "is", "it",
+    "its", "me", "my", "of", "oh", "on", "or", "our", "she", "so", "that", "the",
+    "their", "them", "these", "they", "this", "to", "was", "we", "what", "with", "you",
+    "your", "okay", "ok", "like", "really", "very", "just",
+})
 
 
 def _tokens(text: str) -> tuple[str, ...]:
@@ -40,6 +50,22 @@ def _has_repeated_multiword_phrase(text: str) -> bool:
                 return True
             seen.add(gram)
     return False
+
+
+def _has_repeated_content_token(text: str) -> bool:
+    """Detect a narrow single-word restart echo.
+
+    This is intentionally weaker than repeated multi-word evidence and is only used
+    downstream together with an explicit soft-frustration phrase *and* multimodal
+    reset/break evidence. Short/common/function words never qualify.
+    """
+    content = [
+        token for token in _tokens(text)
+        if len(token) >= 4 and token not in _NON_CONTENT_TOKENS
+    ]
+    if len(content) < 2:
+        return False
+    return any(count >= 2 for count in Counter(content).values())
 
 
 def _source_events(context: WholeVideoContext | None, source_asset_id: str):
@@ -70,9 +96,16 @@ def apply_soft_frustration_restart_cleanup(
     diagnostics = []
     for take in tuple(kept):
         text = str(take.text or "")
+        has_restart_echo = (
+            _has_repeated_multiword_phrase(text)
+            or (
+                take.duration_sec <= 6.5
+                and _has_repeated_content_token(text)
+            )
+        )
         should_remove = (
             bool(_SOFT_FRUSTRATION_RE.search(text))
-            and _has_repeated_multiword_phrase(text)
+            and has_restart_echo
             and _has_multimodal_break(take, context)
         )
         if not should_remove:
