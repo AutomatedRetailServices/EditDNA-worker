@@ -16,7 +16,7 @@ jobs:
     runs-on: ubuntu-latest
     env:
       IMAGE: ghcr.io/automatedretailservices/cutsell-worker:${{ github.sha }}
-      BUILD_REASON: local-clean-cut-regression-fixes
+      BUILD_REASON: post-18-recording-break-and-retry-grouping-fixes
     steps:
       - uses: actions/checkout@v4
       - name: Login to GitHub Container Registry
