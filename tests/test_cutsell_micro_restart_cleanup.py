@@ -40,6 +40,17 @@ def break_context(start=0.0, end=3.0):
     ))
 
 
+def dense_word_search_context():
+    return context((
+        event("hand_motion_reset_candidate", 78.50, 78.60, 1.0),
+        event("body_reset_candidate", 79.00, 79.10, 1.0),
+        event("hand_motion_reset_candidate", 80.20, 80.30, 1.0),
+        event("body_reset_candidate", 81.00, 81.10, 1.0),
+        event("hand_motion_reset_candidate", 82.00, 82.10, 1.0),
+        event("facial_expression_shift_candidate", 79.20, 79.30, 0.82),
+    ))
+
+
 def test_adjacent_content_word_restart_is_removed_with_visual_break():
     failed = take("failed", "the popular croc croc")
     kept, removed, diagnostics = apply_micro_restart_cleanup((failed,), break_context())
@@ -117,6 +128,64 @@ def test_sandwiched_short_retry_debris_is_removed_with_visual_break():
     assert debris in removed
     assert before in kept and after in kept
     assert any(item["reason"] == "sandwiched_retry_debris_with_visual_break" for item in diagnostics)
+
+
+def test_word_search_microtakes_are_removed_before_fuller_attempt_with_dense_break():
+    first = take("a", "Election", start=78.44, end=79.32)
+    second = take("b", "Electric", start=80.10, end=80.58)
+    third = take("c", "Suction", start=81.92, end=82.40)
+    following = take(
+        "full",
+        "Election suction phone holder election",
+        start=83.82,
+        end=86.62,
+    )
+
+    kept, removed, diagnostics = apply_micro_restart_cleanup(
+        (first, second, third, following),
+        dense_word_search_context(),
+    )
+
+    assert set(item.clip_id for item in removed) == {"a", "b", "c"}
+    assert kept == (following,)
+    assert {item["reason"] for item in diagnostics} == {
+        "word_search_microtake_cluster_with_visual_break"
+    }
+
+
+def test_intentional_one_word_list_is_not_treated_as_word_search_cluster():
+    red = take("red", "red", start=0.0, end=0.8)
+    blue = take("blue", "blue", start=1.2, end=2.0)
+    green = take("green", "green", start=2.4, end=3.2)
+    following = take("full", "red blue green are all available today", start=4.0, end=7.0)
+    ctx = context((
+        event("hand_motion_reset_candidate", 0.2, 0.3, 1.0),
+        event("hand_motion_reset_candidate", 1.0, 1.1, 1.0),
+        event("body_reset_candidate", 2.0, 2.1, 1.0),
+        event("hand_motion_reset_candidate", 3.0, 3.1, 1.0),
+        event("facial_expression_shift_candidate", 1.5, 1.6, 0.90),
+    ))
+
+    kept, removed, diagnostics = apply_micro_restart_cleanup((red, blue, green, following), ctx)
+
+    assert kept == (red, blue, green, following)
+    assert removed == ()
+    assert diagnostics == ()
+
+
+def test_word_search_like_cluster_survives_without_visual_break():
+    first = take("a", "Election", start=78.44, end=79.32)
+    second = take("b", "Electric", start=80.10, end=80.58)
+    third = take("c", "Suction", start=81.92, end=82.40)
+    following = take("full", "Election suction phone holder election", start=83.82, end=86.62)
+
+    kept, removed, diagnostics = apply_micro_restart_cleanup(
+        (first, second, third, following), context(())
+    )
+
+    assert kept == (first, second, third, following)
+    assert removed == ()
+    assert diagnostics == ()
 
 
 def test_sandwiched_short_reaction_without_shared_retry_content_survives():
