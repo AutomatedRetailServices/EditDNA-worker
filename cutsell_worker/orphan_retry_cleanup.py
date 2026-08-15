@@ -1,10 +1,10 @@
 """Remove kept fragments trapped inside a proven failed-retry envelope.
 
 Clean Cut can correctly discard several failed attempts while one short middle fragment
-remains fail-open.  This module uses those already-discarded attempts as structural
+remains fail-open. This module uses those already-discarded attempts as structural
 context: a kept take is removable only when same-idea discarded retries occur on both
 sides within a tight time window, and the kept take is materially shorter or visibly
-reset.  It never promotes discarded material and never groups broad-topic speech.
+reset. It never promotes discarded material and never groups broad-topic speech.
 """
 from __future__ import annotations
 
@@ -109,3 +109,26 @@ def apply_orphan_retry_cleanup(
         ))
 
     return tuple(survivors), tuple(removed), tuple(decisions)
+
+
+def install_orphan_retry_cleanup() -> None:
+    """Wrap clean_cut so deterministic discarded retries can invalidate one orphan fragment."""
+    from . import clean_cut
+
+    original = clean_cut.apply_clean_cut
+    if getattr(original, "_cutsell_orphan_retry_cleanup", False):
+        return
+
+    def apply_with_orphan_retry_cleanup(takes, context=None):
+        kept, discarded, decisions = original(takes, context)
+        kept, orphaned, orphan_decisions = apply_orphan_retry_cleanup(kept, discarded, context)
+        if not orphaned:
+            return kept, discarded, decisions
+        return (
+            kept,
+            tuple(discarded) + tuple(orphaned),
+            tuple(decisions) + tuple(orphan_decisions),
+        )
+
+    apply_with_orphan_retry_cleanup._cutsell_orphan_retry_cleanup = True
+    clean_cut.apply_clean_cut = apply_with_orphan_retry_cleanup
