@@ -18,7 +18,7 @@ jobs:
       RUNPOD_API_KEY: ${{ secrets.RUNPOD_API_KEY }}
       REDIS_URL: ${{ secrets.REDIS_URL }}
       RUNPOD_TEMPLATE_NAME: EditDNA-Worker-2
-      IMAGE: ghcr.io/automatedretailservices/cutsell-worker:8532862e1959b51a951173478db6123a58224f95
+      IMAGE: ghcr.io/automatedretailservices/cutsell-worker:61432dd246a2650e52d9fcdc3bb25445d180ced4
     steps:
       - name: Validate approved deployment inputs
         shell: bash
