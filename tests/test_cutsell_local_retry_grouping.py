@@ -29,6 +29,20 @@ def test_local_path_absorbs_interstitial_false_start_into_retry_group():
     assert "interstitial_retry_debris_absorbed" in result.reason
 
 
+def test_serial_weak_retries_collapse_into_following_full_take():
+    takes = (
+        take("short", 0.0, 2.4, "the popular croc"),
+        take("repeat", 3.0, 5.8, "crop popular crop popular crop popular"),
+        take("meta", 6.5, 10.5, "the popular crop black jeans okay now whole sentence okay"),
+        take("full", 11.5, 17.0, "the popular crop black denim jeans are back in stock anything with pockets is a win for me"),
+    )
+
+    result = safe_group_takes(None, takes)
+
+    assert result.groups == (("short", "repeat", "meta", "full"),)
+    assert "serial_retry_envelope_collapsed" in result.reason
+
+
 def test_local_path_keeps_distinct_nearby_content_as_separate_groups():
     takes = (
         take("a", 0.0, 4.0, "the popular crop black jeans are finally back in stock"),
