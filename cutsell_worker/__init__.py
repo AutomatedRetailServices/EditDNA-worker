@@ -22,6 +22,7 @@ from .interstitial_retry_debris import install_interstitial_retry_debris_cleanup
 from .trailing_retry_restart import install_trailing_retry_restart_trim
 from .merged_self_review import install_merged_self_review_cleanup
 from .word_search_attempts import install_word_search_attempt_cleanup
+from .recording_meta_continuation import install_recording_meta_continuation_cleanup
 from .local_retry_grouping import install_local_retry_grouping
 
 install_clean_cut_contract_recovery()
@@ -41,6 +42,7 @@ install_interstitial_retry_debris_cleanup()
 install_trailing_retry_restart_trim()
 install_merged_self_review_cleanup()
 install_word_search_attempt_cleanup()
+install_recording_meta_continuation_cleanup()
 install_local_retry_grouping()
 
 __version__ = "0.1.0"
