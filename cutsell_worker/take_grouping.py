@@ -30,17 +30,51 @@ def retry_similarity(left: str, right: str) -> float:
     tokens_b = b.split()
     # Short phrases are too semantically dense for fuzzy grouping: changing one
     # token can change the creator's meaning or CTA. Require exact equality for
-    # three-word-or-shorter attempts; fuzzy grouping starts at four words.
+    # three-word-or-shorter attempts; a separate source/time-aware path below may
+    # still join an exact-prefix false start to its nearby longer retry.
     if min(len(tokens_a), len(tokens_b)) <= 3:
         return 0.0
     set_a, set_b = set(tokens_a), set(tokens_b)
     containment = len(set_a & set_b) / max(1, min(len(set_a), len(set_b)))
     sequence = SequenceMatcher(None, a, b).ratio()
-    # Both lexical containment and ordering matter. A generic shared phrase alone
-    # is not enough to make two sales ideas alternate takes.
     if containment < 0.60:
         return 0.0
     return round(0.55 * sequence + 0.45 * containment, 4)
+
+
+def _gap_between(left: CandidateTake, right: CandidateTake) -> float:
+    if left.end <= right.start:
+        return right.start - left.end
+    if right.end <= left.start:
+        return left.start - right.end
+    return 0.0
+
+
+def _safe_short_prefix_retry(
+    left: CandidateTake,
+    right: CandidateTake,
+    *,
+    maximum_gap_sec: float = 12.0,
+) -> bool:
+    """Join only a 2-3 word exact-prefix false start to a nearby longer retry.
+
+    One-word reactions are never grouped through this exception.  The match must be
+    same-source, temporally close, and the longer attempt must contain at least five
+    words so a short standalone phrase is not clustered just because it shares a
+    generic opening.
+    """
+    if left.source_asset_id != right.source_asset_id:
+        return False
+    if _gap_between(left, right) > maximum_gap_sec:
+        return False
+    left_tokens = semantic_key(left.text).split()
+    right_tokens = semantic_key(right.text).split()
+    if not left_tokens or not right_tokens:
+        return False
+    short, long = (left_tokens, right_tokens) if len(left_tokens) <= len(right_tokens) else (right_tokens, left_tokens)
+    if not 2 <= len(short) <= 3 or len(long) < 5:
+        return False
+    return long[:len(short)] == short
 
 
 def group_takes(
@@ -55,10 +89,13 @@ def group_takes(
         best_index = None
         best_score = 0.0
         for index, cluster in enumerate(clusters):
-            # Compare with the first and latest attempts; this catches small retry
-            # drift while avoiding broad transitive chains across unrelated ideas.
             representatives = (cluster[0], cluster[-1]) if len(cluster) > 1 else (cluster[0],)
-            score = max(retry_similarity(take.text, item.text) for item in representatives)
+            score = 0.0
+            for item in representatives:
+                candidate_score = retry_similarity(take.text, item.text)
+                if _safe_short_prefix_retry(take, item):
+                    candidate_score = max(candidate_score, 1.0)
+                score = max(score, candidate_score)
             if score > best_score:
                 best_score, best_index = score, index
         if best_index is not None and best_score >= similarity_threshold:
