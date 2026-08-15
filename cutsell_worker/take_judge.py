@@ -12,6 +12,16 @@ from typing import Iterable, Tuple
 from .contracts import CandidateTake, RankedTake
 
 _TOKEN_RE = re.compile(r"[a-z0-9áéíóúñü]+", re.IGNORECASE)
+_RESTART_TAIL_RE = re.compile(
+    r"\b(?:okay|ok)\s+now(?:\s+(?:we|i|let(?:'s|\s+us)))?\b",
+    re.IGNORECASE,
+)
+_CONTENT_STOP = frozenset({
+    "a", "an", "and", "are", "as", "at", "be", "but", "by", "for", "from", "i",
+    "in", "is", "it", "its", "me", "my", "of", "on", "or", "that", "the", "this",
+    "to", "was", "we", "what", "with", "you", "your", "okay", "ok", "now", "let",
+    "lets", "us",
+})
 
 
 def _bounded(value: float) -> float:
@@ -20,6 +30,10 @@ def _bounded(value: float) -> float:
 
 def _tokens(text: str) -> tuple[str, ...]:
     return tuple(token.casefold() for token in _TOKEN_RE.findall(str(text or "")))
+
+
+def _content_tokens(text: str) -> tuple[str, ...]:
+    return tuple(token for token in _tokens(text) if len(token) >= 3 and token not in _CONTENT_STOP)
 
 
 def _handling_failure_penalty(signal) -> float:
@@ -126,6 +140,42 @@ def _repetitive_restart_fragment(candidate: CandidateTake, reference: CandidateT
     return len(overlap) / max(1, len(unique_left)) >= 0.66
 
 
+def _restart_tail_fragment(candidate: CandidateTake, reference: CandidateTake) -> bool:
+    """Penalize a take that starts the idea, then audibly resets before a fuller retry.
+
+    ``okay now ...`` can be legitimate creator speech, so the phrase is never a penalty
+    by itself. It only counts when it occurs in the latter half of a candidate, another
+    take in the *same retry group* is materially fuller/longer, and the pre-reset content
+    substantially overlaps that fuller take. This targets failed delivery tails without
+    imposing sales semantics or deleting either candidate.
+    """
+    text = str(candidate.text or "")
+    match = _RESTART_TAIL_RE.search(text)
+    if match is None:
+        return False
+
+    left = _tokens(text)
+    right = _tokens(reference.text)
+    if len(left) < 6 or len(right) < len(left) + 3:
+        return False
+    if candidate.duration_sec + 0.70 > reference.duration_sec:
+        return False
+
+    prefix_text = text[: match.start()].strip()
+    prefix = _content_tokens(prefix_text)
+    reference_content = set(_content_tokens(reference.text))
+    if len(prefix) < 3 or not reference_content:
+        return False
+    overlap = sum(1 for token in set(prefix) if token in reference_content)
+    if overlap < 3 or overlap / max(1, len(set(prefix))) < 0.60:
+        return False
+
+    # The restart marker must actually be a tail, not the user's intended setup at the
+    # beginning of a sentence.
+    marker_token_index = len(_tokens(text[: match.start()]))
+    return marker_token_index >= max(3, len(left) // 2)
+
+
 def rank_takes(takes: Iterable[CandidateTake]) -> Tuple[RankedTake, ...]:
     take_tuple = tuple(takes)
     base = {take.clip_id: score_take(take) for take in take_tuple}
@@ -141,6 +191,10 @@ def rank_takes(takes: Iterable[CandidateTake]) -> Tuple[RankedTake, ...]:
             other.clip_id != take.clip_id and _repetitive_restart_fragment(take, other)
             for other in take_tuple
         )
+        is_restart_tail = any(
+            other.clip_id != take.clip_id and _restart_tail_fragment(take, other)
+            for other in take_tuple
+        )
         score = item.score
         reasons = [item.reason]
         if is_prefix_fragment:
@@ -149,6 +203,9 @@ def rank_takes(takes: Iterable[CandidateTake]) -> Tuple[RankedTake, ...]:
         if is_repetitive_restart:
             score -= 0.28
             reasons.append("repetitive_restart_fragment_penalty")
+        if is_restart_tail:
+            score -= 0.18
+            reasons.append("restart_tail_fragment_penalty")
         adjusted.append(RankedTake(
             take.clip_id,
             round(_bounded(score), 4),
