@@ -29,6 +29,10 @@ _PROCESS_RE = re.compile(
     re.IGNORECASE,
 )
 _SHORT_RECOVERY_RE = re.compile(r"^\s*(?:no|done|cool|okay|ok|ugh|fuck|shit|damn)[.!?\s]*$", re.IGNORECASE)
+# These are strong recording-recovery utterances when they occupy a long ASR segment
+# full of physical reset motion. ``okay``, ``no`` and ``cool`` stay excluded because
+# they are common intentional delivery words.
+_PHYSICAL_RECOVERY_RE = re.compile(r"^\s*(?:done|ugh|fuck|shit|damn)[.!?\s]*$", re.IGNORECASE)
 _RESET_KINDS = frozenset({"body_reset_candidate", "hand_motion_reset_candidate"})
 _BREAK_KINDS = frozenset({"camera_disengagement_candidate", "facial_expression_shift_candidate"})
 
@@ -134,6 +138,40 @@ def _neighbor_window_ids(takes: tuple[CandidateTake, ...], *, maximum_gap_sec: f
     return eligible
 
 
+def _standalone_physical_recovery_ids(
+    takes: tuple[CandidateTake, ...],
+    context: WholeVideoContext | None,
+    *,
+    maximum_following_gap_sec: float = 2.0,
+) -> set[str]:
+    """Find long one-word recovery fragments inside dense reset motion.
+
+    A bare ``done``/expletive can be legitimate content, so this rule requires an
+    unusually long ASR segment for one word, four strong physical resets, and a real
+    substantive take starting immediately after it. The rule does not require a prior
+    neighbor because dead air or failed debris may already have been removed upstream.
+    """
+    ordered = tuple(sorted(takes, key=lambda x: (x.source_order, x.start, x.end)))
+    remove_ids: set[str] = set()
+    for index, take in enumerate(ordered[:-1]):
+        text = str(take.text or "").strip()
+        if not _PHYSICAL_RECOVERY_RE.search(text):
+            continue
+        if len(_tokens(text)) != 1 or not (1.5 <= take.duration_sec <= 4.0):
+            continue
+        after = ordered[index + 1]
+        if after.source_asset_id != take.source_asset_id:
+            continue
+        gap = after.start - take.end
+        if not (0.0 <= gap <= maximum_following_gap_sec):
+            continue
+        if after.duration_sec < 1.5 or len(_tokens(after.text)) < 4:
+            continue
+        if _has_dense_physical_reset(take, context):
+            remove_ids.add(take.clip_id)
+    return remove_ids
+
+
 def apply_micro_self_talk_cleanup(kept: Iterable[CandidateTake], context: WholeVideoContext | None = None) -> tuple[Tuple[CandidateTake, ...], Tuple[CandidateTake, ...], Tuple[dict, ...]]:
     kept_tuple = tuple(kept)
     # Face/camera break evidence stays on the tight historical window. Dense physical
@@ -143,12 +181,15 @@ def apply_micro_self_talk_cleanup(kept: Iterable[CandidateTake], context: WholeV
     local_window_ids = _neighbor_window_ids(kept_tuple, maximum_gap_sec=3.0)
     physical_window_ids = _neighbor_window_ids(kept_tuple, maximum_gap_sec=7.0)
     bts_window_ids = _bts_window_ids(kept_tuple, context)
+    standalone_physical_ids = _standalone_physical_recovery_ids(kept_tuple, context)
     survivors, removed, diagnostics = [], [], []
     for take in kept_tuple:
         text = str(take.text or "").strip()
         reason = None
         if take.clip_id in bts_window_ids:
             reason = "corroborated_behind_the_scenes_self_talk_window"
+        elif take.clip_id in standalone_physical_ids:
+            reason = "standalone_recovery_fragment_with_dense_physical_reset_before_take"
         elif take.duration_sec <= 3.5 and bool(_SELF_TALK_RE.search(text)):
             if take.clip_id in local_window_ids and _has_visual_break(take, context):
                 reason = "micro_self_talk_inside_retry_window_with_visual_break"
