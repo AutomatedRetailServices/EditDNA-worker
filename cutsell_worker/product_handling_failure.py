@@ -1,8 +1,9 @@
 """Confirm obvious local product-handling failures from multimodal evidence.
 
-A hand gesture is not a failure.  This cleanup requires a dense hand-motion event,
+A hand gesture is not a failure. This cleanup requires a dense hand-motion event,
 a facial reaction, an additional break/disengagement cue, and a nearby same-idea
-retry.  The combination targets drops/fumbles while preserving normal demos.
+retry. The corroborating retry may come immediately before or after the failed take.
+The combination targets drops/fumbles while preserving normal demos.
 """
 from __future__ import annotations
 
@@ -48,12 +49,16 @@ def _has_nearby_retry(
     maximum_gap_sec: float = 10.0,
     minimum_similarity: float = 0.62,
 ) -> bool:
+    """Require a same-idea take close in time on either side of the failure."""
     for other in candidates:
         if other.clip_id == take.clip_id or other.source_asset_id != take.source_asset_id:
             continue
-        if other.start < take.end:
+        if other.end <= take.start:
+            gap = take.start - other.end
+        elif other.start >= take.end:
+            gap = other.start - take.end
+        else:
             continue
-        gap = other.start - take.end
         if gap > maximum_gap_sec:
             continue
         if retry_similarity(take.text, other.text) >= minimum_similarity:
@@ -81,7 +86,7 @@ def apply_product_handling_failure_cleanup(
         removed.append(take)
         diagnostics.append({
             "clip_id": take.clip_id,
-            "reason": "product_handling_fumble_with_face_reaction_before_retry",
+            "reason": "product_handling_fumble_with_face_reaction_near_retry",
             "text": take.text,
         })
     return tuple(survivors), tuple(removed), tuple(diagnostics)
