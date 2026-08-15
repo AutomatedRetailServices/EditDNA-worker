@@ -55,6 +55,16 @@ def test_short_expletive_between_attempts_is_removed_with_dense_physical_reset_e
     assert diagnostics[0]["reason"] == "micro_self_talk_inside_retry_window_with_dense_physical_reset"
 
 
+def test_dense_reset_can_bridge_cleanup_gap_to_following_real_take():
+    before = take("before", "if you are after better sleep then you need magnesium glycinate", 0.0, 3.0)
+    reaction = take("reaction", "oh shit", 4.0, 5.0)
+    after = take("after", "should we do a sample opening I think so", 11.0, 14.0)
+    kept, removed, diagnostics = apply_micro_self_talk_cleanup((before, reaction, after), dense_reset_context())
+    assert reaction in removed
+    assert before in kept and after in kept
+    assert diagnostics[0]["reason"] == "micro_self_talk_inside_retry_window_with_dense_physical_reset"
+
+
 def test_this_is_crap_between_attempts_is_removed_with_visual_break():
     before = take("before", "the popular crop black jeans", 0.0, 3.0)
     reaction = take("reaction", "this is crap", 4.0, 5.0)
