@@ -106,6 +106,32 @@ def test_short_prefix_before_multiple_fuller_retries_is_removed_only_with_visual
     assert full in kept
 
 
+def test_sandwiched_short_retry_debris_is_removed_with_visual_break():
+    before = take("before", "But 13 different scalloped", start=0.0, end=3.0)
+    debris = take("debris", "Scalloped okay", start=4.0, end=5.5)
+    after = take("after", "But 13 different scalloped G string underwear", start=6.0, end=10.0)
+    kept, removed, diagnostics = apply_micro_restart_cleanup(
+        (before, debris, after),
+        break_context(4.0, 5.5),
+    )
+    assert debris in removed
+    assert before in kept and after in kept
+    assert any(item["reason"] == "sandwiched_retry_debris_with_visual_break" for item in diagnostics)
+
+
+def test_sandwiched_short_reaction_without_shared_retry_content_survives():
+    before = take("before", "This cardigan has oversized pockets", start=0.0, end=3.0)
+    reaction = take("reaction", "Okay wow", start=4.0, end=5.2)
+    after = take("after", "The sleeves have a soft ribbed cuff", start=6.0, end=9.0)
+    kept, removed, diagnostics = apply_micro_restart_cleanup(
+        (before, reaction, after),
+        break_context(4.0, 5.2),
+    )
+    assert reaction in kept
+    assert removed == ()
+    assert diagnostics == ()
+
+
 def test_short_valid_line_without_retry_sequence_survives():
     valid = take("valid", "the popular black jeans")
     kept, removed, diagnostics = apply_micro_restart_cleanup((valid,), break_context())
