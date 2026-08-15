@@ -43,6 +43,22 @@ def test_serial_weak_retries_collapse_into_following_full_take():
     assert "serial_retry_envelope_collapsed" in result.reason
 
 
+def test_serial_retry_envelope_allows_one_plausible_trailing_partial_before_full_take():
+    takes = (
+        take("short1", 0.0, 2.2, "the popular croc"),
+        take("short2", 3.0, 4.9, "the popular croc"),
+        take("short3", 5.6, 7.1, "the popular croc"),
+        take("repeat", 7.8, 12.3, "crop popular crop popular crop popular"),
+        take("partial", 14.8, 19.3, "the popular crop black jeans okay now we hold"),
+        take("full", 21.7, 27.7, "the popular crop black denim jeans are back in stock anything with pockets is a win for me"),
+    )
+
+    result = safe_group_takes(None, takes)
+
+    assert result.groups == (("short1", "short2", "short3", "repeat", "partial", "full"),)
+    assert "serial_retry_envelope_collapsed" in result.reason
+
+
 def test_local_path_keeps_distinct_nearby_content_as_separate_groups():
     takes = (
         take("a", 0.0, 4.0, "the popular crop black jeans are finally back in stock"),
@@ -64,6 +80,28 @@ def test_best_take_penalizes_material_prefix_even_if_complete_idea_is_wrongly_tr
     by_id = {item.clip_id: item for item in ranked}
     assert "material_prefix_fragment_penalty" in by_id["fragment"].reason
     assert by_id["full"].score > by_id["fragment"].score
+
+
+def test_best_take_penalizes_repetitive_restart_when_fuller_retry_exists():
+    repeat = take("repeat", 0.0, 4.5, "crop popular crop popular crop popular")
+    full = take("full", 5.0, 11.0, "the popular crop black denim jeans are back in stock anything with pockets is a win for me")
+
+    ranked = rank_takes((repeat, full))
+
+    assert ranked[0].clip_id == "full"
+    by_id = {item.clip_id: item for item in ranked}
+    assert "repetitive_restart_fragment_penalty" in by_id["repeat"].reason
+    assert by_id["full"].score > by_id["repeat"].score
+
+
+def test_repeated_phrase_without_fuller_related_retry_is_not_penalized():
+    slogan = take("slogan", 0.0, 4.0, "go go go go get yours")
+    distinct = take("distinct", 5.0, 9.0, "this jacket has a removable hood and pockets")
+
+    ranked = rank_takes((slogan, distinct))
+    by_id = {item.clip_id: item for item in ranked}
+
+    assert "repetitive_restart_fragment_penalty" not in by_id["slogan"].reason
 
 
 def test_best_take_prefers_complete_natural_delivery_over_product_drop_retry():
