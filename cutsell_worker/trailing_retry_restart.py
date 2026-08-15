@@ -1,11 +1,10 @@
 """Trim a repeated retry restart from the tail of an otherwise useful boundary clip.
 
 A short ASR segment can straddle two editorial events: the final word(s) of a valid
-sentence followed immediately by the beginning of an earlier retry.  Deleting the
-whole segment loses the valid boundary; keeping it leaks the restart.  This module
-uses word timing and exact sequence evidence from an earlier take to keep only the
-small boundary prefix.  It fails open when word timing or exact retry evidence is
-missing.
+sentence followed immediately by the beginning of an earlier retry. Deleting the
+whole segment loses the valid boundary; keeping it leaks the restart. This module
+uses word timing and strong sequence evidence from an earlier take to keep only the
+small boundary prefix. It fails open when word timing or retry evidence is missing.
 """
 from __future__ import annotations
 
@@ -21,6 +20,16 @@ _LEADING_RESTART_FILLERS = frozenset({"if", "you", "so", "and", "but", "okay", "
 
 def _tokens(text: str) -> tuple[str, ...]:
     return tuple(token.casefold() for token in _TOKEN_RE.findall(str(text or "")))
+
+
+def _comparison_tokens(text: str) -> tuple[str, ...]:
+    """Normalize ASR punctuation/contractions only for retry-sequence comparison.
+
+    Whisper can render the same speech as ``we're`` in one take and ``were`` in
+    another. Removing apostrophes makes those orthographic variants comparable while
+    the surrounding 3-4 exact-token requirement still protects ordinary transitions.
+    """
+    return tuple(token.replace("'", "") for token in _tokens(text))
 
 
 def _word_tokens(take: CandidateTake) -> tuple[str, ...]:
@@ -55,19 +64,16 @@ def _retry_suffix_start(
     previous: CandidateTake,
     original: tuple[CandidateTake, ...],
 ) -> int | None:
-    tokens = _tokens(take.text)
+    tokens = _comparison_tokens(take.text)
     if not (4 <= len(tokens) <= 8 and take.duration_sec <= 2.0):
         return None
 
-    # Preserve at most two boundary words.  After that prefix, allow up to two tiny
-    # restart fillers before requiring at least three exact tokens matching the start
-    # of a materially fuller earlier attempt.
     earlier = [
         other for other in original
         if other.clip_id not in {take.clip_id, previous.clip_id}
         and other.source_asset_id == take.source_asset_id
         and other.end <= previous.start + 0.02
-        and len(_tokens(other.text)) >= 6
+        and len(_comparison_tokens(other.text)) >= 6
     ]
     if not earlier:
         return None
@@ -84,13 +90,10 @@ def _retry_suffix_start(
             if len(retry) < 3:
                 continue
             for other in earlier:
-                other_tokens = _tokens(other.text)
+                other_tokens = _comparison_tokens(other.text)
                 match_len = min(len(retry), len(other_tokens))
                 if match_len < 3:
                     continue
-                # Require the repeated part to start the earlier take.  Three exact
-                # tokens are enough only when the current retry tail has no more than
-                # four meaningful tokens; longer tails require four exact tokens.
                 required = 4 if len(retry) >= 4 else 3
                 if match_len >= required and retry[:required] == other_tokens[:required]:
                     return keep_count
@@ -150,7 +153,6 @@ def trim_trailing_retry_restarts(
 
 
 def install_trailing_retry_restart_trim() -> None:
-    """Install as a final fail-open trim after destructive Clean Cut cleanup."""
     from . import clean_cut
 
     original = clean_cut.apply_clean_cut
