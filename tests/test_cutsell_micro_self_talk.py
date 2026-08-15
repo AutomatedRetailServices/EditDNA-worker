@@ -35,6 +35,15 @@ def dense_reset_context():
     ))
 
 
+def dense_reset_context_at(start):
+    return context((
+        event("hand_motion_reset_candidate", start + 0.2, start + 0.3, 1.0),
+        event("body_reset_candidate", start + 0.8, start + 0.9, 1.0),
+        event("hand_motion_reset_candidate", start + 1.4, start + 1.5, 1.0),
+        event("body_reset_candidate", start + 2.0, start + 2.1, 1.0),
+    ))
+
+
 def test_short_expletive_between_attempts_is_removed_with_visual_break():
     before = take("before", "this serum helps seal the cuticle", 0.0, 3.0)
     reaction = take("reaction", "oh shit", 4.0, 5.0)
@@ -72,6 +81,37 @@ def test_this_is_crap_between_attempts_is_removed_with_visual_break():
     kept, removed, diagnostics = apply_micro_self_talk_cleanup((before, reaction, after), break_context())
     assert reaction in removed
     assert diagnostics[0]["reason"] == "micro_self_talk_inside_retry_window_with_visual_break"
+
+
+def test_long_single_done_inside_dense_reset_before_real_take_is_removed():
+    reaction = take("reaction", "done", 29.24, 32.64)
+    after = take("after", "for stretching for working out these sizes are my favorite", 34.02, 37.72)
+    kept, removed, diagnostics = apply_micro_self_talk_cleanup(
+        (reaction, after), dense_reset_context_at(29.24)
+    )
+    assert reaction in removed
+    assert after in kept
+    assert diagnostics[0]["reason"] == "standalone_recovery_fragment_with_dense_physical_reset_before_take"
+
+
+def test_short_intentional_done_survives_even_with_dense_reset():
+    reaction = take("reaction", "done", 4.0, 4.8)
+    after = take("after", "now look at the finished result in natural light", 5.2, 8.0)
+    kept, removed, diagnostics = apply_micro_self_talk_cleanup(
+        (reaction, after), dense_reset_context()
+    )
+    assert reaction in kept
+    assert after in kept
+    assert removed == ()
+    assert diagnostics == ()
+
+
+def test_long_done_without_following_take_survives():
+    reaction = take("reaction", "done", 4.0, 7.0)
+    kept, removed, diagnostics = apply_micro_self_talk_cleanup((reaction,), dense_reset_context())
+    assert kept == (reaction,)
+    assert removed == ()
+    assert diagnostics == ()
 
 
 def test_isolated_profanity_reaction_survives_even_with_dense_reset():
