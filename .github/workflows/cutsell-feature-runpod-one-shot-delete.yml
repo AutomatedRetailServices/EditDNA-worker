@@ -16,7 +16,7 @@ jobs:
     timeout-minutes: 5
     env:
       RUNPOD_API_KEY: ${{ secrets.RUNPOD_API_KEY }}
-      POD_ID: yehm6j1l72ydiv
+      POD_ID: ukchm9s165gpme
     steps:
       - name: Validate exact approved staging Pod
         shell: bash
