@@ -11,6 +11,7 @@ from .recording_suffix_trim import install_visual_self_critique_suffix_trim
 from .dangling_delivery import install_dangling_delivery_cleanup
 from .internal_self_correction import install_internal_self_correction_trim
 from .recording_breaks import install_recording_break_cleanup
+from .restart_questions import install_short_restart_question_cleanup
 
 install_clean_cut_contract_recovery()
 install_recording_process_context_cleanup()
@@ -18,6 +19,7 @@ install_visual_self_critique_suffix_trim()
 install_dangling_delivery_cleanup()
 install_internal_self_correction_trim()
 install_recording_break_cleanup()
+install_short_restart_question_cleanup()
 
 __version__ = "0.1.0"
 OBSERVABILITY_STATUS = initialize_observability(service="cutsell-worker")
