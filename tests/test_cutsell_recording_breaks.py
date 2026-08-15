@@ -109,6 +109,46 @@ def test_multimodal_reaction_cluster_is_removed_as_recording_break():
     }
 
 
+def test_speech_self_review_plus_confused_echo_is_removed_with_dense_reset():
+    review = take("review", "What did I just say?", 307.49, 308.19)
+    echo = take("echo", "What?", 309.65, 310.15)
+    ctx = context((
+        event("hand_motion_reset_candidate", 307.55, 307.65),
+        event("hand_motion_reset_candidate", 308.00, 308.10),
+        event("body_reset_candidate", 308.30, 308.40),
+        event("hand_motion_reset_candidate", 308.90, 309.00),
+        event("hand_motion_reset_candidate", 309.20, 309.30),
+        event("body_reset_candidate", 309.80, 309.90),
+        event("facial_expression_shift_candidate", 308.75, 308.85, 0.80),
+    ))
+
+    kept, removed, diagnostics = apply_recording_break_cleanup((review, echo), ctx)
+
+    assert kept == ()
+    assert removed == (review, echo)
+    assert {item["reason"] for item in diagnostics} == {
+        "speech_self_review_confusion_pair_with_physical_reset"
+    }
+
+
+def test_isolated_what_did_i_just_say_survives_without_confused_echo():
+    review = take("review", "What did I just say?", 10.0, 11.0)
+    next_take = take("next", "I said this serum is my favorite", 12.0, 14.5)
+    ctx = context((
+        event("hand_motion_reset_candidate", 10.1, 10.2),
+        event("hand_motion_reset_candidate", 10.3, 10.4),
+        event("body_reset_candidate", 10.5, 10.6),
+        event("hand_motion_reset_candidate", 10.7, 10.8),
+        event("facial_expression_shift_candidate", 10.8, 10.9, 0.90),
+    ))
+
+    kept, removed, diagnostics = apply_recording_break_cleanup((review, next_take), ctx)
+
+    assert kept == (review, next_take)
+    assert removed == ()
+    assert diagnostics == ()
+
+
 def test_isolated_what_just_happened_survives_even_with_visual_motion():
     reaction = take("reaction", "What just happened?", 10.0, 11.2)
     ctx = context((
