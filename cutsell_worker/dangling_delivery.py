@@ -18,6 +18,18 @@ _AMBIGUOUS_AUX_ENDINGS = frozenset({
     "have", "has", "had", "do", "does", "did",
     "can", "could", "will", "would", "shall", "should", "may", "might", "must",
 })
+# These are syntactic recording-fragment shapes, not word blacklists.  They only become
+# destructive when dense local vision also sees a strong physical reset at the end.
+_DANGLING_AUX_TRIGGER_RE = re.compile(
+    r"\b(?:what\s+if\s+i\s+told\s+you|imagine\s+if|did\s+you\s+know)\b.*\b"
+    r"(?:am|are|is|was|were|have|has|had|can|could|will|would|should|may|might|must)\s*$",
+    re.IGNORECASE,
+)
+_DANGLING_HELP_OBJECT_RE = re.compile(
+    r"\b(?:to|that|which)\s+help(?:s|ed|ing)?\s+(?:you|me|them|us)\s+"
+    r"(?:use|apply|attach|install|choose|pick|set)\s*$",
+    re.IGNORECASE,
+)
 _RESET_KINDS = frozenset({"body_reset_candidate", "hand_motion_reset_candidate"})
 
 
@@ -72,7 +84,8 @@ def _lexical_churn(tokens: tuple[str, ...]) -> bool:
 
 
 def _dangling_reason(take: CandidateTake, context: WholeVideoContext | None) -> str | None:
-    tokens = _tokens(take.text)
+    text = str(take.text or "").strip()
+    tokens = _tokens(text)
     if len(tokens) < 4 or not _has_strong_reset_near_end(take, context):
         return None
 
@@ -82,6 +95,12 @@ def _dangling_reason(take: CandidateTake, context: WholeVideoContext | None) -> 
 
     if last in _AMBIGUOUS_AUX_ENDINGS and _lexical_churn(tokens[:-1]):
         return "dangling_auxiliary_with_internal_restart_and_reset"
+
+    if _DANGLING_AUX_TRIGGER_RE.search(text):
+        return "dangling_trigger_clause_auxiliary_with_physical_reset"
+
+    if _DANGLING_HELP_OBJECT_RE.search(text):
+        return "dangling_help_object_verb_with_physical_reset"
 
     return None
 
