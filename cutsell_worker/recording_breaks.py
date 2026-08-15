@@ -15,7 +15,7 @@ from .whole_video_analysis import WholeVideoContext
 
 _TOKEN_RE = re.compile(r"[a-z0-9']+", re.IGNORECASE)
 _EXPLICIT_FAILURE_RE = re.compile(
-    r"\bi\s+(?:can(?:not|'t)|cant)\s+talk\b|"
+    r"\b(?:why\s+)?i\s+(?:can(?:not|'t)|cant)\s+talk\b|"
     r"\bi\s+(?:do\s+not|don't|dont)\s+know\s+how\s+to\s+end\b|"
     r"\b(?:let's|lets|let\s+us)\s+do\s+that\s+again\b|"
     r"\b(?:let's|lets|let\s+us)\s+(?:try|start)\s+(?:that\s+)?again\b",
@@ -33,6 +33,10 @@ _REACTION_RE = re.compile(
 )
 _RECOVERY_TRANSITION_RE = re.compile(
     r"^\s*(?:okay|ok)[,.!?\s]*(?:anyways?|anyway)\b",
+    re.IGNORECASE,
+)
+_SELF_CRITIQUE_RE = re.compile(
+    r"\bwhy\s+do\s+i\s+(?:keep\s+)?say(?:ing)?\b",
     re.IGNORECASE,
 )
 _FRUSTRATION_TOKENS = frozenset({
@@ -98,18 +102,12 @@ def _multimodal_break_window(
     takes: tuple[CandidateTake, ...],
     context: WholeVideoContext | None,
 ) -> bool:
-    """Require dense physical reset plus expression/engagement break evidence.
-
-    A creator can intentionally say a surprised reaction, so language alone never
-    removes one.  A reaction cluster is destructive only when the same short source
-    window contains repeated high-confidence reset candidates and at least two
-    expression/engagement-break observations.
-    """
+    """Require dense physical reset plus expression/engagement break evidence."""
     if not takes or context is None:
         return False
     source_asset_id = takes[0].source_asset_id
-    start = takes[0].start - 0.45
-    end = takes[-1].end + 0.45
+    start = min(take.start for take in takes) - 0.45
+    end = max(take.end for take in takes) + 0.45
     events = tuple(
         event for event in _source_events(context, source_asset_id)
         if event.end >= start and event.start <= end
@@ -132,13 +130,7 @@ def _reaction_cluster_ids(
     maximum_gap_sec: float = 2.25,
     maximum_span_sec: float = 14.0,
 ) -> set[str]:
-    """Return IDs in a corroborated multi-take recording-break reaction cluster.
-
-    Eligibility is deliberately narrow: each member must be either a short surprised/
-    frustrated recording reaction or a recovery transition such as ``okay anyways``.
-    At least three adjacent members, at least two true reactions, one source only,
-    a short total span, and dense multimodal reset/break evidence are required.
-    """
+    """Return IDs in a corroborated multi-take recording-break reaction cluster."""
     ordered = tuple(sorted(kept, key=lambda item: (item.source_order, item.start, item.end)))
     eligible = lambda take: (
         take.duration_sec <= 4.0
@@ -172,12 +164,44 @@ def _reaction_cluster_ids(
     return remove_ids
 
 
+def _contextual_self_critique_ids(
+    kept: tuple[CandidateTake, ...],
+    context: WholeVideoContext | None,
+    *,
+    maximum_gap_sec: float = 1.5,
+) -> set[str]:
+    """Remove self-critique only when it leads directly into a proven failure.
+
+    Rhetorical speech such as ``why do I say this every morning?`` can be valid
+    creator content.  The local path therefore requires a following same-source take
+    that explicitly admits a recording failure plus dense multimodal reset/break
+    evidence across the two-take window.
+    """
+    ordered = tuple(sorted(kept, key=lambda item: (item.source_order, item.start, item.end)))
+    remove_ids: set[str] = set()
+    for index, take in enumerate(ordered[:-1]):
+        if not _SELF_CRITIQUE_RE.search(str(take.text or "")):
+            continue
+        following = ordered[index + 1]
+        if following.source_asset_id != take.source_asset_id:
+            continue
+        gap = following.start - take.end
+        if not -0.05 <= gap <= maximum_gap_sec:
+            continue
+        if not _EXPLICIT_FAILURE_RE.search(str(following.text or "")):
+            continue
+        if _multimodal_break_window((take, following), context):
+            remove_ids.add(take.clip_id)
+    return remove_ids
+
+
 def apply_recording_break_cleanup(
     kept: Iterable[CandidateTake],
     context: WholeVideoContext | None = None,
 ) -> tuple[Tuple[CandidateTake, ...], Tuple[CandidateTake, ...], Tuple[dict, ...]]:
     kept_tuple = tuple(kept)
     cluster_ids = _reaction_cluster_ids(kept_tuple, context)
+    self_critique_ids = _contextual_self_critique_ids(kept_tuple, context)
     survivors = []
     removed = []
     diagnostics = []
@@ -185,6 +209,8 @@ def apply_recording_break_cleanup(
         reason = _recording_break_reason(take)
         if reason is None and take.clip_id in cluster_ids:
             reason = "multimodal_recording_break_reaction_cluster"
+        if reason is None and take.clip_id in self_critique_ids:
+            reason = "self_critique_before_explicit_recording_failure"
         if reason is None:
             survivors.append(take)
             continue
