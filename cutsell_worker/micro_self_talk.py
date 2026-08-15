@@ -136,7 +136,12 @@ def _neighbor_window_ids(takes: tuple[CandidateTake, ...], *, maximum_gap_sec: f
 
 def apply_micro_self_talk_cleanup(kept: Iterable[CandidateTake], context: WholeVideoContext | None = None) -> tuple[Tuple[CandidateTake, ...], Tuple[CandidateTake, ...], Tuple[dict, ...]]:
     kept_tuple = tuple(kept)
-    local_window_ids = _neighbor_window_ids(kept_tuple)
+    # Face/camera break evidence stays on the tight historical window. Dense physical
+    # reset evidence is much stronger and can bridge a slightly wider post-bloopers
+    # pause after earlier cleanup removed silence/debris. This catches a short exact
+    # self-talk reaction such as ``Oh shit`` without making isolated profanity a rule.
+    local_window_ids = _neighbor_window_ids(kept_tuple, maximum_gap_sec=3.0)
+    physical_window_ids = _neighbor_window_ids(kept_tuple, maximum_gap_sec=7.0)
     bts_window_ids = _bts_window_ids(kept_tuple, context)
     survivors, removed, diagnostics = [], [], []
     for take in kept_tuple:
@@ -144,10 +149,10 @@ def apply_micro_self_talk_cleanup(kept: Iterable[CandidateTake], context: WholeV
         reason = None
         if take.clip_id in bts_window_ids:
             reason = "corroborated_behind_the_scenes_self_talk_window"
-        elif take.duration_sec <= 3.5 and take.clip_id in local_window_ids and bool(_SELF_TALK_RE.search(text)):
-            if _has_visual_break(take, context):
+        elif take.duration_sec <= 3.5 and bool(_SELF_TALK_RE.search(text)):
+            if take.clip_id in local_window_ids and _has_visual_break(take, context):
                 reason = "micro_self_talk_inside_retry_window_with_visual_break"
-            elif _has_dense_physical_reset(take, context):
+            elif take.clip_id in physical_window_ids and _has_dense_physical_reset(take, context):
                 reason = "micro_self_talk_inside_retry_window_with_dense_physical_reset"
         if reason is None:
             survivors.append(take)
