@@ -21,19 +21,21 @@ _SOFT_FRUSTRATION_RE = re.compile(
 )
 _RESET_KINDS = frozenset({"body_reset_candidate", "hand_motion_reset_candidate"})
 _BREAK_KINDS = frozenset({"camera_disengagement_candidate", "facial_expression_shift_candidate"})
-# Deliberately narrow. Repetition of common discourse/function words is not evidence
-# of a failed take. A repeated lexical item must look like actual content.
 _NON_CONTENT_TOKENS = frozenset({
     "a", "an", "and", "are", "as", "at", "be", "but", "by", "do", "for", "from",
     "god", "goodness", "gracious", "have", "he", "her", "here", "i", "in", "is", "it",
     "its", "me", "my", "of", "oh", "on", "or", "our", "she", "so", "that", "the",
     "their", "them", "these", "they", "this", "to", "was", "we", "what", "with", "you",
-    "your", "okay", "ok", "like", "really", "very", "just",
+    "your", "okay", "ok", "like", "really", "very", "just", "one",
 })
 
 
 def _tokens(text: str) -> tuple[str, ...]:
     return tuple(token.casefold() for token in _TOKEN_RE.findall(str(text or "")))
+
+
+def _has_content_token(tokens: tuple[str, ...]) -> bool:
+    return any(len(token) >= 4 and token not in _NON_CONTENT_TOKENS for token in tokens)
 
 
 def _has_repeated_multiword_phrase(text: str) -> bool:
@@ -44,7 +46,7 @@ def _has_repeated_multiword_phrase(text: str) -> bool:
         seen: set[tuple[str, ...]] = set()
         for index in range(0, len(tokens) - width + 1):
             gram = tokens[index:index + width]
-            if len(set(gram)) < 2:
+            if len(set(gram)) < 2 or not _has_content_token(gram):
                 continue
             if gram in seen:
                 return True
@@ -53,12 +55,6 @@ def _has_repeated_multiword_phrase(text: str) -> bool:
 
 
 def _has_repeated_content_token(text: str) -> bool:
-    """Detect a narrow single-word restart echo.
-
-    This is intentionally weaker than repeated multi-word evidence and is only used
-    downstream together with an explicit soft-frustration phrase *and* multimodal
-    reset/break evidence. Short/common/function words never qualify.
-    """
     content = [
         token for token in _tokens(text)
         if len(token) >= 4 and token not in _NON_CONTENT_TOKENS
