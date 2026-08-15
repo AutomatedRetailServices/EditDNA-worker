@@ -2,7 +2,17 @@ from cutsell_worker.contracts import CandidateTake, MediaSignals
 from cutsell_worker.take_judge import rank_takes, score_take
 
 
-def take(clip_id, *, expression=0.5, gesture=0.5, energy=0.5, fumble=0.0, distraction=0.0):
+def take(
+    clip_id,
+    *,
+    expression=0.5,
+    gesture=0.5,
+    energy=0.5,
+    fumble=0.0,
+    distraction=0.0,
+    product=0.7,
+    motion=0.8,
+):
     return CandidateTake(
         clip_id=clip_id,
         source_asset_id="src",
@@ -19,8 +29,8 @@ def take(clip_id, *, expression=0.5, gesture=0.5, energy=0.5, fumble=0.0, distra
             face_visibility=0.9,
             eye_contact=0.8,
             framing_quality=0.8,
-            product_visibility=0.7,
-            motion_stability=0.8,
+            product_visibility=product,
+            motion_stability=motion,
             continuity=0.8,
             visual_fumble=fumble,
             expression_naturalness=expression,
@@ -53,6 +63,61 @@ def test_visual_fumble_and_distraction_penalize_apparently_complete_take():
     )
 
     assert score_take(clean).score > score_take(broken).score
+
+
+def test_product_drop_face_reaction_loses_retry_group_by_clear_margin():
+    stable = take(
+        "stable",
+        expression=0.72,
+        gesture=0.70,
+        energy=0.70,
+        fumble=0.15,
+        distraction=0.12,
+        product=0.72,
+        motion=0.74,
+    )
+    dropped = take(
+        "dropped",
+        expression=0.28,
+        gesture=0.26,
+        energy=0.45,
+        fumble=0.86,
+        distraction=0.78,
+        product=0.22,
+        motion=0.30,
+    )
+
+    ranked = rank_takes((dropped, stable))
+
+    assert ranked[0].clip_id == "stable"
+    assert ranked[0].score - ranked[1].score >= 0.20
+
+
+def test_low_product_visibility_alone_does_not_trigger_failure_penalty():
+    talking_head = take(
+        "talking-head",
+        expression=0.82,
+        gesture=0.76,
+        energy=0.72,
+        fumble=0.05,
+        distraction=0.05,
+        product=0.20,
+        motion=0.78,
+    )
+    visible = take(
+        "visible",
+        expression=0.82,
+        gesture=0.76,
+        energy=0.72,
+        fumble=0.05,
+        distraction=0.05,
+        product=0.80,
+        motion=0.78,
+    )
+
+    # Product visibility contributes only its normal small ranking weight; the
+    # interaction penalty is reserved for an actual multimodal failure.
+    assert score_take(visible).score - score_take(talking_head).score < 0.05
 
 
 def test_text_timing_fallback_still_works_without_visual_signals():
