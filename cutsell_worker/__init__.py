@@ -15,6 +15,7 @@ from .restart_questions import install_short_restart_question_cleanup
 from .frustrated_restart import install_soft_frustration_restart_cleanup
 from .micro_restart_cleanup import install_micro_restart_cleanup
 from .product_handling_failure import install_product_handling_failure_cleanup
+from .micro_self_talk import install_micro_self_talk_cleanup
 
 install_clean_cut_contract_recovery()
 install_recording_process_context_cleanup()
@@ -26,6 +27,7 @@ install_short_restart_question_cleanup()
 install_soft_frustration_restart_cleanup()
 install_micro_restart_cleanup()
 install_product_handling_failure_cleanup()
+install_micro_self_talk_cleanup()
 
 __version__ = "0.1.0"
 OBSERVABILITY_STATUS = initialize_observability(service="cutsell-worker")
