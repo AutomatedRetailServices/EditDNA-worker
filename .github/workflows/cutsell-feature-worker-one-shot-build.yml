@@ -16,7 +16,7 @@ jobs:
     runs-on: ubuntu-latest
     env:
       IMAGE: ghcr.io/automatedretailservices/cutsell-worker:${{ github.sha }}
-      BUILD_REASON: post-21-self-talk-product-boundary-and-best-take-fixes-for-run22
+      BUILD_REASON: post-22-restart-tail-boundary-recovery-and-word-search-fixes-for-run23
     steps:
       - uses: actions/checkout@v4
       - name: Login to GitHub Container Registry
