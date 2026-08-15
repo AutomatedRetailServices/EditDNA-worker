@@ -77,13 +77,43 @@ def _restart_heavy(text: str) -> bool:
     return any(count >= 2 for count in counts.values())
 
 
+def _dominant_weak_group_with_fuller_retry(left_members, right_members) -> bool:
+    """Allow one trailing partial phrase inside an otherwise obvious retry envelope.
+
+    Real ASR often turns the last false start into a grammatically plausible fragment,
+    e.g. ``The popular crop black jeans. Okay now we Hold``. Requiring every member
+    to be restart-heavy leaves that one fragment as a barrier between several tiny
+    retries and the following full delivery. This bridge remains conservative: the
+    left group must contain at least three attempts, all but at most one must be weak,
+    and the fuller adjacent retry must strongly overlap the trailing attempts while
+    being materially longer.
+    """
+    if len(left_members) < 3 or not right_members:
+        return False
+    weak_count = sum(1 for member in left_members if _restart_heavy(member.text))
+    if weak_count < len(left_members) - 1:
+        return False
+    trailing = left_members[-2:]
+    for right in right_members:
+        right_tokens = _tokens(right.text)
+        for left in trailing:
+            left_tokens = _tokens(left.text)
+            if len(right_tokens) - len(left_tokens) < 3:
+                continue
+            if right.duration_sec < left.duration_sec + 0.70:
+                continue
+            if _shared_content_strength(left.text, right.text) >= 3:
+                return True
+    return False
+
+
 def _serial_retry_envelope(groups, takes, *, maximum_gap_sec: float = 20.0):
     """Absorb weak serial retries into the following linked retry group.
 
-    Only the left/current group may trigger this bridge: it must be made entirely of
-    short/repetitive/recording-meta takes. The adjacent next group must share at least
-    two content tokens (a one-character typo may count as one match). This lets a chain
-    like ``popular croc`` -> ``crop popular crop popular`` -> ``popular crop black...``
+    The left/current group normally consists entirely of short/repetitive/meta takes.
+    One trailing plausible fragment is also allowed when the rest of the group is weak
+    and a materially fuller adjacent retry strongly overlaps it. This lets a chain like
+    ``popular croc`` -> ``crop popular crop popular`` -> ``popular crop black...``
     reach the final full retake while protecting two distinct substantive sentences.
     """
     if len(groups) <= 1:
@@ -110,12 +140,13 @@ def _serial_retry_envelope(groups, takes, *, maximum_gap_sec: float = 20.0):
                 continue
             gap = max(0.0, right_members[0].start - left_members[-1].end)
             left_is_weak = all(_restart_heavy(member.text) for member in left_members)
+            dominant_weak_bridge = _dominant_weak_group_with_fuller_retry(left_members, right_members)
             linked = any(
                 _shared_content_strength(left.text, right.text) >= 2
                 for left in left_members
                 for right in right_members
             )
-            if left_is_weak and gap <= maximum_gap_sec and linked:
+            if (left_is_weak or dominant_weak_bridge) and gap <= maximum_gap_sec and linked:
                 work[index + 1] = work[index] + work[index + 1]
                 del work[index]
                 changed = True
