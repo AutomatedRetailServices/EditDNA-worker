@@ -1,8 +1,10 @@
-"""Remove short behind-the-scenes self-talk only inside a proven retry window.
+"""Remove behind-the-scenes self-talk only inside a proven recording-break window.
 
-Short reactions, profanity, and criticism are common valid creator content.  This
-cleanup therefore requires three independent signals: recording-style wording,
-nearby takes on both sides, and local reset/expression evidence.
+Short reactions, profanity, criticism, and words such as ``done`` or ``cool`` can be
+valid creator content.  They are never destructive on their own.  This cleanup first
+proves a local behind-the-scenes cluster using multiple process/self-critique anchors
+plus dense reset/expression evidence, then removes only the process speech and tiny
+restart debris inside that window.
 """
 from __future__ import annotations
 
@@ -12,14 +14,32 @@ from typing import Iterable, Tuple
 from .contracts import CandidateTake, CleanCutDecision
 from .whole_video_analysis import WholeVideoContext
 
+_TOKEN_RE = re.compile(r"[a-z0-9']+", re.IGNORECASE)
 _SELF_TALK_RE = re.compile(
-    r"^\s*(?:oh\s+)?(?:shit|fuck|damn|crap)[.!?\s]*$|"
+    r"^\s*(?:oh\s+)?(?:shit|fuck|damn|crap|ugh)[.!?\s]*$|"
     r"^\s*(?:this|that|it)\s+(?:is|'s)\s+(?:crap|shit|stupid|terrible|awful)[.!?\s]*$|"
     r"^\s*(?:i\s*(?:am|'m)\s+done|i\s+hate\s+(?:this|that))[.!?\s]*$",
     re.IGNORECASE,
 )
+_PROCESS_RE = re.compile(
+    r"\bwhy\s+do\s+i\s+(?:keep\s+)?say(?:ing)?\b|"
+    r"\bi\s+hate\s+(?:saying|being)\b|"
+    r"\bcall\s+to\s+action\b|"
+    r"\b(?:how|what)\s+(?:do|should)\s+i\s+(?:end|say)\b|"
+    r"\bi\s+(?:do\s+not|don't|dont)\s+know\s+how\s+to\s+end\b|"
+    r"\b(?:you(?:'re|\s+are)|i\s*(?:am|'m))\s+stupid\b",
+    re.IGNORECASE,
+)
+_SHORT_RECOVERY_RE = re.compile(
+    r"^\s*(?:no|done|cool|okay|ok|ugh|fuck|shit|damn)[.!?\s]*$",
+    re.IGNORECASE,
+)
 _RESET_KINDS = frozenset({"body_reset_candidate", "hand_motion_reset_candidate"})
 _BREAK_KINDS = frozenset({"camera_disengagement_candidate", "facial_expression_shift_candidate"})
+
+
+def _tokens(text: str) -> tuple[str, ...]:
+    return tuple(token.casefold() for token in _TOKEN_RE.findall(str(text or "")))
 
 
 def _source_events(context: WholeVideoContext | None, source_asset_id: str):
@@ -41,6 +61,79 @@ def _has_visual_break(take: CandidateTake, context: WholeVideoContext | None) ->
     return has_reset and has_break
 
 
+def _window_has_dense_breaks(
+    source_asset_id: str,
+    start: float,
+    end: float,
+    context: WholeVideoContext | None,
+) -> bool:
+    events = tuple(
+        e for e in _source_events(context, source_asset_id)
+        if e.end >= start - 0.35 and e.start <= end + 0.35
+    )
+    resets = sum(1 for e in events if e.kind in _RESET_KINDS and e.confidence >= 0.86)
+    breaks = sum(1 for e in events if e.kind in _BREAK_KINDS and e.confidence >= 0.74)
+    return resets >= 4 and breaks >= 2
+
+
+def _is_anchor(take: CandidateTake) -> bool:
+    text = str(take.text or "").strip()
+    return bool(_SELF_TALK_RE.search(text) or _PROCESS_RE.search(text))
+
+
+def _bts_window_ids(
+    takes: tuple[CandidateTake, ...],
+    context: WholeVideoContext | None,
+    *,
+    maximum_anchor_gap_sec: float = 6.0,
+    maximum_span_sec: float = 35.0,
+) -> set[str]:
+    ordered = tuple(sorted(takes, key=lambda x: (x.source_order, x.start, x.end)))
+    remove_ids: set[str] = set()
+    index = 0
+    while index < len(ordered):
+        if not _is_anchor(ordered[index]):
+            index += 1
+            continue
+        anchors = [ordered[index]]
+        cursor = index + 1
+        last_anchor = ordered[index]
+        while cursor < len(ordered):
+            take = ordered[cursor]
+            if take.source_asset_id != anchors[0].source_asset_id:
+                break
+            if take.end - anchors[0].start > maximum_span_sec:
+                break
+            if _is_anchor(take):
+                if take.start - last_anchor.end > maximum_anchor_gap_sec:
+                    break
+                anchors.append(take)
+                last_anchor = take
+            cursor += 1
+        if (
+            len(anchors) >= 3
+            and _window_has_dense_breaks(
+                anchors[0].source_asset_id,
+                anchors[0].start,
+                anchors[-1].end,
+                context,
+            )
+        ):
+            window_start = anchors[0].start - 1.0
+            window_end = anchors[-1].end + 1.0
+            for take in ordered:
+                if take.source_asset_id != anchors[0].source_asset_id:
+                    continue
+                if take.end < window_start or take.start > window_end:
+                    continue
+                text = str(take.text or "").strip()
+                tiny_debris = take.duration_sec <= 1.25 and len(_tokens(text)) <= 3
+                if _is_anchor(take) or _SHORT_RECOVERY_RE.search(text) or tiny_debris:
+                    remove_ids.add(take.clip_id)
+        index += 1
+    return remove_ids
+
+
 def _neighbor_window_ids(
     takes: tuple[CandidateTake, ...],
     *,
@@ -59,7 +152,6 @@ def _neighbor_window_ids(
             continue
         if not (0.0 <= after.start - take.end <= maximum_gap_sec):
             continue
-        # Neighboring speech must have enough substance to look like actual attempts.
         if before.duration_sec < 1.0 or after.duration_sec < 1.0:
             continue
         eligible.add(take.clip_id)
@@ -71,25 +163,30 @@ def apply_micro_self_talk_cleanup(
     context: WholeVideoContext | None = None,
 ) -> tuple[Tuple[CandidateTake, ...], Tuple[CandidateTake, ...], Tuple[dict, ...]]:
     kept_tuple = tuple(kept)
-    window_ids = _neighbor_window_ids(kept_tuple)
+    local_window_ids = _neighbor_window_ids(kept_tuple)
+    bts_window_ids = _bts_window_ids(kept_tuple, context)
     survivors = []
     removed = []
     diagnostics = []
     for take in kept_tuple:
         text = str(take.text or "").strip()
-        should_remove = (
+        reason = None
+        if take.clip_id in bts_window_ids:
+            reason = "corroborated_behind_the_scenes_self_talk_window"
+        elif (
             take.duration_sec <= 3.5
-            and take.clip_id in window_ids
+            and take.clip_id in local_window_ids
             and bool(_SELF_TALK_RE.search(text))
             and _has_visual_break(take, context)
-        )
-        if not should_remove:
+        ):
+            reason = "micro_self_talk_inside_retry_window_with_visual_break"
+        if reason is None:
             survivors.append(take)
             continue
         removed.append(take)
         diagnostics.append({
             "clip_id": take.clip_id,
-            "reason": "micro_self_talk_inside_retry_window_with_visual_break",
+            "reason": reason,
             "text": take.text,
         })
     return tuple(survivors), tuple(removed), tuple(diagnostics)
