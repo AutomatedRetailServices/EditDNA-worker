@@ -28,9 +28,12 @@ def _source_events(context: WholeVideoContext | None, source_asset_id: str):
 
 
 def _events_for_take(take: CandidateTake, context: WholeVideoContext | None):
+    # Keep only a tiny boundary slop. A prior version looked 350 ms past the take
+    # end, which let the *next* take's hand/face reset contaminate an otherwise good
+    # full delivery and falsely label it as a product fumble.
     return tuple(
         event for event in _source_events(context, take.source_asset_id)
-        if event.end >= take.start - 0.20 and event.start <= take.end + 0.35
+        if event.end >= take.start - 0.10 and event.start <= take.end + 0.08
     )
 
 
