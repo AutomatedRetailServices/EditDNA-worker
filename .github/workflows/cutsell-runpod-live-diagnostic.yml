@@ -17,7 +17,7 @@ jobs:
     env:
       RUNPOD_API_KEY: ${{ secrets.RUNPOD_API_KEY }}
       REDIS_URL: ${{ secrets.REDIS_URL }}
-      POD_ID: bgruphv7oeua1u
+      POD_ID: vq3bsd8cwbk42s
     steps:
       - name: Validate credentials
         shell: bash
