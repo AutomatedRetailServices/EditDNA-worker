@@ -19,6 +19,7 @@ from .micro_self_talk import install_micro_self_talk_cleanup
 from .orphan_retry_cleanup import install_orphan_retry_cleanup
 from .incomplete_retry_suffix import install_incomplete_retry_suffix_cleanup
 from .interstitial_retry_debris import install_interstitial_retry_debris_cleanup
+from .trailing_retry_restart import install_trailing_retry_restart_trim
 from .local_retry_grouping import install_local_retry_grouping
 
 install_clean_cut_contract_recovery()
@@ -35,6 +36,7 @@ install_micro_self_talk_cleanup()
 install_orphan_retry_cleanup()
 install_incomplete_retry_suffix_cleanup()
 install_interstitial_retry_debris_cleanup()
+install_trailing_retry_restart_trim()
 install_local_retry_grouping()
 
 __version__ = "0.1.0"
