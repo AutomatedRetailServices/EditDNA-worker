@@ -15,7 +15,8 @@ from .whole_video_analysis import WholeVideoContext
 
 _TOKEN_RE = re.compile(r"[a-z0-9']+", re.IGNORECASE)
 _EXPLICIT_FAILURE_RE = re.compile(
-    r"\b(?:why\s+)?i\s+(?:can(?:not|'t)|cant)\s+talk\b|"
+    r"\bi\s+(?:can(?:not|'t)|cant)\s+talk\b|"
+    r"\bwhy\s+(?:can(?:not|'t)|cant)\s+i\s+talk\b|"
     r"\bi\s+(?:do\s+not|don't|dont)\s+know\s+how\s+to\s+end\b|"
     r"\b(?:let's|lets|let\s+us)\s+do\s+that\s+again\b|"
     r"\b(?:let's|lets|let\s+us)\s+(?:try|start)\s+(?:that\s+)?again\b",
