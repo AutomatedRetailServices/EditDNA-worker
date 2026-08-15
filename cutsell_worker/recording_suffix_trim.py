@@ -16,6 +16,10 @@ _SUFFIX_PATTERNS = (
     re.compile(r"\bthat was dumb[.!?]*\s*$", re.IGNORECASE),
     re.compile(r"\bthat sounded bad[.!?]*\s*$", re.IGNORECASE),
     re.compile(r"\bthat was awkward[.!?]*\s*$", re.IGNORECASE),
+    # Explicit commentary about the creator's *selling delivery* is recording process,
+    # not product speech.  It is still trimmed only when reset + face/camera evidence
+    # corroborates the transition and at least four useful words precede it.
+    re.compile(r"\bi\s+hate\s+being\s+(?:like\s+)?salesy\b.*$", re.IGNORECASE),
 )
 _RESET_KINDS = frozenset({"body_reset_candidate", "hand_motion_reset_candidate"})
 _BREAK_KINDS = frozenset({"camera_disengagement_candidate", "facial_expression_shift_candidate"})
