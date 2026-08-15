@@ -16,6 +16,7 @@ from .frustrated_restart import install_soft_frustration_restart_cleanup
 from .micro_restart_cleanup import install_micro_restart_cleanup
 from .product_handling_failure import install_product_handling_failure_cleanup
 from .micro_self_talk import install_micro_self_talk_cleanup
+from .orphan_retry_cleanup import install_orphan_retry_cleanup
 from .local_retry_grouping import install_local_retry_grouping
 
 install_clean_cut_contract_recovery()
@@ -29,6 +30,7 @@ install_soft_frustration_restart_cleanup()
 install_micro_restart_cleanup()
 install_product_handling_failure_cleanup()
 install_micro_self_talk_cleanup()
+install_orphan_retry_cleanup()
 install_local_retry_grouping()
 
 __version__ = "0.1.0"
