@@ -1,16 +1,35 @@
 from cutsell_worker.contracts import CandidateTake
+from cutsell_worker.providers import ProviderStatus
 from cutsell_worker.recording_breaks import apply_recording_break_cleanup
+from cutsell_worker.whole_video_analysis import SourceVideoContext, TemporalEvent, WholeVideoContext
 
 
-def take(clip_id, text):
+def take(clip_id, text, start=0.0, end=3.0):
     return CandidateTake(
         clip_id=clip_id,
         source_asset_id="src",
         source_order=0,
-        start=0.0,
-        end=3.0,
+        start=start,
+        end=end,
         text=text,
     )
+
+
+def context(events):
+    return WholeVideoContext(
+        sources=(SourceVideoContext(
+            source_asset_id="src",
+            summary="",
+            dominant_style="talking_head",
+            creator_intent="recording",
+            events=tuple(events),
+        ),),
+        status=ProviderStatus("test", True, True, "applied"),
+    )
+
+
+def event(kind, start, end, confidence=1.0):
+    return TemporalEvent("src", start, end, kind, confidence, kind)
 
 
 def removed_reason(text):
@@ -57,6 +76,63 @@ def test_partial_repeated_restart_with_frustration_is_removed():
     )
     assert kept == ()
     assert diagnostics[0]["reason"] == "frustrated_internal_restart_repetition"
+
+
+def test_multimodal_reaction_cluster_is_removed_as_recording_break():
+    takes = (
+        take("a", "Fuck is happening", 77.57, 79.87),
+        take("b", "Okay, what the frig okay?", 81.31, 83.83),
+        take("c", "What just happened?", 85.53, 86.39),
+        take("d", "Okay, anyways", 87.51, 88.73),
+    )
+    ctx = context((
+        event("hand_motion_reset_candidate", 77.70, 77.80),
+        event("hand_motion_reset_candidate", 81.20, 81.30),
+        event("body_reset_candidate", 81.60, 81.70),
+        event("hand_motion_reset_candidate", 82.30, 82.40),
+        event("facial_expression_shift_candidate", 84.60, 84.70, 0.78),
+        event("facial_expression_shift_candidate", 85.80, 85.90, 0.81),
+    ))
+
+    kept, removed, diagnostics = apply_recording_break_cleanup(takes, ctx)
+
+    assert kept == ()
+    assert removed == takes
+    assert {item["reason"] for item in diagnostics} == {
+        "multimodal_recording_break_reaction_cluster"
+    }
+
+
+def test_isolated_what_just_happened_survives_even_with_visual_motion():
+    reaction = take("reaction", "What just happened?", 10.0, 11.2)
+    ctx = context((
+        event("hand_motion_reset_candidate", 10.1, 10.2),
+        event("hand_motion_reset_candidate", 10.3, 10.4),
+        event("body_reset_candidate", 10.5, 10.6),
+        event("hand_motion_reset_candidate", 10.7, 10.8),
+        event("facial_expression_shift_candidate", 10.8, 10.9, 0.90),
+        event("facial_expression_shift_candidate", 11.0, 11.1, 0.90),
+    ))
+
+    kept, removed, diagnostics = apply_recording_break_cleanup((reaction,), ctx)
+
+    assert kept == (reaction,)
+    assert removed == ()
+    assert diagnostics == ()
+
+
+def test_reaction_cluster_without_multimodal_break_evidence_survives():
+    takes = (
+        take("a", "What is happening?", 10.0, 11.0),
+        take("b", "Okay, what the frig?", 12.0, 13.0),
+        take("c", "What just happened?", 14.0, 15.0),
+    )
+
+    kept, removed, diagnostics = apply_recording_break_cleanup(takes, context(()))
+
+    assert kept == takes
+    assert removed == ()
+    assert diagnostics == ()
 
 
 def test_profanity_alone_is_not_a_recording_break():
