@@ -5,7 +5,14 @@ from cutsell_worker.whole_video_analysis import SourceVideoContext, TemporalEven
 
 
 def take(text, start=0.0, end=3.0):
-    return CandidateTake("x", "src", 0, start, end, text)
+    return CandidateTake(
+        clip_id="x",
+        source_asset_id="src",
+        source_order=0,
+        start=start,
+        end=end,
+        text=text,
+    )
 
 
 def event(kind, start, end, confidence=1.0):
@@ -14,7 +21,13 @@ def event(kind, start, end, confidence=1.0):
 
 def context(events):
     return WholeVideoContext(
-        sources=(SourceVideoContext("src", "", "talking_head", "recording", tuple(events)),),
+        sources=(SourceVideoContext(
+            source_asset_id="src",
+            summary="",
+            dominant_style="talking_head",
+            creator_intent="recording",
+            events=tuple(events),
+        ),),
         status=ProviderStatus("test", True, True, "applied"),
     )
 
