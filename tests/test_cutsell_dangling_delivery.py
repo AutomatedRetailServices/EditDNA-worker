@@ -53,6 +53,43 @@ def test_dangling_article_without_reset_is_preserved():
     assert diagnostics == ()
 
 
+def test_single_function_word_requires_dense_reset_burst():
+    take = _take("At", end=1.0)
+    dense = _context(
+        _event("hand_motion_reset_candidate", start=0.35, end=0.45, confidence=1.0),
+        _event("body_reset_candidate", start=0.55, end=0.65, confidence=1.0),
+        _event("hand_motion_reset_candidate", start=0.75, end=0.85, confidence=1.0),
+    )
+    kept, removed, diagnostics = apply_dangling_delivery_cleanup((take,), dense)
+    assert kept == ()
+    assert removed == (take,)
+    assert diagnostics[0]["reason"] == "single_open_function_word_with_dense_physical_reset"
+
+    sparse = _context(_event("hand_motion_reset_candidate", start=0.75, end=0.85, confidence=1.0))
+    kept, removed, diagnostics = apply_dangling_delivery_cleanup((take,), sparse)
+    assert kept == (take,)
+    assert removed == ()
+    assert diagnostics == ()
+
+
+def test_short_phrase_ending_in_article_is_removed_with_reset():
+    take = _take("so includes the", end=2.0)
+    ctx = _context(_event("hand_motion_reset_candidate", start=1.55, end=1.85, confidence=1.0))
+    kept, removed, diagnostics = apply_dangling_delivery_cleanup((take,), ctx)
+    assert kept == ()
+    assert removed == (take,)
+    assert diagnostics[0]["reason"] == "dangling_open_ending_with_physical_reset"
+
+
+def test_possessive_determiner_ending_is_removed_with_reset():
+    take = _take("you don't have to be on your", end=3.0)
+    ctx = _context(_event("body_reset_candidate", start=2.55, end=2.85, confidence=1.0))
+    kept, removed, diagnostics = apply_dangling_delivery_cleanup((take,), ctx)
+    assert kept == ()
+    assert removed == (take,)
+    assert diagnostics[0]["reason"] == "dangling_possessive_ending_with_physical_reset"
+
+
 def test_valid_complete_phrase_ending_are_is_preserved():
     take = _take("I love them exactly for who they are")
     kept, removed, _ = apply_dangling_delivery_cleanup(
