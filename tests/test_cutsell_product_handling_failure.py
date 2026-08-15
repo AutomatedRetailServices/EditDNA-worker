@@ -32,12 +32,12 @@ def context(events):
     )
 
 
-def handling_break_context():
+def handling_break_context(start=0.0):
     return context((
-        event("hand_motion_reset_candidate", 1.0, 1.1, 0.98),
-        event("hand_motion_reset_candidate", 1.4, 1.5, 0.94),
-        event("facial_expression_shift_candidate", 1.5, 1.6, 0.86),
-        event("body_reset_candidate", 1.6, 1.7, 0.88),
+        event("hand_motion_reset_candidate", start + 1.0, start + 1.1, 0.98),
+        event("hand_motion_reset_candidate", start + 1.4, start + 1.5, 0.94),
+        event("facial_expression_shift_candidate", start + 1.5, start + 1.6, 0.86),
+        event("body_reset_candidate", start + 1.6, start + 1.7, 0.88),
     ))
 
 
@@ -51,7 +51,20 @@ def test_product_drop_like_break_before_same_idea_retry_is_removed():
 
     assert failed in removed
     assert retry in kept
-    assert diagnostics[0]["reason"] == "product_handling_fumble_with_face_reaction_before_retry"
+    assert diagnostics[0]["reason"] == "product_handling_fumble_with_face_reaction_near_retry"
+
+
+def test_product_drop_after_prior_same_idea_take_is_removed():
+    prior = take("prior", "you got your bond and seal and then your", 0.0, 3.6)
+    failed = take("failed", "bond and seal and then your", 9.0, 11.7)
+
+    kept, removed, diagnostics = apply_product_handling_failure_cleanup(
+        (prior, failed), handling_break_context(start=9.0)
+    )
+
+    assert prior in kept
+    assert failed in removed
+    assert diagnostics[0]["reason"] == "product_handling_fumble_with_face_reaction_near_retry"
 
 
 def test_normal_product_gesture_without_face_reaction_survives():
