@@ -109,3 +109,27 @@ def test_retry_without_dense_hand_break_survives():
     assert retry in kept
     assert removed == ()
     assert diagnostics == ()
+
+
+def test_next_take_reset_does_not_contaminate_full_take_boundary():
+    full = take(
+        "full",
+        "the popular crop black denim jeans are back in stock anything with pockets is a win for me",
+        0.0,
+        6.0,
+    )
+    retry = take("retry", "the popular crop black jeans", 8.0, 11.0)
+    ctx = context((
+        event("hand_motion_reset_candidate", 4.0, 4.1, 0.98),
+        event("body_reset_candidate", 4.1, 4.2, 0.90),
+        # These belong to the next boundary. The old +350 ms tail window counted
+        # them against ``full`` and created a false product-fumble deletion.
+        event("hand_motion_reset_candidate", 6.20, 6.25, 0.98),
+        event("facial_expression_shift_candidate", 6.22, 6.27, 0.86),
+    ))
+
+    kept, removed, diagnostics = apply_product_handling_failure_cleanup((full, retry), ctx)
+
+    assert full in kept
+    assert removed == ()
+    assert diagnostics == ()
