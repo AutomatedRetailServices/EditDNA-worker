@@ -5,21 +5,28 @@ contracts. This module never deletes content.
 """
 from __future__ import annotations
 
+import re
 from typing import Iterable, Tuple
 
 from .contracts import CandidateTake, RankedTake
+
+_TOKEN_RE = re.compile(r"[a-z0-9áéíóúñü]+", re.IGNORECASE)
 
 
 def _bounded(value: float) -> float:
     return max(0.0, min(1.0, value))
 
 
+def _tokens(text: str) -> tuple[str, ...]:
+    return tuple(token.casefold() for token in _TOKEN_RE.findall(str(text or "")))
+
+
 def _handling_failure_penalty(signal) -> float:
     """Penalize a visually broken product take without turning it into a delete rule.
 
     A low product-visibility frame is common in legitimate talking-head footage, so it
-    is never penalized on its own.  The interaction only applies when local vision also
-    sees a strong fumble/distraction plus a visibly broken expression or gesture.  This
+    is never penalized on its own. The interaction only applies when local vision also
+    sees a strong fumble/distraction plus a visibly broken expression or gesture. This
     makes a dropped/mis-handled product lose a retry-group ranking contest while leaving
     ordinary product-away-from-frame speech unaffected.
     """
@@ -74,5 +81,42 @@ def score_take(take: CandidateTake) -> RankedTake:
     return RankedTake(take.clip_id, round(_bounded(score), 4), "watch_listen_baseline")
 
 
+def _material_prefix_fragment(candidate: CandidateTake, reference: CandidateTake) -> bool:
+    """Return True when candidate is clearly an abandoned prefix of a fuller retry.
+
+    This is group-relative ranking evidence only. It does not delete the fragment and
+    it does not use semantic/sales roles. Exact lexical prefix plus a meaningful length
+    and duration advantage is required so ordinary concise alternatives are protected.
+    """
+    left = _tokens(candidate.text)
+    right = _tokens(reference.text)
+    if not 2 <= len(left) <= 8:
+        return False
+    if len(right) - len(left) < 3:
+        return False
+    if candidate.duration_sec + 0.70 > reference.duration_sec:
+        return False
+    return right[: len(left)] == left
+
+
 def rank_takes(takes: Iterable[CandidateTake]) -> Tuple[RankedTake, ...]:
-    return tuple(sorted((score_take(take) for take in takes), key=lambda item: (-item.score, item.clip_id)))
+    take_tuple = tuple(takes)
+    base = {take.clip_id: score_take(take) for take in take_tuple}
+    adjusted: list[RankedTake] = []
+
+    for take in take_tuple:
+        item = base[take.clip_id]
+        is_prefix_fragment = any(
+            other.clip_id != take.clip_id and _material_prefix_fragment(take, other)
+            for other in take_tuple
+        )
+        if is_prefix_fragment:
+            adjusted.append(RankedTake(
+                take.clip_id,
+                round(_bounded(item.score - 0.22), 4),
+                item.reason + "+material_prefix_fragment_penalty",
+            ))
+        else:
+            adjusted.append(item)
+
+    return tuple(sorted(adjusted, key=lambda item: (-item.score, item.clip_id)))
