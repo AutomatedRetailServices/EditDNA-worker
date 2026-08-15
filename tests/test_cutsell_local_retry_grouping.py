@@ -104,6 +104,34 @@ def test_repeated_phrase_without_fuller_related_retry_is_not_penalized():
     assert "repetitive_restart_fragment_penalty" not in by_id["slogan"].reason
 
 
+def test_best_take_penalizes_restart_tail_when_full_retry_follows():
+    partial = take(
+        "partial", 0.0, 4.54,
+        "the popular crop black jeans okay now we hold",
+    )
+    full = take(
+        "full", 6.0, 12.0,
+        "the popular crop black denim jeans are back in stock anything with pockets is a win for me",
+    )
+
+    ranked = rank_takes((partial, full))
+    by_id = {item.clip_id: item for item in ranked}
+
+    assert ranked[0].clip_id == "full"
+    assert "restart_tail_fragment_penalty" in by_id["partial"].reason
+    assert by_id["full"].score > by_id["partial"].score
+
+
+def test_okay_now_at_start_of_valid_take_is_not_restart_tail_penalized():
+    valid = take("valid", 0.0, 4.0, "okay now let us look at the zipper and inside pockets")
+    other = take("other", 5.0, 10.0, "the lining is soft and the sleeve length is perfect for me")
+
+    ranked = rank_takes((valid, other))
+    by_id = {item.clip_id: item for item in ranked}
+
+    assert "restart_tail_fragment_penalty" not in by_id["valid"].reason
+
+
 def test_best_take_prefers_complete_natural_delivery_over_product_drop_retry():
     bad = MediaSignals(
         "src", 0.0, 4.0,
