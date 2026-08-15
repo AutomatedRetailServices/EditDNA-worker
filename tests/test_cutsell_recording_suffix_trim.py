@@ -53,6 +53,38 @@ def test_trims_self_critique_suffix_only_with_multimodal_physical_break():
     assert diagnostics[0]["action"] == "trim_self_critique_suffix"
 
 
+def test_trims_explicit_salesy_recording_comment_after_valid_prefix_with_break():
+    tokens = [
+        "miss", "out", "on", "this", "deal", "i", "hate", "being", "like", "salesy",
+        "some", "people", "don't", "end", "them", "they", "just",
+    ]
+    item = take(
+        "miss out on this deal i hate being like salesy some people don't end them they just",
+        words_for(tokens),
+    )
+    ctx = context((
+        event("hand_motion_reset_candidate", 2.10, 2.20, 0.95),
+        event("camera_disengagement_candidate", 2.30, 2.40, 0.80),
+    ))
+
+    refined, diagnostics = trim_visual_self_critique_suffixes((item,), ctx)
+
+    assert refined[0].text == "miss out on this deal"
+    assert refined[0].end == item.words[4].end
+    assert diagnostics[0]["action"] == "trim_self_critique_suffix"
+
+
+def test_salesy_comment_without_visual_break_is_not_trimmed():
+    tokens = ["miss", "out", "on", "this", "deal", "i", "hate", "being", "salesy"]
+    item = take("miss out on this deal i hate being salesy", words_for(tokens))
+    ctx = context((event("hand_motion_reset_candidate", 2.10, 2.20, 0.95),))
+
+    refined, diagnostics = trim_visual_self_critique_suffixes((item,), ctx)
+
+    assert refined == (item,)
+    assert diagnostics == ()
+
+
 def test_does_not_trim_self_critique_suffix_without_two_visual_families():
     tokens = ["Go", "out", "on", "a", "comfortable", "run", "or", "something", "That's", "stupid"]
     item = take("Go out on a comfortable run or something. That's stupid.", words_for(tokens))
