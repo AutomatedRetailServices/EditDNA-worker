@@ -32,6 +32,11 @@ _REACTION_RE = re.compile(
     r"\b(?:fuck|frig|frick)\s+is\s+happening\b",
     re.IGNORECASE,
 )
+_SPEECH_SELF_REVIEW_RE = re.compile(
+    r"\bwhat\s+did\s+i\s+(?:just\s+)?say\b",
+    re.IGNORECASE,
+)
+_SHORT_CONFUSION_RE = re.compile(r"^\s*what[?!.\s]*$", re.IGNORECASE)
 _RECOVERY_TRANSITION_RE = re.compile(
     r"^\s*(?:okay|ok)[,.!?\s]*(?:anyways?|anyway)\b",
     re.IGNORECASE,
@@ -99,13 +104,12 @@ def _source_events(context: WholeVideoContext | None, source_asset_id: str):
     return ()
 
 
-def _multimodal_break_window(
+def _multimodal_break_counts(
     takes: tuple[CandidateTake, ...],
     context: WholeVideoContext | None,
-) -> bool:
-    """Require dense physical reset plus expression/engagement break evidence."""
+) -> tuple[int, int]:
     if not takes or context is None:
-        return False
+        return 0, 0
     source_asset_id = takes[0].source_asset_id
     start = min(take.start for take in takes) - 0.45
     end = max(take.end for take in takes) + 0.45
@@ -121,6 +125,15 @@ def _multimodal_break_window(
         1 for event in events
         if event.kind in _BREAK_KINDS and event.confidence >= 0.72
     )
+    return reset_count, break_count
+
+
+def _multimodal_break_window(
+    takes: tuple[CandidateTake, ...],
+    context: WholeVideoContext | None,
+) -> bool:
+    """Require dense physical reset plus expression/engagement break evidence."""
+    reset_count, break_count = _multimodal_break_counts(takes, context)
     return reset_count >= 4 and break_count >= 2
 
 
@@ -165,6 +178,38 @@ def _reaction_cluster_ids(
     return remove_ids
 
 
+def _speech_self_review_pair_ids(
+    kept: tuple[CandidateTake, ...],
+    context: WholeVideoContext | None,
+    *,
+    maximum_gap_sec: float = 2.0,
+) -> set[str]:
+    """Remove a self-review question plus immediate confused echo during a reset.
+
+    ``What?`` by itself is protected.  The pair becomes destructive only when the
+    creator first explicitly reviews their own just-spoken line (``what did I just
+    say?``), immediately follows with a tiny confusion reaction, and local vision sees
+    dense physical reset plus at least one expression/engagement break across the pair.
+    """
+    ordered = tuple(sorted(kept, key=lambda item: (item.source_order, item.start, item.end)))
+    remove_ids: set[str] = set()
+    for index, take in enumerate(ordered[:-1]):
+        if take.duration_sec > 2.5 or not _SPEECH_SELF_REVIEW_RE.search(str(take.text or "")):
+            continue
+        following = ordered[index + 1]
+        if following.source_asset_id != take.source_asset_id:
+            continue
+        if following.duration_sec > 1.5 or not _SHORT_CONFUSION_RE.search(str(following.text or "")):
+            continue
+        gap = following.start - take.end
+        if not 0.0 <= gap <= maximum_gap_sec:
+            continue
+        resets, breaks = _multimodal_break_counts((take, following), context)
+        if resets >= 4 and breaks >= 1:
+            remove_ids.update((take.clip_id, following.clip_id))
+    return remove_ids
+
+
 def _contextual_self_critique_ids(
     kept: tuple[CandidateTake, ...],
     context: WholeVideoContext | None,
@@ -202,6 +247,7 @@ def apply_recording_break_cleanup(
 ) -> tuple[Tuple[CandidateTake, ...], Tuple[CandidateTake, ...], Tuple[dict, ...]]:
     kept_tuple = tuple(kept)
     cluster_ids = _reaction_cluster_ids(kept_tuple, context)
+    speech_self_review_ids = _speech_self_review_pair_ids(kept_tuple, context)
     self_critique_ids = _contextual_self_critique_ids(kept_tuple, context)
     survivors = []
     removed = []
@@ -210,6 +256,8 @@ def apply_recording_break_cleanup(
         reason = _recording_break_reason(take)
         if reason is None and take.clip_id in cluster_ids:
             reason = "multimodal_recording_break_reaction_cluster"
+        if reason is None and take.clip_id in speech_self_review_ids:
+            reason = "speech_self_review_confusion_pair_with_physical_reset"
         if reason is None and take.clip_id in self_critique_ids:
             reason = "self_critique_before_explicit_recording_failure"
         if reason is None:
