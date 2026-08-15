@@ -44,6 +44,12 @@ def test_i_cant_talk_is_explicit_recording_failure():
     assert diagnostics[0]["reason"] == "explicit_recording_failure"
 
 
+def test_why_cant_i_talk_is_explicit_recording_failure():
+    kept, removed, diagnostics = removed_reason("why can't I talk?")
+    assert kept == ()
+    assert diagnostics[0]["reason"] == "explicit_recording_failure"
+
+
 def test_i_dont_know_how_to_end_is_explicit_recording_failure():
     kept, removed, diagnostics = removed_reason("oh I don't know how to end TikTok shop")
     assert kept == ()
@@ -131,6 +137,57 @@ def test_reaction_cluster_without_multimodal_break_evidence_survives():
     kept, removed, diagnostics = apply_recording_break_cleanup(takes, context(()))
 
     assert kept == takes
+    assert removed == ()
+    assert diagnostics == ()
+
+
+def test_self_critique_before_explicit_failure_is_removed_with_visual_break():
+    critique = take(
+        "critique",
+        "no why do i say don't miss out on this hop on the cozy cardigan train why do i keep saying",
+        435.99,
+        442.11,
+    )
+    failure = take(
+        "failure",
+        "that it's stupid it's stupid yeah yeah it's stupid oh i don't know how to end tiktok shop",
+        442.11,
+        447.65,
+    )
+    ctx = context((
+        event("hand_motion_reset_candidate", 438.0, 438.1),
+        event("body_reset_candidate", 438.8, 438.9),
+        event("hand_motion_reset_candidate", 440.3, 440.4),
+        event("hand_motion_reset_candidate", 442.5, 442.6),
+        event("facial_expression_shift_candidate", 443.0, 443.1, 0.80),
+        event("facial_expression_shift_candidate", 443.8, 443.9, 0.82),
+    ))
+
+    kept, removed, diagnostics = apply_recording_break_cleanup((critique, failure), ctx)
+
+    assert kept == ()
+    assert removed == (critique, failure)
+    assert {item["reason"] for item in diagnostics} == {
+        "self_critique_before_explicit_recording_failure",
+        "explicit_recording_failure",
+    }
+
+
+def test_rhetorical_why_do_i_say_survives_without_following_recording_failure():
+    valid = take("valid", "why do I say this every morning because it actually works", 10.0, 14.0)
+    following = take("next", "and the bottle lasts me all month", 14.1, 17.0)
+    ctx = context((
+        event("hand_motion_reset_candidate", 10.1, 10.2),
+        event("hand_motion_reset_candidate", 10.4, 10.5),
+        event("body_reset_candidate", 11.0, 11.1),
+        event("hand_motion_reset_candidate", 11.5, 11.6),
+        event("facial_expression_shift_candidate", 12.0, 12.1, 0.90),
+        event("facial_expression_shift_candidate", 13.0, 13.1, 0.90),
+    ))
+
+    kept, removed, diagnostics = apply_recording_break_cleanup((valid, following), ctx)
+
+    assert kept == (valid, following)
     assert removed == ()
     assert diagnostics == ()
 
