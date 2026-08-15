@@ -75,6 +75,39 @@ def test_ambiguous_auxiliary_requires_restart_churn_and_reset():
     assert diagnostics[0]["reason"] == "dangling_auxiliary_with_internal_restart_and_reset"
 
 
+def test_trigger_clause_ending_in_auxiliary_is_removed_with_end_reset():
+    take = _take("Perfect. What if I told you your kids are", end=3.0)
+    context = _context(_event("hand_motion_reset_candidate", start=2.65, end=2.9, confidence=1.0))
+    kept, removed, diagnostics = apply_dangling_delivery_cleanup((take,), context)
+    assert kept == ()
+    assert removed == (take,)
+    assert diagnostics[0]["reason"] == "dangling_trigger_clause_auxiliary_with_physical_reset"
+
+
+def test_help_object_verb_fragment_is_removed_only_with_end_reset():
+    take = _take("It's got simple buttons on the back to help you use", end=3.0)
+    context = _context(_event("body_reset_candidate", start=2.65, end=2.9, confidence=1.0))
+    kept, removed, diagnostics = apply_dangling_delivery_cleanup((take,), context)
+    assert kept == ()
+    assert removed == (take,)
+    assert diagnostics[0]["reason"] == "dangling_help_object_verb_with_physical_reset"
+
+    kept, removed, diagnostics = apply_dangling_delivery_cleanup((take,), _context())
+    assert kept == (take,)
+    assert removed == ()
+    assert diagnostics == ()
+
+
+def test_complete_help_phrase_is_preserved_even_with_reset():
+    take = _take("These simple buttons help you use it with one hand")
+    kept, removed, _ = apply_dangling_delivery_cleanup(
+        (take,),
+        _context(_event("hand_motion_reset_candidate")),
+    )
+    assert kept == (take,)
+    assert removed == ()
+
+
 def test_repeated_emphasis_without_dangling_auxiliary_is_preserved():
     take = _take("They are so so super cute and perfect for this outfit")
     kept, removed, _ = apply_dangling_delivery_cleanup(
