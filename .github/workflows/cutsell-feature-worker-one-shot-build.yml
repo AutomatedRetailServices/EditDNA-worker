@@ -16,7 +16,7 @@ jobs:
     runs-on: ubuntu-latest
     env:
       IMAGE: ghcr.io/automatedretailservices/cutsell-worker:${{ github.sha }}
-      BUILD_REASON: hybrid-flash-lite-mini-session-semantic-cleanup-pre-run27
+      BUILD_REASON: hybrid-flash-lite-run27-validation-contract-ready
     steps:
       - uses: actions/checkout@v4
       - name: Login to GitHub Container Registry
