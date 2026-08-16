@@ -22,6 +22,8 @@ from .contracts import (
     TakeGroup,
 )
 from .draft_review_provider import DraftReviewProvider, safe_review_draft
+from .hybrid_editorial import EditorialJudge
+from .hybrid_group_cleanup import apply_hybrid_group_cleanup
 from .session_boundaries import safe_group_takes_by_sessions
 from .strategy import choose_strategy
 from .take_grouping_provider import TakeGroupingProvider
@@ -58,6 +60,7 @@ def build_flow_b_draft(
     composer_provider: ComposerProvider | None = None,
     take_grouping_provider: TakeGroupingProvider | None = None,
     draft_review_provider: DraftReviewProvider | None = None,
+    editorial_judge: EditorialJudge | None = None,
     whole_video_context: WholeVideoContext | None = None,
     temporal_trim_diagnostics: Iterable[dict] = (),
 ) -> ProcessingResult:
@@ -67,8 +70,8 @@ def build_flow_b_draft(
     label_map: dict[str, SemanticLabel] = {label.clip_id: label for label in semantic_labels}
     context_text = whole_video_context.compact_text() if whole_video_context is not None else ""
 
-    # Global context participates in local keep/cut decisions. A complete sentence
-    # can still be a clearly failed recording attempt when temporal performance says so.
+    # Pass 1 remains deterministic and context-aware. It removes obvious recording
+    # garbage before any optional paid semantic reasoning is considered.
     kept, deterministic_discarded, decisions = apply_clean_cut(take_tuple, whole_video_context)
 
     clean_judged = safe_clean_cut_judge(clean_cut_provider, kept)
@@ -89,6 +92,10 @@ def build_flow_b_draft(
                     str(child_id), parent_label.role, parent_label.confidence, parent_label.reason
                 )
 
+    # Retry grouping is already scoped by conservative creator/session walls. Semantic
+    # reasoning is applied only *inside* those bounded groups and cannot invent or move
+    # timestamps. This is the layer that can understand BTS/self-talk and failed human
+    # attempts that deterministic rules should not try to enumerate forever.
     take_by_id = {take.clip_id: take for take in kept}
     grouping = safe_group_takes_by_sessions(
         take_grouping_provider,
@@ -104,12 +111,47 @@ def build_flow_b_draft(
     judge_reasons = Counter()
     alternate_group_count = 0
     judge_group_diagnostics = []
+    hybrid_cleanup_diagnostics = []
+    hybrid_deleted = []
+    hybrid_requested_groups = 0
+    hybrid_available_groups = 0
 
-    for members in group_members:
+    for original_members in group_members:
+        cleanup = apply_hybrid_group_cleanup(original_members, editorial_judge)
+        if cleanup.requested:
+            hybrid_requested_groups += 1
+        if cleanup.available:
+            hybrid_available_groups += 1
+        hybrid_deleted.extend(cleanup.deleted)
+        if cleanup.diagnostics:
+            hybrid_cleanup_diagnostics.append({
+                "source_asset_id": original_members[0].source_asset_id if original_members else None,
+                "original_member_ids": [member.clip_id for member in original_members],
+                "kept_ids": [member.clip_id for member in cleanup.kept],
+                "deleted_ids": [member.clip_id for member in cleanup.deleted],
+                "preferred_winner_id": cleanup.preferred_winner_id,
+                "provider": cleanup.provider,
+                "model": cleanup.model,
+                "decisions": list(cleanup.diagnostics),
+            })
+
+        members = cleanup.kept
+        if not members:
+            continue
         if len(members) >= 2:
             alternate_group_count += 1
+
         judged = safe_rank_takes(members, take_judge_provider)
         ranked = judged.ranked
+        # The semantic pass already paid for one classification of this bounded group.
+        # If it named exactly one high-confidence winner, reuse that decision rather
+        # than making a second LLM request through the Best Take provider.
+        if cleanup.preferred_winner_id and ranked and ranked[0].clip_id != cleanup.preferred_winner_id:
+            ranked = (
+                next(item for item in ranked if item.clip_id == cleanup.preferred_winner_id),
+                *(item for item in ranked if item.clip_id != cleanup.preferred_winner_id),
+            )
+
         judge_statuses[judged.status.status] += 1
         if judged.status.reason:
             judge_reasons[judged.status.reason] += 1
@@ -126,12 +168,15 @@ def build_flow_b_draft(
             selected_clip_id=selected_clip_id,
         )
         groups.append(group)
-        if len(members) >= 2:
+        if len(members) >= 2 or cleanup.requested:
             judge_group_diagnostics.append({
                 "group_id": gid,
                 "selected_clip_id": selected_clip_id,
                 "execution_status": judged.status.status,
                 "execution_reason": judged.status.reason,
+                "hybrid_requested": cleanup.requested,
+                "hybrid_provider": cleanup.provider,
+                "hybrid_model": cleanup.model,
                 "ranked": [
                     {"clip_id": item.clip_id, "score": item.score, "reason": item.reason}
                     for item in ranked
@@ -139,6 +184,10 @@ def build_flow_b_draft(
             })
         for member in members:
             clip_to_group[member.clip_id] = gid
+
+    hybrid_deleted_ids = {take.clip_id for take in hybrid_deleted}
+    kept = tuple(take for take in kept if take.clip_id not in hybrid_deleted_ids)
+    discarded = (*discarded, *tuple(hybrid_deleted))
 
     surviving_labels = tuple(label_map[take.clip_id] for take in kept if take.clip_id in label_map)
     strategy = choose_strategy(surviving_labels, kept)
@@ -154,9 +203,6 @@ def build_flow_b_draft(
     selected_map = {take.clip_id: take for take in natural_selected}
     composed_takes = tuple(selected_map[clip_id] for clip_id in composition.ordered_clip_ids)
 
-    # Final global logic pass: review the assembled story as a whole. This is a
-    # constrained second pass: it can only keep/reorder already selected material.
-    # It cannot invent speech, resurrect discarded takes, or add unknown clips.
     review = safe_review_draft(
         draft_review_provider,
         composed_takes,
@@ -168,9 +214,6 @@ def build_flow_b_draft(
     selected_takes = tuple(composed_map[clip_id] for clip_id in review.ordered_clip_ids)
     selected_ids = {take.clip_id for take in selected_takes}
 
-    # If global story review drops the chosen representative of a retry group, the
-    # underlying idea was removed from the story. Exclude every alternate retry of
-    # that same idea too; otherwise a redundant idea would linger as a fake alternate.
     initially_removed_ids = set(composed_map) - selected_ids
     removed_group_ids = {
         clip_to_group[clip_id]
@@ -249,6 +292,10 @@ def build_flow_b_draft(
             "clean_cut_judge_deleted_count": sum(1 for item in clean_judge_diagnostics if item.get("applied_delete")),
             "clean_cut_judge_mixed_count": sum(1 for item in clean_judge_diagnostics if item["action"] == "mixed"),
             "clean_cut_judge_mixed_trimmed_count": sum(1 for item in clean_judge_diagnostics if item.get("applied_mixed_trim")),
+            "hybrid_editorial_requested_group_count": hybrid_requested_groups,
+            "hybrid_editorial_available_group_count": hybrid_available_groups,
+            "hybrid_editorial_deleted_count": len(hybrid_deleted),
+            "hybrid_editorial_groups": hybrid_cleanup_diagnostics[:100],
             "take_group_count": len(groups),
             "alternate_group_count": alternate_group_count,
             "take_grouping_status": grouping.status.__dict__,
@@ -289,6 +336,15 @@ def build_flow_b_draft(
     else:
         clean_cut_stage = clean_judged.status.status
 
+    if editorial_judge is None:
+        hybrid_stage = "disabled_local_only"
+    elif hybrid_requested_groups and hybrid_available_groups:
+        hybrid_stage = "provider_complete"
+    elif hybrid_requested_groups:
+        hybrid_stage = "degraded_fail_open"
+    else:
+        hybrid_stage = "confidence_gate_local"
+
     if composer_provider is None or len(natural_selected) <= 1:
         composer_stage = "natural_order"
     elif composition.status.status == "applied":
@@ -320,6 +376,7 @@ def build_flow_b_draft(
             "edit_mode": whole_video_context.dominant_edit_mode if whole_video_context is not None else "natural",
             "temporal_performance": "applied" if temporal_trim_diagnostics else "no_edge_trim_needed",
             "clean_cut": clean_cut_stage,
+            "hybrid_editorial": hybrid_stage,
             "take_grouping": grouping_stage,
             "take_judge": judge_stage,
             "semantic": "provided" if label_map else "not_provided",
