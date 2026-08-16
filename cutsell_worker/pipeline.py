@@ -22,8 +22,9 @@ from .contracts import (
     TakeGroup,
 )
 from .draft_review_provider import DraftReviewProvider, safe_review_draft
+from .session_boundaries import safe_group_takes_by_sessions
 from .strategy import choose_strategy
-from .take_grouping_provider import TakeGroupingProvider, safe_group_takes
+from .take_grouping_provider import TakeGroupingProvider
 from .take_judge_provider import TakeJudgeProvider, safe_rank_takes
 from .whole_video_analysis import WholeVideoContext
 
@@ -89,7 +90,12 @@ def build_flow_b_draft(
                 )
 
     take_by_id = {take.clip_id: take for take in kept}
-    grouping = safe_group_takes(take_grouping_provider, kept, context_text=context_text)
+    grouping = safe_group_takes_by_sessions(
+        take_grouping_provider,
+        kept,
+        whole_video_context,
+        context_text=context_text,
+    )
     group_members = [tuple(take_by_id[clip_id] for clip_id in ids) for ids in grouping.groups]
 
     groups = []
