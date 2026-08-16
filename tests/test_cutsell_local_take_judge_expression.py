@@ -12,18 +12,21 @@ def take(
     distraction=0.0,
     product=0.7,
     motion=0.8,
+    text="This product is amazing",
+    start=0.0,
+    end=2.0,
 ):
     return CandidateTake(
         clip_id=clip_id,
         source_asset_id="src",
         source_order=0,
-        start=0.0,
-        end=2.0,
-        text="This product is amazing",
+        start=start,
+        end=end,
+        text=text,
         signals=MediaSignals(
             source_asset_id="src",
-            start=0.0,
-            end=2.0,
+            start=start,
+            end=end,
             silence_ratio=0.0,
             audio_quality=0.8,
             face_visibility=0.9,
@@ -135,3 +138,56 @@ def test_text_timing_fallback_still_works_without_visual_signals():
 
     assert ranked.reason == "text_timing_baseline"
     assert ranked.score == 1.0
+
+
+def test_single_character_asr_drift_short_prefix_loses_to_full_retry():
+    short = take(
+        "short",
+        text="the popular croc",
+        start=0.0,
+        end=1.4,
+        expression=0.82,
+        gesture=0.82,
+        energy=0.82,
+    )
+    full = take(
+        "full",
+        text="the popular crop black denim jeans are back in stock anything with pockets is a win for me",
+        start=2.0,
+        end=8.0,
+        expression=0.72,
+        gesture=0.72,
+        energy=0.72,
+    )
+
+    ranked = rank_takes((short, full))
+    by_id = {item.clip_id: item for item in ranked}
+
+    assert ranked[0].clip_id == "full"
+    assert "material_prefix_fragment_penalty" in by_id["short"].reason
+
+
+def test_multiple_asr_differences_do_not_trigger_fuzzy_prefix_penalty():
+    concise = take(
+        "concise",
+        text="the popular clock",
+        start=0.0,
+        end=1.4,
+        expression=0.85,
+        gesture=0.85,
+        energy=0.85,
+    )
+    longer = take(
+        "longer",
+        text="the popular crop black denim jeans are back in stock anything with pockets is a win for me",
+        start=2.0,
+        end=8.0,
+        expression=0.60,
+        gesture=0.60,
+        energy=0.60,
+    )
+
+    ranked = rank_takes((concise, longer))
+    by_id = {item.clip_id: item for item in ranked}
+
+    assert "material_prefix_fragment_penalty" not in by_id["concise"].reason
