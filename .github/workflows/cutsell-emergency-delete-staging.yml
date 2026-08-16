@@ -1,0 +1,42 @@
+name: CutSell Emergency Delete Staging Worker
+
+on:
+  push:
+    branches:
+      - cutsell/mobile-v1-clean
+    paths:
+      - .github/workflows/cutsell-emergency-delete-staging.yml
+
+permissions:
+  contents: read
+
+jobs:
+  delete:
+    runs-on: ubuntu-latest
+    env:
+      RUNPOD_API_KEY: ${{ secrets.RUNPOD_API_KEY }}
+    steps:
+      - name: Delete every cutsell-staging-worker Pod
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "${RUNPOD_API_KEY:-}" || { echo 'RUNPOD_API_KEY missing'; exit 3; }
+          curl --fail --silent --show-error \
+            --url "https://rest.runpod.io/v1/pods" \
+            --header "Authorization: Bearer $RUNPOD_API_KEY" \
+            --output pods.json
+          ids=$(jq -r '.[] | select(.name == "cutsell-staging-worker") | .id' pods.json)
+          if [ -z "$ids" ]; then
+            echo 'No cutsell-staging-worker Pod exists.'
+            exit 0
+          fi
+          for id in $ids; do
+            echo "Deleting staging Pod: $id"
+            code=$(curl --silent --show-error --write-out '%{http_code}' \
+              --request DELETE \
+              --url "https://rest.runpod.io/v1/pods/$id" \
+              --header "Authorization: Bearer $RUNPOD_API_KEY" \
+              --output delete.json)
+            test "$code" = "204" || { echo "Delete HTTP status: $code"; cat delete.json || true; exit 4; }
+          done
+          echo 'All cutsell-staging-worker Pods deleted.'
