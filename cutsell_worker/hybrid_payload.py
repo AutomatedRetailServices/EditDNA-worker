@@ -1,8 +1,6 @@
 """Compact, provider-neutral payload and hard budget guards for Hybrid Flow B.
 
-No SDK imports, no network calls, and no secret access live here. This module turns an
-already-bounded EditorialSession into a small JSON-ready object and refuses oversized
-requests before any future provider adapter can spend money.
+No SDK imports, network calls, or secret access live here.
 """
 from __future__ import annotations
 
@@ -14,8 +12,6 @@ from .hybrid_editorial import EditorialSession, HybridGatePolicy
 
 @dataclass(frozen=True)
 class HybridCostPolicy:
-    """Hard preflight controls independent of whichever LLM vendor is selected later."""
-
     max_calls_per_session: int = 1
     max_candidates_per_call: int = 14
     max_chars_per_candidate: int = 1_200
@@ -25,7 +21,6 @@ class HybridCostPolicy:
 
 
 def estimate_tokens_from_chars(char_count: int) -> int:
-    """Conservative vendor-neutral preflight estimate; never used for billing truth."""
     return max(1, (max(0, int(char_count)) + 2) // 3)
 
 
@@ -54,8 +49,19 @@ def build_compact_editorial_payload(
             "evidence": evidence,
         })
 
+    cleanup_task = session.task == "classify_recording_process_within_single_creator_session"
+    task_rules = [
+        "valid independent audience-facing speech should be keep",
+        "failed means a clear stumble, false start, incomplete attempt, or word-search",
+        "bts means self-talk, recording-process commentary, frustration, self-review, or breaking character",
+        "do not force a winner across different ideas in the same creator session",
+    ] if cleanup_task else [
+        "return exactly one winner only when the supplied candidates are competing retries and evidence supports one",
+        "independent valid speech may be keep instead of being forced into winner/alternate",
+    ]
+
     payload = {
-        "task": "classify_best_take_within_single_bounded_creator_session",
+        "task": session.task,
         "session_id": session.session_id,
         "source_asset_id": session.source_asset_id,
         "local_confidence": round(float(session.local_confidence), 4),
@@ -66,8 +72,8 @@ def build_compact_editorial_payload(
             "never invent clip ids",
             "never create or alter timestamps",
             "reason only inside this bounded creator session",
-            "return exactly one winner only when the evidence supports one",
             "use uncertain when semantic evidence is insufficient",
+            *task_rules,
         ],
         "candidates": candidates,
     }
@@ -87,7 +93,6 @@ def preflight_hybrid_call(
     *,
     cost_policy: HybridCostPolicy = HybridCostPolicy(),
 ) -> dict[str, int | bool]:
-    """Return explicit spend eligibility before a future provider can be invoked."""
     payload = build_compact_editorial_payload(session, cost_policy=cost_policy)
     payload_chars = len(repr(payload))
     estimated_input_tokens = estimate_tokens_from_chars(payload_chars)
