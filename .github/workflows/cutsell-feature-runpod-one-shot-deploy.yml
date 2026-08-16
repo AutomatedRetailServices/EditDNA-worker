@@ -17,8 +17,9 @@ jobs:
     env:
       RUNPOD_API_KEY: ${{ secrets.RUNPOD_API_KEY }}
       REDIS_URL: ${{ secrets.REDIS_URL }}
+      GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
       RUNPOD_TEMPLATE_NAME: EditDNA-Worker-2
-      IMAGE: ghcr.io/automatedretailservices/cutsell-worker:f8ba5d95670b475cf77aa99c0aaa6ab463fe5fd6
+      IMAGE: ghcr.io/automatedretailservices/cutsell-worker:12487da73d99e58330994c703abc282feadd7a71
     steps:
       - name: Validate approved deployment inputs
         shell: bash
@@ -26,7 +27,9 @@ jobs:
           set -euo pipefail
           test -n "${RUNPOD_API_KEY:-}" || { echo 'RUNPOD_API_KEY missing'; exit 3; }
           test -n "${REDIS_URL:-}" || { echo 'REDIS_URL missing'; exit 3; }
+          test -n "${GEMINI_API_KEY:-}" || { echo 'GEMINI_API_KEY missing'; exit 3; }
           test -n "${IMAGE:-}" || { echo 'worker image missing'; exit 3; }
+          echo "::add-mask::$GEMINI_API_KEY"
 
       - name: Refuse duplicate staging worker
         shell: bash
@@ -88,7 +91,7 @@ jobs:
           VOLUME_GB=20
           VOLUME_MOUNT=$(printf '%s' "$TEMPLATE" | jq -r '.volumeMountPath // "/workspace"')
           printf 'CONTAINER_DISK=%s\nVOLUME_GB=%s\nVOLUME_MOUNT=%s\n' "$CONTAINER_DISK" "$VOLUME_GB" "$VOLUME_MOUNT" >> "$GITHUB_ENV"
-          echo 'Safe baseline loaded without legacy OpenAI/LLM keys; staging disks fixed at 30/20 GB.'
+          echo 'Safe baseline loaded without legacy OpenAI keys; Gemini is injected explicitly only for approved Hybrid testing.'
 
       - name: Create approved staging GPU worker
         shell: bash
@@ -100,15 +103,23 @@ jobs:
             --arg image "$IMAGE" \
             --arg cmd "$START_CMD" \
             --arg redis "$REDIS_URL" \
+            --arg gemini "$GEMINI_API_KEY" \
             --arg mount "$VOLUME_MOUNT" \
             --argjson disk "$CONTAINER_DISK" \
             --argjson volume "$VOLUME_GB" \
             '. + {
               REDIS_URL: $redis,
+              GEMINI_API_KEY: $gemini,
               CUTSELL_BRAIN_BACKEND: "runpod_local",
               CUTSELL_EDITORIAL_MODE: "clean_cut",
               CUTSELL_ASR_MODEL: "medium",
-              CUTSELL_CLEAN_CUT_JUDGE: "0"
+              CUTSELL_CLEAN_CUT_JUDGE: "0",
+              CUTSELL_HYBRID_PROVIDER: "google",
+              CUTSELL_HYBRID_LLM_ENABLED: "1",
+              CUTSELL_HYBRID_PRIMARY_MODEL: "gemini-3.5-flash-lite",
+              CUTSELL_HYBRID_ESCALATION_MODEL: "gemini-3.6-flash",
+              CUTSELL_HYBRID_MAX_SESSION_USD: "0.0075",
+              CUTSELL_HYBRID_TEST_BUDGET_USD: "0.50"
             } | {
               name: $name,
               imageName: $image,
@@ -134,7 +145,7 @@ jobs:
               env: .
             }' safe-template-env.json > create-pod.json
           if jq -e '.env | has("OPENAI_API_KEY") or has("EDITDNA_USE_LLM") or has("EDITDNA_LLM_MODEL")' create-pod.json >/dev/null; then
-            echo 'Refusing deployment: forbidden external-provider key present'; exit 7
+            echo 'Refusing deployment: forbidden OpenAI/legacy provider key present'; exit 7
           fi
           code=$(curl --silent --show-error --write-out '%{http_code}' \
             --request POST \
