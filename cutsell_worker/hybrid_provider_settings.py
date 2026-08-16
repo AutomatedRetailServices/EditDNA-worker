@@ -1,12 +1,8 @@
 """Provider policy for the CutSell Hybrid Editorial Brain.
 
-The production provider remains disabled by default. These settings describe the
-approved architecture and budget ceilings only; no SDK or network call is made here.
-
-Current candidate strategy (Aug 2026):
-- primary: Gemini 3.5 Flash-Lite for high-volume structured editorial classification;
-- escalation: Gemini 3.6 Flash for harder semantic conflicts;
-- no OpenAI provider is enabled by this policy.
+Paid inference is OFF by default. The August 2026 bake-off selected Gemini 3.5
+Flash-Lite as the primary semantic judge. Gemini 3.6 Flash remains an optional
+escalation model only; routine calls must stay on Flash-Lite.
 """
 from __future__ import annotations
 
@@ -39,10 +35,16 @@ class HybridProviderSettings:
     escalation_input_per_million_usd: float = 1.50
     escalation_output_per_million_usd: float = 7.50
     max_cost_per_session_usd: float = 0.02
-    max_test_budget_usd: float = 2.00
+    # Target keeps LLM COGS <= $0.75 per 100 fully-used Starter edits.
+    max_cost_per_edit_usd: float = 0.0075
+    # User-approved development bake-off/test ceiling.
+    max_test_budget_usd: float = 0.50
     max_daily_budget_usd: float = 5.00
-    escalation_conflict_score: float = 0.65
-    escalation_local_confidence: float = 0.55
+    # Escalation is deliberately conservative because 3.6 did not beat Flash-Lite
+    # in the controlled bake-off. These thresholds are only eligibility gates; a
+    # caller should escalate only after the primary result is invalid/uncertain.
+    escalation_conflict_score: float = 0.85
+    escalation_local_confidence: float = 0.35
 
     def estimate_cost_usd(
         self,
@@ -74,9 +76,6 @@ class HybridProviderSettings:
 def load_hybrid_provider_settings(env: dict[str, str] | None = None) -> HybridProviderSettings:
     values = env if env is not None else os.environ
     provider = str(values.get("CUTSELL_HYBRID_PROVIDER", "google")).strip().lower()
-    # Provider selection is intentionally constrained while the first production
-    # integration is being validated. Unknown values fail closed instead of silently
-    # enabling a network transport.
     if provider not in {"google", "none"}:
         provider = "none"
     enabled = _env_bool(values, "CUTSELL_HYBRID_LLM_ENABLED", False) and provider == "google"
@@ -86,8 +85,9 @@ def load_hybrid_provider_settings(env: dict[str, str] | None = None) -> HybridPr
         primary_model=str(values.get("CUTSELL_HYBRID_PRIMARY_MODEL", "gemini-3.5-flash-lite")).strip(),
         escalation_model=str(values.get("CUTSELL_HYBRID_ESCALATION_MODEL", "gemini-3.6-flash")).strip(),
         max_cost_per_session_usd=max(0.0, _env_float(values, "CUTSELL_HYBRID_MAX_SESSION_USD", 0.02)),
-        max_test_budget_usd=max(0.0, _env_float(values, "CUTSELL_HYBRID_TEST_BUDGET_USD", 2.00)),
+        max_cost_per_edit_usd=max(0.0, _env_float(values, "CUTSELL_HYBRID_MAX_EDIT_USD", 0.0075)),
+        max_test_budget_usd=max(0.0, _env_float(values, "CUTSELL_HYBRID_TEST_BUDGET_USD", 0.50)),
         max_daily_budget_usd=max(0.0, _env_float(values, "CUTSELL_HYBRID_DAILY_BUDGET_USD", 5.00)),
-        escalation_conflict_score=min(1.0, max(0.0, _env_float(values, "CUTSELL_HYBRID_ESCALATION_CONFLICT", 0.65))),
-        escalation_local_confidence=min(1.0, max(0.0, _env_float(values, "CUTSELL_HYBRID_ESCALATION_LOCAL_CONFIDENCE", 0.55))),
+        escalation_conflict_score=min(1.0, max(0.0, _env_float(values, "CUTSELL_HYBRID_ESCALATION_CONFLICT", 0.85))),
+        escalation_local_confidence=min(1.0, max(0.0, _env_float(values, "CUTSELL_HYBRID_ESCALATION_LOCAL_CONFIDENCE", 0.35))),
     )
