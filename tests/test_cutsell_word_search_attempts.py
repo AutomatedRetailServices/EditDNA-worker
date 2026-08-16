@@ -71,6 +71,35 @@ def test_longer_word_search_attempt_cluster_is_removed_under_dense_reset():
     }
 
 
+def test_discarded_micro_fragments_still_prove_surviving_word_search_attempt():
+    survivor = take("a", "As a content creator if you do not have this election", 0.0, 3.1)
+    fragments = (
+        take("b", "election electric suction phone holder", 3.8, 7.7),
+        take("c", "election suction phone holder election oh my god", 8.4, 12.5),
+    )
+    evidence = (survivor, *fragments)
+    ctx = context((
+        event("hand_motion_reset_candidate", 1.0, 1.1),
+        event("body_reset_candidate", 2.0, 2.1),
+        event("hand_motion_reset_candidate", 3.0, 3.1),
+        event("hand_motion_reset_candidate", 4.0, 4.1),
+        event("body_reset_candidate", 5.0, 5.1),
+        event("hand_motion_reset_candidate", 6.0, 6.1),
+        event("hand_motion_reset_candidate", 8.8, 8.9),
+        event("facial_expression_shift_candidate", 9.0, 9.1, 0.82),
+    ))
+
+    kept, removed, diagnostics = apply_word_search_attempt_cleanup(
+        (survivor,),
+        ctx,
+        evidence_takes=evidence,
+    )
+
+    assert kept == ()
+    assert removed == (survivor,)
+    assert diagnostics[0]["reason"] == "multi_segment_word_search_cluster_with_dense_reset"
+
+
 def test_same_lexical_pattern_without_dense_reset_fails_open():
     takes = (
         take("a", "As a content creator if you do not have this election", 0.0, 3.1),
