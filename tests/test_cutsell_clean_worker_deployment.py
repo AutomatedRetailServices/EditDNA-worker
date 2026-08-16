@@ -73,3 +73,18 @@ def test_paid_staging_worker_workflows_are_manual_and_explicitly_guarded():
     assert "APPROVE_DELETE_STAGING_WORKER" in delete
     assert "Pod ID is not the CutSell staging worker" in delete
     assert "DELETE" in delete
+
+
+def test_feature_runpod_paid_deploy_cannot_trigger_from_a_commit_and_needs_run_token():
+    deploy = Path(".github/workflows/cutsell-feature-runpod-one-shot-deploy.yml").read_text()
+    assert "workflow_dispatch:" in deploy
+    assert "approval_token:" in deploy
+    assert 'test "$APPROVAL_TOKEN" = "RUN27"' in deploy
+    assert "push:" not in deploy
+    assert "schedule:" not in deploy
+    assert "GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}" in deploy
+    assert 'CUTSELL_HYBRID_LLM_ENABLED:"1"' in deploy
+    assert 'CUTSELL_HYBRID_PRIMARY_MODEL:"gemini-3.5-flash-lite"' in deploy
+    assert 'CUTSELL_HYBRID_MAX_SESSION_USD:"0.0075"' in deploy
+    assert 'CUTSELL_HYBRID_TEST_BUDGET_USD:"0.50"' in deploy
+    assert 'has("OPENAI_API_KEY")' in deploy
