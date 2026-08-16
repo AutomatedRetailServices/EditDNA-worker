@@ -77,8 +77,6 @@ def _editorial_session(
             local_confidence=0.50,
             evidence=_evidence(member),
         ) for member in members),
-        # This stage intentionally requests semantic assistance for every bounded chunk
-        # when a provider exists; batching makes that affordable and gives BTS context.
         local_confidence=0.50,
         conflict_score=0.50,
         task="classify_recording_process_within_single_creator_session",
@@ -92,8 +90,15 @@ def apply_hybrid_session_cleanup(
     *,
     policy: HybridGatePolicy = HybridGatePolicy(),
     delete_confidence: float = 0.94,
-    chunk_size: int = 12,
+    chunk_size: int = 6,
 ) -> HybridSessionCleanupResult:
+    """Classify bounded session chunks while keeping structured output reliably small.
+
+    Six candidates is intentionally conservative for the 500-token structured-output
+    budget. Run #27 showed that 11-12 decision responses frequently failed validation
+    while 1-5 candidate responses completed, so smaller chunks improve reliability
+    without increasing the per-edit dollar cap.
+    """
     take_tuple = tuple(takes)
     if not take_tuple or editorial_judge is None:
         return HybridSessionCleanupResult(take_tuple, (), 0, 0, ())
