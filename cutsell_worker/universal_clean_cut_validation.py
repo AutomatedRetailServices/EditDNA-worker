@@ -109,7 +109,7 @@ def run_single_universal_clean_cut_validation(
     diagnostics = result.draft.diagnostics
     clean_decisions = list(diagnostics.get("clean_cut_decisions") or ())
     temporal = list(diagnostics.get("temporal_performance_trims") or ())
-    hybrid_groups = list(diagnostics.get("hybrid_editorial_groups") or ())
+    hybrid_chunks = list(diagnostics.get("hybrid_editorial_chunks") or ())
 
     return {
         "schema_version": result.schema_version,
@@ -118,10 +118,10 @@ def run_single_universal_clean_cut_validation(
         "external_brain_calls_enabled": brain.external_calls_enabled,
         "hybrid_provider": brain.hybrid_settings.provider if brain.external_calls_enabled else None,
         "hybrid_primary_model": brain.hybrid_settings.primary_model if brain.external_calls_enabled else None,
-        "hybrid_requested_group_count": int(diagnostics.get("hybrid_editorial_requested_group_count") or 0),
-        "hybrid_available_group_count": int(diagnostics.get("hybrid_editorial_available_group_count") or 0),
+        "hybrid_requested_group_count": int(diagnostics.get("hybrid_editorial_requested_chunk_count") or 0),
+        "hybrid_available_group_count": int(diagnostics.get("hybrid_editorial_available_chunk_count") or 0),
         "hybrid_deleted_count": int(diagnostics.get("hybrid_editorial_deleted_count") or 0),
-        "hybrid_group_diagnostic_count": len(hybrid_groups),
+        "hybrid_group_diagnostic_count": len(hybrid_chunks),
         "project_id": result.project_id,
         "source_key": key,
         "source_duration_sec": round(source_duration_sec, 3),
