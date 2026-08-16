@@ -14,14 +14,12 @@ Allowed intelligence:
 - temporal boundary trimming
 - deterministic Clean Cut
 - retry grouping + Best Take
+- optional bounded Hybrid Editorial classification for recording intent/BTS/failures
 
 Explicitly disabled here:
 - commercial semantic funnel labeling
 - Sales/Natural story composition
 - global draft rewriting/reordering/removal
-
-Those editorial layers remain available in the full Flow B pipeline, but they are
-not part of the Universal Clean Cut quality gate.
 """
 from __future__ import annotations
 
@@ -31,6 +29,7 @@ from .asr import ASRProvider
 from .clean_cut_provider import CleanCutProvider
 from .contracts import ProcessingRequest, ProcessingResult
 from .flow_b import ProgressCallback, process_local_sources
+from .hybrid_editorial import EditorialJudge
 from .providers import NoopSemanticProvider
 from .take_grouping_provider import TakeGroupingProvider
 from .take_judge_provider import TakeJudgeProvider
@@ -48,13 +47,14 @@ def process_universal_clean_cut_sources(
     clean_cut_provider: CleanCutProvider | None = None,
     take_grouping_provider: TakeGroupingProvider | None = None,
     whole_video_provider: WholeVideoProvider | None = None,
+    editorial_judge: EditorialJudge | None = None,
     progress: ProgressCallback | None = None,
 ) -> ProcessingResult:
     """Run only the universal recording-cleanup brain.
 
-    Natural source order is preserved after Best Take selection. No commercial or
-    narrative composer/reviewer is permitted in this path, which makes Clean Cut
-    quality independently measurable.
+    Natural source order is preserved after Best Take selection. The optional Hybrid
+    judge is constrained to already-bounded creator mini-sessions and may classify
+    failed/BTS attempts; it cannot activate Sales Funnel composition or change timing.
     """
     result = process_local_sources(
         request,
@@ -68,11 +68,10 @@ def process_universal_clean_cut_sources(
         take_grouping_provider=take_grouping_provider,
         draft_review_provider=None,
         whole_video_provider=whole_video_provider,
+        editorial_judge=editorial_judge,
         progress=progress,
     )
 
-    # Make the isolation explicit in diagnostics/status so benchmarks cannot
-    # accidentally interpret absent editorial stages as degraded providers.
     return ProcessingResult(
         schema_version=result.schema_version,
         project_id=result.project_id,
