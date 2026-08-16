@@ -13,6 +13,7 @@ from .composer_provider import ComposerProvider
 from .contracts import ProcessingRequest, ProcessingResult
 from .draft_review_provider import DraftReviewProvider
 from .frame_sampling import sample_take_frames
+from .hybrid_editorial import EditorialJudge
 from .local_performance import (
     analyze_local_performance,
     apply_local_performance_to_takes,
@@ -37,12 +38,6 @@ ProgressCallback = Callable[[str, int], None]
 
 
 def _resolve_editorial_mode(value: str | None = None) -> str:
-    """Choose whether Flow B stops at universal cleanup or continues to editorial composition.
-
-    `clean_cut` is intentionally the default product behavior: remove recording garbage,
-    resolve retries/best takes, preserve natural source order, and stop. `full` keeps the
-    richer semantic/composer/reviewer stack available for later Natural/Sales editions.
-    """
     mode = str(value or os.environ.get("CUTSELL_EDITORIAL_MODE") or "clean_cut").strip().lower()
     if mode not in {"clean_cut", "full"}:
         raise ValueError("CUTSELL_EDITORIAL_MODE must be clean_cut or full")
@@ -62,15 +57,15 @@ def process_local_sources(
     take_grouping_provider: TakeGroupingProvider | None = None,
     draft_review_provider: DraftReviewProvider | None = None,
     whole_video_provider: WholeVideoProvider | None = None,
+    editorial_judge: EditorialJudge | None = None,
     editorial_mode: str | None = None,
     progress: ProgressCallback | None = None,
 ) -> ProcessingResult:
-    """Process registered sources all the way from local media to editable draft.
+    """Process registered sources from raw media to an editable Flow B draft.
 
-    Universal Clean Cut is the default. It keeps Watch + Listen, dense performance,
-    retries, Best Take, dead-air/boundary cleanup and natural order, while deliberately
-    bypassing semantic story labels, global sales/narrative composition and draft-review
-    deletion. The richer editorial stack remains available behind `editorial_mode='full'`.
+    Perception and exact edit boundaries remain local. When explicitly enabled, the
+    Hybrid Editorial judge receives only already-bounded retry groups and may classify
+    semantic intent (winner/alternate/failed/BTS); it never creates timestamps.
     """
     mode = _resolve_editorial_mode(editorial_mode)
     notify = progress or (lambda _stage, _percent: None)
@@ -122,8 +117,6 @@ def process_local_sources(
     trace.complete("asr", segment_count=len(transcript_tuple))
     notify("analyzing", 27)
 
-    # Dense local observation is the continuous-eyes layer. It is fail-open and
-    # produces measurements/candidate events, never destructive edit commands.
     local_performance = analyze_local_performance(local_paths, target_fps=12.0)
     local_frame_count = sum(len(item.observations) for item in local_performance.timelines)
     local_event_count = sum(len(item.events) for item in local_performance.timelines)
@@ -145,9 +138,6 @@ def process_local_sources(
         )
     notify("analyzing", 36)
 
-    # Pass 1: understand the complete source before destructive editing. This
-    # creates topic/story context plus timestamped performance events. In clean-cut
-    # mode this context is evidence only; it does not impose a sales/narrative edit.
     if whole_video_provider is not None and hydrated_sources:
         with tempfile.TemporaryDirectory(prefix="cutsell-whole-video-") as whole_dir:
             whole_samples = []
@@ -190,8 +180,6 @@ def process_local_sources(
     takes = segment_takes(transcript_tuple, hydrated_sources, gaps)
     trace.complete("take_segmentation", candidate_count=len(takes))
 
-    # Promote dense measurements only when visual trajectory + timing + a likely
-    # retry agree. Isolated gestures remain non-destructive.
     whole_context, confirmation_diagnostics = confirm_local_performance_events(
         takes,
         local_performance.timelines,
@@ -207,7 +195,6 @@ def process_local_sources(
     )
     notify("analyzing", 58)
 
-    # Pass 2: take-level visual scoring complements the global timeline.
     if visual_provider is not None and takes:
         with tempfile.TemporaryDirectory(prefix="cutsell-frames-") as frame_dir:
             samples = []
@@ -261,8 +248,6 @@ def process_local_sources(
         active_composer = composer_provider
         active_reviewer = draft_review_provider
     else:
-        # Clean Cut stops before Sales/Natural story shaping. Retry grouping + Best
-        # Take remain active because they are core cleanup, not editorial funnel logic.
         semantic_labels = ()
         active_composer = None
         active_reviewer = None
@@ -280,6 +265,7 @@ def process_local_sources(
         composer_provider=active_composer,
         take_grouping_provider=take_grouping_provider,
         draft_review_provider=active_reviewer,
+        editorial_judge=editorial_judge,
         whole_video_context=whole_context,
         temporal_trim_diagnostics=(*temporal_trim_diagnostics, {
             "performance_confirmation": list(confirmation_diagnostics)[:300],
