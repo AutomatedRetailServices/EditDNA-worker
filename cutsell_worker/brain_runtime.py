@@ -5,6 +5,10 @@ OPENAI_API_KEY must never enable external model calls implicitly. All heavy anal
 runs inside the worker: Faster-Whisper, dense MediaPipe/OpenCV performance evidence,
 deterministic Clean Cut, retry grouping, Best Take ranking, temporal cleanup, and
 rendering.
+
+Flow B now routes real Best Take groups through the provider-neutral Hybrid gate. The
+gate is zero-cost until an EditorialJudge is explicitly injected; no stored key or SDK
+can turn paid inference on implicitly.
 """
 from __future__ import annotations
 
@@ -14,6 +18,7 @@ from .clean_cut_provider import CleanCutProvider
 from .composer_provider import ComposerProvider
 from .config import RuntimeConfig
 from .draft_review_provider import DraftReviewProvider
+from .hybrid_take_judge import HybridTakeJudgeProvider
 from .providers import NoopSemanticProvider, SemanticProvider
 from .take_grouping_provider import TakeGroupingProvider
 from .take_judge_provider import TakeJudgeProvider
@@ -43,11 +48,12 @@ class BrainRuntime:
 
 
 def build_brain_runtime(config: RuntimeConfig) -> BrainRuntime:
-    """Return the production/benchmark brain. External providers are not permitted.
+    """Return the production/benchmark brain with paid inference disabled.
 
-    Provider ``None`` is intentional for stages that already have conservative local
-    baselines in the core pipeline. Those stages remain fully executed inside RunPod;
-    ``None`` means "use deterministic local implementation", not "skip the brain".
+    The HybridTakeJudgeProvider is intentionally active even without an external
+    EditorialJudge. That lets every real retry/mini-session group exercise the exact
+    confidence-gate integration path in CI and local benchmarks while producing the
+    same deterministic Best Take ranking and zero external cost.
     """
     if config.brain_backend != RUNPOD_LOCAL_BACKEND:
         raise RuntimeError(
@@ -60,9 +66,9 @@ def build_brain_runtime(config: RuntimeConfig) -> BrainRuntime:
         semantic_provider=NoopSemanticProvider(),
         whole_video_provider=RunPodLocalWholeVideoProvider(),
         visual_provider=None,              # dense MediaPipe/OpenCV path in flow_b.py
-        take_grouping_provider=None,       # deterministic retry grouping baseline
-        take_judge_provider=None,          # deterministic Best Take baseline
+        take_grouping_provider=None,       # deterministic retry grouping + session walls
+        take_judge_provider=HybridTakeJudgeProvider(editorial_judge=None),
         clean_cut_provider=None,           # deterministic Clean Cut + contextual rules
-        composer_provider=None,            # disabled in Universal Clean Cut
+        composer_provider=None,            # disabled until Sales Funnel reactivation
         draft_review_provider=None,        # disabled in Universal Clean Cut
     )
