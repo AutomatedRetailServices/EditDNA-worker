@@ -1,0 +1,40 @@
+name: CutSell Run27 Progress Snapshot
+
+on:
+  push:
+    branches:
+      - cutsell/mobile-v1-clean
+    paths:
+      - .github/workflows/cutsell-run27-progress-snapshot.yml
+
+permissions:
+  contents: read
+
+jobs:
+  snapshot:
+    runs-on: ubuntu-latest
+    env:
+      REDIS_URL: ${{ secrets.REDIS_URL }}
+      TARGET_BENCHMARK_ID: unseen-31974424883-b29e59b7b8fdccb95bbc14d0d46c585bdef607f2
+    steps:
+      - name: Read Run27 RQ progress
+        run: |
+          set -euo pipefail
+          python -m pip install -q 'redis>=5.0' 'rq>=2.6'
+          python - <<'PY'
+          import json, os
+          from redis import Redis
+          from rq import Queue
+          from rq.job import Job
+          r=Redis.from_url(os.environ['REDIS_URL']); q=Queue('cutsell', connection=r); target=os.environ['TARGET_BENCHMARK_ID']
+          ids=list(q.job_ids)
+          for reg in (q.started_job_registry,q.finished_job_registry,q.failed_job_registry):
+              try: ids += list(reg.get_job_ids())
+              except Exception: pass
+          for jid in dict.fromkeys(ids):
+              try: j=Job.fetch(jid, connection=r)
+              except Exception: continue
+              if (j.meta or {}).get('benchmark_id')==target:
+                  print(json.dumps({'job_id':j.id,'status':getattr(j.get_status(refresh=True),'value',str(j.get_status())),'meta':dict(j.meta or {})},indent=2,default=str)); raise SystemExit(0)
+          raise SystemExit('Run27 benchmark job not found')
+          PY
