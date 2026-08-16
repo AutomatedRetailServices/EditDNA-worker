@@ -3,7 +3,7 @@ from types import SimpleNamespace
 import cutsell_worker.universal_clean_cut as universal
 
 
-def test_universal_clean_cut_disables_editorial_layers(monkeypatch):
+def test_universal_clean_cut_disables_sales_layers_but_allows_bounded_hybrid_cleanup(monkeypatch):
     captured = {}
 
     def fake_process(request, local_paths, **kwargs):
@@ -17,6 +17,7 @@ def test_universal_clean_cut_disables_editorial_layers(monkeypatch):
         )
 
     monkeypatch.setattr(universal, "process_local_sources", fake_process)
+    hybrid_judge = object()
 
     result = universal.process_universal_clean_cut_sources(
         object(),
@@ -27,11 +28,13 @@ def test_universal_clean_cut_disables_editorial_layers(monkeypatch):
         clean_cut_provider=object(),
         take_grouping_provider=object(),
         whole_video_provider=object(),
+        editorial_judge=hybrid_judge,
     )
 
     assert isinstance(captured["semantic_provider"], universal.NoopSemanticProvider)
     assert captured["composer_provider"] is None
     assert captured["draft_review_provider"] is None
+    assert captured["editorial_judge"] is hybrid_judge
     assert captured["take_grouping_provider"] is not None
     assert captured["take_judge_provider"] is not None
     assert captured["whole_video_provider"] is not None
