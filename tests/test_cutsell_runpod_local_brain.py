@@ -26,7 +26,12 @@ def test_runpod_local_brain_never_activates_openai_from_key_presence():
     assert brain.whole_video_provider.__class__.__name__ == "RunPodLocalWholeVideoProvider"
     assert brain.visual_provider is None
     assert brain.take_grouping_provider is None
-    assert brain.take_judge_provider is None
+    # The zero-cost hybrid wrapper is active so Flow B exercises the real confidence
+    # gate in production shape, but no external judge is injected and therefore it
+    # cannot perform any paid/network call merely because a legacy key is present.
+    assert brain.take_judge_provider is not None
+    assert brain.take_judge_provider.__class__.__name__ == "HybridTakeJudgeProvider"
+    assert brain.take_judge_provider.editorial_judge is None
     assert brain.clean_cut_provider is None
     assert brain.composer_provider is None
     assert brain.draft_review_provider is None
