@@ -29,7 +29,7 @@ def _upload_file(s3, *, bucket: str, key: str, path: str, content_type: str | No
 
 
 def run_unseen_clean_cut_benchmark(payload: dict[str, Any]) -> dict[str, Any]:
-    """Run the unseen suite entirely on the RunPod-local brain and persist artifacts to S3."""
+    """Run the unseen suite on RunPod local perception with optional approved Hybrid semantics."""
     from rq import get_current_job
 
     config = load_runtime_config()
@@ -41,6 +41,7 @@ def run_unseen_clean_cut_benchmark(payload: dict[str, Any]) -> dict[str, Any]:
     benchmark_id = _safe_benchmark_id(payload.get("benchmark_id"))
     prefix = str(payload.get("source_prefix") or "Editdna bloopers videos/")
     video_limit = int(payload.get("video_limit") or 8)
+    expected_external = bool(payload.get("expected_external_brain_calls_enabled", False))
     if video_limit != 8:
         raise ValueError("unseen benchmark requires exactly 8 videos")
 
@@ -59,7 +60,7 @@ def run_unseen_clean_cut_benchmark(payload: dict[str, Any]) -> dict[str, Any]:
         job.meta["progress_percent"] = max(0, min(100, int(percent)))
         job.meta["current_source"] = current_source
         job.meta["brain_backend"] = "runpod_local"
-        job.meta["external_brain_calls_enabled"] = False
+        job.meta["external_brain_calls_enabled"] = expected_external
         job.save_meta()
 
     artifact_prefix = f"cutsell/benchmarks/unseen/{benchmark_id}"
@@ -82,8 +83,15 @@ def run_unseen_clean_cut_benchmark(payload: dict[str, Any]) -> dict[str, Any]:
                     project_id=f"cutsell-unseen-{benchmark_id}-{index:03d}",
                     preview_output=str(preview_path),
                 )
-                if result.get("brain_backend") != "runpod_local" or result.get("external_brain_calls_enabled") is not False:
-                    raise RuntimeError("benchmark escaped runpod_local brain")
+                if result.get("brain_backend") != "runpod_local":
+                    raise RuntimeError("benchmark escaped runpod_local perception brain")
+                if bool(result.get("external_brain_calls_enabled")) is not expected_external:
+                    raise RuntimeError("benchmark Hybrid mode did not match requested contract")
+                if expected_external:
+                    if result.get("hybrid_provider") != "google":
+                        raise RuntimeError("Hybrid benchmark did not use approved Google provider")
+                    if result.get("hybrid_primary_model") != "gemini-3.5-flash-lite":
+                        raise RuntimeError("Hybrid benchmark did not use approved primary model")
                 results.append(result)
                 if preview_path.exists():
                     preview_key = f"{artifact_prefix}/previews/{preview_path.name}"
@@ -103,16 +111,28 @@ def run_unseen_clean_cut_benchmark(payload: dict[str, Any]) -> dict[str, Any]:
 
         total_input = sum(float(item.get("source_duration_sec") or 0) for item in results)
         total_selected = sum(float(item.get("selected_duration_sec") or 0) for item in results)
+        total_hybrid_requested = sum(int(item.get("hybrid_requested_group_count") or 0) for item in results)
+        total_hybrid_available = sum(int(item.get("hybrid_available_group_count") or 0) for item in results)
+        total_hybrid_deleted = sum(int(item.get("hybrid_deleted_count") or 0) for item in results)
+        provider_failures = []
+        if expected_external and total_hybrid_requested and total_hybrid_available == 0:
+            provider_failures.append({"provider": "google", "error": "Hybrid judge requested but no successful groups"})
+
         report = {
             "benchmark_suite": "unseen_clean_cut_generalization",
             "benchmark_id": benchmark_id,
             "brain_backend": "runpod_local",
-            "external_brain_calls_enabled": False,
+            "external_brain_calls_enabled": expected_external,
+            "hybrid_provider": "google" if expected_external else None,
+            "hybrid_primary_model": "gemini-3.5-flash-lite" if expected_external else None,
             "source_keys": keys,
             "source_count": len(keys),
             "completed_count": len(results),
             "execution_failure_count": len(failures),
-            "provider_failure_count": 0,
+            "provider_failure_count": len(provider_failures),
+            "total_hybrid_requested_groups": total_hybrid_requested,
+            "total_hybrid_available_groups": total_hybrid_available,
+            "total_hybrid_deleted": total_hybrid_deleted,
             "total_input_duration_sec": round(total_input, 3),
             "total_selected_duration_sec": round(total_selected, 3),
             "selected_to_input_ratio": round(total_selected / total_input, 4) if total_input else None,
@@ -124,7 +144,7 @@ def run_unseen_clean_cut_benchmark(payload: dict[str, Any]) -> dict[str, Any]:
             "preview_uris": preview_uris,
             "results": results,
             "failures": failures,
-            "provider_failures": [],
+            "provider_failures": provider_failures,
         }
 
         report_path = Path(directory) / "cutsell-unseen-clean-cut-benchmark.json"
@@ -137,17 +157,22 @@ def run_unseen_clean_cut_benchmark(payload: dict[str, Any]) -> dict[str, Any]:
             content_type="application/json",
         )
 
-    publish("finished" if not failures else "finished_with_failures", 100)
+    publish("finished" if not failures and not provider_failures else "finished_with_failures", 100)
     return {
         "benchmark_id": benchmark_id,
         "brain_backend": "runpod_local",
-        "external_brain_calls_enabled": False,
+        "external_brain_calls_enabled": expected_external,
+        "hybrid_provider": report["hybrid_provider"],
+        "hybrid_primary_model": report["hybrid_primary_model"],
         "report_uri": report_uri,
         "preview_uris": preview_uris,
         "source_count": len(keys),
         "completed_count": len(results),
         "execution_failure_count": len(failures),
-        "provider_failure_count": 0,
+        "provider_failure_count": len(provider_failures),
+        "total_hybrid_requested_groups": total_hybrid_requested,
+        "total_hybrid_available_groups": total_hybrid_available,
+        "total_hybrid_deleted": total_hybrid_deleted,
         "selected_to_input_ratio": report["selected_to_input_ratio"],
         "total_clean_cut_removed": report["total_clean_cut_removed"],
         "total_temporal_trimmed": report["total_temporal_trimmed"],
