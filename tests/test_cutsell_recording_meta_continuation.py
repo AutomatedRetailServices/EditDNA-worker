@@ -39,6 +39,37 @@ def test_short_syntactic_tail_after_direct_recording_meta_is_removed():
     assert diagnostics[0]["reason"] == "short_continuation_after_direct_recording_meta"
 
 
+def test_short_tail_can_use_original_direct_meta_even_if_other_cleaner_hid_anchor():
+    anchor = take("a", "how to end TikTok shop videos like I hate saying don't", 446.6, 452.32)
+    tail = take("tail", "miss out on this deal", 452.32, 453.46)
+    kept, removed, diagnostics = apply_recording_meta_continuation_cleanup(
+        (tail,),
+        (),
+        evidence_takes=(anchor, tail),
+    )
+    assert kept == ()
+    assert removed == (tail,)
+    assert diagnostics[0]["reason"] == "short_continuation_after_direct_recording_meta"
+
+
+def test_process_heavy_bts_continuation_near_direct_meta_is_removed():
+    anchor = take("a", "how to end TikTok shop videos like I hate saying the link below", 446.6, 452.32)
+    continuation = take(
+        "c",
+        "stop saying it they're like i love it i want it in every color done cool everything else says you",
+        457.52,
+        462.98,
+    )
+    kept, removed, diagnostics = apply_recording_meta_continuation_cleanup(
+        (continuation,),
+        (anchor,),
+        evidence_takes=(anchor, continuation),
+    )
+    assert kept == ()
+    assert removed == (continuation,)
+    assert diagnostics[0]["reason"] == "process_heavy_continuation_after_direct_recording_meta"
+
+
 def test_short_take_after_unrelated_discard_is_preserved():
     discarded = (take("a", "random failed product phrase", 0.0, 2.0),)
     valid = take("v", "with pockets", 2.5, 3.8)
@@ -51,6 +82,15 @@ def test_short_take_after_unrelated_discard_is_preserved():
 def test_long_viewer_facing_sentence_after_direct_meta_is_preserved():
     discarded = (take("a", "this is so hard to make a video", 0.0, 2.0),)
     valid = take("v", "with kids you can still keep this bottle completely spill proof", 2.4, 5.8)
+    kept, removed, diagnostics = apply_recording_meta_continuation_cleanup((valid,), discarded)
+    assert kept == (valid,)
+    assert removed == ()
+    assert diagnostics == ()
+
+
+def test_viewer_facing_cta_with_process_like_word_survives_after_direct_meta():
+    discarded = (take("a", "this is so hard to make a video", 0.0, 2.0),)
+    valid = take("v", "stop scrolling and tap the link before the sale ends", 4.0, 7.0)
     kept, removed, diagnostics = apply_recording_meta_continuation_cleanup((valid,), discarded)
     assert kept == (valid,)
     assert removed == ()
