@@ -30,6 +30,33 @@ def test_contiguous_recording_process_continuation_is_removed_after_proven_chain
     assert diagnostics[0]["reason"] == "recording_process_continuation_after_discarded_meta_chain"
 
 
+def test_short_syntactic_tail_after_direct_recording_meta_is_removed():
+    discarded = (take("a", "this is so hard to make a video", 299.68, 302.0),)
+    tail = take("tail", "with kids", 302.92, 304.26)
+    kept, removed, diagnostics = apply_recording_meta_continuation_cleanup((tail,), discarded)
+    assert kept == ()
+    assert removed == (tail,)
+    assert diagnostics[0]["reason"] == "short_continuation_after_direct_recording_meta"
+
+
+def test_short_take_after_unrelated_discard_is_preserved():
+    discarded = (take("a", "random failed product phrase", 0.0, 2.0),)
+    valid = take("v", "with pockets", 2.5, 3.8)
+    kept, removed, diagnostics = apply_recording_meta_continuation_cleanup((valid,), discarded)
+    assert kept == (valid,)
+    assert removed == ()
+    assert diagnostics == ()
+
+
+def test_long_viewer_facing_sentence_after_direct_meta_is_preserved():
+    discarded = (take("a", "this is so hard to make a video", 0.0, 2.0),)
+    valid = take("v", "with kids you can still keep this bottle completely spill proof", 2.4, 5.8)
+    kept, removed, diagnostics = apply_recording_meta_continuation_cleanup((valid,), discarded)
+    assert kept == (valid,)
+    assert removed == ()
+    assert diagnostics == ()
+
+
 def test_single_discarded_blooper_does_not_delete_following_process_words():
     discarded = (take("a", "I don't know how to end this", 0.0, 2.0),)
     valid = take("v", "stop saying yes to weak batteries in your videos", 2.0, 5.0)
