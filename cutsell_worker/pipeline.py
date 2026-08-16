@@ -23,7 +23,7 @@ from .contracts import (
 )
 from .draft_review_provider import DraftReviewProvider, safe_review_draft
 from .hybrid_editorial import EditorialJudge
-from .hybrid_group_cleanup import apply_hybrid_group_cleanup
+from .hybrid_session_cleanup import apply_hybrid_session_cleanup
 from .session_boundaries import safe_group_takes_by_sessions
 from .strategy import choose_strategy
 from .take_grouping_provider import TakeGroupingProvider
@@ -70,10 +70,9 @@ def build_flow_b_draft(
     label_map: dict[str, SemanticLabel] = {label.clip_id: label for label in semantic_labels}
     context_text = whole_video_context.compact_text() if whole_video_context is not None else ""
 
-    # Pass 1 remains deterministic and context-aware. It removes obvious recording
-    # garbage before any optional paid semantic reasoning is considered.
+    # Pass 1: deterministic/local cleanup remains the backbone and removes obvious
+    # recording garbage before optional semantic reasoning spends anything.
     kept, deterministic_discarded, decisions = apply_clean_cut(take_tuple, whole_video_context)
-
     clean_judged = safe_clean_cut_judge(clean_cut_provider, kept)
     kept, provider_discarded, clean_judge_diagnostics = apply_provider_judgements(kept, clean_judged)
     discarded = tuple(deterministic_discarded) + tuple(provider_discarded)
@@ -92,10 +91,20 @@ def build_flow_b_draft(
                     str(child_id), parent_label.role, parent_label.confidence, parent_label.reason
                 )
 
-    # Retry grouping is already scoped by conservative creator/session walls. Semantic
-    # reasoning is applied only *inside* those bounded groups and cannot invent or move
-    # timestamps. This is the layer that can understand BTS/self-talk and failed human
-    # attempts that deterministic rules should not try to enumerate forever.
+    # Pass 2: batch semantic intent by bounded creator mini-session. This catches BTS,
+    # self-review and failed attempts with context while avoiding one paid call for every
+    # singleton/retry group. Only high-confidence failed/BTS labels delete anything.
+    hybrid_cleanup = apply_hybrid_session_cleanup(
+        kept,
+        whole_video_context,
+        editorial_judge,
+    )
+    kept = hybrid_cleanup.kept
+    discarded = (*discarded, *hybrid_cleanup.deleted)
+
+    # Pass 3: deterministic retry grouping + Best Take runs after semantic garbage is
+    # removed. The take_judge provider remains zero-cost for this first hybrid release,
+    # avoiding a second paid request for the same content.
     take_by_id = {take.clip_id: take for take in kept}
     grouping = safe_group_takes_by_sessions(
         take_grouping_provider,
@@ -111,47 +120,14 @@ def build_flow_b_draft(
     judge_reasons = Counter()
     alternate_group_count = 0
     judge_group_diagnostics = []
-    hybrid_cleanup_diagnostics = []
-    hybrid_deleted = []
-    hybrid_requested_groups = 0
-    hybrid_available_groups = 0
 
-    for original_members in group_members:
-        cleanup = apply_hybrid_group_cleanup(original_members, editorial_judge)
-        if cleanup.requested:
-            hybrid_requested_groups += 1
-        if cleanup.available:
-            hybrid_available_groups += 1
-        hybrid_deleted.extend(cleanup.deleted)
-        if cleanup.diagnostics:
-            hybrid_cleanup_diagnostics.append({
-                "source_asset_id": original_members[0].source_asset_id if original_members else None,
-                "original_member_ids": [member.clip_id for member in original_members],
-                "kept_ids": [member.clip_id for member in cleanup.kept],
-                "deleted_ids": [member.clip_id for member in cleanup.deleted],
-                "preferred_winner_id": cleanup.preferred_winner_id,
-                "provider": cleanup.provider,
-                "model": cleanup.model,
-                "decisions": list(cleanup.diagnostics),
-            })
-
-        members = cleanup.kept
+    for members in group_members:
         if not members:
             continue
         if len(members) >= 2:
             alternate_group_count += 1
-
         judged = safe_rank_takes(members, take_judge_provider)
         ranked = judged.ranked
-        # The semantic pass already paid for one classification of this bounded group.
-        # If it named exactly one high-confidence winner, reuse that decision rather
-        # than making a second LLM request through the Best Take provider.
-        if cleanup.preferred_winner_id and ranked and ranked[0].clip_id != cleanup.preferred_winner_id:
-            ranked = (
-                next(item for item in ranked if item.clip_id == cleanup.preferred_winner_id),
-                *(item for item in ranked if item.clip_id != cleanup.preferred_winner_id),
-            )
-
         judge_statuses[judged.status.status] += 1
         if judged.status.reason:
             judge_reasons[judged.status.reason] += 1
@@ -160,23 +136,19 @@ def build_flow_b_draft(
             "|".join(sorted(member.clip_id for member in members)).encode()
         ).hexdigest()[:16]
         gid = _group_id(request.project_id, membership_key)
-        group = TakeGroup(
+        groups.append(TakeGroup(
             group_id=gid,
             semantic_key=membership_key,
             candidate_ids=tuple(member.clip_id for member in members),
             ranked=ranked,
             selected_clip_id=selected_clip_id,
-        )
-        groups.append(group)
-        if len(members) >= 2 or cleanup.requested:
+        ))
+        if len(members) >= 2:
             judge_group_diagnostics.append({
                 "group_id": gid,
                 "selected_clip_id": selected_clip_id,
                 "execution_status": judged.status.status,
                 "execution_reason": judged.status.reason,
-                "hybrid_requested": cleanup.requested,
-                "hybrid_provider": cleanup.provider,
-                "hybrid_model": cleanup.model,
                 "ranked": [
                     {"clip_id": item.clip_id, "score": item.score, "reason": item.reason}
                     for item in ranked
@@ -184,10 +156,6 @@ def build_flow_b_draft(
             })
         for member in members:
             clip_to_group[member.clip_id] = gid
-
-    hybrid_deleted_ids = {take.clip_id for take in hybrid_deleted}
-    kept = tuple(take for take in kept if take.clip_id not in hybrid_deleted_ids)
-    discarded = (*discarded, *tuple(hybrid_deleted))
 
     surviving_labels = tuple(label_map[take.clip_id] for take in kept if take.clip_id in label_map)
     strategy = choose_strategy(surviving_labels, kept)
@@ -292,10 +260,10 @@ def build_flow_b_draft(
             "clean_cut_judge_deleted_count": sum(1 for item in clean_judge_diagnostics if item.get("applied_delete")),
             "clean_cut_judge_mixed_count": sum(1 for item in clean_judge_diagnostics if item["action"] == "mixed"),
             "clean_cut_judge_mixed_trimmed_count": sum(1 for item in clean_judge_diagnostics if item.get("applied_mixed_trim")),
-            "hybrid_editorial_requested_group_count": hybrid_requested_groups,
-            "hybrid_editorial_available_group_count": hybrid_available_groups,
-            "hybrid_editorial_deleted_count": len(hybrid_deleted),
-            "hybrid_editorial_groups": hybrid_cleanup_diagnostics[:100],
+            "hybrid_editorial_requested_chunk_count": hybrid_cleanup.requested_chunk_count,
+            "hybrid_editorial_available_chunk_count": hybrid_cleanup.available_chunk_count,
+            "hybrid_editorial_deleted_count": len(hybrid_cleanup.deleted),
+            "hybrid_editorial_chunks": list(hybrid_cleanup.diagnostics)[:100],
             "take_group_count": len(groups),
             "alternate_group_count": alternate_group_count,
             "take_grouping_status": grouping.status.__dict__,
@@ -338,9 +306,9 @@ def build_flow_b_draft(
 
     if editorial_judge is None:
         hybrid_stage = "disabled_local_only"
-    elif hybrid_requested_groups and hybrid_available_groups:
+    elif hybrid_cleanup.requested_chunk_count and hybrid_cleanup.available_chunk_count:
         hybrid_stage = "provider_complete"
-    elif hybrid_requested_groups:
+    elif hybrid_cleanup.requested_chunk_count:
         hybrid_stage = "degraded_fail_open"
     else:
         hybrid_stage = "confidence_gate_local"
