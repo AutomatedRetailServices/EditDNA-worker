@@ -1,11 +1,12 @@
 name: CutSell Unseen Clean Cut Benchmark
 
 on:
-  push:
-    branches:
-      - cutsell/mobile-v1-clean
-    paths:
-      - .github/cutsell-unseen-clean-cut-trigger.txt
+  workflow_dispatch:
+    inputs:
+      approval_token:
+        description: 'Explicit paid-benchmark approval token'
+        required: true
+        type: string
 
 permissions:
   contents: read
@@ -25,6 +26,14 @@ jobs:
       VIDEO_LIMIT: "8"
       BENCHMARK_ID: unseen-${{ github.run_id }}-${{ github.sha }}
     steps:
+      - name: Require explicit paid-benchmark approval token
+        shell: bash
+        env:
+          APPROVAL_TOKEN: ${{ inputs.approval_token }}
+        run: |
+          set -euo pipefail
+          test "$APPROVAL_TOKEN" = "RUN27" || { echo 'Paid Hybrid benchmark not explicitly approved for RUN27'; exit 2; }
+
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
@@ -44,10 +53,7 @@ jobs:
           done
           [ "$missing" = "1" ] || exit 0
           test -n "${RUNPOD_API_KEY:-}" || { echo 'S3 runtime credentials unavailable'; exit 3; }
-          curl --fail --silent --show-error \
-            --url "https://rest.runpod.io/v1/templates" \
-            --header "Authorization: Bearer $RUNPOD_API_KEY" \
-            --output templates.json
+          curl --fail --silent --show-error --url "https://rest.runpod.io/v1/templates" --header "Authorization: Bearer $RUNPOD_API_KEY" --output templates.json
           TEMPLATE=$(jq -c '[.[] | select(.name == "EditDNA-Worker-2")][0]' templates.json)
           test "$TEMPLATE" != "null" || { echo 'EditDNA-Worker-2 template not found'; exit 4; }
           for key in AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_REGION S3_BUCKET; do
@@ -59,7 +65,7 @@ jobs:
             fi
           done
 
-      - name: Enqueue benchmark on RunPod GPU worker
+      - name: Enqueue Hybrid benchmark on approved RunPod GPU worker
         id: enqueue
         shell: bash
         run: |
@@ -79,6 +85,7 @@ jobs:
               'benchmark_id': os.environ['BENCHMARK_ID'],
               'source_prefix': os.environ['CUTSELL_VALIDATION_PREFIX'],
               'video_limit': int(os.environ.get('VIDEO_LIMIT') or 8),
+              'expected_external_brain_calls_enabled': True,
           }
           queue = Queue('cutsell', connection=connection)
           job = queue.enqueue(
@@ -90,7 +97,9 @@ jobs:
               meta={
                   'benchmark_id': payload['benchmark_id'],
                   'brain_backend': 'runpod_local',
-                  'external_brain_calls_enabled': False,
+                  'external_brain_calls_enabled': True,
+                  'hybrid_provider': 'google',
+                  'hybrid_primary_model': 'gemini-3.5-flash-lite',
               },
           )
           print(json.dumps({'job_id': job.id, 'queue': queue.name, **payload}, indent=2))
@@ -98,7 +107,7 @@ jobs:
               handle.write(f'job_id={job.id}\n')
           PY
 
-      - name: Wait for RunPod-local benchmark
+      - name: Wait for RunPod Hybrid benchmark
         env:
           JOB_ID: ${{ steps.enqueue.outputs.job_id }}
         shell: bash
@@ -132,8 +141,12 @@ jobs:
                   result = job.result
                   if not isinstance(result, dict):
                       raise SystemExit('RunPod benchmark returned invalid result')
-                  if result.get('brain_backend') != 'runpod_local' or result.get('external_brain_calls_enabled') is not False:
-                      raise SystemExit('RunPod benchmark did not prove local-only brain execution')
+                  if result.get('brain_backend') != 'runpod_local':
+                      raise SystemExit('RunPod benchmark escaped local perception brain')
+                  if result.get('external_brain_calls_enabled') is not True:
+                      raise SystemExit('RunPod benchmark did not activate approved Hybrid judge')
+                  if result.get('hybrid_provider') != 'google' or result.get('hybrid_primary_model') != 'gemini-3.5-flash-lite':
+                      raise SystemExit('RunPod benchmark used unexpected Hybrid provider/model')
                   with open('runpod-benchmark-result.json', 'w', encoding='utf-8') as handle:
                       json.dump(result, handle, ensure_ascii=False, indent=2, sort_keys=True)
                   print(json.dumps(result, ensure_ascii=False, indent=2, sort_keys=True))
@@ -169,8 +182,10 @@ jobs:
           bucket, key = parts(result['report_uri'])
           s3.download_file(bucket, key, 'cutsell-unseen-clean-cut-benchmark.json')
           report = json.load(open('cutsell-unseen-clean-cut-benchmark.json', encoding='utf-8'))
-          if report.get('brain_backend') != 'runpod_local' or report.get('external_brain_calls_enabled') is not False:
-              raise SystemExit('report does not prove RunPod-local brain execution')
+          if report.get('brain_backend') != 'runpod_local' or report.get('external_brain_calls_enabled') is not True:
+              raise SystemExit('report does not prove approved Hybrid execution')
+          if report.get('hybrid_provider') != 'google' or report.get('hybrid_primary_model') != 'gemini-3.5-flash-lite':
+              raise SystemExit('report contains unexpected Hybrid provider/model')
 
           for uri in result.get('preview_uris') or []:
               bucket, key = parts(uri)
@@ -179,13 +194,15 @@ jobs:
           print(json.dumps({
               key: report.get(key) for key in (
                   'benchmark_id', 'brain_backend', 'external_brain_calls_enabled',
+                  'hybrid_provider', 'hybrid_primary_model',
                   'source_count', 'completed_count', 'execution_failure_count',
-                  'provider_failure_count', 'selected_to_input_ratio',
-                  'total_clean_cut_removed', 'total_temporal_trimmed'
+                  'provider_failure_count', 'total_hybrid_requested_groups',
+                  'total_hybrid_available_groups', 'total_hybrid_deleted',
+                  'selected_to_input_ratio', 'total_clean_cut_removed', 'total_temporal_trimmed'
               )
           }, indent=2))
           if report.get('execution_failure_count') or report.get('provider_failure_count'):
-              raise SystemExit('RunPod-local unseen benchmark reported failures')
+              raise SystemExit('RunPod Hybrid unseen benchmark reported failures')
           PY
 
       - name: Upload JSON report
