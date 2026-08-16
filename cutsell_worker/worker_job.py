@@ -67,12 +67,11 @@ def _safe_notify(*, user_id: str, project_id: str, kind: str, payload: dict | No
 
 
 def run_flow_b_job(payload: dict) -> dict:
-    """Run the CutSell brain entirely inside the RunPod RQ worker.
+    """Run the CutSell Flow B brain inside the RunPod RQ worker.
 
-    External model keys may exist in the environment for legacy tooling, but this
-    execution path is bound to ``brain_runtime`` and therefore cannot enable them
-    implicitly. Universal Clean Cut uses local ASR, dense local vision, deterministic
-    retry/Best Take/Clean Cut logic, temporal cleanup, and local rendering.
+    Local ASR/vision/timing remains the backbone. Gemini semantic reasoning can be
+    added only through brain_runtime's explicit Hybrid feature flag + approved model +
+    per-edit dollar guard; stored keys alone cannot activate paid inference.
     """
     from rq import get_current_job
 
@@ -142,11 +141,14 @@ def run_flow_b_job(payload: dict) -> dict:
                 clean_cut_provider=brain.clean_cut_provider,
                 composer_provider=brain.composer_provider,
                 draft_review_provider=brain.draft_review_provider,
+                editorial_judge=brain.editorial_judge,
                 progress=publish,
             )
             serialized = result_to_dict(result)
             serialized["brain_backend"] = brain.backend
             serialized["external_brain_calls_enabled"] = brain.external_calls_enabled
+            serialized["hybrid_provider"] = brain.hybrid_settings.provider
+            serialized["hybrid_primary_model"] = brain.hybrid_settings.primary_model
 
             publish("draft_ready", 94)
             timeline_assets = _build_timeline_assets(request, local_paths, directory)
