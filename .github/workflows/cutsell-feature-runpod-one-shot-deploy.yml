@@ -20,7 +20,7 @@ jobs:
       REDIS_URL: ${{ secrets.REDIS_URL }}
       GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
       RUNPOD_TEMPLATE_NAME: EditDNA-Worker-2
-      IMAGE: ghcr.io/automatedretailservices/cutsell-worker:12487da73d99e58330994c703abc282feadd7a71
+      IMAGE: ghcr.io/automatedretailservices/cutsell-worker:8740dab03a2c094821ceadb6122a85afdfe0577c
     steps:
       - name: Require explicit paid-deploy approval token
         shell: bash
