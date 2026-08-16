@@ -16,7 +16,7 @@ jobs:
     runs-on: ubuntu-latest
     env:
       IMAGE: ghcr.io/automatedretailservices/cutsell-worker:${{ github.sha }}
-      BUILD_REASON: post-23-fumble-boundary-segmentation-and-recording-meta-fixes-for-run24
+      BUILD_REASON: post-24-fuzzy-prefix-and-recording-meta-cleanup-for-run25
     steps:
       - uses: actions/checkout@v4
       - name: Login to GitHub Container Registry
