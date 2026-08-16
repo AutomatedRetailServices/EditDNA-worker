@@ -1,11 +1,8 @@
 """Hybrid Best Take adapter for real Flow B retry/mini-session groups.
 
-The existing pipeline already calls a TakeJudgeProvider once retry grouping has been
-bounded by session walls. This adapter plugs the provider-neutral editorial judge into
-that exact boundary without changing timestamps or allowing cross-session reasoning.
-
-No SDK is imported here and no network call is possible unless an EditorialJudge is
-explicitly injected by a future provider adapter.
+The pipeline calls this only after grouping has been bounded by session walls. The
+helper also exposes the exact bounded EditorialSession used by semantic cleanup so the
+same evidence contract can drive BTS/failed removal and Best Take selection.
 """
 from __future__ import annotations
 
@@ -47,28 +44,30 @@ def _signal_evidence(take: CandidateTake) -> tuple[tuple[str, float | str | bool
     )
 
 
-def _session_from_group(takes: Tuple[CandidateTake, ...], ranked: Tuple[RankedTake, ...]) -> EditorialSession:
+def build_editorial_session_from_group(
+    takes: Tuple[CandidateTake, ...],
+    ranked: Tuple[RankedTake, ...] | None = None,
+) -> EditorialSession:
+    """Build one semantic request from one already-bounded retry/group partition."""
     if not takes:
         raise ValueError("hybrid take judge requires at least one candidate")
     take_by_id = {take.clip_id: take for take in takes}
     if len(take_by_id) != len(takes):
         raise ValueError("hybrid take judge received duplicate clip ids")
 
-    top_score = float(ranked[0].score) if ranked else 0.0
-    second_score = float(ranked[1].score) if len(ranked) > 1 else 0.0
+    ranking = tuple(ranked) if ranked is not None else rank_takes(takes)
+    top_score = float(ranking[0].score) if ranking else 0.0
+    second_score = float(ranking[1].score) if len(ranking) > 1 else 0.0
     gap = max(0.0, top_score - second_score)
 
-    # Confidence represents confidence in the *choice*, not raw media quality. A very
-    # strong top score with a tiny gap is still editorially ambiguous and should be
-    # eligible for semantic assistance during beta.
     local_confidence = _clamp((0.55 * top_score) + (0.45 * min(1.0, gap * 4.0)))
     conflict_score = _clamp(max(0.0, 0.30 - gap) / 0.30)
 
-    rank_by_id = {item.clip_id: item for item in ranked}
+    rank_by_id = {item.clip_id: item for item in ranking}
     candidates = []
     for take in takes:
         item = rank_by_id[take.clip_id]
-        local_label = "winner" if take.clip_id == ranked[0].clip_id else "alternate"
+        local_label = "winner" if take.clip_id == ranking[0].clip_id else "alternate"
         candidates.append(EditorialCandidate(
             clip_id=take.clip_id,
             text=take.text,
@@ -91,6 +90,11 @@ def _session_from_group(takes: Tuple[CandidateTake, ...], ranked: Tuple[RankedTa
     )
 
 
+# Backward-compatible internal name used by existing tests/callers.
+def _session_from_group(takes: Tuple[CandidateTake, ...], ranked: Tuple[RankedTake, ...]) -> EditorialSession:
+    return build_editorial_session_from_group(takes, ranked)
+
+
 def _accepted_model_winner(session: EditorialSession, result, *, threshold: float) -> str | None:
     if not result.available:
         return None
@@ -99,8 +103,6 @@ def _accepted_model_winner(session: EditorialSession, result, *, threshold: floa
         for decision in result.decisions
         if decision.label == "winner" and decision.confidence >= threshold
     ]
-    # Safety invariant: semantic assistance may replace Best Take only when the model
-    # identifies one unambiguous winner inside the already-bounded group.
     if len(winners) != 1:
         return None
     winner = winners[0]
@@ -115,7 +117,7 @@ def _accepted_model_winner(session: EditorialSession, result, *, threshold: floa
 
 @dataclass(frozen=True)
 class HybridTakeJudgeProvider:
-    """TakeJudgeProvider that escalates semantic ambiguity without surrendering edits."""
+    """TakeJudgeProvider that adds semantic Best Take help with local fallback."""
 
     editorial_judge: EditorialJudge | None = None
     policy: HybridGatePolicy = HybridGatePolicy()
@@ -129,7 +131,7 @@ class HybridTakeJudgeProvider:
                 ProviderStatus("hybrid", False, True, "baseline_single_candidate"),
             )
 
-        session = _session_from_group(takes, baseline)
+        session = build_editorial_session_from_group(takes, baseline)
         result = safe_editorial_judge(self.editorial_judge, session, self.policy)
         winner = _accepted_model_winner(
             session,
