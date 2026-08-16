@@ -1,10 +1,9 @@
-"""Remove a contiguous continuation of an already-proven recording-process window.
+"""Remove continuations of already-proven recording-process windows.
 
-ASR may split one behind-the-scenes thought across several candidates. Earlier cleanup
-can correctly discard the first pieces while a final continuation survives because it
-contains no standalone anchor. This rule only removes that continuation when it is
-contiguous with a discarded chain, the chain contains a strong recording-process
-anchor, and the survivor itself contains multiple recording-process verbs/terms.
+ASR can split behind-the-scenes thoughts across candidate boundaries. This module only
+removes a survivor when the preceding discarded speech already proves recording-process
+intent and the continuation is tightly coupled. It deliberately fails open around
+viewer-facing CTAs and product speech.
 """
 from __future__ import annotations
 
@@ -12,6 +11,7 @@ import re
 from typing import Iterable, Tuple
 
 from .contracts import CandidateTake, CleanCutDecision
+from .recording_process_context import _is_direct_recording_meta
 
 _TOKEN_RE = re.compile(r"[a-z0-9']+", re.IGNORECASE)
 _STRONG_PROCESS_RE = re.compile(
@@ -70,6 +70,34 @@ def _discarded_chain_before(
     return tuple(reversed(chain))
 
 
+def _direct_meta_short_tail(
+    take: CandidateTake,
+    discarded: tuple[CandidateTake, ...],
+    *,
+    maximum_gap_sec: float = 1.10,
+) -> CandidateTake | None:
+    """Return the direct-meta anchor for a tiny syntactic continuation, if any.
+
+    A two- or three-word ASR tail such as ``with kids`` may be split from an explicit
+    statement about making the video. We only remove it when the immediately preceding
+    discarded candidate is itself an unambiguous direct recording-meta utterance. A
+    longer sentence, a larger gap, or ordinary discarded speech always fails open.
+    """
+    tokens = _tokens(take.text)
+    if not tokens or len(tokens) > 4 or take.duration_sec > 2.2:
+        return None
+    prior = [
+        item for item in discarded
+        if item.source_asset_id == take.source_asset_id
+        and item.end <= take.start + 0.02
+        and -0.02 <= take.start - item.end <= maximum_gap_sec
+    ]
+    if not prior:
+        return None
+    nearest = max(prior, key=lambda item: (item.end, item.start))
+    return nearest if _is_direct_recording_meta(nearest) else None
+
+
 def apply_recording_meta_continuation_cleanup(
     kept: Iterable[CandidateTake],
     discarded: Iterable[CandidateTake],
@@ -79,6 +107,17 @@ def apply_recording_meta_continuation_cleanup(
     survivors, removed, diagnostics = [], [], []
 
     for take in kept_tuple:
+        direct_anchor = _direct_meta_short_tail(take, discarded_tuple)
+        if direct_anchor is not None:
+            removed.append(take)
+            diagnostics.append({
+                "clip_id": take.clip_id,
+                "reason": "short_continuation_after_direct_recording_meta",
+                "text": take.text,
+                "anchor_clip_ids": [direct_anchor.clip_id],
+            })
+            continue
+
         chain = _discarded_chain_before(take, discarded_tuple)
         strong_anchor = any(_STRONG_PROCESS_RE.search(str(item.text or "")) for item in chain)
         should_remove = (
