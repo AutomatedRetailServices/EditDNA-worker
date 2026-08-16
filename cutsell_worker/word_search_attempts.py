@@ -1,11 +1,15 @@
 """Remove short multi-segment word-search attempts under dense recording resets.
 
 Some ASR boundaries merge one-word stumbles into neighboring script words, so the
-microtake-only word-search cleanup can miss them.  This sequence rule requires a very
+microtake-only word-search cleanup can miss them. This sequence rule requires a very
 specific structure across adjacent short takes: a long token repeated at least three
 times, a different long token sharing a five-character stem with it, at least two
 other target words shared by two attempts, and a dense multimodal reset window.
 Intentional lists, slogans, and ordinary lexical repetition therefore fail open.
+
+Important: prior cleaners may already discard some fragments from the failed attempt.
+Those discarded fragments remain valid evidence. Detection can therefore run over the
+original take set while destructive action is limited to the current survivors.
 """
 from __future__ import annotations
 
@@ -145,9 +149,12 @@ def _word_search_cluster_ids(
 def apply_word_search_attempt_cleanup(
     kept: Iterable[CandidateTake],
     context: WholeVideoContext | None = None,
+    *,
+    evidence_takes: Iterable[CandidateTake] | None = None,
 ) -> tuple[Tuple[CandidateTake, ...], Tuple[CandidateTake, ...], Tuple[dict, ...]]:
     kept_tuple = tuple(kept)
-    remove_ids = _word_search_cluster_ids(kept_tuple, context)
+    evidence_tuple = tuple(evidence_takes) if evidence_takes is not None else kept_tuple
+    remove_ids = _word_search_cluster_ids(evidence_tuple, context)
     survivors, removed, diagnostics = [], [], []
     for take in kept_tuple:
         if take.clip_id in remove_ids:
@@ -170,8 +177,13 @@ def install_word_search_attempt_cleanup() -> None:
         return
 
     def apply_with_word_search_attempts(takes, context=None):
-        kept, discarded, decisions = original(takes, context)
-        kept, extra_discarded, diagnostics = apply_word_search_attempt_cleanup(kept, context)
+        take_tuple = tuple(takes)
+        kept, discarded, decisions = original(take_tuple, context)
+        kept, extra_discarded, diagnostics = apply_word_search_attempt_cleanup(
+            kept,
+            context,
+            evidence_takes=take_tuple,
+        )
         if not extra_discarded:
             return kept, discarded, decisions
         reason_by_id = {item["clip_id"]: item["reason"] for item in diagnostics}
