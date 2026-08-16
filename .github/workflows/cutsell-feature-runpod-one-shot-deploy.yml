@@ -2,6 +2,11 @@ name: CutSell Feature RunPod One-Shot Deploy
 
 on:
   workflow_dispatch:
+    inputs:
+      approval_token:
+        description: 'Explicit paid-deploy approval token'
+        required: true
+        type: string
 
 permissions:
   contents: read
@@ -17,6 +22,14 @@ jobs:
       RUNPOD_TEMPLATE_NAME: EditDNA-Worker-2
       IMAGE: ghcr.io/automatedretailservices/cutsell-worker:12487da73d99e58330994c703abc282feadd7a71
     steps:
+      - name: Require explicit paid-deploy approval token
+        shell: bash
+        env:
+          APPROVAL_TOKEN: ${{ inputs.approval_token }}
+        run: |
+          set -euo pipefail
+          test "$APPROVAL_TOKEN" = "RUN27" || { echo 'Paid RunPod deploy not explicitly approved for RUN27'; exit 2; }
+
       - name: Validate approved deployment inputs
         shell: bash
         run: |
