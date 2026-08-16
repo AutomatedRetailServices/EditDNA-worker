@@ -16,7 +16,7 @@ jobs:
     timeout-minutes: 5
     env:
       RUNPOD_API_KEY: ${{ secrets.RUNPOD_API_KEY }}
-      POD_ID: vq3bsd8cwbk42s
+      POD_ID: 2ytw11hklo1nua
     steps:
       - name: Validate exact approved staging Pod
         shell: bash
@@ -42,4 +42,4 @@ jobs:
           echo "RunPod delete HTTP status: $code"
           test "$code" = "204"
 
-# benchmark #23 completed; terminate exact Pod above
+# benchmark #24 completed; terminate exact Pod above
