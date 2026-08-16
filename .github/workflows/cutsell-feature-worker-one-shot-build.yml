@@ -16,7 +16,7 @@ jobs:
     runs-on: ubuntu-latest
     env:
       IMAGE: ghcr.io/automatedretailservices/cutsell-worker:${{ github.sha }}
-      BUILD_REASON: post-25-discarded-evidence-word-search-self-review-and-recording-meta-fixes-for-run26
+      BUILD_REASON: hybrid-flash-lite-mini-session-semantic-cleanup-pre-run27
     steps:
       - uses: actions/checkout@v4
       - name: Login to GitHub Container Registry
@@ -25,7 +25,7 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-      - name: Build RunPod-local CutSell worker image
+      - name: Build Hybrid Flow B CutSell worker image
         run: docker build -t "$IMAGE" -f Dockerfile.cutsell.worker .
       - name: Prove OpenAI SDK is absent from worker image
         run: |
