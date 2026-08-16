@@ -29,6 +29,7 @@ _PROCESS_TERMS = frozenset({
     "end", "ending", "say", "saying", "said", "stop", "stopping", "script",
     "line", "take", "recording", "video", "videos", "cta",
 })
+_SAY_TERMS = frozenset({"say", "saying", "said"})
 
 
 def _tokens(text: str) -> tuple[str, ...]:
@@ -98,7 +99,7 @@ def _direct_meta_short_tail(
 ) -> CandidateTake | None:
     """Return direct-meta anchor for a tiny syntactic continuation, if any."""
     tokens = _tokens(take.text)
-    if not tokens or len(tokens) > 4 or take.duration_sec > 2.2:
+    if not tokens or len(tokens) > 5 or take.duration_sec > 2.2:
         return None
     return _nearest_prior_direct_meta(take, evidence, maximum_gap_sec=maximum_gap_sec)
 
@@ -111,11 +112,14 @@ def _process_heavy_continuation_after_direct_meta(
 ) -> CandidateTake | None:
     """Detect BTS continuation after a proven direct recording-meta anchor.
 
-    The survivor itself must still talk about the process using at least two independent
-    process terms. This prevents an ordinary CTA/product sentence after a BTS remark from
-    being removed solely because it appears nearby.
+    Require at least two process terms plus explicit self-direction language about what
+    is being said. This protects viewer-facing copy that happens to mention words like
+    ``video``, ``stop`` or ``end``.
     """
+    tokens = set(_tokens(take.text))
     if take.duration_sec > 6.5 or _process_term_count(take.text) < 2:
+        return None
+    if not tokens.intersection(_SAY_TERMS):
         return None
     return _nearest_prior_direct_meta(take, evidence, maximum_gap_sec=maximum_gap_sec)
 
@@ -143,6 +147,24 @@ def apply_recording_meta_continuation_cleanup(
             })
             continue
 
+        chain = _discarded_chain_before(take, discarded_tuple)
+        strong_anchor = any(_STRONG_PROCESS_RE.search(str(item.text or "")) for item in chain)
+        should_remove = (
+            take.duration_sec <= 6.0
+            and len(chain) >= 2
+            and strong_anchor
+            and _process_term_count(take.text) >= 2
+        )
+        if should_remove:
+            removed.append(take)
+            diagnostics.append({
+                "clip_id": take.clip_id,
+                "reason": "recording_process_continuation_after_discarded_meta_chain",
+                "text": take.text,
+                "anchor_clip_ids": [item.clip_id for item in chain],
+            })
+            continue
+
         process_anchor = _process_heavy_continuation_after_direct_meta(take, evidence_tuple)
         if process_anchor is not None:
             removed.append(take)
@@ -154,24 +176,7 @@ def apply_recording_meta_continuation_cleanup(
             })
             continue
 
-        chain = _discarded_chain_before(take, discarded_tuple)
-        strong_anchor = any(_STRONG_PROCESS_RE.search(str(item.text or "")) for item in chain)
-        should_remove = (
-            take.duration_sec <= 6.0
-            and len(chain) >= 2
-            and strong_anchor
-            and _process_term_count(take.text) >= 2
-        )
-        if not should_remove:
-            survivors.append(take)
-            continue
-        removed.append(take)
-        diagnostics.append({
-            "clip_id": take.clip_id,
-            "reason": "recording_process_continuation_after_discarded_meta_chain",
-            "text": take.text,
-            "anchor_clip_ids": [item.clip_id for item in chain],
-        })
+        survivors.append(take)
 
     return tuple(survivors), tuple(removed), tuple(diagnostics)
 
