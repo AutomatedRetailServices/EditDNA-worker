@@ -88,3 +88,16 @@ def test_feature_runpod_paid_deploy_cannot_trigger_from_a_commit_and_needs_run_t
     assert 'CUTSELL_HYBRID_MAX_SESSION_USD:"0.0075"' in deploy
     assert 'CUTSELL_HYBRID_TEST_BUDGET_USD:"0.50"' in deploy
     assert 'has("OPENAI_API_KEY")' in deploy
+
+
+def test_hybrid_unseen_benchmark_is_manual_and_requires_same_run27_token():
+    benchmark = Path(".github/workflows/cutsell-unseen-clean-cut-benchmark.yml").read_text()
+    assert "workflow_dispatch:" in benchmark
+    assert "approval_token:" in benchmark
+    assert 'test "$APPROVAL_TOKEN" = "RUN27"' in benchmark
+    assert "push:" not in benchmark
+    assert "schedule:" not in benchmark
+    assert "'expected_external_brain_calls_enabled': True" in benchmark
+    assert "'hybrid_provider': 'google'" in benchmark
+    assert "'hybrid_primary_model': 'gemini-3.5-flash-lite'" in benchmark
+    assert "report.get('external_brain_calls_enabled') is not True" in benchmark
