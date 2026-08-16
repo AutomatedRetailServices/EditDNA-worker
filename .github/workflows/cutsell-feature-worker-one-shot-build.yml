@@ -16,7 +16,7 @@ jobs:
     runs-on: ubuntu-latest
     env:
       IMAGE: ghcr.io/automatedretailservices/cutsell-worker:${{ github.sha }}
-      BUILD_REASON: post-24-fuzzy-prefix-recording-meta-and-mini-session-boundaries-for-run25
+      BUILD_REASON: post-25-discarded-evidence-word-search-self-review-and-recording-meta-fixes-for-run26
     steps:
       - uses: actions/checkout@v4
       - name: Login to GitHub Container Registry
