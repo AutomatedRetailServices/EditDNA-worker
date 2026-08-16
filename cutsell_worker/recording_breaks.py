@@ -1,9 +1,13 @@
 """Conservative local cleanup for explicit recording-break speech.
 
 This module targets creator/process failures that are semantically about the recording
-itself (for example ``I can't talk`` or ``let's do that again``).  It deliberately
+itself (for example ``I can't talk`` or ``let's do that again``). It deliberately
 does not treat profanity alone, ordinary negation, intentional single-word emphasis,
 or an isolated creator reaction as destructive evidence.
+
+Prior cleaners may already discard one member of a recording-break pair/cluster. Those
+discarded fragments still remain valid evidence, so contextual detection may run over
+the original take set while destructive action stays limited to current survivors.
 """
 from __future__ import annotations
 
@@ -61,12 +65,6 @@ def _has_frustration(text: str) -> bool:
 
 
 def _has_repeated_multiword_phrase(text: str) -> bool:
-    """Find repeated 2-6 word phrases while ignoring single-word emphasis.
-
-    Two occurrences are enough only when another independent signal (frustration)
-    is present.  This catches abandoned restart loops such as a phrase repeated after
-    an expletive without turning normal rhetorical repetition into a deletion rule.
-    """
     tokens = _tokens(text)
     if len(tokens) < 6:
         return False
@@ -132,20 +130,18 @@ def _multimodal_break_window(
     takes: tuple[CandidateTake, ...],
     context: WholeVideoContext | None,
 ) -> bool:
-    """Require dense physical reset plus expression/engagement break evidence."""
     reset_count, break_count = _multimodal_break_counts(takes, context)
     return reset_count >= 4 and break_count >= 2
 
 
 def _reaction_cluster_ids(
-    kept: tuple[CandidateTake, ...],
+    takes: tuple[CandidateTake, ...],
     context: WholeVideoContext | None,
     *,
     maximum_gap_sec: float = 2.25,
     maximum_span_sec: float = 14.0,
 ) -> set[str]:
-    """Return IDs in a corroborated multi-take recording-break reaction cluster."""
-    ordered = tuple(sorted(kept, key=lambda item: (item.source_order, item.start, item.end)))
+    ordered = tuple(sorted(takes, key=lambda item: (item.source_order, item.start, item.end)))
     eligible = lambda take: (
         take.duration_sec <= 4.0
         and bool(_REACTION_RE.search(str(take.text or "")) or _RECOVERY_TRANSITION_RE.search(str(take.text or "")))
@@ -179,19 +175,12 @@ def _reaction_cluster_ids(
 
 
 def _speech_self_review_pair_ids(
-    kept: tuple[CandidateTake, ...],
+    takes: tuple[CandidateTake, ...],
     context: WholeVideoContext | None,
     *,
     maximum_gap_sec: float = 2.0,
 ) -> set[str]:
-    """Remove a self-review question plus immediate confused echo during a reset.
-
-    ``What?`` by itself is protected.  The pair becomes destructive only when the
-    creator first explicitly reviews their own just-spoken line (``what did I just
-    say?``), immediately follows with a tiny confusion reaction, and local vision sees
-    dense physical reset plus at least one expression/engagement break across the pair.
-    """
-    ordered = tuple(sorted(kept, key=lambda item: (item.source_order, item.start, item.end)))
+    ordered = tuple(sorted(takes, key=lambda item: (item.source_order, item.start, item.end)))
     remove_ids: set[str] = set()
     for index, take in enumerate(ordered[:-1]):
         if take.duration_sec > 2.5 or not _SPEECH_SELF_REVIEW_RE.search(str(take.text or "")):
@@ -211,19 +200,12 @@ def _speech_self_review_pair_ids(
 
 
 def _contextual_self_critique_ids(
-    kept: tuple[CandidateTake, ...],
+    takes: tuple[CandidateTake, ...],
     context: WholeVideoContext | None,
     *,
     maximum_gap_sec: float = 1.5,
 ) -> set[str]:
-    """Remove self-critique only when it leads directly into a proven failure.
-
-    Rhetorical speech such as ``why do I say this every morning?`` can be valid
-    creator content.  The local path therefore requires a following same-source take
-    that explicitly admits a recording failure plus dense multimodal reset/break
-    evidence across the two-take window.
-    """
-    ordered = tuple(sorted(kept, key=lambda item: (item.source_order, item.start, item.end)))
+    ordered = tuple(sorted(takes, key=lambda item: (item.source_order, item.start, item.end)))
     remove_ids: set[str] = set()
     for index, take in enumerate(ordered[:-1]):
         if not _SELF_CRITIQUE_RE.search(str(take.text or "")):
@@ -244,11 +226,14 @@ def _contextual_self_critique_ids(
 def apply_recording_break_cleanup(
     kept: Iterable[CandidateTake],
     context: WholeVideoContext | None = None,
+    *,
+    evidence_takes: Iterable[CandidateTake] | None = None,
 ) -> tuple[Tuple[CandidateTake, ...], Tuple[CandidateTake, ...], Tuple[dict, ...]]:
     kept_tuple = tuple(kept)
-    cluster_ids = _reaction_cluster_ids(kept_tuple, context)
-    speech_self_review_ids = _speech_self_review_pair_ids(kept_tuple, context)
-    self_critique_ids = _contextual_self_critique_ids(kept_tuple, context)
+    evidence_tuple = tuple(evidence_takes) if evidence_takes is not None else kept_tuple
+    cluster_ids = _reaction_cluster_ids(evidence_tuple, context)
+    speech_self_review_ids = _speech_self_review_pair_ids(evidence_tuple, context)
+    self_critique_ids = _contextual_self_critique_ids(evidence_tuple, context)
     survivors = []
     removed = []
     diagnostics = []
@@ -276,8 +261,13 @@ def install_recording_break_cleanup() -> None:
         return
 
     def apply_with_recording_breaks(takes, context=None):
-        kept, discarded, decisions = original(takes, context)
-        kept, contextual_discarded, diagnostics = apply_recording_break_cleanup(kept, context)
+        take_tuple = tuple(takes)
+        kept, discarded, decisions = original(take_tuple, context)
+        kept, contextual_discarded, diagnostics = apply_recording_break_cleanup(
+            kept,
+            context,
+            evidence_takes=take_tuple,
+        )
         if not contextual_discarded:
             return kept, discarded, decisions
 
