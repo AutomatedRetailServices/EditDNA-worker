@@ -28,9 +28,9 @@ def test_request_uses_structured_json_and_no_network_or_key_material():
     config = request["generationConfig"]
     assert config["maxOutputTokens"] == 500
     assert config["thinkingConfig"]["thinkingLevel"] == "minimal"
-    assert config["responseFormat"]["text"]["mimeType"] == "application/json"
-    schema = config["responseFormat"]["text"]["schema"]
-    assert schema == editorial_response_schema()
+    assert config["responseMimeType"] == "application/json"
+    assert config["responseJsonSchema"] == editorial_response_schema()
+    assert "responseFormat" not in config
     serialized = json.dumps(request)
     assert "API_KEY" not in serialized
     assert "http" not in serialized.lower()
@@ -44,13 +44,15 @@ def test_schema_constrains_labels_and_confidence():
     assert item["additionalProperties"] is False
 
 
-def test_parser_extracts_decisions_and_usage():
+def test_parser_extracts_decisions_and_usage_and_joins_text_parts():
+    encoded = json.dumps({"decisions": [
+        {"clip_id": "a", "label": "failed", "confidence": 0.96, "reason_code": "restart"},
+        {"clip_id": "b", "label": "winner", "confidence": 0.98, "reason_code": "complete_take"},
+    ]})
+    split = len(encoded) // 2
     response = {
         "candidates": [{
-            "content": {"parts": [{"text": json.dumps({"decisions": [
-                {"clip_id": "a", "label": "failed", "confidence": 0.96, "reason_code": "restart"},
-                {"clip_id": "b", "label": "winner", "confidence": 0.98, "reason_code": "complete_take"},
-            ]})}]}
+            "content": {"parts": [{"text": encoded[:split]}, {"text": encoded[split:]}]}
         }],
         "usageMetadata": {"candidatesTokenCount": 73},
     }
