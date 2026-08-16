@@ -148,7 +148,17 @@ def max_call_cost(provider_key: str, prompt: str) -> float:
 
 def http_json(url: str, headers: dict[str, str], payload: dict) -> tuple[dict, float]:
     body = json.dumps(payload).encode("utf-8")
-    req = urllib.request.Request(url, data=body, headers={**headers, "Content-Type": "application/json"}, method="POST")
+    req = urllib.request.Request(
+        url,
+        data=body,
+        headers={
+            "User-Agent": "CutSell-Hybrid-Bakeoff/1.0",
+            "Accept": "application/json",
+            **headers,
+            "Content-Type": "application/json",
+        },
+        method="POST",
+    )
     started = time.perf_counter()
     try:
         with urllib.request.urlopen(req, timeout=45) as resp:
@@ -195,7 +205,8 @@ def call_gemini(prompt: str, spend: Spend, model: str) -> tuple[dict, dict]:
         "contents": [{"parts": [{"text": prompt}]}],
         "generationConfig": {
             "maxOutputTokens": MAX_OUTPUT_TOKENS,
-            "responseFormat": {"text": {"mimeType": "application/json", "schema": SCHEMA}},
+            "responseMimeType": "application/json",
+            "responseJsonSchema": SCHEMA,
         },
     }
     raw, latency = http_json(
@@ -283,8 +294,6 @@ def main() -> None:
     reports.append(run_model("groq/openai-gpt-oss-20b", call_groq, CASES, spend))
     reports.append(run_model("gemini-3.5-flash-lite", lambda p, s: call_gemini(p, s, "gemini-3.5-flash-lite"), CASES, spend))
 
-    # Escalation model only runs on cases where the two cheaper candidates disagree on exact labels
-    # or either candidate errored. This keeps quality comparison useful without paying for 3.6 on everything.
     groq_rows = {r["case_id"]: r for r in reports[0]["rows"]}
     lite_rows = {r["case_id"]: r for r in reports[1]["rows"]}
     escalation_cases = []
