@@ -113,6 +113,46 @@ def test_short_correction_after_script_meta_before_retry_is_removed():
     assert diagnostics[0]["reason"] == "short_correction_after_recording_meta_before_retry"
 
 
+def test_direct_complaint_about_making_video_is_removed():
+    meta = take("meta", "this is so hard to make a video", 10.0, 12.2)
+    kept, removed, diagnostics = apply_recording_process_neighbors((meta,), (), context(()))
+    assert kept == ()
+    assert removed == (meta,)
+    assert diagnostics[0]["reason"] == "direct_recording_process_meta"
+
+
+def test_how_to_end_video_process_speech_is_removed():
+    meta = take("meta", "how to end TikTok Shop videos", 10.0, 12.0)
+    kept, removed, diagnostics = apply_recording_process_neighbors((meta,), (), context(()))
+    assert kept == ()
+    assert removed == (meta,)
+    assert diagnostics[0]["reason"] == "direct_recording_process_meta"
+
+
+def test_explicit_call_to_action_construction_is_removed():
+    meta = take("meta", "I need to make a call to action", 10.0, 12.0)
+    kept, removed, diagnostics = apply_recording_process_neighbors((meta,), (), context(()))
+    assert kept == ()
+    assert removed == (meta,)
+    assert diagnostics[0]["reason"] == "direct_recording_process_meta"
+
+
+def test_product_video_statement_survives_direct_meta_detector():
+    valid = take("valid", "this video is so easy to follow", 10.0, 12.0)
+    kept, removed, diagnostics = apply_recording_process_neighbors((valid,), (), context(()))
+    assert kept == (valid,)
+    assert removed == ()
+    assert diagnostics == ()
+
+
+def test_viewer_facing_action_phrase_survives_direct_meta_detector():
+    valid = take("valid", "take action now if you want one too", 10.0, 12.0)
+    kept, removed, diagnostics = apply_recording_process_neighbors((valid,), (), context(()))
+    assert kept == (valid,)
+    assert removed == ()
+    assert diagnostics == ()
+
+
 def test_normal_negation_survives_without_recording_meta_anchor():
     negation = take("negation", "No, it does not contain sugar", 10.0, 12.0)
     follow = take("follow", "It is completely sugar free", 12.5, 14.0)
