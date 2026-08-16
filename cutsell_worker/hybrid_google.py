@@ -1,8 +1,7 @@
-"""Pure request/response helpers for a future Google Gemini Hybrid transport.
+"""Pure request/response helpers for Google Gemini Hybrid transport.
 
-This module deliberately performs no HTTP, reads no API key, and cannot spend money.
-It only builds the structured-output request body and parses the response body that a
-future explicitly-enabled transport will send/receive.
+No HTTP, secret reads, or spending occur here. The request shape mirrors the live
+bake-off that succeeded with Gemini 3.5 Flash-Lite.
 """
 from __future__ import annotations
 
@@ -40,12 +39,14 @@ def editorial_response_schema() -> dict[str, Any]:
 def _prompt_text(compact_payload: Mapping[str, Any]) -> str:
     return (
         "You are the CutSell editorial judge. Classify only the supplied candidates "
-        "inside this already-bounded creator mini-session. Do not invent clips, do "
+        "inside this already-bounded creator group/session. Do not invent clips, do "
         "not create timestamps, and do not compare against any other creator/session. "
-        "Use the local evidence as supporting signals, but apply semantic judgment to "
-        "identify recording failures, BTS/self-talk, alternates, and the strongest "
-        "complete take. Return one decision for every candidate. Return exactly one "
-        "winner only when justified; otherwise use uncertain/keep as appropriate.\n\n"
+        "A winner is the strongest complete intended delivery. Alternate is usable but "
+        "not the best. Failed is a stumble, false start, word-search, incomplete or "
+        "broken delivery. BTS is creator self-talk, recording-process commentary, "
+        "frustration, self-review or breaking character. Return one decision for every "
+        "candidate and exactly one winner only when justified; use uncertain when the "
+        "evidence is insufficient.\n\n"
         + json.dumps(dict(compact_payload), separators=(",", ":"), ensure_ascii=False)
     )
 
@@ -65,12 +66,8 @@ def build_gemini_generate_content_request(
         "generationConfig": {
             "maxOutputTokens": int(max_output_tokens),
             "thinkingConfig": {"thinkingLevel": thinking_level},
-            "responseFormat": {
-                "text": {
-                    "mimeType": "application/json",
-                    "schema": editorial_response_schema(),
-                }
-            },
+            "responseMimeType": "application/json",
+            "responseJsonSchema": editorial_response_schema(),
         },
     }
 
@@ -88,8 +85,12 @@ def parse_gemini_generate_content_response(response: Mapping[str, Any]) -> dict[
     parts = content.get("parts")
     if not isinstance(parts, list) or not parts:
         raise ValueError("Gemini response missing parts")
-    text = parts[0].get("text") if isinstance(parts[0], Mapping) else None
-    if not isinstance(text, str) or not text.strip():
+    text = "".join(
+        str(part.get("text") or "")
+        for part in parts
+        if isinstance(part, Mapping)
+    )
+    if not text.strip():
         raise ValueError("Gemini structured response missing text")
     try:
         parsed = json.loads(text)
