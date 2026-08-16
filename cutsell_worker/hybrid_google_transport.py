@@ -1,8 +1,7 @@
 """Explicitly gated Gemini HTTP transport for CutSell Hybrid Editorial Brain.
 
-Merely importing this module cannot make a request. The caller must pass an API key,
-provider settings with ``enabled=True``, and a dollar ledger with remaining budget.
-The production BrainRuntime does not instantiate this transport yet.
+Importing this module cannot make a request. The caller must provide an API key,
+explicitly-enabled provider settings, and a dollar ledger with remaining budget.
 """
 from __future__ import annotations
 
@@ -66,13 +65,15 @@ class GoogleGeminiTransport:
         if not self.settings.allows_estimated_session_cost(estimated_cost):
             raise RuntimeError("hybrid session cost cap exceeded")
         if not self.ledger.reserve(estimated_cost):
-            raise RuntimeError("hybrid test/daily dollar budget exhausted")
+            raise RuntimeError("hybrid edit/test dollar budget exhausted")
 
-        thinking_level = "medium" if self.escalation else "minimal"
+        # The bake-off found no quality gain from spending extra thinking on the
+        # escalation model, so both paths start at minimal thinking. A future measured
+        # quality gain may change this explicitly.
         body = build_gemini_generate_content_request(
             compact_payload,
             max_output_tokens=max_output_tokens,
-            thinking_level=thinking_level,
+            thinking_level="minimal",
         )
         endpoint = f"https://generativelanguage.googleapis.com/v1beta/models/{self.model}:generateContent"
         response = self.session.post(
