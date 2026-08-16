@@ -1,9 +1,12 @@
 """Remove continuations of already-proven recording-process windows.
 
 ASR can split behind-the-scenes thoughts across candidate boundaries. This module only
-removes a survivor when the preceding discarded speech already proves recording-process
-intent and the continuation is tightly coupled. It deliberately fails open around
-viewer-facing CTAs and product speech.
+removes a survivor when neighboring speech already proves recording-process intent and
+the continuation is tightly coupled. It deliberately fails open around viewer-facing
+CTAs and product speech.
+
+Detection may use the original take set as evidence because earlier cleaners can remove
+anchors before this wrapper executes. Destructive action remains limited to survivors.
 """
 from __future__ import annotations
 
@@ -70,44 +73,66 @@ def _discarded_chain_before(
     return tuple(reversed(chain))
 
 
+def _nearest_prior_direct_meta(
+    take: CandidateTake,
+    evidence: tuple[CandidateTake, ...],
+    *,
+    maximum_gap_sec: float,
+) -> CandidateTake | None:
+    prior = [
+        item for item in evidence
+        if item.clip_id != take.clip_id
+        and item.source_asset_id == take.source_asset_id
+        and item.end <= take.start + 0.02
+        and -0.02 <= take.start - item.end <= maximum_gap_sec
+        and _is_direct_recording_meta(item)
+    ]
+    return max(prior, key=lambda item: (item.end, item.start)) if prior else None
+
+
 def _direct_meta_short_tail(
     take: CandidateTake,
-    discarded: tuple[CandidateTake, ...],
+    evidence: tuple[CandidateTake, ...],
     *,
     maximum_gap_sec: float = 1.10,
 ) -> CandidateTake | None:
-    """Return the direct-meta anchor for a tiny syntactic continuation, if any.
-
-    A two- or three-word ASR tail such as ``with kids`` may be split from an explicit
-    statement about making the video. We only remove it when the immediately preceding
-    discarded candidate is itself an unambiguous direct recording-meta utterance. A
-    longer sentence, a larger gap, or ordinary discarded speech always fails open.
-    """
+    """Return direct-meta anchor for a tiny syntactic continuation, if any."""
     tokens = _tokens(take.text)
     if not tokens or len(tokens) > 4 or take.duration_sec > 2.2:
         return None
-    prior = [
-        item for item in discarded
-        if item.source_asset_id == take.source_asset_id
-        and item.end <= take.start + 0.02
-        and -0.02 <= take.start - item.end <= maximum_gap_sec
-    ]
-    if not prior:
+    return _nearest_prior_direct_meta(take, evidence, maximum_gap_sec=maximum_gap_sec)
+
+
+def _process_heavy_continuation_after_direct_meta(
+    take: CandidateTake,
+    evidence: tuple[CandidateTake, ...],
+    *,
+    maximum_gap_sec: float = 6.0,
+) -> CandidateTake | None:
+    """Detect BTS continuation after a proven direct recording-meta anchor.
+
+    The survivor itself must still talk about the process using at least two independent
+    process terms. This prevents an ordinary CTA/product sentence after a BTS remark from
+    being removed solely because it appears nearby.
+    """
+    if take.duration_sec > 6.5 or _process_term_count(take.text) < 2:
         return None
-    nearest = max(prior, key=lambda item: (item.end, item.start))
-    return nearest if _is_direct_recording_meta(nearest) else None
+    return _nearest_prior_direct_meta(take, evidence, maximum_gap_sec=maximum_gap_sec)
 
 
 def apply_recording_meta_continuation_cleanup(
     kept: Iterable[CandidateTake],
     discarded: Iterable[CandidateTake],
+    *,
+    evidence_takes: Iterable[CandidateTake] | None = None,
 ) -> tuple[Tuple[CandidateTake, ...], Tuple[CandidateTake, ...], Tuple[dict, ...]]:
     kept_tuple = tuple(kept)
     discarded_tuple = tuple(discarded)
+    evidence_tuple = tuple(evidence_takes) if evidence_takes is not None else tuple(kept_tuple + discarded_tuple)
     survivors, removed, diagnostics = [], [], []
 
     for take in kept_tuple:
-        direct_anchor = _direct_meta_short_tail(take, discarded_tuple)
+        direct_anchor = _direct_meta_short_tail(take, evidence_tuple)
         if direct_anchor is not None:
             removed.append(take)
             diagnostics.append({
@@ -115,6 +140,17 @@ def apply_recording_meta_continuation_cleanup(
                 "reason": "short_continuation_after_direct_recording_meta",
                 "text": take.text,
                 "anchor_clip_ids": [direct_anchor.clip_id],
+            })
+            continue
+
+        process_anchor = _process_heavy_continuation_after_direct_meta(take, evidence_tuple)
+        if process_anchor is not None:
+            removed.append(take)
+            diagnostics.append({
+                "clip_id": take.clip_id,
+                "reason": "process_heavy_continuation_after_direct_recording_meta",
+                "text": take.text,
+                "anchor_clip_ids": [process_anchor.clip_id],
             })
             continue
 
@@ -148,8 +184,13 @@ def install_recording_meta_continuation_cleanup() -> None:
         return
 
     def apply_with_recording_meta_continuation(takes, context=None):
-        kept, discarded, decisions = original(takes, context)
-        kept, extra_discarded, diagnostics = apply_recording_meta_continuation_cleanup(kept, discarded)
+        take_tuple = tuple(takes)
+        kept, discarded, decisions = original(take_tuple, context)
+        kept, extra_discarded, diagnostics = apply_recording_meta_continuation_cleanup(
+            kept,
+            discarded,
+            evidence_takes=take_tuple,
+        )
         if not extra_discarded:
             return kept, discarded, decisions
         reason_by_id = {item["clip_id"]: item["reason"] for item in diagnostics}
