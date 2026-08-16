@@ -9,7 +9,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 HARD_CAP_USD = 0.50
-MAX_OUTPUT_TOKENS = 300
+MAX_OUTPUT_TOKENS = 600
 
 PRICES = {
     "groq:gpt-oss-20b": (0.075, 0.30),
@@ -205,6 +205,7 @@ def call_gemini(prompt: str, spend: Spend, model: str) -> tuple[dict, dict]:
         "contents": [{"parts": [{"text": prompt}]}],
         "generationConfig": {
             "maxOutputTokens": MAX_OUTPUT_TOKENS,
+            "thinkingConfig": {"thinkingLevel": "minimal"},
             "responseMimeType": "application/json",
             "responseJsonSchema": SCHEMA,
         },
@@ -214,7 +215,11 @@ def call_gemini(prompt: str, spend: Spend, model: str) -> tuple[dict, dict]:
         {"x-goog-api-key": key},
         payload,
     )
-    text = raw["candidates"][0]["content"]["parts"][0]["text"]
+    parts = raw["candidates"][0]["content"].get("parts") or []
+    text = "".join(str(part.get("text") or "") for part in parts if isinstance(part, dict))
+    if not text.strip():
+        finish = raw.get("candidates", [{}])[0].get("finishReason")
+        raise ValueError(f"gemini returned empty structured text; finishReason={finish}")
     usage = raw.get("usageMetadata") or {}
     in_tok = int(usage.get("promptTokenCount") or estimated_tokens(prompt))
     out_tok = int(usage.get("candidatesTokenCount") or estimated_tokens(text))
@@ -284,6 +289,16 @@ def run_model(name: str, fn, cases: list[dict], spend: Spend) -> dict:
     }
 
 
+def label_signature(row: dict, case: dict) -> dict[str, str] | None:
+    if row.get("status") != "ok":
+        return None
+    expected_ids = {clip_id for clip_id, _text, _expected in case["candidates"]}
+    try:
+        return normalize(row.get("result") or {}, expected_ids)
+    except Exception:
+        return None
+
+
 def main() -> None:
     missing = [name for name in ("GROQ_API_KEY", "GEMINI_API_KEY") if not os.environ.get(name)]
     if missing:
@@ -300,7 +315,7 @@ def main() -> None:
     for case in CASES:
         gr = groq_rows[case["id"]]
         lr = lite_rows[case["id"]]
-        if gr["status"] != "ok" or lr["status"] != "ok" or gr.get("result") != lr.get("result"):
+        if label_signature(gr, case) != label_signature(lr, case):
             escalation_cases.append(case)
     if escalation_cases:
         reports.append(run_model("gemini-3.6-flash", lambda p, s: call_gemini(p, s, "gemini-3.6-flash"), escalation_cases, spend))
@@ -311,6 +326,7 @@ def main() -> None:
         "reserved_cost_usd": round(spend.reserved, 8),
         "actual_estimated_cost_usd": round(spend.actual, 8),
         "case_count": len(CASES),
+        "escalation_case_count": len(escalation_cases),
         "models": reports,
     }
     Path("artifacts").mkdir(exist_ok=True)
@@ -319,6 +335,7 @@ def main() -> None:
         "hard_cap_usd": out["hard_cap_usd"],
         "reserved_cost_usd": out["reserved_cost_usd"],
         "actual_estimated_cost_usd": out["actual_estimated_cost_usd"],
+        "escalation_case_count": out["escalation_case_count"],
         "models": [{"model": r["model"], "label_accuracy": r["label_accuracy"], "winner_accuracy": r["winner_accuracy"]} for r in reports],
     }, indent=2))
 
