@@ -29,6 +29,13 @@ _SCRIPT_META_RE = re.compile(
     r"\bhow\s+do\s+(?:i|you)\s+(?:say|pronounce)\b",
     re.IGNORECASE,
 )
+_DIRECT_RECORDING_META_RE = re.compile(
+    r"\b(?:this|it)\s+(?:is|'s)\s+(?:so\s+|really\s+|too\s+)?hard\s+to\s+(?:make|record|film)\s+(?:a|this|the)\s+(?:video|clip)\b|"
+    r"\bhow\s+to\s+(?:start|end|finish|close)\s+(?:a\s+|the\s+|this\s+)?(?:tiktok\s+shop\s+|tiktok\s+)?(?:video|videos|clip|clips)\b|"
+    r"\b(?:need|have|trying)\s+to\s+(?:do|make|say|add|give)\s+(?:a|the|my)\s+call\s+to\s+action\b|"
+    r"\bcall\s+to\s+action\s+to\s+(?:close|end|finish)\b",
+    re.IGNORECASE,
+)
 _SHORT_CORRECTION_RE = re.compile(
     r"^\s*(?:no|nah|nope)\s*[,!.]?\s*(?:it|that|this)\b",
     re.IGNORECASE,
@@ -43,6 +50,17 @@ def _is_stop_anchor(take: CandidateTake) -> bool:
 
 def _is_script_meta_anchor(take: CandidateTake) -> bool:
     return bool(_SCRIPT_META_RE.search(str(take.text or ""))) and take.duration_sec <= 4.5
+
+
+def _is_direct_recording_meta(take: CandidateTake) -> bool:
+    """Identify speech about making the recording rather than speech for the viewer.
+
+    Keep this narrow and lexical: the take itself must explicitly discuss recording a
+    video, how to open/close a video, or constructing a call-to-action. Product speech
+    that merely contains words such as ``video`` or ``action`` fails open.
+    """
+    text = str(take.text or "").strip()
+    return bool(text and take.duration_sec <= 8.0 and _DIRECT_RECORDING_META_RE.search(text))
 
 
 def _is_strong_stop_anchor(take: CandidateTake) -> bool:
@@ -145,8 +163,9 @@ def apply_recording_process_neighbors(
             anchors_by_id[take.clip_id] = take
     anchors = tuple(sorted(anchors_by_id.values(), key=lambda take: (take.source_order, take.start, take.end)))
     script_meta_anchors = tuple(take for take in all_candidates if _is_script_meta_anchor(take))
+    direct_meta_ids = {take.clip_id for take in kept_tuple if _is_direct_recording_meta(take)}
 
-    if not anchors and not script_meta_anchors:
+    if not anchors and not script_meta_anchors and not direct_meta_ids:
         return kept_tuple, (), ()
 
     removed = []
@@ -157,7 +176,10 @@ def apply_recording_process_neighbors(
         reason = None
         anchor_id = None
 
-        if _is_strong_stop_anchor(take):
+        if take.clip_id in direct_meta_ids:
+            reason = "direct_recording_process_meta"
+            anchor_id = take.clip_id
+        elif _is_strong_stop_anchor(take):
             reason = "explicit_recording_stop_anchor"
             anchor_id = take.clip_id
         else:
@@ -239,6 +261,7 @@ def install_recording_process_context_cleanup() -> None:
 
         reason_by_id = {item["clip_id"]: item["reason"] for item in diagnostics}
         confidence_by_reason = {
+            "direct_recording_process_meta": 0.98,
             "explicit_recording_stop_anchor": 0.98,
             "failed_take_before_explicit_stop_with_visual_reset": 0.96,
             "failed_retry_before_explicit_stop": 0.96,
