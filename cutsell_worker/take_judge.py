@@ -36,6 +36,50 @@ def _content_tokens(text: str) -> tuple[str, ...]:
     return tuple(token for token in _tokens(text) if len(token) >= 3 and token not in _CONTENT_STOP)
 
 
+def _edit_distance_at_most_one(left: str, right: str) -> bool:
+    """Return True only for a single-character ASR drift between content words."""
+    if left == right:
+        return True
+    if abs(len(left) - len(right)) > 1:
+        return False
+    if len(left) == len(right):
+        return sum(a != b for a, b in zip(left, right)) <= 1
+    short, long = (left, right) if len(left) < len(right) else (right, left)
+    i = j = mismatches = 0
+    while i < len(short) and j < len(long):
+        if short[i] == long[j]:
+            i += 1
+            j += 1
+            continue
+        mismatches += 1
+        if mismatches > 1:
+            return False
+        j += 1
+    return True
+
+
+def _near_prefix_tokens(left: tuple[str, ...], right: tuple[str, ...]) -> bool:
+    """Allow one narrow content-word ASR typo inside an otherwise exact prefix."""
+    if len(right) < len(left):
+        return False
+    mismatches = []
+    for candidate_token, reference_token in zip(left, right[: len(left)]):
+        if candidate_token == reference_token:
+            continue
+        mismatches.append((candidate_token, reference_token))
+    if len(mismatches) != 1:
+        return False
+    candidate_token, reference_token = mismatches[0]
+    if (
+        len(candidate_token) < 4
+        or len(reference_token) < 4
+        or candidate_token in _CONTENT_STOP
+        or reference_token in _CONTENT_STOP
+    ):
+        return False
+    return _edit_distance_at_most_one(candidate_token, reference_token)
+
+
 def _handling_failure_penalty(signal) -> float:
     """Penalize a visually broken product take without turning it into a delete rule.
 
@@ -72,10 +116,6 @@ def score_take(take: CandidateTake) -> RankedTake:
         score = 0.70 * completeness + 0.30 * duration_fit
         return RankedTake(take.clip_id, round(_bounded(score), 4), "text_timing_baseline")
 
-    # Clean Cut Best Take must judge the *delivery*, not only whether the words are
-    # complete. Dense local MediaPipe/OpenCV signals expose expression, gesture,
-    # energy and distraction evidence; include them directly so the RunPod-local path
-    # can prefer a natural successful delivery without an external multimodal provider.
     score = (
         0.16 * completeness
         + 0.06 * duration_fit
@@ -99,9 +139,10 @@ def score_take(take: CandidateTake) -> RankedTake:
 def _material_prefix_fragment(candidate: CandidateTake, reference: CandidateTake) -> bool:
     """Return True when candidate is clearly an abandoned prefix of a fuller retry.
 
-    This is group-relative ranking evidence only. It does not delete the fragment and
-    it does not use semantic/sales roles. Exact lexical prefix plus a meaningful length
-    and duration advantage is required so ordinary concise alternatives are protected.
+    Exact lexical prefix is preferred. One single-character ASR drift in a >=4-letter
+    content word is also accepted when every other aligned token is exact. The latter
+    covers transcription pairs such as ``crop``/``croc`` without turning semantic
+    similarity into a broad prefix rule.
     """
     left = _tokens(candidate.text)
     right = _tokens(reference.text)
@@ -111,16 +152,11 @@ def _material_prefix_fragment(candidate: CandidateTake, reference: CandidateTake
         return False
     if candidate.duration_sec + 0.70 > reference.duration_sec:
         return False
-    return right[: len(left)] == left
+    exact_prefix = right[: len(left)] == left
+    return exact_prefix or _near_prefix_tokens(left, right)
 
 
 def _repetitive_restart_fragment(candidate: CandidateTake, reference: CandidateTake) -> bool:
-    """Detect a retry fragment dominated by repeated words when a fuller take exists.
-
-    This is deliberately group-relative. A repeated slogan or intentional phrase is
-    untouched unless another take in the same retry group is materially longer and
-    shares nearly all of the fragment's vocabulary.
-    """
     left = _tokens(candidate.text)
     right = _tokens(reference.text)
     if not 4 <= len(left) <= 10:
@@ -141,14 +177,6 @@ def _repetitive_restart_fragment(candidate: CandidateTake, reference: CandidateT
 
 
 def _restart_tail_fragment(candidate: CandidateTake, reference: CandidateTake) -> bool:
-    """Penalize a take that starts the idea, then audibly resets before a fuller retry.
-
-    ``okay now ...`` can be legitimate creator speech, so the phrase is never a penalty
-    by itself. It only counts when it occurs in the latter half of a candidate, another
-    take in the *same retry group* is materially fuller/longer, and the pre-reset content
-    substantially overlaps that fuller take. This targets failed delivery tails without
-    imposing sales semantics or deleting either candidate.
-    """
     text = str(candidate.text or "")
     match = _RESTART_TAIL_RE.search(text)
     if match is None:
@@ -170,8 +198,6 @@ def _restart_tail_fragment(candidate: CandidateTake, reference: CandidateTake) -
     if overlap < 3 or overlap / max(1, len(set(prefix))) < 0.60:
         return False
 
-    # The restart marker must actually be a tail, not the user's intended setup at the
-    # beginning of a sentence.
     marker_token_index = len(_tokens(text[: match.start()]))
     return marker_token_index >= max(3, len(left) // 2)
 
