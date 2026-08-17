@@ -1,0 +1,33 @@
+name: Run34 Dispatch Benchmark
+
+on:
+  push:
+    branches:
+      - cutsell/mobile-v1-clean
+    paths:
+      - .github/workflows/run34-dispatch-benchmark.yml
+
+permissions:
+  actions: write
+  contents: read
+
+jobs:
+  dispatch:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Dispatch existing manual Hybrid benchmark once
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          code=$(curl --silent --show-error --write-out '%{http_code}' \
+            --request POST \
+            --url "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/workflows/cutsell-unseen-clean-cut-benchmark.yml/dispatches" \
+            --header "Authorization: Bearer $GH_TOKEN" \
+            --header "Accept: application/vnd.github+json" \
+            --header "X-GitHub-Api-Version: 2022-11-28" \
+            --header "Content-Type: application/json" \
+            --data '{"ref":"cutsell/mobile-v1-clean","inputs":{"approval_token":"RUN33"}}' \
+            --output dispatch-response.txt)
+          echo "dispatch_http_status=$code"
+          test "$code" = "204"
