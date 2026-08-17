@@ -32,7 +32,7 @@ jobs:
           APPROVAL_TOKEN: ${{ inputs.approval_token }}
         run: |
           set -euo pipefail
-          test "$APPROVAL_TOKEN" = "RUN30" || { echo 'Paid Hybrid benchmark not explicitly approved for RUN30'; exit 2; }
+          test "$APPROVAL_TOKEN" = "RUN31" || { echo 'Paid Hybrid benchmark not explicitly approved for RUN31'; exit 2; }
 
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -210,7 +210,7 @@ jobs:
           if requested <= 0:
               raise SystemExit('RunPod Hybrid unseen benchmark requested zero semantic chunks')
           if availability_ratio < 0.80:
-              raise SystemExit(f'Hybrid chunk availability below Run30 floor: {available}/{requested}')
+              raise SystemExit(f'Hybrid chunk availability below Run31 floor: {available}/{requested}')
           PY
 
       - name: Upload JSON report
