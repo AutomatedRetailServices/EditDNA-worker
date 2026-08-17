@@ -37,7 +37,15 @@ jobs:
           PY
       - name: Push immutable CutSell worker image
         run: docker push "$IMAGE"
+      - name: Resolve pushed image digest
+        run: |
+          set -euo pipefail
+          docker buildx imagetools inspect "$IMAGE" | tee image-inspect.txt
+          digest=$(awk '/^Digest:/ {print $2; exit}' image-inspect.txt)
+          test -n "$digest" || { echo 'Unable to resolve pushed image digest'; exit 9; }
+          echo "IMAGE_DIGEST=$digest" >> "$GITHUB_ENV"
+          echo "image_digest=$digest" >> "$GITHUB_STEP_SUMMARY"
       - name: Print immutable image reference
         run: |
-          echo "$IMAGE"
+          echo "$IMAGE@$IMAGE_DIGEST"
           echo "build_reason=$BUILD_REASON"
