@@ -53,7 +53,7 @@ def test_disabled_settings_block_before_http():
     assert fake.calls == []
 
 
-def test_enabled_transport_uses_mock_only_and_reserves_tiny_budget():
+def test_enabled_transport_uses_mock_only_and_reconciles_to_actual_usage():
     fake = FakeSession()
     ledger = DollarBudgetLedger(2.0)
     settings = HybridProviderSettings(enabled=True)
@@ -64,12 +64,38 @@ def test_enabled_transport_uses_mock_only_and_reserves_tiny_budget():
         ledger=ledger,
         session=fake,
     )
-    result = transport(compact_payload(), 500)
+    payload = compact_payload()
+    result = transport(payload, 500)
     assert result["decisions"][0]["clip_id"] == "a"
     assert result["output_tokens"] == 41
     assert len(fake.calls) == 1
-    assert ledger.reserved_usd > 0
-    assert ledger.reserved_usd < 0.003
+
+    from cutsell_worker.hybrid_payload import estimate_tokens_from_chars
+    input_tokens = estimate_tokens_from_chars(len(json.dumps(payload, ensure_ascii=False)))
+    actual_cost = settings.estimate_cost_usd(input_tokens=input_tokens, output_tokens=41)
+    assert ledger.reserved_usd == pytest.approx(actual_cost)
+    assert ledger.reserved_usd < settings.estimate_cost_usd(input_tokens=input_tokens, output_tokens=500)
+
+
+def test_actual_usage_reconciliation_allows_multiple_small_calls_under_same_hard_cap():
+    fake = FakeSession()
+    settings = HybridProviderSettings(enabled=True, max_cost_per_edit_usd=0.0075)
+    ledger = DollarBudgetLedger(settings.max_cost_per_edit_usd)
+    transport = GoogleGeminiTransport(
+        api_key="fake",
+        model=settings.primary_model,
+        settings=settings,
+        ledger=ledger,
+        session=fake,
+    )
+
+    # Run #28 exhausted after about four chunks because every successful call retained
+    # a worst-case 500-output-token reservation. Real 41-token responses should settle
+    # to actual usage, allowing many more chunks while preserving the same $0.0075 cap.
+    for _ in range(12):
+        transport(compact_payload(), 500)
+    assert len(fake.calls) == 12
+    assert 0 < ledger.reserved_usd <= settings.max_cost_per_edit_usd
 
 
 def test_zero_budget_blocks_before_http():
