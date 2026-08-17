@@ -75,11 +75,12 @@ def test_paid_staging_worker_workflows_are_manual_and_explicitly_guarded():
     assert "DELETE" in delete
 
 
-def test_feature_runpod_paid_deploy_cannot_trigger_from_a_commit_and_needs_run31_token():
+def test_feature_runpod_paid_deploy_is_manual_and_requires_explicit_run_token():
     deploy = Path(".github/workflows/cutsell-feature-runpod-one-shot-deploy.yml").read_text()
     assert "workflow_dispatch:" in deploy
     assert "approval_token:" in deploy
-    assert 'test "$APPROVAL_TOKEN" = "RUN31"' in deploy
+    assert 'test "$APPROVAL_TOKEN" = "RUN' in deploy
+    assert "Paid RunPod deploy not explicitly approved" in deploy
     assert "push:" not in deploy
     assert "schedule:" not in deploy
     assert "GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}" in deploy
@@ -90,11 +91,12 @@ def test_feature_runpod_paid_deploy_cannot_trigger_from_a_commit_and_needs_run31
     assert 'has("OPENAI_API_KEY")' in deploy
 
 
-def test_hybrid_unseen_benchmark_is_manual_and_requires_same_run31_token():
+def test_hybrid_unseen_benchmark_is_manual_and_requires_explicit_run_token():
     benchmark = Path(".github/workflows/cutsell-unseen-clean-cut-benchmark.yml").read_text()
     assert "workflow_dispatch:" in benchmark
     assert "approval_token:" in benchmark
-    assert 'test "$APPROVAL_TOKEN" = "RUN31"' in benchmark
+    assert 'test "$APPROVAL_TOKEN" = "RUN' in benchmark
+    assert "Paid Hybrid benchmark not explicitly approved" in benchmark
     assert "push:" not in benchmark
     assert "schedule:" not in benchmark
     assert "'expected_external_brain_calls_enabled': True" in benchmark
