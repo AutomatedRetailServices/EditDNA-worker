@@ -13,6 +13,14 @@ _ALLOWED_LABELS = ["winner", "alternate", "failed", "bts", "uncertain", "keep"]
 
 
 def editorial_response_schema() -> dict[str, Any]:
+    """Keep paid structured output intentionally minimal.
+
+    The deterministic brain only needs identity, classification and confidence to apply
+    a decision. Explanatory reason strings are useful for diagnostics but are not needed
+    to edit safely, and repeating them for every candidate materially increases Gemini
+    output cost. The stable internal EditorialDecision contract still accepts an empty
+    reason_code, so vendor output can stay compact without changing downstream logic.
+    """
     return {
         "type": "object",
         "properties": {
@@ -24,9 +32,8 @@ def editorial_response_schema() -> dict[str, Any]:
                         "clip_id": {"type": "string"},
                         "label": {"type": "string", "enum": _ALLOWED_LABELS},
                         "confidence": {"type": "number", "minimum": 0.0, "maximum": 1.0},
-                        "reason_code": {"type": "string"},
                     },
-                    "required": ["clip_id", "label", "confidence", "reason_code"],
+                    "required": ["clip_id", "label", "confidence"],
                     "additionalProperties": False,
                 },
             }
@@ -44,9 +51,9 @@ def _prompt_text(compact_payload: Mapping[str, Any]) -> str:
         "A winner is the strongest complete intended delivery. Alternate is usable but "
         "not the best. Failed is a stumble, false start, word-search, incomplete or "
         "broken delivery. BTS is creator self-talk, recording-process commentary, "
-        "frustration, self-review or breaking character. Return one decision for every "
-        "candidate and exactly one winner only when justified; use uncertain when the "
-        "evidence is insufficient.\n\n"
+        "frustration, self-review or breaking character. Return exactly one compact "
+        "decision per candidate using only clip_id, label and confidence. Exactly one "
+        "winner only when justified; use uncertain when evidence is insufficient.\n\n"
         + json.dumps(dict(compact_payload), separators=(",", ":"), ensure_ascii=False)
     )
 
