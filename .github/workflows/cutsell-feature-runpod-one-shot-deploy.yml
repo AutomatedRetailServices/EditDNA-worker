@@ -7,11 +7,6 @@ on:
         description: 'Explicit paid-deploy approval token'
         required: true
         type: string
-  push:
-    branches:
-      - cutsell/mobile-v1-clean
-    paths:
-      - .github/cutsell-run28-approved-deploy-trigger.txt
 
 permissions:
   contents: read
@@ -31,14 +26,9 @@ jobs:
         shell: bash
         env:
           APPROVAL_TOKEN: ${{ inputs.approval_token }}
-          EVENT_NAME: ${{ github.event_name }}
         run: |
           set -euo pipefail
-          if [ "$EVENT_NAME" = "push" ]; then
-            echo 'Using one-shot RUN28 user-approved push trigger'
-          else
-            test "$APPROVAL_TOKEN" = "RUN28" || { echo 'Paid RunPod deploy not explicitly approved for RUN28'; exit 2; }
-          fi
+          test "$APPROVAL_TOKEN" = "RUN28" || { echo 'Paid RunPod deploy not explicitly approved for RUN28'; exit 2; }
 
       - name: Validate approved deployment inputs
         shell: bash
