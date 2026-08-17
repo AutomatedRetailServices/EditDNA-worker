@@ -1,7 +1,11 @@
 name: CutSell Feature RunPod One-Shot Delete
 
 on:
-  workflow_dispatch:
+  push:
+    branches:
+      - cutsell/mobile-v1-clean
+    paths:
+      - .github/workflows/cutsell-feature-runpod-one-shot-delete.yml
 
 permissions:
   contents: read
@@ -12,7 +16,7 @@ jobs:
     timeout-minutes: 5
     env:
       RUNPOD_API_KEY: ${{ secrets.RUNPOD_API_KEY }}
-      POD_ID: 6sc5vjibu9imxn
+      POD_ID: ae1keiwlextblv
     steps:
       - name: Validate exact approved staging Pod
         shell: bash
@@ -38,4 +42,4 @@ jobs:
           echo "RunPod delete HTTP status: $code"
           test "$code" = "204"
 
-# Run30 Pod deleted successfully; workflow restored to manual-only.
+# Run31 benchmark completed; terminate exact Pod above.
