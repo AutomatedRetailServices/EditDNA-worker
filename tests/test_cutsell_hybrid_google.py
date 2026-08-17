@@ -36,29 +36,46 @@ def test_request_uses_structured_json_and_no_network_or_key_material():
     assert "http" not in serialized.lower()
 
 
-def test_schema_constrains_labels_and_confidence():
+def test_schema_constrains_labels_confidence_and_omits_paid_reason_text():
     item = editorial_response_schema()["properties"]["decisions"]["items"]
     assert "winner" in item["properties"]["label"]["enum"]
     assert item["properties"]["confidence"]["minimum"] == 0.0
     assert item["properties"]["confidence"]["maximum"] == 1.0
+    assert item["required"] == ["clip_id", "label", "confidence"]
+    assert "reason_code" not in item["properties"]
     assert item["additionalProperties"] is False
 
 
-def test_parser_extracts_decisions_and_usage_and_joins_text_parts():
+def test_parser_extracts_compact_decisions_and_usage_and_joins_text_parts():
     encoded = json.dumps({"decisions": [
-        {"clip_id": "a", "label": "failed", "confidence": 0.96, "reason_code": "restart"},
-        {"clip_id": "b", "label": "winner", "confidence": 0.98, "reason_code": "complete_take"},
+        {"clip_id": "a", "label": "failed", "confidence": 0.96},
+        {"clip_id": "b", "label": "winner", "confidence": 0.98},
     ]})
     split = len(encoded) // 2
     response = {
         "candidates": [{
             "content": {"parts": [{"text": encoded[:split]}, {"text": encoded[split:]}]}
         }],
-        "usageMetadata": {"candidatesTokenCount": 73},
+        "usageMetadata": {"candidatesTokenCount": 51},
     }
     parsed = parse_gemini_generate_content_response(response)
     assert parsed["decisions"][1]["clip_id"] == "b"
-    assert parsed["output_tokens"] == 73
+    assert parsed["output_tokens"] == 51
+
+
+def test_compact_schema_materially_reduces_twelve_candidate_output_shape():
+    compact = {"decisions": [
+        {"clip_id": f"c{i}", "label": "keep", "confidence": 0.97}
+        for i in range(12)
+    ]}
+    verbose_baseline = {"decisions": [
+        {"clip_id": f"c{i}", "label": "keep", "confidence": 0.97, "reason_code": "valid_speech"}
+        for i in range(12)
+    ]}
+    compact_chars = len(json.dumps(compact, separators=(",", ":")))
+    verbose_chars = len(json.dumps(verbose_baseline, separators=(",", ":")))
+    assert compact_chars < verbose_chars * 0.70
+    assert compact_chars < 700
 
 
 def test_parser_rejects_missing_or_invalid_json():
