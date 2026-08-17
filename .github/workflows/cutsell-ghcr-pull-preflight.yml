@@ -4,9 +4,9 @@ on:
   workflow_dispatch:
     inputs:
       image:
-        description: "Immutable CutSell worker image tag to validate"
+        description: "Immutable CutSell worker image to validate"
         required: true
-        default: "ghcr.io/automatedretailservices/cutsell-worker:c3e44001efbd52db1fa55d054c1cb6971f6d5748"
+        default: "ghcr.io/automatedretailservices/cutsell-worker@sha256:cedf4b09c42a518fcb85873789c7bad306f7ffd428c8b5b138c2343de82500f8"
 
 permissions:
   contents: read
@@ -26,8 +26,9 @@ jobs:
           docker buildx imagetools inspect "$IMAGE" | tee image-inspect.txt
           digest=$(awk '/^Digest:/ {print $2; exit}' image-inspect.txt)
           test -n "$digest" || { echo 'Unable to resolve image digest'; exit 9; }
+          test "$digest" = "sha256:cedf4b09c42a518fcb85873789c7bad306f7ffd428c8b5b138c2343de82500f8" || { echo 'Unexpected worker digest'; exit 10; }
           echo "image_digest=$digest" >> "$GITHUB_STEP_SUMMARY"
-          echo "$IMAGE@$digest"
+          echo "$IMAGE"
       - name: Verify clean runtime imports and base CUDA stack
         run: |
           docker run --rm --entrypoint python "$IMAGE" - <<'PY'
