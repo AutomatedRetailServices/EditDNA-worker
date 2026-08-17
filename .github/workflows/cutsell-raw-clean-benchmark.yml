@@ -15,11 +15,6 @@ on:
         description: "Optional comma-separated exact S3 keys"
         required: false
         default: ""
-  push:
-    branches:
-      - cutsell/mobile-v1-clean
-    paths:
-      - .github/cutsell-raw-clean-trigger.txt
 
 permissions:
   contents: read
@@ -35,15 +30,18 @@ jobs:
       AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
       AWS_REGION: ${{ secrets.AWS_REGION }}
       S3_BUCKET: ${{ secrets.S3_BUCKET }}
-      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
       CUTSELL_VALIDATION_PREFIX: Editdna longform validation/
       CUTSELL_EDITORIAL_MODE: clean_cut
       CUTSELL_ASR_MODEL: ${{ inputs.asr_model || 'medium' }}
       CUTSELL_CLEAN_CUT_JUDGE: "0"
-      CUTSELL_SEMANTIC_MODEL: gpt-4o-mini
-      CUTSELL_VISUAL_MODEL: gpt-4o-mini
-      CUTSELL_TAKE_JUDGE_MODEL: gpt-4o-mini
-      VIDEO_LIMIT: ${{ github.event_name == 'push' && '3' || inputs.video_limit || '16' }}
+      CUTSELL_HYBRID_PROVIDER: google
+      CUTSELL_HYBRID_LLM_ENABLED: "1"
+      CUTSELL_HYBRID_PRIMARY_MODEL: gemini-3.5-flash-lite
+      CUTSELL_HYBRID_ESCALATION_MODEL: gemini-3.6-flash
+      CUTSELL_HYBRID_MAX_SESSION_USD: "0.0075"
+      CUTSELL_HYBRID_TEST_BUDGET_USD: "0.50"
+      VIDEO_LIMIT: ${{ inputs.video_limit || '16' }}
       SOURCE_KEYS: ${{ inputs.source_keys || '' }}
     steps:
       - uses: actions/checkout@v4
@@ -73,7 +71,7 @@ jobs:
         run: |
           set -euo pipefail
           missing=0
-          for key in AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_REGION S3_BUCKET OPENAI_API_KEY; do
+          for key in AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_REGION S3_BUCKET GEMINI_API_KEY; do
             [ -n "${!key:-}" ] || missing=1
           done
           [ "$missing" = "1" ] || exit 0
@@ -81,7 +79,7 @@ jobs:
           curl --fail --silent --show-error --url "https://rest.runpod.io/v1/templates" --header "Authorization: Bearer $RUNPOD_API_KEY" --output templates.json
           TEMPLATE=$(jq -c '[.[] | select(.name == "EditDNA-Worker-2")][0]' templates.json)
           test "$TEMPLATE" != "null" || { echo 'EditDNA-Worker-2 template not found'; exit 4; }
-          for key in AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_REGION S3_BUCKET OPENAI_API_KEY; do
+          for key in AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_REGION S3_BUCKET GEMINI_API_KEY; do
             if [ -z "${!key:-}" ]; then
               value=$(printf '%s' "$TEMPLATE" | jq -r --arg key "$key" '.env[$key] // empty')
               test -n "$value" || { echo "$key missing"; exit 5; }
@@ -89,6 +87,14 @@ jobs:
               printf '%s=%s\n' "$key" "$value" >> "$GITHUB_ENV"
             fi
           done
+
+      - name: Refuse legacy OpenAI benchmark configuration
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -z "${OPENAI_API_KEY:-}" || { echo 'OPENAI_API_KEY must not be present in Hybrid Run28 benchmark'; exit 6; }
+          test "${CUTSELL_HYBRID_PROVIDER:-}" = "google" || { echo 'Hybrid provider must be google'; exit 6; }
+          test "${CUTSELL_HYBRID_LLM_ENABLED:-}" = "1" || { echo 'Hybrid LLM must be explicitly enabled'; exit 6; }
 
       - name: Run RAW to CLEAN CUT benchmark
         run: |
@@ -99,7 +105,7 @@ jobs:
           raw = os.environ.get('SOURCE_KEYS','').strip()
           keys = [x.strip() for x in raw.split(',') if x.strip()] or None
           report = run_golden_benchmark(
-              video_limit=int(os.environ.get('VIDEO_LIMIT') or 3),
+              video_limit=int(os.environ.get('VIDEO_LIMIT') or 16),
               mode='full',
               prefix=os.environ['CUTSELL_VALIDATION_PREFIX'],
               preview_dir='cutsell-raw-clean-previews',
@@ -108,6 +114,8 @@ jobs:
           report['benchmark_suite'] = 'raw_to_clean_cut'
           report['validation_prefix'] = os.environ['CUTSELL_VALIDATION_PREFIX']
           report['dense_local_performance_expected'] = True
+          report['hybrid_provider_expected'] = 'google'
+          report['hybrid_primary_model_expected'] = os.environ.get('CUTSELL_HYBRID_PRIMARY_MODEL')
           open('cutsell-raw-clean-benchmark.json','w',encoding='utf-8').write(
               json.dumps(report,ensure_ascii=False,indent=2,sort_keys=True)
           )
@@ -118,6 +126,9 @@ jobs:
               'total_input_duration_sec','total_selected_duration_sec',
               'selected_to_input_ratio','total_selected','total_alternates','total_discarded',
               'provider_status_counts','edit_mode_counts',
+              'hybrid_editorial_requested_chunk_count',
+              'hybrid_editorial_available_chunk_count',
+              'hybrid_editorial_deleted_count',
           ]
           print(json.dumps({k:report.get(k) for k in summary_keys},indent=2))
           for item in report.get('results') or []:
@@ -126,6 +137,9 @@ jobs:
               print(json.dumps({
                   'source_key': evaluation.get('source_key'),
                   'local_performance': local,
+                  'hybrid_editorial_requested_chunk_count': evaluation.get('hybrid_editorial_requested_chunk_count'),
+                  'hybrid_editorial_available_chunk_count': evaluation.get('hybrid_editorial_available_chunk_count'),
+                  'hybrid_editorial_deleted_count': evaluation.get('hybrid_editorial_deleted_count'),
               }, ensure_ascii=False))
           if report['execution_failure_count']:
               raise SystemExit('RAW to CLEAN CUT execution failure')
