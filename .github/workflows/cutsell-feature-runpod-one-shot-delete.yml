@@ -1,11 +1,7 @@
 name: CutSell Feature RunPod One-Shot Delete
 
 on:
-  push:
-    branches:
-      - cutsell/mobile-v1-clean
-    paths:
-      - .github/workflows/cutsell-feature-runpod-one-shot-delete.yml
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -30,7 +26,7 @@ jobs:
           name=$(jq -r --arg id "$POD_ID" '[.[] | select(.id == $id)][0].name // empty' pods.json)
           test "$name" = "cutsell-staging-worker" || { echo 'Pod ID is not cutsell-staging-worker; refusing delete'; exit 4; }
 
-      - name: Terminate completed staging GPU worker
+      - name: Terminate exact staging GPU worker
         shell: bash
         run: |
           set -euo pipefail
@@ -42,4 +38,4 @@ jobs:
           echo "RunPod delete HTTP status: $code"
           test "$code" = "204"
 
-# benchmark #29 completed; terminate exact Pod above
+# Run29 Pod already deleted successfully; workflow restored to manual-only.
