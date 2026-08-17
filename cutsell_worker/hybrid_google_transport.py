@@ -45,6 +45,17 @@ def _compact_output_token_ceiling(compact_payload: Mapping[str, Any], requested_
     return min(hard_max, schema_ceiling)
 
 
+def _raw_output_tokens(raw: Mapping[str, Any]) -> int:
+    """Read Gemini-reported billed candidate tokens even when structured parsing fails."""
+    usage = raw.get("usageMetadata") or {}
+    if not isinstance(usage, Mapping):
+        return 0
+    try:
+        return max(0, int(usage.get("candidatesTokenCount") or 0))
+    except (TypeError, ValueError):
+        return 0
+
+
 @dataclass
 class DollarBudgetLedger:
     max_usd: float
@@ -83,6 +94,15 @@ class GoogleGeminiTransport:
         if self.model not in {self.settings.primary_model, self.settings.escalation_model}:
             raise ValueError("Gemini model not approved by hybrid provider policy")
 
+    def _reconcile_reported_usage(self, *, input_tokens: int, output_tokens: int, estimated_cost: float) -> None:
+        actual_cost = self.settings.estimate_cost_usd(
+            input_tokens=input_tokens,
+            output_tokens=max(0, int(output_tokens)),
+            escalation=self.escalation,
+        )
+        if actual_cost < estimated_cost:
+            self.ledger.release(estimated_cost - actual_cost)
+
     def __call__(self, compact_payload: Mapping[str, Any], max_output_tokens: int) -> Mapping[str, Any]:
         if not self.settings.enabled:
             raise RuntimeError("hybrid paid transport is disabled")
@@ -100,10 +120,10 @@ class GoogleGeminiTransport:
             raise RuntimeError("hybrid edit/test dollar budget exhausted")
 
         # Reserve the bounded worst-case request before HTTP so the hard edit cap can
-        # never be crossed optimistically. After a successful structured response,
-        # reconcile the reservation down to actual reported output usage. If HTTP or
-        # parsing fails, keep the full reservation because the provider may still have
-        # billed the request.
+        # never be crossed optimistically. Network/HTTP failures retain the full reserve
+        # because billed usage is unknown. Once Gemini returns an HTTP-success JSON body,
+        # however, usageMetadata is authoritative enough to reconcile the reservation
+        # even if the structured decision payload itself is malformed or truncated.
         body = build_gemini_generate_content_request(
             compact_payload,
             max_output_tokens=effective_output_tokens,
@@ -120,14 +140,22 @@ class GoogleGeminiTransport:
         raw = response.json()
         if not isinstance(raw, Mapping):
             raise ValueError("Gemini HTTP response must be an object")
-        parsed = parse_gemini_generate_content_response(raw)
 
-        actual_output_tokens = max(0, int(parsed.get("output_tokens") or 0))
-        actual_cost = self.settings.estimate_cost_usd(
+        reported_output_tokens = _raw_output_tokens(raw)
+        try:
+            parsed = parse_gemini_generate_content_response(raw)
+        except ValueError:
+            self._reconcile_reported_usage(
+                input_tokens=input_tokens,
+                output_tokens=reported_output_tokens,
+                estimated_cost=estimated_cost,
+            )
+            raise
+
+        actual_output_tokens = max(0, int(parsed.get("output_tokens") or reported_output_tokens))
+        self._reconcile_reported_usage(
             input_tokens=input_tokens,
             output_tokens=actual_output_tokens,
-            escalation=self.escalation,
+            estimated_cost=estimated_cost,
         )
-        if actual_cost < estimated_cost:
-            self.ledger.release(estimated_cost - actual_cost)
         return parsed
