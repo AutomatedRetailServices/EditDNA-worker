@@ -2,11 +2,6 @@ name: CutSell Feature RunPod One-Shot Delete
 
 on:
   workflow_dispatch:
-  push:
-    branches:
-      - cutsell/mobile-v1-clean
-    paths:
-      - .github/workflows/cutsell-feature-runpod-one-shot-delete.yml
 
 permissions:
   contents: read
@@ -43,4 +38,4 @@ jobs:
           echo "RunPod delete HTTP status: $code"
           test "$code" = "204"
 
-# Run33 exact staging Pod cleanup trigger.
+# Run33 Pod deleted successfully; workflow restored to manual-only.
