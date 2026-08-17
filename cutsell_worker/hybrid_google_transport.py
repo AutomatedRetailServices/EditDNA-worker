@@ -19,6 +19,24 @@ from .hybrid_payload import estimate_tokens_from_chars
 from .hybrid_provider_settings import HybridProviderSettings
 
 
+def _compact_output_token_ceiling(compact_payload: Mapping[str, Any], requested_max: int) -> int:
+    """Derive a conservative worst-case output ceiling for the compact decision schema.
+
+    The compact Gemini contract emits only clip_id, label and confidence. Reserving the
+    historical flat 500-token maximum for every call caused the per-edit hard COGS
+    ledger to reject later requests even when the schema could not reasonably consume
+    that much output. Keep a generous fixed floor plus per-candidate headroom, while
+    never exceeding the caller's existing hard maximum.
+    """
+    hard_max = max(1, int(requested_max))
+    raw_candidates = compact_payload.get("candidates")
+    candidate_count = len(raw_candidates) if isinstance(raw_candidates, (list, tuple)) else 0
+    if candidate_count <= 0:
+        return hard_max
+    schema_ceiling = max(160, 48 + (24 * candidate_count))
+    return min(hard_max, schema_ceiling)
+
+
 @dataclass
 class DollarBudgetLedger:
     max_usd: float
@@ -62,9 +80,10 @@ class GoogleGeminiTransport:
             raise RuntimeError("hybrid paid transport is disabled")
 
         input_tokens = estimate_tokens_from_chars(len(json.dumps(dict(compact_payload), ensure_ascii=False)))
+        effective_output_tokens = _compact_output_token_ceiling(compact_payload, max_output_tokens)
         estimated_cost = self.settings.estimate_cost_usd(
             input_tokens=input_tokens,
-            output_tokens=max_output_tokens,
+            output_tokens=effective_output_tokens,
             escalation=self.escalation,
         )
         if not self.settings.allows_estimated_session_cost(estimated_cost):
@@ -72,13 +91,14 @@ class GoogleGeminiTransport:
         if not self.ledger.reserve(estimated_cost):
             raise RuntimeError("hybrid edit/test dollar budget exhausted")
 
-        # Reserve the worst-case request before HTTP so the hard edit cap can never be
-        # crossed optimistically. After a successful structured response, reconcile the
-        # reservation down to actual reported output usage. If HTTP/parsing fails, keep
-        # the full reservation because the provider may still have billed the request.
+        # Reserve the bounded worst-case request before HTTP so the hard edit cap can
+        # never be crossed optimistically. After a successful structured response,
+        # reconcile the reservation down to actual reported output usage. If HTTP or
+        # parsing fails, keep the full reservation because the provider may still have
+        # billed the request.
         body = build_gemini_generate_content_request(
             compact_payload,
-            max_output_tokens=max_output_tokens,
+            max_output_tokens=effective_output_tokens,
             thinking_level="minimal",
         )
         endpoint = f"https://generativelanguage.googleapis.com/v1beta/models/{self.model}:generateContent"
