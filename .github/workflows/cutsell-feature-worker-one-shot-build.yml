@@ -16,7 +16,7 @@ jobs:
     runs-on: ubuntu-latest
     env:
       IMAGE: ghcr.io/automatedretailservices/cutsell-worker:${{ github.sha }}
-      BUILD_REASON: hybrid-compact-6-dynamic-output-ceiling
+      BUILD_REASON: hybrid-compact-6-run31-output-headroom-320
     steps:
       - uses: actions/checkout@v4
       - name: Login to GitHub Container Registry
