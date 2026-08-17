@@ -29,27 +29,32 @@ def test_request_uses_structured_json_and_no_network_or_key_material():
     assert config["maxOutputTokens"] == 500
     assert config["thinkingConfig"]["thinkingLevel"] == "minimal"
     assert config["responseMimeType"] == "application/json"
-    assert config["responseJsonSchema"] == editorial_response_schema()
+    assert config["responseJsonSchema"] == editorial_response_schema(2)
     assert "responseFormat" not in config
     serialized = json.dumps(request)
     assert "API_KEY" not in serialized
     assert "http" not in serialized.lower()
 
 
-def test_schema_constrains_labels_confidence_and_omits_paid_reason_text():
-    item = editorial_response_schema()["properties"]["decisions"]["items"]
+def test_schema_constrains_labels_confidence_omits_echoed_ids_and_locks_count():
+    schema = editorial_response_schema(6)
+    decisions = schema["properties"]["decisions"]
+    item = decisions["items"]
     assert "winner" in item["properties"]["label"]["enum"]
     assert item["properties"]["confidence"]["minimum"] == 0.0
     assert item["properties"]["confidence"]["maximum"] == 1.0
-    assert item["required"] == ["clip_id", "label", "confidence"]
+    assert item["required"] == ["label", "confidence"]
+    assert "clip_id" not in item["properties"]
     assert "reason_code" not in item["properties"]
     assert item["additionalProperties"] is False
+    assert decisions["minItems"] == 6
+    assert decisions["maxItems"] == 6
 
 
-def test_parser_extracts_compact_decisions_and_usage_and_joins_text_parts():
+def test_parser_extracts_ordered_compact_decisions_and_usage_and_joins_text_parts():
     encoded = json.dumps({"decisions": [
-        {"clip_id": "a", "label": "failed", "confidence": 0.96},
-        {"clip_id": "b", "label": "winner", "confidence": 0.98},
+        {"label": "failed", "confidence": 0.96},
+        {"label": "winner", "confidence": 0.98},
     ]})
     split = len(encoded) // 2
     response = {
@@ -59,31 +64,36 @@ def test_parser_extracts_compact_decisions_and_usage_and_joins_text_parts():
         "usageMetadata": {"candidatesTokenCount": 51},
     }
     parsed = parse_gemini_generate_content_response(response)
-    assert parsed["decisions"][1]["clip_id"] == "b"
+    assert parsed["decisions"][1]["label"] == "winner"
+    assert "clip_id" not in parsed["decisions"][1]
     assert parsed["output_tokens"] == 51
 
 
-def test_compact_schema_materially_reduces_twelve_candidate_output_shape():
-    compact = {"decisions": [
-        {"clip_id": f"c{i}", "label": "keep", "confidence": 0.97}
+def test_ordered_schema_materially_reduces_twelve_candidate_output_shape():
+    ordered = {"decisions": [
+        {"label": "keep", "confidence": 0.97}
+        for _ in range(12)
+    ]}
+    prior_compact = {"decisions": [
+        {"clip_id": f"candidate_with_long_runtime_id_{i}", "label": "keep", "confidence": 0.97}
         for i in range(12)
     ]}
-    verbose_baseline = {"decisions": [
-        {"clip_id": f"c{i}", "label": "keep", "confidence": 0.97, "reason_code": "valid_speech"}
-        for i in range(12)
-    ]}
-    compact_chars = len(json.dumps(compact, separators=(",", ":")))
-    verbose_chars = len(json.dumps(verbose_baseline, separators=(",", ":")))
-    assert compact_chars < verbose_chars * 0.70
-    assert compact_chars < 700
+    ordered_chars = len(json.dumps(ordered, separators=(",", ":")))
+    prior_chars = len(json.dumps(prior_compact, separators=(",", ":")))
+    assert ordered_chars < prior_chars * 0.60
+    assert ordered_chars < 500
 
 
-def test_parser_rejects_missing_or_invalid_json():
+def test_parser_rejects_missing_or_invalid_json_with_finish_diagnostics():
     with pytest.raises(ValueError, match="missing candidates"):
         parse_gemini_generate_content_response({})
-    with pytest.raises(ValueError, match="invalid JSON"):
+    with pytest.raises(ValueError, match="invalid JSON; finish_reason=MAX_TOKENS; output_tokens=320"):
         parse_gemini_generate_content_response({
-            "candidates": [{"content": {"parts": [{"text": "not-json"}]}}]
+            "candidates": [{
+                "finishReason": "MAX_TOKENS",
+                "content": {"parts": [{"text": "not-json"}]},
+            }],
+            "usageMetadata": {"candidatesTokenCount": 320},
         })
 
 
