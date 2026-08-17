@@ -16,7 +16,7 @@ jobs:
     runs-on: ubuntu-latest
     env:
       IMAGE: ghcr.io/automatedretailservices/cutsell-worker:${{ github.sha }}
-      BUILD_REASON: hybrid-flash-lite-six-candidate-chunks-telemetry-fix
+      BUILD_REASON: hybrid-actual-usage-budget-reconciliation
     steps:
       - uses: actions/checkout@v4
       - name: Login to GitHub Container Registry
