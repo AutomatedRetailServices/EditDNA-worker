@@ -16,7 +16,7 @@ jobs:
     runs-on: ubuntu-latest
     env:
       IMAGE: ghcr.io/automatedretailservices/cutsell-worker:${{ github.sha }}
-      BUILD_REASON: hybrid-actual-usage-budget-reconciliation
+      BUILD_REASON: hybrid-compact-output-12-candidate-chunks
     steps:
       - uses: actions/checkout@v4
       - name: Login to GitHub Container Registry
