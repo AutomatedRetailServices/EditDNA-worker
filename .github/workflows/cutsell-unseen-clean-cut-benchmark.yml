@@ -32,7 +32,7 @@ jobs:
           APPROVAL_TOKEN: ${{ inputs.approval_token }}
         run: |
           set -euo pipefail
-          test "$APPROVAL_TOKEN" = "RUN27" || { echo 'Paid Hybrid benchmark not explicitly approved for RUN27'; exit 2; }
+          test "$APPROVAL_TOKEN" = "RUN28" || { echo 'Paid Hybrid benchmark not explicitly approved for RUN28'; exit 2; }
 
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -187,6 +187,10 @@ jobs:
           if report.get('hybrid_provider') != 'google' or report.get('hybrid_primary_model') != 'gemini-3.5-flash-lite':
               raise SystemExit('report contains unexpected Hybrid provider/model')
 
+          requested = int(report.get('total_hybrid_requested_groups') or 0)
+          available = int(report.get('total_hybrid_available_groups') or 0)
+          availability_ratio = (available / requested) if requested else 0.0
+
           for uri in result.get('preview_uris') or []:
               bucket, key = parts(uri)
               destination = Path('cutsell-unseen-clean-cut-previews') / Path(key).name
@@ -200,9 +204,13 @@ jobs:
                   'total_hybrid_available_groups', 'total_hybrid_deleted',
                   'selected_to_input_ratio', 'total_clean_cut_removed', 'total_temporal_trimmed'
               )
-          }, indent=2))
+          } | {'hybrid_chunk_availability_ratio': round(availability_ratio, 4)}, indent=2))
           if report.get('execution_failure_count') or report.get('provider_failure_count'):
               raise SystemExit('RunPod Hybrid unseen benchmark reported failures')
+          if requested <= 0:
+              raise SystemExit('RunPod Hybrid unseen benchmark requested zero semantic chunks')
+          if availability_ratio < 0.80:
+              raise SystemExit(f'Hybrid chunk availability below Run28 floor: {available}/{requested}')
           PY
 
       - name: Upload JSON report
