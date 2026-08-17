@@ -35,8 +35,6 @@ class EditorialSession:
     candidates: Tuple[EditorialCandidate, ...]
     local_confidence: float
     conflict_score: float = 0.0
-    # Default preserves the existing retry/Best-Take contract. Session cleanup can
-    # request a different task while reusing exactly the same validated response type.
     task: str = "classify_best_take_within_single_bounded_creator_session"
 
 
@@ -65,8 +63,6 @@ class EditorialJudge(Protocol):
 
 @dataclass(frozen=True)
 class HybridGatePolicy:
-    """Controls *when* semantic reasoning is useful, not vendor selection."""
-
     local_accept_confidence: float = 0.90
     semantic_assist_confidence: float = 0.60
     conflict_trigger: float = 0.30
@@ -82,7 +78,7 @@ def should_request_editorial_judge(
     if not session.candidates:
         return False
     if len(session.candidates) > policy.max_candidates_per_request:
-        return True  # caller must chunk within the same mini-session
+        return True
     if session.conflict_score >= policy.conflict_trigger:
         return True
     if session.local_confidence < policy.local_accept_confidence:
@@ -162,8 +158,12 @@ def safe_editorial_judge(
             last_exc = exc
             break
 
-    reason = last_exc.__class__.__name__ if last_exc is not None else "provider_error"
-    return EditorialJudgeResult((), reason, "none", True, False)
+    if last_exc is None:
+        reason = "provider_error"
+    else:
+        detail = str(last_exc).strip().replace("\n", " ")[:120]
+        reason = last_exc.__class__.__name__ + (f":{detail}" if detail else "")
+    return EditorialJudgeResult((), reason[:160], "none", True, False)
 
 
 def resolve_hybrid_labels(
