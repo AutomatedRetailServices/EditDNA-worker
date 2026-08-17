@@ -35,6 +35,11 @@ class DollarBudgetLedger:
         self.reserved_usd += cost
         return True
 
+    def release(self, unused_usd: float) -> None:
+        """Return unused preflight reservation without ever making the ledger negative."""
+        amount = max(0.0, float(unused_usd))
+        self.reserved_usd = max(0.0, float(self.reserved_usd) - amount)
+
 
 @dataclass
 class GoogleGeminiTransport:
@@ -67,9 +72,10 @@ class GoogleGeminiTransport:
         if not self.ledger.reserve(estimated_cost):
             raise RuntimeError("hybrid edit/test dollar budget exhausted")
 
-        # The bake-off found no quality gain from spending extra thinking on the
-        # escalation model, so both paths start at minimal thinking. A future measured
-        # quality gain may change this explicitly.
+        # Reserve the worst-case request before HTTP so the hard edit cap can never be
+        # crossed optimistically. After a successful structured response, reconcile the
+        # reservation down to actual reported output usage. If HTTP/parsing fails, keep
+        # the full reservation because the provider may still have billed the request.
         body = build_gemini_generate_content_request(
             compact_payload,
             max_output_tokens=max_output_tokens,
@@ -86,4 +92,14 @@ class GoogleGeminiTransport:
         raw = response.json()
         if not isinstance(raw, Mapping):
             raise ValueError("Gemini HTTP response must be an object")
-        return parse_gemini_generate_content_response(raw)
+        parsed = parse_gemini_generate_content_response(raw)
+
+        actual_output_tokens = max(0, int(parsed.get("output_tokens") or 0))
+        actual_cost = self.settings.estimate_cost_usd(
+            input_tokens=input_tokens,
+            output_tokens=actual_output_tokens,
+            escalation=self.escalation,
+        )
+        if actual_cost < estimated_cost:
+            self.ledger.release(estimated_cost - actual_cost)
+        return parsed
