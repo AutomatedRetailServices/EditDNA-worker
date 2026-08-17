@@ -22,12 +22,9 @@ from .hybrid_provider_settings import HybridProviderSettings
 def _compact_output_token_ceiling(compact_payload: Mapping[str, Any], requested_max: int) -> int:
     """Derive a bounded output ceiling for the compact structured decision schema.
 
-    Run #31 proved the previous 192-token ceiling for six real candidate decisions was
-    too aggressive: nearly every six-candidate response failed validation while smaller
-    2-4 candidate responses remained available. Keep the compact schema and six-item
-    batching, but reserve enough room for the real clip IDs plus JSON structure. Actual
-    provider usage is still reconciled after every successful response, so this raises
-    reliability without turning the old flat 500-token reservation back on for all calls.
+    Six-item batches keep 320 tokens of headroom. Run33 now removes echoed clip IDs from
+    provider output, so the same ceiling has substantially more room for actual decisions
+    without raising the hard preflight reserve.
     """
     hard_max = max(1, int(requested_max))
     raw_candidates = compact_payload.get("candidates")
@@ -54,6 +51,28 @@ def _raw_output_tokens(raw: Mapping[str, Any]) -> int:
         return max(0, int(usage.get("candidatesTokenCount") or 0))
     except (TypeError, ValueError):
         return 0
+
+
+def _reattach_ordered_clip_ids(parsed: Mapping[str, Any], compact_payload: Mapping[str, Any]) -> dict[str, Any]:
+    """Restore deterministic clip identity after compact ordered structured output."""
+    raw_candidates = compact_payload.get("candidates")
+    raw_decisions = parsed.get("decisions")
+    if not isinstance(raw_candidates, (list, tuple)):
+        raise ValueError("hybrid compact payload missing candidates")
+    if not isinstance(raw_decisions, (list, tuple)):
+        raise ValueError("hybrid provider response missing decisions array")
+    if len(raw_decisions) != len(raw_candidates):
+        raise ValueError("hybrid provider ordered decision count mismatch")
+
+    restored: list[dict[str, Any]] = []
+    for candidate, decision in zip(raw_candidates, raw_decisions):
+        if not isinstance(candidate, Mapping) or not isinstance(decision, Mapping):
+            raise ValueError("hybrid ordered decision payload malformed")
+        clip_id = str(candidate.get("clip_id") or "")
+        if not clip_id:
+            raise ValueError("hybrid compact candidate missing clip id")
+        restored.append({**dict(decision), "clip_id": clip_id})
+    return {**dict(parsed), "decisions": restored}
 
 
 @dataclass
@@ -119,11 +138,6 @@ class GoogleGeminiTransport:
         if not self.ledger.reserve(estimated_cost):
             raise RuntimeError("hybrid edit/test dollar budget exhausted")
 
-        # Reserve the bounded worst-case request before HTTP so the hard edit cap can
-        # never be crossed optimistically. Network/HTTP failures retain the full reserve
-        # because billed usage is unknown. Once Gemini returns an HTTP-success JSON body,
-        # however, usageMetadata is authoritative enough to reconcile the reservation
-        # even if the structured decision payload itself is malformed or truncated.
         body = build_gemini_generate_content_request(
             compact_payload,
             max_output_tokens=effective_output_tokens,
@@ -144,6 +158,7 @@ class GoogleGeminiTransport:
         reported_output_tokens = _raw_output_tokens(raw)
         try:
             parsed = parse_gemini_generate_content_response(raw)
+            parsed = _reattach_ordered_clip_ids(parsed, compact_payload)
         except ValueError:
             self._reconcile_reported_usage(
                 input_tokens=input_tokens,
