@@ -20,7 +20,7 @@ jobs:
       REDIS_URL: ${{ secrets.REDIS_URL }}
       GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
       RUNPOD_TEMPLATE_NAME: EditDNA-Worker-2
-      IMAGE: ghcr.io/automatedretailservices/cutsell-worker@sha256:09124d80d7eaeeaa369309209ac1ea9d4a3d34951d399232b0029dda2821c0fd
+      IMAGE: ghcr.io/automatedretailservices/cutsell-worker@sha256:c2979775b0eb1baabe4a67f817a99479d12ea3e11df390894d8094756d79b695
     steps:
       - name: Require explicit paid-deploy approval token
         shell: bash
@@ -28,7 +28,7 @@ jobs:
           APPROVAL_TOKEN: ${{ inputs.approval_token }}
         run: |
           set -euo pipefail
-          test "$APPROVAL_TOKEN" = "RUN30" || { echo 'Paid RunPod deploy not explicitly approved for RUN30'; exit 2; }
+          test "$APPROVAL_TOKEN" = "RUN31" || { echo 'Paid RunPod deploy not explicitly approved for RUN31'; exit 2; }
 
       - name: Validate approved deployment inputs
         shell: bash
