@@ -7,11 +7,6 @@ on:
         description: 'Explicit paid-benchmark approval token'
         required: true
         type: string
-  push:
-    branches:
-      - cutsell/mobile-v1-clean
-    paths:
-      - .github/cutsell-run28-approved-benchmark-trigger.txt
 
 permissions:
   contents: read
@@ -35,14 +30,9 @@ jobs:
         shell: bash
         env:
           APPROVAL_TOKEN: ${{ inputs.approval_token }}
-          EVENT_NAME: ${{ github.event_name }}
         run: |
           set -euo pipefail
-          if [ "$EVENT_NAME" = "push" ]; then
-            echo 'Using one-shot RUN28 user-approved benchmark trigger'
-          else
-            test "$APPROVAL_TOKEN" = "RUN28" || { echo 'Paid Hybrid benchmark not explicitly approved for RUN28'; exit 2; }
-          fi
+          test "$APPROVAL_TOKEN" = "RUN28" || { echo 'Paid Hybrid benchmark not explicitly approved for RUN28'; exit 2; }
 
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
