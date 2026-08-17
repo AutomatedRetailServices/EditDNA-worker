@@ -90,14 +90,16 @@ def apply_hybrid_session_cleanup(
     *,
     policy: HybridGatePolicy = HybridGatePolicy(),
     delete_confidence: float = 0.94,
-    chunk_size: int = 6,
+    chunk_size: int = 12,
 ) -> HybridSessionCleanupResult:
-    """Classify bounded session chunks while keeping structured output reliably small.
+    """Classify bounded session chunks with compact structured output.
 
-    Six candidates is intentionally conservative for the 500-token structured-output
-    budget. Run #27 showed that 11-12 decision responses frequently failed validation
-    while 1-5 candidate responses completed, so smaller chunks improve reliability
-    without increasing the per-edit dollar cap.
+    Run #27 proved that verbose 11-12 candidate responses could overrun the old
+    structured-output budget, so Run #28 reduced chunks to six. Run #29 then proved the
+    opposite bottleneck: six-candidate chunks created too many paid calls and exhausted
+    the per-edit COGS guard after roughly five requests. The Gemini response contract is
+    now compact (clip_id + label + confidence only), so twelve candidates restores
+    cost-efficient coverage while staying below the 14-candidate hard request limit.
     """
     take_tuple = tuple(takes)
     if not take_tuple or editorial_judge is None:
