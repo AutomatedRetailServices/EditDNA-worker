@@ -20,20 +20,28 @@ from .hybrid_provider_settings import HybridProviderSettings
 
 
 def _compact_output_token_ceiling(compact_payload: Mapping[str, Any], requested_max: int) -> int:
-    """Derive a conservative worst-case output ceiling for the compact decision schema.
+    """Derive a bounded output ceiling for the compact structured decision schema.
 
-    The compact Gemini contract emits only clip_id, label and confidence. Reserving the
-    historical flat 500-token maximum for every call caused the per-edit hard COGS
-    ledger to reject later requests even when the schema could not reasonably consume
-    that much output. Keep a generous fixed floor plus per-candidate headroom, while
-    never exceeding the caller's existing hard maximum.
+    Run #31 proved the previous 192-token ceiling for six real candidate decisions was
+    too aggressive: nearly every six-candidate response failed validation while smaller
+    2-4 candidate responses remained available. Keep the compact schema and six-item
+    batching, but reserve enough room for the real clip IDs plus JSON structure. Actual
+    provider usage is still reconciled after every successful response, so this raises
+    reliability without turning the old flat 500-token reservation back on for all calls.
     """
     hard_max = max(1, int(requested_max))
     raw_candidates = compact_payload.get("candidates")
     candidate_count = len(raw_candidates) if isinstance(raw_candidates, (list, tuple)) else 0
     if candidate_count <= 0:
         return hard_max
-    schema_ceiling = max(160, 48 + (24 * candidate_count))
+    if candidate_count <= 2:
+        schema_ceiling = 192
+    elif candidate_count <= 4:
+        schema_ceiling = 256
+    elif candidate_count <= 6:
+        schema_ceiling = 320
+    else:
+        schema_ceiling = min(500, 80 + (32 * candidate_count))
     return min(hard_max, schema_ceiling)
 
 
