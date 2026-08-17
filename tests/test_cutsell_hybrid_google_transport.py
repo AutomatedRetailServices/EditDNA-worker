@@ -53,11 +53,13 @@ def compact_payload(candidate_count=1):
     }
 
 
-def test_compact_output_ceiling_scales_with_candidates_and_respects_caller_cap():
-    assert _compact_output_token_ceiling(compact_payload(1), 500) == 160
-    assert _compact_output_token_ceiling(compact_payload(6), 500) == 192
-    assert _compact_output_token_ceiling(compact_payload(12), 500) == 336
-    assert _compact_output_token_ceiling(compact_payload(14), 500) == 384
+def test_compact_output_ceiling_scales_with_real_run31_headroom_and_respects_caller_cap():
+    assert _compact_output_token_ceiling(compact_payload(1), 500) == 192
+    assert _compact_output_token_ceiling(compact_payload(2), 500) == 192
+    assert _compact_output_token_ceiling(compact_payload(4), 500) == 256
+    assert _compact_output_token_ceiling(compact_payload(6), 500) == 320
+    assert _compact_output_token_ceiling(compact_payload(12), 500) == 464
+    assert _compact_output_token_ceiling(compact_payload(14), 500) == 500
     assert _compact_output_token_ceiling(compact_payload(12), 250) == 250
     assert _compact_output_token_ceiling({"candidates": []}, 500) == 500
 
@@ -92,21 +94,21 @@ def test_enabled_transport_uses_dynamic_ceiling_and_reconciles_to_actual_usage()
     assert result["decisions"][0]["clip_id"] == "a"
     assert result["output_tokens"] == 41
     assert len(fake.calls) == 1
-    assert fake.calls[0][2]["generationConfig"]["maxOutputTokens"] == 160
+    assert fake.calls[0][2]["generationConfig"]["maxOutputTokens"] == 192
 
     from cutsell_worker.hybrid_payload import estimate_tokens_from_chars
     input_tokens = estimate_tokens_from_chars(len(json.dumps(payload, ensure_ascii=False)))
     actual_cost = settings.estimate_cost_usd(input_tokens=input_tokens, output_tokens=41)
     assert ledger.reserved_usd == pytest.approx(actual_cost)
-    assert ledger.reserved_usd < settings.estimate_cost_usd(input_tokens=input_tokens, output_tokens=160)
+    assert ledger.reserved_usd < settings.estimate_cost_usd(input_tokens=input_tokens, output_tokens=192)
 
 
-def test_twelve_candidate_call_uses_336_token_worst_case_not_legacy_500():
+def test_six_candidate_call_uses_run31_informed_320_token_headroom():
     decisions = [
         {"clip_id": f"c{i}", "label": "keep", "confidence": 0.97}
-        for i in range(12)
+        for i in range(6)
     ]
-    fake = FakeSession(lambda _: FakeResponse(decisions=decisions, output_tokens=190))
+    fake = FakeSession(lambda _: FakeResponse(decisions=decisions, output_tokens=205))
     settings = HybridProviderSettings(enabled=True)
     ledger = DollarBudgetLedger(2.0)
     transport = GoogleGeminiTransport(
@@ -116,17 +118,17 @@ def test_twelve_candidate_call_uses_336_token_worst_case_not_legacy_500():
         ledger=ledger,
         session=fake,
     )
-    result = transport(compact_payload(12), 500)
-    assert len(result["decisions"]) == 12
-    assert fake.calls[0][2]["generationConfig"]["maxOutputTokens"] == 336
+    result = transport(compact_payload(6), 500)
+    assert len(result["decisions"]) == 6
+    assert fake.calls[0][2]["generationConfig"]["maxOutputTokens"] == 320
 
 
-def test_multiple_twelve_candidate_calls_fit_same_hard_edit_cap_when_actual_usage_is_compact():
+def test_multiple_six_candidate_calls_fit_same_hard_edit_cap_when_actual_usage_is_compact():
     decisions = [
         {"clip_id": f"c{i}", "label": "keep", "confidence": 0.97}
-        for i in range(12)
+        for i in range(6)
     ]
-    fake = FakeSession(lambda _: FakeResponse(decisions=decisions, output_tokens=190))
+    fake = FakeSession(lambda _: FakeResponse(decisions=decisions, output_tokens=205))
     settings = HybridProviderSettings(enabled=True, max_cost_per_edit_usd=0.0075)
     ledger = DollarBudgetLedger(settings.max_cost_per_edit_usd)
     transport = GoogleGeminiTransport(
@@ -137,9 +139,9 @@ def test_multiple_twelve_candidate_calls_fit_same_hard_edit_cap_when_actual_usag
         session=fake,
     )
 
-    for _ in range(6):
-        transport(compact_payload(12), 500)
-    assert len(fake.calls) == 6
+    for _ in range(10):
+        transport(compact_payload(6), 500)
+    assert len(fake.calls) == 10
     assert 0 < ledger.reserved_usd <= settings.max_cost_per_edit_usd
 
 
