@@ -12,32 +12,31 @@ from typing import Any, Mapping
 _ALLOWED_LABELS = ["winner", "alternate", "failed", "bts", "uncertain", "keep"]
 
 
-def editorial_response_schema() -> dict[str, Any]:
-    """Keep paid structured output intentionally minimal.
+def editorial_response_schema(candidate_count: int | None = None) -> dict[str, Any]:
+    """Return the smallest safe vendor schema for ordered editorial decisions.
 
-    The deterministic brain only needs identity, classification and confidence to apply
-    a decision. Explanatory reason strings are useful for diagnostics but are not needed
-    to edit safely, and repeating them for every candidate materially increases Gemini
-    output cost. The stable internal EditorialDecision contract still accepts an empty
-    reason_code, so vendor output can stay compact without changing downstream logic.
+    Gemini does not need to echo clip IDs: the caller already knows the deterministic
+    candidate order. Omitting IDs materially reduces structured-output size and avoids
+    truncation while downstream code can reattach IDs by index before validation.
     """
+    decisions_schema: dict[str, Any] = {
+        "type": "array",
+        "items": {
+            "type": "object",
+            "properties": {
+                "label": {"type": "string", "enum": _ALLOWED_LABELS},
+                "confidence": {"type": "number", "minimum": 0.0, "maximum": 1.0},
+            },
+            "required": ["label", "confidence"],
+            "additionalProperties": False,
+        },
+    }
+    if candidate_count is not None and int(candidate_count) >= 0:
+        decisions_schema["minItems"] = int(candidate_count)
+        decisions_schema["maxItems"] = int(candidate_count)
     return {
         "type": "object",
-        "properties": {
-            "decisions": {
-                "type": "array",
-                "items": {
-                    "type": "object",
-                    "properties": {
-                        "clip_id": {"type": "string"},
-                        "label": {"type": "string", "enum": _ALLOWED_LABELS},
-                        "confidence": {"type": "number", "minimum": 0.0, "maximum": 1.0},
-                    },
-                    "required": ["clip_id", "label", "confidence"],
-                    "additionalProperties": False,
-                },
-            }
-        },
+        "properties": {"decisions": decisions_schema},
         "required": ["decisions"],
         "additionalProperties": False,
     }
@@ -52,8 +51,9 @@ def _prompt_text(compact_payload: Mapping[str, Any]) -> str:
         "not the best. Failed is a stumble, false start, word-search, incomplete or "
         "broken delivery. BTS is creator self-talk, recording-process commentary, "
         "frustration, self-review or breaking character. Return exactly one compact "
-        "decision per candidate using only clip_id, label and confidence. Exactly one "
-        "winner only when justified; use uncertain when evidence is insufficient.\n\n"
+        "decision per candidate, in the exact same order as the candidates array, using "
+        "only label and confidence. Do not echo clip IDs. Exactly one winner only when "
+        "justified; use uncertain when evidence is insufficient.\n\n"
         + json.dumps(dict(compact_payload), separators=(",", ":"), ensure_ascii=False)
     )
 
@@ -68,13 +68,15 @@ def build_gemini_generate_content_request(
         raise ValueError("max_output_tokens must be positive")
     if thinking_level not in {"minimal", "low", "medium", "high"}:
         raise ValueError("unsupported Gemini thinking level")
+    raw_candidates = compact_payload.get("candidates")
+    candidate_count = len(raw_candidates) if isinstance(raw_candidates, (list, tuple)) else None
     return {
         "contents": [{"role": "user", "parts": [{"text": _prompt_text(compact_payload)}]}],
         "generationConfig": {
             "maxOutputTokens": int(max_output_tokens),
             "thinkingConfig": {"thinkingLevel": thinking_level},
             "responseMimeType": "application/json",
-            "responseJsonSchema": editorial_response_schema(),
+            "responseJsonSchema": editorial_response_schema(candidate_count),
         },
     }
 
@@ -102,7 +104,12 @@ def parse_gemini_generate_content_response(response: Mapping[str, Any]) -> dict[
     try:
         parsed = json.loads(text)
     except json.JSONDecodeError as exc:
-        raise ValueError("Gemini structured response is invalid JSON") from exc
+        finish_reason = str(first.get("finishReason") or "unknown")
+        usage = response.get("usageMetadata") or {}
+        output_tokens = int(usage.get("candidatesTokenCount") or 0) if isinstance(usage, Mapping) else 0
+        raise ValueError(
+            f"Gemini structured response is invalid JSON; finish_reason={finish_reason}; output_tokens={output_tokens}"
+        ) from exc
     if not isinstance(parsed, dict):
         raise ValueError("Gemini structured response must be an object")
 
