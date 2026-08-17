@@ -39,18 +39,25 @@ class BatchJudge:
         )
 
 
-def test_long_creator_partition_uses_safe_default_chunks_and_covers_every_candidate_once():
+def test_long_creator_partition_uses_compact_default_chunks_and_covers_every_candidate_once():
     takes = tuple(take(index) for index in range(25))
     judge = BatchJudge()
     result = apply_hybrid_session_cleanup(takes, None, judge)
 
-    assert [len(session.candidates) for session in judge.sessions] == [6, 6, 6, 6, 1]
+    assert [len(session.candidates) for session in judge.sessions] == [12, 12, 1]
     seen = [candidate.clip_id for session in judge.sessions for candidate in session.candidates]
     assert seen == [item.clip_id for item in takes]
-    assert result.requested_chunk_count == 5
-    assert result.available_chunk_count == 5
+    assert result.requested_chunk_count == 3
+    assert result.available_chunk_count == 3
     assert [item.clip_id for item in result.deleted] == ["clip-13"]
     assert all(session.task == "classify_recording_process_within_single_creator_session" for session in judge.sessions)
+
+
+def test_default_chunk_size_never_exceeds_hybrid_gate_hard_limit():
+    takes = tuple(take(index) for index in range(30))
+    judge = BatchJudge()
+    apply_hybrid_session_cleanup(takes, None, judge)
+    assert max(len(session.candidates) for session in judge.sessions) <= 14
 
 
 def test_no_provider_is_zero_cost_and_preserves_everything():
