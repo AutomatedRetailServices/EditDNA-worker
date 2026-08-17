@@ -1,0 +1,2 @@
+RUN30 approved by user on 2026-08-17.
+One-shot paid deploy trigger only.
