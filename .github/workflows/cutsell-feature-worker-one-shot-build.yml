@@ -16,7 +16,7 @@ jobs:
     runs-on: ubuntu-latest
     env:
       IMAGE: ghcr.io/automatedretailservices/cutsell-worker:${{ github.sha }}
-      BUILD_REASON: hybrid-run32-parse-failure-usage-reconciliation
+      BUILD_REASON: hybrid-run33-ordered-decisions-no-echoed-ids
     steps:
       - uses: actions/checkout@v4
       - name: Login to GitHub Container Registry
