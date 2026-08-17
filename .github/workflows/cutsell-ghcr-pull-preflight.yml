@@ -6,7 +6,7 @@ on:
       image:
         description: "Immutable CutSell worker image tag to validate"
         required: true
-        default: "ghcr.io/automatedretailservices/cutsell-worker:f1bc3adc4f2f8df0ae005fa551116dc4d08b30e6"
+        default: "ghcr.io/automatedretailservices/cutsell-worker:c3e44001efbd52db1fa55d054c1cb6971f6d5748"
 
 permissions:
   contents: read
@@ -20,15 +20,27 @@ jobs:
     steps:
       - name: Pull worker image without registry login
         run: docker pull "$IMAGE"
+      - name: Resolve immutable registry digest
+        run: |
+          set -euo pipefail
+          docker buildx imagetools inspect "$IMAGE" | tee image-inspect.txt
+          digest=$(awk '/^Digest:/ {print $2; exit}' image-inspect.txt)
+          test -n "$digest" || { echo 'Unable to resolve image digest'; exit 9; }
+          echo "image_digest=$digest" >> "$GITHUB_STEP_SUMMARY"
+          echo "$IMAGE@$digest"
       - name: Verify clean runtime imports and base CUDA stack
         run: |
           docker run --rm --entrypoint python "$IMAGE" - <<'PY'
+          import importlib.util
           import json
-          import boto3, redis, rq, openai, faster_whisper
+          import boto3, redis, rq, faster_whisper
           import cutsell_worker
           import torch
+          if importlib.util.find_spec('openai') is not None:
+              raise SystemExit('OpenAI SDK unexpectedly present in worker image')
           print(json.dumps({
               'cutsell_worker': True,
+              'openai_sdk_absent': True,
               'faster_whisper': getattr(faster_whisper, '__version__', 'present'),
               'torch_version': torch.__version__,
               'torch_cuda': torch.version.cuda,
