@@ -17,7 +17,7 @@ jobs:
     timeout-minutes: 10
     env:
       RUNPOD_API_KEY: ${{ secrets.RUNPOD_API_KEY }}
-      POD_ID: 6llbzul8q020lp
+      POD_ID: bzesdtg5kuk06y
     steps:
       - uses: actions/checkout@v4
         with:
@@ -44,7 +44,7 @@ jobs:
             --header "Authorization: Bearer $GH_TOKEN" \
             --header "Accept: application/vnd.github+json" \
             --header "Content-Type: application/json" \
-            --data '{"ref":"cutsell/mobile-v1-clean","inputs":{"approval":"APPROVE_DELETE_STAGING_WORKER","pod_id":"6llbzul8q020lp"}}' \
+            --data '{"ref":"cutsell/mobile-v1-clean","inputs":{"approval":"APPROVE_DELETE_STAGING_WORKER","pod_id":"bzesdtg5kuk06y"}}' \
             --output dispatch-response.txt)
           test "$code" = "204" || { echo "delete dispatch failed HTTP $code"; cat dispatch-response.txt; exit 5; }
           run_id=""
@@ -79,8 +79,8 @@ jobs:
           mkdir -p ops
           mv run35-delete-status.json ops/run35-delete-status.json
           git add ops/run35-delete-status.json
-          git commit -m 'Record Run35 staging Pod deletion'
+          git commit -m 'Record Run35 retry staging Pod deletion'
           git pull --rebase origin cutsell/mobile-v1-clean
           git push origin HEAD:cutsell/mobile-v1-clean
 
-# retrigger exact Run35 cleanup after failed Gold benchmark
+# Delete exact retry Pod after successful Gold benchmark.
