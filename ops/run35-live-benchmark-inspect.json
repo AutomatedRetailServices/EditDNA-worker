@@ -1,0 +1,34 @@
+{
+  "pod": {
+    "id": "bzesdtg5kuk06y",
+    "name": "cutsell-staging-worker",
+    "desiredStatus": "RUNNING",
+    "imageName": "ghcr.io/automatedretailservices/cutsell-worker@sha256:fe5dc3b6d3237307d18e138a68aa7b9c98b6ee6046cc4e845b68c42d8406d6fb",
+    "costPerHr": 0.16
+  },
+  "workers": [
+    {
+      "name": "81df069438b44add8b8f7537044d74e0",
+      "state": "busy",
+      "current_job_id": "9d282974-4a1f-4083-b4a8-558b6e6c7fae",
+      "last_heartbeat": "2026-08-18 03:55:00.328179+00:00"
+    }
+  ],
+  "matched_gold_job": {
+    "job_id": "9d282974-4a1f-4083-b4a8-558b6e6c7fae",
+    "status": "started",
+    "meta": {
+      "benchmark_id": "gold-32097024487-74125c3ba62dcab025b257d6f561a34ebd6b50b8",
+      "dataset_role": "clean_cut_gold_raw",
+      "source_prefix": "Editdna longform validation/",
+      "brain_backend": "runpod_local",
+      "external_brain_calls_enabled": true,
+      "hybrid_provider": "google",
+      "hybrid_primary_model": "gemini-3.5-flash-lite",
+      "stage": "processing",
+      "progress_percent": 3,
+      "current_source": "Editdna longform validation/VIDEO-2026-07-30-09-18-03.mp4"
+    },
+    "result_type": null
+  }
+}
