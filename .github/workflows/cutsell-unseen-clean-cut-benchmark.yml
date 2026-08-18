@@ -22,7 +22,7 @@ jobs:
       AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
       AWS_REGION: ${{ secrets.AWS_REGION }}
       S3_BUCKET: ${{ secrets.S3_BUCKET }}
-      CUTSELL_VALIDATION_PREFIX: Editdna/ longform validation/
+      CUTSELL_VALIDATION_PREFIX: Editdna longform validation/
       VIDEO_LIMIT: "16"
       BENCHMARK_ID: gold-${{ github.run_id }}-${{ github.sha }}
     steps:
