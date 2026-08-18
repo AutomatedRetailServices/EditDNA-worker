@@ -1,0 +1,84 @@
+name: Run36 Dispatch Chain
+
+on:
+  push:
+    branches:
+      - cutsell/mobile-v1-clean
+    paths:
+      - .github/workflows/run36-dispatch-chain.yml
+
+permissions:
+  actions: write
+  contents: write
+
+jobs:
+  dispatch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: cutsell/mobile-v1-clean
+      - name: Dispatch Run36 deploy and Gold benchmark
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: AutomatedRetailServices/EditDNA-worker
+        shell: bash
+        run: |
+          set -euo pipefail
+          api="https://api.github.com/repos/$REPO"
+          auth=(-H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github+json")
+
+          before_deploy=$(curl --fail --silent --show-error "${auth[@]}" "$api/actions/workflows/cutsell-feature-runpod-one-shot-deploy.yml/runs?branch=cutsell/mobile-v1-clean&per_page=1" | jq -r '.workflow_runs[0].id // 0')
+          curl --fail --silent --show-error -X POST "${auth[@]}" \
+            "$api/actions/workflows/cutsell-feature-runpod-one-shot-deploy.yml/dispatches" \
+            -d '{"ref":"cutsell/mobile-v1-clean","inputs":{"approval_token":"RUN36"}}'
+
+          deploy_run=""
+          for i in $(seq 1 60); do
+            deploy_run=$(curl --fail --silent --show-error "${auth[@]}" "$api/actions/workflows/cutsell-feature-runpod-one-shot-deploy.yml/runs?branch=cutsell/mobile-v1-clean&per_page=5" | jq -r --argjson before "$before_deploy" '[.workflow_runs[] | select(.id != $before and .event == "workflow_dispatch")][0].id // empty')
+            [ -n "$deploy_run" ] && break
+            sleep 5
+          done
+          test -n "$deploy_run" || { echo 'Run36 deploy run not found'; exit 4; }
+
+          deploy_conclusion=""
+          for i in $(seq 1 180); do
+            run=$(curl --fail --silent --show-error "${auth[@]}" "$api/actions/runs/$deploy_run")
+            status=$(printf '%s' "$run" | jq -r '.status')
+            deploy_conclusion=$(printf '%s' "$run" | jq -r '.conclusion // empty')
+            [ "$status" = "completed" ] && break
+            sleep 5
+          done
+          test "$deploy_conclusion" = "success" || { echo "Run36 deploy failed: $deploy_conclusion"; exit 5; }
+
+          jobs=$(curl --fail --silent --show-error "${auth[@]}" "$api/actions/runs/$deploy_run/jobs")
+          deploy_job=$(printf '%s' "$jobs" | jq -r '.jobs[0].id // empty')
+          test -n "$deploy_job" || { echo 'Run36 deploy job missing'; exit 6; }
+          logs=$(mktemp)
+          curl -L --fail --silent --show-error "${auth[@]}" "$api/actions/jobs/$deploy_job/logs" > "$logs"
+          pod_id=$(grep -Eo '"id"[[:space:]]*:[[:space:]]*"[a-z0-9]+"' "$logs" | tail -1 | sed -E 's/.*"([a-z0-9]+)"/\1/' || true)
+          test -n "$pod_id" || { echo 'Unable to resolve Run36 staging Pod ID from deploy logs'; exit 7; }
+
+          before_benchmark=$(curl --fail --silent --show-error "${auth[@]}" "$api/actions/workflows/cutsell-unseen-clean-cut-benchmark.yml/runs?branch=cutsell/mobile-v1-clean&per_page=1" | jq -r '.workflow_runs[0].id // 0')
+          payload=$(jq -n --arg pod "$pod_id" '{ref:"cutsell/mobile-v1-clean",inputs:{approval_token:"RUN36",pod_id:$pod}}')
+          curl --fail --silent --show-error -X POST "${auth[@]}" \
+            "$api/actions/workflows/cutsell-unseen-clean-cut-benchmark.yml/dispatches" \
+            -d "$payload"
+
+          benchmark_run=""
+          for i in $(seq 1 60); do
+            benchmark_run=$(curl --fail --silent --show-error "${auth[@]}" "$api/actions/workflows/cutsell-unseen-clean-cut-benchmark.yml/runs?branch=cutsell/mobile-v1-clean&per_page=5" | jq -r --argjson before "$before_benchmark" '[.workflow_runs[] | select(.id != $before and .event == "workflow_dispatch")][0].id // empty')
+            [ -n "$benchmark_run" ] && break
+            sleep 5
+          done
+          test -n "$benchmark_run" || { echo 'Run36 Gold benchmark run not found'; exit 8; }
+
+          mkdir -p ops
+          jq -n --argjson deploy_run "$deploy_run" --arg pod "$pod_id" --argjson benchmark_run "$benchmark_run" \
+            '{deploy_run_id:$deploy_run,pod_id:$pod,benchmark_run_id:$benchmark_run,status:"benchmark_dispatched"}' > ops/run36-chain-status.json
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add ops/run36-chain-status.json
+          git commit -m "Record Run36 deploy and benchmark chain" || true
+          git push origin HEAD:cutsell/mobile-v1-clean
