@@ -49,6 +49,29 @@ def _evidence(take: CandidateTake) -> tuple[tuple[str, float | str | bool], ...]
     )
 
 
+def _source_context(
+    context: WholeVideoContext | None,
+    source_asset_id: str,
+) -> tuple[tuple[str, str | float], ...]:
+    """Return one compact whole-source narrative map for every bounded Hybrid chunk."""
+    if context is None:
+        return ()
+    for source in context.sources:
+        if source.source_asset_id != source_asset_id:
+            continue
+        summary = " ".join(str(source.summary or "").split())[:3600]
+        return (
+            ("summary", summary),
+            ("creator_intent", str(source.creator_intent or "")[:500]),
+            ("main_topic", str(source.main_topic or "")[:500]),
+            ("product_or_subject", str(source.product_or_subject or "")[:500]),
+            ("story_logic", str(source.story_logic or "")[:900]),
+            ("edit_mode", str(source.edit_mode or "natural")),
+            ("sales_intent", round(float(source.sales_intent), 4)),
+        )
+    return ()
+
+
 def _failed_local_evidence(
     take: CandidateTake,
     context: WholeVideoContext | None,
@@ -87,6 +110,7 @@ def _chunks(items: Tuple[CandidateTake, ...], size: int) -> tuple[Tuple[Candidat
 
 def _editorial_session(
     members: Tuple[CandidateTake, ...],
+    context: WholeVideoContext | None,
     *,
     partition_index: int,
     chunk_index: int,
@@ -111,6 +135,7 @@ def _editorial_session(
         local_confidence=0.50,
         conflict_score=0.50,
         task="classify_recording_process_within_single_creator_session",
+        source_context=_source_context(context, source_id),
     )
 
 
@@ -129,6 +154,8 @@ def apply_hybrid_session_cleanup(
     Direct semantic deletion remains conservative at ``delete_confidence``. A ``failed``
     decision may also delete at the lower corroborated threshold only when independent
     local performance evidence confirms the failure. BTS remains on the stricter floor.
+    Every chunk receives read-only whole-source context so semantic decisions can respect
+    the complete message/story rather than reasoning from six isolated fragments.
     """
     take_tuple = tuple(takes)
     if not take_tuple or editorial_judge is None:
@@ -149,6 +176,7 @@ def apply_hybrid_session_cleanup(
         for chunk_index, members in enumerate(_chunks(ordered, min(chunk_size, policy.max_candidates_per_request))):
             session = _editorial_session(
                 members,
+                context,
                 partition_index=partition_index,
                 chunk_index=chunk_index,
             )
@@ -199,6 +227,7 @@ def apply_hybrid_session_cleanup(
                 "chunk_index": chunk_index,
                 "session_id": session.session_id,
                 "member_ids": [member.clip_id for member in members],
+                "source_context_available": bool(session.source_context),
                 "requested": bool(result.requested),
                 "available": bool(result.available),
                 "provider": result.provider,
