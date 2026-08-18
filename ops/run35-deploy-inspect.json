@@ -1,0 +1,16 @@
+{
+  "deploy_run": {
+    "id": 32093789849,
+    "status": "in_progress",
+    "conclusion": null,
+    "created_at": "2026-08-18T02:58:58Z",
+    "head_sha": "c0ed790abc258709c62bb05838b127fefdc408fa"
+  },
+  "pod": {
+    "id": "6llbzul8q020lp",
+    "name": "cutsell-staging-worker",
+    "desiredStatus": "RUNNING",
+    "imageName": "ghcr.io/automatedretailservices/cutsell-worker@sha256:b4203baad91acb7c3e646590bc175ce8bc681be74c295d178e74c65382046c95",
+    "costPerHr": 0.16
+  }
+}
