@@ -55,6 +55,49 @@ def test_trims_bad_reaction_after_good_line_without_deleting_line():
     assert refined[0].text == "this works really well"
     assert diagnostics[0]["applied"][0]["action"] == "trim_end"
     assert diagnostics[0]["applied"][0]["kind"] == "body_reset"
+    assert diagnostics[0]["word_boundary_snaps"] == []
+
+
+def test_start_trim_inside_word_advances_to_next_complete_word():
+    take = _take()
+    context = _context(TemporalEvent(
+        "src-1", 9.9, 10.2, "false_start", 0.98, "failed opening overlaps first word"
+    ))
+    refined, diagnostics = refine_takes_with_temporal_context((take,), context)
+    assert refined[0].start == 10.5
+    assert refined[0].text == "works really well"
+    assert [word.text for word in refined[0].words] == ["works", "really", "well"]
+    assert diagnostics[0]["word_boundary_snaps"] == [{
+        "action": "trim_start",
+        "raw_boundary": 10.2,
+        "safe_boundary": 10.5,
+    }]
+
+
+def test_end_trim_inside_word_rewinds_to_last_complete_word():
+    take = _take()
+    context = _context(TemporalEvent(
+        "src-1", 11.85, 15.0, "body_reset", 0.98, "reset begins during final word"
+    ))
+    refined, diagnostics = refine_takes_with_temporal_context((take,), context)
+    assert refined[0].end == 11.6
+    assert refined[0].text == "this works really"
+    assert [word.text for word in refined[0].words] == ["this", "works", "really"]
+    assert diagnostics[0]["word_boundary_snaps"] == [{
+        "action": "trim_end",
+        "raw_boundary": 11.85,
+        "safe_boundary": 11.6,
+    }]
+
+
+def test_boundary_between_words_is_preserved_without_unnecessary_snap():
+    take = _take()
+    context = _context(TemporalEvent(
+        "src-1", 12.2, 15.0, "frustration", 0.96, "reset after spoken line"
+    ))
+    refined, diagnostics = refine_takes_with_temporal_context((take,), context)
+    assert refined[0].end == 12.2
+    assert diagnostics[0]["word_boundary_snaps"] == []
 
 
 def test_meaningful_pause_is_not_trimmed_as_dead_air():
