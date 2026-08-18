@@ -15,12 +15,12 @@ jobs:
     runs-on: ubuntu-latest
     env:
       RUNPOD_API_KEY: ${{ secrets.RUNPOD_API_KEY }}
-      POD_ID: 6llbzul8q020lp
+      POD_ID: bzesdtg5kuk06y
     steps:
       - uses: actions/checkout@v4
         with:
           ref: cutsell/mobile-v1-clean
-      - name: Delete exact failed Run35 staging Pod if present
+      - name: Delete exact successful Run35 retry staging Pod if present
         shell: bash
         run: |
           set -euo pipefail
@@ -42,10 +42,10 @@ jobs:
             if [ "$count" = "0" ]; then verified=true; break; fi
             sleep 3
           done
-          test "$verified" = true || { echo 'Exact Run35 Pod still present after cleanup'; exit 6; }
+          test "$verified" = true || { echo 'Exact Run35 retry Pod still present after cleanup'; exit 6; }
           mkdir -p ops
           jq -n --arg pod_id "$POD_ID" --argjson already "$already" '{pod_id:$pod_id,verified_absent:true,already_absent:$already}' > ops/run35-delete-status.json
-          echo "run35_exact_pod_deleted=true"
+          echo "run35_retry_pod_deleted=true"
       - name: Persist verified cleanup status
         shell: bash
         run: |
@@ -53,6 +53,6 @@ jobs:
           git config user.name github-actions
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
           git add ops/run35-delete-status.json
-          git commit -m 'Record verified Run35 Pod cleanup'
+          git commit -m 'Record verified Run35 retry Pod cleanup'
           git pull --rebase origin cutsell/mobile-v1-clean
           git push origin HEAD:cutsell/mobile-v1-clean
