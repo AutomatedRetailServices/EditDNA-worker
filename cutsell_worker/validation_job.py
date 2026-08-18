@@ -11,7 +11,7 @@ from .config import load_runtime_config
 from .universal_clean_cut_validation import run_single_universal_clean_cut_validation
 from .validation import list_validation_videos
 
-CLEAN_CUT_GOLD_PREFIX = "Editdna/ longform validation/"
+CLEAN_CUT_GOLD_PREFIX = "Editdna longform validation/"
 BLOOPER_NEGATIVE_PREFIX = "Editdna bloopers videos/"
 MAX_GOLD_VIDEOS = 32
 
