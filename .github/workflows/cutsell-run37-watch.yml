@@ -1,4 +1,4 @@
-name: CutSell Run37 Watch
+name: CutSell Run38 Watch
 
 on:
   push:
@@ -12,7 +12,7 @@ permissions:
   contents: write
 
 jobs:
-  record-run37:
+  record-run38:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -20,7 +20,7 @@ jobs:
         with:
           ref: cutsell/mobile-v1-clean
 
-      - name: Resolve exact Run37 workflow run
+      - name: Resolve exact Run38 workflow run
         id: resolve
         shell: bash
         env:
@@ -30,28 +30,28 @@ jobs:
           found=""
           for attempt in $(seq 1 60); do
             runs=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs?branch=cutsell%2Fmobile-v1-clean&per_page=100")
-            found=$(printf '%s' "$runs" | jq -c '[.workflow_runs[] | select(.name == "CutSell Run37 Gold One-Shot" and .event == "push")][0] // empty')
+            found=$(printf '%s' "$runs" | jq -c '[.workflow_runs[] | select(.name == "CutSell Run38 Gold One-Shot" and .event == "push")][0] // empty')
             if [ -n "$found" ]; then
               break
             fi
             sleep 10
           done
-          test -n "$found" || { echo 'Run37 workflow run not found'; exit 2; }
+          test -n "$found" || { echo 'Run38 workflow run not found'; exit 2; }
           run_id=$(printf '%s' "$found" | jq -r '.id')
           echo "run_id=$run_id" >> "$GITHUB_OUTPUT"
-          printf '%s' "$found" | jq '{run_id:.id,name,status,conclusion,head_sha,event,created_at,updated_at,html_url}' > run37-found.json
-          cat run37-found.json
+          printf '%s' "$found" | jq '{run_id:.id,name,status,conclusion,head_sha,event,created_at,updated_at,html_url}' > run38-found.json
+          cat run38-found.json
 
-      - name: Record Run37 run id on branch
+      - name: Record Run38 run id on branch
         shell: bash
         env:
-          RUN37_RUN_ID: ${{ steps.resolve.outputs.run_id }}
+          RUN38_RUN_ID: ${{ steps.resolve.outputs.run_id }}
         run: |
           set -euo pipefail
           mkdir -p ops
-          cp run37-found.json ops/run37-watch.json
+          cp run38-found.json ops/run38-watch.json
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add ops/run37-watch.json
-          git commit -m "Record Run37 workflow run id" || true
+          git add ops/run38-watch.json
+          git commit -m "Record Run38 workflow run id" || true
           git push origin HEAD:cutsell/mobile-v1-clean
