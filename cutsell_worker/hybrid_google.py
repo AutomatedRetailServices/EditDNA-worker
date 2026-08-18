@@ -45,15 +45,22 @@ def editorial_response_schema(candidate_count: int | None = None) -> dict[str, A
 def _prompt_text(compact_payload: Mapping[str, Any]) -> str:
     return (
         "You are the CutSell editorial judge. Classify only the supplied candidates "
-        "inside this already-bounded creator group/session. Do not invent clips, do "
-        "not create timestamps, and do not compare against any other creator/session. "
-        "A winner is the strongest complete intended delivery. Alternate is usable but "
-        "not the best. Failed is a stumble, false start, word-search, incomplete or "
-        "broken delivery. BTS is creator self-talk, recording-process commentary, "
-        "frustration, self-review or breaking character. Return exactly one compact "
-        "decision per candidate, in the exact same order as the candidates array, using "
-        "only label and confidence. Do not echo clip IDs. Exactly one winner only when "
-        "justified; use uncertain when evidence is insufficient.\n\n"
+        "inside this already-bounded creator group/session. source_context is read-only "
+        "whole-video context: use it to understand the complete message, topic, intended "
+        "story flow, and whether a candidate is an abandoned/repeated version of an idea "
+        "that is delivered more completely elsewhere. Do not label or invent clips that "
+        "are not in candidates, and never create timestamps. A winner is the strongest "
+        "complete intended delivery. Alternate is usable but not the best. Failed is a "
+        "stumble, false start, word-search, incomplete/broken delivery, or an abandoned "
+        "same-idea retry. BTS is creator self-talk, recording-process commentary, "
+        "consulting notes/script, frustration, self-review or breaking character. A "
+        "repeated phrase is NOT automatically failed: preserve repetition when it adds "
+        "new information, emphasis, or is required for narrative coherence. When a "
+        "creator visibly/structurally leaves delivery to recover a line and then resumes "
+        "the same idea, treat that recording-process attempt as failed/BTS when evidence "
+        "supports it. Return exactly one compact decision per candidate in the exact same "
+        "order as candidates, using only label and confidence. Do not echo clip IDs. "
+        "Exactly one winner only when justified; use uncertain when evidence is insufficient.\n\n"
         + json.dumps(dict(compact_payload), separators=(",", ":"), ensure_ascii=False)
     )
 
