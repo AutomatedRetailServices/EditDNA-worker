@@ -20,6 +20,7 @@ from .hybrid_editorial import (
     safe_editorial_judge,
 )
 from .session_boundaries import partition_takes_by_sessions
+from .temporal_editing import harmful_events_for_take
 from .whole_video_analysis import WholeVideoContext
 
 
@@ -46,6 +47,36 @@ def _evidence(take: CandidateTake) -> tuple[tuple[str, float | str | bool], ...]
         ("delivery_energy", round(float(signals.delivery_energy), 4)),
         ("distraction_risk", round(float(signals.distraction_risk), 4)),
     )
+
+
+def _failed_local_evidence(
+    take: CandidateTake,
+    context: WholeVideoContext | None,
+) -> tuple[bool, tuple[str, ...]]:
+    """Require an independent local signal before lowering the semantic delete floor.
+
+    A medium-high Gemini ``failed`` label is useful but must not delete valid creator
+    speech by itself. We only trust it below the historical 0.94 hard-delete floor when
+    local temporal/visual perception independently observed a recording failure in the
+    same take. This preserves the global fail-open rule while catching obvious retries
+    such as a spoken false start followed by a visible reset.
+    """
+    reasons: list[str] = []
+    for event in harmful_events_for_take(take, context, minimum_confidence=0.80):
+        reasons.append(f"event:{event.kind}:{event.confidence:.2f}")
+
+    signals = take.signals
+    if signals is not None:
+        if float(signals.visual_fumble) >= 0.72:
+            reasons.append(f"visual_fumble:{float(signals.visual_fumble):.2f}")
+        if float(signals.distraction_risk) >= 0.82:
+            reasons.append(f"distraction_risk:{float(signals.distraction_risk):.2f}")
+        if float(signals.expression_naturalness) <= 0.28:
+            reasons.append(f"expression_naturalness:{float(signals.expression_naturalness):.2f}")
+        if float(signals.gesture_naturalness) <= 0.28:
+            reasons.append(f"gesture_naturalness:{float(signals.gesture_naturalness):.2f}")
+
+    return bool(reasons), tuple(reasons)
 
 
 def _chunks(items: Tuple[CandidateTake, ...], size: int) -> tuple[Tuple[CandidateTake, ...], ...]:
@@ -90,20 +121,20 @@ def apply_hybrid_session_cleanup(
     *,
     policy: HybridGatePolicy = HybridGatePolicy(),
     delete_confidence: float = 0.94,
+    corroborated_failed_confidence: float = 0.84,
     chunk_size: int = 6,
 ) -> HybridSessionCleanupResult:
     """Classify bounded session chunks with the stable six-candidate envelope.
 
-    Run #30 confirmed that 10-12 candidate structured responses still fail validation
-    even after compacting the response schema. Six candidates is the proven reliable
-    request size. Unlike Run #29, the transport now also has compact output plus a
-    candidate-aware dynamic output-token ceiling, so six-candidate calls no longer
-    reserve the old arbitrary 500-token maximum before every request.
+    Direct semantic deletion remains conservative at ``delete_confidence``. A ``failed``
+    decision may also delete at the lower corroborated threshold only when independent
+    local performance evidence confirms the failure. BTS remains on the stricter floor.
     """
     take_tuple = tuple(takes)
     if not take_tuple or editorial_judge is None:
         return HybridSessionCleanupResult(take_tuple, (), 0, 0, ())
 
+    take_map = {take.clip_id: take for take in take_tuple}
     partitions = partition_takes_by_sessions(take_tuple, context)
     if not partitions:
         partitions = (take_tuple,)
@@ -131,10 +162,24 @@ def apply_hybrid_session_cleanup(
             decisions = []
             if result.available:
                 for decision in result.decisions:
-                    applied_delete = bool(
+                    take = take_map[decision.clip_id]
+                    corroborated, local_reasons = _failed_local_evidence(take, context)
+                    hard_semantic_delete = bool(
                         decision.label in {"failed", "bts"}
                         and decision.confidence >= delete_confidence
                     )
+                    corroborated_failed_delete = bool(
+                        decision.label == "failed"
+                        and decision.confidence >= corroborated_failed_confidence
+                        and corroborated
+                    )
+                    applied_delete = hard_semantic_delete or corroborated_failed_delete
+                    if hard_semantic_delete:
+                        delete_basis = "high_confidence_semantic"
+                    elif corroborated_failed_delete:
+                        delete_basis = "semantic_failed_plus_local_performance"
+                    else:
+                        delete_basis = "kept_fail_open"
                     if applied_delete:
                         deleted_ids.add(decision.clip_id)
                         chunk_deleted.append(decision.clip_id)
@@ -143,6 +188,9 @@ def apply_hybrid_session_cleanup(
                         "label": decision.label,
                         "confidence": decision.confidence,
                         "reason_code": decision.reason_code,
+                        "local_failure_corroborated": corroborated,
+                        "local_failure_reasons": list(local_reasons),
+                        "delete_basis": delete_basis,
                         "applied_delete": applied_delete,
                     })
 
