@@ -32,7 +32,7 @@ jobs:
           APPROVAL_TOKEN: ${{ inputs.approval_token }}
         run: |
           set -euo pipefail
-          test "$APPROVAL_TOKEN" = "RUN35" || { echo 'Paid Clean Cut Gold benchmark not explicitly approved for RUN35'; exit 2; }
+          test "$APPROVAL_TOKEN" = "RUN35" || { echo 'Paid Hybrid benchmark not explicitly approved for RUN35 Clean Cut Gold'; exit 2; }
 
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
