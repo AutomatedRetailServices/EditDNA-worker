@@ -25,7 +25,7 @@ jobs:
         with:
           python-version: "3.11"
       - run: pip install -q 'redis>=5.0' 'rq>=2.6'
-      - name: Inspect exact Run36 RQ job and worker registries
+      - name: Audit queue, registries and recent benchmark jobs
         shell: bash
         run: |
           set -euo pipefail
@@ -33,74 +33,84 @@ jobs:
           python - <<'PY'
           import json, os
           from redis import Redis
-          from rq import Worker
+          from rq import Queue, Worker
           from rq.job import Job
-          from rq.registry import StartedJobRegistry, FailedJobRegistry, FinishedJobRegistry, CanceledJobRegistry
+          from rq.registry import StartedJobRegistry, FailedJobRegistry, FinishedJobRegistry, CanceledJobRegistry, DeferredJobRegistry, ScheduledJobRegistry
 
           connection = Redis.from_url(os.environ['REDIS_URL'])
-          job = Job.fetch(os.environ['JOB_ID'], connection=connection)
-          status_obj = job.get_status(refresh=True)
-          status = getattr(status_obj, 'value', str(status_obj))
+          target = Job.fetch(os.environ['JOB_ID'], connection=connection)
+          queue_name = target.origin or 'cutsell'
+          queue = Queue(queue_name, connection=connection)
           workers = Worker.all(connection=connection)
-          queue_name = job.origin or 'cutsell'
 
-          def worker_info(worker):
-              heartbeat = worker.last_heartbeat
-              return {
-                  'name': worker.name,
-                  'state': worker.get_state(),
-                  'last_heartbeat': heartbeat.isoformat() if heartbeat else None,
-                  'current_job_id': worker.get_current_job_id(),
-              }
-
-          registries = {}
-          for name, cls in (
+          registry_classes = (
               ('started', StartedJobRegistry),
               ('failed', FailedJobRegistry),
               ('finished', FinishedJobRegistry),
               ('canceled', CanceledJobRegistry),
-          ):
+              ('deferred', DeferredJobRegistry),
+              ('scheduled', ScheduledJobRegistry),
+          )
+          registries = {}
+          all_ids = set(queue.job_ids)
+          for name, cls in registry_classes:
               try:
-                  registries[name] = cls(queue_name, connection=connection).get_job_ids()
+                  ids = cls(queue_name, connection=connection).get_job_ids()
               except Exception as exc:
                   registries[name] = {'error': f'{type(exc).__name__}: {exc}'}
+                  continue
+              registries[name] = ids
+              all_ids.update(ids)
 
-          result = job.result
-          result_summary = None
-          if isinstance(result, dict):
-              result_summary = {
-                  'keys': sorted(result.keys()),
-                  'report_uri': result.get('report_uri'),
-                  'preview_uris': result.get('preview_uris'),
-                  'source_count': result.get('source_count'),
-                  'completed_count': result.get('completed_count'),
-                  'execution_failure_count': result.get('execution_failure_count'),
-                  'provider_failure_count': result.get('provider_failure_count'),
-                  'total_hybrid_requested_groups': result.get('total_hybrid_requested_groups'),
-                  'total_hybrid_available_groups': result.get('total_hybrid_available_groups'),
-              }
+          def iso(value):
+              return value.isoformat() if value else None
 
+          jobs = []
+          for job_id in sorted(all_ids):
+              try:
+                  job = Job.fetch(job_id, connection=connection)
+                  status_obj = job.get_status(refresh=True)
+                  status = getattr(status_obj, 'value', str(status_obj))
+                  meta = dict(job.meta or {})
+                  jobs.append({
+                      'job_id': job.id,
+                      'status': status,
+                      'origin': job.origin,
+                      'created_at': iso(job.created_at),
+                      'started_at': iso(job.started_at),
+                      'ended_at': iso(job.ended_at),
+                      'benchmark_id': meta.get('benchmark_id'),
+                      'stage': meta.get('stage'),
+                      'progress_percent': meta.get('progress_percent'),
+                      'current_source': meta.get('current_source'),
+                      'dataset_role': meta.get('dataset_role'),
+                      'exc_info_tail': (job.exc_info or '')[-500:],
+                  })
+              except Exception as exc:
+                  jobs.append({'job_id': job_id, 'error': f'{type(exc).__name__}: {exc}'})
+
+          jobs.sort(key=lambda item: item.get('created_at') or '', reverse=True)
           payload = {
-              'job_id': job.id,
-              'status': status,
-              'origin': job.origin,
-              'created_at': job.created_at.isoformat() if job.created_at else None,
-              'started_at': job.started_at.isoformat() if job.started_at else None,
-              'ended_at': job.ended_at.isoformat() if job.ended_at else None,
-              'meta': dict(job.meta or {}),
-              'exc_info_tail': (job.exc_info or '')[-2000:],
+              'queue_name': queue_name,
+              'queue_count': queue.count,
+              'queue_job_ids': queue.job_ids,
               'worker_count': len(workers),
-              'workers': [worker_info(worker) for worker in workers],
+              'workers': [{
+                  'name': worker.name,
+                  'state': worker.get_state(),
+                  'last_heartbeat': iso(worker.last_heartbeat),
+                  'current_job_id': worker.get_current_job_id(),
+              } for worker in workers],
               'registries': registries,
-              'result': result_summary,
+              'jobs': jobs[:50],
           }
           os.makedirs('ops', exist_ok=True)
-          with open('ops/run36-rq-diagnostic.json', 'w', encoding='utf-8') as handle:
+          with open('ops/run36-rq-queue-audit.json', 'w', encoding='utf-8') as handle:
               json.dump(payload, handle, ensure_ascii=False, indent=2, sort_keys=True)
           print(json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True))
           PY
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add ops/run36-rq-diagnostic.json
-          git commit -m "Record Run36 RQ diagnostic" || true
+          git add ops/run36-rq-queue-audit.json
+          git commit -m "Record Run36 RQ queue audit" || true
           git push origin HEAD:cutsell/mobile-v1-clean
