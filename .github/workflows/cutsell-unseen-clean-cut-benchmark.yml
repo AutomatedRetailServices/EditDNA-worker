@@ -22,9 +22,9 @@ jobs:
       AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
       AWS_REGION: ${{ secrets.AWS_REGION }}
       S3_BUCKET: ${{ secrets.S3_BUCKET }}
-      CUTSELL_VALIDATION_PREFIX: Editdna bloopers videos/
-      VIDEO_LIMIT: "8"
-      BENCHMARK_ID: unseen-${{ github.run_id }}-${{ github.sha }}
+      CUTSELL_VALIDATION_PREFIX: Editdna/ longform validation/
+      VIDEO_LIMIT: "16"
+      BENCHMARK_ID: gold-${{ github.run_id }}-${{ github.sha }}
     steps:
       - name: Require explicit paid-benchmark approval token
         shell: bash
@@ -32,7 +32,7 @@ jobs:
           APPROVAL_TOKEN: ${{ inputs.approval_token }}
         run: |
           set -euo pipefail
-          test "$APPROVAL_TOKEN" = "RUN33" || { echo 'Paid Hybrid benchmark not explicitly approved for RUN33'; exit 2; }
+          test "$APPROVAL_TOKEN" = "RUN35" || { echo 'Paid Clean Cut Gold benchmark not explicitly approved for RUN35'; exit 2; }
 
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -82,7 +82,7 @@ jobs:
           payload = {
               'benchmark_id': os.environ['BENCHMARK_ID'],
               'source_prefix': os.environ['CUTSELL_VALIDATION_PREFIX'],
-              'video_limit': int(os.environ.get('VIDEO_LIMIT') or 8),
+              'video_limit': int(os.environ.get('VIDEO_LIMIT') or 16),
               'expected_external_brain_calls_enabled': True,
           }
           queue = Queue('cutsell', connection=connection)
@@ -94,6 +94,8 @@ jobs:
               failure_ttl=86400,
               meta={
                   'benchmark_id': payload['benchmark_id'],
+                  'dataset_role': 'clean_cut_gold_raw',
+                  'source_prefix': payload['source_prefix'],
                   'brain_backend': 'runpod_local',
                   'external_brain_calls_enabled': True,
                   'hybrid_provider': 'google',
@@ -130,6 +132,8 @@ jobs:
                       'stage': meta.get('stage'),
                       'progress_percent': meta.get('progress_percent'),
                       'current_source': meta.get('current_source'),
+                      'dataset_role': meta.get('dataset_role'),
+                      'source_prefix': meta.get('source_prefix'),
                       'brain_backend': meta.get('brain_backend'),
                       'external_brain_calls_enabled': meta.get('external_brain_calls_enabled'),
                   }, ensure_ascii=False))
@@ -138,6 +142,10 @@ jobs:
                   result = job.result
                   if not isinstance(result, dict):
                       raise SystemExit('RunPod benchmark returned invalid result')
+                  if result.get('dataset_role') != 'clean_cut_gold_raw':
+                      raise SystemExit('RunPod benchmark did not use Clean Cut Gold RAW dataset')
+                  if result.get('source_prefix') != os.environ['CUTSELL_VALIDATION_PREFIX']:
+                      raise SystemExit('RunPod benchmark used unexpected source prefix')
                   if result.get('brain_backend') != 'runpod_local':
                       raise SystemExit('RunPod benchmark escaped local perception brain')
                   if result.get('external_brain_calls_enabled') is not True:
@@ -176,6 +184,10 @@ jobs:
           bucket, key = parts(result['report_uri'])
           s3.download_file(bucket, key, 'cutsell-unseen-clean-cut-benchmark.json')
           report = json.load(open('cutsell-unseen-clean-cut-benchmark.json', encoding='utf-8'))
+          if report.get('dataset_role') != 'clean_cut_gold_raw':
+              raise SystemExit('report does not prove Clean Cut Gold RAW execution')
+          if report.get('source_prefix') != os.environ['CUTSELL_VALIDATION_PREFIX']:
+              raise SystemExit('report source prefix is not the Clean Cut Gold RAW prefix')
           if report.get('brain_backend') != 'runpod_local' or report.get('external_brain_calls_enabled') is not True:
               raise SystemExit('report does not prove approved Hybrid execution')
           if report.get('hybrid_provider') != 'google' or report.get('hybrid_primary_model') != 'gemini-3.5-flash-lite':
@@ -189,8 +201,8 @@ jobs:
               s3.download_file(bucket, key, str(destination))
           print(json.dumps({
               key: report.get(key) for key in (
-                  'benchmark_id', 'brain_backend', 'external_brain_calls_enabled',
-                  'hybrid_provider', 'hybrid_primary_model',
+                  'benchmark_id', 'dataset_role', 'source_prefix', 'brain_backend',
+                  'external_brain_calls_enabled', 'hybrid_provider', 'hybrid_primary_model',
                   'source_count', 'completed_count', 'execution_failure_count',
                   'provider_failure_count', 'total_hybrid_requested_groups',
                   'total_hybrid_available_groups', 'total_hybrid_deleted',
@@ -198,18 +210,18 @@ jobs:
               )
           } | {'hybrid_chunk_availability_ratio': round(availability_ratio, 4)}, indent=2))
           if report.get('execution_failure_count') or report.get('provider_failure_count'):
-              raise SystemExit('RunPod Hybrid unseen benchmark reported failures')
+              raise SystemExit('RunPod Hybrid Gold benchmark reported failures')
           if requested <= 0:
-              raise SystemExit('RunPod Hybrid unseen benchmark requested zero semantic chunks')
+              raise SystemExit('RunPod Hybrid Gold benchmark requested zero semantic chunks')
           if availability_ratio < 0.80:
-              raise SystemExit(f'Hybrid chunk availability below Run33 floor: {available}/{requested}')
+              raise SystemExit(f'Hybrid chunk availability below Gold floor: {available}/{requested}')
           PY
 
       - name: Upload JSON report
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: cutsell-unseen-clean-cut-report-${{ github.sha }}
+          name: cutsell-clean-cut-gold-report-${{ github.sha }}
           path: cutsell-unseen-clean-cut-benchmark.json
           if-no-files-found: error
           retention-days: 14
@@ -218,7 +230,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: cutsell-unseen-clean-cut-previews-${{ github.sha }}
+          name: cutsell-clean-cut-gold-previews-${{ github.sha }}
           path: cutsell-unseen-clean-cut-previews/*.mp4
           if-no-files-found: warn
           retention-days: 14
