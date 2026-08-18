@@ -120,8 +120,8 @@ def _dominant_weak_group_with_fuller_retry(left_members, right_members) -> bool:
     return False
 
 
-def _serial_retry_envelope(groups, takes, *, maximum_gap_sec: float = 20.0):
-    """Absorb weak serial retries into the following linked retry group."""
+def _serial_retry_envelope(groups, takes, *, maximum_gap_sec: float = 30.0):
+    """Absorb weak serial retries into a later linked retry group across long-form pauses."""
     if len(groups) <= 1:
         return groups, False
     take_map = {take.clip_id: take for take in takes}
@@ -180,7 +180,7 @@ def _adjacent_reformulated_retries(
     groups,
     takes,
     *,
-    maximum_gap_sec: float = 18.0,
+    maximum_gap_sec: float = 30.0,
     minimum_shared_content: int = 4,
     minimum_containment: float = 0.68,
 ):
@@ -188,11 +188,11 @@ def _adjacent_reformulated_retries(
 
     Long-form creators often restart an idea with small wording changes rather than
     repeating it verbatim. Exact/fuzzy string similarity can miss those retries. This
-    bridge is deliberately strict: groups must be adjacent, close in time, share the
-    first two meaningful content tokens, share at least four content tokens overall,
-    and have high content containment. It therefore captures ``Al terminar mi contrato``
-    reformulations without clustering unrelated neighboring sentences about the same
-    broad topic.
+    bridge remains strict even across a longer editor-realistic window: groups must be
+    adjacent, share the first two meaningful content tokens, share at least four content
+    tokens overall, and have high content containment. The wider 30-second bound catches
+    a creator pausing to recover notes or reset before repeating the same idea without
+    clustering unrelated neighboring sentences about the same broad topic.
     """
     if len(groups) <= 1:
         return groups, False
