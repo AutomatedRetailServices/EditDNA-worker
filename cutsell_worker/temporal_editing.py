@@ -94,6 +94,34 @@ def _trim_words(words: Tuple[Word, ...], start: float, end: float) -> Tuple[Word
     return tuple(word for word in words if word.end > start and word.start < end)
 
 
+def _snapped_start(words: Tuple[Word, ...], candidate: float, end: float) -> tuple[float, bool]:
+    """Never begin a rendered child clip in the middle of a spoken word.
+
+    Whole-video event timestamps are visual/performance estimates, not speech-safe edit
+    points. If an event boundary lands inside a word, advance to the next complete word
+    rather than retaining a transcript token whose audio would start halfway through.
+    """
+    ordered = tuple(sorted(words, key=lambda word: (float(word.start), float(word.end))))
+    if not any(float(word.start) < candidate < float(word.end) for word in ordered):
+        return candidate, False
+    for word in ordered:
+        boundary = float(word.start)
+        if boundary >= candidate and boundary < end:
+            return boundary, True
+    return candidate, False
+
+
+def _snapped_end(words: Tuple[Word, ...], start: float, candidate: float) -> tuple[float, bool]:
+    """Never end a rendered child clip in the middle of a spoken word."""
+    ordered = tuple(sorted(words, key=lambda word: (float(word.start), float(word.end))))
+    if not any(float(word.start) < candidate < float(word.end) for word in ordered):
+        return candidate, False
+    prior = [float(word.end) for word in ordered if float(word.end) <= candidate and float(word.end) > start]
+    if prior:
+        return max(prior), True
+    return candidate, False
+
+
 def _signals_for_trim(signals: MediaSignals | None, start: float, end: float) -> MediaSignals | None:
     if signals is None:
         return None
@@ -120,6 +148,10 @@ def refine_takes_with_temporal_context(
     while removing the awkward reaction/body reset immediately before or after it.
     Interior bad events are reported but are not cut here because doing so without
     a mixed-trim reasoning pass could mutilate valid speech.
+
+    Performance-event timestamps are also snapped away from mid-word positions before
+    they become render boundaries. This prevents physically clipped syllables while
+    keeping non-speech event boundaries unchanged.
     """
     refined = []
     diagnostics = []
@@ -128,27 +160,43 @@ def refine_takes_with_temporal_context(
         new_start, new_end = take.start, take.end
         applied = []
         interior = []
+        word_boundary_snaps = []
 
         for event in events:
             touches_start = event.start <= take.start + edge_tolerance_sec
             touches_end = event.end >= take.end - edge_tolerance_sec
             if touches_start and event.end < new_end - minimum_keep_sec:
-                candidate = max(new_start, min(new_end, event.end))
-                if candidate > new_start:
+                raw_candidate = max(new_start, min(new_end, event.end))
+                candidate, snapped = _snapped_start(take.words, raw_candidate, new_end)
+                if candidate > new_start and new_end - candidate >= minimum_keep_sec:
                     new_start = candidate
                     applied.append((event, "trim_start"))
+                    if snapped:
+                        word_boundary_snaps.append({
+                            "action": "trim_start",
+                            "raw_boundary": raw_candidate,
+                            "safe_boundary": candidate,
+                        })
                 continue
             if touches_end and event.start > new_start + minimum_keep_sec:
-                candidate = min(new_end, max(new_start, event.start))
-                if candidate < new_end:
+                raw_candidate = min(new_end, max(new_start, event.start))
+                candidate, snapped = _snapped_end(take.words, new_start, raw_candidate)
+                if candidate < new_end and candidate - new_start >= minimum_keep_sec:
                     new_end = candidate
                     applied.append((event, "trim_end"))
+                    if snapped:
+                        word_boundary_snaps.append({
+                            "action": "trim_end",
+                            "raw_boundary": raw_candidate,
+                            "safe_boundary": candidate,
+                        })
                 continue
             interior.append(event)
 
         if new_end - new_start < minimum_keep_sec:
             new_start, new_end = take.start, take.end
             applied = []
+            word_boundary_snaps = []
 
         if applied:
             words = _trim_words(take.words, new_start, new_end)
@@ -185,6 +233,7 @@ def refine_takes_with_temporal_context(
                 }
                 for event, action in applied
             ],
+            "word_boundary_snaps": word_boundary_snaps,
             "interior_bad_events": [event.__dict__ for event in interior],
         })
     return tuple(refined), tuple(diagnostics)
