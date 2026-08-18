@@ -10,26 +10,22 @@ from .silence_analysis import SilenceGap, silence_ratio
 from .source_identity import stable_clip_id
 
 
+# Tokens that make a trailing ASR fragment grammatically dependent on what follows.
+# This is intentionally multilingual for the English/Spanish creator footage used by
+# Clean Cut. Ending an ASR chunk on one of these tokens is strong evidence that the
+# chunk boundary is transcription segmentation, not an editorially valid cut point.
 _BRIDGE_CONNECTORS = frozenset({
-    "and",
-    "as",
-    "because",
-    "but",
-    "for",
-    "if",
-    "of",
-    "or",
-    "so",
-    "than",
-    "that",
-    "to",
-    "when",
-    "which",
-    "while",
-    "who",
-    "with",
-    "without",
+    # English
+    "a", "an", "and", "as", "at", "because", "but", "by", "for", "from", "if",
+    "in", "into", "my", "of", "on", "or", "so", "than", "that", "the", "to", "when",
+    "which", "while", "who", "with", "without", "your",
+    # Spanish
+    "a", "al", "como", "con", "cuando", "de", "del", "el", "en", "la", "las", "le",
+    "les", "lo", "los", "me", "mi", "mis", "o", "para", "pero", "por", "porque", "pues",
+    "que", "se", "si", "sin", "su", "sus", "un", "una", "unos", "unas", "y",
 })
+
+_OPEN_PUNCTUATION_RE = re.compile(r"[,;:\-–—]\s*$")
 
 
 def _audio_quality(segment: TranscriptSegment, silence: float) -> float:
@@ -90,15 +86,27 @@ def _last_word(text: str) -> str:
     return words[-1] if words else ""
 
 
-def _looks_complete_idea(text: str, duration_sec: float) -> bool:
-    """Conservatively mark only short open speech as structurally incomplete.
+def _grammatically_open_tail(text: str) -> bool:
+    stripped = str(text or "").strip()
+    if not stripped or _ends_sentence(stripped):
+        return False
+    if _OPEN_PUNCTUATION_RE.search(stripped):
+        return True
+    return _last_word(stripped) in _BRIDGE_CONNECTORS
 
-    This flag is evidence, not a deletion rule. Short intentional lines can remain
-    in the edit unless visual/performance or Best Take evidence rejects them.
-    Longer speech is treated as potentially complete even when ASR omits punctuation.
+
+def _looks_complete_idea(text: str, duration_sec: float) -> bool:
+    """Conservatively distinguish complete delivery from transcription fragments.
+
+    Duration/word count must never override an obviously open grammatical tail. This
+    matters for long-form creator footage where Whisper can split one sentence into
+    several 3-5 second segments such as ``...todos los test que`` + ``ella pudiera...``.
+    Those pieces are not independent takes merely because each is several seconds long.
     """
     if _ends_sentence(text):
         return True
+    if _grammatically_open_tail(text):
+        return False
     words = _word_count(text)
     if words >= 6 or duration_sec >= 3.0:
         return True
@@ -161,15 +169,14 @@ def _repair_boundary_fragments(
     max_join_gap_sec: float = 0.16,
     max_bridge_fragment_sec: float = 2.8,
     max_bridge_gap_sec: float = 0.65,
+    max_open_tail_join_sec: float = 20.0,
 ) -> Tuple[CandidateTake, ...]:
-    """Reattach obvious contiguous ASR fragments without deleting real short lines.
+    """Reattach contiguous ASR fragments without deleting real short lines.
 
-    Repairs are intentionally local: an unfinished tiny suffix can close the prior
-    phrase, and an unfinished tiny lead-in can attach to the next contiguous phrase.
-    A slightly wider bridge is allowed only for a 2-3 word grammatically dependent
-    fragment ending in a connector such as ``because``/``and``/``but``. One-word
-    discourse markers remain independent across anything beyond the strict ASR gap.
-    The repair never crosses a real pause or source boundary.
+    Besides tiny boundary debris, a grammatically open trailing chunk may attach to the
+    next nearby chunk even when the first chunk is several seconds long. This repairs
+    Whisper boundaries such as ``...aumento de`` + ``peso`` or ``...los test que`` +
+    ``ella pudiera...`` while still refusing to cross a real pause/source boundary.
     """
     ordered = sorted(takes, key=lambda take: (take.source_order, take.start, take.end, take.clip_id))
     repaired: list[CandidateTake] = []
@@ -196,17 +203,25 @@ def _repair_boundary_fragments(
                 and _last_word(previous.text) in _BRIDGE_CONNECTORS
                 and _word_count(take.text) >= 4
             )
+            previous_has_open_tail = (
+                _grammatically_open_tail(previous.text)
+                and right_span(previous, take) <= max_open_tail_join_sec
+            )
 
             if same_source and strict_contiguous and (previous_is_open_micro or current_closes_open_previous):
                 repaired[-1] = _join_takes(previous, take)
                 continue
-            if same_source and bridge_contiguous and previous_is_bridge_fragment:
+            if same_source and bridge_contiguous and (previous_is_bridge_fragment or previous_has_open_tail):
                 repaired[-1] = _join_takes(previous, take)
                 continue
 
         repaired.append(take)
 
     return tuple(repaired)
+
+
+def right_span(left: CandidateTake, right: CandidateTake) -> float:
+    return max(0.0, float(right.end) - float(left.start))
 
 
 def segment_takes(
