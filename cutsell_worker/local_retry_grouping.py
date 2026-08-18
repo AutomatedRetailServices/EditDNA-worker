@@ -17,10 +17,16 @@ import re
 
 _TOKEN_RE = re.compile(r"[a-z0-9áéíóúñü]+", re.IGNORECASE)
 _STOP = frozenset({
+    # English
     "a", "an", "and", "are", "as", "at", "be", "but", "by", "for", "from", "i",
     "in", "is", "it", "its", "me", "my", "of", "on", "or", "that", "the", "this",
     "to", "was", "we", "what", "with", "you", "your", "okay", "ok", "now", "whole",
     "sentence",
+    # Spanish
+    "al", "como", "con", "cuando", "de", "del", "el", "en", "ella", "ellas", "ellos",
+    "es", "esta", "este", "la", "las", "le", "les", "lo", "los", "me", "mi", "mis",
+    "o", "para", "pero", "por", "porque", "que", "se", "si", "sin", "su", "sus", "un",
+    "una", "unos", "unas", "y", "yo",
 })
 _META_RE = re.compile(r"\bwhole\s+sentence\b|\b(?:say|do)\s+that\s+again\b", re.IGNORECASE)
 
@@ -67,6 +73,22 @@ def _shared_content_strength(left: str, right: str) -> int:
     return fuzzy
 
 
+def _content_containment(left: str, right: str) -> float:
+    a = set(_content_tokens(left))
+    b = set(_content_tokens(right))
+    if not a or not b:
+        return 0.0
+    return len(a & b) / max(1, min(len(a), len(b)))
+
+
+def _same_semantic_opening(left: str, right: str, *, width: int = 2) -> bool:
+    a = _content_tokens(left)
+    b = _content_tokens(right)
+    if len(a) < width or len(b) < width:
+        return False
+    return a[:width] == b[:width]
+
+
 def _restart_heavy(text: str) -> bool:
     tokens = _content_tokens(text)
     if len(_tokens(text)) <= 6:
@@ -78,16 +100,7 @@ def _restart_heavy(text: str) -> bool:
 
 
 def _dominant_weak_group_with_fuller_retry(left_members, right_members) -> bool:
-    """Allow one trailing partial phrase inside an otherwise obvious retry envelope.
-
-    Real ASR often turns the last false start into a grammatically plausible fragment,
-    e.g. ``The popular crop black jeans. Okay now we Hold``. Requiring every member
-    to be restart-heavy leaves that one fragment as a barrier between several tiny
-    retries and the following full delivery. This bridge remains conservative: the
-    left group must contain at least three attempts, all but at most one must be weak,
-    and the fuller adjacent retry must strongly overlap the trailing attempts while
-    being materially longer.
-    """
+    """Allow one trailing partial phrase inside an otherwise obvious retry envelope."""
     if len(left_members) < 3 or not right_members:
         return False
     weak_count = sum(1 for member in left_members if _restart_heavy(member.text))
@@ -108,14 +121,7 @@ def _dominant_weak_group_with_fuller_retry(left_members, right_members) -> bool:
 
 
 def _serial_retry_envelope(groups, takes, *, maximum_gap_sec: float = 20.0):
-    """Absorb weak serial retries into the following linked retry group.
-
-    The left/current group normally consists entirely of short/repetitive/meta takes.
-    One trailing plausible fragment is also allowed when the rest of the group is weak
-    and a materially fuller adjacent retry strongly overlaps it. This lets a chain like
-    ``popular croc`` -> ``crop popular crop popular`` -> ``popular crop black...``
-    reach the final full retake while protecting two distinct substantive sentences.
-    """
+    """Absorb weak serial retries into the following linked retry group."""
     if len(groups) <= 1:
         return groups, False
     take_map = {take.clip_id: take for take in takes}
@@ -170,6 +176,76 @@ def _serial_retry_envelope(groups, takes, *, maximum_gap_sec: float = 20.0):
     return tuple(normalized), changed
 
 
+def _adjacent_reformulated_retries(
+    groups,
+    takes,
+    *,
+    maximum_gap_sec: float = 18.0,
+    minimum_shared_content: int = 4,
+    minimum_containment: float = 0.68,
+):
+    """Merge nearby full retries that keep the same semantic opening.
+
+    Long-form creators often restart an idea with small wording changes rather than
+    repeating it verbatim. Exact/fuzzy string similarity can miss those retries. This
+    bridge is deliberately strict: groups must be adjacent, close in time, share the
+    first two meaningful content tokens, share at least four content tokens overall,
+    and have high content containment. It therefore captures ``Al terminar mi contrato``
+    reformulations without clustering unrelated neighboring sentences about the same
+    broad topic.
+    """
+    if len(groups) <= 1:
+        return groups, False
+    take_map = {take.clip_id: take for take in takes}
+    work = [list(group) for group in groups]
+    changed = False
+
+    def members(group):
+        return sorted((take_map[cid] for cid in group), key=lambda t: (t.start, t.end, t.clip_id))
+
+    index = 0
+    while index < len(work) - 1:
+        left_members = members(work[index])
+        right_members = members(work[index + 1])
+        if not left_members or not right_members:
+            index += 1
+            continue
+        left = max(left_members, key=lambda item: (item.duration_sec, len(_tokens(item.text))))
+        right = max(right_members, key=lambda item: (item.duration_sec, len(_tokens(item.text))))
+        if left.source_asset_id != right.source_asset_id:
+            index += 1
+            continue
+        gap = max(0.0, right_members[0].start - left_members[-1].end)
+        shared = _shared_content_strength(left.text, right.text)
+        containment = _content_containment(left.text, right.text)
+        if (
+            gap <= maximum_gap_sec
+            and min(len(_content_tokens(left.text)), len(_content_tokens(right.text))) >= 5
+            and _same_semantic_opening(left.text, right.text)
+            and shared >= minimum_shared_content
+            and containment >= minimum_containment
+        ):
+            work[index] = work[index] + work[index + 1]
+            del work[index + 1]
+            changed = True
+            continue
+        index += 1
+
+    normalized = []
+    for group in work:
+        ordered = sorted(
+            set(group),
+            key=lambda cid: (
+                take_map[cid].source_order,
+                take_map[cid].start,
+                take_map[cid].end,
+                cid,
+            ),
+        )
+        normalized.append(tuple(ordered))
+    return tuple(normalized), changed
+
+
 def install_local_retry_grouping() -> None:
     from . import take_grouping_provider as grouping
 
@@ -186,6 +262,7 @@ def install_local_retry_grouping() -> None:
         groups, extended = grouping._extend_adjacent_retry_groups(groups, takes)
         groups, debris_absorbed = grouping._absorb_interstitial_retry_debris(groups, takes)
         groups, serial_envelope = _serial_retry_envelope(groups, takes)
+        groups, reformulated = _adjacent_reformulated_retries(groups, takes)
 
         reasons = ["baseline_local"]
         if reconciled:
@@ -196,6 +273,8 @@ def install_local_retry_grouping() -> None:
             reasons.append("interstitial_retry_debris_absorbed")
         if serial_envelope:
             reasons.append("serial_retry_envelope_collapsed")
+        if reformulated:
+            reasons.append("adjacent_reformulated_retries_collapsed")
 
         return grouping.TakeGroupingProviderResult(
             groups=groups,
