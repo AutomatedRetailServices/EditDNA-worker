@@ -8,7 +8,7 @@ on:
       - .github/workflows/cutsell-emergency-delete-staging.yml
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   delete:
@@ -17,37 +17,42 @@ jobs:
       RUNPOD_API_KEY: ${{ secrets.RUNPOD_API_KEY }}
       POD_ID: 6llbzul8q020lp
     steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: cutsell/mobile-v1-clean
       - name: Delete exact failed Run35 staging Pod if present
         shell: bash
         run: |
           set -euo pipefail
           test -n "${RUNPOD_API_KEY:-}" || { echo 'RUNPOD_API_KEY missing'; exit 3; }
-          curl --fail --silent --show-error \
-            --url "https://rest.runpod.io/v1/pods" \
-            --header "Authorization: Bearer $RUNPOD_API_KEY" \
-            --output pods.json
+          curl --fail --silent --show-error --url "https://rest.runpod.io/v1/pods" --header "Authorization: Bearer $RUNPOD_API_KEY" --output pods.json
           name=$(jq -r --arg id "$POD_ID" '[.[] | select(.id == $id)][0].name // empty' pods.json)
+          already=false
           if [ -z "$name" ]; then
-            echo "Exact Run35 Pod is already absent: $POD_ID"
-            exit 0
+            already=true
+          else
+            test "$name" = "cutsell-staging-worker" || { echo 'Exact Pod ID is not cutsell-staging-worker; refusing delete'; exit 4; }
+            code=$(curl --silent --show-error --write-out '%{http_code}' --request DELETE --url "https://rest.runpod.io/v1/pods/$POD_ID" --header "Authorization: Bearer $RUNPOD_API_KEY" --output delete.json)
+            test "$code" = "204" || { echo "Delete HTTP status: $code"; cat delete.json || true; exit 5; }
           fi
-          test "$name" = "cutsell-staging-worker" || { echo 'Exact Pod ID is not cutsell-staging-worker; refusing delete'; exit 4; }
-          code=$(curl --silent --show-error --write-out '%{http_code}' \
-            --request DELETE \
-            --url "https://rest.runpod.io/v1/pods/$POD_ID" \
-            --header "Authorization: Bearer $RUNPOD_API_KEY" \
-            --output delete.json)
-          test "$code" = "204" || { echo "Delete HTTP status: $code"; cat delete.json || true; exit 5; }
+          verified=false
           for attempt in 1 2 3 4 5 6 7 8 9 10; do
-            curl --fail --silent --show-error \
-              --url "https://rest.runpod.io/v1/pods" \
-              --header "Authorization: Bearer $RUNPOD_API_KEY" \
-              --output pods-after.json
+            curl --fail --silent --show-error --url "https://rest.runpod.io/v1/pods" --header "Authorization: Bearer $RUNPOD_API_KEY" --output pods-after.json
             count=$(jq --arg id "$POD_ID" '[.[] | select(.id == $id)] | length' pods-after.json)
-            if [ "$count" = "0" ]; then
-              echo "run35_exact_pod_deleted=true"
-              exit 0
-            fi
+            if [ "$count" = "0" ]; then verified=true; break; fi
             sleep 3
           done
-          echo 'Exact Run35 Pod still present after deletion request'; exit 6
+          test "$verified" = true || { echo 'Exact Run35 Pod still present after cleanup'; exit 6; }
+          mkdir -p ops
+          jq -n --arg pod_id "$POD_ID" --argjson already "$already" '{pod_id:$pod_id,verified_absent:true,already_absent:$already}' > ops/run35-delete-status.json
+          echo "run35_exact_pod_deleted=true"
+      - name: Persist verified cleanup status
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name github-actions
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add ops/run35-delete-status.json
+          git commit -m 'Record verified Run35 Pod cleanup'
+          git pull --rebase origin cutsell/mobile-v1-clean
+          git push origin HEAD:cutsell/mobile-v1-clean
