@@ -52,8 +52,9 @@ def build_compact_editorial_payload(
     cleanup_task = session.task == "classify_recording_process_within_single_creator_session"
     task_rules = [
         "valid independent audience-facing speech should be keep",
-        "failed means a clear stumble, false start, incomplete attempt, or word-search",
-        "bts means self-talk, recording-process commentary, frustration, self-review, or breaking character",
+        "failed means a clear stumble, false start, incomplete attempt, word-search, or an abandoned same-idea retry",
+        "bts means self-talk, recording-process commentary, frustration, self-review, breaking character, or consulting script/notes",
+        "use whole-source context to distinguish a repeated/abandoned idea from genuinely new information",
         "do not force a winner across different ideas in the same creator session",
     ] if cleanup_task else [
         "return exactly one winner only when the supplied candidates are competing retries and evidence supports one",
@@ -64,6 +65,7 @@ def build_compact_editorial_payload(
         "task": session.task,
         "session_id": session.session_id,
         "source_asset_id": session.source_asset_id,
+        "source_context": {str(key): value for key, value in session.source_context},
         "local_confidence": round(float(session.local_confidence), 4),
         "conflict_score": round(float(session.conflict_score), 4),
         "allowed_labels": ["winner", "alternate", "failed", "bts", "uncertain", "keep"],
@@ -71,7 +73,8 @@ def build_compact_editorial_payload(
             "reference every supplied clip_id exactly once",
             "never invent clip ids",
             "never create or alter timestamps",
-            "reason only inside this bounded creator session",
+            "source_context is read-only whole-video context; only supplied candidates may receive labels",
+            "reason about each candidate in relation to the full message/story, not only its immediate neighbors",
             "use uncertain when semantic evidence is insufficient",
             *task_rules,
         ],
