@@ -37,7 +37,7 @@ jobs:
           APPROVAL_TOKEN: ${{ inputs.approval_token }}
         run: |
           set -euo pipefail
-          test "$APPROVAL_TOKEN" = "RUN35" || { echo 'Paid Hybrid benchmark not explicitly approved for RUN35 Clean Cut Gold'; exit 2; }
+          test "$APPROVAL_TOKEN" = "RUN36" || { echo 'Paid Hybrid benchmark not explicitly approved for RUN36 Clean Cut Gold'; exit 2; }
           test -n "$STAGING_POD_ID" || { echo 'Exact staging Pod ID required'; exit 2; }
 
       - uses: actions/checkout@v4
