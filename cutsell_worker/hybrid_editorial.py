@@ -36,6 +36,10 @@ class EditorialSession:
     local_confidence: float
     conflict_score: float = 0.0
     task: str = "classify_best_take_within_single_bounded_creator_session"
+    # Read-only whole-source semantic map. This lets a bounded request reason about
+    # repeated ideas and narrative continuity without granting authority over clips
+    # that are not present in the candidates tuple.
+    source_context: tuple[tuple[str, str | float], ...] = ()
 
 
 @dataclass(frozen=True)
