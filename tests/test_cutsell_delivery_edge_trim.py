@@ -92,3 +92,50 @@ def test_short_natural_breathing_margin_is_preserved():
     trimmed, diagnostics = trim_delivery_edge_slack((take,), context)
     assert trimmed == (take,)
     assert diagnostics == ()
+
+
+def test_talking_head_short_mic_drop_slack_is_trimmed_with_hand_reset_cluster():
+    words = (
+        Word("this", 0.0, 0.4),
+        Word("works", 0.5, 1.0),
+    )
+    take = CandidateTake(
+        clip_id="mic-drop",
+        source_asset_id="src",
+        source_order=0,
+        start=0.0,
+        end=1.18,
+        text="this works",
+        words=words,
+        signals=MediaSignals("src", 0.0, 1.18),
+    )
+    context = _context(
+        TemporalEvent("src", 1.02, 1.08, "hand_motion_reset_candidate", 0.97, "mic starts dropping"),
+        TemporalEvent("src", 1.09, 1.15, "hand_motion_reset_candidate", 0.99, "hand returns to rest"),
+    )
+    trimmed, diagnostics = trim_delivery_edge_slack((take,), context)
+    assert trimmed[0].end == 1.0
+    assert diagnostics[0]["actions"][0]["talking_head_micro_edge"] is True
+
+
+def test_single_short_hand_gesture_does_not_force_frame_tight_cut():
+    words = (
+        Word("this", 0.0, 0.4),
+        Word("works", 0.5, 1.0),
+    )
+    take = CandidateTake(
+        clip_id="gesture",
+        source_asset_id="src",
+        source_order=0,
+        start=0.0,
+        end=1.18,
+        text="this works",
+        words=words,
+        signals=MediaSignals("src", 0.0, 1.18),
+    )
+    context = _context(TemporalEvent(
+        "src", 1.04, 1.11, "hand_motion_reset_candidate", 0.99, "single hand movement",
+    ))
+    trimmed, diagnostics = trim_delivery_edge_slack((take,), context)
+    assert trimmed == (take,)
+    assert diagnostics == ()
