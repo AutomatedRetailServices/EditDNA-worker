@@ -1,0 +1,60 @@
+name: Run36 Build Observer
+
+on:
+  push:
+    branches:
+      - cutsell/mobile-v1-clean
+    paths:
+      - .github/workflows/run36-build-observer.yml
+
+permissions:
+  actions: read
+  contents: write
+
+jobs:
+  observe:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: cutsell/mobile-v1-clean
+      - name: Resolve exact Run36 build and digest
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TARGET_SHA: 0d55eb3c9a174478f2986234c9f8ed205439351b
+          REPO: AutomatedRetailServices/EditDNA-worker
+        shell: bash
+        run: |
+          set -euo pipefail
+          for i in $(seq 1 60); do
+            runs=$(curl --fail --silent --show-error \
+              -H "Authorization: Bearer $GH_TOKEN" \
+              -H "Accept: application/vnd.github+json" \
+              "https://api.github.com/repos/$REPO/actions/workflows/cutsell-feature-worker-one-shot-build.yml/runs?branch=cutsell/mobile-v1-clean&per_page=20")
+            run_id=$(printf '%s' "$runs" | jq -r --arg sha "$TARGET_SHA" '[.workflow_runs[] | select(.head_sha == $sha)][0].id // empty')
+            status=$(printf '%s' "$runs" | jq -r --arg sha "$TARGET_SHA" '[.workflow_runs[] | select(.head_sha == $sha)][0].status // empty')
+            conclusion=$(printf '%s' "$runs" | jq -r --arg sha "$TARGET_SHA" '[.workflow_runs[] | select(.head_sha == $sha)][0].conclusion // empty')
+            if [ -n "$run_id" ] && [ "$status" = "completed" ]; then
+              jobs=$(curl --fail --silent --show-error \
+                -H "Authorization: Bearer $GH_TOKEN" \
+                -H "Accept: application/vnd.github+json" \
+                "https://api.github.com/repos/$REPO/actions/runs/$run_id/jobs")
+              job_id=$(printf '%s' "$jobs" | jq -r '.jobs[0].id // empty')
+              logs=$(mktemp)
+              curl -L --fail --silent --show-error \
+                -H "Authorization: Bearer $GH_TOKEN" \
+                -H "Accept: application/vnd.github+json" \
+                "https://api.github.com/repos/$REPO/actions/jobs/$job_id/logs" > "$logs"
+              digest=$(grep -Eo 'sha256:[a-f0-9]{64}' "$logs" | tail -1 || true)
+              jq -n --arg sha "$TARGET_SHA" --argjson run_id "$run_id" --argjson job_id "$job_id" --arg conclusion "$conclusion" --arg digest "$digest" \
+                '{head_sha:$sha,run_id:$run_id,job_id:$job_id,conclusion:$conclusion,image_digest:$digest}' > ops/run36-build-status.json
+              git config user.name "github-actions[bot]"
+              git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+              git add ops/run36-build-status.json
+              git commit -m "Record Run36 build status" || true
+              git push origin HEAD:cutsell/mobile-v1-clean
+              exit 0
+            fi
+            sleep 10
+          done
+          exit 1
