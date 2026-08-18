@@ -16,7 +16,7 @@ jobs:
     runs-on: ubuntu-latest
     env:
       IMAGE: ghcr.io/automatedretailservices/cutsell-worker:${{ github.sha }}
-      BUILD_REASON: clean-cut-run35-longform-gold-raws
+      BUILD_REASON: clean-cut-run35-retry-exact-audited-prefix
     steps:
       - uses: actions/checkout@v4
       - name: Login to GitHub Container Registry
