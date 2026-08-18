@@ -84,3 +84,5 @@ jobs:
           git commit -m 'Record live Run35 Gold benchmark inspection'
           git pull --rebase origin cutsell/mobile-v1-clean
           git push origin HEAD:cutsell/mobile-v1-clean
+
+# refresh inspection after benchmark start
