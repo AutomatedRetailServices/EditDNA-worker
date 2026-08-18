@@ -1,0 +1,45 @@
+name: Run35 Inspect Deploy
+
+on:
+  push:
+    branches:
+      - cutsell/mobile-v1-clean
+    paths:
+      - .github/workflows/run35-inspect-deploy.yml
+
+permissions:
+  actions: read
+  contents: write
+
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    env:
+      RUNPOD_API_KEY: ${{ secrets.RUNPOD_API_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: cutsell/mobile-v1-clean
+      - name: Inspect latest deploy run and staging Pod
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          api="https://api.github.com/repos/${GITHUB_REPOSITORY}"
+          runs=$(curl --fail --silent --show-error --header "Authorization: Bearer $GH_TOKEN" "$api/actions/workflows/cutsell-feature-runpod-one-shot-deploy.yml/runs?branch=cutsell/mobile-v1-clean&event=workflow_dispatch&per_page=10")
+          run=$(printf '%s' "$runs" | jq '[.workflow_runs[]][0] // {}')
+          pods=$(curl --fail --silent --show-error --header "Authorization: Bearer $RUNPOD_API_KEY" https://rest.runpod.io/v1/pods)
+          pod=$(printf '%s' "$pods" | jq '[.[] | select(.name == "cutsell-staging-worker")][0] // {}')
+          jq -n --argjson run "$run" --argjson pod "$pod" '{deploy_run:{id:$run.id,status:$run.status,conclusion:$run.conclusion,created_at:$run.created_at,head_sha:$run.head_sha},pod:{id:$pod.id,name:$pod.name,desiredStatus:$pod.desiredStatus,imageName:$pod.imageName,costPerHr:$pod.costPerHr}}' > run35-deploy-inspect.json
+      - name: Persist inspection
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name github-actions
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          mkdir -p ops
+          mv run35-deploy-inspect.json ops/run35-deploy-inspect.json
+          git add ops/run35-deploy-inspect.json
+          git commit -m 'Record Run35 deploy inspection'
+          git push origin HEAD:cutsell/mobile-v1-clean
