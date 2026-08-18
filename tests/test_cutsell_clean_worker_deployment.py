@@ -57,6 +57,17 @@ def test_cutsell_gpu_worker_has_isolated_container_and_immutable_build_workflow(
     assert "push:" not in workflow
 
 
+def test_longform_worker_ttl_exceeds_gold_job_timeout():
+    dockerfile = Path("Dockerfile.cutsell.worker").read_text()
+    deploy = Path(".github/workflows/cutsell-feature-runpod-one-shot-deploy.yml").read_text()
+    benchmark = Path(".github/workflows/cutsell-unseen-clean-cut-benchmark.yml").read_text()
+    assert "--worker-ttl 14400" in dockerfile
+    assert "--worker-ttl 14400" in deploy
+    assert "--worker-ttl 1200" not in dockerfile
+    assert "--worker-ttl 1200" not in deploy
+    assert "job_timeout=10800" in benchmark
+
+
 def test_paid_staging_worker_workflows_are_manual_and_explicitly_guarded():
     create = Path(".github/workflows/cutsell-runpod-staging-worker.yml").read_text()
     delete = Path(".github/workflows/cutsell-runpod-staging-worker-delete.yml").read_text()
