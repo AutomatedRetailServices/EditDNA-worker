@@ -10,43 +10,39 @@ on:
 
 permissions:
   actions: read
-  contents: read
+  contents: write
 
 jobs:
   delete:
     runs-on: ubuntu-latest
-    timeout-minutes: 205
+    timeout-minutes: 15
     env:
       RUNPOD_API_KEY: ${{ secrets.RUNPOD_API_KEY }}
       POD_ID: jw9h16m41q99wi
       BENCHMARK_RUN_ID: "32131140975"
       REPO: AutomatedRetailServices/EditDNA-worker
     steps:
-      - name: Wait for active Run36 benchmark to reach terminal state
+      - uses: actions/checkout@v4
+        with:
+          ref: cutsell/mobile-v1-clean
+
+      - name: Confirm Run36 benchmark terminal state
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          set -u
-          api="https://api.github.com/repos/$REPO/actions/runs/$BENCHMARK_RUN_ID"
-          auth=(-H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github+json")
-          for i in $(seq 1 800); do
-            body=$(curl --silent --show-error --fail "${auth[@]}" "$api" 2>/dev/null || true)
-            if [ -n "$body" ]; then
-              status=$(printf '%s' "$body" | jq -r '.status // empty')
-              conclusion=$(printf '%s' "$body" | jq -r '.conclusion // empty')
-              echo "Run36 benchmark status=$status conclusion=${conclusion:-pending}"
-              if [ "$status" = "completed" ]; then
-                exit 0
-              fi
-            fi
-            sleep 15
-          done
-          echo 'Benchmark terminal state could not be confirmed inside cleanup window; proceeding with cost-safety cleanup.'
-          exit 0
+          set -euo pipefail
+          body=$(curl --fail --silent --show-error \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/$REPO/actions/runs/$BENCHMARK_RUN_ID")
+          status=$(printf '%s' "$body" | jq -r '.status // empty')
+          conclusion=$(printf '%s' "$body" | jq -r '.conclusion // empty')
+          echo "Run36 benchmark status=$status conclusion=${conclusion:-pending}"
+          test "$status" = "completed" || { echo 'Benchmark is not terminal; refusing premature Pod cleanup'; exit 2; }
+          printf 'BENCHMARK_CONCLUSION=%s\n' "$conclusion" >> "$GITHUB_ENV"
 
       - name: Terminate exact Run36 staging GPU worker and verify absence
-        if: always()
         shell: bash
         run: |
           set -euo pipefail
@@ -58,21 +54,61 @@ jobs:
           name=$(jq -r --arg id "$POD_ID" '[.[] | select(.id == $id)][0].name // empty' pods.json)
           if [ -z "$name" ]; then
             echo "Run36 staging Pod already absent: $POD_ID"
-            exit 0
+          else
+            test "$name" = "cutsell-staging-worker" || { echo 'Exact Pod ID is not cutsell-staging-worker; refusing delete'; exit 4; }
+            code=$(curl --silent --show-error --write-out '%{http_code}' \
+              --request DELETE \
+              --url "https://rest.runpod.io/v1/pods/$POD_ID" \
+              --header "Authorization: Bearer $RUNPOD_API_KEY" \
+              --output delete-response.txt)
+            echo "RunPod delete HTTP status: $code"
+            test "$code" = "204"
+            sleep 2
           fi
-          test "$name" = "cutsell-staging-worker" || { echo 'Exact Pod ID is not cutsell-staging-worker; refusing delete'; exit 4; }
-          code=$(curl --silent --show-error --write-out '%{http_code}' \
-            --request DELETE \
-            --url "https://rest.runpod.io/v1/pods/$POD_ID" \
-            --header "Authorization: Bearer $RUNPOD_API_KEY" \
-            --output delete-response.txt)
-          echo "RunPod delete HTTP status: $code"
-          test "$code" = "204"
-          sleep 2
           curl --fail --silent --show-error \
             --url "https://rest.runpod.io/v1/pods" \
             --header "Authorization: Bearer $RUNPOD_API_KEY" \
             --output pods-after.json
           remaining=$(jq --arg id "$POD_ID" '[.[] | select(.id == $id)] | length' pods-after.json)
-          test "$remaining" = "0" || { echo 'Run36 staging Pod still present after delete'; exit 5; }
-          echo "Run36 staging Pod deleted and verified absent: $POD_ID"
+          test "$remaining" = "0" || { echo 'Run36 staging Pod still present after cleanup'; exit 5; }
+          echo "Run36 staging Pod verified absent: $POD_ID"
+
+      - name: Record Run36 cleanup proof
+        if: always()
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          absent=false
+          if [ -n "${RUNPOD_API_KEY:-}" ]; then
+            curl --fail --silent --show-error \
+              --url "https://rest.runpod.io/v1/pods" \
+              --header "Authorization: Bearer $RUNPOD_API_KEY" \
+              --output final-pods.json || true
+            if [ -s final-pods.json ]; then
+              remaining=$(jq --arg id "$POD_ID" '[.[] | select(.id == $id)] | length' final-pods.json)
+              [ "$remaining" = "0" ] && absent=true
+            fi
+          fi
+          conclusion="${BENCHMARK_CONCLUSION:-}"
+          if [ -z "$conclusion" ]; then
+            body=$(curl --silent --show-error \
+              -H "Authorization: Bearer $GH_TOKEN" \
+              -H "Accept: application/vnd.github+json" \
+              "https://api.github.com/repos/$REPO/actions/runs/$BENCHMARK_RUN_ID" || true)
+            conclusion=$(printf '%s' "$body" | jq -r '.conclusion // empty' 2>/dev/null || true)
+          fi
+          mkdir -p ops
+          jq -n \
+            --arg pod "$POD_ID" \
+            --argjson benchmark_run "$BENCHMARK_RUN_ID" \
+            --arg conclusion "$conclusion" \
+            --argjson absent "$absent" \
+            '{pod_id:$pod,benchmark_run_id:$benchmark_run,benchmark_conclusion:$conclusion,pod_verified_absent:$absent}' \
+            > ops/run36-delete-status.json
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add ops/run36-delete-status.json
+          git commit -m "Record Run36 Pod cleanup proof" || true
+          git push origin HEAD:cutsell/mobile-v1-clean
