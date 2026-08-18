@@ -1,0 +1,54 @@
+name: Run36 Live Probe
+
+on:
+  push:
+    branches:
+      - cutsell/mobile-v1-clean
+    paths:
+      - .github/workflows/run36-live-probe.yml
+
+permissions:
+  actions: read
+  contents: write
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      RUNPOD_API_KEY: ${{ secrets.RUNPOD_API_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: cutsell/mobile-v1-clean
+      - name: Record current Run36 state
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: AutomatedRetailServices/EditDNA-worker
+          CUTOFF: '2026-08-18T11:17:00Z'
+        shell: bash
+        run: |
+          set -euo pipefail
+          api="https://api.github.com/repos/$REPO"
+          auth=(-H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github+json")
+
+          deploy_json=$(curl --fail --silent --show-error "${auth[@]}" "$api/actions/workflows/cutsell-feature-runpod-one-shot-deploy.yml/runs?branch=cutsell/mobile-v1-clean&per_page=20")
+          benchmark_json=$(curl --fail --silent --show-error "${auth[@]}" "$api/actions/workflows/cutsell-unseen-clean-cut-benchmark.yml/runs?branch=cutsell/mobile-v1-clean&per_page=20")
+          recovery_json=$(curl --fail --silent --show-error "${auth[@]}" "$api/actions/workflows/run36-dispatch-chain.yml/runs?branch=cutsell/mobile-v1-clean&per_page=20")
+
+          deploy=$(printf '%s' "$deploy_json" | jq -c --arg cutoff "$CUTOFF" '[.workflow_runs[] | select(.created_at >= $cutoff)][0] | {id,status,conclusion,event,created_at,updated_at,head_sha}')
+          benchmark=$(printf '%s' "$benchmark_json" | jq -c --arg cutoff "$CUTOFF" '[.workflow_runs[] | select(.created_at >= $cutoff)][0] | {id,status,conclusion,event,created_at,updated_at,head_sha}')
+          recovery=$(printf '%s' "$recovery_json" | jq -c --arg cutoff "$CUTOFF" '[.workflow_runs[] | select(.created_at >= $cutoff)][0] | {id,status,conclusion,event,created_at,updated_at,head_sha}')
+
+          pods='[]'
+          if [ -n "${RUNPOD_API_KEY:-}" ]; then
+            pods=$(curl --fail --silent --show-error --url "https://rest.runpod.io/v1/pods" --header "Authorization: Bearer $RUNPOD_API_KEY" | jq '[.[] | select(.name == "cutsell-staging-worker") | {id,name,desiredStatus,imageName,costPerHr,adjustedCostPerHr}]')
+          fi
+
+          mkdir -p ops
+          jq -n --argjson deploy "$deploy" --argjson benchmark "$benchmark" --argjson recovery "$recovery" --argjson pods "$pods" '{deploy:$deploy,benchmark:$benchmark,recovery:$recovery,staging_pods:$pods}' > ops/run36-live-status.json
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add ops/run36-live-status.json
+          git commit -m "Record Run36 live status" || true
+          git push origin HEAD:cutsell/mobile-v1-clean
