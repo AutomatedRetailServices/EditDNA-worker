@@ -15,7 +15,8 @@ from .source_sampling import SourceFrameSample
 from .whole_video_analysis import SourceVideoContext, WholeVideoContext
 
 
-def _compact_transcript(segments: tuple[TranscriptSegment, ...], *, limit: int = 700) -> str:
+def _compact_transcript(segments: tuple[TranscriptSegment, ...], *, limit: int = 3600) -> str:
+    """Keep enough source transcript for full-message coherence without flooding Hybrid."""
     text = " ".join(str(segment.text or "").strip() for segment in segments if str(segment.text or "").strip())
     return " ".join(text.split())[:limit]
 
@@ -47,7 +48,7 @@ class RunPodLocalWholeVideoProvider:
                 sales_intent=0.0,
                 main_topic="",
                 product_or_subject="",
-                story_logic="preserve natural source order; remove recording mistakes only",
+                story_logic="preserve the coherent full source message in natural order; collapse abandoned retries, duplicated attempts, note/script consultations, and recording-process debris while preserving genuinely new information",
             ))
 
         return WholeVideoContext(
@@ -57,6 +58,6 @@ class RunPodLocalWholeVideoProvider:
                 requested=True,
                 available=True,
                 status="applied",
-                reason="local_asr_context",
+                reason="local_asr_full_message_context",
             ),
         )
