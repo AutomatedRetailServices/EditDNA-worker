@@ -1,0 +1,56 @@
+name: CutSell Gold RunPod Probe
+
+on:
+  push:
+    branches:
+      - cutsell/mobile-v1-clean
+    paths:
+      - .github/workflows/cutsell-gold-runpod-probe.yml
+
+permissions:
+  contents: write
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    env:
+      RUNPOD_API_KEY: ${{ secrets.RUNPOD_API_KEY }}
+      REDIS_URL: ${{ secrets.REDIS_URL }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: cutsell/mobile-v1-clean
+          fetch-depth: 0
+      - name: Read staging Pod and RQ worker status only
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p ops
+          curl --fail --silent --show-error --url "https://rest.runpod.io/v1/pods" --header "Authorization: Bearer $RUNPOD_API_KEY" --output pods.json
+          python -m pip install -q 'redis>=5.0' 'rq>=2.6'
+          python - <<'PY'
+          import json, os
+          from datetime import datetime, timezone
+          from redis import Redis
+          from rq import Worker
+          pods=json.load(open('pods.json'))
+          staging=[{k:p.get(k) for k in ('id','name','desiredStatus','imageName','costPerHr','adjustedCostPerHr','gpu')} for p in pods if p.get('name')=='cutsell-staging-worker']
+          workers=[]
+          try:
+              conn=Redis.from_url(os.environ['REDIS_URL'])
+              now=datetime.now(timezone.utc)
+              for w in Worker.all(connection=conn):
+                  hb=w.last_heartbeat
+                  if hb and hb.tzinfo is None: hb=hb.replace(tzinfo=timezone.utc)
+                  workers.append({'name':w.name,'state':w.get_state(),'heartbeat_age_sec':round((now-hb).total_seconds(),1) if hb else None,'queues':[q.name for q in w.queues]})
+          except Exception as exc:
+              workers=[{'error':type(exc).__name__+':'+str(exc)[:160]}]
+          out={'captured_at':datetime.now(timezone.utc).isoformat(),'staging_pods':staging,'rq_workers':workers}
+          open('ops/gold-runpod-probe.json','w').write(json.dumps(out,indent=2,sort_keys=True))
+          print(json.dumps(out,indent=2,sort_keys=True))
+          PY
+          git config user.name github-actions
+          git config user.email github-actions@github.com
+          git add ops/gold-runpod-probe.json
+          git commit -m "Record active Gold RunPod probe" || exit 0
+          git push origin HEAD:cutsell/mobile-v1-clean
