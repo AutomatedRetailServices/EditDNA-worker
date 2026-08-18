@@ -18,7 +18,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: cutsell/mobile-v1-clean
-      - name: Dispatch exact Run35 Gold benchmark and capture run id
+      - name: Dispatch exact Run35 Gold retry and capture run id
         env:
           GH_TOKEN: ${{ github.token }}
         shell: bash
@@ -43,9 +43,9 @@ jobs:
             if [ -n "$run_id" ]; then break; fi
             sleep 2
           done
-          test -n "$run_id" || { echo 'Run35 Gold benchmark run not found'; exit 3; }
-          jq -n --argjson run_id "$run_id" --arg head_sha "$head_sha" '{run_id:$run_id,head_sha:$head_sha,dataset_role:"clean_cut_gold_raw",source_prefix:"Editdna/ longform validation/",status:"dispatched"}' > run35-gold-benchmark-status.json
-      - name: Persist Run35 Gold benchmark run id
+          test -n "$run_id" || { echo 'Run35 Gold retry benchmark run not found'; exit 3; }
+          jq -n --argjson run_id "$run_id" --arg head_sha "$head_sha" '{run_id:$run_id,head_sha:$head_sha,dataset_role:"clean_cut_gold_raw",source_prefix:"Editdna longform validation/",worker_pod_id:"bzesdtg5kuk06y",status:"dispatched"}' > run35-gold-benchmark-status.json
+      - name: Persist Run35 Gold retry run id
         shell: bash
         run: |
           set -euo pipefail
@@ -54,5 +54,8 @@ jobs:
           mkdir -p ops
           mv run35-gold-benchmark-status.json ops/run35-gold-benchmark-status.json
           git add ops/run35-gold-benchmark-status.json
-          git commit -m 'Record Run35 Gold benchmark run'
+          git commit -m 'Record Run35 Gold retry benchmark run'
+          git pull --rebase origin cutsell/mobile-v1-clean
           git push origin HEAD:cutsell/mobile-v1-clean
+
+# Retry uses audited S3 prefix and immutable worker digest fe5dc3b6....
