@@ -1,0 +1,57 @@
+name: Run35 Observe Retry Deploy Once
+
+on:
+  push:
+    branches:
+      - cutsell/mobile-v1-clean
+    paths:
+      - .github/workflows/run35-observe-retry-deploy.yml
+
+permissions:
+  actions: read
+  contents: write
+
+jobs:
+  observe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      TARGET_SHA: 92e0c02bcc815d093dfc9f472f543e3de2618d5b
+      WORKFLOW_FILE: run35-dispatch-deploy.yml
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: cutsell/mobile-v1-clean
+      - name: Observe exact Run35 retry deploy dispatcher
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          api="https://api.github.com/repos/${GITHUB_REPOSITORY}"
+          run_id=""
+          status=""
+          conclusion=""
+          for i in $(seq 1 120); do
+            runs=$(curl --fail --silent --show-error --header "Authorization: Bearer $GH_TOKEN" --header "Accept: application/vnd.github+json" "$api/actions/workflows/$WORKFLOW_FILE/runs?branch=cutsell/mobile-v1-clean&per_page=50")
+            run_id=$(printf '%s' "$runs" | jq -r --arg sha "$TARGET_SHA" '[.workflow_runs[] | select(.head_sha == $sha)][0].id // empty')
+            status=$(printf '%s' "$runs" | jq -r --arg sha "$TARGET_SHA" '[.workflow_runs[] | select(.head_sha == $sha)][0].status // empty')
+            conclusion=$(printf '%s' "$runs" | jq -r --arg sha "$TARGET_SHA" '[.workflow_runs[] | select(.head_sha == $sha)][0].conclusion // empty')
+            if [ -n "$run_id" ] && [ "$status" = "completed" ]; then break; fi
+            sleep 10
+          done
+          test -n "$run_id" || { echo 'Run35 retry deploy dispatcher run not found'; exit 2; }
+          mkdir -p ops
+          jq -n --argjson run_id "$run_id" --arg status "$status" --arg conclusion "$conclusion" --arg sha "$TARGET_SHA" '{run_id:$run_id,head_sha:$sha,status:$status,conclusion:$conclusion}' > ops/run35-retry-deploy-observed.json
+          test "$status" = "completed" || { echo 'Run35 retry deploy dispatcher did not complete'; exit 3; }
+          test "$conclusion" = "success" || { echo "Run35 retry deploy dispatcher failed: $conclusion"; exit 4; }
+      - name: Persist observation
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name github-actions
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add ops/run35-retry-deploy-observed.json
+          git commit -m 'Record Run35 retry deploy dispatcher result'
+          git pull --rebase origin cutsell/mobile-v1-clean
+          git push origin HEAD:cutsell/mobile-v1-clean
