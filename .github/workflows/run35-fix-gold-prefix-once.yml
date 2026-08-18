@@ -43,3 +43,5 @@ jobs:
           git commit -m 'Use exact S3 prefix for Clean Cut Gold raws'
           git pull --rebase origin cutsell/mobile-v1-clean
           git push origin HEAD:cutsell/mobile-v1-clean
+
+# Triggered after S3 audit confirmed exact prefix is Editdna longform validation/.
