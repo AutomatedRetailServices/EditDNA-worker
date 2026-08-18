@@ -99,4 +99,4 @@ jobs:
           git pull --rebase origin cutsell/mobile-v1-clean
           git push origin HEAD:cutsell/mobile-v1-clean
 
-# Retry dispatch retriggered after direct digest pin.
+# Retry dispatch retriggered after verified exact S3 prefix fix.
