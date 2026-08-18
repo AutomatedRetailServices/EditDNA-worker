@@ -11,7 +11,7 @@ from cutsell_worker.validation_job import (
 
 
 def test_clean_cut_gold_prefix_is_longform_validation() -> None:
-    assert CLEAN_CUT_GOLD_PREFIX == "Editdna/ longform validation/"
+    assert CLEAN_CUT_GOLD_PREFIX == "Editdna longform validation/"
     assert _clean_cut_gold_prefix(None) == CLEAN_CUT_GOLD_PREFIX
     assert _clean_cut_gold_prefix(CLEAN_CUT_GOLD_PREFIX) == CLEAN_CUT_GOLD_PREFIX
 
