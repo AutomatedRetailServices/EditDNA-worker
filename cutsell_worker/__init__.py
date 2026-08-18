@@ -10,6 +10,7 @@ from .recording_process_context import install_recording_process_context_cleanup
 from .recording_suffix_trim import install_visual_self_critique_suffix_trim
 from .script_consult_trim import install_script_consult_pause_trim
 from .delivery_edge_trim import install_delivery_edge_trim
+from .interior_performance_break import install_interior_performance_break_split
 from .dangling_delivery import install_dangling_delivery_cleanup
 from .internal_self_correction import install_internal_self_correction_trim
 from .internal_repeat_trim import install_internal_repeat_trim
@@ -33,6 +34,7 @@ install_recording_process_context_cleanup()
 install_visual_self_critique_suffix_trim()
 install_script_consult_pause_trim()
 install_delivery_edge_trim()
+install_interior_performance_break_split()
 install_dangling_delivery_cleanup()
 install_internal_self_correction_trim()
 install_internal_repeat_trim()
