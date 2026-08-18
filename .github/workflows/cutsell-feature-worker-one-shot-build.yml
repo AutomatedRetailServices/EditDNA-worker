@@ -16,7 +16,7 @@ jobs:
     runs-on: ubuntu-latest
     env:
       IMAGE: ghcr.io/automatedretailservices/cutsell-worker:${{ github.sha }}
-      BUILD_REASON: clean-cut-run35-retry-exact-audited-prefix
+      BUILD_REASON: clean-cut-run36-boundary-retry-hybrid-corroboration
     steps:
       - uses: actions/checkout@v4
       - name: Login to GitHub Container Registry
