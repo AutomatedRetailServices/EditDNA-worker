@@ -82,3 +82,5 @@ jobs:
           git commit -m 'Record Run35 staging Pod deletion'
           git pull --rebase origin cutsell/mobile-v1-clean
           git push origin HEAD:cutsell/mobile-v1-clean
+
+# retrigger exact Run35 cleanup after failed Gold benchmark
