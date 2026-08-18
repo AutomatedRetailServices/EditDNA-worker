@@ -1,0 +1,106 @@
+name: Run36 RQ Diagnostic
+
+on:
+  push:
+    branches:
+      - cutsell/mobile-v1-clean
+    paths:
+      - .github/workflows/run36-rq-diagnostic.yml
+
+permissions:
+  contents: write
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      REDIS_URL: ${{ secrets.REDIS_URL }}
+      JOB_ID: f9534f86-4e7e-4e9f-a6e9-bc1ab9f3055b
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: cutsell/mobile-v1-clean
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install -q 'redis>=5.0' 'rq>=2.6'
+      - name: Inspect exact Run36 RQ job and worker registries
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "${REDIS_URL:-}" || { echo 'REDIS_URL missing'; exit 2; }
+          python - <<'PY'
+          import json, os
+          from redis import Redis
+          from rq import Worker
+          from rq.job import Job
+          from rq.registry import StartedJobRegistry, FailedJobRegistry, FinishedJobRegistry, CanceledJobRegistry
+
+          connection = Redis.from_url(os.environ['REDIS_URL'])
+          job = Job.fetch(os.environ['JOB_ID'], connection=connection)
+          status_obj = job.get_status(refresh=True)
+          status = getattr(status_obj, 'value', str(status_obj))
+          workers = Worker.all(connection=connection)
+          queue_name = job.origin or 'cutsell'
+
+          def worker_info(worker):
+              heartbeat = worker.last_heartbeat
+              return {
+                  'name': worker.name,
+                  'state': worker.get_state(),
+                  'last_heartbeat': heartbeat.isoformat() if heartbeat else None,
+                  'current_job_id': worker.get_current_job_id(),
+              }
+
+          registries = {}
+          for name, cls in (
+              ('started', StartedJobRegistry),
+              ('failed', FailedJobRegistry),
+              ('finished', FinishedJobRegistry),
+              ('canceled', CanceledJobRegistry),
+          ):
+              try:
+                  registries[name] = cls(queue_name, connection=connection).get_job_ids()
+              except Exception as exc:
+                  registries[name] = {'error': f'{type(exc).__name__}: {exc}'}
+
+          result = job.result
+          result_summary = None
+          if isinstance(result, dict):
+              result_summary = {
+                  'keys': sorted(result.keys()),
+                  'report_uri': result.get('report_uri'),
+                  'preview_uris': result.get('preview_uris'),
+                  'source_count': result.get('source_count'),
+                  'completed_count': result.get('completed_count'),
+                  'execution_failure_count': result.get('execution_failure_count'),
+                  'provider_failure_count': result.get('provider_failure_count'),
+                  'total_hybrid_requested_groups': result.get('total_hybrid_requested_groups'),
+                  'total_hybrid_available_groups': result.get('total_hybrid_available_groups'),
+              }
+
+          payload = {
+              'job_id': job.id,
+              'status': status,
+              'origin': job.origin,
+              'created_at': job.created_at.isoformat() if job.created_at else None,
+              'started_at': job.started_at.isoformat() if job.started_at else None,
+              'ended_at': job.ended_at.isoformat() if job.ended_at else None,
+              'meta': dict(job.meta or {}),
+              'exc_info_tail': (job.exc_info or '')[-2000:],
+              'worker_count': len(workers),
+              'workers': [worker_info(worker) for worker in workers],
+              'registries': registries,
+              'result': result_summary,
+          }
+          os.makedirs('ops', exist_ok=True)
+          with open('ops/run36-rq-diagnostic.json', 'w', encoding='utf-8') as handle:
+              json.dump(payload, handle, ensure_ascii=False, indent=2, sort_keys=True)
+          print(json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True))
+          PY
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add ops/run36-rq-diagnostic.json
+          git commit -m "Record Run36 RQ diagnostic" || true
+          git push origin HEAD:cutsell/mobile-v1-clean
