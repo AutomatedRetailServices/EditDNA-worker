@@ -35,7 +35,7 @@ def _clean_cut_gold_prefix(value: object) -> str:
 
 
 def _gold_video_limit(value: object) -> int:
-    limit = int(value or 16)
+    limit = 16 if value is None or value == "" else int(value)
     if not 1 <= limit <= MAX_GOLD_VIDEOS:
         raise ValueError(f"Clean Cut gold video_limit must be between 1 and {MAX_GOLD_VIDEOS}")
     return limit
