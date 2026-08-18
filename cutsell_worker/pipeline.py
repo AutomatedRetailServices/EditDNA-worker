@@ -51,6 +51,34 @@ def _draft_clip(take: CandidateTake, *, role: SemanticRole, group_id: str | None
     )
 
 
+def _semantic_best_take(
+    members: tuple[CandidateTake, ...],
+    semantic_decisions: dict[str, tuple[str, float]],
+    local_selected_clip_id: str,
+    *,
+    winner_confidence: float = 0.85,
+) -> tuple[str, str | None]:
+    """Honor one clear semantic winner only inside an already-proven retry group.
+
+    Hybrid session cleanup sees the full message and may recognize which delivery is the
+    intended final take. The local Watch+Listen ranker still establishes the fallback,
+    but a unique medium-high semantic winner may override a tiny local score difference.
+    This can never create a group: it only chooses among members the deterministic
+    grouping stage already proved to be competing retries.
+    """
+    winners = []
+    for member in members:
+        label, confidence = semantic_decisions.get(member.clip_id, ("", 0.0))
+        if label == "winner" and confidence >= winner_confidence:
+            winners.append((member.clip_id, confidence))
+    if len(winners) != 1:
+        return local_selected_clip_id, None
+    preferred_id, _ = winners[0]
+    if preferred_id == local_selected_clip_id:
+        return local_selected_clip_id, preferred_id
+    return preferred_id, preferred_id
+
+
 def build_flow_b_draft(
     request: ProcessingRequest,
     takes: Iterable[CandidateTake],
@@ -93,7 +121,7 @@ def build_flow_b_draft(
 
     # Pass 2: batch semantic intent by bounded creator mini-session. This catches BTS,
     # self-review and failed attempts with context while avoiding one paid call for every
-    # singleton/retry group. Only high-confidence failed/BTS labels delete anything.
+    # singleton/retry group. Semantic winner/alternate evidence is retained for Pass 3.
     hybrid_cleanup = apply_hybrid_session_cleanup(
         kept,
         whole_video_context,
@@ -101,10 +129,15 @@ def build_flow_b_draft(
     )
     kept = hybrid_cleanup.kept
     discarded = (*discarded, *hybrid_cleanup.deleted)
+    hybrid_semantic_decisions = {
+        clip_id: (label, float(confidence))
+        for clip_id, label, confidence in hybrid_cleanup.semantic_decisions
+    }
 
     # Pass 3: deterministic retry grouping + Best Take runs after semantic garbage is
-    # removed. The take_judge provider remains zero-cost for this first hybrid release,
-    # avoiding a second paid request for the same content.
+    # removed. The local ranker remains the fallback. If Hybrid already identified one
+    # clear winner among members of the same proven retry group, that editorial winner
+    # takes precedence over a marginal local score difference.
     take_by_id = {take.clip_id: take for take in kept}
     grouping = safe_group_takes_by_sessions(
         take_grouping_provider,
@@ -119,6 +152,7 @@ def build_flow_b_draft(
     judge_statuses = Counter()
     judge_reasons = Counter()
     alternate_group_count = 0
+    semantic_best_take_override_count = 0
     judge_group_diagnostics = []
 
     for members in group_members:
@@ -131,7 +165,14 @@ def build_flow_b_draft(
         judge_statuses[judged.status.status] += 1
         if judged.status.reason:
             judge_reasons[judged.status.reason] += 1
-        selected_clip_id = ranked[0].clip_id
+        local_selected_clip_id = ranked[0].clip_id
+        selected_clip_id, semantic_preferred_clip_id = _semantic_best_take(
+            members,
+            hybrid_semantic_decisions,
+            local_selected_clip_id,
+        )
+        if semantic_preferred_clip_id and selected_clip_id != local_selected_clip_id:
+            semantic_best_take_override_count += 1
         membership_key = "semantic:" + hashlib.sha256(
             "|".join(sorted(member.clip_id for member in members)).encode()
         ).hexdigest()[:16]
@@ -147,6 +188,17 @@ def build_flow_b_draft(
             judge_group_diagnostics.append({
                 "group_id": gid,
                 "selected_clip_id": selected_clip_id,
+                "local_selected_clip_id": local_selected_clip_id,
+                "semantic_preferred_clip_id": semantic_preferred_clip_id,
+                "semantic_override_applied": selected_clip_id != local_selected_clip_id,
+                "semantic_candidates": [
+                    {
+                        "clip_id": member.clip_id,
+                        "label": hybrid_semantic_decisions.get(member.clip_id, ("", 0.0))[0],
+                        "confidence": hybrid_semantic_decisions.get(member.clip_id, ("", 0.0))[1],
+                    }
+                    for member in members
+                ],
                 "execution_status": judged.status.status,
                 "execution_reason": judged.status.reason,
                 "ranked": [
@@ -263,7 +315,9 @@ def build_flow_b_draft(
             "hybrid_editorial_requested_chunk_count": hybrid_cleanup.requested_chunk_count,
             "hybrid_editorial_available_chunk_count": hybrid_cleanup.available_chunk_count,
             "hybrid_editorial_deleted_count": len(hybrid_cleanup.deleted),
+            "hybrid_editorial_semantic_decision_count": len(hybrid_cleanup.semantic_decisions),
             "hybrid_editorial_chunks": list(hybrid_cleanup.diagnostics)[:100],
+            "hybrid_semantic_best_take_override_count": semantic_best_take_override_count,
             "take_group_count": len(groups),
             "alternate_group_count": alternate_group_count,
             "take_grouping_status": grouping.status.__dict__,
