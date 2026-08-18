@@ -16,9 +16,14 @@ from .whole_video_analysis import SourceVideoContext, WholeVideoContext
 
 
 def _compact_transcript(segments: tuple[TranscriptSegment, ...], *, limit: int = 3600) -> str:
-    """Keep enough source transcript for full-message coherence without flooding Hybrid."""
-    text = " ".join(str(segment.text or "").strip() for segment in segments if str(segment.text or "").strip())
-    return " ".join(text.split())[:limit]
+    """Keep a time-ordered source transcript for full-message coherence."""
+    parts = []
+    for segment in segments:
+        text = " ".join(str(segment.text or "").split())
+        if not text:
+            continue
+        parts.append(f"[{float(segment.start):.1f}s] {text}")
+    return " ".join(parts)[:limit]
 
 
 class RunPodLocalWholeVideoProvider:
