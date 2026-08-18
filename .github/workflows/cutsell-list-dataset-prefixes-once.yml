@@ -56,9 +56,11 @@ jobs:
                   key=str(item.get('Key') or '')
                   if PurePosixPath(key).suffix.lower() not in {'.mp4','.mov','.m4v','.webm'}: continue
                   low=key.lower()
-                  if any(term in low for term in ('raw','bloop','editdna','final','mixed','training','train')):
+                  if any(term in low for term in ('raw','bloop','editdna','final','mixed','training','train','longform','long form','validation')):
                       print(key)
                   seen += 1
               if not r.get('IsTruncated'): break
               token=r.get('NextContinuationToken')
           PY
+
+# Run35 re-audit: confirm exact longform validation prefix after benchmark found zero keys.
