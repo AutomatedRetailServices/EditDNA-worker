@@ -16,7 +16,7 @@ from .source_identity import stable_clip_id
 # chunk boundary is transcription segmentation, not an editorially valid cut point.
 _BRIDGE_CONNECTORS = frozenset({
     # English
-    "a", "an", "and", "as", "at", "because", "but", "by", "for", "from", "if",
+    "a", "an", "and", "as", "at", "because", "but", "by", "for", "from", "i", "if",
     "in", "into", "my", "of", "on", "or", "so", "than", "that", "the", "to", "when",
     "which", "while", "who", "with", "without", "your",
     # Spanish
@@ -177,6 +177,8 @@ def _repair_boundary_fragments(
     next nearby chunk even when the first chunk is several seconds long. This repairs
     Whisper boundaries such as ``...aumento de`` + ``peso`` or ``...los test que`` +
     ``ella pudiera...`` while still refusing to cross a real pause/source boundary.
+    A one-word discourse marker is deliberately stricter: it may bridge only an almost
+    contiguous ASR boundary, never a normal conversational pause.
     """
     ordered = sorted(takes, key=lambda take: (take.source_order, take.start, take.end, take.clip_id))
     repaired: list[CandidateTake] = []
@@ -206,6 +208,7 @@ def _repair_boundary_fragments(
             previous_has_open_tail = (
                 _grammatically_open_tail(previous.text)
                 and right_span(previous, take) <= max_open_tail_join_sec
+                and (previous_word_count >= 2 or strict_contiguous)
             )
 
             if same_source and strict_contiguous and (previous_is_open_micro or current_closes_open_previous):
