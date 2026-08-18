@@ -11,12 +11,34 @@ from .config import load_runtime_config
 from .universal_clean_cut_validation import run_single_universal_clean_cut_validation
 from .validation import list_validation_videos
 
+CLEAN_CUT_GOLD_PREFIX = "Editdna/ longform validation/"
+BLOOPER_NEGATIVE_PREFIX = "Editdna bloopers videos/"
+MAX_GOLD_VIDEOS = 32
+
 
 def _safe_benchmark_id(value: object) -> str:
     raw = str(value or "").strip()
     if not re.fullmatch(r"[A-Za-z0-9._-]{1,100}", raw):
         raise ValueError("invalid benchmark_id")
     return raw
+
+
+def _clean_cut_gold_prefix(value: object) -> str:
+    prefix = str(value or CLEAN_CUT_GOLD_PREFIX).strip()
+    if prefix == BLOOPER_NEGATIVE_PREFIX:
+        raise ValueError(
+            "bloopers-only data is negative-behavior training data and cannot be used as the Clean Cut gold selection benchmark"
+        )
+    if prefix != CLEAN_CUT_GOLD_PREFIX:
+        raise ValueError(f"Clean Cut gold benchmark must use {CLEAN_CUT_GOLD_PREFIX!r}")
+    return prefix
+
+
+def _gold_video_limit(value: object) -> int:
+    limit = int(value or 16)
+    if not 1 <= limit <= MAX_GOLD_VIDEOS:
+        raise ValueError(f"Clean Cut gold video_limit must be between 1 and {MAX_GOLD_VIDEOS}")
+    return limit
 
 
 def _upload_file(s3, *, bucket: str, key: str, path: str, content_type: str | None = None) -> str:
@@ -29,7 +51,12 @@ def _upload_file(s3, *, bucket: str, key: str, path: str, content_type: str | No
 
 
 def run_unseen_clean_cut_benchmark(payload: dict[str, Any]) -> dict[str, Any]:
-    """Run the unseen suite on RunPod local perception with optional approved Hybrid semantics."""
+    """Run the Clean Cut gold RAW suite on RunPod local perception plus approved Hybrid semantics.
+
+    The gold suite is intentionally restricted to RAW long-form recordings that contain
+    failed attempts/retries plus usable final delivery. Bloopers-only compilations are a
+    separate negative-behavior dataset and are never valid winner-selection benchmarks.
+    """
     from rq import get_current_job
 
     config = load_runtime_config()
@@ -39,17 +66,15 @@ def run_unseen_clean_cut_benchmark(payload: dict[str, Any]) -> dict[str, Any]:
         raise RuntimeError("S3_BUCKET is required")
 
     benchmark_id = _safe_benchmark_id(payload.get("benchmark_id"))
-    prefix = str(payload.get("source_prefix") or "Editdna bloopers videos/")
-    video_limit = int(payload.get("video_limit") or 8)
+    prefix = _clean_cut_gold_prefix(payload.get("source_prefix"))
+    video_limit = _gold_video_limit(payload.get("video_limit"))
     expected_external = bool(payload.get("expected_external_brain_calls_enabled", False))
-    if video_limit != 8:
-        raise ValueError("unseen benchmark requires exactly 8 videos")
 
     import boto3
     s3 = boto3.client("s3", region_name=config.aws_region or "us-east-1")
     keys = [item["key"] for item in list_validation_videos(prefix=prefix, limit=video_limit, s3=s3)]
-    if len(keys) != video_limit:
-        raise RuntimeError(f"expected {video_limit} unseen raws, found {len(keys)}")
+    if not keys:
+        raise RuntimeError(f"no Clean Cut gold RAW videos found under {prefix!r}")
 
     job = get_current_job()
 
@@ -61,6 +86,8 @@ def run_unseen_clean_cut_benchmark(payload: dict[str, Any]) -> dict[str, Any]:
         job.meta["current_source"] = current_source
         job.meta["brain_backend"] = "runpod_local"
         job.meta["external_brain_calls_enabled"] = expected_external
+        job.meta["dataset_role"] = "clean_cut_gold_raw"
+        job.meta["source_prefix"] = prefix
         job.save_meta()
 
     artifact_prefix = f"cutsell/benchmarks/unseen/{benchmark_id}"
@@ -73,10 +100,11 @@ def run_unseen_clean_cut_benchmark(payload: dict[str, Any]) -> dict[str, Any]:
         preview_dir = Path(directory) / "previews"
         preview_dir.mkdir(parents=True, exist_ok=True)
 
+        source_count = len(keys)
         for index, key in enumerate(keys):
             safe_name = re.sub(r"[^A-Za-z0-9._-]+", "-", PurePosixPath(key).stem)[:80] or "video"
             preview_path = preview_dir / f"{index:02d}-{safe_name}.mp4"
-            publish("processing", 3 + int(index * 84 / video_limit), current_source=key)
+            publish("processing", 3 + int(index * 84 / source_count), current_source=key)
             try:
                 result = run_single_universal_clean_cut_validation(
                     key,
@@ -119,8 +147,11 @@ def run_unseen_clean_cut_benchmark(payload: dict[str, Any]) -> dict[str, Any]:
             provider_failures.append({"provider": "google", "error": "Hybrid judge requested but no successful groups"})
 
         report = {
-            "benchmark_suite": "unseen_clean_cut_generalization",
+            "benchmark_suite": "clean_cut_gold_raw_generalization",
             "benchmark_id": benchmark_id,
+            "dataset_role": "clean_cut_gold_raw",
+            "source_prefix": prefix,
+            "negative_behavior_prefix_excluded": BLOOPER_NEGATIVE_PREFIX,
             "brain_backend": "runpod_local",
             "external_brain_calls_enabled": expected_external,
             "hybrid_provider": "google" if expected_external else None,
@@ -160,6 +191,8 @@ def run_unseen_clean_cut_benchmark(payload: dict[str, Any]) -> dict[str, Any]:
     publish("finished" if not failures and not provider_failures else "finished_with_failures", 100)
     return {
         "benchmark_id": benchmark_id,
+        "dataset_role": report["dataset_role"],
+        "source_prefix": report["source_prefix"],
         "brain_backend": "runpod_local",
         "external_brain_calls_enabled": expected_external,
         "hybrid_provider": report["hybrid_provider"],
