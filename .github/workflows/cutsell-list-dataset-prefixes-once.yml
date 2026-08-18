@@ -1,4 +1,4 @@
-name: CutSell List Dataset Prefixes Once
+name: CutSell Run35 Retry Build Observer Once
 
 on:
   push:
@@ -8,89 +8,66 @@ on:
       - .github/workflows/cutsell-list-dataset-prefixes-once.yml
 
 permissions:
+  actions: read
   contents: write
 
 jobs:
-  list:
+  observe:
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 30
     env:
-      RUNPOD_API_KEY: ${{ secrets.RUNPOD_API_KEY }}
+      TARGET_SHA: c8af5661b0cf2d40a6f8e73c8e9d9da5a7d041bc
+      WORKFLOW_FILE: cutsell-feature-worker-one-shot-build.yml
     steps:
       - uses: actions/checkout@v4
         with:
           ref: cutsell/mobile-v1-clean
-      - name: List candidate CutSell S3 dataset prefixes and video keys
+      - name: Observe exact retry build and persist immutable digest
+        env:
+          GH_TOKEN: ${{ github.token }}
         shell: bash
         run: |
           set -euo pipefail
-          test -n "${RUNPOD_API_KEY:-}" || { echo 'RUNPOD_API_KEY missing'; exit 3; }
-          python -m pip install -q 'boto3>=1.34'
-          curl --fail --silent --show-error --url "https://rest.runpod.io/v1/templates" --header "Authorization: Bearer $RUNPOD_API_KEY" --output templates.json
-          TEMPLATE=$(jq -c '[.[] | select(.name == "EditDNA-Worker-2")][0]' templates.json)
-          test "$TEMPLATE" != "null" || exit 4
-          for key in AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_REGION S3_BUCKET; do
-            value=$(printf '%s' "$TEMPLATE" | jq -r --arg key "$key" '.env[$key] // empty')
-            test -n "$value" || { echo "$key missing"; exit 5; }
-            echo "::add-mask::$value"
-            printf '%s=%s\n' "$key" "$value" >> "$GITHUB_ENV"
+          api="https://api.github.com/repos/${GITHUB_REPOSITORY}"
+          run_id=""
+          status=""
+          conclusion=""
+          for i in $(seq 1 100); do
+            runs=$(curl --fail --silent --show-error \
+              --header "Authorization: Bearer $GH_TOKEN" \
+              --header "Accept: application/vnd.github+json" \
+              "$api/actions/workflows/$WORKFLOW_FILE/runs?branch=cutsell/mobile-v1-clean&per_page=50")
+            run_id=$(printf '%s' "$runs" | jq -r --arg sha "$TARGET_SHA" '[.workflow_runs[] | select(.head_sha == $sha)][0].id // empty')
+            status=$(printf '%s' "$runs" | jq -r --arg sha "$TARGET_SHA" '[.workflow_runs[] | select(.head_sha == $sha)][0].status // empty')
+            conclusion=$(printf '%s' "$runs" | jq -r --arg sha "$TARGET_SHA" '[.workflow_runs[] | select(.head_sha == $sha)][0].conclusion // empty')
+            if [ -n "$run_id" ] && [ "$status" = "completed" ]; then break; fi
+            sleep 12
           done
-      - name: Persist prefixes and likely RAW mixed video keys
-        shell: bash
-        run: |
-          set -euo pipefail
-          python - <<'PY'
-          import json, os
-          from pathlib import PurePosixPath
-          import boto3
-          s3=boto3.client('s3',region_name=os.environ['AWS_REGION'])
-          bucket=os.environ['S3_BUCKET']
-          top=s3.list_objects_v2(Bucket=bucket,Delimiter='/',MaxKeys=1000)
-          top_prefixes=[p.get('Prefix','') for p in top.get('CommonPrefixes',[])]
-          likely=[]
-          token=None
-          scanned=0
-          while scanned < 5000:
-              kwargs={'Bucket':bucket,'MaxKeys':1000}
-              if token: kwargs['ContinuationToken']=token
-              r=s3.list_objects_v2(**kwargs)
-              for item in r.get('Contents',[]):
-                  key=str(item.get('Key') or '')
-                  scanned += 1
-                  if PurePosixPath(key).suffix.lower() not in {'.mp4','.mov','.m4v','.webm'}:
-                      continue
-                  low=key.lower()
-                  if any(term in low for term in ('raw','bloop','editdna','final','mixed','training','train','longform','long form','validation')):
-                      likely.append(key)
-              if not r.get('IsTruncated') or scanned >= 5000: break
-              token=r.get('NextContinuationToken')
-          os.makedirs('ops',exist_ok=True)
-          with open('ops/run35-dataset-prefix-audit.json','w',encoding='utf-8') as f:
-              json.dump({'top_prefixes':top_prefixes,'likely_video_keys':likely,'scanned_objects':scanned},f,ensure_ascii=False,indent=2)
-          print(json.dumps({'top_prefixes':top_prefixes,'likely_video_keys':likely[:200],'scanned_objects':scanned},ensure_ascii=False,indent=2))
-          PY
-      - name: Apply exact S3 prefix proven by audit
-        shell: bash
-        run: |
-          set -euo pipefail
-          files=(
-            cutsell_worker/validation_job.py
-            .github/workflows/cutsell-unseen-clean-cut-benchmark.yml
-            tests/test_cutsell_clean_cut_gold_dataset.py
-          )
-          for f in "${files[@]}"; do
-            test -f "$f" || { echo "missing expected file: $f"; exit 6; }
-            sed -i 's#Editdna/ longform validation/#Editdna longform validation/#g' "$f"
-          done
-          grep -R --line-number --fixed-strings 'Editdna/ longform validation/' "${files[@]}" && { echo 'wrong prefix remains'; exit 7; } || true
-          grep -R --line-number --fixed-strings 'Editdna longform validation/' "${files[@]}"
-      - name: Commit audit and exact prefix fix
+          test -n "$run_id" || { echo 'Exact retry build run was not found'; exit 2; }
+          test "$status" = "completed" || { echo 'Exact retry build did not complete'; exit 3; }
+          test "$conclusion" = "success" || { echo "Exact retry build failed: $conclusion"; exit 4; }
+          jobs=$(curl --fail --silent --show-error \
+            --header "Authorization: Bearer $GH_TOKEN" \
+            --header "Accept: application/vnd.github+json" \
+            "$api/actions/runs/$run_id/jobs?per_page=50")
+          job_id=$(printf '%s' "$jobs" | jq -r '[.jobs[] | select(.name == "docker")][0].id // empty')
+          test -n "$job_id" || { echo 'Retry build docker job not found'; exit 5; }
+          curl --fail --location --silent --show-error \
+            --header "Authorization: Bearer $GH_TOKEN" \
+            --header "Accept: application/vnd.github+json" \
+            "$api/actions/jobs/$job_id/logs" -o retry-build.log
+          digest=$(grep -Eo 'sha256:[0-9a-f]{64}' retry-build.log | tail -1)
+          test -n "$digest" || { echo 'Retry build digest not found'; exit 6; }
+          mkdir -p ops
+          jq -n --arg sha "$TARGET_SHA" --arg digest "$digest" --argjson run_id "$run_id" --argjson job_id "$job_id" \
+            '{head_sha:$sha,run_id:$run_id,job_id:$job_id,conclusion:"success",image_digest:$digest}' > ops/run35-build-status.json
+      - name: Persist retry build status
         shell: bash
         run: |
           set -euo pipefail
           git config user.name github-actions
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
-          git add ops/run35-dataset-prefix-audit.json cutsell_worker/validation_job.py .github/workflows/cutsell-unseen-clean-cut-benchmark.yml tests/test_cutsell_clean_cut_gold_dataset.py
-          git commit -m 'Use exact audited S3 prefix for Clean Cut Gold raws'
+          git add ops/run35-build-status.json
+          git commit -m 'Record Run35 retry worker build digest'
           git pull --rebase origin cutsell/mobile-v1-clean
           git push origin HEAD:cutsell/mobile-v1-clean
