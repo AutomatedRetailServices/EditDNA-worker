@@ -2,19 +2,51 @@ name: CutSell Feature RunPod One-Shot Delete
 
 on:
   workflow_dispatch:
+  push:
+    branches:
+      - cutsell/mobile-v1-clean
+    paths:
+      - .github/workflows/cutsell-feature-runpod-one-shot-delete.yml
 
 permissions:
+  actions: read
   contents: read
 
 jobs:
   delete:
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 205
     env:
       RUNPOD_API_KEY: ${{ secrets.RUNPOD_API_KEY }}
-      POD_ID: qn1diy6bgozuap
+      POD_ID: jw9h16m41q99wi
+      BENCHMARK_RUN_ID: "32131140975"
+      REPO: AutomatedRetailServices/EditDNA-worker
     steps:
-      - name: Validate exact approved staging Pod
+      - name: Wait for active Run36 benchmark to reach terminal state
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -u
+          api="https://api.github.com/repos/$REPO/actions/runs/$BENCHMARK_RUN_ID"
+          auth=(-H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github+json")
+          for i in $(seq 1 800); do
+            body=$(curl --silent --show-error --fail "${auth[@]}" "$api" 2>/dev/null || true)
+            if [ -n "$body" ]; then
+              status=$(printf '%s' "$body" | jq -r '.status // empty')
+              conclusion=$(printf '%s' "$body" | jq -r '.conclusion // empty')
+              echo "Run36 benchmark status=$status conclusion=${conclusion:-pending}"
+              if [ "$status" = "completed" ]; then
+                exit 0
+              fi
+            fi
+            sleep 15
+          done
+          echo 'Benchmark terminal state could not be confirmed inside cleanup window; proceeding with cost-safety cleanup.'
+          exit 0
+
+      - name: Terminate exact Run36 staging GPU worker and verify absence
+        if: always()
         shell: bash
         run: |
           set -euo pipefail
@@ -24,12 +56,11 @@ jobs:
             --header "Authorization: Bearer $RUNPOD_API_KEY" \
             --output pods.json
           name=$(jq -r --arg id "$POD_ID" '[.[] | select(.id == $id)][0].name // empty' pods.json)
-          test "$name" = "cutsell-staging-worker" || { echo 'Pod ID is not cutsell-staging-worker; refusing delete'; exit 4; }
-
-      - name: Terminate exact staging GPU worker
-        shell: bash
-        run: |
-          set -euo pipefail
+          if [ -z "$name" ]; then
+            echo "Run36 staging Pod already absent: $POD_ID"
+            exit 0
+          fi
+          test "$name" = "cutsell-staging-worker" || { echo 'Exact Pod ID is not cutsell-staging-worker; refusing delete'; exit 4; }
           code=$(curl --silent --show-error --write-out '%{http_code}' \
             --request DELETE \
             --url "https://rest.runpod.io/v1/pods/$POD_ID" \
@@ -37,5 +68,11 @@ jobs:
             --output delete-response.txt)
           echo "RunPod delete HTTP status: $code"
           test "$code" = "204"
-
-# Run34 Pod deleted successfully; workflow restored to manual-only.
+          sleep 2
+          curl --fail --silent --show-error \
+            --url "https://rest.runpod.io/v1/pods" \
+            --header "Authorization: Bearer $RUNPOD_API_KEY" \
+            --output pods-after.json
+          remaining=$(jq --arg id "$POD_ID" '[.[] | select(.id == $id)] | length' pods-after.json)
+          test "$remaining" = "0" || { echo 'Run36 staging Pod still present after delete'; exit 5; }
+          echo "Run36 staging Pod deleted and verified absent: $POD_ID"
