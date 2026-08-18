@@ -63,6 +63,7 @@ def test_render_plan_coalesces_contiguous_same_source_clean_cut_spans():
                 start=25.6,
                 end=26.7,
                 text="Nunca se nos ocurrió",
+                caption_text="",
             ),
             DraftClip(
                 clip_id="b",
@@ -71,6 +72,7 @@ def test_render_plan_coalesces_contiguous_same_source_clean_cut_spans():
                 start=26.7,
                 end=34.6,
                 text="hacer un chequeo de sonografía",
+                caption_text="",
             ),
         ),
         alternates=(),
@@ -89,8 +91,8 @@ def test_render_plan_keeps_real_source_gap_as_a_cut():
         project_id="p3",
         strategy=EditStrategy.MIXED,
         selected=(
-            DraftClip(clip_id="a", source_asset_id="src", source_order=0, start=1.0, end=2.0, text="one"),
-            DraftClip(clip_id="b", source_asset_id="src", source_order=0, start=2.4, end=3.0, text="two"),
+            DraftClip(clip_id="a", source_asset_id="src", source_order=0, start=1.0, end=2.0, text="one", caption_text=""),
+            DraftClip(clip_id="b", source_asset_id="src", source_order=0, start=2.4, end=3.0, text="two", caption_text=""),
         ),
         alternates=(),
         discarded=(),
