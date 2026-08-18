@@ -1,0 +1,45 @@
+name: Run35 Fix Exact Gold Prefix Once
+
+on:
+  push:
+    branches:
+      - cutsell/mobile-v1-clean
+    paths:
+      - .github/workflows/run35-fix-gold-prefix-once.yml
+
+permissions:
+  contents: write
+
+jobs:
+  fix:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: cutsell/mobile-v1-clean
+      - name: Replace only the verified wrong Gold S3 prefix
+        shell: bash
+        run: |
+          set -euo pipefail
+          files=(
+            cutsell_worker/validation_job.py
+            .github/workflows/cutsell-unseen-clean-cut-benchmark.yml
+            tests/test_cutsell_clean_cut_gold_dataset.py
+          )
+          for f in "${files[@]}"; do
+            test -f "$f" || { echo "missing expected file: $f"; exit 2; }
+            sed -i 's#Editdna/ longform validation/#Editdna longform validation/#g' "$f"
+          done
+          grep -R --line-number --fixed-strings 'Editdna/ longform validation/' "${files[@]}" && { echo 'wrong prefix remains'; exit 3; } || true
+          grep -R --line-number --fixed-strings 'Editdna longform validation/' "${files[@]}"
+      - name: Commit exact audited prefix
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name github-actions
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add cutsell_worker/validation_job.py .github/workflows/cutsell-unseen-clean-cut-benchmark.yml tests/test_cutsell_clean_cut_gold_dataset.py
+          git commit -m 'Use exact S3 prefix for Clean Cut Gold raws'
+          git pull --rebase origin cutsell/mobile-v1-clean
+          git push origin HEAD:cutsell/mobile-v1-clean
