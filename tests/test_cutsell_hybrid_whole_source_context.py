@@ -1,5 +1,10 @@
 from cutsell_worker.contracts import CandidateTake, SourceAsset, TranscriptSegment
-from cutsell_worker.hybrid_editorial import EditorialDecision, EditorialJudgeResult, EditorialSession
+from cutsell_worker.hybrid_editorial import (
+    EditorialCandidate,
+    EditorialDecision,
+    EditorialJudgeResult,
+    EditorialSession,
+)
 from cutsell_worker.hybrid_payload import build_compact_editorial_payload
 from cutsell_worker.hybrid_session_cleanup import apply_hybrid_session_cleanup
 from cutsell_worker.providers import ProviderStatus
@@ -61,13 +66,6 @@ def test_hybrid_session_receives_whole_source_context():
 
 
 def test_compact_payload_exposes_context_once_not_per_candidate():
-    session = EditorialSession(
-        session_id="s",
-        source_asset_id="src",
-        candidates=(CandidateTake,),  # replaced below to avoid accidental timestamp payload assumptions
-        local_confidence=0.5,
-    )
-    from cutsell_worker.hybrid_editorial import EditorialCandidate
     session = EditorialSession(
         session_id="s",
         source_asset_id="src",
