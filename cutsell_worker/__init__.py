@@ -9,8 +9,10 @@ from .clean_cut_retry import install_clean_cut_contract_recovery
 from .recording_process_context import install_recording_process_context_cleanup
 from .recording_suffix_trim import install_visual_self_critique_suffix_trim
 from .script_consult_trim import install_script_consult_pause_trim
+from .delivery_edge_trim import install_delivery_edge_trim
 from .dangling_delivery import install_dangling_delivery_cleanup
 from .internal_self_correction import install_internal_self_correction_trim
+from .internal_repeat_trim import install_internal_repeat_trim
 from .recording_breaks import install_recording_break_cleanup
 from .restart_questions import install_short_restart_question_cleanup
 from .frustrated_restart import install_soft_frustration_restart_cleanup
@@ -30,8 +32,10 @@ install_clean_cut_contract_recovery()
 install_recording_process_context_cleanup()
 install_visual_self_critique_suffix_trim()
 install_script_consult_pause_trim()
+install_delivery_edge_trim()
 install_dangling_delivery_cleanup()
 install_internal_self_correction_trim()
+install_internal_repeat_trim()
 install_recording_break_cleanup()
 install_short_restart_question_cleanup()
 install_soft_frustration_restart_cleanup()
