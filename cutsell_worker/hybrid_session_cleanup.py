@@ -1,14 +1,16 @@
 """Cost-efficient semantic cleanup across bounded creator mini-sessions.
 
 Instead of paying once per retry group/singleton, this stage batches the candidates that
-belong to one inferred creator mini-session. The model is asked only whether each item
-is valid audience-facing speech (keep) or recording garbage (failed/BTS). Retry/Best
-Take grouping still happens afterward in the deterministic brain.
+belong to one inferred creator mini-session. The model is asked whether each item is
+valid audience-facing speech or recording-process material. Retry/Best Take grouping
+still happens afterward in the deterministic brain, but semantic winner/alternate
+preferences are preserved so a later retry group can honor a clear editorial choice.
 """
 from __future__ import annotations
 
 from dataclasses import dataclass
 import hashlib
+import re
 from typing import Iterable, Tuple
 
 from .contracts import CandidateTake
@@ -23,6 +25,8 @@ from .session_boundaries import partition_takes_by_sessions
 from .temporal_editing import harmful_events_for_take
 from .whole_video_analysis import WholeVideoContext
 
+_TOKEN_RE = re.compile(r"[\w'’-]+", re.UNICODE)
+
 
 @dataclass(frozen=True)
 class HybridSessionCleanupResult:
@@ -31,6 +35,13 @@ class HybridSessionCleanupResult:
     requested_chunk_count: int
     available_chunk_count: int
     diagnostics: tuple[dict, ...]
+    # Read-only semantic evidence from available Hybrid chunks. Pipeline selection may
+    # use this only inside retry groups that the deterministic grouper already proved.
+    semantic_decisions: tuple[tuple[str, str, float], ...] = ()
+
+
+def _token_count(text: str) -> int:
+    return len(_TOKEN_RE.findall(str(text or "")))
 
 
 def _evidence(take: CandidateTake) -> tuple[tuple[str, float | str | bool], ...]:
@@ -76,14 +87,7 @@ def _failed_local_evidence(
     take: CandidateTake,
     context: WholeVideoContext | None,
 ) -> tuple[bool, tuple[str, ...]]:
-    """Require an independent local signal before lowering the semantic delete floor.
-
-    A medium-high Gemini ``failed`` label is useful but must not delete valid creator
-    speech by itself. We only trust it below the historical 0.94 hard-delete floor when
-    local temporal/visual perception independently observed a recording failure in the
-    same take. This preserves the global fail-open rule while catching obvious retries
-    such as a spoken false start followed by a visible reset.
-    """
+    """Return independent local evidence that the take belongs to recording failure."""
     reasons: list[str] = []
     for event in harmful_events_for_take(take, context, minimum_confidence=0.80):
         reasons.append(f"event:{event.kind}:{event.confidence:.2f}")
@@ -146,20 +150,27 @@ def apply_hybrid_session_cleanup(
     *,
     policy: HybridGatePolicy = HybridGatePolicy(),
     delete_confidence: float = 0.94,
-    corroborated_failed_confidence: float = 0.84,
+    corroborated_failed_confidence: float = 0.82,
+    corroborated_bts_confidence: float = 0.84,
+    micro_failed_confidence: float = 0.80,
+    clustered_bts_confidence: float = 0.84,
     chunk_size: int = 6,
 ) -> HybridSessionCleanupResult:
-    """Classify bounded session chunks with the stable six-candidate envelope.
+    """Classify bounded session chunks while preserving safe fail-open behavior.
 
-    Direct semantic deletion remains conservative at ``delete_confidence``. A ``failed``
-    decision may also delete at the lower corroborated threshold only when independent
-    local performance evidence confirms the failure. BTS remains on the stricter floor.
-    Every chunk receives read-only whole-source context so semantic decisions can respect
-    the complete message/story rather than reasoning from six isolated fragments.
+    High-confidence semantic failures remain direct deletes. Medium-high ``failed`` or
+    ``bts`` labels may delete only when independent local performance evidence agrees.
+    One extra case is allowed for BTS: when a chunk contains a dense recording-failure
+    cluster (at least three harmful semantic labels and at least two independently
+    corroborated), another medium-high BTS member in that same chunk may be removed.
+    This captures coherent blooper runs without turning isolated asides into deletions.
+
+    Very short failed debris (for example a one-word false start at the beginning of a
+    take) uses a slightly lower semantic floor only when local evidence corroborates it.
     """
     take_tuple = tuple(takes)
     if not take_tuple or editorial_judge is None:
-        return HybridSessionCleanupResult(take_tuple, (), 0, 0, ())
+        return HybridSessionCleanupResult(take_tuple, (), 0, 0, (), ())
 
     take_map = {take.clip_id: take for take in take_tuple}
     partitions = partition_takes_by_sessions(take_tuple, context)
@@ -170,6 +181,7 @@ def apply_hybrid_session_cleanup(
     requested_chunks = 0
     available_chunks = 0
     diagnostics = []
+    semantic_decisions: list[tuple[str, str, float]] = []
 
     for partition_index, partition in enumerate(partitions):
         ordered = tuple(sorted(partition, key=lambda item: (item.start, item.end, item.clip_id)))
@@ -188,10 +200,25 @@ def apply_hybrid_session_cleanup(
 
             chunk_deleted = []
             decisions = []
+            local_by_id: dict[str, tuple[bool, tuple[str, ...]]] = {}
             if result.available:
                 for decision in result.decisions:
+                    semantic_decisions.append((decision.clip_id, decision.label, float(decision.confidence)))
+                    local_by_id[decision.clip_id] = _failed_local_evidence(take_map[decision.clip_id], context)
+
+                harmful = [
+                    decision for decision in result.decisions
+                    if decision.label in {"failed", "bts"} and decision.confidence >= 0.82
+                ]
+                corroborated_harmful = [
+                    decision for decision in harmful
+                    if local_by_id.get(decision.clip_id, (False, ()))[0]
+                ]
+                dense_semantic_failure_cluster = len(harmful) >= 3 and len(corroborated_harmful) >= 2
+
+                for decision in result.decisions:
                     take = take_map[decision.clip_id]
-                    corroborated, local_reasons = _failed_local_evidence(take, context)
+                    corroborated, local_reasons = local_by_id[decision.clip_id]
                     hard_semantic_delete = bool(
                         decision.label in {"failed", "bts"}
                         and decision.confidence >= delete_confidence
@@ -201,11 +228,40 @@ def apply_hybrid_session_cleanup(
                         and decision.confidence >= corroborated_failed_confidence
                         and corroborated
                     )
-                    applied_delete = hard_semantic_delete or corroborated_failed_delete
+                    corroborated_bts_delete = bool(
+                        decision.label == "bts"
+                        and decision.confidence >= corroborated_bts_confidence
+                        and corroborated
+                    )
+                    micro_failed_delete = bool(
+                        decision.label == "failed"
+                        and decision.confidence >= micro_failed_confidence
+                        and corroborated
+                        and take.duration_sec <= 1.25
+                        and _token_count(take.text) <= 2
+                    )
+                    clustered_bts_delete = bool(
+                        decision.label == "bts"
+                        and decision.confidence >= clustered_bts_confidence
+                        and dense_semantic_failure_cluster
+                    )
+                    applied_delete = (
+                        hard_semantic_delete
+                        or corroborated_failed_delete
+                        or corroborated_bts_delete
+                        or micro_failed_delete
+                        or clustered_bts_delete
+                    )
                     if hard_semantic_delete:
                         delete_basis = "high_confidence_semantic"
+                    elif micro_failed_delete:
+                        delete_basis = "micro_failed_plus_local_performance"
                     elif corroborated_failed_delete:
                         delete_basis = "semantic_failed_plus_local_performance"
+                    elif corroborated_bts_delete:
+                        delete_basis = "semantic_bts_plus_local_performance"
+                    elif clustered_bts_delete:
+                        delete_basis = "semantic_bts_inside_corroborated_failure_cluster"
                     else:
                         delete_basis = "kept_fail_open"
                     if applied_delete:
@@ -218,6 +274,7 @@ def apply_hybrid_session_cleanup(
                         "reason_code": decision.reason_code,
                         "local_failure_corroborated": corroborated,
                         "local_failure_reasons": list(local_reasons),
+                        "dense_semantic_failure_cluster": dense_semantic_failure_cluster,
                         "delete_basis": delete_basis,
                         "applied_delete": applied_delete,
                     })
@@ -244,4 +301,5 @@ def apply_hybrid_session_cleanup(
         requested_chunk_count=requested_chunks,
         available_chunk_count=available_chunks,
         diagnostics=tuple(diagnostics),
+        semantic_decisions=tuple(semantic_decisions),
     )
