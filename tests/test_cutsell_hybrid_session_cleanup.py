@@ -1,9 +1,11 @@
-from cutsell_worker.contracts import CandidateTake
+from cutsell_worker.contracts import CandidateTake, MediaSignals
 from cutsell_worker.hybrid_editorial import EditorialDecision, EditorialJudgeResult
 from cutsell_worker.hybrid_session_cleanup import apply_hybrid_session_cleanup
+from cutsell_worker.providers import ProviderStatus
+from cutsell_worker.whole_video_analysis import SourceVideoContext, TemporalEvent, WholeVideoContext
 
 
-def take(index: int) -> CandidateTake:
+def take(index: int, *, signals: MediaSignals | None = None) -> CandidateTake:
     return CandidateTake(
         clip_id=f"clip-{index}",
         source_asset_id="src",
@@ -11,6 +13,25 @@ def take(index: int) -> CandidateTake:
         start=float(index * 3),
         end=float(index * 3 + 2),
         text=f"candidate speech number {index}",
+        signals=signals,
+    )
+
+
+def context_for(*events: TemporalEvent) -> WholeVideoContext:
+    return WholeVideoContext(
+        sources=(SourceVideoContext(
+            source_asset_id="src",
+            summary="creator records product story",
+            dominant_style="talking_head",
+            creator_intent="deliver a clean take",
+            events=tuple(events),
+            edit_mode="natural",
+            sales_intent=0.0,
+            main_topic="story",
+            product_or_subject="product",
+            story_logic="retry then successful delivery",
+        ),),
+        status=ProviderStatus("test", True, True, "applied"),
     )
 
 
@@ -36,6 +57,26 @@ class BatchJudge:
             available=True,
             estimated_input_tokens=300,
             estimated_output_tokens=100,
+        )
+
+
+class FixedJudge:
+    def __init__(self, label: str, confidence: float):
+        self.label = label
+        self.confidence = confidence
+
+    def judge(self, session):
+        return EditorialJudgeResult(
+            decisions=tuple(
+                EditorialDecision(candidate.clip_id, self.label, self.confidence, "test")
+                for candidate in session.candidates
+            ),
+            provider="fake",
+            model="flash-lite",
+            requested=True,
+            available=True,
+            estimated_input_tokens=100,
+            estimated_output_tokens=50,
         )
 
 
@@ -66,3 +107,41 @@ def test_no_provider_is_zero_cost_and_preserves_everything():
     assert result.kept == takes
     assert result.deleted == ()
     assert result.requested_chunk_count == 0
+
+
+def test_medium_high_failed_label_deletes_when_retry_event_corroborates_locally():
+    item = take(1)
+    context = context_for(TemporalEvent(
+        "src", item.start + 1.5, item.end, "retry_setup", 0.86,
+        "creator visibly resets after failed attempt",
+    ))
+    result = apply_hybrid_session_cleanup((item,), context, FixedJudge("failed", 0.85))
+    assert result.kept == ()
+    assert result.deleted == (item,)
+    decision = result.diagnostics[0]["decisions"][0]
+    assert decision["delete_basis"] == "semantic_failed_plus_local_performance"
+    assert decision["local_failure_corroborated"] is True
+
+
+def test_medium_high_failed_label_stays_fail_open_without_local_corroboration():
+    item = take(1)
+    result = apply_hybrid_session_cleanup((item,), None, FixedJudge("failed", 0.85))
+    assert result.kept == (item,)
+    assert result.deleted == ()
+    decision = result.diagnostics[0]["decisions"][0]
+    assert decision["delete_basis"] == "kept_fail_open"
+
+
+def test_visual_fumble_can_corroborate_medium_high_failed_label():
+    signals = MediaSignals("src", 3.0, 5.0, visual_fumble=0.81)
+    item = take(1, signals=signals)
+    result = apply_hybrid_session_cleanup((item,), None, FixedJudge("failed", 0.86))
+    assert result.deleted == (item,)
+
+
+def test_bts_keeps_historical_high_confidence_floor_even_with_local_fumble():
+    signals = MediaSignals("src", 3.0, 5.0, visual_fumble=0.90)
+    item = take(1, signals=signals)
+    result = apply_hybrid_session_cleanup((item,), None, FixedJudge("bts", 0.86))
+    assert result.kept == (item,)
+    assert result.deleted == ()
