@@ -69,12 +69,28 @@ jobs:
               json.dump({'top_prefixes':top_prefixes,'likely_video_keys':likely,'scanned_objects':scanned},f,ensure_ascii=False,indent=2)
           print(json.dumps({'top_prefixes':top_prefixes,'likely_video_keys':likely[:200],'scanned_objects':scanned},ensure_ascii=False,indent=2))
           PY
-      - name: Commit prefix audit
+      - name: Apply exact S3 prefix proven by audit
+        shell: bash
+        run: |
+          set -euo pipefail
+          files=(
+            cutsell_worker/validation_job.py
+            .github/workflows/cutsell-unseen-clean-cut-benchmark.yml
+            tests/test_cutsell_clean_cut_gold_dataset.py
+          )
+          for f in "${files[@]}"; do
+            test -f "$f" || { echo "missing expected file: $f"; exit 6; }
+            sed -i 's#Editdna/ longform validation/#Editdna longform validation/#g' "$f"
+          done
+          grep -R --line-number --fixed-strings 'Editdna/ longform validation/' "${files[@]}" && { echo 'wrong prefix remains'; exit 7; } || true
+          grep -R --line-number --fixed-strings 'Editdna longform validation/' "${files[@]}"
+      - name: Commit audit and exact prefix fix
         shell: bash
         run: |
           set -euo pipefail
           git config user.name github-actions
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
-          git add ops/run35-dataset-prefix-audit.json
-          git commit -m 'Record Run35 dataset prefix audit'
+          git add ops/run35-dataset-prefix-audit.json cutsell_worker/validation_job.py .github/workflows/cutsell-unseen-clean-cut-benchmark.yml tests/test_cutsell_clean_cut_gold_dataset.py
+          git commit -m 'Use exact audited S3 prefix for Clean Cut Gold raws'
+          git pull --rebase origin cutsell/mobile-v1-clean
           git push origin HEAD:cutsell/mobile-v1-clean
