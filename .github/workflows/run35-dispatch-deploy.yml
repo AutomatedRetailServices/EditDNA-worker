@@ -15,11 +15,38 @@ jobs:
   dispatch-and-observe:
     runs-on: ubuntu-latest
     timeout-minutes: 25
+    env:
+      RETRY_DIGEST: sha256:fe5dc3b6d3237307d18e138a68aa7b9c98b6ee6046cc4e845b68c42d8406d6fb
     steps:
       - uses: actions/checkout@v4
         with:
           ref: cutsell/mobile-v1-clean
-      - name: Dispatch exact Run35 deploy and wait for readiness
+      - name: Pin manual deploy workflow to exact Run35 retry digest
+        shell: bash
+        run: |
+          set -euo pipefail
+          file=.github/workflows/cutsell-feature-runpod-one-shot-deploy.yml
+          python - <<'PY'
+          from pathlib import Path
+          import os, re
+          p=Path('.github/workflows/cutsell-feature-runpod-one-shot-deploy.yml')
+          text=p.read_text()
+          digest=os.environ['RETRY_DIGEST']
+          new,n=re.subn(r'ghcr\.io/automatedretailservices/cutsell-worker@sha256:[0-9a-f]{64}', f'ghcr.io/automatedretailservices/cutsell-worker@{digest}', text, count=1)
+          if n != 1:
+              raise SystemExit(f'expected exactly one worker digest to replace, found {n}')
+          p.write_text(new)
+          PY
+          grep -F "ghcr.io/automatedretailservices/cutsell-worker@$RETRY_DIGEST" "$file"
+          git config user.name github-actions
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add "$file"
+          if ! git diff --cached --quiet; then
+            git commit -m 'Pin Run35 retry worker image digest'
+            git pull --rebase origin cutsell/mobile-v1-clean
+            git push origin HEAD:cutsell/mobile-v1-clean
+          fi
+      - name: Dispatch exact Run35 retry deploy and wait for readiness
         env:
           GH_TOKEN: ${{ github.token }}
         shell: bash
@@ -45,21 +72,21 @@ jobs:
             status=$(printf '%s' "$runs" | jq -r --arg started "$started" '[.workflow_runs[] | select(.created_at >= $started)][0].status // empty')
             conclusion=$(printf '%s' "$runs" | jq -r --arg started "$started" '[.workflow_runs[] | select(.created_at >= $started)][0].conclusion // empty')
             if [ -n "$run_id" ] && [ "$status" = "completed" ]; then
-              test "$conclusion" = "success" || { echo "Run35 deploy failed: $conclusion"; exit 3; }
+              test "$conclusion" = "success" || { echo "Run35 retry deploy failed: $conclusion"; exit 3; }
               break
             fi
             sleep 10
           done
-          test -n "$run_id" || { echo 'Run35 deploy run not found'; exit 4; }
+          test -n "$run_id" || { echo 'Run35 retry deploy run not found'; exit 4; }
           jobs=$(curl --fail --silent --show-error --header "Authorization: Bearer $GH_TOKEN" "$api/actions/runs/$run_id/jobs?per_page=20")
           job_id=$(printf '%s' "$jobs" | jq -r '[.jobs[] | select(.name == "deploy")][0].id // empty')
-          test -n "$job_id" || { echo 'Run35 deploy job not found'; exit 5; }
-          curl --fail --location --silent --show-error --header "Authorization: Bearer $GH_TOKEN" "$api/actions/jobs/$job_id/logs" -o deploy35.log
-          pod_id=$(grep -A8 '"name": "cutsell-staging-worker"' deploy35.log | grep '"id":' | tail -1 | sed -E 's/.*"id": "([^"]+)".*/\1/')
-          test -n "$pod_id" || { echo 'Run35 Pod ID not found in deploy logs'; exit 6; }
-          jq -n --argjson run_id "$run_id" --argjson job_id "$job_id" --arg pod_id "$pod_id" \
-            '{run_id:$run_id,job_id:$job_id,conclusion:"success",pod_id:$pod_id,image_digest:"sha256:b4203baad91acb7c3e646590bc175ce8bc681be74c295d178e74c65382046c95"}' > run35-deploy-status.json
-      - name: Persist Run35 deploy status
+          test -n "$job_id" || { echo 'Run35 retry deploy job not found'; exit 5; }
+          curl --fail --location --silent --show-error --header "Authorization: Bearer $GH_TOKEN" "$api/actions/jobs/$job_id/logs" -o deploy35-retry.log
+          pod_id=$(grep -A8 '"name": "cutsell-staging-worker"' deploy35-retry.log | grep '"id":' | tail -1 | sed -E 's/.*"id": "([^"]+)".*/\1/')
+          test -n "$pod_id" || { echo 'Run35 retry Pod ID not found in deploy logs'; exit 6; }
+          jq -n --argjson run_id "$run_id" --argjson job_id "$job_id" --arg pod_id "$pod_id" --arg digest "$RETRY_DIGEST" \
+            '{run_id:$run_id,job_id:$job_id,conclusion:"success",pod_id:$pod_id,image_digest:$digest}' > run35-deploy-status.json
+      - name: Persist Run35 retry deploy status
         shell: bash
         run: |
           set -euo pipefail
@@ -68,5 +95,6 @@ jobs:
           mkdir -p ops
           mv run35-deploy-status.json ops/run35-deploy-status.json
           git add ops/run35-deploy-status.json
-          git commit -m 'Record Run35 staging deploy'
+          git commit -m 'Record Run35 retry staging deploy'
+          git pull --rebase origin cutsell/mobile-v1-clean
           git push origin HEAD:cutsell/mobile-v1-clean
