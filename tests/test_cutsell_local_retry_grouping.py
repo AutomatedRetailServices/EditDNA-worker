@@ -1,4 +1,5 @@
 from cutsell_worker.contracts import CandidateTake, MediaSignals
+from cutsell_worker.local_retry_grouping import _adjacent_reformulated_retries
 from cutsell_worker.take_grouping_provider import safe_group_takes
 from cutsell_worker.take_judge import rank_takes
 
@@ -75,7 +76,22 @@ def test_spanish_reformulated_retry_with_same_opening_collapses():
     )
     result = safe_group_takes(None, takes)
     assert result.groups == (("first", "retry"),)
-    assert "adjacent_reformulated_retries_collapsed" in result.reason
+
+
+def test_reformulated_retry_fallback_merges_when_seed_groups_missed_it():
+    takes = (
+        take(
+            "first", 82.8, 90.6,
+            "Al terminar mi contrato hablé con mi ginecóloga y le pedí todos los test que ella pudiera imaginarse o indicar",
+        ),
+        take(
+            "retry", 95.5, 104.3,
+            "Al terminar mi contrato cambié de ginecóloga y le pedí todos los test que ella pudiera imaginar e indicar",
+        ),
+    )
+    groups, changed = _adjacent_reformulated_retries((("first",), ("retry",)), takes)
+    assert changed is True
+    assert groups == (("first", "retry"),)
 
 
 def test_reformulated_retry_rule_does_not_merge_distinct_spanish_thoughts():
@@ -85,6 +101,9 @@ def test_reformulated_retry_rule_does_not_merge_distinct_spanish_thoughts():
     )
     result = safe_group_takes(None, takes)
     assert result.groups == (("first",), ("distinct",))
+    groups, changed = _adjacent_reformulated_retries((("first",), ("distinct",)), takes)
+    assert changed is False
+    assert groups == (("first",), ("distinct",))
 
 
 def test_same_opening_without_enough_shared_content_remains_separate():
