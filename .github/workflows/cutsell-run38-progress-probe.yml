@@ -1,0 +1,82 @@
+name: CutSell Run38 Progress Probe
+
+on:
+  push:
+    branches:
+      - cutsell/mobile-v1-clean
+    paths:
+      - .github/workflows/cutsell-run38-progress-probe.yml
+
+permissions:
+  contents: write
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      REDIS_URL: ${{ secrets.REDIS_URL }}
+      RUNPOD_API_KEY: ${{ secrets.RUNPOD_API_KEY }}
+      IMAGE_TAG: 1fedb18b20214efdda7d8c6186d01cf36886b1a8
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: cutsell/mobile-v1-clean
+      - run: python -m pip install -q 'redis>=5.0' 'rq>=2.6'
+      - name: Capture Run38 RQ job and Pod state
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json, os
+          from redis import Redis
+          from rq import Queue
+          from rq.job import Job
+          from rq.registry import StartedJobRegistry, DeferredJobRegistry, ScheduledJobRegistry, FinishedJobRegistry, FailedJobRegistry
+
+          connection = Redis.from_url(os.environ['REDIS_URL'])
+          ids = set(Queue('cutsell', connection=connection).job_ids)
+          for cls in (StartedJobRegistry, DeferredJobRegistry, ScheduledJobRegistry, FinishedJobRegistry, FailedJobRegistry):
+              try:
+                  ids.update(cls('cutsell', connection=connection).get_job_ids())
+              except Exception:
+                  pass
+          matches=[]
+          for job_id in ids:
+              try:
+                  job=Job.fetch(job_id, connection=connection)
+                  meta=job.meta or {}
+                  if meta.get('worker_image_tag') != os.environ['IMAGE_TAG']:
+                      continue
+                  status_obj=job.get_status(refresh=True)
+                  status=getattr(status_obj,'value',str(status_obj))
+                  matches.append({
+                      'job_id':job.id,
+                      'status':status,
+                      'meta':meta,
+                      'enqueued_at':str(job.enqueued_at),
+                      'started_at':str(job.started_at),
+                      'ended_at':str(job.ended_at),
+                      'result_present':job.result is not None,
+                  })
+              except Exception as exc:
+                  matches.append({'job_id':str(job_id),'probe_error':f'{type(exc).__name__}:{str(exc)[:160]}'})
+          with open('rq.json','w',encoding='utf-8') as f:
+              json.dump({'matches':matches},f,indent=2,default=str)
+          print(json.dumps({'matches':matches},indent=2,default=str))
+          PY
+          curl --fail --silent --show-error --url "https://rest.runpod.io/v1/pods" --header "Authorization: Bearer $RUNPOD_API_KEY" --output pods-all.json
+          jq '[.[] | select(.name == "cutsell-staging-worker") | {id,name,desiredStatus,imageName,costPerHr,adjustedCostPerHr}]' pods-all.json > pods.json
+          jq -s '{rq:.[0],staging_pods:.[1]}' rq.json pods.json > run38-progress.json
+          cat run38-progress.json
+      - name: Record progress snapshot
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p ops
+          cp run38-progress.json ops/run38-progress.json
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add ops/run38-progress.json
+          git commit -m "Record Run38 benchmark progress" || true
+          git push origin HEAD:cutsell/mobile-v1-clean
