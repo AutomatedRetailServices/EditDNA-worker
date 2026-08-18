@@ -10,17 +10,19 @@ on:
 
 permissions:
   contents: read
+  packages: read
 
 jobs:
   deploy:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 25
     env:
       RUNPOD_API_KEY: ${{ secrets.RUNPOD_API_KEY }}
       REDIS_URL: ${{ secrets.REDIS_URL }}
       GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
       RUNPOD_TEMPLATE_NAME: EditDNA-Worker-2
-      IMAGE: ghcr.io/automatedretailservices/cutsell-worker@sha256:fe5dc3b6d3237307d18e138a68aa7b9c98b6ee6046cc4e845b68c42d8406d6fb
+      IMAGE_REPO: ghcr.io/automatedretailservices/cutsell-worker
+      IMAGE_TAG: 0d55eb3c9a174478f2986234c9f8ed205439351b
     steps:
       - name: Require explicit paid-deploy approval token
         shell: bash
@@ -28,7 +30,28 @@ jobs:
           APPROVAL_TOKEN: ${{ inputs.approval_token }}
         run: |
           set -euo pipefail
-          test "$APPROVAL_TOKEN" = "RUN35" || { echo 'Paid RunPod deploy not explicitly approved'; exit 2; }
+          test "$APPROVAL_TOKEN" = "RUN36" || { echo 'Paid RunPod deploy not explicitly approved'; exit 2; }
+
+      - name: Resolve exact immutable worker digest from approved commit tag
+        shell: bash
+        run: |
+          set -euo pipefail
+          source_image="$IMAGE_REPO:$IMAGE_TAG"
+          resolved=0
+          for attempt in $(seq 1 60); do
+            if docker buildx imagetools inspect "$source_image" > image-inspect.txt 2>/dev/null; then
+              resolved=1
+              break
+            fi
+            sleep 10
+          done
+          test "$resolved" = "1" || { echo "Approved worker image tag never became available: $source_image"; exit 3; }
+          digest=$(awk '/^Digest:/ {print $2; exit}' image-inspect.txt)
+          test -n "$digest" || { echo 'Unable to resolve immutable worker digest'; exit 3; }
+          case "$digest" in sha256:[0-9a-f][0-9a-f]*) ;; *) echo 'Invalid worker digest'; exit 3;; esac
+          IMAGE="$IMAGE_REPO@$digest"
+          echo "IMAGE=$IMAGE" >> "$GITHUB_ENV"
+          echo "Resolved immutable Run36 worker: $IMAGE"
 
       - name: Validate approved deployment inputs
         shell: bash
@@ -37,7 +60,8 @@ jobs:
           test -n "${RUNPOD_API_KEY:-}" || { echo 'RUNPOD_API_KEY missing'; exit 3; }
           test -n "${REDIS_URL:-}" || { echo 'REDIS_URL missing'; exit 3; }
           test -n "${GEMINI_API_KEY:-}" || { echo 'GEMINI_API_KEY missing'; exit 3; }
-          test -n "${IMAGE:-}" || { echo 'worker image missing'; exit 3; }
+          test -n "${IMAGE:-}" || { echo 'immutable worker image missing'; exit 3; }
+          case "$IMAGE" in *@sha256:*) ;; *) echo 'worker image is not immutable'; exit 3;; esac
           echo "::add-mask::$GEMINI_API_KEY"
 
       - name: Refuse duplicate staging worker
