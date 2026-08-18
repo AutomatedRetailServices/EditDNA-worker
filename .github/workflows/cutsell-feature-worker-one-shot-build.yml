@@ -16,7 +16,7 @@ jobs:
     runs-on: ubuntu-latest
     env:
       IMAGE: ghcr.io/automatedretailservices/cutsell-worker:${{ github.sha }}
-      BUILD_REASON: run37-script-consult-whole-source-coherence-long-gap-retries
+      BUILD_REASON: run38-visual-review-best-take-bts-internal-repeat-edge-trim
     steps:
       - uses: actions/checkout@v4
       - name: Login to GitHub Container Registry
