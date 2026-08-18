@@ -16,13 +16,13 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     env:
-      TARGET_SHA: 5e982f84a9ca79f42ed4d05af77406ef426d1eac
+      TARGET_SHA: c8af5661b0cf2d40a6f8e73c8e9d9da5a7d041bc
       WORKFLOW_FILE: cutsell-feature-worker-one-shot-build.yml
     steps:
       - uses: actions/checkout@v4
         with:
           ref: cutsell/mobile-v1-clean
-      - name: Wait for exact Build #25 and capture immutable digest
+      - name: Wait for exact Run35 retry build and capture immutable digest
         env:
           GH_TOKEN: ${{ github.token }}
         shell: bash
@@ -39,27 +39,27 @@ jobs:
             status=$(printf '%s' "$runs" | jq -r --arg sha "$TARGET_SHA" '[.workflow_runs[] | select(.head_sha == $sha)][0].status // empty')
             conclusion=$(printf '%s' "$runs" | jq -r --arg sha "$TARGET_SHA" '[.workflow_runs[] | select(.head_sha == $sha)][0].conclusion // empty')
             if [ -n "$run_id" ] && [ "$status" = "completed" ]; then
-              test "$conclusion" = "success" || { echo "Build #25 failed: $conclusion"; exit 2; }
+              test "$conclusion" = "success" || { echo "Run35 retry build failed: $conclusion"; exit 2; }
               break
             fi
             sleep 15
           done
-          test -n "$run_id" || { echo 'Exact Build #25 run not found'; exit 3; }
+          test -n "$run_id" || { echo 'Exact Run35 retry build run not found'; exit 3; }
           jobs=$(curl --fail --silent --show-error \
             --header "Authorization: Bearer $GH_TOKEN" \
             --header "Accept: application/vnd.github+json" \
             "$api/actions/runs/$run_id/jobs?per_page=20")
           job_id=$(printf '%s' "$jobs" | jq -r '[.jobs[] | select(.name == "docker")][0].id // empty')
-          test -n "$job_id" || { echo 'Build #25 docker job not found'; exit 4; }
+          test -n "$job_id" || { echo 'Run35 retry docker job not found'; exit 4; }
           curl --fail --location --silent --show-error \
             --header "Authorization: Bearer $GH_TOKEN" \
             --header "Accept: application/vnd.github+json" \
-            "$api/actions/jobs/$job_id/logs" -o build25.log
-          digest=$(grep -Eo 'sha256:[0-9a-f]{64}' build25.log | tail -1)
-          test -n "$digest" || { echo 'Build #25 digest not found in logs'; exit 5; }
+            "$api/actions/jobs/$job_id/logs" -o build35-retry.log
+          digest=$(grep -Eo 'sha256:[0-9a-f]{64}' build35-retry.log | tail -1)
+          test -n "$digest" || { echo 'Run35 retry digest not found in logs'; exit 5; }
           jq -n --arg sha "$TARGET_SHA" --arg digest "$digest" --argjson run_id "$run_id" --argjson job_id "$job_id" \
             '{head_sha:$sha,run_id:$run_id,job_id:$job_id,conclusion:"success",image_digest:$digest}' > run35-build-status.json
-      - name: Persist Build #25 status on feature branch
+      - name: Persist Run35 retry build status
         shell: bash
         run: |
           set -euo pipefail
@@ -68,5 +68,6 @@ jobs:
           mkdir -p ops
           mv run35-build-status.json ops/run35-build-status.json
           git add ops/run35-build-status.json
-          git commit -m 'Record Run35 worker build digest'
+          git commit -m 'Record Run35 retry worker build digest'
+          git pull --rebase origin cutsell/mobile-v1-clean
           git push origin HEAD:cutsell/mobile-v1-clean
