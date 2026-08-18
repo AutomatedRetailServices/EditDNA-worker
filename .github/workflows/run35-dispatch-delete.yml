@@ -1,0 +1,63 @@
+name: Run35 Dispatch Exact Pod Delete
+
+on:
+  push:
+    branches:
+      - cutsell/mobile-v1-clean
+    paths:
+      - .github/workflows/run35-dispatch-delete.yml
+
+permissions:
+  actions: write
+  contents: write
+
+jobs:
+  dispatch-delete:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: cutsell/mobile-v1-clean
+      - name: Dispatch exact Run35 delete and verify completion
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          api="https://api.github.com/repos/${GITHUB_REPOSITORY}"
+          started=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+          code=$(curl --silent --show-error --write-out '%{http_code}' \
+            --request POST \
+            --url "$api/actions/workflows/cutsell-runpod-staging-worker-delete.yml/dispatches" \
+            --header "Authorization: Bearer $GH_TOKEN" \
+            --header "Accept: application/vnd.github+json" \
+            --header "Content-Type: application/json" \
+            --data '{"ref":"cutsell/mobile-v1-clean","inputs":{"approval":"APPROVE_DELETE_STAGING_WORKER","pod_id":"6llbzul8q020lp"}}' \
+            --output dispatch-response.txt)
+          test "$code" = "204" || { echo "delete dispatch failed HTTP $code"; cat dispatch-response.txt; exit 2; }
+          run_id=""
+          for i in $(seq 1 50); do
+            runs=$(curl --fail --silent --show-error --header "Authorization: Bearer $GH_TOKEN" "$api/actions/workflows/cutsell-runpod-staging-worker-delete.yml/runs?branch=cutsell/mobile-v1-clean&event=workflow_dispatch&per_page=20")
+            run_id=$(printf '%s' "$runs" | jq -r --arg started "$started" '[.workflow_runs[] | select(.created_at >= $started)][0].id // empty')
+            status=$(printf '%s' "$runs" | jq -r --arg started "$started" '[.workflow_runs[] | select(.created_at >= $started)][0].status // empty')
+            conclusion=$(printf '%s' "$runs" | jq -r --arg started "$started" '[.workflow_runs[] | select(.created_at >= $started)][0].conclusion // empty')
+            if [ -n "$run_id" ] && [ "$status" = "completed" ]; then
+              test "$conclusion" = "success" || { echo "Run35 delete failed: $conclusion"; exit 3; }
+              break
+            fi
+            sleep 6
+          done
+          test -n "$run_id" || { echo 'Run35 delete run not found'; exit 4; }
+          jq -n --argjson run_id "$run_id" --arg pod_id "6llbzul8q020lp" '{run_id:$run_id,pod_id:$pod_id,conclusion:"success"}' > run35-delete-status.json
+      - name: Persist delete status
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name github-actions
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          mkdir -p ops
+          mv run35-delete-status.json ops/run35-delete-status.json
+          git add ops/run35-delete-status.json
+          git commit -m 'Record Run35 staging Pod deletion'
+          git push origin HEAD:cutsell/mobile-v1-clean
