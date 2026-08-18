@@ -8,7 +8,7 @@ on:
       - .github/workflows/cutsell-list-dataset-prefixes-once.yml
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   list:
@@ -17,6 +17,9 @@ jobs:
     env:
       RUNPOD_API_KEY: ${{ secrets.RUNPOD_API_KEY }}
     steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: cutsell/mobile-v1-clean
       - name: List candidate CutSell S3 dataset prefixes and video keys
         shell: bash
         run: |
@@ -32,35 +35,46 @@ jobs:
             echo "::add-mask::$value"
             printf '%s=%s\n' "$key" "$value" >> "$GITHUB_ENV"
           done
-      - name: Print prefixes and likely RAW mixed video keys
+      - name: Persist prefixes and likely RAW mixed video keys
         shell: bash
         run: |
           set -euo pipefail
           python - <<'PY'
-          import os
+          import json, os
           from pathlib import PurePosixPath
           import boto3
           s3=boto3.client('s3',region_name=os.environ['AWS_REGION'])
           bucket=os.environ['S3_BUCKET']
-          resp=s3.list_objects_v2(Bucket=bucket,Delimiter='/',MaxKeys=1000)
-          print('TOP_PREFIXES')
-          for p in resp.get('CommonPrefixes',[]): print(p.get('Prefix',''))
-          print('LIKELY_VIDEO_KEYS')
+          top=s3.list_objects_v2(Bucket=bucket,Delimiter='/',MaxKeys=1000)
+          top_prefixes=[p.get('Prefix','') for p in top.get('CommonPrefixes',[])]
+          likely=[]
           token=None
-          seen=0
-          while seen < 3000:
+          scanned=0
+          while scanned < 5000:
               kwargs={'Bucket':bucket,'MaxKeys':1000}
               if token: kwargs['ContinuationToken']=token
               r=s3.list_objects_v2(**kwargs)
               for item in r.get('Contents',[]):
                   key=str(item.get('Key') or '')
-                  if PurePosixPath(key).suffix.lower() not in {'.mp4','.mov','.m4v','.webm'}: continue
+                  scanned += 1
+                  if PurePosixPath(key).suffix.lower() not in {'.mp4','.mov','.m4v','.webm'}:
+                      continue
                   low=key.lower()
                   if any(term in low for term in ('raw','bloop','editdna','final','mixed','training','train','longform','long form','validation')):
-                      print(key)
-                  seen += 1
-              if not r.get('IsTruncated'): break
+                      likely.append(key)
+              if not r.get('IsTruncated') or scanned >= 5000: break
               token=r.get('NextContinuationToken')
+          os.makedirs('ops',exist_ok=True)
+          with open('ops/run35-dataset-prefix-audit.json','w',encoding='utf-8') as f:
+              json.dump({'top_prefixes':top_prefixes,'likely_video_keys':likely,'scanned_objects':scanned},f,ensure_ascii=False,indent=2)
+          print(json.dumps({'top_prefixes':top_prefixes,'likely_video_keys':likely[:200],'scanned_objects':scanned},ensure_ascii=False,indent=2))
           PY
-
-# Run35 re-audit: confirm exact longform validation prefix after benchmark found zero keys.
+      - name: Commit prefix audit
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name github-actions
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add ops/run35-dataset-prefix-audit.json
+          git commit -m 'Record Run35 dataset prefix audit'
+          git push origin HEAD:cutsell/mobile-v1-clean
