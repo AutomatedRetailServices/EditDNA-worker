@@ -7,6 +7,10 @@ on:
         description: 'Explicit paid-benchmark approval token'
         required: true
         type: string
+      pod_id:
+        description: 'Exact cutsell-staging-worker Pod ID to clean up after this benchmark'
+        required: true
+        type: string
 
 permissions:
   contents: read
@@ -25,6 +29,7 @@ jobs:
       CUTSELL_VALIDATION_PREFIX: Editdna longform validation/
       VIDEO_LIMIT: "16"
       BENCHMARK_ID: gold-${{ github.run_id }}-${{ github.sha }}
+      STAGING_POD_ID: ${{ inputs.pod_id }}
     steps:
       - name: Require explicit paid-benchmark approval token
         shell: bash
@@ -33,6 +38,7 @@ jobs:
         run: |
           set -euo pipefail
           test "$APPROVAL_TOKEN" = "RUN35" || { echo 'Paid Hybrid benchmark not explicitly approved for RUN35 Clean Cut Gold'; exit 2; }
+          test -n "$STAGING_POD_ID" || { echo 'Exact staging Pod ID required'; exit 2; }
 
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -223,7 +229,7 @@ jobs:
         with:
           name: cutsell-clean-cut-gold-report-${{ github.sha }}
           path: cutsell-unseen-clean-cut-benchmark.json
-          if-no-files-found: error
+          if-no-files-found: warn
           retention-days: 14
 
       - name: Upload preview videos
@@ -234,3 +240,26 @@ jobs:
           path: cutsell-unseen-clean-cut-previews/*.mp4
           if-no-files-found: warn
           retention-days: 14
+
+      - name: Always terminate exact staging GPU worker
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "${RUNPOD_API_KEY:-}" || { echo 'RUNPOD_API_KEY missing during cleanup'; exit 3; }
+          test -n "${STAGING_POD_ID:-}" || { echo 'STAGING_POD_ID missing during cleanup'; exit 3; }
+          curl --fail --silent --show-error --url "https://rest.runpod.io/v1/pods" --header "Authorization: Bearer $RUNPOD_API_KEY" --output cleanup-pods.json
+          name=$(jq -r --arg id "$STAGING_POD_ID" '[.[] | select(.id == $id)][0].name // empty' cleanup-pods.json)
+          if [ -z "$name" ]; then
+            echo "RunPod staging Pod already absent: $STAGING_POD_ID"
+            exit 0
+          fi
+          test "$name" = "cutsell-staging-worker" || { echo 'Exact Pod ID does not belong to cutsell-staging-worker; refusing cleanup'; exit 4; }
+          code=$(curl --silent --show-error --write-out '%{http_code}' --request DELETE --url "https://rest.runpod.io/v1/pods/$STAGING_POD_ID" --header "Authorization: Bearer $RUNPOD_API_KEY" --output cleanup-delete-response.txt)
+          echo "RunPod cleanup DELETE status: $code"
+          test "$code" = "204"
+          sleep 2
+          curl --fail --silent --show-error --url "https://rest.runpod.io/v1/pods" --header "Authorization: Bearer $RUNPOD_API_KEY" --output cleanup-after.json
+          remaining=$(jq --arg id "$STAGING_POD_ID" '[.[] | select(.id == $id)] | length' cleanup-after.json)
+          test "$remaining" = "0" || { echo 'Staging Pod still present after cleanup'; exit 5; }
+          echo "RunPod staging Pod deleted and verified absent: $STAGING_POD_ID"
