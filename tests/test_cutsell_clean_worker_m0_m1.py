@@ -102,3 +102,34 @@ def test_pipeline_keeps_valid_ungrouped_story_material_selected():
 
     assert [clip.clip_id for clip in result.draft.selected] == [first.clip_id, second.clip_id]
     assert result.draft.alternates == ()
+
+
+def test_pipeline_collapses_retry_envelope_and_selects_full_delivery_only():
+    source = _source()
+    short = _take(
+        source, 0.0, 2.4, "the popular croc",
+        audio_quality=0.45, eye_contact=0.35, continuity=0.40,
+    )
+    repeat = _take(
+        source, 3.0, 5.8, "crop popular crop popular crop popular",
+        audio_quality=0.40, eye_contact=0.30, continuity=0.30,
+    )
+    partial = _take(
+        source, 6.5, 10.5, "the popular crop black jeans okay now whole sentence okay",
+        audio_quality=0.55, eye_contact=0.45, continuity=0.50,
+    )
+    full = _take(
+        source, 11.5, 17.0,
+        "the popular crop black denim jeans are back in stock anything with pockets is a win for me",
+        audio_quality=0.95, eye_contact=0.95, continuity=0.95,
+    )
+    request = ProcessingRequest(project_id="project-1", user_id="user-1", sources=(source,))
+
+    result = build_flow_b_draft(request, (short, repeat, partial, full))
+
+    assert [clip.clip_id for clip in result.draft.selected] == [full.clip_id]
+    assert {clip.clip_id for clip in result.draft.alternates} == {
+        short.clip_id,
+        repeat.clip_id,
+        partial.clip_id,
+    }
