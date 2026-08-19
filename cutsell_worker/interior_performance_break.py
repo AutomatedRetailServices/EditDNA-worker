@@ -164,6 +164,15 @@ def install_interior_performance_break_split() -> None:
 
     def refine_with_interior_breaks(takes, context, **kwargs):
         refined, diagnostics = original(takes, context, **kwargs)
+
+        # After Best Take, preserve_clip_id=True means the logical winner identity is
+        # already authoritative. Splitting that winner into fresh child IDs here used to
+        # invalidate the group selection and could turn a valid draft into zero selected
+        # clips (Benchmark #42). Post-Best-Take refinement may adjust physical edges, but
+        # it must never replace the selected logical clip with new identities.
+        if bool(kwargs.get("preserve_clip_id")):
+            return refined, tuple(diagnostics)
+
         refined, interior_diagnostics = split_interior_performance_breaks(refined, context)
         return refined, tuple(diagnostics) + tuple(interior_diagnostics)
 
