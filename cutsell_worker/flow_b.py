@@ -8,6 +8,7 @@ import tempfile
 from typing import Callable, Mapping
 
 from .asr import ASRProvider
+from .attempt_reconstruction import reconstruct_delivery_attempts
 from .clean_cut_provider import CleanCutProvider
 from .composer_provider import ComposerProvider
 from .contracts import ProcessingRequest, ProcessingResult
@@ -29,7 +30,6 @@ from .source_sampling import sample_source_frames
 from .take_grouping_provider import TakeGroupingProvider
 from .take_judge_provider import TakeJudgeProvider
 from .take_segmentation import segment_takes
-from .temporal_editing import refine_takes_with_temporal_context
 from .usage_limits import check_processing_allowance
 from .visual_analysis import VisualProvider, apply_visual_observations, safe_visual_analyze
 from .whole_video_analysis import WholeVideoProvider, safe_whole_video_analyze
@@ -225,16 +225,17 @@ def process_local_sources(
     )
     notify("analyzing", 69)
 
-    takes, temporal_trim_diagnostics = refine_takes_with_temporal_context(takes, whole_context)
-    applied_trim_count = sum(1 for item in temporal_trim_diagnostics if item.get("applied"))
-    interior_event_count = sum(len(item.get("interior_bad_events") or ()) for item in temporal_trim_diagnostics)
+    # Reconstruct the creator's complete delivery attempts before any destructive Clean
+    # Cut/Best Take decision. ASR chunks are evidence, not editorial takes. This stage
+    # never deletes speech; absent a clear retry/reset boundary it preserves neighboring
+    # fragments as one paragraph/delivery-level candidate.
+    takes, attempt_reconstruction_diagnostics = reconstruct_delivery_attempts(takes, whole_context)
     trace.complete(
-        "temporal_performance",
-        candidate_count=len(takes),
-        trimmed_take_count=applied_trim_count,
-        interior_bad_event_count=interior_event_count,
-        local_candidate_event_count=local_event_count,
-        confirmed_performance_event_count=len(confirmation_diagnostics),
+        "attempt_reconstruction",
+        input_candidate_count=attempt_reconstruction_diagnostics.get("input_take_count", 0),
+        attempt_count=attempt_reconstruction_diagnostics.get("attempt_count", 0),
+        merged_fragment_count=attempt_reconstruction_diagnostics.get("merged_fragment_count", 0),
+        boundary_count=len(attempt_reconstruction_diagnostics.get("boundaries") or ()),
     )
     notify("analyzing", 74)
 
@@ -267,9 +268,8 @@ def process_local_sources(
         draft_review_provider=active_reviewer,
         editorial_judge=editorial_judge,
         whole_video_context=whole_context,
-        temporal_trim_diagnostics=(*temporal_trim_diagnostics, {
-            "performance_confirmation": list(confirmation_diagnostics)[:300],
-        }),
+        attempt_reconstruction_diagnostics=attempt_reconstruction_diagnostics,
+        performance_confirmation_diagnostics=confirmation_diagnostics,
     )
     notify("draft_ready", 100)
     return replace(
