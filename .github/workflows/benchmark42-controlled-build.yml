@@ -1,0 +1,68 @@
+name: Benchmark 42 Controlled Worker Build
+
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - .github/workflows/benchmark42-controlled-build.yml
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  docker:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      SOURCE_SHA: 4f6c59f2f4cea81eaa584cbcf14e734858b71945
+      IMAGE: ghcr.io/automatedretailservices/cutsell-worker:4f6c59f2f4cea81eaa584cbcf14e734858b71945
+    steps:
+      - name: Guard exact PR and branch
+        shell: bash
+        env:
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_HEAD: ${{ github.event.pull_request.head.ref }}
+        run: |
+          set -euo pipefail
+          test "$PR_NUMBER" = "25" || { echo 'Benchmark 42 build restricted to PR #25'; exit 2; }
+          test "$PR_HEAD" = "cutsell/mobile-v1-clean" || { echo 'Benchmark 42 build restricted to cutsell/mobile-v1-clean'; exit 2; }
+
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.SOURCE_SHA }}
+          fetch-depth: 1
+
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build benchmark 42 worker image
+        run: docker build -t "$IMAGE" -f Dockerfile.cutsell.worker .
+
+      - name: Prove OpenAI SDK is absent from worker image
+        run: |
+          docker run --rm --entrypoint python "$IMAGE" - <<'PY'
+          import importlib.util
+          if importlib.util.find_spec('openai') is not None:
+              raise SystemExit('OpenAI SDK unexpectedly present in RunPod worker image')
+          print('openai_sdk_absent=true')
+          PY
+
+      - name: Push benchmark 42 worker image
+        run: docker push "$IMAGE"
+
+      - name: Resolve immutable image digest
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker buildx imagetools inspect "$IMAGE" | tee image-inspect.txt
+          digest=$(awk '/^Digest:/ {print $2; exit}' image-inspect.txt)
+          test -n "$digest" || { echo 'Unable to resolve pushed image digest'; exit 9; }
+          case "$digest" in sha256:[0-9a-f][0-9a-f]*) ;; *) echo 'Invalid worker digest'; exit 9;; esac
+          echo "BENCHMARK42_SOURCE_SHA=$SOURCE_SHA" >> "$GITHUB_STEP_SUMMARY"
+          echo "BENCHMARK42_IMAGE=$IMAGE@$digest" >> "$GITHUB_STEP_SUMMARY"
