@@ -9,7 +9,9 @@ creator delivery.
 This guard therefore adds *textual structure* as the second piece of evidence. It only
 acts after Hybrid has already labelled a candidate failed/BTS with medium-high confidence,
 and only for tiny/open fragments, filler BTS, recording-process self-talk, or severe
-repetition pathology. Unique short hooks labelled keep/winner are untouched.
+repetition pathology. A micro ``alternate`` is also removable when it sits inside a
+provider-confirmed failure cluster beside a much fuller winner; isolated short hooks
+remain fail-open.
 """
 from __future__ import annotations
 
@@ -112,6 +114,69 @@ def _recording_process_bts(take: CandidateTake) -> bool:
     return take.duration_sec <= 4.0 and bool(_BTS_SELF_TALK_RE.search(str(take.text or "")))
 
 
+def _temporal_gap(left: CandidateTake, right: CandidateTake) -> float:
+    if left.source_asset_id != right.source_asset_id:
+        return float("inf")
+    if left.end <= right.start:
+        return max(0.0, right.start - left.end)
+    if right.end <= left.start:
+        return max(0.0, left.start - right.end)
+    return 0.0
+
+
+def _alternate_micro_in_failure_cluster(
+    take: CandidateTake,
+    label: str,
+    confidence: float,
+    semantic: dict[str, tuple[str, float]],
+    take_map: dict[str, CandidateTake],
+    *,
+    failed_neighbor_gap_sec: float = 8.0,
+    winner_gap_sec: float = 45.0,
+) -> bool:
+    """Detect a tiny non-winner stranded inside a confirmed failed-retry cluster.
+
+    Benchmark 45 exposed ``you're tired`` as a 1.28-second incomplete fragment labelled
+    ``alternate`` between a failed micro-fragment and a 43-second clear winner. Removing
+    every short alternate would be unsafe because creators use valid two/three-word
+    hooks. This path therefore requires three independent facts at once:
+
+    * the alternate itself is a transcript micro-fragment and is marked incomplete;
+    * another nearby same-source take is provider-confirmed ``failed``;
+    * a same-source, high-confidence winner is materially fuller and still local to the
+      same long-form retry window.
+
+    Without all three, the alternate remains fail-open.
+    """
+    if str(label) != "alternate" or float(confidence) < 0.72:
+        return False
+    if take.complete_idea or not _micro_fragment(take):
+        return False
+
+    failed_neighbor = any(
+        other_id != take.clip_id
+        and other.source_asset_id == take.source_asset_id
+        and other_label == "failed"
+        and other_confidence >= 0.74
+        and _temporal_gap(take, other) <= failed_neighbor_gap_sec
+        for other_id, other in take_map.items()
+        for other_label, other_confidence in (semantic.get(other_id, ("", 0.0)),)
+    )
+    if not failed_neighbor:
+        return False
+
+    return any(
+        other_id != take.clip_id
+        and other.source_asset_id == take.source_asset_id
+        and other_label == "winner"
+        and other_confidence >= 0.90
+        and other.duration_sec >= max(8.0, take.duration_sec * 5.0)
+        and _temporal_gap(take, other) <= winner_gap_sec
+        for other_id, other in take_map.items()
+        for other_label, other_confidence in (semantic.get(other_id, ("", 0.0)),)
+    )
+
+
 def _structural_reason(take: CandidateTake, label: str, confidence: float) -> str | None:
     label = str(label)
     confidence = float(confidence)
@@ -134,7 +199,8 @@ def _structural_reason(take: CandidateTake, label: str, confidence: float) -> st
     if label == "failed":
         # A two/three-word orphan plus a semantic-failure decision is enough independent
         # evidence at medium confidence. This catches fragments such as ``you're tired``
-        # without touching valid short hooks labelled winner/alternate.
+        # when the provider actually calls them failed, without touching valid short
+        # hooks labelled winner/alternate.
         if confidence >= 0.74 and _micro_fragment(take):
             return "semantic_failed_micro_fragment"
         # Slightly longer malformed fragments require substantially stronger semantic
@@ -163,12 +229,21 @@ def remove_semantic_fragment_debris(
         str(clip_id): (str(label), float(confidence))
         for clip_id, label, confidence in semantic_decisions
     }
+    take_map = {take.clip_id: take for take in kept_tuple}
     removed_ids: set[str] = set()
     diagnostics: list[dict] = []
 
     for take in kept_tuple:
         label, confidence = semantic.get(take.clip_id, ("", 0.0))
         reason = _structural_reason(take, label, confidence)
+        if reason is None and _alternate_micro_in_failure_cluster(
+            take,
+            label,
+            confidence,
+            semantic,
+            take_map,
+        ):
+            reason = "semantic_nonwinner_micro_failure_cluster"
         if reason is None:
             continue
         removed_ids.add(take.clip_id)
