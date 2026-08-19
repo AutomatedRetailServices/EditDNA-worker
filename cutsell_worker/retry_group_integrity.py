@@ -4,8 +4,9 @@ The Benchmark 44 story-chain guard correctly prevents substantive story paragrap
 becoming one transitive Best-Take family.  A later regression showed that the same split
 can strand tiny false starts which earlier reconciliation had already placed around a
 proven retry family.  This final grouping pass is deliberately asymmetric: it may attach
-weak/restart-only groups to an already-proven multi-member retry family, but weak speech
-can never merge two substantive families together.
+weak/restart-only groups to an already-proven retry family, or to one clearly fuller
+delivery under strict direct retry evidence, but weak speech can never merge two
+substantive families together.
 """
 from __future__ import annotations
 
@@ -29,14 +30,68 @@ def _temporal_gap(left, right) -> float:
     return 0.0
 
 
-def _restore_weak_retry_envelopes(groups, takes, *, maximum_gap_sec: float = 30.0):
-    """Attach weak debris only to one already-proven retry family.
+def _single_fuller_retry_target(
+    weak_members,
+    target_members,
+    *,
+    maximum_gap_sec: float = 15.0,
+) -> bool:
+    """Allow weak false starts to join one unmistakably fuller delivery.
 
-    A target must already contain at least two members and at least one substantive
-    delivery.  A weak group can attach when it lies inside that family's time envelope
-    (classic interstitial false-start debris), or when it has at least two meaningful
-    shared/fuzzy content tokens within the normal long-form retry window.  If two target
-    families tie, fail open and keep the weak group separate rather than bridging them.
+    Story-chain splitting can leave a clean final delivery as a singleton while the
+    preceding false starts remain in one or more weak-only groups. Requiring the target
+    to already contain two members then strands those false starts and the composer must
+    preserve them as independent speech.
+
+    A singleton target is therefore eligible only when every weak member is materially
+    shorter and all of its meaningful content is covered by the fuller delivery (fuzzy
+    one-character recovery is allowed for ASR slips such as ``croc`` -> ``crop``). This
+    is direct member-to-target evidence, not transitive grouping, so it cannot bridge two
+    substantive story families.
+    """
+    from .local_retry_grouping import _content_tokens, _restart_heavy, _shared_content_strength
+
+    if len(target_members) != 1 or not weak_members:
+        return False
+    target = target_members[0]
+    if _restart_heavy(target.text):
+        return False
+    target_content = set(_content_tokens(target.text))
+    if len(target_content) < 5:
+        return False
+
+    for weak in weak_members:
+        if weak.source_asset_id != target.source_asset_id:
+            return False
+        if _temporal_gap(weak, target) > maximum_gap_sec:
+            return False
+        weak_content = set(_content_tokens(weak.text))
+        if not 2 <= len(weak_content) <= 4:
+            return False
+        if len(target_content) < len(weak_content) + 3:
+            return False
+        if target.duration_sec < weak.duration_sec + 0.75:
+            return False
+        # Require coverage of every meaningful weak token. _shared_content_strength
+        # counts exact tokens plus one-edit fuzzy matches, which is intentionally useful
+        # for short ASR false starts while remaining much stricter than topic overlap.
+        if _shared_content_strength(weak.text, target.text) < len(weak_content):
+            return False
+    return True
+
+
+def _restore_weak_retry_envelopes(groups, takes, *, maximum_gap_sec: float = 30.0):
+    """Attach weak debris only to one strongly supported retry family.
+
+    Normal targets are already-proven retry families with at least two members and at
+    least one substantive delivery. A weak group can attach when it lies inside that
+    family's time envelope, or when it has at least two meaningful shared/fuzzy content
+    tokens within the normal long-form retry window.
+
+    A singleton substantive target is allowed only through ``_single_fuller_retry_target``
+    so a clean final delivery can absorb its obvious false starts after story-chain
+    splitting. If two targets tie, fail open and keep the weak group separate rather than
+    bridging them.
     """
     from .local_retry_grouping import _restart_heavy, _shared_content_strength
 
@@ -66,11 +121,19 @@ def _restore_weak_retry_envelopes(groups, takes, *, maximum_gap_sec: float = 30.
             if target_index == weak_index:
                 continue
             target_members = members(target_index)
-            if len(target_members) < 2:
+            if not target_members:
                 continue
             if not any(not _restart_heavy(item.text) for item in target_members):
                 continue
             if weak_members[0].source_asset_id != target_members[0].source_asset_id:
+                continue
+
+            proven_family = len(target_members) >= 2
+            direct_singleton = (
+                len(target_members) == 1
+                and _single_fuller_retry_target(weak_members, target_members)
+            )
+            if not proven_family and not direct_singleton:
                 continue
 
             target_start = min(item.start for item in target_members)
@@ -88,9 +151,17 @@ def _restore_weak_retry_envelopes(groups, takes, *, maximum_gap_sec: float = 30.
                 for weak_item in weak_members
                 for target_item in target_members
             )
-            if not interstitial and (gap > maximum_gap_sec or shared < 2):
+            if proven_family and not interstitial and (gap > maximum_gap_sec or shared < 2):
                 continue
-            candidates.append(((1 if interstitial else 0, shared, -gap), target_index))
+            candidates.append((
+                (
+                    1 if interstitial else 0,
+                    shared,
+                    1 if proven_family else 0,
+                    -gap,
+                ),
+                target_index,
+            ))
 
         if not candidates:
             continue
