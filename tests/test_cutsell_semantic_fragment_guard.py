@@ -72,6 +72,24 @@ def test_bts_filler_micro_debris_deletes_without_visual_signal():
     assert result.diagnostics[-1]["semantic_fragment_guard"][0]["reason"] == "semantic_bts_micro_debris"
 
 
+def test_failed_open_comma_fragment_deletes_at_point_eight():
+    item = take(0, "I give me the money,", 1.18)
+    result = apply_hybrid_session_cleanup(
+        (item,), None, MappingJudge({"clip-0": ("failed", 0.80)})
+    )
+    assert result.deleted == (item,)
+    assert result.diagnostics[-1]["semantic_fragment_guard"][0]["reason"] == "semantic_failed_micro_fragment"
+
+
+def test_failed_longer_spanish_open_tail_deletes_at_point_eight():
+    item = take(0, "la barrera cutánea te la te hace como", 3.34)
+    result = apply_hybrid_session_cleanup(
+        (item,), None, MappingJudge({"clip-0": ("failed", 0.80)})
+    )
+    assert result.deleted == (item,)
+    assert result.diagnostics[-1]["semantic_fragment_guard"][0]["reason"] == "semantic_failed_open_fragment"
+
+
 def test_valid_short_hook_is_preserved_when_semantics_say_keep():
     item = take(0, "Shop now", 1.0)
     result = apply_hybrid_session_cleanup(
