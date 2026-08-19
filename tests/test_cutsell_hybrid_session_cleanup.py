@@ -21,7 +21,7 @@ def context_for(*events: TemporalEvent) -> WholeVideoContext:
     return WholeVideoContext(
         sources=(SourceVideoContext(
             source_asset_id="src",
-            summary="creator records product story",
+            summary="creator records a complete product story with retries and a final clean delivery",
             dominant_style="talking_head",
             creator_intent="deliver a clean take",
             events=tuple(events),
@@ -99,26 +99,29 @@ class MappingJudge:
         )
 
 
-def test_long_creator_partition_uses_stable_six_candidate_chunks_and_covers_every_candidate_once():
+def test_long_creator_partition_uses_overlapping_story_windows():
     takes = tuple(take(index) for index in range(25))
     judge = BatchJudge()
     result = apply_hybrid_session_cleanup(takes, None, judge)
 
-    assert [len(session.candidates) for session in judge.sessions] == [6, 6, 6, 6, 1]
-    seen = [candidate.clip_id for session in judge.sessions for candidate in session.candidates]
-    assert seen == [item.clip_id for item in takes]
-    assert result.requested_chunk_count == 5
-    assert result.available_chunk_count == 5
+    assert [len(session.candidates) for session in judge.sessions] == [10, 10, 10, 10]
+    windows = [[candidate.clip_id for candidate in session.candidates] for session in judge.sessions]
+    assert windows[0] == [f"clip-{index}" for index in range(10)]
+    assert windows[1] == [f"clip-{index}" for index in range(5, 15)]
+    assert windows[-1] == [f"clip-{index}" for index in range(15, 25)]
+    assert result.requested_chunk_count == 4
+    assert result.available_chunk_count == 4
     assert [item.clip_id for item in result.deleted] == ["clip-13"]
     assert all(session.task == "classify_recording_process_within_single_creator_session" for session in judge.sessions)
+    # Overlap must not duplicate downstream semantic decisions.
     assert len(result.semantic_decisions) == 25
 
 
-def test_default_chunk_size_is_below_structured_output_failure_envelope():
+def test_default_window_size_stays_below_structured_output_failure_envelope():
     takes = tuple(take(index) for index in range(30))
     judge = BatchJudge()
     apply_hybrid_session_cleanup(takes, None, judge)
-    assert max(len(session.candidates) for session in judge.sessions) == 6
+    assert max(len(session.candidates) for session in judge.sessions) == 10
 
 
 def test_no_provider_is_zero_cost_and_preserves_everything():
@@ -142,6 +145,20 @@ def test_medium_high_failed_label_deletes_when_retry_event_corroborates_locally(
     decision = result.diagnostics[0]["decisions"][0]
     assert decision["delete_basis"] == "semantic_failed_plus_local_performance"
     assert decision["local_failure_corroborated"] is True
+
+
+def test_multimodal_physical_reset_candidates_corroborate_failed_take():
+    item = take(1)
+    context = context_for(
+        TemporalEvent("src", 3.2, 3.4, "hand_motion_reset_candidate", 0.96, "mic drops after fumble"),
+        TemporalEvent("src", 3.5, 3.7, "body_reset_candidate", 0.94, "creator resets posture"),
+        TemporalEvent("src", 3.4, 3.8, "facial_expression_shift_candidate", 0.88, "error expression"),
+    )
+    result = apply_hybrid_session_cleanup((item,), context, FixedJudge("failed", 0.84))
+    assert result.deleted == (item,)
+    decision = result.diagnostics[0]["decisions"][0]
+    assert decision["local_failure_corroborated"] is True
+    assert any(reason.startswith("multimodal_reset_cluster") for reason in decision["local_failure_reasons"])
 
 
 def test_medium_high_failed_label_stays_fail_open_without_local_corroboration():
