@@ -32,11 +32,13 @@ from .superseded_attempt_cleanup import install_superseded_attempt_cleanup
 from .lexical_self_correction import install_explicit_lexical_self_correction_cut
 from .semantic_fragment_guard import install_semantic_fragment_guard
 from .hybrid_story_guard import install_hybrid_story_coverage_guard
+from .hybrid_alternate_integrity import install_hybrid_alternate_integrity
 from .local_retry_grouping import install_local_retry_grouping
 from .retry_group_integrity import install_retry_group_integrity
 from .attempt_boundary_integrity import install_attempt_boundary_integrity
 from .session_grouping_bridge import install_session_grouping_bridge
 from .selection_integrity import install_selection_integrity
+from .semantic_best_take_integrity import install_semantic_best_take_integrity
 
 install_clean_cut_contract_recovery()
 install_recording_process_context_cleanup()
@@ -65,11 +67,13 @@ install_superseded_attempt_cleanup()
 install_explicit_lexical_self_correction_cut()
 install_semantic_fragment_guard()
 install_hybrid_story_coverage_guard()
+install_hybrid_alternate_integrity()
 install_local_retry_grouping()
 install_retry_group_integrity()
 install_attempt_boundary_integrity()
 install_session_grouping_bridge()
 install_selection_integrity()
+install_semantic_best_take_integrity()
 
 __version__ = "0.1.0"
 OBSERVABILITY_STATUS = initialize_observability(service="cutsell-worker")
