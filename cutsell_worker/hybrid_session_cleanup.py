@@ -1,10 +1,9 @@
 """Cost-efficient semantic cleanup across bounded creator mini-sessions.
 
 Instead of paying once per retry group/singleton, this stage batches the candidates that
-belong to one inferred creator mini-session. The model is asked whether each item is
-valid audience-facing speech or recording-process material. Retry/Best Take grouping
-still happens afterward in the deterministic brain, but semantic winner/alternate
-preferences are preserved so a later retry group can honor a clear editorial choice.
+belong to one inferred creator mini-session. The model judges every candidate against a
+compact whole-source transcript and overlapping local windows so a failed attempt and a
+later clean retake are less likely to fall into unrelated semantic calls.
 """
 from __future__ import annotations
 
@@ -26,6 +25,8 @@ from .temporal_editing import harmful_events_for_take
 from .whole_video_analysis import WholeVideoContext
 
 _TOKEN_RE = re.compile(r"[\w'’-]+", re.UNICODE)
+_RESET_CANDIDATES = frozenset({"body_reset_candidate", "hand_motion_reset_candidate"})
+_BREAK_CANDIDATES = frozenset({"camera_disengagement_candidate", "facial_expression_shift_candidate"})
 
 
 @dataclass(frozen=True)
@@ -35,8 +36,6 @@ class HybridSessionCleanupResult:
     requested_chunk_count: int
     available_chunk_count: int
     diagnostics: tuple[dict, ...]
-    # Read-only semantic evidence from available Hybrid chunks. Pipeline selection may
-    # use this only inside retry groups that the deterministic grouper already proved.
     semantic_decisions: tuple[tuple[str, str, float], ...] = ()
 
 
@@ -44,12 +43,41 @@ def _token_count(text: str) -> int:
     return len(_TOKEN_RE.findall(str(text or "")))
 
 
-def _evidence(take: CandidateTake) -> tuple[tuple[str, float | str | bool], ...]:
+def _source_events(context: WholeVideoContext | None, source_asset_id: str):
+    if context is None:
+        return ()
+    for source in context.sources:
+        if source.source_asset_id == source_asset_id:
+            return tuple(source.events)
+    return ()
+
+
+def _performance_event_summary(take: CandidateTake, context: WholeVideoContext | None) -> dict[str, int | float | bool]:
+    events = tuple(
+        event for event in _source_events(context, take.source_asset_id)
+        if event.end >= take.start - 0.20 and event.start <= take.end + 0.20
+    )
+    resets = [event for event in events if str(event.kind) in _RESET_CANDIDATES and event.confidence >= 0.88]
+    breaks = [event for event in events if str(event.kind) in _BREAK_CANDIDATES and event.confidence >= 0.76]
+    return {
+        "strong_reset_count": len(resets),
+        "strong_break_count": len(breaks),
+        "max_reset_confidence": round(max((float(event.confidence) for event in resets), default=0.0), 4),
+        "max_break_confidence": round(max((float(event.confidence) for event in breaks), default=0.0), 4),
+        "multimodal_reset": bool(resets and breaks),
+    }
+
+
+def _evidence(take: CandidateTake, context: WholeVideoContext | None) -> tuple[tuple[str, float | str | bool | int], ...]:
+    performance = _performance_event_summary(take, context)
     signals = take.signals
-    if signals is None:
-        return (("complete_idea", bool(take.complete_idea)),)
-    return (
+    base: list[tuple[str, float | str | bool | int]] = [
         ("complete_idea", bool(take.complete_idea)),
+        *(performance.items()),
+    ]
+    if signals is None:
+        return tuple(base)
+    base.extend((
         ("audio_quality", round(float(signals.audio_quality), 4)),
         ("eye_contact", round(float(signals.eye_contact), 4)),
         ("visual_fumble", round(float(signals.visual_fumble), 4)),
@@ -57,14 +85,14 @@ def _evidence(take: CandidateTake) -> tuple[tuple[str, float | str | bool], ...]
         ("gesture_naturalness", round(float(signals.gesture_naturalness), 4)),
         ("delivery_energy", round(float(signals.delivery_energy), 4)),
         ("distraction_risk", round(float(signals.distraction_risk), 4)),
-    )
+    ))
+    return tuple(base)
 
 
 def _source_context(
     context: WholeVideoContext | None,
     source_asset_id: str,
 ) -> tuple[tuple[str, str | float], ...]:
-    """Return one compact whole-source narrative map for every bounded Hybrid chunk."""
     if context is None:
         return ()
     for source in context.sources:
@@ -87,29 +115,48 @@ def _failed_local_evidence(
     take: CandidateTake,
     context: WholeVideoContext | None,
 ) -> tuple[bool, tuple[str, ...]]:
-    """Return independent local evidence that the take belongs to recording failure."""
+    """Independent Watch+Listen evidence that a take belongs to recording failure."""
     reasons: list[str] = []
     for event in harmful_events_for_take(take, context, minimum_confidence=0.80):
         reasons.append(f"event:{event.kind}:{event.confidence:.2f}")
 
+    performance = _performance_event_summary(take, context)
+    reset_count = int(performance["strong_reset_count"])
+    break_count = int(performance["strong_break_count"])
+    if reset_count >= 2 and break_count >= 1:
+        reasons.append(f"multimodal_reset_cluster:{reset_count}:{break_count}")
+    elif reset_count >= 4:
+        reasons.append(f"dense_physical_reset:{reset_count}")
+
     signals = take.signals
     if signals is not None:
-        if float(signals.visual_fumble) >= 0.72:
+        if float(signals.visual_fumble) >= 0.68:
             reasons.append(f"visual_fumble:{float(signals.visual_fumble):.2f}")
-        if float(signals.distraction_risk) >= 0.82:
+        if float(signals.distraction_risk) >= 0.78:
             reasons.append(f"distraction_risk:{float(signals.distraction_risk):.2f}")
-        if float(signals.expression_naturalness) <= 0.28:
+        if float(signals.expression_naturalness) <= 0.32:
             reasons.append(f"expression_naturalness:{float(signals.expression_naturalness):.2f}")
-        if float(signals.gesture_naturalness) <= 0.28:
+        if float(signals.gesture_naturalness) <= 0.32:
             reasons.append(f"gesture_naturalness:{float(signals.gesture_naturalness):.2f}")
 
     return bool(reasons), tuple(reasons)
 
 
-def _chunks(items: Tuple[CandidateTake, ...], size: int) -> tuple[Tuple[CandidateTake, ...], ...]:
-    if size <= 0:
-        raise ValueError("hybrid session chunk size must be positive")
-    return tuple(tuple(items[index : index + size]) for index in range(0, len(items), size))
+def _overlapping_windows(
+    items: Tuple[CandidateTake, ...],
+    *,
+    size: int,
+    stride: int,
+) -> tuple[Tuple[CandidateTake, ...], ...]:
+    if size <= 0 or stride <= 0:
+        raise ValueError("hybrid session window size/stride must be positive")
+    if len(items) <= size:
+        return (items,) if items else ()
+    starts = list(range(0, max(1, len(items) - size + 1), stride))
+    final_start = len(items) - size
+    if not starts or starts[-1] != final_start:
+        starts.append(final_start)
+    return tuple(tuple(items[start : start + size]) for start in starts)
 
 
 def _editorial_session(
@@ -134,13 +181,20 @@ def _editorial_session(
             end=member.end,
             local_label="keep",
             local_confidence=0.50,
-            evidence=_evidence(member),
+            evidence=_evidence(member, context),
         ) for member in members),
         local_confidence=0.50,
         conflict_score=0.50,
         task="classify_recording_process_within_single_creator_session",
         source_context=_source_context(context, source_id),
     )
+
+
+def _decision_priority(label: str, confidence: float) -> tuple[int, float]:
+    # When overlapping windows disagree, strong failure evidence must not be silently
+    # overwritten by a later low-information keep. Uncertain is deliberately weakest.
+    order = {"failed": 5, "bts": 5, "winner": 4, "alternate": 3, "keep": 2, "uncertain": 1}
+    return order.get(str(label), 0), float(confidence)
 
 
 def apply_hybrid_session_cleanup(
@@ -154,20 +208,10 @@ def apply_hybrid_session_cleanup(
     corroborated_bts_confidence: float = 0.84,
     micro_failed_confidence: float = 0.80,
     clustered_bts_confidence: float = 0.84,
-    chunk_size: int = 6,
+    chunk_size: int = 10,
+    chunk_stride: int = 5,
 ) -> HybridSessionCleanupResult:
-    """Classify bounded session chunks while preserving safe fail-open behavior.
-
-    High-confidence semantic failures remain direct deletes. Medium-high ``failed`` or
-    ``bts`` labels may delete only when independent local performance evidence agrees.
-    One extra case is allowed for BTS: when a chunk contains a dense recording-failure
-    cluster (at least three harmful semantic labels and at least two independently
-    corroborated), another medium-high BTS member in that same chunk may be removed.
-    This captures coherent blooper runs without turning isolated asides into deletions.
-
-    Very short failed debris (for example a one-word false start at the beginning of a
-    take) uses a slightly lower semantic floor only when local evidence corroborates it.
-    """
+    """Classify overlapping creator-session windows while failing open on uncertainty."""
     take_tuple = tuple(takes)
     if not take_tuple or editorial_judge is None:
         return HybridSessionCleanupResult(take_tuple, (), 0, 0, (), ())
@@ -181,11 +225,15 @@ def apply_hybrid_session_cleanup(
     requested_chunks = 0
     available_chunks = 0
     diagnostics = []
-    semantic_decisions: list[tuple[str, str, float]] = []
+    best_semantic: dict[str, tuple[str, float]] = {}
+
+    effective_size = min(chunk_size, policy.max_candidates_per_request)
+    effective_stride = min(max(1, chunk_stride), effective_size)
 
     for partition_index, partition in enumerate(partitions):
         ordered = tuple(sorted(partition, key=lambda item: (item.start, item.end, item.clip_id)))
-        for chunk_index, members in enumerate(_chunks(ordered, min(chunk_size, policy.max_candidates_per_request))):
+        windows = _overlapping_windows(ordered, size=effective_size, stride=effective_stride)
+        for chunk_index, members in enumerate(windows):
             session = _editorial_session(
                 members,
                 context,
@@ -203,7 +251,10 @@ def apply_hybrid_session_cleanup(
             local_by_id: dict[str, tuple[bool, tuple[str, ...]]] = {}
             if result.available:
                 for decision in result.decisions:
-                    semantic_decisions.append((decision.clip_id, decision.label, float(decision.confidence)))
+                    candidate = (decision.label, float(decision.confidence))
+                    current = best_semantic.get(decision.clip_id)
+                    if current is None or _decision_priority(*candidate) > _decision_priority(*current):
+                        best_semantic[decision.clip_id] = candidate
                     local_by_id[decision.clip_id] = _failed_local_evidence(take_map[decision.clip_id], context)
 
                 harmful = [
@@ -285,6 +336,8 @@ def apply_hybrid_session_cleanup(
                 "session_id": session.session_id,
                 "member_ids": [member.clip_id for member in members],
                 "source_context_available": bool(session.source_context),
+                "window_size": len(members),
+                "window_stride": effective_stride,
                 "requested": bool(result.requested),
                 "available": bool(result.available),
                 "provider": result.provider,
@@ -295,11 +348,15 @@ def apply_hybrid_session_cleanup(
 
     kept = tuple(take for take in take_tuple if take.clip_id not in deleted_ids)
     deleted = tuple(take for take in take_tuple if take.clip_id in deleted_ids)
+    semantic_decisions = tuple(
+        (clip_id, label, confidence)
+        for clip_id, (label, confidence) in best_semantic.items()
+    )
     return HybridSessionCleanupResult(
         kept=kept,
         deleted=deleted,
         requested_chunk_count=requested_chunks,
         available_chunk_count=available_chunks,
         diagnostics=tuple(diagnostics),
-        semantic_decisions=tuple(semantic_decisions),
+        semantic_decisions=semantic_decisions,
     )
