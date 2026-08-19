@@ -1,0 +1,58 @@
+name: Benchmark 47 Controlled Build
+run-name: Benchmark 47 exact worker build
+
+on:
+  push:
+    branches:
+      - cutsell/mobile-v1-clean
+    paths:
+      - .github/workflows/benchmark47-controlled-build.yml
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      SOURCE_SHA: aaf059f078c0c75277242ca94706ec3bf99a960d
+      IMAGE: ghcr.io/automatedretailservices/cutsell-worker:aaf059f078c0c75277242ca94706ec3bf99a960d
+    steps:
+      - name: Checkout exact validated source
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.SOURCE_SHA }}
+          fetch-depth: 1
+      - name: Guard exact source
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
+          test -f Dockerfile.cutsell.worker
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Build and push exactly one immutable-source worker image
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker buildx build \
+            --platform linux/amd64 \
+            --file Dockerfile.cutsell.worker \
+            --tag "$IMAGE" \
+            --push \
+            --metadata-file build-metadata.json \
+            .
+          digest=$(jq -r '.["containerimage.digest"] // empty' build-metadata.json)
+          test -n "$digest" && test "$digest" != "null"
+          test "${digest#sha256:}" != "$digest"
+          echo "BENCHMARK47_SOURCE_SHA=$SOURCE_SHA"
+          echo "BENCHMARK47_IMAGE=$IMAGE"
+          echo "BENCHMARK47_IMAGE_DIGEST=$digest"
