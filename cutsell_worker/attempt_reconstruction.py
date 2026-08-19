@@ -122,6 +122,25 @@ def _restart_evidence(left_text: str, right_text: str) -> bool:
     return False
 
 
+def _short_incomplete_suffix(left: CandidateTake, right: CandidateTake) -> bool:
+    """Keep a tiny unfinished tail separate from an already usable delivery.
+
+    ASR can fluctuate between runs and attach the last broken three-second self-correction
+    directly to the preceding good paragraph. Once those pieces are merged, Hybrid sees
+    one long winner and can no longer remove only the bad tail. Preserve the boundary
+    when the preceding candidate is already complete and the new candidate is a short,
+    explicitly incomplete suffix. If more speech follows, that suffix can still merge
+    forward into its continuation on the next reconstruction step.
+    """
+    if not left.complete_idea or right.complete_idea:
+        return False
+    tokens = _tokens(right.text)
+    if not tokens or len(tokens) > 10 or right.duration_sec > 4.5:
+        return False
+    gap = max(0.0, right.start - left.end)
+    return gap <= 0.35
+
+
 def _attempt_boundary_reason(
     context: WholeVideoContext | None,
     left: CandidateTake,
@@ -141,6 +160,13 @@ def _attempt_boundary_reason(
     # not joined into one self-repeating sentence either.
     if right.start >= left.end - 0.03 and _restart_evidence(left.text, right.text):
         return "lexical_restart"
+
+    # Do not let a short unfinished final self-correction poison a preceding coherent
+    # paragraph merely because Whisper made the two chunks nearly contiguous.  This is
+    # deliberately directional: complete -> short incomplete.  An incomplete fragment
+    # can still merge forward into later continuation speech.
+    if _short_incomplete_suffix(left, right):
+        return "short_incomplete_suffix"
 
     nearby = _events_near_transition(context, left, right)
     strong = tuple(event for event in nearby if float(event.confidence) >= 0.80)
