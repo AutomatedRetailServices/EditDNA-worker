@@ -90,3 +90,15 @@ def test_composer_preserves_source_order_across_multiple_sources():
     request = ProcessingRequest(project_id="project-1", user_id="user-1", sources=(first, second))
     result = build_flow_b_draft(request, (later_source_take, first_source_take))
     assert [clip.source_order for clip in result.draft.selected] == [0, 1]
+
+
+def test_pipeline_keeps_valid_ungrouped_story_material_selected():
+    source = _source()
+    first = _take(source, 0.0, 5.0, "My skin was dry for months and nothing seemed to help.")
+    second = _take(source, 6.0, 11.0, "Then I changed one part of my routine and the difference was obvious.")
+    request = ProcessingRequest(project_id="project-1", user_id="user-1", sources=(source,))
+
+    result = build_flow_b_draft(request, (first, second))
+
+    assert [clip.clip_id for clip in result.draft.selected] == [first.clip_id, second.clip_id]
+    assert result.draft.alternates == ()
