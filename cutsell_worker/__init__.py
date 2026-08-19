@@ -36,6 +36,7 @@ from .local_retry_grouping import install_local_retry_grouping
 from .retry_group_integrity import install_retry_group_integrity
 from .attempt_boundary_integrity import install_attempt_boundary_integrity
 from .session_grouping_bridge import install_session_grouping_bridge
+from .selection_integrity import install_selection_integrity
 
 install_clean_cut_contract_recovery()
 install_recording_process_context_cleanup()
@@ -68,6 +69,7 @@ install_local_retry_grouping()
 install_retry_group_integrity()
 install_attempt_boundary_integrity()
 install_session_grouping_bridge()
+install_selection_integrity()
 
 __version__ = "0.1.0"
 OBSERVABILITY_STATUS = initialize_observability(service="cutsell-worker")
