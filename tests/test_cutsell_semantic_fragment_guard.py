@@ -78,7 +78,7 @@ def test_failed_open_comma_fragment_deletes_at_point_eight():
         (item,), None, MappingJudge({"clip-0": ("failed", 0.80)})
     )
     assert result.deleted == (item,)
-    assert result.diagnostics[-1]["semantic_fragment_guard"][0]["reason"] == "semantic_failed_micro_fragment"
+    assert result.diagnostics[-1]["semantic_fragment_guard"][0]["reason"] == "semantic_failed_open_fragment"
 
 
 def test_failed_longer_spanish_open_tail_deletes_at_point_eight():
