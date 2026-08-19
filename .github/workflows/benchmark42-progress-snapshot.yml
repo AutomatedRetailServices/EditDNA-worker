@@ -1,0 +1,42 @@
+name: Benchmark 42 Progress Checkpoint
+
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - .github/workflows/benchmark42-progress-snapshot.yml
+
+permissions:
+  contents: read
+
+jobs:
+  snapshot:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    env:
+      REDIS_URL: ${{ secrets.REDIS_URL }}
+    steps:
+      - run: python -m pip install -q 'redis>=5.0' 'rq>=2.6'
+      - name: Read active benchmark progress
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json, os
+          from datetime import datetime, timezone
+          from redis import Redis
+          from rq import Worker
+          from rq.job import Job
+          connection=Redis.from_url(os.environ['REDIS_URL']); now=datetime.now(timezone.utc); rows=[]
+          for worker in Worker.all(connection=connection):
+              hb=worker.last_heartbeat
+              if hb is None: continue
+              if hb.tzinfo is None: hb=hb.replace(tzinfo=timezone.utc)
+              jid=worker.get_current_job_id(); row={'worker':worker.name,'state':worker.get_state(),'heartbeat_age_sec':round((now-hb).total_seconds(),1),'job_id':jid}
+              if jid:
+                  job=Job.fetch(jid, connection=connection); meta=dict(job.meta or {})
+                  row.update({'job_status':getattr(job.get_status(refresh=True),'value',str(job.get_status())),'benchmark_id':meta.get('benchmark_id'),'stage':meta.get('stage'),'progress_percent':meta.get('progress_percent'),'current_source':meta.get('current_source'),'dataset_role':meta.get('dataset_role')})
+              rows.append(row)
+          rows.sort(key=lambda x:x['heartbeat_age_sec']); print('BENCHMARK42_PROGRESS_BEGIN'); print(json.dumps(rows[:8],indent=2,ensure_ascii=False)); print('BENCHMARK42_PROGRESS_END')
+          PY
