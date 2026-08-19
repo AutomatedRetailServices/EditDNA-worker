@@ -30,7 +30,9 @@ from .recording_meta_continuation import install_recording_meta_continuation_cle
 from .story_coverage_guard import install_story_coverage_guard
 from .superseded_attempt_cleanup import install_superseded_attempt_cleanup
 from .semantic_fragment_guard import install_semantic_fragment_guard
+from .hybrid_story_guard import install_hybrid_story_coverage_guard
 from .local_retry_grouping import install_local_retry_grouping
+from .session_grouping_bridge import install_session_grouping_bridge
 
 install_clean_cut_contract_recovery()
 install_recording_process_context_cleanup()
@@ -57,7 +59,9 @@ install_recording_meta_continuation_cleanup()
 install_story_coverage_guard()
 install_superseded_attempt_cleanup()
 install_semantic_fragment_guard()
+install_hybrid_story_coverage_guard()
 install_local_retry_grouping()
+install_session_grouping_bridge()
 
 __version__ = "0.1.0"
 OBSERVABILITY_STATUS = initialize_observability(service="cutsell-worker")
