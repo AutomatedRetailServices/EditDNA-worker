@@ -1,9 +1,9 @@
 name: Benchmark 45 Status Probe
 
 on:
-  push:
+  pull_request:
     branches:
-      - cutsell/mobile-v1-clean
+      - main
     paths:
       - .github/workflows/benchmark45-status-probe.yml
 
@@ -13,6 +13,7 @@ permissions:
 
 jobs:
   status:
+    if: github.event.pull_request.number == 25 && github.event.pull_request.head.ref == 'cutsell/mobile-v1-clean'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     env:
