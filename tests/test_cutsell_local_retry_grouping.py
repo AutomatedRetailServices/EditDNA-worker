@@ -1,5 +1,6 @@
 from cutsell_worker.contracts import CandidateTake, MediaSignals
 from cutsell_worker.local_retry_grouping import _adjacent_reformulated_retries
+from cutsell_worker.session_boundaries import safe_group_takes_by_sessions
 from cutsell_worker.take_grouping_provider import safe_group_takes
 from cutsell_worker.take_judge import rank_takes
 
@@ -192,3 +193,17 @@ def test_best_take_prefers_complete_natural_delivery_over_product_drop_retry():
     ranked = rank_takes(takes)
     assert ranked[0].clip_id == "clean"
     assert ranked[0].score > ranked[1].score
+
+
+def test_session_scoped_production_path_uses_installed_retry_integrity():
+    takes = (
+        take("short1", 0.0, 2.2, "the popular croc"),
+        take("short2", 3.0, 4.9, "the popular croc"),
+        take("short3", 5.6, 7.1, "the popular croc"),
+        take("repeat", 7.8, 12.3, "crop popular crop popular crop popular"),
+        take("partial", 14.8, 19.3, "the popular crop black jeans okay now we hold"),
+        take("full", 21.7, 27.7, "the popular crop black denim jeans are back in stock anything with pockets is a win for me"),
+    )
+    result = safe_group_takes_by_sessions(None, takes, None)
+    assert result.groups == (("short1", "short2", "short3", "repeat", "partial", "full"),)
+    assert "serial_retry_envelope_collapsed" in result.reason
