@@ -2,6 +2,7 @@ from cutsell_worker.hybrid_editorial import EditorialCandidate, EditorialSession
 from cutsell_worker.hybrid_payload import (
     HybridCostPolicy,
     build_compact_editorial_payload,
+    estimate_tokens_from_chars,
     preflight_hybrid_call,
 )
 
@@ -71,3 +72,54 @@ def test_preflight_caps_output_and_exposes_estimated_input():
     assert result["allowed"] is True
     assert result["estimated_input_tokens"] > 0
     assert result["max_output_tokens"] == 500
+
+
+def test_large_realistic_cleanup_window_compacts_instead_of_failing_preflight():
+    candidates = tuple(
+        EditorialCandidate(
+            clip_id=f"c{index}",
+            text=("long creator delivery with useful semantic detail and repeated context " * 30) + str(index),
+            start=float(index * 3),
+            end=float(index * 3 + 2.5),
+            local_label="keep",
+            local_confidence=0.5,
+            evidence=(
+                ("complete_idea", index % 2 == 0),
+                ("strong_reset_count", 2),
+                ("strong_break_count", 1),
+                ("visual_fumble", 0.22),
+                ("expression_naturalness", 0.81),
+                ("gesture_naturalness", 0.77),
+                ("delivery_energy", 0.74),
+                ("distraction_risk", 0.08),
+            ),
+        )
+        for index in range(10)
+    )
+    session = EditorialSession(
+        session_id="large-cleanup",
+        source_asset_id="src",
+        candidates=candidates,
+        local_confidence=0.5,
+        conflict_score=0.5,
+        task="classify_recording_process_within_single_creator_session",
+        source_context=(
+            ("summary", "S" * 3600),
+            ("creator_intent", "I" * 500),
+            ("main_topic", "T" * 500),
+            ("product_or_subject", "P" * 500),
+            ("story_logic", "L" * 900),
+            ("edit_mode", "natural"),
+            ("sales_intent", 0.7),
+        ),
+    )
+
+    payload = build_compact_editorial_payload(session)
+    payload_chars = len(repr(payload))
+
+    assert payload_chars <= 12_000
+    assert estimate_tokens_from_chars(payload_chars) <= 4_000
+    assert [item["clip_id"] for item in payload["candidates"]] == [f"c{i}" for i in range(10)]
+    assert all(item["text"] for item in payload["candidates"])
+    assert "full message/story" in " ".join(payload["rules"])
+    assert payload["source_context"]["summary"]
