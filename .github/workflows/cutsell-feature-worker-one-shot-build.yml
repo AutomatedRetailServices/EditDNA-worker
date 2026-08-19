@@ -1,4 +1,4 @@
-name: CutSell Benchmark 41 Worker Build
+name: CutSell Benchmark 42 Worker Build
 
 on:
   push:
@@ -16,7 +16,7 @@ jobs:
     runs-on: ubuntu-latest
     env:
       IMAGE: ghcr.io/automatedretailservices/cutsell-worker:${{ github.sha }}
-      BUILD_REASON: benchmark41-attempt-session-reconstruction
+      BUILD_REASON: benchmark42-hybrid-payload-and-timeout-robustness
     steps:
       - uses: actions/checkout@v4
       - name: Login to GitHub Container Registry
@@ -49,12 +49,12 @@ jobs:
         run: |
           echo "$IMAGE@$IMAGE_DIGEST"
           echo "build_reason=$BUILD_REASON"
-      - name: Record benchmark 41 immutable build status
+      - name: Record benchmark 42 immutable build status
         shell: bash
         run: |
           set -euo pipefail
           mkdir -p ops
-          cat > ops/benchmark41-build-status.json <<EOF
+          cat > ops/benchmark42-build-status.json <<EOF
           {
             "run_id": ${GITHUB_RUN_ID},
             "head_sha": "${GITHUB_SHA}",
@@ -66,6 +66,6 @@ jobs:
           EOF
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add ops/benchmark41-build-status.json
-          git commit -m "Record benchmark 41 immutable worker build" || exit 0
+          git add ops/benchmark42-build-status.json
+          git commit -m "Record benchmark 42 immutable worker build" || exit 0
           git push origin HEAD:cutsell/mobile-v1-clean
