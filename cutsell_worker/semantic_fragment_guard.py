@@ -2,13 +2,13 @@
 
 Benchmark #40 proved that the semantic judge can correctly label tiny false starts and
 broken repeated deliveries as ``failed`` while the cleanup stage still keeps them because
-there is no visual corroboration.  That fail-open policy is desirable for normal speech,
+there is no visual corroboration. That fail-open policy is desirable for normal speech,
 but not for transcript structures that are independently incompatible with a finished
 creator delivery.
 
-This guard therefore adds *textual structure* as the second piece of evidence.  It only
+This guard therefore adds *textual structure* as the second piece of evidence. It only
 acts after Hybrid has already labelled a candidate failed/BTS with medium-high confidence,
-and only for tiny/open fragments, filler BTS, or severe repetition pathology.  Unique
+and only for tiny/open fragments, filler BTS, or severe repetition pathology. Unique
 short hooks labelled keep/winner/alternate are untouched.
 """
 from __future__ import annotations
@@ -59,8 +59,8 @@ def _open_fragment(take: CandidateTake) -> bool:
     stripped = str(take.text or "").strip()
     punctuation_open = stripped.endswith((",", ":", ";", "-", "–", "—"))
     return (
-        take.duration_sec <= 3.0
-        and len(tokens) <= 7
+        take.duration_sec <= 4.0
+        and len(tokens) <= 9
         and (tokens[-1] in _OPEN_TAIL or punctuation_open)
     )
 
@@ -70,7 +70,7 @@ def _repetition_pathology(take: CandidateTake) -> bool:
     if len(tokens) < 5:
         return False
     # Triple token repetition catches e.g. ``non-gmo non-gmo non-gmo`` after ASR
-    # normalization.  Also catch an immediately repeated 2-token phrase.
+    # normalization. Also catch an immediately repeated 2-token phrase.
     for index in range(len(tokens) - 2):
         if tokens[index] == tokens[index + 1] == tokens[index + 2]:
             return True
@@ -141,7 +141,17 @@ def install_semantic_fragment_guard() -> None:
         return
 
     def apply_with_semantic_fragment_guard(*args, **kwargs):
-        result = original(*args, **kwargs)
+        # Snapshot the input before the wrapped function consumes a possible generator.
+        if args:
+            source_takes = tuple(args[0])
+            call_args = (source_takes, *args[1:])
+            result = original(*call_args, **kwargs)
+        else:
+            source_takes = tuple(kwargs.get("takes") or ())
+            call_kwargs = dict(kwargs)
+            call_kwargs["takes"] = source_takes
+            result = original(**call_kwargs)
+
         if not result.kept or not result.semantic_decisions:
             return result
 
@@ -154,8 +164,6 @@ def install_semantic_fragment_guard() -> None:
 
         deleted_ids = {take.clip_id for take in result.deleted}
         deleted_ids.update(take.clip_id for take in extra_deleted)
-        # Preserve source order from the original input whenever available.
-        source_takes = tuple(args[0]) if args else tuple(kwargs.get("takes") or ())
         if source_takes:
             deleted = tuple(take for take in source_takes if take.clip_id in deleted_ids)
         else:
