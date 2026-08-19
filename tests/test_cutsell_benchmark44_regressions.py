@@ -110,6 +110,50 @@ def test_failed_micro_fragment_at_medium_confidence_is_removed():
     assert diagnostics[0]["reason"] == "semantic_failed_micro_fragment"
 
 
+def test_alternate_micro_fragment_inside_confirmed_failure_cluster_is_removed():
+    failed = _take("worried", 0.0, 1.5, "worried if", complete=False)
+    broken = _take("tired", 6.33, 7.61, "you're tired", complete=False)
+    winner = _take(
+        "winner",
+        30.39,
+        74.09,
+        "A child wakes up, eats breakfast and lunch, then mac and cheese for dinner while hidden hunger can still leave key nutrients missing.",
+    )
+
+    kept, removed, diagnostics = remove_semantic_fragment_debris(
+        (failed, broken, winner),
+        (
+            ("worried", "failed", 0.80),
+            ("tired", "alternate", 0.75),
+            ("winner", "winner", 0.95),
+        ),
+    )
+
+    assert kept == (winner,)
+    assert {take.clip_id for take in removed} == {"worried", "tired"}
+    reasons = {item["clip_id"]: item["reason"] for item in diagnostics}
+    assert reasons["tired"] == "semantic_nonwinner_micro_failure_cluster"
+
+
+def test_isolated_alternate_micro_hook_remains_fail_open_without_failed_neighbor():
+    hook = _take("hook", 0.0, 1.2, "stop scrolling", complete=False)
+    winner = _take(
+        "winner",
+        10.0,
+        25.0,
+        "This is the complete useful product story with enough detail to be the clear final delivery.",
+    )
+
+    kept, removed, diagnostics = remove_semantic_fragment_debris(
+        (hook, winner),
+        (("hook", "alternate", 0.80), ("winner", "winner", 0.96)),
+    )
+
+    assert kept == (hook, winner)
+    assert removed == ()
+    assert diagnostics == ()
+
+
 def test_failed_repetition_survives_provider_variance_but_not_final_cleanup():
     broken = _take(
         "non-gmo",
