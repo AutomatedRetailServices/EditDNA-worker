@@ -28,6 +28,7 @@ from .session_boundaries import safe_group_takes_by_sessions
 from .strategy import choose_strategy
 from .take_grouping_provider import TakeGroupingProvider
 from .take_judge_provider import TakeJudgeProvider, safe_rank_takes
+from .temporal_editing import refine_takes_with_temporal_context
 from .whole_video_analysis import WholeVideoContext
 
 
@@ -91,10 +92,14 @@ def build_flow_b_draft(
     editorial_judge: EditorialJudge | None = None,
     whole_video_context: WholeVideoContext | None = None,
     temporal_trim_diagnostics: Iterable[dict] = (),
+    attempt_reconstruction_diagnostics: dict | None = None,
+    performance_confirmation_diagnostics: Iterable[dict] = (),
 ) -> ProcessingResult:
     """Build an editable draft after understanding the complete source context."""
     take_tuple = tuple(takes)
     temporal_trim_diagnostics = tuple(temporal_trim_diagnostics)
+    performance_confirmation_diagnostics = tuple(performance_confirmation_diagnostics)
+    attempt_reconstruction_diagnostics = dict(attempt_reconstruction_diagnostics or {})
     label_map: dict[str, SemanticLabel] = {label.clip_id: label for label in semantic_labels}
     context_text = whole_video_context.compact_text() if whole_video_context is not None else ""
 
@@ -209,6 +214,20 @@ def build_flow_b_draft(
         for member in members:
             clip_to_group[member.clip_id] = gid
 
+    # Pass 4: only after retry families have been judged and a logical winner has been
+    # chosen do we touch physical edit boundaries. Keep the logical clip IDs stable so
+    # semantic labels, retry-group membership and the already-made Best Take decision
+    # cannot be invalidated by a later timestamp adjustment.
+    kept, post_best_take_trim_diagnostics = refine_takes_with_temporal_context(
+        kept,
+        whole_video_context,
+        preserve_clip_id=True,
+    )
+    temporal_trim_diagnostics = (
+        *temporal_trim_diagnostics,
+        *post_best_take_trim_diagnostics,
+    )
+
     surviving_labels = tuple(label_map[take.clip_id] for take in kept if take.clip_id in label_map)
     strategy = choose_strategy(surviving_labels, kept)
     natural_selected = compose_selected(kept, groups, surviving_labels)
@@ -305,6 +324,8 @@ def build_flow_b_draft(
         discarded=discarded_clips,
         diagnostics={
             "whole_video_context": whole_video_diag,
+            "attempt_reconstruction": attempt_reconstruction_diagnostics,
+            "performance_confirmation": list(performance_confirmation_diagnostics)[:300],
             "temporal_performance_trims": list(temporal_trim_diagnostics)[:300],
             "clean_cut_decisions": [decision.__dict__ for decision in decisions],
             "clean_cut_judge_status": clean_judged.status.__dict__,
@@ -388,6 +409,10 @@ def build_flow_b_draft(
     else:
         review_stage = "degraded_fallback"
 
+    temporal_applied_count = sum(
+        1 for item in temporal_trim_diagnostics if item.get("applied")
+    )
+
     return ProcessingResult(
         schema_version=SCHEMA_VERSION,
         project_id=request.project_id,
@@ -396,7 +421,8 @@ def build_flow_b_draft(
         stage_status={
             "whole_video_context": whole_video_context.status.status if whole_video_context is not None else "not_requested",
             "edit_mode": whole_video_context.dominant_edit_mode if whole_video_context is not None else "natural",
-            "temporal_performance": "applied" if temporal_trim_diagnostics else "no_edge_trim_needed",
+            "attempt_reconstruction": "applied" if attempt_reconstruction_diagnostics else "not_requested",
+            "temporal_performance": "applied" if temporal_applied_count else "no_edge_trim_needed",
             "clean_cut": clean_cut_stage,
             "hybrid_editorial": hybrid_stage,
             "take_grouping": grouping_stage,
