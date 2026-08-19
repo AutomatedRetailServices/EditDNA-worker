@@ -69,14 +69,22 @@ def _repetition_pathology(take: CandidateTake) -> bool:
     tokens = _tokens(take.text)
     if len(tokens) < 5:
         return False
-    # Triple token repetition catches e.g. ``non-gmo non-gmo non-gmo`` after ASR
-    # normalization. Also catch an immediately repeated 2-token phrase.
-    for index in range(len(tokens) - 2):
-        if tokens[index] == tokens[index + 1] == tokens[index + 2]:
-            return True
-    for index in range(len(tokens) - 3):
-        if tokens[index : index + 2] == tokens[index + 2 : index + 4]:
-            return True
+
+    # A semantic-failure label plus an immediately repeated phrase is independent
+    # evidence of a broken delivery even when the creator keeps eye contact. Check
+    # adjacent n-grams up to five tokens so ASR-normalized compounds such as
+    # ``non-gmo non-gmo non-gmo`` (``non gmo`` repeated) and longer restarts such as
+    # ``if they're not eating if they're not eating`` are both recognized.
+    for width in range(1, min(5, len(tokens) // 2) + 1):
+        span = width * 2
+        for index in range(len(tokens) - span + 1):
+            if tokens[index : index + width] == tokens[index + width : index + span]:
+                # One-word duplication is only structural when repeated at least
+                # three times; two identical ordinary words can be emphatic speech.
+                if width > 1:
+                    return True
+                if index + 2 < len(tokens) and tokens[index] == tokens[index + 2]:
+                    return True
     return False
 
 
@@ -88,13 +96,16 @@ def _filler_bts(take: CandidateTake) -> bool:
 def _structural_reason(take: CandidateTake, label: str, confidence: float) -> str | None:
     label = str(label)
     confidence = float(confidence)
-    if label == "failed" and confidence >= 0.80:
-        if _micro_fragment(take):
-            return "semantic_failed_micro_fragment"
-        if _open_fragment(take):
-            return "semantic_failed_open_fragment"
-        if confidence >= 0.82 and _repetition_pathology(take):
+    if label == "failed":
+        # Repetition is stronger textual corroboration than mere brevity. A medium
+        # semantic confidence is enough because both signals must independently agree.
+        if confidence >= 0.74 and _repetition_pathology(take):
             return "semantic_failed_repetition_pathology"
+        if confidence >= 0.80:
+            if _micro_fragment(take):
+                return "semantic_failed_micro_fragment"
+            if _open_fragment(take):
+                return "semantic_failed_open_fragment"
     if label == "bts" and confidence >= 0.88:
         if _filler_bts(take) or _micro_fragment(take):
             return "semantic_bts_micro_debris"
