@@ -104,7 +104,11 @@ class GoogleGeminiTransport:
     settings: HybridProviderSettings
     ledger: DollarBudgetLedger
     escalation: bool = False
-    timeout_sec: float = 30.0
+    # Benchmark #41 saw successful provider calls interleaved with read timeouts at the
+    # old 30s ceiling. Give the same single paid call more time rather than retrying it:
+    # a retry after a client timeout could duplicate spend if the first request completed
+    # server-side. This improves availability without changing call count or budget rules.
+    timeout_sec: float = 60.0
     session: Any = requests
 
     def __post_init__(self) -> None:
