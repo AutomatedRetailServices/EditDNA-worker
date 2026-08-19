@@ -8,8 +8,8 @@ creator delivery.
 
 This guard therefore adds *textual structure* as the second piece of evidence. It only
 acts after Hybrid has already labelled a candidate failed/BTS with medium-high confidence,
-and only for tiny/open fragments, filler BTS, or severe repetition pathology. Unique
-short hooks labelled keep/winner are untouched.
+and only for tiny/open fragments, filler BTS, recording-process self-talk, or severe
+repetition pathology. Unique short hooks labelled keep/winner are untouched.
 """
 from __future__ import annotations
 
@@ -20,6 +20,13 @@ from .contracts import CandidateTake
 
 _TOKEN_RE = re.compile(r"[a-z0-9áéíóúñü]+", re.IGNORECASE)
 _SENTENCE_END_RE = re.compile(r"[.!?][\"'”’)]*\s*$")
+_BTS_SELF_TALK_RE = re.compile(
+    r"\btrying\s+to\s+(?:say|remember|stay|keep)\b|"
+    r"\b(?:stay|staying|keep|keeping)\s+in\s+character\b|"
+    r"\bwhat\s+am\s+i\s+(?:trying\s+to\s+)?say\b|"
+    r"\bi\s+(?:can'?t|cannot)\s+(?:talk|speak)\b",
+    re.IGNORECASE,
+)
 _OPEN_TAIL = frozenset({
     # English connectors / auxiliaries that cannot normally finish a take.
     "a", "an", "and", "are", "as", "at", "because", "been", "being", "but", "by",
@@ -101,6 +108,10 @@ def _filler_bts(take: CandidateTake) -> bool:
     return take.duration_sec <= 1.8 and normalized in _FILLER_PHRASES
 
 
+def _recording_process_bts(take: CandidateTake) -> bool:
+    return take.duration_sec <= 4.0 and bool(_BTS_SELF_TALK_RE.search(str(take.text or "")))
+
+
 def _structural_reason(take: CandidateTake, label: str, confidence: float) -> str | None:
     label = str(label)
     confidence = float(confidence)
@@ -135,7 +146,10 @@ def _structural_reason(take: CandidateTake, label: str, confidence: float) -> st
             return "semantic_failed_open_fragment"
 
     if label == "bts" and confidence >= 0.84:
-        if _filler_bts(take) or _micro_fragment(take) or _short_unfinished_fragment(take):
+        # Keep the historic fail-open contract for an isolated ordinary BTS-labelled
+        # sentence. Only filler/micro debris or explicit recording-process self-talk is
+        # structurally incompatible with a final delivery without visual corroboration.
+        if _filler_bts(take) or _micro_fragment(take) or _recording_process_bts(take):
             return "semantic_bts_micro_debris"
     return None
 
