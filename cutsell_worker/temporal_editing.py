@@ -141,6 +141,7 @@ def refine_takes_with_temporal_context(
     *,
     edge_tolerance_sec: float = 0.30,
     minimum_keep_sec: float = 0.30,
+    preserve_clip_id: bool = False,
 ) -> tuple[Tuple[CandidateTake, ...], Tuple[dict, ...]]:
     """Trim high-confidence recording-process events from take edges.
 
@@ -152,6 +153,11 @@ def refine_takes_with_temporal_context(
     Performance-event timestamps are also snapped away from mid-word positions before
     they become render boundaries. This prevents physically clipped syllables while
     keeping non-speech event boundaries unchanged.
+
+    ``preserve_clip_id`` is used when trimming happens after retry grouping/Best Take.
+    At that point ``clip_id`` represents the logical delivery attempt already judged by
+    the Brain; preserving it lets physical boundary refinement change only the edit span
+    without invalidating the semantic/group identity chosen in the previous stage.
     """
     refined = []
     diagnostics = []
@@ -203,7 +209,7 @@ def refine_takes_with_temporal_context(
             text = " ".join(word.text for word in words).strip() if words else take.text
             child = replace(
                 take,
-                clip_id=_child_id(take, new_start, new_end),
+                clip_id=take.clip_id if preserve_clip_id else _child_id(take, new_start, new_end),
                 start=new_start,
                 end=new_end,
                 text=text,
@@ -218,6 +224,7 @@ def refine_takes_with_temporal_context(
         diagnostics.append({
             "original_clip_id": take.clip_id,
             "result_clip_id": child.clip_id,
+            "preserved_logical_clip_id": bool(preserve_clip_id),
             "original_start": take.start,
             "original_end": take.end,
             "result_start": child.start,
