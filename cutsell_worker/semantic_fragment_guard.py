@@ -9,7 +9,7 @@ creator delivery.
 This guard therefore adds *textual structure* as the second piece of evidence. It only
 acts after Hybrid has already labelled a candidate failed/BTS with medium-high confidence,
 and only for tiny/open fragments, filler BTS, or severe repetition pathology. Unique
-short hooks labelled keep/winner/alternate are untouched.
+short hooks labelled keep/winner are untouched.
 """
 from __future__ import annotations
 
@@ -52,6 +52,14 @@ def _micro_fragment(take: CandidateTake) -> bool:
     return take.duration_sec <= 1.60 and len(tokens) <= 3
 
 
+def _short_unfinished_fragment(take: CandidateTake) -> bool:
+    """A short provider-confirmed failure that is too small to be a finished delivery."""
+    tokens = _tokens(take.text)
+    if not tokens or _has_sentence_end(take.text):
+        return False
+    return take.duration_sec <= 3.50 and len(tokens) <= 7
+
+
 def _open_fragment(take: CandidateTake) -> bool:
     tokens = _tokens(take.text)
     if not tokens or _has_sentence_end(take.text):
@@ -70,11 +78,11 @@ def _repetition_pathology(take: CandidateTake) -> bool:
     if len(tokens) < 5:
         return False
 
-    # A semantic-failure label plus an immediately repeated phrase is independent
-    # evidence of a broken delivery even when the creator keeps eye contact. Check
-    # adjacent n-grams up to five tokens so ASR-normalized compounds such as
-    # ``non-gmo non-gmo non-gmo`` (``non gmo`` repeated) and longer restarts such as
-    # ``if they're not eating if they're not eating`` are both recognized.
+    # A semantic non-winner plus an immediately repeated phrase is independent evidence
+    # of a broken delivery even when the creator keeps eye contact. Check adjacent
+    # n-grams up to five tokens so ASR-normalized compounds such as ``non-gmo non-gmo
+    # non-gmo`` (``non gmo`` repeated) and longer restarts such as ``if they're not
+    # eating if they're not eating`` are both recognized.
     for width in range(1, min(5, len(tokens) // 2) + 1):
         span = width * 2
         for index in range(len(tokens) - span + 1):
@@ -96,18 +104,38 @@ def _filler_bts(take: CandidateTake) -> bool:
 def _structural_reason(take: CandidateTake, label: str, confidence: float) -> str | None:
     label = str(label)
     confidence = float(confidence)
-    if label == "failed":
-        # Repetition is stronger textual corroboration than mere brevity. A medium
-        # semantic confidence is enough because both signals must independently agree.
-        if confidence >= 0.74 and _repetition_pathology(take):
+
+    # Exact phrase repetition is stronger textual corroboration than brevity. Benchmark
+    # 44 showed the same broken delivery can fluctuate between ``failed`` and a low-
+    # confidence ``alternate`` across overlapping Hybrid windows. Never apply this to a
+    # winner/keep; a short low-confidence non-winner also has to lack sentence closure.
+    if _repetition_pathology(take):
+        if label == "failed" and confidence >= 0.65:
             return "semantic_failed_repetition_pathology"
-        if confidence >= 0.80:
-            if _micro_fragment(take):
-                return "semantic_failed_micro_fragment"
-            if _open_fragment(take):
-                return "semantic_failed_open_fragment"
-    if label == "bts" and confidence >= 0.88:
-        if _filler_bts(take) or _micro_fragment(take):
+        if (
+            label == "alternate"
+            and confidence >= 0.60
+            and take.duration_sec <= 7.0
+            and not _has_sentence_end(take.text)
+        ):
+            return "semantic_nonwinner_repetition_pathology"
+
+    if label == "failed":
+        # A two/three-word orphan plus a semantic-failure decision is enough independent
+        # evidence at medium confidence. This catches fragments such as ``you're tired``
+        # without touching valid short hooks labelled winner/alternate.
+        if confidence >= 0.74 and _micro_fragment(take):
+            return "semantic_failed_micro_fragment"
+        # Slightly longer malformed fragments require substantially stronger semantic
+        # confidence. This catches stranded self-talk such as ``trying to say in
+        # character`` while keeping the guard fail-open for ordinary short speech.
+        if confidence >= 0.86 and _short_unfinished_fragment(take):
+            return "semantic_failed_short_fragment"
+        if confidence >= 0.80 and _open_fragment(take):
+            return "semantic_failed_open_fragment"
+
+    if label == "bts" and confidence >= 0.84:
+        if _filler_bts(take) or _micro_fragment(take) or _short_unfinished_fragment(take):
             return "semantic_bts_micro_debris"
     return None
 
