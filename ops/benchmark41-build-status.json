@@ -1,0 +1,8 @@
+{
+  "run_id": 32225112503,
+  "head_sha": "cfe54232b7cde284ae5b5e2e69cf37dfd1cca546",
+  "image": "ghcr.io/automatedretailservices/cutsell-worker:cfe54232b7cde284ae5b5e2e69cf37dfd1cca546@sha256:3ec92c2b4fa7e6f9068c955782f9268cd143601ceb169f66b40f4f47cd6af4ca",
+  "image_digest": "sha256:3ec92c2b4fa7e6f9068c955782f9268cd143601ceb169f66b40f4f47cd6af4ca",
+  "build_reason": "benchmark41-attempt-session-reconstruction",
+  "conclusion": "success"
+}
