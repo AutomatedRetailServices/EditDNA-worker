@@ -48,6 +48,14 @@ def _content_tokens(text: str) -> tuple[str, ...]:
 
 
 def _retry_peer(take: CandidateTake, all_takes: tuple[CandidateTake, ...]) -> bool:
+    """Return true only when another attempt covers most of *this* take's idea.
+
+    Retry evidence is directional. A tiny failed fragment can be fully contained inside a
+    long coherent paragraph without being an alternative delivery of that paragraph. The
+    old symmetric/minimum containment test treated that tiny fragment as a retry peer and
+    prevented the story guard from rescuing the long audience-facing delivery. A peer now
+    has to cover most of the candidate we are considering for restoration.
+    """
     a = set(_content_tokens(take.text))
     if len(a) < 5:
         return False
@@ -58,8 +66,8 @@ def _retry_peer(take: CandidateTake, all_takes: tuple[CandidateTake, ...]) -> bo
         if len(b) < 5:
             continue
         shared = len(a & b)
-        containment = shared / max(1, min(len(a), len(b)))
-        if shared >= 4 and containment >= 0.55:
+        candidate_coverage = shared / max(1, len(a))
+        if shared >= 4 and candidate_coverage >= 0.60:
             return True
     return False
 
