@@ -6,6 +6,10 @@ on:
       - main
     paths:
       - .github/workflows/benchmark43-controlled-build.yml
+      - cutsell_worker/**
+      - tests/test_cutsell_*.py
+      - Dockerfile.cutsell.worker
+      - requirements.cutsell.worker.txt
 
 permissions:
   contents: read
@@ -16,8 +20,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     env:
-      SOURCE_SHA: 88a4cb646f1e85cf8b788a6b400cfbb58de8d7b0
-      IMAGE: ghcr.io/automatedretailservices/cutsell-worker:88a4cb646f1e85cf8b788a6b400cfbb58de8d7b0
+      SOURCE_SHA: ${{ github.event.pull_request.head.sha }}
+      IMAGE: ghcr.io/automatedretailservices/cutsell-worker:${{ github.event.pull_request.head.sha }}
     steps:
       - name: Guard exact PR and branch
         shell: bash
@@ -28,6 +32,7 @@ jobs:
           set -euo pipefail
           test "$PR_NUMBER" = "25" || { echo 'Benchmark 43 build restricted to PR #25'; exit 2; }
           test "$PR_HEAD" = "cutsell/mobile-v1-clean" || { echo 'Benchmark 43 build restricted to cutsell/mobile-v1-clean'; exit 2; }
+          test "$SOURCE_SHA" = "${{ github.event.pull_request.head.sha }}" || { echo 'Benchmark source SHA must equal current PR head'; exit 2; }
 
       - uses: actions/checkout@v4
         with:
