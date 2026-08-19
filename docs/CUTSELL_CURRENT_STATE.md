@@ -14,22 +14,46 @@ This file is the operational checkpoint. Update it whenever the active benchmark
 
 ## Current focus
 
-**Brain editorial-quality hardening for Flow B / Clean Cut, then physical iPhone beta validation and TestFlight preparation.**
+**Brain editorial-quality hardening for Flow B / Clean Cut before the next paid real-video benchmark.**
+
+Human review is the quality gate. Workflow success alone is not an editorial pass.
 
 ## Current Brain checkpoint
 
-### Benchmark #38
+### Human baseline / failure reference
 
-- Workflow run: `32178648887`
-- Branch: `cutsell/mobile-v1-clean`
-- Execution status: **SUCCESS**
-- Benchmark job: completed successfully.
-- RunPod enqueue/wait: completed successfully.
-- JSON report: generated/uploaded.
-- Preview videos: generated/uploaded.
-- Exact staging GPU worker cleanup: completed successfully.
-- Editing-quality status: **NOT YET DECLARED PASS solely from workflow success**.
-- Required next interpretation: rendered outputs must satisfy human/postable quality review under `CUTSELL_BRAIN_DOCTRINE.md`.
+- Benchmark #39 remains the key human-reviewed bad baseline.
+- User review found repeated failed attempts surviving, fragmentary edits, over-cutting, and cases where too little of the original delivery remained to judge naturally.
+- Do not treat later technical workflow success as improvement unless the rendered videos are visibly better than this baseline.
+
+### Subsequent benchmark evidence
+
+- Benchmark #42 exposed concrete architecture/runtime defects including a `SessionBoundary` compatibility crash, Hybrid payload-budget failures, zero-selected drafts, and post-Best-Take clip identity loss.
+- Benchmarks #44/#45 completed technically, but human feedback still judged the videos as effectively as bad as Benchmark #39. Therefore they are **NOT editorial passes**.
+- No later benchmark may be declared a quality pass without human review of the rendered previews.
+
+### Current code checkpoint
+
+- Current branch head at this checkpoint: `1e56b3c984ed6b3fa9d18425415801c19b665b01`.
+- Clean Worker CI: green at run #1432.
+- iOS CI: green at run #1213.
+- PR #25 remains Draft and unmerged.
+- `main` remains unchanged by this release path.
+
+### Hardening completed after the bad-video reviews
+
+The branch now contains regression protection for the major failure classes discovered in the real-video runs:
+
+- complete delivery-attempt reconstruction before destructive editorial decisions;
+- conservative attempt-boundary integrity;
+- retry-family reconciliation for false starts, weak retries and reformulated retries;
+- session-scoped grouping bound to the installed production retry reconciler;
+- Best Take identity preservation after winner selection;
+- prevention of weak/restart fragments leaking into selected output alongside a fuller delivery;
+- Hybrid request payload compaction so large candidate windows are not rejected before Gemini;
+- story-coverage guards that preserve long coherent delivery when short fragments would otherwise veto it;
+- semantic Best Take integrity when Hybrid clearly marks the local winner as failed and one clear usable peer exists;
+- Hybrid alternate integrity to suppress stranded alternate prefixes/suffixes that are superseded by a complete final winner while failing open on unique material.
 
 ## Canonical document hierarchy
 
@@ -49,39 +73,39 @@ If two documents conflict, prefer the more recent explicit decision in `CUTSELL_
 
 The clean release path already has evidence for:
 
-- CutSell API container build/boot and health.
-- Clean Worker CI.
-- iOS Simulator CI/build.
-- real RunPod GPU smoke.
-- immutable GPU worker image build/push.
-- Render staging API.
-- shared Redis/S3 staging topology.
-- real staging E2E through public API: auth -> upload -> Flow B -> Draft recovery -> edit/autosave -> export -> download/validation.
-- persisted Draft recovery.
-- retry/cancel behavior.
-- Render rollback.
+- CutSell API container build/boot and health;
+- Clean Worker CI;
+- iOS Simulator CI/build;
+- real RunPod GPU smoke;
+- immutable GPU worker image build/push;
+- Render staging API;
+- shared Redis/S3 staging topology;
+- real staging E2E through public API: auth -> upload -> Flow B -> Draft recovery -> edit/autosave -> export -> download/validation;
+- persisted Draft recovery;
+- retry/cancel behavior;
+- Render rollback;
 - worker-image rollback and cleanup.
 
 ## Product/Brain status
 
 ### Implemented or substantially present
 
-- Flow B architecture.
-- source identity.
-- ASR.
-- Clean Cut.
-- take segmentation/grouping.
-- retry handling.
-- Best Take / Take Judge paths.
-- whole-video and visual analysis paths.
-- hybrid editorial/composer paths.
-- editable Draft storage/edits.
-- projects.
-- multipart/resumable upload infrastructure.
-- notifications.
-- captions/text/overlays/audio edit paths.
-- render/export/versioning.
-- iOS client/editor code.
+- Flow B architecture;
+- source identity;
+- ASR;
+- Clean Cut;
+- take segmentation/grouping;
+- retry handling;
+- Best Take / Take Judge paths;
+- whole-video and visual analysis paths;
+- hybrid editorial/composer paths;
+- editable Draft storage/edits;
+- projects;
+- multipart/resumable upload infrastructure;
+- notifications;
+- captions/text/overlays/audio edit paths;
+- render/export/versioning;
+- iOS client/editor code;
 - benchmark/evaluation workflows.
 
 ### Current hardening area
@@ -93,7 +117,20 @@ The clean release path already has evidence for:
 - precision trimming/boundaries;
 - preserving personality and meaningful pauses;
 - global story/sales continuity;
-- avoiding redundant or locally-good-but-globally-wrong selections.
+- avoiding redundant or locally-good-but-globally-wrong selections;
+- preventing Hybrid alternates or failed local winners from surviving into the selected draft incorrectly.
+
+## Next gate
+
+Before another paid RunPod benchmark:
+
+1. Keep Clean Worker and iOS CI green on the current hardening head.
+2. Confirm no remaining known unit/regression path can leak failed/retry fragments into selected output.
+3. Build an immutable worker image from the exact current head.
+4. **Stop for explicit user approval before launching paid RunPod.**
+5. After approval, run exactly one controlled 16-video validation cycle.
+6. Delete and verify deletion of the staging Pod.
+7. Present the new preview videos for human editorial review and stop for user input before any further paid benchmark.
 
 ## Remaining path to closed TestFlight
 
@@ -123,4 +160,4 @@ Do not start a new paid benchmark merely because the previous workflow completed
 
 ## Update rule
 
-Whenever work advances from CutSell.ai 7 to a later project checkpoint or Benchmark #39/#40/etc., update this file in the same development cycle instead of reconstructing state from chat history.
+Whenever work advances to a later benchmark or major Brain checkpoint, update this file in the same development cycle instead of reconstructing state from chat history.
