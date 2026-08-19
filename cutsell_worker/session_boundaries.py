@@ -35,6 +35,17 @@ class SessionBoundary:
     confidence: float
     evidence_kinds: Tuple[str, ...]
 
+    @property
+    def at(self) -> float:
+        """Backward-compatible timestamp alias for boundary consumers.
+
+        Older attempt-reconstruction code used ``boundary.at`` while the canonical
+        dataclass field is ``timestamp``. Keeping this read-only alias makes boundary
+        consumers source-compatible and prevents one malformed source from aborting an
+        otherwise healthy benchmark run.
+        """
+        return self.timestamp
+
 
 def _source_events(context: WholeVideoContext | None, source_asset_id: str):
     if context is None:
