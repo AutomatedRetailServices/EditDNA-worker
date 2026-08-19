@@ -1,0 +1,49 @@
+name: Benchmark 44 Emergency Cleanup
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  cleanup:
+    runs-on: ubuntu-latest
+    env:
+      RUNPOD_API_KEY: ${{ secrets.RUNPOD_API_KEY }}
+      POD_ID: iaw3b65psyva7e
+    steps:
+      - name: Delete exact stale staging Pod and verify absent
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          echo '--- recent unseen benchmark runs before cleanup ---'
+          curl --fail --silent --show-error \
+            --url "https://api.github.com/repos/$GITHUB_REPOSITORY/actions/workflows/cutsell-unseen-clean-cut-benchmark.yml/runs?event=workflow_dispatch&branch=cutsell%2Fmobile-v1-clean&per_page=5" \
+            --header "Authorization: Bearer $GH_TOKEN" \
+            --header "Accept: application/vnd.github+json" \
+            --header "X-GitHub-Api-Version: 2022-11-28" \
+            --output runs.json
+          jq '[.workflow_runs[] | {id,run_number,status,conclusion,created_at,head_sha}]' runs.json
+          test -n "${RUNPOD_API_KEY:-}" || { echo 'RUNPOD_API_KEY missing'; exit 2; }
+          curl --fail --silent --show-error --url "https://rest.runpod.io/v1/pods" --header "Authorization: Bearer $RUNPOD_API_KEY" --output pods-before.json
+          name=$(jq -r --arg id "$POD_ID" '[.[] | select(.id == $id)][0].name // empty' pods-before.json)
+          if [ -z "$name" ]; then
+            echo "Exact stale Pod already absent: $POD_ID"
+            exit 0
+          fi
+          test "$name" = "cutsell-staging-worker" || { echo 'Exact Pod id does not belong to cutsell-staging-worker'; exit 3; }
+          code=$(curl --silent --show-error --write-out '%{http_code}' --request DELETE \
+            --url "https://rest.runpod.io/v1/pods/$POD_ID" \
+            --header "Authorization: Bearer $RUNPOD_API_KEY" \
+            --output delete-response.txt)
+          echo "RunPod cleanup DELETE status: $code"
+          test "$code" = "204" || test "$code" = "404"
+          sleep 2
+          curl --fail --silent --show-error --url "https://rest.runpod.io/v1/pods" --header "Authorization: Bearer $RUNPOD_API_KEY" --output pods-after.json
+          remaining=$(jq --arg id "$POD_ID" '[.[] | select(.id == $id)] | length' pods-after.json)
+          test "$remaining" = "0" || { echo 'Exact stale Pod still present after cleanup'; exit 4; }
+          echo "Exact stale staging Pod deleted and explicitly verified absent: $POD_ID"
