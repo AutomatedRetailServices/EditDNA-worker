@@ -129,3 +129,21 @@ def test_natural_mode_uses_same_performance_cleanup_without_sales_requirement():
     refined, _ = refine_takes_with_temporal_context((take,), context)
     assert refined[0].end == 14.0
     assert context.dominant_edit_mode == "natural"
+
+
+def test_post_best_take_trim_can_preserve_logical_attempt_id():
+    take = _take()
+    context = _context(TemporalEvent(
+        "src-1", 12.2, 15.0, "body_reset", 0.96, "reset after completed delivery"
+    ))
+
+    refined, diagnostics = refine_takes_with_temporal_context(
+        (take,),
+        context,
+        preserve_clip_id=True,
+    )
+
+    assert refined[0].clip_id == take.clip_id
+    assert refined[0].end == 12.2
+    assert diagnostics[0]["result_clip_id"] == take.clip_id
+    assert diagnostics[0]["preserved_logical_clip_id"] is True
