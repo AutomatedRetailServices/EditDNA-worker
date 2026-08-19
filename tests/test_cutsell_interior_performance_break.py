@@ -1,3 +1,4 @@
+from cutsell_worker import temporal_editing
 from cutsell_worker.contracts import CandidateTake, MediaSignals, Word
 from cutsell_worker.interior_performance_break import split_interior_performance_breaks
 from cutsell_worker.providers import ProviderStatus
@@ -96,3 +97,21 @@ def test_does_not_split_when_no_safe_word_gap_exists():
     split, diagnostics = split_interior_performance_breaks((take,), context)
     assert split == (take,)
     assert diagnostics == ()
+
+
+def test_post_best_take_refinement_preserves_logical_winner_identity():
+    take = _take()
+    context = _context(
+        TemporalEvent("src", 1.42, 1.49, "hand_motion_reset_candidate", 0.98, "mic drops"),
+        TemporalEvent("src", 1.52, 1.60, "hand_motion_reset_candidate", 0.96, "hand resets"),
+        TemporalEvent("src", 1.48, 1.56, "facial_expression_shift_candidate", 0.80, "delivery breaks"),
+    )
+
+    refined, _ = temporal_editing.refine_takes_with_temporal_context(
+        (take,),
+        context,
+        preserve_clip_id=True,
+    )
+
+    assert len(refined) == 1
+    assert refined[0].clip_id == take.clip_id
