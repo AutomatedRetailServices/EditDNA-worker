@@ -1,0 +1,173 @@
+name: Benchmark 41 Controlled Deploy
+
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - .github/workflows/benchmark41-controlled-deploy.yml
+
+permissions:
+  contents: write
+  actions: write
+
+concurrency:
+  group: cutsell-benchmark41-paid-cycle
+  cancel-in-progress: false
+
+jobs:
+  deploy-and-dispatch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      GH_TOKEN: ${{ github.token }}
+      RUNPOD_API_KEY: ${{ secrets.RUNPOD_API_KEY }}
+      REDIS_URL: ${{ secrets.REDIS_URL }}
+      GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+      RUNPOD_TEMPLATE_NAME: EditDNA-Worker-2
+      IMAGE: ghcr.io/automatedretailservices/cutsell-worker:88e42364d01c58013d5927fc1430413e162a7ef5@sha256:3b8f53e9376fba5173e6a6e09c4ad72aa526bc8f6a78f61f598ce219ddb9beec
+      TARGET_BRANCH: cutsell/mobile-v1-clean
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: cutsell/mobile-v1-clean
+          fetch-depth: 1
+
+      - name: Guard exact PR, branch and immutable worker
+        shell: bash
+        env:
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_HEAD: ${{ github.event.pull_request.head.ref }}
+        run: |
+          set -euo pipefail
+          test "$PR_NUMBER" = "25" || { echo 'Benchmark 41 trigger restricted to PR #25'; exit 2; }
+          test "$PR_HEAD" = "$TARGET_BRANCH" || { echo 'Benchmark 41 trigger restricted to cutsell/mobile-v1-clean'; exit 2; }
+          case "$IMAGE" in *@sha256:*) ;; *) echo 'Worker image is not immutable'; exit 2;; esac
+
+      - name: Validate approved paid-cycle inputs
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "${RUNPOD_API_KEY:-}" || { echo 'RUNPOD_API_KEY missing'; exit 3; }
+          test -n "${REDIS_URL:-}" || { echo 'REDIS_URL missing'; exit 3; }
+          test -n "${GEMINI_API_KEY:-}" || { echo 'GEMINI_API_KEY missing'; exit 3; }
+          echo "::add-mask::$GEMINI_API_KEY"
+
+      - name: Refuse duplicate staging worker
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail --silent --show-error --url "https://rest.runpod.io/v1/pods" --header "Authorization: Bearer $RUNPOD_API_KEY" --output pods-before.json
+          count=$(jq '[.[] | select(.name == "cutsell-staging-worker")] | length' pods-before.json)
+          test "$count" = "0" || { echo 'cutsell-staging-worker already exists; refusing duplicate paid worker'; exit 4; }
+
+      - name: Build safe runtime baseline from existing template
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail --silent --show-error --url "https://rest.runpod.io/v1/templates" --header "Authorization: Bearer $RUNPOD_API_KEY" --output templates.json
+          TEMPLATE=$(jq -c --arg name "$RUNPOD_TEMPLATE_NAME" '[.[] | select(.name == $name)][0]' templates.json)
+          test "$TEMPLATE" != "null" || { echo 'RunPod baseline template not found'; exit 5; }
+          printf '%s' "$TEMPLATE" | jq -c '{ASR_DEVICE:.env.ASR_DEVICE,ASR_ENABLED:.env.ASR_ENABLED,BAD_TAKES_ENABLED:.env.BAD_TAKES_ENABLED,BOUNDARY_REFINER_ENABLED:.env.BOUNDARY_REFINER_ENABLED,BOUNDARY_REFINER_HEAD_STEP_SEC:.env.BOUNDARY_REFINER_HEAD_STEP_SEC,BOUNDARY_REFINER_MIN_DURATION_SEC:.env.BOUNDARY_REFINER_MIN_DURATION_SEC,BOUNDARY_REFINER_TAIL_STEP_SEC:.env.BOUNDARY_REFINER_TAIL_STEP_SEC,FFMPEG_BIN:.env.FFMPEG_BIN,FFPROBE_BIN:.env.FFPROBE_BIN,HEAD_TRIM_SEC:.env.HEAD_TRIM_SEC,PRESIGN_EXPIRES:.env.PRESIGN_EXPIRES,PYTHONPATH:.env.PYTHONPATH,S3_ACL:.env.S3_ACL,S3_BUCKET:.env.S3_BUCKET,S3_PREFIX:.env.S3_PREFIX,TAIL_TRIM_SEC:.env.TAIL_TRIM_SEC,VISION_ENABLED:.env.VISION_ENABLED,VISION_INTERVAL_SEC:.env.VISION_INTERVAL_SEC,VISION_MAX_SAMPLES:.env.VISION_MAX_SAMPLES,VISUAL_BAD_THRESHOLD:.env.VISUAL_BAD_THRESHOLD,WHISPER_DEVICE:.env.WHISPER_DEVICE,WHISPER_MODEL:.env.WHISPER_MODEL,W_FACE:.env.W_FACE,W_VISION:.env.W_VISION,W_VISUAL:.env.W_VISUAL,AWS_ACCESS_KEY_ID:.env.AWS_ACCESS_KEY_ID,AWS_SECRET_ACCESS_KEY:.env.AWS_SECRET_ACCESS_KEY,AWS_REGION:.env.AWS_REGION} | with_entries(select(.value != null and .value != ""))' > safe-template-env.json
+          for key in AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_REGION S3_BUCKET; do
+            value=$(jq -r --arg key "$key" '.[$key] // empty' safe-template-env.json)
+            test -n "$value" || { echo "$key missing from template"; exit 6; }
+            echo "::add-mask::$value"
+          done
+          VOLUME_MOUNT=$(printf '%s' "$TEMPLATE" | jq -r '.volumeMountPath // "/workspace"')
+          echo "VOLUME_MOUNT=$VOLUME_MOUNT" >> "$GITHUB_ENV"
+
+      - name: Create exact benchmark 41 staging GPU worker
+        shell: bash
+        run: |
+          set -euo pipefail
+          START_CMD='python -m rq.cli worker -u "$REDIS_URL" --worker-ttl 14400 cutsell'
+          jq --arg name "cutsell-staging-worker" --arg image "$IMAGE" --arg cmd "$START_CMD" --arg redis "$REDIS_URL" --arg gemini "$GEMINI_API_KEY" --arg mount "$VOLUME_MOUNT" '. + {REDIS_URL:$redis,GEMINI_API_KEY:$gemini,CUTSELL_BRAIN_BACKEND:"runpod_local",CUTSELL_EDITORIAL_MODE:"clean_cut",CUTSELL_ASR_MODEL:"medium",CUTSELL_CLEAN_CUT_JUDGE:"0",CUTSELL_HYBRID_PROVIDER:"google",CUTSELL_HYBRID_LLM_ENABLED:"1",CUTSELL_HYBRID_PRIMARY_MODEL:"gemini-3.5-flash-lite",CUTSELL_HYBRID_ESCALATION_MODEL:"gemini-3.6-flash",CUTSELL_HYBRID_MAX_SESSION_USD:"0.0075",CUTSELL_HYBRID_TEST_BUDGET_USD:"0.50"} | {name:$name,imageName:$image,cloudType:"COMMUNITY",computeType:"GPU",gpuCount:1,gpuTypeIds:["NVIDIA RTX A5000","NVIDIA RTX A4000","NVIDIA L4","NVIDIA A40","NVIDIA RTX A6000","NVIDIA GeForce RTX 3090","NVIDIA GeForce RTX 4090"],gpuTypePriority:"custom",interruptible:false,containerDiskInGb:30,volumeInGb:20,volumeMountPath:$mount,dockerEntrypoint:["bash","-lc"],dockerStartCmd:[$cmd],env:.}' safe-template-env.json > create-pod.json
+          if jq -e '.env | has("OPENAI_API_KEY") or has("EDITDNA_USE_LLM") or has("EDITDNA_LLM_MODEL")' create-pod.json >/dev/null; then
+            echo 'Refusing deployment: forbidden OpenAI/legacy provider key present'; exit 7
+          fi
+          code=$(curl --silent --show-error --write-out '%{http_code}' --request POST --url "https://rest.runpod.io/v1/pods" --header "Authorization: Bearer $RUNPOD_API_KEY" --header "Content-Type: application/json" --data @create-pod.json --output pod.json)
+          rm -f create-pod.json safe-template-env.json
+          test "$code" = "201" || { echo "RunPod create HTTP status: $code"; jq '{error,errors,message}' pod.json || true; exit 8; }
+          POD_ID=$(jq -r '.id // empty' pod.json)
+          test -n "$POD_ID" || { echo 'RunPod returned no Pod id'; exit 8; }
+          echo "POD_ID=$POD_ID" >> "$GITHUB_ENV"
+          jq '{id,name,desiredStatus,imageName,costPerHr,adjustedCostPerHr}' pod.json
+
+      - name: Wait until benchmark 41 RQ worker is ready
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pip install -q 'redis>=5.0' 'rq>=2.6'
+          python - <<'PY'
+          import os, time
+          from datetime import datetime, timezone
+          from redis import Redis
+          from rq import Worker
+          connection = Redis.from_url(os.environ['REDIS_URL'])
+          deadline = time.time() + 600
+          while time.time() < deadline:
+              now = datetime.now(timezone.utc)
+              for worker in Worker.all(connection=connection):
+                  heartbeat = worker.last_heartbeat
+                  if heartbeat is None:
+                      continue
+                  if heartbeat.tzinfo is None:
+                      heartbeat = heartbeat.replace(tzinfo=timezone.utc)
+                  age = (now - heartbeat).total_seconds()
+                  if age <= 30 and worker.get_state() in {'idle','busy'}:
+                      raise SystemExit(0)
+              time.sleep(10)
+          raise SystemExit('Benchmark 41 Pod exists but no fresh RQ worker registered within 10 minutes')
+          PY
+
+      - name: Dispatch exactly one benchmark 41 Gold run
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh run list --repo "$GITHUB_REPOSITORY" --workflow cutsell-unseen-clean-cut-benchmark.yml --event workflow_dispatch --branch "$TARGET_BRANCH" --limit 30 --json databaseId | jq -r '.[].databaseId' | sort -n > before-runs.txt
+          gh workflow run cutsell-unseen-clean-cut-benchmark.yml --repo "$GITHUB_REPOSITORY" --ref "$TARGET_BRANCH" -f approval_token=RUN39 -f pod_id="$POD_ID"
+          BENCHMARK_RUN_ID=""
+          for attempt in $(seq 1 30); do
+            sleep 3
+            gh run list --repo "$GITHUB_REPOSITORY" --workflow cutsell-unseen-clean-cut-benchmark.yml --event workflow_dispatch --branch "$TARGET_BRANCH" --limit 30 --json databaseId | jq -r '.[].databaseId' | sort -n > after-runs.txt
+            BENCHMARK_RUN_ID=$(comm -13 before-runs.txt after-runs.txt | tail -n1)
+            if [ -n "$BENCHMARK_RUN_ID" ]; then break; fi
+          done
+          test -n "$BENCHMARK_RUN_ID" || { echo 'Unable to identify benchmark 41 run'; exit 9; }
+          echo "BENCHMARK_DISPATCHED=1" >> "$GITHUB_ENV"
+          echo "BENCHMARK_RUN_ID=$BENCHMARK_RUN_ID" >> "$GITHUB_ENV"
+
+      - name: Record benchmark 41 handoff
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p ops
+          cat > ops/benchmark41-cycle-status.json <<EOF
+          {
+            "deploy_run_id": ${GITHUB_RUN_ID},
+            "pod_id": "${POD_ID}",
+            "image": "${IMAGE}",
+            "benchmark_run_id": ${BENCHMARK_RUN_ID},
+            "status": "benchmark_dispatched"
+          }
+          EOF
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add ops/benchmark41-cycle-status.json
+          git commit -m "Record benchmark 41 deploy and handoff" || exit 0
+          git push origin HEAD:$TARGET_BRANCH
+
+      - name: Cleanup Pod only if benchmark was not dispatched
+        if: failure()
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ "${BENCHMARK_DISPATCHED:-0}" = "1" ]; then exit 0; fi
+          if [ -z "${POD_ID:-}" ]; then exit 0; fi
+          curl --fail --silent --show-error --url "https://rest.runpod.io/v1/pods" --header "Authorization: Bearer $RUNPOD_API_KEY" --output failure-pods.json
+          name=$(jq -r --arg id "$POD_ID" '[.[] | select(.id == $id)][0].name // empty' failure-pods.json)
+          if [ "$name" = "cutsell-staging-worker" ]; then
+            code=$(curl --silent --show-error --write-out '%{http_code}' --request DELETE --url "https://rest.runpod.io/v1/pods/$POD_ID" --header "Authorization: Bearer $RUNPOD_API_KEY" --output cleanup-delete-response.txt)
+            test "$code" = "204"
+          fi
