@@ -74,3 +74,5 @@ jobs:
           echo "BENCHMARK44_SOURCE_SHA=$SOURCE_SHA" >> "$GITHUB_STEP_SUMMARY"
           echo "BENCHMARK44_IMAGE=$IMAGE@$digest" >> "$GITHUB_STEP_SUMMARY"
           echo "Benchmark 44 immutable image: $IMAGE@$digest"
+
+# controlled trigger: exactly one paid Benchmark 44 image build
