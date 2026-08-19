@@ -51,13 +51,21 @@ def build_compact_editorial_payload(
 
     cleanup_task = session.task == "classify_recording_process_within_single_creator_session"
     task_rules = [
+        "first reconstruct the creator's intended full message/story from source_context before judging individual clips",
+        "treat repeated attempts of the same sentence, paragraph, fact, or idea as one attempt family even when wording changes",
+        "when a later attempt cleanly restates and completes an earlier attempt, prefer the later complete delivery and mark the abandoned/inferior attempt failed rather than preserving both",
+        "a grammatically valid fragment is not automatically usable: failed delivery, restart behavior, physical reset, waiting-for-camera behavior, or an incomplete ending can make it failed",
+        "visual evidence and speech evidence must be fused: strong visual_fumble, reset/disengagement, unnatural expression/gesture, or distraction should materially lower confidence in a take",
         "valid independent audience-facing speech should be keep",
-        "failed means a clear stumble, false start, incomplete attempt, word-search, or an abandoned same-idea retry",
-        "bts means self-talk, recording-process commentary, frustration, self-review, breaking character, or consulting script/notes",
+        "failed means a clear stumble, false start, incomplete attempt, word-search, abandoned same-idea retry, or delivery that cannot form a coherent final take",
+        "bts means self-talk, recording-process commentary, frustration, self-review, breaking character, consulting script/notes, or visibly waiting/resetting between takes",
+        "preserve a complete coherent good delivery even when it is long; do not shorten the story merely because multiple shorter fragments exist",
+        "if a clean later take repeats all meaningful information from an earlier partial take, the earlier partial take should not survive merely to preserve chronology",
         "use whole-source context to distinguish a repeated/abandoned idea from genuinely new information",
         "do not force a winner across different ideas in the same creator session",
     ] if cleanup_task else [
         "return exactly one winner only when the supplied candidates are competing retries and evidence supports one",
+        "compare completeness of the intended idea, delivery quality, and physical performance; a later complete clean retake should beat an earlier partial or visibly failed attempt",
         "independent valid speech may be keep instead of being forced into winner/alternate",
     ]
 
@@ -75,6 +83,7 @@ def build_compact_editorial_payload(
             "never create or alter timestamps",
             "source_context is read-only whole-video context; only supplied candidates may receive labels",
             "reason about each candidate in relation to the full message/story, not only its immediate neighbors",
+            "do not reward a take simply because ASR text is grammatical if the performance evidence shows it is a failed recording attempt",
             "use uncertain when semantic evidence is insufficient",
             *task_rules,
         ],
