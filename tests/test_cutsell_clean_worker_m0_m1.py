@@ -128,8 +128,11 @@ def test_pipeline_collapses_retry_envelope_and_selects_full_delivery_only():
     result = build_flow_b_draft(request, (short, repeat, partial, full))
 
     assert [clip.clip_id for clip in result.draft.selected] == [full.clip_id]
-    assert {clip.clip_id for clip in result.draft.alternates} == {
-        short.clip_id,
-        repeat.clip_id,
-        partial.clip_id,
+    # Failed/restart material may be surfaced as a swap alternate or moved to the
+    # discarded-takes lane by later deterministic cleanup. The product invariant is
+    # that none of those attempts re-enters the final timeline and all remain accounted
+    # for in the editable draft.
+    non_selected_ids = {
+        clip.clip_id for clip in (*result.draft.alternates, *result.draft.discarded)
     }
+    assert non_selected_ids == {short.clip_id, repeat.clip_id, partial.clip_id}
