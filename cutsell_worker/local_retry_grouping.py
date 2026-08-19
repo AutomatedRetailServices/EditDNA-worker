@@ -15,6 +15,8 @@ from __future__ import annotations
 from collections import Counter
 import re
 
+from .take_grouping import retry_similarity
+
 _TOKEN_RE = re.compile(r"[a-z0-9áéíóúñü]+", re.IGNORECASE)
 _STOP = frozenset({
     # English
@@ -89,14 +91,47 @@ def _same_semantic_opening(left: str, right: str, *, width: int = 2) -> bool:
     return a[:width] == b[:width]
 
 
-def _restart_heavy(text: str) -> bool:
+def _adjacent_restart_repetition(text: str) -> bool:
+    """Recognize actual restart structure, not ordinary noun repetition.
+
+    Benchmark 44 showed that merely mentioning the same product noun twice made an
+    otherwise coherent paragraph look ``restart_heavy``.  A recording retry needs much
+    stronger structure: an immediately repeated phrase, or a one-word token repeated at
+    least three times in a row.  Ordinary long-form emphasis remains fail-open.
+    """
+    tokens = _tokens(text)
+    if len(tokens) < 4:
+        return False
+    for width in range(1, min(5, len(tokens) // 2) + 1):
+        span = width * 2
+        for index in range(len(tokens) - span + 1):
+            if tokens[index : index + width] != tokens[index + width : index + span]:
+                continue
+            if width > 1:
+                return True
+            if index + 2 < len(tokens) and tokens[index] == tokens[index + 2]:
+                return True
+    return False
+
+
+def _internal_opening_restart(text: str) -> bool:
+    """Detect a creator restarting the same opening inside one longer attempt."""
     tokens = _content_tokens(text)
+    if len(tokens) < 8:
+        return False
+    opening = tokens[:2]
+    return any(tokens[index : index + 2] == opening for index in range(3, len(tokens) - 1))
+
+
+def _restart_heavy(text: str) -> bool:
+    # Short attempts and explicit recording meta remain weak retry material.  For longer
+    # speech, require structural restart evidence; repeated topic nouns alone are not
+    # enough to sacrifice a paragraph to Best Take.
     if len(_tokens(text)) <= 6:
         return True
     if _META_RE.search(str(text or "")):
         return True
-    counts = Counter(tokens)
-    return any(count >= 2 for count in counts.values())
+    return _adjacent_restart_repetition(text) or _internal_opening_restart(text)
 
 
 def _dominant_weak_group_with_fuller_retry(left_members, right_members) -> bool:
@@ -246,6 +281,149 @@ def _adjacent_reformulated_retries(
     return tuple(normalized), changed
 
 
+def _short_exact_prefix_pair(left, right) -> bool:
+    a = _tokens(left.text)
+    b = _tokens(right.text)
+    if not a or not b:
+        return False
+    short, long = (a, b) if len(a) <= len(b) else (b, a)
+    if not 2 <= len(short) <= 6 or len(long) - len(short) < 3:
+        return False
+    return long[: len(short)] == short
+
+
+def _retry_pair_supported(left, right) -> bool:
+    """Require real retry coverage before two substantive stories share Best Take.
+
+    The local repair passes intentionally search farther than the seed lexical grouper.
+    That reach must not turn a chain of related story paragraphs into one giant retry
+    family.  Two full members therefore need strong bidirectional retry evidence.  A
+    structurally weak false start may attach on lower overlap because it cannot safely
+    become an independent final take, but it is never allowed to bridge two full-story
+    clusters.
+    """
+    if left.source_asset_id != right.source_asset_id:
+        return False
+    if _tokens(left.text) == _tokens(right.text):
+        return True
+    if _short_exact_prefix_pair(left, right):
+        return True
+    if retry_similarity(left.text, right.text) >= 0.90:
+        return True
+
+    shared = _shared_content_strength(left.text, right.text)
+    containment = _content_containment(left.text, right.text)
+    if shared >= 4 and containment >= 0.65:
+        if _same_semantic_opening(left.text, right.text) or containment >= 0.78:
+            return True
+
+    # A broken internal restart can be much less lexically similar to the later clean
+    # delivery.  Permit it to follow a fuller retry only when there is still meaningful
+    # topic overlap; because this path is used only for weak members it cannot merge two
+    # coherent long paragraphs.
+    if (_restart_heavy(left.text) or _restart_heavy(right.text)) and shared >= 3 and containment >= 0.25:
+        return True
+    return False
+
+
+def _split_overbroad_retry_groups(groups, takes):
+    """Undo transitive story chaining while retaining real retries and false starts."""
+    take_map = {take.clip_id: take for take in takes}
+    output = []
+    changed = False
+
+    for raw_group in groups:
+        members = sorted(
+            (take_map[cid] for cid in raw_group if cid in take_map),
+            key=lambda item: (item.source_order, item.start, item.end, item.clip_id),
+        )
+        if len(members) <= 1:
+            if members:
+                output.append((members[0].clip_id,))
+            continue
+
+        substantive = [member for member in members if not _restart_heavy(member.text)]
+        weak = [member for member in members if _restart_heavy(member.text)]
+        clusters: list[list] = []
+
+        # Full deliveries use complete-link clustering.  A related middle paragraph can
+        # no longer serve as a transitive bridge between two different story ideas.
+        for member in substantive:
+            placed = False
+            for cluster in clusters:
+                if all(_retry_pair_supported(member, existing) for existing in cluster):
+                    cluster.append(member)
+                    placed = True
+                    break
+            if not placed:
+                clusters.append([member])
+
+        if not clusters:
+            # All-weak groups are uncommon; still avoid transitive chaining among them.
+            for member in weak:
+                placed = False
+                for cluster in clusters:
+                    if all(_retry_pair_supported(member, existing) for existing in cluster):
+                        cluster.append(member)
+                        placed = True
+                        break
+                if not placed:
+                    clusters.append([member])
+            weak = []
+
+        # Attach weak false starts to the single best-supported substantive family.  They
+        # can be alternates of that family, but never merge two substantive families.
+        for member in weak:
+            candidates = []
+            for index, cluster in enumerate(clusters):
+                supported = [existing for existing in cluster if _retry_pair_supported(member, existing)]
+                if not supported:
+                    continue
+                score = max(
+                    (
+                        _shared_content_strength(member.text, existing.text),
+                        _content_containment(member.text, existing.text),
+                    )
+                    for existing in supported
+                )
+                candidates.append((score, index))
+            if candidates:
+                _, target = max(candidates)
+                clusters[target].append(member)
+            else:
+                clusters.append([member])
+
+        normalized = [
+            tuple(
+                item.clip_id
+                for item in sorted(
+                    cluster,
+                    key=lambda candidate: (
+                        candidate.source_order,
+                        candidate.start,
+                        candidate.end,
+                        candidate.clip_id,
+                    ),
+                )
+            )
+            for cluster in clusters
+            if cluster
+        ]
+        if len(normalized) != 1 or set(normalized[0]) != set(raw_group):
+            changed = True
+        output.extend(normalized)
+
+    output.sort(
+        key=lambda group: (
+            take_map[group[0]].source_order,
+            take_map[group[0]].start,
+            take_map[group[0]].end,
+            group[0],
+        )
+    )
+    return tuple(output), changed
+
+
 def install_local_retry_grouping() -> None:
     from . import take_grouping_provider as grouping
 
@@ -263,6 +441,7 @@ def install_local_retry_grouping() -> None:
         groups, debris_absorbed = grouping._absorb_interstitial_retry_debris(groups, takes)
         groups, serial_envelope = _serial_retry_envelope(groups, takes)
         groups, reformulated = _adjacent_reformulated_retries(groups, takes)
+        groups, story_chain_split = _split_overbroad_retry_groups(groups, takes)
 
         reasons = ["baseline_local"]
         if reconciled:
@@ -275,6 +454,8 @@ def install_local_retry_grouping() -> None:
             reasons.append("serial_retry_envelope_collapsed")
         if reformulated:
             reasons.append("adjacent_reformulated_retries_collapsed")
+        if story_chain_split:
+            reasons.append("overbroad_retry_story_chain_split")
 
         return grouping.TakeGroupingProviderResult(
             groups=groups,
