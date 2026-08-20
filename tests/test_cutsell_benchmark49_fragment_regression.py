@@ -25,7 +25,7 @@ def _take(clip_id, start, end, text, *, complete=True):
     )
 
 
-def test_video02_failed_085_short_fragment_is_removed():
+def test_video02_failed_085_pronoun_collision_fragment_is_removed():
     failed = _take("failed", 149.20, 152.22, "I people It was very funny")
     winner = _take(
         "winner",
@@ -41,7 +41,20 @@ def test_video02_failed_085_short_fragment_is_removed():
 
     assert tuple(t.clip_id for t in kept) == ("winner",)
     assert tuple(t.clip_id for t in removed) == ("failed",)
-    assert diagnostics[0]["reason"] == "semantic_failed_short_fragment"
+    assert diagnostics[0]["reason"] == "semantic_failed_pronoun_collision_fragment"
+
+
+def test_generic_complete_085_failed_short_speech_remains_fail_open():
+    ordinary = _take("ordinary", 0.0, 2.0, "candidate speech number one")
+
+    kept, removed, diagnostics = remove_semantic_fragment_debris(
+        (ordinary,),
+        (("ordinary", "failed", 0.85),),
+    )
+
+    assert tuple(t.clip_id for t in kept) == ("ordinary",)
+    assert removed == ()
+    assert diagnostics == ()
 
 
 def test_short_winner_hook_is_never_removed_by_failed_fragment_rule():
