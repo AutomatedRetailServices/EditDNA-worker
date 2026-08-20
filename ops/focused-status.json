@@ -1,9 +1,20 @@
 {
-  "id": 32419130178,
-  "run_number": 2,
-  "status": "completed",
-  "conclusion": "failure",
-  "head_sha": "7806995b2089b65630c74e707bfa5f9948f1b4d6",
-  "created_at": "2026-08-20T21:23:11Z",
-  "updated_at": "2026-08-20T21:23:29Z"
+  "focused": {
+    "id": 32419130178,
+    "run_number": 2,
+    "status": "completed",
+    "conclusion": "failure",
+    "head_sha": "7806995b2089b65630c74e707bfa5f9948f1b4d6",
+    "created_at": "2026-08-20T21:23:11Z",
+    "updated_at": "2026-08-20T21:23:29Z"
+  },
+  "legacy": {
+    "id": 32414814840,
+    "run_number": 2,
+    "status": "completed",
+    "conclusion": "failure",
+    "head_sha": "aef2ce46c8464f3701799a4c9d7db62e709034e6",
+    "created_at": "2026-08-20T20:34:26Z",
+    "updated_at": "2026-08-20T20:40:26Z"
+  }
 }
