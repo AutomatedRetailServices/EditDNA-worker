@@ -9,7 +9,8 @@ other fail-open guards have finished.
 The pass is deliberately conservative:
 - it only considers Hybrid ``failed`` or ``alternate`` candidates;
 - it requires nearby high-confidence ``winner``/``keep`` peers in the same source;
-- the peers must collectively cover a substantial share of the candidate's content;
+- one peer may directly cover the candidate, or several peers may cover it only when they
+  form one contiguous reconstructed delivery on the same temporal side of the candidate;
 - critical meaning such as negation and numbers must also be preserved by the peers;
 - genuinely unique audience-facing material remains fail-open.
 """
@@ -83,6 +84,69 @@ def _authoritative_peers(
     return tuple(sorted(peers, key=lambda item: (_gap(candidate, item), item.start, item.clip_id)))
 
 
+def _single_peer_cover(candidate: CandidateTake, peers: tuple[CandidateTake, ...]) -> tuple[bool, int, float, str | None]:
+    own = _content(candidate.text)
+    strongest_shared = 0
+    strongest_coverage = 0.0
+    strongest_peer = None
+    for peer in peers:
+        shared = len(own & _content(peer.text))
+        coverage = shared / max(1, len(own))
+        if shared > strongest_shared or (shared == strongest_shared and coverage > strongest_coverage):
+            strongest_shared = shared
+            strongest_coverage = coverage
+            strongest_peer = peer.clip_id
+    if candidate.duration_sec <= 6.0:
+        direct = strongest_shared >= 2 and strongest_coverage >= 0.50
+    else:
+        direct = strongest_shared >= 4 and strongest_coverage >= 0.55
+    return direct, strongest_shared, strongest_coverage, strongest_peer
+
+
+def _same_side_contiguous_chain(
+    candidate: CandidateTake,
+    peers: tuple[CandidateTake, ...],
+    *,
+    maximum_chain_gap_sec: float = 3.0,
+) -> tuple[CandidateTake, ...]:
+    """Return a local peer chain only when it reconstructs one delivery on one side.
+
+    Combining one paragraph before a candidate with another paragraph after it can create
+    artificial lexical coverage and erase unique story.  Multi-peer replacement is valid
+    only when the peers themselves are consecutive fragments of one reconstructed retry,
+    all before or all after the candidate.
+    """
+    before = sorted((p for p in peers if p.end <= candidate.start), key=lambda p: (p.start, p.end))
+    after = sorted((p for p in peers if p.start >= candidate.end), key=lambda p: (p.start, p.end))
+
+    def best_chain(items):
+        best: list[CandidateTake] = []
+        current: list[CandidateTake] = []
+        for peer in items:
+            if not current or peer.start - current[-1].end <= maximum_chain_gap_sec:
+                current.append(peer)
+            else:
+                if len(current) > len(best):
+                    best = list(current)
+                current = [peer]
+        if len(current) > len(best):
+            best = list(current)
+        return tuple(best)
+
+    left = best_chain(before)
+    right = best_chain(after)
+    if len(left) < 2 and len(right) < 2:
+        return ()
+    if len(right) > len(left):
+        return right
+    if len(left) > len(right):
+        return left
+    # Equal length: use the temporally closer chain.
+    left_gap = candidate.start - left[-1].end if left else float("inf")
+    right_gap = right[0].start - candidate.end if right else float("inf")
+    return left if left_gap <= right_gap else right
+
+
 def _covered_by_authoritative_peers(
     candidate: CandidateTake,
     peers: tuple[CandidateTake, ...],
@@ -91,28 +155,54 @@ def _covered_by_authoritative_peers(
     if len(own) < 2 or not peers:
         return False, {}
 
-    # Use at most the four closest authoritative deliveries. This allows a complete idea
-    # to be represented by a winner plus its immediate continuation without letting an
-    # entire later story accidentally erase unique material.
     local = peers[:4]
-    union: set[str] = set()
-    strongest_shared = 0
-    strongest_peer = None
-    for peer in local:
-        peer_content = _content(peer.text)
-        shared = len(own & peer_content)
-        if shared > strongest_shared:
-            strongest_shared = shared
-            strongest_peer = peer.clip_id
-        union.update(peer_content)
+    direct, strongest_shared, strongest_coverage, strongest_peer = _single_peer_cover(candidate, local)
 
+    critical = _critical(candidate.text)
+    all_peer_critical: set[str] = set()
+    for peer in local:
+        all_peer_critical.update(_critical(peer.text))
+
+    if direct:
+        direct_peer = next((p for p in local if p.clip_id == strongest_peer), None)
+        peer_critical = _critical(direct_peer.text) if direct_peer is not None else set()
+        critical_preserved = critical.issubset(peer_critical)
+        return bool(critical_preserved), {
+            "coverage": round(strongest_coverage, 4),
+            "shared_union": strongest_shared,
+            "content_token_count": len(own),
+            "strongest_shared": strongest_shared,
+            "strongest_peer_coverage": round(strongest_coverage, 4),
+            "strongest_peer_clip_id": strongest_peer,
+            "critical_tokens": sorted(critical),
+            "critical_preserved": critical_preserved,
+            "peer_clip_ids": [strongest_peer] if strongest_peer else [],
+            "coverage_mode": "single_authoritative_peer",
+        }
+
+    chain = _same_side_contiguous_chain(candidate, local)
+    if not chain:
+        return False, {
+            "coverage": 0.0,
+            "shared_union": 0,
+            "content_token_count": len(own),
+            "strongest_shared": strongest_shared,
+            "strongest_peer_coverage": round(strongest_coverage, 4),
+            "strongest_peer_clip_id": strongest_peer,
+            "critical_tokens": sorted(critical),
+            "critical_preserved": False,
+            "peer_clip_ids": [peer.clip_id for peer in local],
+            "coverage_mode": "rejected_diffuse_multi_peer",
+        }
+
+    union: set[str] = set()
+    chain_critical: set[str] = set()
+    for peer in chain:
+        union.update(_content(peer.text))
+        chain_critical.update(_critical(peer.text))
     shared_union = len(own & union)
     coverage = shared_union / max(1, len(own))
-    critical = _critical(candidate.text)
-    peer_critical: set[str] = set()
-    for peer in local:
-        peer_critical.update(_critical(peer.text))
-    critical_preserved = critical.issubset(peer_critical)
+    critical_preserved = critical.issubset(chain_critical)
 
     if candidate.duration_sec <= 6.0:
         enough = shared_union >= 2 and coverage >= 0.50
@@ -121,18 +211,17 @@ def _covered_by_authoritative_peers(
     else:
         enough = shared_union >= 5 and coverage >= 0.45
 
-    # Require at least one direct relationship, not just diffuse topic overlap across
-    # several unrelated paragraphs.
-    direct = strongest_shared >= (2 if candidate.duration_sec <= 6.0 else 3)
-    return bool(enough and direct and critical_preserved), {
+    return bool(enough and critical_preserved), {
         "coverage": round(coverage, 4),
         "shared_union": shared_union,
         "content_token_count": len(own),
         "strongest_shared": strongest_shared,
+        "strongest_peer_coverage": round(strongest_coverage, 4),
         "strongest_peer_clip_id": strongest_peer,
         "critical_tokens": sorted(critical),
         "critical_preserved": critical_preserved,
-        "peer_clip_ids": [peer.clip_id for peer in local],
+        "peer_clip_ids": [peer.clip_id for peer in chain],
+        "coverage_mode": "same_side_contiguous_chain",
     }
 
 
