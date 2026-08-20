@@ -2,28 +2,28 @@
   "build": {
     "id": 32317494085,
     "run_number": 1,
-    "status": "in_progress",
-    "conclusion": null,
+    "status": "completed",
+    "conclusion": "success",
     "head_sha": "5e1f1f4194ecb8681f357f11e76820b0119e32e6",
     "created_at": "2026-08-20T00:29:18Z",
-    "updated_at": "2026-08-20T00:29:22Z"
+    "updated_at": "2026-08-20T00:34:37Z"
   },
   "deploy": {
     "id": 32317628610,
     "run_number": 1,
-    "status": "in_progress",
-    "conclusion": null,
+    "status": "completed",
+    "conclusion": "failure",
     "head_sha": "101ce3e059b95b61cb52e80a7cf80fcef8919a07",
     "created_at": "2026-08-20T00:31:21Z",
-    "updated_at": "2026-08-20T00:31:25Z"
+    "updated_at": "2026-08-20T00:37:41Z"
   },
   "benchmark": {
-    "id": 32303785398,
-    "run_number": 50,
-    "status": "completed",
-    "conclusion": "success",
-    "head_sha": "3e715c01f8e1ac7e9d7e9685c6cc0d5e5dfc52d6",
-    "created_at": "2026-08-19T21:25:22Z",
-    "updated_at": "2026-08-19T22:03:57Z"
+    "id": 32318014133,
+    "run_number": 51,
+    "status": "in_progress",
+    "conclusion": null,
+    "head_sha": "7a7c8d26475e6dfed36dd4362504fc88321df00e",
+    "created_at": "2026-08-20T00:37:36Z",
+    "updated_at": "2026-08-20T00:37:41Z"
   }
 }
