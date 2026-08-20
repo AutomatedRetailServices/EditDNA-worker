@@ -28,7 +28,7 @@ _STOP = frozenset({
     "para", "pero", "por", "porque", "que", "se", "si", "su", "sus", "un", "una",
     "unos", "unas", "y", "yo",
 })
-_CRITICAL = frozenset({"no", "not", "never", "nunca", "sin", "without"})
+_NEGATIONS = frozenset({"no", "not", "never", "nunca", "sin", "without"})
 
 
 def _tokens(text: str) -> tuple[str, ...]:
@@ -39,20 +39,12 @@ def _content(text: str) -> set[str]:
     return {token for token in _tokens(text) if len(token) >= 3 and token not in _STOP}
 
 
-def _critical(text: str) -> set[str]:
-    return {
-        token for token in _tokens(text)
-        if token in _CRITICAL or any(ch.isdigit() for ch in token)
-    }
+def _negations(text: str) -> set[str]:
+    return {token for token in _tokens(text) if token in _NEGATIONS}
 
 
-def _coverage(subject_text: str, peer_text: str) -> tuple[int, float]:
-    subject = _content(subject_text)
-    peer = _content(peer_text)
-    if not subject:
-        return 0, 0.0
-    shared = len(subject & peer)
-    return shared, shared / max(1, len(subject))
+def _numbers(text: str) -> set[str]:
+    return {token for token in _tokens(text) if any(ch.isdigit() for ch in token)}
 
 
 def _same_retry_idea(left_text: str, right_text: str) -> bool:
@@ -63,11 +55,20 @@ def _same_retry_idea(left_text: str, right_text: str) -> bool:
     shared = len(left & right)
     left_coverage = shared / len(left)
     right_coverage = shared / len(right)
-    if not _critical(left_text).issubset(_critical(right_text) | _critical(left_text)):
+
+    # Direct full-delivery merging is intentionally strict.  Two paragraphs may share a
+    # setup while adding different facts (e.g. acne+treatment vs acne+dry skin); those are
+    # story continuations, not retries.  Numeric facts and literal negation must also line
+    # up before two complete deliveries can compete in Best Take.
+    if _numbers(left_text) != _numbers(right_text):
         return False
-    # Full reformulations need substantial overlap in both directions.  This is stricter
-    # than broad topic similarity and is intentionally not a sales/story clustering rule.
-    return shared >= 5 and min(left_coverage, right_coverage) >= 0.38 and max(left_coverage, right_coverage) >= 0.55
+    if _negations(left_text) != _negations(right_text):
+        return False
+    return bool(
+        shared >= 6
+        and min(left_coverage, right_coverage) >= 0.60
+        and max(left_coverage, right_coverage) >= 0.72
+    )
 
 
 def _group_members(group, take_map):
@@ -137,12 +138,18 @@ def _variant_chain_matches_complete(
     shared = len(complete_content & combined_content)
     complete_coverage = shared / len(complete_content)
     combined_coverage = shared / len(combined_content)
-    critical_ok = _critical(complete.text).issubset(_critical(combined)) and _critical(combined).issubset(_critical(complete.text))
+
+    # A reformulation can flip literal wording around negation ("no creo X" vs a positive
+    # restatement of the same conclusion), so the split-chain path preserves hard numeric
+    # facts but does not require identical negation tokens.  This remains safe because the
+    # lexical/factual coverage thresholds are high and the prefix+continuation must be
+    # physically adjacent.
+    numbers_ok = _numbers(complete.text) == _numbers(combined)
     return bool(
         shared >= 7
-        and complete_coverage >= 0.45
+        and complete_coverage >= 0.43
         and combined_coverage >= 0.38
-        and critical_ok
+        and numbers_ok
     )
 
 
