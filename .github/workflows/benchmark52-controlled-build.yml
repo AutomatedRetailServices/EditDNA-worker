@@ -296,3 +296,5 @@ jobs:
           remaining=$(jq --arg id "$POD_ID" '[.[] | select(.id == $id)] | length' cleanup-after.json)
           test "$remaining" = "0" || { echo 'Focused Pod still present after cleanup'; exit 12; }
           echo "Focused Pod deleted and verified absent: $POD_ID"
+
+# trigger focused 00-02-03 orchestrator under standing authorization
