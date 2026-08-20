@@ -168,10 +168,9 @@ def test_unique_long_alternate_without_recording_failure_remains_fail_open():
     assert repaired.deleted == ()
 
 
-def test_video03_failed_tail_rolls_back_to_last_complete_parallel_clause():
+def test_video03_complete_delivery_is_preserved_before_failed_tail():
     text = "esta crema es mágica tiene unos componentes que de verdad te protegen te reparan la barrera"
     winner = _take("winner", 7.85, 45.35, text)
-    # Make word timing reach the real edit boundary so the rollback end is observable.
     winner = CandidateTake(
         clip_id=winner.clip_id,
         source_asset_id=winner.source_asset_id,
@@ -201,7 +200,7 @@ def test_video03_failed_tail_rolls_back_to_last_complete_parallel_clause():
 
     assert len(repaired.kept) == 1
     repaired_winner = repaired.kept[0]
-    assert repaired_winner.text.endswith("te protegen")
-    assert "te reparan la barrera" not in repaired_winner.text
-    assert repaired_winner.end < winner.end
+    assert repaired_winner.text == winner.text
+    assert repaired_winner.text.endswith("te reparan la barrera")
+    assert repaired_winner.end == winner.end
     assert {t.clip_id for t in repaired.deleted} == {"tail"}
