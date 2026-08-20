@@ -31,4 +31,4 @@ jobs:
           git commit -m "Record focused worker build status" || exit 0
           git pull --rebase origin cutsell/mobile-v1-clean
           git push origin HEAD:cutsell/mobile-v1-clean
-# refresh direct-rq orchestrator status now
+# refresh after pod-adoption fix
