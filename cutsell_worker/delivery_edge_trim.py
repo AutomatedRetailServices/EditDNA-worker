@@ -61,12 +61,13 @@ def _edge_cut_evidence(
     end: float,
     context: WholeVideoContext | None,
 ) -> tuple[bool, tuple[str, ...], bool]:
-    """Return (confirmed, evidence, safe_for_micro_slack).
+    """Return ``(confirmed, evidence, safe_for_micro_slack)``.
 
     ``safe_for_micro_slack`` is intentionally stricter than ordinary edge evidence.
-    It targets the creator cadence where a handheld mic/hand drops or resets immediately
-    after speech (or rises immediately before it). A single normal gesture must not
-    create a frame-tight cut.
+    It targets a proven non-speech delivery boundary where the creator has already
+    completed the thought and visibly exits that delivery: hand/mic reset, strong body
+    reset, or a combined camera/face break. A normal in-sentence gesture or glance must
+    not create a frame-tight cut.
     """
     events = tuple(
         event for event in _source_events(context, take.source_asset_id)
@@ -80,7 +81,9 @@ def _edge_cut_evidence(
     if authoritative:
         strongest = max(authoritative, key=lambda item: item.confidence)
         reasons.append(f"event:{_kind(strongest.kind)}:{strongest.confidence:.2f}")
-        return True, tuple(reasons), False
+        # Explicit recording-process events are safe at a word-proven edge. This lets
+        # short dead-air/retry-reset tails close tightly instead of requiring 320 ms.
+        return True, tuple(reasons), True
 
     body = [
         event for event in events
@@ -112,16 +115,22 @@ def _edge_cut_evidence(
             reasons.append(f"expression_break:{max(item.confidence for item in face):.2f}")
         return True, tuple(reasons), True
 
-    # Body reset alone is strong enough at an ordinary proven non-speech edge. A
-    # face/camera break needs both families so a normal glance or expression does not
-    # create a cut.
+    # A very strong body reset immediately after the last spoken word is itself a
+    # delivery-boundary signal in talking-head footage. Mark it micro-safe so 120–320 ms
+    # of visible reset/mueca does not survive merely because it is shorter than the
+    # ordinary slack threshold.
     if body:
         reasons.append(f"body_reset:{max(item.confidence for item in body):.2f}")
-        return True, tuple(reasons), False
+        return True, tuple(reasons), True
+
+    # Camera disengagement plus facial-expression shift is the other common audiovisual
+    # signature of "the sentence is over". Requiring both families keeps ordinary eye
+    # movement or expression from becoming an edit point, while still allowing a tight
+    # cut when the creator visibly drops out of the delivery.
     if camera and face:
         reasons.append(f"camera_disengagement:{max(item.confidence for item in camera):.2f}")
         reasons.append(f"expression_break:{max(item.confidence for item in face):.2f}")
-        return True, tuple(reasons), False
+        return True, tuple(reasons), True
     return False, (), False
 
 
