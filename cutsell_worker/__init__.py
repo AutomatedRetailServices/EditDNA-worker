@@ -40,6 +40,7 @@ from .retry_group_integrity import install_retry_group_integrity
 from .attempt_boundary_integrity import install_attempt_boundary_integrity
 from .final_sibling_grouping import install_final_sibling_grouping
 from .session_grouping_bridge import install_session_grouping_bridge
+from .global_session_sibling_bridge import install_global_session_sibling_bridge
 from .selection_integrity import install_selection_integrity
 from .semantic_best_take_integrity import install_semantic_best_take_integrity
 
@@ -78,6 +79,7 @@ install_retry_group_integrity()
 install_attempt_boundary_integrity()
 install_final_sibling_grouping()
 install_session_grouping_bridge()
+install_global_session_sibling_bridge()
 install_selection_integrity()
 install_semantic_best_take_integrity()
 
