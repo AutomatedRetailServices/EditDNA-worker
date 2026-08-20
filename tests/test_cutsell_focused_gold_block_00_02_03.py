@@ -1,5 +1,6 @@
 from cutsell_worker.contracts import CandidateTake, MediaSignals, Word
 from cutsell_worker.hybrid_cross_group_retry_integrity import collapse_cross_group_semantic_retries
+from cutsell_worker.failed_prefix_completion_rescue import rescue_failed_completion_prefixes
 
 
 def _words(text, start=0.0, step=0.2):
@@ -103,3 +104,32 @@ def test_video00_loser_can_be_replaced_by_same_side_winner_plus_continuation_cha
         item.get("clip_id") == "loser" and item.get("coverage_mode") == "same_side_contiguous_chain"
         for item in diagnostics
     )
+
+
+def test_video03_rescues_la_barrera_cutanea_and_drops_failed_tail():
+    previous = _take(
+        "previous",
+        26.33,
+        42.39,
+        "a mí me sorprende la capacidad que tiene el cuerpo la piel en específico de recuperarse pero más me sigue sorprendiendo estos productos que son mágicos esta crema es mágica tiene unos componentes que de verdad te protegen te reparan",
+    )
+    failed = _take(
+        "failed",
+        44.33,
+        47.67,
+        "la barrera cutánea te la te hace como",
+        complete=False,
+    )
+
+    kept, diagnostics = rescue_failed_completion_prefixes(
+        (previous,),
+        (failed,),
+        (("failed", "failed", 0.95),),
+    )
+
+    rescued = [take for take in kept if take.clip_id.endswith("_completion_prefix")]
+    assert len(rescued) == 1
+    assert rescued[0].text == "la barrera cutánea"
+    assert rescued[0].end == failed.words[2].end
+    assert "te la te hace como" not in rescued[0].text
+    assert diagnostics[0]["reason"] == "failed_tail_clean_completion_prefix_before_collision"
