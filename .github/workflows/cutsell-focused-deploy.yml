@@ -1,5 +1,5 @@
 name: CutSell Focused Deploy
-run-name: Focused 00-02-03 deploy and single dispatch
+run-name: Focused 00-02-03 end-to-end benchmark
 
 on:
   push:
@@ -10,25 +10,25 @@ on:
 
 permissions:
   contents: read
-  actions: write
 
 env:
   RUNPOD_API_KEY: ${{ secrets.RUNPOD_API_KEY }}
   REDIS_URL: ${{ secrets.REDIS_URL }}
   GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-  GH_TOKEN: ${{ github.token }}
   SOURCE_SHA: b02cec5afe2087b4de59747c027098b8fdebd8d7
   IMAGE_REPO: ghcr.io/automatedretailservices/cutsell-worker
   RUNPOD_TEMPLATE_NAME: EditDNA-Worker-2
   POD_ID: ''
-  DISPATCHED: '0'
 
 jobs:
-  focused-deploy:
+  focused-benchmark:
     runs-on: ubuntu-latest
-    timeout-minutes: 40
+    timeout-minutes: 90
     steps:
       - uses: actions/checkout@v4
+
+      - name: Install orchestration clients
+        run: python -m pip install -q 'redis>=5.0' 'rq>=2.6' 'boto3>=1.34'
 
       - name: Resolve immutable image
         shell: bash
@@ -58,7 +58,6 @@ jobs:
       - name: Snapshot current RQ workers
         shell: bash
         run: |
-          python -m pip install -q 'redis>=5.0' 'rq>=2.6'
           python - <<'PY'
           import json, os
           from redis import Redis
@@ -67,7 +66,7 @@ jobs:
           json.dump(sorted(w.name for w in Worker.all(connection=c)), open('rq-before.json','w'))
           PY
 
-      - name: Build safe Pod payload
+      - name: Build safe Pod payload and load S3 credentials
         shell: bash
         run: |
           set -euo pipefail
@@ -79,6 +78,7 @@ jobs:
             value=$(jq -r --arg key "$key" '.[$key] // empty' safe-env.json)
             test -n "$value"
             echo "::add-mask::$value"
+            echo "$key=$value" >> "$GITHUB_ENV"
           done
           mount=$(printf '%s' "$TEMPLATE" | jq -r '.volumeMountPath // "/workspace"')
           jq --arg image "$IMMUTABLE_IMAGE" --arg redis "$REDIS_URL" --arg gemini "$GEMINI_API_KEY" --arg mount "$mount" '. + {REDIS_URL:$redis,GEMINI_API_KEY:$gemini,CUTSELL_BRAIN_BACKEND:"runpod_local",CUTSELL_EDITORIAL_MODE:"clean_cut",CUTSELL_ASR_MODEL:"medium",CUTSELL_CLEAN_CUT_JUDGE:"0",CUTSELL_HYBRID_PROVIDER:"google",CUTSELL_HYBRID_LLM_ENABLED:"1",CUTSELL_HYBRID_PRIMARY_MODEL:"gemini-3.5-flash-lite",CUTSELL_HYBRID_ESCALATION_MODEL:"gemini-3.6-flash",CUTSELL_HYBRID_MAX_SESSION_USD:"0.0075",CUTSELL_HYBRID_TEST_BUDGET_USD:"0.20"} | {name:"cutsell-staging-worker",imageName:$image,cloudType:"COMMUNITY",computeType:"GPU",gpuCount:1,gpuTypeIds:["NVIDIA RTX A5000","NVIDIA RTX A4000","NVIDIA L4","NVIDIA A40","NVIDIA RTX A6000","NVIDIA GeForce RTX 3090","NVIDIA GeForce RTX 4090"],gpuTypePriority:"custom",interruptible:false,containerDiskInGb:30,volumeInGb:20,volumeMountPath:$mount,env:.}' safe-env.json > pod-create.json
@@ -122,19 +122,120 @@ jobs:
           raise SystemExit('Fresh focused worker not found')
           PY
 
-      - name: Dispatch focused benchmark once
+      - name: Enqueue exact focused 00-02-03 benchmark
+        id: enqueue
         shell: bash
         run: |
           set -euo pipefail
-          jq -n --arg ref "cutsell/mobile-v1-clean" --arg pod "$POD_ID" '{ref:$ref,inputs:{approval_token:"FOCUSED3",pod_id:$pod}}' > dispatch.json
-          code=$(curl --silent --show-error --write-out '%{http_code}' --request POST --url "https://api.github.com/repos/$GITHUB_REPOSITORY/actions/workflows/cutsell-focused-clean-cut-benchmark.yml/dispatches" --header "Authorization: Bearer $GH_TOKEN" --header "Accept: application/vnd.github+json" --header "X-GitHub-Api-Version: 2022-11-28" --header "Content-Type: application/json" --data @dispatch.json --output dispatch-response.txt)
-          test "$code" = "204" || { cat dispatch-response.txt; exit 10; }
-          echo "DISPATCHED=1" >> "$GITHUB_ENV"
-          echo "FOCUSED_DISPATCHED=1"
+          python - <<'PY'
+          import os, uuid
+          from redis import Redis
+          from rq import Queue
+          keys=[
+            'Editdna longform validation/VIDEO-2026-07-30-09-18-03.mp4',
+            'Editdna longform validation/VIDEO-2026-07-30-09-24-13.mp4',
+            'Editdna longform validation/VIDEO-2026-07-30-10-22-46.mp4',
+          ]
+          payload={
+            'benchmark_id':'focused-00-02-03-'+uuid.uuid4().hex[:10],
+            'source_prefix':'Editdna longform validation/',
+            'source_keys':keys,
+            'expected_external_brain_calls_enabled':True,
+          }
+          c=Redis.from_url(os.environ['REDIS_URL'])
+          q=Queue('cutsell',connection=c)
+          job=q.enqueue('cutsell_worker.focused_validation_job.run_focused_clean_cut_benchmark',payload,job_timeout=5400,result_ttl=86400,failure_ttl=86400)
+          print('FOCUSED_JOB_ID='+job.id)
+          with open(os.environ['GITHUB_OUTPUT'],'a') as f:
+              f.write('job_id='+job.id+'\n')
+          PY
 
-      - name: Cleanup Pod if deploy fails before dispatch
-        if: ${{ failure() && env.POD_ID != '' && env.DISPATCHED != '1' }}
+      - name: Wait for focused benchmark
+        env:
+          JOB_ID: ${{ steps.enqueue.outputs.job_id }}
         shell: bash
         run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json, os, time
+          from redis import Redis
+          from rq.job import Job
+          c=Redis.from_url(os.environ['REDIS_URL'])
+          j=Job.fetch(os.environ['JOB_ID'],connection=c)
+          end=time.time()+5100
+          last=None
+          while time.time()<end:
+              status=j.get_status(refresh=True)
+              value=getattr(status,'value',str(status))
+              snap=(value,j.meta.get('stage'),j.meta.get('progress_percent'),j.meta.get('current_source'))
+              if snap!=last:
+                  print(json.dumps({'status':value,'stage':snap[1],'progress_percent':snap[2],'current_source':snap[3]},ensure_ascii=False))
+                  last=snap
+              if value=='finished':
+                  r=j.result
+                  if not isinstance(r,dict): raise SystemExit('invalid focused result')
+                  if r.get('dataset_role')!='clean_cut_gold_raw_focused': raise SystemExit('wrong dataset role')
+                  if r.get('source_count')!=3: raise SystemExit('wrong focused source count')
+                  json.dump(r,open('focused-result.json','w'),ensure_ascii=False,indent=2)
+                  break
+              if value in {'failed','stopped','canceled'}:
+                  print(j.exc_info or 'focused benchmark failed')
+                  raise SystemExit(value)
+              time.sleep(15)
+          else:
+              raise SystemExit('focused benchmark timed out')
+          PY
+
+      - name: Download focused report and previews
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p focused-previews
+          python - <<'PY'
+          import json, os
+          from pathlib import Path
+          from urllib.parse import urlparse
+          import boto3
+          r=json.load(open('focused-result.json'))
+          s3=boto3.client('s3',region_name=os.environ.get('AWS_REGION') or 'us-east-1')
+          def parts(uri):
+              p=urlparse(uri); return p.netloc,p.path.lstrip('/')
+          b,k=parts(r['report_uri'])
+          s3.download_file(b,k,'focused-report.json')
+          for uri in r.get('preview_uris') or []:
+              b,k=parts(uri)
+              s3.download_file(b,k,str(Path('focused-previews')/Path(k).name))
+          print(json.dumps(r,ensure_ascii=False,indent=2))
+          PY
+
+      - name: Upload focused report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cutsell-focused-00-02-03-report-${{ github.sha }}
+          path: focused-report.json
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: Upload focused previews
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cutsell-focused-00-02-03-previews-${{ github.sha }}
+          path: focused-previews/*.mp4
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: Always terminate exact staging Pod
+        if: always() && env.POD_ID != ''
+        shell: bash
+        run: |
+          set -euo pipefail
           code=$(curl --silent --show-error --write-out '%{http_code}' --request DELETE --url "https://rest.runpod.io/v1/pods/$POD_ID" --header "Authorization: Bearer $RUNPOD_API_KEY" --output cleanup.txt)
+          echo "Focused cleanup status: $code"
           test "$code" = "204" || test "$code" = "404"
+          sleep 2
+          curl --fail --silent --show-error --url "https://rest.runpod.io/v1/pods" --header "Authorization: Bearer $RUNPOD_API_KEY" --output pods-after.json
+          remaining=$(jq --arg id "$POD_ID" '[.[] | select(.id == $id)] | length' pods-after.json)
+          test "$remaining" = "0"
+          echo "Focused Pod deleted and verified absent: $POD_ID"
