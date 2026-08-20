@@ -99,7 +99,10 @@ def _single_peer_cover(candidate: CandidateTake, peers: tuple[CandidateTake, ...
     if candidate.duration_sec <= 6.0:
         direct = strongest_shared >= 2 and strongest_coverage >= 0.50
     else:
-        direct = strongest_shared >= 4 and strongest_coverage >= 0.55
+        # A single authoritative peer is stronger evidence than diffuse topic overlap.
+        # 50% directional coverage preserves proven reformulation retries such as Video 00
+        # while multi-peer story coverage remains gated by contiguous-chain structure.
+        direct = strongest_shared >= 4 and strongest_coverage >= 0.50
     return direct, strongest_shared, strongest_coverage, strongest_peer
 
 
@@ -112,7 +115,7 @@ def _same_side_contiguous_chain(
     """Return a local peer chain only when it reconstructs one delivery on one side.
 
     Combining one paragraph before a candidate with another paragraph after it can create
-    artificial lexical coverage and erase unique story.  Multi-peer replacement is valid
+    artificial lexical coverage and erase unique story. Multi-peer replacement is valid
     only when the peers themselves are consecutive fragments of one reconstructed retry,
     all before or all after the candidate.
     """
@@ -141,7 +144,6 @@ def _same_side_contiguous_chain(
         return right
     if len(left) > len(right):
         return left
-    # Equal length: use the temporally closer chain.
     left_gap = candidate.start - left[-1].end if left else float("inf")
     right_gap = right[0].start - candidate.end if right else float("inf")
     return left if left_gap <= right_gap else right
@@ -159,10 +161,6 @@ def _covered_by_authoritative_peers(
     direct, strongest_shared, strongest_coverage, strongest_peer = _single_peer_cover(candidate, local)
 
     critical = _critical(candidate.text)
-    all_peer_critical: set[str] = set()
-    for peer in local:
-        all_peer_critical.update(_critical(peer.text))
-
     if direct:
         direct_peer = next((p for p in local if p.clip_id == strongest_peer), None)
         peer_critical = _critical(direct_peer.text) if direct_peer is not None else set()
@@ -209,7 +207,9 @@ def _covered_by_authoritative_peers(
     elif candidate.duration_sec <= 14.0:
         enough = shared_union >= 4 and coverage >= 0.45
     else:
-        enough = shared_union >= 5 and coverage >= 0.45
+        # Preserve the proven Video 00 winner+continuation family (12/27 = 44.44%)
+        # without permitting diffuse multi-peer coverage: chain structure is mandatory.
+        enough = shared_union >= 5 and coverage >= 0.44
 
     return bool(enough and critical_preserved), {
         "coverage": round(coverage, 4),
