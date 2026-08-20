@@ -25,6 +25,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          # Probe refresh: capture the latest Benchmark 49 state after controlled dispatch.
           api="https://api.github.com/repos/$GITHUB_REPOSITORY/actions/workflows"
           curl --fail --silent --show-error "$api/benchmark49-controlled-build.yml/runs?event=push&per_page=5" -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github+json" > build.json
           curl --fail --silent --show-error "$api/benchmark49-controlled-deploy-dispatch.yml/runs?event=push&per_page=5" -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github+json" > deploy.json
