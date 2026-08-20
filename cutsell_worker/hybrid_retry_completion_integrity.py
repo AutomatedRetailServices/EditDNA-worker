@@ -1,14 +1,14 @@
 """Conservative post-Hybrid integrity for cross-group retries and broken final clauses.
 
 Hybrid judges bounded creator sessions, so it can recognize retries that deterministic
-TakeGroup boundaries missed.  This pass uses that semantic evidence only when it is
-corroborated by direct lexical coverage and/or recording-process evidence.  It never
+TakeGroup boundaries missed. This pass uses that semantic evidence only when it is
+corroborated by direct lexical coverage and/or recording-process evidence. It never
 invents a retry from topic similarity alone.
 
-A second narrow repair prevents a retained winner from ending on a visibly broken
-parallel clause when the immediately following short suffix is already proven failed.
-Instead of restoring the failed suffix, it rolls the winner back to the preceding clean
-parallel clause at a real word boundary.
+A second narrow repair may roll back a genuinely incomplete retained clause when the
+immediately following short suffix is already proven failed. A retained delivery that is
+already marked as a complete idea is protected: the failed suffix may be removed, but the
+completed delivery itself must not be shortened.
 """
 from __future__ import annotations
 
@@ -83,19 +83,13 @@ def _same_opening(left: CandidateTake, right: CandidateTake) -> bool:
 
 
 def _local_failure(take: CandidateTake, context) -> bool:
-    # Reuse the exact Watch+Listen corroboration already used by Hybrid deletion.
     from .hybrid_session_cleanup import _failed_local_evidence
 
     failed, _ = _failed_local_evidence(take, context)
     return bool(failed)
 
 
-def _safe_failed_retry(
-    take: CandidateTake,
-    peers: tuple[CandidateTake, ...],
-    semantic: dict[str, tuple[str, float]],
-    context,
-) -> CandidateTake | None:
+def _safe_failed_retry(take, peers, semantic, context):
     label, confidence = semantic.get(take.clip_id, ("", 0.0))
     if label not in {"failed", "bts"} or confidence < 0.78 or not _local_failure(take, context):
         return None
@@ -122,12 +116,7 @@ def _safe_failed_retry(
     return best[-1]
 
 
-def _safe_short_alternate_debris(
-    take: CandidateTake,
-    previous: CandidateTake | None,
-    following: CandidateTake | None,
-    semantic: dict[str, tuple[str, float]],
-) -> bool:
+def _safe_short_alternate_debris(take, previous, following, semantic):
     label, confidence = semantic.get(take.clip_id, ("", 0.0))
     content = _content(take.text)
     if label != "alternate" or confidence < 0.74:
@@ -145,24 +134,15 @@ def _safe_short_alternate_debris(
     if _shared(take, previous) < 1 or _shared(take, following) < 1:
         return False
     neighbor_critical = _critical(previous.text) | _critical(following.text)
-    if not _critical(take.text).issubset(neighbor_critical):
-        return False
-    return True
+    return _critical(take.text).issubset(neighbor_critical)
 
 
-def _safe_full_alternate_retry(
-    take: CandidateTake,
-    ordered: tuple[CandidateTake, ...],
-    index: int,
-    semantic: dict[str, tuple[str, float]],
-    context,
-) -> CandidateTake | None:
+def _safe_full_alternate_retry(take, ordered, index, semantic, context):
     label, confidence = semantic.get(take.clip_id, ("", 0.0))
     if label != "alternate" or confidence < 0.70 or take.duration_sec <= 6.0:
         return None
     if not _local_failure(take, context):
         return None
-
     winners = []
     for candidate in ordered:
         if candidate.clip_id == take.clip_id or _gap(take, candidate) > 30.0:
@@ -175,10 +155,6 @@ def _safe_full_alternate_retry(
     winner = winners[0]
     if _coverage(take, (winner,)) >= 0.45:
         return winner
-
-    # A winner may itself be split at a long-form pause while ending on a grammatical
-    # bridge (e.g. "... de los" + "cánceres ...").  Count only the immediate continuation,
-    # never arbitrary later story paragraphs, when proving alternate coverage.
     try:
         winner_index = ordered.index(winner)
     except ValueError:
@@ -198,17 +174,12 @@ def _safe_full_alternate_retry(
     return None
 
 
-def _trim_parallel_clause_before_failed_tail(
-    take: CandidateTake,
-    failed_tail: CandidateTake,
-) -> CandidateTake | None:
-    """Roll back only a broken final parallel clause to the prior clean clause.
-
-    This is deliberately narrower than generic punctuation repair.  It activates only
-    when Hybrid has already proven the immediate suffix failed, and only when the end of
-    the retained take contains a repeated short pronoun/subject marker introducing two
-    parallel clauses ("... te protegen te reparan ...").
-    """
+def _trim_parallel_clause_before_failed_tail(take: CandidateTake, failed_tail: CandidateTake) -> CandidateTake | None:
+    """Roll back only a genuinely incomplete parallel clause before a proven failed tail."""
+    # A complete delivery is authoritative. The failed suffix can be discarded, but we
+    # must not amputate words from speech already classified as a complete idea.
+    if take.complete_idea:
+        return None
     if _SENTENCE_END_RE.search(str(take.text or "").strip()):
         return None
     words = tuple(take.words)
@@ -231,7 +202,7 @@ def _trim_parallel_clause_before_failed_tail(
         candidates.append((second, first, token))
     if not candidates:
         return None
-    second, _, marker = max(candidates)
+    second, _, _ = max(candidates)
     kept_words = words[:second]
     if len(kept_words) < 6 or kept_words[-1].end <= take.start:
         return None
@@ -249,10 +220,8 @@ def _trim_parallel_clause_before_failed_tail(
 
 
 def apply_hybrid_retry_completion_integrity(result, source_takes, context=None):
-    """Return a HybridSessionCleanupResult with only strongly proven extra repairs."""
     if not result.kept or not result.semantic_decisions:
         return result
-
     source_tuple = tuple(sorted(source_takes, key=lambda item: (item.source_order, item.start, item.end, item.clip_id)))
     semantic = {str(cid): (str(label), float(conf)) for cid, label, conf in result.semantic_decisions}
     kept = list(sorted(result.kept, key=lambda item: (item.source_order, item.start, item.end, item.clip_id)))
@@ -263,34 +232,20 @@ def apply_hybrid_retry_completion_integrity(result, source_takes, context=None):
         winner = _safe_failed_retry(take, tuple(kept), semantic, context)
         if winner is not None:
             removed_ids.add(take.clip_id)
-            diagnostics.append({
-                "clip_id": take.clip_id,
-                "reason": "semantic_failed_cross_group_retry_covered",
-                "winner_clip_id": winner.clip_id,
-            })
+            diagnostics.append({"clip_id": take.clip_id, "reason": "semantic_failed_cross_group_retry_covered", "winner_clip_id": winner.clip_id})
             continue
         previous = kept[index - 1] if index > 0 else None
         following = kept[index + 1] if index + 1 < len(kept) else None
         if _safe_short_alternate_debris(take, previous, following, semantic):
             removed_ids.add(take.clip_id)
-            diagnostics.append({
-                "clip_id": take.clip_id,
-                "reason": "semantic_short_alternate_covered_by_neighbors",
-            })
+            diagnostics.append({"clip_id": take.clip_id, "reason": "semantic_short_alternate_covered_by_neighbors"})
             continue
         winner = _safe_full_alternate_retry(take, tuple(kept), index, semantic, context)
         if winner is not None:
             removed_ids.add(take.clip_id)
-            diagnostics.append({
-                "clip_id": take.clip_id,
-                "reason": "semantic_reset_backed_full_alternate_retry",
-                "winner_clip_id": winner.clip_id,
-            })
+            diagnostics.append({"clip_id": take.clip_id, "reason": "semantic_reset_backed_full_alternate_retry", "winner_clip_id": winner.clip_id})
 
     survivors = [take for take in kept if take.clip_id not in removed_ids]
-
-    # Completion repair is intentionally after retry cleanup and uses the original source
-    # adjacency, so a failed tail cannot be mistaken for ordinary removed retry material.
     deleted_semantic = {
         take.clip_id: take
         for take in source_tuple
@@ -324,7 +279,6 @@ def apply_hybrid_retry_completion_integrity(result, source_takes, context=None):
 
     if not removed_ids and not diagnostics:
         return result
-
     deleted_ids = {take.clip_id for take in result.deleted} | removed_ids
     deleted = tuple(take for take in source_tuple if take.clip_id in deleted_ids)
     return type(result)(
@@ -339,7 +293,6 @@ def apply_hybrid_retry_completion_integrity(result, source_takes, context=None):
 
 def install_hybrid_retry_completion_integrity() -> None:
     from . import hybrid_session_cleanup
-
     original = hybrid_session_cleanup.apply_hybrid_session_cleanup
     if getattr(original, "_cutsell_hybrid_retry_completion_integrity", False):
         return
