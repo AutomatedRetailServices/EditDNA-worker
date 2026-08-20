@@ -322,3 +322,4 @@ jobs:
           echo "Focused Pod deleted and verified absent: $POD_ID"
 
 # adopt exact focused pod or replace stale one; continue automatically
+# fresh relaunch after dead pod cleanup
