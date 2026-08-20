@@ -101,9 +101,9 @@ def suppress_stranded_hybrid_alternates(
     removed_ids: set[str] = set()
     diagnostics: list[dict] = []
 
-    # Pass 1: suppress an incomplete alternate when one unique nearby semantic winner
-    # substantially covers the same communication attempt. The alternate may be before
-    # or after that winner.
+    # Pass 1: preserve the historical Video 04 rule for an open alternate BEFORE the
+    # winner (>=3 shared content tokens). For the newer winner-before-alternate case,
+    # require stronger coverage so a valid later story variation is not over-cut.
     for take in kept_tuple:
         label, confidence = semantic.get(take.clip_id, ("", 0.0))
         if label != "alternate" or confidence < 0.75:
@@ -118,10 +118,15 @@ def suppress_stranded_hybrid_alternates(
         winner_content = _content_tokens(winner.text)
         shared = alternate_content & winner_content
         alternate_coverage = len(shared) / max(1, len(alternate_content))
-        if len(shared) < 4 or alternate_coverage < 0.35:
+        before_winner = take.end <= winner.start
+        if before_winner:
+            enough = len(shared) >= 3
+        else:
+            enough = len(shared) >= 4 and alternate_coverage >= 0.35
+        if not enough:
             continue
         removed_ids.add(take.clip_id)
-        relation = "before" if take.end <= winner.start else "after"
+        relation = "before" if before_winner else "after"
         diagnostics.append({
             "clip_id": take.clip_id,
             "reason": "semantic_alternate_incomplete_retry_beside_winner",
