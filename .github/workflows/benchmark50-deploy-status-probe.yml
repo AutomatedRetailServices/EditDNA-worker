@@ -1,0 +1,42 @@
+name: Benchmark 50 Deploy Status Probe
+
+on:
+  push:
+    branches:
+      - cutsell/mobile-v1-clean
+    paths:
+      - .github/workflows/benchmark50-deploy-status-probe.yml
+
+permissions:
+  contents: write
+  actions: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: cutsell/mobile-v1-clean
+          fetch-depth: 0
+      - name: Capture Benchmark 50 deploy and latest benchmark state
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          api="https://api.github.com/repos/$GITHUB_REPOSITORY/actions/workflows"
+          curl --fail --silent --show-error "$api/benchmark50-controlled-deploy-dispatch.yml/runs?event=push&per_page=5" -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github+json" > deploy.json
+          curl --fail --silent --show-error "$api/cutsell-unseen-clean-cut-benchmark.yml/runs?event=workflow_dispatch&branch=cutsell%2Fmobile-v1-clean&per_page=5" -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github+json" > benchmark.json
+          mkdir -p ops
+          jq -n \
+            --argjson deploy "$(jq '.workflow_runs[0] | {id,run_number,status,conclusion,head_sha,created_at,updated_at}' deploy.json)" \
+            --argjson benchmark "$(jq '.workflow_runs[0] | {id,run_number,status,conclusion,head_sha,created_at,updated_at}' benchmark.json)" \
+            '{deploy:$deploy,benchmark:$benchmark}' > ops/benchmark50-deploy-status.json
+          cat ops/benchmark50-deploy-status.json
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add ops/benchmark50-deploy-status.json
+          git commit -m "Record Benchmark 50 deploy status"
+          git pull --rebase origin cutsell/mobile-v1-clean
+          git push origin HEAD:cutsell/mobile-v1-clean
