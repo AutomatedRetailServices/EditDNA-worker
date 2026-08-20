@@ -13,6 +13,7 @@ from .delivery_edge_trim import install_delivery_edge_trim
 from .interior_performance_break import install_interior_performance_break_split
 from .dangling_delivery import install_dangling_delivery_cleanup
 from .internal_self_correction import install_internal_self_correction_trim
+from .internal_retake_winner import install_internal_retake_winner
 from .internal_repeat_trim import install_internal_repeat_trim
 from .recording_breaks import install_recording_break_cleanup
 from .restart_questions import install_short_restart_question_cleanup
@@ -54,6 +55,7 @@ install_delivery_edge_trim()
 install_interior_performance_break_split()
 install_dangling_delivery_cleanup()
 install_internal_self_correction_trim()
+install_internal_retake_winner()
 install_internal_repeat_trim()
 install_recording_break_cleanup()
 install_short_restart_question_cleanup()
