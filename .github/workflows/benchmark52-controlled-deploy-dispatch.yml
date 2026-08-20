@@ -187,3 +187,5 @@ jobs:
           code=$(curl --silent --show-error --write-out '%{http_code}' --request DELETE --url "https://rest.runpod.io/v1/pods/$POD_ID" --header "Authorization: Bearer $RUNPOD_API_KEY" --output cleanup.txt)
           echo "pre-dispatch cleanup DELETE status: $code"
           test "$code" = "204" || test "$code" = "404"
+
+# retrigger focused deploy after immutable image became available
