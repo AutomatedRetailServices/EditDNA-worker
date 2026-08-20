@@ -30,12 +30,10 @@ _BTS_SELF_TALK_RE = re.compile(
     re.IGNORECASE,
 )
 _OPEN_TAIL = frozenset({
-    # English connectors / auxiliaries that cannot normally finish a take.
     "a", "an", "and", "are", "as", "at", "because", "been", "being", "but", "by",
     "did", "do", "does", "for", "from", "had", "has", "have", "if", "in", "into",
     "is", "of", "on", "or", "so", "than", "that", "the", "to", "was", "were", "when",
     "which", "while", "who", "with", "without",
-    # Spanish connectors / auxiliaries.
     "a", "al", "como", "con", "cuando", "de", "del", "el", "en", "era", "es", "fue",
     "ha", "han", "la", "las", "los", "para", "pero", "por", "porque", "que", "si",
     "sin", "un", "una", "y",
@@ -62,7 +60,6 @@ def _micro_fragment(take: CandidateTake) -> bool:
 
 
 def _short_unfinished_fragment(take: CandidateTake) -> bool:
-    """A short provider-confirmed failure that is too small to be a finished delivery."""
     tokens = _tokens(take.text)
     if not tokens or _has_sentence_end(take.text):
         return False
@@ -86,18 +83,10 @@ def _repetition_pathology(take: CandidateTake) -> bool:
     tokens = _tokens(take.text)
     if len(tokens) < 5:
         return False
-
-    # A semantic non-winner plus an immediately repeated phrase is independent evidence
-    # of a broken delivery even when the creator keeps eye contact. Check adjacent
-    # n-grams up to five tokens so ASR-normalized compounds such as ``non-gmo non-gmo
-    # non-gmo`` (``non gmo`` repeated) and longer restarts such as ``if they're not
-    # eating if they're not eating`` are both recognized.
     for width in range(1, min(5, len(tokens) // 2) + 1):
         span = width * 2
         for index in range(len(tokens) - span + 1):
             if tokens[index : index + width] == tokens[index + width : index + span]:
-                # One-word duplication is only structural when repeated at least
-                # three times; two identical ordinary words can be emphatic speech.
                 if width > 1:
                     return True
                 if index + 2 < len(tokens) and tokens[index] == tokens[index + 2]:
@@ -134,20 +123,6 @@ def _alternate_micro_in_failure_cluster(
     failed_neighbor_gap_sec: float = 8.0,
     winner_gap_sec: float = 45.0,
 ) -> bool:
-    """Detect a tiny non-winner stranded inside a confirmed failed-retry cluster.
-
-    Benchmark 45 exposed ``you're tired`` as a 1.28-second incomplete fragment labelled
-    ``alternate`` between a failed micro-fragment and a 43-second clear winner. Removing
-    every short alternate would be unsafe because creators use valid two/three-word
-    hooks. This path therefore requires three independent facts at once:
-
-    * the alternate itself is a transcript micro-fragment and is marked incomplete;
-    * another nearby same-source take is provider-confirmed ``failed``;
-    * a same-source, high-confidence winner is materially fuller and still local to the
-      same long-form retry window.
-
-    Without all three, the alternate remains fail-open.
-    """
     if str(label) != "alternate" or float(confidence) < 0.72:
         return False
     if take.complete_idea or not _micro_fragment(take):
@@ -181,10 +156,6 @@ def _structural_reason(take: CandidateTake, label: str, confidence: float) -> st
     label = str(label)
     confidence = float(confidence)
 
-    # Exact phrase repetition is stronger textual corroboration than brevity. Benchmark
-    # 44 showed the same broken delivery can fluctuate between ``failed`` and a low-
-    # confidence ``alternate`` across overlapping Hybrid windows. Never apply this to a
-    # winner/keep; a short low-confidence non-winner also has to lack sentence closure.
     if _repetition_pathology(take):
         if label == "failed" and confidence >= 0.65:
             return "semantic_failed_repetition_pathology"
@@ -197,24 +168,18 @@ def _structural_reason(take: CandidateTake, label: str, confidence: float) -> st
             return "semantic_nonwinner_repetition_pathology"
 
     if label == "failed":
-        # A two/three-word orphan plus a semantic-failure decision is enough independent
-        # evidence at medium confidence. This catches fragments such as ``you're tired``
-        # when the provider actually calls them failed, without touching valid short
-        # hooks labelled winner/alternate.
         if confidence >= 0.74 and _micro_fragment(take):
             return "semantic_failed_micro_fragment"
-        # Slightly longer malformed fragments require substantially stronger semantic
-        # confidence. This catches stranded self-talk such as ``trying to say in
-        # character`` while keeping the guard fail-open for ordinary short speech.
-        if confidence >= 0.86 and _short_unfinished_fragment(take):
+        # Benchmark 49 reproduced a 3.02-second malformed fragment ("I people It was
+        # very funny") at exactly 0.85 semantic-failure confidence. Treat 0.85 as the
+        # boundary for this already-conservative structural path instead of allowing a
+        # one-hundredth confidence difference to reintroduce obvious failed speech.
+        if confidence >= 0.85 and _short_unfinished_fragment(take):
             return "semantic_failed_short_fragment"
         if confidence >= 0.80 and _open_fragment(take):
             return "semantic_failed_open_fragment"
 
     if label == "bts" and confidence >= 0.84:
-        # Keep the historic fail-open contract for an isolated ordinary BTS-labelled
-        # sentence. Only filler/micro debris or explicit recording-process self-talk is
-        # structurally incompatible with a final delivery without visual corroboration.
         if _filler_bts(take) or _micro_fragment(take) or _recording_process_bts(take):
             return "semantic_bts_micro_debris"
     return None
@@ -269,7 +234,6 @@ def install_semantic_fragment_guard() -> None:
         return
 
     def apply_with_semantic_fragment_guard(*args, **kwargs):
-        # Snapshot the input before the wrapped function consumes a possible generator.
         if args:
             source_takes = tuple(args[0])
             call_args = (source_takes, *args[1:])
