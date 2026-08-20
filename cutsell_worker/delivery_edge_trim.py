@@ -81,8 +81,6 @@ def _edge_cut_evidence(
     if authoritative:
         strongest = max(authoritative, key=lambda item: item.confidence)
         reasons.append(f"event:{_kind(strongest.kind)}:{strongest.confidence:.2f}")
-        # Explicit recording-process events are safe at a word-proven edge. This lets
-        # short dead-air/retry-reset tails close tightly instead of requiring 320 ms.
         return True, tuple(reasons), True
 
     body = [
@@ -102,10 +100,6 @@ def _edge_cut_evidence(
         if _kind(event.kind) in _FACE_BREAK_KINDS and event.confidence >= 0.72
     ]
 
-    # A repeated strong hand trajectory reset at a proven non-speech edge is the local
-    # signature of the common handheld-mic down/up or hand-to-rest recording cadence.
-    # One hand event requires an independent face/camera break to avoid mistaking an
-    # intentional gesture for edit debris.
     hand_micro = len(hand) >= 2 or (len(hand) >= 1 and bool(camera or face))
     if hand_micro:
         reasons.append(f"hand_reset_cluster:{max(item.confidence for item in hand):.2f}")
@@ -115,18 +109,10 @@ def _edge_cut_evidence(
             reasons.append(f"expression_break:{max(item.confidence for item in face):.2f}")
         return True, tuple(reasons), True
 
-    # A very strong body reset immediately after the last spoken word is itself a
-    # delivery-boundary signal in talking-head footage. Mark it micro-safe so 120–320 ms
-    # of visible reset/mueca does not survive merely because it is shorter than the
-    # ordinary slack threshold.
     if body:
         reasons.append(f"body_reset:{max(item.confidence for item in body):.2f}")
         return True, tuple(reasons), True
 
-    # Camera disengagement plus facial-expression shift is the other common audiovisual
-    # signature of "the sentence is over". Requiring both families keeps ordinary eye
-    # movement or expression from becoming an edit point, while still allowing a tight
-    # cut when the creator visibly drops out of the delivery.
     if camera and face:
         reasons.append(f"camera_disengagement:{max(item.confidence for item in camera):.2f}")
         reasons.append(f"expression_break:{max(item.confidence for item in face):.2f}")
@@ -160,14 +146,17 @@ def trim_delivery_edge_slack(
         leading = first_start - new_start
         if micro_talking_head_slack_sec <= leading <= maximum_slack_sec:
             confirmed, evidence, micro_safe = _edge_cut_evidence(take, new_start, first_start, context)
-            threshold = micro_talking_head_slack_sec if talking_head and micro_safe else minimum_slack_sec
+            # Preserve normal pre-roll breathing/setup unless the slack reaches the ordinary
+            # threshold. Human Gold here is about post-sentence visual debris; applying the
+            # 120 ms micro rule to the beginning of a clip caused over-tight starts.
+            threshold = minimum_slack_sec
             if confirmed and leading >= threshold:
                 new_start = first_start
                 reasons.append({
                     "action": "trim_leading_non_speech_setup",
                     "duration_sec": round(leading, 3),
                     "evidence": list(evidence),
-                    "talking_head_micro_edge": bool(talking_head and micro_safe),
+                    "talking_head_micro_edge": False,
                 })
 
         last_end = float(words[-1].end)
