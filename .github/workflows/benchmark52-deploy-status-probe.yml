@@ -32,3 +32,4 @@ jobs:
           git commit -m "Record focused deploy status" || exit 0
           git pull --rebase origin cutsell/mobile-v1-clean
           git push origin HEAD:cutsell/mobile-v1-clean
+# refresh focused status
