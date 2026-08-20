@@ -16,16 +16,15 @@ jobs:
         with:
           ref: cutsell/mobile-v1-clean
           fetch-depth: 0
-      - name: Record focused deploy and benchmark status
+      - name: Record focused deploy status
         env:
           GH_TOKEN: ${{ github.token }}
         shell: bash
         run: |
           set -euo pipefail
           curl --fail --silent --show-error --url "https://api.github.com/repos/$GITHUB_REPOSITORY/actions/workflows/cutsell-focused-deploy.yml/runs?event=push&branch=cutsell%2Fmobile-v1-clean&per_page=5" --header "Authorization: Bearer $GH_TOKEN" --header "Accept: application/vnd.github+json" --output deploy.json
-          curl --fail --silent --show-error --url "https://api.github.com/repos/$GITHUB_REPOSITORY/actions/workflows/cutsell-focused-clean-cut-benchmark.yml/runs?event=workflow_dispatch&branch=cutsell%2Fmobile-v1-clean&per_page=5" --header "Authorization: Bearer $GH_TOKEN" --header "Accept: application/vnd.github+json" --output benchmark.json
           mkdir -p ops
-          jq -n --slurpfile d deploy.json --slurpfile b benchmark.json '{deploy:(($d[0].workflow_runs[0] // {})|{id,run_number,status,conclusion,head_sha,created_at,updated_at}),benchmark:(($b[0].workflow_runs[0] // {})|{id,run_number,status,conclusion,head_sha,created_at,updated_at})}' > ops/focused-status.json
+          jq '.workflow_runs[0] | {id,run_number,status,conclusion,head_sha,created_at,updated_at}' deploy.json > ops/focused-status.json
           cat ops/focused-status.json
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
@@ -33,3 +32,4 @@ jobs:
           git commit -m "Record focused benchmark status" || exit 0
           git pull --rebase origin cutsell/mobile-v1-clean
           git push origin HEAD:cutsell/mobile-v1-clean
+# refresh
