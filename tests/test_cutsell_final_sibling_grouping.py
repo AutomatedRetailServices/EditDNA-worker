@@ -1,5 +1,6 @@
 from cutsell_worker.contracts import CandidateTake, MediaSignals, Word
 from cutsell_worker.final_sibling_grouping import reconcile_final_sibling_groups
+from cutsell_worker import session_boundaries
 
 
 def _words(text, start=0.0, step=0.20):
@@ -25,7 +26,7 @@ def _take(clip_id, start, end, text, *, complete=True):
     )
 
 
-def test_video00_complete_delivery_and_split_retry_become_one_sibling_family():
+def _video00_retry_triplet():
     complete = _take(
         "complete",
         295.36,
@@ -45,6 +46,11 @@ def test_video00_complete_delivery_and_split_retry_become_one_sibling_family():
         346.54,
         "cánceres son hereditarios soy la única que tiene este tipo de cáncer.",
     )
+    return complete, prefix, continuation
+
+
+def test_video00_complete_delivery_and_split_retry_become_one_sibling_family():
+    complete, prefix, continuation = _video00_retry_triplet()
 
     groups, changed = reconcile_final_sibling_groups(
         (("complete",), ("prefix",), ("continuation",)),
@@ -54,6 +60,28 @@ def test_video00_complete_delivery_and_split_retry_become_one_sibling_family():
     assert changed is True
     assert len(groups) == 1
     assert set(groups[0]) == {"complete", "prefix", "continuation"}
+
+
+def test_video00_reconciles_globally_even_when_session_partitioning_separates_all_three(monkeypatch):
+    complete, prefix, continuation = _video00_retry_triplet()
+    takes = (complete, prefix, continuation)
+
+    monkeypatch.setattr(
+        session_boundaries,
+        "partition_takes_by_sessions",
+        lambda *_args, **_kwargs: ((complete,), (prefix,), (continuation,)),
+    )
+
+    result = session_boundaries.safe_group_takes_by_sessions(
+        None,
+        takes,
+        None,
+        context_text="",
+    )
+
+    assert len(result.groups) == 1
+    assert set(result.groups[0]) == {"complete", "prefix", "continuation"}
+    assert "global_post_session_sibling_reconciled" in result.reason
 
 
 def test_full_reformulations_of_same_delivery_merge_for_best_take():
