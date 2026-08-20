@@ -8,176 +8,183 @@ This file is the operational checkpoint. Update it whenever the active benchmark
 
 - Repository: `AutomatedRetailServices/EditDNA-worker`
 - Active branch: `cutsell/mobile-v1-clean`
-- Active PR: `#25` (Draft)
+- Active PR: `#25` (Draft, open, unmerged)
 - Base: `main`
-- PR #24: historical/reference backup; do not modify as part of the clean release path.
+- Base SHA remains `2fb13e5aa228e8e525b942a9b49182032b797e61`
+- PR #24 remains historical/reference backup and must stay untouched.
 
 ## Current focus
 
-**Brain editorial-quality hardening for Flow B / Clean Cut using the latest human-reviewed real-video evidence from Benchmark #49.**
+**Flow B / Clean Cut editorial-quality hardening.**
 
 Human review is the quality gate. Workflow success alone is not an editorial pass.
+Sales-funnel/storytelling work remains intentionally separate until Clean Cut reaches reliable real-video quality.
 
-## Current Brain checkpoint
+## Benchmark history that matters
 
 ### Benchmark #39 — bad human baseline
 
 - 16/16 processed technically.
-- 0 execution/provider failures.
 - Human review: editorial failure.
-- Failure pattern: repeated failed attempts surviving, fragmentary edits, over-cutting, and cases where too little of the original delivery remained to judge naturally.
-- Treat #39 as the original bad baseline that later benchmarks must visibly beat.
+- Core failure class: repeated failed attempts surviving, fragmentary edits, over-cutting and weak Best Take behavior.
 
-### Benchmark #48 — partial editorial improvement, not a pass
+### Benchmark #48 — first large editorial improvement
 
 - 16/16 processed.
-- 0 execution failures.
-- 0 provider failures.
-- Hybrid availability: **21/22 = 95.45%**.
-
-Human review:
-
-- **Video 00:** still wrong; repeated sonography lines and repeated/hereditary-cancer close survived.
-- **Video 02:** major improvement, almost ready to deliver.
-- **Video 03:** cut too early at the ending; idea/words incomplete.
-- **Video 04:** correct.
-- **Video 05:** correct.
+- 0 execution failures / 0 provider failures.
+- Hybrid availability: 21/22 = 95.45%.
+- Human review:
+  - 00 still wrong: repeated sonography + hereditary-cancer delivery.
+  - 02 major improvement, almost ready to deliver.
+  - 03 cut ending too early.
+  - 04 correct.
+  - 05 correct.
 
 ### Benchmark #49 — technically clean, editorially failed
 
-Exact controlled worker under validation:
+Exact worker:
+- source `499d1c59e11ea1abe550678ae334cd46573312d1`
+- image digest `sha256:01dc103a7742054b525b4ff71e720d4af220ff8a12b1a0938ed858b0bff250c5`
+- workflow run `32318014133` (visible run #51)
+- Pod `o5flfm9ioegdt6`, cleanup PASS
 
-- Source SHA: `499d1c59e11ea1abe550678ae334cd46573312d1`
-- Immutable image digest: `sha256:01dc103a7742054b525b4ff71e720d4af220ff8a12b1a0938ed858b0bff250c5`
-- Benchmark workflow run id: `32318014133` (visible workflow run #51)
-- Exact staging Pod: `o5flfm9ioegdt6`
-- Pod cleanup step completed successfully.
+Technical:
+- 16/16
+- 0 execution failures
+- 0 provider failures
+- Hybrid 21/22 = 95.45%
+
+Human review:
+- 00 still kept competing versions instead of one winner.
+- 02 regressed and reintroduced malformed failed speech.
+- 03 ended at `te protegen` and cut the complete idea.
+- 04 stayed correct.
+- 05 stayed correct.
+
+### Benchmark #50 — meaningful recovery, but 00 not fully solved
+
+Exact worker:
+- source `e596002dfc550c9da6d8d10a9eb47b3363272f69`
+- image digest `sha256:ba14a4344e000e3a2200a1c74da32569ff53f823dd74688182f25947f7cb3431`
+- benchmark run `32324942712` (visible run #52)
+- Pod `uoz7exmx8tdf11`, cleanup PASS
+
+Technical:
+- 16/16
+- 0 execution failures
+- 0 provider failures
+- Hybrid 21/22 = 95.45%
+
+Observed editorial result:
+- 00 improved strongly in sonography retries, but hereditary-cancer close still duplicated.
+- 02 recovered the #48-quality path and removed `I people It was very funny`.
+- 03 preserved the complete ending through `te reparan la barrera`.
+- 04 remained correct/clean.
+- 05 remained correct/stable.
+
+### Benchmark #51 — architecture experiment exposed a production integration bug
+
+Exact worker under validation:
+- source `65fe16519bbf72562805d5dac0333b993c43c179`
+- image digest `sha256:4593f402deb56e9128b1d058efd24515c3b91ae0712eac84aff172bc4536d99f`
+- benchmark run `32345888694` (visible run #53)
+- Pod `goi51dpki0m153`
+- Pod cleanup step PASS
 
 Technical result:
+- 16/16 processed
+- 0 execution failures
+- 0 provider failures
+- report and preview artifacts uploaded
 
-- 16/16 processed.
-- 0 execution failures.
-- 0 provider failures.
-- Hybrid availability: **21/22 = 95.45%**.
-- JSON report and preview-video artifacts uploaded successfully.
+Key editorial finding:
+- 02/03/04/05 preserved the expected good behavior.
+- 00 still selected the complete hereditary-cancer delivery **plus** the split retry (`prefix` + `continuation`).
 
-Human review: **NOT an editorial pass.**
+Production diagnostics proved why:
+- the new final sibling reconciliation logic itself worked in unit/regression tests;
+- however `safe_group_takes_by_sessions` partitions the video into mini-sessions first and calls grouping independently inside each session;
+- in Video 00 the complete hereditary delivery, split retry prefix and continuation ended in three distinct session-scoped groups;
+- therefore the sibling layer never saw the three candidates together in production.
 
-- **Video 00:** still wrong. The Brain still keeps multiple versions of the same repeated idea instead of selecting the winning delivery. Core sonography repetition and hereditary-cancer repetition remain.
-- **Video 02:** regressed from Benchmark #48. #49 reintroduced malformed failed speech (`I people It was very funny`) that #48 did not select.
-- **Video 03:** regressed further; #49 ends at `te protegen`, cutting the complete delivery too early.
-- **Video 04:** remained correct and improved slightly by removing the stranded `priceless.` fragment.
-- **Video 05:** remained correct/stable; blooper debris stays removed while useful hidden-hunger story remains.
+This means Benchmark #51 did **not** disprove the sibling-family architecture. It exposed that the reconciliation was installed one level too low.
 
-Do not use #49 technical success as evidence of editorial success.
+## Current architecture decision
 
-## Root causes proven by #49 diagnostics
+Recover the useful earlier EditDNA invariant without rolling back the modern Clean Cut architecture:
 
-### Video 00
+**same audience-facing idea + competing deliveries -> one sibling/retry family -> Best Take chooses exactly one selected winner**
 
-Two separate production-path failures were confirmed:
+Important:
+- losers are not destroyed;
+- they remain available as alternates / Swap Take;
+- Composer should receive only the selected winner from a retry family;
+- Story/funnel logic is not part of this decision.
 
-1. **Correct Hybrid deletion was later undone by story protection.** Hybrid correctly labelled some repeated/bad takes `failed` or `alternate`, but `hybrid_story_coverage_guard` restored them because lexical retry coverage did not prove a peer. This revived material the semantic judge had already rejected.
-2. **Short semantic retries remained stranded across deterministic groups.** Short sonography retries were separately labelled `alternate`/`failed`, but because they were not in one deterministic retry group and local corroboration was insufficient, they remained selected.
+The newer Clean Cut capabilities remain:
+- whole-video understanding;
+- attempt reconstruction;
+- session boundaries;
+- Hybrid/Gemini semantic reasoning;
+- story-preservation guards;
+- temporal completion/boundary repair;
+- immutable source identity.
 
-Therefore the remaining problem is not simply Best Take ranking inside a retry group. The Brain needs a final cross-group semantic retry integrity pass after fail-open/story restoration.
+## Fix implemented after Benchmark #51
 
-### Video 02
+A new **global post-session sibling bridge** now wraps the final output of `safe_group_takes_by_sessions`:
 
-The malformed fragment `I people It was very funny` was Hybrid-labelled `failed` at confidence **0.85**. The generic short-fragment guard required 0.86, so the bad fragment survived. Lowering the generic threshold to 0.85 proved unsafe because an existing regression requires ordinary 0.85 failed speech without structural corroboration to remain fail-open.
+1. session-scoped grouping still runs normally to protect true compilation boundaries;
+2. all final groups are then presented to conservative sibling reconciliation at the whole-source level;
+3. only strong competing-delivery evidence can merge groups;
+4. no take is deleted by this bridge;
+5. the existing TakeJudge/Hybrid Best Take authority chooses the one selected winner.
 
-The final fix therefore uses additional structural evidence (a compact pronoun-collision restart) at 0.85 while preserving the generic 0.86 fail-open threshold.
+A production-path regression now forces the three Video 00 hereditary takes into three separate mini-sessions and requires the final grouping output to collapse them into one sibling family.
 
-### Video 03
+## Current validated code checkpoint
 
-The prior completion rollback logic could shorten a take already classified as `complete_idea=True`. That contradicts the editing doctrine. A completed delivery is now protected; a failed tail may be removed without amputating the complete preceding speech.
+Current code head:
 
-## Current code checkpoint
+`140bec542dd9f0b429093810e4b85b541e35f589`
 
-Current validated code head before this documentation-only update:
+Validation:
+- **CutSell Clean Worker CI #1474 — PASS**
+- **CutSell iOS CI #1255 — PASS**
+- new cross-session production-path sibling regression — PASS
 
-`8101891752545003d1461f59564ec4f0bc63848d`
-
-Validation on that exact code head:
-
-- **CutSell Clean Worker CI #1452 — PASS**
-- **CutSell iOS CI #1233 — PASS**
-
-PR #25 remains Draft and unmerged. `main` remains unchanged by this release path.
-
-## Hardening now implemented after Benchmark #49
-
-- final cross-group semantic retry integrity after Hybrid/story-coverage restoration;
-- combined coverage from nearby authoritative winner/keep deliveries, including winner + immediate continuation;
-- preservation of critical semantic tokens such as negations and numeric facts before removing a repeated delivery;
-- cross-group collapse regressions for Video 00 sonography and hereditary-cancer repetitions;
-- fail-open protections so Video 02 unique story and Video 05 hidden-hunger story are not deleted merely for topic similarity;
-- targeted malformed failed-fragment cleanup for Video 02 at 0.85 when independent pronoun-collision structure proves a broken restart;
-- preservation of the established generic 0.85 fail-open contract for ordinary speech;
-- complete-idea protection for Video 03 so a failed tail cannot shorten already-complete speech;
-- existing protections for Video 04 stranded alternates remain in place.
-
-## Canonical document hierarchy
-
-Read these as the current source of truth:
-
-1. `docs/CUTSELL_MOBILE_V1_ASAP_SCOPE.md`
-2. `docs/CUTSELL_BRAIN_DOCTRINE.md`
-3. `docs/CUTSELL_DECISIONS.md`
-4. `docs/CUTSELL_STAGING_DEPLOYMENT_CONTRACT.md`
-5. `docs/CUTSELL_STAGING_READINESS.md`
-6. `docs/CUTSELL_CURRENT_STATE.md`
-7. `AGENTS.md`
-
-If two documents conflict, prefer the more recent explicit decision in `CUTSELL_DECISIONS.md`, then update the older document so the contradiction does not persist.
-
-## What is already proven
-
-The clean release path already has evidence for:
-
-- CutSell API container build/boot and health;
-- Clean Worker CI;
-- iOS Simulator CI/build;
-- real RunPod GPU smoke;
-- immutable GPU worker image build/push;
-- Render staging API;
-- shared Redis/S3 staging topology;
-- real staging E2E through public API: auth -> upload -> Flow B -> Draft recovery -> edit/autosave -> export -> download/validation;
-- persisted Draft recovery;
-- retry/cancel behavior;
-- Render rollback;
-- worker-image rollback and cleanup.
+PR #25 remains Draft and unmerged. `main` remains unchanged.
 
 ## Next gate
 
-The current code-level defects exposed by #49 have targeted fixes and green CI, but **real-video editorial quality is not yet revalidated**.
+Code-level validation is green, but the new post-session sibling fix has **not yet been proven on real RAW video**.
 
-Before another paid RunPod validation:
+Before the next paid validation:
+1. keep current head green;
+2. build an immutable worker image from the exact validated source;
+3. stop for explicit user approval before creating a new paid RunPod Pod / benchmark;
+4. after approval, run exactly one controlled 16-video RAW benchmark;
+5. verify deletion of the exact Pod;
+6. present 00/02/03/04/05 for human review.
 
-1. Keep the current code head/regressions green.
-2. Build an immutable worker image from the exact validated source.
-3. **Stop for explicit user approval before creating a new paid RunPod Pod / running another paid validation cycle.**
-4. After approval, run exactly one controlled 16-video Gold RAW cycle.
-5. Delete and verify deletion of the exact staging Pod.
-6. Present Video 00/02/03/04/05 previews for human review.
-7. Treat the cycle as successful only if:
-   - 00 chooses one winning delivery rather than keeping repeated attempts;
-   - 02 regains #48 quality and removes the malformed fragment without losing unique story;
-   - 03 preserves a complete natural ending;
-   - 04 remains correct;
-   - 05 remains correct.
+Success criteria:
+- **00:** hereditary-cancer competing deliveries collapse to one winner; no duplicate sonography regression.
+- **02:** keeps the #48/#50 improvement and no malformed retry fragment.
+- **03:** retains the complete natural ending.
+- **04:** stays correct.
+- **05:** stays correct.
 
-## Remaining path to closed TestFlight
+## Sales Funnel sequencing
 
-1. Reach acceptable Brain quality on real-video review/regression.
-2. Apple Developer signing / App ID / provisioning / TestFlight setup.
-3. Physical iPhone validation: camera, Photos/iCloud import, background multipart resume, app kill/resume, Flow B, playback/timeline, Swap Take, trim/split, overlays, captions, recovery, export, Save to Photos and share.
-4. Fix device-only blockers found by physical QA.
-5. Build/upload closed TestFlight beta after approval.
+Do **not** reintroduce rigid funnel structure while Clean Cut is still being validated.
+
+After Clean Cut is reliable, resume the commercial layer as a flexible narrative-understanding stage that can recognize different selling structures (for example story -> discovery -> experience -> recommendation, pain -> demo -> proof, hook -> solution -> CTA) rather than forcing every video into one fixed funnel template.
 
 ## Current execution rule
 
-Continue automatically after each non-paid fix/status block. Stop only for explicit approval before new spend/paid infrastructure, or when human review of new videos is required.
+Continue automatically after each non-paid fix/status block. Stop only for:
+- explicit approval before new paid infrastructure/benchmark spend; or
+- human review when new preview videos are ready.
 
 ## Update rule
 
