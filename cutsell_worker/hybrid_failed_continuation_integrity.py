@@ -18,6 +18,7 @@ from typing import Iterable
 from .contracts import CandidateTake
 
 _TOKEN_RE = re.compile(r"[a-z0-9áéíóúñü]+(?:[-–][0-9]+)?%?", re.IGNORECASE)
+_NUMBER_RE = re.compile(r"\d+(?:\.\d+)?")
 _STOP = frozenset({
     "a", "an", "and", "are", "as", "at", "be", "because", "but", "by", "for", "from",
     "has", "have", "i", "in", "is", "it", "its", "me", "my", "of", "on", "or", "so",
@@ -43,12 +44,10 @@ def _content(text: str) -> set[str]:
 
 
 def _critical(text: str) -> set[str]:
-    out: set[str] = set()
-    for token in _tokens(text):
-        if token in _NEGATION:
-            out.add(_NEGATION_CANONICAL)
-        if any(ch.isdigit() for ch in token):
-            out.add(token)
+    raw = str(text or "")
+    out: set[str] = {f"num:{number}" for number in _NUMBER_RE.findall(raw)}
+    if any(token in _NEGATION for token in _tokens(raw)):
+        out.add(_NEGATION_CANONICAL)
     return out
 
 
