@@ -1,5 +1,6 @@
 from cutsell_worker.contracts import CandidateTake, MediaSignals, Word
 from cutsell_worker.delivery_edge_trim import trim_delivery_edge_slack
+from cutsell_worker.hybrid_alternate_integrity import suppress_stranded_hybrid_alternates
 from cutsell_worker.internal_retake_winner import prefer_internal_clean_retakes
 from cutsell_worker.providers import ProviderStatus
 from cutsell_worker.whole_video_analysis import SourceVideoContext, TemporalEvent, WholeVideoContext
@@ -12,6 +13,21 @@ def _words(tokens, start=0.0, step=0.22):
         out.append(Word(token, cursor, cursor + step, 0.97))
         cursor += step
     return tuple(out)
+
+
+def _take(clip_id, start, end, text, *, complete=True):
+    words = _words(tuple(text.split()), start=start, step=max(0.08, (end - start) / max(1, len(text.split()))))
+    return CandidateTake(
+        clip_id=clip_id,
+        source_asset_id="src",
+        source_order=0,
+        start=float(start),
+        end=float(end),
+        text=text,
+        words=words,
+        signals=MediaSignals("src", float(start), float(end)),
+        complete_idea=complete,
+    )
 
 
 def _context(*events):
@@ -112,3 +128,34 @@ def test_video00_internal_retake_guard_fails_open_without_retry_evidence():
 
     assert resolved == (take,)
     assert diagnostics == ()
+
+
+def test_video00_clean_final_winner_suppresses_later_open_alternate():
+    winner = _take(
+        "winner",
+        295.52,
+        313.82,
+        "Esta es mi experiencia soy la única en mi familia que tiene este tipo de cáncer por eso no creo y está comprobado científicamente que los cánceres son hereditarios más bien solo un 5-10% son de carácter hereditario mayormente son nuestras elecciones de vida así que cuídate",
+        complete=True,
+    )
+    later_open_alternate = _take(
+        "alternate",
+        319.38,
+        334.24,
+        "Soy la primera en mi familia con este tipo de cáncer nadie en mi familia tiene un carcinoma papilar en la tiroides ni sufre de la tiroides así que estoy convencida y la ciencia lo avala que solo un 5-10% de los",
+        complete=False,
+    )
+
+    kept, removed, diagnostics = suppress_stranded_hybrid_alternates(
+        (winner, later_open_alternate),
+        (
+            ("winner", "winner", 0.93),
+            ("alternate", "alternate", 0.78),
+        ),
+    )
+
+    assert "winner" in {take.clip_id for take in kept}
+    assert "alternate" not in {take.clip_id for take in kept}
+    assert "alternate" in {take.clip_id for take in removed}
+    assert diagnostics[0]["temporal_relation"] == "after"
+    assert diagnostics[0]["reason"] == "semantic_alternate_incomplete_retry_beside_winner"
