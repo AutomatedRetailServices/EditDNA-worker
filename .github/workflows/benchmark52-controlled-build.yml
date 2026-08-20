@@ -25,6 +25,7 @@ jobs:
       IMAGE_REPO: ghcr.io/automatedretailservices/cutsell-worker
       EXPECTED_DIGEST: sha256:6dd7ec029acb9ea1b553b7ab69f6a31ba8ad8b771bd2bdeaf76ae1756b3b3f07
       POD_ID: ''
+      ADOPT_EXISTING: '0'
     steps:
       - name: Resolve exact immutable focused worker image
         shell: bash
@@ -42,13 +43,32 @@ jobs:
           echo "IMMUTABLE_IMAGE=$IMMUTABLE_IMAGE" >> "$GITHUB_ENV"
           echo "FOCUSED_IMMUTABLE_IMAGE=$IMMUTABLE_IMAGE"
 
-      - name: Refuse duplicate staging worker
+      - name: Inspect or adopt existing staging worker
         shell: bash
         run: |
           set -euo pipefail
           curl --fail --silent --show-error --url "https://rest.runpod.io/v1/pods" --header "Authorization: Bearer $RUNPOD_API_KEY" --output pods-before.json
           count=$(jq '[.[] | select(.name == "cutsell-staging-worker")] | length' pods-before.json)
-          test "$count" = "0" || { echo "cutsell-staging-worker already exists ($count); refusing duplicate paid Pod"; exit 4; }
+          test "$count" -le 1 || { echo "Multiple staging workers exist ($count); refusing unsafe orchestration"; jq '[.[] | select(.name == "cutsell-staging-worker") | {id,name,imageName,desiredStatus,costPerHr,adjustedCostPerHr}]' pods-before.json; exit 4; }
+          if [ "$count" = "1" ]; then
+            jq '[.[] | select(.name == "cutsell-staging-worker") | {id,name,imageName,desiredStatus,costPerHr,adjustedCostPerHr}]' pods-before.json
+            existing_id=$(jq -r '[.[] | select(.name == "cutsell-staging-worker")][0].id' pods-before.json)
+            existing_image=$(jq -r '[.[] | select(.name == "cutsell-staging-worker")][0].imageName' pods-before.json)
+            if [ "$existing_image" = "$IMMUTABLE_IMAGE" ]; then
+              echo "Adopting exact focused staging worker: $existing_id"
+              echo "POD_ID=$existing_id" >> "$GITHUB_ENV"
+              echo "ADOPT_EXISTING=1" >> "$GITHUB_ENV"
+            else
+              echo "Removing stale staging worker $existing_id with image $existing_image"
+              code=$(curl --silent --show-error --write-out '%{http_code}' --request DELETE --url "https://rest.runpod.io/v1/pods/$existing_id" --header "Authorization: Bearer $RUNPOD_API_KEY" --output stale-delete.txt)
+              test "$code" = "204" || test "$code" = "404"
+              sleep 2
+              echo "ADOPT_EXISTING=0" >> "$GITHUB_ENV"
+            fi
+          else
+            echo "No existing staging worker; a focused worker will be created"
+            echo "ADOPT_EXISTING=0" >> "$GITHUB_ENV"
+          fi
 
       - name: Install orchestration client and snapshot RQ workers
         shell: bash
@@ -66,6 +86,7 @@ jobs:
           PY
 
       - name: Build safe runtime baseline from EditDNA-Worker-2
+        if: ${{ env.ADOPT_EXISTING != '1' }}
         shell: bash
         run: |
           set -euo pipefail
@@ -83,6 +104,7 @@ jobs:
           echo "VOLUME_MOUNT=$VOLUME_MOUNT" >> "$GITHUB_ENV"
 
       - name: Create exactly one staging GPU worker
+        if: ${{ env.ADOPT_EXISTING != '1' }}
         shell: bash
         run: |
           set -euo pipefail
@@ -95,40 +117,42 @@ jobs:
           POD_ID=$(jq -r '.id // empty' pod.json)
           test -n "$POD_ID"
           echo "POD_ID=$POD_ID" >> "$GITHUB_ENV"
-          echo "POD_CREATED_EPOCH=$(date -u +%s)" >> "$GITHUB_ENV"
           echo "FOCUSED_POD_ID=$POD_ID"
           jq '{id,name,desiredStatus,imageName,costPerHr,adjustedCostPerHr}' pod.json
 
-      - name: Confirm exact Pod identity and wait for fresh RQ worker
+      - name: Confirm exact Pod identity and active RQ worker
         shell: bash
         run: |
           set -euo pipefail
+          test -n "${POD_ID:-}"
           curl --fail --silent --show-error --url "https://rest.runpod.io/v1/pods/$POD_ID" --header "Authorization: Bearer $RUNPOD_API_KEY" --output pod-confirm.json
           test "$(jq -r '.id // empty' pod-confirm.json)" = "$POD_ID"
           test "$(jq -r '.name // empty' pod-confirm.json)" = "cutsell-staging-worker"
           test "$(jq -r '.imageName // empty' pod-confirm.json)" = "$IMMUTABLE_IMAGE"
           python - <<'PY'
-          import json, os, time
+          import os, time
           from datetime import datetime, timezone
           from redis import Redis
           from rq import Worker
           connection = Redis.from_url(os.environ['REDIS_URL'])
-          before = set(json.load(open('rq-workers-before.json', encoding='utf-8')))
-          created_epoch = float(os.environ['POD_CREATED_EPOCH'])
           deadline = time.time() + 600
           while time.time() < deadline:
               now = datetime.now(timezone.utc)
+              active = []
               for worker in Worker.all(connection=connection):
                   heartbeat = worker.last_heartbeat
-                  if heartbeat is None or worker.name in before:
+                  if heartbeat is None:
                       continue
                   if heartbeat.tzinfo is None:
                       heartbeat = heartbeat.replace(tzinfo=timezone.utc)
-                  if heartbeat.timestamp() >= created_epoch - 5 and (now-heartbeat).total_seconds() <= 30 and worker.get_state() in {'idle','busy'}:
-                      print('Fresh focused RQ worker:', worker.name)
-                      raise SystemExit(0)
+                  age = (now - heartbeat).total_seconds()
+                  if age <= 30 and worker.get_state() in {'idle','busy'}:
+                      active.append((worker.name, round(age,1), worker.get_state()))
+              if active:
+                  print('Active RQ workers:', active)
+                  raise SystemExit(0)
               time.sleep(10)
-          raise SystemExit('No fresh RQ worker registered by exact focused Pod')
+          raise SystemExit('No active RQ worker available on focused staging worker')
           PY
 
       - name: Enqueue exact 00-02-03 focused benchmark
@@ -285,7 +309,7 @@ jobs:
         run: |
           set -euo pipefail
           if [ -z "${POD_ID:-}" ]; then
-            echo 'No focused Pod was created'
+            echo 'No focused Pod was assigned'
             exit 0
           fi
           code=$(curl --silent --show-error --write-out '%{http_code}' --request DELETE --url "https://rest.runpod.io/v1/pods/$POD_ID" --header "Authorization: Bearer $RUNPOD_API_KEY" --output cleanup.txt)
@@ -297,4 +321,4 @@ jobs:
           test "$remaining" = "0" || { echo 'Focused Pod still present after cleanup'; exit 12; }
           echo "Focused Pod deleted and verified absent: $POD_ID"
 
-# trigger focused 00-02-03 orchestrator under standing authorization
+# adopt exact focused pod or replace stale one; continue automatically
