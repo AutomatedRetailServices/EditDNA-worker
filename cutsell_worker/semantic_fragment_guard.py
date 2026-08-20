@@ -42,6 +42,18 @@ _FILLER_PHRASES = frozenset({
     "you know", "i mean", "um", "uh", "erm", "eh", "okay so", "ok so",
     "o sea", "este", "pues",
 })
+_SUBJECT_PRONOUNS = frozenset({
+    "i", "you", "he", "she", "it", "we", "they",
+    "yo", "tu", "tú", "el", "él", "ella", "nosotros", "nosotras", "ellos", "ellas",
+})
+_COMMON_VERB_LIKE = frozenset({
+    "am", "are", "is", "was", "were", "be", "been", "being", "have", "has", "had",
+    "do", "does", "did", "can", "could", "will", "would", "should", "may", "might",
+    "think", "know", "feel", "look", "like", "want", "need", "love", "make", "made",
+    "say", "said", "see", "saw", "get", "got", "go", "went",
+    "soy", "eres", "es", "somos", "son", "era", "estoy", "esta", "está", "estamos",
+    "tengo", "tiene", "tenemos", "hago", "hace", "puedo", "puede", "quiero", "quiere",
+})
 
 
 def _tokens(text: str) -> tuple[str, ...]:
@@ -64,6 +76,25 @@ def _short_unfinished_fragment(take: CandidateTake) -> bool:
     if not tokens or _has_sentence_end(take.text):
         return False
     return take.duration_sec <= 3.50 and len(tokens) <= 7
+
+
+def _pronoun_collision_fragment(take: CandidateTake) -> bool:
+    """Detect a compact ASR-visible subject collision from a broken restart.
+
+    Example from Benchmark 49: ``I people It was very funny``. We deliberately require
+    pronoun + non-verb token + pronoun at the opening so ordinary speech such as
+    ``I think it works`` remains fail-open.
+    """
+    tokens = _tokens(take.text)
+    if _has_sentence_end(take.text) or take.duration_sec > 3.50 or not (4 <= len(tokens) <= 7):
+        return False
+    first, middle, third = tokens[:3]
+    return (
+        first in _SUBJECT_PRONOUNS
+        and third in _SUBJECT_PRONOUNS
+        and middle not in _SUBJECT_PRONOUNS
+        and middle not in _COMMON_VERB_LIKE
+    )
 
 
 def _open_fragment(take: CandidateTake) -> bool:
@@ -170,11 +201,11 @@ def _structural_reason(take: CandidateTake, label: str, confidence: float) -> st
     if label == "failed":
         if confidence >= 0.74 and _micro_fragment(take):
             return "semantic_failed_micro_fragment"
-        # Benchmark 49 reproduced a 3.02-second malformed fragment ("I people It was
-        # very funny") at exactly 0.85 semantic-failure confidence. Treat 0.85 as the
-        # boundary for this already-conservative structural path instead of allowing a
-        # one-hundredth confidence difference to reintroduce obvious failed speech.
-        if confidence >= 0.85 and _short_unfinished_fragment(take):
+        if confidence >= 0.84 and _pronoun_collision_fragment(take):
+            return "semantic_failed_pronoun_collision_fragment"
+        # Preserve the established fail-open contract for generic complete-looking short
+        # speech at 0.85; only stronger 0.86+ semantic failure may use brevity alone.
+        if confidence >= 0.86 and _short_unfinished_fragment(take):
             return "semantic_failed_short_fragment"
         if confidence >= 0.80 and _open_fragment(take):
             return "semantic_failed_open_fragment"
