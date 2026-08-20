@@ -14,7 +14,7 @@ This file is the operational checkpoint. Update it whenever the active benchmark
 
 ## Current focus
 
-**Brain editorial-quality hardening for Flow B / Clean Cut using the latest human-reviewed real-video evidence from Benchmark #48.**
+**Brain editorial-quality hardening for Flow B / Clean Cut using the latest human-reviewed real-video evidence from Benchmark #49.**
 
 Human review is the quality gate. Workflow success alone is not an editorial pass.
 
@@ -24,57 +24,98 @@ Human review is the quality gate. Workflow success alone is not an editorial pas
 
 - 16/16 processed technically.
 - 0 execution/provider failures.
-- Preview artifacts were generated and the paid staging RunPod was deleted.
 - Human review: editorial failure.
 - Failure pattern: repeated failed attempts surviving, fragmentary edits, over-cutting, and cases where too little of the original delivery remained to judge naturally.
-- Treat #39 as the bad baseline that later benchmarks must visibly beat.
+- Treat #39 as the original bad baseline that later benchmarks must visibly beat.
 
-### Benchmarks #42 / #44 / #45 — architecture/runtime diagnosis
-
-- #42 exposed concrete defects including `SessionBoundary` compatibility failure, Hybrid payload-budget failures, zero-selected drafts and post-Best-Take clip identity loss.
-- #44/#45 completed technically, but human feedback still judged the rendered videos effectively as bad as #39.
-- These are NOT editorial passes.
-
-### Benchmark #48 — latest human-reviewed benchmark
+### Benchmark #48 — partial editorial improvement, not a pass
 
 - 16/16 processed.
 - 0 execution failures.
 - 0 provider failures.
 - Hybrid availability: **21/22 = 95.45%**.
-- This is materially better technically than #42/#44/#45, but quality remains partially unresolved and is NOT yet an editorial pass.
 
-Human review of #48 currently recorded:
+Human review:
 
-- **Video 00:** still wrong. Must remove/resolve repeated sonography lines and the repeated/hereditary-cancer closing. Root issue: semantic Best Take can only choose among candidates already recognized as the same retry family; this case still escapes grouping/relationship recognition.
-- **Video 02:** almost ready to deliver.
-- **Video 03:** still wrong at the ending. It must preserve the completed idea/words and avoid cutting off the end of the delivery. Requires completion-preserving boundary refinement.
+- **Video 00:** still wrong; repeated sonography lines and repeated/hereditary-cancer close survived.
+- **Video 02:** major improvement, almost ready to deliver.
+- **Video 03:** cut too early at the ending; idea/words incomplete.
 - **Video 04:** correct.
 - **Video 05:** correct.
 
-Do not generalize #48 as “fixed” from aggregate metrics. The remaining work is driven by the specific human-reviewed failures above.
+### Benchmark #49 — technically clean, editorially failed
 
-### Current code checkpoint
+Exact controlled worker under validation:
 
-- Current branch head before this documentation reconciliation: `7a7c8d26475e6dfed36dd4362504fc88321df00e`.
-- PR #25 remains Draft and unmerged.
-- `main` remains unchanged by this release path.
-- Latest Clean Worker CI run #1440 and iOS CI run #1221 show `action_required` with zero jobs executed; this is not a test failure and must not be described as broken code.
+- Source SHA: `499d1c59e11ea1abe550678ae334cd46573312d1`
+- Immutable image digest: `sha256:01dc103a7742054b525b4ff71e720d4af220ff8a12b1a0938ed858b0bff250c5`
+- Benchmark workflow run id: `32318014133` (visible workflow run #51)
+- Exact staging Pod: `o5flfm9ioegdt6`
+- Pod cleanup step completed successfully.
 
-### Hardening completed after bad-video reviews
+Technical result:
 
-The branch contains regression protection for the major failure classes discovered in real-video runs:
+- 16/16 processed.
+- 0 execution failures.
+- 0 provider failures.
+- Hybrid availability: **21/22 = 95.45%**.
+- JSON report and preview-video artifacts uploaded successfully.
 
-- complete delivery-attempt reconstruction before destructive editorial decisions;
-- conservative attempt-boundary integrity;
-- retry-family reconciliation for false starts, weak retries and reformulated retries;
-- session-scoped grouping bound to the installed production retry reconciler;
-- Best Take identity preservation after winner selection;
-- prevention of weak/restart fragments leaking into selected output alongside a fuller delivery;
-- Hybrid request payload compaction so large candidate windows are not rejected before Gemini;
-- story-coverage guards that preserve long coherent delivery when short fragments would otherwise veto it;
-- semantic Best Take integrity when Hybrid clearly marks the local winner as failed and one clear usable peer exists;
-- Hybrid alternate integrity to suppress stranded alternate prefixes/suffixes superseded by a complete final winner while failing open on unique material;
-- Benchmark #47/#48 regressions for failed-local-vs-clean-peer selection and stranded Hybrid alternate cleanup.
+Human review: **NOT an editorial pass.**
+
+- **Video 00:** still wrong. The Brain still keeps multiple versions of the same repeated idea instead of selecting the winning delivery. Core sonography repetition and hereditary-cancer repetition remain.
+- **Video 02:** regressed from Benchmark #48. #49 reintroduced malformed failed speech (`I people It was very funny`) that #48 did not select.
+- **Video 03:** regressed further; #49 ends at `te protegen`, cutting the complete delivery too early.
+- **Video 04:** remained correct and improved slightly by removing the stranded `priceless.` fragment.
+- **Video 05:** remained correct/stable; blooper debris stays removed while useful hidden-hunger story remains.
+
+Do not use #49 technical success as evidence of editorial success.
+
+## Root causes proven by #49 diagnostics
+
+### Video 00
+
+Two separate production-path failures were confirmed:
+
+1. **Correct Hybrid deletion was later undone by story protection.** Hybrid correctly labelled some repeated/bad takes `failed` or `alternate`, but `hybrid_story_coverage_guard` restored them because lexical retry coverage did not prove a peer. This revived material the semantic judge had already rejected.
+2. **Short semantic retries remained stranded across deterministic groups.** Short sonography retries were separately labelled `alternate`/`failed`, but because they were not in one deterministic retry group and local corroboration was insufficient, they remained selected.
+
+Therefore the remaining problem is not simply Best Take ranking inside a retry group. The Brain needs a final cross-group semantic retry integrity pass after fail-open/story restoration.
+
+### Video 02
+
+The malformed fragment `I people It was very funny` was Hybrid-labelled `failed` at confidence **0.85**. The generic short-fragment guard required 0.86, so the bad fragment survived. Lowering the generic threshold to 0.85 proved unsafe because an existing regression requires ordinary 0.85 failed speech without structural corroboration to remain fail-open.
+
+The final fix therefore uses additional structural evidence (a compact pronoun-collision restart) at 0.85 while preserving the generic 0.86 fail-open threshold.
+
+### Video 03
+
+The prior completion rollback logic could shorten a take already classified as `complete_idea=True`. That contradicts the editing doctrine. A completed delivery is now protected; a failed tail may be removed without amputating the complete preceding speech.
+
+## Current code checkpoint
+
+Current validated code head before this documentation-only update:
+
+`8101891752545003d1461f59564ec4f0bc63848d`
+
+Validation on that exact code head:
+
+- **CutSell Clean Worker CI #1452 — PASS**
+- **CutSell iOS CI #1233 — PASS**
+
+PR #25 remains Draft and unmerged. `main` remains unchanged by this release path.
+
+## Hardening now implemented after Benchmark #49
+
+- final cross-group semantic retry integrity after Hybrid/story-coverage restoration;
+- combined coverage from nearby authoritative winner/keep deliveries, including winner + immediate continuation;
+- preservation of critical semantic tokens such as negations and numeric facts before removing a repeated delivery;
+- cross-group collapse regressions for Video 00 sonography and hereditary-cancer repetitions;
+- fail-open protections so Video 02 unique story and Video 05 hidden-hunger story are not deleted merely for topic similarity;
+- targeted malformed failed-fragment cleanup for Video 02 at 0.85 when independent pronoun-collision structure proves a broken restart;
+- preservation of the established generic 0.85 fail-open contract for ordinary speech;
+- complete-idea protection for Video 03 so a failed tail cannot shorten already-complete speech;
+- existing protections for Video 04 stranded alternates remain in place.
 
 ## Canonical document hierarchy
 
@@ -107,21 +148,24 @@ The clean release path already has evidence for:
 - Render rollback;
 - worker-image rollback and cleanup.
 
-## Current hardening area
-
-Prioritize only remaining evidence-backed editorial defects:
-
-1. **Video 00 class:** repeated/reformulated delivery that is semantically the same attempt but not being grouped as one retry family, including sonography/hereditary-cancer repetition.
-2. **Video 03 class:** completion-preserving final boundary refinement so completed words/ideas are not clipped at the end.
-3. Preserve the gains already seen in Videos 02/04/05; do not make cleanup more aggressive globally to solve 00/03.
-4. Continue to fail open on unique valid story material and preserve personality/meaningful pauses.
-
 ## Next gate
 
-- Continue code/regression hardening without paid infrastructure.
-- Do not launch another paid RunPod benchmark merely because CI/workflows complete.
-- A new paid GPU/provider validation cycle requires explicit user approval.
-- When a new benchmark is justified and approved, run exactly one controlled validation cycle, delete/verify deletion of the staging Pod, then present previews for human review and stop for user input before any further paid benchmark.
+The current code-level defects exposed by #49 have targeted fixes and green CI, but **real-video editorial quality is not yet revalidated**.
+
+Before another paid RunPod validation:
+
+1. Keep the current code head/regressions green.
+2. Build an immutable worker image from the exact validated source.
+3. **Stop for explicit user approval before creating a new paid RunPod Pod / running another paid validation cycle.**
+4. After approval, run exactly one controlled 16-video Gold RAW cycle.
+5. Delete and verify deletion of the exact staging Pod.
+6. Present Video 00/02/03/04/05 previews for human review.
+7. Treat the cycle as successful only if:
+   - 00 chooses one winning delivery rather than keeping repeated attempts;
+   - 02 regains #48 quality and removes the malformed fragment without losing unique story;
+   - 03 preserves a complete natural ending;
+   - 04 remains correct;
+   - 05 remains correct.
 
 ## Remaining path to closed TestFlight
 
