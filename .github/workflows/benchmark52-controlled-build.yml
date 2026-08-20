@@ -1,5 +1,5 @@
-name: Benchmark 52 Controlled Worker Build
-run-name: Benchmark 52 exact-source immutable worker build
+name: Focused Clean Cut Controlled Worker Build
+run-name: Focused 00-02-03 exact-source immutable worker build
 
 on:
   push:
@@ -17,7 +17,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 25
     env:
-      SOURCE_SHA: 2200dc61a9140f5675b6e7eee432c4acc60b5e74
+      SOURCE_SHA: b02cec5afe2087b4de59747c027098b8fdebd8d7
       IMAGE_REPO: ghcr.io/automatedretailservices/cutsell-worker
     steps:
       - name: Checkout exact validated worker source
@@ -49,4 +49,4 @@ jobs:
           echo "SOURCE_SHA=$SOURCE_SHA" >> "$GITHUB_STEP_SUMMARY"
           echo "IMAGE=$IMAGE@$digest" >> "$GITHUB_STEP_SUMMARY"
           echo "IMAGE_DIGEST=$digest" >> "$GITHUB_STEP_SUMMARY"
-          echo "BENCHMARK52_IMAGE=$IMAGE@$digest"
+          echo "FOCUSED_IMAGE=$IMAGE@$digest"
