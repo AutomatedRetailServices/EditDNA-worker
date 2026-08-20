@@ -29,3 +29,4 @@ jobs:
           jq -n --arg message "Record focused deploy status" --arg content "$encoded" --arg sha "$sha" --arg branch "$branch" '{message:$message,content:$content,sha:$sha,branch:$branch}' > update.json
           curl --fail --silent --show-error --request PUT --url "https://api.github.com/repos/$repo/contents/ops/benchmark52-deploy-status.json" --header "Authorization: Bearer $GH_TOKEN" --header "Accept: application/vnd.github+json" --header "Content-Type: application/json" --data @update.json >/dev/null
           cat status.json
+# refresh after focused retrigger
