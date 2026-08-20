@@ -34,6 +34,7 @@ from .semantic_fragment_guard import install_semantic_fragment_guard
 from .hybrid_retry_completion_integrity import install_hybrid_retry_completion_integrity
 from .hybrid_story_guard import install_hybrid_story_coverage_guard
 from .hybrid_alternate_integrity import install_hybrid_alternate_integrity
+from .hybrid_cross_group_retry_integrity import install_hybrid_cross_group_retry_integrity
 from .local_retry_grouping import install_local_retry_grouping
 from .retry_group_integrity import install_retry_group_integrity
 from .attempt_boundary_integrity import install_attempt_boundary_integrity
@@ -70,6 +71,7 @@ install_semantic_fragment_guard()
 install_hybrid_retry_completion_integrity()
 install_hybrid_story_coverage_guard()
 install_hybrid_alternate_integrity()
+install_hybrid_cross_group_retry_integrity()
 install_local_retry_grouping()
 install_retry_group_integrity()
 install_attempt_boundary_integrity()
