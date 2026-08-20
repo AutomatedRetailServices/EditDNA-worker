@@ -22,14 +22,14 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          curl --fail --silent --show-error --url "https://api.github.com/repos/$GITHUB_REPOSITORY/actions/workflows/cutsell-focused-deploy.yml/runs?event=push&branch=cutsell%2Fmobile-v1-clean&per_page=5" --header "Authorization: Bearer $GH_TOKEN" --header "Accept: application/vnd.github+json" --output deploy.json
+          curl --fail --silent --show-error --url "https://api.github.com/repos/$GITHUB_REPOSITORY/actions/workflows/cutsell-focused-deploy.yml/runs?event=push&branch=cutsell%2Fmobile-v1-clean&per_page=5" --header "Authorization: Bearer $GH_TOKEN" --header "Accept: application/vnd.github+json" --output focused.json
+          curl --fail --silent --show-error --url "https://api.github.com/repos/$GITHUB_REPOSITORY/actions/workflows/benchmark52-controlled-deploy-dispatch.yml/runs?event=push&branch=cutsell%2Fmobile-v1-clean&per_page=5" --header "Authorization: Bearer $GH_TOKEN" --header "Accept: application/vnd.github+json" --output legacy.json
           mkdir -p ops
-          jq '.workflow_runs[0] | {id,run_number,status,conclusion,head_sha,created_at,updated_at}' deploy.json > ops/focused-status.json
+          jq -n --slurpfile f focused.json --slurpfile l legacy.json '{focused:(($f[0].workflow_runs[0]//{})|{id,run_number,status,conclusion,head_sha,created_at,updated_at}),legacy:(($l[0].workflow_runs[0]//{})|{id,run_number,status,conclusion,head_sha,created_at,updated_at})}' > ops/focused-status.json
           cat ops/focused-status.json
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add ops/focused-status.json
-          git commit -m "Record focused benchmark status" || exit 0
+          git commit -m "Record focused deploy inventory" || exit 0
           git pull --rebase origin cutsell/mobile-v1-clean
           git push origin HEAD:cutsell/mobile-v1-clean
-# refresh
