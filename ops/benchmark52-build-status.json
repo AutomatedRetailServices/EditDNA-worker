@@ -1,9 +1,9 @@
 {
-  "id": 32420080782,
-  "run_number": 4,
-  "status": "in_progress",
-  "conclusion": null,
-  "head_sha": "64a0c49f436644200719e0e4acd0a949e73f15f3",
-  "created_at": "2026-08-20T21:34:28Z",
-  "updated_at": "2026-08-20T21:34:32Z"
+  "id": 32420307505,
+  "run_number": 5,
+  "status": "completed",
+  "conclusion": "failure",
+  "head_sha": "23384ab574cc895f770f8ed5b64938698c852bfb",
+  "created_at": "2026-08-20T21:37:10Z",
+  "updated_at": "2026-08-20T21:37:20Z"
 }
