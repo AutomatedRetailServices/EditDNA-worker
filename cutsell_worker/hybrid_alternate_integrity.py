@@ -1,18 +1,12 @@
 """Remove structurally stranded Hybrid alternates beside a clear final winner.
 
 Hybrid intentionally treats ``alternate`` as fail-open because a different delivery can
-contain unique story coverage. Benchmark 47 exposed a narrower case: an explicit lexical
-self-correction may be split into a long punctuation-open prefix plus a tiny corrected
-suffix, and both children can remain as independent alternates immediately before a
-complete winner of the same idea.
+contain unique story coverage. This pass handles the narrower case where an alternate is
+structurally incomplete and substantially repeats a nearby high-confidence winner.
 
-This pass is deliberately conservative. It never removes winners/keeps and it requires a
-nearby high-confidence winner. A longer alternate must be grammatically open *and* share
-several meaningful content tokens with that winner. A tiny closed alternate can be
-removed only when its meaningful token(s) are repeated in the winner and it immediately
-follows one of those already-proven open alternates. This preserves valid short hooks and
-unique story paragraphs while preventing malformed retry debris from becoming final
-speech.
+The competing alternate may appear either before or after the winner. This matters for
+raw creator footage where the creator delivers the clean version, tries the line again,
+then fumbles or cuts off the second attempt.
 """
 from __future__ import annotations
 
@@ -29,6 +23,14 @@ _CONTENT_STOP = frozenset({
     "to", "was", "we", "were", "with", "you", "your", "de", "del", "el", "en", "es",
     "la", "las", "los", "para", "por", "que", "un", "una", "y",
 })
+_OPEN_TAIL_TOKENS = frozenset({
+    "a", "al", "and", "con", "de", "del", "el", "en", "for", "la", "las", "los", "of",
+    "para", "por", "que", "the", "to", "un", "una", "with", "y",
+})
+_OPEN_TAIL_BIGRAMS = frozenset({
+    ("de", "los"), ("de", "las"), ("de", "la"), ("de", "el"), ("por", "los"),
+    ("por", "las"), ("para", "los"), ("para", "las"), ("of", "the"), ("to", "the"),
+})
 
 
 def _tokens(text: str) -> tuple[str, ...]:
@@ -43,14 +45,28 @@ def _sentence_closed(text: str) -> bool:
     return bool(_SENTENCE_END_RE.search(str(text or "").strip()))
 
 
-def _punctuation_open(text: str) -> bool:
-    return str(text or "").rstrip().endswith((",", ":", ";", "-", "–", "—"))
+def _syntactically_open(text: str) -> bool:
+    raw = str(text or "").rstrip()
+    if raw.endswith((",", ":", ";", "-", "–", "—")):
+        return True
+    tokens = _tokens(raw)
+    if not tokens:
+        return False
+    if tokens[-1] in _OPEN_TAIL_TOKENS:
+        return True
+    if len(tokens) >= 2 and (tokens[-2], tokens[-1]) in _OPEN_TAIL_BIGRAMS:
+        return True
+    return False
 
 
-def _forward_gap(left: CandidateTake, right: CandidateTake) -> float:
-    if left.source_asset_id != right.source_asset_id or right.start < left.end:
+def _temporal_gap(left: CandidateTake, right: CandidateTake) -> float:
+    if left.source_asset_id != right.source_asset_id:
         return float("inf")
-    return max(0.0, right.start - left.end)
+    if left.end <= right.start:
+        return max(0.0, right.start - left.end)
+    if right.end <= left.start:
+        return max(0.0, left.start - right.end)
+    return 0.0
 
 
 def _nearby_winners(
@@ -67,9 +83,9 @@ def _nearby_winners(
         label, confidence = semantic.get(other_id, ("", 0.0))
         if label != "winner" or float(confidence) < 0.90:
             continue
-        if _forward_gap(take, other) <= maximum_gap_sec:
+        if _temporal_gap(take, other) <= maximum_gap_sec:
             output.append(other)
-    return tuple(sorted(output, key=lambda item: (item.start, item.end, item.clip_id)))
+    return tuple(sorted(output, key=lambda item: (_temporal_gap(take, item), item.start, item.end, item.clip_id)))
 
 
 def suppress_stranded_hybrid_alternates(
@@ -85,35 +101,40 @@ def suppress_stranded_hybrid_alternates(
     removed_ids: set[str] = set()
     diagnostics: list[dict] = []
 
-    # Pass 1: a long malformed alternate can be suppressed only when it is explicitly
-    # open-ended and substantially overlaps one unique nearby semantic winner.
+    # Pass 1: suppress an incomplete alternate when one unique nearby semantic winner
+    # substantially covers the same communication attempt. The alternate may be before
+    # or after that winner.
     for take in kept_tuple:
         label, confidence = semantic.get(take.clip_id, ("", 0.0))
-        if label != "alternate" or confidence < 0.78:
+        if label != "alternate" or confidence < 0.75:
             continue
-        if take.duration_sec > 14.0 or _sentence_closed(take.text) or not _punctuation_open(take.text):
+        if take.duration_sec > 18.0 or _sentence_closed(take.text) or not _syntactically_open(take.text):
             continue
-        winners = _nearby_winners(take, semantic, take_map, maximum_gap_sec=12.0)
+        winners = _nearby_winners(take, semantic, take_map, maximum_gap_sec=18.0)
         if len(winners) != 1:
             continue
         winner = winners[0]
-        shared = _content_tokens(take.text) & _content_tokens(winner.text)
-        if len(shared) < 3:
+        alternate_content = _content_tokens(take.text)
+        winner_content = _content_tokens(winner.text)
+        shared = alternate_content & winner_content
+        alternate_coverage = len(shared) / max(1, len(alternate_content))
+        if len(shared) < 4 or alternate_coverage < 0.35:
             continue
         removed_ids.add(take.clip_id)
+        relation = "before" if take.end <= winner.start else "after"
         diagnostics.append({
             "clip_id": take.clip_id,
-            "reason": "semantic_alternate_open_retry_before_winner",
+            "reason": "semantic_alternate_incomplete_retry_beside_winner",
             "semantic_confidence": round(confidence, 4),
             "winner_clip_id": winner.clip_id,
+            "temporal_relation": relation,
             "shared_content": sorted(shared),
+            "alternate_coverage": round(alternate_coverage, 4),
             "text": take.text,
         })
 
     # Pass 2: remove a tiny corrected suffix only when it follows one of the malformed
-    # alternates above, precedes one unique winner, and its content is repeated there.
-    # This catches a stranded ``priceless.`` after cutting ``worthless. Oh,`` without
-    # deleting an isolated short punchline.
+    # alternates above, sits near one unique winner, and its content is repeated there.
     for take in kept_tuple:
         if take.clip_id in removed_ids:
             continue
