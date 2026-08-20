@@ -11,7 +11,7 @@ The pass is deliberately conservative:
 - it requires nearby high-confidence ``winner``/``keep`` peers in the same source;
 - one peer may directly cover the candidate, or several peers may cover it only when they
   form one contiguous reconstructed delivery on the same temporal side of the candidate;
-- critical meaning such as negation and numbers must also be preserved by the peers;
+- critical meaning such as semantic negation and numbers must also be preserved by peers;
 - genuinely unique audience-facing material remains fail-open.
 """
 from __future__ import annotations
@@ -31,7 +31,12 @@ _STOP = frozenset({
     "para", "pero", "por", "porque", "que", "se", "si", "su", "sus", "un", "una",
     "unos", "unas", "y", "yo",
 })
-_CRITICAL = frozenset({"no", "not", "never", "nunca", "sin", "without"})
+_NEGATION = frozenset({
+    "no", "not", "never", "nunca", "sin", "without",
+    "nadie", "ningun", "ningún", "ninguna", "ninguno", "ningunos", "ningunas",
+    "nobody", "none", "neither",
+})
+_NEGATION_CANONICAL = "__negation__"
 
 
 def _tokens(text: str) -> tuple[str, ...]:
@@ -46,10 +51,13 @@ def _content(text: str) -> set[str]:
 
 
 def _critical(text: str) -> set[str]:
-    return {
-        token for token in _tokens(text)
-        if token in _CRITICAL or any(ch.isdigit() for ch in token)
-    }
+    critical: set[str] = set()
+    for token in _tokens(text):
+        if token in _NEGATION:
+            critical.add(_NEGATION_CANONICAL)
+        if any(ch.isdigit() for ch in token):
+            critical.add(token)
+    return critical
 
 
 def _gap(left: CandidateTake, right: CandidateTake) -> float:
@@ -99,10 +107,7 @@ def _single_peer_cover(candidate: CandidateTake, peers: tuple[CandidateTake, ...
     if candidate.duration_sec <= 6.0:
         direct = strongest_shared >= 2 and strongest_coverage >= 0.50
     else:
-        # A single authoritative peer is stronger evidence than diffuse topic overlap.
-        # 50% directional coverage preserves proven reformulation retries such as Video 00
-        # while multi-peer story coverage remains gated by contiguous-chain structure.
-        direct = strongest_shared >= 4 and strongest_coverage >= 0.50
+        direct = strongest_shared >= 4 and strongest_coverage >= 0.53
     return direct, strongest_shared, strongest_coverage, strongest_peer
 
 
@@ -205,10 +210,8 @@ def _covered_by_authoritative_peers(
     if candidate.duration_sec <= 6.0:
         enough = shared_union >= 2 and coverage >= 0.50
     elif candidate.duration_sec <= 14.0:
-        enough = shared_union >= 4 and coverage >= 0.45
+        enough = shared_union >= 4 and coverage >= 0.44
     else:
-        # Preserve the proven Video 00 winner+continuation family (12/27 = 44.44%)
-        # without permitting diffuse multi-peer coverage: chain structure is mandatory.
         enough = shared_union >= 5 and coverage >= 0.44
 
     return bool(enough and critical_preserved), {
