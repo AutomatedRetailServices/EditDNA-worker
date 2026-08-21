@@ -1,5 +1,5 @@
-name: Benchmark 51 Controlled Worker Build
-run-name: Benchmark 51 exact-source immutable worker build
+name: Video 00 Round 2 Focused Worker Build
+run-name: Video 00 round-2 exact-source immutable worker build
 
 on:
   push:
@@ -17,7 +17,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 25
     env:
-      SOURCE_SHA: 65fe16519bbf72562805d5dac0333b993c43c179
+      SOURCE_SHA: a425a2cc88c81d53ef4a3135825a8c951bf51233
       IMAGE_REPO: ghcr.io/automatedretailservices/cutsell-worker
     steps:
       - name: Checkout exact validated worker source
@@ -49,4 +49,4 @@ jobs:
           echo "SOURCE_SHA=$SOURCE_SHA" >> "$GITHUB_STEP_SUMMARY"
           echo "IMAGE=$IMAGE@$digest" >> "$GITHUB_STEP_SUMMARY"
           echo "IMAGE_DIGEST=$digest" >> "$GITHUB_STEP_SUMMARY"
-          echo "BENCHMARK51_IMAGE=$IMAGE@$digest"
+          echo "FOCUSED_ROUND2_IMAGE=$IMAGE@$digest"
