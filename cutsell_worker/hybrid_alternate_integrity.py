@@ -127,9 +127,14 @@ def suppress_stranded_hybrid_alternates(
             continue
         removed_ids.add(take.clip_id)
         relation = "before" if before_winner else "after"
+        reason = (
+            "semantic_alternate_open_retry_before_winner"
+            if before_winner
+            else "semantic_alternate_incomplete_retry_after_winner"
+        )
         diagnostics.append({
             "clip_id": take.clip_id,
-            "reason": "semantic_alternate_incomplete_retry_beside_winner",
+            "reason": reason,
             "semantic_confidence": round(confidence, 4),
             "winner_clip_id": winner.clip_id,
             "temporal_relation": relation,
