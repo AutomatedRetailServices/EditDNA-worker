@@ -1,7 +1,9 @@
 """FFmpeg renderer for the clean CutSell draft timeline."""
 from __future__ import annotations
 
+from dataclasses import replace
 from pathlib import Path
+import re
 import subprocess
 import tempfile
 from typing import Iterable
@@ -15,11 +17,87 @@ from .media_overlay_render import (
 from .media_probe import probe_media
 from .render_plan import RenderSegment
 
+_SILENCE_START_RE = re.compile(r"silence_start:\s*([0-9.]+)")
+_SILENCE_END_RE = re.compile(r"silence_end:\s*([0-9.]+)")
+
 
 def _run(command: list[str]) -> None:
     completed = subprocess.run(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
     if completed.returncode != 0:
         raise RuntimeError("ffmpeg_render_failed")
+
+
+def _tighten_trailing_silence(
+    segment: RenderSegment,
+    *,
+    minimum_silence_sec: float = 0.28,
+    maximum_trim_sec: float = 3.0,
+    edge_tolerance_sec: float = 0.16,
+    speech_tail_pad_sec: float = 0.04,
+) -> RenderSegment:
+    """Remove proven silent post-roll from one selected source segment.
+
+    Human Gold for Video 00 repeatedly marks a finished sentence followed by visible
+    pause/mueca/reset before the next useful idea. Earlier stages can miss those visual
+    boundaries. The final renderer has one objective signal available for every clip:
+    the real source audio. We therefore trim only a silence interval that reaches the
+    segment's trailing edge. Internal pauses are untouched and spoken audio is never
+    removed.
+    """
+    if segment.duration_sec < minimum_silence_sec + 0.35:
+        return segment
+    probe = probe_media(segment.source_path)
+    if not probe.has_audio:
+        return segment
+
+    duration = segment.duration_sec
+    command = [
+        "ffmpeg", "-hide_banner", "-loglevel", "info",
+        "-ss", f"{segment.start:.3f}",
+        "-t", f"{duration:.3f}",
+        "-i", segment.source_path,
+        "-vn",
+        "-af", f"silencedetect=noise=-35dB:d={minimum_silence_sec:.3f}",
+        "-f", "null", "-",
+    ]
+    completed = subprocess.run(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    if completed.returncode != 0:
+        return segment
+
+    intervals: list[tuple[float, float]] = []
+    pending_start: float | None = None
+    for line in completed.stderr.splitlines():
+        start_match = _SILENCE_START_RE.search(line)
+        if start_match:
+            pending_start = float(start_match.group(1))
+        end_match = _SILENCE_END_RE.search(line)
+        if end_match and pending_start is not None:
+            intervals.append((pending_start, float(end_match.group(1))))
+            pending_start = None
+    if pending_start is not None:
+        intervals.append((pending_start, duration))
+
+    trailing = None
+    for silence_start, silence_end in intervals:
+        silence_duration = max(0.0, silence_end - silence_start)
+        reaches_edge = silence_end >= duration - edge_tolerance_sec
+        if not reaches_edge or silence_duration < minimum_silence_sec:
+            continue
+        if trailing is None or silence_start > trailing[0]:
+            trailing = (silence_start, silence_end)
+    if trailing is None:
+        return segment
+
+    silence_start, _ = trailing
+    trim_amount = duration - silence_start
+    if trim_amount <= 0.0 or trim_amount > maximum_trim_sec:
+        return segment
+
+    new_end = segment.start + silence_start + speech_tail_pad_sec
+    new_end = min(segment.end, new_end)
+    if new_end - segment.start < 0.35 or segment.end - new_end < minimum_silence_sec - 0.05:
+        return segment
+    return replace(segment, end=new_end)
 
 
 def _srt_timestamp(seconds: float) -> str:
@@ -88,7 +166,7 @@ def render_preview(
     media_overlays: Iterable[LocalMediaOverlay] = (),
 ) -> str:
     """Render clips, captions, text and photo/video overlay lanes."""
-    segment_tuple = tuple(segments)
+    segment_tuple = tuple(_tighten_trailing_silence(segment) for segment in segments)
     text_tuple = tuple(text_overlays)
     media_tuple = tuple(media_overlays)
     if not segment_tuple:
