@@ -1,6 +1,7 @@
 from cutsell_worker.contracts import CandidateTake, MediaSignals, Word
 from cutsell_worker.delivery_edge_trim import trim_delivery_edge_slack
 from cutsell_worker.hybrid_alternate_integrity import suppress_stranded_hybrid_alternates
+from cutsell_worker.hybrid_retry_winner_authority import enforce_proven_retry_winners
 from cutsell_worker.internal_retake_winner import prefer_internal_clean_retakes
 from cutsell_worker.providers import ProviderStatus
 from cutsell_worker.whole_video_analysis import SourceVideoContext, TemporalEvent, WholeVideoContext
@@ -45,23 +46,28 @@ def _context(*events):
     )
 
 
-def test_video00_micro_visual_reset_after_completed_sentence_is_trimmed():
-    words = _words(("esta", "frase", "ya", "termino"), start=0.0, step=0.2)
+def test_video00_finished_sentence_drops_visible_postroll_reset():
+    """Human 0:12 note means timestamp 00:12, not a 120 ms trim target.
+
+    The invariant is: once spoken delivery is complete, proven dead-air/body-reset
+    post-roll should not remain attached to the usable sentence.
+    """
+    words = _words(("esta", "frase", "ya", "termino"), start=10.6, step=0.3)
     take = CandidateTake(
         clip_id="sentence",
         source_asset_id="src",
         source_order=0,
-        start=0.0,
-        end=0.98,
+        start=10.6,
+        end=13.2,
         text="esta frase ya termino",
         words=words,
-        signals=MediaSignals("src", 0.0, 0.98),
+        signals=MediaSignals("src", 10.6, 13.2),
         complete_idea=True,
     )
-    # Last spoken word ends at 0.80. The remaining 180 ms is a strong visible body
-    # reset/mueca: human Gold says this should not survive in a talking-head cut.
+    # Speech ends at 11.8 and the creator visibly exits the delivery until 13.2.
     context = _context(
-        TemporalEvent("src", 0.80, 0.96, "body_reset_candidate", 0.95, "creator visibly resets after sentence"),
+        TemporalEvent("src", 11.82, 13.10, "unintentional_dead_air", 0.95, "sentence is over; creator pauses and resets"),
+        TemporalEvent("src", 11.90, 12.80, "body_reset_candidate", 0.96, "visible post-delivery mueca/body reset"),
     )
 
     trimmed, diagnostics = trim_delivery_edge_slack((take,), context)
@@ -69,7 +75,7 @@ def test_video00_micro_visual_reset_after_completed_sentence_is_trimmed():
     assert len(trimmed) == 1
     assert trimmed[0].end == words[-1].end
     assert diagnostics
-    assert diagnostics[0]["actions"][0]["talking_head_micro_edge"] is True
+    assert diagnostics[0]["actions"][0]["action"] == "trim_trailing_non_speech_cut_signal"
 
 
 def test_video00_broken_internal_attempt_yields_to_later_clean_retake():
@@ -91,7 +97,6 @@ def test_video00_broken_internal_attempt_yields_to_later_clean_retake():
         signals=MediaSignals("src", 10.0, words[-1].end + 0.1),
         complete_idea=True,
     )
-    # Retry setup sits between the broken delivery and the clean redo.
     retry_start = words[12].start - 0.08
     context = _context(
         TemporalEvent("src", retry_start, words[12].start + 0.06, "retry_setup", 0.94, "creator restarts same idea"),
@@ -127,6 +132,81 @@ def test_video00_internal_retake_guard_fails_open_without_retry_evidence():
     resolved, diagnostics = prefer_internal_clean_retakes((take,), _context())
 
     assert resolved == (take,)
+    assert diagnostics == ()
+
+
+def test_video00_round2_failed_sonography_attempt_yields_to_clean_later_winner():
+    failed = _take(
+        "clip_aa7c",
+        25.60,
+        32.42,
+        "Nunca se nos ocurrió hacer un chequeo de sonografía de la tiroides pues porque cada año que me hacía mínimo dos",
+        complete=False,
+    )
+    winner = _take(
+        "clip_8e43",
+        35.46,
+        45.54,
+        "Nunca se nos ocurrió hacer un chequeo de la tiroides por sonografía porque siempre en mis exámenes la tiroides salía completamente normal",
+        complete=True,
+    )
+    context = _context(
+        TemporalEvent("src", 32.60, 33.40, "retry_setup", 0.86, "creator stops broken first attempt and retries"),
+    )
+
+    kept, removed, diagnostics = enforce_proven_retry_winners(
+        (failed, winner),
+        ((failed.clip_id, "failed", 0.80), (winner.clip_id, "winner", 0.95)),
+        context,
+    )
+
+    assert kept == (winner,)
+    assert removed == (failed,)
+    assert diagnostics[0]["reason"] == "failed_attempt_yields_to_proven_later_retry_winner"
+
+
+def test_video00_round2_failed_partial_sonography_restart_yields_to_later_winner():
+    failed = _take(
+        "clip_9aad",
+        108.56,
+        111.86,
+        "Ahí fue cuando me mandaron a hacer sonografías de tiroides",
+        complete=False,
+    )
+    winner = _take(
+        "clip_8b3e",
+        120.11,
+        124.15,
+        "a hacer sonografías de tiroides y otras sonografías",
+        complete=True,
+    )
+    context = _context(
+        TemporalEvent("src", 112.01, 112.34, "retry_setup", 0.86, "creator resets and restarts delivery"),
+    )
+
+    kept, removed, diagnostics = enforce_proven_retry_winners(
+        (failed, winner),
+        ((failed.clip_id, "failed", 0.80), (winner.clip_id, "winner", 0.95)),
+        context,
+    )
+
+    assert kept == (winner,)
+    assert removed == (failed,)
+    assert diagnostics[0]["winner_clip_id"] == winner.clip_id
+
+
+def test_retry_winner_authority_fails_open_without_retry_setup():
+    failed = _take("failed", 10.0, 16.0, "mi historia de salud y mi experiencia personal completa", complete=True)
+    winner = _take("winner", 18.0, 24.0, "mi historia de salud y otra experiencia personal completa", complete=True)
+
+    kept, removed, diagnostics = enforce_proven_retry_winners(
+        (failed, winner),
+        (("failed", "failed", 0.90), ("winner", "winner", 0.96)),
+        _context(),
+    )
+
+    assert kept == (failed, winner)
+    assert removed == ()
     assert diagnostics == ()
 
 
