@@ -158,4 +158,4 @@ def test_video00_clean_final_winner_suppresses_later_open_alternate():
     assert "alternate" not in {take.clip_id for take in kept}
     assert "alternate" in {take.clip_id for take in removed}
     assert diagnostics[0]["temporal_relation"] == "after"
-    assert diagnostics[0]["reason"] == "semantic_alternate_incomplete_retry_beside_winner"
+    assert diagnostics[0]["reason"] == "semantic_alternate_incomplete_retry_after_winner"
