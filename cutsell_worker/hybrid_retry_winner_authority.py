@@ -77,11 +77,18 @@ def _same_retry_attempt(failed: CandidateTake, winner: CandidateTake) -> tuple[b
     numbers_left = _numbers(failed.text)
     numbers_right = _numbers(winner.text)
     numbers_ok = not numbers_left or not numbers_right or numbers_left == numbers_right
+
+    incomplete_prefix_covered = bool(
+        not failed.complete_idea
+        and len(shared) >= 3
+        and winner_cov >= 0.70
+    )
     enough = bool(
         numbers_ok
         and (
             (len(shared) >= 4 and max(failed_cov, winner_cov) >= 0.45)
             or (len(shared) >= 3 and min(failed_cov, winner_cov) >= 0.55)
+            or incomplete_prefix_covered
         )
     )
     return enough, {
@@ -89,6 +96,7 @@ def _same_retry_attempt(failed: CandidateTake, winner: CandidateTake) -> tuple[b
         "shared_count": len(shared),
         "failed_coverage": round(failed_cov, 4),
         "winner_coverage": round(winner_cov, 4),
+        "incomplete_prefix_covered": incomplete_prefix_covered,
         "numbers_ok": numbers_ok,
     }
 
