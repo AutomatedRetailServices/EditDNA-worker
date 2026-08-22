@@ -145,7 +145,8 @@ def test_round8_orphan_319_open_prefix_is_removed_when_335_continuation_already_
         314.60,
         (
             "Esta es mi experiencia. Soy la única en mi familia que tiene este tipo de cáncer. "
-            "Está comprobado científicamente que solo un 5-10% son de carácter hereditario. "
+            "Por eso no creo y está comprobado científicamente que los cánceres son hereditarios. "
+            "Más bien, solo un 5-10% son de carácter hereditario. "
             "Mayormente son nuestras elecciones de vida, así que cuídate."
         ),
     )
