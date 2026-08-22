@@ -48,6 +48,19 @@ def _coverage(source: CandidateTake, peers: Iterable[CandidateTake]) -> tuple[in
     return shared, shared / max(1, len(own))
 
 
+def _pair_coverage(left: CandidateTake, right: CandidateTake) -> tuple[int, float, float]:
+    left_content = _content(left.text)
+    right_content = _content(right.text)
+    if not left_content or not right_content:
+        return 0, 0.0, 0.0
+    shared = len(left_content & right_content)
+    return (
+        shared,
+        shared / max(1, len(left_content)),
+        shared / max(1, len(right_content)),
+    )
+
+
 def _gap(left: CandidateTake, right: CandidateTake) -> float:
     if left.source_asset_id != right.source_asset_id:
         return float("inf")
@@ -153,13 +166,17 @@ def reconcile_human_gold_hybrid(result, source_takes, context=None):
             has_failure_evidence = _local_failure(previous, context) or retry_conf >= 0.84
             if not has_failure_evidence:
                 continue
-            shared, previous_cov = _coverage(previous, (candidate,))
-            if shared < 3 or previous_cov < 0.55:
+            shared, previous_cov, candidate_cov = _pair_coverage(previous, candidate)
+            # A clean retry can be shorter than the broken lead-in. Require at least three
+            # meaningful shared tokens and strong coverage in either direction. This keeps
+            # the repair narrow while allowing a concise complete retake to supersede a
+            # longer failed attempt that contained setup/fumble words.
+            if shared < 3 or max(previous_cov, candidate_cov) < 0.70:
                 continue
-            prior_options.append((previous_cov, shared, retry_conf, -gap, previous))
+            prior_options.append((max(previous_cov, candidate_cov), candidate_cov, shared, retry_conf, -gap, previous))
         if not prior_options:
             continue
-        _, shared, retry_conf, _, previous = max(prior_options, key=lambda item: item[:4])
+        _, candidate_cov, shared, retry_conf, _, previous = max(prior_options, key=lambda item: item[:5])
         kept.pop(previous.clip_id, None)
         deleted[previous.clip_id] = previous
         deleted.pop(candidate.clip_id, None)
@@ -169,6 +186,7 @@ def reconcile_human_gold_hybrid(result, source_takes, context=None):
             "restored_clip_id": candidate.clip_id,
             "removed_clip_id": previous.clip_id,
             "shared_content_tokens": shared,
+            "candidate_coverage": round(candidate_cov, 4),
             "retry_setup_confidence": round(retry_conf, 4),
         })
 
