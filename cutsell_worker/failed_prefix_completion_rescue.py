@@ -11,7 +11,10 @@ Example Gold case (Video 03):
     failed:   "la barrera cutánea te la te hace como"
     rescue:   "la barrera cutánea"
 
-The pass is intentionally narrow and runs after all Hybrid cleanup guards.
+The pass is intentionally narrow and runs after all Hybrid cleanup guards. A semantic
+failure confidence of 0.85 is accepted only because the independent lexical collision
+(``te la te``-style repeated function word) plus a two-content-word completion prefix are
+also mandatory. Ordinary low-confidence failed speech therefore still fails open.
 """
 from __future__ import annotations
 
@@ -84,7 +87,10 @@ def rescue_failed_completion_prefixes(
 
     for candidate in deleted:
         label, confidence = semantic.get(candidate.clip_id, ("", 0.0))
-        if label != "failed" or confidence < 0.90:
+        # Round 11 showed a real case where Hybrid correctly marked the whole fumbled
+        # tail failed at .85. The structural checks below are deliberately strict enough
+        # that accepting .85 here does not broaden generic failed-speech deletion.
+        if label != "failed" or confidence < 0.85:
             continue
         if candidate.duration_sec > 5.0 or len(candidate.words) < 6:
             continue
