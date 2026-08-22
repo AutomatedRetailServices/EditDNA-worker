@@ -138,8 +138,6 @@ def _repeated_opening_split(
                 continue
             if index - (previous + size) < minimum_attempt_gap_words:
                 continue
-            # Avoid tiny tail fragments: the second occurrence must begin early enough
-            # to contain a substantive retake after it.
             if len(normalized) - index < size + 3:
                 continue
             return index, previous, phrase
@@ -156,19 +154,35 @@ def _lexical_visual_retry_split(take: CandidateTake, words) -> tuple[int, dict] 
     split, previous, phrase = found
     if split < 4 or len(words) - split < 5:
         return None
-    left_window = words[max(0, split - 14) : split]
-    right_window = words[split : min(len(words), split + 16)]
-    shared, left_cov, right_cov = _overlap(left_window, right_window)
-    if shared < 3 or max(left_cov, right_cov) < 0.45:
+
+    # The repeated opening itself is the structural retry evidence. Do not require a
+    # second nearby-window overlap check: Round 5 showed that such a window can start
+    # after the first opening and therefore discard the very evidence that located the
+    # retry. Instead require the verbatim opening to contain at least three meaningful
+    # content words and verify that those words are present at the start of the retained
+    # right-side delivery. Combined with visual_fumble >= 0.65 and the long contiguous
+    # repetition above, this remains substantially narrower than generic repetition.
+    phrase_content = {
+        token for token in phrase
+        if len(token) >= 3 and token not in _STOP
+    }
+    if len(phrase_content) < 3:
         return None
+    right_content = _content_words(words[split : min(len(words), split + 18)])
+    shared = len(phrase_content & right_content)
+    phrase_coverage = shared / max(1, len(phrase_content))
+    right_coverage = shared / max(1, len(right_content))
+    if shared < 3 or phrase_coverage < 0.80:
+        return None
+
     return split, {
         "evidence_type": "repeated_opening_plus_visual_fumble",
         "visual_fumble": round(float(signals.visual_fumble), 4),
         "repeated_phrase": " ".join(phrase),
         "first_phrase_index": previous,
         "shared_content_tokens": shared,
-        "left_coverage": round(left_cov, 4),
-        "right_coverage": round(right_cov, 4),
+        "left_coverage": round(phrase_coverage, 4),
+        "right_coverage": round(right_coverage, 4),
     }
 
 
