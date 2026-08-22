@@ -2,7 +2,7 @@
 
 Two failure modes can survive earlier guards:
 1) a clean complete retake is deleted as a short alternate "covered by neighbors" while
-   the preceding retry attempt has local failure evidence and remains selected;
+   the preceding retry attempt has local failure/retry evidence and remains selected;
 2) an incomplete alternate is correctly deleted beside a winner, but its immediate
    continuation survives without a semantic label and renders the same losing delivery.
 
@@ -64,6 +64,34 @@ def _local_failure(take: CandidateTake, context) -> bool:
     return bool(failed)
 
 
+def _retry_setup_between(previous: CandidateTake, candidate: CandidateTake, context) -> float:
+    """Return strong retry_setup confidence in the transition between two attempts.
+
+    Human Gold showed that the creator's reset can begin immediately after the failed
+    attempt ends, so it may sit outside the previous take's destructive local-evidence
+    window. Treat this as pairwise retry evidence, not as a global failure label.
+    """
+    if context is None or previous.source_asset_id != candidate.source_asset_id:
+        return 0.0
+    start = max(previous.start, previous.end - 0.35)
+    end = min(candidate.start, previous.end + 2.5)
+    if end < start:
+        return 0.0
+    best = 0.0
+    for source in context.sources:
+        if source.source_asset_id != previous.source_asset_id:
+            continue
+        for event in source.events:
+            kind = str(event.kind or "").strip().lower().replace("-", "_").replace(" ", "_")
+            if kind != "retry_setup":
+                continue
+            if event.end < start or event.start > end:
+                continue
+            best = max(best, float(event.confidence))
+        break
+    return best
+
+
 def _deleted_short_alternate_ids(diagnostics) -> set[str]:
     out: set[str] = set()
     def visit(value):
@@ -105,7 +133,8 @@ def reconcile_human_gold_hybrid(result, source_takes, context=None):
     diagnostics: list[dict] = []
 
     # Repair 1: restore a complete retake wrongly deleted as short alternate debris,
-    # and remove the preceding locally-failed retry attempt it supersedes.
+    # and remove the preceding retry attempt it supersedes. Evidence may be direct local
+    # failure OR a strong retry_setup in the transition immediately after that attempt.
     for cid in _deleted_short_alternate_ids(result.diagnostics):
         candidate = deleted.get(cid)
         if candidate is None or not candidate.complete_idea:
@@ -118,15 +147,19 @@ def reconcile_human_gold_hybrid(result, source_takes, context=None):
             if previous.source_asset_id != candidate.source_asset_id or previous.end > candidate.start:
                 continue
             gap = _gap(previous, candidate)
-            if gap > 15.0 or not _local_failure(previous, context):
+            if gap > 15.0:
+                continue
+            retry_conf = _retry_setup_between(previous, candidate, context)
+            has_failure_evidence = _local_failure(previous, context) or retry_conf >= 0.84
+            if not has_failure_evidence:
                 continue
             shared, previous_cov = _coverage(previous, (candidate,))
             if shared < 3 or previous_cov < 0.55:
                 continue
-            prior_options.append((previous_cov, shared, -gap, previous))
+            prior_options.append((previous_cov, shared, retry_conf, -gap, previous))
         if not prior_options:
             continue
-        _, shared, _, previous = max(prior_options, key=lambda item: item[:3])
+        _, shared, retry_conf, _, previous = max(prior_options, key=lambda item: item[:4])
         kept.pop(previous.clip_id, None)
         deleted[previous.clip_id] = previous
         deleted.pop(candidate.clip_id, None)
@@ -136,6 +169,7 @@ def reconcile_human_gold_hybrid(result, source_takes, context=None):
             "restored_clip_id": candidate.clip_id,
             "removed_clip_id": previous.clip_id,
             "shared_content_tokens": shared,
+            "retry_setup_confidence": round(retry_conf, 4),
         })
 
     # Repair 2: when an incomplete alternate after a winner was already removed,
