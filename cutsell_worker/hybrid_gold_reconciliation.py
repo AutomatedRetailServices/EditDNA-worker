@@ -148,12 +148,19 @@ def reconcile_human_gold_hybrid(result, source_takes, context=None):
     # Repair 1: restore a complete retake wrongly deleted as short alternate debris,
     # and remove the preceding retry attempt it supersedes. Evidence may be direct local
     # failure OR a strong retry_setup in the transition immediately after that attempt.
+    #
+    # Round 4 exposed an overlap-window integration detail: the same clean retake was
+    # judged alternate=0.75 in one window and keep=0.80 in another. The semantic reducer
+    # intentionally retained the higher-priority "alternate" label, so requiring 0.80
+    # here made the exact Gold repair unreachable even though the short-alternate cleanup
+    # itself is allowed at 0.74. Match that proven upstream floor, then keep the much
+    # stronger pairwise retry/coverage safeguards below.
     for cid in _deleted_short_alternate_ids(result.diagnostics):
         candidate = deleted.get(cid)
         if candidate is None or not candidate.complete_idea:
             continue
         label, conf = semantic.get(cid, ("", 0.0))
-        if label not in {"alternate", "winner", "keep"} or conf < 0.80:
+        if label not in {"alternate", "winner", "keep"} or conf < 0.74:
             continue
         prior_options = []
         for previous in kept.values():
@@ -185,6 +192,8 @@ def reconcile_human_gold_hybrid(result, source_takes, context=None):
             "reason": "restore_clean_retake_remove_failed_previous",
             "restored_clip_id": candidate.clip_id,
             "removed_clip_id": previous.clip_id,
+            "semantic_label": label,
+            "semantic_confidence": round(conf, 4),
             "shared_content_tokens": shared,
             "candidate_coverage": round(candidate_cov, 4),
             "retry_setup_confidence": round(retry_conf, 4),
