@@ -1,5 +1,5 @@
-name: Video 00 Round 4 Focused Orchestrator
-run-name: Video 00 round-4 focused 00-02-03 benchmark
+name: Video 00 Round 5 Focused Orchestrator
+run-name: Video 00 round-5 focused 00-02-03 benchmark
 
 on:
   push:
@@ -10,23 +10,59 @@ on:
 
 permissions:
   contents: read
+  packages: write
   actions: write
 
 jobs:
   orchestrate:
     runs-on: ubuntu-latest
-    timeout-minutes: 120
+    timeout-minutes: 150
     env:
       RUNPOD_API_KEY: ${{ secrets.RUNPOD_API_KEY }}
       REDIS_URL: ${{ secrets.REDIS_URL }}
       GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
       RUNPOD_TEMPLATE_NAME: EditDNA-Worker-2
-      SOURCE_SHA: a91889826b6d70d585480689269d16364924b32c
+      SOURCE_SHA: 99ec8e6a6d86fda70666fe42129043e217108e66
       IMAGE_REPO: ghcr.io/automatedretailservices/cutsell-worker
-      EXPECTED_DIGEST: sha256:d8848de5c429e1b1ac759c385fbed303153a2534d4dcec737d53ddc19d9bebc8
       POD_ID: ''
+
     steps:
-      - name: Resolve exact immutable round-4 worker image
+      - name: Checkout exact Round 5 source
+        uses: actions/checkout@v4
+        with:
+          ref: 99ec8e6a6d86fda70666fe42129043e217108e66
+          fetch-depth: 1
+
+      - name: Login to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build push and resolve exact immutable Round 5 worker image
+        shell: bash
+        run: |
+          set -euo pipefail
+          image="$IMAGE_REPO:$SOURCE_SHA"
+          docker build -t "$image" -f Dockerfile.cutsell.worker .
+          docker run --rm --entrypoint python "$image" - <<'PY'
+          import importlib.util
+          if importlib.util.find_spec('openai') is not None:
+              raise SystemExit('OpenAI SDK unexpectedly present in RunPod worker image')
+          print('openai_sdk_absent=true')
+          PY
+          docker push "$image"
+          docker buildx imagetools inspect "$image" > image-inspect.txt
+          resolved=$(awk '/^Digest:/ {print $2; exit}' image-inspect.txt)
+          test -n "$resolved"
+          case "$resolved" in sha256:[0-9a-f][0-9a-f]*) ;; *) echo "Invalid digest: $resolved"; exit 3;; esac
+          echo "IMAGE_DIGEST=$resolved" >> "$GITHUB_ENV"
+          echo "IMMUTABLE_IMAGE=$image@$resolved" >> "$GITHUB_ENV"
+          echo "source_sha=$SOURCE_SHA" >> "$GITHUB_STEP_SUMMARY"
+          echo "image_digest=$resolved" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Ensure no stale staging worker remains
         shell: bash
         run: |
           set -euo pipefail
@@ -34,16 +70,6 @@ jobs:
           test -n "${REDIS_URL:-}"
           test -n "${GEMINI_API_KEY:-}"
           echo "::add-mask::$GEMINI_API_KEY"
-          image="$IMAGE_REPO:$SOURCE_SHA"
-          docker buildx imagetools inspect "$image" > image-inspect.txt
-          resolved=$(awk '/^Digest:/ {print $2; exit}' image-inspect.txt)
-          test "$resolved" = "$EXPECTED_DIGEST"
-          echo "IMMUTABLE_IMAGE=$image@$resolved" >> "$GITHUB_ENV"
-
-      - name: Ensure no stale staging worker remains
-        shell: bash
-        run: |
-          set -euo pipefail
           curl --fail --silent --show-error --url "https://rest.runpod.io/v1/pods" --header "Authorization: Bearer $RUNPOD_API_KEY" --output pods-before.json
           count=$(jq '[.[] | select(.name == "cutsell-staging-worker")] | length' pods-before.json)
           test "$count" -le 1
@@ -84,12 +110,14 @@ jobs:
           done
           echo "VOLUME_MOUNT=$(printf '%s' "$TEMPLATE" | jq -r '.volumeMountPath // "/workspace"')" >> "$GITHUB_ENV"
 
-      - name: Create exactly one staging GPU worker
+      - name: Create exactly one Round 5 staging GPU worker
         shell: bash
         run: |
           set -euo pipefail
-          jq --arg name "cutsell-staging-worker" --arg image "$IMMUTABLE_IMAGE" --arg redis "$REDIS_URL" --arg gemini "$GEMINI_API_KEY" --arg mount "$VOLUME_MOUNT" '. + {REDIS_URL:$redis,GEMINI_API_KEY:$gemini,CUTSELL_BRAIN_BACKEND:"runpod_local",CUTSELL_EDITORIAL_MODE:"clean_cut",CUTSELL_ASR_MODEL:"medium",CUTSELL_CLEAN_CUT_JUDGE:"0",CUTSELL_HYBRID_PROVIDER:"google",CUTSELL_HYBRID_LLM_ENABLED:"1",CUTSELL_HYBRID_PRIMARY_MODEL:"gemini-3.5-flash-lite",CUTSELL_HYBRID_ESCALATION_MODEL:"gemini-3.6-flash",CUTSELL_HYBRID_MAX_SESSION_USD:"0.0075",CUTSELL_HYBRID_TEST_BUDGET_USD:"0.50"} | {name:$name,imageName:$image,cloudType:"COMMUNITY",computeType:"GPU",gpuCount:1,gpuTypeIds:["NVIDIA RTX A5000","NVIDIA RTX A4000","NVIDIA L4","NVIDIA A40","NVIDIA RTX A6000","NVIDIA GeForce RTX 3090","NVIDIA GeForce RTX 4090"],gpuTypePriority:"custom",interruptible:false,containerDiskInGb:30,volumeInGb:20,volumeMountPath:$mount,env:.}' safe-env.json > create-pod.json
+          jq --arg name "cutsell-staging-worker" --arg image "$IMMUTABLE_IMAGE" --arg redis "$REDIS_URL" --arg gemini "$GEMINI_API_KEY" --arg mount "$VOLUME_MOUNT" '. + {REDIS_URL:$redis,GEMINI_API_KEY:$gemini,CUTSELL_BRAIN_BACKEND:"runpod_local",CUTSELL_EDITORIAL_MODE:"clean_cut",CUTSELL_ASR_MODEL:"medium",CUTSELL_CLEAN_CUT_JUDGE:"0",CUTSELL_HYBRID_PROVIDER:"google",CUTSELL_HYBRID_LLM_ENABLED:"1",CUTSELL_HYBRID_PRIMARY_MODEL:"gemini-3.5-flash-lite",CUTSELL_HYBRID_ESCALATION_MODEL:"gemini-3.6-flash",CUTSELL_HYBRID_MAX_SESSION_USD:"0.0075",CUTSELL_HYBRID_MAX_EDIT_USD:"0.50",CUTSELL_HYBRID_TEST_BUDGET_USD:"0.50"} | {name:$name,imageName:$image,cloudType:"COMMUNITY",computeType:"GPU",gpuCount:1,gpuTypeIds:["NVIDIA RTX A5000","NVIDIA RTX A4000","NVIDIA L4","NVIDIA A40","NVIDIA RTX A6000","NVIDIA GeForce RTX 3090","NVIDIA GeForce RTX 4090"],gpuTypePriority:"custom",interruptible:false,containerDiskInGb:30,volumeInGb:20,volumeMountPath:$mount,env:.}' safe-env.json > create-pod.json
+          if jq -e '.env | has("OPENAI_API_KEY") or has("EDITDNA_USE_LLM") or has("EDITDNA_LLM_MODEL")' create-pod.json >/dev/null; then exit 7; fi
           code=$(curl --silent --show-error --write-out '%{http_code}' --request POST --url "https://rest.runpod.io/v1/pods" --header "Authorization: Bearer $RUNPOD_API_KEY" --header "Content-Type: application/json" --data @create-pod.json --output pod.json)
+          rm -f create-pod.json safe-env.json
           test "$code" = "201"
           POD_ID=$(jq -r '.id // empty' pod.json)
           test -n "$POD_ID"
@@ -120,13 +148,13 @@ jobs:
                   if not hb or w.name in before: continue
                   if hb.tzinfo is None: hb=hb.replace(tzinfo=timezone.utc)
                   if hb.timestamp() >= created-5 and (now-hb).total_seconds() <= 30 and w.get_state() in {'idle','busy'}:
-                      print('Fresh worker', w.name)
+                      print('Fresh Round 5 worker', w.name)
                       raise SystemExit(0)
               time.sleep(10)
           raise SystemExit('No fresh RQ worker')
           PY
 
-      - name: Enqueue exact 00-02-03 round-4 benchmark
+      - name: Enqueue exact 00-02-03 Round 5 benchmark
         id: enqueue
         shell: bash
         run: |
@@ -141,13 +169,13 @@ jobs:
             'Editdna longform validation/VIDEO-2026-07-30-09-24-13.mp4',
             'Editdna longform validation/VIDEO-2026-07-30-10-22-46.mp4',
           ]
-          payload={'benchmark_id':f"focused-round4-{os.environ['GITHUB_RUN_ID']}-{os.environ['SOURCE_SHA'][:12]}",'source_prefix':'Editdna longform validation/','source_keys':keys,'expected_external_brain_calls_enabled':True}
-          job=Queue('cutsell',connection=c).enqueue('cutsell_worker.focused_validation_job.run_focused_clean_cut_benchmark',payload,job_timeout=6600,result_ttl=86400,failure_ttl=86400,meta={'dataset_role':'clean_cut_gold_raw_focused','source_keys':keys,'brain_backend':'runpod_local','hybrid_provider':'google','hybrid_primary_model':'gemini-3.5-flash-lite'})
+          payload={'benchmark_id':f"focused-round5-{os.environ['GITHUB_RUN_ID']}-{os.environ['SOURCE_SHA'][:12]}",'source_prefix':'Editdna longform validation/','source_keys':keys,'expected_external_brain_calls_enabled':True}
+          job=Queue('cutsell',connection=c).enqueue('cutsell_worker.focused_validation_job.run_focused_clean_cut_benchmark',payload,job_timeout=6600,result_ttl=86400,failure_ttl=86400,meta={'dataset_role':'clean_cut_gold_raw_focused','source_keys':keys,'brain_backend':'runpod_local','hybrid_provider':'google','hybrid_primary_model':'gemini-3.5-flash-lite','worker_source_sha':os.environ['SOURCE_SHA'],'worker_image_digest':os.environ['IMAGE_DIGEST']})
           with open(os.environ['GITHUB_OUTPUT'],'a') as f: f.write(f'job_id={job.id}\n')
           print(job.id)
           PY
 
-      - name: Wait for exact round-4 benchmark
+      - name: Wait for exact Round 5 benchmark
         env:
           JOB_ID: ${{ steps.enqueue.outputs.job_id }}
         shell: bash
@@ -181,7 +209,7 @@ jobs:
           raise SystemExit('Timed out')
           PY
 
-      - name: Download report and exactly three previews
+      - name: Download validate and inspect Round 5 report plus exactly three previews
         shell: bash
         run: |
           set -euo pipefail
@@ -201,23 +229,42 @@ jobs:
           for uri in r.get('preview_uris') or []:
               b,k=p(uri); s3.download_file(b,k,str(Path('focused-previews')/Path(k).name))
           if len(list(Path('focused-previews').glob('*.mp4')))!=3: raise SystemExit('Expected exactly 3 previews')
+
+          video00=(report.get('results') or [None])[0]
+          if not isinstance(video00,dict): raise SystemExit('Missing Video 00 result')
+          selected=video00.get('selected') or video00.get('selected_takes') or []
+          discarded=video00.get('discarded') or video00.get('discarded_takes') or []
+          def spans(items):
+              out=[]
+              for item in items:
+                  if not isinstance(item,dict): continue
+                  s=item.get('start',item.get('source_start'))
+                  e=item.get('end',item.get('source_end'))
+                  if s is not None and e is not None: out.append((float(s),float(e),str(item.get('text') or '')))
+              return out
+          ss=spans(selected); ds=spans(discarded)
+          def contains(rows,target_start,target_end,tol=0.35):
+              return any(abs(s-target_start)<=tol and abs(e-target_end)<=tol for s,e,_ in rows)
+          print(json.dumps({'video00_selected_spans':ss,'video00_discarded_spans':ds},ensure_ascii=False,indent=2))
+          if contains(ss,108.56,111.86): raise SystemExit('Round 5 Gold regression: broken 108.56-111.86 still selected')
+          if not contains(ss,120.11,124.15): raise SystemExit('Round 5 Gold regression: clean 120.11-124.15 retake not selected')
           PY
 
-      - name: Upload round-4 report
+      - name: Upload Round 5 report
         uses: actions/upload-artifact@v4
         with:
-          name: cutsell-focused-round4-report-${{ github.sha }}
+          name: cutsell-focused-round5-report-99ec8e6a6d86fda70666fe42129043e217108e66
           path: cutsell-focused-clean-cut-benchmark.json
           retention-days: 14
 
-      - name: Upload round-4 previews
+      - name: Upload Round 5 previews
         uses: actions/upload-artifact@v4
         with:
-          name: cutsell-focused-round4-previews-${{ github.sha }}
+          name: cutsell-focused-round5-previews-99ec8e6a6d86fda70666fe42129043e217108e66
           path: focused-previews/*.mp4
           retention-days: 14
 
-      - name: Always terminate exact staging GPU worker
+      - name: Always terminate exact Round 5 staging GPU worker
         if: always()
         shell: bash
         run: |
