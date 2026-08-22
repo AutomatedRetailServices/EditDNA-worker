@@ -1,5 +1,5 @@
-name: Video 00 Round 10 Focused Orchestrator
-run-name: Video 00 round-10 focused 00-02-03 benchmark
+name: Video 00 Round 11 Focused Orchestrator
+run-name: Video 00 round-11 focused 00-02-03 benchmark
 
 on:
   push:
@@ -22,15 +22,15 @@ jobs:
       REDIS_URL: ${{ secrets.REDIS_URL }}
       GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
       RUNPOD_TEMPLATE_NAME: EditDNA-Worker-2
-      SOURCE_SHA: d622f742ea3a58598253520731615546733535b5
+      SOURCE_SHA: 3883936d7415186a80d11cfc7e1b3eb9a947f7da
       IMAGE_REPO: ghcr.io/automatedretailservices/cutsell-worker
       POD_ID: ''
 
     steps:
-      - name: Checkout exact Round 10 source
+      - name: Checkout exact Round 11 source
         uses: actions/checkout@v4
         with:
-          ref: d622f742ea3a58598253520731615546733535b5
+          ref: 3883936d7415186a80d11cfc7e1b3eb9a947f7da
           fetch-depth: 1
 
       - name: Login to GHCR
@@ -40,7 +40,7 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Build push and resolve exact immutable Round 10 worker image
+      - name: Build push and resolve exact immutable Round 11 worker image
         shell: bash
         run: |
           set -euo pipefail
@@ -110,7 +110,7 @@ jobs:
           done
           echo "VOLUME_MOUNT=$(printf '%s' "$TEMPLATE" | jq -r '.volumeMountPath // "/workspace"')" >> "$GITHUB_ENV"
 
-      - name: Create exactly one Round 10 staging GPU worker
+      - name: Create exactly one Round 11 staging GPU worker
         shell: bash
         run: |
           set -euo pipefail
@@ -148,13 +148,13 @@ jobs:
                   if not hb or w.name in before: continue
                   if hb.tzinfo is None: hb=hb.replace(tzinfo=timezone.utc)
                   if hb.timestamp() >= created-5 and (now-hb).total_seconds() <= 30 and w.get_state() in {'idle','busy'}:
-                      print('Fresh Round 10 worker', w.name)
+                      print('Fresh Round 11 worker', w.name)
                       raise SystemExit(0)
               time.sleep(10)
           raise SystemExit('No fresh RQ worker')
           PY
 
-      - name: Enqueue exact 00-02-03 Round 10 benchmark
+      - name: Enqueue exact 00-02-03 Round 11 benchmark
         id: enqueue
         shell: bash
         run: |
@@ -169,13 +169,13 @@ jobs:
             'Editdna longform validation/VIDEO-2026-07-30-09-24-13.mp4',
             'Editdna longform validation/VIDEO-2026-07-30-10-22-46.mp4',
           ]
-          payload={'benchmark_id':f"focused-round10-{os.environ['GITHUB_RUN_ID']}-{os.environ['SOURCE_SHA'][:12]}",'source_prefix':'Editdna longform validation/','source_keys':keys,'expected_external_brain_calls_enabled':True}
+          payload={'benchmark_id':f"focused-round11-{os.environ['GITHUB_RUN_ID']}-{os.environ['SOURCE_SHA'][:12]}",'source_prefix':'Editdna longform validation/','source_keys':keys,'expected_external_brain_calls_enabled':True}
           job=Queue('cutsell',connection=c).enqueue('cutsell_worker.focused_validation_job.run_focused_clean_cut_benchmark',payload,job_timeout=6600,result_ttl=86400,failure_ttl=86400,meta={'dataset_role':'clean_cut_gold_raw_focused','source_keys':keys,'brain_backend':'runpod_local','hybrid_provider':'google','hybrid_primary_model':'gemini-3.5-flash-lite','worker_source_sha':os.environ['SOURCE_SHA'],'worker_image_digest':os.environ['IMAGE_DIGEST']})
           with open(os.environ['GITHUB_OUTPUT'],'a') as f: f.write(f'job_id={job.id}\n')
           print(job.id)
           PY
 
-      - name: Wait for exact Round 10 benchmark
+      - name: Wait for exact Round 11 benchmark
         env:
           JOB_ID: ${{ steps.enqueue.outputs.job_id }}
         shell: bash
@@ -209,7 +209,7 @@ jobs:
           raise SystemExit('Timed out')
           PY
 
-      - name: Download Round 10 report and previews
+      - name: Download Round 11 report and previews
         shell: bash
         run: |
           set -euo pipefail
@@ -226,14 +226,14 @@ jobs:
           b,k=p(r['report_uri']); s3.download_file(b,k,'cutsell-focused-clean-cut-benchmark.json')
           report=json.load(open('cutsell-focused-clean-cut-benchmark.json'))
           if report.get('source_count')!=3 or report.get('completed_count')!=3 or report.get('execution_failure_count') or report.get('provider_failure_count'):
-              raise SystemExit('Invalid Round 10 report')
+              raise SystemExit('Invalid Round 11 report')
           for uri in r.get('preview_uris') or []:
               b,k=p(uri); s3.download_file(b,k,str(Path('focused-previews')/Path(k).name))
           if len(list(Path('focused-previews').glob('*.mp4')))!=3:
-              raise SystemExit('Expected exactly 3 Round 10 previews')
+              raise SystemExit('Expected exactly 3 Round 11 previews')
           PY
 
-      - name: Validate Round 10 Gold gate
+      - name: Validate Round 11 Gold gate
         shell: bash
         run: |
           set -euo pipefail
@@ -254,40 +254,40 @@ jobs:
           ss=rows(v00,'selected'); ds=rows(v00,'discarded')
           print(json.dumps({'video00_selected':ss,'video00_discarded':ds},ensure_ascii=False,indent=2))
           low=lambda x:' '.join(str(x or '').casefold().split())
-          if any(s < 116.9 and e > 108.2 for s,e,_ in ss): raise SystemExit('Round 10 Gold: broken 108-116 retry still selected')
-          if not any(120.0 <= s <= 122.0 and e >= 123.5 and 'sonograf' in low(t) for s,e,t in ss): raise SystemExit('Round 10 Gold: clean 120-125 retry missing')
-          if any('mínimo dos estados' in low(t) for _,_,t in ss): raise SystemExit('Round 10 Gold: broken first thyroid attempt resurfaced')
-          if not any(34.0 <= s <= 37.0 and e >= 44.0 and 'nunca se nos ocurrió' in low(t) for s,e,t in ss): raise SystemExit('Round 10 Gold: clean first thyroid retake missing')
-          if not any(294.5 <= s <= 296.5 and e >= 312.5 for s,e,_ in ss): raise SystemExit('Round 10 Gold: authoritative 295-314 close not selected')
-          if any(318.5 <= s <= 321.5 and e >= 333.0 for s,e,_ in ss): raise SystemExit('Round 10 Gold: losing 319-334 prefix still selected')
-          if any(334.5 <= s <= 337.0 and e >= 345.0 for s,e,_ in ss): raise SystemExit('Round 10 Gold: losing 335-346 continuation still selected')
-          if any(low(t).endswith('de los') for _,_,t in ss): raise SystemExit('Round 10 Gold: open de-los delivery still selected')
-          if any(low(t).endswith(' y haz') or low(t).endswith(' haz') for _,_,t in ss): raise SystemExit('Round 10 Gold: incomplete haz delivery still selected')
-          if not any(355.0 <= s <= 357.5 and e >= 361.3 and 'haz ejercicio' in low(t) for s,e,t in ss): raise SystemExit('Round 10 Gold: complete haz ejercicio CTA missing')
+          if any(s < 116.9 and e > 108.2 for s,e,_ in ss): raise SystemExit('Round 11 Gold: broken 108-116 retry still selected')
+          if not any(119.5 <= s <= 122.0 and e >= 123.5 and 'sonograf' in low(t) for s,e,t in ss): raise SystemExit('Round 11 Gold: clean 120-125 retry missing')
+          if any('mínimo dos estados' in low(t) for _,_,t in ss): raise SystemExit('Round 11 Gold: broken first thyroid attempt resurfaced')
+          if not any(34.0 <= s <= 37.0 and e >= 44.0 and 'nunca se nos ocurrió' in low(t) for s,e,t in ss): raise SystemExit('Round 11 Gold: clean first thyroid retake missing')
+          if not any(294.5 <= s <= 296.5 and e >= 312.5 for s,e,_ in ss): raise SystemExit('Round 11 Gold: authoritative 295-314 close not selected')
+          if any(318.5 <= s <= 321.5 and e >= 333.0 for s,e,_ in ss): raise SystemExit('Round 11 Gold: losing 319-334 prefix still selected')
+          if any(334.5 <= s <= 337.0 and e >= 345.0 for s,e,_ in ss): raise SystemExit('Round 11 Gold: losing 335-346 continuation still selected')
+          if any(low(t).endswith('de los') for _,_,t in ss): raise SystemExit('Round 11 Gold: open de-los delivery still selected')
+          if any(low(t).endswith(' y haz') or low(t).endswith(' haz') for _,_,t in ss): raise SystemExit('Round 11 Gold: incomplete haz delivery still selected')
+          if not any(355.0 <= s <= 357.5 and e >= 361.3 and ('haz ejercicio' in low(t) or 'haces ejercicio' in low(t)) for s,e,t in ss): raise SystemExit('Round 11 Gold: complete exercise CTA missing')
           text03=' '.join(low(t) for _,_,t in rows(v03,'selected'))
-          if 'la barrera cutánea' not in text03: raise SystemExit('Round 10 Gold: Video 03 lost la barrera cutánea')
-          if 'te la te hace como' in text03: raise SystemExit('Round 10 Gold: Video 03 failed suffix resurfaced')
+          if 'la barrera cutánea' not in text03: raise SystemExit('Round 11 Gold: Video 03 lost la barrera cutánea')
+          if 'te la te hace como' in text03: raise SystemExit('Round 11 Gold: Video 03 failed suffix resurfaced')
           PY
 
-      - name: Upload Round 10 report
+      - name: Upload Round 11 report
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: cutsell-focused-round10-report-${{ env.SOURCE_SHA }}
+          name: cutsell-focused-round11-report-${{ env.SOURCE_SHA }}
           path: cutsell-focused-clean-cut-benchmark.json
           retention-days: 14
           if-no-files-found: warn
 
-      - name: Upload Round 10 previews
+      - name: Upload Round 11 previews
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: cutsell-focused-round10-previews-${{ env.SOURCE_SHA }}
+          name: cutsell-focused-round11-previews-${{ env.SOURCE_SHA }}
           path: focused-previews/*.mp4
           retention-days: 14
           if-no-files-found: warn
 
-      - name: Always terminate exact Round 10 staging GPU worker
+      - name: Always terminate exact Round 11 staging GPU worker
         if: always()
         shell: bash
         run: |
