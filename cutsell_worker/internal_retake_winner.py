@@ -4,12 +4,12 @@ Best-Take can only compare separate candidates. In raw talking-head recordings A
 merge a failed delivery, a visible retry/reset, and the clean retake into one CandidateTake.
 This pass detects that structure conservatively and keeps the later retake.
 
-The pass requires all of the following:
-- a strong recording-process retry/failure event inside the take;
-- meaningful speech on both sides of the event;
-- substantial lexical/content overlap showing that the later speech is a retry of the
-  earlier communication attempt rather than a new story beat;
-- the later side is long enough to stand as a useful delivery.
+The pass normally requires a strong recording-process retry/failure event plus lexical
+coverage. Round 5 exposed a second real structure: the visual/performance analyzer can
+prove a fumble on the merged take while failing to emit one authoritative retry event at
+the exact restart boundary. When the creator then repeats a long opening phrase verbatim,
+that repeated opening itself is strong retry structure. In that narrow case we allow the
+lexical restart plus high visual-fumble evidence to define the split.
 
 It never cuts through a spoken word and fails open when evidence is ambiguous.
 """
@@ -107,6 +107,71 @@ def _overlap(left_words, right_words) -> tuple[int, float, float]:
     return shared, left_cov, right_cov
 
 
+def _repeated_opening_split(
+    words,
+    *,
+    minimum_ngram_words: int = 5,
+    maximum_ngram_words: int = 8,
+    minimum_attempt_gap_words: int = 3,
+) -> tuple[int, int, tuple[str, ...]] | None:
+    """Find a later verbatim opening that restarts an earlier delivery.
+
+    This is deliberately not generic repetition removal. We require a long contiguous
+    phrase (5-8 words) to occur twice with enough material between the occurrences. The
+    caller separately requires strong visual-fumble evidence before using this boundary.
+    """
+    normalized = tuple(_norm(getattr(word, "text", "")) for word in words)
+    if len(normalized) < minimum_ngram_words * 2 + minimum_attempt_gap_words:
+        return None
+
+    for size in range(maximum_ngram_words, minimum_ngram_words - 1, -1):
+        if len(normalized) < size * 2 + minimum_attempt_gap_words:
+            continue
+        first_seen: dict[tuple[str, ...], int] = {}
+        for index in range(0, len(normalized) - size + 1):
+            phrase = normalized[index : index + size]
+            if any(not token for token in phrase):
+                continue
+            previous = first_seen.get(phrase)
+            if previous is None:
+                first_seen[phrase] = index
+                continue
+            if index - (previous + size) < minimum_attempt_gap_words:
+                continue
+            # Avoid tiny tail fragments: the second occurrence must begin early enough
+            # to contain a substantive retake after it.
+            if len(normalized) - index < size + 3:
+                continue
+            return index, previous, phrase
+    return None
+
+
+def _lexical_visual_retry_split(take: CandidateTake, words) -> tuple[int, dict] | None:
+    signals = take.signals
+    if signals is None or float(signals.visual_fumble) < 0.65:
+        return None
+    found = _repeated_opening_split(words)
+    if found is None:
+        return None
+    split, previous, phrase = found
+    if split < 4 or len(words) - split < 5:
+        return None
+    left_window = words[max(0, split - 14) : split]
+    right_window = words[split : min(len(words), split + 16)]
+    shared, left_cov, right_cov = _overlap(left_window, right_window)
+    if shared < 3 or max(left_cov, right_cov) < 0.45:
+        return None
+    return split, {
+        "evidence_type": "repeated_opening_plus_visual_fumble",
+        "visual_fumble": round(float(signals.visual_fumble), 4),
+        "repeated_phrase": " ".join(phrase),
+        "first_phrase_index": previous,
+        "shared_content_tokens": shared,
+        "left_coverage": round(left_cov, 4),
+        "right_coverage": round(right_cov, 4),
+    }
+
+
 def prefer_internal_clean_retakes(
     kept: Iterable[CandidateTake],
     context: WholeVideoContext | None,
@@ -130,8 +195,6 @@ def prefer_internal_clean_retakes(
             if split is None or split < 4 or len(words) - split < minimum_right_words:
                 continue
 
-            # Compare the nearby communication attempts rather than the entire take. A
-            # long story may contain unrelated speech before/after the retry.
             left_start = max(0, split - 12)
             right_end = min(len(words), split + 14)
             left_window = words[left_start:split]
@@ -142,16 +205,25 @@ def prefer_internal_clean_retakes(
             if max(left_cov, right_cov) < minimum_directional_coverage:
                 continue
 
-            # Stronger explicit retry/failure events outrank generic physical resets.
             priority = 2 if evidence_type == "authoritative" else 1
             score = (priority, shared, max(left_cov, right_cov), float(event.confidence))
             candidates.append((score, split, event, shared, left_cov, right_cov, evidence_type))
 
-        if not candidates:
-            output.append(take)
-            continue
+        if candidates:
+            _, split, event, shared, left_cov, right_cov, evidence_type = max(candidates, key=lambda item: item[0])
+            lexical_detail = None
+        else:
+            lexical = _lexical_visual_retry_split(take, words)
+            if lexical is None:
+                output.append(take)
+                continue
+            split, lexical_detail = lexical
+            event = None
+            shared = int(lexical_detail["shared_content_tokens"])
+            left_cov = float(lexical_detail["left_coverage"])
+            right_cov = float(lexical_detail["right_coverage"])
+            evidence_type = str(lexical_detail["evidence_type"])
 
-        _, split, event, shared, left_cov, right_cov, evidence_type = max(candidates, key=lambda item: item[0])
         right_words = words[split:]
         new_start = float(right_words[0].start)
         if new_start <= take.start + 0.25 or take.end - new_start < 1.0:
@@ -171,11 +243,9 @@ def prefer_internal_clean_retakes(
             signals=(replace(take.signals, start=new_start) if take.signals is not None else None),
         )
         output.append(child)
-        diagnostics.append({
+        item = {
             "clip_id": take.clip_id,
             "reason": "internal_broken_attempt_yields_to_clean_retake",
-            "event_kind": _kind(event.kind),
-            "event_confidence": round(float(event.confidence), 4),
             "evidence_type": evidence_type,
             "original_start": round(float(take.start), 3),
             "retake_start": round(new_start, 3),
@@ -183,7 +253,19 @@ def prefer_internal_clean_retakes(
             "left_coverage": round(left_cov, 4),
             "right_coverage": round(right_cov, 4),
             "kept_text": text,
-        })
+        }
+        if event is not None:
+            item.update({
+                "event_kind": _kind(event.kind),
+                "event_confidence": round(float(event.confidence), 4),
+            })
+        elif lexical_detail is not None:
+            item.update({
+                "event_kind": "lexical_restart",
+                "event_confidence": float(lexical_detail["visual_fumble"]),
+                "repeated_phrase": lexical_detail["repeated_phrase"],
+            })
+        diagnostics.append(item)
 
     return tuple(output), tuple(diagnostics)
 
