@@ -1,4 +1,4 @@
-name: Round 7 Status Probe
+name: Round 8 Status Probe
 on:
   push:
     branches:
@@ -16,7 +16,7 @@ jobs:
         with:
           ref: cutsell/mobile-v1-clean
           fetch-depth: 0
-      - name: Capture Round 7 workflow status
+      - name: Capture Round 8 workflow status
         env:
           GH_TOKEN: ${{ github.token }}
         shell: bash
@@ -28,10 +28,10 @@ jobs:
             --header "Accept: application/vnd.github+json" \
             --output runs.json
           mkdir -p ops
-          jq '.workflow_runs[0] | {id,run_number,status,conclusion,head_sha,created_at,updated_at}' runs.json > ops/benchmark52-round7-status.json
+          jq '.workflow_runs[0] | {id,run_number,status,conclusion,head_sha,created_at,updated_at}' runs.json > ops/benchmark52-round8-status.json
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add ops/benchmark52-round7-status.json
-          git commit -m "Record Round 7 benchmark status" || exit 0
+          git add ops/benchmark52-round8-status.json
+          git commit -m "Record Round 8 benchmark status" || exit 0
           git pull --rebase origin cutsell/mobile-v1-clean
           git push origin HEAD:cutsell/mobile-v1-clean
