@@ -22,7 +22,7 @@ jobs:
       REDIS_URL: ${{ secrets.REDIS_URL }}
       GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
       RUNPOD_TEMPLATE_NAME: EditDNA-Worker-2
-      SOURCE_SHA: 1652066128753705cf4a3d96fd80c82b78378ee1
+      SOURCE_SHA: 5ebf2020bf7161d80939ebbe3e573fdfc99d8fef
       IMAGE_REPO: ghcr.io/automatedretailservices/cutsell-worker
       POD_ID: ''
 
@@ -30,7 +30,7 @@ jobs:
       - name: Checkout exact Round 8 source
         uses: actions/checkout@v4
         with:
-          ref: 1652066128753705cf4a3d96fd80c82b78378ee1
+          ref: 5ebf2020bf7161d80939ebbe3e573fdfc99d8fef
           fetch-depth: 1
 
       - name: Login to GHCR
