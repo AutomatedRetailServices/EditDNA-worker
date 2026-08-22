@@ -49,6 +49,7 @@ from .global_session_sibling_bridge import install_global_session_sibling_bridge
 from .selection_integrity import install_selection_integrity
 from .semantic_best_take_integrity import install_semantic_best_take_integrity
 from .final_delivery_integrity import install_final_delivery_integrity
+from .terminal_delivery_reconciliation import install_terminal_delivery_reconciliation
 
 install_clean_cut_contract_recovery()
 install_recording_process_context_cleanup()
@@ -94,6 +95,7 @@ install_global_session_sibling_bridge()
 install_selection_integrity()
 install_semantic_best_take_integrity()
 install_final_delivery_integrity()
+install_terminal_delivery_reconciliation()
 
 __version__ = "0.1.0"
 OBSERVABILITY_STATUS = initialize_observability(service="cutsell-worker")
