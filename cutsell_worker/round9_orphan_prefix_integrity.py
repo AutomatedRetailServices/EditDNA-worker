@@ -26,6 +26,8 @@ from .contracts import DraftClip
 from . import final_draft_retry_integrity as base
 from . import round8_retry_reconciliation as round8
 
+_ROUND8_ORIGINAL = round8.suppress_orphan_failed_open_prefix
+
 
 def _proven_cross_group_authorities(diagnostics: dict) -> dict[str, str]:
     """Map discarded retry clip -> already-proven authoritative peer clip."""
@@ -66,9 +68,9 @@ def suppress_orphan_failed_open_prefix_v2(
     selected_tuple = tuple(selected)
     discarded_tuple = tuple(discarded)
 
-    # Preserve the original short-gap behavior exactly.  The new path only handles the
-    # case that previously failed open because segmentation moved the continuation later.
-    short_selected, short_discarded, short_audit = round8.suppress_orphan_failed_open_prefix(
+    # Preserve the original short-gap behavior exactly.  Use the frozen original
+    # reference so installation of this module cannot recurse back into itself.
+    short_selected, short_discarded, short_audit = _ROUND8_ORIGINAL(
         selected_tuple,
         discarded_tuple,
         diagnostics,
@@ -169,11 +171,8 @@ def install_round9_orphan_prefix_integrity() -> None:
     if getattr(current, "_cutsell_round9_orphan_prefix_integrity", False):
         return
 
-    original = current
-
     def suppress_with_round9_authority(selected, discarded, diagnostics, **kwargs):
-        # Keep any caller-specific Round 8 behavior first.
-        short_selected, short_discarded, short_audit = original(
+        short_selected, short_discarded, short_audit = _ROUND8_ORIGINAL(
             selected,
             discarded,
             diagnostics,
