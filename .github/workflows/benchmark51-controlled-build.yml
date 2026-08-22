@@ -1,5 +1,5 @@
-name: Video 00 Round 3 Focused Orchestrator
-run-name: Video 00 round-3 focused 00-02-03 benchmark
+name: Video 00 Round 4 Focused Worker Build
+run-name: Video 00 round-4 exact-source immutable worker build
 
 on:
   push:
@@ -10,222 +10,43 @@ on:
 
 permissions:
   contents: read
-  actions: write
+  packages: write
 
 jobs:
-  orchestrate:
+  build:
     runs-on: ubuntu-latest
-    timeout-minutes: 120
+    timeout-minutes: 25
     env:
-      RUNPOD_API_KEY: ${{ secrets.RUNPOD_API_KEY }}
-      REDIS_URL: ${{ secrets.REDIS_URL }}
-      GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-      RUNPOD_TEMPLATE_NAME: EditDNA-Worker-2
-      SOURCE_SHA: 225ae6b9e3e6f4f38ebde34896a70dcbcf866d59
+      SOURCE_SHA: a91889826b6d70d585480689269d16364924b32c
       IMAGE_REPO: ghcr.io/automatedretailservices/cutsell-worker
-      EXPECTED_DIGEST: sha256:c8240bf943dc3dba9df0b4f91f622bb004c442b06d9511a1c087806fa01ea1ea
-      POD_ID: ''
     steps:
-      - name: Resolve exact immutable round-3 worker image
-        shell: bash
-        run: |
-          set -euo pipefail
-          test -n "${RUNPOD_API_KEY:-}"
-          test -n "${REDIS_URL:-}"
-          test -n "${GEMINI_API_KEY:-}"
-          echo "::add-mask::$GEMINI_API_KEY"
-          image="$IMAGE_REPO:$SOURCE_SHA"
-          docker buildx imagetools inspect "$image" > image-inspect.txt
-          resolved=$(awk '/^Digest:/ {print $2; exit}' image-inspect.txt)
-          test "$resolved" = "$EXPECTED_DIGEST"
-          echo "IMMUTABLE_IMAGE=$image@$resolved" >> "$GITHUB_ENV"
-
-      - name: Ensure no stale staging worker remains
-        shell: bash
-        run: |
-          set -euo pipefail
-          curl --fail --silent --show-error --url "https://rest.runpod.io/v1/pods" --header "Authorization: Bearer $RUNPOD_API_KEY" --output pods-before.json
-          count=$(jq '[.[] | select(.name == "cutsell-staging-worker")] | length' pods-before.json)
-          test "$count" -le 1
-          if [ "$count" = "1" ]; then
-            stale_id=$(jq -r '[.[] | select(.name == "cutsell-staging-worker")][0].id' pods-before.json)
-            code=$(curl --silent --show-error --write-out '%{http_code}' --request DELETE --url "https://rest.runpod.io/v1/pods/$stale_id" --header "Authorization: Bearer $RUNPOD_API_KEY" --output /tmp/stale-delete.txt)
-            test "$code" = "204" || test "$code" = "404"
-            sleep 3
-          fi
-
-      - name: Install orchestration client and snapshot RQ workers
-        shell: bash
-        run: |
-          set -euo pipefail
-          python -m pip install -q 'redis>=5.0' 'rq>=2.6' 'boto3>=1.34'
-          python - <<'PY'
-          import json, os
-          from redis import Redis
-          from rq import Worker
-          c=Redis.from_url(os.environ['REDIS_URL'])
-          json.dump(sorted(w.name for w in Worker.all(connection=c)), open('rq-before.json','w'))
-          PY
-
-      - name: Build safe runtime environment
-        shell: bash
-        run: |
-          set -euo pipefail
-          curl --fail --silent --show-error --url "https://rest.runpod.io/v1/templates" --header "Authorization: Bearer $RUNPOD_API_KEY" --output templates.json
-          TEMPLATE=$(jq -c --arg name "$RUNPOD_TEMPLATE_NAME" '[.[] | select(.name == $name)][0]' templates.json)
-          test "$TEMPLATE" != "null"
-          printf '%s' "$TEMPLATE" | jq -c '{ASR_DEVICE:.env.ASR_DEVICE,ASR_ENABLED:.env.ASR_ENABLED,BAD_TAKES_ENABLED:.env.BAD_TAKES_ENABLED,BOUNDARY_REFINER_ENABLED:.env.BOUNDARY_REFINER_ENABLED,BOUNDARY_REFINER_HEAD_STEP_SEC:.env.BOUNDARY_REFINER_HEAD_STEP_SEC,BOUNDARY_REFINER_MIN_DURATION_SEC:.env.BOUNDARY_REFINER_MIN_DURATION_SEC,BOUNDARY_REFINER_TAIL_STEP_SEC:.env.BOUNDARY_REFINER_TAIL_STEP_SEC,FFMPEG_BIN:.env.FFMPEG_BIN,FFPROBE_BIN:.env.FFPROBE_BIN,HEAD_TRIM_SEC:.env.HEAD_TRIM_SEC,PRESIGN_EXPIRES:.env.PRESIGN_EXPIRES,PYTHONPATH:.env.PYTHONPATH,S3_ACL:.env.S3_ACL,S3_BUCKET:.env.S3_BUCKET,S3_PREFIX:.env.S3_PREFIX,TAIL_TRIM_SEC:.env.TAIL_TRIM_SEC,VISION_ENABLED:.env.VISION_ENABLED,VISION_INTERVAL_SEC:.env.VISION_INTERVAL_SEC,VISION_MAX_SAMPLES:.env.VISION_MAX_SAMPLES,VISUAL_BAD_THRESHOLD:.env.VISUAL_BAD_THRESHOLD,WHISPER_DEVICE:.env.WHISPER_DEVICE,WHISPER_MODEL:.env.WHISPER_MODEL,W_FACE:.env.W_FACE,W_VISION:.env.W_VISION,W_VISUAL:.env.W_VISUAL,AWS_ACCESS_KEY_ID:.env.AWS_ACCESS_KEY_ID,AWS_SECRET_ACCESS_KEY:.env.AWS_SECRET_ACCESS_KEY,AWS_REGION:.env.AWS_REGION} | with_entries(select(.value != null and .value != ""))' > safe-env.json
-          if jq -e 'has("OPENAI_API_KEY") or has("EDITDNA_USE_LLM") or has("EDITDNA_LLM_MODEL")' safe-env.json >/dev/null; then exit 7; fi
-          for key in AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_REGION S3_BUCKET; do
-            value=$(jq -r --arg key "$key" '.[$key] // empty' safe-env.json)
-            test -n "$value"
-            echo "::add-mask::$value"
-            echo "$key=$value" >> "$GITHUB_ENV"
-          done
-          echo "VOLUME_MOUNT=$(printf '%s' "$TEMPLATE" | jq -r '.volumeMountPath // "/workspace"')" >> "$GITHUB_ENV"
-
-      - name: Create exactly one staging GPU worker
-        shell: bash
-        run: |
-          set -euo pipefail
-          jq --arg name "cutsell-staging-worker" --arg image "$IMMUTABLE_IMAGE" --arg redis "$REDIS_URL" --arg gemini "$GEMINI_API_KEY" --arg mount "$VOLUME_MOUNT" '. + {REDIS_URL:$redis,GEMINI_API_KEY:$gemini,CUTSELL_BRAIN_BACKEND:"runpod_local",CUTSELL_EDITORIAL_MODE:"clean_cut",CUTSELL_ASR_MODEL:"medium",CUTSELL_CLEAN_CUT_JUDGE:"0",CUTSELL_HYBRID_PROVIDER:"google",CUTSELL_HYBRID_LLM_ENABLED:"1",CUTSELL_HYBRID_PRIMARY_MODEL:"gemini-3.5-flash-lite",CUTSELL_HYBRID_ESCALATION_MODEL:"gemini-3.6-flash",CUTSELL_HYBRID_MAX_SESSION_USD:"0.0075",CUTSELL_HYBRID_TEST_BUDGET_USD:"0.50"} | {name:$name,imageName:$image,cloudType:"COMMUNITY",computeType:"GPU",gpuCount:1,gpuTypeIds:["NVIDIA RTX A5000","NVIDIA RTX A4000","NVIDIA L4","NVIDIA A40","NVIDIA RTX A6000","NVIDIA GeForce RTX 3090","NVIDIA GeForce RTX 4090"],gpuTypePriority:"custom",interruptible:false,containerDiskInGb:30,volumeInGb:20,volumeMountPath:$mount,env:.}' safe-env.json > create-pod.json
-          code=$(curl --silent --show-error --write-out '%{http_code}' --request POST --url "https://rest.runpod.io/v1/pods" --header "Authorization: Bearer $RUNPOD_API_KEY" --header "Content-Type: application/json" --data @create-pod.json --output pod.json)
-          test "$code" = "201"
-          POD_ID=$(jq -r '.id // empty' pod.json)
-          test -n "$POD_ID"
-          echo "POD_ID=$POD_ID" >> "$GITHUB_ENV"
-          echo "POD_CREATED_EPOCH=$(date -u +%s)" >> "$GITHUB_ENV"
-          jq '{id,name,desiredStatus,imageName,costPerHr,adjustedCostPerHr}' pod.json
-
-      - name: Confirm exact Pod identity and fresh RQ worker
-        shell: bash
-        run: |
-          set -euo pipefail
-          curl --fail --silent --show-error --url "https://rest.runpod.io/v1/pods/$POD_ID" --header "Authorization: Bearer $RUNPOD_API_KEY" --output pod-confirm.json
-          test "$(jq -r '.id' pod-confirm.json)" = "$POD_ID"
-          test "$(jq -r '.imageName' pod-confirm.json)" = "$IMMUTABLE_IMAGE"
-          python - <<'PY'
-          import json, os, time
-          from datetime import datetime, timezone
-          from redis import Redis
-          from rq import Worker
-          c=Redis.from_url(os.environ['REDIS_URL'])
-          before=set(json.load(open('rq-before.json')))
-          created=float(os.environ['POD_CREATED_EPOCH'])
-          deadline=time.time()+600
-          while time.time()<deadline:
-              now=datetime.now(timezone.utc)
-              for w in Worker.all(connection=c):
-                  hb=w.last_heartbeat
-                  if not hb or w.name in before: continue
-                  if hb.tzinfo is None: hb=hb.replace(tzinfo=timezone.utc)
-                  if hb.timestamp() >= created-5 and (now-hb).total_seconds() <= 30 and w.get_state() in {'idle','busy'}:
-                      print('Fresh worker', w.name)
-                      raise SystemExit(0)
-              time.sleep(10)
-          raise SystemExit('No fresh RQ worker')
-          PY
-
-      - name: Enqueue exact 00-02-03 round-3 benchmark
-        id: enqueue
-        shell: bash
-        run: |
-          set -euo pipefail
-          python - <<'PY'
-          import os
-          from redis import Redis
-          from rq import Queue
-          c=Redis.from_url(os.environ['REDIS_URL'])
-          keys=[
-            'Editdna longform validation/VIDEO-2026-07-30-09-18-03.mp4',
-            'Editdna longform validation/VIDEO-2026-07-30-09-24-13.mp4',
-            'Editdna longform validation/VIDEO-2026-07-30-10-22-46.mp4',
-          ]
-          payload={'benchmark_id':f"focused-round3-{os.environ['GITHUB_RUN_ID']}-{os.environ['SOURCE_SHA'][:12]}",'source_prefix':'Editdna longform validation/','source_keys':keys,'expected_external_brain_calls_enabled':True}
-          job=Queue('cutsell',connection=c).enqueue('cutsell_worker.focused_validation_job.run_focused_clean_cut_benchmark',payload,job_timeout=6600,result_ttl=86400,failure_ttl=86400,meta={'dataset_role':'clean_cut_gold_raw_focused','source_keys':keys,'brain_backend':'runpod_local','hybrid_provider':'google','hybrid_primary_model':'gemini-3.5-flash-lite'})
-          with open(os.environ['GITHUB_OUTPUT'],'a') as f: f.write(f'job_id={job.id}\n')
-          print(job.id)
-          PY
-
-      - name: Wait for exact round-3 benchmark
-        env:
-          JOB_ID: ${{ steps.enqueue.outputs.job_id }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          python - <<'PY'
-          import json, os, time
-          from redis import Redis
-          from rq.job import Job
-          c=Redis.from_url(os.environ['REDIS_URL'])
-          job=Job.fetch(os.environ['JOB_ID'],connection=c)
-          deadline=time.monotonic()+6600
-          last=None
-          while time.monotonic()<deadline:
-              status=getattr(job.get_status(refresh=True),'value',str(job.get_status(refresh=True)))
-              meta=dict(job.meta or {})
-              snap=(status,meta.get('stage'),meta.get('progress_percent'),meta.get('current_source'))
-              if snap!=last:
-                  print(json.dumps({'status':status,'stage':meta.get('stage'),'progress_percent':meta.get('progress_percent'),'current_source':meta.get('current_source')},ensure_ascii=False))
-                  last=snap
-              if status=='finished':
-                  result=job.result
-                  expected=['Editdna longform validation/VIDEO-2026-07-30-09-18-03.mp4','Editdna longform validation/VIDEO-2026-07-30-09-24-13.mp4','Editdna longform validation/VIDEO-2026-07-30-10-22-46.mp4']
-                  if not isinstance(result,dict) or result.get('dataset_role')!='clean_cut_gold_raw_focused' or result.get('source_keys')!=expected: raise SystemExit('Unexpected result')
-                  json.dump(result,open('focused-result.json','w'),ensure_ascii=False,indent=2)
-                  raise SystemExit(0)
-              if status in {'failed','stopped','canceled'}:
-                  print(job.exc_info or '')
-                  raise SystemExit(1)
-              time.sleep(15)
-          raise SystemExit('Timed out')
-          PY
-
-      - name: Download report and exactly three previews
-        shell: bash
-        run: |
-          set -euo pipefail
-          mkdir -p focused-previews
-          python - <<'PY'
-          import json, os
-          from pathlib import Path
-          from urllib.parse import urlparse
-          import boto3
-          r=json.load(open('focused-result.json'))
-          s3=boto3.client('s3',region_name=os.environ.get('AWS_REGION') or 'us-east-1')
-          def p(uri):
-              u=urlparse(uri); return u.netloc,u.path.lstrip('/')
-          b,k=p(r['report_uri']); s3.download_file(b,k,'cutsell-focused-clean-cut-benchmark.json')
-          report=json.load(open('cutsell-focused-clean-cut-benchmark.json'))
-          if report.get('source_count')!=3 or report.get('completed_count')!=3 or report.get('execution_failure_count') or report.get('provider_failure_count'): raise SystemExit('Invalid report')
-          for uri in r.get('preview_uris') or []:
-              b,k=p(uri); s3.download_file(b,k,str(Path('focused-previews')/Path(k).name))
-          if len(list(Path('focused-previews').glob('*.mp4')))!=3: raise SystemExit('Expected exactly 3 previews')
-          PY
-
-      - name: Upload round-3 report
-        uses: actions/upload-artifact@v4
+      - name: Checkout exact validated worker source
+        uses: actions/checkout@v4
         with:
-          name: cutsell-focused-round3-report-${{ github.sha }}
-          path: cutsell-focused-clean-cut-benchmark.json
-          retention-days: 14
-
-      - name: Upload round-3 previews
-        uses: actions/upload-artifact@v4
-        with:
-          name: cutsell-focused-round3-previews-${{ github.sha }}
-          path: focused-previews/*.mp4
-          retention-days: 14
-
-      - name: Always terminate exact staging GPU worker
-        if: always()
+          ref: ${{ env.SOURCE_SHA }}
+      - name: Verify exact source
         shell: bash
         run: |
-          set +e
-          if [ -n "${POD_ID:-}" ]; then
-            code=$(curl --silent --show-error --write-out '%{http_code}' --request DELETE --url "https://rest.runpod.io/v1/pods/$POD_ID" --header "Authorization: Bearer $RUNPOD_API_KEY" --output /tmp/delete.txt)
-            echo "delete_http=$code"
-            sleep 3
-            curl --silent --show-error --url "https://rest.runpod.io/v1/pods" --header "Authorization: Bearer $RUNPOD_API_KEY" --output /tmp/pods-after.json
-            if jq -e --arg id "$POD_ID" '.[] | select(.id == $id)' /tmp/pods-after.json >/dev/null; then exit 1; fi
-          fi
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
+      - name: Login to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Build and push exact worker image
+        shell: bash
+        run: |
+          set -euo pipefail
+          IMAGE="$IMAGE_REPO:$SOURCE_SHA"
+          docker build -t "$IMAGE" -f Dockerfile.cutsell.worker .
+          docker push "$IMAGE"
+          docker buildx imagetools inspect "$IMAGE" | tee image-inspect.txt
+          digest=$(awk '/^Digest:/ {print $2; exit}' image-inspect.txt)
+          test -n "$digest"
+          case "$digest" in sha256:[0-9a-f][0-9a-f]*) ;; *) echo "Invalid digest: $digest"; exit 3;; esac
+          echo "SOURCE_SHA=$SOURCE_SHA" >> "$GITHUB_STEP_SUMMARY"
+          echo "IMAGE=$IMAGE@$digest" >> "$GITHUB_STEP_SUMMARY"
+          echo "IMAGE_DIGEST=$digest" >> "$GITHUB_STEP_SUMMARY"
+          echo "FOCUSED_ROUND4_IMAGE=$IMAGE@$digest"
