@@ -52,6 +52,7 @@ from .final_delivery_integrity import install_final_delivery_integrity
 from .terminal_delivery_reconciliation import install_terminal_delivery_reconciliation
 from .temporal_word_boundary_integrity import install_temporal_word_boundary_integrity
 from .final_draft_retry_integrity import install_final_draft_retry_integrity
+from .selected_failed_bridge_integrity import install_selected_failed_bridge_integrity
 
 install_clean_cut_contract_recovery()
 install_recording_process_context_cleanup()
@@ -100,6 +101,7 @@ install_final_delivery_integrity()
 install_terminal_delivery_reconciliation()
 install_temporal_word_boundary_integrity()
 install_final_draft_retry_integrity()
+install_selected_failed_bridge_integrity()
 
 __version__ = "0.1.0"
 OBSERVABILITY_STATUS = initialize_observability(service="cutsell-worker")
