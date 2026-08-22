@@ -31,7 +31,7 @@ def _tighten_trailing_silence(
     segment: RenderSegment,
     *,
     minimum_silence_sec: float = 0.28,
-    maximum_trim_sec: float = 3.0,
+    maximum_trim_sec: float = 12.0,
     edge_tolerance_sec: float = 0.16,
     speech_tail_pad_sec: float = 0.04,
 ) -> RenderSegment:
@@ -43,6 +43,12 @@ def _tighten_trailing_silence(
     the real source audio. We therefore trim only a silence interval that reaches the
     segment's trailing edge. Internal pauses are untouched and spoken audio is never
     removed.
+
+    The ceiling is deliberately generous. Round 4 proved that long-form raw takes can
+    contain more than three seconds of genuine trailing recording-process dead air; the
+    previous 3 s guard rejected those objectively silent tails and left them visible in
+    the preview. A 12 s cap still prevents an unbounded trim while allowing real creator
+    post-roll to be removed.
     """
     if segment.duration_sec < minimum_silence_sec + 0.35:
         return segment
