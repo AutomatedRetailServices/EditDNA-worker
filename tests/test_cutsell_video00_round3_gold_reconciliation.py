@@ -87,6 +87,63 @@ def test_round3_restores_clean_retake_and_removes_locally_failed_previous_attemp
     assert repairs[0]["reason"] == "restore_clean_retake_remove_failed_previous"
 
 
+def test_round4_restores_clean_retake_at_actual_overlap_window_confidence():
+    """Exact Round 4 integration regression from the real Video 00 report.
+
+    The clean 120.11-124.15 retake was alternate=0.75 in one overlapping Hybrid
+    window and keep=0.80 in another. The semantic reducer retained the higher-priority
+    alternate label, so the prior 0.80 Gold threshold prevented reconciliation and the
+    clean retake was deleted as short-alternate debris while 108.56-111.86 survived.
+    """
+    broken = _take(
+        "broken",
+        108.56,
+        111.86,
+        "Ahí fue cuando me mandaron a hacer sonografías de tiroides",
+        complete=True,
+    )
+    clean = _take(
+        "clean",
+        120.11,
+        124.15,
+        "a hacer sonografías de tiroides y otras sonografías",
+        complete=True,
+    )
+    following = _take(
+        "following",
+        128.16,
+        134.22,
+        "En la sonografía de tiroides apareció un nódulo sospechoso de tres centímetros",
+        complete=True,
+    )
+    result = HybridSessionCleanupResult(
+        kept=(broken, following),
+        deleted=(clean,),
+        requested_chunk_count=3,
+        available_chunk_count=3,
+        diagnostics=({
+            "hybrid_retry_completion_integrity": [{
+                "clip_id": "clean",
+                "reason": "semantic_short_alternate_covered_by_neighbors",
+            }],
+        },),
+        semantic_decisions=(("broken", "alternate", 0.80), ("clean", "alternate", 0.75), ("following", "winner", 0.95)),
+    )
+    context = _context(
+        TemporalEvent("src", 112.009, 112.34, "retry_setup", 0.86, "creator resets and retries same delivery"),
+    )
+
+    fixed = reconcile_human_gold_hybrid(result, (broken, clean, following), context)
+
+    assert {take.clip_id for take in fixed.kept} == {"clean", "following"}
+    assert {take.clip_id for take in fixed.deleted} == {"broken"}
+    repair = fixed.diagnostics[-1]["hybrid_gold_reconciliation"][0]
+    assert repair["reason"] == "restore_clean_retake_remove_failed_previous"
+    assert repair["semantic_label"] == "alternate"
+    assert repair["semantic_confidence"] == 0.75
+    assert repair["retry_setup_confidence"] == 0.86
+
+
 def test_round3_removes_orphan_continuation_after_deleted_incomplete_alternate():
     winner = _take(
         "winner",
