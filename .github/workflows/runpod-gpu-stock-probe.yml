@@ -1,0 +1,38 @@
+name: RunPod GPU Stock Probe
+on:
+  push:
+    branches:
+      - cutsell/mobile-v1-clean
+    paths:
+      - .github/workflows/runpod-gpu-stock-probe.yml
+permissions:
+  contents: write
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    env:
+      RUNPOD_API_KEY: ${{ secrets.RUNPOD_API_KEY }}
+    steps:
+      - name: Query live GPU stock
+        shell: bash
+        run: |
+          set -euo pipefail
+          wget -q https://github.com/runpod/runpodctl/releases/latest/download/runpodctl-linux-amd64 -O runpodctl
+          chmod +x runpodctl
+          ./runpodctl config --apiKey "$RUNPOD_API_KEY"
+          ./runpodctl gpu list > gpu-stock.json
+          cat gpu-stock.json
+      - name: Persist stock snapshot
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          git clone -q "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" repo
+          cd repo && git checkout -q cutsell/mobile-v1-clean
+          mkdir -p ops
+          cp ../gpu-stock.json ops/runpod-gpu-stock.json
+          git config user.name github-actions && git config user.email github-actions@github.com
+          git add ops/runpod-gpu-stock.json
+          git commit -m "ops: snapshot RunPod GPU stock" || exit 0
+          git push -q origin cutsell/mobile-v1-clean
