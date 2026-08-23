@@ -131,11 +131,35 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          code=$(curl --silent --show-error --write-out '%{http_code}' --request POST --url "https://api.runpod.ai/v2/$SERVERLESS_ENDPOINT_ID/runsync" --header "Authorization: Bearer $RUNPOD_API_KEY" --header 'Content-Type: application/json' --data '{"input":{"op":"health"}}' --max-time 900 --output /tmp/health.json)
-          echo "health_http=$code"
-          cat /tmp/health.json | jq .
+          code=$(curl --silent --show-error --write-out '%{http_code}' --request POST --url "https://api.runpod.ai/v2/$SERVERLESS_ENDPOINT_ID/run" --header "Authorization: Bearer $RUNPOD_API_KEY" --header 'Content-Type: application/json' --data '{"input":{"op":"health"}}' --output /tmp/submit.json)
+          echo "submit_http=$code"
+          cat /tmp/submit.json | jq .
           test "$code" = "200"
-          jq -e '.output.ok == true and .output.cuda_available == true and (.output.cuda_device_count|tonumber) >= 1' /tmp/health.json >/dev/null
+          JOB_ID=$(jq -r '.id // empty' /tmp/submit.json)
+          test -n "$JOB_ID"
+          echo "SERVERLESS_JOB_ID=$JOB_ID" >> "$GITHUB_ENV"
+
+          deadline=$((SECONDS+900))
+          while [ "$SECONDS" -lt "$deadline" ]; do
+            curl --fail --silent --show-error --url "https://api.runpod.ai/v2/$SERVERLESS_ENDPOINT_ID/status/$JOB_ID" --header "Authorization: Bearer $RUNPOD_API_KEY" --output /tmp/health.json
+            status=$(jq -r '.status // empty' /tmp/health.json)
+            echo "serverless_health_status=$status"
+            case "$status" in
+              COMPLETED)
+                cat /tmp/health.json | jq .
+                jq -e '.output.ok == true and .output.cuda_available == true and (.output.cuda_device_count|tonumber) >= 1' /tmp/health.json >/dev/null
+                exit 0
+                ;;
+              FAILED|TIMED_OUT|CANCELLED)
+                cat /tmp/health.json | jq .
+                exit 1
+                ;;
+            esac
+            sleep 5
+          done
+          echo "Serverless health job timed out"
+          cat /tmp/health.json | jq . || true
+          exit 1
 
       - name: Publish GPU gate PASS
         env:
