@@ -56,25 +56,56 @@ jobs:
           set -euo pipefail
           python -m pip install -q 'requests>=2.32' 'redis>=5.0' 'rq>=2.6' 'boto3>=1.34'
 
-      - name: Query live RunPod datacenter stock
+      - name: Query live RunPod datacenter stock with safe fallback
         shell: bash
         run: |
-          set -euo pipefail
-          wget -q https://github.com/runpod/runpodctl/releases/latest/download/runpodctl-linux-amd64 -O runpodctl
-          chmod +x runpodctl
-          ./runpodctl config --apiKey "$RUNPOD_API_KEY" >/tmp/runpodctl-config.txt 2>&1
-          ./runpodctl datacenter list > datacenter-stock.json
+          set -u
+          rm -f datacenter-stock.json
+          LIVE_OK=0
+          if wget -q https://github.com/runpod/runpodctl/releases/latest/download/runpodctl-linux-amd64 -O runpodctl; then
+            chmod +x runpodctl
+            if ./runpodctl config --apiKey "$RUNPOD_API_KEY" >/tmp/runpodctl-config.txt 2>&1; then
+              if ./runpodctl datacenter list > datacenter-stock.live.json 2>/tmp/runpodctl-dc.err; then
+                if python - <<'PY'
+import json,sys
+p='datacenter-stock.live.json'
+try:
+    data=json.load(open(p))
+except Exception:
+    sys.exit(1)
+if not isinstance(data,list) or not data:
+    sys.exit(1)
+count=sum(1 for dc in data for g in (dc.get('gpuAvailability') or []) if g.get('stockStatus') in {'High','Medium','Low'})
+if count < 1:
+    sys.exit(1)
+print('live_stock_count=',count)
+PY
+                then
+                  mv datacenter-stock.live.json datacenter-stock.json
+                  LIVE_OK=1
+                  echo "runpod_live_stock_ok=true"
+                fi
+              fi
+            fi
+          fi
+          if [ "$LIVE_OK" != "1" ]; then
+            echo "runpod_live_stock_ok=false; using repository snapshot ops/datacenter-stock.json"
+            test -s ops/datacenter-stock.json
+            cp ops/datacenter-stock.json datacenter-stock.json
+          fi
           python - <<'PY'
-          import json
-          data=json.load(open('datacenter-stock.json'))
-          live=[]
-          for dc in data:
-              for g in dc.get('gpuAvailability') or []:
-                  if g.get('stockStatus') in {'High','Medium','Low'}:
-                      live.append({'dc':dc.get('id'),'location':dc.get('location'),'gpu':g.get('gpuId'),'stock':g.get('stockStatus')})
-          print('live_stock_count=',len(live))
-          print(json.dumps(live[:80], indent=2))
-          PY
+import json
+data=json.load(open('datacenter-stock.json'))
+live=[]
+for dc in data:
+    for g in dc.get('gpuAvailability') or []:
+        if g.get('stockStatus') in {'High','Medium','Low'}:
+            live.append({'dc':dc.get('id'),'location':dc.get('location'),'gpu':g.get('gpuId'),'stock':g.get('stockStatus')})
+print('candidate_stock_count=',len(live))
+print(json.dumps(live[:80], indent=2))
+if not live:
+    raise SystemExit('No usable RunPod datacenter stock in live query or fallback snapshot')
+PY
 
       - name: Execute Round20 dynamic-capacity benchmark
         shell: bash
@@ -118,24 +149,14 @@ jobs:
         shell: bash
         run: |
           set +e
-          curl --silent --show-error \
-            --url "https://rest.runpod.io/v1/pods" \
-            --header "Authorization: Bearer $RUNPOD_API_KEY" \
-            --output /tmp/pods-before-clean.json
+          curl --silent --show-error --url "https://rest.runpod.io/v1/pods" --header "Authorization: Bearer $RUNPOD_API_KEY" --output /tmp/pods-before-clean.json
           jq -r '.[] | select((.name // "") | startswith("cutsell-staging-worker")) | .id' /tmp/pods-before-clean.json | while read -r POD_ID; do
             [ -z "$POD_ID" ] && continue
-            code=$(curl --silent --show-error --write-out '%{http_code}' \
-              --request DELETE \
-              --url "https://rest.runpod.io/v1/pods/$POD_ID" \
-              --header "Authorization: Bearer $RUNPOD_API_KEY" \
-              --output /tmp/delete.txt)
+            code=$(curl --silent --show-error --write-out '%{http_code}' --request DELETE --url "https://rest.runpod.io/v1/pods/$POD_ID" --header "Authorization: Bearer $RUNPOD_API_KEY" --output /tmp/delete.txt)
             echo "final_cleanup pod=$POD_ID http=$code"
           done
           sleep 4
-          curl --silent --show-error \
-            --url "https://rest.runpod.io/v1/pods" \
-            --header "Authorization: Bearer $RUNPOD_API_KEY" \
-            --output /tmp/pods-after-clean.json
+          curl --silent --show-error --url "https://rest.runpod.io/v1/pods" --header "Authorization: Bearer $RUNPOD_API_KEY" --output /tmp/pods-after-clean.json
           remaining=$(jq '[.[] | select((.name // "") | startswith("cutsell-staging-worker"))] | length' /tmp/pods-after-clean.json)
           echo "remaining_staging_pods=$remaining"
           test "$remaining" = "0"
