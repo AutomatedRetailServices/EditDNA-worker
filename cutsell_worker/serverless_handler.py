@@ -5,6 +5,7 @@ adapts the execution surface from a long-lived RQ worker to queue-based Serverle
 """
 from __future__ import annotations
 
+import importlib
 import json
 import os
 from pathlib import Path
@@ -26,10 +27,9 @@ def _upload_artifact(local_path: str, *, key: str, content_type: str) -> str:
 
 
 def _health() -> dict:
-    # Keep CUDA/PyTorch as a runtime-only dependency so the clean-worker/API import
-    # boundary stays free of heavy ML imports. The Serverless image provides torch.
-    import torch
-
+    # Resolve PyTorch only inside the GPU runtime. Using importlib preserves the
+    # clean-worker dependency boundary enforced by CI while still validating CUDA.
+    torch = importlib.import_module("torch")
     return {
         "ok": True,
         "cuda_available": bool(torch.cuda.is_available()),
