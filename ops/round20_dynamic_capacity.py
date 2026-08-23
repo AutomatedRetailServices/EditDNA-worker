@@ -11,8 +11,6 @@ from rq import Worker
 import round14_capacity_failover as base
 
 
-# Compatibility-first ordering. Lower-cost creator-workload GPUs come first;
-# larger datacenter GPUs are fallbacks, not the default.
 GPU_PRIORITY = [
     "NVIDIA GeForce RTX 3090",
     "NVIDIA GeForce RTX 4090",
@@ -31,6 +29,24 @@ GPU_PRIORITY = [
 ]
 GPU_RANK = {gpu: i for i, gpu in enumerate(GPU_PRIORITY)}
 STOCK_RANK = {"High": 0, "Medium": 1, "Low": 2, "": 3, None: 4}
+START_CMD = 'python -m rq.cli worker -u "$REDIS_URL" --worker-ttl 1200 cutsell'
+
+
+def _canonical_image_ref() -> str:
+    """Match the previously proven Run38 RunPod image contract: repo@digest."""
+    raw = base.IMMUTABLE_IMAGE
+    digest = base.IMAGE_DIGEST
+    if "@" in raw:
+        left = raw.split("@", 1)[0]
+        last_slash = left.rfind("/")
+        last_colon = left.rfind(":")
+        if last_colon > last_slash:
+            left = left[:last_colon]
+        ref = f"{left}@{digest}"
+    else:
+        ref = f"{raw.split(':', 1)[0]}@{digest}"
+    print(f"round20_image_ref={ref}", flush=True)
+    return ref
 
 
 def _template_registry_auth() -> str | None:
@@ -59,15 +75,11 @@ def _load_live_candidates() -> list[tuple[str, str, str, str]]:
             stock = item.get("stockStatus")
             if gpu not in GPU_RANK:
                 continue
-            # Empty stock means RunPod lists the GPU but does not claim live stock.
-            # Keep it only as a last-resort candidate after High/Medium/Low.
             candidates.append((dc_id, gpu, str(stock or ""), str(dc.get("location") or "")))
 
-    # Deduplicate and sort by stock first, then our cost/compatibility preference.
     uniq = {(dc, gpu): (dc, gpu, stock, loc) for dc, gpu, stock, loc in candidates}
     ordered = list(uniq.values())
     ordered.sort(key=lambda x: (STOCK_RANK.get(x[2], 4), GPU_RANK.get(x[1], 999), x[0]))
-
     max_candidates = int(os.environ.get("ROUND20_MAX_CANDIDATES", "24"))
     ordered = ordered[:max_candidates]
     print("round20_candidates=" + json.dumps([
@@ -81,20 +93,21 @@ def find_worker_dynamic(base_env: dict, mount: str):
     before = {w.name for w in Worker.all(connection=base.redis)}
     env = base.build_env(base_env)
     registry_auth = _template_registry_auth()
+    image_ref = _canonical_image_ref()
     candidates = _load_live_candidates()
     if not candidates:
         raise RuntimeError("Live RunPod stock returned no compatible GPU candidates")
 
     attempts: list[dict] = []
-    runtime_timeout = int(os.environ.get("ROUND20_RUNTIME_TIMEOUT_SEC", "90"))
+    # Image pulls on a cold host can exceed 90s. Run38 historically waited much longer.
+    runtime_timeout = max(180, int(os.environ.get("ROUND20_RUNTIME_TIMEOUT_SEC", "180")))
     rq_timeout = int(os.environ.get("ROUND20_RQ_TIMEOUT_SEC", "480"))
 
-    # Secure first for each live candidate, then Community. Never more than one Pod alive.
     for dc, gpu, stock, location in candidates:
         for cloud in ("SECURE", "COMMUNITY"):
             payload = {
                 "name": base.POD_PREFIX,
-                "imageName": base.IMMUTABLE_IMAGE,
+                "imageName": image_ref,
                 "cloudType": cloud,
                 "computeType": "GPU",
                 "gpuCount": 1,
@@ -106,6 +119,9 @@ def find_worker_dynamic(base_env: dict, mount: str):
                 "containerDiskInGb": 30,
                 "volumeInGb": 20,
                 "volumeMountPath": mount,
+                # Critical: match the previously proven Run38 boot contract.
+                "dockerEntrypoint": ["bash", "-lc"],
+                "dockerStartCmd": [START_CMD],
                 "env": env,
             }
             if registry_auth:
@@ -126,7 +142,7 @@ def find_worker_dynamic(base_env: dict, mount: str):
             print("round20_pod_created=" + json.dumps({
                 "pod": pid, "cloud": cloud, "datacenter": dc, "location": location,
                 "gpu": gpu, "stock": stock, "cost": info.get("costPerHr"),
-                "image": info.get("imageName"),
+                "image": info.get("imageName"), "boot_contract": "run38-proven",
             }, ensure_ascii=False), flush=True)
 
             runtime_seen = False
@@ -150,6 +166,7 @@ def find_worker_dynamic(base_env: dict, mount: str):
                         print("round20_state=" + json.dumps(snap, ensure_ascii=False), flush=True)
                         last_snap = snap
                     if runtime_seen:
+                        print(f"round20_runtime_ready pod={pid}", flush=True)
                         break
                 else:
                     print(f"round20_pod_get_http={state.status_code} pod={pid}", flush=True)
