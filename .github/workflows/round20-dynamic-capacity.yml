@@ -60,27 +60,13 @@ jobs:
         shell: bash
         run: |
           set -u
-          rm -f datacenter-stock.json
+          rm -f datacenter-stock.json datacenter-stock.live.json
           LIVE_OK=0
           if wget -q https://github.com/runpod/runpodctl/releases/latest/download/runpodctl-linux-amd64 -O runpodctl; then
             chmod +x runpodctl
             if ./runpodctl config --apiKey "$RUNPOD_API_KEY" >/tmp/runpodctl-config.txt 2>&1; then
               if ./runpodctl datacenter list > datacenter-stock.live.json 2>/tmp/runpodctl-dc.err; then
-                if python - <<'PY'
-import json,sys
-p='datacenter-stock.live.json'
-try:
-    data=json.load(open(p))
-except Exception:
-    sys.exit(1)
-if not isinstance(data,list) or not data:
-    sys.exit(1)
-count=sum(1 for dc in data for g in (dc.get('gpuAvailability') or []) if g.get('stockStatus') in {'High','Medium','Low'})
-if count < 1:
-    sys.exit(1)
-print('live_stock_count=',count)
-PY
-                then
+                if python -c "import json,sys; d=json.load(open('datacenter-stock.live.json')); c=sum(1 for dc in d for g in (dc.get('gpuAvailability') or []) if g.get('stockStatus') in {'High','Medium','Low'}); print('live_stock_count=', c); sys.exit(0 if isinstance(d,list) and d and c>0 else 1)"; then
                   mv datacenter-stock.live.json datacenter-stock.json
                   LIVE_OK=1
                   echo "runpod_live_stock_ok=true"
@@ -93,19 +79,7 @@ PY
             test -s ops/datacenter-stock.json
             cp ops/datacenter-stock.json datacenter-stock.json
           fi
-          python - <<'PY'
-import json
-data=json.load(open('datacenter-stock.json'))
-live=[]
-for dc in data:
-    for g in dc.get('gpuAvailability') or []:
-        if g.get('stockStatus') in {'High','Medium','Low'}:
-            live.append({'dc':dc.get('id'),'location':dc.get('location'),'gpu':g.get('gpuId'),'stock':g.get('stockStatus')})
-print('candidate_stock_count=',len(live))
-print(json.dumps(live[:80], indent=2))
-if not live:
-    raise SystemExit('No usable RunPod datacenter stock in live query or fallback snapshot')
-PY
+          python -c "import json,sys; d=json.load(open('datacenter-stock.json')); live=[{'dc':dc.get('id'),'location':dc.get('location'),'gpu':g.get('gpuId'),'stock':g.get('stockStatus')} for dc in d for g in (dc.get('gpuAvailability') or []) if g.get('stockStatus') in {'High','Medium','Low'}]; print('candidate_stock_count=',len(live)); print(json.dumps(live[:80],indent=2)); sys.exit(0 if live else 1)"
 
       - name: Execute Round20 dynamic-capacity benchmark
         shell: bash
