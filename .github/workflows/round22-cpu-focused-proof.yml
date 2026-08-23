@@ -19,6 +19,7 @@ jobs:
       RUNPOD_API_KEY: ${{ secrets.RUNPOD_API_KEY }}
       RUNPOD_TEMPLATE_NAME: EditDNA-Worker-2
       GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+      SOURCE_SHA: f4ea2f9d5676d260205d6fe8364b99b35e4eed39
       CUTSELL_BRAIN_BACKEND: runpod_local
       CUTSELL_EDITORIAL_MODE: clean_cut
       CUTSELL_ASR_MODEL: medium
@@ -33,9 +34,22 @@ jobs:
       SOURCE_KEY: Editdna longform validation/VIDEO-2026-07-30-09-18-03.mp4
 
     steps:
+      - name: Publish exact Round22 run id
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          content=$(printf '{"run_id":%s,"head_sha":"%s","source_sha":"%s","status":"in_progress"}' "$GITHUB_RUN_ID" "$GITHUB_SHA" "$SOURCE_SHA" | base64 -w0)
+          current=$(curl --silent --show-error --header "Authorization: Bearer $GH_TOKEN" --header "Accept: application/vnd.github+json" "https://api.github.com/repos/$GITHUB_REPOSITORY/contents/ops/round22-live.json?ref=cutsell/mobile-v1-clean")
+          sha=$(printf '%s' "$current" | jq -r '.sha // empty')
+          payload=$(jq -n --arg msg "ops: publish Round22 run $GITHUB_RUN_ID" --arg content "$content" --arg branch "cutsell/mobile-v1-clean" --arg sha "$sha" '{message:$msg,content:$content,branch:$branch} + (if $sha=="" then {} else {sha:$sha} end)')
+          curl --fail --silent --show-error --request PUT --url "https://api.github.com/repos/$GITHUB_REPOSITORY/contents/ops/round22-live.json" --header "Authorization: Bearer $GH_TOKEN" --header "Accept: application/vnd.github+json" --header "Content-Type: application/json" --data "$payload" >/dev/null
+          echo "round22_run_id=$GITHUB_RUN_ID"
+
       - uses: actions/checkout@v4
         with:
-          ref: cutsell/mobile-v1-clean
+          ref: ${{ github.sha }}
           fetch-depth: 1
 
       - uses: actions/setup-python@v5
