@@ -10,7 +10,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
   actions: write
 
 jobs:
@@ -31,6 +31,19 @@ jobs:
       RUNPOD_DATACENTER_STOCK: datacenter-stock.json
 
     steps:
+      - name: Publish exact Round20 run id
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          content=$(printf '{"run_id":%s,"head_sha":"%s","source_sha":"%s","status":"in_progress"}' "$GITHUB_RUN_ID" "$GITHUB_SHA" "$SOURCE_SHA" | base64 -w0)
+          current=$(curl --silent --show-error --header "Authorization: Bearer $GH_TOKEN" --header "Accept: application/vnd.github+json" "https://api.github.com/repos/$GITHUB_REPOSITORY/contents/ops/round20-live.json?ref=cutsell/mobile-v1-clean")
+          sha=$(printf '%s' "$current" | jq -r '.sha // empty')
+          payload=$(jq -n --arg msg "ops: publish Round20 run $GITHUB_RUN_ID" --arg content "$content" --arg branch "cutsell/mobile-v1-clean" --arg sha "$sha" '{message:$msg,content:$content,branch:$branch} + (if $sha=="" then {} else {sha:$sha} end)')
+          curl --fail --silent --show-error --request PUT --url "https://api.github.com/repos/$GITHUB_REPOSITORY/contents/ops/round20-live.json" --header "Authorization: Bearer $GH_TOKEN" --header "Accept: application/vnd.github+json" --header "Content-Type: application/json" --data "$payload" >/dev/null
+          echo "round20_run_id=$GITHUB_RUN_ID"
+
       - name: Checkout current CutSell branch
         uses: actions/checkout@v4
         with:
