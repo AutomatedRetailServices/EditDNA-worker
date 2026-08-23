@@ -1,0 +1,117 @@
+name: Round22 CPU Focused Proof
+
+on:
+  push:
+    branches:
+      - cutsell/mobile-v1-clean
+    paths:
+      - .github/workflows/round22-cpu-focused-proof.yml
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  proof:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    env:
+      RUNPOD_API_KEY: ${{ secrets.RUNPOD_API_KEY }}
+      RUNPOD_TEMPLATE_NAME: EditDNA-Worker-2
+      GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+      CUTSELL_BRAIN_BACKEND: runpod_local
+      CUTSELL_EDITORIAL_MODE: clean_cut
+      CUTSELL_ASR_MODEL: medium
+      CUTSELL_CLEAN_CUT_JUDGE: '0'
+      CUTSELL_HYBRID_PROVIDER: google
+      CUTSELL_HYBRID_LLM_ENABLED: '1'
+      CUTSELL_HYBRID_PRIMARY_MODEL: gemini-3.5-flash-lite
+      CUTSELL_HYBRID_ESCALATION_MODEL: gemini-3.6-flash
+      CUTSELL_HYBRID_MAX_SESSION_USD: '0.0075'
+      CUTSELL_HYBRID_MAX_EDIT_USD: '0.50'
+      CUTSELL_HYBRID_TEST_BUDGET_USD: '0.50'
+      SOURCE_KEY: Editdna longform validation/VIDEO-2026-07-30-09-18-03.mp4
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: cutsell/mobile-v1-clean
+          fetch-depth: 1
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Load masked S3 credentials from proven RunPod template
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail --silent --show-error \
+            --url "https://rest.runpod.io/v1/templates" \
+            --header "Authorization: Bearer $RUNPOD_API_KEY" \
+            --output /tmp/templates.json
+          TEMPLATE=$(jq -c --arg name "$RUNPOD_TEMPLATE_NAME" '[.[] | select(.name == $name)][0]' /tmp/templates.json)
+          test "$TEMPLATE" != "null" || { echo 'RunPod baseline template not found'; exit 5; }
+          for key in AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_REGION S3_BUCKET; do
+            value=$(printf '%s' "$TEMPLATE" | jq -r --arg key "$key" '.env[$key] // empty')
+            test -n "$value" || { echo "$key missing from RunPod template"; exit 6; }
+            echo "::add-mask::$value"
+            printf '%s=%s\n' "$key" "$value" >> "$GITHUB_ENV"
+          done
+          echo 'cpu_fallback_storage_credentials=loaded'
+
+      - name: Install CPU validation runtime
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq ffmpeg build-essential python3-dev pkg-config \
+            libavformat-dev libavcodec-dev libavdevice-dev libavutil-dev \
+            libavfilter-dev libswscale-dev libswresample-dev
+          python -m pip install -q --upgrade pip
+          python -m pip install -q 'torch==2.6.0' --index-url https://download.pytorch.org/whl/cpu
+          python -m pip install -q -r requirements.cutsell.worker.txt
+          python - <<'PY'
+          from faster_whisper import WhisperModel
+          import mediapipe, cv2
+          print('cpu_runtime_imports_ok=true')
+          PY
+
+      - name: Run Video00 directly on CPU
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p cpu-proof
+          python - <<'PY'
+          import json, os
+          from cutsell_worker.universal_clean_cut_validation import run_single_universal_clean_cut_validation
+          key=os.environ['SOURCE_KEY']
+          result=run_single_universal_clean_cut_validation(
+              key,
+              project_id='round22-cpu-video00',
+              preview_output='cpu-proof/video00.mp4',
+          )
+          with open('cpu-proof/video00-result.json','w',encoding='utf-8') as f:
+              json.dump(result,f,ensure_ascii=False,indent=2,sort_keys=True)
+          print(json.dumps({
+              'brain_backend':result.get('brain_backend'),
+              'external_brain_calls_enabled':result.get('external_brain_calls_enabled'),
+              'source_duration_sec':result.get('source_duration_sec'),
+              'selected_duration_sec':result.get('selected_duration_sec'),
+              'selected_count':result.get('selected_count'),
+              'discarded_count':result.get('discarded_count'),
+              'elapsed_sec':result.get('elapsed_sec'),
+              'preview_path':result.get('preview_path'),
+          },indent=2))
+          if not os.path.exists('cpu-proof/video00.mp4'):
+              raise SystemExit('CPU proof produced no preview')
+          PY
+
+      - name: Upload Round22 CPU proof
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cutsell-round22-cpu-video00
+          path: cpu-proof/*
+          if-no-files-found: warn
+          retention-days: 14
