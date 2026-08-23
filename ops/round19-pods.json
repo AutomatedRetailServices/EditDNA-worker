@@ -1,1 +1,25 @@
-[]
+[
+  {
+    "id": "nzzx44dh4e2wdh",
+    "name": "cutsell-staging-worker",
+    "desiredStatus": "RUNNING",
+    "costPerHr": 0.74,
+    "gpu": null,
+    "cloudType": null,
+    "imageName": "ghcr.io/automatedretailservices/cutsell-worker@sha256:57ce35db2eee1348576d6745608a71faeb6f8167d8ef4e2c0177d0033d1f91d4",
+    "lastStatusChange": "Rented by User: Sun Aug 23 2026 14:04:10 GMT+0000 (Coordinated Universal Time)",
+    "runtime": null,
+    "machineId": "nall3ylt8mm3",
+    "machine": {
+      "dataCenterId": "EU-RO-1",
+      "diskThroughputMBps": 7099,
+      "gpuTypeId": "NVIDIA GeForce RTX 4090",
+      "location": "RO",
+      "maxDownloadSpeedMbps": 3951,
+      "maxUploadSpeedMbps": 2888,
+      "secureCloud": true,
+      "supportPublicIp": true,
+      "reservedCountVersion": 163626
+    }
+  }
+]
