@@ -1,5 +1,4 @@
 name: RunPod GPU Stock Probe
-# probe rerun: 2026-08-23
 on:
   push:
     branches:
@@ -17,13 +16,50 @@ jobs:
       - name: Query live GPU stock
         shell: bash
         run: |
-          set -euo pipefail
+          set -u
+          : > gpu-stock.json
+          : > gpu-stock.error
+          : > datacenter-stock.json
+          : > datacenter-stock.error
+          : > runpodctl-version.txt
+
           wget -q https://github.com/runpod/runpodctl/releases/latest/download/runpodctl-linux-amd64 -O runpodctl
-          chmod +x runpodctl
-          ./runpodctl config --apiKey "$RUNPOD_API_KEY"
-          ./runpodctl gpu list > gpu-stock.json
-          cat gpu-stock.json
-      - name: Persist stock snapshot
+          download_rc=$?
+          if [ "$download_rc" -eq 0 ]; then chmod +x runpodctl; fi
+
+          config_rc=99
+          gpu_rc=99
+          dc_rc=99
+          if [ "$download_rc" -eq 0 ]; then
+            ./runpodctl version > runpodctl-version.txt 2>&1 || true
+            ./runpodctl config --apiKey "$RUNPOD_API_KEY" >/tmp/runpodctl-config.txt 2>&1
+            config_rc=$?
+            if [ "$config_rc" -eq 0 ]; then
+              ./runpodctl gpu list --include-unavailable > gpu-stock.json 2>gpu-stock.error
+              gpu_rc=$?
+              ./runpodctl datacenter list > datacenter-stock.json 2>datacenter-stock.error
+              dc_rc=$?
+            fi
+          fi
+
+          jq -n \
+            --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            --argjson download_rc "$download_rc" \
+            --argjson config_rc "$config_rc" \
+            --argjson gpu_rc "$gpu_rc" \
+            --argjson dc_rc "$dc_rc" \
+            '{timestamp:$ts,download_rc:$download_rc,config_rc:$config_rc,gpu_list_rc:$gpu_rc,datacenter_list_rc:$dc_rc}' \
+            > runpod-gpu-probe-status.json
+
+          cat runpodctl-version.txt || true
+          cat runpod-gpu-probe-status.json
+          cat gpu-stock.json || true
+          cat gpu-stock.error || true
+          cat datacenter-stock.json || true
+          cat datacenter-stock.error || true
+
+      - name: Persist stock snapshot and diagnostics
+        if: always()
         env:
           GH_TOKEN: ${{ github.token }}
         shell: bash
@@ -32,8 +68,11 @@ jobs:
           git clone -q "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" repo
           cd repo && git checkout -q cutsell/mobile-v1-clean
           mkdir -p ops
-          cp ../gpu-stock.json ops/runpod-gpu-stock.json
-          git config user.name github-actions && git config user.email github-actions@github.com
-          git add ops/runpod-gpu-stock.json
-          git commit -m "ops: snapshot RunPod GPU stock" || exit 0
+          for f in gpu-stock.json gpu-stock.error datacenter-stock.json datacenter-stock.error runpodctl-version.txt runpod-gpu-probe-status.json; do
+            if [ -f "../$f" ]; then cp "../$f" "ops/$f"; fi
+          done
+          git config user.name github-actions
+          git config user.email github-actions@github.com
+          git add ops/gpu-stock.json ops/gpu-stock.error ops/datacenter-stock.json ops/datacenter-stock.error ops/runpodctl-version.txt ops/runpod-gpu-probe-status.json
+          git commit -m "ops: snapshot RunPod GPU stock diagnostics" || exit 0
           git push -q origin cutsell/mobile-v1-clean
