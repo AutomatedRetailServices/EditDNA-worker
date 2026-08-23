@@ -1,7 +1,7 @@
 {
-  "run_id": 32658018891,
-  "head_sha": "20689aaac64977d81e72fdf8399bbf37b9ae5575",
+  "run_id": 32659803587,
+  "original_run_id": "32658018891",
   "endpoint_id": "rdip9xhx6gi2px",
   "source_sha": "f4ea2f9d5676d260205d6fe8364b99b35e4eed39",
-  "status": "in_progress"
+  "status": "recovering_completed_gpu_outputs"
 }
