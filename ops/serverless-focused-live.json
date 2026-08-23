@@ -3,5 +3,5 @@
   "original_run_id": "32658018891",
   "endpoint_id": "rdip9xhx6gi2px",
   "source_sha": "f4ea2f9d5676d260205d6fe8364b99b35e4eed39",
-  "status": "recovering_completed_gpu_outputs"
+  "status": "artifacts_ready"
 }
