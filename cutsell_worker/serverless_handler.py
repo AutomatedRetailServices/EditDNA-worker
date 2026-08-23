@@ -8,11 +8,9 @@ from __future__ import annotations
 import json
 import os
 from pathlib import Path
-from urllib.parse import urlparse
 
 import boto3
 import runpod
-import torch
 
 from .universal_clean_cut_validation import run_single_universal_clean_cut_validation
 
@@ -28,6 +26,10 @@ def _upload_artifact(local_path: str, *, key: str, content_type: str) -> str:
 
 
 def _health() -> dict:
+    # Keep CUDA/PyTorch as a runtime-only dependency so the clean-worker/API import
+    # boundary stays free of heavy ML imports. The Serverless image provides torch.
+    import torch
+
     return {
         "ok": True,
         "cuda_available": bool(torch.cuda.is_available()),
