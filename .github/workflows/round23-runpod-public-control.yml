@@ -1,0 +1,93 @@
+name: Round23 RunPod Public Image Control
+
+on:
+  push:
+    branches:
+      - cutsell/mobile-v1-clean
+    paths:
+      - .github/workflows/round23-runpod-public-control.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      RUNPOD_API_KEY: ${{ secrets.RUNPOD_API_KEY }}
+      PUBLIC_IMAGE: nvidia/cuda:12.4.1-base-ubuntu22.04
+      POD_NAME: cutsell-runpod-public-control
+    steps:
+      - name: Validate RunPod credential
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "${RUNPOD_API_KEY:-}" || { echo 'RUNPOD_API_KEY missing'; exit 3; }
+
+      - name: Inspect CutSell template registry contract
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail --silent --show-error \
+            --url "https://rest.runpod.io/v1/templates" \
+            --header "Authorization: Bearer $RUNPOD_API_KEY" \
+            --output templates.json
+          jq -c '[.[] | select(.name == "EditDNA-Worker-2")][0] | {name,imageName,containerRegistryAuthId,dockerEntrypoint,dockerStartCmd,volumeMountPath,env_keys:(.env|keys)}' templates.json
+
+      - name: Create one public-image GPU control Pod
+        shell: bash
+        run: |
+          set -euo pipefail
+          jq -n \
+            --arg name "$POD_NAME" \
+            --arg image "$PUBLIC_IMAGE" \
+            '{name:$name,imageName:$image,cloudType:"SECURE",computeType:"GPU",gpuCount:1,gpuTypeIds:["NVIDIA GeForce RTX 4090","NVIDIA A40","NVIDIA L4"],gpuTypePriority:"custom",interruptible:false,containerDiskInGb:10,volumeInGb:0,dockerEntrypoint:["bash","-lc"],dockerStartCmd:["nvidia-smi && sleep 600"],env:{}}' > create.json
+          code=$(curl --silent --show-error --write-out '%{http_code}' \
+            --request POST \
+            --url "https://rest.runpod.io/v1/pods" \
+            --header "Authorization: Bearer $RUNPOD_API_KEY" \
+            --header "Content-Type: application/json" \
+            --data @create.json \
+            --output pod.json)
+          echo "create_http=$code"
+          jq '{id,name,desiredStatus,imageName,costPerHr,adjustedCostPerHr}' pod.json || true
+          test "$code" = "201" || exit 10
+          POD_ID=$(jq -r '.id // empty' pod.json)
+          test -n "$POD_ID" || exit 11
+          echo "POD_ID=$POD_ID" >> "$GITHUB_ENV"
+
+      - name: Wait up to 5 minutes for public-image runtime
+        shell: bash
+        run: |
+          set -euo pipefail
+          ok=0
+          for i in $(seq 1 60); do
+            curl --fail --silent --show-error \
+              --url "https://rest.runpod.io/v1/pods/$POD_ID?includeMachine=true" \
+              --header "Authorization: Bearer $RUNPOD_API_KEY" \
+              --output state.json
+            jq '{id,name,desiredStatus,imageName,lastStatusChange,runtime_present:(.runtime!=null),machineId,machine}' state.json
+            if jq -e '.runtime != null' state.json >/dev/null; then
+              ok=1
+              break
+            fi
+            sleep 5
+          done
+          echo "public_image_runtime_reached=$ok"
+          test "$ok" = "1"
+
+      - name: Always cleanup public control Pod
+        if: always()
+        shell: bash
+        run: |
+          set +e
+          if [ -n "${POD_ID:-}" ]; then
+            code=$(curl --silent --show-error --write-out '%{http_code}' \
+              --request DELETE \
+              --url "https://rest.runpod.io/v1/pods/$POD_ID" \
+              --header "Authorization: Bearer $RUNPOD_API_KEY" \
+              --output /tmp/delete.txt)
+            echo "cleanup_http=$code pod=$POD_ID"
+          fi
