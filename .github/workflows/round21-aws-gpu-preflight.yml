@@ -19,10 +19,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     env:
-      AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
-      AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-      AWS_REGION: ${{ secrets.AWS_REGION }}
-      AWS_DEFAULT_REGION: ${{ secrets.AWS_REGION }}
+      RUNPOD_API_KEY: ${{ secrets.RUNPOD_API_KEY }}
+      RUNPOD_TEMPLATE_NAME: EditDNA-Worker-2
     steps:
       - name: Publish exact Round21 preflight run id
         env:
@@ -43,6 +41,28 @@ jobs:
           ref: cutsell/mobile-v1-clean
           fetch-depth: 1
 
+      - name: Load masked AWS credentials from proven RunPod template
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "${RUNPOD_API_KEY:-}" || { echo 'RUNPOD_API_KEY missing'; exit 4; }
+          curl --fail --silent --show-error \
+            --url "https://rest.runpod.io/v1/templates" \
+            --header "Authorization: Bearer $RUNPOD_API_KEY" \
+            --output /tmp/templates.json
+          TEMPLATE=$(jq -c --arg name "$RUNPOD_TEMPLATE_NAME" '[.[] | select(.name == $name)][0]' /tmp/templates.json)
+          test "$TEMPLATE" != "null" || { echo 'RunPod baseline template not found'; exit 5; }
+          for key in AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_REGION; do
+            value=$(printf '%s' "$TEMPLATE" | jq -r --arg key "$key" '.env[$key] // empty')
+            test -n "$value" || { echo "$key missing from RunPod template"; exit 6; }
+            echo "::add-mask::$value"
+            printf '%s=%s\n' "$key" "$value" >> "$GITHUB_ENV"
+            if [ "$key" = "AWS_REGION" ]; then
+              printf 'AWS_DEFAULT_REGION=%s\n' "$value" >> "$GITHUB_ENV"
+            fi
+          done
+          echo 'aws_credentials_source=runpod_template'
+
       - name: AWS GPU capability probe
         shell: bash
         run: |
@@ -51,7 +71,6 @@ jobs:
           python - <<'PY'
           import json, os, sys
           import boto3
-          from botocore.exceptions import ClientError
 
           result = {
               'credentials_present': bool(os.getenv('AWS_ACCESS_KEY_ID') and os.getenv('AWS_SECRET_ACCESS_KEY')),
@@ -83,7 +102,7 @@ jobs:
               ec2 = boto3.client('ec2', region_name=region)
               ec2.describe_account_attributes(AttributeNames=['supported-platforms'])
               result['ec2_describe'] = True
-              families = ['g4dn.xlarge','g5.xlarge','g6.xlarge','g6e.xlarge','p3.2xlarge','p4d.24xlarge']
+              families = ['g4dn.xlarge','g5.xlarge','g6.xlarge','g6e.xlarge','p3.2xlarge']
               resp = ec2.describe_instance_type_offerings(
                   LocationType='availability-zone',
                   Filters=[{'Name':'instance-type','Values':families}],
@@ -111,7 +130,10 @@ jobs:
               result['errors'].append('ssm_gpu_ami:' + repr(e))
 
           open('aws-gpu-preflight.json','w').write(json.dumps(result, indent=2))
-          print(json.dumps(result, indent=2))
+          safe = dict(result)
+          if safe.get('sts'):
+              safe['sts'] = {'Account': safe['sts'].get('Account'), 'Arn': 'masked'}
+          print(json.dumps(safe, indent=2))
           ok = bool(result['sts'] and result['ec2_describe'] and result['gpu_offerings'] and result['ecs_gpu_ami'])
           sys.exit(0 if ok else 3)
           PY
