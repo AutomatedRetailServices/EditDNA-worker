@@ -44,7 +44,7 @@ jobs:
           done
           aws s3 cp "s3://$S3_BUCKET/Editdna longform validation/VIDEO-2026-07-30-09-18-03.mp4" video00-original.mp4
           test -s video00-original.mp4
-          ffprobe -v error -show_entries format=duration,size -of json video00-original.mp4
+          wc -c video00-original.mp4
 
       - name: Upload original Video00
         uses: actions/upload-artifact@v4
