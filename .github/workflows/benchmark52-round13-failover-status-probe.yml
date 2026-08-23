@@ -1,0 +1,34 @@
+name: Round 13 Failover Status Probe
+on:
+  push:
+    branches:
+      - cutsell/mobile-v1-clean
+    paths:
+      - .github/workflows/benchmark52-round13-failover-status-probe.yml
+permissions:
+  actions: read
+  contents: write
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Write latest failover run status
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          api="https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/workflows/benchmark52-round13-gpu-failover.yml/runs?branch=cutsell%2Fmobile-v1-clean&per_page=5"
+          curl --fail --silent --show-error -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github+json" "$api" > runs.json
+          jq '[.workflow_runs[] | select(.head_sha=="756b561287ca3e5937978d6412bc11ff6385d9a2")][0] | {id,run_number,status,conclusion,head_sha,created_at,updated_at}' runs.json > status.json
+          test "$(jq -r '.id // empty' status.json)" != ""
+          git clone -q "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" repo
+          cd repo
+          git checkout -q cutsell/mobile-v1-clean
+          mkdir -p ops
+          cp ../status.json ops/benchmark52-round13-failover-status.json
+          git config user.name github-actions
+          git config user.email github-actions@github.com
+          git add ops/benchmark52-round13-failover-status.json
+          git commit -m "ops: record Round 13 failover status" || exit 0
+          git push -q origin cutsell/mobile-v1-clean
