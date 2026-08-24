@@ -29,7 +29,7 @@ from .asr import ASRProvider
 from .clean_cut_provider import CleanCutProvider
 from .contracts import ProcessingRequest, ProcessingResult
 from .flow_b import ProgressCallback, process_local_sources
-from .human_boundary_polish_v2 import polish_human_boundaries_v2
+from .human_boundary_polish_v3 import polish_human_boundaries_v3
 from .hybrid_editorial import EditorialJudge
 from .providers import NoopSemanticProvider
 from .take_grouping_provider import TakeGroupingProvider
@@ -74,11 +74,12 @@ def process_universal_clean_cut_sources(
     )
 
     # Final physical-boundary authority. Selection/meaning is already frozen; this pass
-    # reconstructs the stored local-performance evidence so human-style completion,
-    # dead-air and visually-better retry decisions still work at this late stage.
+    # reconstructs stored multimodal evidence and removes recording-process clusters,
+    # inferior retry tails, dangling incomplete tails, and real dead air while preserving
+    # unique speech and exact source word boundaries.
     if hasattr(result.draft, "selected") and hasattr(result.draft, "discarded"):
-        result = polish_human_boundaries_v2(result, local_paths)
-        boundary_stage = "source_evidenced_multimodal_complete"
+        result = polish_human_boundaries_v3(result, local_paths)
+        boundary_stage = "source_evidenced_multimodal_v3_complete"
     else:
         boundary_stage = "not_applicable_missing_draft_contract"
 
