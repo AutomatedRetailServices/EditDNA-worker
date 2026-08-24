@@ -29,6 +29,7 @@ from .asr import ASRProvider
 from .clean_cut_provider import CleanCutProvider
 from .contracts import ProcessingRequest, ProcessingResult
 from .flow_b import ProgressCallback, process_local_sources
+from .human_boundary_polish import polish_human_boundaries
 from .hybrid_editorial import EditorialJudge
 from .providers import NoopSemanticProvider
 from .take_grouping_provider import TakeGroupingProvider
@@ -72,6 +73,12 @@ def process_universal_clean_cut_sources(
         progress=progress,
     )
 
+    # Final physical-boundary authority.  Selection/meaning is already frozen; this
+    # source-evidenced pass only fixes sentence-completion cuts, real dead air and
+    # repeated tails.  With no dense timeline supplied, interior deletion still requires
+    # >=1.35 s of source-proven silence, so uncertain gestures remain fail-open.
+    result = polish_human_boundaries(result, local_paths, ())
+
     return ProcessingResult(
         schema_version=result.schema_version,
         project_id=result.project_id,
@@ -83,5 +90,6 @@ def process_universal_clean_cut_sources(
             "semantic": "not_requested_clean_cut_only",
             "composer": "not_requested_clean_cut_only",
             "draft_review": "not_requested_clean_cut_only",
+            "human_boundary_polish": "source_evidenced_complete",
         },
     )
