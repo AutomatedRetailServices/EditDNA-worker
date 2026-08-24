@@ -184,3 +184,5 @@ jobs:
           if [ -n "${SERVERLESS_TEMPLATE_ID:-}" ]; then
             curl --silent --show-error --request DELETE --url "https://rest.runpod.io/v1/templates/$SERVERLESS_TEMPLATE_ID" --header "Authorization: Bearer $RUNPOD_API_KEY" >/dev/null || true
           fi
+
+# trigger: rebuild with human-boundary fixes 2026-08-23
