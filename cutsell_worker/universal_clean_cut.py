@@ -29,7 +29,7 @@ from .asr import ASRProvider
 from .clean_cut_provider import CleanCutProvider
 from .contracts import ProcessingRequest, ProcessingResult
 from .flow_b import ProgressCallback, process_local_sources
-from .human_boundary_polish_v4 import polish_human_boundaries_v4
+from .human_boundary_polish_v5 import polish_human_boundaries_v5
 from .hybrid_editorial import EditorialJudge
 from .providers import NoopSemanticProvider
 from .take_grouping_provider import TakeGroupingProvider
@@ -74,12 +74,11 @@ def process_universal_clean_cut_sources(
     )
 
     # Final human Watch+Listen authority. Selection/meaning is already bounded; this pass
-    # uses source words plus stored multimodal performance evidence to prefer a clearly
-    # more complete later retry and to remove word-gap face/body resets that amplitude-only
-    # silence detection can miss. Ambiguous cases remain untouched.
+    # layers conservative sub-second face/body reset cleanup on top of v4 while preserving
+    # source word boundaries. Ambiguous micro-gaps remain untouched.
     if hasattr(result.draft, "selected") and hasattr(result.draft, "discarded"):
-        result = polish_human_boundaries_v4(result, local_paths)
-        boundary_stage = "source_evidenced_multimodal_v4_complete"
+        result = polish_human_boundaries_v5(result, local_paths)
+        boundary_stage = "source_evidenced_multimodal_v5_complete"
     else:
         boundary_stage = "not_applicable_missing_draft_contract"
 
