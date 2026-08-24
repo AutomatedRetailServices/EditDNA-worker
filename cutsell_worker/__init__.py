@@ -57,6 +57,7 @@ from .round8_retry_reconciliation import install_round8_retry_reconciliation
 from .round9_orphan_prefix_integrity import install_round9_orphan_prefix_integrity
 from .round11_semantic_retry_cleanup import install_round11_semantic_retry_cleanup
 from .short_bts_process_cleanup import install_short_bts_process_cleanup
+from .hybrid_failed_soft_restore import install_hybrid_failed_soft_restore
 from .audio_boundary_completion_install import install_audio_boundary_completion
 
 install_clean_cut_contract_recovery()
@@ -111,6 +112,7 @@ install_round8_retry_reconciliation()
 install_round9_orphan_prefix_integrity()
 install_round11_semantic_retry_cleanup()
 install_short_bts_process_cleanup()
+install_hybrid_failed_soft_restore()
 install_audio_boundary_completion()
 
 __version__ = "0.1.0"
