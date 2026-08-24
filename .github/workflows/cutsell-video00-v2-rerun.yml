@@ -1,0 +1,117 @@
+name: CutSell Video00 V2 Human Rerun
+
+on:
+  push:
+    branches:
+      - cutsell/mobile-v1-clean
+    paths:
+      - .github/workflows/cutsell-video00-v2-rerun.yml
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  video00:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      RUNPOD_API_KEY: ${{ secrets.RUNPOD_API_KEY }}
+      ENDPOINT_ID: warc5u5fxq9ggw
+      SOURCE_KEY: Editdna longform validation/VIDEO-2026-07-30-09-18-03.mp4
+      BENCHMARK_ID: video00-human-v2-${{ github.run_id }}
+    steps:
+      - name: Publish Video00 V2 rerun id
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          content=$(jq -n --argjson run "$GITHUB_RUN_ID" --arg sha "$GITHUB_SHA" --arg endpoint "$ENDPOINT_ID" '{run_id:$run,head_sha:$sha,endpoint_id:$endpoint,status:"in_progress"}' | base64 -w0)
+          current=$(curl --silent --show-error --header "Authorization: Bearer $GH_TOKEN" --header 'Accept: application/vnd.github+json' "https://api.github.com/repos/$GITHUB_REPOSITORY/contents/ops/video00-v2-rerun-live.json?ref=cutsell/mobile-v1-clean")
+          sha=$(printf '%s' "$current" | jq -r '.sha // empty')
+          payload=$(jq -n --arg msg "ops: publish Video00 V2 rerun $GITHUB_RUN_ID" --arg content "$content" --arg branch "cutsell/mobile-v1-clean" --arg sha "$sha" '{message:$msg,content:$content,branch:$branch} + (if $sha=="" then {} else {sha:$sha} end)')
+          curl --fail --silent --show-error --request PUT --url "https://api.github.com/repos/$GITHUB_REPOSITORY/contents/ops/video00-v2-rerun-live.json" --header "Authorization: Bearer $GH_TOKEN" --header 'Accept: application/vnd.github+json' --header 'Content-Type: application/json' --data "$payload" >/dev/null
+
+      - name: Submit Video00 to V2 GPU image
+        shell: bash
+        run: |
+          set -euo pipefail
+          jq -n --arg source "$SOURCE_KEY" --arg benchmark "$BENCHMARK_ID" '{input:{op:"focused",source_key:$source,benchmark_id:$benchmark}}' > /tmp/payload.json
+          code=$(curl --silent --show-error --write-out '%{http_code}' --request POST --url "https://api.runpod.ai/v2/$ENDPOINT_ID/run" --header "Authorization: Bearer $RUNPOD_API_KEY" --header 'Content-Type: application/json' --data @/tmp/payload.json --output /tmp/submit.json)
+          test "$code" = "200"
+          JOB_ID=$(jq -r '.id // empty' /tmp/submit.json)
+          test -n "$JOB_ID"
+          echo "JOB_ID=$JOB_ID" >> "$GITHUB_ENV"
+          echo "runpod_job_id=$JOB_ID"
+
+      - name: Wait for Video00 completion
+        shell: bash
+        run: |
+          set -euo pipefail
+          deadline=$((SECONDS+2100))
+          while [ "$SECONDS" -lt "$deadline" ]; do
+            curl --fail --silent --show-error --url "https://api.runpod.ai/v2/$ENDPOINT_ID/status/$JOB_ID" --header "Authorization: Bearer $RUNPOD_API_KEY" --output /tmp/status.json
+            status=$(jq -r '.status // empty' /tmp/status.json)
+            echo "video00_status=$status"
+            case "$status" in
+              COMPLETED)
+                jq . /tmp/status.json
+                PREVIEW_URI=$(jq -r '.output.preview_uri // empty' /tmp/status.json)
+                RESULT_URI=$(jq -r '.output.result_uri // empty' /tmp/status.json)
+                test -n "$PREVIEW_URI" && test -n "$RESULT_URI"
+                echo "PREVIEW_URI=$PREVIEW_URI" >> "$GITHUB_ENV"
+                echo "RESULT_URI=$RESULT_URI" >> "$GITHUB_ENV"
+                exit 0
+                ;;
+              FAILED|TIMED_OUT|CANCELLED)
+                jq . /tmp/status.json
+                exit 1
+                ;;
+            esac
+            sleep 10
+          done
+          echo "Video00 V2 timed out"
+          exit 1
+
+      - name: Load storage credentials
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail --silent --show-error --url "https://rest.runpod.io/v1/templates" --header "Authorization: Bearer $RUNPOD_API_KEY" --output /tmp/templates.json
+          TEMPLATE=$(jq -c '[.[] | select(.name == "EditDNA-Worker-2")][0]' /tmp/templates.json)
+          for key in AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_REGION S3_BUCKET; do
+            value=$(printf '%s' "$TEMPLATE" | jq -r --arg key "$key" '.env[$key] // empty')
+            test -n "$value"
+            echo "::add-mask::$value"
+            echo "$key=$value" >> "$GITHUB_ENV"
+          done
+
+      - name: Download Video00 MP4 and JSON
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p artifact
+          aws s3 cp "$PREVIEW_URI" artifact/video00-v2.mp4
+          aws s3 cp "$RESULT_URI" artifact/video00-v2.json
+          test -s artifact/video00-v2.mp4
+          test -s artifact/video00-v2.json
+
+      - name: Upload Video00 V2 human review artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: cutsell-video00-v2-human-review
+          path: artifact/
+          retention-days: 14
+
+      - name: Publish Video00 V2 artifact ready
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          content=$(jq -n --argjson run "$GITHUB_RUN_ID" --arg sha "$GITHUB_SHA" --arg endpoint "$ENDPOINT_ID" --arg job "$JOB_ID" '{run_id:$run,head_sha:$sha,endpoint_id:$endpoint,runpod_job_id:$job,status:"artifact_ready"}' | base64 -w0)
+          current=$(curl --silent --show-error --header "Authorization: Bearer $GH_TOKEN" --header 'Accept: application/vnd.github+json' "https://api.github.com/repos/$GITHUB_REPOSITORY/contents/ops/video00-v2-rerun-live.json?ref=cutsell/mobile-v1-clean")
+          sha=$(printf '%s' "$current" | jq -r '.sha // empty')
+          payload=$(jq -n --arg msg "ops: Video00 V2 artifact ready $GITHUB_RUN_ID" --arg content "$content" --arg branch "cutsell/mobile-v1-clean" --arg sha "$sha" '{message:$msg,content:$content,branch:$branch,sha:$sha}')
+          curl --fail --silent --show-error --request PUT --url "https://api.github.com/repos/$GITHUB_REPOSITORY/contents/ops/video00-v2-rerun-live.json" --header "Authorization: Bearer $GH_TOKEN" --header 'Accept: application/vnd.github+json' --header 'Content-Type: application/json' --data "$payload" >/dev/null
