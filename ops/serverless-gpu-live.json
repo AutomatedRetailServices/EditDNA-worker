@@ -1,6 +1,9 @@
 {
   "run_id": 32761801563,
   "head_sha": "efa4f1a856c2d259c3e8a028d165b66ffa82cb85",
-  "status": "in_progress",
-  "provider": "runpod_serverless"
+  "status": "gpu_gate_pass",
+  "provider": "runpod_serverless",
+  "endpoint_id": "vh5to5b0isinwp",
+  "template_id": "475lbv19af",
+  "image": "ghcr.io/automatedretailservices/cutsell-serverless@sha256:e2aa7cda4492f6626caabae256ff00dd53f729efd667595789b04495e09aee03"
 }
