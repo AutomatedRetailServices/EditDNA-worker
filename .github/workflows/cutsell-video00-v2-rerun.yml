@@ -1,4 +1,4 @@
-name: CutSell Video00 V3 Human Rerun
+name: CutSell Video00 V4 Human Rerun
 
 on:
   push:
@@ -17,23 +17,23 @@ jobs:
     timeout-minutes: 45
     env:
       RUNPOD_API_KEY: ${{ secrets.RUNPOD_API_KEY }}
-      ENDPOINT_ID: vh5to5b0isinwp
+      ENDPOINT_ID: xxu7autt8mv2rn
       SOURCE_KEY: Editdna longform validation/VIDEO-2026-07-30-09-18-03.mp4
-      BENCHMARK_ID: video00-human-v3-${{ github.run_id }}
+      BENCHMARK_ID: video00-human-v4-${{ github.run_id }}
     steps:
-      - name: Publish Video00 V3 rerun id
+      - name: Publish Video00 V4 rerun id
         env:
           GH_TOKEN: ${{ github.token }}
         shell: bash
         run: |
           set -euo pipefail
           content=$(jq -n --argjson run "$GITHUB_RUN_ID" --arg sha "$GITHUB_SHA" --arg endpoint "$ENDPOINT_ID" '{run_id:$run,head_sha:$sha,endpoint_id:$endpoint,status:"in_progress"}' | base64 -w0)
-          current=$(curl --silent --show-error --header "Authorization: Bearer $GH_TOKEN" --header 'Accept: application/vnd.github+json' "https://api.github.com/repos/$GITHUB_REPOSITORY/contents/ops/video00-v3-rerun-live.json?ref=cutsell/mobile-v1-clean")
+          current=$(curl --silent --show-error --header "Authorization: Bearer $GH_TOKEN" --header 'Accept: application/vnd.github+json' "https://api.github.com/repos/$GITHUB_REPOSITORY/contents/ops/video00-v4-rerun-live.json?ref=cutsell/mobile-v1-clean")
           sha=$(printf '%s' "$current" | jq -r '.sha // empty')
-          payload=$(jq -n --arg msg "ops: publish Video00 V3 rerun $GITHUB_RUN_ID" --arg content "$content" --arg branch "cutsell/mobile-v1-clean" --arg sha "$sha" '{message:$msg,content:$content,branch:$branch} + (if $sha=="" then {} else {sha:$sha} end)')
-          curl --fail --silent --show-error --request PUT --url "https://api.github.com/repos/$GITHUB_REPOSITORY/contents/ops/video00-v3-rerun-live.json" --header "Authorization: Bearer $GH_TOKEN" --header 'Accept: application/vnd.github+json' --header 'Content-Type: application/json' --data "$payload" >/dev/null
+          payload=$(jq -n --arg msg "ops: publish Video00 V4 rerun $GITHUB_RUN_ID" --arg content "$content" --arg branch "cutsell/mobile-v1-clean" --arg sha "$sha" '{message:$msg,content:$content,branch:$branch} + (if $sha=="" then {} else {sha:$sha} end)')
+          curl --fail --silent --show-error --request PUT --url "https://api.github.com/repos/$GITHUB_REPOSITORY/contents/ops/video00-v4-rerun-live.json" --header "Authorization: Bearer $GH_TOKEN" --header 'Accept: application/vnd.github+json' --header 'Content-Type: application/json' --data "$payload" >/dev/null
 
-      - name: Submit Video00 to V3 GPU image
+      - name: Submit Video00 to V4 GPU image
         shell: bash
         run: |
           set -euo pipefail
@@ -71,7 +71,7 @@ jobs:
             esac
             sleep 10
           done
-          echo "Video00 V3 timed out"
+          echo "Video00 V4 timed out"
           exit 1
 
       - name: Load storage credentials
@@ -92,26 +92,26 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p artifact
-          aws s3 cp "$PREVIEW_URI" artifact/video00-v3.mp4
-          aws s3 cp "$RESULT_URI" artifact/video00-v3.json
-          test -s artifact/video00-v3.mp4
-          test -s artifact/video00-v3.json
+          aws s3 cp "$PREVIEW_URI" artifact/video00-v4.mp4
+          aws s3 cp "$RESULT_URI" artifact/video00-v4.json
+          test -s artifact/video00-v4.mp4
+          test -s artifact/video00-v4.json
 
-      - name: Upload Video00 V3 human review artifact
+      - name: Upload Video00 V4 human review artifact
         uses: actions/upload-artifact@v4
         with:
-          name: cutsell-video00-v3-human-review
+          name: cutsell-video00-v4-human-review
           path: artifact/
           retention-days: 14
 
-      - name: Publish Video00 V3 artifact ready
+      - name: Publish Video00 V4 artifact ready
         env:
           GH_TOKEN: ${{ github.token }}
         shell: bash
         run: |
           set -euo pipefail
           content=$(jq -n --argjson run "$GITHUB_RUN_ID" --arg sha "$GITHUB_SHA" --arg endpoint "$ENDPOINT_ID" --arg job "$JOB_ID" '{run_id:$run,head_sha:$sha,endpoint_id:$endpoint,runpod_job_id:$job,status:"artifact_ready"}' | base64 -w0)
-          current=$(curl --silent --show-error --header "Authorization: Bearer $GH_TOKEN" --header 'Accept: application/vnd.github+json' "https://api.github.com/repos/$GITHUB_REPOSITORY/contents/ops/video00-v3-rerun-live.json?ref=cutsell/mobile-v1-clean")
+          current=$(curl --silent --show-error --header "Authorization: Bearer $GH_TOKEN" --header 'Accept: application/vnd.github+json' "https://api.github.com/repos/$GITHUB_REPOSITORY/contents/ops/video00-v4-rerun-live.json?ref=cutsell/mobile-v1-clean")
           sha=$(printf '%s' "$current" | jq -r '.sha // empty')
-          payload=$(jq -n --arg msg "ops: Video00 V3 artifact ready $GITHUB_RUN_ID" --arg content "$content" --arg branch "cutsell/mobile-v1-clean" --arg sha "$sha" '{message:$msg,content:$content,branch:$branch,sha:$sha}')
-          curl --fail --silent --show-error --request PUT --url "https://api.github.com/repos/$GITHUB_REPOSITORY/contents/ops/video00-v3-rerun-live.json" --header "Authorization: Bearer $GH_TOKEN" --header 'Accept: application/vnd.github+json' --header 'Content-Type: application/json' --data "$payload" >/dev/null
+          payload=$(jq -n --arg msg "ops: Video00 V4 artifact ready $GITHUB_RUN_ID" --arg content "$content" --arg branch "cutsell/mobile-v1-clean" --arg sha "$sha" '{message:$msg,content:$content,branch:$branch,sha:$sha}')
+          curl --fail --silent --show-error --request PUT --url "https://api.github.com/repos/$GITHUB_REPOSITORY/contents/ops/video00-v4-rerun-live.json" --header "Authorization: Bearer $GH_TOKEN" --header 'Accept: application/vnd.github+json' --header 'Content-Type: application/json' --data "$payload" >/dev/null
