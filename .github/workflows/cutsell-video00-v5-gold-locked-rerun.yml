@@ -1,0 +1,179 @@
+name: CutSell Video00 V5 Gold Locked
+
+on:
+  push:
+    branches: [cutsell/mobile-v1-clean]
+    paths:
+      - .github/workflows/cutsell-video00-v5-gold-locked-rerun.yml
+      - cutsell_worker/locked_selection_replay.py
+      - cutsell_worker/serverless_handler.py
+      - ops/gold/video00-v5-approved-selection.json
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+env:
+  IMAGE_REPO: ghcr.io/automatedretailservices/cutsell-serverless
+
+jobs:
+  video00:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      RUNPOD_API_KEY: ${{ secrets.RUNPOD_API_KEY }}
+      ENDPOINT_ID: xxu7autt8mv2rn
+      GOLD_FILE: ops/gold/video00-v5-approved-selection.json
+      BENCHMARK_ID: video00-v5-gold-locked-${{ github.run_id }}
+    steps:
+      - name: Checkout Gold replay head
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 1
+
+      - name: Verify Gold checkpoint
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -s "$GOLD_FILE"
+          jq -e '.historical_run_id == 32780956434 and .historical_artifact_id == 9539973947 and (.selected|length) == 21' "$GOLD_FILE" >/dev/null
+          grep -q 'locked_selection' cutsell_worker/serverless_handler.py
+          grep -q 'caller_locked_approved_selection' cutsell_worker/locked_selection_replay.py
+
+      - name: Login GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push immutable Gold replay image
+        shell: bash
+        run: |
+          set -euo pipefail
+          image="$IMAGE_REPO:v5-gold-locked-$GITHUB_SHA"
+          docker build -t "$image" -f Dockerfile.cutsell.serverless .
+          docker push "$image"
+          docker buildx imagetools inspect "$image" > image-inspect.txt
+          digest=$(awk '/^Digest:/ {print $2; exit}' image-inspect.txt)
+          test -n "$digest"
+          echo "LOCKED_IMAGE=$IMAGE_REPO@$digest" >> "$GITHUB_ENV"
+
+      - name: Load storage credentials
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail --silent --show-error --url "https://rest.runpod.io/v1/templates" --header "Authorization: Bearer $RUNPOD_API_KEY" --output /tmp/templates.json
+          TEMPLATE=$(jq -c '[.[] | select(.name == "EditDNA-Worker-2")][0]' /tmp/templates.json)
+          test "$TEMPLATE" != "null"
+          for key in AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_REGION S3_BUCKET; do
+            value=$(printf '%s' "$TEMPLATE" | jq -r --arg key "$key" '.env[$key] // empty')
+            test -n "$value"
+            echo "::add-mask::$value"
+            echo "$key=$value" >> "$GITHUB_ENV"
+          done
+
+      - name: Create Gold replay template
+        shell: bash
+        run: |
+          set -euo pipefail
+          name="cutsell-v5-gold-locked-$GITHUB_RUN_ID"
+          jq -n --arg image "$LOCKED_IMAGE" --arg name "$name" --arg aws_key "$AWS_ACCESS_KEY_ID" --arg aws_secret "$AWS_SECRET_ACCESS_KEY" --arg aws_region "$AWS_REGION" --arg bucket "$S3_BUCKET" '{imageName:$image,name:$name,category:"NVIDIA",containerDiskInGb:40,isPublic:false,isServerless:true,env:{AWS_ACCESS_KEY_ID:$aws_key,AWS_SECRET_ACCESS_KEY:$aws_secret,AWS_REGION:$aws_region,S3_BUCKET:$bucket,CUTSELL_BRAIN_BACKEND:"runpod_local",CUTSELL_EDITORIAL_MODE:"clean_cut",CUTSELL_ASR_MODEL:"medium",CUTSELL_HYBRID_LLM_ENABLED:"0"},ports:[],volumeInGb:0,volumeMountPath:"/workspace"}' > /tmp/template-create.json
+          code=$(curl --silent --show-error --write-out '%{http_code}' --request POST --url 'https://rest.runpod.io/v1/templates' --header "Authorization: Bearer $RUNPOD_API_KEY" --header 'Content-Type: application/json' --data @/tmp/template-create.json --output /tmp/template.json)
+          test "$code" = "200" || test "$code" = "201"
+          TEMPLATE_ID=$(jq -r '.id // empty' /tmp/template.json)
+          test -n "$TEMPLATE_ID"
+          echo "LOCKED_TEMPLATE_ID=$TEMPLATE_ID" >> "$GITHUB_ENV"
+
+      - name: Roll endpoint to Gold replay
+        shell: bash
+        run: |
+          set -euo pipefail
+          jq -n --arg template "$LOCKED_TEMPLATE_ID" '{templateId:$template,workersMin:0,workersMax:1,scalerType:"QUEUE_DELAY",scalerValue:2,idleTimeout:5,executionTimeoutMs:900000}' > /tmp/endpoint-patch.json
+          code=$(curl --silent --show-error --write-out '%{http_code}' --request PATCH --url "https://rest.runpod.io/v1/endpoints/$ENDPOINT_ID" --header "Authorization: Bearer $RUNPOD_API_KEY" --header 'Content-Type: application/json' --data @/tmp/endpoint-patch.json --output /tmp/endpoint.json)
+          test "$code" = "200"
+
+      - name: CUDA health
+        shell: bash
+        run: |
+          set -euo pipefail
+          code=$(curl --silent --show-error --write-out '%{http_code}' --request POST --url "https://api.runpod.ai/v2/$ENDPOINT_ID/run" --header "Authorization: Bearer $RUNPOD_API_KEY" --header 'Content-Type: application/json' --data '{"input":{"op":"health"}}' --output /tmp/submit-health.json)
+          test "$code" = "200"
+          HEALTH_JOB_ID=$(jq -r '.id // empty' /tmp/submit-health.json)
+          test -n "$HEALTH_JOB_ID"
+          deadline=$((SECONDS+900))
+          while [ "$SECONDS" -lt "$deadline" ]; do
+            curl --fail --silent --show-error --url "https://api.runpod.ai/v2/$ENDPOINT_ID/status/$HEALTH_JOB_ID" --header "Authorization: Bearer $RUNPOD_API_KEY" --output /tmp/health.json
+            status=$(jq -r '.status // empty' /tmp/health.json)
+            echo "health_status=$status"
+            case "$status" in
+              COMPLETED) jq -e '.output.ok == true and .output.cuda_available == true' /tmp/health.json >/dev/null; exit 0 ;;
+              FAILED|TIMED_OUT|CANCELLED) cat /tmp/health.json; exit 1 ;;
+            esac
+            sleep 5
+          done
+          exit 1
+
+      - name: Submit Video00 locked Gold
+        shell: bash
+        run: |
+          set -euo pipefail
+          source=$(jq -r '.source_key' "$GOLD_FILE")
+          selection=$(jq -c '.selected' "$GOLD_FILE")
+          jq -n --arg source "$source" --arg benchmark "$BENCHMARK_ID" --argjson selection "$selection" '{input:{op:"locked_selection",source_key:$source,benchmark_id:$benchmark,selection:$selection}}' > /tmp/payload.json
+          code=$(curl --silent --show-error --write-out '%{http_code}' --request POST --url "https://api.runpod.ai/v2/$ENDPOINT_ID/run" --header "Authorization: Bearer $RUNPOD_API_KEY" --header 'Content-Type: application/json' --data @/tmp/payload.json --output /tmp/submit.json)
+          test "$code" = "200"
+          JOB_ID=$(jq -r '.id // empty' /tmp/submit.json)
+          test -n "$JOB_ID"
+          echo "JOB_ID=$JOB_ID" >> "$GITHUB_ENV"
+
+      - name: Wait for Video00 locked Gold
+        shell: bash
+        run: |
+          set -euo pipefail
+          deadline=$((SECONDS+1800))
+          while [ "$SECONDS" -lt "$deadline" ]; do
+            curl --fail --silent --show-error --url "https://api.runpod.ai/v2/$ENDPOINT_ID/status/$JOB_ID" --header "Authorization: Bearer $RUNPOD_API_KEY" --output /tmp/status.json
+            status=$(jq -r '.status // empty' /tmp/status.json)
+            echo "video00_v5_gold_locked_status=$status"
+            case "$status" in
+              COMPLETED)
+                jq -e '.output.selection_authority == "caller_locked_approved_selection" and .output.external_brain_calls_enabled == false and .output.selected_count == 21' /tmp/status.json >/dev/null
+                PREVIEW_URI=$(jq -r '.output.preview_uri // empty' /tmp/status.json)
+                RESULT_URI=$(jq -r '.output.result_uri // empty' /tmp/status.json)
+                test -n "$PREVIEW_URI" && test -n "$RESULT_URI"
+                echo "PREVIEW_URI=$PREVIEW_URI" >> "$GITHUB_ENV"
+                echo "RESULT_URI=$RESULT_URI" >> "$GITHUB_ENV"
+                exit 0 ;;
+              FAILED|TIMED_OUT|CANCELLED) cat /tmp/status.json; exit 1 ;;
+            esac
+            sleep 10
+          done
+          exit 1
+
+      - name: Download locked Gold artifact
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p artifact
+          aws s3 cp "$PREVIEW_URI" artifact/video00-v5-gold-locked.mp4
+          aws s3 cp "$RESULT_URI" artifact/video00-v5-gold-locked.json
+          test -s artifact/video00-v5-gold-locked.mp4
+          test -s artifact/video00-v5-gold-locked.json
+
+      - name: Verify locked source ranges
+        shell: bash
+        run: |
+          set -euo pipefail
+          jq -S '[.selected[]|{start,end,text,take_group_id}]' "$GOLD_FILE" > /tmp/gold.json
+          jq -S '[.selected[]|{start,end,text,take_group_id}]' artifact/video00-v5-gold-locked.json > /tmp/out.json
+          diff -u /tmp/gold.json /tmp/out.json
+
+      - name: Upload locked Gold human review artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: cutsell-video00-v5-gold-locked-human-review
+          path: artifact/
+          retention-days: 14
