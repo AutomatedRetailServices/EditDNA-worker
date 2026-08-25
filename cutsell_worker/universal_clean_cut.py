@@ -84,14 +84,14 @@ def process_universal_clean_cut_sources(
         # selection/trim pass. If an existing boundary starts after the real beginning
         # of the same spoken idea, restore the missing leading words. If it ends before
         # the idea's last valid word, restore the missing trailing words. Selection and
-        # source order remain untouched. Visual cleanup may only remove non-speech slack
-        # after this complete-idea envelope is protected.
+        # source order remain untouched. Recovery is overlap-safe: an expanded idea may
+        # never duplicate source speech already owned by an adjacent selected clip.
         result = enforce_complete_idea_boundaries(
             result,
             local_paths,
             asr_provider=asr_provider,
         )
-        boundary_stage = "complete_idea_and_complete_word_lock_enforced"
+        boundary_stage = "complete_idea_word_lock_overlap_guard_enforced"
     else:
         polish_stage = "not_applicable_missing_draft_contract"
         boundary_stage = "not_applicable_missing_draft_contract"
