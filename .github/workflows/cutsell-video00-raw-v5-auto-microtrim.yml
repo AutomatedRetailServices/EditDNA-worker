@@ -1,5 +1,6 @@
 name: CutSell Video00 Raw V5 Auto Microtrim
 
+# Manual retrigger after RunPod GEMINI_API_KEY update.
 on:
   push:
     branches: [cutsell/mobile-v1-clean]
