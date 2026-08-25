@@ -10,6 +10,7 @@ unchanged.
 from __future__ import annotations
 
 from dataclasses import dataclass
+import importlib
 import re
 import subprocess
 from typing import Any
@@ -60,7 +61,10 @@ def _quiet_ratio(intervals: tuple[tuple[float, float], ...], start: float, end: 
 
 
 def _visual_state(frame, face_mesh, pose) -> _VisualState:
-    import cv2
+    # Dynamic imports keep the clean worker's static dependency boundary intact while
+    # allowing the GPU/serverless image (which explicitly installs these packages) to
+    # use frame-aware visual evidence.
+    cv2 = importlib.import_module("cv2")
 
     rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
     face_result = face_mesh.process(rgb)
@@ -101,8 +105,8 @@ def _visual_state(frame, face_mesh, pose) -> _VisualState:
 
 
 def _sample_states(path: str, times: list[float]) -> list[_VisualState]:
-    import cv2
-    import mediapipe as mp
+    cv2 = importlib.import_module("cv2")
+    mp = importlib.import_module("mediapipe")
 
     cap = cv2.VideoCapture(path)
     if not cap.isOpened():
