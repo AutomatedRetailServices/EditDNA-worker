@@ -177,3 +177,5 @@ jobs:
           name: cutsell-video00-v5-gold-locked-human-review
           path: artifact/
           retention-days: 14
+
+# trigger locked-gold rerun after workflow creation
