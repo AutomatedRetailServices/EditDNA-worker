@@ -1,8 +1,13 @@
 {
-  "schema_version": "cutsell-approved-selection-v1",
+  "schema_version": "cutsell-approved-selection-v2",
   "source_key": "Editdna longform validation/VIDEO-2026-07-30-09-18-03.mp4",
   "historical_run_id": 32780956434,
   "historical_artifact_id": 9539973947,
+  "review_cuts": [
+    {"start": 60.0, "end": 61.0, "reason": "human_review_face_off_visual_reset"},
+    {"start": 68.0, "end": 69.0, "reason": "human_review_head_drop_pause_reset"},
+    {"start": 76.0, "end": 77.0, "reason": "human_review_face_off_visual_reset"}
+  ],
   "selected": [
     {"start": 8.37, "end": 11.87, "text": "tenía cáncer de tiroides y no lo sabía.", "take_group_id": "tg_40bba804f33f4538ad"},
     {"start": 13.78, "end": 23.28, "text": "No es secreto para nadie que llevo unos 10 años trabajando para cruceros. Tenía como costumbre, cada vez que terminaba un contrato, hacerme un chequeo de rutina con mi ginecóloga.", "take_group_id": "tg_a70386847b95d35d71"},
