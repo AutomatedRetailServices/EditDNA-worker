@@ -45,6 +45,7 @@ def _focused(payload: dict) -> dict:
     source_key = str(payload.get("source_key") or "").strip()
     if not source_key:
         raise ValueError("source_key is required")
+    auto_microtrim = bool(payload.get("auto_speech_visual_microtrim", False))
     safe_id = _safe_id(payload.get("benchmark_id"), "serverless-focused")
     work = Path("/tmp/cutsell-serverless")
     work.mkdir(parents=True, exist_ok=True)
@@ -55,6 +56,27 @@ def _focused(payload: dict) -> dict:
         project_id=safe_id,
         preview_output=str(preview),
     )
+
+    auto_cuts = ()
+    auto_diag = {"speech_lock_ok": True, "auto_microtrim_count": 0, "auto_microtrim_duration_sec": 0.0, "frame_aware": True, "rule": "disabled"}
+    if auto_microtrim and preview.exists():
+        auto_cuts, auto_diag = detect_speech_safe_visual_microtrims(
+            str(preview),
+            asr_model=str(os.environ.get("CUTSELL_ASR_MODEL") or "medium"),
+        )
+        if auto_cuts:
+            _apply_review_cuts(str(preview), auto_cuts)
+
+    result = {
+        **result,
+        "output_duration_sec": round(_probe_duration(str(preview)), 3) if preview.exists() else None,
+        "auto_speech_visual_microtrim_enabled": auto_microtrim,
+        "auto_microtrim_count": len(auto_cuts),
+        "auto_microtrim_duration_sec": round(sum(float(c["end"]) - float(c["start"]) for c in auto_cuts), 3),
+        "auto_microtrims": list(auto_cuts),
+        "auto_microtrim_diagnostics": auto_diag,
+        "speech_lock_ok": bool(auto_diag.get("speech_lock_ok", True)),
+    }
     result_path.write_text(json.dumps(result, ensure_ascii=False, indent=2, sort_keys=True), encoding="utf-8")
     prefix = f"cutsell/serverless/{safe_id}"
     preview_uri = _upload_artifact(str(preview), key=f"{prefix}/preview.mp4", content_type="video/mp4")
@@ -68,6 +90,10 @@ def _focused(payload: dict) -> dict:
         "selected_count": result.get("selected_count"),
         "discarded_count": result.get("discarded_count"),
         "elapsed_sec": result.get("elapsed_sec"),
+        "output_duration_sec": result.get("output_duration_sec"),
+        "auto_microtrim_count": result.get("auto_microtrim_count"),
+        "auto_microtrim_duration_sec": result.get("auto_microtrim_duration_sec"),
+        "speech_lock_ok": result.get("speech_lock_ok"),
         "preview_uri": preview_uri,
         "result_uri": result_uri,
     }
