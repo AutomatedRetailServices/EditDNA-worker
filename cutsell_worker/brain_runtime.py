@@ -54,16 +54,20 @@ def _build_editorial_judge(
     settings: HybridProviderSettings,
     values: Mapping[str, str],
 ) -> EditorialJudge | None:
-    """Construct the approved paid judge only after every explicit gate passes."""
+    """Construct the approved paid judge only after every explicit gate passes.
+
+    Important invariant: if Hybrid is explicitly enabled, silently dropping to the
+    deterministic local brain is forbidden. A missing credential must fail the job so
+    benchmarks and production cannot report success while skipping semantic authority.
+    """
     if not settings.enabled or settings.provider != "google":
         return None
     api_key = str(values.get("GEMINI_API_KEY") or "").strip()
     if not api_key:
-        # Missing credentials degrade to the local brain instead of breaking a job.
-        return None
+        raise RuntimeError(
+            "CUTSELL_HYBRID_LLM_ENABLED=1 requires GEMINI_API_KEY; refusing silent local fallback"
+        )
 
-    # One ledger is scoped to this runtime/job. It prevents all semantic calls made
-    # while processing one edit from exceeding the production LLM COGS target.
     ledger = DollarBudgetLedger(settings.max_cost_per_edit_usd)
     transport = GoogleGeminiTransport(
         api_key=api_key,
@@ -103,12 +107,12 @@ def build_brain_runtime(
         backend=RUNPOD_LOCAL_BACKEND,
         semantic_provider=NoopSemanticProvider(),
         whole_video_provider=RunPodLocalWholeVideoProvider(),
-        visual_provider=None,              # dense MediaPipe/OpenCV path in flow_b.py
-        take_grouping_provider=None,       # deterministic retry grouping + session walls
+        visual_provider=None,
+        take_grouping_provider=None,
         take_judge_provider=HybridTakeJudgeProvider(editorial_judge=None),
-        clean_cut_provider=None,           # deterministic Clean Cut + contextual rules
-        composer_provider=None,            # disabled until Sales Funnel reactivation
-        draft_review_provider=None,        # disabled in Universal Clean Cut
+        clean_cut_provider=None,
+        composer_provider=None,
+        draft_review_provider=None,
         editorial_judge=editorial_judge,
         hybrid_settings=hybrid_settings,
     )
