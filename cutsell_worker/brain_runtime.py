@@ -50,6 +50,10 @@ class BrainRuntime:
         return self.editorial_judge is not None
 
 
+def _env_true(value: str | None) -> bool:
+    return str(value or "").strip().lower() in {"1", "true", "yes", "on"}
+
+
 def _build_editorial_judge(
     settings: HybridProviderSettings,
     values: Mapping[str, str],
@@ -87,12 +91,7 @@ def build_brain_runtime(
     config: RuntimeConfig,
     env: Mapping[str, str] | None = None,
 ) -> BrainRuntime:
-    """Build local perception plus explicitly-gated Hybrid Editorial reasoning.
-
-    The paid judge is deliberately used by the bounded-group semantic cleanup stage.
-    Best Take ranking retains a zero-cost HybridTakeJudgeProvider wrapper so a group is
-    never charged twice for the same semantic decision.
-    """
+    """Build local perception plus explicitly-gated Hybrid Editorial reasoning."""
     if config.brain_backend != RUNPOD_LOCAL_BACKEND:
         raise RuntimeError(
             f"unsupported CUTSELL_BRAIN_BACKEND={config.brain_backend!r}; "
@@ -100,6 +99,14 @@ def build_brain_runtime(
         )
 
     values: Mapping[str, str] = env if env is not None else os.environ
+    requested_hybrid = _env_true(values.get("CUTSELL_HYBRID_LLM_ENABLED"))
+    requested_provider = str(values.get("CUTSELL_HYBRID_PROVIDER") or "google").strip().lower()
+    if requested_hybrid and requested_provider != "google":
+        raise RuntimeError(
+            "CUTSELL_HYBRID_LLM_ENABLED=1 requires CUTSELL_HYBRID_PROVIDER=google; "
+            f"got {requested_provider!r}. Refusing silent local fallback"
+        )
+
     hybrid_settings = load_hybrid_provider_settings(dict(values))
     editorial_judge = _build_editorial_judge(hybrid_settings, values)
 
