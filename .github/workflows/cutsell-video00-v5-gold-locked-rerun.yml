@@ -42,7 +42,7 @@ jobs:
           jq -e '.historical_run_id == 32780956434 and .historical_artifact_id == 9539973947 and (.selected|length) == 21 and (.review_cuts|length) == 3' "$GOLD_FILE" >/dev/null
           grep -q 'caller_locked_approved_selection' cutsell_worker/locked_selection_replay.py
           grep -q 'detect_speech_safe_visual_microtrims' cutsell_worker/serverless_handler.py
-          grep -q 'word_end_plus_acoustic_guard_then_visual_reset_until_next_word_guard' cutsell_worker/speech_visual_microtrim.py
+          grep -q 'word_end_plus_acoustic_guard_then_persistent_visual_reset_until_next_word_guard' cutsell_worker/speech_visual_microtrim.py
           ! grep -q '74\.0\|1:14\|01:14' cutsell_worker/speech_visual_microtrim.py
 
       - name: Login GHCR
