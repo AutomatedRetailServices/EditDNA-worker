@@ -28,8 +28,6 @@ def _upload_artifact(local_path: str, *, key: str, content_type: str) -> str:
 
 
 def _health() -> dict:
-    # Resolve PyTorch only inside the GPU runtime. Using importlib preserves the
-    # clean-worker dependency boundary enforced by CI while still validating CUDA.
     torch = importlib.import_module("torch")
     return {
         "ok": True,
@@ -85,6 +83,10 @@ def _locked_selection(payload: dict) -> dict:
     selection = payload.get("selection")
     if not isinstance(selection, list) or not selection:
         raise ValueError("selection must be a non-empty list")
+    review_cuts = payload.get("review_cuts")
+    if review_cuts is not None and not isinstance(review_cuts, list):
+        raise ValueError("review_cuts must be a list when provided")
+
     safe_id = _safe_id(payload.get("benchmark_id"), "serverless-locked-selection")
     work = Path("/tmp/cutsell-serverless")
     work.mkdir(parents=True, exist_ok=True)
@@ -95,6 +97,7 @@ def _locked_selection(payload: dict) -> dict:
         selection,
         project_id=safe_id,
         preview_output=str(preview),
+        review_cuts=review_cuts,
     )
     result_path.write_text(json.dumps(result, ensure_ascii=False, indent=2, sort_keys=True), encoding="utf-8")
     prefix = f"cutsell/serverless/{safe_id}"
@@ -105,9 +108,14 @@ def _locked_selection(payload: dict) -> dict:
         "benchmark_id": safe_id,
         "source_key": source_key,
         "selection_authority": result.get("selection_authority"),
+        "review_cut_authority": result.get("review_cut_authority"),
         "external_brain_calls_enabled": False,
         "selected_count": result.get("selected_count"),
         "selected_duration_sec": result.get("selected_duration_sec"),
+        "baseline_output_duration_sec": result.get("baseline_output_duration_sec"),
+        "output_duration_sec": result.get("output_duration_sec"),
+        "review_cut_count": result.get("review_cut_count"),
+        "review_cut_duration_sec": result.get("review_cut_duration_sec"),
         "preview_uri": preview_uri,
         "result_uri": result_uri,
     }
