@@ -13,6 +13,7 @@ from pathlib import Path
 import boto3
 import runpod
 
+from .locked_selection_replay import run_locked_selection_replay
 from .universal_clean_cut_validation import run_single_universal_clean_cut_validation
 
 
@@ -40,12 +41,16 @@ def _health() -> dict:
     }
 
 
+def _safe_id(value: str, fallback: str) -> str:
+    raw = str(value or fallback).strip()
+    return "".join(ch if ch.isalnum() or ch in "-_" else "-" for ch in raw)[:100]
+
+
 def _focused(payload: dict) -> dict:
     source_key = str(payload.get("source_key") or "").strip()
     if not source_key:
         raise ValueError("source_key is required")
-    benchmark_id = str(payload.get("benchmark_id") or "serverless-focused").strip()
-    safe_id = "".join(ch if ch.isalnum() or ch in "-_" else "-" for ch in benchmark_id)[:100]
+    safe_id = _safe_id(payload.get("benchmark_id"), "serverless-focused")
     work = Path("/tmp/cutsell-serverless")
     work.mkdir(parents=True, exist_ok=True)
     preview = work / f"{safe_id}.mp4"
@@ -73,6 +78,41 @@ def _focused(payload: dict) -> dict:
     }
 
 
+def _locked_selection(payload: dict) -> dict:
+    source_key = str(payload.get("source_key") or "").strip()
+    if not source_key:
+        raise ValueError("source_key is required")
+    selection = payload.get("selection")
+    if not isinstance(selection, list) or not selection:
+        raise ValueError("selection must be a non-empty list")
+    safe_id = _safe_id(payload.get("benchmark_id"), "serverless-locked-selection")
+    work = Path("/tmp/cutsell-serverless")
+    work.mkdir(parents=True, exist_ok=True)
+    preview = work / f"{safe_id}.mp4"
+    result_path = work / f"{safe_id}.json"
+    result = run_locked_selection_replay(
+        source_key,
+        selection,
+        project_id=safe_id,
+        preview_output=str(preview),
+    )
+    result_path.write_text(json.dumps(result, ensure_ascii=False, indent=2, sort_keys=True), encoding="utf-8")
+    prefix = f"cutsell/serverless/{safe_id}"
+    preview_uri = _upload_artifact(str(preview), key=f"{prefix}/preview.mp4", content_type="video/mp4")
+    result_uri = _upload_artifact(str(result_path), key=f"{prefix}/result.json", content_type="application/json")
+    return {
+        "ok": True,
+        "benchmark_id": safe_id,
+        "source_key": source_key,
+        "selection_authority": result.get("selection_authority"),
+        "external_brain_calls_enabled": False,
+        "selected_count": result.get("selected_count"),
+        "selected_duration_sec": result.get("selected_duration_sec"),
+        "preview_uri": preview_uri,
+        "result_uri": result_uri,
+    }
+
+
 def handler(job: dict) -> dict:
     payload = dict(job.get("input") or {})
     op = str(payload.get("op") or "health").strip().lower()
@@ -80,6 +120,8 @@ def handler(job: dict) -> dict:
         return _health()
     if op == "focused":
         return _focused(payload)
+    if op == "locked_selection":
+        return _locked_selection(payload)
     raise ValueError(f"unsupported op: {op}")
 
 
