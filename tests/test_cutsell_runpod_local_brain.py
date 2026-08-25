@@ -37,16 +37,14 @@ def test_runpod_local_brain_never_activates_external_models_from_key_presence():
     assert brain.draft_review_provider is None
 
 
-def test_explicit_hybrid_enable_without_gemini_key_fails_open_to_local():
+def test_explicit_hybrid_enable_without_gemini_key_fails_closed():
     env = {
         "CUTSELL_BRAIN_BACKEND": "runpod_local",
         "CUTSELL_HYBRID_LLM_ENABLED": "1",
         "CUTSELL_HYBRID_PROVIDER": "google",
     }
-    brain = build_brain_runtime(load_runtime_config(env), env)
-    assert brain.hybrid_settings.enabled is True
-    assert brain.editorial_judge is None
-    assert brain.external_calls_enabled is False
+    with pytest.raises(RuntimeError, match="requires GEMINI_API_KEY"):
+        build_brain_runtime(load_runtime_config(env), env)
 
 
 def test_explicit_hybrid_enable_plus_gemini_key_constructs_flash_lite_without_network():
