@@ -5,6 +5,7 @@ on:
     branches: [cutsell/mobile-v1-clean]
     paths:
       - .github/workflows/cutsell-video00-raw-v5-auto-microtrim.yml
+      - cutsell_worker/brain_runtime.py
       - cutsell_worker/serverless_handler.py
       - cutsell_worker/speech_visual_microtrim.py
       - cutsell_worker/universal_clean_cut.py
@@ -41,6 +42,7 @@ jobs:
           grep -q 'auto_speech_visual_microtrim' cutsell_worker/serverless_handler.py
           grep -q 'detect_speech_safe_visual_microtrims' cutsell_worker/serverless_handler.py
           grep -q 'run_single_universal_clean_cut_validation' cutsell_worker/serverless_handler.py
+          grep -q 'refusing silent local fallback' cutsell_worker/brain_runtime.py
 
       - name: Login GHCR
         uses: docker/login-action@v3
@@ -87,10 +89,12 @@ jobs:
                 CUTSELL_BRAIN_BACKEND:"runpod_local",
                 CUTSELL_EDITORIAL_MODE:"clean_cut",
                 CUTSELL_ASR_MODEL:"medium",
-                CUTSELL_HYBRID_LLM_ENABLED:"1"
+                CUTSELL_HYBRID_LLM_ENABLED:"1",
+                CUTSELL_HYBRID_PROVIDER:"google"
               }),
               ports:[], volumeInGb:0, volumeMountPath:"/workspace"
             }' /tmp/base-template.json > /tmp/template-create.json
+          test -n "$(jq -r '.env.GEMINI_API_KEY // empty' /tmp/template-create.json)" || { echo 'GEMINI_API_KEY missing from RunPod template; refusing brain-off benchmark'; exit 1; }
           code=$(curl --silent --show-error --write-out '%{http_code}' --request POST --url 'https://rest.runpod.io/v1/templates' --header "Authorization: Bearer $RUNPOD_API_KEY" --header 'Content-Type: application/json' --data @/tmp/template-create.json --output /tmp/template.json)
           test "$code" = "200" || test "$code" = "201"
           TEMPLATE_ID=$(jq -r '.id // empty' /tmp/template.json)
@@ -143,7 +147,7 @@ jobs:
             echo "raw_video00_status=$status"
             case "$status" in
               COMPLETED)
-                jq -e '.output.ok == true and .output.speech_lock_ok == true' /tmp/status.json >/dev/null
+                jq -e '.output.ok == true and .output.speech_lock_ok == true and .output.external_brain_calls_enabled == true' /tmp/status.json >/dev/null
                 PREVIEW_URI=$(jq -r '.output.preview_uri // empty' /tmp/status.json)
                 RESULT_URI=$(jq -r '.output.result_uri // empty' /tmp/status.json)
                 test -n "$PREVIEW_URI" && test -n "$RESULT_URI"
@@ -177,8 +181,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          jq -e '.source_duration_sec > 350 and .auto_speech_visual_microtrim_enabled == true and .speech_lock_ok == true and .selected_count > 0' artifact/video00-raw-v5-auto-microtrim.json >/dev/null
-          jq '{source_duration_sec,selected_count,selected_duration_sec,output_duration_sec,external_brain_calls_enabled,hybrid_provider,hybrid_primary_model,auto_microtrim_count,auto_microtrim_duration_sec,speech_lock_ok}' artifact/video00-raw-v5-auto-microtrim.json
+          jq -e '.source_duration_sec > 350 and .auto_speech_visual_microtrim_enabled == true and .speech_lock_ok == true and .external_brain_calls_enabled == true and .selected_count > 0 and .hybrid_requested_group_count > 0' artifact/video00-raw-v5-auto-microtrim.json >/dev/null
+          jq '{source_duration_sec,selected_count,selected_duration_sec,output_duration_sec,external_brain_calls_enabled,hybrid_provider,hybrid_primary_model,hybrid_requested_group_count,hybrid_available_group_count,hybrid_deleted_count,auto_microtrim_count,auto_microtrim_duration_sec,speech_lock_ok}' artifact/video00-raw-v5-auto-microtrim.json
 
       - name: Upload raw V5 auto human review artifact
         uses: actions/upload-artifact@v4
