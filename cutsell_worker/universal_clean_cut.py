@@ -28,6 +28,7 @@ from typing import Mapping
 from .asr import ASRProvider
 from .clean_cut_provider import CleanCutProvider
 from .contracts import ProcessingRequest, ProcessingResult
+from .final_boundary_authority import enforce_complete_idea_boundaries
 from .flow_b import ProgressCallback, process_local_sources
 from .human_boundary_polish_v5 import polish_human_boundaries_v5
 from .hybrid_editorial import EditorialJudge
@@ -73,13 +74,26 @@ def process_universal_clean_cut_sources(
         progress=progress,
     )
 
-    # Final human Watch+Listen authority. Selection/meaning is already bounded; this pass
-    # layers conservative sub-second face/body reset cleanup on top of v4 while preserving
-    # source word boundaries. Ambiguous micro-gaps remain untouched.
+    # Watch+Listen polish may remove source-evidenced non-speech reset gaps, but it is
+    # NOT allowed to be the final speech boundary authority.
     if hasattr(result.draft, "selected") and hasattr(result.draft, "discarded"):
         result = polish_human_boundaries_v5(result, local_paths)
-        boundary_stage = "source_evidenced_multimodal_v5_complete"
+        polish_stage = "source_evidenced_multimodal_v5_complete"
+
+        # Final speech authority: inspect the FULL source transcript again after every
+        # selection/trim pass. If an existing boundary starts after the real beginning
+        # of the same spoken idea, restore the missing leading words. If it ends before
+        # the idea's last valid word, restore the missing trailing words. Selection and
+        # source order remain untouched. Visual cleanup may only remove non-speech slack
+        # after this complete-idea envelope is protected.
+        result = enforce_complete_idea_boundaries(
+            result,
+            local_paths,
+            asr_provider=asr_provider,
+        )
+        boundary_stage = "complete_idea_and_complete_word_lock_enforced"
     else:
+        polish_stage = "not_applicable_missing_draft_contract"
         boundary_stage = "not_applicable_missing_draft_contract"
 
     return ProcessingResult(
@@ -93,6 +107,7 @@ def process_universal_clean_cut_sources(
             "semantic": "not_requested_clean_cut_only",
             "composer": "not_requested_clean_cut_only",
             "draft_review": "not_requested_clean_cut_only",
-            "human_boundary_polish": boundary_stage,
+            "human_boundary_polish": polish_stage,
+            "final_boundary_authority": boundary_stage,
         },
     )
