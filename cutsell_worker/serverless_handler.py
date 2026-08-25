@@ -1,8 +1,4 @@
-"""RunPod Serverless entrypoint for the CutSell GPU brain.
-
-This is intentionally thin: it reuses the exact CutSell validation/brain code and only
-adapts the execution surface from a long-lived RQ worker to queue-based Serverless.
-"""
+"""RunPod Serverless entrypoint for the CutSell GPU brain."""
 from __future__ import annotations
 
 import importlib
@@ -13,7 +9,8 @@ from pathlib import Path
 import boto3
 import runpod
 
-from .locked_selection_replay import run_locked_selection_replay
+from .locked_selection_replay import run_locked_selection_replay, _apply_review_cuts, _probe_duration
+from .speech_visual_microtrim import detect_speech_safe_visual_microtrims
 from .universal_clean_cut_validation import run_single_universal_clean_cut_validation
 
 
@@ -86,6 +83,7 @@ def _locked_selection(payload: dict) -> dict:
     review_cuts = payload.get("review_cuts")
     if review_cuts is not None and not isinstance(review_cuts, list):
         raise ValueError("review_cuts must be a list when provided")
+    auto_microtrim = bool(payload.get("auto_speech_visual_microtrim", False))
 
     safe_id = _safe_id(payload.get("benchmark_id"), "serverless-locked-selection")
     work = Path("/tmp/cutsell-serverless")
@@ -99,6 +97,33 @@ def _locked_selection(payload: dict) -> dict:
         preview_output=str(preview),
         review_cuts=review_cuts,
     )
+
+    auto_cuts = ()
+    auto_diag = {
+        "speech_lock_ok": True,
+        "auto_microtrim_count": 0,
+        "auto_microtrim_duration_sec": 0.0,
+        "frame_aware": True,
+        "rule": "disabled",
+    }
+    if auto_microtrim:
+        auto_cuts, auto_diag = detect_speech_safe_visual_microtrims(
+            str(preview),
+            asr_model=str(os.environ.get("CUTSELL_ASR_MODEL") or "medium"),
+        )
+        if auto_cuts:
+            _apply_review_cuts(str(preview), auto_cuts)
+
+    result = {
+        **result,
+        "output_duration_sec": round(_probe_duration(str(preview)), 3),
+        "auto_speech_visual_microtrim_enabled": auto_microtrim,
+        "auto_microtrim_count": len(auto_cuts),
+        "auto_microtrim_duration_sec": round(sum(float(c["end"]) - float(c["start"]) for c in auto_cuts), 3),
+        "auto_microtrims": list(auto_cuts),
+        "auto_microtrim_diagnostics": auto_diag,
+        "speech_lock_ok": bool(auto_diag.get("speech_lock_ok", True)),
+    }
     result_path.write_text(json.dumps(result, ensure_ascii=False, indent=2, sort_keys=True), encoding="utf-8")
     prefix = f"cutsell/serverless/{safe_id}"
     preview_uri = _upload_artifact(str(preview), key=f"{prefix}/preview.mp4", content_type="video/mp4")
@@ -116,6 +141,9 @@ def _locked_selection(payload: dict) -> dict:
         "output_duration_sec": result.get("output_duration_sec"),
         "review_cut_count": result.get("review_cut_count"),
         "review_cut_duration_sec": result.get("review_cut_duration_sec"),
+        "auto_microtrim_count": result.get("auto_microtrim_count"),
+        "auto_microtrim_duration_sec": result.get("auto_microtrim_duration_sec"),
+        "speech_lock_ok": result.get("speech_lock_ok"),
         "preview_uri": preview_uri,
         "result_uri": result_uri,
     }
