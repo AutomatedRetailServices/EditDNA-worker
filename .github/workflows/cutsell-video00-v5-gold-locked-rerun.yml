@@ -38,9 +38,10 @@ jobs:
         run: |
           set -euo pipefail
           test -s "$GOLD_FILE"
-          jq -e '.historical_run_id == 32780956434 and .historical_artifact_id == 9539973947 and (.selected|length) == 21' "$GOLD_FILE" >/dev/null
+          jq -e '.historical_run_id == 32780956434 and .historical_artifact_id == 9539973947 and (.selected|length) == 21 and (.review_cuts|length) == 3' "$GOLD_FILE" >/dev/null
           grep -q 'locked_selection' cutsell_worker/serverless_handler.py
           grep -q 'caller_locked_approved_selection' cutsell_worker/locked_selection_replay.py
+          grep -q 'caller_explicit_human_watch_listen' cutsell_worker/locked_selection_replay.py
 
       - name: Login GHCR
         uses: docker/login-action@v3
@@ -116,20 +117,21 @@ jobs:
           done
           exit 1
 
-      - name: Submit Video00 locked Gold
+      - name: Submit Video00 locked Gold with approved micro-cuts
         shell: bash
         run: |
           set -euo pipefail
           source=$(jq -r '.source_key' "$GOLD_FILE")
           selection=$(jq -c '.selected' "$GOLD_FILE")
-          jq -n --arg source "$source" --arg benchmark "$BENCHMARK_ID" --argjson selection "$selection" '{input:{op:"locked_selection",source_key:$source,benchmark_id:$benchmark,selection:$selection}}' > /tmp/payload.json
+          review_cuts=$(jq -c '.review_cuts' "$GOLD_FILE")
+          jq -n --arg source "$source" --arg benchmark "$BENCHMARK_ID" --argjson selection "$selection" --argjson review_cuts "$review_cuts" '{input:{op:"locked_selection",source_key:$source,benchmark_id:$benchmark,selection:$selection,review_cuts:$review_cuts}}' > /tmp/payload.json
           code=$(curl --silent --show-error --write-out '%{http_code}' --request POST --url "https://api.runpod.ai/v2/$ENDPOINT_ID/run" --header "Authorization: Bearer $RUNPOD_API_KEY" --header 'Content-Type: application/json' --data @/tmp/payload.json --output /tmp/submit.json)
           test "$code" = "200"
           JOB_ID=$(jq -r '.id // empty' /tmp/submit.json)
           test -n "$JOB_ID"
           echo "JOB_ID=$JOB_ID" >> "$GITHUB_ENV"
 
-      - name: Wait for Video00 locked Gold
+      - name: Wait for Video00 locked Gold micro-cut result
         shell: bash
         run: |
           set -euo pipefail
@@ -140,7 +142,7 @@ jobs:
             echo "video00_v5_gold_locked_status=$status"
             case "$status" in
               COMPLETED)
-                jq -e '.output.selection_authority == "caller_locked_approved_selection" and .output.external_brain_calls_enabled == false and .output.selected_count == 21' /tmp/status.json >/dev/null
+                jq -e '.output.selection_authority == "caller_locked_approved_selection" and .output.review_cut_authority == "caller_explicit_human_watch_listen" and .output.external_brain_calls_enabled == false and .output.selected_count == 21 and .output.review_cut_count == 3 and .output.review_cut_duration_sec == 3' /tmp/status.json >/dev/null
                 PREVIEW_URI=$(jq -r '.output.preview_uri // empty' /tmp/status.json)
                 RESULT_URI=$(jq -r '.output.result_uri // empty' /tmp/status.json)
                 test -n "$PREVIEW_URI" && test -n "$RESULT_URI"
@@ -153,29 +155,31 @@ jobs:
           done
           exit 1
 
-      - name: Download locked Gold artifact
+      - name: Download locked Gold micro-cut artifact
         shell: bash
         run: |
           set -euo pipefail
           mkdir -p artifact
-          aws s3 cp "$PREVIEW_URI" artifact/video00-v5-gold-locked.mp4
-          aws s3 cp "$RESULT_URI" artifact/video00-v5-gold-locked.json
-          test -s artifact/video00-v5-gold-locked.mp4
-          test -s artifact/video00-v5-gold-locked.json
+          aws s3 cp "$PREVIEW_URI" artifact/video00-v5-gold-microcut.mp4
+          aws s3 cp "$RESULT_URI" artifact/video00-v5-gold-microcut.json
+          test -s artifact/video00-v5-gold-microcut.mp4
+          test -s artifact/video00-v5-gold-microcut.json
 
-      - name: Verify locked source ranges
+      - name: Verify locked source ranges and micro-cuts
         shell: bash
         run: |
           set -euo pipefail
           jq -S '[.selected[]|{start,end,text,take_group_id}]' "$GOLD_FILE" > /tmp/gold.json
-          jq -S '[.selected[]|{start,end,text,take_group_id}]' artifact/video00-v5-gold-locked.json > /tmp/out.json
+          jq -S '[.selected[]|{start,end,text,take_group_id}]' artifact/video00-v5-gold-microcut.json > /tmp/out.json
           diff -u /tmp/gold.json /tmp/out.json
+          jq -S '.review_cuts' "$GOLD_FILE" > /tmp/gold-cuts.json
+          jq -S '.review_cuts' artifact/video00-v5-gold-microcut.json > /tmp/out-cuts.json
+          diff -u /tmp/gold-cuts.json /tmp/out-cuts.json
+          jq -e '.review_cut_count == 3 and .review_cut_duration_sec == 3 and .baseline_output_duration_sec > .output_duration_sec' artifact/video00-v5-gold-microcut.json >/dev/null
 
-      - name: Upload locked Gold human review artifact
+      - name: Upload locked Gold micro-cut human review artifact
         uses: actions/upload-artifact@v4
         with:
-          name: cutsell-video00-v5-gold-locked-human-review
+          name: cutsell-video00-v5-gold-microcut-human-review
           path: artifact/
           retention-days: 14
-
-# trigger locked-gold rerun after workflow creation
