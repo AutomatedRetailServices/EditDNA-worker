@@ -31,13 +31,7 @@ def _canon(token: str) -> str:
 
 
 def _lexeme(token: str) -> str:
-    """Small language-agnostic-enough inflection normalizer for retry identity.
-
-    The guard only uses this for lexical coverage, never to synthesize text. A trailing
-    plural ``s`` on a sufficiently long alphabetic token is collapsed so forms such as
-    singular/plural nouns do not look unrelated. Short tokens, numbers and negations are
-    untouched.
-    """
+    """Small inflection normalizer used only for lexical retry coverage."""
     token = _canon(token)
     if len(token) >= 5 and token.isalpha() and token.endswith("s") and not token.endswith("ss"):
         return token[:-1]
@@ -96,13 +90,16 @@ def install_boundary_retry_tail_guard() -> None:
                 continue
 
             words = tuple(left.words)
-            terminal_indices = [i for i, word in enumerate(words) if authority._terminal(word)]
-            if len(terminal_indices) < 2:
+            # We need a completed sentence that occurs before at least one trailing word.
+            # The trailing retry clause itself may also end in punctuation, so requiring
+            # two terminal marks is too strict. Choose the latest terminal that is not
+            # the final word and treat everything after it as the candidate tail.
+            boundary_candidates = [
+                i for i, word in enumerate(words[:-1]) if authority._terminal(word)
+            ]
+            if not boundary_candidates:
                 continue
-
-            # Only consider one short sentence/clause appended after a previously
-            # completed sentence. Never collapse several sentences of audience speech.
-            boundary_index = terminal_indices[-2]
+            boundary_index = boundary_candidates[-1]
             tail_words = words[boundary_index + 1 :]
             if not tail_words or len(tail_words) > 9:
                 continue
