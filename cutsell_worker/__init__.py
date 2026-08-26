@@ -132,5 +132,6 @@ install_audio_boundary_completion()
 
 # Keep this bootstrap path in the raw Video00 benchmark trigger set; touching this file
 # intentionally retriggers the exact-head raw benchmark when boundary guards change.
+# Raw benchmark trigger marker: short-tail gate validated green.
 __version__ = "0.1.0"
 OBSERVABILITY_STATUS = initialize_observability(service="cutsell-worker")
