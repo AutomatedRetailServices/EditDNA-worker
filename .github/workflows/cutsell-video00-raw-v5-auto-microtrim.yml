@@ -17,6 +17,14 @@ on:
       - cutsell_worker/hybrid_session_cleanup.py
       - cutsell_worker/hybrid_retry_completion_integrity.py
       - cutsell_worker/session_boundaries.py
+      - cutsell_worker/post_selection_interior_gap_trim.py
+      - cutsell_worker/post_selection_incomplete_bridge_authority.py
+      - cutsell_worker/semantic_best_take_integrity.py
+      - cutsell_worker/boundary_retry_tail_guard.py
+      - cutsell_worker/incomplete_bridge_retry_authority.py
+      - cutsell_worker/speech_safe_dead_air_guard.py
+      - cutsell_worker/terminal_sentence_boundary_guard.py
+      - cutsell_worker/hybrid_unavailable_retry_fallback.py
   workflow_dispatch:
 
 permissions:
@@ -27,12 +35,12 @@ env:
   IMAGE_REPO: ghcr.io/automatedretailservices/cutsell-serverless
   ENDPOINT_ID: xxu7autt8mv2rn
   SOURCE_KEY: Editdna longform validation/VIDEO-2026-07-30-09-18-03.mp4
-  BENCHMARK_ID: video00-raw-v5-auto-${{ github.run_id }}
+  BENCHMARK_ID: video00-raw-v5-auto-${{ github.run_id }}-${{ github.run_attempt }}
 
 jobs:
   video00-raw:
     runs-on: ubuntu-latest
-    timeout-minutes: 75
+    timeout-minutes: 120
     env:
       RUNPOD_API_KEY: ${{ secrets.RUNPOD_API_KEY }}
     steps:
@@ -88,7 +96,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          name="cutsell-video00-raw-v5-auto-$GITHUB_RUN_ID"
+          name="cutsell-video00-raw-v5-auto-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
           jq --arg image "$LOCKED_IMAGE" --arg name "$name" '
             . as $base |
             {
@@ -154,7 +162,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          deadline=$((SECONDS+2700))
+          deadline=$((SECONDS+5400))
           while [ "$SECONDS" -lt "$deadline" ]; do
             curl --fail --silent --show-error --url "https://api.runpod.ai/v2/$ENDPOINT_ID/status/$JOB_ID" --header "Authorization: Bearer $RUNPOD_API_KEY" --output /tmp/status.json
             status=$(jq -r '.status // empty' /tmp/status.json)
