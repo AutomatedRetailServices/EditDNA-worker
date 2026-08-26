@@ -57,12 +57,12 @@ def _critical(text: str) -> set[str]:
     return out
 
 
-def _semantic_coverage(tail_text: str, next_text: str) -> tuple[int, float]:
+def _semantic_coverage(tail_text: str, next_text: str) -> tuple[int, float, int]:
     tail = _content(tail_text)
     if not tail:
-        return 0, 0.0
+        return 0, 0.0, 0
     shared = len(tail & _content(next_text))
-    return shared, shared / max(1, len(tail))
+    return shared, shared / max(1, len(tail)), len(tail)
 
 
 def install_boundary_retry_tail_guard() -> None:
@@ -90,10 +90,6 @@ def install_boundary_retry_tail_guard() -> None:
                 continue
 
             words = tuple(left.words)
-            # We need a completed sentence that occurs before at least one trailing word.
-            # The trailing retry clause itself may also end in punctuation, so requiring
-            # two terminal marks is too strict. Choose the latest terminal that is not
-            # the final word and treat everything after it as the candidate tail.
             boundary_candidates = [
                 i for i, word in enumerate(words[:-1]) if authority._terminal(word)
             ]
@@ -110,8 +106,12 @@ def install_boundary_retry_tail_guard() -> None:
                 continue
 
             tail_text = " ".join(str(word.text).strip() for word in tail_words).strip()
-            shared, coverage = _semantic_coverage(tail_text, right.text)
-            if shared < 2 or coverage < 0.55:
+            shared, coverage, content_count = _semantic_coverage(tail_text, right.text)
+            # For a very short tail, two independent shared content tokens are already
+            # strong retry evidence. Longer tails keep the stricter proportional gate.
+            short_tail_covered = content_count <= 4 and shared >= 2 and coverage >= 0.50
+            long_tail_covered = shared >= 2 and coverage >= 0.55
+            if not (short_tail_covered or long_tail_covered):
                 continue
             if not _critical(tail_text).issubset(_critical(right.text)):
                 continue
@@ -134,6 +134,7 @@ def install_boundary_retry_tail_guard() -> None:
                 "result_end": round(float(trimmed.end), 3),
                 "removed_tail_sec": round(max(0.0, float(left.end) - float(trimmed.end)), 3),
                 "tail_word_count": len(tail_words),
+                "tail_content_token_count": content_count,
                 "tail_shared_content_tokens": shared,
                 "tail_semantic_coverage": round(coverage, 3),
                 "critical_preserved": True,
