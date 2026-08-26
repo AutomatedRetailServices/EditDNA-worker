@@ -95,12 +95,15 @@ install_semantic_fragment_guard()
 install_editorial_guardrails_v2()
 install_complete_retry_identity_guard()
 install_speech_safe_dead_air_guard()
-install_incomplete_bridge_retry_authority()
 install_terminal_sentence_boundary_guard()
 install_hybrid_retry_completion_integrity()
 install_hybrid_story_coverage_guard()
 install_hybrid_alternate_integrity()
 install_hybrid_cross_group_retry_integrity()
+# Cross-group may otherwise delete the later clean take as lexical coverage of an
+# earlier take. Reinstall the physical incomplete-bridge authority after it so the
+# complete -> incomplete reset -> complete retake pattern owns final retry direction.
+install_incomplete_bridge_retry_authority()
 install_hybrid_failed_continuation_integrity()
 install_hybrid_retry_winner_authority()
 install_hybrid_gold_reconciliation()
