@@ -43,6 +43,59 @@ def _token_count(text: str) -> int:
     return len(_TOKEN_RE.findall(str(text or "")))
 
 
+def _normalized_tokens(text: str) -> frozenset[str]:
+    return frozenset(token.lower() for token in _TOKEN_RE.findall(str(text or "")) if len(token) >= 2)
+
+
+def _semantic_overlap(left: CandidateTake, right: CandidateTake) -> float:
+    left_tokens = _normalized_tokens(left.text)
+    right_tokens = _normalized_tokens(right.text)
+    if len(left_tokens) < 3 or len(right_tokens) < 3:
+        return 0.0
+    shared = len(left_tokens & right_tokens)
+    return shared / max(1, min(len(left_tokens), len(right_tokens)))
+
+
+def _later_semantic_retry_replacement(
+    failed_take: CandidateTake,
+    members: Tuple[CandidateTake, ...],
+    decisions_by_id: dict[str, tuple[str, float]],
+    *,
+    minimum_label_confidence: float = 0.68,
+    minimum_overlap: float = 0.50,
+    maximum_delay_sec: float = 24.0,
+) -> tuple[CandidateTake | None, float]:
+    """Find a later complete retake of substantially the same spoken idea.
+
+    This is not general semantic deletion. It only corroborates a Hybrid `failed`
+    decision when the same bounded creator session contains a later complete delivery
+    with strong lexical/semantic overlap. That closes the common case where the failed
+    first take has no obvious visual fumble but the creator immediately records a clean
+    replacement.
+    """
+    best: CandidateTake | None = None
+    best_overlap = 0.0
+    for candidate in members:
+        if candidate.clip_id == failed_take.clip_id:
+            continue
+        if candidate.source_asset_id != failed_take.source_asset_id:
+            continue
+        if float(candidate.start) <= float(failed_take.end):
+            continue
+        if float(candidate.start) - float(failed_take.end) > maximum_delay_sec:
+            continue
+        if not bool(candidate.complete_idea):
+            continue
+        label, confidence = decisions_by_id.get(candidate.clip_id, ("", 0.0))
+        if label not in {"winner", "alternate", "keep"} or confidence < minimum_label_confidence:
+            continue
+        overlap = _semantic_overlap(failed_take, candidate)
+        if overlap >= minimum_overlap and overlap > best_overlap:
+            best = candidate
+            best_overlap = overlap
+    return best, best_overlap
+
+
 def _source_events(context: WholeVideoContext | None, source_asset_id: str):
     if context is None:
         return ()
@@ -191,8 +244,6 @@ def _editorial_session(
 
 
 def _decision_priority(label: str, confidence: float) -> tuple[int, float]:
-    # When overlapping windows disagree, strong failure evidence must not be silently
-    # overwritten by a later low-information keep. Uncertain is deliberately weakest.
     order = {"failed": 5, "bts": 5, "winner": 4, "alternate": 3, "keep": 2, "uncertain": 1}
     return order.get(str(label), 0), float(confidence)
 
@@ -208,6 +259,7 @@ def apply_hybrid_session_cleanup(
     corroborated_bts_confidence: float = 0.84,
     micro_failed_confidence: float = 0.80,
     clustered_bts_confidence: float = 0.84,
+    retry_replaced_failed_confidence: float = 0.84,
     chunk_size: int = 10,
     chunk_stride: int = 5,
 ) -> HybridSessionCleanupResult:
@@ -250,6 +302,10 @@ def apply_hybrid_session_cleanup(
             decisions = []
             local_by_id: dict[str, tuple[bool, tuple[str, ...]]] = {}
             if result.available:
+                decisions_by_id = {
+                    decision.clip_id: (str(decision.label), float(decision.confidence))
+                    for decision in result.decisions
+                }
                 for decision in result.decisions:
                     candidate = (decision.label, float(decision.confidence))
                     current = best_semantic.get(decision.clip_id)
@@ -270,6 +326,14 @@ def apply_hybrid_session_cleanup(
                 for decision in result.decisions:
                     take = take_map[decision.clip_id]
                     corroborated, local_reasons = local_by_id[decision.clip_id]
+                    replacement, replacement_overlap = _later_semantic_retry_replacement(
+                        take, members, decisions_by_id
+                    ) if decision.label == "failed" else (None, 0.0)
+                    retry_replaced_failed_delete = bool(
+                        decision.label == "failed"
+                        and decision.confidence >= retry_replaced_failed_confidence
+                        and replacement is not None
+                    )
                     hard_semantic_delete = bool(
                         decision.label in {"failed", "bts"}
                         and decision.confidence >= delete_confidence
@@ -298,6 +362,7 @@ def apply_hybrid_session_cleanup(
                     )
                     applied_delete = (
                         hard_semantic_delete
+                        or retry_replaced_failed_delete
                         or corroborated_failed_delete
                         or corroborated_bts_delete
                         or micro_failed_delete
@@ -305,6 +370,8 @@ def apply_hybrid_session_cleanup(
                     )
                     if hard_semantic_delete:
                         delete_basis = "high_confidence_semantic"
+                    elif retry_replaced_failed_delete:
+                        delete_basis = "semantic_failed_plus_later_overlapping_complete_retake"
                     elif micro_failed_delete:
                         delete_basis = "micro_failed_plus_local_performance"
                     elif corroborated_failed_delete:
@@ -325,6 +392,8 @@ def apply_hybrid_session_cleanup(
                         "reason_code": decision.reason_code,
                         "local_failure_corroborated": corroborated,
                         "local_failure_reasons": list(local_reasons),
+                        "later_retry_replacement_id": replacement.clip_id if replacement is not None else None,
+                        "later_retry_semantic_overlap": round(float(replacement_overlap), 4),
                         "dense_semantic_failure_cluster": dense_semantic_failure_cluster,
                         "delete_basis": delete_basis,
                         "applied_delete": applied_delete,
