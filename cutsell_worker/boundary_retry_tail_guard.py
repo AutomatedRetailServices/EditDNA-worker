@@ -30,8 +30,22 @@ def _canon(token: str) -> str:
     return "".join(char for char in raw if not unicodedata.combining(char))
 
 
+def _lexeme(token: str) -> str:
+    """Small language-agnostic-enough inflection normalizer for retry identity.
+
+    The guard only uses this for lexical coverage, never to synthesize text. A trailing
+    plural ``s`` on a sufficiently long alphabetic token is collapsed so forms such as
+    singular/plural nouns do not look unrelated. Short tokens, numbers and negations are
+    untouched.
+    """
+    token = _canon(token)
+    if len(token) >= 5 and token.isalpha() and token.endswith("s") and not token.endswith("ss"):
+        return token[:-1]
+    return token
+
+
 def _tokens(text: str) -> tuple[str, ...]:
-    return tuple(_canon(token) for token in _TOKEN_RE.findall(str(text or "")))
+    return tuple(_lexeme(token) for token in _TOKEN_RE.findall(str(text or "")))
 
 
 def _content(text: str) -> set[str]:
@@ -40,7 +54,8 @@ def _content(text: str) -> set[str]:
 
 def _critical(text: str) -> set[str]:
     out: set[str] = set()
-    for token in _tokens(text):
+    for raw_token in _TOKEN_RE.findall(str(text or "")):
+        token = _canon(raw_token)
         if token in _NEGATION:
             out.add("__negation__")
         if any(ch.isdigit() for ch in token):
