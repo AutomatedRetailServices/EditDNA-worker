@@ -63,7 +63,7 @@ def test_video00_reset_backed_failed_reformulation_yields_to_clean_peer():
     assert "failed" in {t.clip_id for t in repaired.deleted}
 
 
-def test_video00_short_sonography_alternates_covered_by_neighbors_are_removed():
+def test_video00_short_sonography_incomplete_debris_is_removed_but_complete_retry_survives():
     previous = _take(
         "previous",
         95.58,
@@ -75,12 +75,14 @@ def test_video00_short_sonography_alternates_covered_by_neighbors_are_removed():
         108.56,
         111.86,
         "Ahí fue cuando me mandaron a hacer sonografías de tiroides",
+        complete=False,
     )
     retry_b = _take(
         "retry-b",
         120.11,
         124.15,
         "a hacer sonografías de tiroides y otras sonografías",
+        complete=True,
     )
     following = _take(
         "following",
@@ -102,8 +104,9 @@ def test_video00_short_sonography_alternates_covered_by_neighbors_are_removed():
         result, (previous, retry_a, retry_b, following)
     )
 
-    assert tuple(t.clip_id for t in repaired.kept) == ("previous", "following")
-    assert {"retry-a", "retry-b"}.issubset({t.clip_id for t in repaired.deleted})
+    assert tuple(t.clip_id for t in repaired.kept) == ("previous", "retry-b", "following")
+    assert "retry-a" in {t.clip_id for t in repaired.deleted}
+    assert "retry-b" not in {t.clip_id for t in repaired.deleted}
 
 
 def test_video00_full_reset_backed_alternate_can_yield_to_winner_plus_open_continuation():
