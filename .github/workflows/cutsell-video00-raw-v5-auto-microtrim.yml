@@ -1,6 +1,6 @@
 name: CutSell Video00 Raw V5 Auto Microtrim
 
-# Manual retrigger after RunPod GEMINI_API_KEY update - attempt 2.
+# Universal raw Video00 benchmark. Keep Hybrid Brain active and test the exact branch head.
 on:
   push:
     branches: [cutsell/mobile-v1-clean]
@@ -11,6 +11,8 @@ on:
       - cutsell_worker/speech_visual_microtrim.py
       - cutsell_worker/universal_clean_cut.py
       - cutsell_worker/universal_clean_cut_validation.py
+      - cutsell_worker/final_boundary_authority.py
+      - cutsell_worker/hybrid_session_cleanup.py
   workflow_dispatch:
 
 permissions:
@@ -44,6 +46,8 @@ jobs:
           grep -q 'detect_speech_safe_visual_microtrims' cutsell_worker/serverless_handler.py
           grep -q 'run_single_universal_clean_cut_validation' cutsell_worker/serverless_handler.py
           grep -q 'refusing silent local fallback' cutsell_worker/brain_runtime.py
+          grep -q 'preserve_polished_interior_gap' cutsell_worker/final_boundary_authority.py
+          grep -q 'semantic_failed_plus_later_overlapping_complete_retake' cutsell_worker/hybrid_session_cleanup.py
 
       - name: Login GHCR
         uses: docker/login-action@v3
