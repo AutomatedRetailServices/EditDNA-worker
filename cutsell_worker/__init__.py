@@ -65,6 +65,7 @@ from .round11_semantic_retry_cleanup import install_round11_semantic_retry_clean
 from .short_bts_process_cleanup import install_short_bts_process_cleanup
 from .hybrid_failed_soft_restore import install_hybrid_failed_soft_restore
 from .hybrid_unavailable_retry_fallback import install_hybrid_unavailable_retry_fallback
+from .post_selection_incomplete_bridge_authority import install_post_selection_incomplete_bridge_authority
 from .audio_boundary_completion_install import install_audio_boundary_completion
 
 install_clean_cut_contract_recovery()
@@ -132,10 +133,14 @@ install_hybrid_failed_soft_restore()
 # Last Hybrid wrapper: only undecided incomplete takes are eligible, and only when a
 # later complete delivery strongly covers the same idea after a Hybrid window failure.
 install_hybrid_unavailable_retry_fallback()
+# Final physical authority: after every semantic/grouping pass, a proven consecutive
+# complete -> rejected incomplete bridge -> complete retry may promote the discarded
+# clean retry without relying on the LLM's inconsistent failed/winner label.
+install_post_selection_incomplete_bridge_authority()
 install_audio_boundary_completion()
 
 # Keep this bootstrap path in the raw Video00 benchmark trigger set; touching this file
 # intentionally retriggers the exact-head raw benchmark when boundary guards change.
-# Raw benchmark trigger marker: numeric-fact Best-Take integrity validated green.
+# Raw benchmark trigger marker: post-selection incomplete-bridge authority installed.
 __version__ = "0.1.0"
 OBSERVABILITY_STATUS = initialize_observability(service="cutsell-worker")
