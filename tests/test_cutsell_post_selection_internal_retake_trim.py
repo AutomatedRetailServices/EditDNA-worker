@@ -45,30 +45,30 @@ def _diagnostics(restart_time):
 def test_covered_internal_attempt_yields_to_later_clean_retake():
     tokens = [
         "intro", "único", "antes",
-        "me", "hicieron", "una", "prueba", "de", "tiroides",
-        "me", "hicieron", "una", "prueba", "de", "tiroides",
+        "me", "hicieron", "una", "prueba", "completa", "de", "tiroides",
+        "me", "hicieron", "una", "prueba", "completa", "de", "tiroides",
         "y", "salió", "todo", "normal", "después",
     ]
     clip = _clip(tokens)
-    restart_time = clip.words[9].start
+    restart_time = clip.words[10].start
     selected, audit = trim_selected_internal_retakes((clip,), _diagnostics(restart_time))
 
     assert len(audit) == 1
     assert audit[0]["reason"] == "earlier_internal_attempt_covered_by_later_clean_retake"
     assert len(selected) == 2
     assert [w.text for w in selected[0].words] == ["intro", "único", "antes"]
-    assert [w.text for w in selected[1].words[:6]] == ["me", "hicieron", "una", "prueba", "de", "tiroides"]
+    assert [w.text for w in selected[1].words[:7]] == ["me", "hicieron", "una", "prueba", "completa", "de", "tiroides"]
 
 
 def test_unique_numeric_fact_in_earlier_attempt_fails_open():
     tokens = [
         "intro", "antes",
-        "me", "hicieron", "una", "prueba", "de", "tiroides", "3",
-        "me", "hicieron", "una", "prueba", "de", "tiroides",
+        "me", "hicieron", "una", "prueba", "completa", "de", "tiroides", "3",
+        "me", "hicieron", "una", "prueba", "completa", "de", "tiroides",
         "y", "salió", "normal", "después",
     ]
     clip = _clip(tokens)
-    restart_time = clip.words[9].start
+    restart_time = clip.words[10].start
     selected, audit = trim_selected_internal_retakes((clip,), _diagnostics(restart_time))
 
     assert audit == ()
@@ -79,12 +79,13 @@ def test_unique_numeric_fact_in_earlier_attempt_fails_open():
 def test_unique_negation_in_earlier_attempt_fails_open():
     tokens = [
         "intro", "antes",
-        "no", "me", "hicieron", "una", "prueba", "de", "tiroides",
-        "me", "hicieron", "una", "prueba", "de", "tiroides",
+        "me", "hicieron", "una", "prueba", "completa", "de", "tiroides",
+        "no", "salió", "normal",
+        "me", "hicieron", "una", "prueba", "completa", "de", "tiroides",
         "y", "salió", "normal", "después",
     ]
     clip = _clip(tokens)
-    restart_time = clip.words[9].start
+    restart_time = clip.words[13].start
     selected, audit = trim_selected_internal_retakes((clip,), _diagnostics(restart_time))
 
     assert audit == ()
