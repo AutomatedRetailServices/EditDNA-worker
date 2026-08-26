@@ -5,12 +5,11 @@ unique, information-dense, and has no competing retry or strong recording-failur
 evidence. Hybrid cleanup must not immediately delete that same paragraph from weak
 semantic evidence alone.
 
-However, once Hybrid has actually applied a deletion because semantic failure is
-corroborated by local performance evidence, that deletion is authoritative. A later
-story-preservation pass must never resurrect it merely because the paragraph is long or
-information-dense. This distinction is critical for creator retries: unique wording does
-not make a failed delivery valid when the same attempt is explicitly followed by a clean
-retry.
+Only a Hybrid deletion corroborated by local performance evidence is irrevocable. A
+semantic-only "failed" label, even at high confidence, may still pass through the unique
+story-coverage guard because model confidence is not physical proof that the delivery is
+a failed take. Extremely high semantic confidence is still protected separately by the
+hard semantic floor in ``restore_hybrid_story_coverage``.
 """
 from __future__ import annotations
 
@@ -22,7 +21,6 @@ from .whole_video_analysis import WholeVideoContext
 
 _AUTHORITATIVE_DELETE_BASES = frozenset({
     "semantic_failed_plus_local_performance",
-    "high_confidence_semantic",
 })
 
 
