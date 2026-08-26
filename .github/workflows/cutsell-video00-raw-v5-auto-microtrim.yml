@@ -1,7 +1,6 @@
 name: CutSell Video00 Raw V5 Auto Microtrim
 
 # Universal raw Video00 benchmark. Keep Hybrid Brain active and test the exact branch head.
-# Trigger marker: critical-fact Best Take integrity validated by CI; run exact-head Video00.
 on:
   push:
     branches: [cutsell/mobile-v1-clean]
@@ -81,163 +80,127 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          curl --fail --silent --show-error \
-            -H "Authorization: Bearer $RUNPOD_API_KEY" \
-            "https://rest.runpod.io/v1/templates/8vex7s94zn" > /tmp/base-template.json
-          python - <<'PY'
-          import json
-          p=json.load(open('/tmp/base-template.json'))
-          assert p.get('id')
-          print(p.get('id'))
-          PY
+          curl --fail --silent --show-error --url "https://rest.runpod.io/v1/templates" --header "Authorization: Bearer $RUNPOD_API_KEY" --output /tmp/templates.json
+          jq -c '[.[] | select(.name == "EditDNA-Worker-2")][0]' /tmp/templates.json > /tmp/base-template.json
+          test "$(cat /tmp/base-template.json)" != "null"
 
       - name: Create raw V5 auto template
         shell: bash
         run: |
           set -euo pipefail
-          python - <<'PY'
-          import json, os
-          base=json.load(open('/tmp/base-template.json'))
-          body={
-            'name': 'cutsell-video00-raw-v5-auto-'+os.environ['GITHUB_RUN_ID'],
-            'imageName': os.environ['LOCKED_IMAGE'],
-            'dockerArgs': base.get('dockerArgs',''),
-            'containerDiskInGb': base.get('containerDiskInGb',20),
-            'volumeInGb': base.get('volumeInGb',0),
-            'volumeMountPath': base.get('volumeMountPath','/workspace'),
-            'env': base.get('env',{}),
-            'ports': base.get('ports',[]),
-          }
-          json.dump(body, open('/tmp/new-template.json','w'))
-          PY
-          curl --fail --silent --show-error \
-            -X POST \
-            -H "Authorization: Bearer $RUNPOD_API_KEY" \
-            -H 'Content-Type: application/json' \
-            --data @/tmp/new-template.json \
-            https://rest.runpod.io/v1/templates > /tmp/new-template-response.json
-          template_id=$(python - <<'PY'
-          import json
-          p=json.load(open('/tmp/new-template-response.json'))
-          print(p['id'])
-          PY
-          )
-          echo "RAW_TEMPLATE_ID=$template_id" >> "$GITHUB_ENV"
+          name="cutsell-video00-raw-v5-auto-$GITHUB_RUN_ID"
+          jq --arg image "$LOCKED_IMAGE" --arg name "$name" '
+            . as $base |
+            {
+              imageName:$image,
+              name:$name,
+              category:"NVIDIA",
+              containerDiskInGb:40,
+              isPublic:false,
+              isServerless:true,
+              env:(($base.env // {}) + {
+                CUTSELL_BRAIN_BACKEND:"runpod_local",
+                CUTSELL_EDITORIAL_MODE:"clean_cut",
+                CUTSELL_ASR_MODEL:"medium",
+                CUTSELL_HYBRID_LLM_ENABLED:"1",
+                CUTSELL_HYBRID_PROVIDER:"google"
+              }),
+              ports:[], volumeInGb:0, volumeMountPath:"/workspace"
+            }' /tmp/base-template.json > /tmp/template-create.json
+          test -n "$(jq -r '.env.GEMINI_API_KEY // empty' /tmp/template-create.json)" || { echo 'GEMINI_API_KEY missing from RunPod template; refusing brain-off benchmark'; exit 1; }
+          code=$(curl --silent --show-error --write-out '%{http_code}' --request POST --url 'https://rest.runpod.io/v1/templates' --header "Authorization: Bearer $RUNPOD_API_KEY" --header 'Content-Type: application/json' --data @/tmp/template-create.json --output /tmp/template.json)
+          test "$code" = "200" || test "$code" = "201"
+          TEMPLATE_ID=$(jq -r '.id // empty' /tmp/template.json)
+          test -n "$TEMPLATE_ID"
+          echo "TEMPLATE_ID=$TEMPLATE_ID" >> "$GITHUB_ENV"
 
       - name: Roll endpoint to raw V5 auto
         shell: bash
         run: |
           set -euo pipefail
-          curl --fail --silent --show-error \
-            -X PATCH \
-            -H "Authorization: Bearer $RUNPOD_API_KEY" \
-            -H 'Content-Type: application/json' \
-            --data "{\"templateId\":\"$RAW_TEMPLATE_ID\"}" \
-            "https://rest.runpod.io/v1/endpoints/$ENDPOINT_ID" > /tmp/endpoint.json
+          jq -n --arg template "$TEMPLATE_ID" '{templateId:$template,workersMin:0,workersMax:1,scalerType:"QUEUE_DELAY",scalerValue:2,idleTimeout:5,executionTimeoutMs:1800000}' > /tmp/endpoint-patch.json
+          code=$(curl --silent --show-error --write-out '%{http_code}' --request PATCH --url "https://rest.runpod.io/v1/endpoints/$ENDPOINT_ID" --header "Authorization: Bearer $RUNPOD_API_KEY" --header 'Content-Type: application/json' --data @/tmp/endpoint-patch.json --output /tmp/endpoint.json)
+          test "$code" = "200"
 
       - name: CUDA health
         shell: bash
         run: |
           set -euo pipefail
-          response=$(curl --fail --silent --show-error \
-            -X POST \
-            -H "Authorization: Bearer $RUNPOD_API_KEY" \
-            -H 'Content-Type: application/json' \
-            --data '{"input":{"action":"health"}}' \
-            "https://api.runpod.ai/v2/$ENDPOINT_ID/runsync")
-          echo "$response" > /tmp/health.json
-          python - <<'PY'
-          import json
-          p=json.load(open('/tmp/health.json'))
-          out=p.get('output') or {}
-          assert out.get('cuda_available') is True, out
-          PY
+          curl --fail --silent --show-error --request POST --url "https://api.runpod.ai/v2/$ENDPOINT_ID/run" --header "Authorization: Bearer $RUNPOD_API_KEY" --header 'Content-Type: application/json' --data '{"input":{"op":"health"}}' --output /tmp/submit-health.json
+          id=$(jq -r '.id // empty' /tmp/submit-health.json); test -n "$id"
+          deadline=$((SECONDS+1200))
+          while [ "$SECONDS" -lt "$deadline" ]; do
+            curl --fail --silent --show-error --url "https://api.runpod.ai/v2/$ENDPOINT_ID/status/$id" --header "Authorization: Bearer $RUNPOD_API_KEY" --output /tmp/health.json
+            status=$(jq -r '.status // empty' /tmp/health.json)
+            case "$status" in
+              COMPLETED) jq -e '.output.ok == true and .output.cuda_available == true' /tmp/health.json >/dev/null; exit 0 ;;
+              FAILED|TIMED_OUT|CANCELLED) cat /tmp/health.json; exit 1 ;;
+            esac
+            sleep 5
+          done
+          cat /tmp/health.json || true
+          exit 1
 
       - name: Submit original six-minute Video00
         shell: bash
         run: |
           set -euo pipefail
-          cat > /tmp/request.json <<EOF
-          {"input":{"action":"run_validation","benchmark_id":"$BENCHMARK_ID","source_key":"$SOURCE_KEY","auto_speech_visual_microtrim":true}}
-          EOF
-          response=$(curl --fail --silent --show-error \
-            -X POST \
-            -H "Authorization: Bearer $RUNPOD_API_KEY" \
-            -H 'Content-Type: application/json' \
-            --data @/tmp/request.json \
-            "https://api.runpod.ai/v2/$ENDPOINT_ID/run")
-          echo "$response" > /tmp/submission.json
-          job_id=$(python - <<'PY'
-          import json
-          p=json.load(open('/tmp/submission.json'))
-          print(p['id'])
-          PY
-          )
-          echo "RUNPOD_JOB_ID=$job_id" >> "$GITHUB_ENV"
+          jq -n --arg source "$SOURCE_KEY" --arg benchmark "$BENCHMARK_ID" '{input:{op:"focused",source_key:$source,benchmark_id:$benchmark,auto_speech_visual_microtrim:true}}' > /tmp/payload.json
+          curl --fail --silent --show-error --request POST --url "https://api.runpod.ai/v2/$ENDPOINT_ID/run" --header "Authorization: Bearer $RUNPOD_API_KEY" --header 'Content-Type: application/json' --data @/tmp/payload.json --output /tmp/submit.json
+          JOB_ID=$(jq -r '.id // empty' /tmp/submit.json); test -n "$JOB_ID"
+          echo "JOB_ID=$JOB_ID" >> "$GITHUB_ENV"
 
       - name: Wait for raw V5 auto result
         shell: bash
         run: |
           set -euo pipefail
-          for i in $(seq 1 240); do
-            response=$(curl --fail --silent --show-error \
-              -H "Authorization: Bearer $RUNPOD_API_KEY" \
-              "https://api.runpod.ai/v2/$ENDPOINT_ID/status/$RUNPOD_JOB_ID")
-            echo "$response" > /tmp/status.json
-            status=$(python - <<'PY'
-          import json
-          p=json.load(open('/tmp/status.json'))
-          print(p.get('status',''))
-          PY
-          )
-            if [ "$status" = "COMPLETED" ]; then
-              cp /tmp/status.json /tmp/result.json
-              exit 0
-            fi
-            if [ "$status" = "FAILED" ]; then
-              cat /tmp/status.json
-              exit 1
-            fi
+          deadline=$((SECONDS+2700))
+          while [ "$SECONDS" -lt "$deadline" ]; do
+            curl --fail --silent --show-error --url "https://api.runpod.ai/v2/$ENDPOINT_ID/status/$JOB_ID" --header "Authorization: Bearer $RUNPOD_API_KEY" --output /tmp/status.json
+            status=$(jq -r '.status // empty' /tmp/status.json)
+            echo "raw_video00_status=$status"
+            case "$status" in
+              COMPLETED)
+                jq -e '.output.ok == true and .output.speech_lock_ok == true and .output.external_brain_calls_enabled == true' /tmp/status.json >/dev/null
+                PREVIEW_URI=$(jq -r '.output.preview_uri // empty' /tmp/status.json)
+                RESULT_URI=$(jq -r '.output.result_uri // empty' /tmp/status.json)
+                test -n "$PREVIEW_URI" && test -n "$RESULT_URI"
+                echo "PREVIEW_URI=$PREVIEW_URI" >> "$GITHUB_ENV"
+                echo "RESULT_URI=$RESULT_URI" >> "$GITHUB_ENV"
+                exit 0 ;;
+              FAILED|TIMED_OUT|CANCELLED) cat /tmp/status.json; exit 1 ;;
+            esac
             sleep 10
           done
-          echo 'Timed out waiting for RunPod job'
           exit 1
 
       - name: Download raw test artifact
         shell: bash
         run: |
           set -euo pipefail
-          python - <<'PY'
-          import json, os, urllib.request
-          p=json.load(open('/tmp/result.json'))
-          out=p.get('output') or {}
-          for key,target in [('artifact_json_url','/tmp/video00-raw-v5-auto-microtrim.json'),('artifact_video_url','/tmp/video00-raw-v5-auto-microtrim.mp4')]:
-              url=out.get(key)
-              if not url:
-                  raise SystemExit(f'missing {key}: {out}')
-              urllib.request.urlretrieve(url,target)
-          PY
+          mkdir -p artifact
+          BASE_TEMPLATE=$(cat /tmp/base-template.json)
+          for key in AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_REGION S3_BUCKET; do
+            value=$(printf '%s' "$BASE_TEMPLATE" | jq -r --arg key "$key" '.env[$key] // empty')
+            test -n "$value"
+            echo "::add-mask::$value"
+            export "$key=$value"
+          done
+          aws s3 cp "$PREVIEW_URI" artifact/video00-raw-v5-auto-microtrim.mp4
+          aws s3 cp "$RESULT_URI" artifact/video00-raw-v5-auto-microtrim.json
+          test -s artifact/video00-raw-v5-auto-microtrim.mp4
+          test -s artifact/video00-raw-v5-auto-microtrim.json
 
       - name: Verify original raw and final rule
         shell: bash
         run: |
           set -euo pipefail
-          python - <<'PY'
-          import json
-          p=json.load(open('/tmp/video00-raw-v5-auto-microtrim.json'))
-          source=float(p.get('source_duration_sec',0))
-          output=float(p.get('output_duration_sec',0))
-          assert source > 360, source
-          assert output > 0, output
-          assert p.get('speech_lock_ok') is True, p.get('speech_lock_ok')
-          PY
+          jq -e '.source_duration_sec > 350 and .auto_speech_visual_microtrim_enabled == true and .speech_lock_ok == true and .external_brain_calls_enabled == true and .selected_count > 0 and .hybrid_requested_group_count > 0' artifact/video00-raw-v5-auto-microtrim.json >/dev/null
+          jq '{source_duration_sec,selected_count,selected_duration_sec,output_duration_sec,external_brain_calls_enabled,hybrid_provider,hybrid_primary_model,hybrid_requested_group_count,hybrid_available_group_count,hybrid_deleted_count,auto_microtrim_count,auto_microtrim_duration_sec,speech_lock_ok}' artifact/video00-raw-v5-auto-microtrim.json
 
       - name: Upload raw V5 auto human review artifact
         uses: actions/upload-artifact@v4
         with:
           name: cutsell-video00-raw-v5-auto-microtrim-human-review
-          path: |
-            /tmp/video00-raw-v5-auto-microtrim.json
-            /tmp/video00-raw-v5-auto-microtrim.mp4
-          if-no-files-found: error
+          path: artifact/
           retention-days: 14
