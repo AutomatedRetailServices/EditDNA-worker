@@ -36,6 +36,7 @@ from .editorial_guardrails_v2 import install_editorial_guardrails_v2
 from .complete_retry_identity_guard import install_complete_retry_identity_guard
 from .speech_safe_dead_air_guard import install_speech_safe_dead_air_guard
 from .incomplete_bridge_retry_authority import install_incomplete_bridge_retry_authority
+from .terminal_sentence_boundary_guard import install_terminal_sentence_boundary_guard
 from .hybrid_retry_completion_integrity import install_hybrid_retry_completion_integrity
 from .hybrid_story_guard import install_hybrid_story_coverage_guard
 from .hybrid_alternate_integrity import install_hybrid_alternate_integrity
@@ -95,6 +96,7 @@ install_editorial_guardrails_v2()
 install_complete_retry_identity_guard()
 install_speech_safe_dead_air_guard()
 install_incomplete_bridge_retry_authority()
+install_terminal_sentence_boundary_guard()
 install_hybrid_retry_completion_integrity()
 install_hybrid_story_coverage_guard()
 install_hybrid_alternate_integrity()
