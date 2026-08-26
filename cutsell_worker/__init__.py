@@ -67,6 +67,7 @@ from .hybrid_failed_soft_restore import install_hybrid_failed_soft_restore
 from .hybrid_unavailable_retry_fallback import install_hybrid_unavailable_retry_fallback
 from .post_selection_incomplete_bridge_authority import install_post_selection_incomplete_bridge_authority
 from .post_selection_interior_gap_trim import install_post_selection_interior_gap_trim
+from .post_selection_internal_retake_trim import install_post_selection_internal_retake_trim
 from .audio_boundary_completion_install import install_audio_boundary_completion
 
 install_clean_cut_contract_recovery()
@@ -141,10 +142,13 @@ install_post_selection_incomplete_bridge_authority()
 # Best Take is now stable, so selected logical clips may safely split at speech-free
 # multimodal performance resets without invalidating selection identity.
 install_post_selection_interior_gap_trim()
+# Spoken internal attempts may only yield when a later clean retake repeats the opening,
+# covers the earlier audience-facing content, and preserves all numbers/negations.
+install_post_selection_internal_retake_trim()
 install_audio_boundary_completion()
 
 # Keep this bootstrap path in the raw Video00 benchmark trigger set; touching this file
 # intentionally retriggers the exact-head raw benchmark when boundary guards change.
-# Raw benchmark trigger marker: post-selection interior-gap trim installed.
+# Raw benchmark trigger marker: post-selection internal retake trim installed.
 __version__ = "0.1.0"
 OBSERVABILITY_STATUS = initialize_observability(service="cutsell-worker")
