@@ -37,13 +37,7 @@ class SessionBoundary:
 
     @property
     def at(self) -> float:
-        """Backward-compatible timestamp alias for boundary consumers.
-
-        Older attempt-reconstruction code used ``boundary.at`` while the canonical
-        dataclass field is ``timestamp``. Keeping this read-only alias makes boundary
-        consumers source-compatible and prevents one malformed source from aborting an
-        otherwise healthy benchmark run.
-        """
+        """Backward-compatible timestamp alias for boundary consumers."""
         return self.timestamp
 
 
@@ -62,13 +56,7 @@ def infer_session_boundaries(
     *,
     cluster_radius_sec: float = 0.22,
 ) -> Tuple[SessionBoundary, ...]:
-    """Infer only dense multi-family visual discontinuities.
-
-    A creator gesture/reset alone is never a session boundary. We require camera
-    disengagement, facial-geometry shift, and a body/hand reset in the same very tight
-    temporal cluster. This is characteristic of hard compilation edits while remaining
-    conservative for ordinary delivery motion.
-    """
+    """Infer only dense multi-family visual discontinuities."""
     events = tuple(sorted(_source_events(context, source_asset_id), key=lambda e: (e.start, e.end)))
     candidates = []
     for camera in events:
@@ -83,11 +71,13 @@ def infer_session_boundaries(
         reset = [event for event in nearby if event.kind in _RESET_KINDS and event.confidence >= 0.88]
         if not face or not reset:
             continue
-        confidence = min(0.99, (camera.confidence + max(e.confidence for e in face) + max(e.confidence for e in reset)) / 3.0)
+        confidence = min(
+            0.99,
+            (camera.confidence + max(e.confidence for e in face) + max(e.confidence for e in reset)) / 3.0,
+        )
         kinds = tuple(sorted({camera.kind, *(e.kind for e in face), *(e.kind for e in reset)}))
         candidates.append(SessionBoundary(source_asset_id, center, confidence, kinds))
 
-    # Collapse duplicate detections around the same edit.
     collapsed = []
     for boundary in candidates:
         if collapsed and boundary.timestamp - collapsed[-1].timestamp <= 0.35:
@@ -157,6 +147,45 @@ def partition_takes_by_sessions(
     return tuple(partitions)
 
 
+def _repair_session_group_coverage(
+    groups: Tuple[Tuple[str, ...], ...],
+    takes: Tuple[CandidateTake, ...],
+) -> tuple[Tuple[Tuple[str, ...], ...], int, int]:
+    """Guarantee every kept take survives session-scoped grouping exactly once.
+
+    Grouping is not deletion authority. Provider/baseline partitioning may choose retry
+    families, but it must never silently drop a candidate. Unknown IDs and duplicate IDs
+    are removed; any omitted real candidate is restored as a singleton in natural source
+    order so Best Take / Hybrid can make the explicit selection decision later.
+    """
+    natural_ids = tuple(take.clip_id for take in takes)
+    allowed = set(natural_ids)
+    seen: set[str] = set()
+    normalized: list[Tuple[str, ...]] = []
+    duplicate_or_unknown = 0
+
+    for group in groups:
+        kept: list[str] = []
+        for raw_id in group:
+            clip_id = str(raw_id)
+            if clip_id not in allowed or clip_id in seen:
+                duplicate_or_unknown += 1
+                continue
+            kept.append(clip_id)
+            seen.add(clip_id)
+        if kept:
+            normalized.append(tuple(kept))
+
+    missing = [clip_id for clip_id in natural_ids if clip_id not in seen]
+    for clip_id in missing:
+        normalized.append((clip_id,))
+        seen.add(clip_id)
+
+    order = {clip_id: index for index, clip_id in enumerate(natural_ids)}
+    normalized.sort(key=lambda group: min(order.get(clip_id, 10**9) for clip_id in group))
+    return tuple(normalized), len(missing), duplicate_or_unknown
+
+
 def safe_group_takes_by_sessions(
     provider: TakeGroupingProvider | None,
     takes: Iterable[CandidateTake],
@@ -168,22 +197,53 @@ def safe_group_takes_by_sessions(
     take_tuple = tuple(takes)
     partitions = partition_takes_by_sessions(take_tuple, context)
     if len(partitions) <= 1:
-        return safe_group_takes(provider, take_tuple, context_text=context_text)
+        result = safe_group_takes(provider, take_tuple, context_text=context_text)
+        repaired_groups, missing_count, duplicate_count = _repair_session_group_coverage(
+            result.groups, take_tuple
+        )
+        if not missing_count and not duplicate_count:
+            return result
+        return TakeGroupingProviderResult(
+            groups=repaired_groups,
+            status=ProviderStatus(
+                provider=result.status.provider,
+                requested=result.status.requested,
+                available=result.status.available,
+                status="coverage_repaired",
+                reason=f"missing_restored={missing_count};duplicates_removed={duplicate_count}",
+            ),
+            reason="; ".join(
+                part for part in (
+                    result.reason,
+                    f"global_group_coverage_repaired:missing={missing_count}:duplicates={duplicate_count}",
+                ) if part
+            ),
+        )
 
     results = tuple(
         safe_group_takes(provider, partition, context_text=context_text)
         for partition in partitions
     )
-    groups = tuple(group for result in results for group in result.groups)
+    raw_groups = tuple(group for result in results for group in result.groups)
+    groups, missing_count, duplicate_count = _repair_session_group_coverage(raw_groups, take_tuple)
     statuses = {result.status.status for result in results}
     reasons = [result.reason for result in results if result.reason]
     status_name = "applied" if "applied" in statuses else "baseline"
+    if missing_count or duplicate_count:
+        status_name = "coverage_repaired"
     status = ProviderStatus(
         provider="session_scoped_take_grouping",
         requested=provider is not None,
         available=True,
         status=status_name,
-        reason=f"mini_sessions={len(partitions)}",
+        reason=(
+            f"mini_sessions={len(partitions)};missing_restored={missing_count};"
+            f"duplicates_removed={duplicate_count}"
+        ),
     )
-    reason = "; ".join([f"session_boundary_scoped:{len(partitions)}", *reasons])
+    reason = "; ".join([
+        f"session_boundary_scoped:{len(partitions)}",
+        *reasons,
+        f"global_group_coverage:missing_restored={missing_count}:duplicates_removed={duplicate_count}",
+    ])
     return TakeGroupingProviderResult(groups=groups, status=status, reason=reason)
