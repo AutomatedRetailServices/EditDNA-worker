@@ -33,6 +33,7 @@ from .superseded_attempt_cleanup import install_superseded_attempt_cleanup
 from .lexical_self_correction import install_explicit_lexical_self_correction_cut
 from .semantic_fragment_guard import install_semantic_fragment_guard
 from .editorial_guardrails_v2 import install_editorial_guardrails_v2
+from .complete_retry_identity_guard import install_complete_retry_identity_guard
 from .hybrid_retry_completion_integrity import install_hybrid_retry_completion_integrity
 from .hybrid_story_guard import install_hybrid_story_coverage_guard
 from .hybrid_alternate_integrity import install_hybrid_alternate_integrity
@@ -89,6 +90,7 @@ install_superseded_attempt_cleanup()
 install_explicit_lexical_self_correction_cut()
 install_semantic_fragment_guard()
 install_editorial_guardrails_v2()
+install_complete_retry_identity_guard()
 install_hybrid_retry_completion_integrity()
 install_hybrid_story_coverage_guard()
 install_hybrid_alternate_integrity()
