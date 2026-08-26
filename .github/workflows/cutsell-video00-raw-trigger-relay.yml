@@ -1,0 +1,26 @@
+name: CutSell Video00 Raw Trigger Relay
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - .github/cutsell-video00-raw-trigger
+  workflow_dispatch:
+
+permissions:
+  actions: write
+  contents: read
+
+jobs:
+  dispatch-video00-raw:
+    if: github.event_name == 'workflow_dispatch' || github.event.pull_request.head.ref == 'cutsell/mobile-v1-clean'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Dispatch exact branch raw benchmark
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          gh workflow run cutsell-video00-raw-v5-auto-microtrim.yml \
+            --repo "$GITHUB_REPOSITORY" \
+            --ref cutsell/mobile-v1-clean
