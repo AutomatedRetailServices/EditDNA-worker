@@ -1,10 +1,10 @@
 name: CutSell Video00 Raw Trigger Relay
 
+# Manual emergency dispatch only. Automatic Video00 execution is owned by the
+# direct push trigger in cutsell-video00-raw-v5-auto-microtrim.yml.
+# Keeping this workflow manual prevents one code change from launching both a
+# push benchmark and a second relay-dispatched benchmark.
 on:
-  pull_request:
-    branches: [main]
-    paths:
-      - .github/cutsell-video00-raw-trigger
   workflow_dispatch:
 
 permissions:
@@ -13,7 +13,6 @@ permissions:
 
 jobs:
   dispatch-video00-raw:
-    if: github.event_name == 'workflow_dispatch' || github.event.pull_request.head.ref == 'cutsell/mobile-v1-clean'
     runs-on: ubuntu-latest
     steps:
       - name: Dispatch exact branch raw benchmark
