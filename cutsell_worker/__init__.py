@@ -72,6 +72,7 @@ from .post_selection_incomplete_bridge_authority import install_post_selection_i
 from .post_selection_interior_gap_trim import install_post_selection_interior_gap_trim
 from .post_selection_internal_retake_trim import install_post_selection_internal_retake_trim
 from .post_selection_continuity_coalescer import install_post_selection_continuity_coalescer
+from .post_selection_composite_handoff_trim import install_post_selection_composite_handoff_trim
 from .audio_boundary_completion_install import install_audio_boundary_completion
 
 install_clean_cut_contract_recovery()
@@ -162,6 +163,9 @@ install_post_selection_internal_retake_trim()
 # Over-segmented fragments from the same source should not manufacture jump cuts when
 # only a tiny natural gap separates them and no retry/reset evidence exists there.
 install_post_selection_continuity_coalescer()
+# After interior splits/coalescing, trim only a redundant final sibling when a later
+# selected delivery takes over while earlier siblings preserve unique information.
+install_post_selection_composite_handoff_trim()
 install_audio_boundary_completion()
 
 # Keep this bootstrap path in the raw Video00 benchmark trigger set; touching this file
@@ -174,5 +178,6 @@ install_audio_boundary_completion()
 # Raw benchmark trigger marker: final Hybrid wrapper bound into pipeline.
 # Raw benchmark trigger marker: composite Best Take authority installed.
 # Raw benchmark trigger marker: semantic complementary full-alternate rescue installed.
+# Raw benchmark trigger marker: post-selection composite handoff trim installed.
 __version__ = "0.1.0"
 OBSERVABILITY_STATUS = initialize_observability(service="cutsell-worker")
