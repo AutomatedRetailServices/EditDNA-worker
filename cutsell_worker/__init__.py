@@ -67,6 +67,7 @@ from .hybrid_failed_soft_restore import install_hybrid_failed_soft_restore
 from .hybrid_unavailable_retry_fallback import install_hybrid_unavailable_retry_fallback
 from .hybrid_complementary_delivery_guard import install_hybrid_complementary_delivery_guard
 from .hybrid_semantic_complementary_rescue import install_hybrid_semantic_complementary_rescue
+from .hybrid_semantic_composite_bridge import install_hybrid_semantic_composite_bridge
 from .hybrid_composite_best_take import install_hybrid_composite_best_take
 from .post_selection_incomplete_bridge_authority import install_post_selection_incomplete_bridge_authority
 from .post_selection_interior_gap_trim import install_post_selection_interior_gap_trim
@@ -146,6 +147,9 @@ install_hybrid_complementary_delivery_guard()
 # A reset-backed full alternate is not redundant merely because it overlaps a winner.
 # Preserve and split it when it carries material unique audience-facing information.
 install_hybrid_semantic_complementary_rescue()
+# Bridge semantic rescues into Composite Best Take, while revoking strong same-opening
+# retries that are alternate deliveries rather than complementary information.
+install_hybrid_semantic_composite_bridge()
 # Composite authority runs after complementary recovery. It can rescue a complete
 # performance-only deletion with unique information, combine complementary sub-deliveries
 # instead of one monolithic retry, and split those deliveries before Best Take.
@@ -179,5 +183,6 @@ install_audio_boundary_completion()
 # Raw benchmark trigger marker: composite Best Take authority installed.
 # Raw benchmark trigger marker: semantic complementary full-alternate rescue installed.
 # Raw benchmark trigger marker: post-selection composite handoff trim installed.
+# Raw benchmark trigger marker: semantic rescue Composite bridge installed.
 __version__ = "0.1.0"
 OBSERVABILITY_STATUS = initialize_observability(service="cutsell-worker")
