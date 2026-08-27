@@ -92,7 +92,7 @@ def test_strong_prefix_incomplete_restart_can_yield_at_roughly_44_percent_covera
         "restart",
         123.0,
         137.0,
-        "I am the first one in my family with this cancer. Nobody else has this thyroid condition. Science supports that only 5-10% of the",
+        "I am the only one in my family with this cancer. Science shows another different thyroid pattern and recurrence detail that doctors still study, only 5-10% of the",
         complete=False,
     )
 
@@ -100,7 +100,7 @@ def test_strong_prefix_incomplete_restart_can_yield_at_roughly_44_percent_covera
 
     assert deleted == {"restart"}
     assert rows[0]["prior_complete_clip_id"] == "prior"
-    assert rows[0]["coverage"] >= 0.40
+    assert 0.40 <= rows[0]["coverage"] < 0.45
     assert rows[0]["prefix_ratio"] >= 0.60
 
 
