@@ -1,9 +1,11 @@
+import pytest
+
 from cutsell_worker.human_gold_decision_map import AlignmentAnchor, GoldSourceChunk
 from cutsell_worker.human_gold_decision_map_v2 import _top_indices
 
 
 def test_top_indices_orders_best_scores_first():
-    import numpy as np
+    np = pytest.importorskip("numpy")
     values = np.array([0.1, 0.9, 0.4, 0.8, 0.2], dtype=np.float32)
     assert list(_top_indices(values, 3)) == [1, 3, 2]
 
