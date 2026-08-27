@@ -1,11 +1,11 @@
 """General speech-safe, frame-aware visual reset microtrim.
 
 This layer never chooses takes or changes semantic order. It operates only on an
-already-rendered timeline. Candidate cuts must sit between ASR word envelopes, overlap
-objective source silence, and show a strong post-speech visual disengagement. The
-visual evidence may be face/head movement or a persistent silent wrist/hand drop such
-as lowering a handheld microphone after finishing a take. Ambiguous regions fail open
-unchanged.
+already-rendered timeline. Candidate cuts must sit between ASR word envelopes and
+show a strong post-speech visual disengagement. Acoustic evidence normally requires
+objective quiet, but after a terminal delivery we also allow moderate performance
+residual (breath, mouth noise, mic handling) when ASR contains no lexical information
+inside the guarded gap. Ambiguous regions fail open unchanged.
 """
 from __future__ import annotations
 
@@ -235,13 +235,33 @@ def _visual_reset_onset(path: str, left_word_end: float, safe_start: float, safe
     return None, {"reason": "no_persistent_visual_reset"}
 
 
-def _minimum_quiet_ratio(raw_gap: float) -> float:
-    """Require stronger acoustic evidence as the candidate reset gap gets longer."""
+_TERMINAL_DELIVERY_RE = re.compile(r"[.!?…]+[\"'”’\)\]]*$")
+
+
+def _is_terminal_delivery(text: str) -> bool:
+    """Return true only when ASR marks the left token as ending a delivery."""
+    return bool(_TERMINAL_DELIVERY_RE.search((text or "").strip()))
+
+
+def _minimum_quiet_ratio(raw_gap: float, *, terminal_delivery: bool = False) -> float:
+    """Set acoustic evidence required for a speech-safe visual reset gap.
+
+    Non-terminal gaps stay conservative because the next words may complete the same
+    sentence. After terminal punctuation, ASR has already bounded the spoken content;
+    moderate non-lexical performance residual may remain between word envelopes, so a
+    lower quiet floor is allowed only when the visual reset detector also confirms a
+    persistent disengagement.
+    """
     if raw_gap <= 0.62:
-        return 0.68
-    if raw_gap <= 0.90:
-        return 0.76
-    return 0.82
+        strict = 0.68
+        terminal = 0.35
+    elif raw_gap <= 0.90:
+        strict = 0.76
+        terminal = 0.45
+    else:
+        strict = 0.82
+        terminal = 0.55
+    return terminal if terminal_delivery else strict
 
 
 def detect_speech_safe_visual_microtrims(
@@ -254,9 +274,10 @@ def detect_speech_safe_visual_microtrims(
     """Find reset slack strictly between spoken-word envelopes.
 
     Human edits often remove a creator's visible post-take reset even when that reset is
-    longer than a classic sub-second micro-pause. We therefore allow gaps up to 1.25 s,
-    but only when the removal is physically speech-safe, acoustically quiet, and backed
-    by a persistent face/body reset. Longer candidates require stronger quiet evidence.
+    longer than a classic sub-second micro-pause. We therefore allow gaps up to 1.25 s.
+    Non-terminal delivery gaps still require strong objective quiet. A terminal delivery
+    may use a lower acoustic floor for non-lexical performance residual, but only inside
+    ASR word guards and only with a persistent face/body reset. Ambiguous cases fail open.
     """
     transcript = FasterWhisperASR(model_name=asr_model).transcribe(
         path, source_asset_id="rendered-output", language_hint=language_hint,
@@ -283,7 +304,8 @@ def detect_speech_safe_visual_microtrims(
         if safe_end - safe_start < 0.075:
             continue
         quiet_ratio = _quiet_ratio(silences, safe_start, safe_end)
-        minimum_quiet = _minimum_quiet_ratio(raw_gap)
+        terminal_delivery = _is_terminal_delivery(str(left.text))
+        minimum_quiet = _minimum_quiet_ratio(raw_gap, terminal_delivery=terminal_delivery)
         if quiet_ratio < minimum_quiet:
             continue
         candidates += 1
@@ -308,6 +330,7 @@ def detect_speech_safe_visual_microtrims(
             "right_word": str(right.text),
             "left_word_end": round(left_end, 3),
             "right_word_start": round(right_start, 3),
+            "terminal_delivery": terminal_delivery,
             "quiet_ratio": round(quiet_ratio, 3),
             "minimum_quiet_ratio": round(minimum_quiet, 3),
             "visual_evidence": visual,
@@ -324,5 +347,5 @@ def detect_speech_safe_visual_microtrims(
         "visual_channels": ["face_head", "pose_wrist_gesture"],
         "max_reset_gap_sec": 1.25,
         "max_single_trim_sec": 0.90,
-        "rule": "word_end_plus_acoustic_guard_then_persistent_visual_reset_until_next_word_guard",
+        "rule": "asr_word_guards_plus_terminal_aware_acoustic_guard_then_persistent_visual_reset",
     }
