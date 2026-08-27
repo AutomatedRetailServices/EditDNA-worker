@@ -27,6 +27,13 @@ on:
       - cutsell_worker/hybrid_unavailable_retry_fallback.py
   workflow_dispatch:
 
+# Only the newest Video00 benchmark for this branch is useful. A newer head cancels
+# stale GitHub runs so old images/RunPod submissions do not keep competing with the
+# current engine revision.
+concurrency:
+  group: cutsell-video00-raw-${{ github.ref }}
+  cancel-in-progress: true
+
 permissions:
   contents: read
   packages: write
