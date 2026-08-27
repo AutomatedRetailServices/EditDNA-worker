@@ -34,13 +34,12 @@ def test_longer_human_style_reset_gap_is_trimmed_when_speech_safe(monkeypatch):
     assert cut["duration_sec"] == 0.775
     assert cut["left_word_end"] == 1.0
     assert cut["right_word_start"] == 2.0
+    assert cut["quiet_ratio"] >= 0.82
     assert diag["speech_lock_ok"] is True
-    assert diag["max_reset_gap_sec"] == 1.25
 
 
 def test_long_reset_gap_fails_open_without_enough_quiet(monkeypatch):
     monkeypatch.setattr(svm, "FasterWhisperASR", _FakeASR)
-    # Only a small part of the safe interval is acoustically quiet.
     monkeypatch.setattr(svm, "_silences", lambda path: ((1.05, 1.35),))
     monkeypatch.setattr(
         svm,
