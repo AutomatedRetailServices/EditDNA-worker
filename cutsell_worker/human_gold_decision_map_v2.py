@@ -10,7 +10,6 @@ from __future__ import annotations
 import argparse
 import csv
 import json
-import math
 from pathlib import Path
 from typing import Sequence
 
@@ -40,15 +39,16 @@ def align_gold_audio_to_raw_v2(
     anchor_window_sec: float = 1.5,
     anchor_stride_sec: float = 0.50,
     hop_sec: float = 0.02,
-    candidates_per_anchor: int = 8,
-    minimum_correlation: float = 0.50,
-    maximum_forward_skip_sec: float = 65.0,
+    candidates_per_anchor: int = 12,
+    minimum_correlation: float = 0.48,
 ) -> tuple[tuple[AlignmentAnchor, ...], tuple[GoldSourceChunk, ...]]:
     """Align the entire edited Gold monotonically back to its RAW source.
 
-    Each Gold anchor is matched globally against RAW. Dynamic programming then
-    chooses one monotonic path. This avoids the v1 failure mode where one local
-    false match permanently moved the search cursor to the wrong source region.
+    Each Gold anchor is matched globally against RAW. Dynamic programming chooses
+    one complete forward-only path. Human edits may legitimately jump a large
+    distance in RAW between adjacent Gold phrases, so V2.1 does not impose a hard
+    maximum jump. It still penalizes unnecessarily large jumps and validates every
+    resulting source chunk against the real RAW duration before emitting parity.
     """
     import numpy as np
 
@@ -60,35 +60,32 @@ def align_gold_audio_to_raw_v2(
     stride_frames = max(1, int(round(anchor_stride_sec / hop_sec)))
 
     gold_starts = list(range(0, max(1, gold_features.shape[0] - window_frames + 1), stride_frames))
-    if gold_starts and gold_starts[-1] + window_frames < gold_features.shape[0] - stride_frames:
-        gold_starts.append(max(0, gold_features.shape[0] - window_frames))
+    last_start = max(0, gold_features.shape[0] - window_frames)
+    if not gold_starts or gold_starts[-1] != last_start:
+        gold_starts.append(last_start)
 
     candidate_rows: list[list[tuple[int, float]]] = []
-    raw_search = raw_features
     for gold_start in gold_starts:
         template = gold_features[gold_start:gold_start + window_frames]
-        corr = _normalized_window_correlation(raw_search, template)
-        top = []
-        for idx in _top_indices(corr, candidates_per_anchor * 3):
+        corr = _normalized_window_correlation(raw_features, template)
+        top: list[tuple[int, float]] = []
+        # Search more raw peaks than we retain so non-max suppression does not
+        # accidentally leave only repeated local maxima from the same phrase.
+        for idx in _top_indices(corr, candidates_per_anchor * 8):
             score = float(corr[int(idx)])
-            if score < minimum_correlation:
-                continue
             raw_start = int(idx)
-            # Non-max suppression: avoid keeping many near-identical windows.
-            if any(abs(raw_start - kept_start) * hop_sec < 0.45 for kept_start, _ in top):
+            if any(abs(raw_start - kept_start) * hop_sec < 0.40 for kept_start, _ in top):
                 continue
             top.append((raw_start, score))
             if len(top) >= candidates_per_anchor:
                 break
         if not top:
-            # Keep the best global candidate as evidence, but at a large score penalty.
-            best = int(np.argmax(corr))
-            top = [(best, float(corr[best]) - 0.35)]
+            raise RuntimeError(f"No alignment candidates for Gold anchor {gold_start * hop_sec:.3f}s")
         candidate_rows.append(top)
 
-    # Dynamic programming over candidate lattice.
-    # State score favors correlation and near-1x local motion while allowing forward
-    # jumps (human cuts) up to maximum_forward_skip_sec.
+    # DP over all Gold anchors. Low-correlation anchors are allowed to bridge cuts,
+    # but correlation remains the dominant score. A path must progress in RAW by
+    # approximately at least the Gold elapsed time; large forward gaps are allowed.
     dp: list[list[float]] = []
     parent: list[list[int | None]] = []
     for i, row in enumerate(candidate_rows):
@@ -96,23 +93,25 @@ def align_gold_audio_to_raw_v2(
         parent.append([None] * len(row))
         if i == 0:
             for j, (raw_start, corr) in enumerate(row):
-                # Mild preference for earlier RAW only at first anchor.
-                dp[i][j] = corr - 0.0005 * (raw_start * hop_sec)
+                dp[i][j] = corr - 0.0002 * (raw_start * hop_sec)
             continue
         gold_delta = (gold_starts[i] - gold_starts[i - 1]) * hop_sec
         for j, (raw_start, corr) in enumerate(row):
             best_score = -1e18
             best_parent = None
             for pj, (prev_raw, _prev_corr) in enumerate(candidate_rows[i - 1]):
+                prev_score = dp[i - 1][pj]
+                if prev_score <= -1e17:
+                    continue
                 raw_delta = (raw_start - prev_raw) * hop_sec
-                if raw_delta < max(0.05, gold_delta - 0.35):
+                # Windows overlap in Gold, so tolerate a small source overlap while
+                # still forbidding a backwards editorial path.
+                if raw_delta < max(0.02, gold_delta - 0.45):
                     continue
                 extra_skip = max(0.0, raw_delta - gold_delta)
-                if extra_skip > maximum_forward_skip_sec:
-                    continue
-                # Allow real edit jumps, but prefer continuity when evidence ties.
-                transition_penalty = 0.0015 * extra_skip
-                score = dp[i - 1][pj] + corr - transition_penalty
+                # Only a soft penalty: true human cuts can skip tens of seconds.
+                transition_penalty = 0.0008 * extra_skip
+                score = prev_score + corr - transition_penalty
                 if score > best_score:
                     best_score = score
                     best_parent = pj
@@ -144,9 +143,8 @@ def align_gold_audio_to_raw_v2(
         for g, r, c in chosen
     )
 
-    # Remove low-confidence isolated anchors before plateau extraction.
     trusted = tuple(a for a in anchors if a.correlation >= minimum_correlation)
-    if len(trusted) < max(12, int(gold_duration / 4.0)):
+    if len(trusted) < max(18, int(gold_duration / 3.0)):
         raise RuntimeError(f"Insufficient trusted Human Gold anchors: {len(trusted)}")
     if trusted[0].gold_time > 2.5 or trusted[-1].gold_time < gold_duration - 2.5:
         raise RuntimeError(
@@ -156,21 +154,20 @@ def align_gold_audio_to_raw_v2(
 
     groups = coalesce_alignment_anchors(
         trusted,
-        offset_tolerance_sec=0.16,
-        maximum_gold_gap_sec=max(1.25, anchor_window_sec + anchor_stride_sec),
+        offset_tolerance_sec=0.18,
+        maximum_gold_gap_sec=max(1.5, anchor_window_sec + anchor_stride_sec),
         minimum_correlation=minimum_correlation,
     )
     if not groups:
         raise RuntimeError("No Human Gold source plateaus found")
 
-    # Build chunk boundaries from adjacent source plateaus. The first/last chunks
-    # extend only to Gold endpoints after end-to-end anchor coverage was proven.
     boundaries = [0.0]
     for left, right in zip(groups, groups[1:]):
         boundaries.append((float(left[-1].gold_time) + float(right[0].gold_time)) / 2.0)
     boundaries.append(gold_duration)
 
     chunks: list[GoldSourceChunk] = []
+    previous_raw_start = -1.0
     for index, group in enumerate(groups, 1):
         offsets = sorted(a.offset for a in group)
         correlations = sorted(a.correlation for a in group)
@@ -185,6 +182,9 @@ def align_gold_audio_to_raw_v2(
                 f"Invalid Gold->RAW chunk {index}: gold={gold_start:.3f}-{gold_end:.3f}, "
                 f"raw={raw_start:.3f}-{raw_end:.3f}, raw_duration={raw_duration:.3f}"
             )
+        if raw_start + 0.05 < previous_raw_start:
+            raise RuntimeError(f"Non-monotonic Human Gold source chunk {index}")
+        previous_raw_start = raw_start
         chunks.append(GoldSourceChunk(
             index=index,
             gold_start=gold_start,
@@ -195,14 +195,11 @@ def align_gold_audio_to_raw_v2(
             alignment_confidence=confidence,
         ))
 
-    # Fundamental oracle invariants: monotonic source, full Gold duration, no
-    # impossible source projection. Fail instead of producing misleading parity.
-    for left, right in zip(chunks, chunks[1:]):
-        if right.raw_start + 0.05 < left.raw_start:
-            raise RuntimeError("Non-monotonic Human Gold source chunks")
     mapped_gold = sum(c.duration for c in chunks)
     if abs(mapped_gold - gold_duration) > 0.10:
         raise RuntimeError(f"Gold chunk coverage mismatch: {mapped_gold:.3f} vs {gold_duration:.3f}")
+    if chunks[-1].raw_end > raw_duration + 1e-6:
+        raise RuntimeError("Final Gold source projection exceeds RAW")
 
     return anchors, tuple(chunks)
 
@@ -258,10 +255,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         engine_result=engine_result,
         alignment_anchors=anchors,
     )
-    report["schema_version"] = "cutsell.human_gold_decision_map.v2"
-    report["alignment"]["trusted_anchor_count"] = sum(1 for a in anchors if a.correlation >= 0.50)
+    report["schema_version"] = "cutsell.human_gold_decision_map.v2.1"
+    report["alignment"]["trusted_anchor_count"] = sum(1 for a in anchors if a.correlation >= 0.48)
     report["alignment"]["first_anchor_gold_sec"] = round(anchors[0].gold_time, 3)
     report["alignment"]["last_anchor_gold_sec"] = round(anchors[-1].gold_time, 3)
+    report["alignment"]["maximum_projected_raw_sec"] = round(max(c.raw_end for c in chunks), 3)
     Path(args.out_json).write_text(json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True), encoding="utf-8")
     _write_csv(report, args.out_csv)
     print(json.dumps({
