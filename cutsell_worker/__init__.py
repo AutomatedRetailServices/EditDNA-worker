@@ -155,5 +155,6 @@ install_audio_boundary_completion()
 # intentionally retriggers the exact-head raw benchmark when boundary guards change.
 # Raw benchmark trigger marker: continuity coalescer installed.
 # Raw benchmark trigger marker: validate covered incomplete retry suppression.
+# Raw benchmark trigger marker: validate repeated-opening unique-tail preservation.
 __version__ = "0.1.0"
 OBSERVABILITY_STATUS = initialize_observability(service="cutsell-worker")
