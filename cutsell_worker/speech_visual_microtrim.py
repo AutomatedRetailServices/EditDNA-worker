@@ -61,9 +61,6 @@ def _quiet_ratio(intervals: tuple[tuple[float, float], ...], start: float, end: 
 
 
 def _visual_state(frame, face_mesh, pose) -> _VisualState:
-    # Dynamic imports keep the clean worker's static dependency boundary intact while
-    # allowing the GPU/serverless image (which explicitly installs these packages) to
-    # use frame-aware visual evidence.
     cv2 = importlib.import_module("cv2")
 
     rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
@@ -86,7 +83,6 @@ def _visual_state(frame, face_mesh, pose) -> _VisualState:
     landmarks = getattr(pose_result, "pose_landmarks", None)
     if landmarks is not None:
         pts = landmarks.landmark
-        # MediaPipe Pose landmark indices: 15 left wrist, 16 right wrist.
         if len(pts) > 16:
             left = pts[15]
             right = pts[16]
@@ -152,7 +148,6 @@ def _median(values: list[float]) -> float | None:
 
 
 def _visual_reset_onset(path: str, left_word_end: float, safe_start: float, safe_end: float) -> tuple[float | None, dict[str, Any]]:
-    # Use real frame cadence. A 30 fps video yields ~33 ms timing granularity.
     frame_step = 1.0 / 30.0
     baseline_times = [
         max(0.0, left_word_end - 0.12),
@@ -180,8 +175,6 @@ def _visual_reset_onset(path: str, left_word_end: float, safe_start: float, safe
     base_lw = _median([float(s.left_wrist_y) for s in baseline_states if s.left_wrist_y is not None])
     base_rw = _median([float(s.right_wrist_y) for s in baseline_states if s.right_wrist_y is not None])
 
-    # At least one reliable visual channel must exist. Face is preferred, but pose/wrist
-    # alone may establish a reset when a creator lowers a microphone after speech.
     if base_y is None and base_lw is None and base_rw is None:
         return None, {"reason": "baseline_visual_state_unavailable"}
 
@@ -206,9 +199,6 @@ def _visual_reset_onset(path: str, left_word_end: float, safe_start: float, safe
         if base_rw is not None and state.right_wrist_y is not None:
             right_wrist_drop = float(state.right_wrist_y) - base_rw
 
-        # Positive Y is downward in MediaPipe normalized coordinates. A 3.5% frame-height
-        # wrist drop sustained across frames is strong evidence of a post-take gesture or
-        # microphone-lowering reset, but it is only acted on inside ASR-locked silence.
         gesture_reset = (
             (left_wrist_drop is not None and left_wrist_drop >= 0.035)
             or (right_wrist_drop is not None and right_wrist_drop >= 0.035)
@@ -224,8 +214,6 @@ def _visual_reset_onset(path: str, left_word_end: float, safe_start: float, safe
             "channel": "face" if face_reset else ("gesture" if gesture_reset else "none"),
         })
 
-    # Require persistence for at least two consecutive sampled frames. One-frame blips
-    # are treated as ambiguity and are left untouched.
     for index in range(max(0, len(hits) - 1)):
         if hits[index] and hits[index + 1]:
             onset = candidate_times[index]
@@ -247,14 +235,29 @@ def _visual_reset_onset(path: str, left_word_end: float, safe_start: float, safe
     return None, {"reason": "no_persistent_visual_reset"}
 
 
+def _minimum_quiet_ratio(raw_gap: float) -> float:
+    """Require stronger acoustic evidence as the candidate reset gap gets longer."""
+    if raw_gap <= 0.62:
+        return 0.68
+    if raw_gap <= 0.90:
+        return 0.76
+    return 0.82
+
+
 def detect_speech_safe_visual_microtrims(
     path: str,
     *,
     asr_model: str = "medium",
     language_hint: str | None = None,
-    max_total_trim_sec: float = 2.0,
+    max_total_trim_sec: float = 4.0,
 ) -> tuple[tuple[dict[str, Any], ...], dict[str, Any]]:
-    """Find sub-second reset slack strictly between spoken-word envelopes."""
+    """Find reset slack strictly between spoken-word envelopes.
+
+    Human edits often remove a creator's visible post-take reset even when that reset is
+    longer than a classic sub-second micro-pause. We therefore allow gaps up to 1.25 s,
+    but only when the removal is physically speech-safe, acoustically quiet, and backed
+    by a persistent face/body reset. Longer candidates require stronger quiet evidence.
+    """
     transcript = FasterWhisperASR(model_name=asr_model).transcribe(
         path, source_asset_id="rendered-output", language_hint=language_hint,
     )
@@ -273,15 +276,15 @@ def detect_speech_safe_visual_microtrims(
         left_end = float(left.end)
         right_start = float(right.start)
         raw_gap = right_start - left_end
-        # This layer is only for micro-reset slack, never long editorial pauses.
-        if raw_gap < 0.12 or raw_gap > 0.62:
+        if raw_gap < 0.12 or raw_gap > 1.25:
             continue
         safe_start = left_end + 0.035
         safe_end = right_start - 0.045
         if safe_end - safe_start < 0.075:
             continue
         quiet_ratio = _quiet_ratio(silences, safe_start, safe_end)
-        if quiet_ratio < 0.72:
+        minimum_quiet = _minimum_quiet_ratio(raw_gap)
+        if quiet_ratio < minimum_quiet:
             continue
         candidates += 1
         onset, visual = _visual_reset_onset(path, left_end, safe_start, safe_end)
@@ -290,12 +293,10 @@ def detect_speech_safe_visual_microtrims(
         cut_start = max(safe_start, float(onset))
         cut_end = safe_end
         cut_duration = cut_end - cut_start
-        if cut_duration < 0.075 or cut_duration > 0.42:
+        if cut_duration < 0.075 or cut_duration > 0.90:
             continue
         if total_trim + cut_duration > max_total_trim_sec:
             break
-        # Physical speech lock: the removal interval is strictly after left word end and
-        # strictly before right word start, with guards on both sides.
         if cut_start <= left_end + 0.02 or cut_end >= right_start - 0.02:
             continue
         cuts.append({
@@ -308,6 +309,7 @@ def detect_speech_safe_visual_microtrims(
             "left_word_end": round(left_end, 3),
             "right_word_start": round(right_start, 3),
             "quiet_ratio": round(quiet_ratio, 3),
+            "minimum_quiet_ratio": round(minimum_quiet, 3),
             "visual_evidence": visual,
         })
         total_trim += cut_duration
@@ -320,5 +322,7 @@ def detect_speech_safe_visual_microtrims(
         "auto_microtrim_duration_sec": round(total_trim, 3),
         "frame_aware": True,
         "visual_channels": ["face_head", "pose_wrist_gesture"],
+        "max_reset_gap_sec": 1.25,
+        "max_single_trim_sec": 0.90,
         "rule": "word_end_plus_acoustic_guard_then_persistent_visual_reset_until_next_word_guard",
     }
