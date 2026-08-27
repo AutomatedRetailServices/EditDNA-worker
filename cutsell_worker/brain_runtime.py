@@ -116,10 +116,10 @@ def build_brain_runtime(
         whole_video_provider=RunPodLocalWholeVideoProvider(),
         visual_provider=None,
         take_grouping_provider=None,
-        # Best Take must use the same explicitly-approved Hybrid judge as bounded
-        # editorial cleanup. Passing None here silently reduced close retry contests to
-        # deterministic local scoring even when Hybrid was enabled.
-        take_judge_provider=HybridTakeJudgeProvider(editorial_judge=editorial_judge),
+        # Hybrid semantic cleanup is intentionally called once in pipeline Pass 2 and
+        # its winner/alternate evidence is reused by Best Take in Pass 3. Keeping this
+        # provider local prevents a second paid request for the same creator session.
+        take_judge_provider=HybridTakeJudgeProvider(editorial_judge=None),
         clean_cut_provider=None,
         composer_provider=None,
         draft_review_provider=None,
