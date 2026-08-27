@@ -1,0 +1,246 @@
+name: CutSell Video00 Human Gold Decision Map
+
+on:
+  workflow_dispatch:
+    inputs:
+      engine_run_id:
+        description: "Optional successful Video00 RAW workflow run id; blank uses latest success"
+        required: false
+        default: ""
+      gold_key:
+        description: "Optional exact S3 key for the current Human Gold; blank resolves by approved basename"
+        required: false
+        default: ""
+  push:
+    branches:
+      - cutsell/mobile-v1-clean
+    paths:
+      - cutsell_worker/human_gold_decision_map.py
+      - tests/test_cutsell_human_gold_decision_map.py
+      - .github/workflows/cutsell-video00-human-gold-audit.yml
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  human-gold-decision-map:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      RUNPOD_API_KEY: ${{ secrets.RUNPOD_API_KEY }}
+      AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+      AWS_REGION: ${{ secrets.AWS_REGION }}
+      S3_BUCKET: ${{ secrets.S3_BUCKET }}
+      SOURCE_KEY: Editdna longform validation/VIDEO-2026-07-30-09-18-03.mp4
+      GOLD_BASENAME: 5E01F214-A364-4F4B-8F25-D39B1E2B21D2(1).MP4
+      GOLD_STEM: 5E01F214-A364-4F4B-8F25-D39B1E2B21D2
+      FORBIDDEN_OLD_GOLD: 10035410-8AAD-46E5-9B34-9CBA8EC0A8AD
+      RAW_WORKFLOW_FILE: cutsell-video00-raw-v5-auto-microtrim.yml
+
+    steps:
+      - name: Checkout audit head
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install audit runtime
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg jq unzip
+          python -m pip install -q 'numpy>=1.26,<3' 'boto3>=1.34'
+
+      - name: Validate audit module regressions
+        run: |
+          python -m pip install -q pytest
+          pytest -q tests/test_cutsell_human_gold_decision_map.py
+
+      - name: Load missing S3 runtime secrets from safe RunPod template
+        shell: bash
+        run: |
+          set -euo pipefail
+          missing=0
+          for key in AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_REGION S3_BUCKET; do
+            [ -n "${!key:-}" ] || missing=1
+          done
+          [ "$missing" = "1" ] || exit 0
+          test -n "${RUNPOD_API_KEY:-}" || { echo 'S3 credentials unavailable and RUNPOD_API_KEY missing'; exit 3; }
+          curl --fail --silent --show-error \
+            --url "https://rest.runpod.io/v1/templates" \
+            --header "Authorization: Bearer $RUNPOD_API_KEY" \
+            --output templates.json
+          TEMPLATE=$(jq -c '[.[] | select(.name == "EditDNA-Worker-2")][0]' templates.json)
+          test "$TEMPLATE" != "null" || { echo 'EditDNA-Worker-2 template not found'; exit 4; }
+          for key in AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_REGION S3_BUCKET; do
+            if [ -z "${!key:-}" ]; then
+              value=$(printf '%s' "$TEMPLATE" | jq -r --arg key "$key" '.env[$key] // empty')
+              test -n "$value" || { echo "$key missing"; exit 5; }
+              echo "::add-mask::$value"
+              printf '%s=%s\n' "$key" "$value" >> "$GITHUB_ENV"
+            fi
+          done
+          rm -f templates.json
+
+      - name: Resolve one successful engine artifact
+        id: engine
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REQUESTED_RUN_ID: ${{ inputs.engine_run_id || '' }}
+        run: |
+          set -euo pipefail
+          run_id="${REQUESTED_RUN_ID:-}"
+          if [ -z "$run_id" ]; then
+            curl --fail --silent --show-error \
+              --header "Authorization: Bearer $GH_TOKEN" \
+              --header "X-GitHub-Api-Version: 2022-11-28" \
+              "https://api.github.com/repos/$GITHUB_REPOSITORY/actions/workflows/$RAW_WORKFLOW_FILE/runs?branch=cutsell/mobile-v1-clean&status=success&per_page=20" \
+              > raw-runs.json
+            run_id=$(jq -r '.workflow_runs[0].id // empty' raw-runs.json)
+          fi
+          test -n "$run_id" || { echo 'No successful Video00 RAW run found'; exit 6; }
+          curl --fail --silent --show-error \
+            --header "Authorization: Bearer $GH_TOKEN" \
+            --header "X-GitHub-Api-Version: 2022-11-28" \
+            "https://api.github.com/repos/$GITHUB_REPOSITORY/actions/runs/$run_id" > engine-run.json
+          conclusion=$(jq -r '.conclusion // empty' engine-run.json)
+          test "$conclusion" = "success" || { echo "Engine run $run_id is not success: $conclusion"; exit 6; }
+          engine_sha=$(jq -r '.head_sha' engine-run.json)
+          curl --fail --silent --show-error \
+            --header "Authorization: Bearer $GH_TOKEN" \
+            --header "X-GitHub-Api-Version: 2022-11-28" \
+            "https://api.github.com/repos/$GITHUB_REPOSITORY/actions/runs/$run_id/artifacts?per_page=100" > engine-artifacts.json
+          artifact_id=$(jq -r '[.artifacts[] | select(.name == "cutsell-video00-raw-v5-auto-microtrim-human-review")][0].id // empty' engine-artifacts.json)
+          test -n "$artifact_id" || { echo "Human review artifact missing for run $run_id"; exit 7; }
+          mkdir -p engine-artifact
+          curl --fail --silent --show-error --location \
+            --header "Authorization: Bearer $GH_TOKEN" \
+            --header "X-GitHub-Api-Version: 2022-11-28" \
+            "https://api.github.com/repos/$GITHUB_REPOSITORY/actions/artifacts/$artifact_id/zip" \
+            --output engine-artifact.zip
+          unzip -q engine-artifact.zip -d engine-artifact
+          engine_json=$(find engine-artifact -type f -name 'video00-raw-v5-auto-microtrim.json' -print -quit)
+          test -n "$engine_json" || { echo 'Engine result JSON missing from artifact'; exit 7; }
+          echo "ENGINE_RUN_ID=$run_id" >> "$GITHUB_ENV"
+          echo "ENGINE_HEAD_SHA=$engine_sha" >> "$GITHUB_ENV"
+          echo "ENGINE_JSON=$engine_json" >> "$GITHUB_ENV"
+          printf 'engine_run_id=%s\nengine_head_sha=%s\n' "$run_id" "$engine_sha" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Resolve current Human Gold and download oracle media
+        id: oracle
+        env:
+          REQUESTED_GOLD_KEY: ${{ inputs.gold_key || '' }}
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json, os
+          from pathlib import PurePosixPath
+          import boto3
+
+          bucket = os.environ['S3_BUCKET']
+          requested = (os.environ.get('REQUESTED_GOLD_KEY') or '').strip()
+          target_name = os.environ['GOLD_BASENAME']
+          target_stem = os.environ['GOLD_STEM'].casefold()
+          forbidden = os.environ['FORBIDDEN_OLD_GOLD'].casefold()
+          s3 = boto3.client('s3', region_name=os.environ.get('AWS_REGION') or None)
+
+          matches = []
+          if requested:
+              if forbidden in requested.casefold():
+                  raise SystemExit('Refusing explicitly forbidden obsolete Human Gold')
+              s3.head_object(Bucket=bucket, Key=requested)
+              matches = [requested]
+          else:
+              paginator = s3.get_paginator('list_objects_v2')
+              for page in paginator.paginate(Bucket=bucket):
+                  for item in page.get('Contents') or ():
+                      key = str(item.get('Key') or '')
+                      base = PurePosixPath(key).name
+                      if forbidden in key.casefold():
+                          continue
+                      if base == target_name or target_stem in base.casefold():
+                          matches.append(key)
+
+          exact = [key for key in matches if PurePosixPath(key).name == target_name]
+          if len(exact) == 1:
+              gold_key = exact[0]
+          elif len(matches) == 1:
+              gold_key = matches[0]
+          elif not matches:
+              Path = __import__('pathlib').Path
+              Path('human-gold-source-resolution.json').write_text(json.dumps({
+                  'status': 'missing', 'approved_basename': target_name,
+                  'forbidden_old_gold': os.environ['FORBIDDEN_OLD_GOLD'],
+              }, indent=2), encoding='utf-8')
+              raise SystemExit('Current Human Gold is not present in S3; obsolete Gold was not substituted')
+          else:
+              raise SystemExit(f'Ambiguous Human Gold S3 candidates: {matches}')
+
+          s3.download_file(bucket, os.environ['SOURCE_KEY'], 'video00-original-raw.mp4')
+          s3.download_file(bucket, gold_key, 'video00-human-gold.mp4')
+          with open('human-gold-source-resolution.json', 'w', encoding='utf-8') as handle:
+              json.dump({
+                  'status': 'resolved', 'raw_key': os.environ['SOURCE_KEY'],
+                  'gold_key': gold_key, 'approved_basename': target_name,
+              }, handle, ensure_ascii=False, indent=2)
+          with open(os.environ['GITHUB_ENV'], 'a', encoding='utf-8') as handle:
+              handle.write(f'HUMAN_GOLD_KEY={gold_key}\n')
+          print(json.dumps({'raw_key': os.environ['SOURCE_KEY'], 'gold_key': gold_key}, indent=2))
+          PY
+
+      - name: Verify exact RAW and current Human Gold identity
+        run: |
+          set -euo pipefail
+          raw_dur=$(ffprobe -v error -show_entries format=duration -of default=nk=1:nw=1 video00-original-raw.mp4)
+          gold_dur=$(ffprobe -v error -show_entries format=duration -of default=nk=1:nw=1 video00-human-gold.mp4)
+          python - "$raw_dur" "$gold_dur" <<'PY'
+          import sys
+          raw, gold = map(float, sys.argv[1:])
+          assert 350.0 < raw < 380.0, raw
+          assert 140.0 < gold < 143.5, gold
+          print({'raw_duration_sec': raw, 'gold_duration_sec': gold})
+          PY
+
+      - name: Build complete RAW to Human Gold Decision Map
+        run: |
+          set -euo pipefail
+          python -m cutsell_worker.human_gold_decision_map \
+            --raw video00-original-raw.mp4 \
+            --gold video00-human-gold.mp4 \
+            --engine-json "$ENGINE_JSON" \
+            --out-json human-gold-decision-map.json \
+            --out-csv human-gold-decision-map.csv
+          python - <<'PY'
+          import json, os
+          report=json.load(open('human-gold-decision-map.json',encoding='utf-8'))
+          metadata={
+              'engine_run_id': os.environ['ENGINE_RUN_ID'],
+              'engine_head_sha': os.environ['ENGINE_HEAD_SHA'],
+              'raw_key': os.environ['SOURCE_KEY'],
+              'human_gold_key': os.environ['HUMAN_GOLD_KEY'],
+              'selection_parity': report.get('selection_parity'),
+              'boundary_parity': report.get('boundary_parity'),
+              'human_gold_chunk_count': report.get('human_gold_chunk_count'),
+              'alignment': report.get('alignment'),
+          }
+          open('human-gold-audit-metadata.json','w',encoding='utf-8').write(json.dumps(metadata,indent=2,sort_keys=True))
+          print(json.dumps(metadata,indent=2,sort_keys=True))
+          PY
+
+      - name: Upload Human Gold Q/A evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cutsell-video00-human-gold-decision-map-${{ github.run_id }}
+          path: |
+            human-gold-source-resolution.json
+            human-gold-decision-map.json
+            human-gold-decision-map.csv
+            human-gold-audit-metadata.json
+            engine-run.json
+          if-no-files-found: warn
+          retention-days: 14
