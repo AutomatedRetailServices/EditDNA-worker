@@ -162,5 +162,6 @@ install_audio_boundary_completion()
 # Raw benchmark trigger marker: validate repeated-opening unique-tail preservation.
 # Raw benchmark trigger marker: validate complementary Hybrid deliveries.
 # Raw benchmark trigger marker: tuned unavailable-prior restart fallback.
+# Raw benchmark trigger marker: final Hybrid wrapper bound into pipeline.
 __version__ = "0.1.0"
 OBSERVABILITY_STATUS = initialize_observability(service="cutsell-worker")
