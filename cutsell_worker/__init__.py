@@ -66,6 +66,7 @@ from .short_bts_process_cleanup import install_short_bts_process_cleanup
 from .hybrid_failed_soft_restore import install_hybrid_failed_soft_restore
 from .hybrid_unavailable_retry_fallback import install_hybrid_unavailable_retry_fallback
 from .hybrid_complementary_delivery_guard import install_hybrid_complementary_delivery_guard
+from .hybrid_composite_best_take import install_hybrid_composite_best_take
 from .post_selection_incomplete_bridge_authority import install_post_selection_incomplete_bridge_authority
 from .post_selection_interior_gap_trim import install_post_selection_interior_gap_trim
 from .post_selection_internal_retake_trim import install_post_selection_internal_retake_trim
@@ -140,6 +141,10 @@ install_hybrid_unavailable_retry_fallback()
 # audience-facing tails, and when Hybrid is unavailable suppress only an immediate
 # undecided incomplete restart already delivered completely just before it.
 install_hybrid_complementary_delivery_guard()
+# Composite authority runs after complementary recovery. It can rescue a complete
+# performance-only deletion with unique information, combine two complementary
+# sub-deliveries instead of one monolithic retry, and split that pair before Best Take.
+install_hybrid_composite_best_take()
 # Final physical authority: after every semantic/grouping pass, a proven consecutive
 # complete -> rejected incomplete bridge -> complete retry may promote the discarded
 # clean retry without relying on the LLM's inconsistent failed/winner label.
@@ -163,5 +168,6 @@ install_audio_boundary_completion()
 # Raw benchmark trigger marker: validate complementary Hybrid deliveries.
 # Raw benchmark trigger marker: tuned unavailable-prior restart fallback.
 # Raw benchmark trigger marker: final Hybrid wrapper bound into pipeline.
+# Raw benchmark trigger marker: composite Best Take authority installed.
 __version__ = "0.1.0"
 OBSERVABILITY_STATUS = initialize_observability(service="cutsell-worker")
