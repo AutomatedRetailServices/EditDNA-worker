@@ -69,6 +69,7 @@ from .hybrid_complementary_delivery_guard import install_hybrid_complementary_de
 from .hybrid_semantic_complementary_rescue import install_hybrid_semantic_complementary_rescue
 from .hybrid_semantic_composite_bridge import install_hybrid_semantic_composite_bridge
 from .hybrid_composite_best_take import install_hybrid_composite_best_take
+from .hybrid_performance_retry_restore_guard import install_hybrid_performance_retry_restore_guard
 from .post_selection_incomplete_bridge_authority import install_post_selection_incomplete_bridge_authority
 from .post_selection_interior_gap_trim import install_post_selection_interior_gap_trim
 from .post_selection_internal_retake_trim import install_post_selection_internal_retake_trim
@@ -154,6 +155,10 @@ install_hybrid_semantic_composite_bridge()
 # performance-only deletion with unique information, combine complementary sub-deliveries
 # instead of one monolithic retry, and split those deliveries before Best Take.
 install_hybrid_composite_best_take()
+# Composite may still restore an earlier semantically failed take when reset evidence is
+# treated as performance-only. Revoke that restore when it shares the same strong opening
+# as a later authoritative winner in the same source.
+install_hybrid_performance_retry_restore_guard()
 # Final physical authority: after every semantic/grouping pass, a proven consecutive
 # complete -> rejected incomplete bridge -> complete retry may promote the discarded
 # clean retry without relying on the LLM's inconsistent failed/winner label.
@@ -184,5 +189,6 @@ install_audio_boundary_completion()
 # Raw benchmark trigger marker: semantic complementary full-alternate rescue installed.
 # Raw benchmark trigger marker: post-selection composite handoff trim installed.
 # Raw benchmark trigger marker: semantic rescue Composite bridge installed.
+# Raw benchmark trigger marker: performance retry restore guard installed.
 __version__ = "0.1.0"
 OBSERVABILITY_STATUS = initialize_observability(service="cutsell-worker")
