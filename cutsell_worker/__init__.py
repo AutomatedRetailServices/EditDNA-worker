@@ -65,6 +65,7 @@ from .round11_semantic_retry_cleanup import install_round11_semantic_retry_clean
 from .short_bts_process_cleanup import install_short_bts_process_cleanup
 from .hybrid_failed_soft_restore import install_hybrid_failed_soft_restore
 from .hybrid_unavailable_retry_fallback import install_hybrid_unavailable_retry_fallback
+from .hybrid_complementary_delivery_guard import install_hybrid_complementary_delivery_guard
 from .post_selection_incomplete_bridge_authority import install_post_selection_incomplete_bridge_authority
 from .post_selection_interior_gap_trim import install_post_selection_interior_gap_trim
 from .post_selection_internal_retake_trim import install_post_selection_internal_retake_trim
@@ -133,9 +134,12 @@ install_round9_orphan_prefix_integrity()
 install_round11_semantic_retry_cleanup()
 install_short_bts_process_cleanup()
 install_hybrid_failed_soft_restore()
-# Last Hybrid wrapper: only undecided incomplete takes are eligible, and only when a
-# later complete delivery strongly covers the same idea after a Hybrid window failure.
+# Last Hybrid fallback for later clean deliveries after a window failure.
 install_hybrid_unavailable_retry_fallback()
+# Final Hybrid authority: restore complete complementary sub-deliveries with unique
+# audience-facing tails, and when Hybrid is unavailable suppress only an immediate
+# undecided incomplete restart already delivered completely just before it.
+install_hybrid_complementary_delivery_guard()
 # Final physical authority: after every semantic/grouping pass, a proven consecutive
 # complete -> rejected incomplete bridge -> complete retry may promote the discarded
 # clean retry without relying on the LLM's inconsistent failed/winner label.
@@ -156,5 +160,6 @@ install_audio_boundary_completion()
 # Raw benchmark trigger marker: continuity coalescer installed.
 # Raw benchmark trigger marker: validate covered incomplete retry suppression.
 # Raw benchmark trigger marker: validate repeated-opening unique-tail preservation.
+# Raw benchmark trigger marker: validate complementary Hybrid deliveries.
 __version__ = "0.1.0"
 OBSERVABILITY_STATUS = initialize_observability(service="cutsell-worker")
