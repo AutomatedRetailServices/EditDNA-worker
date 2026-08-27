@@ -125,12 +125,14 @@ def test_incomplete_continuation_with_new_opening_is_not_misread_as_restart():
     assert rows == []
 
 
-def test_pipeline_binding_points_at_final_complementary_guard():
+def test_pipeline_binding_points_at_current_final_hybrid_wrapper():
     from cutsell_worker import hybrid_session_cleanup, pipeline
 
     assert pipeline.apply_hybrid_session_cleanup is hybrid_session_cleanup.apply_hybrid_session_cleanup
+    # The complementary guard remains nested in the wrapper chain; the public pipeline
+    # binding must point at whichever final Hybrid authority was installed last.
     assert getattr(
         pipeline.apply_hybrid_session_cleanup,
-        "_cutsell_hybrid_complementary_delivery_guard",
+        "_cutsell_hybrid_composite_best_take",
         False,
     ) is True
