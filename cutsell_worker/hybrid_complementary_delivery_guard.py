@@ -182,7 +182,7 @@ def _delete_unavailable_prior_restarts(
 
     This is intentionally stricter than ordinary semantic dedupe. The candidate must be
     incomplete, undecided by Hybrid, start shortly after the complete peer, share at
-    least five content lexemes with it, have >=45% candidate coverage, and restart with
+    least four content lexemes with it, have >=45% candidate coverage, and restart with
     strong overlap in its first eight content lexemes. Critical numbers and explicit
     negations must already be present in the complete peer.
     """
@@ -223,7 +223,7 @@ def _delete_unavailable_prior_restarts(
             prefix = tuple(own_ordered[:8])
             prefix_shared = sum(1 for token in prefix if token in peer_content)
             prefix_ratio = prefix_shared / max(1, len(prefix))
-            if shared < 5 or coverage < 0.45:
+            if shared < 4 or coverage < 0.45:
                 continue
             if prefix_shared < 3 or prefix_ratio < 0.40:
                 continue
