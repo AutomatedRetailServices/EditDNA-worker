@@ -66,6 +66,7 @@ from .short_bts_process_cleanup import install_short_bts_process_cleanup
 from .hybrid_failed_soft_restore import install_hybrid_failed_soft_restore
 from .hybrid_unavailable_retry_fallback import install_hybrid_unavailable_retry_fallback
 from .hybrid_complementary_delivery_guard import install_hybrid_complementary_delivery_guard
+from .hybrid_semantic_complementary_rescue import install_hybrid_semantic_complementary_rescue
 from .hybrid_composite_best_take import install_hybrid_composite_best_take
 from .post_selection_incomplete_bridge_authority import install_post_selection_incomplete_bridge_authority
 from .post_selection_interior_gap_trim import install_post_selection_interior_gap_trim
@@ -141,9 +142,12 @@ install_hybrid_unavailable_retry_fallback()
 # audience-facing tails, and when Hybrid is unavailable suppress only an immediate
 # undecided incomplete restart already delivered completely just before it.
 install_hybrid_complementary_delivery_guard()
+# A reset-backed full alternate is not redundant merely because it overlaps a winner.
+# Preserve and split it when it carries material unique audience-facing information.
+install_hybrid_semantic_complementary_rescue()
 # Composite authority runs after complementary recovery. It can rescue a complete
-# performance-only deletion with unique information, combine two complementary
-# sub-deliveries instead of one monolithic retry, and split that pair before Best Take.
+# performance-only deletion with unique information, combine complementary sub-deliveries
+# instead of one monolithic retry, and split those deliveries before Best Take.
 install_hybrid_composite_best_take()
 # Final physical authority: after every semantic/grouping pass, a proven consecutive
 # complete -> rejected incomplete bridge -> complete retry may promote the discarded
@@ -161,7 +165,7 @@ install_post_selection_continuity_coalescer()
 install_audio_boundary_completion()
 
 # Keep this bootstrap path in the raw Video00 benchmark trigger set; touching this file
-# intentionally retriggers the exact-head raw benchmark when boundary guards change.
+# intentionally retriggers the exact-head raw benchmark when editorial guards change.
 # Raw benchmark trigger marker: continuity coalescer installed.
 # Raw benchmark trigger marker: validate covered incomplete retry suppression.
 # Raw benchmark trigger marker: validate repeated-opening unique-tail preservation.
@@ -169,5 +173,6 @@ install_audio_boundary_completion()
 # Raw benchmark trigger marker: tuned unavailable-prior restart fallback.
 # Raw benchmark trigger marker: final Hybrid wrapper bound into pipeline.
 # Raw benchmark trigger marker: composite Best Take authority installed.
+# Raw benchmark trigger marker: semantic complementary full-alternate rescue installed.
 __version__ = "0.1.0"
 OBSERVABILITY_STATUS = initialize_observability(service="cutsell-worker")
