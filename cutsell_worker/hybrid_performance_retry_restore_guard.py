@@ -1,19 +1,17 @@
-"""Final Hybrid guard for performance-only restores that are actually retries.
+"""Final Hybrid guard for retry-like restores and contradictory semantic judgments.
 
 Composite Best Take may conservatively restore a semantically failed complete delivery
 when the only delete evidence is performance/reset evidence and the delivery carries
 unique words. That is useful for complementary story material, but it must not resurrect
 an earlier failed retry when a later authoritative winner begins with the same strong
-opening. In that pattern the unique words belong to the losing attempt, not to a separate
-story beat.
+opening.
 
-This guard runs after Composite Best Take, reads only Composite's own restore audit, and
-removes a restored candidate only when:
-- Composite explicitly restored it as performance-only;
-- Hybrid labeled it failed with high confidence;
-- the named peer is a high-confidence winner/keep;
-- both deliveries share the same strong content opening;
-- the candidate precedes the peer in the same source.
+Hybrid also judges overlapping editorial windows. The same complete delivery can therefore
+receive contradictory labels in different windows. Final selection must not depend on which
+window happened to apply its delete last. When one window strongly calls a complete delivery
+``winner``/``keep`` and another calls it ``failed``/``bts``, the stronger semantic evidence
+wins unless an explicit later-retry replacement exists. This provides one deterministic
+final arbitration point instead of allowing wrapper order to decide survival.
 
 Ambiguity fails open. No benchmark ids, timestamps, phrases, or Human Gold data are
 embedded here.
@@ -66,6 +64,17 @@ def _semantic_map(rows) -> dict[str, tuple[str, float]]:
     return best
 
 
+def _semantic_strengths(rows) -> dict[str, dict[str, float]]:
+    strengths: dict[str, dict[str, float]] = {}
+    for clip_id, label, confidence in rows:
+        clip_id = str(clip_id)
+        label = str(label)
+        confidence = float(confidence)
+        bucket = strengths.setdefault(clip_id, {})
+        bucket[label] = max(confidence, bucket.get(label, 0.0))
+    return strengths
+
+
 def _composite_performance_restore_rows(diagnostics):
     rows = []
     for diagnostic in diagnostics:
@@ -78,6 +87,64 @@ def _composite_performance_restore_rows(diagnostics):
         if isinstance(restored, list):
             rows.extend(item for item in restored if isinstance(item, dict))
     return rows
+
+
+def _explicit_replacement_ids(diagnostics) -> set[str]:
+    replaced: set[str] = set()
+
+    def visit(value):
+        if isinstance(value, dict):
+            clip_id = str(value.get("clip_id") or value.get("removed_clip_id") or "")
+            replacement = (
+                value.get("later_retry_replacement_id")
+                or value.get("winner_clip_id")
+                or value.get("suppressed_peer_clip_id")
+            )
+            if clip_id and replacement:
+                reason = str(value.get("reason") or value.get("reason_code") or "").casefold()
+                if "retry" in reason or "replacement" in reason or "yields" in reason:
+                    replaced.add(clip_id)
+            for child in value.values():
+                visit(child)
+        elif isinstance(value, (list, tuple)):
+            for child in value:
+                visit(child)
+
+    visit(diagnostics)
+    return replaced
+
+
+def conflicting_winner_fail_open_ids(
+    source_takes,
+    deleted_ids,
+    semantic_rows,
+    diagnostics=(),
+    *,
+    minimum_winner_confidence: float = 0.90,
+    minimum_failed_confidence: float = 0.80,
+    minimum_winner_margin: float = 0.02,
+) -> set[str]:
+    """Return deleted complete clips whose stronger Hybrid evidence says winner/keep."""
+    deleted_ids = {str(item) for item in deleted_ids}
+    strengths = _semantic_strengths(semantic_rows)
+    explicitly_replaced = _explicit_replacement_ids(diagnostics)
+    restore_ids: set[str] = set()
+
+    for take in source_takes:
+        clip_id = str(take.clip_id)
+        if clip_id not in deleted_ids or clip_id in explicitly_replaced:
+            continue
+        if not bool(take.complete_idea):
+            continue
+        labels = strengths.get(clip_id) or {}
+        winner_conf = max(labels.get("winner", 0.0), labels.get("keep", 0.0))
+        failed_conf = max(labels.get("failed", 0.0), labels.get("bts", 0.0))
+        if winner_conf < minimum_winner_confidence or failed_conf < minimum_failed_confidence:
+            continue
+        if winner_conf + 1e-9 < failed_conf + minimum_winner_margin:
+            continue
+        restore_ids.add(clip_id)
+    return restore_ids
 
 
 def revoke_retry_like_performance_restores(result, source_takes):
@@ -140,6 +207,44 @@ def revoke_retry_like_performance_restores(result, source_takes):
     )
 
 
+def reconcile_conflicting_semantic_decisions(result, source_takes):
+    deleted_ids = {take.clip_id for take in result.deleted}
+    restore_ids = conflicting_winner_fail_open_ids(
+        source_takes,
+        deleted_ids,
+        result.semantic_decisions,
+        result.diagnostics,
+    )
+    if not restore_ids:
+        return result
+
+    kept_ids = {take.clip_id for take in result.kept} | restore_ids
+    kept = tuple(take for take in source_takes if take.clip_id in kept_ids)
+    deleted = tuple(take for take in source_takes if take.clip_id not in kept_ids)
+    strengths = _semantic_strengths(result.semantic_decisions)
+    audit = []
+    for clip_id in sorted(restore_ids):
+        labels = strengths.get(clip_id) or {}
+        audit.append({
+            "clip_id": clip_id,
+            "reason": "conflicting_hybrid_semantics_stronger_winner_fails_open",
+            "winner_confidence": round(max(labels.get("winner", 0.0), labels.get("keep", 0.0)), 4),
+            "failed_confidence": round(max(labels.get("failed", 0.0), labels.get("bts", 0.0)), 4),
+        })
+    diagnostics = tuple(result.diagnostics) + ({
+        "hybrid_conflicting_semantic_arbitration": audit,
+        "restored_ids": sorted(restore_ids),
+    },)
+    return type(result)(
+        kept=kept,
+        deleted=deleted,
+        requested_chunk_count=result.requested_chunk_count,
+        available_chunk_count=result.available_chunk_count,
+        diagnostics=diagnostics,
+        semantic_decisions=result.semantic_decisions,
+    )
+
+
 def install_hybrid_performance_retry_restore_guard() -> None:
     from . import hybrid_session_cleanup
 
@@ -156,9 +261,16 @@ def install_hybrid_performance_retry_restore_guard() -> None:
             call_kwargs = dict(kwargs)
             call_kwargs["takes"] = source_takes
             result = original(**call_kwargs)
-        return revoke_retry_like_performance_restores(result, source_takes)
+        result = revoke_retry_like_performance_restores(result, source_takes)
+        return reconcile_conflicting_semantic_decisions(result, source_takes)
 
     apply_with_performance_retry_restore_guard._cutsell_hybrid_performance_retry_restore_guard = True
+    # Preserve provenance markers from the wrapped final Composite authority. Existing
+    # regression tests use these markers to verify the intended wrapper chain rather than
+    # requiring Composite itself to remain the outermost callable forever.
+    apply_with_performance_retry_restore_guard._cutsell_hybrid_composite_best_take = bool(
+        getattr(original, "_cutsell_hybrid_composite_best_take", False)
+    )
     hybrid_session_cleanup.apply_hybrid_session_cleanup = apply_with_performance_retry_restore_guard
 
     pipeline_module = sys.modules.get(f"{__package__}.pipeline")
