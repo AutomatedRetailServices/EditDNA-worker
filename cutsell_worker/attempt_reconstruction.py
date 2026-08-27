@@ -20,6 +20,7 @@ from .source_identity import stable_clip_id
 from .whole_video_analysis import TemporalEvent, WholeVideoContext
 
 _TOKEN_RE = re.compile(r"[a-z0-9áéíóúñü]+", re.IGNORECASE)
+_TERMINAL_PUNCT_RE = re.compile(r"[.!?…][\"')\]]*$")
 _STOP = frozenset({
     # English
     "a", "an", "and", "are", "as", "at", "be", "but", "by", "for", "from", "i",
@@ -141,6 +142,36 @@ def _short_incomplete_suffix(left: CandidateTake, right: CandidateTake) -> bool:
     return gap <= 0.35
 
 
+def _tiny_nonterminal_continuation(
+    left: CandidateTake,
+    right: CandidateTake,
+    *,
+    max_continuation_gap_sec: float,
+) -> bool:
+    """Protect a tiny lexical tail from a false visual-reset boundary.
+
+    Dense body/hand reset detectors often fire during a normal breath at the end of a
+    sentence. If Whisper split the final one or two words into a new candidate while the
+    preceding text is visibly non-terminal, Best Take must judge the completed delivery,
+    not the truncated prefix and suffix as competing takes. Hard session walls, lexical
+    restarts and explicit recording-process breaks are still evaluated separately.
+    """
+    if left.source_asset_id != right.source_asset_id:
+        return False
+    gap = max(0.0, right.start - left.end)
+    if gap > min(max_continuation_gap_sec, 1.20):
+        return False
+    right_tokens = _tokens(right.text)
+    if not 1 <= len(right_tokens) <= 2 or right.duration_sec > 1.80:
+        return False
+    if len(_tokens(left.text)) < 4:
+        return False
+    left_text = str(left.text or "").rstrip()
+    if not left_text or _TERMINAL_PUNCT_RE.search(left_text):
+        return False
+    return True
+
+
 def _attempt_boundary_reason(
     context: WholeVideoContext | None,
     left: CandidateTake,
@@ -167,6 +198,16 @@ def _attempt_boundary_reason(
     # can still merge forward into later continuation speech.
     if _short_incomplete_suffix(left, right):
         return "short_incomplete_suffix"
+
+    # A one/two-word tail after non-terminal text is more reliable speech-continuation
+    # evidence than an isolated body/hand reset candidate. Keep it attached before local
+    # performance evidence is allowed to split the attempt.
+    if _tiny_nonterminal_continuation(
+        left,
+        right,
+        max_continuation_gap_sec=max_continuation_gap_sec,
+    ):
+        return None
 
     nearby = _events_near_transition(context, left, right)
     strong = tuple(event for event in nearby if float(event.confidence) >= 0.80)
