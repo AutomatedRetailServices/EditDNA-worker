@@ -85,20 +85,76 @@ def _has_adjacent_duplicate_content_word(text: str) -> bool:
     return False
 
 
-def _has_repeated_multiword_phrase(text: str) -> bool:
+def _repeated_phrase_profile(text: str) -> dict | None:
+    """Describe the strongest repeated multiword phrase and unique tail after it.
+
+    Whole-take deletion is only safe when the restart dominates the take. A creator may
+    repeat an opening phrase and then continue with new audience-facing information; in
+    that case the take must survive so a downstream boundary/internal-restart pass can
+    trim only the duplicated prefix when justified.
+    """
     tokens = _tokens(text)
     if len(tokens) < 4:
-        return False
+        return None
+    best = None
     for width in range(min(5, len(tokens) // 2), 1, -1):
-        seen: set[tuple[str, ...]] = set()
+        positions: dict[tuple[str, ...], list[int]] = {}
         for index in range(0, len(tokens) - width + 1):
             gram = tokens[index:index + width]
             if len(set(gram)) < 2:
                 continue
-            if gram in seen:
-                return True
-            seen.add(gram)
-    return False
+            positions.setdefault(gram, []).append(index)
+        for gram, starts in positions.items():
+            if len(starts) < 2:
+                continue
+            first = starts[0]
+            second = starts[1]
+            tail_start = second + width
+            tail = tokens[tail_start:]
+            repeated_token_count = width * 2
+            repeated_share = repeated_token_count / max(1, len(tokens))
+            unique_tail = tuple(token for token in tail if token not in gram)
+            candidate = {
+                "phrase": gram,
+                "width": width,
+                "first_index": first,
+                "second_index": second,
+                "tail_tokens": tail,
+                "unique_tail_tokens": unique_tail,
+                "unique_tail_count": len(unique_tail),
+                "repeated_share": repeated_share,
+            }
+            if best is None or (width, repeated_share) > (best["width"], best["repeated_share"]):
+                best = candidate
+        if best is not None:
+            break
+    return best
+
+
+def _destructive_repeated_phrase_restart(text: str) -> tuple[bool, dict]:
+    profile = _repeated_phrase_profile(text)
+    if profile is None:
+        return False, {}
+
+    # A repeated opening followed by several new content words is a composite delivery,
+    # not whole-take debris. Fail open and let downstream internal-restart trimming decide
+    # whether just the duplicated prefix can be removed speech-safely.
+    unique_tail_count = int(profile["unique_tail_count"])
+    repeated_share = float(profile["repeated_share"])
+    destructive = bool(
+        unique_tail_count <= 2
+        and repeated_share >= 0.55
+    )
+    return destructive, {
+        "repeated_phrase": " ".join(profile["phrase"]),
+        "repeated_phrase_width": int(profile["width"]),
+        "unique_tail_count": unique_tail_count,
+        "repeated_share": round(repeated_share, 3),
+    }
+
+
+def _has_repeated_multiword_phrase(text: str) -> bool:
+    return _repeated_phrase_profile(text) is not None
 
 
 def _token_overlap(left: CandidateTake, right: CandidateTake) -> float:
@@ -267,6 +323,7 @@ def apply_micro_restart_cleanup(
         text = str(take.text or "").strip()
         reason = None
         confidence = 0.96
+        extra_diagnostic = {}
         if _DELIVERY_META_RE.search(text):
             reason = "explicit_delivery_process_meta"
             confidence = 0.97
@@ -274,14 +331,17 @@ def apply_micro_restart_cleanup(
             reason = "negative_self_evaluation_with_visual_break"
         elif _has_adjacent_duplicate_content_word(text) and _has_multimodal_break(take, context):
             reason = "adjacent_content_word_restart_with_visual_break"
-        elif _has_repeated_multiword_phrase(text) and _has_multimodal_break(take, context):
-            reason = "repeated_phrase_restart_with_visual_break"
-        elif take.clip_id in word_search_ids:
-            reason = "word_search_microtake_cluster_with_visual_break"
-        elif take.clip_id in sandwiched_ids:
-            reason = "sandwiched_retry_debris_with_visual_break"
-        elif take.clip_id in short_prefix_ids:
-            reason = "short_prefix_before_fuller_retry_with_visual_break"
+        else:
+            destructive_repeat, repeat_diagnostic = _destructive_repeated_phrase_restart(text)
+            if destructive_repeat and _has_multimodal_break(take, context):
+                reason = "repeated_phrase_restart_with_visual_break"
+                extra_diagnostic = repeat_diagnostic
+            elif take.clip_id in word_search_ids:
+                reason = "word_search_microtake_cluster_with_visual_break"
+            elif take.clip_id in sandwiched_ids:
+                reason = "sandwiched_retry_debris_with_visual_break"
+            elif take.clip_id in short_prefix_ids:
+                reason = "short_prefix_before_fuller_retry_with_visual_break"
         if reason is None:
             survivors.append(take)
             continue
@@ -291,6 +351,7 @@ def apply_micro_restart_cleanup(
             "reason": reason,
             "confidence": confidence,
             "text": take.text,
+            **extra_diagnostic,
         })
     return tuple(survivors), tuple(removed), tuple(diagnostics)
 
