@@ -1,0 +1,37 @@
+name: CutSell Video00 Cancel Stale Runs
+
+# One safety valve for clearing pre-concurrency benchmark runs. It keeps the newest
+# active Video00 raw run and cancels older queued/in-progress raw runs so stale heads
+# cannot keep rolling the shared RunPod endpoint.
+on:
+  push:
+    branches: [cutsell/mobile-v1-clean]
+    paths:
+      - .github/workflows/cutsell-video00-cancel-stale.yml
+  workflow_dispatch:
+
+permissions:
+  actions: write
+  contents: read
+
+jobs:
+  cancel-stale-video00:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Keep newest active raw run and cancel older ones
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RAW_WORKFLOW_ID: "342360588"
+        shell: bash
+        run: |
+          set -euo pipefail
+          repo="$GITHUB_REPOSITORY"
+          runs=$(gh api "repos/$repo/actions/workflows/$RAW_WORKFLOW_ID/runs?branch=cutsell/mobile-v1-clean&per_page=100")
+          active=$(printf '%s' "$runs" | jq -c '[.workflow_runs[] | select(.status == "queued" or .status == "in_progress")] | sort_by(.created_at) | reverse')
+          keep=$(printf '%s' "$active" | jq -r '.[0].id // empty')
+          echo "Keeping newest active Video00 raw run: ${keep:-none}"
+          printf '%s' "$active" | jq -r '.[1:][]?.id' | while read -r id; do
+            [ -n "$id" ] || continue
+            echo "Cancelling stale Video00 raw run $id"
+            gh api --method POST "repos/$repo/actions/runs/$id/cancel" >/dev/null || true
+          done
