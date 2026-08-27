@@ -13,6 +13,8 @@ hard semantic floor in ``restore_hybrid_story_coverage``.
 """
 from __future__ import annotations
 
+import re
+import unicodedata
 from typing import Iterable
 
 from .contracts import CandidateTake
@@ -22,6 +24,49 @@ from .whole_video_analysis import WholeVideoContext
 _AUTHORITATIVE_DELETE_BASES = frozenset({
     "semantic_failed_plus_local_performance",
 })
+_NEGATIONS = frozenset({"no", "not", "never", "nunca", "nadie", "ningun", "ninguna", "sin"})
+
+
+def _normalized_tokens(text: str) -> set[str]:
+    normalized = unicodedata.normalize("NFKD", str(text or "").lower())
+    normalized = normalized.encode("ascii", "ignore").decode("ascii")
+    return {
+        token for token in re.findall(r"[a-z0-9%]+", normalized)
+        if len(token) > 2 or token.isdigit() or "%" in token
+    }
+
+
+def _critical_tokens(text: str) -> set[str]:
+    normalized = unicodedata.normalize("NFKD", str(text or "").lower())
+    normalized = normalized.encode("ascii", "ignore").decode("ascii")
+    tokens = set(re.findall(r"[a-z0-9%]+", normalized))
+    critical = {token for token in tokens if any(ch.isdigit() for ch in token)}
+    critical.update(token for token in tokens if token in _NEGATIONS)
+    return critical
+
+
+def _covered_by_kept_delivery(take: CandidateTake, kept: Iterable[CandidateTake]) -> bool:
+    """Return True when an incomplete failed retry adds no critical information.
+
+    Story coverage is allowed to rescue genuinely unique material. It must not resurrect
+    an incomplete retry merely because its wording differs when an already-kept delivery
+    covers most of the same idea and preserves all numeric/negation facts.
+    """
+    take_tokens = _normalized_tokens(take.text)
+    if not take_tokens:
+        return False
+    critical = _critical_tokens(take.text)
+    for peer in kept:
+        if float(getattr(peer, "start", 0.0)) >= float(getattr(take, "start", 0.0)):
+            continue
+        peer_tokens = _normalized_tokens(peer.text)
+        coverage = len(take_tokens & peer_tokens) / max(1, len(take_tokens))
+        if coverage < 0.50:
+            continue
+        if not critical.issubset(_critical_tokens(peer.text) | peer_tokens):
+            continue
+        return True
+    return False
 
 
 def _authoritative_applied_delete_ids(result) -> set[str]:
@@ -64,16 +109,40 @@ def restore_hybrid_story_coverage(
     authoritative_delete_ids = _authoritative_applied_delete_ids(result)
 
     eligible_deleted = []
+    suppressed_covered_retries: list[dict] = []
     for take in result.deleted:
         if take.clip_id in authoritative_delete_ids:
             continue
         label, confidence = semantic.get(take.clip_id, ("", 0.0))
         if label in {"failed", "bts"} and confidence >= hard_semantic_confidence:
             continue
+        if (
+            label == "failed"
+            and confidence >= 0.90
+            and not bool(getattr(take, "complete_idea", False))
+            and _covered_by_kept_delivery(take, result.kept)
+        ):
+            suppressed_covered_retries.append({
+                "clip_id": take.clip_id,
+                "reason": "incomplete_failed_retry_covered_by_kept_delivery",
+                "hybrid_confidence": round(confidence, 4),
+            })
+            continue
         eligible_deleted.append(take)
 
     if not eligible_deleted:
-        return result
+        if not suppressed_covered_retries:
+            return result
+        return type(result)(
+            kept=result.kept,
+            deleted=result.deleted,
+            requested_chunk_count=result.requested_chunk_count,
+            available_chunk_count=result.available_chunk_count,
+            diagnostics=tuple(result.diagnostics) + ({
+                "hybrid_story_coverage_suppressed_retries": suppressed_covered_retries,
+            },),
+            semantic_decisions=result.semantic_decisions,
+        )
 
     kept, _, diagnostics = restore_unique_story_coverage(
         result.kept,
@@ -82,7 +151,18 @@ def restore_hybrid_story_coverage(
         context,
     )
     if not diagnostics:
-        return result
+        if not suppressed_covered_retries:
+            return result
+        return type(result)(
+            kept=result.kept,
+            deleted=result.deleted,
+            requested_chunk_count=result.requested_chunk_count,
+            available_chunk_count=result.available_chunk_count,
+            diagnostics=tuple(result.diagnostics) + ({
+                "hybrid_story_coverage_suppressed_retries": suppressed_covered_retries,
+            },),
+            semantic_decisions=result.semantic_decisions,
+        )
 
     restored_ids = {str(item["clip_id"]) for item in diagnostics}
     deleted = tuple(take for take in result.deleted if take.clip_id not in restored_ids)
@@ -99,6 +179,7 @@ def restore_hybrid_story_coverage(
         ],
         "restored_ids": sorted(restored_ids),
         "authoritative_delete_ids": sorted(authoritative_delete_ids),
+        "suppressed_covered_retries": suppressed_covered_retries,
     },)
 
     return type(result)(
