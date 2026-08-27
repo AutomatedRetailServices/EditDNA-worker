@@ -15,6 +15,7 @@ on:
       - cutsell_worker/final_boundary_authority.py
       - cutsell_worker/hybrid_session_cleanup.py
       - cutsell_worker/hybrid_retry_completion_integrity.py
+      - cutsell_worker/hybrid_performance_retry_restore_guard.py
       - cutsell_worker/session_boundaries.py
       - cutsell_worker/post_selection_interior_gap_trim.py
       - cutsell_worker/post_selection_incomplete_bridge_authority.py
