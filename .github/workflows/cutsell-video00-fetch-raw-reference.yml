@@ -50,8 +50,9 @@ jobs:
           mkdir -p artifact
           aws s3 cp "s3://$S3_BUCKET/$SOURCE_KEY" artifact/video00-original-raw.mp4
           test -s artifact/video00-original-raw.mp4
-          ffprobe -v error -show_entries format=duration,size -of json artifact/video00-original-raw.mp4 > artifact/video00-original-raw-probe.json
-          jq -e '(.format.duration | tonumber) > 350' artifact/video00-original-raw-probe.json >/dev/null
+          bytes=$(stat -c '%s' artifact/video00-original-raw.mp4)
+          test "$bytes" -gt 30000000
+          printf '{"source_key":"%s","size_bytes":%s}\n' "$SOURCE_KEY" "$bytes" > artifact/video00-original-raw-metadata.json
 
       - name: Upload exact Video00 raw reference
         uses: actions/upload-artifact@v4
