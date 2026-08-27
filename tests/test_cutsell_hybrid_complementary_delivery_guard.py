@@ -123,3 +123,14 @@ def test_incomplete_continuation_with_new_opening_is_not_misread_as_restart():
 
     assert deleted == set()
     assert rows == []
+
+
+def test_pipeline_binding_points_at_final_complementary_guard():
+    from cutsell_worker import hybrid_session_cleanup, pipeline
+
+    assert pipeline.apply_hybrid_session_cleanup is hybrid_session_cleanup.apply_hybrid_session_cleanup
+    assert getattr(
+        pipeline.apply_hybrid_session_cleanup,
+        "_cutsell_hybrid_complementary_delivery_guard",
+        False,
+    ) is True
