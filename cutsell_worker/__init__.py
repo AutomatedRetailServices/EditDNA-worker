@@ -69,12 +69,13 @@ from .hybrid_complementary_delivery_guard import install_hybrid_complementary_de
 from .hybrid_semantic_complementary_rescue import install_hybrid_semantic_complementary_rescue
 from .hybrid_semantic_composite_bridge import install_hybrid_semantic_composite_bridge
 from .hybrid_composite_best_take import install_hybrid_composite_best_take
-from .hybrid_performance_retry_restore_guard import install_hybrid_performance_retry_restore_guard
+from .hybrid_semantic_conflict_arbitration import install_hybrid_semantic_conflict_arbitration
 from .post_selection_incomplete_bridge_authority import install_post_selection_incomplete_bridge_authority
 from .post_selection_interior_gap_trim import install_post_selection_interior_gap_trim
 from .post_selection_internal_retake_trim import install_post_selection_internal_retake_trim
 from .post_selection_continuity_coalescer import install_post_selection_continuity_coalescer
 from .post_selection_composite_handoff_trim import install_post_selection_composite_handoff_trim
+from .final_selection_retry_arbiter import install_final_selection_retry_arbiter
 from .audio_boundary_completion_install import install_audio_boundary_completion
 
 install_clean_cut_contract_recovery()
@@ -113,9 +114,6 @@ install_hybrid_retry_completion_integrity()
 install_hybrid_story_coverage_guard()
 install_hybrid_alternate_integrity()
 install_hybrid_cross_group_retry_integrity()
-# Cross-group may otherwise delete the later clean take as lexical coverage of an
-# earlier take. Reinstall the physical incomplete-bridge authority after it so the
-# complete -> incomplete reset -> complete retake pattern owns final retry direction.
 install_incomplete_bridge_retry_authority()
 install_hybrid_failed_continuation_integrity()
 install_hybrid_retry_winner_authority()
@@ -139,56 +137,24 @@ install_round9_orphan_prefix_integrity()
 install_round11_semantic_retry_cleanup()
 install_short_bts_process_cleanup()
 install_hybrid_failed_soft_restore()
-# Last Hybrid fallback for later clean deliveries after a window failure.
 install_hybrid_unavailable_retry_fallback()
-# Final Hybrid authority: restore complete complementary sub-deliveries with unique
-# audience-facing tails, and when Hybrid is unavailable suppress only an immediate
-# undecided incomplete restart already delivered completely just before it.
 install_hybrid_complementary_delivery_guard()
-# A reset-backed full alternate is not redundant merely because it overlaps a winner.
-# Preserve and split it when it carries material unique audience-facing information.
 install_hybrid_semantic_complementary_rescue()
-# Bridge semantic rescues into Composite Best Take, while revoking strong same-opening
-# retries that are alternate deliveries rather than complementary information.
 install_hybrid_semantic_composite_bridge()
-# Composite authority runs after complementary recovery. It can rescue a complete
-# performance-only deletion with unique information, combine complementary sub-deliveries
-# instead of one monolithic retry, and split those deliveries before Best Take.
 install_hybrid_composite_best_take()
-# Composite may still restore an earlier semantically failed take when reset evidence is
-# treated as performance-only. Revoke that restore when it shares the same strong opening
-# as a later authoritative winner in the same source.
-install_hybrid_performance_retry_restore_guard()
-# Final physical authority: after every semantic/grouping pass, a proven consecutive
-# complete -> rejected incomplete bridge -> complete retry may promote the discarded
-# clean retry without relying on the LLM's inconsistent failed/winner label.
+# Hybrid may disagree across overlapping windows. Resolve only winner-vs-failed
+# contradictions here; do not change retry/composite structure at this stage.
+install_hybrid_semantic_conflict_arbitration()
 install_post_selection_incomplete_bridge_authority()
-# Best Take is now stable, so selected logical clips may safely split at speech-free
-# multimodal performance resets without invalidating selection identity.
 install_post_selection_interior_gap_trim()
-# Spoken internal attempts may only yield when a later clean retake repeats the opening,
-# covers the earlier audience-facing content, and preserves all numbers/negations.
 install_post_selection_internal_retake_trim()
-# Over-segmented fragments from the same source should not manufacture jump cuts when
-# only a tiny natural gap separates them and no retry/reset evidence exists there.
 install_post_selection_continuity_coalescer()
-# After interior splits/coalescing, trim only a redundant final sibling when a later
-# selected delivery takes over while earlier siblings preserve unique information.
 install_post_selection_composite_handoff_trim()
+# Retry-vs-winner arbitration is intentionally last in Selection, after Composite and
+# all post-selection splits/handoffs, so it cannot destroy useful interior material.
+install_final_selection_retry_arbiter()
 install_audio_boundary_completion()
 
-# Keep this bootstrap path in the raw Video00 benchmark trigger set; touching this file
-# intentionally retriggers the exact-head raw benchmark when editorial guards change.
-# Raw benchmark trigger marker: continuity coalescer installed.
-# Raw benchmark trigger marker: validate covered incomplete retry suppression.
-# Raw benchmark trigger marker: validate repeated-opening unique-tail preservation.
-# Raw benchmark trigger marker: validate complementary Hybrid deliveries.
-# Raw benchmark trigger marker: tuned unavailable-prior restart fallback.
-# Raw benchmark trigger marker: final Hybrid wrapper bound into pipeline.
-# Raw benchmark trigger marker: composite Best Take authority installed.
-# Raw benchmark trigger marker: semantic complementary full-alternate rescue installed.
-# Raw benchmark trigger marker: post-selection composite handoff trim installed.
-# Raw benchmark trigger marker: semantic rescue Composite bridge installed.
-# Raw benchmark trigger marker: performance retry restore guard installed.
+# Raw benchmark trigger marker: final selection retry arbitration moved post-selection.
 __version__ = "0.1.0"
 OBSERVABILITY_STATUS = initialize_observability(service="cutsell-worker")
