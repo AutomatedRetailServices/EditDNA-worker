@@ -121,7 +121,14 @@ def remove_superseded_attempts(
                 continue
 
         earlier_content = _content(take.text)
-        short_partial = take.duration_sec <= 6.0 and len(earlier_content) <= 10
+        # A short COMPLETE audience-facing idea is not a "partial attempt" merely because
+        # it is concise. Human edits often keep that clean setup and then splice in a later
+        # complementary elaboration. Only genuinely incomplete short material qualifies.
+        short_partial = (
+            not bool(take.complete_idea)
+            and take.duration_sec <= 6.0
+            and len(earlier_content) <= 10
+        )
         repeated_broken_delivery = _repetition_pathology(take.text)
         incomplete = not bool(take.complete_idea)
         if not (short_partial or repeated_broken_delivery or incomplete or _open_micro_fragment(take)):
