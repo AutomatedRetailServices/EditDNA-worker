@@ -1,6 +1,5 @@
 name: CutSell Video00 Raw V5 Auto Microtrim
 
-# Universal raw Video00 benchmark. Keep Hybrid Brain active and test the exact branch head.
 on:
   push:
     branches: [cutsell/mobile-v1-clean]
@@ -27,9 +26,6 @@ on:
       - cutsell_worker/hybrid_unavailable_retry_fallback.py
   workflow_dispatch:
 
-# Only the newest Video00 benchmark for this branch is useful. A newer head cancels
-# stale GitHub runs so old images/RunPod submissions do not keep competing with the
-# current engine revision.
 concurrency:
   group: cutsell-video00-raw-${{ github.ref }}
   cancel-in-progress: true
@@ -95,9 +91,15 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          curl --fail --silent --show-error --url "https://rest.runpod.io/v1/templates" --header "Authorization: Bearer $RUNPOD_API_KEY" --output /tmp/templates.json
+          curl --fail --silent --show-error \
+            --url "https://rest.runpod.io/v1/templates" \
+            --header "Authorization: Bearer $RUNPOD_API_KEY" \
+            --output /tmp/templates.json
           jq -c '[.[] | select(.name == "EditDNA-Worker-2")][0]' /tmp/templates.json > /tmp/base-template.json
           test "$(cat /tmp/base-template.json)" != "null"
+          BASE_TEMPLATE_ID=$(jq -r '.id // empty' /tmp/base-template.json)
+          test -n "$BASE_TEMPLATE_ID"
+          echo "BASE_TEMPLATE_ID=$BASE_TEMPLATE_ID" >> "$GITHUB_ENV"
 
       - name: Create raw V5 auto template
         shell: bash
@@ -123,7 +125,13 @@ jobs:
               ports:[], volumeInGb:0, volumeMountPath:"/workspace"
             }' /tmp/base-template.json > /tmp/template-create.json
           test -n "$(jq -r '.env.GEMINI_API_KEY // empty' /tmp/template-create.json)" || { echo 'GEMINI_API_KEY missing from RunPod template; refusing brain-off benchmark'; exit 1; }
-          code=$(curl --silent --show-error --write-out '%{http_code}' --request POST --url 'https://rest.runpod.io/v1/templates' --header "Authorization: Bearer $RUNPOD_API_KEY" --header 'Content-Type: application/json' --data @/tmp/template-create.json --output /tmp/template.json)
+          code=$(curl --silent --show-error --write-out '%{http_code}' \
+            --request POST \
+            --url 'https://rest.runpod.io/v1/templates' \
+            --header "Authorization: Bearer $RUNPOD_API_KEY" \
+            --header 'Content-Type: application/json' \
+            --data @/tmp/template-create.json \
+            --output /tmp/template.json)
           test "$code" = "200" || test "$code" = "201"
           TEMPLATE_ID=$(jq -r '.id // empty' /tmp/template.json)
           test -n "$TEMPLATE_ID"
@@ -134,18 +142,34 @@ jobs:
         run: |
           set -euo pipefail
           jq -n --arg template "$TEMPLATE_ID" '{templateId:$template,workersMin:0,workersMax:1,scalerType:"QUEUE_DELAY",scalerValue:2,idleTimeout:5,executionTimeoutMs:1800000}' > /tmp/endpoint-patch.json
-          code=$(curl --silent --show-error --write-out '%{http_code}' --request PATCH --url "https://rest.runpod.io/v1/endpoints/$ENDPOINT_ID" --header "Authorization: Bearer $RUNPOD_API_KEY" --header 'Content-Type: application/json' --data @/tmp/endpoint-patch.json --output /tmp/endpoint.json)
+          code=$(curl --silent --show-error --write-out '%{http_code}' \
+            --request PATCH \
+            --url "https://rest.runpod.io/v1/endpoints/$ENDPOINT_ID" \
+            --header "Authorization: Bearer $RUNPOD_API_KEY" \
+            --header 'Content-Type: application/json' \
+            --data @/tmp/endpoint-patch.json \
+            --output /tmp/endpoint.json)
           test "$code" = "200"
 
       - name: CUDA health
         shell: bash
         run: |
           set -euo pipefail
-          curl --fail --silent --show-error --request POST --url "https://api.runpod.ai/v2/$ENDPOINT_ID/run" --header "Authorization: Bearer $RUNPOD_API_KEY" --header 'Content-Type: application/json' --data '{"input":{"op":"health"}}' --output /tmp/submit-health.json
+          curl --fail --silent --show-error \
+            --request POST \
+            --url "https://api.runpod.ai/v2/$ENDPOINT_ID/run" \
+            --header "Authorization: Bearer $RUNPOD_API_KEY" \
+            --header 'Content-Type: application/json' \
+            --data '{"input":{"op":"health"}}' \
+            --output /tmp/submit-health.json
           id=$(jq -r '.id // empty' /tmp/submit-health.json); test -n "$id"
+          echo "HEALTH_JOB_ID=$id" >> "$GITHUB_ENV"
           deadline=$((SECONDS+1200))
           while [ "$SECONDS" -lt "$deadline" ]; do
-            curl --fail --silent --show-error --url "https://api.runpod.ai/v2/$ENDPOINT_ID/status/$id" --header "Authorization: Bearer $RUNPOD_API_KEY" --output /tmp/health.json
+            curl --fail --silent --show-error \
+              --url "https://api.runpod.ai/v2/$ENDPOINT_ID/status/$id" \
+              --header "Authorization: Bearer $RUNPOD_API_KEY" \
+              --output /tmp/health.json
             status=$(jq -r '.status // empty' /tmp/health.json)
             case "$status" in
               COMPLETED) jq -e '.output.ok == true and .output.cuda_available == true' /tmp/health.json >/dev/null; exit 0 ;;
@@ -161,7 +185,13 @@ jobs:
         run: |
           set -euo pipefail
           jq -n --arg source "$SOURCE_KEY" --arg benchmark "$BENCHMARK_ID" '{input:{op:"focused",source_key:$source,benchmark_id:$benchmark,auto_speech_visual_microtrim:true}}' > /tmp/payload.json
-          curl --fail --silent --show-error --request POST --url "https://api.runpod.ai/v2/$ENDPOINT_ID/run" --header "Authorization: Bearer $RUNPOD_API_KEY" --header 'Content-Type: application/json' --data @/tmp/payload.json --output /tmp/submit.json
+          curl --fail --silent --show-error \
+            --request POST \
+            --url "https://api.runpod.ai/v2/$ENDPOINT_ID/run" \
+            --header "Authorization: Bearer $RUNPOD_API_KEY" \
+            --header 'Content-Type: application/json' \
+            --data @/tmp/payload.json \
+            --output /tmp/submit.json
           JOB_ID=$(jq -r '.id // empty' /tmp/submit.json); test -n "$JOB_ID"
           echo "JOB_ID=$JOB_ID" >> "$GITHUB_ENV"
 
@@ -171,7 +201,10 @@ jobs:
           set -euo pipefail
           deadline=$((SECONDS+5400))
           while [ "$SECONDS" -lt "$deadline" ]; do
-            curl --fail --silent --show-error --url "https://api.runpod.ai/v2/$ENDPOINT_ID/status/$JOB_ID" --header "Authorization: Bearer $RUNPOD_API_KEY" --output /tmp/status.json
+            curl --fail --silent --show-error \
+              --url "https://api.runpod.ai/v2/$ENDPOINT_ID/status/$JOB_ID" \
+              --header "Authorization: Bearer $RUNPOD_API_KEY" \
+              --output /tmp/status.json
             status=$(jq -r '.status // empty' /tmp/status.json)
             echo "raw_video00_status=$status"
             case "$status" in
@@ -219,3 +252,61 @@ jobs:
           name: cutsell-video00-raw-v5-auto-microtrim-human-review
           path: artifact/
           retention-days: 14
+
+      - name: Teardown RunPod benchmark resources
+        if: always()
+        shell: bash
+        run: |
+          set +e
+
+          cancel_if_active() {
+            local job_id="$1"
+            [ -n "$job_id" ] || return 0
+            status=$(curl --silent --show-error \
+              --url "https://api.runpod.ai/v2/$ENDPOINT_ID/status/$job_id" \
+              --header "Authorization: Bearer $RUNPOD_API_KEY" | jq -r '.status // empty')
+            case "$status" in
+              IN_QUEUE|IN_PROGRESS)
+                curl --silent --show-error \
+                  --request POST \
+                  --url "https://api.runpod.ai/v2/$ENDPOINT_ID/cancel/$job_id" \
+                  --header "Authorization: Bearer $RUNPOD_API_KEY" >/dev/null || true
+                ;;
+            esac
+          }
+
+          cancel_if_active "${HEALTH_JOB_ID:-}"
+          cancel_if_active "${JOB_ID:-}"
+
+          # Stop every benchmark worker immediately and return the endpoint to the
+          # stable base template. workersMax=0 is the hard scale-to-zero state.
+          if [ -n "${BASE_TEMPLATE_ID:-}" ]; then
+            jq -n --arg template "$BASE_TEMPLATE_ID" '{templateId:$template,workersMin:0,workersMax:0,scalerType:"QUEUE_DELAY",scalerValue:2,idleTimeout:5,executionTimeoutMs:1800000}' > /tmp/endpoint-teardown.json
+            curl --silent --show-error \
+              --request PATCH \
+              --url "https://rest.runpod.io/v1/endpoints/$ENDPOINT_ID" \
+              --header "Authorization: Bearer $RUNPOD_API_KEY" \
+              --header 'Content-Type: application/json' \
+              --data @/tmp/endpoint-teardown.json \
+              --output /tmp/endpoint-teardown-response.json || true
+          else
+            jq -n '{workersMin:0,workersMax:0}' > /tmp/endpoint-teardown.json
+            curl --silent --show-error \
+              --request PATCH \
+              --url "https://rest.runpod.io/v1/endpoints/$ENDPOINT_ID" \
+              --header "Authorization: Bearer $RUNPOD_API_KEY" \
+              --header 'Content-Type: application/json' \
+              --data @/tmp/endpoint-teardown.json \
+              --output /tmp/endpoint-teardown-response.json || true
+          fi
+
+          # Remove the per-run template after the endpoint no longer references it.
+          if [ -n "${TEMPLATE_ID:-}" ]; then
+            curl --silent --show-error \
+              --request DELETE \
+              --url "https://rest.runpod.io/v1/templates/$TEMPLATE_ID" \
+              --header "Authorization: Bearer $RUNPOD_API_KEY" \
+              --output /tmp/template-delete-response.txt || true
+          fi
+
+          echo "RunPod teardown completed: jobs cancelled if active, workersMax=0, temporary template removed."
