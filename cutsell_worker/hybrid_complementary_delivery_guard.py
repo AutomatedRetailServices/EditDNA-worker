@@ -17,6 +17,7 @@ No benchmark ids, timestamps, phrases, or Gold data are embedded here.
 from __future__ import annotations
 
 import re
+import sys
 import unicodedata
 from typing import Iterable
 
@@ -107,14 +108,7 @@ def _restore_complementary_cross_group_deletions(
     *,
     maximum_gap_sec: float = 45.0,
 ) -> tuple[set[str], list[dict]]:
-    """Restore only cross-group deletions with a material unique tail.
-
-    A candidate must be a complete delivery of at least three seconds and have an
-    authoritative winner/keep peer. The peer must overlap enough to explain why the
-    cross-group guard considered them retries, but at least 15% of the candidate's
-    content lexemes must remain unique. One unique lexeme is sufficient for short
-    complete deliveries because descriptive qualifiers can be editorially meaningful.
-    """
+    """Restore only cross-group deletions with a material unique tail."""
     restore_ids: set[str] = set()
     rows: list[dict] = []
     for candidate in deleted:
@@ -178,14 +172,7 @@ def _delete_unavailable_prior_restarts(
     *,
     maximum_prior_gap_sec: float = 8.0,
 ) -> tuple[set[str], list[dict]]:
-    """Delete an undecided incomplete restart after a nearby complete delivery.
-
-    This is intentionally stricter than ordinary semantic dedupe. The candidate must be
-    incomplete, undecided by Hybrid, start shortly after the complete peer, share at
-    least four content lexemes with it, have >=45% candidate coverage, and restart with
-    strong overlap in its first eight content lexemes. Critical numbers and explicit
-    negations must already be present in the complete peer.
-    """
+    """Delete an undecided incomplete restart after a nearby complete delivery."""
     decided_ids = set(semantic)
     delete_ids: set[str] = set()
     rows: list[dict] = []
@@ -308,3 +295,10 @@ def install_hybrid_complementary_delivery_guard() -> None:
 
     apply_with_complementary_delivery_guard._cutsell_hybrid_complementary_delivery_guard = True
     hybrid_session_cleanup.apply_hybrid_session_cleanup = apply_with_complementary_delivery_guard
+
+    # pipeline.py imports the function by value. If it was imported before this installer
+    # ran, rebinding only the module attribute above would leave the pipeline on a stale
+    # function object. Bind the exact same final wrapper into the already-loaded pipeline.
+    pipeline_module = sys.modules.get(f"{__package__}.pipeline")
+    if pipeline_module is not None:
+        pipeline_module.apply_hybrid_session_cleanup = apply_with_complementary_delivery_guard
