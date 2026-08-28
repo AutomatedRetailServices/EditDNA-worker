@@ -1,9 +1,13 @@
-"""Human Watch+Listen micro-polish v5.
+"""Boundary-only Watch+Listen micro-polish v5.
 
-This pass handles the final sub-second recording-process gaps that can remain after v4.
-It is intentionally conservative: only gaps between source-aligned words are eligible,
-and short gaps require strong stored face/body reset evidence. No benchmark timestamps,
-phrases, or source names are hardcoded. Ambiguous cases fail open unchanged.
+This pass is intentionally a pure Boundary authority. It may split an already-selected
+spoken delivery only at a source gap between aligned words when stored multimodal reset
+evidence is strong enough. It must never promote/demote takes, restore alternates, remove
+spoken retry material, or otherwise change the ordered spoken token stream.
+
+Older human_boundary_polish v1-v4 mixed Selection and Boundary responsibilities. V5 no
+longer chains those passes. Their selection-changing behavior belongs upstream in the
+Selection phase and is deliberately unreachable from this Boundary authority.
 """
 from __future__ import annotations
 
@@ -12,7 +16,6 @@ from typing import Mapping
 
 from .contracts import DraftClip, ProcessingResult, Word
 from .human_boundary_polish_v2 import _timeline_proxies, _reset_score
-from .human_boundary_polish_v4 import polish_human_boundaries_v4
 
 
 def _words_before(words: tuple[Word, ...], end: float) -> tuple[Word, ...]:
@@ -67,14 +70,10 @@ def _remove_micro_visual_reset_word_gaps(
         gap_end = float(right.start)
         gap = gap_end - gap_start
 
-        # v4 already owns >=0.55s word gaps. v5 is only the final micro-polish zone.
         if gap < 0.22 or gap >= 0.55:
             continue
 
         score, strong = _micro_reset_evidence(timeline, gap_start, gap_end)
-        # Very short gaps require multiple corroborating visual events or a very high
-        # aggregate reset score. Slightly longer micro-gaps may pass with one strong
-        # face/body reset plus high aggregate evidence.
         if gap < 0.34:
             eligible = score >= 1.55 or (score >= 1.30 and strong >= 2)
         else:
@@ -108,19 +107,22 @@ def _remove_micro_visual_reset_word_gaps(
         if changed:
             pieces = rebuilt
             diagnostics.append({
+                "authority": "human_boundary_polish_v5",
+                "decision": "split",
                 "action": "remove_micro_visual_reset_word_gap",
                 "start": round(gap_start, 3),
                 "end": round(gap_end, 3),
                 "duration_sec": round(gap_end - gap_start, 3),
                 "reset_score": round(score, 3),
                 "strong_reset_events": strong,
+                "semantic_membership_changed": False,
             })
 
     return tuple(pieces), diagnostics
 
 
 def polish_human_boundaries_v5(result: ProcessingResult, local_paths: Mapping[str, str]) -> ProcessingResult:
-    result = polish_human_boundaries_v4(result, local_paths)
+    """Apply Boundary-only micro-gap splits without invoking legacy Selection polish."""
     if not hasattr(result.draft, "selected"):
         return result
 
