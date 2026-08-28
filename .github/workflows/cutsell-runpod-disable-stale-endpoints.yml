@@ -36,7 +36,16 @@ jobs:
               --header "Authorization: Bearer $RUNPOD_API_KEY" \
               --output "/tmp/$id-before.json"
 
-            jq '{workersMin:0,workersMax:0}' > "/tmp/$id-patch.json"
+            jq '{
+              templateId:.templateId,
+              workersMin:0,
+              workersMax:0,
+              scalerType:(.scalerType // "QUEUE_DELAY"),
+              scalerValue:(.scalerValue // 2),
+              idleTimeout:(.idleTimeout // 5),
+              executionTimeoutMs:(.executionTimeoutMs // 900000)
+            }' "/tmp/$id-before.json" > "/tmp/$id-patch.json"
+
             code=$(curl --silent --show-error --write-out '%{http_code}' \
               --request PATCH \
               --url "https://rest.runpod.io/v1/endpoints/$id" \
@@ -44,7 +53,11 @@ jobs:
               --header 'Content-Type: application/json' \
               --data @"/tmp/$id-patch.json" \
               --output "/tmp/$id-after.json")
-            test "$code" = "200"
+            if [ "$code" != "200" ]; then
+              echo "disable_failed endpoint=$id http=$code"
+              cat "/tmp/$id-after.json" || true
+              exit 1
+            fi
           done
 
       - name: Verify stale endpoints cannot autoscale
