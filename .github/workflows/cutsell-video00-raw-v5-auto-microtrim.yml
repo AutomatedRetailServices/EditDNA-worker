@@ -5,6 +5,8 @@ on:
     branches: [cutsell/mobile-v1-clean]
     paths:
       - .github/workflows/cutsell-video00-raw-v5-auto-microtrim.yml
+      - benchmarks/video00_selection_lock.json
+      - benchmarks/validate_video00_selection_lock.py
       - cutsell_worker/__init__.py
       - cutsell_worker/brain_runtime.py
       - cutsell_worker/serverless_handler.py
@@ -19,6 +21,7 @@ on:
       - cutsell_worker/session_boundaries.py
       - cutsell_worker/post_selection_interior_gap_trim.py
       - cutsell_worker/post_selection_incomplete_bridge_authority.py
+      - cutsell_worker/post_selection_edge_only_boundary.py
       - cutsell_worker/semantic_best_take_integrity.py
       - cutsell_worker/boundary_retry_tail_guard.py
       - cutsell_worker/incomplete_bridge_retry_authority.py
@@ -68,6 +71,8 @@ jobs:
           grep -q 'install_editorial_guardrails_v2' cutsell_worker/__init__.py
           grep -q 'v2_long_visual_slack' cutsell_worker/editorial_guardrails_v2.py
           grep -q 'complete_idea' cutsell_worker/editorial_guardrails_v2.py
+          test -s benchmarks/video00_selection_lock.json
+          test -s benchmarks/validate_video00_selection_lock.py
 
       - name: Login GHCR
         uses: docker/login-action@v3
@@ -240,6 +245,15 @@ jobs:
           test -s artifact/video00-raw-v5-auto-microtrim.mp4
           test -s artifact/video00-raw-v5-auto-microtrim.json
 
+      - name: Verify frozen Selection lock
+        shell: bash
+        run: |
+          set -euo pipefail
+          python benchmarks/validate_video00_selection_lock.py \
+            artifact/video00-raw-v5-auto-microtrim.json \
+            benchmarks/video00_selection_lock.json \
+            | tee artifact/video00-selection-lock-report.json
+
       - name: Verify original raw and final rule
         shell: bash
         run: |
@@ -279,8 +293,6 @@ jobs:
           cancel_if_active "${HEALTH_JOB_ID:-}"
           cancel_if_active "${JOB_ID:-}"
 
-          # Stop every benchmark worker immediately and return the endpoint to the
-          # stable base template. workersMax=0 is the hard scale-to-zero state.
           if [ -n "${BASE_TEMPLATE_ID:-}" ]; then
             jq -n --arg template "$BASE_TEMPLATE_ID" '{templateId:$template,workersMin:0,workersMax:0,scalerType:"QUEUE_DELAY",scalerValue:2,idleTimeout:5,executionTimeoutMs:1800000}' > /tmp/endpoint-teardown.json
             curl --silent --show-error \
@@ -301,7 +313,6 @@ jobs:
               --output /tmp/endpoint-teardown-response.json || true
           fi
 
-          # Remove the per-run template after the endpoint no longer references it.
           if [ -n "${TEMPLATE_ID:-}" ]; then
             curl --silent --show-error \
               --request DELETE \
