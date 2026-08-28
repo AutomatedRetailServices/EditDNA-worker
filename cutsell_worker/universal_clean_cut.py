@@ -130,3 +130,5 @@ def process_universal_clean_cut_sources(
             "final_boundary_authority": boundary_stage,
         },
     )
+
+# Production-path touchpoint: keeps GPU validation tied to the current Boundary contract.
