@@ -8,8 +8,8 @@ recovery and the Selection freeze:
 2. trim a proven internal spoken retake only when the later delivery fully recovers it;
 3. arbitrate selected retry losers using final Hybrid + physical evidence;
 4. keep semantic alternates available for manual SWAP rather than discarding them;
-5. enforce final deterministic guards for already-proven covered failures and
-   consensus alternate bridges.
+5. enforce final deterministic guards for already-proven covered failures,
+   consensus alternate bridges, and short alternates followed by fuller retries.
 
 No Boundary operation is installed or invoked here. Ambiguity fails open.
 """
@@ -32,6 +32,17 @@ _STOP = frozenset({
     "los", "me", "mi", "mis", "of", "on", "or", "para", "pero", "por", "porque", "que",
     "se", "so", "su", "sus", "that", "the", "this", "to", "un", "una", "was", "we",
     "with", "y", "yo",
+})
+# Discourse/light-verb tokens do not establish unique topical information. They are
+# intentionally excluded only from thematic retry coverage, never from the frozen
+# Selection transcript itself.
+_DISCOURSE = frozenset({
+    "ahi", "alli", "aca", "aqui", "entonces", "luego", "despues", "cuando", "donde",
+    "fue", "era", "eran", "estaba", "estaban", "esta", "estan", "haber", "habia",
+    "hacer", "hace", "hacia", "hice", "hizo", "hicieron", "mandar", "mando", "mandaron",
+    "tener", "tengo", "tenia", "tuve", "problema", "problemas", "otro", "otros", "otra", "otras",
+    "there", "here", "then", "after", "when", "where", "was", "were", "did", "do", "does",
+    "made", "make", "had", "have", "has", "problem", "problems", "thing", "things", "other",
 })
 _NEGATION = frozenset({"no", "not", "never", "nunca", "sin", "without", "ni"})
 
@@ -57,6 +68,10 @@ def _content(text: str) -> set[str]:
         for concept in (_concept(raw),)
         if len(concept) >= 3 and concept not in _STOP
     }
+
+
+def _thematic_content(text: str) -> set[str]:
+    return {token for token in _content(text) if token not in _DISCOURSE}
 
 
 def _critical(text: str) -> set[str]:
@@ -104,13 +119,7 @@ def _iter_dicts(value):
 
 
 def authoritative_failed_retry_ids(selected, diagnostics: dict):
-    """Remove only failures another deterministic authority already proved covered.
-
-    Hybrid can fail-open a short failed prefix and a later soft-restore can reinsert it.
-    When cross-group retry integrity has already proved that an authoritative later
-    delivery covers the failed clip and preserves critical facts, the final Selection
-    authority must honor that proof instead of allowing a resurrection race.
-    """
+    """Remove only failures another deterministic authority already proved covered."""
     ordered = tuple(sorted(selected, key=lambda c: (c.source_order, float(c.start), float(c.end), c.clip_id)))
     selected_by_id = {clip.clip_id: clip for clip in ordered}
     votes = _hybrid_votes(diagnostics)
@@ -160,13 +169,11 @@ def authoritative_failed_retry_ids(selected, diagnostics: dict):
 
 
 def redundant_alternate_bridge_ids(selected, diagnostics: dict):
-    """Identify consensus alternates that only bridge two already-selected deliveries.
+    """Identify consensus alternates whose topic is covered by both selected neighbors.
 
-    This is intentionally narrower than generic duplicate removal. The middle clip must
-    receive at least two independent high-confidence ``alternate`` votes, no strong
-    winner/keep vote, be short and temporally sandwiched, and have its informational
-    content substantially covered by BOTH neighboring selected deliveries. Numeric or
-    negated facts must also survive in the neighbors. The clip remains a SWAP alternate.
+    Two independent high-confidence alternate votes are required. Discourse/light-verb
+    wording is ignored for topical coverage so phrases such as "then they sent me" do
+    not manufacture unique information. Critical numeric/negated facts remain protected.
     """
     ordered = tuple(sorted(selected, key=lambda c: (c.source_order, float(c.start), float(c.end), c.clip_id)))
     votes = _hybrid_votes(diagnostics)
@@ -199,16 +206,16 @@ def redundant_alternate_bridge_ids(selected, diagnostics: dict):
         if left_strength < 0.90 or right_strength < 0.75:
             continue
 
-        middle_content = _content(middle.text)
-        left_content = _content(left.text)
-        right_content = _content(right.text)
-        if len(middle_content) < 4:
+        middle_content = _thematic_content(middle.text)
+        left_content = _thematic_content(left.text)
+        right_content = _thematic_content(right.text)
+        if len(middle_content) < 2:
             continue
         left_shared = middle_content & left_content
         right_shared = middle_content & right_content
         union_shared = middle_content & (left_content | right_content)
         coverage = len(union_shared) / max(1, len(middle_content))
-        if len(left_shared) < 2 or len(right_shared) < 2 or coverage < 0.60:
+        if len(left_shared) < 1 or len(right_shared) < 1 or coverage < 0.80:
             continue
         if not _critical(middle.text).issubset(_critical(left.text + " " + right.text)):
             continue
@@ -218,16 +225,88 @@ def redundant_alternate_bridge_ids(selected, diagnostics: dict):
             "clip_id": middle.clip_id,
             "left_clip_id": left.clip_id,
             "right_clip_id": right.clip_id,
-            "reason": "consensus_alternate_bridge_covered_by_neighboring_selected_deliveries",
+            "reason": "consensus_alternate_bridge_thematically_covered_by_neighbors",
             "alternate_vote_count": len(alternate_votes),
             "best_alternate_confidence": round(max(alternate_votes), 4),
             "left_strength": round(left_strength, 4),
             "right_strength": round(right_strength, 4),
-            "left_shared_content_tokens": len(left_shared),
-            "right_shared_content_tokens": len(right_shared),
-            "union_coverage": round(coverage, 4),
+            "left_shared_thematic_tokens": len(left_shared),
+            "right_shared_thematic_tokens": len(right_shared),
+            "thematic_union_coverage": round(coverage, 4),
             "left_gap_sec": round(left_gap, 3),
             "right_gap_sec": round(right_gap, 3),
+        })
+    return remove, audit
+
+
+def _lexical_restart_pairs(diagnostics: dict) -> set[tuple[str, str]]:
+    pairs: set[tuple[str, str]] = set()
+    reconstruction = diagnostics.get("attempt_reconstruction") or {}
+    if not isinstance(reconstruction, dict):
+        return pairs
+    for row in reconstruction.get("boundaries") or ():
+        if not isinstance(row, dict) or row.get("reason") != "lexical_restart":
+            continue
+        first = str(row.get("after_clip_id") or "")
+        second = str(row.get("before_clip_id") or "")
+        if first and second:
+            pairs.add((first, second))
+    return pairs
+
+
+def short_alternate_before_fuller_delivery_ids(selected, diagnostics: dict):
+    """Move a short alternate to SWAP when Attempt Reconstruction proves a retry restart.
+
+    This guard deliberately requires independent structured evidence: Hybrid must call
+    the short take an alternate, Attempt Reconstruction must place a lexical restart
+    directly between it and the next selected take, and that next take must be a strong
+    much fuller winner/keep. Numbers and negations fail open.
+    """
+    ordered = tuple(sorted(selected, key=lambda c: (c.source_order, float(c.start), float(c.end), c.clip_id)))
+    votes = _hybrid_votes(diagnostics)
+    restart_pairs = _lexical_restart_pairs(diagnostics)
+    remove: set[str] = set()
+    audit: list[dict] = []
+
+    for short, fuller in zip(ordered, ordered[1:]):
+        if short.source_asset_id != fuller.source_asset_id:
+            continue
+        if (short.clip_id, fuller.clip_id) not in restart_pairs:
+            continue
+        alt_confidence = _strongest(votes, short.clip_id, {"alternate"})
+        if alt_confidence < 0.70 or _strongest(votes, short.clip_id, {"winner", "keep"}) >= 0.80:
+            continue
+        fuller_strength = _strongest(votes, fuller.clip_id, {"winner", "keep"})
+        if fuller_strength < 0.90:
+            continue
+        short_duration = max(0.0, float(short.end) - float(short.start))
+        fuller_duration = max(0.0, float(fuller.end) - float(fuller.start))
+        gap = float(fuller.start) - float(short.end)
+        if short_duration <= 0.0 or short_duration > 3.0:
+            continue
+        if gap < 0.0 or gap > 8.0:
+            continue
+        if fuller_duration < max(5.0, short_duration * 3.0):
+            continue
+        if _critical(short.text):
+            continue
+        # Short generic alternates only. A longer information-bearing sentence remains
+        # selected unless stronger structured coverage evidence exists.
+        short_thematic = _thematic_content(short.text)
+        if len(short_thematic) > 3:
+            continue
+
+        remove.add(short.clip_id)
+        audit.append({
+            "clip_id": short.clip_id,
+            "fuller_clip_id": fuller.clip_id,
+            "reason": "short_hybrid_alternate_before_lexical_restart_fuller_delivery",
+            "alternate_confidence": round(alt_confidence, 4),
+            "fuller_strength": round(fuller_strength, 4),
+            "short_duration_sec": round(short_duration, 3),
+            "fuller_duration_sec": round(fuller_duration, 3),
+            "gap_sec": round(gap, 3),
+            "short_thematic_token_count": len(short_thematic),
         })
     return remove, audit
 
@@ -294,11 +373,12 @@ def _apply_final_retry_guards(draft):
     diagnostics = dict(draft.diagnostics or {})
     failed_ids, failed_audit = authoritative_failed_retry_ids(draft.selected, diagnostics)
     bridge_ids, bridge_audit = redundant_alternate_bridge_ids(draft.selected, diagnostics)
-    if not failed_ids and not bridge_ids:
+    short_ids, short_audit = short_alternate_before_fuller_delivery_ids(draft.selected, diagnostics)
+    if not failed_ids and not bridge_ids and not short_ids:
         return draft
 
     selected_by_id = {clip.clip_id: clip for clip in draft.selected}
-    remove_ids = failed_ids | bridge_ids
+    remove_ids = failed_ids | bridge_ids | short_ids
     selected = tuple(clip for clip in draft.selected if clip.clip_id not in remove_ids)
 
     discarded = list(draft.discarded)
@@ -311,13 +391,13 @@ def _apply_final_retry_guards(draft):
 
     alternates = list(draft.alternates)
     existing_alternates = {clip.clip_id for clip in alternates}
-    for clip_id in sorted(bridge_ids):
+    for clip_id in sorted(bridge_ids | short_ids):
         clip = selected_by_id.get(clip_id)
         if clip is not None and clip_id not in existing_alternates:
             alternates.append(replace(clip, selected=False))
     alternates.sort(key=lambda c: (c.source_order, float(c.start), float(c.end), c.clip_id))
 
-    diagnostics["selection_final_retry_guards"] = [*failed_audit, *bridge_audit]
+    diagnostics["selection_final_retry_guards"] = [*failed_audit, *bridge_audit, *short_audit]
     return replace(
         draft,
         selected=selected,
