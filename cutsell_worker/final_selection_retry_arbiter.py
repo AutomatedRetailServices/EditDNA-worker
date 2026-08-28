@@ -10,8 +10,11 @@ The authority requires all of the following:
 - both begin with the same strong content opening;
 - the earlier clip precedes the later clip.
 
-This avoids the previous failure mode where an early Hybrid guard changed composite
-construction and accidentally removed useful interior material. Ambiguity fails open.
+After this final Selection authority is installed, the locked edge-only Boundary authority
+is installed immediately after it. That Boundary pass may adjust only start/end inside the
+already-selected clips; it cannot change Selection membership or clip identity.
+
+Ambiguity fails open.
 """
 from __future__ import annotations
 
@@ -153,15 +156,17 @@ def install_final_selection_retry_arbiter() -> None:
     from . import pipeline
 
     original = pipeline.build_flow_b_draft
-    if getattr(original, "_cutsell_final_selection_retry_arbiter", False):
-        return
+    if not getattr(original, "_cutsell_final_selection_retry_arbiter", False):
+        def build_with_final_selection_retry_arbiter(*args, **kwargs):
+            result = original(*args, **kwargs)
+            repaired = apply_final_selection_retry_arbiter(result.draft)
+            if repaired is result.draft:
+                return result
+            return replace(result, draft=repaired)
 
-    def build_with_final_selection_retry_arbiter(*args, **kwargs):
-        result = original(*args, **kwargs)
-        repaired = apply_final_selection_retry_arbiter(result.draft)
-        if repaired is result.draft:
-            return result
-        return replace(result, draft=repaired)
+        build_with_final_selection_retry_arbiter._cutsell_final_selection_retry_arbiter = True
+        pipeline.build_flow_b_draft = build_with_final_selection_retry_arbiter
 
-    build_with_final_selection_retry_arbiter._cutsell_final_selection_retry_arbiter = True
-    pipeline.build_flow_b_draft = build_with_final_selection_retry_arbiter
+    # Boundary is intentionally chained only after final Selection is frozen.
+    from .post_selection_edge_only_boundary import install_post_selection_edge_only_boundary
+    install_post_selection_edge_only_boundary()
