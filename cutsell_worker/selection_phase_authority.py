@@ -33,9 +33,6 @@ _STOP = frozenset({
     "se", "so", "su", "sus", "that", "the", "this", "to", "un", "una", "was", "we",
     "with", "y", "yo",
 })
-# Discourse/light-verb tokens do not establish unique topical information. They are
-# intentionally excluded only from thematic retry coverage, never from the frozen
-# Selection transcript itself.
 _DISCOURSE = frozenset({
     "ahi", "alli", "aca", "aqui", "entonces", "luego", "despues", "cuando", "donde",
     "fue", "era", "eran", "estaba", "estaban", "esta", "estan", "haber", "habia",
@@ -171,9 +168,9 @@ def authoritative_failed_retry_ids(selected, diagnostics: dict):
 def redundant_alternate_bridge_ids(selected, diagnostics: dict):
     """Identify consensus alternates whose topic is covered by both selected neighbors.
 
-    Two independent high-confidence alternate votes are required. Discourse/light-verb
-    wording is ignored for topical coverage so phrases such as "then they sent me" do
-    not manufacture unique information. Critical numeric/negated facts remain protected.
+    Two independent alternate votes are required. Each must be at least 0.70 and at
+    least one must be 0.75 or stronger. Discourse/light-verb wording is ignored for
+    topical coverage. Numeric/negated facts remain protected and ambiguity fails open.
     """
     ordered = tuple(sorted(selected, key=lambda c: (c.source_order, float(c.start), float(c.end), c.clip_id)))
     votes = _hybrid_votes(diagnostics)
@@ -186,9 +183,9 @@ def redundant_alternate_bridge_ids(selected, diagnostics: dict):
             continue
         alternate_votes = [
             confidence for label, confidence in votes.get(middle.clip_id, ())
-            if label == "alternate" and confidence >= 0.75
+            if label == "alternate" and confidence >= 0.70
         ]
-        if len(alternate_votes) < 2:
+        if len(alternate_votes) < 2 or max(alternate_votes, default=0.0) < 0.75:
             continue
         if _strongest(votes, middle.clip_id, {"winner", "keep"}) >= 0.80:
             continue
@@ -228,6 +225,7 @@ def redundant_alternate_bridge_ids(selected, diagnostics: dict):
             "reason": "consensus_alternate_bridge_thematically_covered_by_neighbors",
             "alternate_vote_count": len(alternate_votes),
             "best_alternate_confidence": round(max(alternate_votes), 4),
+            "weakest_alternate_confidence": round(min(alternate_votes), 4),
             "left_strength": round(left_strength, 4),
             "right_strength": round(right_strength, 4),
             "left_shared_thematic_tokens": len(left_shared),
@@ -290,8 +288,6 @@ def short_alternate_before_fuller_delivery_ids(selected, diagnostics: dict):
             continue
         if _critical(short.text):
             continue
-        # Short generic alternates only. A longer information-bearing sentence remains
-        # selected unless stronger structured coverage evidence exists.
         short_thematic = _thematic_content(short.text)
         if len(short_thematic) > 3:
             continue
