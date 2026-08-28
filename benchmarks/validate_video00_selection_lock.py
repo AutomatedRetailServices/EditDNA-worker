@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 import json
+import os
 import sys
+
+from benchmarks.validate_video00_regression_qa import validate as validate_regression_qa
 
 
 def _load(path: str):
@@ -61,17 +64,25 @@ def validate(result_path: str, lock_path: str) -> tuple[bool, dict]:
                 "actual": got_text,
             })
 
+    qa_path = os.path.join(os.path.dirname(lock_path), "video00_regression_qa.json")
+    qa_ok = True
+    qa_report = None
+    if os.path.exists(qa_path):
+        qa_ok, qa_report = validate_regression_qa(result_path, qa_path)
+
     report = {
         "schema_version": lock.get("schema_version"),
         "baseline_run_id": lock.get("baseline_run_id"),
         "expected_selected_count": len(expected),
         "actual_selected_count": len(actual),
         "selection_locked": not errors,
+        "historical_regression_qa_pass": qa_ok,
         "identity_rule": "ordered normalized selected text + selected count; clip_id and start/end intentionally ignored",
         "error_count": len(errors),
         "errors": errors[:100],
+        "historical_regression_qa": qa_report,
     }
-    return not errors, report
+    return (not errors) and qa_ok, report
 
 
 def main() -> int:
