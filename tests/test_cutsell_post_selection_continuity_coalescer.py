@@ -33,11 +33,40 @@ def test_same_source_micro_gap_without_reset_is_coalesced():
     assert audit[0]["source_gap_sec"] == 0.34
 
 
-def test_strong_reset_blocks_coalescing():
+def test_strong_reset_blocks_coalescing_for_unrelated_parents():
     left = _clip("a", 10.0, 12.0, "primera")
     right = _clip("b", 12.34, 14.0, "segunda")
     events = [{"kind": "body_reset_candidate", "start": 12.1, "end": 12.4, "confidence": 0.97}]
     selected, audit = coalesce_selected_source_continuity((left, right), _diagnostics(events))
+    assert len(selected) == 2
+    assert audit == ()
+
+
+def test_same_parent_micro_gap_ignores_isolated_body_reset():
+    left = _clip("clip_parent__psigl123", 10.0, 12.0, "También me salían espinillas.")
+    right = _clip("clip_parent__psigr456", 12.50, 14.0, "Era como un rush")
+    events = [{"kind": "body_reset_candidate", "start": 12.1, "end": 12.45, "confidence": 0.97}]
+    selected, audit = coalesce_selected_source_continuity((left, right), _diagnostics(events))
+    assert len(selected) == 1
+    assert selected[0].start == 10.0
+    assert selected[0].end == 14.0
+    assert audit[0]["same_logical_parent"] is True
+    assert audit[0]["reason"] == "same_parent_micro_gap_without_explicit_retry_event"
+
+
+def test_same_parent_micro_gap_still_blocks_explicit_retry():
+    left = _clip("clip_parent__psigl123", 10.0, 12.0, "primera")
+    right = _clip("clip_parent__psigr456", 12.42, 14.0, "segunda")
+    events = [{"kind": "false_start", "start": 12.1, "end": 12.5, "confidence": 0.94}]
+    selected, audit = coalesce_selected_source_continuity((left, right), _diagnostics(events))
+    assert len(selected) == 2
+    assert audit == ()
+
+
+def test_same_parent_gap_above_micro_limit_fails_open():
+    left = _clip("clip_parent__psigl123", 10.0, 12.0, "primera")
+    right = _clip("clip_parent__psigr456", 12.8, 14.0, "segunda")
+    selected, audit = coalesce_selected_source_continuity((left, right), _diagnostics())
     assert len(selected) == 2
     assert audit == ()
 
