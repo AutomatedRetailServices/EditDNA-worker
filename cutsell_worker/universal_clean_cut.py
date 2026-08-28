@@ -23,6 +23,7 @@ Explicitly disabled here:
 """
 from __future__ import annotations
 
+from dataclasses import replace
 from typing import Mapping
 
 from .asr import ASRProvider
@@ -33,6 +34,7 @@ from .flow_b import ProgressCallback, process_local_sources
 from .human_boundary_polish_v5 import polish_human_boundaries_v5
 from .hybrid_editorial import EditorialJudge
 from .providers import NoopSemanticProvider
+from .selection_boundary_contract import enforce_selection_contract, freeze_selection_contract
 from .take_grouping_provider import TakeGroupingProvider
 from .take_judge_provider import TakeJudgeProvider
 from .visual_analysis import VisualProvider
@@ -57,6 +59,11 @@ def process_universal_clean_cut_sources(
     Natural source order is preserved after Best Take selection. The optional Hybrid
     judge is constrained to already-bounded creator mini-sessions and may classify
     failed/BTS attempts; it cannot activate Sales Funnel composition or change timing.
+
+    Phase ownership is enforced here, not by import-time wrappers: ``process_local_sources``
+    is the last Selection authority for this orchestration. Its ordered spoken token stream
+    is frozen before any human-boundary polish. Every explicit Boundary pass must preserve
+    that stream or the job fails closed before returning a renderable result.
     """
     result = process_local_sources(
         request,
@@ -74,9 +81,14 @@ def process_universal_clean_cut_sources(
         progress=progress,
     )
 
-    # Watch+Listen polish may remove source-evidenced non-speech reset gaps, but it is
-    # NOT allowed to be the final speech boundary authority.
-    if hasattr(result.draft, "selected") and hasattr(result.draft, "discarded"):
+    has_draft_contract = hasattr(result.draft, "selected") and hasattr(result.draft, "discarded")
+    if has_draft_contract:
+        # Hard Selection/Boundary phase barrier at the orchestration point every caller uses.
+        # This is deliberately before all explicit Boundary polish below.
+        result = replace(result, draft=freeze_selection_contract(result.draft))
+
+        # Watch+Listen polish may remove source-evidenced non-speech reset gaps, but it is
+        # NOT allowed to be the final speech boundary authority.
         result = polish_human_boundaries_v5(result, local_paths)
         polish_stage = "source_evidenced_multimodal_v5_complete"
 
@@ -92,9 +104,15 @@ def process_universal_clean_cut_sources(
             asr_provider=asr_provider,
         )
         boundary_stage = "complete_idea_word_lock_overlap_guard_enforced"
+
+        # Unavoidable output invariant. Any Boundary stage that changed Selection's ordered
+        # spoken content is a pipeline bug, not an edit: refuse to return an unsafe timeline.
+        result = replace(result, draft=enforce_selection_contract(result.draft))
+        contract_stage = "selection_semantic_stream_verified_after_boundary"
     else:
         polish_stage = "not_applicable_missing_draft_contract"
         boundary_stage = "not_applicable_missing_draft_contract"
+        contract_stage = "not_applicable_missing_draft_contract"
 
     return ProcessingResult(
         schema_version=result.schema_version,
@@ -107,6 +125,7 @@ def process_universal_clean_cut_sources(
             "semantic": "not_requested_clean_cut_only",
             "composer": "not_requested_clean_cut_only",
             "draft_review": "not_requested_clean_cut_only",
+            "selection_boundary_contract": contract_stage,
             "human_boundary_polish": polish_stage,
             "final_boundary_authority": boundary_stage,
         },
