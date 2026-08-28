@@ -55,7 +55,7 @@ def split_selected_interior_performance_gaps(
     diagnostics: dict,
     *,
     minimum_word_gap_sec: float = 0.18,
-    long_gap_without_break_sec: float = 1.50,
+    long_gap_without_break_sec: float = 1.00,
     evidence_radius_sec: float = 0.75,
     minimum_edge_margin_sec: float = 0.35,
     max_splits_per_clip: int = 3,
