@@ -107,8 +107,6 @@ def install_boundary_retry_tail_guard() -> None:
 
             tail_text = " ".join(str(word.text).strip() for word in tail_words).strip()
             shared, coverage, content_count = _semantic_coverage(tail_text, right.text)
-            # For a very short tail, two independent shared content tokens are already
-            # strong retry evidence. Longer tails keep the stricter proportional gate.
             short_tail_covered = content_count <= 4 and shared >= 2 and coverage >= 0.50
             long_tail_covered = shared >= 2 and coverage >= 0.55
             if not (short_tail_covered or long_tail_covered):
@@ -144,3 +142,5 @@ def install_boundary_retry_tail_guard() -> None:
 
     protected._cutsell_boundary_retry_tail_guard = True
     authority._reconcile_same_source_overlaps = protected
+
+# Raw benchmark trigger marker: locked-selection edge-only Boundary authority installed.
