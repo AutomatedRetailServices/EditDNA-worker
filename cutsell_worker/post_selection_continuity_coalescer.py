@@ -8,6 +8,10 @@ This final draft pass merges adjacent selected clips only when they come from th
 source, the omitted source gap is very small, and whole-video evidence does not show a
 retry/fumble/reset in that gap. It never deletes spoken words; it only restores source
 continuity that earlier segmentation unnecessarily broke. Ambiguity fails open.
+
+Boundary-authorized microcuts are explicit final-timeline decisions and must never be
+re-coalesced here. Selection chooses what survives; Boundary owns the exact physical
+cut once that cut has been proven speech-safe.
 """
 from __future__ import annotations
 
@@ -66,6 +70,23 @@ def _has_blocking_event(events: tuple[dict, ...], gap_start: float, gap_end: flo
     return False
 
 
+def _is_boundary_authorized_gap(diagnostics: dict, gap_start: float, gap_end: float) -> bool:
+    """Return True when a prior Boundary pass explicitly authorized this microcut."""
+    tolerance = 0.035
+    for item in diagnostics.get("post_selection_interior_gap_trim") or ():
+        if not isinstance(item, dict):
+            continue
+        if str(item.get("decision") or "split") != "split":
+            continue
+        start = item.get("removed_gap_start")
+        end = item.get("removed_gap_end")
+        if start is None or end is None:
+            continue
+        if abs(float(start) - float(gap_start)) <= tolerance and abs(float(end) - float(gap_end)) <= tolerance:
+            return True
+    return False
+
+
 def _join_text(left: str, right: str) -> str:
     left = str(left or "").strip()
     right = str(right or "").strip()
@@ -97,6 +118,11 @@ def coalesce_selected_source_continuity(
         )
         gap = float(nxt.start) - float(current.end)
         if not same_source or gap < -0.03 or gap > maximum_source_gap_sec:
+            output.append(current)
+            current = nxt
+            continue
+
+        if _is_boundary_authorized_gap(diagnostics, float(current.end), float(nxt.start)):
             output.append(current)
             current = nxt
             continue
