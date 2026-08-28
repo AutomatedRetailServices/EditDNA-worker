@@ -22,6 +22,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          # Preserve each endpoint's existing template/scaler settings; only disable worker capacity.
           stale_ids=(
             btazjngh2j15or
             rdip9xhx6gi2px
