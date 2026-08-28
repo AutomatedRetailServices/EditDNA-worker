@@ -134,3 +134,5 @@ def process_universal_clean_cut_sources(
             "final_boundary_authority": boundary_stage,
         },
     )
+
+# Raw benchmark trigger marker: validate deterministic final Selection retry guards.
