@@ -35,6 +35,7 @@ from .human_boundary_polish_v5 import polish_human_boundaries_v5
 from .hybrid_editorial import EditorialJudge
 from .providers import NoopSemanticProvider
 from .selection_boundary_contract import enforce_selection_contract, freeze_selection_contract
+from .selection_conflicted_bridge_guard import apply_selection_conflicted_bridge_guard
 from .selection_phase_authority import apply_selection_phase_authority
 from .take_grouping_provider import TakeGroupingProvider
 from .take_judge_provider import TakeJudgeProvider
@@ -87,6 +88,10 @@ def process_universal_clean_cut_sources(
         # Explicit final Selection authority. Do not rely on pipeline wrapper installation:
         # this is the actual orchestration path used by API/serverless/benchmarks.
         result = replace(result, draft=apply_selection_phase_authority(result.draft))
+        # Resolve only a proven keep/alternate conflict whose semantic content is already
+        # covered by selected neighbors. This remains Selection ownership: the losing take
+        # moves to SWAP/Alternates and no timing boundary is changed.
+        result = replace(result, draft=apply_selection_conflicted_bridge_guard(result.draft))
         selection_stage = "explicit_final_selection_authority_executed"
 
         # Complete-idea recovery can restore missing spoken leading/trailing words. That is
@@ -135,4 +140,4 @@ def process_universal_clean_cut_sources(
         },
     )
 
-# Raw benchmark trigger marker: validate 0.70+0.75 consensus alternate bridge guard.
+# Raw benchmark trigger marker: validate conflicted redundant bridge Selection guard.
