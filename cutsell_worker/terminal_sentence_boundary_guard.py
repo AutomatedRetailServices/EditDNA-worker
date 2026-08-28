@@ -4,6 +4,9 @@ If the original selected clip already reaches a terminal source word, trailing r
 may finish that terminal word but must not extend into the next sentence. This preserves
 spoken information while preventing a completed idea from swallowing adjacent narrative
 material or retry setup. No benchmark phrases, timestamps, or clip ids are hardcoded.
+
+Boundary validation also covers upstream same-delivery microgap continuity so a final
+sentence guard is always exercised on the exact timeline produced by those repairs.
 """
 from __future__ import annotations
 
