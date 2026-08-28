@@ -4,11 +4,10 @@ This pass may refine boundaries inside an already-selected take, but it must nev
 change the spoken information chosen by Selection. It therefore cuts only between
 aligned Word envelopes and preserves every word on the left and right child clips.
 
-Normal gaps still require multimodal reset evidence. A second, deliberately narrow
-fallback handles unusually long speech-free gaps after a completed sentence when the
-speaker performs multiple strong physical resets even if face/camera detection misses
-that reset. This models a common human edit: remove the performance pause, keep both
-spoken thoughts.
+Normal gaps require multimodal reset evidence. Narrow fallbacks handle completed
+sentences when physical reset evidence is strong even if face/camera detection misses
+the reset. The anticipatory fallback may use an earlier reset as evidence, but the
+actual edit remains confined to the speech-free word gap.
 """
 from __future__ import annotations
 
@@ -56,6 +55,9 @@ def split_selected_interior_performance_gaps(
     *,
     minimum_word_gap_sec: float = 0.18,
     long_gap_without_break_sec: float = 1.00,
+    anticipatory_minimum_gap_sec: float = 0.40,
+    anticipatory_lookback_sec: float = 2.00,
+    anticipatory_near_gap_sec: float = 0.55,
     evidence_radius_sec: float = 0.75,
     minimum_edge_margin_sec: float = 0.35,
     max_splits_per_clip: int = 3,
@@ -129,8 +131,42 @@ def split_selected_interior_performance_gaps(
                     and completed_left
                 )
 
-                if rejection is None and not multimodal_ok and not long_gap_physical_ok:
-                    if not physical_ok:
+                anticipatory_window_start = gap_start - anticipatory_lookback_sec
+                anticipatory_physical = [
+                    event for event in events
+                    if float(event.get("end") or 0.0) >= anticipatory_window_start
+                    and float(event.get("start") or 0.0) <= window_end
+                    and _kind(event.get("kind")) in _PHYSICAL_KINDS
+                    and float(event.get("confidence") or 0.0) >= 0.90
+                ]
+                anticipatory_hand_count = sum(
+                    1 for event in anticipatory_physical
+                    if _kind(event.get("kind")) == "hand_motion_reset_candidate"
+                )
+                near_gap_reset_count = sum(
+                    1 for event in anticipatory_physical
+                    if float(event.get("end") or 0.0) >= gap_start - anticipatory_near_gap_sec
+                    and float(event.get("start") or 0.0) <= gap_end + evidence_radius_sec
+                )
+                anticipatory_ok = (
+                    completed_left
+                    and anticipatory_minimum_gap_sec <= gap < long_gap_without_break_sec
+                    and len(anticipatory_physical) >= 2
+                    and anticipatory_hand_count >= 1
+                    and near_gap_reset_count >= 1
+                )
+
+                if rejection is None and not multimodal_ok and not long_gap_physical_ok and not anticipatory_ok:
+                    if completed_left and anticipatory_minimum_gap_sec <= gap < long_gap_without_break_sec:
+                        if len(anticipatory_physical) < 2:
+                            rejection = "insufficient_anticipatory_reset_evidence"
+                        elif anticipatory_hand_count < 1:
+                            rejection = "anticipatory_reset_missing_hand_evidence"
+                        elif near_gap_reset_count < 1:
+                            rejection = "anticipatory_reset_not_near_gap"
+                        else:
+                            rejection = "anticipatory_reset_guard_rejected"
+                    elif not physical_ok:
                         rejection = "insufficient_physical_reset_evidence"
                     elif gap < long_gap_without_break_sec:
                         rejection = "gap_below_physical_reset_threshold"
@@ -160,6 +196,10 @@ def split_selected_interior_performance_gaps(
                         "physical_ok": bool(physical_ok),
                         "multimodal_ok": bool(multimodal_ok),
                         "long_gap_physical_ok": bool(long_gap_physical_ok),
+                        "anticipatory_physical_event_count": len(anticipatory_physical),
+                        "anticipatory_hand_event_count": anticipatory_hand_count,
+                        "anticipatory_near_gap_reset_count": near_gap_reset_count,
+                        "anticipatory_ok": bool(anticipatory_ok),
                         "physical_events": [
                             {
                                 "kind": _kind(event.get("kind")),
@@ -168,6 +208,15 @@ def split_selected_interior_performance_gaps(
                                 "confidence": round(float(event.get("confidence") or 0.0), 3),
                             }
                             for event in physical
+                        ],
+                        "anticipatory_physical_events": [
+                            {
+                                "kind": _kind(event.get("kind")),
+                                "start": round(float(event.get("start") or 0.0), 3),
+                                "end": round(float(event.get("end") or 0.0), 3),
+                                "confidence": round(float(event.get("confidence") or 0.0), 3),
+                            }
+                            for event in anticipatory_physical
                         ],
                         "break_events": [
                             {
@@ -183,14 +232,21 @@ def split_selected_interior_performance_gaps(
                 if rejection is not None:
                     continue
 
-                evidence_mode = (
-                    "multimodal_break" if multimodal_ok else "long_gap_physical_reset"
-                )
+                if multimodal_ok:
+                    evidence_mode = "multimodal_break"
+                    selected_physical = physical
+                elif long_gap_physical_ok:
+                    evidence_mode = "long_gap_physical_reset"
+                    selected_physical = physical
+                else:
+                    evidence_mode = "completed_sentence_anticipatory_reset"
+                    selected_physical = anticipatory_physical
+
                 score = (
-                    1 if multimodal_ok else 0,
-                    len(physical),
+                    2 if multimodal_ok else 1 if long_gap_physical_ok else 0,
+                    len(selected_physical),
                     len(breaks),
-                    max(float(event.get("confidence") or 0.0) for event in physical),
+                    max(float(event.get("confidence") or 0.0) for event in selected_physical),
                     gap,
                 )
                 if best is None or score > best[0]:
@@ -199,7 +255,7 @@ def split_selected_interior_performance_gaps(
                         index,
                         gap_start,
                         gap_end,
-                        physical,
+                        selected_physical,
                         breaks,
                         evidence_mode,
                     )
