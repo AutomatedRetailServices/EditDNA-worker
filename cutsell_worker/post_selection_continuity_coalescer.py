@@ -5,12 +5,9 @@ DraftClips. Rendering those fragments independently can manufacture jump cuts ev
 when the underlying source between them contains only a tiny natural breath/gesture.
 
 This final draft pass merges adjacent selected clips only when they come from the same
-source and the omitted source gap is very small. For fragments created from the same
-logical parent delivery, isolated body/hand/face reset candidates are not sufficient to
-manufacture a cut: an explicit retry/fumble/process event is required. For unrelated
-parents the stricter multimodal reset gate remains. It never deletes spoken words; it
-only restores source continuity that earlier segmentation unnecessarily broke.
-Ambiguity fails open.
+source, the omitted source gap is very small, and whole-video evidence does not show a
+retry/fumble/reset in that gap. It never deletes spoken words; it only restores source
+continuity that earlier segmentation unnecessarily broke. Ambiguity fails open.
 """
 from __future__ import annotations
 
@@ -33,19 +30,10 @@ _RESET_KINDS = frozenset({
     "facial_expression_shift_candidate",
     "hand_motion_reset_candidate",
 })
-_CHILD_MARKERS = ("__psig", "__psirt", "__continuity__")
 
 
 def _kind(value: str) -> str:
     return str(value or "").strip().lower().replace("-", "_").replace(" ", "_")
-
-
-def _logical_parent_id(clip_id: str) -> str:
-    value = str(clip_id or "")
-    for marker in _CHILD_MARKERS:
-        if marker in value:
-            value = value.split(marker, 1)[0]
-    return value
 
 
 def _events_for_source(diagnostics: dict, source_asset_id: str) -> tuple[dict, ...]:
@@ -54,19 +42,6 @@ def _events_for_source(diagnostics: dict, source_asset_id: str) -> tuple[dict, .
         if isinstance(source, dict) and source.get("source_asset_id") == source_asset_id:
             return tuple(event for event in (source.get("events") or ()) if isinstance(event, dict))
     return ()
-
-
-def _has_explicit_failure_event(events: tuple[dict, ...], gap_start: float, gap_end: float) -> bool:
-    window_start = gap_start - 0.12
-    window_end = gap_end + 0.12
-    for event in events:
-        start = float(event.get("start") or 0.0)
-        end = float(event.get("end") or start)
-        if end < window_start or start > window_end:
-            continue
-        if _kind(event.get("kind")) in _FAILURE_KINDS and float(event.get("confidence") or 0.0) >= 0.78:
-            return True
-    return False
 
 
 def _has_blocking_event(events: tuple[dict, ...], gap_start: float, gap_end: float) -> bool:
@@ -106,7 +81,6 @@ def coalesce_selected_source_continuity(
     diagnostics: dict,
     *,
     maximum_source_gap_sec: float = 0.45,
-    maximum_same_parent_gap_sec: float = 0.55,
 ) -> tuple[tuple[DraftClip, ...], tuple[dict, ...]]:
     clips = tuple(sorted(selected, key=lambda c: (c.source_order, float(c.start), float(c.end), c.clip_id)))
     if not clips:
@@ -122,26 +96,19 @@ def coalesce_selected_source_continuity(
             and current.source_order == nxt.source_order
         )
         gap = float(nxt.start) - float(current.end)
-        same_parent = _logical_parent_id(current.clip_id) == _logical_parent_id(nxt.clip_id)
-        gap_limit = maximum_same_parent_gap_sec if same_parent else maximum_source_gap_sec
-        if not same_source or gap < -0.03 or gap > gap_limit:
+        if not same_source or gap < -0.03 or gap > maximum_source_gap_sec:
             output.append(current)
             current = nxt
             continue
 
         events = _events_for_source(diagnostics, current.source_asset_id)
-        if same_parent:
-            # The split pass may see a hand/body/face motion inside one clean delivery.
-            # Do not manufacture a jump cut from that alone. A true retry/process event
-            # is required to keep a sub-0.55s gap between siblings from the same parent.
-            blocked = _has_explicit_failure_event(events, float(current.end), float(nxt.start))
-        else:
-            blocked = _has_blocking_event(events, float(current.end), float(nxt.start))
-        if blocked:
+        if _has_blocking_event(events, float(current.end), float(nxt.start)):
             output.append(current)
             current = nxt
             continue
 
+        # Keep role only when both fragments agree. Role disagreement is metadata, not
+        # a reason to manufacture a visible cut; OTHER is the safe neutral merge label.
         role = current.semantic_role if current.semantic_role == nxt.semantic_role else SemanticRole.OTHER
         merged_words = tuple(sorted(tuple(current.words) + tuple(nxt.words), key=lambda w: (float(w.start), float(w.end))))
         parent_ids = [current.clip_id, nxt.clip_id]
@@ -162,12 +129,7 @@ def coalesce_selected_source_continuity(
             "source_gap_start": round(float(current.end), 3),
             "source_gap_end": round(float(nxt.start), 3),
             "source_gap_sec": round(max(0.0, gap), 3),
-            "same_logical_parent": same_parent,
-            "reason": (
-                "same_parent_micro_gap_without_explicit_retry_event"
-                if same_parent
-                else "same_source_micro_gap_without_retry_or_reset_evidence"
-            ),
+            "reason": "same_source_micro_gap_without_retry_or_reset_evidence",
             "merged_parent_ids": parent_ids,
         })
         current = merged
