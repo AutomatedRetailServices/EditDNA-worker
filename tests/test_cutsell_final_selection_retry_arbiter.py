@@ -1,9 +1,6 @@
 from cutsell_worker.contracts import DraftClip, DraftTimeline, EditStrategy
-from cutsell_worker.final_selection_retry_arbiter import (
-    apply_final_selection_retry_arbiter,
-    losing_retry_ids,
-    same_strong_opening,
-)
+from cutsell_worker.final_selection_retry_arbiter import losing_retry_ids, same_strong_opening
+from cutsell_worker.selection_phase_authority import apply_selection_phase_authority
 
 
 def clip(clip_id, start, end, text):
@@ -93,11 +90,12 @@ def test_removed_semantic_alternate_moves_to_swap_alternates_not_discarded():
         diagnostics=diag,
     )
 
-    repaired = apply_final_selection_retry_arbiter(draft)
+    repaired = apply_selection_phase_authority(draft)
 
     assert [item.clip_id for item in repaired.selected] == ["good"]
     assert [item.clip_id for item in repaired.alternates] == ["alternate"]
     assert repaired.discarded == ()
+    assert repaired.diagnostics["selection_phase_authority"]["status"] == "executed"
 
 
 def test_conflicted_clip_with_strong_winner_is_not_removed():
