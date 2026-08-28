@@ -59,8 +59,13 @@ def split_selected_interior_performance_gaps(
     evidence_radius_sec: float = 0.75,
     minimum_edge_margin_sec: float = 0.35,
     max_splits_per_clip: int = 3,
+    include_rejected_diagnostics: bool = False,
 ) -> tuple[tuple[DraftClip, ...], tuple[dict, ...]]:
-    """Split selected clips only around speech-free performance resets."""
+    """Split selected clips only around speech-free performance resets.
+
+    ``include_rejected_diagnostics`` is observability-only. It records why otherwise
+    valid interior word gaps were rejected, but never changes the split decision.
+    """
     output: list[DraftClip] = []
     audit: list[dict] = []
 
@@ -84,12 +89,14 @@ def split_selected_interior_performance_gaps(
                 gap = gap_end - gap_start
                 if gap < minimum_word_gap_sec:
                     continue
+
+                rejection = None
                 if gap_start <= float(clip.start) + minimum_edge_margin_sec:
-                    continue
-                if gap_end >= float(clip.end) - minimum_edge_margin_sec:
-                    continue
-                if index + 1 < 2 or len(words) - (index + 1) < 2:
-                    continue
+                    rejection = "left_edge_margin"
+                elif gap_end >= float(clip.end) - minimum_edge_margin_sec:
+                    rejection = "right_edge_margin"
+                elif index + 1 < 2 or len(words) - (index + 1) < 2:
+                    rejection = "insufficient_words_on_side"
 
                 window_start = gap_start - evidence_radius_sec
                 window_end = gap_end + evidence_radius_sec
@@ -115,12 +122,65 @@ def split_selected_interior_performance_gaps(
                 )
                 physical_ok = len(physical) >= 2 and hand_count >= 1
                 multimodal_ok = physical_ok and bool(breaks)
+                completed_left = _is_completed_left_delivery(left_word)
                 long_gap_physical_ok = (
                     physical_ok
                     and gap >= long_gap_without_break_sec
-                    and _is_completed_left_delivery(left_word)
+                    and completed_left
                 )
-                if not multimodal_ok and not long_gap_physical_ok:
+
+                if rejection is None and not multimodal_ok and not long_gap_physical_ok:
+                    if not physical_ok:
+                        rejection = "insufficient_physical_reset_evidence"
+                    elif gap < long_gap_without_break_sec:
+                        rejection = "gap_below_physical_reset_threshold"
+                    elif not completed_left:
+                        rejection = "left_delivery_not_terminal"
+                    else:
+                        rejection = "missing_multimodal_break"
+
+                if include_rejected_diagnostics and rejection is not None:
+                    audit.append({
+                        "authority": "post_selection_interior_gap_trace",
+                        "decision": "reject",
+                        "reason": rejection,
+                        "parent_clip_id": original.clip_id,
+                        "parent_start": round(float(original.start), 3),
+                        "parent_end": round(float(original.end), 3),
+                        "parent_text": str(original.text or ""),
+                        "gap_start": round(gap_start, 3),
+                        "gap_end": round(gap_end, 3),
+                        "gap_sec": round(gap, 3),
+                        "left_word": str(left_word.text),
+                        "right_word": str(right_word.text),
+                        "left_terminal": bool(completed_left),
+                        "physical_event_count": len(physical),
+                        "hand_event_count": hand_count,
+                        "break_event_count": len(breaks),
+                        "physical_ok": bool(physical_ok),
+                        "multimodal_ok": bool(multimodal_ok),
+                        "long_gap_physical_ok": bool(long_gap_physical_ok),
+                        "physical_events": [
+                            {
+                                "kind": _kind(event.get("kind")),
+                                "start": round(float(event.get("start") or 0.0), 3),
+                                "end": round(float(event.get("end") or 0.0), 3),
+                                "confidence": round(float(event.get("confidence") or 0.0), 3),
+                            }
+                            for event in physical
+                        ],
+                        "break_events": [
+                            {
+                                "kind": _kind(event.get("kind")),
+                                "start": round(float(event.get("start") or 0.0), 3),
+                                "end": round(float(event.get("end") or 0.0), 3),
+                                "confidence": round(float(event.get("confidence") or 0.0), 3),
+                            }
+                            for event in breaks
+                        ],
+                    })
+
+                if rejection is not None:
                     continue
 
                 evidence_mode = (
@@ -171,6 +231,7 @@ def split_selected_interior_performance_gaps(
             split_count += 1
             audit.append({
                 "authority": "post_selection_interior_gap_trim",
+                "decision": "split",
                 "parent_clip_id": original.clip_id,
                 "parent_text": str(original.text or ""),
                 "evidence_mode": evidence_mode,
@@ -198,10 +259,19 @@ def install_post_selection_interior_gap_trim() -> None:
         result = original(*args, **kwargs)
         draft = result.draft
         diagnostics = dict(draft.diagnostics or {})
-        selected, audit = split_selected_interior_performance_gaps(draft.selected, diagnostics)
+        selected, audit = split_selected_interior_performance_gaps(
+            draft.selected,
+            diagnostics,
+            include_rejected_diagnostics=True,
+        )
         if not audit:
             return result
-        diagnostics["post_selection_interior_gap_trim"] = list(audit)
+        diagnostics["post_selection_interior_gap_trim"] = [
+            item for item in audit if item.get("decision") == "split"
+        ]
+        diagnostics["post_selection_interior_gap_trace"] = [
+            item for item in audit if item.get("decision") == "reject"
+        ]
         repaired = replace(draft, selected=selected, diagnostics=diagnostics)
         return replace(result, draft=repaired)
 
