@@ -94,10 +94,14 @@ def conflicted_redundant_bridge_ids(selected, diagnostics: dict):
     Requirements are deliberately independent and conservative:
     - Hybrid contains a strong editorial conflict for the middle take;
     - the take is short and physically between neighboring selected deliveries;
-    - both neighbors have meaningful keep/winner evidence;
+    - both neighbors have meaningful semantic evidence;
     - at least 80% of the middle take's thematic content is covered across neighbors,
       with overlap on both sides;
     - no numeric or negated fact exists only in the middle take.
+
+    A strong keep/winner vote only defeats the conflict when it has a meaningful
+    confidence margin over the alternate vote. Near-tied overlapping Hybrid windows
+    remain a true conflict and are resolved by the independent neighbor-coverage proof.
     """
     ordered = tuple(sorted(
         selected,
@@ -116,8 +120,10 @@ def conflicted_redundant_bridge_ids(selected, diagnostics: dict):
         keep_strength = _strongest(votes, middle.clip_id, {"winner", "keep"})
         if alternate_strength < 0.80 or keep_strength < 0.80:
             continue
-        # A very strong keep/winner call wins unless stronger retry evidence exists.
-        if keep_strength >= 0.90:
+        # Preserve a genuinely decisive strong keep. A near tie (for example 0.90
+        # winner vs 0.88 alternate from overlapping windows) is still a conflict.
+        keep_margin = keep_strength - alternate_strength
+        if keep_strength >= 0.90 and keep_margin >= 0.05:
             continue
 
         duration = max(0.0, float(middle.end) - float(middle.start))
@@ -158,6 +164,7 @@ def conflicted_redundant_bridge_ids(selected, diagnostics: dict):
             "reason": "conflicted_redundant_bridge_moved_to_swap",
             "alternate_confidence": round(alternate_strength, 4),
             "keep_confidence": round(keep_strength, 4),
+            "keep_margin": round(keep_margin, 4),
             "left_strength": round(left_strength, 4),
             "right_strength": round(right_strength, 4),
             "thematic_union_coverage": round(coverage, 4),
