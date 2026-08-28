@@ -172,7 +172,15 @@ def test_short_alternate_before_much_fuller_delivery_moves_to_swap():
         "hybrid_editorial_chunks": [{"decisions": [
             {"clip_id": "short", "label": "alternate", "confidence": 0.70},
             {"clip_id": "full", "label": "keep", "confidence": 0.90},
-        ]}]
+        ]}],
+        "attempt_reconstruction": {
+            "boundaries": [{
+                "after_clip_id": "short",
+                "before_clip_id": "full",
+                "reason": "lexical_restart",
+                "gap_sec": 5.4,
+            }]
+        },
     }
 
     remove, audit = short_alternate_before_fuller_delivery_ids((short, full), diagnostics)
@@ -188,7 +196,15 @@ def test_short_alternate_with_protected_or_unique_fact_fails_open():
         "hybrid_editorial_chunks": [{"decisions": [
             {"clip_id": "short", "label": "alternate", "confidence": 0.75},
             {"clip_id": "full", "label": "keep", "confidence": 0.95},
-        ]}]
+        ]}],
+        "attempt_reconstruction": {
+            "boundaries": [{
+                "after_clip_id": "short",
+                "before_clip_id": "full",
+                "reason": "lexical_restart",
+                "gap_sec": 4.0,
+            }]
+        },
     }
 
     remove, audit = short_alternate_before_fuller_delivery_ids((short, full), diagnostics)
