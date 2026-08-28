@@ -83,6 +83,51 @@ def _physical_only_diagnostics(two_resets=True):
     }
 
 
+def _short_completed_gap_clip(gap_sec=0.44):
+    right_start = 3.00 + gap_sec
+    words = (
+        Word("esta", 0.60, 0.90),
+        Word("frase", 1.20, 1.50),
+        Word("termina.", 2.70, 3.00),
+        Word("otra", right_start, right_start + 0.25),
+        Word("frase", right_start + 0.35, right_start + 0.60),
+        Word("continúa", right_start + 0.70, right_start + 1.00),
+    )
+    return DraftClip(
+        clip_id="clip-short-reset",
+        source_asset_id="src",
+        source_order=0,
+        start=0.0,
+        end=4.8,
+        text=" ".join(word.text for word in words),
+        caption_text=" ".join(word.text for word in words),
+        words=words,
+        semantic_role=SemanticRole.STORY,
+        selected=True,
+    )
+
+
+def _anticipatory_reset_diagnostics(*, include_near_gap=True):
+    events = [
+        {"kind": "hand_motion_reset_candidate", "start": 1.10, "end": 1.17, "confidence": 1.0},
+    ]
+    if include_near_gap:
+        events.append(
+            {"kind": "hand_motion_reset_candidate", "start": 2.65, "end": 2.72, "confidence": 1.0}
+        )
+    else:
+        events.append(
+            {"kind": "hand_motion_reset_candidate", "start": 1.55, "end": 1.62, "confidence": 1.0}
+        )
+    return {
+        "whole_video_context": {
+            "sources": [
+                {"source_asset_id": "src", "events": events}
+            ]
+        }
+    }
+
+
 def test_multimodal_speech_free_interior_gap_is_split():
     selected, audit = split_selected_interior_performance_gaps((_clip(),), _diagnostics(True))
 
@@ -134,6 +179,41 @@ def test_long_gap_without_completed_left_sentence_is_kept_without_face_break():
 def test_long_gap_with_only_one_physical_reset_is_kept_without_face_break():
     selected, audit = split_selected_interior_performance_gaps(
         (_long_gap_clip(left_terminal=True),), _physical_only_diagnostics(two_resets=False)
+    )
+
+    assert len(selected) == 1
+    assert audit == ()
+
+
+def test_short_completed_sentence_gap_with_anticipatory_and_near_gap_resets_is_split():
+    clip = _short_completed_gap_clip(gap_sec=0.44)
+    selected, audit = split_selected_interior_performance_gaps(
+        (clip,), _anticipatory_reset_diagnostics(include_near_gap=True)
+    )
+
+    assert len(selected) == 2
+    assert selected[0].end == 3.00
+    assert selected[1].start == 3.44
+    assert [w.text for child in selected for w in child.words] == [w.text for w in clip.words]
+    assert len(audit) == 1
+    assert audit[0]["removed_gap_sec"] == 0.44
+    assert audit[0]["evidence_mode"] == "completed_sentence_anticipatory_reset"
+
+
+def test_short_completed_sentence_gap_without_near_gap_reset_is_kept():
+    selected, audit = split_selected_interior_performance_gaps(
+        (_short_completed_gap_clip(gap_sec=0.44),),
+        _anticipatory_reset_diagnostics(include_near_gap=False),
+    )
+
+    assert len(selected) == 1
+    assert audit == ()
+
+
+def test_sub_040_completed_sentence_gap_is_kept_even_with_anticipatory_resets():
+    selected, audit = split_selected_interior_performance_gaps(
+        (_short_completed_gap_clip(gap_sec=0.36),),
+        _anticipatory_reset_diagnostics(include_near_gap=True),
     )
 
     assert len(selected) == 1
