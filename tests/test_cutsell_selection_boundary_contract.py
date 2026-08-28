@@ -2,7 +2,7 @@ from dataclasses import replace
 
 import pytest
 
-from cutsell_worker.contracts import DraftClip, DraftTimeline, SemanticRole, Word
+from cutsell_worker.contracts import DraftClip, DraftTimeline, EditStrategy, SemanticRole, Word
 from cutsell_worker.selection_boundary_contract import (
     enforce_selection_contract,
     freeze_selection_contract,
@@ -25,7 +25,15 @@ def _clip(clip_id, start, end, text):
 
 
 def _draft(selected):
-    return DraftTimeline(selected=tuple(selected), discarded=(), alternates=(), diagnostics={})
+    return DraftTimeline(
+        schema_version="cutsell.v1",
+        project_id="p",
+        strategy=EditStrategy.STORYTELLING,
+        selected=tuple(selected),
+        discarded=(),
+        alternates=(),
+        diagnostics={},
+    )
 
 
 def test_boundary_split_preserves_frozen_semantic_stream():
