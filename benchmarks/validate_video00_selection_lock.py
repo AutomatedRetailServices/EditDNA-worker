@@ -4,7 +4,10 @@ import json
 import os
 import sys
 
-from benchmarks.validate_video00_regression_qa import validate as validate_regression_qa
+try:
+    from benchmarks.validate_video00_regression_qa import validate as validate_regression_qa
+except ModuleNotFoundError:
+    from validate_video00_regression_qa import validate as validate_regression_qa
 
 
 def _load(path: str):
@@ -96,5 +99,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-
-# Trigger clean post-RunPod-sanitization QA rerun.
