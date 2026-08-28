@@ -127,7 +127,7 @@ def test_transition_language_does_not_make_consensus_bridge_unique():
         "hybrid_editorial_chunks": [
             {"decisions": [
                 {"clip_id": "left", "label": "winner", "confidence": 0.96},
-                {"clip_id": "bridge", "label": "alternate", "confidence": 0.80},
+                {"clip_id": "bridge", "label": "alternate", "confidence": 0.70},
             ]},
             {"decisions": [
                 {"clip_id": "bridge", "label": "alternate", "confidence": 0.75},
@@ -140,6 +140,7 @@ def test_transition_language_does_not_make_consensus_bridge_unique():
 
     assert remove == {"bridge"}
     assert audit[0]["thematic_union_coverage"] >= 0.8
+    assert audit[0]["best_alternate_confidence"] >= 0.75
 
 
 def test_single_vote_or_unique_alternate_bridge_fails_open():
