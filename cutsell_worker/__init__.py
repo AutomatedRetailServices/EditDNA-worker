@@ -169,5 +169,6 @@ install_audio_boundary_completion()
 # the frozen Selection stream. A bad edit fails closed instead of shipping corrupted.
 install_boundary_selection_invariant()
 
+# Raw benchmark trigger marker: validate RAW105 near-tied sonography bridge arbitration.
 __version__ = "0.1.0"
 OBSERVABILITY_STATUS = initialize_observability(service="cutsell-worker")
