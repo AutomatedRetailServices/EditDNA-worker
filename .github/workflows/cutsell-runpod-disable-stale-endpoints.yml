@@ -1,0 +1,73 @@
+name: CutSell RunPod Disable Stale Endpoints
+
+on:
+  push:
+    branches: [cutsell/mobile-v1-clean]
+    paths:
+      - .github/workflows/cutsell-runpod-disable-stale-endpoints.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  disable-stale:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      RUNPOD_API_KEY: ${{ secrets.RUNPOD_API_KEY }}
+      ACTIVE_ENDPOINT_ID: xxu7autt8mv2rn
+    steps:
+      - name: Disable stale CutSell endpoints
+        shell: bash
+        run: |
+          set -euo pipefail
+          stale_ids=(
+            btazjngh2j15or
+            rdip9xhx6gi2px
+            vh5to5b0isinwp
+            warc5u5fxq9ggw
+          )
+
+          for id in "${stale_ids[@]}"; do
+            test "$id" != "$ACTIVE_ENDPOINT_ID"
+            curl --fail --silent --show-error \
+              --url "https://rest.runpod.io/v1/endpoints/$id" \
+              --header "Authorization: Bearer $RUNPOD_API_KEY" \
+              --output "/tmp/$id-before.json"
+
+            jq '{workersMin:0,workersMax:0}' > "/tmp/$id-patch.json"
+            code=$(curl --silent --show-error --write-out '%{http_code}' \
+              --request PATCH \
+              --url "https://rest.runpod.io/v1/endpoints/$id" \
+              --header "Authorization: Bearer $RUNPOD_API_KEY" \
+              --header 'Content-Type: application/json' \
+              --data @"/tmp/$id-patch.json" \
+              --output "/tmp/$id-after.json")
+            test "$code" = "200"
+          done
+
+      - name: Verify stale endpoints cannot autoscale
+        shell: bash
+        run: |
+          set -euo pipefail
+          stale_ids=(
+            btazjngh2j15or
+            rdip9xhx6gi2px
+            vh5to5b0isinwp
+            warc5u5fxq9ggw
+          )
+          for id in "${stale_ids[@]}"; do
+            curl --fail --silent --show-error \
+              --url "https://rest.runpod.io/v1/endpoints/$id" \
+              --header "Authorization: Bearer $RUNPOD_API_KEY" \
+              --output "/tmp/$id-verify.json"
+            jq -e '.workersMin == 0 and .workersMax == 0' "/tmp/$id-verify.json" >/dev/null
+          done
+
+          curl --fail --silent --show-error \
+            --url "https://rest.runpod.io/v1/endpoints/$ACTIVE_ENDPOINT_ID" \
+            --header "Authorization: Bearer $RUNPOD_API_KEY" \
+            --output /tmp/active-endpoint.json
+          jq -e '.id == "xxu7autt8mv2rn"' /tmp/active-endpoint.json >/dev/null
+          echo 'stale_endpoint_autoscale_disabled=true'
