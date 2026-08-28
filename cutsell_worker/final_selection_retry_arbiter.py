@@ -1,18 +1,10 @@
-"""Final retry arbitration after Composite and post-selection timeline construction.
+"""Final deterministic retry arbitration inside the Selection phase.
 
-This is intentionally late. Hybrid and Composite may generate candidates and composite
-structures first; only after interior splits/handoffs are stable do we remove an earlier
-selected delivery that is clearly the losing retry of a later selected winner.
-
-The authority requires all of the following:
-- the earlier selected clip has strong failed/bts evidence and no strong winner/keep evidence;
-- a later selected clip in the same source has strong winner/keep evidence;
-- both begin with the same strong content opening;
-- the earlier clip precedes the later clip.
-
-After this final Selection authority is installed, the locked edge-only Boundary authority
-is installed immediately after it. That Boundary pass may adjust only start/end inside the
-already-selected clips; it cannot change Selection membership or clip identity.
+Hybrid and Composite may propose candidates first. This authority is the last semantic
+membership pass before Selection is frozen. It may remove an earlier selected delivery
+only when strong failed/BTS evidence and a later same-opening winner make the relation
+unambiguous. Boundary is deliberately NOT installed from this module; orchestration owns
+that phase transition explicitly.
 
 Ambiguity fails open.
 """
@@ -156,17 +148,15 @@ def install_final_selection_retry_arbiter() -> None:
     from . import pipeline
 
     original = pipeline.build_flow_b_draft
-    if not getattr(original, "_cutsell_final_selection_retry_arbiter", False):
-        def build_with_final_selection_retry_arbiter(*args, **kwargs):
-            result = original(*args, **kwargs)
-            repaired = apply_final_selection_retry_arbiter(result.draft)
-            if repaired is result.draft:
-                return result
-            return replace(result, draft=repaired)
+    if getattr(original, "_cutsell_final_selection_retry_arbiter", False):
+        return
 
-        build_with_final_selection_retry_arbiter._cutsell_final_selection_retry_arbiter = True
-        pipeline.build_flow_b_draft = build_with_final_selection_retry_arbiter
+    def build_with_final_selection_retry_arbiter(*args, **kwargs):
+        result = original(*args, **kwargs)
+        repaired = apply_final_selection_retry_arbiter(result.draft)
+        if repaired is result.draft:
+            return result
+        return replace(result, draft=repaired)
 
-    # Boundary is intentionally chained only after final Selection is frozen.
-    from .post_selection_edge_only_boundary import install_post_selection_edge_only_boundary
-    install_post_selection_edge_only_boundary()
+    build_with_final_selection_retry_arbiter._cutsell_final_selection_retry_arbiter = True
+    pipeline.build_flow_b_draft = build_with_final_selection_retry_arbiter
