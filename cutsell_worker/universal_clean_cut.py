@@ -135,4 +135,4 @@ def process_universal_clean_cut_sources(
         },
     )
 
-# Raw benchmark trigger marker: validate final Selection retry guards against Video00.
+# Raw benchmark trigger marker: validate 0.70+0.75 consensus alternate bridge guard.
