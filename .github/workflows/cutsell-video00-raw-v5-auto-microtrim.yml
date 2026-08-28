@@ -21,6 +21,7 @@ on:
       - cutsell_worker/session_boundaries.py
       - cutsell_worker/post_selection_interior_gap_trim.py
       - cutsell_worker/post_selection_incomplete_bridge_authority.py
+      - cutsell_worker/post_selection_complementary_family_stabilizer.py
       - cutsell_worker/post_selection_edge_only_boundary.py
       - cutsell_worker/semantic_best_take_integrity.py
       - cutsell_worker/boundary_retry_tail_guard.py
@@ -245,6 +246,13 @@ jobs:
           test -s artifact/video00-raw-v5-auto-microtrim.mp4
           test -s artifact/video00-raw-v5-auto-microtrim.json
 
+      - name: Upload raw diagnostic artifact before Selection lock
+        uses: actions/upload-artifact@v4
+        with:
+          name: cutsell-video00-raw-v5-auto-microtrim-human-review
+          path: artifact/
+          retention-days: 14
+
       - name: Verify frozen Selection lock
         shell: bash
         run: |
@@ -260,13 +268,6 @@ jobs:
           set -euo pipefail
           jq -e '.source_duration_sec > 350 and .auto_speech_visual_microtrim_enabled == true and .speech_lock_ok == true and .external_brain_calls_enabled == true and .selected_count > 0 and .hybrid_requested_group_count > 0' artifact/video00-raw-v5-auto-microtrim.json >/dev/null
           jq '{source_duration_sec,selected_count,selected_duration_sec,output_duration_sec,external_brain_calls_enabled,hybrid_provider,hybrid_primary_model,hybrid_requested_group_count,hybrid_available_group_count,hybrid_deleted_count,auto_microtrim_count,auto_microtrim_duration_sec,speech_lock_ok}' artifact/video00-raw-v5-auto-microtrim.json
-
-      - name: Upload raw V5 auto human review artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: cutsell-video00-raw-v5-auto-microtrim-human-review
-          path: artifact/
-          retention-days: 14
 
       - name: Teardown RunPod benchmark resources
         if: always()
