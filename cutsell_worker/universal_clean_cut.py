@@ -60,10 +60,9 @@ def process_universal_clean_cut_sources(
     judge is constrained to already-bounded creator mini-sessions and may classify
     failed/BTS attempts; it cannot activate Sales Funnel composition or change timing.
 
-    Phase ownership is enforced here, not by import-time wrappers: ``process_local_sources``
-    is the last Selection authority for this orchestration. Its ordered spoken token stream
-    is frozen before any human-boundary polish. Every explicit Boundary pass must preserve
-    that stream or the job fails closed before returning a renderable result.
+    Phase ownership is enforced here. Any pass that can restore/add spoken words belongs
+    to Selection/semantic recovery and must run before the freeze. Only speech-preserving
+    timing/fragment operations may run after the freeze.
     """
     result = process_local_sources(
         request,
@@ -83,30 +82,26 @@ def process_universal_clean_cut_sources(
 
     has_draft_contract = hasattr(result.draft, "selected") and hasattr(result.draft, "discarded")
     if has_draft_contract:
-        # Hard Selection/Boundary phase barrier at the orchestration point every caller uses.
-        # This is deliberately before all explicit Boundary polish below.
-        result = replace(result, draft=freeze_selection_contract(result.draft))
-
-        # Watch+Listen polish may remove source-evidenced non-speech reset gaps, but it is
-        # NOT allowed to be the final speech boundary authority.
-        result = polish_human_boundaries_v5(result, local_paths)
-        polish_stage = "source_evidenced_multimodal_v5_complete"
-
-        # Final speech authority: inspect the FULL source transcript again after every
-        # selection/trim pass. If an existing boundary starts after the real beginning
-        # of the same spoken idea, restore the missing leading words. If it ends before
-        # the idea's last valid word, restore the missing trailing words. Selection and
-        # source order remain untouched. Recovery is overlap-safe: an expanded idea may
-        # never duplicate source speech already owned by an adjacent selected clip.
+        # Complete-idea recovery can restore missing spoken leading/trailing words. That is
+        # semantic Selection recovery, not Boundary timing, so it MUST run before freeze.
         result = enforce_complete_idea_boundaries(
             result,
             local_paths,
             asr_provider=asr_provider,
         )
-        boundary_stage = "complete_idea_word_lock_overlap_guard_enforced"
+        boundary_stage = "complete_idea_word_lock_overlap_guard_before_freeze"
 
-        # Unavoidable output invariant. Any Boundary stage that changed Selection's ordered
-        # spoken content is a pipeline bug, not an edit: refuse to return an unsafe timeline.
+        # Hard Selection/Boundary phase barrier after every operation allowed to change
+        # spoken membership/content.
+        result = replace(result, draft=freeze_selection_contract(result.draft))
+
+        # Boundary-only polish: may split/remove source-evidenced non-speech gaps, but may
+        # not add, remove, substitute, or reorder spoken tokens.
+        result = polish_human_boundaries_v5(result, local_paths)
+        polish_stage = "source_evidenced_multimodal_v5_boundary_only_complete"
+
+        # Unavoidable output invariant. Any post-freeze mutation of ordered spoken content
+        # is a pipeline bug and fails closed before a renderable result can escape.
         result = replace(result, draft=enforce_selection_contract(result.draft))
         contract_stage = "selection_semantic_stream_verified_after_boundary"
     else:
@@ -130,5 +125,3 @@ def process_universal_clean_cut_sources(
             "final_boundary_authority": boundary_stage,
         },
     )
-
-# Production-path touchpoint: keeps GPU validation tied to the current Boundary contract.
