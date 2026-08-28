@@ -134,7 +134,9 @@ def _clip_from_envelope(
     new_end = max(float(clip.end), float(envelope_words[-1].end))
     text = " ".join(str(word.text).strip() for word in envelope_words).strip()
 
-    changed = abs(new_start - float(clip.start)) > 1e-4 or abs(new_end - float(clip.end)) > 1e-4
+    timing_changed = abs(new_start - float(clip.start)) > 1e-4 or abs(new_end - float(clip.end)) > 1e-4
+    semantic_changed = tuple(clip.words) != envelope_words or str(clip.text or "").strip() != text
+    changed = timing_changed or semantic_changed
     updated = replace(
         clip,
         start=new_start,
@@ -144,9 +146,16 @@ def _clip_from_envelope(
         caption_text=text or clip.caption_text,
     ) if changed else clip
 
+    if timing_changed:
+        action = "expand_to_complete_idea_envelope"
+    elif semantic_changed:
+        action = "refresh_complete_idea_envelope_text"
+    else:
+        action = "keep_complete_idea_envelope"
+
     return updated, {
         "clip_id": clip.clip_id,
-        "action": "expand_to_complete_idea_envelope" if changed else "keep_complete_idea_envelope",
+        "action": action,
         "original_start": round(float(clip.start), 3),
         "original_end": round(float(clip.end), 3),
         "result_start": round(float(updated.start), 3),
@@ -202,10 +211,6 @@ def _reconcile_same_source_overlaps(
         words = source_map.get(left.source_asset_id, ())
         original_gap = float(right_orig.start) - float(left_orig.end)
 
-        # Boundary polish can split one logical selected take into several physical
-        # pieces specifically to remove dead-air/face-off/reset slack between words.
-        # Those gaps are already speech-safe evidence. Idea recovery must never fill
-        # them back in. Preserve the exact polished walls for same logical clip pieces.
         if left_orig.clip_id == right_orig.clip_id and original_gap > 0.02:
             fixed_left = _rebuild_clip(
                 left, words, float(left.start), min(float(left.end), float(left_orig.end))
