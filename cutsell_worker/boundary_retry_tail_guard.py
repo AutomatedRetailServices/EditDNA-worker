@@ -1,15 +1,15 @@
-"""Trim only short trailing retry tails that are covered by the next selected delivery.
+"""Trim only short trailing retry tails that are fully covered by the next selected delivery.
 
 Complete-idea recovery may occasionally absorb the beginning of the next thought when the
 original clip boundary touches that thought's first word. This guard does not infer a cut
 from silence or punctuation alone. It trims only when all of the following are true:
 - the expanded left clip contains a completed sentence followed by a short trailing clause;
 - the next selected clip is nearby in the same source;
-- the short trailing clause is strongly covered by that next selected delivery;
+- every informative token in the short trailing clause is covered by that next delivery;
 - numeric facts and negation in the trailing clause are preserved by the next delivery.
 
-Ambiguous or unique speech fails open and is kept. No benchmark phrases, clip ids, or
-source timestamps are hardcoded.
+Ambiguous, partially-covered, or unique speech fails open and is kept. No benchmark
+phrases, clip ids, or source timestamps are hardcoded.
 """
 from __future__ import annotations
 
@@ -107,9 +107,12 @@ def install_boundary_retry_tail_guard() -> None:
 
             tail_text = " ".join(str(word.text).strip() for word in tail_words).strip()
             shared, coverage, content_count = _semantic_coverage(tail_text, right.text)
-            short_tail_covered = content_count <= 4 and shared >= 2 and coverage >= 0.50
-            long_tail_covered = shared >= 2 and coverage >= 0.55
-            if not (short_tail_covered or long_tail_covered):
+
+            # Spoken content may only be removed when the next delivery covers every
+            # informative concept in the tail. Partial semantic similarity is not
+            # enough: a single unique qualifier/example/detail must fail open.
+            fully_covered = content_count >= 2 and shared == content_count and coverage >= 0.999
+            if not fully_covered:
                 continue
             if not _critical(tail_text).issubset(_critical(right.text)):
                 continue
@@ -125,7 +128,7 @@ def install_boundary_retry_tail_guard() -> None:
 
             output[index] = trimmed
             extra_rows.append({
-                "action": "trim_retry_covered_trailing_clause",
+                "action": "trim_retry_fully_covered_trailing_clause",
                 "left_clip_id": left.clip_id,
                 "right_clip_id": right.clip_id,
                 "original_end": round(float(left.end), 3),
@@ -136,6 +139,7 @@ def install_boundary_retry_tail_guard() -> None:
                 "tail_shared_content_tokens": shared,
                 "tail_semantic_coverage": round(coverage, 3),
                 "critical_preserved": True,
+                "unique_content_preserved": True,
             })
 
         return output, list(rows) + extra_rows
