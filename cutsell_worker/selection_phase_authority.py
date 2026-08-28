@@ -196,7 +196,7 @@ def redundant_alternate_bridge_ids(selected, diagnostics: dict):
             continue
         left_gap = float(middle.start) - float(left.end)
         right_gap = float(right.start) - float(middle.end)
-        if left_gap < 0.0 or left_gap > 2.5 or right_gap < 0.0 or right_gap > 10.0:
+        if left_gap < 0.0 or left_gap > 5.0 or right_gap < 0.0 or right_gap > 10.0:
             continue
         left_strength = _strongest(votes, left.clip_id, {"winner", "keep"})
         right_strength = max(
