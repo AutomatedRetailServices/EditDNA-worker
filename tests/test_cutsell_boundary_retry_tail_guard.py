@@ -15,6 +15,10 @@ def _clip(clip_id, start, end, text, words):
     )
 
 
+def _trim_rows(rows):
+    return [row for row in rows if row.get("action") == "trim_retry_fully_covered_trailing_clause"]
+
+
 def test_retry_covered_short_tail_is_trimmed_to_prior_completed_sentence():
     left_words = (
         Word("terminó.", 0.0, 1.0),
@@ -50,7 +54,7 @@ def test_retry_covered_short_tail_is_trimmed_to_prior_completed_sentence():
 
     assert output[0].end == 1.0
     assert output[0].text == "terminó."
-    assert any(row.get("action") == "trim_retry_covered_trailing_clause" for row in rows)
+    assert _trim_rows(rows)
 
 
 def test_unique_short_tail_fails_open_and_is_preserved():
@@ -78,7 +82,7 @@ def test_unique_short_tail_fails_open_and_is_preserved():
 
     assert output[0].end == 2.75
     assert output[0].text.endswith("medicación.")
-    assert not any(row.get("action") == "trim_retry_covered_trailing_clause" for row in rows)
+    assert not _trim_rows(rows)
 
 
 def test_high_overlap_tail_with_one_unique_concept_is_preserved():
@@ -108,8 +112,6 @@ def test_high_overlap_tail_with_one_unique_concept_is_preserved():
         {"src": left_words + right_words},
     )
 
-    # High semantic overlap is not enough to delete spoken content: "era" is a
-    # distinct concept in the tail and must fail open until a true full retry match exists.
     assert output[0].end == 3.10
     assert output[0].text.endswith("una alergia.")
-    assert not any(row.get("action") == "trim_retry_covered_trailing_clause" for row in rows)
+    assert not _trim_rows(rows)
