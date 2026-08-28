@@ -158,6 +158,6 @@ install_post_selection_composite_handoff_trim()
 install_final_selection_retry_arbiter()
 install_audio_boundary_completion()
 
-# Raw benchmark trigger marker: final selection retry arbitration moved post-selection.
+# Raw benchmark trigger marker: verify Boundary-authorized microcuts survive continuity.
 __version__ = "0.1.0"
 OBSERVABILITY_STATUS = initialize_observability(service="cutsell-worker")
