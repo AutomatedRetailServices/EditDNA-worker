@@ -22,12 +22,9 @@ def _trim_rows(rows):
 def test_retry_covered_short_tail_is_trimmed_to_prior_completed_sentence():
     left_words = (
         Word("terminó.", 0.0, 1.0),
-        Word("Ahí", 1.4, 1.7),
-        Word("me", 1.72, 1.9),
-        Word("mandó", 1.92, 2.25),
-        Word("a", 2.27, 2.36),
-        Word("hacer", 2.38, 2.72),
-        Word("sonografías.", 2.74, 3.35),
+        Word("a", 1.4, 1.5),
+        Word("hacer", 1.52, 1.86),
+        Word("sonografías.", 1.88, 2.45),
     )
     right_words = (
         Word("a", 10.0, 10.1),
@@ -39,10 +36,10 @@ def test_retry_covered_short_tail_is_trimmed_to_prior_completed_sentence():
         Word("otras", 11.67, 11.95),
         Word("sonografías.", 11.97, 12.50),
     )
-    left_original = _clip("left", 0.0, 1.72, "terminó. Ahí", left_words[:2])
+    left_original = _clip("left", 0.0, 1.5, "terminó. a", left_words[:2])
     right_original = _clip("right", 10.0, 12.5, "a hacer sonografía de tiroides y otras sonografías.", right_words)
     left_expanded = _clip(
-        "left", 0.0, 3.35, "terminó. Ahí me mandó a hacer sonografías.", left_words
+        "left", 0.0, 2.45, "terminó. a hacer sonografías.", left_words
     )
     right_expanded = right_original
 
