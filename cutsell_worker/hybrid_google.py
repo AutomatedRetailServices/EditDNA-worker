@@ -80,6 +80,10 @@ def build_gemini_generate_content_request(
     return {
         "contents": [{"role": "user", "parts": [{"text": _prompt_text(compact_payload)}]}],
         "generationConfig": {
+            # Editorial classification must be repeatable for identical payloads. The
+            # provider proposes semantic labels; deterministic downstream arbitration
+            # remains final authority.
+            "temperature": 0.0,
             "maxOutputTokens": int(max_output_tokens),
             "thinkingConfig": {"thinkingLevel": thinking_level},
             "responseMimeType": "application/json",
