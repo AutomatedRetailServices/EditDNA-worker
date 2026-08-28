@@ -35,6 +35,7 @@ from .human_boundary_polish_v5 import polish_human_boundaries_v5
 from .hybrid_editorial import EditorialJudge
 from .providers import NoopSemanticProvider
 from .selection_boundary_contract import enforce_selection_contract, freeze_selection_contract
+from .selection_phase_authority import apply_selection_phase_authority
 from .take_grouping_provider import TakeGroupingProvider
 from .take_judge_provider import TakeJudgeProvider
 from .visual_analysis import VisualProvider
@@ -60,9 +61,10 @@ def process_universal_clean_cut_sources(
     judge is constrained to already-bounded creator mini-sessions and may classify
     failed/BTS attempts; it cannot activate Sales Funnel composition or change timing.
 
-    Phase ownership is enforced here. Any pass that can restore/add spoken words belongs
-    to Selection/semantic recovery and must run before the freeze. Only speech-preserving
-    timing/fragment operations may run after the freeze.
+    Phase ownership is enforced explicitly here rather than relying on import-time
+    wrapper order. All semantic membership authorities run before the freeze. Any pass
+    that can restore/add spoken words also belongs to Selection recovery and runs before
+    the freeze. Only speech-preserving timing/fragment operations may run afterward.
     """
     result = process_local_sources(
         request,
@@ -82,6 +84,11 @@ def process_universal_clean_cut_sources(
 
     has_draft_contract = hasattr(result.draft, "selected") and hasattr(result.draft, "discarded")
     if has_draft_contract:
+        # Explicit final Selection authority. Do not rely on pipeline wrapper installation:
+        # this is the actual orchestration path used by API/serverless/benchmarks.
+        result = replace(result, draft=apply_selection_phase_authority(result.draft))
+        selection_stage = "explicit_final_selection_authority_executed"
+
         # Complete-idea recovery can restore missing spoken leading/trailing words. That is
         # semantic Selection recovery, not Boundary timing, so it MUST run before freeze.
         result = enforce_complete_idea_boundaries(
@@ -105,6 +112,7 @@ def process_universal_clean_cut_sources(
         result = replace(result, draft=enforce_selection_contract(result.draft))
         contract_stage = "selection_semantic_stream_verified_after_boundary"
     else:
+        selection_stage = "not_applicable_missing_draft_contract"
         polish_stage = "not_applicable_missing_draft_contract"
         boundary_stage = "not_applicable_missing_draft_contract"
         contract_stage = "not_applicable_missing_draft_contract"
@@ -120,6 +128,7 @@ def process_universal_clean_cut_sources(
             "semantic": "not_requested_clean_cut_only",
             "composer": "not_requested_clean_cut_only",
             "draft_review": "not_requested_clean_cut_only",
+            "selection_phase_authority": selection_stage,
             "selection_boundary_contract": contract_stage,
             "human_boundary_polish": polish_stage,
             "final_boundary_authority": boundary_stage,
