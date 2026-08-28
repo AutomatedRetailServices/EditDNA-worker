@@ -72,11 +72,12 @@ from .hybrid_composite_best_take import install_hybrid_composite_best_take
 from .hybrid_semantic_conflict_arbitration import install_hybrid_semantic_conflict_arbitration
 from .post_selection_incomplete_bridge_authority import install_post_selection_incomplete_bridge_authority
 from .post_selection_complementary_family_stabilizer import install_post_selection_complementary_family_stabilizer
-from .post_selection_interior_gap_trim import install_post_selection_interior_gap_trim
 from .post_selection_internal_retake_trim import install_post_selection_internal_retake_trim
-from .post_selection_continuity_coalescer import install_post_selection_continuity_coalescer
-from .post_selection_composite_handoff_trim import install_post_selection_composite_handoff_trim
 from .final_selection_retry_arbiter import install_final_selection_retry_arbiter
+from .selection_boundary_contract import install_selection_freeze, install_boundary_selection_invariant
+from .post_selection_edge_only_boundary import install_post_selection_edge_only_boundary
+from .post_selection_interior_gap_trim import install_post_selection_interior_gap_trim
+from .post_selection_continuity_coalescer import install_post_selection_continuity_coalescer
 from .audio_boundary_completion_install import install_audio_boundary_completion
 
 install_clean_cut_contract_recovery()
@@ -143,21 +144,30 @@ install_hybrid_complementary_delivery_guard()
 install_hybrid_semantic_complementary_rescue()
 install_hybrid_semantic_composite_bridge()
 install_hybrid_composite_best_take()
-# Hybrid may disagree across overlapping windows. Resolve only winner-vs-failed
-# contradictions here; do not change retry/composite structure at this stage.
 install_hybrid_semantic_conflict_arbitration()
 install_post_selection_incomplete_bridge_authority()
-# Stabilize complementary retry families before any boundary-oriented interior split.
+
+# ------------------------------ SELECTION PHASE ------------------------------
+# Every operation that may change spoken content or membership must execute here.
 install_post_selection_complementary_family_stabilizer()
-install_post_selection_interior_gap_trim()
 install_post_selection_internal_retake_trim()
-install_post_selection_continuity_coalescer()
-install_post_selection_composite_handoff_trim()
-# Retry-vs-winner arbitration is intentionally last in Selection, after Composite and
-# all post-selection splits/handoffs, so it cannot destroy useful interior material.
 install_final_selection_retry_arbiter()
+
+# Hard semantic phase barrier. Everything after this point is Boundary-only.
+install_selection_freeze()
+
+# ------------------------------- BOUNDARY PHASE ------------------------------
+# Boundary may adjust timestamps and fragment structure, never semantic membership.
+install_post_selection_edge_only_boundary()
+install_post_selection_interior_gap_trim()
+install_post_selection_continuity_coalescer()
+# post_selection_composite_handoff_trim is intentionally not installed: it removes a
+# selected spoken fragment after Boundary and therefore violates phase ownership.
 install_audio_boundary_completion()
 
-# Raw benchmark trigger marker: verify Boundary-authorized microcuts survive continuity.
+# Last wrapper: refuse any final timeline whose ordered spoken token stream differs from
+# the frozen Selection stream. A bad edit fails closed instead of shipping corrupted.
+install_boundary_selection_invariant()
+
 __version__ = "0.1.0"
 OBSERVABILITY_STATUS = initialize_observability(service="cutsell-worker")
