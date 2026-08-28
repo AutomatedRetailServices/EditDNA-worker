@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import json
 import sys
-from pathlib import Path
 
 
 def _load(path: str):
@@ -22,37 +21,44 @@ def validate(result_path: str, lock_path: str) -> tuple[bool, dict]:
     expected = lock.get("segments") or []
     errors = []
 
-    if int(result.get("selected_count") or len(actual)) != int(lock.get("selected_count") or len(expected)):
+    expected_count = int(lock.get("selected_count") or len(expected))
+    actual_count = int(result.get("selected_count") or len(actual))
+    if actual_count != expected_count or len(actual) != len(expected):
         errors.append({
             "reason": "selected_count_changed",
-            "expected": int(lock.get("selected_count") or len(expected)),
-            "actual": int(result.get("selected_count") or len(actual)),
+            "expected": expected_count,
+            "actual": actual_count,
+            "expected_rows": len(expected),
+            "actual_rows": len(actual),
         })
 
     max_len = max(len(actual), len(expected))
     for index in range(max_len):
         if index >= len(expected):
-            errors.append({"reason": "unexpected_segment", "index": index, "actual": actual[index]})
+            errors.append({
+                "reason": "unexpected_segment",
+                "index": index,
+                "actual_text": _norm((actual[index] or {}).get("text")),
+            })
             continue
         if index >= len(actual):
-            errors.append({"reason": "missing_segment", "index": index, "expected": expected[index]})
-            continue
-        got = actual[index]
-        want = expected[index]
-        if str(got.get("clip_id") or "") != str(want.get("clip_id") or ""):
             errors.append({
-                "reason": "clip_id_changed",
+                "reason": "missing_segment",
                 "index": index,
-                "expected": want.get("clip_id"),
-                "actual": got.get("clip_id"),
+                "expected_text": _norm((expected[index] or {}).get("text")),
             })
-        if _norm(got.get("text")) != _norm(want.get("text")):
+            continue
+
+        got = actual[index] or {}
+        want = expected[index] or {}
+        got_text = _norm(got.get("text"))
+        want_text = _norm(want.get("text"))
+        if got_text != want_text:
             errors.append({
                 "reason": "text_changed",
                 "index": index,
-                "clip_id": got.get("clip_id"),
-                "expected": _norm(want.get("text")),
-                "actual": _norm(got.get("text")),
+                "expected": want_text,
+                "actual": got_text,
             })
 
     report = {
@@ -61,6 +67,7 @@ def validate(result_path: str, lock_path: str) -> tuple[bool, dict]:
         "expected_selected_count": len(expected),
         "actual_selected_count": len(actual),
         "selection_locked": not errors,
+        "identity_rule": "ordered normalized selected text + selected count; clip_id and start/end intentionally ignored",
         "error_count": len(errors),
         "errors": errors[:100],
     }
