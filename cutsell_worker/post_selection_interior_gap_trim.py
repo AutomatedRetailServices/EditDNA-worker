@@ -1,14 +1,14 @@
 """Speech-safe interior performance-gap trimming after Best Take.
 
-The pre-selection interior performance splitter intentionally disables itself when
-``preserve_clip_id=True`` because replacing a chosen logical take with child IDs can
-invalidate Best-Take selection. Once the final draft already exists that identity
-constraint is gone: selected DraftClips may be split into selected child clips while
-removing only a true gap between aligned words.
+This pass may refine boundaries inside an already-selected take, but it must never
+change the spoken information chosen by Selection. It therefore cuts only between
+aligned Word envelopes and preserves every word on the left and right child clips.
 
-This pass is deliberately conservative. It requires the same multimodal reset evidence
-as the pre-selection splitter (multiple strong physical resets plus a facial/camera
-break), meaningful speech on both sides, and never cuts through a Word envelope.
+Normal gaps still require multimodal reset evidence. A second, deliberately narrow
+fallback handles unusually long speech-free gaps after a completed sentence when the
+speaker performs multiple strong physical resets even if face/camera detection misses
+that reset. This models a common human edit: remove the performance pause, keep both
+spoken thoughts.
 """
 from __future__ import annotations
 
@@ -20,6 +20,7 @@ from .contracts import DraftClip
 
 _PHYSICAL_KINDS = frozenset({"hand_motion_reset_candidate", "body_reset_candidate"})
 _BREAK_KINDS = frozenset({"camera_disengagement_candidate", "facial_expression_shift_candidate"})
+_TERMINAL_MARKS = (".", "!", "?", "…")
 
 
 def _kind(value: str) -> str:
@@ -45,16 +46,21 @@ def _text(words) -> str:
     return " ".join(str(word.text or "").strip() for word in words).strip()
 
 
+def _is_completed_left_delivery(word) -> bool:
+    return str(getattr(word, "text", "") or "").strip().endswith(_TERMINAL_MARKS)
+
+
 def split_selected_interior_performance_gaps(
     selected: Iterable[DraftClip],
     diagnostics: dict,
     *,
     minimum_word_gap_sec: float = 0.18,
+    long_gap_without_break_sec: float = 1.50,
     evidence_radius_sec: float = 0.75,
     minimum_edge_margin_sec: float = 0.35,
     max_splits_per_clip: int = 3,
 ) -> tuple[tuple[DraftClip, ...], tuple[dict, ...]]:
-    """Split selected draft clips around strong speech-free performance resets."""
+    """Split selected clips only around speech-free performance resets."""
     output: list[DraftClip] = []
     audit: list[dict] = []
 
@@ -103,24 +109,46 @@ def split_selected_interior_performance_gaps(
                         0.72 if _kind(event.get("kind")) == "facial_expression_shift_candidate" else 0.80
                     )
                 ]
-                hand_count = sum(1 for event in physical if _kind(event.get("kind")) == "hand_motion_reset_candidate")
-                if len(physical) < 2 or not breaks or hand_count < 1:
+                hand_count = sum(
+                    1 for event in physical
+                    if _kind(event.get("kind")) == "hand_motion_reset_candidate"
+                )
+                physical_ok = len(physical) >= 2 and hand_count >= 1
+                multimodal_ok = physical_ok and bool(breaks)
+                long_gap_physical_ok = (
+                    physical_ok
+                    and gap >= long_gap_without_break_sec
+                    and _is_completed_left_delivery(left_word)
+                )
+                if not multimodal_ok and not long_gap_physical_ok:
                     continue
 
+                evidence_mode = (
+                    "multimodal_break" if multimodal_ok else "long_gap_physical_reset"
+                )
                 score = (
+                    1 if multimodal_ok else 0,
                     len(physical),
                     len(breaks),
                     max(float(event.get("confidence") or 0.0) for event in physical),
                     gap,
                 )
                 if best is None or score > best[0]:
-                    best = (score, index, gap_start, gap_end, physical, breaks)
+                    best = (
+                        score,
+                        index,
+                        gap_start,
+                        gap_end,
+                        physical,
+                        breaks,
+                        evidence_mode,
+                    )
 
             if best is None:
                 output.append(clip)
                 continue
 
-            _, index, gap_start, gap_end, physical, breaks = best
+            _, index, gap_start, gap_end, physical, breaks, evidence_mode = best
             left_words = words[: index + 1]
             right_words = words[index + 1 :]
             left = replace(
@@ -144,6 +172,8 @@ def split_selected_interior_performance_gaps(
             audit.append({
                 "authority": "post_selection_interior_gap_trim",
                 "parent_clip_id": original.clip_id,
+                "parent_text": str(original.text or ""),
+                "evidence_mode": evidence_mode,
                 "removed_gap_start": round(gap_start, 3),
                 "removed_gap_end": round(gap_end, 3),
                 "removed_gap_sec": round(gap_end - gap_start, 3),
