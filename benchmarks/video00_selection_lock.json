@@ -1,0 +1,33 @@
+{
+  "schema_version": "cutsell.video00.selection_lock.v1",
+  "source_key": "Editdna longform validation/VIDEO-2026-07-30-09-18-03.mp4",
+  "baseline_run_id": 33126865755,
+  "baseline_selection_f1": 0.9143,
+  "baseline_gold_coverage": 0.9468,
+  "selected_count": 23,
+  "segments": [
+    {"clip_id":"clip_93f69d2ba902657896cf","text":"tenía cáncer de tiroides y no lo sabía."},
+    {"clip_id":"clip_6a26e6dd8e452c12a86b","text":"No es secreto para nadie que llevo unos 10 años trabajando para cruceros. Tenía"},
+    {"clip_id":"clip_e5766a28f0d599f4c0e6","text":"Nunca se nos ocurrió hacer un chequeo de la tiroides por sonografía porque siemp"},
+    {"clip_id":"clip_e5766a28f0d599f4c0e6","text":"perfectamente."},
+    {"clip_id":"clip_b225282b84da4a8c7e0a__psigl3e9b78b6727a","text":"El año pasado comencé a notar hinchazón en mi cara,"},
+    {"clip_id":"clip_b225282b84da4a8c7e0a__psigrb741ca77bd5a","text":"aumento de peso,"},
+    {"clip_id":"clip_b225282b84da4a8c7e0a__psigrb741ca77bd5a","text":"si tuve perdida de pelo y me comenzó a hacer ruido."},
+    {"clip_id":"clip_9360dec40511b96869f8","text":"Me hice un test a bordo mientras terminaba mi crucero que se llama In Body Mass"},
+    {"clip_id":"clip_5b13c4fa9b50c8e916ae","text":"Al terminar mi contrato cambié de ginecóloga y le pedí que me hiciera un test de"},
+    {"clip_id":"clip_90fbfa744a1c67f1aa18","text":"a hacer sonografía de tiroides y otras sonografías."},
+    {"clip_id":"clip_ba52c79d5d14e439c022","text":"En la sonografía de tiroides apareció un nódulo sospechoso de 3 centímetros que"},
+    {"clip_id":"clip_8040c74591525facb1f9","text":"La biopsia confirmó que era un cáncer papilar de tiroides. Síntomas que tuve seg"},
+    {"clip_id":"clip_97fe5eb123ee2707f332","text":"Síntomas que no me parecían sospechosos pero que ahora que lo analizo si eran so"},
+    {"clip_id":"clip_8d4a51330ebc3aa25fb6","text":"Por temporada me salió un acné en la espalda con la que yo resolvía con resorcin"},
+    {"clip_id":"clip_4fc2d321c36bef347798","text":"También me salían espinillas."},
+    {"clip_id":"clip_4fc2d321c36bef347798","text":"Era como un rush,"},
+    {"clip_id":"clip_4fc2d321c36bef347798","text":"una alergia."},
+    {"clip_id":"clip_b6da5f6a494cf2b42f8c","text":"Otro síntoma era que me salían espinillas como si fuera una alergia de esta part"},
+    {"clip_id":"clip_0d714bd0002954b2b74d","text":"Se me caía mucho el pelo. Cuando me lavaba el pelo perdía mucho pelo y pensaba q"},
+    {"clip_id":"clip_cd934782a9c793325029","text":"Tuve problemas de digestión en donde me hicieron una endoscopía y dijeron que te"},
+    {"clip_id":"clip_01f2e01c0d3582e74d60","text":"No quiero sonar a conspiración pero todos estos síntomas comenzaron a pasarme de"},
+    {"clip_id":"clip_04793a57bbe2ebc3a9f4","text":"Esta es mi experiencia. Soy la única en mi familia que tiene este tipo de cáncer"},
+    {"clip_id":"clip_f7dfa1021ba63ce1633e","text":"Por eso cuídate, alimentate bien, hidrátate y haz ejercicio."}
+  ]
+}
