@@ -79,3 +79,37 @@ def test_unique_short_tail_fails_open_and_is_preserved():
     assert output[0].end == 2.75
     assert output[0].text.endswith("medicación.")
     assert not any(row.get("action") == "trim_retry_covered_trailing_clause" for row in rows)
+
+
+def test_high_overlap_tail_with_one_unique_concept_is_preserved():
+    left_words = (
+        Word("terminó.", 0.0, 1.0),
+        Word("Era", 1.4, 1.65),
+        Word("como", 1.67, 1.9),
+        Word("un", 1.92, 2.05),
+        Word("brote", 2.07, 2.40),
+        Word("una", 2.42, 2.58),
+        Word("alergia.", 2.60, 3.10),
+    )
+    right_words = (
+        Word("parecía", 10.0, 10.35),
+        Word("una", 10.37, 10.50),
+        Word("alergia", 10.52, 10.90),
+        Word("como", 10.92, 11.10),
+        Word("brote.", 11.12, 11.45),
+    )
+    left_original = _clip("left", 0.0, 1.65, "terminó. Era", left_words[:2])
+    right_original = _clip("right", 10.0, 11.45, "parecía una alergia como brote.", right_words)
+    left_expanded = _clip("left", 0.0, 3.10, "terminó. Era como un brote una alergia.", left_words)
+
+    output, rows = authority._reconcile_same_source_overlaps(
+        (left_original, right_original),
+        [left_expanded, right_original],
+        {"src": left_words + right_words},
+    )
+
+    # High semantic overlap is not enough to delete spoken content: "era" is a
+    # distinct concept in the tail and must fail open until a true full retry match exists.
+    assert output[0].end == 3.10
+    assert output[0].text.endswith("una alergia.")
+    assert not any(row.get("action") == "trim_retry_covered_trailing_clause" for row in rows)
