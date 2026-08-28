@@ -17,8 +17,11 @@ def _clip(clip_id, start, end, text):
     )
 
 
-def _diagnostics(events=None):
-    return {"whole_video_context": {"sources": [{"source_asset_id": "src", "events": events or []}]}}
+def _diagnostics(events=None, boundary_splits=None):
+    return {
+        "whole_video_context": {"sources": [{"source_asset_id": "src", "events": events or []}]},
+        "post_selection_interior_gap_trim": boundary_splits or [],
+    }
 
 
 def test_same_source_micro_gap_without_reset_is_coalesced():
@@ -46,5 +49,24 @@ def test_larger_source_gap_fails_open():
     left = _clip("a", 10.0, 12.0, "primera")
     right = _clip("b", 12.8, 14.0, "segunda")
     selected, audit = coalesce_selected_source_continuity((left, right), _diagnostics())
+    assert len(selected) == 2
+    assert audit == ()
+
+
+def test_boundary_authorized_micro_gap_is_never_recoalesced():
+    left = _clip("left", 10.0, 12.0, "primera")
+    right = _clip("right", 12.44, 14.0, "segunda")
+    boundary_splits = [{
+        "authority": "post_selection_interior_gap_trim",
+        "decision": "split",
+        "removed_gap_start": 12.0,
+        "removed_gap_end": 12.44,
+        "removed_gap_sec": 0.44,
+        "evidence_mode": "completed_sentence_anticipatory_reset",
+    }]
+    selected, audit = coalesce_selected_source_continuity(
+        (left, right),
+        _diagnostics(boundary_splits=boundary_splits),
+    )
     assert len(selected) == 2
     assert audit == ()
