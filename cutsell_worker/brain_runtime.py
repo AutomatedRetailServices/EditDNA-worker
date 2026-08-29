@@ -23,6 +23,8 @@ from .hybrid_take_judge import HybridTakeJudgeProvider
 from .providers import NoopSemanticProvider, SemanticProvider
 from .take_grouping_provider import TakeGroupingProvider
 from .take_judge_provider import TakeJudgeProvider
+from .unified_selection_google import GoogleUnifiedSelectionReasoner
+from .unified_selection_reasoner import UnifiedSelectionReasoner
 from .visual_analysis import VisualProvider
 from .whole_video_analysis import WholeVideoProvider
 from .whole_video_local import RunPodLocalWholeVideoProvider
@@ -43,35 +45,37 @@ class BrainRuntime:
     composer_provider: ComposerProvider | None
     draft_review_provider: DraftReviewProvider | None
     editorial_judge: EditorialJudge | None = None
+    selection_reasoner: UnifiedSelectionReasoner | None = None
     hybrid_settings: HybridProviderSettings = HybridProviderSettings()
 
     @property
     def external_calls_enabled(self) -> bool:
-        return self.editorial_judge is not None
+        return self.editorial_judge is not None or self.selection_reasoner is not None
 
 
 def _env_true(value: str | None) -> bool:
     return str(value or "").strip().lower() in {"1", "true", "yes", "on"}
 
 
-def _build_editorial_judge(
-    settings: HybridProviderSettings,
-    values: Mapping[str, str],
-) -> EditorialJudge | None:
-    """Construct the approved paid judge only after every explicit gate passes.
-
-    Important invariant: if Hybrid is explicitly enabled, silently dropping to the
-    deterministic local brain is forbidden. A missing credential must fail the job so
-    benchmarks and production cannot report success while skipping semantic authority.
-    """
+def _require_google_api_key(settings: HybridProviderSettings, values: Mapping[str, str]) -> str:
     if not settings.enabled or settings.provider != "google":
-        return None
+        return ""
     api_key = str(values.get("GEMINI_API_KEY") or "").strip()
     if not api_key:
         raise RuntimeError(
             "CUTSELL_HYBRID_LLM_ENABLED=1 requires GEMINI_API_KEY; refusing silent local fallback"
         )
+    return api_key
 
+
+def _build_editorial_judge(
+    settings: HybridProviderSettings,
+    values: Mapping[str, str],
+) -> EditorialJudge | None:
+    """Construct the legacy bounded paid judge after every explicit gate passes."""
+    if not settings.enabled or settings.provider != "google":
+        return None
+    api_key = _require_google_api_key(settings, values)
     ledger = DollarBudgetLedger(settings.max_cost_per_edit_usd)
     transport = GoogleGeminiTransport(
         api_key=api_key,
@@ -87,11 +91,26 @@ def _build_editorial_judge(
     )
 
 
+def _build_unified_selection_reasoner(
+    settings: HybridProviderSettings,
+    values: Mapping[str, str],
+) -> UnifiedSelectionReasoner | None:
+    if not settings.enabled or settings.provider != "google":
+        return None
+    api_key = _require_google_api_key(settings, values)
+    return GoogleUnifiedSelectionReasoner(
+        api_key=api_key,
+        model=settings.primary_model,
+        settings=settings,
+        ledger=DollarBudgetLedger(settings.max_cost_per_edit_usd),
+    )
+
+
 def build_brain_runtime(
     config: RuntimeConfig,
     env: Mapping[str, str] | None = None,
 ) -> BrainRuntime:
-    """Build local perception plus explicitly-gated Hybrid Editorial reasoning."""
+    """Build local perception plus one explicitly-gated semantic Selection authority."""
     if config.brain_backend != RUNPOD_LOCAL_BACKEND:
         raise RuntimeError(
             f"unsupported CUTSELL_BRAIN_BACKEND={config.brain_backend!r}; "
@@ -100,15 +119,28 @@ def build_brain_runtime(
 
     values: Mapping[str, str] = env if env is not None else os.environ
     requested_hybrid = _env_true(values.get("CUTSELL_HYBRID_LLM_ENABLED"))
+    requested_unified = _env_true(values.get("CUTSELL_UNIFIED_SELECTION_REASONER"))
     requested_provider = str(values.get("CUTSELL_HYBRID_PROVIDER") or "google").strip().lower()
     if requested_hybrid and requested_provider != "google":
         raise RuntimeError(
             "CUTSELL_HYBRID_LLM_ENABLED=1 requires CUTSELL_HYBRID_PROVIDER=google; "
             f"got {requested_provider!r}. Refusing silent local fallback"
         )
+    if requested_unified and not requested_hybrid:
+        raise RuntimeError(
+            "CUTSELL_UNIFIED_SELECTION_REASONER=1 requires CUTSELL_HYBRID_LLM_ENABLED=1"
+        )
 
     hybrid_settings = load_hybrid_provider_settings(dict(values))
-    editorial_judge = _build_editorial_judge(hybrid_settings, values)
+    selection_reasoner = (
+        _build_unified_selection_reasoner(hybrid_settings, values)
+        if requested_unified
+        else None
+    )
+    # The pivot deliberately avoids two semantic brains fighting over the same edit.
+    # When Unified Selection is active, legacy bounded Hybrid classification is OFF and
+    # its former outputs remain only historical/local evidence already present in tests.
+    editorial_judge = None if selection_reasoner is not None else _build_editorial_judge(hybrid_settings, values)
 
     return BrainRuntime(
         backend=RUNPOD_LOCAL_BACKEND,
@@ -116,13 +148,11 @@ def build_brain_runtime(
         whole_video_provider=RunPodLocalWholeVideoProvider(),
         visual_provider=None,
         take_grouping_provider=None,
-        # Hybrid semantic cleanup is intentionally called once in pipeline Pass 2 and
-        # its winner/alternate evidence is reused by Best Take in Pass 3. Keeping this
-        # provider local prevents a second paid request for the same creator session.
         take_judge_provider=HybridTakeJudgeProvider(editorial_judge=None),
         clean_cut_provider=None,
         composer_provider=None,
         draft_review_provider=None,
         editorial_judge=editorial_judge,
+        selection_reasoner=selection_reasoner,
         hybrid_settings=hybrid_settings,
     )
