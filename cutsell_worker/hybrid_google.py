@@ -18,7 +18,18 @@ def editorial_response_schema(candidate_count: int | None = None) -> dict[str, A
     Gemini does not need to echo clip IDs: the caller already knows the deterministic
     candidate order. Omitting IDs materially reduces structured-output size and avoids
     truncation while downstream code can reattach IDs by index before validation.
+
+    `candidate_count` is accepted for call-site/API compatibility but deliberately NOT
+    encoded as an exact minItems==maxItems array bound. An isolation probe
+    (scripts/isolate_unified_selection_schema.py, see
+    docs/claude-handoff/CUTSELL_COMPLETE_HANDOFF.md) proved Gemini's structured-output
+    validator rejects an exact-length array bound at scale (works at 5 items, 400s at
+    90) with this exact model, even using this exact small schema shape. Hybrid groups
+    have always been small enough to avoid hitting this, but the bound was never doing
+    anything the downstream decision-count check in hybrid_google_transport.py doesn't
+    already enforce, so it is removed here too rather than left as a latent landmine.
     """
+    del candidate_count
     decisions_schema: dict[str, Any] = {
         "type": "array",
         "items": {
@@ -31,9 +42,6 @@ def editorial_response_schema(candidate_count: int | None = None) -> dict[str, A
             "additionalProperties": False,
         },
     }
-    if candidate_count is not None and int(candidate_count) >= 0:
-        decisions_schema["minItems"] = int(candidate_count)
-        decisions_schema["maxItems"] = int(candidate_count)
     return {
         "type": "object",
         "properties": {"decisions": decisions_schema},

@@ -685,35 +685,71 @@ successfully executed once against Video00.**
    what raised the exception here — the request reached Gemini and was
    rejected there, not blocked locally).
 
-This sandbox could not verify any of the above further: `ai.google.dev`
-is blocked by network egress policy here, and no GEMINI_API_KEY is
+This sandbox could not verify any of the above further at the time: `ai.google.dev`
+was blocked by network egress policy here, and no GEMINI_API_KEY was
 available in this session to test the live endpoint directly.
 
-### Explicit handoff instruction (already in this document, still binding)
-> Do not casually change provider/model while diagnosing an
-> observability contract issue.
+### ROOT CAUSE CONFIRMED (2026-08-29, same checkpoint)
 
-Per user decision on 2026-08-29 (this checkpoint), the next Claude
-session should NOT unilaterally rewrite the Unified reasoner's request
-schema or model. The user is investigating the Gemini request-schema
-question directly (they have API/docs access this sandbox does not).
-**Do not spend another paid RAW guessing at a schema fix without new
-instruction from the user or evidence they've supplied.**
+The user independently checked Google's current docs and confirmed
+`gemini-3.5-flash-lite` is a valid GA model (do not change it), and that
+`responseJsonSchema` generally supports `minItems`/`maxItems` (so those
+keys are not inherently invalid). Per the user's instruction, a cheap
+isolation probe was built and run *without* a paid GPU RAW:
+`scripts/isolate_unified_selection_schema.py`, driven by
+`.github/workflows/cutsell-unified-selection-schema-isolate.yml`
+(mirrors `cutsell-hybrid-llm-bakeoff.yml`'s plain-`ubuntu-latest`, no-RunPod
+pattern). It reuses the real production request builders and makes 5 real,
+cheap Gemini calls (run `33271212716`, cost $0.021 total). Result:
+
+| case | N | exact `minItems==maxItems` bound? | schema richness | result |
+|---|---|---|---|---|
+| unified schema, bounded | 5 | yes | rich (Unified) | 200 |
+| unified schema, bounded | 90 | yes | rich (Unified) | **400** |
+| unified schema, unbounded | 90 | no | rich (Unified) | 200 |
+| bake-off schema, unbounded | 90 | no | simple | 200 |
+| bake-off schema, bounded | 90 | yes | simple | **400** |
+
+This isolates the cause completely: schema richness is irrelevant — even
+the already-proven-working bake-off schema 400s once given an exact
+`minItems==maxItems` bound at N=90, and the rich Unified schema succeeds
+fine once that bound is dropped. **Gemini's structured-output validator
+rejects an exact-length array bound at whole-video scale** (works at 5
+items, fails by 90) with this model, regardless of per-item schema shape.
+Legacy bounded-Hybrid groups have always been small enough to never hit
+this.
+
+### Fix applied
+Both `unified_selection_response_schema()`
+(`cutsell_worker/unified_selection_google.py`) and
+`editorial_response_schema()` (`cutsell_worker/hybrid_google.py`, same
+latent landmine, never previously triggered because Hybrid groups are
+small) no longer emit `minItems`/`maxItems` on the `decisions` array. This
+loses no correctness guarantee: both call sites already raise
+`ValueError` downstream in Python
+(`"unified Selection ordered decision count mismatch"` /
+`"hybrid provider ordered decision count mismatch"`) if the returned
+decision count doesn't match the candidate count exactly — that check now
+does the enforcement the wire schema used to attempt and 400 on. No
+semantic Selection logic (SELECT/SWAP/DISCARD reasoning) was touched.
+Targeted tests updated (`test_cutsell_hybrid_google.py`,
+`test_cutsell_hybrid_google_ordered.py`,
+`test_cutsell_unified_selection_reasoner.py`) plus the full suite (848
+passed / 1 skipped) both green.
 
 ## Updated EXACT NEXT ACTION
-1. Wait for the user's findings on the Gemini 400 (schema shape, size
-   limits, or model correction).
-2. Once a concrete fix is identified, apply it narrowly to
-   `unified_selection_google.py` (and/or `unified_selection_reasoner.py`
-   if the fail-open contract itself needs to change), add/extend targeted
-   tests, run the full suite, then trigger exactly one RAW to confirm
-   `selection_reasoner_status == "applied"` before any Selection-quality
-   analysis resumes.
-3. Only after a real `"applied"` run exists should Selection parity vs.
-   the frozen `benchmarks/video00_selection_lock.json` gold lock be
-   re-diagnosed. The current 28-clip regression is a fail-open artifact,
-   not evidence of a Unified Selection editorial bug — do not tune
-   editorial rules against it.
+1. This fix was pushed and should trigger exactly one confirmatory
+   Video00 RAW. Check its `selection_reasoner_status` — expect `"applied"`
+   for the first time.
+2. If `"applied"`: proceed to real Selection-quality analysis against
+   `benchmarks/video00_selection_lock.json` per handoff item F (inspect
+   `diagnostics.unified_selection_reasoner.decisions` before any semantic
+   patch). The prior 28-clip regression was a fail-open artifact of the
+   400, not evidence of a Unified Selection editorial bug — do not carry
+   forward any editorial conclusions drawn from it.
+3. If still not `"applied"`: read the new error via the
+   `Print unified Selection reasoner diagnostics` CI step and re-diagnose;
+   do not assume the same root cause without checking the new error text.
 
 ---
 

@@ -67,8 +67,13 @@ def test_transport_reattaches_clip_ids_to_ordered_decisions():
     schema = fake.calls[0][2]["generationConfig"]["responseJsonSchema"]
     item = schema["properties"]["decisions"]["items"]
     assert "clip_id" not in item["properties"]
-    assert schema["properties"]["decisions"]["minItems"] == 6
-    assert schema["properties"]["decisions"]["maxItems"] == 6
+    # No exact-length array bound: Gemini's structured-output validator rejects
+    # minItems==maxItems at scale even with this schema/model (see
+    # scripts/isolate_unified_selection_schema.py); the count is still enforced
+    # by test_transport_rejects_ordered_decision_count_mismatch_fail_open_upstream
+    # below, downstream in Python, not by the wire schema.
+    assert "minItems" not in schema["properties"]["decisions"]
+    assert "maxItems" not in schema["properties"]["decisions"]
 
 
 def test_transport_rejects_ordered_decision_count_mismatch_fail_open_upstream():

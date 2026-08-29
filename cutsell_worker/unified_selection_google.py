@@ -141,13 +141,22 @@ def build_unified_selection_payload(draft: DraftTimeline) -> dict[str, Any]:
 
 
 def unified_selection_response_schema(candidate_count: int) -> dict[str, Any]:
+    # `candidate_count` is accepted for call-site/API compatibility but deliberately
+    # NOT encoded as an exact minItems==maxItems array bound: an isolation probe
+    # (scripts/isolate_unified_selection_schema.py, see
+    # docs/claude-handoff/CUTSELL_COMPLETE_HANDOFF.md) proved Gemini's structured
+    # -output validator rejects an exact-length array bound at whole-video scale
+    # (works at 5 candidates, 400s at 90) -- even with this same model and even with
+    # the smaller/simpler schema that cutsell-hybrid-llm-bakeoff.yml already proved
+    # works. `reason()` below already raises ValueError on any decision-count
+    # mismatch after the response comes back, so dropping the schema-level bound
+    # loses no correctness guarantee, only the request shape that was 400ing.
+    del candidate_count
     return {
         "type": "object",
         "properties": {
             "decisions": {
                 "type": "array",
-                "minItems": int(candidate_count),
-                "maxItems": int(candidate_count),
                 "items": {
                     "type": "object",
                     "properties": {

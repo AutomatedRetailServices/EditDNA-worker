@@ -146,8 +146,16 @@ def test_unified_request_requires_one_structured_human_style_decision_per_candid
 
     schema = request["generationConfig"]["responseJsonSchema"]
     decisions = schema["properties"]["decisions"]
-    assert decisions["minItems"] == 3
-    assert decisions["maxItems"] == 3
+    # No exact-length array bound: an isolation probe
+    # (scripts/isolate_unified_selection_schema.py) proved Gemini's
+    # structured-output validator rejects minItems==maxItems at whole-video
+    # scale (works at 5 candidates, 400s at 90) even with this exact model and
+    # even with a much simpler schema. GoogleUnifiedSelectionReasoner.reason()
+    # still enforces exactly one decision per candidate downstream in Python
+    # ("unified Selection ordered decision count mismatch"), so the wire schema
+    # must never re-add this bound.
+    assert "minItems" not in decisions
+    assert "maxItems" not in decisions
     properties = decisions["items"]["properties"]
     assert set(properties["action"]["enum"]) == {"select", "swap", "discard"}
     assert "composite_piece" in properties["relation"]["enum"]

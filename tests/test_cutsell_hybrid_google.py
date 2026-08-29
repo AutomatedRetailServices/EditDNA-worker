@@ -36,7 +36,12 @@ def test_request_uses_structured_json_and_no_network_or_key_material():
     assert "http" not in serialized.lower()
 
 
-def test_schema_constrains_labels_confidence_omits_echoed_ids_and_locks_count():
+def test_schema_constrains_labels_confidence_omits_echoed_ids_and_never_bounds_count():
+    # An isolation probe proved Gemini's structured-output validator rejects an
+    # exact-length minItems==maxItems array bound at scale even with this exact
+    # schema and model (works at 5 items, 400s at 90); the decision-count check
+    # already lives downstream in hybrid_google_transport.py, so the schema must
+    # never re-add this bound regardless of the candidate_count argument passed.
     schema = editorial_response_schema(6)
     decisions = schema["properties"]["decisions"]
     item = decisions["items"]
@@ -47,8 +52,8 @@ def test_schema_constrains_labels_confidence_omits_echoed_ids_and_locks_count():
     assert "clip_id" not in item["properties"]
     assert "reason_code" not in item["properties"]
     assert item["additionalProperties"] is False
-    assert decisions["minItems"] == 6
-    assert decisions["maxItems"] == 6
+    assert "minItems" not in decisions
+    assert "maxItems" not in decisions
 
 
 def test_parser_extracts_ordered_compact_decisions_and_usage_and_joins_text_parts():
