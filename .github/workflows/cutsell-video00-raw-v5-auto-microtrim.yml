@@ -45,6 +45,10 @@ env:
   IMAGE_REPO: ghcr.io/automatedretailservices/cutsell-serverless
   ENDPOINT_ID: xxu7autt8mv2rn
   SOURCE_KEY: Editdna longform validation/VIDEO-2026-07-30-09-18-03.mp4
+  # QA-only authoritative Human Gold reference. Downloaded into the diagnostic
+  # artifact for Human Watch+Listen comparison; never read by production
+  # Selection/Boundary code (cutsell_worker) and never passed to the RunPod job.
+  HUMAN_GOLD_KEY: Editdna longform validation/5E01F214-A364-4F4B-8F25-D39B1E2B21D2.MP4
   BENCHMARK_ID: video00-unified-selection-${{ github.run_id }}-${{ github.run_attempt }}
 
 jobs:
@@ -269,6 +273,31 @@ jobs:
           aws s3 cp "$RESULT_URI" artifact/video00-unified-selection.json
           test -s artifact/video00-unified-selection.mp4
           test -s artifact/video00-unified-selection.json
+
+      - name: Download Human Gold reference video
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p artifact
+          # QA-only: gives Human Watch+Listen a side-by-side reference in the
+          # same diagnostic artifact as the generated CutSell MP4 and result
+          # JSON. This file is never read by production code -- it is not
+          # part of the RunPod job input, and no cutsell_worker Selection or
+          # Boundary logic reads HUMAN_GOLD_KEY or this artifact path.
+          if [ ! -s /tmp/base-template.json ]; then
+            echo "No base RunPod template available; skipping Human Gold reference download."
+            exit 0
+          fi
+          BASE_TEMPLATE=$(cat /tmp/base-template.json)
+          for key in AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_REGION S3_BUCKET; do
+            value=$(printf '%s' "$BASE_TEMPLATE" | jq -r --arg key "$key" '.env[$key] // empty')
+            test -n "$value"
+            echo "::add-mask::$value"
+            export "$key=$value"
+          done
+          aws s3 cp "s3://$S3_BUCKET/$HUMAN_GOLD_KEY" artifact/human-gold-video00.mp4
+          test -s artifact/human-gold-video00.mp4
 
       - name: Print unified Selection reasoner diagnostics
         if: always()
