@@ -1,0 +1,306 @@
+"""Gemini-backed whole-video Selection reasoner for CutSell.
+
+Unlike the legacy bounded Hybrid judge, this authority sees the complete candidate
+universe for one source in a single request.  It asks the model to form idea/retry
+families, recognize composites and continuations, and assign final semantic membership
+before Selection freeze.  Boundary ownership remains elsewhere.
+"""
+from __future__ import annotations
+
+from dataclasses import dataclass
+import json
+from typing import Any, Mapping
+
+import requests
+
+from .contracts import DraftTimeline
+from .hybrid_google_transport import DollarBudgetLedger
+from .hybrid_payload import estimate_tokens_from_chars
+from .hybrid_provider_settings import HybridProviderSettings
+from .unified_selection_reasoner import (
+    UnifiedSelectionDecision,
+    UnifiedSelectionPlan,
+)
+
+_ACTIONS = ["select", "swap", "discard"]
+_RELATIONS = [
+    "independent",
+    "retry_winner",
+    "retry_alternate",
+    "composite_piece",
+    "continuation",
+    "failed",
+    "bts",
+    "uncertain",
+]
+_REASON_CODES = [
+    "best_complete_take",
+    "independent_story_coverage",
+    "composite_best_take_piece",
+    "necessary_continuation",
+    "usable_alternate",
+    "redundant_retry",
+    "failed_delivery",
+    "recording_process_bts",
+    "uncertain_preserve",
+]
+
+
+def _candidate_universe(draft: DraftTimeline) -> list[dict[str, Any]]:
+    buckets: dict[str, str] = {}
+    clips = {}
+    for bucket_name, bucket in (
+        ("discard", draft.discarded),
+        ("swap", draft.alternates),
+        ("select", draft.selected),
+    ):
+        for clip in bucket:
+            clips.setdefault(clip.clip_id, clip)
+            buckets[clip.clip_id] = bucket_name
+
+    hybrid_votes: dict[str, list[dict[str, Any]]] = {}
+    for chunk in (draft.diagnostics or {}).get("hybrid_editorial_chunks") or ():
+        if not isinstance(chunk, Mapping):
+            continue
+        for row in chunk.get("decisions") or ():
+            if not isinstance(row, Mapping) or not row.get("clip_id"):
+                continue
+            try:
+                confidence = round(float(row.get("confidence") or 0.0), 3)
+            except (TypeError, ValueError):
+                confidence = 0.0
+            hybrid_votes.setdefault(str(row["clip_id"]), []).append({
+                "label": str(row.get("label") or ""),
+                "confidence": confidence,
+            })
+
+    rows = []
+    for clip in sorted(
+        clips.values(),
+        key=lambda item: (item.source_order, float(item.start), float(item.end), item.clip_id),
+    ):
+        rows.append({
+            "clip_id": clip.clip_id,
+            "current_bucket": buckets.get(clip.clip_id, "swap"),
+            "source_order": int(clip.source_order),
+            "start": round(float(clip.start), 3),
+            "end": round(float(clip.end), 3),
+            "duration": round(max(0.0, float(clip.end) - float(clip.start)), 3),
+            "take_group_id": clip.take_group_id,
+            "text": " ".join(str(clip.text or "").split())[:1800],
+            "hybrid_votes": hybrid_votes.get(clip.clip_id, [])[:6],
+        })
+    return rows
+
+
+def _source_context(draft: DraftTimeline) -> dict[str, Any]:
+    raw = (draft.diagnostics or {}).get("whole_video_context") or {}
+    if not isinstance(raw, Mapping):
+        return {}
+    sources = raw.get("sources") or []
+    compact_sources = []
+    for source in sources:
+        if not isinstance(source, Mapping):
+            continue
+        compact_sources.append({
+            "source_asset_id": source.get("source_asset_id"),
+            "summary": str(source.get("summary") or "")[:3000],
+            "creator_intent": str(source.get("creator_intent") or "")[:600],
+            "main_topic": str(source.get("main_topic") or "")[:500],
+            "story_logic": str(source.get("story_logic") or "")[:1000],
+            "dominant_style": str(source.get("dominant_style") or "")[:300],
+            "edit_mode": str(source.get("edit_mode") or "")[:80],
+        })
+    return {
+        "dominant_edit_mode": raw.get("dominant_edit_mode"),
+        "sources": compact_sources,
+    }
+
+
+def build_unified_selection_payload(draft: DraftTimeline) -> dict[str, Any]:
+    candidates = _candidate_universe(draft)
+    if not candidates:
+        raise ValueError("unified selection requires at least one candidate")
+    return {
+        "task": "cutsell_unified_whole_video_selection",
+        "source_context": _source_context(draft),
+        "editorial_contract": [
+            "Understand the full creator message before deciding any individual take.",
+            "First infer idea families and retry relationships across the entire timeline.",
+            "SELECT independent valid story coverage, the best retry, necessary continuations, and every clean piece needed for a composite best take.",
+            "SWAP a usable alternative or redundant delivery that should not play by default but remains useful for manual replacement.",
+            "DISCARD only recording-process BTS, failed/abandoned delivery, or an inferior retry with no unique audience-facing information.",
+            "Do not prefer a monolithic take merely because it is longer; a human-quality composite of cleaner micro-deliveries may be better.",
+            "Do not treat adjacent valid statements as retries just because they share topic words.",
+            "Preserve numbers, negations, names, causal claims, and genuinely new story facts.",
+            "Natural source story order is authoritative; do not reorder candidates.",
+            "WHEN UNCERTAIN, preserve content rather than destructively deleting it.",
+        ],
+        "candidates": candidates,
+    }
+
+
+def unified_selection_response_schema(candidate_count: int) -> dict[str, Any]:
+    return {
+        "type": "object",
+        "properties": {
+            "decisions": {
+                "type": "array",
+                "minItems": int(candidate_count),
+                "maxItems": int(candidate_count),
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "action": {"type": "string", "enum": _ACTIONS},
+                        "relation": {"type": "string", "enum": _RELATIONS},
+                        "confidence": {"type": "number", "minimum": 0.0, "maximum": 1.0},
+                        "family_index": {"type": "integer", "minimum": 0},
+                        "reason_code": {"type": "string", "enum": _REASON_CODES},
+                    },
+                    "required": ["action", "relation", "confidence", "family_index", "reason_code"],
+                    "additionalProperties": False,
+                },
+            }
+        },
+        "required": ["decisions"],
+        "additionalProperties": False,
+    }
+
+
+def build_unified_selection_request(payload: Mapping[str, Any], *, max_output_tokens: int) -> dict[str, Any]:
+    candidate_count = len(payload.get("candidates") or ())
+    prompt = (
+        "You are CutSell's final human-style Selection editor for ONE complete raw creator video. "
+        "Do not make isolated clip decisions. Read every candidate first, reconstruct the intended story, "
+        "form same-idea retry families, distinguish continuations from retries, and identify when the best "
+        "human edit is a composite assembled from multiple clean sub-deliveries. Current buckets, local groups, "
+        "and Hybrid votes are evidence only and may be overturned. Return one decision for every candidate in "
+        "the exact supplied order. family_index must be the same integer for genuine competing retries or "
+        "composite pieces of one idea; use a different family for independent story beats. SELECT means it plays "
+        "in the default edit. SWAP means it remains available but does not play. DISCARD is destructive and is "
+        "reserved for failed/BTS/inferior duplicate material with no unique audience-facing value. Never delete "
+        "information only because wording overlaps. When uncertain, preserve rather than delete. Do not echo IDs "
+        "or timestamps. Output only the requested JSON schema.\n\n"
+        + json.dumps(dict(payload), ensure_ascii=False, separators=(",", ":"))
+    )
+    return {
+        "contents": [{"role": "user", "parts": [{"text": prompt}]}],
+        "generationConfig": {
+            "temperature": 0.0,
+            "maxOutputTokens": int(max_output_tokens),
+            "thinkingConfig": {"thinkingLevel": "low"},
+            "responseMimeType": "application/json",
+            "responseJsonSchema": unified_selection_response_schema(candidate_count),
+        },
+    }
+
+
+def parse_unified_selection_response(raw: Mapping[str, Any]) -> tuple[list[Mapping[str, Any]], int]:
+    candidates = raw.get("candidates")
+    if not isinstance(candidates, list) or not candidates:
+        raise ValueError("Gemini unified response missing candidates")
+    first = candidates[0]
+    if not isinstance(first, Mapping):
+        raise ValueError("Gemini unified candidate malformed")
+    content = first.get("content")
+    if not isinstance(content, Mapping):
+        raise ValueError("Gemini unified response missing content")
+    parts = content.get("parts")
+    if not isinstance(parts, list) or not parts:
+        raise ValueError("Gemini unified response missing parts")
+    text = "".join(str(part.get("text") or "") for part in parts if isinstance(part, Mapping))
+    parsed = json.loads(text)
+    decisions = parsed.get("decisions") if isinstance(parsed, Mapping) else None
+    if not isinstance(decisions, list):
+        raise ValueError("Gemini unified response missing decisions")
+    usage = raw.get("usageMetadata") or {}
+    try:
+        output_tokens = max(0, int(usage.get("candidatesTokenCount") or 0)) if isinstance(usage, Mapping) else 0
+    except (TypeError, ValueError):
+        output_tokens = 0
+    return decisions, output_tokens
+
+
+@dataclass
+class GoogleUnifiedSelectionReasoner:
+    api_key: str
+    model: str
+    settings: HybridProviderSettings
+    ledger: DollarBudgetLedger
+    timeout_sec: float = 90.0
+    session: Any = requests
+    max_input_tokens: int = 20_000
+    max_output_tokens: int = 4_096
+
+    def reason(self, draft: DraftTimeline) -> UnifiedSelectionPlan:
+        if not self.api_key:
+            raise ValueError("Gemini API key required")
+        if not self.settings.enabled or self.settings.provider != "google":
+            raise RuntimeError("unified Selection paid transport is disabled")
+        if self.model not in {self.settings.primary_model, self.settings.escalation_model}:
+            raise ValueError("Gemini model not approved by provider policy")
+
+        payload = build_unified_selection_payload(draft)
+        candidate_rows = payload["candidates"]
+        payload_chars = len(json.dumps(payload, ensure_ascii=False))
+        input_tokens = estimate_tokens_from_chars(payload_chars)
+        if input_tokens > self.max_input_tokens:
+            raise ValueError("unified Selection input token budget exceeded")
+
+        output_reserve = min(self.max_output_tokens, max(640, 36 * len(candidate_rows)))
+        estimated_cost = self.settings.estimate_cost_usd(
+            input_tokens=input_tokens,
+            output_tokens=output_reserve,
+            escalation=False,
+        )
+        if not self.settings.allows_estimated_session_cost(estimated_cost):
+            raise RuntimeError("unified Selection session cost cap exceeded")
+        if not self.ledger.reserve(estimated_cost):
+            raise RuntimeError("unified Selection edit dollar budget exhausted")
+
+        body = build_unified_selection_request(payload, max_output_tokens=output_reserve)
+        endpoint = f"https://generativelanguage.googleapis.com/v1beta/models/{self.model}:generateContent"
+        response = self.session.post(
+            endpoint,
+            headers={"x-goog-api-key": self.api_key, "Content-Type": "application/json"},
+            json=body,
+            timeout=self.timeout_sec,
+        )
+        response.raise_for_status()
+        raw = response.json()
+        if not isinstance(raw, Mapping):
+            raise ValueError("Gemini unified HTTP response must be an object")
+        raw_decisions, output_tokens = parse_unified_selection_response(raw)
+        if len(raw_decisions) != len(candidate_rows):
+            raise ValueError("unified Selection ordered decision count mismatch")
+
+        actual_cost = self.settings.estimate_cost_usd(
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+            escalation=False,
+        )
+        if actual_cost < estimated_cost:
+            self.ledger.release(estimated_cost - actual_cost)
+
+        decisions = []
+        for candidate, item in zip(candidate_rows, raw_decisions):
+            if not isinstance(item, Mapping):
+                raise ValueError("unified Selection decision malformed")
+            decisions.append(UnifiedSelectionDecision(
+                clip_id=str(candidate["clip_id"]),
+                action=str(item.get("action") or ""),
+                relation=str(item.get("relation") or ""),
+                confidence=float(item.get("confidence", -1.0)),
+                family_index=int(item.get("family_index", -1)),
+                reason_code=str(item.get("reason_code") or ""),
+            ))
+
+        return UnifiedSelectionPlan(
+            decisions=tuple(decisions),
+            provider="google",
+            model=self.model,
+            requested=True,
+            available=True,
+            estimated_input_tokens=input_tokens,
+            estimated_output_tokens=output_tokens,
+        )
