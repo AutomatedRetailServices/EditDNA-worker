@@ -597,6 +597,126 @@ Video00 does NOT need to be Gold for this observability task to be complete.
 
 ---
 
+# RAW #114 OBSERVABILITY TASK — RESOLVED (RAW #116 / #117)
+
+## What was fixed
+Both halves of the RAW #114 "EXACT NEXT ACTION" were completed and pushed to
+`cutsell/mobile-v1-clean`:
+
+- §A (compact serverless return contract): already landed before this
+  checkpoint as `0ae69d4` ("Expose Unified Selection reasoner state in
+  serverless focused output").
+- §B (workflow evidence preservation): landed as `7ad3a48` ("Preserve
+  Video00 RAW evidence before the architecture gate can fail it"). The
+  `Wait for unified Selection result` step no longer hard-gates on compact
+  output keys before evidence is downloaded; artifact download/upload now
+  run with `if: always()` and skip cleanly instead of failing when
+  preview/result URIs are absent; the real architecture/Selection-lock gate
+  now runs after the diagnostic artifact is uploaded.
+- A follow-up, purely additive step landed as `1dbff15` ("Print unified
+  Selection reasoner diagnostics in RAW CI logs"): prints
+  `diagnostics.unified_selection_reasoner` (status/error or
+  status/decisions) straight into CI logs, since this sandbox/session
+  cannot reach the S3/blob hosts needed to pull the uploaded artifact
+  directly.
+
+Completion criteria 1-4 above are met (targeted tests pass, full suite
+848 passed / 1 skipped, RAW #116 and #117 both produced a downloadable
+result JSON + MP4 artifact — `cutsell-video00-unified-selection-human-review`
+on runs `33268618850` and `33269880531`). Criteria 5-6 are also now met,
+in the sense that Unified architecture status IS known — see below — even
+though the news is not the "applied" status everyone was hoping to see.
+
+## NEW CURRENT LIVE BLOCKER — Gemini 400 on the Unified Selection reasoner call
+
+RAW #116 and RAW #117 (both on `cutsell/mobile-v1-clean`, head `7ad3a48`
+and `1dbff15`) each reached RunPod `COMPLETED` and produced:
+
+```
+selection_reasoner_status: "provider_error_fail_open"
+selection_reasoner_provider: null
+selection_reasoner_model: null
+```
+
+`diagnostics.unified_selection_reasoner` (now printed directly in CI logs
+by the `Print unified Selection reasoner diagnostics` step) reads:
+
+```json
+{
+  "error": "HTTPError: 400 Client Error: Bad Request for url: https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash-lite:generateContent",
+  "status": "provider_error_fail_open"
+}
+```
+
+Per `apply_unified_selection_reasoner()` in
+`cutsell_worker/unified_selection_reasoner.py`, this exception is caught
+and the pipeline **fails open**: it returns the pre-reasoner draft
+unchanged, i.e. Unified Selection never actually ran and the legacy
+selection stood. That legacy selection is what `Verify frozen Selection
+lock` then correctly flagged as a real regression against the frozen
+Human Gold lock: 28 clips selected vs. 23 expected, several required
+segments missing (sonography good-take parts, papillary cancer context,
+pimples micro-takes, family context), two historically-bad takes
+returned, and required orderings broken. **This is not evidence that
+Unified Selection itself is editorially wrong — it has still never
+successfully executed once against Video00.**
+
+### Ranked hypotheses (none yet confirmed live)
+1. **Most likely**: the Unified reasoner's `responseJsonSchema` in
+   `unified_selection_google.py` enforces `minItems == maxItems ==
+   candidate_count` against the *entire video's* candidate universe
+   (potentially 60-100+ items for a ~6 minute source) with a 5-field,
+   two-enum per-item schema. The legacy bounded-Hybrid path
+   (`hybrid_google.py` / `hybrid_google_transport.py`) uses the same
+   model and the same `thinkingConfig.thinkingLevel` /
+   `responseJsonSchema` field names, but with a much smaller schema (2
+   fields, small per-group `minItems`/`maxItems`) and has historical
+   evidence of working (see `scripts/hybrid_llm_bakeoff.py`, which has
+   real per-token pricing recorded for `gemini-3.5-flash-lite` and
+   `gemini-3.6-flash`). A fixed-size array schema or combined request
+   size at whole-video scale is the leading suspect for the 400.
+2. Less likely: the model name itself is stale/wrong. Weighed down by
+   the bakeoff script's pricing-table evidence above, but not
+   conclusively ruled out without a live API call.
+3. Unconfirmed: some other field in the request body (e.g. unbounded
+   `family_index` integer, or overall payload size vs. Gemini's actual
+   token/byte ceiling, as opposed to the local `max_input_tokens=20_000`
+   preflight estimate which is a crude chars/3 heuristic and was NOT
+   what raised the exception here — the request reached Gemini and was
+   rejected there, not blocked locally).
+
+This sandbox could not verify any of the above further: `ai.google.dev`
+is blocked by network egress policy here, and no GEMINI_API_KEY is
+available in this session to test the live endpoint directly.
+
+### Explicit handoff instruction (already in this document, still binding)
+> Do not casually change provider/model while diagnosing an
+> observability contract issue.
+
+Per user decision on 2026-08-29 (this checkpoint), the next Claude
+session should NOT unilaterally rewrite the Unified reasoner's request
+schema or model. The user is investigating the Gemini request-schema
+question directly (they have API/docs access this sandbox does not).
+**Do not spend another paid RAW guessing at a schema fix without new
+instruction from the user or evidence they've supplied.**
+
+## Updated EXACT NEXT ACTION
+1. Wait for the user's findings on the Gemini 400 (schema shape, size
+   limits, or model correction).
+2. Once a concrete fix is identified, apply it narrowly to
+   `unified_selection_google.py` (and/or `unified_selection_reasoner.py`
+   if the fail-open contract itself needs to change), add/extend targeted
+   tests, run the full suite, then trigger exactly one RAW to confirm
+   `selection_reasoner_status == "applied"` before any Selection-quality
+   analysis resumes.
+3. Only after a real `"applied"` run exists should Selection parity vs.
+   the frozen `benchmarks/video00_selection_lock.json` gold lock be
+   re-diagnosed. The current 28-clip regression is a fail-open artifact,
+   not evidence of a Unified Selection editorial bug — do not tune
+   editorial rules against it.
+
+---
+
 # SECURITY CONTINUITY
 
 Security is a parallel gate. Read `docs/claude-handoff/SECURITY_CONSTITUTION.md`.
