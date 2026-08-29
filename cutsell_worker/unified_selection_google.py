@@ -46,6 +46,16 @@ _REASON_CODES = [
 ]
 
 
+class UnifiedSelectionUnreliableResponseError(ValueError):
+    """The provider response could not be trusted as one complete decision per
+    candidate: truncated/malformed JSON, a missing field, or a decision count
+    that does not match the candidate universe. Always raised instead of ever
+    treating a partial or malformed response as an applied editorial result --
+    apply_unified_selection_reasoner()'s fail-open path is the only place a
+    response like this may take effect, and it discards the response entirely.
+    """
+
+
 def _candidate_universe(draft: DraftTimeline) -> list[dict[str, Any]]:
     buckets: dict[str, str] = {}
     clips = {}
@@ -176,6 +186,43 @@ def unified_selection_response_schema(candidate_count: int) -> dict[str, Any]:
     }
 
 
+def _worst_case_decision_json_chars() -> int:
+    """Exact worst-case serialized length of one decision object, derived from
+    the real enum values rather than a guessed constant. RAW #119 truncated
+    (finishReason MAX_TOKENS -> malformed JSON) because the previous output
+    token reserve (36 chars/candidate, chosen without reference to the actual
+    schema) under-provisioned relative to this: the longest reason_code alone
+    ("independent_story_coverage") is 27 characters, and that is also the
+    reason_code the model chooses most often in practice."""
+    sample = {
+        "action": max(_ACTIONS, key=len),
+        "relation": max(_RELATIONS, key=len),
+        "confidence": 0.95,
+        "family_index": 999,
+        "reason_code": max(_REASON_CODES, key=len),
+    }
+    return len(json.dumps(sample, separators=(",", ":")))
+
+
+# +1 char reserves the trailing comma between array items; this constant is
+# derived from the schema above, so it can never silently drift out of date
+# the way a hand-picked "tokens per candidate" guess could.
+_TOKENS_PER_DECISION = estimate_tokens_from_chars(_worst_case_decision_json_chars() + 1)
+_DECISION_ARRAY_OVERHEAD_TOKENS = estimate_tokens_from_chars(len('{"decisions":[]}') + 8)
+
+
+def output_token_reserve(candidate_count: int, *, ceiling: int) -> int:
+    """Worst-case output token budget for `candidate_count` decisions, capped
+    at `ceiling`. Every field in the schema is bounded (enums, a 0-1 float,
+    and a small integer), so this is a true upper bound, not a heuristic --
+    the model cannot need more tokens than this to state one complete,
+    schema-valid decision for every candidate."""
+    return min(
+        ceiling,
+        max(640, _TOKENS_PER_DECISION * max(0, int(candidate_count)) + _DECISION_ARRAY_OVERHEAD_TOKENS),
+    )
+
+
 def build_unified_selection_request(payload: Mapping[str, Any], *, max_output_tokens: int) -> dict[str, Any]:
     candidate_count = len(payload.get("candidates") or ())
     prompt = (
@@ -204,30 +251,50 @@ def build_unified_selection_request(payload: Mapping[str, Any], *, max_output_to
     }
 
 
-def parse_unified_selection_response(raw: Mapping[str, Any]) -> tuple[list[Mapping[str, Any]], int]:
+def parse_unified_selection_response(raw: Mapping[str, Any]) -> tuple[list[Mapping[str, Any]], int, str]:
+    """Return (decisions, output_tokens, finish_reason).
+
+    Raises UnifiedSelectionUnreliableResponseError for any shape the response
+    could take that must never be treated as a complete editorial result:
+    a missing candidate/content/parts/decisions field, or JSON that failed to
+    parse -- the latter always names finishReason so a MAX_TOKENS truncation
+    is distinguishable from a genuinely malformed generation at a glance.
+    """
     candidates = raw.get("candidates")
     if not isinstance(candidates, list) or not candidates:
-        raise ValueError("Gemini unified response missing candidates")
+        raise UnifiedSelectionUnreliableResponseError("Gemini unified response missing candidates")
     first = candidates[0]
     if not isinstance(first, Mapping):
-        raise ValueError("Gemini unified candidate malformed")
+        raise UnifiedSelectionUnreliableResponseError("Gemini unified candidate malformed")
+    finish_reason = str(first.get("finishReason") or "")
     content = first.get("content")
     if not isinstance(content, Mapping):
-        raise ValueError("Gemini unified response missing content")
+        raise UnifiedSelectionUnreliableResponseError(
+            f"Gemini unified response missing content (finishReason={finish_reason!r})"
+        )
     parts = content.get("parts")
     if not isinstance(parts, list) or not parts:
-        raise ValueError("Gemini unified response missing parts")
+        raise UnifiedSelectionUnreliableResponseError(
+            f"Gemini unified response missing parts (finishReason={finish_reason!r})"
+        )
     text = "".join(str(part.get("text") or "") for part in parts if isinstance(part, Mapping))
-    parsed = json.loads(text)
+    try:
+        parsed = json.loads(text)
+    except json.JSONDecodeError as exc:
+        raise UnifiedSelectionUnreliableResponseError(
+            f"Gemini unified response was not valid JSON (finishReason={finish_reason!r}): {exc}"
+        ) from exc
     decisions = parsed.get("decisions") if isinstance(parsed, Mapping) else None
     if not isinstance(decisions, list):
-        raise ValueError("Gemini unified response missing decisions")
+        raise UnifiedSelectionUnreliableResponseError(
+            f"Gemini unified response missing decisions (finishReason={finish_reason!r})"
+        )
     usage = raw.get("usageMetadata") or {}
     try:
         output_tokens = max(0, int(usage.get("candidatesTokenCount") or 0)) if isinstance(usage, Mapping) else 0
     except (TypeError, ValueError):
         output_tokens = 0
-    return decisions, output_tokens
+    return decisions, output_tokens, finish_reason
 
 
 @dataclass
@@ -240,6 +307,59 @@ class GoogleUnifiedSelectionReasoner:
     session: Any = requests
     max_input_tokens: int = 20_000
     max_output_tokens: int = 4_096
+    # RAW #119: Gemini returned a MAX_TOKENS-truncated, unparseable response
+    # once, with no retry available -- the pipeline fails open on the very
+    # first provider hiccup. One retry, with a larger output token reserve in
+    # case truncation was the cause, is the smallest general reliability
+    # improvement that does not touch editorial Selection rules at all: it
+    # only changes how many attempts a request gets and how large a response
+    # budget it asks for. If both attempts still fail, `reason()` still raises
+    # and apply_unified_selection_reasoner() still fails open exactly as
+    # before -- a real, observable failure, never a partial result applied as
+    # if it were complete.
+    max_retries: int = 1
+
+    def _call_once(
+        self,
+        payload: Mapping[str, Any],
+        candidate_rows: list[dict[str, Any]],
+        *,
+        output_tokens_requested: int,
+    ) -> tuple[list[UnifiedSelectionDecision], int]:
+        body = build_unified_selection_request(payload, max_output_tokens=output_tokens_requested)
+        endpoint = f"https://generativelanguage.googleapis.com/v1beta/models/{self.model}:generateContent"
+        response = self.session.post(
+            endpoint,
+            headers={"x-goog-api-key": self.api_key, "Content-Type": "application/json"},
+            json=body,
+            timeout=self.timeout_sec,
+        )
+        response.raise_for_status()
+        raw = response.json()
+        if not isinstance(raw, Mapping):
+            raise UnifiedSelectionUnreliableResponseError("Gemini unified HTTP response must be an object")
+        raw_decisions, output_tokens, finish_reason = parse_unified_selection_response(raw)
+        if len(raw_decisions) != len(candidate_rows):
+            raise UnifiedSelectionUnreliableResponseError(
+                "unified Selection ordered decision count mismatch "
+                f"(expected {len(candidate_rows)}, got {len(raw_decisions)}, finishReason={finish_reason!r})"
+            )
+
+        decisions = []
+        for candidate, item in zip(candidate_rows, raw_decisions):
+            if not isinstance(item, Mapping):
+                raise UnifiedSelectionUnreliableResponseError(
+                    f"unified Selection decision malformed (finishReason={finish_reason!r})"
+                )
+            decisions.append(UnifiedSelectionDecision(
+                clip_id=str(candidate["clip_id"]),
+                action=str(item.get("action") or ""),
+                relation=str(item.get("relation") or ""),
+                confidence=float(item.get("confidence", -1.0)),
+                family_index=int(item.get("family_index", -1)),
+                reason_code=str(item.get("reason_code") or ""),
+            ))
+        return decisions, output_tokens
 
     def reason(self, draft: DraftTimeline) -> UnifiedSelectionPlan:
         if not self.api_key:
@@ -256,60 +376,52 @@ class GoogleUnifiedSelectionReasoner:
         if input_tokens > self.max_input_tokens:
             raise ValueError("unified Selection input token budget exceeded")
 
-        output_reserve = min(self.max_output_tokens, max(640, 36 * len(candidate_rows)))
-        estimated_cost = self.settings.estimate_cost_usd(
-            input_tokens=input_tokens,
-            output_tokens=output_reserve,
-            escalation=False,
-        )
-        if not self.settings.allows_estimated_session_cost(estimated_cost):
-            raise RuntimeError("unified Selection session cost cap exceeded")
-        if not self.ledger.reserve(estimated_cost):
-            raise RuntimeError("unified Selection edit dollar budget exhausted")
+        # Exact worst-case budget for the schema actually sent, not a guessed
+        # constant -- see output_token_reserve()/_worst_case_decision_json_chars().
+        output_reserve = output_token_reserve(len(candidate_rows), ceiling=self.max_output_tokens)
 
-        body = build_unified_selection_request(payload, max_output_tokens=output_reserve)
-        endpoint = f"https://generativelanguage.googleapis.com/v1beta/models/{self.model}:generateContent"
-        response = self.session.post(
-            endpoint,
-            headers={"x-goog-api-key": self.api_key, "Content-Type": "application/json"},
-            json=body,
-            timeout=self.timeout_sec,
-        )
-        response.raise_for_status()
-        raw = response.json()
-        if not isinstance(raw, Mapping):
-            raise ValueError("Gemini unified HTTP response must be an object")
-        raw_decisions, output_tokens = parse_unified_selection_response(raw)
-        if len(raw_decisions) != len(candidate_rows):
-            raise ValueError("unified Selection ordered decision count mismatch")
+        for attempt in range(self.max_retries + 1):
+            estimated_cost = self.settings.estimate_cost_usd(
+                input_tokens=input_tokens,
+                output_tokens=output_reserve,
+                escalation=False,
+            )
+            if not self.settings.allows_estimated_session_cost(estimated_cost):
+                raise RuntimeError("unified Selection session cost cap exceeded")
+            if not self.ledger.reserve(estimated_cost):
+                raise RuntimeError("unified Selection edit dollar budget exhausted")
 
-        actual_cost = self.settings.estimate_cost_usd(
-            input_tokens=input_tokens,
-            output_tokens=output_tokens,
-            escalation=False,
-        )
-        if actual_cost < estimated_cost:
-            self.ledger.release(estimated_cost - actual_cost)
-
-        decisions = []
-        for candidate, item in zip(candidate_rows, raw_decisions):
-            if not isinstance(item, Mapping):
-                raise ValueError("unified Selection decision malformed")
-            decisions.append(UnifiedSelectionDecision(
-                clip_id=str(candidate["clip_id"]),
-                action=str(item.get("action") or ""),
-                relation=str(item.get("relation") or ""),
-                confidence=float(item.get("confidence", -1.0)),
-                family_index=int(item.get("family_index", -1)),
-                reason_code=str(item.get("reason_code") or ""),
-            ))
-
-        return UnifiedSelectionPlan(
-            decisions=tuple(decisions),
-            provider="google",
-            model=self.model,
-            requested=True,
-            available=True,
-            estimated_input_tokens=input_tokens,
-            estimated_output_tokens=output_tokens,
-        )
+            try:
+                decisions, output_tokens = self._call_once(
+                    payload, candidate_rows, output_tokens_requested=output_reserve,
+                )
+            except (requests.RequestException, UnifiedSelectionUnreliableResponseError):
+                # A failed attempt bills no real generation tokens, so give the
+                # preflight reservation back rather than leaking it -- otherwise
+                # the retry (or a later call in the same session) could be
+                # starved by budget locked up for a call that produced nothing.
+                self.ledger.release(estimated_cost)
+                if attempt < self.max_retries:
+                    # Retry with a larger reserve in case this was a MAX_TOKENS
+                    # truncation; harmless if it wasn't, still capped at the
+                    # configured ceiling.
+                    output_reserve = min(self.max_output_tokens, max(output_reserve, int(output_reserve * 1.5)))
+                    continue
+                raise
+            else:
+                actual_cost = self.settings.estimate_cost_usd(
+                    input_tokens=input_tokens,
+                    output_tokens=output_tokens,
+                    escalation=False,
+                )
+                if actual_cost < estimated_cost:
+                    self.ledger.release(estimated_cost - actual_cost)
+                return UnifiedSelectionPlan(
+                    decisions=tuple(decisions),
+                    provider="google",
+                    model=self.model,
+                    requested=True,
+                    available=True,
+                    estimated_input_tokens=input_tokens,
+                    estimated_output_tokens=output_tokens,
+                )
