@@ -1,25 +1,10 @@
 """Universal Clean Cut orchestration.
 
-This module intentionally separates recording cleanup from downstream editorial
-objectives. It answers one question only: can CutSell turn messy raw recording
-footage into a clean, naturally ordered source timeline without sales/narrative
-recomposition?
-
-Allowed intelligence:
-- ASR / silence analysis
-- whole-video context for performance/retry evidence
-- dense local performance tracking
-- take-level visual evidence
-- multimodal performance confirmation
-- temporal boundary trimming
-- deterministic Clean Cut
-- retry grouping + Best Take
-- optional bounded Hybrid Editorial classification for recording intent/BTS/failures
-
-Explicitly disabled here:
-- commercial semantic funnel labeling
-- Sales/Natural story composition
-- global draft rewriting/reordering/removal
+This module separates semantic Selection from physical Boundary.  Local perception and
+legacy grouping may generate evidence and provisional buckets, but when the Unified
+Selection Reasoner is enabled one whole-video semantic authority decides final spoken
+membership before the hard freeze. Boundary can then change timing/fragment structure
+only, never the selected spoken stream.
 """
 from __future__ import annotations
 
@@ -39,6 +24,7 @@ from .selection_conflicted_bridge_guard import apply_selection_conflicted_bridge
 from .selection_phase_authority import apply_selection_phase_authority
 from .take_grouping_provider import TakeGroupingProvider
 from .take_judge_provider import TakeJudgeProvider
+from .unified_selection_reasoner import UnifiedSelectionReasoner, apply_unified_selection_reasoner
 from .visual_analysis import VisualProvider
 from .whole_video_analysis import WholeVideoProvider
 
@@ -54,19 +40,10 @@ def process_universal_clean_cut_sources(
     take_grouping_provider: TakeGroupingProvider | None = None,
     whole_video_provider: WholeVideoProvider | None = None,
     editorial_judge: EditorialJudge | None = None,
+    selection_reasoner: UnifiedSelectionReasoner | None = None,
     progress: ProgressCallback | None = None,
 ) -> ProcessingResult:
-    """Run only the universal recording-cleanup brain.
-
-    Natural source order is preserved after Best Take selection. The optional Hybrid
-    judge is constrained to already-bounded creator mini-sessions and may classify
-    failed/BTS attempts; it cannot activate Sales Funnel composition or change timing.
-
-    Phase ownership is enforced explicitly here rather than relying on import-time
-    wrapper order. All semantic membership authorities run before the freeze. Any pass
-    that can restore/add spoken words also belongs to Selection recovery and runs before
-    the freeze. Only speech-preserving timing/fragment operations may run afterward.
-    """
+    """Run the Universal Clean Cut brain with explicit Selection/Boundary ownership."""
     result = process_local_sources(
         request,
         local_paths,
@@ -85,41 +62,45 @@ def process_universal_clean_cut_sources(
 
     has_draft_contract = hasattr(result.draft, "selected") and hasattr(result.draft, "discarded")
     if has_draft_contract:
-        # Explicit final Selection authority. Do not rely on pipeline wrapper installation:
-        # this is the actual orchestration path used by API/serverless/benchmarks.
-        result = replace(result, draft=apply_selection_phase_authority(result.draft))
-        # Resolve only a proven keep/alternate conflict whose semantic content is already
-        # covered by selected neighbors. This remains Selection ownership: the losing take
-        # moves to SWAP/Alternates and no timing boundary is changed.
-        result = replace(result, draft=apply_selection_conflicted_bridge_guard(result.draft))
-        selection_stage = "explicit_final_selection_authority_executed"
+        if selection_reasoner is not None:
+            # PIVOT: one whole-video semantic authority sees Selected + SWAP + Discarded
+            # together. Legacy local/group decisions become evidence rather than final
+            # membership authorities. No per-benchmark semantic guard runs after this.
+            result = replace(
+                result,
+                draft=apply_unified_selection_reasoner(result.draft, selection_reasoner),
+            )
+            reasoner_diag = (result.draft.diagnostics or {}).get("unified_selection_reasoner") or {}
+            reasoner_status = str(reasoner_diag.get("status") or "unknown")
+            selection_stage = f"unified_whole_video_selection_{reasoner_status}"
+        else:
+            # Legacy fallback remains available while Unified Selection is feature-gated.
+            result = replace(result, draft=apply_selection_phase_authority(result.draft))
+            result = replace(result, draft=apply_selection_conflicted_bridge_guard(result.draft))
+            selection_stage = "legacy_explicit_final_selection_authority_executed"
 
-        # Complete-idea recovery can restore missing spoken leading/trailing words. That is
-        # semantic Selection recovery, not Boundary timing, so it MUST run before freeze.
+        # Complete-idea recovery may restore source-proven leading/trailing spoken words.
+        # It therefore belongs before Selection freeze regardless of semantic authority.
         result = enforce_complete_idea_boundaries(
             result,
             local_paths,
             asr_provider=asr_provider,
         )
-        boundary_stage = "complete_idea_word_lock_overlap_guard_before_freeze"
+        recovery_stage = "complete_idea_word_lock_overlap_guard_before_freeze"
 
-        # Hard Selection/Boundary phase barrier after every operation allowed to change
-        # spoken membership/content.
+        # Hard semantic phase barrier. Everything after this line is Boundary-only.
         result = replace(result, draft=freeze_selection_contract(result.draft))
 
-        # Boundary-only polish: may split/remove source-evidenced non-speech gaps, but may
-        # not add, remove, substitute, or reorder spoken tokens.
         result = polish_human_boundaries_v5(result, local_paths)
         polish_stage = "source_evidenced_multimodal_v5_boundary_only_complete"
 
-        # Unavoidable output invariant. Any post-freeze mutation of ordered spoken content
-        # is a pipeline bug and fails closed before a renderable result can escape.
+        # Fail closed if Boundary changed ordered spoken content after the freeze.
         result = replace(result, draft=enforce_selection_contract(result.draft))
         contract_stage = "selection_semantic_stream_verified_after_boundary"
     else:
         selection_stage = "not_applicable_missing_draft_contract"
         polish_stage = "not_applicable_missing_draft_contract"
-        boundary_stage = "not_applicable_missing_draft_contract"
+        recovery_stage = "not_applicable_missing_draft_contract"
         contract_stage = "not_applicable_missing_draft_contract"
 
     return ProcessingResult(
@@ -130,14 +111,15 @@ def process_universal_clean_cut_sources(
         stage_status={
             **result.stage_status,
             "brain_mode": "universal_clean_cut",
-            "semantic": "not_requested_clean_cut_only",
+            "semantic": "whole_video_selection" if selection_reasoner is not None else "legacy_clean_cut_selection",
             "composer": "not_requested_clean_cut_only",
             "draft_review": "not_requested_clean_cut_only",
             "selection_phase_authority": selection_stage,
+            "unified_selection_reasoner": "enabled" if selection_reasoner is not None else "disabled",
             "selection_boundary_contract": contract_stage,
             "human_boundary_polish": polish_stage,
-            "final_boundary_authority": boundary_stage,
+            "final_boundary_authority": recovery_stage,
         },
     )
 
-# Raw benchmark trigger marker: validate conflicted redundant bridge Selection guard.
+# Raw benchmark trigger marker: unified whole-video Selection reasoner pivot.
