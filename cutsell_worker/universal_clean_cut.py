@@ -111,7 +111,7 @@ def process_universal_clean_cut_sources(
         stage_status={
             **result.stage_status,
             "brain_mode": "universal_clean_cut",
-            "semantic": "whole_video_selection" if selection_reasoner is not None else "legacy_clean_cut_selection",
+            "semantic": "whole_video_selection" if selection_reasoner is not None else "not_requested_clean_cut_only",
             "composer": "not_requested_clean_cut_only",
             "draft_review": "not_requested_clean_cut_only",
             "selection_phase_authority": selection_stage,
