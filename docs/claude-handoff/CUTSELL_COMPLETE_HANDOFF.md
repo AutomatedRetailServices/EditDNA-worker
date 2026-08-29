@@ -737,19 +737,76 @@ Targeted tests updated (`test_cutsell_hybrid_google.py`,
 `test_cutsell_unified_selection_reasoner.py`) plus the full suite (848
 passed / 1 skipped) both green.
 
+## RAW #118 — FIRST EVER `"applied"` UNIFIED SELECTION RUN (2026-08-29)
+
+Confirmatory RAW #118 (run `33271431422`, head `455f8c1`) reached
+`selection_reasoner_status: "applied"`, `selection_reasoner_provider:
+"google"`, `selection_reasoner_model: "gemini-3.5-flash-lite"` — the
+schema fix above resolved the 400 completely. This is the first time
+Unified Selection has ever actually executed against Video00.
+`diagnostics.unified_selection_reasoner.candidate_count: 32`,
+`selected_count: 23` (the reasoner's own internal count, exactly
+matching the frozen Human Gold lock's expected count).
+
+### But the final Selection lock still failed — this is now real editorial work, not infra
+`Verify frozen Selection lock` reported `actual_selected_count: 24` (not
+23) and `selection_locked: false`, `historical_regression_qa_pass:
+false` — the same 13 failed-check IDs as the earlier fail-open runs
+(`sonography_good_take_part1_present`, `sonography_bad_take_absent`,
+`papillary_cancer_preserved`, `pimples_micro_1/2/3_present`,
+`pimples_bad_monolith_absent`, `pimples_later_winner_present`,
+`family_context_preserved`, `pimples_micro_order`,
+`sonography_good_before_diagnosis`, plus `selection_count_23`).
+
+This is NOT the same failure as before. The ordered-text diff against
+the frozen lock shows Unified Selection chose genuinely different
+phrasing/takes for several story beats than the locked baseline
+(`baseline_run_id: 33126865755`) — not simply "1 extra clip". At least
+one selected segment reads like an incomplete/stumbled take that likely
+should have been DISCARDed rather than SELECTed:
+
+> "Tuve problemas estomacales a un tiempo en donde se me hizo una
+> endoscopía y me adeagnosticaron con..." (trails off mid-word/mid-sentence)
+
+immediately before what looks like the clean retake of the same idea
+("Tuve problemas de digestión en donde me hicieron una endoscopía y
+dijeron que tenía gastritis..."). If confirmed by Watch+Listen, this
+would be exactly the "redundant_retry" / best-take case the editorial
+contract already calls for SELECTing only the winner, not the stumble.
+
+**Caution**: the fact that the failed-check ID list exactly matches the
+earlier fail-open run's list is worth treating skeptically before
+concluding the editorial quality is unchanged — these specific gold-lock
+checks may simply be strict enough to fire on any rephrasing, valid or
+not. Do not assume the reasoner's editorial judgment is equivalent to
+the fail-open legacy fallback's without actually watching the produced
+MP4 (`artifact/video00-unified-selection.mp4` in the
+`cutsell-video00-unified-selection-human-review` artifact on run
+`33271431422`) against Human Gold.
+
 ## Updated EXACT NEXT ACTION
-1. This fix was pushed and should trigger exactly one confirmatory
-   Video00 RAW. Check its `selection_reasoner_status` — expect `"applied"`
-   for the first time.
-2. If `"applied"`: proceed to real Selection-quality analysis against
-   `benchmarks/video00_selection_lock.json` per handoff item F (inspect
-   `diagnostics.unified_selection_reasoner.decisions` before any semantic
-   patch). The prior 28-clip regression was a fail-open artifact of the
-   400, not evidence of a Unified Selection editorial bug — do not carry
-   forward any editorial conclusions drawn from it.
-3. If still not `"applied"`: read the new error via the
-   `Print unified Selection reasoner diagnostics` CI step and re-diagnose;
-   do not assume the same root cause without checking the new error text.
+1. ~~Confirm one RAW reaches `"applied"`~~ — DONE (RAW #118).
+2. **Human Gold Watch+Listen is now required** before any further code
+   change: download and watch `video00-unified-selection.mp4` from run
+   `33271431422`'s artifact against the Human Gold authoritative video,
+   and read the full `diagnostics.unified_selection_reasoner.decisions`
+   table (candidate_count 32, printed in that run's CI log) per handoff
+   item F's process (family_index / previous_bucket / model_action /
+   effective_action / relation / confidence / reason_code) before
+   concluding anything is a real regression.
+3. Do NOT reflexively add a new guard or tune the editorial prompt based
+   on the automated lock/regression-QA failure alone — per the editorial
+   rules, human judgment on the actual video is required first. If
+   Watch+Listen confirms the stumble-take-selected issue above, the
+   likely fix is prompt/reason_code guidance in
+   `unified_selection_google.py`'s editorial contract (SELECT only the
+   winner of a retry family), not a new post-hoc filter — but that is a
+   semantic Selection change and needs the same care as any other.
+4. Once Selection quality is confirmed, `benchmarks/video00_selection_lock.json`
+   itself may need to be re-baselined against the new Unified-Selection
+   output rather than the old pre-reasoner lock, if the new phrasing
+   choices are judged equal-or-better than the original — that decision
+   belongs to Human Gold review, not automated diffing.
 
 ---
 
