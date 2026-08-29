@@ -46,7 +46,7 @@ def run_single_universal_clean_cut_validation(
     preview_output: str | None = None,
     preview_captions: bool = False,
 ) -> dict[str, Any]:
-    """Run one full S3 raw through local perception plus optional Hybrid Editorial cleanup."""
+    """Run one full S3 raw through local perception plus the active Selection authority."""
     if not _is_real_video_key(key):
         raise ValueError("unsupported validation video")
 
@@ -93,6 +93,7 @@ def run_single_universal_clean_cut_validation(
             take_judge_provider=brain.take_judge_provider,
             clean_cut_provider=brain.clean_cut_provider,
             editorial_judge=brain.editorial_judge,
+            selection_reasoner=brain.selection_reasoner,
         )
 
         preview_path, preview_skipped_reason = _render_validation_preview(
@@ -110,12 +111,17 @@ def run_single_universal_clean_cut_validation(
     clean_decisions = list(diagnostics.get("clean_cut_decisions") or ())
     temporal = list(diagnostics.get("temporal_performance_trims") or ())
     hybrid_chunks = list(diagnostics.get("hybrid_editorial_chunks") or ())
+    unified_diag = diagnostics.get("unified_selection_reasoner") or {}
 
     return {
         "schema_version": result.schema_version,
         "benchmark_mode": "universal_clean_cut",
         "brain_backend": brain.backend,
         "external_brain_calls_enabled": brain.external_calls_enabled,
+        "selection_reasoner_enabled": brain.selection_reasoner is not None,
+        "selection_reasoner_status": unified_diag.get("status") if isinstance(unified_diag, dict) else None,
+        "selection_reasoner_provider": unified_diag.get("provider") if isinstance(unified_diag, dict) else None,
+        "selection_reasoner_model": unified_diag.get("model") if isinstance(unified_diag, dict) else None,
         "hybrid_provider": brain.hybrid_settings.provider if brain.external_calls_enabled else None,
         "hybrid_primary_model": brain.hybrid_settings.primary_model if brain.external_calls_enabled else None,
         "hybrid_requested_group_count": int(diagnostics.get("hybrid_editorial_requested_chunk_count") or 0),
@@ -142,10 +148,11 @@ def run_single_universal_clean_cut_validation(
             "asr": config.asr_model,
             "whole_video": "runpod_local_asr_context",
             "visual": "runpod_local_mediapipe_opencv",
-            "take_grouping": "deterministic_local",
-            "take_judge": "deterministic_local_after_hybrid_cleanup",
-            "clean_cut_judge": "deterministic_local",
-            "hybrid_editorial": brain.hybrid_settings.primary_model if brain.external_calls_enabled else None,
+            "take_grouping": "deterministic_local_evidence",
+            "take_judge": "deterministic_local_evidence",
+            "clean_cut_judge": "deterministic_local_evidence",
+            "hybrid_editorial": brain.hybrid_settings.primary_model if brain.editorial_judge is not None else None,
+            "unified_selection": brain.hybrid_settings.primary_model if brain.selection_reasoner is not None else None,
             "semantic_sales": None,
             "composer": None,
             "draft_review": None,
