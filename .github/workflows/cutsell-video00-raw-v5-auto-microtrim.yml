@@ -1,4 +1,4 @@
-name: CutSell Video00 Raw V5 Auto Microtrim
+name: CutSell Video00 Unified Selection RAW
 
 on:
   push:
@@ -12,6 +12,8 @@ on:
       - cutsell_worker/serverless_handler.py
       - cutsell_worker/speech_visual_microtrim.py
       - cutsell_worker/editorial_guardrails_v2.py
+      - cutsell_worker/unified_selection_reasoner.py
+      - cutsell_worker/unified_selection_google.py
       - cutsell_worker/universal_clean_cut.py
       - cutsell_worker/universal_clean_cut_validation.py
       - cutsell_worker/final_boundary_authority.py
@@ -43,7 +45,7 @@ env:
   IMAGE_REPO: ghcr.io/automatedretailservices/cutsell-serverless
   ENDPOINT_ID: xxu7autt8mv2rn
   SOURCE_KEY: Editdna longform validation/VIDEO-2026-07-30-09-18-03.mp4
-  BENCHMARK_ID: video00-raw-v5-auto-${{ github.run_id }}-${{ github.run_attempt }}
+  BENCHMARK_ID: video00-unified-selection-${{ github.run_id }}-${{ github.run_attempt }}
 
 jobs:
   video00-raw:
@@ -58,20 +60,19 @@ jobs:
           ref: ${{ github.sha }}
           fetch-depth: 1
 
-      - name: Verify raw-auto path
+      - name: Verify unified Selection path
         shell: bash
         run: |
           set -euo pipefail
           grep -q 'auto_speech_visual_microtrim' cutsell_worker/serverless_handler.py
           grep -q 'detect_speech_safe_visual_microtrims' cutsell_worker/serverless_handler.py
           grep -q 'run_single_universal_clean_cut_validation' cutsell_worker/serverless_handler.py
-          grep -q 'refusing silent local fallback' cutsell_worker/brain_runtime.py
+          grep -q 'CUTSELL_UNIFIED_SELECTION_REASONER' cutsell_worker/brain_runtime.py
+          grep -q 'GoogleUnifiedSelectionReasoner' cutsell_worker/brain_runtime.py
+          grep -q 'apply_unified_selection_reasoner' cutsell_worker/universal_clean_cut.py
           grep -q 'preserve_polished_interior_gap' cutsell_worker/final_boundary_authority.py
-          grep -q 'semantic_failed_plus_later_overlapping_complete_retake' cutsell_worker/hybrid_session_cleanup.py
-          grep -q '_repair_session_group_coverage' cutsell_worker/session_boundaries.py
-          grep -q 'install_editorial_guardrails_v2' cutsell_worker/__init__.py
-          grep -q 'v2_long_visual_slack' cutsell_worker/editorial_guardrails_v2.py
-          grep -q 'complete_idea' cutsell_worker/editorial_guardrails_v2.py
+          test -s cutsell_worker/unified_selection_reasoner.py
+          test -s cutsell_worker/unified_selection_google.py
           test -s benchmarks/video00_selection_lock.json
           test -s benchmarks/validate_video00_selection_lock.py
 
@@ -82,11 +83,11 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Build and push immutable raw V5 image
+      - name: Build and push immutable unified Selection image
         shell: bash
         run: |
           set -euo pipefail
-          image="$IMAGE_REPO:video00-raw-v5-auto-$GITHUB_SHA"
+          image="$IMAGE_REPO:video00-unified-selection-$GITHUB_SHA"
           docker build -t "$image" -f Dockerfile.cutsell.serverless .
           docker push "$image"
           docker buildx imagetools inspect "$image" > /tmp/image.txt
@@ -108,11 +109,11 @@ jobs:
           test -n "$BASE_TEMPLATE_ID"
           echo "BASE_TEMPLATE_ID=$BASE_TEMPLATE_ID" >> "$GITHUB_ENV"
 
-      - name: Create raw V5 auto template
+      - name: Create unified Selection template
         shell: bash
         run: |
           set -euo pipefail
-          name="cutsell-video00-raw-v5-auto-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+          name="cutsell-video00-unified-selection-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
           jq --arg image "$LOCKED_IMAGE" --arg name "$name" '
             . as $base |
             {
@@ -127,11 +128,13 @@ jobs:
                 CUTSELL_EDITORIAL_MODE:"clean_cut",
                 CUTSELL_ASR_MODEL:"medium",
                 CUTSELL_HYBRID_LLM_ENABLED:"1",
-                CUTSELL_HYBRID_PROVIDER:"google"
+                CUTSELL_HYBRID_PROVIDER:"google",
+                CUTSELL_UNIFIED_SELECTION_REASONER:"1"
               }),
               ports:[], volumeInGb:0, volumeMountPath:"/workspace"
             }' /tmp/base-template.json > /tmp/template-create.json
           test -n "$(jq -r '.env.GEMINI_API_KEY // empty' /tmp/template-create.json)" || { echo 'GEMINI_API_KEY missing from RunPod template; refusing brain-off benchmark'; exit 1; }
+          test "$(jq -r '.env.CUTSELL_UNIFIED_SELECTION_REASONER' /tmp/template-create.json)" = "1"
           code=$(curl --silent --show-error --write-out '%{http_code}' \
             --request POST \
             --url 'https://rest.runpod.io/v1/templates' \
@@ -144,7 +147,7 @@ jobs:
           test -n "$TEMPLATE_ID"
           echo "TEMPLATE_ID=$TEMPLATE_ID" >> "$GITHUB_ENV"
 
-      - name: Roll endpoint to raw V5 auto
+      - name: Roll endpoint to unified Selection
         shell: bash
         run: |
           set -euo pipefail
@@ -202,7 +205,7 @@ jobs:
           JOB_ID=$(jq -r '.id // empty' /tmp/submit.json); test -n "$JOB_ID"
           echo "JOB_ID=$JOB_ID" >> "$GITHUB_ENV"
 
-      - name: Wait for raw V5 auto result
+      - name: Wait for unified Selection result
         shell: bash
         run: |
           set -euo pipefail
@@ -216,7 +219,7 @@ jobs:
             echo "raw_video00_status=$status"
             case "$status" in
               COMPLETED)
-                jq -e '.output.ok == true and .output.speech_lock_ok == true and .output.external_brain_calls_enabled == true' /tmp/status.json >/dev/null
+                jq -e '.output.ok == true and .output.speech_lock_ok == true and .output.external_brain_calls_enabled == true and .output.selection_reasoner_enabled == true and .output.selection_reasoner_status == "applied"' /tmp/status.json >/dev/null
                 PREVIEW_URI=$(jq -r '.output.preview_uri // empty' /tmp/status.json)
                 RESULT_URI=$(jq -r '.output.result_uri // empty' /tmp/status.json)
                 test -n "$PREVIEW_URI" && test -n "$RESULT_URI"
@@ -229,7 +232,7 @@ jobs:
           done
           exit 1
 
-      - name: Download raw test artifact
+      - name: Download unified Selection artifact
         shell: bash
         run: |
           set -euo pipefail
@@ -241,15 +244,15 @@ jobs:
             echo "::add-mask::$value"
             export "$key=$value"
           done
-          aws s3 cp "$PREVIEW_URI" artifact/video00-raw-v5-auto-microtrim.mp4
-          aws s3 cp "$RESULT_URI" artifact/video00-raw-v5-auto-microtrim.json
-          test -s artifact/video00-raw-v5-auto-microtrim.mp4
-          test -s artifact/video00-raw-v5-auto-microtrim.json
+          aws s3 cp "$PREVIEW_URI" artifact/video00-unified-selection.mp4
+          aws s3 cp "$RESULT_URI" artifact/video00-unified-selection.json
+          test -s artifact/video00-unified-selection.mp4
+          test -s artifact/video00-unified-selection.json
 
-      - name: Upload raw diagnostic artifact before Selection lock
+      - name: Upload unified Selection diagnostic artifact
         uses: actions/upload-artifact@v4
         with:
-          name: cutsell-video00-raw-v5-auto-microtrim-human-review
+          name: cutsell-video00-unified-selection-human-review
           path: artifact/
           retention-days: 14
 
@@ -258,16 +261,16 @@ jobs:
         run: |
           set -euo pipefail
           python benchmarks/validate_video00_selection_lock.py \
-            artifact/video00-raw-v5-auto-microtrim.json \
+            artifact/video00-unified-selection.json \
             benchmarks/video00_selection_lock.json \
             | tee artifact/video00-selection-lock-report.json
 
-      - name: Verify original raw and final rule
+      - name: Verify unified Selection architecture
         shell: bash
         run: |
           set -euo pipefail
-          jq -e '.source_duration_sec > 350 and .auto_speech_visual_microtrim_enabled == true and .speech_lock_ok == true and .external_brain_calls_enabled == true and .selected_count > 0 and .hybrid_requested_group_count > 0' artifact/video00-raw-v5-auto-microtrim.json >/dev/null
-          jq '{source_duration_sec,selected_count,selected_duration_sec,output_duration_sec,external_brain_calls_enabled,hybrid_provider,hybrid_primary_model,hybrid_requested_group_count,hybrid_available_group_count,hybrid_deleted_count,auto_microtrim_count,auto_microtrim_duration_sec,speech_lock_ok}' artifact/video00-raw-v5-auto-microtrim.json
+          jq -e '.source_duration_sec > 350 and .auto_speech_visual_microtrim_enabled == true and .speech_lock_ok == true and .external_brain_calls_enabled == true and .selection_reasoner_enabled == true and .selection_reasoner_status == "applied" and .selected_count > 0 and .hybrid_requested_group_count == 0 and .hybrid_available_group_count == 0' artifact/video00-unified-selection.json >/dev/null
+          jq '{source_duration_sec,selected_count,selected_duration_sec,output_duration_sec,external_brain_calls_enabled,selection_reasoner_enabled,selection_reasoner_status,selection_reasoner_provider,selection_reasoner_model,hybrid_requested_group_count,hybrid_available_group_count,auto_microtrim_count,auto_microtrim_duration_sec,speech_lock_ok}' artifact/video00-unified-selection.json
 
       - name: Teardown RunPod benchmark resources
         if: always()
