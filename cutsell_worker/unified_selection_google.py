@@ -395,6 +395,19 @@ class GoogleUnifiedSelectionReasoner:
             ))
         return decisions, output_tokens
 
+    def _max_affordable_output_tokens(self, input_tokens: int) -> int:
+        """The largest output budget a fresh call at this input size could
+        reserve right now, given the ledger's remaining balance. Used to cap
+        a retry's bumped reserve so growing the schema (or the bump itself)
+        can never be the reason a genuinely retryable failure never gets a
+        second attempt -- see the RAW #121 note in reason() below."""
+        input_cost = self.settings.estimate_cost_usd(input_tokens=input_tokens, output_tokens=0, escalation=False)
+        budget_for_output = max(0.0, self.ledger.remaining_usd - input_cost)
+        rate = self.settings.primary_output_per_million_usd
+        if rate <= 0:
+            return self.max_output_tokens
+        return int(budget_for_output / (rate / 1_000_000.0))
+
     def reason(self, draft: DraftTimeline) -> UnifiedSelectionPlan:
         if not self.api_key:
             raise ValueError("Gemini API key required")
@@ -436,10 +449,23 @@ class GoogleUnifiedSelectionReasoner:
                 # starved by budget locked up for a call that produced nothing.
                 self.ledger.release(estimated_cost)
                 if attempt < self.max_retries:
-                    # Retry with a larger reserve in case this was a MAX_TOKENS
-                    # truncation; harmless if it wasn't, still capped at the
-                    # configured ceiling.
-                    output_reserve = min(self.max_output_tokens, max(output_reserve, int(output_reserve * 1.5)))
+                    # RAW #121: adding candidate_index (needed to fix RAW
+                    # #120's undercount) grew the schema just enough that this
+                    # naive 1.5x bump alone exceeded the tiny default per-edit
+                    # cost cap ($0.0075), so a genuinely retryable failure --
+                    # e.g. a candidate_index mismatch, which has nothing to do
+                    # with token budget -- could never get a second attempt at
+                    # all: the retry died on "budget exhausted" before ever
+                    # making a call. Cap the bump at what the ledger can
+                    # actually afford right now, and give up cleanly (surface
+                    # the original failure) rather than loop with a reserve
+                    # too small to even repeat the failed attempt.
+                    bumped = max(output_reserve, int(output_reserve * 1.5))
+                    affordable = self._max_affordable_output_tokens(input_tokens)
+                    next_reserve = min(self.max_output_tokens, bumped, affordable)
+                    if next_reserve < output_reserve:
+                        raise
+                    output_reserve = next_reserve
                     continue
                 raise
             else:

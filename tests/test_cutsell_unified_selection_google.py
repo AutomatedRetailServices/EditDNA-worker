@@ -288,6 +288,69 @@ def test_failed_first_attempt_releases_its_ledger_reservation_before_retrying():
     assert len(plan.decisions) == 2
 
 
+def test_retry_budget_is_capped_to_what_the_ledger_can_actually_afford():
+    # RAW #121: adding candidate_index (the RAW #120 fix) grew the schema
+    # just enough that the naive 1.5x retry bump alone could exceed the tiny
+    # default per-edit cost cap (max_cost_per_edit_usd, $0.0075) at the real
+    # Video00 candidate count (32) -- so a retryable candidate_index mismatch
+    # (nothing to do with token budget) could never get a second attempt at
+    # all: it died on "unified Selection edit dollar budget exhausted" before
+    # ever making the retry's HTTP call. Sized deterministically here (the
+    # midpoint between what attempt 1 costs and what the naive bump would
+    # cost) so the test reproduces the exact boundary regardless of exactly
+    # how many tokens this file's synthetic payload happens to serialize to.
+    settings = HybridProviderSettings(enabled=True)
+    d = draft(32)
+    payload = build_unified_selection_payload(d)
+    input_tokens = estimate_tokens_from_chars(len(json.dumps(payload, ensure_ascii=False)))
+    reserve = output_token_reserve(32, ceiling=4096)
+    attempt1_cost = settings.estimate_cost_usd(input_tokens=input_tokens, output_tokens=reserve, escalation=False)
+    naive_bumped_cost = settings.estimate_cost_usd(
+        input_tokens=input_tokens, output_tokens=max(reserve, int(reserve * 1.5)), escalation=False,
+    )
+    assert naive_bumped_cost > attempt1_cost  # sanity: the bump really is bigger
+    ledger_max = (attempt1_cost + naive_bumped_cost) / 2  # affords attempt 1, not the naive bump
+
+    reordered = gemini_response(decisions_json(32, index_offset=1))
+    good = gemini_response(decisions_json(32))
+    fake = FakeSession([reordered, good])
+    ledger = DollarBudgetLedger(ledger_max)
+    reasoner = GoogleUnifiedSelectionReasoner(
+        api_key="fake-key", model=settings.primary_model, settings=settings,
+        ledger=ledger, session=fake,
+    )
+
+    plan = reasoner.reason(d)  # must not raise "budget exhausted"
+
+    assert len(fake.calls) == 2
+    assert len(plan.decisions) == 32
+    first_budget = fake.calls[0][2]["generationConfig"]["maxOutputTokens"]
+    second_budget = fake.calls[1][2]["generationConfig"]["maxOutputTokens"]
+    assert first_budget == reserve
+    assert reserve < second_budget < max(reserve, int(reserve * 1.5))  # more headroom, but capped below the naive bump
+
+
+def test_max_affordable_output_tokens_reflects_ledger_remaining_balance():
+    # Direct unit coverage of the helper reason() uses to cap a retry's
+    # bumped budget: given the ledger's ACTUAL remaining balance (not the
+    # amount that funded some earlier, now-released reservation -- a full
+    # release restores exactly what was reserved, so a same-size repeat is
+    # always affordable again by construction), it must compute the largest
+    # output budget a fresh call at this input size could still reserve.
+    settings = HybridProviderSettings(enabled=True)
+    ledger = DollarBudgetLedger(max_usd=0.01, reserved_usd=0.008)  # $0.002 left
+    reasoner = GoogleUnifiedSelectionReasoner(
+        api_key="fake-key", model=settings.primary_model, settings=settings, ledger=ledger,
+    )
+    input_tokens = 1000
+    input_cost = settings.estimate_cost_usd(input_tokens=input_tokens, output_tokens=0, escalation=False)
+    expected_budget_for_output = ledger.remaining_usd - input_cost
+    expected_tokens = int(expected_budget_for_output / (settings.primary_output_per_million_usd / 1_000_000.0))
+
+    assert reasoner._max_affordable_output_tokens(input_tokens) == expected_tokens
+    assert expected_tokens < output_token_reserve(32, ceiling=4096)  # tighter than a real Video00-scale need
+
+
 # --- non-retryable preflight failures never spend a retry ----------------
 
 def test_missing_api_key_raises_before_any_http_call_and_is_never_retried():
