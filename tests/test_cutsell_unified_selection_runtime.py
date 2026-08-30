@@ -56,6 +56,24 @@ def test_legacy_editorial_judge_ledger_still_uses_the_legacy_edit_ceiling():
     assert brain.editorial_judge.transport.ledger.max_usd == settings.max_cost_per_edit_usd
 
 
+def test_deterministic_best_take_authority_defaults_on():
+    env = {**base_env(), "CUTSELL_UNIFIED_SELECTION_REASONER": "1"}
+    brain = build_brain_runtime(load_runtime_config(env), env)
+
+    assert brain.deterministic_best_take_authority_enabled is True
+
+
+def test_deterministic_best_take_authority_rollback_env_flag_disables_it():
+    env = {
+        **base_env(),
+        "CUTSELL_UNIFIED_SELECTION_REASONER": "1",
+        "CUTSELL_DETERMINISTIC_BEST_TAKE_AUTHORITY": "0",
+    }
+    brain = build_brain_runtime(load_runtime_config(env), env)
+
+    assert brain.deterministic_best_take_authority_enabled is False
+
+
 def test_unified_selection_requires_explicit_hybrid_paid_gate():
     env = {
         "CUTSELL_BRAIN_BACKEND": "runpod_local",

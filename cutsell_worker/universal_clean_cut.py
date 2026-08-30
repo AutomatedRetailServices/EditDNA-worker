@@ -14,6 +14,7 @@ from typing import Mapping
 from .asr import ASRProvider
 from .clean_cut_provider import CleanCutProvider
 from .contracts import ProcessingRequest, ProcessingResult
+from .deterministic_best_take_authority import apply_deterministic_best_take_authority
 from .final_boundary_authority import enforce_complete_idea_boundaries
 from .flow_b import ProgressCallback, process_local_sources
 from .human_boundary_polish_v5 import polish_human_boundaries_v5
@@ -41,6 +42,7 @@ def process_universal_clean_cut_sources(
     whole_video_provider: WholeVideoProvider | None = None,
     editorial_judge: EditorialJudge | None = None,
     selection_reasoner: UnifiedSelectionReasoner | None = None,
+    deterministic_best_take_authority_enabled: bool = True,
     progress: ProgressCallback | None = None,
 ) -> ProcessingResult:
     """Run the Universal Clean Cut brain with explicit Selection/Boundary ownership."""
@@ -63,9 +65,10 @@ def process_universal_clean_cut_sources(
     has_draft_contract = hasattr(result.draft, "selected") and hasattr(result.draft, "discarded")
     if has_draft_contract:
         if selection_reasoner is not None:
-            # PIVOT: one whole-video semantic authority sees Selected + SWAP + Discarded
-            # together. Legacy local/group decisions become evidence rather than final
-            # membership authorities. No per-benchmark semantic guard runs after this.
+            # One whole-video semantic authority sees Selected + SWAP + Discarded
+            # together and decides. Local/group decisions inform its payload as
+            # evidence, but no longer have unconditional final say afterward --
+            # see the deterministic Best-Take pass immediately below.
             result = replace(
                 result,
                 draft=apply_unified_selection_reasoner(result.draft, selection_reasoner),
@@ -73,8 +76,27 @@ def process_universal_clean_cut_sources(
             reasoner_diag = (result.draft.diagnostics or {}).get("unified_selection_reasoner") or {}
             reasoner_status = str(reasoner_diag.get("status") or "unknown")
             selection_stage = f"unified_whole_video_selection_{reasoner_status}"
+
+            # Architecture rebalance Phase 0/1: Unified Selection and the
+            # deterministic take_judge Best-Take layer are now sequential
+            # rather than Unified Selection having unconditional final say.
+            # For a retry-family contest the local ranker was genuinely
+            # decisive about, its verdict becomes authoritative here; an
+            # ambiguous (thin score-gap) contest is left exactly as Unified
+            # Selection decided it. Rollback: set
+            # CUTSELL_DETERMINISTIC_BEST_TAKE_AUTHORITY=0 to restore the
+            # previous pure-whole-video-reasoner behavior unmodified.
+            if deterministic_best_take_authority_enabled:
+                result = replace(result, draft=apply_deterministic_best_take_authority(result.draft))
+                selection_stage = f"{selection_stage}+deterministic_best_take_authority"
         else:
-            # Legacy fallback remains available while Unified Selection is feature-gated.
+            # Legacy fallback remains available while Unified Selection is
+            # feature-gated. Untouched by this phase: this path already has its
+            # own, more targeted Best-Take reconciliation (pipeline.py's
+            # _semantic_best_take plus these Hybrid-vote-informed guards); the
+            # new deterministic override above is scoped to Unified Selection
+            # mode only, so it can never undo a legitimate Hybrid semantic
+            # override made here.
             result = replace(result, draft=apply_selection_phase_authority(result.draft))
             result = replace(result, draft=apply_selection_conflicted_bridge_guard(result.draft))
             selection_stage = "legacy_explicit_final_selection_authority_executed"

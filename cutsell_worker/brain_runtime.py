@@ -47,6 +47,11 @@ class BrainRuntime:
     editorial_judge: EditorialJudge | None = None
     selection_reasoner: UnifiedSelectionReasoner | None = None
     hybrid_settings: HybridProviderSettings = HybridProviderSettings()
+    # Architecture rebalance Phase 0/1 rollback flag: set
+    # CUTSELL_DETERMINISTIC_BEST_TAKE_AUTHORITY=0 to restore the previous
+    # pure-whole-video-reasoner behavior (Unified Selection with
+    # unconditional final say) unmodified during migration.
+    deterministic_best_take_authority_enabled: bool = True
 
     @property
     def external_calls_enabled(self) -> bool:
@@ -55,6 +60,12 @@ class BrainRuntime:
 
 def _env_true(value: str | None) -> bool:
     return str(value or "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _env_true_default_true(value: str | None) -> bool:
+    if value is None:
+        return True
+    return str(value).strip().lower() not in {"0", "false", "no", "off"}
 
 
 def _require_google_api_key(settings: HybridProviderSettings, values: Mapping[str, str]) -> str:
@@ -145,6 +156,9 @@ def build_brain_runtime(
     # When Unified Selection is active, legacy bounded Hybrid classification is OFF and
     # its former outputs remain only historical/local evidence already present in tests.
     editorial_judge = None if selection_reasoner is not None else _build_editorial_judge(hybrid_settings, values)
+    deterministic_best_take_authority_enabled = _env_true_default_true(
+        values.get("CUTSELL_DETERMINISTIC_BEST_TAKE_AUTHORITY")
+    )
 
     return BrainRuntime(
         backend=RUNPOD_LOCAL_BACKEND,
@@ -159,4 +173,5 @@ def build_brain_runtime(
         editorial_judge=editorial_judge,
         selection_reasoner=selection_reasoner,
         hybrid_settings=hybrid_settings,
+        deterministic_best_take_authority_enabled=deterministic_best_take_authority_enabled,
     )

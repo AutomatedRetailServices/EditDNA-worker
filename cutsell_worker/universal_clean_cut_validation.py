@@ -94,6 +94,7 @@ def run_single_universal_clean_cut_validation(
             clean_cut_provider=brain.clean_cut_provider,
             editorial_judge=brain.editorial_judge,
             selection_reasoner=brain.selection_reasoner,
+            deterministic_best_take_authority_enabled=brain.deterministic_best_take_authority_enabled,
         )
 
         preview_path, preview_skipped_reason = _render_validation_preview(
