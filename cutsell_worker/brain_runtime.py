@@ -102,7 +102,11 @@ def _build_unified_selection_reasoner(
         api_key=api_key,
         model=settings.primary_model,
         settings=settings,
-        ledger=DollarBudgetLedger(settings.max_cost_per_edit_usd),
+        # Deliberately NOT max_cost_per_edit_usd -- that is the legacy
+        # per-group Hybrid judge's COGS target, sized for many small calls.
+        # Unified Selection's one whole-video call has a different cost
+        # shape and its own ceiling; see hybrid_provider_settings.py.
+        ledger=DollarBudgetLedger(settings.max_cost_per_unified_selection_call_usd),
     )
 
 

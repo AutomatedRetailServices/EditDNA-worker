@@ -12,6 +12,7 @@ def test_hybrid_provider_is_disabled_by_default():
     assert settings.escalation_model == "gemini-3.6-flash"
     assert settings.max_test_budget_usd == 0.50
     assert settings.max_cost_per_edit_usd == 0.0075
+    assert settings.max_cost_per_unified_selection_call_usd == 0.02
 
 
 def test_key_or_provider_name_alone_cannot_enable_paid_calls():
@@ -62,8 +63,37 @@ def test_budget_caps_can_only_be_tightened_to_non_negative_values():
         "CUTSELL_HYBRID_MAX_EDIT_USD": "-2",
         "CUTSELL_HYBRID_TEST_BUDGET_USD": "-5",
         "CUTSELL_HYBRID_DAILY_BUDGET_USD": "-9",
+        "CUTSELL_HYBRID_MAX_UNIFIED_SELECTION_USD": "-3",
     })
     assert settings.max_cost_per_session_usd == 0.0
     assert settings.max_cost_per_edit_usd == 0.0
     assert settings.max_test_budget_usd == 0.0
     assert settings.max_daily_budget_usd == 0.0
+    assert settings.max_cost_per_unified_selection_call_usd == 0.0
+
+
+def test_unified_selection_ceiling_is_independent_of_the_legacy_edit_ceiling():
+    # RAW run 33319393884 (head 4c0ccc9): the corrected, non-truncating
+    # output token reserve made a single real Unified Selection call cost
+    # more than max_cost_per_edit_usd ($0.0075), which is the legacy
+    # per-group Hybrid judge's COGS target ("$0.75 per 100 fully-used
+    # Starter edits"), not a ceiling sized for Unified Selection's one
+    # whole-video call. The two ceilings must be independently configurable
+    # -- tightening one must never move the other.
+    settings = load_hybrid_provider_settings({
+        "CUTSELL_HYBRID_MAX_EDIT_USD": "0.0075",
+        "CUTSELL_HYBRID_MAX_UNIFIED_SELECTION_USD": "0.05",
+    })
+    assert settings.max_cost_per_edit_usd == 0.0075
+    assert settings.max_cost_per_unified_selection_call_usd == 0.05
+
+
+def test_unified_selection_default_ceiling_covers_the_true_worst_case_single_call():
+    # Worst case per GoogleUnifiedSelectionReasoner's own hard caps:
+    # max_input_tokens=20_000, output ceiling=4_096.
+    settings = HybridProviderSettings()
+    worst_case_cost = settings.estimate_cost_usd(input_tokens=20_000, output_tokens=4_096, escalation=False)
+    assert worst_case_cost < settings.max_cost_per_unified_selection_call_usd
+    # ...and comfortably clears the legacy per-edit ceiling too -- pinning
+    # exactly the gap that caused RAW run 33319393884 to fail open.
+    assert worst_case_cost > settings.max_cost_per_edit_usd
