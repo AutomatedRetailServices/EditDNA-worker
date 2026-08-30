@@ -79,7 +79,7 @@ One segment may carry multiple semantic roles.
 CutSell must preserve setup, progression, cause/effect, discovery, payoff and required context. Storytelling quality is not achieved merely by tagging a clip as STORY.
 
 ## D-012 — Editable Draft, not destructive final-only output
-**Status: CANONICAL**
+**Status: SUPERSEDED for Clean Cut Core V1 by D-019 (SWAP out of scope). Still CANONICAL for the editor/mobile-app layer's own manual controls (Restore, Remove, Reorder, Trim, Split, captions, text/overlays, audio, undo/redo) and for a future manual "swap take" editor feature, if reintroduced -- see D-019.**
 
 AI output is an editable draft timeline. Selected clips appear in the draft; valid alternatives remain swappable; discarded production mistakes remain recoverable when appropriate. User controls include Swap Take, Restore, Remove, Reorder, Trim, Split, captions, text/overlays, audio and undo/redo.
 
@@ -117,6 +117,63 @@ Current priority order:
 **Status: CANONICAL**
 
 Paid RunPod work, new paid infrastructure, production deployment, release merge, destructive legacy changes and Apple/TestFlight release actions require explicit user approval at their respective gates.
+
+## D-019 — SWAP is out of scope for Clean Cut Core V1
+**Status: CANONICAL**
+
+Effective the Clean Cut Core V1 migration: SWAP is removed from the ACTIVE Clean Cut
+decision path. The semantic membership model for Clean Cut Core V1 is SELECT/KEEP vs
+DISCARD only -- there is no alternate-take inventory in the winning timeline. A
+non-winning retry does not belong in the final edit and is excluded from it. The goal
+is one coherent winning edit, not a winning edit plus alternate inventory.
+
+This is a product-scope decision, not a technical limitation: alternate-take swapping
+may return in a future version, another product layer, or an editor feature -- that
+decision is explicitly deferred to the user. **SWAP IS OUT OF SCOPE FOR CLEAN CUT V1
+UNTIL THE USER EXPLICITLY REINTRODUCES IT.**
+
+Legacy SWAP machinery is not deleted, only deactivated for this path: `deterministic_
+best_take_authority.py`'s `swap_enabled` parameter defaults to `False` (a legitimate
+losing retry is DISCARDed, not parked as SWAP); the whole-video Unified Selection
+reasoner (which natively reasons in SELECT/SWAP/DISCARD) is deactivated in the active
+path via `clean_cut_core_v1_enabled` (default on) and kept only for rollback; render_
+plan.py already renders `selected` only and was unaffected. `draft_edits.py`'s
+`swap_take` (a manual, user-initiated mobile-editor operation, not an automatic
+Selection decision) is a different product layer and was not touched by this decision.
+
+## D-020 — Clean Cut Core V1: idea-first architecture
+**Status: CANONICAL**
+
+Clean Cut Core V1 reasons idea-first, not pairwise-first: complete intended ideas ->
+all delivery attempts belonging to each idea -> quality/completeness competition ->
+one winning delivery or a necessary composite -> KEEP/DISCARD. An offline audit of a
+real run found that discovering retry families as an unranked, fixed-budget pairwise
+comparison can systematically fail to even present real retries to the semantic
+arbiter (pairs late in a video were less likely to ever be proposed, independent of
+how obvious a retry they were); pairwise discovery with a fixed top-K is therefore not
+the fundamental retry-family-discovery mechanism -- `take_grouping_provider.py`'s
+candidate-pair generation now ranks eligible pairs by priority (temporal proximity,
+raw lexical overlap, continuation/restart evidence) before spending the batch budget,
+rather than truncating in enumeration order.
+
+Active pipeline: ASR/aligned speech timeline -> Watch+Listen evidence -> attempt
+reconstruction -> idea/intent clustering (lexical tier + bounded `semantic_idea_
+equivalence` arbiter tier) -> delivery completeness + performance-quality competition
+(`take_judge.rank_takes`) -> `deterministic_best_take_authority` (KEEP/DISCARD, SWAP
+out of scope per D-019) -> composite resolution when genuinely required -> `final_
+story_coherence_validation` (residual-ambiguity resolution via the same bounded
+arbiter, missing-story-ending observability) -> KEEP/DISCARD final membership ->
+Selection Freeze -> Boundary/Microtrim. Gemini is never the primary editor; it is a
+bounded semantic arbiter only, reused at two points (idea clustering, final coherence
+ambiguity) rather than the single whole-video SELECT/SWAP/DISCARD reasoner call, which
+is deactivated in the active path (rollback: `CUTSELL_CLEAN_CUT_CORE_V1=0`).
+
+Not yet implemented in V1, documented as a known gap rather than silently absent:
+general contradiction detection and exhaustive unique-fact-loss detection in
+coherence validation, and full integration of `hybrid_composite_best_take.py`'s
+dedicated composite-reconciliation machinery into the idea-first chain (composite
+resolution today relies on genuinely different ideas never being forced into
+competition in the first place, per the "continuation must not collapse" invariant).
 
 ## Change rule
 

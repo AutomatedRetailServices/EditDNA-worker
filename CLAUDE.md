@@ -39,13 +39,30 @@ When sources conflict:
 6. old conversations.
 
 ## Current mission
-**Flow B → Universal Clean Cut → Unified Whole-Video Selection.**
+**Flow B → Clean Cut Core V1 (idea-first).** See `docs/CUTSELL_DECISIONS.md` D-019/D-020.
+
+Clean Cut Core V1 reasons idea-first: complete intended ideas → all delivery attempts
+per idea → quality/completeness competition → one winning delivery or a necessary
+composite → KEEP/DISCARD. Gemini is a bounded semantic arbiter only (idea-equivalence
+during clustering, residual-ambiguity resolution during final coherence validation),
+never the primary editor; the whole-video Unified Selection reasoner is deactivated in
+the active path (rollback: `CUTSELL_CLEAN_CUT_CORE_V1=0`).
+
+**SWAP IS OUT OF SCOPE FOR CLEAN CUT V1 UNTIL THE USER EXPLICITLY REINTRODUCES IT**
+(D-019). The active semantic membership model is SELECT/KEEP vs DISCARD only — no
+alternate-take inventory in the winning timeline. Do not design, optimize, validate,
+or preserve the active Clean Cut architecture around SWAP; do not spend engineering
+time maintaining or improving SWAP behavior. Legacy SWAP machinery stays in the
+codebase, deactivated for this path only (never delete it destructively if that would
+destabilize unrelated systems) — see `deterministic_best_take_authority.py`'s
+`swap_enabled` parameter and `draft_edits.py`'s unrelated manual editor-layer
+`swap_take`, which is a different product layer and out of this scope decision.
 
 Preserve:
 - one final semantic Selection authority;
 - Selection Freeze;
 - Boundary-only physical timing after freeze;
-- SELECT/SWAP/DISCARD semantics;
+- KEEP/DISCARD semantics (not SELECT/SWAP/DISCARD — see D-019);
 - Human Gold QA;
 - unseen generalization.
 

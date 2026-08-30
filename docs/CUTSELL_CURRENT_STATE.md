@@ -15,7 +15,20 @@ This file is the operational checkpoint. Update it whenever the active benchmark
 
 ## Current focus
 
-**Flow B / Clean Cut editorial-quality hardening.**
+**Clean Cut Core V1 migration (idea-first, SWAP out of scope).** See
+`docs/CUTSELL_DECISIONS.md` D-019 (SWAP out of scope until explicitly reintroduced)
+and D-020 (idea-first architecture). Superseded the prior "Universal Clean Cut →
+Unified Whole-Video Selection" mission: an accepted offline audit of a real RAW run
+(the whole-video Gemini reasoner era) found pairwise, fixed-budget retry-family
+discovery systematically under-covers retries later in a video, and separately Human
+Watch+Listen found that architecture editorially insufficient. The whole-video Unified
+Selection reasoner is now deactivated in the active path (kept only behind
+`CUTSELL_CLEAN_CUT_CORE_V1=0` for rollback); Gemini is a bounded semantic arbiter only.
+
+As of this checkpoint: Clean Cut Core V1 code, targeted unit tests, and a general
+(video-agnostic, 14-category) Clean Cut evaluation suite are implemented and green
+locally. Per the QA loop, one Video00 RAW is authorized only once that evaluation
+suite is green, followed by a stop for Human Watch+Listen before any further RAW.
 
 Human review is the quality gate. Workflow success alone is not an editorial pass.
 Sales-funnel/storytelling work remains intentionally separate until Clean Cut reaches reliable real-video quality.
