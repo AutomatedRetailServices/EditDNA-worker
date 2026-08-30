@@ -70,3 +70,38 @@ jobs:
           done
           echo 'CutSell API container did not become healthy'
           exit 1
+
+      - name: Notify Claude Routine
+        if: always()
+        shell: bash
+        env:
+          CLAUDE_ROUTINE_URL: ${{ secrets.CUTSELL_CLAUDE_ROUTINE_URL }}
+          CLAUDE_ROUTINE_TOKEN: ${{ secrets.CUTSELL_CLAUDE_ROUTINE_TOKEN }}
+          WORKFLOW_STATUS: ${{ job.status }}
+          HEAD_BRANCH: ${{ github.head_ref || github.ref_name }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          set +e
+          if [ -z "${CLAUDE_ROUTINE_URL:-}" ]; then
+            echo "CUTSELL_CLAUDE_ROUTINE_URL not set; skipping Claude Routine notification."
+            exit 0
+          fi
+          # Small, safe run-identity payload only: no secrets, logs, artifact
+          # contents, S3 URLs, or provider keys.
+          payload=$(jq -n \
+            --arg repository "$GITHUB_REPOSITORY" \
+            --arg workflow "$GITHUB_WORKFLOW" \
+            --arg run_id "$GITHUB_RUN_ID" \
+            --arg run_attempt "$GITHUB_RUN_ATTEMPT" \
+            --arg head_branch "$HEAD_BRANCH" \
+            --arg head_sha "$HEAD_SHA" \
+            --arg status "$WORKFLOW_STATUS" \
+            '{repository:$repository, workflow:$workflow, run_id:$run_id, run_attempt:$run_attempt, head_branch:$head_branch, head_sha:$head_sha, status:$status}')
+          curl --silent --show-error --max-time 15 \
+            --request POST \
+            --url "$CLAUDE_ROUTINE_URL" \
+            --header "Authorization: Bearer $CLAUDE_ROUTINE_TOKEN" \
+            --header 'Content-Type: application/json' \
+            --data "$payload" \
+            || echo "Claude Routine notification failed (non-blocking)."
+          exit 0
