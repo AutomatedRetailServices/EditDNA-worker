@@ -160,3 +160,10 @@ def test_unified_request_requires_one_structured_human_style_decision_per_candid
     assert set(properties["action"]["enum"]) == {"select", "swap", "discard"}
     assert "composite_piece" in properties["relation"]["enum"]
     assert "continuation" in properties["relation"]["enum"]
+    # RAW #120: a normal-STOP response undercounted by one with no length
+    # bound to catch it. candidate_index (validated downstream in
+    # GoogleUnifiedSelectionReasoner._call_once) is required so a short,
+    # reordered, or duplicated response is always caught with the exact
+    # index named, not just a bare count mismatch.
+    assert "candidate_index" in properties
+    assert "candidate_index" in decisions["items"]["required"]

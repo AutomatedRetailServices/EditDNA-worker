@@ -158,9 +158,13 @@ def unified_selection_response_schema(candidate_count: int) -> dict[str, Any]:
     # -output validator rejects an exact-length array bound at whole-video scale
     # (works at 5 candidates, 400s at 90) -- even with this same model and even with
     # the smaller/simpler schema that cutsell-hybrid-llm-bakeoff.yml already proved
-    # works. `reason()` below already raises ValueError on any decision-count
-    # mismatch after the response comes back, so dropping the schema-level bound
-    # loses no correctness guarantee, only the request shape that was 400ing.
+    # works. A second isolation probe (scripts/isolate_unified_selection_
+    # cardinality.py) confirmed this holds even for a LOOSE band (minItems=N-2,
+    # maxItems=N+2), not just an exact bound: 8/8 trials 400'd at the real
+    # Video00 candidate count (32) either way. No length constraint of any kind
+    # belongs in this schema. `reason()` below already raises on any
+    # decision-count or candidate_index mismatch after the response comes
+    # back, so dropping the schema-level bound loses no correctness guarantee.
     del candidate_count
     return {
         "type": "object",
@@ -170,13 +174,25 @@ def unified_selection_response_schema(candidate_count: int) -> dict[str, Any]:
                 "items": {
                     "type": "object",
                     "properties": {
+                        # RAW #120 saw a normal-STOP response return 31
+                        # decisions for 32 candidates -- no truncation, the
+                        # model just undercounted. candidate_index requires
+                        # the model to state which candidate each decision is
+                        # for; the same isolation probe found this alone gets
+                        # 8/8 trials with the exactly right count, and it lets
+                        # _call_once() catch (with the specific index named)
+                        # not just a short response but also a reordered or
+                        # duplicated one that a bare length check would miss.
+                        "candidate_index": {"type": "integer", "minimum": 0},
                         "action": {"type": "string", "enum": _ACTIONS},
                         "relation": {"type": "string", "enum": _RELATIONS},
                         "confidence": {"type": "number", "minimum": 0.0, "maximum": 1.0},
                         "family_index": {"type": "integer", "minimum": 0},
                         "reason_code": {"type": "string", "enum": _REASON_CODES},
                     },
-                    "required": ["action", "relation", "confidence", "family_index", "reason_code"],
+                    "required": [
+                        "candidate_index", "action", "relation", "confidence", "family_index", "reason_code",
+                    ],
                     "additionalProperties": False,
                 },
             }
@@ -195,6 +211,7 @@ def _worst_case_decision_json_chars() -> int:
     ("independent_story_coverage") is 27 characters, and that is also the
     reason_code the model chooses most often in practice."""
     sample = {
+        "candidate_index": 999,
         "action": max(_ACTIONS, key=len),
         "relation": max(_RELATIONS, key=len),
         "confidence": 0.95,
@@ -236,7 +253,12 @@ def build_unified_selection_request(payload: Mapping[str, Any], *, max_output_to
         "in the default edit. SWAP means it remains available but does not play. DISCARD is destructive and is "
         "reserved for failed/BTS/inferior duplicate material with no unique audience-facing value. Never delete "
         "information only because wording overlaps. When uncertain, preserve rather than delete. Do not echo IDs "
-        "or timestamps. Output only the requested JSON schema.\n\n"
+        "or timestamps. Output only the requested JSON schema. "
+        f"You MUST return exactly {candidate_count} decisions, one per candidate, in the same order as the "
+        "candidates array. Each decision's candidate_index must equal its zero-based position in that order "
+        "(0, 1, 2, ...). Never merge two candidates into one decision and never omit any candidate, even if two "
+        "candidates look nearly identical -- they still each need their own decision with their own "
+        "candidate_index.\n\n"
         + json.dumps(dict(payload), ensure_ascii=False, separators=(",", ":"))
     )
     return {
@@ -345,12 +367,24 @@ class GoogleUnifiedSelectionReasoner:
                 f"(expected {len(candidate_rows)}, got {len(raw_decisions)}, finishReason={finish_reason!r})"
             )
 
+        # candidate_index catches more than a short response: a reordered or
+        # duplicated one still has the right length but would otherwise apply
+        # the wrong decision to the wrong clip with no error at all. Naming
+        # the exact index(es) involved here is also what RAW #120 lacked --
+        # a failed attempt previously captured no decisions array at all.
+        mismatches = [
+            (i, item.get("candidate_index") if isinstance(item, Mapping) else "<malformed>")
+            for i, item in enumerate(raw_decisions)
+            if not isinstance(item, Mapping) or item.get("candidate_index") != i
+        ]
+        if mismatches:
+            raise UnifiedSelectionUnreliableResponseError(
+                "unified Selection decision candidate_index mismatch (expected sequential "
+                f"0..{len(candidate_rows) - 1}, mismatches={mismatches[:5]}, finishReason={finish_reason!r})"
+            )
+
         decisions = []
         for candidate, item in zip(candidate_rows, raw_decisions):
-            if not isinstance(item, Mapping):
-                raise UnifiedSelectionUnreliableResponseError(
-                    f"unified Selection decision malformed (finishReason={finish_reason!r})"
-                )
             decisions.append(UnifiedSelectionDecision(
                 clip_id=str(candidate["clip_id"]),
                 action=str(item.get("action") or ""),

@@ -52,10 +52,13 @@ def draft(candidate_count: int) -> DraftTimeline:
     )
 
 
-def decisions_json(candidate_count: int) -> str:
+def decisions_json(candidate_count: int, *, index_offset: int = 0) -> str:
+    """index_offset lets a test deliberately misalign candidate_index from
+    position, e.g. index_offset=1 makes every candidate_index wrong by one."""
     return json.dumps({
         "decisions": [
             {
+                "candidate_index": i + index_offset,
                 "action": "select",
                 "relation": "independent",
                 "confidence": 1.0,
@@ -214,6 +217,49 @@ def test_reason_retries_on_decision_count_mismatch_not_only_on_parse_failure():
 
     assert len(fake.calls) == 2
     assert len(plan.decisions) == 2
+
+
+def test_schema_requires_candidate_index_on_every_decision():
+    # RAW #120: a normal-STOP response returned 31 decisions for 32
+    # candidates. An isolation probe (scripts/isolate_unified_selection_
+    # cardinality.py) found requiring candidate_index gets 8/8 trials with
+    # the exactly right count, and it lets a reordered/duplicated response
+    # (same length, wrong mapping) be caught too -- a bare length check
+    # cannot see that at all.
+    from cutsell_worker.unified_selection_google import unified_selection_response_schema
+    schema = unified_selection_response_schema(5)
+    item_schema = schema["properties"]["decisions"]["items"]
+    assert "candidate_index" in item_schema["properties"]
+    assert "candidate_index" in item_schema["required"]
+
+
+def test_reason_raises_on_reordered_response_with_the_correct_count():
+    # Same length as expected, but candidate_index values are shifted by one
+    # -- exactly the "right count, wrong mapping" case a bare length check
+    # would silently accept and apply to the wrong clips.
+    reordered = gemini_response(decisions_json(2, index_offset=1))
+    fake = FakeSession([reordered, reordered])
+    reasoner = make_reasoner(fake)
+
+    with pytest.raises(UnifiedSelectionUnreliableResponseError, match="candidate_index mismatch"):
+        reasoner.reason(draft(2))
+
+    assert len(fake.calls) == 2  # still retried once, still fails both times
+
+
+def test_reason_names_the_specific_mismatched_indices_in_the_error():
+    reordered = gemini_response(decisions_json(3, index_offset=1))
+    fake = FakeSession([reordered, reordered])
+    reasoner = make_reasoner(fake)
+
+    with pytest.raises(UnifiedSelectionUnreliableResponseError) as excinfo:
+        reasoner.reason(draft(3))
+
+    # every one of the 3 positions is wrong (shifted by 1); the error names
+    # them rather than only reporting a generic mismatch.
+    assert "(0, 1)" in str(excinfo.value)
+    assert "(1, 2)" in str(excinfo.value)
+    assert "(2, 3)" in str(excinfo.value)
 
 
 def test_failed_first_attempt_releases_its_ledger_reservation_before_retrying():
