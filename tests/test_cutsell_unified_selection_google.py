@@ -145,6 +145,20 @@ def test_output_token_reserve_has_a_floor_for_tiny_candidate_counts():
     assert output_token_reserve(1, ceiling=4096) == 640
 
 
+def test_output_token_reserve_accounts_for_gemini_pretty_printed_responses():
+    # RAW run 33316711594 (attempts 1 and 2, head da8bd80) truncated at
+    # MAX_TOKENS with 32 candidates against the PREVIOUS compact-JSON
+    # worst-case estimate (1640 tokens). An isolation probe (scripts/
+    # isolate_unified_selection_output_budget.py) proved Gemini's real
+    # structured-output responses are pretty-printed with indentation, not
+    # compact -- and reproduced the identical truncation with an unmodified
+    # pre-fix prompt too, ruling out anything else as the cause. This pins
+    # the budget comfortably above the empirically observed near-truncation
+    # output token usage (~1622-1623 tokens, response still incomplete) at
+    # the real Video00 candidate count.
+    assert output_token_reserve(32, ceiling=4096) > 2000
+
+
 # --- parser: truncated/malformed responses never look like a result -----
 
 def test_parse_raises_unreliable_error_on_truncated_json_and_names_finish_reason():

@@ -222,13 +222,28 @@ def unified_selection_response_schema(candidate_count: int) -> dict[str, Any]:
 
 
 def _worst_case_decision_json_chars() -> int:
-    """Exact worst-case serialized length of one decision object, derived from
-    the real enum values rather than a guessed constant. RAW #119 truncated
-    (finishReason MAX_TOKENS -> malformed JSON) because the previous output
-    token reserve (36 chars/candidate, chosen without reference to the actual
-    schema) under-provisioned relative to this: the longest reason_code alone
-    ("independent_story_coverage") is 27 characters, and that is also the
-    reason_code the model chooses most often in practice."""
+    """Exact worst-case marginal cost, in characters, of one additional
+    decision object as it actually appears embedded in Gemini's real
+    generated response -- derived by diffing a 1-item and 2-item pretty-
+    printed `{"decisions": [...]}` array (indent=2), not by guessing an
+    indentation depth or assuming compact serialization.
+
+    RAW #119 truncated because the original reserve (36 chars/candidate,
+    chosen without reference to the actual schema) under-provisioned. The
+    fix for that used this same real-enum-values technique but assumed a
+    COMPACT serialization (`separators=(",", ":")`). That assumption was
+    itself wrong: an isolation probe (scripts/isolate_unified_selection_
+    output_budget.py) proved Gemini's real structured-output responses are
+    pretty-printed with indentation and newlines, not compact -- the same
+    probe reproduced RAW run 33316711594's MAX_TOKENS truncation (both
+    attempts, head da8bd80) with an UNMODIFIED pre-fix prompt too, ruling
+    out that fix's prompt/payload growth as the cause and pointing squarely
+    at this compact-vs-pretty mismatch instead. The observed truncation
+    point (~193-196 lines, ~1622 output tokens for 32 candidates never
+    completing) matches a ~25/32-decision partial response at pretty-print
+    sizing almost exactly, and is inconsistent with the old compact-based
+    budget ever having been a true upper bound for this provider's actual
+    output format."""
     sample = {
         "candidate_index": 999,
         "action": max(_ACTIONS, key=len),
@@ -237,13 +252,21 @@ def _worst_case_decision_json_chars() -> int:
         "family_index": 999,
         "reason_code": max(_REASON_CODES, key=len),
     }
-    return len(json.dumps(sample, separators=(",", ":")))
+    one = json.dumps({"decisions": [sample]}, indent=2)
+    two = json.dumps({"decisions": [sample, sample]}, indent=2)
+    return len(two) - len(one)
 
 
-# +1 char reserves the trailing comma between array items; this constant is
-# derived from the schema above, so it can never silently drift out of date
-# the way a hand-picked "tokens per candidate" guess could.
-_TOKENS_PER_DECISION = estimate_tokens_from_chars(_worst_case_decision_json_chars() + 1)
+# A margin on top of the exact pretty-printed marginal-cost measurement above,
+# not a replacement for it: char-counting one observed formatting convention
+# cannot promise the provider's tokenizer or exact whitespace/indentation
+# style will never drift (e.g. a different indent width, or extra newlines).
+# Getting caught by that gap once (compact vs. pretty) is the whole reason
+# this constant exists instead of trusting the bare character count alone.
+_JSON_FORMATTING_SAFETY_MARGIN = 1.20
+_TOKENS_PER_DECISION = estimate_tokens_from_chars(
+    int(_worst_case_decision_json_chars() * _JSON_FORMATTING_SAFETY_MARGIN)
+)
 _DECISION_ARRAY_OVERHEAD_TOKENS = estimate_tokens_from_chars(len('{"decisions":[]}') + 8)
 
 
