@@ -49,6 +49,11 @@ def _draft_clip(take: CandidateTake, *, role: SemanticRole, group_id: str | None
         semantic_role=role,
         take_group_id=group_id,
         selected=selected,
+        # Carry the take's local face/pose/motion evidence through to the
+        # draft so downstream Selection authorities (Hybrid or Unified) can
+        # actually see it instead of it being silently dropped at this
+        # conversion. See local_performance.py / MediaSignals.
+        signals=take.signals,
     )
 
 

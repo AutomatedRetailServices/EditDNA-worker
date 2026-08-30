@@ -10,11 +10,12 @@ one. No editorial Selection rule is exercised or asserted on here -- these
 tests only construct trivial two/three-candidate drafts to drive the
 transport, never real story content.
 """
+from dataclasses import replace
 import json
 
 import pytest
 
-from cutsell_worker.contracts import DraftClip, DraftTimeline, EditStrategy, SCHEMA_VERSION
+from cutsell_worker.contracts import DraftClip, DraftTimeline, EditStrategy, MediaSignals, SCHEMA_VERSION
 from cutsell_worker.hybrid_google_transport import DollarBudgetLedger
 from cutsell_worker.hybrid_payload import estimate_tokens_from_chars
 from cutsell_worker.hybrid_provider_settings import HybridProviderSettings
@@ -375,3 +376,61 @@ def test_disallowed_model_raises_before_any_http_call_and_is_never_retried():
     with pytest.raises(ValueError, match="not approved"):
         reasoner.reason(draft(2))
     assert len(fake.calls) == 0
+
+
+# --- visual/performance evidence reaches the payload ---------------------
+#
+# RAW #122 audit: local_performance.py computes real per-take face/pose/
+# motion evidence (MediaSignals) and pipeline.py's take->DraftClip conversion
+# was silently dropping it -- DraftClip had no field to carry it at all, so
+# not one candidate the reasoner ever saw carried anything beyond transcript
+# text and timing. These tests pin the fix: DraftClip.signals is threaded
+# into the payload as `visual_evidence` when present, and omitted (never
+# zeroed -- a zero would read as "confirmed bad", not "no evidence") when a
+# clip has no signals.
+
+def test_payload_omits_visual_evidence_when_clip_has_no_signals():
+    payload = build_unified_selection_payload(draft(2))
+    for row in payload["candidates"]:
+        assert "visual_evidence" not in row
+
+
+def test_payload_includes_visual_evidence_when_clip_signals_are_present():
+    signals = MediaSignals(
+        source_asset_id="src", start=0.0, end=4.0,
+        face_visibility=0.9, eye_contact=0.8, motion_stability=0.2,
+        visual_fumble=0.7, expression_naturalness=0.3, gesture_naturalness=0.4,
+        distraction_risk=0.6,
+    )
+    stumbled = replace(clip(0), signals=signals)
+    d = DraftTimeline(
+        schema_version=SCHEMA_VERSION, project_id="p", strategy=EditStrategy.STORYTELLING,
+        selected=(stumbled, clip(1)), alternates=(), discarded=(),
+    )
+
+    payload = build_unified_selection_payload(d)
+
+    rows_by_id = {row["clip_id"]: row for row in payload["candidates"]}
+    assert "visual_evidence" not in rows_by_id["c1"]
+    evidence = rows_by_id["c0"]["visual_evidence"]
+    assert evidence == {
+        "face_visibility": 0.9,
+        "eye_contact": 0.8,
+        "motion_stability": 0.2,
+        "visual_fumble": 0.7,
+        "expression_naturalness": 0.3,
+        "gesture_naturalness": 0.4,
+        "distraction_risk": 0.6,
+    }
+
+
+def test_editorial_contract_requires_exactly_one_select_per_retry_family():
+    payload = build_unified_selection_payload(draft(2))
+    contract_text = " ".join(payload["editorial_contract"])
+    assert "exactly ONE SELECT" in contract_text
+
+
+def test_editorial_contract_instructs_use_of_visual_evidence():
+    payload = build_unified_selection_payload(draft(2))
+    contract_text = " ".join(payload["editorial_contract"])
+    assert "visual_evidence" in contract_text

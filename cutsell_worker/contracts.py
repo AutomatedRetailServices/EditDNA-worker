@@ -157,6 +157,13 @@ class DraftClip:
     selected: bool = True
     audio_muted: bool = False
     audio_volume: float = 1.0
+    # Local face/pose/motion evidence carried through from the CandidateTake
+    # this clip was built from (see local_performance.py). Optional and
+    # defaulted to None so every existing construction site (serde.py's
+    # external-payload deserialization included) stays valid unchanged.
+    # Selection-time consumers (e.g. unified_selection_google.py) must treat
+    # a missing signals as "no evidence available", never as a zero score.
+    signals: Optional[MediaSignals] = None
 
 
 @dataclass(frozen=True)

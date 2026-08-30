@@ -89,7 +89,7 @@ def _candidate_universe(draft: DraftTimeline) -> list[dict[str, Any]]:
         clips.values(),
         key=lambda item: (item.source_order, float(item.start), float(item.end), item.clip_id),
     ):
-        rows.append({
+        row: dict[str, Any] = {
             "clip_id": clip.clip_id,
             "current_bucket": buckets.get(clip.clip_id, "swap"),
             "source_order": int(clip.source_order),
@@ -99,7 +99,24 @@ def _candidate_universe(draft: DraftTimeline) -> list[dict[str, Any]]:
             "take_group_id": clip.take_group_id,
             "text": " ".join(str(clip.text or "").split())[:1800],
             "hybrid_votes": hybrid_votes.get(clip.clip_id, [])[:6],
-        })
+        }
+        # Local face/pose/motion evidence (local_performance.py), when the
+        # upstream take was analyzed. Higher visual_fumble/distraction_risk
+        # and lower expression/gesture naturalness indicate a visible reset,
+        # stumble, or camera-disengagement moment -- transcript text alone
+        # cannot see this. Omitted entirely (not zeroed) when unavailable, so
+        # the reasoner never mistakes "no evidence" for "confirmed clean".
+        if clip.signals is not None:
+            row["visual_evidence"] = {
+                "face_visibility": round(float(clip.signals.face_visibility), 3),
+                "eye_contact": round(float(clip.signals.eye_contact), 3),
+                "motion_stability": round(float(clip.signals.motion_stability), 3),
+                "visual_fumble": round(float(clip.signals.visual_fumble), 3),
+                "expression_naturalness": round(float(clip.signals.expression_naturalness), 3),
+                "gesture_naturalness": round(float(clip.signals.gesture_naturalness), 3),
+                "distraction_risk": round(float(clip.signals.distraction_risk), 3),
+            }
+        rows.append(row)
     return rows
 
 
@@ -137,14 +154,16 @@ def build_unified_selection_payload(draft: DraftTimeline) -> dict[str, Any]:
         "editorial_contract": [
             "Understand the full creator message before deciding any individual take.",
             "First infer idea families and retry relationships across the entire timeline.",
-            "SELECT independent valid story coverage, the best retry, necessary continuations, and every clean piece needed for a composite best take.",
-            "SWAP a usable alternative or redundant delivery that should not play by default but remains useful for manual replacement.",
-            "DISCARD only recording-process BTS, failed/abandoned delivery, or an inferior retry with no unique audience-facing information.",
+            "A genuine retry family (competing takes of the same moment, relation retry_winner/retry_alternate) produces exactly ONE SELECT: the single cleanest complete delivery. Every other candidate in that same contest is a SWAP, never an additional SELECT, no matter how usable it is on its own.",
+            "SELECT independent valid story coverage, the one winning retry per family, necessary continuations, and every clean piece needed for a composite best take.",
+            "SWAP a usable alternative or redundant delivery that should not play by default but remains useful for manual replacement -- this is the correct action any time your own reason for keeping a clip is that it is merely a usable/redundant alternative, never SELECT.",
+            "DISCARD only recording-process BTS, failed/abandoned delivery, or an inferior retry with no unique audience-facing information -- if you judge a clip's delivery failed or was abandoned, it must never be SELECT either.",
+            "When visual_evidence is present for a candidate, use it as real evidence, not decoration: low motion_stability/expression_naturalness/gesture_naturalness or high visual_fumble/distraction_risk are signs of a visible reset, stumble, or camera-disengagement moment within that take. An incomplete, stumbled, or visually-reset take must not beat a cleaner, complete competing retry in the same family unless it has clearly stronger evidence (better visual_evidence AND a genuinely more complete delivery) -- being merely present or first is not evidence.",
             "Do not prefer a monolithic take merely because it is longer; a human-quality composite of cleaner micro-deliveries may be better.",
             "Do not treat adjacent valid statements as retries just because they share topic words.",
             "Preserve numbers, negations, names, causal claims, and genuinely new story facts.",
             "Natural source story order is authoritative; do not reorder candidates.",
-            "WHEN UNCERTAIN, preserve content rather than destructively deleting it.",
+            "WHEN UNCERTAIN, preserve content rather than destructively deleting it -- prefer SWAP over SELECT when uncertain which retry is best.",
         ],
         "candidates": candidates,
     }

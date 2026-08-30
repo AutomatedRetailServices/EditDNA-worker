@@ -142,6 +142,19 @@ def validate_unified_selection_plan(
 
 def _effective_action(decision: UnifiedSelectionDecision, current_bucket: str) -> tuple[str, str | None]:
     """Fail open on uncertainty without turning uncertainty into destructive deletion."""
+    # A reason_code is the model's own explanation for a decision, and some
+    # reason codes are self-describing about which tier they belong to per
+    # the editorial contract itself: "usable_alternate" is SWAP-tier by
+    # definition ("a usable alternative...that should not play by default"),
+    # and "failed_delivery" is DISCARD-tier by definition ("failed/abandoned
+    # delivery"). A `select` action paired with either directly contradicts
+    # the model's own stated reason -- checked first, ahead of confidence, so
+    # a high-confidence self-contradiction is still caught. General, not
+    # Video00-specific: it depends only on the fixed reason_code vocabulary.
+    if decision.action == "select" and decision.reason_code == "failed_delivery":
+        return "discard", "failed_delivery_reason_overrides_select_action"
+    if decision.action == "select" and decision.reason_code == "usable_alternate":
+        return "swap", "usable_alternate_reason_overrides_select_action"
     if decision.relation == "uncertain" or decision.confidence < 0.70:
         if current_bucket == "select":
             return "select", "uncertain_preserved_current_selected"
@@ -149,6 +162,39 @@ def _effective_action(decision: UnifiedSelectionDecision, current_bucket: str) -
     if decision.action == "discard" and decision.confidence < 0.80:
         return "swap", "low_confidence_discard_demoted_to_swap"
     return decision.action, None
+
+
+def _enforce_single_retry_family_winner(
+    clips: tuple[DraftClip, ...],
+    decisions: dict[str, UnifiedSelectionDecision],
+    actions: list[str],
+    overrides: list[str | None],
+) -> None:
+    """Within one retry family, a genuine retry contest -- relation
+    retry_winner or retry_alternate, i.e. candidates the model itself framed
+    as competing takes of the same moment -- must produce at most one SELECT.
+    More than one surviving SELECT there is always a policy error, never a
+    legitimate composite: composites are relation composite_piece/
+    continuation and are untouched by this pass, as is every independent
+    story beat. Mutates `actions`/`overrides` in place; keeps the
+    highest-confidence contender, demotes the rest to SWAP (never DISCARD --
+    an alternate that was good enough to reach SELECT stays available for
+    manual replacement, it is not thrown away)."""
+    by_family: dict[int, list[int]] = {}
+    for index, clip in enumerate(clips):
+        decision = decisions[clip.clip_id]
+        if decision.relation in ("retry_winner", "retry_alternate"):
+            by_family.setdefault(decision.family_index, []).append(index)
+
+    for indices in by_family.values():
+        select_indices = [i for i in indices if actions[i] == "select"]
+        if len(select_indices) <= 1:
+            continue
+        winner = max(select_indices, key=lambda i: decisions[clips[i].clip_id].confidence)
+        for i in select_indices:
+            if i != winner:
+                actions[i] = "swap"
+                overrides[i] = "retry_family_single_winner_enforced"
 
 
 def apply_unified_selection_reasoner(
@@ -170,18 +216,27 @@ def apply_unified_selection_reasoner(
         return replace(draft, diagnostics=diagnostics)
 
     clips = _all_clips(draft)
-    clip_by_id = {clip.clip_id: clip for clip in clips}
     current = _bucket_map(draft)
     decisions = {decision.clip_id: decision for decision in plan.decisions}
+
+    actions: list[str] = []
+    overrides: list[str | None] = []
+    for clip in clips:
+        decision = decisions[clip.clip_id]
+        action, safety_override = _effective_action(decision, current.get(clip.clip_id, "swap"))
+        actions.append(action)
+        overrides.append(safety_override)
+
+    _enforce_single_retry_family_winner(clips, decisions, actions, overrides)
 
     selected: list[DraftClip] = []
     alternates: list[DraftClip] = []
     discarded: list[DraftClip] = []
     audit: list[dict] = []
 
-    for clip in clips:
+    for index, clip in enumerate(clips):
         decision = decisions[clip.clip_id]
-        action, safety_override = _effective_action(decision, current.get(clip.clip_id, "swap"))
+        action = actions[index]
         normalized_clip = replace(clip, selected=(action == "select"))
         if action == "select":
             selected.append(normalized_clip)
@@ -198,7 +253,7 @@ def apply_unified_selection_reasoner(
             "confidence": round(decision.confidence, 4),
             "family_index": decision.family_index,
             "reason_code": decision.reason_code,
-            "safety_override": safety_override,
+            "safety_override": overrides[index],
         })
 
     diagnostics["unified_selection_reasoner"] = {
