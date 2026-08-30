@@ -316,6 +316,30 @@ jobs:
           echo "--- diagnostics.unified_selection_reasoner ---"
           jq '.diagnostics.unified_selection_reasoner // {status:"absent"}' artifact/video00-unified-selection.json
 
+          # Clean Cut Core V1 observability (canonical directive item 26): the
+          # full idea-first decision path must be understandable from CI logs
+          # alone, without needing the human-review artifact ZIP (which this
+          # environment cannot always reach). No secrets -- transcript text
+          # only, same class of content the Selection-lock step below already
+          # echoes in full.
+          echo "--- diagnostics.take_judge_groups (retry families + DeliveryScorer scores) ---"
+          jq '.diagnostics.take_judge_groups // []' artifact/video00-unified-selection.json
+
+          echo "--- diagnostics.deterministic_best_take_authority (BestTakeResolver) ---"
+          jq '.diagnostics.deterministic_best_take_authority // {status:"absent"}' artifact/video00-unified-selection.json
+
+          echo "--- diagnostics.semantic_idea_equivalence (IdeaClusterer's bounded SemanticArbiter tier) ---"
+          jq '.diagnostics.semantic_idea_equivalence // {status:"absent"}' artifact/video00-unified-selection.json
+
+          echo "--- diagnostics.final_story_coherence_validation (StoryValidator: contradiction/coverage/freeze_blocked) ---"
+          jq '.diagnostics.final_story_coherence_validation // {status:"absent"}' artifact/video00-unified-selection.json
+
+          echo "--- final KEEP sequence (clip_id + text, in order) ---"
+          jq '[.selected[]? | {clip_id, text}]' artifact/video00-unified-selection.json
+
+          echo "--- final DISCARD count and stage_status ---"
+          jq '{discarded_count: (.discarded | length), stage_status}' artifact/video00-unified-selection.json
+
       - name: Upload unified Selection diagnostic artifact
         if: always()
         uses: actions/upload-artifact@v4
