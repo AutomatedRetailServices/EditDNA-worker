@@ -810,6 +810,84 @@ MP4 (`artifact/video00-unified-selection.mp4` in the
 
 ---
 
+# PROVIDER RELIABILITY — RAW #119/#120 (2026-08-29/30)
+
+RAW #119 saw `selection_reasoner_status` regress from `"applied"` (RAW
+#118) back to `provider_error_fail_open`, with `diagnostics.unified
+_selection_reasoner.error` reading a bare `JSONDecodeError` (no
+`finishReason`, no distinguishing whether it was truncation or something
+else). Diagnosed the provider layer (`unified_selection_google.py`) per
+all six requested angles (finish reason, output token budget, schema
+compatibility, parser assumptions, retry policy, determinism) and fixed:
+
+- `output_token_reserve()` replaces the old flat `36 tokens/candidate`
+  guess with a true upper bound derived from the schema's actual longest
+  enum values (~44 tokens/candidate) — the old formula under-provisioned
+  by ~23% at Video00's real scale (32 candidates).
+- `parse_unified_selection_response()` now names `finishReason` in every
+  error and raises a new `UnifiedSelectionUnreliableResponseError`
+  instead of a bare `ValueError`/`JSONDecodeError`, for every shape that
+  must never be treated as a complete result.
+- One retry (`max_retries: int = 1`) with a 1.5x token budget bump on
+  the second attempt, plus a fix for a pre-existing ledger-reservation
+  leak on failed attempts.
+- 14 new targeted tests (`tests/test_cutsell_unified_selection_google.py`)
+  — this transport had zero prior direct unit coverage.
+
+No Selection/Boundary code touched; no Video00-specific guard added.
+Full suite 869 passed / 1 skipped. Pushed `0666ee1`.
+
+## RAW #120 result: fix confirmed working, but surfaced a NEW distinct failure mode
+
+RAW #120 (run `33281452850`) still did not reach `"applied"`. The
+diagnostics now read clearly (proving the observability half of the fix
+works exactly as intended):
+
+```
+"error": "UnifiedSelectionUnreliableResponseError: unified Selection
+ordered decision count mismatch (expected 32, got 31,
+finishReason='STOP')",
+"status": "provider_error_fail_open"
+```
+
+This is a **different** failure than RAW #119's truncation:
+`finishReason='STOP'` means the model completed normally — it was not
+cut off, and the retry (which bumps the token budget) would not help
+here since the problem is not a lack of headroom. The model simply
+returned one fewer decision object than there were candidates (31 vs
+32), most likely because `unified_selection_response_schema()` no
+longer encodes an exact `minItems`/`maxItems` array bound (removed in
+the RAW #118 fix, because that exact bound is what caused the earlier
+400 at this scale). Removing that bound fixed the 400 but also removed
+the one thing that made the schema *force* exactly one decision per
+candidate — the model is now free to under-count without any
+schema-level pressure not to.
+
+Because the run failed open, `diagnostics.unified_selection_reasoner`
+only ever contains `{status, error}` (see
+`apply_unified_selection_reasoner()`'s except-branch) — the actual
+31-item decisions array was never captured anywhere observable, so
+which specific candidate got dropped or merged is not yet known.
+
+**Do not extrapolate a fix from this note alone.** This needs the same
+evidence-first treatment as the earlier 400: diagnosing *why* the model
+undercounts by exactly one (a merged pair of candidates? one skipped?)
+requires either additional response logging before the count check, or
+a cheap non-RAW isolation probe (mirroring
+`scripts/isolate_unified_selection_schema.py`) that captures the full
+returned decisions array on a short-count response rather than just the
+count. Two schema options worth weighing, once the actual cause is
+known, both requiring the same care as any other provider-layer change:
+requiring the model to echo each candidate's index/id (so a short
+response can be positionally reconciled instead of zipped), or
+re-encoding cardinality some other way that does not reproduce the
+RAW #114-117 400 at scale. Whichever fix is chosen, it is a provider
+transport/schema question, not a Selection semantics question, and it
+should get the same one-RAW confirmatory validation this and the RAW
+#118 fix did.
+
+---
+
 # SECURITY CONTINUITY
 
 Security is a parallel gate. Read `docs/claude-handoff/SECURITY_CONSTITUTION.md`.
