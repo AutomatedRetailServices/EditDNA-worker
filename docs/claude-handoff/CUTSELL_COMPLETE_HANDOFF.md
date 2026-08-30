@@ -886,6 +886,81 @@ transport/schema question, not a Selection semantics question, and it
 should get the same one-RAW confirmatory validation this and the RAW
 #118 fix did.
 
+## RAW #121/#122 — cardinality root-caused and fixed; provider layer now reliable
+
+Root cause for the RAW #120 undercount was isolated with
+`scripts/isolate_unified_selection_cardinality.py` (two full runs, 30 real
+Gemini calls, no paid GPU RAW): ANY array-length schema bound (exact
+*or* a loose ±2 band) reliably 400s at the real Video00 scale (32
+candidates) -- not just the N=90 previously tested -- and near-duplicate
+candidate text was not the driver. A required `candidate_index` field
+plus an explicit "return exactly N" prompt sentence both independently
+hit 8/8 perfect compliance and were implemented together (`fff581e`):
+`candidate_index` also closes a correctness gap beyond the original
+bug -- a same-length but reordered/duplicated response was previously
+undetectable and would have applied the wrong decision to the wrong
+clip silently.
+
+RAW #121 then surfaced two more issues in quick succession, both fixed
+same-session:
+- Attempt 1: a pure RunPod capacity flake (CUDA health stuck
+  `IN_QUEUE` for the full 20-minute deadline, never got a GPU worker) --
+  confirmed via job log, re-run once via `rerun_workflow_run`.
+- Attempt 2: got past CUDA health and reached the reasoner, then hit a
+  **self-inflicted regression from the candidate_index fix itself**:
+  `RuntimeError: unified Selection edit dollar budget exhausted`.
+  Growing the schema pushed the retry's naive 1.5x token-budget bump
+  just over the tiny default per-edit cost cap ($0.0075) at N=32, so a
+  retryable failure could die on the cost check before ever making its
+  HTTP call. Fixed (`fdd3ee3`) with a `_max_affordable_output_tokens()`
+  helper that caps the retry's bump at what the ledger can actually
+  afford, giving up cleanly (not looping) only if even a same-size
+  repeat is genuinely unaffordable.
+
+**RAW #122 (run `33285565223`) reached `selection_reasoner_status:
+"applied"` end-to-end for the first time with every fix in place** --
+schema-400, truncation/retry, cardinality/candidate_index, and
+budget-cap all resolved together. CUDA health passed cleanly, the full
+RunPod job completed, teardown succeeded, and the diagnostic artifact
+correctly contains all 4 files (generated MP4, result JSON, Human Gold
+MP4, status.json).
+
+### This is now a real Selection-quality question, not an infra one
+
+The reasoner's own internal count was 26 (`diagnostics.unified
+_selection_reasoner.selected_count`), but the final draft's
+`actual_selected_count` was 27 (the same "+1 after freeze" pattern seen
+at RAW #118, most likely the pre-freeze complete-idea word-lock
+recovery step in `universal_clean_cut.py` legitimately restoring a
+boundary word/segment -- see the RAW #118 note above). The Selection
+lock comparison against `benchmarks/video00_selection_lock.json`
+failed with the *same 13 failed-check IDs* as both RAW #118 and the
+original fail-open runs, and the ordered-text diff shows the same
+pattern as RAW #118: Unified Selection is choosing different
+phrasing/take order for several story beats than the frozen baseline,
+and a segment reading like an incomplete stumble ("Tuve problemas
+estomacales a un tiempo en donde se me hizo una endoscopía y me
+adeagnosticaron con...") appears selected again. This is now the second
+independent real run showing the same editorial pattern, which is
+stronger evidence than RAW #118 alone that this is a genuine,
+reproducible characteristic of the reasoner's current prompt/editorial
+contract -- not a fluke.
+
+**Per the user's own standing instruction, this is a true Human
+Watch+Listen candidate: autonomous provider-layer fixing stops here.**
+Do NOT tune the editorial prompt, reason_code guidance, or any
+Selection logic from the automated lock/regression-QA failure alone.
+Watch the produced MP4 (`video00-unified-selection.mp4` in the
+`cutsell-video00-unified-selection-human-review` artifact on run
+`33285565223`) side-by-side with `human-gold-video00.mp4` from the same
+artifact, and read the full `diagnostics.unified_selection_reasoner
+.decisions` table (candidate_count 32, printed in that run's CI log)
+per handoff item F's process, before deciding whether the new phrasing
+choices are a regression, an equal-or-better alternative needing the
+lock re-baselined, or confirmation that the "redundant_retry" case
+(the stumble segment) needs prompt-level reinforcement -- a genuine
+semantic Selection change, requiring the same care as any other.
+
 ---
 
 # SECURITY CONTINUITY
