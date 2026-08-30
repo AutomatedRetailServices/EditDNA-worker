@@ -62,11 +62,11 @@ from cutsell_worker.unified_selection_google import (  # noqa: E402
 )
 
 MODEL = "gemini-3.5-flash-lite"
-HARD_CAP_USD = 0.30
+HARD_CAP_USD = 0.40
 INPUT_PER_MILLION_USD = 0.30
 OUTPUT_PER_MILLION_USD = 2.50
 CANDIDATE_COUNT = 32  # RAW #118/#120's real Video00 candidate_count
-TRIALS_PER_CELL = 2
+TRIALS_PER_CELL = 3
 # Generous and identical across every variant so truncation can never be
 # confused with a cardinality failure -- this investigation is about
 # whether the model returns the right COUNT, not whether it has enough room.
@@ -237,12 +237,26 @@ def run_one(
 
     endpoint = f"https://generativelanguage.googleapis.com/v1beta/models/{MODEL}:generateContent"
     started = time.monotonic()
-    response = requests.post(
-        endpoint,
-        headers={"x-goog-api-key": api_key, "Content-Type": "application/json"},
-        json=body,
-        timeout=90.0,
-    )
+    try:
+        response = requests.post(
+            endpoint,
+            headers={"x-goog-api-key": api_key, "Content-Type": "application/json"},
+            json=body,
+            timeout=90.0,
+        )
+    except requests.exceptions.RequestException as exc:
+        # A transient network/timeout error is not a finding about the
+        # provider's cardinality behavior -- record it and let the caller
+        # move on to the next trial instead of losing the rest of the sweep.
+        latency = round(time.monotonic() - started, 3)
+        return CallResult(
+            variant=variant, text_mode=text_mode, trial=trial,
+            status_code=None, ok=False, finish_reason="",
+            expected_count=expected_count, returned_count=None,
+            returned_indices=None, error_body=f"{exc.__class__.__name__}: {exc}"[:800],
+            input_tokens=0, output_tokens=0, latency_sec=latency,
+            notes="network_error",
+        )
     latency = round(time.monotonic() - started, 3)
     ok = response.status_code == 200
 
@@ -302,7 +316,13 @@ def main() -> None:
     spend: list[float] = []
     results: list[CallResult] = []
 
-    variants = ["unbounded_baseline", "exact_bound_old", "loose_band", "index_echo", "prompt_reinforced"]
+    # Highest-value variants first (baseline + the two promising fixes), so a
+    # transient network failure partway through (as happened on the first
+    # run) still leaves the most decision-relevant data captured. The two
+    # length-bound variants are last since a single run already confirmed
+    # both 400 reliably at this scale -- they're a sanity re-check here, not
+    # the main question.
+    variants = ["unbounded_baseline", "index_echo", "prompt_reinforced", "exact_bound_old", "loose_band"]
     text_modes = {
         "distinct": _distinct_candidate_texts(CANDIDATE_COUNT),
         "retry_family_heavy": _retry_family_heavy_candidate_texts(CANDIDATE_COUNT),
