@@ -74,6 +74,20 @@ def test_deterministic_best_take_authority_rollback_env_flag_disables_it():
     assert brain.deterministic_best_take_authority_enabled is False
 
 
+def test_clean_cut_core_v1_defaults_on():
+    env = base_env()
+    brain = build_brain_runtime(load_runtime_config(env), env)
+
+    assert brain.clean_cut_core_v1_enabled is True
+
+
+def test_clean_cut_core_v1_rollback_env_flag_disables_it():
+    env = {**base_env(), "CUTSELL_CLEAN_CUT_CORE_V1": "0"}
+    brain = build_brain_runtime(load_runtime_config(env), env)
+
+    assert brain.clean_cut_core_v1_enabled is False
+
+
 def test_semantic_equivalence_arbiter_builds_when_hybrid_enabled_without_unified_selection():
     # Phase 2: take grouping runs upstream of the Unified Selection/legacy
     # branch, so the arbiter must be available even when

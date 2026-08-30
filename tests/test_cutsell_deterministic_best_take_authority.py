@@ -44,10 +44,11 @@ def test_no_take_judge_groups_is_a_pure_noop():
     assert out is d
 
 
-def test_clear_winner_both_wrongly_selected_gets_corrected_to_one_select_one_swap():
+def test_clear_winner_both_wrongly_selected_gets_corrected_to_one_select_one_discard():
     # Simulates exactly the RAW #122-class bug: Unified Selection put two
     # members of one retry family into SELECT even though the deterministic
-    # ranker was decisive (gap 0.94 - 0.50 = 0.44 >= 0.30).
+    # ranker was decisive (gap 0.94 - 0.50 = 0.44 >= 0.30). Clean Cut Core V1
+    # default: SWAP is out of scope, so the legitimate loser is DISCARDed.
     a = clip("winner", 0.0, 5.0, "the clean complete take", selected=True)
     b = clip("loser", 5.0, 10.0, "a weaker retry of the same idea", selected=True)
     d = draft(
@@ -61,10 +62,35 @@ def test_clear_winner_both_wrongly_selected_gets_corrected_to_one_select_one_swa
     out = apply_deterministic_best_take_authority(d)
 
     assert [c.clip_id for c in out.selected] == ["winner"]
+    assert out.alternates == ()
+    assert [c.clip_id for c in out.discarded] == ["loser"]
+    diag = out.diagnostics["deterministic_best_take_authority"]
+    assert diag["clear_winner_minimum_gap"] == CLEAR_WINNER_MINIMUM_GAP == 0.30
+    assert diag["swap_enabled"] is False
+    reasons = {row["clip_id"]: row["reason"] for row in diag["moves"]}
+    assert reasons["loser"] == "deterministic_legitimate_loser_no_swap_scope"
+
+
+def test_clear_winner_swap_enabled_rollback_restores_pre_v1_swap_behavior():
+    # swap_enabled=True is the retired pre-Clean-Cut-Core-V1 behavior, kept
+    # only for rollback/regression comparison -- not the default.
+    a = clip("winner", 0.0, 5.0, "the clean complete take", selected=True)
+    b = clip("loser", 5.0, 10.0, "a weaker retry of the same idea", selected=True)
+    d = draft(
+        selected=(a, b),
+        take_judge_groups=[{
+            "group_id": "g1",
+            "ranked": [ranked_row("winner", 0.94), ranked_row("loser", 0.50)],
+        }],
+    )
+
+    out = apply_deterministic_best_take_authority(d, swap_enabled=True)
+
+    assert [c.clip_id for c in out.selected] == ["winner"]
     assert [c.clip_id for c in out.alternates] == ["loser"]
     assert out.discarded == ()
     diag = out.diagnostics["deterministic_best_take_authority"]
-    assert diag["clear_winner_minimum_gap"] == CLEAR_WINNER_MINIMUM_GAP == 0.30
+    assert diag["swap_enabled"] is True
     reasons = {row["clip_id"]: row["reason"] for row in diag["moves"]}
     assert reasons["loser"] == "deterministic_legitimate_alternate_not_additional_select"
 
@@ -166,7 +192,7 @@ def test_singleton_group_is_never_touched():
     assert out is d
 
 
-def test_three_way_family_keeps_exactly_one_select_rest_swap():
+def test_three_way_family_keeps_exactly_one_select_rest_discard():
     a = clip("a", 0.0, 5.0, "clean winner", selected=True)
     b = clip("b", 5.0, 10.0, "usable alternate one", selected=True)
     c = clip("c", 10.0, 15.0, "usable alternate two", selected=False)
@@ -180,6 +206,26 @@ def test_three_way_family_keeps_exactly_one_select_rest_swap():
     )
 
     out = apply_deterministic_best_take_authority(d)
+
+    assert [clip_.clip_id for clip_ in out.selected] == ["a"]
+    assert out.alternates == ()
+    assert sorted(clip_.clip_id for clip_ in out.discarded) == ["b", "c"]
+
+
+def test_three_way_family_swap_enabled_rollback_keeps_rest_as_swap():
+    a = clip("a", 0.0, 5.0, "clean winner", selected=True)
+    b = clip("b", 5.0, 10.0, "usable alternate one", selected=True)
+    c = clip("c", 10.0, 15.0, "usable alternate two", selected=False)
+    d = draft(
+        selected=(a, b),
+        alternates=(c,),
+        take_judge_groups=[{
+            "group_id": "g1",
+            "ranked": [ranked_row("a", 0.95), ranked_row("b", 0.55), ranked_row("c", 0.50)],
+        }],
+    )
+
+    out = apply_deterministic_best_take_authority(d, swap_enabled=True)
 
     assert [clip_.clip_id for clip_ in out.selected] == ["a"]
     assert sorted(clip_.clip_id for clip_ in out.alternates) == ["b", "c"]

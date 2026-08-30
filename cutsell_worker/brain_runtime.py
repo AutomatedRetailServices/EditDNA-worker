@@ -61,6 +61,12 @@ class BrainRuntime:
     # that branch. None whenever paid inference is off, disabled via the
     # rollback flag below, or no API key is present.
     semantic_equivalence_arbiter: SemanticEquivalenceArbiter | None = None
+    # Clean Cut Core V1 (see CLAUDE.md / docs/CUTSELL_DECISIONS.md): the
+    # idea-first deterministic pipeline is the default active Clean Cut path.
+    # Set CUTSELL_CLEAN_CUT_CORE_V1=0 to roll back to the pre-V1 architecture
+    # (whole-video Unified Selection reasoner when explicitly requested, else
+    # the legacy Hybrid-vote-informed path) for comparison/regression testing.
+    clean_cut_core_v1_enabled: bool = True
 
     @property
     def external_calls_enabled(self) -> bool:
@@ -201,6 +207,7 @@ def build_brain_runtime(
         if requested_hybrid and semantic_equivalence_arbiter_enabled
         else None
     )
+    clean_cut_core_v1_enabled = _env_true_default_true(values.get("CUTSELL_CLEAN_CUT_CORE_V1"))
 
     return BrainRuntime(
         backend=RUNPOD_LOCAL_BACKEND,
@@ -217,4 +224,5 @@ def build_brain_runtime(
         hybrid_settings=hybrid_settings,
         deterministic_best_take_authority_enabled=deterministic_best_take_authority_enabled,
         semantic_equivalence_arbiter=semantic_equivalence_arbiter,
+        clean_cut_core_v1_enabled=clean_cut_core_v1_enabled,
     )

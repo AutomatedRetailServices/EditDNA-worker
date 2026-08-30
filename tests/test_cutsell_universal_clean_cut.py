@@ -114,7 +114,9 @@ def _fake_process_local_sources(request, local_paths, **kwargs):
     )
 
 
-def _run_with_reasoner(monkeypatch, *, deterministic_best_take_authority_enabled=True):
+def _run_with_reasoner(
+    monkeypatch, *, deterministic_best_take_authority_enabled=True, clean_cut_core_v1_enabled=False,
+):
     monkeypatch.setattr(universal, "process_local_sources", _fake_process_local_sources)
     monkeypatch.setattr(universal, "polish_human_boundaries_v5", lambda result, paths: result)
     return universal.process_universal_clean_cut_sources(
@@ -123,7 +125,14 @@ def _run_with_reasoner(monkeypatch, *, deterministic_best_take_authority_enabled
         asr_provider=object(),
         selection_reasoner=_FakeReasonerBothIndependent(),
         deterministic_best_take_authority_enabled=deterministic_best_take_authority_enabled,
+        clean_cut_core_v1_enabled=clean_cut_core_v1_enabled,
     )
+
+
+# The following three tests exercise the RETIRED pre-Clean-Cut-Core-V1
+# architecture (whole-video Unified Selection reasoner + Phase 0/1 sequencing)
+# kept only behind clean_cut_core_v1_enabled=False for rollback/regression
+# comparison -- see test_clean_cut_core_v1_* below for the active default.
 
 
 def test_deterministic_best_take_authority_runs_after_unified_selection_by_default(monkeypatch):
@@ -131,7 +140,8 @@ def test_deterministic_best_take_authority_runs_after_unified_selection_by_defau
 
     # Unified Selection (the fake) put both clips in SELECT; the deterministic
     # override -- sequential, not exclusive with Unified Selection -- corrects
-    # the clear-gap family back to one SELECT + one SWAP afterward.
+    # the clear-gap family back to one SELECT + one SWAP afterward. SWAP is
+    # only reachable at all via this retired swap_enabled=True rollback path.
     assert [c.clip_id for c in result.draft.selected] == ["winner"]
     assert [c.clip_id for c in result.draft.alternates] == ["loser"]
     assert "deterministic_best_take_authority" in result.draft.diagnostics
@@ -157,12 +167,52 @@ def test_deterministic_best_take_authority_never_invoked_in_legacy_non_unified_p
     monkeypatch.setattr(
         universal,
         "apply_deterministic_best_take_authority",
-        lambda draft: called.append(True) or draft,
+        lambda draft, **kwargs: called.append(True) or draft,
     )
+
+    result = universal.process_universal_clean_cut_sources(
+        object(), {}, asr_provider=object(), selection_reasoner=None, clean_cut_core_v1_enabled=False,
+    )
+
+    assert not called
+    assert result.stage_status["selection_phase_authority"] == "legacy_explicit_final_selection_authority_executed"
+
+
+# --- Clean Cut Core V1: idea-first deterministic pipeline, active default ---
+
+
+def test_clean_cut_core_v1_is_the_default_and_never_invokes_unified_selection_reasoner(monkeypatch):
+    monkeypatch.setattr(universal, "process_local_sources", _fake_process_local_sources)
+    monkeypatch.setattr(universal, "polish_human_boundaries_v5", lambda result, paths: result)
+    reasoner = _FakeReasonerBothIndependent()
+    invoked = []
+    monkeypatch.setattr(universal, "apply_unified_selection_reasoner", lambda draft, r: invoked.append(True) or draft)
+
+    result = universal.process_universal_clean_cut_sources(
+        object(), {}, asr_provider=object(), selection_reasoner=reasoner,
+    )
+
+    # Even though a selection_reasoner instance was passed, Clean Cut Core V1
+    # (the default) never invokes it -- Gemini is a bounded arbiter only.
+    assert not invoked
+    assert result.stage_status["unified_selection_reasoner"] == "disabled_clean_cut_core_v1"
+    assert result.stage_status["semantic"] == "clean_cut_core_v1_idea_first"
+
+
+def test_clean_cut_core_v1_resolves_clear_family_to_keep_discard_no_swap(monkeypatch):
+    # _pre_unified_draft already has a decisive take_judge_groups contest
+    # (winner 0.94 vs loser 0.50) with "loser" pre-parked in alternates by the
+    # upstream (fake) pipeline -- Clean Cut Core V1 must fold that into
+    # DISCARD, never leave or create a SWAP/alternates bucket.
+    monkeypatch.setattr(universal, "process_local_sources", _fake_process_local_sources)
+    monkeypatch.setattr(universal, "polish_human_boundaries_v5", lambda result, paths: result)
 
     result = universal.process_universal_clean_cut_sources(
         object(), {}, asr_provider=object(), selection_reasoner=None,
     )
 
-    assert not called
-    assert result.stage_status["selection_phase_authority"] == "legacy_explicit_final_selection_authority_executed"
+    assert [c.clip_id for c in result.draft.selected] == ["winner"]
+    assert result.draft.alternates == ()
+    assert [c.clip_id for c in result.draft.discarded] == ["loser"]
+    assert result.stage_status["selection_phase_authority"] == "clean_cut_core_v1_idea_first_keep_discard"
+    assert "final_story_coherence_validation" in result.draft.diagnostics

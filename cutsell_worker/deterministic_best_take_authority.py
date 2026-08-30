@@ -78,10 +78,20 @@ def clear_retry_family_winner(ranked: list[dict]) -> dict | None:
     return ordered[0]
 
 
-def apply_deterministic_best_take_authority(draft):
+def apply_deterministic_best_take_authority(draft, *, swap_enabled: bool = False):
     """Lock in the deterministic ranker's verdict for every clear retry-family
     contest; leave every ambiguous (thin-gap) contest exactly as the upstream
-    semantic authority decided it."""
+    semantic authority decided it.
+
+    ``swap_enabled`` controls where a legitimate (not failed/incomplete) losing
+    retry goes. Clean Cut Core V1's product scope decision is KEEP/DISCARD
+    only -- SWAP is out of scope until explicitly reintroduced (see CLAUDE.md
+    and docs/CUTSELL_DECISIONS.md) -- so the default is False: a legitimate
+    loser is DISCARDed, same as a failed/incomplete one, because it lost a
+    decisive contest and does not belong in the one winning edit. Passing
+    swap_enabled=True restores the pre-V1 behavior (legitimate losers become
+    SWAP/alternates) for rollback/testing of the retired architecture only.
+    """
     groups = list((draft.diagnostics or {}).get("take_judge_groups") or ())
     if not groups:
         return draft
@@ -139,9 +149,18 @@ def apply_deterministic_best_take_authority(draft):
                     clip_id, "discard", "deterministic_failed_or_incomplete_evidence",
                     {"group_id": group_id, "winner_clip_id": winner_id, "ranker_reason": row.get("reason")},
                 )
-            else:
+            elif swap_enabled:
                 move(
                     clip_id, "swap", "deterministic_legitimate_alternate_not_additional_select",
+                    {"group_id": group_id, "winner_clip_id": winner_id},
+                )
+            else:
+                # Clean Cut Core V1: KEEP/DISCARD only. A legitimate loser of a
+                # decisive retry-family contest still loses -- it does not
+                # belong in the one winning edit, so it is discarded rather
+                # than parked as an alternate/SWAP.
+                move(
+                    clip_id, "discard", "deterministic_legitimate_loser_no_swap_scope",
                     {"group_id": group_id, "winner_clip_id": winner_id},
                 )
 
@@ -159,6 +178,7 @@ def apply_deterministic_best_take_authority(draft):
     diagnostics["deterministic_best_take_authority"] = {
         "status": "applied",
         "clear_winner_minimum_gap": CLEAR_WINNER_MINIMUM_GAP,
+        "swap_enabled": swap_enabled,
         "moves": moves,
     }
     return replace(draft, selected=selected, alternates=alternates, discarded=discarded, diagnostics=diagnostics)

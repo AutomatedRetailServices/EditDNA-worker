@@ -470,6 +470,81 @@ def _cross_group_candidate_pairs(
     return tuple(pairs)
 
 
+def _raw_content_overlap(left_text: str, right_text: str) -> float:
+    """Unfloored word-containment overlap, for RANKING only -- never a hard
+    accept/reject gate. retry_similarity() deliberately floors to 0.0 below
+    0.60 containment (see reconcile_semantic_idea_equivalence's docstring for
+    why that makes it useless as an eligibility gate); this raw score keeps
+    the same low-overlap paraphrases distinguishable from zero-overlap
+    unrelated text purely as a priority signal."""
+    left_tokens = set(semantic_key(left_text).split())
+    right_tokens = set(semantic_key(right_text).split())
+    if not left_tokens or not right_tokens:
+        return 0.0
+    shared = len(left_tokens & right_tokens)
+    return shared / max(1, min(len(left_tokens), len(right_tokens)))
+
+
+def _continuation_or_restart_bonus(left_take: CandidateTake, right_take: CandidateTake) -> float:
+    """Boost pairs carrying existing continuation/restart evidence this
+    codebase already computes on every CandidateTake: an incomplete delivery
+    (complete_idea=False) or an exact lexical prefix relationship is a strong,
+    general prior that two takes are the same attempt at different points of
+    completion -- not a new heuristic, just reusing fields/helpers this module
+    already has for other purposes."""
+    bonus = 0.0
+    if not left_take.complete_idea or not right_take.complete_idea:
+        bonus += 0.25
+    if _is_prefix_fragment(left_take, right_take) or _is_prefix_fragment(right_take, left_take):
+        bonus += 0.25
+    return bonus
+
+
+def _pair_priority_score(
+    left_take: CandidateTake, right_take: CandidateTake, *, gap_sec: float,
+) -> float:
+    """Composite ranking score for one candidate pair: temporal proximity +
+    raw lexical/topical overlap + continuation/restart evidence. General and
+    reusable -- no per-video tuning, no hardcoded thresholds beyond what the
+    eligibility gate already enforces. Used only to decide WHICH eligible
+    pairs get asked about first when there are more than the batch budget
+    allows; never used to decide same_idea itself (that stays the arbiter's
+    job, or the existing lexical reconciliation's)."""
+    proximity = 1.0 / (1.0 + max(0.0, gap_sec))
+    overlap = _raw_content_overlap(left_take.text, right_take.text)
+    return proximity + overlap + _continuation_or_restart_bonus(left_take, right_take)
+
+
+def _rank_candidate_pairs(
+    pairs: tuple[tuple[int, int, str, str], ...],
+    take_map: dict[str, CandidateTake],
+) -> tuple[tuple[int, int, str, str], ...]:
+    """Sort eligible candidate pairs by priority, highest first, so a fixed
+    per-request pair budget spends its slots on the pairs most likely to be
+    real retries instead of whichever happened to be enumerated first.
+
+    This directly addresses the root cause an offline audit of a real run
+    found: _cross_group_candidate_pairs enumerates ALL eligible group-index
+    pairs in plain chronological order with no priority, so on any video
+    dense enough to exceed the batch cap, coverage became a function of
+    "where in iteration order did this pair land" rather than "how likely is
+    this to be a real duplicate" -- pairs later in a long video were
+    systematically less likely to ever be proposed to the arbiter at all,
+    regardless of how obvious a retry they were. Ranking does not remove the
+    batch cap or make this pairwise discovery exhaustive; it makes the
+    truncation that DOES happen non-arbitrary.
+    """
+    scored = [
+        (_pair_priority_score(take_map[left_id], take_map[right_id], gap_sec=_group_gap(
+            (left_id,), (right_id,), take_map,
+        )), pair)
+        for pair in pairs
+        for left_index, right_index, left_id, right_id in (pair,)
+    ]
+    scored.sort(key=lambda item: item[0], reverse=True)
+    return tuple(pair for _, pair in scored)
+
+
 def reconcile_semantic_idea_equivalence(
     groups: Tuple[Tuple[str, ...], ...],
     takes: Tuple[CandidateTake, ...],
@@ -507,7 +582,12 @@ def reconcile_semantic_idea_equivalence(
     if not candidate_pairs:
         return groups, {"status": "no_eligible_pairs", "candidate_pair_count": 0, "merged_pair_count": 0}
 
-    truncated = candidate_pairs[: policy.max_pairs_per_request]
+    # Priority-ranked, not appearance-ordered: see _rank_candidate_pairs's
+    # docstring for the root-cause finding this fixes. The full eligible set
+    # is still bounded by the same structural gates above; only the order in
+    # which the batch budget below gets spent changes.
+    ranked_pairs = _rank_candidate_pairs(candidate_pairs, take_map)
+    truncated = ranked_pairs[: policy.max_pairs_per_request]
     request = IdeaEquivalenceRequest(pairs=tuple(
         IdeaEquivalencePair(left_text=take_map[left_id].text, right_text=take_map[right_id].text)
         for _, _, left_id, right_id in truncated
