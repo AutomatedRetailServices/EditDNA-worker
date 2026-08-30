@@ -148,24 +148,42 @@ def process_universal_clean_cut_sources(
             semantic_status = "not_requested_clean_cut_only"
             reasoner_status_label = "disabled"
 
-        # Complete-idea recovery may restore source-proven leading/trailing spoken words.
-        # It therefore belongs before Selection freeze regardless of semantic authority.
-        result = enforce_complete_idea_boundaries(
-            result,
-            local_paths,
-            asr_provider=asr_provider,
-        )
-        recovery_stage = "complete_idea_word_lock_overlap_guard_before_freeze"
+        # Hard pre-Freeze gate: Final Story Coherence Validation may find a
+        # high-confidence semantic failure (an unresolved factual
+        # contradiction between still-co-selected same-retry-family members,
+        # or an entire intended idea losing every member from the final
+        # selected set) that must never reach Selection Freeze. Both are
+        # deterministic, evidence-based findings -- not something Boundary
+        # could ever repair -- so this skips freeze/boundary entirely and
+        # surfaces the draft as-is (still selected/discarded, just unfrozen)
+        # for human review rather than silently producing a bad video.
+        coherence_diag = (result.draft.diagnostics or {}).get("final_story_coherence_validation") or {}
+        freeze_blocked = bool(coherence_diag.get("freeze_blocked"))
 
-        # Hard semantic phase barrier. Everything after this line is Boundary-only.
-        result = replace(result, draft=freeze_selection_contract(result.draft))
+        if freeze_blocked:
+            recovery_stage = "not_applicable_freeze_blocked_by_coherence_validation"
+            polish_stage = "not_applicable_freeze_blocked_by_coherence_validation"
+            contract_stage = "not_applicable_freeze_blocked_by_coherence_validation"
+            selection_stage = f"{selection_stage}+freeze_blocked_pending_human_review"
+        else:
+            # Complete-idea recovery may restore source-proven leading/trailing spoken words.
+            # It therefore belongs before Selection freeze regardless of semantic authority.
+            result = enforce_complete_idea_boundaries(
+                result,
+                local_paths,
+                asr_provider=asr_provider,
+            )
+            recovery_stage = "complete_idea_word_lock_overlap_guard_before_freeze"
 
-        result = polish_human_boundaries_v5(result, local_paths)
-        polish_stage = "source_evidenced_multimodal_v5_boundary_only_complete"
+            # Hard semantic phase barrier. Everything after this line is Boundary-only.
+            result = replace(result, draft=freeze_selection_contract(result.draft))
 
-        # Fail closed if Boundary changed ordered spoken content after the freeze.
-        result = replace(result, draft=enforce_selection_contract(result.draft))
-        contract_stage = "selection_semantic_stream_verified_after_boundary"
+            result = polish_human_boundaries_v5(result, local_paths)
+            polish_stage = "source_evidenced_multimodal_v5_boundary_only_complete"
+
+            # Fail closed if Boundary changed ordered spoken content after the freeze.
+            result = replace(result, draft=enforce_selection_contract(result.draft))
+            contract_stage = "selection_semantic_stream_verified_after_boundary"
     else:
         selection_stage = "not_applicable_missing_draft_contract"
         polish_stage = "not_applicable_missing_draft_contract"
@@ -173,6 +191,7 @@ def process_universal_clean_cut_sources(
         contract_stage = "not_applicable_missing_draft_contract"
         semantic_status = "not_requested_clean_cut_only"
         reasoner_status_label = "disabled"
+        freeze_blocked = False
 
     return ProcessingResult(
         schema_version=result.schema_version,
@@ -181,6 +200,7 @@ def process_universal_clean_cut_sources(
         draft=result.draft,
         stage_status={
             **result.stage_status,
+            "freeze_blocked_pending_coherence_review": freeze_blocked,
             "brain_mode": "universal_clean_cut",
             "semantic": semantic_status,
             "composer": "not_requested_clean_cut_only",

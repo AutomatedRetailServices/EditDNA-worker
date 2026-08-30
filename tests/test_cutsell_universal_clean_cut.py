@@ -216,3 +216,63 @@ def test_clean_cut_core_v1_resolves_clear_family_to_keep_discard_no_swap(monkeyp
     assert [c.clip_id for c in result.draft.discarded] == ["loser"]
     assert result.stage_status["selection_phase_authority"] == "clean_cut_core_v1_idea_first_keep_discard"
     assert "final_story_coherence_validation" in result.draft.diagnostics
+
+
+def _contradictory_ambiguous_draft():
+    # Thin score gap (0.60 vs 0.58, < CLEAR_WINNER_MINIMUM_GAP) so
+    # deterministic_best_take_authority leaves both selected; the two texts
+    # disagree via an explicit negation, so coherence validation must flag a
+    # contradiction rather than silently letting both stand.
+    a = _clip("a", 0.0, 5.0, "No soy la unica con este problema.", selected=True)
+    b = _clip("b", 5.0, 10.0, "Soy la unica con este problema.", selected=True)
+    return DraftTimeline(
+        schema_version=SCHEMA_VERSION, project_id="p1", strategy=EditStrategy.STORYTELLING,
+        selected=(a, b), alternates=(), discarded=(),
+        diagnostics={"take_judge_groups": [{
+            "group_id": "g1",
+            "ranked": [
+                {"clip_id": "a", "score": 0.60, "reason": "watch_listen_baseline"},
+                {"clip_id": "b", "score": 0.58, "reason": "watch_listen_baseline"},
+            ],
+        }]},
+    )
+
+
+def test_freeze_blocked_by_contradiction_skips_freeze_and_boundary(monkeypatch):
+    def fake_process(request, local_paths, **kwargs):
+        return ProcessingResult(
+            schema_version=SCHEMA_VERSION, project_id="p1", state=JobState.DRAFT_READY,
+            draft=_contradictory_ambiguous_draft(), stage_status={},
+        )
+
+    monkeypatch.setattr(universal, "process_local_sources", fake_process)
+    freeze_calls = []
+    boundary_calls = []
+    monkeypatch.setattr(universal, "freeze_selection_contract", lambda draft: freeze_calls.append(True) or draft)
+    monkeypatch.setattr(universal, "polish_human_boundaries_v5", lambda result, paths: boundary_calls.append(True) or result)
+    monkeypatch.setattr(universal, "enforce_selection_contract", lambda draft: draft)
+    monkeypatch.setattr(universal, "enforce_complete_idea_boundaries", lambda result, paths, **kw: result)
+
+    result = universal.process_universal_clean_cut_sources(
+        object(), {}, asr_provider=object(), selection_reasoner=None,
+    )
+
+    assert not freeze_calls
+    assert not boundary_calls
+    assert result.stage_status["freeze_blocked_pending_coherence_review"] is True
+    assert "freeze_blocked_pending_human_review" in result.stage_status["selection_phase_authority"]
+    # Both contradictory clips remain visible (unresolved), for human review.
+    assert sorted(c.clip_id for c in result.draft.selected) == ["a", "b"]
+
+
+def test_freeze_not_blocked_when_no_coherence_failure(monkeypatch):
+    monkeypatch.setattr(universal, "process_local_sources", _fake_process_local_sources)
+    monkeypatch.setattr(universal, "polish_human_boundaries_v5", lambda result, paths: result)
+
+    result = universal.process_universal_clean_cut_sources(
+        object(), {}, asr_provider=object(), selection_reasoner=None,
+        clean_cut_core_v1_enabled=False,
+    )
+    # Legacy path never populates final_story_coherence_validation, so the
+    # gate must be a no-op (never blocks) for it.
+    assert result.stage_status["freeze_blocked_pending_coherence_review"] is False

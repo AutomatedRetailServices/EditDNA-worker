@@ -181,3 +181,129 @@ def test_no_missing_story_ending_flag_when_last_take_is_selected():
     out = apply_final_story_coherence_validation(d)
 
     assert out.diagnostics["final_story_coherence_validation"]["possible_missing_story_ending"] is False
+
+
+# --- Contradiction invariant ---
+
+
+def test_contradiction_found_blocks_freeze_and_is_not_auto_resolved():
+    # Both survive Best-Take authority (e.g. authority left an ambiguous
+    # family untouched) but disagree on a hard fact (an explicit negation
+    # present in only one of the two) -- must never be silently resolved;
+    # must set freeze_blocked.
+    a = clip("a", 0.0, 5.0, "No soy la unica en mi familia con este tipo de cancer.", selected=True)
+    b = clip("b", 5.0, 10.0, "Soy la unica en mi familia con este tipo de cancer.", selected=True)
+    d = draft(
+        selected=(a, b),
+        take_judge_groups=[{
+            "group_id": "g1",
+            "ranked": [ranked_row("a", 0.60), ranked_row("b", 0.58)],
+        }],
+    )
+
+    out = apply_final_story_coherence_validation(d)
+
+    diag = out.diagnostics["final_story_coherence_validation"]
+    assert diag["freeze_blocked"] is True
+    assert len(diag["contradiction_findings"]) == 1
+    finding = diag["contradiction_findings"][0]
+    assert finding["negation_conflict"] is True
+    # Never auto-resolved: both remain selected, neither discarded on our say-so.
+    assert sorted(c.clip_id for c in out.selected) == ["a", "b"]
+
+
+def test_numeric_contradiction_between_still_selected_members_blocks_freeze():
+    a = clip("a", 0.0, 5.0, "Solo un 5 por ciento de los casos son hereditarios.", selected=True)
+    b = clip("b", 5.0, 10.0, "Solo un 20 por ciento de los casos son hereditarios.", selected=True)
+    d = draft(
+        selected=(a, b),
+        take_judge_groups=[{
+            "group_id": "g1",
+            "ranked": [ranked_row("a", 0.60), ranked_row("b", 0.58)],
+        }],
+    )
+
+    out = apply_final_story_coherence_validation(d)
+
+    diag = out.diagnostics["final_story_coherence_validation"]
+    assert diag["freeze_blocked"] is True
+    assert diag["contradiction_findings"][0]["number_conflict"] is True
+
+
+def test_no_contradiction_no_freeze_block():
+    a = clip("a", 0.0, 5.0, "take one of the ambiguous idea", selected=True)
+    b = clip("b", 5.0, 10.0, "take two of the ambiguous idea", selected=True)
+    d = draft(
+        selected=(a, b),
+        take_judge_groups=[{
+            "group_id": "g1",
+            "ranked": [ranked_row("a", 0.60), ranked_row("b", 0.55)],
+        }],
+    )
+
+    out = apply_final_story_coherence_validation(d)
+
+    diag = out.diagnostics["final_story_coherence_validation"]
+    assert diag["freeze_blocked"] is False
+    assert diag["contradiction_findings"] == []
+
+
+def test_resolved_arbiter_confirmed_family_has_no_residual_contradiction_check():
+    # Once the arbiter resolves a family to a single winner, only one member
+    # remains selected -- there is no longer a still-co-selected pair to
+    # even evaluate for contradiction.
+    a = clip("a", 0.0, 5.0, "take one of the ambiguous idea", selected=True)
+    b = clip("b", 5.0, 10.0, "take two of the ambiguous idea", selected=True)
+    d = draft(
+        selected=(a, b),
+        take_judge_groups=[{
+            "group_id": "g1",
+            "ranked": [ranked_row("a", 0.60), ranked_row("b", 0.55)],
+        }],
+    )
+    arbiter = ConfirmSameIdeaArbiter()
+
+    out = apply_final_story_coherence_validation(d, semantic_equivalence_arbiter=arbiter)
+
+    diag = out.diagnostics["final_story_coherence_validation"]
+    assert diag["freeze_blocked"] is False
+    assert len(out.selected) == 1
+
+
+# --- Idea coverage invariant ---
+
+
+def test_missing_idea_coverage_blocks_freeze_when_whole_family_discarded():
+    a = clip("a", 0.0, 5.0, "take one", selected=False)
+    b = clip("b", 5.0, 10.0, "take two", selected=False)
+    d = draft(
+        discarded=(a, b),
+        take_judge_groups=[{
+            "group_id": "g1",
+            "ranked": [ranked_row("a", 0.60), ranked_row("b", 0.55)],
+        }],
+    )
+
+    out = apply_final_story_coherence_validation(d)
+
+    diag = out.diagnostics["final_story_coherence_validation"]
+    assert diag["freeze_blocked"] is True
+    assert diag["missing_idea_coverage"] == [{"group_id": "g1", "member_clip_ids": ["a", "b"]}]
+
+
+def test_idea_coverage_fine_when_one_member_still_selected():
+    a = clip("a", 0.0, 5.0, "take one", selected=True)
+    b = clip("b", 5.0, 10.0, "take two", selected=False)
+    d = draft(
+        selected=(a,), discarded=(b,),
+        take_judge_groups=[{
+            "group_id": "g1",
+            "ranked": [ranked_row("a", 0.90), ranked_row("b", 0.50)],
+        }],
+    )
+
+    out = apply_final_story_coherence_validation(d)
+
+    diag = out.diagnostics["final_story_coherence_validation"]
+    assert diag["freeze_blocked"] is False
+    assert diag["missing_idea_coverage"] == []

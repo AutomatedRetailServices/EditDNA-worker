@@ -1,13 +1,25 @@
-"""Clean Cut Core V1 general evaluation suite.
+"""Clean Cut Core V1 general evaluation suite (a.k.a. CleanCutBench).
 
-Video-agnostic fixtures covering the 14 categories required before another
-paid Video00 RAW: exact retry, paraphrased retry, two good takes expressing
-the same idea, false start -> clean retry, incomplete -> complete retry,
-long bad take vs concise complete take, composite required, continuation
-that must not collapse, similar vocabulary but distinct ideas, visual fumble
-with semantically valid transcript, unique-fact preservation, CTA/story-
-ending preservation, multiple retries with progressively better delivery,
-and same idea expressed with substantially different wording.
+Video-agnostic fixtures growing toward the canonical directive's target scale
+(100-300+ cases; this file is an honest subset, not that scale yet). Covers:
+exact retry, paraphrased retry, two good takes expressing the same idea,
+false start -> clean retry, incomplete -> complete retry, long bad take vs
+concise complete take, composite required, continuation that must not
+collapse, similar vocabulary but distinct ideas, visual fumble with
+semantically valid transcript, unique-fact preservation, CTA/story-ending
+preservation, multiple retries with progressively better delivery, same idea
+expressed with substantially different wording, contradictory factual
+retries (hard freeze-blocking invariant), self-correction within one
+continuous take, retry disguised as continuation, continuation disguised as
+retry, composite-forbidden-because-complete-exists, orphan fragment, and
+duplicate semantic beat restated far apart in time (documents a known
+current limitation, not yet a passing capability -- see its own docstring).
+
+Explicitly out of this file's scope, because they belong to other
+already-existing pipeline stages this suite does not exercise (clean_cut.py's
+pre-grouping garbage removal, Boundary's physical timing): BTS/meta-recording
+material and intentional-pause/dead-air pacing. Both already have their own
+existing test coverage elsewhere in this repo.
 
 Each fixture has an explicit oracle (kept clip_ids, discarded clip_ids, and
 for a couple of cases an explicit note on composite/continuation
@@ -364,3 +376,132 @@ def test_same_idea_substantially_different_wording_merges_and_resolves():
     assert equivalence_diag["status"] == "applied"
     assert _kept(draft) == {"a"}
     assert _discarded(draft) == {"b"}
+
+
+# 15. Contradictory factual retries -- hard freeze-blocking invariant --------
+
+def test_contradictory_factual_retries_block_freeze_not_silently_resolved():
+    text_a = "No soy la unica en mi familia con este problema."
+    text_b = "Soy la unica en mi familia con este problema."
+    a = _take("a", 0.0, 3.0, text_a, complete=True)
+    b = _take("b", 4.0, 7.0, text_b, complete=True)
+
+    # Score-tied (both complete, same duration bucket) -> ambiguous gap ->
+    # deterministic_best_take_authority cannot resolve it locally, AND the
+    # arbiter confirming "same idea" must NOT be treated as license to
+    # silently keep one and discard the other when the two texts are
+    # factually incompatible -- freeze must block instead.
+    draft, equivalence_diag, arbiter = _run_core((a, b), oracle_pairs={("a", "b")})
+
+    diag = draft.diagnostics["final_story_coherence_validation"]
+    assert diag["freeze_blocked"] is True
+    assert len(diag["contradiction_findings"]) == 1
+    # Neither was silently discarded on the arbiter's same-idea verdict alone.
+    assert _kept(draft) == {"a", "b"}
+
+
+# 16. Self-correction within one continuous take -----------------------------
+
+def test_self_correction_within_one_take_is_not_treated_as_a_retry_family():
+    # A single delivery that corrects itself mid-sentence is ONE take, not
+    # two competing attempts -- there is nothing to group it with.
+    text = "It costs fifty dollars—actually, sorry, forty dollars."
+    only_take = _take("only", 0.0, 4.0, text, complete=True)
+
+    draft, equivalence_diag, arbiter = _run_core((only_take,))
+
+    assert _kept(draft) == {"only"}
+    assert _discarded(draft) == set()
+    assert "take_judge_groups" not in draft.diagnostics or not draft.diagnostics["take_judge_groups"]
+
+
+# 17. Retry disguised as continuation -----------------------------------------
+
+def test_retry_disguised_as_continuation_still_merges_as_same_idea():
+    # Superficially reads like it's adding detail, but it's actually just
+    # restating the same point in a slightly expanded way -- a correct
+    # arbiter still calls this the same idea, not a real continuation.
+    text_a = "This routine helped me sleep better."
+    text_b = "Something that really helped me sleep better was this exact routine."
+    a = _take("a", 0.0, 3.0, text_a, complete=True)
+    b = _take("b", 4.0, 7.0, text_b, complete=False)
+
+    draft, equivalence_diag, arbiter = _run_core((a, b), oracle_pairs={("a", "b")})
+
+    # High lexical overlap here means the lexical tier may already catch
+    # this one (status "applied" via semantic equivalence is not guaranteed
+    # -- what matters editorially is the outcome, not which tier caught it).
+    assert _kept(draft) == {"a"}
+    assert _discarded(draft) == {"b"}
+
+
+# 18. Continuation disguised as retry -----------------------------------------
+
+def test_continuation_disguised_as_retry_does_not_merge():
+    # Shares an opening phrase/vocabulary with a plausible "retry" shape, but
+    # actually adds genuinely new information -- a correct arbiter says
+    # different idea, so both must survive.
+    text_a = "This routine helped me sleep better."
+    text_b = "This routine also helped clear up my skin within a month."
+    a = _take("a", 0.0, 3.0, text_a, complete=True)
+    b = _take("b", 4.0, 7.0, text_b, complete=True)
+
+    draft, equivalence_diag, arbiter = _run_core((a, b), oracle_pairs=frozenset())
+
+    assert _kept(draft) == {"a", "b"}
+    assert _discarded(draft) == set()
+
+
+# 19. Composite forbidden because a complete take already exists -------------
+
+def test_composite_not_forced_when_complete_take_exists_for_its_own_idea():
+    # "complete" fully covers idea 1 on its own. "part1"/"part2" are a
+    # genuine two-piece composite of a DIFFERENT idea (idea 2). Nothing here
+    # should wrongly merge idea 2's pieces into idea 1's already-complete
+    # winner, and idea 1 must not be turned into a composite it doesn't need.
+    complete = _take("complete", 0.0, 3.0, "This product is excellent value for the price.", complete=True)
+    part1 = _take("part1", 4.0, 6.0, "There are two things I'd change about it.", complete=False)
+    part2 = _take("part2", 6.2, 9.0, "The charging cable is short and the box is flimsy.", complete=False)
+
+    draft, equivalence_diag, arbiter = _run_core((complete, part1, part2), oracle_pairs=frozenset())
+
+    assert _kept(draft) == {"complete", "part1", "part2"}
+    assert _discarded(draft) == set()
+
+
+# 20. Orphan fragment (no competing retry, nothing outranks it) --------------
+
+def test_orphan_incomplete_fragment_kept_by_default_when_uncertain():
+    # A short, incomplete fragment with no retry-family partner has nothing
+    # to lose a competition to -- WHEN UNCERTAIN, KEEP (do not fabricate a
+    # competition/discard where no competing evidence exists).
+    fragment = _take("fragment", 0.0, 2.0, "And another thing about the setup process—", complete=False)
+    unrelated = _take("unrelated", 3.0, 6.0, "The packaging was really nice, by the way.", complete=True)
+
+    draft, equivalence_diag, arbiter = _run_core((fragment, unrelated), oracle_pairs=frozenset())
+
+    assert _kept(draft) == {"fragment", "unrelated"}
+    assert _discarded(draft) == set()
+
+
+# 21. Duplicate semantic beat restated far apart in time ----------------------
+
+def test_duplicate_beat_far_apart_in_time_not_yet_merged_known_limitation():
+    # Documents a REAL, currently-known limitation rather than a passing
+    # capability: the semantic-equivalence eligibility gate caps at 30s
+    # (take_grouping_provider.reconcile_semantic_idea_equivalence's
+    # maximum_gap_sec default), so a fact restated well beyond that window
+    # is not even proposed to the arbiter as a candidate pair today. This
+    # test pins CURRENT behavior (both survive, duplicated) so a future
+    # widening of that window is a deliberate, visible decision -- not a
+    # silent behavior change this suite fails to notice.
+    text_a = "We just launched our brand new skincare line today."
+    text_b = "Today we're excited to finally roll out our new skincare line."
+    a = _take("a", 0.0, 3.0, text_a, complete=True)
+    b = _take("b", 45.0, 48.0, text_b, complete=True)
+
+    draft, equivalence_diag, arbiter = _run_core((a, b), oracle_pairs={("a", "b")})
+
+    assert equivalence_diag["status"] in {"no_eligible_pairs", "not_requested"}
+    assert arbiter.calls == 0
+    assert _kept(draft) == {"a", "b"}

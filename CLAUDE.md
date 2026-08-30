@@ -60,11 +60,20 @@ destabilize unrelated systems) — see `deterministic_best_take_authority.py`'s
 
 Preserve:
 - one final semantic Selection authority;
+- one winning realization per retry family (GOOD TAKE != UNIQUE IDEA);
+- complete delivery dominates an incomplete/abandoned retry of the same idea;
+- contradictory retries (differing number/negation) are never composited or left to
+  coexist silently — they block Selection Freeze for human review (D-020);
+- idea coverage — an intended idea must not silently vanish from the winning edit;
 - Selection Freeze;
-- Boundary-only physical timing after freeze;
+- Boundary-only physical timing after freeze; Boundary never repairs a semantic
+  membership mistake;
 - KEEP/DISCARD semantics (not SELECT/SWAP/DISCARD — see D-019);
-- Human Gold QA;
+- Human Gold QA (oracle only, never fed into runtime production logic);
+- CleanCutBench as the general editorial test suite gating paid Video00 iteration;
 - unseen generalization.
+
+See `docs/CUTSELL_DECISIONS.md` D-021 for the canonical component map (AttemptReconstructor, IdeaClusterer, RetryFamilyResolver, DeliveryScorer, BestTakeResolver, SemanticArbiter, CompositeResolver, StoryValidator, SelectionFreeze, BoundaryEngine, Renderer) that every active behavior must map to.
 
 ## Editorial rules
 - WHEN UNCERTAIN, KEEP.

@@ -168,12 +168,61 @@ bounded semantic arbiter only, reused at two points (idea clustering, final cohe
 ambiguity) rather than the single whole-video SELECT/SWAP/DISCARD reasoner call, which
 is deactivated in the active path (rollback: `CUTSELL_CLEAN_CUT_CORE_V1=0`).
 
+`final_story_coherence_validation.py` additionally enforces two hard pre-Freeze
+invariants, both deterministic and evidence-based (no new heuristic invented): the
+**contradiction invariant** (two still-co-selected members of the same retry family
+that disagree on a number or an explicit negation are factually incompatible, not
+alternate phrasings -- reuses `final_sibling_grouping.py`'s own `_numbers`/
+`_negations` extractors) and the **idea coverage invariant** (a retry-family group
+with zero surviving selected members means that intended idea vanished from the
+winning edit entirely). Either sets `freeze_blocked=True` in diagnostics;
+`universal_clean_cut.py` checks this and skips Selection Freeze/Boundary entirely
+rather than let a self-contradictory or idea-incomplete draft reach Freeze --
+Boundary never gets the chance to paper over a semantic membership mistake.
+
 Not yet implemented in V1, documented as a known gap rather than silently absent:
-general contradiction detection and exhaustive unique-fact-loss detection in
-coherence validation, and full integration of `hybrid_composite_best_take.py`'s
-dedicated composite-reconciliation machinery into the idea-first chain (composite
-resolution today relies on genuinely different ideas never being forced into
-competition in the first place, per the "continuation must not collapse" invariant).
+exhaustive unique-fact-loss detection beyond the number/negation contradiction check,
+general (non-numeric/non-negation) factual contradiction, and full integration of
+`hybrid_composite_best_take.py`'s dedicated composite-reconciliation machinery into
+the idea-first chain (composite resolution today relies on genuinely different ideas
+never being forced into competition in the first place, per the "continuation must
+not collapse" invariant) -- see D-021's CompositeResolver row.
+
+## D-021 — Canonical Clean Cut Core V1 component map
+**Status: CANONICAL**
+
+The canonical engine converges toward 11 responsibilities. Every active behavior in
+the Clean Cut Core V1 path (`clean_cut_core_v1_enabled=True`, the default) maps to
+exactly one, so there is one owner per responsibility rather than several semantic
+brains rewriting the same membership sequentially:
+
+| Canonical component | Current code | Classification |
+|---|---|---|
+| AttemptReconstructor | `attempt_reconstruction.py` (`reconstruct_delivery_attempts`) | KEEP AS CORE |
+| IdeaClusterer | `take_grouping_provider.py` (`safe_group_takes` lexical tier + `reconcile_semantic_idea_equivalence` bounded semantic tier, priority-ranked candidate pairs per D-020); `take_grouping.py` (`retry_similarity`/`semantic_key`) | KEEP AS CORE / MERGED |
+| RetryFamilyResolver | The resolved groups IdeaClusterer produces ARE the retry families. `final_sibling_grouping.py`, `global_session_sibling_bridge.py`, `session_boundaries.py` contribute merge evidence/session partitioning into that same result | DEMOTE TO EVIDENCE (feed IdeaClusterer's output, not a separate invoked step) |
+| DeliveryScorer | `take_judge.py` (`score_take`/`rank_takes`) | KEEP AS CORE |
+| BestTakeResolver | `deterministic_best_take_authority.py` | KEEP AS CORE / PROMOTED (Phase 1) |
+| SemanticArbiter | `semantic_idea_equivalence.py` + `semantic_idea_equivalence_google.py` | KEEP AS CORE, bounded role only (D-020) |
+| CompositeResolver | `hybrid_composite_best_take.py`, `post_selection_complementary_family_stabilizer.py` | DEMOTE TO EVIDENCE / KNOWN GAP -- still wired through the legacy Hybrid-vote-dependent monkeypatch chain in `pipeline.py`'s shared path rather than a directly-callable step in the V1 authority sequence; not yet consolidated (see D-020's documented gap) |
+| StoryValidator | `final_story_coherence_validation.py` | KEEP AS CORE (new; folds alternates to discard, resolves residual ambiguity via SemanticArbiter, contradiction invariant, idea-coverage invariant, hard pre-Freeze gate via `freeze_blocked`) |
+| SelectionFreeze | `selection_boundary_contract.py` (`freeze_selection_contract`/`enforce_selection_contract`) | KEEP AS CORE, unchanged |
+| BoundaryEngine | `final_boundary_authority.py`, `human_boundary_polish_v5.py`, speech-safe/microtrim guards | KEEP AS CORE, physical-only, unchanged |
+| Renderer | `render_plan.py`/`render.py` | KEEP AS CORE, unchanged (renders `selected` only, never `alternates`) |
+
+Reused as BestTakeResolver's own upstream input in the active path (not a parallel
+authority): `selection_phase_authority.py`, `selection_conflicted_bridge_guard.py`
+(Hybrid-vote-informed reconciliation, unchanged, now feeding into
+`deterministic_best_take_authority` rather than being a competing final say).
+
+DEPRECATED FROM ACTIVE PATH (kept only behind `clean_cut_core_v1_enabled=False` for
+rollback, per D-019/D-020): `unified_selection_reasoner.py`, `unified_selection_google.py`
+(the whole-video SELECT/SWAP/DISCARD reasoner).
+
+KEPT AS SAFETY/ROLLBACK INFRASTRUCTURE (dormant, not deleted, per D-019):
+`deterministic_best_take_authority.py`'s `swap_enabled` parameter;
+`draft_edits.py`'s `swap_take` (a different, manual editor-layer product surface,
+never part of this decision).
 
 ## Change rule
 

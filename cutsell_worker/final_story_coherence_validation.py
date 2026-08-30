@@ -33,8 +33,27 @@ already computed (no new heuristic invented for this pass):
     beat. Observability only; auto-restoring here would risk overriding a
     legitimate composer/review trim on no stronger evidence than position.
 
-Not implemented in V1 (documented gap, not silently skipped): general
-contradiction detection and exhaustive unique-fact-loss detection. Both need
+  - Contradiction invariant: within a genuine retry-family group (2+ ranked
+    members -- i.e. already-established competing attempts of ONE idea),
+    two members that both remain selected but disagree on a number or an
+    explicit negation (reusing final_sibling_grouping's own _numbers/
+    _negations extractors -- the same signals that module already requires
+    to MATCH before it will merge two takes) are factually incompatible
+    variants, not two acceptable phrasings. This is not a semantic-judgment
+    question an arbiter should guess at; it is evidence-based and
+    deterministic. Such a family is never auto-resolved here -- it sets
+    freeze_blocked so the caller does not proceed to Selection Freeze with a
+    self-contradictory statement in the winning timeline.
+  - Idea coverage: every take_judge_groups entry represents one intended
+    idea/retry contest. If a group ends up with ZERO members in the final
+    selected set, that idea vanished from the winning edit entirely --
+    high-confidence, deterministic, and exactly the "missing required idea"
+    failure class Selection Freeze must never see silently. This also sets
+    freeze_blocked.
+
+Not implemented in V1 (documented gap, not silently skipped): exhaustive
+unique-fact-loss detection beyond the number/negation contradiction check
+above, and general (non-numeric/negation) factual contradiction. Both need
 capability this deterministic pass does not have; flagging that honestly is
 preferable to a heuristic that would look like coverage it doesn't have.
 """
@@ -43,6 +62,7 @@ from __future__ import annotations
 from dataclasses import replace
 from itertools import combinations
 
+from .final_sibling_grouping import _negations, _numbers
 from .semantic_idea_equivalence import (
     IdeaEquivalencePair,
     IdeaEquivalenceRequest,
@@ -80,12 +100,22 @@ def _resolve_residual_family(
     group: dict,
     take_by_id: dict[str, object],
     arbiter: SemanticEquivalenceArbiter | None,
-) -> tuple[list[str], list[dict]]:
-    """Return (clip_ids_to_discard, audit_rows) for one still-ambiguous
-    retry family. Empty on fail-open (no arbiter, or nothing confirmed)."""
+) -> tuple[list[str], list[dict], list[dict]]:
+    """Return (clip_ids_to_discard, audit_rows, contradiction_rows) for one
+    still-ambiguous retry family. Empty on fail-open (no arbiter, or nothing
+    confirmed).
+
+    A pair the arbiter confirms as the same idea is NOT automatically safe to
+    collapse: "same intended idea" is a different question from "factually
+    compatible enough to silently keep one and drop the other." A pair that
+    disagrees on a number or explicit negation is reported as a
+    contradiction and excluded from the union-find collapse entirely --
+    both members stay selected, unresolved, for the caller's freeze-blocking
+    contradiction invariant to catch.
+    """
     still_selected = group["still_selected"]
     if arbiter is None or len(still_selected) < 2:
-        return [], []
+        return [], [], []
 
     ordered = sorted(still_selected, key=lambda row: -float(row.get("score") or 0.0))
     pairs_meta = list(combinations(range(len(ordered)), 2))
@@ -101,11 +131,11 @@ def _resolve_residual_family(
     result = safe_check_idea_equivalence(arbiter, request)
     decisions = same_idea_by_pair_index(result)
     if not decisions:
-        return [], []
+        return [], [], []
 
-    # Union-find over the ordered members: any confirmed same-idea pair
-    # collapses to keeping only the higher-ranked (index 0 after sort) member
-    # of that connected component.
+    # Union-find over the ordered members: any confirmed same-idea pair that
+    # is ALSO factually compatible collapses to keeping only the
+    # higher-ranked (index 0 after sort) member of that connected component.
     parent = list(range(len(ordered)))
 
     def find(i: int) -> int:
@@ -115,6 +145,7 @@ def _resolve_residual_family(
         return i
 
     audit: list[dict] = []
+    contradictions: list[dict] = []
     any_confirmed = False
     for pair_index, (i, j) in enumerate(pairs_meta):
         decision = decisions.get(pair_index)
@@ -122,6 +153,25 @@ def _resolve_residual_family(
             continue
         same_idea, confidence, reason = decision
         if not same_idea:
+            continue
+        left_take, right_take = take_by_id.get(ordered[i]["clip_id"]), take_by_id.get(ordered[j]["clip_id"])
+        left_text = left_take.text if left_take is not None else ""
+        right_text = right_take.text if right_take is not None else ""
+        left_numbers, right_numbers = _numbers(left_text), _numbers(right_text)
+        left_negations, right_negations = _negations(left_text), _negations(right_text)
+        number_conflict = bool(left_numbers) and bool(right_numbers) and left_numbers != right_numbers
+        negation_conflict = bool(left_negations) != bool(right_negations)
+        if number_conflict or negation_conflict:
+            # Confirmed same idea, but factually incompatible -- do not
+            # collapse; leave both selected, unresolved, for the caller's
+            # freeze-blocking contradiction check to catch.
+            contradictions.append({
+                "group_id": group.get("group_id"),
+                "left_clip_id": ordered[i]["clip_id"],
+                "right_clip_id": ordered[j]["clip_id"],
+                "number_conflict": number_conflict,
+                "negation_conflict": negation_conflict,
+            })
             continue
         any_confirmed = True
         ra, rb = find(i), find(j)
@@ -137,7 +187,7 @@ def _resolve_residual_family(
         })
 
     if not any_confirmed:
-        return [], []
+        return [], [], contradictions
 
     clusters: dict[int, list[int]] = {}
     for index in range(len(ordered)):
@@ -155,7 +205,53 @@ def _resolve_residual_family(
             if member_index != keeper_index:
                 to_discard.append(ordered[member_index]["clip_id"])
 
-    return to_discard, audit
+    return to_discard, audit, contradictions
+
+
+def _contradiction_findings(draft, take_by_id: dict[str, object]) -> list[dict]:
+    """Detect factually-incompatible members still co-selected within the
+    SAME retry-family group. Scoped to established retry families only --
+    comparing arbitrary unrelated texts would trivially "contradict" on
+    every number/negation mismatch, which is not this check's job."""
+    selected_ids = {clip.clip_id for clip in draft.selected}
+    findings: list[dict] = []
+    for group in (draft.diagnostics or {}).get("take_judge_groups") or ():
+        ranked = list(group.get("ranked") or ())
+        still_selected = [row for row in ranked if str(row.get("clip_id") or "") in selected_ids]
+        if len(still_selected) < 2:
+            continue
+        for left, right in combinations(still_selected, 2):
+            left_take = take_by_id.get(left["clip_id"])
+            right_take = take_by_id.get(right["clip_id"])
+            if left_take is None or right_take is None:
+                continue
+            left_numbers, right_numbers = _numbers(left_take.text), _numbers(right_take.text)
+            left_negations, right_negations = _negations(left_take.text), _negations(right_take.text)
+            number_conflict = bool(left_numbers) and bool(right_numbers) and left_numbers != right_numbers
+            negation_conflict = bool(left_negations) != bool(right_negations)
+            if number_conflict or negation_conflict:
+                findings.append({
+                    "group_id": group.get("group_id"),
+                    "left_clip_id": left["clip_id"],
+                    "right_clip_id": right["clip_id"],
+                    "number_conflict": number_conflict,
+                    "negation_conflict": negation_conflict,
+                })
+    return findings
+
+
+def _missing_idea_coverage(draft) -> list[dict]:
+    """Every take_judge_groups entry is one intended idea/retry contest.
+    Flag any whose members are ALL absent from the final selected set --
+    that idea vanished from the winning edit entirely."""
+    selected_ids = {clip.clip_id for clip in draft.selected}
+    missing: list[dict] = []
+    for group in (draft.diagnostics or {}).get("take_judge_groups") or ():
+        ranked = list(group.get("ranked") or ())
+        member_ids = [str(row.get("clip_id") or "") for row in ranked]
+        if member_ids and not any(cid in selected_ids for cid in member_ids):
+            missing.append({"group_id": group.get("group_id"), "member_clip_ids": member_ids})
+    return missing
 
 
 def apply_final_story_coherence_validation(
@@ -170,9 +266,13 @@ def apply_final_story_coherence_validation(
     resolved_families: list[dict] = []
     unresolved_families: list[dict] = []
     discard_ids: set[str] = set()
+    residual_contradictions: list[dict] = []
 
     for group in residual:
-        to_discard, audit = _resolve_residual_family(group, take_by_id, semantic_equivalence_arbiter)
+        to_discard, audit, contradictions = _resolve_residual_family(
+            group, take_by_id, semantic_equivalence_arbiter,
+        )
+        residual_contradictions.extend(contradictions)
         if to_discard:
             discard_ids.update(to_discard)
             resolved_families.append({
@@ -220,6 +320,17 @@ def apply_final_story_coherence_validation(
                 possible_missing_ending = True
                 break
 
+    # Contradiction invariant and idea-coverage tracking run on the state
+    # AFTER residual-family resolution above, using the take_by_id map
+    # extended with anything freshly discarded by that step.
+    take_by_id = {clip.clip_id: clip for clip in (*draft.selected, *draft.discarded)}
+    contradiction_findings = residual_contradictions + [
+        finding for finding in _contradiction_findings(draft, take_by_id)
+        if finding not in residual_contradictions
+    ]
+    missing_idea_coverage = _missing_idea_coverage(draft)
+    freeze_blocked = bool(contradiction_findings) or bool(missing_idea_coverage)
+
     diagnostics = dict(draft.diagnostics or {})
     diagnostics["final_story_coherence_validation"] = {
         "status": "applied",
@@ -230,9 +341,12 @@ def apply_final_story_coherence_validation(
         "unresolved_family_count": len(unresolved_families),
         "unresolved_families": unresolved_families,
         "possible_missing_story_ending": possible_missing_ending,
+        "contradiction_findings": contradiction_findings,
+        "missing_idea_coverage": missing_idea_coverage,
+        "freeze_blocked": freeze_blocked,
         "not_implemented": [
-            "general_contradiction_detection",
             "exhaustive_unique_fact_loss_detection",
+            "general_non_numeric_non_negation_contradiction_detection",
         ],
     }
     return replace(draft, diagnostics=diagnostics)
