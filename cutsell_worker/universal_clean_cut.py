@@ -23,6 +23,7 @@ from .providers import NoopSemanticProvider
 from .selection_boundary_contract import enforce_selection_contract, freeze_selection_contract
 from .selection_conflicted_bridge_guard import apply_selection_conflicted_bridge_guard
 from .selection_phase_authority import apply_selection_phase_authority
+from .semantic_idea_equivalence import SemanticEquivalenceArbiter
 from .take_grouping_provider import TakeGroupingProvider
 from .take_judge_provider import TakeJudgeProvider
 from .unified_selection_reasoner import UnifiedSelectionReasoner, apply_unified_selection_reasoner
@@ -43,6 +44,7 @@ def process_universal_clean_cut_sources(
     editorial_judge: EditorialJudge | None = None,
     selection_reasoner: UnifiedSelectionReasoner | None = None,
     deterministic_best_take_authority_enabled: bool = True,
+    semantic_equivalence_arbiter: SemanticEquivalenceArbiter | None = None,
     progress: ProgressCallback | None = None,
 ) -> ProcessingResult:
     """Run the Universal Clean Cut brain with explicit Selection/Boundary ownership."""
@@ -59,6 +61,7 @@ def process_universal_clean_cut_sources(
         draft_review_provider=None,
         whole_video_provider=whole_video_provider,
         editorial_judge=editorial_judge,
+        semantic_equivalence_arbiter=semantic_equivalence_arbiter,
         progress=progress,
     )
 

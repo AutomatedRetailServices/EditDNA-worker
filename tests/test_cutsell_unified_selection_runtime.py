@@ -74,6 +74,48 @@ def test_deterministic_best_take_authority_rollback_env_flag_disables_it():
     assert brain.deterministic_best_take_authority_enabled is False
 
 
+def test_semantic_equivalence_arbiter_builds_when_hybrid_enabled_without_unified_selection():
+    # Phase 2: take grouping runs upstream of the Unified Selection/legacy
+    # branch, so the arbiter must be available even when
+    # CUTSELL_UNIFIED_SELECTION_REASONER is off -- gated on requested_hybrid
+    # alone, not on the whole-video reasoner flag.
+    env = base_env()
+    brain = build_brain_runtime(load_runtime_config(env), env)
+
+    assert brain.semantic_equivalence_arbiter is not None
+    assert brain.selection_reasoner is None
+
+
+def test_semantic_equivalence_arbiter_ledger_uses_its_own_dedicated_ceiling():
+    env = base_env()
+    brain = build_brain_runtime(load_runtime_config(env), env)
+
+    settings = brain.semantic_equivalence_arbiter.settings
+    ledger = brain.semantic_equivalence_arbiter.ledger
+    assert ledger.max_usd == settings.max_cost_per_semantic_equivalence_call_usd
+    assert ledger.max_usd != settings.max_cost_per_edit_usd
+    assert ledger.max_usd != settings.max_cost_per_unified_selection_call_usd
+
+
+def test_semantic_equivalence_arbiter_none_when_hybrid_paid_inference_disabled():
+    env = {
+        "CUTSELL_BRAIN_BACKEND": "runpod_local",
+        "CUTSELL_HYBRID_LLM_ENABLED": "0",
+    }
+    brain = build_brain_runtime(load_runtime_config(env), env)
+
+    assert brain.semantic_equivalence_arbiter is None
+
+
+def test_semantic_equivalence_arbiter_rollback_env_flag_disables_it():
+    env = {**base_env(), "CUTSELL_SEMANTIC_EQUIVALENCE_ARBITER": "0"}
+    brain = build_brain_runtime(load_runtime_config(env), env)
+
+    assert brain.semantic_equivalence_arbiter is None
+    # Rollback is scoped to this arbiter only -- the legacy judge is untouched.
+    assert brain.editorial_judge is not None
+
+
 def test_unified_selection_requires_explicit_hybrid_paid_gate():
     env = {
         "CUTSELL_BRAIN_BACKEND": "runpod_local",

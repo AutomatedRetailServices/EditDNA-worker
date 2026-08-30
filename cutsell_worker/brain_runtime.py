@@ -21,6 +21,8 @@ from .hybrid_provider import TransportEditorialJudge
 from .hybrid_provider_settings import HybridProviderSettings, load_hybrid_provider_settings
 from .hybrid_take_judge import HybridTakeJudgeProvider
 from .providers import NoopSemanticProvider, SemanticProvider
+from .semantic_idea_equivalence import SemanticEquivalenceArbiter
+from .semantic_idea_equivalence_google import GoogleSemanticEquivalenceArbiter
 from .take_grouping_provider import TakeGroupingProvider
 from .take_judge_provider import TakeJudgeProvider
 from .unified_selection_google import GoogleUnifiedSelectionReasoner
@@ -52,6 +54,13 @@ class BrainRuntime:
     # pure-whole-video-reasoner behavior (Unified Selection with
     # unconditional final say) unmodified during migration.
     deterministic_best_take_authority_enabled: bool = True
+    # Phase 2: narrow gated semantic-equivalence arbiter used by take
+    # grouping to strengthen retry-family detection before Best Take/Unified
+    # Selection ever run. Independent of selection_reasoner -- it applies to
+    # the legacy grouping path too, since take grouping happens upstream of
+    # that branch. None whenever paid inference is off, disabled via the
+    # rollback flag below, or no API key is present.
+    semantic_equivalence_arbiter: SemanticEquivalenceArbiter | None = None
 
     @property
     def external_calls_enabled(self) -> bool:
@@ -121,6 +130,25 @@ def _build_unified_selection_reasoner(
     )
 
 
+def _build_semantic_equivalence_arbiter(
+    settings: HybridProviderSettings,
+    values: Mapping[str, str],
+) -> SemanticEquivalenceArbiter | None:
+    if not settings.enabled or settings.provider != "google":
+        return None
+    api_key = _require_google_api_key(settings, values)
+    return GoogleSemanticEquivalenceArbiter(
+        api_key=api_key,
+        model=settings.primary_model,
+        settings=settings,
+        # Deliberately its own ceiling -- see hybrid_provider_settings.py's
+        # max_cost_per_semantic_equivalence_call_usd docstring. Neither the
+        # legacy per-group Hybrid ceiling nor Unified Selection's whole-video
+        # ceiling is sized for this call shape.
+        ledger=DollarBudgetLedger(settings.max_cost_per_semantic_equivalence_call_usd),
+    )
+
+
 def build_brain_runtime(
     config: RuntimeConfig,
     env: Mapping[str, str] | None = None,
@@ -159,6 +187,20 @@ def build_brain_runtime(
     deterministic_best_take_authority_enabled = _env_true_default_true(
         values.get("CUTSELL_DETERMINISTIC_BEST_TAKE_AUTHORITY")
     )
+    # Phase 2 rollback flag: set CUTSELL_SEMANTIC_EQUIVALENCE_ARBITER=0 to
+    # disable the semantic-equivalence arbiter without touching
+    # CUTSELL_HYBRID_LLM_ENABLED (which also gates the legacy judge and
+    # Unified Selection). Gated on requested_hybrid alone, not
+    # requested_unified -- take grouping runs upstream of the Unified
+    # Selection/legacy branch and benefits from this either way.
+    semantic_equivalence_arbiter_enabled = _env_true_default_true(
+        values.get("CUTSELL_SEMANTIC_EQUIVALENCE_ARBITER")
+    )
+    semantic_equivalence_arbiter = (
+        _build_semantic_equivalence_arbiter(hybrid_settings, values)
+        if requested_hybrid and semantic_equivalence_arbiter_enabled
+        else None
+    )
 
     return BrainRuntime(
         backend=RUNPOD_LOCAL_BACKEND,
@@ -174,4 +216,5 @@ def build_brain_runtime(
         selection_reasoner=selection_reasoner,
         hybrid_settings=hybrid_settings,
         deterministic_best_take_authority_enabled=deterministic_best_take_authority_enabled,
+        semantic_equivalence_arbiter=semantic_equivalence_arbiter,
     )

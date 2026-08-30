@@ -6,6 +6,14 @@ from typing import Protocol, Tuple
 
 from .contracts import CandidateTake
 from .providers import ProviderStatus
+from .semantic_idea_equivalence import (
+    IdeaEquivalencePair,
+    IdeaEquivalenceRequest,
+    SemanticEquivalenceArbiter,
+    SemanticEquivalenceGatePolicy,
+    safe_check_idea_equivalence,
+    same_idea_by_pair_index,
+)
 from .take_grouping import group_takes, retry_similarity, semantic_key
 
 
@@ -436,12 +444,157 @@ def _absorb_interstitial_retry_debris(
     return tuple(normalized), changed
 
 
+def _cross_group_candidate_pairs(
+    groups: Tuple[Tuple[str, ...], ...],
+    take_map: dict[str, CandidateTake],
+    *,
+    maximum_gap_sec: float,
+) -> tuple[tuple[int, int, str, str], ...]:
+    pairs: list[tuple[int, int, str, str]] = []
+    for left_index in range(len(groups)):
+        for right_index in range(left_index + 1, len(groups)):
+            left_group, right_group = groups[left_index], groups[right_index]
+            if _group_gap(left_group, right_group, take_map) > maximum_gap_sec:
+                continue
+            for left_id in left_group:
+                left_take = take_map.get(left_id)
+                if left_take is None or len(semantic_key(left_take.text).split()) <= 3:
+                    continue
+                for right_id in right_group:
+                    right_take = take_map.get(right_id)
+                    if right_take is None or len(semantic_key(right_take.text).split()) <= 3:
+                        continue
+                    if left_take.source_asset_id != right_take.source_asset_id:
+                        continue
+                    pairs.append((left_index, right_index, left_id, right_id))
+    return tuple(pairs)
+
+
+def reconcile_semantic_idea_equivalence(
+    groups: Tuple[Tuple[str, ...], ...],
+    takes: Tuple[CandidateTake, ...],
+    arbiter: SemanticEquivalenceArbiter | None,
+    *,
+    policy: SemanticEquivalenceGatePolicy = SemanticEquivalenceGatePolicy(),
+    maximum_gap_sec: float = 30.0,
+) -> tuple[Tuple[Tuple[str, ...], ...], dict]:
+    """Merge groups the lexical layer left separate only when a narrow
+    semantic arbiter is confident they are recording attempts of the same
+    intended idea. Phase 2 of the architecture rebalance.
+
+    Eligibility is temporal/structural, not a retry_similarity score band:
+    a genuine paraphrase pair can score exactly 0.0 on that function's
+    word-containment floor -- identical to genuinely unrelated text -- so
+    no numeric similarity threshold reliably separates "ambiguous" from
+    "definitely distinct" here (confirmed against real paraphrase fixtures;
+    see semantic_idea_equivalence tests). A pair is eligible when both
+    groups are (a) still separate after the full existing lexical
+    reconciliation above, (b) from the same source, (c) within this
+    module's own existing 30-second outer reconcile breakpoint
+    (_reconcile_similarity_threshold's widest tier -- reused, not
+    invented), and (d) both sides longer than retry_similarity's own
+    existing short-phrase floor (<=3 tokens is already "not fuzzy-
+    comparable" there).
+
+    Fails open throughout: a pair the arbiter did not confidently confirm
+    as the same idea leaves both groups exactly as they were.
+    """
+    if len(groups) < 2 or arbiter is None:
+        return groups, {"status": "not_requested", "candidate_pair_count": 0, "merged_pair_count": 0}
+
+    take_map = {take.clip_id: take for take in takes}
+    candidate_pairs = _cross_group_candidate_pairs(groups, take_map, maximum_gap_sec=maximum_gap_sec)
+    if not candidate_pairs:
+        return groups, {"status": "no_eligible_pairs", "candidate_pair_count": 0, "merged_pair_count": 0}
+
+    truncated = candidate_pairs[: policy.max_pairs_per_request]
+    request = IdeaEquivalenceRequest(pairs=tuple(
+        IdeaEquivalencePair(left_text=take_map[left_id].text, right_text=take_map[right_id].text)
+        for _, _, left_id, right_id in truncated
+    ))
+    result = safe_check_idea_equivalence(arbiter, request, policy)
+    decisions = same_idea_by_pair_index(result)
+
+    # Union-find over group indices: if any member of group A is confirmed
+    # the same idea as any member of group B, the two contests are one
+    # retry family and their whole groups merge.
+    parent = list(range(len(groups)))
+
+    def find(i: int) -> int:
+        while parent[i] != i:
+            parent[i] = parent[parent[i]]
+            i = parent[i]
+        return i
+
+    def union(a: int, b: int) -> None:
+        ra, rb = find(a), find(b)
+        if ra != rb:
+            parent[ra] = rb
+
+    audit: list[dict] = []
+    merged_count = 0
+    for pair_index, (left_group_index, right_group_index, left_id, right_id) in enumerate(truncated):
+        decision = decisions.get(pair_index)
+        if decision is None:
+            continue  # fail-open: arbiter unavailable/declined -> preserve separate
+        same_idea, confidence, reason = decision
+        if not same_idea:
+            continue
+        union(left_group_index, right_group_index)
+        merged_count += 1
+        audit.append({
+            "left_clip_id": left_id,
+            "right_clip_id": right_id,
+            "confidence": round(confidence, 4),
+            "reason": reason,
+        })
+
+    if merged_count == 0:
+        return groups, {
+            "status": "checked_no_merge" if result.available else "arbiter_unavailable",
+            "provider": result.provider,
+            "candidate_pair_count": len(candidate_pairs),
+            "checked_pair_count": len(truncated),
+            "merged_pair_count": 0,
+        }
+
+    clusters: dict[int, list[str]] = {}
+    for index, group in enumerate(groups):
+        clusters.setdefault(find(index), []).extend(group)
+    merged_groups = tuple(tuple(members) for members in clusters.values())
+
+    return merged_groups, {
+        "status": "applied",
+        "provider": result.provider,
+        "model": result.model,
+        "candidate_pair_count": len(candidate_pairs),
+        "checked_pair_count": len(truncated),
+        "merged_pair_count": merged_count,
+        "merges": audit,
+    }
+
+
 def safe_group_takes(
     provider: TakeGroupingProvider | None,
     takes: Tuple[CandidateTake, ...],
     context_text: str = "",
 ) -> TakeGroupingProviderResult:
-    """Use semantic grouping while preserving every real candidate exactly once."""
+    """Use semantic grouping while preserving every real candidate exactly once.
+
+    Phase 2's semantic idea-equivalence pass (reconcile_semantic_idea_equivalence,
+    below) deliberately runs OUTSIDE this function rather than being threaded
+    through it: this codebase already layers several production monkeypatch
+    wrappers over safe_group_takes and safe_group_takes_by_sessions (see
+    final_sibling_grouping.py, session_grouping_bridge.py,
+    global_session_sibling_bridge.py, local_retry_grouping.py,
+    retry_group_integrity.py, hybrid_composite_best_take.py and friends), each
+    hardcoding this function's current signature. Adding a new keyword here
+    would silently stop propagating through every one of those wrappers in the
+    real production call path -- exactly the class of regression several of
+    those files' own docstrings describe fixing. pipeline.py instead calls
+    reconcile_semantic_idea_equivalence directly on the final resolved groups,
+    a single well-defined choke point immune to that layering.
+    """
     baseline = _baseline_groups(takes)
     if provider is None or len(takes) <= 1:
         return TakeGroupingProviderResult(

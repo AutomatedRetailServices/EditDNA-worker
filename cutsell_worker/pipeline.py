@@ -24,9 +24,10 @@ from .contracts import (
 from .draft_review_provider import DraftReviewProvider, safe_review_draft
 from .hybrid_editorial import EditorialJudge
 from .hybrid_session_cleanup import apply_hybrid_session_cleanup
+from .semantic_idea_equivalence import SemanticEquivalenceArbiter
 from .session_boundaries import safe_group_takes_by_sessions
 from .strategy import choose_strategy
-from .take_grouping_provider import TakeGroupingProvider
+from .take_grouping_provider import TakeGroupingProvider, reconcile_semantic_idea_equivalence
 from .take_judge_provider import TakeJudgeProvider, safe_rank_takes
 from .temporal_editing import refine_takes_with_temporal_context
 from .whole_video_analysis import WholeVideoContext
@@ -99,6 +100,7 @@ def build_flow_b_draft(
     temporal_trim_diagnostics: Iterable[dict] = (),
     attempt_reconstruction_diagnostics: dict | None = None,
     performance_confirmation_diagnostics: Iterable[dict] = (),
+    semantic_equivalence_arbiter: SemanticEquivalenceArbiter | None = None,
 ) -> ProcessingResult:
     """Build an editable draft after understanding the complete source context."""
     take_tuple = tuple(takes)
@@ -155,7 +157,22 @@ def build_flow_b_draft(
         whole_video_context,
         context_text=context_text,
     )
-    group_members = [tuple(take_by_id[clip_id] for clip_id in ids) for ids in grouping.groups]
+
+    # Phase 2 of the architecture rebalance: a narrow, gated semantic-
+    # equivalence arbiter may confirm that two groups the lexical layer left
+    # separate are recording attempts of the same intended idea, merging
+    # them into one retry contest BEFORE the completeness/performance
+    # ranking (safe_rank_takes) and deterministic Best Take run below. This
+    # runs here, directly on safe_group_takes_by_sessions's resolved output,
+    # rather than being threaded as a parameter through that call -- see
+    # take_grouping_provider.safe_group_takes's docstring for why: this
+    # function is already wrapped by several production monkeypatch layers
+    # that hardcode its current signature, and this is the one choke point
+    # every one of those layers' output must pass through regardless.
+    semantic_equivalence_groups, semantic_equivalence_diagnostics = reconcile_semantic_idea_equivalence(
+        grouping.groups, kept, semantic_equivalence_arbiter,
+    )
+    group_members = [tuple(take_by_id[clip_id] for clip_id in ids) for ids in semantic_equivalence_groups]
 
     groups = []
     clip_to_group: Dict[str, str] = {}
@@ -348,7 +365,8 @@ def build_flow_b_draft(
             "alternate_group_count": alternate_group_count,
             "take_grouping_status": grouping.status.__dict__,
             "take_grouping_reason": grouping.reason,
-            "take_group_members": [list(group) for group in grouping.groups][:100],
+            "take_group_members": [list(group) for group in semantic_equivalence_groups][:100],
+            "semantic_idea_equivalence": semantic_equivalence_diagnostics,
             "source_count": len(request.sources),
             "take_judge_status_counts": dict(judge_statuses),
             "take_judge_fallback_reasons": dict(judge_reasons),

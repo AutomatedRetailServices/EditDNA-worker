@@ -25,6 +25,7 @@ from .observability import ExecutionTrace
 from .performance_confirmation import confirm_local_performance_events
 from .pipeline import build_flow_b_draft
 from .providers import NoopSemanticProvider, SemanticProvider, safe_semantic_classify
+from .semantic_idea_equivalence import SemanticEquivalenceArbiter
 from .silence_analysis import word_silence_gaps
 from .source_sampling import sample_source_frames
 from .take_grouping_provider import TakeGroupingProvider
@@ -59,6 +60,7 @@ def process_local_sources(
     whole_video_provider: WholeVideoProvider | None = None,
     editorial_judge: EditorialJudge | None = None,
     editorial_mode: str | None = None,
+    semantic_equivalence_arbiter: SemanticEquivalenceArbiter | None = None,
     progress: ProgressCallback | None = None,
 ) -> ProcessingResult:
     """Process registered sources from raw media to an editable Flow B draft.
@@ -270,6 +272,7 @@ def process_local_sources(
         whole_video_context=whole_context,
         attempt_reconstruction_diagnostics=attempt_reconstruction_diagnostics,
         performance_confirmation_diagnostics=confirmation_diagnostics,
+        semantic_equivalence_arbiter=semantic_equivalence_arbiter,
     )
     notify("draft_ready", 100)
     return replace(

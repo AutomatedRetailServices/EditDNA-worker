@@ -54,6 +54,17 @@ class HybridProviderSettings:
     # (~$0.008-0.012 for 32 candidates) -- confirmed acceptable by product:
     # quality first, COGS is not the constraint at this price point.
     max_cost_per_unified_selection_call_usd: float = 0.02
+    # Phase 2 semantic-equivalence arbiter: a narrow, batched call over at
+    # most SemanticEquivalenceGatePolicy.max_pairs_per_request text pairs
+    # (no clip/video identity, no timestamps). Sized to
+    # GoogleSemanticEquivalenceArbiter's own hard caps
+    # (max_input_tokens=8_000, max_output_tokens ceiling=1_500):
+    # 8_000/1e6*0.30 + 1_500/1e6*2.50 = $0.00615, with margin so ledger
+    # sizing itself is never the reason a within-hard-limits call cannot be
+    # attempted. This is a distinct call shape from both the legacy
+    # per-group Hybrid judge and the whole-video Unified Selection call and
+    # must never share either of their ceilings.
+    max_cost_per_semantic_equivalence_call_usd: float = 0.008
     # User-approved development bake-off/test ceiling.
     max_test_budget_usd: float = 0.50
     max_daily_budget_usd: float = 5.00
@@ -105,6 +116,9 @@ def load_hybrid_provider_settings(env: dict[str, str] | None = None) -> HybridPr
         max_cost_per_edit_usd=max(0.0, _env_float(values, "CUTSELL_HYBRID_MAX_EDIT_USD", 0.0075)),
         max_cost_per_unified_selection_call_usd=max(
             0.0, _env_float(values, "CUTSELL_HYBRID_MAX_UNIFIED_SELECTION_USD", 0.02)
+        ),
+        max_cost_per_semantic_equivalence_call_usd=max(
+            0.0, _env_float(values, "CUTSELL_HYBRID_MAX_SEMANTIC_EQUIVALENCE_USD", 0.008)
         ),
         max_test_budget_usd=max(0.0, _env_float(values, "CUTSELL_HYBRID_TEST_BUDGET_USD", 0.50)),
         max_daily_budget_usd=max(0.0, _env_float(values, "CUTSELL_HYBRID_DAILY_BUDGET_USD", 5.00)),
