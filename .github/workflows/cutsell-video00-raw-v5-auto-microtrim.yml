@@ -334,6 +334,23 @@ jobs:
           echo "--- diagnostics.final_story_coherence_validation (StoryValidator: contradiction/coverage/freeze_blocked) ---"
           jq '.diagnostics.final_story_coherence_validation // {status:"absent"}' artifact/video00-unified-selection.json
 
+          # CompositeResolver's actual decisions (restored performance-only
+          # uniques, composite replacements, split-for-composite group ids)
+          # surface here, not under a dedicated key -- hybrid_composite_
+          # best_take.py wraps apply_hybrid_session_cleanup and appends its
+          # own diagnostics dict into this same per-chunk list. Printing the
+          # counts plus the chunks is how to tell whether CompositeResolver
+          # ran at all versus was silently starved (see the editorial_judge
+          # fix this session -- it was inert in both prior V1 RAWs).
+          echo "--- diagnostics.hybrid_editorial_* (CompositeResolver evidence, requires editorial_judge active) ---"
+          jq '{
+            requested_chunk_count: .diagnostics.hybrid_editorial_requested_chunk_count,
+            available_chunk_count: .diagnostics.hybrid_editorial_available_chunk_count,
+            deleted_count: .diagnostics.hybrid_editorial_deleted_count,
+            semantic_decision_count: .diagnostics.hybrid_editorial_semantic_decision_count,
+            chunks: (.diagnostics.hybrid_editorial_chunks // [])
+          }' artifact/video00-unified-selection.json
+
           echo "--- final KEEP sequence (clip_id + text, in order) ---"
           jq '[.selected[]? | {clip_id, text}]' artifact/video00-unified-selection.json
 
