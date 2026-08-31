@@ -334,6 +334,36 @@ jobs:
           echo "--- diagnostics.final_story_coherence_validation (StoryValidator: contradiction/coverage/freeze_blocked) ---"
           jq '.diagnostics.final_story_coherence_validation // {status:"absent"}' artifact/video00-unified-selection.json
 
+          # D-031: semantic-atom importance classifications, pulled out on
+          # their own for readability -- CRITICAL/UNCERTAIN atoms still
+          # block Freeze; a CONTEXTUAL-only atom loss (e.g. an incidental
+          # date) does not. Already present inside lost_semantic_atoms
+          # above; this is the same data, isolated so a reviewer does not
+          # have to re-derive "why did/didn't this block?" by hand.
+          echo "--- semantic atom importance classifications (per lost_semantic_atoms row) ---"
+          jq '[.diagnostics.final_story_coherence_validation.lost_semantic_atoms[]? |
+            {clip_id, blocking, atom_classifications}]' artifact/video00-unified-selection.json
+
+          # D-026/D-030 observability: the CI print script previously did
+          # not surface canonical_edit_plan/repair_loop/final_edit_reviewer
+          # at all, so their state had to be inferred from stage_status's
+          # flat "FAIL"/"PASS" strings alone. Printed here in full now.
+          echo "--- diagnostics.canonical_edit_plan (plan_id/version/hash + Idea sequence) ---"
+          jq '.diagnostics.canonical_edit_plan
+            | if . == null then {status:"absent"} else {
+                plan_id, plan_version, semantic_hash, validation_state, freeze_blocked,
+                ideas: [.ideas[]? | {idea_id, coverage_status, is_composite, winning_clip_ids, discarded_clip_ids}]
+              } end' artifact/video00-unified-selection.json
+
+          echo "--- diagnostics.final_edit_reviewer (every finding + warning) ---"
+          jq '.diagnostics.final_edit_reviewer // {status:"absent"}' artifact/video00-unified-selection.json
+
+          echo "--- diagnostics.repair_loop (every targeted semantic repair attempt) ---"
+          jq '.diagnostics.repair_loop // {status:"absent"}' artifact/video00-unified-selection.json
+
+          echo "--- diagnostics.selection_boundary_contract (Freeze -- must reference the exact validated plan) ---"
+          jq '.diagnostics.selection_boundary_contract // {status:"absent"}' artifact/video00-unified-selection.json
+
           # CompositeResolver's actual decisions (restored performance-only
           # uniques, composite replacements, split-for-composite group ids)
           # surface here, not under a dedicated key -- hybrid_composite_

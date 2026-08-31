@@ -1089,6 +1089,26 @@ does). Full suite (including these, outside the `test_cutsell_*.py` CI glob): 14
 passed (`pytest -q tests/`, excluding the two long-pre-existing unrelated broken
 files this session has documented throughout).
 
+## D-033 — CI diagnostic printing for the D-026/D-030/D-031 architecture
+
+**Status: CANONICAL**
+
+The RAW workflow's "Print unified Selection reasoner diagnostics" step never surfaced
+`diagnostics.canonical_edit_plan`, `diagnostics.repair_loop`, or `diagnostics.final_
+edit_reviewer` -- diagnosing RAW 33402023395 required inferring their state from
+`stage_status`'s flat `"final_edit_reviewer": "FAIL"` string alone, cross-referenced
+against `final_story_coherence_validation`'s own detail by hand. `.github/workflows/
+cutsell-video00-raw-v5-auto-microtrim.yml` now also echoes: a curated `canonical_edit_
+plan` summary (`plan_id`/`plan_version`/`semantic_hash`/`validation_state`/
+`freeze_blocked`/per-Idea `coverage_status`+`is_composite`+winning/discarded clip ids);
+the full `final_edit_reviewer` findings+warnings; the full `repair_loop` attempt
+history; `selection_boundary_contract` (the frozen plan's own id/version/hash, when
+freeze happened); and a `lost_semantic_atoms` atom-classification extract (D-031's
+`blocking`/`atom_classifications` per row) pulled out for readability. Every new jq
+expression was validated against a synthetic result JSON (both present and `absent`
+shapes) before landing, since a jq syntax error here would only otherwise surface
+mid-paid-RAW. No production code changed; this is CI-log observability only.
+
 ## Change rule
 
 When a new decision changes product behavior, update this file in the same development cycle. Do not silently redefine CutSell through code alone.
