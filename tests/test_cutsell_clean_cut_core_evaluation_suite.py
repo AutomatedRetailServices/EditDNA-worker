@@ -16,8 +16,13 @@ duplicate semantic beat restated far apart in time (documents a known
 current limitation, not yet a passing capability -- see its own docstring),
 uncertain semantic case (arbiter unavailable fails open to preserve, never
 guesses), multilingual paraphrased retry, causal/story order preserved
-across independent (non-retry) beats, and numeric correction across two
-takes (conservative freeze-block by design, not an auto-pick).
+across independent (non-retry) beats, numeric correction across two takes
+(conservative freeze-block by design, not an auto-pick), and two general
+content-loss cases added after RAW 33345946000 (a retry winner missing the
+loser's unique numeric fact / missing the loser's unrelated symptom beat) --
+see the ledger comment before fixture 26 for which requested content-loss
+categories are instead covered at the final_story_coherence_validation unit
+level, and why.
 
 Explicitly out of this file's scope, because they belong to other
 already-existing pipeline stages this suite does not exercise (clean_cut.py's
@@ -586,3 +591,83 @@ def test_numeric_correction_across_two_takes_conservatively_blocks_freeze():
     assert diag["freeze_blocked"] is True
     assert diag["contradiction_findings"][0]["number_conflict"] is True
     assert _kept(draft) == {"a", "b"}
+
+
+# 26. Retry winner discards a loser that carried a unique numeric fact -------
+#
+# RAW 33345946000 (Clean Cut Core V1's first controlled run) found this
+# exact failure shape live: a hybrid deletion silently dropped a delivery's
+# unique medical fact even though a "better" delivery of the same idea
+# survived, and final_story_coherence_validation reported freeze_blocked=
+# false because its idea-coverage check was scoped to take_judge_groups,
+# which never saw the deleted candidate. This suite still cannot invoke
+# hybrid_session_cleanup itself in isolation (see module docstring), but
+# the identical failure shape is reachable through the real Best-Take/
+# coherence chain whenever the winning realization of a genuine retry
+# family simply does not carry every fact the losing member did -- which is
+# what the lost-semantic-atoms coverage ledger (final_story_coherence_
+# validation._lost_semantic_atoms) now catches regardless of which
+# authority did the discarding.
+
+def test_retry_winner_missing_losers_unique_numeric_fact_blocks_freeze():
+    keeper_text = "I had thyroid surgery last year and it went well."
+    lost_fact_text = "I had thyroid surgery last year, my 3rd surgery, and it went well."
+    keeper = _take("keeper", 0.0, 3.0, keeper_text, complete=True)
+    loser = _take("loser_with_fact", 4.0, 7.0, lost_fact_text, complete=True)
+
+    draft, _, _ = _run_core((keeper, loser), oracle_pairs={("keeper", "loser_with_fact")})
+
+    assert _kept(draft) == {"keeper"}
+    assert _discarded(draft) == {"loser_with_fact"}
+    diag = draft.diagnostics["final_story_coherence_validation"]
+    assert diag["freeze_blocked"] is True
+    lost_ids = [row["clip_id"] for row in diag["lost_semantic_atoms"]]
+    assert "loser_with_fact" in lost_ids
+
+
+# 27. Retry winner discards a loser carrying an entire unrelated story beat --
+#
+# The same shape as #26, but for a non-numeric story/symptom beat rather
+# than a single critical atom -- the general content-vocabulary side of the
+# coverage ledger, not the number/negation side. Directly maps to this RAW's
+# other confirmed loss (the pimples/rash symptom beat, discarded alongside a
+# retry of an unrelated statement and never independently covered again).
+
+def test_retry_winner_missing_losers_unrelated_symptom_beat_blocks_freeze():
+    keeper_text = "The dermatologist looked at my skin and said it was fine."
+    loser_text = (
+        "The dermatologist looked at my skin, but I also had pimples "
+        "breaking out behind my ear that nobody addressed."
+    )
+    keeper = _take("keeper", 0.0, 3.0, keeper_text, complete=True)
+    loser = _take("loser_beat", 4.0, 7.0, loser_text, complete=True)
+
+    draft, _, _ = _run_core((keeper, loser), oracle_pairs={("keeper", "loser_beat")})
+
+    assert _kept(draft) == {"keeper"}
+    assert _discarded(draft) == {"loser_beat"}
+    diag = draft.diagnostics["final_story_coherence_validation"]
+    assert diag["freeze_blocked"] is True
+    lost_ids = [row["clip_id"] for row in diag["lost_semantic_atoms"]]
+    assert "loser_beat" in lost_ids
+
+
+# Categories requested for this expansion that this file's harness cannot
+# reach honestly (same scoping limit already documented above for BTS/
+# composite: they need either hybrid_session_cleanup's pre-grouping deletion
+# or hybrid_composite_best_take.py's monkeypatch machinery, neither
+# invocable here in isolation) are instead covered directly at the
+# final_story_coherence_validation unit level, in
+# tests/test_cutsell_final_story_coherence_validation.py:
+#   - a whole symptom/story beat discarded before any grouping ever ran
+#     (test_lost_semantic_atoms_blocks_freeze_for_content_discarded_before_any_grouping)
+#   - destructive deletion followed by zero idea coverage / final KEEP
+#     timeline coverage checked directly rather than inferred from
+#     take_judge_groups (same test -- the fixture has no take_judge_groups
+#     entry at all for the lost clip)
+#   - a correctly-discarded redundant retry must not false-positive
+#     (test_lost_semantic_atoms_does_not_flag_correctly_discarded_redundant_retry)
+# "Composite replacement loses one complementary fact" and "causal
+# transition accidentally removed" both reduce to the identical coverage-
+# ledger question (is the fact anywhere in the final KEEP text?) and are not
+# duplicated again here.

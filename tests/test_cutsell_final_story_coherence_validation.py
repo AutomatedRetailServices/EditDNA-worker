@@ -307,3 +307,86 @@ def test_idea_coverage_fine_when_one_member_still_selected():
     diag = out.diagnostics["final_story_coherence_validation"]
     assert diag["freeze_blocked"] is False
     assert diag["missing_idea_coverage"] == []
+
+
+# --- Lost semantic atoms: general coverage ledger vs. the ACTUAL final KEEP
+# timeline, independent of take_judge_groups. Motivated by RAW 33345946000:
+# hybrid_session_cleanup deleted candidates before IdeaClusterer/grouping
+# ever ran, so they never entered any take_judge_groups entry and
+# _missing_idea_coverage reported nothing missing despite real content loss.
+
+
+def test_lost_semantic_atoms_blocks_freeze_for_content_discarded_before_any_grouping():
+    # No take_judge_groups entry at all for this clip -- simulates a clip
+    # deleted upstream (e.g. by hybrid_session_cleanup) before grouping ever
+    # ran, which _missing_idea_coverage cannot see by construction.
+    kept = clip("kept", 0.0, 5.0, "the gynecologist sent me for other tests", selected=True)
+    lost = clip(
+        "lost", 5.0, 10.0,
+        "the biopsy confirmed it was papillary thyroid cancer",
+        selected=False,
+    )
+    d = draft(selected=(kept,), discarded=(lost,))
+
+    out = apply_final_story_coherence_validation(d)
+
+    diag = out.diagnostics["final_story_coherence_validation"]
+    assert diag["freeze_blocked"] is True
+    finding_ids = [row["clip_id"] for row in diag["lost_semantic_atoms"]]
+    assert finding_ids == ["lost"]
+
+
+def test_lost_semantic_atoms_does_not_flag_correctly_discarded_redundant_retry():
+    # A genuine weaker retry of the SAME idea shares most of its topic
+    # vocabulary with the surviving winner even when reworded -- this must
+    # not be mistaken for information loss.
+    kept = clip("kept", 0.0, 5.0, "the serum cleared my skin in two weeks", selected=True)
+    redundant = clip(
+        "redundant", 5.0, 10.0,
+        "so the serum basically cleared my skin after two weeks",
+        selected=False,
+    )
+    d = draft(selected=(kept,), discarded=(redundant,))
+
+    out = apply_final_story_coherence_validation(d)
+
+    diag = out.diagnostics["final_story_coherence_validation"]
+    assert diag["freeze_blocked"] is False
+    assert diag["lost_semantic_atoms"] == []
+
+
+def test_lost_semantic_atoms_flags_missing_numeric_fact_despite_high_overlap():
+    # High lexical overlap overall, but the discarded clip carries a number
+    # never repeated anywhere in the final KEEP text -- a critical fact, not
+    # just a phrasing difference, so it is flagged unconditionally even
+    # though the broader content-coverage floor alone would not catch it.
+    kept = clip("kept", 0.0, 5.0, "i had surgery to remove it", selected=True)
+    unique_fact = clip(
+        "unique_fact", 5.0, 10.0,
+        "i had surgery to remove it, my 3rd surgery that year",
+        selected=False,
+    )
+    d = draft(selected=(kept,), discarded=(unique_fact,))
+
+    out = apply_final_story_coherence_validation(d)
+
+    diag = out.diagnostics["final_story_coherence_validation"]
+    assert diag["freeze_blocked"] is True
+    finding = diag["lost_semantic_atoms"][0]
+    assert finding["clip_id"] == "unique_fact"
+    assert finding["missing_critical_atoms"]
+
+
+def test_lost_semantic_atoms_ignores_short_filler_discard():
+    # Too short to safely judge as carrying a distinct idea/fact -- avoids
+    # flagging BTS/false-start scraps that legitimately have near-zero
+    # overlap with the eventual complete delivery.
+    kept = clip("kept", 0.0, 5.0, "the serum cleared my skin in two weeks", selected=True)
+    filler = clip("filler", 5.0, 6.0, "okay wait let me redo that", selected=False)
+    d = draft(selected=(kept,), discarded=(filler,))
+
+    out = apply_final_story_coherence_validation(d)
+
+    diag = out.diagnostics["final_story_coherence_validation"]
+    assert diag["freeze_blocked"] is False
+    assert diag["lost_semantic_atoms"] == []

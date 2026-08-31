@@ -50,19 +50,42 @@ already computed (no new heuristic invented for this pass):
     high-confidence, deterministic, and exactly the "missing required idea"
     failure class Selection Freeze must never see silently. This also sets
     freeze_blocked.
+  - Lost semantic atoms (general coverage ledger): the take_judge_groups
+    check above is blind to anything deleted upstream of grouping entirely
+    -- most importantly hybrid_session_cleanup's per-clip failed/BTS
+    classification, which runs before IdeaClusterer ever sees the
+    candidate and has no idea-coverage awareness of its own. This check
+    instead compares every discarded clip's own content directly against
+    the union of the FINAL selected text -- independent of which stage
+    discarded it, or whether it was ever grouped at all -- so it catches
+    unique-fact/idea loss regardless of which upstream authority (or
+    combination of legacy hybrid_* authorities, see D-021) caused it. Any
+    missing number/negation atom is flagged unconditionally; a broader
+    loss of content vocabulary is flagged only past a volume+coverage
+    floor, so a genuinely redundant, correctly-discarded retry (which
+    shares most of its topic vocabulary with the surviving winner) is not
+    mistaken for real information loss. This also sets freeze_blocked. See
+    _lost_semantic_atoms's own docstring for the concrete failure case
+    (RAW 33345946000) that motivated it.
 
-Not implemented in V1 (documented gap, not silently skipped): exhaustive
-unique-fact-loss detection beyond the number/negation contradiction check
-above, and general (non-numeric/negation) factual contradiction. Both need
-capability this deterministic pass does not have; flagging that honestly is
-preferable to a heuristic that would look like coverage it doesn't have.
+Not implemented in V1 (documented gap, not silently skipped): general
+(non-numeric/negation) factual contradiction between two takes that are
+not already an established retry-family pair -- comparing arbitrary
+unrelated texts would trivially "contradict" on every number/negation
+mismatch, which is not a general-purpose check's job. The lost-semantic-
+atoms check above closes the exhaustive-unique-fact-loss gap that used to
+be listed here, but is lexical-overlap-based, not paraphrase-aware: a
+fact restated with entirely different vocabulary could still be
+mis-flagged as lost. That failure mode blocks freeze for human review
+rather than silently producing a bad video, which is the conservative
+direction CLAUDE.md's "WHEN UNCERTAIN, KEEP" rule asks for.
 """
 from __future__ import annotations
 
 from dataclasses import replace
 from itertools import combinations
 
-from .final_sibling_grouping import _negations, _numbers
+from .final_sibling_grouping import _content, _negations, _numbers
 from .semantic_idea_equivalence import (
     IdeaEquivalencePair,
     IdeaEquivalenceRequest,
@@ -254,6 +277,69 @@ def _missing_idea_coverage(draft) -> list[dict]:
     return missing
 
 
+def _lost_semantic_atoms(draft) -> list[dict]:
+    """General coverage ledger over the ACTUAL final KEEP timeline.
+
+    ``_missing_idea_coverage`` above is scoped to ``take_judge_groups`` --
+    the retry families IdeaClusterer actually formed. It is blind to any
+    candidate deleted upstream of grouping entirely, most importantly
+    ``hybrid_session_cleanup.apply_hybrid_session_cleanup`` (pipeline.py
+    Pass 2): a per-clip failed/BTS classifier that runs BEFORE IdeaClusterer
+    (safe_group_takes_by_sessions / reconcile_semantic_idea_equivalence)
+    ever sees the candidate, and has no idea-coverage awareness of its own
+    -- it judges one take in isolation, with no concept of whether it is
+    the sole carrier of an audience-facing fact. A clip it deletes never
+    enters any take_judge group, so a whole idea can vanish this way while
+    ``_missing_idea_coverage`` reports nothing missing, because as far as
+    that check can see, the idea never existed in the first place.
+    (RAW 33345946000, head 0ea0adf: the papillary-cancer diagnosis
+    confirmation and the pimples/rash story beat were both
+    high_confidence_semantic hybrid deletions; freeze_blocked was false.)
+
+    This check instead compares every discarded clip's own content
+    directly against the union of the final selected text -- independent
+    of which stage discarded it, or whether it was ever grouped at all.
+    Any number/negation atom (a critical fact) absent from the final KEEP
+    text is flagged unconditionally. A broader loss of ordinary content
+    vocabulary is flagged only once it clears both a volume and a coverage
+    floor, so a genuinely redundant retry of an idea the KEEP timeline
+    already covers -- which shares most of its topic vocabulary with the
+    winner -- is not mistaken for real information loss.
+    """
+    kept_text = " ".join(str(clip.text or "") for clip in draft.selected)
+    kept_content = _content(kept_text)
+    kept_critical = _numbers(kept_text) | _negations(kept_text)
+
+    findings: list[dict] = []
+    for clip in draft.discarded:
+        text = str(clip.text or "")
+        if len(text.split()) < 3:
+            # Too short to safely judge as carrying a distinct idea, a
+            # standalone critical fact, or even a filler reaction ("no
+            # wait", "okay stop") -- avoids flagging bare BTS scraps.
+            continue
+        own_content = _content(text)
+        own_critical = _numbers(text) | _negations(text)
+        missing_critical = sorted(own_critical - kept_critical)
+        # The broader content-vocabulary check needs enough own content to
+        # judge reliably; a critical atom (number/negation) is meaningful
+        # evidence even in an otherwise short clip, so it is never gated by
+        # this floor.
+        missing_content = sorted(own_content - kept_content) if len(own_content) >= 5 else []
+        coverage = 1.0 - (len(missing_content) / max(1, len(own_content) or 1))
+        content_loss = len(own_content) >= 5 and len(missing_content) >= 4 and coverage < 0.45
+        if missing_critical or content_loss:
+            findings.append({
+                "clip_id": clip.clip_id,
+                "text": text,
+                "missing_critical_atoms": missing_critical,
+                "missing_content_token_count": len(missing_content),
+                "own_content_token_count": len(own_content),
+                "coverage_against_final_keep": round(coverage, 4),
+            })
+    return findings
+
+
 def apply_final_story_coherence_validation(
     draft, *, semantic_equivalence_arbiter: SemanticEquivalenceArbiter | None = None,
 ):
@@ -329,7 +415,8 @@ def apply_final_story_coherence_validation(
         if finding not in residual_contradictions
     ]
     missing_idea_coverage = _missing_idea_coverage(draft)
-    freeze_blocked = bool(contradiction_findings) or bool(missing_idea_coverage)
+    lost_semantic_atoms = _lost_semantic_atoms(draft)
+    freeze_blocked = bool(contradiction_findings) or bool(missing_idea_coverage) or bool(lost_semantic_atoms)
 
     diagnostics = dict(draft.diagnostics or {})
     diagnostics["final_story_coherence_validation"] = {
@@ -343,9 +430,9 @@ def apply_final_story_coherence_validation(
         "possible_missing_story_ending": possible_missing_ending,
         "contradiction_findings": contradiction_findings,
         "missing_idea_coverage": missing_idea_coverage,
+        "lost_semantic_atoms": lost_semantic_atoms,
         "freeze_blocked": freeze_blocked,
         "not_implemented": [
-            "exhaustive_unique_fact_loss_detection",
             "general_non_numeric_non_negation_contradiction_detection",
         ],
     }

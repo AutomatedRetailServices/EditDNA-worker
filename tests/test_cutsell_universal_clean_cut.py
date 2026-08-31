@@ -67,7 +67,13 @@ def _clip(clip_id, start, end, text, *, selected):
 
 def _pre_unified_draft():
     winner = _clip("winner", 0.0, 5.0, "the clean complete take", selected=True)
-    loser = _clip("loser", 5.0, 10.0, "a weaker retry of the same idea", selected=False)
+    # Shares real topic vocabulary with the winner ("clean complete take") the
+    # way an actual reworded retry of the same idea would -- the lost-
+    # semantic-atoms coverage check (final_story_coherence_validation.py)
+    # only flags a discard whose OWN content is largely absent from the
+    # final KEEP text, and a synthetic "a weaker retry of the same idea"
+    # fixture text with zero real overlap would false-positive there.
+    loser = _clip("loser", 5.0, 10.0, "a weaker retry of the same clean complete take", selected=False)
     return DraftTimeline(
         schema_version=SCHEMA_VERSION,
         project_id="p1",

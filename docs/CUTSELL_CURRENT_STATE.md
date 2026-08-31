@@ -25,10 +25,19 @@ Watch+Listen found that architecture editorially insufficient. The whole-video U
 Selection reasoner is now deactivated in the active path (kept only behind
 `CUTSELL_CLEAN_CUT_CORE_V1=0` for rollback); Gemini is a bounded semantic arbiter only.
 
-As of this checkpoint: Clean Cut Core V1 code, targeted unit tests, and a general
-(video-agnostic, 14-category) Clean Cut evaluation suite are implemented and green
-locally. Per the QA loop, one Video00 RAW is authorized only once that evaluation
-suite is green, followed by a stop for Human Watch+Listen before any further RAW.
+As of this checkpoint: Clean Cut Core V1's first controlled RAW (33345946000, head
+`0ea0adf`) ran and was Human Watch+Listen reviewed. Result: the flagship hereditary-
+cancer contradiction resolved cleanly and semantic-equivalence merges improved 8x, but
+real content loss was found (a papillary-cancer diagnosis confirmation, a sonography
+transition, and a pimples/rash symptom beat all missing from the final KEEP timeline)
+that `final_story_coherence_validation` did not catch. See D-022 for the full root
+cause (Hybrid session cleanup deletes per-clip before IdeaClusterer ever runs, with no
+idea-coverage awareness of its own, and StoryValidator's coverage check was scoped only
+to post-grouping state) and the general fix implemented (a lost-semantic-atoms coverage
+ledger checking every discarded clip's content directly against the final KEEP text,
+independent of which stage discarded it). Full consolidation of the ~14 legacy hybrid_*
+authorities into one canonical CompositeResolver component remains open (D-021); the
+coverage ledger is this cycle's structural backstop for that gap, not a replacement.
 
 Human review is the quality gate. Workflow success alone is not an editorial pass.
 Sales-funnel/storytelling work remains intentionally separate until Clean Cut reaches reliable real-video quality.

@@ -204,8 +204,8 @@ brains rewriting the same membership sequentially:
 | DeliveryScorer | `take_judge.py` (`score_take`/`rank_takes`) | KEEP AS CORE |
 | BestTakeResolver | `deterministic_best_take_authority.py` | KEEP AS CORE / PROMOTED (Phase 1) |
 | SemanticArbiter | `semantic_idea_equivalence.py` + `semantic_idea_equivalence_google.py` | KEEP AS CORE, bounded role only (D-020) |
-| CompositeResolver | `hybrid_composite_best_take.py`, `post_selection_complementary_family_stabilizer.py` | DEMOTE TO EVIDENCE / PARTIAL -- reachable in the active V1 path (see the `editorial_judge` starvation fix below), and functionally sound: it identifies composite-worthy pieces and marks them via a context-var (`_COMPOSITE_SPLIT_IDS`) that a second wrap forces into singleton groups BEFORE grouping runs, so BestTakeResolver's one-winner competition structurally cannot collapse them again -- the same outcome the canonical pipeline's post-Best-Take composite step describes, achieved by pre-emptive exclusion rather than post-hoc reconstruction. Still a known gap in NAME/DIRECTNESS only: it is two chained monkeypatch wraps over `apply_hybrid_session_cleanup`/`safe_group_takes_by_sessions` rather than one directly-callable step in `universal_clean_cut.py`'s V1 sequence. Its decisions surface in `diagnostics.hybrid_editorial_chunks` (now printed in CI, see D-020's observability note) |
-| StoryValidator | `final_story_coherence_validation.py` | KEEP AS CORE (new; folds alternates to discard, resolves residual ambiguity via SemanticArbiter, contradiction invariant, idea-coverage invariant, hard pre-Freeze gate via `freeze_blocked`) |
+| CompositeResolver | `hybrid_composite_best_take.py`, `post_selection_complementary_family_stabilizer.py`, plus **at least 12 more** `install_hybrid_*`/`install_post_selection_*` hooks in `cutsell_worker/__init__.py` that monkeypatch the same shared functions (`apply_hybrid_session_cleanup`, `safe_group_takes_by_sessions`) -- see D-022 for the full inventory | DEMOTE TO EVIDENCE / NOT YET CONSOLIDATED -- reachable in the active V1 path (see the `editorial_judge` starvation fix below). `hybrid_composite_best_take.py`'s own two chained wraps are individually sound (identifies composite-worthy pieces, marks them via `_COMPOSITE_SPLIT_IDS` so grouping cannot re-collapse them), but it is one of roughly 14 legacy authorities installed at import time that can each restore, delete, or suppress members of the same retry family, layered in installation order with no single arbiter among them. D-022 (RAW 33345946000's content-loss finding) treats full consolidation into one directly-callable, non-conflicting component as a real, still-open, higher-risk item -- not something to claim done. Its decisions surface in `diagnostics.hybrid_editorial_chunks` (now printed in CI, see D-020's observability note) |
+| StoryValidator | `final_story_coherence_validation.py` | KEEP AS CORE (new; folds alternates to discard, resolves residual ambiguity via SemanticArbiter, contradiction invariant, idea-coverage invariant, general lost-semantic-atoms coverage ledger against the ACTUAL final KEEP timeline (D-022), hard pre-Freeze gate via `freeze_blocked`). Per D-022, this is also the structural backstop for the CompositeResolver consolidation gap above: because it checks final `selected`/`discarded` content directly, it catches unique-fact/idea loss regardless of which of the ~14 upstream hybrid_* authorities caused it. |
 | SelectionFreeze | `selection_boundary_contract.py` (`freeze_selection_contract`/`enforce_selection_contract`) | KEEP AS CORE, unchanged |
 | BoundaryEngine | `final_boundary_authority.py`, `human_boundary_polish_v5.py`, speech-safe/microtrim guards | KEEP AS CORE, physical-only, unchanged. Also satisfies the canonical directive's audio/visual pacing QA requirement: `human_boundary_polish_v5.py` already consolidates the dead-air/reset pacing work older v1-v4 passes mixed with Selection responsibilities, using multimodal reset evidence (`_reset_score`/`_micro_reset_evidence`, reused from v2) rather than naive silence-length deletion, and is Boundary-only by construction. No new pacing module was built; pacing *quality* (as opposed to architecture) still needs empirical validation via Human Watch+Listen. |
 | Renderer | `render_plan.py`/`render.py` | KEEP AS CORE, unchanged (renders `selected` only, never `alternates`) |
@@ -223,6 +223,76 @@ KEPT AS SAFETY/ROLLBACK INFRASTRUCTURE (dormant, not deleted, per D-019):
 `deterministic_best_take_authority.py`'s `swap_enabled` parameter;
 `draft_edits.py`'s `swap_take` (a different, manual editor-layer product surface,
 never part of this decision).
+
+## D-022 — RAW 33345946000 content-loss finding: general coverage ledger
+**Status: CANONICAL**
+
+RAW 33345946000 (head `0ea0adf`, Clean Cut Core V1's first controlled run)
+resolved the flagship hereditary-cancer contradiction cleanly and produced an
+8x semantic-equivalence merge improvement, but Human Watch+Listen against the
+actual result JSON found genuine content loss `final_story_coherence_
+validation` reported as `freeze_blocked: false`: a papillary-thyroid-cancer
+diagnosis confirmation, a sonography/ultrasound causal transition, and an
+entire pimples/rash symptom beat were all missing from the final KEEP
+timeline, with no other delivery covering that content.
+
+**Root cause (code-grounded, not inferred):** `apply_hybrid_session_cleanup`
+(`pipeline.py` Pass 2) is a per-clip failed/BTS classifier that runs BEFORE
+IdeaClusterer (`safe_group_takes_by_sessions` / `reconcile_semantic_idea_
+equivalence`) ever sees a candidate, and has no idea-coverage awareness of
+its own -- it judges one take in isolation, with no concept of whether it is
+the sole carrier of an audience-facing fact. A clip it deletes never enters
+any `take_judge_groups` entry. `final_story_coherence_validation`'s idea-
+coverage check (`_missing_idea_coverage`) was scoped only to that
+`take_judge_groups` diagnostic, so it reported nothing missing -- not
+because coverage was actually fine, but because the check could not see
+past grouping to the clips deleted before grouping began. Separately,
+`hybrid_composite_best_take.py`'s rescue path
+(`_restore_performance_only_unique_deliveries`) only reconsiders clips
+deleted via `delete_basis == "semantic_failed_plus_local_performance"`;
+`hard_semantic_delete` (`delete_basis == "high_confidence_semantic"`,
+confidence >= 0.94 -- the exact basis on RAW 33345946000's confirmed
+deletion) is structurally excluded from ever being rescued. This is root
+causes **C** (Hybrid editorial deletion has no coverage/uniqueness
+awareness) and **F** (StoryValidator's coverage check was scoped to
+post-grouping state, invisible to pre-grouping deletion) combined, not a
+clustering-quality problem (A): IdeaClusterer never got the chance to see
+the deleted takes at all.
+
+**General fix implemented:** `final_story_coherence_validation.py` gained
+`_lost_semantic_atoms`, a coverage ledger that compares every discarded
+clip's own content and critical (number/negation) atoms directly against
+the union of the final `selected` text -- independent of which stage
+discarded it, whether it was ever grouped, or which of the ~14 legacy
+hybrid_* authorities (see D-021's CompositeResolver row) touched it. Any
+missing number/negation atom blocks freeze unconditionally; a broader loss
+of ordinary content vocabulary blocks freeze only past a volume+coverage
+floor, so a genuinely redundant, correctly-discarded retry (which shares
+most of its topic vocabulary with the surviving winner) is not mistaken for
+real information loss. This closes the "exhaustive unique-fact-loss
+detection" gap D-020 had left open, and makes StoryValidator's coverage
+invariant true to what CLAUDE.md already declared ("an intended idea must
+not silently vanish from the winning edit") regardless of which upstream
+authority is responsible.
+
+**What is not yet done:** full consolidation of the ~14 hybrid_*/post_
+selection_* legacy authorities that can each restore/delete/suppress
+members of the same retry family into one directly-callable, non-
+conflicting CompositeResolver component remains open and materially
+riskier than this cycle's fix -- see D-021's CompositeResolver row. The
+coverage ledger above is the structural backstop for that gap (it does not
+care which upstream authority caused a loss), not a replacement for
+consolidating the authorities themselves. General (non-numeric/negation)
+factual contradiction detection also remains open (unchanged from D-020).
+
+**Test coverage:** `tests/test_cutsell_final_story_coherence_validation.py`
+(general fixtures: pre-grouping-deleted unique content, correctly-discarded
+redundant retry does not false-positive, missing numeric fact despite high
+overlap, short filler is not flagged) and two new CleanCutBench categories
+in `tests/test_cutsell_clean_cut_core_evaluation_suite.py` (retry winner
+missing the loser's unique numeric fact; retry winner missing the loser's
+unrelated symptom beat) reachable through the real grouping/Best-Take/
+coherence chain.
 
 ## Change rule
 
