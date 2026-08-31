@@ -1109,6 +1109,91 @@ expression was validated against a synthetic result JSON (both present and `abse
 shapes) before landing, since a jq syntax error here would only otherwise surface
 mid-paid-RAW. No production code changed; this is CI-log observability only.
 
+## D-034 — RAW 33409169518 findings: D-031/D-032 confirmed live; two open gaps found, neither fixed yet
+
+**Status: DIAGNOSIS RECORDED — CURRENT LIVE BLOCKER, awaiting explicit direction before further code changes or another RAW**
+
+RAW 33409169518 (source: `9fad0788e...` lineage plus commits `5ce26eb`, `cdb55ae`,
+`2a03880` -- D-031/D-032/D-033) was launched per the D-031/D-032/D-033 RAW gate.
+Semantic-side result, confirmed from the run's own printed diagnostics:
+
+- `final_story_coherence_validation.freeze_blocked: false` (RAW 33402023395 had this
+  `true`, blocked solely by the "2023" atom). The same atom is present again in this
+  run's data (`clip_aeb69adfb81e1d9c2296`, "Tuve problemas de estómago en una
+  temporada en 2023.") and is now correctly classified
+  `{"atom": "2023", "atom_type": "number", "evidence":
+  "incidental_year_in_ordinary_temporal_aside", "importance": "CONTEXTUAL",
+  "resolved_by": "deterministic"}` with `"blocking": false` -- D-031 works live, not
+  just in unit tests.
+- `final_edit_reviewer`: `status: PASS`, `findings: []`, one non-blocking `warnings`
+  entry (the same atom, `"blocking": false`) -- D-031's blocking-vs-warning routing
+  is confirmed live.
+- `repair_loop`: `attempt_count: 0`, `status: PASS` -- no targeted semantic repair was
+  needed pre-freeze this run.
+- `canonical_edit_plan`: `validation_state: frozen_ready`, `freeze_blocked: false`,
+  3 retry-family Ideas recorded (matching this run's 3 `take_judge_groups`), each
+  `coverage_status: complete`.
+- `selection_boundary_contract`: `status: verified`, `matches_reviewed_plan: false`.
+  This is the documented, non-enforced observability case from
+  `selection_boundary_contract.py` (`enforce_complete_idea_boundaries` legitimately
+  runs between FinalEditReviewer's PASS and freeze and can restore source-proven
+  leading/trailing words) -- not a new problem.
+- The RAW workflow's own "Verify frozen Selection lock" step (D-032's aligner)
+  **passed for the first time** on a real RAW.
+
+Despite all of the above, the workflow's overall `conclusion` was `failure`, from a
+later step, "Verify unified Selection architecture." Root-causing that step (not yet
+fixed -- diagnosis only) surfaced two separate, real findings:
+
+1. **Step 18 asserts legacy `unified_selection_reasoner`-era fields that are
+   structurally never true under the active Clean Cut Core V1 path.** It checks
+   `selection_reasoner_enabled == true`, `selection_reasoner_status == "applied"`,
+   `external_brain_calls_enabled == true`, `hybrid_requested_group_count == 0`, etc.
+   This run's own diagnostics show `diagnostics.unified_selection_reasoner:
+   {"status": "absent"}`, and `universal_clean_cut_validation.
+   run_single_universal_clean_cut_validation` derives `selection_reasoner_status`
+   from that same absent dict (`unified_diag.get("status")` -> `None`). Clean Cut
+   Core V1 deliberately deactivates the whole-video Unified Selection reasoner (see
+   Current mission, CLAUDE.md) -- so this check can never pass while V1 is active by
+   design, regardless of edit quality. This looks like a pre-existing CI-script bug
+   that checks the wrong (legacy) architecture's success markers, not a regression
+   from D-026 through D-033: step 18 was never reached to completion in an earlier
+   RAW this session observed (step 17 used to fail first), so this is the first time
+   it has been exercised at all. Not yet fixed; the workflow's own verification
+   script needs updating to assert Clean Cut Core V1's actual success markers
+   instead, but that change has not been made without explicit direction.
+
+2. **New, more significant finding: the Video00 RAW benchmark harness never
+   exercises D-030's live PostRenderWatchListenQC / bounded physical repair wiring
+   at all.** `serverless_handler._focused` (the RunPod op this workflow submits,
+   `op: "focused"`) calls `universal_clean_cut_validation.
+   run_single_universal_clean_cut_validation`, whose preview render path is
+   `_render_validation_preview` -> `render.render_preview` -- a bare ffmpeg
+   concat+overlay function with no QC and no repair loop. D-030's actual live
+   wiring (`live_render_qc.render_with_post_render_qc`, the bounded physical repair
+   loop, and every `render_attempt`/`post_render_qc_status`/`plan_id`/`plan_version`
+   /`semantic_hash` diagnostic D-030 added) lives only in `export_job.run_export_job`
+   -- the separate, real mobile-app export RQ job path, never invoked by the Video00
+   RAW harness. Consequently: no RAW run to date (including 33409169518) has ever
+   produced a `PostRenderWatchListenQC` verdict, a `render_attempt` record, or
+   exercised the bounded physical repair loop against a real Video00 render, even
+   though D-030's live wiring is code-complete, unit-tested (10 integration tests),
+   and separately proven correct in isolation. This is a structural gap between the
+   RAW benchmark harness and the production export pipeline that predates this
+   session's D-026/D-030 work (the harness function was never updated to route
+   through the new live-wired path) -- not something this session's changes broke,
+   but also not something this session's changes have yet closed. Closing it would
+   mean routing `run_single_universal_clean_cut_validation`'s preview render through
+   `render_with_post_render_qc` (or an equivalent path) so a Video00 RAW actually
+   proves PostRenderWatchListenQC/repair-loop behavior end-to-end, per Directive A's
+   original mandate. Not yet done; no code changed for this finding.
+
+**No further code changes and no further RAW were made after this diagnosis.** Per
+the standing acceptance rule (do not call a run successful merely because CI passed
+or a RAW completed; do not launch another RAW off a failing run without root-causing
+it first), both findings above were reported instead of silently patched or
+retried around.
+
 ## Change rule
 
 When a new decision changes product behavior, update this file in the same development cycle. Do not silently redefine CutSell through code alone.
