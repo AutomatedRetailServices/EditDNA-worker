@@ -775,6 +775,63 @@ handed a non-physical finding kind. Skipped, not failed, if `ffmpeg` is absent f
 the runner (a robustness guard; confirmed present and used for real on the standard
 CI ubuntu-latest image and in this sandbox).
 
+## D-029 — RAW gate assessment after D-026/D-027/D-028 (repair loop, causal order, real media QC)
+
+**Status: CANONICAL**
+
+Closing checkpoint for the "three remaining architectural gaps" directive (repair loop,
+general causal/story order validation, real PostRenderWatchListenQC), assessed against
+the directive's own 12-condition RAW gate. Full suite: 1094 passed (`pytest -q
+tests/test_cutsell_*.py`, the exact CI glob), `compileall cutsell_worker cutsell_app`
+clean. Reported honestly, condition by condition, rather than a generic "done":
+
+1. Targeted repair loop green -- **MET** (D-026, `tests/test_cutsell_repair_loop.py`).
+2. Plan versioning across repairs green -- **MET** (`plan_version` increments,
+   `semantic_hash` stable across a pure reorder -- tested).
+3. Unaffected Idea stability proven -- **MET** (`unaffected_ideas_changed` asserted
+   false in both a valid-composite-survives and an unrelated-idea-untouched test).
+4. General STORY_ORDER_BREAK green -- **MET** (D-025, unchanged, still passing).
+5. General CAUSAL_ORDER_BREAK green -- **MET** (D-027,
+   `tests/test_cutsell_causal_order_validator.py`, 14 tests + 2 end-to-end).
+6. Real PostRenderWatchListenQC active on rendered media -- **NOT MET as an active
+   pipeline stage.** D-028 built and tested real ffmpeg/ffprobe checks against actual
+   decoded media (not transcript-only, not faked) and validated them against synthetic
+   fixtures without waiting for Video00, exactly as the directive required for
+   buildability/testability. What is honestly still missing: `post_render_media_qc.py`
+   is not called from anywhere in the live pipeline today (confirmed by search -- no
+   reference outside its own module and docstrings elsewhere). Wiring it in means
+   invoking it from wherever the real render actually happens (`render.py`'s export
+   step is the natural integration point) against the REAL RunPod output file, which
+   this sandbox cannot reach today (Azure Blob egress remains blocked) and was not
+   attempted this cycle -- a real pipeline-wiring change deserves its own careful
+   review, not a rushed addition immediately before a paid RAW.
+7. Bounded physical repair loop green -- **NOT MET as an active pipeline stage**, same
+   root cause as #6: `run_bounded_physical_repair_loop` is real and tested (with a
+   caller-supplied `render_attempt` function standing in for BoundaryEngine/Renderer,
+   since no real re-render is invoked from this sandbox either), but nothing in the
+   live pipeline calls it yet.
+8. Invalid semantic plan still cannot Freeze -- **MET** (unchanged; `freeze_blocked`
+   now also fires on `repair_result.status == "NEEDS_HUMAN_REVIEW"`, D-026).
+9. Composite persistence remains green -- **MET** (D-025's `protected_ids` fix,
+   unchanged, still passing).
+10. CoverageLedger remains green -- **MET** (`lost_semantic_atoms` checks, unchanged,
+    still passing).
+11. CleanCutBench materially green -- **MET** (1094 passed, including the 2 new D-026/
+    D-027 end-to-end integration fixtures added this cycle).
+12. CI green -- **MET** (exact CI glob green; `compileall` clean).
+
+**Honest conclusion: 10 of 12 conditions are met; 6 and 7 are not**, for the same
+reason (real post-render media QC exists and is proven correct against synthetic
+media, but is not yet an active stage of the real render pipeline that would run
+against the RAW's actual output). Per the directive's own framing ("push once and
+allow ONE controlled Video00 RAW... when the gate is truly met"), this is reported as
+NOT fully met rather than rounded up -- consistent with this whole session's standing
+practice of surfacing an honest gap instead of overclaiming readiness for a paid,
+hard-to-verify action. No push and no RAW triggered this cycle; the standing HOLD
+remains in effect pending the user's decision on how to proceed (wire #6/#7 into the
+live pipeline first, or accept the built-and-tested state and proceed with the RAW
+with #6/#7 as a known follow-up).
+
 ## Change rule
 
 When a new decision changes product behavior, update this file in the same development cycle. Do not silently redefine CutSell through code alone.
