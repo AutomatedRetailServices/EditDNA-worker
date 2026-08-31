@@ -44,6 +44,18 @@ All the genuinely perceptual checks (clipped phonemes, fumble frames,
 framing, A/V drift, decode/export integrity against the real file) remain
 unimplemented, per the module-level docstring above -- this section does
 not change that.
+
+## What IS now implemented (D-028): real ffmpeg/ffprobe media checks
+
+`post_render_media_qc.py` (a separate module, so this one stays free of a
+subprocess/ffmpeg dependency at import time) implements DECODE_EXPORT_
+INTEGRITY, LINGERING_ACCIDENTAL_SILENCE, FROZEN_OR_REPEATED_FRAME,
+DEAD_BLACK_FRAME, and ABRUPT_AUDIO_DISCONTINUITY for real against actual
+decoded/probed media (ffmpeg/ffprobe confirmed installed this cycle) --
+never transcript-only. See that module's own docstring for exactly what
+remains an honest, unbuilt gap (phoneme-level truncation, breath-cut
+detection, body/mic/camera reset debris, facial expression, face/body jump,
+fine A/V drift) and why.
 """
 from __future__ import annotations
 
@@ -54,6 +66,7 @@ from .canonical_edit_plan import CanonicalEditPlan
 
 STRUCTURAL_SEGMENT_MISSING = "STRUCTURAL_SEGMENT_MISSING"
 STRUCTURAL_SEGMENT_TRUNCATED = "STRUCTURAL_SEGMENT_TRUNCATED"
+STRUCTURAL_DUPLICATE_SEGMENT = "STRUCTURAL_DUPLICATE_SEGMENT"
 
 CLIPPED_WORD = "CLIPPED_WORD"
 UNSAFE_WORD_BOUNDARY = "UNSAFE_WORD_BOUNDARY"
@@ -64,12 +77,26 @@ AWKWARD_POST_LINE_EXPRESSION = "AWKWARD_POST_LINE_EXPRESSION"
 AV_SYNC_DRIFT = "AV_SYNC_DRIFT"
 FRAMING_INTEGRITY = "FRAMING_INTEGRITY"
 DECODE_EXPORT_INTEGRITY = "DECODE_EXPORT_INTEGRITY"
+# D-028: real ffmpeg/ffprobe-backed additions -- see post_render_media_qc.py.
+FROZEN_OR_REPEATED_FRAME = "FROZEN_OR_REPEATED_FRAME"
+DEAD_BLACK_FRAME = "DEAD_BLACK_FRAME"
+ABRUPT_AUDIO_DISCONTINUITY = "ABRUPT_AUDIO_DISCONTINUITY"
 
 _PHYSICAL_KINDS = frozenset({
     CLIPPED_WORD, UNSAFE_WORD_BOUNDARY, AWKWARD_PHYSICAL_CUT,
     LINGERING_ACCIDENTAL_SILENCE, RESET_DEBRIS, AWKWARD_POST_LINE_EXPRESSION,
     AV_SYNC_DRIFT, FRAMING_INTEGRITY, DECODE_EXPORT_INTEGRITY,
+    FROZEN_OR_REPEATED_FRAME, DEAD_BLACK_FRAME, ABRUPT_AUDIO_DISCONTINUITY,
 })
+
+
+def is_physical_finding_kind(kind: str) -> bool:
+    """True for a purely physical/timing finding kind -- one BoundaryEngine
+    (plus a re-render) could plausibly fix, never a semantic-membership
+    finding. Exposed so a repair/routing loop outside this module (see
+    `post_render_media_qc.run_bounded_physical_repair_loop`) can assert it
+    is never asked to "fix" a semantic finding."""
+    return kind in _PHYSICAL_KINDS
 
 
 @dataclass(frozen=True)
@@ -140,6 +167,38 @@ def check_render_plan_covers_edit_plan(
                     "idea_id": clip.idea_id,
                     "is_composite_piece": clip.is_composite_piece,
                 },
+                routes_to="SelectionFreeze",
+            ))
+    status = "FAIL" if findings else "PASS"
+    return PostRenderQCResult(status=status, findings=tuple(findings))
+
+
+def check_no_duplicate_render_segments(render_segments: Iterable) -> PostRenderQCResult:
+    """Detect a clip_id appearing in more than one render segment -- the
+    same clip rendered twice into the final output.
+
+    `render_plan._coalesce_contiguous_segments` merges two ADJACENT
+    same-source, same-settings segments into one, keeping only the FIRST's
+    clip_id -- a legitimate render never produces two segments sharing one
+    clip_id. Seeing that is a real render-plan bug (the "no duplicate
+    rendered segment" requirement), not a coalescing artifact.
+    """
+    segments = list(render_segments)
+    occurrences: dict[str, int] = {}
+    for seg in segments:
+        occurrences[seg.clip_id] = occurrences.get(seg.clip_id, 0) + 1
+
+    findings: list[PostRenderFinding] = []
+    reported: set[str] = set()
+    for seg in segments:
+        count = occurrences.get(seg.clip_id, 0)
+        if count > 1 and seg.clip_id not in reported:
+            reported.add(seg.clip_id)
+            findings.append(PostRenderFinding(
+                kind=STRUCTURAL_DUPLICATE_SEGMENT,
+                start=float(seg.start),
+                end=float(seg.end),
+                detail={"clip_id": seg.clip_id, "occurrence_count": count},
                 routes_to="SelectionFreeze",
             ))
     status = "FAIL" if findings else "PASS"

@@ -702,6 +702,79 @@ arbiter; a required clip discarded entirely is caught as a detached explanation;
 arbiter exception is treated as "not available"; clips in the same source far beyond
 the gap tolerance are never treated as dependent.
 
+## D-028 — Real PostRenderWatchListenQC media checks (ffmpeg/ffprobe)
+
+**Status: CANONICAL**
+
+D-025 scoped `check_render_plan_covers_edit_plan` to the deterministic render PLAN
+artifact only, explicitly not decoded media, because Azure Blob egress remained
+blocked (the real Video00 rendered MP4 was unreachable). This cycle confirmed
+`ffmpeg`/`ffprobe` install cleanly in this sandbox (`apt-get update -qq && apt-get
+install -y --no-install-recommends ffmpeg`) and `numpy` installs via pip -- unlocking
+real signal-processing work against SYNTHETIC media fixtures, per the canonical
+directive's explicit instruction: "do not fake this with transcript-only checks... do
+not wait for Video00 to test basic media-QC behavior."
+
+**What is real and built (`post_render_media_qc.py`), against actually decoded/probed
+media, not transcripts:**
+
+- **DECODE_EXPORT_INTEGRITY** -- a full null-decode (`ffmpeg -v error -xerror -i
+  <file> -f null -`); any nonzero exit or stderr output is real corruption/truncation.
+- **LINGERING_ACCIDENTAL_SILENCE** -- ffmpeg's own `silencedetect` audio filter
+  against real decoded audio; a silence longer than a threshold is only flagged when
+  it falls outside caller-supplied `protected_pause_windows` (an ordinary parameter,
+  never a Video00-specific constant -- whichever upstream authority knows a pause was
+  editorially intentional supplies it).
+- **FROZEN_OR_REPEATED_FRAME** / **DEAD_BLACK_FRAME** -- ffmpeg's own `freezedetect` /
+  `blackdetect` video filters, real frame-to-frame comparison.
+- **ABRUPT_AUDIO_DISCONTINUITY** -- at each caller-supplied edit-point timestamp,
+  decode a short raw-PCM window via ffmpeg and compare the largest sample-to-sample
+  jump against the window's own median jump (numpy); a ratio far above baseline is the
+  actual acoustic signature of a hard "click"/step discontinuity at a bad cut, measured
+  from the waveform, not inferred from text.
+- **STRUCTURAL_DUPLICATE_SEGMENT** (`post_render_watch_listen_qc.py`, deterministic,
+  no ffmpeg needed) -- a clip_id appearing in more than one render segment; legitimate
+  coalescing merges adjacent segments and keeps only the first's clip_id, so this is
+  always a real render-plan bug, never a coalescing artifact.
+
+**Honest gap, explicitly not built:** phoneme-level word-boundary truncation and
+unnatural-breath-cut detection (require ASR-phoneme alignment, not an ffmpeg
+capability); body/mic/camera reset debris, awkward post-line facial expression, and
+face/body jump (require computer-vision/pose estimation -- no cv2/mediapipe-class
+library is installed for this purpose, and adding one is a separate, larger decision);
+fine-grained (sub-frame) A/V sync drift and framing integrity beyond a gross
+resolution mismatch (no motivating fixture or real failure case yet). None of these
+are faked with a stand-in heuristic; they are recorded here as unbuilt, exactly like
+every other honest gap this session has tracked.
+
+**Authority rule, enforced in code, not just prose:** every finding kind this module
+can emit is physical (`is_physical_finding_kind`, `post_render_watch_listen_qc.py`).
+`run_post_render_media_qc` asserts this of its own output. `run_bounded_physical_repair
+_loop(render_attempt, max_attempts=3)` calls a caller-supplied re-render function
+(BoundaryEngine/Renderer's concern, never this loop's) and re-checks, bounded at
+`max_attempts`; it raises immediately if ever handed a non-physical finding kind
+rather than attempting to "fix" a semantic mismatch by re-rendering -- that must
+invalidate the candidate and route upstream instead, exactly as the canonical
+directive requires. Exhausting attempts without a clean pass reports
+`NEEDS_HUMAN_REVIEW`, never `PASS`.
+
+**Tests (`tests/test_cutsell_post_render_media_qc.py`, 20 tests, all against ffmpeg-
+generated synthetic fixtures -- sine tones, testsrc/color frames, constant-amplitude
+`aevalsrc` splices):** clean media passes decode integrity; a truncated file fails it;
+excessive accidental silence is detected; an intentional protected pause is preserved;
+continuous audio with no gap passes; a frozen stretch and a dead-black stretch are each
+detected, and a continuously-changing/normal video passes both; a genuine hard
+amplitude-jump splice is detected as an audio discontinuity, and a clean boundary
+inside continuous audio passes; the orchestrator passes on clean media and
+short-circuits to decode-integrity failure on corrupt media; every finding the
+orchestrator can emit is confirmed physical; duplicate vs. distinct clip_ids in render
+segments; the bounded physical repair loop passes when a later re-render attempt is
+clean, terminates as `NEEDS_HUMAN_REVIEW` after exactly `max_attempts` (never spins
+further), never claims `PASS` while a finding remains, and refuses (raises) if ever
+handed a non-physical finding kind. Skipped, not failed, if `ffmpeg` is absent from
+the runner (a robustness guard; confirmed present and used for real on the standard
+CI ubuntu-latest image and in this sandbox).
+
 ## Change rule
 
 When a new decision changes product behavior, update this file in the same development cycle. Do not silently redefine CutSell through code alone.
