@@ -65,11 +65,18 @@ def test_export_job_renders_edited_draft_without_rerunning_ai(monkeypatch, tmp_p
     monkeypatch.setattr(export_job, "build_render_plan", lambda draft, local_paths: ("plan",))
 
     rendered = []
-    def fake_render(plan, output, *, text_overlays=(), media_overlays=()):
+    def fake_render_with_qc(draft, plan, output, *, text_overlays=(), media_overlays=(), **kwargs):
         rendered.append((plan, output, tuple(text_overlays), tuple(media_overlays)))
         Path(output).write_bytes(b"mp4")
-        return output
-    monkeypatch.setattr(export_job, "render_preview", fake_render)
+        # D-030: run_export_job now calls render_with_post_render_qc (real
+        # PostRenderWatchListenQC wiring) instead of a bare render_preview --
+        # this fake stands in for a clean PASS, exactly like a real render
+        # that has no physical or semantic findings.
+        return SimpleNamespace(
+            status="PASS", output_path=output, plan_id="plan_test",
+            plan_version=1, semantic_hash="hash_test", attempts=(),
+        )
+    monkeypatch.setattr(export_job, "render_with_post_render_qc", fake_render_with_qc)
     monkeypatch.setattr(
         export_job,
         "store_export",
@@ -102,6 +109,8 @@ def test_export_job_renders_edited_draft_without_rerunning_ai(monkeypatch, tmp_p
     assert len(rendered) == 1
     assert rendered[0][2][0].text == "SALE"
     assert rendered[0][3] == ()
+    assert result["post_render_qc_status"] == "PASS"
+    assert result["plan_id"] == "plan_test"
     assert fake_job.meta["stage"] == "finished"
     assert fake_job.meta["progress_percent"] == 100
 

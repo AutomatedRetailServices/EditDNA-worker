@@ -56,6 +56,17 @@ never transcript-only. See that module's own docstring for exactly what
 remains an honest, unbuilt gap (phoneme-level truncation, breath-cut
 detection, body/mic/camera reset debris, facial expression, face/body jump,
 fine A/V drift) and why.
+
+## What IS now active in the live pipeline (D-030)
+
+`check_render_sequence_matches_edit_plan` (added this cycle) plus
+`check_render_plan_covers_edit_plan` and `check_no_duplicate_render_segments`
+above are all now actually invoked -- not just tested in isolation -- by
+`live_render_qc.render_with_post_render_qc`, which `export_job.py`'s real
+export job calls in place of a bare `render.render_preview(...)`. See
+`live_render_qc.py`'s own docstring for the full live execution order,
+the bounded physical repair loop, and the authority rule that keeps
+`BoundaryEngine` from ever touching a semantic/structural mismatch.
 """
 from __future__ import annotations
 
@@ -67,6 +78,7 @@ from .canonical_edit_plan import CanonicalEditPlan
 STRUCTURAL_SEGMENT_MISSING = "STRUCTURAL_SEGMENT_MISSING"
 STRUCTURAL_SEGMENT_TRUNCATED = "STRUCTURAL_SEGMENT_TRUNCATED"
 STRUCTURAL_DUPLICATE_SEGMENT = "STRUCTURAL_DUPLICATE_SEGMENT"
+STRUCTURAL_SEQUENCE_MISMATCH = "STRUCTURAL_SEQUENCE_MISMATCH"
 
 CLIPPED_WORD = "CLIPPED_WORD"
 UNSAFE_WORD_BOUNDARY = "UNSAFE_WORD_BOUNDARY"
@@ -171,6 +183,44 @@ def check_render_plan_covers_edit_plan(
             ))
     status = "FAIL" if findings else "PASS"
     return PostRenderQCResult(status=status, findings=tuple(findings))
+
+
+def check_render_sequence_matches_edit_plan(
+    render_segments: Iterable, edit_plan: CanonicalEditPlan,
+) -> PostRenderQCResult:
+    """Verify the render segments' clip_id order is consistent with
+    `edit_plan.keep_sequence`'s order -- "rendered spoken sequence matches
+    the frozen CanonicalEditPlan" / "semantic order unchanged" (D-030).
+
+    `render_plan._coalesce_contiguous_segments` merges an adjacent same-
+    source run into one segment and keeps only its FIRST clip_id, so a
+    legitimate render's segment list is not clip_id-for-clip_id identical to
+    `keep_sequence` -- it is `keep_sequence`'s clip_id order with any
+    coalesced-away ids dropped. This check reduces the expected order to
+    exactly the ids that DO appear in the render (preserving relative order)
+    and compares that against the render's own order; anything else -- a
+    clip rendered out of its frozen order, or one that appears in the render
+    but was never in `keep_sequence` at all -- is a real mismatch.
+    """
+    rendered_order = [seg.clip_id for seg in render_segments]
+    expected_ids = {clip.clip_id for clip in edit_plan.keep_sequence}
+    expected_order_filtered = [
+        clip.clip_id for clip in edit_plan.keep_sequence if clip.clip_id in set(rendered_order)
+    ]
+    unexpected = [cid for cid in rendered_order if cid not in expected_ids]
+    if not unexpected and rendered_order == expected_order_filtered:
+        return PostRenderQCResult(status="PASS", findings=())
+    finding = PostRenderFinding(
+        kind=STRUCTURAL_SEQUENCE_MISMATCH,
+        start=0.0, end=0.0,
+        detail={
+            "rendered_order": rendered_order,
+            "expected_order": expected_order_filtered,
+            "unexpected_clip_ids": unexpected,
+        },
+        routes_to="SelectionFreeze",
+    )
+    return PostRenderQCResult(status="FAIL", findings=(finding,))
 
 
 def check_no_duplicate_render_segments(render_segments: Iterable) -> PostRenderQCResult:

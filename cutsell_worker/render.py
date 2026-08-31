@@ -27,7 +27,7 @@ def _run(command: list[str]) -> None:
         raise RuntimeError("ffmpeg_render_failed")
 
 
-def _tighten_trailing_silence(
+def tighten_trailing_silence(
     segment: RenderSegment,
     *,
     minimum_silence_sec: float = 0.28,
@@ -49,6 +49,10 @@ def _tighten_trailing_silence(
     previous 3 s guard rejected those objectively silent tails and left them visible in
     the preview. A 12 s cap still prevents an unbounded trim while allowing real creator
     post-roll to be removed.
+
+    Exposed (D-030, no longer private) so `live_boundary_repair.py` can compute the
+    SAME per-segment output-timeline durations `render_preview` actually produces --
+    one implementation, not a second guess that could silently drift from it.
     """
     if segment.duration_sec < minimum_silence_sec + 0.35:
         return segment
@@ -172,7 +176,7 @@ def render_preview(
     media_overlays: Iterable[LocalMediaOverlay] = (),
 ) -> str:
     """Render clips, captions, text and photo/video overlay lanes."""
-    segment_tuple = tuple(_tighten_trailing_silence(segment) for segment in segments)
+    segment_tuple = tuple(tighten_trailing_silence(segment) for segment in segments)
     text_tuple = tuple(text_overlays)
     media_tuple = tuple(media_overlays)
     if not segment_tuple:

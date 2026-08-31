@@ -1,6 +1,6 @@
 from types import SimpleNamespace
 
-from cutsell_worker.render import _tighten_trailing_silence
+from cutsell_worker.render import tighten_trailing_silence
 from cutsell_worker.render_plan import RenderSegment
 
 
@@ -23,7 +23,7 @@ def test_trailing_silence_reaching_edge_is_removed(monkeypatch):
     )
     monkeypatch.setattr("cutsell_worker.render.subprocess.run", lambda *args, **kwargs: completed)
 
-    tightened = _tighten_trailing_silence(_segment())
+    tightened = tighten_trailing_silence(_segment())
 
     assert round(tightened.end, 2) == 14.04
     assert tightened.start == 10.0
@@ -50,7 +50,7 @@ def test_round4_long_trailing_dead_air_is_not_rejected_by_old_three_second_cap(m
         end=32.0,
     )
 
-    tightened = _tighten_trailing_silence(segment)
+    tightened = tighten_trailing_silence(segment)
 
     assert round(tightened.end, 2) == 24.54
     assert tightened.start == 20.0
@@ -66,10 +66,10 @@ def test_internal_silence_does_not_change_render_boundary(monkeypatch):
     monkeypatch.setattr("cutsell_worker.render.subprocess.run", lambda *args, **kwargs: completed)
 
     original = _segment()
-    assert _tighten_trailing_silence(original) == original
+    assert tighten_trailing_silence(original) == original
 
 
 def test_segment_without_audio_is_unchanged(monkeypatch):
     monkeypatch.setattr("cutsell_worker.render.probe_media", lambda _path: SimpleNamespace(has_audio=False))
     original = _segment()
-    assert _tighten_trailing_silence(original) == original
+    assert tighten_trailing_silence(original) == original

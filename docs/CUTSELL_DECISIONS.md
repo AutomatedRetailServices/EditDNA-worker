@@ -777,7 +777,13 @@ CI ubuntu-latest image and in this sandbox).
 
 ## D-029 — RAW gate assessment after D-026/D-027/D-028 (repair loop, causal order, real media QC)
 
-**Status: CANONICAL**
+**Status: CANONICAL, conditions 6/7 superseded by D-030**
+
+Conditions 6 and 7 below were reported NOT MET at this checkpoint (real
+PostRenderWatchListenQC / bounded physical repair existed and were tested, but nothing
+in the live pipeline called them). D-030 (next entry) wires both into the real export
+job and reports them MET. This entry is kept as the honest historical record of that
+gap, not rewritten.
 
 Closing checkpoint for the "three remaining architectural gaps" directive (repair loop,
 general causal/story order validation, real PostRenderWatchListenQC), assessed against
@@ -831,6 +837,99 @@ hard-to-verify action. No push and no RAW triggered this cycle; the standing HOL
 remains in effect pending the user's decision on how to proceed (wire #6/#7 into the
 live pipeline first, or accept the built-and-tested state and proceed with the RAW
 with #6/#7 as a known follow-up).
+
+## D-030 — Live wiring: PostRenderWatchListenQC + bounded physical repair active in the real export pipeline
+
+**Status: CANONICAL**
+
+D-029 reported RAW-gate conditions 6/7 as NOT met: D-028's real ffmpeg/ffprobe media
+checks existed and were tested against synthetic fixtures, but nothing in the live
+pipeline called them. This cycle closes that gap by wiring them into the actual
+execution path, per the required live order:
+
+```
+Validated CanonicalEditPlan -> Selection Freeze -> BoundaryEngine
+-> Render actual MP4 -> PostRenderWatchListenQC on that actual file
+-> PASS -> final output
+   NO physical issue -> targeted Boundary repair -> re-render -> QC again
+   NO semantic mismatch -> invalidate candidate / route upstream (never "fixed" by Boundary)
+```
+
+**Where it runs:** `export_job.py`'s `run_export_job` -- the actual RQ job that
+downloads sources, builds the render plan, and used to call `render.render_preview(...)`
+directly -- now calls `live_render_qc.render_with_post_render_qc(...)` instead. QC runs
+against the REAL LOCAL rendered file the RunPod worker already has on disk, strictly
+BEFORE `store_export(...)` uploads anything -- never a downloaded-back artifact (Azure/S3
+egress is irrelevant to this check).
+
+**New modules:**
+- `live_boundary_repair.py` -- `repair_segment_for_finding`: a targeted, single-segment,
+  Boundary-only physical repair. Trims ONE `RenderSegment`'s leading or trailing edge by
+  a physical defect's own duration, using `segment_output_windows` (built on `render.
+  tighten_trailing_silence`, the SAME per-segment trim the real renderer already applies,
+  so this mapping from output-timeline offsets back to segments never drifts from what
+  actually gets rendered). Refuses (`None`) a mid-segment defect a boundary trim cannot
+  reach, or a trim that would eat too much real content -- never guesses.
+- `live_render_qc.py` -- `render_with_post_render_qc`: the orchestrator. Renders, runs
+  the deterministic structural checks (segment coverage/order/duplication vs. the frozen
+  CanonicalEditPlan) ONCE against the untouched attempt-0 segments, then D-028's real
+  media checks; on a physical finding, calls `repair_segment_for_finding`, re-renders,
+  and re-checks, bounded at `max_attempts`; on ANY non-physical (structural/semantic)
+  finding, invalidates the candidate immediately and never calls the repair function at
+  all. `_resolve_edit_plan` preserves a repair-loop-derived `plan_version` from
+  `draft.diagnostics["canonical_edit_plan"]` when present, rather than resetting it to 1.
+- `post_render_watch_listen_qc.py` gained `check_render_sequence_matches_edit_plan`
+  (`STRUCTURAL_SEQUENCE_MISMATCH`): the render segments' clip_id order must be consistent
+  with `keep_sequence`'s order (accounting for coalescing dropping a merged segment's
+  second clip_id) -- catches "rendered spoken sequence matches frozen CanonicalEditPlan" /
+  "semantic order unchanged" for real, which the existing coverage-only check did not.
+- `render.py`'s `_tighten_trailing_silence` is now public (`tighten_trailing_silence`) so
+  `live_boundary_repair.py` shares exactly one implementation of the real per-segment
+  render duration, not a second guess.
+
+**A real bug found and fixed via this cycle's own integration tests, not by inspection:**
+the structural coverage check was initially re-run after every physical repair attempt --
+and a legitimate, Boundary-authorized edge trim (shrinking a segment's `end` to remove a
+dead-air tail) always makes that segment's covered time-range smaller than the frozen
+`keep_sequence` clip's full original range, so the coverage check immediately (and
+wrongly) reported it as `STRUCTURAL_SEGMENT_TRUNCATED` -- a semantic mismatch that would
+have made the physical repair loop invalidate its own repair on every single attempt,
+never actually reaching a second, corrected render. Fixed: structural checks run ONCE,
+against attempt 0's own untouched segments, before any physical repair -- a physical
+repair is Boundary's own authorized territory (identical in kind to `tighten_trailing_
+silence`'s existing, already-accepted silence trim), not something a coverage check
+should re-litigate on every retry.
+
+**Authority rule enforced in code:** `is_physical_finding_kind` is the single source of
+truth for what may ever reach `repair_segment_for_finding`; every `STRUCTURAL_*` kind and
+any future non-physical media finding is treated as a semantic mismatch, invalidates the
+candidate immediately, and is never retried or "fixed" by Boundary.
+
+**Tests (`tests/test_cutsell_live_render_qc.py`, 9 tests covering the directive's 10
+required proof points -- items 3/4 share one test):** real ffmpeg rendering and the real
+deterministic structural checks are exercised unmocked throughout; the physical-defect
+DETECTION layer is scripted for the repair-loop tests (D-028's own suite already
+exhaustively covers real detector correctness against synthetic fixtures -- this file's
+job is the orchestration/wiring risk this cycle actually introduced). Covers: render
+actually invokes PostRenderWatchListenQC; a clean render passes directly; a physical
+failure triggers a real targeted Boundary repair AND a real re-render, re-QC'd; the
+bounded loop never spins past `max_attempts`; a semantic/structural mismatch never
+reaches the repair function and is never re-rendered; a semantic mismatch blocks
+delivery (`output_path=None`); a missing composite/KEEP segment fails QC; a reversed
+render order fails the new sequence check; a final PASS's `plan_id`/`semantic_hash`
+match `build_canonical_edit_plan(draft)` exactly, and a carried-over `plan_version` (from
+an earlier D-026 repair) is preserved rather than reset. Existing
+`tests/test_cutsell_clean_worker_export.py` unit test updated to mock the new
+orchestrator instead of the now-internal `render_preview` call.
+
+**RAW-gate update (supersedes D-029's #6/#7):** condition 6 (real PostRenderWatchListenQC
+active on rendered media) and condition 7 (bounded physical repair loop active) are now
+**MET** -- both are exercised for real, against the actual local rendered file, inside the
+real export job, with integration tests proving the full render -> QC -> repair -> re-
+render -> re-QC cycle and the semantic-mismatch-never-touched-by-Boundary invariant.
+
+**Full suite:** 1103 passed (`pytest -q tests/test_cutsell_*.py`, exact CI glob),
+`compileall cutsell_worker cutsell_app` clean.
 
 ## Change rule
 
