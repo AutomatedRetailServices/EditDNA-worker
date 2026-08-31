@@ -391,6 +391,15 @@ jobs:
           # human-review artifact.
           jq '{discarded_count: (.discarded | length), discarded: [.discarded[]? | {clip_id, text}], stage_status}' artifact/video00-unified-selection.json
 
+          # D-030/D-035: this Video00 RAW now renders through the exact same
+          # live PostRenderWatchListenQC + bounded physical repair service
+          # the real mobile export job uses (never a bare, unchecked ffmpeg
+          # render) -- print its full attempt history so a reviewer can see
+          # every physical repair, every finding, and the final QC status
+          # without needing to re-derive it from stage_status alone.
+          echo "--- live_render_qc (PostRenderWatchListenQC + bounded physical repair, D-030/D-035) ---"
+          jq '.live_render_qc // {status:"absent"}' artifact/video00-unified-selection.json
+
       - name: Upload unified Selection diagnostic artifact
         if: always()
         uses: actions/upload-artifact@v4
@@ -421,8 +430,25 @@ jobs:
             echo "No result JSON was downloaded (preview_uri/result_uri missing or download failed); cannot verify architecture. Diagnostic evidence (status.json) has already been uploaded as an artifact for inspection." >&2
             exit 1
           fi
-          jq -e '.source_duration_sec > 350 and .auto_speech_visual_microtrim_enabled == true and .speech_lock_ok == true and .external_brain_calls_enabled == true and .selection_reasoner_enabled == true and .selection_reasoner_status == "applied" and .selected_count > 0 and .hybrid_requested_group_count == 0 and .hybrid_available_group_count == 0' artifact/video00-unified-selection.json >/dev/null
-          jq '{source_duration_sec,selected_count,selected_duration_sec,output_duration_sec,external_brain_calls_enabled,selection_reasoner_enabled,selection_reasoner_status,selection_reasoner_provider,selection_reasoner_model,hybrid_requested_group_count,hybrid_available_group_count,auto_microtrim_count,auto_microtrim_duration_sec,speech_lock_ok}' artifact/video00-unified-selection.json
+          # Architecture-agnostic sanity checks: the real six-minute source
+          # was actually processed and speech-lock held, regardless of which
+          # semantic authority is active.
+          jq -e '.source_duration_sec > 350 and .auto_speech_visual_microtrim_enabled == true and .speech_lock_ok == true and .selected_count > 0' artifact/video00-unified-selection.json >/dev/null
+          jq '{source_duration_sec,selected_count,selected_duration_sec,output_duration_sec,auto_microtrim_count,auto_microtrim_duration_sec,speech_lock_ok}' artifact/video00-unified-selection.json
+
+          # D-034/D-035: the CURRENT Clean Cut Core V1 architecture actually
+          # ran -- CanonicalEditPlan, FinalEditReviewer, the repair loop,
+          # CoverageLedger/StoryValidator, SWAP absence, CompositeResolver
+          # diagnostics, freeze-references-exact-plan, Boundary-only-after-
+          # freeze, and (when not freeze-blocked) the live render/QC service
+          # actually running against the real render. Replaces the old
+          # legacy `unified_selection_reasoner`-era assertions
+          # (selection_reasoner_status == "applied", etc.) that can never be
+          # true while V1 -- which deliberately deactivates that whole-video
+          # reasoner -- is the active path. See docs/CUTSELL_DECISIONS.md D-034.
+          python benchmarks/validate_video00_architecture.py \
+            artifact/video00-unified-selection.json \
+            | tee artifact/video00-architecture-report.json
 
       - name: Teardown RunPod benchmark resources
         if: always()

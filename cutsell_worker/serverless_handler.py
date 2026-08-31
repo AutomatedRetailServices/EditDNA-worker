@@ -101,6 +101,17 @@ def _focused(payload: dict) -> dict:
         "auto_microtrim_count": result.get("auto_microtrim_count"),
         "auto_microtrim_duration_sec": result.get("auto_microtrim_duration_sec"),
         "speech_lock_ok": result.get("speech_lock_ok"),
+        # D-030/D-035: this preview was rendered through the exact same live
+        # PostRenderWatchListenQC + bounded physical repair service the real
+        # export job uses -- surface its outcome even in the compact RunPod
+        # summary so a run's live-render/QC status is visible without
+        # downloading the full result.json.
+        "preview_skipped_reason": result.get("preview_skipped_reason"),
+        "live_render_qc_status": (result.get("live_render_qc") or {}).get("status"),
+        "live_render_qc_render_attempt_count": (result.get("live_render_qc") or {}).get("render_attempt_count"),
+        "live_render_qc_plan_id": (result.get("live_render_qc") or {}).get("plan_id"),
+        "live_render_qc_plan_version": (result.get("live_render_qc") or {}).get("plan_version"),
+        "live_render_qc_semantic_hash": (result.get("live_render_qc") or {}).get("semantic_hash"),
         "preview_uri": preview_uri,
         "result_uri": result_uri,
     }

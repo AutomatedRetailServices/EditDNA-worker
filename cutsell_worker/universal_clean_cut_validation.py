@@ -1,6 +1,17 @@
-"""Real-video validation harness for Universal Clean Cut only."""
+"""Real-video validation harness for Universal Clean Cut only.
+
+D-035 (single-path rule): the preview render below goes through the exact
+same `live_render_qc.render_with_post_render_qc` the real mobile-app export
+job (`export_job.run_export_job`) uses -- there is no separate
+"Video00RenderQC"/"AppRenderQC" implementation. This benchmark harness only
+supplies validation-specific storage/output handling (a local preview path
+instead of an uploaded export); the semantic/physical editing behavior --
+render, PostRenderWatchListenQC, bounded physical repair, re-render -- is
+one shared production-grade service. See docs/CUTSELL_DECISIONS.md D-035.
+"""
 from __future__ import annotations
 
+import dataclasses
 from dataclasses import replace
 from pathlib import Path, PurePosixPath
 import tempfile
@@ -11,8 +22,8 @@ from .asr import FasterWhisperASR
 from .brain_runtime import build_brain_runtime
 from .config import load_runtime_config
 from .contracts import ProcessingRequest, SourceAsset
+from .live_render_qc import LiveRenderQCResult, render_with_post_render_qc
 from .media_probe import probe_media
-from .render import render_preview
 from .render_plan import build_render_plan
 from .source_identity import stable_source_id
 from .storage import download_source
@@ -26,16 +37,61 @@ def _render_validation_preview(
     *,
     preview_output: str | None,
     preview_captions: bool,
-) -> tuple[str | None, str | None]:
+    freeze_blocked: bool = False,
+) -> tuple[str | None, str | None, LiveRenderQCResult | None]:
+    """Render the validation preview through the SAME live render/QC service
+    the real export job uses (D-030/D-035): Boundary (already applied to
+    `draft.selected` upstream, before this is ever called) -> render actual
+    MP4 -> PostRenderWatchListenQC on that actual local file -> PASS, or a
+    bounded physical repair + re-render, or an invalidated semantic mismatch
+    that this harness must never deliver as a preview.
+
+    `freeze_blocked=True` means Final Story Coherence Validation / the repair
+    loop already determined this draft must not be frozen -- Selection
+    Freeze and Boundary never ran for it upstream, so there is nothing safe
+    to render here either. Per the canonical live order, a semantic failure
+    must never reach render at all.
+    """
     if not preview_output:
-        return None, None
+        return None, None, None
     if not draft.selected:
-        return None, "empty_draft"
+        return None, "empty_draft", None
+    if freeze_blocked:
+        return None, "freeze_blocked_no_render", None
 
     plan = build_render_plan(draft, local_paths)
     if not preview_captions:
         plan = tuple(replace(segment, caption_text="") for segment in plan)
-    return render_preview(plan, preview_output), None
+    qc_result = render_with_post_render_qc(draft, plan, preview_output)
+    if qc_result.status != "PASS":
+        return None, f"post_render_qc_{qc_result.status.lower()}", qc_result
+    return qc_result.output_path, None, qc_result
+
+
+def _live_render_qc_diagnostics(
+    qc_result: LiveRenderQCResult | None, *, skipped_reason: str | None
+) -> dict[str, Any]:
+    if qc_result is None:
+        return {
+            "status": "not_attempted",
+            "reason": skipped_reason,
+            "output_path": None,
+            "plan_id": None,
+            "plan_version": None,
+            "semantic_hash": None,
+            "render_attempt_count": 0,
+            "attempts": [],
+        }
+    return {
+        "status": qc_result.status,
+        "reason": None,
+        "output_path": qc_result.output_path,
+        "plan_id": qc_result.plan_id,
+        "plan_version": qc_result.plan_version,
+        "semantic_hash": qc_result.semantic_hash,
+        "render_attempt_count": len(qc_result.attempts),
+        "attempts": [dataclasses.asdict(a) for a in qc_result.attempts],
+    }
 
 
 def run_single_universal_clean_cut_validation(
@@ -99,11 +155,13 @@ def run_single_universal_clean_cut_validation(
             clean_cut_core_v1_enabled=brain.clean_cut_core_v1_enabled,
         )
 
-        preview_path, preview_skipped_reason = _render_validation_preview(
+        freeze_blocked = bool(result.stage_status.get("freeze_blocked_pending_coherence_review"))
+        preview_path, preview_skipped_reason, live_render_qc_result = _render_validation_preview(
             result.draft,
             local_paths,
             preview_output=preview_output,
             preview_captions=preview_captions,
+            freeze_blocked=freeze_blocked,
         )
 
     elapsed = round(time.monotonic() - started, 3)
@@ -140,6 +198,12 @@ def run_single_universal_clean_cut_validation(
         "preview_path": preview_path,
         "preview_captions": bool(preview_captions),
         "preview_skipped_reason": preview_skipped_reason,
+        # D-030/D-035: the exact same live render/QC/repair-loop service the
+        # real mobile export job uses -- render attempt history, the
+        # PostRenderWatchListenQC findings for each attempt, and the exact
+        # frozen plan id/version/hash the delivered (or invalidated) output
+        # corresponds to.
+        "live_render_qc": _live_render_qc_diagnostics(live_render_qc_result, skipped_reason=preview_skipped_reason),
         "empty_draft": not bool(result.draft.selected),
         "selected_count": len(result.draft.selected),
         "alternate_count": len(result.draft.alternates),

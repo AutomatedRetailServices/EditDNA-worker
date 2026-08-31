@@ -1194,6 +1194,79 @@ or a RAW completed; do not launch another RAW off a failing run without root-cau
 it first), both findings above were reported instead of silently patched or
 retried around.
 
+## D-035 — Closing the two D-034 gaps: single-path live render/QC for Video00 RAW, and a Clean-Cut-V1-shaped architecture verifier
+
+**Status: CANONICAL**
+
+Both gaps D-034 found are closed. Neither changed retry/idea/composite/coverage
+semantics; the semantic Clean Cut Core baseline validated live in RAW 33409169518
+is unchanged and preserved as-is.
+
+**Fix 1 -- the stale architecture verifier is replaced, not deleted.**
+`benchmarks/validate_video00_architecture.py` (new) asserts evidence the CURRENT
+Clean Cut Core V1 architecture actually ran, instead of the old whole-video Unified
+Selection reasoner's success markers (`selection_reasoner_status == "applied"`,
+`external_brain_calls_enabled == true`, `hybrid_requested_group_count == 0`, which
+can never be true while V1 -- which deliberately deactivates that reasoner -- is
+active). It checks: Clean Cut Core V1 is the active semantic authority; the
+whole-video reasoner being absent/disabled is asserted as the EXPECTED state, not an
+error; CanonicalEditPlan was built (`plan_id`/`plan_version`/`semantic_hash`
+present); FinalEditReviewer executed (status PASS/FAIL); the repair loop reported a
+status; CoverageLedger/StoryValidator (Final Story Coherence Validation) executed;
+SWAP is absent (`alternate_count == 0`, D-019) asserted as EXPECTED, not an error;
+CompositeResolver diagnostics are present; and, when the candidate was not
+freeze-blocked, that the plan was `frozen_ready`, that Selection Freeze references
+the exact validated plan id/version/hash, that Boundary only ran after that freeze,
+and that the live render/QC service (Fix 2, below) actually ran against the real
+render. When the candidate WAS freeze-blocked, it instead asserts the
+semantic-failure-blocks-freeze gate actually engaged (Boundary/render never ran on
+an unfrozen draft) rather than requiring stages that legitimately never happened.
+The workflow's "Verify unified Selection architecture" step now runs this script
+(keeping a few small architecture-agnostic sanity checks -- source duration,
+speech-lock, non-empty selection -- inline) instead of the old `jq -e` assertion.
+20 targeted tests (`tests/test_video00_architecture.py`) cover a valid V1 run, the
+absent-reasoner/absent-SWAP EXPECTED cases, missing-CanonicalEditPlan/
+FinalEditReviewer/freeze-contract failures, and the freeze-blocked shape (including
+a case where Boundary incorrectly ran despite a block -- caught). Validated against
+a reconstruction of RAW 33409169518's own real diagnostics: passes on every check
+except `live_render_qc_ran_against_the_real_render`, which correctly fails because
+Fix 2 (below) had not landed yet at that run -- proof the verifier is not a rubber
+stamp and would have caught Fix 2's own gap unassisted.
+
+**Fix 2 -- the Video00 RAW harness now renders through the exact same live
+render/QC service the real export job uses; there is no second implementation.**
+`universal_clean_cut_validation._render_validation_preview` (previously a bare
+`render.render_preview()` call) now calls `live_render_qc.render_with_post_render_qc`
+-- the identical function object `export_job.run_export_job` already uses (D-030),
+imported from `live_render_qc.py` in both places; `tests/test_cutsell_universal_
+clean_cut_validation_live_render_qc.py`'s
+`test_export_job_and_validation_harness_share_one_render_qc_implementation` asserts
+object identity directly, not just behavioral similarity. The harness gained a
+`freeze_blocked` parameter (from `result.stage_status["freeze_blocked_pending_
+coherence_review"]`): "if semantic validation fails, no render" is enforced before
+Boundary/Render/QC is ever attempted, matching the canonical live order exactly.
+`run_single_universal_clean_cut_validation`'s return value gained a `live_render_qc`
+key (`status`, `output_path`, `plan_id`, `plan_version`, `semantic_hash`,
+`render_attempt_count`, full per-attempt `attempts`) alongside the existing
+`preview_path`/`preview_skipped_reason`, and `serverless_handler._focused`'s compact
+RunPod output surfaces the same fields for at-a-glance visibility without
+downloading the full result JSON. The workflow's diagnostic-printing step gained a
+`live_render_qc` echo block. 7 targeted tests (real, unmocked ffmpeg throughout,
+skipped if ffmpeg is absent) prove: the harness actually invokes the shared service;
+a clean candidate renders and passes; a physical failure triggers bounded Boundary
+repair and the repaired candidate is re-rendered/re-QC'd; a structural/semantic
+mismatch is never routed to Boundary; a freeze-blocked draft never reaches
+render/QC at all; and the final artifact's `plan_id`/`semantic_hash` match the
+draft's own `CanonicalEditPlan` exactly. No new render/QC implementation was
+written -- this is entirely reuse of the D-030 service, per the single-path rule.
+
+**Validation**: full targeted suite green (`tests/test_video00_architecture.py`,
+`tests/test_cutsell_universal_clean_cut_validation_live_render_qc.py`, updated
+`tests/test_cutsell_universal_clean_cut_validation_empty.py`), the full
+`tests/test_cutsell_*.py` CI glob green (1136 passed), `python -m compileall`
+clean, and the new architecture verifier independently validated end-to-end against
+a reconstruction of RAW 33409169518's real diagnostics.
+
 ## Change rule
 
 When a new decision changes product behavior, update this file in the same development cycle. Do not silently redefine CutSell through code alone.
