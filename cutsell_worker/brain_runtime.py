@@ -186,10 +186,24 @@ def build_brain_runtime(
         if requested_unified
         else None
     )
-    # The pivot deliberately avoids two semantic brains fighting over the same edit.
-    # When Unified Selection is active, legacy bounded Hybrid classification is OFF and
-    # its former outputs remain only historical/local evidence already present in tests.
-    editorial_judge = None if selection_reasoner is not None else _build_editorial_judge(hybrid_settings, values)
+    clean_cut_core_v1_enabled = _env_true_default_true(values.get("CUTSELL_CLEAN_CUT_CORE_V1"))
+    # The pre-V1 pivot deliberately avoided two semantic brains fighting over
+    # the same edit: when the whole-video Unified Selection reasoner was
+    # active, legacy bounded Hybrid classification was OFF. Clean Cut Core V1
+    # never invokes selection_reasoner at all (see universal_clean_cut.py),
+    # so that conflict cannot occur here even if a selection_reasoner
+    # instance still got constructed from a legacy CUTSELL_UNIFIED_SELECTION_
+    # REASONER=1 left set in the environment. Gating editorial_judge on
+    # selection_reasoner's mere existence in V1 mode was a real bug: it
+    # silently starved apply_hybrid_session_cleanup (and everything
+    # downstream of it, including CompositeResolver's restore/composite
+    # logic) of the semantic_decisions it needs to do anything at all,
+    # exactly the "authority conflict avoidance" rule outliving the
+    # architecture it was written for.
+    editorial_judge = (
+        None if (selection_reasoner is not None and not clean_cut_core_v1_enabled)
+        else _build_editorial_judge(hybrid_settings, values)
+    )
     deterministic_best_take_authority_enabled = _env_true_default_true(
         values.get("CUTSELL_DETERMINISTIC_BEST_TAKE_AUTHORITY")
     )
@@ -207,8 +221,6 @@ def build_brain_runtime(
         if requested_hybrid and semantic_equivalence_arbiter_enabled
         else None
     )
-    clean_cut_core_v1_enabled = _env_true_default_true(values.get("CUTSELL_CLEAN_CUT_CORE_V1"))
-
     return BrainRuntime(
         backend=RUNPOD_LOCAL_BACKEND,
         semantic_provider=NoopSemanticProvider(),

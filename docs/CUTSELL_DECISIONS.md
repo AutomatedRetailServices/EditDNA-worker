@@ -204,7 +204,7 @@ brains rewriting the same membership sequentially:
 | DeliveryScorer | `take_judge.py` (`score_take`/`rank_takes`) | KEEP AS CORE |
 | BestTakeResolver | `deterministic_best_take_authority.py` | KEEP AS CORE / PROMOTED (Phase 1) |
 | SemanticArbiter | `semantic_idea_equivalence.py` + `semantic_idea_equivalence_google.py` | KEEP AS CORE, bounded role only (D-020) |
-| CompositeResolver | `hybrid_composite_best_take.py`, `post_selection_complementary_family_stabilizer.py` | DEMOTE TO EVIDENCE / KNOWN GAP -- still wired through the legacy Hybrid-vote-dependent monkeypatch chain in `pipeline.py`'s shared path rather than a directly-callable step in the V1 authority sequence; not yet consolidated (see D-020's documented gap) |
+| CompositeResolver | `hybrid_composite_best_take.py`, `post_selection_complementary_family_stabilizer.py` | DEMOTE TO EVIDENCE / PARTIAL -- reachable in the active V1 path (see the `editorial_judge` starvation fix below) but still wired through the legacy Hybrid-vote-dependent monkeypatch chain in `pipeline.py`'s shared path rather than a directly-callable step in the V1 authority sequence; consolidation into a directly-invoked step is still a known gap |
 | StoryValidator | `final_story_coherence_validation.py` | KEEP AS CORE (new; folds alternates to discard, resolves residual ambiguity via SemanticArbiter, contradiction invariant, idea-coverage invariant, hard pre-Freeze gate via `freeze_blocked`) |
 | SelectionFreeze | `selection_boundary_contract.py` (`freeze_selection_contract`/`enforce_selection_contract`) | KEEP AS CORE, unchanged |
 | BoundaryEngine | `final_boundary_authority.py`, `human_boundary_polish_v5.py`, speech-safe/microtrim guards | KEEP AS CORE, physical-only, unchanged |

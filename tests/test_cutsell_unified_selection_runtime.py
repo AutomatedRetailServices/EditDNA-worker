@@ -13,13 +13,33 @@ def base_env():
     }
 
 
-def test_unified_selection_disables_legacy_bounded_editorial_judge():
-    env = {**base_env(), "CUTSELL_UNIFIED_SELECTION_REASONER": "1"}
+def test_unified_selection_disables_legacy_bounded_editorial_judge_pre_v1_rollback():
+    # This mutual exclusion is specific to the RETIRED pre-Clean-Cut-Core-V1
+    # architecture (two semantic brains must not fight over the same edit
+    # when the whole-video reasoner has unconditional final say). Exercised
+    # here only via the explicit rollback flag.
+    env = {**base_env(), "CUTSELL_UNIFIED_SELECTION_REASONER": "1", "CUTSELL_CLEAN_CUT_CORE_V1": "0"}
     brain = build_brain_runtime(load_runtime_config(env), env)
 
     assert brain.selection_reasoner is not None
     assert brain.editorial_judge is None
     assert brain.external_calls_enabled is True
+
+
+def test_clean_cut_core_v1_builds_editorial_judge_even_if_legacy_reasoner_flag_set():
+    # Clean Cut Core V1 (the default) never invokes selection_reasoner at
+    # all, so the old mutual-exclusion rule must not starve editorial_judge
+    # of a bounded Hybrid classifier here -- CompositeResolver and BTS/
+    # failed-take detection depend on it having real semantic_decisions to
+    # work with. A stale CUTSELL_UNIFIED_SELECTION_REASONER=1 left in the
+    # environment from the retired architecture must not silently disable
+    # this in V1.
+    env = {**base_env(), "CUTSELL_UNIFIED_SELECTION_REASONER": "1"}
+    brain = build_brain_runtime(load_runtime_config(env), env)
+
+    assert brain.clean_cut_core_v1_enabled is True
+    assert brain.selection_reasoner is not None
+    assert brain.editorial_judge is not None
 
 
 def test_legacy_hybrid_remains_available_when_unified_flag_is_off():
