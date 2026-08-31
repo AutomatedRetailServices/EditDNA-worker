@@ -1501,6 +1501,37 @@ ambiguous coverage and can change the outcome) -- reached through the REAL take-
 grouping/idea-equivalence/take-judge/coherence chain, not hand-built drafts alone.
 Full `tests/test_cutsell_*.py` CI glob green (1228 passed), `compileall` clean.
 
+**RAW gate result (run 33432104336, commit 3f7122b)**: the target regression is fixed
+-- the papillary-cancer diagnosis claim from RAW 33423953391's own failure now survives
+(`papillary_cancer_preserved` passed the historical Human-Gold regression-QA check,
+where it had failed on the pre-D-038 run). A second, real defect was found and fixed
+from this run's own diagnostics, not from a fixture: `claim_coverage`'s negation-flip
+guard (above) checked negation presence over the WHOLE candidate text, so a candidate
+clip's or joined winning-realization's OTHER, unrelated sentence carrying a negation
+("no creo ... son hereditarios" several sentences before an unrelated "solo un 5-10%
+son de hereditario" claim in the very same clip) falsely capped coverage for a claim
+whose own sentence was present, uncontradicted, verbatim -- producing a spurious
+CRITICAL_CLAIM_LOST finding. Fixed by scoping the negation check to only the
+sentence(s) that share a substantive (>=2, or the claim's full token count if fewer)
+portion of the claim's own content tokens with the candidate, not one incidental
+shared word (a first, too-broad attempt -- adding "son"/"fue"/"fueron"/"era"/"eran" to
+`final_sibling_grouping._STOP` -- was reverted after it changed unrelated session-
+boundary-reconciliation test outcomes; that stopword list is shared, foundational
+infrastructure, and the correct fix belongs local to `semantic_claims.py`'s own
+negation-scoping instead). Two new regression tests pin both directions: an unrelated
+negation elsewhere no longer deflates coverage, and a genuine same-sentence negation
+still caps it. This fix is committed to the branch but, per the "one RAW then STOP"
+gate, has NOT been pushed -- pushing on this branch auto-triggers another paid RAW,
+which needs explicit authorization first. The regression-QA's separate `pimples_micro_*`
+failures on this same run are very likely unrelated to any D-038 code: the affected
+clips do not appear in the pre-D-038 run's `canonical_edit_plan.ideas` at all (each
+survived there as an uncontested singleton, never entered into a `take_judge_groups`
+contest), while this run's diagnostics show them merged into one 5-member retry-family
+group by the (untouched-by-D-038) grouping/semantic-idea-equivalence stage -- consistent
+with run-to-run ASR/live-arbiter non-determinism upstream of anything this cycle
+changed, not a deterministic code regression, though this is inference from structural
+evidence rather than a confirmed root cause.
+
 ## Change rule
 
 When a new decision changes product behavior, update this file in the same development cycle. Do not silently redefine CutSell through code alone.

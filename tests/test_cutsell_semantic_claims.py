@@ -236,6 +236,39 @@ def test_claim_coverage_negation_flip_is_not_covered_despite_shared_nouns():
     assert not claim_is_covered(claim, "The biopsy did not confirm it was a benign tumor.")
 
 
+def test_claim_coverage_unrelated_negation_in_a_different_sentence_does_not_deflate_coverage():
+    # RAW 33432104336: a multi-sentence clip's OTHER sentence carried a
+    # negation ("no creo ... son hereditarios") with nothing to do with a
+    # later, unrelated claim in the same clip ("Mas bien solo un 5-10% son
+    # de hereditario."), which the whole-text negation check falsely
+    # treated as a negation mismatch even though the claim's own sentence
+    # was present verbatim and uncontradicted. The check must be scoped to
+    # the sentence(s) that actually overlap the claim's own content.
+    claim = extract_claims(
+        "clip_a", "Mas bien solo un 5-10% son de hereditario.",
+    )[0]
+    candidate_text = (
+        "Esta es mi experiencia. Soy la unica en mi familia que tiene este "
+        "tipo de cancer. Por eso no creo y esta comprobado cientificamente "
+        "que los canceres son hereditarios. Mas bien solo un 5-10% son de "
+        "hereditario. Mayormente son nuestras elecciones de vida."
+    )
+    coverage = claim_coverage(claim, candidate_text)
+    assert coverage >= COVERAGE_THRESHOLD
+    assert claim_is_covered(claim, candidate_text)
+
+
+def test_claim_coverage_negation_in_the_same_overlapping_sentence_still_caps_coverage():
+    # The flip side of the fix above: when the negation is IN the sentence
+    # that actually shares the claim's own content tokens (a genuine same-
+    # proposition contradiction, not an unrelated aside elsewhere), the cap
+    # must still apply.
+    claim = extract_claims("clip_a", "El medico confirmo que era cancer.")[0]
+    candidate_text = "Aqui hablo de otras cosas. El medico no confirmo que era cancer."
+    coverage = claim_coverage(claim, candidate_text)
+    assert coverage < AMBIGUOUS_COVERAGE_FLOOR
+
+
 def test_claim_coverage_negation_claim_covered_only_by_also_negated_candidate():
     claim = extract_claims("clip_a", "The test did not show any infection.")[0]
     assert claim.claim_type == NEGATION

@@ -260,13 +260,45 @@ def claim_coverage(claim: Claim, candidate_text: str) -> float:
     things regardless of noun overlap, so coverage is capped below
     `AMBIGUOUS_COVERAGE_FLOOR` -- confidently NOT covered, same as too-low
     overlap, never escalated to the arbiter for what is actually a clear
-    negation mismatch."""
+    negation mismatch.
+
+    The negation check is scoped to the SENTENCE(S) of `candidate_text`
+    that actually share content tokens with the claim, not the whole,
+    possibly multi-sentence or multi-clip (`_lost_critical_claims`/
+    `claim_coverage_best_take` both pass a joined "winning realization"
+    covering several clips) candidate blob. Found via real-chain testing:
+    a candidate's OTHER, unrelated sentence can carry a negation ("no creo
+    ... son hereditarios" a few sentences before an unrelated "solo un
+    5-10% son de hereditario" claim in the same clip) that has nothing to
+    do with the claim actually being checked -- checking negation over the
+    whole blob falsely capped coverage for a claim whose own sentence was
+    present, uncontradicted, verbatim. Scoping to the overlapping
+    sentence(s) fixes that false positive while still catching a genuine
+    same-sentence contradiction (the negated sentence then itself shares
+    the claim's own content tokens, so it IS included in scope)."""
     if not claim.content_tokens:
         return 1.0
     candidate_tokens = _content(candidate_text)
     shared = len(claim.content_tokens & candidate_tokens)
     overlap = shared / len(claim.content_tokens)
-    if bool(_negations(claim.text)) != bool(_negations(candidate_text)):
+    if not shared:
+        return overlap
+    # A sentence counts as "relevant" (in scope for the negation check)
+    # only once it shares a SUBSTANTIVE portion of the claim's own tokens,
+    # not merely one -- a single very common word (e.g. Spanish "son",
+    # "they/you-all are") can coincidentally appear in an entirely
+    # unrelated sentence and must not pull that sentence's own, unrelated
+    # negation into scope. Requires the lesser of 2 tokens or the claim's
+    # own full token count, so a thin (2-token) claim still needs a full
+    # match to be considered the same sentence.
+    min_shared_for_relevance = min(2, len(claim.content_tokens))
+    candidate_sentences = _split_sentences(candidate_text) or (candidate_text,)
+    relevant_sentences = [
+        s for s in candidate_sentences
+        if len(claim.content_tokens & _content(s)) >= min_shared_for_relevance
+    ]
+    negation_scope = " ".join(relevant_sentences) if relevant_sentences else candidate_text
+    if bool(_negations(claim.text)) != bool(_negations(negation_scope)):
         return min(overlap, AMBIGUOUS_COVERAGE_FLOOR / 2)
     return overlap
 
