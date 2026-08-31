@@ -173,15 +173,15 @@ def test_review_never_mutates_the_plan_or_returns_a_membership_edit():
 
 def test_final_edit_reviewer_has_no_detector_for_incomplete_delivery_orphan_fragment_or_incompatible_composite():
     # Honest gap, not silently-absent coverage: these three finding kinds
-    # (plus the general cross-idea CAUSAL_ORDER_BREAK -- see
-    # STORY_ORDER_BREAK's own narrower, real detector in
-    # test_composite_order_findings, below) are recognized in the
-    # vocabulary but no deterministic detector exists for them anywhere in
-    # this pipeline, so review() can never emit them today. This fixture is
-    # exactly the kind of case a real detector would need to catch (an
-    # incomplete, clearly unfinished delivery that is nonetheless the ONLY
-    # thing selected for its idea) and pins that, right now, it passes
-    # silently.
+    # are recognized in the vocabulary but no deterministic detector exists
+    # for them anywhere in this pipeline, so review() can never emit them
+    # today. (STORY_ORDER_BREAK and the general cross-idea CAUSAL_ORDER_
+    # BREAK -- see test_composite_order_findings/test_causal_order_findings
+    # below -- are real, tested detectors, not part of this gap.) This
+    # fixture is exactly the kind of case a real detector would need to
+    # catch (an incomplete, clearly unfinished delivery that is nonetheless
+    # the ONLY thing selected for its idea) and pins that, right now, it
+    # passes silently.
     from cutsell_worker.final_edit_reviewer import _UNIMPLEMENTED_KINDS
 
     incomplete = DraftClip(

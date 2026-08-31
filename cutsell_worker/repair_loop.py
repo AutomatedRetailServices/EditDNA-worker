@@ -45,6 +45,7 @@ from __future__ import annotations
 from dataclasses import dataclass, replace
 
 from .canonical_edit_plan import CanonicalEditPlan, build_canonical_edit_plan
+from .causal_order_validator import CausalOrderArbiter
 from .final_edit_reviewer import STORY_ORDER_BREAK, FinalEditReviewResult, review
 
 DEFAULT_MAX_REPAIR_ATTEMPTS = 3
@@ -109,15 +110,25 @@ def _idea_coverage_label(plan: CanonicalEditPlan, idea_id: str | None) -> str:
 
 
 def run_repair_loop(
-    draft, *, max_attempts: int = DEFAULT_MAX_REPAIR_ATTEMPTS,
+    draft,
+    *,
+    max_attempts: int = DEFAULT_MAX_REPAIR_ATTEMPTS,
+    causal_order_arbiter: CausalOrderArbiter | None = None,
 ) -> RepairLoopResult:
     """Build CanonicalEditPlan v1, review it, and -- only for finding types
     with a safe repair strategy -- apply bounded, targeted repairs and
     re-review, up to ``max_attempts``. Never mutates unrelated ideas. Never
-    guesses content. See module docstring for the honest scope."""
+    guesses content. See module docstring for the honest scope.
+
+    ``causal_order_arbiter`` is forwarded to every `review()` call (D-027):
+    CAUSAL_ORDER_BREAK has no repair strategy in `_REPAIR_STRATEGIES` below
+    (a cross-idea reorder risks undoing an intentional Composer pacing
+    choice), so it always routes straight to NEEDS_HUMAN_REVIEW here -- the
+    arbiter only affects whether review() emits the finding at all, not
+    whether this loop can fix it."""
     current_draft = draft
     plan = build_canonical_edit_plan(current_draft)
-    result = review(plan)
+    result = review(plan, causal_order_arbiter=causal_order_arbiter)
     attempts: list[RepairAttempt] = []
 
     for _ in range(max_attempts):
@@ -171,7 +182,7 @@ def run_repair_loop(
 
         new_plan = build_canonical_edit_plan(repaired_draft)
         new_plan = replace(new_plan, plan_version=plan.plan_version + 1)
-        new_result = review(new_plan)
+        new_result = review(new_plan, causal_order_arbiter=causal_order_arbiter)
 
         other_ideas_before = {i.idea_id: i.winning_clip_ids for i in plan.ideas if i.idea_id != finding.idea_id}
         other_ideas_after = {i.idea_id: i.winning_clip_ids for i in new_plan.ideas if i.idea_id != finding.idea_id}

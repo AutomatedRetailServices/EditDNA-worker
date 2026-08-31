@@ -36,11 +36,18 @@ positive risk entirely while still closing a real gap: RAW 33366538992's
 own regression harness flagged `pimples_micro_order`/`sonography_good_
 before_diagnosis`, which is exactly this failure shape.
 
+CAUSAL_ORDER_BREAK (D-027, general, real detector): the general, cross-idea
+complement to STORY_ORDER_BREAK -- see `causal_order_validator.py` for the
+full mechanism (source chronology + general connector-language evidence,
+with a bounded-arbiter escalation path for ambiguous hits). Unlike
+STORY_ORDER_BREAK, this has NO automatic repair in `repair_loop.py`: a
+cross-idea reorder risks undoing an intentional Composer pacing choice, so
+this blocks Freeze and routes to human review rather than being
+auto-corrected.
+
 Honest gap, not fabricated coverage: INCOMPLETE_DELIVERY, ORPHAN_FRAGMENT,
-INCOMPATIBLE_COMPOSITE, and CAUSAL_ORDER_BREAK (the general, cross-idea
-version of order checking, as opposed to STORY_ORDER_BREAK's narrow
-within-composite version above) are recognized in the finding vocabulary
-(so a future detector has a defined shape to populate) but have no existing
+and INCOMPATIBLE_COMPOSITE are recognized in the finding vocabulary (so a
+future detector has a defined shape to populate) but have no existing
 deterministic detector to draw from, and none is invented here. They are
 never emitted. A finding type appearing in `_UNIMPLEMENTED_KINDS` below is
 the honest record of that gap -- do not remove it by inventing a heuristic
@@ -51,6 +58,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from .canonical_edit_plan import CanonicalEditPlan
+from .causal_order_validator import CausalOrderArbiter, find_causal_order_breaks
 
 # Finding kinds the canonical directive specifies. Every one is a valid
 # value for Finding.kind; only the ones NOT in _UNIMPLEMENTED_KINDS are ever
@@ -68,7 +76,7 @@ STORY_ORDER_BREAK = "STORY_ORDER_BREAK"
 CAUSAL_ORDER_BREAK = "CAUSAL_ORDER_BREAK"
 
 _UNIMPLEMENTED_KINDS = frozenset({
-    INCOMPLETE_DELIVERY, ORPHAN_FRAGMENT, INCOMPATIBLE_COMPOSITE, CAUSAL_ORDER_BREAK,
+    INCOMPLETE_DELIVERY, ORPHAN_FRAGMENT, INCOMPATIBLE_COMPOSITE,
 })
 
 
@@ -125,7 +133,38 @@ def _composite_order_findings(edit_plan: CanonicalEditPlan, plan_id: str, plan_v
     return findings
 
 
-def review(edit_plan: CanonicalEditPlan) -> FinalEditReviewResult:
+def _causal_order_findings(
+    edit_plan: CanonicalEditPlan, plan_id: str, plan_version: int, arbiter: CausalOrderArbiter | None,
+) -> list[Finding]:
+    """CAUSAL_ORDER_BREAK (D-027): general, cross-idea order/dependency
+    check -- see causal_order_validator.py for the full mechanism."""
+    findings: list[Finding] = []
+    for dep in find_causal_order_breaks(edit_plan, arbiter=arbiter):
+        findings.append(Finding(
+            kind=CAUSAL_ORDER_BREAK,
+            plan_id=plan_id,
+            plan_version=plan_version,
+            idea_id=dep.dependent_idea_id,
+            clip_ids=(dep.required_clip_id, dep.dependent_clip_id),
+            detail={
+                "reason": "dependent_clip_precedes_or_is_missing_its_required_context",
+                "required_clip_id": dep.required_clip_id,
+                "dependent_clip_id": dep.dependent_clip_id,
+                "required_idea_id": dep.required_idea_id,
+                "dependent_idea_id": dep.dependent_idea_id,
+                "evidence": dep.evidence,
+                "confidence": dep.confidence,
+                "resolved_by": dep.resolved_by,
+            },
+            owning_authority="StoryValidator",
+            blocking=True,
+        ))
+    return findings
+
+
+def review(
+    edit_plan: CanonicalEditPlan, *, causal_order_arbiter: CausalOrderArbiter | None = None,
+) -> FinalEditReviewResult:
     """Review the CanonicalEditPlan. Never mutates it or the draft it came
     from -- returns PASS or structured findings for the caller to act on
     (universal_clean_cut.py already skips Freeze/Boundary whenever
@@ -190,6 +229,7 @@ def review(edit_plan: CanonicalEditPlan) -> FinalEditReviewResult:
         ))
 
     findings.extend(_composite_order_findings(edit_plan, plan_id, plan_version))
+    findings.extend(_causal_order_findings(edit_plan, plan_id, plan_version, causal_order_arbiter))
 
     if edit_plan.possible_missing_story_ending:
         warnings.append(Finding(

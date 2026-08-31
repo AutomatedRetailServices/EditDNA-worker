@@ -591,6 +591,117 @@ throughout this session), run repeatedly through this cycle's fixes with consist
 results. 17 new tests across `take_grouping_provider`, `universal_clean_cut`,
 `canonical_edit_plan`/`final_edit_reviewer`, and the new post-render structural check.
 
+## D-026 — Automatic targeted repair loop
+
+**Status: CANONICAL**
+
+D-025 left the automatic review/repair loop explicitly unbuilt ("today's actual repair
+path is a human reviewing a FAIL"). This cycle builds it, scoped to what can be fixed
+without guessing content.
+
+**Mechanism (`repair_loop.py`):** `run_repair_loop(draft)` builds CanonicalEditPlan v1,
+reviews it, and -- only for a finding kind with a registered repair strategy -- applies
+a targeted repair and rebuilds/re-reviews, bounded at `max_attempts=3`. A repair
+mutates only the specific clips a finding names, at their existing positions in
+`draft.selected`; nothing else moves, nothing else is discarded or restored. Because
+Final Story Coherence Validation's own checks (`lost_semantic_atoms`,
+`contradiction_findings`, `missing_idea_coverage`) read `selected`/`discarded` as sets,
+not sequences, a pure reorder repair never needs to re-run that whole pass -- only
+CanonicalEditPlan (order-sensitive) and FinalEditReviewer are rebuilt, which is what
+keeps a repair "targeted" rather than a global re-run.
+
+**Honest scope -- only `STORY_ORDER_BREAK` has a real repair:** reordering an accepted
+composite's own components back into recording order is the one repair this
+architecture can perform without guessing at content (no other clip's membership,
+text, or position is touched). `DUPLICATE_IDEA`, `UNRESOLVED_RETRY`,
+`IDEA_COVERAGE_LOST`, `CONTRADICTION`, `UNIQUE_FACT_LOST`, and (D-027, below)
+`CAUSAL_ORDER_BREAK` have NO automatic repair, by design: an automatic "fix" for any of
+them means guessing which take wins a still-ambiguous contest, which discarded clip to
+blindly restore, which side of a contradiction is true, or how to reorder across
+independent ideas without undoing an intentional Composer pacing choice. CLAUDE.md's
+"WHEN UNCERTAIN, KEEP" and this whole session's established conservatism (deterministic
+best-take authority already declines a thin score-gap decision; CompositeResolver's
+restore functions already require strong, specific evidence) both say guessing here is
+a regression in editorial judgment, not a repair. The loop still records an attempt for
+these (audit trail, bounded termination) and always routes straight to
+`NEEDS_HUMAN_REVIEW` -- never `PASS`.
+
+**Audit trail:** every `RepairAttempt` records `plan_id`, previous/new `plan_version`,
+`finding_kind`, `idea_id`, `owning_authority`, previous/replacement realization,
+coverage before/after, `reason`, and `unaffected_ideas_changed` (proven false for every
+passing repair test). `universal_clean_cut.py` writes the full attempt list to
+`diagnostics["repair_loop"]`, and treats `repair_result.status == "NEEDS_HUMAN_REVIEW"`
+exactly like the existing `freeze_blocked` gate -- Selection Freeze never runs on an
+unresolved plan.
+
+**Tests (`tests/test_cutsell_repair_loop.py`, + one end-to-end test in
+`test_cutsell_universal_clean_cut.py`):** a disordered composite is repaired without
+touching an unrelated idea; a valid composite survives repair of a different disordered
+composite; `plan_version` increments across a repair; `semantic_hash` is unchanged by a
+pure-reorder repair (proving the repair changed ordering only, not semantic content); a
+finding with no repair strategy terminates safely as `NEEDS_HUMAN_REVIEW` after exactly
+one recorded attempt (never spins to `max_attempts`); a clean plan with no findings
+passes with zero repair attempts.
+
+## D-027 — General causal/story order validation
+
+**Status: CANONICAL**
+
+D-025's `STORY_ORDER_BREAK` is deliberately narrow (one composite's own components
+only). This cycle adds the general, cross-idea complement the canonical directive
+requires: detecting a dependent consequence/continuation/CTA/explanation placed before
+(or with) its required context missing from KEEP -- diagnosis before its test,
+consequence before cause, continuation before its parent, a dependent explanation
+detached from the fact it explains -- without hardcoding any Video00 fact, disease,
+phrase, or timestamp.
+
+**Mechanism (`causal_order_validator.py`):** two general, deterministic evidence
+sources, exactly as the canonical directive specifies: (1) **source chronology** --
+`source_asset_id` + `start`/`end`, scoped to same-source pairs within a
+continuous-take gap tolerance (45s, the same kind of adjacency evidence
+`take_grouping_provider.py` already uses for retry-family grouping); (2) **connector
+language** -- a small, general English+Spanish lexicon of phrases that mark a clause as
+a dependent consequence/continuation of whatever preceded it ("therefore", "that's
+why", "and that confirmed", "por lo tanto", "como resultado", ...), matched only as a
+text PREFIX, never a substring search. A STRONG connector match is sufficient
+deterministic evidence on its own. A WEAK/generic connector match ("so", "entonces",
+"which means") is treated as insufficient evidence by itself -- exactly the same
+"WHEN UNCERTAIN" posture as the rest of this architecture -- and is escalated to the
+bounded `CausalOrderArbiter` Protocol; with no arbiter configured, or on any arbiter
+exception, the weak hit is dropped silently rather than flagged (false-positive
+prevention takes priority, since there is no repair path either way -- see D-026's
+scope decision). The required-context search runs over kept AND discarded clips
+together (`_clip_pool`), so a required clip that was discarded entirely -- not just
+misordered -- is still caught as a detached explanation.
+
+**Wiring:** `final_edit_reviewer.review()` gained an optional `causal_order_arbiter`
+parameter and now emits blocking `CAUSAL_ORDER_BREAK` findings
+(`owning_authority="StoryValidator"`); `repair_loop.run_repair_loop()` and
+`universal_clean_cut.process_universal_clean_cut_sources()` both forward the same
+parameter through, defaulting to `None` everywhere -- the already-established fail-open
+behavior for an absent arbiter elsewhere in this codebase, not a degraded mode.
+`CAUSAL_ORDER_BREAK` was moved out of `_UNIMPLEMENTED_KINDS`.
+
+**Honest gap:** `CausalOrderArbiter` (mirrors `semantic_idea_equivalence.
+SemanticEquivalenceArbiter`'s shape/fail-open contract exactly) is a real, usable
+Protocol and `find_causal_order_breaks` already calls it when supplied, but no live
+Gemini-backed implementation exists yet -- that is a new provider/prompt module (same
+shape of work as `semantic_idea_equivalence_google.py`) and is explicitly not built
+this cycle. Every caller defaults the parameter to `None` today.
+
+**Tests (`tests/test_cutsell_causal_order_validator.py`, 14 tests, + 2 in
+`test_cutsell_canonical_edit_plan_and_reviewer.py`):** valid chronology (no break);
+inverted cause/effect (strong connector, blocks); continuation before its parent
+(blocks); diagnosis before discovery (generic non-medical fixture, blocks);
+independent ideas with no connector language safely reorder (no false positive on
+legitimate Composer pacing); a correctly-placed CTA is not flagged; a weak connector
+alone is never flagged without a confirming arbiter (false-positive prevention); a
+confirming arbiter resolves an otherwise-ambiguous weak hit into a blocking finding; a
+denying arbiter drops it; a strong connector hit is never second-guessed by a denying
+arbiter; a required clip discarded entirely is caught as a detached explanation; an
+arbiter exception is treated as "not available"; clips in the same source far beyond
+the gap tolerance are never treated as dependent.
+
 ## Change rule
 
 When a new decision changes product behavior, update this file in the same development cycle. Do not silently redefine CutSell through code alone.

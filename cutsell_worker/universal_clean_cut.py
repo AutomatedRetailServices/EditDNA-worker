@@ -27,6 +27,7 @@ from .contracts import ProcessingRequest, ProcessingResult
 from .deterministic_best_take_authority import apply_deterministic_best_take_authority
 from .final_boundary_authority import enforce_complete_idea_boundaries
 from .final_story_coherence_validation import apply_final_story_coherence_validation
+from .causal_order_validator import CausalOrderArbiter
 from .repair_loop import run_repair_loop
 from .flow_b import ProgressCallback, process_local_sources
 from .human_boundary_polish_v5 import polish_human_boundaries_v5
@@ -57,6 +58,7 @@ def process_universal_clean_cut_sources(
     selection_reasoner: UnifiedSelectionReasoner | None = None,
     deterministic_best_take_authority_enabled: bool = True,
     semantic_equivalence_arbiter: SemanticEquivalenceArbiter | None = None,
+    causal_order_arbiter: CausalOrderArbiter | None = None,
     clean_cut_core_v1_enabled: bool = True,
     progress: ProgressCallback | None = None,
 ) -> ProcessingResult:
@@ -150,14 +152,17 @@ def process_universal_clean_cut_sources(
             semantic_status = "not_requested_clean_cut_only"
             reasoner_status_label = "disabled"
 
-        # CanonicalEditPlan (D-024) + bounded targeted repair loop (D-026):
-        # build v1, review it, and -- only for finding types with a safe,
-        # content-preserving repair strategy (today: STORY_ORDER_BREAK's
-        # composite reordering; see repair_loop.py's own docstring for why
-        # every other finding kind has NO automatic repair by design, not
-        # omission) -- apply bounded, targeted repairs and re-review. Never
+        # CanonicalEditPlan (D-024) + bounded targeted repair loop (D-026) +
+        # general causal/story order validation (D-027): build v1, review it
+        # (review now also runs CAUSAL_ORDER_BREAK's general cross-idea
+        # dependency check, see causal_order_validator.py), and -- only for
+        # finding types with a safe, content-preserving repair strategy
+        # (today: STORY_ORDER_BREAK's composite reordering; CAUSAL_ORDER_
+        # BREAK has none by design -- a cross-idea reorder risks undoing an
+        # intentional Composer pacing choice, see repair_loop.py's own
+        # docstring) -- apply bounded, targeted repairs and re-review. Never
         # invents semantic judgment; never mutates an unrelated Idea.
-        repair_result = run_repair_loop(result.draft)
+        repair_result = run_repair_loop(result.draft, causal_order_arbiter=causal_order_arbiter)
         edit_plan = repair_result.final_plan
         review_result = repair_result.final_review
         result = replace(result, draft=repair_result.final_draft)
