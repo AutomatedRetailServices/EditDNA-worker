@@ -3,6 +3,17 @@ name: CutSell Video00 Unified Selection RAW
 on:
   push:
     branches: [cutsell/mobile-v1-clean]
+    # D-039: this list must cover every file in the active Clean Cut Core V1
+    # path (docs/CUTSELL_DECISIONS.md D-021's canonical component map, plus
+    # D-024/025/026/027/037/038's additions to it) whose change could
+    # materially alter Video00's semantic or physical output -- so that kind
+    # of change always gets a controlled RAW automatically, without relying
+    # on someone remembering to trigger one by hand. Grouped by canonical
+    # component below for auditability; keep this grouping in sync with
+    # D-021's own table when either changes. Deliberately excludes docs-only
+    # and tests-only files, unrelated infrastructure, and the dormant
+    # Sales/TikTok Shop extension points (CanonicalEditPlan.annotations and
+    # neighbors) -- none of those can change what a RAW actually produces.
     paths:
       - .github/workflows/cutsell-video00-raw-v5-auto-microtrim.yml
       - benchmarks/video00_selection_lock.json
@@ -10,27 +21,91 @@ on:
       - cutsell_worker/__init__.py
       - cutsell_worker/brain_runtime.py
       - cutsell_worker/serverless_handler.py
-      - cutsell_worker/speech_visual_microtrim.py
-      - cutsell_worker/editorial_guardrails_v2.py
-      - cutsell_worker/unified_selection_reasoner.py
-      - cutsell_worker/unified_selection_google.py
       - cutsell_worker/universal_clean_cut.py
       - cutsell_worker/universal_clean_cut_validation.py
-      - cutsell_worker/final_boundary_authority.py
-      - cutsell_worker/hybrid_session_cleanup.py
-      - cutsell_worker/hybrid_retry_completion_integrity.py
-      - cutsell_worker/hybrid_performance_retry_restore_guard.py
+      - cutsell_worker/editorial_guardrails_v2.py
+      # AttemptReconstructor
+      - cutsell_worker/attempt_reconstruction.py
+      # IdeaClusterer (D-020/D-039: lexical tier + bounded semantic-
+      # equivalence tier + priority-ranked candidate pairs)
+      - cutsell_worker/take_grouping_provider.py
+      - cutsell_worker/take_grouping.py
+      - cutsell_worker/semantic_idea_equivalence.py
+      - cutsell_worker/semantic_idea_equivalence_google.py
+      # RetryFamilyResolver (evidence feeding IdeaClusterer's result)
+      - cutsell_worker/final_sibling_grouping.py
+      - cutsell_worker/global_session_sibling_bridge.py
       - cutsell_worker/session_boundaries.py
+      # DeliveryScorer
+      - cutsell_worker/take_judge.py
+      # BestTakeResolver + its upstream Hybrid-vote input
+      - cutsell_worker/deterministic_best_take_authority.py
+      - cutsell_worker/selection_phase_authority.py
+      - cutsell_worker/selection_conflicted_bridge_guard.py
+      # D-038: per-Idea semantic claim coverage (claim-aware Best-Take
+      # override + the shared marker vocabulary it and StoryValidator draw on)
+      - cutsell_worker/semantic_claims.py
+      - cutsell_worker/claim_coverage_best_take.py
+      - cutsell_worker/semantic_atom_importance.py
+      # Whole-video Unified Selection reasoner (D-021: deprecated from the
+      # active path but still the rollback target -- a change here can
+      # still alter output for clean_cut_core_v1_enabled=False)
+      - cutsell_worker/unified_selection_reasoner.py
+      - cutsell_worker/unified_selection_google.py
+      # CompositeResolver -- one directly-callable component (D-023)
+      # built from the real installers of these 19 modules
+      - cutsell_worker/composite_resolver.py
+      - cutsell_worker/semantic_fragment_guard.py
+      - cutsell_worker/hybrid_story_guard.py
+      - cutsell_worker/hybrid_alternate_integrity.py
+      - cutsell_worker/hybrid_cross_group_retry_integrity.py
+      - cutsell_worker/incomplete_bridge_retry_authority.py
+      - cutsell_worker/hybrid_failed_continuation_integrity.py
+      - cutsell_worker/hybrid_retry_winner_authority.py
+      - cutsell_worker/hybrid_gold_reconciliation.py
+      - cutsell_worker/failed_prefix_completion_rescue.py
+      - cutsell_worker/final_delivery_integrity.py
+      - cutsell_worker/terminal_delivery_reconciliation.py
+      - cutsell_worker/hybrid_failed_soft_restore.py
+      - cutsell_worker/hybrid_unavailable_retry_fallback.py
+      - cutsell_worker/hybrid_complementary_delivery_guard.py
+      - cutsell_worker/hybrid_semantic_complementary_rescue.py
+      - cutsell_worker/hybrid_semantic_composite_bridge.py
+      - cutsell_worker/hybrid_composite_best_take.py
+      - cutsell_worker/hybrid_semantic_conflict_arbitration.py
+      - cutsell_worker/hybrid_session_cleanup.py
+      - cutsell_worker/hybrid_performance_retry_restore_guard.py
       - cutsell_worker/post_selection_interior_gap_trim.py
       - cutsell_worker/post_selection_incomplete_bridge_authority.py
       - cutsell_worker/post_selection_complementary_family_stabilizer.py
       - cutsell_worker/post_selection_edge_only_boundary.py
       - cutsell_worker/semantic_best_take_integrity.py
+      # StoryValidator + CanonicalEditPlan + FinalEditReviewer + the bounded
+      # repair loop and general causal/story order validator around them
+      # (D-024/025/026/027/038)
+      - cutsell_worker/final_story_coherence_validation.py
+      - cutsell_worker/canonical_edit_plan.py
+      - cutsell_worker/final_edit_reviewer.py
+      - cutsell_worker/repair_loop.py
+      - cutsell_worker/causal_order_validator.py
+      # SelectionFreeze
+      - cutsell_worker/selection_boundary_contract.py
+      # BoundaryEngine (physical-only, unchanged semantic membership)
+      - cutsell_worker/final_boundary_authority.py
+      - cutsell_worker/human_boundary_polish_v5.py
+      - cutsell_worker/speech_visual_microtrim.py
       - cutsell_worker/boundary_retry_tail_guard.py
-      - cutsell_worker/incomplete_bridge_retry_authority.py
       - cutsell_worker/speech_safe_dead_air_guard.py
       - cutsell_worker/terminal_sentence_boundary_guard.py
-      - cutsell_worker/hybrid_unavailable_retry_fallback.py
+      # Renderer + live render QC + physical-repair gate (D-030/D-037)
+      - cutsell_worker/render_plan.py
+      - cutsell_worker/render.py
+      - cutsell_worker/live_render_qc.py
+      - cutsell_worker/post_render_watch_listen_qc.py
+      # Shared identity/data model the physical-fragment-identity work
+      # (D-037) and every component above build on
+      - cutsell_worker/contracts.py
+      - cutsell_worker/source_identity.py
   workflow_dispatch:
 
 concurrency:

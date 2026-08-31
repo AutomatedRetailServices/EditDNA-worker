@@ -1632,9 +1632,31 @@ marker) plus one new CleanCutBench fixture (`test_distinct_addition_marker_preve
 real_chain_false_merge`) reached through the real `safe_group_takes` ->
 `reconcile_semantic_idea_equivalence` chain, proving the guard fires with a real
 arbiter call and both deliveries survive independently rather than being collapsed to
-one winner. Full `tests/test_cutsell_*.py` CI glob green, `compileall` clean. Not
-pushed, per the same "propose and hold" instruction as D-038's own negation-guard
-follow-up above -- awaiting explicit authorization before the next RAW.
+one winner. Full `tests/test_cutsell_*.py` CI glob green, `compileall` clean. Pushed as
+`5c264af`/`796b0dc` after explicit authorization and preconditions re-verification
+(no RAW queued/in-progress, PR #25 open/draft/unmerged, `main` untouched, teardown
+step unchanged).
+
+**Addendum -- the RAW trigger itself had a coverage gap.** Neither commit above
+auto-triggered a RAW: the workflow's push `paths:` filter did not include `semantic_
+claims.py` (D-038's own fix file) or `take_grouping_provider.py` (this decision's own
+fix file) -- a real, general gap, not specific to these two files. Audited the full
+D-021 canonical component map against the filter and found it missing most of
+IdeaClusterer/SemanticArbiter, ALL of StoryValidator/CanonicalEditPlan/
+FinalEditReviewer/the repair loop/causal-order validator, SelectionFreeze, most of
+BoundaryEngine, all of Renderer/live-render-QC, the D-038 claim-coverage layer, and the
+shared `contracts.py`/`source_identity.py` identity model underneath all of it -- every
+one of those can materially change Video00's semantic or physical output. Extended the
+`paths:` filter to cover the complete active canonical set (grouped and commented by
+component, mirroring D-021's own table), added `tests/test_video00_raw_trigger_
+coverage.py` (pins the required file set, asserts the workflow's YAML covers it, and
+that every required path actually exists on disk) so a future canonical-map change and
+a workflow-filter change can no longer silently drift apart, and left the already-
+deprecated `unified_selection_reasoner.py`/`unified_selection_google.py` entries in
+place (rollback target, not removed) rather than pruning anything. Deliberately
+excludes docs-only files, tests-only files, and the dormant Sales/TikTok Shop extension
+points. No editorial logic touched. Full `tests/test_cutsell_*.py` CI glob green,
+`compileall` clean, YAML validated.
 
 ## Change rule
 
