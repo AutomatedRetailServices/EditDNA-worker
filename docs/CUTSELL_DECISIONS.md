@@ -1523,14 +1523,118 @@ negation elsewhere no longer deflates coverage, and a genuine same-sentence nega
 still caps it. This fix is committed to the branch but, per the "one RAW then STOP"
 gate, has NOT been pushed -- pushing on this branch auto-triggers another paid RAW,
 which needs explicit authorization first. The regression-QA's separate `pimples_micro_*`
-failures on this same run are very likely unrelated to any D-038 code: the affected
-clips do not appear in the pre-D-038 run's `canonical_edit_plan.ideas` at all (each
-survived there as an uncontested singleton, never entered into a `take_judge_groups`
-contest), while this run's diagnostics show them merged into one 5-member retry-family
-group by the (untouched-by-D-038) grouping/semantic-idea-equivalence stage -- consistent
-with run-to-run ASR/live-arbiter non-determinism upstream of anything this cycle
-changed, not a deterministic code regression, though this is inference from structural
-evidence rather than a confirmed root cause.
+failures on this same run were audited offline before any further RAW -- see D-039 below
+for the confirmed root cause (not D-038 code, not simple non-determinism: a real,
+general arbiter-confirmation gap in the pre-existing grouping stage) and its fix.
+
+## D-039 — Offline audit of RAW 33432104336's pimples_micro_* regression + general grouping fix
+
+**Status: CANONICAL**
+
+Per explicit instruction, this audit ran BEFORE spending a second RAW and before touching
+any production logic on assumption. Traced the full evidence path for the five clips
+`take_judge_groups` merged into idea `tg_886d4543ce1fe7f21e` (winner
+`clip_3d2f0f5c4d7a15cc7054`; discarded `clip_39cfe70af53d9dfe9cc5`,
+`clip_8a345f3048dd41ffc5a2`, `clip_cbc4beb40b406dbdb068`, `clip_aa6d498957c527147344`)
+against the immediately preceding RAW (33423953391, pre-D-038), using the CI job's own
+printed diagnostics (`asr`/`attempt_reconstruction` stage_status, `semantic_idea_
+equivalence`'s `candidate_pair_count`/`checked_pair_count`/`merged_pair_count`/`merges`,
+`take_judge_groups`, `canonical_edit_plan.ideas`) -- no production code was modified
+until this traced to a confirmed cause.
+
+**ASR / attempt reconstruction**: `asr.segment_count` (57), `attempt_reconstruction.
+attempt_count` (30), `.boundary_count` (29), `.input_candidate_count` (52), and
+`.merged_fragment_count` (22) are IDENTICAL between the two runs -- the segmentation
+structure did not change. `clip_id` is `stable_clip_id(source_asset_id, start, end,
+text)` (`source_identity.py`), a SHA256 hash sensitive to millisecond-level timing and
+exact wording; every clip_id differs between the two runs regardless, meaning the live
+ASR pass produced slightly different word-level transcription and/or sub-millisecond
+timing this run despite an identical overall structure -- ordinary GPU-inference
+run-to-run jitter, not a different number or boundary of attempts.
+
+**Grouping / candidate generation**: `semantic_idea_equivalence.candidate_pair_count`
+was 52 this run vs. 51 the prior run -- proof the cross-group candidate-pair universe
+itself differs (a direct consequence of the ASR/timing jitter above cascading into
+`take_grouping_provider._cross_group_candidate_pairs`, since eligibility and lexical-
+overlap scoring both read clip text/timing). `checked_pair_count` was 14 in BOTH runs --
+confirming a hard, fixed per-request arbiter budget (`SemanticEquivalenceGatePolicy.
+max_pairs_per_request`) that `_rank_candidate_pairs` fills highest-priority-first (an
+earlier, already-documented fix for a different pair-starvation failure mode -- see
+that function's own docstring). With a different, larger candidate pool this run, the
+ranking spent its fixed 14-slot budget on a different subset of pairs than last run.
+
+**Semantic-equivalence arbiter (Gemini `gemini-3.5-flash-lite`)**: of the 7 pairs it
+confirmed this run (vs. 5 last run, and NONE of the prior run's 5 touched pimples
+content at all), 3 involved the five pimples-related clips. Their own stated reasons
+name the actual defect: `clip_8a345f3048dd41ffc5a2`'s text is
+"Otro síntoma era que me salían espinillas ... Me salía por temporadas." -- matching
+`benchmarks/video00_regression_qa.json`'s own `pimples_later_winner_present` fixture
+almost verbatim, and opening with "Otro síntoma" ("ANOTHER symptom"), the speaker's own
+explicit signal that this is a DIFFERENT, additional point, not a restatement. The
+arbiter nonetheless confirmed it "same idea" as `clip_39cfe70af53d9dfe9cc5` (confidence
+0.95, matching the fixture's own forbidden `pimples_bad_monolith_absent` text) and as
+`clip_cbc4beb40b406dbdb068` (confidence 0.9, matching `pimples_micro_1/2/3_present`'s
+three fragments concatenated) purely on topical similarity ("same hormonal acne
+symptoms" / "acne interpreted as an allergy rash"), missing that discourse marker
+entirely. `clip_3d2f0f5c4d7a15cc7054` (the eventual winner) also merged with
+`clip_cbc4beb40b406dbdb068` ("both discuss experiencing seasonal acne outbreaks").
+`clip_aa6d498957c527147344` is not in any printed arbiter merge -- it joined via the
+baseline (pre-arbiter) lexical/temporal tier, `safe_group_takes`, itself.
+
+**Root cause classification: G (combination)** -- B (ASR/timing jitter, same structure,
+different exact clip_ids) -> C (different candidate-pair pool, +1 pair) -> D (fixed
+14-pair budget now spends its ranked slots on a different subset) -> **E (the arbiter's
+own verdict on the newly-reachable pair is a real misjudgment)**, not a code-path change
+in D-038 (root cause A is ruled out: neither `reconcile_semantic_idea_equivalence` nor
+`_resolve_residual_family`, the two mechanisms that actually merged and then collapsed
+this family, were touched by D-038 -- `claim_coverage_best_take` never even acted on
+this group, since all 5 members were still selected when it ran, `current_winners != 1`,
+its own explicit "not this module's job" branch). This is genuine E, not mere run-to-run
+noise dressed up as inevitable: the SAME arbiter, given this exact pair again, would very
+likely misjudge it the same way -- it is a real, general gap in the grouping stage's
+defenses, not an unrepeatable fluke, and D-025's own docstring in `take_grouping_
+provider.py` already documents an earlier RAW (33366538992) hitting this identical
+"pimples/otro sintoma" shape from a different angle (there, CompositeResolver had
+already accepted these as composite pieces and `reconcile_semantic_idea_equivalence`
+re-merged them anyway; `protected_ids` fixed that specific path but only once
+CompositeResolver has already acted -- it does not help when, as here, nothing upstream
+ever flagged the clips as composite pieces in the first place).
+
+**What the five clips actually are**: reading the three visible discarded texts against
+`benchmarks/video00_regression_qa.json`'s own fixture definitions, they are **mixed
+ideas incorrectly collapsed**, not one retry family and not a valid multi-piece
+composite/continuation of ONE idea: `clip_cbc4beb40b406dbdb068` is the concatenated
+micro-fragment idea (`pimples_micro_1/2/3`), `clip_39cfe70af53d9dfe9cc5` is a verbose,
+correctly-discardable retry of that same idea (`pimples_bad_monolith_absent`), and
+`clip_8a345f3048dd41ffc5a2` is a DIFFERENT, LATER beat the speaker explicitly marks as
+additional (`pimples_later_winner_present`) that the Human Gold keeps as its own
+delivery, not a restatement to be collapsed into the first idea's retry contest.
+
+**General fix (grouping capability, not a D-038-layer patch)**: `take_grouping_
+provider.reconcile_semantic_idea_equivalence` gained a deterministic override,
+independent of and evaluated after the arbiter's own verdict: when exactly one side of
+an arbiter-confirmed "same idea" pair carries a general "this is a new/additional item"
+discourse marker (`_DISTINCT_ADDITION_MARKERS` -- "otro sintoma", "otra cosa", "another
+symptom", "an additional", etc.; general connector vocabulary, no Video00-specific
+phrase, deliberately excluding "otra vez"/"again"-style repetition markers) and the
+other side does not, the merge is blocked and recorded in a new
+`distinct_addition_blocked` diagnostics list -- the speaker's own explicit signal of
+distinctness outranks a same-idea verdict from a topical-similarity judgment. Both sides
+carrying the marker (two attempts at introducing the same transition) is not blocked --
+only an IMBALANCE is evidence of an actual difference. This complements, and does not
+replace, the existing `protected_ids` defense (which requires CompositeResolver to have
+already acted); this guard fires independently, before that ever needs to happen.
+
+**Validation**: 3 new unit tests in `tests/test_cutsell_semantic_idea_equivalence_
+grouping.py` (blocks the imbalanced-marker case reproducing this exact audit finding;
+still merges an ordinary marker-free paraphrase; still merges when both sides carry the
+marker) plus one new CleanCutBench fixture (`test_distinct_addition_marker_prevents_a_
+real_chain_false_merge`) reached through the real `safe_group_takes` ->
+`reconcile_semantic_idea_equivalence` chain, proving the guard fires with a real
+arbiter call and both deliveries survive independently rather than being collapsed to
+one winner. Full `tests/test_cutsell_*.py` CI glob green, `compileall` clean. Not
+pushed, per the same "propose and hold" instruction as D-038's own negation-guard
+follow-up above -- awaiting explicit authorization before the next RAW.
 
 ## Change rule
 

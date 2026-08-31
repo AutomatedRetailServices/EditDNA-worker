@@ -242,6 +242,74 @@ def test_reconcile_truncates_candidate_pairs_to_policy_maximum():
     assert len(arbiter.last_request.pairs) == 2
 
 
+def test_reconcile_blocks_merge_when_one_side_signals_a_distinct_additional_item():
+    # Offline audit of RAW 33432104336: the arbiter confirmed "otro sintoma
+    # ..." ("ANOTHER symptom...") as the same idea as an earlier, unrelated
+    # pimples mention -- purely topical similarity, missing the speaker's
+    # own explicit "this is a different/additional point" discourse marker.
+    # No protected_ids involved here (that guard only fires once
+    # CompositeResolver has already recognized these as composite pieces --
+    # this general marker-based guard is independent of that and fires even
+    # when nothing upstream has flagged anything).
+    groups = (("a",), ("b",))
+    takes = (
+        _take("a", 0.0, 2.0, "también me salían espinillas era como una alergia"),
+        _take("b", 5.0, 7.0, "otro síntoma que tenía eran espinillas detrás de la oreja"),
+    )
+    arbiter = FixedArbiter(same_idea_pairs={
+        ("también me salían espinillas era como una alergia", "otro síntoma que tenía eran espinillas detrás de la oreja"),
+    })
+
+    merged, diagnostics = reconcile_semantic_idea_equivalence(groups, takes, arbiter)
+
+    assert diagnostics["status"] == "checked_no_merge"
+    assert set(merged) == {("a",), ("b",)}
+    assert len(diagnostics["distinct_addition_blocked"]) == 1
+    assert diagnostics["distinct_addition_blocked"][0]["left_clip_id"] == "a"
+    assert diagnostics["distinct_addition_blocked"][0]["right_clip_id"] == "b"
+
+
+def test_reconcile_still_merges_when_neither_side_has_a_distinct_addition_marker():
+    # The guard must not become a blanket ban on merging -- an ordinary
+    # paraphrased retry with no "another X" marker on either side merges
+    # exactly as before.
+    groups = (("a",), ("b",))
+    takes = (
+        _take("a", 0.0, 2.0, "we launched the new product line today"),
+        _take("b", 5.0, 7.0, "today we finally launched our new product line"),
+    )
+    arbiter = FixedArbiter(same_idea_pairs={
+        ("we launched the new product line today", "today we finally launched our new product line"),
+    })
+
+    merged, diagnostics = reconcile_semantic_idea_equivalence(groups, takes, arbiter)
+
+    assert diagnostics["status"] == "applied"
+    assert diagnostics["distinct_addition_blocked"] == []
+    assert ("a", "b") in merged
+
+
+def test_reconcile_still_merges_when_both_sides_have_a_distinct_addition_marker():
+    # Both sides equally signalling "another point" is not evidence of a
+    # DIFFERENCE between the two -- only an imbalance (one side marked, the
+    # other not) is. This must not become a false block on, say, two
+    # attempts at introducing the SAME "another symptom" transition.
+    groups = (("a",), ("b",))
+    takes = (
+        _take("a", 0.0, 2.0, "another symptom I had was joint pain in my knees"),
+        _take("b", 5.0, 7.0, "one more thing, I also had joint pain in my knees"),
+    )
+    arbiter = FixedArbiter(same_idea_pairs={
+        ("another symptom I had was joint pain in my knees", "one more thing, I also had joint pain in my knees"),
+    })
+
+    merged, diagnostics = reconcile_semantic_idea_equivalence(groups, takes, arbiter)
+
+    assert diagnostics["status"] == "applied"
+    assert diagnostics["distinct_addition_blocked"] == []
+    assert ("a", "b") in merged
+
+
 def test_reconcile_applied_after_safe_group_takes_strengthens_lexical_grouping():
     # Deliberately low lexical overlap so the baseline local grouper leaves
     # these as two separate singleton groups -- only the semantic-equivalence

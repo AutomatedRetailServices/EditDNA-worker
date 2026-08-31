@@ -1171,3 +1171,40 @@ def test_arbiter_is_consulted_only_for_ambiguous_coverage_and_can_change_the_out
     assert _kept(with_arbiter_draft) == {"winner"}
     assert with_arbiter_draft.diagnostics.get("claim_coverage_best_take") is None
     assert arbiter.calls > 0
+
+
+# 50. Distinct-addition marker overrides an arbiter's same-idea merge --
+# reached through the REAL take-grouping/idea-equivalence chain.
+#
+# Offline audit of RAW 33432104336 (not a D-038 code regression -- see
+# docs/CUTSELL_DECISIONS.md's D-038 entry): the live semantic-equivalence
+# arbiter confirmed a "otro sintoma..." ("ANOTHER symptom...") mention as
+# the same idea as an earlier, unrelated pimples mention, collapsing both
+# into one retry contest and discarding one entirely. The speaker's own
+# "this is a different/additional point" discourse marker is stronger,
+# more general evidence than a topical-similarity arbiter verdict --
+# take_grouping_provider.reconcile_semantic_idea_equivalence's own
+# distinct-addition guard (general, no Video00 phrase hardcoded) now
+# overrides exactly this shape, proven here through the real chain rather
+# than only at the unit level (test_cutsell_semantic_idea_equivalence_
+# grouping.py's own dedicated tests).
+
+def test_distinct_addition_marker_prevents_a_real_chain_false_merge():
+    first_mention = _take("first", 0.0, 3.0, "También tenía manchas rojas en la piel del brazo.", complete=True)
+    another_mention = _take(
+        "another", 5.0, 8.0,
+        "Otro síntoma que noté fueron manchas rojas en la piel de la pierna.",
+        complete=True,
+    )
+
+    draft, equivalence_diag, arbiter = _run_core(
+        (first_mention, another_mention), oracle_pairs={("first", "another")},
+    )
+
+    assert arbiter.calls == 1  # the arbiter WAS asked and DID confirm same-idea
+    assert equivalence_diag["status"] == "checked_no_merge"
+    assert len(equivalence_diag["distinct_addition_blocked"]) == 1
+    # Both survive as two independent, uncontested deliveries -- never
+    # forced into one retry contest, so neither is silently discarded.
+    assert _kept(draft) == {"first", "another"}
+    assert _discarded(draft) == set()

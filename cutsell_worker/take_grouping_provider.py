@@ -6,6 +6,7 @@ from typing import Protocol, Tuple
 
 from .contracts import CandidateTake
 from .providers import ProviderStatus
+from .semantic_atom_importance import _clause_has_any
 from .semantic_idea_equivalence import (
     IdeaEquivalencePair,
     IdeaEquivalenceRequest,
@@ -15,6 +16,31 @@ from .semantic_idea_equivalence import (
     same_idea_by_pair_index,
 )
 from .take_grouping import group_takes, retry_similarity, semantic_key
+
+# General (English + Spanish) "this is a new/additional item, not a restatement"
+# discourse markers -- a candidate pair where exactly ONE side opens with one of
+# these must never be merged as the same idea even if the arbiter says so.
+# Found via an offline audit of RAW 33432104336: the semantic-equivalence
+# arbiter confirmed "Otro sintoma era que me salian espinillas ..." ("ANOTHER
+# symptom was that I also got pimples...") as the same idea as an earlier,
+# unrelated pimples mention -- the discourse marker itself ("otro sintoma" /
+# "another symptom") is the speaker explicitly signalling a DISTINCT, additional
+# point, which a coarse topical-similarity judgment can miss. General across any
+# talking-head content that enumerates multiple points -- no Video00 fact,
+# phrase, or literal transcript text is hardcoded, only the generic connector.
+# Deliberately excludes "otra vez"/"another time"/"again", which mean
+# REPETITION of the same thing, not a new one.
+_DISTINCT_ADDITION_MARKERS = (
+    "otro sintoma", "otro síntoma", "otra cosa", "otro problema", "otro punto",
+    "otra situacion", "otra situación", "otro detalle", "otro aspecto",
+    "another symptom", "another issue", "another problem", "another thing",
+    "a different issue", "a different problem", "an additional", "one more thing",
+    "on top of that",
+)
+
+
+def _has_distinct_addition_marker(text: str) -> bool:
+    return _clause_has_any(text, _DISTINCT_ADDITION_MARKERS)
 
 
 @dataclass(frozen=True)
@@ -636,6 +662,7 @@ def reconcile_semantic_idea_equivalence(
             parent[ra] = rb
 
     audit: list[dict] = []
+    distinct_addition_blocked: list[dict] = []
     merged_count = 0
     for pair_index, (left_group_index, right_group_index, left_id, right_id) in enumerate(truncated):
         decision = decisions.get(pair_index)
@@ -643,6 +670,25 @@ def reconcile_semantic_idea_equivalence(
             continue  # fail-open: arbiter unavailable/declined -> preserve separate
         same_idea, confidence, reason = decision
         if not same_idea:
+            continue
+        # General override, independent of the arbiter: exactly one side
+        # explicitly signals "this is a new/additional point" (see
+        # _DISTINCT_ADDITION_MARKERS's own docstring for the real audit
+        # finding this guards against -- a coarse topical-similarity
+        # judgment can still say "same idea" for two mentions of the same
+        # general subject even when one of them is explicitly introducing a
+        # DIFFERENT item). A speaker's own discourse marker is stronger,
+        # more general evidence of distinctness than any arbiter's topical
+        # read, so it wins even over a high-confidence "same idea" verdict.
+        left_marked = _has_distinct_addition_marker(take_map[left_id].text)
+        right_marked = _has_distinct_addition_marker(take_map[right_id].text)
+        if left_marked != right_marked:
+            distinct_addition_blocked.append({
+                "left_clip_id": left_id,
+                "right_clip_id": right_id,
+                "confidence": round(confidence, 4),
+                "reason": reason,
+            })
             continue
         union(left_group_index, right_group_index)
         merged_count += 1
@@ -656,6 +702,7 @@ def reconcile_semantic_idea_equivalence(
     if merged_count == 0:
         return groups, {
             "status": "checked_no_merge" if result.available else "arbiter_unavailable",
+            "distinct_addition_blocked": distinct_addition_blocked,
             "provider": result.provider,
             "candidate_pair_count": len(candidate_pairs),
             "checked_pair_count": len(truncated),
@@ -675,6 +722,7 @@ def reconcile_semantic_idea_equivalence(
         "checked_pair_count": len(truncated),
         "merged_pair_count": merged_count,
         "merges": audit,
+        "distinct_addition_blocked": distinct_addition_blocked,
     }
 
 
