@@ -354,8 +354,12 @@ jobs:
           echo "--- final KEEP sequence (clip_id + text, in order) ---"
           jq '[.selected[]? | {clip_id, text}]' artifact/video00-unified-selection.json
 
-          echo "--- final DISCARD count and stage_status ---"
-          jq '{discarded_count: (.discarded | length), stage_status}' artifact/video00-unified-selection.json
+          echo "--- final DISCARD sequence (clip_id + text) and stage_status ---"
+          # A real gap this run's diagnosis hit: the count alone cannot show
+          # WHAT got discarded, which is exactly what's needed to tell an
+          # over-aggressive deletion from a correct one without the blocked
+          # human-review artifact.
+          jq '{discarded_count: (.discarded | length), discarded: [.discarded[]? | {clip_id, text}], stage_status}' artifact/video00-unified-selection.json
 
       - name: Upload unified Selection diagnostic artifact
         if: always()
