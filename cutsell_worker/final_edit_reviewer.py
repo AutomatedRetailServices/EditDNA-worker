@@ -11,8 +11,9 @@ routes back to whichever canonical component is responsible for resolving
 it, rather than this reviewer attempting to rewrite membership itself.
 
 Blocking vs. non-blocking: DUPLICATE_IDEA, UNRESOLVED_RETRY,
-IDEA_COVERAGE_LOST, CONTRADICTION, and (D-025) STORY_ORDER_BREAK for a
-disordered composite always block. UNIQUE_FACT_LOST (D-031, changed from
+IDEA_COVERAGE_LOST, CONTRADICTION, (D-025) STORY_ORDER_BREAK for a
+disordered composite, and (D-038) CRITICAL_CLAIM_LOST always block.
+UNIQUE_FACT_LOST (D-031, changed from
 always-blocking) blocks only when `final_story_coherence_validation`'s own
 `lost_semantic_atoms` row says `blocking: true` -- a genuinely critical or
 uncertain semantic atom lost, or the broader content-loss signal; a
@@ -45,6 +46,23 @@ cross-idea reorder risks undoing an intentional Composer pacing choice, so
 this blocks Freeze and routes to human review rather than being
 auto-corrected.
 
+CRITICAL_CLAIM_LOST (D-038, general, real detector): a per-Idea audience-
+facing claim (`semantic_claims.py`) marked CRITICAL by at least one source
+attempt in that idea's own retry family is missing from that idea's own
+winning realization. Read directly from `edit_plan.lost_critical_claims`,
+which `final_story_coherence_validation._lost_critical_claims` already
+computed by comparing each idea's claims against ONLY that idea's own
+winning clips -- never the whole-KEEP-timeline vocabulary UNIQUE_FACT_LOST
+uses, which is exactly the check that RAW 33423953391 showed can be fooled
+by the same words recurring in an unrelated clip elsewhere in the video.
+Always blocking, by construction: `_lost_critical_claims` only ever records
+CRITICAL-importance rows, so there is no non-blocking variant to route to
+`warnings` (unlike UNIQUE_FACT_LOST's CONTEXTUAL-vs-blocking split above).
+Routes to BestTakeResolver (a different, more complete take exists) or
+CompositeResolver (only a composite can cover every critical claim) --
+this reviewer never edits membership itself, same as every other finding
+here.
+
 Honest gap, not fabricated coverage: INCOMPLETE_DELIVERY, ORPHAN_FRAGMENT,
 and INCOMPATIBLE_COMPOSITE are recognized in the finding vocabulary (so a
 future detector has a defined shape to populate) but have no existing
@@ -74,6 +92,7 @@ INCOMPATIBLE_COMPOSITE = "INCOMPATIBLE_COMPOSITE"
 REQUIRED_CONTINUATION_LOST = "REQUIRED_CONTINUATION_LOST"
 STORY_ORDER_BREAK = "STORY_ORDER_BREAK"
 CAUSAL_ORDER_BREAK = "CAUSAL_ORDER_BREAK"
+CRITICAL_CLAIM_LOST = "CRITICAL_CLAIM_LOST"
 
 _UNIMPLEMENTED_KINDS = frozenset({
     INCOMPLETE_DELIVERY, ORPHAN_FRAGMENT, INCOMPATIBLE_COMPOSITE,
@@ -233,6 +252,21 @@ def review(
             detail=dict(row),
             owning_authority="StoryValidator",
             blocking=bool(row.get("blocking", True)),
+        ))
+
+    for row in edit_plan.lost_critical_claims:
+        # D-038: unlike lost_semantic_atoms above, every row here is
+        # CRITICAL-importance and idea-scoped by construction (see
+        # `_lost_critical_claims`'s own docstring) -- always blocking, no
+        # warnings split.
+        findings.append(Finding(
+            kind=CRITICAL_CLAIM_LOST,
+            plan_id=plan_id, plan_version=plan_version,
+            idea_id=str(row.get("idea_id") or "") or None,
+            clip_ids=tuple(str(cid) for cid in (row.get("winning_clip_ids") or ())),
+            detail=dict(row),
+            owning_authority=str(row.get("owning_authority") or "BestTakeResolver"),
+            blocking=True,
         ))
 
     findings.extend(_composite_order_findings(edit_plan, plan_id, plan_version))

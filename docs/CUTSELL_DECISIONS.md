@@ -1365,6 +1365,142 @@ passed), CleanCutBench green, `compileall` clean, and the pre-existing 23/23 Hum
 Gold semantic-alignment fixture (`tests/test_video00_selection_lock.py` and
 neighbors) confirmed unaffected -- this work never touches Selection.
 
+## D-038 — Per-Idea semantic claim coverage (semantic fact preservation)
+
+**Status: CANONICAL**
+
+RAW 33423953391 confirmed D-037's physical-fragment/delivery-gate fix working correctly
+(genuine physical QC findings correctly reported NEEDS_HUMAN_REVIEW rather than a
+fabricated PASS), but exposed a separate, serious semantic regression: for idea
+`tg_99d2c57b5472dc615a`, BestTake picked a cleaner-but-incomplete candidate over one
+that stated a diagnosis-confirmation fact, dropping it from the winning realization.
+CoverageLedger's existing `_lost_semantic_atoms` check (D-021/D-031) did not catch
+this because it compares a discarded clip's vocabulary against the ENTIRE final KEEP
+timeline's bag of words -- the lost fact's own words ("cáncer"/"tiroides"/"biopsia")
+happened to also appear in unrelated selected clips elsewhere in the video (an earlier
+screening discussion), which falsely satisfied whole-video vocabulary coverage.
+Root cause, confirmed by reading `_lost_semantic_atoms` directly: `kept_content`/
+`kept_critical` are built from the whole `draft.selected`, never scoped to one idea's
+own winning realization.
+
+    WHOLE-VIDEO WORD PRESENCE  !=  PER-IDEA CLAIM PRESERVATION
+
+**1. New module `semantic_claims.py`**: general (no Video00 vocabulary), deterministic,
+marker-based `classify_claim(sentence) -> (claim_type, importance, evidence)` covering
+all 10 canonical claim types (ENTITY_RELATION, STATE_RESULT, DIAGNOSIS_IDENTIFICATION,
+CAUSE_EFFECT, ACTION_EVENT, MEASUREMENT_QUANTITY, NEGATION, CORRECTION,
+TEMPORAL_RELATION, UNIQUE_CONCLUSION) and 4 importance levels (CRITICAL/SUPPORTING/
+CONTEXTUAL/REDUNDANT) -- importance is deliberately per-instance, not fixed per type
+(a CAUSE_EFFECT clause is always SUPPORTING by design; a DIAGNOSIS_IDENTIFICATION or a
+NEGATION is always CRITICAL). `extract_claims`/`dedupe_claims` build one `Claim` per
+sentence (reusing `final_sibling_grouping`'s existing `_content`/`_negations`/
+`_numbers` tokenizers and `semantic_atom_importance`'s existing marker vocabularies --
+no parallel text-processing stack). `claim_coverage`/`claim_is_covered` score whether a
+claim's content survives in a candidate's text, guarded against a real false-coverage
+trap found while building this module's own CleanCutBench fixtures: a negation flip
+("confirmed X" vs. "did NOT confirm X") shares almost every noun while asserting the
+opposite, so a mismatch between the claim's and the candidate's own negation markers
+caps coverage below the ambiguous floor rather than scoring it as near-total overlap.
+`resolve_ambiguous_coverage` escalates only the genuinely ambiguous coverage band
+(0.3-0.6) to a bounded `ClaimEquivalenceArbiter` (fails open to LOST, same posture as
+`SemanticAtomImportanceArbiter`/`CausalOrderArbiter` -- no implementation wired in this
+codebase, same honest-gap pattern).
+
+**2. New module `claim_coverage_best_take.py`**: runs immediately after
+`deterministic_best_take_authority`, before Final Story Coherence Validation. For every
+genuine retry-family contest with exactly one current winner, checks whether that
+winner covers every CRITICAL claim found across the GROUP'S OWN members (never
+outside it). Bounded resolution, ambiguity fails open throughout (same posture as
+`deterministic_best_take_authority.py`): (a) if exactly one other member covers every
+critical claim, it becomes the new winner (KEEP/DISCARD-only move, D-019: no SWAP);
+(b) if no single member does, but a time-compatible pair together covers everything,
+both are kept as a narrow 2-piece composite (ordered by recording time); (c) anything
+broader is left exactly as upstream decided, flagged in this module's own diagnostics
+for observability -- the real backstop is item 3 below. The composite path is guarded
+against a real regression found via full-chain testing: two members whose UNIQUE
+contributions share a claim_type (e.g. both NEGATION, as in a paraphrased retry family
+where each side negates the same fact in different words) are NOT composited -- that
+shape is far more likely one idea's coarse-classifier-split paraphrase than genuinely
+complementary facts, and forcing it into a composite silently defeated the existing,
+correct arbiter-based retry-family collapse (`final_story_coherence_validation`'s own
+residual-family resolution). Disjoint claim_types stay compositable.
+
+**3. Per-idea backstop**: `final_story_coherence_validation._lost_critical_claims`
+compares each retry-family group's own critical claims directly against ONLY that
+group's own winning realization text -- never the whole-KEEP-timeline vocabulary
+`_lost_semantic_atoms` uses -- so a claim can never be falsely satisfied merely because
+its words also appear in a different, unrelated selected clip elsewhere in the video.
+Runs even when `claim_coverage_best_take.py` already tried and could not safely
+resolve a family (the 3+-way/no-compatible-pair case). A finding here always blocks
+Freeze (`freeze_blocked`), by construction only ever CRITICAL-importance.
+
+**4. Integration**: `CanonicalEditPlan` gained `lost_critical_claims` (populated from
+StoryValidator's diagnostics, defaulted `()` so the one existing construction site and
+any external payload deserializer stays valid unchanged); `_composite_piece_ids` also
+recognizes `claim_coverage_best_take`'s own composites so an idea it resolved this way
+correctly reports `is_composite: true`. `final_edit_reviewer.py` gained the
+`CRITICAL_CLAIM_LOST` finding kind: always blocking (every row is CRITICAL by
+construction, so there is no warning-split like `UNIQUE_FACT_LOST`'s), carrying
+plan_id/plan_version/idea_id/claim_id/claim text/source clip/winning clips/coverage
+evidence, routing to BestTakeResolver or CompositeResolver -- the reviewer never edits
+membership itself. `process_universal_clean_cut_sources` threads an optional
+`claim_equivalence_arbiter` (defaults `None`, same unwired-by-default pattern as every
+other bounded arbiter here) to both the Best-Take override and StoryValidator.
+`repair_loop.py`'s `_REPAIR_STRATEGIES` has no entry for `CRITICAL_CLAIM_LOST` by
+design (same as `IDEA_COVERAGE_LOST`/`CONTRADICTION`): no safe automated repair exists,
+so it correctly falls to NEEDS_HUMAN_REVIEW rather than an invented auto-fix.
+
+**A second regression found and fixed via full-chain testing, not unit isolation**:
+wiring `claim_coverage_best_take` into the real chain (all existing 37 CleanCutBench
+fixtures, not just new ones) surfaced that `final_story_coherence_validation`'s own
+residual-multi-select-group resolution had no awareness a group it saw with 2+ still-
+selected members might already be a LEGITIMATE composite `claim_coverage_best_take`
+just created, and used the same `semantic_equivalence_arbiter` that grouped them in
+the first place to collapse the composite straight back down to one winner -- silently
+undoing the fix. `_residual_multi_select_groups` now excludes any group_id present in
+`diagnostics["claim_coverage_best_take"]["composites"]` (mirrors
+`canonical_edit_plan._composite_piece_ids`'s own existing pattern for the same class of
+trap). Caught by running the full existing eval-suite fixture set against the newly-
+wired chain, per this directive's own explicit item 11 ("protect current semantic
+success") -- not by the new fixtures alone.
+
+**A pre-existing false-positive fixed in the same pass, found via direct classifier
+testing before it ever reached a fixture**: `_IDENTIFICATION_COPULA_MARKERS`' bare "was
+a"/"was an" (and Spanish "era un(a)"/"fue un(a)") entries matched as a substring PREFIX
+of ordinary words with no word-boundary check ("it was ALREADY late" contained "was a"
+literally) and, even fixed to a proper boundary, remained too generic on their own
+("it was a good day" is not a diagnosis). Split into `_STRONG_IDENTIFICATION_MARKERS`
+(unambiguous phrases -- "diagnosed with", "turned out to be", "se trataba de", etc. --
+safe to treat as identity evidence standalone) and `_WEAK_COPULA_MARKERS` (only counted
+as identity evidence when the same sentence ALSO carries explicit result-reporting
+language, e.g. "the biopsy CONFIRMED it WAS A tumor") -- preserves every existing
+positive case (importance stays CRITICAL either way; only the specific
+DIAGNOSIS_IDENTIFICATION-vs-ENTITY_RELATION type label can shift) while eliminating the
+false-positive class entirely.
+
+**Protects, unchanged**: D-037 physical fragment identity, PostRenderWatchListenQC
+behavior, the delivery gate, the Boundary repair loop, render provenance, and the
+event-driven RAW-monitoring protocol -- none of that code was touched in this cycle.
+Also confirmed unregressed: retry cleanup, no incomplete+complete duplicate,
+hereditary contradiction resolution, sonography/pimples micro-ordering, composite
+persistence, and the Human Gold semantic-alignment framework.
+
+**Validation**: `semantic_claims.py` (35 tests), `claim_coverage_best_take.py` (15
+tests), `_lost_critical_claims`/`CRITICAL_CLAIM_LOST` (9 tests), and 12 new
+CleanCutBench fixtures mapping every category the directive named (cleaner take losing
+a diagnosis claim must not win; a SUPPORTING cause/effect claim's loss must NOT force
+an override -- the deliberate importance boundary, not an oversight; all-critical-
+claims-covered wins despite worse performance; complementary claims require a
+composite; a claim missing from its own idea still fails despite similar words
+elsewhere in the video; same nouns present in the wrong winner produce no false
+coverage; a CONTEXTUAL claim is safely omitted; a SUPPORTING claim is safely omitted
+with the core idea intact; a critical correction is preserved; a critical claim split
+across a genuinely independent continuation is left alone; a duplicate retry with no
+unique claim is a safe plain discard; the bounded arbiter is consulted only for
+ambiguous coverage and can change the outcome) -- reached through the REAL take-
+grouping/idea-equivalence/take-judge/coherence chain, not hand-built drafts alone.
+Full `tests/test_cutsell_*.py` CI glob green (1228 passed), `compileall` clean.
+
 ## Change rule
 
 When a new decision changes product behavior, update this file in the same development cycle. Do not silently redefine CutSell through code alone.

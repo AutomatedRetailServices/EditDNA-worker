@@ -84,6 +84,7 @@ from __future__ import annotations
 
 from dataclasses import replace
 from itertools import combinations
+from typing import Mapping
 
 from .final_sibling_grouping import _content, _negations, _numbers
 from .semantic_atom_importance import (
@@ -92,6 +93,14 @@ from .semantic_atom_importance import (
     classify_negation_atom,
     classify_number_atom,
     resolve_uncertain_with_arbiter,
+)
+from .semantic_claims import (
+    CRITICAL as CLAIM_CRITICAL,
+    ClaimEquivalenceArbiter,
+    claim_coverage,
+    dedupe_claims,
+    extract_claims,
+    resolve_ambiguous_coverage,
 )
 from .semantic_idea_equivalence import (
     IdeaEquivalencePair,
@@ -114,11 +123,29 @@ def _fold_alternates_into_discarded(draft):
     return replace(draft, alternates=(), discarded=discarded)
 
 
+def _claim_coverage_composite_group_ids(diagnostics: Mapping[str, object]) -> frozenset[str]:
+    """group_ids `claim_coverage_best_take.py` (D-038) already resolved as
+    its own narrow 2-piece composite fallback. A group it resolved this way
+    legitimately has 2+ members still selected on purpose -- it is not an
+    unresolved retry-family contest, and must never be handed to
+    `_resolve_residual_family` below, which would otherwise use the very
+    same semantic_equivalence_arbiter that grouped these members together
+    in the first place to collapse the composite back down to one winner,
+    silently destroying the claim-coverage fix (same trap
+    `canonical_edit_plan._composite_piece_ids` already accounts for)."""
+    composites = ((diagnostics or {}).get("claim_coverage_best_take") or {}).get("composites") or ()
+    return frozenset(str(row.get("group_id") or "") for row in composites if isinstance(row, dict))
+
+
 def _residual_multi_select_groups(draft) -> list[dict]:
     selected_ids = {clip.clip_id for clip in draft.selected}
-    groups = list((draft.diagnostics or {}).get("take_judge_groups") or ())
+    diagnostics = draft.diagnostics or {}
+    groups = list(diagnostics.get("take_judge_groups") or ())
+    exempt_group_ids = _claim_coverage_composite_group_ids(diagnostics)
     residual = []
     for group in groups:
+        if str(group.get("group_id") or "") in exempt_group_ids:
+            continue
         ranked = list(group.get("ranked") or ())
         still_selected = [row for row in ranked if str(row.get("clip_id") or "") in selected_ids]
         if len(still_selected) >= 2:
@@ -384,11 +411,82 @@ def _lost_semantic_atoms(
     return findings
 
 
+def _lost_critical_claims(
+    draft, *, claim_equivalence_arbiter: ClaimEquivalenceArbiter | None = None,
+) -> list[dict]:
+    """Per-Idea claim coverage (D-038) -- the backstop for `claim_coverage_
+    best_take.py`'s own best-effort override. Unlike `_lost_semantic_atoms`
+    above (which compares a discarded clip's vocabulary against the ENTIRE
+    final KEEP timeline's bag of words), this compares each retry-family
+    group's own critical claims directly against ONLY that idea's own
+    winning realization -- so a claim can never be falsely satisfied merely
+    because its words happen to also appear in a different, unrelated
+    selected clip elsewhere in the video. RAW 33423953391: "cancer" /
+    "thyroid" / "biopsy" recurred in unrelated clips about earlier
+    screening, which incorrectly satisfied whole-video vocabulary coverage
+    for a discarded diagnosis-confirmation clip -- this check's entire job
+    is to not be fooled that way.
+
+    This runs even when `claim_coverage_best_take.py` already tried to fix
+    the family: that module can fail to find a safe single-candidate or
+    paired-composite resolution, and this is the real, independent, always-
+    on gate that must never let a critical claim reach Freeze silently
+    missing regardless of whether an earlier stage could repair it.
+    """
+    groups = list((draft.diagnostics or {}).get("take_judge_groups") or ())
+    if not groups:
+        return []
+    all_clips = {clip.clip_id: clip for clip in (*draft.selected, *draft.discarded, *draft.alternates)}
+    selected_ids = {clip.clip_id for clip in draft.selected}
+
+    findings: list[dict] = []
+    for group in groups:
+        ranked = list(group.get("ranked") or ())
+        member_ids = [str(row.get("clip_id") or "") for row in ranked]
+        members = [(cid, all_clips[cid]) for cid in member_ids if cid in all_clips]
+        if len(members) < 2:
+            continue
+        winners = [cid for cid, _clip in members if cid in selected_ids]
+        if not winners:
+            # The whole idea vanished -- _missing_idea_coverage's job, not
+            # this check's (which only judges an idea that DID survive).
+            continue
+
+        all_claims = []
+        for clip_id, clip in members:
+            all_claims.extend(extract_claims(clip_id, str(clip.text or "")))
+        critical_claims = [c for c in dedupe_claims(tuple(all_claims)) if c.importance == CLAIM_CRITICAL]
+        if not critical_claims:
+            continue
+
+        winning_realization_text = " ".join(str(all_clips[cid].text or "") for cid in winners)
+        for claim in critical_claims:
+            coverage = claim_coverage(claim, winning_realization_text)
+            if resolve_ambiguous_coverage(
+                claim, winning_realization_text, coverage=coverage, arbiter=claim_equivalence_arbiter,
+            ):
+                continue
+            findings.append({
+                "idea_id": group.get("group_id"),
+                "claim_id": claim.claim_id,
+                "claim_type": claim.claim_type,
+                "claim_text": claim.text,
+                "importance": claim.importance,
+                "source_clip_id": claim.source_clip_id,
+                "winning_clip_ids": list(winners),
+                "coverage_against_winning_realization": round(coverage, 4),
+                "owning_authority": "BestTakeResolver",
+                "blocking": True,
+            })
+    return findings
+
+
 def apply_final_story_coherence_validation(
     draft,
     *,
     semantic_equivalence_arbiter: SemanticEquivalenceArbiter | None = None,
     semantic_atom_importance_arbiter: SemanticAtomImportanceArbiter | None = None,
+    claim_equivalence_arbiter: ClaimEquivalenceArbiter | None = None,
 ):
     """Last semantic authority before Selection Freeze. See module docstring."""
     draft = _fold_alternates_into_discarded(draft)
@@ -465,16 +563,22 @@ def apply_final_story_coherence_validation(
     lost_semantic_atoms = _lost_semantic_atoms(
         draft, semantic_atom_importance_arbiter=semantic_atom_importance_arbiter,
     )
+    lost_critical_claims = _lost_critical_claims(
+        draft, claim_equivalence_arbiter=claim_equivalence_arbiter,
+    )
     # D-031: a lost_semantic_atoms finding only blocks Freeze when its own
     # `blocking` field says so (a genuinely critical/uncertain atom, or the
     # broader content-loss signal) -- a CONTEXTUAL-only atom loss (e.g. an
     # incidental year) is recorded for observability but does not itself
     # block. contradiction_findings/missing_idea_coverage are unaffected
-    # and remain unconditionally blocking, unchanged.
+    # and remain unconditionally blocking, unchanged. D-038: any lost
+    # critical claim always blocks -- by construction, only CRITICAL-
+    # importance claims are ever recorded here at all.
     freeze_blocked = (
         bool(contradiction_findings)
         or bool(missing_idea_coverage)
         or any(row.get("blocking", True) for row in lost_semantic_atoms)
+        or bool(lost_critical_claims)
     )
 
     diagnostics = dict(draft.diagnostics or {})
@@ -490,6 +594,7 @@ def apply_final_story_coherence_validation(
         "contradiction_findings": contradiction_findings,
         "missing_idea_coverage": missing_idea_coverage,
         "lost_semantic_atoms": lost_semantic_atoms,
+        "lost_critical_claims": lost_critical_claims,
         "freeze_blocked": freeze_blocked,
         "not_implemented": [
             "general_non_numeric_non_negation_contradiction_detection",

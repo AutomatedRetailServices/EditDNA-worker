@@ -68,9 +68,10 @@ No Video00 timestamps, phrases, or clip IDs anywhere in this file.
 from dataclasses import replace
 
 from cutsell_worker.canonical_edit_plan import build_canonical_edit_plan
+from cutsell_worker.claim_coverage_best_take import apply_claim_coverage_best_take
 from cutsell_worker.contracts import CandidateTake, DraftClip, DraftTimeline, EditStrategy, MediaSignals, SCHEMA_VERSION
 from cutsell_worker.deterministic_best_take_authority import apply_deterministic_best_take_authority
-from cutsell_worker.final_edit_reviewer import CAUSAL_ORDER_BREAK, review
+from cutsell_worker.final_edit_reviewer import CAUSAL_ORDER_BREAK, CRITICAL_CLAIM_LOST, review
 from cutsell_worker.final_story_coherence_validation import apply_final_story_coherence_validation
 from cutsell_worker.repair_loop import run_repair_loop
 from cutsell_worker.semantic_idea_equivalence import IdeaEquivalenceDecision, IdeaEquivalenceResult
@@ -119,7 +120,7 @@ def _draft_clip(take: CandidateTake, *, selected: bool) -> DraftClip:
     )
 
 
-def _run_core(takes: tuple[CandidateTake, ...], *, oracle_pairs=frozenset()):
+def _run_core(takes: tuple[CandidateTake, ...], *, oracle_pairs=frozenset(), claim_equivalence_arbiter=None):
     """Run the real Clean Cut Core V1 decision chain over synthetic takes."""
     arbiter = OracleArbiter(oracle_pairs)
     arbiter._text_to_id = {take.text: take.clip_id for take in takes}
@@ -147,7 +148,15 @@ def _run_core(takes: tuple[CandidateTake, ...], *, oracle_pairs=frozenset()):
         diagnostics={"take_judge_groups": take_judge_groups},
     )
     draft = apply_deterministic_best_take_authority(draft, swap_enabled=False)
-    draft = apply_final_story_coherence_validation(draft, semantic_equivalence_arbiter=arbiter)
+    # D-038: real production order (universal_clean_cut.py) runs the
+    # claim-coverage-aware Best-Take override strictly between the
+    # deterministic ranker and Final Story Coherence Validation -- inserted
+    # here too so every fixture in this file (not just the D-038-specific
+    # ones below) exercises the exact real chain.
+    draft = apply_claim_coverage_best_take(draft, claim_equivalence_arbiter=claim_equivalence_arbiter)
+    draft = apply_final_story_coherence_validation(
+        draft, semantic_equivalence_arbiter=arbiter, claim_equivalence_arbiter=claim_equivalence_arbiter,
+    )
     return draft, equivalence_diag, arbiter
 
 
@@ -908,3 +917,257 @@ def test_ambiguous_atom_with_no_deterministic_signal_stays_blocking_without_an_a
     assert finding["blocking"] is True
     classes = {c["importance"] for c in finding["atom_classifications"]}
     assert "UNCERTAIN" in classes
+
+
+# 38-49. Per-Idea semantic claim coverage (D-038), reached through the REAL
+# take-grouping/idea-equivalence/take-judge/coherence chain, with the
+# claim-coverage-aware Best-Take override (claim_coverage_best_take.py) now
+# wired into that chain (see _run_core above).
+#
+# RAW 33423953391's own failure shape, generalized: BestTake picked a
+# cleaner-but-incomplete candidate over one carrying a critical diagnosis-
+# confirmation claim, and the OLD whole-KEEP-timeline vocabulary check
+# (fixtures 26-27's `_lost_semantic_atoms`) missed it because the same
+# words happened to recur in an unrelated clip elsewhere in the video. These
+# fixtures map the canonical directive's 12 named categories onto the real
+# chain. No Video00 fact/phrase/literal value appears in any fixture below.
+
+def test_cleaner_take_losing_a_diagnosis_claim_must_not_win():
+    cleaner = _take("cleaner", 0.0, 3.0, "Anyway that's been my honest take on the whole thing so far.", complete=True)
+    diagnosis = _take("diagnosis", 4.0, 7.0, "The biopsy confirmed it was a benign tumor, which was a huge relief.", complete=False)
+
+    draft, _, _ = _run_core((cleaner, diagnosis), oracle_pairs={("cleaner", "diagnosis")})
+
+    assert _kept(draft) == {"diagnosis"}
+    assert _discarded(draft) == {"cleaner"}
+    override = draft.diagnostics["claim_coverage_best_take"]["overrides"][0]
+    assert override["previous_winner_clip_id"] == "cleaner"
+    assert override["new_winner_clip_id"] == "diagnosis"
+    assert draft.diagnostics["final_story_coherence_validation"]["lost_critical_claims"] == []
+
+
+def test_shorter_take_losing_a_supporting_cause_effect_claim_must_not_force_an_override():
+    # D-038 item 6: only CRITICAL claim loss must always block/override --
+    # a cause/effect explanatory clause classifies SUPPORTING (see
+    # semantic_claims.classify_claim), never CRITICAL, so its loss alone
+    # must NOT force the current (decisive, complete) winner to lose. This
+    # is the deliberate boundary, not an oversight: overcorrecting into
+    # preserving every explanatory sentence would defeat Best-Take entirely.
+    winner = _take("winner", 0.0, 3.0, "I want to share my quick update after using the product for a while.", complete=True)
+    loser = _take("loser", 4.0, 7.0, "I switched brands because the smell was too strong for me.", complete=False)
+
+    draft, _, _ = _run_core((winner, loser), oracle_pairs={("winner", "loser")})
+
+    assert _kept(draft) == {"winner"}
+    assert _discarded(draft) == {"loser"}
+    assert draft.diagnostics.get("claim_coverage_best_take") is None  # never touched -- no critical claim in the group
+
+
+def test_take_with_all_critical_claims_wins_despite_worse_performance():
+    # "worse performance" here is the take_judge signal this synthetic
+    # harness actually has to work with (complete_idea=False -- see
+    # take_judge.score_take): a rougher-scoring delivery that nonetheless
+    # carries EVERY critical claim in the family must still win over a
+    # clean-scoring delivery carrying none of them.
+    cleaner = _take("cleaner", 0.0, 3.0, "Anyway that's been my honest take on the whole thing so far.", complete=True)
+    all_critical = _take(
+        "all_critical", 4.0, 7.0,
+        "The test came back positive. The biopsy also confirmed it was a serious condition needing treatment.",
+        complete=False,
+    )
+
+    draft, _, _ = _run_core((cleaner, all_critical), oracle_pairs={("cleaner", "all_critical")})
+
+    assert _kept(draft) == {"all_critical"}
+    assert _discarded(draft) == {"cleaner"}
+    override = draft.diagnostics["claim_coverage_best_take"]["overrides"][0]
+    assert len(override["missing_claim_ids"]) == 2  # both claims were missing from the wrong winner
+    assert draft.diagnostics["final_story_coherence_validation"]["lost_critical_claims"] == []
+
+
+def test_complementary_critical_claims_require_a_composite():
+    winner = _take("winner", 0.0, 3.0, "So overall that's been my journey with this so far.", complete=True)
+    piece_a = _take("piece_a", 4.0, 7.0, "The test came back positive for the condition.", complete=False)
+    piece_b = _take(
+        "piece_b", 8.0, 11.0,
+        "The biopsy confirmed it was something more serious that needed treatment.",
+        complete=False,
+    )
+
+    draft, _, _ = _run_core(
+        (winner, piece_a, piece_b),
+        oracle_pairs={("winner", "piece_a"), ("winner", "piece_b"), ("piece_a", "piece_b")},
+    )
+
+    assert _kept(draft) == {"piece_a", "piece_b"}
+    assert _discarded(draft) == {"winner"}
+    composite = draft.diagnostics["claim_coverage_best_take"]["composites"][0]
+    assert set(composite["clip_ids"]) == {"piece_a", "piece_b"}
+    assert draft.diagnostics["final_story_coherence_validation"]["lost_critical_claims"] == []
+
+
+def test_claim_missing_from_its_own_idea_still_fails_despite_similar_words_elsewhere_in_the_video():
+    # The exact invariant RAW 33423953391 exposed: whole-video vocabulary
+    # presence must never satisfy a DIFFERENT idea's missing claim. Three
+    # critical claims are split three ways here so claim_coverage_best_
+    # take.py's own bounded resolution (single candidate / 2-piece
+    # composite) cannot safely fix it either -- proving the real backstop,
+    # final_story_coherence_validation._lost_critical_claims, still catches
+    # it on its own, per-idea, even with an unrelated but lexically similar
+    # clip sitting elsewhere in the same final KEEP timeline.
+    winner = _take("winner", 0.0, 3.0, "Anyway that's been my honest take on the whole thing so far.", complete=True)
+    a = _take("a", 4.0, 7.0, "The test came back positive for the condition.", complete=False)
+    b = _take("b", 8.0, 11.0, "The biopsy confirmed it was something concerning that needed follow up.", complete=False)
+    c = _take("c", 12.0, 15.0, "Only 5 percent of people ever experience this particular reaction.", complete=False)
+    elsewhere = _take(
+        "elsewhere", 100.0, 103.0,
+        "We also asked about biopsy procedures and testing percentages in a totally different consultation.",
+        complete=True,
+    )
+
+    draft, _, _ = _run_core(
+        (winner, a, b, c, elsewhere),
+        oracle_pairs={("winner", "a"), ("winner", "b"), ("winner", "c"), ("a", "b"), ("a", "c"), ("b", "c")},
+    )
+
+    assert _kept(draft) == {"winner", "elsewhere"}
+    assert _discarded(draft) == {"a", "b", "c"}
+    ccbt = draft.diagnostics["claim_coverage_best_take"]
+    assert ccbt["overrides"] == []
+    assert ccbt["composites"] == []
+    assert len(ccbt["unresolved_gaps"]) == 1
+
+    diag = draft.diagnostics["final_story_coherence_validation"]
+    assert diag["freeze_blocked"] is True
+    lost_ids = {row["source_clip_id"] for row in diag["lost_critical_claims"]}
+    assert lost_ids == {"a", "b", "c"}
+    for row in diag["lost_critical_claims"]:
+        assert row["winning_clip_ids"] == ["winner"]  # never satisfied by "elsewhere"
+
+
+def test_same_nouns_present_in_wrong_winner_does_not_produce_false_coverage():
+    # winner shares "biopsy"/"tumor" vocabulary with the actual critical
+    # claim but never asserts it -- claim_coverage's token-overlap check
+    # alone would land in the ambiguous band (not confidently covered), and
+    # with no arbiter configured it fails open to NOT covered, so the
+    # override still correctly fires despite the shared nouns.
+    winner = _take("winner", 0.0, 3.0, "The biopsy and the tumor came up briefly in conversation.", complete=True)
+    loser = _take("loser", 4.0, 7.0, "The biopsy confirmed it was a benign tumor.", complete=False)
+
+    draft, _, _ = _run_core((winner, loser), oracle_pairs={("winner", "loser")})
+
+    assert _kept(draft) == {"loser"}
+    assert _discarded(draft) == {"winner"}
+    override = draft.diagnostics["claim_coverage_best_take"]["overrides"][0]
+    assert override["new_winner_clip_id"] == "loser"
+
+
+def test_contextual_claim_safely_omitted_never_touches_claim_coverage_best_take():
+    winner = _take("winner", 0.0, 3.0, "I want to share my quick update on this whole thing.", complete=True)
+    loser = _take("loser", 4.0, 7.0, "After trying it for a while, I want to share my update on this.", complete=False)
+
+    draft, _, _ = _run_core((winner, loser), oracle_pairs={("winner", "loser")})
+
+    assert _kept(draft) == {"winner"}
+    assert draft.diagnostics.get("claim_coverage_best_take") is None
+    assert draft.diagnostics["final_story_coherence_validation"]["lost_critical_claims"] == []
+
+
+def test_supporting_claim_omitted_but_core_idea_intact_never_blocks():
+    winner = _take("winner", 0.0, 3.0, "Overall I am really happy with this whole thing.", complete=True)
+    loser = _take("loser", 4.0, 7.0, "I picked it up at the store and gave it a try right away.", complete=False)
+
+    draft, _, _ = _run_core((winner, loser), oracle_pairs={("winner", "loser")})
+
+    assert _kept(draft) == {"winner"}
+    assert draft.diagnostics.get("claim_coverage_best_take") is None
+    assert draft.diagnostics["final_story_coherence_validation"]["lost_critical_claims"] == []
+
+
+def test_critical_correction_is_preserved_over_a_cleaner_but_wrong_winner():
+    cleaner = _take("cleaner", 0.0, 3.0, "So that's the update on where things stand right now.", complete=True)
+    correction = _take(
+        "correction", 4.0, 7.0,
+        "Actually, I was wrong earlier, it turned out to be something different entirely.",
+        complete=False,
+    )
+
+    draft, _, _ = _run_core((cleaner, correction), oracle_pairs={("cleaner", "correction")})
+
+    assert _kept(draft) == {"correction"}
+    assert _discarded(draft) == {"cleaner"}
+    override = draft.diagnostics["claim_coverage_best_take"]["overrides"][0]
+    assert override["new_winner_clip_id"] == "correction"
+
+
+def test_critical_claim_split_across_a_genuinely_independent_continuation_is_left_alone():
+    # beat2 is a natural continuation of beat1, not a retry of it -- no
+    # oracle pair, so the real chain never groups them into one retry-
+    # family contest (same invariant as fixture 8, "continuation that must
+    # NOT collapse"). Neither claim_coverage_best_take nor
+    # _lost_critical_claims ever evaluates clips that were never placed in
+    # a shared take_judge_groups entry -- both correctly stay untouched.
+    beat1 = _take("beat1", 0.0, 3.0, "The test came back positive for the infection.", complete=True)
+    beat2 = _take("beat2", 4.0, 7.0, "Because of that, we started the treatment right away.", complete=True)
+
+    draft, _, _ = _run_core((beat1, beat2), oracle_pairs=frozenset())
+
+    assert _kept(draft) == {"beat1", "beat2"}
+    assert draft.diagnostics.get("take_judge_groups") == []
+    assert draft.diagnostics.get("claim_coverage_best_take") is None
+    assert draft.diagnostics["final_story_coherence_validation"]["lost_critical_claims"] == []
+
+
+def test_duplicate_retry_carrying_no_unique_claim_is_a_safe_plain_discard():
+    # Both sides state the IDENTICAL critical claim -- after dedup there is
+    # only one, and the surviving winner already covers it fully, so
+    # claim_coverage_best_take is correctly a complete no-op: this is an
+    # ordinary exact-retry discard, not a claim-coverage case at all.
+    text = "The biopsy confirmed it was a benign tumor."
+    winner = _take("w", 0.0, 3.0, text, complete=True)
+    loser = _take("l", 3.5, 6.5, text, complete=False)
+
+    draft, _, _ = _run_core((winner, loser))
+
+    assert _kept(draft) == {"w"}
+    assert _discarded(draft) == {"l"}
+    assert draft.diagnostics.get("claim_coverage_best_take") is None
+
+
+class _AlwaysConfirmClaimArbiter:
+    """Bounded ClaimEquivalenceArbiter fake: always confirms the proposed
+    winning realization preserves the claim. Used only to prove the arbiter
+    is consulted (and actually changes the outcome) in the ambiguous
+    coverage band -- never for a confidently-covered or confidently-lost
+    case (see resolve_ambiguous_coverage's own floor/threshold gate)."""
+
+    def __init__(self):
+        self.calls = 0
+
+    def claim_covered(self, claim_text, winning_realization_text):
+        self.calls += 1
+        return True, 0.85, "paraphrase confirmed by arbiter"
+
+
+def test_arbiter_is_consulted_only_for_ambiguous_coverage_and_can_change_the_outcome():
+    # winner's phrasing shares enough of the claim's own words to land in
+    # the ambiguous coverage band (0.3-0.6, see semantic_claims.py) but not
+    # enough to be confidently covered -- exactly the one case
+    # resolve_ambiguous_coverage escalates to a bounded arbiter.
+    winner = _take("winner", 0.0, 3.0, "After the biopsy, they said the tumor situation was fine.", complete=True)
+    loser = _take("loser", 4.0, 7.0, "The biopsy confirmed it was a benign tumor.", complete=False)
+
+    # Without an arbiter: ambiguous coverage fails open to NOT covered, so
+    # the fully-covering loser correctly becomes the new winner.
+    no_arbiter_draft, _, _ = _run_core((winner, loser), oracle_pairs={("winner", "loser")})
+    assert _kept(no_arbiter_draft) == {"loser"}
+
+    # With an arbiter that confirms the paraphrase preserves the claim: no
+    # override is needed at all, and the arbiter was actually consulted.
+    arbiter = _AlwaysConfirmClaimArbiter()
+    with_arbiter_draft, _, _ = _run_core(
+        (winner, loser), oracle_pairs={("winner", "loser")}, claim_equivalence_arbiter=arbiter,
+    )
+    assert _kept(with_arbiter_draft) == {"winner"}
+    assert with_arbiter_draft.diagnostics.get("claim_coverage_best_take") is None
+    assert arbiter.calls > 0

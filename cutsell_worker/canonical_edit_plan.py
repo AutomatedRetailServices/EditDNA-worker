@@ -106,11 +106,24 @@ class CanonicalEditPlan:
     possible_missing_story_ending: bool
     freeze_blocked: bool
     validation_state: str  # "frozen_ready" | "freeze_blocked_pending_review"
+    # D-038: per-Idea critical-claim coverage findings (semantic_claims.py),
+    # independent of lost_semantic_atoms's whole-KEEP-timeline vocabulary
+    # comparison -- see final_story_coherence_validation._lost_critical_
+    # claims's own docstring for why the two checks are not redundant.
+    # Defaulted so every existing construction site (there is exactly one,
+    # build_canonical_edit_plan below) and any external payload deserializer
+    # stays valid unchanged.
+    lost_critical_claims: tuple[dict, ...] = ()
 
 
 def _composite_piece_ids(diagnostics: Mapping[str, object]) -> frozenset[str]:
     """Clip ids CompositeResolver marked as a composite piece (step 12/14's
-    split_group_clip_ids), read from diagnostics it already produced."""
+    split_group_clip_ids), read from diagnostics it already produced. Also
+    recognizes `claim_coverage_best_take.py`'s own narrow, D-038 claim-
+    coverage-triggered composite fallback (a distinct, bounded mechanism
+    from the general CompositeResolver above -- see that module's
+    docstring), so an idea it resolved this way is correctly reported
+    `is_composite: true` rather than `unresolved_ambiguous`."""
     ids: set[str] = set()
     for row in diagnostics.get("hybrid_editorial_chunks") or ():
         if not isinstance(row, dict):
@@ -123,6 +136,10 @@ def _composite_piece_ids(diagnostics: Mapping[str, object]) -> frozenset[str]:
                 for item in entry:
                     if isinstance(item, dict):
                         ids.update(str(i) for i in (item.get("split_group_clip_ids") or ()))
+    claim_coverage_best_take = diagnostics.get("claim_coverage_best_take") or {}
+    for composite in claim_coverage_best_take.get("composites") or ():
+        if isinstance(composite, dict):
+            ids.update(str(cid) for cid in (composite.get("clip_ids") or ()))
     return frozenset(ids)
 
 
@@ -228,6 +245,7 @@ def build_canonical_edit_plan(draft) -> CanonicalEditPlan:
         keep_sequence=keep_sequence,
         discard_provenance=discard_provenance,
         lost_semantic_atoms=tuple(coherence.get("lost_semantic_atoms") or ()),
+        lost_critical_claims=tuple(coherence.get("lost_critical_claims") or ()),
         contradiction_findings=tuple(coherence.get("contradiction_findings") or ()),
         composite_provenance=_composite_provenance_rows(diagnostics),
         possible_missing_story_ending=bool(coherence.get("possible_missing_story_ending")),

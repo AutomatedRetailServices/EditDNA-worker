@@ -22,6 +22,7 @@ from dataclasses import replace
 from typing import Mapping
 
 from .asr import ASRProvider
+from .claim_coverage_best_take import apply_claim_coverage_best_take
 from .clean_cut_provider import CleanCutProvider
 from .contracts import ProcessingRequest, ProcessingResult
 from .deterministic_best_take_authority import apply_deterministic_best_take_authority
@@ -29,6 +30,7 @@ from .final_boundary_authority import enforce_complete_idea_boundaries
 from .final_story_coherence_validation import apply_final_story_coherence_validation
 from .causal_order_validator import CausalOrderArbiter
 from .semantic_atom_importance import SemanticAtomImportanceArbiter
+from .semantic_claims import ClaimEquivalenceArbiter
 from .repair_loop import run_repair_loop
 from .flow_b import ProgressCallback, process_local_sources
 from .human_boundary_polish_v5 import polish_human_boundaries_v5
@@ -61,6 +63,7 @@ def process_universal_clean_cut_sources(
     semantic_equivalence_arbiter: SemanticEquivalenceArbiter | None = None,
     causal_order_arbiter: CausalOrderArbiter | None = None,
     semantic_atom_importance_arbiter: SemanticAtomImportanceArbiter | None = None,
+    claim_equivalence_arbiter: ClaimEquivalenceArbiter | None = None,
     clean_cut_core_v1_enabled: bool = True,
     progress: ProgressCallback | None = None,
 ) -> ProcessingResult:
@@ -101,12 +104,24 @@ def process_universal_clean_cut_sources(
                 result,
                 draft=apply_deterministic_best_take_authority(result.draft, swap_enabled=False),
             )
+            # D-038: a visually/performance-clean take must not beat a
+            # semantically complete one -- runs strictly after the
+            # deterministic ranker's own verdict, before it becomes final,
+            # so it can still correct a clear-winner decision that drops a
+            # critical audience-facing claim another family member carried.
+            result = replace(
+                result,
+                draft=apply_claim_coverage_best_take(
+                    result.draft, claim_equivalence_arbiter=claim_equivalence_arbiter,
+                ),
+            )
             result = replace(
                 result,
                 draft=apply_final_story_coherence_validation(
                     result.draft,
                     semantic_equivalence_arbiter=semantic_equivalence_arbiter,
                     semantic_atom_importance_arbiter=semantic_atom_importance_arbiter,
+                    claim_equivalence_arbiter=claim_equivalence_arbiter,
                 ),
             )
             selection_stage = "clean_cut_core_v1_idea_first_keep_discard"
