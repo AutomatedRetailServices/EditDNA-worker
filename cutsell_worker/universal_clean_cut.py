@@ -21,14 +21,13 @@ import dataclasses
 from dataclasses import replace
 from typing import Mapping
 
-from . import final_edit_reviewer
 from .asr import ASRProvider
-from .canonical_edit_plan import build_canonical_edit_plan
 from .clean_cut_provider import CleanCutProvider
 from .contracts import ProcessingRequest, ProcessingResult
 from .deterministic_best_take_authority import apply_deterministic_best_take_authority
 from .final_boundary_authority import enforce_complete_idea_boundaries
 from .final_story_coherence_validation import apply_final_story_coherence_validation
+from .repair_loop import run_repair_loop
 from .flow_b import ProgressCallback, process_local_sources
 from .human_boundary_polish_v5 import polish_human_boundaries_v5
 from .hybrid_editorial import EditorialJudge
@@ -151,22 +150,28 @@ def process_universal_clean_cut_sources(
             semantic_status = "not_requested_clean_cut_only"
             reasoner_status_label = "disabled"
 
-        # CanonicalEditPlan (D-024): the single structured semantic snapshot
-        # handed to physical editing -- built from the same evidence
-        # StoryValidator just computed, no new semantic judgment invented.
-        # FinalEditReviewer is a bounded, read-only reviewer over that plan:
-        # it never rewrites membership, only reports structured findings
-        # that route back to the owning canonical authority (see
-        # final_edit_reviewer.py's own docstring for which finding kinds are
-        # implemented vs. an honestly-documented gap).
-        edit_plan = build_canonical_edit_plan(result.draft)
-        review_result = final_edit_reviewer.review(edit_plan)
+        # CanonicalEditPlan (D-024) + bounded targeted repair loop (D-026):
+        # build v1, review it, and -- only for finding types with a safe,
+        # content-preserving repair strategy (today: STORY_ORDER_BREAK's
+        # composite reordering; see repair_loop.py's own docstring for why
+        # every other finding kind has NO automatic repair by design, not
+        # omission) -- apply bounded, targeted repairs and re-review. Never
+        # invents semantic judgment; never mutates an unrelated Idea.
+        repair_result = run_repair_loop(result.draft)
+        edit_plan = repair_result.final_plan
+        review_result = repair_result.final_review
+        result = replace(result, draft=repair_result.final_draft)
         diagnostics = dict(result.draft.diagnostics or {})
         diagnostics["canonical_edit_plan"] = dataclasses.asdict(edit_plan)
         diagnostics["final_edit_reviewer"] = {
             "status": review_result.status,
             "findings": [dataclasses.asdict(f) for f in review_result.findings],
             "warnings": [dataclasses.asdict(f) for f in review_result.warnings],
+        }
+        diagnostics["repair_loop"] = {
+            "status": repair_result.status,
+            "attempt_count": len(repair_result.attempts),
+            "attempts": [dataclasses.asdict(a) for a in repair_result.attempts],
         }
         result = replace(result, draft=replace(result.draft, diagnostics=diagnostics))
         final_edit_reviewer_status = review_result.status
@@ -175,16 +180,15 @@ def process_universal_clean_cut_sources(
         # high-confidence semantic failure (an unresolved factual
         # contradiction between still-co-selected same-retry-family members,
         # or an entire intended idea losing every member from the final
-        # selected set) that must never reach Selection Freeze. FinalEditReviewer
-        # may independently FAIL on evidence StoryValidator itself does not treat
-        # as freeze-blocking (e.g. a genuinely unresolved -- not contradictory --
-        # duplicate idea still occupying two slots in the final KEEP sequence).
-        # Both are deterministic, evidence-based findings -- not something
-        # Boundary could ever repair -- so this skips freeze/boundary entirely
-        # and surfaces the draft as-is (still selected/discarded, just unfrozen)
-        # for human review rather than silently producing a bad video.
+        # selected set) that must never reach Selection Freeze. The repair
+        # loop's own NEEDS_HUMAN_REVIEW outcome (FinalEditReviewer still FAILs
+        # after exhausting any safe repair) is the same kind of finding --
+        # not something Boundary could ever repair -- so this skips freeze/
+        # boundary entirely and surfaces the draft as-is (still selected/
+        # discarded, just unfrozen) for human review rather than silently
+        # producing a bad video.
         coherence_diag = (result.draft.diagnostics or {}).get("final_story_coherence_validation") or {}
-        freeze_blocked = bool(coherence_diag.get("freeze_blocked")) or review_result.status == "FAIL"
+        freeze_blocked = bool(coherence_diag.get("freeze_blocked")) or repair_result.status == "NEEDS_HUMAN_REVIEW"
 
         if freeze_blocked:
             recovery_stage = "not_applicable_freeze_blocked_by_coherence_validation"

@@ -382,3 +382,45 @@ def test_freeze_not_blocked_when_no_coherence_failure(monkeypatch):
     # Legacy path never populates final_story_coherence_validation, so the
     # gate must be a no-op (never blocks) for it.
     assert result.stage_status["freeze_blocked_pending_coherence_review"] is False
+
+
+def test_repair_loop_fixes_disordered_composite_end_to_end_and_freezes(monkeypatch):
+    # D-026 integration: a composite rendered out of recording order must be
+    # auto-repaired (not routed to human review) by the full V1 pipeline,
+    # and the repaired plan must go on to Freeze successfully.
+    piece_a = _clip("piece_a", 0.0, 3.0, "first half of the idea", selected=True)
+    piece_b = _clip("piece_b", 10.0, 13.0, "second half of the idea", selected=True)
+    d = DraftTimeline(
+        schema_version=SCHEMA_VERSION, project_id="p1", strategy=EditStrategy.STORYTELLING,
+        selected=(piece_b, piece_a), alternates=(), discarded=(),
+        diagnostics={
+            "take_judge_groups": [{"group_id": "g1", "ranked": [
+                {"clip_id": "piece_a", "score": 0.7, "reason": "x"},
+                {"clip_id": "piece_b", "score": 0.7, "reason": "x"},
+            ]}],
+            "hybrid_editorial_chunks": [{"hybrid_composite_best_take": {"split_group_clip_ids": ["piece_a", "piece_b"]}}],
+        },
+    )
+
+    def fake_process(request, local_paths, **kwargs):
+        return ProcessingResult(
+            schema_version=SCHEMA_VERSION, project_id="p1", state=JobState.DRAFT_READY,
+            draft=d, stage_status={},
+        )
+
+    monkeypatch.setattr(universal, "process_local_sources", fake_process)
+    monkeypatch.setattr(universal, "polish_human_boundaries_v5", lambda result, paths: result)
+    monkeypatch.setattr(universal, "enforce_complete_idea_boundaries", lambda result, paths, **kw: result)
+
+    result = universal.process_universal_clean_cut_sources(
+        object(), {}, asr_provider=object(), selection_reasoner=None,
+    )
+
+    assert result.stage_status["freeze_blocked_pending_coherence_review"] is False
+    assert result.stage_status["final_edit_reviewer"] == "PASS"
+    assert [c.clip_id for c in result.draft.selected] == ["piece_a", "piece_b"]
+    repair_diag = result.draft.diagnostics["repair_loop"]
+    assert repair_diag["status"] == "PASS"
+    assert repair_diag["attempt_count"] == 1
+    assert repair_diag["attempts"][0]["repaired"] is True
+    assert result.draft.diagnostics["selection_boundary_contract"]["status"] == "verified"
