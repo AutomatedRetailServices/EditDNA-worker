@@ -21,9 +21,13 @@ from .contracts import (
     SemanticRole,
     TakeGroup,
 )
+from .composite_resolver import (
+    apply_composite_family_stabilization,
+    apply_composite_group_split,
+    apply_composite_resolution,
+)
 from .draft_review_provider import DraftReviewProvider, safe_review_draft
 from .hybrid_editorial import EditorialJudge
-from .hybrid_session_cleanup import apply_hybrid_session_cleanup
 from .semantic_idea_equivalence import SemanticEquivalenceArbiter
 from .session_boundaries import safe_group_takes_by_sessions
 from .strategy import choose_strategy
@@ -134,7 +138,13 @@ def build_flow_b_draft(
     # Pass 2: batch semantic intent by bounded creator mini-session. This catches BTS,
     # self-review and failed attempts with context while avoiding one paid call for every
     # singleton/retry group. Semantic winner/alternate evidence is retained for Pass 3.
-    hybrid_cleanup = apply_hybrid_session_cleanup(
+    #
+    # CompositeResolver (composite_resolver.py, see D-023): the single, directly-
+    # callable authority for delivery restoration/rescue/composite marking. Owns
+    # what used to be 14 separately-monkeypatched hybrid_* authorities layered
+    # onto this one call, in the same order, same algorithms -- now one explicit
+    # composition instead of an implicit import-time chain.
+    hybrid_cleanup, composite_split_ids = apply_composite_resolution(
         kept,
         whole_video_context,
         editorial_judge,
@@ -157,6 +167,11 @@ def build_flow_b_draft(
         whole_video_context,
         context_text=context_text,
     )
+    # CompositeResolver's composite-marked pairs (see above) are forced into
+    # singleton groups here so BestTakeResolver's one-winner competition
+    # cannot re-collapse an intended composite delivery. Direct call, no
+    # ContextVar, no monkeypatch of safe_group_takes_by_sessions.
+    grouping = apply_composite_group_split(grouping, kept, composite_split_ids)
 
     # Phase 2 of the architecture rebalance: a narrow, gated semantic-
     # equivalence arbiter may confirm that two groups the lexical layer left
@@ -383,6 +398,14 @@ def build_flow_b_draft(
             "draft_review_removed_group_ids": sorted(removed_group_ids),
         },
     )
+
+    # CompositeResolver step 16 (composite_resolver.py, D-023): the one
+    # genuinely downstream extension, operating on the built draft rather
+    # than raw takes -- repairs a concise discarded delivery + later winner
+    # that jointly cover a redundant selected monolith better than the
+    # monolith alone. Called explicitly here instead of via a monkeypatch
+    # on this function.
+    draft = apply_composite_family_stabilization(draft)
 
     if alternate_group_count == 0:
         judge_stage = "not_applicable_no_alternates"

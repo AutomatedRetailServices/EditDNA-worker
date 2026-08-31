@@ -38,13 +38,17 @@ from .speech_safe_dead_air_guard import install_speech_safe_dead_air_guard
 from .incomplete_bridge_retry_authority import install_incomplete_bridge_retry_authority
 from .terminal_sentence_boundary_guard import install_terminal_sentence_boundary_guard
 from .boundary_retry_tail_guard import install_boundary_retry_tail_guard
-from .hybrid_retry_completion_integrity import install_hybrid_retry_completion_integrity
-from .hybrid_story_guard import install_hybrid_story_coverage_guard
-from .hybrid_alternate_integrity import install_hybrid_alternate_integrity
-from .hybrid_cross_group_retry_integrity import install_hybrid_cross_group_retry_integrity
-from .hybrid_failed_continuation_integrity import install_hybrid_failed_continuation_integrity
-from .hybrid_retry_winner_authority import install_hybrid_retry_winner_authority
-from .hybrid_gold_reconciliation import install_hybrid_gold_reconciliation
+# hybrid_retry_completion_integrity, hybrid_story_guard, hybrid_alternate_integrity,
+# hybrid_cross_group_retry_integrity, hybrid_failed_continuation_integrity,
+# hybrid_retry_winner_authority, hybrid_gold_reconciliation, hybrid_failed_soft_restore,
+# hybrid_unavailable_retry_fallback, hybrid_complementary_delivery_guard,
+# hybrid_semantic_complementary_rescue, hybrid_semantic_composite_bridge,
+# hybrid_composite_best_take, hybrid_semantic_conflict_arbitration, and
+# post_selection_complementary_family_stabilizer are no longer installed as a
+# monkeypatch chain here (D-023): composite_resolver.py calls their own pure
+# functions directly, in the same order, from pipeline.py. Each module's
+# install_*() function still exists unchanged for its own monkeypatch-based
+# tests, it is just no longer invoked from this file.
 from .failed_prefix_completion_rescue import install_failed_prefix_completion_rescue
 from .local_retry_grouping import install_local_retry_grouping
 from .retry_group_integrity import install_retry_group_integrity
@@ -63,15 +67,7 @@ from .round8_retry_reconciliation import install_round8_retry_reconciliation
 from .round9_orphan_prefix_integrity import install_round9_orphan_prefix_integrity
 from .round11_semantic_retry_cleanup import install_round11_semantic_retry_cleanup
 from .short_bts_process_cleanup import install_short_bts_process_cleanup
-from .hybrid_failed_soft_restore import install_hybrid_failed_soft_restore
-from .hybrid_unavailable_retry_fallback import install_hybrid_unavailable_retry_fallback
-from .hybrid_complementary_delivery_guard import install_hybrid_complementary_delivery_guard
-from .hybrid_semantic_complementary_rescue import install_hybrid_semantic_complementary_rescue
-from .hybrid_semantic_composite_bridge import install_hybrid_semantic_composite_bridge
-from .hybrid_composite_best_take import install_hybrid_composite_best_take
-from .hybrid_semantic_conflict_arbitration import install_hybrid_semantic_conflict_arbitration
 from .post_selection_incomplete_bridge_authority import install_post_selection_incomplete_bridge_authority
-from .post_selection_complementary_family_stabilizer import install_post_selection_complementary_family_stabilizer
 from .post_selection_internal_retake_trim import install_post_selection_internal_retake_trim
 from .final_selection_retry_arbiter import install_final_selection_retry_arbiter
 from .selection_boundary_contract import install_selection_freeze, install_boundary_selection_invariant
@@ -112,14 +108,7 @@ install_complete_retry_identity_guard()
 install_speech_safe_dead_air_guard()
 install_terminal_sentence_boundary_guard()
 install_boundary_retry_tail_guard()
-install_hybrid_retry_completion_integrity()
-install_hybrid_story_coverage_guard()
-install_hybrid_alternate_integrity()
-install_hybrid_cross_group_retry_integrity()
 install_incomplete_bridge_retry_authority()
-install_hybrid_failed_continuation_integrity()
-install_hybrid_retry_winner_authority()
-install_hybrid_gold_reconciliation()
 install_failed_prefix_completion_rescue()
 install_local_retry_grouping()
 install_retry_group_integrity()
@@ -138,18 +127,10 @@ install_round8_retry_reconciliation()
 install_round9_orphan_prefix_integrity()
 install_round11_semantic_retry_cleanup()
 install_short_bts_process_cleanup()
-install_hybrid_failed_soft_restore()
-install_hybrid_unavailable_retry_fallback()
-install_hybrid_complementary_delivery_guard()
-install_hybrid_semantic_complementary_rescue()
-install_hybrid_semantic_composite_bridge()
-install_hybrid_composite_best_take()
-install_hybrid_semantic_conflict_arbitration()
 install_post_selection_incomplete_bridge_authority()
 
 # ------------------------------ SELECTION PHASE ------------------------------
 # Every operation that may change spoken content or membership must execute here.
-install_post_selection_complementary_family_stabilizer()
 install_post_selection_internal_retake_trim()
 install_final_selection_retry_arbiter()
 

@@ -67,6 +67,95 @@ def _coverage(left_text: str, right_text: str) -> tuple[int, float]:
     return shared, shared / max(1, len(left))
 
 
+def apply_unavailable_retry_fallback(result, source_takes):
+    """Core transform, extracted for direct use by composite_resolver.py.
+
+    Identical logic to what used to live only inside this module's
+    install-time monkeypatch closure -- see D-023. ``install_hybrid_
+    unavailable_retry_fallback`` below now delegates here so its own
+    (monkeypatch-based) tests keep working unchanged.
+    """
+    if result.requested_chunk_count <= result.available_chunk_count:
+        return result
+    if not result.kept:
+        return result
+
+    decided_ids = {str(clip_id) for clip_id, _label, _confidence in result.semantic_decisions}
+    kept = tuple(sorted(result.kept, key=lambda take: (take.source_order, take.start, take.end, take.clip_id)))
+    removed_ids: set[str] = set()
+    fallback_rows: list[dict] = []
+
+    for candidate in kept:
+        if candidate.clip_id in decided_ids:
+            continue
+        if bool(candidate.complete_idea):
+            continue
+        own_content = _content(candidate.text)
+        if len(own_content) < 2:
+            continue
+
+        best = None
+        best_shared = 0
+        best_coverage = 0.0
+        for replacement in kept:
+            if replacement.clip_id == candidate.clip_id:
+                continue
+            if replacement.source_asset_id != candidate.source_asset_id:
+                continue
+            if replacement.start <= candidate.end:
+                continue
+            delay = float(replacement.start) - float(candidate.end)
+            if delay > 30.0:
+                continue
+            if not bool(replacement.complete_idea):
+                continue
+            if not _critical(candidate.text).issubset(_critical(replacement.text)):
+                continue
+            shared, coverage = _coverage(candidate.text, replacement.text)
+            if shared < 2:
+                continue
+            required = 0.72 if len(own_content) <= 4 else 0.62
+            if coverage < required:
+                continue
+            if coverage > best_coverage or (coverage == best_coverage and shared > best_shared):
+                best = replacement
+                best_shared = shared
+                best_coverage = coverage
+
+        if best is None:
+            continue
+
+        removed_ids.add(candidate.clip_id)
+        fallback_rows.append({
+            "clip_id": candidate.clip_id,
+            "replacement_clip_id": best.clip_id,
+            "reason": "hybrid_unavailable_incomplete_retry_covered_by_later_complete_delivery",
+            "shared_content_tokens": best_shared,
+            "coverage": round(best_coverage, 4),
+            "requested_chunks": result.requested_chunk_count,
+            "available_chunks": result.available_chunk_count,
+        })
+
+    if not removed_ids:
+        return result
+
+    survivors = tuple(take for take in kept if take.clip_id not in removed_ids)
+    deleted_ids = {take.clip_id for take in result.deleted} | removed_ids
+    deleted = tuple(take for take in source_takes if take.clip_id in deleted_ids)
+    diagnostics = tuple(result.diagnostics) + ({
+        "hybrid_unavailable_retry_fallback": fallback_rows,
+        "deleted_ids": sorted(removed_ids),
+    },)
+    return type(result)(
+        kept=survivors,
+        deleted=deleted,
+        requested_chunk_count=result.requested_chunk_count,
+        available_chunk_count=result.available_chunk_count,
+        diagnostics=diagnostics,
+        semantic_decisions=result.semantic_decisions,
+    )
+
+
 def install_hybrid_unavailable_retry_fallback() -> None:
     from . import hybrid_session_cleanup
 
@@ -83,86 +172,7 @@ def install_hybrid_unavailable_retry_fallback() -> None:
             call_kwargs = dict(kwargs)
             call_kwargs["takes"] = source_takes
             result = original(**call_kwargs)
-
-        if result.requested_chunk_count <= result.available_chunk_count:
-            return result
-        if not result.kept:
-            return result
-
-        decided_ids = {str(clip_id) for clip_id, _label, _confidence in result.semantic_decisions}
-        kept = tuple(sorted(result.kept, key=lambda take: (take.source_order, take.start, take.end, take.clip_id)))
-        removed_ids: set[str] = set()
-        fallback_rows: list[dict] = []
-
-        for candidate in kept:
-            if candidate.clip_id in decided_ids:
-                continue
-            if bool(candidate.complete_idea):
-                continue
-            own_content = _content(candidate.text)
-            if len(own_content) < 2:
-                continue
-
-            best = None
-            best_shared = 0
-            best_coverage = 0.0
-            for replacement in kept:
-                if replacement.clip_id == candidate.clip_id:
-                    continue
-                if replacement.source_asset_id != candidate.source_asset_id:
-                    continue
-                if replacement.start <= candidate.end:
-                    continue
-                delay = float(replacement.start) - float(candidate.end)
-                if delay > 30.0:
-                    continue
-                if not bool(replacement.complete_idea):
-                    continue
-                if not _critical(candidate.text).issubset(_critical(replacement.text)):
-                    continue
-                shared, coverage = _coverage(candidate.text, replacement.text)
-                if shared < 2:
-                    continue
-                required = 0.72 if len(own_content) <= 4 else 0.62
-                if coverage < required:
-                    continue
-                if coverage > best_coverage or (coverage == best_coverage and shared > best_shared):
-                    best = replacement
-                    best_shared = shared
-                    best_coverage = coverage
-
-            if best is None:
-                continue
-
-            removed_ids.add(candidate.clip_id)
-            fallback_rows.append({
-                "clip_id": candidate.clip_id,
-                "replacement_clip_id": best.clip_id,
-                "reason": "hybrid_unavailable_incomplete_retry_covered_by_later_complete_delivery",
-                "shared_content_tokens": best_shared,
-                "coverage": round(best_coverage, 4),
-                "requested_chunks": result.requested_chunk_count,
-                "available_chunks": result.available_chunk_count,
-            })
-
-        if not removed_ids:
-            return result
-
-        survivors = tuple(take for take in kept if take.clip_id not in removed_ids)
-        deleted_ids = {take.clip_id for take in result.deleted} | removed_ids
-        deleted = tuple(take for take in source_takes if take.clip_id in deleted_ids)
-        diagnostics = tuple(result.diagnostics) + ({
-            "hybrid_unavailable_retry_fallback": fallback_rows,
-            "deleted_ids": sorted(removed_ids),
-        },)
-        return type(result)(
-            kept=survivors,
-            deleted=deleted,
-            requested_chunk_count=result.requested_chunk_count,
-            available_chunk_count=result.available_chunk_count,
-            diagnostics=diagnostics,
-            semantic_decisions=result.semantic_decisions,
-        )
+        return apply_unavailable_retry_fallback(result, source_takes)
 
     apply_with_unavailable_retry_fallback._cutsell_hybrid_unavailable_retry_fallback = True
     hybrid_session_cleanup.apply_hybrid_session_cleanup = apply_with_unavailable_retry_fallback

@@ -125,14 +125,16 @@ def test_incomplete_continuation_with_new_opening_is_not_misread_as_restart():
     assert rows == []
 
 
-def test_pipeline_binding_points_at_current_final_hybrid_wrapper():
-    from cutsell_worker import hybrid_session_cleanup, pipeline
+def test_pipeline_calls_composite_resolver_not_a_monkeypatch_chain():
+    # D-023: this guard's restore/delete logic is now one step
+    # (_step_complementary_delivery_guard) inside composite_resolver.
+    # apply_composite_resolution, called directly by pipeline.py -- not
+    # reached by monkeypatching hybrid_session_cleanup.apply_hybrid_
+    # session_cleanup. That module-level name must therefore stay the pure,
+    # unwrapped base for the lifetime of the process: this module no longer
+    # installs anything on top of it.
+    from cutsell_worker import composite_resolver, hybrid_session_cleanup, pipeline
 
-    assert pipeline.apply_hybrid_session_cleanup is hybrid_session_cleanup.apply_hybrid_session_cleanup
-    # The complementary guard remains nested in the wrapper chain; the public pipeline
-    # binding must point at whichever final Hybrid authority was installed last.
-    assert getattr(
-        pipeline.apply_hybrid_session_cleanup,
-        "_cutsell_hybrid_composite_best_take",
-        False,
-    ) is True
+    assert pipeline.apply_composite_resolution is composite_resolver.apply_composite_resolution
+    assert not hasattr(hybrid_session_cleanup.apply_hybrid_session_cleanup, "_cutsell_hybrid_composite_best_take")
+    assert not hasattr(hybrid_session_cleanup.apply_hybrid_session_cleanup, "_cutsell_hybrid_complementary_delivery_guard")

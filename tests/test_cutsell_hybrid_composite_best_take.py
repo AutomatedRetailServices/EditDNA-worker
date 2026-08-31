@@ -197,10 +197,18 @@ def test_composite_members_are_split_out_of_exclusive_retry_group():
     assert result == (("setup",), ("detail",), ("later",))
 
 
-def test_pipeline_bindings_point_at_final_composite_authorities():
-    from cutsell_worker import hybrid_session_cleanup, pipeline, session_boundaries
+def test_pipeline_calls_composite_resolver_not_a_monkeypatch_chain():
+    # D-023: composite_resolver.py is CompositeResolver's one directly-
+    # callable entry point. pipeline.py calls it (and apply_composite_
+    # group_split) directly; hybrid_session_cleanup.apply_hybrid_session_
+    # cleanup and session_boundaries.safe_group_takes_by_sessions are no
+    # longer monkeypatched by this module (or the other 13 legacy hybrid_*
+    # authorities composite_resolver now composes explicitly) and must stay
+    # their pure, unwrapped selves.
+    from cutsell_worker import composite_resolver, hybrid_session_cleanup, pipeline, session_boundaries
 
-    assert pipeline.apply_hybrid_session_cleanup is hybrid_session_cleanup.apply_hybrid_session_cleanup
-    assert getattr(pipeline.apply_hybrid_session_cleanup, "_cutsell_hybrid_composite_best_take", False) is True
-    assert pipeline.safe_group_takes_by_sessions is session_boundaries.safe_group_takes_by_sessions
-    assert getattr(pipeline.safe_group_takes_by_sessions, "_cutsell_hybrid_composite_group_split", False) is True
+    assert pipeline.apply_composite_resolution is composite_resolver.apply_composite_resolution
+    assert pipeline.apply_composite_group_split is composite_resolver.apply_composite_group_split
+    assert not hasattr(hybrid_session_cleanup.apply_hybrid_session_cleanup, "_cutsell_hybrid_composite_best_take")
+    assert not hasattr(session_boundaries.safe_group_takes_by_sessions, "_cutsell_hybrid_composite_group_split")
+    assert not hasattr(session_boundaries.safe_group_takes_by_sessions, "_cutsell_semantic_complementary_group_split")
