@@ -15,8 +15,9 @@ retry, composite-forbidden-because-complete-exists, orphan fragment,
 duplicate semantic beat restated far apart in time (documents a known
 current limitation, not yet a passing capability -- see its own docstring),
 uncertain semantic case (arbiter unavailable fails open to preserve, never
-guesses), multilingual paraphrased retry, and causal/story order preserved
-across independent (non-retry) beats.
+guesses), multilingual paraphrased retry, causal/story order preserved
+across independent (non-retry) beats, and numeric correction across two
+takes (conservative freeze-block by design, not an auto-pick).
 
 Explicitly out of this file's scope, because they belong to other
 already-existing pipeline stages this suite does not exercise (clean_cut.py's
@@ -559,3 +560,29 @@ def test_causal_order_preserved_across_independent_non_retry_beats():
     assert _kept(draft) == {"beat1", "beat2", "beat3"}
     kept_in_order = [clip.clip_id for clip in sorted(draft.selected, key=lambda c: c.start)]
     assert kept_in_order == ["beat1", "beat2", "beat3"]
+
+
+# 25. Factual/numeric correction across two takes -- conservative by design --
+
+def test_numeric_correction_across_two_takes_conservatively_blocks_freeze():
+    # A creator visibly self-corrects a number ACROSS two separate takes
+    # (not one continuous utterance -- see fixture 16 for that case). A
+    # human editor would obviously keep the corrected, more confident take.
+    # This suite intentionally does NOT auto-resolve that: distinguishing
+    # "genuine correction" from "genuinely contradictory competing claims"
+    # would need new correction-marker heuristics this deterministic pass
+    # does not have, and guessing wrong here ships a wrong fact. The
+    # designed behavior is the conservative one -- block freeze, let a human
+    # resolve it in seconds -- not a silent auto-pick. If correction-marker
+    # detection is added later, this fixture's oracle should change with it.
+    text_a = "I think the event happened back in 2019."
+    text_b = "Actually, I checked, and it was 2020."
+    a = _take("a", 0.0, 3.0, text_a, complete=True)
+    b = _take("b", 4.0, 7.0, text_b, complete=True)
+
+    draft, equivalence_diag, arbiter = _run_core((a, b), oracle_pairs={("a", "b")})
+
+    diag = draft.diagnostics["final_story_coherence_validation"]
+    assert diag["freeze_blocked"] is True
+    assert diag["contradiction_findings"][0]["number_conflict"] is True
+    assert _kept(draft) == {"a", "b"}
