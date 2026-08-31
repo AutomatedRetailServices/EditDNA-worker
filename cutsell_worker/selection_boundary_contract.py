@@ -31,16 +31,40 @@ def _digest(tokens: tuple[str, ...]) -> str:
     return hashlib.sha256("\x1f".join(tokens).encode("utf-8")).hexdigest()
 
 
-def freeze_selection_contract(draft):
+def freeze_selection_contract(draft, *, plan=None):
+    """Freeze the current ``draft.selected`` as the semantic contract
+    Boundary must not disturb.
+
+    ``plan`` (D-025, optional): the CanonicalEditPlan FinalEditReviewer
+    already returned PASS for. When given, its ``plan_id``/``plan_version``/
+    ``semantic_hash`` are recorded onto this freeze's own diagnostics so a
+    reader can tell which reviewed plan a given freeze corresponds to --
+    "Selection Freeze must reference a specific validated plan," not just
+    freeze whatever ``draft.selected`` happens to contain at call time.
+    This does NOT hard-assert byte-identical hash equality against the
+    plan: ``enforce_complete_idea_boundaries`` legitimately runs between
+    FinalEditReviewer's PASS and this call and can restore source-proven
+    leading/trailing words, which changes the token stream without
+    changing meaning -- a hard equality check here would misfire on that
+    expected, documented step. The mismatch (if any) is still recorded
+    (``matches_reviewed_plan``) for observability, not enforcement.
+    """
     diagnostics = dict(draft.diagnostics or {})
     tokens = semantic_token_stream(draft.selected)
-    diagnostics["selection_boundary_contract"] = {
+    digest = _digest(tokens)
+    contract = {
         "schema_version": "cutsell.selection_boundary_contract.v1",
         "semantic_token_count": len(tokens),
-        "semantic_sha256": _digest(tokens),
+        "semantic_sha256": digest,
         "selected_parent_count_at_freeze": len(tuple(draft.selected)),
         "status": "frozen",
     }
+    if plan is not None:
+        contract["plan_id"] = plan.plan_id
+        contract["plan_version"] = plan.plan_version
+        contract["plan_semantic_hash"] = plan.semantic_hash
+        contract["matches_reviewed_plan"] = (digest == plan.semantic_hash)
+    diagnostics["selection_boundary_contract"] = contract
     return replace(draft, diagnostics=diagnostics)
 
 

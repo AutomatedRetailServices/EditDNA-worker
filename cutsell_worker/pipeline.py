@@ -184,8 +184,15 @@ def build_flow_b_draft(
     # function is already wrapped by several production monkeypatch layers
     # that hardcode its current signature, and this is the one choke point
     # every one of those layers' output must pass through regardless.
+    # D-025: composite_split_ids are protected here too, not just at the
+    # grouping-split step above -- otherwise this call's own, separate
+    # arbiter invocation can re-merge an accepted composite's pieces (or
+    # merge one into an unrelated group), silently discarding a decision
+    # CompositeResolver already made. See reconcile_semantic_idea_
+    # equivalence's own docstring for the exact RAW that exposed this.
     semantic_equivalence_groups, semantic_equivalence_diagnostics = reconcile_semantic_idea_equivalence(
         grouping.groups, kept, semantic_equivalence_arbiter,
+        protected_ids=composite_split_ids,
     )
     group_members = [tuple(take_by_id[clip_id] for clip_id in ids) for ids in semantic_equivalence_groups]
 

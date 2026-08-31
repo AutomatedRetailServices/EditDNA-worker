@@ -552,6 +552,7 @@ def reconcile_semantic_idea_equivalence(
     *,
     policy: SemanticEquivalenceGatePolicy = SemanticEquivalenceGatePolicy(),
     maximum_gap_sec: float = 30.0,
+    protected_ids: frozenset[str] = frozenset(),
 ) -> tuple[Tuple[Tuple[str, ...], ...], dict]:
     """Merge groups the lexical layer left separate only when a narrow
     semantic arbiter is confident they are recording attempts of the same
@@ -571,6 +572,24 @@ def reconcile_semantic_idea_equivalence(
     existing short-phrase floor (<=3 tokens is already "not fuzzy-
     comparable" there).
 
+    ``protected_ids`` (D-025): clip ids CompositeResolver already marked as
+    an accepted composite's pieces (pipeline.py's ``composite_split_ids``,
+    forced into singleton groups by ``apply_composite_group_split`` right
+    before this call). Once CompositeResolver has decided two deliveries
+    are complementary halves of one composite, this step -- running its
+    OWN, separate arbiter call, with no knowledge of that decision -- must
+    never re-merge them (which collapses the composite back into an
+    ordinary one-winner retry contest and can discard both pieces if a
+    third clip wins that contest) or merge either piece into any other
+    group. RAW 33366538992 hit exactly this: the two accepted composite
+    pieces for the pimples/rash idea were both re-merged with an unrelated
+    third clip by this step's own arbiter call, that third clip won the
+    resulting contest, and neither composite piece survived to the final
+    KEEP sequence, despite CompositeResolver's decision record showing them
+    accepted. A protected clip is filtered out of candidate-pair generation
+    entirely -- it is not merely "unlikely to merge", it cannot be proposed
+    as a candidate pair at all here.
+
     Fails open throughout: a pair the arbiter did not confidently confirm
     as the same idea leaves both groups exactly as they were.
     """
@@ -579,6 +598,11 @@ def reconcile_semantic_idea_equivalence(
 
     take_map = {take.clip_id: take for take in takes}
     candidate_pairs = _cross_group_candidate_pairs(groups, take_map, maximum_gap_sec=maximum_gap_sec)
+    if protected_ids:
+        candidate_pairs = tuple(
+            pair for pair in candidate_pairs
+            if pair[2] not in protected_ids and pair[3] not in protected_ids
+        )
     if not candidate_pairs:
         return groups, {"status": "no_eligible_pairs", "candidate_pair_count": 0, "merged_pair_count": 0}
 

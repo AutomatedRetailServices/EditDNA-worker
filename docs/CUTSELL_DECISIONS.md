@@ -434,6 +434,163 @@ missing hooks above) that none of those remaining hooks reference
 `apply_hybrid_session_cleanup`, so this scope boundary is now evidence-based rather
 than assumed.
 
+## D-025 — RAW 33366538992 follow-up: composite persistence, freeze/review consistency, plan versioning
+**Status: CANONICAL**
+
+Independent inspection of RAW 33366538992's actual result JSON found two architectural
+inconsistencies. Both were root-caused to specific code, fixed generally (no
+Video00-specific logic), and pinned with tests. Building the fixes surfaced two more
+real bugs in the same week-old D-024 code, found by writing rigorous tests rather than
+by further human inspection -- recorded honestly below, not smoothed over.
+
+### Issue 1 — accepted composite did not survive to final KEEP membership
+
+**Root cause:** `reconcile_semantic_idea_equivalence` (`take_grouping_provider.py`,
+Pass 3) runs its OWN, separate Gemini arbiter call on the lexical grouping's output,
+including composite-marked clips that `apply_composite_group_split` (Pass 3, run
+immediately before) had already forced into protected singleton groups. That
+protection stops the LEXICAL grouper from re-merging them, but
+`reconcile_semantic_idea_equivalence` has no knowledge of it at all: its own arbiter
+call confirmed the two accepted composite pieces were "the same idea" (true -- that is
+exactly why they were accepted as a composite) and re-merged them into one ordinary
+retry contest. A third, unrelated clip then won that contest outright, and neither
+composite piece survived to KEEP -- exactly what `lost_semantic_atoms` correctly
+flagged (`freeze_blocked=true`), but the underlying composite decision was still
+silently discarded.
+
+**Fix:** `reconcile_semantic_idea_equivalence` gained a `protected_ids` parameter that
+filters composite-marked clips out of candidate-pair generation entirely -- not
+"unlikely to merge", structurally unable to be proposed as a candidate pair.
+`pipeline.py` passes the same `composite_split_ids` `apply_composite_group_split`
+already receives. Tests: `tests/test_cutsell_semantic_idea_equivalence_grouping.py`
+pins that a protected pair is never re-merged with each other AND never merged into an
+unrelated group, and that the arbiter is never even called for a fully-protected
+candidate set.
+
+### Issue 2 — Freeze state contradicted Review state
+
+**Root cause:** `install_selection_freeze()`/`install_boundary_selection_invariant()`
+(`selection_boundary_contract.py`) monkeypatch `pipeline.build_flow_b_draft` to
+unconditionally freeze-then-verify at the end of Pass 3+legacy-Selection-phase hooks
+-- a holdover from the pre-V1 architecture where `build_flow_b_draft`'s own output was
+the final answer. Clean Cut Core V1 added `deterministic_best_take_authority`,
+`final_story_coherence_validation`, `build_canonical_edit_plan`, and
+`final_edit_reviewer.review` as MORE semantic authorities that run AFTER
+`process_local_sources` (and therefore after that entire legacy chain) returns to
+`universal_clean_cut.py`. When this module's own gate later determines
+`freeze_blocked=true` and correctly skips its OWN freeze call, the diagnostics key
+`selection_boundary_contract` is left at whatever the premature, pre-StoryValidator
+legacy freeze already wrote ("frozen" or "verified") -- a direct, misleading
+contradiction with `freeze_blocked=true` in the same result JSON.
+
+**Fix:** `universal_clean_cut.py`'s freeze-blocked branch now explicitly overwrites
+`diagnostics["selection_boundary_contract"]` with an honest
+`"not_frozen_freeze_blocked_by_coherence_review"` status (recording the superseded
+premature status for observability, not silently dropping it), rather than leaving the
+stale legacy value in place. The much larger legacy Selection-phase/Boundary-phase
+monkeypatch chain this exposed (~13 more `install_*` hooks wrapping
+`build_flow_b_draft` for post_selection/round8-9-11/final_selection_retry_arbiter
+work) is NOT touched -- restructuring it to run StoryValidator/FinalEditReviewer
+BEFORE that whole chain, rather than working around its premature freeze after the
+fact, is a real, larger, separate re-architecture and out of this cycle's scope; this
+fix makes the CURRENT two-phase-freeze reality self-consistent rather than attempting
+to eliminate it. Test: `tests/test_cutsell_universal_clean_cut.py`'s
+`test_freeze_blocked_never_leaves_a_stale_frozen_or_verified_contract` simulates the
+exact premature-freeze state and pins that it can never coexist with
+`freeze_blocked=true` afterward.
+
+### Two more real bugs found while building the above (D-025, same cycle)
+
+1. **`CanonicalEditPlan.keep_sequence` was re-sorted by timestamp instead of
+   preserving `draft.selected`'s actual order.** `render_plan.py` renders
+   `for clip in draft.selected` directly -- that tuple's order IS the true final
+   composed order (Composer is explicitly allowed to reorder independent ideas for
+   pacing/sales logic). Re-sorting by `(source_order, start, end, clip_id)` when
+   building the "single semantic handoff to physical editing" made every
+   order-sensitive check silently unable to ever detect a real reordering. Fixed to
+   iterate `draft.selected` verbatim.
+2. **Every accepted composite was misclassified as `unresolved_ambiguous`
+   (DUPLICATE_IDEA + UNRESOLVED_RETRY findings).** `build_canonical_edit_plan`'s idea
+   construction treated ANY idea with 2+ surviving members as ambiguous, with no
+   exception for the case where those 2+ members are exactly an accepted composite's
+   own components -- which is the CORRECT, intended outcome, not an unresolved retry
+   contest. Fixed: `coverage_status` is `"complete"` (not `"unresolved_ambiguous"`)
+   when every surviving member of a 2+-winner idea is a composite-protected clip.
+   Without this fix, FinalEditReviewer would have FAILed on every correctly-resolved
+   composite, permanently.
+
+Both were caught by writing the STORY_ORDER_BREAK detector's own tests, not by manual
+inspection -- direct evidence for why the tests were worth writing carefully rather
+than assuming the D-024 code from the prior cycle was already correct.
+
+### Plan identity: `plan_id` / `plan_version` / `semantic_hash`
+
+`CanonicalEditPlan` gained `plan_id` (derived from `project_id` + `semantic_hash`, so
+a materially different KEEP timeline gets a different id), `plan_version` (always `1`
+this cycle -- no automatic repair loop exists yet to produce v2/v3, see below), and
+`semantic_hash` (the same token-stream digest `selection_boundary_contract.py` already
+computes, reused via its `semantic_token_stream` helper rather than a second,
+possibly-divergent implementation). `freeze_selection_contract` gained an optional
+`plan` parameter that records `plan_id`/`plan_version`/`plan_semantic_hash` and a
+`matches_reviewed_plan` boolean onto its own diagnostics -- observability, not a hard
+equality gate, because `enforce_complete_idea_boundaries` legitimately runs between
+FinalEditReviewer's PASS and the freeze call and can restore source-proven leading/
+trailing words, which changes the token stream without changing meaning.
+
+### STORY_ORDER_BREAK: a real, narrow detector (not the general causal-order case)
+
+`final_edit_reviewer.py` now actually detects `STORY_ORDER_BREAK`, scoped narrowly to
+one accepted composite's own components: they must appear in the final KEEP sequence
+in the same relative order they were recorded in ("natural continuation" is exactly
+what `hybrid_composite_best_take.py` already requires to accept a composite in the
+first place). This deliberately does NOT attempt general cross-idea narrative-order
+checking (added to the vocabulary as `CAUSAL_ORDER_BREAK`, left in `_UNIMPLEMENTED_
+KINDS`) -- Composer is explicitly allowed to reorder independent ideas, so a blanket
+order check would false-positive on legitimate behavior. This narrow version directly
+addresses RAW 33366538992's own regression harness findings
+(`pimples_micro_order`, `sonography_good_before_diagnosis`), which are exactly this
+failure shape.
+
+### PostRenderWatchListenQC: one real structural check, perceptual checks still a gap
+
+`check_render_plan_covers_edit_plan` (`post_render_watch_listen_qc.py`) is a real,
+tested function -- not a stub -- but deliberately scoped to the deterministic render
+PLAN artifact (`render_plan.RenderSegment`), not decoded MP4 bytes (still unreachable
+from this sandbox). It verifies every `keep_sequence` clip is fully time-covered by
+some render segment in the same source, correctly tolerating `render_plan.py`'s own
+segment-coalescing (which merges touching segments and drops the second's clip_id --
+a naive per-clip_id-segment match would false-positive on that legitimate behavior).
+This catches a distinct failure mode from the existing text-token-hash freeze check: a
+render-plan bug that silently truncates or drops a segment's actual time range without
+touching its text. All genuinely perceptual checks (clipped phonemes, fumble frames,
+framing, A/V drift, real decode/export integrity) remain unimplemented -- not
+fabricated without real signal-processing capability against a reachable file.
+
+### Explicitly NOT built this cycle, stated honestly
+
+- **The automatic review/repair loop** (CanonicalEditPlan v1 -> FinalEditReviewer FAIL
+  -> route affected Idea to CompositeResolver/BestTakeResolver -> v2 -> re-review ->
+  Freeze v2). This requires re-running Pass 2/3 of `pipeline.py` on a SUBSET of takes
+  while provably preserving every other already-valid group's decision untouched --
+  a real pipeline restructuring, not a bolt-on, and exactly the kind of change that
+  produced this cycle's own two-more-bugs-found-while-building experience above.
+  `plan_version` is wired to support it (always `1` until it exists) but the loop
+  itself is not built. Today's actual repair path is a human reviewing a FAIL and
+  triggering a fresh run -- one bounded "repair attempt", performed by a person.
+- **General cross-idea `CAUSAL_ORDER_BREAK` detection.** See STORY_ORDER_BREAK above
+  for why the narrow, composite-scoped version was built instead.
+- **`INCOMPLETE_DELIVERY`, `ORPHAN_FRAGMENT`, `INCOMPATIBLE_COMPOSITE`.** No existing
+  deterministic detector to draw from; unchanged from D-024.
+- **PostRenderWatchListenQC's perceptual half** (everything except the one structural
+  check above).
+
+### Verification
+
+Full suite: 1328 passed, 1 skipped (same 2 pre-existing unrelated failures excluded as
+throughout this session), run repeatedly through this cycle's fixes with consistent
+results. 17 new tests across `take_grouping_provider`, `universal_clean_cut`,
+`canonical_edit_plan`/`final_edit_reviewer`, and the new post-render structural check.
+
 ## Change rule
 
 When a new decision changes product behavior, update this file in the same development cycle. Do not silently redefine CutSell through code alone.

@@ -259,6 +259,27 @@ def test_canonical_edit_plan_and_reviewer_diagnostics_survive_boundary_unchanged
     assert reviewer_diag["findings"] == []
 
 
+def test_successful_freeze_records_which_reviewed_plan_it_matches(monkeypatch):
+    # D-025: a successful freeze must reference the specific plan
+    # FinalEditReviewer PASSed, not just silently hash draft.selected.
+    monkeypatch.setattr(universal, "process_local_sources", _fake_process_local_sources)
+    monkeypatch.setattr(universal, "polish_human_boundaries_v5", lambda result, paths: result)
+
+    result = universal.process_universal_clean_cut_sources(
+        object(), {}, asr_provider=object(), selection_reasoner=None,
+    )
+
+    contract = result.draft.diagnostics["selection_boundary_contract"]
+    plan_diag = result.draft.diagnostics["canonical_edit_plan"]
+    # enforce_selection_contract runs after freeze and advances status to
+    # "verified" (carrying the plan fields through), confirming Boundary
+    # did not change the ordered spoken content after the freeze.
+    assert contract["status"] == "verified"
+    assert contract["plan_id"] == plan_diag["plan_id"]
+    assert contract["plan_semantic_hash"] == plan_diag["semantic_hash"]
+    assert contract["matches_reviewed_plan"] is True
+
+
 def _contradictory_ambiguous_draft():
     # Thin score gap (0.60 vs 0.58, < CLEAR_WINNER_MINIMUM_GAP) so
     # deterministic_best_take_authority leaves both selected; the two texts
@@ -304,6 +325,50 @@ def test_freeze_blocked_by_contradiction_skips_freeze_and_boundary(monkeypatch):
     assert "freeze_blocked_pending_human_review" in result.stage_status["selection_phase_authority"]
     # Both contradictory clips remain visible (unresolved), for human review.
     assert sorted(c.clip_id for c in result.draft.selected) == ["a", "b"]
+
+
+def test_freeze_blocked_never_leaves_a_stale_frozen_or_verified_contract(monkeypatch):
+    # D-025 (Issue 2, RAW 33366538992): install_selection_freeze()/install_
+    # boundary_selection_invariant() unconditionally freeze+verify inside
+    # process_local_sources, BEFORE this gate ever runs -- so a real
+    # (unmocked) draft coming back from process_local_sources can already
+    # carry diagnostics.selection_boundary_contract = {"status": "frozen"}
+    # or "verified" from that premature pass, stale by the time this gate
+    # determines freeze must be blocked. That state combination (freeze_
+    # blocked=true AND selection_boundary_contract.status in {frozen,
+    # verified}) must never survive this gate.
+    def fake_process(request, local_paths, **kwargs):
+        draft = _contradictory_ambiguous_draft()
+        # Simulate the premature legacy freeze that already ran inside
+        # process_local_sources before this module ever sees the draft.
+        stale_diagnostics = dict(draft.diagnostics)
+        stale_diagnostics["selection_boundary_contract"] = {
+            "schema_version": "cutsell.selection_boundary_contract.v1",
+            "status": "verified",
+            "semantic_sha256": "stale-hash-from-before-storyvalidator-ran",
+        }
+        draft = replace(draft, diagnostics=stale_diagnostics)
+        return ProcessingResult(
+            schema_version=SCHEMA_VERSION, project_id="p1", state=JobState.DRAFT_READY,
+            draft=draft, stage_status={},
+        )
+
+    monkeypatch.setattr(universal, "process_local_sources", fake_process)
+    monkeypatch.setattr(universal, "polish_human_boundaries_v5", lambda result, paths: result)
+    monkeypatch.setattr(universal, "enforce_complete_idea_boundaries", lambda result, paths, **kw: result)
+
+    result = universal.process_universal_clean_cut_sources(
+        object(), {}, asr_provider=object(), selection_reasoner=None,
+    )
+
+    assert result.stage_status["freeze_blocked_pending_coherence_review"] is True
+    contract = result.draft.diagnostics["selection_boundary_contract"]
+    assert contract["status"] not in {"frozen", "verified"}
+    assert contract["status"] == "not_frozen_freeze_blocked_by_coherence_review"
+    # The stale value is recorded for observability, not silently dropped.
+    assert contract["superseded_premature_freeze_status"] == "verified"
+    assert contract["plan_id"]
+    assert contract["semantic_hash"]
 
 
 def test_freeze_not_blocked_when_no_coherence_failure(monkeypatch):

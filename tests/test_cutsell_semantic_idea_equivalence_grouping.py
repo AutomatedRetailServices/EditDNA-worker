@@ -120,6 +120,55 @@ def test_reconcile_merges_groups_arbiter_confirms_same_idea():
     assert set(merged) == {("a", "b"), ("c",)}
 
 
+def test_reconcile_never_remerges_protected_composite_pieces_even_if_arbiter_confirms_same_idea():
+    # D-025: RAW 33366538992 -- CompositeResolver already accepted "a" and
+    # "b" as a two-piece composite and forced them into singleton groups.
+    # This step's OWN, separate arbiter call would otherwise confirm they
+    # are the same idea (true! that's exactly why they're a composite) and
+    # re-merge them into one ordinary retry contest -- which a third clip
+    # can then win outright, discarding both accepted composite pieces.
+    # protected_ids must make that impossible.
+    groups = (("a",), ("b",), ("c",))
+    takes = (
+        _take("a", 0.0, 2.0, "también me salían espinillas era como una alergia"),
+        _take("b", 5.0, 7.0, "otro síntoma que tenía eran espinillas detrás de la oreja"),
+        _take("c", 10.0, 12.0, "por temporada me salió un acné en la espalda"),
+    )
+    arbiter = FixedArbiter(same_idea_pairs={
+        ("también me salían espinillas era como una alergia", "otro síntoma que tenía eran espinillas detrás de la oreja"),
+        ("también me salían espinillas era como una alergia", "por temporada me salió un acné en la espalda"),
+    })
+
+    merged, diagnostics = reconcile_semantic_idea_equivalence(
+        groups, takes, arbiter, protected_ids=frozenset({"a", "b"}),
+    )
+
+    assert diagnostics["status"] == "no_eligible_pairs"
+    assert set(merged) == {("a",), ("b",), ("c",)}
+    assert arbiter.calls == 0  # never even asked -- protected pairs are filtered before the call
+
+
+def test_reconcile_protects_composite_pieces_from_merging_into_unrelated_groups_too():
+    # Not just from re-merging with each other -- a protected clip must not
+    # merge into ANY other group either, since that would also silently
+    # remove it from its accepted composite.
+    groups = (("a",), ("c",))
+    takes = (
+        _take("a", 0.0, 2.0, "también me salían espinillas era como una alergia"),
+        _take("c", 10.0, 12.0, "por temporada me salió un acné en la espalda"),
+    )
+    arbiter = FixedArbiter(same_idea_pairs={
+        ("también me salían espinillas era como una alergia", "por temporada me salió un acné en la espalda"),
+    })
+
+    merged, diagnostics = reconcile_semantic_idea_equivalence(
+        groups, takes, arbiter, protected_ids=frozenset({"a"}),
+    )
+
+    assert diagnostics["status"] == "no_eligible_pairs"
+    assert set(merged) == {("a",), ("c",)}
+
+
 def test_reconcile_never_merges_when_arbiter_says_different_idea():
     groups = (("a",), ("b",))
     takes = (

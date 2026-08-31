@@ -191,6 +191,32 @@ def process_universal_clean_cut_sources(
             polish_stage = "not_applicable_freeze_blocked_by_coherence_validation"
             contract_stage = "not_applicable_freeze_blocked_by_coherence_validation"
             selection_stage = f"{selection_stage}+freeze_blocked_pending_human_review"
+
+            # D-025 (Issue 2): install_selection_freeze()/install_boundary_
+            # selection_invariant() unconditionally freeze+verify inside
+            # process_local_sources -> build_flow_b_draft, BEFORE StoryValidator/
+            # CanonicalEditPlan/FinalEditReviewer ever run in this module -- a
+            # holdover from the pre-V1 architecture where build_flow_b_draft's
+            # own output was the final answer. That leaves diagnostics.
+            # selection_boundary_contract.status stuck at "frozen"/"verified"
+            # from that premature, pre-StoryValidator freeze even though this
+            # gate has just determined the real final draft must NOT be frozen
+            # -- a direct evidence-level contradiction (RAW 33366538992: the
+            # result JSON reported freeze_blocked=true AND selection_boundary_
+            # contract.status=frozen simultaneously). This is the one place
+            # that authoritatively knows the true state, so it corrects the
+            # record rather than leaving that stale, misleading key in place.
+            stale_contract = dict((result.draft.diagnostics or {}).get("selection_boundary_contract") or {})
+            diagnostics = dict(result.draft.diagnostics or {})
+            diagnostics["selection_boundary_contract"] = {
+                "schema_version": "cutsell.selection_boundary_contract.v1",
+                "status": "not_frozen_freeze_blocked_by_coherence_review",
+                "plan_id": edit_plan.plan_id,
+                "plan_version": edit_plan.plan_version,
+                "semantic_hash": edit_plan.semantic_hash,
+                "superseded_premature_freeze_status": stale_contract.get("status"),
+            }
+            result = replace(result, draft=replace(result.draft, diagnostics=diagnostics))
         else:
             # Complete-idea recovery may restore source-proven leading/trailing spoken words.
             # It therefore belongs before Selection freeze regardless of semantic authority.
@@ -202,7 +228,10 @@ def process_universal_clean_cut_sources(
             recovery_stage = "complete_idea_word_lock_overlap_guard_before_freeze"
 
             # Hard semantic phase barrier. Everything after this line is Boundary-only.
-            result = replace(result, draft=freeze_selection_contract(result.draft))
+            # Freezes the specific plan FinalEditReviewer PASSed (D-025) --
+            # see freeze_selection_contract's own docstring for why this is
+            # observability (matches_reviewed_plan), not a hard equality gate.
+            result = replace(result, draft=freeze_selection_contract(result.draft, plan=edit_plan))
 
             result = polish_human_boundaries_v5(result, local_paths)
             polish_stage = "source_evidenced_multimodal_v5_boundary_only_complete"

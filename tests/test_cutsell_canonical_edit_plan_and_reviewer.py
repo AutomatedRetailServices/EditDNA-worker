@@ -25,13 +25,14 @@ def clip(clip_id, start, end, text, *, selected, source="src"):
     )
 
 
-def draft(*, selected=(), discarded=(), take_judge_groups=(), coherence=None):
+def draft(*, selected=(), discarded=(), take_judge_groups=(), coherence=None, hybrid_editorial_chunks=()):
     return DraftTimeline(
         schema_version=SCHEMA_VERSION, project_id="p", strategy=EditStrategy.STORYTELLING,
         selected=selected, alternates=(), discarded=discarded,
         diagnostics={
             "take_judge_groups": list(take_judge_groups),
             "final_story_coherence_validation": coherence or {},
+            "hybrid_editorial_chunks": list(hybrid_editorial_chunks),
         },
     )
 
@@ -172,12 +173,15 @@ def test_review_never_mutates_the_plan_or_returns_a_membership_edit():
 
 def test_final_edit_reviewer_has_no_detector_for_incomplete_delivery_orphan_fragment_or_incompatible_composite():
     # Honest gap, not silently-absent coverage: these three finding kinds
-    # (plus STORY_ORDER_BREAK) are recognized in the vocabulary but no
-    # deterministic detector exists for them anywhere in this pipeline, so
-    # review() can never emit them today. This fixture is exactly the kind
-    # of case a real detector would need to catch (an incomplete, clearly
-    # unfinished delivery that is nonetheless the ONLY thing selected for
-    # its idea) and pins that, right now, it passes silently.
+    # (plus the general cross-idea CAUSAL_ORDER_BREAK -- see
+    # STORY_ORDER_BREAK's own narrower, real detector in
+    # test_composite_order_findings, below) are recognized in the
+    # vocabulary but no deterministic detector exists for them anywhere in
+    # this pipeline, so review() can never emit them today. This fixture is
+    # exactly the kind of case a real detector would need to catch (an
+    # incomplete, clearly unfinished delivery that is nonetheless the ONLY
+    # thing selected for its idea) and pins that, right now, it passes
+    # silently.
     from cutsell_worker.final_edit_reviewer import _UNIMPLEMENTED_KINDS
 
     incomplete = DraftClip(
@@ -196,3 +200,82 @@ def test_final_edit_reviewer_has_no_detector_for_incomplete_delivery_orphan_frag
 
     assert result.status == "PASS"  # no detector exists -- this is the gap, not a pass
     assert not any(f.kind in _UNIMPLEMENTED_KINDS for f in (*result.findings, *result.warnings))
+
+
+def _composite_hybrid_editorial_chunks(clip_ids):
+    return [{"hybrid_composite_best_take": {"split_group_clip_ids": list(clip_ids)}}]
+
+
+def test_composite_order_findings_passes_when_components_stay_in_recording_order():
+    piece_a = clip("piece_a", 0.0, 3.0, "first half of the idea", selected=True)
+    piece_b = clip("piece_b", 3.0, 6.0, "second half of the idea", selected=True)
+    d = draft(
+        selected=(piece_a, piece_b),
+        take_judge_groups=[{"group_id": "g1", "ranked": [
+            {"clip_id": "piece_a", "score": 0.7, "reason": "x"},
+            {"clip_id": "piece_b", "score": 0.7, "reason": "x"},
+        ]}],
+        coherence={"freeze_blocked": False, "lost_semantic_atoms": [], "contradiction_findings": []},
+        hybrid_editorial_chunks=_composite_hybrid_editorial_chunks(["piece_a", "piece_b"]),
+    )
+
+    plan = build_canonical_edit_plan(d)
+    result = review(plan)
+
+    assert plan.ideas[0].is_composite is True
+    assert result.status == "PASS"
+
+
+def test_composite_order_findings_blocks_when_components_are_reordered_in_final_keep():
+    # piece_a was RECORDED first (start=0.0) and piece_b second (start=
+    # 10.0), but the actual final composed/rendered order (draft.selected's
+    # own tuple order, which CanonicalEditPlan.keep_sequence must preserve
+    # verbatim -- render_plan.py renders `for clip in draft.selected`
+    # directly) places piece_b BEFORE piece_a. Exactly the failure shape RAW
+    # 33366538992's own regression harness flagged
+    # (pimples_micro_order/sonography_good_before_diagnosis).
+    piece_a = clip("piece_a", 0.0, 3.0, "first half of the idea", selected=True)
+    piece_b = clip("piece_b", 10.0, 13.0, "second half of the idea", selected=True)
+    d = draft(
+        selected=(piece_b, piece_a),  # actual composed order: piece_b THEN piece_a
+        take_judge_groups=[{"group_id": "g1", "ranked": [
+            {"clip_id": "piece_a", "score": 0.7, "reason": "x"},
+            {"clip_id": "piece_b", "score": 0.7, "reason": "x"},
+        ]}],
+        coherence={"freeze_blocked": False, "lost_semantic_atoms": [], "contradiction_findings": []},
+        hybrid_editorial_chunks=_composite_hybrid_editorial_chunks(["piece_a", "piece_b"]),
+    )
+
+    plan = build_canonical_edit_plan(d)
+    result = review(plan)
+
+    assert plan.ideas[0].is_composite is True
+    assert result.status == "FAIL"
+    from cutsell_worker.final_edit_reviewer import STORY_ORDER_BREAK
+    order_findings = [f for f in result.findings if f.kind == STORY_ORDER_BREAK]
+    assert len(order_findings) == 1
+    assert order_findings[0].owning_authority == "CompositeResolver"
+    assert order_findings[0].plan_id == plan.plan_id
+
+
+def test_composite_order_findings_ignores_non_composite_ideas():
+    # A normal (non-composite) two-member family with both somehow still
+    # selected is a DUPLICATE_IDEA/UNRESOLVED_RETRY case (tested elsewhere),
+    # not a STORY_ORDER_BREAK -- the order detector must not fire for it.
+    a = clip("a", 5.0, 8.0, "take one", selected=True)
+    b = clip("b", 0.0, 3.0, "take two", selected=True)
+    d = draft(
+        selected=(a, b),
+        take_judge_groups=[{"group_id": "g1", "ranked": [
+            {"clip_id": "a", "score": 0.6, "reason": "x"},
+            {"clip_id": "b", "score": 0.58, "reason": "x"},
+        ]}],
+        coherence={"freeze_blocked": False, "lost_semantic_atoms": [], "contradiction_findings": []},
+    )
+
+    plan = build_canonical_edit_plan(d)
+    result = review(plan)
+
+    from cutsell_worker.final_edit_reviewer import STORY_ORDER_BREAK
+    assert plan.ideas[0].is_composite is False
+    assert not any(f.kind == STORY_ORDER_BREAK for f in result.findings)

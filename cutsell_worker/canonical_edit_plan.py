@@ -29,8 +29,11 @@ a place to attach without another architecture reset.
 """
 from __future__ import annotations
 
+import hashlib
 from dataclasses import dataclass, field
 from typing import Mapping
+
+from .selection_boundary_contract import semantic_token_stream
 
 
 @dataclass(frozen=True)
@@ -76,9 +79,24 @@ class DiscardRecord:
 
 @dataclass(frozen=True)
 class CanonicalEditPlan:
-    """The single structured semantic handoff to physical editing."""
+    """The single structured semantic handoff to physical editing.
+
+    ``plan_id``/``plan_version``/``semantic_hash`` (D-025): SelectionFreeze
+    must reference a specific, identified plan rather than freezing whatever
+    ``draft.selected`` happens to contain -- see ``selection_boundary_
+    contract.freeze_selection_contract``'s ``plan`` parameter, which records
+    these onto its own diagnostics for traceability. ``plan_version`` is
+    always 1 today: this cycle does not implement an automatic repair loop
+    that would produce v2/v3 (see D-025's "not yet built" note) -- a human
+    reviewing a FAIL is the only repair path right now, and a fresh pipeline
+    run after a human-driven change produces a new plan_id (it is derived
+    from the actual KEEP content), not a new version of the same one.
+    """
 
     project_id: str
+    plan_id: str
+    plan_version: int
+    semantic_hash: str
     ideas: tuple[EditPlanIdea, ...]
     keep_sequence: tuple[EditPlanClip, ...]
     discard_provenance: tuple[DiscardRecord, ...]
@@ -135,16 +153,23 @@ def build_canonical_edit_plan(draft) -> CanonicalEditPlan:
         discarded = tuple(cid for cid in member_ids if cid not in selected_ids)
         if not member_ids:
             continue
+        is_accepted_composite = len(winning) >= 2 and all(cid in composite_ids for cid in winning)
         if not winning:
             coverage_status = "missing"
-        elif len(winning) >= 2:
+        elif len(winning) >= 2 and not is_accepted_composite:
+            # D-025: 2+ surviving members is only ambiguous when they are
+            # NOT all pieces of one CompositeResolver-accepted composite --
+            # an accepted composite's 2+ components jointly realizing one
+            # idea is the CORRECT, intended outcome, not an unresolved
+            # retry contest. Without this check, every accepted composite
+            # would incorrectly report DUPLICATE_IDEA/UNRESOLVED_RETRY.
             coverage_status = "unresolved_ambiguous"
         else:
             coverage_status = "complete"
         ideas.append(EditPlanIdea(
             idea_id=str(group.get("group_id") or ""),
             winning_clip_ids=winning,
-            is_composite=any(cid in composite_ids for cid in winning),
+            is_composite=is_accepted_composite,
             discarded_clip_ids=discarded,
             coverage_status=coverage_status,
         ))
@@ -153,6 +178,14 @@ def build_canonical_edit_plan(draft) -> CanonicalEditPlan:
         cid: idea.idea_id for idea in ideas for cid in idea.winning_clip_ids
     }
 
+    # D-025: iterate draft.selected in ITS OWN order, not re-sorted by
+    # timestamp. render_plan.py renders `for clip in draft.selected` directly
+    # -- that tuple's order IS the actual final rendered order (Composer is
+    # explicitly allowed to reorder clips for pacing/narrative/sales logic),
+    # so this is "the single semantic handoff to physical editing" only if
+    # it reflects that real order. Re-sorting here would have made every
+    # order-sensitive check (e.g. the composite continuity check below)
+    # silently unable to ever detect a real reordering.
     keep_sequence = tuple(
         EditPlanClip(
             clip_id=clip.clip_id,
@@ -166,7 +199,7 @@ def build_canonical_edit_plan(draft) -> CanonicalEditPlan:
             protected_leading_word=(clip.words[0].text if clip.words else None),
             protected_trailing_word=(clip.words[-1].text if clip.words else None),
         )
-        for clip in sorted(draft.selected, key=lambda c: (c.source_order, c.start, c.end, c.clip_id))
+        for clip in draft.selected
     )
 
     discard_provenance = tuple(
@@ -181,8 +214,16 @@ def build_canonical_edit_plan(draft) -> CanonicalEditPlan:
     )
 
     freeze_blocked = bool(coherence.get("freeze_blocked"))
+    project_id = getattr(draft, "project_id", "")
+    semantic_hash = hashlib.sha256(
+        "\x1f".join(semantic_token_stream(draft.selected)).encode("utf-8")
+    ).hexdigest()
+    plan_id = "plan_" + hashlib.sha256(f"{project_id}|{semantic_hash}".encode()).hexdigest()[:16]
     return CanonicalEditPlan(
-        project_id=getattr(draft, "project_id", ""),
+        project_id=project_id,
+        plan_id=plan_id,
+        plan_version=1,
+        semantic_hash=semantic_hash,
         ideas=tuple(ideas),
         keep_sequence=keep_sequence,
         discard_provenance=discard_provenance,
