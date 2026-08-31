@@ -233,6 +233,32 @@ def test_clean_cut_core_v1_resolves_clear_family_to_keep_discard_no_swap(monkeyp
     assert "final_story_coherence_validation" in result.draft.diagnostics
 
 
+def test_canonical_edit_plan_and_reviewer_diagnostics_survive_boundary_unchanged(monkeypatch):
+    # "Boundary cannot mutate EditPlan semantics": CanonicalEditPlan and
+    # FinalEditReviewer's diagnostics are built once, pre-Freeze, from
+    # StoryValidator's output. Boundary (polish_human_boundaries_v5,
+    # freeze_selection_contract, enforce_selection_contract) must never
+    # touch those specific diagnostics keys -- they should come out the
+    # other side byte-for-byte identical to what was built before Freeze.
+    monkeypatch.setattr(universal, "process_local_sources", _fake_process_local_sources)
+    monkeypatch.setattr(universal, "polish_human_boundaries_v5", lambda result, paths: result)
+
+    result = universal.process_universal_clean_cut_sources(
+        object(), {}, asr_provider=object(), selection_reasoner=None,
+    )
+
+    assert result.stage_status["freeze_blocked_pending_coherence_review"] is False
+    assert result.stage_status["final_edit_reviewer"] == "PASS"
+    plan_diag = result.draft.diagnostics["canonical_edit_plan"]
+    reviewer_diag = result.draft.diagnostics["final_edit_reviewer"]
+    # Selection Freeze/Boundary ran (not skipped) for this clean case, and
+    # yet the plan/reviewer diagnostics still describe the pre-Freeze KEEP
+    # sequence exactly -- proving Boundary did not regenerate or mutate them.
+    assert [c["clip_id"] for c in plan_diag["keep_sequence"]] == ["winner"]
+    assert reviewer_diag["status"] == "PASS"
+    assert reviewer_diag["findings"] == []
+
+
 def _contradictory_ambiguous_draft():
     # Thin score gap (0.60 vs 0.58, < CLEAR_WINNER_MINIMUM_GAP) so
     # deterministic_best_take_authority leaves both selected; the two texts

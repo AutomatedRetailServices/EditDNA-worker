@@ -146,3 +146,53 @@ def test_keep_sequence_and_discard_provenance_reflect_the_actual_final_draft():
     assert plan.keep_sequence[0].text == "kept text"
     assert [r.clip_id for r in plan.discard_provenance] == ["b"]
     assert plan.discard_provenance[0].text == "discarded text"
+
+
+def test_review_never_mutates_the_plan_or_returns_a_membership_edit():
+    # "Reviewer routes failure rather than directly editing membership":
+    # review() takes a frozen CanonicalEditPlan and returns findings only --
+    # there is no code path in it that can construct a new draft, a new
+    # plan, or otherwise change what is selected/discarded. Calling it
+    # twice on the same plan must be side-effect-free and idempotent.
+    a = clip("a", 0.0, 5.0, "take one", selected=True)
+    b = clip("b", 5.0, 10.0, "take two", selected=True)
+    d = draft(
+        selected=(a, b),
+        take_judge_groups=[{"group_id": "g1", "ranked": [ranked_row("a", 0.6), ranked_row("b", 0.55)]}],
+        coherence={"freeze_blocked": False, "lost_semantic_atoms": [], "contradiction_findings": []},
+    )
+    plan = build_canonical_edit_plan(d)
+
+    first = review(plan)
+    second = review(plan)
+
+    assert first == second
+    assert plan.ideas[0].winning_clip_ids == ("a", "b")  # untouched by review()
+
+
+def test_final_edit_reviewer_has_no_detector_for_incomplete_delivery_orphan_fragment_or_incompatible_composite():
+    # Honest gap, not silently-absent coverage: these three finding kinds
+    # (plus STORY_ORDER_BREAK) are recognized in the vocabulary but no
+    # deterministic detector exists for them anywhere in this pipeline, so
+    # review() can never emit them today. This fixture is exactly the kind
+    # of case a real detector would need to catch (an incomplete, clearly
+    # unfinished delivery that is nonetheless the ONLY thing selected for
+    # its idea) and pins that, right now, it passes silently.
+    from cutsell_worker.final_edit_reviewer import _UNIMPLEMENTED_KINDS
+
+    incomplete = DraftClip(
+        clip_id="incomplete", source_asset_id="src", source_order=0,
+        start=0.0, end=2.0, text="so basically what happens is",
+        caption_text="so basically what happens is", selected=True,
+    )
+    d = draft(
+        selected=(incomplete,),
+        take_judge_groups=[{"group_id": "g1", "ranked": [ranked_row("incomplete", 0.9)]}],
+        coherence={"freeze_blocked": False, "lost_semantic_atoms": [], "contradiction_findings": []},
+    )
+
+    plan = build_canonical_edit_plan(d)
+    result = review(plan)
+
+    assert result.status == "PASS"  # no detector exists -- this is the gap, not a pass
+    assert not any(f.kind in _UNIMPLEMENTED_KINDS for f in (*result.findings, *result.warnings))
