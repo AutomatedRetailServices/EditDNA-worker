@@ -4,6 +4,11 @@ import json
 import sys
 import unicodedata
 
+try:
+    from benchmarks.video00_semantic_alignment import _content_tokens, find_coverage_span
+except ModuleNotFoundError:
+    from video00_semantic_alignment import _content_tokens, find_coverage_span
+
 
 def _load(path: str):
     with open(path, "r", encoding="utf-8") as handle:
@@ -19,12 +24,15 @@ def _selected_texts(result: dict) -> list[str]:
     return [_norm((row or {}).get("text")) for row in (result.get("selected") or [])]
 
 
-def _find_exact(texts: list[str], target: str) -> int | None:
-    target = _norm(target)
-    for index, text in enumerate(texts):
-        if text == target:
-            return index
-    return None
+def _find_semantic(texts: list[str], target: str, *, start: int = 0) -> tuple[int, int] | None:
+    """D-032: content-coverage span search (`video00_semantic_alignment`),
+    not byte-equal text matching -- a required fact rechunked into a
+    bigger/smaller candidate segment, or restated with light ASR wording
+    variance, is still recognized as present. See that module's own
+    docstring for exactly why exact-text matching false-positived on
+    genuine re-chunking (RAW 33402023395)."""
+    candidate_tokens = [_content_tokens(t) for t in texts]
+    return find_coverage_span(candidate_tokens, _content_tokens(target), start=start)
 
 
 def validate(result_path: str, manifest_path: str) -> tuple[bool, dict]:
@@ -34,16 +42,24 @@ def validate(result_path: str, manifest_path: str) -> tuple[bool, dict]:
     joined = "\n".join(texts)
     failures: list[dict] = []
     passes: list[str] = []
+    warnings: list[dict] = []
 
+    # D-032: a changed segment COUNT is not by itself evidence of content
+    # loss -- benign re-chunking (ASR/attempt-reconstruction merging or
+    # splitting segments differently between runs) changes the count while
+    # every idea stays fully present. Recorded as a warning, not a failure;
+    # the required_exact/required_order/forbidden_contains checks below are
+    # what actually decide whether real content is missing.
     expected_count = int(manifest.get("expected_selected_count") or 0)
     if expected_count:
         actual_count = len(texts)
         if actual_count != expected_count:
-            failures.append({
+            warnings.append({
                 "id": "selection_count_23",
                 "kind": "count",
                 "expected": expected_count,
                 "actual": actual_count,
+                "reason": "count_differs_not_treated_as_failure_see_D-032",
             })
         else:
             passes.append("selection_count_23")
@@ -53,8 +69,8 @@ def validate(result_path: str, manifest_path: str) -> tuple[bool, dict]:
         kind = str(check.get("kind") or "")
 
         if kind == "required_exact":
-            index = _find_exact(texts, check.get("text"))
-            if index is None:
+            span = _find_semantic(texts, check.get("text"))
+            if span is None:
                 failures.append({"id": check_id, "kind": kind, "reason": "missing_required_segment"})
             else:
                 passes.append(check_id)
@@ -71,15 +87,16 @@ def validate(result_path: str, manifest_path: str) -> tuple[bool, dict]:
         if kind == "required_order":
             wanted = list(check.get("texts") or [])
             indices: list[int] = []
-            cursor = -1
+            cursor = 0
             missing = False
             for item in wanted:
-                target = _norm(item)
-                found = None
-                for index in range(cursor + 1, len(texts)):
-                    if texts[index] == target:
-                        found = index
-                        break
+                # start=cursor (not cursor+1): two consecutive required
+                # facts that were merged into the SAME rechunked candidate
+                # segment must both still be found there (a legitimate
+                # RECHUNKED co-location, not a reorder) -- order is still
+                # enforced because `cursor` only ever moves forward.
+                span = _find_semantic(texts, item, start=cursor)
+                found = span[0] if span is not None else None
                 if found is None:
                     missing = True
                     break
@@ -102,6 +119,7 @@ def validate(result_path: str, manifest_path: str) -> tuple[bool, dict]:
         "failed_check_count": len(failures),
         "passed_checks": passes,
         "failed_checks": failures,
+        "warnings": warnings,
     }
     return not failures, report
 

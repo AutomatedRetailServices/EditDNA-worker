@@ -1007,6 +1007,88 @@ deterministic signal stays blocking without an arbiter.
 
 Full suite: 1128 passed (`pytest -q tests/test_cutsell_*.py`, exact CI glob).
 
+## D-032 — Human Gold regression aligner: ordered semantic alignment replaces positional diffing
+
+**Status: CANONICAL**
+
+RAW 33402023395's CI-reported "23 -> 20, content missing" alarm was investigated by
+hand against the actual KEEP text (see the RAW's own diagnosis report) and found to be
+a false positive: `benchmarks/validate_video00_selection_lock.py` compared the
+candidate against the Human Gold baseline INDEX BY INDEX, so one benign re-chunking
+(the baseline's "...funcionando" / "perfectamente." split into two array entries where
+this run produced one merged sentence) shifted every later index and cascaded into a
+wall of false `missing_segment`/`text_changed` errors. `benchmarks/validate_video00_
+regression_qa.py`'s `required_exact`/`required_order` checks were already position-
+independent but required byte-for-byte text equality, so the same re-chunking (and
+ordinary ASR wording variance) still made genuinely-present facts register as missing.
+The Human Gold oracle itself was never wrong; the comparison mechanism was too brittle.
+
+**Mechanism (`benchmarks/video00_semantic_alignment.py`, new module, zero import from
+`cutsell_worker` -- Human Gold stays QA/oracle only):** `align(gold_segments,
+candidate_segments)` walks both lists together, in order, using CONTENT-TOKEN overlap
+(not exact text equality) with a growable window on either side, recognizing:
+
+- `EXACT` -- one gold segment, one candidate segment.
+- `RECHUNKED` -- 2+ gold segments merged into one candidate segment (or vice versa on
+  the candidate side never happening simultaneously with the gold side -- see below).
+- `COMPOSITE` -- one gold segment realized across 2+ candidate segments.
+- `MISSING` -- no candidate window anywhere ahead explains a gold segment.
+- `EXTRA` -- candidate content nothing in gold asked for.
+- `DUPLICATE` -- extra candidate content that closely repeats an already-matched gold
+  segment (the same idea rendered twice).
+
+Because the walk only ever moves forward on both sides, a candidate realization
+belonging to a LATER gold idea appearing before an EARLIER one's realization cannot be
+"found" by looking backward -- the earlier gold segment correctly reports `MISSING`
+(a real ordering break), never a silently-accepted out-of-order match.
+
+**Three real bugs found and fixed via this module's own tests, not by inspection:**
+1. Greedy smallest-window-first matching could consume a candidate segment via a
+   narrow 1:1 match before checking whether it actually belonged to a wider merge,
+   stranding the true second half of a rechunk as falsely `MISSING`. Fixed: matches
+   must be BIDIRECTIONAL (gold's content covered by the candidate window AND the
+   candidate window's content explained by gold), and a window may only grow on ONE
+   side at a time (gold OR candidate, never both) -- growing both simultaneously is
+   bag-of-words matching two independent multi-segment spans against each other,
+   which is order-blind and cannot tell `gold=[A,B]` from `candidate=[B,A]` apart.
+2. A `skip` (tolerating an unrelated EXTRA candidate segment in the way) could mask
+   genuine reordering: skipping ahead to find idea A's content might jump straight
+   over idea B's content sitting where A should have been. Fixed: a skip is refused
+   when the skipped content itself looks like it belongs to any remaining gold idea.
+3. Aggregate coverage across a multi-segment window can mathematically "average out"
+   a completely absent segment behind a strongly-covered neighbor it happens to be
+   windowed with. Fixed: every individual segment inside a 2+-segment window must
+   also individually clear a lower floor on its own -- except a near-content-free
+   trailing fragment (<=2 content tokens, e.g. "perfectamente."), which is exempt
+   since it cannot independently prove or disprove anything and exists only to be
+   merged with its real neighbor (the legitimate rechunk case, not a bug).
+
+**Validated against the actual RAW 33402023395 data**, not just synthetic fixtures:
+reconstructing that run's real 20-clip KEEP sequence and running the rewritten
+`validate_video00_selection_lock.py` against the real 23-segment `video00_selection_
+lock.json` baseline now reports `selection_locked: true`, `historical_regression_qa_
+pass: true`, all 18 named checks passing (including every one RAW 33402023395's run
+had reported failing: `papillary_cancer_preserved`, both `sonography_good_take_*`,
+all three `pimples_micro_*`, `pimples_later_winner_present`, `family_context_
+preserved`, both `required_order` checks), `error_count: 0` -- confirming that
+candidate's Selection was correct all along.
+
+**Count is no longer a hard gate, per the canonical directive's explicit "do not force
+exactly N segments":** both scripts now record a changed segment count as a
+non-blocking warning, not a failure -- `selection_locked`/`qa_pass` are driven by
+whether the alignment/named-fact checks actually pass, never by count equality alone.
+
+**Tests:** 12 unit tests in `tests/test_video00_semantic_alignment.py` (exact,
+rechunk, composite, missing, extra, duplicate, reordering-reports-missing, ASR wording
+variance, extra-segment-does-not-break-alignment, tiny-fragment-exempt-from-floor,
+substantial-content-never-masked, empty input). `tests/test_video00_regression_qa.py`
+updated (4 tests, richer non-degenerate fixture text, count-drift-is-a-warning).
+`tests/test_video00_selection_lock.py` (new, 4 tests: identical locks, benign rechunk
+does not break the lock, genuinely missing content does, duplicate rendered segment
+does). Full suite (including these, outside the `test_cutsell_*.py` CI glob): 1422
+passed (`pytest -q tests/`, excluding the two long-pre-existing unrelated broken
+files this session has documented throughout).
+
 ## Change rule
 
 When a new decision changes product behavior, update this file in the same development cycle. Do not silently redefine CutSell through code alone.
