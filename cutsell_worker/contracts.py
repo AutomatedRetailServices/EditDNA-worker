@@ -164,6 +164,53 @@ class DraftClip:
     # Selection-time consumers (e.g. unified_selection_google.py) must treat
     # a missing signals as "no evidence available", never as a zero score.
     signals: Optional[MediaSignals] = None
+    # D-036: physical-fragment provenance (Boundary-only). `clip_id` remains
+    # the SEMANTIC identity CanonicalEditPlan/FinalEditReviewer/Selection
+    # Freeze reason about and must never be mutated to satisfy a downstream
+    # physical check. When a Boundary pass (e.g. human_boundary_polish_v5's
+    # micro-gap split) divides one already-frozen semantic clip into two or
+    # more physical render pieces, EVERY resulting piece must set these so a
+    # unique physical identity survives independently of `clip_id`, which
+    # may legitimately repeat across siblings:
+    #   render_fragment_id       -- unique per physical piece (never reused).
+    #   parent_semantic_clip_id  -- the semantic clip_id (pre-split) all
+    #                               siblings reconstruct together.
+    #   fragment_index/fragment_count -- this piece's position among its
+    #                               siblings, in rendered order.
+    #   boundary_reason          -- which Boundary operation produced it, for
+    #                               observability (e.g.
+    #                               "remove_micro_visual_reset_word_gap").
+    # All default None/absent: a clip nobody has ever split carries no
+    # fragment provenance at all -- `effective_render_fragment_id`/
+    # `effective_parent_semantic_clip_id` below fall back to `clip_id`.
+    render_fragment_id: Optional[str] = None
+    parent_semantic_clip_id: Optional[str] = None
+    fragment_index: Optional[int] = None
+    fragment_count: Optional[int] = None
+    boundary_reason: Optional[str] = None
+
+
+def effective_render_fragment_id(clip) -> str:
+    """The clip's physical render identity -- its own explicit
+    `render_fragment_id` when a Boundary split minted one, else its
+    `clip_id` (an unsplit clip's semantic and physical identity coincide).
+    Duck-typed on any object carrying `clip_id`/`render_fragment_id` (a
+    `DraftClip` or a `render_plan.RenderSegment`) so this has no import-time
+    dependency on either module."""
+    explicit = getattr(clip, "render_fragment_id", None)
+    return str(explicit) if explicit else str(clip.clip_id)
+
+
+def effective_parent_semantic_clip_id(clip) -> Optional[str]:
+    """The semantic clip this piece is a physical fragment of, or None when
+    it carries no fragment provenance at all (never split, or split by code
+    that predates D-036 and has not been updated to set this). Returning
+    None -- rather than falling back to `clip_id` -- is deliberate: legitimacy
+    requires POSITIVE evidence of a real split, not merely two segments that
+    happen to share a `clip_id`; see `post_render_watch_listen_qc.
+    check_no_duplicate_render_segments`."""
+    explicit = getattr(clip, "parent_semantic_clip_id", None)
+    return str(explicit) if explicit else None
 
 
 @dataclass(frozen=True)

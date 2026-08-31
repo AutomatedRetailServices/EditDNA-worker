@@ -57,9 +57,21 @@ def _focused(payload: dict) -> dict:
         preview_output=str(preview),
     )
 
+    # D-036 item 7: the ONE authoritative delivery gate -- a candidate this
+    # harness rendered is deliverable if and only if the live render/QC
+    # service (shared with the real export job) reached PASS. Everything
+    # below (auto-microtrim, which S3 key the file is uploaded under, which
+    # compact fields are populated) branches off this single value.
+    live_qc = result.get("live_render_qc") or {}
+    deliverable = bool(live_qc.get("deliverable"))
+    delivery_status = str(live_qc.get("delivery_status") or "NOT_DELIVERABLE_unknown")
+
     auto_cuts = ()
     auto_diag = {"speech_lock_ok": True, "auto_microtrim_count": 0, "auto_microtrim_duration_sec": 0.0, "frame_aware": True, "rule": "disabled"}
-    if auto_microtrim and preview.exists():
+    if auto_microtrim and deliverable and preview.exists():
+        # Never spend ASR/microtrim work refining a candidate that will not
+        # be delivered anyway -- an invalidated render stays exactly as QC
+        # left it, for diagnosis.
         auto_cuts, auto_diag = detect_speech_safe_visual_microtrims(
             str(preview),
             asr_model=str(os.environ.get("CUTSELL_ASR_MODEL") or "medium"),
@@ -76,10 +88,26 @@ def _focused(payload: dict) -> dict:
         "auto_microtrims": list(auto_cuts),
         "auto_microtrim_diagnostics": auto_diag,
         "speech_lock_ok": bool(auto_diag.get("speech_lock_ok", True)),
+        "deliverable": deliverable,
+        "delivery_status": delivery_status,
     }
     result_path.write_text(json.dumps(result, ensure_ascii=False, indent=2, sort_keys=True), encoding="utf-8")
     prefix = f"cutsell/serverless/{safe_id}"
-    preview_uri = _upload_artifact(str(preview), key=f"{prefix}/preview.mp4", content_type="video/mp4")
+
+    # D-036 item 6: a candidate invalidated by QC must never be surfaced as
+    # if it were deliverable. A PASSing candidate uploads under the normal
+    # `preview.mp4` name (unchanged behavior); anything else is preserved
+    # ONLY as a clearly-named diagnostic artifact, with `preview_uri` left
+    # null so nothing downstream mistakes it for the real thing.
+    preview_uri = None
+    diagnostic_preview_uri = None
+    if preview.exists():
+        if deliverable:
+            preview_uri = _upload_artifact(str(preview), key=f"{prefix}/preview.mp4", content_type="video/mp4")
+        else:
+            diagnostic_preview_uri = _upload_artifact(
+                str(preview), key=f"{prefix}/diagnostic-invalidated-preview.mp4", content_type="video/mp4",
+            )
     result_uri = _upload_artifact(str(result_path), key=f"{prefix}/result.json", content_type="application/json")
     return {
         "ok": True,
@@ -101,18 +129,23 @@ def _focused(payload: dict) -> dict:
         "auto_microtrim_count": result.get("auto_microtrim_count"),
         "auto_microtrim_duration_sec": result.get("auto_microtrim_duration_sec"),
         "speech_lock_ok": result.get("speech_lock_ok"),
-        # D-030/D-035: this preview was rendered through the exact same live
-        # PostRenderWatchListenQC + bounded physical repair service the real
-        # export job uses -- surface its outcome even in the compact RunPod
-        # summary so a run's live-render/QC status is visible without
-        # downloading the full result.json.
+        # D-030/D-035/D-036: this preview was rendered through the exact same
+        # live PostRenderWatchListenQC + bounded physical repair service the
+        # real export job uses -- surface its outcome, and the authoritative
+        # delivery gate, even in the compact RunPod summary so a run's
+        # deliverability is visible without downloading the full result.json.
         "preview_skipped_reason": result.get("preview_skipped_reason"),
-        "live_render_qc_status": (result.get("live_render_qc") or {}).get("status"),
-        "live_render_qc_render_attempt_count": (result.get("live_render_qc") or {}).get("render_attempt_count"),
-        "live_render_qc_plan_id": (result.get("live_render_qc") or {}).get("plan_id"),
-        "live_render_qc_plan_version": (result.get("live_render_qc") or {}).get("plan_version"),
-        "live_render_qc_semantic_hash": (result.get("live_render_qc") or {}).get("semantic_hash"),
+        "deliverable": deliverable,
+        "delivery_status": delivery_status,
+        "live_render_qc_status": live_qc.get("status"),
+        "live_render_qc_render_attempt_count": live_qc.get("render_attempt_count"),
+        "live_render_qc_plan_id": live_qc.get("plan_id"),
+        "live_render_qc_plan_version": live_qc.get("plan_version"),
+        "live_render_qc_semantic_hash": live_qc.get("semantic_hash"),
+        # NOT DELIVERABLE / QC INVALIDATED when set -- diagnostic only, never
+        # the final candidate.
         "preview_uri": preview_uri,
+        "diagnostic_preview_uri": diagnostic_preview_uri,
         "result_uri": result_uri,
     }
 

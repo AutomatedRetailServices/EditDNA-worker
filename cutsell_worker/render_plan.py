@@ -18,6 +18,18 @@ class RenderSegment:
     audio_volume: float = 1.0
     caption_text: str = ""
     caption_preset: str = "classic"
+    # D-036: physical-fragment provenance carried through from the DraftClip
+    # this segment was built from -- see contracts.py's DraftClip fields and
+    # effective_render_fragment_id/effective_parent_semantic_clip_id for the
+    # full identity contract. This is the "PhysicalRenderPlan" representation
+    # (already existed as RenderSegment/build_render_plan); CanonicalEditPlan
+    # remains the semantic source of truth and is never rewritten into these
+    # physical terms.
+    render_fragment_id: str | None = None
+    parent_semantic_clip_id: str | None = None
+    fragment_index: int | None = None
+    fragment_count: int | None = None
+    boundary_reason: str | None = None
 
     @property
     def duration_sec(self) -> float:
@@ -84,6 +96,11 @@ def build_render_plan(draft: DraftTimeline, local_paths: Mapping[str, str]) -> T
             audio_volume=volume,
             caption_text=(str(clip.caption_text or "") if draft.captions_enabled else ""),
             caption_preset=str(draft.caption_preset or "classic"),
+            render_fragment_id=getattr(clip, "render_fragment_id", None),
+            parent_semantic_clip_id=getattr(clip, "parent_semantic_clip_id", None),
+            fragment_index=getattr(clip, "fragment_index", None),
+            fragment_count=getattr(clip, "fragment_count", None),
+            boundary_reason=getattr(clip, "boundary_reason", None),
         ))
     if not output:
         raise ValueError("draft has no selected clips to render")

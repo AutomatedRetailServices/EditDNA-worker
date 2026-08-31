@@ -12,6 +12,7 @@ import importlib.util
 import json
 import sys
 import types
+from pathlib import Path
 
 import pytest
 
@@ -146,3 +147,128 @@ def test_focused_never_leaks_secret_looking_fields(patched_focused):
     serialized = json.dumps(out)
     assert "sk-should-not-leak" not in serialized
     assert "gemini_api_key" not in out
+
+
+# ---------------------------------------------------------------------------
+# D-036 items 6/7: the authoritative delivery gate -- a QC-invalidated
+# candidate must never be surfaced/uploaded as if it were deliverable.
+# ---------------------------------------------------------------------------
+
+@pytest.fixture
+def patched_focused_with_real_preview_file(monkeypatch, tmp_path):
+    """Like `patched_focused`, but the fake validation actually writes a
+    (tiny, fake) preview file to disk, matching the real order: the render
+    physically happens before `_focused` ever inspects `live_render_qc`."""
+    uploaded = {}
+
+    def fake_upload_artifact(local_path, *, key, content_type):
+        uploaded[key] = local_path
+        return f"s3://fake-bucket/{key}"
+
+    monkeypatch.setattr(serverless_handler, "_upload_artifact", fake_upload_artifact)
+    # The fake preview below is not a real, decodable MP4 -- avoid a real
+    # ffprobe dependency in this contract test by stubbing duration probing.
+    monkeypatch.setattr(serverless_handler, "_probe_duration", lambda path: 1.5)
+
+    work_dir = tmp_path / "cutsell-serverless"
+
+    def fake_path(value):
+        if str(value) == "/tmp/cutsell-serverless":
+            return work_dir
+        return serverless_handler.Path(value)
+
+    monkeypatch.setattr(serverless_handler, "Path", fake_path)
+
+    def make_fake_validation(live_render_qc: dict):
+        def fake_validation(source_key, *, project_id, preview_output):
+            work_dir.mkdir(parents=True, exist_ok=True)
+            Path(preview_output).write_bytes(b"fake-mp4-bytes")
+            return {
+                **FULL_VALIDATION_RESULT,
+                "preview_path": preview_output if live_render_qc.get("deliverable") else None,
+                "preview_skipped_reason": None if live_render_qc.get("deliverable") else "post_render_qc_semantic_mismatch_invalidated",
+                "live_render_qc": live_render_qc,
+            }
+        return fake_validation
+
+    return uploaded, make_fake_validation
+
+
+def test_qc_invalidated_candidate_is_not_uploaded_as_final_deliverable(monkeypatch, patched_focused_with_real_preview_file):
+    uploaded, make_fake_validation = patched_focused_with_real_preview_file
+    monkeypatch.setattr(
+        serverless_handler, "run_single_universal_clean_cut_validation",
+        make_fake_validation({
+            "status": "SEMANTIC_MISMATCH_INVALIDATED", "deliverable": False,
+            "delivery_status": "NOT_DELIVERABLE_SEMANTIC_MISMATCH_INVALIDATED",
+            "output_path": None, "plan_id": "plan_x", "plan_version": 1,
+            "semantic_hash": "hash_x", "render_attempt_count": 1, "attempts": [],
+        }),
+    )
+
+    out = serverless_handler._focused({"source_key": "some/source.mp4", "benchmark_id": "invalid-run"})
+
+    assert out["deliverable"] is False
+    assert out["delivery_status"] == "NOT_DELIVERABLE_SEMANTIC_MISMATCH_INVALIDATED"
+    assert out["preview_uri"] is None
+    assert not any(key.endswith("/preview.mp4") for key in uploaded)
+    assert any(key.endswith("diagnostic-invalidated-preview.mp4") for key in uploaded)
+
+
+def test_diagnostic_invalidated_render_is_preserved_with_explicit_invalid_status(monkeypatch, patched_focused_with_real_preview_file):
+    uploaded, make_fake_validation = patched_focused_with_real_preview_file
+    monkeypatch.setattr(
+        serverless_handler, "run_single_universal_clean_cut_validation",
+        make_fake_validation({
+            "status": "NEEDS_HUMAN_REVIEW", "deliverable": False,
+            "delivery_status": "NOT_DELIVERABLE_NEEDS_HUMAN_REVIEW",
+            "output_path": None, "plan_id": "plan_x", "plan_version": 1,
+            "semantic_hash": "hash_x", "render_attempt_count": 3, "attempts": [],
+        }),
+    )
+
+    out = serverless_handler._focused({"source_key": "some/source.mp4", "benchmark_id": "needs-review-run"})
+
+    assert out["diagnostic_preview_uri"] is not None
+    assert "diagnostic-invalidated-preview.mp4" in out["diagnostic_preview_uri"]
+    assert out["preview_uri"] is None
+    assert out["deliverable"] is False
+
+
+def test_qc_pass_candidate_is_uploaded_normally(monkeypatch, patched_focused_with_real_preview_file):
+    uploaded, make_fake_validation = patched_focused_with_real_preview_file
+    monkeypatch.setattr(
+        serverless_handler, "run_single_universal_clean_cut_validation",
+        make_fake_validation({
+            "status": "PASS", "deliverable": True, "delivery_status": "DELIVERABLE",
+            "output_path": "/tmp/out.mp4", "plan_id": "plan_ok", "plan_version": 2,
+            "semantic_hash": "hash_ok", "render_attempt_count": 1, "attempts": [],
+        }),
+    )
+
+    out = serverless_handler._focused({"source_key": "some/source.mp4", "benchmark_id": "pass-run"})
+
+    assert out["deliverable"] is True
+    assert out["delivery_status"] == "DELIVERABLE"
+    assert out["preview_uri"] is not None
+    assert out["preview_uri"].endswith("preview.mp4")
+    assert out["diagnostic_preview_uri"] is None
+
+
+def test_final_delivery_metadata_references_exact_plan_id_version_hash(monkeypatch, patched_focused_with_real_preview_file):
+    uploaded, make_fake_validation = patched_focused_with_real_preview_file
+    monkeypatch.setattr(
+        serverless_handler, "run_single_universal_clean_cut_validation",
+        make_fake_validation({
+            "status": "PASS", "deliverable": True, "delivery_status": "DELIVERABLE",
+            "output_path": "/tmp/out.mp4", "plan_id": "plan_exact_123", "plan_version": 5,
+            "semantic_hash": "hash_exact_456", "render_attempt_count": 2, "attempts": [],
+        }),
+    )
+
+    out = serverless_handler._focused({"source_key": "some/source.mp4", "benchmark_id": "metadata-run"})
+
+    assert out["live_render_qc_plan_id"] == "plan_exact_123"
+    assert out["live_render_qc_plan_version"] == 5
+    assert out["live_render_qc_semantic_hash"] == "hash_exact_456"
+    assert out["live_render_qc_render_attempt_count"] == 2

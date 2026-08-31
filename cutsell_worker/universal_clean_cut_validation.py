@@ -75,6 +75,8 @@ def _live_render_qc_diagnostics(
         return {
             "status": "not_attempted",
             "reason": skipped_reason,
+            "deliverable": False,
+            "delivery_status": "NOT_DELIVERABLE_not_attempted",
             "output_path": None,
             "plan_id": None,
             "plan_version": None,
@@ -85,6 +87,12 @@ def _live_render_qc_diagnostics(
     return {
         "status": qc_result.status,
         "reason": None,
+        # D-036 item 7: the ONE authoritative delivery gate, read straight off
+        # LiveRenderQCResult rather than re-derived here -- a candidate is
+        # deliverable if and only if the shared render/QC service reached
+        # PASS.
+        "deliverable": qc_result.deliverable,
+        "delivery_status": qc_result.delivery_status,
         "output_path": qc_result.output_path,
         "plan_id": qc_result.plan_id,
         "plan_version": qc_result.plan_version,

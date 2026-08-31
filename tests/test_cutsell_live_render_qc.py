@@ -33,10 +33,11 @@ from cutsell_worker.post_render_watch_listen_qc import (
     LINGERING_ACCIDENTAL_SILENCE,
     PostRenderFinding,
     PostRenderQCResult,
+    STRUCTURAL_DUPLICATE_SEGMENT,
     STRUCTURAL_SEGMENT_MISSING,
     STRUCTURAL_SEQUENCE_MISMATCH,
 )
-from cutsell_worker.render_plan import RenderSegment
+from cutsell_worker.render_plan import RenderSegment, build_render_plan
 
 pytestmark = pytest.mark.skipif(shutil.which("ffmpeg") is None, reason="ffmpeg not available on this runner")
 
@@ -301,3 +302,158 @@ def test_final_pass_preserves_a_repair_loop_derived_plan_version(tmp_path, two_c
     assert result.status == "PASS"
     assert result.plan_id == "plan_carried_over"
     assert result.plan_version == 2
+
+
+# ---------------------------------------------------------------------------
+# D-036: legitimate physical fragments (a Boundary split of one semantic
+# clip into multiple physical pieces) survive build_render_plan and pass
+# the live QC service end-to-end -- the exact shape that incorrectly
+# invalidated RAW 33415661351 before this fix.
+# ---------------------------------------------------------------------------
+
+def test_fragment_provenance_survives_build_render_plan_into_render_segments(source_video):
+    from dataclasses import replace as _replace
+    clip_a = _replace(
+        _clip("a", 0.0, 1.0, "first idea"),
+        render_fragment_id="a__f0", parent_semantic_clip_id="a",
+        fragment_index=0, fragment_count=2, boundary_reason="remove_micro_visual_reset_word_gap",
+    )
+    clip_b = _replace(
+        _clip("a", 1.4, 2.0, "second idea"),
+        render_fragment_id="a__f1", parent_semantic_clip_id="a",
+        fragment_index=1, fragment_count=2, boundary_reason="remove_micro_visual_reset_word_gap",
+    )
+    draft = _draft([clip_a, clip_b])
+
+    plan = build_render_plan(draft, {"src": source_video})
+
+    assert [seg.render_fragment_id for seg in plan] == ["a__f0", "a__f1"]
+    assert all(seg.parent_semantic_clip_id == "a" for seg in plan)
+    assert [seg.fragment_index for seg in plan] == [0, 1]
+    assert all(seg.fragment_count == 2 for seg in plan)
+    assert all(seg.boundary_reason == "remove_micro_visual_reset_word_gap" for seg in plan)
+
+
+def test_legitimate_physical_fragments_pass_the_live_qc_service_end_to_end(tmp_path, source_video):
+    from dataclasses import replace as _replace
+    clip_a = _replace(
+        _clip("a", 0.0, 1.0, "first idea"),
+        render_fragment_id="a__f0", parent_semantic_clip_id="a", fragment_index=0, fragment_count=2,
+    )
+    clip_b = _replace(
+        _clip("a", 1.4, 3.0, "first idea continued"),
+        render_fragment_id="a__f1", parent_semantic_clip_id="a", fragment_index=1, fragment_count=2,
+    )
+    draft = _draft([clip_a, clip_b])
+    plan = build_render_plan(draft, {"src": source_video})
+    output = str(tmp_path / "out.mp4")
+
+    result = live_render_qc.render_with_post_render_qc(draft, plan, output)
+
+    assert result.status == "PASS"
+    assert result.output_path == output
+    assert len(result.attempts) == 1
+    assert result.attempts[0].status == "PASS"
+
+
+def test_re_split_reordering_of_one_semantic_clip_still_fails_qc(tmp_path, source_video):
+    # Same parent, same fragment ids as a legitimate split -- but the render
+    # order was corrupted (fragment 1 before fragment 0). A real reordering
+    # bug must still fail, not be waved through just because provenance is
+    # present.
+    from dataclasses import replace as _replace
+    clip_a_second = _replace(
+        _clip("a", 1.4, 3.0, "first idea continued"),
+        render_fragment_id="a__f1", parent_semantic_clip_id="a", fragment_index=1, fragment_count=2,
+    )
+    clip_a_first = _replace(
+        _clip("a", 0.0, 1.0, "first idea"),
+        render_fragment_id="a__f0", parent_semantic_clip_id="a", fragment_index=0, fragment_count=2,
+    )
+    draft = _draft([clip_a_second, clip_a_first])  # reversed render order
+    plan = build_render_plan(draft, {"src": source_video})
+    output = str(tmp_path / "out.mp4")
+
+    result = live_render_qc.render_with_post_render_qc(draft, plan, output)
+
+    assert result.status == "SEMANTIC_MISMATCH_INVALIDATED"
+    kinds = [f["kind"] for f in result.attempts[0].findings]
+    assert STRUCTURAL_DUPLICATE_SEGMENT in kinds or STRUCTURAL_SEQUENCE_MISMATCH in kinds
+
+
+def test_composite_pieces_remain_distinguishable_from_physical_fragments(tmp_path, source_video):
+    # A CompositeResolver-accepted composite realizes one Idea from TWO
+    # distinct semantic clips (their own clip_id each, no shared parent) --
+    # this must never be mistaken for one clip's physical fragments, and
+    # must not interfere with a genuinely fragmented clip elsewhere in the
+    # same render.
+    from dataclasses import replace as _replace
+    composite_left = _clip("composite_left", 0.0, 1.0, "first half of the idea")
+    composite_right = _clip("composite_right", 1.0, 2.0, "second half of the idea")
+    fragmented_a = _replace(
+        _clip("a", 3.0, 4.0, "an unrelated idea"),
+        render_fragment_id="a__f0", parent_semantic_clip_id="a", fragment_index=0, fragment_count=2,
+    )
+    fragmented_b = _replace(
+        _clip("a", 4.4, 5.4, "continues"),
+        render_fragment_id="a__f1", parent_semantic_clip_id="a", fragment_index=1, fragment_count=2,
+    )
+    draft = _draft([composite_left, composite_right, fragmented_a, fragmented_b])
+    plan = build_render_plan(draft, {"src": source_video})
+    output = str(tmp_path / "out.mp4")
+
+    result = live_render_qc.render_with_post_render_qc(draft, plan, output)
+
+    assert result.status == "PASS"
+
+
+def test_fragment_ids_survive_into_qc_finding_diagnostics_on_failure(tmp_path, source_video):
+    # When a REAL duplicate is caught, the finding's own detail must still
+    # carry the fragment/parent identity -- not just the bare clip_id -- so
+    # a reviewer reading render_attempt diagnostics can tell exactly which
+    # physical piece collided.
+    from dataclasses import replace as _replace
+    clip_a = _replace(
+        _clip("a", 0.0, 1.0, "first idea"),
+        render_fragment_id="a__f0", parent_semantic_clip_id="a", fragment_index=0, fragment_count=2,
+    )
+    clip_a_dup = _replace(
+        _clip("a", 0.0, 1.0, "first idea"),
+        render_fragment_id="a__f0", parent_semantic_clip_id="a", fragment_index=0, fragment_count=2,
+    )
+    draft = _draft([clip_a, clip_a_dup])
+    plan = build_render_plan(draft, {"src": source_video})
+    output = str(tmp_path / "out.mp4")
+
+    result = live_render_qc.render_with_post_render_qc(draft, plan, output)
+
+    assert result.status == "SEMANTIC_MISMATCH_INVALIDATED"
+    finding = result.attempts[0].findings[0]
+    assert finding["detail"]["render_fragment_id"] == "a__f0"
+
+
+def test_rendered_sequence_reconstructed_from_fragments_equals_frozen_plan(tmp_path, source_video):
+    # The render segments' clip_id order, once fragments of one parent are
+    # accounted for, must reconstruct EXACTLY the frozen CanonicalEditPlan's
+    # keep_sequence -- no missing, extra, or reordered semantic content.
+    from dataclasses import replace as _replace
+    clip_a = _replace(
+        _clip("a", 0.0, 1.0, "first idea"),
+        render_fragment_id="a__f0", parent_semantic_clip_id="a", fragment_index=0, fragment_count=2,
+    )
+    clip_a2 = _replace(
+        _clip("a", 1.4, 2.0, "first idea continued"),
+        render_fragment_id="a__f1", parent_semantic_clip_id="a", fragment_index=1, fragment_count=2,
+    )
+    clip_b = _clip("b", 3.0, 4.0, "second idea")
+    draft = _draft([clip_a, clip_a2, clip_b])
+    plan = build_render_plan(draft, {"src": source_video})
+
+    edit_plan = build_canonical_edit_plan(draft)
+    assert [c.clip_id for c in edit_plan.keep_sequence] == ["a", "a", "b"]
+
+    output = str(tmp_path / "out.mp4")
+    result = live_render_qc.render_with_post_render_qc(draft, plan, output)
+
+    assert result.status == "PASS"
+    assert [seg.clip_id for seg in plan] == [c.clip_id for c in edit_plan.keep_sequence]

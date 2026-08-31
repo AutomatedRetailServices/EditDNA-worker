@@ -223,33 +223,146 @@ def check_render_sequence_matches_edit_plan(
     return PostRenderQCResult(status="FAIL", findings=(finding,))
 
 
-def check_no_duplicate_render_segments(render_segments: Iterable) -> PostRenderQCResult:
-    """Detect a clip_id appearing in more than one render segment -- the
-    same clip rendered twice into the final output.
+def _seg_fragment_id(seg) -> str:
+    explicit = getattr(seg, "render_fragment_id", None)
+    return str(explicit) if explicit else str(seg.clip_id)
 
-    `render_plan._coalesce_contiguous_segments` merges two ADJACENT
-    same-source, same-settings segments into one, keeping only the FIRST's
-    clip_id -- a legitimate render never produces two segments sharing one
-    clip_id. Seeing that is a real render-plan bug (the "no duplicate
-    rendered segment" requirement), not a coalescing artifact.
+
+def _seg_parent_id(seg):
+    explicit = getattr(seg, "parent_semantic_clip_id", None)
+    return str(explicit) if explicit else None
+
+
+def check_no_duplicate_render_segments(render_segments: Iterable) -> PostRenderQCResult:
+    """Detect real duplicate/repeated content in the render output -- D-036
+    replaced a raw ``clip_id``-equality check with one that distinguishes
+    two genuinely different situations that used to look identical:
+
+    A. LEGITIMATE physical fragmentation: a Boundary pass (e.g.
+       ``human_boundary_polish_v5``'s micro visual-reset-gap split) may
+       divide one already-frozen semantic clip into two or more physical
+       render pieces. Those pieces intentionally share one ``clip_id``
+       (the semantic identity CanonicalEditPlan/Selection Freeze reason
+       about is never mutated for this), but each carries its OWN unique
+       ``render_fragment_id`` and a shared ``parent_semantic_clip_id`` --
+       see ``contracts.DraftClip``'s D-036 fields. This is NOT a duplicate.
+
+    B. A REAL duplicate: the exact same physical identity emitted twice, or
+       segments claiming a common semantic parent whose physical ranges
+       overlap, or whose ranges are scattered apart in render order instead
+       of reconstructing that parent as one contiguous run. This IS a
+       duplicate, and must fail exactly as before.
+
+    A segment carrying no fragment provenance at all (its own
+    ``render_fragment_id``/``parent_semantic_clip_id`` are both unset) is
+    judged exactly as this check always has: two such segments sharing one
+    ``clip_id`` is a real render-plan bug. Legitimacy requires POSITIVE
+    evidence of a real split (an explicit ``parent_semantic_clip_id``), never
+    an inferred one -- silently treating "same clip_id, different times" as
+    always-fine would hide real duplication from an unrelated bug.
     """
     segments = list(render_segments)
-    occurrences: dict[str, int] = {}
-    for seg in segments:
-        occurrences[seg.clip_id] = occurrences.get(seg.clip_id, 0) + 1
-
     findings: list[PostRenderFinding] = []
-    reported: set[str] = set()
-    for seg in segments:
-        count = occurrences.get(seg.clip_id, 0)
-        if count > 1 and seg.clip_id not in reported:
-            reported.add(seg.clip_id)
+    flagged_clip_ids: set[str] = set()
+
+    # A. Duplicate physical identity is always a bug, regardless of parent
+    # provenance -- a genuinely fresh fragment always gets a fresh id.
+    fragment_positions: dict[str, list[int]] = {}
+    for index, seg in enumerate(segments):
+        fragment_positions.setdefault(_seg_fragment_id(seg), []).append(index)
+    for fragment_id, positions in fragment_positions.items():
+        if len(positions) <= 1:
+            continue
+        clip_id = segments[positions[0]].clip_id
+        flagged_clip_ids.add(clip_id)
+        last = segments[positions[-1]]
+        findings.append(PostRenderFinding(
+            kind=STRUCTURAL_DUPLICATE_SEGMENT,
+            start=float(last.start), end=float(last.end),
+            detail={"clip_id": clip_id, "render_fragment_id": fragment_id, "occurrence_count": len(positions)},
+            routes_to="SelectionFreeze",
+        ))
+
+    # B. Segments explicitly declaring a common semantic parent (legitimate
+    # candidates for physical fragmentation) must reconstruct that parent as
+    # one contiguous, non-overlapping, correctly-ordered run.
+    parent_positions: dict[str, list[int]] = {}
+    for index, seg in enumerate(segments):
+        parent_id = _seg_parent_id(seg)
+        if parent_id is None:
+            continue
+        parent_positions.setdefault(parent_id, []).append(index)
+
+    for parent_id, positions in parent_positions.items():
+        if len(positions) < 2 or segments[positions[0]].clip_id in flagged_clip_ids:
+            continue
+        by_index = sorted(positions)
+        by_time = sorted(positions, key=lambda i: (segments[i].start, segments[i].end))
+        clip_id = segments[by_index[0]].clip_id
+        if by_index != by_time:
+            # The physical pieces of one semantic delivery are out of their
+            # own time order relative to render position -- a reordering,
+            # not a clean reconstruction.
             findings.append(PostRenderFinding(
                 kind=STRUCTURAL_DUPLICATE_SEGMENT,
-                start=float(seg.start),
-                end=float(seg.end),
-                detail={"clip_id": seg.clip_id, "occurrence_count": count},
+                start=float(segments[by_index[0]].start), end=float(segments[by_index[-1]].end),
+                detail={
+                    "clip_id": clip_id, "parent_semantic_clip_id": parent_id,
+                    "occurrence_count": len(positions), "reason": "fragments_out_of_order",
+                },
                 routes_to="SelectionFreeze",
             ))
+            continue
+        # Fragments of one semantic delivery must render back-to-back --
+        # scattered positions mean the same content resurfaces elsewhere in
+        # the timeline, exactly what an audience would perceive as
+        # unintended repetition, not one clean reconstruction.
+        if by_index != list(range(by_index[0], by_index[0] + len(by_index))):
+            findings.append(PostRenderFinding(
+                kind=STRUCTURAL_DUPLICATE_SEGMENT,
+                start=float(segments[by_index[0]].start), end=float(segments[by_index[-1]].end),
+                detail={
+                    "clip_id": clip_id, "parent_semantic_clip_id": parent_id,
+                    "occurrence_count": len(positions), "reason": "fragments_not_contiguous_in_render_order",
+                },
+                routes_to="SelectionFreeze",
+            ))
+            continue
+        overlap = any(
+            segments[right].start < segments[left].end - 1e-6
+            for left, right in zip(by_index, by_index[1:])
+        )
+        if overlap:
+            findings.append(PostRenderFinding(
+                kind=STRUCTURAL_DUPLICATE_SEGMENT,
+                start=float(segments[by_index[0]].start), end=float(segments[by_index[-1]].end),
+                detail={
+                    "clip_id": clip_id, "parent_semantic_clip_id": parent_id,
+                    "occurrence_count": len(positions), "reason": "overlapping_physical_ranges",
+                },
+                routes_to="SelectionFreeze",
+            ))
+
+    # C. Segments with NO fragment provenance at all: preserve the original,
+    # simple clip_id-collision behavior exactly (legitimacy requires
+    # positive evidence, never an inference from bare clip_id equality).
+    unexplained_positions: dict[str, list[int]] = {}
+    for index, seg in enumerate(segments):
+        if _seg_parent_id(seg) is not None or getattr(seg, "render_fragment_id", None):
+            continue
+        if seg.clip_id in flagged_clip_ids:
+            continue
+        unexplained_positions.setdefault(seg.clip_id, []).append(index)
+    for clip_id, positions in unexplained_positions.items():
+        if len(positions) <= 1:
+            continue
+        last = segments[positions[-1]]
+        findings.append(PostRenderFinding(
+            kind=STRUCTURAL_DUPLICATE_SEGMENT,
+            start=float(last.start), end=float(last.end),
+            detail={"clip_id": clip_id, "occurrence_count": len(positions)},
+            routes_to="SelectionFreeze",
+        ))
+
     status = "FAIL" if findings else "PASS"
     return PostRenderQCResult(status=status, findings=tuple(findings))

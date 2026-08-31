@@ -232,10 +232,12 @@ jobs:
                 # A failed gate must not destroy the evidence needed to diagnose it.
                 cp /tmp/status.json artifact/video00-unified-selection-status.json
                 echo "--- sanitized compact RunPod output summary ---"
-                jq '.output | {ok,speech_lock_ok,external_brain_calls_enabled,selection_reasoner_enabled,selection_reasoner_status,selection_reasoner_provider,selection_reasoner_model,hybrid_requested_group_count,alternate_count,selected_duration_sec,preview_uri,result_uri}' /tmp/status.json || true
+                jq '.output | {ok,speech_lock_ok,deliverable,delivery_status,external_brain_calls_enabled,selection_reasoner_enabled,selection_reasoner_status,selection_reasoner_provider,selection_reasoner_model,hybrid_requested_group_count,alternate_count,selected_duration_sec,preview_uri,diagnostic_preview_uri,result_uri}' /tmp/status.json || true
                 PREVIEW_URI=$(jq -r '.output.preview_uri // empty' /tmp/status.json)
+                DIAGNOSTIC_PREVIEW_URI=$(jq -r '.output.diagnostic_preview_uri // empty' /tmp/status.json)
                 RESULT_URI=$(jq -r '.output.result_uri // empty' /tmp/status.json)
                 echo "PREVIEW_URI=$PREVIEW_URI" >> "$GITHUB_ENV"
+                echo "DIAGNOSTIC_PREVIEW_URI=$DIAGNOSTIC_PREVIEW_URI" >> "$GITHUB_ENV"
                 echo "RESULT_URI=$RESULT_URI" >> "$GITHUB_ENV"
                 exit 0 ;;
               FAILED|TIMED_OUT|CANCELLED)
@@ -258,8 +260,8 @@ jobs:
             echo "No RunPod job was submitted; nothing to download."
             exit 0
           fi
-          if [ -z "${PREVIEW_URI:-}" ] || [ -z "${RESULT_URI:-}" ]; then
-            echo "preview_uri/result_uri not present in RunPod output; evidence is limited to the status.json already preserved for this run."
+          if [ -z "${RESULT_URI:-}" ]; then
+            echo "result_uri not present in RunPod output; evidence is limited to the status.json already preserved for this run."
             exit 0
           fi
           BASE_TEMPLATE=$(cat /tmp/base-template.json)
@@ -269,10 +271,24 @@ jobs:
             echo "::add-mask::$value"
             export "$key=$value"
           done
-          aws s3 cp "$PREVIEW_URI" artifact/video00-unified-selection.mp4
           aws s3 cp "$RESULT_URI" artifact/video00-unified-selection.json
-          test -s artifact/video00-unified-selection.mp4
           test -s artifact/video00-unified-selection.json
+
+          # D-036 item 6: a candidate QC invalidated is never uploaded under
+          # the deliverable filename -- download whichever one this run
+          # actually produced, and never let the diagnostic-only render be
+          # mistaken for the final candidate.
+          if [ -n "${PREVIEW_URI:-}" ]; then
+            aws s3 cp "$PREVIEW_URI" artifact/video00-unified-selection.mp4
+            test -s artifact/video00-unified-selection.mp4
+            echo "Deliverable candidate downloaded: artifact/video00-unified-selection.mp4"
+          elif [ -n "${DIAGNOSTIC_PREVIEW_URI:-}" ]; then
+            aws s3 cp "$DIAGNOSTIC_PREVIEW_URI" artifact/video00-DIAGNOSTIC-INVALIDATED-preview.mp4
+            test -s artifact/video00-DIAGNOSTIC-INVALIDATED-preview.mp4
+            echo "NOT DELIVERABLE -- QC INVALIDATED. Diagnostic-only render downloaded: artifact/video00-DIAGNOSTIC-INVALIDATED-preview.mp4"
+          else
+            echo "Neither preview_uri nor diagnostic_preview_uri present; no rendered candidate exists for this run (e.g. a freeze-blocked draft that never reached render)."
+          fi
 
       - name: Download Human Gold reference video
         if: always()

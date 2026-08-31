@@ -252,11 +252,16 @@ def test_every_finding_run_post_render_media_qc_can_emit_is_physical(freeze_vide
 # ---------------------------------------------------------------------------
 
 class _FakeSegment:
-    def __init__(self, clip_id, source_asset_id="src", start=0.0, end=1.0):
+    def __init__(
+        self, clip_id, source_asset_id="src", start=0.0, end=1.0,
+        render_fragment_id=None, parent_semantic_clip_id=None,
+    ):
         self.clip_id = clip_id
         self.source_asset_id = source_asset_id
         self.start = start
         self.end = end
+        self.render_fragment_id = render_fragment_id
+        self.parent_semantic_clip_id = parent_semantic_clip_id
 
 
 def test_no_duplicate_segments_passes_with_distinct_clip_ids():
@@ -265,12 +270,95 @@ def test_no_duplicate_segments_passes_with_distinct_clip_ids():
 
 
 def test_duplicate_clip_id_across_two_segments_is_detected():
+    # No fragment provenance at all -- legitimacy requires positive evidence,
+    # so this is judged exactly as before D-036: a real duplicate.
     result = check_no_duplicate_render_segments([
         _FakeSegment("a", start=0.0, end=1.0), _FakeSegment("a", start=5.0, end=6.0),
     ])
     assert result.status == "FAIL"
     assert result.findings[0].kind == STRUCTURAL_DUPLICATE_SEGMENT
     assert result.findings[0].detail["occurrence_count"] == 2
+
+
+# ---------------------------------------------------------------------------
+# D-036: provenance-aware duplicate detection -- legitimate physical
+# fragments of one frozen semantic clip vs. a real duplicate/repetition.
+# ---------------------------------------------------------------------------
+
+def test_legitimate_two_fragment_split_passes():
+    result = check_no_duplicate_render_segments([
+        _FakeSegment("a", start=0.0, end=1.0, render_fragment_id="a__f0", parent_semantic_clip_id="a"),
+        _FakeSegment("a", start=1.4, end=2.0, render_fragment_id="a__f1", parent_semantic_clip_id="a"),
+        _FakeSegment("b", start=2.0, end=3.0),
+    ])
+    assert result.status == "PASS"
+
+
+def test_legitimate_three_fragment_split_in_order_passes():
+    result = check_no_duplicate_render_segments([
+        _FakeSegment("a", start=0.0, end=1.0, render_fragment_id="a__f0", parent_semantic_clip_id="a"),
+        _FakeSegment("a", start=1.4, end=2.0, render_fragment_id="a__f1", parent_semantic_clip_id="a"),
+        _FakeSegment("a", start=2.4, end=3.4, render_fragment_id="a__f2", parent_semantic_clip_id="a"),
+    ])
+    assert result.status == "PASS"
+
+
+def test_exact_physical_range_emitted_twice_is_detected():
+    # Two "fragments" with a common parent but the EXACT same range and
+    # distinct fragment ids -- content genuinely rendered twice, not a
+    # legitimate reconstruction (which never repeats a physical range).
+    result = check_no_duplicate_render_segments([
+        _FakeSegment("a", start=0.0, end=1.0, render_fragment_id="a__f0", parent_semantic_clip_id="a"),
+        _FakeSegment("a", start=0.0, end=1.0, render_fragment_id="a__f1", parent_semantic_clip_id="a"),
+    ])
+    assert result.status == "FAIL"
+    assert result.findings[0].kind == STRUCTURAL_DUPLICATE_SEGMENT
+    assert result.findings[0].detail["reason"] == "overlapping_physical_ranges"
+
+
+def test_overlapping_sibling_fragments_causing_repeated_speech_is_detected():
+    result = check_no_duplicate_render_segments([
+        _FakeSegment("a", start=0.0, end=1.5, render_fragment_id="a__f0", parent_semantic_clip_id="a"),
+        _FakeSegment("a", start=1.0, end=2.0, render_fragment_id="a__f1", parent_semantic_clip_id="a"),
+    ])
+    assert result.status == "FAIL"
+    assert result.findings[0].detail["reason"] == "overlapping_physical_ranges"
+
+
+def test_same_parent_scattered_across_the_timeline_is_detected():
+    # The two pieces of "a" are legitimate, non-overlapping, correctly
+    # ordered by time -- but an UNRELATED clip "b" sits between them in the
+    # actual render order, so "a" resurfaces later rather than being one
+    # clean, contiguous reconstruction. An audience would perceive this as
+    # unintended repetition.
+    result = check_no_duplicate_render_segments([
+        _FakeSegment("a", start=0.0, end=1.0, render_fragment_id="a__f0", parent_semantic_clip_id="a"),
+        _FakeSegment("b", start=1.0, end=2.0),
+        _FakeSegment("a", start=2.0, end=3.0, render_fragment_id="a__f1", parent_semantic_clip_id="a"),
+    ])
+    assert result.status == "FAIL"
+    assert result.findings[0].detail["reason"] == "fragments_not_contiguous_in_render_order"
+
+
+def test_duplicate_render_fragment_id_is_always_a_bug_even_with_a_parent_set():
+    # Whatever produced these reused the SAME fragment id for two different
+    # pieces -- a real bug regardless of parent bookkeeping.
+    result = check_no_duplicate_render_segments([
+        _FakeSegment("a", start=0.0, end=1.0, render_fragment_id="a__f0", parent_semantic_clip_id="a"),
+        _FakeSegment("a", start=1.4, end=2.0, render_fragment_id="a__f0", parent_semantic_clip_id="a"),
+    ])
+    assert result.status == "FAIL"
+    assert result.findings[0].detail["render_fragment_id"] == "a__f0"
+
+
+def test_composite_pieces_with_distinct_clip_ids_remain_unaffected():
+    # CompositeResolver pieces are distinct semantic clips (their own
+    # clip_id each) -- never mistaken for physical fragments of one parent.
+    result = check_no_duplicate_render_segments([
+        _FakeSegment("composite_left", start=0.0, end=1.0),
+        _FakeSegment("composite_right", start=1.0, end=2.0),
+    ])
+    assert result.status == "PASS"
 
 
 # ---------------------------------------------------------------------------

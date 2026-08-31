@@ -104,6 +104,26 @@ class LiveRenderQCResult:
     semantic_hash: str
     attempts: tuple[RenderAttemptRecord, ...]
 
+    @property
+    def deliverable(self) -> bool:
+        """The ONE authoritative delivery gate (D-036, item 7): a candidate
+        is deliverable if and only if the live render/QC service itself
+        reached PASS. Every caller -- `export_job.run_export_job` (which
+        already enforces this by raising `PostRenderQCFailure` on anything
+        else) and the Video00 RAW validation harness alike -- must derive
+        "may this be published as the final candidate" from this single
+        property, never re-derive it from `status` string-matching of their
+        own."""
+        return self.status == "PASS"
+
+    @property
+    def delivery_status(self) -> str:
+        """Human-readable delivery verdict for diagnostics/observability:
+        "DELIVERABLE" or "NOT_DELIVERABLE_<qc status>". Never itself the
+        gate a caller should branch on -- use `deliverable` for that; this
+        is for logs/reports only."""
+        return "DELIVERABLE" if self.deliverable else f"NOT_DELIVERABLE_{self.status}"
+
 
 def _segment_state(segments: Sequence[RenderSegment]) -> tuple[dict, ...]:
     return tuple({"clip_id": s.clip_id, "start": s.start, "end": s.end} for s in segments)

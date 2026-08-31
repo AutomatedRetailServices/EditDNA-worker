@@ -1267,6 +1267,104 @@ written -- this is entirely reuse of the D-030 service, per the single-path rule
 clean, and the new architecture verifier independently validated end-to-end against
 a reconstruction of RAW 33409169518's real diagnostics.
 
+## D-037 — Physical fragment identity + authoritative delivery gate
+
+**Status: CANONICAL**
+
+Root-caused and fixed the exact defect that invalidated RAW 33415661351's render.
+The semantic Selection result from that run (`selection_locked: true`, `error_count:
+0`, all 19 named regression checks passing) is unchanged and preserved as-is; this
+work is entirely downstream, physical/render infrastructure.
+
+**Root cause, confirmed by tracing the real data flow** (Selection Freeze -> Boundary
+-> render segment construction -> render plan -> PostRenderWatchListenQC):
+`human_boundary_polish_v5._remove_micro_visual_reset_word_gaps` splits an
+already-frozen semantic clip into physical left/right pieces at a micro visual-reset
+word gap via `dataclasses.replace(clip, start=..., end=...)` -- correct and intended
+Boundary behavior (`"semantic_membership_changed": False`) -- but kept the exact same
+`clip_id` for every resulting piece, and can split repeatedly (each detected gap
+re-splits the growing piece list). `check_no_duplicate_render_segments` (D-030) had
+no way to distinguish that from a real duplicate, since it keyed purely on raw
+`clip_id` equality. This is the ONE semantic clip -> multiple legitimate PHYSICAL
+CHILD fragments the user's hypothesis named; `post_selection_interior_gap_trim.py`'s
+own splitter already mints a fresh id per child (via `_child_id`, a
+content-and-boundary hash) and was never the problem -- only `human_boundary_polish_
+v5` reused identity across siblings.
+
+**1. Explicit identity contract (semantic vs. physical), on the repo's existing
+types -- no parallel provenance system.** `contracts.DraftClip` gained five optional
+fields, following the exact precedent the `signals` field already set (all default
+`None`, every existing construction site unaffected): `render_fragment_id` (unique
+per physical piece), `parent_semantic_clip_id` (the semantic clip_id every sibling
+reconstructs together -- deliberately requires POSITIVE evidence, never inferred
+from bare `clip_id` equality), `fragment_index`/`fragment_count` (position among
+siblings), `boundary_reason` (which Boundary operation produced it). Two helpers,
+`effective_render_fragment_id`/`effective_parent_semantic_clip_id`, fall back to
+`clip_id`/`None` for anything nobody has ever split. `render_plan.RenderSegment`
+(the existing PhysicalRenderPlan representation -- `CanonicalEditPlan` remains the
+untouched semantic source of truth, never rewritten into physical terms) carries the
+identical fields through from `build_render_plan`.
+
+**2. `human_boundary_polish_v5` now mints real identity.** Every split piece gets a
+`render_fragment_id` derived from `sha256(clip_id|human_boundary_polish_v5|start|end)`
+(mirroring `_child_id`'s pattern) and a `parent_semantic_clip_id` resolved to the
+TRUE root even when re-splitting an already-split fragment (`clip.parent_semantic_
+clip_id or clip.clip_id`, computed once per input clip) -- so every physical sibling
+of one frozen delivery stays discoverable under one shared key regardless of how many
+Boundary passes touched it. `clip_id` itself is never mutated.
+
+**3/4. `check_no_duplicate_render_segments` rewritten to reason from provenance, not
+raw `clip_id` equality.** Three tiers: (A) a repeated `render_fragment_id` is always
+a bug, full stop, regardless of parent bookkeeping; (B) segments sharing an explicit
+`parent_semantic_clip_id` must reconstruct that parent as one contiguous
+(render-order-adjacent), non-overlapping, correctly time-ordered run -- a violation
+(scattered position, reordering, or overlap) still fails, exactly as a real
+audience-perceptible duplicate/repetition should; (C) segments with NO fragment
+provenance at all are judged exactly as this check always has (bare `clip_id`
+collision = fail) -- legitimacy requires positive evidence, so this never silently
+waves through an unrelated bug from code that hasn't been updated to set the new
+fields. 7 targeted tests cover both fixture-level checks and, via `render_with_post_
+render_qc` end-to-end with real ffmpeg, the exact RAW 33415661351 shape now passing
+plus a deliberately-reordered variant that still correctly fails.
+
+**5. `LiveRenderQCResult` gained the one authoritative delivery gate**: a `deliverable`
+property (`True` iff `status == "PASS"`) and a `delivery_status` string
+(`"DELIVERABLE"` / `"NOT_DELIVERABLE_<status>"`) -- read by every caller (the
+Video00 RAW harness; `export_job.run_export_job` already enforced the equivalent via
+`PostRenderQCFailure`) rather than each re-deriving it.
+
+**6. Unconditional artifact upload fixed.** `serverless_handler._focused()`
+previously uploaded `preview.mp4` regardless of QC outcome -- meaning a run's
+"deliverable" artifact could actually be the QC-invalidated candidate (exactly what
+happened on RAW 33415661351: the duplicate-segment MP4 was uploaded and downloadable
+as if it were the final output). Now: a `deliverable` candidate uploads under the
+unchanged `preview.mp4` name; anything else uploads ONLY as
+`diagnostic-invalidated-preview.mp4`, with `preview_uri` left null in both the full
+result and the compact RunPod output, so nothing downstream can mistake a diagnostic
+render for a deliverable one. Auto-speech-visual-microtrim (a separate, pre-existing
+feature) is skipped entirely on a non-deliverable candidate -- no reason to spend ASR
+work refining a render that will not ship. The workflow's "Download unified Selection
+artifact" step was updated to match: it now downloads `result.json` independently of
+whether a preview exists at all, then fetches whichever of `preview_uri`/
+`diagnostic_preview_uri` the run actually produced (clearly named either way) rather
+than requiring both non-empty as one combined guard, which would have silently
+skipped downloading `result.json` itself on every non-deliverable run.
+
+**Validation**: 22 new/changed targeted tests across
+`tests/test_cutsell_human_boundary_polish_v5.py` (new),
+`tests/test_cutsell_post_render_media_qc.py`,
+`tests/test_cutsell_live_render_qc.py`, and
+`tests/test_cutsell_serverless_focused_contract.py`, covering every scenario D-037's
+directive specified (2- and 3-fragment legitimate splits, exact-range and
+overlapping-range real duplicates, scattered/non-contiguous real duplicates,
+Composite-piece non-interference, fragment-id survival through render plan and QC
+finding diagnostics, reconstructed-sequence-equals-frozen-plan, upload gating in
+both directions, exact plan id/version/hash in delivery metadata, Boundary-cannot-
+touch-semantic-membership). Full `tests/test_cutsell_*.py` CI glob green (1158
+passed), CleanCutBench green, `compileall` clean, and the pre-existing 23/23 Human
+Gold semantic-alignment fixture (`tests/test_video00_selection_lock.py` and
+neighbors) confirmed unaffected -- this work never touches Selection.
+
 ## Change rule
 
 When a new decision changes product behavior, update this file in the same development cycle. Do not silently redefine CutSell through code alone.
