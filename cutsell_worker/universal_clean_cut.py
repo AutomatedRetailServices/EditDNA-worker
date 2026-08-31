@@ -17,10 +17,13 @@ must never repair a semantic membership mistake.
 """
 from __future__ import annotations
 
+import dataclasses
 from dataclasses import replace
 from typing import Mapping
 
+from . import final_edit_reviewer
 from .asr import ASRProvider
+from .canonical_edit_plan import build_canonical_edit_plan
 from .clean_cut_provider import CleanCutProvider
 from .contracts import ProcessingRequest, ProcessingResult
 from .deterministic_best_take_authority import apply_deterministic_best_take_authority
@@ -148,17 +151,40 @@ def process_universal_clean_cut_sources(
             semantic_status = "not_requested_clean_cut_only"
             reasoner_status_label = "disabled"
 
+        # CanonicalEditPlan (D-024): the single structured semantic snapshot
+        # handed to physical editing -- built from the same evidence
+        # StoryValidator just computed, no new semantic judgment invented.
+        # FinalEditReviewer is a bounded, read-only reviewer over that plan:
+        # it never rewrites membership, only reports structured findings
+        # that route back to the owning canonical authority (see
+        # final_edit_reviewer.py's own docstring for which finding kinds are
+        # implemented vs. an honestly-documented gap).
+        edit_plan = build_canonical_edit_plan(result.draft)
+        review_result = final_edit_reviewer.review(edit_plan)
+        diagnostics = dict(result.draft.diagnostics or {})
+        diagnostics["canonical_edit_plan"] = dataclasses.asdict(edit_plan)
+        diagnostics["final_edit_reviewer"] = {
+            "status": review_result.status,
+            "findings": [dataclasses.asdict(f) for f in review_result.findings],
+            "warnings": [dataclasses.asdict(f) for f in review_result.warnings],
+        }
+        result = replace(result, draft=replace(result.draft, diagnostics=diagnostics))
+        final_edit_reviewer_status = review_result.status
+
         # Hard pre-Freeze gate: Final Story Coherence Validation may find a
         # high-confidence semantic failure (an unresolved factual
         # contradiction between still-co-selected same-retry-family members,
         # or an entire intended idea losing every member from the final
-        # selected set) that must never reach Selection Freeze. Both are
-        # deterministic, evidence-based findings -- not something Boundary
-        # could ever repair -- so this skips freeze/boundary entirely and
-        # surfaces the draft as-is (still selected/discarded, just unfrozen)
+        # selected set) that must never reach Selection Freeze. FinalEditReviewer
+        # may independently FAIL on evidence StoryValidator itself does not treat
+        # as freeze-blocking (e.g. a genuinely unresolved -- not contradictory --
+        # duplicate idea still occupying two slots in the final KEEP sequence).
+        # Both are deterministic, evidence-based findings -- not something
+        # Boundary could ever repair -- so this skips freeze/boundary entirely
+        # and surfaces the draft as-is (still selected/discarded, just unfrozen)
         # for human review rather than silently producing a bad video.
         coherence_diag = (result.draft.diagnostics or {}).get("final_story_coherence_validation") or {}
-        freeze_blocked = bool(coherence_diag.get("freeze_blocked"))
+        freeze_blocked = bool(coherence_diag.get("freeze_blocked")) or review_result.status == "FAIL"
 
         if freeze_blocked:
             recovery_stage = "not_applicable_freeze_blocked_by_coherence_validation"
@@ -192,6 +218,7 @@ def process_universal_clean_cut_sources(
         semantic_status = "not_requested_clean_cut_only"
         reasoner_status_label = "disabled"
         freeze_blocked = False
+        final_edit_reviewer_status = "not_applicable_missing_draft_contract"
 
     return ProcessingResult(
         schema_version=result.schema_version,
@@ -201,6 +228,7 @@ def process_universal_clean_cut_sources(
         stage_status={
             **result.stage_status,
             "freeze_blocked_pending_coherence_review": freeze_blocked,
+            "final_edit_reviewer": final_edit_reviewer_status,
             "brain_mode": "universal_clean_cut",
             "semantic": semantic_status,
             "composer": "not_requested_clean_cut_only",

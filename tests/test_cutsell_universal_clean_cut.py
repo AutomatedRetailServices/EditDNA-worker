@@ -160,10 +160,19 @@ def test_deterministic_best_take_authority_rollback_flag_restores_pure_unified_s
     result = _run_with_reasoner(monkeypatch, deterministic_best_take_authority_enabled=False)
 
     # With the rollback flag off, Unified Selection's raw (buggy) verdict
-    # stands untouched -- exactly today's pre-Phase-1 production behavior.
+    # stands untouched at the SELECTION level -- exactly today's pre-Phase-1
+    # production behavior: both members of one retry family remain selected.
     assert sorted(c.clip_id for c in result.draft.selected) == ["loser", "winner"]
     assert "deterministic_best_take_authority" not in result.draft.diagnostics
-    assert result.stage_status["selection_phase_authority"] == "unified_whole_video_selection_applied"
+    # But FinalEditReviewer (D-024) is a general, bounded pre-Freeze check
+    # applied regardless of which upstream selection authority ran -- it
+    # catches this exact "raw buggy verdict" shape (two members of one idea
+    # both in the final KEEP sequence) as DUPLICATE_IDEA/UNRESOLVED_RETRY and
+    # blocks Freeze rather than letting Boundary/Renderer ship it silently.
+    assert result.stage_status["selection_phase_authority"] == (
+        "unified_whole_video_selection_applied+freeze_blocked_pending_human_review"
+    )
+    assert result.stage_status["final_edit_reviewer"] == "FAIL"
 
 
 def test_deterministic_best_take_authority_never_invoked_in_legacy_non_unified_path(monkeypatch):
