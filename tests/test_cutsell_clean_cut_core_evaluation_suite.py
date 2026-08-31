@@ -11,9 +11,12 @@ preservation, multiple retries with progressively better delivery, same idea
 expressed with substantially different wording, contradictory factual
 retries (hard freeze-blocking invariant), self-correction within one
 continuous take, retry disguised as continuation, continuation disguised as
-retry, composite-forbidden-because-complete-exists, orphan fragment, and
+retry, composite-forbidden-because-complete-exists, orphan fragment,
 duplicate semantic beat restated far apart in time (documents a known
-current limitation, not yet a passing capability -- see its own docstring).
+current limitation, not yet a passing capability -- see its own docstring),
+uncertain semantic case (arbiter unavailable fails open to preserve, never
+guesses), multilingual paraphrased retry, and causal/story order preserved
+across independent (non-retry) beats.
 
 Explicitly out of this file's scope, because they belong to other
 already-existing pipeline stages this suite does not exercise (clean_cut.py's
@@ -505,3 +508,54 @@ def test_duplicate_beat_far_apart_in_time_not_yet_merged_known_limitation():
     assert equivalence_diag["status"] in {"no_eligible_pairs", "not_requested"}
     assert arbiter.calls == 0
     assert _kept(draft) == {"a", "b"}
+
+
+# 22. Uncertain semantic case -- arbiter unavailable fails open --------------
+
+def test_uncertain_case_with_unavailable_arbiter_fails_open_preserves_both():
+    # No arbiter provided at all (e.g. provider down/disabled) -- a
+    # genuinely low-overlap pair that WOULD need the arbiter to resolve must
+    # never be guessed at; both survive rather than one being discarded on
+    # no evidence.
+    text_a = "We just launched our brand new skincare line today."
+    text_b = "Today we're excited to finally roll out our new skincare line."
+    a = _take("a", 0.0, 3.0, text_a, complete=True)
+    b = _take("b", 4.0, 7.0, text_b, complete=False)
+
+    draft, equivalence_diag, arbiter = _run_core((a, b))  # no oracle_pairs, arbiter never confirms
+
+    assert equivalence_diag["status"] in {"checked_no_merge", "arbiter_unavailable", "no_eligible_pairs", "not_requested"}
+    assert _kept(draft) == {"a", "b"}
+    assert _discarded(draft) == set()
+
+
+# 23. Multilingual paraphrased retry ------------------------------------------
+
+def test_multilingual_paraphrased_retry_merges_and_keeps_one_winner():
+    text_a = "Nunca se nos ocurrió hacer un chequeo de la tiroides porque los examenes siempre salian normales."
+    text_b = "No se nos ocurrio revisar la tiroides porque en mis examenes previos todo salia bien."
+    a = _take("a", 0.0, 4.0, text_a, complete=True)
+    b = _take("b", 5.0, 9.0, text_b, complete=False)
+
+    draft, equivalence_diag, arbiter = _run_core((a, b), oracle_pairs={("a", "b")})
+
+    assert equivalence_diag["status"] == "applied"
+    assert _kept(draft) == {"a"}
+    assert _discarded(draft) == {"b"}
+
+
+# 24. Causal/story order preserved across independent beats ------------------
+
+def test_causal_order_preserved_across_independent_non_retry_beats():
+    # Three genuinely independent story beats in causal/chronological order
+    # must all survive, in their original relative order -- nothing here is
+    # a retry of anything else.
+    beat1 = _take("beat1", 0.0, 3.0, "First I noticed the symptoms getting worse.", complete=True)
+    beat2 = _take("beat2", 4.0, 7.0, "So I went to see a specialist about it.", complete=True)
+    beat3 = _take("beat3", 8.0, 11.0, "They ran some tests and found the cause.", complete=True)
+
+    draft, equivalence_diag, arbiter = _run_core((beat1, beat2, beat3), oracle_pairs=frozenset())
+
+    assert _kept(draft) == {"beat1", "beat2", "beat3"}
+    kept_in_order = [clip.clip_id for clip in sorted(draft.selected, key=lambda c: c.start)]
+    assert kept_in_order == ["beat1", "beat2", "beat3"]
