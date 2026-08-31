@@ -22,7 +22,19 @@ content-loss cases added after RAW 33345946000 (a retry winner missing the
 loser's unique numeric fact / missing the loser's unrelated symptom beat) --
 see the ledger comment before fixture 26 for which requested content-loss
 categories are instead covered at the final_story_coherence_validation unit
-level, and why.
+level, and why. Fixtures 28-29 (D-026/D-027) extend the exercised chain one
+stage further -- CanonicalEditPlan -> [repair_loop|FinalEditReviewer] -- to
+prove the automatic targeted repair loop and the general causal/story order
+validator integrate correctly with the REAL take-grouping/idea-equivalence/
+take-judge/coherence chain above, not just synthetic drafts built by hand
+(their own exhaustive category coverage lives in tests/test_cutsell_repair_
+loop.py and tests/test_cutsell_causal_order_validator.py respectively -- these
+two fixtures are integration proof, not a duplicate of that coverage).
+PostRenderWatchListenQC's real media checks (D-028) are deliberately NOT
+exercised here: they operate on decoded/probed MEDIA FILES, orthogonal to
+this suite's take-grouping/text-level chain -- their CleanCutBench-style
+required-category coverage is tests/test_cutsell_post_render_media_qc.py's
+own synthetic-fixture suite, in full.
 
 Explicitly out of this file's scope, because they belong to other
 already-existing pipeline stages this suite does not exercise (clean_cut.py's
@@ -55,9 +67,12 @@ No Video00 timestamps, phrases, or clip IDs anywhere in this file.
 """
 from dataclasses import replace
 
+from cutsell_worker.canonical_edit_plan import build_canonical_edit_plan
 from cutsell_worker.contracts import CandidateTake, DraftClip, DraftTimeline, EditStrategy, MediaSignals, SCHEMA_VERSION
 from cutsell_worker.deterministic_best_take_authority import apply_deterministic_best_take_authority
+from cutsell_worker.final_edit_reviewer import CAUSAL_ORDER_BREAK, review
 from cutsell_worker.final_story_coherence_validation import apply_final_story_coherence_validation
+from cutsell_worker.repair_loop import run_repair_loop
 from cutsell_worker.semantic_idea_equivalence import IdeaEquivalenceDecision, IdeaEquivalenceResult
 from cutsell_worker.take_grouping_provider import reconcile_semantic_idea_equivalence, safe_group_takes
 from cutsell_worker.take_judge import rank_takes
@@ -671,3 +686,87 @@ def test_retry_winner_missing_losers_unrelated_symptom_beat_blocks_freeze():
 # transition accidentally removed" both reduce to the identical coverage-
 # ledger question (is the fact anywhere in the final KEEP text?) and are not
 # duplicated again here.
+
+
+# 28. End-to-end (D-026): repair loop fixes a disordered composite reached
+# through the REAL take-grouping/idea-equivalence/take-judge/coherence chain.
+#
+# part1/part2 are the same non-competing, complementary-beats shape as
+# fixture 7 ("composite required") -- the real chain above correctly keeps
+# both, never forcing them into one retry contest. This suite still cannot
+# invoke hybrid_composite_best_take.py's own composite-reconciliation
+# machinery in isolation (see module docstring), so the composite mark
+# itself is injected exactly the way that machinery's real output already
+# looks (a hybrid_editorial_chunks row naming the split_group_clip_ids) --
+# the same simulation fixture 7 already relies on to prove its own
+# invariant without that machinery. What is new and real here: the physical
+# render order is deliberately reversed after the real chain runs, and
+# build_canonical_edit_plan -> run_repair_loop -> review are then run for
+# real against that output -- proving the repair loop actually integrates
+# with this chain's real diagnostics shape, not just a hand-built draft.
+
+def test_repair_loop_fixes_disordered_composite_reached_through_the_real_chain():
+    part_one = _take("part1", 0.0, 3.0, "There are three reasons this product works so well.", complete=False)
+    part_two = _take("part2", 3.2, 7.0, "The first reason is durability, the second is comfort, the third is price.", complete=False)
+
+    draft, _, _ = _run_core((part_one, part_two), oracle_pairs=frozenset())
+    assert _kept(draft) == {"part1", "part2"}
+
+    # Simulate CompositeResolver's real acceptance of this pair (see
+    # docstring above), and physically render them in the wrong order --
+    # the exact failure shape STORY_ORDER_BREAK/the repair loop exist for.
+    # part1/part2 never contested each other (no shared take_judge_groups
+    # entry -- the real chain correctly never treats non-competing beats as
+    # one retry family), so CanonicalEditPlan needs that same union CompositeResolver's
+    # real output would have produced, to see them as one Idea at all.
+    reversed_selected = tuple(sorted(draft.selected, key=lambda c: c.clip_id, reverse=True))
+    assert [c.clip_id for c in reversed_selected] == ["part2", "part1"]
+    composite_diagnostics = dict(draft.diagnostics)
+    composite_diagnostics["take_judge_groups"] = [
+        {"group_id": "g_composite", "ranked": [
+            {"clip_id": "part1", "score": 0.7, "reason": "composite"},
+            {"clip_id": "part2", "score": 0.7, "reason": "composite"},
+        ]},
+    ]
+    composite_diagnostics["hybrid_editorial_chunks"] = [
+        {"hybrid_composite_best_take": {"split_group_clip_ids": ["part1", "part2"]}}
+    ]
+    disordered_draft = replace(draft, selected=reversed_selected, diagnostics=composite_diagnostics)
+
+    result = run_repair_loop(disordered_draft)
+
+    assert result.status == "PASS"
+    assert len(result.attempts) == 1
+    assert result.attempts[0].finding_kind == "STORY_ORDER_BREAK"
+    assert [c.clip_id for c in result.final_draft.selected] == ["part1", "part2"]
+
+
+# 29. End-to-end (D-027): a general causal order break, reached through the
+# same real chain, is detected by FinalEditReviewer.
+#
+# beat1/beat2 are two independent, non-retry story beats -- the real chain
+# above keeps both (same invariant as fixture 24), never merging or
+# reordering them itself. beat2 opens with a strong, general dependency
+# connector ("therefore") naming it a consequence of beat1. The physical
+# render order is then deliberately inverted -- the same kind of authoring
+# mistake causal_order_validator.py exists to catch -- and CanonicalEditPlan
+# + review() are run for real against that output.
+
+def test_general_causal_order_break_reached_through_the_real_chain_blocks_review():
+    beat1 = _take("beat1", 0.0, 3.0, "We ran the test on the sample.", complete=True)
+    beat2 = _take("beat2", 4.0, 7.0, "Therefore the results were confirmed as accurate.", complete=True)
+
+    draft, _, _ = _run_core((beat1, beat2), oracle_pairs=frozenset())
+    assert _kept(draft) == {"beat1", "beat2"}
+
+    inverted_draft = replace(draft, selected=tuple(reversed(draft.selected)))
+    assert [c.clip_id for c in inverted_draft.selected] == ["beat2", "beat1"]
+
+    plan = build_canonical_edit_plan(inverted_draft)
+    result = review(plan)
+
+    assert result.status == "FAIL"
+    causal_findings = [f for f in result.findings if f.kind == CAUSAL_ORDER_BREAK]
+    assert len(causal_findings) == 1
+    assert causal_findings[0].detail["required_clip_id"] == "beat1"
+    assert causal_findings[0].detail["dependent_clip_id"] == "beat2"
