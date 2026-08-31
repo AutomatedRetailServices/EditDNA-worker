@@ -11,15 +11,15 @@ routes back to whichever canonical component is responsible for resolving
 it, rather than this reviewer attempting to rewrite membership itself.
 
 Blocking vs. non-blocking: DUPLICATE_IDEA, UNRESOLVED_RETRY,
-IDEA_COVERAGE_LOST, CONTRADICTION, UNIQUE_FACT_LOST, and (D-025)
-STORY_ORDER_BREAK for a disordered composite are the findings that block.
-The first five are exactly what already sets `final_story_coherence_
-validation`'s own `freeze_blocked` -- surfacing them here through this
-vocabulary does not change what blocks Freeze today. REQUIRED_CONTINUATION_
-LOST is included as a non-blocking warning (mirrors `possible_missing_
-story_ending`'s existing "flag only" contract -- promoting it to blocking
-would be a new behavior change unvalidated by CleanCutBench, not something
-to slip in here).
+IDEA_COVERAGE_LOST, CONTRADICTION, and (D-025) STORY_ORDER_BREAK for a
+disordered composite always block. UNIQUE_FACT_LOST (D-031, changed from
+always-blocking) blocks only when `final_story_coherence_validation`'s own
+`lost_semantic_atoms` row says `blocking: true` -- a genuinely critical or
+uncertain semantic atom lost, or the broader content-loss signal; a
+CONTEXTUAL-only atom loss (e.g. an incidental year -- see
+`semantic_atom_importance.py`) is instead a non-blocking warning, exactly
+like REQUIRED_CONTINUATION_LOST below (mirrors `possible_missing_story_
+ending`'s existing "flag only" contract).
 
 STORY_ORDER_BREAK (D-025, narrow, real detector): when an Idea's
 realization is a Composite (2+ component clips), its components must
@@ -218,14 +218,21 @@ def review(
         ))
 
     for row in edit_plan.lost_semantic_atoms:
-        findings.append(Finding(
+        # D-031: a CONTEXTUAL-only atom loss (e.g. an incidental year) is
+        # recorded as a non-blocking warning -- observability, not a
+        # Freeze-blocking finding. Anything the coverage ledger itself
+        # marked `blocking` (a critical/uncertain atom, or the broader
+        # content-loss signal) still blocks exactly as before. A row from
+        # before this field existed defaults to blocking=True (safe).
+        target = findings if row.get("blocking", True) else warnings
+        target.append(Finding(
             kind=UNIQUE_FACT_LOST,
             plan_id=plan_id, plan_version=plan_version,
             idea_id=None,
             clip_ids=(str(row.get("clip_id") or ""),),
             detail=dict(row),
             owning_authority="StoryValidator",
-            blocking=True,
+            blocking=bool(row.get("blocking", True)),
         ))
 
     findings.extend(_composite_order_findings(edit_plan, plan_id, plan_version))

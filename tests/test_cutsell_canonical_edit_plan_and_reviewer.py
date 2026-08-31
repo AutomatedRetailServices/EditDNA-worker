@@ -120,6 +120,32 @@ def test_contradiction_and_lost_semantic_atoms_pass_through_from_coherence_diagn
     assert result.status == "FAIL"
 
 
+def test_contextual_lost_semantic_atom_is_a_non_blocking_warning_not_a_fail():
+    # D-031: a lost_semantic_atoms row the coverage ledger itself marked
+    # non-blocking (a CONTEXTUAL-only atom, e.g. an incidental year) must
+    # surface as a warning, never a FAIL-causing finding.
+    a = clip("a", 0.0, 5.0, "the only take", selected=True)
+    d = draft(
+        selected=(a,),
+        coherence={
+            "freeze_blocked": False,
+            "lost_semantic_atoms": [{
+                "clip_id": "lost", "text": "during one period in 2023 ...",
+                "missing_critical_atoms": ["2023"], "blocking": False,
+            }],
+            "contradiction_findings": [],
+        },
+    )
+
+    plan = build_canonical_edit_plan(d)
+    result = review(plan)
+
+    assert result.status == "PASS"
+    assert result.findings == ()
+    assert result.warnings and result.warnings[0].kind == UNIQUE_FACT_LOST
+    assert result.warnings[0].blocking is False
+
+
 def test_possible_missing_story_ending_is_a_non_blocking_warning():
     a = clip("a", 0.0, 5.0, "the only take", selected=True)
     d = draft(

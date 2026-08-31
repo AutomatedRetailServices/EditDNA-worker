@@ -86,6 +86,13 @@ from dataclasses import replace
 from itertools import combinations
 
 from .final_sibling_grouping import _content, _negations, _numbers
+from .semantic_atom_importance import (
+    SemanticAtomImportanceArbiter,
+    blocks_freeze,
+    classify_negation_atom,
+    classify_number_atom,
+    resolve_uncertain_with_arbiter,
+)
 from .semantic_idea_equivalence import (
     IdeaEquivalencePair,
     IdeaEquivalenceRequest,
@@ -277,7 +284,9 @@ def _missing_idea_coverage(draft) -> list[dict]:
     return missing
 
 
-def _lost_semantic_atoms(draft) -> list[dict]:
+def _lost_semantic_atoms(
+    draft, *, semantic_atom_importance_arbiter: SemanticAtomImportanceArbiter | None = None,
+) -> list[dict]:
     """General coverage ledger over the ACTUAL final KEEP timeline.
 
     ``_missing_idea_coverage`` above is scoped to ``take_judge_groups`` --
@@ -299,12 +308,26 @@ def _lost_semantic_atoms(draft) -> list[dict]:
     This check instead compares every discarded clip's own content
     directly against the union of the final selected text -- independent
     of which stage discarded it, or whether it was ever grouped at all.
-    Any number/negation atom (a critical fact) absent from the final KEEP
-    text is flagged unconditionally. A broader loss of ordinary content
-    vocabulary is flagged only once it clears both a volume and a coverage
-    floor, so a genuinely redundant retry of an idea the KEEP timeline
-    already covers -- which shares most of its topic vocabulary with the
-    winner -- is not mistaken for real information loss.
+
+    D-031: a missing number/negation atom is no longer flagged as blocking
+    unconditionally. RAW 33402023395 found the old unconditional rule too
+    blunt: it blocked Freeze over a discarded clip's incidental year
+    ("...en 2023.") that the Human Gold oracle itself does not preserve in
+    its own equivalent delivery -- the audience-facing idea (endoscopy ->
+    diagnosis -> medication) was already fully intact. Each missing atom is
+    now run through `semantic_atom_importance.classify_*` -- a negation is
+    always CRITICAL; a number is CRITICAL when its own clip's text carries
+    a percentage/price/measurement/dose/correction-language marker, or
+    UNCERTAIN with no such marker (which still blocks -- WHEN UNCERTAIN,
+    KEEP), and only CONTEXTUAL for a bare, plausible-year-shaped number in
+    an ordinary temporal-aside clause. `blocking` on each finding reflects
+    this: True (as before) for a genuinely critical/uncertain atom or the
+    broader content-loss signal below; False only when every missing atom
+    on that clip classified as CONTEXTUAL. The broader loss of ordinary
+    content vocabulary (a whole idea's worth of unrelated words, not a
+    specific atom) is UNCHANGED and always blocking once it clears both a
+    volume and a coverage floor -- this reclassification is scoped to
+    number/negation atoms only, not to that coarser signal.
     """
     kept_text = " ".join(str(clip.text or "") for clip in draft.selected)
     kept_content = _content(kept_text)
@@ -319,7 +342,9 @@ def _lost_semantic_atoms(draft) -> list[dict]:
             # wait", "okay stop") -- avoids flagging bare BTS scraps.
             continue
         own_content = _content(text)
-        own_critical = _numbers(text) | _negations(text)
+        own_numbers = _numbers(text)
+        own_negations = _negations(text)
+        own_critical = own_numbers | own_negations
         missing_critical = sorted(own_critical - kept_critical)
         # The broader content-vocabulary check needs enough own content to
         # judge reliably; a critical atom (number/negation) is meaningful
@@ -328,20 +353,42 @@ def _lost_semantic_atoms(draft) -> list[dict]:
         missing_content = sorted(own_content - kept_content) if len(own_content) >= 5 else []
         coverage = 1.0 - (len(missing_content) / max(1, len(own_content) or 1))
         content_loss = len(own_content) >= 5 and len(missing_content) >= 4 and coverage < 0.45
-        if missing_critical or content_loss:
-            findings.append({
-                "clip_id": clip.clip_id,
-                "text": text,
-                "missing_critical_atoms": missing_critical,
-                "missing_content_token_count": len(missing_content),
-                "own_content_token_count": len(own_content),
-                "coverage_against_final_keep": round(coverage, 4),
-            })
+        if not (missing_critical or content_loss):
+            continue
+
+        classifications = [
+            classify_negation_atom(atom) if atom in own_negations else classify_number_atom(atom, text)
+            for atom in missing_critical
+        ]
+        classifications = resolve_uncertain_with_arbiter(
+            classifications, source_text=text, kept_text=kept_text,
+            arbiter=semantic_atom_importance_arbiter,
+        )
+        blocking = content_loss or any(blocks_freeze(c.importance) for c in classifications)
+        findings.append({
+            "clip_id": clip.clip_id,
+            "text": text,
+            "missing_critical_atoms": missing_critical,
+            "atom_classifications": [
+                {
+                    "atom": c.atom, "atom_type": c.atom_type, "importance": c.importance,
+                    "evidence": c.evidence, "resolved_by": c.resolved_by,
+                }
+                for c in classifications
+            ],
+            "missing_content_token_count": len(missing_content),
+            "own_content_token_count": len(own_content),
+            "coverage_against_final_keep": round(coverage, 4),
+            "blocking": blocking,
+        })
     return findings
 
 
 def apply_final_story_coherence_validation(
-    draft, *, semantic_equivalence_arbiter: SemanticEquivalenceArbiter | None = None,
+    draft,
+    *,
+    semantic_equivalence_arbiter: SemanticEquivalenceArbiter | None = None,
+    semantic_atom_importance_arbiter: SemanticAtomImportanceArbiter | None = None,
 ):
     """Last semantic authority before Selection Freeze. See module docstring."""
     draft = _fold_alternates_into_discarded(draft)
@@ -415,8 +462,20 @@ def apply_final_story_coherence_validation(
         if finding not in residual_contradictions
     ]
     missing_idea_coverage = _missing_idea_coverage(draft)
-    lost_semantic_atoms = _lost_semantic_atoms(draft)
-    freeze_blocked = bool(contradiction_findings) or bool(missing_idea_coverage) or bool(lost_semantic_atoms)
+    lost_semantic_atoms = _lost_semantic_atoms(
+        draft, semantic_atom_importance_arbiter=semantic_atom_importance_arbiter,
+    )
+    # D-031: a lost_semantic_atoms finding only blocks Freeze when its own
+    # `blocking` field says so (a genuinely critical/uncertain atom, or the
+    # broader content-loss signal) -- a CONTEXTUAL-only atom loss (e.g. an
+    # incidental year) is recorded for observability but does not itself
+    # block. contradiction_findings/missing_idea_coverage are unaffected
+    # and remain unconditionally blocking, unchanged.
+    freeze_blocked = (
+        bool(contradiction_findings)
+        or bool(missing_idea_coverage)
+        or any(row.get("blocking", True) for row in lost_semantic_atoms)
+    )
 
     diagnostics = dict(draft.diagnostics or {})
     diagnostics["final_story_coherence_validation"] = {

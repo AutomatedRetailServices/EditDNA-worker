@@ -931,6 +931,82 @@ render -> re-QC cycle and the semantic-mismatch-never-touched-by-Boundary invari
 **Full suite:** 1103 passed (`pytest -q tests/test_cutsell_*.py`, exact CI glob),
 `compileall cutsell_worker cutsell_app` clean.
 
+## D-031 — Semantic-atom importance classification: CRITICAL/CONTEXTUAL/UNCERTAIN
+
+**Status: CANONICAL**
+
+RAW 33402023395 (D-029/D-030's own RAW) exposed a real CoverageLedger over-
+conservatism, not a Selection regression: a discarded clip's incidental year
+("...en 2023.") blocked Selection Freeze under the old unconditional rule --
+"any missing number/negation atom blocks" -- even though the Human Gold
+oracle itself does not preserve that year in its own equivalent delivery.
+The audience-facing idea (endoscopy -> diagnosis -> medication) was fully
+intact in the winning take. This generalizes that rule.
+
+**Mechanism (`semantic_atom_importance.py`, new module):** every missing
+number/negation atom `final_story_coherence_validation._lost_semantic_atoms`
+finds is now classified CRITICAL, CONTEXTUAL, or UNCERTAIN before deciding
+whether it blocks Freeze:
+
+- A negation is always CRITICAL (flips a claim's truth value outright).
+- A number is CRITICAL when its own clip's text carries a general
+  percentage/price/measurement/dose marker, correction language
+  ("instead of", "actually", "corrijo", ...), or a chronology-relation
+  phrase ("before that", "since then", "antes de eso", ...).
+- A number is CONTEXTUAL only when it is a bare, plausible-year-shaped
+  value (1900-2099) in an ordinary temporal-aside clause with NONE of the
+  above markers present -- the canonical directive's own "during one
+  period in 2023 I had stomach problems" example.
+- Anything else is UNCERTAIN. `blocks_freeze(importance)` treats UNCERTAIN
+  exactly like CRITICAL -- "WHEN UNCERTAIN, KEEP" means an atom this
+  deterministic layer cannot confidently clear as safe-to-lose stays
+  blocking, never silently downgraded to a warning. No Video00 fact,
+  phrase, or literal value is hardcoded anywhere in the marker vocabulary.
+
+A bounded `SemanticAtomImportanceArbiter` Protocol exists for resolving a
+genuinely ambiguous UNCERTAIN atom with minimal context (mirrors this
+codebase's other bounded arbiters' fail-open contract exactly: no arbiter,
+an arbiter exception, or a malformed verdict all leave the atom UNCERTAIN).
+No live implementation exists yet -- same honest-gap pattern as
+`CausalOrderArbiter` (D-027) -- every caller defaults it to `None`.
+
+**Policy change, scoped narrowly:** `_lost_semantic_atoms` now returns an
+`atom_classifications` list and a `blocking` boolean per finding.
+`final_story_coherence_validation`'s own `freeze_blocked` and
+`final_edit_reviewer.review()`'s `UNIQUE_FACT_LOST` finding both now respect
+`blocking` -- a CONTEXTUAL-only atom loss is a non-blocking warning (same
+shape as `REQUIRED_CONTINUATION_LOST`); a critical/uncertain atom, or the
+BROADER content-vocabulary-loss signal (unchanged, still unconditionally
+blocking), still blocks exactly as before. `contradiction_findings` and
+`missing_idea_coverage` are completely unaffected. Protection is NOT
+weakened for papillary-cancer-shaped diagnoses, sonography/nodule-shaped
+measurements, pimples/rash-shaped ideas, or any number/negation that
+actually changes meaning -- all of those hit a CRITICAL rule (measurement,
+dose, correction, chronology, or plain negation) or fall through to
+UNCERTAIN, which still blocks.
+
+**Tests:** 15 unit tests in `tests/test_cutsell_semantic_atom_importance.py`
+(negation always critical; incidental-year contextual; correction-language
+critical -- the directive's own "instead of" example; chronology-relation
+critical; percentage/price/measurement/dose critical; bare ambiguous
+quantity uncertain-and-blocks; arbiter confirms/never-second-guesses-a-
+deterministic-critical-verdict/exception-handling/malformed-verdict). 2 new
+tests in `tests/test_cutsell_final_story_coherence_validation.py` (the exact
+RAW 33402023395 shape: contextual year does not block; a critical
+measurement alongside an incidental year still blocks). 1 new test in
+`tests/test_cutsell_canonical_edit_plan_and_reviewer.py` (a CONTEXTUAL-only
+row surfaces as a non-blocking `UNIQUE_FACT_LOST` warning, not a FAIL). 7
+new CleanCutBench fixtures in `tests/test_cutsell_clean_cut_core_evaluation_
+suite.py`, reached through the REAL take-grouping/idea-equivalence/take-
+judge/coherence chain, covering all ten of the canonical directive's named
+categories (several collapse onto the same CRITICAL/CONTEXTUAL split):
+incidental year safely omitted; year required for chronology; numeric
+measurement/percentage/dose must survive; redundant date repeated in two
+attempts (never even flagged as missing); an ambiguous atom with no
+deterministic signal stays blocking without an arbiter.
+
+Full suite: 1128 passed (`pytest -q tests/test_cutsell_*.py`, exact CI glob).
+
 ## Change rule
 
 When a new decision changes product behavior, update this file in the same development cycle. Do not silently redefine CutSell through code alone.

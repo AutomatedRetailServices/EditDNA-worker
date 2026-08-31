@@ -770,3 +770,141 @@ def test_general_causal_order_break_reached_through_the_real_chain_blocks_review
     assert len(causal_findings) == 1
     assert causal_findings[0].detail["required_clip_id"] == "beat1"
     assert causal_findings[0].detail["dependent_clip_id"] == "beat2"
+
+
+# 30-36. Semantic-atom importance classification (D-031), reached through
+# the REAL take-grouping/idea-equivalence/take-judge/coherence chain.
+#
+# RAW 33402023395's own failure shape, generalized: a losing retry's
+# incidental year blocked Freeze even though the audience-facing idea was
+# fully intact in the winning delivery. These fixtures map the canonical
+# directive's ten named categories onto seven real-chain cases (several
+# categories collapse onto the same underlying CRITICAL/CONTEXTUAL split):
+#   - incidental year safely omitted            -> fixture 30
+#   - year required for chronology               -> fixture 31
+#   - numeric measurement that must survive      -> fixture 32
+#   - percentage that must survive               -> fixture 33
+#   - dose/price/quantity that must survive      -> fixture 34
+#   - redundant date repeated in two attempts    -> fixture 35
+#   - unique factual date referenced by later idea,
+#     ambiguous atom routed to arbiter           -> fixture 36 (no arbiter
+#     configured -- stays UNCERTAIN, which still blocks; the dedicated
+#     confirm/deny arbiter-routing mechanics are unit-tested exhaustively
+#     in tests/test_cutsell_semantic_atom_importance.py)
+#   - removal changes meaning -> critical / removal does not change the
+#     proposition -> contextual: the CRITICAL fixtures (31-34) and the
+#     CONTEXTUAL fixture (30) together ARE this contrast.
+# No Video00 fact/phrase/literal value appears in any fixture below.
+
+def test_incidental_year_safely_omitted_does_not_block_freeze():
+    winner_text = "I had digestion problems and it turned out to be gastritis, nothing severe."
+    loser_text = "During one period in 2023 I had digestion problems and it turned out to be gastritis, nothing severe."
+    winner = _take("keeper", 0.0, 3.0, winner_text, complete=True)
+    loser = _take("loser_atom", 4.0, 7.0, loser_text, complete=True)
+
+    draft, _, _ = _run_core((winner, loser), oracle_pairs={("keeper", "loser_atom")})
+
+    assert _kept(draft) == {"keeper"}
+    diag = draft.diagnostics["final_story_coherence_validation"]
+    assert diag["freeze_blocked"] is False
+    finding = diag["lost_semantic_atoms"][0]
+    assert finding["blocking"] is False
+
+
+def test_year_required_for_chronology_still_blocks_freeze():
+    winner_text = "I started feeling worse and went to get checked out right away."
+    loser_text = "I started feeling worse in 2023, and before that everything felt completely normal."
+    winner = _take("keeper", 0.0, 3.0, winner_text, complete=True)
+    loser = _take("loser_atom", 4.0, 7.0, loser_text, complete=True)
+
+    draft, _, _ = _run_core((winner, loser), oracle_pairs={("keeper", "loser_atom")})
+
+    diag = draft.diagnostics["final_story_coherence_validation"]
+    assert diag["freeze_blocked"] is True
+    finding = diag["lost_semantic_atoms"][0]
+    assert finding["blocking"] is True
+    classes = {c["importance"] for c in finding["atom_classifications"]}
+    assert "CRITICAL" in classes
+
+
+def test_numeric_measurement_must_survive_blocks_freeze():
+    winner_text = "They found something unusual during the scan and sent it for testing."
+    loser_text = "They found something unusual during the scan measuring 3 centimeters and sent it for testing."
+    winner = _take("keeper", 0.0, 3.0, winner_text, complete=True)
+    loser = _take("loser_atom", 4.0, 7.0, loser_text, complete=True)
+
+    draft, _, _ = _run_core((winner, loser), oracle_pairs={("keeper", "loser_atom")})
+
+    diag = draft.diagnostics["final_story_coherence_validation"]
+    assert diag["freeze_blocked"] is True
+    finding = diag["lost_semantic_atoms"][0]
+    classes = {c["importance"]: c["evidence"] for c in finding["atom_classifications"]}
+    assert classes.get("CRITICAL") == "measurement"
+
+
+def test_percentage_must_survive_blocks_freeze():
+    winner_text = "Most people who try the program end up quitting before they finish it."
+    loser_text = "Only 15% of people who try the program actually end up finishing it."
+    winner = _take("keeper", 0.0, 3.0, winner_text, complete=True)
+    loser = _take("loser_atom", 4.0, 7.0, loser_text, complete=True)
+
+    draft, _, _ = _run_core((winner, loser), oracle_pairs={("keeper", "loser_atom")})
+
+    diag = draft.diagnostics["final_story_coherence_validation"]
+    assert diag["freeze_blocked"] is True
+    finding = diag["lost_semantic_atoms"][0]
+    classes = {c["importance"]: c["evidence"] for c in finding["atom_classifications"]}
+    assert classes.get("CRITICAL") == "percentage"
+
+
+def test_dose_quantity_must_survive_blocks_freeze():
+    winner_text = "They put me on medication for a while and it cleared up."
+    loser_text = "They put me on medication, 2 pills every morning for a while, and it cleared up."
+    winner = _take("keeper", 0.0, 3.0, winner_text, complete=True)
+    loser = _take("loser_atom", 4.0, 7.0, loser_text, complete=True)
+
+    draft, _, _ = _run_core((winner, loser), oracle_pairs={("keeper", "loser_atom")})
+
+    diag = draft.diagnostics["final_story_coherence_validation"]
+    assert diag["freeze_blocked"] is True
+    finding = diag["lost_semantic_atoms"][0]
+    classes = {c["importance"]: c["evidence"] for c in finding["atom_classifications"]}
+    assert classes.get("CRITICAL") == "dose_or_quantity"
+
+
+def test_redundant_date_repeated_in_two_attempts_is_not_flagged_at_all():
+    # The year appears in BOTH the winner and the loser -- never actually
+    # "missing" from the final KEEP text, so no atom finding is raised for
+    # it at all (the pre-check that decides something is "missing" already
+    # handles this; the importance classifier is never even reached).
+    winner_text = "During one period in 2023 I had digestion problems and it turned out to be gastritis."
+    loser_text = "In 2023 I had some digestion problems that turned out to be gastritis, nothing major."
+    winner = _take("keeper", 0.0, 3.0, winner_text, complete=True)
+    loser = _take("loser_atom", 4.0, 7.0, loser_text, complete=True)
+
+    draft, _, _ = _run_core((winner, loser), oracle_pairs={("keeper", "loser_atom")})
+
+    diag = draft.diagnostics["final_story_coherence_validation"]
+    assert diag["freeze_blocked"] is False
+    assert diag["lost_semantic_atoms"] == []
+
+
+def test_ambiguous_atom_with_no_deterministic_signal_stays_blocking_without_an_arbiter():
+    # No unit/currency/percent/correction/chronology marker, not a
+    # plausible year -- an ordinary bare quantity this deterministic layer
+    # cannot confidently place. UNCERTAIN, and with no arbiter configured
+    # (the default everywhere in this pipeline today), it stays blocking --
+    # WHEN UNCERTAIN, KEEP, never silently downgraded to a warning.
+    winner_text = "I tried a bunch of different approaches before something finally worked."
+    loser_text = "I tried 7 different approaches before something finally worked for me."
+    winner = _take("keeper", 0.0, 3.0, winner_text, complete=True)
+    loser = _take("loser_atom", 4.0, 7.0, loser_text, complete=True)
+
+    draft, _, _ = _run_core((winner, loser), oracle_pairs={("keeper", "loser_atom")})
+
+    diag = draft.diagnostics["final_story_coherence_validation"]
+    assert diag["freeze_blocked"] is True
+    finding = diag["lost_semantic_atoms"][0]
+    assert finding["blocking"] is True
+    classes = {c["importance"] for c in finding["atom_classifications"]}
+    assert "UNCERTAIN" in classes

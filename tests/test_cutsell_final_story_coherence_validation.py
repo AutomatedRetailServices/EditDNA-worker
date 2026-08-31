@@ -377,6 +377,58 @@ def test_lost_semantic_atoms_flags_missing_numeric_fact_despite_high_overlap():
     assert finding["missing_critical_atoms"]
 
 
+def test_lost_semantic_atoms_does_not_block_freeze_for_a_contextual_incidental_year():
+    # D-031 / RAW 33402023395: an incidental year in an ordinary temporal
+    # aside, on a discarded clip whose core claim (diagnosis + treatment) is
+    # otherwise fully present in the surviving winner, must not block
+    # Freeze by itself -- the Human Gold oracle itself does not preserve
+    # that year either. Generic subject matter, no Video00 wording.
+    kept = clip(
+        "kept", 0.0, 5.0,
+        "I had digestion problems and it turned out to be gastritis, nothing severe.",
+        selected=True,
+    )
+    # Near-identical wording to `kept` plus one leading incidental-year
+    # aside -- isolates the atom-level check from the separate, coarser
+    # content-vocabulary floor (which needs real divergence to fire).
+    lost_year = clip(
+        "lost_year", 5.0, 10.0,
+        "During one period in 2023 I had digestion problems and it turned out to be gastritis, nothing severe.",
+        selected=False,
+    )
+    d = draft(selected=(kept,), discarded=(lost_year,))
+
+    out = apply_final_story_coherence_validation(d)
+
+    diag = out.diagnostics["final_story_coherence_validation"]
+    assert diag["freeze_blocked"] is False
+    finding = diag["lost_semantic_atoms"][0]
+    assert finding["blocking"] is False
+    classes = {c["importance"] for c in finding["atom_classifications"]}
+    assert classes == {"CONTEXTUAL"}
+
+
+def test_lost_semantic_atoms_still_blocks_freeze_for_a_critical_measurement():
+    # A measurement atom lost alongside an incidental year must still block
+    # -- CONTEXTUAL-only tolerance never weakens a genuinely critical atom.
+    kept = clip("kept", 0.0, 5.0, "they found something during the scan", selected=True)
+    lost = clip(
+        "lost", 5.0, 10.0,
+        "during a scan in 2023 they found a lump measuring 3 centimeters",
+        selected=False,
+    )
+    d = draft(selected=(kept,), discarded=(lost,))
+
+    out = apply_final_story_coherence_validation(d)
+
+    diag = out.diagnostics["final_story_coherence_validation"]
+    assert diag["freeze_blocked"] is True
+    finding = diag["lost_semantic_atoms"][0]
+    assert finding["blocking"] is True
+    classes = {c["importance"] for c in finding["atom_classifications"]}
+    assert "CRITICAL" in classes
+
+
 def test_lost_semantic_atoms_ignores_short_filler_discard():
     # Too short to safely judge as carrying a distinct idea/fact -- avoids
     # flagging BTS/false-start scraps that legitimately have near-zero

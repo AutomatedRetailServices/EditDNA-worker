@@ -28,6 +28,7 @@ from .deterministic_best_take_authority import apply_deterministic_best_take_aut
 from .final_boundary_authority import enforce_complete_idea_boundaries
 from .final_story_coherence_validation import apply_final_story_coherence_validation
 from .causal_order_validator import CausalOrderArbiter
+from .semantic_atom_importance import SemanticAtomImportanceArbiter
 from .repair_loop import run_repair_loop
 from .flow_b import ProgressCallback, process_local_sources
 from .human_boundary_polish_v5 import polish_human_boundaries_v5
@@ -59,6 +60,7 @@ def process_universal_clean_cut_sources(
     deterministic_best_take_authority_enabled: bool = True,
     semantic_equivalence_arbiter: SemanticEquivalenceArbiter | None = None,
     causal_order_arbiter: CausalOrderArbiter | None = None,
+    semantic_atom_importance_arbiter: SemanticAtomImportanceArbiter | None = None,
     clean_cut_core_v1_enabled: bool = True,
     progress: ProgressCallback | None = None,
 ) -> ProcessingResult:
@@ -102,7 +104,9 @@ def process_universal_clean_cut_sources(
             result = replace(
                 result,
                 draft=apply_final_story_coherence_validation(
-                    result.draft, semantic_equivalence_arbiter=semantic_equivalence_arbiter,
+                    result.draft,
+                    semantic_equivalence_arbiter=semantic_equivalence_arbiter,
+                    semantic_atom_importance_arbiter=semantic_atom_importance_arbiter,
                 ),
             )
             selection_stage = "clean_cut_core_v1_idea_first_keep_discard"
