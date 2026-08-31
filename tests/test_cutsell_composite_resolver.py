@@ -49,7 +49,7 @@ class _MappingJudge:
 
 
 def test_base_step_alone_reaches_final_conflict_arbitration_unchanged():
-    # No candidate here should trip any of the 14 restore/rescue steps --
+    # No candidate here should trip any of the 19 restore/rescue steps --
     # this proves the chain composes without raising and returns the base
     # step's own decision when nothing downstream has evidence to act on.
     takes = (
@@ -126,6 +126,48 @@ def test_apply_composite_group_split_is_a_noop_without_split_ids():
     out = apply_composite_group_split(grouping, takes, frozenset())
 
     assert out is grouping
+
+
+def test_stray_legacy_install_call_after_chain_is_built_cannot_affect_it():
+    # "Legacy downstream hook cannot mutate final membership": once
+    # composite_resolver's chain has been built (which happens lazily, on
+    # first use -- see _get_take_level_chain), it is a private, cached
+    # reference. Even if some future code accidentally calls one of the 19
+    # consolidated hooks' own install_*() again afterward (they still
+    # exist, unchanged, for their own monkeypatch-based tests -- see
+    # D-023), that stray call can only rewrap the CURRENT global
+    # hybrid_session_cleanup.apply_hybrid_session_cleanup attribute; it
+    # cannot reach composite_resolver's already-cached chain.
+    from cutsell_worker import composite_resolver as cr
+    from cutsell_worker import hybrid_session_cleanup, session_boundaries
+    from cutsell_worker.hybrid_composite_best_take import install_hybrid_composite_best_take
+
+    takes = (
+        _take("a", 0.0, 3.0, "the product arrived in great condition"),
+        _take("b", 4.0, 7.0, "the packaging was also very sturdy"),
+    )
+    judge = _MappingJudge({"a": ("keep", 0.90), "b": ("keep", 0.90)})
+
+    # Warm the cache first (idempotent if some earlier test already did).
+    before, _ = apply_composite_resolution(takes, None, judge)
+    cached_chain = cr._take_level_chain
+    assert cached_chain is not None
+
+    original_cleanup = hybrid_session_cleanup.apply_hybrid_session_cleanup
+    original_grouping = session_boundaries.safe_group_takes_by_sessions
+    try:
+        install_hybrid_composite_best_take()
+        # The stray install DID monkeypatch the global attributes...
+        assert hybrid_session_cleanup.apply_hybrid_session_cleanup is not original_cleanup
+
+        # ...but composite_resolver's cached chain reference is untouched,
+        # and apply_composite_resolution's behavior is unaffected.
+        assert cr._take_level_chain is cached_chain
+        after, _ = apply_composite_resolution(takes, None, judge)
+        assert {t.clip_id for t in after.kept} == {t.clip_id for t in before.kept}
+    finally:
+        hybrid_session_cleanup.apply_hybrid_session_cleanup = original_cleanup
+        session_boundaries.safe_group_takes_by_sessions = original_grouping
 
 
 def test_apply_composite_family_stabilization_delegates_and_is_a_noop_without_swaps():

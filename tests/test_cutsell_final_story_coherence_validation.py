@@ -390,3 +390,51 @@ def test_lost_semantic_atoms_ignores_short_filler_discard():
     diag = out.diagnostics["final_story_coherence_validation"]
     assert diag["freeze_blocked"] is False
     assert diag["lost_semantic_atoms"] == []
+
+
+# --- Composite preserves all unique semantic atoms: the coverage ledger
+# checks the UNION of the final selected text, so a two-piece composite
+# (both pieces individually selected by CompositeResolver) that jointly
+# covers a discarded delivery's facts must not be flagged, while one that
+# genuinely drops a fact still must be -- exactly the "composite preserves
+# all unique semantic atoms" CleanCutBench category, at the level this
+# repo's coverage ledger can actually check (composite mechanics themselves
+# are covered separately in tests/test_cutsell_hybrid_composite_best_take.py,
+# which cannot be exercised in isolation through this module -- see
+# tests/test_cutsell_clean_cut_core_evaluation_suite.py's own scoping note).
+
+
+def test_two_piece_composite_jointly_covering_a_discarded_facts_is_not_flagged():
+    piece_a = clip("piece_a", 0.0, 3.0, "i had thyroid surgery last year", selected=True)
+    piece_b = clip("piece_b", 3.0, 6.0, "it was my 3rd surgery and it went well", selected=True)
+    superseded = clip(
+        "superseded", 6.0, 10.0,
+        "i had thyroid surgery last year, my 3rd surgery, and it went well",
+        selected=False,
+    )
+    d = draft(selected=(piece_a, piece_b), discarded=(superseded,))
+
+    out = apply_final_story_coherence_validation(d)
+
+    diag = out.diagnostics["final_story_coherence_validation"]
+    assert diag["freeze_blocked"] is False
+    assert diag["lost_semantic_atoms"] == []
+
+
+def test_two_piece_composite_missing_a_fact_the_superseded_delivery_had_is_flagged():
+    piece_a = clip("piece_a", 0.0, 3.0, "i had thyroid surgery last year", selected=True)
+    piece_b = clip("piece_b", 3.0, 6.0, "and it went well overall", selected=True)
+    superseded = clip(
+        "superseded", 6.0, 10.0,
+        "i had thyroid surgery last year, my 3rd surgery, and it went well overall",
+        selected=False,
+    )
+    d = draft(selected=(piece_a, piece_b), discarded=(superseded,))
+
+    out = apply_final_story_coherence_validation(d)
+
+    diag = out.diagnostics["final_story_coherence_validation"]
+    assert diag["freeze_blocked"] is True
+    finding = diag["lost_semantic_atoms"][0]
+    assert finding["clip_id"] == "superseded"
+    assert "3rd" in finding["missing_critical_atoms"]

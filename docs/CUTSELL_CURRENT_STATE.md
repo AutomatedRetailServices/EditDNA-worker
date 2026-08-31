@@ -35,9 +35,19 @@ cause (Hybrid session cleanup deletes per-clip before IdeaClusterer ever runs, w
 idea-coverage awareness of its own, and StoryValidator's coverage check was scoped only
 to post-grouping state) and the general fix implemented (a lost-semantic-atoms coverage
 ledger checking every discarded clip's content directly against the final KEEP text,
-independent of which stage discarded it). Full consolidation of the ~14 legacy hybrid_*
-authorities into one canonical CompositeResolver component remains open (D-021); the
-coverage ledger is this cycle's structural backstop for that gap, not a replacement.
+independent of which stage discarded it). Full consolidation of the legacy hybrid_*
+authorities into one canonical CompositeResolver component is now DONE (D-023 --
+turned out to be 19 hooks, not the ~14 first estimated; composite_resolver.py calls
+each hook's own real installer once, in the historical order, rather than
+hand-transcribing their logic, after hand-transcription was found to have missed
+five of them). The coverage ledger remains the structural backstop regardless.
+
+CanonicalEditPlan and a bounded FinalEditReviewer (D-024) now run before Selection
+Freeze -- FinalEditReviewer independently catches an unresolved (non-contradictory)
+duplicate idea that StoryValidator itself does not treat as freeze-blocking. Three
+interface-only contracts (PostRenderWatchListenQC, the Sales/TikTok Shop
+StyleProfile extension points, Finishing) are defined but not implemented or
+activated anywhere.
 
 Human review is the quality gate. Workflow success alone is not an editorial pass.
 Sales-funnel/storytelling work remains intentionally separate until Clean Cut reaches reliable real-video quality.

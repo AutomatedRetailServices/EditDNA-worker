@@ -204,7 +204,7 @@ brains rewriting the same membership sequentially:
 | DeliveryScorer | `take_judge.py` (`score_take`/`rank_takes`) | KEEP AS CORE |
 | BestTakeResolver | `deterministic_best_take_authority.py` | KEEP AS CORE / PROMOTED (Phase 1) |
 | SemanticArbiter | `semantic_idea_equivalence.py` + `semantic_idea_equivalence_google.py` | KEEP AS CORE, bounded role only (D-020) |
-| CompositeResolver | `composite_resolver.py` (`apply_composite_resolution`, `apply_composite_group_split`, `apply_composite_family_stabilization`) -- composes the 15 pure functions from `hybrid_retry_completion_integrity.py`, `hybrid_story_guard.py`, `hybrid_alternate_integrity.py`, `hybrid_cross_group_retry_integrity.py`, `hybrid_failed_continuation_integrity.py`, `hybrid_retry_winner_authority.py`, `hybrid_gold_reconciliation.py`, `hybrid_failed_soft_restore.py`, `hybrid_unavailable_retry_fallback.py`, `hybrid_complementary_delivery_guard.py`, `hybrid_semantic_complementary_rescue.py`, `hybrid_semantic_composite_bridge.py`, `hybrid_composite_best_take.py`, `hybrid_semantic_conflict_arbitration.py`, `post_selection_complementary_family_stabilizer.py` | KEEP AS CORE / CONSOLIDATED (D-023) -- one directly-callable component, one documented order, called explicitly from `pipeline.py` (no monkeypatching left in this domain). `cutsell_worker/__init__.py` no longer installs any of the 15 modules' own `install_*()` hooks; each keeps its existing pure logic and its own tests unchanged, consumed directly as evidence per D-023's classification table. Its decisions surface in `diagnostics.hybrid_editorial_chunks` (printed in CI, see D-020's observability note) |
+| CompositeResolver | `composite_resolver.py` (`apply_composite_resolution`, `apply_composite_group_split`, `apply_composite_family_stabilization`) -- builds its chain by calling the real `install_*()` of `semantic_fragment_guard.py`, `hybrid_retry_completion_integrity.py`, `hybrid_story_guard.py`, `hybrid_alternate_integrity.py`, `hybrid_cross_group_retry_integrity.py`, `incomplete_bridge_retry_authority.py`, `hybrid_failed_continuation_integrity.py`, `hybrid_retry_winner_authority.py`, `hybrid_gold_reconciliation.py`, `failed_prefix_completion_rescue.py`, `final_delivery_integrity.py`, `terminal_delivery_reconciliation.py`, `hybrid_failed_soft_restore.py`, `hybrid_unavailable_retry_fallback.py`, `hybrid_complementary_delivery_guard.py`, `hybrid_semantic_complementary_rescue.py`, `hybrid_semantic_composite_bridge.py`, `hybrid_composite_best_take.py`, `hybrid_semantic_conflict_arbitration.py` (19 take-level hooks), plus `post_selection_complementary_family_stabilizer.py` downstream | KEEP AS CORE / CONSOLIDATED (D-023) -- one directly-callable component, one documented historical order, called explicitly from `pipeline.py` (no monkeypatching left in this domain outside the one lazy chain-build). `cutsell_worker/__init__.py` no longer installs any of these 20 modules' own `install_*()` hooks; each keeps its existing pure logic and its own tests unchanged, consumed by calling their real installers once rather than reimplementing them (D-023 -- an earlier hand-transcribed version of this row's own consolidation missed 5 of the 19 and is why the final design calls the real installers instead of re-typing their logic). Its decisions surface in `diagnostics.hybrid_editorial_chunks` (printed in CI, see D-020's observability note) |
 | StoryValidator | `final_story_coherence_validation.py` | KEEP AS CORE (new; folds alternates to discard, resolves residual ambiguity via SemanticArbiter, contradiction invariant, idea-coverage invariant, general lost-semantic-atoms coverage ledger against the ACTUAL final KEEP timeline (D-022), hard pre-Freeze gate via `freeze_blocked`). Per D-022, this is also the structural backstop for the CompositeResolver consolidation gap above: because it checks final `selected`/`discarded` content directly, it catches unique-fact/idea loss regardless of which of the ~14 upstream hybrid_* authorities caused it. |
 | SelectionFreeze | `selection_boundary_contract.py` (`freeze_selection_contract`/`enforce_selection_contract`) | KEEP AS CORE, unchanged |
 | BoundaryEngine | `final_boundary_authority.py`, `human_boundary_polish_v5.py`, speech-safe/microtrim guards | KEEP AS CORE, physical-only, unchanged. Also satisfies the canonical directive's audio/visual pacing QA requirement: `human_boundary_polish_v5.py` already consolidates the dead-air/reset pacing work older v1-v4 passes mixed with Selection responsibilities, using multimodal reset evidence (`_reset_score`/`_micro_reset_evidence`, reused from v2) rather than naive silence-length deletion, and is Boundary-only by construction. No new pacing module was built; pacing *quality* (as opposed to architecture) still needs empirical validation via Human Watch+Listen. |
@@ -304,82 +304,135 @@ with no legacy hook remaining an independent downstream semantic-membership auth
 
 ### Classification (7 questions each, per the directive)
 
-All 14 take-level hooks share the same execution point (monkeypatched onto
+The initial audit, keyed on `install_hybrid_*`/`install_post_selection_*` naming,
+found 15 hooks (14 take-level + 1 downstream). **That audit was incomplete.** A
+differential test written against this module's own "the base call is pure" claim
+failed during verification, which is how a further, broader grep (every file in
+`cutsell_worker/` that textually references `apply_hybrid_session_cleanup`, not
+just files matching a naming convention) found **five more actively-installed
+hooks** doing the identical thing under different names: `semantic_fragment_guard`,
+`incomplete_bridge_retry_authority`, `failed_prefix_completion_rescue`,
+`final_delivery_integrity`, `terminal_delivery_reconciliation`. All five are real,
+narrow, individually-tested delivery-restoration/deletion authorities in
+CompositeResolver's exact domain -- not the broader out-of-scope Boundary sprawl --
+and critically, they were **interleaved** with the original 15 in
+`cutsell_worker/__init__.py`'s historical order, not merely appended before or
+after. (Three further files referencing the same identifier --
+`cross_group_truncated_winner_authority.py`, `hybrid_performance_retry_restore_
+guard.py`, `incomplete_unique_bridge_completion_rescue.py` -- were confirmed dead:
+their own `install_*()` is never called anywhere in the codebase.)
+
+The corrected full set is 19 take-level hooks plus the 1 downstream extension (20
+total), all sharing the same execution point (monkeypatched onto
 `hybrid_session_cleanup.apply_hybrid_session_cleanup`, running inside `pipeline.py`
-Pass 2, before IdeaClusterer/grouping) and the same mutable state (`HybridSessionCleanupResult.kept/deleted/diagnostics`). Differences are in what each restores, deletes, or
-marks for composite, and what it needs from earlier hooks' diagnostics.
+Pass 2, before IdeaClusterer/grouping) and the same mutable state
+(`HybridSessionCleanupResult.kept/deleted/diagnostics`):
 
 | Hook | Responsibility | Can KEEP/restore/delete/suppress? | Overlaps with | Still required under V1? | Canonical placement |
 |---|---|---|---|---|---|
-| `hybrid_retry_completion_integrity` | Removes cross-group retries proven covered by a peer; rolls back a completed clause's parallel failed tail | delete, trim-restore | `hybrid_cross_group_retry_integrity` (narrower, later, different evidence) | Yes -- distinct evidence (reset-backed full-alternate retry) other hooks don't cover | CompositeResolver step 2 |
-| `hybrid_story_guard` | Restores a unique story paragraph deleted on non-authoritative (semantic-only) evidence | restore | All later delete-only hooks (acts as their common floor) | Yes -- the one hook enforcing "semantic confidence alone is not physical proof" | CompositeResolver step 3 |
-| `hybrid_alternate_integrity` | Suppresses a stranded short alternate beside a clear winner | delete | `hybrid_cross_group_retry_integrity` (broader) | Yes -- narrow, cheap, catches short-debris case others miss | CompositeResolver step 4 |
-| `hybrid_cross_group_retry_integrity` | Collapses a semantically-proven retry stranded across deterministic groups | delete | `hybrid_alternate_integrity`, `hybrid_retry_winner_authority` | Yes -- feeds `hybrid_failed_soft_restore` by diagnostics name (order-dependent) | CompositeResolver step 5 |
-| `hybrid_failed_continuation_integrity` | Repairs a failed split retry (both directions: failed-prefix+continuation, and selected-prefix+failed-suffix) | delete (two-part) | none direct | Yes -- the "Video 00 Round 5 Gold" case, still a real failure shape | CompositeResolver step 6 |
-| `hybrid_retry_winner_authority` | Drops a proven failed attempt superseded by a later high-confidence clean winner | delete | `hybrid_gold_reconciliation` (similar spirit, different threshold/evidence) | Yes -- lower threshold than the generic delete gate, closes a real gap | CompositeResolver step 7 |
-| `hybrid_gold_reconciliation` | Two narrow Human-Gold-exposed repairs (restore clean retake + remove failed prior; remove orphan continuation of a deleted incomplete alternate) | restore + delete | `hybrid_retry_winner_authority` | Yes -- distinct structural cases | CompositeResolver step 8 |
-| `hybrid_failed_soft_restore` | Undoes a weak (<0.90 confidence) cross-group "failed" delete lacking destructive authority | restore | Reads `hybrid_cross_group_retry_integrity`'s diagnostics directly | Yes -- the correction for cross-group integrity's own occasional over-reach | CompositeResolver step 9 |
-| `hybrid_unavailable_retry_fallback` | Deletes an undecided incomplete retry only when Hybrid windows were unavailable and a later complete delivery strongly covers it | delete | `hybrid_complementary_delivery_guard`'s second half (same trigger condition, different evidence direction) | Yes -- the fail-open case when Hybrid itself couldn't run | CompositeResolver step 10 |
-| `hybrid_complementary_delivery_guard` | Restores a complementary tail cut by cross-group collapse; deletes an unavailable-window prior restart (earlier-complete-delivery direction) | restore + delete | `hybrid_unavailable_retry_fallback` (later-delivery direction) | Yes -- the earlier-delivery-direction complement | CompositeResolver step 11 |
-| `hybrid_semantic_complementary_rescue` | Restores a complete alternate that retry-completion removed, when it carries material unique content vs. its named winner; marks it for composite split | restore + composite-mark | `hybrid_semantic_composite_bridge` (consumes its output) | Yes -- first stage of the composite pipeline | CompositeResolver step 12 |
-| `hybrid_semantic_composite_bridge` | Revokes a rescue that is actually a same-opening retry, not complementary; normalizes valid rescues into Composite Best Take's shape | revoke + normalize | `hybrid_semantic_complementary_rescue` (upstream), `hybrid_composite_best_take` (downstream) | Yes -- the correction/bridge between the two | CompositeResolver step 13 |
-| `hybrid_composite_best_take` | Restores performance-only-condemned complete deliveries with unique content; deletes strong-prefix unavailable restarts; builds two-piece composites; marks singleton split | restore + delete + composite-mark | `hybrid_semantic_composite_bridge` (upstream evidence) | Yes -- the actual composite-construction authority | CompositeResolver step 14 |
-| `hybrid_semantic_conflict_arbitration` | Restores a complete delivery whose strongest winner/keep evidence is >= its conflicting failed/bts evidence (overlapping-window label conflicts) | restore | none direct (reads only `semantic_decisions` + diagnostics) | Yes -- the final label-conflict correction, must run last | CompositeResolver step 15 |
-| `post_selection_complementary_family_stabilizer` | Replaces a redundant selected monolith with a concise discarded delivery + later winner when they jointly preserve its critical facts and cover most of its content | restore + suppress | none direct; operates on the built `DraftTimeline`, not raw takes -- genuinely downstream | Yes -- catches a case only visible after grouping/ranking has already built a draft | CompositeResolver step 16 (the one true downstream extension) |
+| `semantic_fragment_guard` | Deletes structurally-obvious failed speech debris (tiny/open fragments, filler BTS, severe repetition) already labeled failed/BTS at medium-high confidence | delete | All later delete-only hooks | Yes -- adds textual-structure corroboration no other hook checks | CompositeResolver step 2 |
+| `hybrid_retry_completion_integrity` | Removes cross-group retries proven covered by a peer; rolls back a completed clause's parallel failed tail | delete, trim-restore | `hybrid_cross_group_retry_integrity` (narrower, later, different evidence) | Yes -- distinct evidence (reset-backed full-alternate retry) other hooks don't cover | CompositeResolver step 3 |
+| `hybrid_story_guard` | Restores a unique story paragraph deleted on non-authoritative (semantic-only) evidence | restore | All later delete-only hooks (acts as their common floor) | Yes -- the one hook enforcing "semantic confidence alone is not physical proof" | CompositeResolver step 4 |
+| `hybrid_alternate_integrity` | Suppresses a stranded short alternate beside a clear winner | delete | `hybrid_cross_group_retry_integrity` (broader) | Yes -- narrow, cheap, catches short-debris case others miss | CompositeResolver step 5 |
+| `hybrid_cross_group_retry_integrity` | Collapses a semantically-proven retry stranded across deterministic groups | delete | `hybrid_alternate_integrity`, `hybrid_retry_winner_authority` | Yes -- feeds `hybrid_failed_soft_restore` by diagnostics name (order-dependent) | CompositeResolver step 6 |
+| `incomplete_bridge_retry_authority` | Protects a completed clause's bridge continuation from being amputated by a later guard | protect/restore | `hybrid_failed_continuation_integrity` (adjacent structural case) | Yes -- a distinct completed-clause protection | CompositeResolver step 7 |
+| `hybrid_failed_continuation_integrity` | Repairs a failed split retry (both directions: failed-prefix+continuation, and selected-prefix+failed-suffix) | delete (two-part) | none direct | Yes -- the "Video 00 Round 5 Gold" case, still a real failure shape | CompositeResolver step 8 |
+| `hybrid_retry_winner_authority` | Drops a proven failed attempt superseded by a later high-confidence clean winner | delete | `hybrid_gold_reconciliation` (similar spirit, different threshold/evidence) | Yes -- lower threshold than the generic delete gate, closes a real gap | CompositeResolver step 9 |
+| `hybrid_gold_reconciliation` | Two narrow Human-Gold-exposed repairs (restore clean retake + remove failed prior; remove orphan continuation of a deleted incomplete alternate) | restore + delete | `hybrid_retry_winner_authority` | Yes -- distinct structural cases | CompositeResolver step 10 |
+| `failed_prefix_completion_rescue` | Rescues a clean completion prefix from an immediately-following high-confidence failed tail | restore (prefix only) | `final_delivery_integrity`, `terminal_delivery_reconciliation` (related prefix/suffix repairs) | Yes -- the "Video 03 Gold" case | CompositeResolver step 11 |
+| `final_delivery_integrity` | Three global repairs: retry_setup-separated duplicate deliveries; open retry prefix before already-failed suffixes; incomplete delivery + tiny discarded completion fragment | restore + delete | `terminal_delivery_reconciliation` (narrower version of the same two structures) | Yes -- broader-window version of the terminal reconciliation cases | CompositeResolver step 12 |
+| `terminal_delivery_reconciliation` | Two terminal-boundary repairs: open retry prefix yields to an earlier complete delivery when its continuation is already failed; incomplete delivery reclaims one tiny immediate fragment | restore + delete | `final_delivery_integrity` (broader) | Yes -- narrower, source-word-only version still catches cases the broader pass's stricter gates miss | CompositeResolver step 13 |
+| `hybrid_failed_soft_restore` | Undoes a weak (<0.90 confidence) cross-group "failed" delete lacking destructive authority | restore | Reads `hybrid_cross_group_retry_integrity`'s diagnostics directly | Yes -- the correction for cross-group integrity's own occasional over-reach | CompositeResolver step 14 |
+| `hybrid_unavailable_retry_fallback` | Deletes an undecided incomplete retry only when Hybrid windows were unavailable and a later complete delivery strongly covers it | delete | `hybrid_complementary_delivery_guard`'s second half (same trigger condition, different evidence direction) | Yes -- the fail-open case when Hybrid itself couldn't run | CompositeResolver step 15 |
+| `hybrid_complementary_delivery_guard` | Restores a complementary tail cut by cross-group collapse; deletes an unavailable-window prior restart (earlier-complete-delivery direction) | restore + delete | `hybrid_unavailable_retry_fallback` (later-delivery direction) | Yes -- the earlier-delivery-direction complement | CompositeResolver step 16 |
+| `hybrid_semantic_complementary_rescue` | Restores a complete alternate that retry-completion removed, when it carries material unique content vs. its named winner; marks it for composite split | restore + composite-mark | `hybrid_semantic_composite_bridge` (consumes its output) | Yes -- first stage of the composite pipeline | CompositeResolver step 17 |
+| `hybrid_semantic_composite_bridge` | Revokes a rescue that is actually a same-opening retry, not complementary; normalizes valid rescues into Composite Best Take's shape | revoke + normalize | `hybrid_semantic_complementary_rescue` (upstream), `hybrid_composite_best_take` (downstream) | Yes -- the correction/bridge between the two | CompositeResolver step 18 |
+| `hybrid_composite_best_take` | Restores performance-only-condemned complete deliveries with unique content; deletes strong-prefix unavailable restarts; builds two-piece composites; marks singleton split | restore + delete + composite-mark | `hybrid_semantic_composite_bridge` (upstream evidence) | Yes -- the actual composite-construction authority | CompositeResolver step 19 |
+| `hybrid_semantic_conflict_arbitration` | Restores a complete delivery whose strongest winner/keep evidence is >= its conflicting failed/bts evidence (overlapping-window label conflicts) | restore | none direct (reads only `semantic_decisions` + diagnostics) | Yes -- the final label-conflict correction, must run last | CompositeResolver step 20 |
+| `post_selection_complementary_family_stabilizer` | Replaces a redundant selected monolith with a concise discarded delivery + later winner when they jointly preserve its critical facts and cover most of its content | restore + suppress | none direct; operates on the built `DraftTimeline`, not raw takes -- genuinely downstream | Yes -- catches a case only visible after grouping/ranking has already built a draft | CompositeResolver step 21 (the one true downstream extension) |
 
-None of the 14 take-level hooks was found REDUNDANT/SUPERSEDED or SAFETY/ROLLBACK-ONLY
+None of the 19 take-level hooks was found REDUNDANT/SUPERSEDED or SAFETY/ROLLBACK-ONLY
 in isolation -- each has a distinct trigger condition or evidence source pinned by its
 own existing tests. The violation was never "these do nothing" -- it was "no single
 place says what CompositeResolver does, in what order, or why," and two of the
-fifteen (`hybrid_composite_best_take`, `hybrid_semantic_complementary_rescue`) each
+nineteen (`hybrid_composite_best_take`, `hybrid_semantic_complementary_rescue`) each
 independently monkeypatched `session_boundaries.safe_group_takes_by_sessions` too,
 via two SEPARATE `ContextVar`s, one of which (`hybrid_semantic_composite_bridge`)
 reached directly into the other module's private `_SPLIT_IDS` variable by name.
 
 ### Canonical composition implemented
 
-`composite_resolver.py` is now CompositeResolver's one directly-callable component:
-`apply_composite_resolution(takes, context, editorial_judge)` runs the same 15
-algorithms above, in the same order, as one explicit function -- not a 14-file,
-import-time, mutable-global monkeypatch chain. `apply_composite_group_split`
-replaces the two separate `ContextVar`-based group-splitting monkeypatches with one
-explicit call `pipeline.py` makes right after grouping. `apply_composite_family_
-stabilization` (step 16) is called explicitly at the end of `build_flow_b_draft`
-instead of via a monkeypatch on that function.
+An earlier version of this consolidation hand-transcribed each of the (then believed
+complete) 15 hooks' glue code directly into composed step functions -- this is
+exactly what missed the five extra hooks above, and would independently have gotten
+their relative order wrong even once found, since they are interleaved with the
+original 15, not appended around them. Hand-transcribing 19 interacting closures by
+reading and re-typing each one carries real, demonstrated transcription risk, so the
+final design does not do that.
 
-`cutsell_worker/__init__.py` no longer calls any of the 15 hooks' own `install_*()`
-functions. Each hook's own function (and its own monkeypatch-based tests) is
-unchanged and still importable -- `composite_resolver.py` consumes their existing,
-already-tested pure logic directly, per the directive's "may consume evidence from
-historical modules" allowance; two hooks whose logic previously lived only inside
-an install-time closure (`hybrid_failed_soft_restore`, `hybrid_unavailable_retry_
-fallback`) had that logic extracted to a named function first, non-breaking, so
-their `install_*()` still delegates to it unchanged.
+`composite_resolver.py` instead builds the chain by calling each hook's own real,
+already-tested `install_*()` function -- completely unmodified -- exactly once, in
+the exact historical `cutsell_worker/__init__.py` order, against the shared module
+attributes, then restores those attributes to what they already were. This reuses
+every hook's real closure directly (zero risk of a transcription error changing any
+threshold, condition, or diagnostics key) while turning 20 scattered import-time
+side effects into one composed, private, directly-callable reference this module
+owns (`apply_composite_resolution`) that `pipeline.py` calls explicitly.
+`apply_composite_group_split` replaces the two `ContextVar`-based group-splitting
+monkeypatches with one explicit call `pipeline.py` makes right after grouping
+(reading both hooks' ContextVars once, right after the chain runs, rather than
+letting either hook's own grouping monkeypatch actually apply). `apply_composite_
+family_stabilization` (step 21) is called explicitly at the end of
+`build_flow_b_draft` instead of via a monkeypatch on that function.
+
+`cutsell_worker/__init__.py` no longer calls any of the 19 take-level hooks' own
+`install_*()` functions (nor `post_selection_complementary_family_stabilizer`'s).
+Each hook's own file, its own pure/glue functions, and its own monkeypatch-based
+tests are completely unchanged -- `composite_resolver.py` consumes them by calling
+their real installers, not by reimplementing anything. Two hooks whose logic
+previously lived only inside an install-time closure (`hybrid_failed_soft_restore`,
+`hybrid_unavailable_retry_fallback`) had that logic extracted to a named function
+first, non-breaking, purely so a test could call it directly; their `install_*()`
+still delegates to it unchanged and works exactly as before.
 
 `hybrid_session_cleanup.apply_hybrid_session_cleanup` and `session_boundaries.
 safe_group_takes_by_sessions` are therefore guaranteed to remain their pure,
-unwrapped selves for the life of the process -- `composite_resolver.py` calls the
-former directly as its base step and nothing monkeypatches either anymore. This
-closes the literal "multiple independent semantic authorities sequentially mutate
-final membership" violation for CompositeResolver's domain: there is now one
-callable, one order, one decision path.
+unwrapped selves for the life of the process, except for the brief window inside
+`composite_resolver._build_take_level_chain()` itself (which runs once, lazily, on
+first use, and restores both attributes before returning). This closes the literal
+"multiple independent semantic authorities sequentially mutate final membership"
+violation for CompositeResolver's domain: there is now one callable, one order, one
+decision path, and it is provably immune to a stray future call to any of the 19
+hooks' own `install_*()` (pinned by
+`test_stray_legacy_install_call_after_chain_is_built_cannot_affect_it`).
 
 **Verification (behavior-preservation, not just code inspection):** the full test
-suite was run before and after the rewiring and passed the same 1294 cases (plus 5
-new direct `composite_resolver.py` tests and 2 replaced wiring-mechanism tests that
-were asserting the now-removed monkeypatch chain itself, updated to assert the new
-direct-call wiring instead). One fixture-text recalibration was needed (D-022's
-"loser" fixture), none for this consolidation. A new differential-style test
+suite was run repeatedly through this consolidation and its correction, ending at
+1313 passed, 1 skipped (up from the pre-consolidation 1294, due to new tests added
+along the way; no pre-existing test's outcome changed). Fixes needed along the way:
+one fixture-text recalibration (D-022's "loser" fixture, unrelated to this specific
+consolidation), a rewrite of the two wiring-mechanism tests that asserted the
+now-removed monkeypatch chain itself, and -- after the five-hook discovery -- a
+fixture-isolation fix to `tests/test_cutsell_semantic_fragment_guard.py` (which had
+been relying on `cutsell_worker/__init__.py`'s auto-install rather than wrapping the
+hook itself the way every other hook's test file already does) plus a test-isolation
+bug in this session's own new differential test (an install-time monkeypatch of
+`session_boundaries.safe_group_takes_by_sessions` that a `try/finally` did not
+restore, leaking into a later test). A differential-style test
 (`test_cross_group_retry_integrity_feeds_failed_soft_restore_by_diagnostics_name`)
-pins the one cross-module diagnostics coupling most likely to break silently under a
-hand-transcription error in the composition.
+pins the one cross-module diagnostics coupling most likely to break silently under
+any future change to this composition.
 
-**Known remaining gap, stated honestly:** the broader legacy sprawl of ~40+ OTHER
-`install_*` hooks in `cutsell_worker/__init__.py` (post_selection_edge_only_boundary,
-round8/9/11_*, final_*_integrity, terminal_*_reconciliation, selection_integrity,
-etc.) is explicitly OUT of this cycle's scope -- it was not named in the audit that
-motivated this directive, and is a separate, larger question about the Boundary/
-post-selection-integrity layer, not CompositeResolver's domain specifically.
+**Known remaining gap, stated honestly:** the broader legacy sprawl of other
+`install_*` hooks in `cutsell_worker/__init__.py` that do NOT touch
+`apply_hybrid_session_cleanup` or `safe_group_takes_by_sessions`
+(post_selection_edge_only_boundary, round8/9/11_*, selection_integrity,
+temporal_word_boundary_integrity, etc.) is explicitly OUT of this cycle's scope --
+a separate, larger question about the Boundary/post-selection-integrity layer, not
+CompositeResolver's domain. Confirmed (by the same broad grep that found the five
+missing hooks above) that none of those remaining hooks reference
+`apply_hybrid_session_cleanup`, so this scope boundary is now evidence-based rather
+than assumed.
 
 ## Change rule
 

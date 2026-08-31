@@ -1,6 +1,28 @@
+import sys
+
+import pytest
+
 from cutsell_worker.contracts import CandidateTake
 from cutsell_worker.hybrid_editorial import EditorialDecision, EditorialJudgeResult
 from cutsell_worker.hybrid_session_cleanup import apply_hybrid_session_cleanup
+
+
+@pytest.fixture(autouse=True)
+def _wrap_with_semantic_fragment_guard(monkeypatch):
+    # D-023: semantic_fragment_guard is no longer auto-installed by
+    # cutsell_worker/__init__.py -- composite_resolver.py now owns calling
+    # it once, as part of its own chain, instead of it being permanently
+    # wrapped onto the global apply_hybrid_session_cleanup. This file tests
+    # that wrap directly and in isolation, so install it here, scoped to
+    # this test only, exactly the way the other hook test files already do.
+    from cutsell_worker import hybrid_session_cleanup
+    from cutsell_worker.semantic_fragment_guard import install_semantic_fragment_guard
+
+    pure_base = hybrid_session_cleanup.apply_hybrid_session_cleanup
+    install_semantic_fragment_guard()
+    wrapped = hybrid_session_cleanup.apply_hybrid_session_cleanup
+    monkeypatch.setattr(hybrid_session_cleanup, "apply_hybrid_session_cleanup", pure_base)
+    monkeypatch.setattr(sys.modules[__name__], "apply_hybrid_session_cleanup", wrapped)
 
 
 def take(index: int, text: str, duration: float) -> CandidateTake:

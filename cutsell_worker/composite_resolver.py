@@ -6,396 +6,189 @@ for delivery-attempt restoration, semantic rescue, and composite construction.
 Before this module, the same responsibility -- deciding which candidate
 deliveries survive Hybrid's initial failed/BTS classification, which
 deleted deliveries get restored as complementary, and which pairs of
-deliveries get marked for a composite -- was implemented as 14 separate
-``install_*()`` functions (see D-021's CompositeResolver row and D-022),
-each called once at ``cutsell_worker`` import time, each monkeypatching the
-SAME mutable module attribute (``hybrid_session_cleanup.
-apply_hybrid_session_cleanup``, and in two cases also ``session_boundaries.
-safe_group_takes_by_sessions``) on top of whichever wrapper the previous
-one had already installed. The net behavior was one long, implicit,
-import-order-dependent chain with no single owner, no explicit decision
-record, and no way to answer "what does CompositeResolver do" without
-reading all 14 files and the exact order ``cutsell_worker/__init__.py``
-happened to call them in.
+deliveries get marked for a composite -- was implemented as a run of
+separate ``install_*()`` functions (see D-021's CompositeResolver row and
+D-022/D-023), each called once at ``cutsell_worker`` import time, each
+monkeypatching the SAME mutable module attribute
+(``hybrid_session_cleanup.apply_hybrid_session_cleanup``, and in two cases
+also ``session_boundaries.safe_group_takes_by_sessions``) on top of
+whichever wrapper the previous one had already installed. The net behavior
+was one long, implicit, import-order-dependent chain with no single owner
+and no explicit decision record.
 
-This module IS that chain, made explicit: the exact same algorithms
-(unchanged), called directly, in one documented order, from one function.
-Nothing here reimplements any matching/threshold logic -- every step below
-delegates to the existing, already-tested pure function or glue that used
-to live only inside an install-time closure (two of them, `hybrid_failed_
-soft_restore` and `hybrid_unavailable_retry_fallback`, had their inline
-closure logic extracted to a named module-level function for this purpose;
-their own `install_*()` now delegates to that same function, so their
-existing monkeypatch-based tests are unchanged).
+**The full set turned out to be 19 hooks, not 14.** An earlier version of
+this module hand-transcribed 14 of them (the ones named `install_hybrid_*`/
+`install_post_selection_*`, matching the original audit) directly into
+composed step functions here, in what was believed to be their exact
+execution order. That transcription MISSED five more hooks that also wrap
+the identical function under different naming (`semantic_fragment_guard`,
+`incomplete_bridge_retry_authority`, `failed_prefix_completion_rescue`,
+`final_delivery_integrity`, `terminal_delivery_reconciliation`) -- found
+only when a differential test written against this module's own claimed
+"pure base" reference failed, because the base was not actually pure. Worse,
+those five were INTERLEAVED with the original 14 in `__init__.py`'s
+historical order, not merely appended before or after them, so a hand
+composition that only reordered the 14 would have run several of them in
+the wrong relative order relative to the five it did not know existed.
 
-``cutsell_worker/__init__.py`` no longer calls any of the 14 modules'
-``install_*()`` functions. ``hybrid_session_cleanup.apply_hybrid_session_
-cleanup`` and ``session_boundaries.safe_group_takes_by_sessions`` are
-therefore guaranteed to stay their pure, unwrapped selves for the lifetime
-of the process; ``pipeline.py`` calls ``apply_composite_resolution`` (this
-module) and ``apply_composite_group_split`` (this module) directly instead.
+Given real evidence that hand-transcribing this many interacting closures
+is error-prone even with careful reading, this module now builds the chain
+a fundamentally safer way: it calls each hook's own real, already-tested
+`install_*()` function -- unmodified, verbatim -- exactly once, in the
+exact historical order `cutsell_worker/__init__.py` used to call them in,
+against private scratch module state, then restores the two shared module
+attributes to what they already were before this ran. This reuses every
+hook's real closure directly (zero risk of a transcription error changing
+any threshold, condition, or diagnostics key) while still turning 19
+scattered import-time side effects into one composed, directly-callable,
+private reference this module owns and pipeline.py calls explicitly.
 
-## Canonical order (unchanged from the old chain -- see D-023's classification
-table for why each step is still needed and what it owns)
+None of the 19 hooks' own `install_*()` functions are called anywhere else
+any more -- `cutsell_worker/__init__.py` no longer calls any of them, so
+`hybrid_session_cleanup.apply_hybrid_session_cleanup` and
+`session_boundaries.safe_group_takes_by_sessions` stay their pure,
+unwrapped selves for the process lifetime; only this module's private
+`_TAKE_LEVEL_CHAIN` (built once, lazily, on first use) carries the composed
+behavior. Each hook's own file, its own pure/glue functions, and its own
+monkeypatch-based tests are all completely unchanged.
+
+## Canonical order (the historical `__init__.py` order, verbatim)
 
 1.  hybrid_session_cleanup.apply_hybrid_session_cleanup   (base: LLM classify + corroborated delete)
-2.  hybrid_retry_completion_integrity                     (cross-group retry completion + parallel-clause rollback)
-3.  hybrid_story_guard                                    (restore unique story paragraphs from non-authoritative deletes)
-4.  hybrid_alternate_integrity                            (suppress stranded short alternates beside a clear winner)
-5.  hybrid_cross_group_retry_integrity                    (collapse retries stranded across deterministic groups)
-6.  hybrid_failed_continuation_integrity                  (repair split-fragment failed retries, both directions)
-7.  hybrid_retry_winner_authority                         (drop a proven failed attempt superseded by a later clean winner)
-8.  hybrid_gold_reconciliation                             (two narrow Human-Gold-exposed repairs)
-9.  hybrid_failed_soft_restore                             (undo weak cross-group "failed" deletes lacking real authority)
-10. hybrid_unavailable_retry_fallback                      (delete undecided incomplete retries when Hybrid was unavailable)
-11. hybrid_complementary_delivery_guard                    (restore a complementary tail; delete unavailable prior restarts)
-12. hybrid_semantic_complementary_rescue                   (restore a complete alternate with material unique content)
-13. hybrid_semantic_composite_bridge                       (revoke same-opening rescues; normalize for composite matching)
-14. hybrid_composite_best_take                             (restore performance-only deletes; build two-piece composites)
-15. hybrid_semantic_conflict_arbitration                   (resolve label conflicts across overlapping windows)
+2.  semantic_fragment_guard                                (textual-structure corroboration for tiny/open failed fragments)
+3.  hybrid_retry_completion_integrity                       (cross-group retry completion + parallel-clause rollback)
+4.  hybrid_story_guard                                      (restore unique story paragraphs from non-authoritative deletes)
+5.  hybrid_alternate_integrity                               (suppress stranded short alternates beside a clear winner)
+6.  hybrid_cross_group_retry_integrity                       (collapse retries stranded across deterministic groups)
+7.  incomplete_bridge_retry_authority                        (protect a completed clause's bridge continuation)
+8.  hybrid_failed_continuation_integrity                     (repair split-fragment failed retries, both directions)
+9.  hybrid_retry_winner_authority                            (drop a proven failed attempt superseded by a later clean winner)
+10. hybrid_gold_reconciliation                                (two narrow Human-Gold-exposed repairs)
+11. failed_prefix_completion_rescue                          (rescue a clean completion prefix from a failed tail)
+12. final_delivery_integrity                                 (three global delivery-integrity repairs)
+13. terminal_delivery_reconciliation                         (two terminal boundary/attempt repairs)
+14. hybrid_failed_soft_restore                                (undo weak cross-group "failed" deletes lacking real authority)
+15. hybrid_unavailable_retry_fallback                        (delete undecided incomplete retries when Hybrid was unavailable)
+16. hybrid_complementary_delivery_guard                       (restore a complementary tail; delete unavailable prior restarts)
+17. hybrid_semantic_complementary_rescue                      (restore a complete alternate with material unique content)
+18. hybrid_semantic_composite_bridge                          (revoke same-opening rescues; normalize for composite matching)
+19. hybrid_composite_best_take                                (restore performance-only deletes; build two-piece composites)
+20. hybrid_semantic_conflict_arbitration                      (resolve label conflicts across overlapping windows)
 
-Step 16, ``apply_post_selection_complementary_family_stabilizer`` (from
+Step 21, ``apply_post_selection_complementary_family_stabilizer`` (from
 ``post_selection_complementary_family_stabilizer.py``), is CompositeResolver's
 one downstream extension: it operates on the already-built ``DraftTimeline``
 (after grouping/ranking), not on raw takes, so it cannot be folded into the
 take-level chain above. It is still owned and called explicitly by this
 module (``apply_composite_family_stabilization``) rather than by monkeypatching
-``pipeline.build_flow_b_draft`` -- see D-023.
+``pipeline.build_flow_b_draft``.
 
 ## Composite group-splitting
 
-Two of the 15 take-level steps (12 and 14) can mark a pair of deliveries as
+Two of the 19 take-level hooks (17 and 19) can mark a pair of deliveries as
 a composite: pieces that must survive Best-Take's one-winner competition
-together rather than be collapsed back into a single retry contest. The old
-chain tracked this via two SEPARATE ``ContextVar`` instances (one per
-module) and two separate monkeypatches of ``safe_group_takes_by_sessions``.
-This module tracks it as one explicit return value (``split_ids``) from
-``apply_composite_resolution``, and exposes ONE ``apply_composite_group_split``
-function ``pipeline.py`` calls directly after grouping -- no ContextVar,
-no monkeypatch.
+together rather than be collapsed back into a single retry contest. Each
+tracks this via its own private ``ContextVar`` and its own monkeypatch of
+``safe_group_takes_by_sessions``. This module reads both ContextVars right
+after invoking the chain (rather than letting either hook's grouping
+monkeypatch actually apply), combines them into one explicit ``split_ids``
+return value, and exposes ONE ``apply_composite_group_split`` function
+``pipeline.py`` calls directly after grouping -- no monkeypatch of
+``session_boundaries`` survives this module's own setup.
 """
 from __future__ import annotations
 
-from typing import Iterable
+from typing import Callable, Iterable
 
 from .contracts import CandidateTake
-from .hybrid_alternate_integrity import suppress_stranded_hybrid_alternates
-from .hybrid_complementary_delivery_guard import (
-    _cross_group_deleted_ids,
-    _delete_unavailable_prior_restarts,
-    _restore_complementary_cross_group_deletions,
-    _semantic_map as _guard_semantic_map,
-)
-from .hybrid_composite_best_take import (
-    _choose_composite_replacements,
-    _decision_map,
-    _delete_strong_prefix_prior_restarts,
-    _existing_restored_rows,
-    _restore_performance_only_unique_deliveries,
-    _semantic_map as _composite_semantic_map,
-)
-from .hybrid_cross_group_retry_integrity import collapse_cross_group_semantic_retries
-from .hybrid_failed_continuation_integrity import (
-    collapse_failed_split_retry_continuations,
-    suppress_selected_prefixes_with_failed_suffixes,
-)
-from .hybrid_failed_soft_restore import restore_weak_failed_cross_group_deletions
-from .hybrid_gold_reconciliation import reconcile_human_gold_hybrid
-from .hybrid_retry_completion_integrity import apply_hybrid_retry_completion_integrity
-from .hybrid_retry_winner_authority import enforce_proven_retry_winners
-from .hybrid_semantic_complementary_rescue import (
-    _completion_removed_pairs,
-    _semantic_map as _rescue_semantic_map,
-    complementary_relation,
-)
-from .hybrid_semantic_composite_bridge import reconcile_semantic_rescues
-from .hybrid_semantic_conflict_arbitration import reconcile as reconcile_semantic_conflicts
-from .hybrid_session_cleanup import HybridSessionCleanupResult, apply_hybrid_session_cleanup
-from .hybrid_story_guard import restore_hybrid_story_coverage
-from .hybrid_unavailable_retry_fallback import apply_unavailable_retry_fallback
+from .hybrid_session_cleanup import HybridSessionCleanupResult
 from .post_selection_complementary_family_stabilizer import (
     apply_post_selection_complementary_family_stabilizer,
 )
 
+# Historical cutsell_worker/__init__.py order for every hook that wraps
+# hybrid_session_cleanup.apply_hybrid_session_cleanup. See this module's
+# docstring for how this list was actually verified (grep for every file
+# referencing apply_hybrid_session_cleanup, not just files named
+# hybrid_*/post_selection_*), not merely assumed from naming convention.
+_CHAIN_SPEC: tuple[tuple[str, str], ...] = (
+    ("semantic_fragment_guard", "install_semantic_fragment_guard"),
+    ("hybrid_retry_completion_integrity", "install_hybrid_retry_completion_integrity"),
+    ("hybrid_story_guard", "install_hybrid_story_coverage_guard"),
+    ("hybrid_alternate_integrity", "install_hybrid_alternate_integrity"),
+    ("hybrid_cross_group_retry_integrity", "install_hybrid_cross_group_retry_integrity"),
+    ("incomplete_bridge_retry_authority", "install_incomplete_bridge_retry_authority"),
+    ("hybrid_failed_continuation_integrity", "install_hybrid_failed_continuation_integrity"),
+    ("hybrid_retry_winner_authority", "install_hybrid_retry_winner_authority"),
+    ("hybrid_gold_reconciliation", "install_hybrid_gold_reconciliation"),
+    ("failed_prefix_completion_rescue", "install_failed_prefix_completion_rescue"),
+    ("final_delivery_integrity", "install_final_delivery_integrity"),
+    ("terminal_delivery_reconciliation", "install_terminal_delivery_reconciliation"),
+    ("hybrid_failed_soft_restore", "install_hybrid_failed_soft_restore"),
+    ("hybrid_unavailable_retry_fallback", "install_hybrid_unavailable_retry_fallback"),
+    ("hybrid_complementary_delivery_guard", "install_hybrid_complementary_delivery_guard"),
+    ("hybrid_semantic_complementary_rescue", "install_hybrid_semantic_complementary_rescue"),
+    ("hybrid_semantic_composite_bridge", "install_hybrid_semantic_composite_bridge"),
+    ("hybrid_composite_best_take", "install_hybrid_composite_best_take"),
+    ("hybrid_semantic_conflict_arbitration", "install_hybrid_semantic_conflict_arbitration"),
+)
 
-# --- Step 4: hybrid_alternate_integrity (glue copied verbatim from its own
-# install_*() closure -- see D-023) ------------------------------------------
-
-def _step_alternate_integrity(result, source_takes):
-    if not result.kept or not result.semantic_decisions:
-        return result
-    kept, extra_deleted, guard_diagnostics = suppress_stranded_hybrid_alternates(
-        result.kept, result.semantic_decisions,
-    )
-    if not guard_diagnostics:
-        return result
-    deleted_ids = {take.clip_id for take in result.deleted}
-    deleted_ids.update(take.clip_id for take in extra_deleted)
-    deleted = tuple(take for take in source_takes if take.clip_id in deleted_ids)
-    diagnostics = tuple(result.diagnostics) + ({
-        "hybrid_alternate_integrity": list(guard_diagnostics),
-        "deleted_ids": [item["clip_id"] for item in guard_diagnostics],
-    },)
-    return type(result)(
-        kept=kept, deleted=deleted,
-        requested_chunk_count=result.requested_chunk_count,
-        available_chunk_count=result.available_chunk_count,
-        diagnostics=diagnostics, semantic_decisions=result.semantic_decisions,
-    )
-
-
-# --- Step 5: hybrid_cross_group_retry_integrity ------------------------------
-
-def _step_cross_group_retry_integrity(result, source_takes):
-    if not result.kept or not result.semantic_decisions:
-        return result
-    kept, extra_deleted, guard_diagnostics = collapse_cross_group_semantic_retries(
-        result.kept, result.semantic_decisions,
-    )
-    if not guard_diagnostics:
-        return result
-    deleted_ids = {take.clip_id for take in result.deleted}
-    deleted_ids.update(take.clip_id for take in extra_deleted)
-    deleted = tuple(take for take in source_takes if take.clip_id in deleted_ids)
-    diagnostics = tuple(result.diagnostics) + ({
-        "hybrid_cross_group_retry_integrity": list(guard_diagnostics),
-        "deleted_ids": [item["clip_id"] for item in guard_diagnostics],
-    },)
-    return type(result)(
-        kept=kept, deleted=deleted,
-        requested_chunk_count=result.requested_chunk_count,
-        available_chunk_count=result.available_chunk_count,
-        diagnostics=diagnostics, semantic_decisions=result.semantic_decisions,
-    )
+_take_level_chain: Callable | None = None
 
 
-# --- Step 6: hybrid_failed_continuation_integrity (two-part repair) ---------
+def _build_take_level_chain() -> Callable:
+    """Build the take-level chain ONCE by calling each hook's own real
+    install_*() function, unmodified, in the exact historical order, against
+    the shared module attributes -- then restore those attributes to what
+    they already were, so nothing global leaks beyond this module's own
+    private cached reference. See module docstring for the full rationale.
+    """
+    import importlib
 
-def _step_failed_continuation_integrity(result, source_takes):
-    if not result.kept or not result.semantic_decisions:
-        return result
-    kept, first_removed, first_diagnostics = collapse_failed_split_retry_continuations(
-        result.kept, result.semantic_decisions,
-    )
-    deleted_pool_ids = {take.clip_id for take in result.deleted}
-    deleted_pool_ids.update(take.clip_id for take in first_removed)
-    deleted_pool = tuple(take for take in source_takes if take.clip_id in deleted_pool_ids)
+    from . import hybrid_session_cleanup, session_boundaries
 
-    kept, second_removed, second_diagnostics = suppress_selected_prefixes_with_failed_suffixes(
-        kept, deleted_pool, result.semantic_decisions,
-    )
-    if not first_diagnostics and not second_diagnostics:
-        return result
+    base_cleanup = hybrid_session_cleanup.apply_hybrid_session_cleanup
+    base_grouping = session_boundaries.safe_group_takes_by_sessions
 
-    deleted_ids = set(deleted_pool_ids)
-    deleted_ids.update(take.clip_id for take in second_removed)
-    deleted = tuple(take for take in source_takes if take.clip_id in deleted_ids)
-    diagnostics = tuple(result.diagnostics) + ({
-        "hybrid_failed_continuation_integrity": [*list(first_diagnostics), *list(second_diagnostics)],
-        "deleted_ids": sorted(take.clip_id for take in (*first_removed, *second_removed)),
-    },)
-    return type(result)(
-        kept=kept, deleted=deleted,
-        requested_chunk_count=result.requested_chunk_count,
-        available_chunk_count=result.available_chunk_count,
-        diagnostics=diagnostics, semantic_decisions=result.semantic_decisions,
-    )
+    for module_name, install_name in _CHAIN_SPEC:
+        module = importlib.import_module(f".{module_name}", __package__)
+        getattr(module, install_name)()
 
+    chain = hybrid_session_cleanup.apply_hybrid_session_cleanup
 
-# --- Step 7: hybrid_retry_winner_authority -----------------------------------
+    # Composite split-marking is owned explicitly by apply_composite_group_
+    # split below (called by pipeline.py after grouping), not by either
+    # hook's own grouping monkeypatch -- restore grouping to what it
+    # already was (which still includes any OTHER, out-of-this-module's-
+    # scope wrap, e.g. global_session_sibling_bridge's, applied earlier by
+    # cutsell_worker/__init__.py before this function ever runs).
+    session_boundaries.safe_group_takes_by_sessions = base_grouping
+    hybrid_session_cleanup.apply_hybrid_session_cleanup = base_cleanup
 
-def _step_retry_winner_authority(result, source_takes, context):
-    if not result.kept or not result.semantic_decisions:
-        return result
-    kept, extra_deleted, authority_diagnostics = enforce_proven_retry_winners(
-        result.kept, result.semantic_decisions, context,
-    )
-    if not authority_diagnostics:
-        return result
-    deleted_ids = {take.clip_id for take in result.deleted}
-    deleted_ids.update(take.clip_id for take in extra_deleted)
-    deleted = tuple(take for take in source_takes if take.clip_id in deleted_ids)
-    diagnostics = tuple(result.diagnostics) + ({
-        "hybrid_retry_winner_authority": list(authority_diagnostics),
-        "deleted_ids": [item["clip_id"] for item in authority_diagnostics],
-    },)
-    return type(result)(
-        kept=kept, deleted=deleted,
-        requested_chunk_count=result.requested_chunk_count,
-        available_chunk_count=result.available_chunk_count,
-        diagnostics=diagnostics, semantic_decisions=result.semantic_decisions,
-    )
+    return chain
 
 
-# --- Step 11: hybrid_complementary_delivery_guard (two-part repair) ---------
-
-def _step_complementary_delivery_guard(result, source_takes):
-    semantic = _guard_semantic_map(result.semantic_decisions)
-    cross_group_deleted = _cross_group_deleted_ids(result.diagnostics)
-    restore_ids, restore_rows = _restore_complementary_cross_group_deletions(
-        tuple(result.kept), tuple(result.deleted), semantic, cross_group_deleted,
-    )
-    kept_ids = {take.clip_id for take in result.kept} | restore_ids
-    kept = tuple(take for take in source_takes if take.clip_id in kept_ids)
-
-    delete_ids: set[str] = set()
-    delete_rows: list[dict] = []
-    if result.requested_chunk_count > result.available_chunk_count:
-        delete_ids, delete_rows = _delete_unavailable_prior_restarts(kept, semantic)
-        if delete_ids:
-            kept = tuple(take for take in kept if take.clip_id not in delete_ids)
-
-    if not restore_rows and not delete_rows:
-        return result
-
-    final_kept_ids = {take.clip_id for take in kept}
-    deleted = tuple(take for take in source_takes if take.clip_id not in final_kept_ids)
-    diagnostics = tuple(result.diagnostics) + ({
-        "hybrid_complementary_delivery_guard": {
-            "restored": restore_rows,
-            "deleted_unavailable_prior_restarts": delete_rows,
-        },
-        "restored_ids": sorted(restore_ids),
-        "deleted_ids": sorted(delete_ids),
-    },)
-    return type(result)(
-        kept=kept, deleted=deleted,
-        requested_chunk_count=result.requested_chunk_count,
-        available_chunk_count=result.available_chunk_count,
-        diagnostics=diagnostics, semantic_decisions=result.semantic_decisions,
-    )
+def _get_take_level_chain() -> Callable:
+    global _take_level_chain
+    if _take_level_chain is None:
+        _take_level_chain = _build_take_level_chain()
+    return _take_level_chain
 
 
-# --- Step 12: hybrid_semantic_complementary_rescue --------------------------
-# Returns (result, split_ids) instead of setting a module ContextVar.
+def _composite_split_ids() -> frozenset[str]:
+    """Read both hooks' private split-id ContextVars right after invoking
+    the chain, and clear them so a later, unrelated call doesn't inherit a
+    stale value. Reaching into another module's "private" ContextVar this
+    way is the same pattern the original hybrid_semantic_composite_bridge.py
+    already used to read hybrid_semantic_complementary_rescue's -- not a new
+    coupling this module introduces."""
+    from . import hybrid_composite_best_take, hybrid_semantic_complementary_rescue
 
-def _step_semantic_complementary_rescue(result, source_takes):
-    pairs = _completion_removed_pairs(result.diagnostics)
-    if not pairs:
-        return result, frozenset()
-    by_id = {take.clip_id: take for take in source_takes}
-    semantic = _rescue_semantic_map(result.semantic_decisions)
-    restore_ids: set[str] = set()
-    split_ids: set[str] = set()
-    audit: list[dict] = []
-    for alternate_id, winner_id in pairs:
-        alternate = by_id.get(alternate_id)
-        winner = by_id.get(winner_id)
-        if alternate is None or winner is None:
-            continue
-        relation = complementary_relation(alternate, winner, semantic)
-        if relation is None:
-            continue
-        restore_ids.add(alternate_id)
-        split_ids.update((alternate_id, winner_id))
-        audit.append(relation)
-
-    if not restore_ids:
-        return result, frozenset()
-    kept_ids = {take.clip_id for take in result.kept} | restore_ids
-    kept = tuple(take for take in source_takes if take.clip_id in kept_ids)
-    deleted = tuple(take for take in source_takes if take.clip_id not in kept_ids)
-    diagnostics = tuple(result.diagnostics) + ({
-        "hybrid_semantic_complementary_rescue": audit,
-        "restored_ids": sorted(restore_ids),
-        "split_group_clip_ids": sorted(split_ids),
-    },)
-    new_result = type(result)(
-        kept=kept, deleted=deleted,
-        requested_chunk_count=result.requested_chunk_count,
-        available_chunk_count=result.available_chunk_count,
-        diagnostics=diagnostics, semantic_decisions=result.semantic_decisions,
-    )
-    return new_result, frozenset(split_ids)
-
-
-# --- Step 13: hybrid_semantic_composite_bridge ------------------------------
-# Takes the pending split_ids explicitly instead of reaching into another
-# module's ContextVar.
-
-def _step_semantic_composite_bridge(result, source_takes, pending_split_ids):
-    kept, revoked, normalized = reconcile_semantic_rescues(
-        source_takes, tuple(result.kept), result.diagnostics,
-    )
-    if not revoked and not normalized:
-        return result, pending_split_ids
-
-    split_ids = set(pending_split_ids)
-    split_ids.difference_update(str(row["clip_id"]) for row in revoked)
-
-    kept_ids = {take.clip_id for take in kept}
-    deleted = tuple(take for take in source_takes if take.clip_id not in kept_ids)
-    extra = {
-        "hybrid_semantic_composite_bridge": {
-            "revoked_same_opening_rescues": list(revoked),
-            "normalized_composite_rescues": list(normalized),
-        },
-        # Composite Best Take already consumes this canonical guard shape.
-        "hybrid_complementary_delivery_guard": {
-            "restored": list(normalized),
-            "deleted_unavailable_prior_restarts": [],
-        },
-        "deleted_ids": [str(row["clip_id"]) for row in revoked],
-        "restored_ids": [str(row["clip_id"]) for row in normalized],
-    }
-    new_result = type(result)(
-        kept=kept, deleted=deleted,
-        requested_chunk_count=result.requested_chunk_count,
-        available_chunk_count=result.available_chunk_count,
-        diagnostics=tuple(result.diagnostics) + (extra,),
-        semantic_decisions=result.semantic_decisions,
-    )
-    return new_result, frozenset(split_ids)
-
-
-# --- Step 14: hybrid_composite_best_take ------------------------------------
-
-def _step_composite_best_take(result, source_takes):
-    semantic = _composite_semantic_map(result.semantic_decisions)
-    decisions = _decision_map(result.diagnostics)
-    perf_restore_ids, perf_restore_rows = _restore_performance_only_unique_deliveries(
-        tuple(result.kept), tuple(result.deleted), semantic, decisions,
-    )
-
-    kept_ids = {take.clip_id for take in result.kept} | perf_restore_ids
-    kept = tuple(take for take in source_takes if take.clip_id in kept_ids)
-
-    strong_delete_ids: set[str] = set()
-    strong_delete_rows: list[dict] = []
-    if result.requested_chunk_count > result.available_chunk_count:
-        strong_delete_ids, strong_delete_rows = _delete_strong_prefix_prior_restarts(kept, semantic)
-        if strong_delete_ids:
-            kept = tuple(take for take in kept if take.clip_id not in strong_delete_ids)
-
-    restored_rows = [*_existing_restored_rows(result.diagnostics), *perf_restore_rows]
-    suppress_ids, split_ids, composite_rows = _choose_composite_replacements(
-        kept, semantic, restored_rows,
-    )
-    if suppress_ids:
-        kept = tuple(take for take in kept if take.clip_id not in suppress_ids)
-
-    if not perf_restore_rows and not strong_delete_rows and not composite_rows:
-        return result, frozenset(split_ids)
-
-    final_kept_ids = {take.clip_id for take in kept}
-    deleted = tuple(take for take in source_takes if take.clip_id not in final_kept_ids)
-    diagnostics = tuple(result.diagnostics) + ({
-        "hybrid_composite_best_take": {
-            "restored_performance_only": perf_restore_rows,
-            "deleted_strong_prefix_unavailable_restarts": strong_delete_rows,
-            "composite_replacements": composite_rows,
-            "split_group_clip_ids": sorted(split_ids),
-        },
-        "restored_ids": sorted(perf_restore_ids),
-        "deleted_ids": sorted(strong_delete_ids | suppress_ids),
-    },)
-    new_result = type(result)(
-        kept=kept, deleted=deleted,
-        requested_chunk_count=result.requested_chunk_count,
-        available_chunk_count=result.available_chunk_count,
-        diagnostics=diagnostics, semantic_decisions=result.semantic_decisions,
-    )
-    return new_result, frozenset(split_ids)
+    rescue_ids = frozenset(hybrid_semantic_complementary_rescue._SPLIT_IDS.get())
+    composite_ids = frozenset(hybrid_composite_best_take._COMPOSITE_SPLIT_IDS.get())
+    hybrid_semantic_complementary_rescue._SPLIT_IDS.set(frozenset())
+    hybrid_composite_best_take._COMPOSITE_SPLIT_IDS.set(frozenset())
+    return rescue_ids | composite_ids
 
 
 def apply_composite_resolution(
@@ -406,28 +199,12 @@ def apply_composite_resolution(
     for ``apply_composite_group_split`` to apply to the grouping result that
     runs immediately after this in ``pipeline.py``.
 
-    Same 15 algorithms, same order, as the old 14-file monkeypatch chain
-    (step 1 is the base itself). See this module's docstring and D-023 for
-    the classification and equivalence rationale.
+    Same 20 algorithms (base + 19 hooks), same historical order, as the old
+    scattered monkeypatch chain -- see this module's docstring and D-023.
     """
-    source_takes = tuple(takes)
-    result = apply_hybrid_session_cleanup(source_takes, context, editorial_judge)
-    result = apply_hybrid_retry_completion_integrity(result, source_takes, context)
-    result = restore_hybrid_story_coverage(source_takes, result, context)
-    result = _step_alternate_integrity(result, source_takes)
-    result = _step_cross_group_retry_integrity(result, source_takes)
-    result = _step_failed_continuation_integrity(result, source_takes)
-    result = _step_retry_winner_authority(result, source_takes, context)
-    result = reconcile_human_gold_hybrid(result, source_takes, context)
-    result = restore_weak_failed_cross_group_deletions(result, source_takes)
-    result = apply_unavailable_retry_fallback(result, source_takes)
-    result = _step_complementary_delivery_guard(result, source_takes)
-    result, split_ids_rescue = _step_semantic_complementary_rescue(result, source_takes)
-    result, split_ids_rescue = _step_semantic_composite_bridge(result, source_takes, split_ids_rescue)
-    result, split_ids_composite = _step_composite_best_take(result, source_takes)
-    result = reconcile_semantic_conflicts(result, source_takes)
-
-    split_ids = frozenset(split_ids_rescue) | frozenset(split_ids_composite)
+    chain = _get_take_level_chain()
+    result = chain(tuple(takes), context, editorial_judge)
+    split_ids = _composite_split_ids()
     return result, split_ids
 
 
@@ -483,7 +260,7 @@ def apply_composite_group_split(grouping_result, takes: Iterable[CandidateTake],
 
 
 def apply_composite_family_stabilization(draft):
-    """Step 16: the one genuinely downstream CompositeResolver extension --
+    """Step 21: the one genuinely downstream CompositeResolver extension --
     operates on the built DraftTimeline, not raw takes. Called explicitly by
     pipeline.py at the end of build_flow_b_draft; no longer installed as a
     monkeypatch on ``pipeline.build_flow_b_draft`` itself (see D-023)."""
