@@ -6,12 +6,17 @@ name: RunPod Warm Worker Probe
 # all) plus workflow_dispatch for reruns. Creates a brand-new, temporary
 # endpoint with workersMin=1 (forcing a warm worker independent of job
 # arrival) -- never mutates or deletes the existing production endpoint
-# (xxu7autt8mv2rn), never submits Video00. Health is submitted only if a
-# worker is directly confirmed provisioned first. Always tears its own
-# temporary resources down. Reuses the already-built diagnostic image from
-# the prior fast-isolation probe run (no code changed since, so no
-# rebuild needed). See runpod_warm_worker_probe.py and
-# docs/CUTSELL_DECISIONS.md D-041.
+# (xxu7autt8mv2rn). A prior run of this probe tried to directly observe
+# worker provisioning via GET /v1/endpoints/{id}/workers before submitting
+# any job -- that endpoint returned HTTP 400 on this account, so this
+# version uses the health job's own lifecycle (IN_QUEUE -> IN_PROGRESS ->
+# COMPLETED/FAILED) as the worker-provisioning signal instead: exactly ONE
+# health job, submitted right after workersMin/workersMax=1 is confirmed
+# via a read-after-write GET, no retry. Never submits Video00 under any
+# code path. Always tears its own temporary resources down. Reuses the
+# already-built diagnostic image from the prior fast-isolation probe run
+# (no code changed in cutsell_worker/ since, so no rebuild needed). See
+# runpod_warm_worker_probe.py and docs/CUTSELL_DECISIONS.md D-041.
 on:
   push:
     branches: [diag/runpod-fast-isolation]
@@ -59,24 +64,7 @@ jobs:
             printf '%s=%s\n' "$key" "$value" >> "$GITHUB_ENV"
           done
 
-      - name: Best-effort account-level concurrency check (read-only, never blocks the probe)
-        shell: bash
-        run: |
-          set +e
-          echo "--- GET /v1/user (account info, if this account/API key can read it) ---"
-          code=$(curl --silent --show-error --write-out '%{http_code}' \
-            --url "https://rest.runpod.io/v1/user" \
-            --header "Authorization: Bearer $RUNPOD_API_KEY" \
-            --output /tmp/account.json)
-          echo "http_status=$code"
-          if [ "$code" = "200" ]; then
-            jq 'del(.email, .id, .apiKeys)' /tmp/account.json 2>/dev/null || cat /tmp/account.json
-          else
-            echo "Account-info endpoint not available/accessible with this key -- concurrency limit source (the '0/15 workers deployed' dashboard figure) could not be confirmed via API. Reporting as unknown rather than assumed."
-          fi
-          exit 0
-
-      - name: Run warm-worker probe (workersMin=1, health only if worker confirmed, never Video00)
+      - name: Run warm-worker health-only probe (workersMin=1, ONE health job, never Video00)
         shell: bash
         run: python3 runpod_warm_worker_probe.py | tee /tmp/probe-output.txt
 
