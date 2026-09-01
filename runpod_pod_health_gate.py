@@ -42,7 +42,14 @@ def _diagnose_pod_logs(api_key: str, pod_id: str) -> int:
     created and stopped) -- never creates or starts anything. Used to
     root-cause a Pod that was reachable at the API level but never
     answered its health endpoint, without provisioning another paid Pod
-    just to keep guessing."""
+    just to keep guessing.
+
+    SECURITY (fixed after a live incident, run 33570304461): RunPod's own
+    GET /v1/pods/{id} response embeds the Pod's REAL env values (unlike a
+    template GET, this is not the redacted view) -- printing `pod` as-is
+    leaked live AWS/GEMINI/OPENAI/etc. credentials into a CI log. `pod` is
+    now always passed through `redact_template_env` (works on any dict
+    with an `env` key, not just templates) before it is ever printed."""
     transport = UrllibTransport()
     print(f"--- diagnosing existing Pod {pod_id} (read-only, no create/start) ---")
     try:
@@ -50,12 +57,16 @@ def _diagnose_pod_logs(api_key: str, pod_id: str) -> int:
     except RuntimeError as exc:
         print(f"GET pod failed: {exc}")
         pod = None
-    print("--- pod state ---")
-    print(json.dumps(pod, indent=2, sort_keys=True, default=str))
+    print("--- pod state (env values redacted, names preserved) ---")
+    print(json.dumps(redact_template_env(pod) if pod is not None else None, indent=2, sort_keys=True, default=str))
 
     url, status_code, body = fetch_pod_logs(transport, api_key, pod_id, log=_default_log)
     print(f"--- logs fetch: {url} -> http {status_code} ---")
-    print(json.dumps(body, indent=2, sort_keys=True, default=str) if body is not None else "(no body)")
+    # Container logs could themselves echo env vars (e.g. a startup script
+    # printing its own config) -- redact the same way if the body happens
+    # to carry an `env` key; anything else (log lines) passes through.
+    safe_body = redact_template_env(body) if isinstance(body, dict) else body
+    print(json.dumps(safe_body, indent=2, sort_keys=True, default=str) if safe_body is not None else "(no body)")
     return 0
 
 

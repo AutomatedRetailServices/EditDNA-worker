@@ -137,6 +137,51 @@ def test_diagnose_pod_id_env_var_skips_lifecycle_entirely(monkeypatch, capsys):
     assert "boom" in out
 
 
+def test_diagnose_pod_id_never_leaks_real_env_values(monkeypatch, capsys):
+    # Security regression (live incident, run 33570304461): RunPod's own
+    # GET /v1/pods/{id} embeds the Pod's REAL env values (unlike a
+    # template GET) -- this must never reach stdout. Only names.
+    monkeypatch.setenv("RUNPOD_API_KEY", "fake-key")
+    monkeypatch.setenv("DIAGNOSE_POD_LOGS_ID", "pod-x")
+    # Placeholder-shaped values only -- never a real secret, even for a
+    # "realistic" fixture (a live GEMINI_API_KEY landed in an earlier
+    # draft of this test and was rightly blocked by GitHub push
+    # protection before it ever left this repo).
+    fake_pod = {
+        "id": "pod-x",
+        "status": "EXITED",
+        "env": {
+            "AWS_SECRET_ACCESS_KEY": "not-a-real-secret-fixture-value-1",
+            "GEMINI_API_KEY": "not-a-real-secret-fixture-value-2",
+        },
+    }
+    monkeypatch.setattr(gate, "get_pod", lambda transport, api_key, pod_id: fake_pod)
+    monkeypatch.setattr(
+        gate,
+        "fetch_pod_logs",
+        lambda transport, api_key, pod_id, log=None: (
+            "https://x/logs",
+            200,
+            {"env": {"OPENAI_API_KEY": "not-a-real-secret-fixture-value-3"}},
+        ),
+    )
+
+    exit_code = gate.main()
+
+    assert exit_code == 0
+    out = capsys.readouterr().out
+    assert "not-a-real-secret-fixture-value-1" not in out
+    assert "not-a-real-secret-fixture-value-2" not in out
+    assert "not-a-real-secret-fixture-value-3" not in out
+    # names (and every other non-env field) are still preserved for
+    # legitimate diagnosis -- redaction is env-values-only, not a blackout
+    assert "AWS_SECRET_ACCESS_KEY" in out
+    assert "GEMINI_API_KEY" in out
+    assert "OPENAI_API_KEY" in out
+    assert "<redacted>" in out
+    assert "EXITED" in out
+
+
 def test_pod_template_id_env_threads_into_config_and_makes_pod_image_optional(_env, monkeypatch):
     # D-042 Step 7: POD_TEMPLATE_ID must reach PodExecutionConfig.template_id
     # (so create_pod() takes the minimal template-referencing payload path)
