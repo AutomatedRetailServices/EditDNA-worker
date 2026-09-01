@@ -564,6 +564,39 @@ def test_create_pod_returns_error_detail_on_non_2xx():
     assert "401" in detail
 
 
+def test_create_pod_sends_ports_and_docker_start_cmd_as_arrays():
+    # Regression: D-042's first live health-only test hit a real RunPod
+    # 400 -- "got string, want array" for both `ports` and
+    # `dockerStartCmd`. RunPod's REST v1 schema requires JSON arrays for
+    # both fields, never single strings.
+    transport = FakePodTransport()
+    transport.post_pods = [TransportResponse(201, {"id": "pod-1"})]
+    create_pod(
+        transport,
+        "fake-key",
+        name="n",
+        image="img",
+        gpu_type_id="NVIDIA A40",
+        start_command="python3 -m cutsell_worker.pod_job_server",
+    )
+    _method, _url, body = transport.calls[0]
+    assert isinstance(body["ports"], list) and body["ports"] == ["8080/http"]
+    assert isinstance(body["dockerStartCmd"], list)
+    assert body["dockerStartCmd"] == ["python3", "-m", "cutsell_worker.pod_job_server"]
+
+
+def test_create_pod_ports_list_passthrough_and_no_start_command_omits_field():
+    transport = FakePodTransport()
+    transport.post_pods = [TransportResponse(201, {"id": "pod-1"})]
+    create_pod(
+        transport, "fake-key", name="n", image="img", gpu_type_id="NVIDIA A40",
+        ports=["8080/http", "22/tcp"],
+    )
+    _method, _url, body = transport.calls[0]
+    assert body["ports"] == ["8080/http", "22/tcp"]
+    assert "dockerStartCmd" not in body
+
+
 # ---------------------------------------------------------------------------
 # 20. A non-capacity-shaped creation error (e.g. auth) is fatal and does not
 #     keep guessing other GPUs

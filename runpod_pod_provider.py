@@ -33,6 +33,7 @@ divergent locking primitive. See `.github/workflows/cutsell-video00-pod-raw.yml`
 """
 from __future__ import annotations
 
+import shlex
 import time
 from dataclasses import dataclass, field
 from typing import Callable, Optional
@@ -237,12 +238,20 @@ def create_pod(
     start_command: Optional[str] = None,
     container_disk_gb: int = 40,
     env: Optional[dict] = None,
-    ports: str = "8080/http",
+    ports: str | list[str] = "8080/http",
 ) -> tuple[Optional[dict], Optional[str]]:
     """POST /v1/pods. Returns (pod_dict, None) on success or (None,
     error_detail) on any non-2xx response -- the caller decides whether that
-    detail looks capacity-shaped (try the next candidate) or fatal."""
+    detail looks capacity-shaped (try the next candidate) or fatal.
+
+    RunPod's REST v1 schema requires `ports` and `dockerStartCmd` as JSON
+    arrays, not single strings (confirmed against a live 400 response
+    during D-042's first live health-only test: `got string, want array`
+    for both fields) -- `ports` is normalized to a list here, and
+    `start_command` (a plain shell-style string for caller convenience) is
+    tokenized via `shlex.split` into the argv-array RunPod expects."""
     headers = {"Authorization": f"Bearer {api_key}"}
+    ports_list = [ports] if isinstance(ports, str) else list(ports)
     payload: dict = {
         "name": name,
         "imageName": image,
@@ -250,11 +259,11 @@ def create_pod(
         "gpuCount": 1,
         "containerDiskInGb": container_disk_gb,
         "cloudType": "COMMUNITY",
-        "ports": ports,
+        "ports": ports_list,
         "env": env or {},
     }
     if start_command:
-        payload["dockerStartCmd"] = start_command
+        payload["dockerStartCmd"] = shlex.split(start_command)
     resp = transport.request("POST", f"{RUNPOD_REST_BASE}/pods", headers=headers, json_body=payload)
     if resp.status_code in (200, 201):
         return resp.json_body or {}, None
