@@ -39,7 +39,12 @@ _SAFE_ENDPOINT_KEYS = {
     "templateId",
     "workersMin",
     "workersMax",
+    "workersStandby",
     "gpuIds",
+    "gpuTypeIds",
+    "gpuCount",
+    "minCudaVersion",
+    "flashboot",
     "scalerType",
     "scalerValue",
     "idleTimeout",
@@ -49,6 +54,7 @@ _SAFE_ENDPOINT_KEYS = {
     "dataCenterIds",
     "computeType",
     "allowedCudaVersions",
+    "version",
 }
 _SAFE_TEMPLATE_KEYS = {
     "id",
