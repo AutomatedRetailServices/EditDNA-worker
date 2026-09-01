@@ -1863,6 +1863,89 @@ fake `Transport` and a fake clock, no network/GPU/credentials. One new trigger-c
 test pins the path-filter exclusion above. Full `tests/test_cutsell_*.py` CI glob plus
 the two new test files green, `compileall` clean.
 
+### D-041 follow-up — GPU fallback audit: endpoint is already a 4-GPU pool, not narrowly pinned
+
+**Status: CANONICAL**
+
+After D-041 landed, RAW `33457835750` (the controlled retry) proved the hardened
+orchestration layer itself works correctly end to end -- readiness detection, IN_QUEUE
+stall tracking, the one bounded infra retry, teardown-before-retry, and failure
+classification all behaved exactly as designed (`WORKER_PROVISIONING_STALLED` on the
+first attempt, `CAPACITY_UNAVAILABLE` on the retry, `~626.5s` total vs. the old blind
+`1200s`) -- but the underlying RunPod worker placement still failed: two independent
+health jobs, on two independently fresh endpoint rolls, each sat `IN_QUEUE` a full 5
+minutes with no worker ever assigned.
+
+Before proposing any GPU fallback policy change, the live endpoint/template
+configuration was read directly rather than guessed, via a new read-only tool
+(`runpod_endpoint_inspect.py` + `.github/workflows/runpod-endpoint-inspect.yml`,
+`workflow_dispatch`-only with a self-scoped `push` trigger on just its own two files so
+it can register for dispatch and stay runnable -- GETs only, no GPU job, no Video00, zero
+cost). Real, live result for endpoint `xxu7autt8mv2rn`:
+
+```
+gpuTypeIds:      ["NVIDIA GeForce RTX 4090", "NVIDIA L4", "NVIDIA A40", "NVIDIA RTX A6000"]
+gpuCount:        1
+minCudaVersion:  "12.0"
+flashboot:       true
+workersMin/Max:  0 / 0  (at rest -- teardown between runs sets this)
+workersStandby:  1
+scalerType:      QUEUE_DELAY, scalerValue: 2, idleTimeout: 5, executionTimeoutMs: 1800000
+networkVolumeId: "" (none)
+templateId:      07g9dovc17 ("EditDNA-Worker-2")
+  imageName:         madiator2011/better-pytorch:cuda12.4-torch2.6.0
+  containerDiskInGb: 80, volumeInGb: 60, volumeMountPath: /workspace
+```
+
+No `locations`/`dataCenterIds` field is present at all -- this endpoint has no region/
+datacenter restriction configured; it is free to place a worker anywhere RunPod has
+matching capacity.
+
+**Finding: the premise that the endpoint might be "pinned too narrowly" is false.** The
+repository's own PATCH payload (`{templateId, workersMin, workersMax, scalerType,
+scalerValue, idleTimeout, executionTimeoutMs}`) never sets `gpuTypeIds` on either roll
+this session performed, so both of RAW `33457835750`'s stalled health jobs were already
+eligible for placement on any of these four GPU classes -- a reasonably broad,
+non-exotic pool of consumer/workstation cards (24-48GB VRAM), all CUDA-12.0+-compatible
+with the template's CUDA 12.4 / torch 2.6.0 stack, all with VRAM far exceeding this
+workload's footprint (an 80GB container disk, no large-model VRAM requirement implied
+anywhere in the repo). There is no narrower single-GPU-class pin to broaden, so items 2/3
+of the follow-up directive (build a compatibility matrix, propose a priority-ordered
+fallback pool) do not apply -- there is nothing to widen. Building a compatibility
+matrix or proposing a fallback priority order for a pool that is already 4 GPU classes
+wide, and inventing GPU-class comparisons for classes not actually in play, would not be
+grounded in evidence and was avoided rather than fabricated.
+
+**No GPU/cost/capacity configuration was changed** -- correctly so per item 6's own
+gate: this is exactly the "capacity still fails even with a safe compatible fallback
+pool" scenario the directive itself names as the stop condition. A pool already spanning
+four distinct GPU classes across (per the absence of any location restriction) every
+RunPod datacenter, still producing two consecutive 5-minute placement failures, points
+at an account-level or provider-side capacity/quota/billing issue rather than a
+GPU-policy misconfiguration this session can fix from code. Per instruction: **STOPPING
+and recommending RunPod support/account-level investigation rather than another RAW or
+health-only retry.** `workersStandby: 1` is worth a human's attention too -- its
+interaction with this workflow's own transient `workersMax` 0/1 cycling was not
+something this session had grounds to evaluate confidently; flagged rather than guessed
+at.
+
+**Explicitly not touched**: any `cutsell_worker/` editorial code, D-040, D-041's
+orchestration state machine itself, grouping, physical fragment identity, delivery gate,
+monitoring behavior, Sales Funnel/TikTok Shop styling, SWAP, `main`/PR merge state,
+production/TestFlight, and the live RunPod endpoint's actual GPU policy (read, never
+written).
+
+**Validation**: 4 unit tests in `tests/test_runpod_endpoint_inspect.py` pin the
+allowlist-filter's only two real risks (a template's `env` dict, which carries real
+secrets, must never reach stdout even though nothing asked for it to be excluded; an
+unrecognized future field is dropped by default rather than guessed at). The tool itself
+was run three times live via its self-registering push trigger (zero GPU cost, seconds
+each), iterating from an initial too-narrow allowlist (guessed `gpuIds`, absent on this
+account's API) to the real field names (`gpuTypeIds` et al.) via a safe values-never-shown
+key-name-only diagnostic step -- the actual live data above is the third run's real
+output, not inferred. Full `tests/test_cutsell_*.py` CI glob plus all new test files
+green, `compileall` clean.
+
 ## Change rule
 
 When a new decision changes product behavior, update this file in the same development cycle. Do not silently redefine CutSell through code alone.
