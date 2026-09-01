@@ -2074,6 +2074,69 @@ health-only Pod test passing, and (2) separate, explicit authorization for the f
 Pod-backed Video00 benchmark. Nothing in this decision changes D-040, any
 `cutsell_worker/` editorial module, `main`, or PR #25's draft/open state.
 
+**Live health-only Pod test checkpoint (2026-09-01, on `feature/runpod-pod-on-demand`,
+not `cutsell/mobile-v1-clean`)**: five real `workflow_dispatch` runs of
+`cutsell-video00-pod-raw.yml`, each root-caused from live evidence and fixed before the
+next attempt -- never a blind retry:
+
+1. Run `33551894420` -- `POST /v1/pods` 400: RunPod's REST v1 schema requires `ports`
+   and `dockerStartCmd` as JSON arrays, not strings. Fixed (`create_pod` now sends
+   arrays; `shlex.split`s the caller's shell-style start-command string). Zero GPU
+   touched (failed before any create attempt could succeed).
+2. Run `33553415542` -- past the schema fix, hit a genuine RunPod capacity response
+   (`"no instances currently available"`) on all 4 approved GPUs, but only under
+   `cloudType: COMMUNITY` (hardcoded). Fixed: sweep COMMUNITY fully across the ranked
+   pool first, then fall back to a full SECURE sweep before concluding
+   `POD_CAPACITY_UNAVAILABLE`.
+3. Run `33554748857` -- the SECURE sweep succeeded: **first real Pod created**
+   (`wmohn5wxu8q9il`, RTX 4090, SECURE). Health GET immediately after creation hit a
+   RunPod proxy 403 in ~1.5s -- accepting a create call is not the same as the Pod being
+   RUNNING. **Guaranteed teardown fired correctly regardless** (confirmed via API:
+   `pod_stopped`, `final_status: EXITED`) -- a false health failure, not a safety-guarantee
+   failure. Fixed: wait for `RUNNING` (bounded, `create_wait_timeout_s`) before touching
+   the health endpoint.
+4. Run `33556235100` -- **second real Pod created** (`chr1zet8f6sr3r`, RTX 4090,
+   COMMUNITY this time). Reached `RUNNING` almost instantly (`elapsed_s ~0` -- RunPod's
+   status field reflects scheduling, not "the container is actually listening"), then the
+   health endpoint 403'd for the **entire** 180s poll window, never once answering. Added
+   a bounded retry loop around the health GET itself (already built for #3, exercised
+   here) -- still no pass. Rather than guess a fourth cause with a fourth paid Pod, added
+   a **zero-cost, read-only diagnostic path** (`fetch_pod_logs`, `DIAGNOSE_POD_LOGS_ID`)
+   to inspect the already-stopped Pod's own state and container logs without provisioning
+   anything.
+5. Diagnostic reads (runs `33557956110`, `33558239960`, no Pod created, no GPU cost)
+   against the stopped `chr1zet8f6sr3r`: its own record confirms `dockerStartCmd`
+   (`["python3","-m","cutsell_worker.pod_job_server"]`) and `ports` (`["8080/http"]`)
+   were both recorded exactly as sent -- ruling out a payload-shape problem as the cause
+   of the 403s. `machine: {}` came back empty despite `desiredStatus`/`lastStatusChange`
+   confirming the Pod ran from 20:43:06 to 20:46:08 -- suggestive of the Pod never
+   actually landing on real host/GPU compute, but not conclusive from this field alone.
+   RunPod's REST v1 has no `/pods/{id}/logs` route (confirmed: 400, "does not exist in
+   the specification"); REST v2's `/pods/{id}/logs` exists but returned 403 with no body
+   under this account's API key -- container-level logs are not reachable with the
+   access this integration currently has, so the exact mechanism behind the empty
+   `machine` record remains unconfirmed.
+
+**Net effect validated end-to-end against real RunPod Pods (not fakes)**: GPU search
+(ranked pool, cost ceiling, COMMUNITY-then-SECURE cloud sweep, capacity-error detection)
+all matched real API responses exactly as designed; guaranteed STOP fired correctly and
+was verified via API on both real Pod creations, at every failure mode exercised so far.
+The **open question is whether this account's RunPod Pod product delivers real compute
+behind an accepted create call** -- the same "accepted but nothing real happens" shape
+already open with RunPod Support for Serverless workers (see D-041's support report).
+Total real GPU time across both live Pod creations: a few seconds each; no paid GPU was
+left running at any point (independently confirmed via API state, not assumed).
+
+**Holding here rather than continuing to iterate blindly**: the two available zero-cost
+diagnostic avenues (REST v1 and v2 Pod logs) are now exhausted without a conclusive
+answer, and further diagnosis would require either RunPod documentation/support access
+this session doesn't have, or provisioning another paid Pod on a guess. Per the standing
+"diagnose before retrying" instruction, this checkpoint is reported for a decision on
+next steps (e.g., add this Pod evidence to the existing RunPod support ticket; authorize
+one more live test with a longer health-poll bound in case it is genuinely a slow image
+pull; or pause Pod work pending Support's response on the parallel Serverless issue) --
+not resolved by further unsupervised live attempts.
+
 ## Change rule
 
 When a new decision changes product behavior, update this file in the same development cycle. Do not silently redefine CutSell through code alone.
