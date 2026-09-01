@@ -157,12 +157,21 @@ def test_build_payload_never_mutates_base_dict():
     assert BASE_TEMPLATE["env"] == original_env
 
 
-def test_build_payload_preserves_registry_auth_and_ssh_jupyter_flags_from_base():
+def test_build_payload_preserves_registry_auth_from_base():
     overrides = PodTemplateOverrides(name="CutSell-Pod-QA", image="ghcr.io/x@sha256:new")
     payload = build_pod_template_payload(BASE_TEMPLATE, overrides)
     assert payload["containerRegistryAuthId"] == ""
-    assert payload["startSsh"] is True
-    assert payload["startJupyter"] is False
+
+
+def test_build_payload_never_sends_start_ssh_or_start_jupyter():
+    # Confirmed live (run 33563578797): POST /v1/templates rejects both as
+    # "Extra input keys ... not in input schema" -- output-only fields on
+    # this endpoint, never settable at creation. Sending them at all is a
+    # hard 400, not a soft ignore.
+    overrides = PodTemplateOverrides(name="CutSell-Pod-QA", image="ghcr.io/x@sha256:new")
+    payload = build_pod_template_payload(BASE_TEMPLATE, overrides)
+    assert "startSsh" not in payload
+    assert "startJupyter" not in payload
 
 
 def test_build_payload_sets_start_command_when_base_has_none():
