@@ -4,6 +4,8 @@ from __future__ import annotations
 import importlib
 import json
 import os
+import socket
+import subprocess
 from pathlib import Path
 
 import boto3
@@ -24,16 +26,134 @@ def _upload_artifact(local_path: str, *, key: str, content_type: str) -> str:
     return f"s3://{bucket}/{key}"
 
 
+def _safe_hostname() -> str | None:
+    """Best-effort worker/container identifier. Never raises."""
+    try:
+        return socket.gethostname()
+    except Exception:
+        return None
+
+
+def _safe_worker_id() -> str | None:
+    """RunPod exposes the pod id via this env var on serverless workers.
+    Best-effort only -- absent outside a real RunPod worker."""
+    try:
+        return os.environ.get("RUNPOD_POD_ID") or None
+    except Exception:
+        return None
+
+
+def _safe_nvidia_driver_cuda_version() -> str | None:
+    """CUDA *runtime* (driver-reported) version, distinct from the CUDA
+    version torch was *compiled* against (`torch.version.cuda`) -- the two
+    can differ, and a driver/runtime mismatch is exactly the kind of
+    evidence a bare `cuda_available=false` collapses away. Best-effort via
+    `nvidia-smi`; short timeout, fails safely to None on any error (binary
+    missing, no GPU, permission denied, timeout, unexpected output)."""
+    try:
+        out = subprocess.run(
+            ["nvidia-smi", "--query-gpu=driver_version,cuda_version", "--format=csv,noheader"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+        if out.returncode != 0:
+            return None
+        line = out.stdout.strip().splitlines()[0] if out.stdout.strip() else ""
+        return line or None
+    except Exception:
+        return None
+
+
+def _diagnose_capability_incompatibility(torch_module, compute_capability: str) -> str:
+    """Explicit diagnosis for "this torch build predates the assigned GPU's
+    compute capability" (D-041 GPU-fallback-audit follow-up -- the RTX PRO
+    6000 Blackwell / sm_120 case), so a future health result says this
+    plainly instead of collapsing to a bare cuda_available=false. Compares
+    against torch's own reported supported-architecture list rather than
+    scraping warning text, which is fragile across torch versions. Fails
+    safely to a still-informative message if the arch list itself can't be
+    read."""
+    try:
+        supported = tuple(torch_module.cuda.get_arch_list())
+    except Exception:
+        return (
+            f"cuda_available is False and a device with compute capability "
+            f"{compute_capability} was detected, but this torch build's supported "
+            f"architecture list could not be read to confirm why."
+        )
+    if compute_capability not in supported:
+        supported_desc = ", ".join(supported) if supported else "none"
+        return (
+            f"Detected GPU compute capability {compute_capability} is not in this "
+            f"torch build's supported architecture list ({supported_desc}). The "
+            f"current torch/CUDA build does not support this GPU."
+        )
+    return (
+        f"cuda_available is False even though compute capability {compute_capability} "
+        f"appears in this torch build's supported architecture list "
+        f"({', '.join(supported)}); the incompatibility is not explained by "
+        f"architecture support alone."
+    )
+
+
 def _health() -> dict:
+    """Diagnostic-only (D-041 GPU-fallback-audit follow-up). Every hardware/
+    runtime read is independently guarded so one failing probe (e.g. an
+    incompatible GPU's device-name lookup) never hides the others -- the
+    goal is that an incompatible GPU such as RTX PRO 6000 Blackwell (sm_120)
+    reports explicitly why, instead of collapsing to a bare
+    cuda_available=false. `ok`/`cuda_available` keep their existing meaning
+    (runpod_orchestration.py's health classification reads both unchanged)."""
     torch = importlib.import_module("torch")
-    return {
+    result: dict = {
         "ok": True,
-        "cuda_available": bool(torch.cuda.is_available()),
-        "cuda_device_count": int(torch.cuda.device_count()),
         "torch_version": torch.__version__,
-        "torch_cuda": torch.version.cuda,
-        "device_name": torch.cuda.get_device_name(0) if torch.cuda.is_available() else None,
+        "torch_compiled_cuda_version": torch.version.cuda,
+        "hostname": _safe_hostname(),
+        "worker_id": _safe_worker_id(),
     }
+
+    try:
+        cuda_available = bool(torch.cuda.is_available())
+    except Exception as exc:
+        cuda_available = False
+        result["cuda_init_error"] = f"{type(exc).__name__}: {exc}"
+    result["cuda_available"] = cuda_available
+
+    device_count = 0
+    try:
+        device_count = int(torch.cuda.device_count())
+    except Exception as exc:
+        result["cuda_device_count_error"] = f"{type(exc).__name__}: {exc}"
+    result["cuda_device_count"] = device_count
+
+    device_name = None
+    if device_count > 0:
+        try:
+            device_name = torch.cuda.get_device_name(0)
+        except Exception as exc:
+            result["device_name_error"] = f"{type(exc).__name__}: {exc}"
+    result["device_name"] = device_name
+
+    compute_capability = None
+    if device_count > 0:
+        try:
+            major, minor = torch.cuda.get_device_capability(0)
+            compute_capability = f"sm_{major}{minor}"
+        except Exception as exc:
+            result["compute_capability_error"] = f"{type(exc).__name__}: {exc}"
+    result["compute_capability"] = compute_capability
+
+    result["cuda_runtime_version"] = _safe_nvidia_driver_cuda_version()
+
+    result["incompatibility_reason"] = (
+        _diagnose_capability_incompatibility(torch, compute_capability)
+        if (not cuda_available and compute_capability is not None)
+        else None
+    )
+
+    return result
 
 
 def _safe_id(value: str, fallback: str) -> str:

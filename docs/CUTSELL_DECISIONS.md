@@ -1946,6 +1946,75 @@ key-name-only diagnostic step -- the actual live data above is the third run's r
 output, not inferred. Full `tests/test_cutsell_*.py` CI glob plus all new test files
 green, `compileall` clean.
 
+### D-041 follow-up — serverless health diagnostics (RTX PRO 6000 Blackwell / sm_120 evidence)
+
+**Status: CANONICAL**
+
+A RunPod dashboard log the user inspected directly showed a CutSell GPU-gate worker
+provisioning successfully (memory/disk/network/CUDA-version checks all PASS) and then
+failing CUDA initialization: `NVIDIA RTX PRO 6000 Blackwell Server Edition with CUDA
+capability sm_120 is not compatible with the current PyTorch installation`. Investigation
+(no code changed in that pass): `cutsell-serverless-gpu-gate.yml` and the Video00 RAW
+workflow share one persistent endpoint (`xxu7autt8mv2rn`, created by gpu-gate run
+`32767566422` on 2026-08-24) and one `gpuTypeIds` allowlist
+(`RTX 4090`/`L4`/`A40`/`RTX A6000`) that has never included Blackwell and is confirmed
+unchanged today (endpoint `version: 232`, i.e. ~232 updates since creation, all via
+partial-merge PATCHes that never touch `gpuTypeIds`). If the observed worker really ran
+on this endpoint, RunPod placed it on a GPU class outside the endpoint's own configured
+allowlist -- a RunPod-side scheduling question, not a misconfiguration in this repo (see
+the RunPod support report drafted alongside this fix). `torch2.6.0`/`cu124`'s lack of
+sm_120 support is expected: Blackwell (sm_100/sm_120) kernel support requires PyTorch
+>=2.7 with CUDA >=12.8, well past the current image
+(`madiator2011/better-pytorch:cuda12.4-torch2.6.0`).
+
+**Fix (diagnostic-only, `cutsell_worker/serverless_handler.py`)**: `_health()` previously
+collapsed any CUDA problem to a bare `cuda_available: false` with no further detail.
+Every hardware/runtime probe is now independently guarded (one failing probe never hides
+the others) and the result reports: `device_name`, `compute_capability` (as `sm_XY`),
+`torch_version`, `torch_compiled_cuda_version` (was `torch_cuda` -- renamed for clarity;
+grepped the repo first, nothing else reads that field name), a best-effort
+`cuda_runtime_version` (via `nvidia-smi`, 5s timeout, `None` on any failure -- missing
+binary, no GPU, permission denied), `hostname`, `worker_id` (RunPod's `RUNPOD_POD_ID` env
+var when present), and an explicit `incompatibility_reason`. The reason is computed
+deterministically -- comparing the detected `compute_capability` against
+`torch.cuda.get_arch_list()` (the actual compiled-architecture list this torch build
+carries) -- rather than by scraping PyTorch's internal warning text, which is fragile and
+version-dependent. When a compute capability is detected but `cuda_available` is `False`
+and that capability isn't in the build's own supported-architecture list, the result now
+says so explicitly (e.g. *"Detected GPU compute capability sm_120 is not in this torch
+build's supported architecture list (sm_50, sm_60, sm_70, sm_75, sm_80, sm_86, sm_90).
+The current torch/CUDA build does not support this GPU."*) instead of a bare
+`cuda_available: false`. When no device is present at all (`cuda_device_count: 0`), no
+incompatibility is fabricated -- `incompatibility_reason` stays `None`, since there is no
+capability to diagnose against. `ok`/`cuda_available` keep their exact existing meaning;
+`runpod_orchestration.py`'s `output.ok == true and output.cuda_available == true`
+classification (D-041) is untouched.
+
+**Explicitly not touched**: `gpuTypeIds` (unchanged), the PyTorch/CUDA image (not
+upgraded), any `cutsell_worker/` editorial/Clean Cut logic, `runpod_orchestration.py`'s
+health classification contract, grouping, delivery gate, monitoring behavior, Sales
+Funnel/TikTok Shop styling, SWAP, `main`/PR merge state, production/TestFlight.
+
+**Validation**: 6 unit tests in `tests/test_cutsell_serverless_health_diagnostics.py`
+against a fully-controllable fake `torch` module (the real dependency is only installed
+inside the GPU worker image, not this CI/dev environment) -- a supported GPU reports no
+incompatibility claim; the RTX PRO 6000 Blackwell/sm_120 case reports the explicit
+architecture-mismatch reason; no device at all reports `cuda_available: false` with no
+fabricated incompatibility claim; a device-name lookup failure and a capability lookup
+failure are each captured without hiding the other probes or crashing the health op; and
+(one beyond the requested five) `is_available()` itself raising is captured rather than
+propagating. Full `tests/test_cutsell_*.py` CI glob (1286 passed) plus this new file
+green, `compileall` clean.
+
+**Not yet pushed**: `cutsell_worker/serverless_handler.py` is one of the RAW workflow's
+required canonical trigger paths (D-039/D-021) -- pushing this commit would auto-fire a
+Video00 RAW via `cutsell-video00-raw-v5-auto-microtrim.yml`'s existing `push.paths`
+filter, which conflicts with the explicit "do not launch another RAW yet" gate this fix
+was requested under. Held locally (committed, not pushed) pending explicit direction on
+how to proceed -- see the accompanying report for the recommended path (validating first
+via `cutsell-serverless-gpu-gate.yml`'s `workflow_dispatch`, which is Video00-submission-
+free, rather than the Video00 RAW workflow itself).
+
 ## Change rule
 
 When a new decision changes product behavior, update this file in the same development cycle. Do not silently redefine CutSell through code alone.
