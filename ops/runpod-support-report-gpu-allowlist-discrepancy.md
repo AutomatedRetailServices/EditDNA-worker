@@ -1,0 +1,57 @@
+# RunPod support report — GPU allowlist discrepancy
+
+**Endpoint:** `xxu7autt8mv2rn`
+
+**Configured `gpuTypeIds`** (set at endpoint creation on 2026-08-24 by our
+`cutsell-serverless-gpu-gate.yml` workflow's `POST /v1/endpoints` call, and
+confirmed unchanged today — the endpoint is at `version: 232`, i.e. roughly
+232 subsequent updates, none of which have ever included `gpuTypeIds` in
+their PATCH body):
+- NVIDIA GeForce RTX 4090
+- NVIDIA L4
+- NVIDIA A40
+- NVIDIA RTX A6000
+
+**Observed worker (from our own dashboard log inspection):**
+- GPU: NVIDIA RTX PRO 6000 Blackwell Server Edition
+- Compute capability: sm_120
+- This GPU class is **not** in the endpoint's configured `gpuTypeIds` list
+  above.
+
+**Current worker image:** `madiator2011/better-pytorch:cuda12.4-torch2.6.0`
+(the image's PyTorch/CUDA build does not include Blackwell/sm_120 compiled
+kernels — that is expected and not itself the question; PyTorch's Blackwell
+support requires >=2.7 with CUDA >=12.8).
+
+## The question for RunPod support
+
+Was this worker actually scheduled for endpoint `xxu7autt8mv2rn`? If so, why
+was it placed on a GPU type (`NVIDIA RTX PRO 6000 Blackwell Server Edition`)
+outside that endpoint's configured `gpuTypeIds` allowlist
+(`RTX 4090` / `L4` / `A40` / `RTX A6000`)? We rely on `gpuTypeIds` as a hard
+compatibility filter — our production image cannot use Blackwell hardware —
+so a placement outside that list, if genuine, is a scheduling behavior we'd
+like RunPod to confirm and, if possible, prevent going forward (e.g. whether
+`gpuTypeIds` is meant to be a strict allowlist or only a soft preference
+under some conditions).
+
+## Supporting evidence we have on our side
+
+- The endpoint's live configuration, re-confirmed via a direct, read-only
+  `GET /v1/endpoints/xxu7autt8mv2rn` call today, still shows exactly the
+  four-class `gpuTypeIds` list above — unchanged since creation.
+- Two independent health-check jobs submitted to this same endpoint on
+  2026-09-01 (job ids `a6f37082-d130-4961-ada0-09cf1051ed67-u2` and
+  `3c0ca828-1138-43b8-8966-88a82065a0fe-u1`) each sat in `IN_QUEUE` for a
+  full 5 minutes with no worker ever assigned at all — a different failure
+  shape from the Blackwell case (worker assigned, then crashed on CUDA
+  init), included here in case it's relevant context for the same
+  underlying placement/capacity investigation.
+
+## What we need from RunPod
+
+1. Confirm whether the Blackwell worker was genuinely dispatched against
+   endpoint `xxu7autt8mv2rn`.
+2. If so, an explanation of why `gpuTypeIds` did not exclude it.
+3. Any guidance on ensuring `gpuTypeIds` is enforced as a hard filter for
+   this endpoint going forward.
