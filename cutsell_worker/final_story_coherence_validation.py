@@ -97,6 +97,7 @@ from .semantic_atom_importance import (
 from .semantic_claims import (
     CRITICAL as CLAIM_CRITICAL,
     ClaimEquivalenceArbiter,
+    ClauseRoleArbiter,
     claim_coverage,
     dedupe_claims,
     extract_claims,
@@ -412,7 +413,9 @@ def _lost_semantic_atoms(
 
 
 def _lost_critical_claims(
-    draft, *, claim_equivalence_arbiter: ClaimEquivalenceArbiter | None = None,
+    draft, *,
+    claim_equivalence_arbiter: ClaimEquivalenceArbiter | None = None,
+    clause_role_arbiter: ClauseRoleArbiter | None = None,
 ) -> list[dict]:
     """Per-Idea claim coverage (D-038) -- the backstop for `claim_coverage_
     best_take.py`'s own best-effort override. Unlike `_lost_semantic_atoms`
@@ -454,7 +457,7 @@ def _lost_critical_claims(
 
         all_claims = []
         for clip_id, clip in members:
-            all_claims.extend(extract_claims(clip_id, str(clip.text or "")))
+            all_claims.extend(extract_claims(clip_id, str(clip.text or ""), clause_role_arbiter=clause_role_arbiter))
         critical_claims = [c for c in dedupe_claims(tuple(all_claims)) if c.importance == CLAIM_CRITICAL]
         if not critical_claims:
             continue
@@ -487,6 +490,7 @@ def apply_final_story_coherence_validation(
     semantic_equivalence_arbiter: SemanticEquivalenceArbiter | None = None,
     semantic_atom_importance_arbiter: SemanticAtomImportanceArbiter | None = None,
     claim_equivalence_arbiter: ClaimEquivalenceArbiter | None = None,
+    clause_role_arbiter: ClauseRoleArbiter | None = None,
 ):
     """Last semantic authority before Selection Freeze. See module docstring."""
     draft = _fold_alternates_into_discarded(draft)
@@ -564,7 +568,7 @@ def apply_final_story_coherence_validation(
         draft, semantic_atom_importance_arbiter=semantic_atom_importance_arbiter,
     )
     lost_critical_claims = _lost_critical_claims(
-        draft, claim_equivalence_arbiter=claim_equivalence_arbiter,
+        draft, claim_equivalence_arbiter=claim_equivalence_arbiter, clause_role_arbiter=clause_role_arbiter,
     )
     # D-031: a lost_semantic_atoms finding only blocks Freeze when its own
     # `blocking` field says so (a genuinely critical/uncertain atom, or the

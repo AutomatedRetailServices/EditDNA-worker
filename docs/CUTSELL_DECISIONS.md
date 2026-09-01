@@ -1658,6 +1658,92 @@ excludes docs-only files, tests-only files, and the dormant Sales/TikTok Shop ex
 points. No editorial logic touched. Full `tests/test_cutsell_*.py` CI glob green,
 `compileall` clean, YAML validated.
 
+RAW `33448261223` (commit `ddfdb6a`) then ran: the cleanest Selection of the session
+(Human Gold regression-QA 18/18 checks passed, `selection_locked: true`) but blocked at
+Freeze by one `CRITICAL_CLAIM_LOST` finding -- see D-040 below for the root cause found
+by cross-checking that finding against the Human Gold alignment evidence.
+
+## D-040 — Claim granularity: core proposition vs. supporting clause
+
+**Status: CANONICAL**
+
+RAW `33448261223`'s one blocker, root-caused: `final_story_coherence_validation.
+_lost_critical_claims` flagged a NEGATION claim at `coverage_against_winning_
+realization: 0.5` (ambiguous, no arbiter, fails open to LOST). Cross-checked against
+the Human Gold alignment (QA evidence, never runtime logic) for that exact span:
+`content_coverage: 1.0`, `relation: EXACT` -- the winning clip's text matches the Gold
+reference verbatim. The Gold editor's own authoritative edit made and endorses the
+same content the finding called "lost." Root cause: `extract_claims` (D-038) treated
+an entire multi-clause sentence as one atomic claim --
+"Nunca se nos ocurrió hacer un chequeo de sonografía de la tiroides, pues porque cada
+año que me hacía mínimo dos estados." bundles a CORE negation ("we never thought to
+check") with a merely-SUPPORTING reason clause ("...because ... two exams a year") --
+so a winning realization that kept the core (matching Gold) but phrased the reason
+differently scored as if the whole sentence, core included, were lost.
+
+**Fix**: `extract_claims` now splits each sentence into clauses BEFORE classifying
+(`_split_into_clauses`), on the same general connector vocabulary `classify_claim`'s
+own CAUSE_EFFECT/TEMPORAL_RELATION rules already draw on
+(porque/because, pero/but/aunque/although, cuando/when, después de/after,
+entonces/so, lo que/lo cual/which -- bare Spanish "que" deliberately excluded, too
+generic a subordinator to split on safely), plus a new `_CONTRASTIVE_MARKERS` set
+(pero/but/aunque/although/sin embargo/however/though). A split is accepted only when
+BOTH sides clear the existing >=2-content-token floor, and splitting recurses into the
+remainder so a chain of connectors yields every piece. **No new importance axis was
+needed**: each clause is classified independently by the SAME deterministic
+`classify_claim` already used for whole sentences, so a clause that itself carries a
+real marker (negation/reporting/correction/etc.) keeps CRITICAL on its own, and a
+clause introduced by a mere connector with no such marker of its own falls through to
+`classify_claim`'s existing SUPPORTING/CONTEXTUAL fallbacks -- exactly the CORE vs.
+SUPPORTING vs. CONTEXTUAL distinction the directive asked for, without inventing a
+second severity scale to keep in sync with the first. Coverage is claim-LOCAL by
+construction once each clause is its own `Claim`: a winner can legitimately score 1.0
+on the core clause and 0.0 on a dropped supporting one and still be valid, because
+only the core clause is ever CRITICAL and only CRITICAL claims are checked for
+blocking loss.
+
+**Bounded `ClauseRoleArbiter` (new, honest-gap, unwired by default)**: for the one
+genuinely ambiguous case -- `classify_claim`'s weakest, marker-less `general_statement`
+fallback -- an optional arbiter can be asked "would removing this clause materially
+change the audience-facing factual meaning of this Idea?", returning CORE_CRITICAL/
+SUPPORTING/CONTEXTUAL/UNCERTAIN. With no arbiter configured (every RAW to date), the
+deterministic fallback is left exactly as `classify_claim` decided -- forcing a blanket
+escalation for every marker-less clause in a video would reintroduce the very
+over-blocking this fix exists to remove. Once wired: a confirmed CORE_CRITICAL upgrades
+the clause; an explicit UNCERTAIN verdict or an arbiter exception also upgrades to
+CRITICAL ("WHEN UNCERTAIN, KEEP") rather than trusting the weak fallback silently.
+Threaded through `claim_coverage_best_take.apply_claim_coverage_best_take`,
+`final_story_coherence_validation.apply_final_story_coherence_validation`, and
+`universal_clean_cut.process_universal_clean_cut_sources` alongside the existing
+`claim_equivalence_arbiter`, defaulting `None` throughout.
+
+**Explicitly not touched**: grouping (`take_grouping_provider.py`), BestTake's own
+override mechanics, CompositeResolver, the D-039 distinct-addition guard, physical
+fragment identity, the delivery gate, monitoring behavior, and the Human Gold alignment
+harness itself (used only as QA evidence to diagnose the false positive, never encoded
+into runtime logic).
+
+**Validation**: 15 new unit tests in `tests/test_cutsell_semantic_claims.py` -- clause
+splitting itself (no-connector sentences unsplit; a connector with too-thin a remainder
+left unsplit) plus the directive's own 10 false-positive-protection cases (core
+preserved/supporting dropped -> not a critical loss; core dropped -> still blocks even
+with a supporting clause preserved; a cause/effect-INTRODUCED clause that is itself
+critical -> still blocks if dropped; a redundant/explanatory clause -> never tracked as
+critical; an incidental temporal clause -> CONTEXTUAL, never critical; a critical
+numeric-measurement clause -> still blocks if dropped, survives splitting; two
+independently critical claims in one sentence -> both tracked, each independently
+checkable; a subordinate correction clause -> still critical, splitting never demotes
+real critical content; a paraphrased core claim -> still counts as covered; same
+vocabulary/different proposition at clause granularity -> still no false coverage) --
+plus 5 tests for `resolve_ambiguous_clause_role`'s own escalation contract. One new
+CleanCutBench fixture reproduces RAW `33448261223`'s exact false positive through the
+real take-grouping/idea-equivalence/take-judge/coherence chain and confirms it no
+longer blocks Freeze. One pre-existing test (`test_dedupe_claims_keeps_distinct_
+propositions`) needed its fixture text updated -- "I felt tired because I skipped
+breakfast." now correctly splits into two claims, which is the fix working as intended,
+not a regression; a new test pins that exact split. Full `tests/test_cutsell_*.py` CI
+glob green, `compileall` clean.
+
 ## Change rule
 
 When a new decision changes product behavior, update this file in the same development cycle. Do not silently redefine CutSell through code alone.

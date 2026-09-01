@@ -22,11 +22,13 @@ from cutsell_worker.semantic_claims import (
     SUPPORTING,
     TEMPORAL_RELATION,
     UNIQUE_CONCLUSION,
+    _split_into_clauses,
     classify_claim,
     claim_coverage,
     claim_is_covered,
     dedupe_claims,
     extract_claims,
+    resolve_ambiguous_clause_role,
     resolve_ambiguous_coverage,
 )
 
@@ -186,7 +188,16 @@ def test_dedupe_claims_collapses_near_identical_restatement():
 
 def test_dedupe_claims_keeps_distinct_propositions():
     claims = extract_claims("clip_a", "The biopsy confirmed it was a benign tumor.") + \
-        extract_claims("clip_b", "I felt tired because I skipped breakfast.")
+        extract_claims("clip_b", "I walked into the clinic and sat down.")
+    deduped = dedupe_claims(claims)
+    assert len(deduped) == 2
+
+
+def test_dedupe_claims_keeps_distinct_clauses_from_the_same_sentence():
+    # D-040: a core+supporting split from ONE sentence produces two
+    # distinct propositions (different claim_type), not near-duplicates.
+    claims = extract_claims("clip_a", "I felt tired because I skipped breakfast.")
+    assert len(claims) == 2
     deduped = dedupe_claims(claims)
     assert len(deduped) == 2
 
@@ -335,3 +346,205 @@ def test_resolve_ambiguous_coverage_arbiter_exception_fails_open_to_lost():
     claim = _claim()
     mid = (AMBIGUOUS_COVERAGE_FLOOR + COVERAGE_THRESHOLD) / 2
     assert resolve_ambiguous_coverage(claim, "text", coverage=mid, arbiter=_ExplodingArbiter()) is False
+
+
+# --- D-040: clause splitting (core vs. supporting/contextual clause) -------
+#
+# Offline audit of RAW 33448261223: a whole multi-clause sentence was
+# treated as one atomic claim, so a winning realization that preserved the
+# CORE proposition but dropped a merely-supporting reason clause scored as
+# if the core itself were lost. `extract_claims` now splits on genuine
+# connectors first, and each clause is classified independently by the
+# same deterministic `classify_claim` rules -- no new importance axis, no
+# Video00 phrase hardcoded. The 10 cases below are the directive's own
+# false-positive-protection list.
+
+def test_split_into_clauses_no_connector_is_unsplit():
+    assert _split_into_clauses("I walked into the clinic and sat down.") == \
+        ("I walked into the clinic and sat down.",)
+
+
+def test_split_into_clauses_short_trailing_remainder_is_not_split():
+    # "but it was benign" has only one content token ("benign") after
+    # stopword filtering -- too thin to stand alone, so the connector is
+    # skipped rather than carving off a degenerate fragment.
+    assert _split_into_clauses("The tumor measured 3 centimeters, but it was benign.") == \
+        ("The tumor measured 3 centimeters, but it was benign.",)
+
+
+# 1. Core claim preserved, trailing supporting clause omitted -> PASS
+def test_case_1_core_preserved_supporting_omitted_is_not_critical_loss():
+    sentence = "Nunca se nos ocurrio hacer un chequeo de la tiroides, porque cada ano me hacia dos examenes normales."
+    claims = extract_claims("clip_a", sentence)
+    critical = [c for c in claims if c.importance == CRITICAL]
+    supporting = [c for c in claims if c.importance != CRITICAL]
+    assert len(critical) == 1
+    assert critical[0].claim_type == NEGATION
+    assert len(supporting) == 1
+    # The winning realization keeps only the core, drops the reason clause.
+    winner_text = "Nunca se nos ocurrio hacer un chequeo de la tiroides."
+    assert claim_is_covered(critical[0], winner_text)
+
+
+# 2. Core diagnosis dropped, supporting reflection preserved -> FAIL
+def test_case_2_core_diagnosis_dropped_still_blocks_despite_supporting_survival():
+    sentence = "The biopsy confirmed cancer, which explained symptoms I had noticed before."
+    claims = extract_claims("clip_a", sentence)
+    critical = [c for c in claims if c.importance == CRITICAL]
+    assert len(critical) == 1
+    core = critical[0]
+    # Winner keeps only the supporting reflection, not the core diagnosis.
+    winner_text = "It explained symptoms I had noticed before."
+    assert not claim_is_covered(core, winner_text)
+
+
+# 3. Cause/effect-introduced clause that is ITSELF critical -> dropping it FAILs
+def test_case_3_critical_clause_introduced_by_a_cause_effect_connector_still_blocks():
+    sentence = "I stopped the medication because it was not working."
+    claims = extract_claims("clip_a", sentence)
+    critical = [c for c in claims if c.importance == CRITICAL]
+    assert len(critical) == 1
+    assert critical[0].claim_type == NEGATION
+    winner_text = "I stopped the medication."
+    assert not claim_is_covered(critical[0], winner_text)
+
+
+# 4. Redundant/explanatory clause omitted -> PASS (never even checked as critical)
+def test_case_4_redundant_explanatory_clause_omission_is_not_tracked_as_critical():
+    sentence = "The biopsy confirmed cancer, which explained symptoms I had noticed before."
+    claims = extract_claims("clip_a", sentence)
+    explanatory = [c for c in claims if "explained" in c.text]
+    assert len(explanatory) == 1
+    assert explanatory[0].importance != CRITICAL
+
+
+# 5. Incidental date/temporal clause omitted -> WARN, never blocking
+def test_case_5_incidental_temporal_clause_is_contextual_not_critical():
+    sentence = "I felt worse when the weather changed."
+    claims = extract_claims("clip_a", sentence)
+    temporal = [c for c in claims if c.claim_type == TEMPORAL_RELATION]
+    assert len(temporal) == 1
+    assert temporal[0].importance == CONTEXTUAL
+
+
+# 6. Numeric measurement critical -> BLOCK if lost, survives clause splitting
+def test_case_6_critical_measurement_clause_still_blocks_when_dropped():
+    sentence = "The tumor measured 3 centimeters, but the doctors said it was benign tissue."
+    claims = extract_claims("clip_a", sentence)
+    critical = [c for c in claims if c.importance == CRITICAL]
+    assert len(critical) == 1
+    assert critical[0].claim_type == MEASUREMENT_QUANTITY
+    winner_text = "The doctors said it was benign tissue."
+    assert not claim_is_covered(critical[0], winner_text)
+
+
+# 7. One sentence with two independently critical claims -> both tracked, both must survive
+def test_case_7_two_independently_critical_claims_in_one_sentence_both_tracked():
+    sentence = "The test came back positive, but I also learned I did not have the gene."
+    claims = extract_claims("clip_a", sentence)
+    critical = [c for c in claims if c.importance == CRITICAL]
+    assert len(critical) == 2
+    assert {c.claim_type for c in critical} == {STATE_RESULT, NEGATION}
+    # Each is independently checkable -- dropping either one is a loss even
+    # though the other survives.
+    only_first = "The test came back positive."
+    only_second = "I did not have the gene."
+    state_result_claim = next(c for c in critical if c.claim_type == STATE_RESULT)
+    negation_claim = next(c for c in critical if c.claim_type == NEGATION)
+    assert claim_is_covered(state_result_claim, only_first)
+    assert not claim_is_covered(negation_claim, only_first)
+    assert claim_is_covered(negation_claim, only_second)
+    assert not claim_is_covered(state_result_claim, only_second)
+
+
+# 8. A subordinate/connector-introduced clause that materially changes
+# meaning (a correction) is still classified critical -- clause splitting
+# never demotes real critical content just because it followed a connector.
+def test_case_8_subordinate_correction_clause_is_still_critical():
+    sentence = "The doctor said it was cancer, but actually it was not cancer at all."
+    claims = extract_claims("clip_a", sentence)
+    critical = [c for c in claims if c.importance == CRITICAL]
+    assert len(critical) == 1
+    assert critical[0].claim_type == NEGATION
+    assert "actually" in critical[0].text.lower()
+
+
+# 9. Paraphrased core claim still counts as covered
+def test_case_9_paraphrased_core_claim_counts_as_covered():
+    sentence = "Nunca se nos ocurrio hacer un chequeo de la tiroides, porque cada ano me hacia dos examenes normales."
+    core = next(c for c in extract_claims("clip_a", sentence) if c.importance == CRITICAL)
+    paraphrase = "Nunca se nos ocurrio hacer un chequeo de la tiroides porque siempre salia normal en mis examenes."
+    assert claim_is_covered(core, paraphrase)
+
+
+# 10. Same vocabulary, different proposition -> no false coverage (clause-level)
+def test_case_10_same_vocabulary_different_proposition_no_false_coverage_at_clause_level():
+    sentence = "The biopsy confirmed it was a benign tumor."
+    core = extract_claims("clip_a", sentence)[0]
+    negated_restatement = "The biopsy did not confirm it was a benign tumor."
+    assert not claim_is_covered(core, negated_restatement)
+
+
+# --- resolve_ambiguous_clause_role (bounded arbiter, D-040) -----------------
+
+class _AlwaysCoreCriticalClauseArbiter:
+    def __init__(self):
+        self.calls = 0
+
+    def clause_role(self, clause_text, parent_sentence_text):
+        self.calls += 1
+        return "CORE_CRITICAL", 0.9, "materially changes meaning"
+
+
+class _AlwaysUncertainClauseArbiter:
+    def clause_role(self, clause_text, parent_sentence_text):
+        return "UNCERTAIN", 0.4, "cannot tell"
+
+
+class _ExplodingClauseArbiter:
+    def clause_role(self, clause_text, parent_sentence_text):
+        raise RuntimeError("boom")
+
+
+def test_resolve_ambiguous_clause_role_leaves_marker_based_evidence_untouched():
+    # A real deterministic marker (negation_present) is never second-guessed
+    # by the arbiter, confirmed or not.
+    result = resolve_ambiguous_clause_role(
+        "it was not working", "parent", deterministic_importance=CRITICAL,
+        evidence="negation_present", arbiter=_AlwaysCoreCriticalClauseArbiter(),
+    )
+    assert result == CRITICAL
+
+
+def test_resolve_ambiguous_clause_role_no_arbiter_keeps_deterministic_fallback():
+    result = resolve_ambiguous_clause_role(
+        "some marker-less clause", "parent", deterministic_importance=SUPPORTING,
+        evidence="general_statement", arbiter=None,
+    )
+    assert result == SUPPORTING
+
+
+def test_resolve_ambiguous_clause_role_arbiter_confirms_core_critical_upgrades():
+    arbiter = _AlwaysCoreCriticalClauseArbiter()
+    result = resolve_ambiguous_clause_role(
+        "some marker-less clause", "parent", deterministic_importance=SUPPORTING,
+        evidence="general_statement", arbiter=arbiter,
+    )
+    assert result == CRITICAL
+    assert arbiter.calls == 1
+
+
+def test_resolve_ambiguous_clause_role_arbiter_uncertain_fails_open_to_critical():
+    result = resolve_ambiguous_clause_role(
+        "some marker-less clause", "parent", deterministic_importance=SUPPORTING,
+        evidence="general_statement", arbiter=_AlwaysUncertainClauseArbiter(),
+    )
+    assert result == CRITICAL
+
+
+def test_resolve_ambiguous_clause_role_arbiter_exception_fails_open_to_critical():
+    result = resolve_ambiguous_clause_role(
+        "some marker-less clause", "parent", deterministic_importance=SUPPORTING,
+        evidence="general_statement", arbiter=_ExplodingClauseArbiter(),
+    )
+    assert result == CRITICAL

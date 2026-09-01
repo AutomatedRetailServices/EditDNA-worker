@@ -51,6 +51,7 @@ from dataclasses import replace
 
 from .semantic_claims import (
     ClaimEquivalenceArbiter,
+    ClauseRoleArbiter,
     CRITICAL,
     claim_coverage,
     dedupe_claims,
@@ -61,12 +62,16 @@ from .semantic_claims import (
 _COMPOSITE_OVERLAP_TOLERANCE_SEC = 0.05
 
 
-def _group_critical_claims(members: list[tuple[str, object]]):
+def _group_critical_claims(members: list[tuple[str, object]], *, clause_role_arbiter: ClauseRoleArbiter | None = None):
     """Every CRITICAL claim found across the group's own members, deduped
-    across near-identical restatements between sibling attempts."""
+    across near-identical restatements between sibling attempts. D-040:
+    `extract_claims` already splits a multi-clause sentence into its own
+    CORE/SUPPORTING/CONTEXTUAL clauses, so a critical fact bundled with a
+    merely-supporting reason surfaces as two separate claims here, not one
+    -- only the core one is ever checked as CRITICAL."""
     all_claims = []
     for clip_id, clip in members:
-        all_claims.extend(extract_claims(clip_id, str(clip.text or "")))
+        all_claims.extend(extract_claims(clip_id, str(clip.text or ""), clause_role_arbiter=clause_role_arbiter))
     deduped = dedupe_claims(tuple(all_claims))
     return tuple(c for c in deduped if c.importance == CRITICAL)
 
@@ -87,7 +92,11 @@ def _time_compatible(left, right) -> bool:
     return float(b.start) >= float(a.end) - _COMPOSITE_OVERLAP_TOLERANCE_SEC
 
 
-def apply_claim_coverage_best_take(draft, *, claim_equivalence_arbiter: ClaimEquivalenceArbiter | None = None):
+def apply_claim_coverage_best_take(
+    draft, *,
+    claim_equivalence_arbiter: ClaimEquivalenceArbiter | None = None,
+    clause_role_arbiter: ClauseRoleArbiter | None = None,
+):
     """See module docstring. Never invents a new grouping/similarity
     heuristic; only reads `take_judge_groups` and moves clips between the
     existing selected/discarded buckets (KEEP/DISCARD only, D-019)."""
@@ -139,7 +148,7 @@ def apply_claim_coverage_best_take(draft, *, claim_equivalence_arbiter: ClaimEqu
         winner_id = current_winners[0]
         winner_clip = all_clips[winner_id]
 
-        critical_claims = _group_critical_claims(members)
+        critical_claims = _group_critical_claims(members, clause_role_arbiter=clause_role_arbiter)
         if not critical_claims:
             continue
 

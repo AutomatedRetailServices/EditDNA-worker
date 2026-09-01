@@ -1208,3 +1208,31 @@ def test_distinct_addition_marker_prevents_a_real_chain_false_merge():
     # forced into one retry contest, so neither is silently discarded.
     assert _kept(draft) == {"first", "another"}
     assert _discarded(draft) == set()
+
+
+# 51. Claim granularity (D-040): a winner that preserves the CORE claim but
+# drops a discarded sibling's merely-supporting reason clause must not
+# block Freeze -- reached through the REAL take-grouping/idea-equivalence/
+# take-judge/coherence chain, reproducing RAW 33448261223's own false
+# positive (the winning realization's phrasing matched the Human Gold
+# reference verbatim; the CRITICAL_CLAIM_LOST finding was wrong).
+
+def test_core_claim_preserved_supporting_reason_dropped_does_not_block_freeze():
+    winner_text = (
+        "Nunca se nos ocurrio hacer un chequeo de la tiroides, "
+        "porque cada ano me hacia dos examenes normales."
+    )
+    loser_text = (
+        "Nunca se nos ocurrio hacer un chequeo de la tiroides por sonografia "
+        "porque siempre en mis examenes salia funcionando perfectamente."
+    )
+    winner = _take("winner", 0.0, 3.0, winner_text, complete=True)
+    loser = _take("loser", 4.0, 7.0, loser_text, complete=False)
+
+    draft, _, _ = _run_core((winner, loser), oracle_pairs={("winner", "loser")})
+
+    assert _kept(draft) == {"winner"}
+    assert _discarded(draft) == {"loser"}
+    diag = draft.diagnostics["final_story_coherence_validation"]
+    assert diag["lost_critical_claims"] == []
+    assert diag["freeze_blocked"] is False

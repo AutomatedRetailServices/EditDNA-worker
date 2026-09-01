@@ -121,6 +121,19 @@ _STATE_RESULT_MARKERS = (
     "salio negativo", "salió negativo", "resultado fue", "came back positive",
     "came back negative", "tested positive", "tested negative", "result was",
 )
+# Contrastive connectors -- like _CAUSE_EFFECT_MARKERS/_TEMPORAL_MARKERS,
+# these introduce a clause that qualifies rather than restates the one
+# before it. Used only for clause splitting (below), not by classify_claim
+# itself, since a bare contrast on its own says nothing about claim type.
+_CONTRASTIVE_MARKERS = (
+    "pero", "aunque", "sin embargo", "but", "although", "however", "though",
+)
+# "lo que"/"lo cual" ("which") are specific enough to safely mark a
+# relative-clause addition; bare "que" is deliberately excluded from clause
+# splitting -- it is Spanish's all-purpose subordinator ("que tenía", "que
+# salían", ...) and splitting on it would shatter ordinary sentence
+# structure rather than separate genuine propositions.
+_RELATIVE_ADDITION_MARKERS = ("lo que", "lo cual", "which")
 
 COVERAGE_THRESHOLD = 0.6
 # Below this, a claim is confidently lost regardless of arbiter availability
@@ -136,6 +149,65 @@ def _split_sentences(text: str) -> tuple[str, ...]:
         return ()
     parts = _SENTENCE_SPLIT_RE.split(text)
     return tuple(part.strip() for part in parts if part.strip())
+
+
+# D-040 (claim granularity): a multi-clause sentence can bundle a CORE
+# proposition with a merely-SUPPORTING reason/context clause -- "Nunca se
+# nos ocurrio hacer un chequeo de tiroides, pues porque cada ano me hacia
+# minimo dos examenes" is a NEGATION core ("we never thought to check the
+# thyroid") plus a supporting elaboration ("because ... two exams a year"),
+# not one indivisible proposition. Scoring the WHOLE sentence as one claim
+# means a winning realization that keeps the core but drops the supporting
+# detail scores as if it dropped the core too -- a real false positive an
+# offline audit of RAW 33448261223 traced to exactly this (the Human Gold
+# reference itself keeps only the core; the CRITICAL_CLAIM_LOST finding was
+# wrong, not the selection).
+#
+# Splitting reuses the SAME connector vocabulary classify_claim's own
+# CAUSE_EFFECT/TEMPORAL_RELATION rules already draw on -- a sentence that
+# opens with a real reporting/negation/correction marker BEFORE any
+# connector keeps that marker's own critical weight on its own clause; the
+# connector-introduced remainder is classified independently by the exact
+# same deterministic rules, so it only ever comes out CRITICAL if it
+# contains its OWN critical marker (a second core fact in one sentence,
+# not a demotion of the first). No Video00 phrase is hardcoded.
+_CLAUSE_SPLIT_MARKERS = (
+    _CAUSE_EFFECT_MARKERS + _TEMPORAL_MARKERS + _CONTRASTIVE_MARKERS + _RELATIVE_ADDITION_MARKERS
+)
+_CLAUSE_SPLIT_RE = re.compile(
+    r"\b(?:" + "|".join(re.escape(m) for m in sorted(_CLAUSE_SPLIT_MARKERS, key=len, reverse=True)) + r")\b",
+    re.IGNORECASE,
+)
+# A split is only accepted when BOTH resulting sides clear the same
+# >=2-content-token floor extract_claims already uses for a whole sentence
+# -- otherwise a connector near the start/end of a short sentence ("it was
+# fine after") would carve off a degenerate, meaningless fragment.
+_CLAUSE_MIN_CONTENT_TOKENS = 2
+
+
+def _split_into_clauses(text: str, *, _search_from: int = 0) -> tuple[str, ...]:
+    """Split one sentence into an ordered tuple of clauses at the first
+    connector that produces two substantive sides, recursing into the
+    remainder so a chain of connectors ("core, porque X, pero Y") yields
+    every piece rather than only the first. Returns `(text,)` unchanged
+    when no genuine split point exists -- the overwhelmingly common case
+    (most sentences are already one clause)."""
+    match = _CLAUSE_SPLIT_RE.search(text, _search_from)
+    if not match:
+        return (text,)
+    left = text[:match.start()].strip()
+    right = text[match.start():].strip()
+    if len(_content(left)) < _CLAUSE_MIN_CONTENT_TOKENS or len(_content(right)) < _CLAUSE_MIN_CONTENT_TOKENS:
+        # This particular connector doesn't produce a valid split (e.g. it
+        # is the sentence's own first word, or nothing substantial follows
+        # it) -- keep looking later in the string for a real one instead of
+        # giving up on splitting the sentence entirely.
+        return _split_into_clauses(text, _search_from=match.end())
+    connector_len = match.end() - match.start()
+    further = _split_into_clauses(right[connector_len:])
+    if len(further) == 1:
+        return (left, right)
+    return (left, (right[:connector_len] + further[0]).strip()) + further[1:]
 
 
 def classify_claim(sentence: str) -> tuple[str, str, str]:
@@ -196,26 +268,48 @@ def _claim_id(source_clip_id: str, text: str) -> str:
     return f"claim_{digest}"
 
 
-def extract_claims(source_clip_id: str, text: str) -> tuple[Claim, ...]:
-    """Split `text` into sentence-level claims. A sentence with fewer than
+def extract_claims(
+    source_clip_id: str, text: str, *, clause_role_arbiter: "ClauseRoleArbiter | None" = None,
+) -> tuple[Claim, ...]:
+    """Split `text` into clause-level claims: each sentence first splits on
+    genuine connectors (`_split_into_clauses` -- D-040) into a CORE clause
+    plus zero or more SUPPORTING/CONTEXTUAL clauses, and each clause is then
+    classified independently via `classify_claim`. A clause with fewer than
     two content tokens is too thin to be a standalone audience-facing
     proposition (a bare reaction/filler, e.g. "Okay." or "Sí.") and is
-    skipped, mirroring `_lost_semantic_atoms`'s own short-clip floor."""
+    skipped, mirroring `_lost_semantic_atoms`'s own short-clip floor. This
+    is claim-LOCAL by construction: a critical fact bundled with a merely
+    supporting reason in one sentence produces two separate claims, so
+    coverage is checked (and can legitimately pass) per clause rather than
+    penalizing a preserved core claim for a dropped supporting one.
+
+    `clause_role_arbiter` (D-040) is consulted only for a clause
+    `classify_claim` could not confidently place at all (its weakest,
+    marker-less fallback) -- see `resolve_ambiguous_clause_role`'s own
+    docstring for exactly when and how it can change the result; defaults
+    to `None` (unwired), the same honest-gap pattern as every other bounded
+    arbiter in this module."""
     claims: list[Claim] = []
     for sentence in _split_sentences(text):
-        tokens = _content(sentence)
-        if len(tokens) < 2:
-            continue
-        claim_type, importance, evidence = classify_claim(sentence)
-        claims.append(Claim(
-            claim_id=_claim_id(source_clip_id, sentence),
-            source_clip_id=source_clip_id,
-            claim_type=claim_type,
-            text=sentence,
-            importance=importance,
-            evidence=evidence,
-            content_tokens=frozenset(tokens),
-        ))
+        for clause in _split_into_clauses(sentence):
+            tokens = _content(clause)
+            if len(tokens) < 2:
+                continue
+            claim_type, importance, evidence = classify_claim(clause)
+            importance = resolve_ambiguous_clause_role(
+                clause, sentence,
+                deterministic_importance=importance, evidence=evidence,
+                arbiter=clause_role_arbiter,
+            )
+            claims.append(Claim(
+                claim_id=_claim_id(source_clip_id, clause),
+                source_clip_id=source_clip_id,
+                claim_type=claim_type,
+                text=clause,
+                importance=importance,
+                evidence=evidence,
+                content_tokens=frozenset(tokens),
+            ))
     return tuple(claims)
 
 
@@ -316,6 +410,64 @@ class ClaimEquivalenceArbiter(Protocol):
     Returns (covered: bool, confidence 0..1, short general reason)."""
 
     def claim_covered(self, claim_text: str, winning_realization_text: str) -> tuple[bool, float, str]: ...
+
+
+class ClauseRoleArbiter(Protocol):
+    """Bounded arbiter for exactly one narrow question per clause (D-040):
+    "Would removing this clause materially change the audience-facing
+    factual meaning of this Idea?" Given the clause's own text and its
+    parent sentence as minimal context -- mirrors `ClaimEquivalenceArbiter`
+    (text only, no clip identity, no whole-video context). Returns
+    (role, confidence 0..1, short general reason), role one of
+    CORE_CRITICAL/SUPPORTING/CONTEXTUAL/UNCERTAIN."""
+
+    def clause_role(self, clause_text: str, parent_sentence_text: str) -> tuple[str, float, str]: ...
+
+
+_CLAUSE_ROLE_CORE_CRITICAL = "CORE_CRITICAL"
+_CLAUSE_ROLE_UNCERTAIN = "UNCERTAIN"
+_CLAUSE_ROLE_TO_IMPORTANCE = {
+    _CLAUSE_ROLE_CORE_CRITICAL: CRITICAL,
+    "SUPPORTING": SUPPORTING,
+    "CONTEXTUAL": CONTEXTUAL,
+}
+
+
+def resolve_ambiguous_clause_role(
+    clause_text: str,
+    parent_sentence_text: str,
+    *,
+    deterministic_importance: str,
+    evidence: str,
+    arbiter: ClauseRoleArbiter | None,
+) -> str:
+    """The clause's own final importance. `classify_claim`'s deterministic
+    rules are confident for every marker-based evidence value (a real
+    negation/reporting/cause-effect/temporal/etc. signal) -- those are left
+    untouched here, matching resolve_ambiguous_coverage's own posture of
+    only ever intervening in the genuinely uncertain band. The one
+    genuinely ambiguous case is `evidence == "general_statement"`: no
+    marker fired at all, so `deterministic_importance` is only ever
+    classify_claim's own weakest fallback (SUPPORTING) -- never a confirmed
+    judgment. With no arbiter (the default everywhere in this pipeline
+    today, same honest-gap pattern as every other bounded arbiter here),
+    that fallback is left exactly as classify_claim decided -- forcing a
+    blanket escalation for every marker-less clause in a video would
+    reintroduce the exact over-blocking this module exists to avoid. Once a
+    real arbiter IS wired: a confirmed CORE_CRITICAL upgrades the clause;
+    an explicit UNCERTAIN verdict (a real semantic check that still
+    couldn't decide) or an arbiter exception also upgrades to CRITICAL --
+    "WHEN UNCERTAIN, KEEP" -- rather than silently trusting the weak
+    fallback; SUPPORTING/CONTEXTUAL verdicts are applied directly."""
+    if evidence != "general_statement" or arbiter is None:
+        return deterministic_importance
+    try:
+        role, _confidence, _reason = arbiter.clause_role(clause_text, parent_sentence_text)
+    except Exception:
+        return CRITICAL
+    if role == _CLAUSE_ROLE_UNCERTAIN:
+        return CRITICAL
+    return _CLAUSE_ROLE_TO_IMPORTANCE.get(role, deterministic_importance)
 
 
 def resolve_ambiguous_coverage(

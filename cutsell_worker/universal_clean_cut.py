@@ -30,7 +30,7 @@ from .final_boundary_authority import enforce_complete_idea_boundaries
 from .final_story_coherence_validation import apply_final_story_coherence_validation
 from .causal_order_validator import CausalOrderArbiter
 from .semantic_atom_importance import SemanticAtomImportanceArbiter
-from .semantic_claims import ClaimEquivalenceArbiter
+from .semantic_claims import ClaimEquivalenceArbiter, ClauseRoleArbiter
 from .repair_loop import run_repair_loop
 from .flow_b import ProgressCallback, process_local_sources
 from .human_boundary_polish_v5 import polish_human_boundaries_v5
@@ -64,6 +64,7 @@ def process_universal_clean_cut_sources(
     causal_order_arbiter: CausalOrderArbiter | None = None,
     semantic_atom_importance_arbiter: SemanticAtomImportanceArbiter | None = None,
     claim_equivalence_arbiter: ClaimEquivalenceArbiter | None = None,
+    clause_role_arbiter: ClauseRoleArbiter | None = None,
     clean_cut_core_v1_enabled: bool = True,
     progress: ProgressCallback | None = None,
 ) -> ProcessingResult:
@@ -112,7 +113,9 @@ def process_universal_clean_cut_sources(
             result = replace(
                 result,
                 draft=apply_claim_coverage_best_take(
-                    result.draft, claim_equivalence_arbiter=claim_equivalence_arbiter,
+                    result.draft,
+                    claim_equivalence_arbiter=claim_equivalence_arbiter,
+                    clause_role_arbiter=clause_role_arbiter,
                 ),
             )
             result = replace(
@@ -122,6 +125,7 @@ def process_universal_clean_cut_sources(
                     semantic_equivalence_arbiter=semantic_equivalence_arbiter,
                     semantic_atom_importance_arbiter=semantic_atom_importance_arbiter,
                     claim_equivalence_arbiter=claim_equivalence_arbiter,
+                    clause_role_arbiter=clause_role_arbiter,
                 ),
             )
             selection_stage = "clean_cut_core_v1_idea_first_keep_discard"
