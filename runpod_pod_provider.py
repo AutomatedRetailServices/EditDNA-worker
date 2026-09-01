@@ -228,6 +228,20 @@ def get_pod(transport: Transport, api_key: str, pod_id: str) -> Optional[dict]:
     return resp.json_body or {}
 
 
+# RunPod's two cloud environments (confirmed: only these two values are
+# valid -- there is no "search both" value). COMMUNITY is peer-hosted and
+# cheaper but its consumer-GPU inventory (RTX 4090 especially) fluctuates;
+# SECURE is RunPod's own datacenter capacity, generally pricier but more
+# consistently available. `create_pod` takes an explicit `cloud_type` per
+# attempt; `_select_and_create_fresh` sweeps COMMUNITY across every
+# approved candidate before falling back to a SECURE sweep, so a genuine
+# CAPACITY_UNAVAILABLE result means neither cloud had room, not just the
+# cheaper one -- see D-042's first live test, which independently hit
+# "no instances currently available" on all four approved GPUs under
+# COMMUNITY alone.
+POD_CLOUD_TYPES = ("COMMUNITY", "SECURE")
+
+
 def create_pod(
     transport: Transport,
     api_key: str,
@@ -235,6 +249,7 @@ def create_pod(
     name: str,
     image: str,
     gpu_type_id: str,
+    cloud_type: str = "COMMUNITY",
     start_command: Optional[str] = None,
     container_disk_gb: int = 40,
     env: Optional[dict] = None,
@@ -250,6 +265,7 @@ def create_pod(
     for both fields) -- `ports` is normalized to a list here, and
     `start_command` (a plain shell-style string for caller convenience) is
     tokenized via `shlex.split` into the argv-array RunPod expects."""
+    assert cloud_type in POD_CLOUD_TYPES, f"invalid cloud_type {cloud_type!r}, must be one of {POD_CLOUD_TYPES}"
     headers = {"Authorization": f"Bearer {api_key}"}
     ports_list = [ports] if isinstance(ports, str) else list(ports)
     payload: dict = {
@@ -258,7 +274,7 @@ def create_pod(
         "gpuTypeIds": [gpu_type_id],
         "gpuCount": 1,
         "containerDiskInGb": container_disk_gb,
-        "cloudType": "COMMUNITY",
+        "cloudType": cloud_type,
         "ports": ports_list,
         "env": env or {},
     }
@@ -436,58 +452,88 @@ class RunPodPodExecutionProvider:
                 detail={"reason": selection.reason, "candidates": [c.gpu_type_id for c in selection.candidates_considered]},
             )
 
+        # Sweep COMMUNITY (cheaper) across every ranked candidate first; only
+        # fall back to a full SECURE sweep if literally nothing in COMMUNITY
+        # worked. This keeps the cost-conscious cloud as the default while
+        # still searching RunPod's only other cloud environment before
+        # concluding capacity is genuinely unavailable -- see D-042's first
+        # live test, which independently hit "no instances currently
+        # available" on all four approved GPUs under COMMUNITY alone.
         last_detail = None
-        for candidate in ordered:
-            pod, detail = create_pod(
-                self._transport,
-                self._cfg.api_key,
-                name=self._cfg.pod_name,
-                image=self._cfg.image,
-                gpu_type_id=candidate.gpu_type_id,
-                start_command=self._cfg.start_command,
-                container_disk_gb=self._cfg.container_disk_gb,
-            )
-            if pod is not None:
-                pod_id = str(pod.get("id") or "")
+        for cloud_type in POD_CLOUD_TYPES:
+            for candidate in ordered:
+                pod, detail = create_pod(
+                    self._transport,
+                    self._cfg.api_key,
+                    name=self._cfg.pod_name,
+                    image=self._cfg.image,
+                    gpu_type_id=candidate.gpu_type_id,
+                    cloud_type=cloud_type,
+                    start_command=self._cfg.start_command,
+                    container_disk_gb=self._cfg.container_disk_gb,
+                )
+                if pod is not None:
+                    pod_id = str(pod.get("id") or "")
+                    self._log(
+                        OrchestrationEvent(
+                            "pod_created_fresh",
+                            self._now(),
+                            {
+                                "pod_id": pod_id,
+                                "gpu_type_id": candidate.gpu_type_id,
+                                "cloud_type": cloud_type,
+                                "price_usd_per_hr": candidate.price_usd_per_hr,
+                            },
+                        )
+                    )
+                    return PodLifecycleResult(
+                        pod_id=pod_id,
+                        classification=POD_CREATED_FRESH,
+                        gpu_selection=GPUSelection(
+                            chosen=candidate,
+                            candidates_considered=selection.candidates_considered,
+                            classification=None,
+                            reason=f"Created with {candidate.gpu_type_id} ({cloud_type} cloud).",
+                        ),
+                        elapsed_s=self._now() - start,
+                        detail={"gpu_type_id": candidate.gpu_type_id, "cloud_type": cloud_type},
+                    )
+                last_detail = detail
+                if not looks_like_capacity_error(detail or ""):
+                    # A non-capacity-shaped failure (auth, malformed request,
+                    # image pull, quota) is fatal -- do not keep guessing
+                    # GPUs or cloud types.
+                    self._log(
+                        OrchestrationEvent(
+                            "pod_create_fatal_error",
+                            self._now(),
+                            {"gpu_type_id": candidate.gpu_type_id, "cloud_type": cloud_type, "detail": detail},
+                        )
+                    )
+                    return PodLifecycleResult(
+                        pod_id=None,
+                        classification=POD_RUNPOD_API_ERROR,
+                        gpu_selection=selection,
+                        elapsed_s=self._now() - start,
+                        detail={"gpu_type_id": candidate.gpu_type_id, "cloud_type": cloud_type, "error": detail},
+                    )
                 self._log(
                     OrchestrationEvent(
-                        "pod_created_fresh",
+                        "pod_create_capacity_unavailable_trying_next",
                         self._now(),
-                        {"pod_id": pod_id, "gpu_type_id": candidate.gpu_type_id, "price_usd_per_hr": candidate.price_usd_per_hr},
+                        {"gpu_type_id": candidate.gpu_type_id, "cloud_type": cloud_type, "detail": detail},
                     )
                 )
-                return PodLifecycleResult(
-                    pod_id=pod_id,
-                    classification=POD_CREATED_FRESH,
-                    gpu_selection=GPUSelection(
-                        chosen=candidate,
-                        candidates_considered=selection.candidates_considered,
-                        classification=None,
-                        reason=f"Created with {candidate.gpu_type_id}.",
-                    ),
-                    elapsed_s=self._now() - start,
-                    detail={"gpu_type_id": candidate.gpu_type_id},
-                )
-            last_detail = detail
-            if not looks_like_capacity_error(detail or ""):
-                # A non-capacity-shaped failure (auth, malformed request,
-                # image pull, quota) is fatal -- do not keep guessing GPUs.
-                self._log(OrchestrationEvent("pod_create_fatal_error", self._now(), {"gpu_type_id": candidate.gpu_type_id, "detail": detail}))
-                return PodLifecycleResult(
-                    pod_id=None,
-                    classification=POD_RUNPOD_API_ERROR,
-                    gpu_selection=selection,
-                    elapsed_s=self._now() - start,
-                    detail={"gpu_type_id": candidate.gpu_type_id, "error": detail},
-                )
-            self._log(OrchestrationEvent("pod_create_capacity_unavailable_trying_next", self._now(), {"gpu_type_id": candidate.gpu_type_id, "detail": detail}))
 
         return PodLifecycleResult(
             pod_id=None,
             classification=POD_CAPACITY_UNAVAILABLE,
             gpu_selection=selection,
             elapsed_s=self._now() - start,
-            detail={"reason": "Every candidate GPU rejected pod creation with a capacity-shaped error.", "last_error": last_detail},
+            detail={
+                "reason": "Every candidate GPU rejected pod creation with a capacity-shaped error, in both COMMUNITY and SECURE cloud.",
+                "last_error": last_detail,
+            },
         )
 
     # -- Reuse / restart / stale recovery -------------------------------

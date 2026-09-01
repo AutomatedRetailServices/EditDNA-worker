@@ -240,24 +240,51 @@ def test_gpu_fallback_chain_reaches_l4_last():
     assert result.gpu_selection.chosen.gpu_type_id == "NVIDIA L4"
 
 
+def test_community_exhausted_falls_back_to_secure_cloud_sweep():
+    # D-042's own first live test shape: every approved GPU rejected under
+    # COMMUNITY, but one succeeds once the SECURE sweep starts.
+    transport = FakePodTransport()
+    transport.get_gpu_types = [TransportResponse(200, [])]
+    transport.post_pods = [
+        TransportResponse(400, {"error": "no instances currently available"}),  # COMMUNITY 4090
+        TransportResponse(400, {"error": "no instances currently available"}),  # COMMUNITY A40
+        TransportResponse(400, {"error": "no instances currently available"}),  # COMMUNITY A6000
+        TransportResponse(400, {"error": "no instances currently available"}),  # COMMUNITY L4
+        TransportResponse(201, {"id": "pod-secure-4090"}),  # SECURE 4090 succeeds
+    ]
+    provider, _clock = _provider(transport, existing_pod_id=None)
+
+    result = provider.ensure_ready()
+
+    assert result.classification == POD_CREATED_FRESH
+    assert result.pod_id == "pod-secure-4090"
+    assert result.gpu_selection.chosen.gpu_type_id == "NVIDIA GeForce RTX 4090"
+    assert result.detail["cloud_type"] == "SECURE"
+    cloud_sequence = [c["cloudType"] for _m, _u, c in transport.calls if _m == "POST" and _u.endswith("/pods")]
+    assert cloud_sequence == ["COMMUNITY", "COMMUNITY", "COMMUNITY", "COMMUNITY", "SECURE"]
+
+
 # ---------------------------------------------------------------------------
 # 9. No compatible GPU available -> CAPACITY_UNAVAILABLE, nothing provisioned
 # ---------------------------------------------------------------------------
 def test_no_compatible_gpu_available_reports_capacity_unavailable():
+    # Must exhaust both the COMMUNITY sweep AND the SECURE sweep (D-042's
+    # first live test hit exactly this shape -- "no instances currently
+    # available" on all 4 approved GPUs under COMMUNITY alone -- before
+    # concluding capacity is genuinely unavailable everywhere.
     transport = FakePodTransport()
     transport.get_gpu_types = [TransportResponse(200, [])]
     transport.post_pods = [
         TransportResponse(400, {"error": "no instances available"}),
-        TransportResponse(400, {"error": "no instances available"}),
-        TransportResponse(400, {"error": "no instances available"}),
-        TransportResponse(400, {"error": "no instances available"}),
-    ]
+    ] * (2 * len(APPROVED_POD_GPU_TYPE_IDS))
     provider, _clock = _provider(transport, existing_pod_id=None)
 
     result = provider.ensure_ready()
 
     assert result.classification == POD_CAPACITY_UNAVAILABLE
     assert result.pod_id is None
+    attempted_clouds = {c["cloudType"] for _m, _u, c in transport.calls if _m == "POST" and _u.endswith("/pods")}
+    assert attempted_clouds == {"COMMUNITY", "SECURE"}
 
 
 # ---------------------------------------------------------------------------
@@ -366,7 +393,7 @@ def test_health_check_never_reaches_video00_stage_when_lifecycle_fails():
     calls = []
     transport = FakePodTransport()
     transport.get_gpu_types = [TransportResponse(200, [])]
-    transport.post_pods = [TransportResponse(400, {"error": "no instances available"})] * 4
+    transport.post_pods = [TransportResponse(400, {"error": "no instances available"})] * (2 * len(APPROVED_POD_GPU_TYPE_IDS))
     provider, _clock = _provider(
         transport,
         existing_pod_id=None,
@@ -406,10 +433,10 @@ def test_recreation_is_bounded_not_looped():
     transport.get_pod = [TransportResponse(200, {"id": "pod-1", "status": "ERROR", "imageName": "img"})]
     transport.delete_pod = [TransportResponse(204, None)]
     transport.get_gpu_types = [TransportResponse(200, [])]
-    # Even if every single GPU creation attempt fails, ensure_ready must
-    # return (CAPACITY_UNAVAILABLE) rather than looping back to re-inspect
-    # pod-1 again.
-    transport.post_pods = [TransportResponse(400, {"error": "no instances available"})] * len(APPROVED_POD_GPU_TYPE_IDS)
+    # Even if every single GPU creation attempt fails (across both cloud
+    # sweeps), ensure_ready must return (CAPACITY_UNAVAILABLE) rather than
+    # looping back to re-inspect pod-1 again.
+    transport.post_pods = [TransportResponse(400, {"error": "no instances available"})] * (2 * len(APPROVED_POD_GPU_TYPE_IDS))
     provider, _clock = _provider(transport, existing_pod_id="pod-1", image="img")
 
     result = provider.ensure_ready()
