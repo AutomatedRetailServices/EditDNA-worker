@@ -13,8 +13,20 @@ name: CutSell Video00 Pod RAW (QA execution fallback)
 # with a report -- never Video00. The full canonical benchmark
 # (`execution_backend: pod`) stays gated on separate, explicit
 # authorization once this health-only gate has passed and been reviewed.
+#
+# One-time bootstrap note: GitHub's workflow_dispatch REST API 404s for a
+# workflow that has never completed a run via any trigger, on any branch.
+# The narrow, self-scoped `push:` trigger below (limited to this file's own
+# path, on this isolated QA branch only -- never cutsell/mobile-v1-clean)
+# exists solely to register this workflow with Actions on its first push;
+# it cannot fire the Video00 RAW workflow (different file, different
+# branch) and is removed once workflow_dispatch is confirmed working.
 
 on:
+  push:
+    branches: [feature/runpod-pod-on-demand]
+    paths:
+      - .github/workflows/cutsell-video00-pod-raw.yml
   workflow_dispatch:
     inputs:
       existing_pod_id:
