@@ -377,6 +377,20 @@ class PodExecutionConfig:
     health_port: int = 8080
     restart_wait_timeout_s: float = 180.0
     poll_interval_s: float = 5.0
+    # A fresh create pulls the image on a (possibly new) host and starts the
+    # container from scratch, which took materially longer than a restart
+    # of an already-warm Pod in D-042's own first successful live creation
+    # -- give it a longer bound than restart_wait_timeout_s rather than
+    # reusing one value for both.
+    create_wait_timeout_s: float = 300.0
+    # After the Pod itself reports RUNNING, RunPod's proxy still needs the
+    # container's application to actually start listening before routing
+    # to it -- an immediate GET can legitimately 403/connection-refuse for
+    # a healthy Pod that just hasn't finished booting yet (confirmed live:
+    # D-042's first successful Pod creation returned 403 on a GET issued
+    # ~1.5s after RUNNING). Poll the health endpoint itself, bounded.
+    health_poll_timeout_s: float = 180.0
+    health_poll_interval_s: float = 10.0
 
 
 @dataclass(frozen=True)
@@ -486,15 +500,50 @@ class RunPodPodExecutionProvider:
                             },
                         )
                     )
+                    # RunPod accepting the create call is not the same as
+                    # the Pod actually being RUNNING -- wait for it (bounded)
+                    # before handing back a result the caller will treat as
+                    # ready to hit over HTTP. See create_wait_timeout_s.
+                    readiness = wait_for_pod_running(
+                        self._transport,
+                        self._cfg.api_key,
+                        pod_id,
+                        timeout_s=self._cfg.create_wait_timeout_s,
+                        poll_interval_s=self._cfg.poll_interval_s,
+                        now=self._now,
+                        sleep=self._sleep,
+                        log=self._log,
+                    )
+                    gpu_selection = GPUSelection(
+                        chosen=candidate,
+                        candidates_considered=selection.candidates_considered,
+                        classification=None,
+                        reason=f"Created with {candidate.gpu_type_id} ({cloud_type} cloud).",
+                    )
+                    if not readiness.ready:
+                        self._log(
+                            OrchestrationEvent(
+                                "pod_created_but_never_became_running",
+                                self._now(),
+                                {"pod_id": pod_id, "desired_status": readiness.desired_status},
+                            )
+                        )
+                        return PodLifecycleResult(
+                            pod_id=pod_id,
+                            classification=POD_RESTART_UNAVAILABLE,
+                            gpu_selection=gpu_selection,
+                            elapsed_s=self._now() - start,
+                            detail={
+                                "gpu_type_id": candidate.gpu_type_id,
+                                "cloud_type": cloud_type,
+                                "reason": "Pod was created but never reported RUNNING within the bounded wait.",
+                                "desired_status": readiness.desired_status,
+                            },
+                        )
                     return PodLifecycleResult(
                         pod_id=pod_id,
                         classification=POD_CREATED_FRESH,
-                        gpu_selection=GPUSelection(
-                            chosen=candidate,
-                            candidates_considered=selection.candidates_considered,
-                            classification=None,
-                            reason=f"Created with {candidate.gpu_type_id} ({cloud_type} cloud).",
-                        ),
+                        gpu_selection=gpu_selection,
                         elapsed_s=self._now() - start,
                         detail={"gpu_type_id": candidate.gpu_type_id, "cloud_type": cloud_type},
                     )
@@ -637,10 +686,7 @@ class RunPodPodExecutionProvider:
                 detail=lifecycle.detail,
             )
 
-        if self._http_get is not None:
-            status_code, body = self._http_get(self._pod_health_url())
-        else:
-            status_code, body = self._real_http_get(self._pod_health_url())
+        status_code, body = self._poll_health_http()
 
         passed = status_code == 200 and isinstance(body, dict) and body.get("ok") is True and body.get("cuda_available") is True
         classification = POD_HEALTH_PASSED if passed else POD_HEALTH_APP_FAILURE
@@ -658,6 +704,50 @@ class RunPodPodExecutionProvider:
                 "health_payload": body,
             },
         )
+
+    # Status codes/absent bodies that mean "the proxy/container isn't ready
+    # to answer yet" -- worth retrying. Anything else (200 with a real
+    # payload, or an unexpected status the app itself could plausibly
+    # return) is treated as the app's real answer, not a boot delay.
+    _NOT_READY_STATUS_CODES = frozenset({0, 403, 404, 502, 503, 504})
+
+    def _poll_health_http(self) -> tuple[int, Optional[dict]]:
+        """Bounded poll of the Pod's health endpoint. RunPod reporting the
+        Pod RUNNING is not the same as the container's application having
+        started listening yet -- an immediate GET can legitimately 403/
+        connection-refuse on a Pod that is otherwise healthy but still
+        booting (confirmed live during D-042's own first successful Pod
+        creation). Retries only on that "not ready yet" shape; a real,
+        parseable app response -- pass or fail -- is returned immediately,
+        never retried away."""
+        get = self._http_get if self._http_get is not None else self._real_http_get
+        start = self._now()
+        status_code, body = 0, None
+        while True:
+            status_code, body = get(self._pod_health_url())
+            # Our own app (pod_job_server.py) always answers with a dict
+            # carrying an "ok" key, on every path including its own error
+            # responses -- that is the reliable signal the container is up
+            # and answering, distinct from a proxy-level "not ready yet"
+            # response (which won't have this shape). An unrecognized
+            # status/body combination that ISN'T one of the known
+            # not-ready codes is also treated as a real (if unexpected)
+            # answer, never silently retried away.
+            app_answered = isinstance(body, dict) and "ok" in body
+            ready_answer = app_answered or status_code not in self._NOT_READY_STATUS_CODES
+            if ready_answer:
+                return status_code, body
+            elapsed = self._now() - start
+            if elapsed >= self._cfg.health_poll_timeout_s:
+                self._log(
+                    OrchestrationEvent(
+                        "pod_health_poll_timed_out",
+                        self._now(),
+                        {"pod_id": self._pod_id, "last_status_code": status_code, "elapsed_s": elapsed},
+                    )
+                )
+                return status_code, body
+            self._sleep(self._cfg.health_poll_interval_s)
 
     def _pod_health_url(self) -> str:
         # RunPod's documented HTTP proxy convention for an exposed Pod port.

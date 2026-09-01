@@ -154,6 +154,7 @@ def test_restart_unavailable_falls_through_to_recreate():
         still_exited,  # wait_for_pod_running poll @ t=0
         still_exited,  # wait_for_pod_running poll @ t=5
         still_exited,  # wait_for_pod_running poll @ t=10 -> elapsed>=timeout, give up
+        TransportResponse(200, {"id": "pod-2", "status": "RUNNING", "imageName": "img"}),  # fresh pod-2 becomes ready
     ]
     transport.post_start = [TransportResponse(200, {})]
     transport.delete_pod = [TransportResponse(204, None)]
@@ -173,7 +174,10 @@ def test_restart_unavailable_falls_through_to_recreate():
 # ---------------------------------------------------------------------------
 def test_stale_pod_wrong_image_deleted_and_recreated():
     transport = FakePodTransport()
-    transport.get_pod = [TransportResponse(200, {"id": "pod-1", "status": "RUNNING", "imageName": "old-image"})]
+    transport.get_pod = [
+        TransportResponse(200, {"id": "pod-1", "status": "RUNNING", "imageName": "old-image"}),
+        TransportResponse(200, {"id": "pod-2", "status": "RUNNING", "imageName": "new-image"}),
+    ]
     transport.delete_pod = [TransportResponse(204, None)]
     transport.get_gpu_types = [TransportResponse(200, [])]
     transport.post_pods = [TransportResponse(201, {"id": "pod-2"})]
@@ -192,6 +196,7 @@ def test_fresh_pod_created_when_none_exists():
     transport = FakePodTransport()
     transport.get_gpu_types = [TransportResponse(200, [])]
     transport.post_pods = [TransportResponse(201, {"id": "pod-new"})]
+    transport.get_pod = [TransportResponse(200, {"id": "pod-new", "status": "RUNNING"})]
     provider, _clock = _provider(transport, existing_pod_id=None)
 
     result = provider.ensure_ready()
@@ -212,6 +217,7 @@ def test_gpu_fallback_chain_rtx4090_then_a40_then_a6000():
         TransportResponse(400, {"error": "insufficient capacity"}),  # A40
         TransportResponse(201, {"id": "pod-a6000"}),  # RTX A6000
     ]
+    transport.get_pod = [TransportResponse(200, {"id": "pod-a6000", "status": "RUNNING"})]
     provider, _clock = _provider(transport, existing_pod_id=None)
 
     result = provider.ensure_ready()
@@ -232,6 +238,7 @@ def test_gpu_fallback_chain_reaches_l4_last():
         TransportResponse(400, {"error": "not available"}),
         TransportResponse(201, {"id": "pod-l4"}),
     ]
+    transport.get_pod = [TransportResponse(200, {"id": "pod-l4", "status": "RUNNING"})]
     provider, _clock = _provider(transport, existing_pod_id=None)
 
     result = provider.ensure_ready()
@@ -252,6 +259,7 @@ def test_community_exhausted_falls_back_to_secure_cloud_sweep():
         TransportResponse(400, {"error": "no instances currently available"}),  # COMMUNITY L4
         TransportResponse(201, {"id": "pod-secure-4090"}),  # SECURE 4090 succeeds
     ]
+    transport.get_pod = [TransportResponse(200, {"id": "pod-secure-4090", "status": "RUNNING"})]
     provider, _clock = _provider(transport, existing_pod_id=None)
 
     result = provider.ensure_ready()
@@ -301,6 +309,7 @@ def test_gpu_priced_over_cost_ceiling_is_never_attempted():
     transport = FakePodTransport()
     transport.get_gpu_types = [TransportResponse(200, catalog)]
     transport.post_pods = [TransportResponse(201, {"id": "pod-a40"})]
+    transport.get_pod = [TransportResponse(200, {"id": "pod-a40", "status": "RUNNING"})]
     provider, _clock = _provider(transport, existing_pod_id=None, cost_ceiling_usd_per_hr=1.50)
 
     result = provider.ensure_ready()
@@ -338,6 +347,7 @@ def test_blackwell_never_in_approved_pool_or_attempted():
     transport = FakePodTransport()
     transport.get_gpu_types = [TransportResponse(200, catalog)]
     transport.post_pods = [TransportResponse(201, {"id": "pod-4090"})]
+    transport.get_pod = [TransportResponse(200, {"id": "pod-4090", "status": "RUNNING"})]
     provider, _clock = _provider(transport, existing_pod_id=None)
 
     result = provider.ensure_ready()
@@ -387,6 +397,104 @@ def test_health_pass_reported_correctly():
     assert result.detail["health_payload"]["device_name"] == "NVIDIA A40"
 
 
+def test_fresh_create_waits_for_running_before_returning():
+    # D-042's own first successful live Pod creation: the API accepting a
+    # create call is not the same as the Pod being RUNNING. A fresh create
+    # must poll until RUNNING before handing back POD_CREATED_FRESH.
+    transport = FakePodTransport()
+    transport.get_gpu_types = [TransportResponse(200, [])]
+    transport.post_pods = [TransportResponse(201, {"id": "pod-new"})]
+    transport.get_pod = [
+        TransportResponse(200, {"id": "pod-new", "status": "PENDING"}),
+        TransportResponse(200, {"id": "pod-new", "status": "RUNNING"}),
+    ]
+    provider, _clock = _provider(transport, existing_pod_id=None)
+
+    result = provider.ensure_ready()
+
+    assert result.classification == POD_CREATED_FRESH
+    assert result.pod_id == "pod-new"
+    get_pod_calls = [c for c in transport.calls if c[0] == "GET" and "/pods/" in c[1]]
+    assert len(get_pod_calls) == 2
+
+
+def test_fresh_create_that_never_becomes_running_is_reported_not_silently_passed():
+    transport = FakePodTransport()
+    transport.get_gpu_types = [TransportResponse(200, [])]
+    transport.post_pods = [TransportResponse(201, {"id": "pod-new"})]
+    still_pending = TransportResponse(200, {"id": "pod-new", "status": "PENDING"})
+    transport.get_pod = [still_pending, still_pending, still_pending]
+    provider, _clock = _provider(transport, existing_pod_id=None, restart_wait_timeout_s=10.0, poll_interval_s=5.0)
+    provider._cfg.create_wait_timeout_s = 10.0
+
+    result = provider.ensure_ready()
+
+    assert result.classification == POD_RESTART_UNAVAILABLE
+    assert result.pod_id == "pod-new"  # the Pod exists -- caller must still be able to stop it
+
+
+def test_health_poll_retries_through_proxy_403_until_app_answers():
+    # RunPod's proxy 403s a Pod whose container hasn't started listening
+    # yet -- confirmed live. The health poll must retry through this, not
+    # report a false failure on the first attempt.
+    transport = FakePodTransport()
+    transport.get_pod = [TransportResponse(200, {"id": "pod-1", "status": "RUNNING", "imageName": "img"})]
+    calls = []
+
+    def _http_get(url):
+        calls.append(url)
+        if len(calls) < 3:
+            return 403, None
+        return 200, {"ok": True, "cuda_available": True}
+
+    provider, clock = _provider(
+        transport, existing_pod_id="pod-1", image="img", http_get=_http_get,
+    )
+    provider._cfg.health_poll_interval_s = 1.0
+    provider._cfg.health_poll_timeout_s = 60.0
+
+    result = provider.health_check()
+
+    assert result.passed is True
+    assert len(calls) == 3
+
+
+def test_health_poll_gives_up_after_bounded_timeout_still_403():
+    transport = FakePodTransport()
+    transport.get_pod = [TransportResponse(200, {"id": "pod-1", "status": "RUNNING", "imageName": "img"})]
+    provider, clock = _provider(
+        transport, existing_pod_id="pod-1", image="img", http_get=lambda url: (403, None),
+    )
+    provider._cfg.health_poll_interval_s = 5.0
+    provider._cfg.health_poll_timeout_s = 12.0
+
+    result = provider.health_check()
+
+    assert result.passed is False
+    assert result.classification == POD_HEALTH_APP_FAILURE
+    assert result.detail["health_status_code"] == 403
+
+
+def test_health_poll_does_not_retry_a_real_app_failure_response():
+    # A genuine, well-formed app answer (even a failing one) must return
+    # immediately -- never mistaken for "still booting".
+    transport = FakePodTransport()
+    transport.get_pod = [TransportResponse(200, {"id": "pod-1", "status": "RUNNING", "imageName": "img"})]
+    calls = []
+    provider, clock = _provider(
+        transport,
+        existing_pod_id="pod-1",
+        image="img",
+        http_get=lambda url: calls.append(url) or (200, {"ok": True, "cuda_available": False}),
+    )
+
+    result = provider.health_check()
+
+    assert result.passed is False
+    assert result.classification == POD_HEALTH_APP_FAILURE
+    assert len(calls) == 1  # no retry -- this was a real answer
+
+
 def test_health_check_never_reaches_video00_stage_when_lifecycle_fails():
     # ensure_ready() itself failing (no pod_id) must short-circuit
     # health_check before any HTTP GET to the pod is attempted.
@@ -412,7 +520,10 @@ def test_health_check_never_reaches_video00_stage_when_lifecycle_fails():
 # ---------------------------------------------------------------------------
 def test_one_recreation_fallback_succeeds_after_restart_failure():
     transport = FakePodTransport()
-    transport.get_pod = [TransportResponse(200, {"id": "pod-1", "status": "ERROR", "imageName": "img"})]
+    transport.get_pod = [
+        TransportResponse(200, {"id": "pod-1", "status": "ERROR", "imageName": "img"}),
+        TransportResponse(200, {"id": "pod-2", "status": "RUNNING", "imageName": "img"}),
+    ]
     transport.delete_pod = [TransportResponse(204, None)]
     transport.get_gpu_types = [TransportResponse(200, [])]
     transport.post_pods = [TransportResponse(201, {"id": "pod-2"})]
