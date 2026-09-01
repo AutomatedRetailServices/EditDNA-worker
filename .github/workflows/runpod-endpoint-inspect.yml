@@ -1,0 +1,32 @@
+name: RunPod Endpoint Inspect (read-only)
+
+# D-041 follow-up. workflow_dispatch ONLY -- deliberately no `push` trigger,
+# so this can never auto-fire. Read-only: GETs the live RunPod endpoint +
+# template configuration (GPU policy, workersMin/Max, scaler settings) that
+# the repository itself pins nowhere in code. Submits no GPU job, runs no
+# Video00, incurs no GPU cost -- a few HTTP GETs on a free ubuntu-latest
+# runner. See runpod_endpoint_inspect.py and docs/CUTSELL_DECISIONS.md D-041.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  ENDPOINT_ID: xxu7autt8mv2rn
+
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      RUNPOD_API_KEY: ${{ secrets.RUNPOD_API_KEY }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Inspect endpoint + template configuration (read-only, no GPU job)
+        shell: bash
+        run: python3 runpod_endpoint_inspect.py
