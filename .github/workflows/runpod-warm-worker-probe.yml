@@ -1,0 +1,90 @@
+name: RunPod Warm Worker Probe
+
+# Diagnostic-only, RunPod-Support-follow-up. Fires on push to THIS branch
+# only (diag/runpod-fast-isolation, never cutsell/mobile-v1-clean, so it
+# cannot interact with the Video00 RAW workflow's push.paths trigger at
+# all) plus workflow_dispatch for reruns. Creates a brand-new, temporary
+# endpoint with workersMin=1 (forcing a warm worker independent of job
+# arrival) -- never mutates or deletes the existing production endpoint
+# (xxu7autt8mv2rn), never submits Video00. Health is submitted only if a
+# worker is directly confirmed provisioned first. Always tears its own
+# temporary resources down. Reuses the already-built diagnostic image from
+# the prior fast-isolation probe run (no code changed since, so no
+# rebuild needed). See runpod_warm_worker_probe.py and
+# docs/CUTSELL_DECISIONS.md D-041.
+on:
+  push:
+    branches: [diag/runpod-fast-isolation]
+    paths:
+      - runpod_warm_worker_probe.py
+      - .github/workflows/runpod-warm-worker-probe.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  RUNPOD_TEMPLATE_NAME: EditDNA-Worker-2
+  # Already-built, already-verified diagnostic image from the prior fast-
+  # isolation probe run (commit d8a8e2d) -- includes the held health-
+  # diagnostics fix. Nothing has changed in cutsell_worker/ since that
+  # build, so reusing the digest avoids a redundant ~6-minute rebuild.
+  PROBE_IMAGE: ghcr.io/automatedretailservices/cutsell-serverless@sha256:ded644e2edcde33383a345bf320621eebcb5ced0c7d22a9c263be08a1338966f
+
+jobs:
+  warm-worker-probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      RUNPOD_API_KEY: ${{ secrets.RUNPOD_API_KEY }}
+      GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+    steps:
+      - name: Checkout exact test head
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 1
+
+      - name: Load masked storage credentials
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail --silent --show-error --url "https://rest.runpod.io/v1/templates" --header "Authorization: Bearer $RUNPOD_API_KEY" --output /tmp/templates.json
+          TEMPLATE=$(jq -c --arg name "$RUNPOD_TEMPLATE_NAME" '[.[] | select(.name == $name)][0]' /tmp/templates.json)
+          test "$TEMPLATE" != "null"
+          for key in AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_REGION S3_BUCKET; do
+            value=$(printf '%s' "$TEMPLATE" | jq -r --arg key "$key" '.env[$key] // empty')
+            test -n "$value" || { echo "$key missing"; exit 6; }
+            echo "::add-mask::$value"
+            printf '%s=%s\n' "$key" "$value" >> "$GITHUB_ENV"
+          done
+
+      - name: Best-effort account-level concurrency check (read-only, never blocks the probe)
+        shell: bash
+        run: |
+          set +e
+          echo "--- GET /v1/user (account info, if this account/API key can read it) ---"
+          code=$(curl --silent --show-error --write-out '%{http_code}' \
+            --url "https://rest.runpod.io/v1/user" \
+            --header "Authorization: Bearer $RUNPOD_API_KEY" \
+            --output /tmp/account.json)
+          echo "http_status=$code"
+          if [ "$code" = "200" ]; then
+            jq 'del(.email, .id, .apiKeys)' /tmp/account.json 2>/dev/null || cat /tmp/account.json
+          else
+            echo "Account-info endpoint not available/accessible with this key -- concurrency limit source (the '0/15 workers deployed' dashboard figure) could not be confirmed via API. Reporting as unknown rather than assumed."
+          fi
+          exit 0
+
+      - name: Run warm-worker probe (workersMin=1, health only if worker confirmed, never Video00)
+        shell: bash
+        run: python3 runpod_warm_worker_probe.py | tee /tmp/probe-output.txt
+
+      - name: Upload probe evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: runpod-warm-worker-probe-evidence
+          path: /tmp/probe-output.txt
+          retention-days: 14
+          if-no-files-found: warn
