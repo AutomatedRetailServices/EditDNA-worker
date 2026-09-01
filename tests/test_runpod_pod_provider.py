@@ -778,6 +778,56 @@ def test_create_pod_ports_list_passthrough_and_no_start_command_omits_field():
     assert "dockerStartCmd" not in body
 
 
+def test_create_pod_with_template_id_sends_minimal_payload_only():
+    # D-042 follow-up: creating a Pod FROM the CutSell-Pod-QA template
+    # (rather than an inline ad-hoc config) must send only the
+    # Pod-instance-specific fields -- image/ports/env/dockerStartCmd/disk
+    # all come from the template itself and must never be duplicated or
+    # guessed here.
+    transport = FakePodTransport()
+    transport.post_pods = [TransportResponse(201, {"id": "pod-1"})]
+    create_pod(
+        transport,
+        "fake-key",
+        name="n",
+        image="img-ignored-in-template-mode",
+        gpu_type_id="NVIDIA A40",
+        start_command="python3 -m cutsell_worker.pod_job_server",
+        env={"IGNORED": "1"},
+        ports=["22/tcp"],
+        template_id="5moabglc4m",
+    )
+    _method, _url, body = transport.calls[0]
+    assert body == {
+        "name": "n",
+        "templateId": "5moabglc4m",
+        "gpuTypeIds": ["NVIDIA A40"],
+        "gpuCount": 1,
+        "cloudType": "COMMUNITY",
+    }
+    for field in ("imageName", "ports", "env", "dockerStartCmd", "containerDiskInGb"):
+        assert field not in body
+
+
+def test_create_pod_without_template_id_is_unaffected_inline_mode():
+    # Regression lock: passing template_id=None (the default) must produce
+    # exactly the same inline payload shape as before this parameter
+    # existed -- no behavior change for the existing inline-config path.
+    transport = FakePodTransport()
+    transport.post_pods = [TransportResponse(201, {"id": "pod-1"})]
+    create_pod(
+        transport,
+        "fake-key",
+        name="n",
+        image="img",
+        gpu_type_id="NVIDIA A40",
+        start_command="python3 -m cutsell_worker.pod_job_server",
+    )
+    _method, _url, body = transport.calls[0]
+    assert body["imageName"] == "img"
+    assert "templateId" not in body
+
+
 # ---------------------------------------------------------------------------
 # 20. A non-capacity-shaped creation error (e.g. auth) is fatal and does not
 #     keep guessing other GPUs

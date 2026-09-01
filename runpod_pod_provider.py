@@ -301,6 +301,7 @@ def create_pod(
     container_disk_gb: int = 40,
     env: Optional[dict] = None,
     ports: str | list[str] = "8080/http",
+    template_id: Optional[str] = None,
 ) -> tuple[Optional[dict], Optional[str]]:
     """POST /v1/pods. Returns (pod_dict, None) on success or (None,
     error_detail) on any non-2xx response -- the caller decides whether that
@@ -311,22 +312,43 @@ def create_pod(
     during D-042's first live health-only test: `got string, want array`
     for both fields) -- `ports` is normalized to a list here, and
     `start_command` (a plain shell-style string for caller convenience) is
-    tokenized via `shlex.split` into the argv-array RunPod expects."""
+    tokenized via `shlex.split` into the argv-array RunPod expects.
+
+    When `template_id` is given (D-042 follow-up: creating a Pod FROM the
+    CutSell-Pod-QA template rather than an inline ad-hoc config), the
+    payload is minimal -- `templateId` plus only the Pod-instance-specific
+    fields (name, GPU, cloud, disk) -- and image/ports/dockerStartCmd/env
+    are deliberately omitted so they come from the template itself,
+    never duplicated/guessed here. `image`/`start_command`/`ports`/`env`
+    are ignored in that mode (the template already carries them)."""
     assert cloud_type in POD_CLOUD_TYPES, f"invalid cloud_type {cloud_type!r}, must be one of {POD_CLOUD_TYPES}"
     headers = {"Authorization": f"Bearer {api_key}"}
-    ports_list = [ports] if isinstance(ports, str) else list(ports)
-    payload: dict = {
-        "name": name,
-        "imageName": image,
-        "gpuTypeIds": [gpu_type_id],
-        "gpuCount": 1,
-        "containerDiskInGb": container_disk_gb,
-        "cloudType": cloud_type,
-        "ports": ports_list,
-        "env": env or {},
-    }
-    if start_command:
-        payload["dockerStartCmd"] = shlex.split(start_command)
+    if template_id:
+        # containerDiskInGb deliberately omitted -- inherit the template's
+        # own value (CutSell-Pod-QA's is 80GB, preserved from EditDNA-
+        # Worker-2) rather than silently overriding it with this
+        # function's inline-mode default (40GB).
+        payload = {
+            "name": name,
+            "templateId": template_id,
+            "gpuTypeIds": [gpu_type_id],
+            "gpuCount": 1,
+            "cloudType": cloud_type,
+        }
+    else:
+        ports_list = [ports] if isinstance(ports, str) else list(ports)
+        payload = {
+            "name": name,
+            "imageName": image,
+            "gpuTypeIds": [gpu_type_id],
+            "gpuCount": 1,
+            "containerDiskInGb": container_disk_gb,
+            "cloudType": cloud_type,
+            "ports": ports_list,
+            "env": env or {},
+        }
+        if start_command:
+            payload["dockerStartCmd"] = shlex.split(start_command)
     resp = transport.request("POST", f"{RUNPOD_REST_BASE}/pods", headers=headers, json_body=payload)
     if resp.status_code in (200, 201):
         return resp.json_body or {}, None
@@ -419,6 +441,14 @@ class PodExecutionConfig:
     pod_name: str = "cutsell-qa-pod"
     start_command: Optional[str] = None
     container_disk_gb: int = 40
+    # D-042 follow-up: when set, Pods are created FROM this RunPod template
+    # (e.g. CutSell-Pod-QA) instead of an inline ad-hoc config -- `image`/
+    # `start_command`/`container_disk_gb` are then ignored for creation
+    # (the template supplies image/ports/dockerStartCmd/env/disk/volume);
+    # only the Pod-instance fields (name, GPU, cloud) are still sent. GPU
+    # search/cloud sweep/cost ceiling still apply exactly as without a
+    # template.
+    template_id: Optional[str] = None
     cost_ceiling_usd_per_hr: float = DEFAULT_COST_CEILING_USD_PER_HR
     approved_gpu_type_ids: tuple[str, ...] = APPROVED_POD_GPU_TYPE_IDS
     health_port: int = 8080
@@ -532,6 +562,7 @@ class RunPodPodExecutionProvider:
                     cloud_type=cloud_type,
                     start_command=self._cfg.start_command,
                     container_disk_gb=self._cfg.container_disk_gb,
+                    template_id=self._cfg.template_id,
                 )
                 if pod is not None:
                     pod_id = str(pod.get("id") or "")

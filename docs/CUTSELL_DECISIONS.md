@@ -2137,6 +2137,138 @@ one more live test with a longer health-poll bound in case it is genuinely a slo
 pull; or pause Pod work pending Support's response on the parallel Serverless issue) --
 not resolved by further unsupervised live attempts.
 
+### D-042 follow-up — CutSell-Pod-QA template cloned from EditDNA-Worker-2 (Steps 1-6)
+
+**Status: CANONICAL (template created + validated; first live Pod test from it not yet
+run -- see Step 7 / task #92)**
+
+Per the separate "create a CutSell QA template from known-working EditDNA-Worker-2"
+directive, rather than keep hand-building ad-hoc inline Pod configs, `CutSell-Pod-QA`
+(RunPod template id `5moabglc4m`) was created as an evidence-grounded clone of the
+already-proven `EditDNA-Worker-2` template (id `07g9dovc17`) -- **the base template was
+read live and never mutated** (`runpod_pod_template.py`'s `find_template_by_name`/
+`create_pod_template` only ever POST to the generic `/v1/templates` create endpoint,
+confirmed by `test_create_pod_template_never_calls_base_mutation_endpoint`). Both the
+live base fetch (run `33563258690`, `template_action=fetch_base`) and the clone creation
+(run `33564506657`, `template_action=create_qa_template`, HTTP 201) are real, GitHub
+Actions-verifiable evidence -- not reconstructed from memory.
+
+**Step 3 -- environment/startup parity table** (env values never shown, per the standing
+redaction policy -- only names, and only whether each is present/required):
+
+| SETTING | EditDNA-Worker-2 (base) | CutSell-Pod-QA (new) | STATUS | WHY CHANGED |
+|---|---|---|---|---|
+| id | `07g9dovc17` | `5moabglc4m` | CHANGED | new template gets its own RunPod-assigned id |
+| name | `EditDNA-Worker-2` | `CutSell-Pod-QA` | CHANGED | directive requirement |
+| imageName | `madiator2011/better-pytorch:cuda12.4-torch2.6.0` | `ghcr.io/automatedretailservices/cutsell-serverless@sha256:2240ec43fc4e1f7203658842a66ec00e5069666b8a668e57d870230fff842433` | CHANGED | Step 5: current canonical CutSell image, immutable digest of the exact commit built; base image carried no CutSell code at all |
+| dockerStartCmd | none (relies on the base image's own default entrypoint) | `["python3","-m","cutsell_worker.pod_job_server"]` | ADDED | Step 4 (startup parity): confirmed live there was no historical start command to preserve or chain after -- this is a clean addition, not a replacement of anything |
+| ports | none configured on base | `["8080/http"]` | ADDED | `pod_job_server`'s `GET /health` / `POST /run` HTTP surface (Step 6 requirement) |
+| category | `NVIDIA` | `NVIDIA` | PRESERVED | no proven need to change |
+| containerDiskInGb | `80` | `80` | PRESERVED | Step 2: "preserve every known-working Pod-level config item unless proven need to change" |
+| volumeInGb | `60` | `60` | PRESERVED | same |
+| volumeMountPath | `/workspace` | `/workspace` | PRESERVED | same |
+| containerRegistryAuthId | `""` (none) | `""` (none) | PRESERVED | GHCR image is public on both; no registry auth configured either template |
+| isServerless | `false` (Pod template) | `false` | PRESERVED | both are Pod templates, not Serverless endpoints |
+| isPublic | `false` | `false` | PRESERVED | QA-only, not published |
+| startSsh | `true` | `true` | PRESERVED (not by choice) | confirmed live: `POST /v1/templates` rejects `startSsh`/`startJupyter` as input fields ("Extra input keys..."); whatever the new template gets is RunPod's own creation default, not something this session's code can set either way |
+| startJupyter | `true` | `true` | PRESERVED (not by choice) | same as above |
+| env -- 48 base vars | present, real values | present, values carried over unchanged | PRESERVED | Step 2: "prefer exact inheritance/parity over manually inventing configuration" |
+| env -- 6 `CUTSELL_*` additions | absent | added (see table below) | ADDED | current CutSell Video00 harness config, mirrored from the existing Serverless RAW workflow's own env block, for full-benchmark parity once Video00 is authorized on Pod |
+| readme | `""` | `""` | PRESERVED | neither template sets one |
+
+**Env var table** (evidence: live redacted fetch, runs `33563258690`/`33564506657`, cross-
+referenced against every `cutsell_worker/*.py` module via `grep` -- never guessed):
+
+*Required for the full Video00 benchmark path (`_focused`/`_locked_selection` in
+`serverless_handler.py`), present on both templates, NOT required for `health`* (`_health()`
+only imports `torch` and reads no env var at all -- confirmed by reading its body):
+
+| NAME | present old? | present new? | req. startup? | req. health? | req. full Video00? |
+|---|---|---|---|---|---|
+| `S3_BUCKET` | yes | yes | no | no | yes -- artifact upload, `S3_BUCKET is required` in 8 modules |
+| `AWS_REGION` | yes | yes | no | no | yes -- S3 client region (`serverless_handler._upload_artifact`) |
+| `AWS_ACCESS_KEY_ID` | yes | yes | no | no | yes -- boto3 S3 credentials (`config.py` presence check) |
+| `AWS_SECRET_ACCESS_KEY` | yes | yes | no | no | yes -- boto3 S3 credentials (`config.py` presence check) |
+| `GEMINI_API_KEY` | yes | yes | no | no | yes, only when `CUTSELL_HYBRID_LLM_ENABLED=1` (`brain_runtime.py`) |
+| `FFMPEG_BIN` | yes | yes | no | no | yes -- audio boundary completion during render (`audio_boundary_completion.py`) |
+
+*Present on both, referenced somewhere in `cutsell_worker/`, but NOT by `health` or by
+either Video00 op (`_focused`/`_locked_selection`) -- other, unrelated code paths (API-
+server-side persistence, or a presence-only check with no call site)*:
+
+| NAME | present old? | present new? | req. startup? | req. health? | req. full Video00? |
+|---|---|---|---|---|---|
+| `REDIS_URL` | yes | yes | no | no | no -- gates project/draft/auth/notifications/batch/render-history/account-lifecycle persistence modules, not the GPU render path |
+| `OPENAI_API_KEY` | yes | yes | no | no | no -- `config.py` presence-check only, no call site found |
+
+*Present on both, zero references anywhere in current `cutsell_worker/*.py`* (preserved
+from the base template for parity per Step 2, not required for startup, health, or
+Video00 under the current codebase -- 40 vars):
+
+`ASR_DEVICE`, `ASR_ENABLED`, `BAD_TAKES_ENABLED`, `BENCHMARK_INTERNAL_API_KEY`,
+`BOUNDARY_REFINER_ENABLED`, `BOUNDARY_REFINER_HEAD_STEP_SEC`,
+`BOUNDARY_REFINER_MIN_DURATION_SEC`, `BOUNDARY_REFINER_TAIL_STEP_SEC`,
+`COMPOSER_MAX_PER_SLOT`, `COMPOSER_MIN_SEMANTIC`, `EDITDNA_CTA_MIN_SCORE`,
+`EDITDNA_HOOK_MIN_SCORE`, `EDITDNA_LLM_MODEL`, `EDITDNA_MIN_CLIP_SCORE`,
+`EDITDNA_USE_LLM`, `FFPROBE_BIN`, `HEAD_TRIM_SEC`, `PRESIGN_EXPIRES`, `PYTHONPATH`,
+`S3_ACL`, `S3_PREFIX`, `TAIL_TRIM_SEC`, `TAKEJUDGE_FRAMES_PER_CLIP`,
+`TAKEJUDGE_MAX_CLIPS`, `TAKEJUDGE_MIN_SCORE`, `TAKE_JUDGE_ENABLED`,
+`TAKE_JUDGE_FRAMES`, `TAKE_JUDGE_MAX_GROUPS`, `TAKE_JUDGE_MAX_TAKES`,
+`TAKE_JUDGE_MODEL`, `VISION_ENABLED`, `VISION_INTERVAL_SEC`, `VISION_MAX_SAMPLES`,
+`VISUAL_BAD_THRESHOLD`, `WHISPER_DEVICE`, `WHISPER_MODEL`, `W_FACE`, `W_SEMANTIC`,
+`W_VISION`, `W_VISUAL`. (Likely historical EditDNA-Worker-2 config for features not
+present, renamed, or not yet wired in the current CutSell codebase -- not deleted from
+the clone, per "prefer exact inheritance over manually inventing configuration.")
+
+*Present ONLY on `CutSell-Pod-QA` (new additions, absent from the base template)* --
+mirrors the existing Serverless RAW workflow's own env block (`cutsell-video00-raw-v5-
+auto-microtrim.yml`) so a future Pod-backed Video00 run is configured identically to
+Serverless, not required for `health`:
+
+| NAME | present old? | present new? | req. startup? | req. health? | req. full Video00? |
+|---|---|---|---|---|---|
+| `CUTSELL_BRAIN_BACKEND` | no | yes | no | no | yes -- selects `runpod_local` brain backend |
+| `CUTSELL_EDITORIAL_MODE` | no | yes | no | no | yes -- selects `clean_cut` |
+| `CUTSELL_ASR_MODEL` | no | yes | no | no | yes -- ASR model size (`medium`) |
+| `CUTSELL_HYBRID_LLM_ENABLED` | no | yes | no | no | yes -- gates the Gemini-backed hybrid path |
+| `CUTSELL_HYBRID_PROVIDER` | no | yes | no | no | yes -- selects `google` |
+| `CUTSELL_UNIFIED_SELECTION_REASONER` | no | yes | no | no | yes -- matches Serverless's current flag (note: dormant in the active Clean Cut Core V1 path per D-019/D-020; carried for harness parity, not reactivating it) |
+
+**Step 6 -- validation before Pod creation (all confirmed against the actual created
+template, run `33564506657`, before any Pod is created)**:
+- required env names: all 48 base + 6 `CUTSELL_*` present (54 total) -- confirmed in the
+  created template's own echoed `env` dict.
+- correct image: `ghcr.io/automatedretailservices/cutsell-serverless@sha256:2240ec43...`
+  (immutable digest of the commit that created the template, per Step 5).
+- correct startup/bootstrap: `dockerStartCmd` == `["python3","-m","cutsell_worker.pod_job_server"]`,
+  confirmed in the created template's own record.
+- correct ports: `["8080/http"]`, confirmed in the created template's own record.
+- correct disk/volume settings: `containerDiskInGb=80`, `volumeInGb=60`,
+  `volumeMountPath=/workspace` -- all inherited unchanged from the base template.
+- correct registry/auth configuration: `containerRegistryAuthId=""` on both (GHCR image
+  is public); no auth needed.
+- no Blackwell-specific assumptions: the template itself carries no GPU pin at all (GPU
+  selection happens at Pod-creation time via `create_pod(..., template_id=...)`'s
+  `gpuTypeIds`, which still goes through the existing D-042 approved pool / Blackwell
+  exclusion / cost ceiling -- unchanged by this work).
+- no missing historical Pod settings: every base field not explicitly listed as CHANGED/
+  ADDED above is preserved verbatim (see parity table).
+- tests: 19 tests in `tests/test_runpod_pod_template.py` (payload construction, env
+  redaction/merge, base-never-mutated, `startSsh`/`startJupyter` regression), 5 template-
+  related tests in `tests/test_runpod_pod_health_gate.py`, plus 2 new tests in `tests/
+  test_runpod_pod_provider.py` locking `create_pod(..., template_id=...)`'s minimal
+  payload shape (sends only `name`/`templateId`/`gpuTypeIds`/`gpuCount`/`cloudType`;
+  never duplicates `imageName`/`ports`/`env`/`dockerStartCmd`/`containerDiskInGb`, which
+  the template itself supplies) and that omitting `template_id` leaves the existing
+  inline-config path completely unaffected. Full targeted suite (`tests/
+  test_runpod_pod_provider.py` -- 40 tests, `tests/test_runpod_pod_template.py` -- 19,
+  `tests/test_runpod_pod_health_gate.py` -- 10, `tests/test_runpod_orchestration.py`) all
+  green; `compileall` clean.
+
+**Not yet done**: Step 7 -- the first live Pod created FROM `CutSell-Pod-QA` (rather than
+an inline ad-hoc config matching it), health-only, then guaranteed STOP. Gated on
+explicit authorization per the standing directive ("Do NOT create another Pod yet").
+
 ## Change rule
 
 When a new decision changes product behavior, update this file in the same development cycle. Do not silently redefine CutSell through code alone.
