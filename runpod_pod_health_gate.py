@@ -136,10 +136,22 @@ def main() -> int:
         )
 
     api_key = os.environ["RUNPOD_API_KEY"]
-    image = os.environ["POD_IMAGE"]
     existing_pod_id = os.environ.get("EXISTING_POD_ID") or None
     cost_ceiling = float(os.environ.get("QA_POD_COST_CEILING_USD_PER_HR", str(DEFAULT_COST_CEILING_USD_PER_HR)))
-    start_command = os.environ.get("POD_START_COMMAND") or "python3 -m cutsell_worker.pod_job_server"
+
+    # D-042 Step 7: when POD_TEMPLATE_ID is set, the Pod is created FROM
+    # that RunPod template (e.g. CutSell-Pod-QA) -- image/ports/env/
+    # dockerStartCmd/disk all come from the template itself and are never
+    # sent by create_pod() in this mode (see its docstring). POD_IMAGE is
+    # then purely informational/logging -- this path deliberately does not
+    # require a freshly-built image just to run a template-based test.
+    template_id = os.environ.get("POD_TEMPLATE_ID") or None
+    if template_id:
+        image = os.environ.get("POD_IMAGE") or "<inherited from template>"
+        start_command = os.environ.get("POD_START_COMMAND") or None
+    else:
+        image = os.environ["POD_IMAGE"]
+        start_command = os.environ.get("POD_START_COMMAND") or "python3 -m cutsell_worker.pod_job_server"
 
     config = PodExecutionConfig(
         api_key=api_key,
@@ -147,6 +159,7 @@ def main() -> int:
         pod_name=os.environ.get("POD_NAME", "cutsell-qa-pod"),
         start_command=start_command,
         cost_ceiling_usd_per_hr=cost_ceiling,
+        template_id=template_id,
     )
     provider = RunPodPodExecutionProvider(
         UrllibTransport(),
@@ -155,7 +168,7 @@ def main() -> int:
         log=_default_log,
     )
 
-    summary: dict = {"execution_provider": "RUNPOD_POD"}
+    summary: dict = {"execution_provider": "RUNPOD_POD", "template_id": template_id}
     exit_code = 1
     try:
         result = provider.health_check()

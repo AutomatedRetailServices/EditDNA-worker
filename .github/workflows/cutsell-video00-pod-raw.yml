@@ -32,6 +32,16 @@ on:
           search the approved GPU pool and create a new Pod.
         required: false
         default: ""
+      pod_template_id:
+        description: >-
+          D-042 Step 7: when set, the Pod is created FROM this RunPod
+          template (e.g. CutSell-Pod-QA's id) via create_pod(template_id=...)
+          instead of the old inline ad-hoc config -- image/ports/env/
+          dockerStartCmd/disk all come from the template itself. Leave
+          blank to use the original inline-config path (requires a built
+          POD_IMAGE, per the steps below).
+        required: false
+        default: ""
       qa_pod_cost_ceiling_usd_per_hr:
         description: "QA Pod hourly cost ceiling in USD. Never provisions above this."
         required: false
@@ -109,6 +119,7 @@ env:
   IMAGE_REPO: ghcr.io/automatedretailservices/cutsell-serverless
   QA_POD_COST_CEILING_USD_PER_HR: ${{ github.event.inputs.qa_pod_cost_ceiling_usd_per_hr }}
   EXISTING_POD_ID: ${{ github.event.inputs.existing_pod_id }}
+  POD_TEMPLATE_ID: ${{ github.event.inputs.pod_template_id }}
   DIAGNOSE_POD_LOGS_ID: ${{ github.event.inputs.diagnose_pod_id }}
   TEMPLATE_ACTION: ${{ github.event.inputs.template_action }}
   BASE_TEMPLATE_NAME: ${{ github.event.inputs.base_template_name }}
@@ -140,17 +151,23 @@ jobs:
       - name: Login GHCR
         if: >-
           env.DIAGNOSE_POD_LOGS_ID == '' && env.TEMPLATE_ACTION != 'fetch_base' &&
-          (env.TEMPLATE_ACTION != 'create_qa_template' || env.QA_TEMPLATE_IMAGE_OVERRIDE == '')
+          (env.TEMPLATE_ACTION != 'create_qa_template' || env.QA_TEMPLATE_IMAGE_OVERRIDE == '') &&
+          env.POD_TEMPLATE_ID == ''
         uses: docker/login-action@v3
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      # Skipped when POD_TEMPLATE_ID is set (D-042 Step 7): the Pod is
+      # created FROM that template, which already carries a pinned,
+      # previously-built image -- no fresh build needed just to run a
+      # template-based health test.
       - name: Build and push canonical CutSell image (same Dockerfile as Serverless)
         if: >-
           env.DIAGNOSE_POD_LOGS_ID == '' && env.TEMPLATE_ACTION != 'fetch_base' &&
-          (env.TEMPLATE_ACTION != 'create_qa_template' || env.QA_TEMPLATE_IMAGE_OVERRIDE == '')
+          (env.TEMPLATE_ACTION != 'create_qa_template' || env.QA_TEMPLATE_IMAGE_OVERRIDE == '') &&
+          env.POD_TEMPLATE_ID == ''
         shell: bash
         run: |
           set -euo pipefail

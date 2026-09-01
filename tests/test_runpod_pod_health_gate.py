@@ -137,6 +137,52 @@ def test_diagnose_pod_id_env_var_skips_lifecycle_entirely(monkeypatch, capsys):
     assert "boom" in out
 
 
+def test_pod_template_id_env_threads_into_config_and_makes_pod_image_optional(_env, monkeypatch):
+    # D-042 Step 7: POD_TEMPLATE_ID must reach PodExecutionConfig.template_id
+    # (so create_pod() takes the minimal template-referencing payload path)
+    # and, unlike the original inline-config path, must NOT require
+    # POD_IMAGE to be set -- the template itself supplies the image.
+    monkeypatch.delenv("POD_IMAGE", raising=False)
+    monkeypatch.setenv("POD_TEMPLATE_ID", "5moabglc4m")
+    captured = {}
+
+    def _init(self, transport, config, *, existing_pod_id=None, log=None):
+        captured["config"] = config
+        self.teardown_called = False
+        self._pod_id = "pod-x"
+        self._raise_in_health_check = False
+        self._passed = True
+        _FakeProvider.instances.append(self)
+
+    _FakeProvider.__init__ = _init
+    exit_code = gate.main()
+
+    assert exit_code == 0
+    assert captured["config"].template_id == "5moabglc4m"
+    summary = json.loads((_env / "pod-health-summary.json").read_text())
+    assert summary["template_id"] == "5moabglc4m"
+
+
+def test_pod_template_id_absent_leaves_original_inline_path_unaffected(_env):
+    # Regression lock: omitting POD_TEMPLATE_ID (the default) must behave
+    # exactly as before this parameter existed -- template_id is None and
+    # POD_IMAGE is still required.
+    captured = {}
+
+    def _init(self, transport, config, *, existing_pod_id=None, log=None):
+        captured["config"] = config
+        self.teardown_called = False
+        self._pod_id = "pod-x"
+        self._raise_in_health_check = False
+        self._passed = True
+        _FakeProvider.instances.append(self)
+
+    _FakeProvider.__init__ = _init
+    gate.main()
+    assert captured["config"].template_id is None
+    assert captured["config"].image == "ghcr.io/example/img@sha256:deadbeef"
+
+
 def test_template_action_fetch_base_never_touches_pod_lifecycle(monkeypatch, capsys):
     monkeypatch.setenv("RUNPOD_API_KEY", "fake-key")
     monkeypatch.setenv("TEMPLATE_ACTION", "fetch_base")
