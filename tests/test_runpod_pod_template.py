@@ -157,6 +157,28 @@ def test_build_payload_never_mutates_base_dict():
     assert BASE_TEMPLATE["env"] == original_env
 
 
+def test_build_payload_preserves_registry_auth_and_ssh_jupyter_flags_from_base():
+    overrides = PodTemplateOverrides(name="CutSell-Pod-QA", image="ghcr.io/x@sha256:new")
+    payload = build_pod_template_payload(BASE_TEMPLATE, overrides)
+    assert payload["containerRegistryAuthId"] == ""
+    assert payload["startSsh"] is True
+    assert payload["startJupyter"] is False
+
+
+def test_build_payload_sets_start_command_when_base_has_none():
+    # EditDNA-Worker-2's actual live shape: no dockerStartCmd at all --
+    # startup parity means we must explicitly set our own, not silently
+    # omit it (which would leave the Pod running no application at all).
+    base = {k: v for k, v in BASE_TEMPLATE.items() if k != "dockerStartCmd"}
+    overrides = PodTemplateOverrides(
+        name="CutSell-Pod-QA",
+        image="ghcr.io/x@sha256:new",
+        start_command=["python3", "-m", "cutsell_worker.pod_job_server"],
+    )
+    payload = build_pod_template_payload(base, overrides)
+    assert payload["dockerStartCmd"] == ["python3", "-m", "cutsell_worker.pod_job_server"]
+
+
 def test_build_payload_container_disk_override_wins_over_base():
     overrides = PodTemplateOverrides(name="CutSell-Pod-QA", image="ghcr.io/x@sha256:new", container_disk_gb=40)
     payload = build_pod_template_payload(BASE_TEMPLATE, overrides)

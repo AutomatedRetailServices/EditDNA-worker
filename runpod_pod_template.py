@@ -106,6 +106,16 @@ def build_pod_template_payload(base: dict, overrides: PodTemplateOverrides) -> d
         "volumeMountPath": base.get("volumeMountPath"),
         "ports": _normalize_ports(base.get("ports"), overrides.required_ports),
         "env": {**(base.get("env") or {}), **overrides.env_overrides},
+        # Registry auth and the SSH/Jupyter sidecar flags are RunPod's own
+        # per-Pod infrastructure, independent of dockerStartCmd -- preserved
+        # verbatim from the base template unless there's a proven reason to
+        # change them (none here: registry auth is orthogonal to the image
+        # swap, and startSsh/startJupyter keep the same debuggability the
+        # base template already had, which does not conflict with also
+        # running our own dockerStartCmd).
+        "containerRegistryAuthId": base.get("containerRegistryAuthId", ""),
+        "startSsh": base.get("startSsh", True),
+        "startJupyter": base.get("startJupyter", False),
     }
     if overrides.start_command is not None:
         payload["dockerStartCmd"] = overrides.start_command
