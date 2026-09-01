@@ -115,3 +115,23 @@ def test_existing_pod_id_env_var_is_passed_through(_env, monkeypatch):
     _FakeProvider.__init__ = _init
     gate.main()
     assert captured["existing_pod_id"] == "pod-reuse-me"
+
+
+def test_diagnose_pod_id_env_var_skips_lifecycle_entirely(monkeypatch, capsys):
+    # Zero-cost diagnostic mode must never construct a
+    # RunPodPodExecutionProvider (no create/start) and must never require
+    # POD_IMAGE to be set -- it only reads an existing Pod's state + logs.
+    monkeypatch.setenv("RUNPOD_API_KEY", "fake-key")
+    monkeypatch.setenv("DIAGNOSE_POD_LOGS_ID", "pod-already-stopped")
+    monkeypatch.setattr(gate, "get_pod", lambda transport, api_key, pod_id: {"id": pod_id, "status": "EXITED"})
+    monkeypatch.setattr(
+        gate, "fetch_pod_logs", lambda transport, api_key, pod_id, log=None: ("https://x/logs", 200, {"lines": ["boom"]})
+    )
+
+    exit_code = gate.main()
+
+    assert exit_code == 0
+    assert _FakeProvider.instances == []  # lifecycle never touched
+    out = capsys.readouterr().out
+    assert "pod-already-stopped" in out
+    assert "boom" in out

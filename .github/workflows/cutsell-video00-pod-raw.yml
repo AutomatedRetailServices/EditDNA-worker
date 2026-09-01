@@ -40,6 +40,14 @@ on:
         description: "QA Pod hourly cost ceiling in USD. Never provisions above this."
         required: false
         default: "1.50"
+      diagnose_pod_id:
+        description: >-
+          Optional, read-only diagnostic mode: fetch state + best-effort
+          container logs for this EXISTING (already stopped) Pod id and
+          exit -- never creates/starts a Pod, never builds an image, zero
+          GPU cost. Leave blank for a normal provision/health/stop run.
+        required: false
+        default: ""
 
 concurrency:
   # Same officially-supported mechanism the Serverless RAW workflow already
@@ -58,6 +66,7 @@ env:
   IMAGE_REPO: ghcr.io/automatedretailservices/cutsell-serverless
   QA_POD_COST_CEILING_USD_PER_HR: ${{ github.event.inputs.qa_pod_cost_ceiling_usd_per_hr }}
   EXISTING_POD_ID: ${{ github.event.inputs.existing_pod_id }}
+  DIAGNOSE_POD_LOGS_ID: ${{ github.event.inputs.diagnose_pod_id }}
 
 jobs:
   pod-health-gate:
@@ -73,6 +82,7 @@ jobs:
           fetch-depth: 1
 
       - name: Login GHCR
+        if: env.DIAGNOSE_POD_LOGS_ID == ''
         uses: docker/login-action@v3
         with:
           registry: ghcr.io
@@ -80,6 +90,7 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Build and push canonical CutSell image (same Dockerfile as Serverless)
+        if: env.DIAGNOSE_POD_LOGS_ID == ''
         shell: bash
         run: |
           set -euo pipefail

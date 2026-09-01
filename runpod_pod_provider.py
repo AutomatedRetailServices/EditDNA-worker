@@ -213,6 +213,31 @@ def rank_gpu_candidates(
     )
 
 
+def fetch_pod_logs(transport: Transport, api_key: str, pod_id: str, *, log: LogFn = _default_log) -> tuple[str, int, object]:
+    """Best-effort, read-only container-log fetch for diagnosing a Pod that
+    was reachable at the API level but never answered its health endpoint
+    (D-042: distinguishing "still pulling the image" from "dockerStartCmd
+    never took effect" from "container crashed at startup" without
+    provisioning another paid Pod). RunPod's log-serving surface has moved
+    across API versions and isn't guaranteed reachable from every account/
+    plan -- this tries a small set of plausible endpoints and returns
+    whichever first responds with something other than 404, never raising.
+    Returns (url_tried_that_answered_or_last_url, status_code, body)."""
+    headers = {"Authorization": f"Bearer {api_key}"}
+    candidate_urls = (
+        f"{RUNPOD_REST_BASE}/pods/{pod_id}/logs",
+        f"https://api.runpod.io/v2/pods/{pod_id}/logs",
+    )
+    last_url, last_status, last_body = candidate_urls[0], 0, None
+    for url in candidate_urls:
+        resp = transport.request("GET", url, headers=headers)
+        last_url, last_status, last_body = url, resp.status_code, resp.json_body
+        log(OrchestrationEvent("pod_logs_fetch_attempt", time.time(), {"url": url, "status_code": resp.status_code}))
+        if resp.status_code != 404:
+            return url, resp.status_code, resp.json_body
+    return last_url, last_status, last_body
+
+
 # ---------------------------------------------------------------------------
 # Pod REST primitives
 # ---------------------------------------------------------------------------

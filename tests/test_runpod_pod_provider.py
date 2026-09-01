@@ -24,6 +24,7 @@ from runpod_pod_provider import (
     RunPodPodExecutionProvider,
     create_pod,
     fetch_pod_gpu_catalog,
+    fetch_pod_logs,
     rank_gpu_candidates,
 )
 
@@ -45,11 +46,14 @@ class FakePodTransport:
         self.post_stop: list[TransportResponse] = []
         self.delete_pod: list[TransportResponse] = []
         self.get_gpu_types: list[TransportResponse] = []
+        self.get_logs: list[TransportResponse] = []
 
     def request(self, method, url, *, headers, json_body=None):
         self.calls.append((method, url, json_body))
         if method == "GET" and ("/gpuTypes" in url or "/gpu-types" in url):
             return self._pop(self.get_gpu_types, f"GET gpuTypes ({url})")
+        if method == "GET" and url.endswith("/logs"):
+            return self._pop(self.get_logs, f"GET logs ({url})")
         if method == "GET" and "/pods/" in url:
             return self._pop(self.get_pod, f"GET pod ({url})")
         if method == "POST" and url.endswith("/pods"):
@@ -690,6 +694,23 @@ def test_rank_gpu_candidates_skips_explicitly_unavailable_catalog_entries():
     }
     selection = rank_gpu_candidates(catalog, cost_ceiling_usd_per_hr=1.50)
     assert selection.chosen.gpu_type_id == "NVIDIA A40"
+
+
+def test_fetch_pod_logs_returns_first_non_404_response():
+    transport = FakePodTransport()
+    transport.get_logs = [TransportResponse(404, None), TransportResponse(200, {"lines": ["hello"]})]
+    url, status, body = fetch_pod_logs(transport, "fake-key", "pod-1", log=_noop_log)
+    assert status == 200
+    assert body == {"lines": ["hello"]}
+    assert url.endswith("/logs")
+
+
+def test_fetch_pod_logs_returns_last_result_when_all_candidates_404():
+    transport = FakePodTransport()
+    transport.get_logs = [TransportResponse(404, None), TransportResponse(404, None)]
+    _url, status, body = fetch_pod_logs(transport, "fake-key", "pod-1", log=_noop_log)
+    assert status == 404
+    assert body is None
 
 
 def test_create_pod_returns_error_detail_on_non_2xx():

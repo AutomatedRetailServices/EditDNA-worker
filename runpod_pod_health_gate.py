@@ -21,10 +21,43 @@ import os
 import sys
 
 from runpod_orchestration import UrllibTransport, _default_log
-from runpod_pod_provider import DEFAULT_COST_CEILING_USD_PER_HR, PodExecutionConfig, RunPodPodExecutionProvider
+from runpod_pod_provider import (
+    DEFAULT_COST_CEILING_USD_PER_HR,
+    PodExecutionConfig,
+    RunPodPodExecutionProvider,
+    fetch_pod_logs,
+    get_pod,
+)
+
+
+def _diagnose_pod_logs(api_key: str, pod_id: str) -> int:
+    """Zero-cost, read-only diagnostic path: fetch state + best-effort
+    container logs for an ALREADY-EXISTING Pod (typically one a prior run
+    created and stopped) -- never creates or starts anything. Used to
+    root-cause a Pod that was reachable at the API level but never
+    answered its health endpoint, without provisioning another paid Pod
+    just to keep guessing."""
+    transport = UrllibTransport()
+    print(f"--- diagnosing existing Pod {pod_id} (read-only, no create/start) ---")
+    try:
+        pod = get_pod(transport, api_key, pod_id)
+    except RuntimeError as exc:
+        print(f"GET pod failed: {exc}")
+        pod = None
+    print("--- pod state ---")
+    print(json.dumps(pod, indent=2, sort_keys=True, default=str))
+
+    url, status_code, body = fetch_pod_logs(transport, api_key, pod_id, log=_default_log)
+    print(f"--- logs fetch: {url} -> http {status_code} ---")
+    print(json.dumps(body, indent=2, sort_keys=True, default=str) if body is not None else "(no body)")
+    return 0
 
 
 def main() -> int:
+    diagnose_pod_id = os.environ.get("DIAGNOSE_POD_LOGS_ID") or None
+    if diagnose_pod_id:
+        return _diagnose_pod_logs(os.environ["RUNPOD_API_KEY"], diagnose_pod_id)
+
     api_key = os.environ["RUNPOD_API_KEY"]
     image = os.environ["POD_IMAGE"]
     existing_pod_id = os.environ.get("EXISTING_POD_ID") or None
