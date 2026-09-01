@@ -2269,6 +2269,129 @@ template, run `33564506657`, before any Pod is created)**:
 an inline ad-hoc config matching it), health-only, then guaranteed STOP. Gated on
 explicit authorization per the standing directive ("Do NOT create another Pod yet").
 
+### D-042 Step 7 -- first live test from CutSell-Pod-QA (2026-09-01, authorized): health FAILED, STOP confirmed
+
+**Status: CANONICAL (health-only test run to completion; Video00 remains gated on
+separate authorization, not granted and not run)**
+
+Authorized, ran on `feature/runpod-pod-on-demand` via `create_pod(template_id=
+"5moabglc4m")` (the `POD_TEMPLATE_ID` workflow input added this cycle, see below).
+
+**Result: health FAILED -- `POD_HEALTH_APP_FAILURE`, identical pattern to the earlier
+inline-config live tests.** Pod `l368986gtg5ijn` (RTX 4090, COMMUNITY cloud, created via
+the template, `templateId` field independently confirmed as `5moabglc4m` on the live Pod
+record) reached `RUNNING` almost instantly (`elapsed_s ~1.3e-7`) but its health endpoint
+403'd for the entire 180s poll window, never once answering -- the same failure mode as
+D-042's very first live Pod tests on the hand-built inline config. **This directly answers
+the question Directive B was testing: the known-working EditDNA-Worker-2-derived template
+does NOT by itself fix the Pod startup/readiness problem.** Whatever prevents
+`pod_job_server.py` from answering `/health` is not a template-configuration difference
+(image, ports, dockerStartCmd, env now all inherited from a template cloned from a
+proven-working base) -- it points at something else in the RunPod Pod product itself
+(see the still-open `machine: {}` question from the earlier checkpoint) or at the
+container's actual startup on this specific host/image, neither of which template parity
+can fix. **Per the standing "do not blindly retry" instruction, no further live Pod test
+was run after this result.**
+
+**Guaranteed STOP -- confirmed, twice over, independently**: the code's own `finally`
+block called `teardown()` (`pod_stopped`, `final_status: EXITED`) immediately after the
+180s poll timed out, and the workflow's independent force-stop safety net ran immediately
+after as a no-op backup. A separate, later, read-only `diagnose_pod_id` check against
+`l368986gtg5ijn` independently re-confirmed via RunPod's own API: `lastStatusChange:
+"Exited by user: ... 23:22:51 UTC"` -- the exact same timestamp as the code's own
+`pod_stopped` event. No paid GPU was left running.
+
+**A genuinely useful secondary finding, not asked for but worth recording**: the
+*previous* live Pod (`z7sgsafyvlto5p`, the one from the earlier checkpoint) was found
+already `EXITED` by RunPod itself when this run inspected it -- despite no explicit STOP
+call from this session's code having reached it (the session's own attempt to do so was
+interrupted before it ran; see the incident below). This is the first direct evidence
+that RunPod's Community Cloud can apparently reclaim/terminate a Pod on its own when its
+health endpoint never responds, independent of any client-side stop call -- consistent
+with, though not proof of, the standing suspicion (parallel to D-041's own open Serverless
+support ticket) that this account's Pod compute may not always be real, delivered
+capacity. Not investigated further this cycle (would require RunPod support access this
+session doesn't have); noted for the existing support thread.
+
+**Full evidence, as required**:
+
+| Field | Value |
+|---|---|
+| Template used | `CutSell-Pod-QA` (`5moabglc4m`), confirmed via live Pod's own `templateId` field |
+| Pod ID | `l368986gtg5ijn` |
+| GPU | NVIDIA GeForce RTX 4090 |
+| Cloud type | COMMUNITY |
+| Hourly rate | not exposed this run (GPU catalog fetch itself failed -- `pod_gpu_catalog_unavailable` -- same as several earlier live runs; ranked-pool fallback still worked correctly) |
+| Image digest | `ghcr.io/automatedretailservices/cutsell-serverless@sha256:2240ec43fc4e1f7203658842a66ec00e5069666b8a668e57d870230fff842433` (confirmed on the live Pod record) |
+| Pod creation timestamp | 2026-09-01 23:19:49 UTC |
+| RunPod RUNNING timestamp | 2026-09-01 23:19:50 UTC (`elapsed_s` ~0) |
+| First successful HTTP/app response | never -- health endpoint answered 403 for the full 180.4s poll |
+| Total startup-to-health-verdict latency | 180.4s (poll timeout), health never passed |
+| Health response | none (403, no parseable app body) |
+| Device name / compute capability / torch version / compiled CUDA / CUDA available | not obtainable -- the app never answered `/health` to report them |
+| ffmpeg/ffprobe status | not exposed by `_health()` even when it does answer (not part of its payload) |
+| Application/job-server readiness | not confirmed -- no evidence `pod_job_server.py` ever started listening |
+| STOP request | issued by `teardown()` in `finally` immediately on poll timeout, confirmed `pod_stopped`/`EXITED` via API; independent workflow force-stop step ran as a no-op backup |
+| Final Pod state | `EXITED` (`lastStatusChange: "Exited by user"`), independently re-confirmed by a later read-only check |
+| Approx. GPU-active time / cost | ~3 minutes on this Pod (23:19:49-23:22:51); the earlier `z7sgsafyvlto5p` was active at most ~7.5 minutes before being found already exited. At the previously-observed $0.34/hr RTX-4090-COMMUNITY rate, total cost across both this cycle's Pods is on the order of a few cents |
+
+**Not run**: Video00. Per the explicit instruction, health FAILED means STOP + diagnose +
+report, not retry -- done exactly that way.
+
+### Security incident during Step 7 (2026-09-01) -- live secrets leaked, fixed same cycle
+
+While chasing this result, a genuine operational mistake compounded into a real security
+exposure, both now fixed and both recorded here honestly rather than glossed over:
+
+1. **Premature cancellation from a sandbox timing artifact.** This session's own elapsed-
+   time tracking (summing nominal background sleep durations) proved unreliable in this
+   environment -- background-task completion notifications were arriving far later than
+   the commands' real durations, making a live run that was actually healthy and only
+   ~3 minutes old look, by this session's own miscount, like it had been stuck for 30+
+   minutes. Acting on that false read, this session cancelled a live, in-bounds workflow
+   run 5 seconds before its own 180s health-poll timeout would have concluded it
+   naturally. GitHub Actions' cancellation hard-killed the Python process without
+   letting its `finally` block run, so the created Pod (`z7sgsafyvlto5p`) was left
+   without an explicit STOP from this session's code (RunPod itself was later found to
+   have already exited it independently -- see above -- so no orphaned billing resulted,
+   but that was not something this session could have known at the time). **Fixed
+   procedurally, not by touching Pod-lifecycle code**: all further waits in this session
+   used `date -u`/a `Monitor`-based real-time-verified loop instead of counting nominal
+   sleep durations, and no further premature cancellation occurred.
+2. **A real, if lower-severity, cleanup misstep while responding to (1).** A follow-up
+   dispatch to check/reuse the stale Pod omitted pinning `POD_TEMPLATE_ID`/the image,
+   which would have triggered a needless rebuild; caught and cancelled before it reached
+   the Pod-lifecycle code (confirmed via job-step timestamps), no Pod was touched by it.
+3. **A genuine secret leak.** The zero-cost, read-only `diagnose_pod_id` path
+   (`_diagnose_pod_logs` in `runpod_pod_health_gate.py`) printed RunPod's raw
+   `GET /v1/pods/{id}` response without redaction. Unlike a template GET (already
+   redacted via `redact_template_env` since the template-management work earlier this
+   cycle), a **Pod** GET embeds the Pod's real, live env values -- this put real
+   credentials (`AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY`, `GEMINI_API_KEY`,
+   `OPENAI_API_KEY`, `BENCHMARK_INTERNAL_API_KEY`, `REDIS_URL`, an SSH public key) into a
+   GitHub Actions log in cleartext, and into this session's own conversation transcript.
+   **Fixed same cycle** (commit on `feature/runpod-pod-on-demand`): `_diagnose_pod_logs`
+   now passes both the fetched Pod state and any dict-shaped logs-fetch body through the
+   same `redact_template_env` helper before ever printing them; 1 new regression test
+   locks that real-shaped values never reach stdout while names and every other field
+   still do. A follow-up commit fixing this was itself initially blocked by GitHub's own
+   push protection for a different reason (the regression test's first draft used the
+   actual leaked key values as "realistic" fixture data -- itself a mistake, replaced
+   with clearly-fake placeholder strings before anything left this repository) and,
+   separately, an unrelated authoring mistake (a literal backtick-wrapped `env` in a
+   commit message run through a double-quoted shell string triggered real shell command
+   substitution, embedding this sandbox's own environment variables into the commit
+   object) -- caught before push via direct inspection of the git object, corrected by
+   rewriting the commit message from a file, and pushed clean. Neither mistake reached
+   the remote.
+
+**Action required from the user, not resolvable by this session**: the exposed
+credentials (`AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY`, `GEMINI_API_KEY`,
+`OPENAI_API_KEY`, `BENCHMARK_INTERNAL_API_KEY`, `REDIS_URL`) should be treated as
+compromised and rotated. This session cannot rotate them (no credential-issuer access);
+flagged here and to the user directly per the standing security rule that this runs in
+parallel with editorial QA, not deferred to launch.
+
 ## Change rule
 
 When a new decision changes product behavior, update this file in the same development cycle. Do not silently redefine CutSell through code alone.
