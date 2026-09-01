@@ -181,6 +181,27 @@ deployed, "High Supply" GPU groups, and the fresh-endpoint result before
 this one), we consider this conclusive on our end: **no configuration
 change available to us explains the lack of worker assignment.**
 
+## Warm-worker retest (2026-09-01, ~2.5 hours later — confirms persistent, not transient)
+
+To rule out a momentary capacity blip, we repeated the exact same
+`workersMin=1` test above, unchanged, on another brand-new temporary
+endpoint roughly 2.5 hours later:
+
+- Temp endpoint: `vfc9ga1y7olpsh`, temp template: `nnh70hipp6` (both
+  deleted after the test — HTTP 204)
+- `workersMin: 1` / `workersMax: 1` **confirmed via read-after-write GET**
+  before the health job was submitted
+- Health job `c9921268-503a-4b9a-a176-48c406f42cc2-u2` submitted `17:42:39Z`
+- **Every status poll over the full 300.56s window again shows `IN_QUEUE`,
+  `worker_id: null` — no transition to `IN_PROGRESS`, identical to the
+  first warm-worker test**
+
+**Two independent warm-worker tests, on two independent fresh endpoints,
+hours apart, produced the identical result.** This rules out a momentary
+capacity fluctuation — we are treating this as a **persistent** RunPod
+Serverless worker-provisioning/account-placement issue, not a transient
+one.
+
 We are holding off on further probing (no additional endpoints, no
 Video00 runs, no configuration changes to the production endpoint, no
 further health retries) until Support responds or gives a specific
