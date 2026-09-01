@@ -713,6 +713,28 @@ def test_fetch_pod_logs_returns_last_result_when_all_candidates_404():
     assert body is None
 
 
+def test_fetch_pod_logs_treats_route_not_found_400_like_404():
+    # Confirmed live: RunPod REST v1 answers an unknown route with HTTP 400
+    # (not 404), body naming the path and "does not exist in the
+    # specification" -- functionally identical to 404 for this purpose.
+    transport = FakePodTransport()
+    route_not_found = [{"error": "At #/paths/get for GET .../logs, ... does not exist in the specification"}]
+    transport.get_logs = [TransportResponse(400, route_not_found), TransportResponse(200, {"lines": ["hi"]})]
+    url, status, body = fetch_pod_logs(transport, "fake-key", "pod-1", log=_noop_log)
+    assert status == 200
+    assert body == {"lines": ["hi"]}
+
+
+def test_fetch_pod_logs_does_not_swallow_a_real_400():
+    # A genuine 400 (bad request, auth, validation) must be returned as-is,
+    # never silently treated as "try the next candidate".
+    transport = FakePodTransport()
+    transport.get_logs = [TransportResponse(400, {"error": "unauthorized"})]
+    url, status, body = fetch_pod_logs(transport, "fake-key", "pod-1", log=_noop_log)
+    assert status == 400
+    assert body == {"error": "unauthorized"}
+
+
 def test_create_pod_returns_error_detail_on_non_2xx():
     transport = FakePodTransport()
     transport.post_pods = [TransportResponse(401, {"error": "unauthorized"})]

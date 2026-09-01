@@ -221,7 +221,11 @@ def fetch_pod_logs(transport: Transport, api_key: str, pod_id: str, *, log: LogF
     provisioning another paid Pod). RunPod's log-serving surface has moved
     across API versions and isn't guaranteed reachable from every account/
     plan -- this tries a small set of plausible endpoints and returns
-    whichever first responds with something other than 404, never raising.
+    whichever first responds with something that isn't a
+    "this route doesn't exist" shape, never raising. A 400 whose body says
+    the path/method isn't in the API spec (confirmed live: REST v1 has no
+    `/pods/{id}/logs` route at all) means exactly the same thing as a 404
+    here -- try the next candidate, don't stop on it.
     Returns (url_tried_that_answered_or_last_url, status_code, body)."""
     headers = {"Authorization": f"Bearer {api_key}"}
     candidate_urls = (
@@ -233,9 +237,27 @@ def fetch_pod_logs(transport: Transport, api_key: str, pod_id: str, *, log: LogF
         resp = transport.request("GET", url, headers=headers)
         last_url, last_status, last_body = url, resp.status_code, resp.json_body
         log(OrchestrationEvent("pod_logs_fetch_attempt", time.time(), {"url": url, "status_code": resp.status_code}))
-        if resp.status_code != 404:
-            return url, resp.status_code, resp.json_body
+        if resp.status_code == 404:
+            continue
+        if resp.status_code == 400 and _looks_like_route_not_found(resp.json_body):
+            continue
+        return url, resp.status_code, resp.json_body
     return last_url, last_status, last_body
+
+
+def _looks_like_route_not_found(body: object) -> bool:
+    """Best-effort: RunPod's own 400 shape for "this path/method isn't in
+    the spec" carries an `error` string naming the path and 'does not
+    exist in the specification' -- distinct from a real 400 (bad request
+    body, auth, validation) that we should NOT silently swallow."""
+    try:
+        entries = body if isinstance(body, list) else [body]
+        return any(
+            isinstance(entry, dict) and "does not exist in the specification" in str(entry.get("error") or "")
+            for entry in entries
+        )
+    except Exception:  # noqa: BLE001 -- best-effort classification only
+        return False
 
 
 # ---------------------------------------------------------------------------
