@@ -48,6 +48,32 @@ under some conditions).
   init), included here in case it's relevant context for the same
   underlying placement/capacity investigation.
 
+## Fresh-endpoint isolation test (2026-09-01, new)
+
+To rule out the existing endpoint being stale/unhealthy, we created a
+brand-new, temporary, zero-history endpoint using the exact same compatible
+GPU allowlist and current production image, submitted exactly one health
+job, and tore the endpoint down immediately after:
+
+- Temp endpoint: `fuwdxy36rvtt2e` (deleted after the test — HTTP 204)
+- Temp template: `koechktwze` (deleted after the test — HTTP 204)
+- `gpuTypeIds`: `NVIDIA GeForce RTX 4090`, `NVIDIA L4`, `NVIDIA A40`,
+  `NVIDIA RTX A6000` (identical to the production endpoint's own allowlist)
+- Endpoint created 06:29:33Z, reported ready 06:29:34Z (essentially instant)
+- Health job `d3c789f1-1a4a-4f99-a23e-e89169f7b456-u2` submitted 06:29:34Z
+- Status stayed `IN_QUEUE` for the full 300.6s test window (~65 consecutive
+  polls at ~5.1s intervals) — **no worker was ever assigned** (`workerId`
+  null on every poll)
+- We cancelled the job and deleted both temp resources at 06:34:35–37Z
+
+**This brand-new endpoint — with no history of its own — hit the identical
+failure as `xxu7autt8mv2rn`: a job accepted into queue that no worker ever
+picked up, across a 4-class allowlist that should have ample capacity.**
+This is evidence against the existing endpoint being uniquely stale/
+unhealthy, and points toward an account-level or provider-side capacity/
+placement issue affecting these GPU classes for this account right now,
+independent of which specific endpoint is used.
+
 ## What we need from RunPod
 
 1. Confirm whether the Blackwell worker was genuinely dispatched against
@@ -55,3 +81,12 @@ under some conditions).
 2. If so, an explanation of why `gpuTypeIds` did not exclude it.
 3. Any guidance on ensuring `gpuTypeIds` is enforced as a hard filter for
    this endpoint going forward.
+4. Given a brand-new endpoint with the same allowlist also failed to
+   provision a worker within 5 minutes (evidence above), please check
+   current capacity/availability for `RTX 4090` / `L4` / `A40` / `RTX A6000`
+   in whatever region(s) this account can reach, and whether anything
+   account-side (quota, spend-rate limit, placement policy) is preventing
+   worker assignment. (Account balance and spend-rate limit were manually
+   verified as healthy on our side prior to this test: balance $11.28,
+   spend rate $0/hr, spend-rate limit $80/hr — billing is not the leading
+   explanation.)
