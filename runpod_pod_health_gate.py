@@ -28,6 +28,12 @@ from runpod_pod_provider import (
     fetch_pod_logs,
     get_pod,
 )
+from runpod_pod_template import (
+    PodTemplateOverrides,
+    create_pod_template,
+    find_template_by_name,
+    redact_template_env,
+)
 
 
 def _diagnose_pod_logs(api_key: str, pod_id: str) -> int:
@@ -53,10 +59,81 @@ def _diagnose_pod_logs(api_key: str, pod_id: str) -> int:
     return 0
 
 
+def _fetch_base_template(api_key: str, name: str) -> int:
+    """Read-only, zero-cost: fetch the live template config by name and
+    print it with every env VALUE redacted (names preserved). Never
+    creates, never mutates -- pure inspection, per D-042 follow-up step 1
+    ("FETCH THE LIVE EDITDNA-WORKER-2 TEMPLATE")."""
+    transport = UrllibTransport()
+    print(f"--- fetching live template '{name}' (read-only) ---")
+    template = find_template_by_name(transport, api_key, name)
+    if template is None:
+        print(f"No template named '{name}' found in this account's live template catalog.")
+        return 1
+    print("--- template config (env values redacted, names preserved) ---")
+    print(json.dumps(redact_template_env(template), indent=2, sort_keys=True, default=str))
+    return 0
+
+
+def _create_qa_template(api_key: str, base_name: str, qa_name: str, image: str) -> int:
+    """Clone `base_name`'s live config into a new `qa_name` template,
+    overriding only image/start-command/env explicitly requested via
+    QA_TEMPLATE_* env vars -- everything else is preserved verbatim from
+    the base. Never mutates the base template (only ever POSTs to the
+    generic /v1/templates create endpoint). Per D-042 follow-up step 2."""
+    transport = UrllibTransport()
+    base = find_template_by_name(transport, api_key, base_name)
+    if base is None:
+        print(f"Base template '{base_name}' not found -- refusing to guess a configuration. Aborting.")
+        return 1
+
+    start_command_raw = os.environ.get("QA_TEMPLATE_START_COMMAND") or ""
+    start_command = start_command_raw.split() if start_command_raw else None
+    env_overrides_raw = os.environ.get("QA_TEMPLATE_ENV_OVERRIDES_JSON") or "{}"
+    try:
+        env_overrides = json.loads(env_overrides_raw)
+    except ValueError as exc:
+        print(f"QA_TEMPLATE_ENV_OVERRIDES_JSON is not valid JSON: {exc}")
+        return 1
+    if not isinstance(env_overrides, dict):
+        print("QA_TEMPLATE_ENV_OVERRIDES_JSON must be a JSON object.")
+        return 1
+
+    overrides = PodTemplateOverrides(
+        name=qa_name,
+        image=image,
+        start_command=start_command,
+        env_overrides=env_overrides,
+    )
+    print(f"--- creating '{qa_name}' from live base '{base_name}' ({base.get('id')}) ---")
+    print("--- base config used (env values redacted) ---")
+    print(json.dumps(redact_template_env(base), indent=2, sort_keys=True, default=str))
+    template, error = create_pod_template(transport, api_key, base=base, overrides=overrides, log=_default_log)
+    if template is None:
+        print(f"Template creation failed: {error}")
+        return 1
+    print("--- created template (env values redacted) ---")
+    print(json.dumps(redact_template_env(template), indent=2, sort_keys=True, default=str))
+    return 0
+
+
 def main() -> int:
     diagnose_pod_id = os.environ.get("DIAGNOSE_POD_LOGS_ID") or None
     if diagnose_pod_id:
         return _diagnose_pod_logs(os.environ["RUNPOD_API_KEY"], diagnose_pod_id)
+
+    template_action = os.environ.get("TEMPLATE_ACTION") or None
+    if template_action == "fetch_base":
+        return _fetch_base_template(
+            os.environ["RUNPOD_API_KEY"], os.environ.get("BASE_TEMPLATE_NAME", "EditDNA-Worker-2")
+        )
+    if template_action == "create_qa_template":
+        return _create_qa_template(
+            os.environ["RUNPOD_API_KEY"],
+            os.environ.get("BASE_TEMPLATE_NAME", "EditDNA-Worker-2"),
+            os.environ.get("QA_TEMPLATE_NAME", "CutSell-Pod-QA"),
+            os.environ["QA_TEMPLATE_IMAGE"],
+        )
 
     api_key = os.environ["RUNPOD_API_KEY"]
     image = os.environ["POD_IMAGE"]

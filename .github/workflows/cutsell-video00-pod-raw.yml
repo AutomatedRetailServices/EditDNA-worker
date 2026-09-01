@@ -44,6 +44,53 @@ on:
           GPU cost. Leave blank for a normal provision/health/stop run.
         required: false
         default: ""
+      template_action:
+        description: >-
+          Template-management mode (D-042 follow-up: CutSell-Pod-QA
+          cloned from EditDNA-Worker-2). "fetch_base": read-only, zero
+          cost -- print the live base template config (env values
+          redacted). "create_qa_template": clone the live base template
+          into a new one (see qa_template_* inputs below), never mutates
+          the base. Leave blank for a normal Pod provision/health/stop
+          run or a diagnose_pod_id run.
+        required: false
+        type: choice
+        options:
+          - ""
+          - fetch_base
+          - create_qa_template
+        default: ""
+      base_template_name:
+        description: "Live RunPod template to read/clone from."
+        required: false
+        default: "EditDNA-Worker-2"
+      qa_template_name:
+        description: "Name for the new template (create_qa_template mode only)."
+        required: false
+        default: "CutSell-Pod-QA"
+      qa_template_image_override:
+        description: >-
+          Optional (create_qa_template mode only): use this exact
+          image@digest instead of building the current HEAD fresh.
+          Leave blank to build and use the current commit's canonical
+          image (preferred -- guarantees current CutSell code/head).
+        required: false
+        default: ""
+      qa_template_start_command:
+        description: >-
+          Optional (create_qa_template mode only): space-separated
+          override for the new template's dockerStartCmd. Leave blank to
+          preserve the base template's own start command untouched
+          (startup parity -- do not assume replacing it is safe).
+        required: false
+        default: ""
+      qa_template_env_overrides_json:
+        description: >-
+          Optional (create_qa_template mode only): JSON object of env
+          vars to add/override on top of the base template's own env
+          (which is otherwise preserved in full). e.g. {"CUTSELL_BRAIN_BACKEND":"runpod_local"}
+        required: false
+        default: "{}"
 
 concurrency:
   # Same officially-supported mechanism the Serverless RAW workflow already
@@ -63,6 +110,12 @@ env:
   QA_POD_COST_CEILING_USD_PER_HR: ${{ github.event.inputs.qa_pod_cost_ceiling_usd_per_hr }}
   EXISTING_POD_ID: ${{ github.event.inputs.existing_pod_id }}
   DIAGNOSE_POD_LOGS_ID: ${{ github.event.inputs.diagnose_pod_id }}
+  TEMPLATE_ACTION: ${{ github.event.inputs.template_action }}
+  BASE_TEMPLATE_NAME: ${{ github.event.inputs.base_template_name }}
+  QA_TEMPLATE_NAME: ${{ github.event.inputs.qa_template_name }}
+  QA_TEMPLATE_IMAGE_OVERRIDE: ${{ github.event.inputs.qa_template_image_override }}
+  QA_TEMPLATE_START_COMMAND: ${{ github.event.inputs.qa_template_start_command }}
+  QA_TEMPLATE_ENV_OVERRIDES_JSON: ${{ github.event.inputs.qa_template_env_overrides_json }}
 
 jobs:
   pod-health-gate:
@@ -77,8 +130,17 @@ jobs:
           ref: ${{ github.sha }}
           fetch-depth: 1
 
+      # Skipped for: DIAGNOSE_POD_LOGS_ID (pure read, no image needed),
+      # template_action=fetch_base (pure read, no image needed), and
+      # template_action=create_qa_template when an explicit image digest
+      # override was supplied (no need to rebuild). Built otherwise --
+      # including the default create_qa_template path, so the new
+      # template gets an immutable digest of the CURRENT commit's code,
+      # per D-042 follow-up's "current CutSell code/head" requirement.
       - name: Login GHCR
-        if: env.DIAGNOSE_POD_LOGS_ID == ''
+        if: >-
+          env.DIAGNOSE_POD_LOGS_ID == '' && env.TEMPLATE_ACTION != 'fetch_base' &&
+          (env.TEMPLATE_ACTION != 'create_qa_template' || env.QA_TEMPLATE_IMAGE_OVERRIDE == '')
         uses: docker/login-action@v3
         with:
           registry: ghcr.io
@@ -86,7 +148,9 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Build and push canonical CutSell image (same Dockerfile as Serverless)
-        if: env.DIAGNOSE_POD_LOGS_ID == ''
+        if: >-
+          env.DIAGNOSE_POD_LOGS_ID == '' && env.TEMPLATE_ACTION != 'fetch_base' &&
+          (env.TEMPLATE_ACTION != 'create_qa_template' || env.QA_TEMPLATE_IMAGE_OVERRIDE == '')
         shell: bash
         run: |
           set -euo pipefail
@@ -98,7 +162,22 @@ jobs:
           test -n "$digest"
           echo "POD_IMAGE=$IMAGE_REPO@$digest" >> "$GITHUB_ENV"
 
-      - name: Pod provision/reuse + HEALTH ONLY + guaranteed STOP
+      - name: Resolve QA template image (create_qa_template mode only)
+        if: env.TEMPLATE_ACTION == 'create_qa_template'
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -n "${QA_TEMPLATE_IMAGE_OVERRIDE:-}" ]; then
+            echo "QA_TEMPLATE_IMAGE=$QA_TEMPLATE_IMAGE_OVERRIDE" >> "$GITHUB_ENV"
+          else
+            test -n "${POD_IMAGE:-}"
+            echo "QA_TEMPLATE_IMAGE=$POD_IMAGE" >> "$GITHUB_ENV"
+          fi
+
+      # Dispatches internally on DIAGNOSE_POD_LOGS_ID / TEMPLATE_ACTION /
+      # neither (normal Pod provision/reuse + HEALTH ONLY + guaranteed
+      # STOP) -- see runpod_pod_health_gate.py's main().
+      - name: Run health gate / diagnostic / template action
         shell: bash
         run: python3 runpod_pod_health_gate.py
 

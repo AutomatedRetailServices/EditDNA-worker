@@ -135,3 +135,88 @@ def test_diagnose_pod_id_env_var_skips_lifecycle_entirely(monkeypatch, capsys):
     out = capsys.readouterr().out
     assert "pod-already-stopped" in out
     assert "boom" in out
+
+
+def test_template_action_fetch_base_never_touches_pod_lifecycle(monkeypatch, capsys):
+    monkeypatch.setenv("RUNPOD_API_KEY", "fake-key")
+    monkeypatch.setenv("TEMPLATE_ACTION", "fetch_base")
+    monkeypatch.setattr(
+        gate,
+        "find_template_by_name",
+        lambda transport, api_key, name: {"id": "07g9dovc17", "name": name, "env": {"SECRET": "real-value"}},
+    )
+
+    exit_code = gate.main()
+
+    assert exit_code == 0
+    assert _FakeProvider.instances == []
+    out = capsys.readouterr().out
+    assert "07g9dovc17" in out
+    assert "real-value" not in out
+    assert "<redacted>" in out
+
+
+def test_template_action_fetch_base_reports_missing_template(monkeypatch, capsys):
+    monkeypatch.setenv("RUNPOD_API_KEY", "fake-key")
+    monkeypatch.setenv("TEMPLATE_ACTION", "fetch_base")
+    monkeypatch.setattr(gate, "find_template_by_name", lambda transport, api_key, name: None)
+
+    exit_code = gate.main()
+
+    assert exit_code == 1
+    assert _FakeProvider.instances == []
+
+
+def test_template_action_create_qa_template_never_mutates_base(monkeypatch, capsys):
+    monkeypatch.setenv("RUNPOD_API_KEY", "fake-key")
+    monkeypatch.setenv("TEMPLATE_ACTION", "create_qa_template")
+    monkeypatch.setenv("QA_TEMPLATE_IMAGE", "ghcr.io/x@sha256:new")
+    base = {"id": "07g9dovc17", "name": "EditDNA-Worker-2", "env": {"SECRET": "real-value"}}
+    captured = {}
+
+    monkeypatch.setattr(gate, "find_template_by_name", lambda transport, api_key, name: base)
+
+    def _fake_create(transport, api_key, *, base, overrides, log):
+        captured["base"] = base
+        captured["overrides"] = overrides
+        return {"id": "new-tmpl-id", "name": overrides.name, "env": base.get("env", {})}, None
+
+    monkeypatch.setattr(gate, "create_pod_template", _fake_create)
+
+    exit_code = gate.main()
+
+    assert exit_code == 0
+    assert captured["base"] is base  # the live-fetched base, never a guessed/hardcoded one
+    assert captured["overrides"].name == "CutSell-Pod-QA"
+    assert captured["overrides"].image == "ghcr.io/x@sha256:new"
+    out = capsys.readouterr().out
+    assert "real-value" not in out
+    assert _FakeProvider.instances == []
+
+
+def test_template_action_create_qa_template_aborts_when_base_missing(monkeypatch, capsys):
+    monkeypatch.setenv("RUNPOD_API_KEY", "fake-key")
+    monkeypatch.setenv("TEMPLATE_ACTION", "create_qa_template")
+    monkeypatch.setenv("QA_TEMPLATE_IMAGE", "ghcr.io/x@sha256:new")
+    monkeypatch.setattr(gate, "find_template_by_name", lambda transport, api_key, name: None)
+
+    called = {"create": False}
+    monkeypatch.setattr(gate, "create_pod_template", lambda *a, **k: called.update(create=True) or (None, "x"))
+
+    exit_code = gate.main()
+
+    assert exit_code == 1
+    assert called["create"] is False  # never guesses a payload when the base can't be read
+
+
+def test_template_action_create_qa_template_rejects_invalid_env_overrides_json(monkeypatch):
+    monkeypatch.setenv("RUNPOD_API_KEY", "fake-key")
+    monkeypatch.setenv("TEMPLATE_ACTION", "create_qa_template")
+    monkeypatch.setenv("QA_TEMPLATE_IMAGE", "ghcr.io/x@sha256:new")
+    monkeypatch.setenv("QA_TEMPLATE_ENV_OVERRIDES_JSON", "not-json")
+    monkeypatch.setattr(gate, "find_template_by_name", lambda transport, api_key, name: {"id": "x", "env": {}})
+
+    exit_code = gate.main()
+
+    assert exit_code == 1
+    assert _FakeProvider.instances == []
