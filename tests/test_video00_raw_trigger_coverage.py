@@ -147,3 +147,14 @@ def test_trigger_set_excludes_docs_and_tests_only_paths():
     trigger_paths = _workflow_trigger_paths()
     assert not any(p.startswith("docs/") for p in trigger_paths)
     assert not any(p.startswith("tests/") for p in trigger_paths)
+
+
+def test_trigger_set_excludes_ci_orchestration_infra():
+    # D-041: the workflow file itself and runpod_orchestration.py are
+    # infrastructure/orchestration only -- neither can change Video00's
+    # semantic or physical output -- so neither should silently burn a paid
+    # RAW on every CI-orchestration edit. Changes to them go through a
+    # controlled `workflow_dispatch` instead.
+    trigger_paths = _workflow_trigger_paths()
+    assert "runpod_orchestration.py" not in trigger_paths
+    assert not any(p.endswith("cutsell-video00-raw-v5-auto-microtrim.yml") for p in trigger_paths)

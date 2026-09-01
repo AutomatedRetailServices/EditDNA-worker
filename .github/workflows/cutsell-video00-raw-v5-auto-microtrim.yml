@@ -15,7 +15,13 @@ on:
     # Sales/TikTok Shop extension points (CanonicalEditPlan.annotations and
     # neighbors) -- none of those can change what a RAW actually produces.
     paths:
-      - .github/workflows/cutsell-video00-raw-v5-auto-microtrim.yml
+      # D-041: this workflow's own file and runpod_orchestration.py are
+      # deliberately NOT in this list. Both are infrastructure/orchestration
+      # only -- they cannot change Video00's semantic or physical output --
+      # so a change to either goes through a controlled `workflow_dispatch`
+      # instead of silently burning a paid RAW on every CI-orchestration
+      # edit (keeps the trigger narrow, per the D-039 addendum's own goal).
+      # See tests/test_video00_raw_trigger_coverage.py's exclusion test.
       - benchmarks/video00_selection_lock.json
       - benchmarks/validate_video00_selection_lock.py
       - cutsell_worker/__init__.py
@@ -230,48 +236,25 @@ jobs:
           test -n "$TEMPLATE_ID"
           echo "TEMPLATE_ID=$TEMPLATE_ID" >> "$GITHUB_ENV"
 
-      - name: Roll endpoint to unified Selection
+      # D-041: replaces the old "Roll endpoint" + blind-20-minute-wait "CUDA
+      # health" steps. RAW 33453836301 spent its entire 20-minute health
+      # budget waiting on a job that never left IN_QUEUE -- no application
+      # code, including any CutSell editorial code, ever ran. This step
+      # rolls the endpoint, waits for its config to actually reflect that
+      # roll (distinguishing a 409 transition race from a stale config),
+      # then submits the health job and tracks time spent specifically in
+      # IN_QUEUE against a bounded stall threshold instead of one
+      # undifferentiated deadline -- failing fast and classified instead of
+      # waiting out the old blind timeout. One bounded infra-class retry
+      # (teardown + backoff + re-roll) is attempted automatically for a
+      # transient-looking failure; a real application/CUDA failure
+      # (HEALTH_APP_FAILURE) is never retried. See runpod_orchestration.py
+      # and docs/CUTSELL_DECISIONS.md D-041. Fully unit-tested with fakes in
+      # tests/test_runpod_orchestration.py -- no paid GPU required to
+      # validate the state machine itself.
+      - name: Roll endpoint + hardened health gate
         shell: bash
-        run: |
-          set -euo pipefail
-          jq -n --arg template "$TEMPLATE_ID" '{templateId:$template,workersMin:0,workersMax:1,scalerType:"QUEUE_DELAY",scalerValue:2,idleTimeout:5,executionTimeoutMs:1800000}' > /tmp/endpoint-patch.json
-          code=$(curl --silent --show-error --write-out '%{http_code}' \
-            --request PATCH \
-            --url "https://rest.runpod.io/v1/endpoints/$ENDPOINT_ID" \
-            --header "Authorization: Bearer $RUNPOD_API_KEY" \
-            --header 'Content-Type: application/json' \
-            --data @/tmp/endpoint-patch.json \
-            --output /tmp/endpoint.json)
-          test "$code" = "200"
-
-      - name: CUDA health
-        shell: bash
-        run: |
-          set -euo pipefail
-          curl --fail --silent --show-error \
-            --request POST \
-            --url "https://api.runpod.ai/v2/$ENDPOINT_ID/run" \
-            --header "Authorization: Bearer $RUNPOD_API_KEY" \
-            --header 'Content-Type: application/json' \
-            --data '{"input":{"op":"health"}}' \
-            --output /tmp/submit-health.json
-          id=$(jq -r '.id // empty' /tmp/submit-health.json); test -n "$id"
-          echo "HEALTH_JOB_ID=$id" >> "$GITHUB_ENV"
-          deadline=$((SECONDS+1200))
-          while [ "$SECONDS" -lt "$deadline" ]; do
-            curl --fail --silent --show-error \
-              --url "https://api.runpod.ai/v2/$ENDPOINT_ID/status/$id" \
-              --header "Authorization: Bearer $RUNPOD_API_KEY" \
-              --output /tmp/health.json
-            status=$(jq -r '.status // empty' /tmp/health.json)
-            case "$status" in
-              COMPLETED) jq -e '.output.ok == true and .output.cuda_available == true' /tmp/health.json >/dev/null; exit 0 ;;
-              FAILED|TIMED_OUT|CANCELLED) cat /tmp/health.json; exit 1 ;;
-            esac
-            sleep 5
-          done
-          cat /tmp/health.json || true
-          exit 1
+        run: python3 runpod_orchestration.py
 
       - name: Submit original six-minute Video00
         shell: bash

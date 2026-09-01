@@ -1744,6 +1744,125 @@ breakfast." now correctly splits into two claims, which is the fix working as in
 not a regression; a new test pins that exact split. Full `tests/test_cutsell_*.py` CI
 glob green, `compileall` clean.
 
+## D-041 — RunPod health/capacity reliability hardening (infrastructure only)
+
+**Status: CANONICAL**
+
+RAW `33453836301` (the D-040 gate run, commit `19f6612`) failed at the "CUDA health"
+step before any application code -- including the D-040 fix -- ever ran. Diagnosis
+(`mcp__github__get_job_logs` on job `99689435894`): the health job was submitted at
+`00:18:15Z`, accepted by RunPod (`id=f89a0a98-...-u1`), and polled every 5s against one
+undifferentiated 1200s (20-minute) deadline. It never left `IN_QUEUE` -- never
+`COMPLETED`/`FAILED`/`TIMED_OUT`/`CANCELLED` -- for the entire window; at `00:38:19Z` the
+loop simply timed out and printed whatever the last poll happened to show. No worker on
+endpoint `xxu7autt8mv2rn` ever picked the job up. Because the health gate never passed,
+"Submit original six-minute Video00" and "Wait for unified Selection result" were
+correctly SKIPPED. This is not evidence against D-040: nothing downstream of health ever
+ran. It is a distinct RunPod-infra failure shape from the earlier `33414001062` incident
+this session (a fast, explicit `409` on submission) -- this one was accepted into queue
+and then starved, a capacity/provisioning-style stall rather than a rejection.
+
+**Fix (`runpod_orchestration.py`, new, infrastructure/orchestration only -- no
+`cutsell_worker` editorial code touched)**: replaces the workflow's old inline-bash
+"roll endpoint" + one-blind-20-minute-wait "CUDA health" pair with a small, fully
+unit-testable state machine (`Transport` protocol injected for both production
+(`UrllibTransport`, stdlib `urllib.request` only -- no new pip dependency, matching this
+workflow's existing Python steps) and tests (a scripted fake, no network/GPU/credentials
+required)):
+
+- `wait_for_endpoint_ready` -- polls `GET /v1/endpoints/{id}` until it reflects the roll
+  just PATCHed (matching `templateId` + `workersMax`) or a bounded readiness timeout
+  elapses. A `409` on this read (endpoint still mid-transition) is classified
+  `ENDPOINT_TRANSITION_RACE`; a stale config that never converges within the timeout
+  (no `409`, just never matches) is classified `CAPACITY_UNAVAILABLE`. Records
+  `template_id`/`workers_min`/`workers_max`/`gpu_type`/elapsed readiness time.
+- `submit_and_poll_health` -- submits the health job, then tracks time spent
+  specifically in `IN_QUEUE` against a bounded stall threshold (`queue_stall_s`,
+  default 300s) instead of one undifferentiated deadline. Still `IN_QUEUE` at the stall
+  threshold on a first attempt -> `WORKER_PROVISIONING_STALLED` (treated as possibly
+  transient, eligible for one retry); still stuck on a retry attempt ->
+  `CAPACITY_UNAVAILABLE` (persistent, no further retries -- see honesty note below). A
+  genuine terminal RunPod status is never reclassified as a queue problem even if slow
+  to arrive: `COMPLETED` with `output.ok`/`output.cuda_available` not both `true`, or any
+  of `FAILED`/`TIMED_OUT`/`CANCELLED`, is `HEALTH_APP_FAILURE` -- a real application/CUDA
+  problem, not a flake. `HEALTH_PASSED` only on `COMPLETED` with both flags `true`.
+- `run_with_bounded_retry` -- retries only infrastructure-class failures
+  (`ENDPOINT_TRANSITION_RACE`/`CAPACITY_UNAVAILABLE`/`WORKER_PROVISIONING_STALLED`/
+  `RUNPOD_API_ERROR`), exactly once (`max_infra_retries=1`, a hard ceiling -- never an
+  unbounded loop), re-rolling the endpoint and backing off before the retry.
+  `HEALTH_APP_FAILURE` is never retried. `cancel_job_if_active` tears down a stalled
+  job's RunPod-side state (cancels if still `IN_QUEUE`/`IN_PROGRESS`) before that retry.
+- Exit code contract: `main()` returns `0` only when `OrchestrationResult.passed` is
+  `True` (a genuine `HEALTH_PASSED`), `1` otherwise -- unchanged from the old step's
+  contract, so the workflow's existing "Submit original six-minute Video00" step (no
+  `if: always()`) is still automatically skipped by GitHub Actions on any failure
+  classification, exactly as it correctly was for RAW `33453836301`.
+- Observability (structured `[runpod_orchestration] <event> {...}` log lines, printed
+  unconditionally): `endpoint_roll_started_at`, `endpoint_ready`/`endpoint_not_ready`
+  (with elapsed readiness time + classification), `health_submitted`, `health_status`
+  (per-poll, with `job_id`/`status`/elapsed/`worker_id` when RunPod reports one),
+  `health_queue_stalled` (with `time_in_queue_s` + classification),
+  `infra_retry_backoff`, `job_cancelled`. `main()` also writes `HEALTH_JOB_ID` (the last
+  attempt's) and `RUNPOD_INFRA_CLASSIFICATION` to `GITHUB_ENV` for the unchanged teardown
+  step and for any future CI-log grep.
+
+**Honesty note on the `WORKER_PROVISIONING_STALLED` vs. `CAPACITY_UNAVAILABLE` split**:
+RunPod's plain endpoint/job-status APIs do not expose a worker-count or scheduler-queue-
+depth field this session could verify, so the two labels are NOT read off a real RunPod
+signal -- they are a policy distinction keyed on retry-attempt-number only (first stall =
+labeled as possibly-transient and retried once; still stuck on that one retry = labeled
+persistent and given up on). This is stated plainly rather than implying a deeper signal
+that does not exist, per the same "never accept silent provider fallback" / "preserve
+observability" engineering rules that govern the rest of this file.
+
+**Item 4 (GPU/capacity fallback audit) -- explicitly incomplete, and said so rather than
+guessed**: this session has no live RunPod API credentials (`RUNPOD_API_KEY` is a GitHub
+Actions secret, not available to local development), and the repository's own code
+contains no GPU-type pin to read (the endpoint patch payload never sets `gpuIds`; whatever
+GPU pool endpoint `xxu7autt8mv2rn` uses was configured outside this codebase, in RunPod's
+own dashboard). No prior CI run ever printed the endpoint's GPU type either -- until this
+fix, nothing in the pipeline captured it. Rather than fabricate a GPU-class comparison or
+a cost/performance estimate this session cannot verify, this fix adds the *capture*
+(`wait_for_endpoint_ready` now reads back and logs `gpuIds`/`gpuType` when RunPod's
+response includes it) so the next real RAW's CI log answers this question with actual
+data instead of a guess. **No GPU/capacity/cost configuration was changed.** A genuine
+fallback-GPU audit (current GPU vs. compatible alternatives vs. cost/perf/CUDA-stack
+compatibility) is deferred until a run has actually surfaced the current GPU type via
+this new observability, or until someone with live RunPod dashboard/API access supplies
+it directly.
+
+**Explicitly not touched**: `cutsell_worker/` editorial code (grouping, BestTake,
+CompositeResolver, StoryValidator, D-038/D-039/D-040's fixes, physical fragment identity,
+the delivery gate, `PostRenderWatchListenQC`, Boundary repair), the RAW-completion
+event-driven monitoring behavior this session uses to watch a run, Sales Funnel/TikTok
+Shop styling, SWAP, `main`/PR merge state, production/TestFlight. The workflow's
+push-`paths:` filter (D-039/D-039-addendum) is unchanged for every canonical Clean Cut
+V1 file; only the workflow file's own self-reference and (deliberately never added)
+`runpod_orchestration.py` are excluded from it -- see the item below.
+
+**Trigger-path side effect (intentional)**: the workflow file itself was previously in
+its own `push.paths` filter, meaning any edit to this workflow -- including a pure
+CI-orchestration fix like this one -- would have auto-fired a paid RAW on push. Removed:
+neither the workflow file nor `runpod_orchestration.py` can change Video00's semantic or
+physical output, so neither should silently burn a paid RAW on every CI-orchestration
+edit (the same "keep the trigger narrow" goal the D-039 addendum stated for the opposite
+direction -- ensuring editorial files DO trigger). `tests/test_video00_raw_trigger_
+coverage.py::test_trigger_set_excludes_ci_orchestration_infra` pins the exclusion.
+Consequence: this fix's own push does NOT auto-trigger a RAW; the one controlled retry
+against the existing D-040 head is fired deliberately via `workflow_dispatch`.
+
+**Validation**: 18 new unit tests in `tests/test_runpod_orchestration.py` covering all 9
+required scenarios (endpoint ready normally; `409` recovers vs. persists past timeout;
+health accepted then stalls `IN_QUEUE` and fails fast; worker eventually starts and
+health completes; a real terminal app failure is never reclassified as a queue problem;
+capacity stall on a retry attempt; bounded retry succeeds; bounded retry exhausted after
+the ceiling with no third attempt; `HEALTH_APP_FAILURE` never retried; teardown cancels a
+stalled job and a full attempt-flow test proves teardown happens before a successful
+retry; the `passed` contract that gates Video00 submission) -- all against a scripted
+fake `Transport` and a fake clock, no network/GPU/credentials. One new trigger-coverage
+test pins the path-filter exclusion above. Full `tests/test_cutsell_*.py` CI glob plus
+the two new test files green, `compileall` clean.
+
 ## Change rule
 
 When a new decision changes product behavior, update this file in the same development cycle. Do not silently redefine CutSell through code alone.
