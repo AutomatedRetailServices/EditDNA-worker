@@ -1,0 +1,88 @@
+name: RunPod Fast Isolation Health Probe
+
+# Diagnostic-only. Fires on push to THIS branch only (diag/runpod-fast-
+# isolation, never cutsell/mobile-v1-clean, so it cannot interact with the
+# Video00 RAW workflow's own push.paths trigger at all) plus workflow_
+# dispatch for reruns. Creates a brand-new, temporary, health-only RunPod
+# endpoint -- never mutates or deletes the existing production endpoint
+# (xxu7autt8mv2rn), never submits Video00. Always tears its own temporary
+# resources down. See runpod_fast_isolation_probe.py and
+# docs/CUTSELL_DECISIONS.md D-041.
+on:
+  push:
+    branches: [diag/runpod-fast-isolation]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+env:
+  IMAGE_REPO: ghcr.io/automatedretailservices/cutsell-serverless
+  RUNPOD_TEMPLATE_NAME: EditDNA-Worker-2
+
+jobs:
+  fast-isolation-probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      RUNPOD_API_KEY: ${{ secrets.RUNPOD_API_KEY }}
+      GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+    steps:
+      - name: Checkout exact test head
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 1
+
+      - name: Login GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push diagnostic-tagged image (includes enhanced health diagnostics)
+        shell: bash
+        run: |
+          set -euo pipefail
+          image="$IMAGE_REPO:diag-fast-isolation-$GITHUB_SHA"
+          docker build -t "$image" -f Dockerfile.cutsell.serverless .
+          docker run --rm --entrypoint python "$image" - <<'PY'
+          import importlib.util
+          import cutsell_worker.serverless_handler
+          assert importlib.util.find_spec('runpod') is not None
+          print('serverless_imports_ok=true')
+          PY
+          docker push "$image"
+          docker buildx imagetools inspect "$image" > /tmp/image-inspect.txt
+          digest=$(awk '/^Digest:/ {print $2; exit}' /tmp/image-inspect.txt)
+          test -n "$digest"
+          echo "PROBE_IMAGE=$IMAGE_REPO@$digest" >> "$GITHUB_ENV"
+
+      - name: Load masked storage credentials
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail --silent --show-error --url "https://rest.runpod.io/v1/templates" --header "Authorization: Bearer $RUNPOD_API_KEY" --output /tmp/templates.json
+          TEMPLATE=$(jq -c --arg name "$RUNPOD_TEMPLATE_NAME" '[.[] | select(.name == $name)][0]' /tmp/templates.json)
+          test "$TEMPLATE" != "null"
+          for key in AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_REGION S3_BUCKET; do
+            value=$(printf '%s' "$TEMPLATE" | jq -r --arg key "$key" '.env[$key] // empty')
+            test -n "$value" || { echo "$key missing"; exit 6; }
+            echo "::add-mask::$value"
+            printf '%s=%s\n' "$key" "$value" >> "$GITHUB_ENV"
+          done
+
+      - name: Run fast isolation probe (fresh temp endpoint, health only, never Video00)
+        shell: bash
+        run: python3 runpod_fast_isolation_probe.py | tee /tmp/probe-output.txt
+
+      - name: Upload probe evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: runpod-fast-isolation-probe-evidence
+          path: /tmp/probe-output.txt
+          retention-days: 14
+          if-no-files-found: warn
