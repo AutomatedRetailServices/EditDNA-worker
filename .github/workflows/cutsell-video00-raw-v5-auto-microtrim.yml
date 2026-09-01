@@ -1,0 +1,615 @@
+name: CutSell Video00 Unified Selection RAW
+
+on:
+  push:
+    branches: [cutsell/mobile-v1-clean]
+    # D-039: this list must cover every file in the active Clean Cut Core V1
+    # path (docs/CUTSELL_DECISIONS.md D-021's canonical component map, plus
+    # D-024/025/026/027/037/038's additions to it) whose change could
+    # materially alter Video00's semantic or physical output -- so that kind
+    # of change always gets a controlled RAW automatically, without relying
+    # on someone remembering to trigger one by hand. Grouped by canonical
+    # component below for auditability; keep this grouping in sync with
+    # D-021's own table when either changes. Deliberately excludes docs-only
+    # and tests-only files, unrelated infrastructure, and the dormant
+    # Sales/TikTok Shop extension points (CanonicalEditPlan.annotations and
+    # neighbors) -- none of those can change what a RAW actually produces.
+    paths:
+      # D-041: this workflow's own file and runpod_orchestration.py are
+      # deliberately NOT in this list. Both are infrastructure/orchestration
+      # only -- they cannot change Video00's semantic or physical output --
+      # so a change to either goes through a controlled `workflow_dispatch`
+      # instead of silently burning a paid RAW on every CI-orchestration
+      # edit (keeps the trigger narrow, per the D-039 addendum's own goal).
+      # See tests/test_video00_raw_trigger_coverage.py's exclusion test.
+      - benchmarks/video00_selection_lock.json
+      - benchmarks/validate_video00_selection_lock.py
+      - cutsell_worker/__init__.py
+      - cutsell_worker/brain_runtime.py
+      - cutsell_worker/serverless_handler.py
+      - cutsell_worker/universal_clean_cut.py
+      - cutsell_worker/universal_clean_cut_validation.py
+      - cutsell_worker/editorial_guardrails_v2.py
+      # AttemptReconstructor
+      - cutsell_worker/attempt_reconstruction.py
+      # IdeaClusterer (D-020/D-039: lexical tier + bounded semantic-
+      # equivalence tier + priority-ranked candidate pairs)
+      - cutsell_worker/take_grouping_provider.py
+      - cutsell_worker/take_grouping.py
+      - cutsell_worker/semantic_idea_equivalence.py
+      - cutsell_worker/semantic_idea_equivalence_google.py
+      # RetryFamilyResolver (evidence feeding IdeaClusterer's result)
+      - cutsell_worker/final_sibling_grouping.py
+      - cutsell_worker/global_session_sibling_bridge.py
+      - cutsell_worker/session_boundaries.py
+      # DeliveryScorer
+      - cutsell_worker/take_judge.py
+      # BestTakeResolver + its upstream Hybrid-vote input
+      - cutsell_worker/deterministic_best_take_authority.py
+      - cutsell_worker/selection_phase_authority.py
+      - cutsell_worker/selection_conflicted_bridge_guard.py
+      # D-038: per-Idea semantic claim coverage (claim-aware Best-Take
+      # override + the shared marker vocabulary it and StoryValidator draw on)
+      - cutsell_worker/semantic_claims.py
+      - cutsell_worker/claim_coverage_best_take.py
+      - cutsell_worker/semantic_atom_importance.py
+      # Whole-video Unified Selection reasoner (D-021: deprecated from the
+      # active path but still the rollback target -- a change here can
+      # still alter output for clean_cut_core_v1_enabled=False)
+      - cutsell_worker/unified_selection_reasoner.py
+      - cutsell_worker/unified_selection_google.py
+      # CompositeResolver -- one directly-callable component (D-023)
+      # built from the real installers of these 19 modules
+      - cutsell_worker/composite_resolver.py
+      - cutsell_worker/semantic_fragment_guard.py
+      - cutsell_worker/hybrid_story_guard.py
+      - cutsell_worker/hybrid_alternate_integrity.py
+      - cutsell_worker/hybrid_cross_group_retry_integrity.py
+      - cutsell_worker/incomplete_bridge_retry_authority.py
+      - cutsell_worker/hybrid_failed_continuation_integrity.py
+      - cutsell_worker/hybrid_retry_winner_authority.py
+      - cutsell_worker/hybrid_gold_reconciliation.py
+      - cutsell_worker/failed_prefix_completion_rescue.py
+      - cutsell_worker/final_delivery_integrity.py
+      - cutsell_worker/terminal_delivery_reconciliation.py
+      - cutsell_worker/hybrid_failed_soft_restore.py
+      - cutsell_worker/hybrid_unavailable_retry_fallback.py
+      - cutsell_worker/hybrid_complementary_delivery_guard.py
+      - cutsell_worker/hybrid_semantic_complementary_rescue.py
+      - cutsell_worker/hybrid_semantic_composite_bridge.py
+      - cutsell_worker/hybrid_composite_best_take.py
+      - cutsell_worker/hybrid_semantic_conflict_arbitration.py
+      - cutsell_worker/hybrid_session_cleanup.py
+      - cutsell_worker/hybrid_performance_retry_restore_guard.py
+      - cutsell_worker/post_selection_interior_gap_trim.py
+      - cutsell_worker/post_selection_incomplete_bridge_authority.py
+      - cutsell_worker/post_selection_complementary_family_stabilizer.py
+      - cutsell_worker/post_selection_edge_only_boundary.py
+      - cutsell_worker/semantic_best_take_integrity.py
+      # StoryValidator + CanonicalEditPlan + FinalEditReviewer + the bounded
+      # repair loop and general causal/story order validator around them
+      # (D-024/025/026/027/038)
+      - cutsell_worker/final_story_coherence_validation.py
+      - cutsell_worker/canonical_edit_plan.py
+      - cutsell_worker/final_edit_reviewer.py
+      - cutsell_worker/repair_loop.py
+      - cutsell_worker/causal_order_validator.py
+      # SelectionFreeze
+      - cutsell_worker/selection_boundary_contract.py
+      # BoundaryEngine (physical-only, unchanged semantic membership)
+      - cutsell_worker/final_boundary_authority.py
+      - cutsell_worker/human_boundary_polish_v5.py
+      - cutsell_worker/speech_visual_microtrim.py
+      - cutsell_worker/boundary_retry_tail_guard.py
+      - cutsell_worker/speech_safe_dead_air_guard.py
+      - cutsell_worker/terminal_sentence_boundary_guard.py
+      # Renderer + live render QC + physical-repair gate (D-030/D-037)
+      - cutsell_worker/render_plan.py
+      - cutsell_worker/render.py
+      - cutsell_worker/live_render_qc.py
+      - cutsell_worker/post_render_watch_listen_qc.py
+      # Shared identity/data model the physical-fragment-identity work
+      # (D-037) and every component above build on
+      - cutsell_worker/contracts.py
+      - cutsell_worker/source_identity.py
+  workflow_dispatch:
+
+concurrency:
+  group: cutsell-video00-raw-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  packages: write
+
+env:
+  IMAGE_REPO: ghcr.io/automatedretailservices/cutsell-serverless
+  ENDPOINT_ID: xxu7autt8mv2rn
+  SOURCE_KEY: Editdna longform validation/VIDEO-2026-07-30-09-18-03.mp4
+  # QA-only authoritative Human Gold reference. Downloaded into the diagnostic
+  # artifact for Human Watch+Listen comparison; never read by production
+  # Selection/Boundary code (cutsell_worker) and never passed to the RunPod job.
+  HUMAN_GOLD_KEY: Editdna longform validation/5E01F214-A364-4F4B-8F25-D39B1E2B21D2.MP4
+  BENCHMARK_ID: video00-unified-selection-${{ github.run_id }}-${{ github.run_attempt }}
+
+jobs:
+  video00-raw:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    env:
+      RUNPOD_API_KEY: ${{ secrets.RUNPOD_API_KEY }}
+    steps:
+      - name: Checkout exact test head
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 1
+
+      - name: Prepare artifact directory
+        shell: bash
+        run: mkdir -p artifact
+
+      - name: Verify unified Selection path
+        shell: bash
+        run: |
+          set -euo pipefail
+          grep -q 'auto_speech_visual_microtrim' cutsell_worker/serverless_handler.py
+          grep -q 'detect_speech_safe_visual_microtrims' cutsell_worker/serverless_handler.py
+          grep -q 'run_single_universal_clean_cut_validation' cutsell_worker/serverless_handler.py
+          grep -q 'CUTSELL_UNIFIED_SELECTION_REASONER' cutsell_worker/brain_runtime.py
+          grep -q 'GoogleUnifiedSelectionReasoner' cutsell_worker/brain_runtime.py
+          grep -q 'apply_unified_selection_reasoner' cutsell_worker/universal_clean_cut.py
+          grep -q 'preserve_polished_interior_gap' cutsell_worker/final_boundary_authority.py
+          test -s cutsell_worker/unified_selection_reasoner.py
+          test -s cutsell_worker/unified_selection_google.py
+          test -s benchmarks/video00_selection_lock.json
+          test -s benchmarks/validate_video00_selection_lock.py
+
+      - name: Login GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push immutable unified Selection image
+        shell: bash
+        run: |
+          set -euo pipefail
+          image="$IMAGE_REPO:video00-unified-selection-$GITHUB_SHA"
+          docker build -t "$image" -f Dockerfile.cutsell.serverless .
+          docker push "$image"
+          docker buildx imagetools inspect "$image" > /tmp/image.txt
+          digest=$(awk '/^Digest:/ {print $2; exit}' /tmp/image.txt)
+          test -n "$digest"
+          echo "LOCKED_IMAGE=$IMAGE_REPO@$digest" >> "$GITHUB_ENV"
+
+      - name: Load base RunPod template
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail --silent --show-error \
+            --url "https://rest.runpod.io/v1/templates" \
+            --header "Authorization: Bearer $RUNPOD_API_KEY" \
+            --output /tmp/templates.json
+          jq -c '[.[] | select(.name == "EditDNA-Worker-2")][0]' /tmp/templates.json > /tmp/base-template.json
+          test "$(cat /tmp/base-template.json)" != "null"
+          BASE_TEMPLATE_ID=$(jq -r '.id // empty' /tmp/base-template.json)
+          test -n "$BASE_TEMPLATE_ID"
+          echo "BASE_TEMPLATE_ID=$BASE_TEMPLATE_ID" >> "$GITHUB_ENV"
+
+      - name: Create unified Selection template
+        shell: bash
+        run: |
+          set -euo pipefail
+          name="cutsell-video00-unified-selection-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+          jq --arg image "$LOCKED_IMAGE" --arg name "$name" '
+            . as $base |
+            {
+              imageName:$image,
+              name:$name,
+              category:"NVIDIA",
+              containerDiskInGb:40,
+              isPublic:false,
+              isServerless:true,
+              env:(($base.env // {}) + {
+                CUTSELL_BRAIN_BACKEND:"runpod_local",
+                CUTSELL_EDITORIAL_MODE:"clean_cut",
+                CUTSELL_ASR_MODEL:"medium",
+                CUTSELL_HYBRID_LLM_ENABLED:"1",
+                CUTSELL_HYBRID_PROVIDER:"google",
+                CUTSELL_UNIFIED_SELECTION_REASONER:"1"
+              }),
+              ports:[], volumeInGb:0, volumeMountPath:"/workspace"
+            }' /tmp/base-template.json > /tmp/template-create.json
+          test -n "$(jq -r '.env.GEMINI_API_KEY // empty' /tmp/template-create.json)" || { echo 'GEMINI_API_KEY missing from RunPod template; refusing brain-off benchmark'; exit 1; }
+          test "$(jq -r '.env.CUTSELL_UNIFIED_SELECTION_REASONER' /tmp/template-create.json)" = "1"
+          code=$(curl --silent --show-error --write-out '%{http_code}' \
+            --request POST \
+            --url 'https://rest.runpod.io/v1/templates' \
+            --header "Authorization: Bearer $RUNPOD_API_KEY" \
+            --header 'Content-Type: application/json' \
+            --data @/tmp/template-create.json \
+            --output /tmp/template.json)
+          test "$code" = "200" || test "$code" = "201"
+          TEMPLATE_ID=$(jq -r '.id // empty' /tmp/template.json)
+          test -n "$TEMPLATE_ID"
+          echo "TEMPLATE_ID=$TEMPLATE_ID" >> "$GITHUB_ENV"
+
+      # D-041: replaces the old "Roll endpoint" + blind-20-minute-wait "CUDA
+      # health" steps. RAW 33453836301 spent its entire 20-minute health
+      # budget waiting on a job that never left IN_QUEUE -- no application
+      # code, including any CutSell editorial code, ever ran. This step
+      # rolls the endpoint, waits for its config to actually reflect that
+      # roll (distinguishing a 409 transition race from a stale config),
+      # then submits the health job and tracks time spent specifically in
+      # IN_QUEUE against a bounded stall threshold instead of one
+      # undifferentiated deadline -- failing fast and classified instead of
+      # waiting out the old blind timeout. One bounded infra-class retry
+      # (teardown + backoff + re-roll) is attempted automatically for a
+      # transient-looking failure; a real application/CUDA failure
+      # (HEALTH_APP_FAILURE) is never retried. See runpod_orchestration.py
+      # and docs/CUTSELL_DECISIONS.md D-041. Fully unit-tested with fakes in
+      # tests/test_runpod_orchestration.py -- no paid GPU required to
+      # validate the state machine itself.
+      - name: Roll endpoint + hardened health gate
+        shell: bash
+        run: python3 runpod_orchestration.py
+
+      - name: Submit original six-minute Video00
+        shell: bash
+        run: |
+          set -euo pipefail
+          jq -n --arg source "$SOURCE_KEY" --arg benchmark "$BENCHMARK_ID" '{input:{op:"focused",source_key:$source,benchmark_id:$benchmark,auto_speech_visual_microtrim:true}}' > /tmp/payload.json
+          curl --fail --silent --show-error \
+            --request POST \
+            --url "https://api.runpod.ai/v2/$ENDPOINT_ID/run" \
+            --header "Authorization: Bearer $RUNPOD_API_KEY" \
+            --header 'Content-Type: application/json' \
+            --data @/tmp/payload.json \
+            --output /tmp/submit.json
+          JOB_ID=$(jq -r '.id // empty' /tmp/submit.json); test -n "$JOB_ID"
+          echo "JOB_ID=$JOB_ID" >> "$GITHUB_ENV"
+
+      - name: Wait for unified Selection result
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p artifact
+          deadline=$((SECONDS+5400))
+          while [ "$SECONDS" -lt "$deadline" ]; do
+            curl --fail --silent --show-error \
+              --url "https://api.runpod.ai/v2/$ENDPOINT_ID/status/$JOB_ID" \
+              --header "Authorization: Bearer $RUNPOD_API_KEY" \
+              --output /tmp/status.json
+            status=$(jq -r '.status // empty' /tmp/status.json)
+            echo "raw_video00_status=$status"
+            case "$status" in
+              COMPLETED)
+                # Preserve evidence before any architecture gate can fail the job.
+                # A failed gate must not destroy the evidence needed to diagnose it.
+                cp /tmp/status.json artifact/video00-unified-selection-status.json
+                echo "--- sanitized compact RunPod output summary ---"
+                jq '.output | {ok,speech_lock_ok,deliverable,delivery_status,external_brain_calls_enabled,selection_reasoner_enabled,selection_reasoner_status,selection_reasoner_provider,selection_reasoner_model,hybrid_requested_group_count,alternate_count,selected_duration_sec,preview_uri,diagnostic_preview_uri,result_uri}' /tmp/status.json || true
+                PREVIEW_URI=$(jq -r '.output.preview_uri // empty' /tmp/status.json)
+                DIAGNOSTIC_PREVIEW_URI=$(jq -r '.output.diagnostic_preview_uri // empty' /tmp/status.json)
+                RESULT_URI=$(jq -r '.output.result_uri // empty' /tmp/status.json)
+                echo "PREVIEW_URI=$PREVIEW_URI" >> "$GITHUB_ENV"
+                echo "DIAGNOSTIC_PREVIEW_URI=$DIAGNOSTIC_PREVIEW_URI" >> "$GITHUB_ENV"
+                echo "RESULT_URI=$RESULT_URI" >> "$GITHUB_ENV"
+                exit 0 ;;
+              FAILED|TIMED_OUT|CANCELLED)
+                cat /tmp/status.json
+                cp /tmp/status.json artifact/video00-unified-selection-status.json || true
+                exit 1 ;;
+            esac
+            sleep 10
+          done
+          cat /tmp/status.json || true
+          exit 1
+
+      - name: Download unified Selection artifact
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p artifact
+          if [ -z "${JOB_ID:-}" ]; then
+            echo "No RunPod job was submitted; nothing to download."
+            exit 0
+          fi
+          if [ -z "${RESULT_URI:-}" ]; then
+            echo "result_uri not present in RunPod output; evidence is limited to the status.json already preserved for this run."
+            exit 0
+          fi
+          BASE_TEMPLATE=$(cat /tmp/base-template.json)
+          for key in AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_REGION S3_BUCKET; do
+            value=$(printf '%s' "$BASE_TEMPLATE" | jq -r --arg key "$key" '.env[$key] // empty')
+            test -n "$value"
+            echo "::add-mask::$value"
+            export "$key=$value"
+          done
+          aws s3 cp "$RESULT_URI" artifact/video00-unified-selection.json
+          test -s artifact/video00-unified-selection.json
+
+          # D-036 item 6: a candidate QC invalidated is never uploaded under
+          # the deliverable filename -- download whichever one this run
+          # actually produced, and never let the diagnostic-only render be
+          # mistaken for the final candidate.
+          if [ -n "${PREVIEW_URI:-}" ]; then
+            aws s3 cp "$PREVIEW_URI" artifact/video00-unified-selection.mp4
+            test -s artifact/video00-unified-selection.mp4
+            echo "Deliverable candidate downloaded: artifact/video00-unified-selection.mp4"
+          elif [ -n "${DIAGNOSTIC_PREVIEW_URI:-}" ]; then
+            aws s3 cp "$DIAGNOSTIC_PREVIEW_URI" artifact/video00-DIAGNOSTIC-INVALIDATED-preview.mp4
+            test -s artifact/video00-DIAGNOSTIC-INVALIDATED-preview.mp4
+            echo "NOT DELIVERABLE -- QC INVALIDATED. Diagnostic-only render downloaded: artifact/video00-DIAGNOSTIC-INVALIDATED-preview.mp4"
+          else
+            echo "Neither preview_uri nor diagnostic_preview_uri present; no rendered candidate exists for this run (e.g. a freeze-blocked draft that never reached render)."
+          fi
+
+      - name: Download Human Gold reference video
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p artifact
+          # QA-only: gives Human Watch+Listen a side-by-side reference in the
+          # same diagnostic artifact as the generated CutSell MP4 and result
+          # JSON. This file is never read by production code -- it is not
+          # part of the RunPod job input, and no cutsell_worker Selection or
+          # Boundary logic reads HUMAN_GOLD_KEY or this artifact path.
+          if [ ! -s /tmp/base-template.json ]; then
+            echo "No base RunPod template available; skipping Human Gold reference download."
+            exit 0
+          fi
+          BASE_TEMPLATE=$(cat /tmp/base-template.json)
+          for key in AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_REGION S3_BUCKET; do
+            value=$(printf '%s' "$BASE_TEMPLATE" | jq -r --arg key "$key" '.env[$key] // empty')
+            test -n "$value"
+            echo "::add-mask::$value"
+            export "$key=$value"
+          done
+          aws s3 cp "s3://$S3_BUCKET/$HUMAN_GOLD_KEY" artifact/human-gold-video00.mp4
+          test -s artifact/human-gold-video00.mp4
+
+      - name: Print unified Selection reasoner diagnostics
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ ! -s artifact/video00-unified-selection.json ]; then
+            echo "No result JSON downloaded; no reasoner diagnostics to print."
+            exit 0
+          fi
+          # diagnostics.unified_selection_reasoner carries {status, error} on a
+          # provider failure or {status, decisions, ...} on success. This has
+          # never been observable in CI logs before, only inside the S3 result
+          # JSON. Reading it is the handoff's required step before any semantic
+          # patch (docs/claude-handoff/CUTSELL_COMPLETE_HANDOFF.md, item F).
+          echo "--- diagnostics.unified_selection_reasoner ---"
+          jq '.diagnostics.unified_selection_reasoner // {status:"absent"}' artifact/video00-unified-selection.json
+
+          # Clean Cut Core V1 observability (canonical directive item 26): the
+          # full idea-first decision path must be understandable from CI logs
+          # alone, without needing the human-review artifact ZIP (which this
+          # environment cannot always reach). No secrets -- transcript text
+          # only, same class of content the Selection-lock step below already
+          # echoes in full.
+          echo "--- diagnostics.take_judge_groups (retry families + DeliveryScorer scores) ---"
+          jq '.diagnostics.take_judge_groups // []' artifact/video00-unified-selection.json
+
+          echo "--- diagnostics.deterministic_best_take_authority (BestTakeResolver) ---"
+          jq '.diagnostics.deterministic_best_take_authority // {status:"absent"}' artifact/video00-unified-selection.json
+
+          echo "--- diagnostics.semantic_idea_equivalence (IdeaClusterer's bounded SemanticArbiter tier) ---"
+          jq '.diagnostics.semantic_idea_equivalence // {status:"absent"}' artifact/video00-unified-selection.json
+
+          echo "--- diagnostics.final_story_coherence_validation (StoryValidator: contradiction/coverage/freeze_blocked) ---"
+          jq '.diagnostics.final_story_coherence_validation // {status:"absent"}' artifact/video00-unified-selection.json
+
+          # D-031: semantic-atom importance classifications, pulled out on
+          # their own for readability -- CRITICAL/UNCERTAIN atoms still
+          # block Freeze; a CONTEXTUAL-only atom loss (e.g. an incidental
+          # date) does not. Already present inside lost_semantic_atoms
+          # above; this is the same data, isolated so a reviewer does not
+          # have to re-derive "why did/didn't this block?" by hand.
+          echo "--- semantic atom importance classifications (per lost_semantic_atoms row) ---"
+          jq '[.diagnostics.final_story_coherence_validation.lost_semantic_atoms[]? |
+            {clip_id, blocking, atom_classifications}]' artifact/video00-unified-selection.json
+
+          # D-026/D-030 observability: the CI print script previously did
+          # not surface canonical_edit_plan/repair_loop/final_edit_reviewer
+          # at all, so their state had to be inferred from stage_status's
+          # flat "FAIL"/"PASS" strings alone. Printed here in full now.
+          echo "--- diagnostics.canonical_edit_plan (plan_id/version/hash + Idea sequence) ---"
+          jq '.diagnostics.canonical_edit_plan
+            | if . == null then {status:"absent"} else {
+                plan_id, plan_version, semantic_hash, validation_state, freeze_blocked,
+                ideas: [.ideas[]? | {idea_id, coverage_status, is_composite, winning_clip_ids, discarded_clip_ids}]
+              } end' artifact/video00-unified-selection.json
+
+          echo "--- diagnostics.final_edit_reviewer (every finding + warning) ---"
+          jq '.diagnostics.final_edit_reviewer // {status:"absent"}' artifact/video00-unified-selection.json
+
+          echo "--- diagnostics.repair_loop (every targeted semantic repair attempt) ---"
+          jq '.diagnostics.repair_loop // {status:"absent"}' artifact/video00-unified-selection.json
+
+          echo "--- diagnostics.selection_boundary_contract (Freeze -- must reference the exact validated plan) ---"
+          jq '.diagnostics.selection_boundary_contract // {status:"absent"}' artifact/video00-unified-selection.json
+
+          # CompositeResolver's actual decisions (restored performance-only
+          # uniques, composite replacements, split-for-composite group ids)
+          # surface here, not under a dedicated key -- hybrid_composite_
+          # best_take.py wraps apply_hybrid_session_cleanup and appends its
+          # own diagnostics dict into this same per-chunk list. Printing the
+          # counts plus the chunks is how to tell whether CompositeResolver
+          # ran at all versus was silently starved (see the editorial_judge
+          # fix this session -- it was inert in both prior V1 RAWs).
+          echo "--- diagnostics.hybrid_editorial_* (CompositeResolver evidence, requires editorial_judge active) ---"
+          jq '{
+            requested_chunk_count: .diagnostics.hybrid_editorial_requested_chunk_count,
+            available_chunk_count: .diagnostics.hybrid_editorial_available_chunk_count,
+            deleted_count: .diagnostics.hybrid_editorial_deleted_count,
+            semantic_decision_count: .diagnostics.hybrid_editorial_semantic_decision_count,
+            chunks: (.diagnostics.hybrid_editorial_chunks // [])
+          }' artifact/video00-unified-selection.json
+
+          echo "--- final KEEP sequence (clip_id + text, in order) ---"
+          jq '[.selected[]? | {clip_id, text}]' artifact/video00-unified-selection.json
+
+          echo "--- final DISCARD sequence (clip_id + text) and stage_status ---"
+          # A real gap this run's diagnosis hit: the count alone cannot show
+          # WHAT got discarded, which is exactly what's needed to tell an
+          # over-aggressive deletion from a correct one without the blocked
+          # human-review artifact.
+          jq '{discarded_count: (.discarded | length), discarded: [.discarded[]? | {clip_id, text}], stage_status}' artifact/video00-unified-selection.json
+
+          # D-030/D-035: this Video00 RAW now renders through the exact same
+          # live PostRenderWatchListenQC + bounded physical repair service
+          # the real mobile export job uses (never a bare, unchecked ffmpeg
+          # render) -- print its full attempt history so a reviewer can see
+          # every physical repair, every finding, and the final QC status
+          # without needing to re-derive it from stage_status alone.
+          echo "--- live_render_qc (PostRenderWatchListenQC + bounded physical repair, D-030/D-035) ---"
+          jq '.live_render_qc // {status:"absent"}' artifact/video00-unified-selection.json
+
+      - name: Upload unified Selection diagnostic artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cutsell-video00-unified-selection-human-review
+          path: artifact/
+          retention-days: 14
+          if-no-files-found: warn
+
+      - name: Verify frozen Selection lock
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ ! -s artifact/video00-unified-selection.json ]; then
+            echo "No result JSON was downloaded (preview_uri/result_uri missing or download failed); cannot verify Selection lock. Diagnostic evidence (status.json) has already been uploaded as an artifact for inspection." >&2
+            exit 1
+          fi
+          python benchmarks/validate_video00_selection_lock.py \
+            artifact/video00-unified-selection.json \
+            benchmarks/video00_selection_lock.json \
+            | tee artifact/video00-selection-lock-report.json
+
+      - name: Verify unified Selection architecture
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ ! -s artifact/video00-unified-selection.json ]; then
+            echo "No result JSON was downloaded (preview_uri/result_uri missing or download failed); cannot verify architecture. Diagnostic evidence (status.json) has already been uploaded as an artifact for inspection." >&2
+            exit 1
+          fi
+          # Architecture-agnostic sanity checks: the real six-minute source
+          # was actually processed and speech-lock held, regardless of which
+          # semantic authority is active.
+          jq -e '.source_duration_sec > 350 and .auto_speech_visual_microtrim_enabled == true and .speech_lock_ok == true and .selected_count > 0' artifact/video00-unified-selection.json >/dev/null
+          jq '{source_duration_sec,selected_count,selected_duration_sec,output_duration_sec,auto_microtrim_count,auto_microtrim_duration_sec,speech_lock_ok}' artifact/video00-unified-selection.json
+
+          # D-034/D-035: the CURRENT Clean Cut Core V1 architecture actually
+          # ran -- CanonicalEditPlan, FinalEditReviewer, the repair loop,
+          # CoverageLedger/StoryValidator, SWAP absence, CompositeResolver
+          # diagnostics, freeze-references-exact-plan, Boundary-only-after-
+          # freeze, and (when not freeze-blocked) the live render/QC service
+          # actually running against the real render. Replaces the old
+          # legacy `unified_selection_reasoner`-era assertions
+          # (selection_reasoner_status == "applied", etc.) that can never be
+          # true while V1 -- which deliberately deactivates that whole-video
+          # reasoner -- is the active path. See docs/CUTSELL_DECISIONS.md D-034.
+          python benchmarks/validate_video00_architecture.py \
+            artifact/video00-unified-selection.json \
+            | tee artifact/video00-architecture-report.json
+
+      - name: Teardown RunPod benchmark resources
+        if: always()
+        shell: bash
+        run: |
+          set +e
+
+          cancel_if_active() {
+            local job_id="$1"
+            [ -n "$job_id" ] || return 0
+            status=$(curl --silent --show-error \
+              --url "https://api.runpod.ai/v2/$ENDPOINT_ID/status/$job_id" \
+              --header "Authorization: Bearer $RUNPOD_API_KEY" | jq -r '.status // empty')
+            case "$status" in
+              IN_QUEUE|IN_PROGRESS)
+                curl --silent --show-error \
+                  --request POST \
+                  --url "https://api.runpod.ai/v2/$ENDPOINT_ID/cancel/$job_id" \
+                  --header "Authorization: Bearer $RUNPOD_API_KEY" >/dev/null || true
+                ;;
+            esac
+          }
+
+          cancel_if_active "${HEALTH_JOB_ID:-}"
+          cancel_if_active "${JOB_ID:-}"
+
+          if [ -n "${BASE_TEMPLATE_ID:-}" ]; then
+            jq -n --arg template "$BASE_TEMPLATE_ID" '{templateId:$template,workersMin:0,workersMax:0,scalerType:"QUEUE_DELAY",scalerValue:2,idleTimeout:5,executionTimeoutMs:1800000}' > /tmp/endpoint-teardown.json
+            curl --silent --show-error \
+              --request PATCH \
+              --url "https://rest.runpod.io/v1/endpoints/$ENDPOINT_ID" \
+              --header "Authorization: Bearer $RUNPOD_API_KEY" \
+              --header 'Content-Type: application/json' \
+              --data @/tmp/endpoint-teardown.json \
+              --output /tmp/endpoint-teardown-response.json || true
+          else
+            jq -n '{workersMin:0,workersMax:0}' > /tmp/endpoint-teardown.json
+            curl --silent --show-error \
+              --request PATCH \
+              --url "https://rest.runpod.io/v1/endpoints/$ENDPOINT_ID" \
+              --header "Authorization: Bearer $RUNPOD_API_KEY" \
+              --header 'Content-Type: application/json' \
+              --data @/tmp/endpoint-teardown.json \
+              --output /tmp/endpoint-teardown-response.json || true
+          fi
+
+          if [ -n "${TEMPLATE_ID:-}" ]; then
+            curl --silent --show-error \
+              --request DELETE \
+              --url "https://rest.runpod.io/v1/templates/$TEMPLATE_ID" \
+              --header "Authorization: Bearer $RUNPOD_API_KEY" \
+              --output /tmp/template-delete-response.txt || true
+          fi
+
+          echo "RunPod teardown completed: jobs cancelled if active, workersMax=0, temporary template removed."
+
+      - name: Notify Claude Routine
+        if: always()
+        shell: bash
+        env:
+          CLAUDE_ROUTINE_URL: ${{ secrets.CUTSELL_CLAUDE_ROUTINE_URL }}
+          CLAUDE_ROUTINE_TOKEN: ${{ secrets.CUTSELL_CLAUDE_ROUTINE_TOKEN }}
+          WORKFLOW_STATUS: ${{ job.status }}
+          HEAD_BRANCH: ${{ github.head_ref || github.ref_name }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          set +e
+          if [ -z "${CLAUDE_ROUTINE_URL:-}" ]; then
+            echo "CUTSELL_CLAUDE_ROUTINE_URL not set; skipping Claude Routine notification."
+            exit 0
+          fi
+          # Small, safe run-identity payload only: no secrets, logs, artifact
+          # contents, S3 URLs, or provider keys.
+          payload=$(jq -n \
+            --arg repository "$GITHUB_REPOSITORY" \
+            --arg workflow "$GITHUB_WORKFLOW" \
+            --arg run_id "$GITHUB_RUN_ID" \
+            --arg run_attempt "$GITHUB_RUN_ATTEMPT" \
+            --arg head_branch "$HEAD_BRANCH" \
+            --arg head_sha "$HEAD_SHA" \
+            --arg status "$WORKFLOW_STATUS" \
+            '{repository:$repository, workflow:$workflow, run_id:$run_id, run_attempt:$run_attempt, head_branch:$head_branch, head_sha:$head_sha, status:$status}')
+          curl --silent --show-error --max-time 15 \
+            --request POST \
+            --url "$CLAUDE_ROUTINE_URL" \
+            --header "Authorization: Bearer $CLAUDE_ROUTINE_TOKEN" \
+            --header 'Content-Type: application/json' \
+            --data "$payload" \
+            || echo "Claude Routine notification failed (non-blocking)."
+          exit 0

@@ -1,0 +1,52 @@
+name: Benchmark 49 Controlled Worker Build
+run-name: Benchmark 49 exact-source immutable worker build
+
+on:
+  push:
+    branches:
+      - cutsell/mobile-v1-clean
+    paths:
+      - .github/workflows/benchmark49-controlled-build.yml
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      SOURCE_SHA: 499d1c59e11ea1abe550678ae334cd46573312d1
+      IMAGE_REPO: ghcr.io/automatedretailservices/cutsell-worker
+    steps:
+      - name: Checkout exact validated worker source
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.SOURCE_SHA }}
+      - name: Verify exact source
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
+      - name: Login to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Build and push exact worker image
+        shell: bash
+        run: |
+          set -euo pipefail
+          IMAGE="$IMAGE_REPO:$SOURCE_SHA"
+          docker build -t "$IMAGE" -f Dockerfile.cutsell.worker .
+          docker push "$IMAGE"
+          docker buildx imagetools inspect "$IMAGE" | tee image-inspect.txt
+          digest=$(awk '/^Digest:/ {print $2; exit}' image-inspect.txt)
+          test -n "$digest"
+          case "$digest" in sha256:[0-9a-f][0-9a-f]*) ;; *) echo "Invalid digest: $digest"; exit 3;; esac
+          echo "SOURCE_SHA=$SOURCE_SHA" >> "$GITHUB_STEP_SUMMARY"
+          echo "IMAGE=$IMAGE@$digest" >> "$GITHUB_STEP_SUMMARY"
+          echo "IMAGE_DIGEST=$digest" >> "$GITHUB_STEP_SUMMARY"
+          echo "BENCHMARK49_IMAGE=$IMAGE@$digest"

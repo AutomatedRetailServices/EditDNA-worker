@@ -1,0 +1,322 @@
+"""OpenAI-backed recording-mistake judge for conservative Clean Cut."""
+from __future__ import annotations
+
+import json
+from dataclasses import dataclass
+from typing import Callable
+
+from .clean_cut_provider import CleanCutJudgement, CleanCutProviderResult
+from .contracts import CandidateTake
+from .openai_json import parse_json_object
+from .providers import ProviderStatus
+from .take_grouping import retry_similarity, semantic_key
+
+
+def _word_count(take: CandidateTake) -> int:
+    if take.words:
+        return sum(1 for word in take.words if str(word.text or "").strip())
+    return len(str(take.text or "").split())
+
+
+def _is_ambiguous_microtake(
+    take: CandidateTake,
+    *,
+    max_words: int = 5,
+    max_duration_sec: float = 3.0,
+) -> bool:
+    return 0 < _word_count(take) <= max_words and 0.0 < take.duration_sec <= max_duration_sec
+
+
+def _prefix_relation(fragment: CandidateTake, reference: CandidateTake | None) -> bool:
+    if reference is None:
+        return False
+    fragment_tokens = semantic_key(fragment.text).split()
+    reference_tokens = semantic_key(reference.text).split()
+    return bool(fragment_tokens and reference_tokens[: len(fragment_tokens)] == fragment_tokens)
+
+
+def _diagnostic_similarity(left: CandidateTake, right: CandidateTake | None) -> float | None:
+    """Similarity evidence for the microtake judge without weakening retry grouping.
+
+    The grouping similarity intentionally suppresses very short overlaps to avoid broad
+    transitive grouping. For judge diagnostics, an exact lexical prefix is still useful
+    evidence, so retain at least its token coverage ratio as a small positive signal.
+    """
+    if right is None:
+        return None
+    score = retry_similarity(left.text, right.text)
+    left_tokens = semantic_key(left.text).split()
+    right_tokens = semantic_key(right.text).split()
+    if left_tokens and right_tokens[: len(left_tokens)] == left_tokens:
+        score = max(score, len(left_tokens) / max(1, len(right_tokens)))
+    return round(score, 4)
+
+
+def _gap(left: CandidateTake | None, right: CandidateTake | None) -> float | None:
+    if left is None or right is None or left.source_asset_id != right.source_asset_id:
+        return None
+    return round(max(0.0, right.start - left.end), 3)
+
+
+def _word_confidence_summary(take: CandidateTake) -> tuple[float | None, float | None]:
+    values = [float(word.confidence) for word in take.words if word.confidence is not None]
+    if not values:
+        return None, None
+    return round(sum(values) / len(values), 4), round(min(values), 4)
+
+
+def _close_neighbor_gap(value: object, *, maximum_sec: float = 1.5) -> bool:
+    if value is None:
+        return False
+    try:
+        gap = float(value)
+    except (TypeError, ValueError):
+        return False
+    return 0.0 <= gap <= maximum_sec
+
+
+def _has_structural_delete_support(evidence: dict) -> bool:
+    """Require independently checkable retry evidence before automatic deletion.
+
+    Model confidence is advisory. A high-confidence DELETE may auto-apply only when
+    the candidate is tightly linked to an adjacent take by exact-prefix or strong
+    lexical-similarity evidence. This protects intentional short reactions from a
+    model that is overconfident because speech is incomplete, profane, or irrelevant.
+    """
+    neighbors = (
+        ("previous", "gap_from_previous_sec"),
+        ("next", "gap_to_next_sec"),
+    )
+    for label, gap_key in neighbors:
+        if not _close_neighbor_gap(evidence.get(gap_key)):
+            continue
+        if bool(evidence.get(f"exact_prefix_of_{label}")):
+            return True
+        similarity = evidence.get(f"similarity_to_{label}")
+        try:
+            if similarity is not None and float(similarity) >= 0.80:
+                return True
+        except (TypeError, ValueError):
+            pass
+    return False
+
+
+def _normalized_action(value: object) -> tuple[str, bool]:
+    action = str(value or "").lower().strip()
+    if action in {"keep", "delete", "mixed"}:
+        return action, True
+    return "keep", False
+
+
+def _safe_confidence(value: object, *, action: str) -> tuple[float, bool]:
+    """Coerce model confidence without ever making malformed output destructive."""
+    try:
+        confidence = float(value)
+    except (TypeError, ValueError):
+        return (1.0 if action == "keep" else 0.0), False
+    if not 0.0 <= confidence <= 1.0:
+        return (1.0 if action == "keep" else 0.0), False
+    return confidence, True
+
+
+def _optional_word_index(value: object) -> int | None:
+    if value is None:
+        return None
+    if isinstance(value, str) and value.strip().lower() in {"", "null", "none"}:
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+@dataclass
+class OpenAICleanCutProvider:
+    model: str = "gpt-4o-mini"
+    client_factory: Callable[[], object] | None = None
+
+    def _client(self):
+        if self.client_factory is not None:
+            return self.client_factory()
+        from openai import OpenAI
+        return OpenAI()
+
+    def judge(self, takes: tuple[CandidateTake, ...]) -> CleanCutProviderResult:
+        target_indexes = [index for index, take in enumerate(takes) if _is_ambiguous_microtake(take)]
+        target_ids = {takes[index].clip_id for index in target_indexes}
+
+        # The provider has zero authority over non-target speech. Return explicit KEEP
+        # judgements for it so the generic provider boundary still receives every
+        # candidate exactly once, without sending long/normal takes to the model.
+        if not target_indexes:
+            return CleanCutProviderResult(
+                tuple(
+                    CleanCutJudgement(take.clip_id, "keep", 1.0, "not_ambiguous_microtake")
+                    for take in takes
+                ),
+                ProviderStatus("openai", True, True, "applied", "no_ambiguous_microtakes"),
+            )
+
+        evidence = []
+        for index in target_indexes:
+            take = takes[index]
+            previous = (
+                takes[index - 1]
+                if index > 0 and takes[index - 1].source_asset_id == take.source_asset_id
+                else None
+            )
+            following = (
+                takes[index + 1]
+                if index + 1 < len(takes) and takes[index + 1].source_asset_id == take.source_asset_id
+                else None
+            )
+            avg_confidence, min_confidence = _word_confidence_summary(take)
+            signals = take.signals
+            evidence.append({
+                "id": take.clip_id,
+                "transcript": take.text,
+                "duration_sec": round(take.duration_sec, 3),
+                "word_count": _word_count(take),
+                "complete_idea": bool(take.complete_idea),
+                "asr_avg_confidence": avg_confidence,
+                "asr_min_confidence": min_confidence,
+                "previous_transcript": previous.text if previous is not None else None,
+                "next_transcript": following.text if following is not None else None,
+                "gap_from_previous_sec": _gap(previous, take),
+                "gap_to_next_sec": _gap(take, following),
+                "similarity_to_previous": _diagnostic_similarity(take, previous),
+                "similarity_to_next": _diagnostic_similarity(take, following),
+                "exact_prefix_of_previous": _prefix_relation(take, previous),
+                "exact_prefix_of_next": _prefix_relation(take, following),
+                "words": [
+                    {
+                        "index": word_index,
+                        "text": word.text,
+                        "start": round(float(word.start), 3),
+                        "end": round(float(word.end), 3),
+                        "confidence": (
+                            round(float(word.confidence), 4)
+                            if word.confidence is not None else None
+                        ),
+                    }
+                    for word_index, word in enumerate(take.words)
+                ],
+                "signals": ({
+                    "audio_quality": signals.audio_quality,
+                    "silence_ratio": signals.silence_ratio,
+                    "motion_stability": signals.motion_stability,
+                    "continuity": signals.continuity,
+                    "visual_fumble": signals.visual_fumble,
+                } if signals is not None else {}),
+            })
+        evidence_by_id = {str(item["id"]): item for item in evidence}
+
+        instruction = (
+            "You are CutSell Clean Cut Judge. The listed takes are ONLY short ambiguous microtakes that survived "
+            "deterministic cleanup. Your ONLY job is to distinguish valid creator speech from obvious recording "
+            "mistakes. previous_transcript and next_transcript are READ-ONLY context, not candidates. You have no "
+            "authority to judge sales quality, hook quality, commercial role, usefulness, style, profanity, or "
+            "whether a sentence is persuasive. For every listed candidate return exactly one action: KEEP, DELETE, "
+            "or MIXED. DELETE only when the WHOLE candidate is clearly unusable production speech such as an "
+            "explicit restart/stop direction, abandoned gibberish, repeated false start, or a fragment that is "
+            "structurally shown to be an abandoned retry by the supplied neighbor timing/similarity/prefix evidence. "
+            "Grammatical incompleteness by itself is NOT enough to DELETE. A lone pronoun, preposition, noun, or "
+            "short phrase must be KEPT unless the supplied context makes the failed-retry/blooper relationship clear. "
+            "A short intentional reaction such as Yeah, No, Bye, What just happened, laughter-related speech, "
+            "profanity, or emotion is valid and must be KEPT when it makes sense in neighboring context. ASR "
+            "confidence can support uncertainty but low ASR confidence alone is never a delete reason. MIXED when "
+            "one candidate contains both an obvious blooper/restart portion and a single contiguous span of valid "
+            "creator speech. For MIXED, if and only if the provided word list makes the valid span unambiguous, "
+            "return inclusive keep_start_word_index and keep_end_word_index using ONLY supplied indexes. Never "
+            "invent timestamps or words. If the valid speech is not one contiguous span, or the boundary is uncertain, "
+            "leave both indexes null. MIXED must never imply deleting the whole take. CONFIDENCE means certainty that "
+            "the requested action is safe for automatic editing. If DELETE is strongly supported by structural/context "
+            "evidence, use confidence >=0.95. If DELETE is plausible but not safe enough to auto-apply, use <=0.93. "
+            "When uncertain choose KEEP. Return JSON only: "
+            "{\"judgements\":[{\"id\":...,\"action\":\"keep|delete|mixed\",\"confidence\":0..1,"
+            "\"reason\":...,\"keep_start_word_index\":null|int,\"keep_end_word_index\":null|int}]}. "
+            "Include every LISTED candidate exactly once."
+        )
+        response = self._client().responses.create(
+            model=self.model,
+            input=[
+                {"role": "system", "content": instruction},
+                {"role": "user", "content": json.dumps({"takes": evidence}, ensure_ascii=False)},
+            ],
+        )
+        data = parse_json_object(response.output_text)
+        items = data.get("judgements")
+        if not isinstance(items, list):
+            raise ValueError("clean cut judge returned invalid payload")
+
+        target_judgements: dict[str, CleanCutJudgement] = {}
+        for item in items:
+            if not isinstance(item, dict):
+                raise ValueError("clean cut judge returned non-object judgement")
+            clip_id = str(item.get("id") or "")
+            if clip_id not in target_ids or clip_id in target_judgements:
+                raise ValueError("clean cut judge returned invalid target id")
+
+            action, valid_action = _normalized_action(item.get("action"))
+            reason = str(item.get("reason") or "")
+            if not valid_action:
+                reason = f"{reason} [invalid action normalized to keep]".strip()
+
+            confidence, valid_confidence = _safe_confidence(
+                item.get("confidence"),
+                action=action,
+            )
+            if not valid_confidence:
+                reason = f"{reason} [malformed confidence blocked from destructive edit]".strip()
+
+            # A model can be confidently wrong about short conversational speech.
+            # Keep its classification for diagnostics, but block automatic deletion
+            # unless the evidence packet independently demonstrates a retry relation.
+            if (
+                action == "delete"
+                and confidence >= 0.94
+                and not _has_structural_delete_support(evidence_by_id[clip_id])
+            ):
+                confidence = min(confidence, 0.93)
+                reason = f"{reason} [auto-delete blocked: no structural retry evidence]"
+
+            if action == "mixed":
+                start_index = _optional_word_index(item.get("keep_start_word_index"))
+                end_index = _optional_word_index(item.get("keep_end_word_index"))
+                if (start_index is None) != (end_index is None):
+                    start_index = None
+                    end_index = None
+                    reason = f"{reason} [mixed trim blocked: malformed word indexes]"
+            else:
+                # KEEP/DELETE never need word indexes. Ignore stray values such as
+                # the string "null" instead of letting harmless model formatting
+                # turn the entire provider into a ValueError fallback.
+                start_index = None
+                end_index = None
+
+            target_judgements[clip_id] = CleanCutJudgement(
+                clip_id=clip_id,
+                action=action,
+                confidence=confidence,
+                reason=reason,
+                keep_start_word_index=start_index,
+                keep_end_word_index=end_index,
+            )
+        if set(target_judgements) != target_ids:
+            raise ValueError("clean cut judge omitted ambiguous microtake")
+
+        judgements = []
+        for take in takes:
+            if take.clip_id in target_judgements:
+                judgements.append(target_judgements[take.clip_id])
+            else:
+                judgements.append(CleanCutJudgement(
+                    take.clip_id,
+                    "keep",
+                    1.0,
+                    "not_ambiguous_microtake",
+                ))
+        return CleanCutProviderResult(
+            tuple(judgements),
+            ProviderStatus("openai", True, True, "applied", "selective_microtake_review"),
+        )

@@ -1,0 +1,8 @@
+{
+  "deploy_run_id": 32226616139,
+  "pod_id": "h5cmhuqha9gtqh",
+  "image": "ghcr.io/automatedretailservices/cutsell-worker:88e42364d01c58013d5927fc1430413e162a7ef5@sha256:3b8f53e9376fba5173e6a6e09c4ad72aa526bc8f6a78f61f598ce219ddb9beec",
+  "benchmark_number": 42,
+  "benchmark_run_id": 32226917406,
+  "status": "benchmark_dispatched"
+}

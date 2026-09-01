@@ -1,0 +1,33 @@
+FROM madiator2011/better-pytorch:cuda12.4-torch2.6.0
+
+WORKDIR /app
+
+ENV PYTHONUNBUFFERED=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    PIP_NO_CACHE_DIR=1 \
+    PYTHONPATH=/app
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    python3-dev \
+    ffmpeg \
+    git \
+    curl \
+    pkg-config \
+    libavformat-dev \
+    libavcodec-dev \
+    libavdevice-dev \
+    libavutil-dev \
+    libavfilter-dev \
+    libswscale-dev \
+    libswresample-dev \
+ && rm -rf /var/lib/apt/lists/*
+
+COPY requirements.cutsell.worker.txt /app/requirements.cutsell.worker.txt
+RUN pip install --no-cache-dir -r /app/requirements.cutsell.worker.txt \
+ && pip install --no-cache-dir 'runpod>=1.7,<2' \
+ && (pip uninstall -y openai >/dev/null 2>&1 || true)
+
+COPY cutsell_worker /app/cutsell_worker
+
+CMD ["python", "-u", "-m", "cutsell_worker.serverless_handler"]

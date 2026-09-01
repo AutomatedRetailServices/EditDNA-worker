@@ -1,0 +1,41 @@
+{
+  "created_at": "2026-08-18T11:19:30.818166+00:00",
+  "ended_at": null,
+  "exc_info_tail": "Moved to FailedJobRegistry, due to AbandonedJobError, at 2026-08-18 14:51:31.818214+00:00",
+  "job_id": "f9534f86-4e7e-4e9f-a6e9-bc1ab9f3055b",
+  "meta": {
+    "benchmark_id": "gold-32131140975-5a4f1f8ca9e8ef2631f15197acf6fc0955a242c9",
+    "brain_backend": "runpod_local",
+    "current_source": "Editdna longform validation/VIDEO-2026-07-30-09-18-03.mp4",
+    "dataset_role": "clean_cut_gold_raw",
+    "external_brain_calls_enabled": true,
+    "hybrid_primary_model": "gemini-3.5-flash-lite",
+    "hybrid_provider": "google",
+    "progress_percent": 3,
+    "source_prefix": "Editdna longform validation/",
+    "stage": "processing"
+  },
+  "origin": "cutsell",
+  "registries": {
+    "canceled": [
+      "e8d2f9f3-cd65-438f-a600-d56de0de79e9",
+      "3de613c4-1c93-40dc-be85-9b5a6a6c5bb9"
+    ],
+    "failed": [
+      "96543f96-3523-41b6-9d27-a0aaf6ab2a99",
+      "f9534f86-4e7e-4e9f-a6e9-bc1ab9f3055b"
+    ],
+    "finished": [
+      "20ee3c89-942b-4856-a82f-523497741ab0",
+      "f438d159-3412-40d2-baad-6d4e7115f6ee",
+      "9d282974-4a1f-4083-b4a8-558b6e6c7fae",
+      "443cf974-dffd-408d-9cd1-4c3ab12df56c"
+    ],
+    "started": []
+  },
+  "result": null,
+  "started_at": "2026-08-18T12:14:56.434563+00:00",
+  "status": "started",
+  "worker_count": 0,
+  "workers": []
+}

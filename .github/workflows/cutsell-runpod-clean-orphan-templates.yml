@@ -1,0 +1,168 @@
+name: CutSell RunPod Clean Orphan Templates
+
+on:
+  push:
+    branches: [cutsell/mobile-v1-clean]
+    paths:
+      - .github/workflows/cutsell-runpod-clean-orphan-templates.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  clean-orphans:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      RUNPOD_API_KEY: ${{ secrets.RUNPOD_API_KEY }}
+      ACTIVE_ENDPOINT_ID: xxu7autt8mv2rn
+    steps:
+      - name: Identify and delete orphan CutSell templates
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p audit
+
+          curl --fail --silent --show-error \
+            --url 'https://rest.runpod.io/v1/endpoints' \
+            --header "Authorization: Bearer $RUNPOD_API_KEY" \
+            --output /tmp/endpoints.json
+
+          curl --fail --silent --show-error \
+            --url 'https://rest.runpod.io/v1/templates' \
+            --header "Authorization: Bearer $RUNPOD_API_KEY" \
+            --output /tmp/templates.json
+
+          jq -r '.[].templateId // empty' /tmp/endpoints.json | sort -u > /tmp/protected-template-ids.txt
+
+          active_template=$(jq -r --arg id "$ACTIVE_ENDPOINT_ID" '.[] | select(.id == $id) | .templateId // empty' /tmp/endpoints.json)
+          test -n "$active_template"
+          grep -qxF "$active_template" /tmp/protected-template-ids.txt
+
+          base_template=$(jq -r '.[] | select(.name == "EditDNA-Worker-2") | .id // empty' /tmp/templates.json | head -n1)
+          test -n "$base_template"
+          printf '%s\n' "$base_template" >> /tmp/protected-template-ids.txt
+          sort -u -o /tmp/protected-template-ids.txt /tmp/protected-template-ids.txt
+
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          endpoints = json.loads(Path('/tmp/endpoints.json').read_text())
+          templates = json.loads(Path('/tmp/templates.json').read_text())
+          protected = set(Path('/tmp/protected-template-ids.txt').read_text().split())
+
+          candidates = []
+          kept = []
+          for t in templates:
+              if not isinstance(t, dict):
+                  continue
+              tid = str(t.get('id') or '')
+              name = str(t.get('name') or '')
+              is_cutsell = (
+                  name.startswith('cutsell-video00-')
+                  or name.startswith('cutsell-v5-')
+                  or name.startswith('cutsell-serverless-')
+                  or name.startswith('cutsell-gpu-gate-')
+                  or name.startswith('cutsell-')
+              )
+              if not is_cutsell:
+                  continue
+              row = {'id': tid, 'name': name, 'protected': tid in protected}
+              if tid in protected:
+                  kept.append(row)
+              else:
+                  candidates.append(row)
+
+          report = {
+              'schema_version': 'cutsell.runpod_orphan_template_cleanup.v1',
+              'endpoint_count': len(endpoints),
+              'protected_template_ids': sorted(protected),
+              'protected_cutsell_templates': kept,
+              'delete_candidates': candidates,
+              'delete_candidate_count': len(candidates),
+          }
+          Path('audit/runpod-orphan-template-plan.json').write_text(json.dumps(report, indent=2, ensure_ascii=False))
+          Path('/tmp/delete-template-ids.txt').write_text('\n'.join(r['id'] for r in candidates) + ('\n' if candidates else ''))
+          print(json.dumps(report, indent=2, ensure_ascii=False))
+          PY
+
+          deleted=0
+          failed=0
+          : > /tmp/delete-results.txt
+          while IFS= read -r tid; do
+            [ -n "$tid" ] || continue
+            if grep -qxF "$tid" /tmp/protected-template-ids.txt; then
+              echo "refusing_protected_template=$tid" >&2
+              exit 1
+            fi
+            code=$(curl --silent --show-error --write-out '%{http_code}' \
+              --request DELETE \
+              --url "https://rest.runpod.io/v1/templates/$tid" \
+              --header "Authorization: Bearer $RUNPOD_API_KEY" \
+              --output "/tmp/delete-$tid.txt" || true)
+            if [ "$code" = "200" ] || [ "$code" = "204" ]; then
+              echo "$tid deleted" >> /tmp/delete-results.txt
+              deleted=$((deleted+1))
+            else
+              echo "$tid failed_http_$code" >> /tmp/delete-results.txt
+              failed=$((failed+1))
+            fi
+          done < /tmp/delete-template-ids.txt
+
+          echo "deleted_count=$deleted" | tee audit/runpod-orphan-template-cleanup-summary.txt
+          echo "failed_count=$failed" | tee -a audit/runpod-orphan-template-cleanup-summary.txt
+          cat /tmp/delete-results.txt >> audit/runpod-orphan-template-cleanup-summary.txt
+          test "$failed" -eq 0
+
+      - name: Verify protected templates remain and orphans are gone
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail --silent --show-error \
+            --url 'https://rest.runpod.io/v1/endpoints' \
+            --header "Authorization: Bearer $RUNPOD_API_KEY" \
+            --output /tmp/endpoints-after.json
+          curl --fail --silent --show-error \
+            --url 'https://rest.runpod.io/v1/templates' \
+            --header "Authorization: Bearer $RUNPOD_API_KEY" \
+            --output /tmp/templates-after.json
+
+          active_template=$(jq -r --arg id "$ACTIVE_ENDPOINT_ID" '.[] | select(.id == $id) | .templateId // empty' /tmp/endpoints-after.json)
+          test -n "$active_template"
+          jq -e --arg tid "$active_template" 'any(.[]; .id == $tid)' /tmp/templates-after.json >/dev/null
+          jq -e 'any(.[]; .name == "EditDNA-Worker-2")' /tmp/templates-after.json >/dev/null
+
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          endpoints = json.loads(Path('/tmp/endpoints-after.json').read_text())
+          templates = json.loads(Path('/tmp/templates-after.json').read_text())
+          refs = {str(e.get('templateId') or '') for e in endpoints}
+          leftovers = []
+          for t in templates:
+              if not isinstance(t, dict):
+                  continue
+              tid = str(t.get('id') or '')
+              name = str(t.get('name') or '')
+              is_cutsell = name.startswith('cutsell-')
+              if is_cutsell and tid not in refs:
+                  leftovers.append({'id': tid, 'name': name})
+          Path('audit/runpod-orphan-template-verification.json').write_text(json.dumps({
+              'schema_version':'cutsell.runpod_orphan_template_verification.v1',
+              'remaining_unreferenced_cutsell_templates': leftovers,
+              'remaining_count': len(leftovers),
+          }, indent=2, ensure_ascii=False))
+          print(json.dumps({'remaining_count': len(leftovers), 'remaining_unreferenced_cutsell_templates': leftovers}, indent=2, ensure_ascii=False))
+          if leftovers:
+              raise SystemExit(1)
+          PY
+
+      - name: Upload cleanup report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cutsell-runpod-orphan-template-cleanup
+          path: audit/
+          retention-days: 7

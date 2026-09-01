@@ -1,0 +1,114 @@
+name: CutSell Serverless Video00 Human Rerun
+
+on:
+  push:
+    branches:
+      - cutsell/mobile-v1-clean
+    paths:
+      - .github/workflows/cutsell-serverless-video00-human-rerun.yml
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  video00:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    env:
+      RUNPOD_API_KEY: ${{ secrets.RUNPOD_API_KEY }}
+      ENDPOINT_ID: btazjngh2j15or
+      SOURCE_KEY: 'Editdna longform validation/VIDEO-2026-07-30-09-18-03.mp4'
+    steps:
+      - name: Publish Video00 rerun id
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          content=$(jq -n --argjson run "$GITHUB_RUN_ID" --arg sha "$GITHUB_SHA" --arg endpoint "$ENDPOINT_ID" '{run_id:$run,head_sha:$sha,endpoint_id:$endpoint,status:"in_progress"}' | base64 -w0)
+          current=$(curl --silent --show-error --header "Authorization: Bearer $GH_TOKEN" --header 'Accept: application/vnd.github+json' "https://api.github.com/repos/$GITHUB_REPOSITORY/contents/ops/video00-human-rerun-live.json?ref=cutsell/mobile-v1-clean")
+          sha=$(printf '%s' "$current" | jq -r '.sha // empty')
+          payload=$(jq -n --arg msg "ops: publish Video00 human rerun $GITHUB_RUN_ID" --arg content "$content" --arg branch "cutsell/mobile-v1-clean" --arg sha "$sha" '{message:$msg,content:$content,branch:$branch} + (if $sha=="" then {} else {sha:$sha} end)')
+          curl --fail --silent --show-error --request PUT --url "https://api.github.com/repos/$GITHUB_REPOSITORY/contents/ops/video00-human-rerun-live.json" --header "Authorization: Bearer $GH_TOKEN" --header 'Accept: application/vnd.github+json' --header 'Content-Type: application/json' --data "$payload" >/dev/null
+
+      - name: Submit Video00 to new GPU image
+        shell: bash
+        run: |
+          set -euo pipefail
+          payload=$(jq -n --arg key "$SOURCE_KEY" --arg bench "video00-human-$GITHUB_RUN_ID" '{input:{op:"focused",source_key:$key,benchmark_id:$bench}}')
+          curl --fail --silent --show-error --request POST --url "https://api.runpod.ai/v2/$ENDPOINT_ID/run" --header "Authorization: Bearer $RUNPOD_API_KEY" --header 'Content-Type: application/json' --data "$payload" --output submit.json
+          JOB_ID=$(jq -r '.id // empty' submit.json)
+          test -n "$JOB_ID"
+          echo "JOB_ID=$JOB_ID" >> "$GITHUB_ENV"
+
+      - name: Wait for Video00 completion
+        shell: bash
+        run: |
+          set -euo pipefail
+          deadline=$((SECONDS+7000))
+          while [ "$SECONDS" -lt "$deadline" ]; do
+            curl --fail --silent --show-error --url "https://api.runpod.ai/v2/$ENDPOINT_ID/status/$JOB_ID" --header "Authorization: Bearer $RUNPOD_API_KEY" --output status.json
+            status=$(jq -r '.status // empty' status.json)
+            echo "video00_status=$status"
+            case "$status" in
+              COMPLETED)
+                jq -e '.output.ok == true' status.json >/dev/null
+                jq '.output' status.json > result-output.json
+                exit 0
+                ;;
+              FAILED|TIMED_OUT|CANCELLED)
+                cat status.json | jq .
+                exit 1
+                ;;
+            esac
+            sleep 20
+          done
+          exit 1
+
+      - name: Download Video00 MP4 and JSON
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail --silent --show-error --url "https://rest.runpod.io/v1/templates" --header "Authorization: Bearer $RUNPOD_API_KEY" --output /tmp/templates.json
+          TEMPLATE=$(jq -c '[.[] | select(.name == "EditDNA-Worker-2")][0]' /tmp/templates.json)
+          for key in AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_REGION S3_BUCKET; do
+            value=$(printf '%s' "$TEMPLATE" | jq -r --arg key "$key" '.env[$key] // empty')
+            test -n "$value"
+            echo "::add-mask::$value"
+            export "$key=$value"
+          done
+          python - <<'PY'
+          import json, os
+          from urllib.parse import urlparse
+          import boto3
+          out=json.load(open('result-output.json'))
+          s3=boto3.client('s3', region_name=os.environ.get('AWS_REGION') or 'us-east-1')
+          for field,dest in [('preview_uri','video00-new.mp4'),('result_uri','video00-new.json')]:
+              u=urlparse(out[field])
+              s3.download_file(u.netloc,u.path.lstrip('/'),dest)
+          PY
+          test -s video00-new.mp4
+          test -s video00-new.json
+
+      - name: Upload Video00 human review artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: cutsell-video00-human-rerun
+          path: |
+            video00-new.mp4
+            video00-new.json
+            result-output.json
+          retention-days: 14
+
+      - name: Publish Video00 artifact ready
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          content=$(jq -n --argjson run "$GITHUB_RUN_ID" --arg sha "$GITHUB_SHA" --arg endpoint "$ENDPOINT_ID" '{run_id:$run,head_sha:$sha,endpoint_id:$endpoint,status:"artifact_ready"}' | base64 -w0)
+          current=$(curl --silent --show-error --header "Authorization: Bearer $GH_TOKEN" --header 'Accept: application/vnd.github+json' "https://api.github.com/repos/$GITHUB_REPOSITORY/contents/ops/video00-human-rerun-live.json?ref=cutsell/mobile-v1-clean")
+          sha=$(printf '%s' "$current" | jq -r '.sha // empty')
+          payload=$(jq -n --arg msg "ops: Video00 human rerun artifact ready $GITHUB_RUN_ID" --arg content "$content" --arg branch "cutsell/mobile-v1-clean" --arg sha "$sha" '{message:$msg,content:$content,branch:$branch,sha:$sha}')
+          curl --fail --silent --show-error --request PUT --url "https://api.github.com/repos/$GITHUB_REPOSITORY/contents/ops/video00-human-rerun-live.json" --header "Authorization: Bearer $GH_TOKEN" --header 'Accept: application/vnd.github+json' --header 'Content-Type: application/json' --data "$payload" >/dev/null

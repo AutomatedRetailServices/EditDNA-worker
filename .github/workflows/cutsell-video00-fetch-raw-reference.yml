@@ -1,0 +1,62 @@
+name: CutSell Video00 Fetch Raw Reference
+
+on:
+  push:
+    branches: [cutsell/mobile-v1-clean]
+    paths:
+      - .github/workflows/cutsell-video00-fetch-raw-reference.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  SOURCE_KEY: Editdna longform validation/VIDEO-2026-07-30-09-18-03.mp4
+
+jobs:
+  fetch-raw:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      RUNPOD_API_KEY: ${{ secrets.RUNPOD_API_KEY }}
+    steps:
+      - name: Load base RunPod template
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail --silent --show-error \
+            --url "https://rest.runpod.io/v1/templates" \
+            --header "Authorization: Bearer $RUNPOD_API_KEY" \
+            --output /tmp/templates.json
+          jq -c '[.[] | select(.name == "EditDNA-Worker-2")][0]' /tmp/templates.json > /tmp/base-template.json
+          test "$(cat /tmp/base-template.json)" != "null"
+
+      - name: Export S3 credentials
+        shell: bash
+        run: |
+          set -euo pipefail
+          BASE_TEMPLATE=$(cat /tmp/base-template.json)
+          for key in AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_REGION S3_BUCKET; do
+            value=$(printf '%s' "$BASE_TEMPLATE" | jq -r --arg key "$key" '.env[$key] // empty')
+            test -n "$value"
+            echo "::add-mask::$value"
+            echo "$key=$value" >> "$GITHUB_ENV"
+          done
+
+      - name: Download exact Video00 raw
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p artifact
+          aws s3 cp "s3://$S3_BUCKET/$SOURCE_KEY" artifact/video00-original-raw.mp4
+          test -s artifact/video00-original-raw.mp4
+          bytes=$(stat -c '%s' artifact/video00-original-raw.mp4)
+          test "$bytes" -gt 30000000
+          printf '{"source_key":"%s","size_bytes":%s}\n' "$SOURCE_KEY" "$bytes" > artifact/video00-original-raw-metadata.json
+
+      - name: Upload exact Video00 raw reference
+        uses: actions/upload-artifact@v4
+        with:
+          name: cutsell-video00-original-raw-reference
+          path: artifact/
+          retention-days: 14

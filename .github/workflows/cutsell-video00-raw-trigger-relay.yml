@@ -1,0 +1,25 @@
+name: CutSell Video00 Raw Trigger Relay
+
+# Manual emergency dispatch only. Automatic Video00 execution is owned by the
+# direct push trigger in cutsell-video00-raw-v5-auto-microtrim.yml.
+# Keeping this workflow manual prevents one code change from launching both a
+# push benchmark and a second relay-dispatched benchmark.
+on:
+  workflow_dispatch:
+
+permissions:
+  actions: write
+  contents: read
+
+jobs:
+  dispatch-video00-raw:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Dispatch exact branch raw benchmark
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          gh workflow run cutsell-video00-raw-v5-auto-microtrim.yml \
+            --repo "$GITHUB_REPOSITORY" \
+            --ref cutsell/mobile-v1-clean

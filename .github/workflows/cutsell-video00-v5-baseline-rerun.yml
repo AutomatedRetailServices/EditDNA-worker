@@ -1,0 +1,167 @@
+name: CutSell Video00 Exact V5 Baseline
+
+on:
+  push:
+    branches: [cutsell/mobile-v1-clean]
+    paths:
+      - .github/workflows/cutsell-video00-v5-baseline-rerun.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+env:
+  IMAGE_REPO: ghcr.io/automatedretailservices/cutsell-serverless
+  V5_SHA: a1566779664662e9e947f8e3f6ec3a962d860378
+
+jobs:
+  video00:
+    runs-on: ubuntu-latest
+    timeout-minutes: 75
+    env:
+      RUNPOD_API_KEY: ${{ secrets.RUNPOD_API_KEY }}
+      GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+      ENDPOINT_ID: xxu7autt8mv2rn
+      SOURCE_KEY: Editdna longform validation/VIDEO-2026-07-30-09-18-03.mp4
+      BENCHMARK_ID: video00-exact-v5-${{ github.run_id }}
+    steps:
+      - name: Checkout exact V5
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.V5_SHA }}
+          fetch-depth: 1
+
+      - name: Verify exact V5 source
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$V5_SHA"
+          grep -q 'polish_human_boundaries_v5' cutsell_worker/universal_clean_cut.py
+          grep -q 'source_evidenced_multimodal_v5_complete' cutsell_worker/universal_clean_cut.py
+
+      - name: Login GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push immutable exact V5 image
+        shell: bash
+        run: |
+          set -euo pipefail
+          image="$IMAGE_REPO:exact-v5-${V5_SHA}"
+          docker build -t "$image" -f Dockerfile.cutsell.serverless .
+          docker push "$image"
+          docker buildx imagetools inspect "$image" > image-inspect.txt
+          digest=$(awk '/^Digest:/ {print $2; exit}' image-inspect.txt)
+          test -n "$digest"
+          echo "V5_IMAGE=$IMAGE_REPO@$digest" >> "$GITHUB_ENV"
+          echo "V5_IMAGE_DIGEST=$digest" >> "$GITHUB_ENV"
+
+      - name: Load storage credentials
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail --silent --show-error --url "https://rest.runpod.io/v1/templates" --header "Authorization: Bearer $RUNPOD_API_KEY" --output /tmp/templates.json
+          TEMPLATE=$(jq -c '[.[] | select(.name == "EditDNA-Worker-2")][0]' /tmp/templates.json)
+          test "$TEMPLATE" != "null"
+          for key in AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_REGION S3_BUCKET; do
+            value=$(printf '%s' "$TEMPLATE" | jq -r --arg key "$key" '.env[$key] // empty')
+            test -n "$value"
+            echo "::add-mask::$value"
+            echo "$key=$value" >> "$GITHUB_ENV"
+          done
+
+      - name: Create exact V5 template
+        shell: bash
+        run: |
+          set -euo pipefail
+          name="cutsell-video00-exact-v5-$GITHUB_RUN_ID"
+          jq -n --arg image "$V5_IMAGE" --arg name "$name" --arg aws_key "$AWS_ACCESS_KEY_ID" --arg aws_secret "$AWS_SECRET_ACCESS_KEY" --arg aws_region "$AWS_REGION" --arg bucket "$S3_BUCKET" --arg gemini "$GEMINI_API_KEY" '{imageName:$image,name:$name,category:"NVIDIA",containerDiskInGb:40,isPublic:false,isServerless:true,env:{AWS_ACCESS_KEY_ID:$aws_key,AWS_SECRET_ACCESS_KEY:$aws_secret,AWS_REGION:$aws_region,S3_BUCKET:$bucket,GEMINI_API_KEY:$gemini,CUTSELL_BRAIN_BACKEND:"runpod_local",CUTSELL_EDITORIAL_MODE:"clean_cut",CUTSELL_ASR_MODEL:"medium",CUTSELL_CLEAN_CUT_JUDGE:"0",CUTSELL_HYBRID_PROVIDER:"google",CUTSELL_HYBRID_LLM_ENABLED:"1",CUTSELL_HYBRID_PRIMARY_MODEL:"gemini-3.5-flash-lite",CUTSELL_HYBRID_ESCALATION_MODEL:"gemini-3.6-flash",CUTSELL_HYBRID_MAX_SESSION_USD:"0.0075",CUTSELL_HYBRID_MAX_EDIT_USD:"0.50"},ports:[],volumeInGb:0,volumeMountPath:"/workspace"}' > /tmp/template-create.json
+          code=$(curl --silent --show-error --write-out '%{http_code}' --request POST --url 'https://rest.runpod.io/v1/templates' --header "Authorization: Bearer $RUNPOD_API_KEY" --header 'Content-Type: application/json' --data @/tmp/template-create.json --output /tmp/template.json)
+          test "$code" = "200" || test "$code" = "201"
+          TEMPLATE_ID=$(jq -r '.id // empty' /tmp/template.json)
+          test -n "$TEMPLATE_ID"
+          echo "V5_TEMPLATE_ID=$TEMPLATE_ID" >> "$GITHUB_ENV"
+
+      - name: Roll endpoint to exact V5
+        shell: bash
+        run: |
+          set -euo pipefail
+          jq -n --arg template "$V5_TEMPLATE_ID" '{templateId:$template,workersMin:0,workersMax:1,scalerType:"QUEUE_DELAY",scalerValue:2,idleTimeout:5,executionTimeoutMs:900000}' > /tmp/endpoint-patch.json
+          code=$(curl --silent --show-error --write-out '%{http_code}' --request PATCH --url "https://rest.runpod.io/v1/endpoints/$ENDPOINT_ID" --header "Authorization: Bearer $RUNPOD_API_KEY" --header 'Content-Type: application/json' --data @/tmp/endpoint-patch.json --output /tmp/endpoint.json)
+          test "$code" = "200"
+
+      - name: CUDA health
+        shell: bash
+        run: |
+          set -euo pipefail
+          code=$(curl --silent --show-error --write-out '%{http_code}' --request POST --url "https://api.runpod.ai/v2/$ENDPOINT_ID/run" --header "Authorization: Bearer $RUNPOD_API_KEY" --header 'Content-Type: application/json' --data '{"input":{"op":"health"}}' --output /tmp/submit-health.json)
+          test "$code" = "200"
+          HEALTH_JOB_ID=$(jq -r '.id // empty' /tmp/submit-health.json)
+          test -n "$HEALTH_JOB_ID"
+          deadline=$((SECONDS+900))
+          while [ "$SECONDS" -lt "$deadline" ]; do
+            curl --fail --silent --show-error --url "https://api.runpod.ai/v2/$ENDPOINT_ID/status/$HEALTH_JOB_ID" --header "Authorization: Bearer $RUNPOD_API_KEY" --output /tmp/health.json
+            status=$(jq -r '.status // empty' /tmp/health.json)
+            echo "health_status=$status"
+            case "$status" in
+              COMPLETED) jq -e '.output.ok == true and .output.cuda_available == true' /tmp/health.json >/dev/null; exit 0 ;;
+              FAILED|TIMED_OUT|CANCELLED) cat /tmp/health.json; exit 1 ;;
+            esac
+            sleep 5
+          done
+          exit 1
+
+      - name: Submit Video00
+        shell: bash
+        run: |
+          set -euo pipefail
+          jq -n --arg source "$SOURCE_KEY" --arg benchmark "$BENCHMARK_ID" '{input:{op:"focused",source_key:$source,benchmark_id:$benchmark}}' > /tmp/payload.json
+          code=$(curl --silent --show-error --write-out '%{http_code}' --request POST --url "https://api.runpod.ai/v2/$ENDPOINT_ID/run" --header "Authorization: Bearer $RUNPOD_API_KEY" --header 'Content-Type: application/json' --data @/tmp/payload.json --output /tmp/submit.json)
+          test "$code" = "200"
+          JOB_ID=$(jq -r '.id // empty' /tmp/submit.json)
+          test -n "$JOB_ID"
+          echo "JOB_ID=$JOB_ID" >> "$GITHUB_ENV"
+
+      - name: Wait for Video00
+        shell: bash
+        run: |
+          set -euo pipefail
+          deadline=$((SECONDS+2400))
+          while [ "$SECONDS" -lt "$deadline" ]; do
+            curl --fail --silent --show-error --url "https://api.runpod.ai/v2/$ENDPOINT_ID/status/$JOB_ID" --header "Authorization: Bearer $RUNPOD_API_KEY" --output /tmp/status.json
+            status=$(jq -r '.status // empty' /tmp/status.json)
+            echo "video00_exact_v5_status=$status"
+            case "$status" in
+              COMPLETED)
+                PREVIEW_URI=$(jq -r '.output.preview_uri // empty' /tmp/status.json)
+                RESULT_URI=$(jq -r '.output.result_uri // empty' /tmp/status.json)
+                test -n "$PREVIEW_URI" && test -n "$RESULT_URI"
+                echo "PREVIEW_URI=$PREVIEW_URI" >> "$GITHUB_ENV"
+                echo "RESULT_URI=$RESULT_URI" >> "$GITHUB_ENV"
+                exit 0 ;;
+              FAILED|TIMED_OUT|CANCELLED) cat /tmp/status.json; exit 1 ;;
+            esac
+            sleep 10
+          done
+          exit 1
+
+      - name: Download exact V5 artifact
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p artifact
+          aws s3 cp "$PREVIEW_URI" artifact/video00-exact-v5.mp4
+          aws s3 cp "$RESULT_URI" artifact/video00-exact-v5.json
+          test -s artifact/video00-exact-v5.mp4
+          test -s artifact/video00-exact-v5.json
+
+      - name: Upload exact V5 human review artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: cutsell-video00-exact-v5-human-review
+          path: artifact/
+          retention-days: 14

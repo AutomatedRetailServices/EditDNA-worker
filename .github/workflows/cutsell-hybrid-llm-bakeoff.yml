@@ -1,0 +1,50 @@
+name: CutSell Hybrid LLM Bake-off
+
+on:
+  push:
+    branches:
+      - cutsell/mobile-v1-clean
+    paths:
+      - .github/workflows/cutsell-hybrid-llm-bakeoff.yml
+      - scripts/hybrid_llm_bakeoff.py
+
+permissions:
+  contents: read
+
+jobs:
+  bakeoff:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+      GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Verify secrets without revealing values
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "${GROQ_API_KEY:-}" || { echo 'GROQ_API_KEY missing'; exit 3; }
+          test -n "${GEMINI_API_KEY:-}" || { echo 'GEMINI_API_KEY missing'; exit 4; }
+          echo 'Groq and Gemini credentials are present.'
+
+      - name: Run approved capped bake-off
+        shell: bash
+        run: |
+          set -euo pipefail
+          python scripts/hybrid_llm_bakeoff.py
+
+      - name: Upload bake-off report
+        uses: actions/upload-artifact@v4
+        with:
+          name: cutsell-hybrid-llm-bakeoff-${{ github.sha }}
+          path: artifacts/hybrid-llm-bakeoff.json
+          if-no-files-found: error
+          retention-days: 14

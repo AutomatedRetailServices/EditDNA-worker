@@ -1,0 +1,119 @@
+name: Recover Serverless Focused 00-02-03 Artifacts
+
+on:
+  push:
+    branches:
+      - cutsell/mobile-v1-clean
+    paths:
+      - .github/workflows/cutsell-serverless-focused-recover-32658018891.yml
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  recover:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      RUNPOD_API_KEY: ${{ secrets.RUNPOD_API_KEY }}
+      ENDPOINT_ID: rdip9xhx6gi2px
+      ORIGINAL_RUN_ID: '32658018891'
+      SOURCE_SHA: f4ea2f9d5676d260205d6fe8364b99b35e4eed39
+    steps:
+      - name: Publish recovery run id
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          content=$(jq -n --argjson run "$GITHUB_RUN_ID" --arg original "$ORIGINAL_RUN_ID" --arg endpoint "$ENDPOINT_ID" --arg source "$SOURCE_SHA" '{run_id:$run,original_run_id:$original,endpoint_id:$endpoint,source_sha:$source,status:"recovering_completed_gpu_outputs"}' | base64 -w0)
+          current=$(curl --silent --show-error --header "Authorization: Bearer $GH_TOKEN" --header 'Accept: application/vnd.github+json' "https://api.github.com/repos/$GITHUB_REPOSITORY/contents/ops/serverless-focused-live.json?ref=cutsell/mobile-v1-clean")
+          sha=$(printf '%s' "$current" | jq -r '.sha // empty')
+          payload=$(jq -n --arg msg "ops: recover focused artifacts $GITHUB_RUN_ID" --arg content "$content" --arg branch "cutsell/mobile-v1-clean" --arg sha "$sha" '{message:$msg,content:$content,branch:$branch,sha:$sha}')
+          curl --fail --silent --show-error --request PUT --url "https://api.github.com/repos/$GITHUB_REPOSITORY/contents/ops/serverless-focused-live.json" --header "Authorization: Bearer $GH_TOKEN" --header 'Accept: application/vnd.github+json' --header 'Content-Type: application/json' --data "$payload" >/dev/null
+
+      - name: Recover exact completed RunPod outputs
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json, os, urllib.request
+          endpoint=os.environ['ENDPOINT_ID']
+          token=os.environ['RUNPOD_API_KEY']
+          jobs={
+              'video00':'736eb8f8-a2da-4ac9-a22c-c98800292108-u1',
+              'video02':'c828d47b-c485-4403-9493-52fd377f547a-u2',
+              'video03':'9457c204-f53a-4aa8-8fa5-c39fdd0e4041-u1',
+          }
+          outputs={}
+          for name,jid in jobs.items():
+              req=urllib.request.Request(f'https://api.runpod.ai/v2/{endpoint}/status/{jid}',headers={'Authorization':f'Bearer {token}'})
+              with urllib.request.urlopen(req, timeout=60) as r:
+                  data=json.load(r)
+              status=str(data.get('status') or '')
+              print(name,status,flush=True)
+              if status!='COMPLETED':
+                  raise SystemExit(f'{name} not completed: {data}')
+              output=data.get('output')
+              if not isinstance(output,dict) or output.get('ok') is not True:
+                  raise SystemExit(f'{name} invalid output: {data}')
+              outputs[name]=output
+          json.dump(outputs,open('focused-results.json','w'),ensure_ascii=False,indent=2)
+          json.dump(jobs,open('focused-jobs.json','w'),indent=2)
+          PY
+
+      - name: Load S3 credentials and download MP4 plus JSON
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts
+          curl --fail --silent --show-error --url "https://rest.runpod.io/v1/templates" --header "Authorization: Bearer $RUNPOD_API_KEY" --output /tmp/templates.json
+          TEMPLATE=$(jq -c '[.[] | select(.name == "EditDNA-Worker-2")][0]' /tmp/templates.json)
+          for key in AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_REGION S3_BUCKET; do
+            value=$(printf '%s' "$TEMPLATE" | jq -r --arg key "$key" '.env[$key] // empty')
+            test -n "$value" || { echo "$key missing"; exit 6; }
+            echo "::add-mask::$value"
+            export "$key=$value"
+          done
+          python - <<'PY'
+          import json, os
+          from pathlib import Path
+          from urllib.parse import urlparse
+          import boto3
+          r=json.load(open('focused-results.json'))
+          s3=boto3.client('s3',region_name=os.environ.get('AWS_REGION') or 'us-east-1')
+          for name,out in r.items():
+              for field,ext in [('preview_uri','mp4'),('result_uri','json')]:
+                  uri=out.get(field)
+                  if not uri:
+                      raise SystemExit(f'{name} missing {field}: {out}')
+                  u=urlparse(uri)
+                  dest=Path('artifacts')/f'{name}.{ext}'
+                  s3.download_file(u.netloc,u.path.lstrip('/'),str(dest))
+                  if not dest.exists() or dest.stat().st_size<=0:
+                      raise SystemExit(f'missing {dest}')
+                  print(name,field,dest.stat().st_size)
+          PY
+
+      - name: Upload recovered focused artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: cutsell-serverless-focused-00-02-03-recovered
+          path: |
+            focused-jobs.json
+            focused-results.json
+            artifacts/*
+          retention-days: 14
+
+      - name: Publish artifacts ready
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          content=$(jq -n --argjson run "$GITHUB_RUN_ID" --arg original "$ORIGINAL_RUN_ID" --arg endpoint "$ENDPOINT_ID" --arg source "$SOURCE_SHA" '{run_id:$run,original_run_id:$original,endpoint_id:$endpoint,source_sha:$source,status:"artifacts_ready"}' | base64 -w0)
+          current=$(curl --silent --show-error --header "Authorization: Bearer $GH_TOKEN" --header 'Accept: application/vnd.github+json' "https://api.github.com/repos/$GITHUB_REPOSITORY/contents/ops/serverless-focused-live.json?ref=cutsell/mobile-v1-clean")
+          sha=$(printf '%s' "$current" | jq -r '.sha // empty')
+          payload=$(jq -n --arg msg "ops: focused recovered artifacts ready $GITHUB_RUN_ID" --arg content "$content" --arg branch "cutsell/mobile-v1-clean" --arg sha "$sha" '{message:$msg,content:$content,branch:$branch,sha:$sha}')
+          curl --fail --silent --show-error --request PUT --url "https://api.github.com/repos/$GITHUB_REPOSITORY/contents/ops/serverless-focused-live.json" --header "Authorization: Bearer $GH_TOKEN" --header 'Accept: application/vnd.github+json' --header 'Content-Type: application/json' --data "$payload" >/dev/null

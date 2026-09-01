@@ -1,0 +1,107 @@
+name: CutSell Clean Worker CI
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "cutsell_worker/**"
+      - "cutsell_app/**"
+      - "tests/test_cutsell_*.py"
+      - "tests/data/cutsell_golden_expectations.json"
+      - "Dockerfile.cutsell"
+      - "Dockerfile.cutsell.worker"
+      - "requirements.cutsell.api.txt"
+      - "requirements.cutsell.worker.txt"
+      - "render.cutsell.yaml"
+      - ".github/workflows/cutsell-clean-worker-ci.yml"
+  push:
+    branches: [main]
+    paths:
+      - "cutsell_worker/**"
+      - "cutsell_app/**"
+      - "tests/test_cutsell_*.py"
+      - "tests/data/cutsell_golden_expectations.json"
+      - "Dockerfile.cutsell"
+      - "Dockerfile.cutsell.worker"
+      - "requirements.cutsell.api.txt"
+      - "requirements.cutsell.worker.txt"
+      - "render.cutsell.yaml"
+      - ".github/workflows/cutsell-clean-worker-ci.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  test-clean-worker:
+    runs-on: ubuntu-latest
+    env:
+      PYTHONPATH: ${{ github.workspace }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Compile clean worker and app
+        run: python -m compileall cutsell_worker cutsell_app
+      - name: Install test runner and runtime dependencies
+        run: pip install pytest httpx -r requirements.cutsell.api.txt
+      - name: Run CutSell tests
+        run: pytest -q tests/test_cutsell_*.py
+      - name: Build staging API container
+        run: docker build -f Dockerfile.cutsell -t cutsell-api-ci:${{ github.sha }} .
+      - name: Boot API container and verify health endpoint
+        shell: bash
+        run: |
+          set -euo pipefail
+          cid=$(docker run -d -e PORT=8000 -p 18000:8000 cutsell-api-ci:${{ github.sha }})
+          trap 'docker logs "$cid" || true; docker rm -f "$cid" >/dev/null 2>&1 || true' EXIT
+          for attempt in $(seq 1 30); do
+            if curl --fail --silent http://127.0.0.1:18000/v1/healthz > health.json; then
+              cat health.json
+              python - <<'PY'
+          import json
+          data=json.load(open('health.json'))
+          assert data['ok'] is True
+          assert data['service'] == 'cutsell-api'
+          PY
+              exit 0
+            fi
+            sleep 1
+          done
+          echo 'CutSell API container did not become healthy'
+          exit 1
+
+      - name: Notify Claude Routine
+        if: always()
+        shell: bash
+        env:
+          CLAUDE_ROUTINE_URL: ${{ secrets.CUTSELL_CLAUDE_ROUTINE_URL }}
+          CLAUDE_ROUTINE_TOKEN: ${{ secrets.CUTSELL_CLAUDE_ROUTINE_TOKEN }}
+          WORKFLOW_STATUS: ${{ job.status }}
+          HEAD_BRANCH: ${{ github.head_ref || github.ref_name }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          set +e
+          if [ -z "${CLAUDE_ROUTINE_URL:-}" ]; then
+            echo "CUTSELL_CLAUDE_ROUTINE_URL not set; skipping Claude Routine notification."
+            exit 0
+          fi
+          # Small, safe run-identity payload only: no secrets, logs, artifact
+          # contents, S3 URLs, or provider keys.
+          payload=$(jq -n \
+            --arg repository "$GITHUB_REPOSITORY" \
+            --arg workflow "$GITHUB_WORKFLOW" \
+            --arg run_id "$GITHUB_RUN_ID" \
+            --arg run_attempt "$GITHUB_RUN_ATTEMPT" \
+            --arg head_branch "$HEAD_BRANCH" \
+            --arg head_sha "$HEAD_SHA" \
+            --arg status "$WORKFLOW_STATUS" \
+            '{repository:$repository, workflow:$workflow, run_id:$run_id, run_attempt:$run_attempt, head_branch:$head_branch, head_sha:$head_sha, status:$status}')
+          curl --silent --show-error --max-time 15 \
+            --request POST \
+            --url "$CLAUDE_ROUTINE_URL" \
+            --header "Authorization: Bearer $CLAUDE_ROUTINE_TOKEN" \
+            --header 'Content-Type: application/json' \
+            --data "$payload" \
+            || echo "Claude Routine notification failed (non-blocking)."
+          exit 0
