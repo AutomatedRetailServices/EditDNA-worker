@@ -76,6 +76,13 @@ def _print_safe(label: str, obj: dict | None, allowlist: set[str]) -> None:
     if not obj:
         print(f"--- {label}: absent/unavailable ---")
         return
+    # Key NAMES carry no secret content (unlike values), so print the full
+    # set of top-level keys the live response actually has -- this is how a
+    # field this allowlist didn't anticipate (e.g. the real GPU-selection
+    # field name, whatever RunPod actually calls it) gets discovered rather
+    # than silently dropped and never noticed.
+    print(f"--- {label}: all top-level key names present (values never shown here) ---")
+    print(sorted(obj.keys()))
     print(f"--- {label} (allowlisted fields only; secrets/env never printed) ---")
     print(json.dumps(filter_safe(obj, allowlist), indent=2, default=str))
 
