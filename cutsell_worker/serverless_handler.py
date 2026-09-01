@@ -226,9 +226,17 @@ def _locked_selection(payload: dict) -> dict:
     }
 
 
-def handler(job: dict) -> dict:
-    payload = dict(job.get("input") or {})
-    op = str(payload.get("op") or "health").strip().lower()
+def run_op(op: str, payload: dict) -> dict:
+    """Provider-neutral canonical CutSell job dispatch (RunPod Pod On-Demand
+    execution-fallback work). This is the ONE dispatch table -- RunPod
+    Serverless's `handler()` below and the RunPod Pod on-demand job server
+    (`cutsell_worker/pod_job_server.py`) both call this exact function, so
+    there is never a second/forked implementation of "which op does what".
+    Everything above this point (`_health`, `_focused`, `_locked_selection`)
+    was already a plain dict-in/dict-out callable with no RunPod-specific
+    object touched inside -- only the job-envelope unwrapping below was
+    ever transport-specific."""
+    op = str(op or "health").strip().lower()
     if op == "health":
         return _health()
     if op == "focused":
@@ -236,6 +244,16 @@ def handler(job: dict) -> dict:
     if op == "locked_selection":
         return _locked_selection(payload)
     raise ValueError(f"unsupported op: {op}")
+
+
+def handler(job: dict) -> dict:
+    """RunPod Serverless transport adapter: unwraps the RunPod job envelope
+    (`job["input"]`) and hands the payload to the shared canonical
+    dispatcher. This function and `runpod.serverless.start(...)` below are
+    the ONLY RunPod-Serverless-specific code in this module."""
+    payload = dict(job.get("input") or {})
+    op = str(payload.get("op") or "health")
+    return run_op(op, payload)
 
 
 if __name__ == "__main__":

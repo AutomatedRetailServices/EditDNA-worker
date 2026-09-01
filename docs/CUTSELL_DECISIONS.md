@@ -1946,6 +1946,134 @@ key-name-only diagnostic step -- the actual live data above is the third run's r
 output, not inferred. Full `tests/test_cutsell_*.py` CI glob plus all new test files
 green, `compileall` clean.
 
+## D-042 — CutSell QA GPU execution fallback: RunPod Pod On-Demand automation (infrastructure only)
+
+**Status: CANONICAL (code built + tested; first live health-only Pod test not yet run)**
+
+D-041's own escalation concluded with two independent, hours-apart, `workersMin=1`
+warm-worker isolation tests both confirming a **persistent** RunPod Serverless
+worker-provisioning/account-placement failure (see D-041 and
+`ops/runpod-support-report-gpu-allowlist-discrepancy.md`), now held for RunPod Support's
+response. Rather than block all CutSell QA GPU work on that response, this decision adds
+a second, interchangeable execution backend so paid QA benchmarking can continue on
+RunPod Pods (persistent GPU instances) while Serverless recovery is pending -- **without
+replacing, deleting, or degrading Serverless**, which remains the production backend and
+is reactivated the moment RunPod resolves the provisioning issue.
+
+**Architecture**: `gpu_execution_provider.py` defines the `GPUExecutionProvider`
+Protocol (`health_check() -> HealthCheckResult`, `teardown() -> None`) plus
+`RunPodServerlessExecutionProvider`, a thin wrapper around D-041's already-tested
+`wait_for_endpoint_ready`/`submit_and_poll_health` -- not a reimplementation.
+`runpod_pod_provider.py` adds `RunPodPodExecutionProvider`, the new RunPod Pod on-demand
+implementation, using the exact same injectable `Transport` pattern
+`runpod_orchestration.py` established (fakes in tests, `UrllibTransport` in production).
+Both providers return the identical `HealthCheckResult` dataclass shape
+(`execution_provider`, `passed`, `classification`, `elapsed_s`, `detail`) -- output-format
+parity, never a forked result schema.
+
+**One canonical benchmark contract, preserved by construction**: `cutsell_worker/
+serverless_handler.py`'s op-dispatch table (`health`/`focused`/`locked_selection`) was
+already a set of plain dict-in/dict-out functions with no RunPod object touched inside --
+the ONLY transport-specific code in that file was `handler()`'s job-envelope unwrapping.
+This decision extracts that dispatch into `run_op(op, payload) -> dict`, and `handler()`
+now just unwraps `job["input"]` and calls it. `cutsell_worker/pod_job_server.py` (a
+stdlib-only `http.server`, matching this repo's no-new-dependency policy for
+orchestration/transport code) is the Pod-side counterpart: it exposes `GET /health` and
+`POST /run` and calls that exact same `run_op`. There is one canonical CutSell job
+runner; the two backends only differ in how a job reaches it (RunPod's async
+Serverless job-queue envelope vs. a direct synchronous HTTP call to a running Pod).
+
+**GPU pool + cost safety**: `runpod_pod_provider.APPROVED_POD_GPU_TYPE_IDS` is the
+conceptual preference order RTX 4090 -> A40 -> RTX A6000 -> L4 (current image: PyTorch
+2.6 / CUDA 12.4). `EXCLUDED_POD_GPU_TYPE_IDS` explicitly and permanently excludes RTX PRO
+6000 Blackwell Server Edition (the exact D-041 GPU-fallback-audit incompatibility) and
+H100/H200/A100, regardless of price or catalog-reported availability -- assertions in
+`rank_gpu_candidates` and dedicated tests guard against either ever entering the approved
+pool. GPU availability is never assumed: `fetch_pod_gpu_catalog` reads RunPod's live
+`/v1/gpuTypes` catalog for price/availability (failing safely to an empty catalog, never
+an exception, on any read failure), and actual Pod creation is the authoritative
+availability signal -- `RunPodPodExecutionProvider._select_and_create_fresh` attempts
+creation in ranked, under-ceiling order and only advances to the next candidate on a
+capacity-shaped error (`looks_like_capacity_error`); a non-capacity error (auth, quota,
+malformed request) is fatal and is never retried across GPU types. A configurable QA
+hourly cost ceiling (`DEFAULT_COST_CEILING_USD_PER_HR = 1.50`, overridable via the new
+workflow's `qa_pod_cost_ceiling_usd_per_hr` input) is enforced before any creation
+attempt; if every available approved GPU is priced above it, the provider reports
+`POD_COST_CEILING_EXCEEDED` and provisions nothing.
+
+**Lifecycle**: `RunPodPodExecutionProvider.ensure_ready()` implements TEST REQUESTED ->
+inspect existing Pod (by an optional caller-supplied `existing_pod_id`) -> reuse if
+already `RUNNING` with a matching image -> one bounded restart attempt if `STOPPED`/
+`EXITED` -> on restart failure/timeout or any other unexpected state (wrong image,
+`ERROR`, disappeared), delete the stale Pod and create exactly one fresh Pod via the GPU
+search above -- never an unbounded restart/recreate loop (pinned by
+`test_recreation_is_bounded_not_looped`). `teardown()` always STOPs (never deletes --
+reuse-first) the Pod this instance is holding, retries the STOP call once on failure, and
+is a safe no-op if no Pod was ever acquired.
+
+**Concurrency**: rather than invent a second, divergent distributed-lock primitive, the
+new workflow reuses the exact mechanism the Serverless RAW workflow already relies on for
+the same purpose -- a GitHub Actions `concurrency: group:` block (`cutsell-video00-pod-qa`,
+`cancel-in-progress: false` so a running test finishes and stops its Pod rather than being
+killed mid-flight).
+
+**Workflow**: `.github/workflows/cutsell-video00-pod-raw.yml` is a new, dedicated,
+`workflow_dispatch`-only workflow (no `push:` trigger of any kind -- ordinary commits to
+`cutsell/mobile-v1-clean` can never provision an on-demand Pod). It builds the same
+`Dockerfile.cutsell.serverless` image RunPod Serverless already uses, runs
+`runpod_pod_health_gate.py` (provision/reuse -> HEALTH ONLY -> guaranteed STOP in
+`finally`), uploads the health summary as an artifact, and issues an independent
+belt-and-suspenders force-STOP as a second safety net in case the Python process itself
+never reached its `finally` (e.g. the runner was killed) -- mirroring the Serverless RAW
+workflow's own redundant `if: always()` teardown step. Pod reuse across manual runs is by
+an `existing_pod_id` workflow input (the prior run's summary names the Pod id to pass
+back in) rather than auto-persisted state -- adequate for QA's low-frequency, human-
+initiated usage; not claimed to be more than that.
+
+**Selector**: `gpu_execution_provider.EXECUTION_BACKEND_SERVERLESS`/
+`EXECUTION_BACKEND_POD` (`"serverless"`/`"pod"`) is the two-and-only-two valid backend
+selector. Serverless remains the default/production backend everywhere except this new,
+manually-dispatched QA workflow, which is `pod`-only for now, by construction (no
+`execution_backend` input exists yet -- there is exactly one workflow for each backend).
+When RunPod Support resolves the Serverless provisioning issue, Serverless is used again
+for QA without reverting any of this work.
+
+**Testing**: 26 tests in `tests/test_runpod_pod_provider.py` (reuse, restart-succeeds,
+restart-unavailable-recreate, stale-wrong-image-recreate, fresh-create, the full
+RTX4090->A40->A6000->L4 fallback chain, no-compatible-GPU, cost-ceiling rejection
+(both the "cheaper approved GPU chosen over an expensive one" and "all approved GPUs over
+ceiling" shapes), Blackwell-never-attempted-even-if-cheapest, health pass/fail, health
+never attempted when the lifecycle itself fails, one-bounded-recreation-succeeds,
+recreation-is-bounded-not-looped, STOP-after-success/failure/exception via `finally`,
+STOP-API-failure-retried-once, teardown-is-a-noop-with-no-pod, GPU-catalog parsing/
+failure-safety, and non-capacity errors never retried across GPU types), 4 tests in
+`tests/test_gpu_execution_provider.py` (backend-selector constants, Serverless-wrapper
+call-shape parity with calling the D-041 primitives directly, Serverless teardown is a
+documented no-op, and `HealthCheckResult` schema identity across both providers), 9 tests
+in `tests/test_cutsell_pod_job_server.py` (real HTTP against the stdlib server on an
+ephemeral port: health/run dispatch, default-op, 404s, invalid/non-object JSON bodies,
+and an exception inside `run_op` becoming a 500 rather than crashing the server or
+leaving it unable to answer the next request), 4 tests in `tests/
+test_runpod_pod_health_gate.py` (pass/fail/raise all still call `teardown()`,
+`existing_pod_id` env var threaded through), and 5 tests in `tests/
+test_cutsell_serverless_run_op_dispatch.py` locking that `handler()` delegates to
+`run_op()` rather than re-implementing dispatch. Full `tests/test_cutsell_*`/D-041/D-042
+suite green; `compileall` clean. (Two pre-existing, unrelated failures --
+`tests/test_semantic_stitch.py`'s module-level collection error and one
+`tests/test_hybrid_story_guard_incomplete_retry.py` assertion -- were confirmed identical
+on the unmodified base commit before this work began and are therefore out of this
+decision's scope; not touched, per the standing "infrastructure only, no editorial
+changes" constraint.)
+
+**Not yet done / explicitly gated**: this decision covers the provider abstraction,
+lifecycle automation, GPU search, cost safety, and the health-only workflow --
+**no real GPU or Pod has been touched yet.** The full canonical Video00 benchmark on a
+Pod (the same D-021 pipeline stages Serverless already runs, via the same `run_op`) is
+deliberately not wired into the new workflow yet and stays gated on: (1) the first live
+health-only Pod test passing, and (2) separate, explicit authorization for the first full
+Pod-backed Video00 benchmark. Nothing in this decision changes D-040, any
+`cutsell_worker/` editorial module, `main`, or PR #25's draft/open state.
+
 ## Change rule
 
 When a new decision changes product behavior, update this file in the same development cycle. Do not silently redefine CutSell through code alone.

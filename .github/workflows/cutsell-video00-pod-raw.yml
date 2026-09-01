@@ -1,0 +1,140 @@
+name: CutSell Video00 Pod RAW (QA execution fallback)
+
+# D-042: CutSell QA GPU execution fallback -- RunPod Pod On-Demand automation.
+# KEEP SERVERLESS FULLY AVAILABLE. This is a separate, manual-dispatch-only
+# QA workflow -- it does NOT replace, modify, or share a trigger with
+# cutsell-video00-raw-v5-auto-microtrim.yml (RunPod Serverless remains the
+# production RAW backend, untouched by this file). Deliberately has no
+# `push:` trigger of any kind: ordinary code pushes to
+# cutsell/mobile-v1-clean must never provision an on-demand Pod.
+#
+# Current phase: HEALTH-ONLY. Per the standing directive, the first live
+# action on a real GPU is strictly POD PROVISION/REUSE -> HEALTH -> STOP,
+# with a report -- never Video00. The full canonical benchmark
+# (`execution_backend: pod`) stays gated on separate, explicit
+# authorization once this health-only gate has passed and been reviewed.
+
+on:
+  workflow_dispatch:
+    inputs:
+      existing_pod_id:
+        description: >-
+          Optional: reuse this QA Pod id (from a previous run's summary)
+          instead of creating a fresh one. Leave blank to let the provider
+          search the approved GPU pool and create a new Pod.
+        required: false
+        default: ""
+      qa_pod_cost_ceiling_usd_per_hr:
+        description: "QA Pod hourly cost ceiling in USD. Never provisions above this."
+        required: false
+        default: "1.50"
+
+concurrency:
+  # Same officially-supported mechanism the Serverless RAW workflow already
+  # uses for its own concurrency group -- prevents two Pod-QA workflow runs
+  # from touching the same QA Pod identity at once. Deliberately does NOT
+  # cancel-in-progress: a running QA Pod test must finish (and STOP the
+  # Pod) rather than be killed mid-flight and leave a paid GPU running.
+  group: cutsell-video00-pod-qa
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  packages: write
+
+env:
+  IMAGE_REPO: ghcr.io/automatedretailservices/cutsell-serverless
+  QA_POD_COST_CEILING_USD_PER_HR: ${{ github.event.inputs.qa_pod_cost_ceiling_usd_per_hr }}
+  EXISTING_POD_ID: ${{ github.event.inputs.existing_pod_id }}
+
+jobs:
+  pod-health-gate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      RUNPOD_API_KEY: ${{ secrets.RUNPOD_API_KEY }}
+    steps:
+      - name: Checkout exact test head
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 1
+
+      - name: Login GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push canonical CutSell image (same Dockerfile as Serverless)
+        shell: bash
+        run: |
+          set -euo pipefail
+          image="$IMAGE_REPO:pod-qa-$GITHUB_SHA"
+          docker build -t "$image" -f Dockerfile.cutsell.serverless .
+          docker push "$image"
+          docker buildx imagetools inspect "$image" > /tmp/image.txt
+          digest=$(awk '/^Digest:/ {print $2; exit}' /tmp/image.txt)
+          test -n "$digest"
+          echo "POD_IMAGE=$IMAGE_REPO@$digest" >> "$GITHUB_ENV"
+
+      - name: Pod provision/reuse + HEALTH ONLY + guaranteed STOP
+        shell: bash
+        run: python3 runpod_pod_health_gate.py
+
+      - name: Upload Pod health summary artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cutsell-video00-pod-raw-health-summary
+          path: pod-health-summary.json
+          retention-days: 14
+          if-no-files-found: warn
+
+      - name: Print Pod health summary + reuse hint
+        if: always()
+        shell: bash
+        run: |
+          set +e
+          if [ -s pod-health-summary.json ]; then
+            cat pod-health-summary.json
+            pod_id=$(jq -r '.pod_id // empty' pod-health-summary.json)
+            if [ -n "$pod_id" ]; then
+              echo "To reuse this Pod on the next manual run, pass existing_pod_id=$pod_id."
+            fi
+          else
+            echo "No pod-health-summary.json was written -- the health gate script did not complete normally."
+          fi
+
+      # Belt-and-suspenders (D-042 "automatic stop guarantee, non-negotiable"):
+      # runpod_pod_health_gate.py's own `finally` block already calls
+      # provider.teardown() (which itself retries STOP once on failure).
+      # This step is a second, independent safety net in case the Python
+      # process itself never reached that finally block (e.g. the runner
+      # was killed) -- it re-reads the pod id from the summary artifact (if
+      # any was written) and re-issues STOP directly against the RunPod
+      # REST API, exactly like the Serverless RAW workflow's own redundant
+      # teardown step.
+      - name: Force-stop QA Pod (independent safety net)
+        if: always()
+        shell: bash
+        run: |
+          set +e
+          pod_id=""
+          if [ -s pod-health-summary.json ]; then
+            pod_id=$(jq -r '.pod_id // empty' pod-health-summary.json)
+          fi
+          if [ -z "$pod_id" ]; then
+            pod_id="${EXISTING_POD_ID:-}"
+          fi
+          if [ -z "$pod_id" ]; then
+            echo "No Pod id known to this run; nothing to force-stop."
+            exit 0
+          fi
+          curl --silent --show-error \
+            --request POST \
+            --url "https://rest.runpod.io/v1/pods/$pod_id/stop" \
+            --header "Authorization: Bearer $RUNPOD_API_KEY" \
+            --output /tmp/pod-force-stop-response.json || true
+          echo "Force-stop issued for Pod $pod_id (safety net; a no-op if the health gate already stopped it)."
