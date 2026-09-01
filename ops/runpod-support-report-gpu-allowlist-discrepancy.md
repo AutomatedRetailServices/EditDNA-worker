@@ -140,6 +140,48 @@ Please inspect, specifically:
    only a soft preference under some conditions, and guidance on enforcing
    it as a hard filter going forward.
 
+## SDK version check (2026-09-01, new — rules out a known SDK issue)
+
+Support flagged `runpod` Python SDK versions `1.7.11`–`1.10.0` as having a
+known job-pulling/tracking issue. Checked directly from two independent
+build logs (production RAW build and an earlier diagnostic probe build,
+both on 2026-09-01): the worker image installs `runpod==1.12.0` (pinned in
+`Dockerfile.cutsell.serverless` as `runpod>=1.7,<2`, which resolves to the
+newest available release at build time). **1.12.0 is above the flagged
+range — not the cause here.** Our handler's only use of the SDK
+(`runpod.serverless.start(...)`) is exactly the job-pulling loop the
+warning refers to, so this check is directly relevant, not incidental.
+
+## Warm-worker (workersMin=1) isolation test (2026-09-01, new — decisive)
+
+To test whether cold/on-demand provisioning specifically is the
+bottleneck, we created a brand-new, temporary endpoint with
+**`workersMin=1`** (forcing a standing worker independent of any job
+arrival) instead of the usual `workersMin=0`, keeping everything else
+identical (same compatible-only `gpuTypeIds` allowlist, same current
+production image, FlashBoot enabled, no region restriction):
+
+- Temp endpoint: `42jpheqrr9ly7w`, temp template: `l1bkopw88u` (both
+  deleted after the test — HTTP 204)
+- `workersMin: 1` / `workersMax: 1` **confirmed via a direct read-after-write
+  GET** immediately after creation, before any job was submitted
+- Health job `f6c36789-6c9a-4fcd-9c97-3f34891f2cfc-u2` submitted `15:12:16.94Z`
+- **Every one of ~61 status polls over the full 301.85s test window shows
+  `IN_QUEUE`, `worker_id: null` — the job never transitioned to
+  `IN_PROGRESS` even once**
+- Job cancelled, both temp resources deleted (204) immediately after
+
+**Even a forced warm/standing worker request never resulted in a worker
+being assigned.** This directly rules out "cold/on-demand provisioning is
+the bottleneck" as an explanation — `workersMin=1` should provision a
+worker regardless of whether a job has arrived, and it did not, for over 5
+minutes, on a completely fresh endpoint. Combined with the evidence above
+(API-confirmed `workersMax`/`workersMin`, funded billing, 0/15 workers
+deployed, "High Supply" GPU groups, and the fresh-endpoint result before
+this one), we consider this conclusive on our end: **no configuration
+change available to us explains the lack of worker assignment.**
+
 We are holding off on further probing (no additional endpoints, no
-Video00 runs, no configuration changes to the production endpoint) until
-Support responds or gives a specific configuration change to test.
+Video00 runs, no configuration changes to the production endpoint, no
+further health retries) until Support responds or gives a specific
+configuration change to test.
