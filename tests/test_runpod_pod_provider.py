@@ -861,6 +861,81 @@ def test_pod_execution_config_env_defaults_to_empty_when_unset():
     assert post_call[2]["env"] == {}
 
 
+def test_cloud_types_defaults_to_community_then_secure_sweep():
+    # Unchanged default behavior: every existing caller/workflow keeps
+    # sweeping COMMUNITY first, falling back to SECURE only on capacity
+    # failure -- this test locks that PodExecutionConfig.cloud_types itself
+    # being added doesn't change the default sweep order.
+    transport = FakePodTransport()
+    transport.get_gpu_types = [TransportResponse(200, [])]
+    transport.post_pods = [
+        TransportResponse(500, {"error": "no instances currently available"}),  # RTX 4090, COMMUNITY
+        TransportResponse(500, {"error": "no instances currently available"}),  # A40, COMMUNITY
+        TransportResponse(500, {"error": "no instances currently available"}),  # RTX A6000, COMMUNITY
+        TransportResponse(500, {"error": "no instances currently available"}),  # L4, COMMUNITY
+        TransportResponse(201, {"id": "pod-secure"}),  # RTX 4090, SECURE -- first SECURE attempt succeeds
+    ]
+    transport.get_pod = [TransportResponse(200, {"id": "pod-secure", "status": "RUNNING"})]
+    provider, _clock = _provider(transport, existing_pod_id=None)
+
+    result = provider.ensure_ready()
+
+    assert result.classification == POD_CREATED_FRESH
+    post_calls = [c for c in transport.calls if c[0] == "POST" and c[1].endswith("/pods")]
+    assert len(post_calls) == 5
+    assert [c[2]["cloudType"] for c in post_calls] == ["COMMUNITY"] * 4 + ["SECURE"]
+
+
+def test_cloud_types_secure_only_skips_community_entirely():
+    # D-042 controlled SECURE-cloud test: forcing cloud_types=("SECURE",)
+    # must create a genuinely SECURE-only Pod on the very first attempt --
+    # no COMMUNITY sweep at all -- so switching cloud type is really the
+    # ONE variable under test, not "COMMUNITY first, SECURE as fallback".
+    transport = FakePodTransport()
+    transport.get_gpu_types = [TransportResponse(200, [])]
+    transport.post_pods = [TransportResponse(201, {"id": "pod-secure-only"})]
+    transport.get_pod = [TransportResponse(200, {"id": "pod-secure-only", "status": "RUNNING"})]
+    provider, _clock = _provider(transport, existing_pod_id=None, cloud_types=("SECURE",))
+
+    result = provider.ensure_ready()
+
+    assert result.classification == POD_CREATED_FRESH
+    post_calls = [c for c in transport.calls if c[0] == "POST" and c[1].endswith("/pods")]
+    assert len(post_calls) == 1
+    assert post_calls[0][2]["cloudType"] == "SECURE"
+
+
+def test_cloud_types_secure_only_never_falls_back_to_community_on_capacity_error():
+    transport = FakePodTransport()
+    transport.get_gpu_types = [TransportResponse(200, [])]
+    transport.post_pods = [
+        TransportResponse(500, {"error": "no instances currently available"})
+        for _ in range(4)  # one capacity-shaped rejection per approved GPU, all SECURE
+    ]
+    provider, _clock = _provider(transport, existing_pod_id=None, cloud_types=("SECURE",))
+
+    result = provider.ensure_ready()
+
+    assert result.classification == POD_CAPACITY_UNAVAILABLE
+    post_calls = [c for c in transport.calls if c[0] == "POST" and c[1].endswith("/pods")]
+    assert len(post_calls) == 4
+    assert all(c[2]["cloudType"] == "SECURE" for c in post_calls)
+
+
+def test_cloud_types_rejects_invalid_value():
+    import pytest as _pytest
+
+    with _pytest.raises(AssertionError):
+        _config(cloud_types=("SECURE", "COMMUNITY", "BOGUS"))
+
+
+def test_cloud_types_rejects_empty_tuple():
+    import pytest as _pytest
+
+    with _pytest.raises(AssertionError):
+        _config(cloud_types=())
+
+
 # ---------------------------------------------------------------------------
 # 20. A non-capacity-shaped creation error (e.g. auth) is fatal and does not
 #     keep guessing other GPUs

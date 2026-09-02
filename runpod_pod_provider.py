@@ -478,6 +478,22 @@ class PodExecutionConfig:
     # earlier tests needed a populated env to answer pod_job_server's
     # /health. The direct-execution benchmark path does need one.
     env: Optional[dict] = None
+    # D-042 follow-up ("controlled SECURE-cloud test"): which cloud
+    # type(s) `_select_and_create_fresh` sweeps, in order. Defaults to the
+    # existing COMMUNITY-then-SECURE sweep (unchanged for every other
+    # caller/workflow). A caller that wants to isolate cloud type as the
+    # ONE variable under test -- e.g. to compare COMMUNITY vs. SECURE
+    # container-execution behavior directly, as opposed to "COMMUNITY
+    # first, SECURE only as capacity fallback" -- passes a single-element
+    # tuple, e.g. ("SECURE",), so a genuine SECURE-only Pod is created
+    # (or the run fails with POD_CAPACITY_UNAVAILABLE) rather than
+    # silently landing back on COMMUNITY first.
+    cloud_types: tuple[str, ...] = POD_CLOUD_TYPES
+
+    def __post_init__(self) -> None:
+        assert self.cloud_types, "cloud_types must not be empty"
+        for cloud_type in self.cloud_types:
+            assert cloud_type in POD_CLOUD_TYPES, f"invalid cloud_type {cloud_type!r} in cloud_types, must be one of {POD_CLOUD_TYPES}"
 
 
 @dataclass(frozen=True)
@@ -560,8 +576,11 @@ class RunPodPodExecutionProvider:
         # concluding capacity is genuinely unavailable -- see D-042's first
         # live test, which independently hit "no instances currently
         # available" on all four approved GPUs under COMMUNITY alone.
+        # `self._cfg.cloud_types` lets a caller narrow this sweep (e.g. to
+        # ("SECURE",) only) for a controlled single-variable comparison;
+        # it defaults to the full COMMUNITY-then-SECURE sweep above.
         last_detail = None
-        for cloud_type in POD_CLOUD_TYPES:
+        for cloud_type in self._cfg.cloud_types:
             for candidate in ordered:
                 pod, detail = create_pod(
                     self._transport,
@@ -669,7 +688,7 @@ class RunPodPodExecutionProvider:
             gpu_selection=selection,
             elapsed_s=self._now() - start,
             detail={
-                "reason": "Every candidate GPU rejected pod creation with a capacity-shaped error, in both COMMUNITY and SECURE cloud.",
+                "reason": f"Every candidate GPU rejected pod creation with a capacity-shaped error, in {' and '.join(self._cfg.cloud_types)} cloud.",
                 "last_error": last_detail,
             },
         )

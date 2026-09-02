@@ -2468,12 +2468,57 @@ left running.
 
 **Per the standing "do not blindly retry" instruction, Video00 was never run** (Step 4's
 gate -- "if sanity checks pass, immediately proceed to Video00" -- was never reached).
-**Not yet resolved / needs either RunPod support engagement or a different Pod/host
-allocation to distinguish from a one-off bad host** -- flagged to the user rather than
-re-attempted speculatively. The stdout-buffering gap in `runpod_pod_direct_benchmark_gate.py`
-(missing `flush=True`, unlike the entrypoint script) that made one log gap look
-artificially short is a known, still-unfixed cosmetic issue, not the cause of the
-`SANITY_CHECK_TIMEOUT` result itself.
+**Not yet resolved at the time this checkpoint was first written / needed either RunPod
+support engagement or a different Pod/host allocation to distinguish from a one-off bad
+host** -- flagged to the user rather than re-attempted speculatively. **Fixed same
+cycle**: the stdout-buffering gap in `runpod_pod_direct_benchmark_gate.py` (missing
+`flush=True`, unlike the entrypoint script) that made one log gap look artificially
+short -- all `print()` calls in that script now use `flush=True`, consistent with the
+entrypoint.
+
+### D-042 follow-up -- controlled SECURE-cloud direct-execution test authorized (2026-09-02)
+
+**Status: INFRASTRUCTURE READY (cloud-type override built and tested; live SECURE-cloud
+test pending dispatch)**
+
+Per the user's explicit authorization to isolate cloud type as the one variable under
+test -- rather than accept the default COMMUNITY-then-SECURE sweep, where a SECURE
+attempt only ever happens as a capacity fallback -- `PodExecutionConfig` gains a new
+`cloud_types: tuple[str, ...] = POD_CLOUD_TYPES` field (default unchanged: the existing
+sweep, every other caller/workflow unaffected). `_select_and_create_fresh` now sweeps
+`self._cfg.cloud_types` instead of the hardcoded `POD_CLOUD_TYPES` constant, so a caller
+passing `("SECURE",)` gets a genuinely SECURE-only Pod (or a real
+`POD_CAPACITY_UNAVAILABLE` if SECURE truly has none) on the approved GPU pool (RTX 4090
+preferred, falling back to A40/RTX A6000/L4 -- no Blackwell, no COMMUNITY for this run).
+
+`runpod_pod_direct_benchmark_gate.py`'s `build_direct_exec_config()` takes an optional
+`cloud_types` parameter (defaults to `None`, meaning "don't override -- use
+`PodExecutionConfig`'s own default sweep"); `main()` reads a new `QA_POD_CLOUD_TYPE` env
+var (case-insensitive, validated against `POD_CLOUD_TYPES`, aborts before touching the
+template/API on an invalid value) and records `cloud_types_requested` in the run summary
+when set. `.github/workflows/cutsell-video00-pod-direct-raw.yml` gains a matching
+`qa_pod_cloud_type` workflow_dispatch input (default `""` -- every future dispatch keeps
+the existing sweep unless this input is explicitly set), threaded to `QA_POD_CLOUD_TYPE`.
+
+No other variable changes from the prior `SANITY_CHECK_TIMEOUT` live test: same git head
+lineage, same canonical image digest (read live from the `CutSell-Pod-QA` template, never
+hardcoded), same inline direct-execution `PodExecutionConfig` construction, same
+`python3 -m cutsell_worker.pod_direct_benchmark_entrypoint` start command, same sanity-
+check-then-Video00 gate. No editorial code, D-040, PyTorch/CUDA, or Serverless touched.
+
+11 new targeted tests (5 in `tests/test_runpod_pod_provider.py` locking the default sweep
+order, SECURE-only creation on the first attempt with no COMMUNITY calls at all,
+SECURE-only correctly returning `POD_CAPACITY_UNAVAILABLE` without ever falling back to
+COMMUNITY, and `cloud_types` validation rejecting an invalid or empty tuple; 6 in
+`tests/test_runpod_pod_direct_benchmark_gate.py` locking the pure-function default/
+override behavior and the `QA_POD_CLOUD_TYPE` env-var wiring including its
+case-insensitivity and invalid-value rejection). Full `tests/test_cutsell_*.py` glob
+(1267 tests) green. `compileall` clean. Workflow YAML validated.
+
+**Not yet run**: the live SECURE-cloud test itself. Per Directive B's exact sequence,
+this is dispatched once this infrastructure lands, with sanity-check-first, Video00 only
+on sanity pass, guaranteed teardown, and an explicit report on whether COMMUNITY->SECURE
+changed the `machine: {}` failure signature observed on both prior COMMUNITY-cloud tests.
 
 ## Change rule
 

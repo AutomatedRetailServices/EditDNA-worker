@@ -78,6 +78,15 @@ on:
         description: "Bounded wait (seconds) for the full Video00 benchmark to reach a terminal state in S3."
         required: false
         default: "5400"
+      qa_pod_cloud_type:
+        description: >-
+          Optional: force a single RunPod cloud type (SECURE or COMMUNITY)
+          as the ONE variable under test, instead of the provider's default
+          COMMUNITY-then-SECURE sweep. Leave blank for the default sweep.
+          A genuinely SECURE-only (or COMMUNITY-only) Pod is created --
+          this never falls back to the other cloud type.
+        required: false
+        default: ""
 
 concurrency:
   # Independent from both cutsell-video00-pod-raw.yml's own group and the
@@ -99,6 +108,7 @@ env:
   CUTSELL_AUTO_MICROTRIM: ${{ github.event.inputs.auto_microtrim }}
   SANITY_TIMEOUT_S: ${{ github.event.inputs.sanity_timeout_s }}
   BENCHMARK_TIMEOUT_S: ${{ github.event.inputs.benchmark_timeout_s }}
+  QA_POD_CLOUD_TYPE: ${{ github.event.inputs.qa_pod_cloud_type }}
   BENCHMARK_ID: video00-pod-direct-${{ github.run_id }}-${{ github.run_attempt }}
   # QA-only authoritative Human Gold reference -- same key the Serverless
   # RAW workflow uses, for the same manual Watch+Listen comparison. Never

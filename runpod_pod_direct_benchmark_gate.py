@@ -41,6 +41,7 @@ from typing import Callable, Optional
 from runpod_orchestration import UrllibTransport, _default_log
 from runpod_pod_provider import (
     DEFAULT_COST_CEILING_USD_PER_HR,
+    POD_CLOUD_TYPES,
     PodExecutionConfig,
     RunPodPodExecutionProvider,
 )
@@ -54,13 +55,20 @@ def build_direct_exec_config(
     pod_name: str,
     payload: dict,
     cost_ceiling_usd_per_hr: float,
+    cloud_types: Optional[tuple[str, ...]] = None,
 ) -> PodExecutionConfig:
     """Pure function: the live template's own image/env/disk are inherited
     verbatim (never reinvented); the per-run payload is added as one extra
-    env var. Never mutates `template`."""
+    env var. Never mutates `template`.
+
+    `cloud_types` defaults (None) to PodExecutionConfig's own default --
+    the existing COMMUNITY-then-SECURE sweep, unchanged for every other
+    caller. A caller running a controlled single-variable cloud-type test
+    (D-042: comparing COMMUNITY vs. SECURE container-execution behavior
+    directly) passes an explicit narrowed tuple, e.g. ("SECURE",)."""
     env = dict(template.get("env") or {})
     env["CUTSELL_BENCHMARK_PAYLOAD_JSON"] = json.dumps(payload)
-    return PodExecutionConfig(
+    kwargs = dict(
         api_key=api_key,
         image=str(template.get("imageName") or ""),
         pod_name=pod_name,
@@ -69,6 +77,9 @@ def build_direct_exec_config(
         env=env,
         cost_ceiling_usd_per_hr=cost_ceiling_usd_per_hr,
     )
+    if cloud_types is not None:
+        kwargs["cloud_types"] = cloud_types
+    return PodExecutionConfig(**kwargs)
 
 
 def s3_key_exists(s3_client, bucket: str, key: str) -> bool:
@@ -137,6 +148,21 @@ def main() -> int:
     benchmark_timeout_s = float(os.environ.get("BENCHMARK_TIMEOUT_S", "5400"))
     sanity_poll_interval_s = float(os.environ.get("SANITY_POLL_INTERVAL_S", "10"))
     benchmark_poll_interval_s = float(os.environ.get("BENCHMARK_POLL_INTERVAL_S", "15"))
+    # D-042 controlled SECURE-cloud test: unset (default) preserves the
+    # existing COMMUNITY-then-SECURE sweep for every other caller of this
+    # script. Set to force a single cloud type as the ONE variable under
+    # test -- e.g. "SECURE" -- so the Pod created is genuinely that cloud
+    # type only, never landing back on COMMUNITY first.
+    qa_pod_cloud_type = (os.environ.get("QA_POD_CLOUD_TYPE") or "").strip().upper()
+    cloud_types: Optional[tuple[str, ...]] = None
+    if qa_pod_cloud_type:
+        if qa_pod_cloud_type not in POD_CLOUD_TYPES:
+            print(
+                f"QA_POD_CLOUD_TYPE={qa_pod_cloud_type!r} is not one of {POD_CLOUD_TYPES} -- refusing to guess. Aborting.",
+                flush=True,
+            )
+            return 1
+        cloud_types = (qa_pod_cloud_type,)
 
     transport = UrllibTransport()
     template = find_template_by_name(transport, api_key, template_name)
@@ -146,6 +172,9 @@ def main() -> int:
         print(f"Template '{template_name}' not found -- refusing to guess a configuration. Aborting.", flush=True)
         Path("pod-direct-benchmark-summary.json").write_text(json.dumps(summary, indent=2))
         return 1
+
+    if cloud_types is not None:
+        summary["cloud_types_requested"] = list(cloud_types)
 
     payload = {
         "op": op,
@@ -159,6 +188,7 @@ def main() -> int:
         pod_name=os.environ.get("POD_NAME", "cutsell-qa-pod-direct"),
         payload=payload,
         cost_ceiling_usd_per_hr=cost_ceiling,
+        cloud_types=cloud_types,
     )
     provider = RunPodPodExecutionProvider(transport, config, existing_pod_id=existing_pod_id, log=_default_log)
 

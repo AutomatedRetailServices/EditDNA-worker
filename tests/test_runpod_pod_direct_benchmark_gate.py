@@ -60,6 +60,29 @@ def test_build_direct_exec_config_defaults_disk_when_template_omits_it():
     assert config.container_disk_gb == 80
 
 
+def test_build_direct_exec_config_cloud_types_unset_keeps_default_sweep():
+    # D-042 controlled SECURE-cloud test: every other caller of this
+    # function must be completely unaffected -- omitting cloud_types keeps
+    # PodExecutionConfig's own default (the existing COMMUNITY-then-SECURE
+    # sweep), not some narrowed value.
+    config = gate.build_direct_exec_config(
+        BASE_TEMPLATE, api_key="k", pod_name="n", payload={"benchmark_id": "b"}, cost_ceiling_usd_per_hr=1.5
+    )
+    assert config.cloud_types == gate.POD_CLOUD_TYPES
+
+
+def test_build_direct_exec_config_forwards_explicit_cloud_types():
+    config = gate.build_direct_exec_config(
+        BASE_TEMPLATE,
+        api_key="k",
+        pod_name="n",
+        payload={"benchmark_id": "b"},
+        cost_ceiling_usd_per_hr=1.5,
+        cloud_types=("SECURE",),
+    )
+    assert config.cloud_types == ("SECURE",)
+
+
 # ---------------------------------------------------------------------------
 # S3 polling primitives
 # ---------------------------------------------------------------------------
@@ -364,6 +387,48 @@ def test_existing_pod_id_env_var_threaded_through(monkeypatch, _env):
     gate.main()
 
     assert captured["existing_pod_id"] == "pod-reuse-me"
+
+
+def test_qa_pod_cloud_type_env_var_forces_secure_only(monkeypatch, _env):
+    # D-042 controlled SECURE-cloud test: setting QA_POD_CLOUD_TYPE=SECURE
+    # must reach the Pod config as cloud_types=("SECURE",), the one
+    # variable under test, not silently fall back to the default sweep.
+    monkeypatch.setenv("QA_POD_CLOUD_TYPE", "SECURE")
+    _patch_s3(monkeypatch, FakeS3Client())
+
+    gate.main()
+
+    assert _FakeProvider.instances[0].config.cloud_types == ("SECURE",)
+    summary = json.loads((_env / "pod-direct-benchmark-summary.json").read_text())
+    assert summary["cloud_types_requested"] == ["SECURE"]
+
+
+def test_qa_pod_cloud_type_env_var_is_case_insensitive(monkeypatch, _env):
+    monkeypatch.setenv("QA_POD_CLOUD_TYPE", "secure")
+    _patch_s3(monkeypatch, FakeS3Client())
+
+    gate.main()
+
+    assert _FakeProvider.instances[0].config.cloud_types == ("SECURE",)
+
+
+def test_qa_pod_cloud_type_env_var_unset_keeps_default_sweep(monkeypatch, _env):
+    _patch_s3(monkeypatch, FakeS3Client())
+
+    gate.main()
+
+    assert _FakeProvider.instances[0].config.cloud_types == gate.POD_CLOUD_TYPES
+    summary = json.loads((_env / "pod-direct-benchmark-summary.json").read_text())
+    assert "cloud_types_requested" not in summary
+
+
+def test_qa_pod_cloud_type_env_var_rejects_invalid_value(monkeypatch, _env):
+    monkeypatch.setenv("QA_POD_CLOUD_TYPE", "BOGUS")
+
+    exit_code = gate.main()
+
+    assert exit_code == 1
+    assert _FakeProvider.instances == []  # never even fetched the template / created a Pod
 
 
 def test_human_gold_reference_downloaded_best_effort_after_teardown(monkeypatch, _env):
