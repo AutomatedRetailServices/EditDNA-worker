@@ -15,10 +15,6 @@ name: CutSell Video00 D-044 Forensic Extract
 # readable in the CI log instead of colliding with an unrelated masked
 # config value's digits.
 on:
-  push:
-    branches: [feature/runpod-pod-on-demand]
-    paths:
-      - ".github/workflows/cutsell-video00-d044-forensic-extract.yml"
   workflow_dispatch:
     inputs:
       benchmark_id:
