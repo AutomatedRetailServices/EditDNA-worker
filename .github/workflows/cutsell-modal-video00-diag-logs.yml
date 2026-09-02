@@ -1,0 +1,119 @@
+name: CutSell Modal Video00 Diagnostic Logs
+
+# D-043 read-only diagnostic: inspects the LIVE Modal app's own logs while
+# the full Video00 benchmark (cutsell-video00-modal-raw.yml) is running,
+# via Modal's own supported `modal app logs` CLI -- entirely separate from
+# that run so it can never interfere with it.
+#
+# This job NEVER touches the running app: no `modal app stop`, no
+# `modal deploy`, no `modal run` (which would launch a NEW GPU function
+# call). It only lists apps and reads logs -- pure read-only observation.
+#
+# workflow_dispatch only, same as every other diagnostic/QA workflow in
+# this repo. (Temporary bootstrap push trigger below registers this new
+# workflow with GitHub's dispatch API -- same precedent as every other new
+# workflow_dispatch-only workflow this session -- removed once confirmed.)
+on:
+  push:
+    branches: [feature/runpod-pod-on-demand]
+    paths:
+      - ".github/workflows/cutsell-modal-video00-diag-logs.yml"
+  workflow_dispatch:
+
+concurrency:
+  # Deliberately NOT grouped with cutsell-video00-modal-raw's own
+  # concurrency group -- this must be able to run WHILE that benchmark is
+  # in progress, not queue behind it.
+  group: cutsell-modal-video00-diag-logs-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  MODAL_APP_NAME: cutsell-video00-modal-benchmark
+
+jobs:
+  diag-logs:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      MODAL_TOKEN_ID: ${{ secrets.MODAL_TOKEN_ID }}
+      MODAL_TOKEN_SECRET: ${{ secrets.MODAL_TOKEN_SECRET }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Verify Modal auth env
+        shell: bash
+        run: |
+          python3 -c "
+          import os
+          from modal_gpu_config import require_modal_token_env
+          require_modal_token_env(os.environ)
+          print('Modal auth env present.')
+          "
+
+      - name: Install Modal client
+        shell: bash
+        run: pip install --disable-pip-version-check --quiet modal
+
+      - name: List Modal apps (App ID + state, read-only)
+        shell: bash
+        run: |
+          set +e
+          modal app list 2>&1 | tee modal-app-list.log
+          echo "exit_code=$?"
+
+      - name: Discover modal app logs CLI flags (read-only)
+        shell: bash
+        run: |
+          set +e
+          modal app logs --help 2>&1 | tee modal-app-logs-help.log
+
+      - name: Capture live Modal app logs (bounded, read-only, never restarts/stops the app)
+        shell: bash
+        run: |
+          set +e
+          # Bounded with `timeout` regardless of whether --follow/-f is
+          # used: this must never hang the diagnostic job waiting on a
+          # still-running benchmark's log stream. 60s is enough to sample
+          # current activity without meaningfully delaying anything.
+          FLAGS="--timestamps"
+          if grep -q -- '--show-function-id' modal-app-logs-help.log; then
+            FLAGS="$FLAGS --show-function-id"
+          fi
+          if grep -q -- '--show-container-id' modal-app-logs-help.log; then
+            FLAGS="$FLAGS --show-container-id"
+          fi
+          echo "Using flags: $FLAGS"
+          timeout 60 modal app logs "$MODAL_APP_NAME" $FLAGS 2>&1 | tee modal-app-logs.log
+          rc=${PIPESTATUS[0]}
+          echo "modal app logs exit code: $rc (124 == timed out after 60s, which is EXPECTED for a live-tailing/long-running app and not itself a failure)"
+
+      - name: Print diagnostic summary
+        if: always()
+        shell: bash
+        run: |
+          echo "--- modal app list ---"
+          cat modal-app-list.log || true
+          echo "--- modal app logs --help ---"
+          cat modal-app-logs-help.log || true
+          echo "--- modal app logs (last captured) ---"
+          cat modal-app-logs.log || true
+          echo "--- last 20 log lines ---"
+          tail -n 20 modal-app-logs.log || true
+
+      - name: Upload diagnostic logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cutsell-modal-video00-diag-logs
+          path: |
+            modal-app-list.log
+            modal-app-logs-help.log
+            modal-app-logs.log
+          retention-days: 7
+          if-no-files-found: warn
