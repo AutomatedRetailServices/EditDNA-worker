@@ -30,12 +30,30 @@ does not depend on guessing the exact current SDK call shape
 SDK versions) beyond the CLI's own stable contract.
 
 Cost safety: exactly one approved GPU type (L4), a bounded timeout (see
-modal_gpu_config.DEFAULT_MODAL_TIMEOUT_S), and no explicit
-`scaledown_window` override -- Modal's own default scale-to-zero behavior
-already satisfies "no idle container remains" for a single ephemeral
-`modal run` invocation, and omitting it avoids a possible
+modal_gpu_config.DEFAULT_MODAL_TIMEOUT_S), `retries=0` (Modal's own
+default container-crash retry behavior would otherwise keep relaunching
+GPU containers on any startup failure -- confirmed live, see below --
+which directly violates the "no retry loop" requirement), and no
+explicit `scaledown_window` override -- Modal's own default scale-to-zero
+behavior already satisfies "no idle container remains" for a single
+ephemeral `modal run` invocation, and omitting it avoids a possible
 container_idle_timeout/scaledown_window kwarg-name mismatch across SDK
 versions on this first live attempt.
+
+Local-source mounting (fixed after a live crash-loop, run 33602989294):
+`modal.Image.from_registry(...).apt_install(...)` alone does NOT make
+this repo's own sibling modules (`modal_gpu_config.py`,
+`modal_gpu_diagnostics.py`) importable inside the remote container --
+`modal run <script>.py` only auto-mounts the one script file being run,
+not its local imports. Confirmed live: every container started, printed
+the base image's own CUDA banner (proving the image/GPU provisioning
+itself was fine), then immediately crashed with `ModuleNotFoundError: No
+module named 'modal_gpu_config'` at this file's own `from modal_gpu_config
+import (...)` line -- Modal's default retry-on-crash behavior then kept
+relaunching new L4 containers for ~18 minutes before the surrounding CI
+job's own timeout ended it. `.add_local_python_source(...)` explicitly
+adds both local modules to the image so they are importable remotely,
+fixing the crash at its source rather than working around it.
 """
 from __future__ import annotations
 
@@ -61,10 +79,18 @@ require_modal_timeout(DEFAULT_MODAL_TIMEOUT_S)
 
 app = modal.App("cutsell-gpu-minimal-isolation")
 
-image = modal.Image.from_registry(CUTSELL_BASE_IMAGE).apt_install("ffmpeg")
+image = (
+    modal.Image.from_registry(CUTSELL_BASE_IMAGE)
+    .apt_install("ffmpeg")
+    # Makes this repo's own modal_gpu_config/modal_gpu_diagnostics
+    # modules importable inside the remote container -- the base image
+    # + apt_install above alone do not include them (modal run only
+    # auto-mounts this one script file, not its local sibling imports).
+    .add_local_python_source("modal_gpu_config", "modal_gpu_diagnostics")
+)
 
 
-@app.function(gpu=MODAL_GPU_TYPE, image=image, timeout=DEFAULT_MODAL_TIMEOUT_S)
+@app.function(gpu=MODAL_GPU_TYPE, image=image, timeout=DEFAULT_MODAL_TIMEOUT_S, retries=0)
 def run_minimal_gpu_check() -> dict:
     return collect_gpu_diagnostics()
 

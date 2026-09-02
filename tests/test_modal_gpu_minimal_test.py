@@ -25,6 +25,7 @@ class _FakeImage:
     def __init__(self):
         self.from_registry_calls: list[tuple] = []
         self.apt_install_calls: list[tuple] = []
+        self.add_local_python_source_calls: list[tuple] = []
 
     def from_registry(self, *args, **kwargs):
         self.from_registry_calls.append((args, kwargs))
@@ -32,6 +33,10 @@ class _FakeImage:
 
     def apt_install(self, *args, **kwargs):
         self.apt_install_calls.append((args, kwargs))
+        return self
+
+    def add_local_python_source(self, *args, **kwargs):
+        self.add_local_python_source_calls.append((args, kwargs))
         return self
 
 
@@ -87,6 +92,16 @@ def test_function_registered_with_l4_gpu_and_bounded_timeout():
     assert 0 < call_kwargs["timeout"] <= cfg.MAX_MODAL_SMOKE_TEST_TIMEOUT_S
 
 
+def test_function_has_no_retry_loop():
+    # D-043 live evidence (run 33602989294): Modal's own default
+    # container-crash retry behavior kept relaunching L4 GPU containers
+    # for ~18 minutes on a crash-looping function -- directly violating
+    # the explicit "no retry loop" requirement. retries=0 is required,
+    # not optional.
+    call_kwargs = mgt.app.function_calls[0]
+    assert call_kwargs["retries"] == 0
+
+
 def test_function_never_requests_an_excluded_gpu():
     call_kwargs = mgt.app.function_calls[0]
     assert call_kwargs["gpu"] not in cfg.EXCLUDED_MODAL_GPU_TYPES
@@ -102,6 +117,17 @@ def test_image_installs_ffmpeg_matching_the_dockerfile():
     assert _fake_image_instance.apt_install_calls
     args, _kwargs = _fake_image_instance.apt_install_calls[0]
     assert "ffmpeg" in args
+
+
+def test_image_mounts_local_source_so_the_container_can_import_it():
+    # D-043 live evidence (run 33602989294): without this, every
+    # container crashed immediately with ModuleNotFoundError for
+    # modal_gpu_config -- Image.from_registry + apt_install alone never
+    # made this repo's own local modules importable remotely.
+    assert _fake_image_instance.add_local_python_source_calls
+    args, _kwargs = _fake_image_instance.add_local_python_source_calls[0]
+    assert "modal_gpu_config" in args
+    assert "modal_gpu_diagnostics" in args
 
 
 def test_run_minimal_gpu_check_delegates_to_diagnostics_module_not_reimplemented(monkeypatch):

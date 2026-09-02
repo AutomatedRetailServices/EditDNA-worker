@@ -2795,6 +2795,70 @@ step already used. This fix does not change the Modal auth outcome itself -- it 
 restores the intended clear PASS/FAIL reporting for the next dispatch, whenever the
 token issue is resolved.
 
+### Retest result (2026-09-02): auth PASSED, but a crash-loop FAIL -- fixed, not yet re-tested
+
+**Status: FAILED again, differently -- root cause fixed in code, not yet re-verified live**
+
+After the user regenerated the `MODAL_TOKEN_ID`/`MODAL_TOKEN_SECRET` pair and replaced
+the GitHub repo secrets, one authorized retest was dispatched at head `e5c2ccd`
+(run [33602989294](https://github.com/AutomatedRetailServices/EditDNA-worker/actions/runs/33602989294)).
+
+**1. Authentication: PASSED.** No "Token validation failed" this time -- the new token
+pair is valid.
+
+**2. What actually happened: a crash-loop, not a clean pass or a clean stop.** The
+Modal container started successfully and repeatedly (confirmed by its own CUDA banner
+printing, `CUDA Version 12.4.1`, each time) -- proving image pull, registry access, and
+L4 GPU provisioning all worked -- but every single container instance immediately
+crashed with:
+
+```
+ModuleNotFoundError: No module named 'modal_gpu_config'
+```
+
+at `modal_gpu_minimal_test.py`'s own `from modal_gpu_config import (...)` line.
+**Root cause**: `modal.Image.from_registry(...).apt_install(...)` only builds the
+container's base filesystem -- it does NOT make this repo's own local sibling Python
+modules (`modal_gpu_config.py`, `modal_gpu_diagnostics.py`) importable inside the
+remote container. `modal run <script>.py` auto-mounts only the one script file being
+run, not its local imports -- a real gap in the initial implementation, not something
+Modal's docs make obvious by default.
+
+**3. A second real gap this exposed: no retry bound.** Modal's own default
+container-crash retry behavior kept relaunching fresh L4 containers on each crash --
+visible retries at 07:22:58, 07:23:03, 07:23:07, 07:23:13, 07:23:17, 07:23:22,
+07:23:28, 07:23:32, 07:24:06, 07:24:49, with Modal's own crash-loop detector logging
+`Function modal_gpu_minimal_test.run_minimal_gpu_check is crash-looping: containers are
+repeatedly failing to start.` at 07:27:43, then one more attempt at 07:37:37 -- growing
+backoff, but still retrying ~18 minutes in. **The run never reached a clean PASS or a
+clean, deliberate STOP**: GitHub's own job-level `timeout-minutes: 20` terminated the
+still-in-progress `modal run` process (`##[error]The operation was canceled.`,
+conclusion `cancelled`), not this session and not Modal's own function completing or
+giving up. This directly violates the explicit "no retry loop" requirement -- the
+`@app.function` decorator never set `retries=0`, so Modal's own default retry count
+applied instead of the required zero.
+
+**Both fixed in code, same cycle**: `modal_gpu_minimal_test.py`'s image now chains
+`.add_local_python_source("modal_gpu_config", "modal_gpu_diagnostics")` after
+`.apt_install("ffmpeg")`, making both local modules importable remotely; the
+`@app.function(...)` call now passes `retries=0` explicitly. 2 new regression tests
+(modal-stubbed, no live call) lock both: `test_image_mounts_local_source_so_the_
+container_can_import_it` and `test_function_has_no_retry_loop`. Full D-042+D-043
+targeted suite (208 tests) and the complete `tests/test_cutsell_*.py` CI glob both
+green; `compileall` clean.
+
+**Cost note**: each crash-looping container failed within ~1 second of starting (the
+import error is immediate), so no single container ran for a meaningful GPU-billed
+duration; the CI job itself ran for the full ~20 minutes before its own timeout, but
+that is GitHub Actions runner time, not billed GPU time. Approximate Modal GPU cost for
+this run: low (a handful of sub-second L4 container starts), but non-zero and not
+precisely knowable from this evidence alone -- Modal's own billing dashboard would have
+the exact figure.
+
+**Not yet re-tested live.** Per the standing "do not blindly retry" discipline, this
+fix is reported here rather than immediately re-dispatched -- the next live attempt
+follows once explicitly authorized.
+
 ## Change rule
 
 When a new decision changes product behavior, update this file in the same development cycle. Do not silently redefine CutSell through code alone.
