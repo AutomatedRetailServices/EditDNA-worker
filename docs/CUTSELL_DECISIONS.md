@@ -2574,6 +2574,77 @@ engagement (citing all three Pod IDs and their identical `machine: {}` evidence)
 the strongest lead, since every configuration variable this session controls has been
 exhausted without resolving it.
 
+### D-042 -- FINAL POD EXECUTION ISOLATION: minimal known-good image also fails, RunPod/account issue confirmed (2026-09-02)
+
+**Status: CANONICAL (isolation test run to completion; DECISION A per the user's own
+decision tree; RunPod/account/host execution problem effectively confirmed; CutSell
+image/runtime/startup ruled out as the cause)**
+
+Per the user's explicit "FINAL POD EXECUTION ISOLATION -- MINIMAL KNOWN-GOOD IMAGE"
+directive, this isolates the one remaining shared variable across all three prior live
+tests (COMMUNITY+HTTP, COMMUNITY+direct-exec, SECURE+direct-exec -- all running the
+CutSell image): is the failure in the CutSell image/runtime itself, or in RunPod's
+account/host execution layer, which would show up regardless of image?
+
+**New, standalone infrastructure, deliberately independent of every CutSell-specific
+dependency**: `runpod_pod_minimal_isolation_gate.py` creates a Pod from a minimal public,
+non-CutSell image (`nvidia/cuda:12.4.1-base-ubuntu22.04`) running a trivial shell command
+(`sh -c 'echo POD_EXECUTION_OK; sleep 60'`) -- no S3, no AWS/Gemini/Redis credentials, no
+`pod_job_server`, no port 8080, no Video00, no CutSell code imported at all. Reuses only
+the already-tested `RunPodPodExecutionProvider` lifecycle and the existing
+`get_pod`/`fetch_pod_logs`/`delete_pod` primitives. Since there is no CutSell-side S3
+marker to poll by design, readiness/completion are observed via bounded snapshots of the
+Pod's own GET state (watching `machine` populate or not over a fixed window) plus a
+best-effort container-log fetch. Classifies `CONTAINER_EXECUTION_CONFIRMED` (machine
+populated, or logs contain the sentinel) vs. `CONTAINER_EXECUTION_NOT_CONFIRMED`. ALWAYS
+stops AND deletes the Pod in `finally` (this ad hoc image has no reuse story, unlike the
+`CutSell-Pod-QA` identity the other D-042 scripts keep alive). New, independent,
+`workflow_dispatch`-only workflow (`cutsell-pod-minimal-isolation-raw.yml`) with no GHCR
+login and no Docker build step -- the whole point is to never reference the CutSell
+image. 22 targeted tests, full `tests/test_cutsell_*.py` glob (1267 tests) green,
+`compileall` clean.
+
+**Live test result (2026-09-02, `feature/runpod-pod-on-demand`, Pod `ca7r6mz7f960ga`, run
+[33597545157](https://github.com/AutomatedRetailServices/EditDNA-worker/actions/runs/33597545157)):
+`CONTAINER_EXECUTION_NOT_CONFIRMED`.** RTX 4090, SECURE cloud (forced via
+`POD_ISOLATION_CLOUD_TYPE=SECURE`, matching the standing directive), reached `RUNNING`
+near-instantly (`elapsed_s ~1.5e-7`, the same pattern as every earlier live test). Six
+bounded snapshots across the full 95-second observation window (0.7s, 16.4s, 32.1s,
+47.8s, 63.5s, 95.0s) **all** show `"machine": {}` -- empty every single time, despite a
+populated `machineId` (`i066evwrx2d6`), exactly like every prior live Pod this cycle.
+The container-log fetch got the same 400/403 this account has always gotten regardless of
+image, so its absence carries no new information either way. `machine_ever_populated:
+false`, `log_confirms_execution: false` -- no evidence of execution by either channel
+available to this session.
+
+**This is the fourth live Pod across the entire D-042 cycle to show the identical
+`machine: {}` signature -- and the first one running an image that is not CutSell's at
+all.** Combined with the earlier two ruled-out variables (cloud type, execution
+transport), **all three configuration axes this session can control -- image/runtime,
+cloud type, and execution transport -- are now ruled out as the cause.** What remains
+constant across every failing Pod is only this RunPod account and its GPU-pool
+provisioning itself.
+
+**Per the user's own decision tree: DECISION A.** "The minimal public image also never
+executed. RunPod/account/host execution problem is effectively confirmed." Per the
+standing directive, **no further Pod experiments are run.** The CutSell image, runtime,
+and Pod startup sequence (`Dockerfile.cutsell.serverless`, `cutsell_worker.pod_job_server`,
+`cutsell_worker.pod_direct_benchmark_entrypoint`) are cleared of suspicion by this
+result -- none of them were even present in this test's image, yet the exact same failure
+reproduced. **RunPod Support escalation, citing all four Pod IDs
+(`l368986gtg5ijn`, `aejb4hkhegwpk5`, `u1nftzx1i1lrik`, `ca7r6mz7f960ga`) and their
+identical `machine: {}` evidence across two cloud types, two execution transports, and
+now two entirely different container images, is the necessary next step** -- this
+session has exhausted every configuration variable it can control and cannot diagnose
+further without RunPod-side account/infrastructure visibility this session does not have.
+
+Guaranteed cleanup confirmed the same way as every earlier test, with an added layer
+since this Pod had no reuse story: the gate script's own `finally` called
+`provider.teardown()` (`pod_stopped`, `final_status: "EXITED"`) followed immediately by
+`delete_pod()` (`pod_deleted: true`), and the workflow's independent force-stop +
+force-delete safety net ran as a no-op backup. No paid GPU left running; total GPU-active
+time on this Pod was under 2 minutes.
+
 ## Change rule
 
 When a new decision changes product behavior, update this file in the same development cycle. Do not silently redefine CutSell through code alone.

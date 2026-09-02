@@ -19,23 +19,17 @@ name: CutSell Pod MINIMAL EXECUTION ISOLATION (final root-cause test)
 # cutsell-video00-pod-raw.yml, cutsell-video00-pod-direct-raw.yml, or
 # RunPod Serverless. One-off diagnostic, not a recurring benchmark path.
 #
-# Bootstrap note: GitHub's workflow_dispatch REST API 404s for a workflow
-# that has never completed a run via any trigger. A narrow, self-scoped
-# `push:` trigger (limited to this file's own path, on this isolated QA
-# branch only) registers the workflow on its first push; the actual
-# Pod-creating step is explicitly gated to `workflow_dispatch` so that
-# bootstrap run stays genuinely inert (RUNPOD_API_KEY comes from repo
-# secrets regardless of trigger type, so without this gate a push-
-# triggered run would still create a real Pod with this workflow's
-# defaults). Removed once workflow_dispatch is confirmed working, same
-# as every other workflow this session bootstrapped this way.
+# Bootstrap note (resolved): GitHub's workflow_dispatch REST API 404s for
+# a workflow that has never completed a run via any trigger. A narrow,
+# self-scoped `push:` trigger (limited to this file's own path, on this
+# isolated QA branch only, with the Pod-creating step gated to
+# workflow_dispatch so that bootstrap run stayed genuinely inert)
+# registered this workflow on its first push (run #1, 10s, no Pod).
+# workflow_dispatch confirmed working immediately after (run #2, the
+# actual authorized live isolation test) -- that trigger and the step
+# gate it required are removed here; they served their one purpose.
 
 on:
-  push:
-    branches:
-      - feature/runpod-pod-on-demand
-    paths:
-      - '.github/workflows/cutsell-pod-minimal-isolation-raw.yml'
   workflow_dispatch:
     inputs:
       existing_pod_id:
@@ -110,7 +104,6 @@ jobs:
           fetch-depth: 1
 
       - name: Run minimal-image Pod execution isolation gate
-        if: github.event_name == 'workflow_dispatch'
         shell: bash
         run: python3 runpod_pod_minimal_isolation_gate.py
 
