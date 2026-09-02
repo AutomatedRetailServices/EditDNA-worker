@@ -143,7 +143,7 @@ def main() -> int:
     summary: dict = {"benchmark_id": benchmark_id, "template_name": template_name}
     if template is None:
         summary["classification"] = "TEMPLATE_NOT_FOUND"
-        print(f"Template '{template_name}' not found -- refusing to guess a configuration. Aborting.")
+        print(f"Template '{template_name}' not found -- refusing to guess a configuration. Aborting.", flush=True)
         Path("pod-direct-benchmark-summary.json").write_text(json.dumps(summary, indent=2))
         return 1
 
@@ -179,7 +179,7 @@ def main() -> int:
     try:
         if not (bucket and aws_access_key and aws_secret_key):
             summary["classification"] = "TEMPLATE_MISSING_S3_CONFIG"
-            print("Template is missing S3_BUCKET/AWS_ACCESS_KEY_ID/AWS_SECRET_ACCESS_KEY -- cannot poll for results.")
+            print("Template is missing S3_BUCKET/AWS_ACCESS_KEY_ID/AWS_SECRET_ACCESS_KEY -- cannot poll for results.", flush=True)
             return exit_code
 
         s3_client = _make_s3_client(region=region, access_key=aws_access_key, secret_key=aws_secret_key)
@@ -190,27 +190,27 @@ def main() -> int:
         summary["lifecycle_classification"] = lifecycle.classification
         if not lifecycle.pod_id:
             summary["classification"] = "POD_LIFECYCLE_FAILED"
-            print("Pod lifecycle failed before any container could run.")
+            print("Pod lifecycle failed before any container could run.", flush=True)
             return exit_code
 
-        print(f"--- [pod-direct-gate] polling S3 for sanity_check.json (bounded {sanity_timeout_s}s) ---")
+        print(f"--- [pod-direct-gate] polling S3 for sanity_check.json (bounded {sanity_timeout_s}s) ---", flush=True)
         found = poll_for_first_existing_key(
             s3_client, bucket, [f"{prefix}/sanity_check.json"], timeout_s=sanity_timeout_s, interval_s=sanity_poll_interval_s,
         )
         if not found:
             summary["classification"] = "SANITY_CHECK_TIMEOUT"
-            print("Sanity check never appeared in S3 within the bound -- container likely never became runtime-ready.")
+            print("Sanity check never appeared in S3 within the bound -- container likely never became runtime-ready.", flush=True)
             return exit_code
         s3_client.download_file(bucket, found, "sanity_check.json")
         sanity = json.loads(Path("sanity_check.json").read_text())
         summary["sanity_check"] = sanity
-        print(json.dumps(sanity, indent=2))
+        print(json.dumps(sanity, indent=2), flush=True)
         if not sanity.get("ok"):
             summary["classification"] = "SANITY_CHECK_FAILED"
-            print("Sanity checks failed inside the Pod -- not proceeding to Video00.")
+            print("Sanity checks failed inside the Pod -- not proceeding to Video00.", flush=True)
             return exit_code
 
-        print(f"--- [pod-direct-gate] sanity passed; polling S3 for run_output.json/pod-execution-error.json (bounded {benchmark_timeout_s}s) ---")
+        print(f"--- [pod-direct-gate] sanity passed; polling S3 for run_output.json/pod-execution-error.json (bounded {benchmark_timeout_s}s) ---", flush=True)
         found = poll_for_first_existing_key(
             s3_client,
             bucket,
@@ -220,7 +220,7 @@ def main() -> int:
         )
         if not found:
             summary["classification"] = "BENCHMARK_TIMEOUT"
-            print("Benchmark never reached a terminal state in S3 within the bound.")
+            print("Benchmark never reached a terminal state in S3 within the bound.", flush=True)
             return exit_code
 
         if found.endswith("pod-execution-error.json"):
@@ -228,7 +228,7 @@ def main() -> int:
             error = json.loads(Path("pod-execution-error.json").read_text())
             summary["classification"] = "BENCHMARK_EXCEPTION"
             summary["error"] = error
-            print(json.dumps(error, indent=2))
+            print(json.dumps(error, indent=2), flush=True)
             return exit_code
 
         s3_client.download_file(bucket, found, "run_output.json")
@@ -259,11 +259,11 @@ def main() -> int:
             try:
                 _download_s3_uri(s3_client, f"s3://{bucket}/{human_gold_key}", "artifact/human-gold-video00.mp4")
             except Exception as exc:  # noqa: BLE001 -- never let this mask the real result
-                print(f"Human Gold reference download failed (non-blocking): {exc}")
+                print(f"Human Gold reference download failed (non-blocking): {exc}", flush=True)
         summary["pod_id"] = summary.get("pod_id") or provider.pod_id
         Path("pod-direct-benchmark-summary.json").write_text(json.dumps(summary, indent=2, default=str))
-        print("--- pod-direct-benchmark-summary.json ---")
-        print(json.dumps(summary, indent=2, default=str))
+        print("--- pod-direct-benchmark-summary.json ---", flush=True)
+        print(json.dumps(summary, indent=2, default=str), flush=True)
 
 
 if __name__ == "__main__":

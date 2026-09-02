@@ -2392,6 +2392,89 @@ compromised and rotated. This session cannot rotate them (no credential-issuer a
 flagged here and to the user directly per the standing security rule that this runs in
 parallel with editorial QA, not deferred to launch.
 
+### D-042 follow-up -- direct-execution model (bypass HTTP/8080) built; same root cause found (2026-09-01/02)
+
+**Status: CANONICAL (direct-execution QA path built and tested; root cause of the
+underlying Pod failure now believed shared with the HTTP-transport path, not fixed by
+bypassing HTTP; no further live Pod test run pending diagnosis/authorization)**
+
+Per the user's explicit follow-up directive ("restore the known-working execution
+model"), instead of continuing to debug `pod_job_server.py`'s HTTP `/health` transport,
+a second, independent QA execution path was built that bypasses HTTP entirely, closer to
+the historical EditDNA-Worker-2 workflow:
+
+- **`cutsell_worker/pod_direct_benchmark_entrypoint.py`** (new): becomes the Pod's own
+  `dockerStartCmd` (its one-shot main process, not a persistent server). Runs three tiny
+  non-editorial sanity checks (CUDA via `torch`, `ffmpeg` present, `cutsell_worker`
+  importable), uploads the result to S3 first (`sanity_check.json` -- this doubles as
+  the "prove direct execution works" validation and the orchestrator's
+  runtime-readiness signal), then calls `cutsell_worker.serverless_handler.run_op(op,
+  payload)` directly -- the exact same dispatcher RunPod Serverless already uses, no
+  second editor implementation. Any exception is caught and uploaded to a known S3 key
+  rather than crashing silently.
+- **`runpod_pod_direct_benchmark_gate.py`** (new): orchestration only. Fetches the live
+  `CutSell-Pod-QA` template, builds an inline `PodExecutionConfig` from it (image/env/
+  disk inherited verbatim, `CUTSELL_BENCHMARK_PAYLOAD_JSON` merged in), reuses
+  `RunPodPodExecutionProvider`'s already-tested lifecycle unchanged (`ensure_ready()`,
+  no HTTP at all), polls S3 (never HTTP, never container logs) for readiness and
+  completion, downloads the result JSON + MP4, classifies the outcome, and always tears
+  the Pod down in `finally`.
+- **`.github/workflows/cutsell-video00-pod-direct-raw.yml`** (new): `workflow_dispatch`
+  only, independent concurrency group, does not replace or touch the HTTP-based
+  workflow or RunPod Serverless.
+- **Real latent bug fixed along the way**: `PodExecutionConfig` never had an `env`
+  field; `create_pod()`'s own `env` parameter was never threaded through the provider's
+  fresh-create call site. Every earlier inline-mode live Pod test this cycle ran with an
+  empty env (harmless for a bare HTTP health check, fatal for an entrypoint that needs
+  `CUTSELL_BENCHMARK_PAYLOAD_JSON` plus AWS/S3/Gemini credentials). Fixed, with
+  regression tests.
+- 145 tests across the new/changed modules, plus the full `tests/test_cutsell_*.py`
+  glob (1267 tests), green. `compileall` clean.
+
+**First live test (2026-09-02, `feature/runpod-pod-on-demand`, Pod `aejb4hkhegwpk5`,
+RTX 4090, COMMUNITY cloud): `SANITY_CHECK_TIMEOUT`.** The Pod itself was created and
+reported `RUNNING` normally (near-instant, consistent with every earlier finding that
+RunPod's Pod status flips before any container application is actually ready), but
+`sanity_check.json` never appeared in S3 within the 300s bound -- meaning the
+entrypoint's own tiny sanity checks never even ran, let alone the benchmark.
+
+**Root-cause diagnosis, from a zero-cost read-only `diagnose_pod_id` check against the
+stopped Pod (2026-09-02)**: the live Pod record's `dockerStartCmd`
+(`["python3", "-m", "cutsell_worker.pod_direct_benchmark_entrypoint"]`), `templateId`
+(`""`, confirming inline mode was used as designed), and `env` (contains
+`CUTSELL_BENCHMARK_PAYLOAD_JSON` alongside every expected template variable, names
+confirmed, values redacted) are all exactly correct -- **this cycle's own configuration
+work is confirmed not at fault.** But the Pod record's `machine` field is `{}` (empty)
+despite a populated `machineId` (`w8d456itlyzv`) -- **the same empty-machine-record
+signature already seen on the HTTP-transport path's own live tests** (see the D-042
+Step 7 checkpoint above). This is now the leading hypothesis for the shared root cause
+of both failure modes: the Pod's control-plane status (`RUNNING`, later `EXITED by
+user`) advances normally, but the underlying GPU host record is empty/never resolves,
+consistent with (though not independently proven as) the container never actually
+executing on real, delivered compute -- which would fully explain both symptoms without
+needing two separate explanations (HTTP ingress unreachable vs. S3 egress never
+attempted): in both cases, nothing inside the container ever ran at all. **This means
+bypassing the HTTP transport did not bypass the true fault** -- it only changed which
+downstream signal exposed the same upstream problem. Both `templateId` GPU-pool
+(`l368986gtg5ijn`, Step 7) and inline-mode (`aejb4hkhegwpk5`, this test) live Pods have
+now hit this same `machine: {}` pattern, on COMMUNITY cloud, ruling out
+"config-shape-specific" as an explanation.
+
+Guaranteed STOP confirmed the same way as every earlier test: the gate script's own
+`finally`/`teardown()` call (`pod_stopped`, `final_status: EXITED`), independently
+re-confirmed via the later read-only diagnostic (`lastStatusChange: "Exited by user"`),
+plus the workflow's independent force-stop safety net as a no-op backup. No paid GPU
+left running.
+
+**Per the standing "do not blindly retry" instruction, Video00 was never run** (Step 4's
+gate -- "if sanity checks pass, immediately proceed to Video00" -- was never reached).
+**Not yet resolved / needs either RunPod support engagement or a different Pod/host
+allocation to distinguish from a one-off bad host** -- flagged to the user rather than
+re-attempted speculatively. The stdout-buffering gap in `runpod_pod_direct_benchmark_gate.py`
+(missing `flush=True`, unlike the entrypoint script) that made one log gap look
+artificially short is a known, still-unfixed cosmetic issue, not the cause of the
+`SANITY_CHECK_TIMEOUT` result itself.
+
 ## Change rule
 
 When a new decision changes product behavior, update this file in the same development cycle. Do not silently redefine CutSell through code alone.
