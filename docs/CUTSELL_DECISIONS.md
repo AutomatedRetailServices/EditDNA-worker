@@ -2746,13 +2746,54 @@ untouched** -- no shared code path was modified, only additive. Full `tests/
 test_cutsell_*.py` CI glob and `compileall` run before any live Modal call, per the
 standing discipline.
 
-### Live test: not yet run
+### Live test result (2026-09-02): FAIL -- Modal token validation failed
 
-The one authorized live Modal L4 minimal GPU smoke test (workflow
-`cutsell-modal-gpu-minimal-raw.yml`, `workflow_dispatch` only) has not yet been
-dispatched as of this checkpoint -- follows once this infrastructure is confirmed green
-and pushed. Per the standing directive: if it passes, report and stop (no automatic
-Video00-on-Modal); if it fails, report the exact error and stop (no blind retry).
+**Status: FAILED, not retried (per the standing "do not blindly retry" directive)**
+
+Dispatched on `feature/runpod-pod-on-demand` at `4db9849` via `workflow_dispatch`
+(run [33601072592](https://github.com/AutomatedRetailServices/EditDNA-worker/actions/runs/33601072592)).
+Checkout, the `require_modal_token_env` presence check (both `MODAL_TOKEN_ID` and
+`MODAL_TOKEN_SECRET` were present/non-blank as GitHub Actions secrets), and
+`pip install modal` (installed `modal-1.5.5` cleanly, ~3s) all succeeded. The actual
+`modal run modal_gpu_minimal_test.py` invocation failed after ~3s with:
+
+```
+╭─ Error ──────────────────────────────────────────────────────────────────────╮
+│ Token validation failed                                                      │
+╰──────────────────────────────────────────────────────────────────────────────╯
+```
+
+**This is a clean, well-formed rejection from Modal's own API/CLI, not a code or
+infrastructure bug in this repo's own Modal integration** -- the auth-presence check
+passed (both secrets are configured and non-blank in the repo), `modal` installed and
+ran normally, and it reached Modal's servers before being rejected specifically on
+token validity. The two most likely causes, neither resolvable by this session (no
+access to the actual secret values or the Modal dashboard): (1) the configured
+`MODAL_TOKEN_ID`/`MODAL_TOKEN_SECRET` pair is stale/revoked/mistyped, or (2) a
+whitespace/formatting artifact in how the secret value was pasted into GitHub (e.g. a
+trailing newline or space) that changes the token's effective bytes.
+
+**No further live Modal dispatch was made or is planned** until the user verifies (or
+regenerates) the `MODAL_TOKEN_ID`/`MODAL_TOKEN_SECRET` pair in GitHub's repo secrets
+against a fresh Modal dashboard token pair. Nothing about this phase's own code
+(image/runtime reuse, L4-only enforcement, bounded timeout) is implicated by this
+failure -- none of it was reached before the auth rejection.
+
+**Real bug found and fixed in the same cycle, from this run's own evidence**: the "Run
+Modal L4 minimal GPU smoke test" step's script used `set -uo pipefail` intending to
+avoid `set -e` so a failing `modal run` would still reach the `exit_code` capture line
+-- but GitHub's own `bash` shell wrapper already runs every `run:` script under
+`-e -o pipefail` regardless of what `set` flags the script body itself requests; only an
+explicit `set +e` actually clears it. Confirmed live in this exact run's own log
+(`shell: /usr/bin/bash --noprofile --norc -e -o pipefail {0}`): the failing `modal run`
+aborted the script immediately, the `exit_code` output was never set, and the next
+step's `if: github.event_name == 'workflow_dispatch'` (no `always()`) meant it was
+skipped entirely -- so the raw Modal error only surfaced in the step's own log, not in
+the intended formatted summary. Fixed by adding an explicit `set +e` before
+`set -uo pipefail` in that step, matching the working pattern the "Print result summary"
+step already used. This fix does not change the Modal auth outcome itself -- it only
+restores the intended clear PASS/FAIL reporting for the next dispatch, whenever the
+token issue is resolved.
 
 ## Change rule
 

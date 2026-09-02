@@ -85,12 +85,15 @@ jobs:
         id: modal_test
         shell: bash
         run: |
+          # GitHub's own `bash` shell wrapper already runs this script
+          # under `-e -o pipefail` regardless of what `set` commands
+          # appear here -- `set +e` is required (not just omitting `-e`)
+          # to actually disable it. Without this, a failing `modal run`
+          # aborted the script before the exit_code capture below ever
+          # ran, which in turn skipped the next step's summary entirely
+          # (confirmed live: run 33601072592 hit exactly this).
+          set +e
           set -uo pipefail
-          # Deliberately no `set -e` here: a failing `modal run` must
-          # still let this script reach the exit_code capture below, so
-          # the next step can print the full log and fail deliberately
-          # rather than the run silently stopping mid-step with no
-          # summary at all.
           modal run modal_gpu_minimal_test.py 2>&1 | tee modal-gpu-minimal-output.log
           echo "exit_code=${PIPESTATUS[0]}" >> "$GITHUB_OUTPUT"
 
