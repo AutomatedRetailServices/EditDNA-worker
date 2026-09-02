@@ -1,0 +1,234 @@
+name: CutSell Video00 Pod DIRECT-EXECUTION RAW (restore known-working execution model)
+
+# D-042 follow-up: "restore the known-working execution model." The new
+# HTTP pod_job_server/port-8080 transport (cutsell-video00-pod-raw.yml)
+# provisions a Pod that reaches RUNNING but whose /health endpoint never
+# becomes reachable -- an open, still-unresolved RunPod-side question
+# (see docs/CUTSELL_DECISIONS.md D-042). Per the standing directive, this
+# workflow does NOT keep debugging that transport: it bypasses it
+# entirely. The Pod's own dockerStartCmd runs the canonical CutSell
+# benchmark directly as the container's main process (no persistent HTTP
+# server, no exposed-port dependency); readiness and completion are both
+# S3-polled (cutsell_worker.pod_direct_benchmark_entrypoint uploads a
+# sanity_check.json first, then the real result), never HTTP-polled.
+#
+# Does NOT replace cutsell-video00-pod-raw.yml (the HTTP-based health-only
+# gate stays as historical/debuggable infrastructure, deactivated for this
+# path only -- same precedent as SWAP's own "stays in the codebase,
+# never destructively deleted") and does NOT touch RunPod Serverless
+# (cutsell-video00-raw-v5-auto-microtrim.yml), which remains the
+# production RAW backend. Deliberately workflow_dispatch-only: no `push:`
+# trigger of any kind, so ordinary commits can never provision a Pod.
+#
+# Bootstrap note: like every other workflow this session added, GitHub's
+# workflow_dispatch REST API 404s for a workflow that has never completed
+# a run via any trigger -- if this is the first-ever dispatch attempt and
+# it 404s, a one-time narrow self-scoped `push:` trigger (limited to this
+# file's own path, on this isolated QA branch only) registers it, exactly
+# as cutsell-video00-pod-raw.yml's own history documents; remove it again
+# once workflow_dispatch is confirmed working.
+
+on:
+  workflow_dispatch:
+    inputs:
+      existing_pod_id:
+        description: >-
+          Optional: reuse this QA Pod id instead of creating a fresh one.
+          Leave blank to let the provider search the approved GPU pool
+          (RTX 4090 / A40 / RTX A6000 / L4, no Blackwell) and create a new
+          Pod.
+        required: false
+        default: ""
+      qa_pod_cost_ceiling_usd_per_hr:
+        description: "QA Pod hourly cost ceiling in USD. Never provisions above this."
+        required: false
+        default: "1.50"
+      qa_template_name:
+        description: "Live RunPod template to build the Pod's config from (image/env/disk all inherited verbatim)."
+        required: false
+        default: "CutSell-Pod-QA"
+      source_key:
+        description: "S3 key of the source video to benchmark -- the same six-minute canonical source the Serverless RAW workflow uses by default."
+        required: false
+        default: "Editdna longform validation/VIDEO-2026-07-30-09-18-03.mp4"
+      benchmark_op:
+        description: "Canonical op to run inside the Pod (mirrors a Serverless job's op)."
+        required: false
+        type: choice
+        options:
+          - focused
+          - locked_selection
+        default: focused
+      auto_microtrim:
+        description: "auto_speech_visual_microtrim payload flag (matches the Serverless RAW workflow's own default)."
+        required: false
+        type: boolean
+        default: true
+      sanity_timeout_s:
+        description: >-
+          Bounded wait (seconds) for the Pod's own sanity_check.json to
+          appear in S3 -- this IS Step 4's "prove direct execution works"
+          validation, not the old HTTP /health endpoint. If this times
+          out, the full benchmark never runs.
+        required: false
+        default: "300"
+      benchmark_timeout_s:
+        description: "Bounded wait (seconds) for the full Video00 benchmark to reach a terminal state in S3."
+        required: false
+        default: "5400"
+
+concurrency:
+  # Independent from both cutsell-video00-pod-raw.yml's own group and the
+  # Serverless RAW workflow's -- this is a third, separate QA Pod
+  # identity, never sharing a lock with either.
+  group: cutsell-video00-pod-direct-qa
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  RUNPOD_API_KEY: ${{ secrets.RUNPOD_API_KEY }}
+  EXISTING_POD_ID: ${{ github.event.inputs.existing_pod_id }}
+  QA_POD_COST_CEILING_USD_PER_HR: ${{ github.event.inputs.qa_pod_cost_ceiling_usd_per_hr }}
+  QA_TEMPLATE_NAME: ${{ github.event.inputs.qa_template_name }}
+  SOURCE_KEY: ${{ github.event.inputs.source_key }}
+  CUTSELL_BENCHMARK_OP: ${{ github.event.inputs.benchmark_op }}
+  CUTSELL_AUTO_MICROTRIM: ${{ github.event.inputs.auto_microtrim }}
+  SANITY_TIMEOUT_S: ${{ github.event.inputs.sanity_timeout_s }}
+  BENCHMARK_TIMEOUT_S: ${{ github.event.inputs.benchmark_timeout_s }}
+  BENCHMARK_ID: video00-pod-direct-${{ github.run_id }}-${{ github.run_attempt }}
+  # QA-only authoritative Human Gold reference -- same key the Serverless
+  # RAW workflow uses, for the same manual Watch+Listen comparison. Never
+  # read by production Selection/Boundary code, never part of the job
+  # payload sent into the Pod.
+  HUMAN_GOLD_KEY: Editdna longform validation/5E01F214-A364-4F4B-8F25-D39B1E2B21D2.MP4
+
+jobs:
+  pod-direct-benchmark:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - name: Checkout exact test head
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 1
+
+      - name: Prepare artifact directory
+        shell: bash
+        run: mkdir -p artifact
+
+      # Lifecycle (reuse/restart/create-from-approved-GPU-pool/cost-
+      # ceiling/guaranteed-stop) is the exact same, already-tested
+      # RunPodPodExecutionProvider machinery cutsell-video00-pod-raw.yml
+      # uses -- unchanged by this workflow. The only difference is what
+      # runs inside the Pod (the benchmark directly, not an HTTP server)
+      # and how readiness/completion are observed (S3, not HTTP).
+      - name: Run direct-execution benchmark gate
+        shell: bash
+        run: python3 runpod_pod_direct_benchmark_gate.py
+
+      - name: Upload Pod direct-benchmark artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cutsell-video00-pod-direct-human-review
+          path: |
+            pod-direct-benchmark-summary.json
+            sanity_check.json
+            run_output.json
+            pod-execution-error.json
+            artifact/
+          retention-days: 14
+          if-no-files-found: warn
+
+      - name: Print Pod direct-benchmark summary + reuse hint
+        if: always()
+        shell: bash
+        run: |
+          set +e
+          if [ -s pod-direct-benchmark-summary.json ]; then
+            cat pod-direct-benchmark-summary.json
+            pod_id=$(jq -r '.pod_id // empty' pod-direct-benchmark-summary.json)
+            if [ -n "$pod_id" ]; then
+              echo "To reuse this Pod on the next manual run, pass existing_pod_id=$pod_id."
+            fi
+          else
+            echo "No pod-direct-benchmark-summary.json was written -- the gate script did not complete normally."
+          fi
+
+      - name: Print Video00 diagnostics
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ ! -s artifact/video00-pod-direct.json ]; then
+            echo "No result JSON downloaded; no diagnostics to print (see the summary above for why)."
+            exit 0
+          fi
+          echo "--- top-level result ---"
+          jq '{ok,speech_lock_ok,deliverable,delivery_status,selected_count,discarded_count,selected_duration_sec,output_duration_sec,source_duration_sec}' artifact/video00-pod-direct.json
+
+          echo "--- diagnostics.canonical_edit_plan (plan_id/version/hash + Idea sequence) ---"
+          jq '.diagnostics.canonical_edit_plan
+            | if . == null then {status:"absent"} else {
+                plan_id, plan_version, semantic_hash, validation_state, freeze_blocked,
+                ideas: [.ideas[]? | {idea_id, coverage_status, is_composite, winning_clip_ids, discarded_clip_ids}]
+              } end' artifact/video00-pod-direct.json
+
+          echo "--- diagnostics.final_edit_reviewer ---"
+          jq '.diagnostics.final_edit_reviewer // {status:"absent"}' artifact/video00-pod-direct.json
+
+          echo "--- diagnostics.repair_loop ---"
+          jq '.diagnostics.repair_loop // {status:"absent"}' artifact/video00-pod-direct.json
+
+          echo "--- diagnostics.final_story_coherence_validation (StoryValidator) ---"
+          jq '.diagnostics.final_story_coherence_validation // {status:"absent"}' artifact/video00-pod-direct.json
+
+          echo "--- diagnostics.selection_boundary_contract (Freeze) ---"
+          jq '.diagnostics.selection_boundary_contract // {status:"absent"}' artifact/video00-pod-direct.json
+
+          echo "--- live_render_qc (Boundary/render/PostRenderWatchListenQC + delivery gate) ---"
+          jq '.live_render_qc // {status:"absent"}' artifact/video00-pod-direct.json
+
+          echo "--- final KEEP sequence ---"
+          jq '[.selected[]? | {clip_id, text}]' artifact/video00-pod-direct.json
+
+          echo "--- final DISCARD sequence + stage_status ---"
+          jq '{discarded_count: (.discarded | length), discarded: [.discarded[]? | {clip_id, text}], stage_status}' artifact/video00-pod-direct.json
+
+      - name: Verify Video00 architecture
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ ! -s artifact/video00-pod-direct.json ]; then
+            echo "No result JSON was downloaded; cannot verify architecture. The summary artifact above has the exact failure reason." >&2
+            exit 1
+          fi
+          python benchmarks/validate_video00_architecture.py \
+            artifact/video00-pod-direct.json \
+            | tee artifact/video00-pod-direct-architecture-report.json
+
+      - name: Force-stop QA Pod (independent safety net)
+        if: always()
+        shell: bash
+        run: |
+          set +e
+          pod_id=""
+          if [ -s pod-direct-benchmark-summary.json ]; then
+            pod_id=$(jq -r '.pod_id // empty' pod-direct-benchmark-summary.json)
+          fi
+          if [ -z "$pod_id" ]; then
+            pod_id="${EXISTING_POD_ID:-}"
+          fi
+          if [ -z "$pod_id" ]; then
+            echo "No Pod id known to this run; nothing to force-stop."
+            exit 0
+          fi
+          curl --silent --show-error \
+            --request POST \
+            --url "https://rest.runpod.io/v1/pods/$pod_id/stop" \
+            --header "Authorization: Bearer $RUNPOD_API_KEY" \
+            --output /tmp/pod-force-stop-response.json || true
+          echo "Force-stop issued for Pod $pod_id (safety net; a no-op if the gate script already stopped it)."

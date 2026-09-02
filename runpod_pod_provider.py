@@ -468,6 +468,16 @@ class PodExecutionConfig:
     # ~1.5s after RUNNING). Poll the health endpoint itself, bounded.
     health_poll_timeout_s: float = 180.0
     health_poll_interval_s: float = 10.0
+    # D-042 follow-up ("restore the known-working execution model"): the
+    # Pod's env at creation time (inline/non-template mode only -- ignored
+    # when template_id is set, matching create_pod()'s own template-mode
+    # contract, where env comes from the template itself). None means "no
+    # env vars" -- the default every earlier inline-mode live Pod test
+    # this session actually used; this was never threaded through to
+    # create_pod() before, a real (if latent) gap since none of those
+    # earlier tests needed a populated env to answer pod_job_server's
+    # /health. The direct-execution benchmark path does need one.
+    env: Optional[dict] = None
 
 
 @dataclass(frozen=True)
@@ -563,6 +573,7 @@ class RunPodPodExecutionProvider:
                     start_command=self._cfg.start_command,
                     container_disk_gb=self._cfg.container_disk_gb,
                     template_id=self._cfg.template_id,
+                    env=self._cfg.env,
                 )
                 if pod is not None:
                     pod_id = str(pod.get("id") or "")

@@ -828,6 +828,39 @@ def test_create_pod_without_template_id_is_unaffected_inline_mode():
     assert "templateId" not in body
 
 
+def test_pod_execution_config_env_is_forwarded_to_create_pod():
+    # D-042 follow-up ("restore the known-working execution model"): a real
+    # gap -- PodExecutionConfig.env did not exist, so create_pod()'s own
+    # `env` parameter was never reached through the provider's fresh-create
+    # path; every earlier inline-mode live Pod test this session ran with
+    # an empty env. The direct-execution benchmark path needs a populated
+    # one (CUTSELL_BENCHMARK_PAYLOAD_JSON at minimum).
+    transport = FakePodTransport()
+    transport.get_gpu_types = [TransportResponse(200, [])]
+    transport.post_pods = [TransportResponse(201, {"id": "pod-new"})]
+    transport.get_pod = [TransportResponse(200, {"id": "pod-new", "status": "RUNNING"})]
+    provider, _clock = _provider(transport, existing_pod_id=None, env={"CUTSELL_BENCHMARK_PAYLOAD_JSON": "{}"})
+
+    result = provider.ensure_ready()
+
+    assert result.classification == POD_CREATED_FRESH
+    post_call = next(c for c in transport.calls if c[0] == "POST" and c[1].endswith("/pods"))
+    assert post_call[2]["env"] == {"CUTSELL_BENCHMARK_PAYLOAD_JSON": "{}"}
+
+
+def test_pod_execution_config_env_defaults_to_empty_when_unset():
+    transport = FakePodTransport()
+    transport.get_gpu_types = [TransportResponse(200, [])]
+    transport.post_pods = [TransportResponse(201, {"id": "pod-new"})]
+    transport.get_pod = [TransportResponse(200, {"id": "pod-new", "status": "RUNNING"})]
+    provider, _clock = _provider(transport, existing_pod_id=None)
+
+    provider.ensure_ready()
+
+    post_call = next(c for c in transport.calls if c[0] == "POST" and c[1].endswith("/pods"))
+    assert post_call[2]["env"] == {}
+
+
 # ---------------------------------------------------------------------------
 # 20. A non-capacity-shaped creation error (e.g. auth) is fatal and does not
 #     keep guessing other GPUs
