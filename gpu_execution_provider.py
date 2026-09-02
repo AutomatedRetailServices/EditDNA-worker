@@ -1,33 +1,39 @@
 """GPUExecutionProvider abstraction (D-042: CutSell QA GPU execution
-fallback -- RunPod Pod On-Demand automation. KEEP SERVERLESS FULLY
-AVAILABLE; this is an EXECUTION/INFRASTRUCTURE addition only).
+fallback -- RunPod Pod On-Demand automation; D-043: Modal GPU execution --
+first live validation. KEEP SERVERLESS AND RUNPOD POD FULLY AVAILABLE;
+Modal is an ADDITIONAL backend, not a replacement).
 
-CutSell supports two interchangeable GPU execution backends --
-`RUNPOD_SERVERLESS` and `RUNPOD_POD` -- behind this one interface. The
-editorial engine (`cutsell_worker.serverless_handler.run_op`) does not know
-or care which backend executed it: both providers ultimately invoke that
-exact same canonical dispatcher with the exact same payload shapes. This
-module only decides HOW a job reaches that dispatcher (RunPod's Serverless
-job-queue envelope vs a direct HTTP call to a running Pod), never WHAT
-runs.
+CutSell supports three interchangeable GPU execution backends --
+`RUNPOD_SERVERLESS`, `RUNPOD_POD`, and `MODAL` -- behind this one
+interface. The editorial engine (`cutsell_worker.serverless_handler.run_op`)
+does not know or care which backend executed it: every provider ultimately
+invokes that exact same canonical dispatcher with the exact same payload
+shapes. This module only decides HOW a job reaches that dispatcher
+(RunPod's Serverless job-queue envelope, a direct HTTP call to a running
+Pod, or a Modal Function call), never WHAT runs.
 
 `RunPodServerlessExecutionProvider` below is a thin wrapper around the
 already-tested D-041 `runpod_orchestration.py` primitives -- it does not
 duplicate `wait_for_endpoint_ready`/`submit_and_poll_health`, it calls them
 directly. See `runpod_pod_provider.py` for `RunPodPodExecutionProvider`,
-the new RunPod Pod on-demand implementation.
+the RunPod Pod on-demand implementation, and `ModalExecutionProvider`
+below for the Modal backend (D-043 first phase: health/smoke-check only,
+same as the other two -- `run_benchmark`/Video00-on-Modal integration is
+separately gated, not part of this phase's interface).
 
-Serverless remains the production backend and is untouched by this module
-(no import here can execute code that would touch a real endpoint); this
-only adds a shared reporting shape (`HealthCheckResult`) and a selector
-constant pair so a caller can pick a backend by name
-(`execution_backend: "serverless" | "pod"`).
+Serverless and RunPod Pod remain fully available and untouched by this
+module (no import here can execute code that would touch a real
+endpoint/Pod); this only adds a shared reporting shape
+(`HealthCheckResult`) and a selector constant trio so a caller can pick a
+backend by name (`execution_backend: "serverless" | "pod" | "modal"`).
 """
 from __future__ import annotations
 
+import time
 from dataclasses import dataclass, field
-from typing import Optional, Protocol
+from typing import Callable, Optional, Protocol
 
+from modal_gpu_config import require_modal_gpu_type
 from runpod_orchestration import (
     HealthOutcome,
     LogFn,
@@ -39,7 +45,8 @@ from runpod_orchestration import (
 
 EXECUTION_BACKEND_SERVERLESS = "serverless"
 EXECUTION_BACKEND_POD = "pod"
-VALID_EXECUTION_BACKENDS = frozenset({EXECUTION_BACKEND_SERVERLESS, EXECUTION_BACKEND_POD})
+EXECUTION_BACKEND_MODAL = "modal"
+VALID_EXECUTION_BACKENDS = frozenset({EXECUTION_BACKEND_SERVERLESS, EXECUTION_BACKEND_POD, EXECUTION_BACKEND_MODAL})
 
 
 @dataclass(frozen=True)
@@ -136,4 +143,58 @@ class RunPodServerlessExecutionProvider:
         # benchmark resources" `if: always()` step -- deliberately a no-op
         # here rather than a second, divergent teardown path for the same
         # resource.
+        return None
+
+
+class ModalExecutionProvider:
+    """D-043: third `GPUExecutionProvider` implementation, for Modal's
+    serverless GPU backend. Health/smoke-check only in this phase, exactly
+    like the other two providers -- `run_benchmark`/Video00-on-Modal
+    integration is separately gated, not part of this interface yet.
+
+    Deliberately does not hardcode a Modal SDK call (`Function.lookup` vs
+    `Function.from_name` etc. have changed across Modal SDK versions, and
+    this repo does not pin one yet) -- `invoke` is an injected zero-arg
+    callable returning a dict with at least an `ok` key (the exact shape
+    `modal_gpu_diagnostics.collect_gpu_diagnostics()` already returns).
+    This keeps the class fully unit-testable without the `modal` package
+    installed and keeps the actual SDK-call-shape decision for whenever
+    Video00-on-Modal integration is authorized, rather than guessing it
+    now.
+
+    Unlike the two RunPod backends, Modal's serverless GPU functions scale
+    to zero automatically once the call returns -- there is no persistent
+    Pod/endpoint for `teardown()` to stop or delete."""
+
+    def __init__(self, invoke: Callable[[], dict], *, gpu_type: str = "L4") -> None:
+        require_modal_gpu_type(gpu_type)
+        self._invoke = invoke
+        self._gpu_type = gpu_type
+
+    def health_check(self) -> HealthCheckResult:
+        start = time.monotonic()
+        try:
+            result = self._invoke()
+        except Exception as exc:  # noqa: BLE001 -- an invoke failure IS the health result, never an unhandled crash
+            return HealthCheckResult(
+                execution_provider="MODAL",
+                passed=False,
+                classification="MODAL_INVOKE_ERROR",
+                elapsed_s=time.monotonic() - start,
+                detail={"gpu_type": self._gpu_type, "error": str(exc)},
+            )
+        passed = bool(result.get("ok"))
+        return HealthCheckResult(
+            execution_provider="MODAL",
+            passed=passed,
+            classification=None if passed else "MODAL_HEALTH_FAILED",
+            elapsed_s=time.monotonic() - start,
+            detail={"gpu_type": self._gpu_type, "result": result},
+        )
+
+    def teardown(self) -> None:
+        # Modal's serverless GPU functions scale to zero automatically --
+        # there is no persistent Pod/endpoint for this method to stop or
+        # delete, unlike the two RunPod backends. Documented no-op, not a
+        # missing feature.
         return None

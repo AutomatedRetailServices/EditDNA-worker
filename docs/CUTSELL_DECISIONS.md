@@ -2645,6 +2645,115 @@ since this Pod had no reuse story: the gate script's own `finally` called
 force-delete safety net ran as a no-op backup. No paid GPU left running; total GPU-active
 time on this Pod was under 2 minutes.
 
+## D-043 — CutSell Modal GPU execution: first live validation (infrastructure only)
+
+**Status: INFRASTRUCTURE READY (Modal added as a third GPU execution backend; live L4
+smoke test pending dispatch)**
+
+Per the user's explicit directive, this adds Modal as an ADDITIONAL GPU execution backend
+for CutSell QA, alongside RunPod Serverless and RunPod Pod -- both fully preserved,
+neither modified. All three backends share one provider-neutral interface
+(`gpu_execution_provider.GPUExecutionProvider`); every backend ultimately invokes the
+exact same canonical `cutsell_worker.serverless_handler.run_op` dispatcher -- no second
+editor implementation, same discipline as D-042's RunPod Pod addition.
+
+**Scope of this phase, explicitly**: a minimal, controlled Modal L4 GPU smoke test only.
+No Video00 on Modal yet -- that integration is separately gated on this phase's PASS plus
+explicit future authorization, exactly like D-042's own health-only-first sequencing.
+
+### Architecture
+
+- `gpu_execution_provider.py`: `EXECUTION_BACKEND_MODAL = "modal"` added alongside the
+  existing `EXECUTION_BACKEND_SERVERLESS`/`EXECUTION_BACKEND_POD` (now three, not two,
+  valid backends). `ModalExecutionProvider` implements the same `health_check()`/
+  `teardown()` Protocol the other two backends already implement, returning the exact
+  same `HealthCheckResult` dataclass (schema parity across all three backends, tested).
+  `teardown()` is a documented no-op -- Modal's serverless GPU functions scale to zero
+  automatically once a call returns; there is no persistent Pod/endpoint to stop or
+  delete, unlike the two RunPod backends. `health_check()` takes an injected zero-arg
+  `invoke` callable rather than hardcoding a specific Modal SDK method call
+  (`Function.lookup` vs `Function.from_name` etc. have changed across Modal SDK
+  versions) -- this keeps the class fully unit-testable without the `modal` package
+  installed, and defers the actual in-process SDK-call-shape decision to whenever
+  Video00-on-Modal integration is separately authorized and a Modal SDK version is
+  pinned.
+- `modal_gpu_config.py`: modal-package-free constants/validation, importable and
+  testable in any environment (same "no runpod-package dependency for config" precedent
+  as the existing RunPod modules). `APPROVED_MODAL_GPU_TYPES = ("L4",)` -- the only
+  approved type this phase; `EXCLUDED_MODAL_GPU_TYPES` names A100/A100-80GB/H100/H200/
+  L40S explicitly so a reader sees exactly what is deliberately excluded, not just
+  "everything else." `require_modal_gpu_type`/`require_modal_timeout`/
+  `require_modal_token_env` hard-reject anything outside the approved pool, a
+  non-positive or excessive timeout, or missing/blank `MODAL_TOKEN_ID`/
+  `MODAL_TOKEN_SECRET` -- named refusals, never silent substitution.
+- `modal_gpu_diagnostics.py`: pure diagnostic logic (`collect_gpu_diagnostics()`) --
+  GPU model, `torch.cuda.is_available()`, torch version, CUDA version, compute
+  capability, ffmpeg/ffprobe availability+version, Python version, elapsed runtime,
+  completion status. Fully independent of the `modal` package so it's directly
+  unit-testable; the Modal-decorated function in `modal_gpu_minimal_test.py` is a thin
+  wrapper that calls it, never a duplicated implementation.
+- `modal_gpu_minimal_test.py`: the actual Modal App/Function. Invoked via Modal's own
+  documented `modal run` CLI (not an in-process SDK call from
+  `gpu_execution_provider.py` -- see that file's own module docstring for why), which
+  is also how the ephemeral run/teardown lifecycle is handled: no persistent app stays
+  deployed after the CLI invocation completes.
+
+### Image/runtime strategy audit (per the standing "do not silently diverge" directive)
+
+**Decision: reuse the exact same base image `Dockerfile.cutsell.serverless` builds
+FROM (`madiator2011/better-pytorch:cuda12.4-torch2.6.0`), via `modal.Image.from_registry`,
+plus the same `apt-get install ffmpeg` step the Dockerfile already runs.** This is
+closest to the user's "Option A" framing (same dependencies/runtime as the Dockerfile)
+implemented as a Modal Image chain rather than duplicating a Dockerfile — no separate
+torch/CUDA/ffmpeg versions were introduced, and none needed to be: this base image
+already has a working Python/pip (confirmed by the Dockerfile's own successful use of
+it), so no `add_python` override was needed either. The full
+`requirements.cutsell.worker.txt` dependency set and the `cutsell_worker` package
+itself are deliberately NOT installed in this phase's image -- not needed for a
+torch/CUDA/ffmpeg-only smoke test that runs no CutSell code, and adding them is
+deferred to whenever full Video00-on-Modal integration is separately authorized. A
+regression test (`test_cutsell_base_image_matches_dockerfile`) locks the base image
+string against the Dockerfile's own first line, so any future edit to either one that
+causes silent drift fails CI rather than going unnoticed. **No CUDA base change, no
+torch/CUDA/ffmpeg version change of any kind was needed or made -- nothing to report
+under the "report before changing" clause.**
+
+### Cost safety
+
+Exactly one approved GPU type (L4), enforced at import time by
+`require_modal_gpu_type` inside `modal_gpu_minimal_test.py` itself (fails fast before
+any Modal call, not a runtime check that could be bypassed) and independently re-tested
+against the module's actual `@app.function(gpu=...)` call kwargs. Bounded timeout
+(`DEFAULT_MODAL_TIMEOUT_S = 300`, hard-ceilinged at `MAX_MODAL_SMOKE_TEST_TIMEOUT_S =
+600` for this phase). No explicit `scaledown_window`/`container_idle_timeout` override
+-- deliberately: Modal's own default scale-to-zero behavior already satisfies "no idle
+container remains" for a single ephemeral `modal run` invocation, and omitting the kwarg
+avoids a possible SDK-version-specific naming mismatch (that parameter was renamed
+across Modal SDK versions) causing an avoidable failure on this first live attempt.
+
+### Tests
+
+50 new tests across three new Modal-specific test files (20 in `tests/
+test_modal_gpu_config.py`, 23 in `tests/test_modal_gpu_diagnostics.py`, 7 in `tests/
+test_modal_gpu_minimal_test.py` [modal-stubbed, same technique `tests/
+test_pod_direct_benchmark_entrypoint.py` already uses for `runpod`]), plus 10 new/2
+updated cases in `tests/test_gpu_execution_provider.py` (14 total in that file now)
+covering the three-backend constant set, `ModalExecutionProvider`'s L4-only
+enforcement, health-check pass/fail/exception handling, teardown no-op, and
+cross-backend `HealthCheckResult` schema parity. Running the full combined D-042+D-043
+targeted suite (206 tests) confirms **RunPod Serverless and RunPod Pod are completely
+untouched** -- no shared code path was modified, only additive. Full `tests/
+test_cutsell_*.py` CI glob and `compileall` run before any live Modal call, per the
+standing discipline.
+
+### Live test: not yet run
+
+The one authorized live Modal L4 minimal GPU smoke test (workflow
+`cutsell-modal-gpu-minimal-raw.yml`, `workflow_dispatch` only) has not yet been
+dispatched as of this checkpoint -- follows once this infrastructure is confirmed green
+and pushed. Per the standing directive: if it passes, report and stop (no automatic
+Video00-on-Modal); if it fails, report the exact error and stop (no blind retry).
+
 ## Change rule
 
 When a new decision changes product behavior, update this file in the same development cycle. Do not silently redefine CutSell through code alone.
