@@ -2929,6 +2929,62 @@ non-zero.
 again" instruction, this fix is reported here and the next live attempt awaits
 separate authorization.
 
+### Fourth retest result (2026-09-02, head 508f386): PASS -- D-043 first live validation complete
+
+**Status: CANONICAL PASS.** Modal L4 minimal GPU execution is confirmed working
+end-to-end for this account. RunPod Serverless and RunPod Pod remain the production
+backends, fully untouched.
+
+One further authorized retest was dispatched at head `508f386` (the DeserializationError
+fix commit) -- run [33622147447](https://github.com/AutomatedRetailServices/EditDNA-worker/actions/runs/33622147447),
+app run [ap-1o6K8hS6HndONVkqArGnjq](https://modal.com/apps/automatedretailservices/main/ap-1o6K8hS6HndONVkqArGnjq).
+Every step succeeded, including "Print result summary" (the step whose own
+`exit_code != "0"` check is the authoritative PASS/FAIL gate).
+
+**Full evidence**:
+
+| Field | Value |
+|---|---|
+| Authentication | PASS |
+| Modal app / function | `cutsell-gpu-minimal-isolation` / `run_minimal_gpu_check` |
+| Container attempts | Exactly ONE (`retries=0` confirmed working a second time -- no crash-loop) |
+| Local modules mounted | Confirmed: `Created mount PythonPackage:modal_gpu_config, PythonPackage:modal_gpu_diagnostics` |
+| GPU model | NVIDIA L4 |
+| `torch.cuda.is_available()` | `true` |
+| torch version | `2.6.0+cu124` |
+| Compiled CUDA version | `12.4` |
+| Compute capability | `8.9` |
+| ffmpeg | `ffmpeg version 4.4.2-0ubuntu0.22.04.1` (present) |
+| ffprobe | `ffprobe version 4.4.2-0ubuntu0.22.04.1` (present) |
+| Python version (in container) | `3.10.12` |
+| Diagnostic body runtime | `3.465s` (the function's own measured `elapsed_s`) |
+| Result deserialization | Succeeded -- the full JSON dict was received and printed by the local `modal run` process with no `DeserializationError` |
+| `torch_error` | `null` |
+| `ok` / `completion_status` | `true` / `"COMPLETED"` |
+| Retry/crash loop | None -- one container, one attempt |
+| Clean completion | `Stopping app - local entrypoint completed.` / `✓ App completed.` |
+| Scale-to-zero | Confirmed by design (ephemeral `modal run` invocation) and by the app's own completion event -- no persistent container remains |
+| Startup latency | ~6.7s from function-object creation to the container's own CUDA banner (image already cached from prior runs) |
+| Total step wall time | 16s ("Run Modal L4 minimal GPU smoke test" step, 10:58:05-10:58:21 UTC) |
+| Approximate cost | Low, sub-cent range (one L4 container, single-digit seconds of GPU-attached wall time) -- Modal's own billing dashboard has the exact per-run figure |
+
+**This closes out D-043's first-phase live validation.** All three defects found across
+this cycle (crash-loop from missing local-source mounting, unbounded Modal-side
+retries, and a torch-typed value leaking past Modal's serialization boundary) are
+fixed and now verified live, not just in mocked tests. Modal is confirmed as a working
+third GPU execution backend for this account on the approved L4 GPU type.
+
+**Per the standing directive, Video00 was NOT run.** The next separately-authorized
+step is the full Video00 benchmark Modal was brought in to eventually run -- the exact
+same canonical pipeline RunPod Serverless/Pod already run (ASR, Attempt reconstruction,
+Idea clustering, Retry families, BestTake, Claim coverage, Composite, Story validation,
+CanonicalEditPlan, FinalEditReviewer, Freeze, Boundary, Render, PostRenderWatchListenQC,
+Delivery gate, Human Gold regression checks) via the exact same `run_op()` dispatcher --
+no new benchmark design, no second editor implementation. That integration (installing
+`cutsell_worker` + its full dependency set into the Modal image, wiring the real
+Video00 payload through) is not yet built and requires separate authorization before
+any code is written for it.
+
 ## Change rule
 
 When a new decision changes product behavior, update this file in the same development cycle. Do not silently redefine CutSell through code alone.
