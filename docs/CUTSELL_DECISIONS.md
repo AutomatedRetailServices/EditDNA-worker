@@ -3692,6 +3692,69 @@ identical) phrasing, isolating the new mechanism cleanly.
 No new Modal RAW launched. Stopping here for review, per the standing
 directive.
 
+## D-046 confirmatory live result -- one Modal Video00 RAW at head 5e23f86
+
+Live confirmatory run (`video00-modal-33669148915-1`, HEAD `5e23f86`, D-044
+hybrid-semantic overlay confirmed active, `retries=0`, same source video,
+same 18-check manifest). Verified via the real, unmasked `result.json`
+(read-only zero-GPU forensic-extract workflow), not the masked CI log.
+
+**D-046 CASE A: PASS (mechanism not exercised, no adverse effect).**
+`clip_fb136663d61593a59463` ("El año pasado comencé a notar hinchazón...")
+was split by `post_selection_interior_gap_trim` into
+`clip_fb136663d61593a59463__psigl11279a14d51e` /
+`__psigr2208741ba22d`, both present in `selected`. This idea had no
+competing retry this run (a take_group_members singleton), so
+`canonical_edit_plan.py`'s provenance-aware rescue was never actually
+NEEDED here -- but its stamping ran cleanly with no side effects, and
+`missing_idea_coverage: []` confirms nothing broke. Neither of the two
+D-045 Case A/B failure geometries reproduced live this run (consistent
+with both being ASR/attempt-boundary run-to-run non-determinism, not a
+deterministic condition) -- FIX A's rescue branch and FIX B's
+`preserved_borderline_subspans` (empty in diagnostics) both went unused
+by coincidence, not by malfunction.
+
+**D-046 CASE B: PASS.** `pimples_micro_2_present` now passes (was FAILing
+in the D-044 confirmatory run). `attempt_reconstruction.attempts` shows
+the pimples region reproduced the SAME (good, non-fused) physical
+boundaries as the original pre-D-044-fix passing run: the micro-fragment
+(`clip_4ad06de981a449a08cc2`, 191.14-198.12s) and the bad monolith
+(`clip_acd1df1b0e7e24a393e4`, 198.88-211.02s) are two separate attempts
+again this run -- byte-identical timing to the historical passing run.
+Direct further confirmation that this is real run-to-run ASR/attempt-
+boundary variance, not a deterministic code regression.
+
+**NEW finding (not D-046, not touched, reported only):** Human Gold
+16/18, two NEW failures unrelated to D-045 Case A/B --
+`pimples_bad_monolith_absent` (the bad monolith text IS present in
+`selected`) and `gastritis_preserved`. Root cause for the first:
+`semantic_idea_equivalence.distinct_addition_blocked` shows the arbiter
+correctly identified `clip_acd1df1b0e7e24a393e4` (bad monolith) and
+`clip_b46d4134c9be18017964` ("Otro síntoma era que me salían
+espinillas...") as the same idea (confidence 0.95) but the take-grouping
+distinct-addition guard (`take_grouping_provider.py`, IdeaClusterer
+territory) blocked the merge anyway -- the same "otro síntoma..." pattern
+this guard was built to protect (CleanCutBench fixture 50, RAW
+33432104336) is here producing a false positive: "otro síntoma" is a
+narrative bridge into a RETRY of the same point, not a genuinely new
+fact. Because the two were never merged into one retry family, the bad
+monolith was never put in competition with the clean winner and survived
+unchallenged. Freeze correctly BLOCKED anyway (a real, separate
+contradiction finding plus two blocking lost_semantic_atoms, both
+pre-existing/unrelated territory). Architecture PASS (0 failed checks).
+Per the standing directive this is IdeaClusterer territory -- not
+diagnosed further and not patched.
+
+**Full result:** Human Gold 16/18, architecture PASS, CanonicalEditPlan
+built (`plan_83d59af0e7f4ea82`), FinalEditReviewer FAIL (expected --
+mirrors the correct freeze block), Freeze BLOCKED, render never attempted
+(`no_render_attempted_on_a_blocked_semantic_plan: ok`). Modal GPU runtime
+~6m14s (374s), one L4, low-cost. Selection lock: 20 vs the frozen 23-count
+expectation (warning only, per D-032).
+
+No code changed based on this result. No further RAW launched. Reported
+for review per the standing directive.
+
 ## Change rule
 
 When a new decision changes product behavior, update this file in the same development cycle. Do not silently redefine CutSell through code alone.
