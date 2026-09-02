@@ -9,8 +9,14 @@ name: CutSell Video00 Modal RAW
 #
 # workflow_dispatch only, same as every other paid-GPU QA workflow this
 # repo has added (Modal minimal test, RunPod Pod RAW/direct-exec/minimal-
-# isolation) -- never on a push trigger, so a controlled Video00-scale
-# Modal spend is always an explicit, one-off decision.
+# isolation) -- never on an ongoing push trigger, so a controlled Video00-
+# scale Modal spend is always an explicit, one-off decision. The bootstrap
+# push trigger below is temporary (same precedent as every other new
+# workflow_dispatch-only workflow this repo has added): GitHub does not
+# register a workflow_dispatch-dispatchable workflow via the API until it
+# has at least one run on the pushed branch. This one push IS the one
+# authorized live full Video00 Modal benchmark; the bootstrap trigger is
+# removed in a follow-up commit once confirmed working.
 #
 # No Docker build/push/digest-pin step here (unlike the RunPod Serverless
 # RAW workflow): Modal's own `.add_local_python_source("cutsell_worker")`
@@ -19,6 +25,10 @@ name: CutSell Video00 Modal RAW
 # "exact test head" guarantee for this backend. The checked-out commit SHA
 # is still printed for the record.
 on:
+  push:
+    branches: [feature/runpod-pod-on-demand]
+    paths:
+      - ".github/workflows/cutsell-video00-modal-raw.yml"
   workflow_dispatch:
 
 concurrency:
