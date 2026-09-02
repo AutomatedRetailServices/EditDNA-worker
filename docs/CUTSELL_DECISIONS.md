@@ -3195,6 +3195,136 @@ value makes ordinary benchmark numbers unreadable in CI logs whenever they coinc
 with a masked short numeric config value -- a future fix should mask only genuinely
 secret-shaped values (credentials, keys), not every value indiscriminately.
 
+## D-044 — Retry-family / idea-clustering regression audit (2026-09-02)
+
+**Correction to the D-043 report above:** that report's semantic finding, written from
+masked CI-log text, speculated the sonography/pimples/hereditary over-retention was an
+"IdeaClusterer/RetryFamilyResolver gap." Forensic tracing against the real (unmasked)
+`result.json` -- fetched via a new read-only, zero-GPU workflow
+(`cutsell-video00-d044-forensic-extract.yml` + `benchmarks/video00_d044_forensic_
+extract.py`, since the org's egress policy blocks the Actions artifact blob-storage
+host and the D-043 workflow's blanket env masking corrupted numeric CI-log output)
+-- found a single, precise, **infrastructure-level** cause, not a code defect.
+
+### Forensic trace (real clip_ids/timestamps/text, run 33636255124)
+
+`diagnostics.semantic_idea_equivalence` = `{"candidate_pair_count": 0,
+"merged_pair_count": 0, "status": "not_requested"}` for the ENTIRE run.
+`take_grouping_provider.reconcile_semantic_idea_equivalence` returns exactly this
+tuple when `arbiter is None` (checked before any candidate pair is even computed --
+`if len(groups) < 2 or arbiter is None: return groups, {"status": "not_requested", ...}`,
+and `len(groups)==25` here, so it is the `arbiter is None` branch). `brain_runtime.
+build_brain_runtime` only constructs that arbiter when `requested_hybrid` (`_env_true
+(values.get("CUTSELL_HYBRID_LLM_ENABLED"))`) is true. `take_grouping_reason` for this
+run was `"baseline_local; weak_retry_envelope_restored; final_sibling_reconciled"` --
+lexical-tier passes only; the bounded semantic-equivalence tier never engaged.
+
+All three named regions show the identical structural signature -- each pair sits in
+its own **separate singleton** `take_group_members` entry (never became a candidate
+pair at all), each pair is temporally well within the module's own 30-second
+cross-group eligibility window, and downstream stages that DID run (BestTakeResolver/
+`claim_coverage_best_take`, StoryValidator) behaved correctly on the groups they were
+actually given:
+
+- **SONOGRAPHY.** `clip_1fc2eb28a33c9b39f313` (25.60-34.60s, "Nunca se nos ocurrió
+  hacer un chequeo de sonografía de la tiroides, pues porque cada año que me hacía
+  mínimo dos estados.") and `clip_818bad730eefa36c8620` (35.46-46.42s, "Nunca se nos
+  ocurrió hacer un chequeo de la tiroides por sonografía porque siempre en mis
+  exámenes la tiroides salía como que estaba funcionando perfectamente.") -- 0.86s
+  apart, reordered near-paraphrase of the same sentence template ("chequeo de
+  sonografía de la tiroides" vs "chequeo de la tiroides por sonografía"), each its own
+  singleton group. Never reached BestTakeResolver -- no group, no contest.
+- **PIMPLES.** `clip_58f755fdf477281c1aad` (191.14-198.12s, micro-fragments "también me
+  salían espinillas." / "era como un rush, una alergia."), `clip_a3f17c1603b8cafa3a13`
+  (198.88-211.02s, the monolith "también me salían espinillas en esta parte... detrás
+  de la oreja y todo el cuello... espinillas de personas con problemas hormonales."),
+  `clip_aab224fd03b3a3b81c83` (213.34-222.98s, the later winner "otro síntoma era que
+  me salían espinillas... detrás de la oreja y en el cuello. Me salía por
+  temporadas.") -- each &lt;3s from its neighbor, each its own singleton. The monolith
+  and later-winner share substantial vocabulary yet the lexical tier alone did not
+  merge them either (its own reconciliation passes, not the semantic tier, decide
+  this; exact lexical non-merge threshold not independently re-verified here).
+- **HEREDITARY.** `clip_ea0192bf8dec7ef1e743` (295.52-313.50s, "Esta es mi experiencia.
+  Soy la única en mi familia que tiene este tipo de cáncer...") IS correctly grouped
+  (lexical tier) with `clip_2e84f4cb59dc3b5632a9` (340.18-346.52s, "cánceres son
+  hereditarios. Soy la única en mi familia que tiene este tipo de cáncer.") -- near-
+  verbatim phrase overlap, merged despite a 26.68s gap and `clip_0c625f24aae20d68152b`
+  sitting temporally between them. `claim_coverage_best_take` then correctly promoted
+  `clip_ea0192bf8dec7ef1e743` over `clip_2e84f4cb59dc3b5632a9` within that group
+  (`reason: "single_candidate_covers_all_critical_claims_previous_winner_did_not"` --
+  the short fragment was missing the hereditary-percentage claim sentences). But
+  `clip_0c625f24aae20d68152b` (319.38-334.24s, "Soy la primera en mi familia con este
+  tipo de cáncer. Nadie en mi familia tiene un carcinoma papilar en la tiroides ni
+  sufre de la tiroides... 5-10%...") -- only 5.88s from the winner and 5.94s from the
+  discarded fragment -- was NEVER a member of this or any group. It shares almost no
+  vocabulary with "Soy la única..." (different sentence structure throughout), so the
+  lexical tier correctly could not have caught it; only the (inert) semantic tier
+  could have. **Section 5 determination:** yes, this is a retry of the same
+  underlying communicative intent (establish personal/family cancer-history context,
+  cite the same 5-10% hereditary statistic, land the same caution/CTA), not two
+  deliberately distinct beats -- the near-identical three-part scaffold (family-status
+  claim -> statistic -> caution) recurring across both clips, with only the specific
+  claim word ("única" vs "primera") and surrounding phrasing differing, is the
+  signature of a creator naturally rephrasing the same take rather than composing two
+  separate points. This is an interpretive judgment, not something the data proves
+  outright -- flagged as such.
+
+### First wrong decision -- classification
+
+**G (another proven cause), and it precedes the A-F taxonomy's own first step**: the
+IdeaClusterer's bounded semantic-equivalence tier was never invoked at all for this
+run (config-gated `arbiter is None`), so no candidate pair for any of the three
+regions was ever generated -- this is not a budget-displacement (C), not a false
+negative from the arbiter itself (D), not a grouping-identity bug, and not a
+downstream reintroduction (F). Every stage that DID run (lexical grouping,
+BestTakeResolver/claim_coverage_best_take, StoryValidator, CompositeResolver hooks --
+all confirmed empty/inert for these clips, ruling out F) operated correctly on the
+inputs it was given.
+
+### Compare against last-good RAW
+
+The canonical RunPod Serverless RAW workflow (`cutsell-video00-raw-v5-auto-
+microtrim.yml`, the workflow that produced `benchmarks/video00_selection_lock.json`'s
+own baseline) does not use the base `EditDNA-Worker-2` template's env verbatim -- its
+"Create unified Selection template" step explicitly overlays `CUTSELL_BRAIN_BACKEND:
+"runpod_local"`, `CUTSELL_EDITORIAL_MODE:"clean_cut"`, `CUTSELL_ASR_MODEL:"medium"`,
+`CUTSELL_HYBRID_LLM_ENABLED:"1"`, `CUTSELL_HYBRID_PROVIDER:"google"`, and
+`CUTSELL_UNIFIED_SELECTION_REASONER:"1"` on top of the base template before every
+live dispatch. `cutsell-video00-modal-raw.yml`'s "Build masked Modal env-secret file"
+step passed the base template's raw `.env` straight through with no equivalent
+overlay. The observed `semantic_idea_equivalence.status: "not_requested"` is fully
+consistent with the base template's own default for `CUTSELL_HYBRID_LLM_ENABLED` (or
+`CUTSELL_HYBRID_PROVIDER`) not being truthy/`"google"` -- exactly the condition the
+RunPod workflow's own overlay exists to force. This is a **deterministic
+infrastructure/config-parity gap** between the two workflows, not ASR jitter, not an
+arbiter budget issue, and not a semantic-equivalence false negative -- category
+"deterministic code regression" only in the sense that the Modal workflow's env
+wiring, not `cutsell_worker`'s engine code, is what changed relative to the
+baseline-producing configuration.
+
+### Shared systemic cause
+
+One shared cause explains all three regions: **the semantic-equivalence arbiter tier
+of IdeaClusterer was completely inert for this run**, because `cutsell-video00-modal-
+raw.yml` never applied the `CUTSELL_HYBRID_LLM_ENABLED=1` / `CUTSELL_HYBRID_PROVIDER=
+google` overlay the canonical RunPod workflow applies before every live dispatch. All
+three failures are lexically-dissimilar-or-borderline paraphrase pairs that the
+lexical-only tier cannot be expected to catch by design -- exactly the class of case
+the semantic tier exists for.
+
+### Smallest general fix surface (NOT implemented -- reported for review only)
+
+Add the same env overlay `cutsell-video00-modal-raw.yml`'s "Build masked Modal env-
+secret file" step already has the mechanism to apply (it already builds the Modal
+Secret from a Python dict merged from the base template) -- overlay
+`CUTSELL_HYBRID_LLM_ENABLED=1` / `CUTSELL_HYBRID_PROVIDER=google` (matching the
+RunPod workflow's own overlay) before constructing the Modal Secret, so both
+execution backends run with parity semantic-arbiter configuration. This is an
+infrastructure/workflow-config change, not a `cutsell_worker` engine-code change --
+still requires the user's separate authorization per the standing directive before
+any code is touched, and before any new Video00 RAW is dispatched to verify it. No
+code was modified in this audit; no new benchmark was launched.
+
 ## Change rule
 
 When a new decision changes product behavior, update this file in the same development cycle. Do not silently redefine CutSell through code alone.
