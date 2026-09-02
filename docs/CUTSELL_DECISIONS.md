@@ -3076,6 +3076,125 @@ on every changed/new file.
 authorized full Video00 Modal benchmark dispatch and its result are reported separately
 once it completes.
 
+### Live full Video00 Modal dispatch result (2026-09-02, head cc25a72)
+
+**MODAL FULL RAW COMPLETE.** First-ever successful end-to-end execution of the canonical
+Clean Cut Core V1 engine on Modal (run 33636255124, App `ap-WX9iPZfMQnhPQJsM1rZwLm`,
+Function `fu-UtPpmyf89ZpgT6JFPc8mDr`). The infra breakthrough is real: `run_op("focused",
+...)` executed the SAME canonical pipeline RunPod runs, unmodified, on an L4 GPU, and
+returned a result -- but the two prior live dispatches on this run each surfaced a real
+bug diagnosed and fixed live, never guessed at:
+
+- **First dispatch (run 33626736759):** failed before touching Modal -- `jq -n`'s
+  default pretty-printed (multi-line) payload JSON was written straight into a plain
+  `KEY=value` line appended to `$GITHUB_ENV`, which GitHub's own env-file command
+  rejects. Fixed with `jq -nc` (compact, single-line).
+- **Second dispatch (run 33626961988):** crash-looped for ~90 minutes (3 container
+  attempts, each dying in ~2s with `ModuleNotFoundError: No module named
+  'modal_gpu_config'`) before ever reaching `run_op()`. Root cause: the image's
+  `.add_local_python_source(...)` mounted `cutsell_worker` but omitted
+  `modal_gpu_config`, the sibling module this script's own top-level code imports --
+  the exact same class of bug already fixed once for `modal_gpu_minimal_test.py`.
+  Diagnosed via a NEW, separate, read-only diagnostic workflow
+  (`cutsell-modal-video00-diag-logs.yml`) that queries `modal app list`/`modal app
+  logs` by App ID (ephemeral apps are not resolvable by name) WITHOUT touching the
+  running benchmark -- confirmed genuinely stuck (deterministic, zero forward
+  progress across 3 attempts), then cancelled and fixed.
+- **Third dispatch (run 33636255124):** ran clean. `run_op()` returned `ok: true`,
+  `elapsed_sec` ~495s of actual pipeline execution (Modal GPU runtime; ~513s total step
+  wall time including `modal run` CLI overhead). Rendered a candidate, ran full
+  PostRenderWatchListenQC, uploaded the diagnostic-invalidated preview + result.json to
+  S3, downloaded them, printed full canonical diagnostics.
+
+**Caveats on this report's completeness:** GitHub's own log masking (`::add-mask::`
+applied per-value to the ENTIRE live RunPod template env dict, per D-043 Section 4's
+"pass the full template through" design) blanks out many numeric fields in the CI log
+wherever those digits happen to coincide with a masked env value (several of the
+template's own config values are short integers) -- e.g. `selected_count` shows as
+`"***8"` in the raw log. The raw artifact ZIPs (which are NOT masked) could not be
+downloaded directly in this session: the organization's egress policy blocks the
+Actions artifact blob-storage host (`*.blob.core.windows.net`), confirmed via a direct
+`curl` 403/`connect_rejected`. `validate_video00_architecture.py` and
+`validate_video00_regression_qa.py` never ran (the workflow mirrors
+`cutsell-video00-raw-v5-auto-microtrim.yml`'s own convention of NOT gating these
+steps with `if: always()`, so a Selection Lock failure short-circuits the rest). All
+of the following is therefore a best-effort MANUAL read of the (unmasked) transcript
+TEXT the "Print full canonical diagnostics" step already printed to the CI log --
+never an automated validator run -- and should be treated as directionally reliable,
+not authoritative to the check.
+
+- **ARCHITECTURE:** no automated PASS/FAIL (validator skipped). Manual review of
+  `stage_status` shows the full canonical component chain instantiated and completed
+  (ASR 54 segments, attempt_reconstruction, take_grouping, take_judge,
+  selection_phase_authority `clean_cut_core_v1_idea_first_keep_discard`,
+  final_story_coherence_validation `status: applied`, canonical_edit_plan
+  `validation_state: frozen_ready`, final_edit_reviewer `PASS`, repair_loop `PASS`,
+  selection_boundary_contract `status: verified`, human_boundary_polish, render,
+  live_render_qc) -- structurally intact end to end.
+- **SEMANTIC: FAIL.** `selection_locked: false`, `historical_regression_qa_pass: false`
+  in the Selection Lock report. Manual comparison of the actual KEEP sequence against
+  every item in `benchmarks/video00_regression_qa.json` found at least two clear,
+  concrete violations of the manifest's own `forbidden_contains` checks (both present
+  when they must be absent):
+  - `sonography_bad_take_absent`: the incomplete take ("...pues porque cada año que me
+    hacía mínimo dos estados.") is KEPT alongside the complete retake ("...funcionando
+    perfectamente.") -- an incomplete+complete duplicate pair survived Selection.
+  - `pimples_bad_monolith_absent`: the monolithic pimples take ("También me salían
+    espinillas en esta parte de aquí detrás de la oreja y todo el cuello...") is KEPT
+    alongside BOTH the micro-fragment version and the later winner -- three
+    realizations of the same idea all survived.
+  - A likely third: `family_context_preserved`'s idea (the hereditary-cancer claim) has
+    TWO separately-phrased retakes both kept ("Esta es mi experiencia. Soy la única en
+    mi familia..." and "Soy la primera en mi familia..."), on two clip_ids neither of
+    which appears in `canonical_edit_plan.diagnostics.ideas` at all -- meaning
+    IdeaClusterer treated them as two unrelated ideas rather than one retry family, so
+    BestTakeResolver never got a chance to pick a winner between them.
+  All three are exactly the "no duplicate retry realization" / "no incomplete+complete
+  duplicate pair" class of regression D-020/D-040 exist to prevent. The diagnostics
+  block's own `final_story_coherence_validation.not_implemented` field explicitly lists
+  `"general_non_numeric_non_negation_contradiction_detection"` -- StoryValidator's
+  contradiction check does not catch this class of issue by design; it depends on
+  IdeaClusterer/RetryFamilyResolver correctly grouping retries upstream, which appears
+  to be where this regression actually originates. `lost_critical_claims: []` and
+  `lost_semantic_atoms: []` -- nothing required was cut; if anything, too much survived.
+  Everything else checked by hand (cancer hook, sonography good-take ordering before
+  diagnosis, biopsy nodule, papillary cancer sentence, acne-back, all three pimples
+  micro-fragments, pimples later winner, hair loss, gastritis, CTA, both required_order
+  sequences) appears present and correctly ordered.
+- **Human Gold regression QA: not run** (validator skipped, see caveat above). Manual
+  best-effort estimate against the 18-check manifest: roughly 15/18, with the 3 failures
+  named above -- reported as an estimate, not an authoritative score.
+- **CanonicalEditPlan: PASS** (`validation_state: frozen_ready`, `freeze_blocked:
+  false`).
+- **Freeze: PASS** (not blocked) -- but this reflects only the contradiction classes
+  StoryValidator currently implements, not the duplicate-retry-realization issue found
+  above.
+- **Render attempted: YES** (1 attempt).
+- **PostRenderWatchListenQC: FAIL.** `status: PHYSICAL_FAIL_UNREPAIRABLE`, 12 physical
+  findings (2 `LINGERING_ACCIDENTAL_SILENCE`, 10 `ABRUPT_AUDIO_DISCONTINUITY`),
+  `repair_requested: true`, `repair_applied: null` -- the bounded physical repair loop
+  did not resolve it. `output_path: null` -- no deliverable file was produced; only the
+  diagnostic-invalidated preview was uploaded to S3.
+- **delivery_status: `NOT_DELIVERABLE_NEEDS_HUMAN_REVIEW`. deliverable: false.**
+- **Modal GPU runtime:** ~495s (~8.3 min) of actual `run_op()` execution; ~513s total
+  step wall time. **Approximate cost:** low cents (single L4, ~8.5 minutes) -- exact
+  figure is in Modal's own billing dashboard.
+- **Artifacts:** `cutsell-video00-modal-human-review` (289 MB: diagnostic-invalidated
+  preview MP4, `video00-modal.json`, Human Gold reference MP4), `cutsell-video00-modal
+  -validator-reports` (2.8 KB: Selection Lock report only -- architecture/regression-qa
+  reports were never generated), `cutsell-video00-modal-run-log` (2 KB), all on run
+  33636255124.
+
+**Per the standing directive: STOPPING here.** No further benchmark launched
+automatically. No engine code modified based on this result -- the finding (a likely
+IdeaClusterer/RetryFamilyResolver gap letting at least 3 retry pairs both survive as
+unrelated "complete" ideas) is reported for the user's review, not acted on
+unilaterally. A secondary, lower-priority finding worth fixing regardless of the
+semantic result: the workflow's blanket `::add-mask::` over every RunPod template env
+value makes ordinary benchmark numbers unreadable in CI logs whenever they coincide
+with a masked short numeric config value -- a future fix should mask only genuinely
+secret-shaped values (credentials, keys), not every value indiscriminately.
+
 ## Change rule
 
 When a new decision changes product behavior, update this file in the same development cycle. Do not silently redefine CutSell through code alone.
