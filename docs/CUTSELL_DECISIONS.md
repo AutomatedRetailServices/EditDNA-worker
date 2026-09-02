@@ -4325,6 +4325,151 @@ nothing reads the new resolver's output to decide anything. No Modal RAW
 launched. No RunPod touched. Holding for review before D-050C2 (the
 actual authority cutover).
 
+## D-050C1.5 -- full shadow parity qualification: NOT YET, 7 named blockers
+
+Ran the D-050C1 shadow resolver against ALL 54 CleanCutBench fixtures
+individually (`tests/test_cutsell_d050c1_5_full_cleancutbench_parity.py`),
+not the D-050C1 representative 7-shape sample. Method: monkeypatches
+`test_cutsell_clean_cut_core_evaluation_suite._run_core` for one pass over
+every real `test_*` function (each one's own assertions still execute),
+capturing every real `(takes, draft, arbiter)` call under its fixture's
+own name -- zero duplication of fixture construction, zero modification of
+the canonical suite file. Also fixed a real fidelity gap found while
+building this: `_run_core`'s `take_judge_groups` entries never carry
+`local_selected_clip_id` (only `pipeline.py`'s real chain stamps that, at
+`pipeline.py:252`), so the Ledger never recorded delivery-score evidence
+for ANY CleanCutBench-driven fixture until this harness reproduced that
+stamp too -- applied identically in this file and in
+`test_cutsell_d050c1_parity_report.py`.
+
+**Result: 72 semantic ideas across 54 fixtures -- 59 SAME (81.9%), 6
+CONTENT_SAFETY_IMPROVEMENT, 3 COMPOSITE_DIFFERENCE, 2
+DELIVERY_RANK_DIFFERENCE, 2 POTENTIAL_REGRESSION, 0
+REVIEW_REQUIRED_DIFFERENCE, 0 CLAIM_DEDUP_DIFFERENCE.** Per the directive's
+own instruction ("do not automatically call a difference an improvement"),
+every non-SAME row was individually re-examined against the fixture's own
+real diagnostics rather than trusted at face value -- this reclassified 5
+of the 8 auto-labeled "improvement" rows and surfaced two bugs in the
+parity machinery itself. Net: 0 of the 8 non-SAME/non-benign findings
+survive re-examination as an unqualified "good", producing 7 named,
+precisely root-caused blockers:
+
+- **F1 incidental/low-information claim importance not downgraded**
+  (3-4 rows: `test_claim_coverage_self_source_trap_...`,
+  `test_incidental_year_safely_omitted_...`,
+  `test_redundant_date_repeated_...`, contributing to the multilingual
+  case below). `semantic_claims.classify_claim` marks EVERY bare
+  negation/number CRITICAL; production's `claim_coverage_best_take.
+  _is_low_information_incidental`/`_override_blocked_by_incidental_self_
+  source_claims` (D-047/D-048 FIX 2) downgrades a source-exclusive,
+  temporal-aside-shaped bare fact so it never forces an override or
+  composite -- the resolver has no equivalent, so it demands a composite
+  (or prefers a candidate) production correctly decided was unnecessary.
+- **F2 negation-marker detection loses short markers** (multilingual
+  case). `_negation_tokens` reads `content_tokens`, which already dropped
+  bare "no" (2 characters, below `_content`'s >=3-char floor) -- the same
+  root cause already fixed once for digits via `_claim_digit_values`
+  (reading raw `text`) but never applied to polarity detection. Two
+  genuinely-equivalent negated paraphrases ("nunca...", "no...") fail to
+  dedup, inflating a coverage requirement and forcing an unneeded
+  composite.
+- **F3 CORRECTION-marker over-trust + narrow contradiction-relatedness
+  threshold** (`test_numeric_correction_across_two_takes_conservatively_
+  blocks_freeze`). The resolver treats a bare correction marker
+  ("actually, I checked") as enough to promote one of two competing
+  numbers to sole-CRITICAL and auto-resolve -- exactly the "guessing"
+  behavior that fixture's own docstring says production deliberately
+  avoids (block Freeze, let a human resolve it in seconds); separately,
+  `_CONTRADICTION_RELATEDNESS_THRESHOLD=0.5` over non-digit Jaccard is too
+  narrow to even flag "2019" vs "2020" in structurally different
+  sentences as related.
+- **F4 no `claim_equivalence_arbiter` wiring** (`test_arbiter_is_
+  consulted_only_for_ambiguous_coverage_...`). By design -- same
+  provider-neutral, honest-gap pattern as every other bounded arbiter in
+  this codebase -- so the resolver can't yet match a production decision
+  an arbiter-confirmed paraphrase legitimately produced. Not urgent on
+  its own, but blocks cutover for any idea an arbiter resolves.
+- **F5 composite model has no completeness/narrative-order-validity
+  check** (`test_claim_missing_from_its_own_idea_still_fails_...`, the one
+  POTENTIAL_REGRESSION Section 4/5 asks not to wave through). Three
+  critical claims split three ways across 3 INCOMPLETE (`complete_idea=
+  False`) fragments plus one complete-but-content-free filler: production
+  correctly blocks Freeze rather than guess (its own bounded ClaimCoverage
+  composite resolution is capped at 2 pieces, deliberately); the resolver
+  instead confidently assembles all 3 incomplete fragments into a 3-piece
+  composite with no check on delivery completeness or narrative/temporal
+  coherence between members.
+- **F6 `SemanticIdeaRecord.current_winner_realization_id` goes stale once
+  a composite forms** (`semantic_ledger.py` bug, found via
+  `test_complementary_critical_claims_require_a_composite`, which the
+  raw auto-classifier mislabeled POTENTIAL_REGRESSION). `record_composite`
+  never updates or clears `current_winner_realization_id`, so a stage's
+  earlier `record_winner_decision` (here: DeliveryScorer's local top
+  score, before ClaimCoverage's composite override) is what a parity
+  comparison sees, even though the real engine's actual final selection
+  (`draft.selected`) matches the shadow composite exactly.
+- **F7 parity comparison trusts a provisional engine pick when the real
+  engine never converged** (the numeric-correction case above, and any
+  `freeze_blocked`/multi-selected idea generally). When the final draft
+  legitimately keeps MULTIPLE realizations for one idea (a deliberate
+  "ask a human" outcome), `current_winner_realization_id` still reports
+  DeliveryScorer's tentative pick as if it were the engine's confident,
+  final answer.
+
+None of these are editorial-behavior bugs -- every one lives entirely in
+shadow code (`realization_resolver.py`'s claim-criticality/dedup/
+composite model, or `semantic_ledger.py`'s winner-tracking field, or the
+parity-comparison function itself) that nothing downstream reads. F1-F5
+are real gaps in the resolver's own decision quality; F6-F7 are bugs in
+how confidently the parity report can be trusted to represent "what the
+engine actually decided" for a composite-formed or unresolved idea --
+worth fixing before F1-F5's own counts can be trusted as complete, since
+a stale/wrong "engine winner" can hide or manufacture a finding either
+way.
+
+**Retained forensic case replay** (Section 2): D-049 Case A (dedicated
+fixture, `resolve_orphan_realizations_shadow` verdict) PASS;
+D-049 Case B (dedicated fixture, dedup + richer-realization-wins) PASS;
+D-048 FIX 1 distinct-addition false positive (CleanCutBench fixture,
+appears as SAME in the full sweep) PASS; D-048 FIX 2 claim-coverage
+self-source-exclusive trap (CleanCutBench fixture) FAIL -- this is F1
+above, the shadow resolver does not yet replicate this specific
+production guard; contradictory-quantity-retries (dedicated fixture +
+representative-sample fixture, both REVIEW_REQUIRED) PASS;
+number-sensitive non-dedup (dedicated fixture, clean ASCII text) PASS;
+negation-sensitive non-dedup (dedicated fixture, clean ASCII text) PASS
+but FAILS on realistic Spanish "no"-marker text (F2) -- the synthetic
+unit fixture's markers ("not"/"never") happen to clear `_content`'s
+length floor where real "no" does not.
+
+**Shadow guarantee re-proven** (Section 7): grep-audited again -- only
+`universal_clean_cut.py` imports `realization_resolver`; `freeze_blocked`
+still derives solely from `coherence_diag`/`repair_result` (unchanged,
+line 254); every one of the 54 fixtures' identity-stamped drafts were
+asserted, per-fixture, to keep an identical `selected`/`discarded`
+clip_id set before and after Ledger/resolver construction.
+
+**Validation**: compileall clean; D-050A (26)/D-050B (26)/D-050C1 (28)
+green; full 54-fixture CleanCutBench green unchanged; full
+`tests/test_cutsell_*.py` glob green, 1405 passed, 0 failed (1404
+pre-existing + 1 new full-sweep test). No GPU used anywhere in this
+directive.
+
+**RECOMMEND D-050C2 CUTOVER? NOT YET.** 0 POTENTIAL_REGRESSION is not met
+(2, one substantive [F5] one methodological [F6]); F1/F2 mean "all
+CleanCutBench expected outcomes compatible with shadow decisions" is not
+met; F3 is a direct instance of "any number/negation semantics incorrectly
+[resolved]" the readiness criteria names explicitly. No zero-realization
+silent failures were found (Invariant A held on all 72 rows); no invalid
+composite was silently accepted without being surfaced in this report; the
+core mechanisms this directive chain set out to prove (D-049 Case A/B,
+physical-split survival, contradiction detection on related conflicting
+quantities) all work correctly in their own tested shapes. Next round
+should fix F1/F2/F6/F7 together (F6/F7 first, so the parity signal itself
+is trustworthy), then re-run this full sweep before F3/F5/F4 are
+separately judged. No Modal RAW. No RunPod touched. No Render/QC
+modified. Holding for review before D-050C2.
+
 ## Change rule
 
 When a new decision changes product behavior, update this file in the same development cycle. Do not silently redefine CutSell through code alone.

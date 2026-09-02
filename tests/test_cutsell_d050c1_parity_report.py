@@ -77,6 +77,21 @@ def _run_core_with_identity(takes, *, oracle_pairs=frozenset()):
 
     diagnostics = dict(draft.diagnostics or {})
     diagnostics["take_group_members"] = take_group_members
+    # See tests/test_cutsell_d050c1_5_full_cleancutbench_parity.py's
+    # matching comment: `_run_core`'s take_judge_groups entries omit
+    # `local_selected_clip_id` (only pipeline.py's real chain stamps it),
+    # so without this the Ledger never records delivery-score evidence.
+    stamped_groups = []
+    for group in diagnostics.get("take_judge_groups") or ():
+        ranked = group.get("ranked") or ()
+        if ranked and "local_selected_clip_id" not in group:
+            top_clip_id = ranked[0]["clip_id"]
+            group = {
+                **group, "local_selected_clip_id": top_clip_id,
+                "selected_clip_id": top_clip_id, "semantic_override_applied": False,
+            }
+        stamped_groups.append(group)
+    diagnostics["take_judge_groups"] = stamped_groups
     draft = dataclass_replace(
         draft,
         selected=tuple(_stamp(c) for c in draft.selected),
