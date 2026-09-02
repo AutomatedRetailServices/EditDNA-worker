@@ -1,0 +1,94 @@
+name: CutSell Video00 D-044 Forensic Extract
+
+# D-044 retry-family / idea-clustering regression audit: read-only, zero-GPU
+# extraction of the diagnostics already produced by the completed Modal
+# Video00 RAW (run 33636255124). Downloads the exact result.json this run
+# already uploaded to S3 and re-shapes a bounded, forensic-focused subset of
+# its diagnostics for review -- never re-runs the pipeline, never touches
+# Modal or RunPod infrastructure, never launches a GPU.
+#
+# Masking discipline (fixes the over-masking gap found while reporting
+# D-043's live result): masks ONLY the 4 AWS/S3 credential values actually
+# used here -- the same narrow set cutsell-video00-modal-raw.yml's own
+# artifact-download step already uses -- never the full RunPod template env
+# dict. This keeps ordinary benchmark numbers (clip counts, timestamps)
+# readable in the CI log instead of colliding with an unrelated masked
+# config value's digits.
+on:
+  push:
+    branches: [feature/runpod-pod-on-demand]
+    paths:
+      - ".github/workflows/cutsell-video00-d044-forensic-extract.yml"
+  workflow_dispatch:
+    inputs:
+      benchmark_id:
+        description: "Benchmark ID whose result.json to fetch (matches the S3 key cutsell/serverless/<benchmark_id>/result.json)"
+        required: true
+        default: "video00-modal-33636255124-1"
+      keywords:
+        description: "Space-separated keywords to filter take_judge_groups/clean_cut_decisions/hybrid_editorial_chunks by (leave blank for no filtering)"
+        required: false
+        default: "sonograf tiroides espinilla alergia rush familia hereditari única primera"
+
+concurrency:
+  group: cutsell-video00-d044-forensic-extract-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  forensic-extract:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      RUNPOD_API_KEY: ${{ secrets.RUNPOD_API_KEY }}
+      BENCHMARK_ID: ${{ github.event.inputs.benchmark_id }}
+      KEYWORDS: ${{ github.event.inputs.keywords }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Load base RunPod template (S3 creds source of truth only)
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail --silent --show-error \
+            --url "https://rest.runpod.io/v1/templates" \
+            --header "Authorization: Bearer $RUNPOD_API_KEY" \
+            --output /tmp/templates.json
+          jq -c '[.[] | select(.name == "EditDNA-Worker-2")][0]' /tmp/templates.json > /tmp/base-template.json
+          test "$(cat /tmp/base-template.json)" != "null"
+
+      - name: Download the already-produced result.json from S3
+        shell: bash
+        run: |
+          set -euo pipefail
+          BASE_TEMPLATE=$(cat /tmp/base-template.json)
+          for key in AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_REGION S3_BUCKET; do
+            value=$(printf '%s' "$BASE_TEMPLATE" | jq -r --arg key "$key" '.env[$key] // empty')
+            test -n "$value"
+            echo "::add-mask::$value"
+            export "$key=$value"
+          done
+          aws s3 cp "s3://$S3_BUCKET/cutsell/serverless/$BENCHMARK_ID/result.json" /tmp/result.json
+          test -s /tmp/result.json
+          echo "Downloaded result.json for benchmark_id=$BENCHMARK_ID"
+
+      - name: Run D-044 forensic extraction (unmasked -- reads the file directly, never echoes credentials)
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 benchmarks/video00_d044_forensic_extract.py /tmp/result.json $KEYWORDS \
+            | tee /tmp/d044-forensic-extract.json
+
+      - name: Upload forensic extract artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cutsell-video00-d044-forensic-extract
+          path: /tmp/d044-forensic-extract.json
+          retention-days: 14
+          if-no-files-found: warn
