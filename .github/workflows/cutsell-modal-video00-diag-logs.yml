@@ -10,14 +10,9 @@ name: CutSell Modal Video00 Diagnostic Logs
 # call). It only lists apps and reads logs -- pure read-only observation.
 #
 # workflow_dispatch only, same as every other diagnostic/QA workflow in
-# this repo. (Temporary bootstrap push trigger below registers this new
-# workflow with GitHub's dispatch API -- same precedent as every other new
-# workflow_dispatch-only workflow this session -- removed once confirmed.)
+# this repo. (Registration with GitHub's dispatch API confirmed via run
+# 33635079911 -- bootstrap push trigger removed.)
 on:
-  push:
-    branches: [feature/runpod-pod-on-demand]
-    paths:
-      - ".github/workflows/cutsell-modal-video00-diag-logs.yml"
   workflow_dispatch:
 
 concurrency:
@@ -77,21 +72,35 @@ jobs:
         shell: bash
         run: |
           set +e
-          # Bounded with `timeout` regardless of whether --follow/-f is
-          # used: this must never hang the diagnostic job waiting on a
-          # still-running benchmark's log stream. 60s is enough to sample
-          # current activity without meaningfully delaying anything.
-          FLAGS="--timestamps"
-          if grep -q -- '--show-function-id' modal-app-logs-help.log; then
-            FLAGS="$FLAGS --show-function-id"
+          # D-043 live evidence (run 33635079911): `modal app logs
+          # <name>` fails with "No App with name '...' found in the
+          # 'main' environment" for an EPHEMERAL app (one launched via
+          # `modal run`, not `modal deploy`) -- ephemeral apps are not
+          # resolvable by name, only by App ID (the CLI's own --help text
+          # confirms: "Get recent logs based on an app ID: modal app logs
+          # ap-123456"). Resolve the App ID from `modal app list` first.
+          APP_ID=$(grep -oE 'ap-[A-Za-z0-9]+' modal-app-list.log | head -1)
+          echo "Resolved App ID: ${APP_ID:-<none found>}"
+          if [ -z "$APP_ID" ]; then
+            echo "No App ID found in modal-app-list.log -- app may no longer exist (already completed/torn down)." | tee modal-app-logs.log
+          else
+            # Bounded with `timeout` regardless of whether --follow/-f is
+            # used: this must never hang the diagnostic job waiting on a
+            # still-running benchmark's log stream. 60s is enough to
+            # sample current activity without meaningfully delaying
+            # anything.
+            FLAGS="--timestamps"
+            if grep -q -- '--show-function-id' modal-app-logs-help.log; then
+              FLAGS="$FLAGS --show-function-id"
+            fi
+            if grep -q -- '--show-container-id' modal-app-logs-help.log; then
+              FLAGS="$FLAGS --show-container-id"
+            fi
+            echo "Using flags: $FLAGS"
+            timeout 60 modal app logs "$APP_ID" $FLAGS 2>&1 | tee modal-app-logs.log
+            rc=${PIPESTATUS[0]}
+            echo "modal app logs exit code: $rc (124 == timed out after 60s, which is EXPECTED for a live-tailing/long-running app and not itself a failure)"
           fi
-          if grep -q -- '--show-container-id' modal-app-logs-help.log; then
-            FLAGS="$FLAGS --show-container-id"
-          fi
-          echo "Using flags: $FLAGS"
-          timeout 60 modal app logs "$MODAL_APP_NAME" $FLAGS 2>&1 | tee modal-app-logs.log
-          rc=${PIPESTATUS[0]}
-          echo "modal app logs exit code: $rc (124 == timed out after 60s, which is EXPECTED for a live-tailing/long-running app and not itself a failure)"
 
       - name: Print diagnostic summary
         if: always()
