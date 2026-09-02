@@ -3325,6 +3325,70 @@ still requires the user's separate authorization per the standing directive befo
 any code is touched, and before any new Video00 RAW is dispatched to verify it. No
 code was modified in this audit; no new benchmark was launched.
 
+### D-044 fix confirmatory run (2026-09-02, head 1e13807, run 33648172326)
+
+**The fix works.** Verified via the real (unmasked) result.json, not the CI log:
+`diagnostics.semantic_idea_equivalence` = `{"status": "applied", "provider": "google",
+"model": "gemini-3.5-flash-lite", "candidate_pair_count": 61, "checked_pair_count":
+14, "merged_pair_count": 2}` -- the bounded semantic-equivalence arbiter is active.
+
+**All 3 originally-audited regions now resolve correctly** (confirmed via
+`validate_video00_regression_qa.py` run directly against the real result.json):
+`sonography_bad_take_absent`, `pimples_bad_monolith_absent`, and
+`family_context_preserved` all PASS. The arbiter's own `merges` list shows the exact
+sonography pair merged (`"reason": "Different phrasings of unexpected thyroid test
+results.", "confidence": 0.8`) and BestTakeResolver correctly kept the complete
+retake over the incomplete one.
+
+**Authoritative Human Gold regression QA: 14/18** (`qa_pass: false`, via the actual
+validator -- not estimated). The 4 failures are NOT the 3 originally-audited
+regions; they are two new root causes plus their cascading order-check failures:
+- `papillary_cancer_preserved` fails because a DIFFERENT idea's claim-coverage
+  BestTake override (`claim_coverage_best_take.overrides`, group `tg_839a860f59abd
+  938a7`) picked a winner clip that doesn't fully token-cover the "Síntomas que
+  tuve..." continuation the manifest expects contiguous with the papillary sentence;
+  `final_story_coherence_validation.lost_semantic_atoms` flags this same discarded
+  clip with `coverage_against_final_keep: 0.4` and `"blocking": true`.
+  `sonography_good_before_diagnosis` (a required_order check whose 4th element is
+  this same text) fails as a direct consequence.
+- `pimples_micro_2_present` ("Era como un rush,") fails because this run's own
+  ASR/attempt-reconstruction pass merged the micro-fragments together WITH the bad
+  monolith into one physical attempt (different segmentation than the prior run),
+  and the semantic arbiter correctly discarded that whole merged clip in favor of
+  the later winner -- correctly per the merge decision, but the word "rush" does
+  not recur in any surviving clip, so this specific manifest check (token-coverage
+  based) has nothing left to match. `pimples_micro_order` fails as a direct
+  consequence (missing its 2nd required element).
+Both look like ASR/attempt-reconstruction non-determinism between runs rather than
+anything caused by the env-parity fix itself -- the fix's own target regions
+resolved exactly as predicted.
+
+**Freeze: BLOCKED this run** (`freeze_blocked: true`, `FinalEditReviewer: FAIL`,
+`repair_loop: NEEDS_HUMAN_REVIEW`) -- and this is the architecture working AS
+DESIGNED, not a bug: `final_story_coherence_validation.missing_idea_coverage` shows
+one entire retry family (`tg_28298998766ee0c8f1`, both member clips discarded, ZERO
+winning_clip_ids) vanished with no surviving realization -- exactly the "idea
+coverage must not silently vanish" invariant firing correctly, combined with the
+same blocking lost_semantic_atom above. `validate_video00_architecture.py` confirms
+0 failed checks (`architecture_verified: true`) -- every stage, including
+`no_render_attempted_on_a_blocked_semantic_plan`, behaved exactly as the contract
+requires. Render was never attempted (`live_render_qc.reason:
+"freeze_blocked_no_render"`); `deliverable: false`; `delivery_status:
+"NOT_DELIVERABLE_not_attempted"`. `lost_critical_claims: []` -- nothing required was
+lost outright, only under-covered.
+
+Selected count: 21 (vs. the frozen lock's 23-count expectation, reported as a
+warning per D-032, not a failure). Modal GPU runtime: ~343s wall time for the
+benchmark step (faster than the pre-fix run, plausibly because no render was
+attempted this time). Approximate cost: low cents (one L4, under 6 minutes).
+
+**Per the standing directive: STOPPING here.** No further benchmark launched, no
+engine code modified. The newly-surfaced missing-idea-coverage gap and the two new
+regression-qa failures are reported for review, not acted on unilaterally -- a
+plausible next audit target if the user wants to pursue it, but out of this
+directive's scope (which named only the sonography/pimples/hereditary regions, all
+three now confirmed resolved).
+
 ## Change rule
 
 When a new decision changes product behavior, update this file in the same development cycle. Do not silently redefine CutSell through code alone.
