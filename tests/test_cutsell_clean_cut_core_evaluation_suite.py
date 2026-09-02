@@ -1298,3 +1298,77 @@ def test_split_winner_fragments_still_satisfy_idea_coverage_through_the_real_cha
         idea.coverage_status == "complete" and idea.winning_clip_ids == (winner_id,)
         for idea in plan.ideas
     )
+
+
+# 53. Distinct-addition guard refinement (D-048 FIX 1): a discourse marker
+# ("Otro sintoma...") opening a high-specific-content-overlap retry of an
+# earlier mention must not block a high-confidence same-idea merge --
+# reached through the REAL take-grouping/idea-equivalence chain, not just
+# take_grouping_provider.py's own unit tests. Generic vocabulary (facial/
+# hand swelling), no Video00 phrase hardcoded -- reproduces D-047 Case 1's
+# shape (same specific symptom AND location, marker as narrative framing
+# only) rather than the founding D-039 incident's shape (a genuinely
+# different body part), which stays blocked in this same module's own
+# dedicated suite (test_cutsell_d048_fix1_distinct_addition_guard.py).
+
+def test_distinct_addition_high_overlap_retry_merges_through_the_real_chain():
+    monolith = _take(
+        "monolith", 0.0, 5.0,
+        "Empece a notar hinchazon en esta parte de la cara cerca de los ojos "
+        "que yo pensaba que era cansancio.",
+        complete=True,
+    )
+    retry = _take(
+        "retry", 6.0, 11.0,
+        "Otro sintoma fue hinchazon en esta parte de la cara cerca de los "
+        "ojos que parecia cansancio.",
+        complete=True,
+    )
+
+    draft, equivalence_diag, arbiter = _run_core((monolith, retry), oracle_pairs={("monolith", "retry")})
+
+    assert equivalence_diag["status"] == "applied"
+    assert equivalence_diag.get("distinct_addition_blocked", []) == []
+    assert len(_kept(draft)) == 1  # one winning realization, not two "ideas"
+
+
+# 54. Claim-coverage self-source trap (D-048 FIX 2): a richer diagnosis/
+# treatment realization must not be discarded in favor of a vague,
+# source-exclusive, incidental-temporal-aside candidate whose only
+# "critical" claim is a bare negation riding on a bare year -- reached
+# through the REAL take-grouping/idea-equivalence/take-judge/claim-coverage
+# chain. Generic vocabulary, no Video00 phrase hardcoded -- reproduces
+# D-047 Case 2's exact shape (the group's only critical claim is source-
+# exclusive to the thin candidate).
+
+def test_claim_coverage_self_source_trap_richer_winner_survives_through_the_real_chain():
+    sibling = _take(
+        "sibling", 0.0, 4.0,
+        "Tuve problemas estomacales a un tiempo en donde se me hizo una "
+        "endoscopia y me diagnosticaron.",
+        complete=False,
+    )
+    rich = _take(
+        "rich", 5.0, 9.0,
+        "Tuve problemas de digestion en donde me hicieron una endoscopia y "
+        "dijeron que tenia gastritis y me mandaron tres meses con pastillas.",
+        complete=True,
+    )
+    vague = _take(
+        "vague", 10.0, 14.0,
+        "Tuve problemas de estomago en una temporada, en 2023, no se por "
+        "que me pasaba eso.",
+        complete=False,
+    )
+
+    draft, _, _ = _run_core(
+        (sibling, rich, vague),
+        oracle_pairs={("sibling", "rich"), ("sibling", "vague"), ("rich", "vague")},
+    )
+
+    assert _kept(draft) == {"rich"}
+    assert _discarded(draft) == {"sibling", "vague"}
+    diag = draft.diagnostics.get("claim_coverage_best_take") or {}
+    assert diag.get("overrides", []) == []
+    assert len(diag.get("suppressed_incidental_overrides", [])) == 1
+    assert diag["suppressed_incidental_overrides"][0]["suppressed_new_winner_clip_id"] == "vague"

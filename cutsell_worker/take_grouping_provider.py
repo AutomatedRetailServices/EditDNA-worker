@@ -1,6 +1,7 @@
 """Provider boundary for semantic retry/take grouping."""
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from typing import Protocol, Tuple
 
@@ -18,18 +19,35 @@ from .semantic_idea_equivalence import (
 from .take_grouping import group_takes, retry_similarity, semantic_key
 
 # General (English + Spanish) "this is a new/additional item, not a restatement"
-# discourse markers -- a candidate pair where exactly ONE side opens with one of
-# these must never be merged as the same idea even if the arbiter says so.
-# Found via an offline audit of RAW 33432104336: the semantic-equivalence
-# arbiter confirmed "Otro sintoma era que me salian espinillas ..." ("ANOTHER
-# symptom was that I also got pimples...") as the same idea as an earlier,
-# unrelated pimples mention -- the discourse marker itself ("otro sintoma" /
-# "another symptom") is the speaker explicitly signalling a DISTINCT, additional
-# point, which a coarse topical-similarity judgment can miss. General across any
-# talking-head content that enumerates multiple points -- no Video00 fact,
-# phrase, or literal transcript text is hardcoded, only the generic connector.
+# discourse markers -- a candidate pair where exactly ONE side carries one of
+# these is EVIDENCE the marked side may be introducing a distinct point,
+# regardless of what the arbiter said. Found via an offline audit of RAW
+# 33432104336: the semantic-equivalence arbiter confirmed "Otro sintoma era
+# que me salian espinillas ..." ("ANOTHER symptom was that I also got
+# pimples...") as the same idea as an earlier, unrelated pimples mention --
+# the discourse marker itself ("otro sintoma" / "another symptom") is the
+# speaker explicitly signalling a DISTINCT, additional point, which a coarse
+# topical-similarity judgment can miss. General across any talking-head
+# content that enumerates multiple points -- no Video00 fact, phrase, or
+# literal transcript text is hardcoded, only the generic connector.
 # Deliberately excludes "otra vez"/"another time"/"again", which mean
 # REPETITION of the same thing, not a new one.
+#
+# D-048 FIX 1: this evidence alone is no longer sufficient to override a
+# high-confidence same-idea verdict -- see _marked_side_diverges_in_content's
+# own docstring below for why (D-047 Case 1: the marker can just as easily
+# open a RESTATEMENT of the same specific content, e.g. "Otro sintoma era
+# que me salian espinillas ... detras de la oreja ... cuello ... alergia..."
+# repeating the exact same symptom/location as an unmarked prior mention).
+# The marker vocabulary itself is UNCHANGED by this fix -- "tambien"/"also"
+# were deliberately evaluated and left out: unlike the deliberate, specific
+# "otro sintoma"/"another symptom" phrasing, they are extremely common
+# ordinary connectors that show up on either side of countless unrelated
+# pairs, so even content-gated they would flag far more pairs than the
+# guard is meant to examine at all -- an unrelated behavior change, not a
+# refinement of this one. "on top of that"/"an additional"/"one more thing"
+# already cover the same general "additive framing" category without that
+# collision risk.
 _DISTINCT_ADDITION_MARKERS = (
     "otro sintoma", "otro síntoma", "otra cosa", "otro problema", "otro punto",
     "otra situacion", "otra situación", "otro detalle", "otro aspecto",
@@ -41,6 +59,90 @@ _DISTINCT_ADDITION_MARKERS = (
 
 def _has_distinct_addition_marker(text: str) -> bool:
     return _clause_has_any(text, _DISTINCT_ADDITION_MARKERS)
+
+
+# D-048 FIX 1: minimal local content-token machinery, mirroring
+# final_sibling_grouping._content (not imported directly -- that module
+# imports FROM this one, so importing back would be circular; this is the
+# same small, order-independent bag-of-words helper other cutsell_worker
+# modules each keep a local copy of for the same reason).
+_TOKEN_RE = re.compile(r"[a-z0-9áéíóúñü]+", re.IGNORECASE)
+_CONTENT_STOP = frozenset({
+    "a", "an", "and", "are", "as", "at", "be", "but", "by", "for", "from", "i",
+    "in", "is", "it", "its", "me", "my", "of", "on", "or", "so", "that", "the",
+    "this", "to", "was", "we", "with", "you", "your", "also", "another", "other",
+    "one", "more", "thing", "different", "additional", "top", "problem", "issue",
+    "al", "como", "con", "cuando", "de", "del", "el", "en", "es", "esta",
+    "este", "la", "las", "le", "les", "lo", "los", "me", "mi", "mis", "o", "para",
+    "pero", "por", "porque", "que", "se", "si", "sin", "su", "sus", "un", "una",
+    "unos", "unas", "y", "yo", "tambien", "también", "otro", "otra", "sintoma",
+    "síntoma", "cosa", "situacion", "situación", "detalle", "aspecto", "punto",
+})
+
+
+def _content_tokens(text: str) -> frozenset[str]:
+    """Order-independent, marker/connector-stripped content vocabulary of one
+    candidate's text. Excludes the addition-marker words themselves (and
+    their own immediate generic frame: "another", "one more thing", "otro
+    problema", etc.) alongside ordinary stopwords, so two candidates that
+    share only the discourse marker's own generic scaffolding never register
+    as content overlap -- overlap must come from the actual claim."""
+    return frozenset(
+        token for token in (t.casefold() for t in _TOKEN_RE.findall(str(text or "")))
+        if len(token) >= 3 and token not in _CONTENT_STOP
+    )
+
+
+# D-048 FIX 1 thresholds -- derived from the two calibration shapes named in
+# the D-047 directive, not picked arbitrarily:
+#   founding D-039 case (genuinely distinct: "manchas rojas en la piel del
+#   BRAZO" vs "manchas rojas en la piel de la PIERNA" -- arm vs leg): shared
+#   content tokens = 3.
+#   D-047 Case 1 false positive (genuine retry: bad pimples monolith vs its
+#   "Otro sintoma" restatement, same symptom + same "detras de la oreja"/
+#   "cuello" location): shared content tokens = 9, coverage (shared /
+#   shorter side's own content vocabulary) ~0.60-0.64.
+# The floor sits strictly between the two: high enough that the founding
+# case (3 shared, generic-only overlap) still blocks, low enough that a
+# same-specific-content retry (9 shared, including the distinguishing nouns)
+# does not. See test_cutsell_d048_fix1_distinct_addition_guard.py for the
+# full regression suite locking both ends and the boundary.
+_DIVERGENCE_MIN_SHARED_CONTENT = 6
+_DIVERGENCE_MIN_SHARED_COVERAGE = 0.55
+
+
+def _marked_side_diverges_in_content(left_text: str, right_text: str) -> bool:
+    """D-048 FIX 1: is there enough of the marked candidate's OWN specific
+    content -- beyond the addition marker's own generic scaffolding --
+    absent from the other candidate to trust the marker as real evidence of
+    a distinct point?
+
+    The original D-039 guard blocked purely on "exactly one side carries the
+    marker," which cannot tell a marker introducing a genuinely new fact
+    (the founding audit: two different body-part locations) apart from a
+    marker prefacing a near-identical restatement of the same specific
+    claim (D-047 Case 1: the same symptom AND the same location, just
+    reformulated) -- a coarse topical read from the arbiter can call both
+    cases "same idea," and the marker alone cannot separate them either.
+
+    Returns True (divergence -- the D-039 block should still apply) when
+    shared specific content is too thin to prove the marked side is a
+    restatement; False (no meaningful divergence -- treat the marker as
+    discourse framing only, let the arbiter's same-idea verdict stand) when
+    the two share substantial specific content including whatever concrete
+    nouns/details carry the claim, not just the generic setup.
+    """
+    left = _content_tokens(left_text)
+    right = _content_tokens(right_text)
+    if len(left) < 3 or len(right) < 3:
+        # Too little content on one side to prove real overlap either way --
+        # fail toward the guard's original, protective behavior.
+        return True
+    shared = left & right
+    if len(shared) < _DIVERGENCE_MIN_SHARED_CONTENT:
+        return True
+    coverage = len(shared) / min(len(left), len(right))
+    return coverage < _DIVERGENCE_MIN_SHARED_COVERAGE
 
 
 @dataclass(frozen=True)
@@ -677,12 +779,24 @@ def reconcile_semantic_idea_equivalence(
         # finding this guards against -- a coarse topical-similarity
         # judgment can still say "same idea" for two mentions of the same
         # general subject even when one of them is explicitly introducing a
-        # DIFFERENT item). A speaker's own discourse marker is stronger,
-        # more general evidence of distinctness than any arbiter's topical
-        # read, so it wins even over a high-confidence "same idea" verdict.
+        # DIFFERENT item). A speaker's own discourse marker is EVIDENCE of
+        # distinctness -- but D-048 FIX 1 (D-047 Case 1: the arbiter
+        # confirmed same_idea at 0.95 confidence for a marked side that
+        # shared the exact symptom AND location with the unmarked side --
+        # the marker was a narrative restart, not a new point) showed marker
+        # presence alone is too coarse: it cannot tell a marker introducing a
+        # genuinely new fact apart from one prefacing a near-identical
+        # restatement. Only override the arbiter when the marked pairing
+        # ALSO shows real content divergence -- see
+        # _marked_side_diverges_in_content's own docstring. Arbiter
+        # confidence is deliberately not weighed here either way (per
+        # D-048's directive: supporting evidence only, never sole authority
+        # in either direction) -- content divergence alone decides.
         left_marked = _has_distinct_addition_marker(take_map[left_id].text)
         right_marked = _has_distinct_addition_marker(take_map[right_id].text)
-        if left_marked != right_marked:
+        if left_marked != right_marked and _marked_side_diverges_in_content(
+            take_map[left_id].text, take_map[right_id].text,
+        ):
             distinct_addition_blocked.append({
                 "left_clip_id": left_id,
                 "right_clip_id": right_id,

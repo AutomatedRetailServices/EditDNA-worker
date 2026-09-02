@@ -3755,6 +3755,137 @@ expectation (warning only, per D-032).
 No code changed based on this result. No further RAW launched. Reported
 for review per the standing directive.
 
+## D-048 -- implement the two D-047 root-cause fixes
+
+Both D-047 root causes implemented, tested, and validated offline. No
+Modal/RunPod infrastructure touched, D-046 untouched, render/QC untouched.
+No new Modal RAW launched -- per the standing directive, this stops for
+review before one.
+
+### FIX 1 -- content-divergence-gated distinct-addition guard
+
+Root cause (D-047 Case 1): `take_grouping_provider.py`'s D-039 guard
+blocked a semantic merge whenever exactly one side carried a "new/
+additional item" discourse marker, with no check of whether the marked
+side's content actually diverged from the other side's. The arbiter
+confirmed the pimples monolith and its "Otro sintoma..." retry as the same
+idea at 0.95 confidence, sharing the same specific symptom AND location
+("detras de la oreja"/"cuello") -- the marker was a narrative restart, not
+evidence of a genuinely new point.
+
+Fix: a new `_marked_side_diverges_in_content` check gates the block. Both
+candidates' content vocabulary (marker/connector/stopword-stripped, via a
+small local bag-of-words helper mirroring `final_sibling_grouping._content`
+-- kept local to avoid a circular import, since that module imports FROM
+this one) is compared; the block only fires when shared content is thin
+(< 6 tokens, or < 55% coverage of the shorter side's own vocabulary).
+Thresholds derived directly from the two calibration shapes named in the
+directive: the founding D-039 incident (arm vs leg mentions) shares only 3
+content tokens; the D-047 Case 1 false positive shares 9, including the
+sentence's own distinguishing nouns. Arbiter confidence is deliberately
+NOT part of the decision either way (supporting evidence only, per the
+directive). Marker vocabulary itself is unchanged -- "tambien"/"also" were
+evaluated and explicitly left out: even content-gated, they are common
+enough ordinary connectors to flag far more pairs than intended (confirmed
+by an existing test regression during implementation); "on top of that"/
+"an additional"/"one more thing" already cover the same "additive
+framing" category without that collision risk.
+
+Tests: 12 required categories in `tests/test_cutsell_d048_fix1_distinct_
+addition_guard.py` (founding case blocked, D-047 Case 1 shape unblocked,
+English "another symptom" both shapes, additive-framing both shapes, both/
+neither side marked unaffected, high-topical-but-different-entity blocked,
+strong-overlap+high-confidence unblocked, weak-overlap+high-confidence
+still blocked, lexical-tier-only regression check) -- 12/12 passing. All
+65 pre-existing take-grouping/semantic-equivalence tests re-run unaffected
+after one necessary wording fix to an existing test whose synthetic
+placeholder text happened to accidentally collide with the founding
+incident's own generic framing.
+
+### FIX 2 -- claim-criticality gate for the ClaimCoverageBestTake override
+
+Root cause (D-047 Case 2): a retry family's only extracted CRITICAL claim
+was a bare negation riding on an incidental year inside an ordinary
+temporal aside ("... en una temporada, en 2023, no hay que preguntar."),
+source-exclusive to the one thin candidate containing that exact wording.
+Because that candidate trivially "covered every critical claim" (the set
+had exactly one member: its own), `claim_coverage_best_take.py` swapped it
+in as winner over an already-correct, substantively richer realization
+carrying the actual diagnosis/treatment content -- neither sibling
+registered a CRITICAL claim of its own (a separate, pre-existing marker-
+matching gap in `classify_claim`, not touched here), making the group's
+critical-claim set collapse to exactly the one incidental claim.
+
+Fix: does NOT change `classify_claim`'s own importance labels or
+StoryValidator's freeze-blocking posture (a negation still always blocks
+Freeze there, unchanged -- a deliberate, separate "WHEN UNCERTAIN, KEEP"
+backstop). Adds a second, narrower gate scoped to this module's own
+override decision -- `_is_low_information_incidental` (no independently
+substantive marker: diagnosis/identification, correction, a genuinely
+unit/percent/currency/dose-qualified number, cause-effect connector,
+unique-conclusion statistic, or state-result language; its only CRITICAL
+signal is a bare negation/number riding on a recognizable temporal-aside
+shape -- mirrors `classify_number_atom`'s own D-031 CONTEXTUAL rule for a
+bare year, applied to the whole claim) -- combined with a source-
+exclusivity check (no OTHER sibling covers the claim either) and a
+richer-content check (the candidate is not otherwise richer than the
+current winner). All three must hold to suppress; a single substantive,
+non-source-exclusive, or genuinely-richer-candidate claim keeps the
+override eligible exactly as before. The same gate is also applied to the
+2-piece composite path (`_unique_contribution_is_incidental`), which would
+otherwise pull the same incidental claim in via a different mechanism.
+Suppressed overrides are recorded in a new
+`diagnostics["claim_coverage_best_take"]["suppressed_incidental_overrides"]`
+list for observability.
+
+Tests: 15 in `tests/test_cutsell_d048_fix2_claim_criticality_gate.py` (14
+required categories -- contextual year/date, incidental temporal aside,
+filler/self-referential aside all correctly non-override-forcing; unique
+diagnosis/negation/causal/treatment/family-hereditary claims all correctly
+override-forcing; contextual-claim-with-richer-winner preserved; multiple-
+critical-claims-better-covered-by-alternate still overrides; source-
+exclusive-but-critical remains eligible; source-exclusive-and-contextual
+is not winner-forcing; no override when it would lose more content than it
+restores; untouched ranking when no critical gap exists at all -- plus a
+literal regression-lock replay of the D-047 Case 2 incident's real clip
+texts and group id) -- 15/15 passing. All 69 pre-existing semantic-claims/
+claim-coverage tests re-run unaffected.
+
+### Real D-047 regression fixtures (CleanCutBench, real chain)
+
+Two fixtures added to `test_cutsell_clean_cut_core_evaluation_suite.py`
+(53, 54), reaching each false positive through the REAL take-grouping/
+idea-equivalence/take-judge/claim-coverage chain with generic (non-Video00)
+vocabulary:
+- 53: a high-specific-content-overlap "Otro sintoma..." retry (facial/hand
+  swelling) merges into one winning realization instead of blocking.
+- 54: a richer diagnosis/treatment realization survives a claim-coverage
+  self-source trap (a vague, source-exclusive, incidental-temporal-aside
+  candidate) through the full chain, with the suppression recorded in
+  diagnostics.
+
+### Validation
+
+- `python3 -m compileall -q cutsell_worker tests`: clean.
+- `pytest -q tests/test_cutsell_*.py` (the canonical CI glob): **1324
+  passed**, 0 failed (up from 1295 pre-D-048; 29 new tests: 12 + 15 + 2
+  CleanCutBench fixtures).
+- Offline replay proves both required results: the PIMPLES-equivalent
+  fixture (53 / the FIX 1 test suite's own D-047-shaped case) shows the
+  semantic merge no longer blocked by the distinct-addition guard when
+  specific content strongly overlaps; the GASTRITIS-equivalent fixture (54
+  / the FIX 2 regression-lock test with the real clip texts) shows the
+  correct richer BestTake winner remains winner and the contextual
+  source-exclusive aside cannot force an override.
+- No behavior change detected outside the target conditions: every
+  pre-existing test in every modified file still passes unchanged, after
+  one necessary wording fix to a pre-existing FIX-1-adjacent test whose
+  synthetic text incidentally collided with the founding D-039 shape (not
+  a real Video00 fixture, no production behavior implication).
+
+No new Modal RAW launched. Stopping here for review, per the standing
+directive.
+
 ## Change rule
 
 When a new decision changes product behavior, update this file in the same development cycle. Do not silently redefine CutSell through code alone.

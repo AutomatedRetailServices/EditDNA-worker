@@ -49,10 +49,24 @@ from __future__ import annotations
 
 from dataclasses import replace
 
+from .final_sibling_grouping import _content, _numbers
+from .semantic_atom_importance import _TEMPORAL_ASIDE_MARKERS, _clause_has_any, _looks_like_year
 from .semantic_claims import (
     ClaimEquivalenceArbiter,
     ClauseRoleArbiter,
     CRITICAL,
+    NEGATION,
+    _CAUSE_EFFECT_MARKERS,
+    _CORRECTION_MARKERS,
+    _CURRENCY_MARKERS,
+    _DOSE_MARKERS,
+    _MEASUREMENT_UNIT_MARKERS,
+    _PERCENT_MARKERS,
+    _RESULT_REPORTING_MARKERS,
+    _STATE_RESULT_MARKERS,
+    _STRONG_IDENTIFICATION_MARKERS,
+    _UNIQUE_CONCLUSION_MARKERS,
+    Claim,
     claim_coverage,
     dedupe_claims,
     extract_claims,
@@ -60,6 +74,102 @@ from .semantic_claims import (
 )
 
 _COMPOSITE_OVERLAP_TOLERANCE_SEC = 0.05
+
+
+# D-048 FIX 2 (D-047 Case 2 -- gastritis): a claim that is CRITICAL purely
+# because it contains a bare negation or a bare number, with no
+# independently substantive marker of its own, and additionally reads as an
+# incidental temporal aside (a plain year sitting in an ordinary "durante
+# .../en .../por ..." clause -- the exact shape semantic_atom_importance.py
+# already treats as CONTEXTUAL for a missing NUMBER atom, D-031) is not, on
+# its own, strong enough evidence to swap out an already-correct BestTake
+# winner for a thinner candidate. This does NOT change classify_claim's own
+# output, dedupe, or coverage math -- and it never touches StoryValidator's
+# freeze-blocking posture (a negation still always blocks Freeze there,
+# unchanged; that is a deliberate, general "WHEN UNCERTAIN, KEEP" backstop
+# this module is not the place to weaken). It only answers a narrower
+# question this module alone asks: is this SPECIFIC claim substantive
+# enough to justify THIS module discarding a richer realization for a
+# thinner one that merely happens to contain it verbatim?
+def _is_low_information_incidental(claim: Claim) -> bool:
+    """True when `claim` shows no independently substantive marker of its
+    own (diagnosis/identification language, correction language, a
+    genuinely unit/percent/currency/dose-qualified number, an explicit
+    cause-effect connector, a unique-conclusion statistic, or explicit
+    result-state language) AND its only CRITICAL signal is a bare negation
+    or bare number riding on an incidental temporal aside. Protects
+    genuinely critical negations/causal/treatment/diagnosis/identity claims
+    (none of those patterns match) while catching a low-information,
+    self-referential/temporal-filler remark that happens to trip the
+    negation rule (D-047 Case 2's own real shape: "... en una temporada, en
+    2023, no hay que preguntar.")."""
+    if claim.importance != CRITICAL:
+        return False
+    text = claim.text
+    if _clause_has_any(text, _STRONG_IDENTIFICATION_MARKERS + _RESULT_REPORTING_MARKERS):
+        return False
+    if _clause_has_any(text, _CORRECTION_MARKERS):
+        return False
+    if _numbers(text) and _clause_has_any(
+        text, _PERCENT_MARKERS + _CURRENCY_MARKERS + _MEASUREMENT_UNIT_MARKERS + _DOSE_MARKERS
+    ):
+        return False
+    if _clause_has_any(text, _CAUSE_EFFECT_MARKERS):
+        return False
+    if _clause_has_any(text, _UNIQUE_CONCLUSION_MARKERS):
+        return False
+    if _clause_has_any(text, _STATE_RESULT_MARKERS):
+        return False
+    # Nothing independently substantive found -- the claim is "critical"
+    # purely via a bare negation and/or a bare (unit-less) number. Treat it
+    # as incidental only when it ALSO carries a recognizable temporal-aside
+    # shape (mirrors classify_number_atom's own CONTEXTUAL rule for a bare
+    # year, D-031, applied here to the whole claim rather than one atom).
+    has_year = any(_looks_like_year(token) for token in _numbers(text))
+    return has_year and _clause_has_any(text, _TEMPORAL_ASIDE_MARKERS)
+
+
+def _override_blocked_by_incidental_self_source_claims(
+    missing: list[Claim],
+    *,
+    candidate_clip_id: str,
+    other_coverers: dict,
+    winner_clip,
+    candidate_clip,
+) -> bool:
+    """D-048 FIX 2 SELF-SOURCE EXCLUSIVITY CHECK: the compound condition
+    under which a single-candidate override should NOT happen, even though
+    the candidate technically covers every critical claim the current
+    winner is missing. All three must hold, matching the D-048 directive's
+    own compound rule -- a single substantive, non-source-exclusive, or
+    genuinely-richer-candidate missing claim is enough to keep the override
+    eligible:
+
+      1. every missing claim is source-exclusive to `candidate_clip_id`
+         (no OTHER sibling in the retry family covers it either -- `other_
+         coverers[claim_id]` is the set of member clip_ids, excluding the
+         candidate itself, that independently cover that claim);
+      2. every missing claim is itself low-information/incidental
+         (`_is_low_information_incidental`);
+      3. the candidate is not otherwise richer than the current winner --
+         swapping to it would discard more of the winner's own content
+         than the incidental claim(s) restore.
+
+    A source-exclusive but genuinely critical claim (a unique diagnosis,
+    negation, causal fact, treatment detail, etc. found nowhere else)
+    still overrides -- exclusivity alone is never disqualifying, per the
+    directive's own "do not make source exclusive an automatic discard
+    either" instruction.
+    """
+    if not missing:
+        return False
+    if any(other_coverers.get(claim.claim_id) for claim in missing):
+        return False  # independently corroborated elsewhere -- not source-exclusive
+    if not all(_is_low_information_incidental(claim) for claim in missing):
+        return False  # at least one missing claim is substantive on its own
+    winner_content = len(_content(str(winner_clip.text or "")))
+    candidate_content = len(_content(str(candidate_clip.text or "")))
+    return candidate_content < winner_content
 
 
 def _group_critical_claims(members: list[tuple[str, object]], *, clause_role_arbiter: ClauseRoleArbiter | None = None):
@@ -122,6 +232,7 @@ def apply_claim_coverage_best_take(
     overrides: list[dict] = []
     composites: list[dict] = []
     unresolved_gaps: list[dict] = []
+    suppressed_incidental_overrides: list[dict] = []
 
     def move(clip_id: str, target: str) -> None:
         clip = all_clips[clip_id]
@@ -159,26 +270,65 @@ def apply_claim_coverage_best_take(
 
         # 1. Does a single OTHER member cover every critical claim?
         full_coverage_candidate = None
+        member_coverage: dict[str, frozenset] = {}
         for clip_id, clip in members:
             if clip_id == winner_id:
                 continue
             covered = _covered_claim_ids(critical_claims, str(clip.text or ""), arbiter=claim_equivalence_arbiter)
-            if covered == frozenset(c.claim_id for c in critical_claims):
+            member_coverage[clip_id] = covered
+            if full_coverage_candidate is None and covered == frozenset(c.claim_id for c in critical_claims):
                 full_coverage_candidate = clip_id
-                break
 
         if full_coverage_candidate is not None:
-            move(winner_id, "discard")
-            move(full_coverage_candidate, "select")
-            overrides.append({
-                "group_id": group_id,
-                "previous_winner_clip_id": winner_id,
-                "new_winner_clip_id": full_coverage_candidate,
-                "reason": "single_candidate_covers_all_critical_claims_previous_winner_did_not",
-                "missing_claim_ids": [c.claim_id for c in missing],
-                "missing_claim_texts": [c.text for c in missing],
-            })
-            continue
+            # D-048 FIX 2 (D-047 Case 2): before committing to this
+            # override, check whether every missing claim is a source-
+            # exclusive, low-information incidental aside that a richer
+            # winner should not be discarded for -- see
+            # _override_blocked_by_incidental_self_source_claims's own
+            # docstring for the full three-part compound rule.
+            other_coverers = {
+                claim.claim_id: {
+                    cid for cid, covered in member_coverage.items()
+                    if cid != full_coverage_candidate and claim.claim_id in covered
+                }
+                for claim in missing
+            }
+            if _override_blocked_by_incidental_self_source_claims(
+                missing,
+                candidate_clip_id=full_coverage_candidate,
+                other_coverers=other_coverers,
+                winner_clip=winner_clip,
+                candidate_clip=all_clips[full_coverage_candidate],
+            ):
+                # Suppressed: every missing claim was incidental and
+                # source-exclusive, so the current winner is left exactly
+                # as it was -- deliberately does NOT fall through to the
+                # 2-piece composite check below, which would otherwise
+                # inject the same low-value aside into the KEEP timeline
+                # anyway via a different mechanism (compositing `candidate`
+                # in alongside `winner` purely to "cover" the same
+                # incidental claim this gate just judged not worth it).
+                suppressed_incidental_overrides.append({
+                    "group_id": group_id,
+                    "winner_clip_id": winner_id,
+                    "suppressed_new_winner_clip_id": full_coverage_candidate,
+                    "reason": "missing_claims_are_incidental_and_source_exclusive",
+                    "missing_claim_ids": [c.claim_id for c in missing],
+                    "missing_claim_texts": [c.text for c in missing],
+                })
+                continue
+            else:
+                move(winner_id, "discard")
+                move(full_coverage_candidate, "select")
+                overrides.append({
+                    "group_id": group_id,
+                    "previous_winner_clip_id": winner_id,
+                    "new_winner_clip_id": full_coverage_candidate,
+                    "reason": "single_candidate_covers_all_critical_claims_previous_winner_did_not",
+                    "missing_claim_ids": [c.claim_id for c in missing],
+                    "missing_claim_texts": [c.text for c in missing],
+                })
+                continue
 
         # 2. Bounded 2-piece composite: do exactly two members, together,
         # cover everything, and are they safe to place side by side?
@@ -211,6 +361,33 @@ def apply_claim_coverage_best_take(
                 # check) -- honest gap, fails closed to unresolved_gaps.
                 unique_to_a = covered_a - covered_b
                 unique_to_b = covered_b - covered_a
+
+                def _unique_contribution_is_incidental(unique_ids, contributor_id) -> bool:
+                    # D-048 FIX 2: the same self-source-exclusivity gate as
+                    # the single-candidate override path (see
+                    # _override_blocked_by_incidental_self_source_claims),
+                    # applied to a composite pairing -- a claim only one
+                    # side contributes must not force that side into the
+                    # KEEP timeline merely because it is incidental AND no
+                    # other sibling in the family covers it either.
+                    if not unique_ids:
+                        return False
+                    for cid in unique_ids:
+                        claim = claim_by_id[cid]
+                        if not _is_low_information_incidental(claim):
+                            return False
+                        corroborated_elsewhere = any(
+                            other_id != contributor_id and cid in _covered_claim_ids(
+                                (claim,), str(other_clip.text or ""), arbiter=claim_equivalence_arbiter,
+                            )
+                            for other_id, other_clip in members
+                        )
+                        if corroborated_elsewhere:
+                            return False
+                    return True
+
+                if _unique_contribution_is_incidental(unique_to_a, id_a) or _unique_contribution_is_incidental(unique_to_b, id_b):
+                    continue
                 types_a = {claim_by_id[cid].claim_type for cid in unique_to_a}
                 types_b = {claim_by_id[cid].claim_type for cid in unique_to_b}
                 if types_a & types_b:
@@ -243,7 +420,7 @@ def apply_claim_coverage_best_take(
                 "reason": "no_single_or_paired_candidate_safely_covers_every_critical_claim",
             })
 
-    if not (overrides or composites or unresolved_gaps):
+    if not (overrides or composites or unresolved_gaps or suppressed_incidental_overrides):
         return draft
 
     def _order(clip):
@@ -259,5 +436,10 @@ def apply_claim_coverage_best_take(
         "overrides": overrides,
         "composites": composites,
         "unresolved_gaps": unresolved_gaps,
+        # D-048 FIX 2: single-candidate overrides this module deliberately
+        # did NOT apply because every missing claim was source-exclusive
+        # and low-information/incidental relative to the current winner --
+        # see _override_blocked_by_incidental_self_source_claims.
+        "suppressed_incidental_overrides": suppressed_incidental_overrides,
     }
     return replace(draft, selected=selected, alternates=alternates, discarded=discarded, diagnostics=diagnostics)
