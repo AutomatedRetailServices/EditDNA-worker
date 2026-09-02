@@ -20,28 +20,17 @@ name: CutSell Video00 Pod DIRECT-EXECUTION RAW (restore known-working execution 
 # production RAW backend. Deliberately workflow_dispatch-only: no `push:`
 # trigger of any kind, so ordinary commits can never provision a Pod.
 #
-# Bootstrap note: like every other workflow this session added, GitHub's
-# workflow_dispatch REST API 404s for a workflow that has never completed
-# a run via any trigger -- if this is the first-ever dispatch attempt and
-# it 404s, a one-time narrow self-scoped `push:` trigger (limited to this
-# file's own path, on this isolated QA branch only) registers it, exactly
-# as cutsell-video00-pod-raw.yml's own history documents; remove it again
-# once workflow_dispatch is confirmed working.
+# Bootstrap note (resolved): GitHub's workflow_dispatch REST API 404s for
+# a workflow that has never completed a run via any trigger. A narrow,
+# self-scoped `push:` trigger (limited to this file's own path, on this
+# isolated QA branch only, and with the benchmark/architecture steps
+# explicitly gated to workflow_dispatch so that bootstrap run stayed
+# genuinely inert -- no Pod, no GPU cost) registered this workflow on its
+# first push (run #1). workflow_dispatch confirmed working immediately
+# after (run #2) -- that trigger and the two step-level gates it required
+# are removed here; they served their one purpose.
 
 on:
-  # TEMPORARY bootstrap trigger (removed once workflow_dispatch is
-  # confirmed working) -- narrow, self-scoped to this file's own path, on
-  # this isolated QA branch only. A push event carries NO
-  # `github.event.inputs` at all (those only exist for workflow_dispatch),
-  # so SOURCE_KEY/etc. would be empty and this could otherwise still
-  # provision a real Pod before failing inside it -- the actual benchmark
-  # step below is therefore explicitly gated to `workflow_dispatch` only,
-  # so a push-triggered run genuinely does nothing beyond registering the
-  # workflow with Actions.
-  push:
-    branches: [feature/runpod-pod-on-demand]
-    paths:
-      - .github/workflows/cutsell-video00-pod-direct-raw.yml
   workflow_dispatch:
     inputs:
       existing_pod_id:
@@ -138,13 +127,7 @@ jobs:
       # uses -- unchanged by this workflow. The only difference is what
       # runs inside the Pod (the benchmark directly, not an HTTP server)
       # and how readiness/completion are observed (S3, not HTTP).
-      # Gated to workflow_dispatch only: the temporary bootstrap `push:`
-      # trigger above carries no github.event.inputs at all (those only
-      # exist for workflow_dispatch), so a push-triggered run must never
-      # reach this step -- it would otherwise still provision a real Pod
-      # (with an empty SOURCE_KEY) before the pipeline failed inside it.
       - name: Run direct-execution benchmark gate
-        if: github.event_name == 'workflow_dispatch'
         shell: bash
         run: python3 runpod_pod_direct_benchmark_gate.py
 
@@ -218,7 +201,6 @@ jobs:
           jq '{discarded_count: (.discarded | length), discarded: [.discarded[]? | {clip_id, text}], stage_status}' artifact/video00-pod-direct.json
 
       - name: Verify Video00 architecture
-        if: github.event_name == 'workflow_dispatch'
         shell: bash
         run: |
           set -euo pipefail
