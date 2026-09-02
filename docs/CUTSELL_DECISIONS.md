@@ -3886,6 +3886,129 @@ vocabulary:
 No new Modal RAW launched. Stopping here for review, per the standing
 directive.
 
+## D-048 confirmatory Modal Video00 RAW
+
+Dispatched at fixed HEAD `1f8f57c` (benchmark_id
+`video00-modal-33676615917-1`). Pre-run verification confirmed: L4 GPU,
+`retries=0`, D-044 hybrid-semantic overlay
+(`CUTSELL_HYBRID_LLM_ENABLED=1`/`CUTSELL_HYBRID_PROVIDER=google`) intact,
+same `SOURCE_KEY`, Human Gold manifest unmodified since D-032.
+
+- **D-048 PIMPLES: PASS** -- `pimples_bad_monolith_absent` in
+  `passed_checks`.
+- **D-048 GASTRITIS: PASS** -- `gastritis_preserved` in `passed_checks`;
+  `suppressed_incidental_overrides: []` (FIX 2's rescue mechanism was not
+  exercised this run -- the vulnerable geometry didn't recur -- but no
+  regression either).
+- **Human Gold: 15/18** (`benchmarks/validate_video00_selection_lock.py`'s
+  embedded `historical_regression_qa`, run inside the CI job itself --
+  authoritative, not estimated). Failed: `papillary_cancer_preserved`,
+  `family_context_preserved`, `sonography_good_before_diagnosis` -- a
+  DIFFERENT set of 3 failures than the 2 D-048 targeted (which both now
+  pass), consistent with known run-to-run ASR/pipeline non-determinism, not
+  a D-048 regression.
+- **Architecture: PASS** (`architecture_verified: true`, 0 failed checks).
+  `CanonicalEditPlan: PASS` (`plan_c4b2dcea26bd07cb`, v1).
+  `FinalEditReviewer: FAIL` (blocking findings; see D-049 below).
+  `Freeze: BLOCKED` (`coverage_ledger_story_validator.freeze_blocked=true`).
+  `Render: NO` (`live_render_qc.status: "not_attempted"` -- correctly
+  skipped since Freeze was blocked). `PostRender QC: NOT_REACHED`.
+
+Investigated via two zero-GPU `cutsell-video00-d044-forensic-extract.yml`
+dispatches against this run's own `result.json` (no RAW). Findings written
+up as D-049 below.
+
+## D-049 -- final 15/18 forensic audit (papillary/symptom-transition +
+family/hereditary)
+
+Report-only, no code changes, no RAW. Full forensic trace via two
+zero-GPU forensic-extract dispatches against `video00-modal-33676615917-1`
+(`clip_trace`) and one comparison dispatch against the last-passing run
+`video00-modal-33669148915-1` (D-046 confirmatory, 16/18).
+
+**Case A (papillary_cancer_preserved + sonography_good_before_diagnosis)**
+-- ONE shared root cause. `diagnostics.hybrid_editorial_chunks[2].decisions[4]`
+authoritatively deleted `clip_9b4436e683ddafba3255` ("Síntomas que tuve.
+Según yo, era sintomática, pero sí hubo indicios ahora mirándose atrás.")
+as a "failed" take (`delete_basis: "semantic_failed_plus_local_performance"`,
+`local_failure_reasons: ["dense_physical_reset:6"]`) with
+`later_retry_replacement_id: null` and `later_retry_semantic_overlap: 0.0`
+-- i.e. deleted with no verified replacement, unlike a sibling in the same
+chunk (`clip_184d5f8d669481af48d6`) which carried its own local-failure
+flag but was correctly downgraded to `"kept_fail_open"`. This one deleted
+clip is the sole realization of a Gold text required BOTH directly by
+`papillary_cancer_preserved` AND as the last element of
+`sonography_good_before_diagnosis`'s 4-part ordered sequence (the two
+checks share the identical required string in
+`benchmarks/video00_regression_qa.json`) -- one missing segment, two failed
+checks. Confirmed against the last-passing run: both checks passed there
+with different ASR clip ids; the specific candidate never tripped
+`dense_physical_reset` that run. Classification: ASR/jitter-triggered
+exposure of a deterministic code gap (missing replacement-verification
+before an authoritative delete). Smallest general fix (not yet
+implemented): require `later_retry_replacement_id` non-null and
+`later_retry_semantic_overlap` above a minimum (or a bag-of-words
+content-overlap check, mirroring D-048 FIX 1's
+`_marked_side_diverges_in_content`) before `applied_delete=true`;
+otherwise downgrade to `"kept_fail_open"`.
+
+Side finding (does not trip any of the 3 failing checks, out of D-049's
+scope): `semantic_idea_equivalence.merges` shows `clip_bb8b91e25dc2e56b9b03`
+("Me hice un test a bordo... mi metabolismo...") merged at confidence 0.85
+into the gynecologist-referral idea with reason "Both describe requesting
+comprehensive tests from a gynecologist" -- a reason that doesn't match
+bb8b91's actual content. This let an unrelated-but-cleanly-delivered clip
+register as that idea's "winning" realization while the real referral
+content (`clip_184d5f8d669481af48d6` et al.) was discarded, even though
+`canonical_edit_plan_ideas` bookkeeping shows `coverage_status: "complete"`.
+No current Gold check covers that exact sentence, so it doesn't explain
+any of the 3 failures -- logged for a future directive, not fixed here.
+
+**Case B (family_context_preserved)** -- independent root cause in a
+different pipeline stage. `take_judge_groups[3]` (group
+`tg_467dddcb681caf780c`, after a correct semantic merge of
+`clip_00badced576948b11b07` + `clip_35b7c1847d8f7c271172` at confidence
+0.9) ranked the short single-sentence `clip_00badced576948b11b07` ahead of
+the full realization `clip_3788d39998c51605dcde` (score 0.6363) on
+`watch_listen_baseline` delivery scoring alone (no content/claim signal).
+`ClaimCoverageBestTake` correctly detected the 0-of-3-critical-claims gap
+but reported `unresolved_gaps` with reason
+`"no_single_or_paired_candidate_safely_covers_every_critical_claim"`:
+`clip_3788d399` alone covers 2 of 3 critical claims (the `NEGATION` +
+one "5-10%" `MEASUREMENT_QUANTITY` claim); the 3rd claim is
+`clip_35b7c1847`'s own independent, mid-sentence-cutoff restatement of
+the SAME "5-10%" fact in different words. `semantic_claims.py` never
+dedupes near-identical restatements of one fact across two
+already-semantically-merged retry-family members, inflating the group's
+true 2-fact requirement to 3 -- no single candidate can satisfy it, and
+the 2-piece composite correctly refuses to pair `3788d399`+`35b7c1847`
+(D-048's same-claim-type collision guard working as designed, since both
+remaining claims are `MEASUREMENT_QUANTITY`). Classification against the
+6 listed options: primarily (B) ClaimCoverage failed to override, rooted
+in a claim-deduplication gap; (A) is a contributing factor (BestTake
+scoring has no claim-richness signal); (C)/(D)/(E) not confirmed --
+composite, negation, and grouping logic all behaved correctly. Confirmed
+against the last-passing run: `family_context_preserved` passed there
+(16/18) with different ASR clip ids -- the 2-clip split of the "5-10%"
+statistic didn't occur that run. Classification: ASR/jitter-triggered
+exposure of a deterministic code gap (missing cross-member claim dedup).
+Smallest general fix (not yet implemented): dedupe claims across a retry
+family's own members in `claim_coverage_best_take.py`'s critical-claims
+aggregation, using the same bag-of-words/content-overlap pattern (D-048
+FIX 1's `_content_tokens`), before requiring separate coverage for each.
+
+**Why 3 failed checks = 2 root causes:** confirmed --
+`sonography_good_before_diagnosis`'s required sequence literally repeats
+`papillary_cancer_preserved`'s own required text as its last element, so
+both trace to the identical missing segment (Case A). `family_context_preserved`
+is structurally independent (Case B, a different pipeline stage and idea).
+Neither cause was introduced by D-048 (which never touched
+`hybrid_editorial_chunks` or claim deduplication) -- both are pre-existing
+gaps this run's particular ASR/vision segmentation happened to trigger.
+
+No code changes made. No new RAW launched. Holding for review before any
+FIX-3/FIX-4 directive.
+
 ## Change rule
 
 When a new decision changes product behavior, update this file in the same development cycle. Do not silently redefine CutSell through code alone.
