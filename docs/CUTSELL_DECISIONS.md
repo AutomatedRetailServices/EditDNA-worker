@@ -4470,6 +4470,177 @@ is trustworthy), then re-run this full sweep before F3/F5/F4 are
 separately judged. No Modal RAW. No RunPod touched. No Render/QC
 modified. Holding for review before D-050C2.
 
+## D-050C1.6 -- shadow resolver qualification fixes: all 7 blockers resolved
+
+Fixed F6/F7/F1/F2/F3/F5/F4, in the directive's mandated priority order,
+re-running the full 54-fixture sweep after each phase. All fixes are
+shadow-only (`realization_resolver.py`, `semantic_ledger.py`) plus two
+small, additive `contracts.py`/`pipeline.py` fields threaded through for
+observability -- none change authoritative editorial behavior.
+
+**Phase 1 (F6/F7)**: added `SemanticIdeaRecord.engine_resolution_status`
+(`ENGINE_RESOLVED_WINNER`/`ENGINE_RESOLVED_COMPOSITE`/`ENGINE_REVIEW_
+REQUIRED`/`ENGINE_BLOCKED_UNRESOLVED`) and the narrow write method
+`finalize_idea_engine_resolution`, called once at the END of
+`build_semantic_ledger_shadow` from ground-truth realization `state` +
+recorded composites -- never from decision-event order. Also fixed a
+real bug this surfaced: `claim_coverage_best_take.py` writes a
+composite's members under `"clip_ids"`, but the Ledger's composite
+reconstruction read a `"member_clip_ids"` key that never existed,
+silently reconstructing ZERO composites from every real ClaimCoverage
+composite ever formed. `build_resolver_parity_report` now branches on
+`engine_resolution_status` first: a composite-formed idea compares
+composite-vs-composite (not composite-vs-a-stale-provisional-winner,
+F6's fix); an unresolved/blocked idea is never scored a
+POTENTIAL_REGRESSION for the shadow reaching a confident answer the
+engine deliberately deferred (F7's fix) -- SAME if the shadow also
+declines, CONTENT_SAFETY_IMPROVEMENT if it resolves.
+
+**Phase 2 (F1)**: `_effective_importance` downgrades a CRITICAL
+requirement group to SUPPORTING when ALL its member claims are low-
+information/incidental (reuses `claim_coverage_best_take._is_low_
+information_incidental` directly -- ONE shared utility, per the
+directive, not a reimplementation of D-047/D-048 FIX 2's own logic) AND
+the fact is source-exclusive (no second, independent realization also
+raised it). Corroboration by >1 realization keeps it CRITICAL. Also
+fixed a companion bug this exposed: the dedup quantitative-meaning gate
+required exact digit agreement whenever EITHER side showed any digit
+evidence, which wrongly blocked dedup between a claim and its own
+paraphrase that merely adds an incidental year (an absent number is not
+a conflicting one) -- now only compared when BOTH sides show digit
+evidence.
+
+**Phase 3 (F2)**: `_claim_has_negation` reads a claim's raw `text` via
+`final_sibling_grouping._negations` (the SAME general negation check
+`classify_claim` itself already uses) instead of `content_tokens`, which
+silently drops bare "no" (2 characters) below `_content`'s length floor
+while keeping "not"/"never"/"nunca"/"sin"/"without" intact. Used by both
+the dedup polarity gate and `_detect_contradiction_signals`, which also
+now compares a NEGATION-typed claim against a differently-typed positive
+counterpart (structurally impossible under the old same-claim_type-only
+gate, since `classify_claim` gives a negated proposition its own type by
+construction) -- proven directly against the real "no soy la unica" vs
+"soy la unica" shape.
+
+**Phase 4 (F3)**: `_correction_explicitly_supersedes` only lets a
+CORRECTION-typed claim override a conflicting prior claim when its own
+raw text names AND rejects (a negation marker within a short window of)
+the prior claim's specific value, AND the two claims share some non-digit
+topical content (guards "correction of a different entity" -- two claims
+can share a bare digit substring, e.g. "5" a dose vs "5%" a rate, with no
+shared topic at all). `_detect_contradiction_signals` no longer requires
+topical relatedness for a CORRECTION-involving pair before examining it
+(a correction is often anaphoric, with little lexical overlap with what
+it corrects) -- this is what actually catches "Actually, I checked, and
+it was 2020" (no named/rejected prior value) as still-blocking, the
+literal CleanCutBench fixture this directive chain has referenced since
+D-050C1.5.
+
+**Phase 5 (F5)**: `_MAX_COMPOSITE_SIZE` lowered from 4 to 2 (matching
+production's own ClaimCoverageBestTake bound) -- the D-050C1.5 full
+sweep's one real POTENTIAL_REGRESSION was exactly a 3-fragment assembly
+production's own bounded resolution would never attempt; bounding alone
+makes it structurally unreachable, falling to REVIEW_REQUIRED instead.
+Added `_composite_members_temporally_compatible` (no two members may
+occupy overlapping time windows) as an honest, narrower proxy for full
+narrative/causal-order validity -- true causal-order validation would
+need the bounded `CausalOrderArbiter` this codebase defines elsewhere,
+deliberately not wired here. An EARLIER version of this phase also
+excluded `complete_idea is False` realizations from composite
+membership; empirically wrong (caught by re-running the full sweep):
+`test_complementary_critical_claims_require_a_composite` composites two
+realizations BOTH marked incomplete BY DESIGN, exactly the point of a
+composite. Reverted -- completeness is not a composite-eligibility gate.
+
+**Phase 6 (F4)**: `_claims_dedup_equivalent` now accepts the existing,
+provider-neutral `semantic_claims.ClaimEquivalenceArbiter` contract (no
+new model/provider) and consults it ONLY when a pair clears every hard
+gate (type/polarity/quantity) and its deterministic overlap falls in the
+genuinely ambiguous band (`_DEDUP_AMBIGUOUS_FLOOR=0.4` to
+`_CLAIM_DEDUP_THRESHOLD=0.7`) -- below the floor, confidently distinct,
+arbiter never consulted. Fails open to FALSE (distinct claims, never
+silently collapsed) on no arbiter, an exception, or a non-`True` verdict.
+Every consultation is recorded on `ResolverReport.arbiter_consultations`
+and surfaced in `diagnostics["realization_resolver_shadow"]
+["arbiter_consultations"]`.
+
+**Corrected baseline after Phase 1 (F6/F7) alone**: re-running the full
+sweep immediately after Phase 1 (before touching F1-F5) already
+recategorized several rows the raw auto-classifier had gotten wrong --
+the composite-key-name bug fix alone flipped `test_complementary_
+critical_claims_require_a_composite` from a false POTENTIAL_REGRESSION
+to SAME, and F7 flipped `test_contradictory_factual_retries_block_
+freeze_not_silently_resolved` from a coincidental false SAME to an
+honestly-labeled CONTENT_SAFETY_IMPROVEMENT (the resolver was in fact
+picking a side on a genuine unresolved contradiction the raw comparison
+logic had been masking).
+
+**Final full sweep** (all 7 fixes applied): 72 semantic ideas, 62 SAME
+(86.1%), 4 CONTENT_SAFETY_IMPROVEMENT, 2 COMPOSITE_DIFFERENCE, 3
+DELIVERY_RANK_DIFFERENCE, 1 REVIEW_REQUIRED_DIFFERENCE, 0
+CLAIM_DEDUP_DIFFERENCE, **0 POTENTIAL_REGRESSION**. Every remaining
+non-SAME row was individually re-examined: the 4 CONTENT_SAFETY_
+IMPROVEMENT and 3 DELIVERY_RANK_DIFFERENCE rows are all genuine/benign
+(both sides independently confirmed critically complete, or the engine
+never converged and the shadow safely does); the 2 remaining
+COMPOSITE_DIFFERENCE rows are safe-conservative (no content lost --
+one is arbiter-dependent, since no arbiter is wired into this offline
+sweep; wiring a real one could close it); the 1 REVIEW_REQUIRED_
+DIFFERENCE is the corrected F5 case, now conservatively correct (the
+engine's own filler-clip pick actually loses 3 critical facts; the
+resolver refuses to guess a composite and correctly declines instead of
+confidently picking the worse answer).
+
+**Forensic case re-check**: D-049 Case A PASS; D-049 Case B PASS
+(unaffected by the digit-gate fix -- both sides already show real digit
+evidence in raw text); D-048 FIX 1 (distinct-addition) PASS; D-048 FIX 2
+(self-source-trap) now PASS (was FAIL in D-050C1.5, fixed by F1);
+contradictory-quantity-retries PASS; number-sensitive non-dedup PASS;
+negation-sensitive non-dedup now PASS on both clean-ASCII AND realistic
+Spanish "no" text (was a partial FAIL in D-050C1.5, fixed by F2/F3).
+
+**Shadow guarantee re-proven**: grep-audited again -- only
+`universal_clean_cut.py` imports `realization_resolver`; `freeze_blocked`
+unchanged (line 254); the full-sweep test's per-fixture mutation-freedom
+assertion still passes for all 54 fixtures.
+
+**Tests**: `tests/test_cutsell_d050c1_6_qualification_fixes.py` (28 new)
+covering all 6 phases -- F6 finalization non-staleness, F7 never-a-
+regression-when-unresolved, F1 incidental-downgrade with/without
+corroboration, F2 negation survival (Spanish "no", English "not", "sin",
+same-fact-never-dedupes, double-negative-fails-safe, cross-type
+contradiction), F3 explicit-vs-ambiguous-vs-different-entity correction,
+F5 valid/invalid/overlapping/incomplete-ok/redundant composite shapes,
+F4 deterministic-first/ambiguous-consults/fail-open-on-false-or-
+exception-or-no-arbiter/diagnostics-recorded/bounded-calls.
+
+**Validation**: compileall clean; D-050A (26)/D-050B (26)/D-050C1 (28)
+green; new D-050C1.6 tests (28) green; all 54 CleanCutBench fixtures
+green unchanged; full `tests/test_cutsell_*.py` glob green, 1433 passed,
+0 failed (1405 pre-existing + 28 new). No GPU used anywhere in this
+directive.
+
+No editorial behavior changed. No winner/grouping/ClaimCoverage/
+Composite/CanonicalEditPlan/StoryValidator/Freeze/Render/QC logic
+modified. No Modal RAW launched. No RunPod touched.
+
+**RECOMMEND D-050C2 CUTOVER?** All of D-050C1.5's stated readiness
+criteria are now met: 0 POTENTIAL_REGRESSION, no CleanCutBench expected
+outcome contradicted, no critical claim lost, no numeric/negation
+contradiction collapsed, no unsafe composite accepted, no silent
+zero-realization idea, all D-045->D-049 forensic fixtures correct. That
+said, cutover itself -- making this resolver AUTHORITATIVE over
+DeliveryScorer/`_semantic_best_take`/ClaimCoverageBestTake/
+CompositeResolver in live production -- is a materially larger,
+harder-to-reverse step than anything qualified here: this evidence base
+is CleanCutBench's 54 synthetic fixtures plus ~140 targeted unit tests,
+not a live RAW/Human-Gold run, and F4's arbiter path has only been
+proven against a test stub, never a real bounded arbiter end-to-end.
+Recommend D-050C2 proceed only with explicit user authorization, behind
+an explicit rollback flag (mirroring `CUTSELL_CLEAN_CUT_CORE_V1`'s own
+precedent), and only after this qualification evidence has been
+reviewed by a human -- not as an automatic next step from this report.
+
 ## Change rule
 
 When a new decision changes product behavior, update this file in the same development cycle. Do not silently redefine CutSell through code alone.

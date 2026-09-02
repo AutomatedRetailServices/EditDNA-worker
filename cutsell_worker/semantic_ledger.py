@@ -80,6 +80,13 @@ class RealizationRecord:
     replacement_realization_id: str | None
     claim_ids: tuple[str, ...]
     render_fragment_ids: tuple[str, ...]
+    # D-050C1.6 (F5, composite completeness safety): carried from
+    # `DraftClip.complete_idea` (itself carried unchanged from the
+    # CandidateTake this clip was built from -- see that field's own
+    # docstring). `None` when the underlying clip predates this field or
+    # a construction site never set it -- reported as UNKNOWN, never
+    # guessed at as True.
+    complete_idea: bool | None = None
 
 
 @dataclass(frozen=True)
@@ -107,6 +114,20 @@ IDEA_STATUS_ACTIVE = "ACTIVE"
 IDEA_STATUS_REMOVED_EXPLICITLY = "REMOVED_EXPLICITLY"
 IDEA_STATUS_BLOCKED = "BLOCKED"
 
+# D-050C1.6 F6/F7: the engine's own FINAL resolution shape for one idea --
+# a typed, ground-truth representation computed directly from realization
+# states + recorded composites (see `_finalize_engine_resolution` below),
+# never from `current_winner_realization_id`'s own event-order history
+# alone (a later composite silently superseding an earlier single-winner
+# decision was exactly F6's bug). A comparison (`build_resolver_parity_
+# report`) MUST branch on this field before ever trusting
+# `current_winner_realization_id`/`composite_realization_ids` -- see each
+# status's own meaning below.
+ENGINE_RESOLVED_WINNER = "RESOLVED_WINNER"          # exactly one realization is `state == "selected"`, no composite recorded
+ENGINE_RESOLVED_COMPOSITE = "RESOLVED_COMPOSITE"    # a CompositeRecord names this idea's winning member set
+ENGINE_REVIEW_REQUIRED = "REVIEW_REQUIRED"          # zero realizations are `state == "selected"` for this idea
+ENGINE_BLOCKED_UNRESOLVED = "BLOCKED_UNRESOLVED"    # >1 realizations are `state == "selected"` with no composite explaining it (e.g. freeze_blocked keeping multiple candidates pending human review)
+
 
 @dataclass(frozen=True)
 class SemanticIdeaRecord:
@@ -119,6 +140,12 @@ class SemanticIdeaRecord:
     coverage_status: str                # "complete" | "missing" | "unresolved_ambiguous" | "unknown"
     story_order_position: int | None
     status: str = IDEA_STATUS_ACTIVE
+    # D-050C1.6 F6/F7 (see the ENGINE_* constants above): defaults to
+    # "" (UNRESOLVED / not yet finalized) so every pre-existing
+    # construction site (D-050B's own tests) stays valid unchanged;
+    # `build_semantic_ledger_shadow` always finalizes this before
+    # returning.
+    engine_resolution_status: str = ""
 
 
 # Decision types (Section 5) -- a closed, named vocabulary so a forensic
@@ -308,6 +335,29 @@ class SemanticLedger:
         if record.semantic_idea_id in self.__ideas:
             idea = self.__ideas[record.semantic_idea_id]
             self.__ideas[record.semantic_idea_id] = replace(idea, coverage_status=record.coverage_status)
+
+    def finalize_idea_engine_resolution(
+        self, semantic_idea_id: str, *, status: str,
+        winner_realization_id: str | None, composite_realization_ids: tuple[str, ...],
+    ) -> None:
+        """D-050C1.6 F6/F7: the ONE place `engine_resolution_status`/
+        `current_winner_realization_id`/`composite_realization_ids` are
+        ever written after an idea's initial registration -- always called
+        LAST, after every stage `build_semantic_ledger_shadow` observes
+        has already run, with values computed straight from ground-truth
+        realization `state` + recorded composites (see
+        `_finalize_engine_resolution`), never from decision-event order.
+        Idempotent when called twice with identical values; safe to call
+        even if the idea record doesn't exist (a no-op) so callers never
+        need their own existence check."""
+        idea = self.__ideas.get(semantic_idea_id)
+        if idea is None:
+            return
+        self.__ideas[semantic_idea_id] = replace(
+            idea, engine_resolution_status=status,
+            current_winner_realization_id=winner_realization_id,
+            composite_realization_ids=composite_realization_ids,
+        )
 
     def record_physical_fragment(self, *, realization_id: str, render_fragment_id: str) -> None:
         if realization_id not in self.__realizations:
@@ -576,6 +626,7 @@ def build_semantic_ledger_shadow(draft) -> SemanticLedger:
             replacement_realization_id=replacement_id,
             claim_ids=tuple(claim.canonical_claim_id for claim in claims),
             render_fragment_ids=fragment_ids,
+            complete_idea=getattr(primary, "complete_idea", None),
         ))
         for claim in claims:
             ledger.register_claim(CanonicalClaimRecord(
@@ -710,8 +761,20 @@ def build_semantic_ledger_shadow(draft) -> SemanticLedger:
                 decision_type=CLAIM_COVERAGE_OVERRIDE, reason=str(override.get("reason") or "claim_coverage_override"),
             )
     for composite in (claim_coverage_diag.get("composites") or ()):
+        # D-050C1.6 F6: `claim_coverage_best_take.apply_claim_coverage_
+        # best_take` writes each composite's member list under "clip_ids"
+        # (see that module's own composites.append(...) call) -- this
+        # used to read a "member_clip_ids" key that key never existed
+        # under, silently reconstructing zero composites from every real
+        # ClaimCoverage composite ever formed. Reading "clip_ids" (falling
+        # back to the never-actually-used "member_clip_ids" only for any
+        # hand-built test fixture that happened to use that name) is what
+        # makes `finalize_idea_engine_resolution`'s ENGINE_RESOLVED_
+        # COMPOSITE detection actually fire on real production shapes.
         member_ids = tuple(
-            _clip_realization_id(clip_by_id[cid]) for cid in (composite.get("member_clip_ids") or ()) if cid in clip_by_id
+            _clip_realization_id(clip_by_id[cid])
+            for cid in (composite.get("clip_ids") or composite.get("member_clip_ids") or ())
+            if cid in clip_by_id
         )
         if member_ids:
             first_idea = ledger.realizations().get(member_ids[0])
@@ -757,6 +820,34 @@ def build_semantic_ledger_shadow(draft) -> SemanticLedger:
                 semantic_idea_id=idea_id, coverage_status="missing",
                 missing_claim_ids=(), winner_realization_id=ledger.ideas()[idea_id].current_winner_realization_id,
             ))
+
+    # --- D-050C1.6 F6/F7: finalize each idea's ENGINE resolution shape
+    # from ground-truth realization state + recorded composites -- always
+    # last, always overriding whatever `current_winner_realization_id`
+    # happened to be left at by the decision-event reconstruction above.
+    # See `finalize_idea_engine_resolution`'s own docstring and the
+    # ENGINE_* constants for exactly what each status means.
+    composites_by_idea: dict[str, tuple[str, ...]] = {}
+    for composite in ledger.composites():
+        if composite.semantic_idea_id:
+            composites_by_idea.setdefault(composite.semantic_idea_id, composite.member_realization_ids)
+    for idea_id, idea in ledger.ideas().items():
+        composite_members = composites_by_idea.get(idea_id, ())
+        selected_ids = tuple(
+            rid for rid in idea.realization_ids
+            if rid in ledger.realizations() and ledger.realizations()[rid].state == "selected"
+        )
+        if composite_members:
+            status, winner = ENGINE_RESOLVED_COMPOSITE, None
+        elif len(selected_ids) == 1:
+            status, winner, composite_members = ENGINE_RESOLVED_WINNER, selected_ids[0], ()
+        elif len(selected_ids) == 0:
+            status, winner = ENGINE_REVIEW_REQUIRED, None
+        else:
+            status, winner = ENGINE_BLOCKED_UNRESOLVED, None
+        ledger.finalize_idea_engine_resolution(
+            idea_id, status=status, winner_realization_id=winner, composite_realization_ids=composite_members,
+        )
 
     return ledger
 

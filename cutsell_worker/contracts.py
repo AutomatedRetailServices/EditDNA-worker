@@ -242,6 +242,15 @@ class DraftClip:
     semantic_idea_id: Optional[str] = None
     retry_family_id: Optional[str] = None
     parent_realization_id: Optional[str] = None
+    # D-050C1.6 (F5, composite completeness safety): carried unchanged
+    # from the CandidateTake this clip was built from (pipeline.py's
+    # `_draft_clip`, same passthrough pattern as `realization_id` above).
+    # Optional/defaulted so every existing construction site stays valid
+    # unchanged; nothing authoritative reads this field today -- it exists
+    # so `realization_resolver.py`'s SHADOW composite model can refuse to
+    # assemble a composite out of fragments that were never a complete,
+    # independently-usable delivery in the first place.
+    complete_idea: Optional[bool] = None
 
 
 def effective_render_fragment_id(clip) -> str:

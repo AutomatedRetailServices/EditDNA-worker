@@ -71,6 +71,7 @@ def _stamp_identity(draft, takes, arbiter):
         realization_id = mint_realization_id(take.source_asset_id, None, take.text) if take else None
         return dataclass_replace(
             clip, semantic_idea_id=idea_id, retry_family_id=family_id, realization_id=realization_id,
+            complete_idea=take.complete_idea if take else None,
         )
 
     diagnostics = dict(draft.diagnostics or {})

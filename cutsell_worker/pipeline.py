@@ -78,6 +78,9 @@ def _draft_clip(take: CandidateTake, *, role: SemanticRole, group_id: str | None
         realization_id=take.realization_id,
         semantic_idea_id=semantic_idea_id,
         retry_family_id=retry_family_id,
+        # D-050C1.6: carried unchanged from the CandidateTake -- see
+        # DraftClip.complete_idea's own docstring.
+        complete_idea=take.complete_idea,
     )
 
 

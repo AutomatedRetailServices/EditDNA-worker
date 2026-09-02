@@ -332,8 +332,8 @@ def test_unsafe_discard_without_replacement_never_silently_confirmed():
 def test_valid_composite_when_no_single_realization_is_complete():
     claim_a = _claim("c_a", "ENTITY_RELATION", {"biopsia", "confirmo", "diagnostico"})
     claim_b = _claim("c_b", "STATE_RESULT", {"resultado", "positivo", "temprano"})
-    half_a = _realization("r_a", semantic_idea_id="idea_1", claim_ids=("c_a",))
-    half_b = _realization("r_b", semantic_idea_id="idea_1", claim_ids=("c_b",))
+    half_a = _realization("r_a", semantic_idea_id="idea_1", claim_ids=("c_a",), start=0.0, end=2.0)
+    half_b = _realization("r_b", semantic_idea_id="idea_1", claim_ids=("c_b",), start=2.0, end=4.0)
     ledger = _ledger([half_a, half_b], [claim_a, claim_b], [_idea("idea_1", ["r_a", "r_b"])])
     report = resolve_realizations_shadow(ledger)
     res = report.idea_resolutions["idea_1"]
@@ -367,9 +367,9 @@ def test_redundant_composite_member_excluded_from_minimal_composite():
     claim_a = _claim("c_a", "ENTITY_RELATION", {"biopsia", "confirmo", "diagnostico"})
     claim_b = _claim("c_b", "STATE_RESULT", {"resultado", "positivo", "temprano"})
     realizations = {
-        "r_a": _realization("r_a", semantic_idea_id="idea_1", claim_ids=("c_a",)),
-        "r_b": _realization("r_b", semantic_idea_id="idea_1", claim_ids=("c_b",)),
-        "r_redundant": _realization("r_redundant", semantic_idea_id="idea_1", claim_ids=("c_a",)),
+        "r_a": _realization("r_a", semantic_idea_id="idea_1", claim_ids=("c_a",), start=0.0, end=2.0),
+        "r_b": _realization("r_b", semantic_idea_id="idea_1", claim_ids=("c_b",), start=2.0, end=4.0),
+        "r_redundant": _realization("r_redundant", semantic_idea_id="idea_1", claim_ids=("c_a",), start=4.0, end=6.0),
     }
     groups = build_requirement_groups([claim_a, claim_b])
     critical_ids = frozenset(g.group_id for g in groups if g.importance == "CRITICAL")
