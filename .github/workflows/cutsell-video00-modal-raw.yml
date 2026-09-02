@@ -109,16 +109,41 @@ jobs:
           # source of truth for the canonical Video00 path's runtime
           # configuration. Every value is masked in the CI log before this
           # step ever prints anything derived from it.
-          jq -c '.env // {}' /tmp/base-template.json > /tmp/cutsell-env.json
+          #
+          # D-044 fix: the canonical RunPod Serverless RAW workflow
+          # (cutsell-video00-raw-v5-auto-microtrim.yml, "Create unified
+          # Selection template" step) never dispatches on the base
+          # template's env verbatim -- it explicitly overlays
+          # CUTSELL_HYBRID_LLM_ENABLED:"1" and CUTSELL_HYBRID_PROVIDER:
+          # "google" on top of it before every live run. This workflow
+          # omitted that overlay, which left the base template's own
+          # (evidently non-truthy) default in place -- confirmed live (run
+          # 33636255124): diagnostics.semantic_idea_equivalence.status was
+          # "not_requested" for the entire benchmark because
+          # brain_runtime.build_brain_runtime only constructs the bounded
+          # semantic-equivalence arbiter when CUTSELL_HYBRID_LLM_ENABLED is
+          # truthy -- the arbiter was never even instantiated, so
+          # IdeaClusterer's semantic tier never ran at all. Applying the
+          # SAME two-variable overlay the RunPod workflow already uses
+          # (source of truth; nothing else invented) restores parity.
+          # This is a runtime-config change only -- no cutsell_worker
+          # editorial module is touched by this overlay.
+          jq -c '(.env // {}) + {CUTSELL_HYBRID_LLM_ENABLED:"1", CUTSELL_HYBRID_PROVIDER:"google"}' \
+            /tmp/base-template.json > /tmp/cutsell-env.json
           test "$(jq 'length' /tmp/cutsell-env.json)" != "0"
+          test "$(jq -r '.CUTSELL_HYBRID_LLM_ENABLED' /tmp/cutsell-env.json)" = "1"
+          test "$(jq -r '.CUTSELL_HYBRID_PROVIDER' /tmp/cutsell-env.json)" = "google"
           python3 -c "
           import json
           with open('/tmp/cutsell-env.json') as f:
               env = json.load(f)
-          for value in env.values():
-              if value:
+          for key, value in env.items():
+              # The two canonical-parity overlay values are not secrets --
+              # never mask them, so the parity audit below (and future
+              # printed diagnostics) can show they are actually set.
+              if value and key not in ('CUTSELL_HYBRID_LLM_ENABLED', 'CUTSELL_HYBRID_PROVIDER'):
                   print(f'::add-mask::{value}')
-          print(f'Loaded {len(env)} env vars from the live RunPod template (values masked).')
+          print(f'Loaded {len(env)} env vars from the live RunPod template plus the D-044 hybrid-semantic overlay (secret values masked).')
           "
           echo "CUTSELL_ENV_JSON_PATH=/tmp/cutsell-env.json" >> "$GITHUB_ENV"
 
