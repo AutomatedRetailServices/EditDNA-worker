@@ -33,6 +33,7 @@ from .semantic_atom_importance import SemanticAtomImportanceArbiter
 from .semantic_claims import ClaimEquivalenceArbiter, ClauseRoleArbiter
 from .repair_loop import run_repair_loop
 from .flow_b import ProgressCallback, process_local_sources
+from .semantic_ledger import build_ledger_parity_report, build_semantic_ledger_diagnostics, build_semantic_ledger_shadow
 from .human_boundary_polish_v5 import polish_human_boundaries_v5
 from .hybrid_editorial import EditorialJudge
 from .providers import NoopSemanticProvider
@@ -203,6 +204,22 @@ def process_universal_clean_cut_sources(
         }
         result = replace(result, draft=replace(result.draft, diagnostics=diagnostics))
         final_edit_reviewer_status = review_result.status
+
+        # D-050B: Semantic Ledger, SHADOW MODE ONLY. Built here -- after
+        # every stage it observes (grouping, DeliveryScorer, semantic
+        # best-take, ClaimCoverage, StoryValidator, CanonicalEditPlan,
+        # FinalEditReviewer) has already run and already written its own
+        # authoritative diagnostics, and strictly BEFORE Freeze -- as a
+        # pure, read-only reconstruction. Nothing below this line (Freeze,
+        # Boundary, complete-idea recovery, Render/QC) reads
+        # `diagnostics["semantic_ledger"]`; it exists purely for
+        # observability and forensic replay. See semantic_ledger.py's
+        # module docstring for the full shadow-mode contract.
+        ledger = build_semantic_ledger_shadow(result.draft)
+        ledger_parity = build_ledger_parity_report(ledger, result.draft)
+        diagnostics = dict(result.draft.diagnostics or {})
+        diagnostics["semantic_ledger"] = build_semantic_ledger_diagnostics(ledger, ledger_parity)
+        result = replace(result, draft=replace(result.draft, diagnostics=diagnostics))
 
         # Hard pre-Freeze gate: Final Story Coherence Validation may find a
         # high-confidence semantic failure (an unresolved factual

@@ -4088,6 +4088,94 @@ No editorial behavior changed. No Modal RAW launched. No RunPod touched.
 No winner/grouping/ClaimCoverage/Freeze logic modified. Holding for review
 before D-050B (Semantic Ledger).
 
+## D-050B -- Semantic Ledger, shadow mode
+
+Implements `cutsell_worker/semantic_ledger.py`: a typed, provider-neutral
+Ledger (`RealizationRecord`, `SemanticIdeaRecord`, `CanonicalClaimRecord`,
+`DecisionRecord`, `DiscardRecord`, `CompositeRecord`, `CoverageRecord`,
+`ProvenanceEdge`) with a narrow write API
+(`register_realization`/`register_semantic_idea`/`assign_retry_family`/
+`register_claim`/`record_winner_decision`/`record_discard`/
+`record_composite`/`record_coverage`/`record_physical_fragment`) --
+internal state is name-mangled and only ever exposed through immutable
+read views. `register_*` calls are idempotent when identical, raise
+`LedgerIntegrityError` the instant two writes disagree about the same id
+-- "no stage may silently create duplicate entries" is structural, not
+conventional. A physical split can only ever attach a `render_fragment_id`
+to an EXISTING realization (`record_physical_fragment`) -- there is no
+method that mints a new realization from a fragment.
+
+**Shadow reconstruction, not live hooks**: `build_semantic_ledger_shadow(draft)`
+is a pure, read-only function called exactly once in
+`universal_clean_cut.py`, right after CanonicalEditPlan/FinalEditReviewer/
+StoryValidator have all run and written their own diagnostics, and
+strictly before Freeze. It reconstructs the full decision history
+(DELIVERY_SCORE_WINNER, SEMANTIC_WINNER_OVERRIDE, CLAIM_COVERAGE_OVERRIDE,
+COMPOSITE_CREATED, CLIP_DISCARDED, REPLACEMENT_DECLARED,
+DRAFT_REVIEW_REMOVED) from diagnostics keys every one of those stages
+already writes today (`take_judge_groups`, `hybrid_editorial_chunks`,
+`claim_coverage_best_take`, `canonical_edit_plan`,
+`final_story_coherence_validation`, `draft_review_removed_ids`) rather
+than injecting eight separate live hooks into eight stages -- a
+deliberately lower-risk implementation of "shadow integration" since
+every one of those facts is already present verbatim by the time this
+runs. Documented, honest best-effort reconstructions: a discarded clip's
+`semantic_idea_id` (not stamped by pipeline.py by design) is borrowed
+from a stamped group-mate when one exists; per-realization claims are
+extracted fresh via the same `extract_claims` ClaimCoverage itself calls.
+Writes one new additive diagnostics key,
+`diagnostics["semantic_ledger"]` -- nothing reads it back to decide
+anything.
+
+**Structural validators** (report, never raise, never change behavior):
+`find_orphan_realizations` (a missing `semantic_idea_id` is only a real
+orphan if no `DiscardRecord` explains its absence -- e.g. a
+hybrid_editorial_chunks delete before the clip ever reached grouping,
+D-049 Case A's exact shape, is NOT an orphan), `find_unknown_parent_ids`,
+`find_fragments_without_parent_realization`, `find_provenance_cycles`
+(DFS over the child->parent provenance graph), `find_duplicate_semantic_ids`
+(always empty by construction -- `register_semantic_idea` already raises
+on conflict).
+
+**Parity checker**: `build_ledger_parity_report(ledger, draft)` -- the
+Ledger's own idea `coverage_status` is deliberately derived independently
+(from winner presence, not copied verbatim from CanonicalEditPlan) so
+this comparison can actually disagree; checks selected/discarded state
+parity, CanonicalEditPlan coverage parity, StoryValidator missing-coverage
+parity, and fragment-provenance attachment. Reports `LedgerMismatch`
+rows; never fails production behavior.
+
+**D-049 shadow observability, proven without fixing either gap**: Case A
+(hybrid_editorial_chunks deletes a unique realization with no verified
+replacement) reconstructs as a `DiscardRecord` with
+`replacement_realization_id=None`/`replacement_verified=False`. Case B
+(near-identical canonical claims from retry-family siblings) reconstructs
+as multiple `MEASUREMENT_QUANTITY` claims from two different
+`source_realization_ids` visible under one `semantic_idea_id` --
+deliberately not deduped, proving D-050C will have the information it
+needs.
+
+**Tests**: `tests/test_cutsell_d050b_semantic_ledger.py` (26 tests) --
+one idea/multiple realizations, multiple independent ideas, provisional-
+winner-then-override decision history and traversal
+(`decision_history_for`), discard with/without verified replacement,
+composite membership, cross-realization claim visibility (D-049 Case B
+shape), physical fragments never minting a new realization, orphan/
+unknown-parent/cycle/duplicate-id detection, shadow reconstruction from
+real-shaped drafts (including D-049 Case A/B shapes), parity-report clean
+and mismatch cases, JSON-safety of the diagnostics view, and a direct
+proof that building the Ledger mutates nothing but the one new
+diagnostics key.
+
+**Validation**: compileall clean; full `tests/test_cutsell_*.py` glob
+1376 passed (1350 pre-existing + 26 new), 0 failed -- behavioral parity
+confirmed with the Ledger wired live into `universal_clean_cut.py`.
+
+No editorial behavior changed. No winner/grouping/ClaimCoverage/Freeze/
+Render/QC logic modified -- nothing reads Ledger state to decide
+anything. No Modal RAW launched. No RunPod touched. Holding for review
+before D-050C (winner/coverage authority consolidation).
+
 ## Change rule
 
 When a new decision changes product behavior, update this file in the same development cycle. Do not silently redefine CutSell through code alone.
