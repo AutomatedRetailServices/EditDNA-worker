@@ -1236,3 +1236,65 @@ def test_core_claim_preserved_supporting_reason_dropped_does_not_block_freeze():
     diag = draft.diagnostics["final_story_coherence_validation"]
     assert diag["lost_critical_claims"] == []
     assert diag["freeze_blocked"] is False
+
+
+# 52. Fragment-provenance-aware coverage (D-046 FIX A): a retry-family
+# winner that survives Selection through the REAL take-grouping/idea-
+# equivalence/take-judge/coherence chain, then gets physically split
+# afterward (simulating post_selection_interior_gap_trim's real production
+# behavior -- a legitimate Boundary-flavored trim that divides an already-
+# selected clip into two fragments, each carrying D-036's existing
+# `parent_semantic_clip_id` provenance back to the original winner), must
+# not be misreported as having vanished. Reproduces D-045 Case A's exact
+# false-positive shape with generic vocabulary (no Video00 phrase/clip_id
+# hardcoded): before the fix, canonical_edit_plan.py/final_story_
+# coherence_validation.py's exact clip_id equality against draft.selected
+# found neither the original id nor either fragment and wrongly reported
+# `coverage_status: "missing"` + a false `missing_idea_coverage` freeze
+# block for an idea whose winning content was, in fact, fully intact.
+
+def test_split_winner_fragments_still_satisfy_idea_coverage_through_the_real_chain():
+    take_a = _take("take_a", 0.0, 6.0, "Empece a notar cambios despues de mi rutina diaria.", complete=True)
+    take_b = _take("take_b", 7.0, 12.0, "Empece a notar cambios despues de mi rutina diaria completa.", complete=True)
+
+    draft, _, _ = _run_core((take_a, take_b), oracle_pairs={("take_a", "take_b")})
+    kept_ids = _kept(draft)
+    assert len(kept_ids) == 1  # Best Take resolved a single winner as usual
+    winner_id = next(iter(kept_ids))
+    loser_id = "take_a" if winner_id == "take_b" else "take_b"
+    assert _discarded(draft) == {loser_id}
+    assert draft.diagnostics["final_story_coherence_validation"]["missing_idea_coverage"] == []
+
+    # Simulate the real post_selection_interior_gap_trim hook: the winner
+    # is removed from draft.selected and replaced by two fragments whose
+    # `parent_semantic_clip_id` names it -- exactly what that hook stamps
+    # in production (see its own D-046 FIX A changes).
+    winner_clip = next(clip for clip in draft.selected if clip.clip_id == winner_id)
+    midpoint = (winner_clip.start + winner_clip.end) / 2.0
+    fragment_left = replace(
+        winner_clip, clip_id=f"{winner_id}__psiglabc", end=midpoint,
+        text="Empece a notar cambios", caption_text="Empece a notar cambios",
+        parent_semantic_clip_id=winner_id,
+    )
+    fragment_right = replace(
+        winner_clip, clip_id=f"{winner_id}__psigrdef", start=midpoint,
+        text="despues de mi rutina.", caption_text="despues de mi rutina.",
+        parent_semantic_clip_id=winner_id,
+    )
+    split_draft = replace(
+        draft,
+        selected=tuple(c for c in draft.selected if c.clip_id != winner_id) + (fragment_left, fragment_right),
+    )
+
+    # Re-run StoryValidator on the post-split draft, exactly as the real
+    # pipeline does (post_selection_interior_gap_trim runs before it).
+    revalidated = apply_final_story_coherence_validation(split_draft)
+    diag = revalidated.diagnostics["final_story_coherence_validation"]
+    assert diag["missing_idea_coverage"] == []
+    assert diag["freeze_blocked"] is False
+
+    plan = build_canonical_edit_plan(revalidated)
+    assert any(
+        idea.coverage_status == "complete" and idea.winning_clip_ids == (winner_id,)
+        for idea in plan.ideas
+    )

@@ -33,6 +33,7 @@ import hashlib
 from dataclasses import dataclass, field
 from typing import Mapping
 
+from .contracts import effective_parent_semantic_clip_id
 from .selection_boundary_contract import semantic_token_stream
 
 
@@ -162,12 +163,34 @@ def build_canonical_edit_plan(draft) -> CanonicalEditPlan:
     coherence = diagnostics.get("final_story_coherence_validation") or {}
     composite_ids = _composite_piece_ids(diagnostics)
     selected_ids = {clip.clip_id for clip in draft.selected}
+    # D-046 FIX A: a `take_judge_groups` member that won Selection can be
+    # physically split afterward (e.g. post_selection_interior_gap_trim's
+    # speech-free-gap trim) into fragments whose own `clip_id`s differ from
+    # the winning member's original id. Exact `clip_id` equality against
+    # `draft.selected` alone would then find neither the original id nor
+    # either fragment, and misreport a genuinely-surviving realization as
+    # discarded -- see D-045 Case A. `parent_semantic_clip_id` is the
+    # general, already-established (D-036) provenance link a physical split
+    # is required to set; a member also counts as surviving when any
+    # selected clip's `effective_parent_semantic_clip_id` names it. This is
+    # scoped to `draft.selected` only, so a fragment of a genuinely-
+    # discarded clip (if one ever existed) cannot revive it.
+    selected_parent_ids = {
+        pid for clip in draft.selected
+        if (pid := effective_parent_semantic_clip_id(clip)) is not None
+    }
 
     ideas: list[EditPlanIdea] = []
     for group in diagnostics.get("take_judge_groups") or ():
         member_ids = [str(row.get("clip_id") or "") for row in (group.get("ranked") or ())]
-        winning = tuple(cid for cid in member_ids if cid in selected_ids)
-        discarded = tuple(cid for cid in member_ids if cid not in selected_ids)
+        winning = tuple(
+            cid for cid in member_ids
+            if cid in selected_ids or cid in selected_parent_ids
+        )
+        discarded = tuple(
+            cid for cid in member_ids
+            if cid not in selected_ids and cid not in selected_parent_ids
+        )
         if not member_ids:
             continue
         is_accepted_composite = len(winning) >= 2 and all(cid in composite_ids for cid in winning)

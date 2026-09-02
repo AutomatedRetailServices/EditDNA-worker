@@ -86,6 +86,7 @@ from dataclasses import replace
 from itertools import combinations
 from typing import Mapping
 
+from .contracts import effective_parent_semantic_clip_id
 from .final_sibling_grouping import _content, _negations, _numbers
 from .semantic_atom_importance import (
     SemanticAtomImportanceArbiter,
@@ -301,13 +302,31 @@ def _contradiction_findings(draft, take_by_id: dict[str, object]) -> list[dict]:
 def _missing_idea_coverage(draft) -> list[dict]:
     """Every take_judge_groups entry is one intended idea/retry contest.
     Flag any whose members are ALL absent from the final selected set --
-    that idea vanished from the winning edit entirely."""
+    that idea vanished from the winning edit entirely.
+
+    D-046 FIX A: "absent from the final selected set" must also recognize a
+    winning member that a post-selection physical split (e.g.
+    post_selection_interior_gap_trim) later divided into fragments carrying
+    a different `clip_id` -- those fragments' own `parent_semantic_clip_id`
+    (D-036 provenance, general and not Video00-specific) still names the
+    original member. Without this, a genuinely-surviving realization was
+    misreported as having "vanished" and incorrectly blocked Freeze -- see
+    D-045 Case A. Only `draft.selected` is consulted for this linkage, so a
+    fragment of an actually-discarded clip cannot revive it."""
     selected_ids = {clip.clip_id for clip in draft.selected}
+    selected_parent_ids = {
+        pid for clip in draft.selected
+        if (pid := effective_parent_semantic_clip_id(clip)) is not None
+    }
     missing: list[dict] = []
     for group in (draft.diagnostics or {}).get("take_judge_groups") or ():
         ranked = list(group.get("ranked") or ())
         member_ids = [str(row.get("clip_id") or "") for row in ranked]
-        if member_ids and not any(cid in selected_ids for cid in member_ids):
+        covered = any(
+            cid in selected_ids or cid in selected_parent_ids
+            for cid in member_ids
+        )
+        if member_ids and not covered:
             missing.append({"group_id": group.get("group_id"), "member_clip_ids": member_ids})
     return missing
 

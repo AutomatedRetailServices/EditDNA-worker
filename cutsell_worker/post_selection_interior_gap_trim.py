@@ -21,6 +21,22 @@ _PHYSICAL_KINDS = frozenset({"hand_motion_reset_candidate", "body_reset_candidat
 _BREAK_KINDS = frozenset({"camera_disengagement_candidate", "facial_expression_shift_candidate"})
 _TERMINAL_MARKS = (".", "!", "?", "…")
 
+# D-046 FIX A: this hook may divide an already-SELECTED, already-winning
+# realization into two physical pieces (a legitimate Boundary-flavored
+# operation -- it never changes which spoken material won). Before this
+# fix, the resulting pieces carried no D-036 fragment provenance
+# (`parent_semantic_clip_id`), so any downstream consumer that determines
+# "did this take_judge_groups member survive?" by exact `clip_id` equality
+# against `draft.selected` (canonical_edit_plan.py's winning/discarded
+# derivation, final_story_coherence_validation.py's `_missing_idea_
+# coverage`) could no longer find the original id anywhere in `selected`
+# and wrongly concluded the whole idea vanished -- see D-045 Case A.
+# Stamping the same provenance fields human_boundary_polish_v5.py already
+# uses lets those consumers recognize a split realization as still
+# covered, via the general `effective_parent_semantic_clip_id` contract
+# instead of a Video00-specific patch.
+BOUNDARY_REASON_INTERIOR_PERFORMANCE_GAP = "remove_interior_performance_gap"
+
 
 def _kind(value: str) -> str:
     return str(value or "").strip().lower().replace("-", "_").replace(" ", "_")
@@ -72,13 +88,21 @@ def split_selected_interior_performance_gaps(
     audit: list[dict] = []
 
     for original in selected:
+        # D-046 FIX A: the ROOT semantic clip every physical sibling this
+        # original ultimately produces reconstructs together -- never a
+        # fragment id, even if `original` itself already carries fragment
+        # provenance from an earlier physical pass (chained splits), so all
+        # descendants stay discoverable under one shared key. Mirrors
+        # human_boundary_polish_v5.py's own `root_parent` pattern exactly.
+        root_parent = getattr(original, "parent_semantic_clip_id", None) or original.clip_id
+        original_pieces: list[DraftClip] = []
         pending = [original]
         split_count = 0
         while pending:
             clip = pending.pop(0)
             words = tuple(sorted(clip.words, key=lambda word: (float(word.start), float(word.end))))
             if len(words) < 4 or split_count >= max_splits_per_clip:
-                output.append(clip)
+                original_pieces.append(clip)
                 continue
 
             events = _events_for_source(diagnostics, clip.source_asset_id)
@@ -261,7 +285,7 @@ def split_selected_interior_performance_gaps(
                     )
 
             if best is None:
-                output.append(clip)
+                original_pieces.append(clip)
                 continue
 
             _, index, gap_start, gap_end, physical, breaks, evidence_mode = best
@@ -274,6 +298,14 @@ def split_selected_interior_performance_gaps(
                 text=_text(left_words),
                 caption_text=_text(left_words),
                 words=left_words,
+                # D-046 FIX A: D-036 fragment provenance -- render_fragment_id
+                # is filled in once the final clip_id is known below;
+                # parent_semantic_clip_id always points at the true ROOT
+                # semantic clip so canonical_edit_plan.py/final_story_
+                # coherence_validation.py can recognize this piece as still
+                # covering that idea even though its own clip_id differs.
+                parent_semantic_clip_id=root_parent,
+                boundary_reason=BOUNDARY_REASON_INTERIOR_PERFORMANCE_GAP,
             )
             right = replace(
                 clip,
@@ -282,7 +314,11 @@ def split_selected_interior_performance_gaps(
                 text=_text(right_words),
                 caption_text=_text(right_words),
                 words=right_words,
+                parent_semantic_clip_id=root_parent,
+                boundary_reason=BOUNDARY_REASON_INTERIOR_PERFORMANCE_GAP,
             )
+            left = replace(left, render_fragment_id=left.clip_id)
+            right = replace(right, render_fragment_id=right.clip_id)
             pending[0:0] = [left, right]
             split_count += 1
             audit.append({
@@ -299,6 +335,19 @@ def split_selected_interior_performance_gaps(
                 "left_word": str(left_words[-1].text),
                 "right_word": str(right_words[0].text),
             })
+
+        if len(original_pieces) > 1:
+            # D-046 FIX A: fragment_index/fragment_count are only meaningful
+            # once every gap candidate for THIS original has been applied
+            # and the final piece count is known -- stamped here as one
+            # last pass, mirroring human_boundary_polish_v5.py's own
+            # end-of-splitting stamp.
+            total = len(original_pieces)
+            original_pieces = [
+                replace(piece, fragment_index=index, fragment_count=total)
+                for index, piece in enumerate(original_pieces)
+            ]
+        output.extend(original_pieces)
 
     output.sort(key=lambda clip: (clip.source_order, float(clip.start), float(clip.end), clip.clip_id))
     return tuple(output), tuple(audit)

@@ -3550,6 +3550,148 @@ real, distinct gaps worth closing independently.
 No code changed. No new Modal RAW launched. Reported for review per the
 standing directive.
 
+## D-046 -- implement the two D-045 root-cause fixes separately
+
+Both D-045 root causes implemented, tested, and validated offline. No Modal/
+RunPod infrastructure touched, D-044's hybrid-semantic config untouched,
+IdeaClusterer untouched, render/QC untouched. No new Modal RAW launched --
+per the standing directive, this stops for review before one.
+
+### FIX A -- fragment-provenance-aware CanonicalEditPlan
+
+Root cause (D-045 Case A): `post_selection_interior_gap_trim.py` can split
+an already-SELECTED winning realization into two physical pieces, but
+never stamped D-036's existing `parent_semantic_clip_id` provenance field
+on them (the same field `human_boundary_polish_v5.py` already uses for
+exactly this purpose). `canonical_edit_plan.py`'s winning/discarded
+derivation and `final_story_coherence_validation.py`'s
+`_missing_idea_coverage` both determine "did this take_judge_groups member
+survive?" via exact `clip_id` equality against `draft.selected` -- with no
+provenance link, neither could find the split winner anywhere and both
+wrongly reported the idea as vanished (`coverage_status: "missing"`,
+`missing_idea_coverage`), falsely blocking Selection Freeze.
+
+Fix (three files, all additive):
+- `post_selection_interior_gap_trim.py`: split pieces now carry
+  `parent_semantic_clip_id` (root-tracked through chained splits, mirroring
+  `human_boundary_polish_v5.py`'s own `root_parent` pattern), plus
+  `render_fragment_id`, `boundary_reason`, and `fragment_index`/
+  `fragment_count` for full D-036 contract parity.
+- `canonical_edit_plan.py`: a `take_judge_groups` member now counts as
+  surviving when its `clip_id` is in `draft.selected` OR any selected
+  clip's `effective_parent_semantic_clip_id` names it.
+- `final_story_coherence_validation.py`: `_missing_idea_coverage` uses the
+  same provenance-aware check.
+
+No Video00 special-casing; the general D-036 provenance contract already
+in `contracts.py` is the only mechanism used. Exact clip identity semantics
+are unchanged everywhere else (a fragment of a genuinely-discarded clip
+that never made it into `draft.selected` cannot revive it -- only
+`draft.selected` is consulted).
+
+Tests: 10 required categories in `tests/test_cutsell_d046_fix_a_fragment_
+provenance.py` (unsplit winner, one-fragment split, multi-fragment split
+counted once, discarded sibling stays discarded, a discarded clip's own
+fragment cannot revive it, provenance survives a second chained split,
+mixed original+fragment doesn't double-count, coverage_status stays
+complete, `missing_idea_coverage` empties out, an unrelated genuinely-
+missing idea still blocks Freeze) plus a literal regression-lock test
+replaying the exact real clip_ids/group_id from the D-045 Case A incident
+(`tg_28298998766ee0c8f1`, `clip_42b0b7919d9f9d025e86` and its real
+`__psigl`/`__psigr` fragment ids) -- 11 tests total, all passing. 3 more
+tests added directly to `post_selection_interior_gap_trim.py`'s own suite
+proving the provenance stamping itself (11 tests total there, up from 8).
+1 new CleanCutBench fixture (52) reaches the same false positive through
+the REAL take-grouping/idea-equivalence/take-judge/coherence chain with
+generic (non-Video00) vocabulary.
+
+### FIX B -- good subspan preservation under a borderline attempt merge
+
+Root cause (D-045 Case B): `AttemptReconstructor` merges two ASR-level
+candidates into one physical attempt whenever the gap between them is
+below `max_continuation_gap_sec` (1.20s) and no stronger boundary signal
+fires. The observed regression gap was ~0.76s -- comfortably inside the
+merge zone -- fusing an independently-usable good micro-fragment ("Era
+como un rush, una alergia.") into a larger monolith that later correctly
+lost its Best Take contest, destroying the good subspan along with it.
+
+Design choice (both options from the directive were evaluated): tightening
+the boundary rule itself (Option A -- e.g. treating any gap where both
+sides are already `complete_idea` as a new hard boundary) was REJECTED --
+`complete_idea` is deliberately permissive for ordinary sentence-length
+speech, so that rule would re-split large amounts of currently-correct
+continuous multi-sentence delivery across every Video project, a global
+fragment explosion rather than a targeted fix. Implemented Option B
+instead: additive-only subspan preservation.
+
+`attempt_reconstruction.py` now also computes, per merged bucket, the
+single widest internal gap that is a real pause (>= 0.55s, comfortably
+below the 1.20s merge threshold) between two members BOTH already
+independently `complete_idea`, with each side carrying enough of its own
+content (>= 3 content tokens) to be worth preserving. When found, both
+sides are reconstructed as their own standalone candidates -- capped at
+one split per bucket, so a bucket with several ordinary internal pauses
+cannot fragment-explode. The merge decision itself, and the fused attempt
+it always still produces, are completely unchanged.
+
+These extra candidates are deliberately NOT mixed into
+`reconstruct_delivery_attempts`'s own `attempts` return value --
+`attempt_boundary_integrity.py`'s pre-existing terminal-connector-guard
+monkeypatch indexes `attempts[-1]`/`attempts[-2]` assuming exactly one
+entry per merged bucket, and mixing extras in would silently corrupt that.
+Instead, a new `preserved_subspan_candidates(takes, diagnostics)` function
+recomputes the same buckets from the diagnostics `reconstruct_delivery_
+attempts` already produced and is called explicitly by `flow_b.py` right
+after reconstruction, appending its result to the live candidate pool.
+Nothing downstream (IdeaClusterer, DeliveryScorer, ClaimCoverageBestTake)
+was modified -- the extra candidates are just more input to the existing
+"multiple realizations of one idea, pick the winner(s)" machinery those
+stages already implement.
+
+Tests: `tests/test_cutsell_d046_fix_b_subspan_preservation.py`, 13 tests --
+the independent micro-fragment surviving a borderline merge; just-below/
+at/just-above the 0.55s preservation floor; +/-50ms, +/-100ms, and +/-250ms
+jitter around the observed 0.76s gap (the last straddles the floor by
+design, proving the boundary is where intended); determinism across 5
+small shifts within the preserve zone; a genuine incomplete continuation
+correctly gets nothing extra; a gap already at/above the merge threshold
+needs no preservation (both sides already independent); no fragment
+explosion across a 4-member bucket with 3 internal gaps (still only 2
+extra candidates); preserved candidates are never duplicates of the fused
+attempt or each other; and an unsplit pool preserves nothing. 3 existing
+attempt_reconstruction/attempt_reconstruction_suffix tests re-run
+unaffected (byte-identical `attempts` return value confirmed).
+
+The real texts from the D-045 incident were deliberately NOT used verbatim
+in a regression-lock test here (unlike FIX A): checked directly, the exact
+real wording trips the PRE-EXISTING, unrelated `_restart_evidence`
+("lexical_restart") rule when modeled as two adjacent CandidateTakes,
+because the real fusion happened across many smaller ASR-level fragments
+this two-take simplification can't reproduce byte-for-byte. The synthetic
+fixtures instead use the same 0.76s gap value and equivalent (not
+identical) phrasing, isolating the new mechanism cleanly.
+
+### Validation
+
+- `python3 -m compileall -q cutsell_worker tests`: clean.
+- `pytest -q tests/test_cutsell_*.py` (the canonical CI glob): **1294
+  passed**, 0 failed.
+- Offline replay proves both cases: the D-045 Case A regression-lock test
+  (exact real clip_ids) shows `missing_idea_coverage == []` and
+  `coverage_status: "complete"` where the live run had shown `"missing"`;
+  the D-046 FIX B tests show the equivalent-shaped micro-fragment surviving
+  as an extra candidate at the exact observed 0.76s gap and through +/-250ms
+  of jitter around it.
+- No behavior change detected outside the target conditions: every
+  pre-existing test in the modified files (`post_selection_interior_gap_
+  trim.py`'s own 8, `attempt_reconstruction.py`'s 9,
+  `canonical_edit_plan.py`/`final_story_coherence_validation.py`'s 34, the
+  full 51-fixture CleanCutBench suite, and the full 1294-test canonical
+  glob) still passes unchanged.
+
+No new Modal RAW launched. Stopping here for review, per the standing
+directive.
+
 ## Change rule
 
 When a new decision changes product behavior, update this file in the same development cycle. Do not silently redefine CutSell through code alone.

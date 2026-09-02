@@ -12,7 +12,7 @@ strong multi-family recording-process evidence, or clear lexical restart evidenc
 from __future__ import annotations
 
 import re
-from typing import Iterable, Tuple
+from typing import Iterable, Mapping, Tuple
 
 from .contracts import CandidateTake, MediaSignals
 from .session_boundaries import infer_session_boundaries
@@ -300,17 +300,125 @@ def _merge_attempt(members: tuple[CandidateTake, ...]) -> CandidateTake:
     )
 
 
+# D-046 FIX B (Invariant 2 -- good subspan preservation): a merge decision is
+# correct on average (`max_continuation_gap_sec`'s job), but D-045 Case B
+# showed a borderline internal gap can fuse two ALREADY-independently-
+# complete deliveries into one physical attempt. When that fused attempt
+# later loses its Best Take contest as a whole, any semantically-usable
+# content that existed only in one half is destroyed even though nothing
+# downstream did anything wrong -- BestTake/DeliveryScorer correctly picked
+# the stronger candidate; they were just never shown the good half on its
+# own. See D-045's docs/CUTSELL_DECISIONS.md entry for the full trace
+# (0.76s gap, same audio, separate attempts in the prior passing run).
+#
+# This does not change the merge decision itself (Option A -- tightening
+# the boundary rule -- was evaluated and rejected: "both sides already
+# complete_idea" is common in ordinary multi-sentence delivery, so gating a
+# real boundary on it alone would re-split large amounts of currently-
+# correct continuous speech; a global fragment explosion, not a targeted
+# fix). Instead (Option B) it ADDS, never replaces: when a merged bucket
+# contains an internal gap that is a real pause (at least
+# ``subspan_preservation_min_gap_sec``) between two members BOTH already
+# independently judged ``complete_idea`` -- the same asymmetry-free
+# condition that makes a gap "borderline" rather than an obvious same-
+# breath continuation -- the two halves are additionally reconstructed as
+# their own standalone candidates and appended to the returned pool. The
+# fused attempt is always still returned too, unchanged, so a genuinely
+# correct merge (the fused attempt wins) is completely unaffected; only a
+# LOSING fused attempt's independently-valid subspan gets a second chance
+# at survival, through the existing IdeaClusterer/BestTake/ClaimCoverage
+# machinery -- no new selection logic, no Video00-specific text, and at
+# most one extra split per merged bucket (the single widest qualifying
+# internal gap), so this cannot fragment-explode a long multi-member
+# bucket with several ordinary internal pauses.
+_SUBSPAN_MIN_CONTENT_TOKENS = 3
+
+
+def _borderline_split_index(
+    bucket: tuple[CandidateTake, ...], *, min_gap_sec: float, max_gap_sec: float,
+) -> int | None:
+    """The single widest internal gap in `bucket` that is a real pause
+    (`min_gap_sec` <= gap < `max_gap_sec` -- already below the merge
+    threshold, or `_attempt_boundary_reason` would have split it) between
+    two members that were each already independently judged a complete
+    idea, or None if no member pair qualifies. Both halves must also carry
+    enough of their own content to be worth preserving as a standalone
+    candidate -- guards against recovering a bare filler word."""
+    best_index: int | None = None
+    best_gap = -1.0
+    for index in range(1, len(bucket)):
+        left = bucket[index - 1]
+        right = bucket[index]
+        if not (left.complete_idea and right.complete_idea):
+            continue
+        gap = max(0.0, float(right.start) - float(left.end))
+        if not (min_gap_sec <= gap < max_gap_sec):
+            continue
+        if len(_content_tokens(left.text)) < _SUBSPAN_MIN_CONTENT_TOKENS:
+            continue
+        if len(_content_tokens(right.text)) < _SUBSPAN_MIN_CONTENT_TOKENS:
+            continue
+        if gap > best_gap:
+            best_gap = gap
+            best_index = index
+    return best_index
+
+
+def _preserve_borderline_subspans(
+    buckets: list[list[CandidateTake]],
+    *,
+    subspan_preservation_min_gap_sec: float,
+    max_continuation_gap_sec: float,
+) -> tuple[list[CandidateTake], list[dict]]:
+    preserved: list[CandidateTake] = []
+    audit: list[dict] = []
+    for bucket in buckets:
+        if len(bucket) < 2:
+            continue
+        members = tuple(bucket)
+        split_index = _borderline_split_index(
+            members,
+            min_gap_sec=subspan_preservation_min_gap_sec,
+            max_gap_sec=max_continuation_gap_sec,
+        )
+        if split_index is None:
+            continue
+        prefix = _merge_attempt(members[:split_index])
+        suffix = _merge_attempt(members[split_index:])
+        parent = _merge_attempt(members)
+        preserved.extend((prefix, suffix))
+        gap = max(0.0, float(members[split_index].start) - float(members[split_index - 1].end))
+        audit.append({
+            "authority": "attempt_reconstruction_subspan_preservation",
+            "decision": "preserve_borderline_subspans",
+            "parent_clip_id": parent.clip_id,
+            "parent_text": parent.text,
+            "prefix_clip_id": prefix.clip_id,
+            "prefix_text": prefix.text,
+            "suffix_clip_id": suffix.clip_id,
+            "suffix_text": suffix.text,
+            "gap_sec": round(gap, 3),
+        })
+    return preserved, audit
+
+
 def reconstruct_delivery_attempts(
     takes: Iterable[CandidateTake],
     context: WholeVideoContext | None,
     *,
     max_continuation_gap_sec: float = 1.20,
+    subspan_preservation_min_gap_sec: float = 0.55,
 ) -> tuple[Tuple[CandidateTake, ...], dict]:
     """Build paragraph/delivery-level candidates from ASR-level candidates.
 
     The function never deletes speech. It only changes the unit that later Clean Cut and
     Best Take judge. This is intentionally fail-open: absent a clear boundary, nearby
     fragments remain one complete creator delivery attempt.
+
+    D-046 FIX B: the returned pool may also include a small number of extra
+    "preserved subspan" candidates -- see `_preserve_borderline_subspans`'s
+    docstring above. These are additive only; every attempt the merge logic
+    itself produces is still returned unchanged.
     """
     ordered = tuple(sorted(
         takes,
@@ -352,6 +460,22 @@ def reconstruct_delivery_attempts(
         buckets[-1].append(take)
 
     attempts = tuple(_merge_attempt(tuple(bucket)) for bucket in buckets)
+    # D-046 FIX B: audit-only preview of what preserved_subspan_candidates()
+    # below would recover -- kept purely informational here (JSON-safe text,
+    # no live CandidateTake objects) so `attempts`/`boundaries` stay BYTE-
+    # IDENTICAL to their pre-FIX-B shape. That matters concretely:
+    # attempt_boundary_integrity.py's terminal-connector-guard monkeypatch
+    # wraps this exact function and indexes `attempts[-1]`/`attempts[-2]`
+    # assuming one entry per merged bucket in bucket order -- mixing extra
+    # candidates into this tuple would silently corrupt that indexing. The
+    # actual extra candidates are produced by the separate, explicit
+    # `preserved_subspan_candidates()` call below, which every caller opts
+    # into deliberately (flow_b.py does, right after this call).
+    _, preserved_audit = _preserve_borderline_subspans(
+        buckets,
+        subspan_preservation_min_gap_sec=subspan_preservation_min_gap_sec,
+        max_continuation_gap_sec=max_continuation_gap_sec,
+    )
     diagnostics = {
         "input_take_count": len(ordered),
         "attempt_count": len(attempts),
@@ -370,5 +494,54 @@ def reconstruct_delivery_attempts(
             }
             for attempt, bucket in zip(attempts, buckets)
         ][:300],
+        # D-046 FIX B: additive-only borderline-merge subspan recovery --
+        # empty whenever no bucket contains a qualifying internal gap, so
+        # this key is a no-op for every currently-passing fixture.
+        "preserved_borderline_subspans": preserved_audit[:300],
     }
     return attempts, diagnostics
+
+
+def preserved_subspan_candidates(
+    takes: Iterable[CandidateTake],
+    diagnostics: Mapping[str, object],
+    *,
+    subspan_preservation_min_gap_sec: float = 0.55,
+    max_continuation_gap_sec: float = 1.20,
+) -> tuple[Tuple[CandidateTake, ...], list[dict]]:
+    """D-046 FIX B integration point: given the ORIGINAL pre-reconstruction
+    takes and the diagnostics `reconstruct_delivery_attempts` already
+    produced for them (specifically `attempts[*].member_clip_ids`),
+    reconstruct the same merged buckets and return the extra "preserved
+    subspan" candidates (and their audit rows) any borderline internal gap
+    qualifies for -- see `_preserve_borderline_subspans`'s docstring.
+
+    Deliberately a separate call from `reconstruct_delivery_attempts`
+    itself (not merged into its own `attempts` return value) so every
+    existing caller of that function -- most notably attempt_boundary_
+    integrity.py's terminal-connector-guard monkeypatch, which indexes
+    `attempts[-1]`/`attempts[-2]` assuming exactly one entry per merged
+    bucket -- is completely unaffected. A caller that wants Invariant 2
+    (good subspan preservation) opts in explicitly by calling this too and
+    appending its result to its own candidate pool, exactly as flow_b.py
+    does right after calling `reconstruct_delivery_attempts`."""
+    by_id = {take.clip_id: take for take in takes}
+    preserved: list[CandidateTake] = []
+    audit: list[dict] = []
+    for row in diagnostics.get("attempts") or ():
+        member_ids = tuple(row.get("member_clip_ids") or ())
+        if len(member_ids) < 2:
+            continue
+        bucket = tuple(by_id[cid] for cid in member_ids if cid in by_id)
+        if len(bucket) != len(member_ids):
+            # Some member is missing from `takes` (a stale/mismatched
+            # diagnostics dict) -- fail closed rather than guess.
+            continue
+        bucket_preserved, bucket_audit = _preserve_borderline_subspans(
+            [list(bucket)],
+            subspan_preservation_min_gap_sec=subspan_preservation_min_gap_sec,
+            max_continuation_gap_sec=max_continuation_gap_sec,
+        )
+        preserved.extend(bucket_preserved)
+        audit.extend(bucket_audit)
+    return tuple(preserved), audit

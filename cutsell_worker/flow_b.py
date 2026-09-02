@@ -8,7 +8,7 @@ import tempfile
 from typing import Callable, Mapping
 
 from .asr import ASRProvider
-from .attempt_reconstruction import reconstruct_delivery_attempts
+from .attempt_reconstruction import preserved_subspan_candidates, reconstruct_delivery_attempts
 from .clean_cut_provider import CleanCutProvider
 from .composer_provider import ComposerProvider
 from .contracts import ProcessingRequest, ProcessingResult
@@ -231,13 +231,35 @@ def process_local_sources(
     # Cut/Best Take decision. ASR chunks are evidence, not editorial takes. This stage
     # never deletes speech; absent a clear retry/reset boundary it preserves neighboring
     # fragments as one paragraph/delivery-level candidate.
+    pre_attempt_takes = takes
     takes, attempt_reconstruction_diagnostics = reconstruct_delivery_attempts(takes, whole_context)
+    # D-046 FIX B (Invariant 2 -- good subspan preservation): a merged
+    # attempt can fuse two already-independently-complete deliveries across
+    # a borderline internal gap (D-045 Case B). Rather than changing the
+    # merge decision itself (risking a global fragment explosion across
+    # ordinary multi-sentence delivery), this adds the qualifying subspans
+    # as EXTRA candidates alongside the fused attempt -- the existing
+    # IdeaClusterer/BestTake/ClaimCoverage machinery decides which
+    # candidate(s), if any, actually survive; nothing is forced into the
+    # final KEEP. See preserved_subspan_candidates()'s own docstring for
+    # why this is a separate call rather than folded into
+    # reconstruct_delivery_attempts's own return value.
+    preserved_subspans, preserved_subspan_audit = preserved_subspan_candidates(
+        pre_attempt_takes, attempt_reconstruction_diagnostics,
+    )
+    if preserved_subspans:
+        takes = takes + preserved_subspans
+        attempt_reconstruction_diagnostics = {
+            **attempt_reconstruction_diagnostics,
+            "preserved_borderline_subspans": preserved_subspan_audit,
+        }
     trace.complete(
         "attempt_reconstruction",
         input_candidate_count=attempt_reconstruction_diagnostics.get("input_take_count", 0),
         attempt_count=attempt_reconstruction_diagnostics.get("attempt_count", 0),
         merged_fragment_count=attempt_reconstruction_diagnostics.get("merged_fragment_count", 0),
         boundary_count=len(attempt_reconstruction_diagnostics.get("boundaries") or ()),
+        preserved_subspan_count=len(preserved_subspans),
     )
     notify("analyzing", 74)
 

@@ -218,3 +218,45 @@ def test_sub_040_completed_sentence_gap_is_kept_even_with_anticipatory_resets():
 
     assert len(selected) == 1
     assert audit == ()
+
+
+# --- D-046 FIX A: D-036 fragment provenance must be stamped on a split ----
+
+
+def test_split_pieces_carry_parent_semantic_clip_id_back_to_the_original():
+    selected, _ = split_selected_interior_performance_gaps((_clip(),), _diagnostics(True))
+
+    assert len(selected) == 2
+    for piece in selected:
+        assert piece.parent_semantic_clip_id == "clip-a"
+        assert piece.render_fragment_id == piece.clip_id
+        assert piece.boundary_reason == "remove_interior_performance_gap"
+    assert selected[0].fragment_index == 0
+    assert selected[1].fragment_index == 1
+    assert selected[0].fragment_count == 2
+    assert selected[1].fragment_count == 2
+
+
+def test_unsplit_clip_carries_no_fragment_provenance():
+    selected, _ = split_selected_interior_performance_gaps((_clip(),), _diagnostics(False))
+
+    assert len(selected) == 1
+    assert selected[0].parent_semantic_clip_id is None
+    assert selected[0].fragment_index is None
+    assert selected[0].fragment_count is None
+
+
+def test_chained_split_keeps_parent_semantic_clip_id_pointed_at_the_true_root():
+    # A clip that already carries fragment provenance from an EARLIER
+    # physical pass (e.g. this hook re-splitting a piece human_boundary_
+    # polish_v5 already touched, or a second interior gap in the same
+    # original) must keep pointing descendants at the ROOT semantic clip,
+    # never at the intermediate fragment's own clip_id.
+    from dataclasses import replace
+
+    already_fragment = replace(_clip(), clip_id="root__psiglabc", parent_semantic_clip_id="root")
+    selected, _ = split_selected_interior_performance_gaps((already_fragment,), _diagnostics(True))
+
+    assert len(selected) == 2
+    for piece in selected:
+        assert piece.parent_semantic_clip_id == "root"
