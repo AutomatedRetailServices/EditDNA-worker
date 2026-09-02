@@ -80,11 +80,35 @@ jobs:
           python3 benchmarks/video00_d044_forensic_extract.py /tmp/result.json $KEYWORDS \
             | tee /tmp/d044-forensic-extract.json
 
-      - name: Upload forensic extract artifact
+      - name: Run authoritative Human Gold regression QA + architecture + selection-lock validators
+        shell: bash
+        run: |
+          set +e
+          echo "--- validate_video00_regression_qa.py (authoritative Human Gold X/18) ---"
+          python3 benchmarks/validate_video00_regression_qa.py /tmp/result.json benchmarks/video00_regression_qa.json \
+            | tee /tmp/d044-regression-qa-report.json
+          echo "regression_qa_exit_code=$?"
+
+          echo "--- validate_video00_architecture.py ---"
+          python3 benchmarks/validate_video00_architecture.py /tmp/result.json \
+            | tee /tmp/d044-architecture-report.json
+          echo "architecture_exit_code=$?"
+
+          echo "--- validate_video00_selection_lock.py ---"
+          python3 benchmarks/validate_video00_selection_lock.py /tmp/result.json benchmarks/video00_selection_lock.json \
+            | tee /tmp/d044-selection-lock-report.json
+          echo "selection_lock_exit_code=$?"
+          exit 0
+
+      - name: Upload forensic extract + validator report artifacts
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: cutsell-video00-d044-forensic-extract
-          path: /tmp/d044-forensic-extract.json
+          path: |
+            /tmp/d044-forensic-extract.json
+            /tmp/d044-regression-qa-report.json
+            /tmp/d044-architecture-report.json
+            /tmp/d044-selection-lock-report.json
           retention-days: 14
           if-no-files-found: warn
