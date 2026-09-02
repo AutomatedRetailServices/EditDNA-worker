@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 
-from benchmarks.video00_d044_forensic_extract import extract
+from benchmarks.video00_d044_forensic_extract import extract, trace_clip_ids
 
 
 def _write_fixture(tmp_path):
@@ -118,6 +118,56 @@ def test_extract_handles_missing_diagnostics_gracefully(tmp_path):
     forensic = extract(str(path))
     assert forensic["selected"] == []
     assert forensic["attempt_reconstruction"] is None
+
+
+def test_trace_clip_ids_finds_a_clip_id_buried_in_an_arbitrary_hook_diagnostic():
+    # D-045: general, fully unbounded search -- must find a clip_id
+    # mentioned inside ANY diagnostics key, not just the curated subset
+    # extract() pulls, since cutsell_worker installs dozens of small
+    # cleanup hooks each with their own diagnostics key.
+    result = {
+        "diagnostics": {
+            "some_hook_nobody_pre-registered": [
+                {"action": "trim", "member_clip_ids": ["clip_X", "clip_Y"]},
+            ],
+            "unrelated_key": {"nested": {"deep": "clip_Z appears here too"}},
+        }
+    }
+    hits = trace_clip_ids(result, ["clip_X", "clip_Z", "clip_absent"])
+    assert len(hits["clip_X"]) == 1
+    assert "some_hook_nobody_pre-registered" in hits["clip_X"][0]["path"]
+    assert len(hits["clip_Z"]) == 1
+    assert "unrelated_key" in hits["clip_Z"][0]["path"]
+    assert hits["clip_absent"] == []
+
+
+def test_trace_clip_ids_finds_multiple_occurrences_of_the_same_clip():
+    result = {
+        "diagnostics": {
+            "hook_a": [{"clip_id": "clip_X"}],
+            "hook_b": {"winner": "clip_X"},
+        }
+    }
+    hits = trace_clip_ids(result, ["clip_X"])
+    assert len(hits["clip_X"]) == 2
+
+
+def test_extract_includes_clip_trace_only_when_requested():
+    result = {"diagnostics": {"hook": {"clip_id": "clip_X"}}}
+    import tempfile
+    import os
+
+    fd, path = tempfile.mkstemp(suffix=".json")
+    try:
+        with os.fdopen(fd, "w") as fh:
+            json.dump(result, fh)
+        forensic_without = extract(path)
+        assert "clip_trace" not in forensic_without
+        forensic_with = extract(path, trace_clips=["clip_X"])
+        assert "clip_trace" in forensic_with
+        assert len(forensic_with["clip_trace"]["clip_X"]) == 1
+    finally:
+        os.unlink(path)
 
 
 def test_main_requires_result_path_argument():

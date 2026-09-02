@@ -25,6 +25,10 @@ on:
         description: "Space-separated keywords to filter take_judge_groups/clean_cut_decisions/hybrid_editorial_chunks by (leave blank for no filtering)"
         required: false
         default: "sonograf tiroides espinilla alergia rush familia hereditari única primera"
+      trace_clip_ids:
+        description: "D-045: space-separated clip_ids to search for across the ENTIRE raw result.json (every diagnostics key, not just the curated subset) -- leave blank to skip"
+        required: false
+        default: ""
 
 concurrency:
   group: cutsell-video00-d044-forensic-extract-${{ github.ref }}
@@ -41,6 +45,7 @@ jobs:
       RUNPOD_API_KEY: ${{ secrets.RUNPOD_API_KEY }}
       BENCHMARK_ID: ${{ github.event.inputs.benchmark_id }}
       KEYWORDS: ${{ github.event.inputs.keywords }}
+      D045_TRACE_CLIP_IDS: ${{ github.event.inputs.trace_clip_ids }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4

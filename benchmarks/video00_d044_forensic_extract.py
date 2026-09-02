@@ -34,7 +34,46 @@ import json
 import sys
 
 
-def extract(result_path: str, keywords: list[str] | None = None) -> dict:
+def trace_clip_ids(result: dict, clip_ids: list[str]) -> dict:
+    """D-045: general, fully unbounded search for every diagnostics path
+    that mentions any of `clip_ids` -- built to answer "which of the ~50
+    cutsell_worker cleanup/trim hooks touched this specific clip" without
+    having to guess or enumerate hook names up front. Cutsell_worker
+    installs dozens of small hooks (round8_retry_reconciliation,
+    post_selection_interior_gap_trim, etc.), most with their own
+    diagnostics key -- a clip that vanishes from selected/alternates/
+    discarded without ever being formally counted as "discarded" (D-045
+    Case A's own finding) can only be traced by searching ALL of them,
+    not the curated subset `extract()` above pulls. Fully general: works
+    for any clip_id, invents nothing Video00-specific -- the search is
+    purely structural (walks the raw JSON tree looking for string
+    matches), so it never needs to know what a hook's own diagnostics
+    schema looks like ahead of time.
+
+    Returns {clip_id: [ {"path": "diagnostics.some_hook[3].member_clip_ids[1]",
+    "context": <the smallest containing dict/list, truncated>} ... ]}."""
+    hits: dict[str, list[dict]] = {cid: [] for cid in clip_ids}
+
+    def _walk(node, path: str, parent_container):
+        if isinstance(node, dict):
+            for key, value in node.items():
+                _walk(value, f"{path}.{key}" if path else str(key), node)
+        elif isinstance(node, list):
+            for idx, value in enumerate(node):
+                _walk(value, f"{path}[{idx}]", node)
+        elif isinstance(node, str):
+            for cid in clip_ids:
+                if cid in node:
+                    context = parent_container
+                    if isinstance(context, dict):
+                        context = {k: v for k, v in context.items() if not isinstance(v, (dict, list)) or len(str(v)) < 200}
+                    hits[cid].append({"path": path, "context": context})
+
+    _walk(result, "", None)
+    return hits
+
+
+def extract(result_path: str, keywords: list[str] | None = None, trace_clips: list[str] | None = None) -> dict:
     with open(result_path, "r", encoding="utf-8") as fh:
         result = json.load(fh)
 
@@ -111,16 +150,27 @@ def extract(result_path: str, keywords: list[str] | None = None) -> dict:
         "post_selection_complementary_family_stabilizer": diagnostics.get("post_selection_complementary_family_stabilizer"),
         "post_selection_composite_handoff_trim": diagnostics.get("post_selection_composite_handoff_trim"),
     }
+    if trace_clips:
+        # D-045: answers "which diagnostics path(s) mention this clip_id at
+        # all" across the ENTIRE raw result (not just the curated subset
+        # above) -- see trace_clip_ids()'s own docstring for why this is
+        # needed: a clip absent from selected/alternates/discarded can only
+        # be traced by searching every hook's own diagnostics key, and
+        # there are too many to enumerate by hand.
+        forensic["clip_trace"] = trace_clip_ids(result, trace_clips)
     return forensic
 
 
 def main() -> int:
+    import os
+
     if len(sys.argv) < 2:
         print("usage: video00_d044_forensic_extract.py RESULT_JSON [keyword ...]", file=sys.stderr)
         return 2
     result_path = sys.argv[1]
     keywords = sys.argv[2:] or None
-    forensic = extract(result_path, keywords)
+    trace_clips = [c for c in os.environ.get("D045_TRACE_CLIP_IDS", "").split() if c] or None
+    forensic = extract(result_path, keywords, trace_clips=trace_clips)
     print(json.dumps(forensic, ensure_ascii=False, indent=2, sort_keys=True))
     return 0
 
