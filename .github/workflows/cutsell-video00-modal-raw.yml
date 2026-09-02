@@ -135,12 +135,18 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          jq -n --arg source "$SOURCE_KEY" --arg benchmark "$BENCHMARK_ID" \
+          # -c (compact, single-line) is required here: GitHub's own
+          # $GITHUB_ENV file command rejects a multi-line value written as
+          # a plain KEY=value line (confirmed live, run 33626736759:
+          # "Unable to process file command 'env' successfully" /
+          # "Invalid format" once jq's default pretty-printed, multi-line
+          # JSON was echoed straight into it).
+          jq -nc --arg source "$SOURCE_KEY" --arg benchmark "$BENCHMARK_ID" \
             '{op:"focused",source_key:$source,benchmark_id:$benchmark,auto_speech_visual_microtrim:true}' \
             > /tmp/payload.json
           echo "CUTSELL_BENCHMARK_PAYLOAD_JSON=$(cat /tmp/payload.json)" >> "$GITHUB_ENV"
           echo "--- payload ---"
-          cat /tmp/payload.json
+          jq . /tmp/payload.json
 
       - name: Run Modal full Video00 benchmark (ONE authorized L4 run)
         id: modal_video00
