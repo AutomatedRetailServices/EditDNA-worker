@@ -56,6 +56,24 @@ def test_extract_pulls_selected_and_discarded_clip_id_and_text(tmp_path):
     assert forensic["discarded"] == [{"clip_id": "clip_C", "text": "sonografia mala toma"}]
 
 
+def test_extract_pulls_alternates_clip_id_and_text(tmp_path):
+    # D-045: a clip can land in draft.alternates rather than draft.discarded
+    # -- distinct from canonical_edit_plan.py's own per-idea
+    # discarded_clip_ids bookkeeping (every take_judge_groups member not in
+    # draft.selected). Missing this bucket hid exactly this class of clip
+    # during the D-045 forensic audit.
+    result = {
+        "selected": [],
+        "discarded": [],
+        "alternates": [{"clip_id": "clip_E", "text": "an alternate take"}],
+        "diagnostics": {},
+    }
+    path = tmp_path / "result_with_alternates.json"
+    path.write_text(json.dumps(result), encoding="utf-8")
+    forensic = extract(str(path))
+    assert forensic["alternates"] == [{"clip_id": "clip_E", "text": "an alternate take"}]
+
+
 def test_extract_pulls_grouping_and_arbiter_diagnostics_unfiltered_without_keywords(tmp_path):
     path = _write_fixture(tmp_path)
     forensic = extract(path)

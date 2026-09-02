@@ -73,6 +73,20 @@ def extract(result_path: str, keywords: list[str] | None = None) -> dict:
             {"clip_id": c.get("clip_id"), "text": c.get("text")}
             for c in (result.get("discarded") or [])
         ],
+        # D-045: "discarded" (above) is the formal draft.discarded bucket
+        # pipeline.py builds from (*discarded, *review_removed) -- a
+        # DIFFERENT, later-stage tuple than canonical_edit_plan.py's own
+        # per-idea discarded_clip_ids (which is simply "every take_judge_
+        # groups member not in draft.selected", including a clip that may
+        # have landed in draft.ALTERNATES instead of draft.discarded).
+        # Missing this bucket in the D-044 extraction hid exactly this
+        # class of clip during the D-045 audit -- included now so a clip's
+        # true resting bucket (selected/alternates/discarded, or genuinely
+        # absent from all three) is always determinable.
+        "alternates": [
+            {"clip_id": c.get("clip_id"), "text": c.get("text")}
+            for c in (result.get("alternates") or [])
+        ],
         "attempt_reconstruction": diagnostics.get("attempt_reconstruction"),
         "take_grouping_status": diagnostics.get("take_grouping_status"),
         "take_grouping_reason": diagnostics.get("take_grouping_reason"),
