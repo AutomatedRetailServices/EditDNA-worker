@@ -2520,6 +2520,60 @@ this is dispatched once this infrastructure lands, with sanity-check-first, Vide
 on sanity pass, guaranteed teardown, and an explicit report on whether COMMUNITY->SECURE
 changed the `machine: {}` failure signature observed on both prior COMMUNITY-cloud tests.
 
+### D-042 -- controlled SECURE-cloud test result: identical failure, cloud type ruled out (2026-09-02)
+
+**Status: CANONICAL (SECURE-cloud test run to completion; COMMUNITY vs. SECURE ruled out
+as the variable behind the failure; root cause narrowed to something shared across both
+cloud types and both execution transports)**
+
+Dispatched on `feature/runpod-pod-on-demand` at `8601e71` via the new `qa_pod_cloud_type:
+SECURE` workflow input -- every other input identical to the prior `SANITY_CHECK_TIMEOUT`
+test (same source video, same op, same timeouts, same template). Run
+[33595330866](https://github.com/AutomatedRetailServices/EditDNA-worker/actions/runs/33595330866).
+
+**Result: `SANITY_CHECK_TIMEOUT` again -- the exact same failure as the COMMUNITY-cloud
+test.** Pod `u1nftzx1i1lrik` was created genuinely SECURE (`gpu_type_id: "NVIDIA GeForce
+RTX 4090"`, `cloud_type: "SECURE"`, confirmed zero COMMUNITY attempts in the log --
+`cloud_types_requested: ["SECURE"]` in the run summary directly proves the new
+`cloud_types` override worked as designed, not silently falling back), reached `RUNNING`
+near-instantly (`elapsed_s ~1.1e-7`, same pattern as every earlier live test), but
+`sanity_check.json` never appeared in S3 within the 300s bound. This time the log
+timestamps are trustworthy (the `flush=True` fix from the immediately preceding commit
+worked): the S3 poll genuinely ran its full coded ~308s span (05:36:18.95 to
+05:41:27.04), not a buffering artifact.
+
+**A zero-cost, read-only `diagnose_pod_id` check against the stopped Pod
+(`u1nftzx1i1lrik`) confirms the same `machine: {}` signature a third time**: `machineId:
+"2qwkos95nrhz"` is populated but `machine: {}` resolves empty, `templateId: ""` (inline
+mode, as designed), `imageName` matches the canonical digest exactly. **This is now the
+same empty-machine-record pattern on all three live Pods tested across this D-042
+follow-up cycle -- two on COMMUNITY cloud (`l368986gtg5ijn` via the HTTP transport,
+`aejb4hkhegwpk5` via direct-exec) and one on SECURE cloud (`u1nftzx1i1lrik`, direct-exec)
+-- ruling out COMMUNITY-vs-SECURE as the variable behind the failure.** Combined with the
+earlier transport comparison (HTTP daemon vs. direct one-shot exec, also both hitting the
+same signature), **two of the three most obvious candidate variables (cloud type,
+execution transport) are now eliminated**; what remains in common across every failing
+Pod is: this RunPod account, the `CutSell-Pod-QA`-derived template/image, and the
+approved GPU pool search itself.
+
+Guaranteed STOP confirmed the same way as every earlier test: the gate script's own
+`finally`/`teardown()` call (`pod_stopped`, `final_status: "EXITED"`, logged at
+05:41:28.44, ~1.4s after the timeout was declared), independently re-confirmed via the
+read-only diagnostic (`lastStatusChange: "Exited by user: ... 05:41:27"`), plus the
+workflow's force-stop safety net as a no-op backup. Total GPU-active time on this Pod:
+~5m10s (05:36:18 to 05:41:28). No paid GPU left running.
+
+**Direct answer to "did switching COMMUNITY -> SECURE change the container-execution
+behavior": no.** The failure is identical in every observable respect (timing, the
+`machine: {}` signature, the complete absence of any application-level output) on both
+cloud types. **Per the standing "do not blindly retry" instruction, Video00 was never
+run** (the sanity gate never passed) and no further live Pod test was dispatched pending
+the user's direction. The two variables ruled out this cycle (cloud type, execution
+transport) narrow, but do not yet identify, the remaining root cause -- RunPod support
+engagement (citing all three Pod IDs and their identical `machine: {}` evidence) is now
+the strongest lead, since every configuration variable this session controls has been
+exhausted without resolving it.
+
 ## Change rule
 
 When a new decision changes product behavior, update this file in the same development cycle. Do not silently redefine CutSell through code alone.
