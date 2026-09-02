@@ -177,6 +177,19 @@ def test_image_mounts_the_whole_cutsell_worker_package():
     assert "cutsell_worker" in args
 
 
+def test_image_mounts_modal_gpu_config_too():
+    # D-043 live evidence: the first live dispatch (App ap-WX9iPZfMQnhPQJsM1rZwLm,
+    # Function fu-UtPpmyf89ZpgT6JFPc8mDr) crash-looped for ~90 minutes --
+    # three container attempts, each dying within ~2s with
+    # `ModuleNotFoundError: No module named 'modal_gpu_config'` -- because
+    # this script's own top-level `from modal_gpu_config import (...)`
+    # was never mounted, only cutsell_worker was. Locks the fix so this
+    # specific omission can never silently regress.
+    assert _fake_image_instance.add_local_python_source_calls
+    args, _kwargs = _fake_image_instance.add_local_python_source_calls[0]
+    assert "modal_gpu_config" in args
+
+
 def test_resolve_env_secret_returns_empty_secret_when_path_unset(monkeypatch):
     monkeypatch.delenv(cfg.CUTSELL_ENV_JSON_PATH_ENV, raising=False)
     secret = mvb._resolve_env_secret()

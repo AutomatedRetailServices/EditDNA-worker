@@ -100,7 +100,20 @@ image = (
     # head" guarantee for Modal: no Docker build/push/digest-pin is needed
     # the way the RunPod Serverless RAW workflow requires, because the
     # local-source mount embeds the exact files present at invocation time.
-    .add_local_python_source("cutsell_worker")
+    #
+    # `modal_gpu_config` is ALSO mounted here -- not just cutsell_worker --
+    # because this script's own top-level code (below) imports it, and
+    # Modal re-imports the entire user module remotely to hydrate the
+    # Function. Omitting it crash-loops the container at import time
+    # before the function body ever runs (live evidence, D-043 full
+    # Video00 dispatch: three container attempts over ~90 minutes, run
+    # ap-WX9iPZfMQnhPQJsM1rZwLm, function fu-UtPpmyf89ZpgT6JFPc8mDr, each
+    # dying within ~2s with `ModuleNotFoundError: No module named
+    # 'modal_gpu_config'`) -- the exact same class of bug already found
+    # and fixed once for modal_gpu_minimal_test.py, which correctly
+    # mounts its own sibling modules. Never omit a top-level sibling
+    # import from this list again.
+    .add_local_python_source("modal_gpu_config", "cutsell_worker")
 )
 
 
