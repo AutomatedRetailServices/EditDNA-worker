@@ -3389,6 +3389,167 @@ plausible next audit target if the user wants to pursue it, but out of this
 directive's scope (which named only the sonography/pimples/hereditary regions, all
 three now confirmed resolved).
 
+## D-045 -- missing idea coverage + physical micro-fragment forensic audit (report only, no code changes)
+
+Forensic-only follow-up to D-044's confirmatory result (benchmark
+`video00-modal-33648172326-1`), using the same read-only, zero-GPU
+`cutsell-video00-d044-forensic-extract.yml` workflow extended with a new
+general `trace_clip_ids()` search (added in this cycle, tooling only --
+recursively finds every diagnostics path mentioning a given clip_id across
+the ENTIRE raw `result.json`, not just the curated subset the D-044
+extractor already pulled). No `cutsell_worker` engine code was read as
+speculation -- every claim below is a direct quote from the real,
+unmasked diagnostics of that one already-produced result.
+
+### CASE A -- "missing idea coverage" is a false positive, not a content loss
+
+Idea `tg_28298998766ee0c8f1` (members `clip_a6a6f4d1cffd6c94115a`,
+`clip_42b0b7919d9f9d025e86`) is the "Al terminar mi contrato... hablé/cambié
+de ginecóloga... me mandó a hacer sonografías" retry family. Its
+`take_judge_groups[1]` entry shows the D-044 semantic-equivalence arbiter
+working correctly: `semantic_candidates` labels `clip_a6a6f4d1cffd6c94115a`
+"alternate" (confidence 0.85) and `clip_42b0b7919d9f9d025e86` "winner"
+(confidence 0.95); `semantic_override_applied: true` correctly overrides the
+narrower baseline watch/listen ranking (0.6855 vs 0.6594, which favored the
+other clip) in favor of the semantically-fuller take. `selected_clip_id` /
+`semantic_preferred_clip_id` both resolve to `clip_42b0b7919d9f9d025e86` --
+the semantic decision itself is correct.
+
+`clip_42b0b7919d9f9d025e86` (95.58-107.48s) is then legitimately split by a
+post-selection physical hook (`post_selection_interior_gap_trim`, minting
+`__psigl`/`__psigr`-suffixed fragment ids per the D-039 fragment-identity
+work) into two fragments -- both of which **are present in the final
+`draft.selected` list** (`clip_42b0b7919d9f9d025e86__psiglcad3722cd281` and
+`clip_42b0b7919d9f9d025e86__psigr1015a2ec8b00`, `selected[6]`/`selected[7]`
+in this run). The winning realization's content was never lost.
+
+`canonical_edit_plan.py`'s own `build_canonical_edit_plan` derives each
+idea's `winning_clip_ids`/`discarded_clip_ids` by exact string-equality
+between a `take_judge_groups` member's *original* clip_id and
+`draft.selected`'s clip_ids. Because the winning clip's id was rewritten
+into two fragment-suffixed ids by the post-selection split, the exact-id
+check finds neither the original id nor either fragment, and wrongly buckets
+`clip_42b0b7919d9f9d025e86` as **discarded** alongside its genuinely-losing
+sibling -- producing `winning_clip_ids: []`, `coverage_status: "missing"` for
+an idea that in fact has a complete, undamaged winning realization on
+screen. `final_story_coherence_validation.missing_idea_coverage` and the one
+BLOCKING `lost_semantic_atom` are downstream of this same false reading, and
+correctly (given that false input) block Selection Freeze.
+
+**First wrong decision:** `canonical_edit_plan.py`'s winning/discarded
+derivation, not any semantic, clustering, or claim-coverage stage --
+it is not fragment-provenance-aware (the exact linkage it would need,
+`post_selection_interior_gap_trace[*].parent_clip_id`, already exists in
+diagnostics; the function just never consults it).
+
+**Classification: deterministic**, not ASR-jitter-sensitive -- this will
+reproduce on any run where a post-selection physical split touches a lone,
+already-selected winner of a retry family, independent of ASR variance.
+
+**Smallest general fix surface (not implemented):** teach
+`build_canonical_edit_plan`'s winning/discarded check to also treat a
+`take_judge_groups` member as "present in selected" when any selected
+clip's recorded `parent_clip_id` (or an equivalent fragment-provenance
+link already produced by the splitting hook) equals that member's id --
+a change local to one function's membership test, touching no semantic,
+clustering, or scoring logic.
+
+**Correction to the D-044 confirmatory report's own framing:** that report
+linked `papillary_cancer_preserved`/`sonography_good_before_diagnosis`
+failing to this same idea's "missing coverage." The deeper trace shows
+these are in fact independent: that check's exact/ordered text belongs to a
+*different* idea, `tg_839a860f59abd938a7` ("sintomas que tuve"), whose
+`coverage_status` is `"complete"` -- it already has a winner
+(`clip_ece4915a647661808c9b`). But the discarded sibling of that same idea,
+`clip_5a99d26352df1219f3d7` ("Sintomas que tuve. Segun yo, era sintomatica,
+pero si hubo indicios ahora mirandose atras."), is a near-verbatim match to
+the golden fixture text, while the winner's phrasing ("Sintomas que no me
+parecian sospechosos...") is a paraphrase that does not satisfy the
+`required_exact`/`required_order` checks. This is a genuine take-selection
+outcome (the higher-scoring take does not happen to match the fixed golden
+wording), not a coverage-loss bug, and not something this directive asked
+to be root-caused further -- flagged here only so the two failures are not
+conflated going forward.
+
+### CASE B -- "Era como un rush" micro-fragment: physical fusion, not semantic-equivalence
+
+Idea `tg_c80832d2c77c9ff630` (members `clip_deddd53436a5861761bf`,
+`clip_557299153657e9c6faf9`) is the pimples retry family.
+`take_judge_groups[3]`'s `semantic_candidates` labels **both** members
+"winner" at confidence 0.95 (`semantic_override_applied: false`,
+`semantic_preferred_clip_id: null`) -- the arbiter correctly saw them as two
+independently-valid deliveries of the same idea and deferred to the
+baseline watch/listen ranking, which picked `clip_557299153657e9c6faf9`
+over `clip_deddd53436a5861761bf` by a narrow margin (0.6843 vs 0.649). This
+selection step behaved exactly as designed.
+
+The problem is upstream, at `AttemptReconstructor`. Comparing against the
+last run where `pimples_micro_2_present` passed (pre-D-044-fix run
+`video00-modal-33636255124-1`, same source audio): that run produced
+**three separate physical attempts** covering this region --
+`clip_58f755fdf477281c1aad` (191.14-198.12s, text "...tambien me salian
+espinillas. Era como un rush, una alergia."), `clip_a3f17c1603b8cafa3a13`
+(198.88-211.02s, the bad monolith wording), and
+`clip_aab224fd03b3a3b81c83` (213.34-222.98s). The desired micro-fragment
+"Era como un rush, una alergia." lived in its own independently-selectable
+attempt, physically separate from the bad monolith, with a 0.76s gap
+between them (198.12 to 198.88s).
+
+In the confirmatory run, `AttemptReconstructor` fused essentially the same
+audio span (192.36-210.62s -- matching the earlier run's two attempts'
+combined range within ~1.2s at each edge) into **one single attempt**,
+`clip_deddd53436a5861761bf`, whose text concatenates the good micro-fragment
+and the bad monolith wording together. No code in `AttemptReconstructor`
+or its merge threshold changed between these two runs (D-044's fix touched
+only two Modal env vars feeding the semantic-equivalence arbiter, unrelated
+to attempt reconstruction). An internal ~0.76s silence gap sitting right at
+the boundary of whatever gap-duration threshold governs attempt merging is
+the most consistent explanation for two runs of the same source audio
+producing different attempt boundaries here.
+
+**First wrong decision:** `AttemptReconstructor`'s attempt-merge boundary
+call across the ~198s gap, which fused two semantically-independent
+utterances (a clean micro-claim and a separately-retried monolith) into one
+physical unit before any take-grouping or scoring ever saw them
+separately. Once fused, `BestTakeResolver`/`DeliveryScorer` had no
+mechanism to recover the good subspan from a monolith that lost the
+best-take contest as a whole -- the entire physical unit is atomic by the
+time scoring runs.
+
+**Classification: A (ASR word-timing jitter) at a B-adjacent
+(AttemptReconstructor merge-threshold) boundary condition** -- a ~0.76s gap
+is a plausible run-to-run jitter range for GPU-decoded ASR timestamps, and
+sits close enough to a merge threshold that a small shift could flip the
+decision; this reads as run-to-run sensitivity at a borderline value, not a
+logic regression from a code change (none touched this path).
+
+**Smallest general fix surface (not implemented):** this is squarely
+General Invariant 2 (good subspan preservation) as the user framed it --
+not a semantic-equivalence fix. The narrowest fix surface sits at or after
+`AttemptReconstructor`: either a more conservative/hysteresis-aware merge
+gap threshold, or preserving sub-span candidate boundaries inside a merged
+attempt so a losing physical monolith's independently-meaningful subspans
+remain separately selectable by `BestTakeResolver` even after ASR-level
+merging treats them as one transcript unit.
+
+### Shared systemic cause: no -- but a shared category
+
+Case A (a post-selection *split* not recognized by downstream
+id-equality bookkeeping) and Case B (a pre-selection *merge* fusing two
+independent utterances before scoring) are different code paths --
+`canonical_edit_plan.py`'s membership derivation vs.
+`AttemptReconstructor`'s boundary/merge logic -- and neither's fix implies
+the other's. They do share one general theme, matching both invariants
+the user asked to be evaluated (not implemented): whenever a clip's
+physical boundary is *mutated* -- split (Case A) or merged (Case B) --
+relative to the identity a later semantic/coverage-bookkeeping stage
+expects, that stage can silently misjudge what actually survived. Neither
+invariant is implemented by this directive; both are confirmed here as
+real, distinct gaps worth closing independently.
+
+No code changed. No new Modal RAW launched. Reported for review per the
+standing directive.
+
 ## Change rule
 
 When a new decision changes product behavior, update this file in the same development cycle. Do not silently redefine CutSell through code alone.
