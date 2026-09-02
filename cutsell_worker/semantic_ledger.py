@@ -91,6 +91,16 @@ class CanonicalClaimRecord:
     source_realization_ids: tuple[str, ...]
     covered_by_realization_ids: tuple[str, ...]
     coverage_state: str                 # "covered" | "missing" | "unresolved"
+    # D-050C1: the claim's own raw clause text (`semantic_claims.Claim.
+    # text`), observation-only -- optional/defaulted so every existing
+    # construction site stays valid unchanged. `content_tokens` alone
+    # loses a short digit run ("5%", 2 characters) to `_content`'s own
+    # >=3-character floor while keeping a longer one ("10%", "5-10%")
+    # intact -- an asymmetry the resolver's quantitative-meaning dedup
+    # check (realization_resolver.py) needs the raw text to see past.
+    # Nothing in claim_coverage_best_take.py or any other authoritative
+    # stage reads this field.
+    text: str = ""
 
 
 IDEA_STATUS_ACTIVE = "ACTIVE"
@@ -244,6 +254,7 @@ class SemanticLedger:
             self.__claims[record.canonical_claim_id] = replace(
                 existing, source_realization_ids=merged_sources, covered_by_realization_ids=merged_covered,
                 coverage_state=record.coverage_state or existing.coverage_state,
+                text=existing.text or record.text,
             )
             return
         self.__claims[record.canonical_claim_id] = record
@@ -575,6 +586,7 @@ def build_semantic_ledger_shadow(draft) -> SemanticLedger:
                 source_realization_ids=(realization_id,),
                 covered_by_realization_ids=(),
                 coverage_state="unresolved",
+                text=str(claim.text or ""),
             ))
 
         if discard_reason is not None:

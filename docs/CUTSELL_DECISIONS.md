@@ -4176,6 +4176,155 @@ Render/QC logic modified -- nothing reads Ledger state to decide
 anything. No Modal RAW launched. No RunPod touched. Holding for review
 before D-050C (winner/coverage authority consolidation).
 
+## D-050C1 -- Unified Realization Resolver, shadow authority
+
+Implements `cutsell_worker/realization_resolver.py`: a single provider-
+neutral resolver that consumes a `SemanticLedger` and computes, in ONE
+pass per `semantic_idea_id` (not as a sequential override stack), what a
+unified Realization Resolution authority WOULD decide -- semantic safety,
+critical-claim completeness, factual/negation consistency, delivery
+quality, and contextual richness, evaluated together with a fixed
+precedence order rather than weighted scores. Produces one
+`RealizationResolution` per idea (`candidate_realization_ids`,
+`winner_realization_id`, `composite_realization_ids`,
+`covered_canonical_claim_ids`, `missing_critical_claim_ids`,
+`discarded_realization_ids`, `retained_for_contextual_value`,
+`decision_status` one of `RESOLVED_WINNER`/`RESOLVED_COMPOSITE`/
+`REVIEW_REQUIRED`, `decision_reason`, `confidence`, `evidence`) plus one
+`OrphanRealizationReview` per pre-grouping discard (D-049 Case A's exact
+shape -- a realization with no `semantic_idea_id` at all).
+
+**Hard invariants A-E**, all implemented as structural properties of the
+decision procedure rather than bolted-on checks: (A) idea survival --
+`resolve_realizations_shadow` iterates every `semantic_idea_id` the Ledger
+knows and never omits one; (B) critical claim preservation -- a
+`RESOLVED_WINNER`/`RESOLVED_COMPOSITE` status is only ever returned with
+`missing_critical_claim_ids == ()`, otherwise the idea is
+`REVIEW_REQUIRED`; (C) no duplicate retry realization -- the composite
+search's own criterion 5 rejects any member contributing zero coverage
+beyond the other chosen members; (D) discard requires safety --
+`discarded_realization_ids` only ever contains a realization that is
+either fully redundant with the chosen winner/composite's own coverage or
+carries a Ledger-verified replacement, everything else lands in
+`retained_for_contextual_value` instead of vanishing; (E) physical quality
+cannot silently delete unique semantics -- `resolve_orphan_realizations_
+shadow` walks every pre-grouping discard directly and returns
+`REPLACEMENT_VERIFIED_SAFE` only with a Ledger-verified replacement,
+`REVIEW_REQUIRED` otherwise, never a silent agreement.
+
+**Canonical claim dedup (shadow-only)**: `build_requirement_groups`
+greedily clusters `CanonicalClaimRecord`s within one idea into
+`RequirementGroup`s via `_claims_dedup_equivalent` -- same `claim_type`
+(structurally blocks "has X" vs "does not have X", since `classify_claim`
+already gives a negated proposition its own type), compatible negation-
+marker polarity, compatible quantitative meaning, and high content
+equivalence on the remaining tokens (overlap coefficient, not plain
+Jaccard -- a real sibling restatement adds filler words around an
+identical core claim, and containment-style similarity survives that
+where Jaccard-over-the-union would not). The quantitative-meaning check
+reads each claim's own raw clause text (`CanonicalClaimRecord.text`, a new
+additive field on the D-050B record, populated from `semantic_claims.
+Claim.text`) rather than `content_tokens` alone: `_content`'s own
+>=3-character token floor silently drops a bare short number ("5%" is 2
+characters) while keeping a longer one ("10%", "5-10%") intact, so
+`content_tokens`-only comparison would let "5% vs 10%" falsely dedup the
+moment one side's digit fell below that floor in real ASR text --
+reading raw text catches the conflict every time while still correctly
+folding "5-10%"/"5 -10 %" restatements (the literal D-049 Case B shape)
+into one requirement.
+
+**Composite model (shadow-only, 6 criteria)**: same semantic idea only;
+combined coverage is a superset of every CRITICAL requirement group;
+no two members are on opposite sides of a detected contradiction signal;
+no member is itself an unsafe-without-replacement realization; every
+member contributes at least one group no other chosen member already
+covers (no redundant member); smallest valid member count wins, ties
+broken by sorted realization_id. Does not touch `composite_resolver.py`.
+
+**Contradiction detection**: `_detect_contradiction_signals` flags two
+claims from different realizations of the same idea as a genuine conflict
+(negation-polarity or quantitative-value) only when they are the same
+`claim_type`, topically related (Jaccard over non-digit content
+>= 0.5), and NOT dedup-equivalent. A contradiction blocks BOTH single-
+winner selection and composite formation for that idea -- the resolver
+returns `REVIEW_REQUIRED` rather than silently picking a side or merging
+both, mirroring D-020's existing "contradictory retries block Selection
+Freeze for human review" posture.
+
+**D-049 Case A required shadow result**: proven directly --
+`resolve_orphan_realizations_shadow` returns `REVIEW_REQUIRED` for a
+hybrid_editorial_chunks delete with no verified replacement, never a
+silent discard confirmation.
+
+**D-049 Case B required shadow result**: proven directly -- the two
+near-identical "5-10%"/"5 -10 %" `MEASUREMENT_QUANTITY` claims from the
+rich/vague sibling realizations fold into ONE `RequirementGroup`, and the
+richer realization (covering both that group and its own NEGATION claim)
+resolves as the single `RESOLVED_WINNER` rather than the short delivery-
+only take.
+
+**Shadow wiring**: `universal_clean_cut.py` calls
+`resolve_realizations_shadow(ledger)` immediately after the existing
+`semantic_ledger` shadow block, writing `build_realization_resolver_
+diagnostics(report)` into a NEW, separate diagnostics key --
+`diagnostics["realization_resolver_shadow"]` -- strictly before Freeze.
+Nothing in `pipeline.py`, `deterministic_best_take_authority.py`,
+`claim_coverage_best_take.py`, `composite_resolver.py`,
+`canonical_edit_plan.py`, `final_story_coherence_validation.py`,
+`final_edit_reviewer.py`, `selection_boundary_contract.py`, or any
+Boundary/Render/QC module imports `realization_resolver` or reads either
+diagnostics key -- confirmed by direct grep audit (only import site is
+`universal_clean_cut.py`'s own shadow-wiring block) and by
+`test_shadow_resolver_never_mutates_draft_timeline`.
+
+**Parity report**: `build_resolver_parity_report(report, ledger)`
+classifies each idea's engine-vs-shadow difference into one of the 7
+named categories (`SAME`, `CONTENT_SAFETY_IMPROVEMENT`,
+`CLAIM_DEDUP_DIFFERENCE`, `COMPOSITE_DIFFERENCE`,
+`DELIVERY_RANK_DIFFERENCE`, `POTENTIAL_REGRESSION`,
+`REVIEW_REQUIRED_DIFFERENCE`). Exercised over a representative
+CleanCutBench-shaped cross-section (single candidate, exact retry,
+paraphrased good takes, false-start-then-clean-retry, composite-required,
+contradictory numeric retries, unique-fact preservation) in
+`tests/test_cutsell_d050c1_parity_report.py`, re-running the exact real
+production chain (`safe_group_takes` -> `reconcile_semantic_idea_
+equivalence` -> `rank_takes` -> `apply_deterministic_best_take_authority`
+-> `apply_claim_coverage_best_take` -> `apply_final_story_coherence_
+validation`) plus the D-050A identity stamping CleanCutBench's own cheaper
+harness intentionally omits. Result on that cross-section: 9 ideas, 6
+SAME, 1 DELIVERY_RANK_DIFFERENCE, 1 COMPOSITE_DIFFERENCE, 1
+REVIEW_REQUIRED_DIFFERENCE, 0 POTENTIAL_REGRESSION, 0
+CONTENT_SAFETY_IMPROVEMENT, 0 CLAIM_DEDUP_DIFFERENCE (the dedicated
+Case B fixture proves dedup capability directly; it didn't happen to
+recur in this cross-section). Every difference found is explainable and
+non-alarming: the DELIVERY_RANK_DIFFERENCE and COMPOSITE_DIFFERENCE are
+both between two candidates the resolver judges equally safe, and the
+REVIEW_REQUIRED_DIFFERENCE is the resolver correctly refusing to silently
+pick a side on a genuinely contradictory 5%-vs-10% retry pair the cheap
+synthetic engine path currently resolves by delivery score alone.
+
+**Tests**: `tests/test_cutsell_d050c1_realization_resolver.py` (26 tests)
+covers all 19 directive-required scenarios plus contradiction-detector
+unit coverage -- one candidate, multiple retries, delivery-best-also-
+complete, delivery-best-loses-critical-claim, richer-candidate-wins,
+duplicate-claim dedup, number/negation/causal-direction non-dedup,
+contextual-only retention, critical-uncovered-blocks-verdict, safe/unsafe
+discard, valid/contradictory/redundant composite, no-coverage ->
+REVIEW_REQUIRED, idea survival, D-049 Case A/B generic fixtures (both
+verdict branches), and a direct mutation-freedom proof.
+`tests/test_cutsell_d050c1_parity_report.py` (2 tests) adds the parity
+report and shadow-quality-metrics printouts above.
+
+**Validation**: compileall clean; D-050A (26), D-050B (26), D-050C1 (28)
+all green; all 54 CleanCutBench fixtures green unchanged; full
+`tests/test_cutsell_*.py` glob green with zero regressions.
+
+No editorial behavior changed. No winner/grouping/ClaimCoverage/Composite/
+CanonicalEditPlan/StoryValidator/Freeze/Render/QC logic modified --
+nothing reads the new resolver's output to decide anything. No Modal RAW
+launched. No RunPod touched. Holding for review before D-050C2 (the
+actual authority cutover).
+
 ## Change rule
 
 When a new decision changes product behavior, update this file in the same development cycle. Do not silently redefine CutSell through code alone.

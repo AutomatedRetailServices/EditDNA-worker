@@ -34,6 +34,7 @@ from .semantic_claims import ClaimEquivalenceArbiter, ClauseRoleArbiter
 from .repair_loop import run_repair_loop
 from .flow_b import ProgressCallback, process_local_sources
 from .semantic_ledger import build_ledger_parity_report, build_semantic_ledger_diagnostics, build_semantic_ledger_shadow
+from .realization_resolver import build_realization_resolver_diagnostics, resolve_realizations_shadow
 from .human_boundary_polish_v5 import polish_human_boundaries_v5
 from .hybrid_editorial import EditorialJudge
 from .providers import NoopSemanticProvider
@@ -219,6 +220,23 @@ def process_universal_clean_cut_sources(
         ledger_parity = build_ledger_parity_report(ledger, result.draft)
         diagnostics = dict(result.draft.diagnostics or {})
         diagnostics["semantic_ledger"] = build_semantic_ledger_diagnostics(ledger, ledger_parity)
+        result = replace(result, draft=replace(result.draft, diagnostics=diagnostics))
+
+        # D-050C1: Unified Realization Resolver, SHADOW AUTHORITY ONLY.
+        # Consumes the Semantic Ledger built immediately above and computes
+        # what ONE unified resolver WOULD decide per semantic idea. This is
+        # NOT a second engine: it never writes to `result.draft.selected`/
+        # `discarded`/`alternates`, and nothing below this line (Freeze,
+        # Boundary, complete-idea recovery, Render/QC) reads
+        # `diagnostics["realization_resolver_shadow"]` -- a SEPARATE key
+        # from `diagnostics["semantic_ledger"]` above, kept isolated so this
+        # shadow authority's own output can never be mistaken for the
+        # Ledger's plain observation. See realization_resolver.py's module
+        # docstring for the full shadow-authority contract and the "NO
+        # BEHAVIOR CUTOVER" audit it requires.
+        resolver_report = resolve_realizations_shadow(ledger)
+        diagnostics = dict(result.draft.diagnostics or {})
+        diagnostics["realization_resolver_shadow"] = build_realization_resolver_diagnostics(resolver_report)
         result = replace(result, draft=replace(result.draft, diagnostics=diagnostics))
 
         # Hard pre-Freeze gate: Final Story Coherence Validation may find a
