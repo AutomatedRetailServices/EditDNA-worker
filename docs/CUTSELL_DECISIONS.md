@@ -2859,6 +2859,76 @@ the exact figure.
 fix is reported here rather than immediately re-dispatched -- the next live attempt
 follows once explicitly authorized.
 
+### Third retest result (2026-09-02, head f9526c1): both prior fixes confirmed working; a new, different FAIL -- fixed, not yet re-tested
+
+**Status: FAILED a third time, differently -- both defects from the second run are
+CONFIRMED FIXED; a new defect found and fixed, not yet re-verified live**
+
+One further authorized retest was dispatched at head `f9526c1` (the crash-loop fix
+commit) -- run [33612105029](https://github.com/AutomatedRetailServices/EditDNA-worker/actions/runs/33612105029).
+
+**Both prior fixes verified working live:**
+- **`retries=0` confirmed effective**: exactly ONE container attempt this time (the
+  entire "Run Modal L4 minimal GPU smoke test" step took 16 seconds total), vs. the
+  previous run's 10+ retries spread across ~18 minutes. No crash-loop.
+- **`add_local_python_source` confirmed effective**: Modal's own setup log shows
+  `Created mount PythonPackage:modal_gpu_config, PythonPackage:modal_gpu_diagnostics`
+  -- both local modules were successfully included this time, and the container's own
+  log shows a torch-internal warning (`Failed to initialize NumPy...`) that only fires
+  partway through `collect_gpu_diagnostics()`'s own torch/CUDA block -- proof the
+  function body was actually entered and executed remotely, past the point of the
+  previous `ModuleNotFoundError`.
+
+**The new failure**: the GitHub Actions runner (running `modal run` locally, with only
+the `modal` package pip-installed -- no `torch`) crashed while trying to deserialize
+the function's *return value*:
+
+```
+Stopping app - uncaught exception raised locally: DeserializationError("Deserialization
+failed because the 'torch' module is not available in the local environment.").
+...
+ModuleNotFoundError: No module named 'torch'
+DeserializationError: Deserialization failed because the 'torch' module is not
+available in the local environment.
+```
+
+**Root cause**: despite `bool()`/f-string casts already applied to most torch-derived
+fields, `collect_gpu_diagnostics()` (in `modal_gpu_diagnostics.py`) had at least one
+unguarded field (`result["cuda_version"] = torch.version.cuda`, assigned with no
+`str()` cast) and no final guarantee that the returned dict was free of any
+torch-specific object -- Modal's serialization protocol pickles the return value
+including its real type, and unpickling on the caller side (no `torch` installed
+there, by design -- only `modal` is) fails if any such object leaked through.
+
+**Fixed, defense-in-depth (two independent layers)**:
+1. Every torch-derived field is now explicitly `str()`- or `int()`-cast at the point
+   of assignment (`cuda_version`, `torch_version`, `gpu_model`, `compute_capability`),
+   not relying on assignment-order luck.
+2. The full result is now JSON-round-tripped (`json.loads(json.dumps(result,
+   default=str))`) before returning -- a second, independent guarantee that only
+   plain JSON-native types (str/int/float/bool/None) ever cross the Modal
+   serialization boundary, regardless of which specific field would otherwise have
+   leaked. This makes the exact root-cause field moot going forward: any future
+   torch-typed leak in this function is now structurally impossible, not just
+   patched at the one field that failed this time.
+
+1 new regression test (`test_collect_gpu_diagnostics_never_leaks_a_non_plain_object`)
+simulates a "leaky" torch whose version/capability values are custom objects (not
+plain `str`/`int`) and asserts the final result is fully plain-JSON-native regardless.
+Full D-042+D-043 targeted suite (209 tests) and the complete `tests/test_cutsell_*.py`
+CI glob green; `compileall` clean.
+
+**Cost note**: this run's single container ran the full diagnostic body (several
+seconds of real L4 GPU time, more than the sub-second crash-loop attempts from the
+prior run) before failing at the client-side deserialization step -- the GPU-side
+work itself completed and the container exited normally; only the local unpickling
+of its result failed. Approximate cost: still low (one L4 container, a few seconds),
+non-zero.
+
+**Not yet re-tested live.** Per the explicit "do not patch and immediately rerun
+again" instruction, this fix is reported here and the next live attempt awaits
+separate authorization.
+
 ## Change rule
 
 When a new decision changes product behavior, update this file in the same development cycle. Do not silently redefine CutSell through code alone.

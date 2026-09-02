@@ -85,6 +85,56 @@ def test_collect_gpu_diagnostics_all_pass(monkeypatch):
     assert isinstance(result["python_version"], str) and result["python_version"]
 
 
+def test_collect_gpu_diagnostics_never_leaks_a_non_plain_object(monkeypatch):
+    # D-043 live failure (run 33612105029): modal run crashed client-side
+    # with DeserializationError("... 'torch' module is not available in
+    # the local environment") -- some torch-typed value leaked into the
+    # returned dict despite bool()/f-string casts elsewhere. Simulates a
+    # "leaky" torch whose version/capability fields are NOT plain str/int
+    # (a custom class only __str__-able, not JSON-native) and asserts the
+    # final result is nonetheless fully plain-JSON-native.
+    class _LeakyStr:
+        def __init__(self, value):
+            self._value = value
+
+        def __str__(self):
+            return self._value
+
+    class _LeakyInt:
+        def __init__(self, value):
+            self._value = value
+
+        def __int__(self):
+            return self._value
+
+        def __str__(self):
+            return str(self._value)
+
+    cuda_ns = types.SimpleNamespace(
+        is_available=lambda: True,
+        get_device_name=lambda idx=0: _LeakyStr("NVIDIA L4"),
+        get_device_capability=lambda idx=0: (_LeakyInt(8), _LeakyInt(9)),
+    )
+    leaky_torch = types.SimpleNamespace(
+        __version__=_LeakyStr("2.6.0"), cuda=cuda_ns, version=types.SimpleNamespace(cuda=_LeakyStr("12.4"))
+    )
+    monkeypatch.setitem(__import__("sys").modules, "torch", leaky_torch)
+    monkeypatch.setattr(diag, "_run_capture", lambda cmd, timeout=30.0: (True, "v\n"))
+
+    result = diag.collect_gpu_diagnostics()
+
+    # Every value must be a plain JSON-native type -- no leaked object
+    # whose class would need importing to reconstruct.
+    reserialized = json.loads(json.dumps(result))
+    assert reserialized == result
+    for value in result.values():
+        assert isinstance(value, (str, int, float, bool, type(None)))
+    assert result["torch_version"] == "2.6.0"
+    assert result["cuda_version"] == "12.4"
+    assert result["gpu_model"] == "NVIDIA L4"
+    assert result["compute_capability"] == "8.9"
+
+
 def test_collect_gpu_diagnostics_cuda_unavailable_is_not_ok(monkeypatch):
     fake_torch = _fake_torch(cuda_available=False)
     monkeypatch.setitem(__import__("sys").modules, "torch", fake_torch)
