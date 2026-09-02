@@ -55,6 +55,79 @@ MODAL_TOKEN_SECRET_ENV = "MODAL_TOKEN_SECRET"
 
 EXECUTION_PROVIDER_MODAL = "MODAL"
 
+# --- D-043 full Video00 execution phase (separately authorized) ---------
+# The minimal smoke test above deliberately never installed the full
+# CutSell runtime; this phase extends the SAME validated base image to run
+# the actual canonical engine. Every constant below is reused verbatim by
+# modal_video00_full_benchmark.py -- never a second, hand-typed dependency
+# list drifting from Dockerfile.cutsell.serverless. Order matches the
+# Dockerfile's own apt-get install block; a dedicated test
+# (tests/test_modal_video00_full_benchmark.py) parses that Dockerfile and
+# asserts this tuple stays in lockstep with it.
+CUTSELL_APT_PACKAGES: tuple[str, ...] = (
+    "build-essential",
+    "python3-dev",
+    "ffmpeg",
+    "git",
+    "curl",
+    "pkg-config",
+    "libavformat-dev",
+    "libavcodec-dev",
+    "libavdevice-dev",
+    "libavutil-dev",
+    "libavfilter-dev",
+    "libswscale-dev",
+    "libswresample-dev",
+)
+
+# The actual requirements FILE is read at Modal image-build time (Modal's
+# own `pip_install_from_requirements`) -- this is the file path, not a
+# copy of its contents, so there is nothing here that can drift from the
+# canonical dependency list itself.
+CUTSELL_REQUIREMENTS_FILE = "requirements.cutsell.worker.txt"
+
+# Reused verbatim from Dockerfile.cutsell.serverless's own separate
+# `pip install 'runpod>=1.7,<2'` step (kept out of
+# requirements.cutsell.worker.txt in the Dockerfile too -- see that file's
+# own header comment). serverless_handler.py imports `runpod` unconditionally
+# at module level even though run_op() itself never calls it.
+CUTSELL_RUNPOD_PIP_SPEC = "runpod>=1.7,<2"
+
+# Full Video00 benchmark timeout: mirrors RunPod Serverless RAW's own
+# poll bound (5400s / 90 minutes, cutsell-video00-raw-v5-auto-microtrim.yml)
+# rather than inventing a new number for the same six-minute source video.
+# Kept as a SEPARATE ceiling from MAX_MODAL_SMOKE_TEST_TIMEOUT_S above --
+# that one stays scoped to the minimal smoke test and is never widened by
+# this phase's own needs.
+DEFAULT_MODAL_VIDEO00_TIMEOUT_S: int = 5400
+MAX_MODAL_VIDEO00_TIMEOUT_S: int = 5400
+
+MODAL_VIDEO00_APP_NAME = "cutsell-video00-modal-benchmark"
+
+# Env var naming the local JSON file (built by the GitHub Actions workflow
+# from the live RunPod template's own env dict -- never a second,
+# hand-typed env list) that modal_video00_full_benchmark.py reads to build
+# its injected Modal Secret.
+CUTSELL_ENV_JSON_PATH_ENV = "CUTSELL_ENV_JSON_PATH"
+
+# Env var naming the canonical run_op() payload (JSON-encoded), reusing the
+# exact same env var name runpod_pod_direct_benchmark_gate.py already
+# established for the equivalent RunPod Pod direct-execution path.
+CUTSELL_BENCHMARK_PAYLOAD_JSON_ENV = "CUTSELL_BENCHMARK_PAYLOAD_JSON"
+
+
+def require_modal_video00_timeout(timeout_s: float) -> None:
+    """Raises ValueError for a non-positive or excessive timeout. Separate
+    from require_modal_timeout (the minimal-smoke-test ceiling) so widening
+    one never silently widens the other."""
+    if timeout_s <= 0:
+        raise ValueError(f"timeout_s must be positive, got {timeout_s!r}.")
+    if timeout_s > MAX_MODAL_VIDEO00_TIMEOUT_S:
+        raise ValueError(
+            f"timeout_s={timeout_s!r} exceeds the full Video00 benchmark ceiling of "
+            f"{MAX_MODAL_VIDEO00_TIMEOUT_S}s."
+        )
+
 
 def require_modal_gpu_type(gpu_type: str) -> None:
     """Raises ValueError for any GPU type outside the approved pool.

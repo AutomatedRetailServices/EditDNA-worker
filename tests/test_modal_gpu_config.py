@@ -91,3 +91,67 @@ def test_cutsell_base_image_matches_dockerfile():
 
 def test_default_timeout_is_within_the_ceiling():
     assert 0 < cfg.DEFAULT_MODAL_TIMEOUT_S <= cfg.MAX_MODAL_SMOKE_TEST_TIMEOUT_S
+
+
+# --- D-043 full Video00 execution phase --------------------------------
+
+def test_video00_timeout_mirrors_runpod_serverless_raws_own_bound():
+    # cutsell-video00-raw-v5-auto-microtrim.yml's own poll deadline is
+    # SECONDS+5400 -- this must stay the same number, not a new invention,
+    # for the exact same six-minute source video.
+    assert cfg.DEFAULT_MODAL_VIDEO00_TIMEOUT_S == 5400
+    assert cfg.MAX_MODAL_VIDEO00_TIMEOUT_S == 5400
+
+
+def test_require_modal_video00_timeout_accepts_the_default():
+    cfg.require_modal_video00_timeout(cfg.DEFAULT_MODAL_VIDEO00_TIMEOUT_S)  # must not raise
+
+
+def test_require_modal_video00_timeout_rejects_zero_or_negative():
+    with pytest.raises(ValueError):
+        cfg.require_modal_video00_timeout(0)
+    with pytest.raises(ValueError):
+        cfg.require_modal_video00_timeout(-1)
+
+
+def test_require_modal_video00_timeout_rejects_above_ceiling():
+    with pytest.raises(ValueError):
+        cfg.require_modal_video00_timeout(cfg.MAX_MODAL_VIDEO00_TIMEOUT_S + 1)
+
+
+def test_require_modal_video00_timeout_is_independent_of_smoke_test_ceiling():
+    # Widening the Video00 ceiling must never silently widen the minimal
+    # smoke test's own (much smaller) ceiling, and vice versa.
+    assert cfg.MAX_MODAL_VIDEO00_TIMEOUT_S > cfg.MAX_MODAL_SMOKE_TEST_TIMEOUT_S
+    with pytest.raises(ValueError):
+        cfg.require_modal_timeout(cfg.DEFAULT_MODAL_VIDEO00_TIMEOUT_S)
+
+
+def test_cutsell_apt_packages_match_dockerfile():
+    # D-043 Section 3: never a second, hand-typed dependency list drifting
+    # from Dockerfile.cutsell.serverless's own apt-get install block.
+    with open("Dockerfile.cutsell.serverless") as f:
+        dockerfile_text = f.read()
+    start = dockerfile_text.index("apt-get install -y --no-install-recommends")
+    end = dockerfile_text.index("&& rm -rf /var/lib/apt/lists/*", start)
+    block = dockerfile_text[start:end]
+    packages = tuple(
+        line.strip().rstrip("\\").strip()
+        for line in block.splitlines()[1:]
+        if line.strip().strip("\\").strip()
+    )
+    assert packages == cfg.CUTSELL_APT_PACKAGES
+
+
+def test_cutsell_requirements_file_path_matches_dockerfile():
+    with open("Dockerfile.cutsell.serverless") as f:
+        dockerfile_text = f.read()
+    assert cfg.CUTSELL_REQUIREMENTS_FILE in dockerfile_text
+    import os
+    assert os.path.isfile(cfg.CUTSELL_REQUIREMENTS_FILE)
+
+
+def test_cutsell_runpod_pip_spec_matches_dockerfile():
+    with open("Dockerfile.cutsell.serverless") as f:
+        dockerfile_text = f.read()
+    assert cfg.CUTSELL_RUNPOD_PIP_SPEC in dockerfile_text

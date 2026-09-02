@@ -1,0 +1,374 @@
+name: CutSell Video00 Modal RAW
+
+# D-043 "BUILD MODAL FULL VIDEO00 EXECUTION AND RUN ONE FULL BENCHMARK":
+# resumes the exact full Video00 benchmark cutsell-video00-raw-v5-auto-
+# microtrim.yml (RunPod Serverless) was supposed to execute, on Modal as
+# an ADDITIONAL execution backend. RunPod Serverless and RunPod Pod stay
+# fully available and untouched -- this workflow is new, alongside them,
+# never a replacement.
+#
+# workflow_dispatch only, same as every other paid-GPU QA workflow this
+# repo has added (Modal minimal test, RunPod Pod RAW/direct-exec/minimal-
+# isolation) -- never on a push trigger, so a controlled Video00-scale
+# Modal spend is always an explicit, one-off decision.
+#
+# No Docker build/push/digest-pin step here (unlike the RunPod Serverless
+# RAW workflow): Modal's own `.add_local_python_source("cutsell_worker")`
+# mounts the cutsell_worker package from this exact checked-out commit
+# directly into the remote container at `modal run` invocation time -- the
+# "exact test head" guarantee for this backend. The checked-out commit SHA
+# is still printed for the record.
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: cutsell-video00-modal-raw-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  SOURCE_KEY: Editdna longform validation/VIDEO-2026-07-30-09-18-03.mp4
+  # QA-only authoritative Human Gold reference -- never read by production
+  # Selection/Boundary code, never part of the run_op() payload.
+  HUMAN_GOLD_KEY: Editdna longform validation/5E01F214-A364-4F4B-8F25-D39B1E2B21D2.MP4
+  BENCHMARK_ID: video00-modal-${{ github.run_id }}-${{ github.run_attempt }}
+
+jobs:
+  video00-modal-raw:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    env:
+      RUNPOD_API_KEY: ${{ secrets.RUNPOD_API_KEY }}
+      MODAL_TOKEN_ID: ${{ secrets.MODAL_TOKEN_ID }}
+      MODAL_TOKEN_SECRET: ${{ secrets.MODAL_TOKEN_SECRET }}
+    steps:
+      - name: Checkout exact test head
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 1
+
+      - name: Print exact test head + D-040 ancestry
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "HEAD: $(git rev-parse HEAD) ($(git log -1 --oneline))"
+          # D-043 Section 2: never silently benchmark an older semantic
+          # head merely because the Modal infra lives on a feature branch.
+          for commit in 19f6612 e561b8b 3f7122b 796b0dc; do
+            if git merge-base --is-ancestor "$commit" HEAD 2>/dev/null; then
+              echo "commit $commit IS an ancestor of HEAD"
+            else
+              echo "WARNING: commit $commit is NOT an ancestor of HEAD -- semantic head may be stale" >&2
+            fi
+          done
+          test -s benchmarks/video00_regression_qa.json
+          test -s benchmarks/video00_selection_lock.json
+
+      - name: Prepare artifact directory
+        shell: bash
+        run: mkdir -p artifact
+
+      - name: Verify Modal auth env
+        shell: bash
+        run: |
+          python3 -c "
+          import os
+          from modal_gpu_config import require_modal_token_env
+          require_modal_token_env(os.environ)
+          print('Modal auth env present.')
+          "
+
+      - name: Install Modal client
+        shell: bash
+        run: pip install --disable-pip-version-check --quiet modal
+
+      - name: Load base RunPod template (env source of truth only)
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail --silent --show-error \
+            --url "https://rest.runpod.io/v1/templates" \
+            --header "Authorization: Bearer $RUNPOD_API_KEY" \
+            --output /tmp/templates.json
+          jq -c '[.[] | select(.name == "EditDNA-Worker-2")][0]' /tmp/templates.json > /tmp/base-template.json
+          test "$(cat /tmp/base-template.json)" != "null"
+
+      - name: Build masked Modal env-secret file
+        shell: bash
+        run: |
+          set -euo pipefail
+          # D-043 Section 4: never a second, hand-typed env-var list -- the
+          # FULL live RunPod template env dict is the single existing
+          # source of truth for the canonical Video00 path's runtime
+          # configuration. Every value is masked in the CI log before this
+          # step ever prints anything derived from it.
+          jq -c '.env // {}' /tmp/base-template.json > /tmp/cutsell-env.json
+          test "$(jq 'length' /tmp/cutsell-env.json)" != "0"
+          python3 -c "
+          import json
+          with open('/tmp/cutsell-env.json') as f:
+              env = json.load(f)
+          for value in env.values():
+              if value:
+                  print(f'::add-mask::{value}')
+          print(f'Loaded {len(env)} env vars from the live RunPod template (values masked).')
+          "
+          echo "CUTSELL_ENV_JSON_PATH=/tmp/cutsell-env.json" >> "$GITHUB_ENV"
+
+      - name: Verify canonical Video00 path present
+        shell: bash
+        run: |
+          set -euo pipefail
+          grep -q 'auto_speech_visual_microtrim' cutsell_worker/serverless_handler.py
+          grep -q 'detect_speech_safe_visual_microtrims' cutsell_worker/serverless_handler.py
+          grep -q 'run_single_universal_clean_cut_validation' cutsell_worker/serverless_handler.py
+          grep -q 'def run_op' cutsell_worker/serverless_handler.py
+
+      - name: Submit canonical Video00 payload
+        shell: bash
+        run: |
+          set -euo pipefail
+          jq -n --arg source "$SOURCE_KEY" --arg benchmark "$BENCHMARK_ID" \
+            '{op:"focused",source_key:$source,benchmark_id:$benchmark,auto_speech_visual_microtrim:true}' \
+            > /tmp/payload.json
+          echo "CUTSELL_BENCHMARK_PAYLOAD_JSON=$(cat /tmp/payload.json)" >> "$GITHUB_ENV"
+          echo "--- payload ---"
+          cat /tmp/payload.json
+
+      - name: Run Modal full Video00 benchmark (ONE authorized L4 run)
+        id: modal_video00
+        shell: bash
+        run: |
+          set +e
+          set -uo pipefail
+          modal run modal_video00_full_benchmark.py 2>&1 | tee modal-video00-output.log
+          echo "exit_code=${PIPESTATUS[0]}" >> "$GITHUB_OUTPUT"
+
+      - name: Upload raw Modal run log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cutsell-video00-modal-run-log
+          path: modal-video00-output.log
+          retention-days: 14
+          if-no-files-found: warn
+
+      - name: Print Modal run summary
+        if: always()
+        shell: bash
+        run: |
+          if [ "${{ steps.modal_video00.outputs.exit_code }}" != "0" ]; then
+            echo "MODAL FULL VIDEO00 RUN FAILED (exit ${{ steps.modal_video00.outputs.exit_code }}) -- see modal-video00-output.log."
+            exit 1
+          fi
+          if [ ! -s modal-video00-result.json ]; then
+            echo "Modal run exited 0 but modal-video00-result.json is missing -- treating as a failure."
+            exit 1
+          fi
+          echo "--- modal-video00-result.json (compact run_op() summary) ---"
+          cat modal-video00-result.json
+          cp modal-video00-result.json artifact/video00-modal-summary.json
+          RUN_OK=$(jq -r '.ok // false' modal-video00-result.json)
+          if [ "$RUN_OK" != "true" ]; then
+            echo "run_op() reported ok=false -- see artifact/video00-modal-summary.json for the error."
+            exit 1
+          fi
+          RESULT_URI=$(jq -r '.result_uri // empty' modal-video00-result.json)
+          PREVIEW_URI=$(jq -r '.preview_uri // empty' modal-video00-result.json)
+          DIAGNOSTIC_PREVIEW_URI=$(jq -r '.diagnostic_preview_uri // empty' modal-video00-result.json)
+          echo "RESULT_URI=$RESULT_URI" >> "$GITHUB_ENV"
+          echo "PREVIEW_URI=$PREVIEW_URI" >> "$GITHUB_ENV"
+          echo "DIAGNOSTIC_PREVIEW_URI=$DIAGNOSTIC_PREVIEW_URI" >> "$GITHUB_ENV"
+
+      - name: Download Video00 Modal artifacts
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p artifact
+          if [ -z "${RESULT_URI:-}" ]; then
+            echo "No result_uri present; nothing to download from S3."
+            exit 0
+          fi
+          BASE_TEMPLATE=$(cat /tmp/base-template.json)
+          for key in AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_REGION S3_BUCKET; do
+            value=$(printf '%s' "$BASE_TEMPLATE" | jq -r --arg key "$key" '.env[$key] // empty')
+            test -n "$value"
+            echo "::add-mask::$value"
+            export "$key=$value"
+          done
+          aws s3 cp "$RESULT_URI" artifact/video00-modal.json
+          test -s artifact/video00-modal.json
+
+          # D-036 item 6 parity: a QC-invalidated candidate is never
+          # uploaded under the deliverable filename.
+          if [ -n "${PREVIEW_URI:-}" ]; then
+            aws s3 cp "$PREVIEW_URI" artifact/video00-modal.mp4
+            test -s artifact/video00-modal.mp4
+            echo "Deliverable candidate downloaded: artifact/video00-modal.mp4"
+          elif [ -n "${DIAGNOSTIC_PREVIEW_URI:-}" ]; then
+            aws s3 cp "$DIAGNOSTIC_PREVIEW_URI" artifact/video00-modal-DIAGNOSTIC-INVALIDATED.mp4
+            test -s artifact/video00-modal-DIAGNOSTIC-INVALIDATED.mp4
+            echo "NOT DELIVERABLE -- QC INVALIDATED. Diagnostic-only render downloaded."
+          else
+            echo "Neither preview_uri nor diagnostic_preview_uri present; no rendered candidate exists for this run."
+          fi
+
+      - name: Download Human Gold reference video
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p artifact
+          if [ ! -s /tmp/base-template.json ]; then
+            echo "No base RunPod template available; skipping Human Gold reference download."
+            exit 0
+          fi
+          BASE_TEMPLATE=$(cat /tmp/base-template.json)
+          for key in AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_REGION S3_BUCKET; do
+            value=$(printf '%s' "$BASE_TEMPLATE" | jq -r --arg key "$key" '.env[$key] // empty')
+            test -n "$value"
+            echo "::add-mask::$value"
+            export "$key=$value"
+          done
+          aws s3 cp "s3://$S3_BUCKET/$HUMAN_GOLD_KEY" artifact/human-gold-video00.mp4
+          test -s artifact/human-gold-video00.mp4
+
+      - name: Print full canonical diagnostics
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ ! -s artifact/video00-modal.json ]; then
+            echo "No result JSON downloaded; no diagnostics to print."
+            exit 0
+          fi
+          echo "--- diagnostics.unified_selection_reasoner (must be inert -- V1 deactivates it) ---"
+          jq '.diagnostics.unified_selection_reasoner // {status:"absent"}' artifact/video00-modal.json
+
+          echo "--- diagnostics.take_judge_groups (retry families + DeliveryScorer scores) ---"
+          jq '.diagnostics.take_judge_groups // []' artifact/video00-modal.json
+
+          echo "--- diagnostics.deterministic_best_take_authority (BestTakeResolver) ---"
+          jq '.diagnostics.deterministic_best_take_authority // {status:"absent"}' artifact/video00-modal.json
+
+          echo "--- diagnostics.semantic_idea_equivalence (IdeaClusterer's bounded SemanticArbiter tier) ---"
+          jq '.diagnostics.semantic_idea_equivalence // {status:"absent"}' artifact/video00-modal.json
+
+          echo "--- diagnostics.final_story_coherence_validation (StoryValidator) ---"
+          jq '.diagnostics.final_story_coherence_validation // {status:"absent"}' artifact/video00-modal.json
+
+          echo "--- semantic atom importance classifications ---"
+          jq '[.diagnostics.final_story_coherence_validation.lost_semantic_atoms[]? |
+            {clip_id, blocking, atom_classifications}]' artifact/video00-modal.json
+
+          echo "--- diagnostics.canonical_edit_plan ---"
+          jq '.diagnostics.canonical_edit_plan
+            | if . == null then {status:"absent"} else {
+                plan_id, plan_version, semantic_hash, validation_state, freeze_blocked,
+                ideas: [.ideas[]? | {idea_id, coverage_status, is_composite, winning_clip_ids, discarded_clip_ids}]
+              } end' artifact/video00-modal.json
+
+          echo "--- diagnostics.final_edit_reviewer ---"
+          jq '.diagnostics.final_edit_reviewer // {status:"absent"}' artifact/video00-modal.json
+
+          echo "--- diagnostics.repair_loop ---"
+          jq '.diagnostics.repair_loop // {status:"absent"}' artifact/video00-modal.json
+
+          echo "--- diagnostics.selection_boundary_contract (Selection Freeze) ---"
+          jq '.diagnostics.selection_boundary_contract // {status:"absent"}' artifact/video00-modal.json
+
+          echo "--- diagnostics.hybrid_editorial_* (CompositeResolver evidence) ---"
+          jq '{
+            requested_chunk_count: .diagnostics.hybrid_editorial_requested_chunk_count,
+            available_chunk_count: .diagnostics.hybrid_editorial_available_chunk_count,
+            deleted_count: .diagnostics.hybrid_editorial_deleted_count,
+            semantic_decision_count: .diagnostics.hybrid_editorial_semantic_decision_count,
+            chunks: (.diagnostics.hybrid_editorial_chunks // [])
+          }' artifact/video00-modal.json
+
+          echo "--- final KEEP sequence (clip_id + text, in order) ---"
+          jq '[.selected[]? | {clip_id, text}]' artifact/video00-modal.json
+
+          echo "--- final DISCARD sequence and stage_status ---"
+          jq '{discarded_count: (.discarded | length), discarded: [.discarded[]? | {clip_id, text}], stage_status}' artifact/video00-modal.json
+
+          echo "--- live_render_qc (PostRenderWatchListenQC + bounded physical repair) ---"
+          jq '.live_render_qc // {status:"absent"}' artifact/video00-modal.json
+
+      - name: Upload Video00 Modal diagnostic artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cutsell-video00-modal-human-review
+          path: artifact/
+          retention-days: 14
+          if-no-files-found: warn
+
+      - name: Verify frozen Selection lock
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ ! -s artifact/video00-modal.json ]; then
+            echo "No result JSON was downloaded; cannot verify Selection lock." >&2
+            exit 1
+          fi
+          python benchmarks/validate_video00_selection_lock.py \
+            artifact/video00-modal.json \
+            benchmarks/video00_selection_lock.json \
+            | tee artifact/video00-modal-selection-lock-report.json
+
+      - name: Verify Video00 architecture
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ ! -s artifact/video00-modal.json ]; then
+            echo "No result JSON was downloaded; cannot verify architecture." >&2
+            exit 1
+          fi
+          jq -e '.source_duration_sec > 350 and .auto_speech_visual_microtrim_enabled == true and .speech_lock_ok == true and .selected_count > 0' artifact/video00-modal.json >/dev/null
+          jq '{source_duration_sec,selected_count,selected_duration_sec,output_duration_sec,auto_microtrim_count,auto_microtrim_duration_sec,speech_lock_ok}' artifact/video00-modal.json
+          python benchmarks/validate_video00_architecture.py \
+            artifact/video00-modal.json \
+            | tee artifact/video00-modal-architecture-report.json
+
+      - name: Verify Human Gold regression QA (18-check manifest)
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ ! -s artifact/video00-modal.json ]; then
+            echo "No result JSON was downloaded; cannot verify Human Gold regression QA." >&2
+            exit 1
+          fi
+          python benchmarks/validate_video00_regression_qa.py \
+            artifact/video00-modal.json \
+            benchmarks/video00_regression_qa.json \
+            | tee artifact/video00-modal-regression-qa-report.json
+          echo "--- Human Gold regression QA summary ---"
+          jq '{qa_pass, passed_check_count, failed_check_count, selected_count}' artifact/video00-modal-regression-qa-report.json
+
+      - name: Upload validator reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cutsell-video00-modal-validator-reports
+          path: |
+            artifact/video00-modal-selection-lock-report.json
+            artifact/video00-modal-architecture-report.json
+            artifact/video00-modal-regression-qa-report.json
+          retention-days: 14
+          if-no-files-found: warn
+
+      - name: Modal teardown confirmation
+        if: always()
+        shell: bash
+        run: |
+          # No persistent Pod/endpoint was created (unlike RunPod) -- Modal's
+          # own scale-to-zero behavior applies the instant this one ephemeral
+          # `modal run` invocation's function call returns, combined with
+          # retries=0 (no crash-loop) and the bounded timeout enforced
+          # in-process by modal_gpu_config.require_modal_video00_timeout.
+          echo "Modal teardown: automatic scale-to-zero on function return -- no persistent GPU resource was created by this workflow."

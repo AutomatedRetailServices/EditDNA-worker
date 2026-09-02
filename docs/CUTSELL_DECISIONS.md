@@ -2985,6 +2985,97 @@ no new benchmark design, no second editor implementation. That integration (inst
 Video00 payload through) is not yet built and requires separate authorization before
 any code is written for it.
 
+### Full Video00 execution phase (2026-09-02): build checkpoint, authorized
+
+"AUTHORIZED — BUILD MODAL FULL VIDEO00 EXECUTION AND RUN ONE FULL BENCHMARK." Resumes
+the exact full Video00 benchmark RunPod Serverless was supposed to execute, on Modal as
+an additional execution backend -- not a new benchmark, not a new editor, not a reduced
+Modal-specific pipeline. RunPod Serverless and RunPod Pod remain fully available and
+untouched.
+
+**Exact test head verified (Section 2).** `git merge-base feature/runpod-pod-on-demand
+origin/cutsell/mobile-v1-clean` equals `cutsell/mobile-v1-clean`'s own tip
+(`a26c099`) -- zero divergence; the infra branch contains 100% of the editorial
+branch's current commits plus D-042/D-043 infra on top. D-037 (`e561b8b`), D-038
+(`3f7122b`), D-039 (`796b0dc`), and D-040 (`19f6612`) are all confirmed ancestors of
+HEAD. `benchmarks/video00_regression_qa.json` (18 checks) and
+`benchmarks/video00_selection_lock.json` are present. The new workflow
+(`cutsell-video00-modal-raw.yml`) re-verifies this ancestry live on every dispatch,
+rather than trusting a one-time audit.
+
+**Canonical engine preserved (Section 1).** `modal_video00_full_benchmark.py`'s remote
+function imports `cutsell_worker.serverless_handler.run_op` inside the function body
+(never at module top level -- `cutsell_worker` pulls in torch/mediapipe/faster-whisper,
+none of which the plain `modal run` CLI process has) and calls it with the payload
+unmodified: `run_op(payload["op"], payload)`. No forked/duplicated editorial logic.
+
+**Modal image extended, not reinvented (Section 3).** `modal_gpu_config.py` gained
+`CUTSELL_APT_PACKAGES` (the exact `Dockerfile.cutsell.serverless` apt-get install list,
+guarded by a test that re-parses the Dockerfile and asserts byte-for-byte match),
+`CUTSELL_REQUIREMENTS_FILE` (a path, not a copied list -- Modal's own
+`pip_install_from_requirements` reads the actual `requirements.cutsell.worker.txt` file
+at image-build time), and `CUTSELL_RUNPOD_PIP_SPEC` (`runpod>=1.7,<2`, matching the
+Dockerfile's separate pip step -- `serverless_handler.py` imports `runpod` unconditionally
+at module level even though `run_op()` itself never calls it). The image chain:
+`Image.from_registry(CUTSELL_BASE_IMAGE).apt_install(*CUTSELL_APT_PACKAGES)
+.pip_install_from_requirements(CUTSELL_REQUIREMENTS_FILE).pip_install(CUTSELL_RUNPOD_PIP_SPEC)
+.add_local_python_source("cutsell_worker")` -- the last step mounts the whole package
+from the exact checked-out commit, which is this backend's "exact test head" guarantee
+(no Docker build/push/digest-pin needed the way RunPod Serverless RAW requires).
+
+**Secrets wired from the single existing source of truth (Section 4).** No hand-typed
+env-var list. The workflow fetches the live `EditDNA-Worker-2` RunPod template (same
+template the RunPod Serverless RAW workflow itself reads), masks every value with
+`::add-mask::`, and writes the full `env` dict to a local JSON file. `modal_video00_full_benchmark.
+_resolve_env_secret()` reads that file (path via `CUTSELL_ENV_JSON_PATH`) and builds
+`modal.Secret.from_dict(...)` from it at `modal run` invocation time -- values never
+printed, never baked into the image, never a second static Modal Secret store to keep
+in sync by hand. Returns an empty secret (not an error) when the env var is unset, so
+the module stays importable for tests that stub `modal` entirely.
+
+**Return-value discipline reused, not reinvented.** `serverless_handler._focused()`
+already returns a small, plain-JSON-native compact summary (the exact shape RunPod
+Serverless returns) -- the full diagnostics tree is written to S3 as `result.json` by
+`run_op()`'s own existing `_upload_artifact` machinery, never returned in-process. This
+sidesteps the D-043 `DeserializationError` class of bug entirely (nothing torch-typed is
+ever part of the return value), with the same defensive `json.loads(json.dumps(...,
+default=str))` round-trip still applied as a second, independent guarantee.
+
+**Execution safety (Section 11).** Exactly one approved GPU type (L4, via
+`require_modal_gpu_type`), `retries=0` (same crash-loop protection this phase's own live
+failure required), and a new, separate timeout ceiling
+(`DEFAULT_MODAL_VIDEO00_TIMEOUT_S = MAX_MODAL_VIDEO00_TIMEOUT_S = 5400`, mirroring RunPod
+Serverless RAW's own 5400s/90-minute poll bound for this exact six-minute source video --
+never widening `MAX_MODAL_SMOKE_TEST_TIMEOUT_S`, which stays scoped to the minimal smoke
+test). No persistent container: Modal's own scale-to-zero applies the instant the one
+ephemeral `modal run` invocation's function call returns.
+
+**New workflow: `cutsell-video00-modal-raw.yml`** (`workflow_dispatch` only, concurrency-
+grouped, never a push trigger). Mirrors `cutsell-video00-raw-v5-auto-microtrim.yml`'s
+diagnostics-printing and validator steps verbatim (same jq blocks, same three
+validators: `validate_video00_selection_lock.py`, `validate_video00_architecture.py`,
+and -- newly wired in, previously unused by any workflow --
+`validate_video00_regression_qa.py` against the 18-check Human Gold manifest for the
+"X/18" report). No RunPod endpoint/template lifecycle management: unlike the Serverless
+RAW workflow, this one creates no persistent RunPod resource, so there is nothing to
+tear down beyond Modal's own automatic scale-to-zero.
+
+**Tests.** `tests/test_modal_gpu_config.py` gained coverage for the new timeout
+ceiling/validator and three Dockerfile-consistency tests (apt packages, requirements
+file path, runpod pip spec). `tests/test_modal_video00_full_benchmark.py` (18 tests)
+covers the App/Image/Function/Secret wiring and `run_op()` delegation, using the same
+modal-package-free stub pattern as `test_modal_gpu_minimal_test.py` -- extended with a
+`__cutsell_test_stub__` marker so the two test files' shared `sys.modules["modal"]`
+stub merges attributes instead of one file silently winning the stub and leaving the
+other's needed attributes (e.g. `modal.Secret`) missing, regardless of pytest's
+collection order. Full `tests/test_cutsell_*.py` CI glob (1267 tests) green; the
+combined D-042+D-043 targeted suite is now 232 tests (up from 209). `compileall` clean
+on every changed/new file.
+
+**Status at this checkpoint: CODE FIXED, TESTS PASS.** Not yet run live -- the one
+authorized full Video00 Modal benchmark dispatch and its result are reported separately
+once it completes.
+
 ## Change rule
 
 When a new decision changes product behavior, update this file in the same development cycle. Do not silently redefine CutSell through code alone.

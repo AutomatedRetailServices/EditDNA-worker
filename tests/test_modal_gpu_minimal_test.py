@@ -12,13 +12,23 @@ import types
 
 
 def _stub_missing_module(name, **attributes):
-    if name in sys.modules:
-        return
-    if importlib.util.find_spec(name) is None:
-        module = types.ModuleType(name)
-        for attribute, value in attributes.items():
-            setattr(module, attribute, value)
-        sys.modules[name] = module
+    """Merges attributes onto an already-stubbed fake module rather than a
+    one-shot "only if absent" -- test_modal_video00_full_benchmark.py also
+    stubs `modal` (with additional attributes, e.g. `Secret`), and
+    whichever test file pytest collects first must not "win" the stub and
+    leave the other file's needed attributes missing on the shared
+    sys.modules entry. Never shadows a real installed `modal` package."""
+    existing = sys.modules.get(name)
+    if existing is not None and not getattr(existing, "__cutsell_test_stub__", False):
+        return  # a real module (or a non-stub module) is already imported
+    if existing is None:
+        if importlib.util.find_spec(name) is not None:
+            return  # a real installable package exists; never shadow it
+        existing = types.ModuleType(name)
+        existing.__cutsell_test_stub__ = True
+        sys.modules[name] = existing
+    for attribute, value in attributes.items():
+        setattr(existing, attribute, value)
 
 
 class _FakeImage:
