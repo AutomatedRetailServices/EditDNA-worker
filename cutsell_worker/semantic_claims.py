@@ -35,6 +35,7 @@ import hashlib
 import re
 from typing import Protocol
 
+from .canonical_identity import mint_canonical_claim_id
 from .final_sibling_grouping import _content, _negations, _numbers
 from .semantic_atom_importance import (
     _CORRECTION_MARKERS,
@@ -261,6 +262,17 @@ class Claim:
     importance: str
     evidence: str
     content_tokens: frozenset
+    # D-050A: canonical, cross-source claim identity -- see
+    # canonical_identity.py's module docstring (ID OWNERSHIP: "Claim
+    # canonicalization"). Minted from (claim_type, content_tokens) only,
+    # deliberately NOT from source_clip_id/exact text, so two near-
+    # duplicate restatements of the same fact from different sibling
+    # realizations of one merged idea share this id today, in metadata
+    # only -- observability, not a decision input. Optional/defaulted so
+    # every existing construction site (this module's own extract_claims,
+    # and every test building a Claim by keyword) stays valid unchanged;
+    # nothing in claim_coverage_best_take.py reads this field yet.
+    canonical_claim_id: str = ""
 
 
 def _claim_id(source_clip_id: str, text: str) -> str:
@@ -301,6 +313,7 @@ def extract_claims(
                 deterministic_importance=importance, evidence=evidence,
                 arbiter=clause_role_arbiter,
             )
+            content_tokens = frozenset(tokens)
             claims.append(Claim(
                 claim_id=_claim_id(source_clip_id, clause),
                 source_clip_id=source_clip_id,
@@ -308,7 +321,8 @@ def extract_claims(
                 text=clause,
                 importance=importance,
                 evidence=evidence,
-                content_tokens=frozenset(tokens),
+                content_tokens=content_tokens,
+                canonical_claim_id=mint_canonical_claim_id(claim_type, content_tokens),
             ))
     return tuple(claims)
 

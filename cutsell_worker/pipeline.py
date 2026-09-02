@@ -2,9 +2,16 @@
 from __future__ import annotations
 
 from collections import Counter
+from dataclasses import replace as dataclass_replace
 import hashlib
 from typing import Dict, Iterable
 
+from .canonical_identity import (
+    build_identity_chain_diagnostics,
+    mint_realization_id,
+    mint_retry_family_id,
+    mint_semantic_idea_id,
+)
 from .clean_cut import apply_clean_cut
 from .clean_cut_provider import CleanCutProvider, apply_provider_judgements, safe_clean_cut_judge
 from .composer import compose_selected
@@ -42,6 +49,13 @@ def _group_id(project_id: str, key: str) -> str:
 
 
 def _draft_clip(take: CandidateTake, *, role: SemanticRole, group_id: str | None, selected: bool) -> DraftClip:
+    # D-050A: `group_id` here is already the FINAL, post-semantic-
+    # equivalence take-group id (pipeline.py is its one minting owner --
+    # see canonical_identity.py's ID OWNERSHIP table). semantic_idea_id
+    # and retry_family_id are minted from it, additively; take_group_id
+    # itself is left completely unchanged for every existing consumer.
+    semantic_idea_id = mint_semantic_idea_id(group_id) if group_id else None
+    retry_family_id = mint_retry_family_id(group_id) if group_id else None
     return DraftClip(
         clip_id=take.clip_id,
         source_asset_id=take.source_asset_id,
@@ -59,6 +73,11 @@ def _draft_clip(take: CandidateTake, *, role: SemanticRole, group_id: str | None
         # actually see it instead of it being silently dropped at this
         # conversion. See local_performance.py / MediaSignals.
         signals=take.signals,
+        # D-050A: carried unchanged from the CandidateTake this clip was
+        # built from -- never recomputed here.
+        realization_id=take.realization_id,
+        semantic_idea_id=semantic_idea_id,
+        retry_family_id=retry_family_id,
     )
 
 
@@ -155,6 +174,22 @@ def build_flow_b_draft(
         clip_id: (label, float(confidence))
         for clip_id, label, confidence in hybrid_cleanup.semantic_decisions
     }
+
+    # D-050A: mint `realization_id` here -- immediately before take-
+    # grouping, on every candidate that survived clean-up/composite-
+    # resolution -- the single owning point for "candidate/realization
+    # normalization" the D-050 architecture audit named without its own
+    # module (see canonical_identity.py's ID OWNERSHIP table). Content-
+    # anchored (source + attempt lineage + normalized text), never
+    # timestamp-anchored; carried unchanged by every later
+    # dataclasses.replace() (physical trims/splits) from here on, never
+    # independently recomputed downstream.
+    kept = tuple(
+        take if take.realization_id else dataclass_replace(
+            take, realization_id=mint_realization_id(take.source_asset_id, take.attempt_id, take.text),
+        )
+        for take in kept
+    )
 
     # Pass 3: deterministic retry grouping + Best Take runs after semantic garbage is
     # removed. The local ranker remains the fallback. If Hybrid already identified one
@@ -413,6 +448,18 @@ def build_flow_b_draft(
     # monolith alone. Called explicitly here instead of via a monkeypatch
     # on this function.
     draft = apply_composite_family_stabilization(draft)
+
+    # D-050A observability (Section 7): the full identity chain for every
+    # selected clip, in one place, computed AFTER the last stage in this
+    # function that can change `selected` membership -- read-only, never
+    # fed back into any decision here or downstream.
+    draft = dataclass_replace(
+        draft,
+        diagnostics={
+            **(draft.diagnostics or {}),
+            "canonical_identity_chain": build_identity_chain_diagnostics(draft),
+        },
+    )
 
     if alternate_group_count == 0:
         judge_stage = "not_applicable_no_alternates"

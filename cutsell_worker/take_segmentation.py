@@ -5,6 +5,7 @@ from dataclasses import replace
 import re
 from typing import Iterable, Mapping, Tuple
 
+from .canonical_identity import mint_source_span_id
 from .contracts import CandidateTake, MediaSignals, SourceAsset, TranscriptSegment, Word
 from .silence_analysis import SilenceGap, silence_ratio
 from .source_identity import stable_clip_id
@@ -148,6 +149,12 @@ def _merge_signals(left: CandidateTake, right: CandidateTake) -> MediaSignals | 
 def _join_takes(left: CandidateTake, right: CandidateTake) -> CandidateTake:
     text = f"{left.text.rstrip()} {right.text.lstrip()}".strip()
     duration = max(0.0, right.end - left.start)
+    # D-050A: this internal boundary-fragment repair join is itself a small
+    # fusion of two raw ASR spans, so the joined result gets a fresh
+    # source_span_id (physical observation identity for the NEW joined
+    # span) rather than inheriting either parent's -- see
+    # canonical_identity.py's module docstring on why this id is
+    # deliberately timestamp-sensitive.
     return CandidateTake(
         clip_id=stable_clip_id(left.source_asset_id, left.start, right.end, text),
         source_asset_id=left.source_asset_id,
@@ -158,6 +165,7 @@ def _join_takes(left: CandidateTake, right: CandidateTake) -> CandidateTake:
         words=tuple(left.words) + tuple(right.words),
         signals=_merge_signals(left, right),
         complete_idea=_looks_complete_idea(text, duration),
+        source_span_id=mint_source_span_id(left.source_asset_id, left.start, right.end, text),
     )
 
 
@@ -263,5 +271,8 @@ def segment_takes(
                 words=segment.words,
                 signals=signals,
                 complete_idea=_looks_complete_idea(text, end - start),
+                # D-050A: the raw physical-observation identity for this
+                # exact ASR span (see canonical_identity.py).
+                source_span_id=mint_source_span_id(source.source_asset_id, start, end, text),
             ))
     return _repair_boundary_fragments(output)

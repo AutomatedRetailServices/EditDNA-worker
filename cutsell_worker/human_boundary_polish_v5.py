@@ -44,7 +44,7 @@ def _fragment_id(clip: DraftClip, *, start: float, end: float) -> str:
 
 def _clip_from_words(
     clip: DraftClip, start: float, end: float, words: tuple[Word, ...],
-    *, parent_semantic_clip_id: str,
+    *, parent_semantic_clip_id: str, parent_realization_id: str | None = None,
 ) -> DraftClip | None:
     if end - start < 0.18 or not words:
         return None
@@ -63,6 +63,10 @@ def _clip_from_words(
         # of how many Boundary passes touched it.
         render_fragment_id=_fragment_id(clip, start=start, end=end),
         parent_semantic_clip_id=parent_semantic_clip_id,
+        # D-050A: `realization_id` itself is left unchanged by this
+        # replace() (never touched -- see canonical_identity.py);
+        # `parent_realization_id` mirrors `parent_semantic_clip_id` above.
+        parent_realization_id=parent_realization_id,
         boundary_reason=BOUNDARY_REASON_MICRO_VISUAL_RESET_GAP,
     )
 
@@ -125,6 +129,11 @@ def _remove_micro_visual_reset_word_gaps(
     # under one shared key regardless of how many splitting passes touched
     # this delivery.
     root_parent = clip.parent_semantic_clip_id or clip.clip_id
+    # D-050A: mirrors `root_parent` exactly, for `realization_id` -- see
+    # canonical_identity.py's ID OWNERSHIP table. `realization_id` itself
+    # is preserved unchanged on every piece below; this is only the
+    # explicit "a split happened" marker.
+    root_realization = clip.realization_id
 
     pieces: list[DraftClip] = [clip]
     diagnostics: list[dict] = []
@@ -140,10 +149,12 @@ def _remove_micro_visual_reset_word_gaps(
             left_piece = _clip_from_words(
                 piece, float(piece.start), gap_start, left_words,
                 parent_semantic_clip_id=root_parent,
+                parent_realization_id=root_realization,
             )
             right_piece = _clip_from_words(
                 piece, gap_end, float(piece.end), right_words,
                 parent_semantic_clip_id=root_parent,
+                parent_realization_id=root_realization,
             )
             if left_piece is None or right_piece is None:
                 rebuilt.append(piece)

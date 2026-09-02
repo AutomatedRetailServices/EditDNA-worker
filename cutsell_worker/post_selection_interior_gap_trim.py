@@ -95,6 +95,12 @@ def split_selected_interior_performance_gaps(
         # descendants stay discoverable under one shared key. Mirrors
         # human_boundary_polish_v5.py's own `root_parent` pattern exactly.
         root_parent = getattr(original, "parent_semantic_clip_id", None) or original.clip_id
+        # D-050A: mirrors `root_parent` exactly, for `realization_id`
+        # instead of `clip_id` -- see canonical_identity.py's ID
+        # OWNERSHIP table. `original.realization_id` itself is preserved
+        # unchanged on every fragment below (dataclasses.replace() never
+        # touches it); this is only the explicit "a split happened" marker.
+        root_realization = getattr(original, "realization_id", None)
         original_pieces: list[DraftClip] = []
         pending = [original]
         split_count = 0
@@ -305,6 +311,7 @@ def split_selected_interior_performance_gaps(
                 # coherence_validation.py can recognize this piece as still
                 # covering that idea even though its own clip_id differs.
                 parent_semantic_clip_id=root_parent,
+                parent_realization_id=root_realization,
                 boundary_reason=BOUNDARY_REASON_INTERIOR_PERFORMANCE_GAP,
             )
             right = replace(
@@ -315,6 +322,7 @@ def split_selected_interior_performance_gaps(
                 caption_text=_text(right_words),
                 words=right_words,
                 parent_semantic_clip_id=root_parent,
+                parent_realization_id=root_realization,
                 boundary_reason=BOUNDARY_REASON_INTERIOR_PERFORMANCE_GAP,
             )
             left = replace(left, render_fragment_id=left.clip_id)

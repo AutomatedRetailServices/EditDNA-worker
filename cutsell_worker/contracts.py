@@ -104,6 +104,30 @@ class CandidateTake:
     words: Tuple[Word, ...] = ()
     signals: Optional[MediaSignals] = None
     complete_idea: bool = True
+    # D-050A: canonical identity/provenance metadata (see
+    # canonical_identity.py's module docstring for the full design note
+    # and ID ownership table). Additive/shadow-only -- optional and
+    # defaulted to None so every existing construction site stays valid
+    # unchanged, and nothing in the active pipeline reads these fields to
+    # make an editorial decision yet.
+    #   source_span_id -- physical observation identity, minted once per
+    #                     raw span in take_segmentation.py. Timestamp-
+    #                     sensitive by design (see canonical_identity.py).
+    #   attempt_id     -- canonical semantic identity for the delivery
+    #                     attempt this candidate represents, minted once
+    #                     in attempt_reconstruction.py's `_merge_attempt`
+    #                     (covers both fused and singleton-passthrough
+    #                     attempts). Content/membership-anchored, never
+    #                     timestamp-anchored.
+    #   realization_id -- canonical semantic identity for "one specific
+    #                     recorded delivery of an idea", minted once in
+    #                     pipeline.py immediately before take-grouping.
+    #                     Carried forward unchanged by every later
+    #                     `dataclasses.replace()` (physical trims/splits)
+    #                     -- never independently recomputed downstream.
+    source_span_id: Optional[str] = None
+    attempt_id: Optional[str] = None
+    realization_id: Optional[str] = None
 
     @property
     def duration_sec(self) -> float:
@@ -188,6 +212,36 @@ class DraftClip:
     fragment_index: Optional[int] = None
     fragment_count: Optional[int] = None
     boundary_reason: Optional[str] = None
+    # D-050A: canonical identity/provenance metadata (see
+    # canonical_identity.py's module docstring for the full design note
+    # and ID ownership table). Additive/shadow-only, same convention as
+    # D-036 above -- all optional, all defaulted to None, nothing reads
+    # these to make an editorial decision yet.
+    #   realization_id       -- carried unchanged from the CandidateTake
+    #                           this clip was built from (pipeline.py's
+    #                           `_draft_clip`); never recomputed here or
+    #                           by any later physical split.
+    #   semantic_idea_id /
+    #   retry_family_id      -- minted from this clip's final (post-
+    #                           semantic-equivalence) `take_group_id` --
+    #                           D-050A intentionally mints both fields
+    #                           identically; see canonical_identity.py.
+    #   parent_realization_id -- mirrors `parent_semantic_clip_id`'s own
+    #                           pattern exactly: absent on a clip nobody
+    #                           has split, set to the pre-split clip's
+    #                           `realization_id` by the one physical-split
+    #                           site that produced this fragment. The
+    #                           fragment's own `realization_id` field is
+    #                           NOT changed by a split -- it stays equal to
+    #                           the parent's, which is the actual
+    #                           "physical split preserves realization
+    #                           identity" invariant; this field is the
+    #                           explicit, observable marker that a split
+    #                           happened at all.
+    realization_id: Optional[str] = None
+    semantic_idea_id: Optional[str] = None
+    retry_family_id: Optional[str] = None
+    parent_realization_id: Optional[str] = None
 
 
 def effective_render_fragment_id(clip) -> str:

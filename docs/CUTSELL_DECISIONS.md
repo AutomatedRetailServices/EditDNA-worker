@@ -4009,6 +4009,85 @@ gaps this run's particular ASR/vision segmentation happened to trigger.
 No code changes made. No new RAW launched. Holding for review before any
 FIX-3/FIX-4 directive.
 
+## D-050 -- engine architecture consolidation audit (report-only)
+
+Full audit delivered in chat (execution graph traced from real source for
+every stage of `run_op("focused", ...)`; duplicated-authority findings for
+"who decides the winner"/"what is one idea"/"who may delete content"/"who
+proves a composite is safe"/"is an idea covered"; a proposed canonical
+identity model, semantic ledger, 6-layer authority hierarchy, ASR-jitter
+strategy, D-037-through-D-049 rule classification, benchmark expansion
+plan, Semantic Selection Stability metric, and a staged D-050A-F refactor
+plan). No code changes, no RAW. Authorized to proceed with D-050A only.
+
+## D-050A -- canonical identity/provenance foundation (additive-only)
+
+Implements the identity/provenance layer D-050's audit proposed, as pure
+shadow metadata: nothing in the active pipeline reads any id below to make
+an editorial decision yet -- confirmed by running the full pre-existing
+`tests/test_cutsell_*.py` glob (1324 tests, CleanCutBench's 54 real-chain
+fixtures included) unmodified and green both before and after this change.
+
+**Identity model** (all additive, defaulted to `None`/`""`, existing
+`clip_id`/`parent_semantic_clip_id`/`render_fragment_id` untouched):
+`CandidateTake` gains `source_span_id`, `attempt_id`, `realization_id`.
+`DraftClip` gains `realization_id`, `semantic_idea_id`, `retry_family_id`,
+`parent_realization_id`. `semantic_claims.Claim` gains
+`canonical_claim_id`.
+
+**Physical vs semantic identity** (the directive's central anti-jitter
+requirement): `source_span_id` is a physical-observation identity and is
+deliberately timestamp-sensitive, mirroring `source_identity.
+stable_clip_id`'s own existing shape. `attempt_id`/`realization_id`/
+`semantic_idea_id`/`canonical_claim_id` are canonical SEMANTIC identities
+and are minted purely from content (normalized text) and structural
+membership -- never from start/end timestamps -- so small ASR timing
+jitter alone can never change a semantic id. See
+`cutsell_worker/canonical_identity.py`'s module docstring for the full
+design note and the one-owner-per-id table.
+
+**Minting owners** (one call site each): `take_segmentation.py`
+(`source_span_id`, including its own internal boundary-fragment-repair
+join); `attempt_reconstruction.py`'s `_merge_attempt` (`attempt_id`, both
+fused and singleton-passthrough, reused unmodified by
+`_preserve_borderline_subspans`); `pipeline.py`'s `build_flow_b_draft`
+(`realization_id`, immediately before take-grouping; `semantic_idea_id`/
+`retry_family_id`, minted from the final post-semantic-equivalence
+`take_group_id` -- D-050A intentionally conflates the two, per the D-050
+audit's own Phase 3 finding); `post_selection_interior_gap_trim.py` and
+`human_boundary_polish_v5.py` (`parent_realization_id`, mirroring the
+existing D-036 `parent_semantic_clip_id` pattern exactly -- `realization_id`
+itself is never touched by either split site, only carried through
+`dataclasses.replace()`); `semantic_claims.py`'s `extract_claims`
+(`canonical_claim_id`, from `claim_type` + `content_tokens` only, the seed
+for a future D-050C cross-realization claim-dedup fix, not wired into any
+coverage decision here).
+
+**Observability**: `pipeline.py` adds a new, additive
+`diagnostics["canonical_identity_chain"]` key (via
+`canonical_identity.build_identity_chain_diagnostics`) listing every
+selected clip's full identity chain in one place.
+
+**Tests**: `tests/test_cutsell_d050a_canonical_identity.py` (26 tests) --
+minting-function determinism/content-anchoring/anti-jitter, one-owner-
+never-remints, physical trim preserves `realization_id`, physical split
+(both sites, including a re-split of an already-split fragment) preserves
+`realization_id` and stamps `parent_realization_id`, group members keep
+distinct `realization_id`s while sharing one `semantic_idea_id`, no
+duplicate/orphan realization ids through the real `build_flow_b_draft`
+chain, no cycle in chained-split parent pointers, legacy `clip_id`
+computation and `Claim.claim_id` untouched.
+
+**Validation**: compileall clean; full `tests/test_cutsell_*.py` glob
+1350 passed (1324 pre-existing + 26 new), 0 failed -- behavioral parity
+confirmed (CleanCutBench's real-chain fixtures assert exact
+winner/order/discarded/claim-coverage/Freeze outcomes and all 54 still
+pass unchanged).
+
+No editorial behavior changed. No Modal RAW launched. No RunPod touched.
+No winner/grouping/ClaimCoverage/Freeze logic modified. Holding for review
+before D-050B (Semantic Ledger).
+
 ## Change rule
 
 When a new decision changes product behavior, update this file in the same development cycle. Do not silently redefine CutSell through code alone.

@@ -11,9 +11,11 @@ strong multi-family recording-process evidence, or clear lexical restart evidenc
 """
 from __future__ import annotations
 
+from dataclasses import replace
 import re
 from typing import Iterable, Mapping, Tuple
 
+from .canonical_identity import mint_attempt_id
 from .contracts import CandidateTake, MediaSignals
 from .session_boundaries import infer_session_boundaries
 from .source_identity import stable_clip_id
@@ -279,9 +281,24 @@ def _merge_signals(members: tuple[CandidateTake, ...]) -> MediaSignals | None:
     )
 
 
+def _member_span_ids(members: tuple[CandidateTake, ...]) -> tuple[str, ...]:
+    """D-050A: the id set `attempt_id` is minted from -- each member's own
+    `source_span_id` when it has one (a raw or already-fused candidate),
+    falling back to its `clip_id` only for a candidate that predates
+    D-050A's source_span_id stamping entirely. Never falls back to
+    start/end -- see canonical_identity.py's anti-jitter design note."""
+    return tuple(str(member.source_span_id or member.clip_id) for member in members)
+
+
 def _merge_attempt(members: tuple[CandidateTake, ...]) -> CandidateTake:
+    # D-050A: every attempt -- fused or a lone passthrough -- gets a
+    # canonical `attempt_id`, minted once here (the single owner; see
+    # canonical_identity.py's ID OWNERSHIP table). Content/membership-
+    # anchored, never timestamp-anchored.
+    attempt_id = mint_attempt_id(_member_span_ids(members))
     if len(members) == 1:
-        return members[0]
+        member = members[0]
+        return member if member.attempt_id == attempt_id else replace(member, attempt_id=attempt_id)
     text = " ".join(member.text.strip() for member in members if member.text.strip()).strip()
     start = members[0].start
     end = members[-1].end
@@ -297,6 +314,7 @@ def _merge_attempt(members: tuple[CandidateTake, ...]) -> CandidateTake:
         # Completeness belongs to the tail of the delivery. A complete earlier sentence
         # must not hide an unfinished final fragment.
         complete_idea=members[-1].complete_idea,
+        attempt_id=attempt_id,
     )
 
 
