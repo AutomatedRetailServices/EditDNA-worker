@@ -35,6 +35,7 @@ from .composite_resolver import (
 )
 from .draft_review_provider import DraftReviewProvider, safe_review_draft
 from .hybrid_editorial import EditorialJudge
+from .semantic_compute_planner import build_cost_contract_report
 from .semantic_idea_equivalence import SemanticEquivalenceArbiter
 from .session_boundaries import safe_group_takes_by_sessions
 from .strategy import choose_strategy
@@ -445,6 +446,12 @@ def build_flow_b_draft(
             "hybrid_editorial_deleted_count": len(hybrid_cleanup.deleted),
             "hybrid_editorial_semantic_decision_count": len(hybrid_cleanup.semantic_decisions),
             "hybrid_editorial_chunks": list(hybrid_cleanup.diagnostics)[:100],
+            # D-052 Part B: present only when CUTSELL_SEMANTIC_COMPUTE_PLANNER
+            # was enabled for this run -- None otherwise (today's default).
+            "semantic_compute_plan": (
+                build_cost_contract_report(hybrid_cleanup.semantic_compute_plan)
+                if hybrid_cleanup.semantic_compute_plan is not None else None
+            ),
             "hybrid_semantic_best_take_override_count": semantic_best_take_override_count,
             "take_group_count": len(groups),
             "alternate_group_count": alternate_group_count,

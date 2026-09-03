@@ -138,13 +138,26 @@ jobs:
           # nothing new). A runtime-config value only, read by
           # cutsell_worker/resolver_mode.py; no cutsell_worker editorial
           # module is touched by this overlay either.
-          jq -c '(.env // {}) + {CUTSELL_HYBRID_LLM_ENABLED:"1", CUTSELL_HYBRID_PROVIDER:"google", CUTSELL_UNIFIED_REALIZATION_RESOLVER:"AUTHORITATIVE"}' \
+          # D-052 STABILITY BATTERY: explicitly authorized overlay of
+          # CUTSELL_ASR_CANONICAL_NORMALIZATION="1" and
+          # CUTSELL_SEMANTIC_COMPUTE_PLANNER="1" for the controlled 3-run
+          # battery -- both flags default OFF in code (see D-052) and the
+          # base RunPod template has no opinion on either, so without this
+          # overlay the battery would test nothing new. Same mechanism,
+          # same reasoning as the D-044/D-050C2 overlays above. Runtime-
+          # config values only, read by take_segmentation.py and
+          # hybrid_session_cleanup.py respectively; no cutsell_worker
+          # editorial module is touched by this overlay.
+          jq -c '(.env // {}) + {CUTSELL_HYBRID_LLM_ENABLED:"1", CUTSELL_HYBRID_PROVIDER:"google", CUTSELL_UNIFIED_REALIZATION_RESOLVER:"AUTHORITATIVE", CUTSELL_ASR_CANONICAL_NORMALIZATION:"1", CUTSELL_SEMANTIC_COMPUTE_PLANNER:"1"}' \
             /tmp/base-template.json > /tmp/cutsell-env.json
           test "$(jq 'length' /tmp/cutsell-env.json)" != "0"
           test "$(jq -r '.CUTSELL_HYBRID_LLM_ENABLED' /tmp/cutsell-env.json)" = "1"
           test "$(jq -r '.CUTSELL_HYBRID_PROVIDER' /tmp/cutsell-env.json)" = "google"
           test "$(jq -r '.CUTSELL_UNIFIED_REALIZATION_RESOLVER' /tmp/cutsell-env.json)" = "AUTHORITATIVE"
+          test "$(jq -r '.CUTSELL_ASR_CANONICAL_NORMALIZATION' /tmp/cutsell-env.json)" = "1"
+          test "$(jq -r '.CUTSELL_SEMANTIC_COMPUTE_PLANNER' /tmp/cutsell-env.json)" = "1"
           echo "Resolver mode for this run: $(jq -r '.CUTSELL_UNIFIED_REALIZATION_RESOLVER' /tmp/cutsell-env.json)"
+          echo "D-052 flags for this run: CUTSELL_ASR_CANONICAL_NORMALIZATION=$(jq -r '.CUTSELL_ASR_CANONICAL_NORMALIZATION' /tmp/cutsell-env.json) CUTSELL_SEMANTIC_COMPUTE_PLANNER=$(jq -r '.CUTSELL_SEMANTIC_COMPUTE_PLANNER' /tmp/cutsell-env.json)"
           python3 -c "
           import json
           with open('/tmp/cutsell-env.json') as f:
@@ -153,9 +166,9 @@ jobs:
               # The canonical-parity overlay values are not secrets --
               # never mask them, so the parity audit below (and future
               # printed diagnostics) can show they are actually set.
-              if value and key not in ('CUTSELL_HYBRID_LLM_ENABLED', 'CUTSELL_HYBRID_PROVIDER', 'CUTSELL_UNIFIED_REALIZATION_RESOLVER'):
+              if value and key not in ('CUTSELL_HYBRID_LLM_ENABLED', 'CUTSELL_HYBRID_PROVIDER', 'CUTSELL_UNIFIED_REALIZATION_RESOLVER', 'CUTSELL_ASR_CANONICAL_NORMALIZATION', 'CUTSELL_SEMANTIC_COMPUTE_PLANNER'):
                   print(f'::add-mask::{value}')
-          print(f'Loaded {len(env)} env vars from the live RunPod template plus the D-044 hybrid-semantic overlay and the D-050C2 resolver-mode overlay (secret values masked).')
+          print(f'Loaded {len(env)} env vars from the live RunPod template plus the D-044 hybrid-semantic overlay, the D-050C2 resolver-mode overlay, and the D-052 stability-battery overlay (secret values masked).')
           "
           echo "CUTSELL_ENV_JSON_PATH=/tmp/cutsell-env.json" >> "$GITHUB_ENV"
 
@@ -351,6 +364,12 @@ jobs:
             semantic_decision_count: .diagnostics.hybrid_editorial_semantic_decision_count,
             chunks: (.diagnostics.hybrid_editorial_chunks // [])
           }' artifact/video00-modal.json
+
+          echo "--- diagnostics.semantic_compute_plan (D-052 Part B, present only when CUTSELL_SEMANTIC_COMPUTE_PLANNER=1) ---"
+          jq '.diagnostics.semantic_compute_plan // {status:"absent_flag_off"}' artifact/video00-modal.json
+
+          echo "--- stage_status.canonical_asr_evidence (D-052 Part A, always computed) ---"
+          jq '.stage_status.canonical_asr_evidence // {status:"absent"}' artifact/video00-modal.json
 
           echo "--- final KEEP sequence (clip_id + text, in order) ---"
           jq '[.selected[]? | {clip_id, text}]' artifact/video00-modal.json

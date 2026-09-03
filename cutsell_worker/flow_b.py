@@ -9,6 +9,7 @@ from typing import Callable, Mapping
 
 from .asr import ASRProvider
 from .attempt_reconstruction import preserved_subspan_candidates, reconstruct_delivery_attempts
+from .canonical_asr_evidence import build_canonical_asr_evidence, normalize_transcript_segments
 from .clean_cut_provider import CleanCutProvider
 from .composer_provider import ComposerProvider
 from .contracts import ProcessingRequest, ProcessingResult
@@ -118,6 +119,49 @@ def process_local_sources(
     transcript_tuple = tuple(transcripts)
     trace.complete("asr", segment_count=len(transcript_tuple))
     notify("analyzing", 27)
+
+    # D-052 Part A Section 2/3 observability: compute canonical ASR evidence
+    # and its deterministic re-segmentation for every source, independent
+    # of whether CUTSELL_ASR_CANONICAL_NORMALIZATION is actually applied
+    # inside segment_takes below -- this diagnostic exists so a stability
+    # battery can compare "what Whisper's raw segments looked like" against
+    # "what the canonical evidence layer says was actually spoken" even
+    # when the flag is off. Never used to make an editorial decision.
+    asr_config_fingerprint = ""
+    fingerprint_fn = getattr(asr_provider, "config_fingerprint", None)
+    if callable(fingerprint_fn):
+        try:
+            asr_config_fingerprint = fingerprint_fn(language_hint=request.language_hint).fingerprint()
+        except Exception:
+            asr_config_fingerprint = ""
+    per_source_evidence = []
+    total_normalized_words = 0
+    for source in sorted(hydrated_sources, key=lambda item: item.source_order):
+        evidence = build_canonical_asr_evidence(
+            transcript_tuple,
+            source_asset_id=source.source_asset_id,
+            language=request.language_hint,
+            asr_model=getattr(asr_provider, "model_name", "unknown"),
+            asr_config_fingerprint=asr_config_fingerprint,
+        )
+        per_source_evidence.append(evidence)
+        total_normalized_words += len(evidence.normalized_words)
+    normalized_segments = normalize_transcript_segments(transcript_tuple)
+    combined_evidence_hash = "asrev_combined_" + "|".join(
+        evidence.evidence_hash for evidence in per_source_evidence
+    ) if per_source_evidence else ""
+    trace.complete(
+        "canonical_asr_evidence",
+        raw_segment_count=len(transcript_tuple),
+        normalized_segment_count=len(normalized_segments),
+        normalized_word_count=total_normalized_words,
+        evidence_hash=combined_evidence_hash,
+        per_source_evidence_hashes=[evidence.evidence_hash for evidence in per_source_evidence],
+        asr_config_fingerprint=asr_config_fingerprint,
+        canonical_normalization_applied=str(
+            os.environ.get("CUTSELL_ASR_CANONICAL_NORMALIZATION", "")
+        ).strip().lower() in {"1", "true", "yes", "on"},
+    )
 
     local_performance = analyze_local_performance(local_paths, target_fps=12.0)
     local_frame_count = sum(len(item.observations) for item in local_performance.timelines)
