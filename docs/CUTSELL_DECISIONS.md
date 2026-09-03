@@ -6701,6 +6701,41 @@ READY FOR HUMAN VISUAL REVIEW: NO (nothing rendered -- Freeze blocked before Bou
 
 Then STOP. Do not patch. Do not launch another RAW.
 
+## D-059 -- claim-coverage proposition scope fix
+
+Targeted validator fix for the D-058 canary's own residual finding -- no new architecture, no changes to Unified Resolver, grouping, BestTake, ASR, Human Gold, Semantic Ledger, Freeze, Boundary, or Render/QC.
+
+**Root scope bug**: `semantic_claims.claim_coverage`'s relevance-scoping required a candidate sentence to clear a general content-token bar (`min(2, claim_token_count)` shared tokens) before treating it as the sentence the claim is actually about. When a claim's own surrounding scaffolding was paraphrased heavily enough (near-zero shared ordinary words) that no sentence cleared that bar, the function fell back to the WHOLE candidate text for its negation/number/causal mismatch guards -- so an unrelated clause's own negation could poison a claim it was never actually about. Live shape (D-058 canary): an earlier "no creo... son hereditarios" clause (rejecting a broader, unrelated claim) capped coverage for a completely separate, later, correctly-restated "5-10%" quantitative claim whose own phrasing barely overlapped the claim's own scaffolding words.
+
+**Fix (two parts, both inside `claim_coverage`)**:
+1. When some candidate sentence shares an EXACT number with the claim, that sentence takes PRIORITY over the general content-token test as the relevance signal -- reuses `contradiction_signal._clauses_address_same_proposition`'s own D-056.5 anchor ("a shared number is decisive on its own"), not reinvented. Priority, not union: unioning would have let a coincidentally-overlapping unrelated sentence (sharing generic scaffolding like "science backs this up") merge into scope alongside the real match, reproducing the same bug. This is a match-only signal -- a genuinely different number never "shares" one, so a real number mismatch still falls through to the general content-token test untouched.
+2. When truly no sentence is relevant under either test, the negation/number/causal guards are **skipped entirely** -- never fall back to the whole candidate text. The plain overlap ratio (already computed whole-text-scoped, independent of this per-sentence check) stands alone: a genuine low-overlap paraphrase still reaches the ambiguous band and gets a real chance at the bounded claim-equivalence arbiter (`resolve_ambiguous_coverage`, unchanged); a claim with no credible matching content anywhere is honestly reported not covered via low raw overlap, never via a fabricated mismatch cap -- the distinction is provable: the resulting coverage value is never exactly `_DEFINITIVE_MISMATCH_COVERAGE_CAP` in this case.
+
+**Verified against the exact live D-058 canary claim/candidate text pair**: coverage now 0.333 (ambiguous band, arbiter-confirmable) -- was 0.05 (falsely capped).
+
+**Tests**: `tests/test_cutsell_d059_claim_coverage_proposition_scope.py`, 9 new tests -- unrelated negation before/after a valid paraphrased claim (covered, never poisoned), same-proposition negation/number/causal mismatch (still not covered), low-overlap clear paraphrase reaching the arbiter, no credible matching proposition (honestly not covered via low overlap, not a fabricated mismatch), multi-sentence clip with only one relevant clause, and a generic reproduction of the exact D-058 canary shape (a rhetorical negation of a broader unrelated claim, followed by a heavily-paraphrased restatement of the shared number).
+
+**No safety weakening**: true negation/number/causal mismatch on the SAME matched proposition are all still confidently capped and unreachable by the arbiter (proven by the 3 same-proposition mismatch tests above). D-056.3's 17 contradiction-safe-composite tests and D-056.5's 16 proposition-completeness tests remain green unchanged (33/33) -- `contradiction_signal.py` itself was never touched.
+
+**Offline qualification**: compileall clean. D-050 through D-059 targeted suite: 285 passed (276 baseline + 9 new). CleanCutBench LEGACY+AUTHORITATIVE: 54/54 fixtures both modes, identical 23/31/3 split, 0 regressions. Full `tests/test_cutsell_*.py`: 1621 passed (1612 baseline + 9 new), 0 regressions. Full `tests/` (minus `test_semantic_stitch.py`): 2245 passed, 13 subtests passed, only the same 2 pre-existing/unrelated failures already on record since D-056.1.
+
+### Final report (verbatim, as delivered)
+D-059 COMPLETE
+
+ROOT SCOPE BUG: `claim_coverage`'s relevance-scoping fell back to the whole candidate text for its negation/number/causal mismatch guards whenever no single sentence cleared the general content-token relevance bar, letting an unrelated clause's own negation poison a claim it was never about.
+PROPOSITION-LEVEL COVERAGE: PASS
+UNRELATED NEGATION FALSE POSITIVE: FIXED
+TRUE NEGATION SAFETY: PASS
+NUMBER SAFETY: PASS
+CAUSAL SAFETY: PASS
+Human Gold fixtures: PASS (offline; the exact live claim/candidate pair now resolves to the ambiguous band, arbiter-confirmable, matching the D-058 canary's own Human Gold-passing content)
+LEGACY: 54/54
+AUTHORITATIVE: 54/54
+FULL TEST COUNT: 1621 passed (tests/test_cutsell_*.py), 0 regressions vs the 1612-test D-058 baseline; full tests/ (minus test_semantic_stitch.py) 2245 passed, 13 subtests passed, only the same 2 pre-existing/unrelated failures already on record.
+READY FOR ONE FINAL VIDEO00 CANARY? YES
+
+Then STOP. Do not launch Modal.
+
 ## Change rule
 
 When a new decision changes product behavior, update this file in the same development cycle. Do not silently redefine CutSell through code alone.
