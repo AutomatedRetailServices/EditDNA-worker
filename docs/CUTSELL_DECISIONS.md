@@ -6655,6 +6655,52 @@ READY FOR ONE VIDEO00 CANARY? YES
 
 Then STOP. Do not launch Modal.
 
+## D-058 canary -- final Video00 Modal run validating the three structural fixes live
+
+One authorized run (run [33814961471](https://github.com/AutomatedRetailServices/EditDNA-worker/actions/runs/33814961471), commit `7be38e4`, fixed config unchanged, ~4.4 min GPU wall-clock, clean completion, teardown confirmed). No code changes before or after.
+
+**Pimples/acne (Phase 1)**: the exact three-clip shape recurred under fresh clip ids -- "Por temporada, me salía un acné en la espalda con la que yo resolvía con resorcina." plus THREE separate hormonal-pimples-behind-the-ear/neck clips. All four now survive to the final KEEP sequence as independent beats -- zero contradiction/duplicate/retry findings on any of them. Human Gold confirms directly: `pimples_micro_1_present`, `pimples_micro_2_present`, `pimples_micro_3_present`, `pimples_bad_monolith_absent`, `pimples_later_winner_present`, `pimples_micro_order`, and `acne_back_preserved` all **PASSED** (all FAILED in the pre-D-058 canary). **GROUPING DISTINCT-IDEA SAFETY: PASS.**
+
+**Gastritis (Phase 2)**: the complete realization ("...dijeron que tenía gastritis. Nada severo pero tenía gastritis y me mandaron tres meses con pastillas.") is the one that survived to KEEP, verbatim-matching Human Gold's own gold text exactly. The two competing incomplete/thinner takes (the "...me diagnosticaron con..." cutoff and the bare "2023" mention) were correctly discarded. Human Gold confirms: `gastritis_preserved` **PASSED** (failed in the pre-D-058 canary). **RESOLVER EVIDENCE HIERARCHY: PASS.**
+
+**Hereditary 5-10% (Phase 3)**: the winning realization (the full "Esta es mi experiencia..." statement) still carries the same "5-10%" fact verbatim, and `contradiction_findings: []` confirms the D-056.5 fix still holds. However, `_lost_critical_claims` still reports this exact claim `CRITICAL_CLAIM_LOST` (`coverage_against_winning_realization: 0.05`) -- a **newly discovered, different residual bug** in the same mechanism, not the one D-058 Phase 3 targeted: the claim's own content tokens (`{"convencida","avala","ciencia","solo","así","estoy"}`, since digits are excluded from `_content()`) never reach `_MIN_SHARED_FOR_RELEVANCE` (2 tokens) against any single sentence of the winning realization -- each candidate sentence shares at most 1 token ("solo" or "así") with the claim. `claim_coverage`'s relevance-scoping therefore falls back to the WHOLE candidate text (`relevant_sentences if relevant_sentences else candidate_text`), which contains an earlier, unrelated negation ("Por eso no creo... son hereditarios") that then trips the negation-flip guard and caps coverage at `_DEFINITIVE_MISMATCH_COVERAGE_CAP` (0.05) -- reproducing, through a different code path, the same class of whole-text-scope false positive D-056.4/D-056.5 already fixed once for `contradiction_signal.py`. Confirmed via local reproduction of the exact live claim/candidate text pair. **CLAIM PARAPHRASE ALIGNMENT: FAIL** (the deterministic number/negation/causal mismatch guards themselves are confirmed correct and unregressed by the 22-test D-058 offline suite; this is a distinct, not-yet-fixed relevance-scoping gap in the same function).
+
+**Authoritative resolver**: 19 semantic ideas -- 18 RESOLVED_WINNER + 1 RESOLVED_COMPOSITE, shadow and authority tracks agree (19/19). 2 orphan realizations correctly routed `REVIEW_REQUIRED` (no verified replacement, explicitly flagged not silently confirmed). Zero invalid composites, zero silent zero-realization ideas.
+
+**Human Gold**: 16/18 (up from 8/18 pre-D-058). Failed: `papillary_cancer_preserved`, `sonography_good_before_diagnosis` -- both unrelated to any of the three D-058 shapes (a separate thyroid-nodule/biopsy-sequencing area).
+
+**Architecture**: PASS, 0 failed checks.
+
+**Freeze**: BLOCKED -- on the single residual `CRITICAL_CLAIM_LOST` finding above, plus 2 pre-existing, unrelated `UNIQUE_FACT_LOST` findings (a stray "Síntomas que tuve..." aside and an incidental "2023" date) that were never part of D-058's scope.
+
+**Render/QC**: not reached -- Freeze blocked, no render attempted, `delivery_status: NOT_DELIVERABLE_not_attempted`, `deliverable: false`.
+
+**Single root blocker**: Category C -- coverage/alignment false positive, in `claim_coverage`'s relevance-scoping fallback (see above). Not a grouping problem, not a resolver-winner problem, not genuine content loss, not a genuine contradiction.
+
+### Final report (verbatim, as delivered)
+D-058 VIDEO00 CANARY COMPLETE
+
+GROUPING DISTINCT-IDEA SAFETY: PASS
+RESOLVER EVIDENCE HIERARCHY: PASS
+CLAIM PARAPHRASE ALIGNMENT: FAIL
+AUTHORITATIVE ENGINE: PASS
+Human Gold: 16/18
+Architecture: PASS
+CanonicalEditPlan: PASS
+FinalEditReviewer: PASS (correctly caught the residual finding -- functioned correctly; the underlying claim-coverage computation it reads from is what's wrong)
+Freeze: BLOCKED
+Render: NO
+PostRender QC: NOT_REACHED
+delivery_status: NOT_DELIVERABLE_not_attempted
+deliverable: false
+
+IF BLOCKED:
+single root blocker: C. coverage/alignment false positive -- `claim_coverage`'s relevance-scoping falls back to the whole candidate text when no single sentence shares >=2 tokens with a heavily-paraphrased claim, and the whole-text fallback picks up an unrelated earlier negation, capping coverage at the fixed mismatch value. A newly discovered gap, distinct from the one D-058 Phase 3 fixed (which is confirmed correct and unregressed offline).
+
+READY FOR HUMAN VISUAL REVIEW: NO (nothing rendered -- Freeze blocked before Boundary/Render)
+
+Then STOP. Do not patch. Do not launch another RAW.
+
 ## Change rule
 
 When a new decision changes product behavior, update this file in the same development cycle. Do not silently redefine CutSell through code alone.
