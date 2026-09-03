@@ -6298,6 +6298,169 @@ READY FOR HUMAN VISUAL REVIEW OF THE RENDERED VIDEO? NO (nothing rendered -- Fre
 
 Then STOP. Did not patch. Did not launch another RAW.
 
+## D-056.4 -- Final blocker forensic (report only, no code, no RAW)
+
+Forensic on the D-056.3 canary's (run 33794783794, head `b674c5b`) one remaining
+blocker: `tg_48c0c0027c22862ff2` (realizations `clip_182eb2f537baef489c38` =
+A, `clip_333a082e130594f3b867` = B), negation contradiction. Raw S3
+result.json and the GH Actions artifact ZIP were both unreachable (this
+environment's egress policy blocks S3/blob-storage hosts entirely -- not a
+masking issue; every field used below is the exact, unmasked value printed
+by the workflow's own `jq` extraction, confirmed free of the pre-D-056.1
+masking-corruption class of bug). Not recoverable from what was available:
+exact start/end timestamps, `attempt_id`, `realization_id`,
+`retry_family_id` in the SemanticLedger's own numbering. KEEP-sequence order
+is used as a chronological-order proxy, justified below.
+
+**Realization A** (`clip_182eb2f537baef489c38`): "Esta es mi experiencia. Soy
+la única en mi familia que tiene este tipo de cáncer. Por eso no creo y está
+comprobado científicamente que los cánceres son hereditarios. Más bien, solo
+un 5-10% son de carácter hereditario. Mayormente, son nuestras elecciones de
+vida, así que cuídate." Complete sentence. DeliveryScorer score 0.6369.
+Hybrid semantic label: `winner` (confidence 0.95, both chunks it appears in).
+
+**Realization B** (`clip_333a082e130594f3b867`): "Soy la primera en mi
+familia con este tipo de cáncer. Nadie en mi familia tiene un carcinoma
+papilar en la tiroides ni sufre de la tiroides. Así que estoy convencida y la
+ciencia lo avala que solo un 5-10% de los" -- **trails off mid-clause**, never
+completes ("...de los [cánceres son hereditarios]" never spoken). Score
+0.6288 (a 1.3% gap from A -- the exact "score gap too thin" FinalEditReviewer
+finding). Hybrid semantic label: `failed` (confidence 0.85-0.95, every chunk).
+
+**Exact contradiction mechanism**: `detect_text_contradiction` flags
+`negation_conflict=True` because A's tokens include "no" (from "no creo") and
+B's tokens include zero members of `{no, not, never, nunca, sin, without}` --
+"nadie" and "ni" are NOT in that set. Both realizations independently state
+the SAME shared numeric claim ("solo un 5-10%"), so `number_conflict=False`
+(correctly). Trigger: **NEGATION**, and specifically an asymmetric-
+completeness false trigger -- A's "no creo" is a rhetorical negation of a
+DIFFERENT, adjacent proposition ("cancers are broadly hereditary", which A
+explicitly rejects before restating the narrower shared 5-10% claim); B never
+reaches an equivalent clause at all because its recording was cut off, so its
+absence of a negation token reflects incompleteness, not an asserted opposite
+polarity.
+
+**Independent corroboration this is the same idea, not two competing
+claims**: `semantic_idea_equivalence`'s SemanticEquivalenceArbiter (Gemini,
+confidence 0.9) merged this exact pair with reason "Same personal cancer
+statistics and hereditary beliefs discussed." `hybrid_editorial_chunks`'
+own decision history for this idea: B was originally correctly identified as
+`failed` and marked `applied_delete: true`, with `later_retry_replacement_id:
+clip_d7bd7ded5f860eb93858` (a short fragment, "cánceres son hereditarios.
+Soy la única en mi familia que tiene este tipo de cáncer.") -- which was
+ITSELF then deleted as `cross_group_semantic_retry_covered_by_authoritative_
+delivery`, `strongest_peer_clip_id: clip_182eb2f537baef489c38` (= A),
+`strongest_peer_coverage: 1.0`. B was only pulled back into play by a LATER
+`hybrid_story_coverage_guard` restoration (`reason:
+restore_unique_story_coverage`) specifically to preserve its one genuinely
+unique fact -- the papillary thyroid carcinoma family-history detail, which A
+never mentions -- not because B is a competing final assertion of the shared
+5-10% claim.
+
+**Human semantic reading**: RETRY_CORRECTION for the shared 5-10% claim
+(A is the complete, later-in-KEEP-order, higher-scored, "winner"-labeled
+final formulation; B is an abandoned earlier/incomplete attempt at the same
+point, already once correctly identified as `failed` and routed through a
+now-deleted intermediate replacement that itself resolved to A) combined
+with COMPLEMENTARY_INFORMATION for B's one unique clause (papillary thyroid
+carcinoma family history). NOT a GENUINE_CONTRADICTION -- A and B never
+assert opposite polarity on any claim they both actually complete.
+
+**Retry intent**: recoverable. Clean Cut V1 confirmed `editorial_mode:
+"clean_cut"`, `composer: "not_requested_clean_cut_only"` this run -- no
+reordering layer is active, so `draft.selected`'s order is raw chronological
+order (D-025), making A -> B a real temporal-order proxy, not just a KEEP-
+sequence artifact. Every independent signal (DeliveryScorer score,
+Gemini "winner"/"failed" label, the hybrid layer's own now-superseded
+`applied_delete`+`later_retry_replacement_id` chain) agrees: A is the
+creator's completed, deliverable formulation; B was an earlier, unfinished
+attempt at the same statement, restored later ONLY to rescue one adjacent
+unique fact it happens to carry.
+
+**Editorial decision a competent human editor would make**: KEEP A as the
+primary statement. B's unique clause (papillary thyroid carcinoma family
+history) is worth a targeted micro-trim-and-insert if achievable without
+its own incomplete tail -- verbatim, B cannot be composited as a full second
+member (its sentence never finishes), so neither "KEEP BOTH verbatim" nor
+"discard B's unique fact entirely" is fully satisfying; a human editor would
+most likely keep A and manually decide whether the isolated clause "Nadie en
+mi familia tiene un carcinoma papilar en la tiroides ni sufre de la tiroides"
+is worth a hand-trimmed micro-insert -- exactly the kind of judgment call
+this architecture correctly routes to `unresolved_ambiguous`/human review
+rather than silently discarding or silently keeping an unfinished sentence.
+
+**Root cause: B. CONTRADICTION DETECTOR FALSE POSITIVE.** The retry
+relationship IS already understood and correctly reasoned about elsewhere in
+this exact pipeline (the hybrid layer's own `failed`/`later_retry_
+replacement_id`/`cross_group_semantic_retry_covered_by_authoritative_
+delivery` chain, and the SemanticEquivalenceArbiter's 0.9-confidence same-
+idea merge) -- this is not a "retry relationship not understood" gap (C).
+The specific defect is narrower: `detect_text_contradiction`'s negation
+check compares raw whole-clip negation-token PRESENCE/ABSENCE without regard
+to whether both realizations reached far enough into their own sentence to
+have had the opportunity to state the compared proposition at all. An
+incomplete/truncated realization's mere silence on a clause it never reached
+gets conflated with an asserted opposite polarity.
+
+**Smallest general missing contract** (no Video00 phrase special-casing, not
+proposed as multiple patches): a negation-conflict verdict should require
+evidence that BOTH realizations actually completed enough of the shared
+proposition to express a polarity at all -- e.g. gating the negation-token
+comparison on the SHARED/overlapping claim text (or requiring some minimum
+completeness/closure signal on both sides) rather than each realization's
+whole-clip negation-token set independent of whether either side ever
+finished its sentence. Analysis only -- not implemented here.
+
+### Final report (verbatim, as delivered)
+D-056.4 COMPLETE
+
+REALIZATION A (`clip_182eb2f537baef489c38`, score 0.6369, hybrid label
+`winner`): "Esta es mi experiencia. Soy la única en mi familia que tiene
+este tipo de cáncer. Por eso no creo y está comprobado científicamente que
+los cánceres son hereditarios. Más bien, solo un 5-10% son de carácter
+hereditario. Mayormente, son nuestras elecciones de vida, así que cuídate."
+
+REALIZATION B (`clip_333a082e130594f3b867`, score 0.6288, hybrid label
+`failed`): "Soy la primera en mi familia con este tipo de cáncer. Nadie en
+mi familia tiene un carcinoma papilar en la tiroides ni sufre de la
+tiroides. Así que estoy convencida y la ciencia lo avala que solo un 5-10%
+de los" -- incomplete, cut off mid-clause.
+
+EXACT CONTRADICTION: negation_conflict=true (A contains "no", B contains
+zero negation-set tokens); number_conflict=false (both state "5-10%"
+identically).
+
+ACTUAL HUMAN MEANING: RETRY_CORRECTION for the shared 5-10%-hereditary claim
+(A is the completed final formulation; B an abandoned, once-already-deleted
+earlier attempt) plus COMPLEMENTARY_INFORMATION for B's one unique clause
+(papillary thyroid carcinoma family history). Not a genuine contradiction.
+
+CREATOR FINAL INTENT RECOVERABLE: YES
+
+HUMAN EDITOR DECISION: KEEP A as the primary statement; flag B's isolated
+unique clause for a targeted human micro-trim-and-insert decision (cannot
+be verbatim-composited -- B's own sentence never completes).
+
+CUTSELL DECISION: unresolved_ambiguous / freeze_blocked (both realizations
+left selected, routed to human review).
+
+CUTSELL WAS: INCORRECT (on the contradiction call specifically -- routing an
+uncertain case to human review, rather than silently resolving it wrong, is
+the correct FAIL-CLOSED behavior per CLAUDE.md's "WHEN UNCERTAIN, KEEP";
+the incorrect judgment is narrowly that a genuine polarity conflict exists
+here, not the decision to escalate).
+
+ROOT CAUSE: B
+
+ONE GENERAL MISSING CONTRACT: a negation-conflict verdict must require
+evidence both realizations completed enough of the shared proposition to
+express a polarity at all, rather than comparing whole-clip negation-token
+presence independent of either side's completeness.
+
+READY TO FIX: YES
+
+Then STOP. No code. No RAW.
+
 ## Change rule
 
 When a new decision changes product behavior, update this file in the same development cycle. Do not silently redefine CutSell through code alone.
