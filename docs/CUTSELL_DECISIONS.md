@@ -5827,6 +5827,134 @@ READY FOR VIDEO01/VIDEO02/VIDEO03? NO
 Then STOP. Did not patch. Did not launch a further run beyond the five
 dispatch attempts already documented in Section 8.
 
+## D-056.1 -- Benchmark execution reliability only (infra, no engine-semantic change)
+
+Issued directly off D-056 Section 8's root-cause findings. Explicitly scoped to
+workflow/wrapper/masking/observability fixes: no Resolver, Ledger, ASR, Human
+Gold, Selection, or Freeze code touched. Zero live GPU dispatch during this
+directive -- offline validation only, same commit head
+(`feature/runpod-pod-on-demand`).
+
+### 1. Benchmark result persistence (item 1)
+D-056 Run C root cause: `modal_video00_full_benchmark.py`'s local entrypoint
+only wrote `modal-video00-result.json` AFTER its blocking
+`run_video00_benchmark.remote(payload)` call returned cleanly -- a SIGTERM to
+the local `modal run` process at any point before that write permanently
+discarded the result, even when the remote computation had already fully
+succeeded (confirmed on 4 of 4 cancelled Run C attempts).
+
+Fix: `run_video00_benchmark` (the REMOTE function) now also persists its
+compact summary directly to S3, from inside the remote call itself, before it
+ever returns to the local caller -- `_persist_benchmark_result()`, keyed by
+`modal_gpu_config.benchmark_result_s3_key(benchmark_id)` (new namespace:
+`cutsell/benchmark-results/{benchmark_id}/compact-result.json`, deliberately
+separate from `serverless_handler._focused()`'s own full-diagnostics
+`cutsell/serverless/{benchmark_id}/result.json` upload). Uses the same AWS
+credentials already injected into the remote container via
+`cutsell_env_secret` -- no second credential path. Never raises: a
+persistence failure never turns an otherwise-successful benchmark into a
+reported failure. The persisted/local result additionally carries a new,
+purely-observational `benchmark_result_uri` field.
+
+### 2. Stale-status recovery / poll-not-trust (item 2)
+`cutsell-video00-modal-raw.yml`'s "Print Modal run summary" step no longer
+declares failure the instant `modal-video00-result.json` is missing/empty. It
+now extracts the same 4 AWS credentials the workflow already pulls from the
+live RunPod template, computes the deterministic S3 key via
+`benchmark_result_s3_key(BENCHMARK_ID)`, and polls (up to 6 attempts, 10s
+apart) for the durably-persisted marker before declaring the run a failure.
+This is what makes an apparently "stale"/hung GitHub Actions job-step status
+(observed for 2-9+ hours per Run C attempt while real completion took ~5-6
+minutes -- D-056 Section 8) recoverable: the marker's existence depends only
+on the remote computation finishing, never on this job step's own reported
+status or on the local process surviving.
+
+### 3. Masking fix (item 3)
+Same class of bug as D-053, same fix: "Build masked Modal env-secret file"
+now only masks a value when it is also `len(str(value)) >= 12`, so ordinary
+short/numeric diagnostics (hash fragments, counts, costs) are never blanked
+out of "Print full canonical diagnostics" the way they were during D-056 Run
+A/B (D-056 Section 1's masking-corruption finding). A real secret is
+essentially always >= 12 characters, so this costs no real masking coverage.
+
+### 4. Additional diagnostics surfaced (item 4)
+- `content_hash`/`canonical_equivalence_hash` (D-055, already computed by
+  `build_canonical_asr_evidence()` but never forwarded) are now combined and
+  included in `stage_status.canonical_asr_evidence` (`content_hash`,
+  `canonical_equivalence_hash`, `per_source_content_hashes`,
+  `per_source_canonical_equivalence_hashes`), via a new shared
+  `flow_b._combine_hashes()` helper (also used to rebuild
+  `combined_evidence_hash`, unchanged in value).
+- `semantic_compute_plan` now reports per-tier P0/P1/P2
+  eligible/planned/deferred COUNTS (`p0_eligible_count`, `p0_planned_count`,
+  `p0_deferred_count`, and the P1/P2 equivalents) in
+  `semantic_compute_planner.build_cost_contract_report()` -- pure
+  presentation over `SemanticComputePlan.work_items`, which already carried
+  this information; never changes which items are planned or deferred.
+- Realization/orphan COUNTS are now printed explicitly in the workflow
+  (`shadow_orphan_review_count`, `authority_unresolved_orphan_count`, etc.),
+  derived via `jq length` over the exact same lists
+  (`realization_resolver_shadow.orphan_reviews`,
+  `realization_resolver_authority.unresolved_orphan_realization_ids`) already
+  printed in full -- no `cutsell_worker/realization_resolver.py` change.
+- Actual (spent, not estimated) semantic compute cost is NOT surfaced: no
+  ledger/transport code anywhere in this repo currently tracks a real
+  dollars-spent figure (only `estimated_semantic_cost_usd` and an unused
+  optional `actual_cost_usd` parameter existed). Adding real cost-tracking
+  would mean new logic inside the Gemini transport/ledger, which is out of
+  this reliability-only directive's scope (`Do NOT modify ... Ledger`).
+  Flagged honestly rather than silently left unaddressed.
+
+### 5. Duplicate-paid-run prevention + offline tests (item 5)
+`main()` now checks `_load_persisted_benchmark_result(benchmark_id)` BEFORE
+ever calling `.remote()` -- a benchmark_id that already has a durably
+persisted result (e.g. the workflow's own deterministic
+`video00-modal-{run_id}-{run_attempt}`, reused by a resumed/re-invoked local
+wrapper) never triggers a second paid Modal dispatch. A `.remote()` exception
+(e.g. a Modal `FunctionTimeoutError`) is now caught and turned into a
+deterministic, well-shaped diagnostic result (`ok: false`, `error_type`,
+`benchmark_id`, `terminal_state: "local_wrapper_exception"`) instead of an
+uncaught traceback and an empty local file -- and that diagnostic result is
+itself persisted to S3.
+
+32 new/updated offline tests added to
+`tests/test_modal_video00_full_benchmark.py` (real S3 put/get code paths
+exercised against an in-memory fake S3 client, never a real bucket) covering
+all 5 required scenarios plus the key-computation and persistence-helper
+unit tests, and 7 new tests in
+`tests/test_cutsell_d056_1_diagnostics_surfacing.py` for the item-4 diagnostics
+wiring. Zero live Modal/GitHub dispatch.
+
+### Final report (verbatim, as delivered)
+BENCHMARK RESULT PERSISTENCE: PASS
+STALE STATUS RECOVERY: PASS
+MASKING FIX: PASS
+DUPLICATE PAID RUN PREVENTION: PASS
+FULL TEST COUNT: 1557 passed (tests/test_cutsell_*.py glob) + 2181 passed / 2
+pre-existing-and-unrelated failures (full tests/ minus one pre-existing
+broken-collection file, test_semantic_stitch.py -- see Engineering notes
+below)
+READY TO RE-RUN 3-RUN BATTERY: YES
+
+### Engineering notes (honesty section)
+Two test failures were observed in the full `tests/` run, BOTH confirmed
+(via `git stash`) to already fail identically on HEAD before any D-056.1
+change was made -- neither is a regression introduced by this directive, and
+neither is fixed by it (fixing either would mean touching Resolver/
+StoryValidator-adjacent code explicitly out of this directive's scope):
+- `tests/test_hybrid_story_guard_incomplete_retry.py::test_incomplete_failed_retry_is_covered_when_prior_delivery_preserves_numbers_and_negation`
+  -- a `_covered_by_kept_delivery` (StoryValidator-adjacent) behavioral test,
+  unrelated to benchmark execution reliability.
+- `tests/test_video00_modal_hybrid_semantic_parity.py::test_the_two_overlay_values_are_never_masked_in_ci_logs`
+  -- a stale literal-substring assertion (checks for a 2-item allowlist tuple
+  prefix that was already extended to 5 items by D-050C2/D-052, before this
+  session).
+Also pre-existing and unrelated: `tests/test_semantic_stitch.py` fails to
+even collect (`TypeError: score_take() missing 1 required positional
+argument`) and `jobs_smoke.py` (a stray heredoc snippet, not a real module)
+fails `compileall` -- both untouched by this diff, both already broken on
+HEAD.
+
 ## Change rule
 
 When a new decision changes product behavior, update this file in the same development cycle. Do not silently redefine CutSell through code alone.

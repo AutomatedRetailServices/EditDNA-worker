@@ -139,6 +139,49 @@ MAX_MODAL_ASR_ONLY_TIMEOUT_S: int = 900
 # Video00 payload shape.
 CUTSELL_ASR_ONLY_PAYLOAD_JSON_ENV = "CUTSELL_ASR_ONLY_PAYLOAD_JSON"
 
+# --- D-056.1 "BENCHMARK EXECUTION RELIABILITY ONLY" ----------------------
+# D-056's Run C dispatch saga (docs/CUTSELL_DECISIONS.md D-056 Section 8)
+# root-caused the failure to a single structural gap: the ONLY place a
+# Modal full-Video00 benchmark's compact result was ever persisted was a
+# local file (`modal-video00-result.json`), written by the local `modal
+# run` CLI process ONLY after its blocking `.remote()` call returned
+# cleanly. A SIGTERM to that local process at any point before that write
+# -- even after the remote computation had already fully succeeded --
+# permanently discarded the result. This prefix/key names the SEPARATE,
+# durable S3 location `modal_video00_full_benchmark.py` now persists that
+# same compact result to, from INSIDE the remote function itself, before
+# it ever returns to the local caller -- independent of whether that local
+# process survives.
+#
+# Deliberately a different namespace from
+# `cutsell_worker.serverless_handler._focused()`'s own
+# `cutsell/serverless/{benchmark_id}/result.json` upload: that key holds
+# the FULL diagnostics tree (run_op()'s own durable-persistence
+# convention, unchanged here); this key holds only the small compact
+# summary dict (the exact same shape the Modal function itself returns),
+# so a workflow-side poll/read never has to guess which of the two it is
+# looking at.
+CUTSELL_BENCHMARK_RESULT_S3_PREFIX = "cutsell/benchmark-results"
+
+
+def benchmark_result_s3_key(benchmark_id: str) -> str:
+    """Deterministic S3 key for a durably-persisted compact benchmark
+    result. Keyed off the SAME `benchmark_id` the calling workflow already
+    computes BEFORE ever dispatching (e.g. `BENCHMARK_ID: video00-modal-
+    ${{ github.run_id }}-${{ github.run_attempt }}` in
+    cutsell-video00-modal-raw.yml) -- so both the Modal remote function
+    (the writer) and the GitHub Actions workflow or local wrapper (the
+    readers) can derive the identical key independently, with no round
+    trip through a function return value or a local file either side
+    might never see. Sanitized the same way
+    `cutsell_worker.serverless_handler._safe_id` sanitizes a benchmark_id
+    for use in an S3 key, so this never rejects a benchmark_id `run_op()`
+    itself would have accepted."""
+    safe_id = "".join(ch if ch.isalnum() or ch in "-_" else "-" for ch in str(benchmark_id or "").strip())[:100]
+    if not safe_id:
+        raise ValueError("benchmark_id is required to compute a benchmark_result_s3_key.")
+    return f"{CUTSELL_BENCHMARK_RESULT_S3_PREFIX}/{safe_id}/compact-result.json"
+
 
 def require_modal_asr_only_timeout(timeout_s: float) -> None:
     """Raises ValueError for a non-positive or excessive timeout. Separate

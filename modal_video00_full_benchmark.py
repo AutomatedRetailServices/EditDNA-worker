@@ -59,6 +59,22 @@ Serverless RAW's own 5400s/90-minute poll bound for this exact six-minute
 source video, not a new number). No persistent container: Modal's own
 scale-to-zero behavior applies the moment this one ephemeral `modal run`
 invocation's function call returns.
+
+Result persistence (D-056.1 "BENCHMARK EXECUTION RELIABILITY ONLY"): D-056
+found that cancelling the local `modal run` CLI process at ANY point
+before its blocking `.remote()` call returned discarded the result
+permanently, even when the remote computation had already fully
+succeeded -- the ONLY place the compact summary was ever written was a
+local file, written only on a clean return. `run_video00_benchmark` now
+also persists that same compact summary to S3 (see
+`_persist_benchmark_result`, `modal_gpu_config.benchmark_result_s3_key`)
+from INSIDE the remote function, before it ever returns -- independent of
+whether the local process survives. `main()` checks for an
+already-persisted result before dispatching (never pays for a duplicate
+Modal invocation for the same `benchmark_id`) and persists a deterministic
+diagnostic result on its own exception path too (e.g. a Modal timeout).
+Purely additive/observability -- no editorial field of the compact
+summary changes shape or meaning.
 """
 from __future__ import annotations
 
@@ -76,6 +92,7 @@ from modal_gpu_config import (
     CUTSELL_RUNPOD_PIP_SPEC,
     DEFAULT_MODAL_VIDEO00_TIMEOUT_S,
     MODAL_VIDEO00_APP_NAME,
+    benchmark_result_s3_key,
     require_modal_gpu_type,
     require_modal_video00_timeout,
 )
@@ -138,6 +155,88 @@ def _resolve_env_secret() -> "modal.Secret":
 cutsell_env_secret = _resolve_env_secret()
 
 
+def _persist_benchmark_result(benchmark_id: str, result: dict) -> str | None:
+    """D-056.1 item 1: persists the compact run_op() summary to S3 at the
+    deterministic key `benchmark_result_s3_key(benchmark_id)`, independent
+    of whether the local `modal run` CLI process survives to write its own
+    `modal-video00-result.json`. This is called from INSIDE the remote
+    `run_video00_benchmark` function below, before it returns to the local
+    caller -- so the persisted copy exists even if the local process is
+    SIGTERM'd (workflow cancellation, runner loss, a timeout) the very
+    instant control returns to it. Uses the SAME AWS credentials already
+    present in this remote container's environment (injected via
+    `cutsell_env_secret`, built from the full RunPod template env dict --
+    identical mechanism to `cutsell_worker.serverless_handler._upload_
+    artifact`, never a second credential path).
+
+    Also called from `main()` (the LOCAL process) both to persist a
+    deterministic diagnostic result on a local-side exception (see item
+    5(e)) and, indirectly via `_load_persisted_benchmark_result`, to avoid
+    a duplicate paid dispatch (item 5(d)) -- the live workflow exports the
+    same 4 AWS env vars into that step's shell before invoking `modal run`
+    so this function works identically on both sides.
+
+    Never raises: persistence is purely an additive reliability/
+    observability mechanism and must never turn an otherwise-successful
+    (or already-reported) benchmark result into a harder failure. Returns
+    the `s3://...` URI on success, None otherwise (including when
+    S3_BUCKET/boto3/benchmark_id are unavailable)."""
+    benchmark_id = str(benchmark_id or "").strip()
+    if not benchmark_id:
+        return None
+    try:
+        import boto3
+
+        bucket = str(os.environ.get("S3_BUCKET") or "").strip()
+        if not bucket:
+            return None
+        region = str(os.environ.get("AWS_REGION") or "us-east-1")
+        key = benchmark_result_s3_key(benchmark_id)
+        s3 = boto3.client("s3", region_name=region)
+        s3.put_object(
+            Bucket=bucket,
+            Key=key,
+            Body=json.dumps(result, indent=2, default=str).encode("utf-8"),
+            ContentType="application/json",
+        )
+        return f"s3://{bucket}/{key}"
+    except Exception:  # noqa: BLE001 -- observability only, never fatal
+        return None
+
+
+def _load_persisted_benchmark_result(benchmark_id: str) -> dict | None:
+    """D-056.1 items 2/5(d): reads back a previously-persisted compact
+    result for this exact `benchmark_id`, if one already exists at
+    `benchmark_result_s3_key(benchmark_id)`. `main()` uses this BEFORE
+    dispatching to skip a duplicate paid Modal invocation for a
+    benchmark_id that already has a durable result -- e.g. the workflow's
+    own deterministic `BENCHMARK_ID` (known before dispatch) being reused
+    by a resumed or re-invoked local wrapper. The same function is what a
+    stale-GH-status recovery path relies on: since the remote function
+    persists before returning (see `_persist_benchmark_result`), this can
+    recover a completed result even when the local process/GitHub step
+    status never reflects that completion. Never raises -- returns None on
+    any failure (bucket/creds/boto3 unavailable, key not found, malformed
+    JSON)."""
+    benchmark_id = str(benchmark_id or "").strip()
+    if not benchmark_id:
+        return None
+    try:
+        import boto3
+
+        bucket = str(os.environ.get("S3_BUCKET") or "").strip()
+        if not bucket:
+            return None
+        region = str(os.environ.get("AWS_REGION") or "us-east-1")
+        key = benchmark_result_s3_key(benchmark_id)
+        s3 = boto3.client("s3", region_name=region)
+        obj = s3.get_object(Bucket=bucket, Key=key)
+        body = obj["Body"].read()
+        return json.loads(body.decode("utf-8") if isinstance(body, bytes) else body)
+    except Exception:  # noqa: BLE001 -- "not found yet" and "can't check" both mean: dispatch normally
+        return None
+
+
 @app.function(
     gpu=MODAL_GPU_TYPE,
     image=image,
@@ -156,12 +255,21 @@ def run_video00_benchmark(payload: dict) -> dict:
         result = run_op(op, payload)
     except Exception as exc:  # noqa: BLE001 -- report, don't crash the whole benchmark invocation
         result = {"ok": False, "error": str(exc), "error_type": type(exc).__name__}
+
+    # D-056.1 item 1: persist BEFORE returning -- see _persist_benchmark_
+    # result's docstring for why this specific ordering is the fix.
+    benchmark_id = str(payload.get("benchmark_id") or "").strip()
+    persisted_uri = _persist_benchmark_result(benchmark_id, result) if benchmark_id else None
+
     # Second, independent guarantee (belt-and-suspenders on top of
     # _focused() already returning a plain-JSON-native compact summary):
     # only plain JSON-native types ever cross the Modal serialization
     # boundary back to a caller that has neither torch nor cutsell_worker
     # installed locally -- same discipline as modal_gpu_diagnostics.py.
-    return json.loads(json.dumps(result, default=str))
+    # `benchmark_result_uri` is additive observability only -- never an
+    # editorial field, never consulted by any Selection/Boundary/Freeze
+    # decision.
+    return json.loads(json.dumps({**result, "benchmark_result_uri": persisted_uri}, default=str))
 
 
 @app.local_entrypoint()
@@ -170,7 +278,35 @@ def main() -> None:
     if not payload_json:
         raise RuntimeError(f"{CUTSELL_BENCHMARK_PAYLOAD_JSON_ENV} is required (JSON-encoded run_op() payload).")
     payload = json.loads(payload_json)
-    result = run_video00_benchmark.remote(payload)
+    benchmark_id = str(payload.get("benchmark_id") or "").strip()
+
+    # D-056.1 item 5(d): never dispatch a second paid Modal invocation for
+    # a benchmark_id that already has a durably-persisted result.
+    existing = _load_persisted_benchmark_result(benchmark_id) if benchmark_id else None
+    if existing is not None:
+        print(
+            f"Reusing already-persisted result for benchmark_id={benchmark_id!r} -- "
+            "no duplicate paid Modal dispatch."
+        )
+        result = existing
+    else:
+        try:
+            result = run_video00_benchmark.remote(payload)
+        except Exception as exc:  # noqa: BLE001 -- D-056.1 item 5(e): a Modal-side
+            # timeout/interruption (e.g. modal.exception.FunctionTimeoutError,
+            # a lost connection) must still produce a deterministic,
+            # recoverable diagnostic result -- never an uncaught traceback
+            # and an empty local file.
+            result = {
+                "ok": False,
+                "error": str(exc),
+                "error_type": type(exc).__name__,
+                "benchmark_id": benchmark_id or None,
+                "terminal_state": "local_wrapper_exception",
+            }
+            if benchmark_id:
+                result["benchmark_result_uri"] = _persist_benchmark_result(benchmark_id, result)
+
     print(json.dumps(result, indent=2, default=str))
     with open("modal-video00-result.json", "w", encoding="utf-8") as fh:
         json.dump(result, fh, indent=2, default=str)

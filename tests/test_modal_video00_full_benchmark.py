@@ -215,6 +215,7 @@ def test_resolve_env_secret_rejects_an_empty_json_object(tmp_path, monkeypatch):
 def test_run_video00_benchmark_delegates_to_run_op_not_reimplemented(monkeypatch):
     # No forked/duplicated editorial logic -- the same run_op() dispatcher
     # RunPod Serverless and RunPod Pod both already use.
+    monkeypatch.delenv("S3_BUCKET", raising=False)
     fake_module = types.ModuleType("cutsell_worker.serverless_handler")
     sentinel = {"ok": True, "sentinel_marker": "no-duplicated-editor", "selected_count": 23}
     calls = []
@@ -230,10 +231,14 @@ def test_run_video00_benchmark_delegates_to_run_op_not_reimplemented(monkeypatch
     result = mvb.run_video00_benchmark.remote(payload)
 
     assert calls == [("focused", payload)]
-    assert result == sentinel
+    # D-056.1 item 1: benchmark_result_uri is additive-only -- None here
+    # because no S3_BUCKET is configured in this offline test, exactly the
+    # "can't persist, don't fail the benchmark" path.
+    assert result == {**sentinel, "benchmark_result_uri": None}
 
 
 def test_run_video00_benchmark_reports_exception_without_crashing(monkeypatch):
+    monkeypatch.delenv("S3_BUCKET", raising=False)
     fake_module = types.ModuleType("cutsell_worker.serverless_handler")
 
     def _raise(op, payload):
@@ -250,6 +255,7 @@ def test_run_video00_benchmark_reports_exception_without_crashing(monkeypatch):
 
 
 def test_run_video00_benchmark_result_is_json_serializable(monkeypatch):
+    monkeypatch.delenv("S3_BUCKET", raising=False)
     fake_module = types.ModuleType("cutsell_worker.serverless_handler")
     fake_module.run_op = lambda op, payload: {"ok": True, "selected_count": 23, "deliverable": True}
     monkeypatch.setitem(sys.modules, "cutsell_worker.serverless_handler", fake_module)
@@ -264,3 +270,241 @@ def test_main_requires_payload_env_var(monkeypatch):
     monkeypatch.delenv(cfg.CUTSELL_BENCHMARK_PAYLOAD_JSON_ENV, raising=False)
     with pytest.raises(RuntimeError, match=cfg.CUTSELL_BENCHMARK_PAYLOAD_JSON_ENV):
         mvb.main()
+
+
+# --- D-056.1 "BENCHMARK EXECUTION RELIABILITY ONLY" ----------------------
+# D-056's Run C dispatch saga (docs/CUTSELL_DECISIONS.md D-056 Section 8)
+# root-caused why the mandated 3rd run could never be recovered: the ONLY
+# place a compact result was ever persisted was a local file, written by
+# main() ONLY after its blocking `.remote()` call returned cleanly -- a
+# SIGTERM at any point before that write permanently discarded an
+# otherwise-successful remote result. The fixtures/tests below exercise
+# the real S3 put/get code paths in _persist_benchmark_result and
+# _load_persisted_benchmark_result against an in-memory fake S3 client
+# (never a real bucket), matching this file's existing precedent of
+# mocking at the external-system boundary (`cutsell_worker.serverless_
+# handler.run_op` above) rather than the internals behind it.
+
+
+class _FakeS3Body:
+    def __init__(self, data: bytes):
+        self._data = data
+
+    def read(self):
+        return self._data
+
+
+class _FakeS3Client:
+    """In-memory stand-in for boto3's S3 client, scoped to exactly the two
+    calls the persistence helpers make (put_object / get_object)."""
+
+    def __init__(self):
+        self.store: dict[tuple[str, str], bytes] = {}
+        self.put_calls: list[dict] = []
+        self.get_calls: list[dict] = []
+
+    def put_object(self, *, Bucket, Key, Body, ContentType=None):
+        self.put_calls.append({"Bucket": Bucket, "Key": Key, "ContentType": ContentType})
+        self.store[(Bucket, Key)] = Body
+
+    def get_object(self, *, Bucket, Key):
+        self.get_calls.append({"Bucket": Bucket, "Key": Key})
+        if (Bucket, Key) not in self.store:
+            raise KeyError(f"no such key: {Bucket}/{Key}")
+        return {"Body": _FakeS3Body(self.store[(Bucket, Key)])}
+
+
+def _install_fake_s3(monkeypatch, *, bucket="test-bucket") -> _FakeS3Client:
+    import boto3
+
+    fake_client = _FakeS3Client()
+    monkeypatch.setenv("S3_BUCKET", bucket)
+    monkeypatch.setenv("AWS_REGION", "us-east-1")
+    monkeypatch.setattr(boto3, "client", lambda *args, **kwargs: fake_client)
+    return fake_client
+
+
+def test_benchmark_result_s3_key_is_deterministic_and_namespaced():
+    key1 = cfg.benchmark_result_s3_key("video00-modal-123-1")
+    key2 = cfg.benchmark_result_s3_key("video00-modal-123-1")
+    assert key1 == key2
+    assert key1 == "cutsell/benchmark-results/video00-modal-123-1/compact-result.json"
+    # Never the same namespace as serverless_handler._focused()'s own
+    # full-diagnostics upload (`cutsell/serverless/...`).
+    assert not key1.startswith("cutsell/serverless/")
+
+
+def test_benchmark_result_s3_key_rejects_empty_benchmark_id():
+    with pytest.raises(ValueError):
+        cfg.benchmark_result_s3_key("")
+
+
+def test_persist_benchmark_result_writes_to_the_deterministic_key(monkeypatch):
+    fake_s3 = _install_fake_s3(monkeypatch)
+    result = {"ok": True, "selected_count": 5}
+
+    uri = mvb._persist_benchmark_result("bench-1", result)
+
+    assert uri == "s3://test-bucket/cutsell/benchmark-results/bench-1/compact-result.json"
+    assert len(fake_s3.put_calls) == 1
+    assert fake_s3.put_calls[0]["Key"] == cfg.benchmark_result_s3_key("bench-1")
+    stored = json.loads(fake_s3.store[("test-bucket", cfg.benchmark_result_s3_key("bench-1"))])
+    assert stored == result
+
+
+def test_persist_benchmark_result_never_raises_without_a_bucket(monkeypatch):
+    monkeypatch.delenv("S3_BUCKET", raising=False)
+    assert mvb._persist_benchmark_result("bench-1", {"ok": True}) is None
+
+
+def test_persist_benchmark_result_never_raises_without_a_benchmark_id(monkeypatch):
+    _install_fake_s3(monkeypatch)
+    assert mvb._persist_benchmark_result("", {"ok": True}) is None
+
+
+def test_load_persisted_benchmark_result_round_trips(monkeypatch):
+    _install_fake_s3(monkeypatch)
+    result = {"ok": True, "selected_count": 7}
+    mvb._persist_benchmark_result("bench-2", result)
+
+    loaded = mvb._load_persisted_benchmark_result("bench-2")
+
+    assert loaded == result
+
+
+def test_load_persisted_benchmark_result_returns_none_when_absent(monkeypatch):
+    _install_fake_s3(monkeypatch)
+    assert mvb._load_persisted_benchmark_result("never-persisted") is None
+
+
+# 5(a): Modal function completes while GH status appears stale -- the
+# workflow's own job-step status is never consulted by these helpers at
+# all; a completed remote result is recoverable purely from S3, exactly
+# what a stale-status recovery path (the workflow's fallback download)
+# relies on.
+def test_persisted_result_recoverable_independent_of_caller_state(monkeypatch):
+    _install_fake_s3(monkeypatch)
+    fake_module = types.ModuleType("cutsell_worker.serverless_handler")
+    fake_module.run_op = lambda op, payload: {"ok": True, "selected_count": 9}
+    monkeypatch.setitem(sys.modules, "cutsell_worker.serverless_handler", fake_module)
+
+    # Simulate the remote function completing (the ONLY thing that ever
+    # calls .remote() successfully) ...
+    mvb.run_video00_benchmark.remote({"op": "focused", "benchmark_id": "bench-stale"})
+
+    # ... then a totally separate read, as if performed by a workflow step
+    # that never saw the (possibly stale-reporting) job status at all.
+    recovered = mvb._load_persisted_benchmark_result("bench-stale")
+    assert recovered is not None
+    assert recovered["ok"] is True
+    assert recovered["selected_count"] == 9
+
+
+# 5(b): result exists (in S3) before the local wrapper (main()) exits --
+# i.e. persistence happens INSIDE the remote function call, not after.
+def test_result_is_persisted_before_remote_call_returns_to_caller(monkeypatch):
+    fake_s3 = _install_fake_s3(monkeypatch)
+    fake_module = types.ModuleType("cutsell_worker.serverless_handler")
+    fake_module.run_op = lambda op, payload: {"ok": True, "selected_count": 3}
+    monkeypatch.setitem(sys.modules, "cutsell_worker.serverless_handler", fake_module)
+
+    assert fake_s3.put_calls == []  # nothing persisted yet
+    mvb.run_video00_benchmark.remote({"op": "focused", "benchmark_id": "bench-order"})
+    # The put_object call already happened as part of .remote() itself --
+    # a caller that dies the instant .remote() returns (the exact D-056
+    # Run C failure mode) can never observe an un-persisted result.
+    assert len(fake_s3.put_calls) == 1
+
+
+# 5(c): cancellation never destroys an already-completed result -- once
+# persisted, nothing in this module's code path ever deletes/overwrites an
+# S3 object with a "not done" placeholder, and a later local-side failure
+# on the SAME benchmark_id still finds it.
+def test_cancellation_after_persistence_never_loses_the_result(monkeypatch):
+    _install_fake_s3(monkeypatch)
+    fake_module = types.ModuleType("cutsell_worker.serverless_handler")
+    fake_module.run_op = lambda op, payload: {"ok": True, "selected_count": 11}
+    monkeypatch.setitem(sys.modules, "cutsell_worker.serverless_handler", fake_module)
+
+    mvb.run_video00_benchmark.remote({"op": "focused", "benchmark_id": "bench-cancel"})
+
+    # Simulate the local wrapper being cancelled/killed AFTER persistence
+    # (a no-op here: nothing to run) -- the persisted copy is untouched.
+    recovered = mvb._load_persisted_benchmark_result("bench-cancel")
+    assert recovered["ok"] is True
+    assert recovered["selected_count"] == 11
+
+
+# 5(d): no duplicate paid rerun when a result already exists for this
+# exact benchmark_id -- main() must never call .remote() again.
+def test_main_skips_duplicate_dispatch_when_result_already_persisted(monkeypatch, tmp_path):
+    _install_fake_s3(monkeypatch)
+    monkeypatch.chdir(tmp_path)
+    mvb._persist_benchmark_result("bench-dup", {"ok": True, "selected_count": 42})
+
+    payload = {"op": "focused", "benchmark_id": "bench-dup"}
+    monkeypatch.setenv(cfg.CUTSELL_BENCHMARK_PAYLOAD_JSON_ENV, json.dumps(payload))
+
+    def _fail_if_dispatched(*args, **kwargs):
+        raise AssertionError("main() must not dispatch a duplicate paid Modal call")
+
+    monkeypatch.setattr(mvb.run_video00_benchmark, "remote", _fail_if_dispatched)
+
+    mvb.main()
+
+    with open("modal-video00-result.json", "r", encoding="utf-8") as fh:
+        written = json.load(fh)
+    assert written == {"ok": True, "selected_count": 42}
+
+
+# 5(e): a timeout/interruption on the LOCAL side (e.g. a Modal
+# FunctionTimeoutError surfacing from .remote() itself) must still produce
+# a deterministic, well-shaped diagnostic result -- never an uncaught
+# traceback and an empty local file.
+def test_main_produces_deterministic_diagnostic_result_on_timeout(monkeypatch, tmp_path):
+    fake_s3 = _install_fake_s3(monkeypatch)
+    monkeypatch.chdir(tmp_path)
+    payload = {"op": "focused", "benchmark_id": "bench-timeout"}
+    monkeypatch.setenv(cfg.CUTSELL_BENCHMARK_PAYLOAD_JSON_ENV, json.dumps(payload))
+
+    def _raise_timeout(*args, **kwargs):
+        raise TimeoutError("simulated modal.exception.FunctionTimeoutError")
+
+    monkeypatch.setattr(mvb.run_video00_benchmark, "remote", _raise_timeout)
+
+    mvb.main()
+
+    with open("modal-video00-result.json", "r", encoding="utf-8") as fh:
+        written = json.load(fh)
+    assert written["ok"] is False
+    assert written["error_type"] == "TimeoutError"
+    assert written["terminal_state"] == "local_wrapper_exception"
+    assert written["benchmark_id"] == "bench-timeout"
+    # The deterministic diagnostic result is itself persisted -- a later
+    # poll/read for this benchmark_id recovers it instead of nothing. The
+    # persisted copy predates the `benchmark_result_uri` field being set
+    # on the local `written` dict (that field names the persisted copy's
+    # own URI, so it cannot be included in the payload it is naming) --
+    # every other field matches exactly.
+    assert len(fake_s3.put_calls) == 1
+    recovered = mvb._load_persisted_benchmark_result("bench-timeout")
+    assert recovered == {k: v for k, v in written.items() if k != "benchmark_result_uri"}
+
+
+def test_main_dispatches_normally_when_no_existing_result(monkeypatch, tmp_path):
+    _install_fake_s3(monkeypatch)
+    monkeypatch.chdir(tmp_path)
+    fake_module = types.ModuleType("cutsell_worker.serverless_handler")
+    fake_module.run_op = lambda op, payload: {"ok": True, "selected_count": 15}
+    monkeypatch.setitem(sys.modules, "cutsell_worker.serverless_handler", fake_module)
+
+    payload = {"op": "focused", "benchmark_id": "bench-fresh"}
+    monkeypatch.setenv(cfg.CUTSELL_BENCHMARK_PAYLOAD_JSON_ENV, json.dumps(payload))
+
+    mvb.main()
+
+    with open("modal-video00-result.json", "r", encoding="utf-8") as fh:
+        written = json.load(fh)
+    assert written["ok"] is True
+    assert written["selected_count"] == 15
+    assert written["benchmark_result_uri"] == "s3://test-bucket/cutsell/benchmark-results/bench-fresh/compact-result.json"

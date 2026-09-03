@@ -87,7 +87,12 @@ jobs:
 
       - name: Install Modal client
         shell: bash
-        run: pip install --disable-pip-version-check --quiet modal
+        run: |
+          # boto3 is D-056.1's addition (never a live-modal-run
+          # dependency before this): the local `modal run` wrapper now
+          # checks/persists a durable S3 result marker itself -- see
+          # "Run Modal full Video00 benchmark" below.
+          pip install --disable-pip-version-check --quiet modal boto3
 
       - name: Load base RunPod template (env source of truth only)
         shell: bash
@@ -166,7 +171,22 @@ jobs:
               # The canonical-parity overlay values are not secrets --
               # never mask them, so the parity audit below (and future
               # printed diagnostics) can show they are actually set.
-              if value and key not in ('CUTSELL_HYBRID_LLM_ENABLED', 'CUTSELL_HYBRID_PROVIDER', 'CUTSELL_UNIFIED_REALIZATION_RESOLVER', 'CUTSELL_ASR_CANONICAL_NORMALIZATION', 'CUTSELL_SEMANTIC_COMPUTE_PLANNER'):
+              #
+              # D-056.1 item 3 fix (same precedent as D-053's fix to
+              # cutsell-asr-only-modal.yml): only mask values at least 12
+              # characters long. Without this threshold, EVERY other
+              # RunPod-template env value -- however short, however
+              # ordinary -- got masked unconditionally, and GitHub then
+              # redacts that literal substring everywhere it recurs in
+              # ANY later log line for the rest of the run. Short numeric
+              # diagnostics (hash fragments, counts, costs) recur
+              # constantly in the 'Print full canonical diagnostics' step
+              # below, so this corrupted them there -- confirmed live
+              # during D-056's Run A/B analysis (docs/CUTSELL_DECISIONS.md
+              # D-056 Section 1). A real secret (API key, token, bucket
+              # name) is essentially always >= 12 characters, so this
+              # threshold costs no actual masking coverage.
+              if value and key not in ('CUTSELL_HYBRID_LLM_ENABLED', 'CUTSELL_HYBRID_PROVIDER', 'CUTSELL_UNIFIED_REALIZATION_RESOLVER', 'CUTSELL_ASR_CANONICAL_NORMALIZATION', 'CUTSELL_SEMANTIC_COMPUTE_PLANNER') and len(str(value)) >= 12:
                   print(f'::add-mask::{value}')
           print(f'Loaded {len(env)} env vars from the live RunPod template plus the D-044 hybrid-semantic overlay, the D-050C2 resolver-mode overlay, and the D-052 stability-battery overlay (secret values masked).')
           "
@@ -204,6 +224,23 @@ jobs:
         run: |
           set +e
           set -uo pipefail
+          # D-056.1 items 1/5(d): give the LOCAL `modal run` wrapper
+          # (modal_video00_full_benchmark.py's main(), which runs as part
+          # of this exact `modal run` CLI invocation, not inside the
+          # remote Modal container) the same AWS credentials the remote
+          # side already has via cutsell_env_secret -- same 4-key
+          # extraction this workflow already uses in "Download Video00
+          # Modal artifacts" below, so main() can (a) skip a duplicate
+          # paid dispatch when BENCHMARK_ID already has a persisted
+          # result, and (b) persist a deterministic diagnostic result on
+          # its own exception path (e.g. a Modal timeout).
+          BASE_TEMPLATE=$(cat /tmp/base-template.json)
+          for key in AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_REGION S3_BUCKET; do
+            value=$(printf '%s' "$BASE_TEMPLATE" | jq -r --arg key "$key" '.env[$key] // empty')
+            test -n "$value"
+            echo "::add-mask::$value"
+            export "$key=$value"
+          done
           modal run modal_video00_full_benchmark.py 2>&1 | tee modal-video00-output.log
           echo "exit_code=${PIPESTATUS[0]}" >> "$GITHUB_OUTPUT"
 
@@ -220,12 +257,48 @@ jobs:
         if: always()
         shell: bash
         run: |
-          if [ "${{ steps.modal_video00.outputs.exit_code }}" != "0" ]; then
-            echo "MODAL FULL VIDEO00 RUN FAILED (exit ${{ steps.modal_video00.outputs.exit_code }}) -- see modal-video00-output.log."
-            exit 1
-          fi
+          # D-056.1 items 1/2: never trust the local file (or this step's
+          # own exit_code input) alone. D-056's Run C dispatch saga
+          # (docs/CUTSELL_DECISIONS.md D-056 Section 8) confirmed on 4 of 4
+          # cancelled attempts that a SIGTERM to the local `modal run`
+          # process at any point before its own clean return permanently
+          # prevented modal-video00-result.json from ever being written --
+          # even when the remote Modal computation had already fully
+          # succeeded. modal_video00_full_benchmark.py's remote function
+          # now ALSO persists its compact result to a durable, benchmark-
+          # id-keyed S3 marker from inside the remote call itself, before
+          # it ever returns (see _persist_benchmark_result). When the
+          # local file is missing, recover from that marker instead of
+          # declaring failure outright -- this is what makes an
+          # apparently "stale"/hung GitHub step status recoverable: the
+          # marker's existence depends only on the remote computation
+          # actually finishing, never on this job step's own reported
+          # status or on the local process surviving.
           if [ ! -s modal-video00-result.json ]; then
-            echo "Modal run exited 0 but modal-video00-result.json is missing -- treating as a failure."
+            echo "modal-video00-result.json is missing/empty (exit_code=${{ steps.modal_video00.outputs.exit_code }}) -- checking the durable S3 result marker before declaring failure."
+            BASE_TEMPLATE=$(cat /tmp/base-template.json)
+            for key in AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_REGION S3_BUCKET; do
+              value=$(printf '%s' "$BASE_TEMPLATE" | jq -r --arg key "$key" '.env[$key] // empty')
+              test -n "$value"
+              echo "::add-mask::$value"
+              export "$key=$value"
+            done
+            RESULT_KEY=$(python3 -c "from modal_gpu_config import benchmark_result_s3_key; print(benchmark_result_s3_key('$BENCHMARK_ID'))")
+            RECOVERED=0
+            for attempt in 1 2 3 4 5 6; do
+              if aws s3 cp "s3://$S3_BUCKET/$RESULT_KEY" modal-video00-result.json >/dev/null 2>&1 && [ -s modal-video00-result.json ]; then
+                echo "Recovered a durably-persisted result from s3://$S3_BUCKET/$RESULT_KEY (attempt $attempt) -- the local wrapper never got to write its own copy, but the remote computation's own S3 persistence survived."
+                RECOVERED=1
+                break
+              fi
+              sleep 10
+            done
+            if [ "$RECOVERED" != "1" ]; then
+              echo "MODAL FULL VIDEO00 RUN FAILED (exit ${{ steps.modal_video00.outputs.exit_code }}) -- no local result and no persisted S3 result found at s3://$S3_BUCKET/$RESULT_KEY. See modal-video00-output.log."
+              exit 1
+            fi
+          elif [ "${{ steps.modal_video00.outputs.exit_code }}" != "0" ]; then
+            echo "MODAL FULL VIDEO00 RUN FAILED (exit ${{ steps.modal_video00.outputs.exit_code }}) -- see modal-video00-output.log."
             exit 1
           fi
           echo "--- modal-video00-result.json (compact run_op() summary) ---"
@@ -349,6 +422,20 @@ jobs:
 
           echo "--- diagnostics.realization_resolver_authority (D-050C2 authoritative application) ---"
           jq '.diagnostics.realization_resolver_authority // {status:"absent"}' artifact/video00-modal.json
+
+          # D-056.1 item 4: explicit realization/orphan COUNTS, derived
+          # (never recomputed -- jq `length` over the exact same lists
+          # already printed in full above) so a stability battery does
+          # not have to hand-count orphan_reviews/unresolved_orphan_
+          # realization_ids entries out of the raw dumps every time.
+          echo "--- realization/orphan counts (derived from the above) ---"
+          jq '{
+            shadow_total_ideas: (.diagnostics.realization_resolver_shadow.total_ideas // null),
+            shadow_review_required_count: (.diagnostics.realization_resolver_shadow.review_required_count // null),
+            shadow_orphan_review_count: (.diagnostics.realization_resolver_shadow.orphan_reviews // [] | length),
+            authority_idea_count: (.diagnostics.realization_resolver_authority.ideas // [] | length),
+            authority_unresolved_orphan_count: (.diagnostics.realization_resolver_authority.unresolved_orphan_realization_ids // [] | length)
+          }' artifact/video00-modal.json
 
           echo "--- diagnostics.repair_loop ---"
           jq '.diagnostics.repair_loop // {status:"absent"}' artifact/video00-modal.json

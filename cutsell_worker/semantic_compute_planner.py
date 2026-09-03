@@ -196,6 +196,19 @@ def build_cost_contract_report(plan: SemanticComputePlan, *, actual_cost_usd: fl
     Pure presentation of an already-built plan; never used to make a
     planning decision itself.
     """
+    # D-056.1 item 4: per-tier P0/P1/P2 counts -- purely a presentation
+    # addition over data build_semantic_compute_plan already computed
+    # (each SemanticWorkOutcome already carries its own priority/planned
+    # flag in plan.work_items); never changes which items are planned or
+    # deferred. D-056's report could only compare P0/P1/P2 dollar buckets,
+    # never how many work items actually made up each tier or how many of
+    # them were planned vs deferred -- this closes that gap.
+    def _count(priority: SemanticWorkPriority, *, planned: bool | None = None) -> int:
+        return sum(
+            1 for outcome in plan.work_items
+            if outcome.priority == priority and (planned is None or outcome.planned == planned)
+        )
+
     report = {
         "schema_version": "cutsell.semantic_compute_plan.v1",
         "eligible_work_item_count": plan.eligible_work_item_count,
@@ -206,6 +219,15 @@ def build_cost_contract_report(plan: SemanticComputePlan, *, actual_cost_usd: fl
         "optional_p2_cost_usd": plan.optional_p2_cost_usd,
         "cost_ceiling_usd": plan.cost_ceiling_usd,
         "estimated_semantic_cost_usd": plan.planned_cost_usd,
+        "p0_eligible_count": _count(SemanticWorkPriority.P0_SAFETY_CRITICAL),
+        "p0_planned_count": _count(SemanticWorkPriority.P0_SAFETY_CRITICAL, planned=True),
+        "p0_deferred_count": _count(SemanticWorkPriority.P0_SAFETY_CRITICAL, planned=False),
+        "p1_eligible_count": _count(SemanticWorkPriority.P1_RETRY_EQUIVALENCE),
+        "p1_planned_count": _count(SemanticWorkPriority.P1_RETRY_EQUIVALENCE, planned=True),
+        "p1_deferred_count": _count(SemanticWorkPriority.P1_RETRY_EQUIVALENCE, planned=False),
+        "p2_eligible_count": _count(SemanticWorkPriority.P2_EDITORIAL_QUALITY),
+        "p2_planned_count": _count(SemanticWorkPriority.P2_EDITORIAL_QUALITY, planned=True),
+        "p2_deferred_count": _count(SemanticWorkPriority.P2_EDITORIAL_QUALITY, planned=False),
     }
     if actual_cost_usd is not None:
         report["actual_semantic_cost_usd"] = round(max(0.0, float(actual_cost_usd)), 6)

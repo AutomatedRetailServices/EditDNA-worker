@@ -39,6 +39,17 @@ from .whole_video_analysis import WholeVideoProvider, safe_whole_video_analyze
 ProgressCallback = Callable[[str, int], None]
 
 
+def _combine_hashes(prefix: str, values: list[str]) -> str:
+    """D-056.1 item 4: shared join logic for the combined_* diagnostic
+    hashes surfaced in the `canonical_asr_evidence` trace (evidence_hash,
+    and -- newly forwarded here -- content_hash/canonical_equivalence_hash
+    from D-055's CanonicalASREvidence). Same convention D-052 already
+    established for combined_evidence_hash; extracted so it is not
+    hand-duplicated three times and is directly unit-testable without
+    exercising the full process_local_sources pipeline."""
+    return prefix + "|".join(values) if values else ""
+
+
 def _resolve_editorial_mode(value: str | None = None) -> str:
     mode = str(value or os.environ.get("CUTSELL_EDITORIAL_MODE") or "clean_cut").strip().lower()
     if mode not in {"clean_cut", "full"}:
@@ -147,16 +158,35 @@ def process_local_sources(
         per_source_evidence.append(evidence)
         total_normalized_words += len(evidence.normalized_words)
     normalized_segments = normalize_transcript_segments(transcript_tuple)
-    combined_evidence_hash = "asrev_combined_" + "|".join(
-        evidence.evidence_hash for evidence in per_source_evidence
-    ) if per_source_evidence else ""
+    combined_evidence_hash = _combine_hashes(
+        "asrev_combined_", [evidence.evidence_hash for evidence in per_source_evidence]
+    )
+    # D-056.1 item 4: content_hash/canonical_equivalence_hash (D-055) were
+    # already computed per source by build_canonical_asr_evidence() above
+    # but never forwarded into this diagnostic trace -- combined the same
+    # way combined_evidence_hash already combines evidence_hash, so a
+    # stability battery can compare "are these two runs' transcripts truly
+    # equivalent" without downloading the full result.json. Purely
+    # additive diagnostics: no ASR/Selection/Freeze decision reads these.
+    combined_content_hash = _combine_hashes(
+        "asrcontent_combined_", [evidence.content_hash for evidence in per_source_evidence]
+    )
+    combined_canonical_equivalence_hash = _combine_hashes(
+        "asrcanon_combined_", [evidence.canonical_equivalence_hash for evidence in per_source_evidence]
+    )
     trace.complete(
         "canonical_asr_evidence",
         raw_segment_count=len(transcript_tuple),
         normalized_segment_count=len(normalized_segments),
         normalized_word_count=total_normalized_words,
         evidence_hash=combined_evidence_hash,
+        content_hash=combined_content_hash,
+        canonical_equivalence_hash=combined_canonical_equivalence_hash,
         per_source_evidence_hashes=[evidence.evidence_hash for evidence in per_source_evidence],
+        per_source_content_hashes=[evidence.content_hash for evidence in per_source_evidence],
+        per_source_canonical_equivalence_hashes=[
+            evidence.canonical_equivalence_hash for evidence in per_source_evidence
+        ],
         asr_config_fingerprint=asr_config_fingerprint,
         canonical_normalization_applied=str(
             os.environ.get("CUTSELL_ASR_CANONICAL_NORMALIZATION", "")
