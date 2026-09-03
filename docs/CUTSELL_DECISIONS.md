@@ -6461,6 +6461,117 @@ READY TO FIX: YES
 
 Then STOP. No code. No RAW.
 
+## D-056.5 -- Proposition-completeness negation contradiction contract
+
+Fixes the exact false-positive class D-056.4 proved, entirely inside the
+D-056.3 shared contract (`cutsell_worker/contradiction_signal.py`), with
+zero caller-side changes: `final_story_coherence_validation.py`'s
+StoryValidator and `canonical_edit_plan.py`'s composite-acceptance gate
+both already call `detect_text_contradiction`/`any_pair_contradicts` and
+inherit the fix automatically.
+
+**Root false positive**: `negation_conflict` fired whenever exactly one of
+two texts contained ANY negation-marker token anywhere in the WHOLE clip,
+with no regard for which clause that token was attached to, or for whether
+the other realization ever reached an equivalent clause at all. D-056.4's
+live example: realization A's "no creo... que los cánceres son
+hereditarios" rhetorically negates a broader, DIFFERENT claim in an earlier
+sentence than A's own later restatement of the shared "solo un 5-10%"
+figure; realization B never reaches its own completion of that later
+clause because its recording trails off mid-sentence. Whole-clip
+presence/absence alone could not distinguish "asserts the opposite
+polarity" from "never got the chance to say anything about this clause at
+all."
+
+**Proposition-completeness contract**: `detect_text_contradiction`'s
+negation check is now scoped, per side, to the sentence/clause that
+`_clauses_address_same_proposition` establishes actually corresponds to a
+clause of the OTHER realization -- a shared NUMBER between the two clauses
+is decisive on its own (the same class of anchor D-056.4's own 5-10% figure
+is); otherwise a clause counts as corresponding only when it clears both a
+minimum shared-content-token count (`_MIN_SHARED_CLAUSE_TOKENS = 2`) and a
+minimum coverage ratio of the smaller side (`_MIN_SHARED_CLAUSE_COVERAGE =
+0.5`) -- the same two-part shape `final_sibling_grouping._same_retry_idea`
+already uses for whole-clip retry matching, reused here at clause
+granularity so a single incidental shared connecting word never counts as
+"the same proposition." A negation token attached to a clause that never
+corresponds to anything on the other side (a rhetorical negation of an
+unrelated point, or a clause the other realization's recording never
+reached) no longer counts toward the verdict. Per Section 4's explicit
+requirement, this is asymmetric-safe rather than blanket-lenient: an
+incomplete realization whose negation-bearing clause IS fully stated before
+it trails off elsewhere still counts, because that clause still
+corresponds to the shared proposition on its own terms
+(`test_incomplete_negative_fragment_that_completes_the_claim_still_
+contradicts`). The change can only DROP a negation token whole-clip
+presence/absence would previously have counted -- it never adds one, so it
+cannot manufacture a new contradiction the pre-D-056.5 primitive would have
+missed.
+
+**Tests**: new `tests/test_cutsell_d056_5_proposition_completeness_gate.py`
+(16 tests) covers the full Section 6 matrix -- complete positive vs
+complete negative; complete negative vs incomplete same-direction retry;
+an incomplete fragment that still completes the conflicting clause;
+rhetorical negation outside the shared proposition; all six named polarity
+markers (nadie/ni/sin/nunca/not/never); same fact restated differently;
+incompatible numbers; explicit correction of the same number; different
+propositions each independently containing negation; shared proposition
+absent on one side; explicit causal inversion via negation -- plus a
+generic (non-Video00) structural fixture reproducing the exact D-056.4
+shape, and three full-pipeline (StoryValidator -> CanonicalEditPlan ->
+FinalEditReviewer) proofs that a true contradiction still blocks Freeze,
+the D-056.4 shape no longer does end to end, and FinalEditReviewer stays
+independently in agreement with StoryValidator/CanonicalEditPlan after the
+gate. One pre-existing D-056.3 test
+(`test_any_pair_contradicts_checks_every_pair`) needed its fixture
+sentences lengthened (its original 2-3-word fixtures fell under the new
+per-clause token-count threshold on the fixture side, not the production
+threshold) -- all other 16 D-056.3 tests were unchanged and still pass.
+
+**Offline qualification (Section 8)**: compileall clean on
+`contradiction_signal.py` and both changed/added test files. D-050/D-052/
+D-053/D-055/D-056 targeted suite: 254 passed, 0 failed. CleanCutBench
+LEGACY+AUTHORITATIVE sweep: fixtures=54 rows=54 in both modes, 0 unsafe
+findings/regressions. Full `tests/test_cutsell_*.py`: 1590 passed (D-056.3
+baseline 1574 + 16 new D-056.5 tests, 0 regressions). Full `tests/`
+(minus `test_semantic_stitch.py`, extra honesty check): 2214 passed, 13
+subtests passed, and only the same 2 pre-existing/unrelated failures
+already on record before D-056.5
+(`test_hybrid_story_guard_incomplete_retry.py::test_incomplete_failed_
+retry_is_covered_when_prior_delivery_preserves_numbers_and_negation`,
+`test_video00_modal_hybrid_semantic_parity.py::test_the_two_overlay_
+values_are_never_masked_in_ci_logs`).
+
+### Final report (verbatim, as delivered)
+D-056.5 COMPLETE
+ROOT FALSE POSITIVE: whole-clip negation-token presence/absence, with no
+regard for which clause the token belonged to or whether the other
+realization ever reached an equivalent clause -- D-056.4's rhetorical "no
+creo" (negating a different, broader claim) vs realization B's incomplete
+trail-off before it ever restated the shared 5-10% figure.
+PROPOSITION COMPLETENESS CONTRACT: `detect_text_contradiction` now scopes
+each side's negation tokens to the sentence that `_clauses_address_same_
+proposition` proves corresponds to an actual clause of the other
+realization (a shared number is decisive on its own; otherwise a minimum
+shared-content-token count of 2 AND a minimum coverage ratio of 0.5 of the
+smaller clause, the same two-part shape `final_sibling_grouping._same_
+retry_idea` already uses for whole-clip retry matching). A clause the
+other side never reached, or a negation on an unrelated adjacent clause,
+no longer counts; a negation-bearing clause that IS fully stated before an
+incomplete take trails off elsewhere still counts.
+TRUE CONTRADICTION RECALL: PASS
+FALSE POSITIVE FIX: PASS
+D-056.3 SAFETY PRESERVED: PASS
+LEGACY: 54/54
+AUTHORITATIVE: 54/54
+FULL TEST COUNT: 1590 passed (tests/test_cutsell_*.py), 0 regressions vs
+the 1574-test D-056.3 baseline; full tests/ (minus test_semantic_stitch.py)
+2214 passed, 13 subtests passed, only the same 2 pre-existing/unrelated
+failures already on record.
+READY FOR ONE VIDEO00 CANARY? YES
+
+Then STOP. Do not launch Modal.
+
 ## Change rule
 
 When a new decision changes product behavior, update this file in the same development cycle. Do not silently redefine CutSell through code alone.

@@ -125,8 +125,16 @@ def test_detect_text_contradiction_no_signal_present_is_not_a_conflict():
 
 
 def test_any_pair_contradicts_checks_every_pair():
-    assert any_pair_contradicts(["it happened once", "it happened once", "it never happened"]) is True
-    assert any_pair_contradicts(["it happened once", "it happened twice too", "yes it did happen"]) is False
+    assert any_pair_contradicts([
+        "it happened once during the trial",
+        "it happened once during the trial",
+        "it never happened during the trial",
+    ]) is True
+    assert any_pair_contradicts([
+        "it happened once during the trial",
+        "it happened twice too during the trial",
+        "yes it did happen during the trial",
+    ]) is False
 
 
 def test_any_pair_contradicts_empty_or_single_is_false():
