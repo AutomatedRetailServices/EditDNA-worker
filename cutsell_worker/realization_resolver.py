@@ -168,12 +168,13 @@ that call site's own comment.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from itertools import combinations
 import re
 from typing import Mapping, Sequence
 
 from .claim_coverage_best_take import _is_low_information_incidental
+from .contracts import DraftTimeline
 from .final_sibling_grouping import _negations
 from .semantic_claims import ClaimEquivalenceArbiter
 from .semantic_ledger import (
@@ -1185,3 +1186,245 @@ def _engine_winner_covered_critical(
     critical_ids = frozenset(g.group_id for g in groups if g.importance == _CRITICAL)
     covered = _covered_group_ids(realizations[engine_winner], groups)
     return critical_ids.issubset(covered)
+
+
+# ---------------------------------------------------------------------------
+# D-050C2: CONTROLLED AUTHORITY CUTOVER
+# ---------------------------------------------------------------------------
+#
+# Everything above this line is shadow-only (D-050C1/D-050C1.5/D-050C1.6):
+# `resolve_realizations_shadow`/`build_resolver_parity_report` compute and
+# compare, but never write to a `DraftTimeline`. Everything below is what
+# `resolver_mode.RESOLVER_MODE_AUTHORITATIVE` actually applies -- see
+# `resolver_mode.py`'s own module docstring for the 3-state rollout
+# contract (LEGACY/SHADOW/AUTHORITATIVE), and `universal_clean_cut.py`'s
+# cutover-point comment for the ONE place this is ever called and the
+# explicit EVIDENCE-ONLY-vs-AUTHORITATIVE list for every legacy module.
+#
+# NON-NEGOTIABLE SCOPE NOTE: `apply_authoritative_realization_resolution`
+# can only ever act on realizations still PRESENT in the `DraftTimeline` it
+# is handed (selected + alternates + discarded). A D-049 Case A shape --
+# hybrid_editorial_chunks deleting a realization before it ever reached
+# grouping -- has already vanished from the draft by the time this stage
+# runs; this function cannot resurrect deleted content, only refuse to
+# certify the result as safe. That is exactly what it does: any orphan
+# discard `resolve_orphan_realizations_shadow` cannot confirm
+# REPLACEMENT_VERIFIED_SAFE forces the overall status to REVIEW_REQUIRED
+# (Section 8's "delete safety" requirement, applied at the boundary of what
+# this stage can actually see).
+
+SEMANTICALLY_RESOLVED = "SEMANTICALLY_RESOLVED"
+AUTHORITATIVE_REVIEW_REQUIRED = "REVIEW_REQUIRED"
+
+
+@dataclass(frozen=True)
+class AuthoritativeIdeaOutcome:
+    """One idea's authoritative-application record -- the per-idea unit
+    `build_authoritative_resolution_diagnostics` reports (Section 12:
+    "make production diagnosis possible without reconstructing 20
+    diagnostics dictionaries")."""
+
+    semantic_idea_id: str
+    decision_status: str
+    winner_realization_id: str | None
+    composite_realization_ids: tuple[str, ...]
+    covered_canonical_claim_ids: tuple[str, ...]
+    missing_critical_claim_ids: tuple[str, ...]
+    discarded_realization_ids: tuple[str, ...]
+    retained_for_contextual_value: tuple[str, ...]
+    decision_reason: str
+    legacy_winner_realization_id: str | None
+    legacy_composite_realization_ids: tuple[str, ...]
+    legacy_vs_authoritative_same: bool
+
+
+@dataclass(frozen=True)
+class AuthoritativeApplicationResult:
+    draft: DraftTimeline
+    status: str  # SEMANTICALLY_RESOLVED | REVIEW_REQUIRED
+    idea_outcomes: tuple[AuthoritativeIdeaOutcome, ...]
+    unresolved_orphan_realization_ids: tuple[str, ...]
+
+
+def _realization_id_of(clip) -> str:
+    return str(getattr(clip, "realization_id", None) or clip.clip_id)
+
+
+def apply_authoritative_realization_resolution(
+    draft: DraftTimeline, ledger: SemanticLedger, report: ResolverReport,
+) -> AuthoritativeApplicationResult:
+    """D-050C2 Section 3/4: THE ONE explicit point the resolver's decision
+    is ever applied to a `DraftTimeline`. Atomic per semantic idea:
+
+    - `RESOLVED_WINNER`: every clip belonging to the winning realization
+      moves to `selected`; every OTHER candidate realization of that idea
+      moves to `discarded` (if the resolver proved it safely redundant)
+      or `alternates` (if it holds unique, non-critical content this
+      resolver refuses to silently drop -- Invariant D/Section 5's "no
+      unresolved contradiction is collapsed... discard requires safety").
+    - `RESOLVED_COMPOSITE`: every clip belonging to a composite member
+      moves to `selected`; the same discarded/alternates split as above
+      applies to non-member candidates.
+    - `REVIEW_REQUIRED`: this idea's realizations are NEVER touched --
+      every clip stays in whatever bucket the (pre-authoritative,
+      legacy-computed) draft already had it in, and the overall result
+      status becomes `REVIEW_REQUIRED` (Section 4: "do NOT guess... mark
+      the draft/freeze state so delivery cannot proceed silently").
+
+    A realization with multiple physical fragments (a post-Boundary
+    split) always moves as one unit -- D-050A's "physical split preserves
+    realization identity" invariant is never violated by this function.
+
+    Returns a NEW `DraftTimeline` (immutable, `draft` itself untouched)
+    plus the overall `status` and full per-idea/orphan diagnostics.
+    Raises nothing for a semantic disagreement -- ANY invariant failure
+    this function itself detects becomes `REVIEW_REQUIRED` in the
+    returned status, never an exception and never a silent legacy
+    fallback (Section 6: "never hide semantic failure through
+    fallback"). A genuine internal bug (a candidate realization_id this
+    function cannot map back to any clip at all) is the one case still
+    surfaced as `REVIEW_REQUIRED` with an explicit `evidence` note rather
+    than crashing the whole request, since a render decision must never
+    proceed on a state this function itself could not fully verify."""
+    all_clips = [*draft.selected, *draft.alternates, *draft.discarded]
+    clips_by_realization: dict[str, list] = {}
+    for clip in all_clips:
+        clips_by_realization.setdefault(_realization_id_of(clip), []).append(clip)
+
+    ideas = ledger.ideas()
+    final_bucket: dict[str, str] = {}  # realization_id -> "selected" | "discarded" | "alternates"
+    idea_outcomes: list[AuthoritativeIdeaOutcome] = []
+    any_review_required = False
+    unmapped_realization_ids: list[str] = []
+
+    for idea_id, resolution in report.idea_resolutions.items():
+        idea = ideas.get(idea_id)
+        legacy_winner = idea.current_winner_realization_id if idea else None
+        legacy_composite = idea.composite_realization_ids if idea else ()
+
+        if resolution.decision_status == REVIEW_REQUIRED:
+            any_review_required = True
+            # Untouched: no bucket assignment for this idea's realizations
+            # at all -- they keep whatever the incoming draft already had.
+            idea_outcomes.append(AuthoritativeIdeaOutcome(
+                semantic_idea_id=idea_id, decision_status=resolution.decision_status,
+                winner_realization_id=None, composite_realization_ids=(),
+                covered_canonical_claim_ids=resolution.covered_canonical_claim_ids,
+                missing_critical_claim_ids=resolution.missing_critical_claim_ids,
+                discarded_realization_ids=(), retained_for_contextual_value=resolution.candidate_realization_ids,
+                decision_reason=resolution.decision_reason,
+                legacy_winner_realization_id=legacy_winner, legacy_composite_realization_ids=tuple(legacy_composite),
+                legacy_vs_authoritative_same=False,
+            ))
+            continue
+
+        winning_ids = frozenset(
+            (resolution.winner_realization_id,) if resolution.winner_realization_id
+            else resolution.composite_realization_ids
+        )
+        for rid in winning_ids:
+            if rid not in clips_by_realization:
+                unmapped_realization_ids.append(rid)
+                continue
+            final_bucket[rid] = "selected"
+        for rid in resolution.discarded_realization_ids:
+            if rid not in clips_by_realization:
+                unmapped_realization_ids.append(rid)
+                continue
+            final_bucket[rid] = "discarded"
+        for rid in resolution.retained_for_contextual_value:
+            if rid not in clips_by_realization:
+                continue  # legitimately absent -- nothing to preserve
+            final_bucket[rid] = "alternates"
+
+        if resolution.decision_status == RESOLVED_WINNER:
+            same_as_legacy = legacy_winner == resolution.winner_realization_id
+        else:
+            same_as_legacy = set(legacy_composite) == set(resolution.composite_realization_ids)
+        idea_outcomes.append(AuthoritativeIdeaOutcome(
+            semantic_idea_id=idea_id, decision_status=resolution.decision_status,
+            winner_realization_id=resolution.winner_realization_id,
+            composite_realization_ids=resolution.composite_realization_ids,
+            covered_canonical_claim_ids=resolution.covered_canonical_claim_ids,
+            missing_critical_claim_ids=resolution.missing_critical_claim_ids,
+            discarded_realization_ids=resolution.discarded_realization_ids,
+            retained_for_contextual_value=resolution.retained_for_contextual_value,
+            decision_reason=resolution.decision_reason,
+            legacy_winner_realization_id=legacy_winner, legacy_composite_realization_ids=tuple(legacy_composite),
+            legacy_vs_authoritative_same=same_as_legacy,
+        ))
+
+    # Section 8 (delete safety), applied at this function's own boundary --
+    # see the module-level NON-NEGOTIABLE SCOPE NOTE above: an orphan
+    # discard (D-049 Case A shape) this function cannot verify safe forces
+    # REVIEW_REQUIRED rather than silently certifying the draft.
+    orphan_reviews = resolve_orphan_realizations_shadow(ledger)
+    unresolved_orphans = tuple(o.realization_id for o in orphan_reviews if o.verdict == REVIEW_REQUIRED)
+    if unresolved_orphans:
+        any_review_required = True
+
+    if unmapped_realization_ids:
+        # Internal-consistency failure (a resolution names a realization_id
+        # this function cannot find a clip for) -- fail closed, never guess
+        # which bucket it belongs in and never silently drop it either.
+        any_review_required = True
+
+    def _rebuild(clip):
+        bucket = final_bucket.get(_realization_id_of(clip))
+        return bucket  # None -> untouched (REVIEW_REQUIRED idea, or unmapped)
+
+    new_selected, new_alternates, new_discarded = [], [], []
+    seen_ids = set()
+    for clip, original_bucket in (
+        [(c, "selected") for c in draft.selected]
+        + [(c, "alternates") for c in draft.alternates]
+        + [(c, "discarded") for c in draft.discarded]
+    ):
+        if clip.clip_id in seen_ids:
+            continue
+        seen_ids.add(clip.clip_id)
+        bucket = _rebuild(clip) or original_bucket
+        if bucket == "selected":
+            new_selected.append(clip)
+        elif bucket == "alternates":
+            new_alternates.append(clip)
+        else:
+            new_discarded.append(clip)
+
+    status = AUTHORITATIVE_REVIEW_REQUIRED if any_review_required else SEMANTICALLY_RESOLVED
+    new_draft = replace(draft, selected=tuple(new_selected), alternates=tuple(new_alternates), discarded=tuple(new_discarded))
+    return AuthoritativeApplicationResult(
+        draft=new_draft, status=status, idea_outcomes=tuple(idea_outcomes),
+        unresolved_orphan_realization_ids=unresolved_orphans + tuple(unmapped_realization_ids),
+    )
+
+
+def build_authoritative_resolution_diagnostics(result: AuthoritativeApplicationResult, *, mode: str) -> dict:
+    """JSON-safe view for `diagnostics["realization_resolver_authority"]`
+    -- Section 12's observability requirement: every idea's semantic_idea_
+    id, mode, candidates, authoritative winner/composite, canonical
+    critical claims, covered claims, discarded realizations + reasons,
+    legacy winner, and legacy-vs-authoritative agreement, in ONE place."""
+    return {
+        "schema_version": "cutsell.realization_resolver_authority.v1",
+        "mode": mode,
+        "status": result.status,
+        "unresolved_orphan_realization_ids": list(result.unresolved_orphan_realization_ids),
+        "ideas": [
+            {
+                "semantic_idea_id": outcome.semantic_idea_id,
+                "decision_status": outcome.decision_status,
+                "winner_realization_id": outcome.winner_realization_id,
+                "composite_realization_ids": list(outcome.composite_realization_ids),
+                "covered_canonical_claim_ids": list(outcome.covered_canonical_claim_ids),
+                "missing_critical_claim_ids": list(outcome.missing_critical_claim_ids),
+                "discarded_realization_ids": list(outcome.discarded_realization_ids),
+                "retained_for_contextual_value": list(outcome.retained_for_contextual_value),
+                "decision_reason": outcome.decision_reason,
+                "legacy_winner_realization_id": outcome.legacy_winner_realization_id,
+                "legacy_composite_realization_ids": list(outcome.legacy_composite_realization_ids),
+                "legacy_vs_authoritative_same": outcome.legacy_vs_authoritative_same,
+            }
+            for outcome in result.idea_outcomes
+        ],
+    }

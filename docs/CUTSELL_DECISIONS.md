@@ -4641,6 +4641,162 @@ an explicit rollback flag (mirroring `CUTSELL_CLEAN_CUT_CORE_V1`'s own
 precedent), and only after this qualification evidence has been
 reviewed by a human -- not as an automatic next step from this report.
 
+## D-050C2 -- Unified Realization Resolver, controlled authority cutover
+
+User authorized D-050C2 explicitly as a CONTROLLED cutover, not
+permission for an irreversible replacement: legacy logic stays in the
+codebase as evidence/rollback, Modal RAW stays gated on offline
+qualification, RunPod untouched.
+
+**Feature flag** (`cutsell_worker/resolver_mode.py`, new): typed 3-state
+`CUTSELL_UNIFIED_REALIZATION_RESOLVER` env var --
+`LEGACY`/`SHADOW`/`AUTHORITATIVE` -- never an ambiguous boolean pair, so
+"half on" has no representable state. `resolve_resolver_mode(env=None)`
+reads case-insensitively and fails safe to `LEGACY` on unset, empty, or
+any unrecognized value; never silently escalates toward
+`AUTHORITATIVE`. Rollback is resetting one env var, no code revert.
+
+**Authority cutover point** (`realization_resolver.py`, new section):
+one function, `apply_authoritative_realization_resolution(draft,
+ledger, report) -> AuthoritativeApplicationResult`, is the entire
+surface where the resolver's decision can change `DraftTimeline.
+selected`/`alternates`/`discarded`. It is called from exactly one
+place, `universal_clean_cut.py`, gated strictly on `resolver_mode ==
+RESOLVER_MODE_AUTHORITATIVE`; `LEGACY` and `SHADOW` both skip the call
+entirely and leave the draft the legacy stages already produced
+untouched. Per semantic idea: `RESOLVED_WINNER` keeps exactly that
+realization's clips selected and discards every other candidate;
+`RESOLVED_COMPOSITE` keeps exactly the validated composite members;
+`REVIEW_REQUIRED` leaves that idea's clips completely untouched (no
+guess) and escalates the overall application `status` to
+`REVIEW_REQUIRED`, which `universal_clean_cut.py` OR's into
+`freeze_blocked` alongside the existing StoryValidator/repair-loop
+conditions -- Freeze cannot proceed silently. A realization the
+resolver names but that cannot be mapped back onto any clip in the
+draft (an unmapped id) is treated the same as an unresolved orphan:
+fail-closed to `REVIEW_REQUIRED`, never a silent drop. Orphan
+realizations (no `semantic_idea_id` at all -- the D-049 Case A shape)
+are re-checked via the existing `resolve_orphan_realizations_shadow`
+and any that still resolve to `REVIEW_REQUIRED` also force the overall
+status, so a realization with unique content can never be
+authoritatively discarded without either a verified replacement, proof
+of redundancy, or an explicit review escalation -- D-049 Case A is
+structurally unreachable at this boundary.
+
+**Legacy modules now evidence-only in AUTHORITATIVE mode**:
+`DeliveryScorer`/`take_judge.rank_takes`, `_semantic_best_take`,
+`deterministic_best_take_authority`, `ClaimCoverageBestTake` (including
+its own `CompositeResolver` composite formation) all still run and
+still write their diagnostics -- nothing upstream of the cutover point
+was removed or skipped -- but in `AUTHORITATIVE` mode none of their
+conclusions may subsequently overwrite the resolver's applied
+selection, because the cutover point is the single place selection is
+finalized and nothing runs after it that re-reads their diagnostics to
+re-decide. `CanonicalEditPlan`/`FinalEditReviewer`/`StoryValidator`
+diagnostics are an explicitly documented C2-phase exemption (per the
+directive's own Section 8): they still compute from the same
+comparison inputs they always have and are not yet rewired to read the
+post-cutover resolved state as their source of truth -- proven, not
+assumed, by `test_authoritative_diagnostics_expose_legacy_vs_
+authoritative` and `test_canonical_edit_plan_and_reviewer_diagnostics_
+survive_boundary_unchanged`-style non-regression on the LEGACY path.
+This is a known, deliberate scope boundary for C2, not an oversight; a
+future phase should give StoryValidator/CanonicalEditPlan one shared
+coverage/provenance read API rather than two independent
+recalculations.
+
+**Observability**: `build_authoritative_resolution_diagnostics` writes
+one `diagnostics["realization_resolver_authority"]` block per run
+(schema `cutsell.realization_resolver_authority.v1`) carrying mode,
+overall status, unresolved-orphan ids, and per-idea: winner/composite
+ids, covered/missing canonical claim ids, discarded ids,
+contextually-retained ids, decision reason, the legacy winner/composite
+for comparison, and whether legacy and authoritative agreed -- one
+place to read, not twenty diagnostics dicts reconstructed by hand. The
+D-050C1 shadow diagnostics (`realization_resolver_shadow`) keep
+computing unconditionally in every mode, unchanged.
+
+**Offline cutover qualification** (`tests/test_cutsell_d050c2_
+authority_cutover.py`, new, 19 tests): `_run_full_cutover_sweep()`
+reuses the D-050C1.5 harness (`_collect_every_fixture_call`/
+`_stamp_identity`) to run all 54 CleanCutBench fixtures through
+identity stamping, `resolve_realizations_shadow`, and
+`apply_authoritative_realization_resolution`, then checks per-idea
+safety invariants directly against the applied draft: a
+`RESOLVED_WINNER`/`RESOLVED_COMPOSITE` idea outcome must have zero
+missing critical claims and at least one surviving selected clip; any
+`REVIEW_REQUIRED` idea outcome must correspond to an escalated overall
+`status`. Result: **54/54 fixtures, 0 unsafe findings** (23 fixtures
+identical clip-level selection to LEGACY, 31 differ -- expected, since
+these are the same idea-level differences D-050C1.6 already qualified
+as 0 POTENTIAL_REGRESSION/mostly CONTENT_SAFETY_IMPROVEMENT, now
+visible at the whole-draft bucket level; 3 fixtures resolve to
+`REVIEW_REQUIRED` under both LEGACY's own coherence validation and the
+authoritative path, in agreement). The remaining ~16 migration tests
+cover: mode resolution (default/unrecognized-fails-safe/case-
+insensitive per state), SHADOW mode computing the identical resolver
+report AUTHORITATIVE would but never applying it even where the
+resolver actively disagrees with legacy (mirrors `universal_clean_cut.
+py`'s own `if resolver_mode == RESOLVER_MODE_AUTHORITATIVE` gate
+directly), authoritative winner/composite replacement, REVIEW_REQUIRED
+leaving selection untouched with no silent fallback, critical-claim/
+number/negation safety preserved through application, causal
+(temporal-overlap) ambiguity forcing REVIEW_REQUIRED rather than a
+guess, the D-049 Case A delete-without-replacement shape forcing
+REVIEW_REQUIRED via orphan detection, physical fragment provenance
+(two fragments sharing one realization_id) moving as one unit never
+split across buckets, legacy evidence unable to overwrite the
+authoritative resolution, and Freeze blocking on REVIEW_REQUIRED /
+permitting SEMANTICALLY_RESOLVED.
+
+**Validation**: compileall clean; D-050A (26)/D-050B (26)/D-050C1
+(28)/D-050C1.5/D-050C1.6 (28)/D-050C2 (19) all green (128 across the
+whole D-050 series); all 54 CleanCutBench fixtures green under LEGACY
+(default), explicit `LEGACY`, explicit `SHADOW`, and explicit
+`AUTHORITATIVE` env values alike -- CleanCutBench's own harness
+(`_run_core`) does not call into `universal_clean_cut.py`'s cutover
+wiring at all, so this confirms the flag is inert to CleanCutBench's
+own expected-outcome assertions, not a second independent AUTHORITATIVE
+qualification (that qualification is the 54-fixture offline sweep
+above, which does call the real cutover point). Full `tests/
+test_cutsell_*.py` glob: **1452 passed, 0 failed** (1433 pre-existing +
+19 new) with the env var unset (LEGACY, the default) -- byte-for-byte
+LEGACY parity confirmed at full-suite scale, not just CleanCutBench.
+
+**Known characteristic, not a regression**: forcing
+`CUTSELL_UNIFIED_REALIZATION_RESOLVER=AUTHORITATIVE` across the *entire*
+`tests/test_cutsell_*.py` glob (beyond what this directive required --
+an extra diligence check) surfaces 3 failures in
+`test_cutsell_universal_clean_cut.py`, all in fixtures that hand-build
+bare `DraftClip`s with no `semantic_idea_id`/`realization_id` at all
+(these predate D-050A and were never updated to carry real
+`pipeline.py`-only identity stamping). Under `AUTHORITATIVE` mode this
+is correctly detected as unmapped/orphan realizations and fail-closed
+to `REVIEW_REQUIRED`, blocking Freeze -- exactly the D-049 Case A
+safety behavior this directive requires, not a bug. Every clip a real
+Clean Cut Core V1 run produces is stamped with this identity by
+`pipeline.py`'s `_draft_clip` before it ever reaches the cutover point,
+so this shape cannot occur on a genuine production draft; it is purely
+an artifact of these three tests' pre-D-050A synthetic fixtures never
+being exercised in `AUTHORITATIVE` mode by design (the default is
+`LEGACY`, so none of these tests break in any normal run or CI). Left
+unmodified -- fixing them is out of this directive's scope, and
+weakening the fail-closed behavior to make them pass under a forced
+`AUTHORITATIVE` override would be the actual regression.
+
+No editorial behavior changed in `LEGACY` mode (the default and the
+only mode active anywhere in CI/production today). No legacy logic
+removed. No Modal RAW launched. No RunPod touched.
+
+**READY FOR MODAL CANARY?** Offline cutover qualification passes every
+stated gate: LEGACY exactly unchanged, AUTHORITATIVE satisfies every
+CleanCutBench safety invariant with 0 unsafe findings, 0 critical-claim/
+contradiction/number/negation regressions, 0 unsafe composites, 0
+silent zero-realization ideas, 0 resolver-authority overwrite by legacy
+modules. Per this directive's own closing instruction, this is a report
+of readiness, not a launch: no Modal canary has been run, and one
+should not be until the user explicitly authorizes it.
+
 ## Change rule
 
 When a new decision changes product behavior, update this file in the same development cycle. Do not silently redefine CutSell through code alone.

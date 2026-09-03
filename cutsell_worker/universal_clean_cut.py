@@ -34,7 +34,14 @@ from .semantic_claims import ClaimEquivalenceArbiter, ClauseRoleArbiter
 from .repair_loop import run_repair_loop
 from .flow_b import ProgressCallback, process_local_sources
 from .semantic_ledger import build_ledger_parity_report, build_semantic_ledger_diagnostics, build_semantic_ledger_shadow
-from .realization_resolver import build_realization_resolver_diagnostics, resolve_realizations_shadow
+from .realization_resolver import (
+    apply_authoritative_realization_resolution,
+    AUTHORITATIVE_REVIEW_REQUIRED,
+    build_authoritative_resolution_diagnostics,
+    build_realization_resolver_diagnostics,
+    resolve_realizations_shadow,
+)
+from .resolver_mode import RESOLVER_MODE_AUTHORITATIVE, resolve_resolver_mode
 from .human_boundary_polish_v5 import polish_human_boundaries_v5
 from .hybrid_editorial import EditorialJudge
 from .providers import NoopSemanticProvider
@@ -222,21 +229,58 @@ def process_universal_clean_cut_sources(
         diagnostics["semantic_ledger"] = build_semantic_ledger_diagnostics(ledger, ledger_parity)
         result = replace(result, draft=replace(result.draft, diagnostics=diagnostics))
 
-        # D-050C1: Unified Realization Resolver, SHADOW AUTHORITY ONLY.
-        # Consumes the Semantic Ledger built immediately above and computes
-        # what ONE unified resolver WOULD decide per semantic idea. This is
-        # NOT a second engine: it never writes to `result.draft.selected`/
-        # `discarded`/`alternates`, and nothing below this line (Freeze,
-        # Boundary, complete-idea recovery, Render/QC) reads
-        # `diagnostics["realization_resolver_shadow"]` -- a SEPARATE key
-        # from `diagnostics["semantic_ledger"]` above, kept isolated so this
-        # shadow authority's own output can never be mistaken for the
-        # Ledger's plain observation. See realization_resolver.py's module
-        # docstring for the full shadow-authority contract and the "NO
-        # BEHAVIOR CUTOVER" audit it requires.
+        # D-050C1/D-050C1.5/D-050C1.6: Unified Realization Resolver. Consumes
+        # the Semantic Ledger built immediately above and computes what ONE
+        # unified resolver decides per semantic idea. `resolve_realizations_
+        # shadow` itself NEVER writes to a DraftTimeline -- it is pure
+        # observation, same as every prior D-050C1.x directive. Whether that
+        # decision is APPLIED depends entirely on `resolver_mode` below.
+        resolver_mode = resolve_resolver_mode()
         resolver_report = resolve_realizations_shadow(ledger)
         diagnostics = dict(result.draft.diagnostics or {})
         diagnostics["realization_resolver_shadow"] = build_realization_resolver_diagnostics(resolver_report)
+        result = replace(result, draft=replace(result.draft, diagnostics=diagnostics))
+
+        # D-050C2 CONTROLLED AUTHORITY CUTOVER -- see resolver_mode.py's own
+        # module docstring for the 3-state contract (LEGACY/SHADOW/
+        # AUTHORITATIVE, default LEGACY, one environment variable, no code
+        # revert to roll back) and realization_resolver.py's
+        # `apply_authoritative_realization_resolution` docstring for exactly
+        # what gets applied. This is THE ONE explicit point in the pipeline
+        # the resolver's decision is ever applied (Section 3) -- no other
+        # module below this line, or above it, mutates selection membership
+        # on the resolver's behalf.
+        #
+        # EVIDENCE-ONLY vs AUTHORITATIVE (Section 2, documented here as the
+        # single source of truth for this classification): when
+        # `resolver_mode == AUTHORITATIVE`, every stage that already ran
+        # ABOVE this line and already wrote `result.draft.selected`/
+        # `discarded` -- take_grouping_provider's grouping,
+        # `deterministic_best_take_authority` (DeliveryScorer + `_semantic_
+        # best_take`'s hybrid override), `apply_claim_coverage_best_take`
+        # (ClaimCoverageBestTake + its own composite formation), and
+        # CanonicalEditPlan/FinalEditReviewer/StoryValidator's own
+        # diagnostics computed from that pre-cutover selection -- become
+        # EVIDENCE ONLY: their own diagnostics keys stay in place unchanged
+        # (this stays true to Section 7's "old calculations may remain as
+        # comparison diagnostics" for this C2 phase -- CanonicalEditPlan/
+        # StoryValidator are NOT rewritten to consume the post-cutover
+        # state yet), but the values in `result.draft.selected`/
+        # `discarded`/`alternates` immediately below are overwritten by the
+        # resolver's own decision and nothing downstream (Freeze, Boundary,
+        # complete-idea recovery, Render/QC) may reinterpret that. In
+        # `LEGACY`/`SHADOW` mode none of this changes anything: identical
+        # to every prior D-050C1.x directive.
+        authoritative_result = None
+        if resolver_mode == RESOLVER_MODE_AUTHORITATIVE:
+            authoritative_result = apply_authoritative_realization_resolution(result.draft, ledger, resolver_report)
+            result = replace(result, draft=authoritative_result.draft)
+        diagnostics = dict(result.draft.diagnostics or {})
+        diagnostics["realization_resolver_authority"] = (
+            build_authoritative_resolution_diagnostics(authoritative_result, mode=resolver_mode)
+            if authoritative_result is not None
+            else {"schema_version": "cutsell.realization_resolver_authority.v1", "mode": resolver_mode, "status": None, "ideas": []}
+        )
         result = replace(result, draft=replace(result.draft, diagnostics=diagnostics))
 
         # Hard pre-Freeze gate: Final Story Coherence Validation may find a
@@ -249,9 +293,16 @@ def process_universal_clean_cut_sources(
         # not something Boundary could ever repair -- so this skips freeze/
         # boundary entirely and surfaces the draft as-is (still selected/
         # discarded, just unfrozen) for human review rather than silently
-        # producing a bad video.
+        # producing a bad video. D-050C2 Section 11 (Freeze contract): in
+        # AUTHORITATIVE mode, the resolver's own REVIEW_REQUIRED status is
+        # an equally hard gate -- OR'd in here, never allowed to be
+        # silently overridden by a legacy coherence check that ran on the
+        # PRE-cutover selection and has no visibility into the resolver's
+        # own verdict.
         coherence_diag = (result.draft.diagnostics or {}).get("final_story_coherence_validation") or {}
         freeze_blocked = bool(coherence_diag.get("freeze_blocked")) or repair_result.status == "NEEDS_HUMAN_REVIEW"
+        if authoritative_result is not None and authoritative_result.status == AUTHORITATIVE_REVIEW_REQUIRED:
+            freeze_blocked = True
 
         if freeze_blocked:
             recovery_stage = "not_applicable_freeze_blocked_by_coherence_validation"
