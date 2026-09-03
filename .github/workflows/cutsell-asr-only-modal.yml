@@ -104,10 +104,22 @@ jobs:
           import json
           with open('/tmp/cutsell-env.json') as f:
               env = json.load(f)
+          # D-053 live-run finding: masking EVERY template value (the
+          # original approach, copied from cutsell-video00-modal-raw.yml)
+          # includes short, non-secret config knobs (e.g. a single-digit
+          # MAX_CONCURRENT_JOBS_PER_USER). GitHub Actions then masks that
+          # literal substring EVERYWHERE it recurs in later log output --
+          # including inside this harness's own evidence_hash/
+          # asr_config_fingerprint/version-string diagnostics, which are
+          # never secrets and are exactly what this workflow exists to
+          # report legibly. Only mask values at least 12 characters long --
+          # every real secret this template carries (AWS keys, API keys,
+          # DB/Redis URLs, Sentry DSN) is well over that length; every
+          # short value is an ordinary, non-secret config knob.
           for key, value in env.items():
-              if value and key != 'CUTSELL_ASR_DETERMINISTIC_CONFIG':
+              if value and key != 'CUTSELL_ASR_DETERMINISTIC_CONFIG' and len(str(value)) >= 12:
                   print(f'::add-mask::{value}')
-          print(f'Loaded {len(env)} env vars from the live RunPod template plus the D-053 CUTSELL_ASR_DETERMINISTIC_CONFIG overlay (secret values masked).')
+          print(f'Loaded {len(env)} env vars from the live RunPod template plus the D-053 CUTSELL_ASR_DETERMINISTIC_CONFIG overlay (values >=12 chars masked as secrets).')
           "
           echo "CUTSELL_ENV_JSON_PATH=/tmp/cutsell-env.json" >> "$GITHUB_ENV"
 
