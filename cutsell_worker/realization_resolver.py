@@ -711,19 +711,60 @@ class RealizationResolution:
         return self.decision_status == REVIEW_REQUIRED
 
 
+PRE_GROUP_REJECTED = "PRE_GROUP_REJECTED"
+REPLACEMENT_VERIFIED_SAFE = "REPLACEMENT_VERIFIED_SAFE"
+
+
 @dataclass(frozen=True)
 class OrphanRealizationReview:
     """See module docstring's Hard Invariant E: a realization the current
-    engine discarded before it ever reached grouping (no semantic_idea_id
-    at all -- D-049 Case A's exact shape). This module can never confirm
-    such a discard as safe on its own; it always reports a verdict here
-    rather than silently agreeing."""
+    engine discarded with no `semantic_idea_id` at all. D-050D1 splits
+    this into two contracts that used to be conflated under one blanket
+    "unresolved orphan" umbrella:
+
+      PRE_GROUP_REJECTED  -- this candidate never reached hybrid
+                              editorial's own semantic judgment at all
+                              (an ordinary deterministic clean_cut/
+                              provider-judgement rejection, or a
+                              draft_review removal of content grouping
+                              never touched). It legitimately never had
+                              a semantic_idea_id to lose -- there is
+                              nothing here for D-049 Case A to be
+                              concerned about, because nothing here was
+                              ever judged meaningful enough to route
+                              through a semantic delete path in the
+                              first place. Safe; does not block Freeze.
+
+      REVIEW_REQUIRED     -- this candidate DID reach hybrid_editorial's
+                              own semantic delete decision (`discarding_
+                              stage == "hybrid_editorial_chunks"`) and
+                              was explicitly judged meaningful/unique
+                              enough to record a `delete_basis`, with no
+                              verified replacement -- D-049 Case A's
+                              exact shape, the "true orphan" this module
+                              can never silently confirm as safe. Still
+                              blocks Freeze, unconditionally, regardless
+                              of how many PRE_GROUP_REJECTED realizations
+                              exist alongside it.
+
+    (REPLACEMENT_VERIFIED_SAFE is the third, pre-existing verdict: a
+    discard -- of either origin -- whose replacement IS verified.)
+
+    This distinction is drawn ONLY from `DiscardRecord.discarding_stage`,
+    itself set once and unconditionally by the Ledger's own read-only
+    reconstruction (semantic_ledger.py) -- it never reclassifies a
+    hybrid_editorial delete as safe, and never demotes it, regardless of
+    identity closure elsewhere. `apply_authoritative_realization_
+    resolution` escalates `any_review_required` only for the
+    `REVIEW_REQUIRED` verdict; `PRE_GROUP_REJECTED` realizations are
+    still fully recorded here (Section 5's Ledger-registration
+    requirement) but never force that escalation on their own."""
 
     realization_id: str
     discard_reason: str
     replacement_realization_id: str | None
     replacement_verified: bool
-    verdict: str  # "REPLACEMENT_VERIFIED_SAFE" | "REVIEW_REQUIRED"
+    verdict: str  # "REPLACEMENT_VERIFIED_SAFE" | "REVIEW_REQUIRED" | "PRE_GROUP_REJECTED"
     decision_reason: str
 
 
@@ -755,7 +796,16 @@ def resolve_orphan_realizations_shadow(ledger: SemanticLedger) -> tuple[OrphanRe
     `semantic_idea_id` to loop over), so it is walked here directly from
     the Ledger's own discard history. This is the module's proof of the
     D-049 Case A required shadow result -- see
-    tests/test_cutsell_d050c1_realization_resolver.py's own Case A fixture."""
+    tests/test_cutsell_d050c1_realization_resolver.py's own Case A fixture.
+
+    D-050D1: three-way verdict (see `OrphanRealizationReview`'s own
+    docstring for the full contract) -- a verified replacement is always
+    safe regardless of origin; absent that, a discard that never reached
+    `hybrid_editorial_chunks`'s own semantic delete decision is
+    `PRE_GROUP_REJECTED` (never had semantic understanding applied, so
+    D-049 Case A does not apply); a discard that DID reach that stage is
+    `REVIEW_REQUIRED` -- unchanged from before this directive, never
+    downgraded."""
     reviews = []
     realizations = ledger.realizations()
     for discard in ledger.discards():
@@ -763,11 +813,14 @@ def resolve_orphan_realizations_shadow(ledger: SemanticLedger) -> tuple[OrphanRe
         if record is None or record.semantic_idea_id is not None:
             continue  # not an orphan -- either unknown, or reached grouping normally
         if discard.replacement_verified and discard.replacement_realization_id:
-            verdict = "REPLACEMENT_VERIFIED_SAFE"
+            verdict = REPLACEMENT_VERIFIED_SAFE
             reason = "ledger_confirms_verified_replacement_realization"
+        elif discard.discarding_stage != "hybrid_editorial_chunks":
+            verdict = PRE_GROUP_REJECTED
+            reason = "ordinary_pre_grouping_rejection_never_reached_semantic_understanding"
         else:
             verdict = REVIEW_REQUIRED
-            reason = "pre_grouping_discard_with_no_verified_replacement_never_silently_confirmed"
+            reason = "hybrid_editorial_semantic_delete_with_no_verified_replacement_never_silently_confirmed"
         reviews.append(OrphanRealizationReview(
             realization_id=discard.discarded_realization_id, discard_reason=discard.reason,
             replacement_realization_id=discard.replacement_realization_id,
@@ -1208,10 +1261,16 @@ def _engine_winner_covered_critical(
 # grouping -- has already vanished from the draft by the time this stage
 # runs; this function cannot resurrect deleted content, only refuse to
 # certify the result as safe. That is exactly what it does: any orphan
-# discard `resolve_orphan_realizations_shadow` cannot confirm
-# REPLACEMENT_VERIFIED_SAFE forces the overall status to REVIEW_REQUIRED
-# (Section 8's "delete safety" requirement, applied at the boundary of what
-# this stage can actually see).
+# discard `resolve_orphan_realizations_shadow` classifies REVIEW_REQUIRED
+# (a hybrid_editorial semantic delete with no verified replacement -- the
+# "true orphan" D-049 Case A is actually concerned about) forces the
+# overall status to REVIEW_REQUIRED (Section 8's "delete safety"
+# requirement, applied at the boundary of what this stage can actually
+# see). D-050D1: an orphan discard classified PRE_GROUP_REJECTED (never
+# reached semantic understanding at all -- ordinary deterministic
+# clean_cut/provider-judgement cleanup) does NOT force this escalation --
+# it was never a candidate for D-049 Case A's concern in the first place,
+# and treating it as one only ever produced noise, not safety.
 
 SEMANTICALLY_RESOLVED = "SEMANTICALLY_RESOLVED"
 AUTHORITATIVE_REVIEW_REQUIRED = "REVIEW_REQUIRED"

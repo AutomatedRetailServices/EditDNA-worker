@@ -5008,6 +5008,122 @@ No Modal RAW launched in this directive. No RunPod touched. No
 Video00 phrases patched. No resolver semantic logic changed except the
 general, non-Video00-specific pipeline.py identity fix in Section 5.
 
+## D-050D -- front-half stability + orphan closure audit (report only)
+
+Report-only directive against canary 33727122331 (5 orphans) plus a
+direct code trace, no code changes. Full findings live in the
+session transcript; the load-bearing conclusion, confirmed and acted
+on in D-050D1 below: `mint_realization_id` (the sole minting owner,
+`canonical_identity.py`) ran only over `pipeline.py`'s `kept` list,
+strictly AFTER `apply_clean_cut`/`apply_provider_judgements` (clean_cut
+removal) and `apply_composite_resolution` (hybrid_editorial removal)
+had already partitioned candidates -- so anything either stage removed
+never received a canonical identity at all, falling back to its own
+`clip_id` in the Ledger. All 5 orphans in that canary traced to exactly
+this mechanism: 3 were `apply_composite_resolution`'s own semantic
+delete decisions (`discard_reason` values matching hybrid_editorial
+vocabulary -- `semantic_failed_plus_local_performance`, `high_
+confidence_semantic` x2), 2 were the generic pre-grouping catch-all.
+Separately (Section 4 of that report): `resolve_orphan_realizations_
+shadow` conflated "never had semantic understanding applied" (ordinary
+clean_cut rejects) with "should have had it but lost it" (genuine D-049
+Case A) under one blanket REVIEW_REQUIRED verdict -- also identified as
+worth closing, acted on below.
+
+## D-050D1 -- early realization identity minting
+
+**Section 1 (relocation)**: `pipeline.py`'s minting loop moved from
+after `apply_composite_resolution` to immediately over `take_tuple`,
+before `apply_clean_cut` is ever called -- the complete candidate pool
+(AttemptReconstructor output plus any `preserved_subspan_candidates`,
+already merged upstream in flow_b.py) is now identified before any
+editorial stage can keep, discard, or transform it. Still exactly ONE
+minting owner (`mint_realization_id`); the old post-composite-
+resolution block was deleted, not duplicated. Verified safe by
+inspection: `apply_clean_cut`/`apply_provider_judgements` are pure
+partitions of the same `CandidateTake` objects (never rebuild them),
+and `apply_composite_resolution`'s own kept/deleted split is the same
+shape, so minting once, at the top, survives every branch by
+construction.
+
+**Section 3 (survives partitioning)**: auditing every production
+`CandidateTake(...)` construction site (the same grep discipline as
+D-050C3's `DraftClip` audit) found one genuine second break:
+`clean_cut_provider.py`'s `_candidate_from_words` (the mixed-trim's
+kept child and discarded edge fragments) built a bare `CandidateTake`
+that silently dropped `attempt_id`/`realization_id` entirely. Fixed to
+carry both forward explicitly -- a mixed trim is a physical word-
+boundary adjustment of one already-minted recorded delivery, not a
+genuinely new semantic realization, the same reasoning `human_boundary_
+polish_v5`'s own fragment splitting already uses via `dataclasses.
+replace()`. `source_span_id` is deliberately NOT carried forward (a
+mixed trim IS a new physical span; re-minting that id is out of this
+directive's scope). `attempt_reconstruction.py`'s own `_merge_attempt`/
+`_preserve_borderline_subspans`, and `hybrid_gold_reconciliation.py`'s
+`combined` CandidateTake (confirmed ephemeral -- used only for a local
+coverage comparison, never persisted into any real candidate pool),
+were both audited and confirmed clean; `lexical_self_correction.py` has
+the same class of bare-construction bug but is confirmed dead code (no
+caller anywhere in the live call graph) and was left untouched.
+
+**Sections 4-6 (PRE_GROUP_REJECTED vs true orphan)**: `realization_
+resolver.py`'s `resolve_orphan_realizations_shadow` now draws a
+three-way verdict instead of two, using ONLY `DiscardRecord.
+discarding_stage` (set once, unconditionally, by the Ledger's own
+read-only reconstruction) as the discriminator:
+- a verified replacement is always `REPLACEMENT_VERIFIED_SAFE`,
+  regardless of origin (unchanged);
+- absent that, a discard whose `discarding_stage != "hybrid_editorial_
+  chunks"` is `PRE_GROUP_REJECTED` (new) -- it never reached hybrid
+  editorial's own semantic judgment at all, so D-049 Case A's concern
+  does not apply; does not force Freeze to block;
+- absent that, a discard whose `discarding_stage == "hybrid_editorial_
+  chunks"` remains `REVIEW_REQUIRED` (unchanged) -- this candidate WAS
+  judged meaningful/unique enough to record a `delete_basis`, with no
+  verified replacement; D-049 Case A's exact shape; still blocks Freeze
+  unconditionally. No fake semantic_idea_id is ever minted to eliminate
+  an orphan count; the Ledger still records every `PRE_GROUP_REJECTED`
+  realization's full provenance (realization_id, clip_ids, discard
+  stage/reason, replacement status) via the same `orphan_reviews` list
+  already surfaced in `diagnostics["realization_resolver_shadow"]`.
+
+**Section 8 (behavioral parity)**: full D-050 series (A/B/C1/C1.5/C1.6/
+C2/C3/D1) all green, unchanged counts. All 54 CleanCutBench fixtures
+green under LEGACY and explicit AUTHORITATIVE, unchanged. Full
+`tests/test_cutsell_*.py` glob green under the default (unset) env var,
+byte-for-byte LEGACY parity. One measured, expected, and welcome side
+effect: forcing `AUTHORITATIVE` across `test_cutsell_universal_clean_
+cut.py`'s pre-D-050A synthetic fixtures (bare `DraftClip`s with no
+identity stamping) previously showed 4 fail-closed differences from
+LEGACY (D-050C3); with the new `PRE_GROUP_REJECTED` classification, 3
+of those 4 now resolve correctly -- their "loser" realization is
+exactly an ordinary discarded clip with no `hybrid_editorial_chunks`
+provenance, which no longer force-blocks Freeze. The 4th (a `repair_
+loop.attempt_count` 0-vs-1 difference, unrelated to orphan
+classification -- the Ledger finds zero semantic ideas at all in that
+specific fixture, so the authoritative pass is a true no-op on an
+already-repaired draft) persists, unchanged, still a benign synthetic-
+fixture artifact.
+
+**Tests**: `tests/test_cutsell_d050d1_early_identity_minting.py` (new,
+12 tests) -- every candidate receives `realization_id` before
+`apply_clean_cut` runs, clean_cut-kept/discarded candidates both retain
+it, the mixed-trim fix (kept child + edge fragments retain parent
+identity), no-double-minting, timestamp-independence, the `PRE_GROUP_
+REJECTED`/`REVIEW_REQUIRED` distinction (both directions -- an ordinary
+reject vs a hybrid_editorial semantic delete), a verified replacement
+staying safe regardless of origin, a `PRE_GROUP_REJECTED` discard never
+blocking Freeze, a hybrid_editorial delete without replacement still
+escalating, the Ledger recording full pre-group-rejected provenance,
+and one full-pipeline run confirming the relocation changed nothing
+about bucket assignment.
+
+No Modal RAW launched. No RunPod touched. No Unified Realization
+Resolver idea-level decision logic changed (only the orphan/pre-group
+classification, which the directive explicitly asked to be
+introduced). No Human Gold, grouping, or CleanCut decision logic
+touched.
+
 ## Change rule
 
 When a new decision changes product behavior, update this file in the same development cycle. Do not silently redefine CutSell through code alone.

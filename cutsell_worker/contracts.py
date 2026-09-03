@@ -121,8 +121,15 @@ class CandidateTake:
     #                     timestamp-anchored.
     #   realization_id -- canonical semantic identity for "one specific
     #                     recorded delivery of an idea", minted once in
-    #                     pipeline.py immediately before take-grouping.
-    #                     Carried forward unchanged by every later
+    #                     pipeline.py on the complete candidate pool,
+    #                     before ANY editorial stage (clean_cut, provider
+    #                     judgements, hybrid/composite resolution,
+    #                     grouping) can keep, discard, or transform a
+    #                     candidate -- D-050D1 relocated this from its
+    #                     original post-composite-resolution point after
+    #                     an audit found every candidate those upstream
+    #                     stages removed never received an identity at
+    #                     all. Carried forward unchanged by every later
     #                     `dataclasses.replace()` (physical trims/splits)
     #                     -- never independently recomputed downstream.
     source_span_id: Optional[str] = None

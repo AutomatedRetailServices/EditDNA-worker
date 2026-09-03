@@ -138,6 +138,18 @@ def _candidate_from_words(parent: CandidateTake, words) -> CandidateTake:
         words=word_tuple,
         signals=signals,
         complete_idea=parent.complete_idea,
+        # D-050D1: a mixed trim's kept child and discarded edge fragments
+        # are physical word-boundary adjustments of ONE already-minted
+        # recorded delivery, not a genuinely new semantic realization --
+        # same reasoning as human_boundary_polish_v5's own fragment
+        # splitting, which carries realization_id/attempt_id forward via
+        # dataclasses.replace(). This bare CandidateTake(...) constructor
+        # used to drop both silently; now explicit. `source_span_id` is
+        # deliberately NOT carried forward -- it is a NEW physical span
+        # (different start/end than the parent's), and re-minting it is
+        # out of this directive's scope.
+        attempt_id=parent.attempt_id,
+        realization_id=parent.realization_id,
     )
 
 

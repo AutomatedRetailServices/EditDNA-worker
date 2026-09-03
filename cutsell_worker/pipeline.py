@@ -136,6 +136,29 @@ def build_flow_b_draft(
     label_map: dict[str, SemanticLabel] = {label.clip_id: label for label in semantic_labels}
     context_text = whole_video_context.compact_text() if whole_video_context is not None else ""
 
+    # D-050D1: mint `realization_id` here -- on the COMPLETE candidate pool
+    # (AttemptReconstructor output plus any `preserved_subspan_candidates`,
+    # already merged into `takes` by flow_b.py before this function is
+    # ever called), before ANY editorial stage (clean_cut, provider
+    # judgements, hybrid/composite resolution) can keep, discard, or
+    # transform a candidate. This used to run only over the survivors of
+    # all three of those stages (see D-050C3/D-050D's own audit), which
+    # meant anything they removed never received a canonical identity at
+    # all -- the exact mechanism behind every orphan realization traced in
+    # that audit. `apply_clean_cut`/`apply_provider_judgements` are pure
+    # partitions of the SAME CandidateTake objects (never rebuild them),
+    # and `apply_composite_resolution`'s own kept/deleted split is the
+    # same shape -- so minting here, once, is carried forward unchanged
+    # into every branch, kept or discarded, by construction. Still the
+    # single canonical owner (`mint_realization_id`, canonical_identity.py)
+    # -- no second minting implementation anywhere else in this function.
+    take_tuple = tuple(
+        take if take.realization_id else dataclass_replace(
+            take, realization_id=mint_realization_id(take.source_asset_id, take.attempt_id, take.text),
+        )
+        for take in take_tuple
+    )
+
     # Pass 1: deterministic/local cleanup remains the backbone and removes obvious
     # recording garbage before optional semantic reasoning spends anything.
     kept, deterministic_discarded, decisions = apply_clean_cut(take_tuple, whole_video_context)
@@ -178,21 +201,10 @@ def build_flow_b_draft(
         for clip_id, label, confidence in hybrid_cleanup.semantic_decisions
     }
 
-    # D-050A: mint `realization_id` here -- immediately before take-
-    # grouping, on every candidate that survived clean-up/composite-
-    # resolution -- the single owning point for "candidate/realization
-    # normalization" the D-050 architecture audit named without its own
-    # module (see canonical_identity.py's ID OWNERSHIP table). Content-
-    # anchored (source + attempt lineage + normalized text), never
-    # timestamp-anchored; carried unchanged by every later
-    # dataclasses.replace() (physical trims/splits) from here on, never
-    # independently recomputed downstream.
-    kept = tuple(
-        take if take.realization_id else dataclass_replace(
-            take, realization_id=mint_realization_id(take.source_asset_id, take.attempt_id, take.text),
-        )
-        for take in kept
-    )
+    # D-050D1: `realization_id` is minted once, above, before Pass 1 even
+    # starts -- every member of `kept` here already carries it (see the
+    # single minting pass at the top of this function). No second minting
+    # pass; no reminting.
 
     # Pass 3: deterministic retry grouping + Best Take runs after semantic garbage is
     # removed. The local ranker remains the fallback. If Hybrid already identified one

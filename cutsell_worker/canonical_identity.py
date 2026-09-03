@@ -155,9 +155,13 @@ def mint_attempt_id(member_source_span_ids: Sequence[str]) -> str:
 
 
 def mint_realization_id(source_asset_id: str, attempt_id: str | None, text: str) -> str:
-    """One specific recorded delivery of an idea -- minted once a candidate
-    survives clean-up/composite-resolution and is about to enter take-
-    grouping.
+    """One specific recorded delivery of an idea -- minted once, in
+    pipeline.py, on the COMPLETE candidate pool, before ANY editorial
+    stage (clean_cut, provider judgements, hybrid/composite resolution,
+    grouping) can keep, discard, or transform a candidate (D-050D1 --
+    relocated from its original post-composite-resolution point after an
+    audit found every candidate those stages removed never received an
+    identity at all).
 
     Content-anchored (source lineage + attempt lineage + normalized
     spoken text), never raw timestamps: a candidate whose ASR timing
