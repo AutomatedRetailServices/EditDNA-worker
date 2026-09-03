@@ -34,6 +34,7 @@ from dataclasses import dataclass, field
 from typing import Mapping
 
 from .contracts import effective_parent_semantic_clip_id
+from .contradiction_signal import any_pair_contradicts
 from .selection_boundary_contract import semantic_token_stream
 
 
@@ -144,6 +145,33 @@ def _composite_piece_ids(diagnostics: Mapping[str, object]) -> frozenset[str]:
     return frozenset(ids)
 
 
+def _composite_is_contradiction_free(winning_clip_ids: tuple[str, ...], clip_by_id: Mapping[str, object]) -> bool:
+    """D-056.3 CONTRADICTION-SAFE COMPOSITE CONTRACT: the ONE structural gate
+    that makes it impossible for a factually-contradictory pair to be
+    reported `is_composite: true` / `coverage_status: complete` here --
+    the field Selection Freeze/Boundary/Renderer actually consume, no
+    matter which upstream mechanism (`claim_coverage_best_take.py`'s own
+    2-piece fallback, `hybrid_composite_best_take`,
+    `hybrid_semantic_complementary_rescue`, or any future one) proposed the
+    composite. Live defect this closes (docs/CUTSELL_DECISIONS.md D-056.2/
+    D-056.3): `_composite_piece_ids` above never checked for a factual
+    contradiction between a composite's own members before this fix --
+    D-056.2 Run B (`tg_539b31f663aaf9e13f`) and Run C
+    (`tg_f4b9e7c1fe3e28a1af`) both a negation-conflicting pair reported
+    `is_composite: true` here while FinalEditReviewer's independent
+    CONTRADICTION check (reading `contradiction_findings` below) still
+    flagged the exact same pair -- two safety layers that disagreed.
+
+    Uses the SAME shared contradiction contract StoryValidator's own
+    `_contradiction_findings`/`_resolve_residual_family` use (see
+    `contradiction_signal.py`) -- never a second, independently-derived
+    verdict. Members whose text cannot be resolved from `clip_by_id` are
+    skipped, never invented; this only narrows available evidence, never
+    widens what counts as a conflict."""
+    texts = [str(clip.text) for cid in winning_clip_ids if (clip := clip_by_id.get(cid)) is not None]
+    return not any_pair_contradicts(texts)
+
+
 def _composite_provenance_rows(diagnostics: Mapping[str, object]) -> tuple[dict, ...]:
     rows: list[dict] = []
     for row in diagnostics.get("hybrid_editorial_chunks") or ():
@@ -163,6 +191,7 @@ def build_canonical_edit_plan(draft) -> CanonicalEditPlan:
     coherence = diagnostics.get("final_story_coherence_validation") or {}
     composite_ids = _composite_piece_ids(diagnostics)
     selected_ids = {clip.clip_id for clip in draft.selected}
+    clip_by_id = {clip.clip_id: clip for clip in draft.selected}
     # D-046 FIX A: a `take_judge_groups` member that won Selection can be
     # physically split afterward (e.g. post_selection_interior_gap_trim's
     # speech-free-gap trim) into fragments whose own `clip_id`s differ from
@@ -193,7 +222,16 @@ def build_canonical_edit_plan(draft) -> CanonicalEditPlan:
         )
         if not member_ids:
             continue
-        is_accepted_composite = len(winning) >= 2 and all(cid in composite_ids for cid in winning)
+        is_accepted_composite = (
+            len(winning) >= 2
+            and all(cid in composite_ids for cid in winning)
+            # D-056.3: an upstream mechanism marking every member a
+            # "composite piece" is necessary but no longer sufficient --
+            # the members must also not factually contradict each other.
+            # See _composite_is_contradiction_free's own docstring for the
+            # exact live defect this closes.
+            and _composite_is_contradiction_free(winning, clip_by_id)
+        )
         if not winning:
             coverage_status = "missing"
         elif len(winning) >= 2 and not is_accepted_composite:

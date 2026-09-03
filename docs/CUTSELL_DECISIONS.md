@@ -6113,6 +6113,151 @@ closed before the next paid RAW battery.
 
 Then STOP. Did not patch. Did not launch a fourth run.
 
+## D-056.3 -- Contradiction-safe composite contract (offline code fix, no RAW)
+
+Closes the single root architectural blocker D-056.2 identified. No Human Gold,
+sonography/pimples/gastritis, ASR, Semantic Compute Planner, or Modal
+infrastructure changes; no RAW launched.
+
+### Root defect
+Three places independently decide "is this 2+-member group a resolved
+composite" and, before this fix, only two of them ever checked for a factual
+contradiction between the members:
+- `final_story_coherence_validation.py`'s `_resolve_residual_family`/
+  `_contradiction_findings` -- checked (via inline-duplicated `_numbers`/
+  `_negations` logic, itself a within-file duplication risk).
+- `final_edit_reviewer.py` -- checked, but only by reading StoryValidator's
+  own `contradiction_findings` list (never an independent computation).
+- **`canonical_edit_plan.py`'s `_composite_piece_ids`/`is_accepted_composite`
+  -- never checked at all.** This is the field that actually decides
+  `is_composite: true` / `coverage_status: complete`, the object Selection
+  Freeze/Boundary/Renderer consume, and the field an upstream mechanism (most
+  likely `claim_coverage_best_take.py`'s own narrow 2-piece "combined claim
+  coverage is complete" fallback, given the exact 2-member composite shape
+  observed live) can set to `true` for ANY 2+ members an upstream diagnostic
+  called a composite piece, with zero contradiction awareness.
+- Additionally, `final_story_coherence_validation.py`'s own
+  `_residual_multi_select_groups` unconditionally EXEMPTED any group already
+  claimed as a composite (via `claim_coverage_best_take.composites`) from
+  `unresolved_families`/`residual_family_count` bookkeeping -- taking the
+  upstream claim on faith rather than validating it.
+
+Net effect (D-056.2 live evidence, Run B `tg_539b31f663aaf9e13f`, Run C
+`tg_f4b9e7c1fe3e28a1af`): a negation-conflicting pair got `is_composite: true`
+in CanonicalEditPlan while FinalEditReviewer's independent CONTRADICTION check
+(reading the SAME upstream `contradiction_findings` StoryValidator itself
+still correctly populated) flagged the identical pair -- two safety layers
+that disagreed instead of one shared, structurally enforced contract. The net
+product outcome was unaffected both times purely because FinalEditReviewer's
+redundant check happened to still fire.
+
+### Shared contradiction contract
+New module `cutsell_worker/contradiction_signal.py`: `detect_text_contradiction
+(left_text, right_text) -> TextContradiction(number_conflict, negation_conflict)`
+and `any_pair_contradicts(texts) -> bool`. Extracted verbatim (not
+reimplemented) from `final_sibling_grouping._numbers`/`_negations` -- the same
+signals StoryValidator has used since D-011. Every caller now calls this ONE
+function:
+- `final_story_coherence_validation.py`'s `_resolve_residual_family` and
+  `_contradiction_findings` (deduped from two inline copies to one shared
+  call).
+- `final_story_coherence_validation.py`'s `_residual_multi_select_groups`:
+  a group `claim_coverage_best_take.composites` claims is resolved is now
+  exempted from `unresolved_families`/`residual_family_count` ONLY when its
+  still-selected members are contradiction-free (new `_members_contradiction_
+  free` helper). A contradictory "composite" falls straight through to
+  residual tracking, exactly as if no upstream mechanism had ever claimed it
+  resolved.
+- `canonical_edit_plan.py`'s `is_accepted_composite` computation (new
+  `_composite_is_contradiction_free` helper): now requires ALL upstream-
+  claimed composite pieces to be pairwise contradiction-free, in addition to
+  the pre-existing `composite_ids` membership check. This is the primary,
+  upstream-agnostic enforcement point -- it structurally prevents ANY
+  composite-forming mechanism (current or future) from producing an accepted
+  contradictory composite, since it re-validates every accepted composite
+  regardless of which upstream diagnostic proposed it. When rejected, the
+  idea's `coverage_status` falls through to the pre-existing
+  `unresolved_ambiguous` branch -- this codebase's existing vocabulary for
+  "REVIEW_REQUIRED or equivalent unresolved state."
+
+`final_edit_reviewer.py` itself is unchanged: its DUPLICATE_IDEA/
+UNRESOLVED_RETRY findings already come from `idea.coverage_status ==
+"unresolved_ambiguous"`, and its CONTRADICTION findings already come from
+`edit_plan.contradiction_findings` -- both fields the fix above corrects at
+the source, so FinalEditReviewer automatically, structurally agrees with the
+other two layers without a single line of its own code changing.
+
+`claim_coverage_best_take.py` (ClaimCoverage) itself is also unchanged, per
+the directive's explicit scope -- its own pre-existing safety invariants
+(time-compatibility, shared-claim-type guard) are untouched and still
+covered by its own existing test suite (`test_composite_skipped_when_
+candidates_overlap_in_time`, `test_composite_skipped_when_unique_
+contributions_share_a_claim_type`), both still green.
+
+### Tests
+New `tests/test_cutsell_d056_3_contradiction_safe_composite.py` (17 tests, all
+generic -- no Video00 clip ids or phrases): `contradiction_signal.py` primitive
+unit tests; the full Section 6 matrix (valid complementary composite passes;
+positive-vs-negative, incompatible numbers, and negation-expressed causal
+inversion all reject to `unresolved_ambiguous`; a restated identical number
+and a safe chronological pair both stay valid; a 3-member composite with any
+contradicting pair rejects); the exact D-056.2 generic shape reproduced end to
+end through StoryValidator -> CanonicalEditPlan -> FinalEditReviewer; explicit
+StoryValidator-bookkeeping-retains-the-family and FinalEditReviewer-
+independently-agrees tests. Verified via `git stash` that exactly the 7 tests
+targeting the new behavior fail without the fix (the other 10 -- pre-existing-
+behavior tests -- pass either way, confirming the fix is additive and does not
+change already-correct behavior).
+
+### Offline qualification
+- `compileall`: clean.
+- All D-050/D-052/D-053/D-055/D-056 test files: 238 passed.
+- 54-fixture CleanCutBench LEGACY-vs-AUTHORITATIVE sweep
+  (`test_cutsell_d050c1_5_full_cleancutbench_parity.py` +
+  `test_cutsell_d050c2_authority_cutover.py`): all 54 fixtures processed in
+  both modes, 20/20 tests passed, zero unsafe findings, zero regressions.
+- Full `tests/test_cutsell_*.py` glob: 1574 passed (1557 pre-existing + 17
+  new), zero regressions.
+- Full `tests/` (minus the same pre-existing broken-collection file already
+  documented in D-056.1): 2198 passed, 13 subtests passed, the SAME 2
+  pre-existing-and-unrelated failures already confirmed via `git stash` in
+  D-056.1/D-056.2 to predate this session's changes entirely (a stale
+  masking-tuple-length test-string assertion, and an unrelated `_covered_by_
+  kept_delivery` StoryValidator-adjacent behavioral test never touched by
+  this fix).
+- Zero live GPU/Modal dispatch.
+
+### Final report (verbatim, as delivered)
+D-056.3 COMPLETE
+
+ROOT DEFECT: `canonical_edit_plan.py`'s composite-acceptance gate
+(`is_accepted_composite`) never checked whether a composite's own members
+factually contradict each other before reporting `is_composite: true` /
+`coverage_status: complete` -- the field Selection Freeze/Boundary/Renderer
+actually consume. `final_story_coherence_validation.py`'s own bookkeeping
+compounded this by exempting any upstream-claimed composite from
+`unresolved_families` without re-validating it.
+
+SHARED CONTRADICTION CONTRACT: `contradiction_signal.detect_text_
+contradiction`/`any_pair_contradicts`, extracted verbatim from
+`final_sibling_grouping._numbers`/`_negations` (StoryValidator's existing
+primitive since D-011) -- now the ONE function StoryValidator's own two
+checks, its residual-family exemption, and CanonicalEditPlan's composite-
+acceptance gate all call.
+
+COMPOSITE CONTRADICTION SAFETY: PASS
+STORYVALIDATOR UNRESOLVED BOOKKEEPING: PASS
+FINAL EDIT REVIEWER AGREEMENT: PASS
+VALID COMPOSITE REGRESSION: PASS
+
+LEGACY: 54/54
+AUTHORITATIVE: 54/54
+FULL TEST COUNT: 1574 passed (tests/test_cutsell_*.py glob, zero regressions)
+
+READY FOR ONE FINAL VIDEO00 CANARY? YES
+
+Then STOP. Did not launch Modal.
+
 ## Change rule
 
 When a new decision changes product behavior, update this file in the same development cycle. Do not silently redefine CutSell through code alone.

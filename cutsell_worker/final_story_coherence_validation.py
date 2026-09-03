@@ -87,6 +87,7 @@ from itertools import combinations
 from typing import Mapping
 
 from .contracts import effective_parent_semantic_clip_id
+from .contradiction_signal import any_pair_contradicts, detect_text_contradiction
 from .final_sibling_grouping import _content, _negations, _numbers
 from .semantic_atom_importance import (
     SemanticAtomImportanceArbiter,
@@ -139,19 +140,52 @@ def _claim_coverage_composite_group_ids(diagnostics: Mapping[str, object]) -> fr
     return frozenset(str(row.get("group_id") or "") for row in composites if isinstance(row, dict))
 
 
-def _residual_multi_select_groups(draft) -> list[dict]:
+def _members_contradiction_free(still_selected: list[dict], take_by_id: dict[str, object]) -> bool:
+    """D-056.3 Section 4: the shared contradiction contract, applied to an
+    upstream-claimed "resolved composite" before StoryValidator agrees to
+    drop it from unresolved-family bookkeeping. A composite is only ever
+    VALIDATED SAFE -- eligible to resolve the family -- when none of its
+    still-selected members factually contradict each other. Members whose
+    text cannot be resolved are skipped (never invented), matching this
+    file's existing fail-open posture elsewhere; this never widens what
+    counts as a conflict, only narrows what evidence is available to find
+    one."""
+    texts = [
+        str(take.text)
+        for row in still_selected
+        if (take := take_by_id.get(str(row.get("clip_id") or ""))) is not None
+    ]
+    return not any_pair_contradicts(texts)
+
+
+def _residual_multi_select_groups(draft, take_by_id: dict[str, object]) -> list[dict]:
     selected_ids = {clip.clip_id for clip in draft.selected}
     diagnostics = draft.diagnostics or {}
     groups = list(diagnostics.get("take_judge_groups") or ())
     exempt_group_ids = _claim_coverage_composite_group_ids(diagnostics)
     residual = []
     for group in groups:
-        if str(group.get("group_id") or "") in exempt_group_ids:
-            continue
         ranked = list(group.get("ranked") or ())
         still_selected = [row for row in ranked if str(row.get("clip_id") or "") in selected_ids]
-        if len(still_selected) >= 2:
-            residual.append({**group, "ranked": ranked, "still_selected": still_selected})
+        if len(still_selected) < 2:
+            continue
+        if str(group.get("group_id") or "") in exempt_group_ids:
+            # D-056.3 root-defect fix: an upstream composite mechanism
+            # (e.g. claim_coverage_best_take.py's own narrow 2-piece
+            # fallback) claims this family is resolved -- but StoryValidator
+            # never takes that on faith merely because a composite object
+            # exists (D-056.2 Run B/C: `tg_539b31f663aaf9e13f`/
+            # `tg_f4b9e7c1fe3e28a1af`, both a factually-contradictory pair
+            # accepted as "resolved" by an upstream mechanism that never
+            # checked for contradiction at all). Only a composite whose
+            # still-selected members are NOT contradictory (same shared
+            # primitive `_contradiction_findings` below uses) may be
+            # exempted. A contradictory "composite" falls straight through
+            # to residual tracking, exactly as if no upstream mechanism had
+            # ever claimed it was resolved.
+            if _members_contradiction_free(still_selected, take_by_id):
+                continue
+        residual.append({**group, "ranked": ranked, "still_selected": still_selected})
     return residual
 
 
@@ -216,11 +250,8 @@ def _resolve_residual_family(
         left_take, right_take = take_by_id.get(ordered[i]["clip_id"]), take_by_id.get(ordered[j]["clip_id"])
         left_text = left_take.text if left_take is not None else ""
         right_text = right_take.text if right_take is not None else ""
-        left_numbers, right_numbers = _numbers(left_text), _numbers(right_text)
-        left_negations, right_negations = _negations(left_text), _negations(right_text)
-        number_conflict = bool(left_numbers) and bool(right_numbers) and left_numbers != right_numbers
-        negation_conflict = bool(left_negations) != bool(right_negations)
-        if number_conflict or negation_conflict:
+        signal = detect_text_contradiction(left_text, right_text)
+        if signal.has_conflict:
             # Confirmed same idea, but factually incompatible -- do not
             # collapse; leave both selected, unresolved, for the caller's
             # freeze-blocking contradiction check to catch.
@@ -228,8 +259,8 @@ def _resolve_residual_family(
                 "group_id": group.get("group_id"),
                 "left_clip_id": ordered[i]["clip_id"],
                 "right_clip_id": ordered[j]["clip_id"],
-                "number_conflict": number_conflict,
-                "negation_conflict": negation_conflict,
+                "number_conflict": signal.number_conflict,
+                "negation_conflict": signal.negation_conflict,
             })
             continue
         any_confirmed = True
@@ -284,17 +315,14 @@ def _contradiction_findings(draft, take_by_id: dict[str, object]) -> list[dict]:
             right_take = take_by_id.get(right["clip_id"])
             if left_take is None or right_take is None:
                 continue
-            left_numbers, right_numbers = _numbers(left_take.text), _numbers(right_take.text)
-            left_negations, right_negations = _negations(left_take.text), _negations(right_take.text)
-            number_conflict = bool(left_numbers) and bool(right_numbers) and left_numbers != right_numbers
-            negation_conflict = bool(left_negations) != bool(right_negations)
-            if number_conflict or negation_conflict:
+            signal = detect_text_contradiction(left_take.text, right_take.text)
+            if signal.has_conflict:
                 findings.append({
                     "group_id": group.get("group_id"),
                     "left_clip_id": left["clip_id"],
                     "right_clip_id": right["clip_id"],
-                    "number_conflict": number_conflict,
-                    "negation_conflict": negation_conflict,
+                    "number_conflict": signal.number_conflict,
+                    "negation_conflict": signal.negation_conflict,
                 })
     return findings
 
@@ -514,8 +542,8 @@ def apply_final_story_coherence_validation(
     """Last semantic authority before Selection Freeze. See module docstring."""
     draft = _fold_alternates_into_discarded(draft)
 
-    residual = _residual_multi_select_groups(draft)
     take_by_id = {clip.clip_id: clip for clip in (*draft.selected, *draft.discarded)}
+    residual = _residual_multi_select_groups(draft, take_by_id)
 
     resolved_families: list[dict] = []
     unresolved_families: list[dict] = []
