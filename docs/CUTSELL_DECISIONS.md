@@ -5434,6 +5434,116 @@ regression suite, not by this ASR-only harness -- it deliberately never
 constructs the hybrid editorial / CompositeResolver stage those fixes
 live in.
 
+## D-054 -- ASR variance severity + commercial stabilization (report only; no code)
+
+Re-analyzes D-053's six existing ASR-only artifacts (no rerun) to answer
+what D-053 could not: not "do hashes match" but "does the variance touch
+anything commercially critical." Full word sequences + per-word
+timestamps were recovered from the six Modal job logs (the console
+summary only prints the first 40 words; the full arrays are earlier in
+the same job's own "Run Modal ASR-only benchmark" step output, which
+`get_job_logs` with a larger `tail_lines` does return).
+
+**Confounder found first:** `evidence_hash` embeds `source_asset_id`,
+which this harness derives from `benchmark_id` (unique per GitHub Actions
+run/attempt) -- so `evidence_hash` is GUARANTEED to differ run-to-run
+regardless of ASR content. Proof: runs D and F have word-for-word
+IDENTICAL transcripts (0 diff ops, 100% similarity) yet different
+`evidence_hash` values. D-053's "0/3 identical hashes" framing is
+therefore partly a harness-identity artifact, not solely ASR
+non-determinism -- real ASR variance is still present (proven directly
+below by actual word-content diffs), but hash inequality alone was never
+a clean proxy for it, exactly as D-053 Section 8 had already warned.
+
+**Word-level alignment (classic Levenshtein WER, full backtrace):**
+LEGACY A-B 99.84% similar (1 substitution only); A-C 90.69%; B-C 90.85%.
+Deterministic D-F 100% identical (0 diffs); D-E 87.54%; E-F 87.54%. In
+both groups, two of three runs are near-identical and ONE run (C in
+LEGACY, E in deterministic) is the actual source of essentially all
+observed variance -- not three independently-diverging runs.
+
+**T0-T4 severity classification (302 diff tokens across all 6 pairwise
+comparisons):** T0 (formatting/punctuation) 162, T1 (filler/homophone
+orthography, e.g. `si`/`sí`, `aliméntate`/`alimentate`) 14, T2
+(inflection/paraphrase, e.g. `pedía`/`pedí`, `salió`/`salía`) 10, T3
+(other lexical variance) 104, T4 (negation/number/entity trigger) 12.
+The T3/T4 counts look large in isolation but cluster into just ONE
+localized real content event per outlier run, not dozens of independent
+facts changing:
+1. A dropped/reworded descriptive clause about a resolved back-acne
+   symptom (present in C/E, absent or garbled as `resor...` elsewhere).
+2. The colloquial idiom "no hay que preguntar" (rhetorical "don't even
+   ask") becomes "hay que voltar" in C/E -- a real negation deletion
+   plus a nonsensical word substitution. This is genuine ASR
+   hallucination on a hard, idiomatic, filler phrase -- but it is
+   rhetorical/emotional filler, not a clinical statement (contrast
+   "no tengo cáncer"), and changes no diagnosis, treatment, number, or
+   hereditary fact anywhere in the transcript.
+3. A `sonografía`/`sonografías` singular/plural variance on one mention
+   of an ultrasound procedure.
+The apparent "5"/"-10" insertion/deletion the raw aligner flags in D-E is
+a REPHRASING artifact (the same 5-10% hereditary-cancer statistic stated
+in two different sentence structures across runs), not a number
+appearing or disappearing -- confirmed by the whole-transcript check
+below.
+
+**Critical claim stability (`semantic_claims.extract_claims`, run
+standalone, no clause-role arbiter, one mega-clip per full transcript):**
+raw `canonical_claim_id` intersection across all 6 runs is 11/18 CRITICAL
+claims (61.1%); 12/17 (70.6%) within the deterministic group alone. This
+number is understated by a real second-order effect, not by lost facts:
+`canonical_claim_id` is minted from an exact clause's content-token set,
+and ASR's comma/period placement variance shifts where
+`_split_into_clauses` draws a clause boundary, producing a "different"
+claim id for what is the same underlying sentence reworded only in
+punctuation. Proof this isn't real fact loss: `final_sibling_grouping.
+_negations()` and `_numbers()`, run over the FULL transcript text (the
+same token-set primitives the live engine's own retry-family/coverage
+logic already uses), are IDENTICAL across all 6 runs --
+`negations={no, nunca}`, `numbers={3, 5, 10, 2023}` -- and a direct
+substring check confirms every named entity/diagnosis/hereditary-stat
+fact (`cáncer`, `tiroides`, `hereditario`, `sonografía`, `ginecóloga`,
+`metabolismo`, the "5-10%" figure, the "In Body Mass" test name) is
+present in literally all 6 transcripts. The one real negation event (the
+idiom above) is a single clause-level exception inside an otherwise
+100%-stable negation/number token set.
+
+**Timestamp drift (aligned identical words only):** median 0.0s in
+every pairwise comparison. p95 ranges 0.0-2.06s; max ranges 0.0-7.12s --
+but the two byte-identical-content pairs (D-F: 0 diffs) and near-
+identical pairs (A-B: 1 diff) show max drift of exactly 0.0s and 0.04s
+respectively. The larger p95/max values only appear in pairs that also
+have the real content-divergence event above (which shifts every
+downstream word's absolute time by the length of the differing clause) --
+they are a cascading effect of content variance, not independent timing
+jitter. When content genuinely matches, timing is sub-frame-accurate,
+comfortably inside `take_segmentation`'s existing 0.75s gap-splitting
+threshold.
+
+**Decision: CASE A** (D-054 Section 6) -- hashes differ, but the
+transcript is semantically equivalent for every commercially-relevant
+purpose and critical claims (numbers, negations, diagnoses, named
+entities) are stable in substance. Do NOT chase bit-identical CUDA/GPU
+determinism. The one genuine anomaly found (the idiom-corruption
+negation drop) is a real, worth-monitoring ASR hallucination on hard
+colloquial filler, but is not a clinical/factual claim and does not
+change this phase's conclusion.
+
+**Recommended commercial ASR strategy:** keep the current Faster-Whisper
+GPU provider (LEGACY config, per D-053) and invest instead in a
+Canonical Transcript Equivalence layer -- normalizing harmless
+T0-T2 lexical/filler/punctuation/clause-boundary variance to one
+semantic evidence representation, so `evidence_hash`-style identity
+reflects meaning-equivalence rather than raw token-sequence equality.
+Fixed `compute_type`, CPU-only deterministic transcription, two-pass
+consensus transcription, and an alternate ASR backend are all CASE-B
+remedies; none are needed given this phase's CASE-A finding, and none
+are implemented here (informational comparison only, per the directive).
+
+No full Video00 RAW run. No engine code touched (Resolver, Ledger,
+CleanCut, Human Gold, Gemini, Render all untouched) -- this phase is
+pure offline analysis of already-existing D-053 artifacts.
+
 ## Change rule
 
 When a new decision changes product behavior, update this file in the same development cycle. Do not silently redefine CutSell through code alone.
