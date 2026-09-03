@@ -384,6 +384,12 @@ jobs:
             | tee artifact/video00-modal-selection-lock-report.json
 
       - name: Verify Video00 architecture
+        # D-050C3 Section 8: a BLOCKED Freeze is itself a valid benchmark
+        # result -- it must never cause this validator to be skipped just
+        # because the (LEGACY-selection-shaped) "Verify frozen Selection
+        # lock" step above failed. CI observability only; does not change
+        # engine behavior.
+        if: always()
         shell: bash
         run: |
           set -euo pipefail
@@ -398,6 +404,10 @@ jobs:
             | tee artifact/video00-modal-architecture-report.json
 
       - name: Verify Human Gold regression QA (18-check manifest)
+        # D-050C3 Section 8: same reasoning as the architecture validator
+        # above -- must still run against result.json even when Freeze
+        # was blocked and the selection-lock step above failed.
+        if: always()
         shell: bash
         run: |
           set -euo pipefail

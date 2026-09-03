@@ -371,7 +371,20 @@ def build_flow_b_draft(
         _draft_clip(
             take,
             role=label_map.get(take.clip_id, SemanticLabel(take.clip_id, SemanticRole.OTHER, 0.0)).role,
-            group_id=None,
+            # D-050C3 Section 5: this used to hardcode group_id=None
+            # unconditionally, unlike the selected/alternates buckets above
+            # which correctly consult clip_to_group. `discarded` (pre-
+            # grouping clean_cut/hybrid-cleanup rejects) never had a group
+            # to begin with, so clip_to_group.get() is a no-op there -- but
+            # `review_removed` (post-grouping draft_review rejects, see
+            # removed_group_ids above) DID go through grouping and have a
+            # real group_id, which the hardcoded None silently discarded,
+            # stripping semantic_idea_id/retry_family_id (see _draft_clip)
+            # from every such realization regardless of whether grouping
+            # found a real retry family for it. Fixed to the same lookup
+            # selected/alternates already use -- no clip-id hardcoding,
+            # general to any discard path that reaches this constructor.
+            group_id=clip_to_group.get(take.clip_id),
             selected=False,
         )
         for take in (*discarded, *review_removed)

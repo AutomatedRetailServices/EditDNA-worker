@@ -1428,3 +1428,141 @@ def build_authoritative_resolution_diagnostics(result: AuthoritativeApplicationR
             for outcome in result.idea_outcomes
         ],
     }
+
+
+# ---------------------------------------------------------------------------
+# D-050C3 Section 7: ONE typed resolved-state object. `apply_authoritative_
+# realization_resolution` already produces the resolved `DraftTimeline` that
+# CanonicalEditPlan/StoryValidator/FinalEditReviewer consume directly (in
+# AUTHORITATIVE mode they run strictly AFTER this function, on its own
+# output draft -- see universal_clean_cut.py's D-050C3 ordering) -- that
+# draft.selected/discarded/alternates split IS the one resolved semantic
+# state every downstream stage sees, so there is structurally no second,
+# independently-reconstructed notion of winner/discard for them to disagree
+# with. `AuthoritativeSemanticState` is the typed, flattened OBSERABILITY
+# view of that same resolved state (semantic_idea_id, winner-or-composite,
+# canonical critical claims, coverage, discarded realizations, replacement
+# verification, review status, story order, provenance) -- built once,
+# straight from `AuthoritativeApplicationResult` plus the Ledger it was
+# computed from, so nothing downstream has to reconstruct it by hand from
+# raw diagnostics dicts.
+# ---------------------------------------------------------------------------
+
+@dataclass(frozen=True)
+class AuthoritativeSemanticIdeaState:
+    semantic_idea_id: str
+    review_status: str  # RESOLVED_WINNER | RESOLVED_COMPOSITE | REVIEW_REQUIRED
+    winner_or_composite_realization_ids: tuple[str, ...]
+    canonical_critical_claim_ids: tuple[str, ...]
+    covered_canonical_claim_ids: tuple[str, ...]
+    missing_critical_claim_ids: tuple[str, ...]
+    discarded_realization_ids: tuple[str, ...]
+    retained_for_contextual_value: tuple[str, ...]
+    replacement_verified: bool
+    story_order_position: int | None
+    provenance: Mapping[str, tuple[str, ...]]  # realization_id -> source_span_ids
+
+
+@dataclass(frozen=True)
+class AuthoritativeSemanticState:
+    status: str  # SEMANTICALLY_RESOLVED | REVIEW_REQUIRED
+    ideas: tuple[AuthoritativeSemanticIdeaState, ...]
+    unresolved_orphan_realization_ids: tuple[str, ...]
+
+    def idea(self, semantic_idea_id: str) -> AuthoritativeSemanticIdeaState | None:
+        for entry in self.ideas:
+            if entry.semantic_idea_id == semantic_idea_id:
+                return entry
+        return None
+
+
+def build_authoritative_semantic_state(
+    result: AuthoritativeApplicationResult, ledger: SemanticLedger,
+) -> AuthoritativeSemanticState:
+    """Builds the Section 7 typed contract from an already-computed
+    `AuthoritativeApplicationResult`. Pure, read-only, no new decisions --
+    every value here is a direct projection of `outcome`/`ledger`, never a
+    fresh judgment call. `story_order_position` is this idea's rank among
+    all RESOLVED ideas by their winning realization's earliest start time
+    in the resolved draft (None for REVIEW_REQUIRED -- it never joined the
+    resolved timeline). `provenance` maps each surviving realization_id to
+    its `source_span_ids` as recorded in the Ledger (never guessed)."""
+    realizations = ledger.realizations()
+
+    def _earliest_start(realization_ids: tuple[str, ...]) -> float:
+        starts = [realizations[rid].start for rid in realization_ids if rid in realizations]
+        return min(starts) if starts else float("inf")
+
+    provisional: list[tuple[float, AuthoritativeIdeaOutcome]] = []
+    for outcome in result.idea_outcomes:
+        winner_ids = outcome.composite_realization_ids or (
+            (outcome.winner_realization_id,) if outcome.winner_realization_id else ()
+        )
+        provisional.append((_earliest_start(winner_ids), outcome))
+
+    order_rank: dict[str, int] = {}
+    resolved_sorted = sorted(
+        (item for item in provisional if item[1].decision_status != REVIEW_REQUIRED),
+        key=lambda item: item[0],
+    )
+    for position, (_, outcome) in enumerate(resolved_sorted):
+        order_rank[outcome.semantic_idea_id] = position
+
+    idea_states: list[AuthoritativeSemanticIdeaState] = []
+    for _, outcome in provisional:
+        winner_or_composite = outcome.composite_realization_ids or (
+            (outcome.winner_realization_id,) if outcome.winner_realization_id else ()
+        )
+        canonical_critical_claim_ids = tuple(dict.fromkeys(
+            (*outcome.covered_canonical_claim_ids, *outcome.missing_critical_claim_ids)
+        ))
+        provenance = {
+            rid: realizations[rid].source_span_ids
+            for rid in (*winner_or_composite, *outcome.discarded_realization_ids)
+            if rid in realizations
+        }
+        idea_states.append(AuthoritativeSemanticIdeaState(
+            semantic_idea_id=outcome.semantic_idea_id,
+            review_status=outcome.decision_status,
+            winner_or_composite_realization_ids=winner_or_composite,
+            canonical_critical_claim_ids=canonical_critical_claim_ids,
+            covered_canonical_claim_ids=outcome.covered_canonical_claim_ids,
+            missing_critical_claim_ids=outcome.missing_critical_claim_ids,
+            discarded_realization_ids=outcome.discarded_realization_ids,
+            retained_for_contextual_value=outcome.retained_for_contextual_value,
+            replacement_verified=(
+                outcome.decision_status != REVIEW_REQUIRED and not outcome.missing_critical_claim_ids
+            ),
+            story_order_position=order_rank.get(outcome.semantic_idea_id),
+            provenance=provenance,
+        ))
+
+    return AuthoritativeSemanticState(
+        status=result.status, ideas=tuple(idea_states),
+        unresolved_orphan_realization_ids=result.unresolved_orphan_realization_ids,
+    )
+
+
+def build_authoritative_semantic_state_diagnostics(state: AuthoritativeSemanticState) -> dict:
+    """JSON-safe view for `diagnostics["authoritative_semantic_state"]`."""
+    return {
+        "schema_version": "cutsell.authoritative_semantic_state.v1",
+        "status": state.status,
+        "unresolved_orphan_realization_ids": list(state.unresolved_orphan_realization_ids),
+        "ideas": [
+            {
+                "semantic_idea_id": idea.semantic_idea_id,
+                "review_status": idea.review_status,
+                "winner_or_composite_realization_ids": list(idea.winner_or_composite_realization_ids),
+                "canonical_critical_claim_ids": list(idea.canonical_critical_claim_ids),
+                "covered_canonical_claim_ids": list(idea.covered_canonical_claim_ids),
+                "missing_critical_claim_ids": list(idea.missing_critical_claim_ids),
+                "discarded_realization_ids": list(idea.discarded_realization_ids),
+                "retained_for_contextual_value": list(idea.retained_for_contextual_value),
+                "replacement_verified": idea.replacement_verified,
+                "story_order_position": idea.story_order_position,
+                "provenance": {rid: list(spans) for rid, spans in idea.provenance.items()},
+            }
+            for idea in state.ideas
+        ],
+    }

@@ -38,6 +38,8 @@ from .realization_resolver import (
     apply_authoritative_realization_resolution,
     AUTHORITATIVE_REVIEW_REQUIRED,
     build_authoritative_resolution_diagnostics,
+    build_authoritative_semantic_state,
+    build_authoritative_semantic_state_diagnostics,
     build_realization_resolver_diagnostics,
     resolve_realizations_shadow,
 )
@@ -194,6 +196,21 @@ def process_universal_clean_cut_sources(
         # intentional Composer pacing choice, see repair_loop.py's own
         # docstring) -- apply bounded, targeted repairs and re-review. Never
         # invents semantic judgment; never mutates an unrelated Idea.
+        #
+        # D-050C3 Section 1/4: this FIRST pass runs on whatever the 3-way
+        # selection branch above produced -- the pre-cutover ("legacy")
+        # draft. In LEGACY/SHADOW mode (and always for the two non-Clean-
+        # Cut-Core-V1 selection branches, which the Unified Realization
+        # Resolver was never designed for) this pass's output IS the real,
+        # final diagnostics -- nothing below ever touches it again. In
+        # AUTHORITATIVE mode it is ALSO still needed here: (a) the Semantic
+        # Ledger's own reconstruction reads `final_story_coherence_
+        # validation`/`canonical_edit_plan` diagnostics for one enrichment
+        # (see semantic_ledger.py Section 11), so this pass has to exist
+        # before the Ledger is built, and (b) it becomes this run's LEGACY
+        # EVIDENCE for comparison once the authoritative pass below
+        # recomputes these same three diagnostics keys on the resolver's
+        # OWN resolved draft and takes over as the real ones Freeze reads.
         repair_result = run_repair_loop(result.draft, causal_order_arbiter=causal_order_arbiter)
         edit_plan = repair_result.final_plan
         review_result = repair_result.final_review
@@ -213,16 +230,16 @@ def process_universal_clean_cut_sources(
         result = replace(result, draft=replace(result.draft, diagnostics=diagnostics))
         final_edit_reviewer_status = review_result.status
 
-        # D-050B: Semantic Ledger, SHADOW MODE ONLY. Built here -- after
-        # every stage it observes (grouping, DeliveryScorer, semantic
-        # best-take, ClaimCoverage, StoryValidator, CanonicalEditPlan,
-        # FinalEditReviewer) has already run and already written its own
-        # authoritative diagnostics, and strictly BEFORE Freeze -- as a
-        # pure, read-only reconstruction. Nothing below this line (Freeze,
-        # Boundary, complete-idea recovery, Render/QC) reads
-        # `diagnostics["semantic_ledger"]`; it exists purely for
-        # observability and forensic replay. See semantic_ledger.py's
-        # module docstring for the full shadow-mode contract.
+        # D-050B: Semantic Ledger. Built here -- after every stage it
+        # observes (grouping, DeliveryScorer, semantic best-take,
+        # ClaimCoverage, StoryValidator, CanonicalEditPlan, FinalEditReviewer)
+        # has already run and already written its own diagnostics -- as a
+        # pure, read-only reconstruction. In LEGACY/SHADOW mode this remains
+        # purely observational: nothing below this line (Freeze, Boundary,
+        # complete-idea recovery, Render/QC) reads `diagnostics
+        # ["semantic_ledger"]`. In AUTHORITATIVE mode it is ALSO the
+        # Unified Realization Resolver's own input two steps below -- see
+        # semantic_ledger.py's module docstring for the full contract.
         ledger = build_semantic_ledger_shadow(result.draft)
         ledger_parity = build_ledger_parity_report(ledger, result.draft)
         diagnostics = dict(result.draft.diagnostics or {})
@@ -241,40 +258,92 @@ def process_universal_clean_cut_sources(
         diagnostics["realization_resolver_shadow"] = build_realization_resolver_diagnostics(resolver_report)
         result = replace(result, draft=replace(result.draft, diagnostics=diagnostics))
 
-        # D-050C2 CONTROLLED AUTHORITY CUTOVER -- see resolver_mode.py's own
-        # module docstring for the 3-state contract (LEGACY/SHADOW/
+        # D-050C2/D-050C3 CONTROLLED AUTHORITY CUTOVER -- see resolver_mode.py's
+        # own module docstring for the 3-state contract (LEGACY/SHADOW/
         # AUTHORITATIVE, default LEGACY, one environment variable, no code
         # revert to roll back) and realization_resolver.py's
         # `apply_authoritative_realization_resolution` docstring for exactly
         # what gets applied. This is THE ONE explicit point in the pipeline
         # the resolver's decision is ever applied (Section 3) -- no other
         # module below this line, or above it, mutates selection membership
-        # on the resolver's behalf.
+        # on the resolver's behalf. Gated on `clean_cut_core_v1_enabled` too:
+        # the resolver's per-idea/retry-family model only makes sense against
+        # Clean Cut Core V1's own idea-first grouping.
         #
-        # EVIDENCE-ONLY vs AUTHORITATIVE (Section 2, documented here as the
-        # single source of truth for this classification): when
-        # `resolver_mode == AUTHORITATIVE`, every stage that already ran
-        # ABOVE this line and already wrote `result.draft.selected`/
-        # `discarded` -- take_grouping_provider's grouping,
-        # `deterministic_best_take_authority` (DeliveryScorer + `_semantic_
-        # best_take`'s hybrid override), `apply_claim_coverage_best_take`
-        # (ClaimCoverageBestTake + its own composite formation), and
-        # CanonicalEditPlan/FinalEditReviewer/StoryValidator's own
-        # diagnostics computed from that pre-cutover selection -- become
-        # EVIDENCE ONLY: their own diagnostics keys stay in place unchanged
-        # (this stays true to Section 7's "old calculations may remain as
-        # comparison diagnostics" for this C2 phase -- CanonicalEditPlan/
-        # StoryValidator are NOT rewritten to consume the post-cutover
-        # state yet), but the values in `result.draft.selected`/
-        # `discarded`/`alternates` immediately below are overwritten by the
-        # resolver's own decision and nothing downstream (Freeze, Boundary,
-        # complete-idea recovery, Render/QC) may reinterpret that. In
-        # `LEGACY`/`SHADOW` mode none of this changes anything: identical
-        # to every prior D-050C1.x directive.
+        # D-050C3 Section 4 (the C2 evidence-only exemption removed): where
+        # D-050C2 left CanonicalEditPlan/StoryValidator/FinalEditReviewer's
+        # FIRST-pass output (computed above, on the pre-cutover draft) as the
+        # diagnostics Freeze actually reads even in AUTHORITATIVE mode, this
+        # phase re-runs all three -- StoryValidator, then CanonicalEditPlan
+        # + FinalEditReviewer + bounded repair -- a SECOND time, strictly on
+        # the resolver's own resolved draft, and THAT second pass becomes
+        # the real `diagnostics["canonical_edit_plan"]`/`["final_edit_
+        # reviewer"]`/`["final_story_coherence_validation"]`/["repair_loop"]`
+        # keys Freeze reads below. The first pass's output for those same
+        # four keys is relabeled `*_legacy_evidence` -- still present, still
+        # fully computed, but structurally unable to block or approve
+        # anything: no code below this point ever reads those `_legacy_
+        # evidence` keys for a decision, only for comparison/observability.
+        # In `LEGACY`/`SHADOW` mode (and the two non-Clean-Cut-V1 selection
+        # branches) none of this runs: identical to every prior D-050C1.x/
+        # D-050C2 directive -- the first pass above is the only pass, full
+        # stop.
         authoritative_result = None
-        if resolver_mode == RESOLVER_MODE_AUTHORITATIVE:
+        authoritative_semantic_state = None
+        if clean_cut_core_v1_enabled and resolver_mode == RESOLVER_MODE_AUTHORITATIVE:
             authoritative_result = apply_authoritative_realization_resolution(result.draft, ledger, resolver_report)
-            result = replace(result, draft=authoritative_result.draft)
+
+            pre_authority_diagnostics = dict(result.draft.diagnostics or {})
+            legacy_evidence_keys = (
+                "canonical_edit_plan", "final_edit_reviewer", "repair_loop",
+                "final_story_coherence_validation",
+            )
+            authoritative_diagnostics = {
+                key: value for key, value in pre_authority_diagnostics.items()
+                if key not in legacy_evidence_keys
+            }
+            for key in legacy_evidence_keys:
+                if key in pre_authority_diagnostics:
+                    authoritative_diagnostics[f"{key}_legacy_evidence"] = pre_authority_diagnostics[key]
+            authoritative_draft = replace(authoritative_result.draft, diagnostics=authoritative_diagnostics)
+
+            # StoryValidator, AUTHORITATIVELY: re-validated on the resolver's
+            # own resolved selection, never the pre-cutover one.
+            authoritative_draft = apply_final_story_coherence_validation(
+                authoritative_draft,
+                semantic_equivalence_arbiter=semantic_equivalence_arbiter,
+                semantic_atom_importance_arbiter=semantic_atom_importance_arbiter,
+                claim_equivalence_arbiter=claim_equivalence_arbiter,
+                clause_role_arbiter=clause_role_arbiter,
+            )
+
+            # CanonicalEditPlan + FinalEditReviewer + bounded repair,
+            # AUTHORITATIVELY: same call as the first pass above, now
+            # operating on the resolved draft -- this becomes the plan
+            # Freeze actually consumes.
+            repair_result = run_repair_loop(authoritative_draft, causal_order_arbiter=causal_order_arbiter)
+            edit_plan = repair_result.final_plan
+            review_result = repair_result.final_review
+            result = replace(result, draft=repair_result.final_draft)
+            final_edit_reviewer_status = review_result.status
+
+            diagnostics = dict(result.draft.diagnostics or {})
+            diagnostics["canonical_edit_plan"] = dataclasses.asdict(edit_plan)
+            diagnostics["final_edit_reviewer"] = {
+                "status": review_result.status,
+                "findings": [dataclasses.asdict(f) for f in review_result.findings],
+                "warnings": [dataclasses.asdict(f) for f in review_result.warnings],
+            }
+            diagnostics["repair_loop"] = {
+                "status": repair_result.status,
+                "attempt_count": len(repair_result.attempts),
+                "attempts": [dataclasses.asdict(a) for a in repair_result.attempts],
+            }
+            authoritative_semantic_state = build_authoritative_semantic_state(authoritative_result, ledger)
+            diagnostics["authoritative_semantic_state"] = build_authoritative_semantic_state_diagnostics(
+                authoritative_semantic_state
+            )
+            result = replace(result, draft=replace(result.draft, diagnostics=diagnostics))
         diagnostics = dict(result.draft.diagnostics or {})
         diagnostics["realization_resolver_authority"] = (
             build_authoritative_resolution_diagnostics(authoritative_result, mode=resolver_mode)

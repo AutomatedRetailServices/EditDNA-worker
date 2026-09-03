@@ -4797,6 +4797,217 @@ modules. Per this directive's own closing instruction, this is a report
 of readiness, not a launch: no Modal canary has been run, and one
 should not be until the user explicitly authorizes it.
 
+## D-050C2 MODAL CANARY -- run 33701641177
+
+User authorized ONE Modal Video00 canary in `AUTHORITATIVE` mode on
+head `ade4578` (later `324233b` after the one-line env overlay this
+directive itself required -- see below). The Modal RAW workflow
+(`cutsell-video00-modal-raw.yml`) had no mechanism to pass
+`CUTSELL_UNIFIED_REALIZATION_RESOLVER` into the run at all; the user
+explicitly authorized adding the same one-line overlay pattern the
+D-044 fix already uses for `CUTSELL_HYBRID_LLM_ENABLED`/
+`CUTSELL_HYBRID_PROVIDER` (a runtime-config-only change, no
+cutsell_worker editorial module touched) rather than dispatch a run
+that would have silently stayed on `LEGACY` and tested nothing new.
+
+**Result** (run 33701641177, ~7m14s on one L4, low-cost): the resolver
+genuinely ran in `AUTHORITATIVE` mode -- confirmed directly from
+`diagnostics.realization_resolver_authority.mode == "AUTHORITATIVE"`
+with real per-idea output. 17 semantic ideas evaluated: 16
+`RESOLVED_WINNER` (0 composites), 1 `REVIEW_REQUIRED`; 13/16 winners
+agreed with legacy's own pick, 3/16 differed with zero critical-claim
+loss in any; 0 of the 16 resolved winners has a nonempty
+`missing_critical_claim_ids` (the only nonempty case is the one
+declined idea, exactly the fail-closed contract). 6 orphan/unmapped
+realizations forced the overall status to `REVIEW_REQUIRED`, which
+correctly escalated `freeze_blocked` -- Freeze did not proceed, no
+render was attempted, `deliverable: false`.
+
+Freeze was independently also blocked by legacy `FinalEditReviewer`
+(computed pre-cutover, per the then-current C2 evidence-only exemption)
+on a `CRITICAL_CLAIM_LOST` finding for the same real-video "5% of
+cancers are hereditary" claim this repo's D-047/D-048 work already
+root-caused -- strong circumstantial evidence (same claim text/theme,
+singular FAIL and singular `REVIEW_REQUIRED`) that the resolver's own
+`REVIEW_REQUIRED` idea is the SAME idea, correctly declining rather
+than accepting the same lossy composite legacy's evidence-only
+computation had settled for. Not provable by exact id (see below).
+
+**Human Gold could not be read**: `Verify frozen Selection lock` failed
+(Freeze never froze anything to compare against the pinned LEGACY
+baseline), and GitHub Actions' own step-dependency chain skipped the
+architecture and Human Gold (18-check) validators as a result -- a
+pre-existing CI-wiring gap, not a resolver defect, and not patched at
+the time (see D-050C3 Section 8 fix below).
+
+**Honest limitation**: GitHub's own cross-log secret masking (the
+workflow's existing "mask the live RunPod template's env" step) blanked
+many bare digits throughout the run's log wherever they collided with a
+masked secret substring, including unrelated diagnostic numbers and
+clip/realization ids. The 6 orphan realizations and the one
+`REVIEW_REQUIRED` idea could not be traced to real ids from this log;
+Section 5/6 below are a structural code audit, not a literal per-id
+replay of this run.
+
+## D-050C3 -- authoritative downstream integration + identity closure
+
+**Section 1 (execution order proof)**: confirmed by direct code trace of
+`universal_clean_cut.py`: the D-050C2 order was exactly
+`legacy Selection -> StoryValidator -> CanonicalEditPlan ->
+FinalEditReviewer -> Semantic Ledger -> Unified Resolver ->
+apply_authoritative_realization_resolution -> Freeze OR-in`.
+CanonicalEditPlan/StoryValidator/FinalEditReviewer ran once, on the
+pre-cutover draft, and their diagnostics were what Freeze read even in
+`AUTHORITATIVE` mode (the C2 evidence-only exemption) -- the primary
+downstream integration gap this directive closes.
+
+**Section 2-4 (reordered pipeline, evidence-only exemption removed)**:
+`universal_clean_cut.py` now runs, in `AUTHORITATIVE` mode only
+(`clean_cut_core_v1_enabled` and `resolver_mode == AUTHORITATIVE`):
+grouping/DeliveryScorer/ClaimCoverageBestTake (unchanged) -> first-pass
+StoryValidator/CanonicalEditPlan/FinalEditReviewer/repair loop (still
+needed here because the Semantic Ledger's own reconstruction reads
+`final_story_coherence_validation`/`canonical_edit_plan` diagnostics
+for one enrichment) -> Semantic Ledger -> Unified Resolver ->
+`apply_authoritative_realization_resolution` -> a SECOND pass of
+StoryValidator, then CanonicalEditPlan + FinalEditReviewer + bounded
+repair, now on the resolver's own resolved draft -> Freeze. The first
+pass's `canonical_edit_plan`/`final_edit_reviewer`/`repair_loop`/
+`final_story_coherence_validation` diagnostics are relabeled
+`*_legacy_evidence` before the second pass overwrites the real keys;
+nothing below this point ever reads a `_legacy_evidence` key for a
+decision, only for comparison. `LEGACY`/`SHADOW` modes, and the two
+non-Clean-Cut-Core-V1 selection branches, run the first pass exactly
+once and are otherwise untouched -- proven by the full suite staying at
+1452 passed under the default (unset) env var, byte-for-byte.
+
+**Section 5 (orphan root-cause audit)**: traced every production
+construction site that mints or copies a `DraftClip`'s identity fields.
+`human_boundary_polish_v5.py` and `post_selection_interior_gap_trim.py`
+both mint fragments via `dataclasses.replace(original, ...)`, which
+copies `realization_id`/`semantic_idea_id`/`retry_family_id` forward
+unless explicitly overridden -- neither overrides them; both are clean.
+`claim_coverage_best_take.py`'s composite formation never mints a new
+clip at all (`replace(clip, selected=...)` on existing clips only) --
+clean. The one and only other production `DraftClip(...)` construction
+site is `pipeline.py`'s `_draft_clip`, called from three places:
+`selected`/`alternates` correctly pass `group_id=clip_to_group.get(take.
+clip_id)`; **`discarded_clips` hardcoded `group_id=None`
+unconditionally** for both its inputs -- `discarded` (pre-grouping
+clean_cut/hybrid-cleanup rejects, which is a no-op fix, they were never
+grouped) and, critically, `review_removed` (post-grouping draft_review
+rejects, which per `removed_group_ids`'s own construction DID go
+through grouping and had a real `group_id` the hardcoded `None` was
+silently discarding). Classified closest to the directive's category G
+("another proven cause"): identity minting for the discarded bucket
+ignored the exact same `clip_to_group` lookup already used and
+available two lines above for `selected`/`alternates`. Fixed to the
+identical lookup -- no clip-id hardcoding, general to any discard path
+reaching this constructor. A discarded realization with this bug never
+showed up as a flagged "orphan" (`find_orphan_realizations()` excludes
+any realization a `DiscardRecord` already explains, and pipeline.py's
+own discard bookkeeping always records one) -- its actual effect was
+silent invisibility: it never joined its true idea's `realization_ids`
+in the Ledger at all, so a discarded retry's unique claims (if any)
+could never be considered by the resolver's requirement-group analysis
+for that idea. Fixed regardless, as a general identity-propagation
+correctness issue independent of whether it explains canary
+33701641177's specific 6 orphans (which, per the honest limitation
+above, could not be traced by id). Full suite unaffected: still 1452
+passed after the fix.
+
+**Section 6 (hereditary REVIEW_REQUIRED audit)**: from the canary's own
+(masked) diagnostics, the resolver's one declined idea has
+`decision_reason: "no_single_or_composite_realization_covers_all_
+critical_claims"` -- it tried both a single-realization and a bounded
+2-piece composite path and neither achieved full critical-claim
+coverage. Legacy's own independent evidence-only `FinalEditReviewer`
+FAIL, on the real video's own already-root-caused "5% hereditary"
+claim, corroborates this is a genuine content gap in the *available*
+candidates, not a resolver defect. Classified **F: genuinely
+ambiguous/impossible -- REVIEW_REQUIRED is correct** on the balance of
+available evidence. Cannot fully rule out C (a candidate carrying the
+missing claim was among the 6 orphans) without exact id tracing, which
+this session could not obtain (see honest limitation above); the
+Section 5 fix is the appropriate general mitigation either way, and
+whether it actually changes this specific idea's outcome can only be
+confirmed by a second live canary (not run in this directive).
+Resolver logic itself was not changed for this section, per the
+directive's own instruction not to without a proven general defect.
+
+**Section 7 (typed resolved-state contract)**: `AuthoritativeSemanticState`/
+`AuthoritativeSemanticIdeaState` (`realization_resolver.py`, new) --
+one frozen, typed object per run, built once from `AuthoritativeApplicationResult`
+plus the Ledger it was computed from: `semantic_idea_id`, winner-or-
+composite realization ids, canonical critical claim ids, covered/missing
+claims, discarded realizations, contextually-retained ids, `replacement_
+verified` (true iff resolved with zero missing critical claims),
+`story_order_position` (rank by earliest winning clip start among
+resolved ideas, `None` for `REVIEW_REQUIRED`), and `provenance`
+(`source_span_ids` per surviving realization, from the Ledger, never
+guessed). Attached to `diagnostics["authoritative_semantic_state"]` in
+`AUTHORITATIVE` mode only. Downstream modules are not rewritten to take
+this object as a parameter (that would mean rewriting CanonicalEditPlan/
+StoryValidator/FinalEditReviewer's internals, well beyond this
+directive's scope) -- instead, per Section 2-4's reorder, they operate
+directly on the resolver's own resolved `DraftTimeline` as their sole
+selection input, so there is structurally one resolved state for them
+to agree with, not two to reconcile.
+
+**Section 8 (CI observability)**: `cutsell-video00-modal-raw.yml`'s
+`Verify Video00 architecture` and `Verify Human Gold regression QA`
+steps now carry `if: always()` -- a blocked Freeze (a failed `Verify
+frozen Selection lock` step, itself unchanged) no longer skips either
+validator; both still run against the same `result.json` and upload
+their own reports regardless. CI observability only, no engine change.
+
+**Section 9 (tests)**: `tests/test_cutsell_d050c3_downstream_integration.py`
+(new, 10 tests) -- pipeline.py's discard-path identity fix (grouped vs
+genuinely-ungrouped), fragment/composite realization-id sharing
+preserves the Ledger's mapping, `human_boundary_polish_v5`'s real split
+function keeps identity on both physical pieces, the authoritative
+winner/composite reflected in the real (non-legacy-evidence)
+`canonical_edit_plan`, `REVIEW_REQUIRED` blocks Freeze while a resolved
+idea permits it, the legacy-evidence `canonical_edit_plan` key is
+provably identical to a genuine LEGACY-mode run of the same draft (so
+it is truly untouched, not resolver-influenced), LEGACY mode carries
+none of the new `_legacy_evidence`/`authoritative_semantic_state` keys,
+SHADOW computes the resolver report without ever splitting evidence,
+and the Modal workflow's two validator steps carry `if: always()`.
+
+**Section 10 (full qualification)**: compileall clean. Full D-050
+series (A/B/C1/C1.5/C1.6/C2/C3): 138 passed. All 54 CleanCutBench
+fixtures green under LEGACY (default) and explicit `AUTHORITATIVE`
+(CleanCutBench's own harness still never calls into
+`universal_clean_cut.py`'s wiring, so this remains a LEGACY-parity
+check on that harness, not a second reorder qualification -- the
+reorder qualification is the Section 9 end-to-end tests above). Full
+`tests/test_cutsell_*.py` glob: 1452 passed (before the new file) / see
+final report for the post-file count -- 0 failed with the env var unset
+(LEGACY, the default). 0 identity-orphan violations introduced by the
+Section 5 fix (full suite unaffected). 0 critical-claim regressions. 0
+unsafe composites. 0 semantic dual-authority findings: the reorder's
+own design (legacy diagnostics relabeled before the second pass writes
+the real keys) makes a legacy CanonicalEditPlan overwriting an
+authoritative one structurally impossible, not just empirically absent.
+
+Known characteristic carried forward from D-050C2, now with one more
+instance: forcing `AUTHORITATIVE` across the pre-D-050A synthetic
+fixtures in `test_cutsell_universal_clean_cut.py` (fixtures with no
+identity stamping at all, never exercised in `AUTHORITATIVE` mode by
+default) now shows 4 (was 3) fail-closed differences from LEGACY --
+the new one is a `repair_loop.attempt_count` difference, explained
+identically: the Ledger finds zero semantic ideas (no clip carries a
+`semantic_idea_id`), so `apply_authoritative_realization_resolution` is
+a true no-op on an already-first-pass-repaired draft, and the SECOND
+downstream-validation pass correctly finds nothing left to repair. Not
+a regression; still purely a synthetic-fixture artifact, still
+unreachable on a genuine production draft.
+
+No Modal RAW launched in this directive. No RunPod touched. No
+Video00 phrases patched. No resolver semantic logic changed except the
+general, non-Video00-specific pipeline.py identity fix in Section 5.
+
 ## Change rule
 
 When a new decision changes product behavior, update this file in the same development cycle. Do not silently redefine CutSell through code alone.
