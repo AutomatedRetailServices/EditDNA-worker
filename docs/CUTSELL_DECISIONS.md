@@ -5664,6 +5664,169 @@ them -- both modes are exercised in one pass, nothing skipped). Full
 `tests/test_cutsell_*.py` glob: 1550 passed (1531 pre-existing + 19 new),
 zero regressions. No GPU/Modal dispatch was needed or used.
 
+## D-056 -- Final full-engine stability battery / commercial validation gate (report only; no code)
+
+Directive: run exactly three full Modal Video00 RAWs at the fixed D-052-era
+config (`CUTSELL_UNIFIED_REALIZATION_RESOLVER=AUTHORITATIVE`,
+`CUTSELL_ASR_CANONICAL_NORMALIZATION=1`, `CUTSELL_SEMANTIC_COMPUTE_PLANNER=1`,
+`CUTSELL_HYBRID_LLM_ENABLED=1`, `CUTSELL_HYBRID_PROVIDER=google`), same
+source, same Human Gold manifest, same commit, zero code changes between
+runs, and deliver a 10-section stability/commercial-readiness report.
+
+**Two runs (A, B) completed cleanly and were fully analyzed. A valid third
+run could not be obtained in-session** despite five workflow_dispatch
+attempts, documented below as its own finding (Section 8 below).
+
+### Section 1 -- Transcript equivalence
+Both runs' `stage_status.canonical_asr_evidence` reported `status: complete`
+with `canonical_normalization_applied: true`. Exact evidence_hash /
+content_hash / canonical_equivalence_hash digit comparison could not be
+certified: `cutsell-video00-modal-raw.yml`'s console-log secret masking
+(unlike the fixed `cutsell-asr-only-modal.yml` from D-053) blanket-masks
+every numeric-looking RunPod-template env value, and GitHub then redacts
+that literal substring everywhere else it recurs in the log -- corrupting
+every hash string and every printed count in both runs' `Print full
+canonical diagnostics` output. Structural (non-numeric) evidence that
+survived masking: Run A `raw_segment_count`=55 -> `normalized_segment_count`=49;
+Run B raw≈4X (masked) -> normalized=45. Retry-family count (4 vs 6) and
+resolved-idea count (17 vs 18) differ between runs -- evidence of genuine
+ASR/semantic-clustering variance, not just formatting/punctuation.
+**TRANSCRIPT EQUIVALENCE: not certifiable as HARMLESS this battery** --
+recommend fixing the masking-threshold bug in this workflow (same class of
+bug fixed in D-053 for the ASR-only workflow) before the next stability run.
+
+### Section 2/3 -- Front-half + semantic compute plan
+Run A: 4 retry families (`take_judge_groups`), `semantic_idea_equivalence`
+candidate_pair_count=58/merged_pair_count=5, IdeaClusterer resolved 17
+semantic ideas (16 RESOLVED_WINNER + 1 RESOLVED_COMPOSITE), 5
+PRE_GROUP_REJECTED, 2 pre-group REVIEW_REQUIRED verdicts.
+Run B: 6 retry families, candidate_pair_count=59/merged_pair_count=5 (plus
+one `distinct_addition_blocked` entry not seen in A), resolved 18 semantic
+ideas (17 RESOLVED_WINNER + 1 RESOLVED_COMPOSITE), 4 PRE_GROUP_REJECTED, 2
+REVIEW_REQUIRED, 1 REPLACEMENT_VERIFIED_SAFE verdict not seen in A.
+`diagnostics.semantic_compute_plan` was present in both (planner active)
+but every numeric field (`cost_ceiling_usd`, `deferred_call_count`,
+`eligible_work_item_count`, `estimated_semantic_cost_usd`, tier cost
+buckets) was masked; the schema does not expose per-tier (P0/P1/P2) call
+counts at all, only cost buckets, so P0/positional-starvation cannot be
+independently verified from these diagnostics either run.
+
+### Section 4 -- Unified resolver
+Run A: 16 RESOLVED_WINNER + 1 RESOLVED_COMPOSITE, top-level
+`status: REVIEW_REQUIRED` (2 `unresolved_orphan_realization_ids`), 3/17
+ideas with `legacy_vs_authoritative_same: false`, 0 ideas with a non-empty
+`missing_critical_claim_ids`, no invalid composites, no silent
+zero-realization ideas. Run B: 17 RESOLVED_WINNER + 1 RESOLVED_COMPOSITE,
+same top-level `REVIEW_REQUIRED` shape, 3/18 ideas with
+`legacy_vs_authoritative_same: false`, 0 critical-claim-missing ideas, no
+invalid composites, no silent zero-realization ideas.
+
+### Section 5 -- Semantic selection stability (the key finding)
+Both runs independently hit a genuine negation contradiction that blocked
+Selection Freeze -- but **on different retry families**: Run A's
+contradiction is in the "problemas de estómago / no hay que preguntar"
+family; Run B's is in a "hereditary cancer statistics" family the
+SemanticArbiter merged differently this run. `FinalEditReviewer` finding
+kinds differ too: Run A = CONTRADICTION + 5x UNIQUE_FACT_LOST +
+CRITICAL_CLAIM_LOST (blocking) + REQUIRED_CONTINUATION_LOST (warning); Run
+B = DUPLICATE_IDEA + UNRESOLVED_RETRY + CONTRADICTION + 2x
+UNIQUE_FACT_LOST, **no** CRITICAL_CLAIM_LOST. Human Gold check-level
+stability (the most concrete measurable proxy available): 10/18 checks
+identical pass/fail across A and B (56%), 3 consistently fail in both,
+8 flip. **SEMANTIC_SELECTION_STABILITY_PERCENT ~= 56%** by this measure;
+retry-family count, idea count, and contradiction location all differ on
+top of that. Per-idea instability list: the stomach/gastritis family (A)
+and the hereditary-cancer-statistics family (B) are each unstable in the
+sense that which family becomes the blocking contradiction is itself
+run-dependent.
+
+### Section 6 -- Human Gold (18-check authoritative validator)
+Run A: 12/18 (fails: pimples_micro_1/2/3_present, pimples_later_winner_present,
+gastritis_preserved, pimples_micro_order). Run B: 10/18 (fails:
+sonography_good_take_part1_present, sonography_good_take_completion_present,
+sonography_bad_take_absent, papillary_cancer_preserved,
+pimples_micro_3_present, gastritis_preserved, pimples_micro_order,
+sonography_good_before_diagnosis). PASS-in-both (7): cancer_hook_preserved,
+biopsy_nodule_preserved, acne_back_preserved, pimples_bad_monolith_absent,
+hair_loss_preserved, family_context_preserved, cta_preserved. FAIL-in-both
+(3): pimples_micro_3_present, gastritis_preserved, pimples_micro_order.
+FLIPPING (8): sonography_good_take_part1_present,
+sonography_good_take_completion_present, sonography_bad_take_absent,
+papillary_cancer_preserved, pimples_micro_1_present, pimples_micro_2_present,
+pimples_later_winner_present, sonography_good_before_diagnosis. Not
+patched (per directive).
+
+### Section 7 -- Freeze/delivery
+Identical shape both runs: `selection_boundary_contract.status =
+not_frozen_freeze_blocked_by_coherence_review` (a premature freeze was
+computed then correctly superseded once StoryValidator found the
+contradiction), architecture check confirms Clean Cut Core V1 active and
+the whole-video Unified Selection reasoner correctly inert, `live_render_qc
+= not_attempted` (Boundary/Render never runs on an unfrozen Selection, by
+design), `delivery_status = NOT_DELIVERABLE_not_attempted`,
+`deliverable = false`. **PRODUCT DECISION (block-for-human-review, do not
+ship) is stable across both completed runs.**
+
+### Section 8 -- Cost / Run C dispatch saga
+Real per-run GPU wall time (from job step timestamps, not masked): Run A
+benchmark step ~6m10s, Run B ~4m44s. Exact $ COGS is not computable: no
+Modal-dollar-cost field exists anywhere in the diagnostics, and
+`semantic_compute_plan.estimated_semantic_cost_usd` is masked in console
+output for both runs. **Operational finding, not a code defect:** across
+five `workflow_dispatch` attempts at a third run, `mcp__github__actions_list`
+(`list_workflow_jobs`)/`actions_get` (`get_workflow_run`) reported the
+`Run Modal full Video00 benchmark` step as `in_progress` continuously for
+2-9+ hours per attempt with the job's own `updated_at`/step timestamps
+never advancing, on a step whose own real completion (confirmed every time
+by cancelling and reading the resulting -- now terminal -- step timestamps)
+took 2.5-6 minutes. The only way found to force a fresh read was
+`cancel_workflow_run`, but cancelling **always** produces
+`conclusion: cancelled` on that step and a downstream chain with no usable
+`artifact/video00-modal.json` (the wrapper only writes its local
+`modal-video00-result.json` marker on the `modal run` CLI's own successful
+exit; a SIGTERM at any point -- even after the real Modal computation
+already finished -- prevents that marker from ever being written, so
+`Verify frozen Selection lock` gets skipped and architecture/regression-QA
+report `No result JSON was downloaded`). Confirmed on 4 of 4 cancelled
+attempts. This makes cancellation **structurally unable** to recover data
+from this specific workflow, and the `in_progress`-status staleness
+appears to be a real, reproducible defect (in this session's view into the
+Actions API, the workflow's own runner reporting, or both) independent of
+Modal itself. Recommend: (a) fix the masking-threshold bug (Section 1);
+(b) make the wrapper write its local result marker incrementally/earlier so
+a cancelled run's already-completed data isn't discarded; (c) investigate
+the `in_progress` staleness before relying on this workflow for future
+timed stability batteries.
+
+### Section 9 -- Commercial pass criteria
+Critical claims: NOT stable (Run A found one blocking CRITICAL_CLAIM_LOST,
+Run B found none -- presence/absence of this finding itself flips).
+No unsafe silent discard in either run (every discard traces to the
+StoryValidator contradiction-block, never a silent drop). No invalid
+composite in either run. Product decision (ship/no-ship) stable (both
+block). Semantic-selection stability low (~56% by Human Gold proxy,
+retry-family/idea counts differ). Transcript differences not certified
+harmless (Section 1). No P0 budget-starvation evidence found, but the
+schema doesn't expose the data needed to fully rule it out. Given these,
+Video00 does **not** clear the READY bar this battery.
+
+### Final decision (verbatim, as delivered)
+D-056 COMPLETE
+TRANSCRIPT EQUIVALENCE: FAIL (not certifiable -- console masking bug; retry-family/idea counts differ between runs)
+CRITICAL CLAIM STABILITY: FAIL (blocking CRITICAL_CLAIM_LOST present in A, absent in B)
+SEMANTIC COMPUTE PLAN: PARTIAL (planner active both runs; P0/P1/P2 call-count fields not exposed by the schema, cost fields masked)
+SEMANTIC_SELECTION_STABILITY: ~56% (10/18 Human Gold checks stable; contradiction location, retry-family count, and idea count all differ)
+Human Gold: A: 12/18, B: 10/18, C: N/A (five dispatch attempts did not yield valid data -- see Section 8)
+CONSISTENT FAILURES: pimples_micro_3_present, gastritis_preserved, pimples_micro_order
+FLIPPING CHECKS: sonography_good_take_part1_present, sonography_good_take_completion_present, sonography_bad_take_absent, papillary_cancer_preserved, pimples_micro_1_present, pimples_micro_2_present, pimples_later_winner_present, sonography_good_before_diagnosis
+PRODUCT DECISION STABILITY: PASS (both runs independently blocked for human review; delivery gate never fired on unreviewed content)
+AVERAGE COGS: NOT COMPUTABLE (no dollar-cost field exists in diagnostics; GPU wall time ~5-6 min/run)
+VIDEO00 ENGINE STATUS: MOSTLY_STABLE (the safety mechanism -- contradiction detection blocking Freeze -- fires correctly and consistently; which content triggers it, and how many Human Gold checks pass, is not yet stable)
+VIDEO00 DEVELOPMENT STATUS: MORE WORK REQUIRED
+READY FOR VIDEO01/VIDEO02/VIDEO03? NO
+Then STOP. Did not patch. Did not launch a further run beyond the five
+dispatch attempts already documented in Section 8.
+
 ## Change rule
 
 When a new decision changes product behavior, update this file in the same development cycle. Do not silently redefine CutSell through code alone.
