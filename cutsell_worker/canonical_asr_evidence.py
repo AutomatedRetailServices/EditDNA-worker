@@ -50,6 +50,7 @@ import re
 from typing import Iterable, Mapping, Tuple
 
 from .contracts import TranscriptSegment, Word
+from .final_sibling_grouping import _tokens as _engine_tokens
 
 _WHITESPACE_RE = re.compile(r"\s+")
 _SENTENCE_END_RE = re.compile(r"[.!?][\"'”’)]*\s*$")
@@ -156,6 +157,39 @@ class CanonicalASREvidence:
     (``normalize_transcript_segments`` in this module, or a future
     replacement) is expected to derive its own segment shape purely from
     this evidence, never from Whisper's original grouping.
+
+    D-055 ("CANONICAL TRANSCRIPT EQUIVALENCE"): D-054 proved
+    ``evidence_hash`` is a SOURCE-SCOPED id -- it deliberately includes
+    ``source_asset_id`` for provenance/lineage, which is exactly right
+    when comparing evidence within one project, but means two runs over
+    the byte-identical audio dispatched under two different
+    ``source_asset_id`` values (e.g. two separate benchmark dispatches)
+    can never match on ``evidence_hash`` alone even with zero ASR
+    variance -- D-054 proved this directly (two runs with word-for-word
+    identical transcripts still produced different ``evidence_hash``
+    values). Two NEW, purely additive fields separate the two concerns
+    ``evidence_hash`` had been carrying at once:
+
+    - ``content_hash`` (``compute_content_hash``): identical word-TEXT
+      hashing logic to ``evidence_hash``, MINUS ``source_asset_id`` --
+      the pure "what was said" identity, comparable ACROSS dispatches of
+      the same underlying audio regardless of how each was labeled.
+    - ``canonical_equivalence_hash`` (``compute_canonical_equivalence_hash``):
+      a further, deliberately narrow normalization on top of
+      ``content_hash`` that ALSO collapses the two harmless variance
+      classes D-054 actually proved harmless (T0 punctuation/casing/
+      spacing, and the single proven-safe T1 accent-orthography pair) --
+      see ``canonicalize_transcript_words`` for exactly what it does and
+      does not touch. Every T2+ (paraphrase), T3 (lexical), and T4
+      (negation/number/entity/causal) difference remains fully
+      distinguishable by design -- "fail conservative" per the D-055
+      directive.
+
+    Neither new field replaces or narrows ``evidence_hash`` -- it stays
+    exactly as it was for any existing downstream reader that depends on
+    source-scoped identity. Both new fields are diagnostics/stability-
+    comparison tools only (D-055 Section 4): nothing in Selection, claim
+    extraction, or any editorial stage reads them.
     """
     source_asset_id: str
     normalized_words: Tuple[Word, ...]
@@ -163,20 +197,107 @@ class CanonicalASREvidence:
     asr_model: str
     asr_config_fingerprint: str
     evidence_hash: str
+    content_hash: str = ""
+    canonical_equivalence_hash: str = ""
 
 
 def compute_evidence_hash(source_asset_id: str, words: Iterable[Word], language: str | None) -> str:
-    """Content-only hash: normalized word TEXT sequence + language +
-    source lineage. Deliberately excludes every timestamp -- per the D-052
+    """SOURCE-SCOPED evidence id (D-055 naming -- unchanged behavior from
+    D-052/D-053): normalized word TEXT sequence + language + source
+    lineage. Deliberately excludes every timestamp -- per the D-052
     directive, "Segment boundaries must NOT define semantic identity," and
     the same principle extends to word-level timing jitter that does not
     change what was actually said. Two ASR runs that transcribed the exact
-    same words (even if Whisper grouped/timed them differently) always
-    produce the same ``evidence_hash``.
+    same words under the SAME ``source_asset_id`` (even if Whisper grouped/
+    timed them differently) always produce the same ``evidence_hash`` --
+    see ``compute_content_hash`` for the source-independent counterpart.
     """
     word_text = "|".join(_normalize_word_text(word.text) for word in words if _normalize_word_text(word.text))
     raw = f"{source_asset_id}|{language or ''}|{word_text}".encode("utf-8")
     return "asrev_" + hashlib.sha256(raw).hexdigest()[:24]
+
+
+def compute_content_hash(words: Iterable[Word], language: str | None) -> str:
+    """D-055 Section 1: CONTENT-ONLY equivalence hash -- identical word-text
+    hashing logic to ``compute_evidence_hash``, but with ``source_asset_id``
+    deliberately excluded. Two independently-dispatched runs (different
+    ``source_asset_id`` each, e.g. two separate benchmark CI dispatches)
+    over the byte-identical underlying audio produce the SAME
+    ``content_hash`` whenever the transcribed words truly match -- this is
+    the exact case D-054 proved ``evidence_hash`` could never satisfy.
+    Still excludes every timestamp, for the same reason
+    ``compute_evidence_hash`` does.
+    """
+    word_text = "|".join(_normalize_word_text(word.text) for word in words if _normalize_word_text(word.text))
+    raw = f"{language or ''}|{word_text}".encode("utf-8")
+    return "asrcontent_" + hashlib.sha256(raw).hexdigest()[:24]
+
+
+# D-055 Section 2/3: the ONLY accent-only orthographic pair D-054's live
+# battery actually observed and proved harmless ("si"/"sí" -- identical
+# audio, the accent mark is a stylistic ASR choice, not a difference in
+# what was said). Deliberately a tiny, explicit allowlist rather than a
+# blanket accent-stripping rule: Spanish has real minimal pairs where an
+# accent changes grammatical meaning entirely (el/él, mas/más, tu/tú,
+# de/dé, si/sí itself is ambiguous in the OTHER direction too -- "if" vs
+# "yes"/reflexive) -- collapsing those would violate this directive's
+# "fail conservative" instruction. Extend this table only with a new pair
+# actually proven safe the same way (a live D-05x battery observing it as
+# the ONLY difference between two runs whose content is otherwise
+# identical), never speculatively.
+_SAFE_ORTHOGRAPHIC_EQUIVALENTS: Mapping[str, str] = {
+    "sí": "si",
+}
+
+
+def _canonical_token(token: str) -> str:
+    return _SAFE_ORTHOGRAPHIC_EQUIVALENTS.get(token, token)
+
+
+def canonicalize_transcript_words(words: Iterable[Word]) -> Tuple[str, ...]:
+    """D-055 Section 2: T0 (punctuation/casing/spacing) + bounded T1
+    (the proven-safe accent-orthography table above) canonicalization.
+    Reuses ``final_sibling_grouping._tokens`` verbatim for the T0 step --
+    the SAME tested, already-live tokenizer the engine's own retry-family
+    grouping already relies on (D-055's own "use existing normalization
+    machinery" instruction) -- rather than a second, hand-rolled
+    punctuation/casing regex that could quietly drift from it.
+
+    Deliberately does NOT touch T2 (inflection/paraphrase, e.g.
+    pedía/pedí, salió/salía): no deterministic stemmer exists anywhere in
+    this codebase to safely collapse those, and inventing one here would
+    be exactly the "aggressive paraphrase" this directive forbids. T3/T4
+    differences are untouched by construction -- ``_tokens`` never merges
+    two genuinely different words, and the accent table above is the only
+    additional collapsing applied, so digits, negation vocabulary, and
+    every named entity/diagnosis word pass through completely unchanged
+    (a digit token or a negation word never collides with
+    ``_SAFE_ORTHOGRAPHIC_EQUIVALENTS``, so no extra guard is needed to
+    keep Section 3's protected classes distinguishable).
+
+    Returns a flat tuple of canonical tokens across the WHOLE word
+    sequence (a pure-punctuation "word" contributes zero tokens and
+    vanishes, exactly like harmless formatting should; a word can also
+    contribute more than one token, e.g. a hyphenated range)."""
+    canonical: list[str] = []
+    for word in words:
+        for token in _engine_tokens(word.text):
+            canonical.append(_canonical_token(token))
+    return tuple(canonical)
+
+
+def compute_canonical_equivalence_hash(words: Iterable[Word], language: str | None) -> str:
+    """D-055 Section 2: hash of ``canonicalize_transcript_words`` output --
+    the narrowest of the three hashes (source-scoped ``evidence_hash`` >
+    source-independent ``content_hash`` > canonical-equivalence hash).
+    Two runs whose ``canonical_equivalence_hash`` matches are equivalent
+    for ASR-stability/diagnostics purposes even if their raw
+    ``content_hash`` differs on nothing but T0/T1 noise; a mismatch here
+    always means a genuine T2+ difference exists (this function never
+    manufactures a false match)."""
+    canonical_tokens = canonicalize_transcript_words(words)
+    raw = f"{language or ''}|{'|'.join(canonical_tokens)}".encode("utf-8")
+    return "asrcanon_" + hashlib.sha256(raw).hexdigest()[:24]
 
 
 def build_canonical_asr_evidence(
@@ -207,6 +328,8 @@ def build_canonical_asr_evidence(
         asr_model=asr_model,
         asr_config_fingerprint=asr_config_fingerprint,
         evidence_hash=compute_evidence_hash(source_asset_id, ordered_words, language),
+        content_hash=compute_content_hash(ordered_words, language),
+        canonical_equivalence_hash=compute_canonical_equivalence_hash(ordered_words, language),
     )
 
 

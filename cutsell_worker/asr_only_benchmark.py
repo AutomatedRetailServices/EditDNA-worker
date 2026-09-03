@@ -195,6 +195,13 @@ def run_asr_only_benchmark(payload: Mapping[str, Any]) -> dict[str, Any]:
             for word in evidence.normalized_words
         ],
         "evidence_hash": evidence.evidence_hash,
+        # D-055: source-independent counterparts of evidence_hash, so a
+        # live dispatch's own diagnostics already show whether two runs
+        # would be considered content-equivalent / canonically-equivalent
+        # without needing an offline replay (see canonical_asr_evidence.py
+        # module docstring for what each of the three hashes means).
+        "content_hash": evidence.content_hash,
+        "canonical_equivalence_hash": evidence.canonical_equivalence_hash,
         "asr_config_fingerprint": config_fingerprint.fingerprint(),
         "asr_config": {
             "model_name": asr_provider.model_name,

@@ -5544,6 +5544,126 @@ No full Video00 RAW run. No engine code touched (Resolver, Ledger,
 CleanCut, Human Gold, Gemini, Render all untouched) -- this phase is
 pure offline analysis of already-existing D-053 artifacts.
 
+## D-055 -- Canonical Transcript Equivalence (small stability layer; no editorial changes)
+
+Builds the small, additive stability layer D-054 recommended instead of
+chasing bit-identical CUDA. Touches only `canonical_asr_evidence.py`
+(plus wiring the two new fields into `asr_only_benchmark.py`'s
+diagnostics output) -- Resolver, Ledger, CleanCut, Human Gold, Selection,
+Gemini, and Render are all untouched; nothing new is fed into Selection
+or claim extraction.
+
+**Section 1 -- separating source-scoped id from content equivalence.**
+`CanonicalASREvidence.evidence_hash` (D-052/D-053) is unchanged and kept
+as the SOURCE-SCOPED evidence id (still includes `source_asset_id`, for
+existing provenance/lineage callers). Two new, purely additive fields:
+`content_hash` (`compute_content_hash`) -- identical word-text hashing
+logic minus `source_asset_id`, so two independently-dispatched runs over
+the byte-identical audio (D-054's exact finding) now correctly match --
+and `canonical_equivalence_hash` (`compute_canonical_equivalence_hash`),
+a further narrowing on top of `content_hash`.
+
+**Section 2 -- Canonical Transcript Equivalence.** New
+`canonicalize_transcript_words()` normalizes ONLY the two variance
+classes D-054 actually proved harmless: T0 (punctuation/casing/spacing,
+via `final_sibling_grouping._tokens` -- the SAME tested tokenizer the
+engine's own retry-family grouping already uses, per this directive's
+own "reuse existing normalization machinery" instruction, not a second
+hand-rolled regex) and a single bounded T1 accent-orthography pair
+(`"sí" -> "si"`, the ONLY accent-only pair D-054's live battery actually
+observed and proved harmless). T2 (inflection/paraphrase) is deliberately
+NOT normalized -- no deterministic stemmer exists anywhere in this
+codebase, and inventing one here would be the "aggressive paraphrase"
+this directive forbids.
+
+**Section 3 -- protected semantics, structurally.** Digits, negation
+vocabulary, and every named entity/diagnosis word pass through
+`canonicalize_transcript_words` completely unchanged by construction: the
+accent table above is a 1-entry allowlist that never collides with a
+digit or a negation word, so no separate guard was needed to keep numbers/
+negation/diagnosis/entity/causal-order distinguishable -- verified
+directly by 6 of the Section 7 tests (number/negation/diagnosis/causal-
+direction/word-order changes all still produce different
+`canonical_equivalence_hash` values).
+
+**Section 4 -- stability-only.** Both new hashes are read only by
+`asr_only_benchmark.py`'s own diagnostics dict (so a live dispatch already
+shows whether two runs are content-equivalent without an offline replay)
+and by this section's own replay script. Nothing in Selection or claim
+extraction reads either field; the original transcript stays the sole
+authoritative evidence.
+
+**Section 5 -- replay of all six D-054 transcripts** (offline, no GPU --
+the saved D-054 artifacts were available, so no rerun was needed).
+`content_hash`/`canonical_equivalence_hash` were computed for all six
+using synthetic per-run `source_asset_id` stand-ins (the one input the
+saved logs do not preserve verbatim; every word/timestamp value is the
+real recovered transcript). Result: the six runs collapse into **4**
+genuine `canonical_equivalence_hash` classes, not 6 -- and the split is
+NOT along the LEGACY-vs-deterministic config line D-054's own framing
+implied. Runs A (LEGACY), D (deterministic), and F (deterministic) share
+ONE identical canonical-equivalence class (their raw transcripts are, in
+fact, byte-for-byte identical to each other); B, C, and E are each their
+own singleton class. So within LEGACY: 3 distinct classes (A alone here,
+B alone, C alone -- no LEGACY-internal collapse); within the
+deterministic group: 2 distinct classes (D+F together, E alone). This is
+a materially stronger finding than D-054's own within-group framing: the
+"outlier" behavior is not tied to either config -- across all six runs,
+4 of 6 (A, D, F) actually agree on one dominant transcription, and only
+B, C, E each diverge in their own distinct way. Pairwise canonical-token
+Jaccard similarity (unordered bag-of-tokens, naturally more forgiving
+than D-054's sequence-order WER numbers): A-B 99.16%, A-C 96.25%, B-C
+97.07%, D-E 95.02%, D-F 100.00% (byte-identical, as the shared class
+above already showed), E-F 95.02%.
+
+**Section 6 -- critical claim equivalence, re-verified on the canonical
+representation.** Re-running `final_sibling_grouping._negations()`/
+`_numbers()` on the CANONICAL (post-`canonicalize_transcript_words`)
+token representation instead of raw text reproduces D-054's whole-
+transcript findings exactly: negation set `{no, nunca}` and number set
+`{3, 5, 10, 2023}` are IDENTICAL across all 6 runs. Direct fact-presence
+checks on the canonical representation confirm every checked fact
+(cáncer, tiroides, hereditario, the 5-10% hereditary-cancer stat,
+sonografía, ginecóloga, metabolismo, the resorcina treatment mention) is
+present in literally all 6 canonicalized transcripts. No CTA phrase
+exists anywhere in this particular source video in any of the 6 runs
+(vacuously stable -- nothing to lose, not a failure).
+
+**Section 7 -- tests** (19 new,
+`tests/test_cutsell_d055_canonical_transcript_equivalence.py`): identical
+words + different `source_asset_id` -> same `content_hash` (and
+`evidence_hash` still differs, proving the separation is real);
+punctuation/casing/spacing differences -> same
+`canonical_equivalence_hash`; the proven-safe `si`/`sí` pair -> same; an
+UNPROVEN accent pair (`mas`/`más`) -> deliberately stays distinguishable
+(fail conservative); number change, negation change (the directive's own
+"no tenía" vs "tenía" example), diagnosis-noun change (the directive's
+own "gastritis" vs "alergia" example), causal-direction change, and
+word-order change -> all different; timestamp-only changes -> same
+`content_hash` and `canonical_equivalence_hash`; plus direct unit
+coverage of `canonicalize_transcript_words` (punctuation stripping, the
+accent table applying ONLY to its one entry, digits/negation passing
+through untouched, a pure-punctuation "word" vanishing) and two
+D-054-story-shaped replay tests (a punctuation-only pair collapsing to
+one class; the real "no hay que preguntar"/"hay que voltar" pair staying
+distinct).
+
+**Validation:** compileall clean.
+`tests/test_cutsell_d050*.py tests/test_cutsell_d052*.py
+tests/test_cutsell_d053_asr_determinism.py
+tests/test_cutsell_asr_only_benchmark.py
+tests/test_cutsell_d055_canonical_transcript_equivalence.py
+tests/test_cutsell_composite_resolver.py
+tests/test_cutsell_clean_cut_core_evaluation_suite.py`: 286 passed (this
+single evaluation-suite file IS all 54 CleanCutBench fixtures run
+through the real production chain under LEGACY;
+`test_cutsell_d050c1_5_full_cleancutbench_parity.py`, part of the same
+run, captures every one of those same 54 fixtures' real takes and
+independently cross-checks AUTHORITATIVE shadow-resolver parity against
+them -- both modes are exercised in one pass, nothing skipped). Full
+`tests/test_cutsell_*.py` glob: 1550 passed (1531 pre-existing + 19 new),
+zero regressions. No GPU/Modal dispatch was needed or used.
+
 ## Change rule
 
 When a new decision changes product behavior, update this file in the same development cycle. Do not silently redefine CutSell through code alone.
