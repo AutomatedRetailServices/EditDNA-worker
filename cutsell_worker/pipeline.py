@@ -39,7 +39,11 @@ from .semantic_compute_planner import build_cost_contract_report
 from .semantic_idea_equivalence import SemanticEquivalenceArbiter
 from .session_boundaries import safe_group_takes_by_sessions
 from .strategy import choose_strategy
-from .take_grouping_provider import TakeGroupingProvider, reconcile_semantic_idea_equivalence
+from .take_grouping_provider import (
+    TakeGroupingProvider,
+    reconcile_semantic_idea_equivalence,
+    split_incohesive_retry_groups,
+)
 from .take_judge_provider import TakeJudgeProvider, safe_rank_takes
 from .temporal_editing import refine_takes_with_temporal_context
 from .whole_video_analysis import WholeVideoContext
@@ -243,6 +247,19 @@ def build_flow_b_draft(
     # equivalence's own docstring for the exact RAW that exposed this.
     semantic_equivalence_groups, semantic_equivalence_diagnostics = reconcile_semantic_idea_equivalence(
         grouping.groups, kept, semantic_equivalence_arbiter,
+        protected_ids=composite_split_ids,
+    )
+
+    # D-058 Phase 1: one final cohesion-validation pass -- see
+    # take_grouping_provider.split_incohesive_retry_groups's own module
+    # comment for the full defect/fix rationale (docs/CUTSELL_DECISIONS.md
+    # D-057/D-058). Runs after every merging step above, on whatever groups
+    # they produced, and before Best Take ranking below ever treats a group
+    # as one mutually-exclusive contest. Same `protected_ids` contract as
+    # the arbiter merge immediately above -- an accepted composite's pieces
+    # are never re-examined here either.
+    semantic_equivalence_groups, cohesion_diagnostics = split_incohesive_retry_groups(
+        semantic_equivalence_groups, kept, semantic_equivalence_arbiter,
         protected_ids=composite_split_ids,
     )
     group_members = [tuple(take_by_id[clip_id] for clip_id in ids) for ids in semantic_equivalence_groups]
@@ -459,6 +476,7 @@ def build_flow_b_draft(
             "take_grouping_reason": grouping.reason,
             "take_group_members": [list(group) for group in semantic_equivalence_groups][:100],
             "semantic_idea_equivalence": semantic_equivalence_diagnostics,
+            "distinct_idea_grouping_safety": cohesion_diagnostics,
             "source_count": len(request.sources),
             "take_judge_status_counts": dict(judge_statuses),
             "take_judge_fallback_reasons": dict(judge_reasons),

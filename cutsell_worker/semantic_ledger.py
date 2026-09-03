@@ -742,9 +742,26 @@ def build_semantic_ledger_shadow(draft) -> SemanticLedger:
             previous_realization_id = (
                 _clip_realization_id(clip_by_id[local_winner_clip]) if local_winner_clip in clip_by_id else None
             )
+            # D-058 Phase 2: carry the arbiter's own recorded confidence for
+            # the winning clip through to the decision's evidence -- the
+            # Resolver's own evidence hierarchy (realization_resolver.py's
+            # `_pick_winner`) needs this to tell a HIGH-confidence semantic
+            # winner from a merely-applied one; before this it was recorded
+            # with no confidence at all, so a downstream reader could not
+            # distinguish the two without re-deriving it from
+            # `semantic_candidates` itself.
+            override_confidence = next(
+                (
+                    float(candidate.get("confidence") or 0.0)
+                    for candidate in (group.get("semantic_candidates") or ())
+                    if candidate.get("clip_id") == semantic_winner_clip
+                ),
+                0.0,
+            )
             ledger.record_winner_decision(
                 semantic_idea_id=idea_id, realization_id=override_realization_id, stage="pipeline_semantic_best_take",
                 decision_type=SEMANTIC_WINNER_OVERRIDE, reason="hybrid_semantic_label_override",
+                evidence={"confidence": round(override_confidence, 4)},
                 previous_realization_id=previous_realization_id,
             )
 

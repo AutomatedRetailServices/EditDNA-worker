@@ -185,6 +185,7 @@ from .semantic_ledger import (
     ENGINE_RESOLVED_WINNER,
     ENGINE_REVIEW_REQUIRED,
     RealizationRecord,
+    SEMANTIC_WINNER_OVERRIDE,
     SemanticLedger,
 )
 
@@ -592,6 +593,37 @@ def _realization_delivery_score(record: RealizationRecord, clip_scores: Mapping[
     return max(candidates) if candidates else None
 
 
+# D-058 Phase 2: same confidence floor `pipeline.py`'s own
+# `_semantic_best_take` already applies before it will override a local
+# DeliveryScorer pick -- reused verbatim so the Resolver's own notion of
+# "high confidence" can never disagree with the stage that produced the
+# evidence in the first place.
+_HIGH_CONFIDENCE_SEMANTIC_WINNER_THRESHOLD = 0.85
+
+
+def _semantic_winner_confidence_by_realization(
+    ledger: SemanticLedger, idea_id: str, candidate_ids: tuple[str, ...],
+) -> dict[str, float]:
+    """The Ledger's own recorded `SEMANTIC_WINNER_OVERRIDE` evidence for this
+    idea, keyed by realization_id -> highest recorded confidence. Absence
+    from this mapping means no such decision was ever recorded for that
+    realization -- never guessed at as high confidence."""
+    candidate_set = frozenset(candidate_ids)
+    confidence_by_realization: dict[str, float] = {}
+    for decision in ledger.decisions():
+        if decision.decision_type != SEMANTIC_WINNER_OVERRIDE:
+            continue
+        if decision.semantic_idea_id != idea_id:
+            continue
+        rid = decision.subject_realization_id
+        if rid not in candidate_set:
+            continue
+        confidence = float(decision.evidence.get("confidence") or 0.0)
+        if confidence > confidence_by_realization.get(rid, 0.0):
+            confidence_by_realization[rid] = confidence
+    return confidence_by_realization
+
+
 # --- Composite search ---------------------------------------------------------
 
 # D-050C1.6 F5: bounded at 2, matching production's own ClaimCoverageBestTake
@@ -897,18 +929,89 @@ def _resolve_one_idea(
         if rid not in unsafe_ids and critical_group_ids.issubset(coverage_by_id[rid])
     ]
 
+    # D-058 Phase 2: the evidence hierarchy among candidates that already
+    # each satisfy full critical coverage on their own. See
+    # docs/CUTSELL_DECISIONS.md D-057's gastritis forensic: the previous
+    # `_pick_winner` ranked by raw DeliveryScorer score FIRST, so an
+    # incomplete take (higher watch/listen score) could -- and did -- beat
+    # a complete take the Ledger's own event history already recorded as
+    # the high-confidence semantic winner (`SEMANTIC_WINNER_OVERRIDE`,
+    # `pipeline.py`'s `_semantic_best_take`). Delivery score now breaks
+    # ties only among candidates already equivalent on every stronger tier
+    # below it -- it can no longer silently override recorded semantic
+    # evidence.
+    semantic_winner_confidence = _semantic_winner_confidence_by_realization(ledger, idea_id, candidate_ids)
+
+    def _critical_claim_richness(rid: str) -> int:
+        return sum(
+            len(group.member_claim_ids) for group in groups
+            if group.group_id in (coverage_by_id[rid] & critical_group_ids)
+        )
+
     def _pick_winner(pool: Sequence[str]) -> str:
-        # Delivery quality (evidence) breaks ties only among candidates
-        # already proven safe+complete; contextual richness (count of
-        # covered non-critical groups) is the next tie-breaker; the
-        # realization_id itself is the final, fully deterministic one.
+        # Tier 1 -- semantic validity/completeness: a realization proven
+        # incomplete (`complete_idea is False`, D-050C1.6) is never
+        # preferred over one that is complete or of unknown completeness;
+        # unknown is never guessed at as incomplete (CLAUDE.md "WHEN
+        # UNCERTAIN, KEEP").
+        # Tier 2 -- high-confidence semantic winner evidence: the Ledger's
+        # own recorded `SEMANTIC_WINNER_OVERRIDE` decision for this idea
+        # (see `_semantic_winner_confidence_by_realization`), at or above
+        # the same 0.85 confidence floor `pipeline.py`'s own
+        # `_semantic_best_take` already uses to apply an override --
+        # reused verbatim, not a new number.
+        # Tier 3 -- critical claim coverage quality: how many individual
+        # critical claims (not just requirement groups) this candidate
+        # covers -- a finer signal than the boolean "covers all critical
+        # groups" test every pool member already passed.
+        # Tier 4 -- delivery quality (DeliveryScorer/watch-listen score):
+        # breaks ties only among candidates already equivalent above.
+        # Tier 5 -- contextual richness (count of covered non-critical
+        # groups); the realization_id itself is the final, fully
+        # deterministic tiebreaker.
         def sort_key(rid: str):
+            proven_incomplete = realizations[rid].complete_idea is False
+            has_high_confidence_semantic_winner = (
+                semantic_winner_confidence.get(rid, 0.0) >= _HIGH_CONFIDENCE_SEMANTIC_WINNER_THRESHOLD
+            )
             score = _realization_delivery_score(realizations[rid], clip_scores)
             richness = len(coverage_by_id[rid] - critical_group_ids)
-            return (-(score if score is not None else float("-inf")), -richness, rid)
+            return (
+                1 if proven_incomplete else 0,
+                0 if has_high_confidence_semantic_winner else 1,
+                -_critical_claim_richness(rid),
+                -(score if score is not None else float("-inf")),
+                -richness,
+                rid,
+            )
         return sorted(pool, key=sort_key)[0]
 
     if complete_single:
+        # D-058 Phase 2: if more than one candidate already carries
+        # high-confidence semantic winner evidence for DIFFERENT
+        # realizations, the recorded evidence itself disagrees -- never
+        # guess between two confidently-recorded semantic verdicts. Falls
+        # through to REVIEW_REQUIRED, the same fail-closed posture
+        # contradiction signals already use above.
+        high_confidence_pool = [
+            rid for rid in complete_single
+            if semantic_winner_confidence.get(rid, 0.0) >= _HIGH_CONFIDENCE_SEMANTIC_WINNER_THRESHOLD
+        ]
+        if len(high_confidence_pool) >= 2:
+            covered_by_id = {rid: coverage_by_id[rid] for rid in complete_single}
+            return RealizationResolution(
+                semantic_idea_id=idea_id, candidate_realization_ids=candidate_ids, winner_realization_id=None,
+                composite_realization_ids=(), covered_canonical_claim_ids=(),
+                missing_critical_claim_ids=tuple(sorted(critical_group_ids)),
+                discarded_realization_ids=(), retained_for_contextual_value=candidate_ids,
+                decision_status=REVIEW_REQUIRED,
+                decision_reason="conflicting_high_confidence_semantic_winner_evidence",
+                confidence=0.0,
+                evidence={
+                    "conflicting_realization_ids": sorted(high_confidence_pool),
+                    "covered_group_ids": {rid: sorted(ids) for rid, ids in covered_by_id.items()},
+                },
+            )
         winner = _pick_winner(complete_single)
         covered = coverage_by_id[winner]
         chosen_ids = (winner,)

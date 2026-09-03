@@ -840,6 +840,212 @@ def reconcile_semantic_idea_equivalence(
     }
 
 
+# ---------------------------------------------------------------------------
+# D-058 Phase 1: DISTINCT-IDEA GROUPING SAFETY
+# ---------------------------------------------------------------------------
+#
+# Root defect (docs/CUTSELL_DECISIONS.md D-057's forensic on the D-056.6
+# pimples/acne shape): a deterministic multi-member `take_judge_groups` group
+# is treated as ONE mutually-exclusive retry family by construction, with no
+# re-validation of that assumption anywhere downstream. `_repair_groups`'s
+# own `_constrain_provider_group` complete-link check only ever runs on the
+# provider's RAW output, before `_extend_adjacent_retry_groups`/`_absorb_
+# interstitial_retry_debris` (which can add members by adjacency/prefix-
+# debris alone, no content re-check) and before `reconcile_semantic_idea_
+# equivalence` (which only ever MERGES groups, never re-examines an already-
+# multi-member group's own internal cohesion). The live shape: a deterministic
+# group bundled "back acne treated with resorcina" together with "hormonal
+# pimples behind the ear/neck" -- two distinct symptom beats sharing only
+# temporal proximity and generic skin-symptom vocabulary -- and the semantic
+# arbiter, when it separately evaluated OTHER pairs in this exact run, never
+# confirmed these two as the same idea (its own merges list named only the
+# genuine back-acne retry pair). Forcing them to compete for one winner
+# guaranteed one beat would be silently discarded regardless of which member
+# actually won that contest.
+#
+# FIX: one additional, final cohesion-validation pass over whatever groups
+# `reconcile_semantic_idea_equivalence` produced (the single well-defined
+# choke point that function's own docstring already establishes) -- run once,
+# after all merging is done and before Best Take ranking ever sees a group.
+# For every already-multi-member group, every pair of members must show
+# EITHER (a) strong deterministic lexical evidence of being the same retry
+# (`_provider_members_compatible`'s own existing complete-link threshold --
+# reused verbatim, not reinvented) OR (b) explicit arbiter confirmation of
+# same intended idea for that SPECIFIC pair (the same `IdeaEquivalenceRequest`/
+# `safe_check_idea_equivalence` contract `reconcile_semantic_idea_equivalence`
+# already uses, batched and budget-truncated the same way). Neither temporal
+# proximity nor raw topic/vocabulary overlap alone is ever sufficient by
+# construction -- this function's evidence check is text-only (no timestamps,
+# no gap comparison beyond what `_provider_members_compatible` itself already
+# requires). A pair with neither kind of evidence is split apart -- one
+# connected component of confirmed-cohesive pairs per resulting group,
+# members with no confirmed edge to anyone become their own singleton group
+# -- so both beats get an independent chance to survive Selection rather than
+# one silently losing a contest it was never actually part of. Fails open in
+# the content-preserving direction throughout, matching every other gate in
+# this module: uncertain evidence never merges, and here it also never
+# forces an artificial contest.
+#
+# `protected_ids` (D-025, same contract as `reconcile_semantic_idea_
+# equivalence`): CompositeResolver-accepted composite pieces are exempt --
+# this pass must never re-examine or split a decision that authority already
+# made.
+
+def _within_group_candidate_pairs(
+    group: Tuple[str, ...],
+    take_map: dict[str, CandidateTake],
+    *,
+    protected_ids: frozenset[str],
+) -> tuple[tuple[str, str], ...]:
+    pairs: list[tuple[str, str]] = []
+    members = [clip_id for clip_id in group if clip_id in take_map and clip_id not in protected_ids]
+    for i in range(len(members)):
+        left_id = members[i]
+        left_take = take_map[left_id]
+        if len(semantic_key(left_take.text).split()) <= 3:
+            continue
+        for j in range(i + 1, len(members)):
+            right_id = members[j]
+            right_take = take_map[right_id]
+            if len(semantic_key(right_take.text).split()) <= 3:
+                continue
+            pairs.append((left_id, right_id))
+    return tuple(pairs)
+
+
+def _cohesive_components(
+    group: Tuple[str, ...],
+    cohesive_pairs: frozenset[frozenset[str]],
+    protected_ids: frozenset[str],
+) -> tuple[Tuple[str, ...], ...]:
+    """Connected components of `group` under the `cohesive_pairs` edge set.
+
+    A protected id (already an accepted composite piece) is never split off
+    from the rest of its original group -- it keeps whatever membership
+    upstream authority already assigned it, exactly like every other guard
+    in this module treats `protected_ids`.
+    """
+    parent = {clip_id: clip_id for clip_id in group}
+
+    def find(x: str) -> str:
+        while parent[x] != x:
+            parent[x] = parent[parent[x]]
+            x = parent[x]
+        return x
+
+    def union(a: str, b: str) -> None:
+        ra, rb = find(a), find(b)
+        if ra != rb:
+            parent[ra] = rb
+
+    for pair in cohesive_pairs:
+        left_id, right_id = tuple(pair)
+        if left_id in parent and right_id in parent:
+            union(left_id, right_id)
+    if protected_ids:
+        protected_in_group = [clip_id for clip_id in group if clip_id in protected_ids]
+        for anchor, other in zip(protected_in_group, protected_in_group[1:]):
+            union(anchor, other)
+
+    clusters: dict[str, list[str]] = {}
+    for clip_id in group:
+        clusters.setdefault(find(clip_id), []).append(clip_id)
+    return tuple(tuple(members) for members in clusters.values())
+
+
+def split_incohesive_retry_groups(
+    groups: Tuple[Tuple[str, ...], ...],
+    takes: Tuple[CandidateTake, ...],
+    arbiter: SemanticEquivalenceArbiter | None,
+    *,
+    policy: SemanticEquivalenceGatePolicy = SemanticEquivalenceGatePolicy(),
+    protected_ids: frozenset[str] = frozenset(),
+) -> tuple[Tuple[Tuple[str, ...], ...], dict]:
+    """D-058 Phase 1: require evidence of shared communicative intent before
+    an already-multi-member group is trusted as one mutually-exclusive retry
+    family. See the module comment immediately above for the full defect and
+    fix rationale. Runs once, after `reconcile_semantic_idea_equivalence`,
+    before Best Take ranking.
+    """
+    take_map = {take.clip_id: take for take in takes}
+    multi_member_groups = [group for group in groups if len(group) >= 2]
+    if not multi_member_groups:
+        return groups, {"status": "not_requested", "groups_checked": 0, "groups_split": 0}
+
+    cohesive_pairs: set[frozenset[str]] = set()
+    weak_pairs: list[tuple[str, str]] = []
+    for group in multi_member_groups:
+        for left_id, right_id in _within_group_candidate_pairs(group, take_map, protected_ids=protected_ids):
+            left_take, right_take = take_map[left_id], take_map[right_id]
+            if _provider_members_compatible(left_take, right_take):
+                cohesive_pairs.add(frozenset((left_id, right_id)))
+            elif _is_prefix_fragment(left_take, right_take) or _is_prefix_fragment(right_take, left_take):
+                cohesive_pairs.add(frozenset((left_id, right_id)))
+            else:
+                weak_pairs.append((left_id, right_id))
+
+    checked_pair_count = 0
+    confirmed_pairs: list[dict] = []
+    if weak_pairs and arbiter is not None:
+        ranked = sorted(
+            weak_pairs,
+            key=lambda pair: _pair_priority_score(
+                take_map[pair[0]], take_map[pair[1]],
+                gap_sec=_group_gap((pair[0],), (pair[1],), take_map),
+            ),
+            reverse=True,
+        )
+        truncated = tuple(ranked[: policy.max_pairs_per_request])
+        checked_pair_count = len(truncated)
+        request = IdeaEquivalenceRequest(pairs=tuple(
+            IdeaEquivalencePair(left_text=take_map[left_id].text, right_text=take_map[right_id].text)
+            for left_id, right_id in truncated
+        ))
+        result = safe_check_idea_equivalence(arbiter, request, policy)
+        decisions = same_idea_by_pair_index(result)
+        for pair_index, (left_id, right_id) in enumerate(truncated):
+            decision = decisions.get(pair_index)
+            if decision is None:
+                continue  # fail-open: arbiter unavailable/declined -> keep separate
+            same_idea, confidence, reason = decision
+            if not same_idea:
+                continue
+            cohesive_pairs.add(frozenset((left_id, right_id)))
+            confirmed_pairs.append({
+                "left_clip_id": left_id, "right_clip_id": right_id,
+                "confidence": round(confidence, 4), "reason": reason,
+            })
+
+    frozen_cohesive_pairs = frozenset(cohesive_pairs)
+    output_groups: list[Tuple[str, ...]] = []
+    split_records: list[dict] = []
+    groups_split = 0
+    for group in groups:
+        if len(group) < 2:
+            output_groups.append(group)
+            continue
+        components = _cohesive_components(group, frozen_cohesive_pairs, protected_ids)
+        if len(components) <= 1:
+            output_groups.append(group)
+            continue
+        groups_split += 1
+        split_records.append({
+            "original_group_ids": list(group),
+            "resulting_groups": [list(component) for component in components],
+        })
+        output_groups.extend(components)
+
+    return tuple(output_groups), {
+        "status": "applied" if (groups_split or checked_pair_count) else "no_incohesive_groups_found",
+        "groups_checked": len(multi_member_groups),
+        "groups_split": groups_split,
+        "weak_pair_count": len(weak_pairs),
+        "checked_pair_count": checked_pair_count,
+        "arbiter_confirmed_pairs": confirmed_pairs,
+        "splits": split_records,
+    }
+
+
 def safe_group_takes(
     provider: TakeGroupingProvider | None,
     takes: Tuple[CandidateTake, ...],

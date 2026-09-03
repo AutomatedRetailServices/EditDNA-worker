@@ -6617,6 +6617,44 @@ READY FOR HUMAN VISUAL REVIEW? NO (nothing rendered -- Freeze blocked before Bou
 
 Then STOP. Did not patch. Did not launch another RAW.
 
+## D-056.6 / D-057 -- content-loss and Resolver-authority forensics (report only, no code)
+
+Two report-only directives, delivered in chat, not code checkpoints on their own -- superseded by D-058's actual fixes below, summarized here so the D-058 entry has context without re-deriving it:
+
+D-056.6 collected the D-056.5 canary's 7 content-loss findings and traced them to 3 root decisions (not 7 independent losses): (A) pre-Resolver deterministic grouping wrongly merged two distinct symptom beats ("back acne" / "hormonal pimples behind the ear-neck") into one mutually-exclusive retry contest; (B) a downstream authority reversed a correct, twice-independently-confirmed semantic winner for a genuine 3-way stomach/gastritis retry family back to a lower-confidence, incomplete take; (C) a validator-side coverage/alignment false positive on a genuinely-preserved, differently-worded 5-10%-hereditary claim.
+
+D-057 traced (B) to its exact source: `realization_resolver.py`'s `_pick_winner`, inside the Unified Resolver itself (not a downstream mutator -- confirmed 0 SEMANTIC_MUTATORs exist anywhere after `apply_authoritative_realization_resolution`), ranked candidates that already satisfied full critical-claim coverage by raw DeliveryScorer score first, never consulting the Semantic Ledger's own already-recorded `SEMANTIC_WINNER_OVERRIDE` evidence. (A) was confirmed strictly pre-Resolver (an Idea Formation problem). (C) was confirmed a genuine VALIDATOR false positive, not a Selection failure.
+
+## D-058 -- grouping + Resolver decision-quality targeted fixes
+
+Three independent, targeted fixes for D-057's findings -- no new authority layer, no post-Resolver semantic mutator added (confirmed still 0 after this directive).
+
+**Phase 1 (distinct-idea grouping safety)**: new `take_grouping_provider.split_incohesive_retry_groups`, called in `pipeline.py` immediately after `reconcile_semantic_idea_equivalence` (the single choke point that function's own docstring already establishes), before Best Take ranking ever treats a group as one mutually-exclusive contest. Every pair inside an already-multi-member group must now show either strong deterministic lexical evidence of being the same retry (`_provider_members_compatible`'s existing complete-link threshold, reused verbatim) or explicit arbiter confirmation for that specific pair; neither temporal proximity nor shared vocabulary/topic alone is ever sufficient. A pair with neither is split into its own connected component, so a genuinely distinct beat gets an independent chance to survive Selection instead of losing a contest it was never actually part of. `protected_ids` (accepted composite pieces) are never re-examined, same contract as the arbiter merge step.
+
+**Phase 2 (Resolver evidence hierarchy)**: `realization_resolver.py`'s `_pick_winner` (inside `_resolve_one_idea`) now ranks candidates that already satisfy full critical coverage by an explicit hierarchy -- (1) semantic validity/completeness (`RealizationRecord.complete_idea is not False`, D-050C1.6's own field, never guessed at as incomplete when unknown), (2) high-confidence semantic winner evidence (a new `_semantic_winner_confidence_by_realization` helper reads the Ledger's own `SEMANTIC_WINNER_OVERRIDE` decisions, at or above the same 0.85 confidence floor `pipeline.py`'s `_semantic_best_take` already uses), (3) critical claim coverage quality (individual critical claims covered, a finer signal than the boolean "covers all critical groups" gate every pool member already passes), (4) delivery quality (DeliveryScorer/watch-listen score, now a tiebreaker only), (5) contextual richness (unchanged). `semantic_ledger.py`'s own `SEMANTIC_WINNER_OVERRIDE` recording now carries the arbiter's confidence in its evidence (previously unrecorded). When two candidates both carry conflicting high-confidence semantic winner evidence, the idea resolves `REVIEW_REQUIRED` (`conflicting_high_confidence_semantic_winner_evidence`) rather than guessing.
+
+**Phase 3 (validator claim-paraphrase alignment, separate code path from Phases 1-2 as directed)**: `semantic_claims.py`'s `AMBIGUOUS_COVERAGE_FLOOR` lowered from 0.3 to 0.10 (the live D-056.6 false positive's own coverage was 0.15 -- a genuine paraphrase that never reached the bounded claim-equivalence arbiter under the old floor). A new, floor-independent `_DEFINITIVE_MISMATCH_COVERAGE_CAP` (0.05) keeps three deterministic "definitely not the same claim" guards inside `claim_coverage` -- negation flip (pre-existing, now using the fixed cap instead of a floor-relative one), number/percentage change (new), and connector-based causal-direction inversion (new, scoped to `_CAUSE_EFFECT_MARKERS`, the existing marker vocabulary) -- confidently below the new, wider ambiguous band regardless of how low the floor is tuned, so none of the three can ever drift into arbiter-eligible territory. A bare, connector-less causal-verb inversion ("X triggers Y" vs "Y triggers X") remains an honest, documented gap in bag-of-words coverage -- the same class `contradiction_signal.py`'s own module docstring already declares out of scope for that primitive; fixing it would require preserving token order/dependency roles, a materially new representation this directive's "no new architecture" scope excludes.
+
+**Tests**: 3 new files, 22 tests total -- `test_cutsell_d058_phase1_grouping_safety.py` (10, including a generic reproduction of the exact D-057 three-clip shape: two true back-acne retries plus one genuinely distinct beat, arbiter confirms only the true retry pair), `test_cutsell_d058_phase2_resolver_evidence_hierarchy.py` (5, including the exact D-057 gastritis shape: higher-score-but-incomplete vs lower-score-but-complete-and-semantically-confirmed), `test_cutsell_d058_phase3_claim_paraphrase_alignment.py` (7, covering paraphrase-now-covered, number/negation/entity/causal-still-not-covered, and fail-open-without-an-arbiter unchanged).
+
+**Offline qualification**: compileall clean. D-050 through D-058 targeted suite: 276 passed (254 baseline + 22 new). CleanCutBench LEGACY+AUTHORITATIVE: 54/54 fixtures both modes, identical 23-same/31-different/3-review_required split as the pre-D-058 baseline, 0 regressions. Full `tests/test_cutsell_*.py`: 1612 passed (1590 baseline + 22 new), 0 regressions. Full `tests/` (minus `test_semantic_stitch.py`): 2236 passed, 13 subtests passed, only the same 2 pre-existing/unrelated failures already on record since D-056.1.
+
+### Final report (verbatim, as delivered)
+D-058 COMPLETE
+
+GROUPING DISTINCT-IDEA SAFETY: PASS
+RESOLVER EVIDENCE HIERARCHY: PASS
+GASTRITIS GENERIC FIX: PASS
+PIMPLES GENERIC FIX: PASS
+CLAIM PARAPHRASE ALIGNMENT: PASS
+POST-RESOLVER SEMANTIC MUTATORS: 0
+LEGACY: 54/54
+AUTHORITATIVE: 54/54
+FULL TEST COUNT: 1612 passed (tests/test_cutsell_*.py), 0 regressions vs the 1590-test D-056.5 baseline; full tests/ (minus test_semantic_stitch.py) 2236 passed, 13 subtests passed, only the same 2 pre-existing/unrelated failures already on record.
+READY FOR ONE VIDEO00 CANARY? YES
+
+Then STOP. Do not launch Modal.
+
 ## Change rule
 
 When a new decision changes product behavior, update this file in the same development cycle. Do not silently redefine CutSell through code alone.

@@ -137,9 +137,30 @@ _CONTRASTIVE_MARKERS = (
 _RELATIVE_ADDITION_MARKERS = ("lo que", "lo cual", "which")
 
 COVERAGE_THRESHOLD = 0.6
-# Below this, a claim is confidently lost regardless of arbiter availability
-# -- too little overlap for a paraphrase judgment to plausibly apply.
-AMBIGUOUS_COVERAGE_FLOOR = 0.3
+# D-058 Phase 3 (docs/CUTSELL_DECISIONS.md D-057's 5-10% forensic): lowered
+# from 0.3. The live false positive this fixes had raw token overlap 0.15 --
+# a genuine paraphrase of the same hereditary-percentage claim ("estoy
+# convencida y la ciencia lo avala que solo un 5-10% de los" vs "esta
+# comprobado cientificamente ... solo un 5-10% son de caracter
+# hereditario") whose surrounding scaffolding words differ enough that raw
+# content-token overlap alone undersells it, while the number itself
+# ("5-10%") and the core claim survive verbatim. 0.3 was too high a floor to
+# ever let a real case like this reach the arbiter for a paraphrase
+# judgment at all. The floor still exists -- below it a claim is confidently
+# lost regardless of arbiter availability, too little overlap for a
+# paraphrase judgment to plausibly apply -- it is only calibrated lower.
+# `_DEFINITIVE_MISMATCH_COVERAGE_CAP` (below) is a separate, fixed value
+# for confidently-mismatched claims (negation flip, number change) so
+# lowering this floor can never let one of those genuine mismatches drift
+# into the ambiguous band merely because the floor moved.
+AMBIGUOUS_COVERAGE_FLOOR = 0.10
+# A genuine negation flip or number change is confidently NOT the same
+# claim, never escalated to the arbiter regardless of how low
+# `AMBIGUOUS_COVERAGE_FLOOR` is calibrated -- see `claim_coverage`'s own
+# negation-flip and number-mismatch guards below, both of which cap
+# coverage at this fixed value rather than at a fraction of the (now
+# lower, tunable) ambiguous floor.
+_DEFINITIVE_MISMATCH_COVERAGE_CAP = 0.05
 
 _DEDUPE_SIMILARITY_THRESHOLD = 0.7
 
@@ -365,13 +386,15 @@ def claim_coverage(claim: Claim, candidate_text: str) -> float:
     benign" -- same nouns, opposite proposition. When exactly one of
     claim/candidate carries a negation marker (`_negations`, general
     English+Spanish set, no Video00 vocabulary), the two assert different
-    things regardless of noun overlap, so coverage is capped below
-    `AMBIGUOUS_COVERAGE_FLOOR` -- confidently NOT covered, same as too-low
-    overlap, never escalated to the arbiter for what is actually a clear
-    negation mismatch.
+    things regardless of noun overlap, so coverage is capped at
+    `_DEFINITIVE_MISMATCH_COVERAGE_CAP` -- confidently NOT covered, same as
+    too-low overlap, never escalated to the arbiter for what is actually a
+    clear negation mismatch. Number-mismatch guard immediately below this
+    docstring is the identical shape, for a changed number/percentage
+    instead of a changed polarity.
 
-    The negation check is scoped to the SENTENCE(S) of `candidate_text`
-    that actually share content tokens with the claim, not the whole,
+    Both checks are scoped to the SENTENCE(S) of `candidate_text` that
+    actually share content tokens with the claim, not the whole,
     possibly multi-sentence or multi-clip (`_lost_critical_claims`/
     `claim_coverage_best_take` both pass a joined "winning realization"
     covering several clips) candidate blob. Found via real-chain testing:
@@ -405,10 +428,68 @@ def claim_coverage(claim: Claim, candidate_text: str) -> float:
         s for s in candidate_sentences
         if len(claim.content_tokens & _content(s)) >= min_shared_for_relevance
     ]
-    negation_scope = " ".join(relevant_sentences) if relevant_sentences else candidate_text
-    if bool(_negations(claim.text)) != bool(_negations(negation_scope)):
-        return min(overlap, AMBIGUOUS_COVERAGE_FLOOR / 2)
+    relevant_scope = " ".join(relevant_sentences) if relevant_sentences else candidate_text
+    if bool(_negations(claim.text)) != bool(_negations(relevant_scope)):
+        return min(overlap, _DEFINITIVE_MISMATCH_COVERAGE_CAP)
+    # D-058 Phase 3 (docs/CUTSELL_DECISIONS.md D-057/D-058): number-mismatch
+    # guard, the same shape as the negation-flip guard immediately above --
+    # "only 5% are hereditary" and "only 10% are hereditary" share every
+    # other content token and must never be treated as a covered paraphrase
+    # of each other just because a lower ambiguous floor (below) now lets
+    # thinner-overlap PARAPHRASES reach the arbiter. Scoped to the same
+    # relevant-sentence(s) as the negation check, for the identical reason:
+    # a candidate's OTHER, unrelated sentence can carry its own unrelated
+    # number. Only fires when BOTH sides actually state a number at all --
+    # a claim with no number of its own, or a candidate that never restates
+    # any number, is not a number disagreement, just missing evidence
+    # (already reflected in `overlap`).
+    claim_numbers = _numbers(claim.text)
+    candidate_numbers = _numbers(relevant_scope)
+    if claim_numbers and candidate_numbers and claim_numbers != candidate_numbers:
+        return min(overlap, _DEFINITIVE_MISMATCH_COVERAGE_CAP)
+    # D-058 Phase 3: causal-inversion guard, scoped to the same connector
+    # vocabulary `classify_claim` already uses to detect a CAUSE_EFFECT
+    # claim at all (`_CAUSE_EFFECT_MARKERS`) -- never a new marker list.
+    # Bag-of-words overlap is blind to WHICH side of the connector each
+    # entity sits on ("stress happens because of the flare-ups" and "the
+    # flare-ups happen because of stress" share every content token), so a
+    # reversed cause/effect pair can otherwise score as a near-perfect
+    # paraphrase. Splits both the claim and its relevant candidate
+    # sentence(s) on the first marker found; when both sides have real
+    # content on both halves, an inversion is evidence when the SWAPPED
+    # pairing (claim's cause vs candidate's effect, and vice versa) shares
+    # strictly more than the SAME-side pairing -- the entities are still
+    # all there, just on the wrong side of the connector. A general,
+    # non-connector causal reversal (a bare "X triggers Y" vs "Y triggers
+    # X" with no connector at all) is not detectable from bag-of-words
+    # tokens alone without real parsing -- an honest, documented gap, the
+    # same class `contradiction_signal.py`'s own module docstring already
+    # declares out of scope for that primitive.
+    claim_split = _split_on_cause_effect_marker(claim.text)
+    if claim_split is not None:
+        candidate_split = _split_on_cause_effect_marker(relevant_scope)
+        if candidate_split is not None:
+            claim_before, claim_after = _content(claim_split[0]), _content(claim_split[1])
+            candidate_before, candidate_after = _content(candidate_split[0]), _content(candidate_split[1])
+            if claim_before and claim_after and candidate_before and candidate_after:
+                same_side = len(claim_before & candidate_before) + len(claim_after & candidate_after)
+                swapped_side = len(claim_before & candidate_after) + len(claim_after & candidate_before)
+                if swapped_side > same_side:
+                    return min(overlap, _DEFINITIVE_MISMATCH_COVERAGE_CAP)
     return overlap
+
+
+def _split_on_cause_effect_marker(text: str) -> tuple[str, str] | None:
+    """First `_CAUSE_EFFECT_MARKERS` connector found in `text`, splitting it
+    into (before, after). `None` when no connector is present -- the
+    causal-inversion guard above only ever activates when BOTH the claim
+    and the candidate's relevant scope contain one."""
+    lowered = text.casefold()
+    for marker in _CAUSE_EFFECT_MARKERS:
+        index = lowered.find(marker)
+        if index != -1:
+            return text[:index], text[index + len(marker):]
+    return None
 
 
 def claim_is_covered(claim: Claim, candidate_text: str, *, threshold: float = COVERAGE_THRESHOLD) -> bool:
