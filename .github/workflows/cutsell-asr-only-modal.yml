@@ -20,14 +20,6 @@ on:
         description: "Set CUTSELL_ASR_DETERMINISTIC_CONFIG=1 (candidate config) instead of leaving it unset (current/LEGACY config)"
         type: boolean
         default: false
-  # TEMPORARY bootstrap push trigger -- same precedent as
-  # cutsell-video00-modal-raw.yml's own history (run 33626736759): a brand
-  # new workflow_dispatch-only workflow is not yet visible to GitHub's
-  # dispatch API until some event on this branch registers it. Removed
-  # again once confirmed working.
-  push:
-    branches:
-      - feature/runpod-pod-on-demand
 
 concurrency:
   group: cutsell-asr-only-modal-${{ github.ref }}
