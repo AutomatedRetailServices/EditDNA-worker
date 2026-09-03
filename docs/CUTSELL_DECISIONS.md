@@ -5249,6 +5249,141 @@ pre-existing + 27 new), env unset (both flags off, LEGACY default) --
 byte-for-byte parity confirmed by the exact count match. No GPU/Modal RAW
 run as part of this change.
 
+## D-053 -- ASR determinism qualification (isolated ASR-only phase; IN PROGRESS)
+
+Follows directly from the D-052 stability battery's live finding: 3
+identical-config Modal Video00 RAWs produced 3 different
+`CanonicalASREvidence.evidence_hash` values on the byte-identical source
+video/config -- ASR word-sequence output itself is not deterministic, even
+with D-052's canonical normalization layer on. This phase isolates and
+qualifies a fix for ASR determinism specifically, without touching any
+downstream stage (Unified Realization Resolver, Semantic Ledger,
+AttemptReconstructor, Human Gold, hybrid editorial, Semantic Compute
+Planner's ordering/decisions, CanonicalEditPlan, Freeze, Render/QC) and
+without running another full Video00 RAW.
+
+**Ground-truthing method.** Rather than assume faster-whisper's documented
+defaults (which can silently drift version-to-version), the exact pinned
+wheel this repo installs (`faster-whisper==1.0.0`,
+`requirements.cutsell.worker.txt`) was downloaded and its
+`transcribe.py`/`vad.py` source read directly. Confirmed:
+`temperature` defaults to the LADDER `[0.0, 0.2, 0.4, 0.6, 0.8, 1.0]`, not
+a deterministic scalar -- the primary attempt is temperature 0.0
+(deterministic beam search), but a segment escalates to a later, sampling
+(non-deterministic) rung whenever it fails the library's own quality gates
+(`compression_ratio_threshold=2.4`, `log_prob_threshold=-1.0`,
+`no_speech_threshold=0.6`), and `condition_on_previous_text=True`
+compounds any such escalation forward through the rest of the transcript
+via its context window. This is the confirmed mechanism (not merely a
+leading suspect, as D-051/D-052 had it) for the observed run-to-run
+word-sequence variance. `VadOptions` defaults were ground-truthed the same
+way (`threshold=0.5, min_speech_duration_ms=250,
+max_speech_duration_s=inf, min_silence_duration_ms=2000,
+window_size_samples=1024, speech_pad_ms=400`).
+
+**`asr.py` rewrite.** `FasterWhisperASR` now threads every one of these
+ground-truthed parameters explicitly into the live `model.transcribe()`
+call (previously audit/fingerprint-only fields per D-052) -- for the
+LEGACY (default-constructed) provider every value is identical to the
+library's own default, so this is a zero-behavior-change,
+make-explicit-and-fingerprintable change. `DETERMINISTIC_TEMPERATURE =
+(0.0,)` is the ONE deliberate difference: a scalar temperature with no
+fallback rung for the decode-with-fallback loop to ever escalate to.
+`build_deterministic_asr_provider()` builds this candidate;
+`load_asr_provider_from_env()` gained `CUTSELL_ASR_DETERMINISTIC_CONFIG`
+(default OFF, LEGACY unchanged) to select it.
+`canonical_asr_evidence.ASRConfigFingerprint` was extended with every new
+field (`task`, `patience`, `length_penalty`, `repetition_penalty`,
+`no_repeat_ngram_size`, the quality-gate thresholds,
+`prompt_reset_on_temperature`, `vad_parameters`) plus a derived
+`sampling_fallback_enabled` property (`len(temperature_ladder) > 1`).
+`compute_type` stays `"auto"` for both providers -- pinning precision
+(e.g. `float16`) is deliberately deferred as a separate, separately-tested
+change, not bundled into this determinism fix.
+
+**Isolated ASR-only harness.** `cutsell_worker/asr_only_benchmark.py`
+(new): `run_asr_only_benchmark()` downloads the same Video00 source,
+transcribes it via `load_asr_provider_from_env()` (so it automatically
+respects `CUTSELL_ASR_DETERMINISTIC_CONFIG` exactly like the real
+pipeline), builds `CanonicalASREvidence`, and stops -- never constructing
+AttemptReconstructor, hybrid editorial, the resolver, or render/QC.
+`collect_asr_runtime_audit()` ground-truths the live installed
+faster-whisper/ctranslate2 versions and the actual installed
+`WhisperModel.transcribe` signature via `inspect.signature` on the live
+import, GPU model and CUDA runtime via the `nvidia-smi` CLI (deliberately
+never `torch` -- `cutsell_worker` is a torch-free package by architectural
+contract, enforced by
+`tests/test_cutsell_clean_worker_dependency_boundary.py`). Modal transport:
+`modal_asr_only_benchmark.py` (new; mirrors
+`modal_video00_full_benchmark.py`'s image/app/secret pattern exactly) runs
+on a separate Modal App (`MODAL_ASR_ONLY_APP_NAME`, never the full-engine
+app) with its own, materially shorter timeout ceiling
+(`DEFAULT_MODAL_ASR_ONLY_TIMEOUT_S=900s` vs. the full RAW's 5400s). CI
+entry point: `.github/workflows/cutsell-asr-only-modal.yml`
+(`workflow_dispatch`, one boolean input toggling
+`CUTSELL_ASR_DETERMINISTIC_CONFIG` per dispatch so both baseline and
+candidate runs use the same workflow).
+
+**Two D-052 observability-only bugs found live by the stability battery,
+fixed this phase (never changing semantic execution ordering or provider
+decisions):**
+1. `diagnostics.semantic_compute_plan` showed `absent_flag_off` in all 3
+   battery runs despite the flag being on and the planner demonstrably
+   running (per-window `planner_priority` diagnostics were correctly
+   populated). Root cause: several of `composite_resolver.py`'s 19 chain
+   hooks reconstruct `HybridSessionCleanupResult` via a keyword
+   constructor call written before `semantic_compute_plan` existed,
+   silently reverting it to `None`. Fixed via the same `ContextVar`
+   side-channel pattern this codebase already established for
+   `_SPLIT_IDS`/`_COMPOSITE_SPLIT_IDS`
+   (`hybrid_session_cleanup._LAST_SEMANTIC_COMPUTE_PLAN`, set
+   unconditionally at the base call, read-and-cleared once by
+   `composite_resolver._restore_semantic_compute_plan`) -- no hook file
+   needed editing.
+2. `planner_predicted_planned` was `false` for every window in all 3
+   battery runs even though the real ledger accepted 4 of 6, because
+   `_estimate_window_cost_usd`'s old flat `0.0015 USD/member` heuristic
+   overshot real cost badly enough that a typical 10-member window's
+   estimate alone exceeded the entire default `$0.0075` ceiling. Fixed by
+   reusing the SAME real token-based formula the live transport bills
+   against (`HybridProviderSettings.estimate_cost_usd`, fed by
+   `estimate_tokens_from_chars` and an output-token tiering duplicated
+   from `hybrid_google_transport._compact_output_token_ceiling`) --
+   estimate/bookkeeping only; dispatch order never depended on estimate
+   accuracy.
+
+**Tests (all new, all green):** `tests/test_cutsell_d053_asr_determinism.py`
+(14) -- explicit transcribe-parameter wiring, deterministic-vs-legacy
+temperature shape, VAD/compute-type explicitness, fingerprint
+stability/sensitivity, `CUTSELL_ASR_DETERMINISTIC_CONFIG` on/off parity.
+`tests/test_cutsell_asr_only_benchmark.py` (7) -- the isolated harness
+never invokes editorial stages, respects the env-driven config loader,
+JSON-serializable result. `tests/test_modal_asr_only_benchmark.py` (14) +
+`tests/test_modal_gpu_config.py` additions (8) -- Modal
+App/Image/Function/Secret wiring, distinct app name/timeout/payload-env
+from the full-engine benchmark. `tests/test_cutsell_composite_resolver.py`
+additions (4) and `tests/test_cutsell_d052_semantic_compute_planner.py`
+additions (4) -- the two observability fixes above, including a direct
+unit test of `_restore_semantic_compute_plan`'s never-overwrite and
+clear-after-read behavior.
+
+**Validation so far:** compileall clean across `cutsell_worker/`,
+`modal_asr_only_benchmark.py`, `modal_gpu_config.py`, and `tests/`. Full
+`tests/test_cutsell_*.py` glob: 1531 passed (1501 pre-existing + 30 new),
+zero regressions. `tests/test_cutsell_clean_worker_dependency_boundary.py`
+(the torch-free architectural contract) still passes -- the runtime-audit
+GPU/CUDA introspection deliberately uses `nvidia-smi`, never `torch`.
+
+**NOT yet done (this phase is not complete):** the live Modal audit of the
+actual installed ctranslate2 version / resolved `compute_type="auto"`
+behavior / GPU model on the real L4 image (ground-truthing so far is
+static analysis of the pinned wheel only); dispatching the 3 baseline
+(flag OFF) and 3 candidate (flag ON) ASR-only Modal runs and comparing
+`evidence_hash`/word-sequence/timestamp stability between them; the final
+3/3-identical acceptance judgment and ASR-config recommendation this
+comparison is gated on. No Modal RAW (full or ASR-only) has been executed
+as part of this phase yet.
+
 ## Change rule
 
 When a new decision changes product behavior, update this file in the same development cycle. Do not silently redefine CutSell through code alone.

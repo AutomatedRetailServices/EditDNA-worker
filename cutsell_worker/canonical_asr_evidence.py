@@ -73,10 +73,22 @@ def _ends_sentence(text: str) -> bool:
 @dataclass(frozen=True)
 class ASRConfigFingerprint:
     """Every behaviorally-relevant ASR setting, made explicit (D-052 Part A
-    Section 1/5). Two runs with an identical fingerprint used an identical
-    effective decode configuration -- a difference here is a legitimate,
-    named suspect for run-to-run variance; a match rules configuration out
-    and points back at the audio/hardware/library-internal path instead.
+    Section 1/5; extended by D-053 Section 2/10 with the full effective
+    ``model.transcribe()`` decode config, ground-truthed against the exact
+    pinned ``faster-whisper==1.0.0`` wheel's own signature -- see
+    ``docs/CUTSELL_DECISIONS.md`` D-053 for how each default below was
+    verified, not assumed). Two runs with an identical fingerprint used an
+    identical effective decode configuration -- a difference here is a
+    legitimate, named suspect for run-to-run variance; a match rules
+    configuration out and points back at the audio/hardware/library-internal
+    path instead.
+
+    ``sampling_fallback_enabled`` (D-053 Section 3) is a derived, explicit
+    answer to "can this configuration ever leave temperature=0.0 deterministic
+    beam search for random sampling" -- true whenever ``temperature_ladder``
+    has more than one entry (the library's own fallback-on-quality-gate
+    behavior; see ``asr.py``'s module docstring for the exact trigger
+    conditions).
 
     Deliberately a plain, hashable, provider-neutral value object -- this is
     metadata attached to evidence, never a knob any editorial stage reads.
@@ -84,26 +96,50 @@ class ASRConfigFingerprint:
     model_name: str
     device: str
     compute_type: str
+    task: str
     beam_size: int
     best_of: int
+    patience: float
+    length_penalty: float
+    repetition_penalty: float
+    no_repeat_ngram_size: int
     temperature_ladder: Tuple[float, ...]
+    compression_ratio_threshold: float | None
+    log_prob_threshold: float | None
+    no_speech_threshold: float | None
     condition_on_previous_text: bool
+    prompt_reset_on_temperature: float
     word_timestamps: bool
     vad_filter: bool
+    vad_parameters: Tuple[float, ...]
     language_hint: str | None
     initial_prompt: str | None
+
+    @property
+    def sampling_fallback_enabled(self) -> bool:
+        return len(self.temperature_ladder) > 1
 
     def fingerprint(self) -> str:
         raw = "|".join([
             self.model_name,
             self.device,
             self.compute_type,
+            self.task,
             str(self.beam_size),
             str(self.best_of),
+            f"{self.patience:.2f}",
+            f"{self.length_penalty:.2f}",
+            f"{self.repetition_penalty:.2f}",
+            str(self.no_repeat_ngram_size),
             ",".join(f"{value:.2f}" for value in self.temperature_ladder),
+            f"{self.compression_ratio_threshold:.2f}" if self.compression_ratio_threshold is not None else "",
+            f"{self.log_prob_threshold:.2f}" if self.log_prob_threshold is not None else "",
+            f"{self.no_speech_threshold:.2f}" if self.no_speech_threshold is not None else "",
             str(self.condition_on_previous_text),
+            f"{self.prompt_reset_on_temperature:.2f}",
             str(self.word_timestamps),
             str(self.vad_filter),
+            ",".join(f"{value:.4f}" for value in self.vad_parameters),
             self.language_hint or "",
             self.initial_prompt or "",
         ]).encode("utf-8")
@@ -260,17 +296,37 @@ def build_asr_config_fingerprint(
     vad_filter: bool,
     language_hint: str | None,
     initial_prompt: str | None = None,
+    task: str = "transcribe",
+    patience: float = 1.0,
+    length_penalty: float = 1.0,
+    repetition_penalty: float = 1.0,
+    no_repeat_ngram_size: int = 0,
+    compression_ratio_threshold: float | None = 2.4,
+    log_prob_threshold: float | None = -1.0,
+    no_speech_threshold: float | None = 0.6,
+    prompt_reset_on_temperature: float = 0.5,
+    vad_parameters: Tuple[float, ...] = (),
 ) -> ASRConfigFingerprint:
     return ASRConfigFingerprint(
         model_name=model_name,
         device=device,
         compute_type=compute_type,
+        task=task,
         beam_size=beam_size,
         best_of=best_of,
+        patience=patience,
+        length_penalty=length_penalty,
+        repetition_penalty=repetition_penalty,
+        no_repeat_ngram_size=no_repeat_ngram_size,
         temperature_ladder=tuple(temperature_ladder),
+        compression_ratio_threshold=compression_ratio_threshold,
+        log_prob_threshold=log_prob_threshold,
+        no_speech_threshold=no_speech_threshold,
         condition_on_previous_text=condition_on_previous_text,
+        prompt_reset_on_temperature=prompt_reset_on_temperature,
         word_timestamps=word_timestamps,
         vad_filter=vad_filter,
+        vad_parameters=tuple(vad_parameters),
         language_hint=language_hint,
         initial_prompt=initial_prompt,
     )

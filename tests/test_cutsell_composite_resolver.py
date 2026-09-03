@@ -20,6 +20,7 @@ from cutsell_worker.composite_resolver import (
     apply_composite_resolution,
 )
 from cutsell_worker.hybrid_editorial import EditorialDecision, EditorialJudgeResult
+from cutsell_worker.hybrid_session_cleanup import HybridSessionCleanupResult
 from cutsell_worker.session_boundaries import TakeGroupingProviderResult
 from cutsell_worker.providers import ProviderStatus
 
@@ -185,3 +186,139 @@ def test_apply_composite_family_stabilization_delegates_and_is_a_noop_without_sw
     out = apply_composite_family_stabilization(draft)
 
     assert out is draft
+
+
+# ---------------------------------------------------------------------------
+# D-053 Section 11 / Section 12 category 10: "SemanticComputePlan
+# diagnostics survive wrapper chain" -- several of the 19 chain hooks
+# reconstruct HybridSessionCleanupResult via a keyword constructor call that
+# never named semantic_compute_plan, silently reverting it to None the
+# moment such a hook fires (discovered live in the D-052 stability battery).
+# The fix is the hybrid_session_cleanup._LAST_SEMANTIC_COMPUTE_PLAN
+# ContextVar, read-and-cleared by composite_resolver._restore_semantic_
+# compute_plan -- mirrors _composite_split_ids's own established pattern.
+# ---------------------------------------------------------------------------
+
+def test_semantic_compute_plan_survives_the_full_19_hook_chain(monkeypatch):
+    monkeypatch.setenv("CUTSELL_SEMANTIC_COMPUTE_PLANNER", "1")
+    # Same fixture as the cross-group-retry-integrity test above -- proven
+    # to actually route through multiple chain hooks (steps 5 and 9), at
+    # least one of which reconstructs HybridSessionCleanupResult via a
+    # keyword constructor call that predates the semantic_compute_plan
+    # field and would otherwise silently drop it.
+    weak = _take("weak", 0.0, 3.0, "so basically this cream works great for dry skin overall")
+    authoritative = _take(
+        "authoritative", 4.0, 7.0,
+        "so basically this cream works great for dry skin overall and also reduces redness",
+    )
+    judge = _MappingJudge({
+        "weak": ("failed", 0.80),
+        "authoritative": ("winner", 0.95),
+    })
+
+    result, _ = apply_composite_resolution((weak, authoritative), None, judge)
+
+    assert result.semantic_compute_plan is not None
+    diag_names = [
+        key
+        for row in result.diagnostics
+        if isinstance(row, dict)
+        for key in row
+    ]
+    # Confirms the chain actually ran through the multi-hook path this test
+    # depends on, not merely the base step alone.
+    assert "hybrid_cross_group_retry_integrity" in diag_names
+    assert "hybrid_failed_soft_restore" in diag_names
+
+
+def test_semantic_compute_plan_absent_when_flag_off_even_through_the_chain(monkeypatch):
+    monkeypatch.delenv("CUTSELL_SEMANTIC_COMPUTE_PLANNER", raising=False)
+    takes = (
+        _take("a", 0.0, 3.0, "the product arrived in great condition"),
+        _take("b", 4.0, 7.0, "the packaging was also very sturdy"),
+    )
+    judge = _MappingJudge({"a": ("keep", 0.90), "b": ("keep", 0.90)})
+
+    result, _ = apply_composite_resolution(takes, None, judge)
+
+    assert result.semantic_compute_plan is None
+
+
+def test_restore_semantic_compute_plan_reattaches_a_dropped_plan():
+    # Direct unit test of the fix itself: simulate a hook that reconstructed
+    # the result via a keyword call that dropped semantic_compute_plan
+    # (result.semantic_compute_plan is None) while the ContextVar still
+    # holds the plan the base call actually produced.
+    from cutsell_worker import hybrid_session_cleanup
+    from cutsell_worker.composite_resolver import _restore_semantic_compute_plan
+    from cutsell_worker.semantic_compute_planner import SemanticComputePlan
+
+    fake_plan = SemanticComputePlan(
+        work_items=(), planned_calls=(), deferred_optional_calls=(),
+        planned_cost_usd=0.0, cost_ceiling_usd=0.0075,
+        required_p0_cost_usd=0.0, required_p1_cost_usd=0.0, optional_p2_cost_usd=0.0,
+    )
+    token = hybrid_session_cleanup._LAST_SEMANTIC_COMPUTE_PLAN.set(fake_plan)
+    try:
+        dropped = HybridSessionCleanupResult(
+            kept=(), deleted=(), requested_chunk_count=0, available_chunk_count=0,
+            diagnostics=(), semantic_decisions=(),
+        )
+        restored = _restore_semantic_compute_plan(dropped)
+        assert restored.semantic_compute_plan is fake_plan
+        # Never touches kept/deleted/diagnostics/semantic_decisions.
+        assert restored.kept == dropped.kept
+        assert restored.deleted == dropped.deleted
+        assert restored.diagnostics == dropped.diagnostics
+        assert restored.semantic_decisions == dropped.semantic_decisions
+    finally:
+        hybrid_session_cleanup._LAST_SEMANTIC_COMPUTE_PLAN.reset(token)
+
+
+def test_restore_semantic_compute_plan_never_overwrites_a_plan_the_hook_kept():
+    from cutsell_worker import hybrid_session_cleanup
+    from cutsell_worker.composite_resolver import _restore_semantic_compute_plan
+    from cutsell_worker.semantic_compute_planner import SemanticComputePlan
+
+    contextvar_plan = SemanticComputePlan(
+        work_items=(), planned_calls=(), deferred_optional_calls=(),
+        planned_cost_usd=0.0, cost_ceiling_usd=0.0075,
+        required_p0_cost_usd=0.0, required_p1_cost_usd=0.0, optional_p2_cost_usd=0.0,
+    )
+    kept_plan = SemanticComputePlan(
+        work_items=(), planned_calls=(), deferred_optional_calls=(),
+        planned_cost_usd=0.005, cost_ceiling_usd=0.0075,
+        required_p0_cost_usd=0.0, required_p1_cost_usd=0.0, optional_p2_cost_usd=0.0,
+    )
+    token = hybrid_session_cleanup._LAST_SEMANTIC_COMPUTE_PLAN.set(contextvar_plan)
+    try:
+        result_with_plan = HybridSessionCleanupResult(
+            kept=(), deleted=(), requested_chunk_count=0, available_chunk_count=0,
+            diagnostics=(), semantic_decisions=(), semantic_compute_plan=kept_plan,
+        )
+        restored = _restore_semantic_compute_plan(result_with_plan)
+        assert restored.semantic_compute_plan is kept_plan
+        assert restored is result_with_plan
+    finally:
+        hybrid_session_cleanup._LAST_SEMANTIC_COMPUTE_PLAN.reset(token)
+
+
+def test_restore_semantic_compute_plan_clears_the_contextvar_after_reading():
+    # Never leaks a stale plan into a later, unrelated call -- same
+    # discipline _composite_split_ids already applies to its two ContextVars.
+    from cutsell_worker import hybrid_session_cleanup
+    from cutsell_worker.composite_resolver import _restore_semantic_compute_plan
+    from cutsell_worker.semantic_compute_planner import SemanticComputePlan
+
+    fake_plan = SemanticComputePlan(
+        work_items=(), planned_calls=(), deferred_optional_calls=(),
+        planned_cost_usd=0.0, cost_ceiling_usd=0.0075,
+        required_p0_cost_usd=0.0, required_p1_cost_usd=0.0, optional_p2_cost_usd=0.0,
+    )
+    hybrid_session_cleanup._LAST_SEMANTIC_COMPUTE_PLAN.set(fake_plan)
+    dropped = HybridSessionCleanupResult(
+        kept=(), deleted=(), requested_chunk_count=0, available_chunk_count=0,
+        diagnostics=(), semantic_decisions=(),
+    )
+    _restore_semantic_compute_plan(dropped)
+    assert hybrid_session_cleanup._LAST_SEMANTIC_COMPUTE_PLAN.get() is None

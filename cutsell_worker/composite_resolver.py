@@ -98,6 +98,7 @@ return value, and exposes ONE ``apply_composite_group_split`` function
 """
 from __future__ import annotations
 
+import dataclasses
 from typing import Callable, Iterable
 
 from .contracts import CandidateTake
@@ -205,7 +206,32 @@ def apply_composite_resolution(
     chain = _get_take_level_chain()
     result = chain(tuple(takes), context, editorial_judge)
     split_ids = _composite_split_ids()
+    result = _restore_semantic_compute_plan(result)
     return result, split_ids
+
+
+def _restore_semantic_compute_plan(result: HybridSessionCleanupResult) -> HybridSessionCleanupResult:
+    """D-053 Section 11: several of the 19 chain hooks reconstruct
+    HybridSessionCleanupResult via a keyword constructor call that never
+    named ``semantic_compute_plan`` (written before that field existed),
+    silently reverting it to the dataclass default (None) the moment such
+    a hook actually fires -- discovered live in the D-052 stability
+    battery (top-level diagnostics showed "absent_flag_off" even though
+    the flag was on and the per-window planner fields proved the planner
+    had genuinely run). Read the same base-call plan back via the
+    ContextVar side-channel hybrid_session_cleanup.py sets unconditionally
+    (mirroring _composite_split_ids's own pattern above) and reattach it
+    only if the chain's own result lost it -- never overwrites a plan a
+    hook actually preserved correctly, and never touches kept/deleted/
+    diagnostics/semantic_decisions or any other field, so this cannot
+    change which takes were kept, discarded, or how they got there."""
+    from . import hybrid_session_cleanup
+
+    plan = hybrid_session_cleanup._LAST_SEMANTIC_COMPUTE_PLAN.get()
+    hybrid_session_cleanup._LAST_SEMANTIC_COMPUTE_PLAN.set(None)
+    if result.semantic_compute_plan is None and plan is not None:
+        result = dataclasses.replace(result, semantic_compute_plan=plan)
+    return result
 
 
 def _split_groups_for_composite(

@@ -7,6 +7,7 @@ later clean retake are less likely to fall into unrelated semantic calls.
 """
 from __future__ import annotations
 
+from contextvars import ContextVar
 from dataclasses import dataclass
 import hashlib
 import os
@@ -23,6 +24,8 @@ from .hybrid_editorial import (
     HybridGatePolicy,
     safe_editorial_judge,
 )
+from .hybrid_payload import estimate_tokens_from_chars
+from .hybrid_provider_settings import HybridProviderSettings
 from .semantic_compute_planner import (
     SemanticComputePlan,
     SemanticWorkItem,
@@ -32,6 +35,28 @@ from .semantic_compute_planner import (
 from .session_boundaries import partition_takes_by_sessions
 from .temporal_editing import harmful_events_for_take
 from .whole_video_analysis import WholeVideoContext
+
+# D-053 Section 11: composite_resolver.py's 19-hook monkeypatch chain wraps
+# apply_hybrid_session_cleanup's own HybridSessionCleanupResult repeatedly;
+# several hooks reconstruct it via `type(result)(kept=..., deleted=...,
+# requested_chunk_count=..., available_chunk_count=..., diagnostics=...,
+# semantic_decisions=...)` -- a keyword constructor call, not
+# dataclasses.replace() -- which silently drops any field the hook's own
+# (pre-D-052) code doesn't name, reverting semantic_compute_plan to its
+# dataclass default (None) the moment the first such hook fires. Rather than
+# hand-edit all 20 affected hook files (a real regression risk on already
+# load-bearing scoring logic, and exactly the kind of change this directive
+# says must not touch semantic execution ordering or provider decisions),
+# this uses the SAME ContextVar side-channel pattern
+# hybrid_semantic_complementary_rescue._SPLIT_IDS /
+# hybrid_composite_best_take._COMPOSITE_SPLIT_IDS already establish for
+# exactly this class of problem (composite_resolver.py's own
+# _composite_split_ids() reads and clears those two the same way). Set once
+# here, read-and-cleared once by composite_resolver.apply_composite_
+# resolution -- no hook file needs to know this exists.
+_LAST_SEMANTIC_COMPUTE_PLAN: "ContextVar[SemanticComputePlan | None]" = ContextVar(
+    "_LAST_SEMANTIC_COMPUTE_PLAN", default=None,
+)
 
 _TOKEN_RE = re.compile(r"[\w'’-]+", re.UNICODE)
 _RESET_CANDIDATES = frozenset({"body_reset_candidate", "hand_motion_reset_candidate"})
@@ -101,12 +126,42 @@ def _classify_window_priority(
     return SemanticWorkPriority.P2_EDITORIAL_QUALITY
 
 
-def _estimate_window_cost_usd(members: Tuple[CandidateTake, ...], *, per_member_usd: float = 0.0015) -> float:
-    """Deterministic, provider-neutral cost estimate proportional to window
-    size -- mirrors the shape of hybrid_google_transport's own token-based
-    estimate (more members -> more input/output tokens) without importing
-    anything Gemini-specific into the planner (Section 11)."""
-    return round(max(1, len(members)) * per_member_usd, 6)
+_COST_ESTIMATE_SETTINGS = HybridProviderSettings()
+_CONTEXT_OVERHEAD_CHARS = 600  # rough allowance for the session's fixed schema/context fields
+
+
+def _estimate_output_token_ceiling(member_count: int) -> int:
+    """Same tiering hybrid_google_transport._compact_output_token_ceiling
+    uses for the real compact structured-decision schema -- duplicated
+    (not imported) because that function additionally needs the live
+    request's ``requested_max`` ceiling, which this planning-time estimate
+    has no equivalent for yet."""
+    if member_count <= 2:
+        return 192
+    if member_count <= 4:
+        return 256
+    if member_count <= 6:
+        return 320
+    return min(500, 80 + (32 * member_count))
+
+
+def _estimate_window_cost_usd(members: Tuple[CandidateTake, ...]) -> float:
+    """D-053 Section 11: real, token-based cost estimate using the SAME
+    formula the live transport bills against
+    (HybridProviderSettings.estimate_cost_usd), not a flat per-member
+    dollar guess. D-052's original flat estimate (0.0015 USD/member)
+    overshot every real window's actual cost badly enough that
+    build_semantic_compute_plan's own ``planned_calls``/
+    ``deferred_optional_calls`` bookkeeping showed 0 planned calls in a
+    live 3-run battery even though the real ledger (a genuinely different,
+    authoritative accounting) accepted 4 of 6 -- this fixes the ESTIMATE
+    only. Priority classification and dispatch ORDER (the actual D-052
+    Part B fix) never depended on this number being accurate; only the
+    plan's own "predicted planned/deferred" diagnostic labels did."""
+    total_chars = sum(len(str(member.text or "")) for member in members) + _CONTEXT_OVERHEAD_CHARS
+    input_tokens = estimate_tokens_from_chars(total_chars)
+    output_tokens = _estimate_output_token_ceiling(len(members))
+    return round(_COST_ESTIMATE_SETTINGS.estimate_cost_usd(input_tokens=input_tokens, output_tokens=output_tokens), 6)
 
 
 @dataclass(frozen=True)
@@ -352,6 +407,7 @@ def apply_hybrid_session_cleanup(
     """Classify overlapping creator-session windows while failing open on uncertainty."""
     take_tuple = tuple(takes)
     if not take_tuple or editorial_judge is None:
+        _LAST_SEMANTIC_COMPUTE_PLAN.set(None)
         return HybridSessionCleanupResult(take_tuple, (), 0, 0, (), ())
 
     take_map = {take.clip_id: take for take in take_tuple}
@@ -557,6 +613,13 @@ def apply_hybrid_session_cleanup(
         (clip_id, label, confidence)
         for clip_id, (label, confidence) in best_semantic.items()
     )
+    # D-053 Section 11: set the ContextVar side-channel unconditionally
+    # (None when the flag is off, exactly like the field itself) so
+    # composite_resolver.apply_composite_resolution can recover this exact
+    # plan even if a downstream monkeypatch hook in the chain reconstructs
+    # HybridSessionCleanupResult without naming this field -- see this
+    # module's own docstring on _LAST_SEMANTIC_COMPUTE_PLAN above.
+    _LAST_SEMANTIC_COMPUTE_PLAN.set(plan)
     return HybridSessionCleanupResult(
         kept=kept,
         deleted=deleted,

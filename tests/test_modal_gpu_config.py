@@ -127,6 +127,49 @@ def test_require_modal_video00_timeout_is_independent_of_smoke_test_ceiling():
         cfg.require_modal_timeout(cfg.DEFAULT_MODAL_VIDEO00_TIMEOUT_S)
 
 
+# --- D-053 ASR-only isolated benchmark ---------------------------------
+
+def test_asr_only_app_name_is_distinct_from_full_video00_app_name():
+    assert cfg.MODAL_ASR_ONLY_APP_NAME != cfg.MODAL_VIDEO00_APP_NAME
+
+
+def test_asr_only_timeout_is_within_its_own_ceiling():
+    assert 0 < cfg.DEFAULT_MODAL_ASR_ONLY_TIMEOUT_S <= cfg.MAX_MODAL_ASR_ONLY_TIMEOUT_S
+
+
+def test_asr_only_timeout_is_materially_shorter_than_full_video00_timeout():
+    # D-053 Section 5: "This should make one ASR test materially cheaper
+    # and faster than a full RAW."
+    assert cfg.DEFAULT_MODAL_ASR_ONLY_TIMEOUT_S < cfg.DEFAULT_MODAL_VIDEO00_TIMEOUT_S
+
+
+def test_require_modal_asr_only_timeout_accepts_the_default():
+    cfg.require_modal_asr_only_timeout(cfg.DEFAULT_MODAL_ASR_ONLY_TIMEOUT_S)  # must not raise
+
+
+def test_require_modal_asr_only_timeout_rejects_zero_or_negative():
+    with pytest.raises(ValueError):
+        cfg.require_modal_asr_only_timeout(0)
+    with pytest.raises(ValueError):
+        cfg.require_modal_asr_only_timeout(-1)
+
+
+def test_require_modal_asr_only_timeout_rejects_above_ceiling():
+    with pytest.raises(ValueError):
+        cfg.require_modal_asr_only_timeout(cfg.MAX_MODAL_ASR_ONLY_TIMEOUT_S + 1)
+
+
+def test_require_modal_asr_only_timeout_is_independent_of_other_ceilings():
+    # Widening the ASR-only ceiling must never silently widen the smoke
+    # test's or the full Video00 benchmark's own ceilings, and vice versa.
+    with pytest.raises(ValueError):
+        cfg.require_modal_timeout(cfg.DEFAULT_MODAL_ASR_ONLY_TIMEOUT_S)
+
+
+def test_asr_only_payload_env_var_is_distinct_from_full_video00_payload_env_var():
+    assert cfg.CUTSELL_ASR_ONLY_PAYLOAD_JSON_ENV != cfg.CUTSELL_BENCHMARK_PAYLOAD_JSON_ENV
+
+
 def test_cutsell_apt_packages_match_dockerfile():
     # D-043 Section 3: never a second, hand-typed dependency list drifting
     # from Dockerfile.cutsell.serverless's own apt-get install block.

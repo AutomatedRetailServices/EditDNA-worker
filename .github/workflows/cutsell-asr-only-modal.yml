@@ -1,0 +1,184 @@
+name: CutSell ASR-Only Modal Benchmark
+
+# D-053 "ASR DETERMINISM QUALIFICATION / ISOLATED ASR-ONLY PHASE" Section 5:
+# an isolated ASR-only benchmark harness -- download the SAME Video00
+# source, run only ASR, produce CanonicalASREvidence, STOP. NOT a full
+# Video00 RAW: no AttemptReconstructor, no Gemini/hybrid editorial, no
+# Unified Realization Resolver, no Render/QC. This makes one ASR
+# determinism test materially cheaper and faster than
+# cutsell-video00-modal-raw.yml's full run.
+#
+# workflow_dispatch only, same as every other paid-GPU QA workflow this
+# repo has added. The `deterministic_config` input toggles
+# CUTSELL_ASR_DETERMINISTIC_CONFIG on/off per dispatch so Section 6
+# (baseline, flag OFF) and Section 8 (candidate, flag ON) can both be run
+# from this one workflow without editing YAML between runs.
+on:
+  workflow_dispatch:
+    inputs:
+      deterministic_config:
+        description: "Set CUTSELL_ASR_DETERMINISTIC_CONFIG=1 (candidate config) instead of leaving it unset (current/LEGACY config)"
+        type: boolean
+        default: false
+
+concurrency:
+  group: cutsell-asr-only-modal-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  SOURCE_KEY: Editdna longform validation/VIDEO-2026-07-30-09-18-03.mp4
+  BENCHMARK_ID: asr-only-modal-${{ github.run_id }}-${{ github.run_attempt }}
+
+jobs:
+  asr-only-modal:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      RUNPOD_API_KEY: ${{ secrets.RUNPOD_API_KEY }}
+      MODAL_TOKEN_ID: ${{ secrets.MODAL_TOKEN_ID }}
+      MODAL_TOKEN_SECRET: ${{ secrets.MODAL_TOKEN_SECRET }}
+    steps:
+      - name: Checkout exact test head
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 1
+
+      - name: Print exact test head
+        shell: bash
+        run: |
+          echo "HEAD: $(git rev-parse HEAD) ($(git log -1 --oneline))"
+
+      - name: Prepare artifact directory
+        shell: bash
+        run: mkdir -p artifact
+
+      - name: Verify Modal auth env
+        shell: bash
+        run: |
+          python3 -c "
+          import os
+          from modal_gpu_config import require_modal_token_env
+          require_modal_token_env(os.environ)
+          print('Modal auth env present.')
+          "
+
+      - name: Install Modal client
+        shell: bash
+        run: pip install --disable-pip-version-check --quiet modal
+
+      - name: Load base RunPod template (env source of truth only)
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail --silent --show-error \
+            --url "https://rest.runpod.io/v1/templates" \
+            --header "Authorization: Bearer $RUNPOD_API_KEY" \
+            --output /tmp/templates.json
+          jq -c '[.[] | select(.name == "EditDNA-Worker-2")][0]' /tmp/templates.json > /tmp/base-template.json
+          test "$(cat /tmp/base-template.json)" != "null"
+
+      - name: Build masked Modal env-secret file
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Never a second, hand-typed env-var list -- the live RunPod
+          # template's own env dict is the single source of truth for
+          # runtime configuration (S3_BUCKET, AWS creds, etc). This
+          # workflow adds exactly ONE overlay on top of it:
+          # CUTSELL_ASR_DETERMINISTIC_CONFIG, toggled by this dispatch's
+          # own `deterministic_config` input -- D-053's ONE deliberate
+          # candidate-vs-baseline variable. No hybrid/resolver overlays are
+          # applied here (unlike cutsell-video00-modal-raw.yml) -- this
+          # harness never reaches those stages.
+          DETERMINISTIC="${{ inputs.deterministic_config && '1' || '0' }}"
+          jq -c --arg det "$DETERMINISTIC" '(.env // {}) + {CUTSELL_ASR_DETERMINISTIC_CONFIG:$det}' \
+            /tmp/base-template.json > /tmp/cutsell-env.json
+          test "$(jq 'length' /tmp/cutsell-env.json)" != "0"
+          test "$(jq -r '.CUTSELL_ASR_DETERMINISTIC_CONFIG' /tmp/cutsell-env.json)" = "$DETERMINISTIC"
+          echo "CUTSELL_ASR_DETERMINISTIC_CONFIG for this run: $DETERMINISTIC"
+          python3 -c "
+          import json
+          with open('/tmp/cutsell-env.json') as f:
+              env = json.load(f)
+          for key, value in env.items():
+              if value and key != 'CUTSELL_ASR_DETERMINISTIC_CONFIG':
+                  print(f'::add-mask::{value}')
+          print(f'Loaded {len(env)} env vars from the live RunPod template plus the D-053 CUTSELL_ASR_DETERMINISTIC_CONFIG overlay (secret values masked).')
+          "
+          echo "CUTSELL_ENV_JSON_PATH=/tmp/cutsell-env.json" >> "$GITHUB_ENV"
+
+      - name: Submit ASR-only payload
+        shell: bash
+        run: |
+          set -euo pipefail
+          jq -nc --arg source "$SOURCE_KEY" --arg benchmark "$BENCHMARK_ID" \
+            '{source_key:$source,benchmark_id:$benchmark}' \
+            > /tmp/payload.json
+          echo "CUTSELL_ASR_ONLY_PAYLOAD_JSON=$(cat /tmp/payload.json)" >> "$GITHUB_ENV"
+          echo "--- payload ---"
+          jq . /tmp/payload.json
+
+      - name: Run Modal ASR-only benchmark
+        id: modal_asr_only
+        shell: bash
+        run: |
+          set +e
+          set -uo pipefail
+          modal run modal_asr_only_benchmark.py 2>&1 | tee modal-asr-only-output.log
+          echo "exit_code=${PIPESTATUS[0]}" >> "$GITHUB_OUTPUT"
+
+      - name: Upload raw Modal run log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cutsell-asr-only-modal-run-log
+          path: modal-asr-only-output.log
+          retention-days: 14
+          if-no-files-found: warn
+
+      - name: Print Modal run summary
+        if: always()
+        shell: bash
+        run: |
+          if [ "${{ steps.modal_asr_only.outputs.exit_code }}" != "0" ]; then
+            echo "MODAL ASR-ONLY RUN FAILED (exit ${{ steps.modal_asr_only.outputs.exit_code }}) -- see modal-asr-only-output.log."
+            exit 1
+          fi
+          if [ ! -s modal-asr-only-result.json ]; then
+            echo "Modal run exited 0 but modal-asr-only-result.json is missing -- treating as a failure."
+            exit 1
+          fi
+          cp modal-asr-only-result.json artifact/asr-only-modal-result.json
+          RUN_OK=$(jq -r '.ok // false' modal-asr-only-result.json)
+          if [ "$RUN_OK" != "true" ]; then
+            echo "run_asr_only_benchmark() reported ok=false -- see artifact/asr-only-modal-result.json for the error."
+            jq . modal-asr-only-result.json
+            exit 1
+          fi
+          echo "--- runtime_audit (D-053 Section 1) ---"
+          jq '.runtime_audit' modal-asr-only-result.json
+          echo "--- asr_config (D-053 Section 2/10) ---"
+          jq '.asr_config' modal-asr-only-result.json
+          echo "--- evidence_hash / asr_config_fingerprint / word count ---"
+          jq '{evidence_hash, asr_config_fingerprint, normalized_word_count, elapsed_sec, source_duration_sec}' modal-asr-only-result.json
+          echo "--- normalized_word_sequence (first 40 words) ---"
+          jq '.normalized_word_sequence[0:40]' modal-asr-only-result.json
+
+      - name: Upload ASR-only diagnostic artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cutsell-asr-only-modal-human-review
+          path: artifact/
+          retention-days: 14
+          if-no-files-found: warn
+
+      - name: Modal teardown confirmation
+        if: always()
+        shell: bash
+        run: |
+          echo "Modal teardown: automatic scale-to-zero on function return -- no persistent GPU resource was created by this workflow."

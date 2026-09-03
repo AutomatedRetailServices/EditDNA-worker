@@ -115,6 +115,43 @@ CUTSELL_ENV_JSON_PATH_ENV = "CUTSELL_ENV_JSON_PATH"
 # established for the equivalent RunPod Pod direct-execution path.
 CUTSELL_BENCHMARK_PAYLOAD_JSON_ENV = "CUTSELL_BENCHMARK_PAYLOAD_JSON"
 
+# --- D-053 ASR-only isolated benchmark (separately authorized, NOT a full
+# Video00 RAW) ---------------------------------------------------------
+# A dedicated, materially cheaper/faster Modal app: it runs ONLY
+# cutsell_worker.asr_only_benchmark.run_asr_only_benchmark (download source,
+# transcribe, build CanonicalASREvidence, stop) -- never
+# serverless_handler.run_op(), never AttemptReconstructor/hybrid editorial/
+# resolver/render. A separate app name (never reusing
+# MODAL_VIDEO00_APP_NAME) keeps its billing/observability distinct from the
+# full-engine benchmark app.
+MODAL_ASR_ONLY_APP_NAME = "cutsell-asr-only-modal-benchmark"
+
+# ASR-only transcription of one ~6 minute source is a small fraction of a
+# full Video00 RAW's runtime (no local-performance/vision analysis, no
+# hybrid editorial, no render/QC) -- a short, separate ceiling keeps a hung
+# ASR-only call bounded without borrowing the full-engine timeout.
+DEFAULT_MODAL_ASR_ONLY_TIMEOUT_S: int = 900
+MAX_MODAL_ASR_ONLY_TIMEOUT_S: int = 900
+
+# Env var naming the canonical asr_only_benchmark payload (JSON-encoded),
+# kept separate from CUTSELL_BENCHMARK_PAYLOAD_JSON_ENV so an ASR-only
+# dispatch can never be confused with (or accidentally reuse) a full
+# Video00 payload shape.
+CUTSELL_ASR_ONLY_PAYLOAD_JSON_ENV = "CUTSELL_ASR_ONLY_PAYLOAD_JSON"
+
+
+def require_modal_asr_only_timeout(timeout_s: float) -> None:
+    """Raises ValueError for a non-positive or excessive timeout. Separate
+    from both require_modal_timeout and require_modal_video00_timeout so
+    widening one never silently widens another."""
+    if timeout_s <= 0:
+        raise ValueError(f"timeout_s must be positive, got {timeout_s!r}.")
+    if timeout_s > MAX_MODAL_ASR_ONLY_TIMEOUT_S:
+        raise ValueError(
+            f"timeout_s={timeout_s!r} exceeds the ASR-only benchmark ceiling of "
+            f"{MAX_MODAL_ASR_ONLY_TIMEOUT_S}s."
+        )
+
 
 def require_modal_video00_timeout(timeout_s: float) -> None:
     """Raises ValueError for a non-positive or excessive timeout. Separate

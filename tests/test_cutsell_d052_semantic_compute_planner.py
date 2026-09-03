@@ -247,3 +247,70 @@ def test_flag_on_with_no_risk_signals_everything_is_p2_and_order_is_unaffected()
     )
     assert all(d["planner_priority"] == "P2_EDITORIAL_QUALITY" for d in result.diagnostics)
     assert all(d["available"] for d in result.diagnostics)
+
+
+# ---------------------------------------------------------------------------
+# D-053 Section 11 / Section 12 category 11: "cost report matches actual
+# planning semantics" -- _estimate_window_cost_usd must use the SAME
+# real, token-based formula the live transport bills against, not a flat
+# per-member guess that overshoots badly enough to show 0 planned calls
+# even when the real ledger accepts several.
+# ---------------------------------------------------------------------------
+
+from cutsell_worker.hybrid_payload import estimate_tokens_from_chars
+from cutsell_worker.hybrid_provider_settings import HybridProviderSettings
+from cutsell_worker.hybrid_session_cleanup import (
+    _CONTEXT_OVERHEAD_CHARS,
+    _estimate_output_token_ceiling,
+    _estimate_window_cost_usd,
+)
+
+
+def test_estimate_window_cost_usd_matches_the_real_transport_formula():
+    members = (
+        _take("a", 0.0, "so basically this cream works great for dry skin overall"),
+        _take("b", 10.0, "it also reduces redness within about a week of daily use"),
+    )
+    total_chars = sum(len(m.text) for m in members) + _CONTEXT_OVERHEAD_CHARS
+    expected_input_tokens = estimate_tokens_from_chars(total_chars)
+    expected_output_tokens = _estimate_output_token_ceiling(len(members))
+    expected = round(
+        HybridProviderSettings().estimate_cost_usd(
+            input_tokens=expected_input_tokens, output_tokens=expected_output_tokens,
+        ),
+        6,
+    )
+    assert _estimate_window_cost_usd(members) == expected
+
+
+def test_estimate_window_cost_usd_no_longer_uses_the_old_flat_per_member_heuristic():
+    # D-052's original flat estimate was 0.0015 USD/member -- a realistic
+    # 10-member window would have been estimated at ~$0.015, already
+    # exceeding the entire default $0.0075 ceiling alone (the exact live
+    # battery bug). The real, token-based formula must land well under
+    # that for ordinary short-clip text.
+    members = tuple(
+        _take(f"clip{i}", float(i) * 10.0, "ordinary clip text of moderate length here")
+        for i in range(10)
+    )
+    old_flat_heuristic = 0.0015 * len(members)
+    assert _estimate_window_cost_usd(members) < old_flat_heuristic
+    assert _estimate_window_cost_usd(members) < HybridProviderSettings().max_cost_per_edit_usd
+
+
+def test_estimate_window_cost_usd_grows_with_more_or_longer_members():
+    small = (_take("a", 0.0, "short clip"),)
+    big = tuple(_take(f"clip{i}", float(i) * 10.0, "a much longer clip transcript with more words in it") for i in range(8))
+    assert _estimate_window_cost_usd(big) > _estimate_window_cost_usd(small)
+
+
+def test_realistic_window_is_now_predicted_planned_under_the_real_ceiling():
+    # The live battery bug: planner_predicted_planned was False for every
+    # window because the estimate alone exceeded the ceiling. A single
+    # ordinary window's estimate must now fit under the default ceiling
+    # with room for the ledger to actually accept it.
+    members = tuple(
+        _take(f"clip{i}", float(i) * 10.0, "ordinary clip text of moderate length here")
+        for i in range(10)
+    )
+    assert _estimate_window_cost_usd(members) < HybridProviderSettings().max_cost_per_edit_usd
