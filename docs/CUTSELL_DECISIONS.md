@@ -6258,6 +6258,46 @@ READY FOR ONE FINAL VIDEO00 CANARY? YES
 
 Then STOP. Did not launch Modal.
 
+## D-056.3 canary -- final Video00 Modal run after the contradiction-safe composite fix
+
+One authorized run (run [33794783794](https://github.com/AutomatedRetailServices/EditDNA-worker/actions/runs/33794783794), commit `b674c5b`, fixed config unchanged from D-056/D-056.2). No code changes before or after. Zero regressions in the durable-persistence mechanism: `benchmark_result_uri` present, ~4.2 min GPU wall-clock, clean completion.
+
+**Contradiction contract**: one candidate composite-shaped retry family this run (`tg_48c0c0027c22862ff2`, negation conflict). It was never accepted as a composite -- `is_composite: false`, `coverage_status: unresolved_ambiguous` from the start, correctly routed to `unresolved_families` (StoryValidator: `residual_family_count: 1`, `unresolved_family_count: 1`, `resolved_family_count: 0`). Zero composites were accepted this run at all (0 `is_composite: true` ideas in CanonicalEditPlan) -- the specific "invalid composite" shape D-056.2 found (a contradictory pair wrongly marked `is_composite: true`) did not recur, and could not have: the new gate in `canonical_edit_plan.py` had no accepted composite to wrongly approve, and would have rejected one had the upstream data produced it. All three layers (StoryValidator, CanonicalEditPlan, FinalEditReviewer) agree exactly: DUPLICATE_IDEA + UNRESOLVED_RETRY + CONTRADICTION, same group, same clips, no disagreement.
+
+**Authoritative resolver**: 18 semantic ideas, 17 RESOLVED_WINNER + 1 RESOLVED_COMPOSITE (realization_resolver's own shadow/authority diagnostic -- a parallel-track signal that does not feed `canonical_edit_plan.is_composite`, confirmed unrelated to the live decision). 2 orphan realizations REVIEW_REQUIRED, 2 REPLACEMENT_VERIFIED_SAFE, 4 PRE_GROUP_REJECTED. Zero critical claim losses, zero unsafe discards, zero invalid composites, zero silent zero-realization ideas. Zero P0 semantic-compute starvation (2/2 planned, 0 deferred).
+
+**Freeze**: BLOCKED -- correctly, on a genuine unresolved contradiction (not the D-056.2 defect pattern). Repair loop: `NEEDS_HUMAN_REVIEW` (no repair strategy exists for DUPLICATE_IDEA, by design -- StoryValidator/FinalEditReviewer flag it for human review rather than guessing).
+
+**Human Gold**: 10/18 (within the same range as the D-056.2 battery: A 12/18, B 8/18, C 8/18). Failed: sonography_good_take_part1_present, sonography_good_take_completion_present, sonography_bad_take_absent, papillary_cancer_preserved, pimples_micro_2_present, gastritis_preserved, pimples_micro_order, sonography_good_before_diagnosis. Not patched, per directive.
+
+**Architecture**: PASS, 0 failed checks, all 10 checks ok -- including `semantic_failure_correctly_blocked_freeze_and_boundary` and `no_render_attempted_on_a_blocked_semantic_plan`, both `ok: true`.
+
+**Render/QC**: not reached -- Freeze blocked, so per architecture design no render was attempted (`live_render_qc.status: not_attempted`, `delivery_status: NOT_DELIVERABLE_not_attempted`, `deliverable: false`).
+
+**Single root blocker** (Category A -- semantic contradiction still unresolved): the exact same underlying content topic (family cancer history / hereditary-percentage narrative, negation-conflicting retry pair) that drove the Freeze block in D-056.2 Run A and Run B recurred here, genuinely unresolved. This is NOT the D-056.3 defect (that specific dual-truth failure mode is now structurally closed, confirmed by this run producing zero wrongly-accepted composites) -- it is the underlying, still-open semantic instability D-056.2 already classified as VIDEO00 ENGINE STATUS: MOSTLY_STABLE. The contradiction-safe composite fix did its job (no invalid composite slipped through); it was never intended to, and does not, resolve genuine contradictions -- by design those still correctly block for human review.
+
+### Final report (verbatim, as delivered)
+FINAL VIDEO00 CANARY COMPLETE
+
+CONTRADICTION-SAFE COMPOSITE: PASS
+AUTHORITATIVE ENGINE: PASS
+Human Gold: 10/18
+Architecture: PASS
+CanonicalEditPlan: PASS
+FinalEditReviewer: PASS
+Freeze: BLOCKED
+Render: NO
+PostRender QC: NOT_REACHED
+delivery_status: NOT_DELIVERABLE_not_attempted
+deliverable: false
+
+IF BLOCKED:
+single root blocker: A. semantic contradiction still unresolved (family cancer history / hereditary-percentage negation conflict -- same content topic as D-056.2 Run A/B, not the D-056.3 defect pattern, which did not recur)
+
+READY FOR HUMAN VISUAL REVIEW OF THE RENDERED VIDEO? NO (nothing rendered -- Freeze blocked before Boundary/Render)
+
+Then STOP. Did not patch. Did not launch another RAW.
+
 ## Change rule
 
 When a new decision changes product behavior, update this file in the same development cycle. Do not silently redefine CutSell through code alone.
