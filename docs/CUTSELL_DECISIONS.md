@@ -5955,6 +5955,164 @@ argument`) and `jobs_smoke.py` (a stray heredoc snippet, not a real module)
 fails `compileall` -- both untouched by this diff, both already broken on
 HEAD.
 
+## D-056.2 -- Final recoverable three-run Video00 battery (report only; no code)
+
+Explicitly authorized live 3-run battery at commit `2b58359` (D-056.1's reliability
+fixes), same fixed engine config as D-056 (`CUTSELL_UNIFIED_REALIZATION_RESOLVER=
+AUTHORITATIVE`, `CUTSELL_ASR_CANONICAL_NORMALIZATION=1`, `CUTSELL_SEMANTIC_COMPUTE_
+PLANNER=1`, `CUTSELL_HYBRID_LLM_ENABLED=1`, `CUTSELL_HYBRID_PROVIDER=google`), same
+SOURCE_KEY, same Modal L4, same Human Gold 18-check manifest, retries=0. No code
+changes between or after any of the 3 runs.
+
+### 1. Reliability -- ALL 3 OF 3 DURABLE RESULTS RECOVERED
+Runs A (33786446483), B (33787369737), C (33788328094) all completed cleanly with
+no GitHub-status staleness and no cancellation needed -- every `modal-video00-
+result.json` carried a populated `benchmark_result_uri` pointing at the D-056.1
+S3 marker (`cutsell/benchmark-results/{benchmark_id}/compact-result.json`),
+confirmed present in all 3 runs. Zero dispatch failures, zero duplicate paid
+reruns. This is the first 3-for-3 clean battery since D-043 introduced the Modal
+backend -- D-056.1's fixes fully held under live load.
+
+### 2. Transcript equivalence (content_hash/canonical_equivalence_hash, not evidence_hash)
+| | raw_segment | norm_segment | norm_word | content_hash | canonical_equivalence_hash |
+|---|---|---|---|---|---|
+| A | 42 | 46 | 605 | ...f22e916a | ...e060d88a |
+| B | 54 | 48 | 623 | ...dcc16eb9 | ...0227492c |
+| C | 54 | 48 | 623 | ...54d64743 | ...ae644036 |
+
+B and C share IDENTICAL raw/normalized segment and word counts (54/48/623) but a
+DIFFERENT canonical_equivalence_hash -- same transcript shape, different word-level
+content somewhere. A differs from both in every count and hash. ASR is not
+byte-identical across runs of the same source on the same commit. Number set and
+negation set were not separately exposed as a diagnostics field this battery (not
+newly computed anywhere in the codebase); critical-claim presence is covered in
+Section 5/7 below.
+
+### 3. Front-half
+| | candidates | attempts | boundaries | merged_fragments | realizations (mapped+orphan) | PRE_GROUP_REJECTED | REVIEW_REQUIRED discards | ideas | retry-families |
+|---|---|---|---|---|---|---|---|---|---|
+| A | 45 | 33 | 32 | 12 | 24+9=33 | 5 | 2 | 20 | 4 |
+| B | 47 | 32 | 31 | 15 | 24+8=32 | 3 | 4 | 16 | 5 |
+| C | 47 | 32 | 31 | 15 | 25+7=32 | 3 | 2 | 17 | 4 |
+
+B and C's candidate/attempt/boundary/merged-fragment counts are IDENTICAL despite
+different ASR content hashes (Section 2) -- front-half reconstruction is
+structurally stable there even though the underlying words differ.
+
+### 4. Semantic compute plan -- ZERO P0 STARVATION CONFIRMED IN ALL 3 RUNS
+All 3 runs: P0 2 eligible/2 planned/0 deferred; P1 4/4/0; P2 0/0/0; 6 of 6 planned
+calls executed every run; 0 deferred/budget-exhausted calls. Estimated cost:
+A $0.007011, B $0.007022, C $0.007022 (ceiling $0.0075, never approached).
+
+### 5. Resolver
+| | WINNER | COMPOSITE | idea-level REVIEW_REQUIRED | critical claim losses | unsafe discards | invalid composites | silent zero-realization ideas |
+|---|---|---|---|---|---|---|---|
+| A | 19 | 1 | 0 | 0 | 0 | 0 | 0 |
+| B | 14 | 2 | 0 | 0 | 0 | 1 | 0 |
+| C | 16 | 1 | 0 | 1 | 0 | 1 | 0 |
+
+**New architectural finding, recurring 2 of 3 runs (B and C):** CanonicalEditPlan
+marks a StoryValidator-flagged negation-CONTRADICTION pair as `coverage_status:
+complete, is_composite: true` (i.e. CompositeResolver treats it as resolved), while
+FinalEditReviewer's independent pass still flags the SAME pair as blocking
+CONTRADICTION. StoryValidator's own `unresolved_families`/`residual_family_count`
+bookkeeping does not count this pair as unresolved once it has been composited --
+the contradiction is caught ONLY by FinalEditReviewer's redundant second pass. Net
+product outcome was unaffected in both cases (Freeze still blocked, nothing
+delivered) purely because the redundant catch fired both times -- but the primary
+reasoner's own accounting is wrong. This is the single clearest, reproducible root
+architectural gap this battery surfaced (see Section 10).
+
+Run C additionally produced this battery's only CRITICAL_CLAIM_LOST finding
+(`claim_4eabdfef01e8`, NEGATION/CRITICAL, the "estomago/2023" claim,
+coverage_against_winning_realization=0.15) -- absent in A and B.
+
+### 6. Semantic selection stability (aligned by content, not clip id)
+SEMANTIC_SELECTION_STABILITY_PERCENT: **66.7%** (12/18 Human Gold checks
+identical pass/fail across A, B, and C -- same computation D-056 used, for direct
+comparability).
+
+Unstable ideas (by content):
+- **Family cancer history / hereditary-percentage narrative** -- the CONTRADICTION
+  blocking Freeze in A (`tg_dd25f25a`) and B (`tg_e6c53841`, unresolved); not even
+  flagged as contradictory in C (merged cleanly).
+- **Retrospectively-recognized symptoms** ("sintomas que tuve... indicios") -- an
+  ordinary non-blocking-family UNIQUE_FACT_LOST in A; escalates to a
+  StoryValidator-flagged CONTRADICTION that CompositeResolver mis-classifies as a
+  valid composite in B (`tg_539b31`) and C (`tg_f4b9e7c1`) -- the invalid-composite
+  pattern from Section 5, same content both times.
+- **Gastritis / stomach problems / endoscopy** -- lost in all 3 runs (Human Gold
+  `gastritis_preserved` fails 3/3) but the internal severity classification
+  worsens run to run: ordinary UNIQUE_FACT_LOST in A and B, promoted to a genuine
+  CRITICAL_CLAIM_LOST in C.
+- **Espinillas/pimples behind-ear micro-retry sequence** -- fully preserved and
+  correctly ordered in A (5/5 related Human Gold checks pass); entirely lost as
+  blocking UNIQUE_FACT_LOST content (3 clips) in B and C identically.
+- **Papillary cancer mention** -- fails Human Gold in A only, passes in B and C.
+
+Stable ideas (identical outcome all 3 runs): cancer hook/intro, biopsy nodule,
+acne back, historical-bad-monolith-pimples-take correctly excluded, hair loss,
+family context, CTA.
+
+### 7. Human Gold (18-check authoritative validator, no patching)
+A: 12/18. B: 8/18. C: 8/18.
+PASS in all 3 (7): cancer_hook_preserved, biopsy_nodule_preserved,
+acne_back_preserved, pimples_bad_monolith_absent, hair_loss_preserved,
+family_context_preserved, cta_preserved.
+FAIL in all 3 (5): sonography_good_take_part1_present,
+sonography_good_take_completion_present, sonography_bad_take_absent,
+gastritis_preserved, sonography_good_before_diagnosis.
+FLIPPING (6): papillary_cancer_preserved (fail A / pass B,C), pimples_micro_1/2/3
+_present, pimples_later_winner_present, pimples_micro_order (all: pass A / fail
+B,C). B and C's passed/failed sets are not just equal in count -- they are the
+identical 8 and identical 10 checks.
+
+### 8. Product result -- 100% STABLE ACROSS ALL 3 RUNS
+Architecture verified true, all 3. FinalEditReviewer status FAIL, all 3 (correctly
+-- each run had a real blocking finding). Freeze: `not_frozen_freeze_blocked_by_
+coherence_review`, all 3. Render: not_attempted, all 3 (`freeze_blocked_no_render`).
+PostRenderWatchListenQC: not_attempted, all 3. delivery_status:
+`NOT_DELIVERABLE_not_attempted`, all 3. deliverable: false, all 3. The one
+invariant that matters most -- never deliver on unresolved semantic ambiguity --
+held perfectly, 3 for 3, despite every other axis (idea count, retry-family count,
+which content triggers the block, Human Gold score, even which internal mechanism
+does the blocking) varying between runs.
+
+### 9. Cost
+| | GPU wall-clock | estimated semantic AI cost |
+|---|---|---|
+| A | 275.99s (4.6 min) | $0.007011 |
+| B | 463.07s (7.7 min) | $0.007022 |
+| C | 337.54s (5.6 min) | $0.007022 |
+| avg/min/max | 358.9s / 275.99s / 463.07s | $0.007018 avg |
+
+Approx GPU-$ cost and total COGS: NOT COMPUTABLE -- no documented Modal L4 $/sec
+rate exists anywhere in this codebase's diagnostics or config (same honest
+limitation D-056 already recorded). Semantic AI cost is fully computable and is
+negligible (~$0.007/run, nowhere near the $0.0075 ceiling).
+
+### 10. Final Video00 decision
+VIDEO00 ENGINE STATUS: **MOSTLY_STABLE** (same classification as D-056 -- the
+safety mechanism is now proven reliable at 3-for-3 dispatch AND 3-for-3
+correct-block; the safety net's own internal correctness, not its net product
+outcome, is what still has a gap).
+
+RECOMMENDATION: **B. ONE SPECIFIC ARCHITECTURAL BLOCKER REMAINS.**
+Root blocker (earliest wrong decision in the causal chain, per Section 5):
+CompositeResolver classifies a StoryValidator-detected negation-CONTRADICTION
+pair as a resolved composite (`coverage_status: complete`) instead of
+`unresolved_ambiguous`, and StoryValidator's own `unresolved_families`/
+`residual_family_count` accounting silently drops the pair once composited.
+Today's correct product outcome (3/3 runs still blocked and never delivered)
+depends entirely on FinalEditReviewer's independent, redundant CONTRADICTION
+check catching what the primary reasoner mis-resolved -- confirmed reproducible
+in 2 of 3 runs this battery (B, C). This is a single, specific, root-cause fix
+(align CompositeResolver's contradiction handling with StoryValidator's own
+family-resolution bookkeeping) -- not a list of micro-fixes -- and should be
+closed before the next paid RAW battery.
+
+Then STOP. Did not patch. Did not launch a fourth run.
+
 ## Change rule
 
 When a new decision changes product behavior, update this file in the same development cycle. Do not silently redefine CutSell through code alone.
