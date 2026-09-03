@@ -394,19 +394,30 @@ def claim_coverage(claim: Claim, candidate_text: str) -> float:
     instead of a changed polarity.
 
     Both checks are scoped to the SENTENCE(S) of `candidate_text` that
-    actually share content tokens with the claim, not the whole,
-    possibly multi-sentence or multi-clip (`_lost_critical_claims`/
-    `claim_coverage_best_take` both pass a joined "winning realization"
-    covering several clips) candidate blob. Found via real-chain testing:
-    a candidate's OTHER, unrelated sentence can carry a negation ("no creo
-    ... son hereditarios" a few sentences before an unrelated "solo un
-    5-10% son de hereditario" claim in the same clip) that has nothing to
-    do with the claim actually being checked -- checking negation over the
-    whole blob falsely capped coverage for a claim whose own sentence was
-    present, uncontradicted, verbatim. Scoping to the overlapping
-    sentence(s) fixes that false positive while still catching a genuine
-    same-sentence contradiction (the negated sentence then itself shares
-    the claim's own content tokens, so it IS included in scope)."""
+    actually correspond to the claim's own proposition (shared content
+    tokens, OR a shared number -- D-059's proposition-scoping anchor, see
+    below), never the whole, possibly multi-sentence or multi-clip
+    (`_lost_critical_claims`/`claim_coverage_best_take` both pass a joined
+    "winning realization" covering several clips) candidate blob. Found via
+    real-chain testing: a candidate's OTHER, unrelated sentence can carry a
+    negation ("no creo ... son hereditarios" a few sentences before an
+    unrelated "solo un 5-10% son de hereditario" claim in the same clip)
+    that has nothing to do with the claim actually being checked -- checking
+    negation over the whole blob falsely capped coverage for a claim whose
+    own sentence was present, uncontradicted, verbatim. Scoping to the
+    corresponding sentence(s) fixes that false positive while still
+    catching a genuine same-sentence contradiction (the negated sentence
+    then itself corresponds to the claim, so it IS included in scope).
+
+    D-059: when NO sentence corresponds to the claim at all (its own
+    surrounding scaffolding is paraphrased heavily enough that neither the
+    content-token bar nor the number anchor finds a match), these guards
+    are skipped entirely rather than falling back to the whole candidate
+    text -- that whole-text fallback was itself the exact false-positive
+    class this fix closes (docs/CUTSELL_DECISIONS.md D-058 canary's
+    residual finding): an unrelated clause's own negation/number/causal
+    marker must never poison a claim whose real matching sentence was
+    simply missed by the relevance bar."""
     if not claim.content_tokens:
         return 1.0
     candidate_tokens = _content(candidate_text)
@@ -422,13 +433,68 @@ def claim_coverage(claim: Claim, candidate_text: str) -> float:
     # negation into scope. Requires the lesser of 2 tokens or the claim's
     # own full token count, so a thin (2-token) claim still needs a full
     # match to be considered the same sentence.
+    #
+    # D-059: when some candidate sentence shares an EXACT number with the
+    # claim, that sentence (or sentences) is used INSTEAD of the general
+    # content-token test, not merely as an additional way in -- the same
+    # proposition-scoping anchor `contradiction_signal._clauses_address_
+    # same_proposition` already established for D-056.5 ("a shared number
+    # is decisive on its own... the most specific anchor two realizations
+    # can share"), reused verbatim here rather than reinvented. Deciding by
+    # priority rather than union matters: a claim's own paraphrased
+    # scaffolding ("estoy convencida y la ciencia lo avala") can
+    # coincidentally share generic-sounding words with a WHOLLY UNRELATED
+    # sentence elsewhere in the candidate ("está comprobado
+    # científicamente" -- both invoking "science backs this up" as a
+    # rhetorical frame) even though that sentence has nothing to do with
+    # the claim's actual number -- exactly the live D-058 canary shape. If
+    # number-matched sentences were used only as one more way to qualify
+    # (unioned with the content-token test) rather than as the
+    # authoritative source once a match exists, that coincidentally-
+    # overlapping unrelated sentence would still be merged into scope
+    # alongside the real one, undoing the fix.
+    #
+    # This can only ever be a MATCH signal, never a mismatch one -- a
+    # candidate sentence stating a genuinely DIFFERENT number never
+    # "shares" one with the claim, so it can't be found this way; that
+    # case (and a claim with no number at all) falls through to the
+    # general content-token test below, exactly as before, which is what
+    # still lets a genuine number disagreement ("only 5 percent" vs "about
+    # 10 percent of cancers") reach the number-mismatch guard at all.
     min_shared_for_relevance = min(2, len(claim.content_tokens))
+    claim_numbers_for_scope = _numbers(claim.text)
     candidate_sentences = _split_sentences(candidate_text) or (candidate_text,)
-    relevant_sentences = [
+    number_matched_sentences = [
         s for s in candidate_sentences
-        if len(claim.content_tokens & _content(s)) >= min_shared_for_relevance
+        if claim_numbers_for_scope and claim_numbers_for_scope & _numbers(s)
     ]
-    relevant_scope = " ".join(relevant_sentences) if relevant_sentences else candidate_text
+    if number_matched_sentences:
+        relevant_sentences = number_matched_sentences
+    else:
+        relevant_sentences = [
+            s for s in candidate_sentences
+            if len(claim.content_tokens & _content(s)) >= min_shared_for_relevance
+        ]
+    if not relevant_sentences:
+        # D-059 (docs/CUTSELL_DECISIONS.md D-058 canary's own residual
+        # finding): no sentence of `candidate_text` corresponds confidently
+        # enough to this claim's own proposition to safely judge polarity/
+        # number/causal agreement against it. NEVER fall back to the whole
+        # clip for those checks (that was the exact bug -- an unrelated
+        # clause's own negation/number/causal marker poisoning a claim
+        # whose real matching sentence simply had too little lexical
+        # overlap to pass the bar above). `overlap` (already computed
+        # above, whole-text word-containment scoped -- unrelated to this
+        # per-sentence scoping) still stands as the return value: a genuine
+        # paraphrase still reaches the ambiguous band and gets a real
+        # chance at the bounded claim-equivalence arbiter via
+        # `resolve_ambiguous_coverage`; a claim with no credible matching
+        # proposition anywhere in the candidate stays honestly low and is
+        # reported not covered (Freeze-blocked pending human review) --
+        # never a fabricated mismatch from text that was never actually
+        # about this claim at all.
+        return overlap
+    relevant_scope = " ".join(relevant_sentences)
     if bool(_negations(claim.text)) != bool(_negations(relevant_scope)):
         return min(overlap, _DEFINITIVE_MISMATCH_COVERAGE_CAP)
     # D-058 Phase 3 (docs/CUTSELL_DECISIONS.md D-057/D-058): number-mismatch
