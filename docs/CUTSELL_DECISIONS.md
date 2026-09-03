@@ -5249,7 +5249,7 @@ pre-existing + 27 new), env unset (both flags off, LEGACY default) --
 byte-for-byte parity confirmed by the exact count match. No GPU/Modal RAW
 run as part of this change.
 
-## D-053 -- ASR determinism qualification (isolated ASR-only phase; IN PROGRESS)
+## D-053 -- ASR determinism qualification (isolated ASR-only phase; COMPLETE -- determinism NOT achieved)
 
 Follows directly from the D-052 stability battery's live finding: 3
 identical-config Modal Video00 RAWs produced 3 different
@@ -5374,15 +5374,65 @@ zero regressions. `tests/test_cutsell_clean_worker_dependency_boundary.py`
 (the torch-free architectural contract) still passes -- the runtime-audit
 GPU/CUDA introspection deliberately uses `nvidia-smi`, never `torch`.
 
-**NOT yet done (this phase is not complete):** the live Modal audit of the
-actual installed ctranslate2 version / resolved `compute_type="auto"`
-behavior / GPU model on the real L4 image (ground-truthing so far is
-static analysis of the pinned wheel only); dispatching the 3 baseline
-(flag OFF) and 3 candidate (flag ON) ASR-only Modal runs and comparing
-`evidence_hash`/word-sequence/timestamp stability between them; the final
-3/3-identical acceptance judgment and ASR-config recommendation this
-comparison is gated on. No Modal RAW (full or ASR-only) has been executed
-as part of this phase yet.
+**Live Modal audit (Section 1, ground-truthed on the actual L4 container):**
+`faster_whisper==1.0.0`, `ctranslate2==4.8.2`, Python `3.10.12`, GPU
+`NVIDIA L4`, `nvidia-smi`-reported driver CUDA version `13.0`,
+`cuda_available=true`. `compute_type="auto"` confirmed unchanged (Section
+4 tradeoff data deferred, per the directive, to a separate future task).
+
+**Live 3+3 ASR-only battery (Sections 6/8/9, one source, one commit,
+`CUTSELL_ASR_DETERMINISTIC_CONFIG` toggled per run):**
+
+| run | config | `evidence_hash` | words | elapsed_sec |
+|---|---|---|---|---|
+| A | LEGACY (flag OFF) | `asrev_4635ffbc25094ca1157d5e53` | 623 | 42.1 |
+| B | LEGACY (flag OFF) | `asrev_afb71a01dd24859f4635ec0a` | 623 | 37.5 |
+| C | LEGACY (flag OFF) | `asrev_fac7fb4c1e601c8e6228c80b` | 623 | 30.7 |
+| D | deterministic (flag ON) | `asrev_37ac9540809c3d2762175a97` | 623 | 35.3 |
+| E | deterministic (flag ON) | `asrev_62b25b19d9d4d7a78e1594fa` | **650** | 29.2 |
+| F | deterministic (flag ON) | `asrev_d54c748fd7098230456aecb6` | 623 | 36.2 |
+
+`asr_config_fingerprint` was identical across all 3 LEGACY runs
+(`asrcfg_bccad85973b58720`) and identical across all 3 deterministic runs
+(`asrcfg_664a49ba49f6baf6`, `sampling_fallback_enabled=false` confirmed in
+every deterministic run) -- configuration itself is stable; every hash
+difference below is genuine audio-decode variance, not a config drift
+artifact.
+
+**Result: 0/3 identical in BOTH configurations.** LEGACY produced 3
+different hashes with a constant word count (623/623/623) -- word-level
+substitutions only. The deterministic candidate ALSO produced 3 different
+hashes, and one run (E) diverged in word COUNT too (650 vs. 623) -- a
+larger, more concerning divergence than anything LEGACY showed. Removing
+the temperature fallback ladder (the mechanism D-051/D-052/D-053's own
+analysis had named as the confirmed, capable-of-causing-it culprit)
+measurably changed the config fingerprint but did **not** reduce
+observed non-determinism at all. Per Section 9's own acceptance
+criteria ("if words differ, report exactly, do NOT compensate
+downstream"): the root cause is NOT (solely, or even primarily) the
+decode-with-fallback loop -- it sits deeper, most plausibly in
+non-deterministic GPU floating-point reduction order inside
+ctranslate2's CUDA beam-search/decode kernels themselves (a well-known
+class of run-to-run GPU non-determinism, independent of temperature or
+any faster-whisper-level setting, and out of this phase's scope to fix --
+forcing deterministic CUDA/cuDNN algorithms is a separate, much larger,
+not-yet-authorized change).
+
+**Recommended ASR config: LEGACY (`CUTSELL_ASR_DETERMINISTIC_CONFIG`
+stays OFF by default).** The deterministic candidate is not disqualified
+architecturally (it is still a defensible, more explicit configuration:
+no risk of ever escalating to a random sampling temperature), but it
+delivered zero measured reproducibility benefit in this live battery, so
+there is no evidence-based case to flip the flag on yet. Both providers
+remain fully available behind the flag for future investigation once a
+GPU-kernel-level determinism fix is separately scoped.
+
+**Semantic compute observability fixes:** validated by the 8 new targeted
+tests (`test_cutsell_composite_resolver.py`/
+`test_cutsell_d052_semantic_compute_planner.py` additions) and the full
+regression suite, not by this ASR-only harness -- it deliberately never
+constructs the hybrid editorial / CompositeResolver stage those fixes
+live in.
 
 ## Change rule
 
