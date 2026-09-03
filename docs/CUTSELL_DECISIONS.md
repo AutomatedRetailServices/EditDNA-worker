@@ -6572,6 +6572,51 @@ READY FOR ONE VIDEO00 CANARY? YES
 
 Then STOP. Do not launch Modal.
 
+## D-056.5 canary -- final Video00 Modal run after the proposition-completeness fix
+
+One authorized run (run [33804595319](https://github.com/AutomatedRetailServices/EditDNA-worker/actions/runs/33804595319), commit `3b631a8`, fixed config unchanged from D-056/D-056.2/D-056.3-canary). No code changes before or after. Clean completion, ~5.9 min GPU wall-clock, durable S3 result persisted, Modal teardown confirmed.
+
+**Proposition-completeness contract**: the exact D-056.4 family recurred this run under fresh clip ids (fresh ASR pass) -- realization A ("Esta es mi experiencia... no creo... solo un 5-10% son de carácter hereditario...", `clip_c092ab8cb0accda710e9`) vs realization B ("Soy la primera... Nadie en mi familia tiene un carcinoma papilar... solo un 5-10% de los", trailing off, `clip_8d51205ccab895aa996f`). `contradiction_findings: []` for the whole run -- this family produced **zero** contradiction verdict, appearing only in `resolved_families` (`tg_06b850e023fc82f6bc`, merge confidence 0.9, "Both recordings discuss familial cancer statistics and personal history"), with B correctly discarded via `cross_group_semantic_retry_covered_by_authoritative_delivery` (`strongest_peer_coverage: 1.0`) rather than blocked as a false contradiction. `unresolved_families: []`, `unresolved_family_count: 0`, `resolved_family_count: 1`. **The proven false negation contradiction did not recur.**
+
+**True contradiction recall**: not exercised live -- this run's actual transcript contained no genuine contradiction to trigger (`contradiction_findings: []` overall). Recall is proved by the offline D-056.5 qualification (33/33 D-056.3+D-056.5 tests, including 3 full-pipeline true-contradiction-still-blocks-Freeze proofs) rather than by this run's own data.
+
+**A different, pre-existing mechanism did block Freeze this run**: the same family idea (`tg_06b850e023fc82f6bc`) also produced one `CRITICAL_CLAIM_LOST` finding (`owning_authority: BestTakeResolver`, claim `"Así que estoy convencida y la ciencia lo avala que solo un 5-10% de los"`, `coverage_against_winning_realization: 0.15`) -- BestTakeResolver's own pre-existing token-coverage claim check, structurally unrelated to `contradiction_signal.py` and out of D-056.5's scope. Freeze blocked on this plus 5 `UNIQUE_FACT_LOST` findings (StoryValidator) in an unrelated topic area (acne/pimples detail, stomach/gastritis detail) and 1 more `CRITICAL_CLAIM_LOST` (stomach/2023 NEGATION claim) -- 7 findings total, **zero** CONTRADICTION / DUPLICATE_IDEA / UNRESOLVED_RETRY findings.
+
+**Authoritative resolver**: 16 semantic ideas, shadow and authority tracks agree (16/16). 3 orphan realizations correctly routed `REVIEW_REQUIRED` (`hybrid_editorial_semantic_delete_with_no_verified_replacement_never_silently_confirmed` -- high-confidence semantic discards with no verified replacement, explicitly flagged rather than silently confirmed). Zero silent zero-realization ideas, zero unsafe silent discards, zero invalid composites (`composite_resolver_diagnostics_available` check ok).
+
+**Freeze**: BLOCKED -- on genuine content-loss findings (StoryValidator `UNIQUE_FACT_LOST` + BestTakeResolver `CRITICAL_CLAIM_LOST`), not on a contradiction. Repair loop: `NEEDS_HUMAN_REVIEW` (`UNIQUE_FACT_LOST`, no repair strategy exists for this finding kind, by design).
+
+**Human Gold**: 8/18. Failed: sonography_good_take_part1_present, sonography_good_take_completion_present, sonography_bad_take_absent, pimples_micro_1_present, pimples_micro_2_present, pimples_micro_3_present, pimples_later_winner_present, gastritis_preserved, pimples_micro_order, sonography_good_before_diagnosis. `family_context_preserved` and `papillary_cancer_preserved` both PASSED -- the D-056.4/D-056.5 family content itself is intact in this candidate. Not patched, per directive.
+
+**Architecture**: PASS, 0 failed checks, all 9 checks ok -- including `semantic_failure_correctly_blocked_freeze_and_boundary` and `no_render_attempted_on_a_blocked_semantic_plan`, both `ok: true`.
+
+**Render/QC**: not reached -- Freeze blocked, so per architecture design no render was attempted (`live_render_qc.status: not_attempted`, `delivery_status: NOT_DELIVERABLE_not_attempted`, `deliverable: false`).
+
+**Single root blocker** (Category B -- genuine critical content loss): earliest-listed finding is StoryValidator's `UNIQUE_FACT_LOST` on `clip_48af0cc69a62b44cea15` ("También me salían espinillas. Era como un rush, una alergia.", `coverage_against_final_keep: 0.1667`) -- a real unique acne/pimples detail dropped by the winning realization, not covered elsewhere. Six further findings (4 more `UNIQUE_FACT_LOST` in the same acne/stomach/gastritis topic area, 2 `CRITICAL_CLAIM_LOST`) compound the same category. This is a new, distinct blocker layer from D-056.2/D-056.4's contradiction-class defect -- out of D-056.5's scope, and not itself a contradiction-contract problem: `contradiction_findings: []` confirms the fix holds.
+
+### Final report (verbatim, as delivered)
+D-056.5 FINAL VIDEO00 CANARY COMPLETE
+
+FALSE NEGATION CONTRADICTION: FIXED
+TRUE CONTRADICTION SAFETY: PASS
+AUTHORITATIVE ENGINE: PASS
+Human Gold: 8/18
+Architecture: PASS
+CanonicalEditPlan: PASS
+FinalEditReviewer: PASS
+Freeze: BLOCKED
+Render: NO
+PostRender QC: NOT_REACHED
+delivery_status: NOT_DELIVERABLE_not_attempted
+deliverable: false
+
+IF BLOCKED:
+single root blocker: B. genuine critical content loss (StoryValidator UNIQUE_FACT_LOST on an acne/pimples detail, `clip_48af0cc69a62b44cea15`, plus 4 more UNIQUE_FACT_LOST and 2 CRITICAL_CLAIM_LOST findings in the same acne/stomach/gastritis topic area -- a new blocker layer, not a contradiction, and not the D-056.4 defect recurring)
+
+READY FOR HUMAN VISUAL REVIEW? NO (nothing rendered -- Freeze blocked before Boundary/Render)
+
+Then STOP. Did not patch. Did not launch another RAW.
+
 ## Change rule
 
 When a new decision changes product behavior, update this file in the same development cycle. Do not silently redefine CutSell through code alone.
