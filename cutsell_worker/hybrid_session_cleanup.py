@@ -9,16 +9,25 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import hashlib
+import os
 import re
-from typing import Iterable, Tuple
+from typing import Iterable, Mapping, Tuple
 
 from .contracts import CandidateTake
+from .final_sibling_grouping import _content as _content_tokens
+from .final_sibling_grouping import _negations, _numbers
 from .hybrid_editorial import (
     EditorialCandidate,
     EditorialJudge,
     EditorialSession,
     HybridGatePolicy,
     safe_editorial_judge,
+)
+from .semantic_compute_planner import (
+    SemanticComputePlan,
+    SemanticWorkItem,
+    SemanticWorkPriority,
+    build_semantic_compute_plan,
 )
 from .session_boundaries import partition_takes_by_sessions
 from .temporal_editing import harmful_events_for_take
@@ -27,6 +36,77 @@ from .whole_video_analysis import WholeVideoContext
 _TOKEN_RE = re.compile(r"[\w'’-]+", re.UNICODE)
 _RESET_CANDIDATES = frozenset({"body_reset_candidate", "hand_motion_reset_candidate"})
 _BREAK_CANDIDATES = frozenset({"camera_disengagement_candidate", "facial_expression_shift_candidate"})
+
+# D-052 Part B Section 14: OFF by default -- current pure chunk_index-order
+# dispatch (whichever chunk happens to be requested fifth silently loses the
+# shared budget) is unchanged unless explicitly opted in. When enabled,
+# every window in this call is classified into a SemanticWorkPriority using
+# ONLY signals already available before any paid call is made, planned via
+# semantic_compute_planner.build_semantic_compute_plan, and dispatched in
+# planned (priority) order instead of enumeration order. See
+# tests/test_cutsell_d052_semantic_compute_planner.py and
+# CUTSELL_DECISIONS.md D-052.
+_SEMANTIC_COMPUTE_PLANNER_ENV = "CUTSELL_SEMANTIC_COMPUTE_PLANNER"
+
+
+def _semantic_compute_planner_enabled(env: Mapping[str, str] | None = None) -> bool:
+    values = env if env is not None else os.environ
+    return str(values.get(_SEMANTIC_COMPUTE_PLANNER_ENV, "")).strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _has_negation_or_number_conflict(members: Tuple[CandidateTake, ...]) -> bool:
+    """Pre-call, fully deterministic P0 signal: does this window already
+    contain two members that look like the same idea (meaningful content-
+    token overlap) but disagree on negation or number presence? This is
+    the exact same shape final_story_coherence_validation later checks
+    (D-052 deliberately reuses final_sibling_grouping's own extractors) --
+    here it is used only to reserve semantic-compute budget ahead of a
+    contradiction risk, never to make an editorial decision itself."""
+    texts = [member.text for member in members]
+    for i in range(len(texts)):
+        left_content = _content_tokens(texts[i])
+        if len(left_content) < 4:
+            continue
+        for j in range(i + 1, len(texts)):
+            right_content = _content_tokens(texts[j])
+            if len(right_content) < 4:
+                continue
+            shared = len(left_content & right_content)
+            if shared < 3:
+                continue
+            left_negations, right_negations = _negations(texts[i]), _negations(texts[j])
+            left_numbers, right_numbers = _numbers(texts[i]), _numbers(texts[j])
+            if bool(left_negations) != bool(right_negations):
+                return True
+            if left_numbers and right_numbers and left_numbers != right_numbers:
+                return True
+    return False
+
+
+def _classify_window_priority(
+    members: Tuple[CandidateTake, ...],
+    context: WholeVideoContext | None,
+) -> SemanticWorkPriority:
+    """D-052 Section 7: classify one window's semantic-compute priority
+    using only pre-call signals -- StoryValidator's own contradiction check
+    runs downstream of hybrid editorial and is not available yet, so P0
+    here is a conservative, cheaper, pre-call proxy for the same risk
+    shape, not a duplicate of that later check."""
+    if _has_negation_or_number_conflict(members):
+        return SemanticWorkPriority.P0_SAFETY_CRITICAL
+    for member in members:
+        corroborated, _reasons = _failed_local_evidence(member, context)
+        if corroborated:
+            return SemanticWorkPriority.P1_RETRY_EQUIVALENCE
+    return SemanticWorkPriority.P2_EDITORIAL_QUALITY
+
+
+def _estimate_window_cost_usd(members: Tuple[CandidateTake, ...], *, per_member_usd: float = 0.0015) -> float:
+    """Deterministic, provider-neutral cost estimate proportional to window
+    size -- mirrors the shape of hybrid_google_transport's own token-based
+    estimate (more members -> more input/output tokens) without importing
+    anything Gemini-specific into the planner (Section 11)."""
+    return round(max(1, len(members)) * per_member_usd, 6)
 
 
 @dataclass(frozen=True)
@@ -37,6 +117,11 @@ class HybridSessionCleanupResult:
     available_chunk_count: int
     diagnostics: tuple[dict, ...]
     semantic_decisions: tuple[tuple[str, str, float], ...] = ()
+    # D-052 Part B: present only when CUTSELL_SEMANTIC_COMPUTE_PLANNER is
+    # enabled for this call -- None otherwise (today's default), never a
+    # behavior change to any existing caller that only reads the fields
+    # above.
+    semantic_compute_plan: "SemanticComputePlan | None" = None
 
 
 def _token_count(text: str) -> int:
@@ -262,6 +347,7 @@ def apply_hybrid_session_cleanup(
     retry_replaced_failed_confidence: float = 0.84,
     chunk_size: int = 10,
     chunk_stride: int = 5,
+    env: Mapping[str, str] | None = None,
 ) -> HybridSessionCleanupResult:
     """Classify overlapping creator-session windows while failing open on uncertainty."""
     take_tuple = tuple(takes)
@@ -282,6 +368,12 @@ def apply_hybrid_session_cleanup(
     effective_size = min(chunk_size, policy.max_candidates_per_request)
     effective_stride = min(max(1, chunk_stride), effective_size)
 
+    # D-052 Part B: build every window across every partition FIRST -- the
+    # planner (when enabled) needs the complete set of eligible work before
+    # it can decide an execution order, exactly per Section 6 ("Introduce a
+    # provider-neutral SemanticComputePlan generated BEFORE paid hybrid
+    # calls begin").
+    all_windows: list[tuple[int, int, Tuple[CandidateTake, ...], EditorialSession]] = []
     for partition_index, partition in enumerate(partitions):
         ordered = tuple(sorted(partition, key=lambda item: (item.start, item.end, item.clip_id)))
         windows = _overlapping_windows(ordered, size=effective_size, stride=effective_stride)
@@ -292,6 +384,41 @@ def apply_hybrid_session_cleanup(
                 partition_index=partition_index,
                 chunk_index=chunk_index,
             )
+            all_windows.append((partition_index, chunk_index, members, session))
+
+    execution_order = list(range(len(all_windows)))
+    plan: SemanticComputePlan | None = None
+    if _semantic_compute_planner_enabled(env) and all_windows:
+        from .hybrid_provider_settings import load_hybrid_provider_settings
+
+        cost_ceiling_usd = load_hybrid_provider_settings(dict(env) if env is not None else None).max_cost_per_edit_usd
+        work_items = tuple(
+            SemanticWorkItem(
+                work_id=str(position),
+                priority=_classify_window_priority(members, context),
+                estimated_cost_usd=_estimate_window_cost_usd(members),
+                reason=f"partition={partition_index} chunk={chunk_index} size={len(members)}",
+            )
+            for position, (partition_index, chunk_index, members, _session) in enumerate(all_windows)
+        )
+        plan = build_semantic_compute_plan(work_items, cost_ceiling_usd=cost_ceiling_usd)
+        # Every window is still attempted (the transport's own DollarBudgetLedger
+        # remains the sole authoritative enforcement -- see module docstring);
+        # only the ORDER changes, from plain enumeration to planned/priority
+        # order. This is what guarantees a P0 window is never starved merely
+        # because it happened to be requested fifth.
+        execution_order = [int(work_id) for work_id in plan.planned_calls] + [
+            int(work_id) for work_id in plan.deferred_optional_calls
+        ]
+
+    for position in execution_order:
+        partition_index, chunk_index, members, session = all_windows[position]
+        # D-052: the block below is unchanged from before the planner existed
+        # (deliberately kept at its original nesting depth to minimize diff
+        # risk on this already load-bearing scoring logic) -- only WHICH
+        # window is visited on each loop iteration changed, via
+        # `execution_order` above.
+        if True:
             result = safe_editorial_judge(editorial_judge, session, policy)
             if result.requested:
                 requested_chunks += 1
@@ -399,6 +526,7 @@ def apply_hybrid_session_cleanup(
                         "applied_delete": applied_delete,
                     })
 
+            plan_outcome = plan.outcome_for(str(position)) if plan is not None else None
             diagnostics.append({
                 "partition_index": partition_index,
                 "chunk_index": chunk_index,
@@ -413,6 +541,14 @@ def apply_hybrid_session_cleanup(
                 "model": result.model,
                 "deleted_ids": chunk_deleted,
                 "decisions": decisions,
+                # D-052 Part B: present only when CUTSELL_SEMANTIC_COMPUTE_PLANNER
+                # is enabled -- the plan's own priority classification and
+                # predicted planned/deferred status for this exact window,
+                # independent of whether the transport's own ledger actually
+                # accepted or rejected the call above.
+                "planner_execution_rank": execution_order.index(position) if plan is not None else None,
+                "planner_priority": plan_outcome.priority.name if plan_outcome is not None else None,
+                "planner_predicted_planned": plan_outcome.planned if plan_outcome is not None else None,
             })
 
     kept = tuple(take for take in take_tuple if take.clip_id not in deleted_ids)
@@ -428,4 +564,5 @@ def apply_hybrid_session_cleanup(
         available_chunk_count=available_chunks,
         diagnostics=tuple(diagnostics),
         semantic_decisions=semantic_decisions,
+        semantic_compute_plan=plan,
     )

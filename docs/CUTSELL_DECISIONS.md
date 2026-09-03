@@ -5124,6 +5124,131 @@ classification, which the directive explicitly asked to be
 introduced). No Human Gold, grouping, or CleanCut decision logic
 touched.
 
+## D-051 -- front-half determinism + hybrid budget audit (report only)
+
+Three completed AUTHORITATIVE-mode Modal Video00 canaries (33701641177 /
+`324233b`, 33727122331 / `5e83abe`, 33733618943 / `fce4588`) were audited
+against each other. Findings, all report-only, no code changed:
+
+- ASR `segment_count` on the identical `SOURCE_KEY` video already diverges
+  (48 / 54 / ~5x) before any candidate/attempt/clean_cut logic runs --
+  this is the FIRST material divergence stage, not clean_cut or hybrid
+  editorial. `asr.py`'s `FasterWhisperASR` left every Faster-Whisper decode
+  parameter beyond `word_timestamps`/`vad_filter` as a silent library
+  default (`compute_type="auto"`, unpinned `beam_size`/`best_of`/
+  temperature fallback ladder/`condition_on_previous_text`), and the
+  library exposes no seed control for its beam-search/temperature-fallback
+  decoding at all.
+- The hybrid-editorial-chunks stage's `$0.0075` `DollarBudgetLedger`
+  (`hybrid_google_transport.py`) is a single per-run ledger shared across
+  every chunk call in plain `chunk_index` order; all 3 runs show exactly 4
+  chunks receiving real provider evaluation and everything requested
+  beyond that (1 chunk in runs 1-2, 2 chunks in run 3, since requested
+  count itself drifted 5->5->6 as a downstream consequence of the ASR
+  variance above) failing deterministically with
+  `RuntimeError("hybrid edit/test dollar budget exhausted")` -- a pure
+  function of call order, with zero regard for what a chunk contains.
+- The Unified Selection Reasoner and the semantic-equivalence arbiter each
+  carry their own, separate `DollarBudgetLedger` (never shared with hybrid
+  editorial chunks); neither StoryValidator's claim/clause arbiters nor
+  the semantic-equivalence arbiter were ever actually invoked in any of
+  the 3 runs (0 arbiter consultations) -- their budgets are not a live
+  factor in the observed variance.
+- The latest canary's 4 true hybrid `REVIEW_REQUIRED` orphans all
+  genuinely received real provider evaluation (verified: a
+  budget-exhausted chunk always shows `decisions: []`, and
+  `delete_basis="high_confidence_semantic"` is only reachable from a
+  non-empty decision) -- they are real editorial decisions, not
+  incomplete-evaluation artifacts.
+- Verdict: current Video00 canaries are only PARTIALLY comparable
+  experiments. See the full report delivered to the user for the complete
+  run table, budget trace, and commercial-runtime recommendation (D-052
+  Section 8/9 below implements the accepted part of that recommendation).
+
+## D-052 -- deterministic ASR evidence + semantic compute planner
+
+Closes the two D-051-proven stability gaps architecturally, both
+additive-only and flag-gated OFF by default (no live behavior change
+without an explicit opt-in env var; no Modal RAW run as part of this
+change).
+
+**Part A -- `canonical_asr_evidence.py` (new module).**
+`CanonicalASREvidence` is a provider-neutral contract for "what was
+said": a flat, source-ordered `normalized_words` word stream + language +
+ASR model/config fingerprint + `evidence_hash`. `evidence_hash` is
+computed from normalized word TEXT only -- never from timestamps or
+segment boundaries -- so two transcriptions of the same words always
+match regardless of how Whisper happened to group or time them.
+`normalize_transcript_segments` deterministically re-derives segment
+boundaries from the flattened word timeline using only a word-timestamp
+gap (`0.75s`, the same constant `take_segmentation.py`'s own
+`_speech_units` already used -- reused, not widened, per the directive's
+explicit "do not globally widen thresholds") and sentence-ending
+punctuation, discarding Whisper's own per-segment shape entirely.
+`asr.py`'s `FasterWhisperASR` gained explicit `beam_size`/`best_of`/
+`temperature_ladder`/`condition_on_previous_text`/`word_timestamps`/
+`vad_filter`/`initial_prompt` fields (every default value identical to
+faster-whisper's own documented library default -- audit/fingerprint
+only, not yet threaded into the live `model.transcribe()` call, since
+this sandbox has no faster-whisper install to verify the actually-pinned
+GPU-image version's defaults against; wiring them in is the recommended,
+separately-tested follow-up) plus a `config_fingerprint()` method and a
+`load_asr_provider_from_env` builder with an explicit
+`CUTSELL_ASR_COMPUTE_TYPE` override (default unchanged: `"auto"`).
+`take_segmentation.segment_takes` gained the
+`CUTSELL_ASR_CANONICAL_NORMALIZATION` flag (default OFF): when enabled,
+every source's segments are canonically re-normalized before any of
+`segment_takes`'s own existing logic runs.
+
+**Part B -- `semantic_compute_planner.py` (new module).**
+`SemanticWorkItem`/`SemanticWorkPriority` (P0 safety-critical / P1 retry-
+equivalence / P2 editorial-quality) / `SemanticComputePlan` /
+`build_semantic_compute_plan` -- a provider-neutral (no Gemini-specific
+field anywhere in this module) planner that computes, BEFORE any paid
+call, which work items fit a cost ceiling via a stable priority sort (P0
+always reserved first, ties keep original relative order, so the
+caller's own iteration order never changes which priority tier executes
+first). `hybrid_session_cleanup.py` gained the
+`CUTSELL_SEMANTIC_COMPUTE_PLANNER` flag (default OFF, preserving today's
+exact `chunk_index`-order dispatch): when enabled,
+`apply_hybrid_session_cleanup` builds every window across every partition
+first, classifies each into P0 (via a pre-call, deterministic reuse of
+`final_sibling_grouping`'s own `_negations`/`_numbers` extractors -- a
+window containing a same-idea pair that disagrees on negation/number is
+P0) / P1 (contains a `_failed_local_evidence`-corroborated candidate,
+already pre-call-available) / P2 (everything else), plans via
+`build_semantic_compute_plan`, and dispatches every window in planned
+order instead of enumeration order -- the real `DollarBudgetLedger`
+remains the sole authoritative spend enforcement; only WHICH window is
+attempted first changes, which is what guarantees a P0 window is never
+starved purely for having been requested fifth or sixth. Diagnostics gain
+`planner_execution_rank`/`planner_priority`/`planner_predicted_planned`
+per window (all `None` when the flag is off) and
+`HybridSessionCleanupResult.semantic_compute_plan` (`None` when off).
+`build_cost_contract_report` renders the D-052 Section 9 predictable
+per-video cost contract (estimated pre-execution, actual post-execution)
+from an already-built plan.
+
+Tests: `tests/test_cutsell_d052_canonical_asr_evidence.py` (14) --
+evidence-hash content/timestamp independence, 2-vs-3-segment and
+50/100/250ms-jitter/VAD-boundary/punctuation equivalence classes, and the
+`segment_takes` flag's off-by-default parity + on-mode segment-boundary
+independence. `tests/test_cutsell_d052_semantic_compute_planner.py` (13)
+-- the 9 named planner cases (4/6 items sufficient budget, 6 items
+constrained budget, P0-before-P2 regardless of arrival order, order-
+independence, cost-ceiling respected, P0/P2 exhaustion actions, the exact
+D-051 "fifth call" positional-starvation shape) plus 4
+`hybrid_session_cleanup.py` integration tests proving the flag's off-mode
+parity and on-mode fix.
+
+Validation: compileall clean. Full D-050+D-052 series: 177 passed (150
+pre-existing D-050 + 27 new). All 54 CleanCutBench fixtures green under
+LEGACY and explicit AUTHORITATIVE, including with both new flags forced
+on simultaneously. Full `tests/test_cutsell_*.py` glob: 1501 passed (1474
+pre-existing + 27 new), env unset (both flags off, LEGACY default) --
+byte-for-byte parity confirmed by the exact count match. No GPU/Modal RAW
+run as part of this change.
+
 ## Change rule
 
 When a new decision changes product behavior, update this file in the same development cycle. Do not silently redefine CutSell through code alone.

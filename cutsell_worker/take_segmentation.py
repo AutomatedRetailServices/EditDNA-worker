@@ -2,13 +2,33 @@
 from __future__ import annotations
 
 from dataclasses import replace
+import os
 import re
 from typing import Iterable, Mapping, Tuple
 
+from .canonical_asr_evidence import normalize_transcript_segments
 from .canonical_identity import mint_source_span_id
 from .contracts import CandidateTake, MediaSignals, SourceAsset, TranscriptSegment, Word
 from .silence_analysis import SilenceGap, silence_ratio
 from .source_identity import stable_clip_id
+
+# D-052 Part A Section 14: OFF by default -- current behavior (Whisper's own
+# per-segment grouping feeds directly into _speech_units/
+# _repair_boundary_fragments below) is unchanged unless explicitly opted in.
+# When enabled, every source's TranscriptSegments are first flattened to a
+# word-level timeline and deterministically re-segmented
+# (canonical_asr_evidence.normalize_transcript_segments) BEFORE this
+# module's own logic runs, so Whisper's arbitrary segment boundaries never
+# reach AttemptReconstructor at all. See
+# tests/test_cutsell_d052_canonical_asr_evidence.py for the equivalence
+# classes this is required to satisfy, and CUTSELL_DECISIONS.md D-052 for
+# why this stays flag-gated pending a live parity RAW.
+_CANONICAL_NORMALIZATION_ENV = "CUTSELL_ASR_CANONICAL_NORMALIZATION"
+
+
+def _canonical_normalization_enabled(env: Mapping[str, str] | None = None) -> bool:
+    values = env if env is not None else os.environ
+    return str(values.get(_CANONICAL_NORMALIZATION_ENV, "")).strip().lower() in {"1", "true", "yes", "on"}
 
 
 # Tokens that make a trailing ASR fragment grammatically dependent on what follows.
@@ -239,11 +259,20 @@ def segment_takes(
     segments: Iterable[TranscriptSegment],
     sources: Iterable[SourceAsset],
     gaps: Iterable[SilenceGap] = (),
+    *,
+    env: Mapping[str, str] | None = None,
 ) -> Tuple[CandidateTake, ...]:
     source_map: Mapping[str, SourceAsset] = {source.source_asset_id: source for source in sources}
     gap_tuple = tuple(gaps)
+    segment_tuple = tuple(segments)
+    if _canonical_normalization_enabled(env):
+        # D-052: replace Whisper's own per-segment grouping with a
+        # deterministic, word-timeline-derived one before anything else in
+        # this function sees it. Everything below is unchanged -- it simply
+        # now receives already-canonicalized segments.
+        segment_tuple = normalize_transcript_segments(segment_tuple)
     output = []
-    for original_segment in segments:
+    for original_segment in segment_tuple:
         if original_segment.source_asset_id not in source_map:
             raise ValueError("transcript source is not registered in processing request")
         for segment in _speech_units(original_segment):
