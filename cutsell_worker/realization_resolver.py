@@ -184,11 +184,17 @@ from .contracts import DraftTimeline
 from .final_sibling_grouping import _negations
 from .semantic_atom_importance import blocks_freeze, classify_number_atom
 from .semantic_claims import (
+    ACTION_EVENT,
     CAUSE_EFFECT,
     CONTRASTIVE_HINDSIGHT_NEGATION,
     ClaimEquivalenceArbiter,
+    DIAGNOSIS_IDENTIFICATION,
+    ENTITY_RELATION,
+    MEASUREMENT_QUANTITY,
     NEGATION,
+    STATE_RESULT,
     TEMPORAL_RELATION,
+    UNIQUE_CONCLUSION,
     _CAUSE_EFFECT_MARKERS,
     _TEMPORAL_MARKERS,
     _negation_role_hard_exclusion,
@@ -826,6 +832,17 @@ class SemanticPreservationProof:
     arbiter_invoked: bool = False
     verified: bool = False
     rejection_reason: str = ""
+    # D-077 Section 12: every individual claim-equivalence arbiter
+    # consultation attempted for this discard (whether or not it was
+    # actually reachable/available, and regardless of the overall proof's
+    # final verdict) -- deterministic preservation result, eligibility,
+    # invocation, provider/model, verdict, confidence, and best-effort
+    # cost/budget evidence per consultation (see `_arbiter_provenance`).
+    # Empty whenever no claim pair of this discard ever reached the
+    # genuinely ambiguous cross-type band (D-077 Section 2's own
+    # "deterministic first" requirement -- most pairs never populate
+    # this at all).
+    arbiter_consultations: tuple[Mapping[str, object], ...] = ()
     # D-076 Section 4 observability: which strong-relation evidence (if
     # any) made a PRE_GROUP_SEMANTIC_PRESERVATION candidate eligible for
     # certification in the first place -- "" for the other three proof
@@ -1096,12 +1113,108 @@ def _claim_content_subsumed(d_claim: CanonicalClaimRecord, r_claim: CanonicalCla
     return True
 
 
+# D-077: the ONE new claim-relationship this directive adds -- a genuinely
+# cross-TYPE ambiguous paraphrase, reachable ONLY when the caller explicitly
+# opts in (`_claim_preserved`'s own `allow_cross_type_ambiguous_bridge`
+# parameter, default False everywhere -- PATH B's own call site never
+# passes it, so PATH B stays byte-identical). Candidate (R-side) types
+# allowed here are every "asserts something specific" type EXCEPT the four
+# whose whole purpose is asserting something ABOUT another claim or whose
+# bag-of-words representation cannot safely encode argument direction
+# (NEGATION, CORRECTION, CAUSE_EFFECT, TEMPORAL_RELATION -- the last two
+# also independently checked via `_claim_signals_direction_sensitive`
+# below, belt and braces).
+_CROSS_TYPE_BRIDGE_ALLOWED_CANDIDATE_TYPES = frozenset({
+    ENTITY_RELATION, STATE_RESULT, DIAGNOSIS_IDENTIFICATION,
+    ACTION_EVENT, MEASUREMENT_QUANTITY, UNIQUE_CONCLUSION,
+})
+
+
+def _cross_type_ambiguous_bridge_eligible(
+    d_claim: CanonicalClaimRecord, r_claim: CanonicalClaimRecord,
+) -> tuple[bool, str]:
+    """D-077 Sections 2/3/4/9: is this (d_claim, r_claim) pair a genuine
+    ambiguous-middle-band cross-type paraphrase eligible for the bounded
+    claim-equivalence arbiter -- never a candidate-discovery mechanism
+    (Section 4's strong-relation requirement is enforced entirely upstream,
+    by `_find_pre_group_candidates`; this function only ever judges a
+    claim PAIR already belonging to an already-verified strong-relation
+    realization pair). Returns `(eligible, gate_reason)` -- `gate_reason`
+    is always populated, verified or not, for Section 12's own
+    observability requirement.
+
+    ENTITY/DIAGNOSIS SAFETY (Section 3/9), drawn structurally rather than
+    via a new entity extractor ("no new provider/model/protocol"): requires
+    `d_claim.claim_type == ACTION_EVENT` -- the marker-less, generic-
+    statement fallback `classify_claim` assigns only when NOTHING more
+    specific fired (no reporting/identification/quantity/state-result
+    marker). A claim already classified ENTITY_RELATION/STATE_RESULT/
+    DIAGNOSIS_IDENTIFICATION/MEASUREMENT_QUANTITY/UNIQUE_CONCLUSION/
+    CORRECTION/NEGATION already asserts something SPECIFIC of its own (a
+    diagnosis, a measured value, a reported result, a correction, a
+    negation) -- D-073's own protected `test_different_diagnosis_never_
+    verifies_even_with_confirming_arbiter` fixture ("...it was gastritis"
+    vs "...it was an ulcer") is EXACTLY this shape (D's own claim there is
+    ENTITY_RELATION, not ACTION_EVENT) and this gate never reaches it: the
+    pre-existing exact-type-match dedup gate is what protects it, tried
+    first, unchanged. An ACTION_EVENT `d_claim`, by construction, never
+    itself names a specific diagnosis/measured value/reported result, so a
+    richer candidate that develops it into one is always an ADDITION on
+    R's side, never a substitution of a fact D itself already named --
+    the same "R may contain additional safe information" direction
+    `_claim_content_subsumed` already establishes for the literal-subset
+    case, extended here across a type boundary for a genuine paraphrase.
+    Same-type pairs are explicitly excluded (`_claims_dedup_equivalent`
+    already tries -- and, for the ambiguous band, already arbitrates --
+    every same-type pair; this function only ever adds the ONE new,
+    additional relationship a same-type check cannot express)."""
+    if d_claim.claim_type != ACTION_EVENT:
+        return False, "source_not_generic_action_event"
+    if r_claim.claim_type == d_claim.claim_type:
+        return False, "same_type_handled_by_existing_dedup"
+    if r_claim.claim_type not in _CROSS_TYPE_BRIDGE_ALLOWED_CANDIDATE_TYPES:
+        return False, "candidate_type_not_bridge_eligible"
+    if _claim_signals_direction_sensitive(d_claim) or _claim_signals_direction_sensitive(r_claim):
+        return False, "direction_sensitive_claim"
+    if _claim_has_negation(d_claim) != _claim_has_negation(r_claim):
+        return False, "negation_polarity_mismatch"
+    d_values, r_values = _claim_digit_values(d_claim), _claim_digit_values(r_claim)
+    if d_values and not d_values.issubset(r_values):
+        return False, "number_mismatch"
+    d_digits, r_digits = _digit_tokens(d_claim.content_tokens), _digit_tokens(r_claim.content_tokens)
+    overlap = _overlap_coefficient(d_claim.content_tokens - d_digits, r_claim.content_tokens - r_digits)
+    if overlap < _DEDUP_AMBIGUOUS_FLOOR or overlap >= _CLAIM_DEDUP_THRESHOLD:
+        return False, "outside_ambiguous_band"
+    return True, "ambiguous_cross_type_candidate"
+
+
+def _arbiter_provenance(claim_equivalence_arbiter: ClaimEquivalenceArbiter | None) -> Mapping[str, object]:
+    """D-077 Section 12 (provider/model/cost-budget observability): best-
+    effort, read-only introspection of whatever the CONFIGURED arbiter
+    implementation happens to expose -- never fabricated, never required.
+    `GoogleClaimEquivalenceArbiter` (D-061 Phase 2) exposes `.model` and
+    `.settings.provider`/`.ledger.reserved_usd`/`.ledger.remaining_usd`;
+    a test double (e.g. an always-YES arbiter) exposes none of these and
+    every field simply falls back to "" / None via `getattr`."""
+    if claim_equivalence_arbiter is None:
+        return {"provider": "", "model": "", "reserved_usd": None, "remaining_usd": None}
+    settings = getattr(claim_equivalence_arbiter, "settings", None)
+    ledger = getattr(claim_equivalence_arbiter, "ledger", None)
+    return {
+        "provider": getattr(settings, "provider", "") or type(claim_equivalence_arbiter).__name__,
+        "model": getattr(claim_equivalence_arbiter, "model", ""),
+        "reserved_usd": getattr(ledger, "reserved_usd", None),
+        "remaining_usd": getattr(ledger, "remaining_usd", None),
+    }
+
+
 def _claim_preserved(
     d_claim: CanonicalClaimRecord,
     r_claims: Sequence[CanonicalClaimRecord],
     *,
     claim_equivalence_arbiter: ClaimEquivalenceArbiter | None,
     arbiter_log: list[dict] | None,
+    allow_cross_type_ambiguous_bridge: bool = False,
 ) -> tuple[CanonicalClaimRecord | None, str]:
     """D-073 Sections 3/5/8: is `d_claim` (one claim of the discarded
     realization D) preserved by some claim of the candidate replacement R?
@@ -1137,7 +1250,8 @@ def _claim_preserved(
     D-073.1: `r_claims` is filtered ONCE up front to drop any candidate
     claim blocked by `_preservation_blocked_by_attribution_asymmetry` --
     R's own reported/attributed speech can never certify a D claim asserted
-    directly, in ANY of the three matching strategies below (see that
+    directly, in ANY of the matching strategies below (the three always
+    tried, plus D-077's opt-in `cross_type_ambiguous_bridge` -- see that
     function's own docstring for the proven adversarial case).
     Fails closed (returns `(None, "none")`) whenever nothing matches."""
     if _claim_signals_direction_sensitive(d_claim):
@@ -1182,6 +1296,49 @@ def _claim_preserved(
                 })
             if verdict:
                 return r_claim, "hindsight_semantic"
+    # D-077 Section 1/2/4: the ONE new arbiter-reachable relationship --
+    # opt-in only (`allow_cross_type_ambiguous_bridge`, default False),
+    # tried LAST (deterministic-first, per Section 2), after dedup_
+    # equivalent/content_subsumed/hindsight_semantic have all already
+    # failed deterministically for every candidate. `_cross_type_ambiguous_
+    # bridge_eligible` re-verifies every hard gate (number, negation,
+    # causal/temporal direction, entity/diagnosis-safety-by-construction)
+    # independently before this point is ever reached -- see that
+    # function's own docstring. A diagnostic entry is recorded for every
+    # ELIGIBLE candidate regardless of arbiter availability or verdict
+    # (Section 12: "confirm no arbiter call on deterministic pass/fail
+    # cases" -- an ineligible pair, i.e. every deterministic pass/fail
+    # case, never reaches this loop body at all, let alone logs or calls).
+    if allow_cross_type_ambiguous_bridge:
+        for r_claim in sorted(r_claims, key=lambda c: c.canonical_claim_id):
+            eligible, gate_reason = _cross_type_ambiguous_bridge_eligible(d_claim, r_claim)
+            if not eligible:
+                continue
+            if claim_equivalence_arbiter is None or not d_claim.text or not r_claim.text:
+                if arbiter_log is not None:
+                    arbiter_log.append({
+                        "left_claim_id": d_claim.canonical_claim_id, "right_claim_id": r_claim.canonical_claim_id,
+                        "method": "cross_type_ambiguous_bridge", "deterministic_result": "ambiguous",
+                        "arbiter_eligible": True, "arbiter_invoked": False,
+                        "verdict": False, "confidence": None, "reason": "arbiter_unavailable",
+                        **_arbiter_provenance(claim_equivalence_arbiter),
+                    })
+                continue
+            try:
+                covered, confidence, reason = claim_equivalence_arbiter.claim_covered(d_claim.text, r_claim.text)
+                verdict = bool(covered) is True
+            except Exception:
+                verdict, confidence, reason = False, 0.0, "arbiter_exception"
+            if arbiter_log is not None:
+                arbiter_log.append({
+                    "left_claim_id": d_claim.canonical_claim_id, "right_claim_id": r_claim.canonical_claim_id,
+                    "method": "cross_type_ambiguous_bridge", "deterministic_result": "ambiguous",
+                    "arbiter_eligible": True, "arbiter_invoked": True,
+                    "verdict": verdict, "confidence": confidence, "reason": reason,
+                    **_arbiter_provenance(claim_equivalence_arbiter),
+                })
+            if verdict:
+                return r_claim, "cross_type_ambiguous_bridge"
     return None, "none"
 
 
@@ -1309,23 +1466,30 @@ def _certify_directional_semantic_preservation(
     claim_equivalence_arbiter: ClaimEquivalenceArbiter | None,
     evidence: dict,
     nonrequired_digit_omissions: frozenset[str] = frozenset(),
+    allow_cross_type_ambiguous_bridge: bool = False,
 ) -> tuple[bool, str]:
-    """D-073/D-076 shared directional preservation certification chain --
-    D's required meaning subset of R's required meaning. Takes an ALREADY-
-    DISCOVERED candidate; contains no candidate-discovery logic of its own
-    (each caller's own discovery method is what legitimately differs --
-    D-072's pre-guard candidate for PATH B, D-076's strong-relation
-    discovery for PRE_GROUP_SEMANTIC_PRESERVATION). Reused verbatim by
-    both -- this is "reuse the exact existing D-073/D-073.1 semantic
-    preservation chain," not a second implementation of it.
+    """D-073/D-076/D-077 shared directional preservation certification
+    chain -- D's required meaning subset of R's required meaning. Takes an
+    ALREADY-DISCOVERED candidate; contains no candidate-discovery logic of
+    its own (each caller's own discovery method is what legitimately
+    differs -- D-072's pre-guard candidate for PATH B, D-076's strong-
+    relation discovery for PRE_GROUP_SEMANTIC_PRESERVATION). Reused
+    verbatim by both -- this is "reuse the exact existing D-073/D-073.1
+    semantic preservation chain," not a second implementation of it.
 
     `nonrequired_digit_omissions` (D-076 Section 6, default empty): digit
     VALUES from D's own realization text that the CALLER has already
     classified, via the existing `semantic_atom_importance` classifiers,
     as safe to omit (e.g. a bare incidental year) -- PATH B's own call
     passes nothing here, so its NUMBER gate stays byte-identical to before
-    D-076 (any missing digit still fails closed). Mutates and returns
-    `evidence` in place; caller owns constructing/initializing it."""
+    D-076 (any missing digit still fails closed).
+
+    `allow_cross_type_ambiguous_bridge` (D-077, default False): threaded
+    straight through to `_claim_preserved`'s own identically-named
+    parameter -- PATH B's own call passes nothing here, so its per-claim
+    matching stays byte-identical to before D-077; only the pre-group
+    path opts in. Mutates and returns `evidence` in place; caller owns
+    constructing/initializing it."""
     evidence["candidate_replacement_realization_id"] = candidate_realization_id
 
     if candidate_record.state != "selected":
@@ -1378,11 +1542,15 @@ def _certify_directional_semantic_preservation(
     for d_claim in sorted(d_claims, key=lambda c: c.canonical_claim_id):
         preserving, _method = _claim_preserved(
             d_claim, r_claims, claim_equivalence_arbiter=claim_equivalence_arbiter, arbiter_log=arbiter_log,
+            allow_cross_type_ambiguous_bridge=allow_cross_type_ambiguous_bridge,
         )
         if preserving is None:
             evidence["semantic_replacement_reason"] = "required_claim_not_preserved"
             evidence["hard_gate_results"]["unpreserved_claim_id"] = d_claim.canonical_claim_id
             evidence["arbiter_invoked"] = bool(arbiter_log)
+            # D-077 Section 12: every consultation attempted for this
+            # discard, even the failing one -- never silently dropped.
+            evidence["arbiter_consultations"] = list(arbiter_log)
             return False, evidence["semantic_replacement_reason"]
         preserved_ids.append(d_claim.canonical_claim_id)
 
@@ -1390,6 +1558,7 @@ def _certify_directional_semantic_preservation(
     evidence["critical_claims_preserved"] = True
     evidence["unique_required_content_preserved"] = True
     evidence["arbiter_invoked"] = bool(arbiter_log)
+    evidence["arbiter_consultations"] = list(arbiter_log)
     evidence["semantic_replacement_verified"] = True
     evidence["semantic_replacement_reason"] = "semantic_replacement_certified_claim_level_preservation_verified"
     return True, evidence["semantic_replacement_reason"]
@@ -1529,6 +1698,7 @@ def _attempt_pre_group_semantic_preservation(
 
     realizations = ledger.realizations()
     last_reason = "no_strong_relation_candidate"
+    last_candidate_evidence: dict = {}
     for candidate_realization_id, relation in candidates:
         candidate_record = realizations[candidate_realization_id]
         _passes, safe_to_omit, omissions = _classify_pre_group_number_omissions(
@@ -1539,12 +1709,18 @@ def _attempt_pre_group_semantic_preservation(
         if not _passes:
             last_reason = "number_mismatch"
             continue
+        # D-077 Section 1/4: the pre-group path is the ONLY caller that
+        # opts into the cross-type ambiguous claim-equivalence bridge --
+        # PATH B's own call to this same shared function (`_attempt_
+        # semantic_replacement_certification` above) never passes this,
+        # so PATH B stays byte-identical.
         verified, reason = _certify_directional_semantic_preservation(
             record, candidate_record, candidate_realization_id, ledger,
             claim_equivalence_arbiter=claim_equivalence_arbiter, evidence=candidate_evidence,
-            nonrequired_digit_omissions=safe_to_omit,
+            nonrequired_digit_omissions=safe_to_omit, allow_cross_type_ambiguous_bridge=True,
         )
         last_reason = reason
+        last_candidate_evidence = candidate_evidence
         if verified:
             return SemanticPreservationProof(
                 discarded_id=record.realization_id, preserving_id=candidate_realization_id,
@@ -1553,6 +1729,7 @@ def _attempt_pre_group_semantic_preservation(
                 nonrequired_omissions=omissions,
                 hard_gate_results=dict(candidate_evidence.get("hard_gate_results") or {}),
                 arbiter_invoked=bool(candidate_evidence.get("arbiter_invoked")),
+                arbiter_consultations=tuple(candidate_evidence.get("arbiter_consultations") or ()),
                 verified=True,
                 relationship_evidence=relation,
                 candidate_discovery_method="pre_group_strong_relation",
@@ -1562,6 +1739,7 @@ def _attempt_pre_group_semantic_preservation(
         discarded_id=record.realization_id, preserving_id=None,
         proof_method=PROOF_METHOD_PRE_GROUP_SEMANTIC_PRESERVATION,
         rejection_reason=last_reason,
+        arbiter_consultations=tuple(last_candidate_evidence.get("arbiter_consultations") or ()),
         candidate_discovery_method="pre_group_strong_relation",
     )
 

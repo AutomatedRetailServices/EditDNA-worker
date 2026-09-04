@@ -8313,6 +8313,130 @@ Then STOP.
 
 Do not launch Modal.
 
+## D-077 -- PRE_GROUP claim-equivalence completion (implementation)
+
+Closes D-076's own disclosed limitation: the literal-token-subset
+certification chain (PATH A, PATH B, and D-076's PRE_GROUP_SEMANTIC_
+PRESERVATION) could not bridge a genuine SYNONYM paraphrase with no
+literal word overlap on the specific fact (e.g. "problemas de estomago"
+vs "problemas de digestion") -- confirmed via a generic stand-in fixture,
+"I had stomach problems for a while." vs "I had digestive problems, had
+an endoscopy, and was diagnosed with gastritis.": the discarded claim
+classifies `ACTION_EVENT` (the marker-less, generic-statement fallback),
+the candidate's own richer clause classifies `DIAGNOSIS_IDENTIFICATION`
+(triggered by "diagnosed with"), so the pre-existing exact-claim-type-
+match gate on `_claims_dedup_equivalent` blocked the pair from ever
+reaching the existing D-061 claim-equivalence arbiter, and the
+deterministic cross-type superset check (`_claim_content_subsumed`)
+requires a literal token subset a synonym pair can never satisfy.
+
+IMPLEMENTATION: one new, additive, OPT-IN claim-matching strategy,
+`cross_type_ambiguous_bridge`, added as the 4th (last-tried) strategy
+inside `_claim_preserved` (realization_resolver.py) -- reached only after
+`dedup_equivalent`/`content_subsumed`/`hindsight_semantic` have all
+already failed deterministically (Section 2's "deterministic first").
+Gated by a new `allow_cross_type_ambiguous_bridge` parameter threaded
+through `_claim_preserved` and `_certify_directional_semantic_
+preservation`, defaulting `False` everywhere -- PATH B's own call site
+(`_attempt_semantic_replacement_certification`) never passes it, so PATH
+B is byte-identical (proven by a dedicated regression test routing the
+exact cross-type synonym pair through PATH B's own `hybrid_editorial_
+chunks` population and confirming REVIEW_REQUIRED, zero arbiter calls).
+Only D-076's own pre-group path (`_attempt_pre_group_semantic_
+preservation`) opts in.
+
+`_cross_type_ambiguous_bridge_eligible(d_claim, r_claim)` gates entry:
+  1. ENTITY/DIAGNOSIS SAFETY (Section 3/9), drawn structurally rather than
+     via a new entity extractor ("no new provider/model/protocol"):
+     requires `d_claim.claim_type == ACTION_EVENT` -- a claim already
+     classified ENTITY_RELATION/STATE_RESULT/DIAGNOSIS_IDENTIFICATION/
+     MEASUREMENT_QUANTITY/UNIQUE_CONCLUSION/CORRECTION/NEGATION already
+     asserts something SPECIFIC of its own (a diagnosis, a measured
+     value, a correction, a negation); an ACTION_EVENT claim, by
+     construction, never does, so a richer candidate can only ever be
+     ADDING to it, never substituting a fact D itself already named. The
+     existing D-073 diagnosis-substitution fixture ("...it was gastritis"
+     vs "...it was an ulcer") is `ENTITY_RELATION`, not `ACTION_EVENT`, on
+     D's own side -- this gate structurally never reaches it; the
+     pre-existing exact-type-match dedup gate still protects it,
+     unchanged (re-verified through the pre-group path too, Section 9).
+  2. candidate side restricted to a fixed allowlist of "asserts something
+     specific" types, excluding NEGATION/CORRECTION/CAUSE_EFFECT/
+     TEMPORAL_RELATION;
+  3. `_claim_signals_direction_sensitive` re-checked on BOTH sides
+     (causal/temporal safety);
+  4. negation-polarity agreement;
+  5. digit-value subset agreement (D's own numbers, if any, must survive
+     in R);
+  6. overlap coefficient (non-digit content tokens) must fall in the SAME
+     genuinely-ambiguous band PATH B's own dedup arbiter already uses
+     (`_DEDUP_AMBIGUOUS_FLOOR` to `_CLAIM_DEDUP_THRESHOLD`) -- confidently
+     similar or confidently dissimilar pairs never reach the arbiter.
+
+Candidate discovery (D-076's own strong-relation requirement -- same
+`source_asset_id` AND matching `attempt_id`/overlapping `source_span_
+ids`) is completely untouched; this directive adds no new discovery path
+and the arbiter cannot manufacture a relation (verified: an always-YES
+arbiter with no relation supplied never gets called at all).
+
+Reuses the EXACT existing D-061 `ClaimEquivalenceArbiter.claim_covered`
+protocol -- no new provider, model, budget system, or retry loop. When
+the configured arbiter is `None`, fails closed (no verification).
+
+OBSERVABILITY (Section 12): every consultation this strategy attempts is
+recorded (whether reachable or not) into a new additive `arbiter_
+consultations` field on `SemanticPreservationProof` and on the shared
+`evidence["arbiter_consultations"]` dict key -- method, deterministic
+result, eligibility, invocation, verdict, confidence, reason, and
+best-effort provider/model/budget introspection (`_arbiter_provenance`,
+read-only `getattr`, never fabricated). Confirmed via dedicated tests:
+zero arbiter calls for a deterministic pass (literal-subset D-074 case)
+and a deterministic fail (number mismatch); exactly one call, fully
+recorded, for the genuine ambiguous cross-type case.
+
+StoryValidator's own consumption is completely unchanged -- no new
+StoryValidator code path; the synonym-shaped proof flows through the
+exact same `semantic_preservation_proofs` lookup D-076 already wired
+(verified with a dedicated test).
+
+TESTS: tests/test_cutsell_d077_pre_group_claim_equivalence.py, 20 new
+tests -- D-074 synonym shape (verifies with arbiter, fails closed without
+one, never overridden by a declining honest arbiter), mandatory no-
+relation negative control (even with always-YES), same-topic different-
+event, the full hard-mismatch matrix (number/negation/diagnosis/
+attribution/causal/temporal, each with an always-YES arbiter and zero
+calls), the existing D-073 diagnosis fixture re-verified through the new
+path, sales/UGC positive (ambiguous, may verify) and negative (hard
+failure, never reaches arbiter) generalization, cost/observability
+(0 calls on deterministic pass/fail, full consultation record on the
+ambiguous case), strong relation via `source_span_relation` alone,
+StoryValidator consumer-only re-verification, and PATH B byte-identical
+regression.
+
+QUALIFICATION: compileall clean; D-050-D-077 targeted sweep 446 passed;
+CleanCutBench 54/54 LEGACY and 54/54 AUTHORITATIVE; full suite 1790
+passed (1770 baseline + 20 new), 0 regressions.
+
+QA_ENGINE VERDICT: PASS. Adversarial matrix (always-YES arbiter attack
+against every hard gate: number, negation, diagnosis/entity, attribution,
+causal, temporal, same-topic continuation, no-relation-at-all, and the
+pre-existing D-073 diagnosis-substitution fixture routed through this new
+path) found no unsafe override in any case -- every one fails closed with
+zero arbiter calls, confirming the hard gates run BEFORE the arbiter is
+even reachable, not merely that a well-behaved arbiter happens to decline.
+
+P0: 0
+P1: 0
+P2: 0
+P3: 0
+
+READY FOR ONE VIDEO00 CANARY: offline-qualified; awaiting explicit user
+authorization before any Modal canary.
+
+Then STOP.
+
+No Modal. No RAW.
+
 ## Change rule
 
 When a new decision changes product behavior, update this file in the same development cycle. Do not silently redefine CutSell through code alone.
