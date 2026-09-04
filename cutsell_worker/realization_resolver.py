@@ -936,6 +936,52 @@ def _claim_signals_direction_sensitive(claim: CanonicalClaimRecord) -> bool:
     return False
 
 
+# D-073.1 (same-idea proxy safety audit): a claim/candidate pairing pass
+# every deterministic content/negation/digit gate below AND still be an
+# unsafe "replacement" when R's matching claim is REPORTED/ATTRIBUTED
+# speech ("Some customers said it did not work for them...") while D's own
+# claim is a direct, unattributed assertion of the identical words ("It did
+# not work for me."). Bag-of-words content-token comparison cannot tell
+# "I assert X" from "someone else is quoted asserting X" -- and in
+# practice R's own clause reporting the third-party claim is very often
+# the SETUP half of a contrastive rebuttal ("...but it worked great for
+# me"), i.e. R's own NET assertion is the OPPOSITE of what the reported
+# clause's bare words say. Proven via a concrete adversarial fixture
+# during the D-073.1 audit (before this fix: `_claim_content_subsumed`
+# and `_claims_dedup_equivalent` both incorrectly certified this pairing).
+# Fix is a small, generic, bilingual reporting-verb/attribution marker set
+# this module owns itself -- same established pattern as
+# `_CAUSAL_VERB_MARKERS` -- not a change to `classify_claim`/`extract_
+# claims` and not a new claim type. Only blocks the ASYMMETRIC case (R's
+# matching claim carries attribution language D's own claim does not) --
+# a D claim that itself already carries the same attribution framing may
+# still match a same-attribution R claim normally.
+_REPORTED_ATTRIBUTION_MARKERS = (
+    "said", "says", "claimed", "claims", "reported", "reports",
+    "mentioned", "mentions", "according to",
+    "dijo", "dijeron", "afirmo", "afirmó", "afirmaron",
+    "segun", "según", "comento", "comentó", "mencionó", "mencionaron",
+)
+
+
+def _claim_has_reported_attribution(claim: CanonicalClaimRecord) -> bool:
+    text = (claim.text or "").lower()
+    if not text:
+        return False
+    return any(marker in text for marker in _REPORTED_ATTRIBUTION_MARKERS)
+
+
+def _preservation_blocked_by_attribution_asymmetry(
+    d_claim: CanonicalClaimRecord, r_claim: CanonicalClaimRecord,
+) -> bool:
+    """True when `r_claim` may never be used to certify `d_claim` preserved
+    -- R's own text attributes the claim to a third party ("said",
+    "according to", ...) while D's own text asserts it directly, with no
+    such attribution. See the module-level comment above this function's
+    own marker set for the concrete adversarial case this closes."""
+    return _claim_has_reported_attribution(r_claim) and not _claim_has_reported_attribution(d_claim)
+
+
 def _realization_digit_values(text: str) -> frozenset[str]:
     """D-073 Section 8 hard NUMBER gate, read from the REALIZATION's own
     raw text (`RealizationRecord.text` -- each realization's own clip
@@ -1027,9 +1073,18 @@ def _claim_preserved(
     TYPES`'s and `_CAUSAL_VERB_MARKERS`'s own docstrings for why even a
     configured arbiter is not trusted here. Stable order (sorted by
     canonical_claim_id) -- first match wins, never an arbitrary pick.
+    D-073.1: `r_claims` is filtered ONCE up front to drop any candidate
+    claim blocked by `_preservation_blocked_by_attribution_asymmetry` --
+    R's own reported/attributed speech can never certify a D claim asserted
+    directly, in ANY of the three matching strategies below (see that
+    function's own docstring for the proven adversarial case).
     Fails closed (returns `(None, "none")`) whenever nothing matches."""
     if _claim_signals_direction_sensitive(d_claim):
         return None, "none"
+    r_claims = tuple(
+        r_claim for r_claim in r_claims
+        if not _preservation_blocked_by_attribution_asymmetry(d_claim, r_claim)
+    )
     for r_claim in sorted(r_claims, key=lambda c: c.canonical_claim_id):
         if _claims_dedup_equivalent(
             d_claim, r_claim, claim_equivalence_arbiter=claim_equivalence_arbiter, arbiter_log=arbiter_log,

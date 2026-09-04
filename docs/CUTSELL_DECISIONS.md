@@ -7798,6 +7798,159 @@ canary (per D-073's own "Do not launch Modal" instruction).
 Then STOP.
 Do not launch Modal.
 
+## D-073.1 -- same-idea proxy safety audit (offline only, one defect found and fixed)
+
+Audited D-073's `candidate.state == "selected"` proxy for "verified same
+semantic idea/retry relation" (the only signal available for a TRUE orphan,
+which has no `semantic_idea_id` by definition).
+
+**Candidate origin (Section 1).** `candidate_clip_id = discard.pre_guard_
+candidate_clip_id` is the SOLE source (`realization_resolver.py` line
+~1134) -- no arbitrary search over selected realizations exists anywhere in
+PATH B. Traced upstream into `complete_retry_identity_guard.py`'s
+`protected()` wrapper: for a COMPLETE discarded realization, the pre-guard
+candidate already passed same-source-asset, later-start-within-24s,
+candidate.complete_idea==True, label confidence>=0.68, a real NUMBER-
+PRESERVATION filter (every number in D's raw text present in the
+candidate's), and a real topical-overlap floor (`_semantic_overlap`
+containment coefficient) >=0.64 -- it reaches PATH B only because it
+ADDITIONALLY failed the sequence-identity check (SequenceMatcher
+ratio<0.52) that would otherwise have made it PATH A's own certified
+replacement. For an INCOMPLETE discarded realization, the discovery step is
+looser (`INCOMPLETE_RETRY_LOOSER_MATCH`): no number-preservation filter, a
+lower 0.50 overlap floor -- a real, disclosed discovery-time asymmetry, but
+PATH B's own downstream claim-level checks (number/negation/content
+subsumption) independently re-verify preservation regardless of which
+discovery path found the candidate, so this asymmetry affects only which
+candidate is offered for verification, never whether a false one is
+certified.
+
+**What "selected" proves (Section 2).** Only that the candidate realization
+survives into the final kept timeline -- never semantic equivalence,
+direction, entity identity, or that R's own net assertion matches D's. It
+functions purely as a necessary precondition; all actual safety is carried
+by the separate, independent directional claim-preservation chain (D-073
+Sections 3-8), not by this proxy itself.
+
+**Adversarial testing (Sections 3-6).** Ran the exact founding
+`complete_retry_identity_guard` case, the full same-topic-different-event
+matrix (4 cases), the valid-superset matrix (2 cases), and an always-YES
+adversarial arbiter against both the founding case and the same-topic
+matrix -- all rejected correctly, and the arbiter was never even invoked
+(deterministic content/type mismatches reject before any arbiter-reachable
+branch). One genuine defect was found and proven via a constructed
+adversarial case NOT in the directive's own matrix: R's matching claim
+carrying REPORTED/ATTRIBUTED speech ("Some customers said it did not work
+for them...") could satisfy preservation for a D claim asserting the
+identical words directly and unattributed ("It did not work for me.") --
+even though R's own net assertion, in a contrastive-rebuttal frame
+("...but it worked great for me"), is the OPPOSITE of D's. Every
+deterministic content/negation/digit gate passed; the claim-preservation
+layer had no concept of speech attribution.
+
+**Fix** (`realization_resolver.py`): `_REPORTED_ATTRIBUTION_MARKERS` (a
+small, generic, bilingual reporting-verb/attribution marker set this
+module owns, same established pattern as `_CAUSAL_VERB_MARKERS`) and
+`_preservation_blocked_by_attribution_asymmetry` -- blocks the ASYMMETRIC
+case only (R's matching claim carries attribution language D's own claim
+does not); a D claim that itself already carries the same attribution
+framing may still match a same-attribution R claim normally (verified by a
+dedicated symmetric-attribution sanity test). Applied once, up front, in
+`_claim_preserved`, filtering the candidate pool before all three matching
+strategies -- not a redesign, not a new authority, not a lowered gate.
+
+**Provenance requirement (Section 7).** Based on code and 35 total
+adversarial/positive tests exercised across D-073 and this audit: an
+actual `semantic_idea_id`/`retry_family_id` relationship is NOT required
+for safety, given the full directional all-claim preservation contract is
+applied on top. Every attempted false certification was rejected by the
+claim-preservation layer, independent of the selected-state proxy; the one
+defect found (reported-attribution asymmetry) would NOT have been caught
+by requiring a same-idea id either, since it lives entirely in the
+claim-preservation layer, not in the idea-relation layer. Conclusion:
+the selected-state proxy is a correctly-scoped necessary precondition, and
+requiring an additional same-idea id would add complexity without closing
+any gap the preservation chain doesn't already close.
+
+Verified: 12 new targeted tests
+(`test_cutsell_d073_1_same_idea_proxy_audit.py`) lock in the founding case,
+the full same-topic-different-event matrix, the valid-superset matrix, the
+always-YES arbiter attack, the discovered reported-attribution defect
+(both broken-before and fixed-after), and the symmetric-attribution sanity
+case. 0 regressions: tests/test_cutsell_*.py 1749 passed (1737 D-073
+baseline + 12 new). CleanCutBench 54/54 LEGACY, 54/54 AUTHORITATIVE.
+Founding `complete_retry_identity_guard` tests unaffected.
+
+Final report (verbatim, as delivered):
+
+D-073.1 COMPLETE
+
+SELECTED-STATE PROXY:
+SUFFICIENT (as a necessary precondition; all safety is carried by the
+directional claim-preservation chain, not by this proxy)
+
+PRE-GUARD CANDIDATE RELATION:
+Sole origin is `discard.pre_guard_candidate_clip_id` -- no arbitrary
+search. For a complete D: already passed same-source-asset, later-start-
+within-24s, candidate-completeness, label-confidence, NUMBER-PRESERVATION,
+and >=0.64 topical overlap, failing only sequence-identity. For an
+incomplete D: looser (no number-preservation, 0.50 overlap floor) --
+disclosed, but re-verified independently by PATH B's own claim-level gates
+regardless.
+
+FOUNDING CONTINUATION CASE:
+REVIEW_REQUIRED (content-token subset check rejects: R's clause never
+contains "she" -- D's own subject/agent is not literally present in R)
+
+SAME-TOPIC DIFFERENT-EVENT SAFETY:
+PASS (all 4 matrix cases: REVIEW_REQUIRED)
+
+VALID SUPERSET REPLACEMENT:
+PASS (both matrix cases: REPLACEMENT_VERIFIED_SEMANTIC)
+
+ALWAYS-YES ARBITER SAFETY:
+PASS (arbiter never invoked for any same-topic-different-event or founding
+case -- deterministic gates reject first)
+
+ACTUAL SAME-IDEA ID REQUIRED:
+NO (based on tests/code -- the claim-preservation chain is sufficient and
+would not have been strengthened by an id-based relation for the one
+defect found)
+
+CODE CHANGE REQUIRED:
+YES -- one targeted fix: `_preservation_blocked_by_attribution_asymmetry`
+in realization_resolver.py, closing a proven reported/attributed-speech
+false-certification case discovered during this audit (not in the
+directive's own required matrix).
+
+QA_ENGINE VERDICT:
+PASS post-fix -- the audit's own adversarial search found one real P1-class
+defect (reported-attribution asymmetry could falsely certify a rebuttal
+frame as preserving a direct claim); fixed and locked in by 3 dedicated
+regression tests (broken-before shape, arbiter-attack variant, symmetric-
+attribution sanity check) before this verdict. No other unsafe case
+survived the founding case, the full same-topic-different-event matrix, or
+the always-YES arbiter attack.
+
+P0:
+0
+P1:
+1 (reported-attribution asymmetry -- FIXED, verified by regression tests,
+outcome: fixed)
+P2:
+0
+P3:
+0
+
+READY FOR ONE VIDEO00 CANARY:
+Offline-qualified; awaiting explicit user authorization before any Modal
+canary.
+
+Then STOP.
+
+No Modal.
+No RAW.
+
 ## Change rule
 
 When a new decision changes product behavior, update this file in the same development cycle. Do not silently redefine CutSell through code alone.
