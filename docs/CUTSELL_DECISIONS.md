@@ -6736,6 +6736,49 @@ READY FOR ONE FINAL VIDEO00 CANARY? YES
 
 Then STOP. Do not launch Modal.
 
+## D-059 canary -- final Video00 Modal run validating the proposition-scope fix live
+
+One authorized run (run [33819516264](https://github.com/AutomatedRetailServices/EditDNA-worker/actions/runs/33819516264), commit `db8a32d`, fixed config unchanged, retries=0, clean completion). No code changes before or after.
+
+**Hereditary 5-10% claim (D-059's own target)**: `coverage_against_winning_realization` for `claim_9387121066f1` (idea `tg_408fb4ac93d8dffb4f`, winning realization `clip_50308b2721b5fee0d949`) is now **0.3333** -- up from the D-058 canary's fabricated-mismatch value of 0.05. This is direct, confirmed proof the fix works exactly as designed: the shared-number-anchor proposition scope excluded the winning realization's own unrelated earlier negation clause, and the score landed in the genuine ambiguous band (`0.10 <= 0.3333 < 0.6`) instead of the fixed mismatch cap. **D-059 CLAIM SCOPE: PASS.**
+
+**Why Freeze still blocks on this claim anyway**: `resolve_ambiguous_coverage`'s ambiguous band requires a live `claim_equivalence_arbiter` to confirm the paraphrase; grep of `flow_b.py` (the real production entry point) confirms only `semantic_equivalence_arbiter` is ever instantiated and passed through the call chain (`universal_clean_cut.py` -> `final_story_coherence_validation.py` -> `realization_resolver.py`) -- `claim_equivalence_arbiter` is a fully-wired, never-instantiated dead parameter. So the ambiguous band always receives `arbiter=None` and fails open to "not covered" per the pre-existing, unchanged "WHEN UNCERTAIN, KEEP [the finding]" design. This is a **separate, newly discovered, out-of-scope structural gap** -- not a flaw in D-059's actual code, and not a regression of anything D-059 touched.
+
+**Safety preservation**: `contradiction_findings: []` (D-056.5 holds); `unresolved_families: []` (the hereditary retry family itself merged cleanly, confidence 0.9); all 3 same-proposition mismatch guards (negation/number/causal) remain green in the unchanged offline suite; no genuine mismatch case appeared live this run to additionally exercise on real data.
+
+**Authoritative engine**: 18 semantic ideas -- 17 RESOLVED_WINNER + 1 RESOLVED_COMPOSITE, 3 unresolved orphans correctly routed `REVIEW_REQUIRED` (not guessed). Zero unsafe discards, zero invalid composites, zero silent zero-realization ideas (`missing_idea_coverage: []`).
+
+**Human Gold**: 14/18 (down from the D-058 canary's 16/18). All D-058-targeted checks still PASS (`gastritis_preserved`, `family_context_preserved`, `acne_back_preserved`, `pimples_micro_1_present`, `pimples_micro_3_present`, `pimples_bad_monolith_absent`, `pimples_later_winner_present`). Failed: `papillary_cancer_preserved`, `pimples_micro_2_present`, `pimples_micro_order`, `sonography_good_before_diagnosis` -- the 2 new failures beyond the D-058 canary's original 2 look like run-to-run ASR/transcript nondeterminism, not investigated further per directive (report only, do not patch).
+
+**Architecture**: PASS, 0 failed checks. **CanonicalEditPlan** (`plan_8c19e0575518de38`, v1): created, 6 top-level ideas, 0 composite, all `coverage_status: complete`; `validation_state: freeze_blocked_pending_review`.
+
+**FinalEditReviewer**: `status: "FAIL"`, 2 blocking findings -- (1) `UNIQUE_FACT_LOST` on `clip_e065a01173052bbf8c78` ("Síntomas que tuve...", coverage 0.4), entirely unrelated to D-058/D-059; `repair_loop` reports `reason: "no_repair_strategy_exists_for_this_finding_kind"` for it -- a structural repair-loop coverage gap, not investigated further as it predates and is outside D-059's scope; (2) `CRITICAL_CLAIM_LOST` on the hereditary claim (above). 1 non-blocking warning (an incidental "2023" date atom, classified CONTEXTUAL).
+
+**Freeze**: BLOCKED on both findings above. **Render/QC**: not reached, `delivery_status: NOT_DELIVERABLE_not_attempted`, `deliverable: false`.
+
+**Single root blocker (earliest in FinalEditReviewer's findings array)**: Category F -- `UNIQUE_FACT_LOST` on `clip_e065a01173052bbf8c78`, for which `repair_loop` has no repair strategy for this finding kind at all (structural gap). The directive's primary-interest blocker, `CRITICAL_CLAIM_LOST` on the hereditary claim, is also Category F -- D-059's fix is proven correct; the residual gap is the missing live `claim_equivalence_arbiter` wiring in `flow_b.py`, not a grouping, resolver-winner, coverage-math, content-loss, or contradiction defect.
+
+### Final report (verbatim, as delivered)
+D-059 FINAL VIDEO00 CANARY COMPLETE
+D-059 CLAIM SCOPE: PASS
+TRUE NEGATION SAFETY: PASS
+NUMBER SAFETY: PASS
+CAUSAL SAFETY: PASS
+AUTHORITATIVE ENGINE: PASS
+Human Gold: 14/18
+Architecture: PASS
+CanonicalEditPlan: PASS
+FinalEditReviewer: FAIL
+Freeze: BLOCKED
+Render: NO
+PostRender QC: NOT_REACHED
+delivery_status: NOT_DELIVERABLE_not_attempted
+deliverable: false
+IF BLOCKED: single root blocker: UNIQUE_FACT_LOST on clip_e065a01173052bbf8c78 (StoryValidator) -- repair_loop has no repair strategy for this finding kind (structural gap, category F), unrelated to D-058/D-059. Secondary, D-059-relevant blocker: CRITICAL_CLAIM_LOST on the hereditary claim -- D-059's fix is proven correct (coverage moved from fabricated mismatch 0.05 to genuine ambiguous 0.3333), but no live claim_equivalence_arbiter is wired in flow_b.py to resolve the ambiguous band (structural gap, category F).
+READY FOR HUMAN VISUAL REVIEW: NO
+
+Then STOP. Did not patch. Did not launch another RAW.
+
 ## Change rule
 
 When a new decision changes product behavior, update this file in the same development cycle. Do not silently redefine CutSell through code alone.
