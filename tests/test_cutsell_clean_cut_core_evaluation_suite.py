@@ -851,7 +851,21 @@ def test_numeric_measurement_must_survive_blocks_freeze():
     assert classes.get("CRITICAL") == "measurement"
 
 
-def test_percentage_must_survive_blocks_freeze():
+def test_percentage_must_survive_via_critical_coverage_dominance():
+    # D-063: this fixture's two candidates tie exactly on the deterministic
+    # ranker's own score (both "text_timing_baseline" 1.0), so
+    # `apply_deterministic_best_take_authority` cannot break the tie and
+    # leaves BOTH selected -- the genuinely ambiguous, 2-selected shape
+    # CRITICAL_COVERAGE_DOMINANCE now resolves in `claim_coverage_best_
+    # take.py`, BEFORE Final Story Coherence Validation ever runs. Before
+    # D-063, this ambiguity reached StoryValidator's own residual-family
+    # fallback, which (with no claim-coverage awareness) could pick either
+    # side -- the percentage then only "survived" in the sense that losing
+    # it was CAUGHT and blocked. Now the fact survives directly: the
+    # candidate that actually carries it (`loser_atom`) is the one
+    # CRITICAL_COVERAGE_DOMINANCE prefers, so nothing is lost and Freeze is
+    # correctly not blocked at all -- a stronger guarantee than "catch the
+    # loss after the fact", not a weaker one.
     winner_text = "Most people who try the program end up quitting before they finish it."
     loser_text = "Only 15% of people who try the program actually end up finishing it."
     winner = _take("keeper", 0.0, 3.0, winner_text, complete=True)
@@ -859,11 +873,16 @@ def test_percentage_must_survive_blocks_freeze():
 
     draft, _, _ = _run_core((winner, loser), oracle_pairs={("keeper", "loser_atom")})
 
+    assert [c.clip_id for c in draft.selected] == ["loser_atom"]
+    assert [c.clip_id for c in draft.discarded] == ["keeper"]
+    dominance = draft.diagnostics["claim_coverage_best_take"]["dominance_resolutions"]
+    assert len(dominance) == 1
+    assert dominance[0]["winner_clip_id"] == "loser_atom"
+    assert dominance[0]["reason"] == "critical_coverage_dominance"
+
     diag = draft.diagnostics["final_story_coherence_validation"]
-    assert diag["freeze_blocked"] is True
-    finding = diag["lost_semantic_atoms"][0]
-    classes = {c["importance"]: c["evidence"] for c in finding["atom_classifications"]}
-    assert classes.get("CRITICAL") == "percentage"
+    assert diag["freeze_blocked"] is False
+    assert diag["lost_semantic_atoms"] == []
 
 
 def test_dose_quantity_must_survive_blocks_freeze():

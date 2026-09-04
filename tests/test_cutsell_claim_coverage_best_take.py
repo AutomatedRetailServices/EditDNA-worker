@@ -9,7 +9,7 @@ from cutsell_worker.claim_coverage_best_take import apply_claim_coverage_best_ta
 from cutsell_worker.contracts import DraftClip, DraftTimeline, EditStrategy, SCHEMA_VERSION
 
 
-def clip(clip_id, start, end, text, *, selected, source="src"):
+def clip(clip_id, start, end, text, *, selected, source="src", complete_idea=None):
     return DraftClip(
         clip_id=clip_id,
         source_asset_id=source,
@@ -19,6 +19,7 @@ def clip(clip_id, start, end, text, *, selected, source="src"):
         text=text,
         caption_text=text,
         selected=selected,
+        complete_idea=complete_idea,
     )
 
 
@@ -51,8 +52,13 @@ def test_single_member_group_is_skipped():
     assert out is d
 
 
-def test_ambiguous_two_current_winners_left_untouched():
-    # Both still selected -- not this module's job (StoryValidator's).
+def test_ambiguous_two_current_winners_resolved_by_critical_coverage_dominance():
+    # D-063: `a` strictly dominates `b` on CRITICAL-claim coverage (covers
+    # `b`'s ENTIRE content -- b has no critical claim of its own at all --
+    # plus the diagnosis fact `b` lacks). Before D-063 this was left
+    # untouched as "not this module's job"; now the dominant candidate
+    # becomes the family's sole winner instead of falling through to
+    # DUPLICATE_IDEA+UNRESOLVED_RETRY.
     a = clip("a", 0.0, 5.0, "The biopsy confirmed it was a benign tumor.", selected=True)
     b = clip("b", 5.0, 10.0, "It was just a routine checkup.", selected=True)
     d = draft(
@@ -60,7 +66,173 @@ def test_ambiguous_two_current_winners_left_untouched():
         take_judge_groups=[{"group_id": "g1", "ranked": [ranked_row("a", 0.9), ranked_row("b", 0.85)]}],
     )
     out = apply_claim_coverage_best_take(d)
+
+    assert [c.clip_id for c in out.selected] == ["a"]
+    assert [c.clip_id for c in out.discarded] == ["b"]
+    diag = out.diagnostics["claim_coverage_best_take"]
+    assert len(diag["dominance_resolutions"]) == 1
+    resolution = diag["dominance_resolutions"][0]
+    assert resolution["group_id"] == "g1"
+    assert resolution["winner_clip_id"] == "a"
+    assert resolution["discarded_clip_ids"] == ["b"]
+    assert resolution["reason"] == "critical_coverage_dominance"
+
+
+def test_dominance_ignores_ranked_delivery_score_ordering():
+    # D-063 test matrix item 2: `b` has the HIGHER ranked/delivery score,
+    # but `a` still wins on CRITICAL_COVERAGE_DOMINANCE -- this module
+    # never consults score for this branch, only claim coverage.
+    a = clip("a", 0.0, 5.0, "The biopsy confirmed it was a benign tumor.", selected=True)
+    b = clip("b", 5.0, 10.0, "It was just a routine checkup.", selected=True)
+    d = draft(
+        selected=(a, b),
+        take_judge_groups=[{"group_id": "g1", "ranked": [ranked_row("b", 0.95), ranked_row("a", 0.4)]}],
+    )
+    out = apply_claim_coverage_best_take(d)
+
+    assert [c.clip_id for c in out.selected] == ["a"]
+    assert [c.clip_id for c in out.discarded] == ["b"]
+
+
+def test_identical_critical_coverage_is_not_dominance_left_untouched():
+    # D-063 test matrix item 3: both candidates cover the exact same
+    # CRITICAL claim -- a proper superset can never hold between equal
+    # sets, so no forced pick here; delivery may decide it elsewhere, this
+    # module leaves the family exactly as it was.
+    a = clip("a", 0.0, 5.0, "The biopsy confirmed it was a benign tumor.", selected=True)
+    b = clip("b", 5.0, 10.0, "The biopsy confirmed it was a benign tumor, cleanly delivered.", selected=True)
+    d = draft(
+        selected=(a, b),
+        take_judge_groups=[{"group_id": "g1", "ranked": [ranked_row("a", 0.9), ranked_row("b", 0.85)]}],
+    )
+    out = apply_claim_coverage_best_take(d)
     assert out is d
+
+
+def test_extra_contextual_only_claim_does_not_dominate():
+    # D-063 test matrix item 4: `a` has an extra sentence, but it is
+    # SUPPORTING/CONTEXTUAL importance (an incidental year), not CRITICAL --
+    # coverage over CRITICAL claims alone is identical between `a` and `b`,
+    # so this must NOT be treated as dominance.
+    a = clip(
+        "a", 0.0, 5.0,
+        "The biopsy confirmed it was a benign tumor. It happened back in 2019.",
+        selected=True,
+    )
+    b = clip("b", 5.0, 10.0, "The biopsy confirmed it was a benign tumor.", selected=True)
+    d = draft(
+        selected=(a, b),
+        take_judge_groups=[{"group_id": "g1", "ranked": [ranked_row("a", 0.9), ranked_row("b", 0.85)]}],
+    )
+    out = apply_claim_coverage_best_take(d)
+    assert out is d
+
+
+def test_extra_critical_claim_but_genuine_contradiction_blocks_dominance():
+    # D-063 test matrix item 5: `a` technically covers an extra CRITICAL
+    # claim (5 percent vs 10 percent), but the two candidates directly
+    # contradict each other on it -- safety must never be overridden by
+    # coverage dominance (module docstring / Section 3).
+    a = clip(
+        "a", 0.0, 5.0,
+        "The biopsy confirmed it was a benign tumor. Only 5 percent of cases are hereditary.",
+        selected=True,
+    )
+    b = clip(
+        "b", 5.0, 10.0,
+        "The biopsy confirmed it was a benign tumor. Only 10 percent of cases are hereditary.",
+        selected=True,
+    )
+    d = draft(
+        selected=(a, b),
+        take_judge_groups=[{"group_id": "g1", "ranked": [ranked_row("a", 0.9), ranked_row("b", 0.85)]}],
+    )
+    out = apply_claim_coverage_best_take(d)
+    assert out is d
+
+
+def test_extra_critical_claim_but_incomplete_delivery_is_a_safe_fallback():
+    # D-063 test matrix item 6: `a` structurally dominates `b` on coverage,
+    # but `a` is itself a proven-incomplete/failed delivery -- do not
+    # blindly prefer a richer candidate that cannot actually deliver those
+    # claims usably. Left untouched (existing completeness evidence wins).
+    a = clip("a", 0.0, 5.0, "The biopsy confirmed it was a benign tumor.", selected=True, complete_idea=False)
+    b = clip("b", 5.0, 10.0, "It was just a routine checkup.", selected=True)
+    d = draft(
+        selected=(a, b),
+        take_judge_groups=[{"group_id": "g1", "ranked": [ranked_row("a", 0.9), ranked_row("b", 0.85)]}],
+    )
+    out = apply_claim_coverage_best_take(d)
+    assert out is d
+
+
+def test_disjoint_unique_critical_claims_no_dominance_stays_review_required():
+    # D-063 test matrix items 7 & 9: each candidate carries a DIFFERENT
+    # critical claim the other entirely lacks -- neither is a superset of
+    # the other, so there is no dominance either way. This is a genuine
+    # ambiguity: left exactly as it was, still falling through to
+    # StoryValidator/FinalEditReviewer's DUPLICATE_IDEA+UNRESOLVED_RETRY
+    # block (this codebase's production analog of REVIEW_REQUIRED).
+    a = clip("a", 0.0, 5.0, "The biopsy confirmed it was a benign tumor.", selected=True)
+    b = clip("b", 5.0, 10.0, "Only 5 percent of patients ever see this reaction.", selected=True)
+    d = draft(
+        selected=(a, b),
+        take_judge_groups=[{"group_id": "g1", "ranked": [ranked_row("a", 0.9), ranked_row("b", 0.85)]}],
+    )
+    out = apply_claim_coverage_best_take(d)
+    assert out is d
+
+
+def test_negation_contradiction_blocks_dominance_even_with_coverage_gap():
+    # D-063 test matrix item 10: semantic-winner-style evidence alone
+    # (whichever candidate "looks" more complete) must never override a
+    # genuine safety conflict -- here a negation-polarity contradiction --
+    # same posture as the numeric case above, different conflict shape.
+    a = clip(
+        "a", 0.0, 5.0,
+        "The biopsy confirmed it was a benign tumor. She is not the only one in her family with this.",
+        selected=True,
+    )
+    b = clip(
+        "b", 5.0, 10.0,
+        "The biopsy confirmed it was a benign tumor. She is the only one in her family with this.",
+        selected=True,
+    )
+    d = draft(
+        selected=(a, b),
+        take_judge_groups=[{"group_id": "g1", "ranked": [ranked_row("a", 0.9), ranked_row("b", 0.85)]}],
+    )
+    out = apply_claim_coverage_best_take(d)
+    assert out is d
+
+
+def test_d0621_generic_regression_fixture_auto_resolves_via_dominance():
+    # D-063 test matrix item 11: the D-062.1 forensic's generic shape --
+    # candidate A carries a distinct critical fact PLUS the shared
+    # reflective statement both sides carry; candidate B carries only the
+    # shared reflective statement. No Video00-specific text/ids -- this is
+    # the general pattern D-062.1 identified, not the literal fixture.
+    a = clip(
+        "a", 0.0, 5.0,
+        "The biopsy confirmed it was a benign tumor. "
+        "Looking back, I am really glad we caught it early.",
+        selected=True,
+    )
+    b = clip(
+        "b", 5.0, 10.0,
+        "Looking back, I am really glad we caught it early.",
+        selected=True,
+    )
+    d = draft(
+        selected=(a, b),
+        take_judge_groups=[{"group_id": "g1", "ranked": [ranked_row("a", 0.9), ranked_row("b", 0.88)]}],
+    )
+    out = apply_claim_coverage_best_take(d)
+
+    assert [c.clip_id for c in out.selected] == ["a"]
+    assert [c.clip_id for c in out.discarded] == ["b"]
+    diag = out.diagnostics["claim_coverage_best_take"]
+    assert diag["dominance_resolutions"][0]["winner_clip_id"] == "a"
 
 
 def test_no_critical_claims_in_group_is_untouched():

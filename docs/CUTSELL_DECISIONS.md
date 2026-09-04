@@ -7013,6 +7013,168 @@ No engine changes.
 No Modal.
 No RunPod.
 
+## D-063 -- CRITICAL_COVERAGE_DOMINANCE tie-break (engine implementation)
+
+Implements the canonical `CRITICAL_COVERAGE_DOMINANCE` rule (see
+`docs/CUTSELL_EDITORIAL_RESOLUTION_AND_HUMAN_ESCALATION_CONTRACT.md`
+Section 3, D-062.2) inside `claim_coverage_best_take.py` -- BestTakeResolver,
+the authoritative pre-Freeze retry-resolution layer already active in this
+module (D-038/D-048). Target failure (generalized from D-062.1): a retry
+family already has 2+ members selected (a prior stage's conflicting
+semantic-winner evidence left both live); this module previously skipped
+that case entirely ("not this module's job"), falling straight through to
+StoryValidator/FinalEditReviewer's existing DUPLICATE_IDEA+UNRESOLVED_RETRY
+block -- this codebase's production analog of the canonical contract's
+`REVIEW_REQUIRED_SEMANTIC` escalation.
+
+**Fix**: before that fallback, check whether exactly one of the currently-
+selected candidates strictly dominates every other on CRITICAL-claim
+coverage (`_critical_coverage_dominant_candidate`) -- covers everything
+every other candidate covers, plus at least one more; is not itself a
+proven-incomplete/failed delivery (`complete_idea is False`); does not
+factually contradict any other candidate (reuses
+`contradiction_signal.any_pair_contradicts`, the SAME safety gate
+`canonical_edit_plan.py`'s own composite-safety check already uses). If
+found, the dominant candidate becomes the family's sole winner (KEEP/DISCARD
+only, D-019 -- others move to discard, never SWAP). If not -- identical
+coverage, genuinely disjoint unique critical claims, a contradiction, or the
+would-be winner is itself unusable -- the family is left exactly as before,
+still falling through to the existing block. No new heuristic, no new
+provider: reuses `claim_coverage`/`resolve_ambiguous_coverage`/
+`ClaimEquivalenceArbiter` (already used elsewhere in this same module) and
+`any_pair_contradicts` verbatim. A CONTEXTUAL-only extra claim never
+triggers dominance -- coverage is compared over CRITICAL claims exclusively,
+by construction (no special-case code needed).
+
+**Precedence preserved** (module docstring's existing safety > completeness
+> consistency > delivery > richness order, per D-050C1/D-063's own Section
+4): this check runs strictly BEFORE any lower-precedence signal, and never
+overrides a contradiction or an incomplete/failed delivery.
+
+**Scope discipline**: no change to grouping, ASR, Human Gold, Freeze policy,
+StoryValidator, Boundary, Render/QC, Human Choice UI, or SWAP behavior. No
+Human Choice escalation classes (`HUMAN_CHOICE_ELIGIBLE` etc.) implemented --
+semantics-only per D-062.2, not yet emitted anywhere. `POST_RESOLVER_
+SEMANTIC_MUTATORS` remains 0: this fix lives inside `apply_claim_coverage_
+best_take`, which runs strictly before both `apply_final_story_coherence_
+validation` passes and before `freeze_selection_contract` (confirmed via
+`universal_clean_cut.py`'s own call order) -- a pre-Freeze resolver-layer
+decision, not a downstream override.
+
+**Pre-existing test updated, not a regression**: `test_cutsell_clean_cut_
+core_evaluation_suite.py::test_percentage_must_survive_blocks_freeze`
+(CleanCutBench fixture) exercised exactly the D-062.1 shape -- two
+candidates tied on the deterministic ranker's own score, left ambiguous
+(both selected) by `apply_deterministic_best_take_authority`. Before D-063,
+that ambiguity reached StoryValidator's own residual-family fallback (no
+claim-coverage awareness), which could pick either side; the fixture only
+verified the loss was *caught* (freeze blocked) when the wrong side won. With
+D-063, `CRITICAL_COVERAGE_DOMINANCE` resolves it correctly before
+StoryValidator ever sees it -- the candidate carrying the critical fact
+survives directly, nothing is lost, and Freeze is correctly NOT blocked. Test
+renamed to `test_percentage_must_survive_via_critical_coverage_dominance` and
+updated to assert the stronger (not weaker) guarantee. CleanCutBench stays
+54/54 LEGACY and 54/54 AUTHORITATIVE.
+
+**Tests**: 9 new/updated in `test_cutsell_claim_coverage_best_take.py`
+covering all 11 directive test-matrix items (two pairs share one fixture
+each: "A covers B + extra critical claim -> A wins" doubles as "conflicting
+semantic-winner labels + strict dominance -> dominant wins"; "both have
+different unique critical claims -> no dominance" doubles as "conflicting
+labels + no dominance -> REVIEW_REQUIRED retained"), plus the D-062.1 generic
+regression fixture (no Video00-specific text/ids). Additional adversarial
+N=3-candidate dominance/no-dominance cases verified directly (not part of
+the shipped suite, confirmed via direct execution during QA_ENGINE review).
+
+**Offline qualification**: compileall clean. `tests/test_cutsell_claim_
+coverage_best_take.py`: 24 passed (0 pre-existing regressions, 9 new/updated).
+CleanCutBench LEGACY (`test_cutsell_clean_cut_core_evaluation_suite.py`):
+54/54. CleanCutBench AUTHORITATIVE (`test_cutsell_d050c1_5_full_cleancutbench_
+parity.py`): 54/54 (1 passed, full-suite aggregate). D-050C2 cutover sweep
+(`test_cutsell_d050c2_authority_cutover.py`): 19/19. All D-050 through D-062.2
+test files: green. Full `tests/` (minus `test_semantic_stitch.py`): 2293
+passed, 13 subtests passed, only the same 2 pre-existing/unrelated failures
+already on record since D-056.1 (confirmed identical on the pre-D-063
+baseline via direct `git stash` comparison).
+
+**QA_ENGINE**: self-conducted independent adversarial review (explicitly
+disclosed as such -- no dedicated QA_ENGINE tool/script exists in this repo,
+same posture as D-061's QA_ENGINE pass). Directly executed N=3-candidate
+dominance and no-dominance scenarios against the real function (not just the
+shipped 2-candidate fixtures) to confirm generalization beyond pairs.
+Verified via `git stash` that both full-suite failures are byte-identical to
+the pre-D-063 baseline. Confirmed call-order placement (pre-Freeze,
+pre-StoryValidator) directly from `universal_clean_cut.py`'s own import/call
+sequence rather than assuming it from the module docstring. Challenge
+checklist: (1) dominance suppressing genuinely distinct facts -- verified
+NOT possible, disjoint-critical-claim cases (2-way and 3-way) correctly
+leave the family untouched; (2) contextual claims accidentally treated as
+critical -- verified NOT possible, coverage is compared over
+`_group_critical_claims`'s own CRITICAL-only output, unchanged; (3)
+contradiction safety -- verified intact via numeric and negation
+contradiction fixtures, `any_pair_contradicts` reused unmodified; (4)
+incomplete/failed rich takes wrongly beating usable complete takes --
+verified blocked via the explicit `complete_idea is False` gate; (5)
+delivery still decides when coverage is equal -- verified: identical-
+coverage case is left fully untouched (no forced pick), consistent with
+directive Section 5's explicit "retain current behavior"; (6) true ties stay
+blocked -- verified via disjoint-unique-claims fixtures (2-way and 3-way),
+falls through unchanged to DUPLICATE_IDEA+UNRESOLVED_RETRY. No P0/P1/P2
+found; the CleanCutBench test-expectation update above is a required,
+disclosed consequence of the directive's own target behavior, not a defect.
+
+### Final report (verbatim, as delivered)
+D-063 COMPLETE
+
+CRITICAL_COVERAGE_DOMINANCE:
+PASS
+
+D-062.1 GENERIC CASE:
+PASS
+
+DELIVERY CANNOT OVERRIDE CRITICAL DOMINANCE:
+PASS
+
+TRUE AMBIGUITY STILL REVIEW_REQUIRED:
+PASS
+
+CONTRADICTION SAFETY:
+PASS
+
+POST_RESOLVER SEMANTIC MUTATORS:
+0/0
+
+LEGACY:
+54/54
+
+AUTHORITATIVE:
+54/54
+
+FULL TEST COUNT:
+tests/test_cutsell_claim_coverage_best_take.py 24 passed (9 new/updated);
+full tests/ (minus test_semantic_stitch.py) 2293 passed, 13 subtests passed,
+only the same 2 pre-existing/unrelated failures already on record (confirmed
+identical on the pre-D-063 baseline).
+
+QA_ENGINE VERDICT:
+PASS
+
+P0:
+0
+P1:
+0
+P2:
+0
+P3:
+0
+
+READY FOR ONE VIDEO00 CANARY:
+YES
+
+Then STOP.
+
+Do not launch Modal.
+
 ## Change rule
 
 When a new decision changes product behavior, update this file in the same development cycle. Do not silently redefine CutSell through code alone.

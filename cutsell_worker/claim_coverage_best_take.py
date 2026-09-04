@@ -44,11 +44,40 @@ Resolution, bounded:
 Ambiguity fails open throughout, same posture as `deterministic_best_take_
 authority.py`: any contest this module is not confident about is left
 exactly as it was.
+
+D-063 CRITICAL_COVERAGE_DOMINANCE (an already-ambiguous, 2+-selected
+family): the three cases above all assume exactly ONE current winner. When
+a retry-family group instead already has 2+ members selected (e.g. a prior
+stage's conflicting semantic-winner evidence left both live), this module
+used to skip it entirely as "not this module's job", falling straight
+through to StoryValidator/FinalEditReviewer's existing
+DUPLICATE_IDEA+UNRESOLVED_RETRY block -- this codebase's production analog
+of the canonical CUTSELL_EDITORIAL_RESOLUTION_AND_HUMAN_ESCALATION_CONTRACT
+doctrine's `REVIEW_REQUIRED_SEMANTIC` escalation (see
+docs/CUTSELL_DECISIONS.md D-062.1's forensic and D-062.2/D-063). Before
+that fallback, this module now checks whether exactly one of the
+currently-selected candidates strictly dominates every other on CRITICAL-
+claim coverage (`_critical_coverage_dominant_candidate`, reusing the SAME
+`claim_coverage`/`resolve_ambiguous_coverage`/`ClaimEquivalenceArbiter`
+machinery every other check in this module already uses, plus the SAME
+`contradiction_signal.any_pair_contradicts` safety gate
+`canonical_edit_plan.py`'s own composite-safety check already uses -- no
+new heuristic, no new provider). If found, the dominant candidate becomes
+the family's sole winner (KEEP/DISCARD only, D-019: the others move to
+discard, never a SWAP). If not -- identical coverage, genuinely disjoint
+unique claims, a factual contradiction between candidates, or the would-be
+winner is itself a proven-incomplete/failed delivery -- the family is left
+untouched, exactly as before this directive, and still falls through to
+the existing block. See `docs/CUTSELL_EDITORIAL_RESOLUTION_AND_HUMAN_ESCALATION_CONTRACT.md`
+Section 3 for the full CRITICAL_COVERAGE_DOMINANCE contract this
+implements verbatim, and its Section 4 for why this check runs BEFORE any
+semantic-winner-label evidence is ever consulted.
 """
 from __future__ import annotations
 
 from dataclasses import replace
 
+from .contradiction_signal import any_pair_contradicts
 from .final_sibling_grouping import _content, _numbers
 from .semantic_atom_importance import _TEMPORAL_ASIDE_MARKERS, _clause_has_any, _looks_like_year
 from .semantic_claims import (
@@ -195,6 +224,65 @@ def _covered_claim_ids(claims, text: str, *, arbiter: ClaimEquivalenceArbiter | 
     return frozenset(covered)
 
 
+def _critical_coverage_dominant_candidate(
+    candidate_ids: list[str],
+    all_clips: dict,
+    critical_claims,
+    *,
+    claim_equivalence_arbiter: ClaimEquivalenceArbiter | None = None,
+) -> str | None:
+    """D-063 CRITICAL_COVERAGE_DOMINANCE. See module docstring and
+    `docs/CUTSELL_EDITORIAL_RESOLUTION_AND_HUMAN_ESCALATION_CONTRACT.md`
+    Section 3 for the full contract. Returns the one candidate id (among
+    `candidate_ids`, all already-selected members of one ambiguous retry
+    family) whose CRITICAL-claim coverage is a PROPER superset of every
+    OTHER candidate's own CRITICAL-claim coverage -- covers everything
+    every other candidate covers, plus at least one more -- and is safe to
+    prefer outright:
+
+      - not itself a proven-incomplete/failed delivery (`complete_idea is
+        False`); CLAUDE.md "WHEN UNCERTAIN, KEEP" means unknown/unset
+        completeness (`None`, the common case for hand-authored fixtures
+        and most real clips) is never treated as a disqualifier, only an
+        EXPLICIT `False` is;
+      - does not factually contradict any other candidate in the family
+        (`contradiction_signal.any_pair_contradicts`, the same safety gate
+        `canonical_edit_plan.py`'s own composite-safety check already uses
+        -- never a second, independently-derived contradiction heuristic).
+
+    Returns `None` whenever no such single candidate exists: identical
+    coverage between candidates (a proper superset can never hold when two
+    sets are equal), each candidate covers something CRITICAL the other
+    lacks (genuinely disjoint, no dominance either way), a contradiction is
+    present, or the only structurally-dominant candidate is itself an
+    unusable/incomplete delivery. The caller must then leave the family
+    exactly as it was -- D-063 Section 5: "if neither dominates, retain
+    current REVIEW_REQUIRED behavior".
+
+    A CONTEXTUAL-only extra claim never makes a candidate "dominant" here:
+    `critical_claims` is already filtered to CRITICAL importance only by
+    the caller (`_group_critical_claims`), so coverage is compared over
+    CRITICAL claims exclusively -- this needs no special-case code, it
+    falls directly out of only ever comparing critical-claim coverage
+    sets."""
+    coverage_by_id = {
+        cid: _covered_claim_ids(critical_claims, str(all_clips[cid].text or ""), arbiter=claim_equivalence_arbiter)
+        for cid in candidate_ids
+    }
+    dominant = [
+        cid for cid in candidate_ids
+        if all(coverage_by_id[other] < coverage_by_id[cid] for other in candidate_ids if other != cid)
+    ]
+    if len(dominant) != 1:
+        return None
+    winner_id = dominant[0]
+    if all_clips[winner_id].complete_idea is False:
+        return None  # D-063 Section 6: never blindly prefer a proven-incomplete/failed delivery
+    if any_pair_contradicts([str(all_clips[cid].text or "") for cid in candidate_ids]):
+        return None  # D-063 Section 3/4: safety is never overridden by coverage dominance
+    return winner_id
+
+
 def _time_compatible(left, right) -> bool:
     if left.source_asset_id != right.source_asset_id:
         return False
@@ -233,6 +321,7 @@ def apply_claim_coverage_best_take(
     composites: list[dict] = []
     unresolved_gaps: list[dict] = []
     suppressed_incidental_overrides: list[dict] = []
+    dominance_resolutions: list[dict] = []
 
     def move(clip_id: str, target: str) -> None:
         clip = all_clips[clip_id]
@@ -251,10 +340,42 @@ def apply_claim_coverage_best_take(
             continue
 
         current_winners = [cid for cid, _clip in members if bucket_of(cid) == "select"]
-        if len(current_winners) != 1:
-            # Not this module's job: an unresolved (2+ still selected) or
-            # already-fully-lost (0 selected) family is StoryValidator's
-            # existing territory.
+        if len(current_winners) == 0:
+            # Already-fully-lost family -- StoryValidator's existing
+            # territory, unrelated to D-063 (scoped to the >=2 ambiguous
+            # case only).
+            continue
+        if len(current_winners) >= 2:
+            # D-063 CRITICAL_COVERAGE_DOMINANCE: before this ambiguous,
+            # already-multi-selected family falls through unchanged to
+            # StoryValidator/FinalEditReviewer's existing
+            # DUPLICATE_IDEA+UNRESOLVED_RETRY block, check whether exactly
+            # one currently-selected candidate strictly dominates every
+            # other on CRITICAL-claim coverage. See module docstring and
+            # `_critical_coverage_dominant_candidate`'s own docstring for
+            # the full contract.
+            dominance_critical_claims = _group_critical_claims(members, clause_role_arbiter=clause_role_arbiter)
+            dominant_id = (
+                _critical_coverage_dominant_candidate(
+                    current_winners, all_clips, dominance_critical_claims,
+                    claim_equivalence_arbiter=claim_equivalence_arbiter,
+                )
+                if dominance_critical_claims else None
+            )
+            if dominant_id is not None:
+                for cid in current_winners:
+                    if cid != dominant_id:
+                        move(cid, "discard")
+                dominance_resolutions.append({
+                    "group_id": group_id,
+                    "winner_clip_id": dominant_id,
+                    "discarded_clip_ids": sorted(cid for cid in current_winners if cid != dominant_id),
+                    "reason": "critical_coverage_dominance",
+                })
+            # Whether resolved or not, this module's job on this
+            # already-multi-selected family ends here -- D-063 Section 5:
+            # "if neither dominates, retain current REVIEW_REQUIRED
+            # behavior" (no forced pick, family left exactly as it was).
             continue
         winner_id = current_winners[0]
         winner_clip = all_clips[winner_id]
@@ -420,7 +541,7 @@ def apply_claim_coverage_best_take(
                 "reason": "no_single_or_paired_candidate_safely_covers_every_critical_claim",
             })
 
-    if not (overrides or composites or unresolved_gaps or suppressed_incidental_overrides):
+    if not (overrides or composites or unresolved_gaps or suppressed_incidental_overrides or dominance_resolutions):
         return draft
 
     def _order(clip):
@@ -441,5 +562,12 @@ def apply_claim_coverage_best_take(
         # and low-information/incidental relative to the current winner --
         # see _override_blocked_by_incidental_self_source_claims.
         "suppressed_incidental_overrides": suppressed_incidental_overrides,
+        # D-063: already-ambiguous (2+ selected) families resolved via
+        # CRITICAL_COVERAGE_DOMINANCE -- see
+        # `_critical_coverage_dominant_candidate`'s own docstring. Empty
+        # whenever no such family existed, or none had a single dominant
+        # candidate (still falls through to the existing
+        # DUPLICATE_IDEA+UNRESOLVED_RETRY block unchanged).
+        "dominance_resolutions": dominance_resolutions,
     }
     return replace(draft, selected=selected, alternates=alternates, discarded=discarded, diagnostics=diagnostics)
