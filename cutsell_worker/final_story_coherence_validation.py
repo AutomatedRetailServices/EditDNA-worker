@@ -474,7 +474,9 @@ def _same_idea_paraphrase_credit(
 
 
 def _lost_semantic_atoms(
-    draft, *, semantic_atom_importance_arbiter: SemanticAtomImportanceArbiter | None = None,
+    draft, *,
+    semantic_atom_importance_arbiter: SemanticAtomImportanceArbiter | None = None,
+    semantic_preservation_proofs: Mapping[str, object] | None = None,
 ) -> list[dict]:
     """General coverage ledger over the ACTUAL final KEEP timeline.
 
@@ -584,6 +586,39 @@ def _lost_semantic_atoms(
             arbiter=semantic_atom_importance_arbiter,
         )
         blocking = content_loss or any(blocks_freeze(c.importance) for c in classifications)
+
+        # D-076: a verified SEMANTIC_PRESERVATION_PROOF from the Unified
+        # Resolver (LEXICAL_REPLACEMENT/SEMANTIC_REPLACEMENT for a
+        # hybrid_editorial_chunks discard already certified by PATH A/PATH
+        # B, or PRE_GROUP_SEMANTIC_PRESERVATION for a discard that never
+        # reached grouping at all -- see realization_resolver.py's own
+        # SemanticPreservationProof/build_semantic_preservation_proofs
+        # docstrings) may ALSO suppress an otherwise-blocking finding, or
+        # simply upgrade this row's own classification/evidence when it
+        # was already non-blocking for an unrelated reason (e.g. its only
+        # missing atom was already CONTEXTUAL) -- Section 6's own "must
+        # not be silently dropped from diagnostics" requires surfacing a
+        # genuine proof even then, never only when it flips a verdict.
+        # Only consulted when GROUPED_SAME_IDEA (`_same_idea_paraphrase_
+        # credit` above) did NOT already claim this row -- that mechanism
+        # keeps its own precedence untouched. StoryValidator only ever
+        # CONSUMES this proof -- one dict lookup -- it never discovers a
+        # candidate, extracts a claim, ranks a retry, or invokes an
+        # arbiter itself for this decision. A proof that is present but
+        # not `verified` changes nothing: current fail-closed behavior
+        # remains exactly as before this directive.
+        preserving_realization_id = None
+        preserved_claim_ids: tuple = ()
+        nonrequired_omissions: tuple = ()
+        if semantic_preservation_proofs is not None and suppressed_reason is None:
+            proof = semantic_preservation_proofs.get(clip.clip_id)
+            if proof is not None and bool(getattr(proof, "verified", False)):
+                blocking = False
+                suppressed_reason = str(getattr(proof, "proof_method", "") or "")
+                preserving_realization_id = getattr(proof, "preserving_id", None)
+                preserved_claim_ids = tuple(getattr(proof, "preserved_claim_ids", ()) or ())
+                nonrequired_omissions = tuple(getattr(proof, "nonrequired_omissions", ()) or ())
+
         row = {
             "clip_id": clip.clip_id,
             "text": text,
@@ -611,6 +646,12 @@ def _lost_semantic_atoms(
         }
         if suppressed_reason is not None:
             row["content_loss_suppressed_by"] = suppressed_reason
+        if preserving_realization_id is not None:
+            row["preserving_realization_id"] = preserving_realization_id
+        if preserved_claim_ids:
+            row["preserved_claim_ids"] = list(preserved_claim_ids)
+        if nonrequired_omissions:
+            row["nonrequired_omissions"] = [dict(o) for o in nonrequired_omissions]
         findings.append(row)
     return findings
 
@@ -722,6 +763,13 @@ def apply_final_story_coherence_validation(
     semantic_atom_importance_arbiter: SemanticAtomImportanceArbiter | None = None,
     claim_equivalence_arbiter: ClaimEquivalenceArbiter | None = None,
     clause_role_arbiter: ClauseRoleArbiter | None = None,
+    # D-076: an optional, pre-built map of clip_id -> SemanticPreservation
+    # Proof (realization_resolver.py) -- structurally can only be supplied
+    # by a caller that already built a Semantic Ledger (AUTHORITATIVE
+    # mode's second pass; see universal_clean_cut.py's own call site
+    # comment). None everywhere else -- current fail-closed behavior is
+    # then byte-for-byte unchanged.
+    semantic_preservation_proofs: Mapping[str, object] | None = None,
 ):
     """Last semantic authority before Selection Freeze. See module docstring."""
     draft = _fold_alternates_into_discarded(draft)
@@ -797,6 +845,7 @@ def apply_final_story_coherence_validation(
     missing_idea_coverage = _missing_idea_coverage(draft)
     lost_semantic_atoms = _lost_semantic_atoms(
         draft, semantic_atom_importance_arbiter=semantic_atom_importance_arbiter,
+        semantic_preservation_proofs=semantic_preservation_proofs,
     )
     lost_critical_claims, claim_coverage_confirmations = _lost_critical_claims(
         draft, claim_equivalence_arbiter=claim_equivalence_arbiter, clause_role_arbiter=clause_role_arbiter,

@@ -182,6 +182,7 @@ from .claim_coverage_best_take import (
 )
 from .contracts import DraftTimeline
 from .final_sibling_grouping import _negations
+from .semantic_atom_importance import blocks_freeze, classify_number_atom
 from .semantic_claims import (
     CAUSE_EFFECT,
     CONTRASTIVE_HINDSIGHT_NEGATION,
@@ -775,6 +776,66 @@ VERIFICATION_METHOD_LEXICAL = "lexical"
 VERIFICATION_METHOD_SEMANTIC = "semantic"
 
 
+# D-076: SEMANTIC_PRESERVATION_PROOF -- see docs/CUTSELL_DECISIONS.md D-075
+# for the accepted design and D-076 for this implementation. One reusable,
+# directional evidence object answering the same question regardless of
+# which existing authority produced it: "is discarded content D's required
+# meaning already accounted for by selected realization R?"
+# GROUPED_SAME_IDEA is minted by StoryValidator's own existing
+# `_same_idea_paraphrase_credit` (final_story_coherence_validation.py,
+# D-061 Phase 1) -- unchanged, not reframed into this dataclass here (it
+# already IS a proof-shaped decision at its own point of use).
+# LEXICAL_REPLACEMENT/SEMANTIC_REPLACEMENT are this module's own existing
+# PATH A/PATH B verdicts (`REPLACEMENT_VERIFIED_SAFE`/`REPLACEMENT_
+# VERIFIED_SEMANTIC`), reframed into this shape by `build_semantic_
+# preservation_proofs` below purely for StoryValidator's consumption --
+# PATH A/PATH B's OWN verdict logic is never touched.
+# PRE_GROUP_SEMANTIC_PRESERVATION is the one genuinely NEW certification
+# path this directive adds -- see `_attempt_pre_group_semantic_
+# preservation` below.
+PROOF_METHOD_GROUPED_SAME_IDEA = "GROUPED_SAME_IDEA"
+PROOF_METHOD_LEXICAL_REPLACEMENT = "LEXICAL_REPLACEMENT"
+PROOF_METHOD_SEMANTIC_REPLACEMENT = "SEMANTIC_REPLACEMENT"
+PROOF_METHOD_PRE_GROUP_SEMANTIC_PRESERVATION = "PRE_GROUP_SEMANTIC_PRESERVATION"
+
+
+@dataclass(frozen=True)
+class SemanticPreservationProof:
+    """D-076: an additive, directional evidence object -- never a second
+    authority. Every field is populated by the SAME certification chain
+    PATH B already uses (`_certify_directional_semantic_preservation`);
+    this dataclass only packages the result for StoryValidator's
+    consumption (`final_story_coherence_validation.py` reads `.verified`
+    and, when true, the remaining fields -- it computes nothing of its own
+    from this object). `verified=False` proofs are still returned (never
+    dropped) so `rejection_reason` stays visible in diagnostics per
+    Section 14 -- StoryValidator itself only ever acts on a verified one."""
+
+    discarded_id: str
+    preserving_id: str | None
+    proof_method: str  # "" | one of the PROOF_METHOD_* constants above
+    preserved_claim_ids: tuple[str, ...] = ()
+    # D-076 Section 6: an atom (today, always a number) that IS absent from
+    # the preserving realization's own text but that the EXISTING
+    # `semantic_atom_importance.classify_number_atom`/`blocks_freeze`
+    # classifiers already establish as non-required -- reused verbatim,
+    # never a new importance tier. Always recorded, never silently dropped,
+    # regardless of whether the overall proof ends up verified.
+    nonrequired_omissions: tuple[Mapping[str, object], ...] = ()
+    hard_gate_results: Mapping[str, object] = field(default_factory=dict)
+    arbiter_invoked: bool = False
+    verified: bool = False
+    rejection_reason: str = ""
+    # D-076 Section 4 observability: which strong-relation evidence (if
+    # any) made a PRE_GROUP_SEMANTIC_PRESERVATION candidate eligible for
+    # certification in the first place -- "" for the other three proof
+    # methods, which have their own, separately-diagnosed discovery
+    # mechanisms (D-072's pre-guard candidate, StoryValidator's take-judge
+    # grouping).
+    relationship_evidence: str = ""
+    candidate_discovery_method: str = ""
+
+
 @dataclass(frozen=True)
 class OrphanRealizationReview:
     """See module docstring's Hard Invariant E: a realization the current
@@ -1198,38 +1259,108 @@ def _attempt_semantic_replacement_certification(
     if candidate_realization_id is None:
         evidence["semantic_replacement_reason"] = "candidate_realization_not_found"
         return None, None, evidence["semantic_replacement_reason"], evidence
-    evidence["candidate_replacement_realization_id"] = candidate_realization_id
     candidate_record = realizations[candidate_realization_id]
+
+    verified, reason = _certify_directional_semantic_preservation(
+        record, candidate_record, candidate_realization_id, ledger,
+        claim_equivalence_arbiter=claim_equivalence_arbiter, evidence=evidence,
+    )
+    if not verified:
+        return None, None, reason, evidence
+    return REPLACEMENT_VERIFIED_SEMANTIC, candidate_realization_id, reason, evidence
+
+
+def _sanitize_claim_for_nonrequired_omissions(
+    claim: CanonicalClaimRecord, omitted_digit_values: frozenset[str],
+) -> CanonicalClaimRecord:
+    """D-076 Section 6: strips ONLY the specific digit VALUES the caller
+    has already classified as non-required (via the existing
+    `semantic_atom_importance` classifiers -- see `_classify_pre_group_
+    number_omissions`) from this one claim's own `content_tokens` and raw
+    `text` -- never any other token, never a negation marker, never a
+    non-digit word. Returns `claim` UNCHANGED (the same object) when
+    `omitted_digit_values` is empty, which is PATH B's own call --
+    byte-identical behavior guaranteed by construction, not convention.
+
+    Exists because the realization-level NUMBER gate above operates on
+    the WHOLE realization's text, but `_claim_preserved`'s own content-
+    token subset/dedup checks operate per-claim and have no visibility
+    into that gate's own classification: a required clause can share ONE
+    clause with an already-cleared CONTEXTUAL digit (e.g. "I had gastritis
+    in 2023."), and without this the per-claim subset check would still
+    fail on that literal digit token even though the realization-level
+    gate already proved it safe to omit."""
+    if not omitted_digit_values:
+        return claim
+    sanitized_text = claim.text
+    for value in omitted_digit_values:
+        sanitized_text = re.sub(r"\b" + re.escape(value) + r"\b", " ", sanitized_text)
+    return replace(
+        claim, content_tokens=claim.content_tokens - omitted_digit_values, text=sanitized_text,
+    )
+
+
+def _certify_directional_semantic_preservation(
+    record: RealizationRecord,
+    candidate_record: RealizationRecord,
+    candidate_realization_id: str,
+    ledger: SemanticLedger,
+    *,
+    claim_equivalence_arbiter: ClaimEquivalenceArbiter | None,
+    evidence: dict,
+    nonrequired_digit_omissions: frozenset[str] = frozenset(),
+) -> tuple[bool, str]:
+    """D-073/D-076 shared directional preservation certification chain --
+    D's required meaning subset of R's required meaning. Takes an ALREADY-
+    DISCOVERED candidate; contains no candidate-discovery logic of its own
+    (each caller's own discovery method is what legitimately differs --
+    D-072's pre-guard candidate for PATH B, D-076's strong-relation
+    discovery for PRE_GROUP_SEMANTIC_PRESERVATION). Reused verbatim by
+    both -- this is "reuse the exact existing D-073/D-073.1 semantic
+    preservation chain," not a second implementation of it.
+
+    `nonrequired_digit_omissions` (D-076 Section 6, default empty): digit
+    VALUES from D's own realization text that the CALLER has already
+    classified, via the existing `semantic_atom_importance` classifiers,
+    as safe to omit (e.g. a bare incidental year) -- PATH B's own call
+    passes nothing here, so its NUMBER gate stays byte-identical to before
+    D-076 (any missing digit still fails closed). Mutates and returns
+    `evidence` in place; caller owns constructing/initializing it."""
+    evidence["candidate_replacement_realization_id"] = candidate_realization_id
 
     if candidate_record.state != "selected":
         evidence["semantic_replacement_reason"] = "candidate_not_selected"
-        return None, None, evidence["semantic_replacement_reason"], evidence
+        return False, evidence["semantic_replacement_reason"]
     evidence["same_idea_verified"] = True
 
     if candidate_record.complete_idea is False:
         evidence["semantic_replacement_reason"] = "candidate_incomplete"
-        return None, None, evidence["semantic_replacement_reason"], evidence
+        return False, evidence["semantic_replacement_reason"]
 
     d_realization_values = _realization_digit_values(record.text)
     r_realization_values = _realization_digit_values(candidate_record.text)
     # Subset, not exact equality: every number D asserts must survive in R,
     # but R may legitimately carry ADDITIONAL numbers beyond D's own (the
     # same safe-superset direction Section 3 requires everywhere else --
-    # see `_claim_content_subsumed`'s own digit check).
-    evidence["hard_gate_results"]["realization_number_match"] = (
-        not d_realization_values or d_realization_values.issubset(r_realization_values)
-    )
-    if d_realization_values and not d_realization_values.issubset(r_realization_values):
+    # see `_claim_content_subsumed`'s own digit check). A digit value the
+    # caller has already pre-classified as non-required (D-076) is
+    # excluded from the "missing" set here, never from the gate itself.
+    missing_values = d_realization_values - r_realization_values - nonrequired_digit_omissions
+    evidence["hard_gate_results"]["realization_number_match"] = not missing_values
+    if missing_values:
         evidence["semantic_replacement_reason"] = "number_mismatch"
-        return None, None, evidence["semantic_replacement_reason"], evidence
+        return False, evidence["semantic_replacement_reason"]
 
     claims = ledger.claims()
-    d_claims = tuple(claims[cid] for cid in record.claim_ids if cid in claims)
+    d_claims = tuple(
+        _sanitize_claim_for_nonrequired_omissions(claims[cid], nonrequired_digit_omissions)
+        for cid in record.claim_ids if cid in claims
+    )
     r_claims = tuple(claims[cid] for cid in candidate_record.claim_ids if cid in claims)
 
     if not d_claims:
         evidence["semantic_replacement_reason"] = "no_extractable_claims_uncertain_content"
-        return None, None, evidence["semantic_replacement_reason"], evidence
+        return False, evidence["semantic_replacement_reason"]
 
     contradictions = _detect_contradiction_signals({
         record.realization_id: d_claims, candidate_realization_id: r_claims,
@@ -1240,8 +1371,9 @@ def _attempt_semantic_replacement_certification(
         evidence["hard_gate_results"]["contradiction_detail"] = [
             {"claim_type": c.claim_type, "reason": c.reason} for c in contradictions
         ]
-        return None, None, evidence["semantic_replacement_reason"], evidence
+        return False, evidence["semantic_replacement_reason"]
 
+    arbiter_log: list[dict] = []
     preserved_ids: list[str] = []
     for d_claim in sorted(d_claims, key=lambda c: c.canonical_claim_id):
         preserving, _method = _claim_preserved(
@@ -1251,7 +1383,7 @@ def _attempt_semantic_replacement_certification(
             evidence["semantic_replacement_reason"] = "required_claim_not_preserved"
             evidence["hard_gate_results"]["unpreserved_claim_id"] = d_claim.canonical_claim_id
             evidence["arbiter_invoked"] = bool(arbiter_log)
-            return None, None, evidence["semantic_replacement_reason"], evidence
+            return False, evidence["semantic_replacement_reason"]
         preserved_ids.append(d_claim.canonical_claim_id)
 
     evidence["preserved_claim_ids"] = preserved_ids
@@ -1260,10 +1392,277 @@ def _attempt_semantic_replacement_certification(
     evidence["arbiter_invoked"] = bool(arbiter_log)
     evidence["semantic_replacement_verified"] = True
     evidence["semantic_replacement_reason"] = "semantic_replacement_certified_claim_level_preservation_verified"
-    return (
-        REPLACEMENT_VERIFIED_SEMANTIC, candidate_realization_id,
-        evidence["semantic_replacement_reason"], evidence,
+    return True, evidence["semantic_replacement_reason"]
+
+
+# D-076 Section 3: the two discard populations this directive extends
+# Resolver evaluation to -- both currently classified `PRE_GROUP_REJECTED`
+# by `resolve_orphan_realizations_shadow` (unchanged by this directive; a
+# SEPARATE, additive pass over these same two stages, never a modification
+# of that function or its own verdict). `hybrid_editorial_chunks` is
+# deliberately excluded here -- that population already has its own
+# candidate-discovery mechanism (D-072's pre-guard candidate) and its own
+# verdict machinery (PATH A/PATH B); D-076 reframes THOSE verdicts into
+# proofs in `build_semantic_preservation_proofs` below rather than
+# re-evaluating them a second time.
+_PRE_GROUP_PROOF_ELIGIBLE_STAGES = frozenset({
+    "clean_cut_or_composite_resolution", "draft_review_removed",
+})
+
+
+def _pre_group_relationship_evidence(record: RealizationRecord, candidate: RealizationRecord) -> str:
+    """D-076 Section 4: STRONG relation required. Same `source_asset_id`
+    AND (shared `attempt_id` OR overlapping `source_span_ids`) -- looks at
+    provenance identity ONLY, never at either realization's own text.
+    Temporal proximity alone, topical overlap alone, and shared nouns
+    alone are NEVER sufficient and are not even consulted here: this
+    function has no access to start/end timing or text at all, by
+    construction, so it cannot accidentally fall back to either. Returns
+    the relation kind, or "" when no qualifying relation exists."""
+    if not record.source_asset_id or record.source_asset_id != candidate.source_asset_id:
+        return ""
+    if record.attempt_id and candidate.attempt_id and record.attempt_id == candidate.attempt_id:
+        return "attempt_relation"
+    if set(record.source_span_ids) & set(candidate.source_span_ids):
+        return "source_span_relation"
+    return ""
+
+
+def _find_pre_group_candidates(
+    record: RealizationRecord, ledger: SemanticLedger,
+) -> tuple[tuple[str, str], ...]:
+    """D-076 Section 4: discovers every SELECTED realization with a strong
+    provenance relation to `record` -- never an arbitrary search by
+    topical similarity. Stable order (sorted by realization_id); the
+    caller tries each in turn against the full certification chain and
+    stops at the first that verifies (mirrors `_claim_preserved`'s own
+    "first match wins" convention) -- this function only discovers
+    ELIGIBLE candidates, it never certifies one itself."""
+    qualifying = []
+    for rid, candidate in sorted(ledger.realizations().items(), key=lambda pair: pair[0]):
+        if candidate.state != "selected":
+            continue
+        relation = _pre_group_relationship_evidence(record, candidate)
+        if relation:
+            qualifying.append((rid, relation))
+    return tuple(qualifying)
+
+
+def _classify_pre_group_number_omissions(
+    d_text: str, r_text: str,
+) -> tuple[bool, frozenset[str], tuple[Mapping[str, object], ...]]:
+    """D-076 Section 6: classifies every digit VALUE present in D's own
+    realization text but absent from R's, via the EXISTING `semantic_atom_
+    importance.classify_number_atom`/`blocks_freeze` classifiers -- reused
+    verbatim, no new importance tier invented here. A CRITICAL or
+    UNCERTAIN missing digit still fails closed (WHEN UNCERTAIN, KEEP,
+    exactly `blocks_freeze`'s own existing rule); only a confidently
+    CONTEXTUAL missing digit (e.g. a bare incidental year) may be recorded
+    as a nonrequired omission. Returns `(gate_passes, safe_to_omit_
+    values, omission_records)` -- `omission_records` is always populated
+    for every classified atom, verified or not, so nothing is silently
+    dropped from diagnostics (Section 6's own requirement); `gate_passes`
+    is False the moment any single missing digit fails to clear
+    `blocks_freeze`, at which point iteration stops (fail-closed, no
+    partial credit)."""
+    missing = _realization_digit_values(d_text) - _realization_digit_values(r_text)
+    if not missing:
+        return True, frozenset(), ()
+    safe_to_omit: set[str] = set()
+    omissions: list[Mapping[str, object]] = []
+    for atom in sorted(missing):
+        classification = classify_number_atom(atom, d_text)
+        record_row = {
+            "atom": classification.atom, "atom_type": classification.atom_type,
+            "importance": classification.importance, "evidence": classification.evidence,
+            "resolved_by": classification.resolved_by,
+        }
+        if blocks_freeze(classification.importance):
+            return False, frozenset(), (record_row,)
+        safe_to_omit.add(atom)
+        omissions.append(record_row)
+    return True, frozenset(safe_to_omit), tuple(omissions)
+
+
+def _attempt_pre_group_semantic_preservation(
+    record: RealizationRecord, ledger: SemanticLedger, *, claim_equivalence_arbiter: ClaimEquivalenceArbiter | None,
+) -> SemanticPreservationProof:
+    """D-076: the one genuinely NEW certification path -- PRE_GROUP_
+    SEMANTIC_PRESERVATION, for a content-bearing discard that never
+    reached `hybrid_editorial_chunks`'s own semantic judgment (so PATH A/
+    PATH B never evaluate it) and never entered a `take_judge_groups`
+    contest (so StoryValidator's own `_same_idea_paraphrase_credit` never
+    evaluates it either) -- see docs/CUTSELL_DECISIONS.md D-074/D-075 for
+    the discovered gap this closes.
+
+    Tries every strong-relation candidate `_find_pre_group_candidates`
+    discovers, in order, running the SAME `_certify_directional_semantic_
+    preservation` chain PATH B uses, with one additive relaxation (Section
+    6): a missing digit already classified CONTEXTUAL by the existing
+    `semantic_atom_importance` classifiers is recorded as a nonrequired
+    omission rather than failing the NUMBER gate outright -- CRITICAL/
+    UNCERTAIN missing digits still fail closed exactly as PATH B's own
+    unmodified gate does. Stops at the first candidate that verifies;
+    returns an unverified proof (never silently omitted -- Section 14)
+    when no candidate exists or every candidate fails."""
+    evidence: dict = {
+        "semantic_replacement_evaluated": True,
+        "candidate_replacement_realization_id": None,
+        "same_idea_verified": False,
+        "critical_claims_preserved": False,
+        "unique_required_content_preserved": False,
+        "hard_gate_results": {},
+        "arbiter_invoked": False,
+        "semantic_replacement_verified": False,
+        "semantic_replacement_reason": "",
+        "preserved_claim_ids": [],
+    }
+
+    candidates = _find_pre_group_candidates(record, ledger)
+    if not candidates:
+        return SemanticPreservationProof(
+            discarded_id=record.realization_id, preserving_id=None,
+            proof_method=PROOF_METHOD_PRE_GROUP_SEMANTIC_PRESERVATION,
+            rejection_reason="no_strong_relation_candidate",
+            candidate_discovery_method="pre_group_strong_relation",
+        )
+
+    realizations = ledger.realizations()
+    last_reason = "no_strong_relation_candidate"
+    for candidate_realization_id, relation in candidates:
+        candidate_record = realizations[candidate_realization_id]
+        _passes, safe_to_omit, omissions = _classify_pre_group_number_omissions(
+            record.text, candidate_record.text,
+        )
+        candidate_evidence = dict(evidence)
+        candidate_evidence["hard_gate_results"] = {}
+        if not _passes:
+            last_reason = "number_mismatch"
+            continue
+        verified, reason = _certify_directional_semantic_preservation(
+            record, candidate_record, candidate_realization_id, ledger,
+            claim_equivalence_arbiter=claim_equivalence_arbiter, evidence=candidate_evidence,
+            nonrequired_digit_omissions=safe_to_omit,
+        )
+        last_reason = reason
+        if verified:
+            return SemanticPreservationProof(
+                discarded_id=record.realization_id, preserving_id=candidate_realization_id,
+                proof_method=PROOF_METHOD_PRE_GROUP_SEMANTIC_PRESERVATION,
+                preserved_claim_ids=tuple(candidate_evidence.get("preserved_claim_ids") or ()),
+                nonrequired_omissions=omissions,
+                hard_gate_results=dict(candidate_evidence.get("hard_gate_results") or {}),
+                arbiter_invoked=bool(candidate_evidence.get("arbiter_invoked")),
+                verified=True,
+                relationship_evidence=relation,
+                candidate_discovery_method="pre_group_strong_relation",
+            )
+
+    return SemanticPreservationProof(
+        discarded_id=record.realization_id, preserving_id=None,
+        proof_method=PROOF_METHOD_PRE_GROUP_SEMANTIC_PRESERVATION,
+        rejection_reason=last_reason,
+        candidate_discovery_method="pre_group_strong_relation",
     )
+
+
+def resolve_pre_group_semantic_preservation_shadow(
+    ledger: SemanticLedger, *, claim_equivalence_arbiter: ClaimEquivalenceArbiter | None = None,
+) -> tuple[SemanticPreservationProof, ...]:
+    """D-076: additive, shadow-only pass over the two discard populations
+    named in Section 3 (`_PRE_GROUP_PROOF_ELIGIBLE_STAGES`) -- never
+    touches `resolve_orphan_realizations_shadow`'s own discard walk or
+    verdict for these same records (that function's `PRE_GROUP_REJECTED`
+    verdict for them is completely unchanged; this is a SEPARATE,
+    parallel evaluation feeding StoryValidator's consumption only, per
+    Section 15's own "validation behavior, not semantic selection
+    mutation" framing). Mechanical garbage/false starts retain their
+    existing safe handling for free: a discard with no extractable claims
+    at all fails the shared certification chain's own existing "no
+    extractable claims" gate (WHEN UNCERTAIN, KEEP), never a new floor
+    invented here."""
+    realizations = ledger.realizations()
+    proofs = []
+    for discard in ledger.discards():
+        if discard.discarding_stage not in _PRE_GROUP_PROOF_ELIGIBLE_STAGES:
+            continue
+        record = realizations.get(discard.discarded_realization_id)
+        if record is None:
+            continue
+        proofs.append(
+            _attempt_pre_group_semantic_preservation(
+                record, ledger, claim_equivalence_arbiter=claim_equivalence_arbiter,
+            )
+        )
+    return tuple(proofs)
+
+
+def build_semantic_preservation_proofs(
+    ledger: SemanticLedger, *,
+    claim_equivalence_arbiter: ClaimEquivalenceArbiter | None = None,
+    pre_group_proofs: Sequence[SemanticPreservationProof] | None = None,
+) -> dict[str, SemanticPreservationProof]:
+    """D-076 Section 1/7: the single unified lookup StoryValidator
+    consumes -- keyed by every `clip_id` a proved realization carries (a
+    realization can merge multiple legacy clip_ids), so a lookup by any
+    one of them finds the same proof. Combines TWO already-existing
+    verdict sources plus the one new path, minting NOTHING itself:
+
+      - `hybrid_editorial_chunks` discards: reframes `resolve_orphan_
+        realizations_shadow`'s own existing PATH A/PATH B verdicts
+        (called here, never duplicated) into `LEXICAL_REPLACEMENT`/
+        `SEMANTIC_REPLACEMENT` proofs. PATH A/PATH B's own verdict logic
+        is untouched -- this only relabels an already-computed result.
+      - The two D-076 Section 3 populations: `resolve_pre_group_semantic_
+        preservation_shadow`'s own new `PRE_GROUP_SEMANTIC_PRESERVATION`
+        proofs.
+
+    `GROUPED_SAME_IDEA` is deliberately NOT produced here -- it is
+    StoryValidator's own existing, already-working `_same_idea_paraphrase_
+    credit` mechanism, consulted first and independently at its own point
+    of use; this function only supplies the additional evidence that
+    mechanism cannot see.
+
+    `pre_group_proofs`: pass the ALREADY-COMPUTED result of `resolve_pre_
+    group_semantic_preservation_shadow` when a caller (e.g. `universal_
+    clean_cut.py`, which also needs the full raw list for diagnostics) has
+    already run it, to avoid a redundant second pass (and a redundant
+    second arbiter consultation for the same content) -- computed
+    internally when omitted, so this function stays usable standalone."""
+    realizations = ledger.realizations()
+    proofs_by_clip: dict[str, SemanticPreservationProof] = {}
+
+    for review in resolve_orphan_realizations_shadow(ledger, claim_equivalence_arbiter=claim_equivalence_arbiter):
+        if review.verdict == REPLACEMENT_VERIFIED_SAFE:
+            method = PROOF_METHOD_LEXICAL_REPLACEMENT
+        elif review.verdict == REPLACEMENT_VERIFIED_SEMANTIC:
+            method = PROOF_METHOD_SEMANTIC_REPLACEMENT
+        else:
+            continue
+        record = realizations.get(review.realization_id)
+        proof = SemanticPreservationProof(
+            discarded_id=review.realization_id, preserving_id=review.replacement_realization_id,
+            proof_method=method,
+            preserved_claim_ids=tuple((review.semantic_replacement_evidence or {}).get("preserved_claim_ids") or ()),
+            hard_gate_results=dict((review.semantic_replacement_evidence or {}).get("hard_gate_results") or {}),
+            arbiter_invoked=bool((review.semantic_replacement_evidence or {}).get("arbiter_invoked")),
+            verified=True,
+        )
+        for clip_id in (record.clip_ids if record is not None else ()):
+            proofs_by_clip[clip_id] = proof
+
+    resolved_pre_group_proofs = (
+        pre_group_proofs if pre_group_proofs is not None
+        else resolve_pre_group_semantic_preservation_shadow(ledger, claim_equivalence_arbiter=claim_equivalence_arbiter)
+    )
+    for proof in resolved_pre_group_proofs:
+        if not proof.verified:
+            continue
+        record = realizations.get(proof.discarded_id)
+        for clip_id in (record.clip_ids if record is not None else ()):
+            proofs_by_clip[clip_id] = proof
+
+    return proofs_by_clip
 
 
 def resolve_orphan_realizations_shadow(
@@ -2077,6 +2476,45 @@ def build_authoritative_resolution_diagnostics(result: AuthoritativeApplicationR
             }
             for outcome in result.idea_outcomes
         ],
+    }
+
+
+def build_semantic_preservation_proofs_diagnostics(
+    proofs: Sequence[SemanticPreservationProof],
+) -> dict:
+    """D-076 Section 14: JSON-safe view for `diagnostics["semantic_
+    preservation_proofs"]`. Takes the RAW output of `resolve_pre_group_
+    semantic_preservation_shadow` -- every attempt, verified or not, so a
+    rejection reason is always visible here, never silently dropped
+    (Section 14's own requirement) -- scoped to PRE_GROUP_SEMANTIC_
+    PRESERVATION specifically: LEXICAL_REPLACEMENT/SEMANTIC_REPLACEMENT's
+    own full evidence (verified or rejected) is already fully exposed by
+    the EXISTING `realization_resolver_shadow`/`realization_resolver_
+    authority` diagnostics' own `orphan_reviews`, unchanged by this
+    directive -- duplicating it here would be a second, redundant
+    observability surface for the same underlying data. Diagnostic-only:
+    nothing reads this key to make a decision."""
+    rows = [
+        {
+            "discarded_id": proof.discarded_id,
+            "preserving_id": proof.preserving_id,
+            "proof_method": proof.proof_method,
+            "preserved_claim_ids": list(proof.preserved_claim_ids),
+            "nonrequired_omissions": [dict(o) for o in proof.nonrequired_omissions],
+            "hard_gate_results": dict(proof.hard_gate_results),
+            "arbiter_invoked": proof.arbiter_invoked,
+            "verified": proof.verified,
+            "rejection_reason": proof.rejection_reason,
+            "relationship_evidence": proof.relationship_evidence,
+            "candidate_discovery_method": proof.candidate_discovery_method,
+        }
+        for proof in proofs
+    ]
+    return {
+        "schema_version": "cutsell.semantic_preservation_proofs.v1",
+        "proof_count": len(rows),
+        "verified_count": sum(1 for row in rows if row["verified"]),
+        "proofs": rows,
     }
 
 

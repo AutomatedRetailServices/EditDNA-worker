@@ -41,6 +41,9 @@ from .realization_resolver import (
     build_authoritative_semantic_state,
     build_authoritative_semantic_state_diagnostics,
     build_realization_resolver_diagnostics,
+    build_semantic_preservation_proofs,
+    build_semantic_preservation_proofs_diagnostics,
+    resolve_pre_group_semantic_preservation_shadow,
     resolve_realizations_shadow,
 )
 from .resolver_mode import RESOLVER_MODE_AUTHORITATIVE, resolve_resolver_mode
@@ -309,6 +312,23 @@ def process_universal_clean_cut_sources(
                     authoritative_diagnostics[f"{key}_legacy_evidence"] = pre_authority_diagnostics[key]
             authoritative_draft = replace(authoritative_result.draft, diagnostics=authoritative_diagnostics)
 
+            # D-076: SEMANTIC_PRESERVATION_PROOF -- built from the same
+            # `ledger`/`resolver_report` already computed above, ONLY here
+            # (AUTHORITATIVE mode's own second StoryValidator pass) since
+            # this is structurally the first point in the pipeline both
+            # the Ledger and a resolved draft exist together. StoryValidator
+            # only ever consumes this map (one dict lookup per discarded
+            # clip) -- see final_story_coherence_validation.py's own
+            # consumption comment; it discovers no candidate, extracts no
+            # claim, and invokes no arbiter of its own for this decision.
+            pre_group_semantic_preservation_proofs = resolve_pre_group_semantic_preservation_shadow(
+                ledger, claim_equivalence_arbiter=claim_equivalence_arbiter,
+            )
+            semantic_preservation_proofs = build_semantic_preservation_proofs(
+                ledger, claim_equivalence_arbiter=claim_equivalence_arbiter,
+                pre_group_proofs=pre_group_semantic_preservation_proofs,
+            )
+
             # StoryValidator, AUTHORITATIVELY: re-validated on the resolver's
             # own resolved selection, never the pre-cutover one.
             authoritative_draft = apply_final_story_coherence_validation(
@@ -317,6 +337,7 @@ def process_universal_clean_cut_sources(
                 semantic_atom_importance_arbiter=semantic_atom_importance_arbiter,
                 claim_equivalence_arbiter=claim_equivalence_arbiter,
                 clause_role_arbiter=clause_role_arbiter,
+                semantic_preservation_proofs=semantic_preservation_proofs,
             )
 
             # CanonicalEditPlan + FinalEditReviewer + bounded repair,
@@ -344,6 +365,14 @@ def process_universal_clean_cut_sources(
             authoritative_semantic_state = build_authoritative_semantic_state(authoritative_result, ledger)
             diagnostics["authoritative_semantic_state"] = build_authoritative_semantic_state_diagnostics(
                 authoritative_semantic_state
+            )
+            # D-076 Section 14: every PRE_GROUP_SEMANTIC_PRESERVATION
+            # attempt, verified or not -- LEXICAL_REPLACEMENT/SEMANTIC_
+            # REPLACEMENT's own full evidence stays in `realization_
+            # resolver_shadow`/`realization_resolver_authority`'s existing
+            # `orphan_reviews`, unchanged.
+            diagnostics["semantic_preservation_proofs"] = build_semantic_preservation_proofs_diagnostics(
+                pre_group_semantic_preservation_proofs
             )
             result = replace(result, draft=replace(result.draft, diagnostics=diagnostics))
         diagnostics = dict(result.draft.diagnostics or {})

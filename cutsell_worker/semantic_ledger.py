@@ -87,6 +87,13 @@ class RealizationRecord:
     # a construction site never set it -- reported as UNKNOWN, never
     # guessed at as True.
     complete_idea: bool | None = None
+    # D-076: `DraftClip.source_asset_id`, observation-only. Lets
+    # realization_resolver.py's PRE_GROUP_SEMANTIC_PRESERVATION candidate
+    # discovery require "same source" as one leg of its strong-relation
+    # test without re-deriving it from clip_ids/text. "" when unset (never
+    # guessed) -- a discard with no source_asset_id can never satisfy the
+    # same-source requirement, which is the safe, fail-closed direction.
+    source_asset_id: str = ""
 
 
 @dataclass(frozen=True)
@@ -652,6 +659,7 @@ def build_semantic_ledger_shadow(draft) -> SemanticLedger:
             claim_ids=tuple(claim.canonical_claim_id for claim in claims),
             render_fragment_ids=fragment_ids,
             complete_idea=getattr(primary, "complete_idea", None),
+            source_asset_id=str(getattr(primary, "source_asset_id", "") or ""),
         ))
         for claim in claims:
             ledger.register_claim(CanonicalClaimRecord(

@@ -249,6 +249,20 @@ class DraftClip:
     semantic_idea_id: Optional[str] = None
     retry_family_id: Optional[str] = None
     parent_realization_id: Optional[str] = None
+    # D-076: carried unchanged from the CandidateTake this clip was built
+    # from (pipeline.py's `_draft_clip`, same passthrough convention as
+    # `realization_id` above) -- `source_span_id`/`attempt_id` exist on
+    # CandidateTake but were never threaded through to DraftClip before
+    # this, so the Semantic Ledger's own `RealizationRecord.source_span_
+    # ids`/`.attempt_id` (which already read these via getattr, unchanged)
+    # were always empty/None in practice. Additive/shadow-only, same
+    # convention as every other D-050A identity field: nothing reads these
+    # to make an editorial decision except realization_resolver.py's own
+    # PRE_GROUP_SEMANTIC_PRESERVATION candidate-discovery relation check
+    # (D-076), which only ever uses them as a strong-relation PROOF
+    # REQUIREMENT, never as a ranking signal.
+    source_span_id: Optional[str] = None
+    attempt_id: Optional[str] = None
     # D-050C1.6 (F5, composite completeness safety): carried unchanged
     # from the CandidateTake this clip was built from (pipeline.py's
     # `_draft_clip`, same passthrough pattern as `realization_id` above).

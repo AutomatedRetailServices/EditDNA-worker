@@ -8068,6 +8068,251 @@ NO
 
 Then STOP.
 
+## D-074 -- StoryValidator content-loss forensic (report only, no code, no RAW)
+
+Forensically root-caused the D-073.1 canary's sole Freeze blocker
+(`clip_6ce67f1f00383863ee5b`, "Tuve problemas de estómago en una temporada,
+en 2023, hay que voltar."). Confirmed via the run's own printed
+diagnostics: this discard is part of a real 3-4-take retry cluster for one
+story beat (stomach/digestion problems -> endoscopy -> gastritis
+diagnosis); the clean, complete winner of that SAME beat
+(`clip_7c1583e73e46714ce837`, richer -- includes the actual diagnosis and
+treatment duration) IS selected. The clip never entered any `take_judge_
+groups` contest (confirmed: its own beat's group `tg_f9f1e23d81a778bb74`
+contains only two OTHER clips), so StoryValidator's own `_same_idea_
+paraphrase_credit` never had a chance to credit it -- not a bug in that
+mechanism, a population it was never designed to see. Root cause: B
+(SAME_IDEA_SUPPRESSION_GAP), with C (ASR/segmentation variance in which
+takes reach grouping) as a contributing factor. Validator judged
+PARTIALLY_CORRECT: accurate on literal token coverage, correctly
+conservative given no equivalence evidence, but the resulting REAL_
+CONTENT_LOSS classification mischaracterized the actual audience-facing
+outcome (the story is told, more completely, elsewhere). Freeze
+counterfactual: YES, would have passed -- this was the only blocking
+finding in the entire coherence validation. Engine fix judged required and
+ready to design; not implemented under this report-only directive.
+
+## D-075 -- pre-group discard semantic preservation design (design only, no code, no RAW)
+
+Accepted design for closing D-074's gap generally (no code). Mapped every
+discard population StoryValidator/the Resolver can see (hybrid editorial
+deletes, draft-review removals, the `clean_cut_or_composite_resolution`
+catch-all, grouped retry losers) against which already carry
+`realization_id`/`semantic_idea_id`/claims/replacement provenance/
+selected-sibling relation/semantic-equivalence evidence -- confirming the
+gap is architectural drift (an unintended seam between two correctly-
+scoped authorities), not a deliberate policy.
+
+Designed `SEMANTIC_PRESERVATION_PROOF`: one reusable, directional evidence
+object (`GROUPED_SAME_IDEA` | `LEXICAL_REPLACEMENT` | `SEMANTIC_
+REPLACEMENT` | `PRE_GROUP_SEMANTIC_PRESERVATION`) all answering the same
+question -- is D's required meaning already accounted for by selected R --
+minted ONLY by existing authorities (the one new method, PRE_GROUP_
+SEMANTIC_PRESERVATION, by the Unified Resolver itself, reusing D-073's own
+certification chain verbatim); StoryValidator CONSUMER ONLY, never a new
+authority. Candidate discovery for the new method bounded to STRONG
+provenance relation (attempt_id match OR source_span_id overlap, plus same
+source_asset_id) -- explicitly never temporal proximity or topical
+similarity alone. Verified conceptually safe against the founding same-
+topic-continuation case, the D-074 stomach/digestion pair (NOT_PROVEN
+without execution, correctly not claimed as YES), and the sales/UGC
+matrix. No new authority required; no Freeze policy change; LOW
+implementation risk; ready for implementation.
+
+## D-076 -- PRE_GROUP_SEMANTIC_PRESERVATION implementation
+
+Implements D-075's design, with one added safety refinement: temporal
+proximity alone can never discover a candidate (enforced structurally --
+`_pre_group_relationship_evidence` has no access to start/end timing at
+all, only provenance identity).
+
+**Real infrastructure gap found and fixed as a prerequisite.**
+`CandidateTake.attempt_id`/`.source_span_id` are genuinely minted upstream
+(`attempt_reconstruction.py`, `take_segmentation.py`) but were NEVER
+threaded through to `DraftClip` -- the schema the Ledger/Resolver actually
+consume. Added both as additive, optional `DraftClip` fields (contracts.py)
+carried through unchanged at the one existing passthrough site
+(`pipeline.py`'s `_draft_clip`, same convention as `realization_id`'s own
+D-050A addition) -- and a matching additive `RealizationRecord.source_
+asset_id` field (semantic_ledger.py). This activates already-existing,
+already-computed upstream identity, not new grouping/ASR logic.
+
+**SEMANTIC_PRESERVATION_PROOF** (realization_resolver.py): typed, frozen
+`SemanticPreservationProof` dataclass with the exact fields specified
+(discarded_id, preserving_id, proof_method, preserved_claim_ids,
+nonrequired_omissions, hard_gate_results, arbiter_invoked, verified,
+rejection_reason, relationship_evidence, candidate_discovery_method).
+`build_semantic_preservation_proofs` unifies three sources into one
+clip_id-keyed lookup: PATH A/PATH B's own existing verdicts (reframed,
+never recomputed) for `hybrid_editorial_chunks` discards, plus the one new
+`resolve_pre_group_semantic_preservation_shadow` pass over exactly the two
+named populations (`clean_cut_or_composite_resolution`, `draft_review_
+removed`) -- a SEPARATE, additive pass that never touches `resolve_orphan_
+realizations_shadow`'s own existing discard walk or `PRE_GROUP_REJECTED`
+verdict for these same records.
+
+**Certification chain reused, not duplicated.** Extracted D-073's own
+certification body (candidate-selected check, completeness check, NUMBER
+gate, claims fetch, contradiction check, all-claims-preserved loop) into
+`_certify_directional_semantic_preservation`, called identically by PATH B
+(byte-identical behavior, verified by re-running its full existing suite
+unchanged) and by the new `_attempt_pre_group_semantic_preservation`. One
+additive parameter, `nonrequired_digit_omissions` (default empty,
+byte-identical for PATH B): a digit value the caller has already
+classified CONTEXTUAL via the EXISTING `semantic_atom_importance.
+classify_number_atom`/`blocks_freeze` (no new importance tier) may be
+recorded as a nonrequired omission instead of failing the realization-
+level NUMBER gate. Found and fixed mid-implementation that this relaxation
+also had to reach the PER-CLAIM content-token subset check (`_claim_
+content_subsumed`/`_claims_dedup_equivalent` have no visibility into the
+realization-level gate's own classification) -- added `_sanitize_claim_
+for_nonrequired_omissions`, which strips ONLY the classified-safe digit
+value from one claim's own `content_tokens`/`text` before the shared
+per-claim loop runs; returns the SAME object unchanged (identity, not just
+equivalence) when no omissions are supplied, guaranteeing PATH B is
+unaffected.
+
+**Candidate discovery** (`_find_pre_group_candidates`,
+`_pre_group_relationship_evidence`): same `source_asset_id` AND (shared
+`attempt_id` OR overlapping `source_span_ids`) -- provenance identity
+only, no text, no timing. Tries every qualifying candidate in stable order
+against the full certification chain; stops at the first that verifies.
+
+**Two real defects found and fixed during implementation (self-
+administered QA_ENGINE):** (1) the realization-level number relaxation
+did not reach the per-claim content-token check (found via the exact
+D-074 generic fixture failing `required_claim_not_preserved` despite a
+correctly-classified CONTEXTUAL year) -- fixed via claim sanitization
+above. (2) StoryValidator's own consumption originally only fired `if
+blocking`, silently skipping a case where a verified proof existed but the
+row was already non-blocking for an unrelated reason (a lone CONTEXTUAL
+atom) -- Section 6's "must not be silently dropped from diagnostics"
+requires surfacing the proof either way; relaxed to fire whenever
+GROUPED_SAME_IDEA did not already claim the row, never overriding that
+mechanism's own precedence.
+
+**StoryValidator consumption** (`final_story_coherence_validation.py`):
+`_lost_semantic_atoms` gained an additive `semantic_preservation_proofs`
+parameter (default `None`, byte-identical to before D-076 when omitted);
+one dict lookup per row, no candidate discovery, no claim extraction, no
+arbiter invocation of its own. Wired only at `universal_clean_cut.py`'s
+AUTHORITATIVE-mode second StoryValidator pass (the one point in the
+pipeline both the Ledger and a resolved draft exist together) -- the first,
+pre-Ledger StoryValidator pass and LEGACY/SHADOW mode are structurally
+unaffected. Pre-group proofs computed once and shared between StoryValidator
+consumption and the new `diagnostics["semantic_preservation_proofs"]`
+observability key, avoiding a redundant second arbiter pass.
+
+**POST_RESOLVER_SEMANTIC_MUTATORS reconfirmed 0.** StoryValidator's
+consumption changes only its own `blocking`/`classification` computation
+(a validation-gate decision it already owned); nothing new mutates
+`selected`/`discarded` membership.
+
+Verified: 21 new tests (`test_cutsell_d076_pre_group_semantic_
+preservation.py`) covering the D-074 generic regression, the mandatory
+no-relation negative control (different attempt, different source,
+temporally-close-but-unrelated), historical same-topic-continuation safety
+even with a relation supplied, the full sales/UGC matrix, the reported-
+attribution regression re-run through the new path, the always-YES arbiter
+attack (proven unable to create a relation or override any hard gate), and
+StoryValidator consumption (suppression, fail-closed with no proof,
+byte-identical when the parameter is omitted). 0 regressions:
+tests/test_cutsell_*.py 1770 passed (1749 baseline + 21 new). CleanCutBench
+54/54 LEGACY, 54/54 AUTHORITATIVE. PATH B's own founding tests unaffected.
+
+Final report (verbatim, as delivered):
+
+D-076 COMPLETE
+
+SEMANTIC_PRESERVATION_PROOF:
+PASS
+
+PRE_GROUP PRESERVATION:
+PASS
+
+STRONG RELATION REQUIRED:
+PASS (same source_asset_id AND attempt_id match OR source_span_id overlap
+-- both real, upstream-minted identities now threaded through DraftClip)
+
+TEMPORAL-ONLY DISCOVERY:
+IMPOSSIBLE (structural -- the discovery function has no access to
+start/end timing at all)
+
+STORYVALIDATOR CONSUMER ONLY:
+PASS
+
+D-074 GENERIC CASE:
+PASS
+
+NO-RELATION NEGATIVE CONTROL:
+PASS
+
+SAME-TOPIC CONTINUATION SAFETY:
+PASS
+
+NUMBER SAFETY:
+PASS
+
+NEGATION SAFETY:
+PASS
+
+ATTRIBUTION SAFETY:
+PASS
+
+ENTITY/DIAGNOSIS SAFETY:
+PASS
+
+CAUSAL SAFETY:
+PASS
+
+TEMPORAL SAFETY:
+PASS
+
+SALES/UGC GENERALIZATION:
+PASS
+
+POST_RESOLVER SEMANTIC MUTATORS:
+0
+
+LEGACY:
+54/54
+
+AUTHORITATIVE:
+54/54
+
+FULL TEST COUNT:
+tests/test_cutsell_*.py: 1770 passed, 0 failed (1749 baseline + 21 new).
+D-050-D-076 targeted sweep: 426 passed. CleanCutBench: 54/54 LEGACY, 54/54
+AUTHORITATIVE.
+
+QA_ENGINE VERDICT:
+PASS -- self-administered adversarial review (no-relation negative
+control, same-topic continuation with an artificially-supplied relation,
+reverse-direction loss, number, negation, attribution, entity/diagnosis,
+causal, temporal, incomplete candidate, ASR uncertainty/no-extractable-
+claims, always-YES arbiter) found two real defects during implementation
+(realization-level number relaxation not reaching the per-claim check;
+StoryValidator silently skipping an already-non-blocking row with a valid
+proof) -- both fixed and locked in by dedicated regression tests before
+this verdict. No unsafe suppression found for any tested shape.
+
+P0:
+0
+P1:
+0
+P2:
+0
+P3:
+0
+
+READY FOR ONE VIDEO00 CANARY:
+Offline-qualified; awaiting explicit user authorization before any Modal
+canary.
+
+Then STOP.
+
+Do not launch Modal.
+
 ## Change rule
 
 When a new decision changes product behavior, update this file in the same development cycle. Do not silently redefine CutSell through code alone.
