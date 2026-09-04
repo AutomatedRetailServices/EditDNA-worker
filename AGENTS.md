@@ -12,6 +12,7 @@ Before changing CutSell code, read in this order:
 4. `docs/CUTSELL_MOBILE_V1_ASAP_SCOPE.md`
 5. `docs/CUTSELL_STAGING_DEPLOYMENT_CONTRACT.md`
 6. `docs/CUTSELL_STAGING_READINESS.md`
+7. `docs/CUTSELL_COMMERCIAL_ENGINEERING_OPERATING_MODEL.md` -- canonical roles, gates, and QA modes (D-062); governs who may implement vs. who may certify release-ready.
 
 Treat these as the product constitution for the clean CutSell release path.
 

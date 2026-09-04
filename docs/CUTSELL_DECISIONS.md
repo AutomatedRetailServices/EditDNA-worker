@@ -6822,6 +6822,68 @@ READY FOR ONE VIDEO00 CANARY: YES
 
 Then STOP. Do not launch Modal.
 
+## D-062 -- CutSell Commercial Engineering Operating Model (governance, no engine change)
+
+Canonical governance checkpoint, not an engineering directive: adds
+`docs/CUTSELL_COMMERCIAL_ENGINEERING_OPERATING_MODEL.md`, the permanent
+operating model for CutSell as it moves from benchmark-driven engine
+development toward a commercial product. Registers 11 canonical roles
+(Product Owner/MVP Authority, Platform/Application Engineer, AI/Video Engine
+Engineer, QA/Release Engineer, Security & Privacy Engineer, SRE/DevOps
+Engineer, Product/UX Engineer, FinOps/AI Cost Engineer, Data/Product
+Analytics, Trust/Compliance Owner, Human Editorial Acceptance), the
+separation-of-duties doctrine (no single role self-certifies the complete
+product -- the AI/Video Engine Engineer that implements a fix is never the
+same authority that certifies it release-ready), 7 canonical gates
+(ENGINE/QA/SECURITY/RELIABILITY/EDITORIAL_ACCEPTANCE/ECONOMICS/RELEASE),
+P0-P3 defect severity, a commercial QA coverage matrix (AUTH through
+PERFORMANCE), development checkpoints tying each gate to a project stage,
+12 reusable canonical review command definitions (contracts only, not
+implemented as runnable tools by this checkpoint), the Standard Review
+Report template, a release-readiness contract JSON Schema (contract only,
+no UI, no runtime validator), and a registry of existing QA assets
+(CleanCutBench, Human Gold, Architecture Validator, StoryValidator,
+FinalEditReviewer, Selection Freeze, PostRenderWatchListenQC, Semantic
+Ledger/Unified Resolver tests, LEGACY/AUTHORITATIVE regression, Modal
+canaries, canonical identity/provenance tests) placed under those roles and
+gates by reference, not duplicated.
+
+**No engine file changed.** No code was modified, no test was run, no Modal
+or RunPod infrastructure was touched. D-061 (already committed at `9919ae2`
+on `feature/runpod-pod-on-demand`, working tree clean at the time of this
+checkpoint) was neither modified nor rerun.
+
+**Handoff**: per this operating model's Section 11, the correct next formal
+action against the existing D-061 build is `RUN QA_ENGINE` -- an
+independent review of D-061's implementation, tests, negative cases,
+semantic-safety guards, Freeze behavior, post-Resolver immutability,
+regression evidence, claim-equivalence arbiter wiring, and same-idea
+paraphrase-credit behavior. Only after that verdict is recorded may a paid
+Modal canary for D-061 be authorized. This checkpoint does not itself run
+that review.
+
+### Final report (verbatim, as delivered)
+CUTSELL COMMERCIAL ENGINEERING OPERATING MODEL ADDED
+
+CANONICAL ROLES: 11
+CANONICAL GATES: 7
+QA MODES: QA_COMPONENT, QA_ENGINE, QA_INTEGRATION, QA_E2E, QA_MOBILE, QA_REGRESSION, QA_EXPLORATORY, QA_PERFORMANCE, QA_RELEASE
+REUSABLE REVIEW COMMANDS: RUN ENGINE_GATE, RUN QA_COMPONENT, RUN QA_ENGINE, RUN QA_INTEGRATION, RUN QA_E2E, RUN QA_MOBILE, RUN QA_REGRESSION, RUN QA_EXPLORATORY, RUN QA_PERFORMANCE, RUN QA_RELEASE, RUN SECURITY_REVIEW, RUN SRE_READINESS, RUN COST_REVIEW, RUN EDITORIAL_ACCEPTANCE, RUN BETA_READINESS, RUN RELEASE_GATE
+SECURITY MODEL: REGISTERED
+SRE MODEL: REGISTERED
+FINOPS MODEL: REGISTERED
+DATA/ANALYTICS MODEL: REGISTERED
+TRUST/COMPLIANCE MODEL: REGISTERED
+HUMAN EDITORIAL ACCEPTANCE: REGISTERED
+COMMERCIAL QA MATRIX: REGISTERED
+RELEASE READINESS CONTRACT: CREATED
+D-061 MODIFIED: NO
+D-061 RERUN: NO
+CURRENT DEVELOPMENT BLOCKED: NO
+NEXT FORMAL ACTION: RUN QA_ENGINE against existing D-061 implementation
+
+Then STOP. No Modal. No RunPod. No paid tests. No engine behavior changes.
+
 ## Change rule
 
 When a new decision changes product behavior, update this file in the same development cycle. Do not silently redefine CutSell through code alone.

@@ -28,6 +28,7 @@ If HEAD is newer, inspect intervening commits and reconcile state. Never reset b
 4. existing `docs/CUTSELL_DECISIONS.md`
 5. existing `docs/CUTSELL_BRAIN_DOCTRINE.md`
 6. existing `docs/CUTSELL_MOBILE_V1_ASAP_SCOPE.md`
+7. existing `docs/CUTSELL_COMMERCIAL_ENGINEERING_OPERATING_MODEL.md` (D-062) -- canonical roles/gates/QA modes; an engine change is never self-certified release-ready by the role that implemented it.
 
 ## Source precedence
 When sources conflict:
