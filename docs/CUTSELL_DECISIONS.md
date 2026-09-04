@@ -7951,6 +7951,123 @@ Then STOP.
 No Modal.
 No RAW.
 
+## D-073.1 canary -- Modal run 33907530147, head 7cef038
+
+Authorized ONE Video00 Modal benchmark on the D-073.1-qualified head, full
+canonical path (AUTHORITATIVE resolver -> Freeze -> Boundary/Render/QC/
+delivery gate if Freeze passes). No code changes before or after the run.
+
+**PATH B fired live for real, correctly.** `realization_resolver_shadow`
+(also mirrored in `realization_resolver_authority`, 18/18 ideas):
+`real_c5617c48790ccb70a1c1` (discard_reason `semantic_failed_plus_later_
+overlapping_complete_retake`) -> `REPLACEMENT_VERIFIED_SEMANTIC`,
+`verification_method: "semantic"`, replaced by `real_305dfd300185ebd6e0f0`,
+evidence: `same_idea_verified: true`, `critical_claims_preserved: true`,
+`unique_required_content_preserved: true`, `hard_gate_results: {contradiction:
+false, realization_number_match: true}`, `arbiter_invoked: false` (fully
+deterministic, zero incremental LLM cost), 1 preserved claim id. 2 other
+orphans resolved via PATH A (`REPLACEMENT_VERIFIED_SAFE`/`lexical`,
+unchanged). 7 `PRE_GROUP_REJECTED` (never reached hybrid semantic judgment).
+Exactly 1 remained `REVIEW_REQUIRED` (`no_pre_guard_candidate` -- no
+discovery candidate existed at all; correctly fails closed, WHEN UNCERTAIN,
+KEEP). No unsafe certification, no crash, no arbiter spend beyond what was
+already necessary.
+
+**Freeze BLOCKED -- for a reason entirely unrelated to D-073/D-073.1.**
+`selection_boundary_contract.status: "not_frozen_freeze_blocked_by_
+coherence_review"`. Root cause: StoryValidator's own pre-existing, untouched
+`_lost_semantic_atoms` broader content-loss signal on `clip_6ce67f1f00383863
+ee5b` (`classification: REAL_CONTENT_LOSS`, `content_loss_suppressed_by:
+null` -- same-idea paraphrase credit did not apply to this clip's retry
+family) -- `blocking=True` here comes from that broader content-vocabulary
+signal (`coverage_against_final_keep < 0.45`), NOT from the co-located
+CONTEXTUAL "2023" atom also listed on the same row (confirmed by reading
+`final_story_coherence_validation.py`'s own `blocking = content_loss or
+any(blocks_freeze(...))` line). `repair_loop` correctly attempted and
+declined (`UNIQUE_FACT_LOST`, `no_repair_strategy_exists_for_this_finding_
+kind`, `repaired: false`) -- `status: NEEDS_HUMAN_REVIEW`. This exact
+class of finding (a `papillary_cancer_preserved`-area content check
+flipping) is an established, long-documented recurring pattern in this
+fixed Video00 fixture across many prior canaries (D-058 through D-066),
+attributed to run-to-run ASR/transcript nondeterminism -- not new, not
+caused by this directive, not patched, per the directive's own instruction.
+
+**Downstream (Boundary/Render/PostRender QC/delivery gate): correctly
+never attempted.** Per D-050C3's own architecture: a blocked Freeze must
+never reach Boundary/Render. `live_render_qc.status: "not_attempted"`,
+`preview_skipped_reason: "freeze_blocked_no_render"`, `delivery_status:
+"NOT_DELIVERABLE_not_attempted"`. `validate_video00_architecture.py`
+(the validator that actually understands this branch) confirmed
+`architecture_verified: true`, 0 failed checks, explicitly including
+`semantic_failure_correctly_blocked_freeze_and_boundary: true` and
+`no_render_attempted_on_a_blocked_semantic_plan: true`.
+
+**Legacy-shaped validators failed as expected, not as a new regression.**
+`validate_video00_selection_lock.py` and `validate_video00_regression_qa.py`
+both compare against a LEGACY-mode baseline (`baseline_run_id 33126865755`,
+23 selected clips) and assume a completed render exists; this run has 19
+selected clips (AUTHORITATIVE mode's own freeze-blocked draft,
+`output_duration_sec: null`, no render). Human Gold: 14/18 (the same
+recurring 4 checks failing as multiple prior canaries:
+`papillary_cancer_preserved`, `pimples_micro_2_present`, `pimples_micro_
+order`, `sonography_good_before_diagnosis`); the 23-vs-19 count difference
+is an explicit non-blocking warning per D-032 (`count_differs_not_treated_
+as_failure`). Neither validator understands AUTHORITATIVE-mode
+freeze-blocked results as a valid terminal state -- a known, disclosed
+harness limitation, not investigated or patched per this directive's own
+instruction.
+
+**Modal execution:** `ok: true`, `elapsed_sec: 283.1`, no exception, no
+crash-loop. Automatic scale-to-zero on function return -- no persistent
+GPU resource created.
+
+D-073.1 CANARY COMPLETE
+
+RESOLVER MODE:
+AUTHORITATIVE (confirmed active: 18/18 ideas populated in both shadow and
+authority diagnostics)
+
+PATH B LIVE FIRING:
+YES -- 1 real orphan certified REPLACEMENT_VERIFIED_SEMANTIC, fully
+deterministic, all hard gates recorded true, no unsafe certification
+
+PATH A LIVE FIRING:
+YES -- 2 orphans, unchanged REPLACEMENT_VERIFIED_SAFE/lexical
+
+UNRESOLVED ORPHANS:
+1 (no_pre_guard_candidate -- fails closed correctly)
+
+FREEZE STATUS:
+BLOCKED -- not_frozen_freeze_blocked_by_coherence_review, root cause
+entirely unrelated to D-073/D-073.1 (pre-existing StoryValidator broader
+content-loss signal, same recurring fixture-specific finding as multiple
+prior canaries)
+
+BOUNDARY/RENDER/POSTRENDER QC/DELIVERY GATE:
+NOT ATTEMPTED (correct -- architecture validator confirms this is the
+required behavior for a blocked Freeze)
+
+ARCHITECTURE VALIDATOR:
+PASS (architecture_verified: true, 0 failed checks)
+
+HUMAN GOLD REGRESSION QA:
+14/18 (known recurring pattern, unrelated to this directive, not patched)
+
+SELECTION LOCK:
+FAIL (legacy-shaped comparison against a different-mode baseline; expected,
+not investigated per directive)
+
+MODAL EXECUTION:
+ok=true, 283.1s, clean teardown, no persistent GPU resource
+
+PATCHED FROM THIS RESULT:
+NO
+
+SECOND RAW LAUNCHED:
+NO
+
+Then STOP.
+
 ## Change rule
 
 When a new decision changes product behavior, update this file in the same development cycle. Do not silently redefine CutSell through code alone.
