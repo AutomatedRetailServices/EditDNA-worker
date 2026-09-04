@@ -7586,6 +7586,218 @@ Then STOP.
 No Modal.
 No RAW.
 
+## D-073 -- semantic replacement certification / Unified Resolver PATH B implementation
+
+Implemented PATH B: a second, additive, semantic replacement-certification
+path inside the Unified Resolver's own existing orphan-resolution authority
+(`resolve_orphan_realizations_shadow` in `realization_resolver.py`). PATH A
+(the lexical guard in `complete_retry_identity_guard.py`/
+`hybrid_session_cleanup.py`) is untouched -- tried first, unconditionally,
+exactly as before; PATH B is attempted only when PATH A found nothing AND
+the discard already reached `hybrid_editorial_chunks`'s own semantic delete
+decision (never for `PRE_GROUP_REJECTED` discards).
+
+**Candidate discovery.** A true orphan (discarded before grouping, so
+`semantic_idea_id is None` by definition) has no formal idea/retry relation
+to consult. PATH B reuses D-072's own `replacement_candidate_clip_id_before_
+guard` diagnostic (already gated by real topical overlap) as its sole
+legitimate candidate-discovery mechanism -- carried through the Ledger via a
+new `DiscardRecord.pre_guard_candidate_clip_id` field (`semantic_ledger.py`,
+additive, observation-only).
+
+**Certification chain** (`_attempt_semantic_replacement_certification`,
+fail-closed at every step, in order): pre-guard candidate exists -> maps to
+an existing Ledger realization -> that realization is `state == "selected"`
+(the module's only available proxy for "verified same relation" for a true
+orphan) -> not proven incomplete (`complete_idea is not False`) ->
+realization-level NUMBER hard gate (see below) -> D has >=1 extractable
+claim (WHEN UNCERTAIN, KEEP) -> no contradiction signal
+(`_detect_contradiction_signals`, reused verbatim) -> EVERY one of D's
+claims (not just CRITICAL ones -- Section 6) has a verified preserving claim
+on R's side (`_claim_preserved`).
+
+**Claim-level preservation** (`_claim_preserved`) tries, in order:
+`_claims_dedup_equivalent` (existing hard type/negation/digit gates, reused
+verbatim -- gives NUMBER/NEGATION/entity-substitution safety by
+construction); `_claim_content_subsumed` (new: a cross-TYPE deterministic
+superset check -- D's content tokens subset of R's, D's digit values subset
+of R's, negation polarity agrees -- needed because `classify_claim` can
+promote a combined clause to a different `claim_type` the instant a number
+appears, which would otherwise defeat the exact-type gate on a genuinely
+safe superset); D-066's CONTRASTIVE_HINDSIGHT_NEGATION safe contract
+(reimplemented for `CanonicalClaimRecord`, same imported constants/
+functions, same protected-type exclusion, same bounded arbiter question).
+
+**Direction safety (Sections 8/12).** CAUSE_EFFECT/TEMPORAL_RELATION claims
+can NEVER be certified preserved, unconditionally, no arbiter escape hatch
+(`_DIRECTION_SENSITIVE_CLAIM_TYPES`). Found during testing that
+`classify_claim` only assigns CAUSE_EFFECT to a connector-split clause
+("because", "due to", ...) -- a bare causal verb ("The medication caused
+the rash.") classifies plain ACTION_EVENT, so type-alone detection missed
+the directive's own required causal-reversal case. Added
+`_claim_signals_direction_sensitive`: also blocks on a small, generic,
+bilingual causal-verb marker set this module owns (`_CAUSAL_VERB_MARKERS`)
+plus the existing `_CAUSE_EFFECT_MARKERS`/`_TEMPORAL_MARKERS` connector
+vocabulary (reused, not redefined) -- a deterministic, PATH-B-local text
+signal, not a change to `classify_claim` itself.
+
+**Number safety beyond claim identity.** `mint_canonical_claim_id`
+(canonical_identity.py, pre-existing, unrelated D-050C purpose) groups
+claims by `(claim_type, content_tokens)` only -- not exact text -- so two
+claims differing ONLY by digit ("...3 centimeters..." vs "...5
+centimeters...") can mint to the SAME `canonical_claim_id`, making D's and
+R's claim the literal same Ledger object (trivially "self-preserved").
+Added an independent realization-TEXT-level NUMBER hard gate
+(`_realization_digit_values`, reading each realization's own raw `.text`,
+untouched by claim-id collapsing) as an additional safety net PATH B owns
+itself -- not a change to shared claim-minting infra (out of scope, wide
+blast radius). Both this gate and `_claim_content_subsumed`'s own digit
+check are SUBSET checks (every number D asserts must survive in R), not
+exact-set equality -- R may carry additional numbers beyond D's own
+(Section 3's safe-superset direction applies to numbers like any other
+fact); an initial exact-equality draft was caught and fixed before
+qualification, with a dedicated regression test locking in the subset
+behavior.
+
+**Verdict model (additive):** `REPLACEMENT_VERIFIED_SEMANTIC` (new PATH B
+verdict) alongside unchanged `REPLACEMENT_VERIFIED_SAFE` (PATH A),
+`REVIEW_REQUIRED`, `PRE_GROUP_REJECTED`. New `OrphanRealizationReview`
+fields: `verification_method` (`"lexical"` | `"semantic"` | `""`),
+`semantic_replacement_evidence` (Section 15's diagnostic fields:
+`semantic_replacement_evaluated`, `candidate_replacement_realization_id`,
+`same_idea_verified`, `critical_claims_preserved`,
+`unique_required_content_preserved`, `hard_gate_results`,
+`arbiter_invoked`, `semantic_replacement_verified`,
+`semantic_replacement_reason`, `preserved_claim_ids`) -- diagnostic-only,
+never a second authority.
+
+**Arbiter.** `claim_equivalence_arbiter` threaded as an additive optional
+keyword through `resolve_orphan_realizations_shadow` ->
+`resolve_realizations_shadow` (existing param) and
+`apply_authoritative_realization_resolution`; production wiring added ONLY
+at `universal_clean_cut.py`'s `apply_authoritative_realization_resolution`
+call site, deliberately NOT at the earlier `resolve_realizations_shadow`
+call site (preserves existing grouped-idea dedup arbiter behavior
+unchanged -- out of this directive's scope). Deterministic evidence always
+tried first; the bounded arbiter only ever narrows the D-066 hindsight
+ambiguous band; provider exception/malformed result fails closed
+(pre-existing `_claims_dedup_equivalent`/hindsight-loop behavior, reused
+verbatim).
+
+**POST_RESOLVER_SEMANTIC_MUTATORS reconfirmed 0.** Traced
+`universal_clean_cut.py`'s AUTHORITATIVE-mode path after
+`apply_authoritative_realization_resolution`: only StoryValidator
+(re-validates, can freeze-block, never re-selects) and the repair loop
+(Boundary-only physical repair) run afterward -- nothing downstream flips
+`selected`/`discarded` membership again.
+
+Verified: 23 new targeted tests
+(`test_cutsell_d073_semantic_replacement_certification.py`) cover the full
+D-073 Section 12 directional matrix, Section 13 orphan A/B/C-like
+regression, Section 14 historical-guard regression (founding
+`complete_retry_identity_guard` tests re-run unchanged), arbiter
+failure/decline, provenance-not-found/not-selected fail-closed cases, and
+the safe-superset-number regression. All real end-to-end fixtures through
+`build_semantic_ledger_shadow` (real `extract_claims`, real Ledger
+reconstruction) -- no Video00-specific text/ids.
+
+Final report (verbatim, as delivered):
+
+D-073 COMPLETE
+
+SEMANTIC REPLACEMENT PATH:
+IMPLEMENTED (REPLACEMENT_VERIFIED_SEMANTIC, inside the existing Unified
+Resolver orphan authority)
+
+LEXICAL PATH UNCHANGED:
+YES (PATH A tried first, unconditionally; founding guard tests pass
+byte-for-byte)
+
+DIRECTIONAL PRESERVATION:
+PASS (superset MAY VERIFY; reverse direction NEVER VERIFIES)
+
+UNIQUE FACT SAFETY:
+PASS (every D claim, not just CRITICAL ones, must find a preserving R
+claim)
+
+SAME-TOPIC CONTINUATION SAFETY:
+PASS (founding guard case re-verified at this layer: REVIEW_REQUIRED)
+
+NUMBER SAFETY:
+PASS (claim-level + independent realization-text-level hard gate; subset-
+safe for legitimate additional numbers in R)
+
+NEGATION SAFETY:
+PASS (factual negation reversal: REVIEW_REQUIRED)
+
+ENTITY/DIAGNOSIS SAFETY:
+PASS (diagnosis substitution: REVIEW_REQUIRED even with an always-confirm
+arbiter)
+
+CAUSAL SAFETY:
+PASS (unconditional block, no arbiter escape hatch, marker-based detection
+added to cover the realistic bare-causal-verb shape `classify_claim` alone
+misses)
+
+TEMPORAL SAFETY:
+PASS (unconditional block; reversal case also independently fails on
+content mismatch)
+
+ORPHAN A-LIKE/B-LIKE/C-LIKE:
+A-like: REPLACEMENT_VERIFIED_SEMANTIC. B-like (no pre-guard candidate):
+REVIEW_REQUIRED. C-like (truncated/no resolvable equivalence):
+REVIEW_REQUIRED.
+
+POST_RESOLVER SEMANTIC MUTATORS:
+0 (reconfirmed by tracing the AUTHORITATIVE-mode path)
+
+LEGACY:
+54/54
+
+AUTHORITATIVE:
+54/54
+
+FULL TEST COUNT:
+tests/test_cutsell_*.py: 1737 passed, 0 failed (1714 D-072 baseline + 23
+new D-073 tests). D-050-D-073 targeted sweep (32 files, including founding
+`complete_retry_identity_guard`): 393 passed. CleanCutBench: 54/54 LEGACY,
+54/54 AUTHORITATIVE.
+
+QA_ENGINE VERDICT:
+PASS -- self-administered adversarial review attacking numbers, negation,
+diagnosis/entity substitution, causal/temporal direction, unique facts,
+partial retries, same-topic-different-event, ASR uncertainty, arbiter
+failure/decline, and provenance validity found two real defects during
+implementation (claim-type-mismatch defeating superset preservation;
+causal-verb reversal undetected by type-alone gating; exact-set-equality
+number check over-blocking safe supersets) -- all three fixed and locked in
+by dedicated regression tests before this verdict. Known residual
+limitation: causal/temporal direction detection is marker/connector-based
+(deterministic, reusing existing vocabulary), not a full parse -- a causal
+or temporal reversal using language outside the marker vocabulary would not
+be flagged as direction-sensitive and would fall through to ordinary
+claim-preservation comparison. This is a disclosed, not hidden, gap; no
+false-certification was found for any tested causal/temporal shape, and
+building a general causal/temporal parser is out of D-073's scope (Section
+9: no new model/provider).
+
+P0:
+0
+P1:
+0
+P2:
+1 (disclosed causal/temporal marker-coverage limitation above -- monitor,
+do not silently expand scope to fix without a separate directive)
+P3:
+0
+
+READY FOR ONE VIDEO00 CANARY:
+Offline-qualified; awaiting explicit user authorization before any Modal
+canary (per D-073's own "Do not launch Modal" instruction).
+
+Then STOP.
+Do not launch Modal.
+
 ## Change rule
 
 When a new decision changes product behavior, update this file in the same development cycle. Do not silently redefine CutSell through code alone.

@@ -173,13 +173,29 @@ from itertools import combinations
 import re
 from typing import Mapping, Sequence
 
-from .claim_coverage_best_take import _is_low_information_incidental
+from .claim_coverage_best_take import (
+    _content_overlap_coefficient,
+    _HINDSIGHT_ALIGNABLE_CLAIM_TYPES,
+    _HINDSIGHT_ALIGNMENT_AMBIGUOUS_FLOOR,
+    _HINDSIGHT_PROTECTED_CLAIM_TYPES,
+    _is_low_information_incidental,
+)
 from .contracts import DraftTimeline
 from .final_sibling_grouping import _negations
-from .semantic_claims import ClaimEquivalenceArbiter
+from .semantic_claims import (
+    CAUSE_EFFECT,
+    CONTRASTIVE_HINDSIGHT_NEGATION,
+    ClaimEquivalenceArbiter,
+    NEGATION,
+    TEMPORAL_RELATION,
+    _CAUSE_EFFECT_MARKERS,
+    _TEMPORAL_MARKERS,
+    _negation_role_hard_exclusion,
+)
 from .semantic_ledger import (
     CanonicalClaimRecord,
     DELIVERY_SCORE_WINNER,
+    DiscardRecord,
     ENGINE_BLOCKED_UNRESOLVED,
     ENGINE_RESOLVED_COMPOSITE,
     ENGINE_RESOLVED_WINNER,
@@ -745,6 +761,18 @@ class RealizationResolution:
 
 PRE_GROUP_REJECTED = "PRE_GROUP_REJECTED"
 REPLACEMENT_VERIFIED_SAFE = "REPLACEMENT_VERIFIED_SAFE"
+# D-073: a SECOND, additive certification path alongside REPLACEMENT_
+# VERIFIED_SAFE (PATH A -- see VERIFICATION_METHOD_LEXICAL below, mapping
+# it to "existing Path A concept" per the D-073 directive). Both verdicts
+# mean the exact same thing to every existing consumer of this field
+# (`apply_authoritative_realization_resolution`'s own `if o.verdict ==
+# REVIEW_REQUIRED` filter, its only reader below, never matches either
+# VERIFIED verdict) -- PATH B never widens what "safe" means, it only adds
+# a second, independently-verified way to reach the SAME safe conclusion.
+REPLACEMENT_VERIFIED_SEMANTIC = "REPLACEMENT_VERIFIED_SEMANTIC"
+
+VERIFICATION_METHOD_LEXICAL = "lexical"
+VERIFICATION_METHOD_SEMANTIC = "semantic"
 
 
 @dataclass(frozen=True)
@@ -790,14 +818,32 @@ class OrphanRealizationReview:
     resolution` escalates `any_review_required` only for the
     `REVIEW_REQUIRED` verdict; `PRE_GROUP_REJECTED` realizations are
     still fully recorded here (Section 5's Ledger-registration
-    requirement) but never force that escalation on their own."""
+    requirement) but never force that escalation on their own.
+
+    D-073: a would-be REVIEW_REQUIRED orphan (reached hybrid_editorial's
+    own semantic delete decision, no LEXICAL replacement ever verified)
+    gets exactly ONE more chance, attempted here and here only: PATH B
+    semantic replacement certification (`_attempt_semantic_replacement_
+    certification`), using ONLY evidence the Ledger already reconstructed
+    (claims, negation role, realization state, the D-072-surfaced
+    pre-guard candidate). Success upgrades the verdict to
+    `REPLACEMENT_VERIFIED_SEMANTIC`; anything short of full, directional,
+    claim-level preservation leaves it REVIEW_REQUIRED, unchanged. This
+    never touches, weakens, or bypasses PATH A (`REPLACEMENT_VERIFIED_
+    SAFE`) -- PATH A is tried first, unconditionally, exactly as before;
+    PATH B is only ever consulted when PATH A already failed."""
 
     realization_id: str
     discard_reason: str
     replacement_realization_id: str | None
     replacement_verified: bool
-    verdict: str  # "REPLACEMENT_VERIFIED_SAFE" | "REVIEW_REQUIRED" | "PRE_GROUP_REJECTED"
+    verdict: str  # "REPLACEMENT_VERIFIED_SAFE" | "REPLACEMENT_VERIFIED_SEMANTIC" | "REVIEW_REQUIRED" | "PRE_GROUP_REJECTED"
     decision_reason: str
+    # D-073 additive fields -- "" / None / empty mapping whenever PATH B
+    # was never attempted (PATH A already succeeded, or this is a
+    # PRE_GROUP_REJECTED discard) or found nothing to certify.
+    verification_method: str = ""  # "" | "lexical" | "semantic"
+    semantic_replacement_evidence: Mapping[str, object] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -822,7 +868,352 @@ class ResolverReport:
         )
 
 
-def resolve_orphan_realizations_shadow(ledger: SemanticLedger) -> tuple[OrphanRealizationReview, ...]:
+# D-073 Section 8/12: CAUSE_EFFECT and TEMPORAL_RELATION claims can express
+# OPPOSITE meanings ("A caused B" vs "B caused A", "X then Y" vs "Y then X")
+# while sharing an IDENTICAL bag-of-words content-token set --
+# `_claims_dedup_equivalent`'s deterministic overlap check (and every other
+# overlap-coefficient check in this module) is structurally blind to word
+# ORDER/argument direction, and this codebase has no existing, tested
+# causal/temporal-direction arbiter question to safely delegate to either
+# (the bounded `ClaimEquivalenceArbiter.claim_covered` protocol was
+# designed and tested for topical/paraphrase coverage, never validated
+# against direction-reversal specifically). D-073 Section 12 requires
+# causal and temporal reversal to NEVER verify, unconditionally -- not
+# "never verify without an arbiter" -- so PATH B never attempts to
+# preserve a CAUSE_EFFECT/TEMPORAL_RELATION claim by any means, regardless
+# of a configured arbiter's own verdict. A future, separately-authorized
+# directive introducing a dedicated, tested causal/temporal-order check
+# could safely revisit this; PATH B does not invent one now (mirrors this
+# module's own existing stance on `CausalOrderArbiter` -- "deliberately
+# NOT wired in yet").
+_DIRECTION_SENSITIVE_CLAIM_TYPES = frozenset({CAUSE_EFFECT, TEMPORAL_RELATION})
+
+# D-073 Section 8/12 (continued): `classify_claim` (semantic_claims.py) only
+# ever assigns CAUSE_EFFECT to a clause split on one of `_CAUSE_EFFECT_
+# MARKERS`'s own CONNECTOR phrases ("because", "due to", "therefore", ...);
+# a bare causal VERB with no connector ("The medication caused the rash.")
+# is classified plain ACTION_EVENT -- `_DIRECTION_SENSITIVE_CLAIM_TYPES`
+# alone therefore never fires for this realistic, common shape, and its
+# reversal ("The rash caused the need for medication.") would otherwise
+# pass `_claim_content_subsumed` as a false "superset" (both sides share
+# the same bag of words; only the causal argument order differs). This is
+# PATH B's own additional, deterministic, TEXT-level safety net -- not a
+# change to `classify_claim`/`extract_claims` (out of scope, wide blast
+# radius) -- reusing the SAME connector vocabulary already established for
+# causal/temporal detection elsewhere in this codebase
+# (`_CAUSE_EFFECT_MARKERS`, `_TEMPORAL_MARKERS`), plus a small, generic,
+# bilingual set of causal VERB markers this module owns itself (no
+# Video00-specific fact, disease, or product name, matching every other
+# marker list's own convention). Any claim whose raw text contains one of
+# these markers is treated as direction-sensitive regardless of its
+# assigned `claim_type` -- fails closed, exactly like
+# `_DIRECTION_SENSITIVE_CLAIM_TYPES` itself, no arbiter escape hatch.
+_CAUSAL_VERB_MARKERS = (
+    "caused", "causes", "causing", "led to", "leads to", "leading to",
+    "resulted in", "results in", "resulting in", "triggered", "triggers",
+    "brought on", "gave rise to",
+    "causo", "causó", "provoco", "provocó", "genero", "generó",
+    "produjo", "llevo a", "llevó a", "resulto en", "resultó en",
+)
+
+
+def _claim_signals_direction_sensitive(claim: CanonicalClaimRecord) -> bool:
+    """True when `claim` must never be certified preserved by PATH B under
+    any circumstance -- either `classify_claim` already assigned it
+    CAUSE_EFFECT/TEMPORAL_RELATION, or its own raw text carries a causal/
+    temporal connector or causal verb marker that a bag-of-words content-
+    token comparison cannot safely disambiguate for direction. See
+    `_DIRECTION_SENSITIVE_CLAIM_TYPES` and `_CAUSAL_VERB_MARKERS` docstrings
+    for the full reasoning."""
+    if claim.claim_type in _DIRECTION_SENSITIVE_CLAIM_TYPES:
+        return True
+    text = (claim.text or "").lower()
+    if not text:
+        return False
+    for marker in _CAUSAL_VERB_MARKERS + _CAUSE_EFFECT_MARKERS + _TEMPORAL_MARKERS:
+        if marker in text:
+            return True
+    return False
+
+
+def _realization_digit_values(text: str) -> frozenset[str]:
+    """D-073 Section 8 hard NUMBER gate, read from the REALIZATION's own
+    raw text (`RealizationRecord.text` -- each realization's own clip
+    text, set once at Ledger construction and never merged/collapsed
+    across sibling realizations) rather than from canonical claims.
+
+    `mint_canonical_claim_id` (canonical_identity.py) deliberately groups
+    claims by `(claim_type, content_tokens)` only -- NOT exact text --
+    by design, for an unrelated D-050C purpose (crediting a same-idea
+    paraphrase across sibling realizations). A side effect: two claims
+    whose only difference is a digit ("...measured 3 centimeters..." vs
+    "...measured 5 centimeters...") can share IDENTICAL content_tokens
+    (the digit itself is not a content token) and therefore mint to the
+    SAME `canonical_claim_id` -- meaning D's own realization and R's own
+    realization can end up pointing at the literal same
+    `CanonicalClaimRecord` object in `ledger.claims()`, whose `.text`
+    reflects whichever clip was registered last. Comparing claims alone
+    would then make D's claim trivially "preserved" by R's -- against
+    itself. This function is PATH B's own independent, additional
+    safety net against exactly that collision: it never trusts the
+    Ledger's claim identity for numeric safety, only each realization's
+    own untouched raw text. Not a fix to `mint_canonical_claim_id` itself
+    (out of D-073's scope -- shared infra with a wide, unrelated blast
+    radius); scoped entirely to this module's own PATH B gate."""
+    return frozenset(_DIGIT_RUN_RE.findall(text or ""))
+
+
+def _claim_content_subsumed(d_claim: CanonicalClaimRecord, r_claim: CanonicalClaimRecord) -> bool:
+    """D-073 Sections 3/12: a cross-TYPE, deterministic superset check --
+    every one of D's own content tokens appears verbatim in R's, AND every
+    digit value D's own text carries is also present in R's (R may carry
+    ADDITIONAL digit values beyond D's own -- a subset check, not exact
+    equality: Section 3's "R may contain additional safe information"
+    applies to numbers exactly like any other fact), AND negation polarity
+    agrees. Deliberately not gated on claim_type equality (unlike
+    `_claims_dedup_equivalent`): a richer candidate claim that folds D's
+    fact together with an ADDITIONAL one is exactly the safe "R may
+    contain additional information" direction Section 3 requires PATH B
+    to recognize. Structurally cannot pass in the unsafe direction -- D's
+    own words (or D's own numbers) can never simply be absent from R for
+    this to return True."""
+    if not d_claim.content_tokens:
+        return False
+    if not d_claim.content_tokens.issubset(r_claim.content_tokens):
+        return False
+    d_values = _claim_digit_values(d_claim)
+    if d_values and not d_values.issubset(_claim_digit_values(r_claim)):
+        return False
+    if _claim_has_negation(d_claim) != _claim_has_negation(r_claim):
+        return False
+    return True
+
+
+def _claim_preserved(
+    d_claim: CanonicalClaimRecord,
+    r_claims: Sequence[CanonicalClaimRecord],
+    *,
+    claim_equivalence_arbiter: ClaimEquivalenceArbiter | None,
+    arbiter_log: list[dict] | None,
+) -> tuple[CanonicalClaimRecord | None, str]:
+    """D-073 Sections 3/5/8: is `d_claim` (one claim of the discarded
+    realization D) preserved by some claim of the candidate replacement R?
+    Returns (preserving_claim_or_None, method): "dedup_equivalent" reuses
+    `_claims_dedup_equivalent` verbatim -- the SAME hard claim-type,
+    negation-polarity, and quantitative-value gates plus deterministic
+    overlap plus bounded arbiter escalation this module already uses for
+    requirement-group dedup, giving PATH B the NUMBER/FACTUAL_NEGATION/
+    entity-substitution safety Section 8 requires for free, by
+    construction, not by a separate check. "content_subsumed" (D-073
+    Section 3/12: "R may contain additional safe information") is a
+    cross-TYPE superset check (`_claim_content_subsumed`) for exactly the
+    case a richer candidate claim absorbs D's own fact into a differently-
+    classified claim (e.g. `classify_claim` promotes a combined clause to
+    MEASUREMENT_QUANTITY the moment a number appears, even though D's own
+    half of it was plain ACTION_EVENT) -- `_claims_dedup_equivalent`'s
+    exact claim_type gate would otherwise reject a genuinely safe superset
+    match. Still hard-gated on digit-value and negation-polarity agreement.
+    "hindsight_semantic" is D-066's own CONTRASTIVE_HINDSIGHT_NEGATION safe
+    contract (same protected-type exclusion, same digit-evidence gate,
+    same ambiguous-overlap floor, same bounded arbiter question --
+    imported constants/functions, not redefined), applied to the Ledger's
+    own claim representation since `semantic_claims.Claim`'s own helper
+    functions use a different attribute name (`claim_id` vs
+    `canonical_claim_id`) than `CanonicalClaimRecord`. Direction-sensitive
+    claims (CAUSE_EFFECT/TEMPORAL_RELATION `claim_type`, OR raw text
+    carrying a causal/temporal connector or causal-verb marker --
+    `_claim_signals_direction_sensitive`) can NEVER be certified preserved
+    by this function, unconditionally -- see `_DIRECTION_SENSITIVE_CLAIM_
+    TYPES`'s and `_CAUSAL_VERB_MARKERS`'s own docstrings for why even a
+    configured arbiter is not trusted here. Stable order (sorted by
+    canonical_claim_id) -- first match wins, never an arbitrary pick.
+    Fails closed (returns `(None, "none")`) whenever nothing matches."""
+    if _claim_signals_direction_sensitive(d_claim):
+        return None, "none"
+    for r_claim in sorted(r_claims, key=lambda c: c.canonical_claim_id):
+        if _claims_dedup_equivalent(
+            d_claim, r_claim, claim_equivalence_arbiter=claim_equivalence_arbiter, arbiter_log=arbiter_log,
+        ):
+            return r_claim, "dedup_equivalent"
+    for r_claim in sorted(r_claims, key=lambda c: c.canonical_claim_id):
+        if _claim_content_subsumed(d_claim, r_claim):
+            return r_claim, "content_subsumed"
+    if d_claim.claim_type == NEGATION and d_claim.negation_role == CONTRASTIVE_HINDSIGHT_NEGATION:
+        for r_claim in sorted(r_claims, key=lambda c: c.canonical_claim_id):
+            if r_claim.claim_type in _HINDSIGHT_PROTECTED_CLAIM_TYPES:
+                continue
+            if r_claim.claim_type not in _HINDSIGHT_ALIGNABLE_CLAIM_TYPES:
+                continue
+            if _claim_digit_values(d_claim) or _claim_digit_values(r_claim):
+                continue
+            if _negation_role_hard_exclusion(r_claim.text):
+                continue
+            overlap = _content_overlap_coefficient(d_claim.content_tokens, r_claim.content_tokens)
+            if overlap < _HINDSIGHT_ALIGNMENT_AMBIGUOUS_FLOOR:
+                continue
+            if claim_equivalence_arbiter is None or not d_claim.text or not r_claim.text:
+                continue
+            try:
+                covered, confidence, reason = claim_equivalence_arbiter.claim_covered(d_claim.text, r_claim.text)
+                verdict = bool(covered) is True
+            except Exception:
+                verdict, confidence, reason = False, 0.0, "arbiter_exception"
+            if arbiter_log is not None:
+                arbiter_log.append({
+                    "left_claim_id": d_claim.canonical_claim_id, "right_claim_id": r_claim.canonical_claim_id,
+                    "overlap": overlap, "verdict": verdict, "confidence": confidence, "reason": reason,
+                    "method": "hindsight_semantic",
+                })
+            if verdict:
+                return r_claim, "hindsight_semantic"
+    return None, "none"
+
+
+def _attempt_semantic_replacement_certification(
+    discard: DiscardRecord,
+    record: RealizationRecord,
+    ledger: SemanticLedger,
+    *,
+    claim_equivalence_arbiter: ClaimEquivalenceArbiter | None,
+) -> tuple[str | None, str | None, str, dict]:
+    """D-073: PATH B, the Unified Resolver's own second, additive
+    replacement-certification path -- see module docstring's DIRECTIONAL
+    SEMANTIC REPLACEMENT CONTRACT. Attempted ONLY by `resolve_orphan_
+    realizations_shadow`, and only for a discarded realization that
+    already reached `hybrid_editorial_chunks`'s own semantic delete
+    decision with no PATH A (lexical) verified replacement -- exactly the
+    population that would otherwise become REVIEW_REQUIRED. Returns
+    `(new_verdict_or_None, replacement_realization_id_or_None,
+    decision_reason, evidence)`; `new_verdict` is
+    `REPLACEMENT_VERIFIED_SEMANTIC` only when every one of the following
+    holds, in order (any failure returns `(None, None, reason, evidence)`
+    immediately -- fail-closed, never a partial/best-effort certification):
+
+      1. A pre-guard candidate exists at all (`discard.pre_guard_
+         candidate_clip_id`, D-072's own already-computed evidence --
+         never guessed, never re-derived).
+      2. That candidate clip maps to an EXISTING realization in this same
+         Ledger.
+      3. That realization is `state == "selected"` -- R is actually
+         selected/kept; this IS this module's only available proxy for
+         "verified same semantic idea/retry relation" for a TRUE orphan
+         (one with no `semantic_idea_id` at all, by definition -- it never
+         reached grouping, so no formal idea/retry-family id exists to
+         match against; see module docstring).
+      4. That realization is not proven incomplete (`complete_idea is not
+         False`) -- a truncated/failed/unfinished candidate can never
+         certify a replacement (Section 7).
+      5. D has at least one extractable claim (a genuinely empty claim set
+         is treated as unresolved/uncertain content, never vacuously safe
+         -- WHEN UNCERTAIN, KEEP).
+      6. No contradiction signal between D's and R's claims
+         (`_detect_contradiction_signals`, reused verbatim).
+      7. EVERY one of D's claims has a verified preserving claim on R's
+         side (`_claim_preserved`) -- not just CRITICAL ones (Section 6:
+         "not merely critical-claim-covered"; checking ALL claims is a
+         strictly stronger, safer bar than critical-only).
+
+    Never widens PATH A, never touches D-063/D-066's own rules (reuses
+    their outputs only), never creates a second decision-making authority
+    (this IS the existing Unified Resolver's own orphan-review authority,
+    called only from within it)."""
+    arbiter_log: list[dict] = []
+    evidence: dict = {
+        "semantic_replacement_evaluated": True,
+        "candidate_replacement_realization_id": None,
+        "same_idea_verified": False,
+        "critical_claims_preserved": False,
+        "unique_required_content_preserved": False,
+        "hard_gate_results": {},
+        "arbiter_invoked": False,
+        "semantic_replacement_verified": False,
+        "semantic_replacement_reason": "",
+        "preserved_claim_ids": [],
+    }
+
+    candidate_clip_id = discard.pre_guard_candidate_clip_id
+    if not candidate_clip_id:
+        evidence["semantic_replacement_reason"] = "no_pre_guard_candidate"
+        return None, None, evidence["semantic_replacement_reason"], evidence
+
+    realizations = ledger.realizations()
+    candidate_realization_id = next(
+        (rid for rid, rec in realizations.items() if candidate_clip_id in rec.clip_ids), None,
+    )
+    if candidate_realization_id is None:
+        evidence["semantic_replacement_reason"] = "candidate_realization_not_found"
+        return None, None, evidence["semantic_replacement_reason"], evidence
+    evidence["candidate_replacement_realization_id"] = candidate_realization_id
+    candidate_record = realizations[candidate_realization_id]
+
+    if candidate_record.state != "selected":
+        evidence["semantic_replacement_reason"] = "candidate_not_selected"
+        return None, None, evidence["semantic_replacement_reason"], evidence
+    evidence["same_idea_verified"] = True
+
+    if candidate_record.complete_idea is False:
+        evidence["semantic_replacement_reason"] = "candidate_incomplete"
+        return None, None, evidence["semantic_replacement_reason"], evidence
+
+    d_realization_values = _realization_digit_values(record.text)
+    r_realization_values = _realization_digit_values(candidate_record.text)
+    # Subset, not exact equality: every number D asserts must survive in R,
+    # but R may legitimately carry ADDITIONAL numbers beyond D's own (the
+    # same safe-superset direction Section 3 requires everywhere else --
+    # see `_claim_content_subsumed`'s own digit check).
+    evidence["hard_gate_results"]["realization_number_match"] = (
+        not d_realization_values or d_realization_values.issubset(r_realization_values)
+    )
+    if d_realization_values and not d_realization_values.issubset(r_realization_values):
+        evidence["semantic_replacement_reason"] = "number_mismatch"
+        return None, None, evidence["semantic_replacement_reason"], evidence
+
+    claims = ledger.claims()
+    d_claims = tuple(claims[cid] for cid in record.claim_ids if cid in claims)
+    r_claims = tuple(claims[cid] for cid in candidate_record.claim_ids if cid in claims)
+
+    if not d_claims:
+        evidence["semantic_replacement_reason"] = "no_extractable_claims_uncertain_content"
+        return None, None, evidence["semantic_replacement_reason"], evidence
+
+    contradictions = _detect_contradiction_signals({
+        record.realization_id: d_claims, candidate_realization_id: r_claims,
+    })
+    evidence["hard_gate_results"]["contradiction"] = bool(contradictions)
+    if contradictions:
+        evidence["semantic_replacement_reason"] = "contradiction_detected"
+        evidence["hard_gate_results"]["contradiction_detail"] = [
+            {"claim_type": c.claim_type, "reason": c.reason} for c in contradictions
+        ]
+        return None, None, evidence["semantic_replacement_reason"], evidence
+
+    preserved_ids: list[str] = []
+    for d_claim in sorted(d_claims, key=lambda c: c.canonical_claim_id):
+        preserving, _method = _claim_preserved(
+            d_claim, r_claims, claim_equivalence_arbiter=claim_equivalence_arbiter, arbiter_log=arbiter_log,
+        )
+        if preserving is None:
+            evidence["semantic_replacement_reason"] = "required_claim_not_preserved"
+            evidence["hard_gate_results"]["unpreserved_claim_id"] = d_claim.canonical_claim_id
+            evidence["arbiter_invoked"] = bool(arbiter_log)
+            return None, None, evidence["semantic_replacement_reason"], evidence
+        preserved_ids.append(d_claim.canonical_claim_id)
+
+    evidence["preserved_claim_ids"] = preserved_ids
+    evidence["critical_claims_preserved"] = True
+    evidence["unique_required_content_preserved"] = True
+    evidence["arbiter_invoked"] = bool(arbiter_log)
+    evidence["semantic_replacement_verified"] = True
+    evidence["semantic_replacement_reason"] = "semantic_replacement_certified_claim_level_preservation_verified"
+    return (
+        REPLACEMENT_VERIFIED_SEMANTIC, candidate_realization_id,
+        evidence["semantic_replacement_reason"], evidence,
+    )
+
+
+def resolve_orphan_realizations_shadow(
+    ledger: SemanticLedger, *, claim_equivalence_arbiter: ClaimEquivalenceArbiter | None = None,
+) -> tuple[OrphanRealizationReview, ...]:
     """Hard Invariant E, standalone: a realization discarded before ever
     reaching grouping never enters the per-idea loop below (it has no
     `semantic_idea_id` to loop over), so it is walked here directly from
@@ -837,26 +1228,56 @@ def resolve_orphan_realizations_shadow(ledger: SemanticLedger) -> tuple[OrphanRe
     `PRE_GROUP_REJECTED` (never had semantic understanding applied, so
     D-049 Case A does not apply); a discard that DID reach that stage is
     `REVIEW_REQUIRED` -- unchanged from before this directive, never
-    downgraded."""
+    downgraded.
+
+    D-073: a would-be-REVIEW_REQUIRED discard gets exactly one additional,
+    additive chance here: PATH B semantic replacement certification
+    (`_attempt_semantic_replacement_certification`, optional
+    `claim_equivalence_arbiter` -- defaults to None, i.e. deterministic-
+    only). PATH A (`REPLACEMENT_VERIFIED_SAFE`) is tried first,
+    unconditionally, exactly as before this directive; PATH B is
+    consulted only when PATH A already found nothing AND this discard
+    reached hybrid_editorial's own semantic judgment. `PRE_GROUP_REJECTED`
+    discards never reach PATH B either -- they never needed a
+    replacement-safety verdict in the first place."""
     reviews = []
     realizations = ledger.realizations()
     for discard in ledger.discards():
         record = realizations.get(discard.discarded_realization_id)
         if record is None or record.semantic_idea_id is not None:
             continue  # not an orphan -- either unknown, or reached grouping normally
+        verification_method = ""
+        semantic_evidence: Mapping[str, object] = {}
         if discard.replacement_verified and discard.replacement_realization_id:
             verdict = REPLACEMENT_VERIFIED_SAFE
             reason = "ledger_confirms_verified_replacement_realization"
+            replacement_realization_id = discard.replacement_realization_id
+            verification_method = VERIFICATION_METHOD_LEXICAL
         elif discard.discarding_stage != "hybrid_editorial_chunks":
             verdict = PRE_GROUP_REJECTED
             reason = "ordinary_pre_grouping_rejection_never_reached_semantic_understanding"
+            replacement_realization_id = discard.replacement_realization_id
         else:
-            verdict = REVIEW_REQUIRED
-            reason = "hybrid_editorial_semantic_delete_with_no_verified_replacement_never_silently_confirmed"
+            semantic_verdict, semantic_replacement_id, semantic_reason, semantic_evidence = (
+                _attempt_semantic_replacement_certification(
+                    discard, record, ledger, claim_equivalence_arbiter=claim_equivalence_arbiter,
+                )
+            )
+            if semantic_verdict == REPLACEMENT_VERIFIED_SEMANTIC:
+                verdict = REPLACEMENT_VERIFIED_SEMANTIC
+                reason = semantic_reason
+                replacement_realization_id = semantic_replacement_id
+                verification_method = VERIFICATION_METHOD_SEMANTIC
+            else:
+                verdict = REVIEW_REQUIRED
+                reason = "hybrid_editorial_semantic_delete_with_no_verified_replacement_never_silently_confirmed"
+                replacement_realization_id = discard.replacement_realization_id
         reviews.append(OrphanRealizationReview(
             realization_id=discard.discarded_realization_id, discard_reason=discard.reason,
-            replacement_realization_id=discard.replacement_realization_id,
-            replacement_verified=discard.replacement_verified, verdict=verdict, decision_reason=reason,
+            replacement_realization_id=replacement_realization_id,
+            replacement_verified=verdict in (REPLACEMENT_VERIFIED_SAFE, REPLACEMENT_VERIFIED_SEMANTIC),
+            verdict=verdict, decision_reason=reason,
+            verification_method=verification_method, semantic_replacement_evidence=semantic_evidence,
         ))
     return tuple(reviews)
 
@@ -1092,7 +1513,7 @@ def resolve_realizations_shadow(
             idea_id, candidate_ids, ledger, clip_scores,
             claim_equivalence_arbiter=claim_equivalence_arbiter, arbiter_log=arbiter_log,
         )
-    orphan_reviews = resolve_orphan_realizations_shadow(ledger)
+    orphan_reviews = resolve_orphan_realizations_shadow(ledger, claim_equivalence_arbiter=claim_equivalence_arbiter)
     return ResolverReport(
         idea_resolutions=idea_resolutions, orphan_reviews=orphan_reviews,
         arbiter_consultations=tuple(arbiter_log),
@@ -1134,6 +1555,12 @@ def build_realization_resolver_diagnostics(report: ResolverReport) -> dict:
                 "replacement_realization_id": o.replacement_realization_id,
                 "replacement_verified": o.replacement_verified,
                 "verdict": o.verdict, "decision_reason": o.decision_reason,
+                # D-073: additive, diagnostic-only -- verification_method
+                # distinguishes PATH A ("lexical") from PATH B ("semantic")
+                # certifications; semantic_replacement_evidence is empty
+                # whenever PATH B was never attempted or found nothing.
+                "verification_method": o.verification_method,
+                "semantic_replacement_evidence": dict(o.semantic_replacement_evidence),
             }
             for o in report.orphan_reviews
         ],
@@ -1414,9 +1841,15 @@ def _realization_id_of(clip) -> str:
 
 def apply_authoritative_realization_resolution(
     draft: DraftTimeline, ledger: SemanticLedger, report: ResolverReport,
+    *, claim_equivalence_arbiter: ClaimEquivalenceArbiter | None = None,
 ) -> AuthoritativeApplicationResult:
     """D-050C2 Section 3/4: THE ONE explicit point the resolver's decision
     is ever applied to a `DraftTimeline`. Atomic per semantic idea:
+
+    D-073: `claim_equivalence_arbiter` is additive, defaulted to None
+    (deterministic-only PATH B) -- threaded straight through to this
+    function's own `resolve_orphan_realizations_shadow` call below, never
+    consulted anywhere else in this function.
 
     - `RESOLVED_WINNER`: every clip belonging to the winning realization
       moves to `selected`; every OTHER candidate realization of that idea
@@ -1520,7 +1953,7 @@ def apply_authoritative_realization_resolution(
     # see the module-level NON-NEGOTIABLE SCOPE NOTE above: an orphan
     # discard (D-049 Case A shape) this function cannot verify safe forces
     # REVIEW_REQUIRED rather than silently certifying the draft.
-    orphan_reviews = resolve_orphan_realizations_shadow(ledger)
+    orphan_reviews = resolve_orphan_realizations_shadow(ledger, claim_equivalence_arbiter=claim_equivalence_arbiter)
     unresolved_orphans = tuple(o.realization_id for o in orphan_reviews if o.verdict == REVIEW_REQUIRED)
     if unresolved_orphans:
         any_review_required = True

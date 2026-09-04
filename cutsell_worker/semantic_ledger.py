@@ -108,6 +108,13 @@ class CanonicalClaimRecord:
     # Nothing in claim_coverage_best_take.py or any other authoritative
     # stage reads this field.
     text: str = ""
+    # D-073: `semantic_claims.Claim.negation_role` (D-066), carried
+    # through observation-only -- "" when absent/not-applicable, never
+    # guessed. Lets realization_resolver.py's PATH B semantic replacement
+    # certification reuse D-066's CONTRASTIVE_HINDSIGHT_NEGATION safe
+    # contract on the Ledger's own claim representation, without this
+    # module making any classification decision of its own.
+    negation_role: str = ""
 
 
 IDEA_STATUS_ACTIVE = "ACTIVE"
@@ -183,6 +190,16 @@ class DiscardRecord:
     replacement_realization_id: str | None
     replacement_verified: bool
     coverage_after_discard: str | None = None
+    # D-073: `hybrid_editorial_chunks[*].decisions[*].replacement_candidate_
+    # clip_id_before_guard` (D-072), carried through observation-only when
+    # this discard's own hybrid decision recorded one -- None whenever no
+    # such candidate exists or predates D-072. This is the ONLY additional
+    # evidence realization_resolver.py's PATH B semantic replacement
+    # certification needs to find a starting candidate for a true orphan
+    # (one with no semantic_idea_id, so no formal grouping relation to
+    # consult) -- the Ledger itself makes no certification decision from
+    # it, exactly like every other field on this record.
+    pre_guard_candidate_clip_id: str | None = None
 
 
 @dataclass(frozen=True)
@@ -589,6 +606,7 @@ def build_semantic_ledger_shadow(draft) -> SemanticLedger:
         )
         discard_reason = None
         replacement_id = None
+        pre_guard_candidate_clip_id = None
         if state == "discarded":
             hybrid_decision = next((hybrid_delete_by_clip.get(c.clip_id) for c in clips if c.clip_id in hybrid_delete_by_clip), None)
             if hybrid_decision:
@@ -596,6 +614,13 @@ def build_semantic_ledger_shadow(draft) -> SemanticLedger:
                 later_replacement_clip = hybrid_decision.get("later_retry_replacement_id")
                 if later_replacement_clip and later_replacement_clip in clip_by_id:
                     replacement_id = _clip_realization_id(clip_by_id[later_replacement_clip])
+                # D-073: carried through unconditionally (even when a
+                # lexical replacement_id was already found above) -- an
+                # observation, never a decision; PATH B only ever consults
+                # it when the lexical path above left replacement_id None.
+                pre_guard_candidate_clip_id = hybrid_decision.get(
+                    "replacement_candidate_clip_id_before_guard"
+                )
             elif any(c.clip_id in draft_review_removed_ids for c in clips):
                 discard_reason = "draft_review_removed"
             else:
@@ -638,6 +663,7 @@ def build_semantic_ledger_shadow(draft) -> SemanticLedger:
                 covered_by_realization_ids=(),
                 coverage_state="unresolved",
                 text=str(claim.text or ""),
+                negation_role=str(getattr(claim, "negation_role", "") or ""),
             ))
 
         if discard_reason is not None:
@@ -648,6 +674,7 @@ def build_semantic_ledger_shadow(draft) -> SemanticLedger:
                     reason=discard_reason,
                     replacement_realization_id=replacement_id,
                     replacement_verified=bool(replacement_id),
+                    pre_guard_candidate_clip_id=pre_guard_candidate_clip_id,
                 ),
                 stage="hybrid_editorial_chunks" if discard_reason not in ("draft_review_removed", "clean_cut_or_composite_resolution") else discard_reason,
                 semantic_idea_id=str(getattr(primary, "semantic_idea_id", None)) if getattr(primary, "semantic_idea_id", None) else None,
@@ -968,6 +995,7 @@ def build_semantic_ledger_diagnostics(ledger: SemanticLedger, parity: LedgerPari
                 "reason": d.reason,
                 "replacement_realization_id": d.replacement_realization_id,
                 "replacement_verified": d.replacement_verified,
+                "pre_guard_candidate_clip_id": d.pre_guard_candidate_clip_id,
             }
             for d in ledger.discards()
         ],

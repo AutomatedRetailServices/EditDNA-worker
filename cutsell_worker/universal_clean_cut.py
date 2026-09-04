@@ -291,7 +291,9 @@ def process_universal_clean_cut_sources(
         authoritative_result = None
         authoritative_semantic_state = None
         if clean_cut_core_v1_enabled and resolver_mode == RESOLVER_MODE_AUTHORITATIVE:
-            authoritative_result = apply_authoritative_realization_resolution(result.draft, ledger, resolver_report)
+            authoritative_result = apply_authoritative_realization_resolution(
+                result.draft, ledger, resolver_report, claim_equivalence_arbiter=claim_equivalence_arbiter,
+            )
 
             pre_authority_diagnostics = dict(result.draft.diagnostics or {})
             legacy_evidence_keys = (
