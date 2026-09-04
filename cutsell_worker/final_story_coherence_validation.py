@@ -660,6 +660,20 @@ def _lost_critical_claims(
     draft, *,
     claim_equivalence_arbiter: ClaimEquivalenceArbiter | None = None,
     clause_role_arbiter: ClauseRoleArbiter | None = None,
+    # D-079 Phase 2: an optional, pre-built canonical_claim_id -> verified
+    # SemanticPreservationProof index (realization_resolver.py's
+    # `build_preserved_claim_id_index`) -- structurally can only be
+    # supplied by a caller that already built a Semantic Ledger
+    # (AUTHORITATIVE mode's second pass; see universal_clean_cut.py's own
+    # call site comment, same scoping D-076 already established for
+    # `_lost_semantic_atoms`'s own `semantic_preservation_proofs`
+    # parameter). None everywhere else -- current fail-closed behavior is
+    # then byte-for-byte unchanged (D-079 Phase 1's own "if canonical
+    # identity cannot be established, current fail-closed behavior
+    # remains"). Deliberately CLAIM-scoped, never idea- or clip-scoped --
+    # see that function's own docstring for why a coarse `GROUPED_SAME_
+    # IDEA`/clip-level credit is structurally never enough to appear here.
+    critical_claim_preservation_index: Mapping[str, object] | None = None,
 ) -> tuple[list[dict], list[dict]]:
     """Per-Idea claim coverage (D-038) -- the backstop for `claim_coverage_
     best_take.py`'s own best-effort override. Unlike `_lost_semantic_atoms`
@@ -741,9 +755,59 @@ def _lost_critical_claims(
                         "resolution": "claim_equivalence_arbiter_confirmed",
                     })
                 continue
+            # D-079 Phase 1/2: canonical claim identity. `claim.
+            # canonical_claim_id` (semantic_claims.extract_claims, minted
+            # via the SAME `mint_canonical_claim_id(claim_type,
+            # content_tokens)` the Ledger's own `CanonicalClaimRecord`
+            # uses -- see canonical_identity.py) is a deterministic,
+            # PROPOSITION-scoped identity: a pure function of this claim's
+            # own type+content, never of idea id or clip id. When the
+            # Semantic Ledger independently extracted the SAME source
+            # clip's SAME clause, it produces the IDENTICAL id -- this is
+            # what makes the lookup below safe without any new minting
+            # scheme. `_lost_critical_claims`'s own extraction here is
+            # UNCHANGED; only this additional check is new.
+            proof = None
+            if critical_claim_preservation_index is not None:
+                proof = critical_claim_preservation_index.get(claim.canonical_claim_id)
+            # D-079 Phase 2's own hard requirement: consumable ONLY when
+            # `proof.verified` AND the exact canonical claim id being
+            # validated is genuinely a member of `proof.preserved_claim_
+            # ids` (guaranteed by construction here -- that is exactly
+            # how the index above was built -- re-checked explicitly for
+            # defense-in-depth, never trusted implicitly). A `None` result
+            # (no such id in the index at all -- GROUPED_SAME_IDEA proofs,
+            # which carry no `preserved_claim_ids`, can never appear here;
+            # neither can an unverified proof, filtered out when the index
+            # was built) means Phase 1's own "canonical identity cannot be
+            # established" escape hatch: fall through to the existing,
+            # unchanged CRITICAL_CLAIM_LOST finding below.
+            if (
+                proof is not None
+                and bool(getattr(proof, "verified", False))
+                and claim.canonical_claim_id in (getattr(proof, "preserved_claim_ids", ()) or ())
+            ):
+                confirmations.append({
+                    "idea_id": group.get("group_id"),
+                    "claim_id": claim.claim_id,
+                    "canonical_claim_id": claim.canonical_claim_id,
+                    "claim_type": claim.claim_type,
+                    "claim_text": claim.text,
+                    "importance": claim.importance,
+                    "source_clip_id": claim.source_clip_id,
+                    "winning_clip_ids": list(winners),
+                    "coverage_against_winning_realization": round(coverage, 4),
+                    "owning_authority": "BestTakeResolver",
+                    "resolution": "semantic_preservation_proof_consumed",
+                    "claim_preservation_consumed": True,
+                    "proof_method": str(getattr(proof, "proof_method", "") or ""),
+                    "preserving_realization_id": getattr(proof, "preserving_id", None),
+                })
+                continue
             findings.append({
                 "idea_id": group.get("group_id"),
                 "claim_id": claim.claim_id,
+                "canonical_claim_id": claim.canonical_claim_id,
                 "claim_type": claim.claim_type,
                 "claim_text": claim.text,
                 "importance": claim.importance,
@@ -770,6 +834,10 @@ def apply_final_story_coherence_validation(
     # comment). None everywhere else -- current fail-closed behavior is
     # then byte-for-byte unchanged.
     semantic_preservation_proofs: Mapping[str, object] | None = None,
+    # D-079 Phase 2: an optional, pre-built canonical_claim_id -> verified
+    # SemanticPreservationProof index -- see `_lost_critical_claims`'s own
+    # identically-named parameter docstring. None everywhere else.
+    critical_claim_preservation_index: Mapping[str, object] | None = None,
 ):
     """Last semantic authority before Selection Freeze. See module docstring."""
     draft = _fold_alternates_into_discarded(draft)
@@ -849,6 +917,7 @@ def apply_final_story_coherence_validation(
     )
     lost_critical_claims, claim_coverage_confirmations = _lost_critical_claims(
         draft, claim_equivalence_arbiter=claim_equivalence_arbiter, clause_role_arbiter=clause_role_arbiter,
+        critical_claim_preservation_index=critical_claim_preservation_index,
     )
     # D-031: a lost_semantic_atoms finding only blocks Freeze when its own
     # `blocking` field says so (a genuinely critical/uncertain atom, or the

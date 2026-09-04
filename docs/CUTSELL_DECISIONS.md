@@ -8437,6 +8437,174 @@ Then STOP.
 
 No Modal. No RAW.
 
+## D-078 -- final Freeze-blocker dual-truth forensic (report only, no code, no RAW)
+
+Forensically root-caused both remaining D-077 canary Freeze blockers using the
+canary's own live diagnostics (run 33917709135, head 86253f3).
+
+**CRITICAL_CLAIM_LOST dual-truth bug**: `_lost_semantic_atoms` (bag-of-words,
+GROUPED_SAME_IDEA-eligible) correctly classified the estomago/gastritis clip
+non-blocking; `_lost_critical_claims` (D-038's own, completely separate
+claim-coverage backstop -- its own `claim_coverage()`/`resolve_ambiguous_
+coverage()` chain, no shared claim identity with the Ledger, never consuming
+any `SemanticPreservationProof`) independently flagged the SAME source text
+as CRITICAL_CLAIM_LOST. Root cause: `classify_claim`'s own unconditional
+"any negation token -> the whole clause is NEGATION" rule fired on a bare
+"no" inside a rhetorical/idiomatic aside ("no hay que preguntar" / "no need
+to ask") that does not negate the clause's actual asserted content (having
+stomach/digestive problems); `claim_coverage()`'s negation-flip guard then
+capped coverage at 0.05, below its own ambiguous-arbiter floor (0.10), so
+the claim never even reached an arbiter. Human-meaning check: YES, the final
+video fully communicates the claim -- SAME_PROPOSITION as the already-
+preserved story atom, not a distinct or contradictory one.
+
+**Separate, unrelated blocker**: DUPLICATE_IDEA/UNRESOLVED_RETRY on
+`tg_bb8eb9fceecf9c6d6f` -- classified AUTO_RESOLVABLE (Candidate B carries a
+unique, Human-Gold-verified critical fact; Candidate A is a higher-delivery-
+score restatement of only the non-critical hindsight half, already covered,
+in briefer form, inside Candidate B). D-063 CRITICAL_COVERAGE_DOMINANCE +
+D-066's hindsight-alignment mechanism were shown (offline, `tests/
+test_cutsell_d066_hindsight_alignment.py`) to already resolve this EXACT
+shape correctly given a confirming arbiter -- not a missing mechanism, an
+observed-live absence/decline of that one arbiter consultation for this pair.
+
+Freeze counterfactual: fixing both blockers, no other blocker remains --
+Freeze would pass. Recommended design: `_lost_critical_claims` should
+consume an existing, claim-SCOPED (never idea- or clip-scoped)
+`SemanticPreservationProof` for the exact canonical claim id, never a
+coarse `GROUPED_SAME_IDEA`/clip-level credit. Not implemented in D-078
+(report only, per directive).
+
+## D-079 -- final Freeze-blocker integration: claim single-truth + dominance reachability
+
+Implements D-078's own recommended design for the CRITICAL_CLAIM_LOST dual-
+truth bug; confirms (does not re-implement) the D-063/D-066 dominance
+mechanism already resolves the retry-family blocker correctly.
+
+PHASE 1 -- CANONICAL CLAIM IDENTITY: `semantic_claims.extract_claims`
+already mints `Claim.canonical_claim_id` via `mint_canonical_claim_id
+(claim_type, content_tokens)` -- the SAME function the Semantic Ledger's own
+`CanonicalClaimRecord.canonical_claim_id` uses. This is a pure function of a
+claim's own type+content, never of idea id or clip id -- the SAME source
+clip's SAME clause, extracted independently by `_lost_critical_claims` and
+by the Ledger, produces the IDENTICAL id. No new minting scheme; this
+existing, already-shared identity space is simply now READ from both sides.
+
+PHASE 2 -- CLAIM-SCOPED PROOF CONSUMPTION: `_lost_critical_claims` gains an
+additive `critical_claim_preservation_index: Mapping[str, object] | None =
+None` parameter (default None -- byte-identical everywhere else). Before
+emitting a CRITICAL_CLAIM_LOST finding, it checks `index.get(claim.
+canonical_claim_id)`; suppresses ONLY when `proof.verified` AND the exact
+canonical claim id is a member of `proof.preserved_claim_ids` (re-checked
+explicitly, never trusted implicitly) -- recording `claim_preservation_
+consumed`, `canonical_claim_id`, `proof_method`, `preserving_realization_id`
+into the existing `claim_coverage_confirmations` list. `build_preserved_
+claim_id_index` (realization_resolver.py) builds this index from ALL
+verified proofs' `preserved_claim_ids` -- `GROUPED_SAME_IDEA` (StoryValidator's
+own clip-level credit) carries no `preserved_claim_ids` and can structurally
+never appear here, satisfying "a generic same-idea proof is NOT enough."
+
+The index needed a genuinely new proof source: PATH A/B only evaluate TRUE
+orphans (no `semantic_idea_id`), D-076's pre-group pass only evaluates
+discards that never reached `hybrid_editorial_chunks`'s own semantic
+judgment. A discard that DID reach grouping and lost, WITHIN its own idea,
+to that idea's own resolved winner/composite was never evaluated by ANY
+claim-level chain at all -- the third, remaining population. New, additive
+`INTRA_IDEA_SEMANTIC_PRESERVATION` certification path (realization_
+resolver.py): `resolve_intra_idea_semantic_preservation_shadow` walks every
+`resolve_realizations_shadow` idea resolved RESOLVED_WINNER/RESOLVED_
+COMPOSITE, certifies every non-winning member against that idea's OWN
+resolved winner/composite (candidate discovery = the idea's own resolution,
+never a search) via the EXACT SAME shared `_certify_directional_semantic_
+preservation` chain PATH B/D-076/D-077 use, unmodified.
+
+PHASE 1/4 root fix: a new, narrow, opt-in `rhetorical_aside_negation_bridge`
+matching strategy inside `_claim_preserved` (`allow_rhetorical_aside_
+negation_bridge`, default False -- PATH B's and D-076's own calls pass
+nothing, byte-identical). Eligible ONLY when a claim is NEGATION-typed, not
+already CONTRASTIVE_HINDSIGHT_NEGATION (D-066 owns that shape), and its raw
+text contains an EXACT match from a small, fixed, general, bilingual marker
+list (`_RHETORICAL_ASIDE_NEGATION_MARKERS`: "no need to ask" / "no hay que
+preguntar" / "needless to say" / "no doubt" / etc. -- never a bare "no"/"not"
+token, so a genuine factual negation like "did not have gastritis" is
+structurally unaffected). Strips ONLY that exact phrase, re-classifies the
+residual via the UNMODIFIED `classify_claim`, and requires the residual
+carry NO remaining negation marker of its own (`residual_still_negated`
+fails closed) and NOT re-classify NEGATION itself. The residual (now
+typically ACTION_EVENT) is then matched via the EXISTING, unmodified dedup/
+subsumed/cross-type-bridge strategies -- never a new matching primitive.
+`classify_claim`/`_negations`/`_claim_has_negation` and every existing
+NEGATION hard gate are completely untouched globally.
+
+PHASE 3 -- HARD SAFETY: re-verified via adversarial tests with an always-
+YES arbiter that number mismatch, negation reversal, diagnosis substitution,
+attribution asymmetry, causal reversal, and same-topic-different-event can
+never be suppressed by the new path -- each fails via the SAME pre-existing
+hard gates the shared chain already enforces (fully reused, not
+reimplemented), or via the idea's own Resolver-level contradiction check
+firing even earlier (no certification is even attempted).
+
+PHASE 5/6/7 -- D-063 DOMINANCE REACHABILITY: traced and confirmed (no code
+change -- `claim_coverage_best_take.py` is not touched by D-079 at all)
+that `_critical_coverage_dominant_candidate` + D-066's `_find_hindsight_
+alignment` ALREADY run, unconditionally, before every DUPLICATE_IDEA/
+UNRESOLVED_RETRY emission for a 2+-selected family, and ALREADY correctly
+resolve the exact D-078 retry shape (Candidate A: critical diagnosis +
+hindsight, delivery 0.9; Candidate B: hindsight only, delivery 0.95) to A,
+via existing, unmodified `tests/test_cutsell_d066_hindsight_alignment.py`
+tests (`test_d064_generic_chain_auto_resolves_with_confirming_arbiter`);
+without a confirming arbiter the family correctly stays REVIEW_REQUIRED,
+never forced (`test_d064_generic_chain_stays_ambiguous_without_arbiter_
+confirmation`/`_with_no_arbiter_at_all`) -- Phase 6's own "true tie
+preservation" and Phase 7's own retry-regression requirement, both already
+green, re-run here as confirmation.
+
+PHASE 8 -- SINGLE-TRUTH INVARIANT: dedicated tests confirm that for the
+exact same canonical required proposition, a verified claim-scoped
+preservation proof and a CRITICAL_CLAIM_LOST finding never coexist, across
+both a genuine positive case (verified proof, no finding) and a genuine
+negative case (no proof reaches verified, finding still emitted).
+
+PHASE 9 -- NO NEW AUTHORITY: reconfirmed. The Unified Resolver / existing
+claim-preservation chain mints the one new proof type; `_lost_critical_
+claims` only consumes it (a dict lookup gating whether it emits its own,
+pre-existing finding kind) -- never mutates `selected`/`discarded`
+membership. POST_RESOLVER_SEMANTIC_MUTATORS stays 0.
+
+TESTS: tests/test_cutsell_d079_claim_single_truth.py, 18 new tests --
+canonical claim identity sharing, fail-closed with no canonical identity/no
+arbiter, the D-078 negation shape resolving via the new intra-idea proof
+(with and without arbiter), the mandatory no-relation negative control, the
+full hard-safety matrix (number/negation/diagnosis/attribution/causal/
+same-topic-different-event) under an always-YES arbiter, rhetorical-aside
+marker exact-phrase-only safety (a bare negation without the marker never
+bridges; a genuine second negation alongside the marker never bridges
+either), sales/UGC positive/negative generalization, the single-truth
+invariant (positive and negative cases), and StoryValidator/`_lost_
+critical_claims` consumer-only re-verification.
+
+QUALIFICATION: compileall clean; D-050-D-079 targeted sweep 464 passed;
+CleanCutBench 54/54 LEGACY and 54/54 AUTHORITATIVE; full suite 1808 passed
+(1790 baseline + 18 new), 0 regressions.
+
+QA_ENGINE VERDICT: PASS. Adversarial matrix (always-YES arbiter attack
+against every hard gate for the NEW rhetorical-aside-bridge specifically,
+mandatory no-relation negative control, canonical-id-to-wrong-proposition
+attack via Phase 1's own deterministic minting) found no unsafe suppression
+in any case.
+
+P0: 0
+P1: 0
+P2: 0
+P3: 0
+
+READY FOR ONE VIDEO00 CANARY: offline-qualified; awaiting explicit user
+authorization before any Modal canary.
+
+Then STOP.
+
+No Modal. No RAW.
+
 ## Change rule
 
 When a new decision changes product behavior, update this file in the same development cycle. Do not silently redefine CutSell through code alone.

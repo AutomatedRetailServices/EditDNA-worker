@@ -181,7 +181,7 @@ from .claim_coverage_best_take import (
     _is_low_information_incidental,
 )
 from .contracts import DraftTimeline
-from .final_sibling_grouping import _negations
+from .final_sibling_grouping import _content, _negations
 from .semantic_atom_importance import blocks_freeze, classify_number_atom
 from .semantic_claims import (
     ACTION_EVENT,
@@ -198,6 +198,7 @@ from .semantic_claims import (
     _CAUSE_EFFECT_MARKERS,
     _TEMPORAL_MARKERS,
     _negation_role_hard_exclusion,
+    classify_claim,
 )
 from .semantic_ledger import (
     CanonicalClaimRecord,
@@ -803,6 +804,17 @@ PROOF_METHOD_GROUPED_SAME_IDEA = "GROUPED_SAME_IDEA"
 PROOF_METHOD_LEXICAL_REPLACEMENT = "LEXICAL_REPLACEMENT"
 PROOF_METHOD_SEMANTIC_REPLACEMENT = "SEMANTIC_REPLACEMENT"
 PROOF_METHOD_PRE_GROUP_SEMANTIC_PRESERVATION = "PRE_GROUP_SEMANTIC_PRESERVATION"
+# D-079: the one genuinely NEW certification path THIS directive adds --
+# see `_attempt_intra_idea_semantic_preservation` below. Closes the D-078
+# forensic's own gap: a discarded realization that DID reach grouping (has
+# a `semantic_idea_id`) and lost, WITHIN its own idea, to that idea's own
+# resolved winner/composite (`resolve_realizations_shadow`'s own per-idea
+# resolution) was never evaluated by ANY claim-level certification chain
+# at all -- PATH A/PATH B only ever run for TRUE orphans (no semantic_
+# idea_id), D-076's pre-group only for discards that never reached
+# `hybrid_editorial_chunks`'s own semantic judgment. This is the THIRD,
+# remaining population.
+PROOF_METHOD_INTRA_IDEA_SEMANTIC_PRESERVATION = "INTRA_IDEA_SEMANTIC_PRESERVATION"
 
 
 @dataclass(frozen=True)
@@ -1208,6 +1220,96 @@ def _arbiter_provenance(claim_equivalence_arbiter: ClaimEquivalenceArbiter | Non
     }
 
 
+# D-079 Phase 1/4: a small, FIXED, general (non-Video00-specific,
+# bilingual) set of idiomatic discourse-aside phrases that carry a bare
+# negation TOKEN ("no") without asserting a factual negation of anything
+# -- "goes without saying" / "needless to say" phrasing, not "did not
+# have X". D-078's own forensic (docs/CUTSELL_DECISIONS.md) traced a live
+# CRITICAL_CLAIM_LOST false-positive to exactly this shape: "no hay que
+# preguntar" ("no need to ask") tacked onto an otherwise-plain statement
+# tripped `classify_claim`'s own unconditional "any negation token -> the
+# WHOLE clause is NEGATION" rule (correct and untouched -- see below),
+# which then tripped `claim_coverage()`'s negation-flip guard even though
+# nothing about the clause's actual asserted content was negated.
+#
+# EXACT-PHRASE match only (never a bare "no"/"not" token) -- this is what
+# makes it safe: "did not have gastritis" / "no tuve gastritis" contains
+# no such phrase and is completely unaffected. Used ONLY by
+# `_rhetorical_aside_negation_bridge_eligible` below, itself reachable
+# ONLY via the new, opt-in `allow_rhetorical_aside_negation_bridge`
+# parameter (default False everywhere except D-079's own new intra-idea
+# certification call site) -- `classify_claim`, `_negations`,
+# `_claim_has_negation`, and every existing NEGATION hard gate in this
+# module (D-073's direction-sensitivity check, D-073.1's attribution
+# check, PATH B's own dedup/subsumed/hindsight strategies) are completely
+# untouched. This is an ADDITIVE, narrow exception -- never a global
+# weakening of negation detection.
+_RHETORICAL_ASIDE_NEGATION_MARKERS = (
+    "no hay que preguntar", "no hay que decir", "no hace falta decir",
+    "sin duda", "no cabe duda", "ni que decir tiene",
+    "no need to ask", "needless to say", "no doubt", "without a doubt",
+    "goes without saying",
+)
+
+
+def _rhetorical_aside_negation_bridge_eligible(
+    d_claim: CanonicalClaimRecord,
+) -> tuple[bool, str, CanonicalClaimRecord | None]:
+    """D-079 Phase 1/4: does `d_claim`'s own NEGATION classification stem
+    ONLY from a fixed, general rhetorical-aside phrase, with no genuine
+    negation of its own asserted content? Returns `(eligible, reason,
+    residual_claim_or_None)`. `residual_claim` -- when eligible -- is a
+    NEW `CanonicalClaimRecord` (never mutates `d_claim`) built from
+    `d_claim`'s own text with ONLY the matched phrase removed, then
+    RE-classified via the SAME, unmodified `classify_claim` -- used only
+    as an internal probe for the matching strategies below, never
+    surfaced as `d_claim`'s own type/importance to any caller
+    (`_lost_critical_claims` keeps validating the ORIGINAL NEGATION/
+    CRITICAL claim; only the certification attempt uses the residual).
+
+    Fails closed (not eligible) whenever:
+      - `d_claim` is not NEGATION-typed at all;
+      - its negation_role is already CONTRASTIVE_HINDSIGHT_NEGATION (D-066
+        owns that shape via its own claim-vs-claim alignment machinery --
+        never doubly handled here);
+      - no exact marker phrase is present in the raw text;
+      - stripping the phrase leaves no residual content at all;
+      - the RESIDUAL text still contains ANY negation marker anywhere
+        (`_negations`) -- a genuine second, real negation elsewhere in
+        the same clause must never be bridged away;
+      - the residual, independently re-classified, is STILL NEGATION --
+        proof the match didn't actually isolate the true negation."""
+    if d_claim.claim_type != NEGATION:
+        return False, "not_negation_claim", None
+    if d_claim.negation_role == CONTRASTIVE_HINDSIGHT_NEGATION:
+        return False, "hindsight_negation_handled_elsewhere", None
+    text = d_claim.text or ""
+    if not text:
+        return False, "no_raw_text", None
+    lowered = text.lower()
+    marker = next((m for m in _RHETORICAL_ASIDE_NEGATION_MARKERS if m in lowered), None)
+    if marker is None:
+        return False, "no_rhetorical_aside_marker", None
+    pattern = re.compile(re.escape(marker), re.IGNORECASE)
+    residual_text = pattern.sub(" ", text)
+    residual_text = re.sub(r"\s*,\s*,\s*", ", ", residual_text)  # collapse a doubled comma left by the strip
+    residual_text = residual_text.strip(" ,.")
+    if not residual_text:
+        return False, "no_residual_content", None
+    if _negations(residual_text):
+        return False, "residual_still_negated", None
+    residual_type, _residual_importance, _evidence = classify_claim(residual_text)
+    if residual_type == NEGATION:
+        return False, "residual_reclassifies_negation", None
+    residual_tokens = frozenset(_content(residual_text))
+    if not residual_tokens:
+        return False, "no_residual_content_tokens", None
+    residual_claim = replace(
+        d_claim, claim_type=residual_type, content_tokens=residual_tokens, text=residual_text,
+    )
+    return True, "rhetorical_aside_negation_isolated", residual_claim
+
+
 def _claim_preserved(
     d_claim: CanonicalClaimRecord,
     r_claims: Sequence[CanonicalClaimRecord],
@@ -1215,6 +1317,7 @@ def _claim_preserved(
     claim_equivalence_arbiter: ClaimEquivalenceArbiter | None,
     arbiter_log: list[dict] | None,
     allow_cross_type_ambiguous_bridge: bool = False,
+    allow_rhetorical_aside_negation_bridge: bool = False,
 ) -> tuple[CanonicalClaimRecord | None, str]:
     """D-073 Sections 3/5/8: is `d_claim` (one claim of the discarded
     realization D) preserved by some claim of the candidate replacement R?
@@ -1339,6 +1442,64 @@ def _claim_preserved(
                 })
             if verdict:
                 return r_claim, "cross_type_ambiguous_bridge"
+    # D-079 Phase 1/4: the ONE new arbiter-adjacent relationship this
+    # directive adds -- opt-in only (`allow_rhetorical_aside_negation_
+    # bridge`, default False), tried LAST, after every other strategy
+    # (including the cross-type bridge above) has already failed for
+    # `d_claim` itself. Eligibility is computed ONCE (it depends only on
+    # `d_claim`'s own text, not on any candidate) via
+    # `_rhetorical_aside_negation_bridge_eligible`; when eligible, the
+    # SAME matching strategies above (dedup_equivalent, content_subsumed,
+    # and -- only if the caller ALSO enabled it -- the cross-type bridge)
+    # are retried against the RESIDUAL claim in place of `d_claim` --
+    # never a new matching primitive, never a new hard-gate exemption.
+    # `d_claim` itself (its own canonical_claim_id, claim_type, importance)
+    # is NEVER mutated or replaced in the caller's own bookkeeping --
+    # only this one internal certification attempt uses the residual.
+    if allow_rhetorical_aside_negation_bridge:
+        eligible, gate_reason, residual_claim = _rhetorical_aside_negation_bridge_eligible(d_claim)
+        if eligible and residual_claim is not None:
+            for r_claim in sorted(r_claims, key=lambda c: c.canonical_claim_id):
+                if _claims_dedup_equivalent(
+                    residual_claim, r_claim,
+                    claim_equivalence_arbiter=claim_equivalence_arbiter, arbiter_log=arbiter_log,
+                ):
+                    return r_claim, "rhetorical_aside_negation_bridge"
+            for r_claim in sorted(r_claims, key=lambda c: c.canonical_claim_id):
+                if _claim_content_subsumed(residual_claim, r_claim):
+                    return r_claim, "rhetorical_aside_negation_bridge"
+            if allow_cross_type_ambiguous_bridge:
+                for r_claim in sorted(r_claims, key=lambda c: c.canonical_claim_id):
+                    eligible2, _gate2 = _cross_type_ambiguous_bridge_eligible(residual_claim, r_claim)
+                    if not eligible2:
+                        continue
+                    if claim_equivalence_arbiter is None or not residual_claim.text or not r_claim.text:
+                        if arbiter_log is not None:
+                            arbiter_log.append({
+                                "left_claim_id": d_claim.canonical_claim_id, "right_claim_id": r_claim.canonical_claim_id,
+                                "method": "rhetorical_aside_negation_bridge", "deterministic_result": "ambiguous",
+                                "arbiter_eligible": True, "arbiter_invoked": False,
+                                "verdict": False, "confidence": None, "reason": "arbiter_unavailable",
+                                **_arbiter_provenance(claim_equivalence_arbiter),
+                            })
+                        continue
+                    try:
+                        covered, confidence, reason = claim_equivalence_arbiter.claim_covered(
+                            residual_claim.text, r_claim.text,
+                        )
+                        verdict = bool(covered) is True
+                    except Exception:
+                        verdict, confidence, reason = False, 0.0, "arbiter_exception"
+                    if arbiter_log is not None:
+                        arbiter_log.append({
+                            "left_claim_id": d_claim.canonical_claim_id, "right_claim_id": r_claim.canonical_claim_id,
+                            "method": "rhetorical_aside_negation_bridge", "deterministic_result": "ambiguous",
+                            "arbiter_eligible": True, "arbiter_invoked": True,
+                            "verdict": verdict, "confidence": confidence, "reason": reason,
+                            **_arbiter_provenance(claim_equivalence_arbiter),
+                        })
+                    if verdict:
+                        return r_claim, "rhetorical_aside_negation_bridge"
     return None, "none"
 
 
@@ -1467,15 +1628,18 @@ def _certify_directional_semantic_preservation(
     evidence: dict,
     nonrequired_digit_omissions: frozenset[str] = frozenset(),
     allow_cross_type_ambiguous_bridge: bool = False,
+    allow_rhetorical_aside_negation_bridge: bool = False,
 ) -> tuple[bool, str]:
-    """D-073/D-076/D-077 shared directional preservation certification
-    chain -- D's required meaning subset of R's required meaning. Takes an
-    ALREADY-DISCOVERED candidate; contains no candidate-discovery logic of
-    its own (each caller's own discovery method is what legitimately
-    differs -- D-072's pre-guard candidate for PATH B, D-076's strong-
-    relation discovery for PRE_GROUP_SEMANTIC_PRESERVATION). Reused
-    verbatim by both -- this is "reuse the exact existing D-073/D-073.1
-    semantic preservation chain," not a second implementation of it.
+    """D-073/D-076/D-077/D-079 shared directional preservation
+    certification chain -- D's required meaning subset of R's required
+    meaning. Takes an ALREADY-DISCOVERED candidate; contains no candidate-
+    discovery logic of its own (each caller's own discovery method is what
+    legitimately differs -- D-072's pre-guard candidate for PATH B,
+    D-076's strong-relation discovery for PRE_GROUP_SEMANTIC_PRESERVATION,
+    D-079's idea-own-winner discovery for INTRA_IDEA_SEMANTIC_
+    PRESERVATION). Reused verbatim by all four -- this is "reuse the exact
+    existing D-073/D-073.1 semantic preservation chain," not a second
+    implementation of it.
 
     `nonrequired_digit_omissions` (D-076 Section 6, default empty): digit
     VALUES from D's own realization text that the CALLER has already
@@ -1487,9 +1651,15 @@ def _certify_directional_semantic_preservation(
     `allow_cross_type_ambiguous_bridge` (D-077, default False): threaded
     straight through to `_claim_preserved`'s own identically-named
     parameter -- PATH B's own call passes nothing here, so its per-claim
-    matching stays byte-identical to before D-077; only the pre-group
-    path opts in. Mutates and returns `evidence` in place; caller owns
-    constructing/initializing it."""
+    matching stays byte-identical to before D-077; only the pre-group and
+    (D-079) intra-idea paths opt in.
+
+    `allow_rhetorical_aside_negation_bridge` (D-079, default False):
+    threaded straight through to `_claim_preserved`'s own identically-
+    named parameter -- PATH B's and D-076's own calls pass nothing here,
+    so their per-claim matching stays byte-identical to before D-079;
+    only the new intra-idea path opts in. Mutates and returns `evidence`
+    in place; caller owns constructing/initializing it."""
     evidence["candidate_replacement_realization_id"] = candidate_realization_id
 
     if candidate_record.state != "selected":
@@ -1539,10 +1709,12 @@ def _certify_directional_semantic_preservation(
 
     arbiter_log: list[dict] = []
     preserved_ids: list[str] = []
+    preserved_methods: dict[str, str] = {}
     for d_claim in sorted(d_claims, key=lambda c: c.canonical_claim_id):
-        preserving, _method = _claim_preserved(
+        preserving, method = _claim_preserved(
             d_claim, r_claims, claim_equivalence_arbiter=claim_equivalence_arbiter, arbiter_log=arbiter_log,
             allow_cross_type_ambiguous_bridge=allow_cross_type_ambiguous_bridge,
+            allow_rhetorical_aside_negation_bridge=allow_rhetorical_aside_negation_bridge,
         )
         if preserving is None:
             evidence["semantic_replacement_reason"] = "required_claim_not_preserved"
@@ -1553,8 +1725,14 @@ def _certify_directional_semantic_preservation(
             evidence["arbiter_consultations"] = list(arbiter_log)
             return False, evidence["semantic_replacement_reason"]
         preserved_ids.append(d_claim.canonical_claim_id)
+        preserved_methods[d_claim.canonical_claim_id] = method
 
     evidence["preserved_claim_ids"] = preserved_ids
+    # D-079 Phase 1: per-claim matching method, keyed by the claim's OWN
+    # canonical_claim_id -- observability only, so a consumer can tell
+    # "cross_type_ambiguous_bridge"/"rhetorical_aside_negation_bridge"
+    # certified this specific claim apart from a plain deterministic match.
+    evidence["preserved_claim_methods"] = dict(preserved_methods)
     evidence["critical_claims_preserved"] = True
     evidence["unique_required_content_preserved"] = True
     evidence["arbiter_invoked"] = bool(arbiter_log)
@@ -1775,16 +1953,173 @@ def resolve_pre_group_semantic_preservation_shadow(
     return tuple(proofs)
 
 
+# --- D-079: INTRA_IDEA_SEMANTIC_PRESERVATION ---------------------------------
+
+def _find_intra_idea_candidates(resolution: RealizationResolution, exclude_id: str) -> tuple[str, ...]:
+    """D-079 Phase 1: candidate discovery for a losing member of an
+    ALREADY-RESOLVED idea -- never a search, never a new relation: the
+    idea's own resolved winner and/or composite members, exactly as
+    `resolve_realizations_shadow`'s own per-idea resolution already
+    established them. Stable order (winner first, then composite members
+    sorted) -- the caller tries each in turn and stops at the first that
+    verifies, mirroring every other candidate-discovery function in this
+    module's own "first match wins" convention."""
+    candidates: list[str] = []
+    if resolution.winner_realization_id and resolution.winner_realization_id != exclude_id:
+        candidates.append(resolution.winner_realization_id)
+    for cid in sorted(resolution.composite_realization_ids):
+        if cid != exclude_id and cid not in candidates:
+            candidates.append(cid)
+    return tuple(candidates)
+
+
+def _attempt_intra_idea_semantic_preservation(
+    record: RealizationRecord, resolution: RealizationResolution, ledger: SemanticLedger, *,
+    claim_equivalence_arbiter: ClaimEquivalenceArbiter | None,
+) -> SemanticPreservationProof:
+    """D-079: the one genuinely NEW certification path this directive
+    adds -- for a realization that DID reach grouping (has a
+    `semantic_idea_id`, hence never evaluated by `resolve_orphan_
+    realizations_shadow`/PATH A/PATH B/D-076's pre-group pass at all) and
+    lost, WITHIN its own already-resolved idea, to that idea's own winner
+    or composite. Candidate discovery is the idea's OWN resolution --
+    stronger than D-076's own "strong relation" search, since it is
+    literally "the already-computed winner of MY OWN idea." Runs the
+    SAME shared `_certify_directional_semantic_preservation` chain PATH B
+    and D-076 use, with the SAME Section 6 nonrequired-digit-omission
+    relaxation D-076 already established, PLUS (D-079's own addition)
+    `allow_cross_type_ambiguous_bridge` and `allow_rhetorical_aside_
+    negation_bridge` -- both opt-in, both previously introduced (D-077,
+    D-079) as narrow, hard-gated, additive strategies inside the SAME
+    unmodified `_claim_preserved` chain. Stops at the first candidate
+    that verifies; returns an unverified proof (never silently omitted)
+    when no candidate exists or every candidate fails."""
+    evidence: dict = {
+        "semantic_replacement_evaluated": True,
+        "candidate_replacement_realization_id": None,
+        "same_idea_verified": False,
+        "critical_claims_preserved": False,
+        "unique_required_content_preserved": False,
+        "hard_gate_results": {},
+        "arbiter_invoked": False,
+        "semantic_replacement_verified": False,
+        "semantic_replacement_reason": "",
+        "preserved_claim_ids": [],
+    }
+
+    candidate_ids = _find_intra_idea_candidates(resolution, record.realization_id)
+    if not candidate_ids:
+        return SemanticPreservationProof(
+            discarded_id=record.realization_id, preserving_id=None,
+            proof_method=PROOF_METHOD_INTRA_IDEA_SEMANTIC_PRESERVATION,
+            rejection_reason="no_resolved_idea_winner",
+            candidate_discovery_method="intra_idea_own_resolution",
+        )
+
+    realizations = ledger.realizations()
+    last_reason = "no_resolved_idea_winner"
+    last_candidate_evidence: dict = {}
+    for candidate_realization_id in candidate_ids:
+        candidate_record = realizations.get(candidate_realization_id)
+        if candidate_record is None:
+            continue
+        _passes, safe_to_omit, omissions = _classify_pre_group_number_omissions(
+            record.text, candidate_record.text,
+        )
+        candidate_evidence = dict(evidence)
+        candidate_evidence["hard_gate_results"] = {}
+        if not _passes:
+            last_reason = "number_mismatch"
+            continue
+        verified, reason = _certify_directional_semantic_preservation(
+            record, candidate_record, candidate_realization_id, ledger,
+            claim_equivalence_arbiter=claim_equivalence_arbiter, evidence=candidate_evidence,
+            nonrequired_digit_omissions=safe_to_omit,
+            allow_cross_type_ambiguous_bridge=True,
+            allow_rhetorical_aside_negation_bridge=True,
+        )
+        last_reason = reason
+        last_candidate_evidence = candidate_evidence
+        if verified:
+            return SemanticPreservationProof(
+                discarded_id=record.realization_id, preserving_id=candidate_realization_id,
+                proof_method=PROOF_METHOD_INTRA_IDEA_SEMANTIC_PRESERVATION,
+                preserved_claim_ids=tuple(candidate_evidence.get("preserved_claim_ids") or ()),
+                nonrequired_omissions=omissions,
+                hard_gate_results=dict(candidate_evidence.get("hard_gate_results") or {}),
+                arbiter_invoked=bool(candidate_evidence.get("arbiter_invoked")),
+                arbiter_consultations=tuple(candidate_evidence.get("arbiter_consultations") or ()),
+                verified=True,
+                relationship_evidence="intra_idea_resolved_winner",
+                candidate_discovery_method="intra_idea_own_resolution",
+            )
+
+    return SemanticPreservationProof(
+        discarded_id=record.realization_id, preserving_id=None,
+        proof_method=PROOF_METHOD_INTRA_IDEA_SEMANTIC_PRESERVATION,
+        rejection_reason=last_reason,
+        arbiter_consultations=tuple(last_candidate_evidence.get("arbiter_consultations") or ()),
+        candidate_discovery_method="intra_idea_own_resolution",
+    )
+
+
+def resolve_intra_idea_semantic_preservation_shadow(
+    ledger: SemanticLedger, *,
+    claim_equivalence_arbiter: ClaimEquivalenceArbiter | None = None,
+    resolver_report: ResolverReport | None = None,
+) -> tuple[SemanticPreservationProof, ...]:
+    """D-079: additive, shadow-only pass over every idea `resolve_
+    realizations_shadow` already resolved to RESOLVED_WINNER/RESOLVED_
+    COMPOSITE -- never touches that function's own per-idea resolution,
+    `discarded_realization_ids`, or `retained_for_contextual_value`
+    bookkeeping (Hard Invariant D is untouched); this is a SEPARATE,
+    parallel evaluation feeding `_lost_critical_claims`'s claim-scoped
+    consumption only (D-079 Phase 2), exactly D-076's own "validation
+    behavior, not semantic selection mutation" framing.
+
+    `resolver_report`: pass an ALREADY-COMPUTED `resolve_realizations_
+    shadow` result when a caller (e.g. `universal_clean_cut.py`, which
+    also needs it for its own `realization_resolver_shadow` diagnostics)
+    has already run it, to avoid a redundant second pass -- computed
+    internally when omitted."""
+    report = (
+        resolver_report if resolver_report is not None
+        else resolve_realizations_shadow(ledger, claim_equivalence_arbiter=claim_equivalence_arbiter)
+    )
+    realizations = ledger.realizations()
+    proofs: list[SemanticPreservationProof] = []
+    for resolution in report.idea_resolutions.values():
+        if resolution.decision_status not in (RESOLVED_WINNER, RESOLVED_COMPOSITE):
+            continue
+        winner_and_composite = set(resolution.composite_realization_ids)
+        if resolution.winner_realization_id:
+            winner_and_composite.add(resolution.winner_realization_id)
+        for realization_id in sorted(resolution.candidate_realization_ids):
+            if realization_id in winner_and_composite:
+                continue
+            record = realizations.get(realization_id)
+            if record is None:
+                continue
+            proofs.append(
+                _attempt_intra_idea_semantic_preservation(
+                    record, resolution, ledger, claim_equivalence_arbiter=claim_equivalence_arbiter,
+                )
+            )
+    return tuple(proofs)
+
+
 def build_semantic_preservation_proofs(
     ledger: SemanticLedger, *,
     claim_equivalence_arbiter: ClaimEquivalenceArbiter | None = None,
     pre_group_proofs: Sequence[SemanticPreservationProof] | None = None,
+    intra_idea_proofs: Sequence[SemanticPreservationProof] | None = None,
 ) -> dict[str, SemanticPreservationProof]:
-    """D-076 Section 1/7: the single unified lookup StoryValidator
-    consumes -- keyed by every `clip_id` a proved realization carries (a
-    realization can merge multiple legacy clip_ids), so a lookup by any
-    one of them finds the same proof. Combines TWO already-existing
-    verdict sources plus the one new path, minting NOTHING itself:
+    """D-076 Section 1/7 (D-079: now three new-path sources): the single
+    unified lookup StoryValidator consumes -- keyed by every `clip_id` a
+    proved realization carries (a realization can merge multiple legacy
+    clip_ids), so a lookup by any one of them finds the same proof.
+    Combines existing verdict sources plus the new paths, minting NOTHING
+    itself:
 
       - `hybrid_editorial_chunks` discards: reframes `resolve_orphan_
         realizations_shadow`'s own existing PATH A/PATH B verdicts
@@ -1794,6 +2129,11 @@ def build_semantic_preservation_proofs(
       - The two D-076 Section 3 populations: `resolve_pre_group_semantic_
         preservation_shadow`'s own new `PRE_GROUP_SEMANTIC_PRESERVATION`
         proofs.
+      - D-079's third, remaining population: `resolve_intra_idea_
+        semantic_preservation_shadow`'s own new `INTRA_IDEA_SEMANTIC_
+        PRESERVATION` proofs (a discard that DID reach grouping and lost,
+        within its own idea, to that idea's own resolved winner/
+        composite).
 
     `GROUPED_SAME_IDEA` is deliberately NOT produced here -- it is
     StoryValidator's own existing, already-working `_same_idea_paraphrase_
@@ -1801,12 +2141,13 @@ def build_semantic_preservation_proofs(
     of use; this function only supplies the additional evidence that
     mechanism cannot see.
 
-    `pre_group_proofs`: pass the ALREADY-COMPUTED result of `resolve_pre_
-    group_semantic_preservation_shadow` when a caller (e.g. `universal_
-    clean_cut.py`, which also needs the full raw list for diagnostics) has
-    already run it, to avoid a redundant second pass (and a redundant
-    second arbiter consultation for the same content) -- computed
-    internally when omitted, so this function stays usable standalone."""
+    `pre_group_proofs`/`intra_idea_proofs`: pass the ALREADY-COMPUTED
+    result of the corresponding `resolve_*_shadow` function when a caller
+    (e.g. `universal_clean_cut.py`, which also needs the full raw list for
+    diagnostics) has already run it, to avoid a redundant second pass (and
+    a redundant second arbiter consultation for the same content) --
+    computed internally when omitted, so this function stays usable
+    standalone."""
     realizations = ledger.realizations()
     proofs_by_clip: dict[str, SemanticPreservationProof] = {}
 
@@ -1824,6 +2165,7 @@ def build_semantic_preservation_proofs(
             preserved_claim_ids=tuple((review.semantic_replacement_evidence or {}).get("preserved_claim_ids") or ()),
             hard_gate_results=dict((review.semantic_replacement_evidence or {}).get("hard_gate_results") or {}),
             arbiter_invoked=bool((review.semantic_replacement_evidence or {}).get("arbiter_invoked")),
+            arbiter_consultations=tuple((review.semantic_replacement_evidence or {}).get("arbiter_consultations") or ()),
             verified=True,
         )
         for clip_id in (record.clip_ids if record is not None else ()):
@@ -1840,7 +2182,58 @@ def build_semantic_preservation_proofs(
         for clip_id in (record.clip_ids if record is not None else ()):
             proofs_by_clip[clip_id] = proof
 
+    resolved_intra_idea_proofs = (
+        intra_idea_proofs if intra_idea_proofs is not None
+        else resolve_intra_idea_semantic_preservation_shadow(ledger, claim_equivalence_arbiter=claim_equivalence_arbiter)
+    )
+    for proof in resolved_intra_idea_proofs:
+        if not proof.verified:
+            continue
+        record = realizations.get(proof.discarded_id)
+        for clip_id in (record.clip_ids if record is not None else ()):
+            proofs_by_clip[clip_id] = proof
+
     return proofs_by_clip
+
+
+def build_preserved_claim_id_index(
+    *proof_collections: Sequence[SemanticPreservationProof] | Mapping[str, SemanticPreservationProof],
+) -> dict[str, SemanticPreservationProof]:
+    """D-079 Phase 1/2: the single, CLAIM-SCOPED lookup `_lost_critical_
+    claims` consumes -- canonical_claim_id -> the one VERIFIED proof that
+    lists it in `preserved_claim_ids`. Deliberately NOT clip-keyed and NOT
+    idea-keyed (Phase 1's own "do not match by idea id... do not suppress
+    on whole-clip equivalence" requirement) -- membership is decided
+    purely by whether the EXACT canonical claim id appears in a verified
+    proof's own `preserved_claim_ids` tuple, which is itself only ever
+    populated by the shared per-claim `_certify_directional_semantic_
+    preservation` loop (PATH B, D-076, D-079) -- never by `GROUPED_SAME_
+    IDEA` (StoryValidator's own clip-level credit, which carries no
+    `preserved_claim_ids` at all and is never passed to this function).
+
+    Accepts any mix of proof sequences (raw `resolve_*_shadow` lists) or
+    clip-keyed dicts (`build_semantic_preservation_proofs`'s own output,
+    where multiple clip_ids can point at the identical proof object) --
+    every source is de-duplicated by object identity before indexing, so
+    a proof consulted by both codepaths is only counted once and never
+    double-recorded. Unverified proofs are skipped entirely; a claim with
+    no verified proof anywhere is simply absent from the returned dict,
+    which is `_lost_critical_claims`'s own fail-closed signal (Phase 1:
+    'if canonical identity cannot be established, current fail-closed
+    behavior remains')."""
+    index: dict[str, SemanticPreservationProof] = {}
+    seen_proof_object_ids: set[int] = set()
+    for collection in proof_collections:
+        values = collection.values() if isinstance(collection, Mapping) else collection
+        for proof in values:
+            if proof is None or id(proof) in seen_proof_object_ids:
+                continue
+            seen_proof_object_ids.add(id(proof))
+            if not bool(getattr(proof, "verified", False)):
+                continue
+            for canonical_claim_id in getattr(proof, "preserved_claim_ids", ()) or ():
+                index.setdefault(canonical_claim_id, proof)
+    return index
 
 
 def resolve_orphan_realizations_shadow(

@@ -41,8 +41,10 @@ from .realization_resolver import (
     build_authoritative_semantic_state,
     build_authoritative_semantic_state_diagnostics,
     build_realization_resolver_diagnostics,
+    build_preserved_claim_id_index,
     build_semantic_preservation_proofs,
     build_semantic_preservation_proofs_diagnostics,
+    resolve_intra_idea_semantic_preservation_shadow,
     resolve_pre_group_semantic_preservation_shadow,
     resolve_realizations_shadow,
 )
@@ -324,9 +326,28 @@ def process_universal_clean_cut_sources(
             pre_group_semantic_preservation_proofs = resolve_pre_group_semantic_preservation_shadow(
                 ledger, claim_equivalence_arbiter=claim_equivalence_arbiter,
             )
+            # D-079 Phase 1/2: the third, remaining discard population --
+            # a realization that DID reach grouping and lost, within its
+            # own idea, to that idea's own resolved winner/composite.
+            # Reuses the ALREADY-COMPUTED `resolver_report` from this same
+            # function's own diagnostics pass above (no redundant second
+            # per-idea resolution).
+            intra_idea_semantic_preservation_proofs = resolve_intra_idea_semantic_preservation_shadow(
+                ledger, claim_equivalence_arbiter=claim_equivalence_arbiter, resolver_report=resolver_report,
+            )
             semantic_preservation_proofs = build_semantic_preservation_proofs(
                 ledger, claim_equivalence_arbiter=claim_equivalence_arbiter,
                 pre_group_proofs=pre_group_semantic_preservation_proofs,
+                intra_idea_proofs=intra_idea_semantic_preservation_proofs,
+            )
+            # D-079 Phase 1/2: the single, CLAIM-scoped index `_lost_
+            # critical_claims` consumes -- built from ALL verified proofs
+            # (hybrid_editorial PATH A/B reframed, pre-group, and this
+            # directive's own intra-idea pass), never from a coarse clip-
+            # or idea-level credit. See `build_preserved_claim_id_index`'s
+            # own docstring for the full contract.
+            critical_claim_preservation_index = build_preserved_claim_id_index(
+                pre_group_semantic_preservation_proofs, intra_idea_semantic_preservation_proofs,
             )
 
             # StoryValidator, AUTHORITATIVELY: re-validated on the resolver's
@@ -338,6 +359,7 @@ def process_universal_clean_cut_sources(
                 claim_equivalence_arbiter=claim_equivalence_arbiter,
                 clause_role_arbiter=clause_role_arbiter,
                 semantic_preservation_proofs=semantic_preservation_proofs,
+                critical_claim_preservation_index=critical_claim_preservation_index,
             )
 
             # CanonicalEditPlan + FinalEditReviewer + bounded repair,
