@@ -64,6 +64,18 @@ _VALID_CLAIM_TYPES = frozenset({
     TEMPORAL_RELATION, UNIQUE_CONCLUSION,
 })
 
+# --- Negation semantic role (D-065/D-066) ------------------------------------
+# See docs/CUTSELL_DECISIONS.md D-065 for the full design contract this
+# implements. Meaningful ONLY for a clause classify_claim already typed
+# NEGATION (evidence == "negation_present") -- every other claim_type's role
+# is "" (not applicable). This is additive metadata alongside claim_type,
+# never a replacement for it, and CONTRASTIVE_HINDSIGHT_NEGATION means only
+# "eligible for the narrowly-scoped claim-vs-claim equivalence procedure" in
+# claim_coverage_best_take.py -- it never means "equivalent" by itself.
+FACTUAL_NEGATION = "FACTUAL_NEGATION"
+CONTRASTIVE_HINDSIGHT_NEGATION = "CONTRASTIVE_HINDSIGHT_NEGATION"
+_VALID_NEGATION_ROLES = frozenset({FACTUAL_NEGATION, CONTRASTIVE_HINDSIGHT_NEGATION, ""})
+
 # --- Importance (reuses D-031's vocabulary, extended with SUPPORTING/REDUNDANT) ---
 CRITICAL = "CRITICAL"
 SUPPORTING = "SUPPORTING"
@@ -135,6 +147,39 @@ _CONTRASTIVE_MARKERS = (
 # salían", ...) and splitting on it would shatter ordinary sentence
 # structure rather than separate genuine propositions.
 _RELATIVE_ADDITION_MARKERS = ("lo que", "lo cual", "which")
+
+# D-065/D-066: general (English + Spanish) vocabulary for
+# CONTRASTIVE_HINDSIGHT_NEGATION detection only -- no Video00-specific
+# fact, disease, or product name, same convention as every marker list
+# above. A negation clause's own predicate must be a belief/perception/
+# seeming verb (a SUBJECTIVE impression, "it seemed X to me", never an
+# asserted external fact) before it is even eligible to be scaffolding for
+# a before->after hindsight realization rather than a standalone factual
+# negation.
+_BELIEF_PERCEPTION_MARKERS = (
+    "parecia", "parecía", "parecian", "parecían", "parece", "parecen",
+    "me parecia", "me parecía", "me parece",
+    "pensaba", "pense", "pensé", "pienso", "piensa",
+    "creia", "creía", "crei", "creí", "creo", "cree",
+    "sentia que", "sentía que", "siento que", "me imaginaba", "me imagino",
+    "asumia", "asumía", "asumo",
+    "thought", "think", "believed", "believe", "seemed", "seems", "seem",
+    "appeared", "appears", "felt like", "feels like", "assumed", "assume",
+    "notice", "noticed", "note", "noté",
+)
+# The "after" half of a before->after realization: either an explicit
+# retrospective/recognition verb, or (unioned with `_TEMPORAL_MARKERS`
+# above, already general-purpose) a plain temporal marker placing the
+# realization later than the negated impression.
+_RETROSPECTIVE_RECOGNITION_MARKERS = (
+    "ahora", "ahora que", "en retrospectiva", "mirandose atras", "mirándose atrás",
+    "mirando atras", "mirando atrás", "looking back", "in hindsight",
+    "me di cuenta", "me doy cuenta", "dandome cuenta", "dándome cuenta",
+    "reconoci", "reconocí", "reconozco", "entendi", "entendí", "analizo", "analizó",
+    "analice", "analicé",
+    "realized", "realize", "noticed", "notice", "recognized", "recognize",
+    "understood", "eventually", "later on",
+)
 
 COVERAGE_THRESHOLD = 0.6
 # D-058 Phase 3 (docs/CUTSELL_DECISIONS.md D-057's 5-10% forensic): lowered
@@ -232,6 +277,102 @@ def _split_into_clauses(text: str, *, _search_from: int = 0) -> tuple[str, ...]:
     return (left, (right[:connector_len] + further[0]).strip()) + further[1:]
 
 
+# D-065/D-066: the SAME protected-content marker vocabulary
+# `claim_coverage_best_take._is_low_information_incidental` already tests,
+# plus every quantity-unit marker `classify_claim` itself uses to type
+# MEASUREMENT_QUANTITY -- reused verbatim, never a new heuristic.
+# CONTRASTIVE_HINDSIGHT_NEGATION eligibility is categorically denied
+# whenever any of this fires on either the negation clause or its proposed
+# after-state clause (Section 4's hard safety exclusions).
+_NEGATION_ROLE_PROTECTED_MARKERS = (
+    _STRONG_IDENTIFICATION_MARKERS + _RESULT_REPORTING_MARKERS + _CAUSE_EFFECT_MARKERS
+    + _UNIQUE_CONCLUSION_MARKERS + _STATE_RESULT_MARKERS + _CORRECTION_MARKERS
+    + _PERCENT_MARKERS + _CURRENCY_MARKERS + _MEASUREMENT_UNIT_MARKERS + _DOSE_MARKERS
+)
+
+
+def _negation_role_hard_exclusion(text: str) -> bool:
+    """True when `text` carries any protected-content marker (diagnosis/
+    identification, result-reporting, cause-effect, unique-conclusion/
+    statistic, state-result, correction, or any percent/currency/
+    measurement-unit/dose-qualified language) OR any digit evidence at all.
+    Conservative by construction -- reuses the SAME marker vocabulary
+    `classify_claim`/`claim_coverage_best_take._is_low_information_
+    incidental` already use, never a new heuristic."""
+    if _numbers(text):
+        return True
+    return _clause_has_any(text, _NEGATION_ROLE_PROTECTED_MARKERS)
+
+
+def _classify_negation_role(
+    clause: str, claim_type: str, clause_index: int, sentence_clauses: tuple[str, ...], sentence: str,
+) -> str:
+    """D-065/D-066: FACTUAL_NEGATION (the safe default) vs
+    CONTRASTIVE_HINDSIGHT_NEGATION (narrow, conjunctive-evidence-gated
+    eligibility only -- see module-level note above `FACTUAL_NEGATION`).
+    Only ever meaningful for a clause `classify_claim` already typed
+    NEGATION; every other claim_type returns "" (not applicable) and is
+    never touched by this function's own logic.
+
+    CONTRASTIVE_HINDSIGHT_NEGATION requires ALL of, conjunctively -- no
+    single marker is ever sufficient on its own:
+      1. the ORIGINAL sentence (before clause-splitting) contains a
+         contrast marker (`_CONTRASTIVE_MARKERS`) -- the pivot connecting a
+         before-state to an after-state;
+      2. the negation clause's own predicate uses a belief/perception/
+         seeming verb (`_BELIEF_PERCEPTION_MARKERS`) -- the negation is
+         about a SUBJECTIVE impression, not an asserted external fact.
+         This is the primary safety differentiator: none of "It did not
+         reduce bloating"/"was not the cream"/"did not cost $49"/"did not
+         cause the breakout" ever use a belief/perception predicate (they
+         assert an external fact directly), so they never even reach the
+         remaining checks;
+      3. a LATER, non-degenerate, NOT-itself-negated clause exists within
+         the SAME original sentence -- the "after" half of the transition,
+         and a COMPLETE one (an incomplete "I didn't think..." with no
+         later clause at all never qualifies; a later clause that is ITSELF
+         negated is a more complex double-transition shape, deliberately
+         not attempted in this Phase 1);
+      4. neither the negation clause nor that later clause carries any
+         protected-content marker or digit evidence
+         (`_negation_role_hard_exclusion`) -- Section 4's hard safety
+         exclusions, categorical, no exceptions.
+
+    An EXPLICIT temporal/retrospective/recognition marker
+    (`_TEMPORAL_MARKERS`/`_RETROSPECTIVE_RECOGNITION_MARKERS`) on the later
+    clause is treated as strong SUPPORTING evidence when present (real
+    positive-paraphrase fixtures overwhelmingly carry one: "ahora",
+    "mirándose atrás", "later I recognized"), but is deliberately not made
+    a hard requirement -- a natural resolution clause ("but it helped",
+    "but it crushed the ice easily") legitimately completes the same
+    before->after shape without a dedicated marker word, and requiring one
+    would silently exclude exactly the plain outcome-statement phrasing
+    real sales/UGC content most commonly uses. Safety does not depend on
+    this marker: it is carried entirely by gate 2 (belief/perception verb)
+    and gate 4 (protected-content exclusion), both of which remain
+    categorical.
+
+    Fails closed to FACTUAL_NEGATION -- the safe default -- whenever any
+    signal is missing or ambiguous: "WHEN UNCERTAIN, KEEP [it
+    FACTUAL_NEGATION]", never guessed toward the narrower, mergeable
+    class."""
+    if claim_type != NEGATION:
+        return ""
+    if not _clause_has_any(sentence, _CONTRASTIVE_MARKERS):
+        return FACTUAL_NEGATION
+    if not _clause_has_any(clause, _BELIEF_PERCEPTION_MARKERS):
+        return FACTUAL_NEGATION
+    later_clauses = sentence_clauses[clause_index + 1:]
+    if not later_clauses:
+        return FACTUAL_NEGATION  # incomplete -- no after-state at all
+    after_clause = next((c for c in later_clauses if not _negations(c)), None)
+    if after_clause is None:
+        return FACTUAL_NEGATION  # every later clause is itself negated -- more complex, not attempted here
+    if _negation_role_hard_exclusion(clause) or _negation_role_hard_exclusion(after_clause):
+        return FACTUAL_NEGATION
+    return CONTRASTIVE_HINDSIGHT_NEGATION
+
+
 def classify_claim(sentence: str) -> tuple[str, str, str]:
     """Deterministic (claim_type, importance, evidence) for one sentence.
     General marker-based rules only -- see module docstring."""
@@ -294,6 +435,15 @@ class Claim:
     # and every test building a Claim by keyword) stays valid unchanged;
     # nothing in claim_coverage_best_take.py reads this field yet.
     canonical_claim_id: str = ""
+    # D-065/D-066: additive negation semantic role -- FACTUAL_NEGATION,
+    # CONTRASTIVE_HINDSIGHT_NEGATION, or "" (not applicable, the default;
+    # every non-NEGATION claim, and any NEGATION claim not yet classified
+    # by a caller that predates this field). Never a replacement for
+    # `claim_type` -- see the module-level note above `FACTUAL_NEGATION`
+    # for the full contract. Optional/defaulted so every existing
+    # construction site (every hand-built test fixture included) stays
+    # valid unchanged.
+    negation_role: str = ""
 
 
 def _claim_id(source_clip_id: str, text: str) -> str:
@@ -324,7 +474,8 @@ def extract_claims(
     arbiter in this module."""
     claims: list[Claim] = []
     for sentence in _split_sentences(text):
-        for clause in _split_into_clauses(sentence):
+        sentence_clauses = _split_into_clauses(sentence)
+        for clause_index, clause in enumerate(sentence_clauses):
             tokens = _content(clause)
             if len(tokens) < 2:
                 continue
@@ -333,6 +484,9 @@ def extract_claims(
                 clause, sentence,
                 deterministic_importance=importance, evidence=evidence,
                 arbiter=clause_role_arbiter,
+            )
+            negation_role = _classify_negation_role(
+                clause, claim_type, clause_index, sentence_clauses, sentence,
             )
             content_tokens = frozenset(tokens)
             claims.append(Claim(
@@ -344,6 +498,7 @@ def extract_claims(
                 evidence=evidence,
                 content_tokens=content_tokens,
                 canonical_claim_id=mint_canonical_claim_id(claim_type, content_tokens),
+                negation_role=negation_role,
             ))
     return tuple(claims)
 

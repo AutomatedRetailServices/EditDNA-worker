@@ -7175,6 +7175,240 @@ Then STOP.
 
 Do not launch Modal.
 
+## D-063.1 -- D-063 Video00 canary (run 33851050636, report only)
+
+Authorized single Modal Video00 canary against D-063's build (head `c23a9f4`,
+qualified config unchanged). CRITICAL_COVERAGE_DOMINANCE was NOT_EXERCISED
+live: the one already-ambiguous (2+-selected) family present this run
+(`tg_c065fefe93a2dea845`) genuinely carried two DIFFERENT CRITICAL-classified
+claims (a diagnosis claim on one side, a NEGATION claim on the other) under
+the current claim extractor -- no strict-superset relationship existed, so
+D-063 correctly declined to force a pick (TRUE AMBIGUITY SAFETY: PASS).
+D-061 safety fully retained live (claim_equivalence_arbiter reachable and
+successfully confirmed one ambiguous paraphrase elsewhere in the same run;
+a separate hard negation mismatch, unrelated to this family, correctly still
+blocked via `lost_critical_claims`). Human Gold 16/18 (same 2 pre-existing,
+unrelated failures as every prior canary). Freeze BLOCKED --
+root blocker classified B (true semantic ambiguity under the current claim
+classifier, not a dominance failure, not content loss, not a validator false
+positive). D-063 LIVE OBJECTIVE: PARTIAL (safety proven live; the positive
+auto-resolve case was not exercised because no qualifying dominance case
+existed in this run's fresh ASR output). No code modified, no second RAW.
+
+## D-064 -- cross-claim-type semantic dedup forensic (report only)
+
+Forensic trace of the D-063.1 blocker's clip pair. Extracted every claim
+from both candidates with full field detail and found: candidate A's
+reflective clause and candidate B's NEGATION clause are a genuine
+SEMANTIC_PARAPHRASE of the same before->after hindsight-realization
+proposition ("in hindsight, previously-unremarkable signs were actually
+meaningful") -- B's negation is CONTRASTIVE, not standalone-factual; deleting
+B while keeping A loses no audience-facing information. Root cause:
+claim-type mismatch (DIAGNOSIS_IDENTIFICATION vs NEGATION) is a contributor,
+not the sole cause -- the deeper gap is architectural: D-063's dominance
+check compares a claim against a candidate's WHOLE TEXT (coverage), never
+claim-against-claim (equivalence), so the paraphrase relationship was never
+even asked about. Counterfactual: after correct claim-vs-claim dedup, A
+would strictly dominate B (D-063's own rule proven still correct). Product
+decision: NOT human-choice-eligible -- the same D-062.1 pattern, a
+resolver/claim-canonicalization gap, not a genuine tie. General missing
+contract identified: claim-vs-claim equivalence distinguishing rhetorical/
+contrastive hindsight negation from standalone factual negation, preserving
+number/entity/diagnosis/causal-direction/temporal-order safety invariants.
+No code modified.
+
+## D-065 -- negation semantic role design (design only, no code)
+
+Full design contract for the D-064 gap. Two-class semantic-role model:
+FACTUAL_NEGATION (negation changes the truth conditions of protected
+content -- diagnosis/number/dose/currency/entity/causal-direction/quantified-
+outcome -- always independent, never merged) vs CONTRASTIVE_HINDSIGHT_NEGATION
+(negation is the before-half of an explicit before->after realization
+structure over non-protected content only -- eligible for narrow,
+arbiter-confirmed merge). Canonical claim unit: retain raw claims, add
+additive semantic-role metadata (never a new claim_type, never a
+replacement). Claim-vs-claim equivalence: hard-gated (numbers/entities/
+diagnosis/causal-direction/temporal-direction/protected-content, all
+categorical) before any arbiter call; reuses the EXISTING
+`ClaimEquivalenceArbiter` protocol, no new provider/model. Owner subsystem:
+`semantic_claims.py` (role classification) + `claim_coverage_best_take.py`'s
+existing critical-claims dedup step (equivalence merging) -- no new
+authority layer. Full adversarial matrix (13 cases) and sales/UGC
+generalization matrix (beauty/wellness/consumer/storytelling, plus the
+mandatory "It did not reduce bloating" vs "It reduced bloating" never-merge
+counter-example) specified. D-064 confirmed to auto-resolve after this
+contract; true negation safety confirmed preservable; no new authority
+layer required. READY FOR IMPLEMENTATION DIRECTIVE: YES. No code modified.
+
+## D-066 -- negation semantic role implementation (Phase 1, engine change)
+
+Implements D-065's design conservatively across exactly two files:
+
+**`semantic_claims.py`**: additive `Claim.negation_role` field
+(`FACTUAL_NEGATION` / `CONTRASTIVE_HINDSIGHT_NEGATION` / `""` not-applicable
+default) -- `claim_type` itself untouched. `_classify_negation_role` requires,
+conjunctively, for a NEGATION-typed clause: (1) a contrast marker in the
+original (pre-split) sentence; (2) the negation clause's own predicate uses a
+belief/perception/seeming verb (`_BELIEF_PERCEPTION_MARKERS`, new) -- the
+primary safety differentiator, since no factual negation ("did not reduce
+bloating", "was not the cream", "did not cost $49", "did not cause the
+breakout") ever uses one; (3) a LATER, non-degenerate, not-itself-negated
+clause exists in the same sentence (an incomplete "I didn't think..." or a
+later clause that is itself negated never qualifies); (4) neither clause
+carries any protected-content marker or digit evidence
+(`_negation_role_hard_exclusion`, reusing the exact marker vocabulary
+`claim_coverage_best_take._is_low_information_incidental` already uses).
+An explicit temporal/retrospective marker on the later clause is treated as
+strong supporting evidence, not a hard requirement (D-040's own >=2-content-
+token clause-split floor already screens out degenerate "but it helped"-style
+completions in practice; requiring an explicit marker in addition would have
+silently excluded real, plain-outcome sales/UGC phrasing).
+
+**`claim_coverage_best_take.py`**: `_find_hindsight_alignment` searches,
+for every CONTRASTIVE_HINDSIGHT_NEGATION-eligible CRITICAL claim in an
+already-ambiguous (D-063 `>=2`-selected) family, for a claim-vs-claim (never
+claim-vs-whole-candidate-text) equivalence among the family's own
+ACTION_EVENT/STATE_RESULT claims -- deterministic hard gates
+(`_hindsight_alignment_hard_gates_pass`: candidate claim_type excluded from
+DIAGNOSIS_IDENTIFICATION/CORRECTION/MEASUREMENT_QUANTITY, no digit evidence
+on either side, no protected marker on the candidate) run BEFORE a
+negation-agnostic content-token overlap floor, itself before any arbiter
+call -- reuses the EXISTING `ClaimEquivalenceArbiter` protocol verbatim, no
+new provider/model, no new arbiter class. A confirmed alignment merges the
+two claims for coverage-unit purposes only (`_covered_claim_ids`'s additive
+`hindsight_alignments` parameter, default None, byte-identical for every
+pre-D-066 call site) -- raw claims, text, and provenance are never rewritten.
+**D-063's own dominance rule (`_critical_coverage_dominant_candidate`) is
+completely unchanged**: only the coverage sets it consumes are corrected
+upstream. Diagnostics (`claim_coverage_best_take.hindsight_alignments`,
+never exposed to any UI) record, per eligible claim: role, aligned claim id/
+text (or none), arbiter invocation/verdict, coverage-unit relation, reason.
+
+**Verified live safety proofs** (direct adversarial execution, not just
+shipped tests): an arbiter that would confirm ANY pairing is proven to
+never even be asked about a protected (diagnosis) candidate
+(`test_arbiter_never_reaches_protected_candidate_even_if_it_would_confirm`);
+the mandatory "It did not reduce bloating" vs "It reduced bloating"
+counter-example never merges even with an always-confirming arbiter (the
+negation clause never becomes eligible in the first place -- no belief/
+perception verb -- and `any_pair_contradicts` independently blocks it too);
+the D-061 QA_ENGINE-flagged gastritis/ulcer diagnosis-substitution shape
+stays unmerged; an incomplete/failed-delivery candidate is never preferred
+even when alignment succeeds (D-063's own completeness gate, untested by
+this directive, confirmed still intact); a genuine contradiction elsewhere
+in the two candidates' text still blocks dominance even after a successful
+alignment; an arbiter exception fails closed with no crash. `POST_RESOLVER_
+SEMANTIC_MUTATORS` stays 0 -- both changed files are pre-Freeze, and no new
+call site was added anywhere else.
+
+**Tests**: 20 new in `test_cutsell_d066_negation_semantic_role.py`
+(role-classification adversarial suite: true factual negation, diagnosis,
+number, price, entity, causal-direction, incomplete sentence, double
+negation, sarcasm-like phrasing, temporal reversal, both-sides-negated,
+no-contrast-marker -- all FACTUAL_NEGATION; positive paraphrase suite +
+sales/UGC positive shapes -- CONTRASTIVE_HINDSIGHT_NEGATION; one disclosed
+Phase-1 conservative boundary documented, not hidden). 12 new in
+`test_cutsell_d066_hindsight_alignment.py` (hard-gate unit tests, the
+protected-candidate arbiter-never-asked proof, the D-064 generic auto-
+resolve chain end to end under confirming/declining/absent arbiters, the
+mandatory bloating and gastritis/ulcer never-merge counter-examples, beauty
+and consumer-product positive sales/UGC shapes). No Video00-specific text or
+ids in any test or production code -- the D-064 generic-chain fixture
+reproduces the general pattern only.
+
+**Offline qualification**: compileall clean. All D-050 through D-066 test
+files (including `test_cutsell_claim_coverage_best_take.py` and
+`test_cutsell_clean_cut_core_evaluation_suite.py`): 433 passed. CleanCutBench
+LEGACY 54/54, AUTHORITATIVE 54/54 (both within that same 433). Full `tests/`
+(minus `test_semantic_stitch.py`): 2325 passed, 13 subtests passed, only the
+same 2 pre-existing/unrelated failures already on record since D-056.1.
+
+**QA_ENGINE**: self-conducted independent adversarial review (same
+disclosed posture as D-061/D-063's QA_ENGINE passes). Directly re-executed,
+outside the shipped test suite, every mandatory safety question from the
+directive's Section 14: number/entity/diagnosis/causal/temporal/true-
+negation safety and ASR-uncertainty fail-closed behavior, all PASS,
+including the specific dangerous-failure-mode probe ("can a genuine
+contradiction be silently merged because it resembles rhetorical
+negation?") -- answered NO, both via the eligibility gate itself (a factual
+negation never acquires a belief/perception verb) and independently via
+`any_pair_contradicts`'s own unchanged safety net. 0 new P0/P1/P2/P3.
+
+### Final report (verbatim, as delivered)
+D-066 COMPLETE
+
+NEGATION SEMANTIC ROLE:
+PASS
+
+FACTUAL_NEGATION SAFETY:
+PASS
+
+CONTRASTIVE_HINDSIGHT:
+PASS
+
+CLAIM-VS-CLAIM EQUIVALENCE:
+PASS
+
+D-064 GENERIC CASE:
+PASS
+
+D-063 DOMINANCE AFTER DEDUP:
+PASS
+
+NUMBER SAFETY:
+PASS
+
+ENTITY SAFETY:
+PASS
+
+DIAGNOSIS SAFETY:
+PASS
+
+CAUSAL SAFETY:
+PASS
+
+TEMPORAL SAFETY:
+PASS
+
+ASR UNCERTAINTY:
+FAIL_CLOSED
+
+SALES/UGC GENERALIZATION:
+PASS
+
+POST_RESOLVER SEMANTIC MUTATORS:
+0/0
+
+LEGACY:
+54/54
+
+AUTHORITATIVE:
+54/54
+
+FULL TEST COUNT:
+D-050-D-066 test files 433 passed; full tests/ (minus test_semantic_stitch.py)
+2325 passed, 13 subtests passed, only the same 2 pre-existing/unrelated
+failures already on record.
+
+QA_ENGINE VERDICT:
+PASS
+
+P0:
+0
+P1:
+0
+P2:
+0
+P3:
+0
+
+READY FOR ONE VIDEO00 CANARY:
+YES
+
+Then STOP.
+
+Do not launch Modal.
+
 ## Change rule
 
 When a new decision changes product behavior, update this file in the same development cycle. Do not silently redefine CutSell through code alone.

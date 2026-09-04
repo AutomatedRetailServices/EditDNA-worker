@@ -72,6 +72,31 @@ the existing block. See `docs/CUTSELL_EDITORIAL_RESOLUTION_AND_HUMAN_ESCALATION_
 Section 3 for the full CRITICAL_COVERAGE_DOMINANCE contract this
 implements verbatim, and its Section 4 for why this check runs BEFORE any
 semantic-winner-label evidence is ever consulted.
+
+D-065/D-066 NEGATION SEMANTIC ROLE (claim-vs-claim hindsight equivalence):
+D-064's forensic on a live D-063 blocker found that a candidate's own
+CONTRASTIVE_HINDSIGHT_NEGATION clause (`semantic_claims.py`'s additive
+`Claim.negation_role`, e.g. "no me parecian sospechosos... pero ahora si"
+-- a before->after realization, not a standalone factual negation) can get
+independently CRITICAL-classified while an equivalent, differently-worded
+realization from ANOTHER candidate in the same family stays SUPPORTING,
+making the two candidates' critical-claim sets look genuinely disjoint to
+D-063's dominance check even though they express the same proposition.
+Before computing dominance, this module now searches (`_find_hindsight_
+alignment`) for a claim-vs-claim (never claim-vs-whole-candidate-text)
+equivalence between a CONTRASTIVE_HINDSIGHT_NEGATION-eligible claim and a
+same-family ACTION_EVENT/STATE_RESULT claim, gated by deterministic hard
+exclusions (never a protected claim type, never any digit evidence,
+Section 4's full protected-marker set) BEFORE any arbiter call, and
+confirmed only by the SAME `ClaimEquivalenceArbiter` protocol every other
+check in this module already uses (no new provider/model). A confirmed
+alignment merges the two claims for coverage-unit purposes ONLY
+(`_covered_claim_ids`'s own `hindsight_alignments` parameter) -- the raw
+claims, their text, and their provenance are never rewritten or deleted.
+D-063's own dominance rule (`_critical_coverage_dominant_candidate`) is
+UNCHANGED by this: only the coverage SETS it consumes are corrected
+upstream. See docs/CUTSELL_DECISIONS.md D-065 (design) and D-066
+(implementation) for the full contract.
 """
 from __future__ import annotations
 
@@ -81,10 +106,16 @@ from .contradiction_signal import any_pair_contradicts
 from .final_sibling_grouping import _content, _numbers
 from .semantic_atom_importance import _TEMPORAL_ASIDE_MARKERS, _clause_has_any, _looks_like_year
 from .semantic_claims import (
+    ACTION_EVENT,
     ClaimEquivalenceArbiter,
     ClauseRoleArbiter,
+    CONTRASTIVE_HINDSIGHT_NEGATION,
+    CORRECTION,
     CRITICAL,
+    DIAGNOSIS_IDENTIFICATION,
+    MEASUREMENT_QUANTITY,
     NEGATION,
+    STATE_RESULT,
     _CAUSE_EFFECT_MARKERS,
     _CORRECTION_MARKERS,
     _CURRENCY_MARKERS,
@@ -100,6 +131,7 @@ from .semantic_claims import (
     dedupe_claims,
     extract_claims,
     resolve_ambiguous_coverage,
+    _negation_role_hard_exclusion,
 )
 
 _COMPOSITE_OVERLAP_TOLERANCE_SEC = 0.05
@@ -201,25 +233,158 @@ def _override_blocked_by_incidental_self_source_claims(
     return candidate_content < winner_content
 
 
-def _group_critical_claims(members: list[tuple[str, object]], *, clause_role_arbiter: ClauseRoleArbiter | None = None):
-    """Every CRITICAL claim found across the group's own members, deduped
-    across near-identical restatements between sibling attempts. D-040:
-    `extract_claims` already splits a multi-clause sentence into its own
-    CORE/SUPPORTING/CONTEXTUAL clauses, so a critical fact bundled with a
-    merely-supporting reason surfaces as two separate claims here, not one
-    -- only the core one is ever checked as CRITICAL."""
+def _all_group_claims(members: list[tuple[str, object]], *, clause_role_arbiter: ClauseRoleArbiter | None = None):
+    """Every claim (any importance) found across the group's own members,
+    deduped across near-identical restatements between sibling attempts --
+    the full pool `_group_critical_claims` filters down from, and (D-066)
+    the pool `_find_hindsight_alignment` searches for a claim-vs-claim
+    equivalence partner. D-040: `extract_claims` already splits a
+    multi-clause sentence into its own CORE/SUPPORTING/CONTEXTUAL clauses,
+    so a critical fact bundled with a merely-supporting reason surfaces as
+    two separate claims here, not one."""
     all_claims = []
     for clip_id, clip in members:
         all_claims.extend(extract_claims(clip_id, str(clip.text or ""), clause_role_arbiter=clause_role_arbiter))
-    deduped = dedupe_claims(tuple(all_claims))
+    return dedupe_claims(tuple(all_claims))
+
+
+def _group_critical_claims(members: list[tuple[str, object]], *, clause_role_arbiter: ClauseRoleArbiter | None = None):
+    """Every CRITICAL claim found across the group's own members -- see
+    `_all_group_claims`'s own docstring for the full extraction/dedup
+    contract this filters down from."""
+    deduped = _all_group_claims(members, clause_role_arbiter=clause_role_arbiter)
     return tuple(c for c in deduped if c.importance == CRITICAL)
 
 
-def _covered_claim_ids(claims, text: str, *, arbiter: ClaimEquivalenceArbiter | None) -> frozenset:
+# --- D-065/D-066: negation semantic role -- claim-vs-claim hindsight
+#     equivalence (feeds D-063 CRITICAL_COVERAGE_DOMINANCE's coverage sets,
+#     never its own dominance rule) --------------------------------------
+
+# A CONTRASTIVE_HINDSIGHT_NEGATION claim may only ever align with a
+# non-protected reflective claim type -- ACTION_EVENT/STATE_RESULT are the
+# general "plain statement" claim types this codebase already produces for
+# an ordinary reflective clause (D-065 Section 6). DIAGNOSIS_IDENTIFICATION/
+# CORRECTION/MEASUREMENT_QUANTITY are categorically excluded on the
+# candidate side too -- diagnosis/correction/number safety, symmetric with
+# the hard exclusions `semantic_claims._classify_negation_role` already
+# applies when first deciding a claim is even hindsight-eligible.
+_HINDSIGHT_ALIGNABLE_CLAIM_TYPES = frozenset({ACTION_EVENT, STATE_RESULT})
+_HINDSIGHT_PROTECTED_CLAIM_TYPES = frozenset({DIAGNOSIS_IDENTIFICATION, CORRECTION, MEASUREMENT_QUANTITY})
+# D-065 Section 6: below this floor, two claims' content-token overlap is
+# too thin for a hindsight-paraphrase judgment to plausibly apply --
+# confidently NOT equivalent, the arbiter is never consulted. Deliberately
+# NOT `semantic_claims.claim_coverage` (that function's own negation-flip
+# guard would cap this at `_DEFINITIVE_MISMATCH_COVERAGE_CAP` precisely
+# BECAUSE one side is negated and the other is not -- exactly the shape
+# this mechanism exists to recognize as equivalent, not reject). Raw
+# content-token overlap is negation-agnostic by construction (`_content`
+# already strips 2-3 character words including every negation marker in
+# `_NEGATIONS`), so it is the correct, neutral floor check here.
+_HINDSIGHT_ALIGNMENT_AMBIGUOUS_FLOOR = 0.10
+
+
+def _hindsight_alignment_hard_gates_pass(negation_claim: Claim, candidate_claim: Claim) -> bool:
+    """D-065 Section 5: deterministic hard gates, ALL of which must pass
+    before any arbiter call is even considered for a claim-vs-claim
+    CONTRASTIVE_HINDSIGHT_NEGATION alignment. Any failure -> NOT
+    EQUIVALENT, arbiter NOT called."""
+    if candidate_claim.claim_id == negation_claim.claim_id:
+        return False
+    if candidate_claim.claim_type in _HINDSIGHT_PROTECTED_CLAIM_TYPES:
+        return False  # diagnosis/correction/measurement safety on the candidate side
+    if candidate_claim.claim_type not in _HINDSIGHT_ALIGNABLE_CLAIM_TYPES:
+        return False
+    if _numbers(negation_claim.text) or _numbers(candidate_claim.text):
+        return False  # number safety (defensive re-check; the role itself already excludes digit evidence)
+    if _negation_role_hard_exclusion(candidate_claim.text):
+        return False  # diagnosis/result-reporting/cause-effect/unique-conclusion/state-result/correction/percent/currency/measurement/dose safety
+    return True
+
+
+def _content_overlap_coefficient(left_tokens: frozenset, right_tokens: frozenset) -> float:
+    """Szymkiewicz-Simpson overlap coefficient (shared fraction of the
+    SMALLER side) over content tokens -- negation-agnostic by construction,
+    see `_HINDSIGHT_ALIGNMENT_AMBIGUOUS_FLOOR`'s own docstring for why this
+    is used here instead of `claim_coverage`."""
+    if not left_tokens or not right_tokens:
+        return 0.0
+    return len(left_tokens & right_tokens) / min(len(left_tokens), len(right_tokens))
+
+
+def _find_hindsight_alignment(
+    negation_claim: Claim,
+    all_claims,
+    *,
+    claim_equivalence_arbiter: ClaimEquivalenceArbiter | None,
+    arbiter_log: list[dict] | None = None,
+) -> Claim | None:
+    """D-065 Section 6: claim-vs-claim (never claim-vs-whole-candidate-
+    text) equivalence search for a CONTRASTIVE_HINDSIGHT_NEGATION-eligible
+    claim. Reuses the EXISTING `ClaimEquivalenceArbiter` protocol verbatim
+    -- no new provider/model, no new arbiter class: "does `other`'s text
+    preserve `negation_claim`'s meaning, even paraphrased" is exactly the
+    same bounded question the arbiter already answers for claim-vs-
+    realization-text coverage, applied here to one other CLAIM's text
+    instead of a whole candidate's winning realization text. Fails closed
+    (returns None) whenever no arbiter is available, the arbiter raises, or
+    it does not explicitly return True -- same posture as every other
+    arbiter consumer in this module. Candidates are visited in a stable,
+    deterministic order (sorted by claim_id); the FIRST arbiter-confirmed
+    match wins, never an arbitrary pick."""
+    if negation_claim.negation_role != CONTRASTIVE_HINDSIGHT_NEGATION:
+        return None
+    for other in sorted(all_claims, key=lambda c: c.claim_id):
+        if not _hindsight_alignment_hard_gates_pass(negation_claim, other):
+            continue
+        overlap = _content_overlap_coefficient(negation_claim.content_tokens, other.content_tokens)
+        if overlap < _HINDSIGHT_ALIGNMENT_AMBIGUOUS_FLOOR:
+            continue
+        if claim_equivalence_arbiter is None:
+            continue
+        try:
+            covered, confidence, reason = claim_equivalence_arbiter.claim_covered(negation_claim.text, other.text)
+        except Exception:
+            covered, confidence, reason = False, 0.0, "arbiter_exception"
+        verdict = bool(covered) is True
+        if arbiter_log is not None:
+            arbiter_log.append({
+                "negation_claim_id": negation_claim.claim_id,
+                "candidate_claim_id": other.claim_id,
+                "overlap": overlap,
+                "verdict": verdict,
+                "confidence": confidence,
+                "reason": reason,
+            })
+        if verdict:
+            return other
+    return None
+
+
+def _covered_claim_ids(
+    claims, text: str, *, arbiter: ClaimEquivalenceArbiter | None,
+    hindsight_alignments: dict | None = None,
+) -> frozenset:
+    """D-065/D-066: `hindsight_alignments` (claim_id -> aligned Claim,
+    default None so every pre-existing call site is byte-identical) lets a
+    CRITICAL claim ALSO count as covered when `text` covers its
+    arbiter-confirmed hindsight-equivalent claim instead of covering the
+    original claim's own (often thin, ambiguous-band) whole-text overlap
+    directly -- this is exactly how candidate A's own reflective clause
+    ends up satisfying candidate B's CONTRASTIVE_HINDSIGHT_NEGATION claim
+    once the two are proven equivalent (D-065 Section 7). Never a
+    replacement for the original coverage check -- tried first, the
+    alignment is only ever a fallback."""
     covered = set()
     for claim in claims:
         coverage = claim_coverage(claim, text)
         if resolve_ambiguous_coverage(claim, text, coverage=coverage, arbiter=arbiter):
+            covered.add(claim.claim_id)
+            continue
+        aligned = (hindsight_alignments or {}).get(claim.claim_id)
+        if aligned is None:
+            continue
+        aligned_coverage = claim_coverage(aligned, text)
+        if resolve_ambiguous_coverage(aligned, text, coverage=aligned_coverage, arbiter=arbiter):
             covered.add(claim.claim_id)
     return frozenset(covered)
 
@@ -230,6 +395,7 @@ def _critical_coverage_dominant_candidate(
     critical_claims,
     *,
     claim_equivalence_arbiter: ClaimEquivalenceArbiter | None = None,
+    hindsight_alignments: dict | None = None,
 ) -> str | None:
     """D-063 CRITICAL_COVERAGE_DOMINANCE. See module docstring and
     `docs/CUTSELL_EDITORIAL_RESOLUTION_AND_HUMAN_ESCALATION_CONTRACT.md`
@@ -264,9 +430,17 @@ def _critical_coverage_dominant_candidate(
     the caller (`_group_critical_claims`), so coverage is compared over
     CRITICAL claims exclusively -- this needs no special-case code, it
     falls directly out of only ever comparing critical-claim coverage
-    sets."""
+    sets.
+
+    `hindsight_alignments` (D-065/D-066, default None -- byte-identical to
+    every pre-D-066 call) is forwarded straight to `_covered_claim_ids`:
+    the dominance ALGORITHM below is completely unchanged by it, only the
+    coverage sets it operates on are corrected upstream."""
     coverage_by_id = {
-        cid: _covered_claim_ids(critical_claims, str(all_clips[cid].text or ""), arbiter=claim_equivalence_arbiter)
+        cid: _covered_claim_ids(
+            critical_claims, str(all_clips[cid].text or ""),
+            arbiter=claim_equivalence_arbiter, hindsight_alignments=hindsight_alignments,
+        )
         for cid in candidate_ids
     }
     dominant = [
@@ -322,6 +496,7 @@ def apply_claim_coverage_best_take(
     unresolved_gaps: list[dict] = []
     suppressed_incidental_overrides: list[dict] = []
     dominance_resolutions: list[dict] = []
+    hindsight_alignment_diagnostics: list[dict] = []
 
     def move(clip_id: str, target: str) -> None:
         clip = all_clips[clip_id]
@@ -354,11 +529,48 @@ def apply_claim_coverage_best_take(
             # other on CRITICAL-claim coverage. See module docstring and
             # `_critical_coverage_dominant_candidate`'s own docstring for
             # the full contract.
-            dominance_critical_claims = _group_critical_claims(members, clause_role_arbiter=clause_role_arbiter)
+            dominance_all_claims = _all_group_claims(members, clause_role_arbiter=clause_role_arbiter)
+            dominance_critical_claims = tuple(c for c in dominance_all_claims if c.importance == CRITICAL)
+            # D-065/D-066: for every CONTRASTIVE_HINDSIGHT_NEGATION-eligible
+            # critical claim in this family, search for an arbiter-
+            # confirmed claim-vs-claim equivalence among the family's own
+            # non-protected reflective claims BEFORE computing dominance --
+            # see module docstring's own D-065/D-066 section.
+            hindsight_alignments: dict[str, object] = {}
+            hindsight_arbiter_log: list[dict] = []
+            for claim in dominance_critical_claims:
+                if claim.negation_role != CONTRASTIVE_HINDSIGHT_NEGATION:
+                    continue
+                aligned = _find_hindsight_alignment(
+                    claim, dominance_all_claims,
+                    claim_equivalence_arbiter=claim_equivalence_arbiter,
+                    arbiter_log=hindsight_arbiter_log,
+                )
+                consultations = [
+                    row for row in hindsight_arbiter_log if row["negation_claim_id"] == claim.claim_id
+                ]
+                hindsight_alignment_diagnostics.append({
+                    "group_id": group_id,
+                    "claim_id": claim.claim_id,
+                    "claim_text": claim.text,
+                    "negation_role": claim.negation_role,
+                    "aligned_claim_id": aligned.claim_id if aligned is not None else None,
+                    "aligned_claim_text": aligned.text if aligned is not None else None,
+                    "arbiter_invoked": bool(consultations),
+                    "arbiter_consultations": consultations,
+                    "coverage_unit_relation": "merged" if aligned is not None else "unmerged",
+                    "reason": (
+                        "claim_vs_claim_equivalence_arbiter_confirmed" if aligned is not None
+                        else "no_arbiter_confirmed_equivalent_reflective_claim_found"
+                    ),
+                })
+                if aligned is not None:
+                    hindsight_alignments[claim.claim_id] = aligned
             dominant_id = (
                 _critical_coverage_dominant_candidate(
                     current_winners, all_clips, dominance_critical_claims,
                     claim_equivalence_arbiter=claim_equivalence_arbiter,
+                    hindsight_alignments=hindsight_alignments,
                 )
                 if dominance_critical_claims else None
             )
@@ -541,7 +753,10 @@ def apply_claim_coverage_best_take(
                 "reason": "no_single_or_paired_candidate_safely_covers_every_critical_claim",
             })
 
-    if not (overrides or composites or unresolved_gaps or suppressed_incidental_overrides or dominance_resolutions):
+    if not (
+        overrides or composites or unresolved_gaps or suppressed_incidental_overrides
+        or dominance_resolutions or hindsight_alignment_diagnostics
+    ):
         return draft
 
     def _order(clip):
@@ -569,5 +784,12 @@ def apply_claim_coverage_best_take(
         # candidate (still falls through to the existing
         # DUPLICATE_IDEA+UNRESOLVED_RETRY block unchanged).
         "dominance_resolutions": dominance_resolutions,
+        # D-065/D-066: which CONTRASTIVE_HINDSIGHT_NEGATION-eligible claim
+        # was checked against which same-family reflective claim, whether
+        # the arbiter was invoked, its verdict, and the resulting coverage-
+        # unit relation -- never exposed to any user-facing UI. Empty
+        # whenever no already-ambiguous (2+ selected) family contained a
+        # CONTRASTIVE_HINDSIGHT_NEGATION-eligible claim this run.
+        "hindsight_alignments": hindsight_alignment_diagnostics,
     }
     return replace(draft, selected=selected, alternates=alternates, discarded=discarded, diagnostics=diagnostics)
