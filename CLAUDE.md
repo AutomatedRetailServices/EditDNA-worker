@@ -29,6 +29,7 @@ If HEAD is newer, inspect intervening commits and reconcile state. Never reset b
 5. existing `docs/CUTSELL_BRAIN_DOCTRINE.md`
 6. existing `docs/CUTSELL_MOBILE_V1_ASAP_SCOPE.md`
 7. existing `docs/CUTSELL_COMMERCIAL_ENGINEERING_OPERATING_MODEL.md` (D-062) -- canonical roles/gates/QA modes; an engine change is never self-certified release-ready by the role that implemented it.
+8. existing `docs/CUTSELL_EDITORIAL_RESOLUTION_AND_HUMAN_ESCALATION_CONTRACT.md` (D-062.2) -- Automatic Editor Doctrine, CRITICAL_COVERAGE_DOMINANCE, the 16-layer Automatic Resolution Hierarchy, and the HUMAN_CHOICE_ELIGIBLE escalation contract; human choice is a last resort, never a convenience valve for resolver uncertainty.
 
 ## Source precedence
 When sources conflict:

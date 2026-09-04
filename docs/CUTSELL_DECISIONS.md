@@ -6884,6 +6884,135 @@ NEXT FORMAL ACTION: RUN QA_ENGINE against existing D-061 implementation
 
 Then STOP. No Modal. No RunPod. No paid tests. No engine behavior changes.
 
+## D-062.1 -- UNRESOLVED_RETRY final blocker forensic (report only, no code, no RAW)
+
+Forensic trace of the post-D-061-canary Freeze blocker on idea
+`tg_c7c1ae9f22e6c10986` (clips `clip_5e34ebd314daf98ff730` [A] and
+`clip_0b90ef2e20d08e8e7ec5` [B]). A contains a distinct biopsy/diagnosis-
+confirmation fact plus the shared reflective statement that B also carries;
+B has only the reflective statement, with slightly better delivery. A should
+have auto-won via critical-content completeness, but the resolver's
+"conflicting high-confidence semantic-winner labels -> REVIEW_REQUIRED"
+branch fired without first checking claim-coverage dominance between the two
+candidates.
+
+**Root cause**: resolver too conservative -- a missing check, not a missing
+signal. The evidence needed to resolve this automatically (A's superset
+critical-claim coverage over B) was already available; the resolver simply
+never consulted it before falling to `REVIEW_REQUIRED` on the conflicting
+semantic-winner labels.
+
+**Smallest missing contract identified**: check critical-claim-coverage
+dominance between conflicting semantic-winner candidates before falling to
+`REVIEW_REQUIRED`. No code changed under this forensic; the fix itself is
+deferred to a future directive (see D-062.2's `CRITICAL_COVERAGE_DOMINANCE`
+concept, which generalizes this specific finding).
+
+No RAW run. No code modified.
+
+## D-062.2 -- CutSell Editorial Resolution & Human Escalation Contract (doctrine, no engine change)
+
+Canonical doctrine checkpoint, not an engineering directive: adds
+`docs/CUTSELL_EDITORIAL_RESOLUTION_AND_HUMAN_ESCALATION_CONTRACT.md`.
+Registers the Automatic Editor Doctrine (CutSell is the editorial
+decision-maker; human choice is a last resort, never a convenience valve for
+resolver uncertainty); Semantic Dominance Before Performance; the
+`CRITICAL_COVERAGE_DOMINANCE` concept (strict-superset critical-claim
+coverage settles a comparison before delivery quality is consulted); a
+16-layer Automatic Resolution Hierarchy (explicitly conceptual precedence,
+not hard-coded weights or a scoring formula -- higher layers cannot be
+silently overridden by lower layers); `CONTEXTUAL_DELIVERY_FIT` (delivery
+quality consulted only once no higher-precedence semantic signal already
+decided the outcome); three escalation classes -- `REVIEW_REQUIRED_SEMANTIC`
+(irreducible, evidence-symmetric ambiguity, no dominance signal available),
+`AUTO_RESOLVED_LOW_MARGIN` (a winner was produced, but narrowly, recorded for
+observability), `HUMAN_CHOICE_ELIGIBLE` (the rare, affirmatively-determined
+subset of `REVIEW_REQUIRED_SEMANTIC` presentable to a user as a plain A/B
+choice); D-062.1 registered as the canonical example of a
+NOT-human-choice-eligible case (a strict resolver defect -- coverage
+dominance should have auto-resolved it -- generic pattern only, no
+Video00-specific text/ids encoded into production logic); the Human Choice
+Contract (uncertainty alone never creates a user-facing task -- surfacing a
+choice requires the affirmative `HUMAN_CHOICE_ELIGIBLE` determination); a
+Future UX contract-only section (compact A/B comparison, play/choose A or B,
+must NOT expose confidence scores/semantic ids/resolver terminology); the
+SWAP vs. `HUMAN_CHOICE_ELIGIBLE` distinction (analogous shape, distinct
+trigger/scope/frequency/membership-model -- does not reintroduce SWAP, D-019
+unaffected); the `HUMAN_DECISION_RATE` product metric (defined, no hard
+threshold set); a QA_ENGINE contract update (QA must challenge every future
+`HUMAN_CHOICE_ELIGIBLE` result against a 5-item checklist before accepting
+it); and Future Engine States (`AUTO_RESOLVED`, `AUTO_RESOLVED_LOW_MARGIN`,
+`REVIEW_REQUIRED_SEMANTIC`, `HUMAN_CHOICE_ELIGIBLE` -- semantics only, no
+code emits any of these values today).
+
+**No engine file changed.** No code was modified, no test was run, no UI was
+implemented, no Modal or RunPod infrastructure was touched. The D-062.1
+resolver fix (`CRITICAL_COVERAGE_DOMINANCE` implementation) is explicitly
+deferred to its own future directive, requiring targeted tests and a
+`RUN QA_ENGINE` pass before any paid canary, per this document's own Section
+11 checklist and D-062's operating model.
+
+### Final report (verbatim, as delivered)
+CUTSELL EDITORIAL RESOLUTION & HUMAN ESCALATION CONTRACT ADDED
+
+AUTOMATIC EDITOR DOCTRINE:
+REGISTERED
+
+SEMANTIC DOMINANCE BEFORE PERFORMANCE:
+REGISTERED
+
+CRITICAL_COVERAGE_DOMINANCE:
+REGISTERED
+
+AUTOMATIC RESOLUTION HIERARCHY (16 LAYERS):
+REGISTERED
+
+CONTEXTUAL_DELIVERY_FIT:
+REGISTERED
+
+ESCALATION CLASSES (REVIEW_REQUIRED_SEMANTIC / AUTO_RESOLVED_LOW_MARGIN / HUMAN_CHOICE_ELIGIBLE):
+REGISTERED
+
+HUMAN CHOICE CONTRACT:
+REGISTERED
+
+FUTURE UX CONTRACT (A/B COMPARISON, NO INTERNAL TERMINOLOGY EXPOSED):
+REGISTERED
+
+SWAP VS HUMAN_CHOICE DISTINCTION:
+REGISTERED
+
+HUMAN_DECISION_RATE METRIC:
+REGISTERED (NO HARD THRESHOLD)
+
+QA_ENGINE CONTRACT UPDATE (HUMAN_CHOICE_ELIGIBLE CHECKLIST):
+REGISTERED
+
+FUTURE ENGINE STATES:
+REGISTERED (SEMANTICS ONLY, NOT IMPLEMENTED)
+
+D-062.1 CLASSIFICATION:
+AUTO-RESOLVE -- NOT HUMAN CHOICE
+
+ENGINE CODE CHANGED:
+NO
+
+UI IMPLEMENTED:
+NO
+
+CURRENT DEVELOPMENT BLOCKED:
+NO
+
+NEXT TECHNICAL ACTION:
+Implement critical-coverage-dominance tie-break for the D-062.1 resolver case,
+then RUN QA_ENGINE before any paid canary.
+
+Then STOP.
+
+No engine changes.
+No Modal.
+No RunPod.
+
 ## Change rule
 
 When a new decision changes product behavior, update this file in the same development cycle. Do not silently redefine CutSell through code alone.
