@@ -98,6 +98,7 @@ from .semantic_atom_importance import (
 )
 from .semantic_claims import (
     CRITICAL as CLAIM_CRITICAL,
+    COVERAGE_THRESHOLD,
     ClaimEquivalenceArbiter,
     ClauseRoleArbiter,
     claim_coverage,
@@ -359,6 +360,119 @@ def _missing_idea_coverage(draft) -> list[dict]:
     return missing
 
 
+# ---------------------------------------------------------------------------
+# D-061 Phase 1: SAME-IDEA PARAPHRASE CREDIT for _lost_semantic_atoms
+# ---------------------------------------------------------------------------
+#
+# Root defect (docs/CUTSELL_DECISIONS.md D-060's forensic): `_lost_semantic_
+# atoms` is deliberately whole-video/bag-of-words/idea-membership-blind (see
+# its own docstring below) -- correct for its original purpose of catching
+# content deleted BEFORE grouping ever saw it, but that same blindness makes
+# it flag a discarded clip as UNIQUE_FACT_LOST even when a SELECTED member of
+# its own retry family already carries the identical proposition in
+# different words. D-060's live shape: two clips merged by the semantic-
+# equivalence arbiter at 0.9 confidence ("Both reflect on unrecognized
+# symptoms viewed in retrospect") shared almost no raw vocabulary, so the
+# discarded one scored only 0.4 whole-video coverage and blocked Freeze for
+# content that was never actually lost.
+#
+# Fix: before treating a content-loss trigger as blocking, check whether the
+# discarded clip reached semantic grouping at all (is a member of a genuine,
+# 2+-member `take_judge_groups` retry contest) and has a SELECTED sibling in
+# that exact group. If so, reuse existing evidence -- no new paid call: an
+# existing `semantic_idea_equivalence` merge record for this exact
+# (discarded, winner) pair at high confidence already answers the question
+# an arbiter would otherwise be asked again for nothing.
+#
+# Deliberately NOT also tried: a purely deterministic idea-scoped word-
+# overlap fallback (comparing the discarded clip only against its own
+# winner's text, instead of the whole video). It looks like it should catch
+# an exact/near-duplicate that never got a separate arbiter call, but it is
+# mathematically inert here: `winner_content` is always a SUBSET of
+# `kept_content` (the winner is itself part of the selected/kept timeline),
+# so idea-scoped coverage can never exceed whole-video coverage. Since this
+# credit path is only ever consulted after whole-video coverage has ALREADY
+# failed the same 0.45 floor, the idea-scoped version is guaranteed to fail
+# it too -- it would never once fire. A genuine near-duplicate is, in fact,
+# already handled correctly by the existing whole-video check with no fix
+# needed at all: the winner's own presence in `kept_text` guarantees high
+# overlap for anything that closely resembles it. Real low-word-overlap
+# paraphrases (the actual D-060 shape) can only be told apart from a
+# genuinely additive fact by semantic judgment, which is exactly what the
+# arbiter-evidence path above reuses -- not reinvented as a second, useless
+# heuristic here.
+#
+# A clip that never reached grouping at all (PRE_GROUP_REJECTED, an
+# ungrouped candidate, or a hybrid_session_cleanup delete with no verified
+# replacement -- exactly the gap this check exists to catch, see the RAW
+# 33345946000 papillary-cancer case in the docstring below) has no entry in
+# `clip_id_to_group` and this credit never applies -- current fail-closed
+# behavior is completely unchanged for that class of clip. A genuinely
+# additive fact inside the same idea group also clears nothing (no pairwise
+# arbiter record confirms it) and remains blocking, unchanged.
+_SAME_IDEA_HIGH_CONFIDENCE_THRESHOLD = 0.85  # matches D-058 Phase 2's own bar
+
+
+def _clip_id_to_group_members(groups) -> dict[str, tuple[str, tuple[str, ...]]]:
+    """Map clip_id -> (group_id, all member clip_ids) from take_judge_
+    groups' own `ranked` lists -- the FINAL, post-merge/post-split retry-
+    family membership Best Take actually contested over (D-058 Phase 1's
+    split_incohesive_retry_groups already ran upstream of this). Only
+    genuine 2+-member contests count; a singleton is not a retry family."""
+    mapping: dict[str, tuple[str, tuple[str, ...]]] = {}
+    for group in groups or ():
+        group_id = str(group.get("group_id") or "")
+        member_ids = tuple(
+            str(row.get("clip_id") or "") for row in (group.get("ranked") or ()) if row.get("clip_id")
+        )
+        if len(member_ids) < 2:
+            continue
+        for clip_id in member_ids:
+            mapping[clip_id] = (group_id, member_ids)
+    return mapping
+
+
+def _semantic_equivalence_confidence(diagnostics, left_id: str, right_id: str) -> float:
+    """Highest confidence any EXISTING `semantic_idea_equivalence` merge
+    record already established for this exact pair -- reused, never
+    recomputed. 0.0 when no such record exists for this pair. This is
+    'existing semantic-equivalence evidence the engine already possesses'
+    (D-061 Phase 1): a call already paid for during grouping, never asked
+    again here."""
+    merges = ((diagnostics or {}).get("semantic_idea_equivalence") or {}).get("merges") or ()
+    pair = {left_id, right_id}
+    best = 0.0
+    for merge in merges:
+        if {str(merge.get("left_clip_id") or ""), str(merge.get("right_clip_id") or "")} == pair:
+            try:
+                best = max(best, float(merge.get("confidence") or 0.0))
+            except (TypeError, ValueError):
+                continue
+    return best
+
+
+def _same_idea_paraphrase_credit(
+    clip, member_ids: tuple[str, ...], selected_ids: set, diagnostics,
+) -> tuple[bool, str | None]:
+    """Does a SELECTED member of `clip`'s own retry family already carry
+    the same proposition, per EXISTING semantic-equivalence evidence? Never
+    invents a new heuristic and never places a new paid call -- see the
+    module comment above for why this is the only evidence source
+    consulted (a deterministic idea-scoped overlap fallback is inert by
+    construction and is deliberately not implemented)."""
+    winner_ids = [cid for cid in member_ids if cid != clip.clip_id and cid in selected_ids]
+    if not winner_ids:
+        return False, None
+    if len(_content(str(clip.text or ""))) < 5:
+        return False, None
+    for winner_id in winner_ids:
+        if _semantic_equivalence_confidence(
+            diagnostics, clip.clip_id, winner_id
+        ) >= _SAME_IDEA_HIGH_CONFIDENCE_THRESHOLD:
+            return True, "same_idea_semantic_equivalence"
+    return False, None
+
+
 def _lost_semantic_atoms(
     draft, *, semantic_atom_importance_arbiter: SemanticAtomImportanceArbiter | None = None,
 ) -> list[dict]:
@@ -403,10 +517,25 @@ def _lost_semantic_atoms(
     specific atom) is UNCHANGED and always blocking once it clears both a
     volume and a coverage floor -- this reclassification is scoped to
     number/negation atoms only, not to that coarser signal.
+
+    D-061 Phase 1: the broader content-vocabulary trigger above is now
+    checked against same-idea paraphrase credit (see the module comment and
+    `_same_idea_paraphrase_credit` above) before it is allowed to block --
+    a POST-GROUPING discarded clip whose own retry family already has a
+    SELECTED member covering the same proposition is relabeled
+    `SEMANTICALLY_COVERED_BY_SELECTED_REALIZATION` and stops blocking,
+    still recorded (never silently dropped) with the evidence that
+    suppressed it. Number/negation atom handling above is completely
+    untouched: `missing_critical` is computed against the whole selected
+    timeline's own vocabulary already, so an atom this idea's own winner
+    genuinely carries was never "missing" in the first place, and a
+    genuinely missing one still blocks regardless of idea membership.
     """
     kept_text = " ".join(str(clip.text or "") for clip in draft.selected)
     kept_content = _content(kept_text)
     kept_critical = _numbers(kept_text) | _negations(kept_text)
+    selected_ids = {clip.clip_id for clip in draft.selected}
+    clip_id_to_group = _clip_id_to_group_members((draft.diagnostics or {}).get("take_judge_groups"))
 
     findings: list[dict] = []
     for clip in draft.discarded:
@@ -431,6 +560,21 @@ def _lost_semantic_atoms(
         if not (missing_critical or content_loss):
             continue
 
+        # D-061 Phase 1: same-idea paraphrase credit -- only ever suppresses
+        # the broader content_loss signal above, never touches
+        # missing_critical/classifications (see docstring paragraph above).
+        suppressed_reason = None
+        if content_loss:
+            group = clip_id_to_group.get(clip.clip_id)
+            if group is not None:
+                _group_id, member_ids = group
+                credited, evidence_kind = _same_idea_paraphrase_credit(
+                    clip, member_ids, selected_ids, draft.diagnostics,
+                )
+                if credited:
+                    content_loss = False
+                    suppressed_reason = evidence_kind
+
         classifications = [
             classify_negation_atom(atom) if atom in own_negations else classify_number_atom(atom, text)
             for atom in missing_critical
@@ -440,7 +584,7 @@ def _lost_semantic_atoms(
             arbiter=semantic_atom_importance_arbiter,
         )
         blocking = content_loss or any(blocks_freeze(c.importance) for c in classifications)
-        findings.append({
+        row = {
             "clip_id": clip.clip_id,
             "text": text,
             "missing_critical_atoms": missing_critical,
@@ -455,7 +599,19 @@ def _lost_semantic_atoms(
             "own_content_token_count": len(own_content),
             "coverage_against_final_keep": round(coverage, 4),
             "blocking": blocking,
-        })
+            # D-061 Phase 3: distinguish REAL_CONTENT_LOSS from a finding
+            # that was suppressed because same-idea semantic equivalence
+            # already established coverage -- never silently hidden, even
+            # in the rare case a separate missing-critical-atom signal
+            # still blocks the row for an unrelated reason.
+            "classification": (
+                "SEMANTICALLY_COVERED_BY_SELECTED_REALIZATION" if suppressed_reason and not blocking
+                else "REAL_CONTENT_LOSS"
+            ),
+        }
+        if suppressed_reason is not None:
+            row["content_loss_suppressed_by"] = suppressed_reason
+        findings.append(row)
     return findings
 
 
@@ -463,7 +619,7 @@ def _lost_critical_claims(
     draft, *,
     claim_equivalence_arbiter: ClaimEquivalenceArbiter | None = None,
     clause_role_arbiter: ClauseRoleArbiter | None = None,
-) -> list[dict]:
+) -> tuple[list[dict], list[dict]]:
     """Per-Idea claim coverage (D-038) -- the backstop for `claim_coverage_
     best_take.py`'s own best-effort override. Unlike `_lost_semantic_atoms`
     above (which compares a discarded clip's vocabulary against the ENTIRE
@@ -482,14 +638,28 @@ def _lost_critical_claims(
     paired-composite resolution, and this is the real, independent, always-
     on gate that must never let a critical claim reach Freeze silently
     missing regardless of whether an earlier stage could repair it.
+
+    Returns (findings, confirmations). D-061 Phase 3: `resolve_ambiguous_
+    coverage`'s ambiguous band (semantic_claims.AMBIGUOUS_COVERAGE_FLOOR <=
+    coverage < COVERAGE_THRESHOLD) can only ever resolve to covered via the
+    arbiter -- by that function's own construction, coverage in this band
+    with no arbiter or a False/exception verdict always fails open to NOT
+    covered. So every claim that lands in this band and does NOT become a
+    finding was necessarily confirmed by `claim_equivalence_arbiter`; that
+    evidence is recorded in `confirmations` for observability (never
+    silently dropped) rather than only being visible as an absence from
+    `findings`. A confidently-covered claim (coverage >= COVERAGE_THRESHOLD,
+    no arbiter ever consulted) is not recorded here -- nothing was
+    suppressed, there is no hidden evidence to surface.
     """
     groups = list((draft.diagnostics or {}).get("take_judge_groups") or ())
     if not groups:
-        return []
+        return [], []
     all_clips = {clip.clip_id: clip for clip in (*draft.selected, *draft.discarded, *draft.alternates)}
     selected_ids = {clip.clip_id for clip in draft.selected}
 
     findings: list[dict] = []
+    confirmations: list[dict] = []
     for group in groups:
         ranked = list(group.get("ranked") or ())
         member_ids = [str(row.get("clip_id") or "") for row in ranked]
@@ -512,9 +682,23 @@ def _lost_critical_claims(
         winning_realization_text = " ".join(str(all_clips[cid].text or "") for cid in winners)
         for claim in critical_claims:
             coverage = claim_coverage(claim, winning_realization_text)
-            if resolve_ambiguous_coverage(
+            covered = resolve_ambiguous_coverage(
                 claim, winning_realization_text, coverage=coverage, arbiter=claim_equivalence_arbiter,
-            ):
+            )
+            if covered:
+                if coverage < COVERAGE_THRESHOLD:
+                    confirmations.append({
+                        "idea_id": group.get("group_id"),
+                        "claim_id": claim.claim_id,
+                        "claim_type": claim.claim_type,
+                        "claim_text": claim.text,
+                        "importance": claim.importance,
+                        "source_clip_id": claim.source_clip_id,
+                        "winning_clip_ids": list(winners),
+                        "coverage_against_winning_realization": round(coverage, 4),
+                        "owning_authority": "BestTakeResolver",
+                        "resolution": "claim_equivalence_arbiter_confirmed",
+                    })
                 continue
             findings.append({
                 "idea_id": group.get("group_id"),
@@ -528,7 +712,7 @@ def _lost_critical_claims(
                 "owning_authority": "BestTakeResolver",
                 "blocking": True,
             })
-    return findings
+    return findings, confirmations
 
 
 def apply_final_story_coherence_validation(
@@ -614,7 +798,7 @@ def apply_final_story_coherence_validation(
     lost_semantic_atoms = _lost_semantic_atoms(
         draft, semantic_atom_importance_arbiter=semantic_atom_importance_arbiter,
     )
-    lost_critical_claims = _lost_critical_claims(
+    lost_critical_claims, claim_coverage_confirmations = _lost_critical_claims(
         draft, claim_equivalence_arbiter=claim_equivalence_arbiter, clause_role_arbiter=clause_role_arbiter,
     )
     # D-031: a lost_semantic_atoms finding only blocks Freeze when its own
@@ -646,6 +830,15 @@ def apply_final_story_coherence_validation(
         "missing_idea_coverage": missing_idea_coverage,
         "lost_semantic_atoms": lost_semantic_atoms,
         "lost_critical_claims": lost_critical_claims,
+        # D-061 Phase 3: observability-only, additive, never wired into
+        # freeze_blocked -- claims that landed in the genuinely ambiguous
+        # coverage band and were confirmed covered by claim_equivalence_
+        # arbiter (the only way to resolve True in that band; see
+        # _lost_critical_claims's own docstring). Distinguishes REAL_
+        # CONTENT_LOSS (in lost_critical_claims) from SEMANTICALLY_COVERED_
+        # BY_SELECTED_REALIZATION (here) without ever silently hiding the
+        # evidence that a suppression happened.
+        "claim_coverage_confirmations": claim_coverage_confirmations,
         "freeze_blocked": freeze_blocked,
         "not_implemented": [
             "general_non_numeric_non_negation_contradiction_detection",

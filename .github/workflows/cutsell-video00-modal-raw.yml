@@ -396,7 +396,10 @@ jobs:
 
           echo "--- semantic atom importance classifications ---"
           jq '[.diagnostics.final_story_coherence_validation.lost_semantic_atoms[]? |
-            {clip_id, blocking, atom_classifications}]' artifact/video00-modal.json
+            {clip_id, blocking, classification, content_loss_suppressed_by, atom_classifications}]' artifact/video00-modal.json
+
+          echo "--- claim coverage confirmations (D-061 Phase 3, observability only, never blocking) ---"
+          jq '.diagnostics.final_story_coherence_validation.claim_coverage_confirmations // []' artifact/video00-modal.json
 
           echo "--- diagnostics.canonical_edit_plan ---"
           jq '.diagnostics.canonical_edit_plan

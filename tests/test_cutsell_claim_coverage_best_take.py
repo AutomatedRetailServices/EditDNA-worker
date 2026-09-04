@@ -270,3 +270,57 @@ def test_multiple_groups_independently_evaluated():
     out = apply_claim_coverage_best_take(d)
     selected_ids = {c.clip_id for c in out.selected}
     assert selected_ids == {"complete1", "winner2"}
+
+
+# --- D-061 Phase 2: this module is the SECOND consumer of claim_equivalence_
+#     arbiter (alongside StoryValidator's _lost_critical_claims) that D-061's
+#     BrainRuntime/universal_clean_cut_validation.py wiring activates for the
+#     first time in production -- both share the one wired instance. No new
+#     heuristic here: `_covered_claim_ids` already called `resolve_ambiguous_
+#     coverage` with whatever arbiter it was given; it was simply always
+#     None before D-061. -------------------------------------------------
+
+def test_paraphrased_winner_claim_without_arbiter_flags_unresolved_gap():
+    """Unchanged, pre-D-061 behavior: a winner whose own paraphrase of a
+    critical claim lands in the ambiguous coverage band, with no arbiter
+    available, is NOT credited -- fails open exactly as before, surfacing
+    an unresolved_gap (which StoryValidator's own, always-on backstop would
+    also independently catch as CRITICAL_CLAIM_LOST)."""
+    winner = clip("winner", 0.0, 5.0, "About 5 to 10 percent of cancers are hereditary, according to her doctor.", selected=True)
+    complete = clip("complete", 5.0, 10.0, "Only 5 to 10 percent of these cases are hereditary in nature.", selected=False)
+    d = draft(
+        selected=(winner,), discarded=(complete,),
+        take_judge_groups=[{"group_id": "g1", "ranked": [ranked_row("winner", 0.9), ranked_row("complete", 0.5)]}],
+    )
+    out = apply_claim_coverage_best_take(d)
+
+    assert [c.clip_id for c in out.selected] == ["winner"]  # no override -- no safe single/pair fix
+    diag = out.diagnostics["claim_coverage_best_take"]
+    assert diag["overrides"] == []
+    assert len(diag["unresolved_gaps"]) == 1
+
+
+def test_paraphrased_winner_claim_with_wired_arbiter_recognizes_coverage():
+    """New, D-061 behavior: the SAME ambiguous-band paraphrase, now with a
+    wired arbiter confirming it, is correctly recognized as already covered
+    by the winner -- no override needed, no unresolved gap raised. Safer
+    than before, not less safe: catching this earlier (at BestTake) means
+    StoryValidator never even needs to flag it downstream."""
+    winner = clip("winner", 0.0, 5.0, "About 5 to 10 percent of cancers are hereditary, according to her doctor.", selected=True)
+    complete = clip("complete", 5.0, 10.0, "Only 5 to 10 percent of these cases are hereditary in nature.", selected=False)
+    d = draft(
+        selected=(winner,), discarded=(complete,),
+        take_judge_groups=[{"group_id": "g1", "ranked": [ranked_row("winner", 0.9), ranked_row("complete", 0.5)]}],
+    )
+
+    class _AlwaysCoveredArbiter:
+        def claim_covered(self, claim_text, winning_realization_text):
+            return True, 0.9, "paraphrase confirmed"
+
+    out = apply_claim_coverage_best_take(d, claim_equivalence_arbiter=_AlwaysCoveredArbiter())
+
+    assert [c.clip_id for c in out.selected] == ["winner"]
+    # A true no-op: nothing needed fixing, so no diagnostics key is even
+    # written (mirrors test_winner_already_covers_every_critical_claim_is_
+    # untouched's own assertion shape for the "nothing to do" case).
+    assert out is d

@@ -11,6 +11,7 @@ from dataclasses import dataclass
 import os
 from typing import Mapping
 
+from .claim_equivalence_google import GoogleClaimEquivalenceArbiter
 from .clean_cut_provider import CleanCutProvider
 from .composer_provider import ComposerProvider
 from .config import RuntimeConfig
@@ -21,6 +22,7 @@ from .hybrid_provider import TransportEditorialJudge
 from .hybrid_provider_settings import HybridProviderSettings, load_hybrid_provider_settings
 from .hybrid_take_judge import HybridTakeJudgeProvider
 from .providers import NoopSemanticProvider, SemanticProvider
+from .semantic_claims import ClaimEquivalenceArbiter
 from .semantic_idea_equivalence import SemanticEquivalenceArbiter
 from .semantic_idea_equivalence_google import GoogleSemanticEquivalenceArbiter
 from .take_grouping_provider import TakeGroupingProvider
@@ -61,6 +63,21 @@ class BrainRuntime:
     # that branch. None whenever paid inference is off, disabled via the
     # rollback flag below, or no API key is present.
     semantic_equivalence_arbiter: SemanticEquivalenceArbiter | None = None
+    # D-061 Phase 2: narrow gated claim-equivalence arbiter used by
+    # StoryValidator/ClaimCoverageBestTake to resolve the genuinely
+    # ambiguous claim-coverage band (semantic_claims.AMBIGUOUS_COVERAGE_
+    # FLOOR <= coverage < COVERAGE_THRESHOLD) via a bounded paraphrase
+    # judgment -- the SAME already-configured google/Gemini provider client
+    # semantic_equivalence_arbiter above uses, never a new provider or
+    # model, with its own independent cost ledger (a distinct, much
+    # smaller call shape). Deterministic obvious cases (confident coverage,
+    # or a number/negation/entity/causal-direction mismatch, all capped
+    # below the ambiguous floor by claim_coverage's own guards) never reach
+    # this arbiter at all. None whenever paid inference is off, disabled
+    # via the rollback flag below, or no API key is present -- in which
+    # case `resolve_ambiguous_coverage` fails open to NOT COVERED exactly
+    # as it always has (unchanged, safe default).
+    claim_equivalence_arbiter: ClaimEquivalenceArbiter | None = None
     # Clean Cut Core V1 (see CLAUDE.md / docs/CUTSELL_DECISIONS.md): the
     # idea-first deterministic pipeline is the default active Clean Cut path.
     # Set CUTSELL_CLEAN_CUT_CORE_V1=0 to roll back to the pre-V1 architecture
@@ -155,6 +172,26 @@ def _build_semantic_equivalence_arbiter(
     )
 
 
+def _build_claim_equivalence_arbiter(
+    settings: HybridProviderSettings,
+    values: Mapping[str, str],
+) -> ClaimEquivalenceArbiter | None:
+    if not settings.enabled or settings.provider != "google":
+        return None
+    api_key = _require_google_api_key(settings, values)
+    return GoogleClaimEquivalenceArbiter(
+        api_key=api_key,
+        model=settings.primary_model,
+        settings=settings,
+        # Deliberately its own ceiling -- see hybrid_provider_settings.py's
+        # max_cost_per_claim_equivalence_call_usd docstring. Distinct call
+        # shape from the legacy per-group Hybrid judge, Unified Selection,
+        # and the semantic-equivalence arbiter; must never share any of
+        # their ceilings.
+        ledger=DollarBudgetLedger(settings.max_cost_per_claim_equivalence_call_usd),
+    )
+
+
 def build_brain_runtime(
     config: RuntimeConfig,
     env: Mapping[str, str] | None = None,
@@ -221,6 +258,20 @@ def build_brain_runtime(
         if requested_hybrid and semantic_equivalence_arbiter_enabled
         else None
     )
+    # D-061 Phase 2 rollback flag: set CUTSELL_CLAIM_EQUIVALENCE_ARBITER=0 to
+    # disable the claim-equivalence arbiter without touching
+    # CUTSELL_HYBRID_LLM_ENABLED. Same gating shape as semantic_equivalence_
+    # arbiter_enabled above -- requested_hybrid alone, independent of
+    # requested_unified, since StoryValidator/ClaimCoverageBestTake run
+    # upstream of the Unified Selection/legacy branch in Clean Cut Core V1.
+    claim_equivalence_arbiter_enabled = _env_true_default_true(
+        values.get("CUTSELL_CLAIM_EQUIVALENCE_ARBITER")
+    )
+    claim_equivalence_arbiter = (
+        _build_claim_equivalence_arbiter(hybrid_settings, values)
+        if requested_hybrid and claim_equivalence_arbiter_enabled
+        else None
+    )
     return BrainRuntime(
         backend=RUNPOD_LOCAL_BACKEND,
         semantic_provider=NoopSemanticProvider(),
@@ -236,5 +287,6 @@ def build_brain_runtime(
         hybrid_settings=hybrid_settings,
         deterministic_best_take_authority_enabled=deterministic_best_take_authority_enabled,
         semantic_equivalence_arbiter=semantic_equivalence_arbiter,
+        claim_equivalence_arbiter=claim_equivalence_arbiter,
         clean_cut_core_v1_enabled=clean_cut_core_v1_enabled,
     )

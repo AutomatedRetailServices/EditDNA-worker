@@ -6779,6 +6779,49 @@ READY FOR HUMAN VISUAL REVIEW: NO
 
 Then STOP. Did not patch. Did not launch another RAW.
 
+## D-061 -- semantic-equivalence-aware validation (D-060 final Freeze-blocker integration)
+
+Fixes D-060's two proven false positives -- no new semantic authority, no new provider/model, no weakening of Freeze, no changes to Grouping/BestTake/Unified Resolver/Semantic Ledger/ASR/Human Gold/Freeze policy/Boundary/Render-QC.
+
+**Phase 1 (same-idea paraphrase credit)**: new `_same_idea_paraphrase_credit` in `final_story_coherence_validation.py`, consulted only inside `_lost_semantic_atoms`'s existing content-loss trigger. A POST-GROUPING discarded clip (a member of a genuine 2+-member `take_judge_groups` retry contest) whose own family has a SELECTED sibling is credited -- and the finding relabeled `SEMANTICALLY_COVERED_BY_SELECTED_REALIZATION`, `blocking: false` -- only when an EXISTING `semantic_idea_equivalence` merge record for that exact pair already confirms it at >=0.85 confidence (D-058 Phase 2's own bar, reused). No new paid call: this reuses evidence the arbiter already produced during grouping. A deterministic idea-scoped word-overlap fallback was designed, proven mathematically inert (idea-scoped coverage can never exceed whole-video coverage, since the winner's own text is already part of the whole-video comparison -- a genuine near-duplicate is *already* handled correctly by the existing, unmodified check with no fix needed, so this fallback would never once fire), and deliberately removed rather than shipped as dead code. Pre-group-rejected/ungrouped/hybrid-deleted clips (no entry in the group map) and genuinely additive facts (no matching pairwise evidence) are completely unaffected -- current fail-closed behavior unchanged.
+
+**Phase 2 (claim-equivalence arbiter wiring)**: new `claim_equivalence_google.py` (`GoogleClaimEquivalenceArbiter`, implementing `semantic_claims.ClaimEquivalenceArbiter.claim_covered`), mirroring `semantic_idea_equivalence_google.py`'s existing Gemini-transport pattern exactly -- same provider (`google`), same model (`gemini-3.5-flash-lite`), its own independent `DollarBudgetLedger`/cost ceiling (`max_cost_per_claim_equivalence_call_usd`, new `hybrid_provider_settings.py` field, default $0.003, own env var `CUTSELL_HYBRID_MAX_CLAIM_EQUIVALENCE_USD`). `BrainRuntime` gains a `claim_equivalence_arbiter` field + `_build_claim_equivalence_arbiter` factory, gated the same way `semantic_equivalence_arbiter` already is (`requested_hybrid` + a new independent rollback flag `CUTSELL_CLAIM_EQUIVALENCE_ARBITER`, default on). **The actual root fix**: `universal_clean_cut_validation.py` -- the real production/RAW-harness call site, confirmed by direct trace to be the exact gap D-059/D-060 identified -- now passes `claim_equivalence_arbiter=brain.claim_equivalence_arbiter` into `process_universal_clean_cut_sources`, which already correctly threaded the parameter through `ClaimCoverageBestTake` and `StoryValidator` but never received a live instance before. No changes to `claim_coverage`/`resolve_ambiguous_coverage` themselves (D-059's proposition-scoping fix and D-038's deterministic mismatch guards are untouched) -- the arbiter is structurally unreachable for any confidently-covered or confidently-mismatched claim (`resolve_ambiguous_coverage` only ever calls it inside the genuinely ambiguous band), so it can never override a number/negation/entity/causal-direction mismatch; the prompt additionally, defensively instructs the model to answer NOT covered on any such difference or genuine uncertainty, belt-and-braces on top of the structural guarantee.
+
+Noted side effect, in scope, not new: `claim_coverage_best_take.py` (D-048's BestTake-level claim-criticality override) already accepted this same `claim_equivalence_arbiter` parameter and already called `resolve_ambiguous_coverage` through it -- wiring one real instance at the `BrainRuntime` root activates BOTH consumers simultaneously, since they share the one instance. This is not a new authority (D-048 already existed, pre-Freeze, part of BestTakeResolver); it lets an ambiguous paraphrase get recognized earlier, before StoryValidator would otherwise need to flag it. 2 new targeted tests confirm the pre-D-061 fail-open behavior is unchanged without an arbiter, and the new behavior is safe with one.
+
+**Phase 3 (validator diagnostics consistency)**: `_lost_semantic_atoms` rows now carry a `classification` field (`REAL_CONTENT_LOSS` / `SEMANTICALLY_COVERED_BY_SELECTED_REALIZATION`) and, when Phase 1's credit suppressed the finding, `content_loss_suppressed_by`. `_lost_critical_claims` now returns `(findings, confirmations)` -- `confirmations` is a new, additive, observability-only diagnostics list (`claim_coverage_confirmations`) recording every claim the ambiguous band resolved to covered via the arbiter (the *only* way that band can ever resolve to covered, by `resolve_ambiguous_coverage`'s own construction) with `resolution: "claim_equivalence_arbiter_confirmed"` -- deliberately kept OUT of `lost_critical_claims` itself (every row there is unconditionally blocking by construction; adding confirmed-covered rows to it would falsely block Freeze) and never wired into `freeze_blocked`. Nothing is ever silently hidden: a suppressed or confirmed finding is always visible in diagnostics, just correctly no longer blocking. The RAW workflow's diagnostic printing was updated to surface both new fields directly.
+
+**Tests**: 40 new -- `test_cutsell_d061_phase1_same_idea_paraphrase_credit.py` (7: explicit-evidence credit, genuinely-additive-still-blocks, different-idea-still-blocks, pre-group-reject fail-closed, hybrid-delete-no-replacement fail-closed, exact-duplicate/semantic-paraphrase regression-confirmed-unaffected), `test_cutsell_d061_claim_equivalence_google.py` (13, transport-reliability, mirrors the semantic-equivalence arbiter's own test depth: request/response contract, retry, cost-ledger, malformed-response, model-policy, missing-key), `test_cutsell_d061_phase2_claim_equivalence_wiring.py` (15: BrainRuntime construction/gating/rollback/cost-ceiling + a call-counting-arbiter safety matrix proving number/negation/causal-inversion mismatches never even reach the arbiter, plus 2 end-to-end `apply_final_story_coherence_validation` integration tests), `test_cutsell_d061_phase3_validator_diagnostics_consistency.py` (3), plus 2 added to the pre-existing `test_cutsell_claim_coverage_best_take.py` covering the newly-activated second consumer.
+
+**Offline qualification**: compileall clean across `cutsell_worker/`. `tests/test_cutsell_*.py`: 2285-baseline-consistent count with 0 regressions (see final report below for the exact number). CleanCutBench LEGACY+AUTHORITATIVE: 54/54 fixtures both modes (`test_cutsell_clean_cut_core_evaluation_suite.py` + `test_cutsell_d050c1_5_full_cleancutbench_parity.py`, 55 passed together). D-056.3/D-056.5/D-058/D-059-specific test files: 64/64 passed, explicitly re-confirmed green. Full `tests/` (minus `test_semantic_stitch.py`): 2285 passed, 13 subtests passed, only the same 2 pre-existing/unrelated failures already on record since D-056.1 (`test_hybrid_story_guard_incomplete_retry.py::test_incomplete_failed_retry_is_covered_when_prior_delivery_preserves_numbers_and_negation`, `test_video00_modal_hybrid_semantic_parity.py::test_the_two_overlay_values_are_never_masked_in_ci_logs`).
+
+**QA_ENGINE**: no dedicated `QA_ENGINE` tool, skill, or script exists in this session or repository (confirmed by search). Ran as a self-conducted independent adversarial review pass instead (explicitly disclosed as such, not represented as a separate system): re-derived the live `take_judge_groups`/`semantic_idea_equivalence` diagnostics shape directly from `pipeline.py` to confirm Phase 1's assumptions hold against real pipeline output (not just fixtures); traced the second-consumer (`claim_coverage_best_take.py`) side effect of Phase 2's wiring, found it had zero existing arbiter-path tests, and added 2; confirmed zero interaction with CompositeResolver/accepted-composite pieces (Phase 1 only ever inspects `draft.discarded`, composite pieces are always in `draft.selected`); confirmed the mathematically-inert idea-scoped-overlap fallback design flaw myself before shipping it, and removed it rather than leaving dead/misleading code. One informational, pre-existing, out-of-scope observation surfaced (not introduced by D-061, not fixed by D-061): `resolve_ambiguous_coverage` (D-038) ignores the arbiter's own returned confidence value entirely, relying solely on prompt-level instructions to fold low-confidence uncertainty into `covered=false` -- a real gap, but in code this directive was explicitly told not to modify (`claim_coverage`/`resolve_ambiguous_coverage` themselves), and not a regression.
+
+### Final report (verbatim, as delivered)
+D-061 COMPLETE
+
+SAME-IDEA PARAPHRASE CREDIT: PASS
+PRE-GROUP CONTENT SAFETY: PASS
+CLAIM EQUIVALENCE ARBITER: WIRED
+AMBIGUOUS CLAIM RESOLUTION: PASS
+NUMBER SAFETY: PASS
+NEGATION SAFETY: PASS
+ENTITY/DIAGNOSIS SAFETY: PASS
+CAUSAL SAFETY: PASS
+POST-RESOLVER SEMANTIC MUTATORS: 0
+FREEZE POLICY CHANGED: NO
+LEGACY: 54/54
+AUTHORITATIVE: 54/54
+FULL TEST COUNT: tests/test_cutsell_*.py 1661 passed (1621 D-059 baseline + 40 new), 0 regressions; full tests/ (minus test_semantic_stitch.py) 2285 passed, 13 subtests passed, only the same 2 pre-existing/unrelated failures already on record.
+QA_ENGINE VERDICT: PASS_WITH_KNOWN_ISSUES
+P0: 0
+P1: 0
+P2: 0
+P3: 1 (pre-existing, out-of-scope: resolve_ambiguous_coverage ignores arbiter confidence value, D-038, not modified or introduced here)
+READY FOR ONE VIDEO00 CANARY: YES
+
+Then STOP. Do not launch Modal.
+
 ## Change rule
 
 When a new decision changes product behavior, update this file in the same development cycle. Do not silently redefine CutSell through code alone.

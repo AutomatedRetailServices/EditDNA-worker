@@ -160,6 +160,15 @@ def run_single_universal_clean_cut_validation(
             selection_reasoner=brain.selection_reasoner,
             deterministic_best_take_authority_enabled=brain.deterministic_best_take_authority_enabled,
             semantic_equivalence_arbiter=brain.semantic_equivalence_arbiter,
+            # D-061 Phase 2: this was the exact gap D-059/D-060 identified --
+            # process_universal_clean_cut_sources already accepts and
+            # correctly threads claim_equivalence_arbiter through
+            # ClaimCoverageBestTake and StoryValidator, but this real
+            # production/RAW-harness call site never passed one, so the
+            # ambiguous claim-coverage band always failed open to NOT
+            # COVERED regardless of whether a real paraphrase judgment was
+            # available.
+            claim_equivalence_arbiter=brain.claim_equivalence_arbiter,
             clean_cut_core_v1_enabled=brain.clean_cut_core_v1_enabled,
         )
 

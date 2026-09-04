@@ -65,6 +65,17 @@ class HybridProviderSettings:
     # per-group Hybrid judge and the whole-video Unified Selection call and
     # must never share either of their ceilings.
     max_cost_per_semantic_equivalence_call_usd: float = 0.008
+    # D-061 Phase 2: the claim-equivalence arbiter answers exactly ONE
+    # narrow claim-vs-realization-text paraphrase question per call (no
+    # batching, no clip/video identity) -- a much smaller call shape than
+    # the batched semantic-equivalence arbiter above. Sized to
+    # GoogleClaimEquivalenceArbiter's own hard caps (max_input_tokens=4_000,
+    # max_output_tokens ceiling=300): 4_000/1e6*0.30 + 300/1e6*2.50 =
+    # $0.00195, with margin so ledger sizing itself is never the reason a
+    # within-hard-limits call cannot be attempted. Must never share the
+    # legacy per-group Hybrid judge's, Unified Selection's, or the semantic-
+    # equivalence arbiter's ceiling -- a distinct call shape gets its own.
+    max_cost_per_claim_equivalence_call_usd: float = 0.003
     # User-approved development bake-off/test ceiling.
     max_test_budget_usd: float = 0.50
     max_daily_budget_usd: float = 5.00
@@ -119,6 +130,9 @@ def load_hybrid_provider_settings(env: dict[str, str] | None = None) -> HybridPr
         ),
         max_cost_per_semantic_equivalence_call_usd=max(
             0.0, _env_float(values, "CUTSELL_HYBRID_MAX_SEMANTIC_EQUIVALENCE_USD", 0.008)
+        ),
+        max_cost_per_claim_equivalence_call_usd=max(
+            0.0, _env_float(values, "CUTSELL_HYBRID_MAX_CLAIM_EQUIVALENCE_USD", 0.003)
         ),
         max_test_budget_usd=max(0.0, _env_float(values, "CUTSELL_HYBRID_TEST_BUDGET_USD", 0.50)),
         max_daily_budget_usd=max(0.0, _env_float(values, "CUTSELL_HYBRID_DAILY_BUDGET_USD", 5.00)),
