@@ -14,6 +14,10 @@ import os
 import re
 from typing import Iterable, Mapping, Tuple
 
+from .complete_retry_identity_guard import (
+    NOT_APPLICABLE as _REPLACEMENT_REASON_NOT_APPLICABLE,
+    _consume_replacement_guard_diagnostic,
+)
 from .contracts import CandidateTake
 from .final_sibling_grouping import _content as _content_tokens
 from .final_sibling_grouping import _negations, _numbers
@@ -234,6 +238,55 @@ def _later_semantic_retry_replacement(
             best = candidate
             best_overlap = overlap
     return best, best_overlap
+
+
+@dataclass(frozen=True)
+class _ReplacementCandidateScan:
+    """D-072: pure, side-effect-free re-scan of `members` for observability
+    only -- mirrors _later_semantic_retry_replacement's own gate cascade
+    verbatim (never duplicated with independent logic that could drift)
+    but additionally reports the best-seen overlap and the count of
+    structurally eligible candidates REGARDLESS of whether any candidate
+    actually cleared `minimum_overlap` -- information the decision-making
+    function itself has no reason to keep once it returns. Never consulted
+    by any decision; complete_retry_identity_guard.py's own no-replacement
+    diagnostics (D-072) are the only reader."""
+    eligible_candidate_count: int
+    best_candidate_clip_id: str | None
+    best_overlap_seen: float
+
+
+def _scan_replacement_candidates(
+    failed_take: CandidateTake,
+    members: Tuple[CandidateTake, ...],
+    decisions_by_id: dict[str, tuple[str, float]],
+    *,
+    minimum_label_confidence: float = 0.68,
+    maximum_delay_sec: float = 24.0,
+) -> _ReplacementCandidateScan:
+    eligible_count = 0
+    best_overlap = 0.0
+    best_clip_id: str | None = None
+    for candidate in members:
+        if candidate.clip_id == failed_take.clip_id:
+            continue
+        if candidate.source_asset_id != failed_take.source_asset_id:
+            continue
+        if float(candidate.start) <= float(failed_take.end):
+            continue
+        if float(candidate.start) - float(failed_take.end) > maximum_delay_sec:
+            continue
+        if not bool(candidate.complete_idea):
+            continue
+        label, confidence = decisions_by_id.get(candidate.clip_id, ("", 0.0))
+        if label not in {"winner", "alternate", "keep"} or confidence < minimum_label_confidence:
+            continue
+        eligible_count += 1
+        overlap = _semantic_overlap(failed_take, candidate)
+        if overlap > best_overlap:
+            best_overlap = overlap
+            best_clip_id = candidate.clip_id
+    return _ReplacementCandidateScan(eligible_count, best_clip_id, best_overlap)
 
 
 def _source_events(context: WholeVideoContext | None, source_asset_id: str):
@@ -512,6 +565,17 @@ def apply_hybrid_session_cleanup(
                     replacement, replacement_overlap = _later_semantic_retry_replacement(
                         take, members, decisions_by_id
                     ) if decision.label == "failed" else (None, 0.0)
+                    # D-072: read-and-clear the guard's own observability
+                    # side channel (set only when the call above actually
+                    # ran, i.e. decision.label == "failed" -- consuming it
+                    # in the same branch prevents a stale value from a
+                    # PRIOR decision ever leaking onto this one). Additive
+                    # only: nothing below reads these fields to make a
+                    # decision.
+                    guard_diagnostic = (
+                        _consume_replacement_guard_diagnostic()
+                        if decision.label == "failed" else None
+                    )
                     retry_replaced_failed_delete = bool(
                         decision.label == "failed"
                         and decision.confidence >= retry_replaced_failed_confidence
@@ -580,6 +644,30 @@ def apply_hybrid_session_cleanup(
                         "dense_semantic_failure_cluster": dense_semantic_failure_cluster,
                         "delete_basis": delete_basis,
                         "applied_delete": applied_delete,
+                        # D-072: additive observability only -- explains
+                        # WHY later_retry_replacement_id is null even when
+                        # later_retry_semantic_overlap is nonzero (D-070's
+                        # finding). Never read by any decision below this
+                        # point or anywhere else in the pipeline (D-072
+                        # Section 5 requires and verifies this).
+                        "replacement_candidate_clip_id_before_guard": (
+                            guard_diagnostic.replacement_candidate_clip_id_before_guard
+                            if guard_diagnostic is not None else None
+                        ),
+                        "sequence_identity": (
+                            guard_diagnostic.sequence_identity if guard_diagnostic is not None else None
+                        ),
+                        "sequence_identity_threshold": (
+                            guard_diagnostic.sequence_identity_threshold
+                            if guard_diagnostic is not None else None
+                        ),
+                        "lexical_identity_passed": (
+                            guard_diagnostic.lexical_identity_passed if guard_diagnostic is not None else None
+                        ),
+                        "replacement_rejection_reason": (
+                            guard_diagnostic.replacement_rejection_reason
+                            if guard_diagnostic is not None else _REPLACEMENT_REASON_NOT_APPLICABLE
+                        ),
                     })
 
             plan_outcome = plan.outcome_for(str(position)) if plan is not None else None

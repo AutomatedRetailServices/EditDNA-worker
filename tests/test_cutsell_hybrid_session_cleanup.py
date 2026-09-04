@@ -217,3 +217,52 @@ def test_one_word_failed_debris_can_delete_at_point_eight_with_local_fumble():
     result = apply_hybrid_session_cleanup((item,), None, FixedJudge("failed", 0.80))
     assert result.deleted == (item,)
     assert result.diagnostics[0]["decisions"][0]["delete_basis"] == "micro_failed_plus_local_performance"
+
+
+def test_d072_replacement_guard_diagnostics_are_wired_end_to_end():
+    """D-072: the guard's observability fields must reach the real
+    per-decision diagnostic dict apply_hybrid_session_cleanup produces,
+    not just the direct unit-level _later_semantic_retry_replacement
+    call. Reproduces the exact D-070 shape (a complete-idea failed take
+    whose topically-overlapping later candidate fails sequence identity)
+    end to end and confirms both the unchanged decision AND the new
+    explanatory fields."""
+    failed = take(
+        0, text="Al terminar mi contrato, le pedí a mi ginecóloga.",
+    )
+    candidate = take(
+        1,
+        text=(
+            "Al terminar mi contrato, cambié de ginecóloga y le pedí que me "
+            "hiciera un test de todo lo que ella se pudiera imaginar y me "
+            "pudiese indicar."
+        ),
+    )
+    labels = {"clip-0": ("failed", 0.95), "clip-1": ("keep", 0.95)}
+    result = apply_hybrid_session_cleanup((failed, candidate), None, MappingJudge(labels))
+
+    decision = next(item for item in result.diagnostics[0]["decisions"] if item["clip_id"] == "clip-0")
+
+    # Decision itself: unchanged from pre-D-072 behavior.
+    assert decision["later_retry_replacement_id"] is None
+    assert decision["later_retry_semantic_overlap"] == 1.0
+
+    # New, additive-only observability.
+    assert decision["replacement_candidate_clip_id_before_guard"] == "clip-1"
+    assert round(decision["sequence_identity"], 4) == 0.4108
+    assert decision["sequence_identity_threshold"] == 0.52
+    assert decision["lexical_identity_passed"] is False
+    assert decision["replacement_rejection_reason"] == "SEQUENCE_IDENTITY_BELOW_THRESHOLD"
+
+
+def test_d072_diagnostics_default_to_not_applicable_for_non_failed_decisions():
+    """Decisions this guard was never invoked for (label != 'failed') must
+    carry the explicit NOT_APPLICABLE reason, never a stale value from a
+    different clip's own guard evaluation."""
+    item = take(0)
+    result = apply_hybrid_session_cleanup((item,), None, FixedJudge("keep", 0.95))
+    decision = result.diagnostics[0]["decisions"][0]
+    assert decision["replacement_candidate_clip_id_before_guard"] is None
+    assert decision["sequence_identity"] is None
+    assert decision["lexical_identity_passed"] is None
+    assert decision["replacement_rejection_reason"] == "NOT_APPLICABLE"

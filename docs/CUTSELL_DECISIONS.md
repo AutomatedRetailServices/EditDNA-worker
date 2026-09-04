@@ -7409,6 +7409,183 @@ Then STOP.
 
 Do not launch Modal.
 
+## D-067 -- authoritative orphan root-cause forensic (report only, no code, no RAW)
+
+D-066 canary run 33882792100 reached Freeze BLOCKED via a separate, previously-
+unexamined authority: `realization_resolver_authority` (Unified Resolver)
+found 3 unconfirmed orphan realizations, all `discard_reason:
+"high_confidence_semantic"` / `decision_reason:
+"hybrid_editorial_semantic_delete_with_no_verified_replacement_never_silently_
+confirmed"`. Traced and classified all 3 (category F, IDENTITY/PROVENANCE BUG
+in substance, two with strong independent coverage evidence never wired into
+`replacement_verified`); D-050D1's own three-way orphan contract itself found
+PASS (executed exactly as documented -- the gap is one layer upstream). Shared
+root cause: `semantic_ledger.py` reads only `hybrid_editorial`'s own
+`later_retry_replacement_id` field, never `later_retry_semantic_overlap` alone
+nor `hybrid_story_coverage_guard`'s independent coverage verdicts. Orphans
+A/B/C: NOT_PROVEN safe (do not infer from overlap alone). Freeze counterfactual:
+YES, this is the only structural blocker between the engine and Render if
+correctly classified.
+
+## D-068 -- replacement provenance wiring investigation (report only, no code, no RAW)
+
+Explained WHY `later_retry_semantic_overlap > 0` can coexist with
+`later_retry_replacement_id == null`. Proved, by direct source reading, that
+`_later_semantic_retry_replacement`'s own body makes this pairing
+unreachable (best/best_overlap always co-assigned) -- disproving control-flow
+and diagnostics-construction bugs. Could not locate the actual mechanism from
+static reading alone; root cause: E (artifact/logging mismatch), reached by
+elimination, not direct proof -- flagged as the one open item requiring the
+raw persisted artifact, not the console-log transcript, to close.
+
+## D-069 -- raw persisted artifact provenance audit (no engine code, no GPU, no RAW)
+
+Recovered the run's own raw `result.json` via the existing, already-authorized,
+zero-GPU `cutsell-video00-d044-forensic-extract.yml` workflow (S3 read only, no
+Modal/RunPod). The "impossible" pair is present in the RAW artifact itself,
+byte-identical across raw file / workflow extraction / console log -- D-068's
+category E (log/artifact mismatch) is disproven. Root class re-opened as
+UNKNOWN pending offline code-level reproduction. Orphans A/B/C remain
+NOT_PROVEN.
+
+## D-070 -- replacement provenance offline reproduction (no GPU, no RAW)
+
+Reproduced the live anomaly offline by calling the real, unmodified
+`_later_semantic_retry_replacement` with real recovered field values:
+`(None, 1.0)` and `(None, 0.75)`, exact matches. Root cause found and proven
+via `inspect.getsource`: `complete_retry_identity_guard.py`'s
+`install_complete_retry_identity_guard()` monkeypatches
+`hybrid_session_cleanup._later_semantic_retry_replacement` at
+`cutsell_worker` package-import time. Its own additional sequence-identity
+veto (`_sequence_identity < 0.52`) discards a candidate the base function
+found, while returning the base function's own `overlap` unchanged --
+producing the "impossible" pair. Not a bug: a deliberate, documented,
+previously-unexamined safety layer. RED regression test (scratchpad only,
+not committed) proved the mechanism against the real code. Orphans remain
+NOT_PROVEN (this strengthens, not weakens, that caution).
+
+## D-071 -- complete retry identity guard modernization design (design/forensic only, no code, no RAW)
+
+Confirmed the guard's founding failure class (same-topic narrative
+continuation mistaken for a retake, proven by its own test suite) and
+designed, without implementing, a second, PATH-B semantic-preservation
+certification path as a composition of already-existing primitives
+(claim coverage, D-063 critical-coverage dominance, D-066 negation-role
+classification, contradiction detection) -- never new semantic machinery.
+Found the required evidence does not exist at the guard's own pipeline
+stage; recommended owner is the existing Unified Resolver
+(`realization_resolver.py`), never a new authority. Orphans A/B/C: all
+NOT_PROVEN under PATH B on existing evidence (A strongest, B lacks a valid
+PATH-B-shaped candidate at all, C has an unresolved entity-level lexical
+divergence). Observability fix recommended regardless of PATH B's fate.
+
+## D-072 -- complete retry identity observability (engine change, additive only)
+
+Implemented ONLY the D-071 observability recommendation -- no PATH B, no
+threshold change, no behavior change. Added, additively:
+
+- `cutsell_worker/hybrid_session_cleanup.py`: `_scan_replacement_candidates`
+  (a pure, side-effect-free re-scan mirroring `_later_semantic_retry_
+  replacement`'s own gate cascade verbatim, reporting best-overlap-seen and
+  eligible-candidate-count regardless of whether any candidate cleared the
+  floor -- consulted only by the new diagnostics, never by any decision);
+  wired the per-decision loop to read-and-clear the guard's new diagnostic
+  side channel and add 5 new additive keys to each `hybrid_editorial_chunks`
+  decision dict (`replacement_candidate_clip_id_before_guard`,
+  `sequence_identity`, `sequence_identity_threshold`,
+  `lexical_identity_passed`, `replacement_rejection_reason`).
+- `cutsell_worker/complete_retry_identity_guard.py`: bounded rejection-reason
+  vocabulary (`NO_CANDIDATE`, `SEMANTIC_OVERLAP_BELOW_THRESHOLD`,
+  `NUMBER_PRESERVATION_FAILED`, `SEQUENCE_IDENTITY_BELOW_THRESHOLD`,
+  `LEXICAL_REPLACEMENT_VERIFIED`, `INCOMPLETE_RETRY_LOOSER_MATCH`,
+  `NOT_APPLICABLE`); a frozen `ReplacementGuardDiagnostic` dataclass; a
+  ContextVar side channel (same established pattern as
+  `hybrid_session_cleanup._LAST_SEMANTIC_COMPUTE_PLAN`), set once per
+  `protected()` call immediately before each existing `return` (no return
+  VALUE changed anywhere), read-and-cleared once by the consumer;
+  `_diagnose_no_replacement_reason` distinguishes NO_CANDIDATE /
+  SEMANTIC_OVERLAP_BELOW_THRESHOLD / NUMBER_PRESERVATION_FAILED via the new
+  scan helper, purely for reporting.
+
+Verified: all 4 pre-existing guard tests pass byte-for-byte unchanged; 11 new
+targeted tests (`test_cutsell_d072_complete_retry_observability.py`) cover
+every reason, ContextVar clear-on-read, cross-clip non-leakage, and
+cross-thread isolation; 2 new end-to-end integration tests in
+`test_cutsell_hybrid_session_cleanup.py` prove the fields reach
+`apply_hybrid_session_cleanup`'s own real diagnostics, reproducing the exact
+D-070 shape and the NOT_APPLICABLE default for non-"failed" decisions.
+Repo-wide grep confirms the 4 new field names appear in exactly the 2
+producer files and nowhere else (no selection/resolver/Freeze/orphan
+consumer). Only one call site of `_later_semantic_retry_replacement` exists
+in the whole codebase (`hybrid_session_cleanup.py`'s own loop), so no other
+caller can leave an unconsumed, later-misattributed diagnostic.
+
+Final report (verbatim, as delivered):
+
+D-072 COMPLETE
+
+COMPLETE RETRY OBSERVABILITY:
+PASS
+
+SEQUENCE IDENTITY SURFACED:
+YES
+
+PRE-GUARD CANDIDATE SURFACED:
+YES
+
+REJECTION REASON SURFACED:
+YES
+
+DECISION BEHAVIOR CHANGED:
+NO
+
+ORPHAN POLICY CHANGED:
+NO
+
+FREEZE POLICY CHANGED:
+NO
+
+CONTEXT ISOLATION:
+PASS
+
+LEGACY:
+54/54
+
+AUTHORITATIVE:
+54/54
+
+FULL TEST COUNT:
+tests/test_cutsell_*.py: 1714 passed, 0 failed. D-050-D-072 targeted sweep
+(31 files): 462 passed. CleanCutBench: 54/54 LEGACY, 54/54 AUTHORITATIVE.
+
+QA_ENGINE VERDICT:
+PASS -- observability-only confirmed: decisions unchanged (byte-for-byte on
+all founding safety tests plus new explicit assertions), orphan/Freeze code
+paths untouched, no new semantic authority (the new scan helper is provably
+side-effect-free and consulted only by diagnostics), no diagnostic state
+leakage (ContextVar is per-context, read-once-cleared, single call site).
+
+P0:
+0
+P1:
+0
+P2:
+0
+P3:
+0
+
+PATH B IMPLEMENTED:
+NO
+
+READY FOR PATH B DESIGN/IMPLEMENTATION:
+YES (observability groundwork in place; PATH B itself remains a future,
+separately-authorized directive per D-071)
+
+Then STOP.
+
+No Modal.
+No RAW.
+
 ## Change rule
 
 When a new decision changes product behavior, update this file in the same development cycle. Do not silently redefine CutSell through code alone.
