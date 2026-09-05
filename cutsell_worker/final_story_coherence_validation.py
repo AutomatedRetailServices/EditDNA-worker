@@ -155,6 +155,17 @@ from .post_authority_validation import (
 PHASE_STORY_VALIDATION_INTERNAL = "story_validator_internal_self_check"
 
 
+def fold_alternates_into_discarded(draft):
+    """D-019 KEEP/DISCARD normalization: every clip in `alternates` moves to
+    `discarded` (sorted into recording order); `selected` is never touched.
+    Public since D-092 so the AUTHORITATIVE branch can apply it ONCE at the
+    authority boundary (universal_clean_cut.py, right after the resolver's
+    application and before the D-090 signature is captured) -- the legacy
+    resolving pass below still calls it for LEGACY/SHADOW and the first
+    AUTHORITATIVE pass, unchanged."""
+    return _fold_alternates_into_discarded(draft)
+
+
 def _fold_alternates_into_discarded(draft):
     if not draft.alternates:
         return draft

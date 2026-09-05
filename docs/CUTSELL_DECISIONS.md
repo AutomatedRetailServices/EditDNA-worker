@@ -9693,6 +9693,65 @@ automatically (next entry), after which QA re-runs and offline qualification
 re-runs; the paid D-090 canary remains stop condition C until separately
 authorized.
 
+## D-092 -- KEEP/DISCARD normalization at the authority boundary (D-090 QA P2)
+
+**Origin:** the D-090 QA_ENGINE acceptance review's one P2 (recorded under
+D-090): after D-090 the resolver's `retained_for_contextual_value` alternates
+were no longer folded into `discarded`, so they survived as `alternates`
+through Freeze and into the result, and CanonicalEditPlan's discard
+provenance stopped listing them. Confirmed by worktree comparison against
+40dde20; the D-089 live log carries 8 such realizations, so it would have
+shown on the next Video00 canary. Opened automatically under D-091 Sections
+12.3/12.7 (in-scope QA finding returns to Engineering).
+
+**Root cause:** the D-019 fold lived inside StoryValidator's second pass;
+D-090 correctly made that pass validation-only (it folds on a working copy for
+the coverage checks' view) and nothing else performed the normalization.
+
+**Fix (engine, minimal):** `universal_clean_cut.py` AUTHORITATIVE branch folds
+`alternates` into `discarded` exactly once, immediately after
+`apply_authoritative_realization_resolution` and BEFORE the D-090 signature is
+captured, via the now-public `final_story_coherence_validation.fold_
+alternates_into_discarded` (same function the legacy pass uses). `selected` is
+untouched (the ordered signature is identical before/after the fold; D-092
+tests prove it). The resolver application is unchanged: it still returns its
+alternates bucket and its `retained_for_contextual_value` reasoning stays in
+`realization_resolver_authority`. The folded clip ids are recorded in
+`diagnostics["post_authority_validation"]["alternates_folded_at_authority_
+boundary"]` (already printed by the RAW workflow's D-090 block). LEGACY/SHADOW
+unchanged (their own pass still folds).
+
+**Result:** final drafts are KEEP/DISCARD only again (D-019); discard
+provenance lists the folded clips; lost-atom/lost-claim checks still see them
+as discarded; D-090 invariants PASS with the fold in place.
+
+**Tests:** `tests/test_cutsell_d092_authority_boundary_alternates_fold.py`
+(6): resolver application still returns the alternate; fold helper never
+touches `selected`; full-path AUTHORITATIVE fold at the boundary with
+provenance + loss-check + invariant assertions; no-op when nothing retained;
+LEGACY/SHADOW parity.
+
+**QA re-pass (same session, disclosed; distinct skeptical pass):** plan
+source, semantic state and authority diagnostics are built from idea outcomes
+and the ledger, not from draft buckets, so folding before them changes
+nothing; story placement is computed before the fold; REVIEW_REQUIRED ideas
+never produce alternates (the first legacy pass already folded the incoming
+draft); no post-authority stage promotes alternates (D-090 review). No new
+findings. D-090's P3s unchanged.
+
+**Qualification (offline):** compileall clean; D-092 + D-090 + D-087 + D-089 +
+StoryValidator + plan/reviewer + repair + D-050C2/C3/D1 + D-056.3 + D-046A +
+universal_clean_cut + D-061/D-076/D-079 suites 309/309; CleanCutBench 54/54
+LEGACY and 54/54 AUTHORITATIVE; full `tests/test_cutsell_*.py` glob
+1976/1976 (1970 D-090 baseline + 6); whole `tests/` 2600 passed (= 2594
+D-090 baseline + 6), same 2 pre-existing unrelated failures and the
+pre-existing `test_semantic_stitch.py` collection error -- 0 new regressions.
+
+**State:** CODE FIXED / TESTS PASS / QA re-pass PASS (disclosed same-session).
+NEXT AUTOMATIC ACTION: none offline -- the next step is the paid D-090/D-092
+Video00 canary, which is stop condition C until the Product Owner authorizes
+it. HUMAN ACTION REQUIRED: YES (C).
+
 ## Change rule
 
 When a new decision changes product behavior, update this file in the same development cycle. Do not silently redefine CutSell through code alone.

@@ -30,6 +30,7 @@ from .final_boundary_authority import enforce_complete_idea_boundaries
 from .final_story_coherence_validation import (
     apply_final_story_coherence_validation,
     apply_post_authority_story_validation,
+    fold_alternates_into_discarded,
 )
 from .post_authority_validation import (
     INTEGRITY_FAILURE_SELECTION_MUTATION,
@@ -320,6 +321,29 @@ def process_universal_clean_cut_sources(
             authoritative_result = apply_authoritative_realization_resolution(
                 result.draft, ledger, resolver_report, claim_equivalence_arbiter=claim_equivalence_arbiter,
             )
+            # D-092 (D-090 QA_ENGINE P2): KEEP/DISCARD normalization at the
+            # authority boundary. The resolver's application may park a
+            # candidate it refuses to silently drop (`retained_for_
+            # contextual_value`) in `alternates`; Clean Cut Core V1 is
+            # KEEP/DISCARD only (D-019), and before D-090 the second
+            # StoryValidator pass folded those into `discarded`. D-090 made
+            # that pass validation-only (it folds on a working copy for the
+            # coverage checks' view), so the fold now happens exactly ONCE,
+            # here, before the D-090 signature is captured: `selected` is
+            # untouched (the signature proves it), the folded clips reach
+            # the coverage checks and the plan's discard provenance as
+            # discarded, and the resolver's own `retained_for_contextual_
+            # value` reasoning stays visible in `realization_resolver_
+            # authority`. The realization_resolver application itself is
+            # unchanged.
+            alternates_folded_at_authority_boundary = [
+                clip.clip_id for clip in (authoritative_result.draft.alternates or ())
+            ]
+            if alternates_folded_at_authority_boundary:
+                authoritative_result = replace(
+                    authoritative_result,
+                    draft=fold_alternates_into_discarded(authoritative_result.draft),
+                )
 
             pre_authority_diagnostics = dict(result.draft.diagnostics or {})
             legacy_evidence_keys = (
@@ -503,6 +527,8 @@ def process_universal_clean_cut_sources(
                 repair_invariant=mutation_report_to_diagnostics(repair_invariant),
                 integrity_failures=tuple(post_authority_integrity_failures),
                 extra={
+                    # D-092: what the authority boundary folded (D-019).
+                    "alternates_folded_at_authority_boundary": alternates_folded_at_authority_boundary,
                     "authoritative_families_accepted": list(
                         ((authoritative_draft.diagnostics or {}).get("final_story_coherence_validation") or {})
                         .get("authoritative_families_accepted") or []
