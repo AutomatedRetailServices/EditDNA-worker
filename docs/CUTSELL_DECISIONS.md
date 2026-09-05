@@ -9752,6 +9752,114 @@ NEXT AUTOMATIC ACTION: none offline -- the next step is the paid D-090/D-092
 Video00 canary, which is stop condition C until the Product Owner authorizes
 it. HUMAN ACTION REQUIRED: YES (C).
 
+## D-092 canary -- ONE_CANARY on e4cd508 (D-090 + D-092 integration, D-087/D-089 retained)
+
+**Run:** `cutsell-video00-modal-raw.yml` run 33969388042, job 101315084197,
+head `e4cd508`, Modal L4, retries=0, unchanged qualified config, same
+SOURCE_KEY / Human Gold. Benchmark id `video00-modal-33969388042-1`; result
+persisted to S3. Terminal; Modal teardown confirmed; job conclusion "failure"
+from the selection-lock (legacy baseline 33126865755, expected to differ) and
+Human Gold validator steps only, as in every prior canary. Authorization
+consumed: exactly one run.
+
+**D-090 authority boundary (LIVE PROVEN):** `post_authority_validation`:
+`validation_mode: post_authority_validation_only`, `context_status: present`,
+source identity `authsrc_b59f32a60a18f1d8`, 20 decisions, `integrity_failed:
+false`. Validation invariant PASS (ordered digest identical before/after
+StoryValidator, no membership/speech/provenance/order change); StoryValidator
+internal self-check PASS; repair invariant PASS with `order_changed: true`
+(the bounded repair's one permitted STORY_ORDER_BREAK reorder of the
+composite components into recording order, plan v1 -> v2). `resolved_
+families: []`, `unresolved_families: []`, `authority_membership_findings:
+[]`; residual_family_count 1 = the authoritative composite, accepted as
+resolved (`tg_4372185fd828bc8000` / `idea_efcf2f1dd58b9b2582df`, members
+`real_bebd4d786f92a0a3cfb2` + `real_dbe5c265cac9d9dc710f`, both selected,
+structural validation passed, plan `complete` + `is_composite`). The
+post-resolver mutation that blocked D-089's canary did not recur.
+
+**D-092 (LIVE PROVEN):** 6 resolver-retained alternates folded at the
+boundary (`alternates_folded_at_authority_boundary`), `signature_after_
+authority.alternates_count: 0`, final `alternate_count` 0, all 6 present in
+the final DISCARD list with provenance (discarded_count 11). Retained
+reasoning still visible per idea in `realization_resolver_authority`.
+
+**D-087/D-089 retained:** composite block contiguous at KEEP 10-11 (biopsy
+confirmation -> hindsight), `all_blocks_contiguous: true`, 3 placement units
+(1 composite block, 2 single-winner replacements into departed slots, 0
+appends); "Por temporada me salió un acné ... resolvía con" -> "resorcina."
+adjacent at KEEP 12-13. D-089 Part A suppression EXERCISED live this run:
+`claim_coverage_confirmations` carries `cclaim_0d1dbd02d419041608f2` with
+`critical_loss_suppressed_by: canonical_effective_importance`; `lost_
+critical_claims: []`.
+
+**Gate accounting:** resolver SEMANTICALLY_RESOLVED, 20 ideas, 0 unresolved
+orphans, 0 REVIEW_REQUIRED; plan `plan_4fc6cb1e19228873` v2, 7 grouped ideas
+all `complete`; StoryValidator `freeze_blocked: true` (one lost-semantic-atom
+finding, below); FinalEditReviewer FAIL with one finding UNIQUE_FACT_LOST
+(StoryValidator, blocking); repair loop 2 attempts (STORY_ORDER_BREAK
+repaired; UNIQUE_FACT_LOST no strategy) -> NEEDS_HUMAN_REVIEW; Freeze
+BLOCKED (`not_frozen_freeze_blocked_by_coherence_review`); architecture
+verified; render not attempted (`freeze_blocked_no_render`); delivery_status
+`NOT_DELIVERABLE_not_attempted`; deliverable false. Human Gold 15/18 (22
+selected): failed `pimples_micro_2_present`, `pimples_bad_monolith_absent`
+(`historical_bad_take_returned`), `pimples_micro_order` -- the known pimples
+family, one check worse than D-089's 16/18 because this run's grouping kept
+the long behind-the-ear monolith (`clip_f04cccba7e709a9091c7`) instead of the
+micro restatement.
+
+**PRIMARY BLOCKER (not a D-090/D-092 defect):** StoryValidator `_lost_
+semantic_atoms` flags `clip_08b0bf5cbe9a30ae45cd` ("Tuve problemas de
+estómago en una temporada, en 2023, no hay que preguntar.") as REAL_CONTENT_
+LOSS, blocking: own content tokens 7, missing 4, coverage 0.4286 -> the
+importance-blind `content_loss` rule (own>=5, missing>=4, coverage<0.45)
+fires even though its only atom ("2023") is classified CONTEXTUAL, the
+canonical effective importance says the claim is SUPPORTING (`incidental_
+source_exclusive_downgrade`, the very row D-089 Part A suppressed at claim
+level), and the Resolver itself ruled the realization non-required
+(`retained_for_contextual_value` in family `tg_1fb8b076f6fc3410c3`, winner
+"Tuve problemas estomacales ... me diagnosticaron con..."). This is the
+D-088 dual-truth pattern surviving in the atom-level check: D-089 unified
+importance for `_lost_critical_claims` only; the bag-of-words `content_loss`
+signal still re-derives "required" from token coverage. It would have fired
+identically on 40dde20 and fe288d5 whenever this aside is not in KEEP (D-089's
+run happened to keep it); D-092's fold only made the discard explicit.
+
+**Why it stops here (D-091 stop conditions A/B/G):** the correction is a
+Freeze-blocking policy change for the class "resolver-retained contextual
+realization whose canonical effective importance is non-required" -- i.e.
+making `_lost_semantic_atoms.content_loss` consume the same canonical
+effective-importance truth (and/or the resolver's retained-contextual
+verdict) that `_lost_critical_claims` already consumes. That is an editorial
+/ critical-content policy decision and belongs to the D-089 "importance single
+truth" objective, not to D-090/D-092 (authority-boundary immutability), so it
+is recorded here as the proposed D-093 and NOT implemented under this
+authorization. Proposed D-093 shape (for Product Owner decision): in the
+post-authority pass only, downgrade `content_loss` to non-blocking (keep the
+row, add `critical_loss_suppressed_by: canonical_effective_importance`) when
+EVERY canonical claim of the lost realization is non-required in the index
+AND the realization is the Resolver's `retained_for_contextual_value` for a
+family whose winner is selected; never for a CRITICAL/UNCERTAIN atom, never
+without the identity guards, never in LEGACY/SHADOW.
+
+**OTHER INDEPENDENT OBSERVATIONS (recorded, not in scope):**
+- Grouping variance (D-085 family): two gastritis retries co-kept (KEEP 16
+  abandoned "...me diagnosticaron con..." and KEEP 17 complete "...gastritis.
+  Nada severo...") and two hereditary statements co-kept (KEEP 19, 20)
+  because this run's grouping placed them in different families / left one
+  ungrouped; no StoryValidator/plan finding because they are not one
+  take_judge group. Editorially visible; not Freeze-blocking.
+- Resolver composite member order was [hindsight, biopsy] (not recording
+  order); D-089 placement honoured it, the reviewer's STORY_ORDER_BREAK
+  repair reordered to recording order (plan v2). Net order correct; P3:
+  `composite_realization_ids` order should be recording order at the source.
+- Human Gold pimples family (3 checks) unchanged in kind, +1 failure from
+  grouping variance.
+
+**Status:** D-090 LIVE PROVEN, D-092 LIVE PROVEN, D-087/D-089 RETAINED, Freeze
+BLOCKED by the pre-existing atom-level importance dual truth. HUMAN ACTION
+REQUIRED: YES (A/B/G) -- authorize or decline the proposed D-093 policy
+change. No second RAW without new authorization.
+
 ## Change rule
 
 When a new decision changes product behavior, update this file in the same development cycle. Do not silently redefine CutSell through code alone.
