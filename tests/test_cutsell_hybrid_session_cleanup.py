@@ -111,7 +111,20 @@ def test_long_creator_partition_uses_overlapping_story_windows():
     assert windows[-1] == [f"clip-{index}" for index in range(15, 25)]
     assert result.requested_chunk_count == 4
     assert result.available_chunk_count == 4
-    assert [item.clip_id for item in result.deleted] == ["clip-13"]
+    # D-081: "bts" at 0.99 confidence with NO local corroboration is a pure
+    # semantic-judgment ("high_confidence_semantic") delete basis -- it may
+    # no longer irreversibly remove the candidate. It stays kept, carrying
+    # semantic_delete_recommended=True evidence for downstream authorities.
+    assert result.deleted == ()
+    decision_13 = next(
+        item
+        for diagnostic in result.diagnostics
+        for item in diagnostic["decisions"]
+        if item["clip_id"] == "clip-13"
+    )
+    assert decision_13["delete_basis"] == "high_confidence_semantic"
+    assert decision_13["semantic_delete_recommended"] is True
+    assert decision_13["applied_delete"] is False
     assert all(session.task == "classify_recording_process_within_single_creator_session" for session in judge.sessions)
     # Overlap must not duplicate downstream semantic decisions.
     assert len(result.semantic_decisions) == 25
@@ -134,17 +147,24 @@ def test_no_provider_is_zero_cost_and_preserves_everything():
 
 
 def test_medium_high_failed_label_deletes_when_retry_event_corroborates_locally():
+    # D-081: "failed" + local corroboration is still a semantic-judgment
+    # delete basis (D-080's exact root cause: the same corroboration signal
+    # was present when the LLM instead labeled the real-world equivalent of
+    # this take "winner" in a separate live run). It must remain KEPT and
+    # inspectable, recorded only as semantic_delete_recommended evidence.
     item = take(1)
     context = context_for(TemporalEvent(
         "src", item.start + 1.5, item.end, "retry_setup", 0.86,
         "creator visibly resets after failed attempt",
     ))
     result = apply_hybrid_session_cleanup((item,), context, FixedJudge("failed", 0.85))
-    assert result.kept == ()
-    assert result.deleted == (item,)
+    assert result.kept == (item,)
+    assert result.deleted == ()
     decision = result.diagnostics[0]["decisions"][0]
     assert decision["delete_basis"] == "semantic_failed_plus_local_performance"
     assert decision["local_failure_corroborated"] is True
+    assert decision["semantic_delete_recommended"] is True
+    assert decision["applied_delete"] is False
 
 
 def test_multimodal_physical_reset_candidates_corroborate_failed_take():
@@ -155,9 +175,13 @@ def test_multimodal_physical_reset_candidates_corroborate_failed_take():
         TemporalEvent("src", 3.4, 3.8, "facial_expression_shift_candidate", 0.88, "error expression"),
     )
     result = apply_hybrid_session_cleanup((item,), context, FixedJudge("failed", 0.84))
-    assert result.deleted == (item,)
+    # D-081: local corroboration remains recorded evidence, but no longer an
+    # irreversible delete on its own -- see test above.
+    assert result.kept == (item,)
+    assert result.deleted == ()
     decision = result.diagnostics[0]["decisions"][0]
     assert decision["local_failure_corroborated"] is True
+    assert decision["semantic_delete_recommended"] is True
     assert any(reason.startswith("multimodal_reset_cluster") for reason in decision["local_failure_reasons"])
 
 
@@ -171,19 +195,28 @@ def test_medium_high_failed_label_stays_fail_open_without_local_corroboration():
 
 
 def test_visual_fumble_can_corroborate_medium_high_failed_label():
+    # D-081: corroboration is recorded, not destructive -- see above.
     signals = MediaSignals("src", 3.0, 5.0, visual_fumble=0.81)
     item = take(1, signals=signals)
     result = apply_hybrid_session_cleanup((item,), None, FixedJudge("failed", 0.86))
-    assert result.deleted == (item,)
+    assert result.kept == (item,)
+    assert result.deleted == ()
+    decision = result.diagnostics[0]["decisions"][0]
+    assert decision["semantic_delete_recommended"] is True
 
 
 def test_medium_high_bts_deletes_when_local_performance_corroborates():
+    # D-081: "bts" + local corroboration is also semantic-judgment -- recorded,
+    # not destructive.
     signals = MediaSignals("src", 3.0, 5.0, visual_fumble=0.90)
     item = take(1, signals=signals)
     result = apply_hybrid_session_cleanup((item,), None, FixedJudge("bts", 0.86))
-    assert result.kept == ()
-    assert result.deleted == (item,)
-    assert result.diagnostics[0]["decisions"][0]["delete_basis"] == "semantic_bts_plus_local_performance"
+    assert result.kept == (item,)
+    assert result.deleted == ()
+    decision = result.diagnostics[0]["decisions"][0]
+    assert decision["delete_basis"] == "semantic_bts_plus_local_performance"
+    assert decision["semantic_delete_recommended"] is True
+    assert decision["applied_delete"] is False
 
 
 def test_medium_high_bts_still_fails_open_when_isolated_and_uncorroborated():
@@ -206,9 +239,18 @@ def test_dense_bts_cluster_can_corroborate_one_member_without_local_signal():
         "clip-3": ("keep", 0.90),
     }
     result = apply_hybrid_session_cleanup((a, b, c, d), None, MappingJudge(labels))
-    assert {item.clip_id for item in result.deleted} == {"clip-0", "clip-1", "clip-2"}
+    # D-081: the cluster corroboration bases (semantic_bts_plus_local_
+    # performance, semantic_failed_plus_local_performance,
+    # semantic_bts_inside_corroborated_failure_cluster) are all semantic
+    # judgment -- none may delete early anymore. All four takes stay kept,
+    # with the dense-cluster evidence still recorded for downstream use.
+    assert result.deleted == ()
+    assert {item.clip_id for item in result.kept} == {"clip-0", "clip-1", "clip-2", "clip-3"}
     c_decision = next(item for item in result.diagnostics[0]["decisions"] if item["clip_id"] == "clip-2")
     assert c_decision["delete_basis"] == "semantic_bts_inside_corroborated_failure_cluster"
+    assert c_decision["semantic_delete_recommended"] is True
+    assert c_decision["applied_delete"] is False
+    assert c_decision["dense_semantic_failure_cluster"] is True
 
 
 def test_one_word_failed_debris_can_delete_at_point_eight_with_local_fumble():

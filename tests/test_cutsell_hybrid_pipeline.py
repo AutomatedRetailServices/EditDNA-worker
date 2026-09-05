@@ -52,7 +52,12 @@ class FakeEditorialJudge:
         )
 
 
-def test_hybrid_pipeline_discards_semantic_bts_and_keeps_preferred_winner():
+def test_hybrid_pipeline_keeps_preferred_winner_and_no_longer_deletes_semantic_bts():
+    # D-081: a pure "bts" semantic label at high confidence, with no local
+    # performance corroboration, is now the "high_confidence_semantic"
+    # delete basis -- evidence-only, never an irreversible early delete.
+    # "meta" stays inspectable (as an alternate, not selected and not
+    # discarded) rather than vanishing from the draft entirely.
     takes = (
         take("meta", "This cardigan is soft and comes in three colors", 0.0),
         take("good", "This cardigan is soft and comes in three colors today", 3.0),
@@ -62,8 +67,9 @@ def test_hybrid_pipeline_discards_semantic_bts_and_keeps_preferred_winner():
 
     assert judge.calls >= 1
     assert [clip.clip_id for clip in result.draft.selected] == ["good"]
-    assert "meta" in {clip.clip_id for clip in result.draft.discarded}
-    assert result.draft.diagnostics["hybrid_editorial_deleted_count"] == 1
+    assert "meta" in {clip.clip_id for clip in result.draft.alternates}
+    assert "meta" not in {clip.clip_id for clip in result.draft.discarded}
+    assert result.draft.diagnostics["hybrid_editorial_deleted_count"] == 0
     assert result.stage_status["hybrid_editorial"] == "provider_complete"
 
 

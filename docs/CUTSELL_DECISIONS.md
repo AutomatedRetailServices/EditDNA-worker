@@ -8605,6 +8605,177 @@ Then STOP.
 
 No Modal. No RAW.
 
+## D-079 canary (run 33925842853) -- Human Gold 13/18, root cause deferred to D-080
+
+Freeze BLOCKED via `_lost_semantic_atoms` (pre-existing, unmodified by D-079)
+on an incidental "2023" atom in a discarded gastritis clip -- unrelated to
+either D-079 validation objective. `lost_critical_claims: []` and
+`deterministic_best_take_authority: {"status": "absent"}` for the whole run:
+D-079's claim-scoped suppression and D-063/D-066 dominance were both
+NOT_EXERCISED, not falsified -- the papillary-cancer retry pair never
+reached `take_judge_groups` as a contested family at all, because the
+biopsy-confirmation clip was deleted upstream by `hybrid_editorial`'s own
+P1_RETRY_EQUIVALENCE pass before grouping ever ran. Full forensic: D-080.
+
+## D-080 -- upstream semantic decision stability forensic (report only)
+
+Compared the D-077 canary (18/18) against the D-079 canary (13/18) on the
+same source. Root cause: two separate live-LLM semantic-judgment stages each
+returned a different verdict on materially identical deterministic evidence
+across the two runs.
+
+PAPILLARY: `hybrid_editorial`'s P1_RETRY_EQUIVALENCE pass relabeled the
+biopsy-confirmation clip from `"winner"` (0.94, kept fail-open) to `"failed"`
+(0.88, `semantic_failed_plus_local_performance`) on the identical
+`local_failure_corroborated=True`/`dense_physical_reset:8` signal in both
+runs, and `applied_delete=True` removed it before grouping/take_judge/
+dominance/StoryValidator ever saw it.
+
+SONOGRAPHY: `take_judge_groups`' own semantic-candidate classifier
+(`pipeline.py::_semantic_best_take`) relabeled the same short/long retry
+pair from a decisive `{"failed","winner"}` (which correctly overrode the raw
+DeliveryScorer ranking via `semantic_override_applied`) to a non-actionable
+`{"keep","keep"}` on byte-identical DeliveryScorer scores (`0.6817`/
+`0.6211`), causing `_semantic_best_take` to fall through to the raw,
+completeness-blind local score and select the incomplete clip.
+
+Neither divergence traces to ASR (text/boundaries stable both runs) or to
+semantic-compute budget/ordering (identical `requested_chunk_count`,
+identical budget-exhaustion cutoff, the affected chunk fully available and
+executed in both runs). Both are UNSTABLE_MODEL_DECISION.
+
+Architectural finding: paid LLM judgments currently hold irreversible
+destructive-delete authority (`hybrid_editorial`) before any authoritative
+semantic layer inspects the candidate. Recommendation: evidence-only until
+Resolver (option B), never destructive authority.
+
+## D-081 -- pre-Resolver destructive semantic authority cutover
+
+Implements D-080's architectural recommendation for the papillary-cancer
+class of regression. Canonical rule: MECHANICAL CERTAINTY MAY DELETE EARLY;
+SEMANTIC JUDGMENT MAY NOT IRREVERSIBLY DELETE BEFORE THE AUTHORITATIVE
+RESOLUTION BOUNDARY.
+
+CUTOVER (`cutsell_worker/hybrid_session_cleanup.py`): every `delete_basis`
+driven by a probabilistic LLM label (`high_confidence_semantic`,
+`semantic_failed_plus_later_overlapping_complete_retake`,
+`semantic_failed_plus_local_performance`, `semantic_bts_plus_local_
+performance`, `semantic_bts_inside_corroborated_failure_cluster` --
+collected in the new `_SEMANTIC_JUDGMENT_DELETE_BASES`) no longer sets
+`applied_delete=True`. Each instead sets a new additive `semantic_delete_
+recommended: bool` evidence field (label/confidence/local_failure_
+corroborated/local_failure_reasons/delete_basis/cost diagnostics all
+preserved unchanged for observability). The candidate stays in `kept`,
+reachable by grouping, claim extraction, critical coverage, BestTake/
+dominance, the Unified Resolver, and Semantic Ledger preservation exactly as
+before -- no new Resolver was created; every existing downstream authority
+decides survival unchanged.
+
+MECHANICAL EXCEPTION PRESERVED: `micro_failed_plus_local_performance`
+(near-empty fragment, duration<=1.25s AND token_count<=2, matching the
+"deterministically unusable fragment" mechanical-certainty class) is the
+one basis still an actual, early, real delete -- not every reject became
+KEEP.
+
+DOWNSTREAM CONSUMERS AUDITED: `hybrid_story_guard.py`'s and
+`hybrid_composite_best_take.py`'s post-hoc "restore a performance-only
+deletion" guards both key off `applied_delete`/`delete_basis` from this same
+decision structure; since the affected bases no longer land in `deleted`,
+both guards become safe no-ops for that basis rather than needing their own
+changes. `hybrid_group_cleanup.py` contains a structurally similar
+destructive delete but is dead code (imported/called nowhere in the live
+pipeline) -- left untouched per scope discipline, not "spend engineering
+time" on an unreachable path.
+
+TESTS: 6 existing `tests/test_cutsell_hybrid_session_cleanup.py` cases and 1
+`tests/test_cutsell_hybrid_pipeline.py` case updated from asserting the old
+destructive behavior to the new evidence-only behavior (each still verifies
+the SAME evidence -- label, confidence, corroboration -- is still recorded,
+only that it no longer deletes). New `tests/test_cutsell_d081_pre_resolver_
+semantic_authority.py` (10 tests): the mechanical exception still deletes;
+every semantic-judgment basis enumerated as evidence-only; a generic
+papillary-shape reproduction (critical content + local friction + LLM
+"failed" survives); a model-variance matrix across all four `winner/failed`,
+`keep/keep`, `failed/keep`, `winner/winner` label shapes proving neither
+candidate is ever removed pre-Resolver in any shape; a true-failed-take case
+proving a real downstream authority (`take_judge.rank_takes`, unmodified,
+"never deletes content") still ranks the complete delivery above an
+incomplete, corroborated-failed candidate once both are visible to it;
+unique-required-fact safety; and three sales/UGC generalizations (a rough
+take that is the only carrier of a dosage instruction, the same dosage take
+safely losing downstream once a clean retry restates it, and a product-demo
+step clip that must remain available).
+
+QUALIFICATION: compileall clean; targeted D-050 through D-081 sweep (473
+tests, including the new D-081 file) all pass; CleanCutBench 54/54, run
+twice for determinism; full `tests/` suite (excluding `test_semantic_
+stitch.py`, a pre-existing, unrelated collection error reproduced identically
+on the pre-D-081 head) -- 2442 passed, 2 pre-existing unrelated failures
+confirmed present on the pre-D-081 head too (`test_hybrid_story_guard_
+incomplete_retry.py`'s `_covered_by_kept_delivery` case;
+`test_video00_modal_hybrid_semantic_parity.py`'s CI-log-masking case) and
+therefore deselected, not caused by this change. 0 new regressions.
+
+CANDIDATE-COUNT IMPACT (Section 12): a synthetic 40-candidate stress fixture
+(20% failed+corroborated, 10% bts+corroborated, 5% bts-high-confidence-alone)
+showed 33 of 40 candidates that would have been destructively deleted under
+the old rule now correctly carried downstream, 0 actually removed (no
+near-empty fragments in the fixture). No new LLM call type or call volume
+was introduced at this stage -- cost impact falls entirely on existing,
+already-bounded downstream stages (`take_judge_groups`' own chunk_size/
+window_stride windowing, `claim_coverage_best_take`'s per-retry-family
+scope) which already process whatever `kept` population arrives; no new
+deterministic bounding was added because none of the existing bounds are
+sized off `hybrid_session_cleanup`'s own delete count.
+
+QA_ENGINE VERDICT: PARTIAL PASS, with one carried-forward P1 finding.
+
+The PAPILLARY-class regression (destructive delete before the authoritative
+boundary) is fully closed and tested. The SONOGRAPHY-class regression is
+NOT closed by this directive: its root cause is a materially different
+mechanism -- `pipeline.py::_semantic_best_take` unconditionally falls back
+to the raw, completeness-blind local (DeliveryScorer) rank whenever
+`take_judge_groups`' semantic-candidate labels are non-decisive (zero or 2+
+"winner" labels), which is exactly what happened when the labels degraded
+from `{"failed","winner"}` to `{"keep","keep"}` across the two D-080 runs.
+This violates the same D-081 canonical rule ("Raw DeliveryScore must not
+become final authority merely because LLM labels are non-actionable") at a
+second site, but fixing it safely requires changing take_judge_groups' core
+one-winner-per-retry-family selection semantics -- a load-bearing mechanism
+used by every retry family in the pipeline, not only these two shapes -- and
+deciding how a non-decisive label set should hand off to (without
+duplicating) the existing claim_coverage_best_take dominance mechanism
+without creating a new Resolver (Section 5). That scoping and testing was
+judged too large to responsibly complete inside this directive; it is
+recorded here as open, not silently left unaddressed, and should be
+implemented as its own scoped directive (D-082) before being relied upon to
+close the sonography-class failure mode. A narrower, pre-existing residual
+was also confirmed and accepted: the preserved mechanical
+`micro_failed_plus_local_performance` exception (<=1.25s, <=2 tokens) could
+in principle still destructively delete a genuinely critical single-token
+utterance; this is unchanged, pre-existing, explicitly authorized behavior
+(D-081 Section 4's own exception list), judged low-likelihood in practice
+(ASR/attempt-reconstruction already merges speech into multi-word attempts
+before this stage ever sees a candidate) and tracked as a monitored
+residual, not a new defect.
+
+P0: 0
+P1: 1 (take_judge_groups' semantic-label-non-decisive fallback to raw
+DeliveryScorer -- the sonography-class regression -- remains open; requires
+D-082)
+P2: 0
+P3: 1 (micro_failed_plus_local_performance mechanical exception could in
+principle delete a genuinely critical 1-2 token utterance; pre-existing,
+bounded, monitored)
+
+READY FOR CONTROLLED STABILITY BATTERY: PARTIAL -- the papillary-class fix
+is ready; the sonography-class root cause requires D-082 before the full
+D-080 stability matrix can be considered closed.
+
+Then STOP.
+
+No Modal. No RAW.
+
 ## Change rule
 
 When a new decision changes product behavior, update this file in the same development cycle. Do not silently redefine CutSell through code alone.

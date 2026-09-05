@@ -4,6 +4,17 @@ Instead of paying once per retry group/singleton, this stage batches the candida
 belong to one inferred creator mini-session. The model judges every candidate against a
 compact whole-source transcript and overlapping local windows so a failed attempt and a
 later clean retake are less likely to fall into unrelated semantic calls.
+
+D-081: this stage is an EVIDENCE PRODUCER, not a destructive authority. A
+probabilistic semantic label ("failed"/"bts"), even corroborated by a local
+performance heuristic, may no longer irreversibly delete a candidate here --
+D-080 proved the same evidence can flip that label across two separate live
+runs. Only mechanical-certainty deletes (a near-empty fragment) still remove
+a candidate at this stage; every semantic-judgment delete is instead recorded
+as `semantic_delete_recommended` evidence on a candidate that remains kept
+and inspectable by every downstream authority (grouping, take_judge_groups,
+claim extraction, BestTake/dominance, Unified Resolver, StoryValidator/
+Semantic Ledger preservation), which alone decide whether it survives.
 """
 from __future__ import annotations
 
@@ -65,6 +76,23 @@ _LAST_SEMANTIC_COMPUTE_PLAN: "ContextVar[SemanticComputePlan | None]" = ContextV
 _TOKEN_RE = re.compile(r"[\w'’-]+", re.UNICODE)
 _RESET_CANDIDATES = frozenset({"body_reset_candidate", "hand_motion_reset_candidate"})
 _BREAK_CANDIDATES = frozenset({"camera_disengagement_candidate", "facial_expression_shift_candidate"})
+
+# D-081 Section 1/2/13: every delete_basis below is fundamentally driven by a
+# probabilistic LLM label ("failed"/"bts"), whether alone (high_confidence_
+# semantic) or corroborated by a local performance heuristic. Per the D-081
+# canonical authority rule, none of these may irreversibly remove a candidate
+# before the authoritative resolution boundary (grouping / take_judge_groups /
+# claim extraction / BestTake dominance / Unified Resolver / StoryValidator).
+# "micro_failed_plus_local_performance" and "kept_fail_open" are deliberately
+# excluded -- the former is the one preserved mechanical-certainty exception
+# (a near-empty fragment), the latter never deletes at all.
+_SEMANTIC_JUDGMENT_DELETE_BASES = frozenset({
+    "high_confidence_semantic",
+    "semantic_failed_plus_later_overlapping_complete_retake",
+    "semantic_failed_plus_local_performance",
+    "semantic_bts_plus_local_performance",
+    "semantic_bts_inside_corroborated_failure_cluster",
+})
 
 # D-052 Part B Section 14: OFF by default -- current pure chunk_index-order
 # dispatch (whichever chunk happens to be requested fifth silently loses the
@@ -607,14 +635,6 @@ def apply_hybrid_session_cleanup(
                         and decision.confidence >= clustered_bts_confidence
                         and dense_semantic_failure_cluster
                     )
-                    applied_delete = (
-                        hard_semantic_delete
-                        or retry_replaced_failed_delete
-                        or corroborated_failed_delete
-                        or corroborated_bts_delete
-                        or micro_failed_delete
-                        or clustered_bts_delete
-                    )
                     if hard_semantic_delete:
                         delete_basis = "high_confidence_semantic"
                     elif retry_replaced_failed_delete:
@@ -629,6 +649,24 @@ def apply_hybrid_session_cleanup(
                         delete_basis = "semantic_bts_inside_corroborated_failure_cluster"
                     else:
                         delete_basis = "kept_fail_open"
+                    # D-081 Section 1/2: MECHANICAL CERTAINTY MAY DELETE EARLY --
+                    # SEMANTIC JUDGMENT MAY NOT IRREVERSIBLY DELETE BEFORE THE
+                    # AUTHORITATIVE RESOLUTION BOUNDARY. Every basis above except
+                    # "micro_failed_plus_local_performance" is fundamentally an
+                    # LLM label ("failed"/"bts", possibly corroborated by a local
+                    # performance heuristic) -- a probabilistic semantic judgment,
+                    # not mechanical certainty (empty/invalid/unusable fragment).
+                    # D-080 proved that same LLM/label class flips between two
+                    # separate live runs on materially identical evidence, so it
+                    # must never be allowed to irreversibly remove a candidate
+                    # before grouping/take_judge/BestTake dominance/StoryValidator
+                    # ever see it. "micro_failed_plus_local_performance" targets a
+                    # near-empty fragment (<=1.25s, <=2 tokens) -- close enough to
+                    # the mechanical "no-content fragment" exception class (D-081
+                    # Section 4) to remain an early, actual delete.
+                    mechanical_delete = delete_basis == "micro_failed_plus_local_performance"
+                    semantic_delete_recommended = delete_basis in _SEMANTIC_JUDGMENT_DELETE_BASES
+                    applied_delete = mechanical_delete
                     if applied_delete:
                         deleted_ids.add(decision.clip_id)
                         chunk_deleted.append(decision.clip_id)
@@ -644,6 +682,14 @@ def apply_hybrid_session_cleanup(
                         "dense_semantic_failure_cluster": dense_semantic_failure_cluster,
                         "delete_basis": delete_basis,
                         "applied_delete": applied_delete,
+                        # D-081 Section 3: additive evidence state. True means
+                        # strong negative semantic evidence was recorded --
+                        # NOT that the candidate was removed. The realization
+                        # stays available to grouping/claim extraction/
+                        # critical coverage/BestTake dominance/Unified
+                        # Resolver/Semantic Ledger, which may still discard it
+                        # downstream once a real comparison happens.
+                        "semantic_delete_recommended": semantic_delete_recommended,
                         # D-072: additive observability only -- explains
                         # WHY later_retry_replacement_id is null even when
                         # later_retry_semantic_overlap is nonzero (D-070's
