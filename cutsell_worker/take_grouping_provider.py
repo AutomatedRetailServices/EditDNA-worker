@@ -974,6 +974,12 @@ def _cohesive_components(
     from the rest of its original group -- it keeps whatever membership
     upstream authority already assigned it, exactly like every other guard
     in this module treats `protected_ids`.
+
+    Superseded within `split_incohesive_retry_groups` by
+    `_bridge_aware_components` (D-085) -- kept as a standalone, independently
+    testable primitive (plain pairwise union-find, no bridge sensitivity)
+    since nothing about it is wrong on its own; it simply isn't sufficient by
+    itself any more for the one caller that used to rely on it exclusively.
     """
     parent = {clip_id: clip_id for clip_id in group}
 
@@ -1003,6 +1009,254 @@ def _cohesive_components(
     return tuple(tuple(members) for members in clusters.values())
 
 
+# ---------------------------------------------------------------------------
+# D-085: BRIDGE-AWARE RETRY FAMILY COHESION
+# ---------------------------------------------------------------------------
+#
+# Root defect (docs/CUTSELL_DECISIONS.md D-084's forensic, live evidence
+# recovered from 4 independent Modal runs): `_cohesive_components` above is
+# plain union-find over an unordered edge set -- ANY accepted pairwise edge
+# can transitively connect two full components, and nothing ever re-checks
+# that the resulting merged component still represents ONE shared audience-
+# facing proposition. D-084 proved the exact live shape: a true back-acne
+# subcluster (acne1<->acne2, confidence 0.95) and a true ear/neck-pimples
+# subcluster (monolith<->restatement, confidence 0.98) were bridged by TWO
+# independent, unmarked, weaker (0.80/0.85) pairwise confirmations
+# (acne2<->monolith, acne2<->short) that D-083's marker gate never touches
+# (neither side of either pair carries a `_DISTINCT_ADDITION_MARKERS`
+# marker) -- and this exact bridge recurred, at the same ~0.85 confidence,
+# in all 4 independently-executed runs (D-058/D-083 already-fixed
+# regressions plus this one): a reproducible, deterministic grouping defect,
+# not one-off LLM noise.
+#
+# SESSION CLUSTER vs RETRY FAMILY (D-085 formalization): a "session cluster"
+# -- the output of `_baseline_groups`/`_repair_groups`/`reconcile_semantic_
+# idea_equivalence`, i.e. everything upstream of this module's own final
+# cohesion pass -- is only ever a bounded NEIGHBORHOOD of clips worth
+# comparing; temporal/topical proximity that put clips in one cluster is
+# NEVER by itself evidence they belong in one RETRY FAMILY (a mutually-
+# exclusive set of realizations competing to express ONE audience-facing
+# proposition). Confusing the two is exactly D-084's root cause.
+#
+# FIX: order-independent, bridge-sensitive component construction.
+# 1. Every candidate edge (deterministic lexical match, OR arbiter same_idea
+#    confirmation surviving the existing D-083 marker gate -- unchanged,
+#    still the ONLY thing that can produce an edge at all) is processed in a
+#    fixed, input-order-independent sequence: deterministic edges first,
+#    then semantic edges by descending confidence, tie-broken by clip-id
+#    pair -- so the same edge set always yields the same families regardless
+#    of `weak_pairs`/dict/group iteration order (D-085 Section 2; see the
+#    dedicated permutation-invariance tests).
+# 2. An edge is a BRIDGE the moment either endpoint's current component
+#    (before this edge) already has >=2 members -- i.e. it would join two
+#    already-established components, or attach another member to one that
+#    already exists, rather than a first-time singleton<->singleton merge.
+#    A non-bridge ("internal/simple") edge is accepted exactly as before
+#    (D-058/D-083 behavior byte-for-byte unchanged for the common case: two
+#    still-unattached clips merging into a fresh pair).
+# 3. A bridge is NEVER accepted on the strength of its own triggering pair's
+#    same_idea/confidence alone (D-084's own explicit warning: two
+#    independent pairwise mistakes are not component-level proof, and one is
+#    even less so). It must additionally clear `_evaluate_bridge_cohesion`:
+#    a bounded, component-level question posed to the SAME already-
+#    configured `SemanticEquivalenceArbiter` (no new provider/model/
+#    authority) built from BOTH components' own member texts rather than
+#    just the two touching clips, PLUS a deterministic `any_pair_contradicts`
+#    safety net across every cross-component member pair (the same
+#    contradiction primitive D-082 already trusts for exactly this "never
+#    silently merge a genuine contradiction" role). Absent/malformed/
+#    declined/low-confidence responses fail closed -- the bridge is
+#    rejected, never merged.
+#
+# Grouping-only, exactly like D-083: this changes only which candidates end
+# up competing for one BestTake winner, never who wins that contest
+# (BestTake/Resolver authority, D-081/D-082 fallback ladder, StoryValidator,
+# Freeze, Boundary, Render/QC, Human Choice/SWAP -- all untouched).
+
+_BRIDGE_MIN_COHESION_CONFIDENCE = 0.90
+_BRIDGE_PROBE_MAX_MEMBERS_PER_SIDE = 3
+
+
+@dataclass(frozen=True)
+class _RetryEdge:
+    """One candidate cohesion edge inside a single already-multi-member
+    baseline group. `confidence` is 1.0 for deterministic evidence (which
+    has no natural confidence score of its own but must still sort ahead of
+    every semantic edge, per D-085 Section 2's precedence order)."""
+    left_id: str
+    right_id: str
+    evidence: str  # "deterministic" | "semantic"
+    confidence: float
+    reason: str
+
+
+def _edge_sort_key(edge: _RetryEdge) -> tuple:
+    """D-085 Section 2: deterministic edges first, then semantic edges by
+    descending confidence, then a stable clip-id tie-break -- independent of
+    whatever order `edges` was originally built in."""
+    evidence_rank = 0 if edge.evidence == "deterministic" else 1
+    return (evidence_rank, -edge.confidence, edge.left_id, edge.right_id)
+
+
+def _component_probe_text(take_map: dict[str, CandidateTake], member_ids: Tuple[str, ...]) -> str:
+    """D-085 Section 6: a bounded, deterministic textual stand-in for one
+    whole component, used only to pose the component-level cohesion question
+    -- built from up to `_BRIDGE_PROBE_MAX_MEMBERS_PER_SIDE` member texts,
+    in clip-id order (never union-bookkeeping order, so the probe text is
+    identical regardless of which side of a merge happened to become the
+    union-find root)."""
+    ordered_ids = sorted(member_ids)[:_BRIDGE_PROBE_MAX_MEMBERS_PER_SIDE]
+    texts = [take_map[cid].text for cid in ordered_ids if cid in take_map]
+    return " || ".join(texts)
+
+
+def _evaluate_bridge_cohesion(
+    *,
+    left_members: Tuple[str, ...],
+    right_members: Tuple[str, ...],
+    edge: _RetryEdge,
+    take_map: dict[str, CandidateTake],
+    arbiter: SemanticEquivalenceArbiter | None,
+    policy: SemanticEquivalenceGatePolicy,
+) -> tuple[bool, dict]:
+    """D-085 Section 5/6/7: does the FULL merged component -- not just the
+    two touching clips -- still represent one shared audience-facing
+    proposition? Fails closed (bridge rejected) on any uncertainty: no
+    arbiter, arbiter declines/errors, low confidence, or a deterministic
+    cross-component contradiction. Never fabricates a semantic verdict --
+    `shared_proposition`/`member_support` are populated only from the SAME
+    arbiter call's own `reason`/inputs, and `distinct_required_facts` only
+    from the existing, already-trusted `any_pair_contradicts` primitive --
+    no new semantic authority is introduced.
+    """
+    record: dict = {
+        "left_clip_id": edge.left_id,
+        "right_clip_id": edge.right_id,
+        "evidence": edge.evidence,
+        "triggering_confidence": round(edge.confidence, 4) if edge.evidence == "semantic" else None,
+        "triggering_reason": edge.reason,
+        "bridge_sensitive": True,
+        "left_component_members": list(left_members),
+        "right_component_members": list(right_members),
+        "component_cohesion_evaluated": False,
+        "shared_proposition": None,
+        "member_support": [],
+        "distinct_required_facts": [],
+        "accepted": False,
+    }
+
+    # Deferred import: contradiction_signal transitively imports back from
+    # this module (via final_sibling_grouping) -- see the D-048 FIX 1 /
+    # D-083 comments elsewhere in this file for the same constraint on the
+    # same kind of import.
+    from .contradiction_signal import any_pair_contradicts
+
+    left_texts = [take_map[cid].text for cid in left_members if cid in take_map]
+    right_texts = [take_map[cid].text for cid in right_members if cid in take_map]
+    if any_pair_contradicts(left_texts + right_texts):
+        record["distinct_required_facts"] = ["cross_component_contradiction"]
+        record["reason_rejected"] = "cross_component_contradiction"
+        return False, record
+
+    if arbiter is None:
+        record["reason_rejected"] = "arbiter_unavailable_fail_closed"
+        return False, record
+
+    left_text = _component_probe_text(take_map, left_members)
+    right_text = _component_probe_text(take_map, right_members)
+    request = IdeaEquivalenceRequest(pairs=(IdeaEquivalencePair(left_text=left_text, right_text=right_text),))
+    result = safe_check_idea_equivalence(arbiter, request, policy)
+    decision = same_idea_by_pair_index(result).get(0)
+    if decision is None:
+        record["reason_rejected"] = "component_arbiter_unavailable_or_declined_fail_closed"
+        return False, record
+
+    same_retry_family, cohesion_confidence, cohesion_reason = decision
+    record["component_cohesion_evaluated"] = True
+    record["cohesion_confidence"] = round(cohesion_confidence, 4)
+    if not same_retry_family:
+        record["reason_rejected"] = "component_cohesion_declined"
+        return False, record
+    if cohesion_confidence < _BRIDGE_MIN_COHESION_CONFIDENCE:
+        record["reason_rejected"] = "component_cohesion_below_bridge_floor"
+        return False, record
+
+    record["shared_proposition"] = cohesion_reason
+    record["member_support"] = list(left_members) + list(right_members)
+    record["accepted"] = True
+    return True, record
+
+
+def _bridge_aware_components(
+    group: Tuple[str, ...],
+    edges: list[_RetryEdge],
+    *,
+    protected_ids: frozenset[str],
+    take_map: dict[str, CandidateTake],
+    arbiter: SemanticEquivalenceArbiter | None,
+    policy: SemanticEquivalenceGatePolicy,
+    edge_trace: list[dict],
+) -> tuple[Tuple[str, ...], ...]:
+    """D-085: bridge-sensitive replacement for plain union-find. Processes
+    `edges` in the fixed, input-order-independent sequence `_edge_sort_key`
+    defines; a non-bridge edge unions immediately (byte-identical to
+    `_cohesive_components`'s own behavior for that case); a bridge edge only
+    unions after `_evaluate_bridge_cohesion` accepts it. `protected_ids`
+    handling is unchanged from `_cohesive_components`."""
+    parent = {clip_id: clip_id for clip_id in group}
+    members_of: dict[str, list[str]] = {clip_id: [clip_id] for clip_id in group}
+
+    def find(x: str) -> str:
+        while parent[x] != x:
+            parent[x] = parent[parent[x]]
+            x = parent[x]
+        return x
+
+    def union(a: str, b: str) -> None:
+        ra, rb = find(a), find(b)
+        if ra == rb:
+            return
+        merged = members_of.pop(ra) + members_of.pop(rb)
+        parent[ra] = rb
+        members_of[rb] = merged
+
+    for edge in sorted(edges, key=_edge_sort_key):
+        if edge.left_id not in parent or edge.right_id not in parent:
+            continue
+        root_left, root_right = find(edge.left_id), find(edge.right_id)
+        if root_left == root_right:
+            continue
+        left_members, right_members = members_of[root_left], members_of[root_right]
+        is_bridge = len(left_members) >= 2 or len(right_members) >= 2
+        if not is_bridge:
+            union(edge.left_id, edge.right_id)
+            edge_trace.append({
+                "left_clip_id": edge.left_id, "right_clip_id": edge.right_id,
+                "evidence": edge.evidence,
+                "confidence": round(edge.confidence, 4) if edge.evidence == "semantic" else None,
+                "reason": edge.reason, "bridge_sensitive": False, "accepted": True,
+            })
+            continue
+        accepted, record = _evaluate_bridge_cohesion(
+            left_members=tuple(left_members), right_members=tuple(right_members),
+            edge=edge, take_map=take_map, arbiter=arbiter, policy=policy,
+        )
+        edge_trace.append(record)
+        if accepted:
+            union(edge.left_id, edge.right_id)
+
+    if protected_ids:
+        protected_in_group = [clip_id for clip_id in group if clip_id in protected_ids]
+        for anchor, other in zip(protected_in_group, protected_in_group[1:]):
+            if anchor in parent and other in parent:
+                union(anchor, other)
+
+    clusters: dict[str, list[str]] = {}
+    for clip_id in group:
+        clusters.setdefault(find(clip_id), []).append(clip_id)
+    return tuple(tuple(members) for members in clusters.values())
+
+
 def split_incohesive_retry_groups(
     groups: Tuple[Tuple[str, ...], ...],
     takes: Tuple[CandidateTake, ...],
@@ -1011,10 +1265,15 @@ def split_incohesive_retry_groups(
     policy: SemanticEquivalenceGatePolicy = SemanticEquivalenceGatePolicy(),
     protected_ids: frozenset[str] = frozenset(),
 ) -> tuple[Tuple[Tuple[str, ...], ...], dict]:
-    """D-058 Phase 1: require evidence of shared communicative intent before
-    an already-multi-member group is trusted as one mutually-exclusive retry
-    family. See the module comment immediately above for the full defect and
-    fix rationale. Runs once, after `reconcile_semantic_idea_equivalence`,
+    """D-058 Phase 1 + D-085: require evidence of shared communicative intent
+    before an already-multi-member group is trusted as one mutually-
+    exclusive retry family, AND (D-085) require that a BRIDGE edge -- one
+    that would connect two already-established components rather than form
+    a fresh pair -- additionally prove the resulting merged component still
+    represents one shared audience-facing proposition. See the module
+    comments immediately above `_cohesive_components` (D-058) and above
+    `_BRIDGE_MIN_COHESION_CONFIDENCE` (D-085) for the full defect and fix
+    rationale. Runs once, after `reconcile_semantic_idea_equivalence`,
     before Best Take ranking.
     """
     take_map = {take.clip_id: take for take in takes}
@@ -1026,19 +1285,27 @@ def split_incohesive_retry_groups(
             "arbiter_confirmed_pairs": [],
             "content_divergence_blocked": [], "content_divergence_blocked_count": 0,
             "splits": [],
+            "edge_trace": [], "bridge_evaluated_count": 0, "bridge_accepted_count": 0,
+            "bridge_rejected_count": 0, "component_semantic_call_count": 0,
         }
 
-    cohesive_pairs: set[frozenset[str]] = set()
+    edges_by_group: dict[int, list[_RetryEdge]] = {id(group): [] for group in multi_member_groups}
     weak_pairs: list[tuple[str, str]] = []
+    weak_pair_group: dict[tuple[str, str], int] = {}
     for group in multi_member_groups:
         for left_id, right_id in _within_group_candidate_pairs(group, take_map, protected_ids=protected_ids):
             left_take, right_take = take_map[left_id], take_map[right_id]
             if _provider_members_compatible(left_take, right_take):
-                cohesive_pairs.add(frozenset((left_id, right_id)))
+                edges_by_group[id(group)].append(
+                    _RetryEdge(left_id, right_id, "deterministic", 1.0, "provider_members_compatible")
+                )
             elif _is_prefix_fragment(left_take, right_take) or _is_prefix_fragment(right_take, left_take):
-                cohesive_pairs.add(frozenset((left_id, right_id)))
+                edges_by_group[id(group)].append(
+                    _RetryEdge(left_id, right_id, "deterministic", 1.0, "prefix_fragment")
+                )
             else:
                 weak_pairs.append((left_id, right_id))
+                weak_pair_group[(left_id, right_id)] = id(group)
 
     checked_pair_count = 0
     confirmed_pairs: list[dict] = []
@@ -1073,27 +1340,34 @@ def split_incohesive_retry_groups(
                 # trust this confirmation. See the module comment above
                 # `_within_group_arbiter_confirmation_diverges` for the full
                 # rationale and why this is deliberately marker-gated rather
-                # than a blanket overlap floor.
+                # than a blanket overlap floor. Retained unchanged by D-085 --
+                # D-085 complements this gate, it never replaces or weakens it.
                 content_divergence_blocked.append({
                     "left_clip_id": left_id, "right_clip_id": right_id,
                     "confidence": round(confidence, 4), "reason": reason,
                 })
                 continue
-            cohesive_pairs.add(frozenset((left_id, right_id)))
+            edges_by_group[weak_pair_group[(left_id, right_id)]].append(
+                _RetryEdge(left_id, right_id, "semantic", confidence, reason)
+            )
             confirmed_pairs.append({
                 "left_clip_id": left_id, "right_clip_id": right_id,
                 "confidence": round(confidence, 4), "reason": reason,
             })
 
-    frozen_cohesive_pairs = frozenset(cohesive_pairs)
     output_groups: list[Tuple[str, ...]] = []
     split_records: list[dict] = []
     groups_split = 0
+    edge_trace: list[dict] = []
     for group in groups:
         if len(group) < 2:
             output_groups.append(group)
             continue
-        components = _cohesive_components(group, frozen_cohesive_pairs, protected_ids)
+        components = _bridge_aware_components(
+            group, edges_by_group.get(id(group), []),
+            protected_ids=protected_ids, take_map=take_map,
+            arbiter=arbiter, policy=policy, edge_trace=edge_trace,
+        )
         if len(components) <= 1:
             output_groups.append(group)
             continue
@@ -1103,6 +1377,13 @@ def split_incohesive_retry_groups(
             "resulting_groups": [list(component) for component in components],
         })
         output_groups.extend(components)
+
+    bridge_records = [record for record in edge_trace if record.get("bridge_sensitive")]
+    bridge_accepted_count = sum(1 for record in bridge_records if record.get("accepted"))
+    bridge_rejected_count = len(bridge_records) - bridge_accepted_count
+    component_semantic_call_count = sum(
+        1 for record in bridge_records if record.get("component_cohesion_evaluated")
+    )
 
     return tuple(output_groups), {
         "status": "applied" if (groups_split or checked_pair_count) else "no_incohesive_groups_found",
@@ -1114,6 +1395,21 @@ def split_incohesive_retry_groups(
         "content_divergence_blocked": content_divergence_blocked,
         "content_divergence_blocked_count": len(content_divergence_blocked),
         "splits": split_records,
+        # D-085 bridge-aware cohesion diagnostics -- see the module comment
+        # above `_BRIDGE_MIN_COHESION_CONFIDENCE` for the full contract. Each
+        # `edge_trace` entry carries evidence type/confidence/reason,
+        # `bridge_sensitive`, and (for bridges) `left_component_members`/
+        # `right_component_members`/`component_cohesion_evaluated`/
+        # `shared_proposition`/`member_support`/`distinct_required_facts`/
+        # `accepted`/`reason_rejected` -- deliberately surfaced under this
+        # top-level diagnostics key (unlike D-083's own `distinct_idea_
+        # grouping_safety`, this is intended to be printed directly by the
+        # Modal RAW workflow's diagnostic-dump script; see D-085 Section 14).
+        "edge_trace": edge_trace,
+        "bridge_evaluated_count": len(bridge_records),
+        "bridge_accepted_count": bridge_accepted_count,
+        "bridge_rejected_count": bridge_rejected_count,
+        "component_semantic_call_count": component_semantic_call_count,
     }
 
 

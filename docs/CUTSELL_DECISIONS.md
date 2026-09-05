@@ -9050,6 +9050,160 @@ Then STOP.
 
 No Modal. No RAW.
 
+## D-083 canary (run 33940008705) -- distinct-idea grouping still conflated
+
+Canary result: **DISTINCT-IDEA GROUPING FAIL**, **PIMPLES REGRESSION FAIL** --
+identical to the pre-D-083 shape (same 5 pimples/acne checks failing, `acne_
+back_preserved`/`pimples_bad_monolith_absent` still passing). D-081/D-082
+retention both PASS (0 destructive deletes; no non-decisive fallback to raw
+DeliveryScore). Root blocker classified live as **B -- unmarked-pair
+residual**: the marker-gated D-083 fix correctly protects every pairing
+involving the marked pimples restatement, but the live conflation routes
+through at least one unmarked pair the fix does not independently guarantee
+-- exactly the disclosed P2 residual, now observed rather than theoretical.
+Not patched per directive; handed to D-084 for exact edge-level forensics.
+
+## D-084 -- retry-family bridge edge forensic (report only, no code/GPU/RAW)
+
+Recovered the exact live edge-level evidence for the D-083 canary's
+conflated 5-member family via the zero-GPU D-044 forensic-extract workflow's
+`trace_clip_ids` (D-045), reading `distinct_idea_grouping_safety` directly
+from the persisted S3 `result.json` for the canary AND all 3 D-082 battery
+runs (the key existed all along -- it was simply never printed by the Modal
+RAW workflow's own dump script, a real, separate observability gap).
+
+EXACT BRIDGE: `acné2 <-> pimples-monolith`, arbiter confidence 0.85
+("Connecting back acne to specific neck and ear pimples."), plus a second,
+redundant, independent false bridge `acné2 <-> pimples-short` at 0.80. Both
+unmarked -- D-083's marker gate correctly protected the one pairing
+involving the marked restatement (blocked, confirmed in diagnostics), but
+these two edges never touch it. ROOT CLASS: DIRECT_FALSE_EDGE, on top of a
+pre-existing BASELINE_GROUP_ALREADY_CONFLATED precondition.
+
+Cross-run comparison: the identical `acné2<->monolith` bridge, at the
+identical 0.85 confidence, was independently confirmed in **all 4** runs
+checked (3 pre-D-083 D-082-battery runs plus the D-083 canary) -- every true
+within-beat edge scored 0.90-0.98 in every run, every false cross-beat edge
+scored 0.80-0.85 in every run. Classified **DETERMINISTIC_GROUPING_DEFECT**,
+not LLM edge variance.
+
+Proven from source: `_cohesive_components` is plain union-find with no
+group-wide cohesion requirement -- pairwise/transitive connectivity alone is
+sufficient today; the arbiter's own pairwise judgments are not even
+internally coherent (it never confirmed acné2<->restatement directly, the
+pair a coherent single-proposition read would also reject, yet transitivity
+through the monolith puts them in one family anyway).
+
+Recommended anti-bridge contract: bridge-edge validation (a materially
+higher evidentiary bar only when an edge would union two already-
+established, multi-member subclusters), informed by a canonical-proposition
+check -- leaving singleton/small-cluster merges (the common true-retry case)
+untouched. This became D-085's implementation.
+
+READY FOR IMPLEMENTATION: YES. Then STOP (no code changed by D-084 itself).
+
+## D-085 -- bridge-aware retry family cohesion (grouping only)
+
+Implements D-084's recommended anti-bridge contract. Root defect (D-084's
+own live, cross-run-verified forensic): `_cohesive_components` (D-058) is
+plain union-find over an unordered edge set -- any accepted pairwise edge
+can transitively connect two full components, with no requirement that the
+RESULTING merged component still represent one shared audience-facing
+proposition. Proven reproducible: the same 0.85-confidence cross-beat bridge
+recurred in 4/4 independent live runs.
+
+SESSION CLUSTER vs RETRY FAMILY (formalized in `take_grouping_provider.py`'s
+own module comment): a session cluster -- everything upstream of this
+module's final cohesion pass -- is only ever a bounded neighborhood of
+clips worth comparing; temporal/topical proximity is never by itself
+evidence of one retry family (a mutually-exclusive set of realizations
+competing to express ONE proposition).
+
+IMPLEMENTATION (`cutsell_worker/take_grouping_provider.py`):
+- `_RetryEdge`/`_edge_sort_key`: every candidate edge (deterministic lexical
+  match, or an arbiter same_idea confirmation already surviving D-083's
+  unchanged marker gate) is processed in a fixed order independent of input
+  order -- deterministic edges first, then semantic edges by descending
+  confidence, then a clip-id tie-break. Proven input-order-independent by
+  dedicated permutation tests (edge list order, group member order).
+- `_bridge_aware_components`: incremental union-find tracking live
+  component membership. An edge is a BRIDGE the instant either endpoint's
+  CURRENT component already has >=2 members (two established components
+  merging, or a singleton attaching to an existing multi-member one) -- a
+  first-time singleton<->singleton merge is unaffected, byte-identical to
+  pre-D-085 behavior.
+- `_evaluate_bridge_cohesion`: a bridge is NEVER accepted on its own
+  triggering pair's same_idea/confidence alone. It must additionally clear:
+  (1) a deterministic `any_pair_contradicts` cross-component safety net
+  (the same primitive D-082 already trusts for exactly this role -- no new
+  authority), then (2) a bounded, component-level question posed to the
+  SAME already-configured `SemanticEquivalenceArbiter` (no new provider/
+  model), built from both components' own member texts (`_component_probe_
+  text`, sorted by clip id for full determinism) rather than just the two
+  touching clips, requiring `same_idea=True` at >= 0.90 confidence
+  (`_BRIDGE_MIN_COHESION_CONFIDENCE`, calibrated directly against D-084's
+  own numbers: true edges 0.90-0.98, false bridges 0.80-0.85). Absent/
+  malformed/declined/low-confidence responses fail closed -- rejected, not
+  merged. `shared_proposition`/`member_support` are populated only from that
+  same arbiter call's own output; `distinct_required_facts` only from the
+  existing contradiction primitive -- no fabricated semantic authority.
+- D-083's marker gate is completely unchanged (still the only thing that
+  can block an edge before it ever becomes a candidate for D-085's own
+  bridge machinery) -- D-085 complements it, confirmed by dedicated tests.
+- Modal RAW workflow (`cutsell-video00-modal-raw.yml`): now prints
+  `diagnostics.distinct_idea_grouping_safety` directly (previously never
+  printed at all -- the exact gap D-084's own forensic had to work around
+  via the S3 side-channel). Closed, not repeated.
+
+TESTS: new `tests/test_cutsell_d085_bridge_aware_retry_family_cohesion.py`
+(25 tests) -- the exact D-084 5-member regression (two independent false
+bridges, generic fixture, must not reconnect); edge-order and group-member-
+order permutation invariance; bridge classification unit tests; component-
+cohesion fail-closed cases (no arbiter, arbiter exception, declined,
+low-confidence, high-triggering-confidence-still-rejected); D-083 marker
+retention; true-retry safety (low-lexical-overlap paraphrase, directional
+superset, singleton joining a coherent component, two true subclusters with
+a genuine shared proposition merging); narrative-continuation safety
+(adjacent chronology, different events); sales/UGC generalization (dosage/
+outcome/product-use/experience/hook/CTA never bridge; a benefit restatement
+still may); bounded-compute diagnostics; no winner/selection-authority keys
+ever surfaced by grouping; and the QA_ENGINE-mandated always-YES-pairwise-
+but-skeptical-component-check adversarial proof that the two-tier design,
+not pairwise confidence, is what prevents the false bridges.
+
+QUALIFICATION: compileall clean; D-050 through D-085 targeted sweep 526/526;
+D-058/D-083 grouping suites + historical complete-retry-identity-guard
+suites (`test_cutsell_complete_retry_identity_guard.py`, `test_cutsell_
+d072_complete_retry_observability.py`) all pass; CleanCutBench 54/54, run
+twice; full `tests/` suite -- 2495 passed (2471 D-083 baseline + 24 new
+D-085 tests), same 2 pre-existing unrelated failures D-081 already
+identified and excluded, plus `test_semantic_stitch.py`'s pre-existing
+collection error -- 0 new regressions.
+
+QA_ENGINE: the always-YES pairwise arbiter attack (every two-clip query
+confirmed at uniform high confidence, with only the component-level probe
+questions answered honestly) still correctly separates the two families --
+proving pairwise confidence/vote count was never load-bearing in the fix.
+Edge-order and group-order permutation attacks produce byte-identical
+families. Candidate/group explosion: bridge evaluations are bounded well
+below all-pairs (observed 3-4 bridge evaluations against 10 possible pairs
+in the 5-member D-084 fixture); no unbounded re-evaluation.
+
+GROUPING SELECTS WINNER: NO (unchanged -- BestTake/Resolver remain sole
+winner authorities; grouping only decides who competes).
+POST-RESOLVER SEMANTIC MUTATORS: 0 (unchanged from D-081's own count).
+
+P0: 0
+P1: 0
+P2: 0
+P3: 0
+
+READY FOR ONE VIDEO00 CANARY: YES.
+
+Then STOP.
+
+No Modal. No RAW.
+
 ## Change rule
 
 When a new decision changes product behavior, update this file in the same development cycle. Do not silently redefine CutSell through code alone.

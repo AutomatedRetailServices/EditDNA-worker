@@ -391,6 +391,9 @@ jobs:
           echo "--- diagnostics.semantic_idea_equivalence (IdeaClusterer's bounded SemanticArbiter tier) ---"
           jq '.diagnostics.semantic_idea_equivalence // {status:"absent"}' artifact/video00-modal.json
 
+          echo "--- diagnostics.distinct_idea_grouping_safety (D-058 within-group cohesion + D-083 marker gate + D-085 bridge-aware edge trace -- see D-084's forensic for why this was never printed before) ---"
+          jq '.diagnostics.distinct_idea_grouping_safety // {status:"absent"}' artifact/video00-modal.json
+
           echo "--- diagnostics.final_story_coherence_validation (StoryValidator) ---"
           jq '.diagnostics.final_story_coherence_validation // {status:"absent"}' artifact/video00-modal.json
 
