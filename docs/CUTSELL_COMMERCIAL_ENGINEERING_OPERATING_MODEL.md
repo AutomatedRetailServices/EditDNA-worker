@@ -273,6 +273,9 @@ them now.
   privacy/compliance review.
 - **Before production:** full `RELEASE_GATE`.
 
+These checkpoints are gates a change must clear, not points at which the
+orchestrating agent waits for a relayed instruction -- see Section 12.
+
 ## 7. Reusable canonical commands
 
 Definitions only -- none of these run as part of this governance update.
@@ -604,7 +607,10 @@ reimplement them -- it places them under the roles and gates above.
   provenance-aware duplicate detection (D-030-era work, `canonical_identity.py`).
   Feeds `ENGINE_GATE` and `RELIABILITY_GATE`.
 
-## 11. D-061 handoff
+## 11. D-061 handoff (historical checkpoint)
+
+Recorded at D-062; the QA_ENGINE pass it calls for was run and its verdict
+is in `docs/CUTSELL_DECISIONS.md`. Kept as history under Section 12.5.
 
 D-061 (semantic-equivalence-aware validation) has already run and is
 committed on `feature/runpod-pod-on-demand`. This document does not modify,
@@ -621,6 +627,111 @@ paraphrase-credit behavior.
 
 Only after that QA_ENGINE verdict is recorded may a paid Modal canary for
 D-061 be authorized.
+
+## 12. Continuous autonomous orchestration and escalation (D-091)
+
+This section registers how the roles above are ORCHESTRATED between
+checkpoints. It changes no role's ownership and no gate's checks.
+
+### 12.1 Canonical continuity rule
+
+Within an already-authorized technical scope, the orchestrating agent MUST
+continue autonomously. It does not wait for "continue", "proceed", "what
+next?" or a newly relayed prompt when the next action is an ordinary
+technical consequence of the currently authorized objective.
+
+Canonical loop: diagnose -> reproduce -> fix -> targeted tests -> QA -> (if
+QA finds an in-scope defect, return to Engineering) -> retest -> CI /
+offline qualification where applicable -> analyze evidence -> continue to the
+next proven root cause within scope. A technical checkpoint is not
+automatically a stopping point.
+
+### 12.2 Product Owner role
+
+The Product Owner defines product behavior, scope, priorities, acceptable
+risk, paid-compute budget, release decisions and human editorial acceptance.
+The Product Owner is NOT required to choose which function to inspect, which
+unit test to write, how to reproduce a bug, to relay Engineering findings to
+QA or QA findings back to Engineering, or to say "continue" after normal
+technical steps.
+
+### 12.3 Engineering <-> QA auto-loop
+
+Engineering implements; QA independently challenges (Section 2 is
+unchanged). Their hand-off is orchestrated automatically: when QA returns
+FAIL, or a finding within the authorized scope, the agent returns it to
+Engineering, fixes it if within scope, reruns tests, then reruns QA.
+Engineering never rewrites a QA verdict; diagnostics and reporting keep the
+two roles' outputs separate and disclose when one session carries both.
+
+### 12.4 Stop conditions (ask the Product Owner ONLY when at least one holds)
+
+- A. PRODUCT DECISION REQUIRED: the fix changes product behavior, UX
+  doctrine, user workflow, editorial policy, pricing, scope or acceptance
+  criteria.
+- B. SAFETY / AUTHORITY CHANGE REQUIRED: the next fix would weaken Freeze,
+  critical-content protection, security, privacy, authorization, tenant
+  isolation, claim safety or another canonical safety contract.
+- C. PAID COMPUTE OUTSIDE AUTHORIZATION: a Modal/RunPod/provider run beyond
+  the currently approved paid-run count/budget/scope.
+- D. PROTECTED REPOSITORY ACTION: merge PR, write `main`, deploy
+  production, TestFlight/App Store release, destructive repository operation.
+- E. P0/P1 ACCEPTED-RISK DECISION.
+- F. HUMAN EDITORIAL ACCEPTANCE: a real rendered artifact needs human
+  watch/listen/product judgment.
+- G. TRUE SCOPE BOUNDARY: the proven next root cause belongs to a materially
+  different project objective.
+
+Otherwise: continue.
+
+### 12.5 Task-local STOP semantics
+
+A directive-local "Then STOP", "No code", "No RAW" or "Report only" limits
+THAT directive's authorized actions and never disables the global continuity
+contract. REPORT ONLY: forensic work stops before code modification; an
+implementation directive the Product Owner already authorized may then
+proceed under that authorization. NO RAW: offline diagnose/fix/test/QA/CI
+continue; stop only when the next required step is a paid run. NO CODE:
+investigation and documentation continue; implementation waits for
+authorization. Historical STOPs recorded in `docs/CUTSELL_DECISIONS.md` are
+not permanent relay requirements.
+
+### 12.6 Paid compute budget contract
+
+Default: paid compute NOT authorized. The Product Owner may authorize a
+bounded campaign (for example ONE_CANARY, THREE_RUN_STABILITY_BATTERY,
+MAX_PAID_RUNS=N, MAX_BUDGET_USD=X). Within it the agent schedules exactly
+the approved runs without asking again and never exceeds count, budget or
+scope. A failed paid run does not stop offline diagnosis and fixing.
+Additional paid compute is stop condition C.
+
+### 12.7 Root-cause continuity
+
+A defect exposed by a test or canary within the SAME authorized objective is
+investigated and fixed automatically. An unrelated defect is recorded
+separately without silently expanding scope, and the authorized objective
+continues where possible. No endless D-xxx work is opened merely because
+another observation exists.
+
+### 12.8 D-xxx decision log role
+
+D-xxx entries remain durable engineering decisions and checkpoints. They are
+not manual turn-taking tokens: creating the next sequential entry does not
+by itself require Product Owner intervention while the work stays within
+authorized scope and crosses no stop condition.
+
+### 12.9 Status reporting
+
+While continuing, progress is reported compactly as: CURRENT OBJECTIVE,
+CURRENT STAGE, LAST VERIFIED RESULT, CURRENT ROOT CAUSE, NEXT AUTOMATIC
+ACTION, HUMAN ACTION REQUIRED (YES/NO, with the stop-condition letter).
+
+### 12.10 What this section preserves
+
+Repository protections (Section 12.4 D and `CLAUDE.md`), QA separation
+(Section 2), security and release gates (Sections 3, 7, 9), paid-compute
+limits (12.6), Human Editorial Acceptance (role 11, gate
+`EDITORIAL_ACCEPTANCE_GATE`) and the current engine doctrine are unchanged.
 
 ## Change rule
 

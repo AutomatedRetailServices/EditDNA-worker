@@ -124,6 +124,22 @@ When product behavior changes intentionally:
 
 Do not allow chat-only decisions to become invisible product requirements.
 
+## Continuity contract (D-091)
+
+Within an already-authorized technical scope an agent continues autonomously
+through diagnose -> reproduce -> fix -> targeted tests -> independent QA ->
+(auto-loop back to Developer on an in-scope QA defect) -> retest -> offline
+qualification / CI where applicable. It does not wait for a relayed
+"continue" after an ordinary technical step, and it does not require the
+Product Owner to relay Developer findings to QA/Eval or QA/Eval findings back
+to the Developer. It stops and asks the Product Owner only on a listed
+escalation condition: product decision, safety/authority change, paid compute
+outside authorization, protected repository action, P0/P1 accepted-risk
+decision, human editorial acceptance of a rendered artifact, or a true scope
+boundary. Full text: `docs/CUTSELL_COMMERCIAL_ENGINEERING_OPERATING_MODEL.md`
+Section 12 and `CLAUDE.md`. Every rule under "Never do without explicit user
+approval" and step 9 of the validation protocol remain in force unchanged.
+
 ## Agent roles
 
 Initially use a small role set rather than uncontrolled multi-agent sprawl:

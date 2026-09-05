@@ -9596,6 +9596,103 @@ additive key (`validation_mode`). Historical open: D-087 P3 (split-bucket
 realization represented from selected pieces only). POST_RESOLVER_SEMANTIC_
 MUTATORS in the AUTHORITATIVE path: 0 (was 1: StoryValidator residual collapse).
 
+QA_ENGINE ACCEPTANCE REVIEW OF fe288d5 (separate pass, run after the
+implementation report; performed by the SAME session as the implementation --
+disclosed, not independently staffed; evidence gathered from fresh scratchpad
+probes through the real pipeline plus a detached worktree at 40dde20):
+- D-089 mutation reproduction PASS (parent worktree reproduces the discard;
+  fe288d5 keeps the composite, plan complete, reviewer PASS).
+- Post-authority validation-only PASS; integrity enforcement PASS (remove
+  member, add unauthorized member, text change, realization-id change, 10 ms
+  span shift, reorder during StoryValidator, duplicate-id replacement,
+  repair-phase drop/add/text-rewrite all produce the named
+  `POST_AUTHORITY_SELECTION_MUTATION` failure; repair-phase pure reorder
+  passes). Not detected by design: case/accent-only text, caption-only,
+  word-timing-only, sub-millisecond span drift.
+- Real content-safety checks PASS; D-089 order retention PASS; LEGACY/SHADOW
+  PASS. Tests executed by the review: 274 (D-090 + D-087 + D-089 +
+  StoryValidator + plan/reviewer + repair + D-050C2/C3 + D-056.3 + D-046A +
+  D-061/D-076/D-079) and CleanCutBench 54/54 both modes.
+- Protected window: from the signature captured right after
+  `apply_authoritative_realization_resolution` through `run_repair_loop`.
+  `enforce_complete_idea_boundaries` -> `freeze_selection_contract` ->
+  `polish_human_boundaries_v5` -> `enforce_selection_contract` run after it
+  under their existing contracts. The repair-phase check is membership/speech/
+  provenance scoped and accepts any reorder, not only the contracted one.
+- NEW FINDING P2: resolver-retained alternates now persist to the final draft.
+  Pre-D-090 the post-authority pass folded `alternates` into `discarded`;
+  fe288d5 folds only on a working copy, so realizations the Resolver marks
+  `retained_for_contextual_value` survive as `alternates` through Freeze and
+  into the result. Worktree comparison: on 40dde20 the plan's discard
+  provenance listed the retained clip; on fe288d5 it lists nothing and the
+  clip is in neither keep nor discard provenance. The D-089 live log carries 8
+  such retained realizations, so this WILL manifest on the next Video00
+  canary as a non-zero `alternate_count`. Content safety unaffected (loss
+  checks still evaluate them as discarded; render uses `selected` only; no
+  active post-authority stage promotes alternates); it is a D-019
+  KEEP/DISCARD contract deviation plus a provenance gap. Correct fix location:
+  the authoritative application boundary, before the signature is captured.
+- NEW P3: repair-phase invariant accepts any reorder. NEW P3: discarded
+  bucket recorded but not digested. Historical: authority-identity
+  comparison tautological in-pipeline (confirmed P3); additive legacy key
+  (P3); D-087 split-bucket P3.
+- VERDICT: PASS_WITH_KNOWN_ISSUES. P0 0 / P1 0 / P2 1 / P3 5. Canary
+  recommendation: YES, conditioned on either correcting the P2 first at the
+  authoritative application boundary or explicitly accounting for
+  `alternate_count` and the missing discard provenance in the canary report.
+
+## D-091 -- Continuous Autonomous Engineering & Escalation Contract (governance reconciliation)
+
+**Type:** documentation / operating-contract only. No engine behavior, Human
+Gold, Modal/RunPod, `main` or deployment touched.
+
+**Decision:** Claude Code acts as a continuous technical orchestrator within
+authorized scope. Within an already-authorized technical objective it
+continues autonomously through diagnose -> reproduce -> fix -> targeted tests
+-> independent QA -> (auto-loop back to Engineering on an in-scope defect) ->
+retest -> offline qualification / CI where applicable -> next proven root cause
+in scope, without waiting for a relayed "continue". It stops and asks the
+Product Owner only on a listed escalation condition: A product decision, B
+safety/authority weakening, C paid compute beyond authorization, D protected
+repository action, E P0/P1 accepted-risk decision, F human editorial
+acceptance of a rendered artifact, G true scope boundary. Full text:
+`docs/CUTSELL_COMMERCIAL_ENGINEERING_OPERATING_MODEL.md` Section 12; summary
+in `CLAUDE.md` ("Continuity contract") and `AGENTS.md`.
+
+**Reconciled stale instructions (history preserved, not rewritten):**
+- `CLAUDE.md` "Current first task" (Unified Selection observability, from the
+  handoff era) replaced by a "Current state pointer" to the newest D-xxx
+  entry; the handoff's CURRENT LIVE BLOCKER / EXACT NEXT ACTION sections are
+  marked historical.
+- `CLAUDE.md` QA loop now shows the Engineering <-> QA auto-loop and states
+  that on `feature/runpod-pod-on-demand` no unpaid CI runs on push (the
+  clean-worker CI is pull-request-to-main only), so the offline qualification
+  set is the CI-equivalent gate.
+- Operating model Section 6 checkpoints annotated as gates, not relay points;
+  Section 11 (D-061 handoff) marked historical.
+- Every historical "Then STOP / No code / No RAW / Report only" in D-044
+  through D-090 is now read as task-local to its directive (Section 12.5),
+  never as a standing relay requirement.
+
+**Preserved unchanged:** repository protections (no merge PR #25, no write
+to `main`, no deploy, no TestFlight/App Store, no destructive repo/archive
+change, no secret exposure, no new recurring paid infrastructure), QA
+separation of duties (Section 2), SECURITY/RELEASE gates, paid-compute
+limits (default not authorized; bounded campaigns only), Human Editorial
+Acceptance, and the current engine doctrine (D-019/D-020/D-021, D-062.2).
+
+**Status reporting format registered:** CURRENT OBJECTIVE / CURRENT STAGE /
+LAST VERIFIED RESULT / CURRENT ROOT CAUSE / NEXT AUTOMATIC ACTION / HUMAN
+ACTION REQUIRED.
+
+**D-090 continuity under this contract:** D-090 (fe288d5) is CODE FIXED /
+TESTS PASS; its QA_ENGINE acceptance review is recorded above under D-090
+(PASS_WITH_KNOWN_ISSUES, one P2 within D-090 scope). Per Sections 12.1/12.3/
+12.7 the P2 is an in-scope QA finding that returns to Engineering
+automatically (next entry), after which QA re-runs and offline qualification
+re-runs; the paid D-090 canary remains stop condition C until separately
+authorized.
+
 ## Change rule
 
 When a new decision changes product behavior, update this file in the same development cycle. Do not silently redefine CutSell through code alone.

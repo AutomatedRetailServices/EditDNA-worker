@@ -30,6 +30,7 @@ If HEAD is newer, inspect intervening commits and reconcile state. Never reset b
 6. existing `docs/CUTSELL_MOBILE_V1_ASAP_SCOPE.md`
 7. existing `docs/CUTSELL_COMMERCIAL_ENGINEERING_OPERATING_MODEL.md` (D-062) -- canonical roles/gates/QA modes; an engine change is never self-certified release-ready by the role that implemented it.
 8. existing `docs/CUTSELL_EDITORIAL_RESOLUTION_AND_HUMAN_ESCALATION_CONTRACT.md` (D-062.2) -- Automatic Editor Doctrine, CRITICAL_COVERAGE_DOMINANCE, the 16-layer Automatic Resolution Hierarchy, and the HUMAN_CHOICE_ELIGIBLE escalation contract; human choice is a last resort, never a convenience valve for resolver uncertainty.
+9. `docs/CUTSELL_COMMERCIAL_ENGINEERING_OPERATING_MODEL.md` Section 12 (D-091) -- the Continuous Autonomous Engineering & Escalation Contract: within an authorized technical scope Claude continues through diagnose -> fix -> tests -> QA -> retest without waiting for a relayed "continue"; it stops only on a listed Product Owner escalation condition.
 
 ## Source precedence
 When sources conflict:
@@ -112,14 +113,78 @@ Without explicit user approval:
 - do not expose/move secrets;
 - do not create materially new recurring paid infrastructure.
 
-## Current first task
-Read the `CURRENT LIVE BLOCKER` and `EXACT NEXT ACTION` sections of the complete handoff.
-Short version: fix Unified Selection benchmark/serverless observability before any new semantic Video00 rule.
+## Current state pointer
+The live current state is the newest `D-xxx` entry in `docs/CUTSELL_DECISIONS.md`
+(read its LAST VERIFIED RESULT / NEXT AUTOMATIC ACTION lines). The handoff
+document's `CURRENT LIVE BLOCKER` / `EXACT NEXT ACTION` sections are historical
+context from the Unified Selection era, superseded by the decision log; do not
+treat them as the standing next task.
+
+## Continuity contract (D-091)
+Within an already-authorized technical scope, CONTINUE AUTONOMOUSLY. Do not wait
+for "continue", "proceed", "what next?" or a relayed prompt when the next action
+is an ordinary technical consequence of the current authorized objective. A
+technical checkpoint (a D-xxx entry, a green test run, a QA verdict) is not a
+stopping point by itself.
+
+Canonical loop:
+`diagnose → reproduce → fix → targeted tests → QA (independent pass) → if QA
+finds an in-scope defect return to Engineering → retest → offline qualification
+/ CI where applicable → analyze evidence → next proven root cause within scope`.
+
+Engineering and QA remain distinct roles with separate reporting; Claude
+orchestrates the hand-off between them itself. Engineering never rewrites a QA
+verdict; it fixes and re-submits.
+
+Stop and ask the Product Owner ONLY when at least one is true:
+- A. PRODUCT DECISION REQUIRED (product behavior, UX doctrine, workflow,
+  editorial policy, pricing, scope, acceptance criteria);
+- B. SAFETY / AUTHORITY CHANGE REQUIRED (would weaken Freeze, critical-content
+  protection, security, privacy, authorization, tenant isolation, claim safety,
+  or another canonical safety contract);
+- C. PAID COMPUTE OUTSIDE AUTHORIZATION (any Modal/RunPod/provider run beyond
+  the currently approved count/budget/scope; default: no paid compute);
+- D. PROTECTED REPOSITORY ACTION (the list under "Repository protection");
+- E. P0/P1 ACCEPTED-RISK DECISION;
+- F. HUMAN EDITORIAL ACCEPTANCE (a real rendered artifact needs watch/listen);
+- G. TRUE SCOPE BOUNDARY (the proven next root cause belongs to a materially
+  different objective).
+Otherwise: continue.
+
+Task-local "Then STOP" / "No code" / "No RAW" / "Report only" bound THAT
+directive's actions only; they never disable this contract. NO RAW still allows
+offline diagnose/fix/test/QA. NO CODE allows investigation/documentation.
+REPORT ONLY ends before code modification; an implementation already authorized
+by the Product Owner may then proceed under that authorization.
+
+Root-cause continuity: a defect exposed within the same authorized objective is
+investigated and fixed automatically; an unrelated one is recorded separately
+without expanding scope. Sequential D-xxx entries may be created autonomously
+while inside authorized scope and no stop condition is crossed.
 
 ## QA loop
-`diagnose → fix → targeted tests → CI → one RAW → JSON+MP4 → architecture check → Selection analysis → Human Gold → Watch+Listen → unseen/regression`
+`diagnose → fix → targeted tests → independent QA → auto-loop back on in-scope
+defects → offline qualification / CI where applicable → (paid run only when
+authorized) one RAW → JSON+MP4 → architecture check → Selection analysis →
+Human Gold → Watch+Listen → unseen/regression`
+
+On `feature/runpod-pod-on-demand` no unpaid CI workflow runs on push (the
+clean-worker CI runs on pull requests to `main`), so the offline qualification
+set (compileall, targeted suites, CleanCutBench both modes, full
+`tests/test_cutsell_*.py`, whole `tests/`) is the CI-equivalent gate.
 
 ## Status vocabulary
+While continuing, report compactly with this block:
+- CURRENT OBJECTIVE
+- CURRENT STAGE
+- LAST VERIFIED RESULT
+- CURRENT ROOT CAUSE
+- NEXT AUTOMATIC ACTION
+- HUMAN ACTION REQUIRED: YES/NO (with the escalation condition letter if YES)
+
+Never ask "what do you want me to do next?" when the next technical action is
+already implied by the current objective.
+
 Report exact state instead of generic "done":
 - CODE FIXED
 - TESTS PASS
