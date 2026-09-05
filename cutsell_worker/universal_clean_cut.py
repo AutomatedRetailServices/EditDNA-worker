@@ -27,7 +27,23 @@ from .clean_cut_provider import CleanCutProvider
 from .contracts import ProcessingRequest, ProcessingResult
 from .deterministic_best_take_authority import apply_deterministic_best_take_authority
 from .final_boundary_authority import enforce_complete_idea_boundaries
-from .final_story_coherence_validation import apply_final_story_coherence_validation
+from .final_story_coherence_validation import (
+    apply_final_story_coherence_validation,
+    apply_post_authority_story_validation,
+)
+from .post_authority_validation import (
+    INTEGRITY_FAILURE_SELECTION_MUTATION,
+    PHASE_BOUNDED_REPAIR,
+    PHASE_STORY_VALIDATION,
+    POST_AUTHORITY_VALIDATION_MODE,
+    PostAuthorityBoundaryRecord,
+    PostAuthorityIntegrityError,
+    build_post_authority_validation_context,
+    compare_selection_signatures,
+    mutation_report_to_diagnostics,
+    semantic_selection_signature,
+    signature_to_diagnostics,
+)
 from .causal_order_validator import CausalOrderArbiter
 from .semantic_atom_importance import SemanticAtomImportanceArbiter
 from .semantic_claims import ClaimEquivalenceArbiter, ClauseRoleArbiter
@@ -299,6 +315,7 @@ def process_universal_clean_cut_sources(
         # stop.
         authoritative_result = None
         authoritative_semantic_state = None
+        post_authority_integrity_failed = False
         if clean_cut_core_v1_enabled and resolver_mode == RESOLVER_MODE_AUTHORITATIVE:
             authoritative_result = apply_authoritative_realization_resolution(
                 result.draft, ledger, resolver_report, claim_equivalence_arbiter=claim_equivalence_arbiter,
@@ -391,11 +408,36 @@ def process_universal_clean_cut_sources(
                 },
             )
 
-            # StoryValidator, AUTHORITATIVELY: re-validated on the resolver's
-            # own resolved selection, never the pre-cutover one.
-            authoritative_draft = apply_final_story_coherence_validation(
+            # D-090 AUTHORITY BOUNDARY: the resolver's applied selection is
+            # the ONE semantic truth from here on. Capture its signature
+            # now; everything below is validation/representation/bounded
+            # physical-order repair and must hand back the SAME selection.
+            post_authority_integrity_failures: list[str] = []
+            post_authority_context = None
+            context_status, context_detail = "present", ""
+            try:
+                post_authority_context = build_post_authority_validation_context(
+                    authoritative_result, authoritative_plan_source,
+                )
+            except PostAuthorityIntegrityError as exc:
+                context_status, context_detail = exc.code, exc.detail
+                post_authority_integrity_failures.append(exc.code)
+            source_identity = post_authority_context.source_identity if post_authority_context else ""
+            signature_after_authority = semantic_selection_signature(
+                authoritative_draft, authority_identity=source_identity,
+            )
+
+            # StoryValidator, AUTHORITATIVELY -- VALIDATION-ONLY (D-090):
+            # re-validated on the resolver's own resolved selection, never
+            # the pre-cutover one, and structurally unable to edit it. A
+            # missing context is an integrity failure that fails closed
+            # inside the call; it never falls back to the legacy pass.
+            authoritative_draft = apply_post_authority_story_validation(
                 authoritative_draft,
-                semantic_equivalence_arbiter=semantic_equivalence_arbiter,
+                context=post_authority_context,
+                integrity_failure=(
+                    (context_status, context_detail) if post_authority_context is None else None
+                ),
                 semantic_atom_importance_arbiter=semantic_atom_importance_arbiter,
                 claim_equivalence_arbiter=claim_equivalence_arbiter,
                 clause_role_arbiter=clause_role_arbiter,
@@ -403,11 +445,25 @@ def process_universal_clean_cut_sources(
                 critical_claim_preservation_index=critical_claim_preservation_index,
                 canonical_effective_importance_index=canonical_effective_importance_index,
             )
+            signature_after_validation = semantic_selection_signature(
+                authoritative_draft, authority_identity=source_identity,
+            )
+            validation_invariant = compare_selection_signatures(
+                signature_after_authority, signature_after_validation,
+                phase=PHASE_STORY_VALIDATION, order_sensitive=True,
+            )
+            if not validation_invariant.unchanged:
+                post_authority_integrity_failures.append(
+                    f"{INTEGRITY_FAILURE_SELECTION_MUTATION}:{PHASE_STORY_VALIDATION}"
+                )
 
             # CanonicalEditPlan + FinalEditReviewer + bounded repair,
             # AUTHORITATIVELY: same call as the first pass above, now
             # operating on the resolved draft -- this becomes the plan
-            # Freeze actually consumes.
+            # Freeze actually consumes. The loop's ONE permitted repair is
+            # a story-order reorder, so the ORDER-INSENSITIVE projection
+            # (membership, speech, provenance, authority identity) must
+            # come back unchanged (D-090 Section 6).
             repair_result = run_repair_loop(
                 authoritative_draft,
                 causal_order_arbiter=causal_order_arbiter,
@@ -415,8 +471,55 @@ def process_universal_clean_cut_sources(
             )
             edit_plan = repair_result.final_plan
             review_result = repair_result.final_review
+            signature_after_repair = semantic_selection_signature(
+                repair_result.final_draft, authority_identity=source_identity,
+            )
+            repair_invariant = compare_selection_signatures(
+                signature_after_authority, signature_after_repair,
+                phase=PHASE_BOUNDED_REPAIR, order_sensitive=False,
+            )
+            if not repair_invariant.unchanged:
+                post_authority_integrity_failures.append(
+                    f"{INTEGRITY_FAILURE_SELECTION_MUTATION}:{PHASE_BOUNDED_REPAIR}"
+                )
+            # Fail closed on drift: keep the (mutated) draft exactly as the
+            # offending stage produced it -- never silently restore the
+            # pre-mutation selection and call it a PASS, never rebuild the
+            # authoritative source from it. The record below makes the
+            # drift visible and the Freeze gate blocks on it.
             result = replace(result, draft=repair_result.final_draft)
             final_edit_reviewer_status = review_result.status
+            post_authority_record = PostAuthorityBoundaryRecord(
+                validation_mode=POST_AUTHORITY_VALIDATION_MODE,
+                context_status=context_status,
+                context_detail=context_detail,
+                authoritative_source_identity=source_identity,
+                authoritative_status=authoritative_result.status,
+                decision_count=post_authority_context.decision_count if post_authority_context else 0,
+                signature_after_authority=signature_to_diagnostics(signature_after_authority),
+                signature_after_validation=signature_to_diagnostics(signature_after_validation),
+                signature_after_repair=signature_to_diagnostics(signature_after_repair),
+                validation_invariant=mutation_report_to_diagnostics(validation_invariant),
+                repair_invariant=mutation_report_to_diagnostics(repair_invariant),
+                integrity_failures=tuple(post_authority_integrity_failures),
+                extra={
+                    "authoritative_families_accepted": list(
+                        ((authoritative_draft.diagnostics or {}).get("final_story_coherence_validation") or {})
+                        .get("authoritative_families_accepted") or []
+                    ),
+                    "authority_membership_findings": list(
+                        ((authoritative_draft.diagnostics or {}).get("final_story_coherence_validation") or {})
+                        .get("authority_membership_findings") or []
+                    ),
+                    "story_validator_freeze_blocked": bool(
+                        ((authoritative_draft.diagnostics or {}).get("final_story_coherence_validation") or {})
+                        .get("freeze_blocked")
+                    ),
+                    "repair_loop_status": repair_result.status,
+                    "final_edit_reviewer_status": review_result.status,
+                },
+            )
+            post_authority_integrity_failed = post_authority_record.integrity_failed
 
             diagnostics = dict(result.draft.diagnostics or {})
             diagnostics["canonical_edit_plan"] = dataclasses.asdict(edit_plan)
@@ -454,6 +557,9 @@ def process_universal_clean_cut_sources(
                 "authoritative_story_placement",
                 build_story_placement_diagnostics(authoritative_result.story_placement),
             )
+            # D-090 Section 9: the authority-boundary record, always written
+            # (not setdefault -- it must reflect THIS run's invariant).
+            diagnostics["post_authority_validation"] = post_authority_record.to_diagnostics()
             result = replace(result, draft=replace(result.draft, diagnostics=diagnostics))
         diagnostics = dict(result.draft.diagnostics or {})
         diagnostics["realization_resolver_authority"] = (
@@ -483,6 +589,16 @@ def process_universal_clean_cut_sources(
         freeze_blocked = bool(coherence_diag.get("freeze_blocked")) or repair_result.status == "NEEDS_HUMAN_REVIEW"
         if authoritative_result is not None and authoritative_result.status == AUTHORITATIVE_REVIEW_REQUIRED:
             freeze_blocked = True
+        # D-090: a post-authority selection mutation (or a missing
+        # authoritative context) is a named integrity failure -- an equally
+        # hard gate, never silently repaired.
+        if post_authority_integrity_failed:
+            freeze_blocked = True
+        blocked_status = (
+            "not_frozen_post_authority_integrity_failure"
+            if post_authority_integrity_failed
+            else "not_frozen_freeze_blocked_by_coherence_review"
+        )
 
         if freeze_blocked:
             recovery_stage = "not_applicable_freeze_blocked_by_coherence_validation"
@@ -508,7 +624,7 @@ def process_universal_clean_cut_sources(
             diagnostics = dict(result.draft.diagnostics or {})
             diagnostics["selection_boundary_contract"] = {
                 "schema_version": "cutsell.selection_boundary_contract.v1",
-                "status": "not_frozen_freeze_blocked_by_coherence_review",
+                "status": blocked_status,
                 "plan_id": edit_plan.plan_id,
                 "plan_version": edit_plan.plan_version,
                 "semantic_hash": edit_plan.semantic_hash,
@@ -545,6 +661,7 @@ def process_universal_clean_cut_sources(
         semantic_status = "not_requested_clean_cut_only"
         reasoner_status_label = "disabled"
         freeze_blocked = False
+        post_authority_integrity_failed = False
         final_edit_reviewer_status = "not_applicable_missing_draft_contract"
 
     return ProcessingResult(
@@ -555,6 +672,7 @@ def process_universal_clean_cut_sources(
         stage_status={
             **result.stage_status,
             "freeze_blocked_pending_coherence_review": freeze_blocked,
+            "post_authority_integrity_failure": post_authority_integrity_failed,
             "final_edit_reviewer": final_edit_reviewer_status,
             "brain_mode": "universal_clean_cut",
             "semantic": semantic_status,

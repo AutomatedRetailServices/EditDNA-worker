@@ -420,6 +420,10 @@ jobs:
           jq '.diagnostics.canonical_effective_importance // {status:"absent"}' artifact/video00-modal.json
           echo "--- diagnostics.authoritative_story_placement (D-089 Part B: every restoration placement unit) ---"
           jq '.diagnostics.authoritative_story_placement // {status:"absent"}' artifact/video00-modal.json
+          echo "--- diagnostics.post_authority_validation (D-090 authority boundary: validation mode, source identity, selection signature before/after, membership added/removed, invariant status) ---"
+          jq '.diagnostics.post_authority_validation // {status:"absent"}' artifact/video00-modal.json
+          echo "--- StoryValidator post-authority family bookkeeping (D-090: authoritative composites accepted as resolved vs blocking authority-membership findings) ---"
+          jq '.diagnostics.final_story_coherence_validation | {validation_mode, authoritative_source_identity, residual_family_count, authoritative_families_accepted_count, authoritative_families_accepted, unresolved_family_count, unresolved_families, authority_membership_findings, selection_mutation_self_check, freeze_blocked}' artifact/video00-modal.json
 
           echo "--- diagnostics.final_edit_reviewer ---"
           jq '.diagnostics.final_edit_reviewer // {status:"absent"}' artifact/video00-modal.json

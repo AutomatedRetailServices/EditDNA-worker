@@ -205,7 +205,7 @@ brains rewriting the same membership sequentially:
 | BestTakeResolver | `deterministic_best_take_authority.py` | KEEP AS CORE / PROMOTED (Phase 1) |
 | SemanticArbiter | `semantic_idea_equivalence.py` + `semantic_idea_equivalence_google.py` | KEEP AS CORE, bounded role only (D-020) |
 | CompositeResolver | `composite_resolver.py` (`apply_composite_resolution`, `apply_composite_group_split`, `apply_composite_family_stabilization`) -- builds its chain by calling the real `install_*()` of `semantic_fragment_guard.py`, `hybrid_retry_completion_integrity.py`, `hybrid_story_guard.py`, `hybrid_alternate_integrity.py`, `hybrid_cross_group_retry_integrity.py`, `incomplete_bridge_retry_authority.py`, `hybrid_failed_continuation_integrity.py`, `hybrid_retry_winner_authority.py`, `hybrid_gold_reconciliation.py`, `failed_prefix_completion_rescue.py`, `final_delivery_integrity.py`, `terminal_delivery_reconciliation.py`, `hybrid_failed_soft_restore.py`, `hybrid_unavailable_retry_fallback.py`, `hybrid_complementary_delivery_guard.py`, `hybrid_semantic_complementary_rescue.py`, `hybrid_semantic_composite_bridge.py`, `hybrid_composite_best_take.py`, `hybrid_semantic_conflict_arbitration.py` (19 take-level hooks), plus `post_selection_complementary_family_stabilizer.py` downstream | KEEP AS CORE / CONSOLIDATED (D-023) -- one directly-callable component, one documented historical order, called explicitly from `pipeline.py` (no monkeypatching left in this domain outside the one lazy chain-build). `cutsell_worker/__init__.py` no longer installs any of these 20 modules' own `install_*()` hooks; each keeps its existing pure logic and its own tests unchanged, consumed by calling their real installers once rather than reimplementing them (D-023 -- an earlier hand-transcribed version of this row's own consolidation missed 5 of the 19 and is why the final design calls the real installers instead of re-typing their logic). Its decisions surface in `diagnostics.hybrid_editorial_chunks` (printed in CI, see D-020's observability note) |
-| StoryValidator | `final_story_coherence_validation.py` | KEEP AS CORE (new; folds alternates to discard, resolves residual ambiguity via SemanticArbiter, contradiction invariant, idea-coverage invariant, general lost-semantic-atoms coverage ledger against the ACTUAL final KEEP timeline (D-022), hard pre-Freeze gate via `freeze_blocked`). Per D-022, this is also the structural backstop for the CompositeResolver consolidation gap above: because it checks final `selected`/`discarded` content directly, it catches unique-fact/idea loss regardless of which of the ~14 upstream hybrid_* authorities caused it. |
+| StoryValidator | `final_story_coherence_validation.py` | KEEP AS CORE (new; contradiction invariant, idea-coverage invariant, general lost-semantic-atoms coverage ledger against the ACTUAL final KEEP timeline (D-022), hard pre-Freeze gate via `freeze_blocked`). **D-090 authority boundary:** in LEGACY/SHADOW mode and in AUTHORITATIVE mode's first (pre-resolver, legacy-evidence) pass it still folds alternates to discard and resolves residual ambiguity via SemanticArbiter; in AUTHORITATIVE mode's post-resolver pass it is VALIDATION-ONLY (`apply_post_authority_story_validation`, `post_authority_validation.py`): it never edits membership, winners, composites, speech or order -- family bookkeeping is answered by the resolver's D-087 verdict through the shared `assess_authoritative_membership`, and a signature invariant fails closed on any drift. The pre-D-090 claim that StoryValidator is the last/final selection authority is RETIRED for AUTHORITATIVE mode; the one semantic Selection authority there is the Unified Realization Resolver, applied once. Per D-022, this is also the structural backstop for the CompositeResolver consolidation gap above: because it checks final `selected`/`discarded` content directly, it catches unique-fact/idea loss regardless of which of the ~14 upstream hybrid_* authorities caused it. |
 | SelectionFreeze | `selection_boundary_contract.py` (`freeze_selection_contract`/`enforce_selection_contract`) | KEEP AS CORE, unchanged |
 | BoundaryEngine | `final_boundary_authority.py`, `human_boundary_polish_v5.py`, speech-safe/microtrim guards | KEEP AS CORE, physical-only, unchanged. Also satisfies the canonical directive's audio/visual pacing QA requirement: `human_boundary_polish_v5.py` already consolidates the dead-air/reset pacing work older v1-v4 passes mixed with Selection responsibilities, using multimodal reset evidence (`_reset_score`/`_micro_reset_evidence`, reused from v2) rather than naive silence-length deletion, and is Boundary-only by construction. No new pacing module was built; pacing *quality* (as opposed to architecture) still needs empirical validation via Human Watch+Listen. |
 | Renderer | `render_plan.py`/`render.py` | KEEP AS CORE, unchanged (renders `selected` only, never `alternates`) |
@@ -9474,6 +9474,127 @@ POST-RESOLVER SEMANTIC MUTATORS: 0 (the index reports the resolver's own
 importance; placement reorders already-selected clips only).
 
 READY FOR ONE VIDEO00 CANARY: YES.
+
+## D-090 -- post-resolver StoryValidator immutability (authority boundary)
+
+**Trigger:** D-089 canary run 33960713625 (engine 40dde20). Resolver emitted
+RESOLVED_COMPOSITE [`real_40a2720d8631ff22ab43`, `real_bd71970e8f6d76052093`]
+for the hereditary family; StoryValidator's residual-family resolution (arbiter
+merge 0.9) then discarded one member; CanonicalEditPlan correctly failed closed
+(`realization_not_selected`); Freeze BLOCKED by a post-resolver semantic
+membership mutation -- two authorities disagreeing on one family's membership.
+
+**Root cause:** AUTHORITATIVE mode's second StoryValidator pass was the SAME
+legacy resolving code as the pre-resolver pass (`apply_final_story_coherence_
+validation`), so it re-asked the semantic-equivalence arbiter "same idea?" for a
+family the resolver had already ruled a complementary composite, and acted on
+the answer. Mutation points in that pass, enumerated: (1) alternates fold into
+discarded; (2) residual multi-select family collapse (`_resolve_residual_family`
+-> `discard_ids` -> `replace(draft, selected=..., discarded=...)`). Nothing else
+in the module edits membership.
+
+**Decision (implemented, offline only -- no Modal, no RAW):**
+
+1. `post_authority_validation.py` (new): `PostAuthorityValidationContext` --
+   the explicit typed contract built ONLY from the applied
+   `AuthoritativeApplicationResult` + the D-087 `AuthoritativePlanSource`
+   (status/decision consistency checked; `PostAuthorityIntegrityError` fails
+   closed). `semantic_selection_signature` (ordered clip id, realization id,
+   fragment parent, semantic idea, source span, canonical speech digest,
+   authority identity) + `compare_selection_signatures` = the executable
+   invariant: order-sensitive after StoryValidator, order-insensitive
+   (membership/speech/provenance/authority) after the bounded repair loop.
+2. `final_story_coherence_validation.apply_post_authority_story_validation`
+   (the one AUTHORITATIVE second-pass entry point; `universal_clean_cut.py`
+   imports and calls it). Mode is decided by the typed context alone -- never
+   by a diagnostics key, two selected clips, or a composite label. With the
+   context: no residual collapse, no arbiter call for membership, alternates
+   folded on a working copy for the coverage checks' VIEW only (buckets
+   returned untouched), contradiction / idea-coverage / lost-atom / lost-claim
+   checks unchanged (D-076/D-079 proofs and D-089 index still consumed).
+   Family bookkeeping: `canonical_edit_plan.assess_authoritative_membership`
+   (extracted from `build_canonical_edit_plan`, which now consumes it too) --
+   a structurally valid RESOLVED_COMPOSITE/RESOLVED_WINNER is
+   `authoritative_families_accepted`; REVIEW_REQUIRED, missing/unselected/
+   wrong-idea/extra member, missing critical claims, contradiction, or absent
+   decision -> `authority_membership_findings` (blocking) + `unresolved_
+   families`. Missing context -> `status: integrity_failure`,
+   `freeze_blocked: true`, draft untouched, NEVER the legacy resolving pass.
+   Without the context the legacy function is byte-for-byte unchanged
+   (LEGACY/SHADOW and the first AUTHORITATIVE pass); its diagnostics gain one
+   additive key `validation_mode: legacy_resolving`.
+3. `universal_clean_cut.py` AUTHORITATIVE branch: context built, signature
+   captured after authoritative application, validation invariant checked
+   after StoryValidator, repair-projection invariant checked after
+   `run_repair_loop`; `diagnostics["post_authority_validation"]` records
+   mode, context status, source identity, all three signatures, both
+   invariants, membership added/removed, speech/order/provenance changes,
+   accepted families, blocking findings. Any drift -> `stage_status.post_
+   authority_integrity_failure: true`, Freeze BLOCKED, `selection_boundary_
+   contract.status: not_frozen_post_authority_integrity_failure`; the mutated
+   draft is reported as-is (never silently restored) and the authoritative
+   source is never rebuilt from it. Workflow prints both new blocks.
+
+**Retired claim:** "StoryValidator is the last semantic authority allowed to
+touch membership" -- true only of the legacy resolving pass. In AUTHORITATIVE
+mode the ONE semantic Selection authority is the Unified Realization Resolver,
+applied once by `apply_authoritative_realization_resolution`; everything after
+it validates, represents, or reorders physically, and the D-090 invariant
+proves it.
+
+**RED reproduction (real import path, generic fixture -- no live texts/ids):**
+two same-claim-type CRITICAL diagnosis claims in one retry family (legacy
+ClaimCoverageBestTake declines the 2-piece composite on `types_a & types_b`
+exactly as live; resolver composites [A, B]) + an always-merge arbiter: before
+the fix StoryValidator discarded A, plan `realization_not_selected:real_A`,
+reviewer DUPLICATE_IDEA+UNRESOLVED_RETRY, NEEDS_HUMAN_REVIEW, Freeze BLOCKED.
+After: composite intact, plan complete, reviewer PASS, Freeze not blocked,
+arbiter never asked. Tests: `tests/test_cutsell_d090_post_authority_
+validation_immutability.py` (29: RED/GREEN reproduction, full-path composite,
+valid winner, fragment identity, REVIEW_REQUIRED / contradictory / missing /
+extra-member / no-decision blocking without rewrite, claim+atom loss active,
+alternates untouched, explicit mode, missing context fails closed (unit + full
+path), injected mutation in validation and in repair trips the invariant and
+is not restored, pure reorder passes the repair projection, signature
+speech/provenance/order/authority detection, D-089 placement + effective-
+importance retention, LEGACY/SHADOW parity, real wrapper path, shared
+assessment).
+
+**Out of scope, unchanged:** resolver decision logic, grouping/D-085,
+BestTake scoring, D-089 placement, effective-importance classification, Human
+Gold, Freeze/delivery policy, Boundary/Render/QC, Human Choice/SWAP.
+
+QUALIFICATION (offline): compileall clean (cutsell_worker, tests, benchmarks);
+StoryValidator / CanonicalEditPlan / repair-loop / D-046 / D-050C2-C3 / D-050D1
+/ D-056.3 / D-061 / D-076 / D-079 / D-087 / D-089 suites 258/258 + plan sweep
+195/195; new D-090 file 29/29; CleanCutBench 54/54 LEGACY and 54/54
+AUTHORITATIVE; full `tests/test_cutsell_*.py` glob 1970/1970 (1941 D-089
+baseline + 29 new); whole `tests/` directory 2594 passed (= 2565 D-089
+baseline + 29), the same 2 pre-existing unrelated failures D-081 identified
+(`test_hybrid_story_guard_incomplete_retry`, `test_video00_modal_hybrid_
+semantic_parity`) plus the pre-existing `tests/test_semantic_stitch.py`
+collection error (module-level `score_take()` call, untouched since 8077aa4)
+-- 0 new regressions.
+
+QA_ENGINE (self-review by the implementing session; NOT independently
+staffed): primary attack "can any post-authoritative validator still remove /
+restore / replace / reinterpret a selected realization?" -- StoryValidator
+post-authority pass returns `replace(draft)` (buckets untouched) and takes no
+semantic-equivalence arbiter at all; the only other post-authority stage
+before Freeze is the bounded repair loop (pure reorder), covered by the order-
+insensitive invariant; both invariants are exercised by injected mutations.
+Secondary attack "does read-only suppress real contradictions or losses?" --
+`_contradiction_findings` checks EVERY still-selected pair per family
+deterministically (a superset of the arbiter-gated rows the legacy collapse
+produced); atom/claim/idea-coverage checks run on the same folded view as
+before; unresolved families now BLOCK inside StoryValidator too (they were
+already blocked by the plan/reviewer, so no new false block). Findings
+introduced by D-090: P3 -- the authority-identity component of the signature
+is tautological in-pipeline (one source object, one digest string), it only
+guards a caller that rebuilds the source; P3 -- LEGACY diagnostics gain one
+additive key (`validation_mode`). Historical open: D-087 P3 (split-bucket
+realization represented from selected pieces only). POST_RESOLVER_SEMANTIC_
+MUTATORS in the AUTHORITATIVE path: 0 (was 1: StoryValidator residual collapse).
 
 ## Change rule
 

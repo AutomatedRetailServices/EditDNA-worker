@@ -464,27 +464,54 @@ def _validate_authoritative_composite(
     return resolved, tuple(failures)
 
 
-def build_canonical_edit_plan(draft, *, authoritative_source: AuthoritativePlanSource | None = None) -> CanonicalEditPlan:
-    """Build the CanonicalEditPlan from a draft that has already been through
-    Final Story Coherence Validation (so `diagnostics["final_story_
-    coherence_validation"]` and `take_judge_groups` are populated).
+@dataclass(frozen=True)
+class AuthoritativeGroupAssessment:
+    """D-090: one `take_judge_groups` family assessed against the resolved
+    draft AND (when present) the D-087 authoritative verdict for its
+    semantic idea. This is the ONE structural-membership assessment both
+    `build_canonical_edit_plan` (the plan's idea rows) and the post-
+    authority StoryValidator pass (`final_story_coherence_validation.
+    apply_post_authority_story_validation`, family bookkeeping) consume, so
+    the two can never disagree about whether a multi-member family is a
+    valid authoritative composite or a genuinely unresolved contest.
 
-    D-087: `authoritative_source` (AUTHORITATIVE resolver mode only -- see
-    the module-level SINGLE-TRUTH CONTRACT note) makes the Unified
-    Realization Resolver's own per-idea verdict the canonical source of
-    each idea's representation. When omitted, the draft's own
-    `diagnostics["authoritative_plan_source"]` is consulted (present only
-    on a draft the AUTHORITATIVE cutover produced); absent both, the
-    legacy composite-evidence path below runs byte-for-byte unchanged."""
+    `accepted_as_resolved` is True only for a RESOLVED_COMPOSITE / RESOLVED_
+    WINNER decision whose structural validation passed against the draft
+    (every named member selected, none outside the idea/group, no extra
+    unexplained selected member, contradiction-free). REVIEW_REQUIRED, a
+    missing decision, or any structural failure leaves it False -- nothing
+    is ever blindly exempted because a composite label exists."""
+    group_id: str
+    semantic_idea_id: str
+    member_clip_ids: tuple[str, ...]
+    legacy_winning_clip_ids: tuple[str, ...]
+    legacy_discarded_clip_ids: tuple[str, ...]
+    decision_status: str | None
+    winner_realization_id: str | None
+    composite_realization_ids: tuple[str, ...]
+    covered_canonical_claim_ids: tuple[str, ...]
+    decision_reason: str | None
+    plan_semantic_source: str
+    winning_clip_ids: tuple[str, ...]
+    is_composite: bool
+    coverage_status: str
+    resolved_clip_ids: tuple[str, ...]
+    structural_validation_passed: bool | None
+    structural_validation_failures: tuple[str, ...]
+    accepted_as_resolved: bool
+
+
+def assess_authoritative_membership(
+    draft, authoritative_source: AuthoritativePlanSource | None,
+) -> dict[str, AuthoritativeGroupAssessment]:
+    """Assess every `take_judge_groups` family of `draft` -- see
+    `AuthoritativeGroupAssessment`. With `authoritative_source=None` the
+    assessment is the legacy composite-evidence path only (D-025/D-056.3),
+    byte-for-byte what the pre-D-087 plan computed."""
     diagnostics = draft.diagnostics or {}
-    coherence = diagnostics.get("final_story_coherence_validation") or {}
     composite_ids = _composite_piece_ids(diagnostics)
     selected_ids = {clip.clip_id for clip in draft.selected}
     clip_by_id = {clip.clip_id: clip for clip in draft.selected}
-    if authoritative_source is None:
-        authoritative_source = authoritative_plan_source_from_diagnostics(
-            diagnostics.get("authoritative_plan_source")
-        )
     all_clips = _all_draft_clips(draft)
     clip_by_id_all = {clip.clip_id: clip for clip in all_clips}
     rid_by_clip: dict[str, str | None] = {}
@@ -515,8 +542,6 @@ def build_canonical_edit_plan(draft, *, authoritative_source: AuthoritativePlanS
         if own is not None:
             rids.add(own)
         return frozenset(rids)
-    authoritative_piece_ids: set[str] = set()
-    plan_semantic_source = PLAN_SOURCE_LEGACY if authoritative_source is None else PLAN_SOURCE_AUTHORITATIVE
     # D-046 FIX A: a `take_judge_groups` member that won Selection can be
     # physically split afterward (e.g. post_selection_interior_gap_trim's
     # speech-free-gap trim) into fragments whose own `clip_id`s differ from
@@ -534,7 +559,7 @@ def build_canonical_edit_plan(draft, *, authoritative_source: AuthoritativePlanS
         if (pid := effective_parent_semantic_clip_id(clip)) is not None
     }
 
-    ideas: list[EditPlanIdea] = []
+    assessments: dict[str, AuthoritativeGroupAssessment] = {}
     for group in diagnostics.get("take_judge_groups") or ():
         member_ids = [str(row.get("clip_id") or "") for row in (group.get("ranked") or ())]
         winning = tuple(
@@ -570,7 +595,8 @@ def build_canonical_edit_plan(draft, *, authoritative_source: AuthoritativePlanS
         else:
             coverage_status = "complete"
         group_id = str(group.get("group_id") or "")
-        idea_extra: dict = {}
+        member_clips = [clip_by_id_all[cid] for cid in member_ids if cid in clip_by_id_all]
+        semantic_idea_id = _group_semantic_idea_id(group_id, member_clips)
 
         # D-087: in AUTHORITATIVE mode the resolver's verdict is the
         # canonical source of this idea's representation. Everything above
@@ -578,17 +604,14 @@ def build_canonical_edit_plan(draft, *, authoritative_source: AuthoritativePlanS
         # the resolver recorded no decision for).
         decision = None
         if authoritative_source is not None:
-            member_clips = [clip_by_id_all[cid] for cid in member_ids if cid in clip_by_id_all]
-            semantic_idea_id = _group_semantic_idea_id(group_id, member_clips)
             decision = authoritative_source.decisions.get(semantic_idea_id)
+        plan_semantic_source = PLAN_SOURCE_LEGACY
+        structural_passed: bool | None = None
+        structural_failures: tuple[str, ...] = ()
+        resolved_clip_ids: tuple[str, ...] = ()
+        accepted_as_resolved = False
         if decision is not None:
-            idea_extra = {
-                "plan_semantic_source": PLAN_SOURCE_AUTHORITATIVE,
-                "authoritative_resolution_status": decision.decision_status,
-                "authoritative_composite_realization_ids": decision.composite_realization_ids,
-                "authoritative_claim_coverage": decision.covered_canonical_claim_ids,
-                "authoritative_decision_reason": decision.decision_reason,
-            }
+            plan_semantic_source = PLAN_SOURCE_AUTHORITATIVE
             rids_for_member = {cid: _rids_for_member(cid) for cid in member_ids}
             group_member_rids = frozenset().union(*rids_for_member.values()) if rids_for_member else frozenset()
             if decision.decision_status == _RESOLVED_COMPOSITE:
@@ -601,9 +624,9 @@ def build_canonical_edit_plan(draft, *, authoritative_source: AuthoritativePlanS
                     known_rids=frozenset(known_rids),
                     clip_by_id=clip_by_id,
                 )
-                idea_extra["structural_validation_passed"] = not failures
-                idea_extra["structural_validation_failures"] = failures
-                idea_extra["authoritative_resolved_clip_ids"] = resolved
+                structural_passed = not failures
+                structural_failures = tuple(failures)
+                resolved_clip_ids = tuple(resolved)
                 if not failures:
                     # Section 3: represent the resolver's composite --
                     # members in the resolver's own order, never re-sorted
@@ -611,7 +634,7 @@ def build_canonical_edit_plan(draft, *, authoritative_source: AuthoritativePlanS
                     winning = resolved
                     is_accepted_composite = True
                     coverage_status = "complete"
-                    authoritative_piece_ids.update(resolved)
+                    accepted_as_resolved = True
                 else:
                     # Section 6: BLOCK and explain -- never invent an
                     # alternative semantic answer. Keeping the family
@@ -634,30 +657,102 @@ def build_canonical_edit_plan(draft, *, authoritative_source: AuthoritativePlanS
                     failures.append(
                         "selected_members_differ_from_authoritative_winner:" + ",".join(winning)
                     )
-                idea_extra["structural_validation_passed"] = not failures
-                idea_extra["structural_validation_failures"] = tuple(failures)
-                idea_extra["authoritative_resolved_clip_ids"] = winner_clip_ids
+                structural_passed = not failures
+                structural_failures = tuple(failures)
+                resolved_clip_ids = winner_clip_ids
                 if failures and winning:
                     is_accepted_composite = False
                     coverage_status = "unresolved_ambiguous"
+                accepted_as_resolved = not failures and bool(winner_clip_ids)
             else:
                 # REVIEW_REQUIRED (or a malformed status): the resolver
                 # itself declined to decide -- the legacy representation
                 # above stands, which keeps such a family unresolved.
-                idea_extra["structural_validation_passed"] = None
-                idea_extra["structural_validation_failures"] = ()
+                structural_passed = None
+                structural_failures = ()
+        elif authoritative_source is not None:
+            structural_passed = None
+            structural_failures = ("no_authoritative_decision_recorded_for_group",)
+        assessments[group_id] = AuthoritativeGroupAssessment(
+            group_id=group_id,
+            semantic_idea_id=semantic_idea_id,
+            member_clip_ids=tuple(member_ids),
+            legacy_winning_clip_ids=tuple(
+                cid for cid in member_ids if cid in selected_ids or cid in selected_parent_ids
+            ),
+            legacy_discarded_clip_ids=discarded,
+            decision_status=decision.decision_status if decision is not None else None,
+            winner_realization_id=decision.winner_realization_id if decision is not None else None,
+            composite_realization_ids=tuple(decision.composite_realization_ids) if decision is not None else (),
+            covered_canonical_claim_ids=tuple(decision.covered_canonical_claim_ids) if decision is not None else (),
+            decision_reason=decision.decision_reason if decision is not None else None,
+            plan_semantic_source=plan_semantic_source,
+            winning_clip_ids=tuple(winning),
+            is_composite=is_accepted_composite,
+            coverage_status=coverage_status,
+            resolved_clip_ids=resolved_clip_ids,
+            structural_validation_passed=structural_passed,
+            structural_validation_failures=structural_failures,
+            accepted_as_resolved=accepted_as_resolved,
+        )
+    return assessments
+
+
+def build_canonical_edit_plan(draft, *, authoritative_source: AuthoritativePlanSource | None = None) -> CanonicalEditPlan:
+    """Build the CanonicalEditPlan from a draft that has already been through
+    Final Story Coherence Validation (so `diagnostics["final_story_
+    coherence_validation"]` and `take_judge_groups` are populated).
+
+    D-087: `authoritative_source` (AUTHORITATIVE resolver mode only -- see
+    the module-level SINGLE-TRUTH CONTRACT note) makes the Unified
+    Realization Resolver's own per-idea verdict the canonical source of
+    each idea's representation. When omitted, the draft's own
+    `diagnostics["authoritative_plan_source"]` is consulted (present only
+    on a draft the AUTHORITATIVE cutover produced); absent both, the
+    legacy composite-evidence path below runs byte-for-byte unchanged.
+
+    D-090: the per-family structural assessment lives in
+    `assess_authoritative_membership` (shared with the post-authority
+    StoryValidator pass); this function only turns it into plan rows."""
+    diagnostics = draft.diagnostics or {}
+    coherence = diagnostics.get("final_story_coherence_validation") or {}
+    composite_ids = _composite_piece_ids(diagnostics)
+    if authoritative_source is None:
+        authoritative_source = authoritative_plan_source_from_diagnostics(
+            diagnostics.get("authoritative_plan_source")
+        )
+    plan_semantic_source = PLAN_SOURCE_LEGACY if authoritative_source is None else PLAN_SOURCE_AUTHORITATIVE
+    authoritative_piece_ids: set[str] = set()
+
+    ideas: list[EditPlanIdea] = []
+    for assessment in assess_authoritative_membership(draft, authoritative_source).values():
+        idea_extra: dict = {}
+        if assessment.decision_status is not None:
+            idea_extra = {
+                "plan_semantic_source": PLAN_SOURCE_AUTHORITATIVE,
+                "authoritative_resolution_status": assessment.decision_status,
+                "authoritative_composite_realization_ids": assessment.composite_realization_ids,
+                "authoritative_claim_coverage": assessment.covered_canonical_claim_ids,
+                "authoritative_decision_reason": assessment.decision_reason,
+                "structural_validation_passed": assessment.structural_validation_passed,
+                "structural_validation_failures": assessment.structural_validation_failures,
+            }
+            if assessment.decision_status in (_RESOLVED_COMPOSITE, _RESOLVED_WINNER):
+                idea_extra["authoritative_resolved_clip_ids"] = assessment.resolved_clip_ids
+            if assessment.decision_status == _RESOLVED_COMPOSITE and assessment.structural_validation_passed:
+                authoritative_piece_ids.update(assessment.resolved_clip_ids)
         elif authoritative_source is not None:
             idea_extra = {
                 "plan_semantic_source": PLAN_SOURCE_LEGACY,
                 "structural_validation_passed": None,
-                "structural_validation_failures": ("no_authoritative_decision_recorded_for_group",),
+                "structural_validation_failures": assessment.structural_validation_failures,
             }
         ideas.append(EditPlanIdea(
-            idea_id=group_id,
-            winning_clip_ids=winning,
-            is_composite=is_accepted_composite,
-            discarded_clip_ids=discarded,
-            coverage_status=coverage_status,
+            idea_id=assessment.group_id,
+            winning_clip_ids=assessment.winning_clip_ids,
+            is_composite=assessment.is_composite,
+            discarded_clip_ids=assessment.legacy_discarded_clip_ids,
+            coverage_status=assessment.coverage_status,
             **idea_extra,
         ))
 

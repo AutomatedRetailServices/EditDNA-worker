@@ -575,7 +575,10 @@ reimplement them -- it places them under the roles and gates above.
   component map is intact (see D-053 Fix 1). Feeds `ENGINE_GATE`.
 - **StoryValidator** (`final_story_coherence_validation.py`) -- contradiction
   invariant, idea coverage, lost-semantic-atoms coverage ledger, lost-
-  critical-claims coverage, same-idea paraphrase credit (D-061). Feeds
+  critical-claims coverage, same-idea paraphrase credit (D-061). In
+  AUTHORITATIVE mode's post-resolver pass it is validation-only (D-090):
+  it reports and blocks, never edits the resolver's selection; the
+  `post_authority_validation.py` signature invariant enforces that. Feeds
   `ENGINE_GATE` and `QA_ENGINE`.
 - **FinalEditReviewer** (`final_edit_reviewer.py`) -- the bounded PASS/FAIL
   review before Selection Freeze (D-024). Feeds `ENGINE_GATE`.

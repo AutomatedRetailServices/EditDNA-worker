@@ -1,9 +1,36 @@
 """Final Story / Coherence Validation -- Clean Cut Core V1.
 
 Runs after Best-Take authority resolves decisive retry-family contests and
-before Selection Freeze. It is the last semantic authority allowed to touch
-membership; Boundary must never repair a semantic membership mistake (see
-CLAUDE.md / docs/CUTSELL_DECISIONS.md).
+before Selection Freeze. Boundary must never repair a semantic membership
+mistake (see CLAUDE.md / docs/CUTSELL_DECISIONS.md).
+
+## Authority boundary (D-090) -- read this before the rest
+
+This module has TWO invocation contracts, selected explicitly by the caller:
+
+  * LEGACY RESOLVING pass (`apply_final_story_coherence_validation` with no
+    `post_authority_context`): the pre-resolver pass -- LEGACY/SHADOW
+    resolver modes, and AUTHORITATIVE mode's first, legacy-evidence pass.
+    Here this module still resolves residual multi-select retry families
+    (bounded arbiter, fail-open) and folds alternates, exactly as it always
+    has. Byte-for-byte unchanged by D-090.
+
+  * POST-AUTHORITY VALIDATION-ONLY pass (`apply_post_authority_story_
+    validation`, AUTHORITATIVE mode's second pass, on the Unified
+    Realization Resolver's own applied selection): this module is NOT a
+    selection authority. It validates and reports; it never removes,
+    restores, re-winners, collapses, re-members, rewrites or reorders a
+    selected realization. Residual-family bookkeeping is answered by the
+    resolver's own D-087 verdict through `canonical_edit_plan.assess_
+    authoritative_membership` (a structurally valid RESOLVED_COMPOSITE is
+    accepted as resolved; anything else is reported as unresolved and
+    blocks); the semantic-equivalence arbiter is not consulted to re-decide
+    membership. The retired claim that StoryValidator is "the last semantic
+    authority allowed to touch membership" was true only of the legacy
+    pass; in AUTHORITATIVE mode the one semantic Selection authority is the
+    resolver, applied once (`apply_authoritative_realization_resolution`),
+    and `post_authority_validation.py`'s signature invariant enforces that
+    nothing after it -- this module included -- changes the selection.
 
 Clean Cut Core V1 product scope: SELECT/KEEP vs DISCARD only. SWAP is out of
 scope until explicitly reintroduced. This module is also where that becomes
@@ -114,6 +141,18 @@ from .semantic_idea_equivalence import (
     same_idea_by_pair_index,
     safe_check_idea_equivalence,
 )
+from .canonical_edit_plan import assess_authoritative_membership
+from .post_authority_validation import (
+    INTEGRITY_FAILURE_MISSING_CONTEXT,
+    LEGACY_RESOLVING_MODE,
+    POST_AUTHORITY_VALIDATION_MODE,
+    PostAuthorityValidationContext,
+    compare_selection_signatures,
+    mutation_report_to_diagnostics,
+    semantic_selection_signature,
+)
+
+PHASE_STORY_VALIDATION_INTERNAL = "story_validator_internal_self_check"
 
 
 def _fold_alternates_into_discarded(draft):
@@ -918,8 +957,29 @@ def apply_final_story_coherence_validation(
     # parameter docstring. None everywhere except AUTHORITATIVE mode's
     # second pass.
     canonical_effective_importance_index: Mapping[str, object] | None = None,
+    # D-090: the explicit, typed post-authority contract. When given, this
+    # call is the AUTHORITATIVE second pass and runs VALIDATION-ONLY (see
+    # `_apply_post_authority_validation_only`). Mode is decided by THIS
+    # parameter alone -- never inferred from a diagnostics key, from two
+    # selected clips, or from a composite label.
+    post_authority_context: PostAuthorityValidationContext | None = None,
 ):
-    """Last semantic authority before Selection Freeze. See module docstring."""
+    """Legacy resolving pass -- see the module docstring's authority
+    boundary. For the post-authority validation-only pass use
+    `apply_post_authority_story_validation` (or pass `post_authority_
+    context`); with `post_authority_context=None` this is byte-for-byte the
+    pre-D-090 behaviour."""
+    if post_authority_context is not None:
+        return _apply_post_authority_validation_only(
+            draft,
+            context=post_authority_context,
+            semantic_atom_importance_arbiter=semantic_atom_importance_arbiter,
+            claim_equivalence_arbiter=claim_equivalence_arbiter,
+            clause_role_arbiter=clause_role_arbiter,
+            semantic_preservation_proofs=semantic_preservation_proofs,
+            critical_claim_preservation_index=critical_claim_preservation_index,
+            canonical_effective_importance_index=canonical_effective_importance_index,
+        )
     draft = _fold_alternates_into_discarded(draft)
 
     take_by_id = {clip.clip_id: clip for clip in (*draft.selected, *draft.discarded)}
@@ -1039,8 +1099,235 @@ def apply_final_story_coherence_validation(
         # evidence that a suppression happened.
         "claim_coverage_confirmations": claim_coverage_confirmations,
         "freeze_blocked": freeze_blocked,
+        "validation_mode": LEGACY_RESOLVING_MODE,
         "not_implemented": [
             "general_non_numeric_non_negation_contradiction_detection",
         ],
     }
     return replace(draft, diagnostics=diagnostics)
+
+
+# ---------------------------------------------------------------------------
+# D-090: POST-AUTHORITY VALIDATION-ONLY PASS
+# ---------------------------------------------------------------------------
+
+AUTHORITY_FAMILY_ACCEPTED = "authoritative_composite_accepted_as_resolved"
+AUTHORITY_FAMILY_WINNER_ACCEPTED = "authoritative_winner_accepted_as_resolved"
+AUTHORITY_FAMILY_REVIEW_REQUIRED = "authoritative_review_required"
+AUTHORITY_FAMILY_STRUCTURAL_FAILURE = "authoritative_structural_validation_failed"
+AUTHORITY_FAMILY_NO_DECISION = "no_authoritative_decision_recorded_for_group"
+
+
+def _classify_family_under_authority(assessment) -> tuple[bool, str]:
+    """(accepted, reason) for one still-multi-select family under the
+    resolver's own verdict. Only a STRUCTURALLY VALID composite/winner is
+    accepted; the rest stay unresolved and block (Section 5: REVIEW_
+    REQUIRED, missing/unselected/wrong-idea/extra member, incomplete
+    required coverage, contradiction, absent decision)."""
+    if assessment is None or assessment.decision_status is None:
+        return False, AUTHORITY_FAMILY_NO_DECISION
+    if assessment.accepted_as_resolved:
+        if assessment.decision_status == "RESOLVED_COMPOSITE":
+            return True, AUTHORITY_FAMILY_ACCEPTED
+        return True, AUTHORITY_FAMILY_WINNER_ACCEPTED
+    if assessment.decision_status == "REVIEW_REQUIRED":
+        return False, AUTHORITY_FAMILY_REVIEW_REQUIRED
+    return False, AUTHORITY_FAMILY_STRUCTURAL_FAILURE
+
+
+def _apply_post_authority_validation_only(
+    draft,
+    *,
+    context: PostAuthorityValidationContext,
+    semantic_atom_importance_arbiter: SemanticAtomImportanceArbiter | None = None,
+    claim_equivalence_arbiter: ClaimEquivalenceArbiter | None = None,
+    clause_role_arbiter: ClauseRoleArbiter | None = None,
+    semantic_preservation_proofs: Mapping[str, object] | None = None,
+    critical_claim_preservation_index: Mapping[str, object] | None = None,
+    canonical_effective_importance_index: Mapping[str, object] | None = None,
+):
+    """StoryValidator after the one semantic authority has ruled: validate
+    and report on the resolver's applied selection, never edit it.
+
+    What this pass does NOT do (D-090 Section 4): remove/restore a selected
+    realization, change a winner, collapse or re-member a composite, move a
+    selected clip to discarded, rewrite selected speech, reorder the
+    sequence. `draft.selected` is returned exactly as received (the
+    returned draft differs only in `diagnostics`), and the internal
+    signature self-check below records that fact.
+
+    What it still does: fold `alternates` into `discarded` for the
+    coverage checks' VIEW of the draft (KEEP/DISCARD, D-019) -- the fold is
+    applied to a working copy for evaluation only and the returned draft
+    keeps its buckets untouched; the ordered `selected` sequence cannot be
+    affected by it either way; contradiction invariant; idea-coverage
+    invariant; lost-semantic-atom and lost-critical-claim checks (with the
+    D-076/D-079 proofs and the D-089 canonical effective-importance index,
+    unchanged); and authoritative FAMILY BOOKKEEPING via the very same
+    structural assessment CanonicalEditPlan uses, so a valid RESOLVED_
+    COMPOSITE is accepted as resolved without anyone re-asking the
+    semantic-equivalence arbiter whether its members are "the same idea".
+    """
+    signature_in = semantic_selection_signature(draft, authority_identity=context.source_identity)
+
+    working = _fold_alternates_into_discarded(draft)
+    folded_alternate_ids = [clip.clip_id for clip in (draft.alternates or ())]
+    take_by_id = {clip.clip_id: clip for clip in (*working.selected, *working.discarded)}
+    residual = _residual_multi_select_groups(working, take_by_id)
+    assessments = assess_authoritative_membership(working, context.plan_source)
+
+    accepted_families: list[dict] = []
+    unresolved_families: list[dict] = []
+    authority_membership_findings: list[dict] = []
+    for group in residual:
+        group_id = str(group.get("group_id") or "")
+        assessment = assessments.get(group_id)
+        accepted, reason = _classify_family_under_authority(assessment)
+        still_selected = [row["clip_id"] for row in group["still_selected"]]
+        row = {
+            "group_id": group_id,
+            "semantic_idea_id": assessment.semantic_idea_id if assessment is not None else None,
+            "still_selected_clip_ids": still_selected,
+            "authority_status": reason,
+            "decision_status": assessment.decision_status if assessment is not None else None,
+            "composite_realization_ids": list(assessment.composite_realization_ids) if assessment is not None else [],
+            "resolved_clip_ids": list(assessment.resolved_clip_ids) if assessment is not None else [],
+            "structural_validation_failures": list(assessment.structural_validation_failures) if assessment is not None else [],
+        }
+        if accepted:
+            accepted_families.append(row)
+        else:
+            unresolved_families.append(row)
+            authority_membership_findings.append({**row, "blocking": True})
+
+    possible_missing_ending = False
+    all_takes = sorted(
+        (*working.selected, *working.discarded),
+        key=lambda clip: (clip.source_order, clip.start, clip.end, clip.clip_id),
+    )
+    if all_takes:
+        selected_ids = {clip.clip_id for clip in working.selected}
+        last_by_source: dict[str, object] = {}
+        for clip in all_takes:
+            last_by_source[clip.source_asset_id] = clip
+        for last_clip in last_by_source.values():
+            if last_clip.clip_id not in selected_ids:
+                possible_missing_ending = True
+                break
+
+    contradiction_findings = _contradiction_findings(working, take_by_id)
+    missing_idea_coverage = _missing_idea_coverage(working)
+    lost_semantic_atoms = _lost_semantic_atoms(
+        working, semantic_atom_importance_arbiter=semantic_atom_importance_arbiter,
+        semantic_preservation_proofs=semantic_preservation_proofs,
+    )
+    lost_critical_claims, claim_coverage_confirmations = _lost_critical_claims(
+        working, claim_equivalence_arbiter=claim_equivalence_arbiter, clause_role_arbiter=clause_role_arbiter,
+        critical_claim_preservation_index=critical_claim_preservation_index,
+        canonical_effective_importance_index=canonical_effective_importance_index,
+    )
+    freeze_blocked = (
+        bool(contradiction_findings)
+        or bool(missing_idea_coverage)
+        or any(row.get("blocking", True) for row in lost_semantic_atoms)
+        or bool(lost_critical_claims)
+        or bool(authority_membership_findings)
+    )
+
+    # Internal self-check: the draft handed back carries the input's own
+    # buckets -- recorded, never "repaired" (the caller's boundary invariant
+    # in universal_clean_cut.py is the authoritative enforcement).
+    validated = replace(draft)
+    signature_out = semantic_selection_signature(validated, authority_identity=context.source_identity)
+    self_check = compare_selection_signatures(
+        signature_in, signature_out, phase=PHASE_STORY_VALIDATION_INTERNAL, order_sensitive=True,
+    )
+
+    diagnostics = dict(draft.diagnostics or {})
+    diagnostics["final_story_coherence_validation"] = {
+        "status": "applied",
+        "validation_mode": POST_AUTHORITY_VALIDATION_MODE,
+        "authoritative_source_identity": context.source_identity,
+        "authoritative_status": context.authoritative_status,
+        "alternates_folded_into_discard": bool(folded_alternate_ids),
+        "alternates_folded_for_evaluation_only": True,
+        "alternates_folded_clip_ids": folded_alternate_ids,
+        "residual_family_count": len(residual),
+        "residual_resolution": "disabled_post_authority_validation_only",
+        "resolved_family_count": 0,
+        "resolved_families": [],
+        "authoritative_families_accepted": accepted_families,
+        "authoritative_families_accepted_count": len(accepted_families),
+        "unresolved_family_count": len(unresolved_families),
+        "unresolved_families": unresolved_families,
+        "authority_membership_findings": authority_membership_findings,
+        "possible_missing_story_ending": possible_missing_ending,
+        "contradiction_findings": contradiction_findings,
+        "missing_idea_coverage": missing_idea_coverage,
+        "lost_semantic_atoms": lost_semantic_atoms,
+        "lost_critical_claims": lost_critical_claims,
+        "claim_coverage_confirmations": claim_coverage_confirmations,
+        "freeze_blocked": freeze_blocked,
+        "selection_mutation_self_check": mutation_report_to_diagnostics(self_check),
+        "not_implemented": [
+            "general_non_numeric_non_negation_contradiction_detection",
+        ],
+    }
+    return replace(validated, diagnostics=diagnostics)
+
+
+def apply_post_authority_story_validation(
+    draft,
+    *,
+    context: PostAuthorityValidationContext | None,
+    semantic_atom_importance_arbiter: SemanticAtomImportanceArbiter | None = None,
+    claim_equivalence_arbiter: ClaimEquivalenceArbiter | None = None,
+    clause_role_arbiter: ClauseRoleArbiter | None = None,
+    semantic_preservation_proofs: Mapping[str, object] | None = None,
+    critical_claim_preservation_index: Mapping[str, object] | None = None,
+    canonical_effective_importance_index: Mapping[str, object] | None = None,
+    integrity_failure: tuple[str, str] | None = None,
+):
+    """The ONE entry point for the AUTHORITATIVE second pass. Requires the
+    typed `context`; a missing context (or a caller-reported
+    `integrity_failure=(code, detail)` from building it) is recorded as a
+    fail-closed integrity failure -- `freeze_blocked=True`, draft returned
+    untouched -- and NEVER falls back to the legacy resolving pass."""
+    if context is None or integrity_failure is not None:
+        code, detail = integrity_failure or (
+            INTEGRITY_FAILURE_MISSING_CONTEXT, "post-authority validation invoked without authoritative context",
+        )
+        diagnostics = dict(draft.diagnostics or {})
+        diagnostics["final_story_coherence_validation"] = {
+            "status": "integrity_failure",
+            "validation_mode": POST_AUTHORITY_VALIDATION_MODE,
+            "integrity_failure": code,
+            "integrity_detail": detail,
+            "authoritative_source_identity": None,
+            "residual_family_count": 0,
+            "resolved_family_count": 0,
+            "resolved_families": [],
+            "authoritative_families_accepted": [],
+            "unresolved_family_count": 0,
+            "unresolved_families": [],
+            "authority_membership_findings": [],
+            "possible_missing_story_ending": False,
+            "contradiction_findings": [],
+            "missing_idea_coverage": [],
+            "lost_semantic_atoms": [],
+            "lost_critical_claims": [],
+            "claim_coverage_confirmations": [],
+            "freeze_blocked": True,
+            "not_implemented": [],
+        }
+        return replace(draft, diagnostics=diagnostics)
+    return _apply_post_authority_validation_only(
+        draft,
+        context=context,
+        semantic_atom_importance_arbiter=semantic_atom_importance_arbiter,
+        claim_equivalence_arbiter=claim_equivalence_arbiter,
+        clause_role_arbiter=clause_role_arbiter,
+        semantic_preservation_proofs=semantic_preservation_proofs,
+        critical_claim_preservation_index=critical_claim_preservation_index,
+        canonical_effective_importance_index=canonical_effective_importance_index,
+    )
