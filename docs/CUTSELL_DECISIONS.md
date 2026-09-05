@@ -9860,6 +9860,109 @@ BLOCKED by the pre-existing atom-level importance dual truth. HUMAN ACTION
 REQUIRED: YES (A/B/G) -- authorize or decline the proposed D-093 policy
 change. No second RAW without new authorization.
 
+## D-093 -- incidental-omission permit for `_lost_semantic_atoms` (post-authority only)
+
+**Authorization:** Product Owner accepted widening the D-090/D-092 scope to the
+importance inconsistency the D-092 canary exposed (run 33969388042, engine
+e4cd508, checkpoint d457e16). Product decision: an omission explicitly
+classified as incidental and non-required by the canonical authority must
+not block Freeze purely on low vocabulary overlap. Explicitly NOT authorized
+(and not done): treating every SUPPORTING claim as dispensable; using
+`retained_for_contextual_value` as sufficient evidence by itself; ignoring a
+useful fact next to an incidental aside; lowering general coverage floors;
+suppressing CRITICAL/UNCERTAIN losses; changing selection/grouping/winners/
+composites/order; modifying Human Gold; weakening Freeze or safety.
+
+**Root cause (D-092 canary):** `_lost_semantic_atoms`'s vocabulary
+`content_loss` signal (own>=5, missing>=4, coverage<0.45) is importance-blind
+and re-derived "required" for a realization the Resolver had ruled
+non-required and the canonical effective-importance index had downgraded
+(`incidental_source_exclusive_downgrade`) -- the same dual-truth D-088 found
+at claim level and D-089 fixed only for `_lost_critical_claims`.
+
+**Fix:** `final_story_coherence_validation._permit_incidental_omissions`,
+called ONLY from the post-authority validation pass (never LEGACY/SHADOW,
+never the first AUTHORITATIVE pass). A blocking REAL_CONTENT_LOSS row is
+downgraded to a non-blocking `PERMITTED_INCIDENTAL_OMISSION` only when ALL
+conjunctive guards hold: (1) it blocks through `content_loss` alone -- every
+missing number/negation atom is CONTEXTUAL (a CRITICAL/UNCERTAIN atom is never
+suppressed here); (2) canonical identity present (`realization_id` +
+`semantic_idea_id`); (3) the Resolver retained that realization as
+`retained_for_contextual_value` for that idea AND the idea's winner/composite
+members are selected AND the realization is a candidate of the idea (from the
+D-087 plan source) -- the resolver verdict is one guard, never sufficient;
+(4) canonical claims were actually extracted from the clip (absence of claims
+proves nothing) and EVERY one is explicitly justified in the canonical
+effective-importance index: exact canonical_claim_id, same idea, this
+realization among its sources, non-critical effective importance, and the
+authority's explicit `incidental_source_exclusive_downgrade` reason when
+source-exclusive (a plain SUPPORTING claim with `raw_importance_retained` is
+DENIED); a shared claim is justified only when a selected realization of the
+idea carries it; (5) mixed-clip guard: every missing content token must be
+attributable to a justified claim's own text -- any token outside is
+unclassified information and keeps the block. The row is never dropped: it
+keeps what is missing (atoms, coverage, tokens), records what may be omitted
+and why (`omission_evidence.justified_claims`, `omittable_tokens`,
+`resolver_verdict`, selected family realizations) and is explicitly marked
+`verified_semantic_preservation: false`. Denials record
+`omission_permit_denied_reason`. `PostAuthorityValidationContext` gained
+`retained_contextual_by_idea` / `resolved_realizations_by_idea`, read from
+the applied `idea_outcomes`. Diagnostics: `permitted_incidental_omissions`
+(+count) in the StoryValidator block; the RAW workflow prints the permit /
+denial evidence per lost-atom row. FinalEditReviewer needs no change: a
+non-blocking row routes to `warnings` (UNIQUE_FACT_LOST) exactly as D-031
+already specified for CONTEXTUAL-only rows.
+
+**Documented limits (not solved, not hidden):**
+- Rhetorical negation atom: when the aside's "no" token is absent from the
+  entire KEEP the atom classifier rates it CRITICAL and the permit never
+  applies (the live run happened to carry "no" elsewhere). Reconciling
+  atom-level negation with the claim-level downgrade is a separate decision.
+- Claim segmentation is the boundary: a low-information clause the extractor
+  folds INTO the incidental claim ("..., y mi hermana también.") is judged
+  incidental by the same canonical classifier and the permit follows that
+  single truth, listing every omitted token transparently; a fact in its own
+  clause/sentence is a separate claim and is denied unless itself justified.
+  No second classifier was invented to split clauses.
+
+**RED/GREEN (recovered case shape, real path):** legacy pass blocks the
+aside (coverage 0.29, atom "2023" CONTEXTUAL); post-authority pass permits it
+(row kept, non-blocking, evidence present), `lost_critical_claims: []` with
+the D-089 suppression row, reviewer PASS with UNIQUE_FACT_LOST as a warning,
+Freeze not blocked, D-090 invariants PASS, D-092 fold still applied.
+
+**Tests:** `tests/test_cutsell_d093_incidental_omission_permit.py` (23):
+RED/GREEN; CRITICAL negation atom keeps the block (limit); separate
+SUPPORTING fact denied; mixed clip with dosage never permitted (resolver
+makes it winner; nothing retained); missing identity denied; merged-clause
+limit documented; LEGACY/SHADOW never permit; permit-function matrix (not
+retained, winner not selected, not a candidate, claim missing from index,
+other idea, not sourced from realization, effective CRITICAL, SUPPORTING
+without incidental reason, shared claim not carried, mixed-clip token guard,
+no claims extracted, CRITICAL number atom, non-content-loss rows untouched).
+
+**QA (same session, disclosed; distinct adversarial pass with real
+ledger-derived indexes and forced retained verdicts):** same-topic different
+fact -> denied (effective CRITICAL); diagnosis aside and named-entity aside
+-> denied (no explicit incidental justification); dosage / percent /
+negation-fact asides -> denied (CRITICAL atom); recovered case and a pure
+year filler -> permitted; all rows JSON-serializable; permit reachable only
+from the post-authority pass. No new findings. Verdict PASS.
+
+**Qualification (offline):** compileall clean; affected suites 362/362
+(D-093 + D-090 + D-092 + D-089 + D-087 + StoryValidator + plan/reviewer +
+repair + D-050C2/C3 + D-056.3 + D-046A + universal_clean_cut + D-061/D-076/
+D-079/D-038/D-066/atom-importance); CleanCutBench 54/54 LEGACY and 54/54
+AUTHORITATIVE; full `tests/test_cutsell_*.py` 1999/1999 (1976 D-092 baseline
++ 23); whole `tests/` 2623 passed (= 2600 + 23), same 2 pre-existing
+unrelated failures and the pre-existing `test_semantic_stitch.py` collection
+error -- 0 new regressions.
+
+**State:** CODE FIXED / TESTS PASS / QA PASS (disclosed same-session). NEXT
+AUTOMATIC ACTION: none offline. Next step is ONE Video00 canary on this head
+to prove the permit live on the D-092 blocker shape and reach Freeze/Render
+-- stop condition C. HUMAN ACTION REQUIRED: YES (C only).
+
 ## Change rule
 
 When a new decision changes product behavior, update this file in the same development cycle. Do not silently redefine CutSell through code alone.

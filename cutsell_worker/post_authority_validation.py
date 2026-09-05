@@ -103,6 +103,16 @@ class PostAuthorityValidationContext:
     source_identity: str
     decision_count: int
     unresolved_orphan_count: int = 0
+    # D-093: the resolver's own per-idea verdict on realizations it kept OUT
+    # of the winning timeline deliberately -- `retained_for_contextual_value`
+    # (unique, non-required content it refused to silently drop) -- and the
+    # realization ids it selected (winner or composite members). Read
+    # straight from `AuthoritativeApplicationResult.idea_outcomes`; never
+    # recomputed. Consumed by the post-authority StoryValidator's incidental-
+    # omission permit as ONE of its required guards, never as sufficient
+    # evidence on its own.
+    retained_contextual_by_idea: Mapping[str, tuple[str, ...]] = field(default_factory=dict)
+    resolved_realizations_by_idea: Mapping[str, tuple[str, ...]] = field(default_factory=dict)
 
 
 def authoritative_source_identity(source: AuthoritativePlanSource) -> str:
@@ -154,12 +164,24 @@ def build_post_authority_validation_context(
             INTEGRITY_FAILURE_INVALID_CONTEXT,
             "plan source decisions do not match the applied idea outcomes",
         )
+    retained: dict[str, tuple[str, ...]] = {}
+    resolved: dict[str, tuple[str, ...]] = {}
+    for outcome in (getattr(authoritative_result, "idea_outcomes", ()) or ()):
+        idea_id = str(getattr(outcome, "semantic_idea_id", "") or "")
+        if not idea_id:
+            continue
+        retained[idea_id] = tuple(str(r) for r in (getattr(outcome, "retained_for_contextual_value", ()) or ()))
+        winner = getattr(outcome, "winner_realization_id", None)
+        composite = tuple(str(r) for r in (getattr(outcome, "composite_realization_ids", ()) or ()))
+        resolved[idea_id] = (str(winner),) if winner else composite
     return PostAuthorityValidationContext(
         authoritative_status=status,
         plan_source=plan_source,
         source_identity=authoritative_source_identity(plan_source),
         decision_count=len(decisions),
         unresolved_orphan_count=len(getattr(authoritative_result, "unresolved_orphan_realization_ids", ()) or ()),
+        retained_contextual_by_idea=retained,
+        resolved_realizations_by_idea=resolved,
     )
 
 

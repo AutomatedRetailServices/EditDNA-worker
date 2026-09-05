@@ -118,6 +118,7 @@ from .contracts import effective_parent_semantic_clip_id
 from .contradiction_signal import any_pair_contradicts, detect_text_contradiction
 from .final_sibling_grouping import _content, _negations, _numbers
 from .semantic_atom_importance import (
+    CONTEXTUAL as ATOM_CONTEXTUAL,
     SemanticAtomImportanceArbiter,
     blocks_freeze,
     classify_negation_atom,
@@ -1237,6 +1238,13 @@ def _apply_post_authority_validation_only(
         critical_claim_preservation_index=critical_claim_preservation_index,
         canonical_effective_importance_index=canonical_effective_importance_index,
     )
+    # D-093: incidental-omission permit -- post-authority pass only, fully
+    # guarded (see `_permit_incidental_omissions`).
+    lost_semantic_atoms, permitted_incidental_omissions = _permit_incidental_omissions(
+        lost_semantic_atoms, working, context=context,
+        canonical_effective_importance_index=canonical_effective_importance_index,
+        clause_role_arbiter=clause_role_arbiter,
+    )
     freeze_blocked = (
         bool(contradiction_findings)
         or bool(missing_idea_coverage)
@@ -1278,6 +1286,9 @@ def _apply_post_authority_validation_only(
         "lost_semantic_atoms": lost_semantic_atoms,
         "lost_critical_claims": lost_critical_claims,
         "claim_coverage_confirmations": claim_coverage_confirmations,
+        # D-093: permitted incidental omissions (rows kept above, non-blocking).
+        "permitted_incidental_omissions": permitted_incidental_omissions,
+        "permitted_incidental_omission_count": len(permitted_incidental_omissions),
         "freeze_blocked": freeze_blocked,
         "selection_mutation_self_check": mutation_report_to_diagnostics(self_check),
         "not_implemented": [
@@ -1285,6 +1296,180 @@ def _apply_post_authority_validation_only(
         ],
     }
     return replace(validated, diagnostics=diagnostics)
+
+
+# ---------------------------------------------------------------------------
+# D-093: INCIDENTAL-OMISSION PERMIT for `_lost_semantic_atoms` (post-authority only)
+# ---------------------------------------------------------------------------
+#
+# Product decision (D-093): an omission the canonical authority has
+# explicitly classified as incidental and non-required must not block Freeze
+# purely on low vocabulary overlap. NOT authorized: treating every SUPPORTING
+# claim as dispensable; using `retained_for_contextual_value` as sufficient
+# evidence by itself; ignoring a useful fact because it sits next to an
+# incidental aside; lowering the general coverage floors; suppressing a
+# CRITICAL or UNCERTAIN atom loss. Every guard below is therefore
+# conjunctive, and any missing identity, incomplete evidence or conflict
+# keeps the original blocking row untouched (with the denial reason recorded).
+
+PERMITTED_INCIDENTAL_OMISSION = "PERMITTED_INCIDENTAL_OMISSION"
+OMISSION_PERMITTED_BY = "canonical_effective_importance"
+_INCIDENTAL_DOWNGRADE_REASON = "incidental_source_exclusive_downgrade"
+
+
+def _permit_incidental_omissions(
+    rows: list[dict], draft, *,
+    context: PostAuthorityValidationContext,
+    canonical_effective_importance_index: Mapping[str, object] | None,
+    clause_role_arbiter: ClauseRoleArbiter | None = None,
+) -> tuple[list[dict], list[dict]]:
+    """Return (rows, permitted) where `rows` is the same list with a blocking
+    REAL_CONTENT_LOSS row downgraded to a non-blocking PERMITTED_INCIDENTAL_
+    OMISSION only when ALL of the following hold; otherwise the row is kept
+    blocking and `omission_permit_denied_reason` records why:
+
+      1. the row blocks ONLY through the vocabulary `content_loss` signal:
+         every missing number/negation atom is CONTEXTUAL (a CRITICAL or
+         UNCERTAIN atom keeps the block -- never suppressed here);
+      2. the clip carries canonical identity: a stamped `realization_id`
+         and `semantic_idea_id` (D-050A);
+      3. the Resolver itself ruled that realization non-required for its
+         idea (`retained_for_contextual_value`) AND the idea's own winner /
+         composite members are selected in the final KEEP;
+      4. canonical claims were actually extracted from the clip (the mere
+         absence of claims proves nothing) and EVERY one of them is
+         explicitly justified: an index entry for the exact canonical_claim_
+         id, belonging to this idea and naming this realization as a source,
+         with non-critical effective importance and the authority's explicit
+         incidental reason (`incidental_source_exclusive_downgrade`) when the
+         claim is source-exclusive; a claim shared with another realization
+         of the idea is justified only when a selected realization of the
+         idea carries it;
+      5. mixed-clip guard: every missing content token is attributable to one
+         of those justified incidental claims' own text. A missing token
+         outside them is unclassified information and keeps the block.
+
+    The row is never dropped: what is missing, what may be omitted and why
+    are all recorded, and the row is explicitly marked as NOT a verified
+    semantic preservation."""
+    permitted: list[dict] = []
+    if not rows:
+        return rows, permitted
+    selected_rids = {
+        str(getattr(c, "realization_id", None) or "") for c in draft.selected if getattr(c, "realization_id", None)
+    }
+    kept_content = _content(" ".join(str(c.text or "") for c in draft.selected))
+    discarded_by_id = {c.clip_id: c for c in draft.discarded}
+    index = canonical_effective_importance_index or {}
+
+    def deny(row: dict, reason: str) -> None:
+        row["omission_permit_denied_reason"] = reason
+
+    for row in rows:
+        if not row.get("blocking") or row.get("classification") != "REAL_CONTENT_LOSS":
+            continue
+        # Guard 1: content-loss-only rows.
+        if any(str(c.get("importance")) != ATOM_CONTEXTUAL for c in row.get("atom_classifications", ())):
+            deny(row, "critical_or_uncertain_atom_missing"); continue
+        if row.get("missing_critical_atoms") and len(row.get("atom_classifications", ())) != len(row.get("missing_critical_atoms", ())):
+            deny(row, "atom_classification_incomplete"); continue
+        clip = discarded_by_id.get(str(row.get("clip_id") or ""))
+        if clip is None:
+            deny(row, "clip_not_in_discarded"); continue
+        # Guard 2: canonical identity.
+        rid = str(getattr(clip, "realization_id", None) or "")
+        idea_id = str(getattr(clip, "semantic_idea_id", None) or "")
+        if not rid or not idea_id:
+            deny(row, "missing_identity"); continue
+        # Guard 3: the Resolver's own verdict + selected family winner.
+        if rid not in (context.retained_contextual_by_idea.get(idea_id) or ()):
+            deny(row, "resolver_did_not_retain_as_contextual"); continue
+        resolved_rids = tuple(context.resolved_realizations_by_idea.get(idea_id) or ())
+        if not resolved_rids or not all(r in selected_rids for r in resolved_rids):
+            deny(row, "family_winner_not_selected"); continue
+        decision = context.plan_source.decisions.get(idea_id)
+        if decision is None or rid not in (decision.candidate_realization_ids or ()):
+            deny(row, "realization_not_a_candidate_of_idea"); continue
+        # Guard 4: every extracted canonical claim explicitly justified.
+        text = str(clip.text or "")
+        claims = extract_claims(clip.clip_id, text, clause_role_arbiter=clause_role_arbiter)
+        if not claims:
+            deny(row, "no_canonical_claims_extracted"); continue
+        justified: list[dict] = []
+        denial = None
+        for claim in claims:
+            entry = index.get(claim.canonical_claim_id)
+            if entry is None or str(getattr(entry, "canonical_claim_id", "")) != claim.canonical_claim_id:
+                denial = f"claim_not_in_canonical_index:{claim.canonical_claim_id}"; break
+            if str(getattr(entry, "semantic_idea_id", "") or "") != idea_id:
+                denial = f"claim_belongs_to_other_idea:{claim.canonical_claim_id}"; break
+            entry_rids = tuple(getattr(entry, "source_realization_ids", ()) or ())
+            if rid not in entry_rids:
+                denial = f"claim_not_sourced_from_realization:{claim.canonical_claim_id}"; break
+            effective = str(getattr(entry, "effective_importance", CLAIM_CRITICAL))
+            if effective == CLAIM_CRITICAL:
+                denial = f"claim_effective_importance_critical:{claim.canonical_claim_id}"; break
+            reason = str(getattr(entry, "reason", "") or "")
+            source_exclusive = bool(getattr(entry, "source_exclusive", True))
+            if source_exclusive:
+                if reason != _INCIDENTAL_DOWNGRADE_REASON:
+                    denial = f"omission_not_explicitly_justified:{claim.canonical_claim_id}:{reason or 'no_reason'}"; break
+            else:
+                if not any(r in selected_rids for r in entry_rids if r != rid):
+                    denial = f"shared_claim_not_carried_by_selected_realization:{claim.canonical_claim_id}"; break
+            justified.append({
+                "canonical_claim_id": claim.canonical_claim_id,
+                "claim_id": claim.claim_id,
+                "claim_type": claim.claim_type,
+                "claim_text": claim.text,
+                "raw_importance": claim.importance,
+                "effective_importance": effective,
+                "importance_resolution_reason": reason,
+                "source_exclusive": source_exclusive,
+                "source_realization_ids": list(entry_rids),
+                "justification": (
+                    "authority_classified_incidental_non_required" if source_exclusive
+                    else "carried_by_selected_realization_of_same_idea"
+                ),
+            })
+        if denial is not None:
+            deny(row, denial); continue
+        # Guard 5: mixed-clip -- every missing token must belong to a
+        # justified claim's own text.
+        own_content = _content(text)
+        missing_content = sorted(own_content - kept_content)
+        omittable = set()
+        for j in justified:
+            omittable |= _content(str(j["claim_text"] or ""))
+        unclassified = sorted(tok for tok in missing_content if tok not in omittable)
+        if unclassified:
+            deny(row, "unclassified_information_in_missing_tokens:" + ",".join(unclassified)); continue
+        # All guards passed: downgrade, keep the evidence, never relabel as
+        # verified preservation.
+        row["blocking"] = False
+        row["classification"] = PERMITTED_INCIDENTAL_OMISSION
+        row["omission_permitted_by"] = OMISSION_PERMITTED_BY
+        row["omission_evidence"] = {
+            "realization_id": rid,
+            "semantic_idea_id": idea_id,
+            "resolver_verdict": "retained_for_contextual_value",
+            "selected_family_realization_ids": list(resolved_rids),
+            "missing_content_tokens": missing_content,
+            "omittable_tokens": sorted(tok for tok in missing_content if tok in omittable),
+            "justified_claims": justified,
+            "verified_semantic_preservation": False,
+            "note": "permitted omission of authority-classified incidental content; not a preservation proof",
+        }
+        permitted.append({
+            "clip_id": clip.clip_id,
+            "realization_id": rid,
+            "semantic_idea_id": idea_id,
+            "coverage_against_final_keep": row.get("coverage_against_final_keep"),
+            "missing_content_tokens": missing_content,
+            "justified_claim_ids": [j["canonical_claim_id"] for j in justified],
+            "text": text,
+        })
+    return rows, permitted
 
 
 def apply_post_authority_story_validation(
