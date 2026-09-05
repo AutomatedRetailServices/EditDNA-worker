@@ -12,8 +12,10 @@ from .canonical_identity import (
     mint_retry_family_id,
     mint_semantic_idea_id,
 )
+from .claim_coverage_best_take import critical_coverage_sets, resolve_critical_coverage_dominance
 from .clean_cut import apply_clean_cut
 from .clean_cut_provider import CleanCutProvider, apply_provider_judgements, safe_clean_cut_judge
+from .contradiction_signal import any_pair_contradicts
 from .composer import compose_selected
 from .composer_provider import ComposerProvider, safe_compose_order
 from .contracts import (
@@ -97,9 +99,11 @@ def _semantic_best_take(
     members: tuple[CandidateTake, ...],
     semantic_decisions: dict[str, tuple[str, float]],
     local_selected_clip_id: str,
+    ranked: tuple = (),
     *,
     winner_confidence: float = 0.85,
-) -> tuple[str, str | None]:
+    semantic_delete_recommended: dict[str, bool] | None = None,
+) -> tuple[str, str | None, str]:
     """Honor one clear semantic winner only inside an already-proven retry group.
 
     Hybrid session cleanup sees the full message and may recognize which delivery is the
@@ -107,18 +111,113 @@ def _semantic_best_take(
     but a unique medium-high semantic winner may override a tiny local score difference.
     This can never create a group: it only chooses among members the deterministic
     grouping stage already proved to be competing retries.
+
+    D-082: when semantic labels are NOT decisive (zero or 2+ "winner" labels
+    -- the exact D-080 sonography shape, where labels degraded from a
+    decisive {"failed", "winner"} to a non-actionable {"keep", "keep"}
+    across two live runs on byte-identical DeliveryScorer scores), this no
+    longer falls straight to `local_selected_clip_id` (the raw,
+    completeness-blind DeliveryScorer rank -- D-080's proven root cause).
+    It instead consults, in order, deterministic evidence this codebase
+    already computes elsewhere -- no new authority, no weighted scoring:
+
+      1. D-081 `semantic_delete_recommended` evidence (soft: a candidate
+         carrying it is excluded from consideration unless that would
+         eliminate every candidate -- same "WHEN UNCERTAIN, KEEP" fail-open
+         rule as every other check below, and never a second irreversible
+         delete authority -- D-081/D-082 Section 12);
+      2. attempt completeness (`CandidateTake.complete_idea`, the exact
+         signal `take_judge.score_take` already weights for delivery
+         scoring -- soft, same fail-open rule: only an EXPLICIT False
+         excludes, never an unset/unknown value);
+      3. D-063/D-065/D-066 CRITICAL_COVERAGE_DOMINANCE, reused verbatim via
+         `claim_coverage_best_take.resolve_critical_coverage_dominance` --
+         never reimplemented, including its own safety gates (never prefers
+         a proven-incomplete candidate, never overrides a real
+         contradiction);
+      4. only once dominance finds no single winner AND the survivors'
+         CRITICAL-claim coverage sets are genuinely IDENTICAL (a true tie)
+         does the local DeliveryScorer ranking get to decide among them --
+         its proper role once content is effectively tied (D-082 Section
+         8/10). A genuinely disjoint/asymmetric coverage split (distinct
+         unique facts, neither a superset of the other) is left exactly as
+         it was -- `local_selected_clip_id`, this function's own pre-D-082
+         safe default -- rather than forcing delivery to pick a side
+         (D-082 Section 7: "remain unresolved / preserve safe behavior").
+
+    Any step that finds nothing decisive falls open to the next one; the
+    final fallback is always `local_selected_clip_id`, never worse than
+    today's behavior for a genuinely unresolved family.
     """
     winners = []
     for member in members:
         label, confidence = semantic_decisions.get(member.clip_id, ("", 0.0))
         if label == "winner" and confidence >= winner_confidence:
             winners.append((member.clip_id, confidence))
-    if len(winners) != 1:
-        return local_selected_clip_id, None
-    preferred_id, _ = winners[0]
-    if preferred_id == local_selected_clip_id:
-        return local_selected_clip_id, preferred_id
-    return preferred_id, preferred_id
+    if len(winners) == 1:
+        preferred_id, _ = winners[0]
+        if preferred_id == local_selected_clip_id:
+            return local_selected_clip_id, preferred_id, "single_semantic_winner"
+        return preferred_id, preferred_id, "single_semantic_winner"
+
+    member_ids = [member.clip_id for member in members]
+    by_id = {member.clip_id: member for member in members}
+    if len(member_ids) < 2:
+        return local_selected_clip_id, None, "single_member_no_contest"
+
+    def _exclude_unless_all(ids: list[str], excluded: set[str]) -> list[str]:
+        survivors = [cid for cid in ids if cid not in excluded]
+        return survivors if survivors else list(ids)
+
+    # Step 1: D-081 semantic-delete-recommended evidence.
+    delete_recommended_ids = {
+        cid for cid in member_ids if (semantic_delete_recommended or {}).get(cid, False)
+    }
+    survivors = _exclude_unless_all(member_ids, delete_recommended_ids)
+
+    # Step 2: attempt completeness.
+    incomplete_ids = {cid for cid in survivors if by_id[cid].complete_idea is False}
+    survivors = _exclude_unless_all(survivors, incomplete_ids)
+
+    if len(survivors) >= 2:
+        members_pairs = [(cid, by_id[cid]) for cid in member_ids]
+
+        # Step 3/4: D-063/D-065/D-066 CRITICAL_COVERAGE_DOMINANCE, reused.
+        dominant_id, _hindsight_rows = resolve_critical_coverage_dominance(members_pairs, survivors)
+        if dominant_id is not None:
+            if dominant_id == local_selected_clip_id:
+                return local_selected_clip_id, dominant_id, "critical_coverage_dominance"
+            return dominant_id, dominant_id, "critical_coverage_dominance"
+
+        # Step 5: unique-required-fact safety -- delivery may only settle a
+        # GENUINE tie, never an asymmetric/disjoint split. A defensive
+        # second check reuses `any_pair_contradicts` (the SAME safety gate
+        # `_critical_coverage_dominant_candidate` itself already applies
+        # internally) directly on the surviving texts: two candidates that
+        # factually contradict each other must never be handed to delivery
+        # merely because their CRITICAL-claim coverage sets happened to
+        # look identical (e.g. a negated and non-negated claim minted under
+        # colliding canonical ids).
+        coverage = critical_coverage_sets(members_pairs, survivors)
+        if coverage:
+            coverage_values = list(coverage.values())
+            if any(value != coverage_values[0] for value in coverage_values[1:]):
+                return local_selected_clip_id, None, "unresolved_unique_fact_asymmetry"
+        if any_pair_contradicts([str(by_id[cid].text or "") for cid in survivors]):
+            return local_selected_clip_id, None, "unresolved_contradiction"
+
+    # Steps 6-9: delivery score / richness tie-break among the surviving,
+    # safe candidate set -- delivery's proper role once content is
+    # effectively tied.
+    rank_by_id = {row.clip_id: row.score for row in ranked}
+    survivor_ranked = [cid for cid in survivors if cid in rank_by_id]
+    if survivor_ranked:
+        best = max(survivor_ranked, key=lambda cid: rank_by_id[cid])
+        if best == local_selected_clip_id:
+            return local_selected_clip_id, None, "delivery_tie_break_among_survivors"
+        return best, best, "delivery_tie_break_among_survivors"
+
+    return local_selected_clip_id, None, "local_fallback"
 
 
 def build_flow_b_draft(
@@ -209,6 +308,22 @@ def build_flow_b_draft(
         clip_id: (label, float(confidence))
         for clip_id, label, confidence in hybrid_cleanup.semantic_decisions
     }
+    # D-082 Section 12: surface D-081's semantic_delete_recommended evidence
+    # (recorded per-window inside hybrid_cleanup.diagnostics, never
+    # destructive on its own) so _semantic_best_take's non-decisive-label
+    # fallback can treat it as soft negative evidence. OR-across windows:
+    # if any window flagged the candidate, that evidence is never silently
+    # dropped, matching D-081's own "never discard the evidence" posture.
+    hybrid_semantic_delete_recommended: dict[str, bool] = {}
+    for diagnostic in hybrid_cleanup.diagnostics:
+        for decision in diagnostic.get("decisions") or ():
+            clip_id = decision.get("clip_id")
+            if not clip_id:
+                continue
+            if decision.get("semantic_delete_recommended"):
+                hybrid_semantic_delete_recommended[clip_id] = True
+            else:
+                hybrid_semantic_delete_recommended.setdefault(clip_id, False)
 
     # D-050D1: `realization_id` is minted once, above, before Pass 1 even
     # starts -- every member of `kept` here already carries it (see the
@@ -287,10 +402,12 @@ def build_flow_b_draft(
         if judged.status.reason:
             judge_reasons[judged.status.reason] += 1
         local_selected_clip_id = ranked[0].clip_id
-        selected_clip_id, semantic_preferred_clip_id = _semantic_best_take(
+        selected_clip_id, semantic_preferred_clip_id, semantic_best_take_reason = _semantic_best_take(
             members,
             hybrid_semantic_decisions,
             local_selected_clip_id,
+            ranked,
+            semantic_delete_recommended=hybrid_semantic_delete_recommended,
         )
         if semantic_preferred_clip_id and selected_clip_id != local_selected_clip_id:
             semantic_best_take_override_count += 1
@@ -312,6 +429,7 @@ def build_flow_b_draft(
                 "local_selected_clip_id": local_selected_clip_id,
                 "semantic_preferred_clip_id": semantic_preferred_clip_id,
                 "semantic_override_applied": selected_clip_id != local_selected_clip_id,
+                "semantic_best_take_reason": semantic_best_take_reason,
                 "semantic_candidates": [
                     {
                         "clip_id": member.clip_id,

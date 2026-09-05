@@ -8776,6 +8776,121 @@ Then STOP.
 
 No Modal. No RAW.
 
+## D-082 -- non-decisive semantic label fallback: authoritative Best-Take stability
+
+Closes D-081's own carried-forward P1: `pipeline.py::_semantic_best_take`
+fell straight through to the raw, completeness-blind local (DeliveryScorer)
+rank whenever `take_judge_groups`'s semantic-candidate labels were
+non-decisive (zero or 2+ "winner" labels) -- the exact D-080 sonography
+mechanism, where labels degraded from a decisive `{"failed","winner"}` to a
+non-actionable `{"keep","keep"}` across two live runs on byte-identical
+DeliveryScorer scores.
+
+CANONICAL FALLBACK ORDER: when semantic labels are decisive (exactly one
+"winner"), behavior is byte-identical to before D-082. When they are not,
+`_semantic_best_take` now consults, in order, deterministic evidence this
+codebase already computes elsewhere -- no new authority, no weighted
+scoring:
+1. D-081 `semantic_delete_recommended` evidence (soft exclusion, unless it
+   would eliminate every candidate);
+2. attempt completeness (`CandidateTake.complete_idea`, the exact signal
+   `take_judge.score_take` already weights -- soft, same fail-open rule);
+3/4. D-063/D-065/D-066 CRITICAL_COVERAGE_DOMINANCE, reused verbatim via the
+   new `claim_coverage_best_take.resolve_critical_coverage_dominance`
+   (factored out of `apply_claim_coverage_best_take`'s own already-
+   multi-selected-family branch so both callers share one dominance
+   decision -- never reimplemented, never two copies);
+5. unique-required-fact safety: delivery may only settle a candidate set
+   whose CRITICAL-claim coverage (`claim_coverage_best_take.
+   critical_coverage_sets`, the same per-candidate coverage sets dominance
+   itself computes, exposed read-only) is genuinely IDENTICAL across
+   survivors -- a disjoint/asymmetric split is left exactly as it was
+   (`local_selected_clip_id`, the pre-D-082 safe default), never forced.
+   Hardened with a direct `any_pair_contradicts` re-check (the SAME safety
+   gate dominance's own internal implementation already uses) so a genuine
+   factual contradiction can never reach delivery even if two coverage sets
+   ever looked identical by claim-identity coincidence;
+6-9. only once nothing above resolved it does the local DeliveryScorer
+   ranking decide among the surviving, safe candidates -- delivery's proper
+   role once content is effectively tied.
+
+Any step finding nothing decisive falls open to the next; the final
+fallback is always `local_selected_clip_id`, never worse than pre-D-082
+behavior for a genuinely unresolved family.
+
+MONKEYPATCH COMPANION FIX (required, not optional): `semantic_best_take_
+integrity.py`'s `install_semantic_best_take_integrity()` replaces
+`pipeline._semantic_best_take` at import time with a wrapper carrying three
+independent, already-tested legacy tie-break heuristics (`_prefer_clear_
+nonfailed_peer`, `_prefer_information_rich_tied_winner`, `_prefer_complete_
+peer_with_preserved_critical_facts`) layered on top of whatever the base
+function returns. Its signature/return arity hard-coded the pre-D-082
+3-positional-argument, 2-tuple contract -- updated (mechanically, its own
+internal logic and precedence order untouched) to accept the new `ranked`/
+`semantic_delete_recommended` parameters, pass them through to `original`,
+and return the new 3-tuple `(selected, preferred, reason)`. Without this
+companion fix every real invocation through the package's normal import
+path would raise `TypeError` on the missing `ranked` argument.
+
+TESTS: 3 pre-existing `tests/test_cutsell_semantic_best_take.py` cases
+updated for the new 3-tuple return contract (one also gained an explicit
+`ranked=()` expectation for the genuine "nothing to consult" case). New
+`tests/test_cutsell_d082_non_decisive_semantic_fallback.py` (15 tests): the
+core sonography stability regression (decisive AND non-decisive label
+variants, both correctly selecting the complete candidate); winner/winner
+variance preferring the objectively more complete candidate; a 5-shape
+model-label-variance matrix (`failed/winner`, `keep/keep`, `winner/winner`,
+`keep/winner`, `failed/keep`) proving invariant final selection; critical
+coverage precedence over delivery; two genuinely distinct critical facts
+staying unresolved; a richer-but-explicitly-incomplete candidate never
+dominating solely on word count; delivery correctly deciding a genuine tie;
+D-081 evidence integration (soft exclusion, and confirmation it never
+eliminates a whole group); three sales/UGC generalizations (a required
+claim winning despite a lower delivery score, delivery favoring a cleaner
+take when nothing required is at stake, and a price/offer claim winning
+over a higher delivery score); decisive-label byte-identical regression;
+and a QA_ENGINE-hardening test proving a genuine contradiction never reaches
+delivery even with a large score gap in the contradicting candidate's
+favor.
+
+QUALIFICATION: compileall clean; targeted D-050 through D-082 sweep (558
+tests) all pass; CleanCutBench 54/54, run twice; full `tests/` suite
+(same 2 pre-existing, unrelated exclusions as D-081, confirmed unrelated) --
+2457 passed (2442 D-081 baseline + 15 new D-082 tests), 0 new regressions.
+
+QA_ENGINE VERDICT: PASS, after one hardening fix applied during self-review
+(the direct `any_pair_contradicts` re-check in Step 5, described above --
+a genuine contradiction could in principle have reached delivery if two
+coverage sets ever collided to look identical; closed before this report,
+not left as an open finding). Primary attacks run: higher DeliveryScore
+beating a complete lower-score take (blocked by completeness/dominance
+running first); a richer-but-unusable take beating a clean usable one
+(blocked by the completeness exclusion, tested); unique fact loss (the
+per-group single-winner model is pre-existing and unchanged by D-082 --
+StoryValidator's own independent `_lost_critical_claims`/`_lost_semantic_
+atoms` backstops remain the safety net for whatever a group's winner does
+not cover, exactly as before); two genuinely distinct critical facts forced
+into one winner (blocked, tested); model-label variance changing the final
+result despite decisive deterministic evidence (tested invariant across 5
+label shapes); delivery no longer functioning when content is genuinely
+tied (tested, still works).
+
+SCOPE NOTE: `hybrid_group_cleanup.py`'s own, differently-shaped destructive
+delete (flagged as dead code, unreachable in the live pipeline, during
+D-081's own QA_ENGINE pass) remains untouched -- still correctly out of
+scope, not rediscovered as newly relevant here.
+
+P0: 0
+P1: 0
+P2: 0
+P3: 0
+
+READY FOR CONTROLLED STABILITY BATTERY: YES.
+
+Then STOP.
+
+No Modal. No RAW.
+
 ## Change rule
 
 When a new decision changes product behavior, update this file in the same development cycle. Do not silently redefine CutSell through code alone.

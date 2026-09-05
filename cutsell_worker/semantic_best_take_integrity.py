@@ -208,14 +208,23 @@ def install_semantic_best_take_integrity() -> None:
         members,
         semantic_decisions,
         local_selected_clip_id,
+        ranked=(),
         *,
         winner_confidence=0.85,
+        semantic_delete_recommended=None,
     ):
-        selected, preferred = original(
+        # D-082: `original` (pipeline._semantic_best_take) now takes `ranked`
+        # and returns a 3-tuple (selected, preferred, reason) -- passed
+        # through unchanged here; this wrapper's own three extra checks
+        # below are unmodified and still layer on top, in the same order,
+        # as an additional, independently-tested safety net.
+        selected, preferred, reason = original(
             members,
             semantic_decisions,
             local_selected_clip_id,
+            ranked,
             winner_confidence=winner_confidence,
+            semantic_delete_recommended=semantic_delete_recommended,
         )
 
         critical_peer = _prefer_complete_peer_with_preserved_critical_facts(
@@ -224,7 +233,7 @@ def install_semantic_best_take_integrity() -> None:
             selected,
         )
         if critical_peer is not None:
-            return critical_peer, critical_peer
+            return critical_peer, critical_peer, "critical_peer_preserved_facts"
 
         if preferred is None and selected == local_selected_clip_id:
             richer = _prefer_information_rich_tied_winner(
@@ -234,10 +243,10 @@ def install_semantic_best_take_integrity() -> None:
                 winner_confidence_floor=winner_confidence,
             )
             if richer is not None:
-                return richer, richer
+                return richer, richer, "information_rich_tied_winner"
 
         if preferred is not None or selected != local_selected_clip_id:
-            return selected, preferred
+            return selected, preferred, reason
 
         safer = _prefer_clear_nonfailed_peer(
             members,
@@ -245,8 +254,8 @@ def install_semantic_best_take_integrity() -> None:
             local_selected_clip_id,
         )
         if safer is None:
-            return selected, preferred
-        return safer, safer
+            return selected, preferred, reason
+        return safer, safer, "clear_nonfailed_peer_preferred"
 
     semantic_best_take_with_integrity._cutsell_semantic_best_take_integrity = True
     pipeline._semantic_best_take = semantic_best_take_with_integrity

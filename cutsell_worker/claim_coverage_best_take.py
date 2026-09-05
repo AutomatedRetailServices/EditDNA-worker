@@ -457,6 +457,112 @@ def _critical_coverage_dominant_candidate(
     return winner_id
 
 
+def resolve_critical_coverage_dominance(
+    members: list[tuple[str, object]],
+    candidate_ids: list[str],
+    *,
+    claim_equivalence_arbiter: ClaimEquivalenceArbiter | None = None,
+    clause_role_arbiter: ClauseRoleArbiter | None = None,
+) -> tuple[str | None, tuple[dict, ...]]:
+    """D-063/D-065/D-066 CRITICAL_COVERAGE_DOMINANCE, including its
+    hindsight-alignment pre-step, factored out of `apply_claim_coverage_
+    best_take`'s own already-multi-selected-family branch so every caller
+    shares the exact same dominance decision -- never two independently
+    maintained copies of the same contract (D-082 Section 6: "Reuse
+    existing D-063 CRITICAL_COVERAGE_DOMINANCE. Do NOT reimplement it.").
+
+    `members` supplies the full pool `_all_group_claims` extracts every
+    claim from (any importance, any candidate -- needed so a hindsight
+    alignment partner can be found even outside `candidate_ids`, exactly
+    as the original inline call did with the group's own `members`).
+    `candidate_ids` is the subset actually being compared for dominance
+    (`apply_claim_coverage_best_take`'s own `current_winners`; D-082's
+    non-decisive-semantic-label member set in `pipeline.py`).
+
+    Returns `(dominant_id_or_None, hindsight_alignment_diagnostics)` --
+    the diagnostics rows carry no `group_id` (the caller's own concern);
+    callers that track a group id add it themselves, same as before this
+    refactor.
+    """
+    all_clips = {cid: clip for cid, clip in members}
+    dominance_all_claims = _all_group_claims(members, clause_role_arbiter=clause_role_arbiter)
+    dominance_critical_claims = tuple(c for c in dominance_all_claims if c.importance == CRITICAL)
+    if not dominance_critical_claims:
+        return None, ()
+
+    # D-065/D-066: for every CONTRASTIVE_HINDSIGHT_NEGATION-eligible
+    # critical claim in this family, search for an arbiter-confirmed
+    # claim-vs-claim equivalence among the family's own non-protected
+    # reflective claims BEFORE computing dominance -- see module
+    # docstring's own D-065/D-066 section.
+    hindsight_alignments: dict[str, object] = {}
+    hindsight_arbiter_log: list[dict] = []
+    hindsight_diagnostics: list[dict] = []
+    for claim in dominance_critical_claims:
+        if claim.negation_role != CONTRASTIVE_HINDSIGHT_NEGATION:
+            continue
+        aligned = _find_hindsight_alignment(
+            claim, dominance_all_claims,
+            claim_equivalence_arbiter=claim_equivalence_arbiter,
+            arbiter_log=hindsight_arbiter_log,
+        )
+        consultations = [
+            row for row in hindsight_arbiter_log if row["negation_claim_id"] == claim.claim_id
+        ]
+        hindsight_diagnostics.append({
+            "claim_id": claim.claim_id,
+            "claim_text": claim.text,
+            "negation_role": claim.negation_role,
+            "aligned_claim_id": aligned.claim_id if aligned is not None else None,
+            "aligned_claim_text": aligned.text if aligned is not None else None,
+            "arbiter_invoked": bool(consultations),
+            "arbiter_consultations": consultations,
+            "coverage_unit_relation": "merged" if aligned is not None else "unmerged",
+            "reason": (
+                "claim_vs_claim_equivalence_arbiter_confirmed" if aligned is not None
+                else "no_arbiter_confirmed_equivalent_reflective_claim_found"
+            ),
+        })
+        if aligned is not None:
+            hindsight_alignments[claim.claim_id] = aligned
+
+    dominant_id = _critical_coverage_dominant_candidate(
+        candidate_ids, all_clips, dominance_critical_claims,
+        claim_equivalence_arbiter=claim_equivalence_arbiter,
+        hindsight_alignments=hindsight_alignments,
+    )
+    return dominant_id, tuple(hindsight_diagnostics)
+
+
+def critical_coverage_sets(
+    members: list[tuple[str, object]],
+    candidate_ids: list[str],
+    *,
+    claim_equivalence_arbiter: ClaimEquivalenceArbiter | None = None,
+    clause_role_arbiter: ClauseRoleArbiter | None = None,
+) -> dict[str, frozenset]:
+    """D-082 Section 7 support: the per-candidate CRITICAL-claim coverage
+    sets `resolve_critical_coverage_dominance` itself computes internally,
+    exposed so a caller can distinguish WHY dominance returned None --
+    identical coverage (a true tie, safe for delivery to decide) from
+    genuinely disjoint/asymmetric coverage (distinct unique facts, must
+    stay unresolved) -- without duplicating `_critical_coverage_dominant_
+    candidate`'s own dominance algorithm or its safety gates. Returns an
+    empty dict when there are no CRITICAL claims in the group at all
+    (nothing to distinguish on)."""
+    all_clips = {cid: clip for cid, clip in members}
+    dominance_all_claims = _all_group_claims(members, clause_role_arbiter=clause_role_arbiter)
+    critical_claims = tuple(c for c in dominance_all_claims if c.importance == CRITICAL)
+    if not critical_claims:
+        return {}
+    return {
+        cid: _covered_claim_ids(
+            critical_claims, str(all_clips[cid].text or ""), arbiter=claim_equivalence_arbiter,
+        )
+        for cid in candidate_ids
+    }
+
+
 def _time_compatible(left, right) -> bool:
     if left.source_asset_id != right.source_asset_id:
         return False
@@ -526,53 +632,17 @@ def apply_claim_coverage_best_take(
             # StoryValidator/FinalEditReviewer's existing
             # DUPLICATE_IDEA+UNRESOLVED_RETRY block, check whether exactly
             # one currently-selected candidate strictly dominates every
-            # other on CRITICAL-claim coverage. See module docstring and
-            # `_critical_coverage_dominant_candidate`'s own docstring for
-            # the full contract.
-            dominance_all_claims = _all_group_claims(members, clause_role_arbiter=clause_role_arbiter)
-            dominance_critical_claims = tuple(c for c in dominance_all_claims if c.importance == CRITICAL)
-            # D-065/D-066: for every CONTRASTIVE_HINDSIGHT_NEGATION-eligible
-            # critical claim in this family, search for an arbiter-
-            # confirmed claim-vs-claim equivalence among the family's own
-            # non-protected reflective claims BEFORE computing dominance --
-            # see module docstring's own D-065/D-066 section.
-            hindsight_alignments: dict[str, object] = {}
-            hindsight_arbiter_log: list[dict] = []
-            for claim in dominance_critical_claims:
-                if claim.negation_role != CONTRASTIVE_HINDSIGHT_NEGATION:
-                    continue
-                aligned = _find_hindsight_alignment(
-                    claim, dominance_all_claims,
-                    claim_equivalence_arbiter=claim_equivalence_arbiter,
-                    arbiter_log=hindsight_arbiter_log,
-                )
-                consultations = [
-                    row for row in hindsight_arbiter_log if row["negation_claim_id"] == claim.claim_id
-                ]
-                hindsight_alignment_diagnostics.append({
-                    "group_id": group_id,
-                    "claim_id": claim.claim_id,
-                    "claim_text": claim.text,
-                    "negation_role": claim.negation_role,
-                    "aligned_claim_id": aligned.claim_id if aligned is not None else None,
-                    "aligned_claim_text": aligned.text if aligned is not None else None,
-                    "arbiter_invoked": bool(consultations),
-                    "arbiter_consultations": consultations,
-                    "coverage_unit_relation": "merged" if aligned is not None else "unmerged",
-                    "reason": (
-                        "claim_vs_claim_equivalence_arbiter_confirmed" if aligned is not None
-                        else "no_arbiter_confirmed_equivalent_reflective_claim_found"
-                    ),
-                })
-                if aligned is not None:
-                    hindsight_alignments[claim.claim_id] = aligned
-            dominant_id = (
-                _critical_coverage_dominant_candidate(
-                    current_winners, all_clips, dominance_critical_claims,
-                    claim_equivalence_arbiter=claim_equivalence_arbiter,
-                    hindsight_alignments=hindsight_alignments,
-                )
-                if dominance_critical_claims else None
+            # other on CRITICAL-claim coverage. See module docstring,
+            # `_critical_coverage_dominant_candidate`'s own docstring, and
+            # (D-082) `resolve_critical_coverage_dominance`'s own docstring
+            # for the full contract.
+            dominant_id, hindsight_rows = resolve_critical_coverage_dominance(
+                members, current_winners,
+                claim_equivalence_arbiter=claim_equivalence_arbiter,
+                clause_role_arbiter=clause_role_arbiter,
+            )
+            hindsight_alignment_diagnostics.extend(
+                {**row, "group_id": group_id} for row in hindsight_rows
             )
             if dominant_id is not None:
                 for cid in current_winners:
