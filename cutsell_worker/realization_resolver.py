@@ -2236,6 +2236,128 @@ def build_preserved_claim_id_index(
     return index
 
 
+# ---------------------------------------------------------------------------
+# D-089 Part A: CANONICAL EFFECTIVE-IMPORTANCE SINGLE TRUTH
+#
+# Live defect (D-088 forensic, run 33957582102): the SAME canonical claim id
+# was raw CRITICAL in `semantic_claims.extract_claims` (a NEGATION-typed
+# sentence carrying a rhetorical aside), effectively SUPPORTING in the
+# Ledger's requirement-group view (`_effective_importance`: incidental +
+# source-exclusive), treated as non-required by this resolver (RESOLVED_
+# WINNER, missing_critical_claim_ids empty, the loser retained as a
+# contextual alternate) and by ClaimCoverageBestTake (`suppressed_
+# incidental_overrides`), and then re-extracted as raw CRITICAL by
+# StoryValidator's `_lost_critical_claims`, which emitted CRITICAL_CLAIM_LOST
+# and blocked Freeze. Two importance truths for one canonical proposition.
+#
+# This index is the ONE authoritative, deterministic per-canonical-claim
+# importance lookup StoryValidator consumes. It invents no classifier: the
+# effective importance is exactly the requirement-group importance the
+# resolver itself computes (`build_requirement_groups` -> `_effective_
+# importance`, the shared `_is_low_information_incidental` + source-
+# exclusivity rule), computed per idea over the idea's own realizations'
+# claims -- the same inputs `_resolve_one_idea` uses. Keyed strictly by
+# canonical_claim_id; a consumer must match the EXACT id (never idea id,
+# clip similarity or topic). A canonical id that appears in more than one
+# idea with disagreeing effective importance fails closed to CRITICAL.
+# ---------------------------------------------------------------------------
+
+EFFECTIVE_IMPORTANCE_RAW_RETAINED = "raw_importance_retained"
+EFFECTIVE_IMPORTANCE_INCIDENTAL_SOURCE_EXCLUSIVE = "incidental_source_exclusive_downgrade"
+EFFECTIVE_IMPORTANCE_CROSS_IDEA_CONFLICT = "cross_idea_conflict_fail_closed"
+
+
+@dataclass(frozen=True)
+class EffectiveClaimImportance:
+    canonical_claim_id: str
+    claim_type: str
+    text: str
+    raw_importance: str
+    effective_importance: str
+    reason: str
+    semantic_idea_id: str
+    requirement_group_id: str
+    source_realization_ids: tuple[str, ...]
+    source_exclusive: bool
+
+
+def build_effective_claim_importance_index(
+    ledger: SemanticLedger, *, claim_equivalence_arbiter: ClaimEquivalenceArbiter | None = None,
+) -> dict[str, EffectiveClaimImportance]:
+    """D-089 Section 2: canonical_claim_id -> the authoritative effective
+    importance of that exact proposition, derived from the Ledger's own
+    per-idea requirement groups (the identical `build_requirement_groups`
+    call `_resolve_one_idea` makes, with the same optional arbiter). Pure
+    function of Ledger state; deterministic (ideas and claims are visited
+    in sorted order)."""
+    realizations = ledger.realizations()
+    claims_by_id = ledger.claims()
+    index: dict[str, EffectiveClaimImportance] = {}
+    for idea_id in sorted(ledger.ideas()):
+        idea = ledger.ideas()[idea_id]
+        candidate_ids = tuple(sorted(idea.realization_ids))
+        idea_claims = [
+            claims_by_id[cid]
+            for rid in candidate_ids if rid in realizations
+            for cid in realizations[rid].claim_ids if cid in claims_by_id
+        ]
+        if not idea_claims:
+            continue
+        groups = build_requirement_groups(idea_claims, claim_equivalence_arbiter=claim_equivalence_arbiter)
+        for group in groups:
+            for canonical_claim_id in group.member_claim_ids:
+                claim = claims_by_id.get(canonical_claim_id)
+                if claim is None:
+                    continue
+                source_rids = tuple(sorted(set(claim.source_realization_ids) & set(candidate_ids))) or tuple(claim.source_realization_ids)
+                source_exclusive = len(set(source_rids)) <= 1
+                if claim.importance == _CRITICAL and group.importance != _CRITICAL:
+                    reason = EFFECTIVE_IMPORTANCE_INCIDENTAL_SOURCE_EXCLUSIVE
+                else:
+                    reason = EFFECTIVE_IMPORTANCE_RAW_RETAINED
+                entry = EffectiveClaimImportance(
+                    canonical_claim_id=canonical_claim_id, claim_type=claim.claim_type, text=claim.text,
+                    raw_importance=claim.importance, effective_importance=group.importance, reason=reason,
+                    semantic_idea_id=idea_id, requirement_group_id=group.group_id,
+                    source_realization_ids=source_rids, source_exclusive=source_exclusive,
+                )
+                existing = index.get(canonical_claim_id)
+                if existing is None:
+                    index[canonical_claim_id] = entry
+                elif existing.effective_importance != entry.effective_importance:
+                    # Section 6: one canonical id, two authoritative answers
+                    # -> never the weaker one. Fail closed to CRITICAL.
+                    index[canonical_claim_id] = replace(
+                        existing, effective_importance=_CRITICAL, reason=EFFECTIVE_IMPORTANCE_CROSS_IDEA_CONFLICT,
+                        semantic_idea_id=existing.semantic_idea_id,
+                    )
+    return index
+
+
+def build_effective_claim_importance_diagnostics(index: Mapping[str, EffectiveClaimImportance]) -> dict:
+    """JSON-safe view for `diagnostics["canonical_effective_importance"]`:
+    every entry whose effective importance differs from its raw one (the
+    only rows that can change a StoryValidator outcome) plus counts."""
+    rows = [
+        {
+            "canonical_claim_id": e.canonical_claim_id, "claim_type": e.claim_type, "text": e.text,
+            "raw_importance": e.raw_importance, "effective_importance": e.effective_importance,
+            "reason": e.reason, "semantic_idea_id": e.semantic_idea_id,
+            "requirement_group_id": e.requirement_group_id,
+            "source_realization_ids": list(e.source_realization_ids), "source_exclusive": e.source_exclusive,
+        }
+        for e in sorted(index.values(), key=lambda e: e.canonical_claim_id)
+        if e.effective_importance != e.raw_importance or e.reason == EFFECTIVE_IMPORTANCE_CROSS_IDEA_CONFLICT
+    ]
+    return {
+        "schema_version": "cutsell.canonical_effective_importance.v1",
+        "claim_count": len(index),
+        "downgraded_count": sum(1 for r in rows if r["effective_importance"] != r["raw_importance"]),
+        "cross_idea_conflict_count": sum(1 for r in rows if r["reason"] == EFFECTIVE_IMPORTANCE_CROSS_IDEA_CONFLICT),
+        "entries": rows,
+    }
+
+
 def resolve_orphan_realizations_shadow(
     ledger: SemanticLedger, *, claim_equivalence_arbiter: ClaimEquivalenceArbiter | None = None,
 ) -> tuple[OrphanRealizationReview, ...]:
@@ -2858,39 +2980,67 @@ class AuthoritativeApplicationResult:
     status: str  # SEMANTICALLY_RESOLVED | REVIEW_REQUIRED
     idea_outcomes: tuple[AuthoritativeIdeaOutcome, ...]
     unresolved_orphan_realization_ids: tuple[str, ...]
+    # D-089 Part B Section 12: one row per restoration placement unit
+    # (`_place_restored_clips_at_story_position`), observability only.
+    # Defaulted so every pre-D-089 construction site stays valid.
+    story_placement: tuple[dict, ...] = ()
 
 
 def _realization_id_of(clip) -> str:
     return str(getattr(clip, "realization_id", None) or clip.clip_id)
 
 
+PLACEMENT_UNIT_COMPOSITE_BLOCK = "AUTHORITATIVE_COMPOSITE_BLOCK"
+PLACEMENT_UNIT_WINNER_REPLACEMENT = "SINGLE_WINNER_REPLACEMENT"
+PLACEMENT_UNIT_NO_ANCHOR_APPEND = "NO_ANCHOR_APPEND"
+
+
 def _place_restored_clips_at_story_position(
-    kept_selected: list, restored: list, original_selected, *, ideas_by_realization: Mapping[str, str],
+    kept_selected: list, restored: list, original_selected, *,
+    ideas_by_realization: Mapping[str, str],
+    composite_order_by_idea: Mapping[str, tuple[str, ...]] | None = None,
+    placement_log: list[dict] | None = None,
 ) -> list:
-    """D-087 Section 12 (STORY ORDER): a clip this application moves INTO
-    `selected` from `alternates`/`discarded` must land at its idea's
-    canonical story position, not at the end of the timeline.
+    """D-087 Section 12 / D-089 Part B (STORY ORDER): a clip this
+    application moves INTO `selected` from `alternates`/`discarded` must
+    land at its idea's canonical story position -- never at the end of the
+    timeline, never inside another idea's composite, never between a
+    departed winner's own predecessor and successor.
 
-    Before D-087 the rebuild loop appended every restored clip after all
-    originally-selected clips (it iterates selected, then alternates, then
-    discarded) -- live consequence on run 33952982672: the resolver's own
-    RESOLVED_COMPOSITE restored the clean hindsight lead-in (previously
-    legacy-discarded) to `selected`, but as the LAST clip, after the CTA,
-    instead of consecutively after its diagnosis sibling.
+    D-088 live defect (run 33957582102): B (a composite member) was placed
+    right after its sibling A, then the acne winner replacement was ALSO
+    anchored "after the last original kept predecessor" (= A) and landed
+    ahead of B -- splitting the authoritative composite A->B and the
+    physical continuation "...resolvía con" -> "resorcina.".
 
-    Placement is purely positional and membership-preserving -- the set of
-    selected clips is exactly what the resolver decided, unchanged:
-      * a restored clip whose idea still has an originally-selected sibling
-        in `kept_selected` (the composite shape) is inserted adjacent to
-        that sibling group, before or after it by recording start time
-        (composite members stay consecutive, in recording order);
-      * a restored clip whose idea's originally-selected sibling(s) LEFT
-        `selected` (the winner-replacement shape) takes the slot the first
-        departing sibling occupied in the original order;
-      * a restored clip with no selected sibling at all keeps the pre-D-087
-        behavior: appended, in original bucket order.
+    Placement is expressed as deterministic RESTORATION UNITS, applied to
+    the CURRENT sequence in a stable order:
+
+      * AUTHORITATIVE_COMPOSITE_BLOCK -- every selected member of an idea
+        that (a) has an explicit resolver composite order, or (b) still has
+        an originally-selected sibling, placed ATOMICALLY as one contiguous
+        block in the resolver's member order (recording start only breaks
+        ties / orders members with no explicit order). The block occupies
+        the story position of its earliest originally-selected member.
+      * SINGLE_WINNER_REPLACEMENT -- a restored idea whose originally-
+        selected sibling(s) LEFT `selected` takes the departed winner's
+        ACTUAL slot: immediately before the first ORIGINAL successor of the
+        departed clip that is still in the sequence (never inside a placed
+        block -- the block head is used instead); only when no successor
+        survives, immediately after the last surviving original
+        predecessor; else the front.
+      * NO_ANCHOR_APPEND -- no idea context at all: appended (the pre-D-087
+        behavior), in original bucket order.
+
+    Units are processed blocks first (by anchor story position, then idea
+    id), then replacements (by departed original index, then idea id), then
+    appends (by recording start, then clip id) -- so output never depends
+    on `restored`'s iteration order. Membership is untouched by
+    construction: every input clip appears exactly once in the output.
     Sibling identity is the resolver's own idea membership
-    (`ideas_by_realization`, from the Ledger) -- never text similarity."""
+    (`ideas_by_realization`, from the Ledger) -- never text similarity.
+    `placement_log` (Section 12 diagnostics) receives one row per unit."""
+    composite_order_by_idea = dict(composite_order_by_idea or {})
     if not restored:
         return list(kept_selected)
 
@@ -2899,44 +3049,172 @@ def _place_restored_clips_at_story_position(
         stamped = getattr(clip, "semantic_idea_id", None)
         return ideas_by_realization.get(rid) or (str(stamped) if stamped else None)
 
-    result = list(kept_selected)
-    kept_ids = {c.clip_id for c in kept_selected}
-    original_order = [c for c in original_selected]
-    placed_ids: set[str] = set()
+    def _ids(seq):
+        return [c.clip_id for c in seq]
 
+    original_order = list(original_selected)
+    original_index = {c.clip_id: i for i, c in enumerate(original_order)}
+    kept_ids = {c.clip_id for c in kept_selected}
+    restored_ids = {c.clip_id for c in restored}
+    seq = list(kept_selected)
+    block_of: dict[str, str] = {}      # clip_id -> block idea id, once a block is placed
+    block_members: dict[str, list[str]] = {}
+
+    def _member_sort_key(idea_id):
+        order = composite_order_by_idea.get(idea_id) or ()
+        rank = {rid: i for i, rid in enumerate(order)}
+
+        def key(clip):
+            rid = _realization_id_of(clip)
+            return (rank.get(rid, len(rank)), float(clip.start), clip.clip_id)
+        return key
+
+    restored_by_idea: dict[str, list] = {}
+    unanchored: list = []
     for clip in restored:
         idea_id = _idea_of(clip)
         if idea_id is None:
-            continue
-        kept_siblings = [i for i, c in enumerate(result) if c.clip_id != clip.clip_id and _idea_of(c) == idea_id]
-        if kept_siblings:
-            # Composite shape: keep members consecutive, in recording order.
-            earlier = [i for i in kept_siblings if result[i].start <= clip.start]
-            insert_at = (earlier[-1] + 1) if earlier else kept_siblings[0]
-            result.insert(insert_at, clip)
-            placed_ids.add(clip.clip_id)
-            continue
+            unanchored.append(clip)
+        else:
+            restored_by_idea.setdefault(idea_id, []).append(clip)
+
+    blocks: list[tuple[tuple, str, list]] = []
+    replacements: list[tuple[tuple, str, list, list]] = []
+    for idea_id, clips in restored_by_idea.items():
+        kept_members = [c for c in seq if _idea_of(c) == idea_id]
         departed = [
             c for c in original_order
-            if c.clip_id not in kept_ids and c.clip_id != clip.clip_id and _idea_of(c) == idea_id
+            if c.clip_id not in kept_ids and c.clip_id not in restored_ids and _idea_of(c) == idea_id
         ]
-        if departed:
-            # Winner-replacement shape: take the departing sibling's slot --
-            # the position right after whichever originally-selected clip
-            # preceded that sibling and is still selected.
-            departed_index = next(i for i, c in enumerate(original_order) if c.clip_id == departed[0].clip_id)
-            preceding_kept = [c.clip_id for c in original_order[:departed_index] if c.clip_id in kept_ids or c.clip_id in placed_ids]
-            if preceding_kept:
-                anchor = max(i for i, c in enumerate(result) if c.clip_id in preceding_kept)
-                result.insert(anchor + 1, clip)
-            else:
-                result.insert(0, clip)
-            placed_ids.add(clip.clip_id)
+        if kept_members or idea_id in composite_order_by_idea:
+            anchor_pos = min((original_index.get(c.clip_id, len(original_order)) for c in kept_members), default=len(original_order))
+            if not kept_members and departed:
+                anchor_pos = original_index.get(departed[0].clip_id, len(original_order))
+            blocks.append(((anchor_pos, idea_id), idea_id, sorted(kept_members + clips, key=_member_sort_key(idea_id))))
+        elif departed:
+            replacements.append(((original_index[departed[0].clip_id], idea_id), idea_id, sorted(clips, key=lambda c: (float(c.start), c.clip_id)), departed))
+        else:
+            unanchored.extend(clips)
 
-    for clip in restored:
-        if clip.clip_id not in placed_ids:
-            result.append(clip)  # pre-D-087 behavior: no sibling context at all
-    return result
+    def _log(row):
+        if placement_log is not None:
+            placement_log.append(row)
+
+    def _departed_slot(departed):
+        """(insert_index, successor_id, predecessor_id, reason) against the CURRENT seq."""
+        current_index = {c.clip_id: i for i, c in enumerate(seq)}
+        departed_positions = [original_index[c.clip_id] for c in departed]
+        first_departed = min(departed_positions)
+        successor_id = predecessor_id = None
+        for candidate in original_order[first_departed + 1:]:
+            if candidate.clip_id in current_index:
+                successor_id = candidate.clip_id
+                break
+        if successor_id is not None:
+            idx = current_index[successor_id]
+            block_idea = block_of.get(successor_id)
+            if block_idea is not None:
+                idx = min(current_index[m] for m in block_members[block_idea])  # never split a placed block
+            return idx, successor_id, None, "before_surviving_original_successor"
+        for candidate in reversed(original_order[:first_departed]):
+            if candidate.clip_id in current_index:
+                predecessor_id = candidate.clip_id
+                break
+        if predecessor_id is not None:
+            idx = current_index[predecessor_id] + 1
+            block_idea = block_of.get(predecessor_id)
+            if block_idea is not None:
+                idx = max(current_index[m] for m in block_members[block_idea]) + 1
+            return idx, None, predecessor_id, "after_last_surviving_original_predecessor_fallback"
+        return 0, None, None, "no_surviving_neighbor_front"
+
+    # 1. Composite blocks, atomically.
+    for _key, idea_id, members in sorted(blocks, key=lambda b: b[0]):
+        member_ids = _ids(members)
+        before = _ids(seq)
+        kept_positions = [i for i, c in enumerate(seq) if c.clip_id in member_ids]
+        departed_here = [
+            c for c in original_order
+            if c.clip_id not in kept_ids and c.clip_id not in restored_ids and _idea_of(c) == idea_id
+        ]
+        if kept_positions:
+            insert_at = kept_positions[0]
+            seq = [c for c in seq if c.clip_id not in member_ids]
+            reason = "block_at_earliest_original_member_position"
+            successor_id = predecessor_id = None
+        elif departed_here:
+            insert_at, successor_id, predecessor_id, reason = _departed_slot(departed_here)
+        else:
+            insert_at, successor_id, predecessor_id, reason = len(seq), None, None, "no_anchor_append"
+        seq[insert_at:insert_at] = members
+        for cid in member_ids:
+            block_of[cid] = idea_id
+        block_members[idea_id] = member_ids
+        _log({
+            "unit_type": PLACEMENT_UNIT_COMPOSITE_BLOCK, "semantic_idea_id": idea_id,
+            "member_clip_ids": member_ids, "member_realization_ids": [_realization_id_of(c) for c in members],
+            "authoritative_member_order": list(composite_order_by_idea.get(idea_id) or ()),
+            "departed_clip_ids": _ids(departed_here),
+            "departed_original_index": (original_index[departed_here[0].clip_id] if departed_here else None),
+            "successor_anchor": successor_id, "predecessor_fallback": predecessor_id,
+            "chosen_insertion_index": insert_at, "sequence_before": before, "sequence_after": _ids(seq),
+            "contiguity_validated": None, "placement_reason": reason,
+        })
+
+    # 2. Winner replacements, into the departed winner's own slot.
+    for _key, idea_id, clips, departed in sorted(replacements, key=lambda r: r[0]):
+        before = _ids(seq)
+        insert_at, successor_id, predecessor_id, reason = _departed_slot(departed)
+        seq[insert_at:insert_at] = clips
+        _log({
+            "unit_type": PLACEMENT_UNIT_WINNER_REPLACEMENT, "semantic_idea_id": idea_id,
+            "member_clip_ids": _ids(clips), "member_realization_ids": [_realization_id_of(c) for c in clips],
+            "authoritative_member_order": [],
+            "departed_clip_ids": _ids(departed), "departed_original_index": original_index[departed[0].clip_id],
+            "successor_anchor": successor_id, "predecessor_fallback": predecessor_id,
+            "chosen_insertion_index": insert_at, "sequence_before": before, "sequence_after": _ids(seq),
+            "contiguity_validated": None, "placement_reason": reason,
+        })
+
+    # 3. No anchor at all: append (pre-D-087 behavior), deterministically.
+    for clip in sorted(unanchored, key=lambda c: (float(c.start), c.clip_id)):
+        before = _ids(seq)
+        seq.append(clip)
+        _log({
+            "unit_type": PLACEMENT_UNIT_NO_ANCHOR_APPEND, "semantic_idea_id": _idea_of(clip),
+            "member_clip_ids": [clip.clip_id], "member_realization_ids": [_realization_id_of(clip)],
+            "authoritative_member_order": [], "departed_clip_ids": [], "departed_original_index": None,
+            "successor_anchor": None, "predecessor_fallback": None,
+            "chosen_insertion_index": len(seq) - 1, "sequence_before": before, "sequence_after": _ids(seq),
+            "contiguity_validated": None, "placement_reason": "no_anchor_append",
+        })
+
+    # Contiguity validation (observability -- placement above is contiguous
+    # by construction; this is the audit a future canary reads).
+    final_index = {c.clip_id: i for i, c in enumerate(seq)}
+    if placement_log is not None:
+        for row in placement_log:
+            if row["unit_type"] == PLACEMENT_UNIT_COMPOSITE_BLOCK:
+                positions = sorted(final_index[cid] for cid in row["member_clip_ids"] if cid in final_index)
+                row["contiguity_validated"] = bool(positions) and positions == list(range(positions[0], positions[0] + len(positions)))
+            else:
+                row["contiguity_validated"] = True
+    return seq
+
+
+def build_story_placement_diagnostics(rows: Sequence[Mapping[str, object]]) -> dict:
+    """D-089 Part B Section 12: JSON-safe view for `diagnostics
+    ["authoritative_story_placement"]`."""
+    rows = [dict(r) for r in rows]
+    return {
+        "schema_version": "cutsell.authoritative_story_placement.v1",
+        "unit_count": len(rows),
+        "composite_block_count": sum(1 for r in rows if r.get("unit_type") == PLACEMENT_UNIT_COMPOSITE_BLOCK),
+        "winner_replacement_count": sum(1 for r in rows if r.get("unit_type") == PLACEMENT_UNIT_WINNER_REPLACEMENT),
+        "append_count": sum(1 for r in rows if r.get("unit_type") == PLACEMENT_UNIT_NO_ANCHOR_APPEND),
+        "all_blocks_contiguous": all(bool(r.get("contiguity_validated")) for r in rows if r.get("unit_type") == PLACEMENT_UNIT_COMPOSITE_BLOCK),
+        "units": rows,
+    }
 
 
 def apply_authoritative_realization_resolution(
@@ -3089,10 +3367,19 @@ def apply_authoritative_realization_resolution(
             new_alternates.append(clip)
         else:
             new_discarded.append(clip)
+    placement_log: list[dict] = []
     new_selected = _place_restored_clips_at_story_position(
         new_selected, restored, draft.selected, ideas_by_realization={
             rid: idea_id for idea_id, idea in ideas.items() for rid in idea.realization_ids
         },
+        # D-089 Part B: the resolver's OWN composite member order per idea --
+        # an explicit authoritative order always outranks recording time.
+        composite_order_by_idea={
+            idea_id: tuple(res.composite_realization_ids)
+            for idea_id, res in report.idea_resolutions.items()
+            if res.decision_status == RESOLVED_COMPOSITE and res.composite_realization_ids
+        },
+        placement_log=placement_log,
     )
 
     status = AUTHORITATIVE_REVIEW_REQUIRED if any_review_required else SEMANTICALLY_RESOLVED
@@ -3100,6 +3387,7 @@ def apply_authoritative_realization_resolution(
     return AuthoritativeApplicationResult(
         draft=new_draft, status=status, idea_outcomes=tuple(idea_outcomes),
         unresolved_orphan_realization_ids=unresolved_orphans + tuple(unmapped_realization_ids),
+        story_placement=tuple(placement_log),
     )
 
 

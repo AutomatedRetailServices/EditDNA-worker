@@ -416,6 +416,10 @@ jobs:
               } end' artifact/video00-modal.json
           echo "--- diagnostics.authoritative_plan_source (D-087 single-truth handoff; AUTHORITATIVE mode only) ---"
           jq '.diagnostics.authoritative_plan_source // {status:"absent"}' artifact/video00-modal.json
+          echo "--- diagnostics.canonical_effective_importance (D-089 Part A: per-canonical-claim effective importance; downgraded/conflict entries only) ---"
+          jq '.diagnostics.canonical_effective_importance // {status:"absent"}' artifact/video00-modal.json
+          echo "--- diagnostics.authoritative_story_placement (D-089 Part B: every restoration placement unit) ---"
+          jq '.diagnostics.authoritative_story_placement // {status:"absent"}' artifact/video00-modal.json
 
           echo "--- diagnostics.final_edit_reviewer ---"
           jq '.diagnostics.final_edit_reviewer // {status:"absent"}' artifact/video00-modal.json

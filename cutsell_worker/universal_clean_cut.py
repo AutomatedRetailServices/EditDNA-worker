@@ -42,9 +42,12 @@ from .realization_resolver import (
     build_authoritative_semantic_state,
     build_authoritative_semantic_state_diagnostics,
     build_realization_resolver_diagnostics,
+    build_effective_claim_importance_diagnostics,
+    build_effective_claim_importance_index,
     build_preserved_claim_id_index,
     build_semantic_preservation_proofs,
     build_semantic_preservation_proofs_diagnostics,
+    build_story_placement_diagnostics,
     resolve_intra_idea_semantic_preservation_shadow,
     resolve_pre_group_semantic_preservation_shadow,
     resolve_realizations_shadow,
@@ -363,6 +366,30 @@ def process_universal_clean_cut_sources(
             critical_claim_preservation_index = build_preserved_claim_id_index(
                 pre_group_semantic_preservation_proofs, intra_idea_semantic_preservation_proofs,
             )
+            # D-089 Part A: the ONE canonical effective-importance truth --
+            # the Ledger's own per-idea requirement-group importance (the
+            # exact rule the resolver above and ClaimCoverageBestTake
+            # already honor), keyed by canonical_claim_id, so StoryValidator
+            # can never re-derive a weaker/stronger importance for the SAME
+            # proposition from its own raw re-extraction.
+            canonical_effective_importance_index = build_effective_claim_importance_index(
+                ledger, claim_equivalence_arbiter=claim_equivalence_arbiter,
+            )
+            authoritative_draft = replace(
+                authoritative_draft,
+                diagnostics={
+                    **dict(authoritative_draft.diagnostics or {}),
+                    "canonical_effective_importance": build_effective_claim_importance_diagnostics(
+                        canonical_effective_importance_index
+                    ),
+                    # D-089 Part B Section 12: every restoration placement
+                    # unit the authoritative application made, inspectable
+                    # from the RAW log without a forensic extract.
+                    "authoritative_story_placement": build_story_placement_diagnostics(
+                        authoritative_result.story_placement
+                    ),
+                },
+            )
 
             # StoryValidator, AUTHORITATIVELY: re-validated on the resolver's
             # own resolved selection, never the pre-cutover one.
@@ -374,6 +401,7 @@ def process_universal_clean_cut_sources(
                 clause_role_arbiter=clause_role_arbiter,
                 semantic_preservation_proofs=semantic_preservation_proofs,
                 critical_claim_preservation_index=critical_claim_preservation_index,
+                canonical_effective_importance_index=canonical_effective_importance_index,
             )
 
             # CanonicalEditPlan + FinalEditReviewer + bounded repair,
@@ -413,6 +441,18 @@ def process_universal_clean_cut_sources(
             # `orphan_reviews`, unchanged.
             diagnostics["semantic_preservation_proofs"] = build_semantic_preservation_proofs_diagnostics(
                 pre_group_semantic_preservation_proofs
+            )
+            # D-089: carried forward from the authoritative draft built
+            # above (the repair loop's final draft is derived from it);
+            # re-stated here so the keys survive even if a repair rebuilt
+            # the diagnostics dict.
+            diagnostics.setdefault(
+                "canonical_effective_importance",
+                build_effective_claim_importance_diagnostics(canonical_effective_importance_index),
+            )
+            diagnostics.setdefault(
+                "authoritative_story_placement",
+                build_story_placement_diagnostics(authoritative_result.story_placement),
             )
             result = replace(result, draft=replace(result.draft, diagnostics=diagnostics))
         diagnostics = dict(result.draft.diagnostics or {})

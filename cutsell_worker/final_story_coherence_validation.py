@@ -86,6 +86,7 @@ from dataclasses import replace
 from itertools import combinations
 from typing import Mapping
 
+from .canonical_identity import mint_semantic_idea_id
 from .contracts import effective_parent_semantic_clip_id
 from .contradiction_signal import any_pair_contradicts, detect_text_contradiction
 from .final_sibling_grouping import _content, _negations, _numbers
@@ -656,6 +657,31 @@ def _lost_semantic_atoms(
     return findings
 
 
+def _effective_importance_entry_belongs_to_group(effective, group: Mapping[str, object], members) -> bool:
+    """D-089 Section 3/5: an effective-importance entry may only ever speak
+    for a claim of ITS OWN idea/realizations. Identity is established from
+    the group's own members -- a stamped `semantic_idea_id` (D-050A) or the
+    deterministic mint from the take-group id (the same function
+    pipeline.py used to stamp it), plus the members' own `realization_id`s
+    when present. No derivable identity -> False (fail closed)."""
+    entry_idea = str(getattr(effective, "semantic_idea_id", "") or "")
+    entry_rids = set(getattr(effective, "source_realization_ids", ()) or ())
+    member_clips = [clip for _cid, clip in members]
+    stamped = {
+        str(getattr(c, "semantic_idea_id", None)) for c in member_clips if getattr(c, "semantic_idea_id", None)
+    }
+    group_id = str(group.get("group_id") or "")
+    group_ideas = stamped if stamped else ({mint_semantic_idea_id(group_id)} if group_id else set())
+    member_rids = {
+        str(getattr(c, "realization_id", None)) for c in member_clips if getattr(c, "realization_id", None)
+    }
+    if not entry_idea or entry_idea not in group_ideas:
+        return False
+    if entry_rids and member_rids and not (entry_rids & member_rids):
+        return False
+    return True
+
+
 def _lost_critical_claims(
     draft, *,
     claim_equivalence_arbiter: ClaimEquivalenceArbiter | None = None,
@@ -674,6 +700,14 @@ def _lost_critical_claims(
     # see that function's own docstring for why a coarse `GROUPED_SAME_
     # IDEA`/clip-level credit is structurally never enough to appear here.
     critical_claim_preservation_index: Mapping[str, object] | None = None,
+    # D-089 Part A: an optional, pre-built canonical_claim_id -> Effective
+    # ClaimImportance index (realization_resolver.build_effective_claim_
+    # importance_index) -- the Ledger/Resolver's own requirement-group
+    # importance for the EXACT canonical proposition. Structurally only
+    # supplied by a caller that already built a Semantic Ledger
+    # (AUTHORITATIVE mode's second pass). None everywhere else -- current
+    # fail-closed behavior is then byte-for-byte unchanged.
+    canonical_effective_importance_index: Mapping[str, object] | None = None,
 ) -> tuple[list[dict], list[dict]]:
     """Per-Idea claim coverage (D-038) -- the backstop for `claim_coverage_
     best_take.py`'s own best-effort override. Unlike `_lost_semantic_atoms`
@@ -804,6 +838,48 @@ def _lost_critical_claims(
                     "preserving_realization_id": getattr(proof, "preserving_id", None),
                 })
                 continue
+            # D-089 Part A: canonical EFFECTIVE importance single truth. The
+            # Ledger/Resolver's requirement-group importance for this EXACT
+            # canonical claim id (the same `_effective_importance` incidental
+            # + source-exclusive rule the resolver and ClaimCoverageBestTake
+            # already honor) outranks this function's own raw re-extraction
+            # importance -- one canonical proposition can never be
+            # "non-required" upstream and "CRITICAL lost" here at the same
+            # time (Section 6). Consumed ONLY when: the exact id is present
+            # in the index, its effective importance is non-critical, AND
+            # the entry provably belongs to THIS group's own idea/
+            # realizations (never another idea's same-looking claim). Any
+            # missing identity or evidence keeps the fail-closed finding
+            # below exactly as before.
+            effective = None
+            if canonical_effective_importance_index is not None:
+                effective = canonical_effective_importance_index.get(claim.canonical_claim_id)
+            if (
+                effective is not None
+                and str(getattr(effective, "canonical_claim_id", "")) == claim.canonical_claim_id
+                and str(getattr(effective, "effective_importance", CLAIM_CRITICAL)) != CLAIM_CRITICAL
+                and _effective_importance_entry_belongs_to_group(effective, group, members)
+            ):
+                confirmations.append({
+                    "idea_id": group.get("group_id"),
+                    "claim_id": claim.claim_id,
+                    "canonical_claim_id": claim.canonical_claim_id,
+                    "claim_type": claim.claim_type,
+                    "claim_text": claim.text,
+                    "importance": claim.importance,
+                    "raw_importance": claim.importance,
+                    "effective_importance": str(getattr(effective, "effective_importance", "")),
+                    "importance_resolution_reason": str(getattr(effective, "reason", "") or ""),
+                    "source_clip_id": claim.source_clip_id,
+                    "source_realization_ids": list(getattr(effective, "source_realization_ids", ()) or ()),
+                    "semantic_idea_id": str(getattr(effective, "semantic_idea_id", "") or ""),
+                    "winning_clip_ids": list(winners),
+                    "coverage_against_winning_realization": round(coverage, 4),
+                    "owning_authority": "UnifiedRealizationResolver",
+                    "resolution": "canonical_effective_importance",
+                    "critical_loss_suppressed_by": "canonical_effective_importance",
+                })
+                continue
             findings.append({
                 "idea_id": group.get("group_id"),
                 "claim_id": claim.claim_id,
@@ -838,6 +914,10 @@ def apply_final_story_coherence_validation(
     # SemanticPreservationProof index -- see `_lost_critical_claims`'s own
     # identically-named parameter docstring. None everywhere else.
     critical_claim_preservation_index: Mapping[str, object] | None = None,
+    # D-089 Part A: see `_lost_critical_claims`'s identically-named
+    # parameter docstring. None everywhere except AUTHORITATIVE mode's
+    # second pass.
+    canonical_effective_importance_index: Mapping[str, object] | None = None,
 ):
     """Last semantic authority before Selection Freeze. See module docstring."""
     draft = _fold_alternates_into_discarded(draft)
@@ -918,6 +998,7 @@ def apply_final_story_coherence_validation(
     lost_critical_claims, claim_coverage_confirmations = _lost_critical_claims(
         draft, claim_equivalence_arbiter=claim_equivalence_arbiter, clause_role_arbiter=clause_role_arbiter,
         critical_claim_preservation_index=critical_claim_preservation_index,
+        canonical_effective_importance_index=canonical_effective_importance_index,
     )
     # D-031: a lost_semantic_atoms finding only blocks Freeze when its own
     # `blocking` field says so (a genuinely critical/uncertain atom, or the

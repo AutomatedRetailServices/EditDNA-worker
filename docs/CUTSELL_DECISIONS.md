@@ -9349,6 +9349,132 @@ StoryValidator's independent lost-claim check still covers content loss).
 
 READY FOR ONE VIDEO00 CANARY: YES.
 
+## D-087 canary (run 33957582102) -- authoritative composite consumption PROVEN live
+
+Head `a181273`. The D-086 family (`tg_b3fd0910f3dfc18d4e` = `idea_838ff338…`)
+resolved `RESOLVED_COMPOSITE [A, B]`; CanonicalEditPlan emitted
+`is_composite: true`, `coverage_status: complete`, `plan_semantic_source:
+authoritative_realization_resolver`, `structural_validation_passed: true`,
+members in resolver order; ZERO DUPLICATE_IDEA / UNRESOLVED_RETRY findings
+(the two that blocked run 33952982672). 19/19 authoritative decisions
+represented verbatim. D-087 LIVE OBJECTIVE: PROVEN. Human Gold 15/18
+(`pimples_micro_2_present`, `pimples_bad_monolith_absent` -- arbiter
+variance picked the monolith this run --, `pimples_micro_order`). Freeze
+BLOCKED on ONE unrelated finding: `CRITICAL_CLAIM_LOST` on the gastritis
+family (`tg_cb6bda4604271b263f`, "…no hay que preguntar"), classified C.
+STORY ORDER: composite relative order preserved but NOT contiguous -- the
+acne winner replacement landed between A and B and split "…resolvía con" |
+"resorcina." (D-087-owned placement bug). Both forensic'd as D-088.
+
+## D-088 -- claim-proof + story-order integration forensic (report only)
+
+PART A: claim `claim_fabaabad04cf` / `cclaim_0d1dbd02d419041608f2`
+("Tuve problemas de estómago en una temporada, en 2023, no hay que
+preguntar.", whole sentence, NEGATION/FACTUAL_NEGATION, raw CRITICAL) from
+`real_6db31c8d3122ce4b53d8`. Canonical id identical across StoryValidator
+extraction and the Ledger (no drift). Ledger requirement group downgraded it
+to SUPPORTING (`_effective_importance`: incidental + source-exclusive); the
+resolver resolved `RESOLVED_WINNER` with `missing_critical_claim_ids: []`
+and kept the loser as a contextual alternate; ClaimCoverageBestTake
+suppressed its override as incidental; `_lost_critical_claims` re-derived
+raw CRITICAL and blocked Freeze. The D-079 intra-idea proof was minted but
+unverified (`required_claim_not_preserved`): after the rhetorical-aside strip
+the residual and the winner's claim are same-type, so only deterministic
+dedup applies (2/6 tokens, no arbiter route reachable). FIRST MISSING LINK:
+G. DUAL-TRUTH INVARIANT (verified proof + finding): not violated. CLAIM
+BLOCKER ROOT: importance dual-truth between the Ledger/Resolver and
+StoryValidator. Intra-idea proofs were also not surfaced in diagnostics.
+
+PART B: legacy keep `A[9], old-acne[10] (166.56-182.36), "resorcina."[11]
+(191.14)`; restored `[B, new-acne]` in discarded-bucket order. B was placed
+after A (composite rule); the acne replacement was anchored "after the last
+ORIGINAL kept predecessor" (= A) -- invisible to the already-placed B -- and
+inserted at 10, pushing B to 11: `A, new-acne, B, resorcina`. Replayed
+offline with the production function: reproduces the live order exactly.
+STORY-ORDER ROOT: A (multiple restorations sharing one anchor; departed slot
+reduced to "after predecessor"). Fixes required: 2. Both implemented as D-089.
+
+## D-089 -- effective claim importance single truth + authoritative story placement
+
+PART A (`realization_resolver.build_effective_claim_importance_index` /
+`build_effective_claim_importance_diagnostics`, `final_story_coherence_
+validation._lost_critical_claims`): a deterministic canonical_claim_id ->
+`EffectiveClaimImportance` index (raw importance, effective importance,
+reason, semantic idea, requirement group, source realizations, source-
+exclusive flag) built per idea from the Ledger's OWN `build_requirement_
+groups` -> `_effective_importance` (the identical rule the resolver and
+ClaimCoverageBestTake already honor; no second classifier). A canonical id
+receiving two different authoritative answers across ideas fails closed to
+CRITICAL (`cross_idea_conflict_fail_closed`). `_lost_critical_claims`
+consumes it AFTER the D-079 proof lookup: only when the EXACT canonical id
+is present, its effective importance is non-critical, AND the entry belongs
+to this group's own idea (stamped `semantic_idea_id` or the deterministic
+mint from the group id) and, when realization ids are stamped, shares a
+source realization with the group's members. It then records a
+`claim_coverage_confirmations` row with `critical_loss_suppressed_by:
+canonical_effective_importance`, raw/effective importance and the reason,
+instead of a CRITICAL_CLAIM_LOST finding. Absent id, wrong id, foreign idea,
+or effective CRITICAL -> unchanged fail-closed finding. Built and threaded
+only in universal_clean_cut.py's AUTHORITATIVE branch (`diagnostics
+["canonical_effective_importance"]`, downgraded/conflict entries only);
+LEGACY/SHADOW byte-identical.
+
+PART B (`realization_resolver._place_restored_clips_at_story_position`,
+rewritten): restorations are deterministic units applied to the CURRENT
+sequence in stable order -- `AUTHORITATIVE_COMPOSITE_BLOCK` (every selected
+member of an idea with a resolver composite order or a kept sibling, placed
+atomically, in the resolver's member order -- recording time only orders
+members with no explicit order -- at the earliest original member's
+position), then `SINGLE_WINNER_REPLACEMENT` (the departed winner's ACTUAL
+slot: immediately before the first ORIGINAL successor still in the sequence,
+never inside a placed block; only with no surviving successor, after the
+last surviving original predecessor), then `NO_ANCHOR_APPEND`. Blocks
+sorted by anchor position then idea id; replacements by departed original
+index then idea id; appends by start then clip id -- output independent of
+the restored bucket's iteration order. Membership untouched by
+construction. Every unit is logged (unit type, member clip/realization ids,
+authoritative member order, departed clip id + original index, successor
+anchor, predecessor fallback, chosen insertion index, sequence before/after,
+contiguity validated, placement reason) on `AuthoritativeApplicationResult.
+story_placement` -> `diagnostics["authoritative_story_placement"]`, printed
+by the RAW workflow. The D-088 shape now yields `A, B, new-acne,
+"resorcinol."` for either restoration order. Resolver decision logic,
+composite membership, winners: unchanged.
+
+TESTS: `tests/test_cutsell_d089_effective_importance_and_story_placement.py`
+(31): Part A -- exact id + effective SUPPORTING suppresses (with the pre-
+D-089 baseline finding proven on the same draft); exact id + effective
+CRITICAL keeps the finding; missing id / None index fail closed; wrong id
+and mismatched entry never suppress; same text/different proposition never
+suppresses; corroborated (non-source-exclusive) incidental negation stays
+CRITICAL; genuine negation / diagnosis negation / measurement / entity
+identification / attribution-negation losses keep effective CRITICAL and
+block exactly as baseline; number / entity / causal mismatch propositions
+are never downgraded below raw; attribution asymmetry stays blocking and
+uncertifiable by the proof chain; D-079 proof consumption unchanged (and the
+aside shape still yields an unverified proof -- the index, not a proof,
+closes it); foreign-idea entry never downgrades; cross-idea conflict fails
+closed; StoryValidator pass threads the index; AUTHORITATIVE carries both
+new diagnostics keys and no CRITICAL_CLAIM_LOST on the aside shape while
+LEGACY keeps its finding and no keys. Part B -- D-088 exact generic order
+for both restoration orders; contiguity + explicit order over recording
+time; successor-anchored replacement; predecessor fallback; two
+replacements sharing one predecessor; multiple blocks; replacements before/
+after a block never split it; continuation adjacency; full permutation
+invariance; membership invariance; END TO END through the real Ledger ->
+resolver -> application with placement diagnostics.
+
+QUALIFICATION: compileall clean; D-046 through D-089 targeted sweep 680/680;
+CleanCutBench 54/54 LEGACY and 54/54 AUTHORITATIVE; full `tests/test_
+cutsell_*.py` glob 1941/1941 (1910 D-087 baseline + 31 new); whole `tests/`
+directory 2565 passed, the same 2 pre-existing unrelated failures D-081
+already identified and excluded -- 0 new regressions.
+
+POST-RESOLVER SEMANTIC MUTATORS: 0 (the index reports the resolver's own
+importance; placement reorders already-selected clips only).
+
+READY FOR ONE VIDEO00 CANARY: YES.
+
 ## Change rule
 
 When a new decision changes product behavior, update this file in the same development cycle. Do not silently redefine CutSell through code alone.
