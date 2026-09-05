@@ -177,6 +177,9 @@ def _estimate_output_token_ceiling(member_count: int) -> int:
     return min(500, 80 + (32 * member_count))
 
 
+_BUDGET_EXHAUSTED_PROVIDER_PREFIX = "RuntimeError:hybrid edit/test dollar budget exhausted"
+
+
 def _estimate_window_cost_usd(members: Tuple[CandidateTake, ...]) -> float:
     """D-053 Section 11: real, token-based cost estimate using the SAME
     formula the live transport bills against
@@ -194,6 +197,41 @@ def _estimate_window_cost_usd(members: Tuple[CandidateTake, ...]) -> float:
     input_tokens = estimate_tokens_from_chars(total_chars)
     output_tokens = _estimate_output_token_ceiling(len(members))
     return round(_COST_ESTIMATE_SETTINGS.estimate_cost_usd(input_tokens=input_tokens, output_tokens=output_tokens), 6)
+
+
+def _estimate_window_reservation_usd(
+    session: EditorialSession,
+    members: Tuple[CandidateTake, ...],
+    settings: HybridProviderSettings,
+) -> float:
+    """D-094.F2: the dollar figure the live transport will actually RESERVE
+    against its per-edit DollarBudgetLedger for this window, computed with
+    the transport's own preflight recipe (compact payload JSON length ->
+    input tokens; `_compact_output_token_ceiling` -> output tokens;
+    `settings.estimate_cost_usd`). Runs 33960713625 / 33969388042: the plan
+    said 6 windows fit in $0.0075 (estimated 0.007022 by the lighter
+    chars-of-member-text formula in `_estimate_window_cost_usd`) while the
+    ledger, reserving the larger preflight figure per call, refused windows
+    5 and 6 -- "6 planned / 0 deferred / 4 served". Planner labels and the
+    per-window `estimated_cost_usd` diagnostic now use THIS figure, so the
+    reported shortfall is the ledger's own arithmetic, not a guess. Falls
+    back to the lighter estimate only when the compact payload itself cannot
+    be built (the transport would refuse such a window before reserving).
+    """
+    from .hybrid_google_transport import _compact_output_token_ceiling
+    from .hybrid_payload import HybridCostPolicy, build_compact_editorial_payload, preflight_hybrid_call
+    import json as _json
+
+    try:
+        payload = build_compact_editorial_payload(session, cost_policy=HybridCostPolicy())
+        preflight = preflight_hybrid_call(session, HybridGatePolicy(), cost_policy=HybridCostPolicy())
+    except ValueError:
+        return _estimate_window_cost_usd(members)
+    input_tokens = estimate_tokens_from_chars(len(_json.dumps(dict(payload), ensure_ascii=False)))
+    output_tokens = _compact_output_token_ceiling(payload, int(preflight["max_output_tokens"]))
+    # Unrounded on purpose: this must equal the transport's own reservation
+    # to the last bit (a ledger holding exactly this amount admits the call).
+    return float(settings.estimate_cost_usd(input_tokens=input_tokens, output_tokens=output_tokens))
 
 
 @dataclass(frozen=True)
@@ -525,18 +563,22 @@ def apply_hybrid_session_cleanup(
 
     execution_order = list(range(len(all_windows)))
     plan: SemanticComputePlan | None = None
-    if _semantic_compute_planner_enabled(env) and all_windows:
-        from .hybrid_provider_settings import load_hybrid_provider_settings
+    # D-094.F2: one settings load for the whole call -- the ledger-parity
+    # estimate below prices every window with the SAME settings the live
+    # transport bills with (pricing + per-edit ceiling both come from here).
+    from .hybrid_provider_settings import load_hybrid_provider_settings
 
-        cost_ceiling_usd = load_hybrid_provider_settings(dict(env) if env is not None else None).max_cost_per_edit_usd
+    billing_settings = load_hybrid_provider_settings(dict(env) if env is not None else None)
+    if _semantic_compute_planner_enabled(env) and all_windows:
+        cost_ceiling_usd = billing_settings.max_cost_per_edit_usd
         work_items = tuple(
             SemanticWorkItem(
                 work_id=str(position),
                 priority=_classify_window_priority(members, context),
-                estimated_cost_usd=_estimate_window_cost_usd(members),
+                estimated_cost_usd=_estimate_window_reservation_usd(session, members, billing_settings),
                 reason=f"partition={partition_index} chunk={chunk_index} size={len(members)}",
             )
-            for position, (partition_index, chunk_index, members, _session) in enumerate(all_windows)
+            for position, (partition_index, chunk_index, members, session) in enumerate(all_windows)
         )
         plan = build_semantic_compute_plan(work_items, cost_ceiling_usd=cost_ceiling_usd)
         # Every window is still attempted (the transport's own DollarBudgetLedger
@@ -729,6 +771,13 @@ def apply_hybrid_session_cleanup(
                 "available": bool(result.available),
                 "provider": result.provider,
                 "model": result.model,
+                # D-094.F2 observability: a window the transport's per-edit
+                # DollarBudgetLedger refused is a fail-open KEEP with zero
+                # semantic evidence -- never a silent provider string. The
+                # estimate is the ledger-parity reservation figure for this
+                # exact window (see `_estimate_window_reservation_usd`).
+                "budget_exhausted": str(result.provider or "").startswith(_BUDGET_EXHAUSTED_PROVIDER_PREFIX),
+                "estimated_cost_usd": round(_estimate_window_reservation_usd(session, members, billing_settings), 6),
                 "deleted_ids": chunk_deleted,
                 "decisions": decisions,
                 # D-052 Part B: present only when CUTSELL_SEMANTIC_COMPUTE_PLANNER

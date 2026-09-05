@@ -377,9 +377,20 @@ def build_flow_b_draft(
     # as one mutually-exclusive contest. Same `protected_ids` contract as
     # the arbiter merge immediately above -- an accepted composite's pieces
     # are never re-examined here either.
+    # D-094.F3: hand the reconcile stage's own confirmed merges to the
+    # cohesion pass as prior evidence (same run, same arbiter, same pair
+    # texts) so a confirmed retry pair can never be split merely because it
+    # fell outside this pass's bounded re-ask.
+    prior_confirmations = {
+        frozenset((str(row.get("left_clip_id") or ""), str(row.get("right_clip_id") or ""))):
+        (float(row.get("confidence") or 0.0), str(row.get("reason") or ""))
+        for row in (semantic_equivalence_diagnostics.get("merges") or ())
+        if isinstance(row, dict) and row.get("left_clip_id") and row.get("right_clip_id")
+    }
     semantic_equivalence_groups, cohesion_diagnostics = split_incohesive_retry_groups(
         semantic_equivalence_groups, kept, semantic_equivalence_arbiter,
         protected_ids=composite_split_ids,
+        prior_confirmations=prior_confirmations,
     )
     group_members = [tuple(take_by_id[clip_id] for clip_id in ids) for ids in semantic_equivalence_groups]
 
@@ -585,6 +596,23 @@ def build_flow_b_draft(
             "hybrid_editorial_deleted_count": len(hybrid_cleanup.deleted),
             "hybrid_editorial_semantic_decision_count": len(hybrid_cleanup.semantic_decisions),
             "hybrid_editorial_chunks": list(hybrid_cleanup.diagnostics)[:100],
+            # D-094.F2: explicit, counted starvation evidence (runs 33960713625 /
+            # 33969388042: 2 of 6 planned P1 retry-equivalence windows refused
+            # by the $0.0075 per-edit ledger, silently fail-open before this).
+            "hybrid_editorial_budget_exhausted_chunk_count": sum(
+                1 for row in hybrid_cleanup.diagnostics if row.get("budget_exhausted")
+            ),
+            "hybrid_editorial_budget_exhausted_chunk_indices": [
+                row.get("chunk_index") for row in hybrid_cleanup.diagnostics if row.get("budget_exhausted")
+            ],
+            "hybrid_editorial_budget_exhausted_estimated_shortfall_usd": round(sum(
+                float(row.get("estimated_cost_usd") or 0.0)
+                for row in hybrid_cleanup.diagnostics if row.get("budget_exhausted")
+            ), 6),
+            "hybrid_editorial_budget_exhausted_member_ids": sorted({
+                cid for row in hybrid_cleanup.diagnostics if row.get("budget_exhausted")
+                for cid in (row.get("member_ids") or ())
+            }),
             # D-052 Part B: present only when CUTSELL_SEMANTIC_COMPUTE_PLANNER
             # was enabled for this run -- None otherwise (today's default).
             "semantic_compute_plan": (

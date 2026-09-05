@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
-from typing import Protocol, Tuple
+from typing import Mapping, Protocol, Tuple
 
 from .contracts import CandidateTake
 from .providers import ProviderStatus
@@ -1149,14 +1149,31 @@ def _evaluate_bridge_cohesion(
     # this module (via final_sibling_grouping) -- see the D-048 FIX 1 /
     # D-083 comments elsewhere in this file for the same constraint on the
     # same kind of import.
-    from .contradiction_signal import any_pair_contradicts
+    from .contradiction_signal import any_pair_contradicts, detect_text_contradiction
 
     left_texts = [take_map[cid].text for cid in left_members if cid in take_map]
     right_texts = [take_map[cid].text for cid in right_members if cid in take_map]
-    if any_pair_contradicts(left_texts + right_texts):
+    # D-094.F4: the bridge question is whether the LEFT component and the
+    # RIGHT component can be one family -- so only CROSS-component pairs
+    # may reject it. A contradiction that already lives INSIDE one component
+    # (e.g. a mid-sentence ASR fragment of a member's own negated sentence)
+    # was formed by earlier, already-accepted edges; it is that family's
+    # own problem (StoryValidator's contradiction invariant / the composite
+    # contradiction contract catch it if both members are co-selected) and
+    # must not veto a third clip's membership. Run 33969388042: the
+    # hereditary family's truncated fragment "canceres son hereditarios..."
+    # contradicted its own full sentence, the bridge to the restatement was
+    # rejected, and the restatement was co-kept as a separate family.
+    if any(
+        detect_text_contradiction(left_text, right_text).has_conflict
+        for left_text in left_texts for right_text in right_texts
+    ):
         record["distinct_required_facts"] = ["cross_component_contradiction"]
         record["reason_rejected"] = "cross_component_contradiction"
         return False, record
+    record["within_component_contradiction"] = bool(
+        any_pair_contradicts(left_texts) or any_pair_contradicts(right_texts)
+    )
 
     if arbiter is None:
         record["reason_rejected"] = "arbiter_unavailable_fail_closed"
@@ -1264,6 +1281,7 @@ def split_incohesive_retry_groups(
     *,
     policy: SemanticEquivalenceGatePolicy = SemanticEquivalenceGatePolicy(),
     protected_ids: frozenset[str] = frozenset(),
+    prior_confirmations: Mapping[frozenset, tuple[float, str]] | None = None,
 ) -> tuple[Tuple[Tuple[str, ...], ...], dict]:
     """D-058 Phase 1 + D-085: require evidence of shared communicative intent
     before an already-multi-member group is trusted as one mutually-
@@ -1284,6 +1302,8 @@ def split_incohesive_retry_groups(
             "weak_pair_count": 0, "checked_pair_count": 0,
             "arbiter_confirmed_pairs": [],
             "content_divergence_blocked": [], "content_divergence_blocked_count": 0,
+            "prior_confirmations_reused": [], "prior_confirmations_reused_count": 0,
+            "unchecked_weak_pairs": [], "unchecked_weak_pair_count": 0,
             "splits": [],
             "edge_trace": [], "bridge_evaluated_count": 0, "bridge_accepted_count": 0,
             "bridge_rejected_count": 0, "component_semantic_call_count": 0,
@@ -1310,6 +1330,41 @@ def split_incohesive_retry_groups(
     checked_pair_count = 0
     confirmed_pairs: list[dict] = []
     content_divergence_blocked: list[dict] = []
+    prior_reused: list[dict] = []
+    # D-094.F3: a weak pair the SAME run's reconcile stage already asked the
+    # arbiter about (`reconcile_semantic_idea_equivalence`'s confirmed
+    # merges) is existing evidence the engine already paid for -- reuse it
+    # instead of re-asking, and never let it fall off the end of this pass's
+    # own bounded re-ask (`policy.max_pairs_per_request`). Run 33969388042:
+    # the gastritis retry pair was confirmed at 0.95 upstream, was not among
+    # the 14 of 21 weak pairs re-asked here, and the group was split on
+    # absence of evidence -- the abandoned retry and the complete delivery
+    # were then both kept (D-020 violated silently). The D-083 divergence
+    # gate applies to a reused confirmation exactly as to a fresh one.
+    prior = dict(prior_confirmations or {})
+    weak_pair_total = len(weak_pairs)  # reported as before: ALL weak pairs, reused or not
+    remaining_weak: list[tuple[str, str]] = []
+    for left_id, right_id in weak_pairs:
+        hit = prior.get(frozenset((left_id, right_id)))
+        if hit is None:
+            remaining_weak.append((left_id, right_id))
+            continue
+        confidence, reason = float(hit[0]), str(hit[1])
+        if _within_group_arbiter_confirmation_diverges(take_map, left_id, right_id):
+            content_divergence_blocked.append({
+                "left_clip_id": left_id, "right_clip_id": right_id,
+                "confidence": round(confidence, 4), "reason": reason, "source": "prior_confirmation",
+            })
+            continue
+        edges_by_group[weak_pair_group[(left_id, right_id)]].append(
+            _RetryEdge(left_id, right_id, "semantic", confidence, reason)
+        )
+        row = {"left_clip_id": left_id, "right_clip_id": right_id,
+               "confidence": round(confidence, 4), "reason": reason, "source": "prior_confirmation"}
+        confirmed_pairs.append(row)
+        prior_reused.append(row)
+    weak_pairs = remaining_weak
+    unchecked_weak_pairs: list[dict] = []
     if weak_pairs and arbiter is not None:
         ranked = sorted(
             weak_pairs,
@@ -1321,6 +1376,12 @@ def split_incohesive_retry_groups(
         )
         truncated = tuple(ranked[: policy.max_pairs_per_request])
         checked_pair_count = len(truncated)
+        # D-094.F3 observability: pairs this bounded pass could NOT ask are
+        # recorded, never silently treated as "no evidence".
+        unchecked_weak_pairs = [
+            {"left_clip_id": left_id, "right_clip_id": right_id}
+            for left_id, right_id in ranked[policy.max_pairs_per_request:]
+        ]
         request = IdeaEquivalenceRequest(pairs=tuple(
             IdeaEquivalencePair(left_text=take_map[left_id].text, right_text=take_map[right_id].text)
             for left_id, right_id in truncated
@@ -1389,11 +1450,16 @@ def split_incohesive_retry_groups(
         "status": "applied" if (groups_split or checked_pair_count) else "no_incohesive_groups_found",
         "groups_checked": len(multi_member_groups),
         "groups_split": groups_split,
-        "weak_pair_count": len(weak_pairs),
+        "weak_pair_count": weak_pair_total,
         "checked_pair_count": checked_pair_count,
         "arbiter_confirmed_pairs": confirmed_pairs,
         "content_divergence_blocked": content_divergence_blocked,
         "content_divergence_blocked_count": len(content_divergence_blocked),
+        # D-094.F3
+        "prior_confirmations_reused": prior_reused,
+        "prior_confirmations_reused_count": len(prior_reused),
+        "unchecked_weak_pairs": unchecked_weak_pairs,
+        "unchecked_weak_pair_count": len(unchecked_weak_pairs),
         "splits": split_records,
         # D-085 bridge-aware cohesion diagnostics -- see the module comment
         # above `_BRIDGE_MIN_COHESION_CONFIDENCE` for the full contract. Each

@@ -24,6 +24,18 @@ name: CutSell Video00 Modal RAW
 # is still printed for the record.
 on:
   workflow_dispatch:
+    inputs:
+      hybrid_max_edit_usd:
+        # D-094.F2: per-edit hybrid dollar ceiling override
+        # (CUTSELL_HYBRID_MAX_EDIT_USD). Empty (default) = code default
+        # $0.0075, i.e. exactly the behaviour of every run to date. Setting
+        # it is an economics decision the Product Owner takes explicitly per
+        # run (see docs/CUTSELL_DECISIONS.md D-094.1); the value is printed
+        # in the run log so the evidence names the ceiling it ran under.
+        description: "Optional CUTSELL_HYBRID_MAX_EDIT_USD override (e.g. 0.02). Empty = code default 0.0075."
+        required: false
+        default: ""
+        type: string
 
 concurrency:
   group: cutsell-video00-modal-raw-${{ github.ref }}
@@ -155,6 +167,16 @@ jobs:
           # editorial module is touched by this overlay.
           jq -c '(.env // {}) + {CUTSELL_HYBRID_LLM_ENABLED:"1", CUTSELL_HYBRID_PROVIDER:"google", CUTSELL_UNIFIED_REALIZATION_RESOLVER:"AUTHORITATIVE", CUTSELL_ASR_CANONICAL_NORMALIZATION:"1", CUTSELL_SEMANTIC_COMPUTE_PLANNER:"1"}' \
             /tmp/base-template.json > /tmp/cutsell-env.json
+          # D-094.F2: optional per-run hybrid dollar-ceiling override. Only
+          # applied when the dispatch input is non-empty and numeric; the
+          # code default ($0.0075) stays in force otherwise.
+          HYBRID_MAX_EDIT_USD_INPUT="${{ github.event.inputs.hybrid_max_edit_usd }}"
+          if [ -n "$HYBRID_MAX_EDIT_USD_INPUT" ]; then
+            python3 -c "import sys; float(sys.argv[1])" "$HYBRID_MAX_EDIT_USD_INPUT"
+            jq -c --arg v "$HYBRID_MAX_EDIT_USD_INPUT" '. + {CUTSELL_HYBRID_MAX_EDIT_USD:$v}' /tmp/cutsell-env.json > /tmp/cutsell-env.tmp.json
+            mv /tmp/cutsell-env.tmp.json /tmp/cutsell-env.json
+          fi
+          echo "D-094.F2 hybrid per-edit ceiling for this run: CUTSELL_HYBRID_MAX_EDIT_USD=$(jq -r '.CUTSELL_HYBRID_MAX_EDIT_USD // "unset (code default 0.0075)"' /tmp/cutsell-env.json)"
           test "$(jq 'length' /tmp/cutsell-env.json)" != "0"
           test "$(jq -r '.CUTSELL_HYBRID_LLM_ENABLED' /tmp/cutsell-env.json)" = "1"
           test "$(jq -r '.CUTSELL_HYBRID_PROVIDER' /tmp/cutsell-env.json)" = "google"
@@ -186,7 +208,7 @@ jobs:
               # D-056 Section 1). A real secret (API key, token, bucket
               # name) is essentially always >= 12 characters, so this
               # threshold costs no actual masking coverage.
-              if value and key not in ('CUTSELL_HYBRID_LLM_ENABLED', 'CUTSELL_HYBRID_PROVIDER', 'CUTSELL_UNIFIED_REALIZATION_RESOLVER', 'CUTSELL_ASR_CANONICAL_NORMALIZATION', 'CUTSELL_SEMANTIC_COMPUTE_PLANNER') and len(str(value)) >= 12:
+              if value and key not in ('CUTSELL_HYBRID_LLM_ENABLED', 'CUTSELL_HYBRID_PROVIDER', 'CUTSELL_UNIFIED_REALIZATION_RESOLVER', 'CUTSELL_ASR_CANONICAL_NORMALIZATION', 'CUTSELL_SEMANTIC_COMPUTE_PLANNER', 'CUTSELL_HYBRID_MAX_EDIT_USD') and len(str(value)) >= 12:
                   print(f'::add-mask::{value}')
           print(f'Loaded {len(env)} env vars from the live RunPod template plus the D-044 hybrid-semantic overlay, the D-050C2 resolver-mode overlay, and the D-052 stability-battery overlay (secret values masked).')
           "
@@ -391,6 +413,8 @@ jobs:
           echo "--- diagnostics.semantic_idea_equivalence (IdeaClusterer's bounded SemanticArbiter tier) ---"
           jq '.diagnostics.semantic_idea_equivalence // {status:"absent"}' artifact/video00-modal.json
 
+          echo "--- D-094.F3/F4 grouping-safety evidence reuse (prior confirmations, unchecked weak pairs) ---"
+          jq '.diagnostics.distinct_idea_grouping_safety | {prior_confirmations_reused_count, prior_confirmations_reused, unchecked_weak_pair_count, unchecked_weak_pairs}' artifact/video00-modal.json
           echo "--- diagnostics.distinct_idea_grouping_safety (D-058 within-group cohesion + D-083 marker gate + D-085 bridge-aware edge trace -- see D-084's forensic for why this was never printed before) ---"
           jq '.diagnostics.distinct_idea_grouping_safety // {status:"absent"}' artifact/video00-modal.json
 
@@ -471,6 +495,10 @@ jobs:
             available_chunk_count: .diagnostics.hybrid_editorial_available_chunk_count,
             deleted_count: .diagnostics.hybrid_editorial_deleted_count,
             semantic_decision_count: .diagnostics.hybrid_editorial_semantic_decision_count,
+            budget_exhausted_chunk_count: .diagnostics.hybrid_editorial_budget_exhausted_chunk_count,
+            budget_exhausted_chunk_indices: .diagnostics.hybrid_editorial_budget_exhausted_chunk_indices,
+            budget_exhausted_estimated_shortfall_usd: .diagnostics.hybrid_editorial_budget_exhausted_estimated_shortfall_usd,
+            budget_exhausted_member_ids: .diagnostics.hybrid_editorial_budget_exhausted_member_ids,
             chunks: (.diagnostics.hybrid_editorial_chunks // [])
           }' artifact/video00-modal.json
 

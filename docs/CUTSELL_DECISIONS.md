@@ -9963,6 +9963,156 @@ AUTOMATIC ACTION: none offline. Next step is ONE Video00 canary on this head
 to prove the permit live on the D-092 blocker shape and reach Freeze/Render
 -- stop condition C. HUMAN ACTION REQUIRED: YES (C only).
 
+## D-094 -- INTEGRATED MISSION: Video00 Clean Cut to a reviewable rendered video
+
+**Authorization (Product Owner):** the authorized technical scope is widened
+from D-090/D-092/D-093 to the whole Video00 path -- candidates -> grouping ->
+BestTake/Resolver -> Ledger and preservation proofs -> StoryValidator ->
+CanonicalEditPlan -> Freeze -> Boundary -> Render -> QC -- including the
+integration, provenance, order, selection, validation and observability
+defects needed to prove that path. Orchestrated under D-091 (no per-step
+relay). NOT authorized: redesign from scratch, new product/UX/SWAP/Sales
+features, forcing Freeze, disabling validators, changing Human Gold,
+treating all SUPPORTING as dispensable, hiding required-information loss,
+inventing words/equivalences/provenance, presenting a permitted omission as
+preserved content. No budget expansion: only unconsumed authorizations;
+grouped paid-compute request (count, objective, cost, limit) when needed.
+Closure criterion: a reviewable artifact plus the real state of selection,
+Freeze, Render, QC, Human Gold and open defects; a diagnostic preview is not
+an approved deliverable; no "ready" without editorial acceptance.
+
+**Starting state:** HEAD febbe27 (D-093 offline-qualified, unproven live);
+last live evidence run 33969388042 (e4cd508). No unconsumed paid run.
+
+**Video00 failure matrix (evidence: runs 33960713625 / 33969388042 logs):**
+| # | Failure | Layer | Root cause (evidence) | State |
+|---|---|---|---|---|
+| F1 | Freeze blocked by atom-level loss on the incidental stomach aside | StoryValidator | importance dual truth (atom vs canonical) | D-093 fixed offline, unproven live |
+| F2 | Pimples: monolith kept, micro + "Otro sintoma" retries discarded (`pimples_micro_2_present`, `pimples_bad_monolith_absent`, `pimples_micro_order`) | hybrid semantic pass -> BestTake -> Resolver | hybrid windows 2-3 (P1_RETRY_EQUIVALENCE, holding the pimples + gastritis clips) refused in BOTH runs: `RuntimeError: hybrid edit/test dollar budget exhausted` -- per-edit ledger cap `max_cost_per_edit_usd` $0.0075 fits 4 of 6 planned windows while the planner reports 6 planned / 0 deferred (accounting inconsistency, silent fail-open keep). No CRITICAL claim in the family, so the Resolver defers to the DeliveryScore pick (monolith 0.667). Known since D-056.x, never fixed. | open: economics decision + accounting/observability fix |
+| F3 | Gastritis abandoned retry co-kept with the complete delivery (KEEP 16 + 17) | grouping safety (`split_incohesive_retry_groups`) | reconcile stage confirmed c596eb07<->909af009 at 0.95 and 30ae45cd<->909af009 at 0.9; the safety pass re-asks the arbiter only for the top `max_pairs_per_request` weak pairs (14 of 21), never reuses the reconcile confirmations, and treats unasked pairs as no evidence -> split -> both kept, D-020 violated silently | open: fix (reuse prior confirmations; observability for unchecked pairs) |
+| F4 | Hereditary restatement co-kept (KEEP 19 + 20) | grouping safety bridge (`_evaluate_bridge_cohesion`) | bridge rejected as `cross_component_contradiction`, but `any_pair_contradicts(left+right)` tests WITHIN-component pairs too: the truncated fragment "canceres son hereditarios. Soy la unica..." (mid-sentence ASR fragment of "...no creo ... que los canceres son hereditarios") vs its own full statement raises a negation conflict; cross-component pairs do NOT conflict (offline probe) | open: fix (cross-component pairs only; the within-family contradiction stays StoryValidator's to block if co-selected) |
+| F5 | Resolver composite member order not recording order -> STORY_ORDER_BREAK repair cycle (plan v2) | Resolver / placement | `composite_realization_ids` order | open P3 |
+| F6 | Render/QC path never reached live since the AUTHORITATIVE cutover | Freeze -> Boundary -> Render -> QC | blocked by F1 | pending live proof |
+
+Progress entries follow as D-094.x.
+
+### D-094.1 -- F2 / F3 / F4 offline fixes + F2 economics preparation
+
+**Scope executed (offline, no paid compute):** the three proven root causes
+in the matrix that are pure engine/observability defects (F3, F4, and the
+accounting/observability half of F2), plus the workflow plumbing that lets
+the Product Owner take the F2 economics decision per run. F1 (D-093) is
+unchanged and still unproven live. F5 (composite member order) untouched
+(P3). F6 still blocked on a live Freeze PASS.
+
+**F3 -- `split_incohesive_retry_groups` reuses the reconcile stage's own
+confirmations (`take_grouping_provider.py`, `pipeline.py`).** New keyword
+`prior_confirmations: Mapping[frozenset[str], (confidence, reason)]`;
+`build_flow_b_draft` passes the `merges` audit rows of
+`reconcile_semantic_idea_equivalence` (same run, same arbiter, same pair
+texts). A weak pair with a prior confirmation is seeded as a `semantic`
+`_RetryEdge` BEFORE the bounded re-ask, so it can never fall off the end of
+`max_pairs_per_request`; it goes through the D-083 divergence gate exactly
+like a fresh confirmation (blocked rows carry `source: prior_confirmation`).
+Pairs the bounded pass could not ask are now named in
+`unchecked_weak_pairs(_count)` instead of being silently treated as "no
+evidence". `weak_pair_count` still reports the full weak-pair total. New
+diagnostics: `prior_confirmations_reused(_count)`.
+
+**F4 -- `_evaluate_bridge_cohesion` rejects on CROSS-component
+contradictions only.** The old `any_pair_contradicts(left + right)` also
+tested pairs inside one component; a mid-sentence ASR fragment of a
+member's own negated sentence vetoed a third clip's membership. Now only
+left-vs-right pairs can reject (`cross_component_contradiction`); a
+within-component contradiction is recorded as
+`within_component_contradiction: true` and left to StoryValidator's
+contradiction invariant / the composite contradiction contract, which block
+if both members are co-selected. No new semantic authority; same
+`detect_text_contradiction` primitive.
+
+**F2 (accounting + observability) -- ledger-parity cost estimate
+(`hybrid_session_cleanup.py`).** Root cause of "6 planned / 0 deferred / 4
+served" in both runs: the transport reserves against its own preflight
+figure (compact payload JSON length -> input tokens, `_compact_output_token_
+ceiling` -> output tokens, `settings.estimate_cost_usd`), while the planner
+priced windows with the lighter chars-of-member-text formula
+(`_estimate_window_cost_usd`, plan total 0.007022 < 0.0075 ceiling). New
+`_estimate_window_reservation_usd(session, members, settings)` computes the
+transport's exact reservation (proven bit-exact by a test that builds the
+real `GoogleGeminiTransport` with a ledger of exactly that amount -> admits,
+a hair less -> "dollar budget exhausted"); the planner's work items and the
+per-window `estimated_cost_usd` use it, priced with the same loaded
+`HybridProviderSettings` the transport bills with. Every hybrid chunk row
+now carries `budget_exhausted` (provider string starts with
+`RuntimeError:hybrid edit/test dollar budget exhausted`) and
+`estimated_cost_usd`; pipeline diagnostics add
+`hybrid_editorial_budget_exhausted_chunk_count / _chunk_indices /
+_estimated_shortfall_usd / _member_ids`. The refused windows are still a
+fail-open KEEP (unchanged behaviour), but never silent again.
+
+**F2 (economics) -- NOT changed in code.** The per-edit ceiling stays at the
+code default $0.0075 (`CUTSELL_HYBRID_MAX_EDIT_USD`). The Modal RAW workflow
+gained an optional `workflow_dispatch` input `hybrid_max_edit_usd` (empty
+default = no overlay, i.e. byte-identical behaviour to every run to date);
+when set, it is validated as a float, overlaid as
+`CUTSELL_HYBRID_MAX_EDIT_USD`, never masked, and printed in the run log so
+the evidence names the ceiling it ran under. Raising it is a Product Owner
+economics decision (D-091 stop condition A/C), requested below.
+
+**Tests:** new `tests/test_cutsell_d094_video00_integration_fixes.py` (9):
+F3 red shape (confirmed pair outside the bounded re-ask is split without
+prior evidence), F3 green (prior confirmation keeps the D-020 pair, never
+re-asks it, whole family survives when the D-085 bridge probe is answered),
+F3 divergence gate still applies to a prior confirmation, F3 pipeline wiring
+(reconcile merges reach the split as `prior_confirmations`), F4 red shape
+(within-component contradiction alone no longer rejects the bridge), F4
+cross-component contradiction still rejects, F4 full split keeps the
+hereditary-shaped family, F2 refused windows flagged and priced, F2 estimate
+== live transport reservation. Fixtures are generic shapes with the live
+failure texts' SHAPE; no Video00 clip ids.
+
+**QA (self-review by the implementing session, disclosed; not independently
+staffed).** Attacks: (1) could a prior confirmation merge clips the fresh
+pass would have refused? -- no: same divergence gate, same edge type, and
+the D-085 bridge/cohesion evaluation still runs on the resulting components;
+(2) does F4 weaken contradiction safety? -- no: cross-component pairs use
+the identical primitive; a within-component contradiction can only exist
+because earlier accepted edges formed that component, and co-selection of
+such members is still blocked downstream; (3) does the ledger-parity
+estimate change spend? -- no: the planner still attempts every window in
+priority order and the ledger remains the sole enforcement; only labels and
+diagnostics changed; (4) do the merge rows the pipeline forwards match the
+split's pair keys? -- yes (`left_clip_id`/`right_clip_id`/`confidence`/
+`reason`, order-insensitive frozenset key). One defect found and fixed
+during QA: `weak_pair_count` had silently become "remaining after reuse";
+restored to the total. Verdict: PASS.
+
+**Qualification (offline):** compileall clean (cutsell_worker, tests,
+benchmarks); grouping/planner/session-cleanup/pipeline/D-081..D-093 suites
+288/288 + pipeline-level 67/67; CleanCutBench 54/54 LEGACY and 54/54
+AUTHORITATIVE; full `tests/test_cutsell_*.py` glob 2008/2008 (1999 D-093 baseline + 9 new); whole `tests/`
+directory 2632 passed (= 2623 D-093 baseline + 9) with the same 2 pre-existing unrelated failures
+(`test_hybrid_story_guard_incomplete_retry`, `test_video00_modal_hybrid_
+semantic_parity`) and the pre-existing `tests/test_semantic_stitch.py`
+collection error -- 0 new regressions. Workflow YAML parses.
+
+**Updated failure matrix state:** F1 fixed offline (D-093), unproven live;
+F2 accounting/observability fixed offline, economics decision pending PO;
+F3 fixed offline; F4 fixed offline; F5 open P3; F6 pending live proof.
+None of the four fixes is live-proven; the regression check that the old
+failures (D-086 composite discard, D-089 residual-family mutation, D-090
+signature mutation, D-092 alternates) do not reappear is covered by their
+suites, all green at this head.
+
+LAST VERIFIED RESULT: CODE FIXED (F2 accounting, F3, F4) / TESTS PASS /
+offline qualification green at this head; nothing live-proven since e4cd508.
+NEXT AUTOMATIC ACTION: none offline within the proven root causes; the next
+step is ONE Video00 canary, which is paid compute -> grouped request to the
+Product Owner (below). F5 (P3) may be taken offline if the PO prefers to
+defer the run.
+HUMAN ACTION REQUIRED: YES -- C (paid compute) + A (F2 economics: per-run
+`hybrid_max_edit_usd`, proposed 0.02, +~$0.005/video worst case).
+
 ## Change rule
 
 When a new decision changes product behavior, update this file in the same development cycle. Do not silently redefine CutSell through code alone.
