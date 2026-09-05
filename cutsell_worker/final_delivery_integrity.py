@@ -363,7 +363,7 @@ def restore_immediate_completion_fragments(
     deleted_tuple = tuple(sorted(deleted, key=lambda t: (t.source_order, t.start, t.end, t.clip_id)))
     semantic = _semantic_map(semantic_decisions)
     restored_ids: set[str] = set()
-    replacement: dict[str, CandidateTake] = {}
+    restored_takes: dict[str, CandidateTake] = {}
     diagnostics: list[dict] = []
 
     for candidate in kept_tuple:
@@ -402,26 +402,29 @@ def restore_immediate_completion_fragments(
         if not options:
             continue
         gap, confidence, fragment, label = min(options, key=lambda item: (item[0], item[1], item[2].start))
-        merged_words = tuple(candidate.words) + tuple(fragment.words)
         merged_text = f"{str(candidate.text or '').strip()} {str(fragment.text or '').strip()}".strip()
-        merged_signals = (
-            replace(candidate.signals, end=float(fragment.end))
-            if candidate.signals is not None else None
-        )
-        child = replace(
-            candidate,
-            end=float(fragment.end),
-            text=merged_text,
-            words=merged_words,
-            signals=merged_signals,
-            complete_idea=True,
-        )
-        replacement[candidate.clip_id] = child
+        # D-094.2: restore the fragment as ITS OWN kept take -- identity
+        # preserved (same clip_id / realization / span), never folded into
+        # the candidate by text mutation. The CompositeResolver chain's
+        # outer hooks rebuild `kept`/`deleted` from the SOURCE takes by
+        # clip id the moment any of them fires (hybrid_complementary_
+        # delivery_guard, *_composite_bridge, hybrid_composite_best_take,
+        # hybrid_semantic_conflict_arbitration, ...), so a merged child
+        # was silently reverted to the original truncated candidate and
+        # the fragment fell back into `deleted` -- run 33983880111: the
+        # kept take ended mid-sentence ("... yo resolvía con"), the
+        # Ledger recorded the fragment as a hybrid delete with no
+        # replacement, the Resolver raised an orphan REVIEW_REQUIRED and
+        # Freeze was blocked. Kept as two takes, the pair reaches the
+        # Resolver as one idea and composes exactly as run 33969388042
+        # already proved live (RESOLVED_COMPOSITE, contiguous block).
+        restored_takes[fragment.clip_id] = fragment
         restored_ids.add(fragment.clip_id)
         diagnostics.append({
             "reason": "restore_immediate_deleted_completion_fragment",
             "clip_id": candidate.clip_id,
             "restored_fragment_id": fragment.clip_id,
+            "restored_as": "separate_take",
             "gap_sec": round(gap, 3),
             "fragment_label": label,
             "fragment_confidence": round(confidence, 4),
@@ -431,7 +434,10 @@ def restore_immediate_completion_fragments(
 
     if not diagnostics:
         return kept_tuple, deleted_tuple, ()
-    output = tuple(replacement.get(take.clip_id, take) for take in kept_tuple)
+    output = tuple(sorted(
+        (*kept_tuple, *restored_takes.values()),
+        key=lambda t: (t.source_order, t.start, t.end, t.clip_id),
+    ))
     remaining_deleted = tuple(take for take in deleted_tuple if take.clip_id not in restored_ids)
     return output, remaining_deleted, tuple(diagnostics)
 

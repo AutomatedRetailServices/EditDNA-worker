@@ -10113,6 +10113,175 @@ defer the run.
 HUMAN ACTION REQUIRED: YES -- C (paid compute) + A (F2 economics: per-run
 `hybrid_max_edit_usd`, proposed 0.02, +~$0.005/video worst case).
 
+### D-094.1 canary -- ONE Video00 run 33983880111 on b8b11de (`hybrid_max_edit_usd=0.02`)
+
+**Authorization:** Product Owner "Authorized" on the grouped request (1 run +
+the F2 economics overlay). Consumed; no unconsumed paid authorization remains.
+Modal teardown confirmed by the workflow's own step.
+
+**Live results by fix:**
+| Fix | Live evidence | Verdict |
+|---|---|---|
+| F2 economics (0.02) | `semantic_compute_plan`: ceiling 0.02, 6 planned / 0 deferred, `estimated_semantic_cost_usd` 0.011844 (ledger-parity estimate > the old 0.0075 ceiling, confirming D-094.1's root cause); `hybrid_editorial_available_chunk_count` 6/6; `budget_exhausted_chunk_count` 0 | PROVEN |
+| F2 accounting | every chunk row carries `budget_exhausted` + `estimated_cost_usd`; plan labels consistent with the ledger | PROVEN |
+| F3 (prior confirmations) | `prior_confirmations_reused_count` 6 (gastritis trio 0.90/0.95/0.95 among them), `unchecked_weak_pair_count` 0 | PROVEN as designed -- but see F3b |
+| F4 (cross-component only) | pimples family {aside, monolith, later delivery} bridged and ACCEPTED (0.95, `within_component_contradiction: false`); no hereditary bridge evaluated this run (see F4b) | PROVEN on the pimples family |
+| F1 (D-093 permit) | no `lost_semantic_atoms` block reached (the aside's atom loss was already `SEMANTICALLY_COVERED_BY_SELECTED_REALIZATION`, non-blocking warning) | not exercised |
+| D-090/D-092 | invariants PASS, alternates folded (5), composite accepted, plan `frozen_ready`, StoryValidator `freeze_blocked: false`, FinalEditReviewer PASS, repair loop 0 attempts | retained |
+
+**Freeze: BLOCKED (new root cause, F7).** `realization_resolver_authority.status
+= REVIEW_REQUIRED` with one orphan (`unresolved_orphan_realization_ids`):
+the acne completion fragment "resorcina." (verdict `hybrid_editorial_
+semantic_delete_with_no_verified_replacement_never_silently_confirmed`,
+discard reason `micro_failed_plus_local_performance`). Chain of events:
+hybrid window 2 (now served, thanks to the 0.02 ceiling) mechanically
+deleted the 1-word fragment (failed 0.88 + `dense_physical_reset` local
+corroboration, <= 2 tokens); `final_delivery_integrity.restore_immediate_
+completion_fragments` restored it by MERGING its text into the truncated
+parent ("... yo resolvía con" -> "... resolvía con resorcina."); a later
+chain hook (`hybrid_complementary_delivery_guard`, which fired for an
+unrelated clip) rebuilt `kept`/`deleted` from the SOURCE takes by clip id --
+the merged child reverted to the original truncated take and the fragment
+fell back into `deleted`. Final KEEP therefore ends that take mid-sentence
+("... yo resolvía con"), the Ledger records a hybrid delete with no
+replacement, the Resolver's orphan review (correctly) refuses to confirm it
+silently, `selection_boundary_contract.status = not_frozen_freeze_blocked_
+by_coherence_review`, render not attempted. NOTE the two-truths
+observability gap: `canonical_edit_plan.validation_state = frozen_ready` and
+StoryValidator `freeze_blocked: false` while the Resolver gate blocks
+(P3, diagnostics-only; the boundary contract carries the truth). Run
+33969388042 never hit F7 because its windows 2-3 were budget-refused, so the
+fragment was never deleted and A|B resolved as a composite.
+
+**F3b (D-020 still violated live):** F3 seeded all three gastritis
+confirmations, the singleton-vs-{aside, complete} bridge then went through
+the D-085 component probe, which answered `same_idea=False, 0.2` on the
+concatenated "aside || complete" text vs the truncated retry, so the
+abandoned retry was split into its own idea (`idea_63fc5790...`, winner
+`single_realization_full_critical_coverage`) and appended after the CTA
+(`no_anchor_append`) -- KEEP 20 + KEEP 16 co-kept. Three pairwise answers at
+0.90-0.95 were overruled by one probe answer at 0.2.
+
+**F4b (hereditary restatement co-kept, KEEP 21):** the truncated restatement
+("Soy la primera en mi familia ... solo un 5-10 % de los") was labelled
+`failed` 0.9/0.8 by two hybrid windows (D-081: semantic labels never delete
+pre-Resolver), was NOT in any multi-member take group this run (no bridge
+evaluated), resolved as its own idea (`idea_4a62898e...`) and was appended
+(`no_anchor_append`). The reconcile/take-group evidence needed to say WHY it
+was not grouped with the full statement was above the log tail cap
+(`semantic_idea_equivalence` / `take_group_members` print too early) and the
+230 MB artifact is not fetchable from this session -- observability gap
+closed in D-094.2 (late forensic summary print).
+
+**Human Gold 15/18** (unchanged set: `pimples_micro_2_present`,
+`pimples_bad_monolith_absent`, `pimples_micro_order`). With hybrid evidence
+now available the Resolver still picks the monolith ("También me salían
+espinillas en esta parte ... problemas hormonales.", hybrid winner 0.96)
+over the later delivery ("Otro síntoma era ...", hybrid winner 0.95) and the
+micro aside ("También me salían espinillas. Era como un rush, una alergia.",
+alternate). Reason `single_realization_full_critical_coverage`: the monolith
+alone covers every critical claim of the family, including "problemas
+hormonales", which the human edit dropped. This is an editorial-policy
+question (coverage dominance vs the human editor's choice of the later,
+shorter delivery), not an engine defect the mission authorizes fixing
+("never treat SUPPORTING as dispensable", "never change Human Gold") ->
+escalation A/F below.
+
+### D-094.2 -- F7 fragment identity + F3b singleton clique bridge (policy-gated) + observability
+
+**F7 fix (`final_delivery_integrity.restore_immediate_completion_fragments`,
+`terminal_delivery_reconciliation.restore_tiny_completion_suffixes`):** a
+restored completion fragment is now restored as ITS OWN kept take (same
+clip_id / realization / span / text; ordered by (source_order, start)),
+never merged into the candidate by text mutation. Identity is therefore
+preserved under the CompositeResolver chain's "rebuild from source takes by
+clip id" convention (hooks 16-20), the fragment reaches grouping/Ledger/
+Resolver as a first-class realization, and the pair composes exactly the way
+run 33969388042 already proved live (RESOLVED_COMPOSITE, contiguous D-089
+block). Diagnostics rows gain `restored_as: separate_take`; `restored_text`
+keeps the combined preview. Offline chain reproduction (`scratchpad
+f7_repro.py`, now a test): with the OUTERMOST hook firing, the fragment is
+kept, the candidate untouched, `deleted` empty. One existing round-6 test
+updated (it asserted the merged text); its scenario now yields two kept
+takes, nothing deleted.
+
+**F3b (`take_grouping_provider._accept_complete_pairwise_bridge`) -- POLICY-
+GATED, DEFAULT OFF:** a SINGLETON-attaches-to-component bridge whose every
+cross pair already carries an accepted-candidate edge (deterministic, or
+same_idea at >= `_BRIDGE_MIN_COHESION_CONFIDENCE` 0.90, already past the
+D-083 gate) is accepted on that complete pairwise evidence with D-085's
+deterministic cross-component contradiction safety net and WITHOUT the
+component probe (trace: `accepted_by: complete_pairwise_confirmation`,
+`cross_pair_confirmations`, `component_cohesion_evaluated: false`; no paid
+call). Component-to-component merges (>= 2 on both sides) always keep the
+probe: D-085's QA contract test ("always-yes pairwise arbiter must not
+defeat the component check", a 2-vs-3 merge) is untouched and green.
+Enabled only by `SemanticEquivalenceGatePolicy.accept_complete_pairwise_
+singleton_bridge` (pipeline reads `CUTSELL_BRIDGE_COMPLETE_PAIRWISE_
+SINGLETON`, default OFF; recorded in `distinct_idea_grouping_safety.accept_
+complete_pairwise_singleton_bridge`). Why gated: it narrows a canonical
+grouping-safety contract (D-085 "a bridge is NEVER accepted on pairwise
+evidence alone") -> D-091 stop condition B; the Product Owner decides per run
+via the new workflow input `bridge_complete_pairwise_singleton` ("1").
+Rationale offered: for a single newcomer, "confirmed against each existing
+member" IS the component question; the probe's synthetic "A || B" text
+produced the only dissenting answer; D-084's false bridges sat at 0.80-0.85,
+below the per-pair floor this rule requires.
+
+**Observability:** Modal RAW workflow prints a late "D-094.2 grouping
+forensic summary" (take groups with member texts, IdeaClusterer merges and
+distinct-addition blocks, grouping-safety splits, the policy flag, restore-
+guard rows) right before the final KEEP sequence so it survives the log tail
+cap; the new dispatch input is overlaid only when exactly "1", printed,
+never masked.
+
+**Tests:** `tests/test_cutsell_d094_2_fragment_identity_and_singleton_
+bridge.py` (9): both guards restore as separate take (identity, order,
+diagnostics); full-chain reproduction with the outermost hook firing
+(fragment kept, candidate untouched, identity invariant across the chain);
+F3b default-OFF reproduces the live split shape; ON accepts the singleton
+clique without any probe call; incomplete pairwise evidence, below-floor
+confidence, cross-component contradiction and component-to-component
+bridges all still go through / fail the probe; pipeline env flag parsing.
+
+**QA (self-review by the implementing session, disclosed):** (1) can a
+separately-restored fragment be re-deleted downstream? -- hooks 13-20 only
+restore or rebuild by kept ids; hook 13's open-prefix suppression needs the
+fragment in `deleted`, which it no longer is; the Resolver may still DISCARD
+it inside its idea (then it is a grouped discard, never an orphan). (2) does
+F7 change any restore CONDITION? -- no, only the representation. (3) does
+the gated F3b weaken safety when OFF? -- no code path changes (verified: all
+D-085/D-083/D-058 tests green with the default policy). (4) when ON, can a
+permissive arbiter merge two distinct ideas through a singleton? -- only if
+it confirms that clip against EVERY member at >= 0.90 and no cross
+contradiction exists; the remaining exposure is documented as the PO's
+call. Verdict: PASS (F7 unconditional; F3b conditional on PO).
+
+**Qualification (offline):** compileall clean; new file 9/9; round-6 +
+D-085/D-083/D-058/D-094 grouping suites 73/73; chain/pipeline/planner/
+session-cleanup/universal suites 104/104; CleanCutBench 54/54 LEGACY and
+54/54 AUTHORITATIVE; full `tests/test_cutsell_*.py` glob 2018/2018 (2008 D-094.1 baseline + 10 new);
+whole `tests/` 2642 passed (= 2632 + 10) with the same 2 pre-existing unrelated failures and the
+pre-existing `tests/test_semantic_stitch.py` collection error -- 0 new
+regressions.
+
+**Updated failure matrix:** F1 offline-fixed, not exercised live; F2
+economics PROVEN (needs the 0.02 overlay per run until a code default is
+decided); F2 accounting PROVEN; F3 PROVEN, F3b fixed offline behind the PO
+flag; F4 PROVEN on pimples, F4b open (evidence gap now closed for the next
+run); F5 open P3; F6 pending; **F7 fixed offline, unproven live**; F8
+(pimples Human Gold vs coverage dominance) = product decision.
+
+LAST VERIFIED RESULT: run 33983880111 analysed; F7 CODE FIXED / TESTS PASS;
+F3b implemented behind a default-OFF policy flag; offline qualification green
+at this head; no rendered video exists yet (Freeze blocked by F7 live).
+NEXT AUTOMATIC ACTION: none offline within the proven root causes (F4b needs
+the next run's forensic print; F5 P3 optional).
+HUMAN ACTION REQUIRED: YES -- B (enable F3b for the next run?), A/F (pimples:
+coverage dominance vs Human Gold), C (ONE canary on this head with
+`hybrid_max_edit_usd=0.02` and, if B is granted, `bridge_complete_pairwise_
+singleton=1`).
+
 ## Change rule
 
 When a new decision changes product behavior, update this file in the same development cycle. Do not silently redefine CutSell through code alone.

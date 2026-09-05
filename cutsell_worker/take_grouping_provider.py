@@ -1204,6 +1204,82 @@ def _evaluate_bridge_cohesion(
     return True, record
 
 
+def _accept_complete_pairwise_bridge(
+    *,
+    left_members: Tuple[str, ...],
+    right_members: Tuple[str, ...],
+    edge: _RetryEdge,
+    edge_by_pair: dict,
+    take_map: dict[str, CandidateTake],
+) -> tuple[bool, dict | None]:
+    """D-094.2 (policy-gated, default OFF -- see SemanticEquivalenceGatePolicy.
+    accept_complete_pairwise_singleton_bridge): a SINGLETON-attaches-to-
+    component bridge whose EVERY cross pair already carries its own
+    accepted-candidate edge (deterministic, or a same_idea confirmation at
+    >= `_BRIDGE_MIN_COHESION_CONFIDENCE` that already survived the D-083
+    marker gate) is not the transitive-contamination shape D-084/D-085
+    guard against -- the newcomer was confirmed against EACH existing
+    member, which for a single clip IS the component-level question. It
+    is accepted on that complete pairwise evidence, with the same
+    deterministic cross-component contradiction safety net D-085's probe
+    applies, and WITHOUT the component-level probe. Component-to-component
+    merges (>= 2 members on both sides) are never routed here: D-085's own
+    QA contract (always-yes pairwise arbiter must not defeat the component
+    check) stays in force for them. Run 33983880111:
+    the abandoned gastritis retry was confirmed 0.95 against the complete
+    delivery and 0.90 against the aside, the aside 0.95 against the
+    delivery, yet the concatenated "A || B" probe answered 0.2 and the
+    D-020 pair was split -- the probe (a question about a synthetic
+    joined text) contradicted the arbiter's own three pairwise answers.
+    Returns (accepted, record) or (False, None) when the pairwise evidence
+    is NOT complete -- the caller then falls through to D-085's probe,
+    byte-for-byte unchanged. Bounded by construction: n*m confirmed pairs.
+    """
+    cross_pairs = [(l, r) for l in left_members for r in right_members]
+    confirmations: list[dict] = []
+    for left_id, right_id in cross_pairs:
+        pair_edge = edge_by_pair.get(frozenset((left_id, right_id)))
+        if pair_edge is None:
+            return False, None
+        if pair_edge.evidence != "deterministic" and pair_edge.confidence < _BRIDGE_MIN_COHESION_CONFIDENCE:
+            return False, None
+        confirmations.append({
+            "left_clip_id": left_id, "right_clip_id": right_id, "evidence": pair_edge.evidence,
+            "confidence": round(pair_edge.confidence, 4) if pair_edge.evidence == "semantic" else None,
+            "reason": pair_edge.reason,
+        })
+
+    record: dict = {
+        "left_clip_id": edge.left_id, "right_clip_id": edge.right_id,
+        "evidence": edge.evidence,
+        "triggering_confidence": round(edge.confidence, 4) if edge.evidence == "semantic" else None,
+        "triggering_reason": edge.reason,
+        "bridge_sensitive": True,
+        "left_component_members": list(left_members),
+        "right_component_members": list(right_members),
+        "component_cohesion_evaluated": False,
+        "accepted_by": "complete_pairwise_confirmation",
+        "cross_pair_confirmations": confirmations,
+        "shared_proposition": None,
+        "member_support": list(left_members) + list(right_members),
+        "distinct_required_facts": [],
+        "accepted": False,
+    }
+    from .contradiction_signal import detect_text_contradiction  # deferred: see _evaluate_bridge_cohesion
+
+    left_texts = [take_map[cid].text for cid in left_members if cid in take_map]
+    right_texts = [take_map[cid].text for cid in right_members if cid in take_map]
+    if any(
+        detect_text_contradiction(left_text, right_text).has_conflict
+        for left_text in left_texts for right_text in right_texts
+    ):
+        record["distinct_required_facts"] = ["cross_component_contradiction"]
+        record["reason_rejected"] = "cross_component_contradiction"
+        return False, record
+    record["accepted"] = True
+    return True, record
+
+
 def _bridge_aware_components(
     group: Tuple[str, ...],
     edges: list[_RetryEdge],
@@ -1237,6 +1313,15 @@ def _bridge_aware_components(
         parent[ra] = rb
         members_of[rb] = merged
 
+    # D-094.2: every accepted-candidate edge, keyed order-insensitively, so
+    # a bridge can be recognised as a COMPLETE PAIRWISE CONFIRMATION (below).
+    edge_by_pair: dict[frozenset, _RetryEdge] = {}
+    for candidate_edge in edges:
+        key = frozenset((candidate_edge.left_id, candidate_edge.right_id))
+        current = edge_by_pair.get(key)
+        if current is None or _edge_sort_key(candidate_edge) < _edge_sort_key(current):
+            edge_by_pair[key] = candidate_edge
+
     for edge in sorted(edges, key=_edge_sort_key):
         if edge.left_id not in parent or edge.right_id not in parent:
             continue
@@ -1254,10 +1339,17 @@ def _bridge_aware_components(
                 "reason": edge.reason, "bridge_sensitive": False, "accepted": True,
             })
             continue
-        accepted, record = _evaluate_bridge_cohesion(
-            left_members=tuple(left_members), right_members=tuple(right_members),
-            edge=edge, take_map=take_map, arbiter=arbiter, policy=policy,
-        )
+        record = None
+        if policy.accept_complete_pairwise_singleton_bridge and min(len(left_members), len(right_members)) == 1:
+            accepted, record = _accept_complete_pairwise_bridge(
+                left_members=tuple(left_members), right_members=tuple(right_members),
+                edge=edge, edge_by_pair=edge_by_pair, take_map=take_map,
+            )
+        if record is None:
+            accepted, record = _evaluate_bridge_cohesion(
+                left_members=tuple(left_members), right_members=tuple(right_members),
+                edge=edge, take_map=take_map, arbiter=arbiter, policy=policy,
+            )
         edge_trace.append(record)
         if accepted:
             union(edge.left_id, edge.right_id)

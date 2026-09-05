@@ -77,6 +77,13 @@ class SemanticEquivalenceGatePolicy:
     max_pairs_per_request: int = 14
     max_estimated_input_tokens: int = 12_000
     max_estimated_output_tokens: int = 1_000
+    # D-094.2 (default OFF -- Product Owner decision, D-091 stop condition B):
+    # let `split_incohesive_retry_groups` accept a SINGLETON-attaches-to-
+    # component bridge on complete pairwise confirmation (every cross pair
+    # already confirmed at >= the D-085 bridge floor, no cross-component
+    # contradiction) WITHOUT the D-085 component-level probe. Component-to-
+    # component bridges (>= 2 members on both sides) always keep the probe.
+    accept_complete_pairwise_singleton_bridge: bool = False
 
 
 def should_request_semantic_equivalence(

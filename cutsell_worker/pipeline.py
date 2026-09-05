@@ -1,6 +1,8 @@
 """Clean orchestration for CutSell Flow B Milestone 1."""
 from __future__ import annotations
 
+import os
+
 from collections import Counter
 from dataclasses import replace as dataclass_replace
 import hashlib
@@ -38,7 +40,7 @@ from .composite_resolver import (
 from .draft_review_provider import DraftReviewProvider, safe_review_draft
 from .hybrid_editorial import EditorialJudge
 from .semantic_compute_planner import build_cost_contract_report
-from .semantic_idea_equivalence import SemanticEquivalenceArbiter
+from .semantic_idea_equivalence import SemanticEquivalenceArbiter, SemanticEquivalenceGatePolicy
 from .session_boundaries import safe_group_takes_by_sessions
 from .strategy import choose_strategy
 from .take_grouping_provider import (
@@ -53,6 +55,12 @@ from .whole_video_analysis import WholeVideoContext
 
 def _group_id(project_id: str, key: str) -> str:
     return "tg_" + hashlib.sha256(f"{project_id}|{key}".encode()).hexdigest()[:18]
+
+
+def _env_flag_enabled(name: str) -> bool:
+    """D-094.2: '1'/'true'/'yes'/'on' (case-insensitive) enables; anything else,
+    including unset, is OFF."""
+    return str(os.environ.get(name, "")).strip().lower() in {"1", "true", "yes", "on"}
 
 
 def _draft_clip(take: CandidateTake, *, role: SemanticRole, group_id: str | None, selected: bool) -> DraftClip:
@@ -391,7 +399,19 @@ def build_flow_b_draft(
         semantic_equivalence_groups, kept, semantic_equivalence_arbiter,
         protected_ids=composite_split_ids,
         prior_confirmations=prior_confirmations,
+        # D-094.2: runtime-config only (default OFF); see the policy field.
+        policy=SemanticEquivalenceGatePolicy(
+            accept_complete_pairwise_singleton_bridge=_env_flag_enabled(
+                "CUTSELL_BRIDGE_COMPLETE_PAIRWISE_SINGLETON"
+            ),
+        ),
     )
+    cohesion_diagnostics = {
+        **cohesion_diagnostics,
+        "accept_complete_pairwise_singleton_bridge": _env_flag_enabled(
+            "CUTSELL_BRIDGE_COMPLETE_PAIRWISE_SINGLETON"
+        ),
+    }
     group_members = [tuple(take_by_id[clip_id] for clip_id in ids) for ids in semantic_equivalence_groups]
 
     groups = []

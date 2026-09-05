@@ -36,6 +36,17 @@ on:
         required: false
         default: ""
         type: string
+      bridge_complete_pairwise_singleton:
+        # D-094.2: "1" overlays CUTSELL_BRIDGE_COMPLETE_PAIRWISE_SINGLETON=1
+        # (grouping: accept a singleton-attaches-to-component bridge on
+        # complete pairwise confirmation without the D-085 component probe).
+        # Empty (default) = code default OFF, byte-identical to every run to
+        # date. A D-085 grouping-safety contract change -> Product Owner
+        # decision per run (docs/CUTSELL_DECISIONS.md D-094.2).
+        description: "Optional: '1' enables CUTSELL_BRIDGE_COMPLETE_PAIRWISE_SINGLETON (D-094.2). Empty = OFF."
+        required: false
+        default: ""
+        type: string
 
 concurrency:
   group: cutsell-video00-modal-raw-${{ github.ref }}
@@ -177,6 +188,13 @@ jobs:
             mv /tmp/cutsell-env.tmp.json /tmp/cutsell-env.json
           fi
           echo "D-094.F2 hybrid per-edit ceiling for this run: CUTSELL_HYBRID_MAX_EDIT_USD=$(jq -r '.CUTSELL_HYBRID_MAX_EDIT_USD // "unset (code default 0.0075)"' /tmp/cutsell-env.json)"
+          # D-094.2: optional grouping-policy overlay, applied only when the
+          # dispatch input is exactly "1"; code default (OFF) otherwise.
+          if [ "${{ github.event.inputs.bridge_complete_pairwise_singleton }}" = "1" ]; then
+            jq -c '. + {CUTSELL_BRIDGE_COMPLETE_PAIRWISE_SINGLETON:"1"}' /tmp/cutsell-env.json > /tmp/cutsell-env.tmp.json
+            mv /tmp/cutsell-env.tmp.json /tmp/cutsell-env.json
+          fi
+          echo "D-094.2 singleton clique bridge for this run: CUTSELL_BRIDGE_COMPLETE_PAIRWISE_SINGLETON=$(jq -r '.CUTSELL_BRIDGE_COMPLETE_PAIRWISE_SINGLETON // "unset (code default OFF)"' /tmp/cutsell-env.json)"
           test "$(jq 'length' /tmp/cutsell-env.json)" != "0"
           test "$(jq -r '.CUTSELL_HYBRID_LLM_ENABLED' /tmp/cutsell-env.json)" = "1"
           test "$(jq -r '.CUTSELL_HYBRID_PROVIDER' /tmp/cutsell-env.json)" = "google"
@@ -208,7 +226,7 @@ jobs:
               # D-056 Section 1). A real secret (API key, token, bucket
               # name) is essentially always >= 12 characters, so this
               # threshold costs no actual masking coverage.
-              if value and key not in ('CUTSELL_HYBRID_LLM_ENABLED', 'CUTSELL_HYBRID_PROVIDER', 'CUTSELL_UNIFIED_REALIZATION_RESOLVER', 'CUTSELL_ASR_CANONICAL_NORMALIZATION', 'CUTSELL_SEMANTIC_COMPUTE_PLANNER', 'CUTSELL_HYBRID_MAX_EDIT_USD') and len(str(value)) >= 12:
+              if value and key not in ('CUTSELL_HYBRID_LLM_ENABLED', 'CUTSELL_HYBRID_PROVIDER', 'CUTSELL_UNIFIED_REALIZATION_RESOLVER', 'CUTSELL_ASR_CANONICAL_NORMALIZATION', 'CUTSELL_SEMANTIC_COMPUTE_PLANNER', 'CUTSELL_HYBRID_MAX_EDIT_USD', 'CUTSELL_BRIDGE_COMPLETE_PAIRWISE_SINGLETON') and len(str(value)) >= 12:
                   print(f'::add-mask::{value}')
           print(f'Loaded {len(env)} env vars from the live RunPod template plus the D-044 hybrid-semantic overlay, the D-050C2 resolver-mode overlay, and the D-052 stability-battery overlay (secret values masked).')
           "
@@ -507,6 +525,16 @@ jobs:
 
           echo "--- stage_status.canonical_asr_evidence (D-052 Part A, always computed) ---"
           jq '.stage_status.canonical_asr_evidence // {status:"absent"}' artifact/video00-modal.json
+
+          echo "--- D-094.2 grouping forensic summary (take groups with member texts; IdeaClusterer merges / distinct-addition blocks; restore guards) -- printed late so it survives the log tail cap ---"
+          jq '( [ (.selected[]?), (.alternates[]?), (.discarded[]?) ] | map({(.clip_id): (.text // "")[:110]}) | add ) as $t
+              | {
+                  take_groups: ((.diagnostics.take_group_members // []) | map(map({id: ., text: ($t[.] // "?")}))),
+                  semantic_idea_equivalence: ((.diagnostics.semantic_idea_equivalence // {}) | {status, candidate_pair_count, checked_pair_count, merged_pair_count, merges, distinct_addition_blocked}),
+                  grouping_safety_splits: (.diagnostics.distinct_idea_grouping_safety.splits // []),
+                  accept_complete_pairwise_singleton_bridge: (.diagnostics.distinct_idea_grouping_safety.accept_complete_pairwise_singleton_bridge // null),
+                  restore_guards: [ (.diagnostics.hybrid_editorial_chunks // [])[] | select(has("final_delivery_integrity") or has("terminal_delivery_reconciliation")) | {final_delivery_integrity, terminal_delivery_reconciliation} ]
+                }' artifact/video00-modal.json
 
           echo "--- final KEEP sequence (clip_id + text, in order) ---"
           jq '[.selected[]? | {clip_id, text}]' artifact/video00-modal.json

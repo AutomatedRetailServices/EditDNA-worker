@@ -212,12 +212,17 @@ def test_round6_tiny_deleted_word_can_complete_incomplete_selected_delivery_with
         _context(),
     )
 
-    assert len(kept) == 1
-    assert kept[0].end == 361.55
-    assert kept[0].text.endswith("haz ejercicio.")
-    assert kept[0].complete_idea is True
+    # D-094.2: the completion is restored as its OWN take (identity
+    # preserved) rather than merged into the incomplete candidate -- the
+    # CompositeResolver chain rebuilds kept/deleted from the source takes by
+    # clip id, so a merged child never survived it live (run 33983880111).
+    assert tuple(t.clip_id for t in kept) == ("incomplete", "completion")
+    assert kept[0].text.endswith("hidrátate y haz") and kept[0].end == 360.80
+    assert kept[1].text == "ejercicio." and kept[1].end == 361.55
     assert deleted == ()
     assert diagnostics[0]["reason"] == "restore_tiny_completion_suffix"
+    assert diagnostics[0]["restored_as"] == "separate_take"
+    assert diagnostics[0]["restored_text"].endswith("haz ejercicio.")
 
 
 def test_tiny_completion_is_not_restored_across_retry_setup():

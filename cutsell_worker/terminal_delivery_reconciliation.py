@@ -224,7 +224,7 @@ def restore_tiny_completion_suffixes(
     kept_tuple = tuple(sorted(kept, key=lambda t: (t.source_order, t.start, t.end, t.clip_id)))
     deleted_tuple = tuple(sorted(deleted, key=lambda t: (t.source_order, t.start, t.end, t.clip_id)))
     semantic = _semantic_map(semantic_decisions)
-    replacements: dict[str, CandidateTake] = {}
+    restored_takes: dict[str, CandidateTake] = {}
     restored_ids: set[str] = set()
     diagnostics: list[dict] = []
 
@@ -261,23 +261,18 @@ def restore_tiny_completion_suffixes(
             continue
         gap, confidence, fragment, label = min(options, key=lambda item: (item[0], item[1], item[2].start))
         merged_text = f"{str(candidate.text or '').strip()} {str(fragment.text or '').strip()}".strip()
-        child = replace(
-            candidate,
-            end=float(fragment.end),
-            text=merged_text,
-            words=tuple(candidate.words) + tuple(fragment.words),
-            signals=(
-                replace(candidate.signals, end=float(fragment.end))
-                if candidate.signals is not None else None
-            ),
-            complete_idea=True,
-        )
-        replacements[candidate.clip_id] = child
+        # D-094.2: restored as its OWN kept take (identity preserved), never
+        # merged into the candidate by text mutation -- see the same-named
+        # comment in final_delivery_integrity.restore_immediate_completion_
+        # fragments for the live evidence (run 33983880111) and why a
+        # merged child cannot survive the CompositeResolver chain.
+        restored_takes[fragment.clip_id] = fragment
         restored_ids.add(fragment.clip_id)
         diagnostics.append({
             "reason": "restore_tiny_completion_suffix",
             "clip_id": candidate.clip_id,
             "restored_fragment_id": fragment.clip_id,
+            "restored_as": "separate_take",
             "gap_sec": round(gap, 3),
             "fragment_label": label,
             "fragment_confidence": round(confidence, 4),
@@ -286,7 +281,10 @@ def restore_tiny_completion_suffixes(
 
     if not diagnostics:
         return kept_tuple, deleted_tuple, ()
-    output = tuple(replacements.get(take.clip_id, take) for take in kept_tuple)
+    output = tuple(sorted(
+        (*kept_tuple, *restored_takes.values()),
+        key=lambda t: (t.source_order, t.start, t.end, t.clip_id),
+    ))
     remaining_deleted = tuple(take for take in deleted_tuple if take.clip_id not in restored_ids)
     return output, remaining_deleted, tuple(diagnostics)
 
