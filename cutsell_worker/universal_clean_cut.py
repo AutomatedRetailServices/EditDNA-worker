@@ -31,6 +31,7 @@ from .final_story_coherence_validation import apply_final_story_coherence_valida
 from .causal_order_validator import CausalOrderArbiter
 from .semantic_atom_importance import SemanticAtomImportanceArbiter
 from .semantic_claims import ClaimEquivalenceArbiter, ClauseRoleArbiter
+from .canonical_edit_plan import authoritative_plan_source_to_diagnostics, build_authoritative_plan_source
 from .repair_loop import run_repair_loop
 from .flow_b import ProgressCallback, process_local_sources
 from .semantic_ledger import build_ledger_parity_report, build_semantic_ledger_diagnostics, build_semantic_ledger_shadow
@@ -312,6 +313,19 @@ def process_universal_clean_cut_sources(
             for key in legacy_evidence_keys:
                 if key in pre_authority_diagnostics:
                     authoritative_diagnostics[f"{key}_legacy_evidence"] = pre_authority_diagnostics[key]
+            # D-087 SINGLE-TRUTH HANDOFF: the resolver's own per-idea verdict
+            # (winner / composite / review-required, with its coverage
+            # evidence) becomes the canonical source CanonicalEditPlan
+            # represents in AUTHORITATIVE mode -- built once here from the
+            # very same `authoritative_result` + `ledger` every other
+            # authoritative stage consumes, stored as diagnostics (Section
+            # 15) and handed to the repair loop below explicitly. LEGACY/
+            # SHADOW never reach this branch, so they never carry the key
+            # and CanonicalEditPlan keeps its pre-D-087 path there.
+            authoritative_plan_source = build_authoritative_plan_source(authoritative_result, ledger)
+            authoritative_diagnostics["authoritative_plan_source"] = authoritative_plan_source_to_diagnostics(
+                authoritative_plan_source
+            )
             authoritative_draft = replace(authoritative_result.draft, diagnostics=authoritative_diagnostics)
 
             # D-076: SEMANTIC_PRESERVATION_PROOF -- built from the same
@@ -366,7 +380,11 @@ def process_universal_clean_cut_sources(
             # AUTHORITATIVELY: same call as the first pass above, now
             # operating on the resolved draft -- this becomes the plan
             # Freeze actually consumes.
-            repair_result = run_repair_loop(authoritative_draft, causal_order_arbiter=causal_order_arbiter)
+            repair_result = run_repair_loop(
+                authoritative_draft,
+                causal_order_arbiter=causal_order_arbiter,
+                authoritative_source=authoritative_plan_source,
+            )
             edit_plan = repair_result.final_plan
             review_result = repair_result.final_review
             result = replace(result, draft=repair_result.final_draft)

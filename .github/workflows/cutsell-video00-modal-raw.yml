@@ -408,8 +408,14 @@ jobs:
           jq '.diagnostics.canonical_edit_plan
             | if . == null then {status:"absent"} else {
                 plan_id, plan_version, semantic_hash, validation_state, freeze_blocked,
-                ideas: [.ideas[]? | {idea_id, coverage_status, is_composite, winning_clip_ids, discarded_clip_ids}]
+                plan_semantic_source,
+                ideas: [.ideas[]? | {idea_id, coverage_status, is_composite, winning_clip_ids, discarded_clip_ids,
+                                     plan_semantic_source, authoritative_resolution_status,
+                                     authoritative_composite_realization_ids, structural_validation_passed,
+                                     structural_validation_failures}]
               } end' artifact/video00-modal.json
+          echo "--- diagnostics.authoritative_plan_source (D-087 single-truth handoff; AUTHORITATIVE mode only) ---"
+          jq '.diagnostics.authoritative_plan_source // {status:"absent"}' artifact/video00-modal.json
 
           echo "--- diagnostics.final_edit_reviewer ---"
           jq '.diagnostics.final_edit_reviewer // {status:"absent"}' artifact/video00-modal.json

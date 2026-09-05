@@ -44,7 +44,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, replace
 
-from .canonical_edit_plan import CanonicalEditPlan, build_canonical_edit_plan
+from .canonical_edit_plan import AuthoritativePlanSource, CanonicalEditPlan, build_canonical_edit_plan
 from .causal_order_validator import CausalOrderArbiter
 from .final_edit_reviewer import STORY_ORDER_BREAK, FinalEditReviewResult, review
 
@@ -114,6 +114,7 @@ def run_repair_loop(
     *,
     max_attempts: int = DEFAULT_MAX_REPAIR_ATTEMPTS,
     causal_order_arbiter: CausalOrderArbiter | None = None,
+    authoritative_source: AuthoritativePlanSource | None = None,
 ) -> RepairLoopResult:
     """Build CanonicalEditPlan v1, review it, and -- only for finding types
     with a safe repair strategy -- apply bounded, targeted repairs and
@@ -125,9 +126,14 @@ def run_repair_loop(
     (a cross-idea reorder risks undoing an intentional Composer pacing
     choice), so it always routes straight to NEEDS_HUMAN_REVIEW here -- the
     arbiter only affects whether review() emits the finding at all, not
-    whether this loop can fix it."""
+    whether this loop can fix it.
+
+    ``authoritative_source`` (D-087, AUTHORITATIVE resolver mode only) is
+    forwarded unchanged to every `build_canonical_edit_plan` call so a
+    repaired plan v2/v3 is represented from the same authoritative verdict
+    as v1 -- see canonical_edit_plan.py's SINGLE-TRUTH CONTRACT note."""
     current_draft = draft
-    plan = build_canonical_edit_plan(current_draft)
+    plan = build_canonical_edit_plan(current_draft, authoritative_source=authoritative_source)
     result = review(plan, causal_order_arbiter=causal_order_arbiter)
     attempts: list[RepairAttempt] = []
 
@@ -180,7 +186,7 @@ def run_repair_loop(
             ))
             break
 
-        new_plan = build_canonical_edit_plan(repaired_draft)
+        new_plan = build_canonical_edit_plan(repaired_draft, authoritative_source=authoritative_source)
         new_plan = replace(new_plan, plan_version=plan.plan_version + 1)
         new_result = review(new_plan, causal_order_arbiter=causal_order_arbiter)
 

@@ -9204,6 +9204,151 @@ Then STOP.
 
 No Modal. No RAW.
 
+## D-085 canary (run 33952982672) -- bridge-aware cohesion PROVEN live
+
+Head `2ad6203`. `diagnostics.distinct_idea_grouping_safety` now prints in the
+main RAW log: `bridge_evaluated_count: 7`, `bridge_accepted_count: 1`,
+`bridge_rejected_count: 6`, `groups_checked: 5`, `groups_split: 3`. Both
+exact D-084 false bridges (back-acne <-> pimples-monolith at cohesion 0.1,
+back-acne <-> short-pimples with the arbiter 0.95-confident they are
+distinct) were REJECTED; the one accepted bridge reunited two true retries of
+the pimples idea. Back-acne and neck/ear-pimples resolved as two separate
+families (CONFLATED: NO). D-085 LIVE OBJECTIVE: PROVEN. Human Gold 16/18
+(`pimples_micro_2_present` + `pimples_micro_order` fail: the discarded first
+pimples mention's unique "rush" detail is not restated by the winning take --
+a pre-existing BestTakeResolver completeness gap, not D-085's). Freeze
+BLOCKED on ONE unrelated family (`tg_393d421c605ad934cd`,
+`unresolved_unique_fact_asymmetry`) -- classified C, forensic'd as D-086.
+
+## D-086 -- papillary diagnosis / hindsight family forensic (report only)
+
+Recovered from the persisted S3 result via two zero-GPU forensic-extract runs
+(`33954934990`, `33955123472`). A = diagnosis sentence + fumbled hindsight
+clause (135.44-149.52, `real_0c9165624e0030d03ae3`); B = clean hindsight
+lead-in (150.68-158.14, `real_98ec88ff1c0a3488cc35`); 1.16 s apart;
+`retry_similarity` 0.0 -- grouped only by the SemanticArbiter on the shared
+hindsight theme. CRITICAL claim sets disjoint (A: DIAGNOSIS_IDENTIFICATION;
+B: CONTRASTIVE_HINDSIGHT_NEGATION) -> D-063 dominance correctly None ->
+D-082 `unresolved_unique_fact_asymmetry`. Human Gold keeps BOTH consecutively
+(gold spans 11 -> 12). SEMANTIC RELATION: COMPLEMENTARY_DISTINCT_IDEAS;
+CUTSELL SHOULD: KEEP BOTH SEPARATELY; HUMAN CHOICE: NO; D-085 bridge check:
+NOT_APPLICABLE (singleton-to-singleton edge).
+
+Decisive finding: the authoritative RealizationResolver (mode AUTHORITATIVE,
+status SEMANTICALLY_RESOLVED) had ALREADY resolved the family as
+`RESOLVED_COMPOSITE [A, B]` ("minimal_composite_covers_all_critical_claims",
+all 5 canonical claims covered, zero missing) -- but `CanonicalEditPlan`
+derived `is_composite` only from legacy composite evidence, relabeled the
+pair `unresolved_ambiguous`, and FinalEditReviewer blocked Freeze with
+DUPLICATE_IDEA + UNRESOLVED_RETRY. ROOT CLASS: GROUPING (compound
+realization attached through a non-critical shared clause) with the plan-
+handoff seam as the mechanism that turned a correct resolution into a block.
+IF CORRECTED, FREEZE WOULD PASS: YES. Note for future work: forwarding the
+D-061 claim-equivalence arbiter into pipeline.py's D-082 ladder is NOT the
+fix -- the legacy path that did consult it discarded B (the wrong answer).
+
+## D-087 -- authoritative composite -> CanonicalEditPlan handoff (single truth)
+
+SINGLE-TRUTH CONTRACT: in AUTHORITATIVE resolver mode the Unified Realization
+Resolver decides winner / composite / review-required; `CanonicalEditPlan`
+REPRESENTS that decision (plus structural validation); FinalEditReviewer
+validates; Freeze gates. No new semantic authority, no post-resolver
+semantic mutator.
+
+IMPLEMENTATION (`cutsell_worker/canonical_edit_plan.py`):
+- `AuthoritativeIdeaDecision` / `AuthoritativePlanSource` -- the resolver's
+  own per-idea verdict (status, winner/composite realization ids, the
+  Ledger's candidate realizations, covered/missing canonical claims,
+  decision reason), built ONLY in universal_clean_cut.py's AUTHORITATIVE
+  branch by `build_authoritative_plan_source(authoritative_result, ledger)`,
+  stored as `diagnostics["authoritative_plan_source"]`, and passed
+  explicitly through `run_repair_loop(..., authoritative_source=)` to every
+  `build_canonical_edit_plan` call (v1 and each repaired v2/v3).
+  `build_canonical_edit_plan` also reads the stored key back when called
+  without the object (live_render_qc's plan re-resolution), so the plan
+  Freeze recorded and the plan Render QC cross-checks agree.
+- A `RESOLVED_COMPOSITE` idea whose members pass
+  `_validate_authoritative_composite` is emitted `is_composite=True`,
+  `coverage_status="complete"`, `winning_clip_ids` = the authoritative
+  members in the resolver's own order (never re-sorted by DeliveryScore or
+  clip id), with `plan_semantic_source="authoritative_realization_resolver"`,
+  `authoritative_resolution_status`, `authoritative_composite_realization_
+  ids`, `authoritative_resolved_clip_ids`, `authoritative_claim_coverage`,
+  `authoritative_decision_reason`, `structural_validation_passed/_failures`
+  on the idea and `plan_semantic_source` on the plan.
+- Structural validity checks, all fail-closed (idea stays
+  `unresolved_ambiguous` so Freeze still blocks, with the failures carried
+  on the idea -- BLOCK and explain, never an invented alternative): empty
+  composite; duplicate member ids; status not RESOLVED_COMPOSITE; missing
+  critical claims non-empty; unknown realization; realization not selected;
+  member outside the idea's Ledger candidate set; member outside the
+  take_judge group; member clip stamped with another idea; stale fragment
+  provenance (`parent_realization_id` disagreeing, or a parent-only fragment
+  whose parent vanished); a selected member the composite does not name;
+  factual contradiction between members (the D-056.3 shared contract). A
+  `RESOLVED_WINNER` idea whose survivors are not exactly the winner's clips
+  is likewise blocked and explained (never a silently different winner).
+- Fragment/provenance (D-046/D-050A): realization -> clip mapping uses
+  `realization_id` (fragments carry the parent's), then
+  `parent_realization_id`, then a parent-only `parent_semantic_clip_id`
+  resolved through the parent still present in the draft; a member
+  `take_judge_groups` names by its pre-split clip id is explained by its
+  fragments' realizations.
+- LEGACY/SHADOW: no source is ever built or stored; `build_canonical_edit_
+  plan(draft)` is byte-identical to pre-D-087 (legacy composite evidence
+  path untouched; new fields defaulted).
+- `final_edit_reviewer.py`: a family the resolver resolved but the plan
+  structurally rejected reports DUPLICATE_IDEA/UNRESOLVED_RETRY with reason
+  `authoritative_resolution_structural_validation_failed` + the failure
+  list, owning authority `CanonicalEditPlan(structural_validation)`; a
+  genuinely unresolved family keeps the pre-D-087 findings verbatim.
+- STORY ORDER (Section 12): `realization_resolver._place_restored_clips_at_
+  story_position` -- a clip the authoritative application restores into
+  `selected` lands at its idea's story position (adjacent to its kept
+  composite sibling in recording order; or in the departing legacy winner's
+  slot for a winner replacement; appended only with no sibling context),
+  instead of after the CTA as on run 33952982672. Membership is untouched
+  -- positional only; resolver decision logic unchanged.
+- RAW workflow prints `plan_semantic_source` + per-idea authoritative/
+  structural fields and `diagnostics.authoritative_plan_source`.
+
+TESTS: `tests/test_cutsell_d087_authoritative_composite_plan_handoff.py`
+(39): Section 8 generic diagnosis+hindsight regression (direct, via the
+repair loop, unstamped-mint mapping, and END TO END through the real Ledger
+-> real resolver -> real application -> plan source -> plan/reviewer/repair
+loop); Section 9 controls (REVIEW_REQUIRED, no authoritative decision,
+RESOLVED_WINNER with two survivors -> still blocked); Section 10 malformed
+composites (missing id, not selected, wrong idea, outside candidate set,
+missing critical claim, contradictory, empty, duplicate ids, wrong status,
+stale provenance x2, extra unexplained member) all fail closed; Section 11
+fragments (D-050A split fragments; legacy parent-only provenance); Section
+12 story order (resolver order over DeliveryScore/clip id; restored member
+placed consecutively after/before its sibling; winner-replacement slot;
+no-sibling append; membership invariance); Section 13 (valid composite is
+PASS, never NEEDS_HUMAN_REVIEW); Section 14 sales/UGC (benefit + dosage
+composite; hook + CTA distinct winners); Sections 5/15/16 (legacy shape
+unchanged, diagnostics round trip + draft-key fallback, explicit source
+precedence, never changes membership, LEGACY/SHADOW carry no key end to
+end, AUTHORITATIVE carries and consumes it end to end).
+
+QUALIFICATION: compileall clean; D-046 through D-087 targeted sweep 636/636;
+CleanCutBench 54/54 LEGACY and 54/54 AUTHORITATIVE; full `tests/test_
+cutsell_*.py` glob 1910/1910; whole `tests/` directory 2534 passed (2495
+D-085 baseline + 39 new D-087 tests), the same 2 pre-existing unrelated
+failures D-081 already identified and excluded (`test_hybrid_story_guard_
+incomplete_retry`, `test_video00_modal_hybrid_semantic_parity` overlay-
+masking assertion) -- 0 new regressions.
+
+POST-RESOLVER SEMANTIC MUTATORS: 0 (CanonicalEditPlan represents, the
+repair loop reorders only, StoryValidator/FinalEditReviewer validate).
+
+P0: 0 / P1: 0 / P2: 0 / P3: 1 (a realization with clips split across
+selected AND discarded buckets is represented from its selected pieces
+only -- the D-046 physical-fragment shape -- rather than failed closed;
+StoryValidator's independent lost-claim check still covers content loss).
+
+READY FOR ONE VIDEO00 CANARY: YES.
+
 ## Change rule
 
 When a new decision changes product behavior, update this file in the same development cycle. Do not silently redefine CutSell through code alone.

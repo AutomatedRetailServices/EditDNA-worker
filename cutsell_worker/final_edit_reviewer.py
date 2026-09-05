@@ -196,13 +196,40 @@ def review(
 
     for idea in edit_plan.ideas:
         if idea.coverage_status == "unresolved_ambiguous":
+            # D-087 Section 6/7: a family the Unified Resolver DID resolve
+            # (RESOLVED_WINNER/RESOLVED_COMPOSITE) but whose representation
+            # failed CanonicalEditPlan's structural validation is reported
+            # as exactly that -- the plan blocked and explained, it did not
+            # re-decide semantics -- rather than as a resolver/arbiter
+            # non-decision. A genuinely unresolved family (no authoritative
+            # decision, or the resolver's own REVIEW_REQUIRED) keeps the
+            # pre-D-087 findings verbatim. Duplicate detection itself is
+            # unchanged: `unresolved_ambiguous` always blocks.
+            structural_failures = tuple(getattr(idea, "structural_validation_failures", ()) or ())
+            structurally_rejected = (
+                getattr(idea, "structural_validation_passed", None) is False and bool(structural_failures)
+            )
+            if structurally_rejected:
+                duplicate_detail = {
+                    "reason": "authoritative_resolution_structural_validation_failed",
+                    "authoritative_resolution_status": idea.authoritative_resolution_status,
+                    "authoritative_composite_realization_ids": list(idea.authoritative_composite_realization_ids),
+                    "structural_validation_failures": list(structural_failures),
+                }
+                unresolved_detail = dict(duplicate_detail)
+                duplicate_authority = unresolved_authority = "CanonicalEditPlan(structural_validation)"
+            else:
+                duplicate_detail = {"reason": "two_or_more_members_of_one_idea_still_in_final_keep"}
+                unresolved_detail = {"reason": "retry_family_score_gap_too_thin_and_arbiter_did_not_resolve"}
+                duplicate_authority = "BestTakeResolver+SemanticArbiter"
+                unresolved_authority = "StoryValidator"
             findings.append(Finding(
                 kind=DUPLICATE_IDEA,
                 plan_id=plan_id, plan_version=plan_version,
                 idea_id=idea.idea_id,
                 clip_ids=idea.winning_clip_ids,
-                detail={"reason": "two_or_more_members_of_one_idea_still_in_final_keep"},
-                owning_authority="BestTakeResolver+SemanticArbiter",
+                detail=duplicate_detail,
+                owning_authority=duplicate_authority,
                 blocking=True,
             ))
             findings.append(Finding(
@@ -210,8 +237,8 @@ def review(
                 plan_id=plan_id, plan_version=plan_version,
                 idea_id=idea.idea_id,
                 clip_ids=idea.winning_clip_ids,
-                detail={"reason": "retry_family_score_gap_too_thin_and_arbiter_did_not_resolve"},
-                owning_authority="StoryValidator",
+                detail=unresolved_detail,
+                owning_authority=unresolved_authority,
                 blocking=True,
             ))
         elif idea.coverage_status == "missing":

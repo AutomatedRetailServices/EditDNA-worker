@@ -2864,6 +2864,81 @@ def _realization_id_of(clip) -> str:
     return str(getattr(clip, "realization_id", None) or clip.clip_id)
 
 
+def _place_restored_clips_at_story_position(
+    kept_selected: list, restored: list, original_selected, *, ideas_by_realization: Mapping[str, str],
+) -> list:
+    """D-087 Section 12 (STORY ORDER): a clip this application moves INTO
+    `selected` from `alternates`/`discarded` must land at its idea's
+    canonical story position, not at the end of the timeline.
+
+    Before D-087 the rebuild loop appended every restored clip after all
+    originally-selected clips (it iterates selected, then alternates, then
+    discarded) -- live consequence on run 33952982672: the resolver's own
+    RESOLVED_COMPOSITE restored the clean hindsight lead-in (previously
+    legacy-discarded) to `selected`, but as the LAST clip, after the CTA,
+    instead of consecutively after its diagnosis sibling.
+
+    Placement is purely positional and membership-preserving -- the set of
+    selected clips is exactly what the resolver decided, unchanged:
+      * a restored clip whose idea still has an originally-selected sibling
+        in `kept_selected` (the composite shape) is inserted adjacent to
+        that sibling group, before or after it by recording start time
+        (composite members stay consecutive, in recording order);
+      * a restored clip whose idea's originally-selected sibling(s) LEFT
+        `selected` (the winner-replacement shape) takes the slot the first
+        departing sibling occupied in the original order;
+      * a restored clip with no selected sibling at all keeps the pre-D-087
+        behavior: appended, in original bucket order.
+    Sibling identity is the resolver's own idea membership
+    (`ideas_by_realization`, from the Ledger) -- never text similarity."""
+    if not restored:
+        return list(kept_selected)
+
+    def _idea_of(clip):
+        rid = _realization_id_of(clip)
+        stamped = getattr(clip, "semantic_idea_id", None)
+        return ideas_by_realization.get(rid) or (str(stamped) if stamped else None)
+
+    result = list(kept_selected)
+    kept_ids = {c.clip_id for c in kept_selected}
+    original_order = [c for c in original_selected]
+    placed_ids: set[str] = set()
+
+    for clip in restored:
+        idea_id = _idea_of(clip)
+        if idea_id is None:
+            continue
+        kept_siblings = [i for i, c in enumerate(result) if c.clip_id != clip.clip_id and _idea_of(c) == idea_id]
+        if kept_siblings:
+            # Composite shape: keep members consecutive, in recording order.
+            earlier = [i for i in kept_siblings if result[i].start <= clip.start]
+            insert_at = (earlier[-1] + 1) if earlier else kept_siblings[0]
+            result.insert(insert_at, clip)
+            placed_ids.add(clip.clip_id)
+            continue
+        departed = [
+            c for c in original_order
+            if c.clip_id not in kept_ids and c.clip_id != clip.clip_id and _idea_of(c) == idea_id
+        ]
+        if departed:
+            # Winner-replacement shape: take the departing sibling's slot --
+            # the position right after whichever originally-selected clip
+            # preceded that sibling and is still selected.
+            departed_index = next(i for i, c in enumerate(original_order) if c.clip_id == departed[0].clip_id)
+            preceding_kept = [c.clip_id for c in original_order[:departed_index] if c.clip_id in kept_ids or c.clip_id in placed_ids]
+            if preceding_kept:
+                anchor = max(i for i, c in enumerate(result) if c.clip_id in preceding_kept)
+                result.insert(anchor + 1, clip)
+            else:
+                result.insert(0, clip)
+            placed_ids.add(clip.clip_id)
+
+    for clip in restored:
+        if clip.clip_id not in placed_ids:
+            result.append(clip)  # pre-D-087 behavior: no sibling context at all
+    return result
+
+
 def apply_authoritative_realization_resolution(
     draft: DraftTimeline, ledger: SemanticLedger, report: ResolverReport,
     *, claim_equivalence_arbiter: ClaimEquivalenceArbiter | None = None,
@@ -2994,6 +3069,7 @@ def apply_authoritative_realization_resolution(
         return bucket  # None -> untouched (REVIEW_REQUIRED idea, or unmapped)
 
     new_selected, new_alternates, new_discarded = [], [], []
+    restored: list = []  # clips entering `selected` from a non-selected bucket
     seen_ids = set()
     for clip, original_bucket in (
         [(c, "selected") for c in draft.selected]
@@ -3005,11 +3081,19 @@ def apply_authoritative_realization_resolution(
         seen_ids.add(clip.clip_id)
         bucket = _rebuild(clip) or original_bucket
         if bucket == "selected":
-            new_selected.append(clip)
+            if original_bucket == "selected":
+                new_selected.append(clip)
+            else:
+                restored.append(clip)
         elif bucket == "alternates":
             new_alternates.append(clip)
         else:
             new_discarded.append(clip)
+    new_selected = _place_restored_clips_at_story_position(
+        new_selected, restored, draft.selected, ideas_by_realization={
+            rid: idea_id for idea_id, idea in ideas.items() for rid in idea.realization_ids
+        },
+    )
 
     status = AUTHORITATIVE_REVIEW_REQUIRED if any_review_required else SEMANTICALLY_RESOLVED
     new_draft = replace(draft, selected=tuple(new_selected), alternates=tuple(new_alternates), discarded=tuple(new_discarded))
