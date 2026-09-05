@@ -93,6 +93,14 @@ class RenderAttemptRecord:
     repair_requested: bool
     repair_applied: dict | None
     status: str  # "PASS" | "PHYSICAL_FAIL_REPAIRED" | "PHYSICAL_FAIL_UNREPAIRABLE" | "SEMANTIC_MISMATCH"
+    # D-094.3 (F13): which physical finding the Boundary repair actually
+    # targeted (None when none was repairable) and how many physical
+    # findings were examined and found unrepairable before it -- the loop
+    # no longer gives up on the FIRST unrepairable finding while a later
+    # one had a safe edge trim (run 33995806350: a mid-segment silence sat
+    # first in the list and 8 boundary clicks behind it were never tried).
+    repair_target: dict | None = None
+    unrepairable_finding_count: int = 0
 
 
 @dataclass(frozen=True)
@@ -247,9 +255,20 @@ def render_with_post_render_qc(
             )
 
         # Every remaining finding is physical -- attempt ONE targeted,
-        # Boundary-only repair for the first, re-render, and re-check.
-        finding = media.findings[0]
-        repair = repair_segment_for_finding(current_segments, finding)
+        # Boundary-only repair per attempt: the FIRST finding (in QC order)
+        # that has a safe edge trim. D-094.3 (F13): a finding with no safe
+        # repair (e.g. a mid-segment silence) no longer ends the loop while
+        # later findings in the same list could still be repaired; the loop
+        # stays bounded by `max_attempts` exactly as before.
+        repair = None
+        target_finding = None
+        unrepairable = 0
+        for candidate in media.findings:
+            repair = repair_segment_for_finding(current_segments, candidate)
+            if repair is not None:
+                target_finding = candidate
+                break
+            unrepairable += 1
         if repair is None:
             attempts.append(RenderAttemptRecord(
                 render_attempt=attempt_index + 1,
@@ -258,6 +277,7 @@ def render_with_post_render_qc(
                 findings=tuple(_finding_dict(f) for f in media.findings),
                 finding_types=("physical",) * len(media.findings),
                 repair_requested=True, repair_applied=None, status="PHYSICAL_FAIL_UNREPAIRABLE",
+                repair_target=None, unrepairable_finding_count=unrepairable,
             ))
             break
 
@@ -269,6 +289,7 @@ def render_with_post_render_qc(
             findings=tuple(_finding_dict(f) for f in media.findings),
             finding_types=("physical",) * len(media.findings),
             repair_requested=True, repair_applied=dataclasses.asdict(repair_attempt), status="PHYSICAL_FAIL_REPAIRED",
+            repair_target=_finding_dict(target_finding), unrepairable_finding_count=unrepairable,
         ))
         current_segments = new_segments
 

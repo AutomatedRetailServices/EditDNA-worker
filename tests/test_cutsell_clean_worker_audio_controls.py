@@ -92,14 +92,16 @@ def test_renderer_applies_mute_volume_and_silent_track_for_broll(monkeypatch, tm
         vf="scale=1080:1920",
     )
     assert "-af" in muted
-    assert "volume=0.000" in muted
+    # D-094.3 (F14): the audio filter chain now also carries the 12 ms join
+    # fades, so the volume term is a member of the chain, not the whole -af value.
+    assert any(arg.startswith("volume=0.000") for arg in muted)
 
     lowered = renderer._segment_command(
         RenderSegment("c2", "s1", str(audio_source), 0.0, 1.0, audio_muted=False, audio_volume=0.5),
         tmp_path / "two.mp4",
         vf="scale=1080:1920",
     )
-    assert "volume=0.500" in lowered
+    assert any(arg.startswith("volume=0.500") for arg in lowered)
 
     broll = renderer._segment_command(
         RenderSegment("c3", "s2", str(silent_source), 0.0, 1.0),

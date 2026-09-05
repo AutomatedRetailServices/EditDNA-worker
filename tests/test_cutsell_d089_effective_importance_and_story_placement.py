@@ -493,7 +493,11 @@ def test_b10_iteration_permutation_yields_same_sequence():
     for perm in itertools.permutations([B, new, extra]):
         ids, _ = _place(kept, list(perm), legacy, ideas, composite_order_by_idea={IDEA_AB: ("real_A", "real_B")})
         outputs.add(tuple(ids))
-    assert outputs == {("hook", "A", "B", "new_acne", "res", "later", "cta", "lone")}
+    # D-094.3 (F9): a clip with no idea context is placed by recording
+    # position (250 s: after `later` at 200 s, before `cta` at 300 s), never
+    # appended after the CTA. Still one deterministic sequence for every
+    # iteration order.
+    assert outputs == {("hook", "A", "B", "new_acne", "res", "later", "lone", "cta")}
 
 
 def test_b11_no_semantic_membership_change():

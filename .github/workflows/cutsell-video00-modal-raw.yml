@@ -532,6 +532,9 @@ jobs:
                   take_groups: ((.diagnostics.take_group_members // []) | map(map({id: ., text: ($t[.] // "?")}))),
                   semantic_idea_equivalence: ((.diagnostics.semantic_idea_equivalence // {}) | {status, candidate_pair_count, checked_pair_count, merged_pair_count, merges, distinct_addition_blocked}),
                   grouping_safety_splits: (.diagnostics.distinct_idea_grouping_safety.splits // []),
+                  grouping_safety_budget: ((.diagnostics.distinct_idea_grouping_safety // {}) | {weak_pair_count, checked_pair_count, unchecked_weak_pair_count, unchecked_weak_pairs, content_divergence_blocked}),
+                  grouping_safety_rejected_edges: [ (.diagnostics.distinct_idea_grouping_safety.edge_trace // [])[] | select(.accepted == false) ],
+                  family_window_label_sources: [ (.diagnostics.take_judge_groups // [])[]? | select(.semantic_label_source != null) | {group_id, selected_clip_id, semantic_best_take_reason, semantic_label_source} ],
                   accept_complete_pairwise_singleton_bridge: (.diagnostics.distinct_idea_grouping_safety.accept_complete_pairwise_singleton_bridge // null),
                   restore_guards: [ (.diagnostics.hybrid_editorial_chunks // [])[] | select(has("final_delivery_integrity") or has("terminal_delivery_reconciliation")) | {final_delivery_integrity, terminal_delivery_reconciliation} ]
                 }' artifact/video00-modal.json

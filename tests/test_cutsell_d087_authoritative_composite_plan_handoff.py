@@ -519,11 +519,17 @@ def test_section12_winner_replacement_takes_departing_siblings_slot():
     assert [c.clip_id for c in placed] == ["H", "rich", "Z"]
 
 
-def test_section12_restored_clip_with_no_sibling_context_keeps_append_behavior():
+def test_section12_restored_clip_with_no_sibling_context_lands_at_its_recording_position():
+    # D-094.3 (F9): pre-D-094.3 this asserted the append behaviour ["Z", "L"];
+    # run 33995806350 showed that behaviour putting a 82 s retry after the
+    # 357 s CTA. A clip with no idea context now lands by recording position.
     lone = _clip("L", "lone restored realization", start=5.0, end=8.0, selected=False, semantic_idea_id="idea_lone")
     cta = _clip("Z", "call to action", start=40.0, end=45.0, selected=True, semantic_idea_id="idea_cta")
     placed = _place_restored_clips_at_story_position([cta], [lone], (cta,), ideas_by_realization={})
-    assert [c.clip_id for c in placed] == ["Z", "L"]
+    assert [c.clip_id for c in placed] == ["L", "Z"]
+    tail = _clip("T", "recorded after the cta", start=50.0, end=52.0, selected=False, semantic_idea_id="idea_tail")
+    placed = _place_restored_clips_at_story_position([cta], [tail], (cta,), ideas_by_realization={})
+    assert [c.clip_id for c in placed] == ["Z", "T"]
 
 
 def test_section12_placement_never_changes_membership():

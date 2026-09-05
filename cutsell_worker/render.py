@@ -137,6 +137,28 @@ def _caption_filter(segment: RenderSegment, part: Path) -> str | None:
     return f"subtitles='{path}':force_style='{style}'"
 
 
+# D-094.3 (F14): every hard cut between two source segments is a step in the
+# audio waveform. Run 33995806350's PostRenderWatchListenQC flagged 8 of 22
+# joins as ABRUPT_AUDIO_DISCONTINUITY (peak sample jumps 573-3719 vs a
+# typical 41-153) because the concat step copies streams verbatim with no
+# edge treatment. A 12 ms fade-in/fade-out on each segment's OWN edges is a
+# purely physical join treatment: it changes no boundary, no timing, no
+# selection -- the segment still starts and ends exactly where Boundary put
+# it -- it only takes the waveform to zero across the join so the splice is
+# click-free. Segments shorter than `_AUDIO_JOIN_FADE_MIN_SEGMENT_SEC` are
+# left untouched (a fade would cover a material share of them).
+_AUDIO_JOIN_FADE_SEC = 0.012
+_AUDIO_JOIN_FADE_MIN_SEGMENT_SEC = 0.20
+
+
+def _audio_join_fade_filters(duration_sec: float) -> list[str]:
+    fade = float(_AUDIO_JOIN_FADE_SEC)
+    if fade <= 0.0 or duration_sec < _AUDIO_JOIN_FADE_MIN_SEGMENT_SEC:
+        return []
+    fade_out_start = max(0.0, float(duration_sec) - fade)
+    return [f"afade=t=in:st=0:d={fade:.3f}", f"afade=t=out:st={fade_out_start:.3f}:d={fade:.3f}"]
+
+
 def _segment_command(segment: RenderSegment, part: Path, *, vf: str) -> list[str]:
     probe = probe_media(segment.source_path)
     effective_volume = 0.0 if segment.audio_muted else float(segment.audio_volume)
@@ -155,7 +177,8 @@ def _segment_command(segment: RenderSegment, part: Path, *, vf: str) -> list[str
         "-i", segment.source_path,
     ]
     if probe.has_audio:
-        return base + ["-af", f"volume={effective_volume:.3f}"] + common_video + [str(part)]
+        audio_filter = ",".join([f"volume={effective_volume:.3f}", *_audio_join_fade_filters(segment.duration_sec)])
+        return base + ["-af", audio_filter] + common_video + [str(part)]
     return base + [
         "-f", "lavfi",
         "-t", f"{segment.duration_sec:.3f}",

@@ -10282,6 +10282,189 @@ coverage dominance vs Human Gold), C (ONE canary on this head with
 `hybrid_max_edit_usd=0.02` and, if B is granted, `bridge_complete_pairwise_
 singleton=1`).
 
+### D-094.2 canary -- ONE Video00 run 33995806350 on df3946e (F3b OFF, ceiling 0.02): FIRST LIVE FREEZE PASS + RENDER
+
+**Authorization:** Product Owner decisions (F3b NOT authorized; Human Gold
+unchanged; exactly one canary on df3946e, `hybrid_max_edit_usd=0.02`, F3b
+OFF, retries=0, no code changes before the run). Pre-dispatch verification:
+policy default `accept_complete_pairwise_singleton_bridge=False`, no env
+override in the shell, workflow overlay only on the literal input "1"
+(input left empty), Modal app `retries=0` on L4, local = remote head
+df3946e, no prior run on that sha. Consumed. Modal teardown confirmed.
+
+**F7 PROVEN LIVE.** `unresolved_orphan_realization_ids: []`, authority
+status SEMANTICALLY_RESOLVED, Freeze PASS (`selection_boundary_contract:
+selection_semantic_stream_verified_after_boundary`, plan v2 `frozen_ready`,
+`freeze_blocked_pending_coherence_review: false`), Boundary applied
+(`complete_idea_word_lock_overlap_guard_before_freeze`, v5 polish
+`boundary_only_complete`). Physical continuity: KEEP 13 "Por temporada, me
+salía acné en la espalda" -> KEEP 14 "con la que yo resolvía con
+resorcina." adjacent (this run's ASR segmented the fragment as the whole
+clause), acne_back_preserved PASS. NOTE: no `restore_immediate_deleted_
+completion_fragment` row fired this run (the hybrid pass did not delete the
+fragment under this segmentation); F7's chain-level proof therefore rests
+on the offline chain test plus the absence of any orphan/revert live.
+
+**Render/QC (first time reached on the AUTHORITATIVE path):** 1 render
+attempt; PostRenderWatchListenQC findings: 1 LINGERING_ACCIDENTAL_SILENCE
+(output 70.77-73.13 s, 2.36 s, inside the hindsight take "Síntomas que no me
+parecían sospechosos...", ending 0.75 s before that segment's end) + 8
+ABRUPT_AUDIO_DISCONTINUITY (peak sample jumps 573-3719 vs typical 41-153) at
+segment joins; `repair_requested: true`, `repair_applied: null`, attempt
+status PHYSICAL_FAIL_UNREPAIRABLE -> `delivery_status: NOT_DELIVERABLE_
+NEEDS_HUMAN_REVIEW`, `deliverable: false`. A diagnostic preview MP4 was
+persisted (S3 `.../video00-modal-33995806350-1/diagnostic-invalidated-
+preview.mp4`, and inside the run's `cutsell-video00-modal-human-review`
+artifact, 14-day retention). It is a DIAGNOSTIC PREVIEW, not an approved
+delivery.
+
+**Human Gold 15/19** (selection_count 23 now PASS; failures:
+`papillary_cancer_preserved`, `pimples_micro_2_present`, `pimples_micro_
+order`, `sonography_good_before_diagnosis`). Cross-run note: this run's ASR
+differs materially (42 segments vs 54; "resorbía, resorbía", "In -Body
+Mass"); `papillary_cancer_preserved` expects the joined segment "La biopsia
+confirmó ... Síntomas que tuve según yo era sintomática ...", which this ASR
+split into two candidates -- the biopsy sentence IS kept (KEEP 11) but the
+hindsight family resolved as single winner (the other hindsight take,
+"Síntomas que no me parecían sospechosos...") instead of the D-092-run
+composite, so the "Síntomas que tuve..." take was discarded and the order
+check that depends on the joined text fails with it (F12, ASR-drift
+sensitive). `pimples_bad_monolith_absent` PASSED only because this run's
+monolith text carries commas the forbidden string lacks -- the monolith IS
+kept (KEEP 15); the check is punctuation-brittle (aligner P3), F8 stands.
+
+**Selection defects visible in the final KEEP (23 clips):**
+- F8 (pimples): monolith kept, later delivery discarded. Root cause now
+  pinned (offline, read-only during the run): the only hybrid window that
+  judged all three takes together (chunk 3 of run 33983880111) labelled the
+  later delivery WINNER 0.95 and the monolith ALTERNATE 0.88; chunk 2 (no
+  later delivery present) labelled the monolith WINNER 0.96; the per-clip
+  cross-window merge keeps each clip's strongest label, producing two
+  winners -> D-082 ladder -> DeliveryScorer -> monolith. "problemas
+  hormonales" is extracted SUPPORTING (every claim of that family is
+  SUPPORTING; no CRITICAL coverage is at stake) -- the earlier D-094.1
+  canary note attributing the pick to critical coverage was wrong on that
+  point and is corrected here. Engine mis-application of "best valid
+  realization of the idea" -> fixed in D-094.3 (F8).
+- F9 (order): KEEP 23 "Al terminar mi contrato, hablé con mi ginecóloga..."
+  (recorded at 82 s) placed AFTER the CTA via `NO_ANCHOR_APPEND` -- its
+  2-member group was split by grouping safety and it became a singleton
+  idea with no departed sibling. Fixed in D-094.3 (F9). The split itself
+  (F11) is a separate open item: `semantic_idea_equivalence` checked 14 of
+  63 candidate pairs (bounded), the pair was not among them, and the safety
+  pass's own verdict on it is above the tail cap -> rejected edges and the
+  pair budget are now printed (observability).
+- F4b (hereditary): KEEP 19-20 (full statement, split in two by Boundary)
+  + KEEP 21 (truncated restatement "...solo un 5-10 % de los") as a
+  RESOLVED_COMPOSITE. The truncated retry's "5-10 %" MEASUREMENT claim and
+  the full statement's carry the same digits but only 0.25 token overlap,
+  below the 0.4 arbiter floor, so they became two CRITICAL requirement
+  groups and the composite was "needed". Fixed in D-094.3 (F4b, arbiter
+  consulted from a lower floor for same-number claims; verdict stays the
+  arbiter's).
+- D-020 gastritis: the abandoned retry was DISCARDED this run (2-member
+  group, no aside); the previous run's F3b shape did not recur under this
+  segmentation. F3b remains OFF and unproven, per PO.
+- Duplicate `clip_id`s in the KEEP print (two physical pieces of one
+  semantic clip after a Boundary split) are D-036 by design (semantic id
+  shared, `render_fragment_id` distinct) -- not a defect.
+
+### D-094.3 -- render join fades (F14), QC repair loop (F13), source-order placement (F9), family-window labels (F8), same-number dedup floor (F4b), observability
+
+**F14 `render.py`:** each rendered segment now carries a 12 ms audio fade-in
+and fade-out on its own edges (`_audio_join_fade_filters`; skipped below
+0.2 s). Physical join treatment only -- no boundary, timing or selection
+change. Proven with a synthetic worst-case splice (opposite-polarity DC
+sources): hard cut -> ABRUPT_AUDIO_DISCONTINUITY FAIL; with fades -> PASS;
+output duration unchanged.
+
+**F13 `live_render_qc.py`:** the bounded repair loop now tries each
+physical finding in QC order and repairs the first with a safe Boundary
+edge trim, instead of ending on the first unrepairable one; still bounded
+by `max_attempts`; `RenderAttemptRecord` gains `repair_target` and
+`unrepairable_finding_count` (defaults keep every existing consumer).
+
+**F9 `realization_resolver.py`:** a restored clip with no idea anchor is
+inserted before the first current clip that starts later (never inside a
+placed composite block; `SOURCE_ORDER_INSERTION`); appended only when it
+truly starts after everything (`NO_ANCHOR_APPEND` kept for that case). Two
+existing tests that pinned the append behaviour (D-087 §12, D-089 b10)
+updated to the new contract with the live evidence in their comments.
+
+**F8 `pipeline.py`:** `family_scoped_semantic_decisions` -- when at least
+one hybrid window contains EVERY member of a retry family, those windows'
+labels (merged by the existing priority rule among themselves) replace the
+cross-window per-clip merge for that family before `_semantic_best_take`;
+otherwise the merge is unchanged. `take_judge_groups[*]` records
+`semantic_label_source`; `semantic_candidates` reflects the labels actually
+used (so the Ledger's SEMANTIC_WINNER_OVERRIDE confidence matches).
+`_semantic_best_take` itself is unchanged.
+
+**F4b `realization_resolver._claims_dedup_equivalent`:** when both claims
+carry the SAME digit values, the claim-equivalence arbiter is consulted from
+overlap 0.2 (`_DEDUP_AMBIGUOUS_FLOOR_SAME_NUMBER`) instead of 0.4; nothing
+is merged deterministically, different numbers never reach the arbiter,
+and no arbiter still fails open to DISTINCT.
+
+**Observability (Modal RAW workflow):** the late forensic summary adds the
+grouping-safety budget (weak/checked/unchecked pairs, divergence blocks),
+every rejected edge, and the family-window label sources.
+
+**Not changed (product decisions / open):** QC thresholds (1.2 s silence,
+6x jump ratio) untouched; the 2.36 s mid-take silence remains unrepairable
+by an edge trim -- an interior silence cut inside a kept take would be a
+jump cut (product/UX decision, escalation A); F3b OFF; Human Gold
+unchanged; F11 (pair budget 14/63 in the IdeaClusterer, a cost decision)
+open; F12 (ASR-drift-sensitive hindsight composite) open P3; aligner
+punctuation brittleness P3.
+
+**Tests:** `tests/test_cutsell_d094_3_render_qc_placement_labels.py` (13):
+F14 red/green splice (real ffmpeg) + filter shape; F13 repairable-later
+finding + all-unrepairable bounded; F9 recording-position insertion, true
+tail append, never inside a block; F8 family-complete window overrides the
+merge, no complete window = unchanged, two complete windows merge among
+themselves; F4b same numbers consult the arbiter, no arbiter stays
+distinct, different numbers never asked. Existing contract tests updated: 3.
+
+**QA (self-review by the implementing session, disclosed):** (1) can F14
+shift a boundary? -- no, fades are inside the segment's own span, duration
+checked equal; (2) can F13 loosen the delivery gate? -- no, it only chooses
+which finding to repair; every finding still must clear QC on the re-render
+and the loop stays bounded; (3) can F9 reorder selected material? -- only
+restored clips are placed, membership untouched, blocks never split
+(permutation test still yields one sequence); (4) can F8 invent a winner?
+-- it only chooses which existing window's labels feed the unchanged
+ladder; with no family-complete window nothing changes; (5) can F4b merge
+distinct facts? -- only the arbiter can say "same"; different numbers stay
+distinct deterministically. Verdict: PASS.
+
+**Qualification (offline):** compileall clean; new file 13/13; render/QC/
+placement/best-take/D-050/D-087/D-089 suites 187/187 after the 3 contract
+updates; CleanCutBench 54/54 LEGACY and 54/54 AUTHORITATIVE; full
+`tests/test_cutsell_*.py` glob 2031/2031 (2018 D-094.2 baseline + 13 new); whole `tests/` 2655 passed
+(= 2642 + 13) with the
+same 2 pre-existing unrelated failures and the pre-existing
+`tests/test_semantic_stitch.py` collection error -- 0 new regressions.
+
+**Failure matrix:** F1 offline-fixed, not exercised live; F2 PROVEN (0.02
+overlay per run); F3 PROVEN; F3b OFF (PO); F4 PROVEN; F4b fixed offline;
+F5 P3; F6 REACHED LIVE (render + QC executed, gated); **F7 PROVEN**; F8
+fixed offline; F9 fixed offline; F11 open (pair budget, cost decision); F12
+open P3; F13 fixed offline; F14 fixed offline; F15 (mid-take silence >1.2 s
+inside a kept take: jump-cut policy) = product decision.
+
+LAST VERIFIED RESULT: run 33995806350 = Freeze PASS + render + QC gate
+(NOT_DELIVERABLE_NEEDS_HUMAN_REVIEW) + diagnostic preview persisted; Human
+Gold 15/19; D-094.3 CODE FIXED / TESTS PASS / offline qualification green.
+NEXT AUTOMATIC ACTION: none offline within proven root causes; the next
+proof (F8/F9/F13/F14/F4b live, and whether QC clears with fades) is a paid
+run.
+HUMAN ACTION REQUIRED: YES -- F (watch/listen the diagnostic preview of
+33995806350; it is not an approved delivery), A (F15 mid-take silence
+policy: keep as human review, or authorize an interior word-locked silence
+cut = jump cut), C (ONE canary on this head, same configuration), optional
+C (IdeaClusterer pair budget for F11).
+
 ## Change rule
 
 When a new decision changes product behavior, update this file in the same development cycle. Do not silently redefine CutSell through code alone.

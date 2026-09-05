@@ -6,7 +6,7 @@ import os
 from collections import Counter
 from dataclasses import replace as dataclass_replace
 import hashlib
-from typing import Dict, Iterable
+from typing import Dict, Iterable, Mapping
 
 from .canonical_identity import (
     build_identity_chain_diagnostics,
@@ -101,6 +101,63 @@ def _draft_clip(take: CandidateTake, *, role: SemanticRole, group_id: str | None
         source_span_id=take.source_span_id,
         attempt_id=take.attempt_id,
     )
+
+
+def family_scoped_semantic_decisions(
+    members: tuple[CandidateTake, ...],
+    semantic_decisions: dict[str, tuple[str, float]],
+    window_rows: Iterable[Mapping] | None,
+) -> tuple[dict[str, tuple[str, float]], dict | None]:
+    """D-094.3 (F8): a hybrid "winner"/"alternate" label is COMPARATIVE -- it
+    answers "best among the candidates this window saw". The per-clip merge
+    across windows (`hybrid_session_cleanup`'s best-priority-per-clip) keeps
+    a clip's strongest label from ANY window, so a take judged "winner" in
+    a window that never saw its better sibling keeps that "winner" even when
+    the one window that saw the WHOLE family ranked it "alternate". Run
+    33983880111: the pimples monolith was "winner" 0.96 in a window without
+    the later delivery, "alternate" 0.88 in the window holding all three
+    takes (where the later delivery was "winner" 0.95); the merge produced
+    two "winners", the ladder fell to DeliveryScorer and the monolith won.
+
+    When at least one window contains EVERY member of this retry family,
+    those windows' labels are the family-level answer and replace the
+    cross-window merge for these members (merged by the same priority rule
+    across the complete windows only). Otherwise the global merge is used
+    unchanged. Returns (decisions, source_info); source_info is None when no
+    family-complete window exists. Windows are the per-chunk rows of
+    `hybrid_cleanup.diagnostics` (member_ids + decisions); rows without
+    member_ids (hook diagnostics) are ignored."""
+    from .hybrid_session_cleanup import _decision_priority
+
+    family = [member.clip_id for member in members]
+    if not window_rows or len(family) < 2:
+        return dict(semantic_decisions), None
+    family_set = set(family)
+    complete = [
+        row for row in window_rows
+        if isinstance(row, Mapping) and family_set <= set(row.get("member_ids") or ())
+    ]
+    if not complete:
+        return dict(semantic_decisions), None
+    merged: dict[str, tuple[str, float]] = {}
+    for row in complete:
+        for decision in row.get("decisions") or ():
+            clip_id = decision.get("clip_id")
+            if clip_id not in family_set:
+                continue
+            candidate = (str(decision.get("label") or ""), float(decision.get("confidence") or 0.0))
+            current = merged.get(clip_id)
+            if current is None or _decision_priority(*candidate) > _decision_priority(*current):
+                merged[clip_id] = candidate
+    scoped = dict(semantic_decisions)
+    for clip_id in family:
+        if clip_id in merged:
+            scoped[clip_id] = merged[clip_id]
+    return scoped, {
+        "family_complete_window_chunk_indices": [row.get("chunk_index") for row in complete],
+        "family_window_labels": {cid: list(merged[cid]) for cid in family if cid in merged},
+        "global_merge_labels": {cid: list(semantic_decisions.get(cid, ("", 0.0))) for cid in family},
+    }
 
 
 def _semantic_best_take(
@@ -433,9 +490,14 @@ def build_flow_b_draft(
         if judged.status.reason:
             judge_reasons[judged.status.reason] += 1
         local_selected_clip_id = ranked[0].clip_id
+        # D-094.3 (F8): prefer the labels of a window that judged the WHOLE
+        # family together over the per-clip cross-window merge.
+        family_semantic_decisions, semantic_label_source = family_scoped_semantic_decisions(
+            members, hybrid_semantic_decisions, hybrid_cleanup.diagnostics,
+        )
         selected_clip_id, semantic_preferred_clip_id, semantic_best_take_reason = _semantic_best_take(
             members,
-            hybrid_semantic_decisions,
+            family_semantic_decisions,
             local_selected_clip_id,
             ranked,
             semantic_delete_recommended=hybrid_semantic_delete_recommended,
@@ -461,11 +523,14 @@ def build_flow_b_draft(
                 "semantic_preferred_clip_id": semantic_preferred_clip_id,
                 "semantic_override_applied": selected_clip_id != local_selected_clip_id,
                 "semantic_best_take_reason": semantic_best_take_reason,
+                # D-094.3 (F8): the labels the decision was actually made on
+                # (family-window labels when a family-complete window exists).
+                "semantic_label_source": semantic_label_source,
                 "semantic_candidates": [
                     {
                         "clip_id": member.clip_id,
-                        "label": hybrid_semantic_decisions.get(member.clip_id, ("", 0.0))[0],
-                        "confidence": hybrid_semantic_decisions.get(member.clip_id, ("", 0.0))[1],
+                        "label": family_semantic_decisions.get(member.clip_id, ("", 0.0))[0],
+                        "confidence": family_semantic_decisions.get(member.clip_id, ("", 0.0))[1],
                     }
                     for member in members
                 ],

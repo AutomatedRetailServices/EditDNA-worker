@@ -307,6 +307,7 @@ def _overlap_coefficient(left: frozenset, right: frozenset) -> float:
 # floor). Between this floor and `_CLAIM_DEDUP_THRESHOLD` is the genuinely
 # ambiguous band deterministic overlap alone cannot safely decide.
 _DEDUP_AMBIGUOUS_FLOOR = 0.4
+_DEDUP_AMBIGUOUS_FLOOR_SAME_NUMBER = 0.2  # D-094.3 (F4b): same digit values on both sides
 
 
 def _claims_dedup_equivalent(
@@ -355,6 +356,7 @@ def _claims_dedup_equivalent(
     # D-050C1.5 full sweep's `test_incidental_year_safely_omitted_...` /
     # `test_redundant_date_repeated_...` fixtures.
     left_values, right_values = _claim_digit_values(left), _claim_digit_values(right)
+    same_numbers = bool(left_values and right_values and left_values == right_values)
     if left_values and right_values:
         if left_values != right_values:
             return False
@@ -364,7 +366,18 @@ def _claims_dedup_equivalent(
     overlap = _overlap_coefficient(left_rest, right_rest)
     if overlap >= _CLAIM_DEDUP_THRESHOLD:
         return True
-    if overlap < _DEDUP_AMBIGUOUS_FLOOR or claim_equivalence_arbiter is None or not left.text or not right.text:
+    # D-094.3 (F4b): two same-type claims asserting the SAME numbers are far
+    # more likely one requirement restated than two facts -- the arbiter is
+    # consulted from a lower overlap floor for them (never merged
+    # deterministically; the verdict is still the arbiter's, and absence of
+    # an arbiter still fails open to DISTINCT). Run 33995806350: "solo un
+    # 5-10 % son de carácter hereditario" vs the truncated restatement "...
+    # que solo un 5-10 % de los" had overlap 0.25 (< 0.4), were never put
+    # to the arbiter, became two CRITICAL requirement groups, and forced an
+    # abandoned mid-sentence retry into the composite next to the complete
+    # delivery (D-020).
+    ambiguous_floor = _DEDUP_AMBIGUOUS_FLOOR_SAME_NUMBER if same_numbers else _DEDUP_AMBIGUOUS_FLOOR
+    if overlap < ambiguous_floor or claim_equivalence_arbiter is None or not left.text or not right.text:
         return False
     try:
         covered, confidence, reason = claim_equivalence_arbiter.claim_covered(left.text, right.text)
@@ -2993,6 +3006,12 @@ def _realization_id_of(clip) -> str:
 PLACEMENT_UNIT_COMPOSITE_BLOCK = "AUTHORITATIVE_COMPOSITE_BLOCK"
 PLACEMENT_UNIT_WINNER_REPLACEMENT = "SINGLE_WINNER_REPLACEMENT"
 PLACEMENT_UNIT_NO_ANCHOR_APPEND = "NO_ANCHOR_APPEND"
+# D-094.3 (F9): a restored clip with no idea context is placed by its own
+# recording position -- before the first current clip that starts later --
+# never appended after the CTA merely because nothing departed. Run
+# 33995806350: a restored retry recorded at 82 s (its sibling was split into
+# a separate idea) landed AFTER the closing CTA at 357 s as NO_ANCHOR_APPEND.
+PLACEMENT_UNIT_SOURCE_ORDER_INSERTION = "SOURCE_ORDER_INSERTION"
 
 
 def _place_restored_clips_at_story_position(
@@ -3176,17 +3195,32 @@ def _place_restored_clips_at_story_position(
             "contiguity_validated": None, "placement_reason": reason,
         })
 
-    # 3. No anchor at all: append (pre-D-087 behavior), deterministically.
+    # 3. No idea anchor at all: D-094.3 (F9) -- insert by recording position
+    #    (before the first current clip that starts later, never inside a
+    #    placed block), deterministically; append only when every current
+    #    clip starts earlier (the pre-D-087 behavior, now the true tail case).
     for clip in sorted(unanchored, key=lambda c: (float(c.start), c.clip_id)):
         before = _ids(seq)
-        seq.append(clip)
+        clip_start = float(clip.start)
+        insert_at = next((i for i, c in enumerate(seq) if float(c.start) > clip_start), len(seq))
+        successor_id = None
+        if insert_at < len(seq):
+            successor_id = seq[insert_at].clip_id
+            block_idea = block_of.get(successor_id)
+            if block_idea is not None:
+                current_index = {c.clip_id: i for i, c in enumerate(seq)}
+                insert_at = min(current_index[m] for m in block_members[block_idea])  # never split a placed block
+            unit_type, reason = PLACEMENT_UNIT_SOURCE_ORDER_INSERTION, "source_order_before_first_later_start"
+        else:
+            unit_type, reason = PLACEMENT_UNIT_NO_ANCHOR_APPEND, "no_anchor_append"
+        seq[insert_at:insert_at] = [clip]
         _log({
-            "unit_type": PLACEMENT_UNIT_NO_ANCHOR_APPEND, "semantic_idea_id": _idea_of(clip),
+            "unit_type": unit_type, "semantic_idea_id": _idea_of(clip),
             "member_clip_ids": [clip.clip_id], "member_realization_ids": [_realization_id_of(clip)],
             "authoritative_member_order": [], "departed_clip_ids": [], "departed_original_index": None,
-            "successor_anchor": None, "predecessor_fallback": None,
-            "chosen_insertion_index": len(seq) - 1, "sequence_before": before, "sequence_after": _ids(seq),
-            "contiguity_validated": None, "placement_reason": "no_anchor_append",
+            "successor_anchor": successor_id, "predecessor_fallback": None,
+            "chosen_insertion_index": insert_at, "sequence_before": before, "sequence_after": _ids(seq),
+            "contiguity_validated": None, "placement_reason": reason,
         })
 
     # Contiguity validation (observability -- placement above is contiguous
