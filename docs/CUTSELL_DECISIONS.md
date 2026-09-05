@@ -8891,6 +8891,165 @@ Then STOP.
 
 No Modal. No RAW.
 
+## D-083 -- distinct-idea retry grouping safety (grouping only)
+
+Follow-up to the D-082 CONTROLLED VIDEO00 STABILITY BATTERY's own P2 finding:
+across all 3 runs, `take_judge_groups` conflated two genuinely distinct
+symptom beats -- a back-acne mention treated with resorcinol, and a
+hormonal-pimples-behind-the-ear/neck mention that itself appears across
+three takes of increasing specificity -- into one mutually-exclusive retry
+family, causing 5 identical Human Gold "pimples" check failures
+(`pimples_micro_1/2/3_present`, `pimples_later_winner_present`,
+`pimples_micro_order`) in every run while `acne_back_preserved` and
+`pimples_bad_monolith_absent` both passed. GROUPING ONLY -- no BestTake,
+Resolver, StoryValidator, Freeze, Boundary, Render/QC, or ASR change.
+
+EXACT GROUPING-RULE TRACE: `session_boundaries.py` only computes coarse
+mini-session boundaries and was ruled out directly. The deterministic
+lexical mechanisms (`take_grouping.retry_similarity`/`group_takes`,
+`_provider_members_compatible`, `_is_prefix_fragment`) were ruled out by
+direct computation against the real (translated) clip texts -- every
+acne-vs-pimples and pimples-vs-pimples pair scored 0.0 or strictly below its
+respective merge threshold (the closest, the short generic pimples mention
+vs. the discarded elaboration, scored 0.7032 against a 0.72 deterministic
+threshold -- close, but not crossed). With every deterministic path ruled
+out, all within-group pairs in the conflated baseline group became "weak
+pairs" resolved entirely by `split_incohesive_retry_groups`'s (D-058 Phase
+1) own arbiter call -- which, unlike its sibling
+`reconcile_semantic_idea_equivalence`, applies NO content-divergence
+override to any arbiter "same_idea=True" confirmation, marked or not. The
+polished pimples restatement carries the exact "Otro sintoma"/"another
+symptom" `_DISTINCT_ADDITION_MARKERS` marker this module already tracks
+elsewhere; `split_incohesive_retry_groups` simply never consulted it.
+
+FIX: `_within_group_arbiter_confirmation_diverges` in
+`take_grouping_provider.py` -- reuses `_marked_side_diverges_in_content`
+(D-048 FIX 1, already calibrated and already proven via the founding D-039
+distinct-body-part case and the D-047 Case 1 genuine-restatement case)
+inside `split_incohesive_retry_groups`'s own weak-pair confirmation loop,
+exactly mirroring how `reconcile_semantic_idea_equivalence` already gates
+its cross-group merges. Wired in as an unconditional check on every
+confirmed pair: exactly one side marked AND real content divergence from
+the other blocks the confirmation (logged to a new
+`content_divergence_blocked` diagnostics list/count on the returned dict,
+alongside the existing `arbiter_confirmed_pairs`); everything else is
+unaffected.
+
+REJECTED ALTERNATIVE (evaluated and disproven, not merely untried): a
+broader, unconditional content-overlap floor on EVERY arbiter confirmation
+in `split_incohesive_retry_groups` (marked or not), using claim-level
+(`semantic_claims.extract_claims`) Dice/coverage/subset measures instead of
+whole-text tokens. Numerically verified against this directive's own
+Section 4/5/6/7 fixtures AND the real acne/pimples texts, it broke the
+pre-existing `test_arbiter_confirmed_retry_stays_grouped` true-retry
+paraphrase regression (`test_cutsell_d058_phase1_grouping_safety.py`): that
+pair ("I had seasonal back acne ... an ointment" vs "Every season I would
+get back breakouts ... an ointment for it") scores LOWER lexical/claim
+overlap by every measure tried (raw shared tokens: 2; min-side coverage:
+0.333; best claim-pair Dice: 0.286) than the specific unmarked pimples pair
+this fix must NOT merge (shared: 4; min-side coverage: 0.800; best claim-pair
+Dice: 0.421) -- proof that no fixed lexical-overlap threshold can separate
+"same proposition, very different words" (an LLM arbiter's whole reason for
+existing) from "different proposition, overlapping topic vocabulary" in
+general. The marker is a genuine, narrow, non-lexical signal; widening the
+override beyond it reintroduces exactly the false-positive class this
+module's own paraphrase-retry contract already forbids.
+
+HONEST RESIDUAL SCOPE: the fix closes every pairing that routes through the
+marked restatement (acne-vs-restatement, short-mention-vs-restatement --
+both proven to split even under an adversarial always-confirm arbiter in
+the new test suite) and leaves the pre-existing, already-correct
+monolith-vs-restatement merge untouched. The one pairing it does NOT
+independently guarantee is an UNMARKED pair between two topically-similar,
+asymmetric mentions (here: the short generic pimples mention vs. the
+discarded longer elaboration) -- no deterministic signal tried can
+distinguish that shape from a genuine unmarked paraphrase retry without
+also breaking the paraphrase case. In the real 3-run battery, the more
+likely single connecting edge was the marked restatement pair (the
+elaboration and restatement share the identical specific location detail
+and framing; the short mention shares only generic topic vocabulary with
+either), so this fix is expected, but not proven offline, to fully close
+the observed regression. Closing the residual with certainty would require
+either a live arbiter-confirmation trace (the `distinct_idea_grouping_
+safety` diagnostics key already exists in `pipeline.py` but is never
+printed by the Modal RAW workflow's own diagnostic-dump script -- a real,
+separate, and still-open observability gap worth a future scoped fix) or a
+structured-justification arbiter contract -- both out of "grouping only"
+scope for this directive.
+
+TESTS: new `tests/test_cutsell_d083_distinct_idea_grouping_safety.py` (14
+tests) -- Section 4 distinct-idea negative control (realistic-arbiter-
+declines path, and a marked-side path proven safe under an adversarial
+always-confirm arbiter); Section 5 true-retry positive control; Section 6
+Fact-A-vs-Fact-A+B directional-completeness safety (both sides still
+compete, content never silently disposed); Section 7 sales/UGC
+generalization (dosage vs. benefit never compete; a benefit restatement may
+compete); the real acne/pimples regression shape reproduced end-to-end
+(acne-vs-marked-restatement splits even adversarially; acne vs. the two
+unmarked mentions splits under a realistic declining arbiter; the genuine
+monolith/restatement retry still merges; the full four-member conflated
+group resolves to exactly the three intended families); diagnostics
+observability (empty-groups shape, and a populated-block shape); and a
+direct unit check that the new gate function requires exactly one marked
+side.
+
+QUALIFICATION: compileall clean; targeted D-050 through D-083 sweep (516
+tests: the existing 502 plus this file's 14) all pass; CleanCutBench 54/54,
+run twice; full `tests/` suite -- 2471 passed (2457 D-082 baseline + 14 new
+D-083 tests), 2 pre-existing failures unrelated to this change (the same
+`test_hybrid_story_guard_incomplete_retry.py` and `test_video00_modal_
+hybrid_semantic_parity.py` cases D-081's own qualification already
+identified and excluded), plus `test_semantic_stitch.py`'s pre-existing,
+unrelated collection error -- 0 new regressions.
+
+QA_ENGINE: adversarial pass asked "can two nearby distinct ideas still be
+forced into one family?" -- built `ConfirmEverythingArbiter`, an arbiter
+stub that confirms same_idea=True for every pair regardless of content, and
+re-ran the acne-vs-marked-restatement and short-mention-vs-marked-
+restatement cases against it: both still split, proving the marker +
+content-divergence gate (not arbiter restraint) is what protects those
+pairings. The same adversarial arbiter against the acne-vs-unmarked-mention
+pairings does still force a merge -- this is the honestly-disclosed residual
+above, not a hidden failure: no proven unique-content loss exists offline
+(both mentions have a legitimate, independent chance to survive Selection
+either way -- only the WHO-COMPETES boundary is what remains open for that
+one unmarked shape).
+
+P0: 0
+P1: 0
+P2: 1 -- the unmarked-pair residual described above; recommend closing via
+either the `distinct_idea_grouping_safety` diagnostics observability gap
+(print it from the Modal RAW workflow so a live arbiter trace can confirm
+or rule out the residual directly) or a structured-justification arbiter
+contract, both out of this directive's grouping-only scope.
+P3: 1 -- the Modal RAW workflow's diagnostic-dump script never surfaces
+`distinct_idea_grouping_safety` at all (only `semantic_idea_equivalence`),
+so this whole D-058/D-083 cohesion-safety stage has been operating without
+direct live observability since D-058 shipped.
+
+DISTINCT-IDEA GROUPING: PASS (marker-mediated cases; unmarked residual
+honestly disclosed, not proven safe).
+PIMPLES REGRESSION: PASS expected, not certified offline (see residual
+scope note above -- requires a live canary to certify with certainty).
+TRUE RETRY GROUPING: PASS.
+TEMPORAL-ONLY GROUPING: UNSAFE (temporal proximity alone was never
+sufficient before this fix and remains insufficient after it -- both the
+pre-existing deterministic thresholds and the new marker gate require
+textual evidence).
+UNIQUE CONTENT SAFETY: PASS.
+SALES/UGC GENERALIZATION: PASS.
+
+READY FOR ONE VIDEO00 CANARY: YES -- the fix is safe (zero regressions
+across 516 targeted + 54x2 CleanCutBench + full suite), closes a real,
+diagnosed defect for every marker-mediated pairing, and the one remaining
+question (does the unmarked residual matter in practice) can only be
+answered by observing live arbiter behavior, which is exactly what a single
+canary run is for.
+
+Then STOP.
+
+No Modal. No RAW.
+
 ## Change rule
 
 When a new decision changes product behavior, update this file in the same development cycle. Do not silently redefine CutSell through code alone.

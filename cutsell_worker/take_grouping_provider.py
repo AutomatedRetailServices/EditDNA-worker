@@ -145,6 +145,56 @@ def _marked_side_diverges_in_content(left_text: str, right_text: str) -> bool:
     return coverage < _DIVERGENCE_MIN_SHARED_COVERAGE
 
 
+# D-083: DISTINCT-IDEA RETRY GROUPING SAFETY (within-group weak-pair gate)
+#
+# `_marked_side_diverges_in_content` above only ever guards
+# `reconcile_semantic_idea_equivalence`'s CROSS-group merges.
+# `split_incohesive_retry_groups` below -- the WITHIN-group cohesion pass --
+# has no equivalent safety net at all: any arbiter "same_idea=True" verdict
+# for a within-group weak pair is trusted unconditionally, marker or no
+# marker. Live audit of the D-082 stability battery (docs/
+# CUTSELL_DECISIONS.md D-083) found a baseline group bundling one back-acne
+# mention with three separate hormonal-pimples mentions (none of the pairs
+# scoring above `_provider_members_compatible`'s own threshold, so all six
+# became weak pairs sent to this function's own arbiter call). One of those
+# pimples mentions carried the exact "otro sintoma"/"another symptom" marker
+# this module already treats as distinct-addition evidence elsewhere -- but
+# because `split_incohesive_retry_groups` never applies that check itself,
+# a coarse same-topic confirmation involving the marked mention had nothing
+# to override it here, unlike the identical scenario in
+# `reconcile_semantic_idea_equivalence`.
+#
+# FIX: apply the exact same marker-gated `_marked_side_diverges_in_content`
+# override to this function's own arbiter confirmations, for consistency
+# between the two cohesion passes. A broader, unconditional content-overlap
+# floor on EVERY confirmation (marked or not) was evaluated and rejected: it
+# fails at both ends against this module's own regression contract --
+# `test_arbiter_confirmed_retry_stays_grouped`'s true-retry paraphrase pair
+# ("I had seasonal back acne ... an ointment" vs "Every season I would get
+# back breakouts ... an ointment for it") scores LOWER lexical/claim overlap
+# by every measure tried (raw shared tokens, coverage, claim-level Dice)
+# than the specific unmarked pimples pair this fix must NOT merge -- proving
+# no fixed lexical-overlap threshold can separate "same proposition, very
+# different words" (trust the arbiter -- exactly what an LLM arbiter exists
+# to catch) from "different proposition, overlapping topic vocabulary"
+# (don't) in general. The marker is a genuine, narrow, non-lexical signal;
+# widening the override beyond it re-introduces exactly the false-positive
+# class this module's own paraphrase-retry contract already forbids. An
+# unmarked within-group weak pair (e.g. two pimples mentions neither of
+# which carries a discourse marker) is therefore still governed by the
+# arbiter's own judgment alone here, same as before this fix -- see D-083's
+# own decision log entry for the honest scope of what this closes and what
+# it does not.
+def _within_group_arbiter_confirmation_diverges(
+    take_map: dict[str, CandidateTake], left_id: str, right_id: str,
+) -> bool:
+    left_text = take_map[left_id].text
+    right_text = take_map[right_id].text
+    left_marked = _has_distinct_addition_marker(left_text)
+    right_marked = _has_distinct_addition_marker(right_text)
+    return left_marked != right_marked and _marked_side_diverges_in_content(left_text, right_text)
+
+
 @dataclass(frozen=True)
 class TakeGroupingProviderResult:
     groups: Tuple[Tuple[str, ...], ...]
@@ -970,7 +1020,13 @@ def split_incohesive_retry_groups(
     take_map = {take.clip_id: take for take in takes}
     multi_member_groups = [group for group in groups if len(group) >= 2]
     if not multi_member_groups:
-        return groups, {"status": "not_requested", "groups_checked": 0, "groups_split": 0}
+        return groups, {
+            "status": "not_requested", "groups_checked": 0, "groups_split": 0,
+            "weak_pair_count": 0, "checked_pair_count": 0,
+            "arbiter_confirmed_pairs": [],
+            "content_divergence_blocked": [], "content_divergence_blocked_count": 0,
+            "splits": [],
+        }
 
     cohesive_pairs: set[frozenset[str]] = set()
     weak_pairs: list[tuple[str, str]] = []
@@ -986,6 +1042,7 @@ def split_incohesive_retry_groups(
 
     checked_pair_count = 0
     confirmed_pairs: list[dict] = []
+    content_divergence_blocked: list[dict] = []
     if weak_pairs and arbiter is not None:
         ranked = sorted(
             weak_pairs,
@@ -1009,6 +1066,18 @@ def split_incohesive_retry_groups(
                 continue  # fail-open: arbiter unavailable/declined -> keep separate
             same_idea, confidence, reason = decision
             if not same_idea:
+                continue
+            if _within_group_arbiter_confirmation_diverges(take_map, left_id, right_id):
+                # D-083: exactly one side carries a distinct-addition marker
+                # and shows real content divergence from the other -- do not
+                # trust this confirmation. See the module comment above
+                # `_within_group_arbiter_confirmation_diverges` for the full
+                # rationale and why this is deliberately marker-gated rather
+                # than a blanket overlap floor.
+                content_divergence_blocked.append({
+                    "left_clip_id": left_id, "right_clip_id": right_id,
+                    "confidence": round(confidence, 4), "reason": reason,
+                })
                 continue
             cohesive_pairs.add(frozenset((left_id, right_id)))
             confirmed_pairs.append({
@@ -1042,6 +1111,8 @@ def split_incohesive_retry_groups(
         "weak_pair_count": len(weak_pairs),
         "checked_pair_count": checked_pair_count,
         "arbiter_confirmed_pairs": confirmed_pairs,
+        "content_divergence_blocked": content_divergence_blocked,
+        "content_divergence_blocked_count": len(content_divergence_blocked),
         "splits": split_records,
     }
 
