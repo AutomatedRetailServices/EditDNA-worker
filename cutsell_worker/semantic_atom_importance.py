@@ -219,3 +219,6 @@ def blocks_freeze(importance: str) -> bool:
     safe-to-lose is never treated as merely a warning. Only a confidently
     CONTEXTUAL verdict does not block by itself."""
     return importance in (CRITICAL, UNCERTAIN)
+
+# Operational no-op: force a controlled Video00 RAW at the current branch HEAD
+# after the editorial-slot resolver change; semantic behavior above is unchanged.
