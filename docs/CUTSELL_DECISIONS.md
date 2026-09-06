@@ -11100,3 +11100,172 @@ recorded in the commit message of this checkpoint.
 head (the first RAW produced no video, so the per-fix MP4 report is still
 owed); ladder + CLEAN RAW gate; per-fix report.
 **HUMAN ACTION REQUIRED:** NO.
+
+## D-097.2 -- RAW 34029861712 (head a212caa): Freeze PASSED, no deliverable MP4; per-fix MP4 report; three root causes fixed (renderer output timeline, semantic-label budget starvation, restart evidence at the reconcile tier) + perceptual review of diagnostic artifacts
+
+**RAW COMPLETE (Modal run 34029861712, head `a212caa`, default inputs).** The
+D-097.1 fix held: FinalEditReviewer PASS, **Selection Freeze PASSED**
+(`plan_9ed42207d1c00735`, 24 fragments / 19 parents, `story_completeness =
+complete`, `no_usable_realization_family_count = 0`, `polarity_rejoin_count =
+0`, `audio_silence.interval_count = 70`, `boundary_engine_pass =
+post_freeze_edge_interior_audio_edges_complete`), the video rendered three
+times and **the technical QC never passed**: 8 / 8 / 9
+`ABRUPT_AUDIO_DISCONTINUITY` findings per attempt, one 50 ms edge "repair"
+per attempt, `NEEDS_HUMAN_REVIEW` -> `NOT_DELIVERABLE_NEEDS_HUMAN_REVIEW`, no
+`preview.mp4`, the 140.061 s file kept only as `diagnostic-invalidated-
+preview.mp4`, `perceptual_review_status = null`, CLEAN RAW gate FAIL. The
+selection lock reads 24 vs 23; Human Gold regression QA 14/18 (papillary /
+pimples-micro-2 / pimples order / sonography order; the first and last are
+segmentation-sensitive `required_exact` checks, see below). The Modal
+in-workflow ladder ran this time (PYTHONPATH fix proven).
+
+**Four-way ladder (in-workflow, Cut.ai = commercial baseline):** selection
+scope LEVEL_1 21 regions / 34.853 s (0.2077 of Cut.ai keep) vs 25 / 33.2 s on
+34008386434; final-MP4 scope LEVEL_1 13 / 28.813 s vs 17 / 25.042 s; F1 vs
+Cut.ai 0.788 (selection) / 0.804 (render) vs 0.859 / 0.879; F1 vs Human Gold
+0.850 / 0.872 vs 0.821 / 0.845; CutSell keep 146.6 s (rendered 140.1 s) vs
+173.7 s (165.3 s) before -- Gold 141.7 s, Cut.ai 167.8 s. LEVEL_1 by authority:
+BestTakeResolver 6 / 11.62 s, BoundaryEngine 28 / 8.05 s, IdeaClusterer 4 /
+7.96 s, AttemptReconstructor 4 / 6.07 s, CompositeResolver/PreResolverCleanup
+1 / 5.75 s. Reading: the cut got much tighter and closer to Human Gold, but
+two new LEVEL_1 regions (below) cost more than the fixed ones saved against
+Cut.ai. Not "almost Human Gold"; not CLEAN RAW.
+
+**Per-fix MP4 report (change -> authority -> tests -> verified execution ->
+MP4 effect -> defects fixed -> regressions -> not evaluated):**
+- D-097.A retry-family completeness (IdeaClusterer): tests 18; executed
+  (`same_opening_restart` in grouping + cohesion); **PROVEN on the selection
+  and the diagnostic MP4**: the failed / abandoned / corrected "gynecologist"
+  family formed (`tg_297097b63112956e7f`), the corrected delivery won, the
+  7.31 s BestTake false keep of 34008386434 is gone (2.6 s of edge regions
+  remain), the "that was when they sent me" restarts are consensus deletes.
+  No regression attributable.
+- D-097.1 pre-group retry certification (Resolver proof + StoryValidator
+  credit): tests 18; executed; **PROVEN**: Freeze no longer blocks, the
+  abandoned stomach restarts are consensus deletes, the digestion delivery
+  is kept once.
+- Resolver usability (failed >= 0.85 never restored): tests 8; executed;
+  **PROVEN (small)**: the failed "first in my family" restatement is no
+  longer restored beside the conclusion (0.37 s LEVEL_1 gone; one conclusion
+  realization).
+- D-097.B no-usable-realization: tests 12; **NOT EXERCISED** (0 families).
+- D-097.D polarity safety: tests 24; **NOT EXERCISED** (ASR joined the
+  negated clause; 0 rejoins, 0 protections).
+- D-097.C/E post-Freeze BoundaryEngine pass: tests 15; executed (stage
+  complete, renderer trailing trims recorded: 10 exits, 0.24-1.34 s each);
+  **MP4 effect mixed**: no lingering-silence finding in any attempt (run
+  34008386434 carried 2.32 s of dead air), but the interior pass split two
+  kept takes at pauses both references keep whole (a 0.34 s gap between two
+  list items, a 0.46 s pause in the conclusion) -> 0.46 s BoundaryEngine
+  LEVEL_1 `interior_hole` + one extra join; `dead_air_reconciliation` had
+  nothing to reconcile. Follow-up: interior splits need a minimum gap that
+  a human would cut (BoundaryEngine review, not this entry).
+- DeliveryScorer cleanliness evidence: tests 6; **NOT EVALUATED** on this run
+  (no family decision traceable to it; two label windows were missing).
+- Perceptual Watch+Listen v1: tests 12; **NOT RUN** (only deliverable
+  candidates were reviewed; fixed here, §4).
+- CLEAN RAW gate: executed, FAIL (technical QC, failed material, missing
+  delivery) -- correct verdict.
+
+**Regressions vs 34008386434 (LEVEL_1, both references agree):**
+R1 the abandoned "acne on my back" take (`clip_04096fd19699516edd9b`,
+`...la cual yo resor...`, cut mid-word, two interior gaps) was KEPT beside its
+clean retry -- 9.4 s of failed material, the largest LEVEL_1 region of the
+run; R2 the "symptoms in hindsight" family (`tg_dea7ea2356449a4f9f`) was
+collapsed to one winner by `critical_coverage_dominance` with NO Hybrid labels
+(both members sat in budget-refused windows) while both references keep both
+takes -> 7.25 s missing delivery (34008386434 kept both: 3.62 s of edge
+regions). Unchanged: the "also I got pimples" take deleted outside any
+family (5.75 s, CompositeResolver/PreResolverCleanup -- the same 5.75 s as
+before, different mechanism), the mid-sentence restart "there she sent me for
+scans" (2.76 s, no shared opening, similarity floor), the loose exits.
+
+**Root causes (from the run's own diagnostics, the D-044 forensic extract
+34031255612 and offline reproduction) and fixes:**
+1. **R3 -- Renderer owns the output timeline (pre-existing in BOTH runs,
+   structural delivery blocker).** `render_preview` encoded one MP4 part per
+   segment and joined them with the concat DEMUXER in stream-copy mode; each
+   part carries its AAC priming frame + packet padding, so every join
+   advanced the real timeline ~41 ms more than the plan (measured on a
+   synthetic 12-part render: +44, +70, +125 ... +450 ms after 11 joins; the
+   file 2.3 % longer than the plan; silence inserted at every cut).
+   `segment_output_windows` assumed the plan timeline, so from the third
+   join onward the ABRUPT_AUDIO_DISCONTINUITY probe (+-80 ms) sampled
+   speech, not joins -- 8-9 "findings" per attempt that a 50 ms edge trim
+   can never fix; the loop burned its 3 attempts and returned
+   NEEDS_HUMAN_REVIEW in 34008386434 and 34029861712 alike (the ladder,
+   dead-air reconciliation and the perceptual reviewer used the same wrong
+   windows). Fix in the Renderer: ONE ffmpeg pass with the concat FILTER,
+   each input trimmed to a frame-exact duration (`rendered_segment_duration_
+   sec`; video `trim`, audio `apad`+`atrim` to the same length, 12 ms join
+   fades kept, captions/silent tracks kept), and `segment_output_windows`
+   uses the same function. Measured after the fix: every join within 3 ms
+   of the computed window, audio and video the same length, QC PASS on
+   clean joins, a real hard step still detected. Selection, order and
+   boundaries untouched.
+2. **R2 -- semantic-label budget starvation made explicit and sized.** The
+   $0.0075 per-edit `DollarBudgetLedger` refused windows 2-3 of 6 (D-094.F2's
+   counted starvation; the same 2-of-6 shape in 33960713625, 33969388042,
+   34028202024, 34029861712), the stage still read `provider_complete` and
+   the story `complete`. Now: `hybrid_editorial = provider_partial:4/6:
+   budget_refused=2` (pipeline), the CLEAN RAW gate reports
+   `semantic_labels:2/6 windows refused` as missing evidence
+   (INCOMPLETE_EVIDENCE, never PASS), and the default ceiling is $0.015
+   (a full Video00-scale pass is ~$0.012; distinct from the $0.02 Unified
+   Selection ceiling; `CUTSELL_HYBRID_MAX_EDIT_USD` still overrides). COGS
+   note for the Product Owner: +~$0.005 per edit at this scale, taken under
+   the recorded "quality first, COGS is not the constraint at this price
+   point" statement; revert via the env var if that statement changes.
+3. **R1 -- restart evidence at the reconcile tier (IdeaClusterer).** The
+   forensic extract shows the abandoned take and its clean retry reached
+   `reconcile_semantic_idea_equivalence` as a cross-group candidate pair and
+   the arbiter answered NOT-same-idea (0.9, "incomplete fragments") -- the
+   abandoned take's incompleteness used as the reason to keep it OUT of its
+   family, exactly the judgement D-097.A ruled deterministic restart
+   evidence must outrank (cohesion pass). The same rule now applies at the
+   reconcile tier: a candidate pair with `same_opening_restart` /
+   `_safe_short_prefix_retry` evidence merges without the arbiter (D-083
+   marker gate kept; traced as `restart_evidence_merges`, `accepted_by`), and
+   the pair is not spent on the bounded request. Residual honesty: the
+   deterministic chain (`group_takes` -> local retry reconciliation) groups
+   the pair offline with the run's own texts and spans, so WHY the pair
+   arrived at the reconcile tier already separated is not reproduced; the
+   fix makes the outcome robust regardless, and the next RAW's
+   `restart_evidence_merges` row will show it.
+4. **§4 -- the perceptual reviewer reviews the diagnostic artifact too**
+   (`artifact_kind = deliverable_candidate | diagnostic_invalidated`,
+   `technical_qc_status` attached; delivery status untouched; NOT
+   EVALUATED never becomes PASS).
+
+Not fixed here, recorded: the R2 editorial question itself (two complete,
+clean deliveries of one idea that BOTH references keep -- the one-winner
+doctrine vs "WHEN UNCERTAIN, KEEP"; a Product Owner editorial-policy call,
+escalation A, non-blocking: the next RAW will show the labeled outcome);
+the pimples take deleted outside its family (5.75 s, next LEVEL_1 root
+cause after R1-R3 are proven on video); the interior splits both references
+keep whole (BoundaryEngine minimum-gap review); the `required_exact`
+regression checks that fail on benign re-segmentation (QA tooling).
+
+Tests: `tests/test_cutsell_d097_2_render_timeline_and_evidence_completeness.py`
+(16: frame alignment, measured join drift <= 5 ms on a synthetic alternating-
+tone render, A/V length equality, QC PASS on clean joins, hard-step negative
+control, command shape, silent-source track, window mapping, gate
+INCOMPLETE on refused windows, budget default/override, partial stage
+status, perceptual review of the diagnostic artifact + status untouched,
+reconcile restart merge with a rejecting arbiter / without an arbiter /
+unchanged without evidence / D-083 gate). Updated pins: renderer/QC suites
+73/73, grouping-related suites 289/289 (one fixture varied its opening
+because four same-opening takes seconds apart ARE restarts now), settings /
+brain / unified-selection suites 40/40, RAW trigger coverage extended
+(`live_boundary_repair.py`, `hybrid_provider_settings.py`). CleanCutBench
+54/54 LEGACY and 54/54 AUTHORITATIVE; compileall clean; full
+`tests/test_cutsell_*.py` result recorded in the commit message.
+
+**LAST VERIFIED RESULT:** RAW 34029861712 = FREEZE PASS, no deliverable MP4
+(technical QC stuck on false join findings); three root causes CODE FIXED /
+TESTS PASS offline; the MP4 effect of R1-R3 is unproven on video.
+**NEXT AUTOMATIC ACTION:** commit + push; ONE authorised Modal RAW on the new
+head (first run where the delivery gate can pass); ladder + CLEAN RAW gate +
+perceptual review; per-fix MP4 report as D-097.3; then the pimples
+pre-resolver delete.
+**HUMAN ACTION REQUIRED:** NO (editorial-policy note above is informational).

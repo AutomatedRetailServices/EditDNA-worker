@@ -59,7 +59,7 @@ def test_explicit_hybrid_enable_plus_gemini_key_constructs_flash_lite_without_ne
     assert brain.editorial_judge is not None
     assert brain.editorial_judge.provider_name == "google"
     assert brain.editorial_judge.model_name == "gemini-3.5-flash-lite"
-    assert brain.hybrid_settings.max_cost_per_edit_usd == 0.0075
+    assert brain.hybrid_settings.max_cost_per_edit_usd == 0.015  # D-097.2
     # Best Take wrapper stays local so semantic cleanup cannot charge twice per group.
     assert brain.take_judge_provider.editorial_judge is None
 

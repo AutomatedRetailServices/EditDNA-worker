@@ -35,12 +35,26 @@ class HybridProviderSettings:
     escalation_input_per_million_usd: float = 1.50
     escalation_output_per_million_usd: float = 7.50
     max_cost_per_session_usd: float = 0.02
-    # Target keeps LLM COGS <= $0.75 per 100 fully-used Starter edits.
     # This is the legacy per-group Hybrid judge's budget only -- many small
     # calls, one per candidate group. Unified Selection is a fundamentally
     # different cost shape (see max_cost_per_unified_selection_call_usd
     # below) and must never share this ceiling.
-    max_cost_per_edit_usd: float = 0.0075
+    #
+    # D-097.2: the original $0.0075 (LLM COGS <= $0.75 per 100 Starter
+    # edits) sat exactly at Video00 scale -- six ~$0.002 windows -- and
+    # starved the last two whenever the payload grew a little (D-094.F2
+    # counted it; runs 33960713625, 33969388042, 34028202024, 34029861712
+    # all ran with 2 of 6 semantic-label windows refused, leaving whole
+    # retry families unlabeled and decided by tie-breaks). Sized on the
+    # same product statement as the Unified Selection ceiling below
+    # ("quality first, COGS is not the constraint at this price point"):
+    # a full Video00-scale pass is ~$0.012, so $0.015 leaves margin and the
+    # ledger is never the reason a window goes unlabeled -- deliberately a
+    # distinct value from that ceiling (the two ledgers are independent). CUTSELL_HYBRID_MAX_EDIT_USD still overrides it; a
+    # refused window is now reported as an explicit partial stage status
+    # and counted as INCOMPLETE_EVIDENCE by the CLEAN RAW gate rather than
+    # silently failing open.
+    max_cost_per_edit_usd: float = 0.015
     # Unified Selection makes ONE whole-video call over the entire candidate
     # universe (32+ candidates in real Video00 usage), not many small
     # per-group calls -- a single call legitimately costs more than the
@@ -124,7 +138,7 @@ def load_hybrid_provider_settings(env: dict[str, str] | None = None) -> HybridPr
         primary_model=str(values.get("CUTSELL_HYBRID_PRIMARY_MODEL", "gemini-3.5-flash-lite")).strip(),
         escalation_model=str(values.get("CUTSELL_HYBRID_ESCALATION_MODEL", "gemini-3.6-flash")).strip(),
         max_cost_per_session_usd=max(0.0, _env_float(values, "CUTSELL_HYBRID_MAX_SESSION_USD", 0.02)),
-        max_cost_per_edit_usd=max(0.0, _env_float(values, "CUTSELL_HYBRID_MAX_EDIT_USD", 0.0075)),
+        max_cost_per_edit_usd=max(0.0, _env_float(values, "CUTSELL_HYBRID_MAX_EDIT_USD", 0.015)),
         max_cost_per_unified_selection_call_usd=max(
             0.0, _env_float(values, "CUTSELL_HYBRID_MAX_UNIFIED_SELECTION_USD", 0.02)
         ),

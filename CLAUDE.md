@@ -148,15 +148,20 @@ Without explicit user approval:
 
 ## Current state pointer
 The live current state is the newest `D-xxx` entry in `docs/CUTSELL_DECISIONS.md`
-(D-097 / D-097.1 at the time of writing: the approved post-audit implementation --
-retry-family completeness, no-usable-realization, Resolver usability, polarity
-safety, ONE post-Freeze BoundaryEngine pass with the physical ownership
-contract, dead-air reconciliation, perceptual Watch+Listen v1 (advisory, never
-auto-PASS) and the CLEAN RAW gate -- CODE FIXED / TESTS PASS; the first RAW on
-it (34028202024) ran the chain but Freeze was blocked by a pre-group failed
-retry, fixed in D-097.1 (retry-relation discovery + pre-group restart credit);
-the next authorised RAW must prove the MP4 effect; D-096 remains the source of
-truth, its Appendix B records implementation status)
+(D-097 / D-097.1 / D-097.2 at the time of writing: the approved post-audit
+implementation -- retry-family completeness, no-usable-realization, Resolver
+usability, polarity safety, ONE post-Freeze BoundaryEngine pass with the
+physical ownership contract, dead-air reconciliation, perceptual Watch+Listen
+v1 (advisory, never auto-PASS) and the CLEAN RAW gate; RAW 34028202024 was
+Freeze-blocked (fixed in D-097.1); RAW 34029861712 PASSED Freeze (D-097.A and
+D-097.1 proven on the selection) but produced no deliverable MP4 because the
+renderer's part+concat-demuxer join drifted the output timeline and the QC
+probed speech instead of joins -- D-097.2 rebuilt the renderer as one gapless
+pass with frame-exact windows, made semantic-label budget starvation explicit
+(default ceiling $0.015), merged restart-evidence pairs at the reconcile tier
+and reviews diagnostic artifacts perceptually; the next authorised RAW must
+prove the MP4 effect; D-096 remains the source of truth, its Appendix B records
+implementation status)
 (read its LAST VERIFIED RESULT / NEXT AUTOMATIC ACTION lines). The handoff
 document's `CURRENT LIVE BLOCKER` / `EXACT NEXT ACTION` sections are historical
 context from the Unified Selection era, superseded by the decision log; do not

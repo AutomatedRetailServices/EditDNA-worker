@@ -62,13 +62,18 @@ def segment_output_windows(segments: tuple[RenderSegment, ...]) -> list[tuple[fl
     from output-timeline offsets back to segments never silently drifts from
     what the real renderer does -- one implementation, not a second guess.
     """
-    from .render import tighten_trailing_silence
+    from .render import RENDER_FPS_DEFAULT, rendered_segment_duration_sec, tighten_trailing_silence
 
     windows: list[tuple[float, float]] = []
     cursor = 0.0
     for seg in segments:
         tightened = tighten_trailing_silence(seg)
-        duration = tightened.duration_sec
+        # D-097.2: the renderer places every segment on a frame-aligned
+        # output timeline (`rendered_segment_duration_sec`); mapping with the
+        # raw duration drifted from the real joins by ~20-60 ms per part
+        # under the old part+concat-demuxer renderer and would still drift by
+        # one frame-rounding per part here.
+        duration = rendered_segment_duration_sec(tightened.duration_sec, fps=RENDER_FPS_DEFAULT)
         windows.append((cursor, cursor + duration))
         cursor += duration
     return windows

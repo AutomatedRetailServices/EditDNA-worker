@@ -263,7 +263,7 @@ def test_renderer_records_its_trailing_trims(monkeypatch, tmp_path):
     seg = RenderSegment(clip_id="a", source_asset_id="src", source_path="/x.mp4", start=0.0, end=5.0)
     monkeypatch.setattr(render, "tighten_trailing_silence", lambda s: s.__class__(**{**s.__dict__, "end": 4.6}))
     monkeypatch.setattr(render, "_run", lambda command: None)
-    monkeypatch.setattr(render, "_segment_command", lambda *a, **k: ["true"])
+    monkeypatch.setattr(render, "_concat_render_command", lambda *a, **k: ["true"])
     out = tmp_path / "out.mp4"
     out.write_bytes(b"x")
     report: list = []

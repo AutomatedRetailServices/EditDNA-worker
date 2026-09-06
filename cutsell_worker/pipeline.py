@@ -865,10 +865,25 @@ def build_flow_b_draft(
     else:
         clean_cut_stage = clean_judged.status.status
 
+    # D-097.2: a window the per-edit dollar ledger refused (D-094.F2's
+    # counted starvation) is a PARTIAL semantic pass, never "complete" --
+    # the families inside it go unlabeled and get decided by tie-breaks,
+    # so the stage status must say so where every consumer (RAW prints,
+    # CLEAN RAW gate, active-path identity) reads it.
+    hybrid_budget_refused_count = sum(1 for row in hybrid_cleanup.diagnostics if row.get("budget_exhausted"))
     if editorial_judge is None:
         hybrid_stage = "disabled_local_only"
-    elif hybrid_cleanup.requested_chunk_count and hybrid_cleanup.available_chunk_count:
+    elif (
+        hybrid_cleanup.requested_chunk_count
+        and hybrid_cleanup.available_chunk_count == hybrid_cleanup.requested_chunk_count
+        and not hybrid_budget_refused_count
+    ):
         hybrid_stage = "provider_complete"
+    elif hybrid_cleanup.requested_chunk_count and hybrid_cleanup.available_chunk_count:
+        hybrid_stage = (
+            f"provider_partial:{hybrid_cleanup.available_chunk_count}/{hybrid_cleanup.requested_chunk_count}"
+            + (f":budget_refused={hybrid_budget_refused_count}" if hybrid_budget_refused_count else "")
+        )
     elif hybrid_cleanup.requested_chunk_count:
         hybrid_stage = "degraded_fail_open"
     else:

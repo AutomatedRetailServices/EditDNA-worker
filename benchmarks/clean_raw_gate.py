@@ -88,7 +88,14 @@ def compute_clean_raw_metrics(result: Mapping[str, Any], ladder: Mapping[str, An
         "boundary_audio_exit_trim_count": int(boundary_pass.get("audio_exit_trim_count") or 0),
         "polarity_rejoin_count": int(segmentation.get("polarity_rejoin_count") or 0),
         "protected_polarity_fragment_count": _count_rows(_walk(diagnostics, "protected_polarity_fragments")),
+        # D-097.2: a semantic-label window refused by the per-edit dollar
+        # ledger leaves whole retry families unlabeled -- evidence missing,
+        # never a PASS (D-094.F2 starvation, runs 34028202024 / 34029861712).
+        "hybrid_editorial_stage": stage_status.get("hybrid_editorial"),
+        "hybrid_budget_refused_chunk_count": int(diagnostics.get("hybrid_editorial_budget_exhausted_chunk_count") or 0),
+        "hybrid_requested_chunk_count": int(diagnostics.get("hybrid_editorial_requested_chunk_count") or 0),
         "perceptual_status": perceptual.get("status"),
+        "perceptual_artifact_kind": perceptual.get("artifact_kind"),
         "perceptual_gate_mode": perceptual.get("gate_mode"),
         "perceptual_capability_status_counts": perceptual.get("capability_status_counts") or {},
         "perceptual_routing": perceptual.get("routing") or {},
@@ -133,6 +140,11 @@ def evaluate_clean_raw_gate(metrics: Mapping[str, Any]) -> dict[str, Any]:
         missing.append("perceptual_watch_listen")
     elif metrics.get("perceptual_status") == "FAIL":
         blocking.append("perceptual:FAIL")
+    if int(metrics.get("hybrid_budget_refused_chunk_count") or 0) > 0:
+        missing.append(
+            f"semantic_labels:{metrics['hybrid_budget_refused_chunk_count']}/{metrics.get('hybrid_requested_chunk_count')} "
+            "windows refused by the per-edit dollar ledger"
+        )
     if "level1_region_count" not in metrics:
         missing.append("ladder")
     else:
@@ -173,6 +185,8 @@ def format_report(report: Mapping[str, Any]) -> str:
     lines = [
         f"CLEAN RAW GATE: {gate['status']}",
         "  blocking: " + ("; ".join(gate["blocking"]) or "none"),
+        f"  semantic labels: stage {metrics.get('hybrid_editorial_stage')}; budget-refused windows "
+        f"{metrics.get('hybrid_budget_refused_chunk_count')}/{metrics.get('hybrid_requested_chunk_count')}",
         "  missing evidence: " + (", ".join(gate["missing_evidence"]) or "none"),
         f"  technical QC: {metrics.get('technical_qc_status')} deliverable={metrics.get('deliverable')} delivery_status={metrics.get('delivery_status')}",
         f"  story: {metrics.get('story_completeness')} (no-usable families: {metrics.get('no_usable_realization_family_count')})",

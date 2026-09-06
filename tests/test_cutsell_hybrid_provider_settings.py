@@ -11,7 +11,7 @@ def test_hybrid_provider_is_disabled_by_default():
     assert settings.primary_model == "gemini-3.5-flash-lite"
     assert settings.escalation_model == "gemini-3.6-flash"
     assert settings.max_test_budget_usd == 0.50
-    assert settings.max_cost_per_edit_usd == 0.0075
+    assert settings.max_cost_per_edit_usd == 0.015  # D-097.2: sized for a full Video00-scale pass
     assert settings.max_cost_per_unified_selection_call_usd == 0.02
 
 

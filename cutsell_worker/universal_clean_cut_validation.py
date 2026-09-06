@@ -11,6 +11,8 @@ one shared production-grade service. See docs/CUTSELL_DECISIONS.md D-035.
 """
 from __future__ import annotations
 
+import os
+
 import dataclasses
 from dataclasses import replace
 from pathlib import Path, PurePosixPath
@@ -70,13 +72,33 @@ def _render_validation_preview(
     return qc_result.output_path, None, qc_result
 
 
-def _perceptual_review(preview_path: str | None, draft, local_paths: Mapping[str, str], qc_result) -> dict[str, Any] | None:
-    """D-097 §4: perceptual System Watch+Listen v1 on the technically clean
-    rendered MP4 (advisory, routing only). Runs on the final attempt's
-    segments (post physical repair) so its findings describe the file that
-    exists. Never raises."""
-    if not preview_path or qc_result is None or not qc_result.deliverable:
+def _perceptual_review(
+    preview_path: str | None,
+    draft,
+    local_paths: Mapping[str, str],
+    qc_result,
+    *,
+    rendered_path: str | None = None,
+) -> dict[str, Any] | None:
+    """D-097 §4: perceptual System Watch+Listen v1 (advisory, routing only)
+    on the rendered MP4. Runs on the final attempt's segments (post physical
+    repair) so its findings describe the file that exists. Never raises.
+
+    D-097.2: a candidate the technical QC did NOT pass is still reviewed --
+    the file at `rendered_path` (the last attempt's render, uploaded only as
+    the clearly-named diagnostic-invalidated artifact) carries the same
+    perceptual evidence a human would need to route the defect, and run
+    34029861712 showed that a QC loop stuck on its own findings left the
+    perceptual review NULL for the very artifact under diagnosis. The review
+    is marked `artifact_kind` = "deliverable_candidate" |
+    "diagnostic_invalidated"; it never changes the delivery status."""
+    if qc_result is None:
         return None
+    deliverable = bool(preview_path) and bool(qc_result.deliverable)
+    media_path = preview_path if deliverable else rendered_path
+    if not media_path or not os.path.exists(media_path):
+        return None
+    artifact_kind = "deliverable_candidate" if deliverable else "diagnostic_invalidated"
     try:
         final_state = qc_result.attempts[-1].input_boundary_state if qc_result.attempts else ()
         plan = build_render_plan(draft, local_paths)
@@ -86,9 +108,12 @@ def _perceptual_review(preview_path: str | None, draft, local_paths: Mapping[str
             for row in final_state if row.get("clip_id") in by_id
         ) or plan
         windows = segment_output_windows(segments)
-        return review_rendered_candidate(preview_path, draft, segments, windows).as_dict()
+        review = review_rendered_candidate(media_path, draft, segments, windows).as_dict()
     except Exception as exc:  # noqa: BLE001 -- ERROR is a reported status, never a silent pass
-        return error_review(f"perceptual_review_failed: {exc}").as_dict()
+        review = error_review(f"perceptual_review_failed: {exc}").as_dict()
+    review["artifact_kind"] = artifact_kind
+    review["technical_qc_status"] = getattr(qc_result, "status", None)
+    return review
 
 
 def _live_render_qc_diagnostics(
@@ -227,7 +252,9 @@ def run_single_universal_clean_cut_validation(
             preview_captions=preview_captions,
             freeze_blocked=freeze_blocked,
         )
-        perceptual = _perceptual_review(preview_path, result.draft, local_paths, live_render_qc_result)
+        perceptual = _perceptual_review(
+            preview_path, result.draft, local_paths, live_render_qc_result, rendered_path=preview_output,
+        )
 
     elapsed = round(time.monotonic() - started, 3)
     selected_duration_sec = round(

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from dataclasses import replace
+import math
 from pathlib import Path
 import re
 import subprocess
@@ -188,13 +189,112 @@ def _segment_command(segment: RenderSegment, part: Path, *, vf: str) -> list[str
     ] + common_video + ["-shortest", str(part)]
 
 
+# D-097.2 (Renderer owns the output timeline): the previous renderer encoded
+# every segment to its own MP4 part and joined the parts with the concat
+# DEMUXER in stream-copy mode. Each part carried its own AAC priming frame
+# and frame/packet padding, so every join advanced the real output timeline
+# by ~20-60 ms more than the segment's duration (measured +41 ms per part on
+# a synthetic 12-part render: +450 ms after 11 joins) -- inserted silence at
+# every cut, an output 2 % longer than the frozen plan, and, because
+# `segment_output_windows` assumed the plan timeline, the post-render
+# discontinuity check probing speech tens or hundreds of ms away from the
+# real joins (runs 34008386434 / 34029861712: 8-9 false
+# ABRUPT_AUDIO_DISCONTINUITY findings per attempt, three wasted 50 ms
+# "repairs", NEEDS_HUMAN_REVIEW, no deliverable MP4). One ffmpeg pass with
+# the concat FILTER fixes both: every segment is trimmed to an exact,
+# frame-aligned duration (video `trim`, audio `apad`+`atrim` to the same
+# length) before the join, so the output timeline is exactly the sum of
+# `rendered_segment_duration_sec` values and the same function serves the
+# QC/perceptual/ladder window mapping. Segment boundaries, selection and
+# order are untouched -- this is a purely physical join treatment.
+RENDER_FPS_DEFAULT = 30
+
+
+def rendered_segment_duration_sec(duration_sec: float, *, fps: int = RENDER_FPS_DEFAULT) -> float:
+    """The exact length one segment occupies on the output timeline: its
+    (already tightened) duration rounded UP to whole output frames, which is
+    what the `fps` filter emits for a cut of that length. Audio is padded/
+    trimmed to the same value inside the render command."""
+    fps = max(1, int(fps))
+    frames = max(1, int(math.ceil(float(duration_sec) * fps - 1e-6)))
+    return frames / fps
+
+
+def _concat_render_command(
+    segments: tuple[RenderSegment, ...],
+    output: Path,
+    *,
+    width: int,
+    height: int,
+    fps: int,
+    workdir: Path,
+) -> list[str]:
+    """One ffmpeg invocation: per-input seek + normalize + exact-duration
+    trim, then the concat filter, then one encode. `segments` are already
+    trailing-silence tightened."""
+    command = ["ffmpeg", "-y", "-hide_banner", "-loglevel", "error"]
+    filters: list[str] = []
+    input_index = 0
+    for index, segment in enumerate(segments):
+        probe = probe_media(segment.source_path)
+        exact = rendered_segment_duration_sec(segment.duration_sec, fps=fps)
+        command += ["-ss", f"{segment.start:.3f}", "-to", f"{segment.end:.3f}", "-i", segment.source_path]
+        video_input = input_index
+        input_index += 1
+        video_chain = [
+            f"[{video_input}:v]scale={width}:{height}:force_original_aspect_ratio=decrease",
+            f"pad={width}:{height}:(ow-iw)/2:(oh-ih)/2",
+            "setsar=1",
+            f"fps={fps}",
+        ]
+        caption = _caption_filter(segment, workdir / f"part-{index:04d}.mp4")
+        if caption:
+            video_chain.append(caption)
+        video_chain += [f"trim=duration={exact:.6f}", "setpts=PTS-STARTPTS", f"format=yuv420p[v{index}]"]
+        filters.append(",".join(video_chain))
+        audio_format = "aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=stereo"
+        if probe.has_audio:
+            effective_volume = 0.0 if segment.audio_muted else float(segment.audio_volume)
+            audio_chain = [
+                f"[{video_input}:a]volume={effective_volume:.3f}",
+                *_audio_join_fade_filters(segment.duration_sec),
+                audio_format,
+                f"apad=whole_dur={exact:.6f}",
+                f"atrim=duration={exact:.6f}",
+                f"asetpts=PTS-STARTPTS[a{index}]",
+            ]
+        else:
+            command += ["-f", "lavfi", "-t", f"{exact:.6f}", "-i", "anullsrc=channel_layout=stereo:sample_rate=48000"]
+            audio_input = input_index
+            input_index += 1
+            audio_chain = [
+                f"[{audio_input}:a]{audio_format}",
+                f"atrim=duration={exact:.6f}",
+                f"asetpts=PTS-STARTPTS[a{index}]",
+            ]
+        filters.append(",".join(audio_chain))
+    filters.append(
+        "".join(f"[v{index}][a{index}]" for index in range(len(segments)))
+        + f"concat=n={len(segments)}:v=1:a=1[vout][aout]"
+    )
+    command += [
+        "-filter_complex", ";".join(filters),
+        "-map", "[vout]", "-map", "[aout]",
+        "-c:v", "libx264", "-preset", "veryfast", "-crf", "20",
+        "-c:a", "aac", "-b:a", "160k", "-ar", "48000",
+        "-movflags", "+faststart",
+        str(output),
+    ]
+    return command
+
+
 def render_preview(
     segments: Iterable[RenderSegment],
     output_path: str,
     *,
     width: int = 1080,
     height: int = 1920,
-    fps: int = 30,
+    fps: int = RENDER_FPS_DEFAULT,
     text_overlays: Iterable[TextOverlay] = (),
     media_overlays: Iterable[LocalMediaOverlay] = (),
     trim_report: list[dict] | None = None,
@@ -231,27 +331,16 @@ def render_preview(
     destination.parent.mkdir(parents=True, exist_ok=True)
 
     with tempfile.TemporaryDirectory(prefix="cutsell-render-") as directory:
-        normalized = []
-        for index, segment in enumerate(segment_tuple):
+        for segment in segment_tuple:
             if segment.end <= segment.start:
                 raise ValueError(f"invalid render segment {segment.clip_id}")
-            part = Path(directory) / f"part-{index:04d}.mp4"
-            vf = (
-                f"scale={width}:{height}:force_original_aspect_ratio=decrease,"
-                f"pad={width}:{height}:(ow-iw)/2:(oh-ih)/2,setsar=1,fps={fps}"
-            )
-            _run(_segment_command(segment, part, vf=vf))
-            normalized.append(part)
-
-        concat_file = Path(directory) / "concat.txt"
-        concat_file.write_text("".join(f"file '{part.as_posix()}'\n" for part in normalized), encoding="utf-8")
         has_final_overlays = bool(text_tuple or media_tuple)
         joined = destination if not has_final_overlays else Path(directory) / "joined.mp4"
-        _run([
-            "ffmpeg", "-y", "-hide_banner", "-loglevel", "error",
-            "-f", "concat", "-safe", "0", "-i", str(concat_file),
-            "-c", "copy", "-movflags", "+faststart", str(joined),
-        ])
+        # D-097.2: one pass, exact frame-aligned per-segment durations, gapless
+        # concat filter -- see the module comment above render_preview.
+        _run(_concat_render_command(
+            segment_tuple, joined, width=width, height=height, fps=fps, workdir=Path(directory),
+        ))
 
         if has_final_overlays:
             ass_path = None

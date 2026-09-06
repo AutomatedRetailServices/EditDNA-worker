@@ -466,6 +466,25 @@ Binding validation order (Product Owner, 2026-09-06):
 
 ---
 
+- D-097.2 (2026-09-06): RAW 34029861712 on the D-097.1 head PASSED Freeze (the
+  gynecologist retry family formed and the corrected take won; the stomach
+  restarts and the restored conclusion restatement are gone) but the technical
+  QC never passed: the renderer joined per-segment MP4 parts with the concat
+  demuxer (+~41 ms per join of priming/padding) while the QC/perceptual/ladder
+  windows assumed the plan timeline, so the discontinuity probe sampled speech
+  and the 3-attempt repair loop always ended NEEDS_HUMAN_REVIEW (both RAWs).
+  Fixed in the Renderer (one gapless concat-filter pass, frame-exact
+  `rendered_segment_duration_sec`, same function for the windows; measured
+  join drift <= 3 ms). Also: the $0.0075 per-edit label ledger refused 2 of 6
+  windows again (families decided without labels) -> explicit
+  `provider_partial` stage, CLEAN RAW gate INCOMPLETE_EVIDENCE, default
+  $0.015; the abandoned acne take + clean retry were rejected by the arbiter
+  as "incomplete fragments" at the reconcile tier -> deterministic restart
+  evidence merges there too (D-097.A parity); the perceptual reviewer now
+  reviews the diagnostic-invalidated MP4 (marked). Ladder 34029861712: L1
+  34.85 s / 21 regions (selection), F1 vs Cut.ai 0.788, vs Gold 0.850; keep
+  146.6 s. Next: ONE RAW to prove the MP4 effect. Full entry:
+  `docs/CUTSELL_DECISIONS.md` D-097.2.
 # HISTORICAL CUTSELL.AI 11 CONTINUITY
 
 A trusted CutSell.ai 11 recovery checkpoint is:

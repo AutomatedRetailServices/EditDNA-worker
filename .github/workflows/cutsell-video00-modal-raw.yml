@@ -481,7 +481,7 @@ jobs:
           echo "--- D-097: post-Freeze BoundaryEngine pass, polarity rejoins, renderer trailing trims, dead-air reconciliation, story completeness ---"
           jq '{boundary_engine_pass: (.diagnostics.boundary_engine_pass // "absent" | if type=="object" then del(.ownership_contract) else . end), take_segmentation: (.stage_status.take_segmentation // "absent"), story_completeness: (.stage_status.story_completeness // "absent"), no_usable_realization_family_ids: (.stage_status.no_usable_realization_family_ids // []), last_attempt: ((.live_render_qc.attempts // [])[-1] // "absent" | if type=="object" then {status, renderer_trailing_trims, dead_air_reconciliation} else . end)}' artifact/video00-modal.json | head -c 30000
           echo "--- D-097 §4 perceptual System Watch+Listen (advisory_v1; never auto-PASS) ---"
-          jq '.perceptual_watch_listen // "absent" | if type=="object" then {status, gate_mode, capability_status_counts, routing, capabilities:[.capabilities[]? | {capability, status, method, finding_count:(.findings|length), findings:[.findings[]? | {kind, start, end, severity, routes_to, detail}], note}]} else . end' artifact/video00-modal.json | head -c 30000
+          jq '.perceptual_watch_listen // "absent" | if type=="object" then {status, gate_mode, artifact_kind, technical_qc_status, capability_status_counts, routing, capabilities:[.capabilities[]? | {capability, status, method, finding_count:(.findings|length), findings:[.findings[]? | {kind, start, end, severity, routes_to, detail}], note}]} else . end' artifact/video00-modal.json | head -c 30000
           echo "--- D-097 CLEAN RAW gate (result only; the CPU ladder workflow adds the four-way regions) ---"
           python benchmarks/clean_raw_gate.py --engine-json artifact/video00-modal.json || true
           echo "--- diagnostics.take_judge_groups (retry families + DeliveryScorer scores) ---"
@@ -592,7 +592,7 @@ jobs:
           jq '( [ (.selected[]?), (.alternates[]?), (.discarded[]?) ] | map({(.clip_id): (.text // "")[:110]}) | add ) as $t
               | {
                   take_groups: ((.diagnostics.take_group_members // []) | map(map({id: ., text: ($t[.] // "?")}))),
-                  semantic_idea_equivalence: ((.diagnostics.semantic_idea_equivalence // {}) | {status, candidate_pair_count, checked_pair_count, merged_pair_count, merges, distinct_addition_blocked}),
+                  semantic_idea_equivalence: ((.diagnostics.semantic_idea_equivalence // {}) | {status, candidate_pair_count, checked_pair_count, merged_pair_count, merges, restart_evidence_merges, distinct_addition_blocked, arbiter_rejected_pairs}),
                   grouping_safety_splits: (.diagnostics.distinct_idea_grouping_safety.splits // []),
                   grouping_safety_budget: ((.diagnostics.distinct_idea_grouping_safety // {}) | {weak_pair_count, checked_pair_count, unchecked_weak_pair_count, unchecked_weak_pairs, content_divergence_blocked}),
                   grouping_safety_rejected_edges: [ (.diagnostics.distinct_idea_grouping_safety.edge_trace // [])[] | select(.accepted == false) ],

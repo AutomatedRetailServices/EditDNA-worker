@@ -96,6 +96,9 @@ on:
       - cutsell_worker/take_segmentation.py
       - cutsell_worker/audio_silence.py
       - cutsell_worker/boundary_engine_pass.py
+      # D-097.2: renderer output-timeline mapping and the semantic-label budget
+      - cutsell_worker/live_boundary_repair.py
+      - cutsell_worker/hybrid_provider_settings.py
       # StoryValidator + CanonicalEditPlan + FinalEditReviewer + the bounded
       # repair loop and general causal/story order validator around them
       # (D-024/025/026/027/038)

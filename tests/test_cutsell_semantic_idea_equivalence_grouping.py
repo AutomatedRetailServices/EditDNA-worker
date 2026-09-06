@@ -231,8 +231,13 @@ def test_reconcile_transitively_merges_three_groups_via_union_find():
 
 def test_reconcile_truncates_candidate_pairs_to_policy_maximum():
     groups = tuple((clip_id,) for clip_id in "abcd")
+    # D-097.2: four takes sharing the same four-word opening seconds apart
+    # ARE deterministic restarts now (merged without the arbiter), so the
+    # fixture varies the opening -- the pairs stay eligible for the arbiter
+    # tier and the truncation policy is what this test exercises.
+    openers = ("honestly", "basically", "look", "anyway")
     takes = tuple(
-        _take(clip_id, float(i) * 3.0, float(i) * 3.0 + 2.0, f"we launched the new product line today variant {i}")
+        _take(clip_id, float(i) * 3.0, float(i) * 3.0 + 2.0, f"{openers[i]} the team shipped a product line today variant {i}")
         for i, clip_id in enumerate("abcd")
     )
     arbiter = FixedArbiter(same_idea_pairs=frozenset())

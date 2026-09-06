@@ -94,6 +94,10 @@ REQUIRED_CANONICAL_PATHS = {
     "cutsell_worker/take_segmentation.py",
     "cutsell_worker/audio_silence.py",
     "cutsell_worker/boundary_engine_pass.py",
+    # D-097.2: renderer output-timeline mapping (QC/perceptual/ladder windows)
+    # and the per-edit semantic-label budget that decides labeling completeness
+    "cutsell_worker/live_boundary_repair.py",
+    "cutsell_worker/hybrid_provider_settings.py",
     # StoryValidator + CanonicalEditPlan + FinalEditReviewer + repair loop +
     # causal/story order validator
     "cutsell_worker/final_story_coherence_validation.py",

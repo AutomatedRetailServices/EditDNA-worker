@@ -16,7 +16,7 @@ from .semantic_idea_equivalence import (
     safe_check_idea_equivalence,
     same_idea_by_pair_index,
 )
-from .take_grouping import group_takes, retry_similarity, same_opening_restart, semantic_key
+from .take_grouping import _safe_short_prefix_retry, group_takes, retry_similarity, same_opening_restart, semantic_key
 
 # General (English + Spanish) "this is a new/additional item, not a restatement"
 # discourse markers -- a candidate pair where exactly ONE side carries one of
@@ -771,7 +771,7 @@ def reconcile_semantic_idea_equivalence(
     Fails open throughout: a pair the arbiter did not confidently confirm
     as the same idea leaves both groups exactly as they were.
     """
-    if len(groups) < 2 or arbiter is None:
+    if len(groups) < 2:
         return groups, {"status": "not_requested", "candidate_pair_count": 0, "merged_pair_count": 0}
 
     take_map = {take.clip_id: take for take in takes}
@@ -783,19 +783,6 @@ def reconcile_semantic_idea_equivalence(
         )
     if not candidate_pairs:
         return groups, {"status": "no_eligible_pairs", "candidate_pair_count": 0, "merged_pair_count": 0}
-
-    # Priority-ranked, not appearance-ordered: see _rank_candidate_pairs's
-    # docstring for the root-cause finding this fixes. The full eligible set
-    # is still bounded by the same structural gates above; only the order in
-    # which the batch budget below gets spent changes.
-    ranked_pairs = _rank_candidate_pairs(candidate_pairs, take_map)
-    truncated = ranked_pairs[: policy.max_pairs_per_request]
-    request = IdeaEquivalenceRequest(pairs=tuple(
-        IdeaEquivalencePair(left_text=take_map[left_id].text, right_text=take_map[right_id].text)
-        for _, _, left_id, right_id in truncated
-    ))
-    result = safe_check_idea_equivalence(arbiter, request, policy)
-    decisions = same_idea_by_pair_index(result)
 
     # Union-find over group indices: if any member of group A is confirmed
     # the same idea as any member of group B, the two contests are one
@@ -815,11 +802,79 @@ def reconcile_semantic_idea_equivalence(
 
     audit: list[dict] = []
     distinct_addition_blocked: list[dict] = []
+    merged_count = 0
+
+    # D-097.2 (RAW 34029861712, D-096 C-1 again one tier later): a cross-
+    # group candidate pair that carries DETERMINISTIC restart evidence
+    # (`take_grouping.same_opening_restart` / `_safe_short_prefix_retry` --
+    # same source, seconds apart, same opening words, shared content beyond
+    # the opening) is recording-process evidence of a retry and merges here
+    # without the arbiter, exactly as D-097.A already ruled for the cohesion
+    # pass. The run asked the arbiter about an abandoned "same sentence,
+    # restarted" take and its clean retry and it answered NOT-same-idea
+    # because the abandoned take was an "incomplete fragment" -- the one
+    # reason that must never keep a failed attempt OUT of its family (both
+    # then played back to back). The D-083 marker gate is kept: a marked
+    # side with real content divergence is still blocked. The pair is not
+    # spent on the arbiter's bounded request either.
+    restart_merged: list[dict] = []
+    remaining_pairs: list[tuple] = []
+    for pair in candidate_pairs:
+        left_group_index, right_group_index, left_id, right_id = pair
+        left_take, right_take = take_map[left_id], take_map[right_id]
+        restart_kind = same_opening_restart(left_take, right_take)
+        if restart_kind is None and _safe_short_prefix_retry(left_take, right_take):
+            restart_kind = "safe_short_prefix_retry"
+        if restart_kind is None:
+            remaining_pairs.append(pair)
+            continue
+        left_marked = _has_distinct_addition_marker(left_take.text)
+        right_marked = _has_distinct_addition_marker(right_take.text)
+        if left_marked != right_marked and _marked_side_diverges_in_content(left_take.text, right_take.text):
+            distinct_addition_blocked.append({
+                "left_clip_id": left_id, "right_clip_id": right_id,
+                "confidence": 1.0, "reason": f"restart_evidence:{restart_kind}", "source": "restart_evidence",
+            })
+            remaining_pairs.append(pair)
+            continue
+        union(left_group_index, right_group_index)
+        merged_count += 1
+        row = {
+            "left_clip_id": left_id, "right_clip_id": right_id,
+            "confidence": 1.0, "reason": f"deterministic restart evidence ({restart_kind}); arbiter not consulted",
+            "accepted_by": restart_kind,
+        }
+        audit.append(row)
+        restart_merged.append(row)
+
+    if arbiter is None:
+        if merged_count == 0:
+            return groups, {"status": "not_requested", "candidate_pair_count": len(candidate_pairs), "merged_pair_count": 0}
+        result = None
+        truncated: tuple = ()
+        decisions: dict = {}
+    else:
+        # Priority-ranked, not appearance-ordered: see _rank_candidate_pairs's
+        # docstring for the root-cause finding this fixes. The full eligible set
+        # is still bounded by the same structural gates above; only the order in
+        # which the batch budget below gets spent changes.
+        ranked_pairs = _rank_candidate_pairs(tuple(remaining_pairs), take_map) if remaining_pairs else ()
+        truncated = tuple(ranked_pairs[: policy.max_pairs_per_request])
+        if truncated:
+            request = IdeaEquivalenceRequest(pairs=tuple(
+                IdeaEquivalencePair(left_text=take_map[left_id].text, right_text=take_map[right_id].text)
+                for _, _, left_id, right_id in truncated
+            ))
+            result = safe_check_idea_equivalence(arbiter, request, policy)
+            decisions = same_idea_by_pair_index(result)
+        else:
+            result = None
+            decisions = {}
+
     # D-097.A observability: a pair the arbiter answered NOT-same-idea used to
     # vanish from the record entirely (only merges were traced), so a run
     # could not show WHY two takes never became one family.
     arbiter_rejected_pairs: list[dict] = []
-    merged_count = 0
     for pair_index, (left_group_index, right_group_index, left_id, right_id) in enumerate(truncated):
         decision = decisions.get(pair_index)
         if decision is None:
@@ -873,12 +928,16 @@ def reconcile_semantic_idea_equivalence(
 
     if merged_count == 0:
         return groups, {
-            "status": "checked_no_merge" if result.available else "arbiter_unavailable",
+            "status": (
+                "checked_no_merge" if (result is not None and result.available)
+                else ("arbiter_unavailable" if result is not None else "no_eligible_pairs")
+            ),
             "distinct_addition_blocked": distinct_addition_blocked,
-            "provider": result.provider,
+            "provider": result.provider if result is not None else None,
             "candidate_pair_count": len(candidate_pairs),
             "checked_pair_count": len(truncated),
             "merged_pair_count": 0,
+            "restart_evidence_merges": restart_merged,
             "arbiter_rejected_pairs": arbiter_rejected_pairs,
             "arbiter_rejected_pair_count": len(arbiter_rejected_pairs),
         }
@@ -890,12 +949,13 @@ def reconcile_semantic_idea_equivalence(
 
     return merged_groups, {
         "status": "applied",
-        "provider": result.provider,
-        "model": result.model,
+        "provider": result.provider if result is not None else "deterministic_restart_evidence",
+        "model": result.model if result is not None else None,
         "candidate_pair_count": len(candidate_pairs),
         "checked_pair_count": len(truncated),
         "merged_pair_count": merged_count,
         "merges": audit,
+        "restart_evidence_merges": restart_merged,
         "distinct_addition_blocked": distinct_addition_blocked,
         "arbiter_rejected_pairs": arbiter_rejected_pairs,
         "arbiter_rejected_pair_count": len(arbiter_rejected_pairs),
