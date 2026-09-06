@@ -12555,3 +12555,63 @@ documentation task. The Perception + Understanding dataflow investigation
 named above is NOT begun by this entry and awaits explicit Product Owner
 authorization (D-091 continuity does not apply across this task's STOP
 boundary).
+
+## D-099 -- Perception + Understanding active dataflow map (investigation only, no engine behavior change)
+
+Product Owner directive: map the CURRENT ACTIVE engine's perception/
+semantic evidence against D-098's target architecture -- what evidence
+exists, where it is stored, which authorities actually consume it, where
+it is lost/diagnostic-only. Read-only investigation; no code touched.
+
+New document: `docs/CUTSELL_PERCEPTION_UNDERSTANDING_DATAFLOW_MAP.md`.
+
+Key traced findings:
+- The real production entrypoint (`flow_b.py::process_local_sources`)
+  already computes real MediaPipe visual evidence (`mediapipe==0.10.21`
+  is installed in `Dockerfile.cutsell.worker`), real ffmpeg-measured
+  audio silence, and confirmed `wrong_take`/`retry_setup` visual events
+  (`performance_confirmation.py`), all merged into `whole_video_context`
+  before grouping runs;
+- shared attempt representation is PARTIAL: three separate modules
+  (`attempt_reconstruction.py`, `boundary_engine_pass.py`,
+  `perceptual_watch_listen.py`) each reimplement their own identical
+  `_events_for_source` accessor over the same `whole_video_context`
+  event stream rather than sharing one; `CandidateTake.signals`
+  (`MediaSignals`) is a real per-clip multimodal record consumed by
+  exactly one function (`take_judge.score_take`);
+- retry-family grouping (`take_grouping.py`/`take_grouping_provider.py`,
+  where D-097.A/D-097.12 live) never receives `whole_video_context` at
+  all, even though it is a live variable one call earlier in
+  `pipeline.py` -- confirmed as the top gap: D-097.12's fix had to be a
+  new LEXICAL rule specifically because the grouping authority cannot
+  see multimodal evidence regardless of whether it exists for a given
+  RAW;
+- five of `MediaSignals`' twelve fields (audio_quality, framing_quality,
+  product_visibility, continuity, delivery_energy) never leave their
+  dataclass defaults on any real run because their only writer
+  (`visual_analysis.py`, an LLM provider) is hardcoded to
+  `visual_provider=None` in `brain_runtime.py`, while `take_judge.
+  score_take` still weights all five as if measured;
+- `performance_confirmation.py`'s visual-to-editorial-evidence promotion
+  is gated to a narrow 4-second lexically-similar-retry window,
+  correctly flagged as UNPROVEN (not recommended to widen without
+  measuring real-RAW false-negative rate first);
+- D-097.12's real-media stomach-family proof and D-097.13's synthetic
+  checkpoint proof are unaffected and remain exactly as recorded in
+  D-097.12/D-097.13 -- this investigation traced the fixture and code
+  path, it did not re-verify or alter either result;
+- top 3 Cut.ai-blocking gaps ranked and each given a MINIMUM bridge
+  recommendation (parameter-threading, dropping unmeasured constant
+  terms, and an explicitly-deferred measurement task) -- none
+  prescribing a rewrite or the full D-098 target Multimodal Attempt
+  Record.
+
+No engine behavior was changed. No RAW, provider, S3, or infrastructure
+work was performed.
+
+**HUMAN ACTION REQUIRED:** NO to close this investigation. The minimum
+next implementation recommendation (Section 8 of the new document -- an
+optional, corroborating-only wiring of confirmed multimodal evidence into
+the existing retry-family restart-evidence rules) is NOT authorized by
+this entry and awaits explicit Product Owner authorization before any
+code is touched.
