@@ -655,8 +655,13 @@ def _raw_content_overlap(left_text: str, right_text: str) -> float:
     why that makes it useless as an eligibility gate); this raw score keeps
     the same low-overlap paraphrases distinguishable from zero-overlap
     unrelated text purely as a priority signal."""
-    left_tokens = set(semantic_key(left_text).split())
-    right_tokens = set(semantic_key(right_text).split())
+    # D-097.8 (R9): CONTENT tokens (the D-048 stoplist above), not the raw
+    # semantic_key words -- with stopwords counted, two adjacent sentences
+    # of one narrative ("en la ... de ... que se ...") scored 0.6 overlap
+    # and outranked a real retry pair whose shared content was the actual
+    # claim vocabulary.
+    left_tokens = _content_tokens(left_text)
+    right_tokens = _content_tokens(right_text)
     if not left_tokens or not right_tokens:
         return 0.0
     shared = len(left_tokens & right_tokens)
@@ -678,6 +683,9 @@ def _continuation_or_restart_bonus(left_take: CandidateTake, right_take: Candida
     return bonus
 
 
+_PROXIMITY_RANK_WEIGHT = 0.25
+
+
 def _pair_priority_score(
     left_take: CandidateTake, right_take: CandidateTake, *, gap_sec: float,
 ) -> float:
@@ -690,7 +698,18 @@ def _pair_priority_score(
     job, or the existing lexical reconciliation's)."""
     proximity = 1.0 / (1.0 + max(0.0, gap_sec))
     overlap = _raw_content_overlap(left_take.text, right_take.text)
-    return proximity + overlap + _continuation_or_restart_bonus(left_take, right_take)
+    # D-097.8 (R9): proximity is a tie-break, not the lead signal. With a
+    # full weight, every ADJACENT pair of different sentences (nodule ->
+    # biopsy result, advice -> "no, no, no") scored ~0.7-1.0 on proximity
+    # alone and outranked a real retry 14 s away with half its content in
+    # common (RAW 34043967265: 55 candidate pairs, 14 asked, 9 of them
+    # sequential-narrative neighbours the arbiter rejected, while the
+    # abandoned stomach attempt <-> clean gastritis delivery pair -- shared
+    # opening, "endoscopía", "donde" -- was never asked; the two abandoned
+    # attempts formed their own family and its incomplete winner played).
+    # Content overlap and restart/continuation evidence decide the order;
+    # proximity only separates otherwise-equal pairs.
+    return overlap + _continuation_or_restart_bonus(left_take, right_take) + _PROXIMITY_RANK_WEIGHT * proximity
 
 
 def _rank_candidate_pairs(

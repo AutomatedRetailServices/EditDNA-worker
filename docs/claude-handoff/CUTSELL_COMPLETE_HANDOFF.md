@@ -547,6 +547,15 @@ Binding validation order (Product Owner, 2026-09-06):
   (coarse vocabulary only; atoms untouched; fail-closed on every gap). The
   pimples tie-break (escalation A) is now the dominant Level-1 item. Next: ONE
   RAW. Full entry: `docs/CUTSELL_DECISIONS.md` D-097.7.
+- D-097.8 (2026-09-06): RAW 34043967265 = Freeze PASS, QC PASS, deliverable MP4
+  with the clean gynaecologist retry AND the diagnosis (R6/R7 held on video).
+  Two more selection gaps fixed: the arbiter's 14-pair budget went to adjacent
+  narrative pairs because proximity outweighed content overlap and the overlap
+  counted stopwords (content tokens + proximity as tie-break now); a `bts`
+  0.95 singleton with local corroboration ended the video because no
+  authority resolves singletons (now a no-usable-realization outcome, recorded).
+  Pimples tie-break (escalation A) is the dominant remaining Level-1 item.
+  Next: ONE RAW. Full entry: `docs/CUTSELL_DECISIONS.md` D-097.8.
 # HISTORICAL CUTSELL.AI 11 CONTINUITY
 
 A trusted CutSell.ai 11 recovery checkpoint is:

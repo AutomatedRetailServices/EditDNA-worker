@@ -73,16 +73,24 @@ def _gastritis_takes():
     return (_take("G1", 100.0, 106.0, ABANDONED, complete=False), _take("G2", 107.0, 111.0, ASIDE), _take("G3", 112.0, 120.0, COMPLETE))
 
 
-def test_f3_red_confirmed_pair_outside_the_bounded_reask_is_split_without_prior_evidence():
+def test_f3_red_shape_the_bounded_reask_now_contests_the_complete_delivery_first():
+    """D-094 recorded the live defect shape: with ONE pair per request the
+    proximity-first ranking asked the aside (G1<->G2) and split the complete
+    delivery G3 off on absence of evidence. D-097.8 (R9) ranks the budget by
+    shared content first (proximity is a tie-break), so the abandoned
+    attempt is contested by the complete delivery inside the same budget and
+    the D-020 pair is no longer split for want of a question."""
     takes = _gastritis_takes()
-    # The arbiter would confirm G1<->G3 at 0.95 -- but the pass is capped to ONE pair and asks G1<->G2 first.
     arbiter = TableArbiter({(ABANDONED, ASIDE): (True, 0.85, "same stomach story"), (ABANDONED, COMPLETE): (True, 0.95, "same story")})
     policy = SemanticEquivalenceGatePolicy(max_pairs_per_request=1)
     groups, diag = split_incohesive_retry_groups((("G1", "G2", "G3"),), takes, arbiter, policy=policy)
     assert diag["checked_pair_count"] == 1
     assert diag["unchecked_weak_pair_count"] >= 1  # observability: unasked pairs are named, not hidden
     assert diag["prior_confirmations_reused_count"] == 0
-    assert len(groups) == 2 and ("G3",) in groups  # the live defect shape: complete delivery split off
+    assert arbiter.pairs_asked == [(ABANDONED, COMPLETE)] or arbiter.pairs_asked == [(COMPLETE, ABANDONED)]
+    family = next(g for g in groups if "G1" in g)
+    assert "G3" in family  # the complete delivery stays with the abandoned attempt it contests
+    assert ("G3",) not in groups
 
 
 def test_f3_green_prior_confirmation_keeps_the_family_and_never_reasks_that_pair():

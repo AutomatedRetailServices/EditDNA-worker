@@ -11911,3 +11911,92 @@ dominant remainder; per-fix MP4 report as D-097.8.
 **HUMAN ACTION REQUIRED:** YES, non-blocking -- A (later-attempt tie
 preference: now the dominant Level-1 item), F (watch + listen the
 deliverables of 34040848026 / 34042123557), B/A (waiver narrowing), F3b.
+
+## D-097.8 -- RAW 34043967265 (head 23306a4): Freeze PASS, QC PASS, deliverable MP4 carrying the clean gynaecologist retry AND the diagnosis (R6/R7/R8 all held); two more legacy gaps on the selection -- the arbiter pair budget spent on adjacent narrative pairs (R9) and a corroborated `bts` singleton nobody could resolve (R10)
+
+**RAW COMPLETE (Modal run 34043967265, head `23306a4`, 2026-09-06).**
+Worker ok, `hybrid_editorial = provider_complete`, Freeze PASSED (R8: the
+abandoned stomach take was grouped this run and credited by same-idea
+equivalence; no block), 26 kept, technical QC PASS on attempt 1,
+`DELIVERABLE_PENDING_HUMAN_WATCH_LISTEN:perceptual=FAIL` (advisory: 21
+BoundaryEngine routings), output 159.1 s for a 171.8 s plan. Final KEEP
+contains "al terminar mi contrato cambié de ginecóloga ..." (R7 held),
+"La biopsia confirmó que era un cáncer papilar de tiroides." (R6 held) and
+neither abandoned gynaecologist attempt.
+
+### Per-fix MP4 report
+- **R6, R7 -- HELD on video** (see above). **R8 -- not exercised** (the
+  take reached grouping this run; the credit path stays proven by tests).
+- **Ladder (selection scope):** LEVEL_1 29 / 61.08 s (0.364 of Cut.ai
+  keep), F1 vs Cut.ai 0.781, vs Gold 0.727; keep 171.8 s. FINAL MP4: L1
+  21 / 53.4 s, F1 0.795 / 0.747. Worse than 34043247473's 43.6 s: the
+  delta is two NEW regions (7.96 s + 2.48 s) plus the pimples family
+  (25.9 s, unchanged; escalation A) and the diagnosis tail (1.98 s).
+
+### NEW ROOT CAUSE R9 -- the arbiter budget was spent on the wrong pairs
+`semantic_idea_equivalence`: 55 candidate pairs, 14 checked (`max_pairs_
+per_request`), 9 rejected -- and the rejected list is a roll-call of
+ADJACENT sentences of one narrative (nodule -> biopsy result, test at
+sea -> "me mandó a hacer sonografías", digestion -> vaccine, advice ->
+"no, no, no"). The abandoned stomach attempt "Tuve problemas estomacales a
+un tiempo en donde se me hizo una endoscopía y me diagnosticaron con..."
+<-> the clean gastritis delivery (shared opening, `endoscopía`, `donde`;
+14 s apart) was never asked; the two abandoned stomach attempts were
+merged with each other (0.9), formed their OWN family, and its winner --
+the incomplete "...me diagnosticaron con..." take (`winner` 0.95 in one
+window, `failed` 0.9 in another) -- played for 7.96 s (region 97,
+"restored by the RealizationResolver"). Root cause in `_pair_priority_
+score`: temporal proximity `1/(1+gap)` carried a full unit of weight
+(an adjacent pair scores 0.6-1.0 on proximity alone) and the overlap term
+counted stopwords (`semantic_key` words: "en la ... de ... que se ..." gave
+nodule/biopsy 0.6). Fix: overlap is measured on the module's own D-048
+CONTENT tokens, and proximity is a tie-break at weight 0.25 -- content
+overlap and the existing restart/continuation bonus lead the ranking.
+Cost-neutral (the budget is unchanged; its slots go to likelier retries).
+Existing ranking tests unchanged; new tests reproduce the RAW pair shape.
+
+### NEW ROOT CAUSE R10 -- the video ended on "No, no, no, no, no."
+Last clip of the MP4 (364.4-366.9 s, 2.48 s): Hybrid `bts` 0.95, local
+corroboration `dense_physical_reset:5` + `visual_fumble:0.85`, delete
+basis `high_confidence_semantic` -- `applied_delete: false` because D-081
+defers every semantic delete to the authoritative resolution boundary.
+For a SINGLETON that boundary never came: `_semantic_best_take` returns
+`single_member_no_contest` before its usability tiers, the Resolver keeps
+a single realization (WHEN UNCERTAIN, KEEP), the arbiter correctly
+rejected pairing it with the CTA, and no authority ever applied the
+corroborated-bts basis. Fix (owning authority = Best Take, the same
+D-097.B outcome): a lone `bts` realization at or above the 0.85 floor
+WITH deterministic local corroboration is a no-usable-realization
+outcome (`single_bts_unusable`), recorded in `take_judge_groups` like a
+dropped family so the StoryValidator classifies the loss
+LOST_IN_NO_USABLE_REALIZATION_FAMILY (a decision). A lone `failed`
+delivery is unchanged from D-097.B (an idea could vanish with it; kept);
+a label without the deterministic evidence never drops anything.
+
+Tests: `tests/test_cutsell_d097_8_pair_ranking_and_bts_singleton.py`
+(8). Ranking, D-097.B, D-082 ladder, grouping and D-048 suites unchanged.
+The full glob exposed ONE expected change: the D-094 F3 "red shape"
+reproduction (`test_f3_red_confirmed_pair_outside_the_bounded_reask_is_
+split_without_prior_evidence`) asserted the proximity-first order (aside
+asked first, complete delivery split off on absence of evidence); under R9
+the same one-pair budget asks the abandoned<->complete pair first and the
+D-020 pair stays a family, which is the defect that test documented. It is
+rewritten as `test_f3_red_shape_the_bounded_reask_now_contests_the_
+complete_delivery_first` asserting the new order and the retained
+observability (unchecked pairs named, no prior reuse).
+
+**Offline qualification:** compileall clean; targeted 54/54 + 8 new;
+CleanCutBench 54/54 x2; full `tests/test_cutsell_*.py` glob 2279/2279
+after the D-094 rewrite (2278 + the one rewritten test).
+
+**LAST VERIFIED RESULT:** RAW 34043967265 = FREEZE PASS, QC PASS, DELIVERABLE
+MP4 with R6/R7 both visible on the selection; R9 (pair ranking) and R10
+(corroborated bts singleton) CODE FIXED / TESTS PASS.
+**NEXT AUTOMATIC ACTION:** commit + push; ONE authorised Modal RAW on the
+new head -- expected: the stomach abandoned attempts contested by the
+clean delivery (asked within the budget), "No, no, no, no, no." lost by
+decision, deliverable MP4; per-fix report as D-097.9. The pimples
+tie-break remains the dominant Level-1 item pending escalation A.
+**HUMAN ACTION REQUIRED:** YES, non-blocking -- A (later-attempt tie
+preference; 4 of 5 runs), F (watch + listen: runs 34040848026,
+34042123557, 34043967265), B/A (waiver narrowing), F3b.

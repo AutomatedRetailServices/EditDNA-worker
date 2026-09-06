@@ -179,7 +179,10 @@ abandoned attempts over the `winner` clean retry -- D-097.6 applies the §3
 usability floor at those guards -- PROVEN on RAW 34043247473 (best ladder so
 far), which then blocked Freeze over a take the multimodal layer had rejected
 as `wrong_take`; D-097.7 makes that confirmation a deterministic pre-group
-credit; the next authorised RAW must prove the deliverable MP4; D-096 remains the source of
+credit -- RAW 34043967265 then delivered an MP4 with the clean retry and the
+diagnosis, and D-097.8 fixed the arbiter pair ranking (content overlap leads,
+proximity is a tie-break) and the unresolved corroborated `bts` singleton; the
+next authorised RAW must prove both; D-096 remains the source of
 truth, its Appendix B records implementation status)
 (read its LAST VERIFIED RESULT / NEXT AUTOMATIC ACTION lines). The handoff
 document's `CURRENT LIVE BLOCKER` / `EXACT NEXT ACTION` sections are historical

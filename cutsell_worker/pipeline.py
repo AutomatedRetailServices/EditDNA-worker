@@ -161,6 +161,12 @@ def family_scoped_semantic_decisions(
     }
 
 
+# D-097.8 (R10): the same 0.85 floor the Resolver applies to a hybrid
+# `failed` label (realization_resolver._SEMANTIC_FAILED_THRESHOLD) and the
+# winner-label floor `_semantic_best_take` already requires.
+_BTS_SINGLETON_UNUSABLE_CONFIDENCE = 0.85
+
+
 def _semantic_best_take(
     members: tuple[CandidateTake, ...],
     semantic_decisions: dict[str, tuple[str, float]],
@@ -243,6 +249,25 @@ def _semantic_best_take(
     member_ids = [member.clip_id for member in members]
     by_id = {member.clip_id: member for member in members}
     if len(member_ids) < 2:
+        # D-097.8 (R10): a lone `bts` realization (not audience content at
+        # all, so no idea can vanish with it -- unlike D-097.B's lone
+        # `failed` delivery, which stays kept) with the Hybrid label at or
+        # above the usable floor AND deterministic local corroboration is
+        # the D-081 `corroborated_bts_delete` basis whose application was
+        # deferred to "the authoritative resolution boundary" -- this is
+        # that boundary, and for a singleton nobody else ever reached it:
+        # RAW 34043967265 ended the video on "No, no, no, no, no." (bts
+        # 0.95, dense_physical_reset:5, visual_fumble:0.85, kept fail-open).
+        # Lost BY DECISION (recorded as no_usable_realization), never a
+        # label-only drop: without the deterministic evidence it is kept.
+        only_id = member_ids[0]
+        label, confidence = semantic_decisions.get(only_id, ("", 0.0))
+        if (
+            label == "bts"
+            and confidence >= _BTS_SINGLETON_UNUSABLE_CONFIDENCE
+            and (deterministic_unusable or {}).get(only_id, False)
+        ):
+            return None, None, "single_bts_unusable"
         return local_selected_clip_id, None, "single_member_no_contest"
 
     def _exclude_unless_all(ids: list[str], excluded: set[str]) -> list[str]:
@@ -587,7 +612,12 @@ def build_flow_b_draft(
             ranked=ranked,
             selected_clip_id=selected_clip_id,
         ))
-        if len(members) >= 2:
+        # D-097.8 (R10): a singleton dropped as no-usable (a corroborated
+        # `bts` lone take) is recorded exactly like a dropped family so the
+        # StoryValidator classifies it LOST_IN_NO_USABLE_REALIZATION_FAMILY
+        # (a decision, never an accidental loss) -- ordinary singletons are
+        # still not contests and stay out of these rows.
+        if len(members) >= 2 or no_usable_realization:
             judge_group_diagnostics.append({
                 "group_id": gid,
                 "selected_clip_id": selected_clip_id,
