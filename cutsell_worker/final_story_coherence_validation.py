@@ -548,10 +548,69 @@ def _same_idea_paraphrase_credit(
     return False, None
 
 
+PRE_GROUP_RESTART_SEMANTIC_EQUIVALENCE = "pre_group_restart_semantic_equivalence"
+
+
+def _pre_group_restart_credit(
+    clip, selected, semantic_equivalence_arbiter: SemanticEquivalenceArbiter | None,
+) -> tuple[bool, list[dict]]:
+    """D-097.1: same-idea credit for a discard that NEVER reached grouping.
+
+    RAW 34028386434 (head 11ffa8c): an abandoned "same sentence, restarted"
+    take was deleted by the pre-grouping semantic pass, so IdeaClusterer
+    never asked the arbiter about it, `_same_idea_paraphrase_credit` above
+    had no family to consult, the D-093 permit was denied for
+    `missing_identity`, and the coarse vocabulary signal blocked Freeze
+    over an incidental year -- with no repair strategy. The ONLY evidence
+    source this credit accepts is the same bounded SemanticEquivalenceArbiter
+    IdeaClusterer uses (the residual-ambiguity tier CLAUDE.md allows in
+    final coherence validation), asked the same question about the pair
+    grouping would have asked had the take survived to it. Which pair is
+    asked is decided deterministically by `_pre_group_retry_relation`
+    (same source, <= 8 s, >= 3 identical opening natural tokens, the
+    discard shorter) -- the D-097.A restart-evidence class -- so this is
+    bounded (one request per such discard) and never a topical search.
+    Fail-closed: no arbiter, no adjacency, an unavailable/declined result,
+    or a verdict below `_SAME_IDEA_HIGH_CONFIDENCE_THRESHOLD` credits
+    nothing. Number/negation atoms are never touched (this only ever
+    suppresses the coarse vocabulary signal, exactly like the grouped
+    credit). Every consultation is returned for the row's own record."""
+    from .realization_resolver import _pre_group_retry_relation
+
+    if semantic_equivalence_arbiter is None:
+        return False, []
+    neighbours = [
+        other for other in selected
+        if other.clip_id != clip.clip_id and _pre_group_retry_relation(clip, other)
+    ]
+    if not neighbours:
+        return False, []
+    request = IdeaEquivalenceRequest(pairs=tuple(
+        IdeaEquivalencePair(left_text=str(clip.text or ""), right_text=str(other.text or ""))
+        for other in neighbours
+    ))
+    result = safe_check_idea_equivalence(semantic_equivalence_arbiter, request)
+    decisions = same_idea_by_pair_index(result)
+    consultations: list[dict] = []
+    credited = False
+    for index, other in enumerate(neighbours):
+        same_idea, confidence, reason = decisions.get(index, (False, 0.0, "arbiter_unavailable_or_declined"))
+        row = {
+            "neighbour_clip_id": other.clip_id, "relation": "retry_relation",
+            "same_idea": bool(same_idea), "confidence": round(float(confidence or 0.0), 4),
+            "reason": str(reason or "")[:200], "provider": result.provider, "model": result.model,
+        }
+        consultations.append(row)
+        if same_idea and float(confidence or 0.0) >= _SAME_IDEA_HIGH_CONFIDENCE_THRESHOLD:
+            credited = True
+    return credited, consultations
+
+
 def _lost_semantic_atoms(
     draft, *,
     semantic_atom_importance_arbiter: SemanticAtomImportanceArbiter | None = None,
     semantic_preservation_proofs: Mapping[str, object] | None = None,
+    semantic_equivalence_arbiter: SemanticEquivalenceArbiter | None = None,
 ) -> list[dict]:
     """General coverage ledger over the ACTUAL final KEEP timeline.
 
@@ -652,6 +711,7 @@ def _lost_semantic_atoms(
         # the broader content_loss signal above, never touches
         # missing_critical/classifications (see docstring paragraph above).
         suppressed_reason = None
+        restart_consultations: list[dict] = []
         if content_loss:
             group = clip_id_to_group.get(clip.clip_id)
             if group is not None:
@@ -662,6 +722,15 @@ def _lost_semantic_atoms(
                 if credited:
                     content_loss = False
                     suppressed_reason = evidence_kind
+            else:
+                # D-097.1: a pre-group discard has no family to credit it;
+                # ask the same arbiter the same question grouping would have.
+                credited, restart_consultations = _pre_group_restart_credit(
+                    clip, draft.selected, semantic_equivalence_arbiter,
+                )
+                if credited:
+                    content_loss = False
+                    suppressed_reason = PRE_GROUP_RESTART_SEMANTIC_EQUIVALENCE
 
         classifications = [
             classify_negation_atom(atom) if atom in own_negations else classify_number_atom(atom, text)
@@ -732,6 +801,8 @@ def _lost_semantic_atoms(
         }
         if suppressed_reason is not None:
             row["content_loss_suppressed_by"] = suppressed_reason
+        if restart_consultations:
+            row["pre_group_restart_consultations"] = restart_consultations
         if preserving_realization_id is not None:
             row["preserving_realization_id"] = preserving_realization_id
         if preserved_claim_ids:
@@ -1019,6 +1090,7 @@ def apply_final_story_coherence_validation(
         return _apply_post_authority_validation_only(
             draft,
             context=post_authority_context,
+            semantic_equivalence_arbiter=semantic_equivalence_arbiter,
             semantic_atom_importance_arbiter=semantic_atom_importance_arbiter,
             claim_equivalence_arbiter=claim_equivalence_arbiter,
             clause_role_arbiter=clause_role_arbiter,
@@ -1100,6 +1172,7 @@ def apply_final_story_coherence_validation(
     lost_semantic_atoms = _lost_semantic_atoms(
         draft, semantic_atom_importance_arbiter=semantic_atom_importance_arbiter,
         semantic_preservation_proofs=semantic_preservation_proofs,
+        semantic_equivalence_arbiter=semantic_equivalence_arbiter,
     )
     lost_critical_claims, claim_coverage_confirmations = _lost_critical_claims(
         draft, claim_equivalence_arbiter=claim_equivalence_arbiter, clause_role_arbiter=clause_role_arbiter,
@@ -1189,6 +1262,7 @@ def _apply_post_authority_validation_only(
     draft,
     *,
     context: PostAuthorityValidationContext,
+    semantic_equivalence_arbiter: SemanticEquivalenceArbiter | None = None,
     semantic_atom_importance_arbiter: SemanticAtomImportanceArbiter | None = None,
     claim_equivalence_arbiter: ClaimEquivalenceArbiter | None = None,
     clause_role_arbiter: ClauseRoleArbiter | None = None,
@@ -1270,6 +1344,10 @@ def _apply_post_authority_validation_only(
     lost_semantic_atoms = _lost_semantic_atoms(
         working, semantic_atom_importance_arbiter=semantic_atom_importance_arbiter,
         semantic_preservation_proofs=semantic_preservation_proofs,
+        # D-097.1: the arbiter is consulted here ONLY for the pre-group
+        # restart credit (validation evidence); residual family resolution
+        # stays disabled in this pass (D-090: never a selection mutation).
+        semantic_equivalence_arbiter=semantic_equivalence_arbiter,
     )
     lost_critical_claims, claim_coverage_confirmations = _lost_critical_claims(
         working, claim_equivalence_arbiter=claim_equivalence_arbiter, clause_role_arbiter=clause_role_arbiter,
@@ -1515,6 +1593,7 @@ def apply_post_authority_story_validation(
     draft,
     *,
     context: PostAuthorityValidationContext | None,
+    semantic_equivalence_arbiter: SemanticEquivalenceArbiter | None = None,
     semantic_atom_importance_arbiter: SemanticAtomImportanceArbiter | None = None,
     claim_equivalence_arbiter: ClaimEquivalenceArbiter | None = None,
     clause_role_arbiter: ClauseRoleArbiter | None = None,
@@ -1559,6 +1638,7 @@ def apply_post_authority_story_validation(
     return _apply_post_authority_validation_only(
         draft,
         context=context,
+        semantic_equivalence_arbiter=semantic_equivalence_arbiter,
         semantic_atom_importance_arbiter=semantic_atom_importance_arbiter,
         claim_equivalence_arbiter=claim_equivalence_arbiter,
         clause_role_arbiter=clause_role_arbiter,

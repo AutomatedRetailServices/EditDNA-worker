@@ -464,6 +464,8 @@ def process_universal_clean_cut_sources(
             authoritative_draft = apply_post_authority_story_validation(
                 authoritative_draft,
                 context=post_authority_context,
+                # D-097.1: pre-group restart credit only (validation evidence).
+                semantic_equivalence_arbiter=semantic_equivalence_arbiter,
                 integrity_failure=(
                     (context_status, context_detail) if post_authority_context is None else None
                 ),

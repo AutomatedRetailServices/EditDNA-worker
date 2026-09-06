@@ -431,6 +431,15 @@ Binding validation order (Product Owner, 2026-09-06):
   -> SYSTEM PERCEPTUAL W+L -> HUMAN W+L`. Next: ONE authorised RAW + ladder +
   gate + per-fix MP4 report. Full entry: `docs/CUTSELL_DECISIONS.md` D-097;
   gap-row status: `docs/CUTSELL_SYSTEM_AUDIT_D096.md` Appendix B.
+- D-097.1 (2026-09-06): first RAW on the D-097 code (Modal 34028202024) ran the
+  whole chain but Freeze was BLOCKED by one UNIQUE_FACT_LOST on a failed retry
+  deleted before grouping (CONTEXTUAL year, no family -> no credit, no permit,
+  no proof discovery). Fixed in the owning authorities: retry-relation
+  discovery tier + sanitized-claim reclassification + retry consultation floor
+  in the Resolver's pre-group proof; StoryValidator asks the bounded
+  SemanticEquivalenceArbiter the grouping question for a no-family discard
+  (validation evidence only). Modal ladder step PYTHONPATH fixed. Next: ONE
+  RAW on the new head -> MP4 -> ladder -> CLEAN RAW gate -> per-fix report.
 
 - Human Gold stays the ultimate editorial authority.
 - Cut.ai is the intermediate COMMERCIAL BASELINE oracle: recording-process

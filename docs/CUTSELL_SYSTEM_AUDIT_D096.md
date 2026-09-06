@@ -1242,3 +1242,4 @@ next authorised RAW is run on this code.
 | G-12 (identity markers) | PARTIAL | markers `BoundaryEnginePass.post_freeze`, `TakeSegmentation.polarity_rejoin` added; the two probe defects noted in Part 1 are unchanged |
 | CLEAN RAW gate (approval) | IMPLEMENTED (QA-only) | `benchmarks/clean_raw_gate.py` + both workflows |
 | Part 10 retire/merge candidates | NOT SCHEDULED | unchanged (needs per-module CleanCutBench proof + separate approval) |
+| D-062.2 "human review as convenience valve" / D-076 discovery gap (new, RAW 34028202024) | IMPLEMENTED (D-097.1) | a failed retry deleted BEFORE grouping blocked Freeze over a CONTEXTUAL year with no repair strategy; `realization_resolver._pre_group_retry_relation` discovery tier + sanitized-claim reclassification + retry consultation floor; `final_story_coherence_validation._pre_group_restart_credit` asks the bounded SemanticEquivalenceArbiter the question grouping would have asked (validation evidence only) |

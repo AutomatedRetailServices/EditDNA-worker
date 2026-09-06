@@ -1205,6 +1205,7 @@ _CROSS_TYPE_BRIDGE_ALLOWED_CANDIDATE_TYPES = frozenset({
 
 def _cross_type_ambiguous_bridge_eligible(
     d_claim: CanonicalClaimRecord, r_claim: CanonicalClaimRecord,
+    *, ambiguous_floor: float = _DEDUP_AMBIGUOUS_FLOOR,
 ) -> tuple[bool, str]:
     """D-077 Sections 2/3/4/9: is this (d_claim, r_claim) pair a genuine
     ambiguous-middle-band cross-type paraphrase eligible for the bounded
@@ -1256,7 +1257,13 @@ def _cross_type_ambiguous_bridge_eligible(
         return False, "number_mismatch"
     d_digits, r_digits = _digit_tokens(d_claim.content_tokens), _digit_tokens(r_claim.content_tokens)
     overlap = _overlap_coefficient(d_claim.content_tokens - d_digits, r_claim.content_tokens - r_digits)
-    if overlap < _DEDUP_AMBIGUOUS_FLOOR or overlap >= _CLAIM_DEDUP_THRESHOLD:
+    # `ambiguous_floor` (D-097.1): a deterministic retry relation (an
+    # abandoned restart of the very sentence R delivers, discovered by
+    # `_pre_group_retry_relation`) lowers the CONSULTATION floor the way
+    # D-094.3 F4b's same-number evidence already does -- the verdict is
+    # still the arbiter's, never a deterministic merge, and every other
+    # hard gate above is unchanged.
+    if overlap < ambiguous_floor or overlap >= _CLAIM_DEDUP_THRESHOLD:
         return False, "outside_ambiguous_band"
     return True, "ambiguous_cross_type_candidate"
 
@@ -1379,6 +1386,7 @@ def _claim_preserved(
     arbiter_log: list[dict] | None,
     allow_cross_type_ambiguous_bridge: bool = False,
     allow_rhetorical_aside_negation_bridge: bool = False,
+    cross_type_ambiguous_floor: float = _DEDUP_AMBIGUOUS_FLOOR,
 ) -> tuple[CanonicalClaimRecord | None, str]:
     """D-073 Sections 3/5/8: is `d_claim` (one claim of the discarded
     realization D) preserved by some claim of the candidate replacement R?
@@ -1475,7 +1483,9 @@ def _claim_preserved(
     # case, never reaches this loop body at all, let alone logs or calls).
     if allow_cross_type_ambiguous_bridge:
         for r_claim in sorted(r_claims, key=lambda c: c.canonical_claim_id):
-            eligible, gate_reason = _cross_type_ambiguous_bridge_eligible(d_claim, r_claim)
+            eligible, gate_reason = _cross_type_ambiguous_bridge_eligible(
+                d_claim, r_claim, ambiguous_floor=cross_type_ambiguous_floor,
+            )
             if not eligible:
                 continue
             if claim_equivalence_arbiter is None or not d_claim.text or not r_claim.text:
@@ -1674,9 +1684,24 @@ def _sanitize_claim_for_nonrequired_omissions(
     sanitized_text = claim.text
     for value in omitted_digit_values:
         sanitized_text = re.sub(r"\b" + re.escape(value) + r"\b", " ", sanitized_text)
-    return replace(
+    sanitized = replace(
         claim, content_tokens=claim.content_tokens - omitted_digit_values, text=sanitized_text,
     )
+    # D-097.1: `classify_claim` promotes a clause to MEASUREMENT_QUANTITY the
+    # moment ANY number appears. When the only number was the digit the
+    # caller has just ruled non-required (an incidental year), the type was
+    # a by-product of that digit: the sanitized claim is re-classified by
+    # the SAME deterministic classifier on the sanitized text, so the
+    # remaining proposition is judged as what it is (RAW 34028202024: a
+    # retry's "stomach problems for a season" stayed MEASUREMENT_QUANTITY
+    # and could never reach the cross-type bridge). Any other type
+    # (NEGATION, CORRECTION, DIAGNOSIS...) was never digit-triggered and is
+    # left untouched.
+    if claim.claim_type == MEASUREMENT_QUANTITY and not _digit_tokens(sanitized.content_tokens):
+        claim_type, importance, evidence = classify_claim(sanitized_text)
+        if claim_type != MEASUREMENT_QUANTITY:
+            sanitized = replace(sanitized, claim_type=claim_type)
+    return sanitized
 
 
 def _certify_directional_semantic_preservation(
@@ -1690,6 +1715,7 @@ def _certify_directional_semantic_preservation(
     nonrequired_digit_omissions: frozenset[str] = frozenset(),
     allow_cross_type_ambiguous_bridge: bool = False,
     allow_rhetorical_aside_negation_bridge: bool = False,
+    cross_type_ambiguous_floor: float = _DEDUP_AMBIGUOUS_FLOOR,
 ) -> tuple[bool, str]:
     """D-073/D-076/D-077/D-079 shared directional preservation
     certification chain -- D's required meaning subset of R's required
@@ -1776,6 +1802,7 @@ def _certify_directional_semantic_preservation(
             d_claim, r_claims, claim_equivalence_arbiter=claim_equivalence_arbiter, arbiter_log=arbiter_log,
             allow_cross_type_ambiguous_bridge=allow_cross_type_ambiguous_bridge,
             allow_rhetorical_aside_negation_bridge=allow_rhetorical_aside_negation_bridge,
+            cross_type_ambiguous_floor=cross_type_ambiguous_floor,
         )
         if preserving is None:
             evidence["semantic_replacement_reason"] = "required_claim_not_preserved"
@@ -1836,6 +1863,62 @@ def _pre_group_relationship_evidence(record: RealizationRecord, candidate: Reali
     return ""
 
 
+# D-097.1: a failed RETRY deleted BEFORE grouping (RAW 34028202024: an
+# abandoned "same sentence, restarted" take carrying only an incidental
+# year) can never satisfy the strong relation above -- a retry is, by
+# construction, a different attempt with non-overlapping spans -- so its
+# only certification path was closed and StoryValidator's coarse
+# vocabulary signal blocked Freeze with no repair strategy. Deterministic
+# restart evidence (D-097.A's own class) is a second DISCOVERY tier only:
+# same source, the selected candidate begins within
+# `_PRE_GROUP_RETRY_MAX_GAP_SEC` of the discard (either direction), the
+# two share at least `_PRE_GROUP_RETRY_OPENING_TOKENS` identical opening
+# natural tokens, and the discard is the shorter one (an abandoned
+# start). Temporal proximity alone or a two-word discourse opening ("I
+# had ...") still never qualifies (D-076 Section 4's control stays green),
+# and certification is the SAME unmodified chain -- claims, numbers,
+# contradiction gates, arbiter -- so a retry candidate is never certified
+# by adjacency.
+_PRE_GROUP_RETRY_MAX_GAP_SEC = 8.0
+_PRE_GROUP_RETRY_OPENING_TOKENS = 3
+_PRE_GROUP_RETRY_MAX_LENGTH_RATIO = 0.75
+# The arbiter CONSULTATION floor for a retry-relation candidate: an abandoned
+# restart carries ASR debris and dropped words, so its content overlap with
+# the finished delivery is depressed below the ordinary 0.40 band even when
+# it is the same sentence. Same precedent as `_DEDUP_AMBIGUOUS_FLOOR_SAME_
+# NUMBER` (D-094.3 F4b): extra structural evidence lowers when the arbiter
+# is asked, never what it may decide.
+_PRE_GROUP_RETRY_AMBIGUOUS_FLOOR = 0.2
+
+
+def _pre_group_retry_relation(record: RealizationRecord, candidate: RealizationRecord) -> str:
+    """D-097.1 discovery tier: deterministic same-opening restart adjacency
+    between a pre-group discard and a SELECTED realization. Returns
+    "retry_relation" or ""."""
+    from .take_grouping import _natural_tokens
+
+    if not record.source_asset_id or record.source_asset_id != candidate.source_asset_id:
+        return ""
+    if record.end <= candidate.start:
+        gap = float(candidate.start) - float(record.end)
+    elif candidate.end <= record.start:
+        gap = float(record.start) - float(candidate.end)
+    else:
+        gap = 0.0
+    if gap > _PRE_GROUP_RETRY_MAX_GAP_SEC:
+        return ""
+    d_tokens = _natural_tokens(record.text)
+    r_tokens = _natural_tokens(candidate.text)
+    opening = _PRE_GROUP_RETRY_OPENING_TOKENS
+    if len(d_tokens) < opening or len(r_tokens) < opening + 1:
+        return ""
+    if d_tokens[:opening] != r_tokens[:opening]:
+        return ""
+    if len(d_tokens) > len(r_tokens) * _PRE_GROUP_RETRY_MAX_LENGTH_RATIO:
+        return ""
+    return "retry_relation"
+
+
 def _find_pre_group_candidates(
     record: RealizationRecord, ledger: SemanticLedger,
 ) -> tuple[tuple[str, str], ...]:
@@ -1845,15 +1928,24 @@ def _find_pre_group_candidates(
     caller tries each in turn against the full certification chain and
     stops at the first that verifies (mirrors `_claim_preserved`'s own
     "first match wins" convention) -- this function only discovers
-    ELIGIBLE candidates, it never certifies one itself."""
+    ELIGIBLE candidates, it never certifies one itself.
+
+    D-097.1: strong relations first, then `_pre_group_retry_relation`
+    candidates (deterministic restart adjacency) that no strong relation
+    already covers."""
     qualifying = []
+    retry = []
     for rid, candidate in sorted(ledger.realizations().items(), key=lambda pair: pair[0]):
         if candidate.state != "selected":
             continue
         relation = _pre_group_relationship_evidence(record, candidate)
         if relation:
             qualifying.append((rid, relation))
-    return tuple(qualifying)
+            continue
+        retry_relation = _pre_group_retry_relation(record, candidate)
+        if retry_relation:
+            retry.append((rid, retry_relation))
+    return tuple(qualifying) + tuple(retry)
 
 
 def _classify_pre_group_number_omissions(
@@ -1957,6 +2049,9 @@ def _attempt_pre_group_semantic_preservation(
             record, candidate_record, candidate_realization_id, ledger,
             claim_equivalence_arbiter=claim_equivalence_arbiter, evidence=candidate_evidence,
             nonrequired_digit_omissions=safe_to_omit, allow_cross_type_ambiguous_bridge=True,
+            cross_type_ambiguous_floor=(
+                _PRE_GROUP_RETRY_AMBIGUOUS_FLOOR if relation == "retry_relation" else _DEDUP_AMBIGUOUS_FLOOR
+            ),
         )
         last_reason = reason
         last_candidate_evidence = candidate_evidence

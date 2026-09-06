@@ -11012,3 +11012,91 @@ the four-way ladder and the CLEAN RAW gate; then the per-fix MP4 report
 (defects fixed / regressions / capabilities not evaluated).
 **HUMAN ACTION REQUIRED:** NO for the RAW (a fresh RAW after proven fixes is
 inside the approval); YES (A) only to make the perceptual gate BLOCKING.
+
+## D-097.1 -- RAW 34028202024 (head 11ffa8c): Freeze blocked by a pre-group failed retry; retry-relation certification + pre-group restart credit; Modal ladder step fixed
+
+**RAW COMPLETE (Modal run 34028202024, head `11ffa8c`, default inputs, same
+ceiling/flags as 34008386434).** The engine ran the whole authority chain on
+the D-097 code (`stage_status.take_segmentation`, `audio_silence.interval_count
+= 70` vs 56 with the merged/relaxed measurement, Resolver AUTHORITATIVE
+SEMANTICALLY_RESOLVED, 18 ideas, 0 review_required, `story_completeness =
+complete`, `no_usable_realization_family_count = 0`), then **Selection Freeze
+was BLOCKED** by FinalEditReviewer FAIL on ONE blocking `UNIQUE_FACT_LOST`
+(repair loop: `no_repair_strategy_exists_for_this_finding_kind` ->
+NEEDS_HUMAN_REVIEW). No render, no MP4, `delivery_status =
+NOT_DELIVERABLE_not_attempted (freeze_blocked_no_render)`. The active-path
+identity step passed on the runner (step 16 success); the identity block
+itself fell outside the retrievable log tail, so the package fingerprint is
+not quoted here.
+
+**What the final KEEP already showed (selection level, unproven on video):**
+one delivery per stomach idea (the gastritis take alone; both failed stomach
+starts discarded), the conclusion kept as ONE realization (no restored
+"first in my family" restatement beside it -- the D-097 Resolver usability
+fix at work; run 34008386434 had both), the biopsy idea kept once, the
+negated conspiracy clause intact as one take (ASR joined the sentence this
+time: `polarity_rejoin_count = 0`, nothing to rejoin, nothing orphaned).
+The Modal in-workflow ladder step died with `ModuleNotFoundError:
+cutsell_worker` (the step never put the checkout on `PYTHONPATH`, unlike the
+CPU ladder workflow) -> fixed here.
+
+**Root cause of the block (from the run's own diagnostics):** the abandoned
+restart "Tuve problemas de estómago en una temporada, en 2023, hay que
+voltar." was deleted by the pre-grouping semantic pass this time (in
+34008386434 the same take survived to grouping and the arbiter merged it:
+"Both describe a 2023 stomach issue and gastritis diagnosis"). A pre-group
+discard has no `take_group_id` -> no `semantic_idea_id` -> (1) the D-061
+GROUPED_SAME_IDEA credit had no family to consult, (2) the D-093 omission
+permit was denied `missing_identity`, (3) the D-076 pre-group proof could
+not even DISCOVER the delivery (a retry is a different attempt with no
+shared span -- `no_strong_relation_candidate`), and (4) its one atom
+("2023") was already CONTEXTUAL (D-031) but the coarse vocabulary signal
+(7 content tokens, 4 missing, coverage 0.43) blocked. Net: a failed retry
+that Cut.ai and Human Gold both delete blocked the entire video with no
+repair strategy -- human review as a convenience valve (D-062.2), and a
+Level-1 false block that D-097.A (family completeness) did not reach
+because the take never entered the family.
+
+**Fixes (owning authorities; discovery/evidence only, no hard gate
+weakened, no deterministic merge added):**
+1. `realization_resolver._find_pre_group_candidates`: second DISCOVERY tier
+   `retry_relation` (`_pre_group_retry_relation`: same source, <= 8 s,
+   >= 3 identical opening natural tokens, discard shorter -- the D-097.A
+   restart-evidence class). D-076's "temporal proximity / two-word
+   discourse opening never qualifies" control stays green. Certification
+   is the SAME unmodified chain.
+2. `_sanitize_claim_for_nonrequired_omissions`: a claim promoted to
+   MEASUREMENT_QUANTITY solely by the digit the caller has just ruled
+   non-required is re-classified by the same deterministic classifier on
+   the sanitized text (a retry's "stomach problems for a season" was stuck
+   as a quantity claim). Genuine measurements keep their type.
+3. `_cross_type_ambiguous_bridge_eligible(..., ambiguous_floor)`: for a
+   `retry_relation` candidate the arbiter CONSULTATION floor is 0.20
+   instead of 0.40 (same precedent as D-094.3 F4b's same-number floor);
+   the verdict stays the arbiter's; every other gate unchanged.
+4. `final_story_coherence_validation._pre_group_restart_credit`: for a
+   discard with NO family, the validator asks the SAME bounded
+   SemanticEquivalenceArbiter the SAME question IdeaClusterer would have
+   asked had the take survived to grouping (pair chosen by
+   `_pre_group_retry_relation`, one request per such discard); a
+   same-idea verdict >= 0.85 suppresses ONLY the coarse vocabulary signal
+   (`content_loss_suppressed_by = pre_group_restart_semantic_equivalence`;
+   consultations recorded on the row). Number/negation atoms untouched;
+   no arbiter / no adjacency / low confidence -> blocked as before. The
+   arbiter is now threaded into the post-authority validation pass for
+   this credit only (residual family resolution stays disabled -- D-090).
+5. Modal RAW workflow ladder step: `PYTHONPATH: ${{ github.workspace }}`.
+
+Tests: `tests/test_cutsell_d097_1_pre_group_retry_relation.py` (18: discovery
+tiers + controls, reclassification, floor band, certification with/without
+arbiter, number-mismatch never certified, validator credit / fail-closed /
+no-adjacency / critical-atom controls, post-authority threading). Existing
+D-076/D-077/D-079/D-090/D-093/D-061 suites unchanged and green.
+
+**LAST VERIFIED RESULT:** RAW 34028202024 = FREEZE BLOCKED (no MP4); root cause
+fixed offline (CODE FIXED, targeted suites 282/282 green); full qualification
+recorded in the commit message of this checkpoint.
+**NEXT AUTOMATIC ACTION:** commit + push; ONE authorised Modal RAW on the new
+head (the first RAW produced no video, so the per-fix MP4 report is still
+owed); ladder + CLEAN RAW gate; per-fix report.
+**HUMAN ACTION REQUIRED:** NO.
