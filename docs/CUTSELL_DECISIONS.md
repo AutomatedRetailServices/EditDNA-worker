@@ -10804,3 +10804,59 @@ incl. an ffmpeg tone-silence-tone measurement and the Video00-constant guard).
 **Qualification:** compileall clean; trimmer/boundary/context/D-046/identity/
 ladder suites 87/87; CleanCutBench 54/54 LEGACY and 54/54 AUTHORITATIVE;
 full `tests/test_cutsell_*.py` glob 2100/2100 (2073 D-095 baseline + 14 ladder/identity + 13 new).
+
+## D-096 -- CANONICAL SYSTEM MAP + AS-IS / SHOULD-BE / GAP / DUPLICATION AUDIT (audit only, no engine change)
+
+**Product Owner directive (2026-09-06):** before modifying the engine further,
+produce a complete canonical system map and an architecture + authority +
+execution audit of the active Clean Cut path, preserving every previously
+accepted component, the D-095 ladder and its clarification/addendum, the
+Human Gold / Cut.ai oracle hierarchy (QA-only), PR #25 OPEN/DRAFT/UNMERGED and
+`main` untouched. No refactor, no new guard/rescue layer, no paid RAW.
+
+**Canonical document:** `docs/CUTSELL_SYSTEM_AUDIT_D096.md` (12 parts + Appendix).
+It is the single source of truth for what is built, what is active, what is
+duplicated/contradictory, and what is missing. It distinguishes HISTORICAL
+DECISIONS (this log) from the CURRENT ACTIVE ARCHITECTURE (audited on RAW run
+34008386434, engine byte-identical to head `fdce3f7`) from the PROPOSED TARGET
+ARCHITECTURE (Part 11, proposal only).
+
+**Headline findings (evidence in the document):**
+1. The engine that produced the last analysed video IS the current head
+   (in-worker identity: build sha 8d2bdb9, package sha256 fe54d094…, 18/20
+   markers; the two absent markers are probe defects, not inactivity).
+2. Ranked root causes of "still worse than Cut.ai / far from Gold":
+   (1) the authoritative Resolver's objective is CRITICAL-claim coverage
+   maximisation -- it restored a failed-labelled conclusion restatement into a
+   composite after Best Take had chosen one winner, and decides compete-vs-
+   composite by claim arithmetic (wrong in both directions: conclusion vs
+   pimples); (2) Best Take elects a survivor among only-failed members;
+   (3) a missed retry-family member turns into "ungrouped = keep" (retry and
+   failed sibling both play); (4) physical ownership is split across five
+   pre-Freeze editors, one post-Freeze polish and two renderer trimmers,
+   entries have no owner, the D-095.2 trimmer runs before the authority and
+   its source measurement disagrees with the render QC measurement (the 2.32 s
+   pause that blocks delivery); (5) the perceptual System Watch+Listen gate
+   does not exist (Protocol + constants only).
+3. 13 distinct membership editors run before the declared single semantic
+   authority; 8 modules can restore discarded content; 10 modules change
+   source ranges; 4 installers are dead code; the accepted "minimum sufficient
+   editorial set" doctrine exists only as prompt text (D-042), not as an
+   engine objective.
+4. Four-way ladder on run 34008386434: LEVEL-1 25.0 s (17 regions) + 3.4 s
+   boundary in the final MP4 (down from 54.8 s on run 33995806350), LEVEL-2
+   17.3 s, F1 vs Cut.ai 0.879 / vs Gold 0.845; candidate NOT deliverable
+   (LINGERING_ACCIDENTAL_SILENCE 2.32 s). Cut.ai parity: NOT reached.
+
+**Actions taken:** document written; the uncommitted D-095.3 negation-rejoin
+patch was REVERTED from the tree and parked verbatim in the audit's Appendix A
+as a proposal. No code, tests, CI or RAW.
+
+**LAST VERIFIED RESULT:** AUDIT COMPLETE; engine unchanged at `fdce3f7`;
+RAW 34008386434 = NOT DELIVERABLE; CUT.AI PARITY NOT REACHED.
+**NEXT AUTOMATIC ACTION:** none -- STOP per the directive (Part 12). Awaiting
+Product Owner review of the ranked root causes and approval of the plan
+(Step 0 observability and Step 2 investigation are technical and can start on
+request; Steps 1/3/4 change editorial policy or structure -> escalation A/D).
+**HUMAN ACTION REQUIRED:** YES (A: editorial policy for the Resolver objective
+and the all-failed family rule; D: any structural change).

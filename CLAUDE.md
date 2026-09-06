@@ -30,7 +30,8 @@ If HEAD is newer, inspect intervening commits and reconcile state. Never reset b
 6. existing `docs/CUTSELL_MOBILE_V1_ASAP_SCOPE.md`
 7. existing `docs/CUTSELL_COMMERCIAL_ENGINEERING_OPERATING_MODEL.md` (D-062) -- canonical roles/gates/QA modes; an engine change is never self-certified release-ready by the role that implemented it.
 8. existing `docs/CUTSELL_EDITORIAL_RESOLUTION_AND_HUMAN_ESCALATION_CONTRACT.md` (D-062.2) -- Automatic Editor Doctrine, CRITICAL_COVERAGE_DOMINANCE, the 16-layer Automatic Resolution Hierarchy, and the HUMAN_CHOICE_ELIGIBLE escalation contract; human choice is a last resort, never a convenience valve for resolver uncertainty.
-9. `docs/CUTSELL_COMMERCIAL_ENGINEERING_OPERATING_MODEL.md` Section 12 (D-091) -- the Continuous Autonomous Engineering & Escalation Contract: within an authorized technical scope Claude continues through diagnose -> fix -> tests -> QA -> retest without waiting for a relayed "continue"; it stops only on a listed Product Owner escalation condition.
+9. `docs/CUTSELL_SYSTEM_AUDIT_D096.md` (D-096) -- the canonical AS-IS system map, authority tables, collision map, gap table, duplication report and PROPOSED target architecture; read it before touching any authority. It is an audit: Part 11 is a proposal, not an implementation, and Part 12 requires Product Owner approval before structural changes.
+10. `docs/CUTSELL_COMMERCIAL_ENGINEERING_OPERATING_MODEL.md` Section 12 (D-091) -- the Continuous Autonomous Engineering & Escalation Contract: within an authorized technical scope Claude continues through diagnose -> fix -> tests -> QA -> retest without waiting for a relayed "continue"; it stops only on a listed Product Owner escalation condition.
 
 ## Source precedence
 When sources conflict:
@@ -147,6 +148,8 @@ Without explicit user approval:
 
 ## Current state pointer
 The live current state is the newest `D-xxx` entry in `docs/CUTSELL_DECISIONS.md`
+(D-096 at the time of writing: audit complete, engine unchanged, STOP pending
+Product Owner review of `docs/CUTSELL_SYSTEM_AUDIT_D096.md` Part 12)
 (read its LAST VERIFIED RESULT / NEXT AUTOMATIC ACTION lines). The handoff
 document's `CURRENT LIVE BLOCKER` / `EXACT NEXT ACTION` sections are historical
 context from the Unified Selection era, superseded by the decision log; do not

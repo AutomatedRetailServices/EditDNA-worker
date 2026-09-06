@@ -401,6 +401,16 @@ Binding validation order (Product Owner, 2026-09-06):
   package fingerprint, component activity markers). CODE EXISTS != VIDEO USED
   IT. One coherent canonical pipeline, no parallel QA pipeline.
 - Both the D-095 directive and its addendum are binding for any continuation.
+- D-096 (2026-09-06): the complete canonical system map and AS-IS / SHOULD-BE /
+  GAP / duplication audit lives in `docs/CUTSELL_SYSTEM_AUDIT_D096.md`. It is
+  the one reliable source of truth for everything built so far: Part 1 real
+  state (engine of RAW 34008386434 == head fdce3f7), Parts 2-3 pipeline map +
+  authority tables, Part 4 collision map, Part 5 traces, Part 6 ladder gap map,
+  Part 7 doctrine verification, Part 8 Watch+Listen audit, Part 9 gap table,
+  Part 10 duplication report, Part 11 PROPOSED target architecture (not
+  implemented), Part 12 ranked root causes + plan -- STOP, awaiting Product
+  Owner approval before any structural change. The D-095.3 negation patch is
+  parked in its Appendix A (reverted from the tree).
 
 - Human Gold stays the ultimate editorial authority.
 - Cut.ai is the intermediate COMMERCIAL BASELINE oracle: recording-process
