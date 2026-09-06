@@ -268,6 +268,11 @@ jobs:
           echo "--- human_boundary_polish / final_boundary_authority (edge decisions) ---"
           jq -c '{human_boundary_polish: (.diagnostics.human_boundary_polish // "absent"), final_boundary_authority: (.diagnostics.final_boundary_authority // "absent"), final_boundary_authority_rule: (.diagnostics.final_boundary_authority_rule // "absent"), temporal_performance_trims: ((.diagnostics.temporal_performance_trims // []) | length)}' ladder/cutsell-result.json | head -c 20000
           echo
+          echo "--- active_path_identity (D-095 addendum: which code produced this result) ---"
+          jq '.active_path_identity // "absent" | if type=="object" then {build_git_sha, package, python_version, resolver_mode_env, hybrid_max_edit_usd_env, components_present, components_absent, error} else . end' ladder/cutsell-result.json
+          echo "--- D-095.2 audio dead-air stage + interior-gap trim splits/rejections ---"
+          jq '{audio_silence: (.stage_status.audio_silence // "absent"), splits: (.diagnostics.post_selection_interior_gap_trim // []), audio_rejections: [(.diagnostics.post_selection_interior_gap_trace // [])[] | select(.evidence_mode == "long_audio_silence")]}' ladder/cutsell-result.json | head -c 20000
+          echo
           echo "--- result top-level keys ---"
           jq -c 'keys' ladder/cutsell-result.json
           jq -c '.diagnostics | keys' ladder/cutsell-result.json
