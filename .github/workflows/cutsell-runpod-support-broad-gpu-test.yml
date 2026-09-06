@@ -1,0 +1,164 @@
+name: CutSell RunPod Support Broad GPU Test
+
+on:
+  push:
+    branches:
+      - cutsell/mobile-v1-clean
+    paths:
+      - .github/cutsell-runpod-support-broad-gpu-trigger.txt
+
+permissions:
+  contents: read
+
+jobs:
+  broad-gpu-placement-test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      RUNPOD_API_KEY: ${{ secrets.RUNPOD_API_KEY }}
+      EXISTING_SERVERLESS_TEMPLATE_ID: j3bz8ctsna
+    steps:
+      - name: Validate RunPod credential
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "${RUNPOD_API_KEY:-}" || { echo 'RUNPOD_API_KEY missing'; exit 3; }
+
+      - name: Confirm referenced Serverless template still exists
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail --silent --show-error \
+            --url 'https://rest.runpod.io/v1/templates' \
+            --header "Authorization: Bearer $RUNPOD_API_KEY" \
+            --output /tmp/templates.json
+          jq -e --arg id "$EXISTING_SERVERLESS_TEMPLATE_ID" '.[] | select(.id == $id and .isServerless == true)' /tmp/templates.json >/tmp/template.json
+          jq '{id,name,imageName,isServerless}' /tmp/template.json
+
+      - name: Create temporary warm Serverless endpoint with broadened compatible GPU allowlist
+        shell: bash
+        run: |
+          set -euo pipefail
+          jq -n \
+            --arg template "$EXISTING_SERVERLESS_TEMPLATE_ID" \
+            --arg name "cutsell-support-broad-${GITHUB_RUN_ID}" \
+            '{
+              templateId:$template,
+              computeType:"GPU",
+              gpuCount:1,
+              gpuTypeIds:[
+                "NVIDIA GeForce RTX 4090",
+                "NVIDIA L4",
+                "NVIDIA A40",
+                "NVIDIA RTX A6000",
+                "NVIDIA L40S",
+                "NVIDIA RTX 6000 Ada Generation",
+                "NVIDIA RTX 5000 Ada Generation",
+                "NVIDIA RTX A5000",
+                "NVIDIA GeForce RTX 3090",
+                "NVIDIA GeForce RTX 4080 SUPER",
+                "NVIDIA A30",
+                "NVIDIA RTX A4000",
+                "NVIDIA RTX A4500"
+              ],
+              workersMin:1,
+              workersMax:1,
+              scalerType:"QUEUE_DELAY",
+              scalerValue:2,
+              idleTimeout:5,
+              executionTimeoutMs:600000,
+              flashboot:true,
+              name:$name
+            }' > /tmp/endpoint-create.json
+
+          code=$(curl --silent --show-error --write-out '%{http_code}' \
+            --request POST \
+            --url 'https://rest.runpod.io/v1/endpoints' \
+            --header "Authorization: Bearer $RUNPOD_API_KEY" \
+            --header 'Content-Type: application/json' \
+            --data @/tmp/endpoint-create.json \
+            --output /tmp/endpoint.json)
+          echo "endpoint_create_http=$code"
+          cat /tmp/endpoint.json | jq '{id,name,templateId,workersMin,workersMax,gpuTypeIds}' || true
+          test "$code" = "200" || test "$code" = "201"
+          ENDPOINT_ID=$(jq -r '.id // empty' /tmp/endpoint.json)
+          test -n "$ENDPOINT_ID"
+          echo "ENDPOINT_ID=$ENDPOINT_ID" >> "$GITHUB_ENV"
+
+          curl --fail --silent --show-error \
+            --url "https://rest.runpod.io/v1/endpoints/$ENDPOINT_ID" \
+            --header "Authorization: Bearer $RUNPOD_API_KEY" \
+            --output /tmp/endpoint-readback.json
+          jq '{id,workersMin,workersMax,gpuTypeIds}' /tmp/endpoint-readback.json
+          jq -e '.workersMin == 1 and .workersMax == 1' /tmp/endpoint-readback.json >/dev/null
+
+      - name: Submit exactly one health job and observe placement
+        shell: bash
+        run: |
+          set -euo pipefail
+          code=$(curl --silent --show-error --write-out '%{http_code}' \
+            --request POST \
+            --url "https://api.runpod.ai/v2/$ENDPOINT_ID/run" \
+            --header "Authorization: Bearer $RUNPOD_API_KEY" \
+            --header 'Content-Type: application/json' \
+            --data '{"input":{"op":"health"}}' \
+            --output /tmp/submit.json)
+          echo "submit_http=$code"
+          cat /tmp/submit.json | jq .
+          test "$code" = "200"
+          JOB_ID=$(jq -r '.id // empty' /tmp/submit.json)
+          test -n "$JOB_ID"
+          echo "JOB_ID=$JOB_ID" >> "$GITHUB_ENV"
+
+          deadline=$((SECONDS+360))
+          last=''
+          while [ "$SECONDS" -lt "$deadline" ]; do
+            curl --fail --silent --show-error \
+              --url "https://api.runpod.ai/v2/$ENDPOINT_ID/status/$JOB_ID" \
+              --header "Authorization: Bearer $RUNPOD_API_KEY" \
+              --output /tmp/status.json
+            status=$(jq -r '.status // empty' /tmp/status.json)
+            worker=$(jq -r '.workerId // .worker_id // empty' /tmp/status.json)
+            snapshot="$status|$worker"
+            if [ "$snapshot" != "$last" ]; then
+              echo "status=$status worker_id=${worker:-null}"
+              last="$snapshot"
+            fi
+            case "$status" in
+              COMPLETED)
+                cat /tmp/status.json | jq .
+                jq -e '.output.ok == true and .output.cuda_available == true and (.output.cuda_device_count|tonumber) >= 1' /tmp/status.json >/dev/null
+                echo 'BROAD_GPU_SUPPORT_TEST=PASS'
+                exit 0
+                ;;
+              FAILED|TIMED_OUT|CANCELLED)
+                cat /tmp/status.json | jq .
+                echo 'BROAD_GPU_SUPPORT_TEST=TERMINAL_FAILURE'
+                exit 1
+                ;;
+            esac
+            sleep 5
+          done
+
+          echo 'BROAD_GPU_SUPPORT_TEST=NO_PLACEMENT_WITHIN_360S'
+          cat /tmp/status.json | jq . || true
+          exit 1
+
+      - name: Cleanup temporary job and endpoint
+        if: always()
+        shell: bash
+        run: |
+          set +e
+          if [ -n "${JOB_ID:-}" ] && [ -n "${ENDPOINT_ID:-}" ]; then
+            curl --silent --show-error --request POST \
+              --url "https://api.runpod.ai/v2/$ENDPOINT_ID/cancel/$JOB_ID" \
+              --header "Authorization: Bearer $RUNPOD_API_KEY" >/dev/null 2>&1 || true
+          fi
+          if [ -n "${ENDPOINT_ID:-}" ]; then
+            code=$(curl --silent --show-error --write-out '%{http_code}' \
+              --request DELETE \
+              --url "https://rest.runpod.io/v1/endpoints/$ENDPOINT_ID" \
+              --header "Authorization: Bearer $RUNPOD_API_KEY" \
+              --output /tmp/delete.txt)
+            echo "endpoint_delete_http=$code"
+          fi
