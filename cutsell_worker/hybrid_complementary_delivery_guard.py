@@ -100,6 +100,23 @@ def _cross_group_deleted_ids(diagnostics: Iterable[dict]) -> set[str]:
     return ids
 
 
+def _semantically_unusable(label: str, confidence: float) -> bool:
+    """D-097 §3 / D-097.6: a hybrid `failed` label at or above the Resolver's
+    own unusable floor (`realization_resolver._SEMANTIC_FAILED_THRESHOLD`,
+    0.85) marks a realization NOT USABLE for restoration or as a composite
+    member. RAW 34042123557: this guard restored an abandoned start labelled
+    `failed` 0.95 because its inflected forms ("pedía" vs "pedí") counted as
+    a unique tail, and `hybrid_composite_best_take` then composed it with the
+    other abandoned attempt to REPLACE the `winner` 0.95 clean retry -- the
+    clean delivery left the edit and both abandoned attempts played. The
+    rule the Resolver already applies (D-097 Priority B / §3) now holds at
+    this earlier, lexical authority too; an `alternate` or a low-confidence
+    `failed` label is unchanged."""
+    from .realization_resolver import _SEMANTIC_FAILED_THRESHOLD  # deferred: import cycle
+
+    return str(label) == "failed" and float(confidence) >= _SEMANTIC_FAILED_THRESHOLD
+
+
 def _restore_complementary_cross_group_deletions(
     kept: tuple[CandidateTake, ...],
     deleted: tuple[CandidateTake, ...],
@@ -119,6 +136,8 @@ def _restore_complementary_cross_group_deletions(
         label, confidence = semantic.get(candidate.clip_id, ("", 0.0))
         if label not in {"alternate", "failed"} or confidence < 0.65:
             continue
+        if _semantically_unusable(label, confidence):
+            continue  # D-097.6: never restored on lexical evidence alone
         own = _content(candidate.text)
         if len(own) < 4:
             continue

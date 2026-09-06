@@ -32,7 +32,10 @@ def test_complete_performance_failed_delivery_with_unique_tail_is_restored():
         43.0,
         "Another symptom was bumps behind my ear and on my neck like an allergy. They came in seasons.",
     )
-    semantic = {"winner": ("winner", 0.93), "candidate": ("failed", 0.90)}
+    # D-097.6: a `failed` label at/above the Resolver's 0.85 unusable floor
+    # is never restored on lexical evidence; the performance-only rescue
+    # still applies below it.
+    semantic = {"winner": ("winner", 0.93), "candidate": ("failed", 0.80)}
     decisions = {
         "candidate": {
             "clip_id": "candidate",
@@ -145,10 +148,13 @@ def test_two_complementary_restores_can_replace_one_monolithic_winner():
         51.0,
         "Another symptom was bumps like an allergy behind my ear and on my neck. It happened in seasons.",
     )
+    # D-097.6: composite members must be usable -- `detail` is an alternate
+    # here; a `failed` >= 0.85 member is refused (see
+    # test_cutsell_d097_6_failed_label_never_restored_or_composited.py).
     semantic = {
         "setup": ("alternate", 0.82),
         "winner": ("winner", 0.93),
-        "detail": ("failed", 0.90),
+        "detail": ("alternate", 0.80),
     }
     restored_rows = [
         {"clip_id": "setup", "peer_clip_id": "winner"},

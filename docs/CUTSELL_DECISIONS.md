@@ -11726,3 +11726,97 @@ BoundaryEngine; the acne "rash" take needs the perceptual layer).
 - B/A (non-blocking): approve or reject the waiver narrowing above.
 - A (non-blocking, standing): F3b evidence (this entry), the later-attempt
   tie preference and the complementary same-idea question (D-097.4).
+
+## D-097.6 -- RAW 34042123557 (head 18a2707): R6 PROVEN on video (the diagnosis sentence is back as its own kept clip; QC PASS on attempt 1; deliverable), but the finer attempt segmentation exposed the legacy pre-resolver guard chain composing two abandoned attempts to replace the `winner` clean retry; D-097 §3 usability now holds at those guards too
+
+**RAW COMPLETE (Modal run 34042123557, head `18a2707`, 2026-09-06).**
+Worker ok, `hybrid_editorial = provider_complete`, Freeze PASSED, 25 kept,
+technical QC PASS on attempt 1, `deliverable = true`, `DELIVERABLE_PENDING_
+HUMAN_WATCH_LISTEN:perceptual=FAIL` (advisory: 21 BoundaryEngine routings,
+edge reset debris), output 155.5 s for a 167.3 s frozen plan. Attempt
+reconstruction: 36 attempts / 11 merged (32 / 15 on 34040848026);
+`measured_dead_air_pause` fired 4 times (141.18 s = the diagnosis
+boundary; 104.32 s; 327.61 s; 342.74 s).
+
+### Per-fix MP4 report
+
+**Fix R6 (D-097.5, measured dead-air pause) -- PROVEN ON VIDEO.** "La
+biopsia confirmó que era un cáncer papilar de tiroides." is its own
+attempt (boundary `measured_dead_air_pause` at 141.18 s, ASR gap 0.44 s)
+and its own kept clip in the final KEEP sequence, between the nodule/biopsy
+sentence and "Síntomas que no me parecían sospechosos...". The Human Gold
+regression check `papillary_cancer_preserved` still reports missing because
+its fixture text is the Gold two-sentence segment (diagnosis + "Síntomas que
+tuve ...") and the second sentence lost its family to the clean retry -- the
+standing complementary-same-idea question (escalation A), not R6.
+Authority: AttemptReconstructor. Regressions: see R7 below (a consequence
+of finer segmentation, not of the rule itself).
+
+**Fix R4 (D-097.4) -- PROVEN AGAIN**: 0 QC findings on attempt 1, 25 joins.
+
+### Ladder 34042123557 (selection scope)
+
+LEVEL_1 28 regions / 70.35 s (0.42 of Cut.ai keep) -- WORSE than 25 /
+40.17 s on 34040848026; F1 vs Cut.ai 0.746 (0.777), vs Gold 0.697 (0.830);
+keep 167.3 s (143.6 s); LEVEL_2 17.3 s (the hereditary restatement Cut.ai
+keeps and Gold does not). By authority: BestTakeResolver 8 / 40.8 s,
+IdeaClusterer 4 / 12.8 s, BoundaryEngine 22 / 8.2 s, CompositeResolver/
+PreResolverCleanup 1 / 6.0 s. Two families explain the delta:
+
+- **Gynaecologist family (16.5 s: regions 33 + 35 false keep, 38 missing)
+  -- NEW ROOT CAUSE R7.** Forensic (extract runs 34042787896 /
+  34042895585): R6 split the clean retry "al terminar mi contrato cambié de
+  ginecóloga ... me pudiese indicar." (95.52-104.32) from "Ahí me mandó a
+  hacer sonografías" (measured pause at 104.32 s; the two were one fused
+  attempt on 34040848026). Labels: clean retry `winner` 0.95 (local
+  `multimodal_reset_cluster:6:1`), abandoned full attempt "hablé con mi
+  ginecóloga y le pedí todos los test..." `alternate` 0.85, abandoned start
+  "le pedía a mi ginecóloga" `failed` 0.95. `hybrid_cross_group_retry_
+  integrity` correctly deleted both abandoned attempts as covered by the
+  winner (coverage 0.70 / 0.75). Then `hybrid_complementary_delivery_guard`
+  RESTORED both -- unique "tail" tokens `hablé`, `imaginarse` (0.18) and
+  `pedía` (0.25): inflected forms of the winner's own `cambié`/`imaginar`/
+  `pedí` -- and `hybrid_composite_best_take` composed the two abandoned
+  attempts (10.92 s, "unique" tokens `hable`, `imaginarse`, `pedia`) to
+  REPLACE the `winner` 0.95 clean retry (`suppressed_peer_clip_id`), with
+  its members split into singleton groups. The clean delivery was deleted
+  before IdeaClusterer ran; both abandoned attempts played as singletons
+  (never contested), the D-097.2 R1 restart merge had no clean retry left
+  to merge with. Root cause: a lexical, pre-resolver guard chain that
+  predates D-097 §3 treated a `failed` 0.95 realization as restorable and
+  as a composite member, and its composite outranked a semantic `winner`.
+  Fix: `hybrid_complementary_delivery_guard._semantically_unusable`
+  (label `failed` at or above `realization_resolver._SEMANTIC_FAILED_
+  THRESHOLD` = 0.85, the SAME floor the Resolver applies) -- such a take is
+  never restored on unique-tail evidence, never restored by the
+  performance-only rescue, and never a composite member. With the abandoned
+  start excluded, no pair exists and the winner stands; the `alternate`
+  abandoned attempt is still restored and then contested (and loses) in
+  its retry family. Two pre-D-097 fixtures updated (`failed` 0.90 members ->
+  0.80 / `alternate`), four new tests in `tests/test_cutsell_d097_6_failed_
+  label_never_restored_or_composited.py`. Authority: CompositeResolver's
+  legacy installers (D-096 duplication report entries 16 and 19). Not a new
+  guard: the existing usability contract applied where it was missing.
+- **Pimples family (25.9 s: regions 84, 87, 90)** -- the delivery tie-break
+  variance of D-097.4 flipped back (both takes `winner`; earlier, longer
+  take won by ~0.01). Escalation A (later-attempt preference) now has
+  evidence from 3 of 4 runs; no code.
+- Stomach abandoned take (5.94 s, F3b OFF) and the "Síntomas que tuve"
+  half (7.08 s, complementary same-idea question) unchanged.
+
+**Offline qualification:** compileall clean; guard suites + D-081 + new
+27/27; CleanCutBench 54/54 x2; full `tests/test_cutsell_*.py` glob (see
+commit).
+
+**LAST VERIFIED RESULT:** RAW 34042123557 = FREEZE PASS, QC PASS, DELIVERABLE
+(pending HUMAN WATCH+LISTEN); R6 PROVEN on video; ladder regressed through
+R7 (legacy guard chain overriding a semantic winner with a composite of
+abandoned attempts) -- CODE FIXED / TESTS PASS at the owning installers.
+**NEXT AUTOMATIC ACTION:** commit + push; ONE authorised Modal RAW on the
+new head -- expected: the clean gynaecologist retry kept, both abandoned
+attempts discarded, the diagnosis sentence still kept, QC PASS, deliverable;
+ladder L1 expected back near or below 40 s; per-fix report as D-097.7.
+**HUMAN ACTION REQUIRED:** YES, non-blocking -- F (watch + listen the
+deliverable MP4s of runs 34040848026 / 34042123557), A (later-attempt tie
+preference, now 3 of 4 runs; complementary same-idea deliveries; F3b),
+B/A (waiver narrowing, D-097.5).

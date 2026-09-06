@@ -173,7 +173,10 @@ diagnosis sentence: the AttemptReconstructor fused it with the next sentence
 across 2.96 s of measured dead air the ASR padded over and the D-089 waiver
 dropped the claim -- fixed in D-097.5 at the owning authority (measured
 dead-air pause boundary); the waiver narrowing and F3b are Product Owner
-decisions; the next authorised RAW must prove the diagnosis returns; D-096 remains the source of
+decisions; RAW 34042123557 proved R6 (diagnosis kept, QC PASS, deliverable) but
+the finer segmentation let the legacy pre-resolver guard chain compose two
+abandoned attempts over the `winner` clean retry -- D-097.6 applies the §3
+usability floor at those guards; the next authorised RAW must prove it; D-096 remains the source of
 truth, its Appendix B records implementation status)
 (read its LAST VERIFIED RESULT / NEXT AUTOMATIC ACTION lines). The handoff
 document's `CURRENT LIVE BLOCKER` / `EXACT NEXT ACTION` sections are historical

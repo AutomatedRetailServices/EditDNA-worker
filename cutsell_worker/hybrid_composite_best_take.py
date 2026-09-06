@@ -159,6 +159,13 @@ def _performance_only_failure(decision: dict | None) -> bool:
     return all(reason.startswith(_PERFORMANCE_ONLY_PREFIXES) for reason in reasons)
 
 
+def _semantically_unusable(label: str, confidence: float) -> bool:
+    """D-097 §3 / D-097.6 -- see hybrid_complementary_delivery_guard."""
+    from .hybrid_complementary_delivery_guard import _semantically_unusable as _rule
+
+    return _rule(label, confidence)
+
+
 def _restore_performance_only_unique_deliveries(
     kept: tuple[CandidateTake, ...],
     deleted: tuple[CandidateTake, ...],
@@ -180,6 +187,8 @@ def _restore_performance_only_unique_deliveries(
         label, confidence = semantic.get(candidate.clip_id, ("", 0.0))
         if label != "failed" or confidence < 0.75:
             continue
+        if _semantically_unusable(label, confidence):
+            continue  # D-097.6: failed >= 0.85 is not restored on lexical evidence
         own = _content(candidate.text)
         if len(own) < 5:
             continue
@@ -338,7 +347,14 @@ def _choose_composite_replacements(
         best_pair = None
         best_score = None
         best_metrics = None
-        candidates = [by_id[clip_id] for clip_id in sorted(candidate_ids) if clip_id in by_id]
+        # D-097.6: a member labelled `failed` at or above the Resolver's
+        # unusable floor is never a composite member (D-097 Priority B /
+        # §3, now applied at this pre-resolver authority too -- see
+        # hybrid_complementary_delivery_guard._semantically_unusable).
+        candidates = [
+            by_id[clip_id] for clip_id in sorted(candidate_ids)
+            if clip_id in by_id and not _semantically_unusable(*semantic.get(clip_id, ("", 0.0)))
+        ]
         for left, right in combinations(candidates, 2):
             left, right = sorted((left, right), key=lambda t: (t.start, t.end, t.clip_id))
             if left.source_asset_id != right.source_asset_id or left.source_asset_id != peer.source_asset_id:

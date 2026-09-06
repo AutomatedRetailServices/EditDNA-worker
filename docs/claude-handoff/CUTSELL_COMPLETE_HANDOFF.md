@@ -527,6 +527,16 @@ Binding validation order (Product Owner, 2026-09-06):
   Product Owner. Ladder L1 25 / 40.17 s, F1 vs Cut.ai 0.777, vs Gold 0.830.
   Next: ONE RAW to prove the diagnosis returns. Full entry:
   `docs/CUTSELL_DECISIONS.md` D-097.5.
+- D-097.6 (2026-09-06): RAW 34042123557 = R6 PROVEN (the diagnosis sentence is
+  its own kept clip; QC PASS; deliverable) but ladder L1 70 s: the finer
+  segmentation exposed the legacy pre-resolver guard chain
+  (`hybrid_complementary_delivery_guard` + `hybrid_composite_best_take`)
+  restoring a `failed` 0.95 abandoned start on inflected "unique" tokens and
+  composing it with the other abandoned attempt to REPLACE the `winner` 0.95
+  clean gynaecologist retry. D-097 §3 usability (failed >= 0.85 = never
+  restored on lexical evidence, never a composite member) now holds at those
+  guards. Pimples tie-break variance recurred (escalation A). Next: ONE RAW.
+  Full entry: `docs/CUTSELL_DECISIONS.md` D-097.6.
 # HISTORICAL CUTSELL.AI 11 CONTINUITY
 
 A trusted CutSell.ai 11 recovery checkpoint is:
