@@ -204,6 +204,18 @@ class _RecordingArbiter:
 
 
 def test_a_two_pair_budget_is_spent_on_the_two_strongest_pairs_and_recorded():
+    # D-097.12 (approved behavior change, bounded stomach-family encargo):
+    # ABANDONED (incomplete) now resolves against BOTH ASIDE and CLEAN by
+    # deterministic evidence (`incomplete_attempt_completed_by_retry`) before
+    # the arbiter is ever asked -- ASIDE shares "stomach"/"problems" with
+    # ABANDONED beyond this fixture's two-word English opening ("I had"),
+    # unlike the Spanish original this rule targets, where the equivalent
+    # words sit INSIDE the two-word opening itself. Both pairs are now
+    # spent on deterministic evidence, not the arbiter's bounded budget, so
+    # this test asserts that supersession and re-anchors its original R9
+    # claim (budget spent on the two strongest REMAINING pairs, in
+    # descending score, no zero-evidence neighbour) on the two pairs that
+    # still reach the arbiter.
     install_editorial_slot_resolution()
     takes = (HAIR, ABANDONED, ASIDE, CLEAN, VACCINE)
     groups = tuple((t.clip_id,) for t in takes)
@@ -211,11 +223,15 @@ def test_a_two_pair_budget_is_spent_on_the_two_strongest_pairs_and_recorded():
     _groups, diag = tgp.reconcile_semantic_idea_equivalence(
         groups, takes, arbiter, policy=SemanticEquivalenceGatePolicy(max_pairs_per_request=2),
     )
+    restart_merged = {frozenset((m["left_clip_id"], m["right_clip_id"])) for m in diag.get("restart_evidence_merges") or ()}
+    assert frozenset(("aband", "clean")) in restart_merged
+    assert frozenset(("aband", "aside")) in restart_merged
     assert diag["checked_pair_count"] == 2
     assert diag["pair_order_authority"] == tgp._PAIR_ORDER_AUTHORITY
     budget = diag["ranked_pair_budget"]
     assert [row["priority_score"] for row in budget] == sorted(row["priority_score"] for row in budget)[::-1]
     assert all(row["group_cap_deferred"] is False for row in budget)
     asked = {frozenset(pair) for pair in arbiter.pairs_asked}
-    assert frozenset((ABANDONED.text, CLEAN.text)) in asked  # the abandoned attempt vs its clean retry
+    assert frozenset((ASIDE.text, CLEAN.text)) in asked  # the two strongest pairs left after determinism
+    assert frozenset((HAIR.text, ABANDONED.text)) in asked
     assert frozenset((HAIR.text, ASIDE.text)) not in asked  # a zero-evidence neighbour never spends a slot

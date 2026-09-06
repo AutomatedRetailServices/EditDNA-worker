@@ -12401,3 +12401,78 @@ complementary "Síntomas" pair), F (watch + listen: deliverable MP4s of runs
 (D-097.D polarity micro-fragment "No"), B/A (waiver narrowing), and the
 perceptual gate's blocking status (advisory v1 stays FAIL on real entry/exit
 debris).
+
+## D-097.12 -- Bounded encargo (D-091 suspended for this task): stomach-family grouping closed at the owning authority (offline, no RAW)
+
+Scope: close R13 (D-097.11) -- an earlier, grammatically incomplete attempt
+and its later self-corrected clean retry, competing/not-competing purely on
+the semantic arbiter's run-to-run answer (SAME 0.95 / NOT-same 0.85 / NOT-same
+0.90 on the identical pair across three RAWs). Fix at the existing owner,
+`take_grouping.py`'s D-097.A deterministic restart-evidence family (no new
+final editor): `incomplete_attempt_completed_by_retry` unions an EARLIER
+`complete_idea=False` take with a LATER `complete_idea=True` take when they
+share a 2-token opening AND >= 2 real content tokens beyond that opening
+(D-048-stoplist content, via the same `_restart_content` helper
+`same_opening_restart` already uses) within 20 s, deterministic and arbiter-
+independent -- exactly the discriminator that separates the real abandoned
+attempt from its clean retry (share "donde"/"endoscopía") from an
+independent aside sentence sharing only the two-word opener and nothing else
+(D-020: topic alone never merges independent sentences). Wired into
+`take_grouping_provider.py`'s existing restart-evidence loop and
+`_RESTART_EVIDENCE_KINDS`.
+
+Integration test (CleanCutBench,
+`tests/test_cutsell_clean_cut_core_evaluation_suite.py::test_incomplete_
+stomach_attempt_survives_arbiter_rejection_through_the_full_chain`, fixture
+55): the real take-grouping -> idea-equivalence -> take-judge -> deterministic
+Best-Take -> claim-coverage -> final-story-coherence chain, arbiter oracle
+EMPTY (declines every pair -- the worst case observed in production).
+BEFORE: abandoned/clean/aside all survive as three separate kept realizations
+(no deterministic evidence existed to unify abandoned+clean; verified by
+reverting the fix and re-running -- test fails as `[]` merges). AFTER: the
+pair resolves via `restart_evidence_merges` (`accepted_by:
+incomplete_attempt_completed_by_retry`) before the arbiter is ever asked
+(absent from `arbiter_rejected_pairs`); `_kept(draft) == {"clean", "aside"}`,
+`_discarded(draft) == {"abandoned"}` (a fair contest loss, not a label/
+ellipsis/position force-delete); `final_story_coherence_validation.
+freeze_blocked` is not True. The independent aside stays its own kept
+realization, never absorbed.
+
+Regression: `test_cutsell_clean_cut_core_evaluation_suite.py` full 55/55;
+`test_cutsell_d097_a_retry_family_completeness.py`,
+`test_cutsell_d097_5_measured_pause_attempt_boundary.py`,
+`test_cutsell_d097_7_wrong_take_confirmation_credit.py`,
+`test_cutsell_d094_video00_integration_fixes.py`, the take-grouping/
+editorial-slot/D-083/D-058 grouping-safety suites, and D-097.9-11's own
+suites: green. One pre-existing D-097.9 fixture assertion updated (approved
+behavior change, not a green-washing edit): its English proxy for the
+abandoned/clean pair now ALSO matches abandoned/aside on this rule's
+2-content-token threshold, purely because in that fixture's English word
+order "stomach"/"problems" fall AFTER the two-word "I had" opener rather
+than inside it (the Spanish original's "problemas" IS inside the 2-word
+opener, so no such collision exists there); the assertion now checks the
+two pairs that still reach the arbiter's bounded budget, which is what R9
+was actually about. Two hardcoded CleanCutBench fixture-count tripwires
+bumped 54 -> 55 (`test_cutsell_d050c1_5_full_cleancutbench_parity.py`,
+`test_cutsell_d050c2_authority_cutover.py`); both report zero
+mutation/unsafe-finding regressions.
+
+Evidence file: forensic extracts and RAW logs at
+`scratchpad/d097_{9,10,11}_raw/` (not re-fetched for this task; reused as
+specified).
+
+Offline qualification: compileall clean; CleanCutBench both files 55/55;
+full `tests/test_cutsell_*.py` glob 2292/2292.
+
+Limits / not done here, per the bounded authorization: no RAW dispatched: R13
+is proven only at the offline/unit and CleanCutBench-integration level, not
+on the rendered MP4 -- Cut.ai parity and any MP4 effect remain unverified
+until the next authorised RAW. The pimples/"Síntomas" families (escalation A)
+and the perceptual gate's advisory status are untouched, as instructed.
+This entry itself is the only checkpoint updated; CLAUDE.md's pointer, the
+handoff doc and the D-096 audit's Appendix B are intentionally NOT updated
+this cycle (bounded-encargo instruction: no further audits/doc rewrites).
+
+**HUMAN ACTION REQUIRED:** NO further action needed to close this bounded
+task. Authorize a fresh RAW separately to confirm the MP4 effect before
+folding this into the standing D-097.x continuity thread.

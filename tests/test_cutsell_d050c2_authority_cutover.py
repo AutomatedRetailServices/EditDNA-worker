@@ -129,7 +129,9 @@ def test_full_offline_cutover_sweep_zero_unsafe_findings():
             print(f"  {finding}")
     print("=== END SWEEP ===\n")
     assert unsafe_findings == []
-    assert fixture_count == 54
+    # D-097.12: bumped 54 -> 55 for the new bounded-encargo stomach-family
+    # fixture in the evaluation suite (zero unsafe findings, unaffected).
+    assert fixture_count == 55
 
 
 # ---------------------------------------------------------------------------

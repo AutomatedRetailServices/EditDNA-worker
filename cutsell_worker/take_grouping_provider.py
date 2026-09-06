@@ -18,7 +18,14 @@ from .semantic_idea_equivalence import (
     safe_check_idea_equivalence,
     same_idea_by_pair_index,
 )
-from .take_grouping import _safe_short_prefix_retry, group_takes, retry_similarity, same_opening_restart, semantic_key
+from .take_grouping import (
+    _safe_short_prefix_retry,
+    group_takes,
+    incomplete_attempt_completed_by_retry,
+    retry_similarity,
+    same_opening_restart,
+    semantic_key,
+)
 
 # General (English + Spanish) "this is a new/additional item, not a restatement"
 # discourse markers -- a candidate pair where exactly ONE side carries one of
@@ -884,6 +891,8 @@ def reconcile_semantic_idea_equivalence(
         if restart_kind is None and _safe_short_prefix_retry(left_take, right_take):
             restart_kind = "safe_short_prefix_retry"
         if restart_kind is None:
+            restart_kind = incomplete_attempt_completed_by_retry(left_take, right_take)
+        if restart_kind is None:
             remaining_pairs.append(pair)
             continue
         left_marked = _has_distinct_addition_marker(left_take.text)
@@ -1430,7 +1439,9 @@ def _accept_complete_pairwise_bridge(
     return True, record
 
 
-_RESTART_EVIDENCE_KINDS = frozenset({"same_opening_restart", "same_opening_abandoned_start"})
+_RESTART_EVIDENCE_KINDS = frozenset({
+    "same_opening_restart", "same_opening_abandoned_start", "incomplete_attempt_completed_by_retry",
+})
 
 
 def _restart_cohesive(members: Tuple[str, ...], restart_pairs: set[frozenset]) -> bool:

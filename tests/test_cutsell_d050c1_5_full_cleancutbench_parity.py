@@ -196,4 +196,7 @@ def test_full_cleancutbench_shadow_parity():
     # which clip_ids the real chain selected/discarded, for ANY fixture.
     assert result["mutation_mismatches"] == []
     assert total_ideas > 0
-    assert result["fixture_count"] == 54
+    # D-097.12: bumped 54 -> 55 for the new bounded-encargo stomach-family
+    # fixture in the evaluation suite; both its semantic ideas parity SAME
+    # (engine and shadow resolver agree), not a behavior-change tripwire.
+    assert result["fixture_count"] == 55

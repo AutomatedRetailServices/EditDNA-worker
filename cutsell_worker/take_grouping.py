@@ -167,6 +167,70 @@ def same_opening_restart(
     return None
 
 
+# D-097.12 (stomach family, bounded encargo): an ABANDONED ATTEMPT completed
+# by a later retry the creator self-corrects with different wording all the
+# way through (not just the first four words `same_opening_restart` requires).
+#
+# RAW 34043967265/34045158712/34047064840/34048444463 (D-097.9-.11): "Tuve
+# problemas estomacales ... y me diagnosticaron con..." (grammatically open
+# tail, R15) and "Tuve problemas de digestión ... dijeron que tenía
+# gastritis." share only a 2-word opening -- the creator rewrote "estomacales"
+# to "de digestión" and "diagnosticaron con" to "dijeron que tenía gastritis"
+# -- so `same_opening_restart`'s 4-token exact-prefix requirement never
+# fires, and the semantic arbiter answered this exact pair SAME 0.95 once and
+# NOT-same 0.85/0.90 twice on "incomplete vs complete", the one reason the
+# module comment above already rules must never gate a retry family. An
+# EARLIER take that is provably incomplete (open tail / trailing off, not a
+# label or position alone) is recording-process evidence independent of the
+# arbiter's answer -- but a 2-word opening is common enough ("Tuve
+# problemas...") that it must never join on the opening alone: the SAME
+# gastritis pair vs an unrelated "Tuve problemas de estómago ... no hay que
+# preguntar." aside shares the identical 2-word opening and ZERO further
+# content, and must not merge (an independent sentence sharing only a topic
+# opener, D-020). The gate is therefore the SAME shared-content-beyond-the-
+# opening test `same_opening_restart` already uses, just at a shorter
+# opening and a wider gap (the creator's aside intervenes between the
+# abandoned attempt and its completion in the source recording).
+_INCOMPLETE_RETRY_OPENING_TOKENS = 2
+_INCOMPLETE_RETRY_MAXIMUM_GAP_SEC = 20.0
+_INCOMPLETE_RETRY_MINIMUM_TOKENS = 5
+_INCOMPLETE_RETRY_MINIMUM_SHARED_CONTENT = 2
+
+
+def incomplete_attempt_completed_by_retry(
+    left: CandidateTake,
+    right: CandidateTake,
+    *,
+    maximum_gap_sec: float = _INCOMPLETE_RETRY_MAXIMUM_GAP_SEC,
+    opening_tokens: int = _INCOMPLETE_RETRY_OPENING_TOKENS,
+    minimum_tokens: int = _INCOMPLETE_RETRY_MINIMUM_TOKENS,
+    minimum_shared_content: int = _INCOMPLETE_RETRY_MINIMUM_SHARED_CONTENT,
+) -> str | None:
+    """Return `"incomplete_attempt_completed_by_retry"` when an earlier,
+    grammatically incomplete take is completed by a later delivery sharing
+    its opening and real content beyond it, or None. Order-independent:
+    the chronologically earlier take must be the incomplete one. See the
+    D-097.12 module comment above."""
+    if left.source_asset_id != right.source_asset_id:
+        return None
+    if _gap_between(left, right) > maximum_gap_sec:
+        return None
+    earlier, later = (left, right) if left.start <= right.start else (right, left)
+    if earlier.complete_idea or not later.complete_idea:
+        return None
+    earlier_tokens = _natural_tokens(earlier.text)
+    later_tokens = _natural_tokens(later.text)
+    if min(len(earlier_tokens), len(later_tokens)) < minimum_tokens:
+        return None
+    if earlier_tokens[:opening_tokens] != later_tokens[:opening_tokens]:
+        return None
+    earlier_rest = _restart_content(earlier_tokens[opening_tokens:])
+    later_rest = _restart_content(later_tokens[opening_tokens:])
+    if len(earlier_rest & later_rest) >= minimum_shared_content:
+        return "incomplete_attempt_completed_by_retry"
+    return None
+
+
 def group_takes(
     takes: Iterable[CandidateTake],
     *,

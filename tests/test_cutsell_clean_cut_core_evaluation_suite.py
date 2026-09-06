@@ -1391,3 +1391,71 @@ def test_claim_coverage_self_source_trap_richer_winner_survives_through_the_real
     assert diag.get("overrides", []) == []
     assert len(diag.get("suppressed_incidental_overrides", [])) == 1
     assert diag["suppressed_incidental_overrides"][0]["suppressed_new_winner_clip_id"] == "vague"
+
+
+# 55. D-097.12 (bounded stomach-family encargo) -- an EARLIER, grammatically
+# incomplete attempt (open tail, R15) and its LATER self-corrected clean
+# retry are the same recording attempt even when the semantic arbiter
+# answers the pair inconsistently ("incomplete vs complete" -- the one
+# reason `take_grouping.same_opening_restart`'s own module comment already
+# rules must never gate a retry family). Reproduces the live shape across
+# four Video00 RAWs where the SAME pair was answered SAME once and
+# NOT-same twice: here the oracle never confirms it (the worst case), so
+# the pair must survive on deterministic evidence alone through the REAL
+# take-grouping -> idea-equivalence -> take-judge -> Best-Take ->
+# claim-coverage -> final-story-coherence chain -- not just at the grouping
+# unit level. A third, independent one-liner sharing only the same two-word
+# opening and NO further content must stay ungrouped and survive on its own
+# merits (D-020: sharing a topic opener alone never merges independent
+# sentences).
+
+def test_incomplete_stomach_attempt_survives_arbiter_rejection_through_the_full_chain():
+    abandoned = _take(
+        "abandoned", 0.0, 8.0,
+        "Tuve problemas estomacales a un tiempo en donde se me hizo una "
+        "endoscopia y me diagnosticaron con...",
+        complete=False,
+    )
+    aside = _take(
+        "aside", 9.2, 15.4,
+        "Tuve problemas de estomago en una temporada, en 2023, no hay que "
+        "preguntar.",
+        complete=True,
+    )
+    clean = _take(
+        "clean", 22.7, 33.7,
+        "Tuve problemas de digestion en donde me hicieron una endoscopia y "
+        "dijeron que tenia gastritis, nada severo, y me mandaron tres "
+        "meses con pastillas.",
+        complete=True,
+    )
+
+    # The oracle never confirms ANY of the three pairs -- the worst case
+    # observed in production (the abandoned<->clean pair was answered
+    # NOT-same on two of three RAWs it was asked about). If the fix worked
+    # only because the arbiter happened to agree, this fixture would fail.
+    draft, equivalence_diag, arbiter = _run_core((abandoned, aside, clean), oracle_pairs=frozenset())
+
+    # Resolved BEFORE the arbiter, on deterministic evidence alone.
+    merges = equivalence_diag.get("restart_evidence_merges") or []
+    assert any(
+        m["accepted_by"] == "incomplete_attempt_completed_by_retry"
+        and {m["left_clip_id"], m["right_clip_id"]} == {"abandoned", "clean"}
+        for m in merges
+    ), merges
+    rejected_pairs = {
+        frozenset((r["left_clip_id"], r["right_clip_id"])) for r in equivalence_diag.get("arbiter_rejected_pairs") or ()
+    }
+    assert frozenset({"abandoned", "clean"}) not in rejected_pairs  # never spent on the unreliable arbiter
+
+    # Through take_judge -> deterministic Best-Take -> claim coverage ->
+    # final_story_coherence_validation: the complete retry wins the
+    # contest, the abandoned attempt loses it (not force-deleted by a
+    # label, an ellipsis, or its position alone -- it COMPETES and loses),
+    # and the independent aside is neither absorbed into the family nor
+    # discarded as a "losing realization" of someone else's idea.
+    assert _kept(draft) == {"clean", "aside"}
+    assert _discarded(draft) == {"abandoned"}
+
+    report = draft.diagnostics.get("final_story_coherence_validation") or {}
+    assert report.get("freeze_blocked") is not True
