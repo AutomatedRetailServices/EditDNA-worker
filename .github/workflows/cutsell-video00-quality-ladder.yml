@@ -226,6 +226,34 @@ jobs:
           jq -c '.reference_chunks.gold[] | {i:.index, raw:[.raw_start,.raw_end], edit:[.edit_start,.edit_end], conf:.alignment_confidence}' ladder/video00-quality-ladder.json
           echo "--- LEVEL_1 regions with rationale ---"
           jq -c '.regions[] | select(.level=="LEVEL_1" and .scope=="selection") | {i:.region_index, raw:[.raw_start,.raw_end], dur:.duration_sec, kind, refinement, authority:.attributed_authority, why:.attribution_rationale, cands:[.cutsell_candidates[] | {s:.status, id:.clip_id, t:(.text[:80])}]}' ladder/video00-quality-ladder.json
+          echo "--- render verification (frozen plan -> final MP4) ---"
+          jq '.render_verification | if . == null then "absent" else {render_duration_sec, fragment_count, found_count, missing_fragments, source_order_inversions_in_render, render_order} end' ladder/video00-quality-ladder.json
+
+      - name: Engine forensic evidence for authority attribution (read-only)
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "--- every candidate row (status, clip, raw start/end, text) ---"
+          jq -c '(.selected // [] | map({s:"sel", id:.clip_id, start, end, t:(.text[:90])})) + (.alternates // [] | map({s:"alt", id:.clip_id, start, end, t:(.text[:90])})) + (.discarded // [] | map({s:"dis", id:.clip_id, start, end, t:(.text[:90])})) | sort_by(.start)[]' ladder/cutsell-result.json
+          echo "--- take_judge_groups (families, winners, labels, ranked scores) ---"
+          jq -c '.diagnostics.take_judge_groups[]? | {group_id, selected_clip_id, local_selected_clip_id, semantic_override_applied, semantic_best_take_reason, semantic_label_source, labels:[.semantic_candidates[]? | {id:.clip_id, label, confidence}], ranked:[.ranked[]? | {id:.clip_id, score, reason}]}' ladder/cutsell-result.json
+          echo "--- distinct_idea_grouping_safety (splits, weak pairs, budget, rejected edges) ---"
+          jq '.diagnostics.distinct_idea_grouping_safety // "absent"' ladder/cutsell-result.json | head -c 60000
+          echo
+          echo "--- semantic_idea_equivalence (merges / blocks / pair budget) ---"
+          jq '.diagnostics.semantic_idea_equivalence // "absent" | if type=="object" then with_entries(select(.key|test("pair|budget|merged|blocked|request|count|status|reason"))) else . end' ladder/cutsell-result.json | head -c 40000
+          echo
+          echo "--- stage_status.silence_analysis / attempt_reconstruction / take_segmentation ---"
+          jq '{silence: (.stage_status.silence_analysis // "absent"), attempt_reconstruction: (.stage_status.attempt_reconstruction // "absent"), take_segmentation: (.stage_status.take_segmentation // "absent")}' ladder/cutsell-result.json | head -c 40000
+          echo
+          echo "--- silence gaps if listed anywhere (diagnostics.silence_gaps / silence_analysis.gaps) ---"
+          jq -c '(.diagnostics.silence_gaps // .stage_status.silence_analysis.gaps // .diagnostics.silence_analysis.gaps // []) | .[]?' ladder/cutsell-result.json | head -200
+          echo "--- live_render_qc findings + boundary state ---"
+          jq -c '.diagnostics.live_render_qc // .live_render_qc // "absent" | if type=="object" then {status, delivery_status, attempts:[.attempts[]? | {render_attempt, status, findings:[.findings[]? | {kind, start, end, clip_id, detail}], repair_target, repair_applied}]} else . end' ladder/cutsell-result.json | head -c 30000
+          echo
+          echo "--- result top-level keys ---"
+          jq -c 'keys' ladder/cutsell-result.json
+          jq -c '.diagnostics | keys' ladder/cutsell-result.json
 
       - name: Upload quality ladder evidence
         if: always()

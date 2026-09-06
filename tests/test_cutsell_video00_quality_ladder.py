@@ -319,3 +319,111 @@ def test_module_is_qa_only_and_never_imported_by_production_code():
     src = pathlib.Path("cutsell_worker")
     offenders = [p for p in src.rglob("*.py") if "video00_quality_ladder" in p.read_text(encoding="utf-8")]
     assert offenders == []
+
+
+# --- D-095.1: physical edge refinements + render verification -----------------
+
+from benchmarks.video00_quality_ladder import (  # noqa: E402
+    INTERIOR_HOLE,
+    LOOSE_ENTRY_EDGE,
+    LOOSE_EXIT_EDGE,
+    TIGHT_EDGE,
+    verify_render_against_plan,
+)
+
+
+def test_loose_exit_edge_of_a_consensus_fragment_is_a_boundary_refinement():
+    cutai = ReferenceCut.from_spans("cutai", [(0, 10)])
+    gold = ReferenceCut.from_spans("gold", [(0, 10)])
+    engine = _engine(selected=[("a", 0, 10.9, "hook with a loose tail")])
+    report = build_region_map(raw_duration_sec=20.0, cutai=cutai, gold=gold, engine_result=engine)
+    edge = _region_at(report, 10.0, 10.9)
+    assert edge["scope"] == "selection"  # above the 0.35 s tolerance, still an edge
+    assert (edge["level"], edge["kind"], edge["refinement"], edge["attributed_authority"]) == (
+        LEVEL_1, FALSE_KEEP, LOOSE_EXIT_EDGE, AUTH_BOUNDARY)
+
+
+def test_loose_entry_edge_and_tight_edge_are_boundary_refinements():
+    cutai = ReferenceCut.from_spans("cutai", [(2, 10), (20, 30)])
+    gold = ReferenceCut.from_spans("gold", [(2, 10), (20, 30)])
+    engine = _engine(selected=[("a", 1.2, 10, "early head"), ("b", 20.6, 30, "late start")])
+    report = build_region_map(raw_duration_sec=40.0, cutai=cutai, gold=gold, engine_result=engine)
+    head = _region_at(report, 1.2, 2.0)
+    assert (head["refinement"], head["attributed_authority"]) == (LOOSE_ENTRY_EDGE, AUTH_BOUNDARY)
+    tight = _region_at(report, 20.0, 20.6)
+    assert (tight["kind"], tight["refinement"], tight["attributed_authority"]) == (MISSING_DELIVERY, TIGHT_EDGE, AUTH_BOUNDARY)
+
+
+def test_interior_hole_inside_a_consensus_fragment_is_a_boundary_refinement():
+    cutai = ReferenceCut.from_spans("cutai", [(0, 20)])
+    gold = ReferenceCut.from_spans("gold", [(0, 20)])
+    engine = _engine(selected=[("p__psig1", 0, 9.6, "first half"), ("p__psig2", 10.1, 20, "second half")])
+    report = build_region_map(raw_duration_sec=30.0, cutai=cutai, gold=gold, engine_result=engine)
+    hole = _region_at(report, 9.6, 10.1)
+    assert (hole["kind"], hole["refinement"], hole["attributed_authority"]) == (MISSING_DELIVERY, INTERIOR_HOLE, AUTH_BOUNDARY)
+
+
+def test_long_false_keep_next_to_a_consensus_fragment_is_not_an_edge():
+    cutai = ReferenceCut.from_spans("cutai", [(0, 10)])
+    gold = ReferenceCut.from_spans("gold", [(0, 10)])
+    engine = _engine(selected=[("a", 0, 14, "hook then four seconds of stumbling")])
+    report = build_region_map(raw_duration_sec=20.0, cutai=cutai, gold=gold, engine_result=engine)
+    tail = _region_at(report, 10.0, 14.0)
+    assert tail["refinement"] == FAILED_MATERIAL_RETAINED and tail["attributed_authority"] == AUTH_ATTEMPT
+
+
+def _synth_media(tmp_path):
+    import shutil
+    import subprocess
+    if shutil.which("ffmpeg") is None:
+        pytest.skip("ffmpeg not available")
+    raw = tmp_path / "raw.wav"
+    render = tmp_path / "render.wav"
+    # 30 s of noise under a non-periodic (chirp) envelope so every window is distinct.
+    subprocess.check_call([
+        "ffmpeg", "-v", "error", "-y", "-f", "lavfi",
+        "-i", "aevalsrc='random(0)*(0.05+0.9*abs(sin(t*t/7)))':s=8000:d=30",
+        str(raw),
+    ])
+    # render = raw[10,14] + raw[2,6] (source-order inversion); raw[20,24] absent.
+    subprocess.check_call([
+        "ffmpeg", "-v", "error", "-y", "-i", str(raw),
+        "-filter_complex",
+        "[0:a]atrim=10:14,asetpts=PTS-STARTPTS[a];[0:a]atrim=2:6,asetpts=PTS-STARTPTS[b];[a][b]concat=n=2:v=0:a=1[out]",
+        "-map", "[out]", str(render),
+    ])
+    return raw, render
+
+
+def test_verify_render_against_plan_locates_fragments_and_counts_order_inversions(tmp_path):
+    pytest.importorskip("numpy")
+    raw, render = _synth_media(tmp_path)
+    selected = [
+        {"clip_id": "early", "start": 2.0, "end": 6.0, "text": "x"},
+        {"clip_id": "late", "start": 10.0, "end": 14.0, "text": "y"},
+        {"clip_id": "absent", "start": 20.0, "end": 24.0, "text": "z"},
+    ]
+    rv = verify_render_against_plan(raw, render, selected, template_sec=3.0)
+    by_id = {f["clip_id"]: f for f in rv["fragments"]}
+    assert by_id["late"]["found"] and abs(by_id["late"]["render_start"] - 0.0) < 0.15
+    assert by_id["early"]["found"] and abs(by_id["early"]["render_start"] - 4.0) < 0.15
+    assert by_id["absent"]["found"] is False
+    assert rv["missing_fragments"] == ["absent"]
+    assert rv["source_order_inversions_in_render"] == 1
+    assert rv["render_order"] == ["late", "early"]
+    assert abs(rv["render_duration_sec"] - 8.0) < 0.1
+
+
+def test_render_verification_rows_flow_into_traceability_and_markdown():
+    cutai = ReferenceCut.from_spans("cutai", [(0, 10)])
+    gold = ReferenceCut.from_spans("gold", [(0, 10)])
+    engine = _engine(selected=[("a", 0, 10, "hook")])
+    rv = {"render_duration_sec": 10.0, "fragment_count": 1, "found_count": 1, "missing_fragments": [],
+          "source_order_inversions_in_render": 0, "render_order": ["a"],
+          "fragments": [{"clip_id": "a", "raw_start": 0.0, "raw_end": 10.0, "render_start": 0.5, "render_end": 10.5, "correlation": 0.97, "found": True}]}
+    report = build_region_map(raw_duration_sec=20.0, cutai=cutai, gold=gold, engine_result=engine, render_verification=rv)
+    row = report["traceability"][0]
+    assert (row["render_start_sec"], row["render_correlation"], row["render_found"]) == (0.5, 0.97, True)
+    md = render_markdown(report)
+    assert "Render verification (frozen plan -> final MP4): 1/1 fragments located" in md
+    assert "0.5 (0.97)" in md

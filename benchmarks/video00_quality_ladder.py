@@ -69,6 +69,13 @@ REDUNDANT_REALIZATION = "redundant_realization_both_kept"
 UNGROUPED_RETRY = "ungrouped_retry_of_kept_idea"
 FAILED_MATERIAL_RETAINED = "failed_or_process_material_retained"
 RESTORED_BY_RESOLVER = "restored_by_realization_resolver"
+# Physical edge refinements (BoundaryEngine): the region is a short extension /
+# shortfall of a fragment both references also keep.
+LOOSE_EXIT_EDGE = "loose_exit_edge"          # CutSell keeps a tail both references cut
+LOOSE_ENTRY_EDGE = "loose_entry_edge"        # CutSell keeps a head both references cut
+TIGHT_EDGE = "tight_edge"                    # CutSell cuts a head/tail both references keep
+INTERIOR_HOLE = "interior_hole"              # CutSell removed a slice inside a fragment both references keep whole
+DEFAULT_EDGE_SLACK_MAX_SEC = 1.25
 
 # Authorities (D-021 component map).
 AUTH_ATTEMPT = "AttemptReconstructor/RecordingProcessRemoval"
@@ -434,6 +441,39 @@ def _refine_and_attribute(
     return None, AUTH_NONE, ""
 
 
+def _edge_refinement(index: int, rows: Sequence[dict], *, edge_slack_max_sec: float) -> tuple[str, str] | None:
+    """Classify a short LEVEL_1 region as a physical edge of a neighbouring
+    consensus-keep region (same selected parent clip) -> BoundaryEngine.
+    ``rows`` are the merged region rows (with ``_key`` / ``_overlapping``)."""
+    row = rows[index]
+    span: Span = row["span"]
+    if span.duration > edge_slack_max_sec:
+        return None
+    (cutai_keep, gold_keep, cutsell_keep), selected_ids = row["_key"]
+    parents = {parent_clip_id(c) for c in selected_ids}
+    prev_row = rows[index - 1] if index > 0 else None
+    next_row = rows[index + 1] if index + 1 < len(rows) else None
+
+    def consensus_keep(r):
+        return r is not None and r["_key"][0] == (True, True, True)
+
+    def parents_of(r):
+        return {parent_clip_id(c) for c in r["_key"][1]} if r is not None else set()
+
+    if cutsell_keep and not cutai_keep and not gold_keep:
+        if consensus_keep(prev_row) and parents & parents_of(prev_row):
+            return LOOSE_EXIT_EDGE, "CutSell keeps a tail of a fragment both references end earlier"
+        if consensus_keep(next_row) and parents & parents_of(next_row):
+            return LOOSE_ENTRY_EDGE, "CutSell keeps a head of a fragment both references start later"
+        return None
+    if not cutsell_keep and cutai_keep and gold_keep and not selected_ids:
+        if consensus_keep(prev_row) and consensus_keep(next_row) and parents_of(prev_row) & parents_of(next_row):
+            return INTERIOR_HOLE, "CutSell removed a slice inside a fragment both references keep whole"
+        if consensus_keep(prev_row) or consensus_keep(next_row):
+            return TIGHT_EDGE, "CutSell cuts a head/tail both references keep"
+    return None
+
+
 def build_region_map(
     *,
     raw_duration_sec: float,
@@ -443,6 +483,8 @@ def build_region_map(
     rendered: ReferenceCut | None = None,
     boundary_tolerance_sec: float = DEFAULT_BOUNDARY_TOLERANCE_SEC,
     min_region_sec: float = DEFAULT_MIN_REGION_SEC,
+    edge_slack_max_sec: float = DEFAULT_EDGE_SLACK_MAX_SEC,
+    render_verification: dict | None = None,
 ) -> dict:
     raw_duration = float(raw_duration_sec)
     cutai_spans = cutai.spans
@@ -490,9 +532,14 @@ def build_region_map(
         authority = AUTH_NONE
         rationale = ""
         if level == LEVEL_1:
+            edge = _edge_refinement(index - 1, merged, edge_slack_max_sec=edge_slack_max_sec)
             if is_boundary:
                 authority = AUTH_BOUNDARY
-                rationale = "sub-tolerance edge difference against both references"
+                refinement = edge[0] if edge else None
+                rationale = edge[1] if edge else "sub-tolerance edge difference against both references"
+            elif edge is not None:
+                refinement, rationale = edge
+                authority = AUTH_BOUNDARY
             else:
                 refinement, authority, rationale = _refine_and_attribute(
                     kind, overlapping, membership=membership, idea_index=idea_index,
@@ -545,6 +592,9 @@ def build_region_map(
         ]
         worst = LEVEL_1 if LEVEL_1 in region_levels else (LEVEL_2 if LEVEL_2 in region_levels else LEVEL_3)
         render_cov = (covered_duration(span, rendered_spans) / span.duration) if (rendered is not None and span.duration) else None
+        render_match = None
+        if render_verification is not None:
+            render_match = next((m for m in render_verification.get("fragments", ()) if m.get("clip_id") == c["clip_id"]), None)
         traceability.append({
             "clip_id": c["clip_id"],
             "parent_clip_id": c["parent_clip_id"],
@@ -564,6 +614,9 @@ def build_region_map(
             "cutai_coverage": _round(covered_duration(span, cutai_spans) / span.duration if span.duration else 0.0, 4),
             "gold_coverage": _round(covered_duration(span, gold_spans) / span.duration if span.duration else 0.0, 4),
             "rendered_coverage": _round(render_cov, 4),
+            "render_start_sec": None if render_match is None else render_match.get("render_start"),
+            "render_correlation": None if render_match is None else render_match.get("correlation"),
+            "render_found": None if render_match is None else render_match.get("found"),
             "worst_level": worst,
         })
 
@@ -577,6 +630,7 @@ def build_region_map(
             "cutsell_rendered": None if rendered is None else {"chunk_count": len(rendered.chunks), "kept_duration_sec": _round(rendered.kept_duration_sec), "edit_duration_sec": _round(rendered.edit_duration_sec)},
         },
         "freeze": freeze,
+        "render_verification": render_verification,
         "summary": summary,
         "regions": regions,
         "traceability": traceability,
@@ -688,6 +742,16 @@ def render_markdown(report: dict, *, max_text: int = 70) -> str:
         "",
         "LEVEL_1 by authority: " + (", ".join(f"{k}: {v['count']} regions / {v['seconds']} s" for k, v in sorted(s["level1_by_authority"].items(), key=lambda kv: -kv[1]['seconds'])) or "none"),
         "",
+    ]
+    rv = report.get("render_verification")
+    if rv:
+        lines += [
+            f"Render verification (frozen plan -> final MP4): {rv['found_count']}/{rv['fragment_count']} fragments located, "
+            f"{rv['source_order_inversions_in_render']} source-order inversions in render order, render {rv['render_duration_sec']} s; "
+            f"missing: {rv['missing_fragments'] or 'none'}",
+            "",
+        ]
+    lines += [
         "## Regions (selection scope)",
         "",
         "| # | raw start | raw end | dur | C | G | S | level | kind | refinement | authority | CutSell candidates |",
@@ -711,12 +775,13 @@ def render_markdown(report: dict, *, max_text: int = 70) -> str:
         for r in boundary_rows:
             lines.append(f"| {r['region_index']} | {r['raw_start']} | {r['raw_end']} | {r['duration_sec']} | {_flag(r['cutai_keep'])} | {_flag(r['gold_keep'])} | {_flag(r['cutsell_keep'])} | {r['level'][-1]} | {r['kind']} |")
     lines += ["", "## Traceability (every CutSell selected fragment)", "",
-              "| clip | raw range | family | idea / resolution | composite | restored | C cov | G cov | rendered cov | worst level | text |",
+              "| clip | raw range | family | idea / resolution | composite | restored | C cov | G cov | render start (corr) | worst level | text |",
               "|---|---|---|---|---|---|---|---|---|---|---|"]
     for t in report["traceability"]:
+        render_cell = "n/a" if t.get("render_start_sec") is None else f"{t['render_start_sec']} ({t['render_correlation']}){'' if t.get('render_found') else ' NOT FOUND'}"
         lines.append(
             f"| {t['clip_id'][-12:]} | {t['raw_start']}–{t['raw_end']} | {(t['retry_family'] or '')[-8:]} | {(t['idea_id'] or '')[-8:]} {t['resolution'] or ''} "
-            f"| {t['is_composite']} | {t['restored_by_resolver']} | {t['cutai_coverage']} | {t['gold_coverage']} | {t['rendered_coverage']} | {t['worst_level'][-1]} | {t['text'][:max_text]} |"
+            f"| {t['is_composite']} | {t['restored_by_resolver']} | {t['cutai_coverage']} | {t['gold_coverage']} | {render_cell} | {t['worst_level'][-1]} | {t['text'][:max_text]} |"
         )
     lines += ["", f"_{report['attribution_note']}_"]
     return "\n".join(lines)
@@ -756,6 +821,73 @@ def align_edit_to_raw(raw_path: str | Path, edit_path: str | Path, name: str) ->
     return ReferenceCut(name=name, chunks=rows, edit_duration_sec=float(edit_duration))
 
 
+def verify_render_against_plan(
+    raw_path: str | Path,
+    render_path: str | Path,
+    selected: Sequence[dict],
+    *,
+    hop_sec: float = 0.02,
+    template_sec: float = 4.0,
+    min_fragment_sec: float = 0.6,
+    found_correlation: float = 0.60,
+) -> dict:
+    """Plan -> FINAL MP4 link of the traceability chain.
+
+    The free edit->RAW aligner assumes the edit walks RAW monotonically; a
+    CutSell render can legitimately violate that (a resolver-restored clip
+    placed out of source order), so instead each FROZEN selected fragment is
+    located inside the render by template matching its own RAW audio
+    features. Reports, per fragment: render position, correlation, found; and
+    globally: fragments not found, render order vs source order inversions.
+    """
+    import numpy as np
+    from cutsell_worker.human_gold_decision_map import _audio_features, _ffprobe_duration, _normalized_window_correlation
+
+    raw_features = _audio_features(raw_path, hop_sec=hop_sec)
+    render_features = _audio_features(render_path, hop_sec=hop_sec)
+    render_duration = _ffprobe_duration(render_path)
+    fragments = []
+    for item in selected:
+        span = _span_of(item or {})
+        if span is None or span.duration < min_fragment_sec:
+            continue
+        # Middle slice as template (robust to Boundary edge repairs), clamped to the span.
+        width = min(template_sec, span.duration)
+        centre = (span.start + span.end) / 2.0
+        t_start = max(span.start, centre - width / 2.0)
+        t_end = min(span.end, t_start + width)
+        a, b = int(round(t_start / hop_sec)), int(round(t_end / hop_sec))
+        template = raw_features[a:b]
+        corr = _normalized_window_correlation(render_features, template)
+        if corr.shape[0] == 0:
+            fragments.append({"clip_id": str(item.get("clip_id") or ""), "raw_start": _round(span.start), "raw_end": _round(span.end),
+                              "render_start": None, "correlation": None, "found": False})
+            continue
+        best = int(np.argmax(corr))
+        render_start = best * hop_sec - (t_start - span.start)
+        fragments.append({
+            "clip_id": str(item.get("clip_id") or ""),
+            "raw_start": _round(span.start),
+            "raw_end": _round(span.end),
+            "render_start": _round(render_start),
+            "render_end": _round(render_start + span.duration),
+            "correlation": _round(float(corr[best]), 4),
+            "found": bool(corr[best] >= found_correlation),
+        })
+    found = [f for f in fragments if f["found"]]
+    by_render = sorted(found, key=lambda f: f["render_start"])
+    inversions = sum(1 for x, y in zip(by_render, by_render[1:]) if y["raw_start"] < x["raw_start"])
+    return {
+        "render_duration_sec": _round(render_duration),
+        "fragment_count": len(fragments),
+        "found_count": len(found),
+        "missing_fragments": [f["clip_id"] for f in fragments if not f["found"]],
+        "source_order_inversions_in_render": inversions,
+        "render_order": [f["clip_id"] for f in by_render],
+        "fragments": fragments,
+    }
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Video00 quality ladder: RAW vs Cut.ai vs Human Gold vs CutSell (QA-only)")
     parser.add_argument("--raw", required=True)
@@ -774,16 +906,22 @@ def main(argv: Sequence[str] | None = None) -> int:
     raw_duration = _ffprobe_duration(args.raw)
     cutai = align_edit_to_raw(args.raw, args.cutai, "cutai")
     gold = align_edit_to_raw(args.raw, args.gold, "gold")
+    engine_result = json.loads(Path(args.engine_json).read_text(encoding="utf-8"))
     rendered = None
+    render_verification = None
     if args.engine_mp4:
         try:
             rendered = align_edit_to_raw(args.raw, args.engine_mp4, "cutsell_rendered")
-        except Exception as exc:  # observability, never hide it
+        except Exception as exc:  # observability, never hide it: a non-monotonic render is itself a finding
             print(json.dumps({"rendered_alignment_error": str(exc)[:300]}))
-    engine_result = json.loads(Path(args.engine_json).read_text(encoding="utf-8"))
+        try:
+            render_verification = verify_render_against_plan(args.raw, args.engine_mp4, engine_result.get("selected") or ())
+        except Exception as exc:
+            print(json.dumps({"render_verification_error": str(exc)[:300]}))
     report = build_region_map(
         raw_duration_sec=raw_duration, cutai=cutai, gold=gold, engine_result=engine_result,
         rendered=rendered, boundary_tolerance_sec=args.boundary_tolerance_sec,
+        render_verification=render_verification,
     )
     report["inputs"] = {"raw": str(args.raw), "cutai": str(args.cutai), "gold": str(args.gold),
                         "engine_json": str(args.engine_json), "engine_mp4": args.engine_mp4}
