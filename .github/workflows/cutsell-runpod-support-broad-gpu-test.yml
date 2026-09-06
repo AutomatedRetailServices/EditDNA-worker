@@ -16,7 +16,7 @@ jobs:
     timeout-minutes: 15
     env:
       RUNPOD_API_KEY: ${{ secrets.RUNPOD_API_KEY }}
-      EXISTING_SERVERLESS_TEMPLATE_ID: j3bz8ctsna
+      IMMUTABLE_SERVERLESS_IMAGE: ghcr.io/automatedretailservices/cutsell-serverless@sha256:421d5544bc17afbdf5bf900b422249db07cbfd83accc9b61ed537b68eb2acdd3
     steps:
       - name: Validate RunPod credential
         shell: bash
@@ -24,23 +24,45 @@ jobs:
           set -euo pipefail
           test -n "${RUNPOD_API_KEY:-}" || { echo 'RUNPOD_API_KEY missing'; exit 3; }
 
-      - name: Confirm referenced Serverless template still exists
+      - name: Create temporary Serverless template from known-good immutable image
         shell: bash
         run: |
           set -euo pipefail
-          curl --fail --silent --show-error \
+          jq -n \
+            --arg image "$IMMUTABLE_SERVERLESS_IMAGE" \
+            --arg name "cutsell-support-broad-template-${GITHUB_RUN_ID}" \
+            '{
+              imageName:$image,
+              name:$name,
+              category:"NVIDIA",
+              containerDiskInGb:40,
+              isPublic:false,
+              isServerless:true,
+              env:{},
+              ports:[],
+              volumeInGb:0,
+              volumeMountPath:"/workspace"
+            }' > /tmp/template-create.json
+          code=$(curl --silent --show-error --write-out '%{http_code}' \
+            --request POST \
             --url 'https://rest.runpod.io/v1/templates' \
             --header "Authorization: Bearer $RUNPOD_API_KEY" \
-            --output /tmp/templates.json
-          jq -e --arg id "$EXISTING_SERVERLESS_TEMPLATE_ID" '.[] | select(.id == $id and .isServerless == true)' /tmp/templates.json >/tmp/template.json
-          jq '{id,name,imageName,isServerless}' /tmp/template.json
+            --header 'Content-Type: application/json' \
+            --data @/tmp/template-create.json \
+            --output /tmp/template.json)
+          echo "template_create_http=$code"
+          cat /tmp/template.json | jq '{id,name,imageName,isServerless}' || true
+          test "$code" = "200" || test "$code" = "201"
+          TEMPLATE_ID=$(jq -r '.id // empty' /tmp/template.json)
+          test -n "$TEMPLATE_ID"
+          echo "TEMPLATE_ID=$TEMPLATE_ID" >> "$GITHUB_ENV"
 
       - name: Create temporary warm Serverless endpoint with broadened compatible GPU allowlist
         shell: bash
         run: |
           set -euo pipefail
           jq -n \
-            --arg template "$EXISTING_SERVERLESS_TEMPLATE_ID" \
+            --arg template "$TEMPLATE_ID" \
             --arg name "cutsell-support-broad-${GITHUB_RUN_ID}" \
             '{
               templateId:$template,
@@ -144,7 +166,7 @@ jobs:
           cat /tmp/status.json | jq . || true
           exit 1
 
-      - name: Cleanup temporary job and endpoint
+      - name: Cleanup temporary job, endpoint and template
         if: always()
         shell: bash
         run: |
@@ -159,6 +181,14 @@ jobs:
               --request DELETE \
               --url "https://rest.runpod.io/v1/endpoints/$ENDPOINT_ID" \
               --header "Authorization: Bearer $RUNPOD_API_KEY" \
-              --output /tmp/delete.txt)
+              --output /tmp/delete-endpoint.txt)
             echo "endpoint_delete_http=$code"
+          fi
+          if [ -n "${TEMPLATE_ID:-}" ]; then
+            code=$(curl --silent --show-error --write-out '%{http_code}' \
+              --request DELETE \
+              --url "https://rest.runpod.io/v1/templates/$TEMPLATE_ID" \
+              --header "Authorization: Bearer $RUNPOD_API_KEY" \
+              --output /tmp/delete-template.txt)
+            echo "template_delete_http=$code"
           fi
