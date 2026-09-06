@@ -16,9 +16,15 @@ of one already-proven retry group as equally strong winners. In that narrow case
 the complete delivery with materially greater audience-facing information coverage when
 it still strongly overlaps the local winner and preserves every critical numeric fact.
 
+A fourth rule enforces the minimum-sufficient-editorial-set ordering exposed by Human
+Gold: a semantic winner label is not allowed to override the local Best-Take winner when
+the semantic candidate is incomplete and the local winner is a complete realization.
+Completeness is an editorial prerequisite, not a delivery-style preference. This rule
+does not choose a new candidate; it simply refuses an unsafe semantic override and falls
+back to the already-ranked local winner.
+
 This module never creates retry groups and never deletes unique story material. It only
-changes the winner inside a group that deterministic grouping already proved contains
-competing deliveries of the same idea.
+changes the winner inside a group already proven to contain competing deliveries.
 """
 from __future__ import annotations
 
@@ -83,6 +89,27 @@ def _semantic_overlap(left_text: str, right_text: str) -> float:
         return 0.0
     shared = len(left & right)
     return shared / max(1, min(len(left), len(right)))
+
+
+def _complete_member(members, clip_id: str):
+    member = next((item for item in members if item.clip_id == clip_id), None)
+    if member is None:
+        return None
+    return bool(getattr(member, "complete_idea", True))
+
+
+def _reject_incomplete_semantic_override(
+    members,
+    local_selected_clip_id: str,
+    selected_clip_id: str,
+    semantic_preferred_clip_id: str | None,
+) -> bool:
+    """Reject only an override from a complete local winner to an incomplete peer."""
+    if semantic_preferred_clip_id is None or selected_clip_id == local_selected_clip_id:
+        return False
+    local_complete = _complete_member(members, local_selected_clip_id)
+    selected_complete = _complete_member(members, selected_clip_id)
+    return local_complete is True and selected_complete is False
 
 
 def _prefer_information_rich_tied_winner(
@@ -226,6 +253,14 @@ def install_semantic_best_take_integrity() -> None:
             winner_confidence=winner_confidence,
             semantic_delete_recommended=semantic_delete_recommended,
         )
+
+        if _reject_incomplete_semantic_override(
+            members,
+            local_selected_clip_id,
+            selected,
+            preferred,
+        ):
+            return local_selected_clip_id, None
 
         critical_peer = _prefer_complete_peer_with_preserved_critical_facts(
             members,

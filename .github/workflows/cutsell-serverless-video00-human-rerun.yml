@@ -1,4 +1,5 @@
 name: CutSell Serverless Video00 Human Rerun
+# Relaunch after minimum-sufficient editorial-slot selection fix.
 
 on:
   push:

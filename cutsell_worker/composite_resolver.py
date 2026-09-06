@@ -85,16 +85,14 @@ module (``apply_composite_family_stabilization``) rather than by monkeypatching
 
 ## Composite group-splitting
 
-Two of the 19 take-level hooks (17 and 19) can mark a pair of deliveries as
-a composite: pieces that must survive Best-Take's one-winner competition
-together rather than be collapsed back into a single retry contest. Each
-tracks this via its own private ``ContextVar`` and its own monkeypatch of
-``safe_group_takes_by_sessions``. This module reads both ContextVars right
-after invoking the chain (rather than letting either hook's grouping
-monkeypatch actually apply), combines them into one explicit ``split_ids``
-return value, and exposes ONE ``apply_composite_group_split`` function
-``pipeline.py`` calls directly after grouping -- no monkeypatch of
-``session_boundaries`` survives this module's own setup.
+Only a true two-piece composite built by ``hybrid_composite_best_take`` is
+allowed to bypass Best-Take's one-winner competition. A semantic
+complementary rescue may restore a delivery that would otherwise be lost,
+but restoration is not itself proof that two complete realizations should
+co-exist. Rescue ids are therefore cleared here after the chain runs but are
+not promoted into ``split_ids``. Restored deliveries remain eligible to
+compete normally downstream; true composite ids remain split into singleton
+groups so their complementary pieces survive together.
 """
 from __future__ import annotations
 
@@ -107,11 +105,6 @@ from .post_selection_complementary_family_stabilizer import (
     apply_post_selection_complementary_family_stabilizer,
 )
 
-# Historical cutsell_worker/__init__.py order for every hook that wraps
-# hybrid_session_cleanup.apply_hybrid_session_cleanup. See this module's
-# docstring for how this list was actually verified (grep for every file
-# referencing apply_hybrid_session_cleanup, not just files named
-# hybrid_*/post_selection_*), not merely assumed from naming convention.
 _CHAIN_SPEC: tuple[tuple[str, str], ...] = (
     ("semantic_fragment_guard", "install_semantic_fragment_guard"),
     ("hybrid_retry_completion_integrity", "install_hybrid_retry_completion_integrity"),
@@ -138,12 +131,7 @@ _take_level_chain: Callable | None = None
 
 
 def _build_take_level_chain() -> Callable:
-    """Build the take-level chain ONCE by calling each hook's own real
-    install_*() function, unmodified, in the exact historical order, against
-    the shared module attributes -- then restore those attributes to what
-    they already were, so nothing global leaks beyond this module's own
-    private cached reference. See module docstring for the full rationale.
-    """
+    """Build the take-level chain once using each hook's own installer."""
     import importlib
 
     from . import hybrid_session_cleanup, session_boundaries
@@ -156,16 +144,8 @@ def _build_take_level_chain() -> Callable:
         getattr(module, install_name)()
 
     chain = hybrid_session_cleanup.apply_hybrid_session_cleanup
-
-    # Composite split-marking is owned explicitly by apply_composite_group_
-    # split below (called by pipeline.py after grouping), not by either
-    # hook's own grouping monkeypatch -- restore grouping to what it
-    # already was (which still includes any OTHER, out-of-this-module's-
-    # scope wrap, e.g. global_session_sibling_bridge's, applied earlier by
-    # cutsell_worker/__init__.py before this function ever runs).
     session_boundaries.safe_group_takes_by_sessions = base_grouping
     hybrid_session_cleanup.apply_hybrid_session_cleanup = base_cleanup
-
     return chain
 
 
@@ -177,32 +157,25 @@ def _get_take_level_chain() -> Callable:
 
 
 def _composite_split_ids() -> frozenset[str]:
-    """Read both hooks' private split-id ContextVars right after invoking
-    the chain, and clear them so a later, unrelated call doesn't inherit a
-    stale value. Reaching into another module's "private" ContextVar this
-    way is the same pattern the original hybrid_semantic_composite_bridge.py
-    already used to read hybrid_semantic_complementary_rescue's -- not a new
-    coupling this module introduces."""
+    """Return only ids proven to be a true multi-piece composite.
+
+    Semantic complementary rescue remains a restoration authority, not a
+    co-keep authority. Its ContextVar is still consumed/cleared here because
+    the semantic composite bridge may use it inside the take-level chain, but
+    rescue ids no longer receive singleton immunity from Best Take.
+    """
     from . import hybrid_composite_best_take, hybrid_semantic_complementary_rescue
 
-    rescue_ids = frozenset(hybrid_semantic_complementary_rescue._SPLIT_IDS.get())
     composite_ids = frozenset(hybrid_composite_best_take._COMPOSITE_SPLIT_IDS.get())
     hybrid_semantic_complementary_rescue._SPLIT_IDS.set(frozenset())
     hybrid_composite_best_take._COMPOSITE_SPLIT_IDS.set(frozenset())
-    return rescue_ids | composite_ids
+    return composite_ids
 
 
 def apply_composite_resolution(
     takes: Iterable[CandidateTake], context, editorial_judge,
 ) -> tuple[HybridSessionCleanupResult, frozenset[str]]:
-    """The ONE CompositeResolver step for take-level restoration/rescue/composite
-    marking. Returns ``(result, composite_split_ids)`` -- the split ids are
-    for ``apply_composite_group_split`` to apply to the grouping result that
-    runs immediately after this in ``pipeline.py``.
-
-    Same 20 algorithms (base + 19 hooks), same historical order, as the old
-    scattered monkeypatch chain -- see this module's docstring and D-023.
-    """
+    """Run take-level restoration/rescue/composite marking."""
     chain = _get_take_level_chain()
     result = chain(tuple(takes), context, editorial_judge)
     split_ids = _composite_split_ids()
@@ -239,12 +212,7 @@ def _split_groups_for_composite(
     split_ids: set[str] | frozenset[str],
     natural_ids: Iterable[str],
 ) -> tuple[tuple[str, ...], ...]:
-    """Force each composite-marked clip into its own singleton group so
-    BestTakeResolver's one-winner competition cannot re-collapse an intended
-    composite. One shared implementation -- the old chain had two functions
-    (``hybrid_composite_best_take._split_groups_for_composite`` and
-    ``hybrid_semantic_complementary_rescue._split_groups``) that were
-    already byte-for-byte identical in logic."""
+    """Force true composite-marked clips into singleton Best-Take groups."""
     split_ids = set(split_ids)
     order = {clip_id: index for index, clip_id in enumerate(natural_ids)}
     out: list[tuple[str, ...]] = []
@@ -260,9 +228,7 @@ def _split_groups_for_composite(
 
 
 def apply_composite_group_split(grouping_result, takes: Iterable[CandidateTake], split_ids: frozenset[str]):
-    """Apply composite split ids to a grouping result. Called directly by
-    pipeline.py right after ``safe_group_takes_by_sessions`` -- no
-    ContextVar, no monkeypatch of ``session_boundaries``."""
+    """Apply true composite split ids to a grouping result."""
     takes = tuple(takes)
     if not split_ids or not takes:
         return grouping_result
@@ -286,8 +252,5 @@ def apply_composite_group_split(grouping_result, takes: Iterable[CandidateTake],
 
 
 def apply_composite_family_stabilization(draft):
-    """Step 21: the one genuinely downstream CompositeResolver extension --
-    operates on the built DraftTimeline, not raw takes. Called explicitly by
-    pipeline.py at the end of build_flow_b_draft; no longer installed as a
-    monkeypatch on ``pipeline.build_flow_b_draft`` itself (see D-023)."""
+    """Apply the downstream complementary-family stabilizer."""
     return apply_post_selection_complementary_family_stabilizer(draft)

@@ -109,12 +109,13 @@ def test_video00_short_sonography_incomplete_debris_is_removed_but_complete_retr
     assert "retry-b" not in {t.clip_id for t in repaired.deleted}
 
 
-def test_video00_full_reset_backed_alternate_can_yield_to_winner_plus_open_continuation():
+def test_video00_complete_alternate_survives_incomplete_winner_plus_continuation_for_downstream_competition():
     alternate = _take(
         "alternate",
         295.36,
         314.60,
         "Esta es mi experiencia soy la única en mi familia que tiene este tipo de cáncer está comprobado científicamente que los cánceres son hereditarios solo un porcentaje son de carácter hereditario mayormente son nuestras elecciones de vida",
+        complete=True,
         fumble=0.80,
     )
     winner = _take(
@@ -143,8 +144,35 @@ def test_video00_full_reset_backed_alternate_can_yield_to_winner_plus_open_conti
         result, (alternate, winner, continuation)
     )
 
-    assert "alternate" not in {t.clip_id for t in repaired.kept}
-    assert {"winner", "continuation"}.issubset({t.clip_id for t in repaired.kept})
+    assert tuple(t.clip_id for t in repaired.kept) == ("alternate", "winner", "continuation")
+    assert "alternate" not in {t.clip_id for t in repaired.deleted}
+
+
+def test_complete_alternate_can_still_yield_to_independently_complete_winner():
+    alternate = _take(
+        "alternate",
+        0.0,
+        12.0,
+        "This is my experience and only a small percentage of these cancers are hereditary while most risk comes from life choices",
+        complete=True,
+        fumble=0.85,
+    )
+    winner = _take(
+        "winner",
+        15.0,
+        27.0,
+        "This is my experience and only a small percentage of these cancers are hereditary while most risk comes from life choices and habits",
+        complete=True,
+    )
+    result = _result(
+        (alternate, winner),
+        decisions=(("alternate", "alternate", 0.80), ("winner", "winner", 0.96)),
+    )
+
+    repaired = apply_hybrid_retry_completion_integrity(result, (alternate, winner))
+
+    assert tuple(t.clip_id for t in repaired.kept) == ("winner",)
+    assert "alternate" in {t.clip_id for t in repaired.deleted}
 
 
 def test_unique_long_alternate_without_recording_failure_remains_fail_open():

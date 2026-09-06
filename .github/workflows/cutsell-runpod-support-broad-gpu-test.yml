@@ -1,0 +1,205 @@
+name: CutSell RunPod Support Broad GPU Test
+
+on:
+  push:
+    branches:
+      - cutsell/mobile-v1-clean
+    paths:
+      - .github/cutsell-runpod-support-broad-gpu-trigger.txt
+
+permissions:
+  contents: read
+
+jobs:
+  broad-gpu-placement-test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      RUNPOD_API_KEY: ${{ secrets.RUNPOD_API_KEY }}
+      IMMUTABLE_SERVERLESS_IMAGE: ghcr.io/automatedretailservices/cutsell-serverless@sha256:421d5544bc17afbdf5bf900b422249db07cbfd83accc9b61ed537b68eb2acdd3
+    steps:
+      - name: Validate RunPod credential
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "${RUNPOD_API_KEY:-}" || { echo 'RUNPOD_API_KEY missing'; exit 3; }
+
+      - name: Create temporary Serverless template from known-good immutable image
+        shell: bash
+        run: |
+          set -euo pipefail
+          jq -n \
+            --arg image "$IMMUTABLE_SERVERLESS_IMAGE" \
+            --arg name "cutsell-support-broad-template-${GITHUB_RUN_ID}" \
+            '{
+              imageName:$image,
+              name:$name,
+              category:"NVIDIA",
+              containerDiskInGb:40,
+              isPublic:false,
+              isServerless:true,
+              env:{},
+              ports:[],
+              volumeInGb:0,
+              volumeMountPath:"/workspace"
+            }' > /tmp/template-create.json
+          code=$(curl --silent --show-error --write-out '%{http_code}' \
+            --request POST \
+            --url 'https://rest.runpod.io/v1/templates' \
+            --header "Authorization: Bearer $RUNPOD_API_KEY" \
+            --header 'Content-Type: application/json' \
+            --data @/tmp/template-create.json \
+            --output /tmp/template.json)
+          echo "template_create_http=$code"
+          cat /tmp/template.json
+          echo
+          test "$code" = "200" || test "$code" = "201"
+          TEMPLATE_ID=$(jq -r '.id // empty' /tmp/template.json)
+          test -n "$TEMPLATE_ID"
+          echo "TEMPLATE_ID=$TEMPLATE_ID" >> "$GITHUB_ENV"
+
+      - name: Create temporary warm endpoint with broadened CUDA 12.4 compatible GPU allowlist
+        shell: bash
+        run: |
+          set -euo pipefail
+          jq -n \
+            --arg template "$TEMPLATE_ID" \
+            --arg name "cutsell-support-broad-${GITHUB_RUN_ID}" \
+            '{
+              templateId:$template,
+              computeType:"GPU",
+              gpuCount:1,
+              gpuTypeIds:[
+                "NVIDIA GeForce RTX 4090",
+                "NVIDIA L4",
+                "NVIDIA A40",
+                "NVIDIA RTX A6000",
+                "NVIDIA RTX A5000",
+                "NVIDIA GeForce RTX 3090",
+                "NVIDIA RTX A4500",
+                "NVIDIA RTX A4000",
+                "NVIDIA L40S",
+                "NVIDIA RTX 6000 Ada Generation",
+                "NVIDIA L40"
+              ],
+              allowedCudaVersions:["12.4"],
+              workersMin:1,
+              workersMax:1,
+              scalerType:"QUEUE_DELAY",
+              scalerValue:2,
+              idleTimeout:5,
+              executionTimeoutMs:600000,
+              flashboot:true,
+              name:$name
+            }' > /tmp/endpoint-create.json
+
+          echo 'endpoint_request_summary='
+          jq '{computeType,gpuCount,gpuTypeIds,allowedCudaVersions,workersMin,workersMax,scalerType,scalerValue,idleTimeout,executionTimeoutMs,flashboot,name}' /tmp/endpoint-create.json
+
+          code=$(curl --silent --show-error --write-out '%{http_code}' \
+            --request POST \
+            --url 'https://rest.runpod.io/v1/endpoints' \
+            --header "Authorization: Bearer $RUNPOD_API_KEY" \
+            --header 'Content-Type: application/json' \
+            --data @/tmp/endpoint-create.json \
+            --output /tmp/endpoint.json)
+          echo "endpoint_create_http=$code"
+          echo 'endpoint_response_body='
+          cat /tmp/endpoint.json
+          echo
+          if [ "$code" != "200" ] && [ "$code" != "201" ]; then
+            echo 'BROAD_GPU_SUPPORT_TEST=ENDPOINT_CREATE_REJECTED'
+            exit 11
+          fi
+
+          ENDPOINT_ID=$(jq -r '.id // empty' /tmp/endpoint.json)
+          test -n "$ENDPOINT_ID"
+          echo "ENDPOINT_ID=$ENDPOINT_ID" >> "$GITHUB_ENV"
+
+          curl --fail --silent --show-error \
+            --url "https://rest.runpod.io/v1/endpoints/$ENDPOINT_ID" \
+            --header "Authorization: Bearer $RUNPOD_API_KEY" \
+            --output /tmp/endpoint-readback.json
+          echo 'endpoint_readback='
+          cat /tmp/endpoint-readback.json
+          echo
+          jq -e '.workersMin == 1 and .workersMax == 1' /tmp/endpoint-readback.json >/dev/null
+
+      - name: Submit exactly one health job and observe placement
+        shell: bash
+        run: |
+          set -euo pipefail
+          code=$(curl --silent --show-error --write-out '%{http_code}' \
+            --request POST \
+            --url "https://api.runpod.ai/v2/$ENDPOINT_ID/run" \
+            --header "Authorization: Bearer $RUNPOD_API_KEY" \
+            --header 'Content-Type: application/json' \
+            --data '{"input":{"op":"health"}}' \
+            --output /tmp/submit.json)
+          echo "submit_http=$code"
+          cat /tmp/submit.json | jq .
+          test "$code" = "200"
+          JOB_ID=$(jq -r '.id // empty' /tmp/submit.json)
+          test -n "$JOB_ID"
+          echo "JOB_ID=$JOB_ID" >> "$GITHUB_ENV"
+
+          deadline=$((SECONDS+360))
+          last=''
+          while [ "$SECONDS" -lt "$deadline" ]; do
+            curl --fail --silent --show-error \
+              --url "https://api.runpod.ai/v2/$ENDPOINT_ID/status/$JOB_ID" \
+              --header "Authorization: Bearer $RUNPOD_API_KEY" \
+              --output /tmp/status.json
+            status=$(jq -r '.status // empty' /tmp/status.json)
+            worker=$(jq -r '.workerId // .worker_id // empty' /tmp/status.json)
+            snapshot="$status|$worker"
+            if [ "$snapshot" != "$last" ]; then
+              echo "status=$status worker_id=${worker:-null}"
+              last="$snapshot"
+            fi
+            case "$status" in
+              COMPLETED)
+                cat /tmp/status.json | jq .
+                jq -e '.output.ok == true and .output.cuda_available == true and (.output.cuda_device_count|tonumber) >= 1' /tmp/status.json >/dev/null
+                echo 'BROAD_GPU_SUPPORT_TEST=PASS'
+                exit 0
+                ;;
+              FAILED|TIMED_OUT|CANCELLED)
+                cat /tmp/status.json | jq .
+                echo 'BROAD_GPU_SUPPORT_TEST=TERMINAL_FAILURE'
+                exit 1
+                ;;
+            esac
+            sleep 5
+          done
+
+          echo 'BROAD_GPU_SUPPORT_TEST=NO_PLACEMENT_WITHIN_360S'
+          cat /tmp/status.json | jq . || true
+          exit 1
+
+      - name: Cleanup temporary job, endpoint and template
+        if: always()
+        shell: bash
+        run: |
+          set +e
+          if [ -n "${JOB_ID:-}" ] && [ -n "${ENDPOINT_ID:-}" ]; then
+            curl --silent --show-error --request POST \
+              --url "https://api.runpod.ai/v2/$ENDPOINT_ID/cancel/$JOB_ID" \
+              --header "Authorization: Bearer $RUNPOD_API_KEY" >/dev/null 2>&1 || true
+          fi
+          if [ -n "${ENDPOINT_ID:-}" ]; then
+            code=$(curl --silent --show-error --write-out '%{http_code}' \
+              --request DELETE \
+              --url "https://rest.runpod.io/v1/endpoints/$ENDPOINT_ID" \
+              --header "Authorization: Bearer $RUNPOD_API_KEY" \
+              --output /tmp/delete-endpoint.txt)
+            echo "endpoint_delete_http=$code"
+          fi
+          if [ -n "${TEMPLATE_ID:-}" ]; then
+            code=$(curl --silent --show-error --write-out '%{http_code}' \
+              --request DELETE \
+              --url "https://rest.runpod.io/v1/templates/$TEMPLATE_ID" \
+              --header "Authorization: Bearer $RUNPOD_API_KEY" \
+              --output /tmp/delete-template.txt)
+            echo "template_delete_http=$code"
+          fi
