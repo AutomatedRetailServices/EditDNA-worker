@@ -10,6 +10,13 @@ extra supporting wording. Once separated, Best Take cannot make them compete and
 may survive. The active patch therefore teaches the semantic-equivalence request that
 "same intended idea" is an editorial-function question, not a union-of-facts test.
 
+The same active boundary also has a fixed per-request pair budget. Pure score ordering
+can spend most of that budget comparing many variants inside one dense local region and
+starve a later retry family entirely. This installer therefore keeps the existing pair
+priority score but diversifies its ORDER: pairs that expose previously unseen groups are
+asked before redundant extra comparisons among groups already represented. No extra
+provider calls or tokens are introduced; the existing max-pairs budget remains intact.
+
 The legacy Unified Selection contract is patched too for rollback parity, but it is not
 relied upon for the active Clean Cut Core V1 behavior.
 """
@@ -73,6 +80,40 @@ def _inject_semantic_equivalence_policy(payload: Mapping[str, Any]) -> dict[str,
     return out
 
 
+def _coverage_first_pair_order(ranked_pairs):
+    """Diversify a score-ranked pair stream without changing eligibility or cost.
+
+    Each pair is ``(left_group_index, right_group_index, left_clip_id, right_clip_id)``.
+    The original rank already encodes proximity/overlap/restart evidence. We preserve
+    that order as the tie-break, but first prefer the candidate that exposes the largest
+    number of not-yet-represented group endpoints (2, then 1, then 0). This prevents a
+    dense retry neighborhood from monopolizing a bounded request while still spending
+    all remaining slots on the strongest original-score comparisons once coverage is
+    exhausted.
+    """
+    remaining = list(ranked_pairs)
+    ordered = []
+    covered_groups: set[int] = set()
+    while remaining:
+        best_index = 0
+        best_gain = -1
+        for index, pair in enumerate(remaining):
+            left_group_index, right_group_index = int(pair[0]), int(pair[1])
+            gain = int(left_group_index not in covered_groups) + int(
+                right_group_index not in covered_groups
+            )
+            if gain > best_gain:
+                best_index = index
+                best_gain = gain
+                if gain == 2:
+                    break
+        pair = remaining.pop(best_index)
+        ordered.append(pair)
+        covered_groups.add(int(pair[0]))
+        covered_groups.add(int(pair[1]))
+    return tuple(ordered)
+
+
 def _install_active_semantic_equivalence_policy() -> None:
     from . import semantic_idea_equivalence_google as module
 
@@ -85,6 +126,20 @@ def _install_active_semantic_equivalence_policy() -> None:
 
     build_request_with_editorial_slots._cutsell_editorial_slot_resolution = True
     module.build_semantic_equivalence_request = build_request_with_editorial_slots
+
+
+def _install_semantic_pair_budget_coverage() -> None:
+    from . import take_grouping_provider as module
+
+    original = module._rank_candidate_pairs
+    if getattr(original, "_cutsell_editorial_slot_coverage", False):
+        return
+
+    def rank_candidate_pairs_with_coverage(*args, **kwargs):
+        return _coverage_first_pair_order(original(*args, **kwargs))
+
+    rank_candidate_pairs_with_coverage._cutsell_editorial_slot_coverage = True
+    module._rank_candidate_pairs = rank_candidate_pairs_with_coverage
 
 
 def _install_legacy_unified_selection_policy() -> None:
@@ -103,4 +158,5 @@ def _install_legacy_unified_selection_policy() -> None:
 
 def install_editorial_slot_resolution() -> None:
     _install_active_semantic_equivalence_policy()
+    _install_semantic_pair_budget_coverage()
     _install_legacy_unified_selection_policy()
