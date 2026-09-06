@@ -4,10 +4,12 @@ Best-Take and semantic stages may split one clean creator delivery into several
 DraftClips. Rendering those fragments independently can manufacture jump cuts even
 when the underlying source between them contains only a tiny natural breath/gesture.
 
-This final draft pass merges adjacent selected clips only when they come from the same
-source, the omitted source gap is very small, and whole-video evidence does not show a
-retry/fumble/reset in that gap. It never deletes spoken words; it only restores source
-continuity that earlier segmentation unnecessarily broke. Ambiguity fails open.
+This final draft pass restores the omitted micro-gap between adjacent selected clips
+only when they come from the same source, the gap is very small, and whole-video
+evidence does not show a retry/fumble/reset in that gap. It never deletes spoken
+words and (D-097.3) never re-mints identities: the leading clip is extended to the
+next clip's start, both clips keep their clip_id/provenance, and the render plan's
+mechanical contiguous-segment coalesce joins them physically. Ambiguity fails open.
 
 Boundary-authorized microcuts are explicit final-timeline decisions and must never be
 re-coalesced here. Selection chooses what survives; Boundary owns the exact physical
@@ -133,32 +135,31 @@ def coalesce_selected_source_continuity(
             current = nxt
             continue
 
-        # Keep role only when both fragments agree. Role disagreement is metadata, not
-        # a reason to manufacture a visible cut; OTHER is the safe neutral merge label.
-        role = current.semantic_role if current.semantic_role == nxt.semantic_role else SemanticRole.OTHER
-        merged_words = tuple(sorted(tuple(current.words) + tuple(nxt.words), key=lambda w: (float(w.start), float(w.end))))
-        parent_ids = [current.clip_id, nxt.clip_id]
-        merged = replace(
-            current,
-            clip_id=f"{current.clip_id}__continuity__{nxt.clip_id}",
-            end=float(nxt.end),
-            text=_join_text(current.text, nxt.text),
-            caption_text=_join_text(current.caption_text, nxt.caption_text),
-            words=merged_words,
-            semantic_role=role,
-            take_group_id=(current.take_group_id if current.take_group_id == nxt.take_group_id else None),
-        )
+        # D-097.3 (RAW 34033468088): restore the omitted micro-gap by extending
+        # the leading clip to the next clip's start -- BOTH clips keep their
+        # own identity. The previous behaviour re-minted one merged clip
+        # (`A__continuity__B`, no `parent_semantic_clip_id`), which made every
+        # identity-keyed consumer blind to both members: StoryValidator
+        # reported the whole family as IDEA_COVERAGE_LOST ("every member
+        # discarded"), the D-061 same-idea credit found no selected winner,
+        # and Freeze blocked a correct selection. The physical result is the
+        # same: `render_plan._coalesce_contiguous_segments` joins exactly
+        # contiguous same-source segments into one render segment, so no cut
+        # is manufactured and no source between the two is dropped.
+        restored = replace(current, end=float(nxt.start)) if float(nxt.start) > float(current.end) else current
         audit.append({
             "authority": "post_selection_continuity_coalescer",
+            "action": "source_gap_restored_identities_preserved",
             "left_clip_id": current.clip_id,
             "right_clip_id": nxt.clip_id,
             "source_gap_start": round(float(current.end), 3),
             "source_gap_end": round(float(nxt.start), 3),
             "source_gap_sec": round(max(0.0, gap), 3),
             "reason": "same_source_micro_gap_without_retry_or_reset_evidence",
-            "merged_parent_ids": parent_ids,
+            "merged_parent_ids": [current.clip_id, nxt.clip_id],
         })
-        current = merged
+        output.append(restored)
+        current = nxt
 
     output.append(current)
     return tuple(output), tuple(audit)

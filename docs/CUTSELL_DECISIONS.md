@@ -11307,3 +11307,85 @@ family from the persisted diagnostics (a family with no usable
 realization must be dropped BY DECISION, D-097.B, never lost silently);
 otherwise ladder + CLEAN RAW gate + perceptual review + per-fix report.
 **HUMAN ACTION REQUIRED:** NO.
+
+## D-097.3 -- RAW 34033468088 (head 277ebc4): D-097.2 R1/R2 proven on the selection, Freeze blocked by an identity the continuity coalescer re-minted; coalescer now restores the gap without re-minting identities
+
+**RAW COMPLETE (Modal run 34033468088, head `277ebc4`).** The worker
+completed (D-097.2.1 fix held), `hybrid_editorial = provider_complete`
+(6/6 label windows, `budget_exhausted_chunk_count = 0` -- **R2 PROVEN**),
+`semantic_idea_equivalence.restart_evidence_merges` = 3 (`same_opening_
+restart` on the two "we never thought to check" deliveries, two
+`same_opening_abandoned_start` attachments of the abandoned "when my
+contract ended" start to its family -- **R1 mechanism PROVEN**; the arbiter
+still rejected 3 adjacent-idea pairs, correctly), the abandoned acne take
+is discarded and the clean retry kept (the ASR re-segmented that region
+this run, so the pair grouped deterministically; 0.5 s missing-delivery
+edge is the only trace). Then **Selection Freeze was BLOCKED** by
+FinalEditReviewer FAIL: `IDEA_COVERAGE_LOST` ("every member of this idea
+was discarded") on the stomach family + `UNIQUE_FACT_LOST` on the same
+family's abandoned restart (`resolver_did_not_retain_as_contextual`,
+CONTEXTUAL year), repair loop `no_repair_strategy_exists_for_this_finding_
+kind` (a STORY_ORDER_BREAK composite reorder WAS repaired), NEEDS_HUMAN_
+REVIEW, no render -- R3 (renderer timeline) still unproven on video.
+19 kept.
+
+**Root cause (from the run's diagnostics):** the family's winner (the
+gastritis delivery, split by ASR into two selected clips this run) was
+re-minted by `post_selection_continuity_coalescer` into ONE clip named
+`A__continuity__B` with no `parent_semantic_clip_id`. Every identity-keyed
+consumer then lost both members: `_missing_idea_coverage` saw no selected
+member (false IDEA_COVERAGE_LOST), the D-061 same-idea credit for the
+abandoned restart found no selected winner (false UNIQUE_FACT_LOST), the
+ledger's `_clip_realization_id` state map, CanonicalEditPlan's selected-
+parent logic and the ladder's attribution ("family winner ...__continuity__
+... is a realization both references rejected", "never grouped with
+...__continuity__...") all read the same phantom. Exactly the D-046 FIX A
+defect class (physical re-identification without provenance), from a
+different physical pass. It never surfaced before because the coalescer
+had not fired on a family winner in a RAW since D-046.
+
+**Fix (owning authority: the coalescer itself):** it now restores the
+omitted micro-gap by extending the leading clip to the next clip's start;
+both clips keep their `clip_id`/provenance/text/words; the audit row says
+`source_gap_restored_identities_preserved` with both parent ids. The
+physical result is identical: `render_plan._coalesce_contiguous_segments`
+joins exactly contiguous same-source segments into one render segment, so
+no cut is manufactured and no source between the two is dropped (all
+gates -- same source, <= 0.45 s, no reset/retry evidence, never across a
+Boundary-authorized cut -- unchanged). The ownership table in
+`boundary_engine_pass.py` adds "re-minting a clip identity" to what this
+pass must never do. Tests: coalescer suite updated (identities preserved,
+gap restored, contiguous render segment, `_missing_idea_coverage` empty);
+the offline end-to-end replay with the last run's family labels now
+reaches Freeze PASS -> one render attempt -> QC PASS ->
+`DELIVERABLE_PENDING_HUMAN_WATCH_LISTEN:perceptual=UNCERTAIN`
+(`artifact_kind = deliverable_candidate`) on a synthetic source.
+
+**Ladder 34033468088 (selection scope only; no MP4):** LEVEL_1 25 regions /
+35.82 s (0.2134 of Cut.ai keep) vs 21 / 34.85 s on 34029861712; F1 vs
+Cut.ai 0.805 (0.788), vs Human Gold 0.855 (0.850); keep 162.3 s (146.6 s).
+By authority: BestTakeResolver 8 / 15.1 s (the "also I got pimples" take
+lost its family again, 5.75 s; the "when my contract ended" family winner's
+edges; the two-clip gastritis winner 1.78 s), IdeaClusterer 1 / 7.96 s (the
+failed "stomach problems ... diagnosed with..." take was NOT grouped with
+the re-segmented gastritis delivery: different opening, no restart
+evidence, arbiter not asked -- the 34029861712 arbiter merge of this pair
+did not recur), BoundaryEngine 20 / 7.14 s (the same loose exits),
+AttemptReconstructor 7 / 4.92 s (incl. "resorcina." kept alone, 0.47 s),
+RealizationResolver 3 / 3.62 s (the "symptoms in hindsight" pair kept as a
+composite: both references keep both -- the D-097.2 R2 editorial question,
+now recorded as composite edges rather than 7.25 s missing delivery).
+Reading: no LEVEL_1 regression attributable to D-097.2; the pimples
+pre-resolver / family loss and the stomach failed-take grouping are the
+next LEVEL_1 root causes after the MP4 is finally produced.
+
+**LAST VERIFIED RESULT:** RAW 34033468088 = FREEZE BLOCKED by the coalescer
+identity re-mint (false IDEA_COVERAGE_LOST / UNIQUE_FACT_LOST); fixed in the
+owning pass; CODE FIXED / TESTS PASS; R1 and R2 PROVEN on the selection; R3
+and the perceptual review still unproven on video.
+**NEXT AUTOMATIC ACTION:** commit + push; ONE authorised Modal RAW on the
+new head (Freeze should PASS on this selection; the renderer / QC /
+perceptual chain then runs for the first time on Video00); ladder + CLEAN
+RAW gate + per-fix MP4 report as D-097.4; then the pimples family loss and
+the stomach failed-take grouping.
+**HUMAN ACTION REQUIRED:** NO.

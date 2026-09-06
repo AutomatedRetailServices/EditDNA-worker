@@ -160,8 +160,10 @@ probed speech instead of joins -- D-097.2 rebuilt the renderer as one gapless
 pass with frame-exact windows, made semantic-label budget starvation explicit
 (default ceiling $0.015), merged restart-evidence pairs at the reconcile tier
 and reviews diagnostic artifacts perceptually; the RAW on that head (34032322925)
-died on a latent ledger crash when a whole family vanished, fixed in D-097.2.1;
-the next authorised RAW must prove the MP4 effect; D-096 remains the source of
+died on a latent ledger crash, fixed in D-097.2.1; RAW 34033468088 then proved
+R1/R2 on the selection but Freeze was blocked by the continuity coalescer
+re-minting a family winner's identity, fixed in D-097.3 (gap restored,
+identities preserved); the next authorised RAW must prove the MP4 effect; D-096 remains the source of
 truth, its Appendix B records implementation status)
 (read its LAST VERIFIED RESULT / NEXT AUTOMATIC ACTION lines). The handoff
 document's `CURRENT LIVE BLOCKER` / `EXACT NEXT ACTION` sections are historical

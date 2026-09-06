@@ -492,6 +492,16 @@ Binding validation order (Product Owner, 2026-09-06):
   Freeze. Reproduced offline end-to-end, fixed in `semantic_ledger`
   (`missing_idea_coverage_idea_ids`), traceback capture added to the focused
   job. No engine evidence from that run; next RAW pending.
+- D-097.3 (2026-09-06): RAW 34033468088 completed: R2 proven (6/6 label windows),
+  R1 mechanism proven (3 restart-evidence merges, abandoned acne take
+  discarded), but Freeze was blocked by a false IDEA_COVERAGE_LOST /
+  UNIQUE_FACT_LOST: `post_selection_continuity_coalescer` re-minted the
+  gastritis family's two-clip winner as one `A__continuity__B` clip with no
+  provenance (D-046 defect class). The coalescer now restores the gap by
+  extending the leading clip and keeps both identities (render plan joins
+  them mechanically). Ladder (selection only): L1 25 / 35.82 s, F1 vs Cut.ai
+  0.805, vs Gold 0.855, keep 162.3 s. Next: ONE RAW to finally produce the
+  MP4. Full entry: `docs/CUTSELL_DECISIONS.md` D-097.3.
 # HISTORICAL CUTSELL.AI 11 CONTINUITY
 
 A trusted CutSell.ai 11 recovery checkpoint is:

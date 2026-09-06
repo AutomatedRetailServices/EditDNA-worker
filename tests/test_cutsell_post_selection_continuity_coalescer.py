@@ -28,12 +28,17 @@ def test_same_source_micro_gap_without_reset_is_coalesced():
     left = _clip("a", 10.0, 12.0, "primera")
     right = _clip("b", 12.34, 14.0, "segunda")
     selected, audit = coalesce_selected_source_continuity((left, right), _diagnostics())
-    assert len(selected) == 1
+    # D-097.3: the micro-gap is restored by extending the leading clip to the
+    # next clip's start; both identities survive (no `__continuity__` id).
+    assert [clip.clip_id for clip in selected] == ["a", "b"]
     assert selected[0].start == 10.0
-    assert selected[0].end == 14.0
-    assert selected[0].text == "primera segunda"
+    assert selected[0].end == 12.34
+    assert selected[1].start == 12.34 and selected[1].end == 14.0
+    assert selected[0].text == "primera" and selected[1].text == "segunda"
     assert len(audit) == 1
     assert audit[0]["source_gap_sec"] == 0.34
+    assert audit[0]["action"] == "source_gap_restored_identities_preserved"
+    assert audit[0]["merged_parent_ids"] == ["a", "b"]
 
 
 def test_strong_reset_blocks_coalescing():
@@ -70,3 +75,31 @@ def test_boundary_authorized_micro_gap_is_never_recoalesced():
     )
     assert len(selected) == 2
     assert audit == ()
+
+
+def test_restored_gap_renders_as_one_contiguous_segment_without_losing_identity():
+    # The physical outcome of the old identity merge is preserved by the
+    # render plan's mechanical contiguous coalesce (same source, exactly
+    # contiguous), while StoryValidator still sees both selected ids.
+    from cutsell_worker.contracts import DraftTimeline, EditStrategy, SCHEMA_VERSION
+    from cutsell_worker.final_story_coherence_validation import _missing_idea_coverage
+    from cutsell_worker.render_plan import build_render_plan
+
+    from dataclasses import replace as _replace
+
+    # Captions off (the RAW harness default): the render plan's mechanical
+    # coalesce only joins segments whose playback/caption settings agree.
+    left = _replace(_clip("a", 10.0, 12.0, "primera"), caption_text="")
+    right = _replace(_clip("b", 12.34, 14.0, "segunda"), caption_text="")
+    selected, _ = coalesce_selected_source_continuity((left, right), _diagnostics())
+    draft = DraftTimeline(
+        schema_version=SCHEMA_VERSION, project_id="p", strategy=EditStrategy.STORYTELLING,
+        selected=selected, alternates=(), discarded=(),
+        diagnostics={"take_judge_groups": [
+            {"group_id": "tg_a", "ranked": [{"clip_id": "a"}, {"clip_id": "x"}]},
+            {"group_id": "tg_b", "ranked": [{"clip_id": "b"}]},
+        ]},
+    )
+    assert _missing_idea_coverage(draft) == []
+    plan = build_render_plan(draft, {"src": "/tmp/does-not-need-to-exist.mp4"})
+    assert len(plan) == 1 and plan[0].start == 10.0 and plan[0].end == 14.0
