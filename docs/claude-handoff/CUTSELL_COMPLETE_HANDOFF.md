@@ -381,7 +381,17 @@ After Video00 passes, unseen videos and the broader regression suite must prove 
 
 Binding validation order (Product Owner, 2026-09-06):
 
-    RAW -> CUT.AI PARITY -> HUMAN GOLD PARITY -> HUMAN WATCH + LISTEN PASS
+    RAW -> CUT.AI PARITY -> HUMAN GOLD PARITY -> technical post-render QC
+        -> perceptual SYSTEM WATCH + LISTEN -> HUMAN WATCH + LISTEN PASS
+
+- Re-base = QA priority / validation order only. Every previously accepted
+  canonical component stays in force unless the four-way diagnostic proves it
+  wrong; never reset the architecture; Cut.ai is an additional gate, not a
+  replacement editor.
+- The perceptual SYSTEM WATCH + LISTEN gate (human-visible/audible editing
+  defects on the rendered MP4) is NOT complete yet; it is to be added as an
+  additional blocking post-render gate before Human Watch + Listen, at the
+  right stage after the diagnostic, preserving the technical QC.
 
 - Human Gold stays the ultimate editorial authority.
 - Cut.ai is the intermediate COMMERCIAL BASELINE oracle: recording-process

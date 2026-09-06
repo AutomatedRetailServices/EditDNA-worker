@@ -42,7 +42,10 @@ When sources conflict:
 6. old conversations.
 
 ## Canonical quality ladder (D-095, binding)
-`RAW → CUT.AI PARITY → HUMAN GOLD PARITY → HUMAN WATCH + LISTEN PASS`.
+`RAW → CUT.AI PARITY → HUMAN GOLD PARITY → technical post-render QC → perceptual
+SYSTEM WATCH + LISTEN → HUMAN WATCH + LISTEN PASS` (the perceptual gate is an
+additional blocking post-render gate still to be implemented at the right stage;
+the technical QC is preserved, never replaced).
 Human Gold is the ultimate editorial authority; Cut.ai is the intermediate
 COMMERCIAL BASELINE oracle. Video00 QA references (QA-ONLY, never exposed to
 production Selection/Boundary/BestTake/grouping/render/LLM prompts):
@@ -58,7 +61,12 @@ the ladder step of the Modal RAW workflow. Do not characterize CutSell as "almos
 Human Gold"; do not add another rescue/guard/reconciliation authority for a
 symptom; if Level-1 failures are widespread across independent regions, produce
 an architecture-level diagnosis first (D-095). THE PRODUCT IS THE RENDERED VIDEO,
-NOT THE TEST SUITE.
+NOT THE TEST SUITE. Re-base means QA priority/validation order only: every
+previously accepted canonical component (attempt reconstruction, recording-process
+cleanup, grouping, Best Take, claim protections, composites, editorial-slot
+resolution, Selection/Boundary ownership, Freeze, CanonicalEditPlan/review/repair
+loop, Boundary, render/QC, regression coverage) stays in force unless the four-way
+diagnostic proves a specific component wrong; never reset the architecture.
 
 ## Current mission
 **Flow B → Clean Cut Core V1 (idea-first).** See `docs/CUTSELL_DECISIONS.md` D-019/D-020.

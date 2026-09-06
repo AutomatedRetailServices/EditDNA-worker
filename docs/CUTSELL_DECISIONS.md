@@ -10602,3 +10602,45 @@ Level-1 failures are widespread), tests, CI, ONE fresh Video00 RAW (authorized
 by this directive), inspect the MP4, repeat until Cut.ai parity.
 HUMAN ACTION REQUIRED: NO (within this directive) -- acceptance thresholds for
 "Cut.ai parity" are reported, not gated, until the Product Owner sets them.
+
+### D-095 clarification (Product Owner, same day, binding) -- preservation + perceptual System Watch+Listen
+
+**"STOP AND RE-BASE" re-bases the QA/editorial PRIORITY and VALIDATION ORDER
+only.** It does NOT discard, reset or replace the previously implemented and
+canonically accepted system. Everything accepted before D-095 remains in
+force unless the RAW / Cut.ai / Human Gold / CutSell diagnostic proves a
+specific component incorrect, conflicting, inactive or regressing. Preserve in
+particular: attempt reconstruction; recording-process cleanup; retry-family /
+grouping logic; Best Take; semantic / critical-claim protections; composite
+handling; complete-realization / editorial-slot resolution (D-042 line);
+Selection vs Boundary ownership; Selection Freeze; CanonicalEditPlan / final
+review / repair loop; Boundary processing; render/QC infrastructure; all
+previously accepted regression coverage. Never reset the architecture to an
+earlier version or remove a prior protection merely because the ladder is now
+RAW -> Cut.ai parity -> Human Gold parity. The Cut.ai baseline is an
+ADDITIONAL evaluation gate, not a replacement editor architecture.
+
+**Newly discovered gap -- perceptual SYSTEM WATCH + LISTEN is not complete.**
+The current post-render QC (`post_render_media_qc.py` / `live_render_qc.py`)
+performs real structural and ffmpeg/ffprobe media checks (silence, audio
+discontinuity, duplicate/malformed segments, semantic-hash parity, bounded
+Boundary repair) and is PRESERVED as the technical gate. The intended
+perceptual provider -- one that evaluates the rendered MP4 for human-visible /
+human-audible editing problems (body/camera reset debris, facial/expression
+discontinuity, gesture jumps, awkward entry/exit frames, perceptually bad
+cuts, clipped phonemes/breaths, visual continuity and similar editor-level
+failures) -- is NOT fully implemented. It must be added as an ADDITIONAL
+BLOCKING post-render gate BEFORE a candidate is presented for Human Watch +
+Listen, without replacing the technical QC.
+
+**Eventual canonical ladder:**
+
+    RAW -> Cut.ai parity -> Human Gold parity -> technical post-render QC
+        -> perceptual SYSTEM WATCH + LISTEN -> HUMAN WATCH + LISTEN
+
+**Sequencing rule:** do not interrupt the current diagnostic work to add the
+perceptual gate blindly; implement it at the correct stage after the
+active-path / root-cause situation from the four-way diagnostic is known
+(planned as a D-095.x entry with its own provider contract, tests and live
+proof). Until then: `delivery_status` semantics are unchanged and no candidate
+is presented as deliverable on technical QC alone.
