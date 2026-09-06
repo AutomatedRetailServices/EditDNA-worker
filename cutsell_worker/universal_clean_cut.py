@@ -85,6 +85,33 @@ from .visual_analysis import VisualProvider
 from .whole_video_analysis import WholeVideoProvider
 
 
+
+_BTS_SINGLETON_BASIS = "single_bts_unusable"
+
+
+def derive_story_completeness(take_judge_groups) -> dict:
+    """D-097.B / D-097.9 (R11): read the Best Take rows that ended with no
+    usable realization and decide whether the STORY is incomplete.
+
+    `no_usable_realization_basis == "no_usable_realization"` (D-097.B) is a
+    dropped intended idea -> `incomplete_no_usable_realization`, never
+    deliverable as a clean complete story. `"single_bts_unusable"` (D-097.8
+    R10) is a corroborated lone `bts` take -- no audience-facing idea vanished
+    with it, so it is listed (never silent) but leaves the story complete. A
+    row without a basis (older diagnostics) is treated as a dropped idea."""
+    dropped = [
+        row for row in (take_judge_groups or ())
+        if isinstance(row, dict) and row.get("no_usable_realization")
+    ]
+    bts = [row for row in dropped if row.get("no_usable_realization_basis") == _BTS_SINGLETON_BASIS]
+    ideas = [row for row in dropped if row.get("no_usable_realization_basis") != _BTS_SINGLETON_BASIS]
+    return {
+        "story_completeness": "incomplete_no_usable_realization" if ideas else "complete",
+        "dropped_families": dropped,
+        "idea_family_ids": [str(row.get("group_id") or "") for row in ideas],
+        "bts_singleton_ids": [str(row.get("group_id") or "") for row in bts],
+    }
+
 def process_universal_clean_cut_sources(
     request: ProcessingRequest,
     local_paths: Mapping[str, str],
@@ -709,13 +736,14 @@ def process_universal_clean_cut_sources(
     # realization for is dropped from the timeline BY DECISION and the run
     # is marked story-incomplete -- never presented as a clean complete
     # story. Read by the validation harness / delivery gate.
-    dropped_families = [
-        row for row in ((getattr(result.draft, "diagnostics", None) or {}).get("take_judge_groups") or ())
-        if isinstance(row, dict) and row.get("no_usable_realization")
-    ]
-    story_completeness = (
-        "incomplete_no_usable_realization" if dropped_families else "complete"
+    # D-097.9 (R11): only a dropped IDEA family makes the story incomplete;
+    # a corroborated lone `bts` take (D-097.8 R10) is recording-process
+    # material whose removal is the product working, not a missing idea.
+    story = derive_story_completeness(
+        (getattr(result.draft, "diagnostics", None) or {}).get("take_judge_groups") or ()
     )
+    dropped_families = story["dropped_families"]
+    story_completeness = story["story_completeness"]
 
     return ProcessingResult(
         schema_version=result.schema_version,
@@ -727,6 +755,8 @@ def process_universal_clean_cut_sources(
             "story_completeness": story_completeness,
             "no_usable_realization_family_count": len(dropped_families),
             "no_usable_realization_family_ids": [str(row.get("group_id") or "") for row in dropped_families],
+            "no_usable_realization_idea_family_ids": story["idea_family_ids"],
+            "no_usable_realization_bts_singleton_ids": story["bts_singleton_ids"],
             "freeze_blocked_pending_coherence_review": freeze_blocked,
             "post_authority_integrity_failure": post_authority_integrity_failed,
             "final_edit_reviewer": final_edit_reviewer_status,

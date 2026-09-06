@@ -158,5 +158,15 @@ def _install_legacy_unified_selection_policy() -> None:
 
 def install_editorial_slot_resolution() -> None:
     _install_active_semantic_equivalence_policy()
-    _install_semantic_pair_budget_coverage()
+    # D-097.9 (R12): `_install_semantic_pair_budget_coverage` is RETIRED from
+    # the active path. It wrapped `take_grouping_provider._rank_candidate_pairs`
+    # at import with a coverage-first re-order ("one pair per group before any
+    # group gets a second"), a SECOND authority over the arbiter budget order
+    # that silently defeated the D-097.8 R9 ranking: on RAW 34045158712 (68
+    # candidate pairs, 14 asked) it promoted zero-evidence neighbours (hair
+    # loss <-> stomach aside, score 0.02; gastritis <-> vaccine, 0.03) into the
+    # budget because they "exposed new groups" and demoted a 0.95 same-opening
+    # retry pair to 12th. One ranking authority now: content overlap +
+    # restart/continuation evidence lead, proximity breaks ties (R9). The
+    # function is kept, deactivated, for the record.
     _install_legacy_unified_selection_policy()

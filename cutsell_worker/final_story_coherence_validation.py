@@ -393,12 +393,18 @@ def _no_usable_realization_groups(draft) -> list[dict]:
             "group_id": group.get("group_id"),
             "member_clip_ids": [str(row.get("clip_id") or "") for row in (group.get("ranked") or ())],
             "member_usability": group.get("member_usability") or {},
+            # D-097.9 (R11): dropped idea (D-097.B) vs corroborated bts singleton (R10).
+            "basis": group.get("no_usable_realization_basis"),
         })
     return rows
 
 
 def _no_usable_realization_clip_ids(draft) -> set[str]:
     return {cid for row in _no_usable_realization_groups(draft) for cid in row["member_clip_ids"]}
+
+
+def _no_usable_realization_basis_by_clip(draft) -> dict[str, str | None]:
+    return {cid: row.get("basis") for row in _no_usable_realization_groups(draft) for cid in row["member_clip_ids"]}
 
 
 def _missing_idea_coverage(draft) -> list[dict]:
@@ -743,6 +749,7 @@ def _lost_semantic_atoms(
     selected_ids = {clip.clip_id for clip in draft.selected}
     clip_id_to_group = _clip_id_to_group_members((draft.diagnostics or {}).get("take_judge_groups"))
     no_usable_clip_ids = _no_usable_realization_clip_ids(draft)
+    no_usable_basis = _no_usable_realization_basis_by_clip(draft)
 
     findings: list[dict] = []
     for clip in draft.discarded:
@@ -750,10 +757,13 @@ def _lost_semantic_atoms(
         if clip.clip_id in no_usable_clip_ids:
             # D-097.B: content of a family with no usable realization -- lost
             # by decision, recorded (never silent), never a Freeze block.
+            # D-097.9 (R11): the basis names whether an idea was dropped or a
+            # corroborated bts singleton was removed (story still complete).
             findings.append({
                 "clip_id": clip.clip_id,
                 "text": text[:200],
                 "kind": "LOST_IN_NO_USABLE_REALIZATION_FAMILY",
+                "basis": no_usable_basis.get(clip.clip_id),
                 "blocking": False,
             })
             continue

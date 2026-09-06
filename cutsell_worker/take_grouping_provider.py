@@ -1,6 +1,8 @@
 """Provider boundary for semantic retry/take grouping."""
 from __future__ import annotations
 
+from collections import Counter
+
 import re
 from dataclasses import dataclass
 from typing import Mapping, Protocol, Tuple
@@ -684,6 +686,18 @@ def _continuation_or_restart_bonus(left_take: CandidateTake, right_take: Candida
 
 
 _PROXIMITY_RANK_WEIGHT = 0.25
+# D-097.9 (R12): the ONE authority over the arbiter budget order.
+_PAIR_ORDER_AUTHORITY = "take_grouping_provider._rank_candidate_pairs:content_overlap_v2+group_cap"
+# D-097.9 (R12): fairness bound INSIDE the ranking authority. In the first
+# pass a group may take part in at most this many asked pairs; pairs a
+# capped group would push over the bound are deferred behind every
+# first-pass pair (still in score order) so a dense neighbourhood of
+# mutually similar takes cannot spend the whole budget before a distinct
+# paraphrase pair elsewhere is asked (the D-042 concern the retired
+# coverage-first wrapper served) -- without ever promoting a zero-evidence
+# pair over one with content or restart evidence (the way that wrapper
+# spent RAW 34045158712's budget on hair loss <-> stomach aside, 0.02).
+_PAIR_BUDGET_PER_GROUP_CAP = 2
 
 
 def _pair_priority_score(
@@ -731,6 +745,20 @@ def _rank_candidate_pairs(
     batch cap or make this pairwise discovery exhaustive; it makes the
     truncation that DOES happen non-arbitrary.
     """
+    return tuple(pair for pair, _deferred in _rank_candidate_pairs_with_marks(pairs, take_map))
+
+
+def _rank_candidate_pairs_with_marks(
+    pairs: tuple[tuple[int, int, str, str], ...],
+    take_map: dict[str, CandidateTake],
+    *,
+    per_group_cap: int = _PAIR_BUDGET_PER_GROUP_CAP,
+) -> tuple[tuple[tuple[int, int, str, str], bool], ...]:
+    """Score order with the D-097.9 per-group fairness bound: first-pass
+    pairs (score order, no group beyond `per_group_cap` pairs) followed by
+    the deferred pairs (score order). The mark says whether a pair was
+    deferred by the cap -- recorded in the run diagnostics so a score out of
+    descending order is explained by this authority, never by a wrapper."""
     scored = [
         (_pair_priority_score(take_map[left_id], take_map[right_id], gap_sec=_group_gap(
             (left_id,), (right_id,), take_map,
@@ -739,7 +767,18 @@ def _rank_candidate_pairs(
         for left_index, right_index, left_id, right_id in (pair,)
     ]
     scored.sort(key=lambda item: item[0], reverse=True)
-    return tuple(pair for _, pair in scored)
+    usage: Counter = Counter()
+    accepted: list[tuple[tuple[int, int, str, str], bool]] = []
+    deferred: list[tuple[tuple[int, int, str, str], bool]] = []
+    for _score, pair in scored:
+        left_index, right_index = int(pair[0]), int(pair[1])
+        if per_group_cap > 0 and (usage[left_index] >= per_group_cap or usage[right_index] >= per_group_cap):
+            deferred.append((pair, True))
+            continue
+        accepted.append((pair, False))
+        usage[left_index] += 1
+        usage[right_index] += 1
+    return tuple(accepted + deferred)
 
 
 def reconcile_semantic_idea_equivalence(
@@ -866,6 +905,7 @@ def reconcile_semantic_idea_equivalence(
         audit.append(row)
         restart_merged.append(row)
 
+    ranked_pair_budget: list[dict] = []
     if arbiter is None:
         if merged_count == 0:
             return groups, {"status": "not_requested", "candidate_pair_count": len(candidate_pairs), "merged_pair_count": 0}
@@ -877,8 +917,23 @@ def reconcile_semantic_idea_equivalence(
         # docstring for the root-cause finding this fixes. The full eligible set
         # is still bounded by the same structural gates above; only the order in
         # which the batch budget below gets spent changes.
-        ranked_pairs = _rank_candidate_pairs(tuple(remaining_pairs), take_map) if remaining_pairs else ()
+        marked = _rank_candidate_pairs_with_marks(tuple(remaining_pairs), take_map) if remaining_pairs else ()
+        ranked_pairs = tuple(pair for pair, _deferred in marked)
         truncated = tuple(ranked_pairs[: policy.max_pairs_per_request])
+        # D-097.9 (R12): record the order the budget was actually spent in,
+        # with the score that produced it and the cap mark, so a run can
+        # show WHICH authority ordered the pairs (a foreign re-order is
+        # visible as scores out of descending order without a cap mark).
+        ranked_pair_budget = [
+            {
+                "left_clip_id": left_id, "right_clip_id": right_id,
+                "priority_score": round(_pair_priority_score(
+                    take_map[left_id], take_map[right_id], gap_sec=_group_gap((left_id,), (right_id,), take_map),
+                ), 4),
+                "group_cap_deferred": deferred,
+            }
+            for (_, _, left_id, right_id), deferred in marked[: policy.max_pairs_per_request]
+        ]
         if truncated:
             request = IdeaEquivalenceRequest(pairs=tuple(
                 IdeaEquivalencePair(left_text=take_map[left_id].text, right_text=take_map[right_id].text)
@@ -955,6 +1010,8 @@ def reconcile_semantic_idea_equivalence(
             "provider": result.provider if result is not None else None,
             "candidate_pair_count": len(candidate_pairs),
             "checked_pair_count": len(truncated),
+            "ranked_pair_budget": ranked_pair_budget,
+            "pair_order_authority": _PAIR_ORDER_AUTHORITY,
             "merged_pair_count": 0,
             "restart_evidence_merges": restart_merged,
             "arbiter_rejected_pairs": arbiter_rejected_pairs,
@@ -972,6 +1029,8 @@ def reconcile_semantic_idea_equivalence(
         "model": result.model if result is not None else None,
         "candidate_pair_count": len(candidate_pairs),
         "checked_pair_count": len(truncated),
+        "ranked_pair_budget": ranked_pair_budget,
+        "pair_order_authority": _PAIR_ORDER_AUTHORITY,
         "merged_pair_count": merged_count,
         "merges": audit,
         "restart_evidence_merges": restart_merged,

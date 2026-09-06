@@ -12000,3 +12000,173 @@ tie-break remains the dominant Level-1 item pending escalation A.
 **HUMAN ACTION REQUIRED:** YES, non-blocking -- A (later-attempt tie
 preference; 4 of 5 runs), F (watch + listen: runs 34040848026,
 34042123557, 34043967265), B/A (waiver narrowing), F3b.
+
+
+## D-097.9 -- RAW 34045158712 (head c85c3ab): R9 and R10 PROVEN on the selection (the abandoned stomach attempt contested and discarded; "¡Vamos!" dropped), Freeze PASS, technical QC PASS -- but the drop was misread as an INCOMPLETE STORY and the MP4 was refused (R11), and an import-time coverage-first wrapper was found re-ordering R9's pair budget (R12)
+
+**RAW COMPLETE (Modal run 34045158712, head `c85c3ab`, 2026-09-06).**
+Worker ok, 49 candidates, `hybrid_editorial = provider_complete` (7 windows,
+0 budget-refused), 34 measured silence gaps, performance confirmation 3
+`retry_setup` / 0 `wrong_take`. Freeze PASSED (`freeze_blocked_pending_
+coherence_review: false`, `post_authority_integrity_failure: false`,
+`selection_semantic_stream_verified_after_boundary`), 27 kept, technical QC
+PASS on attempt 1 (0 findings, 0 repairs, 15 renderer trailing trims =
+11.98 s), plan `plan_1643254bc6004dde`, rendered 147.9 s for a 159.5 s
+plan. `delivery_status = NOT_DELIVERABLE_INCOMPLETE_STORY_REVIEW:
+incomplete_no_usable_realization`, `perceptual_review_status = FAIL`
+(advisory; `reset_debris_at_edges_source_evidence` EVALUATED_FAIL with 20
+findings, `interior_dead_air_mp4` UNCERTAIN 2, 2 EVALUATED_PASS, 4
+NOT_IMPLEMENTED; routing BoundaryEngine 22). CLEAN RAW gate: FAIL
+(`story:incomplete_no_usable_realization`, `perceptual:FAIL`). The
+"Verify frozen Selection lock" step is the legacy-shaped check that fails on
+every Clean Cut run (recorded since D-050C3); not a finding.
+
+**Per-fix MP4 report -- D-097.8 R9 (pair ranking): PROVEN on the selection.**
+`semantic_idea_equivalence`: 68 candidate pairs, 14 checked (1 restart-
+evidence merge, 5 arbiter merges, 9 arbiter rejections), second stage 9
+checked / 0 unchecked. The abandoned stomach attempt ("Tuve problemas
+estomacales a un tiempo en donde se me hizo una endoscopía y me
+diagnosticaron con...", `clip_2ae11bb5`) was ASKED against the clean
+gastritis delivery (`clip_296687a9`) and confirmed 0.95 ("Both describe
+stomach issues and an endoscopy resulting in gastritis"); they formed one
+family (`tg_d055e345`), the clean delivery won, the abandoned attempt is
+discarded. The 7.96 s Level-1 false keep of RAW 34043967265 is gone (the
+only residual on that family is a 0.98 s exit edge, region 105).
+
+**Per-fix MP4 report -- D-097.8 R10 (corroborated bts singleton): PROVEN
+on the selection, then WRONGLY blocked delivery (R11).** The lone `bts`
+0.95 take this run was "¡Vamos!" (`clip_43376534`, `strong_reset_count 3`,
+`local_failure_corroborated`, `deterministic_unusable`) -> `single_bts_
+unusable`, family `tg_75b34772` -> Ledger/Resolver `RESOLVED_NONE`
+(`no_usable_realization_all_failed`), StoryValidator
+`LOST_IN_NO_USABLE_REALIZATION_FAMILY` non-blocking. Both QA references
+remove that take (no Level-1 region exists for it): the drop is correct.
+But `universal_clean_cut` derives `story_completeness` from ANY judge row
+with `no_usable_realization`, so the run was marked `incomplete_no_usable_
+realization` and the harness refused a technically clean MP4 as an
+incomplete story. The "No, no, no, no, no." of the previous run was
+segmented this run as "No" (0.8 s, 269.37-270.17) + a 5.92 s pause with a
+strong reset + "quiero sonar a conspiración ...": Hybrid `failed`
+(0.85/0.90/0.99), no local corroboration, and the D-097.D polarity-bearing
+micro-fragment protection refused the delete (`semantic_failed_micro_
+fragment`), so it was kept and coalesced onto the gastritis delivery's tail
+(`same_source_micro_gap_without_retry_or_reset_evidence`). Both references
+remove it (0.8 s Level-1, region 106). That is a D-097.D safety contract
+(escalation B): recorded, not touched.
+
+**R11 -- a corroborated bts singleton drop is recording-process removal,
+not a missing idea.** Root cause: D-097.8 R10 reused the D-097.B
+`no_usable_realization` row without saying WHY; D-097.B's consumers
+(`universal_clean_cut` story completeness -> `_live_render_qc_diagnostics`
+delivery gate -> CLEAN RAW gate) treat every such row as a dropped intended
+idea. Fix at the owning authorities: the judge row carries
+`no_usable_realization_basis` (`"no_usable_realization"` = D-097.B dropped
+idea; `"single_bts_unusable"` = R10 bts singleton); the new
+`universal_clean_cut.derive_story_completeness` counts ONLY dropped idea
+families (a row without a basis is read as a dropped idea, fail-closed);
+`stage_status` lists `no_usable_realization_idea_family_ids` and
+`no_usable_realization_bts_singleton_ids` (never silent); the pipeline
+diagnostics add `no_usable_realization_bts_singleton_count`; the
+StoryValidator's `LOST_IN_NO_USABLE_REALIZATION_FAMILY` finding and its
+`no_usable_realization_families` rows carry `basis`. D-097.B behaviour for
+an all-failed idea family is byte-identical. Authority: BestTakeResolver
+bookkeeping + delivery gate. Expected MP4 effect: the same selection
+becomes `DELIVERABLE_PENDING_HUMAN_WATCH_LISTEN`.
+
+**R12 -- a second authority over the arbiter budget order defeated R9.**
+Offline replay of the run's takes showed `_rank_candidate_pairs` returning
+scores OUT of descending order: `editorial_slot_resolution_install.
+_install_semantic_pair_budget_coverage` (commit 60e5bfe "diversify semantic
+retry pair budget coverage"; D-096 P-46 / S-9 "IMPLEMENTED-BUT-NOT-
+OBSERVABLE") wraps the function at import (via `final_selection_retry_
+arbiter`) with a coverage-first re-order: every group gets one pair before
+any group gets a second, whatever the scores. On this run's 68 candidates
+/ 14 slots that admitted zero-evidence neighbours -- hair loss <-> stomach
+aside (priority 0.019), gastritis <-> vaccine (0.032), "Nunca se nos
+ocurrió" <-> "test a bordo" (0.169) -- all rejected by the arbiter, while
+the replay (37 of 49 takes with text, lexical regrouping) shows the pure
+R9 order spending all 14 slots on pairs >= 0.449 with the same-opening
+stomach false-start pairs (0.955 / 0.945) first and the abandoned<->clean
+pair 12th; the wrapper pushed the 0.945 pair to 12th and admitted 0.17-0.26
+pairs. Fix: the wrapper is retired from `install_editorial_slot_resolution`
+(function kept, deactivated; the D-042 prompt-policy injection and the
+legacy unified payload hook are unchanged). The fairness concern it served
+is real -- the full glob's D-042 test (`test_late_same_slot_conclusions_
+reach_arbiter_under_pair_budget_and_merge`: eight mutually similar takes
+must not starve a distinct late paraphrase pair) fails under pure score
+order -- so it now lives INSIDE the one ranking authority as a per-group
+cap (`_PAIR_BUDGET_PER_GROUP_CAP = 2`): in the first pass a group takes
+part in at most two asked pairs, pairs a capped group would push over the
+bound are deferred behind every first-pass pair, both passes in score
+order. A zero-evidence pair can therefore never jump an evidence pair, and
+a dense neighbourhood cannot spend the whole budget. `reconcile_semantic_
+idea_equivalence` records `ranked_pair_budget` (the asked pairs with their
+`priority_score` and `group_cap_deferred` mark, in the order spent) and
+`pair_order_authority`, so a foreign re-order would be visible as scores
+out of order without a cap mark. The D-094 F3 red-shape test already
+asserts the R9 order.
+
+**Ladder (QA-only, four-way):** LEVEL_1 selection 27 regions / 56.21 s
+(34043967265: 29 / 61.08 s; best so far 34043247473: 43.6 s); Level-1 share
+of Cut.ai keep 0.3349; LEVEL_2 7 / 11.58 s; LEVEL_3 50 / 291.06 s. By
+attributed authority: BestTakeResolver 8 / 35.85 s (the pimples family
+tie-break 25.9 s -- escalation A, 5 of 6 runs; the complementary "Síntomas"
+pair 7.77 s -- escalation A; sonografía 0.71; gastritis edge 0.98; acné
+0.5), AttemptReconstructor/RecordingProcessRemoval 10 / 12.8 s (the stomach
+aside 5.94 s dominant; hair-loss 1.37 s; the rest < 1.1 s edges),
+BoundaryEngine 21 / 7.68 s, IdeaClusterer 2 (1.98 + 0.52 s edges),
+CompositeResolver/PreResolverCleanup 1 (0.84 s). Durations: CutSell keep
+159.52 s (rendered 147.9), Cut.ai 167.83, Gold 141.67, RAW 367.0.
+
+**Next candidate root cause (R13, not fixed here -- needs the next RAW's
+forensic).** The stomach aside ("Tuve problemas de estómago en una
+temporada, en 2023, no hay que preguntar.", `clip_9f688aea`, 5.94 s, both
+references remove it) was removed in RAW 34043967265 through a `wrong_take`
+0.97 confirmation (D-097.7 R8) but KEPT this run: the multimodal layer
+confirmed only `retry_setup` 0.86 (hand reset at exit 0.978; retry take
+"Tuve problemas de estómago," 0.26 s later, similarity 0.662), clean-cut
+kept it (`valid_or_uncertain_speech`), Hybrid labelled it `winner` 0.9 with
+local corroboration (`retry_setup` + `dense_physical_reset:4`), and it is a
+singleton family. Deterministic restart evidence cannot claim it: aside <->
+clean delivery share a 3-token opening (D-097.A needs 4) with a disjoint
+remainder; the 4-token false start is above the 2-3-token short-prefix cap;
+in pure R9 order the aside <-> clean pair ranks 23rd of 101 (0.316), outside
+the budget even after R12. The recording-process chain (attempt -> its own
+0.26 s restart, confirmed `retry_setup` -> same-opening clean delivery 7 s
+later) is evidence no authority consumes for a `winner`-labelled singleton;
+the multimodal confirmation KIND varies run to run (wrong_take vs
+retry_setup). A principled rule at the AttemptReconstructor/IdeaClusterer,
+never a Video00 special case, is the next Level-1 candidate after the
+escalation-A families.
+
+Tests: `tests/test_cutsell_d097_9_bts_singleton_story_and_pair_order.py`
+(10): R11 derivation (bts-only -> complete; dropped idea -> incomplete;
+mixed; legacy row without basis -> incomplete; winner rows ignored;
+StoryValidator basis + non-blocking) and R12 (install no longer wraps the
+ranking; first pass and deferred pass each in descending score, zero-
+evidence neighbours behind every evidence pair, the retired wrapper's
+inversion shown; the D-042 dense-cluster fixture still reaches the late
+paraphrase pair inside 14 with no group over the cap; a 2-pair budget
+spends on the two strongest pairs, recorded with scores, cap marks and
+authority). Affected suites (D-042 minimum-sufficient set, D-097.8,
+D-097.B, D-094, editorial-slot resolution/policy, D-097 gate, D-097.2,
+D-097.A, D-048, grouping provider, D-058, D-083, final selection retry
+arbiter): green (see commit).
+
+**Offline qualification:** compileall clean; CleanCutBench both files;
+full `tests/test_cutsell_*.py` glob 2279/2279.
+
+**LAST VERIFIED RESULT:** RAW 34045158712 = FREEZE PASS, QC PASS, R9 and
+R10 PROVEN on the selection, MP4 NOT delivered (R11: story misclassified);
+R11 + R12 CODE FIXED / TESTS PASS.
+**NEXT AUTOMATIC ACTION:** commit + push; ONE authorised Modal RAW on the
+new head -- expected: the same drop of a corroborated bts singleton with
+`story_completeness = complete`, `DELIVERABLE_PENDING_HUMAN_WATCH_LISTEN`,
+`ranked_pair_budget` in descending score order with the same-opening and
+abandoned<->clean pairs inside the budget; per-fix report as D-097.10; then
+R13 from that run's forensic.
+**HUMAN ACTION REQUIRED:** YES, non-blocking -- A (pimples later-attempt
+tie preference, 5 of 6 runs; complementary "Síntomas" pair), F (watch +
+listen: runs 34040848026, 34042123557, 34043967265; 34045158712's MP4 is a
+review artifact), B (the D-097.D polarity micro-fragment "No" 0.8 s), B/A
+(waiver narrowing), F3b.

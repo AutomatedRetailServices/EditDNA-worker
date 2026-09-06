@@ -645,6 +645,15 @@ def build_flow_b_draft(
                 # D-097: cleanliness evidence rows and the all-failed outcome.
                 "delivery_cleanliness": cleanliness_rows,
                 "no_usable_realization": no_usable_realization,
+                # D-097.9 (R11): WHY the family has no usable realization --
+                # "no_usable_realization" (D-097.B: every delivery of an
+                # intended idea failed; the story is incomplete) or
+                # "single_bts_unusable" (D-097.8 R10: a corroborated lone
+                # `bts` take -- recording-process material, no audience idea
+                # vanishes with it, the story stays complete). RAW 34045158712
+                # dropped "¡Vamos!" correctly and then refused delivery
+                # because the two were indistinguishable downstream.
+                "no_usable_realization_basis": (semantic_best_take_reason if no_usable_realization else None),
                 "all_members_delete_recommended": all_delete_recommended,
                 "label_conflict_routed": bool(all_delete_recommended and not no_usable_realization),
                 "member_usability": {
@@ -853,6 +862,11 @@ def build_flow_b_draft(
             "no_usable_realization_removed_ids": [take.clip_id for take in no_usable_removed],
             "no_usable_realization_family_count": sum(
                 1 for row in judge_group_diagnostics if row.get("no_usable_realization")
+            ),
+            # D-097.9 (R11): the split the delivery gate reads.
+            "no_usable_realization_bts_singleton_count": sum(
+                1 for row in judge_group_diagnostics
+                if row.get("no_usable_realization") and row.get("no_usable_realization_basis") == "single_bts_unusable"
             ),
         },
     )

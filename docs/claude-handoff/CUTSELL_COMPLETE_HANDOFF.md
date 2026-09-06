@@ -556,6 +556,21 @@ Binding validation order (Product Owner, 2026-09-06):
   authority resolves singletons (now a no-usable-realization outcome, recorded).
   Pimples tie-break (escalation A) is the dominant remaining Level-1 item.
   Next: ONE RAW. Full entry: `docs/CUTSELL_DECISIONS.md` D-097.8.
+- D-097.9 (2026-09-06): RAW 34045158712 = Freeze PASS, QC PASS; R9 and R10
+  PROVEN on the selection (abandoned stomach attempt asked, confirmed 0.95 and
+  discarded; the corroborated bts singleton "¡Vamos!" dropped, as both
+  references do) -- but the drop was recorded like a D-097.B dropped idea, the
+  run was marked story-incomplete and the clean MP4 refused (R11: the judge row
+  now carries the no-usable BASIS; only dropped idea families make the story
+  incomplete; bts singletons are listed, never silent). Offline replay also
+  found the D-042 editorial-slot install wrapping the pair ranking at import
+  with a coverage-first re-order that spent R9's budget on zero-evidence
+  neighbours (R12: wrapper retired; its fairness concern is now a per-group
+  cap inside the one ranking authority; the ranked budget is recorded with
+  scores, cap marks and its authority). Ladder L1 27 / 56.21 s. Next Level-1 candidate after the
+  escalation-A families: the stomach aside kept on a run-to-run change of the
+  multimodal confirmation kind (R13, needs the next forensic). Next: ONE RAW.
+  Full entry: `docs/CUTSELL_DECISIONS.md` D-097.9.
 # HISTORICAL CUTSELL.AI 11 CONTINUITY
 
 A trusted CutSell.ai 11 recovery checkpoint is:
