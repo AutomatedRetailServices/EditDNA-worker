@@ -1,1 +1,2 @@
 Run isolated RunPod Support broad-GPU placement test after support response dated 2026-09-03.
+Retry 2: self-contained temporary Serverless template from known-good immutable image.
