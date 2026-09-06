@@ -51,7 +51,7 @@ from .take_grouping_provider import (
 from .take_judge import FRAGMENT_PENALTY_MARKERS, apply_delivery_cleanliness_evidence
 from .take_judge_provider import TakeJudgeProvider, safe_rank_takes
 from .temporal_editing import refine_takes_with_temporal_context
-from .whole_video_analysis import WholeVideoContext
+from .whole_video_analysis import WholeVideoContext, confirmed_recording_behavior_events
 
 
 def _group_id(project_id: str, key: str) -> str:
@@ -498,9 +498,22 @@ def build_flow_b_draft(
     # merge one into an unrelated group), silently discarding a decision
     # CompositeResolver already made. See reconcile_semantic_idea_
     # equivalence's own docstring for the exact RAW that exposed this.
+    # D-100 (D-099 Gap #1): `whole_video_context` is already a live local
+    # variable at this exact call site (used one call earlier for session
+    # partitioning's `context_text`) -- D-099 traced that it was never
+    # threaded any further into the deterministic restart-evidence merge
+    # loop below, so confirmed multimodal recording-behavior evidence
+    # (`performance_confirmation.py`'s `wrong_take`/`retry_setup` events)
+    # never reached the retry-family authority. This is the minimal bridge:
+    # a narrow, plain-tuple extraction (never the full context object) so
+    # `reconcile_semantic_idea_equivalence` can let that evidence corroborate
+    # a weaker lexical link than its existing rules require -- optional and
+    # purely additive; see `take_grouping.multimodal_corroborated_retry`.
+    confirmed_recording_evidence = confirmed_recording_behavior_events(whole_video_context)
     semantic_equivalence_groups, semantic_equivalence_diagnostics = reconcile_semantic_idea_equivalence(
         grouping.groups, kept, semantic_equivalence_arbiter,
         protected_ids=composite_split_ids,
+        confirmed_recording_evidence=confirmed_recording_evidence,
     )
 
     # D-058 Phase 1: one final cohesion-validation pass -- see

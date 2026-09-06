@@ -137,3 +137,37 @@ def safe_whole_video_analyze(
                 reason=reason,
             ),
         )
+
+
+_CONFIRMED_RECORDING_BEHAVIOR_KINDS = frozenset({"wrong_take", "retry_setup"})
+
+
+def confirmed_recording_behavior_events(
+    context: "WholeVideoContext | None",
+    *,
+    kinds: frozenset[str] = _CONFIRMED_RECORDING_BEHAVIOR_KINDS,
+) -> dict[str, Tuple[Tuple[str, float, float], ...]]:
+    """D-099 Gap #1 / D-100's evidence bridge: a narrow, read-only view of
+    the CONFIRMED recording-behavior events already produced by
+    `performance_confirmation.py` (never the dense, unconfirmed
+    `*_candidate` events), keyed by `source_asset_id`, as plain
+    `(kind, start, end)` tuples rather than `TemporalEvent` objects.
+
+    This exists so `take_grouping.py` (a pure lexical module) can receive
+    corroborating multimodal evidence without depending on this module or
+    on `WholeVideoContext` itself -- `take_grouping_provider.
+    reconcile_semantic_idea_equivalence` calls this once and passes the
+    plain mapping down. Never used to change what `whole_video_context`
+    itself is; a purely additive, optional extraction."""
+    if context is None:
+        return {}
+    result: dict[str, Tuple[Tuple[str, float, float], ...]] = {}
+    for source in context.sources:
+        matched = tuple(
+            (event.kind, event.start, event.end)
+            for event in source.events
+            if event.kind in kinds
+        )
+        if matched:
+            result[source.source_asset_id] = matched
+    return result

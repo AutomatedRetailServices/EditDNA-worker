@@ -12615,3 +12615,94 @@ optional, corroborating-only wiring of confirmed multimodal evidence into
 the existing retry-family restart-evidence rules) is NOT authorized by
 this entry and awaits explicit Product Owner authorization before any
 code is touched.
+
+## D-100 -- D-099 Gap #1 closed offline: confirmed multimodal recording-behavior evidence now corroborates retry-family grouping (bounded encargo, no RAW)
+
+Product Owner directive: implement ONLY D-099's highest-ranked Cut.ai-
+blocking gap (retry-family grouping blind to already-computed confirmed
+`wrong_take`/`retry_setup` multimodal evidence) as an evolutionary
+plumbing bridge, never a new perception system, grouping authority,
+editor, LLM call, or the full D-098 Multimodal Attempt Record.
+
+Exact bridge implemented:
+- `whole_video_analysis.confirmed_recording_behavior_events(context)` --
+  a new, narrow, read-only extraction of CONFIRMED `wrong_take`/
+  `retry_setup` `TemporalEvent`s (never the dense, unconfirmed
+  `*_candidate` events) into a plain `{source_asset_id: (kind, start,
+  end), ...}` mapping. `take_grouping.py` stays a pure lexical module
+  with zero dependency on `whole_video_analysis`/`WholeVideoContext`.
+- `take_grouping.multimodal_corroborated_retry(left, right,
+  confirmed_events)` -- a new pure function, tried ONLY after
+  `same_opening_restart`, `_safe_short_prefix_retry` and
+  `incomplete_attempt_completed_by_retry` all decline. Three independent
+  safety gates, each proven by its own negative-control test: (1) real
+  shared topical content beyond stopwords must exist between the two
+  takes (D-020 -- confirmed evidence with no textual link never merges);
+  (2) the pair must be asymmetric in completeness (one incomplete, one
+  complete -- the same shape D-097.12 already established as the safe
+  retry pattern; two complementary COMPLETE statements are excluded even
+  when they share real content and a confirmed event sits between them);
+  (3) the confirmed event must sit at the physical boundary between the
+  two takes, not merely somewhere in the source.
+- `take_grouping_provider.reconcile_semantic_idea_equivalence` gained an
+  optional `confirmed_recording_evidence` parameter, wired into the
+  existing restart-evidence merge loop and `_RESTART_EVIDENCE_KINDS`
+  (same D-083 marker gate, same arbiter-bypass treatment as the lexical
+  kinds). Merge rows carry `corroborating_evidence`/
+  `corroborating_event_kind`/`corroborating_event_range` when this kind
+  fired, distinguishing lexical from multimodal evidence in the audit
+  trail without exposing any benchmark-specific transcript text.
+- `pipeline.py` builds the narrow mapping from `whole_video_context`
+  (already a live local variable one call earlier, used only for
+  `context_text`) and passes it to the existing
+  `reconcile_semantic_idea_equivalence` call -- the entire bridge is this
+  one parameter, no new call site, no new stage.
+
+Not touched, per explicit scope: D-099 Gap #2 (unmeasured `MediaSignals`
+constants), Gap #3 (the 4-second visual-confirmation window),
+`visual_analysis.py`'s unwired provider, gaze/pose/expression models,
+phoneme realignment, framing/eye-contact, Human Gold layers, and the
+cohesion pass (`split_incohesive_retry_groups`)'s own `same_opening_
+restart` call site (D-100's bridge lives at the reconcile stage only,
+matching D-097.12's own precedent).
+
+Tests (`tests/test_cutsell_d100_multimodal_retry_corroboration.py`, 15
+new): positive control (a retry-compatible pair the existing lexical
+rules do NOT resolve on their own -- differing openings defeat both
+`same_opening_restart` and `incomplete_attempt_completed_by_retry` --
+merges once a confirmed event at the boundary corroborates real shared
+content); negative control 1 (confirmed event present, later take
+semantically unrelated -- no merge, through both the unit function and
+the full `reconcile_semantic_idea_equivalence` authority); negative
+control 2 (two complementary COMPLETE statements sharing real topical
+overlap plus a nearby confirmed event -- no merge, completeness-asymmetry
+gate); backward-compatibility (no evidence supplied -- identical BEFORE/
+AFTER behavior, `None`/`{}` both no-op); event-far-from-boundary and
+unconfirmed-candidate-kind controls; extraction-helper unit tests; and a
+precedence test proving an existing lexical rule is never re-labelled as
+multimodal when it already fired.
+
+Regression: `test_cutsell_clean_cut_core_evaluation_suite.py` 55/55 (incl.
+D-097.12's own fixture unchanged); `test_cutsell_d097_a_retry_family_
+completeness.py`, `test_cutsell_d097_9_bts_singleton_story_and_pair_
+order.py`, `test_cutsell_d097_2_render_timeline_and_evidence_
+completeness.py`, `test_cutsell_semantic_idea_equivalence_grouping.py`,
+both CleanCutBench parity files: all green (137/137). Full offline
+qualification: compileall clean; full suite 2942 passed / 5 failures,
+all confirmed pre-existing and unrelated (same set already recorded at
+D-099: `test_hybrid_story_guard_incomplete_retry.py` and
+`test_video00_modal_hybrid_semantic_parity.py`) / 1 pre-existing
+unrelated collection error (`test_semantic_stitch.py`).
+
+Limits / not proven here: this is an OFFLINE plumbing bridge only. No
+RAW was dispatched; whether real Video00 footage actually carries a
+confirmed `wrong_take`/`retry_setup` event for any currently-unresolved
+retry family, and what physical/MP4 effect this bridge has, remain
+unverified until a future authorized RAW. This does NOT close D-099 Gap
+#1 as a proven Cut.ai-parity improvement -- it closes the ARCHITECTURAL
+gap (grouping can now receive the evidence that already exists) that a
+future real-media proof would need in place first.
+
+**HUMAN ACTION REQUIRED:** NO to close this bounded task. A future RAW
+authorization is needed to prove or disprove this bridge's real-media
+effect; D-099 Gap #2 and Gap #3 remain separately unauthorized.

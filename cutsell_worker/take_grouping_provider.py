@@ -22,6 +22,7 @@ from .take_grouping import (
     _safe_short_prefix_retry,
     group_takes,
     incomplete_attempt_completed_by_retry,
+    multimodal_corroborated_retry,
     retry_similarity,
     same_opening_restart,
     semantic_key,
@@ -796,6 +797,7 @@ def reconcile_semantic_idea_equivalence(
     policy: SemanticEquivalenceGatePolicy = SemanticEquivalenceGatePolicy(),
     maximum_gap_sec: float = 30.0,
     protected_ids: frozenset[str] = frozenset(),
+    confirmed_recording_evidence: Mapping[str, Tuple[Tuple[str, float, float], ...]] | None = None,
 ) -> tuple[Tuple[Tuple[str, ...], ...], dict]:
     """Merge groups the lexical layer left separate only when a narrow
     semantic arbiter is confident they are recording attempts of the same
@@ -892,6 +894,18 @@ def reconcile_semantic_idea_equivalence(
             restart_kind = "safe_short_prefix_retry"
         if restart_kind is None:
             restart_kind = incomplete_attempt_completed_by_retry(left_take, right_take)
+        # D-100 (D-099 Gap #1, bounded encargo): only tried once every
+        # existing lexical rule above has already declined this pair --
+        # confirmed multimodal evidence CORROBORATES a weaker lexical link
+        # the deterministic rules above intentionally do not accept on
+        # their own; it never runs ahead of, or in place of, them. See
+        # `take_grouping.multimodal_corroborated_retry`'s own module
+        # comment for the three safety gates.
+        corroboration = None
+        if restart_kind is None and confirmed_recording_evidence:
+            corroborated = multimodal_corroborated_retry(left_take, right_take, confirmed_recording_evidence)
+            if corroborated is not None:
+                restart_kind, corroboration = corroborated
         if restart_kind is None:
             remaining_pairs.append(pair)
             continue
@@ -911,6 +925,15 @@ def reconcile_semantic_idea_equivalence(
             "confidence": 1.0, "reason": f"deterministic restart evidence ({restart_kind}); arbiter not consulted",
             "accepted_by": restart_kind,
         }
+        if corroboration is not None:
+            event_kind, event_start, event_end = corroboration
+            # Observability (D-100): make it possible to tell lexical vs.
+            # multimodal evidence apart in the audit trail, and which
+            # confirmed event/source range corroborated the merge, without
+            # ever exposing benchmark-specific transcript text.
+            row["corroborating_evidence"] = "confirmed_multimodal_event"
+            row["corroborating_event_kind"] = event_kind
+            row["corroborating_event_range"] = [round(event_start, 3), round(event_end, 3)]
         audit.append(row)
         restart_merged.append(row)
 
@@ -1441,6 +1464,10 @@ def _accept_complete_pairwise_bridge(
 
 _RESTART_EVIDENCE_KINDS = frozenset({
     "same_opening_restart", "same_opening_abandoned_start", "incomplete_attempt_completed_by_retry",
+    # D-100 (D-099 Gap #1): confirmed-multimodal-corroborated retry. Same
+    # deterministic-evidence treatment as the lexical kinds above -- never
+    # re-examined by the arbiter, subject to the same D-083 marker gate.
+    "multimodal_corroborated_retry",
 })
 
 
