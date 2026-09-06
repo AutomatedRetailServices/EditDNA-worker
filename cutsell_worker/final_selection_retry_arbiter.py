@@ -16,6 +16,8 @@ from dataclasses import replace
 import re
 import unicodedata
 
+from .editorial_slot_resolution_install import install_editorial_slot_resolution
+
 _TOKEN_RE = re.compile(r"[a-z0-9áéíóúñü]+(?:[-–][0-9]+)?%?", re.IGNORECASE)
 _STOP = frozenset({
     "a", "al", "and", "are", "as", "at", "be", "but", "by", "como", "con", "de", "del",
@@ -229,6 +231,11 @@ def apply_final_selection_retry_arbiter(draft):
 
 
 def install_final_selection_retry_arbiter() -> None:
+    # Install whole-video editorial-slot classification before the final deterministic
+    # retry arbiter. The latter can enforce one winner only after semantic family
+    # formation has correctly recognized competing complete realizations.
+    install_editorial_slot_resolution()
+
     from . import pipeline
 
     original = pipeline.build_flow_b_draft
