@@ -48,7 +48,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field, replace
 import hashlib
 import types
-from typing import Iterable, Mapping, Sequence
+from typing import Any, Iterable, Mapping, Sequence
 
 from .canonical_identity import mint_canonical_claim_id
 from .semantic_claims import Claim, extract_claims
@@ -558,6 +558,38 @@ def _extract_claims_for_clip(clip) -> tuple[Claim, ...]:
         return ()
 
 
+def missing_idea_coverage_idea_ids(coherence_diag: Mapping[str, Any], ledger: "SemanticLedger") -> tuple[str, ...]:
+    """D-097.2: `final_story_coherence_validation.missing_idea_coverage` rows
+    are dicts (`{"group_id", "member_clip_ids"}`, StoryValidator's own shape
+    since D-046) -- never bare idea ids. Both ledger consumers below hashed
+    the rows as ids, so the first RAW in which a whole retry family vanished
+    before Freeze (34032322925) died with `unhashable type: 'dict'` inside
+    the worker instead of reporting the missing idea. Resolve each row to
+    the ledger's semantic idea through the members' realizations; a row no
+    realization can be tied to keeps its group id so the parity report
+    names it as a mismatch rather than losing it."""
+    ids: list[str] = []
+    realizations = ledger.realizations()
+    for row in (coherence_diag.get("missing_idea_coverage") or ()):
+        if isinstance(row, str):
+            ids.append(row)
+            continue
+        if not isinstance(row, Mapping):
+            continue
+        member_ids = {str(cid) for cid in (row.get("member_clip_ids") or ()) if cid}
+        found: str | None = None
+        for record in realizations.values():
+            if record.semantic_idea_id and member_ids & set(record.clip_ids):
+                found = record.semantic_idea_id
+                break
+        group_id = str(row.get("group_id") or "")
+        if found is None and group_id:
+            found = group_id
+        if found:
+            ids.append(found)
+    return tuple(dict.fromkeys(ids))
+
+
 def build_semantic_ledger_shadow(draft) -> SemanticLedger:
     """Reconstructs a `SemanticLedger` from a fully-built `DraftTimeline`'s
     existing diagnostics -- read-only, called exactly once, after every
@@ -915,7 +947,7 @@ def build_semantic_ledger_shadow(draft) -> SemanticLedger:
 
     # --- Section 11: StoryValidator / CanonicalEditPlan coverage ---------
     coherence_diag = diagnostics.get("final_story_coherence_validation") or {}
-    for idea_id in (coherence_diag.get("missing_idea_coverage") or ()):
+    for idea_id in missing_idea_coverage_idea_ids(coherence_diag, ledger):
         if idea_id in ledger.ideas():
             ledger.record_coverage(CoverageRecord(
                 semantic_idea_id=idea_id, coverage_status="missing",
@@ -1016,7 +1048,7 @@ def build_ledger_parity_report(ledger: SemanticLedger, draft) -> LedgerParityRep
             ))
 
     coherence = diagnostics.get("final_story_coherence_validation") or {}
-    for idea_id in (coherence.get("missing_idea_coverage") or ()):
+    for idea_id in missing_idea_coverage_idea_ids(coherence, ledger):
         ledger_idea = ledger.ideas().get(idea_id)
         if ledger_idea is None:
             mismatches.append(LedgerMismatch("missing_idea", f"StoryValidator-flagged idea {idea_id!r} absent from ledger"))

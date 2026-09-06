@@ -6,6 +6,8 @@ RunPod-local perception and approved Google Hybrid semantics contract.
 """
 from __future__ import annotations
 
+import traceback
+
 import json
 from pathlib import Path, PurePosixPath
 import re
@@ -120,10 +122,14 @@ def run_focused_clean_cut_benchmark(payload: dict[str, Any]) -> dict[str, Any]:
                         content_type="video/mp4",
                     ))
             except Exception as exc:
+                # D-097.2: the failure record carries the traceback tail --
+                # RAW 34032322925 died with a bare "unhashable type: 'dict'"
+                # and no frame, which cost a paid run to locate.
                 failures.append({
                     "source_key": key,
                     "error_type": exc.__class__.__name__,
                     "error": str(exc)[:500],
+                    "traceback": traceback.format_exc()[-4000:],
                 })
 
         total_input = sum(float(item.get("source_duration_sec") or 0) for item in results)

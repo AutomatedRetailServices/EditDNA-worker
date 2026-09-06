@@ -11269,3 +11269,41 @@ head (first run where the delivery gate can pass); ladder + CLEAN RAW gate +
 perceptual review; per-fix MP4 report as D-097.3; then the pimples
 pre-resolver delete.
 **HUMAN ACTION REQUIRED:** NO (editorial-policy note above is informational).
+
+## D-097.2.1 -- RAW 34032322925 (head 3463aaa): worker died on a latent ledger bug the moment a whole retry family vanished; fixed, traceback capture added, no evidence produced
+
+**RAW COMPLETE (Modal run 34032322925, head `3463aaa`) -- NO ENGINE
+EVIDENCE.** The focused job failed inside `process_universal_clean_cut_
+sources` with a bare `TypeError: unhashable type: 'dict'` (no traceback is
+recorded on that path), so no result.json, no ladder, no MP4. Reproduced
+offline in 14 s with a fake ASR built from run 34029861712's own take texts
+and spans, a labelling judge and a rejecting arbiter on a synthetic 370 s
+source: `semantic_ledger.build_semantic_ledger_shadow` (and
+`build_ledger_parity_report`) iterate `final_story_coherence_validation.
+missing_idea_coverage` as bare idea ids, but StoryValidator has always
+emitted `{"group_id", "member_clip_ids"}` rows there (D-046). The two
+consumers therefore crash the worker in EXACTLY the runs where a whole
+retry family vanished before Freeze -- the D-050B shadow ledger had never
+met a non-empty list. Run 34032322925 is the first run on the D-097.2 head
+in which a family vanished (which family, and why, is unknown until the
+next run reports it: Freeze will block with IDEA_COVERAGE_LOST and the
+diagnostics will persist instead of the process dying).
+
+Fixes (owning modules): `semantic_ledger.missing_idea_coverage_idea_ids`
+resolves each row to the ledger idea through the members' realizations
+(bare-string rows still accepted; an unresolvable row keeps its group id so
+the parity report names it); both consumers use it.
+`focused_validation_job` records the traceback tail in its failure record
+so a worker exception is never a bare message again. Test:
+`test_ledger_shadow_and_parity_survive_a_vanished_family` (+ the
+end-to-end offline reproduction now completes and reports the block).
+
+**LAST VERIFIED RESULT:** RAW 34032322925 = WORKER ERROR (no evidence);
+latent ledger crash CODE FIXED / TESTS PASS offline; D-097.2 R1-R3 still
+unproven on video.
+**NEXT AUTOMATIC ACTION:** commit + push; ONE authorised Modal RAW on the
+new head; if Freeze blocks on IDEA_COVERAGE_LOST, diagnose the vanished
+family from the persisted diagnostics (a family with no usable
+realization must be dropped BY DECISION, D-097.B, never lost silently);
+otherwise ladder + CLEAN RAW gate + perceptual review + per-fix report.
+**HUMAN ACTION REQUIRED:** NO.

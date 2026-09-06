@@ -366,3 +366,51 @@ def test_reconcile_restart_evidence_keeps_the_d083_marker_gate():
     else:
         # No restart evidence fired for this pair at all -> nothing merged either way.
         assert merged == (("l",), ("r",))
+
+
+# ------------------------------------------ ledger: vanished family must not crash
+
+
+def test_ledger_shadow_and_parity_survive_a_vanished_family(tmp_path):
+    """RAW 34032322925: the first run in which a whole retry family vanished
+    before Freeze died with `unhashable type: 'dict'` in
+    semantic_ledger.build_semantic_ledger_shadow -- the StoryValidator's
+    missing_idea_coverage rows are dicts, both ledger consumers hashed them
+    as ids. The row must resolve to the idea and be reported, never crash."""
+    from cutsell_worker.contracts import DraftClip, DraftTimeline, EditStrategy, SCHEMA_VERSION
+    from cutsell_worker.semantic_ledger import (
+        build_ledger_parity_report, build_semantic_ledger_shadow, missing_idea_coverage_idea_ids,
+    )
+
+    def clip(cid, start, end, text, *, selected, idea):
+        return DraftClip(
+            clip_id=cid, source_asset_id="src", source_order=0, start=start, end=end, text=text,
+            caption_text=text, selected=selected, semantic_idea_id=idea, retry_family_id=idea,
+            take_group_id="tg_" + idea, realization_id="real_" + cid, source_span_id="span_" + cid,
+        )
+
+    kept = clip("k1", 0.0, 3.0, "the idea that survived", selected=True, idea="idea_keep")
+    gone_a = clip("g1", 5.0, 8.0, "the idea that vanished first try", selected=False, idea="idea_gone")
+    gone_b = clip("g2", 9.0, 12.0, "the idea that vanished second try", selected=False, idea="idea_gone")
+    draft = DraftTimeline(
+        schema_version=SCHEMA_VERSION, project_id="p", strategy=EditStrategy.STORYTELLING,
+        selected=(kept,), alternates=(), discarded=(gone_a, gone_b),
+        diagnostics={
+            "take_group_members": [["k1"], ["g1", "g2"]],
+            "take_judge_groups": [
+                {"group_id": "tg_idea_keep", "ranked": [{"clip_id": "k1"}], "selected_clip_id": "k1"},
+                {"group_id": "tg_idea_gone", "ranked": [{"clip_id": "g1"}, {"clip_id": "g2"}], "selected_clip_id": None},
+            ],
+            "final_story_coherence_validation": {
+                "missing_idea_coverage": [{"group_id": "tg_idea_gone", "member_clip_ids": ["g1", "g2"]}],
+            },
+        },
+    )
+    ledger = build_semantic_ledger_shadow(draft)  # must not raise
+    ids = missing_idea_coverage_idea_ids(draft.diagnostics["final_story_coherence_validation"], ledger)
+    assert ids and all(isinstance(i, str) for i in ids)
+    report = build_ledger_parity_report(ledger, draft)  # must not raise either
+    assert report is not None
+    # A bare-string row (legacy shape) and an unresolvable row are tolerated too.
+    legacy = {"missing_idea_coverage": ["idea_x", {"group_id": "tg_unknown", "member_clip_ids": ["nope"]}]}
+    assert missing_idea_coverage_idea_ids(legacy, ledger) == ("idea_x", "tg_unknown")

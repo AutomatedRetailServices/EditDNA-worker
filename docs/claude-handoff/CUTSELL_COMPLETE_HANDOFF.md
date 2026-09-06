@@ -485,6 +485,13 @@ Binding validation order (Product Owner, 2026-09-06):
   34.85 s / 21 regions (selection), F1 vs Cut.ai 0.788, vs Gold 0.850; keep
   146.6 s. Next: ONE RAW to prove the MP4 effect. Full entry:
   `docs/CUTSELL_DECISIONS.md` D-097.2.
+- D-097.2.1 (2026-09-06): the RAW on the D-097.2 head (34032322925) died in the
+  worker with `unhashable type: 'dict'` -- a latent bug in the D-050B shadow
+  ledger (both consumers hashed StoryValidator's `missing_idea_coverage` dict
+  rows as ids), hit the first time a whole retry family vanished before
+  Freeze. Reproduced offline end-to-end, fixed in `semantic_ledger`
+  (`missing_idea_coverage_idea_ids`), traceback capture added to the focused
+  job. No engine evidence from that run; next RAW pending.
 # HISTORICAL CUTSELL.AI 11 CONTINUITY
 
 A trusted CutSell.ai 11 recovery checkpoint is:
