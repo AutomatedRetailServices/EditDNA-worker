@@ -32,6 +32,8 @@ SCHEMA_VERSION = "cutsell.active_path_identity.v1"
 _COMPONENT_PROBES: tuple[tuple[str, str, str, tuple[str, ...]], ...] = (
     ("AttemptReconstructor", "D-021", "stage_status", ("attempt_reconstruction",)),
     ("TakeSegmentation", "D-021", "stage_status", ("take_segmentation",)),
+    ("AudioSilenceEvidence", "D-095.2", "stage_status", ("audio_silence",)),
+    ("InteriorGapTrim", "D-046/D-095.2", "diagnostics", ("post_selection_interior_gap_trim",)),
     ("HybridSemanticPass", "D-081", "stage_status", ("hybrid_editorial",)),
     ("IdeaClusterer.semantic_tier", "D-020/D-044", "diagnostics", ("semantic_idea_equivalence",)),
     ("IdeaClusterer.grouping_safety", "D-058/D-083/D-085/D-094.F3", "diagnostics", ("distinct_idea_grouping_safety",)),

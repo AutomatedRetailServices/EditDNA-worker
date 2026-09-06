@@ -28,6 +28,7 @@ from .pipeline import build_flow_b_draft
 from .providers import NoopSemanticProvider, SemanticProvider, safe_semantic_classify
 from .semantic_idea_equivalence import SemanticEquivalenceArbiter
 from .silence_analysis import word_silence_gaps
+from .audio_silence import audio_silence_events, merge_audio_silence_into_context
 from .source_sampling import sample_source_frames
 from .take_grouping_provider import TakeGroupingProvider
 from .take_judge_provider import TakeJudgeProvider
@@ -247,6 +248,19 @@ def process_local_sources(
         trace.complete("whole_video_context", status="not_requested", source_count=0, event_count=0, frame_count=0)
 
     whole_context = merge_local_events_into_context(whole_context, local_performance.timelines)
+
+    # D-095.2: objective audio dead-air intervals (ffmpeg silencedetect on
+    # the source) published as whole-video events -- the one audio-based
+    # silence signal available before Selection Freeze. word_silence_gaps
+    # below is ASR-timing-derived and blind to words whose timestamps are
+    # stretched over real silence. Evidence + observability only.
+    audio_silence_by_source = audio_silence_events(local_paths)
+    whole_context = merge_audio_silence_into_context(whole_context, audio_silence_by_source)
+    trace.complete(
+        "audio_silence",
+        interval_count=sum(len(items) for items in audio_silence_by_source.values()),
+        source_count=len(audio_silence_by_source),
+    )
     notify("analyzing", 45)
 
     gaps = word_silence_gaps(transcript_tuple)

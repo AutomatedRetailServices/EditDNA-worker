@@ -10699,3 +10699,108 @@ diversification merged in D-095 -- none of them was in that worker. Of the
 components that WERE present, the ladder shows which ones acted and which
 did not on each Level-1 region (D-095.1 entry). The next RAW carries the
 active-path identity so this question is answered by the run itself.
+
+### D-095.1 -- Four-way diagnostic of the latest valid artifact (run 33995806350 / df3946e): LEVEL-1 root causes and authorities
+
+**Evidence (CPU ladder runs 34007175554 / 34007551722 / 34007873613 /
+34007969868 on `video00-modal-33995806350-1`; no paid compute):** Cut.ai
+projects to 26 RAW chunks (167.8 s kept), Human Gold to 21 (141.7 s),
+CutSell froze 172.9 s in 23 fragments; render verification located 23/23
+frozen fragments in the diagnostic MP4 (166.6 s) with ONE source-order
+inversion (the resolver-restored "Al terminar mi contrato" take rendered
+after the CTA -- the F9 defect, now proven physically). Selection F1: CutSell
+vs Cut.ai 0.77, vs Gold 0.73 (Cut.ai vs Gold 0.90). Selection-level LEVEL_1:
+21 regions / 60.7 s (36 % of Cut.ai keep); FINAL-MP4 physical LEVEL_1 (after
+the renderer's trailing-silence trims): 14 regions / 54.8 s + 3.8 s of
+sub-tolerance edges. LEVEL_2: 16.3 s (the conclusion restatement Cut.ai
+also keeps). LEVEL_3 (protect): 281 s.
+
+**LEVEL-1 root causes, ranked by seconds, with the responsible authority
+(evidence in the run's own diagnostics):**
+| # | Region(s) | s | What CutSell did | Authority / cause | On HEAD already? |
+|---|---|---|---|---|---|
+| R1 | pimples family 191.8-221.6 | 25.5 | kept the monolith (198.8-210.5), discarded the micro take (191.8-197.5, pre-resolver: semantic label `failed` 0.85 + local `visual_fumble`/`dense_physical_reset`) and the "Otro sintoma" take (213.6-221.6); hybrid labelled monolith and "Otro sintoma" both `winner` 0.95, DeliveryScorer tie-break 0.684 vs 0.674 | hybrid semantic labels + BestTake tie-break; both references keep exactly the two takes CutSell dropped | F8 family-window labels (D-094.3) unproven live; D-042 competition may still prefer the superset -- needs a physical take-quality signal or a rhythm/brevity rule (Product Owner evidence, D-095.2 note) |
+| R2 | acne 171.3-183.8 | 11.8 | kept a 12.5 s candidate for 7 words: failed attempts + a 2.36 s interior silence (render 70.8-73.1 s) inside the take; both references keep ~0.6 s + the clean 185.2-190.3 retake; the interior-gap trimmer saw no word gap >= 0.26 s (ASR timings stretched over the silence); QC then invalidated the render (LINGERING_ACCIDENTAL_SILENCE, unrepairable mid-segment) | no audio-based dead-air evidence before Freeze; the only objective silence measurement lived in post-render QC | FIXED in D-095.2 |
+| R3 | "Al terminar mi contrato" 82.4-90.4 (+ order inversion) | 7.1 | deterministic grouping paired it with the retake 95.6-104.0; the safety pass asked the arbiter about exactly this pair (1 checked / 6 prior confirmations reused) and split on a "different idea" verdict ("hable con" vs "cambie de ginecologa"); both kept, the first restored after the CTA | IdeaClusterer evidence handling (arbiter false negative on a self-corrected retry); placement = F9 | F9 fixed offline (D-094.3); D-042 editorial-function prompt merged, unproven live; the equivalence verdict itself is open |
+| R4 | "Sintomas que tuve" 140.8-148.0 | 7.25 | arbiter merged it with "Sintomas que no me parecian" (0.95, "both reflect on noticing subtle symptoms in hindsight"), BestTake kept one; BOTH references keep both | semantic arbiter over-merge; by D-042 doctrine this is one editorial slot, by both oracles it is two beats | oracle-vs-doctrine tension recorded, no engine change |
+| R5 | conclusion 313.9-314.6, 319.4-319.8 (+ 14.5 s LEVEL_2) | 1.1 (+14.5 L2) | the "Soy la primera en mi familia" restatement is a RESOLVED_COMPOSITE member with the winning conclusion (5-10 % number claims judged distinct) | RealizationResolver composite of two complete same-slot realizations | F4b same-number dedup floor (D-094.3) + D-042 unproven live |
+| R6 | 26 edge regions | 7.8 frozen / 3.8 physical | frozen exits ~0.4-1.3 s later than both references; `render.tighten_trailing_silence` removes most of it (trims of 0.79-1.32 s measured); tight entries of 0.36-0.54 s at three take starts remain | BoundaryEngine (entry edges) | open, second priority |
+| R7 | gastritis tail 268.4-269.4 | 1.0 | trailing material after the sentence | BoundaryEngine | open |
+
+**Architecture-level assessment (required by D-095 when LEVEL-1 failures are
+widespread):** the failures sit in four independent authorities, but they
+share ONE missing capability rather than an excess of layers: CutSell had no
+objective PHYSICAL take-cleanliness signal before Selection Freeze --
+dead air, failed-attempt debris and reset residue inside a candidate were
+invisible to segmentation (ASR-timing based), to DeliveryScorer (no speech
+density / dead-air penalty) and to the interior-gap trimmer (word gaps +
+visual resets only), and surfaced for the first time in post-render QC as
+an unrepairable finding. The layered rescue/guard architecture did not
+cause R1-R7 and is not what is preventing Cut.ai parity; the proposed
+simplified path (Attempt Detection -> Recording Process Removal -> Retry
+Family Formation -> Clean Take Ranking -> ...) maps onto strengthening the
+EXISTING AttemptReconstructor / interior-gap trimmer / DeliveryScorer with
+that physical signal, not onto a rewrite. No rewrite is proposed. The
+perceptual System Watch+Listen gate (addendum) is the post-render
+counterpart of the same signal.
+
+**Why prior work did not show in the last video:** run 33995806350 predates
+D-094.3 (F8/F9/F13/F14/F4b), the D-042 editorial-slot line and the pair-
+budget diversification; none of them was in that worker. The next RAW
+carries `active_path_identity` so this is verified by the run itself.
+
+### D-095.2 -- Objective audio dead air inside a kept take is removed before Freeze (R2 root cause)
+
+**Change (existing components only, no new authority):**
+- `cutsell_worker/audio_silence.py` (new evidence source): ffmpeg
+  `silencedetect` on the SOURCE (-35 dB, >= 0.60 s), once per source,
+  published as `audio_silence_interval` events on the whole-video context --
+  the same channel local-performance reset events already use. Never raises;
+  `stage_status.audio_silence` records interval/source counts.
+- `flow_b.py`: merges those events right after the local-performance merge.
+- `post_selection_interior_gap_trim.py` (the component that already owns
+  interior physical gaps, Boundary-flavored, post-BestTake, pre-Freeze): a
+  new first evidence path `long_audio_silence` -- a proven silence >= 1.20 s
+  (the exact LINGERING_ACCIDENTAL_SILENCE threshold post-render QC applies)
+  lying inside a selected clip with >= 0.35 s margins is cut between
+  `silence.start + 0.12` and `silence.end - 0.12` (natural pause edges kept);
+  words are partitioned by midpoint and their timings clamped to the piece;
+  pieces carry `__psig*` fragment ids, `parent_semantic_clip_id`,
+  `boundary_reason = remove_interior_audio_silence`; the split budget and
+  all existing word-gap/visual-reset paths are unchanged. Rejections are
+  traced (`audio_silence_edge_margin`, `..._no_words_on_side`,
+  `..._piece_too_short`).
+- `final_boundary_authority.py`: `preserve_polished_interior_gap` now
+  recognises physical siblings by `parent_semantic_clip_id` (the D-036/D-046
+  provenance key) and not only by identical `clip_id`, so the envelope
+  expansion can never re-fill a removed gap through an ASR word that
+  straddles the cut.
+- `active_path_identity`: markers `AudioSilenceEvidence` (D-095.2) and
+  `InteriorGapTrim`.
+
+**Selection vs Boundary ownership:** semantic membership is untouched (every
+word of the take survives, in order, in the same idea); only physical dead
+air is removed -- the case the trimmer's own contract describes. It resolves
+the pending F15 decision (mid-take silence policy) under the D-095 directive,
+which lists "unusable pauses" and "fragments of failed attempts" as LEVEL-1
+recording-process material and whose both references cut this exact dead
+air; the Product Owner can veto by setting the threshold above any real
+silence (no flag added on purpose: a kept >= 1.2 s silence is a guaranteed
+render invalidation).
+
+**QA (independent pass, Engineering did not self-certify):** (1) can it
+remove speech? -- no: -35 dB for >= 1.2 s is the QC's own definition of no
+speech; words are never dropped, only re-timed; (2) can it change
+membership? -- no: pieces keep `parent_semantic_clip_id`/realization, the
+plan and StoryValidator resolve fragments by the D-046 contract; (3) can the
+envelope pass undo it? -- no: preservation test with a straddling source
+word; (4) can it fire at clip edges? -- no: 0.35 s margins, trailing silence
+stays `tighten_trailing_silence`'s; (5) does it change the visual-reset path?
+-- no: the multimodal test still splits; (6) ffmpeg missing/timeout? --
+returns () and the stage count shows 0 (visible, not silent). Verdict: PASS.
+
+**Tests:** `tests/test_cutsell_d095_2_audio_silence_interior_trim.py` (13,
+incl. an ffmpeg tone-silence-tone measurement and the Video00-constant guard).
+**Qualification:** compileall clean; trimmer/boundary/context/D-046/identity/
+ladder suites 87/87; CleanCutBench 54/54 LEGACY and 54/54 AUTHORITATIVE;
+full `tests/test_cutsell_*.py` glob 2100/2100 (2073 D-095 baseline + 14 ladder/identity + 13 new).

@@ -36,6 +36,85 @@ _TERMINAL_MARKS = (".", "!", "?", "…")
 # covered, via the general `effective_parent_semantic_clip_id` contract
 # instead of a Video00-specific patch.
 BOUNDARY_REASON_INTERIOR_PERFORMANCE_GAP = "remove_interior_performance_gap"
+# D-095.2: a proven audio silence (ffmpeg silencedetect, the SAME measurement
+# post_render_media_qc uses to invalidate a render) lying inside a selected
+# clip is objective dead air -- recording-process material, never spoken
+# content. Word-gap evidence cannot see it when ASR word timestamps are
+# stretched over the silence (run 33995806350: a 2.36 s interior silence
+# with no word gap >= 0.26 s around it). Cut inside the silence, leaving a
+# natural pause edge on both sides; words are partitioned by their midpoint
+# and their timings clamped to the piece so no later envelope pass can
+# re-expand across the removed dead air.
+BOUNDARY_REASON_INTERIOR_AUDIO_SILENCE = "remove_interior_audio_silence"
+AUDIO_SILENCE_EVENT_KIND = "audio_silence_interval"
+# Same threshold post_render_media_qc applies as LINGERING_ACCIDENTAL_SILENCE:
+# anything at or above it inside a kept take is guaranteed to invalidate the
+# render later, so it is removed here, at the Boundary-flavored stage that
+# already owns interior physical gaps.
+LONG_AUDIO_SILENCE_SEC = 1.20
+AUDIO_SILENCE_EDGE_PAD_SEC = 0.12
+
+
+def _clamp_word(word, start: float, end: float):
+    new_start = min(max(float(word.start), start), end)
+    new_end = max(min(float(word.end), end), new_start)
+    if abs(new_start - float(word.start)) < 1e-9 and abs(new_end - float(word.end)) < 1e-9:
+        return word
+    return replace(word, start=new_start, end=new_end)
+
+
+def _audio_silence_split_candidate(
+    clip: DraftClip,
+    words,
+    events,
+    *,
+    long_audio_silence_sec: float,
+    minimum_edge_margin_sec: float,
+    audio_pad_sec: float,
+    minimum_piece_sec: float,
+):
+    """Return (left_words, right_words, left_end, right_start, silence, rejections)
+    for the longest qualifying audio silence inside ``clip``; the first
+    element is None when no silence qualifies. ``rejections`` lists every
+    interior audio silence >= long_audio_silence_sec that did not qualify,
+    with the reason (observability)."""
+    silences = sorted(
+        (
+            (float(event.get("start") or 0.0), float(event.get("end") or 0.0))
+            for event in events
+            if _kind(event.get("kind")) == AUDIO_SILENCE_EVENT_KIND
+        ),
+        key=lambda item: -(item[1] - item[0]),
+    )
+    rejections: list[dict] = []
+    clip_start, clip_end = float(clip.start), float(clip.end)
+    for start, end in silences:
+        duration = end - start
+        if duration < long_audio_silence_sec:
+            continue
+        if end <= clip_start or start >= clip_end:
+            continue
+        if start < clip_start + minimum_edge_margin_sec or end > clip_end - minimum_edge_margin_sec:
+            rejections.append({"reason": "audio_silence_edge_margin", "gap_start": start, "gap_end": end})
+            continue
+        left_end = start + audio_pad_sec
+        right_start = end - audio_pad_sec
+        if right_start - left_end < 0.10:
+            rejections.append({"reason": "audio_silence_too_short_after_padding", "gap_start": start, "gap_end": end})
+            continue
+        midpoint = (start + end) / 2.0
+        left_words = tuple(w for w in words if (float(w.start) + float(w.end)) / 2.0 <= midpoint)
+        right_words = tuple(w for w in words if (float(w.start) + float(w.end)) / 2.0 > midpoint)
+        if not left_words or not right_words:
+            rejections.append({"reason": "audio_silence_no_words_on_side", "gap_start": start, "gap_end": end})
+            continue
+        if left_end - clip_start < minimum_piece_sec or clip_end - right_start < minimum_piece_sec:
+            rejections.append({"reason": "audio_silence_piece_too_short", "gap_start": start, "gap_end": end})
+            continue
+        left_words = tuple(_clamp_word(w, clip_start, left_end) for w in left_words)
+        right_words = tuple(_clamp_word(w, right_start, clip_end) for w in right_words)
+        return left_words, right_words, left_end, right_start, (start, end), rejections
+    return None, (), 0.0, 0.0, None, rejections
 
 
 def _kind(value: str) -> str:
@@ -78,6 +157,8 @@ def split_selected_interior_performance_gaps(
     minimum_edge_margin_sec: float = 0.35,
     max_splits_per_clip: int = 3,
     include_rejected_diagnostics: bool = False,
+    long_audio_silence_sec: float = LONG_AUDIO_SILENCE_SEC,
+    audio_pad_sec: float = AUDIO_SILENCE_EDGE_PAD_SEC,
 ) -> tuple[tuple[DraftClip, ...], tuple[dict, ...]]:
     """Split selected clips only around speech-free performance resets.
 
@@ -107,11 +188,85 @@ def split_selected_interior_performance_gaps(
         while pending:
             clip = pending.pop(0)
             words = tuple(sorted(clip.words, key=lambda word: (float(word.start), float(word.end))))
+            events = _events_for_source(diagnostics, clip.source_asset_id)
+
+            # D-095.2: objective audio dead air first. It needs no visual
+            # reset corroboration -- a proven >= long_audio_silence_sec
+            # silence contains no speech by measurement -- and it does not
+            # depend on ASR word gaps at all.
+            if split_count < max_splits_per_clip and len(words) >= 2:
+                left_words, right_words, left_end, right_start, silence, audio_rejections = (
+                    _audio_silence_split_candidate(
+                        clip, words, events,
+                        long_audio_silence_sec=long_audio_silence_sec,
+                        minimum_edge_margin_sec=minimum_edge_margin_sec,
+                        audio_pad_sec=audio_pad_sec,
+                        minimum_piece_sec=minimum_edge_margin_sec,
+                    )
+                )
+                if include_rejected_diagnostics:
+                    for rejection in audio_rejections:
+                        audit.append({
+                            "authority": "post_selection_interior_gap_trace",
+                            "decision": "reject",
+                            "evidence_mode": "long_audio_silence",
+                            "parent_clip_id": original.clip_id,
+                            "parent_start": round(float(original.start), 3),
+                            "parent_end": round(float(original.end), 3),
+                            "gap_start": round(float(rejection["gap_start"]), 3),
+                            "gap_end": round(float(rejection["gap_end"]), 3),
+                            "gap_sec": round(float(rejection["gap_end"]) - float(rejection["gap_start"]), 3),
+                            "reason": rejection["reason"],
+                        })
+                if left_words is not None:
+                    left = replace(
+                        clip,
+                        clip_id=_child_id(clip, "l", float(clip.start), float(left_end)),
+                        end=float(left_end),
+                        text=_text(left_words),
+                        caption_text=_text(left_words),
+                        words=left_words,
+                        parent_semantic_clip_id=root_parent,
+                        parent_realization_id=root_realization,
+                        boundary_reason=BOUNDARY_REASON_INTERIOR_AUDIO_SILENCE,
+                    )
+                    right = replace(
+                        clip,
+                        clip_id=_child_id(clip, "r", float(right_start), float(clip.end)),
+                        start=float(right_start),
+                        text=_text(right_words),
+                        caption_text=_text(right_words),
+                        words=right_words,
+                        parent_semantic_clip_id=root_parent,
+                        parent_realization_id=root_realization,
+                        boundary_reason=BOUNDARY_REASON_INTERIOR_AUDIO_SILENCE,
+                    )
+                    left = replace(left, render_fragment_id=left.clip_id)
+                    right = replace(right, render_fragment_id=right.clip_id)
+                    pending[0:0] = [left, right]
+                    split_count += 1
+                    audit.append({
+                        "authority": "post_selection_interior_gap_trim",
+                        "decision": "split",
+                        "parent_clip_id": original.clip_id,
+                        "parent_text": str(original.text or ""),
+                        "evidence_mode": "long_audio_silence",
+                        "removed_gap_start": round(float(left_end), 3),
+                        "removed_gap_end": round(float(right_start), 3),
+                        "removed_gap_sec": round(float(right_start) - float(left_end), 3),
+                        "audio_silence_start": round(float(silence[0]), 3),
+                        "audio_silence_end": round(float(silence[1]), 3),
+                        "physical_event_count": 0,
+                        "break_event_count": 0,
+                        "left_word": str(left_words[-1].text),
+                        "right_word": str(right_words[0].text),
+                    })
+                    continue
+
             if len(words) < 4 or split_count >= max_splits_per_clip:
                 original_pieces.append(clip)
                 continue
 
-            events = _events_for_source(diagnostics, clip.source_asset_id)
             best = None
             for index in range(len(words) - 1):
                 left_word = words[index]

@@ -192,6 +192,12 @@ def _rebuild_clip(clip: DraftClip, words: tuple[Word, ...], start: float, end: f
     )
 
 
+def _same_semantic_parent(left: DraftClip, right: DraftClip) -> bool:
+    left_key = getattr(left, "parent_semantic_clip_id", None) or left.clip_id
+    right_key = getattr(right, "parent_semantic_clip_id", None) or right.clip_id
+    return left_key == right_key
+
+
 def _reconcile_same_source_overlaps(
     originals: tuple[DraftClip, ...],
     expanded: list[DraftClip],
@@ -211,7 +217,12 @@ def _reconcile_same_source_overlaps(
         words = source_map.get(left.source_asset_id, ())
         original_gap = float(right_orig.start) - float(left_orig.end)
 
-        if left_orig.clip_id == right_orig.clip_id and original_gap > 0.02:
+        # D-036/D-046 provenance: physical siblings of one frozen delivery
+        # may carry fragment ids (post_selection_interior_gap_trim's
+        # `__psig*` pieces) instead of the parent's clip_id -- the shared
+        # key is parent_semantic_clip_id. D-095.2: without this, an
+        # audio-silence split could be re-filled by the envelope expansion.
+        if _same_semantic_parent(left_orig, right_orig) and original_gap > 0.02:
             fixed_left = _rebuild_clip(
                 left, words, float(left.start), min(float(left.end), float(left_orig.end))
             )

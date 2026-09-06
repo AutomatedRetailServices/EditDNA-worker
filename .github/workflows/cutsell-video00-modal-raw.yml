@@ -476,6 +476,8 @@ jobs:
           echo "--- diagnostics.unified_selection_reasoner (must be inert -- V1 deactivates it) ---"
           jq '.diagnostics.unified_selection_reasoner // {status:"absent"}' artifact/video00-modal.json
 
+          echo "--- D-095.2 audio dead-air evidence + interior-gap trimmer (splits / rejections) ---"
+          jq '{audio_silence: (.stage_status.audio_silence // "absent"), interior_gap_splits: (.diagnostics.post_selection_interior_gap_trim // []), interior_gap_audio_rejections: [(.diagnostics.post_selection_interior_gap_trace // [])[] | select(.evidence_mode == "long_audio_silence")]}' artifact/video00-modal.json
           echo "--- diagnostics.take_judge_groups (retry families + DeliveryScorer scores) ---"
           jq '.diagnostics.take_judge_groups // []' artifact/video00-modal.json
 
