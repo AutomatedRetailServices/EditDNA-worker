@@ -12476,3 +12476,82 @@ this cycle (bounded-encargo instruction: no further audits/doc rewrites).
 **HUMAN ACTION REQUIRED:** NO further action needed to close this bounded
 task. Authorize a fresh RAW separately to confirm the MP4 effect before
 folding this into the standing D-097.x continuity thread.
+
+## D-098 -- Canonical engine architecture evolution (documentation only, no engine behavior change)
+
+Product Owner directive: evolve the CutSell canon so the project reads as
+ONE continuous architecture instead of a chain of disconnected `Rxx`
+fixes, by adapting Perception/Understanding target concepts (media
+perception, performance understanding, multimodal attempt evidence,
+attempt relationships, Clean Raw intelligence, Best Take/Boundary
+intelligence, downstream perceptual Watch+Listen, Cut.ai parity, Human
+Gold sufficiency/ranking/composite intelligence, decision ledger,
+confidence/abstention, human-feedback evaluation memory, future learned
+components) INTO the existing architecture, never replacing it, never
+standing beside it as a second architecture, never creating a second
+editor. This is documentation/canon work only; no code was touched.
+
+New canonical document:
+`docs/CUTSELL_CANONICAL_ENGINE_ARCHITECTURE_D098.md` -- the 20-layer
+evolved target architecture, an old-canon -> evolved-canon compatibility
+map (every existing D-096/D-097.x component classified EXISTING /
+EXISTING+NEEDS CONSOLIDATION / PARTIALLY IMPLEMENTED / MISSING-FUTURE and
+mapped to its target layer, with PRESERVE / CONSOLIDATE LATER / FUTURE as
+the only allowed actions -- nothing marked obsolete, deleted, renamed, or
+reset), the explicit distinction between upstream perceptual
+understanding (informs editorial decisions) and downstream perceptual
+Watch+Listen QA (diagnoses/routes, never edits), the Milestone 1 (RAW ->
+Cut.ai parity, current) / Milestone 2 (Cut.ai -> Human Gold, downstream,
+not started) roadmap, and the anti-loop/execution contract restated
+(architecture is not authorization; a new D-xxx number is not progress by
+itself; progress is CLOSED product capabilities; synthetic-only proof
+never closes a real-media capability).
+
+Binding conclusions of this cycle:
+- the architecture is evolutionary, not a replacement -- D-096 remains
+  the architectural/root-cause foundation and D-097.x remains the
+  accepted implementation evolution on top of it, both preserved intact;
+- RAW -> Cut.ai commercial parity remains the current active milestone;
+  Human Gold capabilities (editorial function, delivery sufficiency,
+  information gain, minimum sufficient set, good-vs-good ranking,
+  composite necessity, multimodal performance ranking) are downstream,
+  roadmap-only, and not authorized by this document;
+- upstream Perception/Understanding and downstream Watch+Listen QA are
+  architecturally distinct roles that may share underlying analysis
+  primitives but never share authority -- downstream Watch+Listen never
+  silently rewrites selection;
+- D-097.12's stomach-family selection proof (offline/CleanCutBench,
+  55/55) remains valid and unchanged;
+- D-097.13's synthetic Clean Raw diagnostic checkpoint
+  (`benchmarks/clean_raw_checkpoint.py`) remains valid as a MECHANISM
+  proof; it demonstrated the render/QC/perceptual/membership-correlation
+  chain end-to-end on synthetic proxy media only -- real Video00
+  stomach-family MP4 proof remains PENDING (this sandbox's AWS
+  credentials are invalid for the persisted S3 bucket: `ListBuckets`/
+  `GetObject` both fail with `InvalidAccessKeyId`) and must never be
+  characterized as real Video00 proof;
+- no proposed target-layer concept was found to conflict with an accepted
+  D-096/D-097.x authority contract in this pass (see the new document's
+  Section 7); every mapped row is additive (CONSOLIDATE LATER / FUTURE),
+  never substitutive;
+- the exact next engineering investigation is the Perception +
+  Understanding active dataflow map (what perceptual/audio/visual/
+  semantic evidence already exists today, where it is stored, which
+  active downstream authorities actually consume it) -- named here as the
+  next candidate, explicitly NOT authorized by this document, and
+  requiring separate Product Owner authorization before any code is
+  touched;
+- NO engine behavior was changed to produce this entry or the new
+  document; NO RAW, provider, S3, or infrastructure work was performed.
+
+CLAUDE.md's "Current mission" / "Current state pointer" sections are left
+as the D-097.x operational pointer (still accurate and current); a
+one-line pointer to this document and its milestone/investigation summary
+was added separately rather than restructuring those sections, per the
+bounded documentation-only scope of this task.
+
+**HUMAN ACTION REQUIRED:** NO. This entry closes the bounded
+documentation task. The Perception + Understanding dataflow investigation
+named above is NOT begun by this entry and awaits explicit Product Owner
+authorization (D-091 continuity does not apply across this task's STOP
+boundary).

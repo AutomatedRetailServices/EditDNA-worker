@@ -146,6 +146,42 @@ Without explicit user approval:
 - do not expose/move secrets;
 - do not create materially new recurring paid infrastructure.
 
+## Canonical engine architecture pointer (D-098)
+`docs/CUTSELL_CANONICAL_ENGINE_ARCHITECTURE_D098.md` is the evolutionary
+target-architecture canon: D-096 (foundation) + D-097.x (accepted
+implementation) + a Perception/Understanding evolution layer, read as ONE
+continuous architecture, never a second system. It classifies every
+future capability's relationship to today's code (EXISTING / EXISTING +
+NEEDS CONSOLIDATION / PARTIALLY IMPLEMENTED / MISSING-FUTURE, action
+PRESERVE / CONSOLIDATE LATER / FUTURE only -- nothing marked obsolete).
+- **TARGET ARCHITECTURE:** 20 layers, Perception (L1-4) -> Clean Raw/
+  Cut.ai (L5-9) -> Human Gold (L10-16) -> engine growth/learning (L17-20);
+  upstream perceptual understanding (informs editorial decisions) is
+  architecturally distinct from downstream perceptual Watch+Listen QA
+  (diagnoses/routes, never edits selection) -- see the document's
+  Section 4.
+- **CURRENT ACTIVE MILESTONE:** Milestone 1, RAW -> Cut.ai Commercial
+  Parity. Milestone 2 (Cut.ai -> Human Gold) is downstream and not
+  started.
+- **CURRENT PARTIAL / CLOSED CAPABILITIES:** D-097.12's stomach-family
+  selection fix is CLOSED at the offline/CleanCutBench level (55/55);
+  D-097.13's Clean Raw diagnostic checkpoint
+  (`benchmarks/clean_raw_checkpoint.py`) is a PROVEN MECHANISM on
+  synthetic proxy media only -- real Video00 MP4 proof for the stomach
+  family remains PENDING and must never be described as real proof;
+  `perceptual_watch_listen.py` v1 has 4 EVALUATED capabilities and 4
+  `NOT_IMPLEMENTED` (facial expression, gesture continuity, clipped-
+  phoneme ASR realign, framing/eye contact) -- never silently PASS.
+- **CURRENT EXACT NEXT ENGINEERING INVESTIGATION:** the Perception +
+  Understanding active dataflow map (what evidence exists today, where
+  it lives, which authorities actually consume it) -- NOT authorized
+  until the Product Owner explicitly greenlights it; D-098's own
+  documentation task ended before this investigation began.
+- **Bounded-task STOP precedence:** an explicit task-local STOP
+  condition (as D-098's was) always takes precedence over D-091
+  autonomous continuity for that task's own next step; D-091 continuity
+  resumes normally for any separately-authorized objective.
+
 ## Current state pointer
 The live current state is the newest `D-xxx` entry in `docs/CUTSELL_DECISIONS.md`
 (D-097 / D-097.1 / D-097.2 at the time of writing: the approved post-audit
