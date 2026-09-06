@@ -1,0 +1,51 @@
+name: CutSell Run38 Build Watch
+
+on:
+  push:
+    branches:
+      - cutsell/mobile-v1-clean
+    paths:
+      - .github/workflows/cutsell-run38-build-watch.yml
+
+permissions:
+  actions: read
+  contents: write
+
+jobs:
+  record-build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      TARGET_SHA: 1fedb18b20214efdda7d8c6186d01cf36886b1a8
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: cutsell/mobile-v1-clean
+      - name: Resolve exact Run38 image build
+        id: resolve
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          found=""
+          for attempt in $(seq 1 60); do
+            runs=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs?head_sha=$TARGET_SHA&per_page=100")
+            found=$(printf '%s' "$runs" | jq -c '[.workflow_runs[] | select(.name == "CutSell Feature Worker One-Shot Build" and .event == "push" and .head_sha == env.TARGET_SHA)][0] // empty')
+            if [ -n "$found" ]; then break; fi
+            sleep 10
+          done
+          test -n "$found" || { echo 'Run38 image build run not found'; exit 2; }
+          printf '%s' "$found" | jq '{run_id:.id,name,status,conclusion,head_sha,event,created_at,updated_at,html_url}' > run38-build.json
+          cat run38-build.json
+      - name: Record Run38 image build status
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p ops
+          cp run38-build.json ops/run38-build-watch.json
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add ops/run38-build-watch.json
+          git commit -m "Record Run38 image build run" || true
+          git push origin HEAD:cutsell/mobile-v1-clean

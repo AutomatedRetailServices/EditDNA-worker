@@ -1,0 +1,16 @@
+# CutSell GPU worker runtime only.
+# PyTorch/CUDA are provided by the base image and must not be replaced by pip.
+boto3>=1.34
+redis>=5.0
+rq>=2.6
+requests>=2.32.3
+python-dotenv>=1.0.1
+faster-whisper==1.0.0
+# Dense local temporal eyes. Pin MediaPipe to the legacy Holistic API that
+# exposes face + pose + hands in one tracked video pass on Python 3.11.
+# MediaPipe supplies its compatible cv2 dependency; do not add/replace the
+# base worker's OpenCV stack explicitly.
+mediapipe==0.10.21
+SQLAlchemy>=2.0
+psycopg[binary]>=3.1
+sentry-sdk>=2.0

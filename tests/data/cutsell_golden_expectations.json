@@ -1,0 +1,18 @@
+{
+  "Editdna bloopers videos/Bloppers11.mp4": {
+    "must_not_select_substrings": [
+      "okay stop"
+    ]
+  },
+  "Editdna bloopers videos/Bloppers13.mp4": {
+    "must_not_select_substrings": [
+      "why is it so wobbly"
+    ]
+  },
+  "Editdna bloopers videos/Bloppers16.mp4": {
+    "must_not_select_substrings": [
+      "what am i saying",
+      "one more cuz"
+    ]
+  }
+}

@@ -1,0 +1,38 @@
+{
+  "rq": {
+    "matches": [
+      {
+        "job_id": "0006f310-1522-4e7c-9bad-72788b871c0d",
+        "status": "started",
+        "meta": {
+          "benchmark_id": "run38-gold-32165730181-1fedb18b20214efdda7d8c6186d01cf36886b1a8",
+          "dataset_role": "clean_cut_gold_raw",
+          "source_prefix": "Editdna longform validation/",
+          "brain_backend": "runpod_local",
+          "external_brain_calls_enabled": true,
+          "hybrid_provider": "google",
+          "hybrid_primary_model": "gemini-3.5-flash-lite",
+          "staging_pod_id": "4bwxwcpw7aoj43",
+          "worker_image_tag": "1fedb18b20214efdda7d8c6186d01cf36886b1a8",
+          "stage": "processing",
+          "progress_percent": 3,
+          "current_source": "Editdna longform validation/VIDEO-2026-07-30-09-18-03.mp4"
+        },
+        "enqueued_at": "2026-08-18 17:35:11.439115+00:00",
+        "started_at": "2026-08-18 17:35:12.010284+00:00",
+        "ended_at": "None",
+        "result_present": false
+      }
+    ]
+  },
+  "staging_pods": [
+    {
+      "id": "4bwxwcpw7aoj43",
+      "name": "cutsell-staging-worker",
+      "desiredStatus": "RUNNING",
+      "imageName": "ghcr.io/automatedretailservices/cutsell-worker@sha256:b63ae70218d19211d2873c578b233dffd15461f52803293c6e8895a95f255ae0",
+      "costPerHr": 0.17,
+      "adjustedCostPerHr": null
+    }
+  ]
+}

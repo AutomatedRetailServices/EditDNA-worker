@@ -1,0 +1,6 @@
+trigger=golden-full
+video_limit=8
+mode=full
+asr_model=medium
+source_keys=
+requested_at=2026-08-08

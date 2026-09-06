@@ -1,0 +1,148 @@
+name: Round21 AWS GPU Preflight
+
+on:
+  push:
+    branches:
+      - cutsell/mobile-v1-clean
+    paths:
+      - .github/workflows/round21-aws-gpu-preflight.yml
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+env:
+  SOURCE_SHA: f4ea2f9d5676d260205d6fe8364b99b35e4eed39
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      RUNPOD_API_KEY: ${{ secrets.RUNPOD_API_KEY }}
+      RUNPOD_TEMPLATE_NAME: EditDNA-Worker-2
+    steps:
+      - name: Publish exact Round21 preflight run id
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          content=$(printf '{"run_id":%s,"head_sha":"%s","source_sha":"%s","status":"in_progress"}' "$GITHUB_RUN_ID" "$GITHUB_SHA" "$SOURCE_SHA" | base64 -w0)
+          current=$(curl --silent --show-error --header "Authorization: Bearer $GH_TOKEN" --header "Accept: application/vnd.github+json" "https://api.github.com/repos/$GITHUB_REPOSITORY/contents/ops/round21-aws-preflight-live.json?ref=cutsell/mobile-v1-clean")
+          sha=$(printf '%s' "$current" | jq -r '.sha // empty')
+          payload=$(jq -n --arg msg "ops: publish Round21 AWS preflight run $GITHUB_RUN_ID" --arg content "$content" --arg branch "cutsell/mobile-v1-clean" --arg sha "$sha" '{message:$msg,content:$content,branch:$branch} + (if $sha=="" then {} else {sha:$sha} end)')
+          curl --fail --silent --show-error --request PUT --url "https://api.github.com/repos/$GITHUB_REPOSITORY/contents/ops/round21-aws-preflight-live.json" --header "Authorization: Bearer $GH_TOKEN" --header "Accept: application/vnd.github+json" --header "Content-Type: application/json" --data "$payload" >/dev/null
+          echo "round21_preflight_run_id=$GITHUB_RUN_ID"
+
+      - name: Checkout branch
+        uses: actions/checkout@v4
+        with:
+          ref: cutsell/mobile-v1-clean
+          fetch-depth: 1
+
+      - name: Load masked AWS credentials from proven RunPod template
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "${RUNPOD_API_KEY:-}" || { echo 'RUNPOD_API_KEY missing'; exit 4; }
+          curl --fail --silent --show-error \
+            --url "https://rest.runpod.io/v1/templates" \
+            --header "Authorization: Bearer $RUNPOD_API_KEY" \
+            --output /tmp/templates.json
+          TEMPLATE=$(jq -c --arg name "$RUNPOD_TEMPLATE_NAME" '[.[] | select(.name == $name)][0]' /tmp/templates.json)
+          test "$TEMPLATE" != "null" || { echo 'RunPod baseline template not found'; exit 5; }
+          for key in AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_REGION; do
+            value=$(printf '%s' "$TEMPLATE" | jq -r --arg key "$key" '.env[$key] // empty')
+            test -n "$value" || { echo "$key missing from RunPod template"; exit 6; }
+            echo "::add-mask::$value"
+            printf '%s=%s\n' "$key" "$value" >> "$GITHUB_ENV"
+            if [ "$key" = "AWS_REGION" ]; then
+              printf 'AWS_DEFAULT_REGION=%s\n' "$value" >> "$GITHUB_ENV"
+            fi
+          done
+          echo 'aws_credentials_source=runpod_template'
+
+      - name: AWS GPU capability probe
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pip install -q 'boto3>=1.34'
+          python - <<'PY'
+          import json, os, sys
+          import boto3
+
+          result = {
+              'credentials_present': bool(os.getenv('AWS_ACCESS_KEY_ID') and os.getenv('AWS_SECRET_ACCESS_KEY')),
+              'region': os.getenv('AWS_REGION') or os.getenv('AWS_DEFAULT_REGION') or '',
+              'sts': None,
+              'ec2_describe': False,
+              'gpu_offerings': [],
+              'default_vpc': None,
+              'subnets': [],
+              'security_groups': [],
+              'ecs_gpu_ami': None,
+              'errors': [],
+          }
+          if not result['credentials_present']:
+              result['errors'].append('aws_credentials_missing')
+              open('aws-gpu-preflight.json','w').write(json.dumps(result, indent=2))
+              print(json.dumps(result, indent=2))
+              sys.exit(2)
+
+          region = result['region'] or 'us-east-1'
+          try:
+              sts = boto3.client('sts', region_name=region)
+              ident = sts.get_caller_identity()
+              result['sts'] = {'Account': ident.get('Account'), 'Arn': ident.get('Arn')}
+          except Exception as e:
+              result['errors'].append('sts:' + repr(e))
+
+          try:
+              ec2 = boto3.client('ec2', region_name=region)
+              ec2.describe_account_attributes(AttributeNames=['supported-platforms'])
+              result['ec2_describe'] = True
+              families = ['g4dn.xlarge','g5.xlarge','g6.xlarge','g6e.xlarge','p3.2xlarge']
+              resp = ec2.describe_instance_type_offerings(
+                  LocationType='availability-zone',
+                  Filters=[{'Name':'instance-type','Values':families}],
+                  MaxResults=1000,
+              )
+              result['gpu_offerings'] = sorted([
+                  {'instance_type': x.get('InstanceType'), 'az': x.get('Location')}
+                  for x in resp.get('InstanceTypeOfferings', [])
+              ], key=lambda x:(x['instance_type'] or '',x['az'] or ''))
+              vpcs = ec2.describe_vpcs(Filters=[{'Name':'is-default','Values':['true']}]).get('Vpcs',[])
+              if vpcs:
+                  result['default_vpc'] = vpcs[0].get('VpcId')
+                  subs = ec2.describe_subnets(Filters=[{'Name':'vpc-id','Values':[result['default_vpc']]}]).get('Subnets',[])
+                  result['subnets'] = [{'id':s.get('SubnetId'),'az':s.get('AvailabilityZone'),'map_public_ip':s.get('MapPublicIpOnLaunch')} for s in subs]
+                  sgs = ec2.describe_security_groups(Filters=[{'Name':'vpc-id','Values':[result['default_vpc']]}]).get('SecurityGroups',[])
+                  result['security_groups'] = [{'id':s.get('GroupId'),'name':s.get('GroupName')} for s in sgs]
+          except Exception as e:
+              result['errors'].append('ec2:' + repr(e))
+
+          try:
+              ssm = boto3.client('ssm', region_name=region)
+              p = ssm.get_parameter(Name='/aws/service/ecs/optimized-ami/amazon-linux-2/gpu/recommended/image_id')
+              result['ecs_gpu_ami'] = p.get('Parameter',{}).get('Value')
+          except Exception as e:
+              result['errors'].append('ssm_gpu_ami:' + repr(e))
+
+          open('aws-gpu-preflight.json','w').write(json.dumps(result, indent=2))
+          safe = dict(result)
+          if safe.get('sts'):
+              safe['sts'] = {'Account': safe['sts'].get('Account'), 'Arn': 'masked'}
+          print(json.dumps(safe, indent=2))
+          ok = bool(result['sts'] and result['ec2_describe'] and result['gpu_offerings'] and result['ecs_gpu_ami'])
+          sys.exit(0 if ok else 3)
+          PY
+
+      - name: Upload AWS preflight diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cutsell-round21-aws-gpu-preflight
+          path: aws-gpu-preflight.json
+          if-no-files-found: warn
+          retention-days: 14

@@ -1,0 +1,107 @@
+{
+  "schema_version": "cutsell.video00.regression_qa.v1",
+  "baseline_run_id": 33126865755,
+  "expected_selected_count": 23,
+  "checks": [
+    {
+      "id": "cancer_hook_preserved",
+      "kind": "required_exact",
+      "text": "tenía cáncer de tiroides y no lo sabía."
+    },
+    {
+      "id": "sonography_good_take_part1_present",
+      "kind": "required_exact",
+      "text": "Nunca se nos ocurrió hacer un chequeo de la tiroides por sonografía porque siempre en mis exámenes la tiroides salía como que estaba funcionando"
+    },
+    {
+      "id": "sonography_good_take_completion_present",
+      "kind": "required_exact",
+      "text": "perfectamente."
+    },
+    {
+      "id": "sonography_bad_take_absent",
+      "kind": "forbidden_contains",
+      "text": "pues porque cada año que me hacía mínimo dos estados"
+    },
+    {
+      "id": "biopsy_nodule_preserved",
+      "kind": "required_exact",
+      "text": "En la sonografía de tiroides apareció un nódulo sospechoso de 3 centímetros que se mandó a biopsia."
+    },
+    {
+      "id": "papillary_cancer_preserved",
+      "kind": "required_exact",
+      "text": "La biopsia confirmó que era un cáncer papilar de tiroides. Síntomas que tuve según yo era sintomática pero si hubo indicios ahora mirándose atrás."
+    },
+    {
+      "id": "acne_back_preserved",
+      "kind": "required_exact",
+      "text": "Por temporada me salió un acné en la espalda con la que yo resolvía con resorcina."
+    },
+    {
+      "id": "pimples_micro_1_present",
+      "kind": "required_exact",
+      "text": "También me salían espinillas."
+    },
+    {
+      "id": "pimples_micro_2_present",
+      "kind": "required_exact",
+      "text": "Era como un rush,"
+    },
+    {
+      "id": "pimples_micro_3_present",
+      "kind": "required_exact",
+      "text": "una alergia."
+    },
+    {
+      "id": "pimples_bad_monolith_absent",
+      "kind": "forbidden_contains",
+      "text": "También me salían espinillas en esta parte de aquí detrás de la oreja y todo el cuello"
+    },
+    {
+      "id": "pimples_later_winner_present",
+      "kind": "required_exact",
+      "text": "Otro síntoma era que me salían espinillas como si fuera una alergia de esta parte aquí detrás de la oreja y en el cuello. Me salía por"
+    },
+    {
+      "id": "hair_loss_preserved",
+      "kind": "required_exact",
+      "text": "Se me caía mucho el pelo. Cuando me lavaba el pelo perdía mucho pelo y pensaba que era por el estrés."
+    },
+    {
+      "id": "gastritis_preserved",
+      "kind": "required_exact",
+      "text": "Tuve problemas de digestión en donde me hicieron una endoscopía y dijeron que tenía gastritis. Nada severo pero tenía gastritis y me mandaron tres meses con pastillas."
+    },
+    {
+      "id": "family_context_preserved",
+      "kind": "required_exact",
+      "text": "Esta es mi experiencia. Soy la única en mi familia que tiene este tipo de cáncer. Por eso no creo y está comprobado científicamente que los cánceres son hereditarios. Más bien solo un 5 -10 % son de hereditario. Mayormente son nuestras elecciones de vida así que cuídate."
+    },
+    {
+      "id": "cta_preserved",
+      "kind": "required_exact",
+      "text": "Por eso cuídate, alimentate bien, hidrátate y haz ejercicio."
+    },
+    {
+      "id": "pimples_micro_order",
+      "kind": "required_order",
+      "texts": [
+        "También me salían espinillas.",
+        "Era como un rush,",
+        "una alergia.",
+        "Otro síntoma era que me salían espinillas como si fuera una alergia de esta parte aquí detrás de la oreja y en el cuello. Me salía por"
+      ]
+    },
+    {
+      "id": "sonography_good_before_diagnosis",
+      "kind": "required_order",
+      "texts": [
+        "Nunca se nos ocurrió hacer un chequeo de la tiroides por sonografía porque siempre en mis exámenes la tiroides salía como que estaba funcionando",
+        "perfectamente.",
+        "En la sonografía de tiroides apareció un nódulo sospechoso de 3 centímetros que se mandó a biopsia.",
+        "La biopsia confirmó que era un cáncer papilar de tiroides. Síntomas que tuve según yo era sintomática pero si hubo indicios ahora mirándose atrás."
+      ]
+    }
+  ]
+}

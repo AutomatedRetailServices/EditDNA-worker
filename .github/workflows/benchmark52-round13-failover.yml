@@ -1,0 +1,363 @@
+name: Round 13 Capacity Failover Orchestrator
+run-name: round-13 capacity-failover 00-02-03 benchmark
+
+on:
+  push:
+    branches:
+      - cutsell/mobile-v1-clean
+    paths:
+      - .github/workflows/benchmark52-round13-failover.yml
+
+permissions:
+  contents: read
+  actions: write
+
+jobs:
+  orchestrate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 150
+    env:
+      RUNPOD_API_KEY: ${{ secrets.RUNPOD_API_KEY }}
+      REDIS_URL: ${{ secrets.REDIS_URL }}
+      GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+      RUNPOD_TEMPLATE_NAME: EditDNA-Worker-2
+      SOURCE_SHA: f4ea2f9d5676d260205d6fe8364b99b35e4eed39
+      IMAGE_DIGEST: sha256:57ce35db2eee1348576d6745608a71faeb6f8167d8ef4e2c0177d0033d1f91d4
+      IMMUTABLE_IMAGE: ghcr.io/automatedretailservices/cutsell-worker:f4ea2f9d5676d260205d6fe8364b99b35e4eed39@sha256:57ce35db2eee1348576d6745608a71faeb6f8167d8ef4e2c0177d0033d1f91d4
+      POD_ID: ''
+
+    steps:
+      - name: Install orchestration dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pip install -q 'redis>=5.0' 'rq>=2.6' 'boto3>=1.34'
+
+      - name: Build safe runtime environment and snapshot RQ
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "${RUNPOD_API_KEY:-}"
+          test -n "${REDIS_URL:-}"
+          test -n "${GEMINI_API_KEY:-}"
+          echo "::add-mask::$GEMINI_API_KEY"
+          curl --fail --silent --show-error --url "https://rest.runpod.io/v1/pods" --header "Authorization: Bearer $RUNPOD_API_KEY" --output pods-before.json
+          jq -r '.[] | select(.name == "cutsell-staging-worker") | .id' pods-before.json | while read -r stale_id; do
+            [ -z "$stale_id" ] && continue
+            code=$(curl --silent --show-error --write-out '%{http_code}' --request DELETE --url "https://rest.runpod.io/v1/pods/$stale_id" --header "Authorization: Bearer $RUNPOD_API_KEY" --output /tmp/stale-delete.txt)
+            echo "stale_delete=$stale_id http=$code"
+            test "$code" = "204" || test "$code" = "404"
+          done
+          sleep 3
+          curl --fail --silent --show-error --url "https://rest.runpod.io/v1/templates" --header "Authorization: Bearer $RUNPOD_API_KEY" --output templates.json
+          TEMPLATE=$(jq -c --arg name "$RUNPOD_TEMPLATE_NAME" '[.[] | select(.name == $name)][0]' templates.json)
+          test "$TEMPLATE" != "null"
+          printf '%s' "$TEMPLATE" | jq -c '{ASR_DEVICE:.env.ASR_DEVICE,ASR_ENABLED:.env.ASR_ENABLED,BAD_TAKES_ENABLED:.env.BAD_TAKES_ENABLED,BOUNDARY_REFINER_ENABLED:.env.BOUNDARY_REFINER_ENABLED,BOUNDARY_REFINER_HEAD_STEP_SEC:.env.BOUNDARY_REFINER_HEAD_STEP_SEC,BOUNDARY_REFINER_MIN_DURATION_SEC:.env.BOUNDARY_REFINER_MIN_DURATION_SEC,BOUNDARY_REFINER_TAIL_STEP_SEC:.env.BOUNDARY_REFINER_TAIL_STEP_SEC,FFMPEG_BIN:.env.FFMPEG_BIN,FFPROBE_BIN:.env.FFPROBE_BIN,HEAD_TRIM_SEC:.env.HEAD_TRIM_SEC,PRESIGN_EXPIRES:.env.PRESIGN_EXPIRES,PYTHONPATH:.env.PYTHONPATH,S3_ACL:.env.S3_ACL,S3_BUCKET:.env.S3_BUCKET,S3_PREFIX:.env.S3_PREFIX,TAIL_TRIM_SEC:.env.TAIL_TRIM_SEC,VISION_ENABLED:.env.VISION_ENABLED,VISION_INTERVAL_SEC:.env.VISION_INTERVAL_SEC,VISION_MAX_SAMPLES:.env.VISION_MAX_SAMPLES,VISUAL_BAD_THRESHOLD:.env.VISUAL_BAD_THRESHOLD,WHISPER_DEVICE:.env.WHISPER_DEVICE,WHISPER_MODEL:.env.WHISPER_MODEL,W_FACE:.env.W_FACE,W_VISION:.env.W_VISION,W_VISUAL:.env.W_VISUAL,AWS_ACCESS_KEY_ID:.env.AWS_ACCESS_KEY_ID,AWS_SECRET_ACCESS_KEY:.env.AWS_SECRET_ACCESS_KEY,AWS_REGION:.env.AWS_REGION} | with_entries(select(.value != null and .value != ""))' > safe-env.json
+          if jq -e 'has("OPENAI_API_KEY") or has("EDITDNA_USE_LLM") or has("EDITDNA_LLM_MODEL")' safe-env.json >/dev/null; then exit 7; fi
+          for key in AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_REGION S3_BUCKET; do
+            value=$(jq -r --arg key "$key" '.[$key] // empty' safe-env.json)
+            test -n "$value"
+            echo "::add-mask::$value"
+            echo "$key=$value" >> "$GITHUB_ENV"
+          done
+          echo "VOLUME_MOUNT=$(printf '%s' "$TEMPLATE" | jq -r '.volumeMountPath // "/workspace"')" >> "$GITHUB_ENV"
+          python - <<'PY'
+          import json, os
+          from redis import Redis
+          from rq import Worker
+          c=Redis.from_url(os.environ['REDIS_URL'])
+          json.dump(sorted(w.name for w in Worker.all(connection=c)), open('rq-before.json','w'))
+          PY
+
+      - name: Capacity failover until one fresh worker is live
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json, os, subprocess, time
+          from datetime import datetime, timezone
+          from redis import Redis
+          from rq import Worker
+
+          api=os.environ['RUNPOD_API_KEY']
+          redis_url=os.environ['REDIS_URL']
+          gemini=os.environ['GEMINI_API_KEY']
+          image=os.environ['IMMUTABLE_IMAGE']
+          mount=os.environ['VOLUME_MOUNT']
+          before=set(json.load(open('rq-before.json')))
+          safe=json.load(open('safe-env.json'))
+          c=Redis.from_url(redis_url)
+          gpu_order=[
+              'NVIDIA A40',
+              'NVIDIA RTX A5000',
+              'NVIDIA RTX A6000',
+              'NVIDIA L4',
+              'NVIDIA RTX A4000',
+              'NVIDIA GeForce RTX 3090',
+              'NVIDIA GeForce RTX 4090',
+          ]
+          clouds=['COMMUNITY','SECURE']
+
+          def req(method,url,payload=None):
+              cmd=['curl','--silent','--show-error','--write-out','\\n%{http_code}','--request',method,'--url',url,'--header',f'Authorization: Bearer {api}']
+              if payload is not None:
+                  cmd += ['--header','Content-Type: application/json','--data',json.dumps(payload)]
+              out=subprocess.check_output(cmd,text=True)
+              body,code=out.rsplit('\n',1)
+              return int(code), body
+
+          def delete(pod):
+              code,_=req('DELETE',f'https://rest.runpod.io/v1/pods/{pod}')
+              print(f'delete pod={pod} http={code}',flush=True)
+              if code not in (204,404):
+                  raise RuntimeError(f'failed deleting pod {pod}: {code}')
+              time.sleep(3)
+
+          env=dict(safe)
+          env.update({
+              'REDIS_URL':redis_url,
+              'GEMINI_API_KEY':gemini,
+              'CUTSELL_BRAIN_BACKEND':'runpod_local',
+              'CUTSELL_EDITORIAL_MODE':'clean_cut',
+              'CUTSELL_ASR_MODEL':'medium',
+              'CUTSELL_CLEAN_CUT_JUDGE':'0',
+              'CUTSELL_HYBRID_PROVIDER':'google',
+              'CUTSELL_HYBRID_LLM_ENABLED':'1',
+              'CUTSELL_HYBRID_PRIMARY_MODEL':'gemini-3.5-flash-lite',
+              'CUTSELL_HYBRID_ESCALATION_MODEL':'gemini-3.6-flash',
+              'CUTSELL_HYBRID_MAX_SESSION_USD':'0.0075',
+              'CUTSELL_HYBRID_MAX_EDIT_USD':'0.50',
+              'CUTSELL_HYBRID_TEST_BUDGET_USD':'0.50',
+          })
+          for bad in ('OPENAI_API_KEY','EDITDNA_USE_LLM','EDITDNA_LLM_MODEL'):
+              env.pop(bad,None)
+
+          chosen=None
+          attempts=[]
+          for cloud in clouds:
+              for gpu in gpu_order:
+                  payload={
+                      'name':'cutsell-staging-worker', 'imageName':image,
+                      'cloudType':cloud, 'computeType':'GPU', 'gpuCount':1,
+                      'gpuTypeIds':[gpu], 'gpuTypePriority':'custom', 'interruptible':False,
+                      'containerDiskInGb':30, 'volumeInGb':20, 'volumeMountPath':mount,
+                      'env':env,
+                  }
+                  code,body=req('POST','https://rest.runpod.io/v1/pods',payload)
+                  if code != 201:
+                      try: err=json.loads(body)
+                      except Exception: err={'body':body[:500]}
+                      print('create_rejected='+json.dumps({'cloud':cloud,'gpu':gpu,'http':code,'error':err},ensure_ascii=False),flush=True)
+                      attempts.append({'cloud':cloud,'gpu':gpu,'create_http':code,'result':'create_rejected'})
+                      continue
+                  info=json.loads(body); pod=str(info.get('id') or '')
+                  if not pod: raise RuntimeError('RunPod 201 without pod id')
+                  created=time.time()
+                  print('pod_created='+json.dumps({'pod':pod,'cloud':cloud,'gpu':gpu,'costPerHr':info.get('costPerHr')},ensure_ascii=False),flush=True)
+
+                  runtime_seen=False
+                  runtime_deadline=time.time()+150
+                  last=None
+                  while time.time()<runtime_deadline:
+                      gcode,gbody=req('GET',f'https://rest.runpod.io/v1/pods/{pod}')
+                      if gcode != 200:
+                          print(f'pod_get_http={gcode}',flush=True); time.sleep(10); continue
+                      p=json.loads(gbody)
+                      runtime=p.get('runtime')
+                      snap={'desiredStatus':p.get('desiredStatus'),'lastStatusChange':p.get('lastStatusChange'),'runtime':bool(runtime)}
+                      if snap != last:
+                          print('pod_snapshot='+json.dumps({'pod':pod,'cloud':cloud,'gpu':gpu,**snap},ensure_ascii=False),flush=True); last=snap
+                      if isinstance(runtime,dict):
+                          runtime_seen=True; break
+                      time.sleep(10)
+                  if not runtime_seen:
+                      attempts.append({'cloud':cloud,'gpu':gpu,'pod':pod,'result':'no_runtime'})
+                      print(f'capacity_fail pod={pod} cloud={cloud} gpu={gpu}',flush=True)
+                      delete(pod)
+                      continue
+
+                  worker_deadline=time.time()+420
+                  while time.time()<worker_deadline:
+                      now=datetime.now(timezone.utc)
+                      for w in Worker.all(connection=c):
+                          hb=w.last_heartbeat
+                          if not hb or w.name in before: continue
+                          if hb.tzinfo is None: hb=hb.replace(tzinfo=timezone.utc)
+                          if hb.timestamp() >= created-5 and (now-hb).total_seconds() <= 45 and w.get_state() in {'idle','busy'}:
+                              chosen=(pod,cloud,gpu,w.name)
+                              break
+                      if chosen: break
+                      time.sleep(10)
+                  if chosen:
+                      attempts.append({'cloud':cloud,'gpu':gpu,'pod':pod,'result':'fresh_worker','worker':chosen[3]})
+                      print('chosen='+json.dumps({'pod':pod,'cloud':cloud,'gpu':gpu,'worker':chosen[3]},ensure_ascii=False),flush=True)
+                      break
+                  attempts.append({'cloud':cloud,'gpu':gpu,'pod':pod,'result':'runtime_without_rq'})
+                  print(f'boot_fail pod={pod} cloud={cloud} gpu={gpu} runtime_seen=true rq=false',flush=True)
+                  delete(pod)
+              if chosen: break
+
+          json.dump(attempts,open('capacity-attempts.json','w'),ensure_ascii=False,indent=2)
+          if not chosen:
+              raise SystemExit('No GPU/cloud candidate produced a fresh RQ worker')
+          pod,cloud,gpu,worker=chosen
+          with open(os.environ['GITHUB_ENV'],'a') as f:
+              f.write(f'POD_ID={pod}\n')
+              f.write(f'CHOSEN_CLOUD={cloud}\n')
+              f.write(f'CHOSEN_GPU={gpu}\n')
+              f.write(f'FRESH_WORKER={worker}\n')
+          PY
+
+      - name: Enqueue exact 00-02-03 benchmark
+        id: enqueue
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import os
+          from redis import Redis
+          from rq import Queue
+          keys=[
+            'Editdna longform validation/VIDEO-2026-07-30-09-18-03.mp4',
+            'Editdna longform validation/VIDEO-2026-07-30-09-24-13.mp4',
+            'Editdna longform validation/VIDEO-2026-07-30-10-22-46.mp4',
+          ]
+          c=Redis.from_url(os.environ['REDIS_URL'])
+          payload={'benchmark_id':f"focused-round13-failover-{os.environ['GITHUB_RUN_ID']}-{os.environ['SOURCE_SHA'][:12]}",'source_prefix':'Editdna longform validation/','source_keys':keys,'expected_external_brain_calls_enabled':True}
+          job=Queue('cutsell',connection=c).enqueue('cutsell_worker.focused_validation_job.run_focused_clean_cut_benchmark',payload,job_timeout=6600,result_ttl=86400,failure_ttl=86400,meta={'dataset_role':'clean_cut_gold_raw_focused','source_keys':keys,'brain_backend':'runpod_local','hybrid_provider':'google','hybrid_primary_model':'gemini-3.5-flash-lite','worker_source_sha':os.environ['SOURCE_SHA'],'worker_image_digest':os.environ['IMAGE_DIGEST'],'chosen_cloud':os.environ.get('CHOSEN_CLOUD'),'chosen_gpu':os.environ.get('CHOSEN_GPU')})
+          with open(os.environ['GITHUB_OUTPUT'],'a') as f: f.write(f'job_id={job.id}\n')
+          print('job_id='+job.id)
+          PY
+
+      - name: Wait for benchmark
+        env:
+          JOB_ID: ${{ steps.enqueue.outputs.job_id }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json, os, time
+          from redis import Redis
+          from rq.job import Job
+          c=Redis.from_url(os.environ['REDIS_URL'])
+          job=Job.fetch(os.environ['JOB_ID'],connection=c)
+          deadline=time.monotonic()+6600; last=None
+          while time.monotonic()<deadline:
+              status=getattr(job.get_status(refresh=True),'value',str(job.get_status(refresh=True)))
+              meta=dict(job.meta or {})
+              snap=(status,meta.get('stage'),meta.get('progress_percent'),meta.get('current_source'))
+              if snap!=last:
+                  print(json.dumps({'status':status,'stage':meta.get('stage'),'progress_percent':meta.get('progress_percent'),'current_source':meta.get('current_source')},ensure_ascii=False),flush=True); last=snap
+              if status=='finished':
+                  result=job.result
+                  expected=['Editdna longform validation/VIDEO-2026-07-30-09-18-03.mp4','Editdna longform validation/VIDEO-2026-07-30-09-24-13.mp4','Editdna longform validation/VIDEO-2026-07-30-10-22-46.mp4']
+                  if not isinstance(result,dict) or result.get('dataset_role')!='clean_cut_gold_raw_focused' or result.get('source_keys')!=expected: raise SystemExit('Unexpected result')
+                  json.dump(result,open('focused-result.json','w'),ensure_ascii=False,indent=2); raise SystemExit(0)
+              if status in {'failed','stopped','canceled'}:
+                  print(job.exc_info or ''); raise SystemExit(1)
+              time.sleep(15)
+          raise SystemExit('Benchmark timed out')
+          PY
+
+      - name: Download report and previews
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p focused-previews
+          python - <<'PY'
+          import json, os
+          from pathlib import Path
+          from urllib.parse import urlparse
+          import boto3
+          r=json.load(open('focused-result.json'))
+          s3=boto3.client('s3',region_name=os.environ.get('AWS_REGION') or 'us-east-1')
+          def p(uri):
+              u=urlparse(uri); return u.netloc,u.path.lstrip('/')
+          b,k=p(r['report_uri']); s3.download_file(b,k,'cutsell-focused-clean-cut-benchmark.json')
+          report=json.load(open('cutsell-focused-clean-cut-benchmark.json'))
+          if report.get('source_count')!=3 or report.get('completed_count')!=3 or report.get('execution_failure_count') or report.get('provider_failure_count'): raise SystemExit('Invalid report')
+          for uri in r.get('preview_uris') or []:
+              b,k=p(uri); s3.download_file(b,k,str(Path('focused-previews')/Path(k).name))
+          if len(list(Path('focused-previews').glob('*.mp4')))!=3: raise SystemExit('Expected exactly 3 previews')
+          PY
+
+      - name: Validate focused Gold gate
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json
+          report=json.load(open('cutsell-focused-clean-cut-benchmark.json'))
+          results=report.get('results') or []
+          v00=next((x for x in results if str(x.get('source_key') or '').endswith('VIDEO-2026-07-30-09-18-03.mp4')),None)
+          v02=next((x for x in results if str(x.get('source_key') or '').endswith('VIDEO-2026-07-30-09-24-13.mp4')),None)
+          v03=next((x for x in results if str(x.get('source_key') or '').endswith('VIDEO-2026-07-30-10-22-46.mp4')),None)
+          if not all(isinstance(x,dict) for x in (v00,v02,v03)): raise SystemExit('Missing focused result')
+          def rows(result,key):
+              out=[]
+              for item in result.get(key) or result.get(key+'_takes') or []:
+                  if not isinstance(item,dict): continue
+                  s=item.get('start',item.get('source_start')); e=item.get('end',item.get('source_end'))
+                  if s is not None and e is not None: out.append((float(s),float(e),str(item.get('text') or '')))
+              return out
+          low=lambda x:' '.join(str(x or '').casefold().split())
+          ss=rows(v00,'selected'); s02=rows(v02,'selected'); s03=rows(v03,'selected')
+          print(json.dumps({'video00_selected':ss,'video02_selected':s02,'video03_selected':s03},ensure_ascii=False,indent=2))
+          if any(s < 116.9 and e > 108.2 for s,e,_ in ss): raise SystemExit('broken 108-116 retry selected')
+          if not any(119.5 <= s <= 122.0 and e >= 123.5 and 'sonograf' in low(t) for s,e,t in ss): raise SystemExit('clean 120-125 retry missing')
+          if any('mínimo dos estados' in low(t) for _,_,t in ss): raise SystemExit('broken first thyroid attempt resurfaced')
+          if not any(34.0 <= s <= 37.0 and e >= 44.0 and 'nunca se nos ocurrió' in low(t) for s,e,t in ss): raise SystemExit('clean first thyroid retake missing')
+          if any(235.0 <= s <= 237.5 and e >= 243.0 for s,e,_ in ss): raise SystemExit('incomplete stomach attempt selected')
+          if not any(257.5 <= s <= 259.5 and e >= 268.0 and ('gastritis' in low(t) or 'digestión' in low(t) or 'digestion' in low(t)) for s,e,t in ss): raise SystemExit('corrected stomach retry missing')
+          if not any(294.5 <= s <= 296.5 and e >= 312.5 for s,e,_ in ss): raise SystemExit('authoritative 295 close missing')
+          if any(318.5 <= s <= 321.5 and e >= 333.0 for s,e,_ in ss): raise SystemExit('losing 319 prefix selected')
+          if any(334.5 <= s <= 337.0 and e >= 345.0 for s,e,_ in ss): raise SystemExit('losing 335 continuation selected')
+          if any(low(t).endswith('de los') for _,_,t in ss): raise SystemExit('open de-los delivery selected')
+          if any(low(t).endswith(' y haz') or low(t).endswith(' haz') for _,_,t in ss): raise SystemExit('incomplete haz delivery selected')
+          if not any(355.0 <= s <= 357.5 and e >= 361.3 and ('haz ejercicio' in low(t) or 'haces ejercicio' in low(t)) for s,e,t in ss): raise SystemExit('complete exercise CTA missing')
+          if any(108.5 <= s <= 111.5 and e <= 112.5 for s,e,_ in s02): raise SystemExit('Video02 short BTS fragment selected')
+          if any('trying to say in character' in low(t) for _,_,t in s02): raise SystemExit('Video02 trying-to-say BTS selected')
+          text03=' '.join(low(t) for _,_,t in s03)
+          if 'la barrera cutánea' not in text03: raise SystemExit('Video03 lost la barrera cutánea')
+          if 'te la te hace como' in text03: raise SystemExit('Video03 failed suffix resurfaced')
+          PY
+
+      - name: Upload capacity attempts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cutsell-round13-capacity-attempts
+          path: capacity-attempts.json
+          retention-days: 14
+          if-no-files-found: warn
+
+      - name: Upload report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cutsell-focused-round13-failover-report-${{ env.SOURCE_SHA }}
+          path: cutsell-focused-clean-cut-benchmark.json
+          retention-days: 14
+          if-no-files-found: warn
+
+      - name: Upload previews
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cutsell-focused-round13-failover-previews-${{ env.SOURCE_SHA }}
+          path: focused-previews/*.mp4
+          retention-days: 14
+          if-no-files-found: warn
+
+      - name: Always terminate chosen staging GPU worker
+        if: always()
+        shell: bash
+        run: |
+          set +e
+          if [ -n "${POD_ID:-}" ]; then
+            code=$(curl --silent --show-error --write-out '%{http_code}' --request DELETE --url "https://rest.runpod.io/v1/pods/$POD_ID" --header "Authorization: Bearer $RUNPOD_API_KEY" --output /tmp/delete.txt)
+            echo "delete_http=$code"
+            sleep 3
+            curl --silent --show-error --url "https://rest.runpod.io/v1/pods" --header "Authorization: Bearer $RUNPOD_API_KEY" --output /tmp/pods-after.json
+            if jq -e --arg id "$POD_ID" '.[] | select(.id == $id)' /tmp/pods-after.json >/dev/null; then exit 1; fi
+          fi

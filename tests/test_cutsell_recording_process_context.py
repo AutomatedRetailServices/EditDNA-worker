@@ -1,0 +1,198 @@
+from cutsell_worker.contracts import CandidateTake
+from cutsell_worker.providers import ProviderStatus
+from cutsell_worker.recording_process_context import apply_recording_process_neighbors
+from cutsell_worker.whole_video_analysis import SourceVideoContext, TemporalEvent, WholeVideoContext
+
+
+def take(clip_id, text, start, end):
+    return CandidateTake(
+        clip_id=clip_id,
+        source_asset_id="src",
+        source_order=0,
+        start=start,
+        end=end,
+        text=text,
+    )
+
+
+def event(kind, start, end, confidence=0.9):
+    return TemporalEvent("src", start, end, kind, confidence, kind)
+
+
+def context(events):
+    return WholeVideoContext(
+        sources=(SourceVideoContext(
+            source_asset_id="src",
+            summary="",
+            dominant_style="talking_head",
+            creator_intent="recording",
+            events=tuple(events),
+        ),),
+        status=ProviderStatus("test", True, True, "applied"),
+    )
+
+
+def test_visual_reset_plus_explicit_stop_removes_immediately_previous_failed_take():
+    failed = take("failed", "using my tik tok shit", 30.16, 32.47)
+    anchor = take("stop", "Damn it, okay stopped", 34.72, 37.25)
+    ctx = context((
+        event("facial_expression_shift_candidate", 33.39, 33.50, 0.75),
+        event("body_reset_candidate", 34.09, 34.20, 1.0),
+    ))
+    kept, removed, diagnostics = apply_recording_process_neighbors((failed,), (anchor,), ctx)
+    assert kept == ()
+    assert removed == (failed,)
+    assert diagnostics[0]["reason"] == "failed_take_before_explicit_stop_with_visual_reset"
+
+
+def test_recording_meta_after_explicit_stop_is_removed_without_language_censorship():
+    anchor = take("stop", "Damn it, okay stopped", 34.72, 37.25)
+    meta = take("meta", "That better have been good", 37.89, 39.47)
+    kept, removed, diagnostics = apply_recording_process_neighbors((meta,), (anchor,), context(()))
+    assert kept == ()
+    assert removed == (meta,)
+    assert diagnostics[0]["reason"] == "recording_meta_after_explicit_stop"
+
+
+def test_local_brain_discards_strong_recording_anchor_even_if_baseline_kept_it():
+    anchor = take("stop", "Damn it. Okay, stop", 34.88, 37.14)
+    kept, removed, diagnostics = apply_recording_process_neighbors((anchor,), (), context(()))
+    assert kept == ()
+    assert removed == (anchor,)
+    assert diagnostics[0]["reason"] == "explicit_recording_stop_anchor"
+
+
+def test_local_kept_anchor_still_removes_post_stop_meta():
+    anchor = take("stop", "Damn it. Okay, stop", 34.88, 37.14)
+    meta = take("meta", "That better have been good", 37.88, 39.70)
+    kept, removed, diagnostics = apply_recording_process_neighbors((anchor, meta), (), context(()))
+    assert kept == ()
+    assert removed == (anchor, meta)
+    assert [item["reason"] for item in diagnostics] == [
+        "explicit_recording_stop_anchor",
+        "recording_meta_after_explicit_stop",
+    ]
+
+
+def test_local_kept_anchor_reactivates_visual_pre_stop_cleanup():
+    failed = take("failed", "using my tik tok shit", 30.16, 32.42)
+    anchor = take("stop", "Damn it. Okay, stop", 34.88, 37.14)
+    ctx = context((
+        event("facial_expression_shift_candidate", 33.39, 33.50, 0.75),
+        event("body_reset_candidate", 34.09, 34.20, 1.0),
+    ))
+    kept, removed, diagnostics = apply_recording_process_neighbors((failed, anchor), (), ctx)
+    assert kept == ()
+    assert removed == (failed, anchor)
+    assert [item["reason"] for item in diagnostics] == [
+        "failed_take_before_explicit_stop_with_visual_reset",
+        "explicit_recording_stop_anchor",
+    ]
+
+
+def test_later_retry_before_explicit_stop_is_removed_when_prior_same_idea_exists():
+    first = take("first", "Help me motivate myself today", 21.92, 24.08)
+    failed_retry = take("retry", "To help motivate myself today", 24.86, 28.34)
+    anchor = take("stop", "Damn it. Okay, stop", 34.88, 37.14)
+    kept, removed, diagnostics = apply_recording_process_neighbors((first, failed_retry, anchor), (), context(()))
+    assert kept == (first,)
+    assert removed == (failed_retry, anchor)
+    assert [item["reason"] for item in diagnostics] == [
+        "failed_retry_before_explicit_stop",
+        "explicit_recording_stop_anchor",
+    ]
+
+
+def test_short_correction_after_script_meta_before_retry_is_removed():
+    meta = take("meta", "Have to look at the word", 13.90, 15.68)
+    reaction = take("reaction", "No, it does not", 15.68, 17.34)
+    retry = take("retry", "If you have one of those universal", 18.58, 19.69)
+    kept, removed, diagnostics = apply_recording_process_neighbors((reaction, retry), (meta,), context(()))
+    assert kept == (retry,)
+    assert removed == (reaction,)
+    assert diagnostics[0]["reason"] == "short_correction_after_recording_meta_before_retry"
+
+
+def test_direct_complaint_about_making_video_is_removed():
+    meta = take("meta", "this is so hard to make a video", 10.0, 12.2)
+    kept, removed, diagnostics = apply_recording_process_neighbors((meta,), (), context(()))
+    assert kept == ()
+    assert removed == (meta,)
+    assert diagnostics[0]["reason"] == "direct_recording_process_meta"
+
+
+def test_how_to_end_video_process_speech_is_removed():
+    meta = take("meta", "how to end TikTok Shop videos", 10.0, 12.0)
+    kept, removed, diagnostics = apply_recording_process_neighbors((meta,), (), context(()))
+    assert kept == ()
+    assert removed == (meta,)
+    assert diagnostics[0]["reason"] == "direct_recording_process_meta"
+
+
+def test_explicit_call_to_action_construction_is_removed():
+    meta = take("meta", "I need to make a call to action", 10.0, 12.0)
+    kept, removed, diagnostics = apply_recording_process_neighbors((meta,), (), context(()))
+    assert kept == ()
+    assert removed == (meta,)
+    assert diagnostics[0]["reason"] == "direct_recording_process_meta"
+
+
+def test_product_video_statement_survives_direct_meta_detector():
+    valid = take("valid", "this video is so easy to follow", 10.0, 12.0)
+    kept, removed, diagnostics = apply_recording_process_neighbors((valid,), (), context(()))
+    assert kept == (valid,)
+    assert removed == ()
+    assert diagnostics == ()
+
+
+def test_viewer_facing_action_phrase_survives_direct_meta_detector():
+    valid = take("valid", "take action now if you want one too", 10.0, 12.0)
+    kept, removed, diagnostics = apply_recording_process_neighbors((valid,), (), context(()))
+    assert kept == (valid,)
+    assert removed == ()
+    assert diagnostics == ()
+
+
+def test_normal_negation_survives_without_recording_meta_anchor():
+    negation = take("negation", "No, it does not contain sugar", 10.0, 12.0)
+    follow = take("follow", "It is completely sugar free", 12.5, 14.0)
+    kept, removed, diagnostics = apply_recording_process_neighbors((negation, follow), (), context(()))
+    assert kept == (negation, follow)
+    assert removed == ()
+    assert diagnostics == ()
+
+
+def test_unique_take_before_explicit_stop_survives_without_visual_reset():
+    unique = take("unique", "This shampoo is actually amazing", 25.0, 28.0)
+    anchor = take("stop", "Okay stop", 34.0, 35.0)
+    kept, removed, diagnostics = apply_recording_process_neighbors((unique, anchor), (), context(()))
+    assert kept == (unique,)
+    assert removed == (anchor,)
+    assert diagnostics[0]["reason"] == "explicit_recording_stop_anchor"
+
+
+def test_pre_stop_take_survives_without_two_visual_evidence_families():
+    valid = take("valid", "this shampoo is actually amazing", 30.16, 32.47)
+    anchor = take("stop", "okay stop", 34.72, 35.20)
+    ctx = context((event("hand_motion_reset_candidate", 33.9, 34.0, 1.0),))
+    kept, removed, diagnostics = apply_recording_process_neighbors((valid,), (anchor,), ctx)
+    assert kept == (valid,)
+    assert removed == ()
+    assert diagnostics == ()
+
+
+def test_plain_semantic_stop_is_not_a_local_recording_anchor():
+    valid = take("valid", "this serum helps stop breakouts quickly", 10.0, 13.0)
+    kept, removed, diagnostics = apply_recording_process_neighbors((valid,), (), context(()))
+    assert kept == (valid,)
+    assert removed == ()
+    assert diagnostics == ()
+
+
+def test_profanity_alone_is_never_a_recording_process_signal():
+    valid = take("valid", "this shit actually works", 30.16, 32.47)
+    unrelated_discard = take("other", "random fragment", 34.72, 35.20)
+    kept, removed, diagnostics = apply_recording_process_neighbors((valid,), (unrelated_discard,), context(()))
+    assert kept == (valid,)
+    assert removed == ()
+    assert diagnostics == ()

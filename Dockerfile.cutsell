@@ -1,0 +1,16 @@
+FROM python:3.11-slim
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PIP_NO_CACHE_DIR=1 \
+    PYTHONPATH=/app
+
+WORKDIR /app
+
+COPY requirements.cutsell.api.txt ./
+RUN pip install --upgrade pip && pip install -r requirements.cutsell.api.txt
+
+COPY cutsell_worker ./cutsell_worker
+COPY cutsell_app ./cutsell_app
+
+CMD ["sh", "-lc", "uvicorn cutsell_app.main:app --host 0.0.0.0 --port ${PORT:-8000}"]

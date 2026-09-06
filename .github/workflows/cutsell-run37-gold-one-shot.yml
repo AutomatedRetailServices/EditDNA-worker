@@ -1,0 +1,386 @@
+name: CutSell Run37 Gold One-Shot
+
+on:
+  push:
+    branches:
+      - cutsell/mobile-v1-clean
+    paths:
+      - .github/workflows/cutsell-run37-gold-one-shot.yml
+
+permissions:
+  contents: read
+  packages: read
+
+jobs:
+  run37-gold:
+    runs-on: ubuntu-latest
+    timeout-minutes: 300
+    env:
+      RUNPOD_API_KEY: ${{ secrets.RUNPOD_API_KEY }}
+      REDIS_URL: ${{ secrets.REDIS_URL }}
+      GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+      AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+      AWS_REGION: ${{ secrets.AWS_REGION }}
+      S3_BUCKET: ${{ secrets.S3_BUCKET }}
+      CUTSELL_VALIDATION_PREFIX: Editdna longform validation/
+      VIDEO_LIMIT: "16"
+      RUNPOD_TEMPLATE_NAME: EditDNA-Worker-2
+      IMAGE_REPO: ghcr.io/automatedretailservices/cutsell-worker
+      IMAGE_TAG: 9b0b811aa1db2da62fe4dd3e1a527a8250ea9593
+      POD_ID: ""
+      JOB_ID: ""
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install control-plane dependencies
+        run: python -m pip install -q 'redis>=5.0' 'rq>=2.6' 'boto3>=1.34'
+
+      - name: Login to GHCR for immutable image preflight
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Wait for exact Run37 worker image and resolve digest
+        shell: bash
+        run: |
+          set -euo pipefail
+          source_image="$IMAGE_REPO:$IMAGE_TAG"
+          resolved=0
+          for attempt in $(seq 1 90); do
+            if docker buildx imagetools inspect "$source_image" > image-inspect.txt 2>/dev/null; then
+              resolved=1
+              break
+            fi
+            sleep 10
+          done
+          test "$resolved" = "1" || { echo "Run37 image tag never became available: $source_image"; exit 3; }
+          digest=$(awk '/^Digest:/ {print $2; exit}' image-inspect.txt)
+          test -n "$digest" || { echo 'Unable to resolve Run37 immutable worker digest'; exit 3; }
+          case "$digest" in sha256:[0-9a-f][0-9a-f]*) ;; *) echo 'Invalid Run37 worker digest'; exit 3;; esac
+          IMAGE_REF="$IMAGE_REPO@$digest"
+          echo "IMAGE_REF=$IMAGE_REF" >> "$GITHUB_ENV"
+          echo "image_ref=$IMAGE_REF" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Refuse duplicate Gold job or paid staging worker
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "${RUNPOD_API_KEY:-}" || { echo 'RUNPOD_API_KEY missing'; exit 4; }
+          test -n "${REDIS_URL:-}" || { echo 'REDIS_URL missing'; exit 4; }
+          test -n "${GEMINI_API_KEY:-}" || { echo 'GEMINI_API_KEY missing'; exit 4; }
+          python - <<'PY'
+          from redis import Redis
+          from rq import Queue
+          from rq.job import Job
+          from rq.registry import StartedJobRegistry, DeferredJobRegistry, ScheduledJobRegistry
+
+          connection = Redis.from_url(__import__('os').environ['REDIS_URL'])
+          queue = Queue('cutsell', connection=connection)
+          ids = set(queue.job_ids)
+          for cls in (StartedJobRegistry, DeferredJobRegistry, ScheduledJobRegistry):
+              try:
+                  ids.update(cls('cutsell', connection=connection).get_job_ids())
+              except Exception:
+                  pass
+          active = []
+          for job_id in ids:
+              try:
+                  job = Job.fetch(job_id, connection=connection)
+                  status_obj = job.get_status(refresh=True)
+                  status = getattr(status_obj, 'value', str(status_obj))
+                  if (job.meta or {}).get('dataset_role') == 'clean_cut_gold_raw' and status not in {'finished','failed','canceled','stopped'}:
+                      active.append((job.id, status, (job.meta or {}).get('benchmark_id')))
+              except Exception:
+                  continue
+          if active:
+              raise SystemExit(f'Active Clean Cut Gold job already exists; refusing duplicate: {active}')
+          print('active_gold_jobs=0')
+          PY
+          curl --fail --silent --show-error --url "https://rest.runpod.io/v1/pods" --header "Authorization: Bearer $RUNPOD_API_KEY" --output pods-before.json
+          count=$(jq '[.[] | select(.name == "cutsell-staging-worker")] | length' pods-before.json)
+          test "$count" = "0" || { echo 'cutsell-staging-worker already exists; refusing duplicate paid worker'; exit 5; }
+          echo 'active_staging_pods=0'
+
+      - name: Load safe RunPod template baseline
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail --silent --show-error --url "https://rest.runpod.io/v1/templates" --header "Authorization: Bearer $RUNPOD_API_KEY" --output templates.json
+          TEMPLATE=$(jq -c --arg name "$RUNPOD_TEMPLATE_NAME" '[.[] | select(.name == $name)][0]' templates.json)
+          test "$TEMPLATE" != "null" || { echo 'RunPod baseline template not found'; exit 6; }
+          printf '%s' "$TEMPLATE" | jq -c '{ASR_DEVICE:.env.ASR_DEVICE,ASR_ENABLED:.env.ASR_ENABLED,BAD_TAKES_ENABLED:.env.BAD_TAKES_ENABLED,BOUNDARY_REFINER_ENABLED:.env.BOUNDARY_REFINER_ENABLED,BOUNDARY_REFINER_HEAD_STEP_SEC:.env.BOUNDARY_REFINER_HEAD_STEP_SEC,BOUNDARY_REFINER_MIN_DURATION_SEC:.env.BOUNDARY_REFINER_MIN_DURATION_SEC,BOUNDARY_REFINER_TAIL_STEP_SEC:.env.BOUNDARY_REFINER_TAIL_STEP_SEC,FFMPEG_BIN:.env.FFMPEG_BIN,FFPROBE_BIN:.env.FFPROBE_BIN,HEAD_TRIM_SEC:.env.HEAD_TRIM_SEC,PRESIGN_EXPIRES:.env.PRESIGN_EXPIRES,PYTHONPATH:.env.PYTHONPATH,S3_ACL:.env.S3_ACL,S3_BUCKET:.env.S3_BUCKET,S3_PREFIX:.env.S3_PREFIX,TAIL_TRIM_SEC:.env.TAIL_TRIM_SEC,VISION_ENABLED:.env.VISION_ENABLED,VISION_INTERVAL_SEC:.env.VISION_INTERVAL_SEC,VISION_MAX_SAMPLES:.env.VISION_MAX_SAMPLES,VISUAL_BAD_THRESHOLD:.env.VISUAL_BAD_THRESHOLD,WHISPER_DEVICE:.env.WHISPER_DEVICE,WHISPER_MODEL:.env.WHISPER_MODEL,W_FACE:.env.W_FACE,W_VISION:.env.W_VISION,W_VISUAL:.env.W_VISUAL,AWS_ACCESS_KEY_ID:.env.AWS_ACCESS_KEY_ID,AWS_SECRET_ACCESS_KEY:.env.AWS_SECRET_ACCESS_KEY,AWS_REGION:.env.AWS_REGION} | with_entries(select(.value != null and .value != ""))' > safe-template-env.json
+          for key in AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_REGION S3_BUCKET; do
+            value=$(jq -r --arg key "$key" '.[$key] // empty' safe-template-env.json)
+            if [ -z "${!key:-}" ]; then
+              test -n "$value" || { echo "$key missing from EditDNA-Worker-2"; exit 7; }
+              echo "::add-mask::$value"
+              printf '%s=%s\n' "$key" "$value" >> "$GITHUB_ENV"
+            else
+              echo "::add-mask::${!key}"
+            fi
+          done
+          CONTAINER_DISK=30
+          VOLUME_GB=20
+          VOLUME_MOUNT=$(printf '%s' "$TEMPLATE" | jq -r '.volumeMountPath // "/workspace"')
+          printf 'CONTAINER_DISK=%s\nVOLUME_GB=%s\nVOLUME_MOUNT=%s\n' "$CONTAINER_DISK" "$VOLUME_GB" "$VOLUME_MOUNT" >> "$GITHUB_ENV"
+
+      - name: Create exactly one Run37 staging GPU worker
+        shell: bash
+        run: |
+          set -euo pipefail
+          START_CMD='python -m rq.cli worker -u "$REDIS_URL" --worker-ttl 1200 cutsell'
+          jq --arg name "cutsell-staging-worker" --arg image "$IMAGE_REF" --arg cmd "$START_CMD" --arg redis "$REDIS_URL" --arg gemini "$GEMINI_API_KEY" --arg mount "$VOLUME_MOUNT" --argjson disk "$CONTAINER_DISK" --argjson volume "$VOLUME_GB" '. + {REDIS_URL:$redis,GEMINI_API_KEY:$gemini,CUTSELL_BRAIN_BACKEND:"runpod_local",CUTSELL_EDITORIAL_MODE:"clean_cut",CUTSELL_ASR_MODEL:"medium",CUTSELL_CLEAN_CUT_JUDGE:"0",CUTSELL_HYBRID_PROVIDER:"google",CUTSELL_HYBRID_LLM_ENABLED:"1",CUTSELL_HYBRID_PRIMARY_MODEL:"gemini-3.5-flash-lite",CUTSELL_HYBRID_ESCALATION_MODEL:"gemini-3.6-flash",CUTSELL_HYBRID_MAX_SESSION_USD:"0.0075",CUTSELL_HYBRID_TEST_BUDGET_USD:"0.50"} | {name:$name,imageName:$image,cloudType:"COMMUNITY",computeType:"GPU",gpuCount:1,gpuTypeIds:["NVIDIA RTX A5000","NVIDIA RTX A4000","NVIDIA L4","NVIDIA A40","NVIDIA RTX A6000","NVIDIA GeForce RTX 3090","NVIDIA GeForce RTX 4090"],gpuTypePriority:"custom",interruptible:false,containerDiskInGb:$disk,volumeInGb:$volume,volumeMountPath:$mount,dockerEntrypoint:["bash","-lc"],dockerStartCmd:[$cmd],env:.}' safe-template-env.json > create-pod.json
+          if jq -e '.env | has("OPENAI_API_KEY") or has("EDITDNA_USE_LLM") or has("EDITDNA_LLM_MODEL")' create-pod.json >/dev/null; then
+            echo 'Refusing deployment: forbidden OpenAI/legacy provider key present'; exit 8
+          fi
+          code=$(curl --silent --show-error --write-out '%{http_code}' --request POST --url "https://rest.runpod.io/v1/pods" --header "Authorization: Bearer $RUNPOD_API_KEY" --header "Content-Type: application/json" --data @create-pod.json --output pod.json)
+          rm -f create-pod.json safe-template-env.json
+          test "$code" = "201" || { echo "RunPod create HTTP status: $code"; jq '{error,errors,message}' pod.json || true; exit 9; }
+          created=$(jq -r '.id // empty' pod.json)
+          test -n "$created" || { echo 'RunPod returned no Pod id'; exit 9; }
+          echo "POD_ID=$created" >> "$GITHUB_ENV"
+          echo "staging_pod_id=$created" >> "$GITHUB_STEP_SUMMARY"
+          jq '{id,name,desiredStatus,imageName,costPerHr,adjustedCostPerHr}' pod.json
+
+      - name: Wait for exact Run37 RQ worker readiness
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import os, time
+          from datetime import datetime, timezone
+          from redis import Redis
+          from rq import Worker
+          connection = Redis.from_url(os.environ['REDIS_URL'])
+          deadline = time.time() + 600
+          while time.time() < deadline:
+              now = datetime.now(timezone.utc)
+              for worker in Worker.all(connection=connection):
+                  heartbeat = worker.last_heartbeat
+                  if heartbeat is None:
+                      continue
+                  if heartbeat.tzinfo is None:
+                      heartbeat = heartbeat.replace(tzinfo=timezone.utc)
+                  age = (now - heartbeat).total_seconds()
+                  if age <= 30 and worker.get_state() in {'idle','busy'}:
+                      print('fresh_worker=', worker.name, 'state=', worker.get_state(), 'age=', round(age, 1))
+                      raise SystemExit(0)
+              time.sleep(10)
+          raise SystemExit('Run37 Pod exists but no fresh RQ worker registered within 10 minutes')
+          PY
+          curl --fail --silent --show-error --url "https://rest.runpod.io/v1/pods/$POD_ID" --header "Authorization: Bearer $RUNPOD_API_KEY" | jq '{id,name,desiredStatus,imageName,costPerHr,adjustedCostPerHr}'
+
+      - name: Enqueue one Clean Cut Gold Run37 benchmark
+        id: enqueue
+        shell: bash
+        run: |
+          set -euo pipefail
+          export BENCHMARK_ID="run37-gold-${GITHUB_RUN_ID}-${IMAGE_TAG}"
+          echo "BENCHMARK_ID=$BENCHMARK_ID" >> "$GITHUB_ENV"
+          python - <<'PY'
+          import json, os
+          from redis import Redis
+          from rq import Queue
+          connection = Redis.from_url(os.environ['REDIS_URL'])
+          payload = {
+              'benchmark_id': os.environ['BENCHMARK_ID'],
+              'source_prefix': os.environ['CUTSELL_VALIDATION_PREFIX'],
+              'video_limit': int(os.environ.get('VIDEO_LIMIT') or 16),
+              'expected_external_brain_calls_enabled': True,
+          }
+          if payload['source_prefix'] != 'Editdna longform validation/':
+              raise SystemExit('Refusing non-Gold source prefix')
+          queue = Queue('cutsell', connection=connection)
+          job = queue.enqueue(
+              'cutsell_worker.validation_job.run_unseen_clean_cut_benchmark',
+              payload,
+              job_timeout=10800,
+              result_ttl=86400,
+              failure_ttl=86400,
+              meta={
+                  'benchmark_id': payload['benchmark_id'],
+                  'dataset_role': 'clean_cut_gold_raw',
+                  'source_prefix': payload['source_prefix'],
+                  'brain_backend': 'runpod_local',
+                  'external_brain_calls_enabled': True,
+                  'hybrid_provider': 'google',
+                  'hybrid_primary_model': 'gemini-3.5-flash-lite',
+                  'staging_pod_id': os.environ['POD_ID'],
+                  'worker_image_tag': os.environ['IMAGE_TAG'],
+              },
+          )
+          print(json.dumps({'job_id': job.id, 'pod_id': os.environ['POD_ID'], **payload}, indent=2))
+          with open(os.environ['GITHUB_ENV'], 'a', encoding='utf-8') as handle:
+              handle.write(f'JOB_ID={job.id}\n')
+          with open(os.environ['GITHUB_OUTPUT'], 'a', encoding='utf-8') as handle:
+              handle.write(f'job_id={job.id}\n')
+          PY
+
+      - name: Wait for Run37 Gold benchmark
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json, os, time
+          from redis import Redis
+          from rq.job import Job
+          connection = Redis.from_url(os.environ['REDIS_URL'])
+          job = Job.fetch(os.environ['JOB_ID'], connection=connection)
+          deadline = time.monotonic() + 10200
+          last = None
+          while time.monotonic() < deadline:
+              status = job.get_status(refresh=True)
+              value = getattr(status, 'value', str(status))
+              if value != last:
+                  print('status=', value, 'meta=', json.dumps(job.meta or {}, default=str), flush=True)
+                  last = value
+              if value == 'finished':
+                  result = job.result
+                  if not isinstance(result, dict):
+                      raise SystemExit('Run37 benchmark returned invalid result')
+                  checks = {
+                      'dataset_role': 'clean_cut_gold_raw',
+                      'source_prefix': 'Editdna longform validation/',
+                      'brain_backend': 'runpod_local',
+                      'hybrid_provider': 'google',
+                      'hybrid_primary_model': 'gemini-3.5-flash-lite',
+                  }
+                  for key, expected in checks.items():
+                      if result.get(key) != expected:
+                          raise SystemExit(f'Run37 Gold identity mismatch: {key}={result.get(key)!r}')
+                  if result.get('external_brain_calls_enabled') is not True:
+                      raise SystemExit('Run37 Hybrid judge was not active')
+                  with open('run37-benchmark-result.json', 'w', encoding='utf-8') as handle:
+                      json.dump(result, handle, ensure_ascii=False, indent=2, sort_keys=True)
+                  print(json.dumps(result, ensure_ascii=False, indent=2, sort_keys=True))
+                  raise SystemExit(0)
+              if value in {'failed','stopped','canceled'}:
+                  print(job.exc_info or 'Run37 benchmark failed')
+                  raise SystemExit(f'Run37 benchmark job {value}')
+              time.sleep(15)
+          raise SystemExit('Timed out waiting for Run37 benchmark')
+          PY
+
+      - name: Download and validate Run37 Gold artifacts
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p run37-gold-previews
+          python - <<'PY'
+          import json, os
+          from pathlib import Path
+          from urllib.parse import urlparse
+          import boto3
+          result = json.load(open('run37-benchmark-result.json', encoding='utf-8'))
+          s3 = boto3.client('s3', region_name=os.environ.get('AWS_REGION') or 'us-east-1')
+          def parts(uri):
+              parsed = urlparse(uri)
+              if parsed.scheme != 's3' or not parsed.netloc or not parsed.path.lstrip('/'):
+                  raise ValueError(f'invalid S3 artifact URI: {uri}')
+              return parsed.netloc, parsed.path.lstrip('/')
+          bucket, key = parts(result['report_uri'])
+          s3.download_file(bucket, key, 'run37-gold-report.json')
+          report = json.load(open('run37-gold-report.json', encoding='utf-8'))
+          if report.get('dataset_role') != 'clean_cut_gold_raw' or report.get('source_prefix') != 'Editdna longform validation/':
+              raise SystemExit('Downloaded report is not Clean Cut Gold RAW')
+          for uri in result.get('preview_uris') or []:
+              bucket, key = parts(uri)
+              destination = Path('run37-gold-previews') / Path(key).name
+              s3.download_file(bucket, key, str(destination))
+          requested = int(report.get('total_hybrid_requested_groups') or 0)
+          available = int(report.get('total_hybrid_available_groups') or 0)
+          ratio = available / requested if requested else 0.0
+          summary = {
+              'source_count': report.get('source_count'),
+              'completed_count': report.get('completed_count'),
+              'execution_failure_count': report.get('execution_failure_count'),
+              'provider_failure_count': report.get('provider_failure_count'),
+              'hybrid_requested': requested,
+              'hybrid_available': available,
+              'hybrid_availability_ratio': round(ratio, 4),
+              'selected_to_input_ratio': report.get('selected_to_input_ratio'),
+              'total_clean_cut_removed': report.get('total_clean_cut_removed'),
+              'total_temporal_trimmed': report.get('total_temporal_trimmed'),
+              'total_hybrid_deleted': report.get('total_hybrid_deleted'),
+          }
+          print(json.dumps(summary, indent=2))
+          if report.get('execution_failure_count') or report.get('provider_failure_count'):
+              raise SystemExit('Run37 Gold benchmark reported failures')
+          if requested <= 0 or ratio < 0.80:
+              raise SystemExit('Run37 Hybrid availability below Gold floor')
+          previews = list(Path('run37-gold-previews').glob('*.mp4'))
+          if len(previews) != int(report.get('completed_count') or 0):
+              raise SystemExit('Run37 preview count does not match completed Gold videos')
+          PY
+
+      - name: Upload Run37 Gold report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cutsell-run37-gold-report-${{ env.IMAGE_TAG }}
+          path: run37-gold-report.json
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: Upload Run37 Gold previews
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cutsell-run37-gold-previews-${{ env.IMAGE_TAG }}
+          path: run37-gold-previews/*.mp4
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: Always retire Run37 job and terminate exact staging worker
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -n "${JOB_ID:-}" ] && [ -n "${REDIS_URL:-}" ]; then
+            python - <<'PY' || true
+          import os
+          from redis import Redis
+          from rq.job import Job
+          connection = Redis.from_url(os.environ['REDIS_URL'])
+          try:
+              job = Job.fetch(os.environ['JOB_ID'], connection=connection)
+              status_obj = job.get_status(refresh=True)
+              status = getattr(status_obj, 'value', str(status_obj))
+              print('cleanup_job_status=', status)
+              if status in {'queued','deferred','scheduled'}:
+                  job.cancel()
+                  print('cleanup_job_canceled=true')
+              elif status == 'started':
+                  try:
+                      from rq.command import send_stop_job_command
+                      send_stop_job_command(connection, job.id)
+                      print('cleanup_job_stop_requested=true')
+                  except Exception as exc:
+                      print('cleanup_job_stop_request_failed=', type(exc).__name__, str(exc)[:160])
+          except Exception as exc:
+              print('cleanup_job_lookup_failed=', type(exc).__name__, str(exc)[:160])
+          PY
+          fi
+          if [ -z "${POD_ID:-}" ]; then
+            echo 'No Run37 staging Pod was created; Pod cleanup is a no-op.'
+            exit 0
+          fi
+          test -n "${RUNPOD_API_KEY:-}" || { echo 'RUNPOD_API_KEY missing during Run37 cleanup'; exit 10; }
+          curl --fail --silent --show-error --url "https://rest.runpod.io/v1/pods" --header "Authorization: Bearer $RUNPOD_API_KEY" --output cleanup-pods.json
+          name=$(jq -r --arg id "$POD_ID" '[.[] | select(.id == $id)][0].name // empty' cleanup-pods.json)
+          if [ -z "$name" ]; then
+            echo "Run37 staging Pod already absent: $POD_ID"
+            exit 0
+          fi
+          test "$name" = "cutsell-staging-worker" || { echo 'Exact Run37 Pod ID is not cutsell-staging-worker; refusing cleanup'; exit 11; }
+          code=$(curl --silent --show-error --write-out '%{http_code}' --request DELETE --url "https://rest.runpod.io/v1/pods/$POD_ID" --header "Authorization: Bearer $RUNPOD_API_KEY" --output cleanup-delete-response.txt)
+          test "$code" = "204" || { echo "RunPod cleanup DELETE status: $code"; exit 12; }
+          sleep 2
+          curl --fail --silent --show-error --url "https://rest.runpod.io/v1/pods" --header "Authorization: Bearer $RUNPOD_API_KEY" --output cleanup-after.json
+          remaining=$(jq --arg id "$POD_ID" '[.[] | select(.id == $id)] | length' cleanup-after.json)
+          test "$remaining" = "0" || { echo 'Run37 staging Pod still present after cleanup'; exit 13; }
+          echo "Run37 staging Pod deleted and verified absent: $POD_ID"

@@ -1,0 +1,66 @@
+name: Export Video00 Original for Review
+
+on:
+  push:
+    branches:
+      - cutsell/mobile-v1-clean
+    paths:
+      - .github/workflows/export-video00-original-for-review.yml
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  export:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      RUNPOD_API_KEY: ${{ secrets.RUNPOD_API_KEY }}
+    steps:
+      - name: Publish export run id
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          content=$(jq -n --argjson run "$GITHUB_RUN_ID" --arg sha "$GITHUB_SHA" '{run_id:$run,head_sha:$sha,status:"in_progress"}' | base64 -w0)
+          current=$(curl --silent --show-error --header "Authorization: Bearer $GH_TOKEN" --header 'Accept: application/vnd.github+json' "https://api.github.com/repos/$GITHUB_REPOSITORY/contents/ops/video00-original-export-live.json?ref=cutsell/mobile-v1-clean")
+          sha=$(printf '%s' "$current" | jq -r '.sha // empty')
+          payload=$(jq -n --arg msg "ops: publish Video00 original export $GITHUB_RUN_ID" --arg content "$content" --arg branch "cutsell/mobile-v1-clean" --arg sha "$sha" '{message:$msg,content:$content,branch:$branch} + (if $sha=="" then {} else {sha:$sha} end)')
+          curl --fail --silent --show-error --request PUT --url "https://api.github.com/repos/$GITHUB_REPOSITORY/contents/ops/video00-original-export-live.json" --header "Authorization: Bearer $GH_TOKEN" --header 'Accept: application/vnd.github+json' --header 'Content-Type: application/json' --data "$payload" >/dev/null
+
+      - name: Download exact original Video00 from S3
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail --silent --show-error --url "https://rest.runpod.io/v1/templates" --header "Authorization: Bearer $RUNPOD_API_KEY" --output /tmp/templates.json
+          TEMPLATE=$(jq -c '[.[] | select(.name == "EditDNA-Worker-2")][0]' /tmp/templates.json)
+          for key in AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_REGION S3_BUCKET; do
+            value=$(printf '%s' "$TEMPLATE" | jq -r --arg key "$key" '.env[$key] // empty')
+            test -n "$value" || { echo "$key missing"; exit 6; }
+            echo "::add-mask::$value"
+            export "$key=$value"
+          done
+          aws s3 cp "s3://$S3_BUCKET/Editdna longform validation/VIDEO-2026-07-30-09-18-03.mp4" video00-original.mp4
+          test -s video00-original.mp4
+          wc -c video00-original.mp4
+
+      - name: Upload original Video00
+        uses: actions/upload-artifact@v4
+        with:
+          name: video00-original-for-review
+          path: video00-original.mp4
+          retention-days: 3
+
+      - name: Publish ready status
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          content=$(jq -n --argjson run "$GITHUB_RUN_ID" --arg sha "$GITHUB_SHA" '{run_id:$run,head_sha:$sha,status:"artifact_ready"}' | base64 -w0)
+          current=$(curl --silent --show-error --header "Authorization: Bearer $GH_TOKEN" --header 'Accept: application/vnd.github+json' "https://api.github.com/repos/$GITHUB_REPOSITORY/contents/ops/video00-original-export-live.json?ref=cutsell/mobile-v1-clean")
+          sha=$(printf '%s' "$current" | jq -r '.sha // empty')
+          payload=$(jq -n --arg msg "ops: Video00 original artifact ready $GITHUB_RUN_ID" --arg content "$content" --arg branch "cutsell/mobile-v1-clean" --arg sha "$sha" '{message:$msg,content:$content,branch:$branch,sha:$sha}')
+          curl --fail --silent --show-error --request PUT --url "https://api.github.com/repos/$GITHUB_REPOSITORY/contents/ops/video00-original-export-live.json" --header "Authorization: Bearer $GH_TOKEN" --header 'Accept: application/vnd.github+json' --header 'Content-Type: application/json' --data "$payload" >/dev/null

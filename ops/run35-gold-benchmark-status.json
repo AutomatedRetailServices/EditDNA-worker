@@ -1,0 +1,8 @@
+{
+  "run_id": 32097024487,
+  "head_sha": "74125c3ba62dcab025b257d6f561a34ebd6b50b8",
+  "dataset_role": "clean_cut_gold_raw",
+  "source_prefix": "Editdna longform validation/",
+  "worker_pod_id": "bzesdtg5kuk06y",
+  "status": "dispatched"
+}

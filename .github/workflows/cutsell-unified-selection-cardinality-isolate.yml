@@ -1,0 +1,61 @@
+name: CutSell Unified Selection Cardinality Isolation
+
+# Isolates why a normal-STOP Gemini response returned fewer decisions than
+# candidates (RAW #120: expected 32, got 31, finishReason='STOP') without
+# spending a paid RunPod GPU RAW. See
+# scripts/isolate_unified_selection_cardinality.py and
+# docs/claude-handoff/CUTSELL_COMPLETE_HANDOFF.md ("PROVIDER RELIABILITY --
+# RAW #119/#120") for context. Mirrors
+# cutsell-unified-selection-schema-isolate.yml's cheap, GPU-free pattern: a
+# small number of real but small Gemini calls on ubuntu-latest.
+
+on:
+  push:
+    branches: [cutsell/mobile-v1-clean]
+    paths:
+      - .github/workflows/cutsell-unified-selection-cardinality-isolate.yml
+      - scripts/isolate_unified_selection_cardinality.py
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  isolate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+      PYTHONPATH: ${{ github.workspace }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Verify secret without revealing value
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "${GEMINI_API_KEY:-}" || { echo 'GEMINI_API_KEY missing'; exit 3; }
+          echo 'Gemini credential is present.'
+
+      - name: Install minimal dependencies
+        shell: bash
+        run: pip install requests
+
+      - name: Run cardinality isolation probe
+        shell: bash
+        run: python scripts/isolate_unified_selection_cardinality.py
+
+      - name: Upload isolation report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cutsell-unified-selection-cardinality-isolation-${{ github.sha }}
+          path: artifacts/unified-selection-cardinality-isolation.json
+          if-no-files-found: warn
+          retention-days: 14

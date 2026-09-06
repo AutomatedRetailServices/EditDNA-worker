@@ -1,0 +1,41 @@
+name: Round19 Live Pod Probe
+# refresh: 2026-08-23T14:07Z
+on:
+  push:
+    branches:
+      - cutsell/mobile-v1-clean
+    paths:
+      - .github/workflows/round19-live-pod-probe.yml
+permissions:
+  contents: write
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    env:
+      RUNPOD_API_KEY: ${{ secrets.RUNPOD_API_KEY }}
+    steps:
+      - name: Snapshot staging pods
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail --silent --show-error \
+            --url "https://rest.runpod.io/v1/pods?includeMachine=true" \
+            --header "Authorization: Bearer $RUNPOD_API_KEY" \
+            > /tmp/all-pods.json
+          jq '[.[] | select((.name // "") | startswith("cutsell-staging-worker")) | {id,name,desiredStatus,costPerHr,gpu,cloudType,imageName,lastStatusChange,runtime,machineId,machine}]' /tmp/all-pods.json > round19-pods.json
+          cat round19-pods.json
+      - name: Persist snapshot
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          git clone -q "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" repo
+          cd repo && git checkout -q cutsell/mobile-v1-clean
+          mkdir -p ops
+          cp ../round19-pods.json ops/round19-pods.json
+          git config user.name github-actions
+          git config user.email github-actions@github.com
+          git add ops/round19-pods.json
+          git commit -m "ops: snapshot Round19 staging pods" || exit 0
+          git push -q origin cutsell/mobile-v1-clean

@@ -1,0 +1,142 @@
+name: CutSell Feature RunPod One-Shot Deploy
+
+on:
+  workflow_dispatch:
+    inputs:
+      approval_token:
+        description: 'Explicit paid-deploy approval token'
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  packages: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      RUNPOD_API_KEY: ${{ secrets.RUNPOD_API_KEY }}
+      REDIS_URL: ${{ secrets.REDIS_URL }}
+      GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+      RUNPOD_TEMPLATE_NAME: EditDNA-Worker-2
+      IMAGE_REPO: ghcr.io/automatedretailservices/cutsell-worker
+      IMAGE_TAG: 0d55eb3c9a174478f2986234c9f8ed205439351b
+    steps:
+      - name: Require explicit paid-deploy approval token
+        shell: bash
+        env:
+          APPROVAL_TOKEN: ${{ inputs.approval_token }}
+        run: |
+          set -euo pipefail
+          test "$APPROVAL_TOKEN" = "RUN36" || { echo 'Paid RunPod deploy not explicitly approved'; exit 2; }
+
+      - name: Resolve exact immutable worker digest from approved commit tag
+        shell: bash
+        run: |
+          set -euo pipefail
+          source_image="$IMAGE_REPO:$IMAGE_TAG"
+          resolved=0
+          for attempt in $(seq 1 60); do
+            if docker buildx imagetools inspect "$source_image" > image-inspect.txt 2>/dev/null; then
+              resolved=1
+              break
+            fi
+            sleep 10
+          done
+          test "$resolved" = "1" || { echo "Approved worker image tag never became available: $source_image"; exit 3; }
+          digest=$(awk '/^Digest:/ {print $2; exit}' image-inspect.txt)
+          test -n "$digest" || { echo 'Unable to resolve immutable worker digest'; exit 3; }
+          case "$digest" in sha256:[0-9a-f][0-9a-f]*) ;; *) echo 'Invalid worker digest'; exit 3;; esac
+          IMAGE="$IMAGE_REPO@$digest"
+          echo "IMAGE=$IMAGE" >> "$GITHUB_ENV"
+          echo "Resolved immutable Run36 worker: $IMAGE"
+
+      - name: Validate approved deployment inputs
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "${RUNPOD_API_KEY:-}" || { echo 'RUNPOD_API_KEY missing'; exit 3; }
+          test -n "${REDIS_URL:-}" || { echo 'REDIS_URL missing'; exit 3; }
+          test -n "${GEMINI_API_KEY:-}" || { echo 'GEMINI_API_KEY missing'; exit 3; }
+          test -n "${IMAGE:-}" || { echo 'immutable worker image missing'; exit 3; }
+          case "$IMAGE" in *@sha256:*) ;; *) echo 'worker image is not immutable'; exit 3;; esac
+          echo "::add-mask::$GEMINI_API_KEY"
+
+      - name: Refuse duplicate staging worker
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail --silent --show-error --url "https://rest.runpod.io/v1/pods" --header "Authorization: Bearer $RUNPOD_API_KEY" --output pods.json
+          count=$(jq '[.[] | select(.name == "cutsell-staging-worker")] | length' pods.json)
+          test "$count" = "0" || { echo 'cutsell-staging-worker already exists; refusing duplicate paid worker'; exit 4; }
+
+      - name: Build safe runtime baseline from EditDNA-Worker-2
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail --silent --show-error --url "https://rest.runpod.io/v1/templates" --header "Authorization: Bearer $RUNPOD_API_KEY" --output templates.json
+          TEMPLATE=$(jq -c --arg name "$RUNPOD_TEMPLATE_NAME" '[.[] | select(.name == $name)][0]' templates.json)
+          test "$TEMPLATE" != "null" || { echo 'RunPod baseline template not found'; exit 5; }
+          printf '%s' "$TEMPLATE" | jq -c '{ASR_DEVICE:.env.ASR_DEVICE,ASR_ENABLED:.env.ASR_ENABLED,BAD_TAKES_ENABLED:.env.BAD_TAKES_ENABLED,BOUNDARY_REFINER_ENABLED:.env.BOUNDARY_REFINER_ENABLED,BOUNDARY_REFINER_HEAD_STEP_SEC:.env.BOUNDARY_REFINER_HEAD_STEP_SEC,BOUNDARY_REFINER_MIN_DURATION_SEC:.env.BOUNDARY_REFINER_MIN_DURATION_SEC,BOUNDARY_REFINER_TAIL_STEP_SEC:.env.BOUNDARY_REFINER_TAIL_STEP_SEC,FFMPEG_BIN:.env.FFMPEG_BIN,FFPROBE_BIN:.env.FFPROBE_BIN,HEAD_TRIM_SEC:.env.HEAD_TRIM_SEC,PRESIGN_EXPIRES:.env.PRESIGN_EXPIRES,PYTHONPATH:.env.PYTHONPATH,S3_ACL:.env.S3_ACL,S3_BUCKET:.env.S3_BUCKET,S3_PREFIX:.env.S3_PREFIX,TAIL_TRIM_SEC:.env.TAIL_TRIM_SEC,VISION_ENABLED:.env.VISION_ENABLED,VISION_INTERVAL_SEC:.env.VISION_INTERVAL_SEC,VISION_MAX_SAMPLES:.env.VISION_MAX_SAMPLES,VISUAL_BAD_THRESHOLD:.env.VISUAL_BAD_THRESHOLD,WHISPER_DEVICE:.env.WHISPER_DEVICE,WHISPER_MODEL:.env.WHISPER_MODEL,W_FACE:.env.W_FACE,W_VISION:.env.W_VISION,W_VISUAL:.env.W_VISUAL,AWS_ACCESS_KEY_ID:.env.AWS_ACCESS_KEY_ID,AWS_SECRET_ACCESS_KEY:.env.AWS_SECRET_ACCESS_KEY,AWS_REGION:.env.AWS_REGION} | with_entries(select(.value != null and .value != ""))' > safe-template-env.json
+          for key in AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_REGION S3_BUCKET; do
+            value=$(jq -r --arg key "$key" '.[$key] // empty' safe-template-env.json)
+            test -n "$value" || { echo "$key missing from EditDNA-Worker-2"; exit 6; }
+            echo "::add-mask::$value"
+          done
+          CONTAINER_DISK=30
+          VOLUME_GB=20
+          VOLUME_MOUNT=$(printf '%s' "$TEMPLATE" | jq -r '.volumeMountPath // "/workspace"')
+          printf 'CONTAINER_DISK=%s\nVOLUME_GB=%s\nVOLUME_MOUNT=%s\n' "$CONTAINER_DISK" "$VOLUME_GB" "$VOLUME_MOUNT" >> "$GITHUB_ENV"
+
+      - name: Create approved staging GPU worker
+        shell: bash
+        run: |
+          set -euo pipefail
+          START_CMD='python -m rq.cli worker -u "$REDIS_URL" --worker-ttl 14400 cutsell'
+          jq --arg name "cutsell-staging-worker" --arg image "$IMAGE" --arg cmd "$START_CMD" --arg redis "$REDIS_URL" --arg gemini "$GEMINI_API_KEY" --arg mount "$VOLUME_MOUNT" --argjson disk "$CONTAINER_DISK" --argjson volume "$VOLUME_GB" '. + {REDIS_URL:$redis,GEMINI_API_KEY:$gemini,CUTSELL_BRAIN_BACKEND:"runpod_local",CUTSELL_EDITORIAL_MODE:"clean_cut",CUTSELL_ASR_MODEL:"medium",CUTSELL_CLEAN_CUT_JUDGE:"0",CUTSELL_HYBRID_PROVIDER:"google",CUTSELL_HYBRID_LLM_ENABLED:"1",CUTSELL_HYBRID_PRIMARY_MODEL:"gemini-3.5-flash-lite",CUTSELL_HYBRID_ESCALATION_MODEL:"gemini-3.6-flash",CUTSELL_HYBRID_MAX_SESSION_USD:"0.0075",CUTSELL_HYBRID_TEST_BUDGET_USD:"0.50"} | {name:$name,imageName:$image,cloudType:"COMMUNITY",computeType:"GPU",gpuCount:1,gpuTypeIds:["NVIDIA RTX A5000","NVIDIA RTX A4000","NVIDIA L4","NVIDIA A40","NVIDIA RTX A6000","NVIDIA GeForce RTX 3090","NVIDIA GeForce RTX 4090"],gpuTypePriority:"custom",interruptible:false,containerDiskInGb:$disk,volumeInGb:$volume,volumeMountPath:$mount,dockerEntrypoint:["bash","-lc"],dockerStartCmd:[$cmd],env:.}' safe-template-env.json > create-pod.json
+          if jq -e '.env | has("OPENAI_API_KEY") or has("EDITDNA_USE_LLM") or has("EDITDNA_LLM_MODEL")' create-pod.json >/dev/null; then
+            echo 'Refusing deployment: forbidden OpenAI/legacy provider key present'; exit 7
+          fi
+          code=$(curl --silent --show-error --write-out '%{http_code}' --request POST --url "https://rest.runpod.io/v1/pods" --header "Authorization: Bearer $RUNPOD_API_KEY" --header "Content-Type: application/json" --data @create-pod.json --output pod.json)
+          rm -f create-pod.json safe-template-env.json
+          test "$code" = "201" || { echo "RunPod create HTTP status: $code"; jq '{error,errors,message}' pod.json || true; exit 8; }
+          POD_ID=$(jq -r '.id // empty' pod.json)
+          test -n "$POD_ID" || { echo 'RunPod returned no Pod id'; exit 8; }
+          echo "POD_ID=$POD_ID" >> "$GITHUB_ENV"
+          jq '{id,name,desiredStatus,imageName,costPerHr,adjustedCostPerHr}' pod.json || true
+
+      - name: Wait until the new RQ worker is actually ready
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pip install -q 'redis>=5.0' 'rq>=2.6'
+          python - <<'PY'
+          import os, time
+          from datetime import datetime, timezone
+          from redis import Redis
+          from rq import Worker
+          connection = Redis.from_url(os.environ['REDIS_URL'])
+          deadline = time.time() + 600
+          while time.time() < deadline:
+              workers = Worker.all(connection=connection)
+              now = datetime.now(timezone.utc)
+              for worker in workers:
+                  heartbeat = worker.last_heartbeat
+                  if heartbeat is None:
+                      continue
+                  if heartbeat.tzinfo is None:
+                      heartbeat = heartbeat.replace(tzinfo=timezone.utc)
+                  age = (now - heartbeat).total_seconds()
+                  if age <= 30 and worker.get_state() in {'idle','busy'}:
+                      raise SystemExit(0)
+              time.sleep(10)
+          raise SystemExit('RunPod Pod exists but no fresh RQ worker registered within 10 minutes')
+          PY
+
+      - name: Confirm exact staging Pod after worker readiness
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail --silent --show-error --url "https://rest.runpod.io/v1/pods/$POD_ID" --header "Authorization: Bearer $RUNPOD_API_KEY" | jq '{id,name,desiredStatus,imageName,costPerHr,adjustedCostPerHr}'

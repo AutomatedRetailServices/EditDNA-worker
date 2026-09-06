@@ -1,0 +1,140 @@
+{
+  "jobs": [
+    {
+      "benchmark_id": "gold-32131140975-5a4f1f8ca9e8ef2631f15197acf6fc0955a242c9",
+      "created_at": "2026-08-18T11:19:30.818166+00:00",
+      "current_source": "Editdna longform validation/VIDEO-2026-07-30-09-18-03.mp4",
+      "dataset_role": "clean_cut_gold_raw",
+      "ended_at": null,
+      "exc_info_tail": "Moved to FailedJobRegistry, due to AbandonedJobError, at 2026-08-18 14:51:31.818214+00:00",
+      "job_id": "f9534f86-4e7e-4e9f-a6e9-bc1ab9f3055b",
+      "origin": "cutsell",
+      "progress_percent": 3,
+      "stage": "processing",
+      "started_at": "2026-08-18T12:14:56.434563+00:00",
+      "status": "failed"
+    },
+    {
+      "benchmark_id": "gold-32129103228-ee8ea08c0ea0de0216d11610964651930a04ed38",
+      "created_at": "2026-08-18T11:04:54.219515+00:00",
+      "current_source": null,
+      "dataset_role": "clean_cut_gold_raw",
+      "ended_at": "2026-08-18T12:14:54.883997+00:00",
+      "exc_info_tail": "",
+      "job_id": "443cf974-dffd-408d-9cd1-4c3ab12df56c",
+      "origin": "cutsell",
+      "progress_percent": 100,
+      "stage": "finished",
+      "started_at": "2026-08-18T11:04:54.842389+00:00",
+      "status": "finished"
+    },
+    {
+      "benchmark_id": "gold-32097024487-74125c3ba62dcab025b257d6f561a34ebd6b50b8",
+      "created_at": "2026-08-18T03:52:27.354590+00:00",
+      "current_source": null,
+      "dataset_role": "clean_cut_gold_raw",
+      "ended_at": "2026-08-18T04:16:19.894185+00:00",
+      "exc_info_tail": "",
+      "job_id": "9d282974-4a1f-4083-b4a8-558b6e6c7fae",
+      "origin": "cutsell",
+      "progress_percent": 100,
+      "stage": "finished",
+      "started_at": "2026-08-18T03:52:28.800702+00:00",
+      "status": "finished"
+    },
+    {
+      "benchmark_id": "gold-32094391059-7b09690724a2d8d6b578b54bf13f68b401e09b25",
+      "created_at": "2026-08-18T03:08:49.508804+00:00",
+      "current_source": null,
+      "dataset_role": "clean_cut_gold_raw",
+      "ended_at": "2026-08-18T03:08:51.451459+00:00",
+      "exc_info_tail": "\"/usr/local/lib/python3.10/dist-packages/rq/job.py\", line 1368, in perform\n    self._result = self._execute()\n  File \"/usr/local/lib/python3.10/dist-packages/rq/job.py\", line 1428, in _execute\n    result = self.func(*self.args, **self.kwargs)\n  File \"/app/cutsell_worker/validation_job.py\", line 77, in run_unseen_clean_cut_benchmark\n    raise RuntimeError(f\"no Clean Cut gold RAW videos found under {prefix!r}\")\nRuntimeError: no Clean Cut gold RAW videos found under 'Editdna/ longform validation/'\n",
+      "job_id": "96543f96-3523-41b6-9d27-a0aaf6ab2a99",
+      "origin": "cutsell",
+      "progress_percent": null,
+      "stage": null,
+      "started_at": "2026-08-18T03:08:50.794250+00:00",
+      "status": "failed"
+    },
+    {
+      "benchmark_id": "unseen-32047819459-5a98b493a2062009d1ee547e4d6e17c855aa71f8",
+      "created_at": "2026-08-17T16:54:31.707212+00:00",
+      "current_source": null,
+      "dataset_role": null,
+      "ended_at": "2026-08-17T17:31:15.228891+00:00",
+      "exc_info_tail": "",
+      "job_id": "f438d159-3412-40d2-baad-6d4e7115f6ee",
+      "origin": "cutsell",
+      "progress_percent": 100,
+      "stage": "finished",
+      "started_at": "2026-08-17T16:54:33.162794+00:00",
+      "status": "finished"
+    },
+    {
+      "benchmark_id": "unseen-32039759235-d498a84a1cd9f73a6f0a37b5d420eba50e6fa080",
+      "created_at": "2026-08-17T14:38:56.193186+00:00",
+      "current_source": null,
+      "dataset_role": null,
+      "ended_at": "2026-08-17T15:50:47.674998+00:00",
+      "exc_info_tail": "",
+      "job_id": "20ee3c89-942b-4856-a82f-523497741ab0",
+      "origin": "cutsell",
+      "progress_percent": 100,
+      "stage": "finished",
+      "started_at": "2026-08-17T14:38:56.693665+00:00",
+      "status": "finished"
+    },
+    {
+      "benchmark_id": null,
+      "created_at": "2026-08-08T08:30:07.626518+00:00",
+      "current_source": null,
+      "dataset_role": null,
+      "ended_at": null,
+      "exc_info_tail": "",
+      "job_id": "3de613c4-1c93-40dc-be85-9b5a6a6c5bb9",
+      "origin": "cutsell",
+      "progress_percent": null,
+      "stage": null,
+      "started_at": null,
+      "status": "canceled"
+    },
+    {
+      "benchmark_id": null,
+      "created_at": "2026-08-08T08:30:03.495111+00:00",
+      "current_source": null,
+      "dataset_role": null,
+      "ended_at": null,
+      "exc_info_tail": "",
+      "job_id": "e8d2f9f3-cd65-438f-a600-d56de0de79e9",
+      "origin": "cutsell",
+      "progress_percent": null,
+      "stage": null,
+      "started_at": null,
+      "status": "canceled"
+    }
+  ],
+  "queue_count": 0,
+  "queue_job_ids": [],
+  "queue_name": "cutsell",
+  "registries": {
+    "canceled": [
+      "e8d2f9f3-cd65-438f-a600-d56de0de79e9",
+      "3de613c4-1c93-40dc-be85-9b5a6a6c5bb9"
+    ],
+    "deferred": [],
+    "failed": [
+      "96543f96-3523-41b6-9d27-a0aaf6ab2a99",
+      "f9534f86-4e7e-4e9f-a6e9-bc1ab9f3055b"
+    ],
+    "finished": [
+      "20ee3c89-942b-4856-a82f-523497741ab0",
+      "f438d159-3412-40d2-baad-6d4e7115f6ee",
+      "9d282974-4a1f-4083-b4a8-558b6e6c7fae",
+      "443cf974-dffd-408d-9cd1-4c3ab12df56c"
+    ],
+    "scheduled": [],
+    "started": []
+  },
+  "worker_count": 0,
+  "workers": []
+}

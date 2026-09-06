@@ -1,0 +1,82 @@
+name: CutSell RunPod Emergency Quiesce
+
+on:
+  push:
+    branches: [cutsell/mobile-v1-clean]
+    paths:
+      - .github/workflows/cutsell-runpod-emergency-quiesce.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  quiesce:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      RUNPOD_API_KEY: ${{ secrets.RUNPOD_API_KEY }}
+      ENDPOINT_ID: xxu7autt8mv2rn
+    steps:
+      - name: Snapshot RunPod serverless health
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --silent --show-error \
+            --url "https://api.runpod.ai/v2/$ENDPOINT_ID/health" \
+            --header "Authorization: Bearer $RUNPOD_API_KEY" \
+            --output /tmp/health-before.json || true
+          echo 'health_before:'
+          cat /tmp/health-before.json || true
+
+      - name: Restore base template and disable workers
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail --silent --show-error \
+            --url 'https://rest.runpod.io/v1/templates' \
+            --header "Authorization: Bearer $RUNPOD_API_KEY" \
+            --output /tmp/templates.json
+          BASE_TEMPLATE_ID=$(jq -r '.[] | select(.name == "EditDNA-Worker-2") | .id // empty' /tmp/templates.json | head -n1)
+          test -n "$BASE_TEMPLATE_ID"
+
+          jq -n --arg template "$BASE_TEMPLATE_ID" '{
+            templateId:$template,
+            workersMin:0,
+            workersMax:0,
+            scalerType:"QUEUE_DELAY",
+            scalerValue:2,
+            idleTimeout:5,
+            executionTimeoutMs:1800000
+          }' > /tmp/endpoint-patch.json
+
+          code=$(curl --silent --show-error --write-out '%{http_code}' \
+            --request PATCH \
+            --url "https://rest.runpod.io/v1/endpoints/$ENDPOINT_ID" \
+            --header "Authorization: Bearer $RUNPOD_API_KEY" \
+            --header 'Content-Type: application/json' \
+            --data @/tmp/endpoint-patch.json \
+            --output /tmp/endpoint-after.json)
+          test "$code" = "200"
+          jq -e --arg base "$BASE_TEMPLATE_ID" '.templateId == $base and .workersMin == 0 and .workersMax == 0' /tmp/endpoint-after.json >/dev/null
+          echo "base_template_id=$BASE_TEMPLATE_ID"
+          jq '{id,name,templateId,workersMin,workersMax,idleTimeout,executionTimeoutMs}' /tmp/endpoint-after.json
+
+      - name: Verify serverless workers quiesced
+        shell: bash
+        run: |
+          set -euo pipefail
+          sleep 10
+          curl --silent --show-error \
+            --url "https://api.runpod.ai/v2/$ENDPOINT_ID/health" \
+            --header "Authorization: Bearer $RUNPOD_API_KEY" \
+            --output /tmp/health-after.json || true
+          echo 'health_after:'
+          cat /tmp/health-after.json || true
+
+          curl --fail --silent --show-error \
+            --url "https://rest.runpod.io/v1/endpoints/$ENDPOINT_ID" \
+            --header "Authorization: Bearer $RUNPOD_API_KEY" \
+            --output /tmp/endpoint-verify.json
+          jq -e '.workersMin == 0 and .workersMax == 0' /tmp/endpoint-verify.json >/dev/null
+          echo 'runpod_endpoint_quiesced=true'

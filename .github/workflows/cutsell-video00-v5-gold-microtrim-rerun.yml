@@ -1,0 +1,130 @@
+name: CutSell Video00 V5 Gold Microtrim
+
+on:
+  push:
+    branches: [cutsell/mobile-v1-clean]
+    paths:
+      - .github/workflows/cutsell-video00-v5-gold-microtrim-rerun.yml
+      - ops/gold/video00-v5-visual-microtrim.json
+      - ops/gold/apply_output_microtrim.py
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  video00:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      RUNPOD_API_KEY: ${{ secrets.RUNPOD_API_KEY }}
+      ENDPOINT_ID: xxu7autt8mv2rn
+      GOLD_FILE: ops/gold/video00-v5-approved-selection.json
+      TRIM_FILE: ops/gold/video00-v5-visual-microtrim.json
+      BENCHMARK_ID: video00-v5-gold-microtrim-${{ github.run_id }}
+    steps:
+      - name: Checkout visual microtrim head
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 1
+
+      - name: Verify locked Gold and microtrim manifest
+        shell: bash
+        run: |
+          set -euo pipefail
+          jq -e '.historical_run_id == 32780956434 and .historical_artifact_id == 9539973947 and (.selected|length) == 21' "$GOLD_FILE" >/dev/null
+          jq -e '.authority == "human_watch_listen_visual_only" and .speech_changes_allowed == false and (.cuts|length) == 3' "$TRIM_FILE" >/dev/null
+          python -m py_compile ops/gold/apply_output_microtrim.py
+
+      - name: Load storage credentials
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail --silent --show-error --url "https://rest.runpod.io/v1/templates" --header "Authorization: Bearer $RUNPOD_API_KEY" --output /tmp/templates.json
+          TEMPLATE=$(jq -c '[.[] | select(.name == "EditDNA-Worker-2")][0]' /tmp/templates.json)
+          test "$TEMPLATE" != "null"
+          for key in AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_REGION S3_BUCKET; do
+            value=$(printf '%s' "$TEMPLATE" | jq -r --arg key "$key" '.env[$key] // empty')
+            test -n "$value"
+            echo "::add-mask::$value"
+            echo "$key=$value" >> "$GITHUB_ENV"
+          done
+
+      - name: Submit exact locked V5 Gold
+        shell: bash
+        run: |
+          set -euo pipefail
+          source=$(jq -r '.source_key' "$GOLD_FILE")
+          selection=$(jq -c '.selected' "$GOLD_FILE")
+          jq -n --arg source "$source" --arg benchmark "$BENCHMARK_ID" --argjson selection "$selection" '{input:{op:"locked_selection",source_key:$source,benchmark_id:$benchmark,selection:$selection}}' > /tmp/payload.json
+          code=$(curl --silent --show-error --write-out '%{http_code}' --request POST --url "https://api.runpod.ai/v2/$ENDPOINT_ID/run" --header "Authorization: Bearer $RUNPOD_API_KEY" --header 'Content-Type: application/json' --data @/tmp/payload.json --output /tmp/submit.json)
+          test "$code" = "200"
+          JOB_ID=$(jq -r '.id // empty' /tmp/submit.json)
+          test -n "$JOB_ID"
+          echo "JOB_ID=$JOB_ID" >> "$GITHUB_ENV"
+
+      - name: Wait for exact locked V5 Gold
+        shell: bash
+        run: |
+          set -euo pipefail
+          deadline=$((SECONDS+1800))
+          while [ "$SECONDS" -lt "$deadline" ]; do
+            curl --fail --silent --show-error --url "https://api.runpod.ai/v2/$ENDPOINT_ID/status/$JOB_ID" --header "Authorization: Bearer $RUNPOD_API_KEY" --output /tmp/status.json
+            status=$(jq -r '.status // empty' /tmp/status.json)
+            echo "video00_v5_gold_status=$status"
+            case "$status" in
+              COMPLETED)
+                jq -e '.output.selection_authority == "caller_locked_approved_selection" and .output.external_brain_calls_enabled == false and .output.selected_count == 21' /tmp/status.json >/dev/null
+                PREVIEW_URI=$(jq -r '.output.preview_uri // empty' /tmp/status.json)
+                RESULT_URI=$(jq -r '.output.result_uri // empty' /tmp/status.json)
+                test -n "$PREVIEW_URI" && test -n "$RESULT_URI"
+                echo "PREVIEW_URI=$PREVIEW_URI" >> "$GITHUB_ENV"
+                echo "RESULT_URI=$RESULT_URI" >> "$GITHUB_ENV"
+                exit 0 ;;
+              FAILED|TIMED_OUT|CANCELLED) cat /tmp/status.json; exit 1 ;;
+            esac
+            sleep 10
+          done
+          exit 1
+
+      - name: Download locked Gold baseline
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p artifact
+          aws s3 cp "$PREVIEW_URI" artifact/video00-v5-gold-baseline.mp4
+          aws s3 cp "$RESULT_URI" artifact/video00-v5-gold-baseline.json
+          test -s artifact/video00-v5-gold-baseline.mp4
+          test -s artifact/video00-v5-gold-baseline.json
+
+      - name: Verify source selection unchanged
+        shell: bash
+        run: |
+          set -euo pipefail
+          jq -S '[.selected[]|{start,end,text,take_group_id}]' "$GOLD_FILE" > /tmp/gold.json
+          jq -S '[.selected[]|{start,end,text,take_group_id}]' artifact/video00-v5-gold-baseline.json > /tmp/out.json
+          diff -u /tmp/gold.json /tmp/out.json
+
+      - name: Apply visual-only output microtrim
+        shell: bash
+        run: |
+          set -euo pipefail
+          python ops/gold/apply_output_microtrim.py \
+            artifact/video00-v5-gold-baseline.mp4 \
+            "$TRIM_FILE" \
+            artifact/video00-v5-gold-microtrim.mp4 | tee artifact/video00-v5-gold-microtrim-diagnostics.json
+          test -s artifact/video00-v5-gold-microtrim.mp4
+
+      - name: Preserve Gold metadata and trim manifest
+        shell: bash
+        run: |
+          cp "$GOLD_FILE" artifact/video00-v5-approved-selection.json
+          cp "$TRIM_FILE" artifact/video00-v5-visual-microtrim.json
+
+      - name: Upload V5 Gold microtrim human review artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: cutsell-video00-v5-gold-microtrim-human-review
+          path: artifact/
+          retention-days: 14

@@ -1,0 +1,37 @@
+FROM madiator2011/better-pytorch:cuda12.4-torch2.6.0
+
+WORKDIR /app
+
+ENV PYTHONUNBUFFERED=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    PIP_NO_CACHE_DIR=1 \
+    PYTHONPATH=/app
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    python3-dev \
+    ffmpeg \
+    git \
+    curl \
+    pkg-config \
+    libavformat-dev \
+    libavcodec-dev \
+    libavdevice-dev \
+    libavutil-dev \
+    libavfilter-dev \
+    libswscale-dev \
+    libswresample-dev \
+ && rm -rf /var/lib/apt/lists/*
+
+COPY requirements.cutsell.worker.txt /app/requirements.cutsell.worker.txt
+RUN pip install --no-cache-dir -r /app/requirements.cutsell.worker.txt \
+ && (pip uninstall -y openai >/dev/null 2>&1 || true)
+
+COPY cutsell_worker /app/cutsell_worker
+
+# Gold long-form jobs may legitimately spend well over 20 minutes inside one
+# GPU-heavy processing unit. Keep the worker-death TTL above the 3-hour benchmark
+# job timeout so Redis/RQ cannot classify a healthy busy worker as abandoned merely
+# because the job is long-running. The parent RQ worker continues to heartbeat while
+# monitoring its work horse; this TTL is the last-resort death-detection window.
+CMD ["bash", "-lc", "python -m rq.cli worker -u \"$REDIS_URL\" --worker-ttl 14400 cutsell"]

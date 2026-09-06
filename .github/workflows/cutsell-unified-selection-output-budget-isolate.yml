@@ -1,0 +1,61 @@
+name: CutSell Unified Selection Output Budget Isolation
+
+# Isolates whether the retry-family policy fix (editorial_contract prompt
+# growth + optional visual_evidence per candidate) is what made RAW run
+# 33316711594 (attempts 1 and 2, head da8bd80) truncate at MAX_TOKENS twice
+# in a row immediately after that fix landed, without spending a third paid
+# RunPod GPU RAW. See scripts/isolate_unified_selection_output_budget.py and
+# docs/claude-handoff/CUTSELL_COMPLETE_HANDOFF.md for context. Mirrors
+# cutsell-unified-selection-cardinality-isolate.yml's cheap, GPU-free
+# pattern: a small number of real but small Gemini calls on ubuntu-latest.
+
+on:
+  push:
+    branches: [cutsell/mobile-v1-clean]
+    paths:
+      - .github/workflows/cutsell-unified-selection-output-budget-isolate.yml
+      - scripts/isolate_unified_selection_output_budget.py
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  isolate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+      PYTHONPATH: ${{ github.workspace }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Verify secret without revealing value
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "${GEMINI_API_KEY:-}" || { echo 'GEMINI_API_KEY missing'; exit 3; }
+          echo 'Gemini credential is present.'
+
+      - name: Install minimal dependencies
+        shell: bash
+        run: pip install requests
+
+      - name: Run output budget isolation probe
+        shell: bash
+        run: python scripts/isolate_unified_selection_output_budget.py
+
+      - name: Upload isolation report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cutsell-unified-selection-output-budget-isolation-${{ github.sha }}
+          path: artifacts/unified-selection-output-budget-isolation.json
+          if-no-files-found: warn
+          retention-days: 14

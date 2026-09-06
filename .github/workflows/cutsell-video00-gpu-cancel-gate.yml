@@ -1,0 +1,22 @@
+name: CutSell Video00 GPU Cancel Gate
+
+on:
+  push:
+    branches: [cutsell/mobile-v1-clean]
+    paths:
+      - .github/workflows/cutsell-video00-gpu-cancel-gate.yml
+  workflow_dispatch:
+
+concurrency:
+  group: cutsell-video00-raw-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  cancel-gpu-rerun:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Cancel accidental GPU benchmark via shared concurrency group
+        run: echo 'No GPU work. This run exists only to cancel an accidental Video00 RAW rerun.'
