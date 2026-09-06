@@ -79,8 +79,20 @@ def _focused(payload: dict) -> dict:
         if auto_cuts:
             _apply_review_cuts(str(preview), auto_cuts)
 
+    # D-095 addendum: proof of WHICH code produced this result, computed
+    # inside this worker (package fingerprint + build sha + component
+    # activity markers). Observability only; never consulted by any
+    # editorial decision.
+    try:
+        from .active_path_identity import build_active_path_identity
+
+        active_path_identity = build_active_path_identity(result)
+    except Exception as exc:  # noqa: BLE001 -- identity must never break a run; the gap is printed, not hidden
+        active_path_identity = {"schema_version": "cutsell.active_path_identity.v1", "error": str(exc)[:200]}
+
     result = {
         **result,
+        "active_path_identity": active_path_identity,
         "output_duration_sec": round(_probe_duration(str(preview)), 3) if preview.exists() else None,
         "auto_speech_visual_microtrim_enabled": auto_microtrim,
         "auto_microtrim_count": len(auto_cuts),

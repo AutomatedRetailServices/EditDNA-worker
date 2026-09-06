@@ -180,7 +180,9 @@ jobs:
           # config values only, read by take_segmentation.py and
           # hybrid_session_cleanup.py respectively; no cutsell_worker
           # editorial module is touched by this overlay.
-          jq -c '(.env // {}) + {CUTSELL_HYBRID_LLM_ENABLED:"1", CUTSELL_HYBRID_PROVIDER:"google", CUTSELL_UNIFIED_REALIZATION_RESOLVER:"AUTHORITATIVE", CUTSELL_ASR_CANONICAL_NORMALIZATION:"1", CUTSELL_SEMANTIC_COMPUTE_PLANNER:"1"}' \
+          # D-095 addendum: the exact commit travels INTO the worker so the
+          # result's active_path_identity names it (CODE EXISTS != VIDEO USED IT).
+          jq -c --arg sha "${{ github.sha }}" '(.env // {}) + {CUTSELL_HYBRID_LLM_ENABLED:"1", CUTSELL_HYBRID_PROVIDER:"google", CUTSELL_UNIFIED_REALIZATION_RESOLVER:"AUTHORITATIVE", CUTSELL_ASR_CANONICAL_NORMALIZATION:"1", CUTSELL_SEMANTIC_COMPUTE_PLANNER:"1", CUTSELL_BUILD_GIT_SHA:$sha}' \
             /tmp/base-template.json > /tmp/cutsell-env.json
           # D-094.F2: optional per-run hybrid dollar-ceiling override. Only
           # applied when the dispatch input is non-empty and numeric; the
@@ -230,7 +232,7 @@ jobs:
               # D-056 Section 1). A real secret (API key, token, bucket
               # name) is essentially always >= 12 characters, so this
               # threshold costs no actual masking coverage.
-              if value and key not in ('CUTSELL_HYBRID_LLM_ENABLED', 'CUTSELL_HYBRID_PROVIDER', 'CUTSELL_UNIFIED_REALIZATION_RESOLVER', 'CUTSELL_ASR_CANONICAL_NORMALIZATION', 'CUTSELL_SEMANTIC_COMPUTE_PLANNER', 'CUTSELL_HYBRID_MAX_EDIT_USD', 'CUTSELL_BRIDGE_COMPLETE_PAIRWISE_SINGLETON') and len(str(value)) >= 12:
+              if value and key not in ('CUTSELL_HYBRID_LLM_ENABLED', 'CUTSELL_HYBRID_PROVIDER', 'CUTSELL_UNIFIED_REALIZATION_RESOLVER', 'CUTSELL_ASR_CANONICAL_NORMALIZATION', 'CUTSELL_SEMANTIC_COMPUTE_PLANNER', 'CUTSELL_HYBRID_MAX_EDIT_USD', 'CUTSELL_BRIDGE_COMPLETE_PAIRWISE_SINGLETON', 'CUTSELL_BUILD_GIT_SHA') and len(str(value)) >= 12:
                   print(f'::add-mask::{value}')
           print(f'Loaded {len(env)} env vars from the live RunPod template plus the D-044 hybrid-semantic overlay, the D-050C2 resolver-mode overlay, and the D-052 stability-battery overlay (secret values masked).')
           "
@@ -419,6 +421,48 @@ jobs:
           test -s artifact/cutai-video00.mp4
           aws s3 cp "s3://$S3_BUCKET/$SOURCE_KEY" artifact/raw-video00.mp4
           test -s artifact/raw-video00.mp4
+
+      - name: Verify active-path identity (CODE EXISTS != VIDEO USED IT, D-095 addendum)
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ ! -s artifact/video00-modal.json ]; then
+            echo "No result JSON downloaded; cannot verify active-path identity."
+            exit 0
+          fi
+          python3 - <<'PY'
+          import json, subprocess, sys
+          from cutsell_worker.active_path_identity import package_fingerprint
+          result = json.load(open('artifact/video00-modal.json', encoding='utf-8'))
+          ident = result.get('active_path_identity') or {}
+          local = package_fingerprint('cutsell_worker')
+          head = subprocess.check_output(['git', 'rev-parse', 'HEAD']).decode().strip()
+          remote_sha = ident.get('build_git_sha')
+          remote_fp = (ident.get('package') or {}).get('sha256')
+          report = {
+              'workflow_head_sha': head,
+              'worker_build_git_sha': remote_sha,
+              'git_sha_match': (remote_sha == head) if remote_sha else None,
+              'workflow_package_sha256': local['sha256'],
+              'worker_package_sha256': remote_fp,
+              'package_fingerprint_match': (remote_fp == local['sha256']) if remote_fp else None,
+              'worker_module_count': (ident.get('package') or {}).get('module_count'),
+              'workflow_module_count': local['module_count'],
+              'resolver_mode_env': ident.get('resolver_mode_env'),
+              'hybrid_max_edit_usd_env': ident.get('hybrid_max_edit_usd_env'),
+              'components_present': ident.get('components_present'),
+              'components_absent': ident.get('components_absent'),
+              'identity_error': ident.get('error'),
+          }
+          print('--- ACTIVE PATH IDENTITY ---')
+          print(json.dumps(report, indent=2))
+          for row in ident.get('component_markers') or []:
+              print(f"{'PRESENT' if row['present'] else 'ABSENT '}  {row['component']:<45} {row['reference']:<28} {row['evidence']}")
+          verdict = 'ACTIVE_CODE_VERIFIED' if (report['package_fingerprint_match'] and report['git_sha_match'] is not False) else 'ACTIVE_CODE_NOT_VERIFIED'
+          print(f'ACTIVE_PATH_IDENTITY_VERDICT={verdict}')
+          json.dump(report, open('artifact/video00-modal-active-path-identity.json', 'w', encoding='utf-8'), indent=2)
+          PY
 
       - name: Print full canonical diagnostics
         if: always()
@@ -665,6 +709,7 @@ jobs:
             artifact/video00-modal-quality-ladder.json
             artifact/video00-modal-quality-ladder.md
             artifact/video00-modal-quality-ladder.csv
+            artifact/video00-modal-active-path-identity.json
           retention-days: 14
           if-no-files-found: warn
 

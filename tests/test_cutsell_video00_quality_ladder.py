@@ -427,3 +427,16 @@ def test_render_verification_rows_flow_into_traceability_and_markdown():
     md = render_markdown(report)
     assert "Render verification (frozen plan -> final MP4): 1/1 fragments located" in md
     assert "0.5 (0.97)" in md
+
+
+def test_d089_placement_units_mark_member_clips_as_restored():
+    cutai = ReferenceCut.from_spans("cutai", [(0, 10)])
+    gold = ReferenceCut.from_spans("gold", [(0, 10)])
+    engine = _engine(selected=[("a", 0, 10, "hook"), ("b", 15, 20, "restated conclusion")])
+    engine["diagnostics"]["authoritative_story_placement"] = {
+        "schema_version": "cutsell.authoritative_story_placement.v1",
+        "units": [{"member_clip_ids": ["b", "a"], "placement_reason": "block_at_earliest_original_member_position"}],
+    }
+    report = build_region_map(raw_duration_sec=30.0, cutai=cutai, gold=gold, engine_result=engine)
+    r = _region_at(report, 15, 20)
+    assert (r["refinement"], r["attributed_authority"]) == (RESTORED_BY_RESOLVER, AUTH_REALIZATION)

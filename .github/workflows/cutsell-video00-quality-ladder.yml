@@ -251,6 +251,18 @@ jobs:
           echo "--- live_render_qc findings + boundary state ---"
           jq -c '.diagnostics.live_render_qc // .live_render_qc // "absent" | if type=="object" then {status, delivery_status, attempts:[.attempts[]? | {render_attempt, status, findings:[.findings[]? | {kind, start, end, clip_id, detail}], repair_target, repair_applied}]} else . end' ladder/cutsell-result.json | head -c 30000
           echo
+          echo "--- post_selection_interior_gap_trim (+trace): did the existing interior-gap trimmer act, and why not ---"
+          jq -c '.diagnostics.post_selection_interior_gap_trim // "absent"' ladder/cutsell-result.json | head -c 20000
+          echo
+          jq -c '.diagnostics.post_selection_interior_gap_trace // "absent"' ladder/cutsell-result.json | head -c 30000
+          echo
+          echo "--- whole_video_context event kinds (reset evidence available to the trimmer) ---"
+          jq -c '[.diagnostics.whole_video_context.sources[]?.events[]? | .kind] | group_by(.) | map({kind: .[0], n: length})' ladder/cutsell-result.json | head -c 4000
+          echo
+          jq -c '[.diagnostics.whole_video_context.sources[]?.events[]? | select(.start >= 165 and .start <= 235)] | .[]' ladder/cutsell-result.json | head -80
+          echo "--- human_boundary_polish / final_boundary_authority (edge decisions) ---"
+          jq -c '{human_boundary_polish: (.diagnostics.human_boundary_polish // "absent"), final_boundary_authority: (.diagnostics.final_boundary_authority // "absent"), final_boundary_authority_rule: (.diagnostics.final_boundary_authority_rule // "absent"), temporal_performance_trims: ((.diagnostics.temporal_performance_trims // []) | length)}' ladder/cutsell-result.json | head -c 20000
+          echo
           echo "--- result top-level keys ---"
           jq -c 'keys' ladder/cutsell-result.json
           jq -c '.diagnostics | keys' ladder/cutsell-result.json

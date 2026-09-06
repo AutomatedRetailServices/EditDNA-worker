@@ -299,7 +299,9 @@ def _restored_clip_ids(engine_result: dict) -> frozenset[str]:
     for row in rows:
         if not isinstance(row, dict):
             continue
-        for key in ("clip_id", "clip_ids", "restored_clip_id", "restored_clip_ids"):
+        # D-089 placement units: member_clip_ids (composite block / single winner
+        # replacement) are the clips the resolver placed, i.e. restored material.
+        for key in ("clip_id", "clip_ids", "restored_clip_id", "restored_clip_ids", "member_clip_ids"):
             value = row.get(key)
             if isinstance(value, str):
                 ids.add(value)
