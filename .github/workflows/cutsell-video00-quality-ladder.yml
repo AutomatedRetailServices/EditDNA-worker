@@ -79,7 +79,9 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y ffmpeg jq
-          python -m pip install -q 'numpy>=1.26,<3' 'boto3>=1.34' pytest
+          # Same runtime the clean-worker CI uses (cutsell_worker's package import
+          # needs requests) plus numpy for the audio alignment.
+          python -m pip install -q pytest -r requirements.cutsell.api.txt 'numpy>=1.26,<3'
 
       - name: Validate quality-ladder and decision-map regressions
         run: |

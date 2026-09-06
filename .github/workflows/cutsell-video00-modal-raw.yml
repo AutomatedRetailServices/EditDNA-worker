@@ -119,7 +119,7 @@ jobs:
           # checks/persists a durable S3 result marker itself -- see
           # "Run Modal full Video00 benchmark" below.
           # numpy: D-095 quality-ladder audio alignment on the runner (CPU, QA-only).
-          pip install --disable-pip-version-check --quiet modal boto3 'numpy>=1.26,<3'
+          pip install --disable-pip-version-check --quiet modal boto3 'numpy>=1.26,<3' 'requests>=2.32.3'
 
       - name: Load base RunPod template (env source of truth only)
         shell: bash
