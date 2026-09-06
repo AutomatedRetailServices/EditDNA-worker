@@ -10860,3 +10860,155 @@ Product Owner review of the ranked root causes and approval of the plan
 request; Steps 1/3/4 change editorial policy or structure -> escalation A/D).
 **HUMAN ACTION REQUIRED:** YES (A: editorial policy for the Resolver objective
 and the all-failed family rule; D: any structural change).
+
+## D-097 -- POST-AUDIT IMPLEMENTATION: retry-family completeness, no-usable-realization, Resolver usability, polarity safety, post-Freeze BoundaryEngine pass, perceptual Watch+Listen v1, CLEAN RAW gate
+
+**Product Owner approval (2026-09-06, "D-096 POST-AUDIT IMPLEMENTATION APPROVAL")
++ execution adjustment ("AJUSTE DE EJECUCIÓN SOBRE LA APROBACIÓN POST-AUDITORÍA
+D-096", §1-§5):** proceed from D-096; the ladder is `RAW -> CLEAN RAW GATE ->
+CUT.AI PARITY -> HUMAN GOLD PARITY -> TECHNICAL QC -> SYSTEM PERCEPTUAL W+L ->
+HUMAN W+L`; priorities A-E in order; meaning intact is the critical priority;
+"all failed" means Best Take must not force a winner, never auto-delete; Resolver
+Level-1 fixes are NOT postponed; Watch+Listen is developed during the
+improvements; success is proven on the rendered video, never by duration/F1/
+test count. D-096 stays the source of truth (this entry maps its gap rows to
+what changed; `docs/CUTSELL_SYSTEM_AUDIT_D096.md` Appendix B records the
+implementation status). No wholesale rewrite, no second pipeline, no module
+group deleted, no new guard/rescue layer, no Cut.ai/Gold input to production.
+
+### Per-fix report (change -> owning authority -> tests -> verified execution -> expected MP4 effect)
+
+**A. Retry-family completeness (D-096 C-1, root cause #3)** --
+`take_grouping.same_opening_restart` (lexical same-opening restart /
+abandoned-start evidence, generic es/en function-word aware) feeds
+`group_takes` and the provider's cohesion pass as a deterministic edge;
+`_bridge_aware_components` accepts a singleton-side bridge on deterministic
+restart evidence or a >= 0.90 semantic confirmation against a restart-cohesive
+component (`accepted_by` recorded); reconcile/cohesion traces gain
+`arbiter_rejected_pairs`. Authority: IdeaClusterer. Tests:
+`tests/test_cutsell_d097_a_retry_family_completeness.py` (18) + the D-083
+fixture updated (compete-vs-composite is the Resolver's decision, not the
+clusterer's). Expected MP4 effect: a failed attempt and its clean retry land in
+ONE family, so the retry competes instead of both playing ("ungrouped = keep").
+
+**B. All-failed family -> principled no-usable-realization (C-2, root cause #2;
+adjustment §1)** -- `pipeline._semantic_best_take` returns
+`no_usable_realization` when every member is delete-recommended AND every
+member is deterministically unusable (fragment marker or local corroboration);
+labels alone never delete. The family is dropped BY DECISION: members go to
+`discarded` with `no_usable_realization_all_failed`, the Ledger/Resolver record
+`RESOLVED_NONE`, CanonicalEditPlan/FinalEditReviewer/StoryValidator carry
+`dropped_no_usable_realization` (non-blocking, explained),
+`stage_status.story_completeness = incomplete_no_usable_realization`, and the
+harness marks the candidate `NOT_DELIVERABLE_INCOMPLETE_STORY_REVIEW` -- never a
+clean complete story. Authority: BestTakeResolver (decision) + Ledger/Resolver/
+StoryValidator (bookkeeping). Tests:
+`tests/test_cutsell_d097_b_no_usable_realization.py` (12).
+
+**Resolver Level-1 fixes (C-4/C-5, root cause #1; adjustment §3)** -- a
+family-scoped hybrid `failed` label at >= 0.85 marks a realization UNUSABLE for
+restoration/composite: its exclusive CRITICAL requirement groups are waived
+(recorded; mirrored into the D-089 effective-importance index as SUPPORTING so
+StoryValidator never re-blocks on them), a usable realization always outranks
+it (`_pick_winner` tier 0), and it is never a composite member. When every
+candidate is failed the evidence cancels out (the idea resolves exactly as
+before -- never dropped by labels). D-063 CRITICAL_COVERAGE_DOMINANCE is
+untouched for USABLE restatements. Authority: RealizationResolver. Tests:
+`tests/test_cutsell_d097_resolver_usability.py` (8). Expected MP4 effect: the
+failed conclusion restatement is no longer restored beside the chosen winner.
+
+**DeliveryScorer cleanliness evidence (adjustment §2, G-6)** --
+`take_judge.delivery_cleanliness_evidence` / `apply_delivery_cleanliness_evidence`
+penalise interior dead air (audio_silence events >= 1.20 s inside the take,
+-0.12 each, cap -0.24) and multimodal resets (strong physical reset + break
+inside the take, -0.10) on the family ranking; markers
+`interior_dead_air_penalty` / `multimodal_reset_penalty` are recorded per member
+(`take_judge_groups[*].delivery_cleanliness`). Negative controls: edge-adjacent
+pauses, single gestures, glances and short intentional pauses do not penalise.
+Tests: `tests/test_cutsell_d097_delivery_cleanliness_evidence.py` (6).
+
+**D. Polarity / micro-fragment safety (Appendix A, adjustment §1)** -- one shared
+vocabulary `polarity_safety.py` (es/en particles, no literal video phrase);
+`take_segmentation._repair_boundary_fragments` rejoins a bare polarity unit to
+the clause it negates across a pause of up to 2.0 s (never across a source or
+section boundary; repeated emphatic particles fold first) and publishes every
+rejoin with word timings (`stage_status.take_segmentation.polarity_rejoins`);
+`semantic_fragment_guard` refuses every brevity-only deletion of a
+polarity-bearing micro fragment (`protected_polarity_fragments`). Authority:
+AttemptReconstructor input (segmentation) owns the fix; the guard is the safety
+net. Tests: `tests/test_cutsell_d097_d_polarity_safety.py` (24, incl. the
+end-to-end "cleanup cannot invert meaning" case).
+
+**C/E. Dead-air reconciliation + ONE post-Freeze BoundaryEngine pass + ownership
+contract (C-6/C-7/C-8/C-12, G-7/G-8/G-14, D-6, root cause #4)** --
+(1) C-12 mechanism reproduced offline (synthetic tone / near-floor room tone /
+tone): the same `silencedetect` reports a 1.71 s silence starting 0.58 s late on
+the source but 2.30 s on the AAC re-encoded render; `audio_silence` now probes
+at 0.30 s, MERGES runs closer than 0.30 s, and adds a relaxed -30 dB floor
+(>= 1.20 s, confidence 0.90) so a fragmented near-floor pause is published as
+the one pause it is. (2) `boundary_engine_pass.apply_post_freeze_boundary_pass`
+runs ONCE after `freeze_selection_contract` on the FINAL keep set: evidence
+edge trim -> interior dead air / performance gaps (the same
+`split_selected_interior_performance_gaps`) -> audio-evidenced entry/exit
+tightening (`tighten_audio_entry` / `tighten_audio_exit`, never past a word);
+`enforce_selection_contract` verifies the token stream afterwards. The draft-
+time wrappers (edge-only boundary, interior gap trim) skip on the universal path
+via `boundary_owner="post_freeze"` (legacy `process_local_sources` callers keep
+them). (3) The renderer records every `tighten_trailing_silence` it applies
+(`renderer_trailing_trims` per render attempt) and every post-render
+LINGERING_ACCIDENTAL_SILENCE is reconciled back to its source range with the
+source-side evidence and the trimmer decision (`dead_air_reconciliation`
+verdicts: source_not_measured / source_measured_trimmer_rejected:<reason> /
+source_measured_and_split_elsewhere / ...). (4) The PHYSICAL CLEANUP OWNERSHIP
+CONTRACT (entry, exit, interior dead air, reset debris, micro continuity,
+renderer mechanical ops, pre-Freeze editors) is the module docstring of
+`boundary_engine_pass.py` and is emitted in `diagnostics.boundary_engine_pass`.
+Smallest safe dedup: the two pre-authority physical wrappers no longer run on
+the active path (one pass instead of two runs); no module was deleted.
+Tests: `tests/test_cutsell_d097_c_boundary_engine_pass.py` (15).
+
+**§4. Perceptual System Watch+Listen v1 (root cause #5)** --
+`perceptual_watch_listen.review_rendered_candidate` runs after a technical-QC
+PASS on the real MP4: interior dead air (mp4_measured; >= 1.2 s FAIL, 0.8-1.2 s
+UNCERTAIN), cut-adjacent speech energy at every join (mp4_measured, UNCERTAIN
+"possible clipped word"), reset debris at entries/exits (A-5 events mapped onto
+the render timeline), repeated audience content between different semantic
+clips (transcript-derived, routes to BestTakeResolver); four capabilities are
+declared NOT_IMPLEMENTED (post-line expression, gesture continuity, clipped
+phoneme re-alignment, framing/eye contact). NOT_IMPLEMENTED / UNCERTAIN / ERROR
+never become PASS; v1 therefore never auto-passes; `gate_mode = advisory_v1`
+(the technical QC stays the blocking gate until the PO approves the perceptual
+acceptance criteria -- escalation A); a technically clean candidate is reported
+as `DELIVERABLE_PENDING_HUMAN_WATCH_LISTEN:perceptual=<status>` with
+`human_watch_listen_required = true`, never as an approved preview. Tests:
+`tests/test_cutsell_d097_perceptual_watch_listen_and_clean_raw_gate.py`.
+
+**CLEAN RAW gate (QA metric layer)** -- `benchmarks/clean_raw_gate.py` reads the
+persisted result (+ the four-way ladder when present) and prints one verdict:
+PASS only with technical QC PASS, complete story, zero interior dead air, no
+perceptual FAIL, and (ladder) zero failed/redundant/restored material, zero
+missing delivery, <= 1.0 s loose edges; INCOMPLETE_EVIDENCE when the ladder or
+the perceptual review is absent (never PASS by absence). Wired into
+`cutsell-video00-quality-ladder.yml` (with the ladder) and printed result-only
+in `cutsell-video00-modal-raw.yml`. Active-path identity gains the
+`BoundaryEnginePass.post_freeze` and `TakeSegmentation.polarity_rejoin`
+markers.
+
+**Capabilities NOT evaluated by this checkpoint:** no RAW has run on this code
+yet (every "expected MP4 effect" above is a prediction to be verified on the
+next authorised RAW with the ladder + CLEAN RAW gate); the perceptual v1
+NOT_IMPLEMENTED capabilities; C-12 on the real Video00 media (the
+reconciliation diagnostic settles it on the next RAW).
+
+**Qualification:** see the LAST VERIFIED RESULT line (filled from the offline
+run of this checkpoint).
+
+**LAST VERIFIED RESULT:** CODE FIXED; TESTS PASS (targeted D-097 suites 91/91:
+A 18, B 12, resolver 8, cleanliness 6, D 24, C/E 15, perceptual+gate 8 -- see
+the qualification line below for the full glob); RAW NOT YET RUN on this code.
+**NEXT AUTOMATIC ACTION:** commit + push `feature/runpod-pod-on-demand`; then
+ONE authorised Video00 RAW (Modal) with active-path identity verification,
+the four-way ladder and the CLEAN RAW gate; then the per-fix MP4 report
+(defects fixed / regressions / capabilities not evaluated).
+**HUMAN ACTION REQUIRED:** NO for the RAW (a fresh RAW after proven fixes is
+inside the approval); YES (A) only to make the perceptual gate BLOCKING.

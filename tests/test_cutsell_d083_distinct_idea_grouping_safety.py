@@ -265,9 +265,18 @@ def test_regression_monolith_and_restatement_still_merge_as_genuine_retry():
 
 def test_regression_full_five_member_conflated_group_resolves_to_three_families():
     # The exact shape observed in the D-082 battery: one baseline group
-    # bundling all four mentions together. Only the monolith-restatement
-    # pair should stay merged; acne and the short mention must each end up
-    # in their own singleton group.
+    # bundling all four mentions together. Acne must end up alone.
+    # D-097.A: the short mention restarts the monolith's own sentence from
+    # its first words ("I also used to get pimples ...") within seconds and
+    # shares its content -- deterministic recording-process evidence that
+    # the two are one retry family (take_grouping.same_opening_restart),
+    # exactly what the live arbiter also confirmed at 0.95 in every recorded
+    # run. It therefore joins the monolith (and, through the >= 0.90
+    # confirmation against that restart-cohesive component, the
+    # restatement) instead of being isolated by "no evidence -> split".
+    # Whether the short piece and the restatement then COMPETE or form a
+    # COMPOSITE is the Resolver's decision (D-096 root cause #1), not a
+    # grouping question.
     takes = (
         _take("acne", 0.0, 2.0, _ACNE),
         _take("short", 5.0, 7.0, _PIMPLES_SHORT),
@@ -285,9 +294,18 @@ def test_regression_full_five_member_conflated_group_resolves_to_three_families(
     result, diagnostics = split_incohesive_retry_groups((group,), takes, arbiter=arbiter)
     result_sets = {frozenset(g) for g in result}
     assert frozenset({"acne"}) in result_sets
-    assert frozenset({"monolith", "restatement"}) in result_sets
-    assert frozenset({"short"}) in result_sets
-    assert len(result) == 3
+    assert frozenset({"short", "monolith", "restatement"}) in result_sets
+    assert len(result) == 2
+    restart_edges = [
+        row for row in diagnostics["edge_trace"]
+        if row.get("reason") in {"same_opening_restart", "same_opening_abandoned_start"}
+        or row.get("triggering_reason") in {"same_opening_restart", "same_opening_abandoned_start"}
+    ]
+    assert restart_edges, "the short mention must join through deterministic restart evidence"
+    assert any(
+        row.get("accepted_by") == "semantic_confirmation_against_restart_cohesive_component"
+        for row in diagnostics["edge_trace"]
+    )
 
 
 # --- Diagnostics observability ----------------------------------------------

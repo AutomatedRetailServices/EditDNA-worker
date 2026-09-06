@@ -53,6 +53,7 @@ import dataclasses
 from dataclasses import dataclass, replace
 from typing import Sequence
 
+from .boundary_engine_pass import reconcile_silence_findings
 from .canonical_edit_plan import CanonicalEditPlan, build_canonical_edit_plan
 from .live_boundary_repair import repair_segment_for_finding, segment_output_windows
 from .post_render_media_qc import run_post_render_media_qc
@@ -101,6 +102,12 @@ class RenderAttemptRecord:
     # first in the list and 8 boundary clicks behind it were never tried).
     repair_target: dict | None = None
     unrepairable_finding_count: int = 0
+    # D-097.C/E: the renderer's own trailing-silence trims for this attempt
+    # (owner-attributed exits) and, for every LINGERING_ACCIDENTAL_SILENCE
+    # the QC measured, the source range it maps to plus what the source-level
+    # measurement and the post-Freeze Boundary pass knew about it (C-12).
+    renderer_trailing_trims: tuple[dict, ...] = ()
+    dead_air_reconciliation: tuple[dict, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -182,7 +189,12 @@ def render_with_post_render_qc(
     attempts: list[RenderAttemptRecord] = []
 
     for attempt_index in range(max_attempts):
-        render_preview(current_segments, output_path, text_overlays=text_overlays, media_overlays=media_overlays)
+        trailing_trims: list[dict] = []
+        render_preview(
+            current_segments, output_path, text_overlays=text_overlays, media_overlays=media_overlays,
+            trim_report=trailing_trims,
+        )
+        trims = tuple(trailing_trims)
 
         # Structural checks validate that THIS segment SET correctly
         # represents the frozen CanonicalEditPlan's clip membership and
@@ -216,12 +228,14 @@ def render_with_post_render_qc(
                     attempts=tuple(attempts),
                 )
 
-        boundary_timestamps = [w[1] for w in segment_output_windows(current_segments)[:-1]]
+        output_windows = segment_output_windows(current_segments)
+        boundary_timestamps = [w[1] for w in output_windows[:-1]]
         media = run_post_render_media_qc(
             output_path,
             boundary_timestamps=boundary_timestamps,
             protected_pause_windows=protected_pause_windows,
         )
+        reconciliation = reconcile_silence_findings(draft, current_segments, media.findings, output_windows)
 
         if media.status == "PASS":
             attempts.append(RenderAttemptRecord(
@@ -229,6 +243,7 @@ def render_with_post_render_qc(
                 plan_id=edit_plan.plan_id, plan_version=edit_plan.plan_version, semantic_hash=edit_plan.semantic_hash,
                 input_boundary_state=_segment_state(current_segments),
                 findings=(), finding_types=(), repair_requested=False, repair_applied=None, status="PASS",
+                renderer_trailing_trims=trims,
             ))
             return LiveRenderQCResult(
                 status="PASS", output_path=output_path,
@@ -247,6 +262,7 @@ def render_with_post_render_qc(
                     "physical" if is_physical_finding_kind(f.kind) else "semantic_structural" for f in media.findings
                 ),
                 repair_requested=False, repair_applied=None, status="SEMANTIC_MISMATCH",
+                renderer_trailing_trims=trims, dead_air_reconciliation=reconciliation,
             ))
             return LiveRenderQCResult(
                 status="SEMANTIC_MISMATCH_INVALIDATED", output_path=None,
@@ -278,6 +294,7 @@ def render_with_post_render_qc(
                 finding_types=("physical",) * len(media.findings),
                 repair_requested=True, repair_applied=None, status="PHYSICAL_FAIL_UNREPAIRABLE",
                 repair_target=None, unrepairable_finding_count=unrepairable,
+                renderer_trailing_trims=trims, dead_air_reconciliation=reconciliation,
             ))
             break
 
@@ -290,6 +307,7 @@ def render_with_post_render_qc(
             finding_types=("physical",) * len(media.findings),
             repair_requested=True, repair_applied=dataclasses.asdict(repair_attempt), status="PHYSICAL_FAIL_REPAIRED",
             repair_target=_finding_dict(target_finding), unrepairable_finding_count=unrepairable,
+            renderer_trailing_trims=trims, dead_air_reconciliation=reconciliation,
         ))
         current_segments = new_segments
 

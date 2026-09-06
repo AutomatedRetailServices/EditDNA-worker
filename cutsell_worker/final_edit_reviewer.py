@@ -93,6 +93,9 @@ REQUIRED_CONTINUATION_LOST = "REQUIRED_CONTINUATION_LOST"
 STORY_ORDER_BREAK = "STORY_ORDER_BREAK"
 CAUSAL_ORDER_BREAK = "CAUSAL_ORDER_BREAK"
 CRITICAL_CLAIM_LOST = "CRITICAL_CLAIM_LOST"
+# D-097.B: non-blocking -- Best Take found no usable realization for an
+# idea and dropped it; the run is marked story-incomplete for review.
+NO_USABLE_REALIZATION = "NO_USABLE_REALIZATION"
 
 _UNIMPLEMENTED_KINDS = frozenset({
     INCOMPLETE_DELIVERY, ORPHAN_FRAGMENT, INCOMPATIBLE_COMPOSITE,
@@ -240,6 +243,16 @@ def review(
                 detail=unresolved_detail,
                 owning_authority=unresolved_authority,
                 blocking=True,
+            ))
+        elif idea.coverage_status == "dropped_no_usable_realization":
+            warnings.append(Finding(
+                kind=NO_USABLE_REALIZATION,
+                plan_id=plan_id, plan_version=plan_version,
+                idea_id=idea.idea_id,
+                clip_ids=idea.discarded_clip_ids,
+                detail={"reason": "best_take_found_no_usable_realization_in_family"},
+                owning_authority="BestTakeResolver",
+                blocking=False,
             ))
         elif idea.coverage_status == "missing":
             findings.append(Finding(

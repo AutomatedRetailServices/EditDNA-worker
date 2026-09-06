@@ -380,6 +380,27 @@ def _contradiction_findings(draft, take_by_id: dict[str, object]) -> list[dict]:
     return findings
 
 
+def _no_usable_realization_groups(draft) -> list[dict]:
+    """D-097.B: `take_judge_groups` families Best Take refused to force a
+    winner for (every member semantically failed AND deterministically
+    unusable). Recorded, never silent; exempt from the accidental-loss
+    checks below because the drop is a decision, not a coverage accident."""
+    rows = []
+    for group in (draft.diagnostics or {}).get("take_judge_groups") or ():
+        if not group.get("no_usable_realization"):
+            continue
+        rows.append({
+            "group_id": group.get("group_id"),
+            "member_clip_ids": [str(row.get("clip_id") or "") for row in (group.get("ranked") or ())],
+            "member_usability": group.get("member_usability") or {},
+        })
+    return rows
+
+
+def _no_usable_realization_clip_ids(draft) -> set[str]:
+    return {cid for row in _no_usable_realization_groups(draft) for cid in row["member_clip_ids"]}
+
+
 def _missing_idea_coverage(draft) -> list[dict]:
     """Every take_judge_groups entry is one intended idea/retry contest.
     Flag any whose members are ALL absent from the final selected set --
@@ -401,6 +422,8 @@ def _missing_idea_coverage(draft) -> list[dict]:
     }
     missing: list[dict] = []
     for group in (draft.diagnostics or {}).get("take_judge_groups") or ():
+        if group.get("no_usable_realization"):
+            continue  # D-097.B: dropped by decision -- see _no_usable_realization_groups
         ranked = list(group.get("ranked") or ())
         member_ids = [str(row.get("clip_id") or "") for row in ranked]
         covered = any(
@@ -590,10 +613,21 @@ def _lost_semantic_atoms(
     kept_critical = _numbers(kept_text) | _negations(kept_text)
     selected_ids = {clip.clip_id for clip in draft.selected}
     clip_id_to_group = _clip_id_to_group_members((draft.diagnostics or {}).get("take_judge_groups"))
+    no_usable_clip_ids = _no_usable_realization_clip_ids(draft)
 
     findings: list[dict] = []
     for clip in draft.discarded:
         text = str(clip.text or "")
+        if clip.clip_id in no_usable_clip_ids:
+            # D-097.B: content of a family with no usable realization -- lost
+            # by decision, recorded (never silent), never a Freeze block.
+            findings.append({
+                "clip_id": clip.clip_id,
+                "text": text[:200],
+                "kind": "LOST_IN_NO_USABLE_REALIZATION_FAMILY",
+                "blocking": False,
+            })
+            continue
         if len(text.split()) < 3:
             # Too short to safely judge as carrying a distinct idea, a
             # standalone critical fact, or even a filler reaction ("no
@@ -1099,6 +1133,7 @@ def apply_final_story_coherence_validation(
         "possible_missing_story_ending": possible_missing_ending,
         "contradiction_findings": contradiction_findings,
         "missing_idea_coverage": missing_idea_coverage,
+        "no_usable_realization_families": _no_usable_realization_groups(draft),  # D-097.B
         "lost_semantic_atoms": lost_semantic_atoms,
         "lost_critical_claims": lost_critical_claims,
         # D-061 Phase 3: observability-only, additive, never wired into
@@ -1126,6 +1161,7 @@ def apply_final_story_coherence_validation(
 AUTHORITY_FAMILY_ACCEPTED = "authoritative_composite_accepted_as_resolved"
 AUTHORITY_FAMILY_WINNER_ACCEPTED = "authoritative_winner_accepted_as_resolved"
 AUTHORITY_FAMILY_REVIEW_REQUIRED = "authoritative_review_required"
+AUTHORITY_FAMILY_NONE_ACCEPTED = "authoritative_none_accepted"  # D-097.B
 AUTHORITY_FAMILY_STRUCTURAL_FAILURE = "authoritative_structural_validation_failed"
 AUTHORITY_FAMILY_NO_DECISION = "no_authoritative_decision_recorded_for_group"
 
@@ -1141,6 +1177,8 @@ def _classify_family_under_authority(assessment) -> tuple[bool, str]:
     if assessment.accepted_as_resolved:
         if assessment.decision_status == "RESOLVED_COMPOSITE":
             return True, AUTHORITY_FAMILY_ACCEPTED
+        if assessment.decision_status == "RESOLVED_NONE":
+            return True, AUTHORITY_FAMILY_NONE_ACCEPTED
         return True, AUTHORITY_FAMILY_WINNER_ACCEPTED
     if assessment.decision_status == "REVIEW_REQUIRED":
         return False, AUTHORITY_FAMILY_REVIEW_REQUIRED
@@ -1283,6 +1321,7 @@ def _apply_post_authority_validation_only(
         "possible_missing_story_ending": possible_missing_ending,
         "contradiction_findings": contradiction_findings,
         "missing_idea_coverage": missing_idea_coverage,
+        "no_usable_realization_families": _no_usable_realization_groups(working),  # D-097.B
         "lost_semantic_atoms": lost_semantic_atoms,
         "lost_critical_claims": lost_critical_claims,
         "claim_coverage_confirmations": claim_coverage_confirmations,

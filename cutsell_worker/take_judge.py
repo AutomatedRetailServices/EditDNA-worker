@@ -202,6 +202,132 @@ def _restart_tail_fragment(candidate: CandidateTake, reference: CandidateTake) -
     return marker_token_index >= max(3, len(left) // 2)
 
 
+# Shared vocabulary: the ranker's own reason markers for a fragment it has
+# proven failed/incomplete relative to a sibling. Read (never re-derived) by
+# deterministic_best_take_authority, selection_integrity and pipeline
+# (D-097.B usability evidence).
+FRAGMENT_PENALTY_MARKERS = (
+    "material_prefix_fragment_penalty",
+    "repetitive_restart_fragment_penalty",
+    "restart_tail_fragment_penalty",
+)
+
+# D-097 (Product Owner adjustment §2): measured audiovisual evidence must
+# influence Best Take, and an ABSENT signal is never "confirmed clean".
+# Two objective, already-computed evidence sources are applied to the
+# family ranking here, with reason markers so every consumer can see why:
+# - ACCIDENTAL INTERIOR DEAD AIR: an `audio_silence_interval` event
+#   (D-095.2, ffmpeg silencedetect -35 dB on the source) lying strictly
+#   inside the take, lasting >= ACCIDENTAL_DEAD_AIR_SEC -- the post-render
+#   QC's own LINGERING_ACCIDENTAL_SILENCE threshold. Shorter pauses are
+#   never penalised (an intentional beat or a breath is not an error).
+# - MULTIMODAL RESET inside the take: a strong body/hand reset candidate
+#   (>= 0.88) AND an independent disengagement/face break (>= 0.76) both
+#   inside the take's interior (the same two-signal pattern
+#   hybrid_session_cleanup._failed_local_evidence already requires). One
+#   gesture, one glance or one reset alone is NOT evidence -- negative
+#   controls in tests/test_cutsell_d097_delivery_cleanliness_evidence.py.
+ACCIDENTAL_DEAD_AIR_SEC = 1.20
+_DEAD_AIR_PENALTY = 0.12
+_DEAD_AIR_PENALTY_CAP = 0.24
+_MULTIMODAL_RESET_PENALTY = 0.10
+_CLEANLINESS_EDGE_MARGIN_SEC = 0.35
+_RESET_KINDS = frozenset({"hand_motion_reset_candidate", "body_reset_candidate"})
+_BREAK_KINDS = frozenset({"camera_disengagement_candidate", "facial_expression_shift_candidate"})
+_AUDIO_SILENCE_KIND = "audio_silence_interval"
+
+
+def _event_field(event, name: str, default=None):
+    if isinstance(event, dict):
+        return event.get(name, default)
+    return getattr(event, name, default)
+
+
+def _interior_events(take: CandidateTake, events, *, margin_sec: float):
+    interior_start = float(take.start) + margin_sec
+    interior_end = float(take.end) - margin_sec
+    if interior_end <= interior_start:
+        return []
+    inside = []
+    for event in events or ():
+        try:
+            start = float(_event_field(event, "start", 0.0))
+            end = float(_event_field(event, "end", 0.0))
+        except (TypeError, ValueError):
+            continue
+        source = _event_field(event, "source_asset_id", None)
+        if source not in (None, "", take.source_asset_id):
+            continue
+        if start >= interior_start and end <= interior_end:
+            inside.append(event)
+    return inside
+
+
+def delivery_cleanliness_evidence(take: CandidateTake, events) -> dict:
+    """Objective cleanliness evidence for one take (see the D-097 comment
+    above). Pure; never reads labels or references."""
+    inside = _interior_events(take, events, margin_sec=_CLEANLINESS_EDGE_MARGIN_SEC)
+    dead_air = [
+        (float(_event_field(e, "start")), float(_event_field(e, "end")))
+        for e in inside
+        if str(_event_field(e, "kind", "")) == _AUDIO_SILENCE_KIND
+        and float(_event_field(e, "end")) - float(_event_field(e, "start")) >= ACCIDENTAL_DEAD_AIR_SEC
+    ]
+    resets = [
+        e for e in inside
+        if str(_event_field(e, "kind", "")) in _RESET_KINDS and float(_event_field(e, "confidence", 0.0)) >= 0.88
+    ]
+    breaks = [
+        e for e in inside
+        if str(_event_field(e, "kind", "")) in _BREAK_KINDS and float(_event_field(e, "confidence", 0.0)) >= 0.76
+    ]
+    penalty = min(_DEAD_AIR_PENALTY_CAP, _DEAD_AIR_PENALTY * len(dead_air))
+    reasons = []
+    if dead_air:
+        reasons.append("interior_dead_air_penalty")
+    if resets and breaks:
+        penalty += _MULTIMODAL_RESET_PENALTY
+        reasons.append("multimodal_reset_penalty")
+    return {
+        "clip_id": take.clip_id,
+        "interior_dead_air_count": len(dead_air),
+        "interior_dead_air_sec": round(sum(end - start for start, end in dead_air), 3),
+        "interior_dead_air_intervals": [[round(s, 3), round(e, 3)] for s, e in dead_air],
+        "strong_reset_count": len(resets),
+        "break_count": len(breaks),
+        "multimodal_reset": bool(resets and breaks),
+        "penalty": round(penalty, 4),
+        "reasons": reasons,
+    }
+
+
+def apply_delivery_cleanliness_evidence(
+    ranked: Iterable[RankedTake], takes: Iterable[CandidateTake], events,
+) -> tuple[Tuple[RankedTake, ...], list[dict]]:
+    """Re-rank `ranked` with `delivery_cleanliness_evidence` penalties. The
+    baseline scores/reasons are preserved and the markers appended, so the
+    evidence is visible in `take_judge_groups[].ranked[].reason`."""
+    take_map = {take.clip_id: take for take in takes}
+    rows: list[dict] = []
+    adjusted: list[RankedTake] = []
+    for item in ranked:
+        take = take_map.get(item.clip_id)
+        if take is None:
+            adjusted.append(item)
+            continue
+        evidence = delivery_cleanliness_evidence(take, events)
+        rows.append(evidence)
+        if not evidence["penalty"]:
+            adjusted.append(item)
+            continue
+        adjusted.append(RankedTake(
+            item.clip_id,
+            round(_bounded(float(item.score) - float(evidence["penalty"])), 4),
+            "+".join([str(item.reason), *evidence["reasons"]]),
+        ))
+    return tuple(sorted(adjusted, key=lambda row: (-row.score, row.clip_id))), rows
+
+
 def rank_takes(takes: Iterable[CandidateTake]) -> Tuple[RankedTake, ...]:
     take_tuple = tuple(takes)
     base = {take.clip_id: score_take(take) for take in take_tuple}

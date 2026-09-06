@@ -234,6 +234,19 @@ jobs:
           echo "--- FINAL MP4 physical LEVEL_1 regions ---"
           jq -c '(.physical_regions // [])[] | select(.level=="LEVEL_1" and .scope=="selection") | {i:.region_index, raw:[.raw_start,.raw_end], dur:.duration_sec, kind, refinement, authority:.attributed_authority, cands:[.cutsell_candidates[] | {s:.status, id:.clip_id, t:(.text[:60])}]}' ladder/video00-quality-ladder.json
 
+      - name: CLEAN RAW gate (D-097 QA metric layer over result + ladder)
+        shell: bash
+        run: |
+          set -euo pipefail
+          python benchmarks/clean_raw_gate.py \
+            --engine-json ladder/cutsell-result.json \
+            --ladder-json ladder/video00-quality-ladder.json \
+            --out-json ladder/clean-raw-gate.json
+          echo "--- perceptual System Watch+Listen (advisory_v1) ---"
+          jq '.perceptual_watch_listen // "absent" | if type=="object" then {status, gate_mode, capability_status_counts, routing, capabilities:[.capabilities[]? | {capability, status, method, finding_count:(.findings|length), note}]} else . end' ladder/cutsell-result.json
+          echo "--- post-Freeze BoundaryEngine pass + renderer trailing trims + dead-air reconciliation ---"
+          jq '{boundary_engine_pass: (.diagnostics.boundary_engine_pass // "absent" | if type=="object" then del(.ownership_contract) else . end), take_segmentation: (.stage_status.take_segmentation // "absent"), last_attempt: ((.live_render_qc.attempts // [])[-1] // "absent" | if type=="object" then {status, renderer_trailing_trims, dead_air_reconciliation} else . end)}' ladder/cutsell-result.json | head -c 30000
+
       - name: Engine forensic evidence for authority attribution (read-only)
         shell: bash
         run: |

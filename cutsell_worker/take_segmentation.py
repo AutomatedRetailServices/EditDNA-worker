@@ -9,6 +9,7 @@ from typing import Iterable, Mapping, Tuple
 from .canonical_asr_evidence import normalize_transcript_segments
 from .canonical_identity import mint_source_span_id
 from .contracts import CandidateTake, MediaSignals, SourceAsset, TranscriptSegment, Word
+from .polarity_safety import is_bare_polarity_unit
 from .silence_analysis import SilenceGap, silence_ratio
 from .source_identity import stable_clip_id
 
@@ -47,6 +48,17 @@ _BRIDGE_CONNECTORS = frozenset({
 })
 
 _OPEN_PUNCTUATION_RE = re.compile(r"[,;:\-–—]\s*$")
+
+# D-097 Priority D (was the parked D-095.3 proposal): a bare polarity particle
+# is NOT a discourse marker. When ASR puts it in its own speech unit because
+# the speaker paused for emphasis ("No ... quiero sonar a conspiracion"),
+# leaving it orphaned lets a downstream cleanup delete it as micro debris and
+# the following clause is then delivered with its meaning INVERTED. The
+# particle therefore rejoins the clause it negates across a normal, even
+# emphatic, pause -- never across a real section boundary. Vocabulary lives
+# in `polarity_safety` (shared with the fragment guard's protection).
+_MAX_POLARITY_REJOIN_GAP_SEC = 2.0
+_MIN_POLARITY_CLAUSE_WORDS = 3
 
 
 def _audio_quality(segment: TranscriptSegment, silence: float) -> float:
@@ -198,6 +210,8 @@ def _repair_boundary_fragments(
     max_bridge_fragment_sec: float = 2.8,
     max_bridge_gap_sec: float = 0.65,
     max_open_tail_join_sec: float = 20.0,
+    max_polarity_rejoin_gap_sec: float = _MAX_POLARITY_REJOIN_GAP_SEC,
+    polarity_rejoins: list[dict] | None = None,
 ) -> Tuple[CandidateTake, ...]:
     """Reattach contiguous ASR fragments without deleting real short lines.
 
@@ -206,7 +220,11 @@ def _repair_boundary_fragments(
     Whisper boundaries such as ``...aumento de`` + ``peso`` or ``...los test que`` +
     ``ella pudiera...`` while still refusing to cross a real pause/source boundary.
     A one-word discourse marker is deliberately stricter: it may bridge only an almost
-    contiguous ASR boundary, never a normal conversational pause.
+    contiguous ASR boundary, never a normal conversational pause. A bare polarity
+    particle is the one exception (D-097 Priority D): it rejoins the clause it
+    negates across a pause of up to ``max_polarity_rejoin_gap_sec`` because an
+    orphaned particle is a meaning-inversion risk, not granularity. Every such
+    rejoin is appended to ``polarity_rejoins`` (observability, word timings kept).
     """
     ordered = sorted(takes, key=lambda take: (take.source_order, take.start, take.end, take.clip_id))
     repaired: list[CandidateTake] = []
@@ -216,6 +234,30 @@ def _repair_boundary_fragments(
             previous = repaired[-1]
             gap = take.start - previous.end
             same_source = previous.source_asset_id == take.source_asset_id
+            if same_source and -0.02 <= gap <= max_polarity_rejoin_gap_sec:
+                previous_is_bare_polarity = (
+                    previous.duration_sec <= max_fragment_sec and is_bare_polarity_unit(previous.text)
+                )
+                # "No" + "no" (a repeated emphatic particle) first folds into one
+                # bare unit; a bare unit then rejoins a real clause (>= 3 words).
+                if previous_is_bare_polarity and (
+                    _word_count(take.text) >= _MIN_POLARITY_CLAUSE_WORDS
+                    or (take.duration_sec <= max_fragment_sec and is_bare_polarity_unit(take.text))
+                ):
+                    joined = _join_takes(previous, take)
+                    if polarity_rejoins is not None:
+                        polarity_rejoins.append({
+                            "source_asset_id": previous.source_asset_id,
+                            "particle_text": previous.text,
+                            "particle_start": round(float(previous.start), 3),
+                            "particle_end": round(float(previous.end), 3),
+                            "clause_text": take.text,
+                            "clause_start": round(float(take.start), 3),
+                            "gap_sec": round(float(gap), 3),
+                            "joined_clip_id": joined.clip_id,
+                        })
+                    repaired[-1] = joined
+                    continue
             strict_contiguous = -0.02 <= gap <= max_join_gap_sec
             bridge_contiguous = -0.02 <= gap <= max_bridge_gap_sec
             current_is_micro = take.duration_sec <= max_fragment_sec and _word_count(take.text) <= max_fragment_words
@@ -261,7 +303,11 @@ def segment_takes(
     gaps: Iterable[SilenceGap] = (),
     *,
     env: Mapping[str, str] | None = None,
+    diagnostics: dict | None = None,
 ) -> Tuple[CandidateTake, ...]:
+    """``diagnostics`` (optional, mutated) receives ``polarity_rejoins``: every
+    D-097 Priority D particle-to-clause rejoin with its word timings, so a
+    RAW can prove where a polarity particle was reattached (observability)."""
     source_map: Mapping[str, SourceAsset] = {source.source_asset_id: source for source in sources}
     gap_tuple = tuple(gaps)
     segment_tuple = tuple(segments)
@@ -304,4 +350,8 @@ def segment_takes(
                 # exact ASR span (see canonical_identity.py).
                 source_span_id=mint_source_span_id(source.source_asset_id, start, end, text),
             ))
-    return _repair_boundary_fragments(output)
+    polarity_rejoins: list[dict] = []
+    repaired = _repair_boundary_fragments(output, polarity_rejoins=polarity_rejoins)
+    if diagnostics is not None:
+        diagnostics["polarity_rejoins"] = polarity_rejoins
+    return repaired

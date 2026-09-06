@@ -1218,3 +1218,27 @@ index b98c42b..fcf1c41 100644
                  repaired[-1] = _join_takes(previous, take)
                  continue
 ```
+
+---
+
+## APPENDIX B -- D-097 implementation status against this audit (added 2026-09-06; the audit above is unchanged)
+
+The Product Owner approved the post-audit plan (D-097) with the execution
+adjustment §1-§5. This appendix records, per audit row, what was implemented;
+it does not rewrite the AS-IS map, which remains the description of the engine
+that produced RAW 34008386434. Every "expected MP4 effect" is unproven until the
+next authorised RAW is run on this code.
+
+| Audit row | Status | Where |
+|---|---|---|
+| C-1 / root cause #3 (missed family member, "ungrouped = keep") | IMPLEMENTED (A) | `take_grouping.same_opening_restart`, `take_grouping_provider._bridge_aware_components` (deterministic restart edge; semantic >= 0.90 attach to a restart-cohesive component; `accepted_by`, `arbiter_rejected_pairs`) |
+| C-2 / root cause #2 (all-failed tie-break survivor) | IMPLEMENTED (B, adjustment §1) | `pipeline._semantic_best_take` -> `no_usable_realization` only with deterministic usability evidence; Ledger `RESOLVED_NONE`; plan/reviewer/validator `dropped_no_usable_realization`; `story_completeness`; harness `NOT_DELIVERABLE_INCOMPLETE_STORY_REVIEW` |
+| C-4 / C-5 / root cause #1 (Resolver restores failed restatement; compete-vs-composite by arithmetic) | IMPLEMENTED (adjustment §3) | `realization_resolver`: failed >= 0.85 = unusable (tier 0, never composite member, exclusive CRITICAL groups waived + mirrored into the D-089 index); all-failed cancels out; D-063 dominance untouched for usable restatements |
+| G-6 (DeliveryScorer has no cleanliness feature) | IMPLEMENTED (adjustment §2) | `take_judge.delivery_cleanliness_evidence` / `apply_delivery_cleanliness_evidence` (interior dead air, multimodal resets; negative controls) |
+| Appendix A (bare negation isolated then deleted) | IMPLEMENTED (D) | `polarity_safety.py`, `take_segmentation` rejoin (<= 2.0 s, word timings published), `semantic_fragment_guard` protection |
+| C-6 / C-7 / C-8, G-7, G-8, D-6 (split physical ownership; trimmer before authority; entries unowned) | IMPLEMENTED (C/E) | `boundary_engine_pass.apply_post_freeze_boundary_pass` after `freeze_selection_contract`; draft wrappers skip via `boundary_owner="post_freeze"`; ownership contract in the module; renderer trailing trims recorded |
+| C-12 / G-14 (source vs render silence disagree) | MECHANISM REPRODUCED OFFLINE + INSTRUMENTED | synthetic experiment (AAC re-encode + fragmented near-floor pause); `audio_silence` probe/merge + relaxed floor; `dead_air_reconciliation` per finding settles the Video00 case on the next RAW |
+| Part 8 / root cause #5 (no perceptual System Watch+Listen) | IMPLEMENTED v1 (advisory) | `perceptual_watch_listen.py`: 4 evaluated capabilities + 4 declared NOT_IMPLEMENTED; never auto-PASS; `DELIVERABLE_PENDING_HUMAN_WATCH_LISTEN`; blocking mode needs PO approval (escalation A) |
+| G-12 (identity markers) | PARTIAL | markers `BoundaryEnginePass.post_freeze`, `TakeSegmentation.polarity_rejoin` added; the two probe defects noted in Part 1 are unchanged |
+| CLEAN RAW gate (approval) | IMPLEMENTED (QA-only) | `benchmarks/clean_raw_gate.py` + both workflows |
+| Part 10 retire/merge candidates | NOT SCHEDULED | unchanged (needs per-module CleanCutBench proof + separate approval) |

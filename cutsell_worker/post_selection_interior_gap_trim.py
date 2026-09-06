@@ -525,6 +525,11 @@ def install_post_selection_interior_gap_trim() -> None:
 
     def build_with_post_selection_interior_gap_trim(*args, **kwargs):
         result = original(*args, **kwargs)
+        # D-097.C: the universal path owns interior dead air in its
+        # post-Freeze BoundaryEngine pass (boundary_engine_pass.py) so the
+        # trim reaches the FINAL keep set, not the pre-authority candidates.
+        if str(kwargs.get("boundary_owner") or "pre_freeze") == "post_freeze":
+            return result
         draft = result.draft
         diagnostics = dict(draft.diagnostics or {})
         selected, audit = split_selected_interior_performance_gaps(

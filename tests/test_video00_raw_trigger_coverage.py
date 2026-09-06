@@ -84,6 +84,16 @@ REQUIRED_CANONICAL_PATHS = {
     "cutsell_worker/post_selection_complementary_family_stabilizer.py",
     "cutsell_worker/post_selection_edge_only_boundary.py",
     "cutsell_worker/semantic_best_take_integrity.py",
+    # D-097: draft builder / Best Take decision, Ledger + Resolver, polarity
+    # vocabulary + segmentation rejoin, source dead-air evidence, the ONE
+    # post-Freeze BoundaryEngine pass
+    "cutsell_worker/pipeline.py",
+    "cutsell_worker/semantic_ledger.py",
+    "cutsell_worker/realization_resolver.py",
+    "cutsell_worker/polarity_safety.py",
+    "cutsell_worker/take_segmentation.py",
+    "cutsell_worker/audio_silence.py",
+    "cutsell_worker/boundary_engine_pass.py",
     # StoryValidator + CanonicalEditPlan + FinalEditReviewer + repair loop +
     # causal/story order validator
     "cutsell_worker/final_story_coherence_validation.py",

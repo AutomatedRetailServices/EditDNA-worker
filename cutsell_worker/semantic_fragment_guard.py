@@ -19,8 +19,23 @@ import re
 from typing import Iterable
 
 from .contracts import CandidateTake
+from .polarity_safety import carries_polarity
 
 _TOKEN_RE = re.compile(r"[a-z0-9áéíóúñü]+", re.IGNORECASE)
+
+# D-097 Priority D: a micro fragment that carries a polarity particle ("No",
+# "no no", "not really", "nunca") is never structurally-obvious debris. Deleting
+# it can hand the next clause to the audience with its meaning inverted (run
+# 34008386434). The guard therefore refuses every brevity-only reason for such
+# a fragment and records the refusal; a longer failed fragment with a real
+# predicate is still judged on the ordinary evidence. Segmentation is the
+# owning authority for reattaching the particle; this is the safety net.
+PROTECTED_POLARITY_FRAGMENT = "polarity_bearing_micro_fragment_protected"
+_BREVITY_ONLY_REASONS = frozenset({
+    "semantic_failed_micro_fragment",
+    "semantic_bts_micro_debris",
+    "semantic_nonwinner_micro_failure_cluster",
+})
 _SENTENCE_END_RE = re.compile(r"[.!?][\"'”’)]*\s*$")
 _BTS_SELF_TALK_RE = re.compile(
     r"\btrying\s+to\s+(?:say|remember|stay|keep)\b|"
@@ -228,6 +243,7 @@ def remove_semantic_fragment_debris(
     take_map = {take.clip_id: take for take in kept_tuple}
     removed_ids: set[str] = set()
     diagnostics: list[dict] = []
+    protected: list[dict] = []
 
     for take in kept_tuple:
         label, confidence = semantic.get(take.clip_id, ("", 0.0))
@@ -242,6 +258,17 @@ def remove_semantic_fragment_debris(
             reason = "semantic_nonwinner_micro_failure_cluster"
         if reason is None:
             continue
+        if reason in _BREVITY_ONLY_REASONS and _micro_fragment(take) and carries_polarity(take.text):
+            protected.append({
+                "clip_id": take.clip_id,
+                "reason": PROTECTED_POLARITY_FRAGMENT,
+                "refused_reason": reason,
+                "semantic_label": label,
+                "semantic_confidence": round(confidence, 4),
+                "duration_sec": round(take.duration_sec, 3),
+                "text": take.text,
+            })
+            continue
         removed_ids.add(take.clip_id)
         diagnostics.append({
             "clip_id": take.clip_id,
@@ -254,7 +281,9 @@ def remove_semantic_fragment_debris(
 
     survivors = tuple(take for take in kept_tuple if take.clip_id not in removed_ids)
     removed = tuple(take for take in kept_tuple if take.clip_id in removed_ids)
-    return survivors, removed, tuple(diagnostics)
+    # Protections ride along in the same diagnostics tuple (reason distinguishes
+    # them; `deleted_ids` below is built only from real deletions).
+    return survivors, removed, tuple(diagnostics) + tuple(protected)
 
 
 def install_semantic_fragment_guard() -> None:
@@ -293,8 +322,9 @@ def install_semantic_fragment_guard() -> None:
             deleted = tuple(result.deleted) + tuple(extra_deleted)
 
         diagnostics = tuple(result.diagnostics) + ({
-            "semantic_fragment_guard": list(guard_diagnostics),
-            "deleted_ids": [item["clip_id"] for item in guard_diagnostics],
+            "semantic_fragment_guard": [item for item in guard_diagnostics if item["reason"] != PROTECTED_POLARITY_FRAGMENT],
+            "deleted_ids": [item["clip_id"] for item in guard_diagnostics if item["reason"] != PROTECTED_POLARITY_FRAGMENT],
+            "protected_polarity_fragments": [item for item in guard_diagnostics if item["reason"] == PROTECTED_POLARITY_FRAGMENT],
         },)
         return type(result)(
             kept=kept,

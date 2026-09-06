@@ -25,7 +25,9 @@ def compose_selected(
         for group in group_tuple
         for clip_id in group.candidate_ids
     }
-    selected_ids = {group.selected_clip_id for group in group_tuple}
+    # D-097.B: a family with no usable realization carries an empty
+    # selected_clip_id -- it contributes no winner.
+    selected_ids = {group.selected_clip_id for group in group_tuple if group.selected_clip_id}
     selected_ids.update(
         clip_id for clip_id in take_map
         if clip_id not in grouped_ids

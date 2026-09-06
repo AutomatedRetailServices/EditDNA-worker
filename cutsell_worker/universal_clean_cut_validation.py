@@ -22,8 +22,10 @@ from .asr import FasterWhisperASR
 from .brain_runtime import build_brain_runtime
 from .config import load_runtime_config
 from .contracts import ProcessingRequest, SourceAsset
+from .live_boundary_repair import segment_output_windows
 from .live_render_qc import LiveRenderQCResult, render_with_post_render_qc
 from .media_probe import probe_media
+from .perceptual_watch_listen import error_review, review_rendered_candidate
 from .render_plan import build_render_plan
 from .source_identity import stable_source_id
 from .storage import download_source
@@ -68,9 +70,43 @@ def _render_validation_preview(
     return qc_result.output_path, None, qc_result
 
 
+def _perceptual_review(preview_path: str | None, draft, local_paths: Mapping[str, str], qc_result) -> dict[str, Any] | None:
+    """D-097 §4: perceptual System Watch+Listen v1 on the technically clean
+    rendered MP4 (advisory, routing only). Runs on the final attempt's
+    segments (post physical repair) so its findings describe the file that
+    exists. Never raises."""
+    if not preview_path or qc_result is None or not qc_result.deliverable:
+        return None
+    try:
+        final_state = qc_result.attempts[-1].input_boundary_state if qc_result.attempts else ()
+        plan = build_render_plan(draft, local_paths)
+        by_id = {s.clip_id: s for s in plan}
+        segments = tuple(
+            replace(by_id[row["clip_id"]], start=float(row["start"]), end=float(row["end"]))
+            for row in final_state if row.get("clip_id") in by_id
+        ) or plan
+        windows = segment_output_windows(segments)
+        return review_rendered_candidate(preview_path, draft, segments, windows).as_dict()
+    except Exception as exc:  # noqa: BLE001 -- ERROR is a reported status, never a silent pass
+        return error_review(f"perceptual_review_failed: {exc}").as_dict()
+
+
 def _live_render_qc_diagnostics(
-    qc_result: LiveRenderQCResult | None, *, skipped_reason: str | None
+    qc_result: LiveRenderQCResult | None, *, skipped_reason: str | None,
+    story_completeness: str = "complete",
+    perceptual_status: str | None = None,
 ) -> dict[str, Any]:
+    """`story_completeness` (D-097.B): when the engine marked the run
+    story-incomplete (a family with no usable realization was dropped by
+    decision), the candidate is NOT deliverable even if the technical QC
+    passed -- it is kept as a clearly-marked diagnostic artifact for
+    review, never presented as a clean complete story.
+
+    `perceptual_status` (D-097 §4): the advisory System Watch+Listen verdict.
+    A technically deliverable candidate is reported as
+    DELIVERABLE_PENDING_HUMAN_WATCH_LISTEN with that status attached --
+    never as an approved preview -- until the perceptual gate is approved as
+    blocking and passes."""
     if qc_result is None:
         return {
             "status": "not_attempted",
@@ -84,15 +120,26 @@ def _live_render_qc_diagnostics(
             "render_attempt_count": 0,
             "attempts": [],
         }
+    story_incomplete = str(story_completeness or "complete") != "complete"
+    deliverable = bool(qc_result.deliverable) and not story_incomplete
+    if qc_result.deliverable and story_incomplete:
+        delivery_status = f"NOT_DELIVERABLE_INCOMPLETE_STORY_REVIEW:{story_completeness}"
+    elif deliverable and perceptual_status is not None:
+        delivery_status = f"DELIVERABLE_PENDING_HUMAN_WATCH_LISTEN:perceptual={perceptual_status}"
+    else:
+        delivery_status = qc_result.delivery_status
     return {
         "status": qc_result.status,
         "reason": None,
         # D-036 item 7: the ONE authoritative delivery gate, read straight off
         # LiveRenderQCResult rather than re-derived here -- a candidate is
         # deliverable if and only if the shared render/QC service reached
-        # PASS.
-        "deliverable": qc_result.deliverable,
-        "delivery_status": qc_result.delivery_status,
+        # PASS -- AND (D-097.B) the engine did not mark the story incomplete.
+        "deliverable": deliverable,
+        "delivery_status": delivery_status,
+        "story_completeness": story_completeness,
+        "perceptual_review_status": perceptual_status,
+        "human_watch_listen_required": True,
         "output_path": qc_result.output_path,
         "plan_id": qc_result.plan_id,
         "plan_version": qc_result.plan_version,
@@ -180,6 +227,7 @@ def run_single_universal_clean_cut_validation(
             preview_captions=preview_captions,
             freeze_blocked=freeze_blocked,
         )
+        perceptual = _perceptual_review(preview_path, result.draft, local_paths, live_render_qc_result)
 
     elapsed = round(time.monotonic() - started, 3)
     selected_duration_sec = round(
@@ -220,7 +268,13 @@ def run_single_universal_clean_cut_validation(
         # PostRenderWatchListenQC findings for each attempt, and the exact
         # frozen plan id/version/hash the delivered (or invalidated) output
         # corresponds to.
-        "live_render_qc": _live_render_qc_diagnostics(live_render_qc_result, skipped_reason=preview_skipped_reason),
+        "live_render_qc": _live_render_qc_diagnostics(
+            live_render_qc_result, skipped_reason=preview_skipped_reason,
+            story_completeness=str(result.stage_status.get("story_completeness") or "complete"),
+            perceptual_status=(perceptual or {}).get("status") if perceptual else None,
+        ),
+        # D-097 §4: perceptual System Watch+Listen v1 (advisory, routing only).
+        "perceptual_watch_listen": perceptual,
         "empty_draft": not bool(result.draft.selected),
         "selected_count": len(result.draft.selected),
         "alternate_count": len(result.draft.alternates),

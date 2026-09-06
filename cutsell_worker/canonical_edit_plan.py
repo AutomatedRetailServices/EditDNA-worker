@@ -90,6 +90,8 @@ PLAN_SOURCE_AUTHORITATIVE = "authoritative_realization_resolver"
 _RESOLVED_WINNER = "RESOLVED_WINNER"
 _RESOLVED_COMPOSITE = "RESOLVED_COMPOSITE"
 _REVIEW_REQUIRED = "REVIEW_REQUIRED"
+_RESOLVED_NONE = "RESOLVED_NONE"  # D-097.B
+COVERAGE_DROPPED_NO_USABLE_REALIZATION = "dropped_no_usable_realization"
 
 
 @dataclass(frozen=True)
@@ -582,7 +584,12 @@ def assess_authoritative_membership(
             # exact live defect this closes.
             and _composite_is_contradiction_free(winning, clip_by_id)
         )
-        if not winning:
+        if not winning and group.get("no_usable_realization"):
+            # D-097.B: Best Take refused to force a winner -- recorded as a
+            # dropped idea (reviewer warning, story-incomplete signal), not
+            # as an accidental IDEA_COVERAGE_LOST block.
+            coverage_status = COVERAGE_DROPPED_NO_USABLE_REALIZATION
+        elif not winning:
             coverage_status = "missing"
         elif len(winning) >= 2 and not is_accepted_composite:
             # D-025: 2+ surviving members is only ambiguous when they are
@@ -643,6 +650,21 @@ def assess_authoritative_membership(
                     # idea so the block is explained, not silent.
                     is_accepted_composite = False
                     coverage_status = "unresolved_ambiguous" if winning else "missing"
+            elif decision.decision_status == _RESOLVED_NONE:
+                # D-097.B: the resolver confirmed the drop; structurally valid
+                # only when no member of the family is still selected.
+                failures = []
+                if winning:
+                    failures.append("selected_members_present_for_none_decision:" + ",".join(winning))
+                structural_passed = not failures
+                structural_failures = tuple(failures)
+                resolved_clip_ids = ()
+                if not failures:
+                    coverage_status = COVERAGE_DROPPED_NO_USABLE_REALIZATION
+                    accepted_as_resolved = True
+                else:
+                    is_accepted_composite = False
+                    coverage_status = "unresolved_ambiguous"
             elif decision.decision_status == _RESOLVED_WINNER and decision.winner_realization_id:
                 winner_clips = selected_clips_by_rid.get(decision.winner_realization_id) or []
                 winner_clip_ids = tuple(c.clip_id for c in winner_clips)

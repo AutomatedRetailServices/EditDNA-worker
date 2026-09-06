@@ -75,6 +75,7 @@ def process_local_sources(
     editorial_mode: str | None = None,
     semantic_equivalence_arbiter: SemanticEquivalenceArbiter | None = None,
     progress: ProgressCallback | None = None,
+    boundary_owner: str = "pre_freeze",
 ) -> ProcessingResult:
     """Process registered sources from raw media to an editable Flow B draft.
 
@@ -267,8 +268,17 @@ def process_local_sources(
     trace.complete("silence_analysis", gap_count=len(gaps))
     notify("analyzing", 50)
 
-    takes = segment_takes(transcript_tuple, hydrated_sources, gaps)
-    trace.complete("take_segmentation", candidate_count=len(takes))
+    segmentation_diagnostics: dict = {}
+    takes = segment_takes(transcript_tuple, hydrated_sources, gaps, diagnostics=segmentation_diagnostics)
+    polarity_rejoins = list(segmentation_diagnostics.get("polarity_rejoins") or ())
+    trace.complete(
+        "take_segmentation",
+        candidate_count=len(takes),
+        # D-097 Priority D observability: where a bare polarity particle was
+        # reattached to the clause it negates (word timings included).
+        polarity_rejoin_count=len(polarity_rejoins),
+        polarity_rejoins=polarity_rejoins,
+    )
 
     whole_context, confirmation_diagnostics = confirm_local_performance_events(
         takes,
@@ -383,6 +393,7 @@ def process_local_sources(
         attempt_reconstruction_diagnostics=attempt_reconstruction_diagnostics,
         performance_confirmation_diagnostics=confirmation_diagnostics,
         semantic_equivalence_arbiter=semantic_equivalence_arbiter,
+        boundary_owner=boundary_owner,
     )
     notify("draft_ready", 100)
     return replace(

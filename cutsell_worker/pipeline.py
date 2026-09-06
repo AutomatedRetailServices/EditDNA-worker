@@ -48,6 +48,7 @@ from .take_grouping_provider import (
     reconcile_semantic_idea_equivalence,
     split_incohesive_retry_groups,
 )
+from .take_judge import FRAGMENT_PENALTY_MARKERS, apply_delivery_cleanliness_evidence
 from .take_judge_provider import TakeJudgeProvider, safe_rank_takes
 from .temporal_editing import refine_takes_with_temporal_context
 from .whole_video_analysis import WholeVideoContext
@@ -168,8 +169,22 @@ def _semantic_best_take(
     *,
     winner_confidence: float = 0.85,
     semantic_delete_recommended: dict[str, bool] | None = None,
-) -> tuple[str, str | None, str]:
+    deterministic_unusable: dict[str, bool] | None = None,
+) -> tuple[str | None, str | None, str]:
     """Honor one clear semantic winner only inside an already-proven retry group.
+
+    D-097.B (all-failed family): when EVERY member carries D-081 semantic
+    delete-recommended evidence, Best Take no longer elects a survivor by
+    delivery tie-break ("least bad wins"). It looks for a USABLE member --
+    one without deterministic unusability evidence (`deterministic_unusable`:
+    a ranker fragment penalty relative to a sibling, or local-performance
+    corroboration of failure). A usable member competes normally (the label
+    conflict is recorded by the caller, never silently trusted); if NONE is
+    usable the family yields NO winner (`(None, None, "no_usable_realization")`)
+    and the caller marks the candidate incomplete for review rather than
+    presenting a clean complete story. Labels alone never delete: a family
+    whose members lack deterministic unusability evidence keeps today's
+    behaviour byte-for-byte.
 
     Hybrid session cleanup sees the full message and may recognize which delivery is the
     intended final take. The local Watch+Listen ranker still establishes the fallback,
@@ -238,7 +253,15 @@ def _semantic_best_take(
     delete_recommended_ids = {
         cid for cid in member_ids if (semantic_delete_recommended or {}).get(cid, False)
     }
-    survivors = _exclude_unless_all(member_ids, delete_recommended_ids)
+    if delete_recommended_ids == set(member_ids):
+        # D-097.B: every member is semantically failed -- consult objective
+        # usability instead of falling open to a tie-break among failures.
+        usable = [cid for cid in member_ids if not (deterministic_unusable or {}).get(cid, False)]
+        if not usable:
+            return None, None, "no_usable_realization"
+        survivors = usable
+    else:
+        survivors = _exclude_unless_all(member_ids, delete_recommended_ids)
 
     # Step 2: attempt completeness.
     incomplete_ids = {cid for cid in survivors if by_id[cid].complete_idea is False}
@@ -300,8 +323,18 @@ def build_flow_b_draft(
     attempt_reconstruction_diagnostics: dict | None = None,
     performance_confirmation_diagnostics: Iterable[dict] = (),
     semantic_equivalence_arbiter: SemanticEquivalenceArbiter | None = None,
+    boundary_owner: str = "pre_freeze",
 ) -> ProcessingResult:
-    """Build an editable draft after understanding the complete source context."""
+    """Build an editable draft after understanding the complete source context.
+
+    ``boundary_owner`` (D-097.C/E) is read only by the physical draft
+    wrappers installed around this function (edge-only boundary, interior gap
+    trim): ``"post_freeze"`` tells them the universal Clean Cut path owns
+    those operations in its post-Freeze BoundaryEngine pass, so they skip
+    here instead of acting on a pre-authority candidate set. The legacy
+    ``process_local_sources`` callers keep the default.
+    """
+    del boundary_owner  # consumed by the wrappers; never influences the draft itself
     take_tuple = tuple(takes)
     temporal_trim_diagnostics = tuple(temporal_trim_diagnostics)
     performance_confirmation_diagnostics = tuple(performance_confirmation_diagnostics)
@@ -389,6 +422,17 @@ def build_flow_b_draft(
                 hybrid_semantic_delete_recommended[clip_id] = True
             else:
                 hybrid_semantic_delete_recommended.setdefault(clip_id, False)
+
+    # D-097.B: D-081's local-performance corroboration per candidate (the
+    # `local_failure_corroborated` flag hybrid_session_cleanup records on
+    # every window decision) -- deterministic unusability evidence, never a
+    # label.
+    hybrid_local_failure_corroborated: dict[str, bool] = {}
+    for diagnostic in hybrid_cleanup.diagnostics:
+        for decision in diagnostic.get("decisions") or ():
+            clip_id = decision.get("clip_id")
+            if clip_id and decision.get("local_failure_corroborated"):
+                hybrid_local_failure_corroborated[clip_id] = True
 
     # D-050D1: `realization_id` is minted once, above, before Pass 1 even
     # starts -- every member of `kept` here already carries it (see the
@@ -478,6 +522,11 @@ def build_flow_b_draft(
     alternate_group_count = 0
     semantic_best_take_override_count = 0
     judge_group_diagnostics = []
+    no_usable_realization_ids: set[str] = set()
+    events_by_source: dict[str, tuple] = {}
+    if whole_video_context is not None:
+        for source in whole_video_context.sources:
+            events_by_source[source.source_asset_id] = tuple(source.events)
 
     for members in group_members:
         if not members:
@@ -485,7 +534,11 @@ def build_flow_b_draft(
         if len(members) >= 2:
             alternate_group_count += 1
         judged = safe_rank_takes(members, take_judge_provider)
-        ranked = judged.ranked
+        # D-097 (PO adjustment §2): measured cleanliness evidence (accidental
+        # interior dead air, multimodal resets) adjusts the family ranking
+        # BEFORE any winner is read off it; markers land in `ranked[].reason`.
+        source_events = events_by_source.get(members[0].source_asset_id, ())
+        ranked, cleanliness_rows = apply_delivery_cleanliness_evidence(judged.ranked, members, source_events)
         judge_statuses[judged.status.status] += 1
         if judged.status.reason:
             judge_reasons[judged.status.reason] += 1
@@ -495,13 +548,32 @@ def build_flow_b_draft(
         family_semantic_decisions, semantic_label_source = family_scoped_semantic_decisions(
             members, hybrid_semantic_decisions, hybrid_cleanup.diagnostics,
         )
+        # D-097.B: deterministic unusability evidence per member -- a ranker
+        # fragment penalty relative to a sibling, or D-081 local-performance
+        # corroboration. Labels are never part of this map.
+        ranked_reason_by_id = {row.clip_id: str(row.reason or "") for row in ranked}
+        deterministic_unusable = {
+            member.clip_id: bool(
+                any(marker in ranked_reason_by_id.get(member.clip_id, "") for marker in FRAGMENT_PENALTY_MARKERS)
+                or hybrid_local_failure_corroborated.get(member.clip_id, False)
+            )
+            for member in members
+        }
         selected_clip_id, semantic_preferred_clip_id, semantic_best_take_reason = _semantic_best_take(
             members,
             family_semantic_decisions,
             local_selected_clip_id,
             ranked,
             semantic_delete_recommended=hybrid_semantic_delete_recommended,
+            deterministic_unusable=deterministic_unusable,
         )
+        no_usable_realization = selected_clip_id is None
+        all_delete_recommended = len(members) >= 2 and all(
+            hybrid_semantic_delete_recommended.get(member.clip_id, False) for member in members
+        )
+        if no_usable_realization:
+            selected_clip_id = ""
+            no_usable_realization_ids.update(member.clip_id for member in members)
         if semantic_preferred_clip_id and selected_clip_id != local_selected_clip_id:
             semantic_best_take_override_count += 1
         membership_key = "semantic:" + hashlib.sha256(
@@ -540,6 +612,20 @@ def build_flow_b_draft(
                     {"clip_id": item.clip_id, "score": item.score, "reason": item.reason}
                     for item in ranked
                 ],
+                # D-097: cleanliness evidence rows and the all-failed outcome.
+                "delivery_cleanliness": cleanliness_rows,
+                "no_usable_realization": no_usable_realization,
+                "all_members_delete_recommended": all_delete_recommended,
+                "label_conflict_routed": bool(all_delete_recommended and not no_usable_realization),
+                "member_usability": {
+                    member.clip_id: {
+                        "delete_recommended": bool(hybrid_semantic_delete_recommended.get(member.clip_id, False)),
+                        "deterministic_unusable": deterministic_unusable.get(member.clip_id, False),
+                        "local_failure_corroborated": hybrid_local_failure_corroborated.get(member.clip_id, False),
+                        "ranker_reason": ranked_reason_by_id.get(member.clip_id, ""),
+                    }
+                    for member in members
+                },
             })
         for member in members:
             clip_to_group[member.clip_id] = gid
@@ -605,6 +691,11 @@ def build_flow_b_draft(
         )
         for take in selected_takes
     )
+    # D-097.B: members of a family with no usable realization are DISCARDED
+    # (never parked as alternates where a later pass could re-select them);
+    # the drop is recorded below and surfaced as an incomplete-story review
+    # signal downstream, never as a clean complete story.
+    no_usable_removed = tuple(take for take in kept if take.clip_id in no_usable_realization_ids)
     alternates = tuple(
         _draft_clip(
             take,
@@ -613,7 +704,9 @@ def build_flow_b_draft(
             selected=False,
         )
         for take in kept
-        if take.clip_id not in selected_ids and take.clip_id not in review_removed_ids
+        if take.clip_id not in selected_ids
+        and take.clip_id not in review_removed_ids
+        and take.clip_id not in no_usable_realization_ids
     )
     discarded_clips = tuple(
         _draft_clip(
@@ -635,7 +728,7 @@ def build_flow_b_draft(
             group_id=clip_to_group.get(take.clip_id),
             selected=False,
         )
-        for take in (*discarded, *review_removed)
+        for take in (*discarded, *review_removed, *no_usable_removed)
     )
 
     whole_video_diag = {
@@ -726,6 +819,11 @@ def build_flow_b_draft(
             "draft_review_order": list(review.ordered_clip_ids),
             "draft_review_removed_ids": [take.clip_id for take in review_removed],
             "draft_review_removed_group_ids": sorted(removed_group_ids),
+            # D-097.B: families Best Take refused to force a winner for.
+            "no_usable_realization_removed_ids": [take.clip_id for take in no_usable_removed],
+            "no_usable_realization_family_count": sum(
+                1 for row in judge_group_diagnostics if row.get("no_usable_realization")
+            ),
         },
     )
 

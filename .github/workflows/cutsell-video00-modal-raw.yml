@@ -478,6 +478,12 @@ jobs:
 
           echo "--- D-095.2 audio dead-air evidence + interior-gap trimmer (splits / rejections) ---"
           jq '{audio_silence: (.stage_status.audio_silence // "absent"), interior_gap_splits: (.diagnostics.post_selection_interior_gap_trim // []), interior_gap_audio_rejections: [(.diagnostics.post_selection_interior_gap_trace // [])[] | select(.evidence_mode == "long_audio_silence")]}' artifact/video00-modal.json
+          echo "--- D-097: post-Freeze BoundaryEngine pass, polarity rejoins, renderer trailing trims, dead-air reconciliation, story completeness ---"
+          jq '{boundary_engine_pass: (.diagnostics.boundary_engine_pass // "absent" | if type=="object" then del(.ownership_contract) else . end), take_segmentation: (.stage_status.take_segmentation // "absent"), story_completeness: (.stage_status.story_completeness // "absent"), no_usable_realization_family_ids: (.stage_status.no_usable_realization_family_ids // []), last_attempt: ((.live_render_qc.attempts // [])[-1] // "absent" | if type=="object" then {status, renderer_trailing_trims, dead_air_reconciliation} else . end)}' artifact/video00-modal.json | head -c 30000
+          echo "--- D-097 §4 perceptual System Watch+Listen (advisory_v1; never auto-PASS) ---"
+          jq '.perceptual_watch_listen // "absent" | if type=="object" then {status, gate_mode, capability_status_counts, routing, capabilities:[.capabilities[]? | {capability, status, method, finding_count:(.findings|length), findings:[.findings[]? | {kind, start, end, severity, routes_to, detail}], note}]} else . end' artifact/video00-modal.json | head -c 30000
+          echo "--- D-097 CLEAN RAW gate (result only; the CPU ladder workflow adds the four-way regions) ---"
+          python benchmarks/clean_raw_gate.py --engine-json artifact/video00-modal.json || true
           echo "--- diagnostics.take_judge_groups (retry families + DeliveryScorer scores) ---"
           jq '.diagnostics.take_judge_groups // []' artifact/video00-modal.json
 

@@ -70,6 +70,7 @@ from .realization_resolver import (
     resolve_realizations_shadow,
 )
 from .resolver_mode import RESOLVER_MODE_AUTHORITATIVE, resolve_resolver_mode
+from .boundary_engine_pass import apply_post_freeze_boundary_pass
 from .human_boundary_polish_v5 import polish_human_boundaries_v5
 from .hybrid_editorial import EditorialJudge
 from .providers import NoopSemanticProvider
@@ -121,6 +122,10 @@ def process_universal_clean_cut_sources(
         editorial_judge=editorial_judge,
         semantic_equivalence_arbiter=semantic_equivalence_arbiter,
         progress=progress,
+        # D-097.C/E: physical edge/interior cleanup runs ONCE, after Freeze,
+        # on the final KEEP set (boundary_engine_pass.py) -- the draft-time
+        # wrappers skip on this path.
+        boundary_owner="post_freeze",
     )
 
     has_draft_contract = hasattr(result.draft, "selected") and hasattr(result.draft, "discarded")
@@ -629,6 +634,7 @@ def process_universal_clean_cut_sources(
         if freeze_blocked:
             recovery_stage = "not_applicable_freeze_blocked_by_coherence_validation"
             polish_stage = "not_applicable_freeze_blocked_by_coherence_validation"
+            boundary_pass_stage = "not_applicable_freeze_blocked_by_coherence_validation"
             contract_stage = "not_applicable_freeze_blocked_by_coherence_validation"
             selection_stage = f"{selection_stage}+freeze_blocked_pending_human_review"
 
@@ -673,6 +679,12 @@ def process_universal_clean_cut_sources(
             # observability (matches_reviewed_plan), not a hard equality gate.
             result = replace(result, draft=freeze_selection_contract(result.draft, plan=edit_plan))
 
+            # D-097.C/E: the one post-Freeze BoundaryEngine pass -- evidence
+            # edge trim, interior dead air / performance gaps, audio entry/
+            # exit -- on the FINAL keep set (D-096 root cause #4).
+            result = apply_post_freeze_boundary_pass(result)
+            boundary_pass_stage = "post_freeze_edge_interior_audio_edges_complete"
+
             result = polish_human_boundaries_v5(result, local_paths)
             polish_stage = "source_evidenced_multimodal_v5_boundary_only_complete"
 
@@ -682,6 +694,7 @@ def process_universal_clean_cut_sources(
     else:
         selection_stage = "not_applicable_missing_draft_contract"
         polish_stage = "not_applicable_missing_draft_contract"
+        boundary_pass_stage = "not_applicable_missing_draft_contract"
         recovery_stage = "not_applicable_missing_draft_contract"
         contract_stage = "not_applicable_missing_draft_contract"
         semantic_status = "not_requested_clean_cut_only"
@@ -690,6 +703,18 @@ def process_universal_clean_cut_sources(
         post_authority_integrity_failed = False
         final_edit_reviewer_status = "not_applicable_missing_draft_contract"
 
+    # D-097.B (PO adjustment §1): a family Best Take found no usable
+    # realization for is dropped from the timeline BY DECISION and the run
+    # is marked story-incomplete -- never presented as a clean complete
+    # story. Read by the validation harness / delivery gate.
+    dropped_families = [
+        row for row in ((getattr(result.draft, "diagnostics", None) or {}).get("take_judge_groups") or ())
+        if isinstance(row, dict) and row.get("no_usable_realization")
+    ]
+    story_completeness = (
+        "incomplete_no_usable_realization" if dropped_families else "complete"
+    )
+
     return ProcessingResult(
         schema_version=result.schema_version,
         project_id=result.project_id,
@@ -697,6 +722,9 @@ def process_universal_clean_cut_sources(
         draft=result.draft,
         stage_status={
             **result.stage_status,
+            "story_completeness": story_completeness,
+            "no_usable_realization_family_count": len(dropped_families),
+            "no_usable_realization_family_ids": [str(row.get("group_id") or "") for row in dropped_families],
             "freeze_blocked_pending_coherence_review": freeze_blocked,
             "post_authority_integrity_failure": post_authority_integrity_failed,
             "final_edit_reviewer": final_edit_reviewer_status,
@@ -707,6 +735,7 @@ def process_universal_clean_cut_sources(
             "selection_phase_authority": selection_stage,
             "unified_selection_reasoner": reasoner_status_label,
             "selection_boundary_contract": contract_stage,
+            "boundary_engine_pass": boundary_pass_stage,
             "human_boundary_polish": polish_stage,
             "final_boundary_authority": recovery_stage,
         },

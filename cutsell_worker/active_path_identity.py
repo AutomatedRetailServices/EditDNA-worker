@@ -34,6 +34,8 @@ _COMPONENT_PROBES: tuple[tuple[str, str, str, tuple[str, ...]], ...] = (
     ("TakeSegmentation", "D-021", "stage_status", ("take_segmentation",)),
     ("AudioSilenceEvidence", "D-095.2", "stage_status", ("audio_silence",)),
     ("InteriorGapTrim", "D-046/D-095.2", "diagnostics", ("post_selection_interior_gap_trim",)),
+    ("BoundaryEnginePass.post_freeze", "D-097.C/E", "diagnostics", ("boundary_engine_pass", "stage")),
+    ("TakeSegmentation.polarity_rejoin", "D-097.D", "stage_status", ("take_segmentation", "polarity_rejoin_count")),
     ("HybridSemanticPass", "D-081", "stage_status", ("hybrid_editorial",)),
     ("IdeaClusterer.semantic_tier", "D-020/D-044", "diagnostics", ("semantic_idea_equivalence",)),
     ("IdeaClusterer.grouping_safety", "D-058/D-083/D-085/D-094.F3", "diagnostics", ("distinct_idea_grouping_safety",)),

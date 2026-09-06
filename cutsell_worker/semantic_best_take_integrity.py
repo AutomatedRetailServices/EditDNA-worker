@@ -239,6 +239,7 @@ def install_semantic_best_take_integrity() -> None:
         *,
         winner_confidence=0.85,
         semantic_delete_recommended=None,
+        deterministic_unusable=None,
     ):
         # D-082: `original` (pipeline._semantic_best_take) now takes `ranked`
         # and returns a 3-tuple (selected, preferred, reason) -- passed
@@ -252,7 +253,11 @@ def install_semantic_best_take_integrity() -> None:
             ranked,
             winner_confidence=winner_confidence,
             semantic_delete_recommended=semantic_delete_recommended,
+            deterministic_unusable=deterministic_unusable,
         )
+        if selected is None:
+            # D-097.B: no usable realization -- nothing to protect or prefer.
+            return selected, preferred, reason
 
         if _reject_incomplete_semantic_override(
             members,

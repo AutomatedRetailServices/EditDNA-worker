@@ -16,7 +16,7 @@ from .semantic_idea_equivalence import (
     safe_check_idea_equivalence,
     same_idea_by_pair_index,
 )
-from .take_grouping import group_takes, retry_similarity, semantic_key
+from .take_grouping import group_takes, retry_similarity, same_opening_restart, semantic_key
 
 # General (English + Spanish) "this is a new/additional item, not a restatement"
 # discourse markers -- a candidate pair where exactly ONE side carries one of
@@ -815,6 +815,10 @@ def reconcile_semantic_idea_equivalence(
 
     audit: list[dict] = []
     distinct_addition_blocked: list[dict] = []
+    # D-097.A observability: a pair the arbiter answered NOT-same-idea used to
+    # vanish from the record entirely (only merges were traced), so a run
+    # could not show WHY two takes never became one family.
+    arbiter_rejected_pairs: list[dict] = []
     merged_count = 0
     for pair_index, (left_group_index, right_group_index, left_id, right_id) in enumerate(truncated):
         decision = decisions.get(pair_index)
@@ -822,6 +826,10 @@ def reconcile_semantic_idea_equivalence(
             continue  # fail-open: arbiter unavailable/declined -> preserve separate
         same_idea, confidence, reason = decision
         if not same_idea:
+            arbiter_rejected_pairs.append({
+                "left_clip_id": left_id, "right_clip_id": right_id,
+                "confidence": round(float(confidence), 4), "reason": str(reason)[:200],
+            })
             continue
         # General override, independent of the arbiter: exactly one side
         # explicitly signals "this is a new/additional point" (see
@@ -871,6 +879,8 @@ def reconcile_semantic_idea_equivalence(
             "candidate_pair_count": len(candidate_pairs),
             "checked_pair_count": len(truncated),
             "merged_pair_count": 0,
+            "arbiter_rejected_pairs": arbiter_rejected_pairs,
+            "arbiter_rejected_pair_count": len(arbiter_rejected_pairs),
         }
 
     clusters: dict[int, list[str]] = {}
@@ -887,6 +897,8 @@ def reconcile_semantic_idea_equivalence(
         "merged_pair_count": merged_count,
         "merges": audit,
         "distinct_addition_blocked": distinct_addition_blocked,
+        "arbiter_rejected_pairs": arbiter_rejected_pairs,
+        "arbiter_rejected_pair_count": len(arbiter_rejected_pairs),
     }
 
 
@@ -1280,6 +1292,79 @@ def _accept_complete_pairwise_bridge(
     return True, record
 
 
+_RESTART_EVIDENCE_KINDS = frozenset({"same_opening_restart", "same_opening_abandoned_start"})
+
+
+def _restart_cohesive(members: Tuple[str, ...], restart_pairs: set[frozenset]) -> bool:
+    """True when EVERY pair inside `members` carries deterministic restart
+    evidence -- the component is one sentence and its restarts, not a set of
+    semantically-linked deliveries (D-097.A)."""
+    if len(members) < 2:
+        return False
+    return all(
+        frozenset((left_id, right_id)) in restart_pairs
+        for index, left_id in enumerate(members)
+        for right_id in members[index + 1:]
+    )
+
+
+def _accept_restart_singleton_bridge(
+    *,
+    left_members: Tuple[str, ...],
+    right_members: Tuple[str, ...],
+    edge: _RetryEdge,
+    take_map: dict[str, CandidateTake],
+    accepted_by: str = "deterministic_restart_evidence",
+) -> tuple[bool, dict]:
+    """D-097.A: a SINGLETON attaching to a component is accepted WITHOUT the
+    D-085 component probe when (a) the attaching edge itself is deterministic
+    RESTART evidence (`take_grouping.same_opening_restart`: the newcomer
+    restarts a member's own sentence from its first words within seconds,
+    sharing content beyond the opening), or (b) the attaching edge is an
+    arbiter confirmation at >= `_BRIDGE_MIN_COHESION_CONFIDENCE` and the
+    receiving component is RESTART-COHESIVE (every pair inside it carries
+    restart evidence -- it is one sentence and its restarts, so confirming
+    against one member is confirming against the component). Both are
+    recording-process evidence, not the transitive semantic contamination
+    D-084/D-085 guard against -- and the component probe is a question to
+    the very semantic judge whose "different idea" verdict on a self-
+    corrected detail isolated the clean retry in run 34008386434 (D-096
+    C-1). D-085's deterministic cross-component contradiction safety net
+    still applies. Component-to-component merges (>= 2 members on both
+    sides), every non-restart deterministic edge (`prefix_fragment`,
+    `provider_members_compatible`) and every semantic attach to a
+    semantically-formed component keep D-085's probe byte-for-byte; the
+    D-094.2 policy flag for SEMANTIC complete-pairwise bridges is untouched
+    and still OFF."""
+    record: dict = {
+        "left_clip_id": edge.left_id, "right_clip_id": edge.right_id,
+        "evidence": edge.evidence,
+        "triggering_confidence": round(edge.confidence, 4) if edge.evidence == "semantic" else None,
+        "triggering_reason": edge.reason, "bridge_sensitive": True,
+        "left_component_members": list(left_members),
+        "right_component_members": list(right_members),
+        "component_cohesion_evaluated": False,
+        "accepted_by": accepted_by,
+        "shared_proposition": None,
+        "member_support": list(left_members) + list(right_members),
+        "distinct_required_facts": [],
+        "accepted": False,
+    }
+    from .contradiction_signal import detect_text_contradiction  # deferred: see _evaluate_bridge_cohesion
+
+    left_texts = [take_map[cid].text for cid in left_members if cid in take_map]
+    right_texts = [take_map[cid].text for cid in right_members if cid in take_map]
+    if any(
+        detect_text_contradiction(left_text, right_text).has_conflict
+        for left_text in left_texts for right_text in right_texts
+    ):
+        record["distinct_required_facts"] = ["cross_component_contradiction"]
+        record["reason_rejected"] = "cross_component_contradiction"
+        return False, record
+    record["accepted"] = True
+    return True, record
+
+
 def _bridge_aware_components(
     group: Tuple[str, ...],
     edges: list[_RetryEdge],
@@ -1321,6 +1406,13 @@ def _bridge_aware_components(
         current = edge_by_pair.get(key)
         if current is None or _edge_sort_key(candidate_edge) < _edge_sort_key(current):
             edge_by_pair[key] = candidate_edge
+    # D-097.A: pairs joined by deterministic restart evidence (one sentence
+    # restarted from its own opening) -- see `_accept_restart_singleton_bridge`.
+    restart_pairs = {
+        frozenset((candidate_edge.left_id, candidate_edge.right_id))
+        for candidate_edge in edges
+        if candidate_edge.evidence == "deterministic" and candidate_edge.reason in _RESTART_EVIDENCE_KINDS
+    }
 
     for edge in sorted(edges, key=_edge_sort_key):
         if edge.left_id not in parent or edge.right_id not in parent:
@@ -1340,7 +1432,24 @@ def _bridge_aware_components(
             })
             continue
         record = None
-        if policy.accept_complete_pairwise_singleton_bridge and min(len(left_members), len(right_members)) == 1:
+        if min(len(left_members), len(right_members)) == 1:
+            multi_members = left_members if len(left_members) >= 2 else right_members
+            restart_edge = edge.evidence == "deterministic" and edge.reason in _RESTART_EVIDENCE_KINDS
+            confirmed_against_restart_component = (
+                edge.evidence == "semantic"
+                and edge.confidence >= _BRIDGE_MIN_COHESION_CONFIDENCE
+                and _restart_cohesive(tuple(multi_members), restart_pairs)
+            )
+            if restart_edge or confirmed_against_restart_component:
+                accepted, record = _accept_restart_singleton_bridge(
+                    left_members=tuple(left_members), right_members=tuple(right_members),
+                    edge=edge, take_map=take_map,
+                    accepted_by=(
+                        "deterministic_restart_evidence" if restart_edge
+                        else "semantic_confirmation_against_restart_cohesive_component"
+                    ),
+                )
+        if record is None and policy.accept_complete_pairwise_singleton_bridge and min(len(left_members), len(right_members)) == 1:
             accepted, record = _accept_complete_pairwise_bridge(
                 left_members=tuple(left_members), right_members=tuple(right_members),
                 edge=edge, edge_by_pair=edge_by_pair, take_map=take_map,
@@ -1396,6 +1505,7 @@ def split_incohesive_retry_groups(
             "content_divergence_blocked": [], "content_divergence_blocked_count": 0,
             "prior_confirmations_reused": [], "prior_confirmations_reused_count": 0,
             "unchecked_weak_pairs": [], "unchecked_weak_pair_count": 0,
+            "arbiter_rejected_pairs": [], "arbiter_rejected_pair_count": 0,
             "splits": [],
             "edge_trace": [], "bridge_evaluated_count": 0, "bridge_accepted_count": 0,
             "bridge_rejected_count": 0, "component_semantic_call_count": 0,
@@ -1414,6 +1524,17 @@ def split_incohesive_retry_groups(
             elif _is_prefix_fragment(left_take, right_take) or _is_prefix_fragment(right_take, left_take):
                 edges_by_group[id(group)].append(
                     _RetryEdge(left_id, right_id, "deterministic", 1.0, "prefix_fragment")
+                )
+            elif (
+                (restart_kind := same_opening_restart(left_take, right_take)) is not None
+                and not _within_group_arbiter_confirmation_diverges(take_map, left_id, right_id)
+            ):
+                # D-097.A: a sentence restarted from its own first words within
+                # seconds is recording-process evidence of one retry family
+                # (see take_grouping.same_opening_restart); D-083's marker
+                # gate still applies exactly as it does to a semantic edge.
+                edges_by_group[id(group)].append(
+                    _RetryEdge(left_id, right_id, "deterministic", 1.0, restart_kind)
                 )
             else:
                 weak_pairs.append((left_id, right_id))
@@ -1457,6 +1578,7 @@ def split_incohesive_retry_groups(
         prior_reused.append(row)
     weak_pairs = remaining_weak
     unchecked_weak_pairs: list[dict] = []
+    arbiter_rejected_pairs: list[dict] = []  # D-097.A observability
     if weak_pairs and arbiter is not None:
         ranked = sorted(
             weak_pairs,
@@ -1486,6 +1608,10 @@ def split_incohesive_retry_groups(
                 continue  # fail-open: arbiter unavailable/declined -> keep separate
             same_idea, confidence, reason = decision
             if not same_idea:
+                arbiter_rejected_pairs.append({
+                    "left_clip_id": left_id, "right_clip_id": right_id,
+                    "confidence": round(float(confidence), 4), "reason": str(reason)[:200],
+                })
                 continue
             if _within_group_arbiter_confirmation_diverges(take_map, left_id, right_id):
                 # D-083: exactly one side carries a distinct-addition marker
@@ -1552,6 +1678,8 @@ def split_incohesive_retry_groups(
         "prior_confirmations_reused_count": len(prior_reused),
         "unchecked_weak_pairs": unchecked_weak_pairs,
         "unchecked_weak_pair_count": len(unchecked_weak_pairs),
+        "arbiter_rejected_pairs": arbiter_rejected_pairs,
+        "arbiter_rejected_pair_count": len(arbiter_rejected_pairs),
         "splits": split_records,
         # D-085 bridge-aware cohesion diagnostics -- see the module comment
         # above `_BRIDGE_MIN_COHESION_CONFIDENCE` for the full contract. Each

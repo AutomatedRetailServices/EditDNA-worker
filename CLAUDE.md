@@ -148,8 +148,13 @@ Without explicit user approval:
 
 ## Current state pointer
 The live current state is the newest `D-xxx` entry in `docs/CUTSELL_DECISIONS.md`
-(D-096 at the time of writing: audit complete, engine unchanged, STOP pending
-Product Owner review of `docs/CUTSELL_SYSTEM_AUDIT_D096.md` Part 12)
+(D-097 at the time of writing: the approved post-audit implementation --
+retry-family completeness, no-usable-realization, Resolver usability, polarity
+safety, ONE post-Freeze BoundaryEngine pass with the physical ownership
+contract, dead-air reconciliation, perceptual Watch+Listen v1 (advisory, never
+auto-PASS) and the CLEAN RAW gate -- CODE FIXED / TESTS PASS; the next
+authorised RAW must prove the MP4 effect; D-096 remains the source of truth,
+its Appendix B records implementation status)
 (read its LAST VERIFIED RESULT / NEXT AUTOMATIC ACTION lines). The handoff
 document's `CURRENT LIVE BLOCKER` / `EXACT NEXT ACTION` sections are historical
 context from the Unified Selection era, superseded by the decision log; do not

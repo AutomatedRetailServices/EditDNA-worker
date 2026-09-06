@@ -411,6 +411,26 @@ Binding validation order (Product Owner, 2026-09-06):
   implemented), Part 12 ranked root causes + plan -- STOP, awaiting Product
   Owner approval before any structural change. The D-095.3 negation patch is
   parked in its Appendix A (reverted from the tree).
+- D-097 (2026-09-06): the Product Owner approved the post-audit implementation
+  (+ the execution adjustment §1-§5). Implemented and offline-qualified, no RAW
+  yet: A retry-family completeness (same-opening restart evidence, bridge
+  acceptance); B all-failed family -> no-usable-realization BY DECISION with
+  story marked incomplete (never a clean preview); Resolver usability (failed
+  >= 0.85 never restored/composited, waived CRITICAL groups mirrored to the
+  importance index); DeliveryScorer cleanliness evidence (dead air, multimodal
+  resets) with negative controls; D polarity safety (shared vocabulary,
+  segmentation rejoin, guard protection, word timings published); C/E the ONE
+  post-Freeze BoundaryEngine pass (`cutsell_worker/boundary_engine_pass.py`,
+  ownership contract in its docstring), source-silence merge + relaxed floor
+  (C-12 mechanism reproduced offline), renderer trailing trims recorded,
+  post-render silence findings reconciled to source; perceptual System
+  Watch+Listen v1 (`cutsell_worker/perceptual_watch_listen.py`, advisory_v1,
+  never auto-PASS, `DELIVERABLE_PENDING_HUMAN_WATCH_LISTEN`); CLEAN RAW gate
+  (`benchmarks/clean_raw_gate.py`, wired into both workflows). Ladder is now
+  `RAW -> CLEAN RAW GATE -> CUT.AI PARITY -> HUMAN GOLD PARITY -> TECHNICAL QC
+  -> SYSTEM PERCEPTUAL W+L -> HUMAN W+L`. Next: ONE authorised RAW + ladder +
+  gate + per-fix MP4 report. Full entry: `docs/CUTSELL_DECISIONS.md` D-097;
+  gap-row status: `docs/CUTSELL_SYSTEM_AUDIT_D096.md` Appendix B.
 
 - Human Gold stays the ultimate editorial authority.
 - Cut.ai is the intermediate COMMERCIAL BASELINE oracle: recording-process

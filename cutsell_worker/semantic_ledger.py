@@ -94,6 +94,14 @@ class RealizationRecord:
     # guessed) -- a discard with no source_asset_id can never satisfy the
     # same-source requirement, which is the safe, fail-closed direction.
     source_asset_id: str = ""
+    # D-097: the FAMILY-SCOPED hybrid label Best Take actually decided on
+    # (take_judge_groups[].semantic_candidates, D-094.3 F8), observation
+    # only -- "" / 0.0 when the realization never reached a multi-member
+    # family. Read by realization_resolver's usability tiers (a failed label
+    # at >= the winner floor is evidence a realization is not usable for
+    # restoration/composite -- never a deletion authority on its own).
+    semantic_label: str = ""
+    semantic_label_confidence: float = 0.0
 
 
 @dataclass(frozen=True)
@@ -141,6 +149,8 @@ ENGINE_RESOLVED_WINNER = "RESOLVED_WINNER"          # exactly one realization is
 ENGINE_RESOLVED_COMPOSITE = "RESOLVED_COMPOSITE"    # a CompositeRecord names this idea's winning member set
 ENGINE_REVIEW_REQUIRED = "REVIEW_REQUIRED"          # zero realizations are `state == "selected"` for this idea
 ENGINE_BLOCKED_UNRESOLVED = "BLOCKED_UNRESOLVED"    # >1 realizations are `state == "selected"` with no composite explaining it (e.g. freeze_blocked keeping multiple candidates pending human review)
+ENGINE_NO_USABLE_REALIZATION = "NO_USABLE_REALIZATION"  # D-097.B: Best Take found no usable realization; zero selected BY DECISION, not by accident
+NO_USABLE_REALIZATION_DISCARD_REASON = "no_usable_realization_all_failed"
 
 
 @dataclass(frozen=True)
@@ -160,6 +170,12 @@ class SemanticIdeaRecord:
     # `build_semantic_ledger_shadow` always finalizes this before
     # returning.
     engine_resolution_status: str = ""
+    # D-097.B: Best Take found NO usable realization in this family (every
+    # member semantically failed AND deterministically unusable) and refused
+    # to force a winner. The Resolver answers RESOLVED_NONE for such an idea
+    # (never a restoration), the plan/reviewer record it as a dropped idea
+    # for review, and the run is marked story-incomplete.
+    no_usable_realization: bool = False
 
 
 # Decision types (Section 5) -- a closed, named vocabulary so a forensic
@@ -595,6 +611,20 @@ def build_semantic_ledger_shadow(draft) -> SemanticLedger:
     for clip in all_clips:
         realization_clips.setdefault(_clip_realization_id(clip), []).append(clip)
 
+    # D-097.B: families Best Take refused to force a winner for, and the
+    # family-scoped labels it decided on (observation only).
+    no_usable_clip_ids: set[str] = set()
+    family_label_by_clip: dict[str, tuple[str, float]] = {}
+    for group in (diagnostics.get("take_judge_groups") or ()):
+        member_ids = [str(row.get("clip_id") or "") for row in (group.get("ranked") or ())]
+        if group.get("no_usable_realization"):
+            no_usable_clip_ids.update(cid for cid in member_ids if cid)
+        for candidate in (group.get("semantic_candidates") or ()):
+            cid = str(candidate.get("clip_id") or "")
+            label = str(candidate.get("label") or "")
+            if cid and label:
+                family_label_by_clip[cid] = (label, float(candidate.get("confidence") or 0.0))
+
     hybrid_chunks = diagnostics.get("hybrid_editorial_chunks") or ()
     hybrid_delete_by_clip: dict[str, dict] = {}
     for chunk in hybrid_chunks:
@@ -616,7 +646,9 @@ def build_semantic_ledger_shadow(draft) -> SemanticLedger:
         pre_guard_candidate_clip_id = None
         if state == "discarded":
             hybrid_decision = next((hybrid_delete_by_clip.get(c.clip_id) for c in clips if c.clip_id in hybrid_delete_by_clip), None)
-            if hybrid_decision:
+            if any(c.clip_id in no_usable_clip_ids for c in clips):
+                discard_reason = NO_USABLE_REALIZATION_DISCARD_REASON
+            elif hybrid_decision:
                 discard_reason = str(hybrid_decision.get("delete_basis") or "hybrid_editorial_delete")
                 later_replacement_clip = hybrid_decision.get("later_retry_replacement_id")
                 if later_replacement_clip and later_replacement_clip in clip_by_id:
@@ -660,6 +692,8 @@ def build_semantic_ledger_shadow(draft) -> SemanticLedger:
             render_fragment_ids=fragment_ids,
             complete_idea=getattr(primary, "complete_idea", None),
             source_asset_id=str(getattr(primary, "source_asset_id", "") or ""),
+            semantic_label=next((family_label_by_clip[c.clip_id][0] for c in clips if c.clip_id in family_label_by_clip), ""),
+            semantic_label_confidence=next((family_label_by_clip[c.clip_id][1] for c in clips if c.clip_id in family_label_by_clip), 0.0),
         ))
         for claim in claims:
             ledger.register_claim(CanonicalClaimRecord(
@@ -675,16 +709,22 @@ def build_semantic_ledger_shadow(draft) -> SemanticLedger:
             ))
 
         if discard_reason is not None:
+            if discard_reason in ("draft_review_removed", "clean_cut_or_composite_resolution"):
+                discarding_stage = discard_reason
+            elif discard_reason == NO_USABLE_REALIZATION_DISCARD_REASON:
+                discarding_stage = "pipeline_semantic_best_take"
+            else:
+                discarding_stage = "hybrid_editorial_chunks"
             ledger.record_discard(
                 DiscardRecord(
                     discarded_realization_id=realization_id,
-                    discarding_stage="hybrid_editorial_chunks" if discard_reason not in ("draft_review_removed", "clean_cut_or_composite_resolution") else discard_reason,
+                    discarding_stage=discarding_stage,
                     reason=discard_reason,
                     replacement_realization_id=replacement_id,
                     replacement_verified=bool(replacement_id),
                     pre_guard_candidate_clip_id=pre_guard_candidate_clip_id,
                 ),
-                stage="hybrid_editorial_chunks" if discard_reason not in ("draft_review_removed", "clean_cut_or_composite_resolution") else discard_reason,
+                stage=discarding_stage,
                 semantic_idea_id=str(getattr(primary, "semantic_idea_id", None)) if getattr(primary, "semantic_idea_id", None) else None,
             )
             if discard_reason == "draft_review_removed":
@@ -728,10 +768,15 @@ def build_semantic_ledger_shadow(draft) -> SemanticLedger:
         if record.semantic_idea_id:
             idea_members.setdefault(record.semantic_idea_id, []).append(realization_id)
 
+    no_usable_realization_ids = {
+        rid for rid, record in ledger.realizations().items()
+        if record.discard_reason == NO_USABLE_REALIZATION_DISCARD_REASON
+    }
     for idea_id, realization_ids in idea_members.items():
         winner_id = next(
             (rid for rid in realization_ids if ledger.realizations()[rid].state == "selected"), None,
         )
+        no_usable_realization = winner_id is None and any(rid in no_usable_realization_ids for rid in realization_ids)
         claim_ids = tuple(dict.fromkeys(
             cid for rid in realization_ids for cid in ledger.realizations()[rid].claim_ids
         ))
@@ -746,8 +791,12 @@ def build_semantic_ledger_shadow(draft) -> SemanticLedger:
             canonical_claim_ids=claim_ids,
             current_winner_realization_id=winner_id,
             composite_realization_ids=(),
-            coverage_status="complete" if winner_id else "unresolved_ambiguous",
+            coverage_status=(
+                "complete" if winner_id
+                else ("no_usable_realization" if no_usable_realization else "unresolved_ambiguous")
+            ),
             story_order_position=None,
+            no_usable_realization=no_usable_realization,
         ))
         if winner_id:
             ledger.record_winner_decision(
@@ -893,6 +942,8 @@ def build_semantic_ledger_shadow(draft) -> SemanticLedger:
             status, winner = ENGINE_RESOLVED_COMPOSITE, None
         elif len(selected_ids) == 1:
             status, winner, composite_members = ENGINE_RESOLVED_WINNER, selected_ids[0], ()
+        elif len(selected_ids) == 0 and idea.no_usable_realization:
+            status, winner = ENGINE_NO_USABLE_REALIZATION, None  # D-097.B: zero selected by decision
         elif len(selected_ids) == 0:
             status, winner = ENGINE_REVIEW_REQUIRED, None
         else:

@@ -153,6 +153,10 @@ def install_post_selection_edge_only_boundary() -> None:
 
     def build_with_locked_edge_boundary(*args, **kwargs):
         result = original(*args, **kwargs)
+        # D-097.C/E: owned by the post-Freeze BoundaryEngine pass on the
+        # universal path (see boundary_engine_pass.py).
+        if str(kwargs.get("boundary_owner") or "pre_freeze") == "post_freeze":
+            return result
         draft = result.draft
         diagnostics = dict(draft.diagnostics or {})
         selected, audit = trim_locked_selection_edges(draft.selected, diagnostics)

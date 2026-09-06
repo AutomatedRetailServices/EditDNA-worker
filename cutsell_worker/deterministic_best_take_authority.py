@@ -126,6 +126,10 @@ def apply_deterministic_best_take_authority(draft, *, swap_enabled: bool = False
         moves.append({"clip_id": clip_id, "from_bucket": origin, "to_bucket": target, "reason": reason, **extra})
 
     for group in groups:
+        if group.get("no_usable_realization"):
+            # D-097.B: Best Take refused to force a winner for this family --
+            # a clear local score gap among failed members is not one either.
+            continue
         ranked = list(group.get("ranked") or ())
         winner_row = clear_retry_family_winner(ranked)
         if winner_row is None:

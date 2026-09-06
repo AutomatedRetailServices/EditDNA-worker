@@ -197,9 +197,29 @@ def render_preview(
     fps: int = 30,
     text_overlays: Iterable[TextOverlay] = (),
     media_overlays: Iterable[LocalMediaOverlay] = (),
+    trim_report: list[dict] | None = None,
 ) -> str:
-    """Render clips, captions, text and photo/video overlay lanes."""
-    segment_tuple = tuple(tighten_trailing_silence(segment) for segment in segments)
+    """Render clips, captions, text and photo/video overlay lanes.
+
+    ``trim_report`` (D-097.E, optional, mutated): one row per segment whose
+    trailing edge `tighten_trailing_silence` actually moved -- the renderer's
+    last mechanical op is recorded, never silent, so a RAW can attribute
+    every exit to its owner (see boundary_engine_pass.py's ownership table).
+    """
+    segment_tuple = []
+    for segment in segments:
+        tightened = tighten_trailing_silence(segment)
+        if trim_report is not None and abs(float(tightened.end) - float(segment.end)) > 1e-6:
+            trim_report.append({
+                "clip_id": segment.clip_id,
+                "render_fragment_id": getattr(segment, "render_fragment_id", None),
+                "original_end": round(float(segment.end), 3),
+                "tightened_end": round(float(tightened.end), 3),
+                "trim_sec": round(float(segment.end) - float(tightened.end), 3),
+                "owner": "render.tighten_trailing_silence",
+            })
+        segment_tuple.append(tightened)
+    segment_tuple = tuple(segment_tuple)
     text_tuple = tuple(text_overlays)
     media_tuple = tuple(media_overlays)
     if not segment_tuple:

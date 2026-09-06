@@ -758,6 +758,54 @@ def _find_minimal_composite(
 RESOLVED_WINNER = "RESOLVED_WINNER"
 RESOLVED_COMPOSITE = "RESOLVED_COMPOSITE"
 REVIEW_REQUIRED = "REVIEW_REQUIRED"
+# D-097.B: Best Take found no usable realization for this idea and refused
+# to force a winner; the resolver confirms NO restoration (never a review
+# block on its own -- the drop is surfaced as an incomplete-story signal).
+RESOLVED_NONE = "RESOLVED_NONE"
+
+# D-097 (PO adjustment §3): a FAMILY-SCOPED hybrid label "failed" at or
+# above the same 0.85 floor `pipeline._semantic_best_take` requires to
+# accept a "winner" label is evidence that a realization is NOT USABLE for
+# restoration or as a composite member. It is never a deletion authority:
+# if every candidate of an idea carries it, the evidence cancels out and
+# the idea is resolved exactly as before (WHEN UNCERTAIN, KEEP).
+_SEMANTIC_FAILED_THRESHOLD = 0.85
+
+
+def _unusable_realization_ids(
+    realizations: Mapping[str, RealizationRecord], candidate_ids: Sequence[str],
+) -> frozenset[str]:
+    unusable = frozenset(
+        rid for rid in candidate_ids
+        if rid in realizations
+        and str(realizations[rid].semantic_label) == "failed"
+        and float(realizations[rid].semantic_label_confidence) >= _SEMANTIC_FAILED_THRESHOLD
+    )
+    if not candidate_ids or len(unusable) >= len(set(candidate_ids)):
+        return frozenset()
+    return unusable
+
+
+def _groups_sourced_only_by(
+    groups: Sequence["RequirementGroup"], claims_by_id: Mapping[str, CanonicalClaimRecord],
+    realization_ids: frozenset[str], candidate_ids: Sequence[str],
+) -> frozenset[str]:
+    """Requirement groups whose every member claim originates ONLY from
+    `realization_ids` (within this idea's candidates)."""
+    if not realization_ids:
+        return frozenset()
+    candidate_set = frozenset(candidate_ids)
+    waived = []
+    for group in groups:
+        sources: set[str] = set()
+        for cid in group.member_claim_ids:
+            claim = claims_by_id.get(cid)
+            if claim is None:
+                continue
+            sources.update(set(claim.source_realization_ids) & candidate_set)
+        if sources and sources <= realization_ids:
+            waived.append(group.group_id)
+    return frozenset(waived)
 
 
 @dataclass(frozen=True)
@@ -2278,6 +2326,12 @@ def build_preserved_claim_id_index(
 EFFECTIVE_IMPORTANCE_RAW_RETAINED = "raw_importance_retained"
 EFFECTIVE_IMPORTANCE_INCIDENTAL_SOURCE_EXCLUSIVE = "incidental_source_exclusive_downgrade"
 EFFECTIVE_IMPORTANCE_CROSS_IDEA_CONFLICT = "cross_idea_conflict_fail_closed"
+# D-097: a CRITICAL requirement group sourced ONLY by semantically failed
+# realizations of its idea (see `_unusable_realization_ids`) is waived by
+# the resolver and reported here as SUPPORTING with this reason -- the ONE
+# importance truth StoryValidator consumes, so it never re-blocks Freeze
+# on content only a failed attempt carried.
+EFFECTIVE_IMPORTANCE_WAIVED_FAILED_REALIZATION_SOURCE = "waived_failed_realization_source"
 
 
 @dataclass(frozen=True)
@@ -2317,6 +2371,8 @@ def build_effective_claim_importance_index(
         if not idea_claims:
             continue
         groups = build_requirement_groups(idea_claims, claim_equivalence_arbiter=claim_equivalence_arbiter)
+        unusable_ids = _unusable_realization_ids(realizations, candidate_ids)
+        waived_group_ids = _groups_sourced_only_by(groups, claims_by_id, unusable_ids, candidate_ids)
         for group in groups:
             for canonical_claim_id in group.member_claim_ids:
                 claim = claims_by_id.get(canonical_claim_id)
@@ -2324,13 +2380,17 @@ def build_effective_claim_importance_index(
                     continue
                 source_rids = tuple(sorted(set(claim.source_realization_ids) & set(candidate_ids))) or tuple(claim.source_realization_ids)
                 source_exclusive = len(set(source_rids)) <= 1
-                if claim.importance == _CRITICAL and group.importance != _CRITICAL:
+                effective_importance = group.importance
+                if group.group_id in waived_group_ids and group.importance == _CRITICAL:
+                    effective_importance = "SUPPORTING"
+                    reason = EFFECTIVE_IMPORTANCE_WAIVED_FAILED_REALIZATION_SOURCE
+                elif claim.importance == _CRITICAL and group.importance != _CRITICAL:
                     reason = EFFECTIVE_IMPORTANCE_INCIDENTAL_SOURCE_EXCLUSIVE
                 else:
                     reason = EFFECTIVE_IMPORTANCE_RAW_RETAINED
                 entry = EffectiveClaimImportance(
                     canonical_claim_id=canonical_claim_id, claim_type=claim.claim_type, text=claim.text,
-                    raw_importance=claim.importance, effective_importance=group.importance, reason=reason,
+                    raw_importance=claim.importance, effective_importance=effective_importance, reason=reason,
                     semantic_idea_id=idea_id, requirement_group_id=group.group_id,
                     source_realization_ids=source_rids, source_exclusive=source_exclusive,
                 )
@@ -2453,6 +2513,18 @@ def _resolve_one_idea(
 ) -> RealizationResolution:
     realizations = ledger.realizations()
     claims_by_id = ledger.claims()
+    idea_record = ledger.ideas().get(idea_id)
+    if idea_record is not None and getattr(idea_record, "no_usable_realization", False):
+        # D-097.B: Best Take refused to force a winner (every member
+        # semantically failed AND deterministically unusable). Confirm the
+        # drop; never restore a failed attempt to fill the slot.
+        return RealizationResolution(
+            semantic_idea_id=idea_id, candidate_realization_ids=candidate_ids, winner_realization_id=None,
+            composite_realization_ids=(), covered_canonical_claim_ids=(), missing_critical_claim_ids=(),
+            discarded_realization_ids=tuple(sorted(candidate_ids)), retained_for_contextual_value=(),
+            decision_status=RESOLVED_NONE, decision_reason="no_usable_realization_all_failed",
+            confidence=1.0, evidence={"no_usable_realization": True},
+        )
     claims_by_realization = {
         rid: tuple(claims_by_id[cid] for cid in realizations[rid].claim_ids if cid in claims_by_id)
         for rid in candidate_ids
@@ -2462,6 +2534,15 @@ def _resolve_one_idea(
         all_claims, claim_equivalence_arbiter=claim_equivalence_arbiter, arbiter_log=arbiter_log,
     )
     critical_group_ids = frozenset(g.group_id for g in groups if g.importance == _CRITICAL)
+    # D-097 (PO adjustment §3): a semantically failed realization must not be
+    # restored merely to cover a claim only it carries. Its exclusive
+    # CRITICAL groups are WAIVED for the coverage objective (recorded, and
+    # mirrored into the D-089 effective-importance index so StoryValidator
+    # never re-blocks on them); the realization is also never preferred as
+    # a winner over a usable one, nor used as a composite member.
+    unusable_ids = _unusable_realization_ids(realizations, candidate_ids)
+    waived_group_ids = _groups_sourced_only_by(groups, claims_by_id, unusable_ids, candidate_ids)
+    critical_group_ids = critical_group_ids - waived_group_ids
 
     contradictions = _detect_contradiction_signals(claims_by_realization)
     contradiction_pairs = frozenset(frozenset((c.realization_a, c.realization_b)) for c in contradictions)
@@ -2501,6 +2582,10 @@ def _resolve_one_idea(
     # `resolve_orphan_realizations_shadow` instead.
     unsafe_ids: frozenset[str] = frozenset()
     coverage_by_id = {rid: _covered_group_ids(realizations[rid], groups) for rid in candidate_ids}
+    waiver_evidence = {
+        "unusable_realization_ids": sorted(unusable_ids),
+        "critical_groups_waived_from_failed_realizations": sorted(waived_group_ids),
+    }
 
     # Critical claim completeness, single realization: prefer a single
     # candidate over a composite whenever one already covers every
@@ -2558,6 +2643,10 @@ def _resolve_one_idea(
             score = _realization_delivery_score(realizations[rid], clip_scores)
             richness = len(coverage_by_id[rid] - critical_group_ids)
             return (
+                # D-097 tier 0: a usable realization always outranks a
+                # semantically failed one (delivery sufficiency, not only
+                # message sufficiency).
+                1 if rid in unusable_ids else 0,
                 1 if proven_incomplete else 0,
                 0 if has_high_confidence_semantic_winner else 1,
                 -_critical_claim_richness(rid),
@@ -2599,8 +2688,10 @@ def _resolve_one_idea(
         composite_ids: tuple[str, ...] = ()
         status, reason = RESOLVED_WINNER, "single_realization_full_critical_coverage"
     else:
+        # D-097: a semantically failed realization is never a composite
+        # member (a composite is built from usable pieces only).
         composite = _find_minimal_composite(
-            candidate_ids, realizations, groups, critical_group_ids, unsafe_ids, contradiction_pairs,
+            candidate_ids, realizations, groups, critical_group_ids, unsafe_ids | unusable_ids, contradiction_pairs,
         )
         if composite is not None:
             covered = frozenset()
@@ -2636,6 +2727,10 @@ def _resolve_one_idea(
             discarded_ids.append(rid)
         elif record.replacement_realization_id in chosen_ids and record.discard_reason:
             discarded_ids.append(rid)
+        elif rid in unusable_ids:
+            # D-097: a semantically failed realization's exclusive content
+            # is waived, not retained -- recorded in `waiver_evidence`.
+            discarded_ids.append(rid)
         else:
             retained_ids.append(rid)
 
@@ -2647,7 +2742,7 @@ def _resolve_one_idea(
         retained_for_contextual_value=tuple(sorted(retained_ids)),
         decision_status=status, decision_reason=reason,
         confidence=1.0 if status == RESOLVED_WINNER else 0.85,
-        evidence={"covered_group_ids": sorted(covered)},
+        evidence={"covered_group_ids": sorted(covered), **waiver_evidence},
     )
 
 
@@ -3325,6 +3420,23 @@ def apply_authoritative_realization_resolution(
             ))
             continue
 
+        if resolution.decision_status == RESOLVED_NONE:
+            # D-097.B: every candidate stays out of the timeline by decision.
+            for rid in resolution.candidate_realization_ids:
+                if rid in clips_by_realization:
+                    final_bucket[rid] = "discarded"
+            idea_outcomes.append(AuthoritativeIdeaOutcome(
+                semantic_idea_id=idea_id, decision_status=RESOLVED_NONE,
+                winner_realization_id=None, composite_realization_ids=(),
+                covered_canonical_claim_ids=(), missing_critical_claim_ids=(),
+                discarded_realization_ids=tuple(resolution.candidate_realization_ids),
+                retained_for_contextual_value=(),
+                decision_reason=resolution.decision_reason,
+                legacy_winner_realization_id=legacy_winner, legacy_composite_realization_ids=tuple(legacy_composite),
+                legacy_vs_authoritative_same=legacy_winner is None,
+            ))
+            continue
+
         winning_ids = frozenset(
             (resolution.winner_realization_id,) if resolution.winner_realization_id
             else resolution.composite_realization_ids
@@ -3567,7 +3679,7 @@ def build_authoritative_semantic_state(
 
     order_rank: dict[str, int] = {}
     resolved_sorted = sorted(
-        (item for item in provisional if item[1].decision_status != REVIEW_REQUIRED),
+        (item for item in provisional if item[1].decision_status not in (REVIEW_REQUIRED, RESOLVED_NONE)),
         key=lambda item: item[0],
     )
     for position, (_, outcome) in enumerate(resolved_sorted):

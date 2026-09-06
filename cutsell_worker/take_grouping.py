@@ -88,6 +88,85 @@ def _safe_short_prefix_retry(
     return long[:len(short)] == short
 
 
+# D-097.A (retry-family completeness): SAME-OPENING RESTART evidence.
+#
+# Run 34008386434 (D-096 collision C-1): a failed take, its abandoned
+# restart and the clean retry all began with the same four words within a
+# few seconds of each other, yet `retry_similarity` scored the failed take
+# vs the clean retry 0.0 -- its 0.60 word-containment floor is defeated by
+# a self-correction that rewrites the middle of the sentence ("hablé con"
+# -> "cambié de", "todos los test" -> "un test de todo") -- and the
+# semantic arbiter, asked about the pair, declined. A creator restarting a
+# sentence from its first words within seconds IS recording-process
+# evidence of a retry, independent of what any semantic judge thinks about
+# the factual detail that changed: the two deliveries must compete (the
+# corrected one should win) rather than both play. Two deterministic shapes,
+# both bounded by temporal adjacency and shared content beyond the opening
+# so a shared discourse connector ("y después de eso ...") never qualifies:
+# (1) RESTART -- both takes long enough to carry content after the opening,
+#     and their post-opening content overlaps materially;
+# (2) ABANDONED START -- the shorter take is at most half the longer one,
+#     shares the opening and at least one content word beyond it (the
+#     "Al terminar mi contrato le pedía a mi ginecóloga" shape, too short
+#     for (1) and not an exact prefix for `_safe_short_prefix_retry`).
+# No Video00 wording is referenced; thresholds are structural.
+_RESTART_OPENING_TOKENS = 4
+_RESTART_MAXIMUM_GAP_SEC = 8.0
+_RESTART_MINIMUM_REMAINDER_OVERLAP = 0.40
+_RESTART_MINIMUM_SHARED_CONTENT = 2
+_RESTART_STOP = frozenset({
+    # es
+    "que", "con", "por", "para", "una", "uno", "unos", "unas", "los", "las", "del", "les",
+    "como", "pero", "muy", "más", "mas", "sin", "sobre", "entre", "hasta", "desde", "ella",
+    "ellos", "ellas", "eso", "esa", "ese", "esto", "esta", "este", "aquí", "ahí", "allí",
+    "era", "fue", "son", "está", "esta", "hay", "había", "tenía", "tener", "sea", "ser",
+    # en
+    "the", "and", "that", "this", "with", "for", "was", "were", "are", "have", "has", "had",
+    "you", "your", "our", "they", "them", "there", "here", "then", "than", "but", "not",
+    "just", "very", "also", "into", "from", "what", "when", "which", "who",
+})
+
+
+def _restart_content(tokens: tuple[str, ...]) -> set[str]:
+    return {token for token in tokens if len(token) >= 3 and token not in _RESTART_STOP}
+
+
+def same_opening_restart(
+    left: CandidateTake,
+    right: CandidateTake,
+    *,
+    maximum_gap_sec: float = _RESTART_MAXIMUM_GAP_SEC,
+    opening_tokens: int = _RESTART_OPENING_TOKENS,
+    minimum_remainder_overlap: float = _RESTART_MINIMUM_REMAINDER_OVERLAP,
+    minimum_shared_content: int = _RESTART_MINIMUM_SHARED_CONTENT,
+) -> str | None:
+    """Return the deterministic restart evidence kind ("same_opening_restart"
+    or "same_opening_abandoned_start") joining two takes, or None. See the
+    D-097.A module comment above for the rationale and bounds."""
+    if left.source_asset_id != right.source_asset_id:
+        return None
+    if _gap_between(left, right) > maximum_gap_sec:
+        return None
+    left_tokens = _natural_tokens(left.text)
+    right_tokens = _natural_tokens(right.text)
+    if min(len(left_tokens), len(right_tokens)) < opening_tokens + 2:
+        return None
+    if left_tokens[:opening_tokens] != right_tokens[:opening_tokens]:
+        return None
+    left_rest = _restart_content(left_tokens[opening_tokens:])
+    right_rest = _restart_content(right_tokens[opening_tokens:])
+    if not left_rest or not right_rest:
+        return None
+    shared = left_rest & right_rest
+    smaller = min(len(left_rest), len(right_rest))
+    if len(shared) >= minimum_shared_content and len(shared) / smaller >= minimum_remainder_overlap:
+        return "same_opening_restart"
+    short, long = (left_tokens, right_tokens) if len(left_tokens) <= len(right_tokens) else (right_tokens, left_tokens)
+    if shared and len(short) * 2 <= len(long):
+        return "same_opening_abandoned_start"
+    return None
+
+
 def group_takes(
     takes: Iterable[CandidateTake],
     *,
@@ -104,7 +183,7 @@ def group_takes(
             score = 0.0
             for item in representatives:
                 candidate_score = retry_similarity(take.text, item.text)
-                if _safe_short_prefix_retry(take, item):
+                if _safe_short_prefix_retry(take, item) or same_opening_restart(take, item):
                     candidate_score = max(candidate_score, 1.0)
                 score = max(score, candidate_score)
             if score > best_score:
