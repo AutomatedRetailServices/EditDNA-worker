@@ -1,15 +1,17 @@
-"""Install the minimum-sufficient-editorial-set contract into Unified Selection.
+"""Install minimum-sufficient-editorial-set semantics at retry-family formation.
 
-This is intentionally a pre-Selection semantic-policy patch, not a post-hoc lexical
-removal rule. The existing unified-selection safety layer already enforces at most one
-SELECT inside a retry family. The failure fixed here occurs one step earlier: two good
-complete deliveries can be misclassified as independent/continuation merely because
-one contains extra wording or supporting detail. Once misclassified, the existing
-single-family-winner authority cannot act.
+Clean Cut Core V1 does not use the legacy whole-video Unified Selection reasoner as its
+primary editor. Its active path forms retry families through the bounded semantic idea-
+equivalence arbiter, then lets Best Take choose one winner inside each proven family.
 
-The patch therefore strengthens the provider-neutral editorial contract presented to
-the whole-video reasoner so that rhetorical/editorial function is resolved before
-claim preservation, composite rescue, or co-keep decisions.
+The Human-Gold failure this policy addresses happens at that family-formation boundary:
+two good complete deliveries can be left as separate ideas merely because one contains
+extra supporting wording. Once separated, Best Take cannot make them compete and both
+may survive. The active patch therefore teaches the semantic-equivalence request that
+"same intended idea" is an editorial-function question, not a union-of-facts test.
+
+The legacy Unified Selection contract is patched too for rollback parity, but it is not
+relied upon for the active Clean Cut Core V1 behavior.
 """
 from __future__ import annotations
 
@@ -18,40 +20,87 @@ from typing import Any, Mapping
 
 _SLOT_RULES = (
     "Optimize for the MINIMUM SUFFICIENT EDITORIAL SET, not the union of every fact said across all usable takes.",
-    "Before using wording overlap or unique facts, infer each candidate's audience-facing EDITORIAL FUNCTION (for example hook, setup, diagnosis, symptom, example, reflection, conclusion, CTA). Function is higher-level than literal wording.",
-    "Two complete deliveries that perform the same editorial function are competing realizations of one slot even when wording differs and one contains extra supporting detail. Classify them as retry_winner/retry_alternate in the SAME family, not independent or continuation merely to preserve extra wording.",
-    "GOOD + GOOD does not imply SELECT + SELECT. If two complete realizations do the same editorial job, choose the single realization that sufficiently communicates the required intent; the other is SWAP or DISCARD according to its usefulness.",
-    "Distinguish REQUIRED PROPOSITIONS from SUPPORTING/RESTATED/ELABORATIVE DETAIL. Supporting detail is allowed to be sacrificed when a complete selected realization already communicates the required story intent cleanly.",
-    "A fact is not automatically required merely because it appears only in one retry. Ask whether removing it changes the story's necessary audience-facing meaning; if not, treat it as supporting detail, not a reason to co-keep a second complete realization.",
-    "Use a COMPOSITE only when no single realization is sufficient and complementary clean pieces are genuinely required to create one coherent complete realization. Never create or preserve a composite just to maximize semantic coverage.",
-    "For competing complete realizations, rank in this order: required-idea coverage; contradiction/factual safety; completeness; redundancy with already-selected realization; delivery quality; narrative fit; rhythm/brevity.",
-    "A later conclusion/restatement after an already complete conclusion is normally a competing retry of the CONCLUSION slot, not a necessary continuation, unless it introduces a genuinely required new story proposition that the first conclusion cannot communicate without it.",
-    "Likewise, do not collapse genuinely complementary micro-deliveries: when A and B are incomplete pieces that together form one superior realization, retain them as composite_piece/continuation rather than forcing a whole-take winner.",
+    "Infer audience-facing EDITORIAL FUNCTION before literal wording differences (for example hook, setup, diagnosis, symptom, example, reflection, conclusion, CTA).",
+    "Two complete deliveries that perform the same editorial function and communicate the same core intended message are competing realizations of one retry family even when wording differs or one contains extra supporting detail.",
+    "GOOD + GOOD does not imply keeping both. A complete realization may make another complete realization redundant.",
+    "Distinguish a genuinely new REQUIRED STORY PROPOSITION from SUPPORTING, RESTATED, or ELABORATIVE DETAIL. Unique supporting wording does not by itself create a separate idea.",
+    "Use a composite only when no single realization is sufficient and complementary clean pieces are genuinely required to create one coherent complete realization.",
+    "A later conclusion/restatement after an already complete conclusion is normally a competing realization of the CONCLUSION slot unless it advances the story with a genuinely different required proposition.",
+    "Do not collapse genuinely complementary micro-deliveries: incomplete pieces that advance different necessary parts of one message may remain continuation/composite material.",
+)
+
+_SEMANTIC_EQUIVALENCE_POLICY = (
+    "EDITORIAL-FUNCTION RULE: decide SAME intended idea/message the way a human editor "
+    "would decide whether two deliveries should COMPETE for one rhetorical slot. Two "
+    "deliveries can be the SAME idea even if wording, length, examples, or supporting "
+    "facts differ. Extra detail that merely restates, supports, specifies, or elaborates "
+    "the same core audience-facing point does NOT automatically make a new idea. Treat "
+    "them as DIFFERENT only when the second delivery advances a genuinely distinct "
+    "required story proposition or audience-facing job that should survive alongside "
+    "the first. A second complete conclusion/restatement of the same takeaway is SAME; "
+    "a complementary next story beat is DIFFERENT. Do not rank or choose a winner here. "
 )
 
 
 def _inject_contract(payload: Mapping[str, Any]) -> dict[str, Any]:
+    """Rollback-path parity for the legacy whole-video reasoner."""
     out = dict(payload)
     existing = [str(item) for item in (out.get("editorial_contract") or ())]
     marker = _SLOT_RULES[0]
     if marker not in existing:
-        # Insert immediately after the global understand-the-video directives so these
-        # rules govern family formation before the legacy preservation clauses below.
         insertion = min(2, len(existing))
         existing[insertion:insertion] = list(_SLOT_RULES)
     out["editorial_contract"] = existing
     return out
 
 
-def install_editorial_slot_resolution() -> None:
+def _inject_semantic_equivalence_policy(payload: Mapping[str, Any]) -> dict[str, Any]:
+    """Inject the editorial-slot definition into the ACTIVE bounded arbiter request."""
+    out = dict(payload)
+    contents = [dict(item) for item in (out.get("contents") or ())]
+    if not contents:
+        return out
+    first = contents[0]
+    parts = [dict(item) for item in (first.get("parts") or ())]
+    if not parts:
+        return out
+    text = str(parts[0].get("text") or "")
+    if _SEMANTIC_EQUIVALENCE_POLICY not in text:
+        parts[0]["text"] = _SEMANTIC_EQUIVALENCE_POLICY + text
+    first["parts"] = parts
+    contents[0] = first
+    out["contents"] = contents
+    return out
+
+
+def _install_active_semantic_equivalence_policy() -> None:
+    from . import semantic_idea_equivalence_google as module
+
+    original = module.build_semantic_equivalence_request
+    if getattr(original, "_cutsell_editorial_slot_resolution", False):
+        return
+
+    def build_request_with_editorial_slots(*args, **kwargs):
+        return _inject_semantic_equivalence_policy(original(*args, **kwargs))
+
+    build_request_with_editorial_slots._cutsell_editorial_slot_resolution = True
+    module.build_semantic_equivalence_request = build_request_with_editorial_slots
+
+
+def _install_legacy_unified_selection_policy() -> None:
     from . import unified_selection_google as module
 
-    original_payload = module.build_unified_selection_payload
-    if getattr(original_payload, "_cutsell_editorial_slot_resolution", False):
+    original = module.build_unified_selection_payload
+    if getattr(original, "_cutsell_editorial_slot_resolution", False):
         return
 
     def build_payload_with_editorial_slots(*args, **kwargs):
-        return _inject_contract(original_payload(*args, **kwargs))
+        return _inject_contract(original(*args, **kwargs))
 
     build_payload_with_editorial_slots._cutsell_editorial_slot_resolution = True
     module.build_unified_selection_payload = build_payload_with_editorial_slots
+
+
+def install_editorial_slot_resolution() -> None:
+    _install_active_semantic_equivalence_policy()
+    _install_legacy_unified_selection_policy()
