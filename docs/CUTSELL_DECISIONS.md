@@ -10644,3 +10644,58 @@ active-path / root-cause situation from the four-way diagnostic is known
 (planned as a D-095.x entry with its own provider contract, tests and live
 proof). Until then: `delivery_status` semantics are unchanged and no candidate
 is presented as deliverable on technical QC alone.
+
+### D-095 addendum (Product Owner, same day, binding) -- routing authority of System Watch+Listen, active-path verification, one pipeline
+
+1. **Preservation restated.** Nothing accepted before D-095 is restarted,
+   replaced, reset or discarded (attempt reconstruction, recording-process
+   cleanup, retry-family/grouping, Best Take, semantic and critical-claim
+   protections, composite handling, complete-realization competition,
+   editorial-slot resolution, minimum-sufficient-editorial-set behaviour,
+   Selection vs Boundary ownership, Selection Freeze, CanonicalEditPlan,
+   FinalEditReviewer, repair loop, Boundary, rendering, the existing
+   technical post-render QC, all accepted regression coverage). The Cut.ai
+   ladder EXTENDS this work. Video00 timestamps, Cut.ai decisions and Human
+   Gold decisions are never hardcoded into production behaviour.
+2. **System PERCEPTUAL Watch+Listen = blocking QA/reviewer authority, not an
+   editor.** It evaluates the ACTUAL FINAL RENDERED MP4 (where technically
+   supportable: body/camera/mic reset debris, awkward entry/exit frames,
+   facial-expression discontinuity, head/body/hand/gesture jumps, abandoned
+   or interrupted gestures, perceptually ugly cuts, clipped or unnatural
+   word/phoneme boundaries, unnatural breath cuts, awkward pauses/cadence,
+   visual continuity, performance discontinuity, recording-process residue,
+   retry/repetition residue, A/V perceptual problems) and ROUTES each
+   failure to the authority that owns it: wrong take / redundant retry /
+   wrong story content -> Selection/Retry/BestTake/editorial authority;
+   correct content but bad physical cut -> Boundary; render/decode/A-V
+   defect -> Renderer/media pipeline. It never changes semantic membership
+   itself; a Selection failure is never solved by trimming Boundary, a
+   Boundary failure never by changing Selection. A candidate that fails it
+   is never presented as a successful preview for Human Watch+Listen.
+   Sequencing unchanged: complete the four-way diagnostic and the Level-1
+   root causes first, then integrate the perceptual gate at the post-render
+   stage (after the existing technical QC, before Human Watch+Listen).
+3. **Active-path verification ("CODE EXISTS != VIDEO USED IT").** For the
+   next valid RAW, prove that the implementation evaluated is the one inside
+   the worker/image that produced the video: the run must carry the exact
+   commit and a content fingerprint of the mounted `cutsell_worker` package
+   computed INSIDE the remote worker, compared by the workflow against the
+   checkout, plus per-component activity markers from the run's own
+   `stage_status`/`diagnostics`. For every major canonical component relevant
+   to a diagnosed failure, establish whether it was on the active execution
+   path for that RAW before changing it again. Diagnostic traceability only
+   -- not a second architecture: ONE coherent canonical pipeline, no parallel
+   competing pipelines to satisfy QA.
+4. **Acceptance criterion unchanged:** THE ACTUAL RENDERED VIDEO MUST
+   DEMONSTRATE THE IMPROVEMENT; tests, CI, diagnostics, duration similarity,
+   selection counts and technical QC are necessary evidence, none alone
+   proves editorial success.
+
+**Why prior work did not visibly materialize in the last rendered video
+(evidence, D-095.1 ladder on run 33995806350 / df3946e):** that render
+predates D-094.3 (F8 family-window labels, F9 source-order placement, F13/F14
+render-QC fixes), the D-042 editorial-slot line and the pair-budget
+diversification merged in D-095 -- none of them was in that worker. Of the
+components that WERE present, the ladder shows which ones acted and which
+did not on each Level-1 region (D-095.1 entry). The next RAW carries the
+active-path identity so this question is answered by the run itself.

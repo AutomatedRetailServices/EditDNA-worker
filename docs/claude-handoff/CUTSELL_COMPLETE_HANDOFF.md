@@ -391,7 +391,16 @@ Binding validation order (Product Owner, 2026-09-06):
 - The perceptual SYSTEM WATCH + LISTEN gate (human-visible/audible editing
   defects on the rendered MP4) is NOT complete yet; it is to be added as an
   additional blocking post-render gate before Human Watch + Listen, at the
-  right stage after the diagnostic, preserving the technical QC.
+  right stage after the diagnostic, preserving the technical QC. It is a
+  QA/reviewer authority: it routes failures to the owning authority (Selection/
+  BestTake for wrong content, Boundary for bad cuts, Renderer for A/V defects)
+  and never changes semantic membership; a failing candidate is never shown as
+  a successful preview.
+- Active-path verification: every RAW must prove the evaluated implementation
+  is the one inside the worker that produced the video (commit, in-worker
+  package fingerprint, component activity markers). CODE EXISTS != VIDEO USED
+  IT. One coherent canonical pipeline, no parallel QA pipeline.
+- Both the D-095 directive and its addendum are binding for any continuation.
 
 - Human Gold stays the ultimate editorial authority.
 - Cut.ai is the intermediate COMMERCIAL BASELINE oracle: recording-process

@@ -45,7 +45,12 @@ When sources conflict:
 `RAW → CUT.AI PARITY → HUMAN GOLD PARITY → technical post-render QC → perceptual
 SYSTEM WATCH + LISTEN → HUMAN WATCH + LISTEN PASS` (the perceptual gate is an
 additional blocking post-render gate still to be implemented at the right stage;
-the technical QC is preserved, never replaced).
+the technical QC is preserved, never replaced; the perceptual gate is a QA/reviewer
+authority that ROUTES failures to the owning authority -- Selection/BestTake for wrong
+content, Boundary for bad physical cuts, Renderer for A/V defects -- and never edits
+membership). Every RAW must prove the evaluated code is the code inside the worker
+that produced the video (commit + in-worker package fingerprint + component activity
+markers): CODE EXISTS != VIDEO USED IT. One coherent pipeline, never a parallel one.
 Human Gold is the ultimate editorial authority; Cut.ai is the intermediate
 COMMERCIAL BASELINE oracle. Video00 QA references (QA-ONLY, never exposed to
 production Selection/Boundary/BestTake/grouping/render/LLM prompts):
