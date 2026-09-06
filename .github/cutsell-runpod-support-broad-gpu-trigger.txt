@@ -1,0 +1,1 @@
+Run isolated RunPod Support broad-GPU placement test after support response dated 2026-09-03.
