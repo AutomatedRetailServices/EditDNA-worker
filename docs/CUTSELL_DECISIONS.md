@@ -12706,3 +12706,93 @@ future real-media proof would need in place first.
 **HUMAN ACTION REQUIRED:** NO to close this bounded task. A future RAW
 authorization is needed to prove or disprove this bridge's real-media
 effect; D-099 Gap #2 and Gap #3 remain separately unauthorized.
+
+## D-101 -- P0 meaning-safety forensic: hereditary-cancer / papillary-diagnosis cluster root-caused to `_semantic_best_take`, not D-097.12 or D-100 (offline investigation only, no fix)
+
+Full report: `docs/CUTSELL_FORENSIC_HEREDITARY_CANCER_CLUSTER_D101.md`.
+Compares RAW `34062384187` (AFTER, HEAD `808317b`, D-100 live) against
+reference RAW `34048444463` (BEFORE, D-097.11) using only the two runs'
+already-decoded job logs plus `benchmarks/video00_regression_qa.json` --
+no ASR re-run, no provider call, no RAW dispatched.
+
+Two regressed checks investigated: `papillary_cancer_preserved` (FAIL on
+both runs -- pre-existing, not a regression) and
+`family_context_preserved` (PASS on BEFORE, FAIL on AFTER -- the one true
+divergence).
+
+**Root cause #1 (papillary diagnosis, pre-existing on both runs):**
+`_semantic_best_take`'s `single_semantic_winner` fast path
+(`cutsell_worker/pipeline.py:238-247`) trusts any single Hybrid/Gemini
+per-window `"winner"` label at >=0.85 confidence with ZERO further
+safety checks -- no completeness check, no claim-coverage check, no
+contradiction check. On both runs the Hybrid session-cleanup layer
+(`gemini-3.5-flash-lite`) labelled an unrelated "other symptoms" clip
+`"winner"` at 0.95 while labelling the required diagnosis-continuation
+sentence `"alternate"`/`"failed"` -- reproduced byte-for-byte identically
+on both runs, so this is a pre-existing defect, not something D-097.12
+or D-100 introduced or could have prevented.
+
+**Root cause #2 (family context, the actual BEFORE->AFTER divergence):**
+the SAME function's multi-candidate fallback,
+`delivery_tie_break_among_survivors` (`pipeline.py:322-331`), has no
+subset/prefix awareness: when it is forced to choose between the full
+family-context statement and its own strict short prefix, it has no way
+to prefer the more complete realization on ranking alone. On BEFORE, the
+Hybrid label for the full-text window was `"winner"` at 0.9, so the
+fast path resolved it correctly before the fallback was ever reached; on
+AFTER, the SAME window's label flipped to `"failed"`/0.85 (short prefix
+`"alternate"`/0.7) on byte-identical transcript text, forcing the
+multi-candidate fallback, which then picked the incomplete prefix. This
+is genuine Gemini run-to-run classification variance, not a code-path
+change.
+
+**Authority collision:** AttemptReconstructor and take_grouping are
+correct on both clusters in both runs (first correct decision). The
+Hybrid/Gemini per-window semantic label is the first wrong decision in
+both cases. `_semantic_best_take` is the authority that should catch and
+override a wrong label and does not -- in root cause #1 because its fast
+path has no safety net at all, in root cause #2 because its fallback's
+safety net (completeness/coverage/contradiction checks) has no
+subset-vs-full-statement discrimination. ClaimCoverage is bypassed
+entirely by the fast path in root cause #1 and is consulted but
+non-decisive in root cause #2.
+
+**Verified, not assumed:** no evidence was found that "carcinoma
+papilar" appearing in one realization causes the system to treat the
+full diagnosis/family-history proposition as falsely covered. The
+mechanism in both clusters is BestTake selecting the wrong member of a
+correctly-formed retry family, not false claim substitution.
+
+**D-097.12 contribution:** NO -- unrelated stomach-family fix, not
+implicated in either cluster; family membership for both clusters is
+identical BEFORE/AFTER. **D-100 contribution:** NO -- D-100's bridge
+never activated in either cluster (no confirmed multimodal event at
+either boundary; both clusters' membership was decided by pre-existing
+lexical rules the same on both runs). **ASR/arbiter variance
+contribution:** the transcript text is stable/byte-identical between
+runs; the divergence is Gemini per-window *classification* variance on
+that identical text (root cause #2 only) -- ASR itself did not vary, and
+root cause #1 reproduces identically so no variance is implicated there.
+
+**Minimum safe fix location (NOT implemented):** either (a) extend
+`single_semantic_winner`'s fast path to run the same completeness/
+claim-coverage/contradiction checks the multi-candidate branch already
+has before trusting a lone `"winner"` label, or (b) give
+`delivery_tie_break_among_survivors` a subset/prefix-awareness check so
+it never prefers a candidate that is a strict content subset of another
+survivor. Both are additive to the existing, heavily-precedented
+`_semantic_best_take` function (D-081/D-082/D-097.B/D-097.8 history) and
+preserve WHEN-UNCERTAIN-KEEP and D-063 CRITICAL_COVERAGE_DOMINANCE.
+
+This directive was forensic-only per its own scope: no engine behavior
+was changed, no selection/claim/grouping/Resolver/StoryValidator code was
+touched, no test was added, no RAW/provider/S3/infra work was performed.
+`git diff --stat` against `808317b` shows only this decision-log entry
+and the forensic document as changed.
+
+**HUMAN ACTION REQUIRED:** YES -- condition A (product decision required)
+and G is not crossed (same objective's own last step). The Product Owner
+must choose which of the two candidate fix locations (or both) to
+authorize before any implementation begins; per this task's own closing
+instruction, no fix is implemented and no further task begins until that
+approval is given.
