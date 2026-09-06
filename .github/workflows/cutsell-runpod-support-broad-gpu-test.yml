@@ -51,13 +51,14 @@ jobs:
             --data @/tmp/template-create.json \
             --output /tmp/template.json)
           echo "template_create_http=$code"
-          cat /tmp/template.json | jq '{id,name,imageName,isServerless}' || true
+          cat /tmp/template.json
+          echo
           test "$code" = "200" || test "$code" = "201"
           TEMPLATE_ID=$(jq -r '.id // empty' /tmp/template.json)
           test -n "$TEMPLATE_ID"
           echo "TEMPLATE_ID=$TEMPLATE_ID" >> "$GITHUB_ENV"
 
-      - name: Create temporary warm Serverless endpoint with broadened compatible GPU allowlist
+      - name: Create temporary warm endpoint with broadened CUDA 12.4 compatible GPU allowlist
         shell: bash
         run: |
           set -euo pipefail
@@ -73,16 +74,15 @@ jobs:
                 "NVIDIA L4",
                 "NVIDIA A40",
                 "NVIDIA RTX A6000",
-                "NVIDIA L40S",
-                "NVIDIA RTX 6000 Ada Generation",
-                "NVIDIA RTX 5000 Ada Generation",
                 "NVIDIA RTX A5000",
                 "NVIDIA GeForce RTX 3090",
-                "NVIDIA GeForce RTX 4080 SUPER",
-                "NVIDIA A30",
+                "NVIDIA RTX A4500",
                 "NVIDIA RTX A4000",
-                "NVIDIA RTX A4500"
+                "NVIDIA L40S",
+                "NVIDIA RTX 6000 Ada Generation",
+                "NVIDIA L40"
               ],
+              allowedCudaVersions:["12.4"],
               workersMin:1,
               workersMax:1,
               scalerType:"QUEUE_DELAY",
@@ -93,6 +93,9 @@ jobs:
               name:$name
             }' > /tmp/endpoint-create.json
 
+          echo 'endpoint_request_summary='
+          jq '{computeType,gpuCount,gpuTypeIds,allowedCudaVersions,workersMin,workersMax,scalerType,scalerValue,idleTimeout,executionTimeoutMs,flashboot,name}' /tmp/endpoint-create.json
+
           code=$(curl --silent --show-error --write-out '%{http_code}' \
             --request POST \
             --url 'https://rest.runpod.io/v1/endpoints' \
@@ -101,8 +104,14 @@ jobs:
             --data @/tmp/endpoint-create.json \
             --output /tmp/endpoint.json)
           echo "endpoint_create_http=$code"
-          cat /tmp/endpoint.json | jq '{id,name,templateId,workersMin,workersMax,gpuTypeIds}' || true
-          test "$code" = "200" || test "$code" = "201"
+          echo 'endpoint_response_body='
+          cat /tmp/endpoint.json
+          echo
+          if [ "$code" != "200" ] && [ "$code" != "201" ]; then
+            echo 'BROAD_GPU_SUPPORT_TEST=ENDPOINT_CREATE_REJECTED'
+            exit 11
+          fi
+
           ENDPOINT_ID=$(jq -r '.id // empty' /tmp/endpoint.json)
           test -n "$ENDPOINT_ID"
           echo "ENDPOINT_ID=$ENDPOINT_ID" >> "$GITHUB_ENV"
@@ -111,7 +120,9 @@ jobs:
             --url "https://rest.runpod.io/v1/endpoints/$ENDPOINT_ID" \
             --header "Authorization: Bearer $RUNPOD_API_KEY" \
             --output /tmp/endpoint-readback.json
-          jq '{id,workersMin,workersMax,gpuTypeIds}' /tmp/endpoint-readback.json
+          echo 'endpoint_readback='
+          cat /tmp/endpoint-readback.json
+          echo
           jq -e '.workersMin == 1 and .workersMax == 1' /tmp/endpoint-readback.json >/dev/null
 
       - name: Submit exactly one health job and observe placement
