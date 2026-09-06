@@ -583,6 +583,17 @@ Binding validation order (Product Owner, 2026-09-06):
   print the FINAL-MP4 (physical) Level-1 view as the headline (49.98 s this
   run; the selection-plan view was 56.58 s). Next: ONE RAW. Full entry:
   `docs/CUTSELL_DECISIONS.md` D-097.10.
+- D-097.11 (2026-09-06): RAW 34048444463 = Freeze PASS, QC PASS, DELIVERABLE
+  MP4; R14 proven on the rendered MP4 (17 recorded trims applied before the
+  perceptual review; exit-debris findings 13 -> 6, all real; physical headline
+  printed with its sources). The stomach family regressed to three kept
+  singletons because the arbiter answered the same pair differently in three
+  runs (same 0.95 / not-same 0.85 / not-same 0.90): escalation A with three
+  options recorded. R15: a trailing "..." was read as a sentence end, marking
+  a visibly cut-off attempt complete; fixed at take_segmentation (open tail),
+  join rules unchanged. Physical Level-1 53.3 s, 46.3 s of it in the three
+  escalation-A families. No RAW until a fix with an expected MP4 effect or a
+  PO decision. Full entry: `docs/CUTSELL_DECISIONS.md` D-097.11.
 # HISTORICAL CUTSELL.AI 11 CONTINUITY
 
 A trusted CutSell.ai 11 recovery checkpoint is:

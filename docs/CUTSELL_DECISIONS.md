@@ -12293,3 +12293,111 @@ arbiter's inconsistent verdicts vs the D-085 fail-closed probe / F3b), F
 (watch + listen: deliverable MP4s of runs 34040848026, 34042123557,
 34043967265, 34047064840), B (D-097.D polarity micro-fragment "No"), B/A
 (waiver narrowing).
+
+
+## D-097.11 -- RAW 34048444463 (head 3c8ec4a): R14 PROVEN on the rendered MP4 (post-render QA layers read the segments as rendered; physical Level-1 headline printed); the stomach family regressed on a third different arbiter answer (R13, escalation A with three runs of evidence); the "..." trailing-off marker was read as a full stop (R15, fixed)
+
+**RAW COMPLETE (Modal run 34048444463, head `3c8ec4a`, 2026-09-06).**
+Worker ok, `hybrid_editorial = provider_complete`, Freeze PASSED, technical
+QC PASS on attempt 1, `story_completeness = complete`, `delivery_status =
+DELIVERABLE_PENDING_HUMAN_WATCH_LISTEN:perceptual=FAIL` (advisory),
+render 162.9 s (physical keep 162.3 s), `render_verification` 24/26
+fragments located, 0 source-order inversions. Final KEEP carries the clean
+gynaecologist retry, the diagnosis sentence and the clean gastritis delivery.
+
+**Per-fix MP4 report -- D-097.10 R14: PROVEN on the rendered MP4.**
+`perceptual_watch_listen.segments_as_rendered = true`, `renderer_trims_
+applied = 17`; `reset_debris_at_edges_source_evidence` exit findings 13 ->
+6, every remaining exit finding inside the rendered end (e.g. the stomach
+aside's hand reset at 250.754-250.821 against a rendered end of 250.926);
+entry findings 7 (unchanged: no entry tightening exists). The workflow
+printed the FINAL-MP4 (physical) summary as the headline with
+`physical_source = {recorded_renderer_trims: 17, render_verification: 9,
+plan: 0}` and the physical Level-1 rows; the CLEAN RAW gate reads the same
+physical regions. The perceptual verdict stays FAIL on the 13 real
+findings (advisory v1; escalation F/A on its blocking status is unchanged).
+
+**Ladder (QA-only, four-way), PHYSICAL view:** LEVEL_1 18 regions /
+53.28 s selection + 22 / 4.21 s boundary; F1 vs Cut.ai 0.7905 / vs Gold
+0.7471; by authority: BestTakeResolver 6 / 33.88 s (pimples family 25.4 s +
+"Síntomas" pair 7.9 s -- escalation A), AttemptReconstructor/
+RecordingProcessRemoval 6 / 9.17 s (the stomach aside 5.54 s -- R13; hair
+loss tail 1.37 s; the rest <= 0.81 s edges), RealizationResolver 1 /
+7.48 s (the abandoned stomach attempt, see below), BoundaryEngine 25 /
+5.75 s, CompositeResolver/PreResolverCleanup 1 / 0.84 s, IdeaClusterer 1 /
+0.37 s. Physical Level-1 seconds by run: 53.36 -> 49.94 -> 49.98 -> 53.28
+(the +3.3 s is the stomach family, below). Of the 53.3 s, 46.3 s sit in
+the three escalation-A families (pimples, "Síntomas", stomach); the
+engineering-owned remainder is ~7 s of sub-1.4 s edges.
+
+**R13, third run of evidence -- the stomach family is decided by the
+arbiter's run-to-run answer.** The same abandoned<->clean pair has now
+been answered SAME 0.95 (34045158712), NOT-same 0.85 (34047064840: "second
+text provides specific gastritis diagnosis missing in the first") and
+NOT-same 0.90 (this run: "Left cuts off; right gives complete endoscopy
+and gastritis details"); abandoned<->aside SAME 0.90 then NOT-same 0.95.
+The prompt already instructs "even with ... one being incomplete/stumbled"
+and the D-042 policy lines say extra supporting detail is not a new idea;
+the model keeps answering "incomplete vs complete = different". This run
+nothing merged: three singletons, all kept -- the abandoned attempt
+(`winner` 0.95 in one window, `failed` 0.85 in another, kept fail-open,
+placed by D-089 as its own unit, hence the ladder's "restored by the
+RealizationResolver" attribution: it was never deleted), the aside, the
+clean delivery: 13.0 s Level-1, the worst of the four runs. Every
+deterministic tier is exhausted (D-097.A restart evidence: 2 shared
+opening tokens of 4, remainder overlap 0.33 < 0.40; F3b inapplicable).
+Options for the Product Owner (escalation A): (i) a deterministic
+INCOMPLETE-ATTEMPT-RESTARTED rule (earlier take grammatically incomplete /
+trailing off, same opening bigram, >= 2 shared content tokens beyond it,
+within 30 s) -- catches this shape, a grouping-policy relaxation;
+(ii) an arbiter prompt clause + isolation-probe battery (paid provider
+calls; C) with the reason strings above as the regression fixture;
+(iii) accept the D-085 fail-closed behaviour as WHEN-UNCERTAIN-KEEP and
+leave the family to human Watch+Listen. No autonomous change.
+
+**R15 -- a trailing ellipsis was read as a sentence end.** The abandoned
+attempt's transcript ends "... y me diagnosticaron con..." and
+`take_segmentation._ends_sentence` matched the "..." as a period before
+`_grammatically_open_tail` could see the bridge word "con", so
+`complete_idea = True` on an attempt that visibly cuts off (2 of the run's
+39 takes end in an ellipsis; both are genuinely cut off: "... la cual yo
+resor..."). The marker feeds the pair-ranking continuation bonus, clean-
+cut's incomplete rules, the Resolver's usability and claim protections and
+the guards that exist only to work around it (`cross_group_truncated_
+winner_authority`: "reconstruction can occasionally mark complete_idea=True
+even though its transcript visibly ends ... on a bridge word or
+ellipsis"). Fix at the owning authority: `_trails_off` (a trailing "..." or
+"…") is never a sentence end and is an open tail. The segmentation join
+rules are unchanged: an open tail joins only a contiguous continuation
+(gap <= 0.65 s), so the abandoned attempt (1.2 s before the aside) is NOT
+fused; a mid-sentence ellipsis is untouched. Expected MP4 effect on its
+own: none on this family (the attempt stays a kept singleton unless an
+authority acts on the marker); it removes a false complete-delivery
+marker from every downstream rule. Tests: `tests/test_cutsell_d097_11_
+trailing_ellipsis_is_not_a_sentence_end.py` (4); segmentation, clean-cut
+rules, polarity safety, reconstruction, D-046, D-097.5 and truncated-
+winner suites 82/82.
+
+**Offline qualification:** compileall clean; CleanCutBench both files;
+full `tests/test_cutsell_*.py` glob 2291/2291.
+
+**LAST VERIFIED RESULT:** RAW 34048444463 = FREEZE PASS, QC PASS,
+DELIVERABLE MP4 (pending human Watch+Listen), R14 PROVEN on the rendered
+MP4, physical Level-1 53.28 s of which 46.3 s are escalation-A families;
+R15 CODE FIXED / TESTS PASS.
+**NEXT AUTOMATIC ACTION:** commit + push R15. NO new RAW on its own: R15
+has no expected MP4 effect on this video and the remaining Level-1 mass is
+Product Owner territory (A). Continue offline with the engineering-owned
+remainder (sub-1.4 s edges: the entry-edge reset debris the perceptual
+reviewer flags has no reference counterpart -- calibrate the capability
+against word onsets before any Boundary change) and with the R15 marker's
+downstream effects on CleanCutBench fixtures; the next RAW follows the
+first fix with an expected MP4 effect or a Product Owner decision on (i)/
+(ii)/(iii).
+**HUMAN ACTION REQUIRED:** YES, non-blocking -- A (the stomach family:
+options (i)/(ii)/(iii) above; pimples later-attempt tie preference; the
+complementary "Síntomas" pair), F (watch + listen: deliverable MP4s of runs
+34040848026, 34042123557, 34043967265, 34047064840, 34048444463), B
+(D-097.D polarity micro-fragment "No"), B/A (waiver narrowing), and the
+perceptual gate's blocking status (advisory v1 stays FAIL on real entry/exit
+debris).

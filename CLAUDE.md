@@ -192,7 +192,13 @@ D-097.10 fixed the post-render QA layers that read pre-render boundaries
 (R14: the perceptual reviewer and the ladder now measure the segments as
 rendered; the physical Level-1 view is the headline); the stomach aside is
 recorded as escalation A (arbiter inconsistency vs the D-085 fail-closed
-probe); the next authorised RAW must prove R14; D-096 remains the source of
+probe); RAW 34048444463 PROVED R14 on the rendered MP4 (deliverable) and
+showed the stomach family decided by the arbiter's run-to-run answer (three
+runs, three verdicts) -- escalation A with options recorded in D-097.11,
+which also fixed the trailing-ellipsis completeness marker (R15); the
+remaining Level-1 mass (46 of 53 physical seconds) is Product Owner
+territory, so no RAW runs until a fix with an expected MP4 effect or a PO
+decision; D-096 remains the source of
 truth, its Appendix B records implementation status)
 (read its LAST VERIFIED RESULT / NEXT AUTOMATIC ACTION lines). The handoff
 document's `CURRENT LIVE BLOCKER` / `EXACT NEXT ACTION` sections are historical

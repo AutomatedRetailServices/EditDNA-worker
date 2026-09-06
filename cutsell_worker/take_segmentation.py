@@ -110,8 +110,20 @@ def _word_count(text: str) -> int:
     return len(re.findall(r"[\w'’-]+", text, flags=re.UNICODE))
 
 
+_TRAILING_ELLIPSIS_RE = re.compile(r"(?:\.\.\.|…)[\"'”’)]*\s*$")
+
+
+def _trails_off(text: str) -> bool:
+    """D-097.11 (R15): a trailing ellipsis is the transcriber's trailing-off /
+    cut-off marker ("... y me diagnosticaron con..."), never a full stop."""
+    return bool(_TRAILING_ELLIPSIS_RE.search(str(text or "").strip()))
+
+
 def _ends_sentence(text: str) -> bool:
-    return bool(re.search(r"[.!?][\"'”’)]*\s*$", text.strip()))
+    stripped = str(text or "").strip()
+    if _trails_off(stripped):
+        return False
+    return bool(re.search(r"[.!?][\"'”’)]*\s*$", stripped))
 
 
 def _last_word(text: str) -> str:
@@ -123,6 +135,14 @@ def _grammatically_open_tail(text: str) -> bool:
     stripped = str(text or "").strip()
     if not stripped or _ends_sentence(stripped):
         return False
+    if _trails_off(stripped):
+        # D-097.11 (R15): RAW 34048444463 marked "Tuve problemas estomacales ...
+        # y me diagnosticaron con..." complete_idea=True because the ellipsis
+        # matched the full-stop pattern first; the abandoned attempt then
+        # carried a complete-delivery marker into ranking, clean-cut and the
+        # Resolver's usability rules (cross_group_truncated_winner_authority
+        # exists to work around exactly this marker error).
+        return True
     if _OPEN_PUNCTUATION_RE.search(stripped):
         return True
     return _last_word(stripped) in _BRIDGE_CONNECTORS
