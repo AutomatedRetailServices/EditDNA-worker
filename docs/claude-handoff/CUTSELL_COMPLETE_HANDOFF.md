@@ -377,6 +377,37 @@ After Video00 passes, unseen videos and the broader regression suite must prove 
 
 ---
 
+# CANONICAL QUALITY LADDER (D-095) -- CUTSELL.AI 11 CONTINUATION CHECKPOINT
+
+Binding validation order (Product Owner, 2026-09-06):
+
+    RAW -> CUT.AI PARITY -> HUMAN GOLD PARITY -> HUMAN WATCH + LISTEN PASS
+
+- Human Gold stays the ultimate editorial authority.
+- Cut.ai is the intermediate COMMERCIAL BASELINE oracle: recording-process
+  removal, basic retry resolution, take quality, visual cleanliness, basic
+  continuity, basic redundancy removal. CutSell must reach that first.
+- QA references (QA-ONLY; never fed to production Selection/Boundary/BestTake/
+  grouping/render/LLM reasoning):
+  - RAW `Editdna longform validation/VIDEO-2026-07-30-09-18-03.mp4`
+  - CUT.AI `Editdna longform validation/D40F1D43-7391-44D5-8D83-09CB62FBF397.MP4`
+  - HUMAN GOLD `Editdna longform validation/5E01F214-A364-4F4B-8F25-D39B1E2B21D2.MP4`
+- Classification of every CutSell discrepancy: LEVEL 1 (worse than Cut.ai --
+  fix first) / LEVEL 2 (~Cut.ai, Gold better -- after Level 1 is stable) /
+  LEVEL 3 (matches or exceeds Gold -- do not touch).
+- Tooling: `benchmarks/video00_quality_ladder.py` + workflow
+  `cutsell-video00-quality-ladder.yml` (CPU, no paid compute) + the ladder step
+  in `cutsell-video00-modal-raw.yml`. Full contract: `docs/CUTSELL_DECISIONS.md`
+  D-095; oracle hierarchy: `docs/video00-reference-oracles.md`.
+- Quality states stay separate: CODE FIXED != TESTS PASS != CI GREEN != CUT.AI
+  PARITY != HUMAN GOLD PARITY != HUMAN WATCH + LISTEN PASS. The product is the
+  rendered video, not the test suite.
+- Architecture warning: do not add another rescue/guard/reconciliation
+  authority per symptom; widespread Level-1 failures require an
+  architecture-level diagnosis before any fix (no large rewrite yet).
+
+---
+
 # HISTORICAL CUTSELL.AI 11 CONTINUITY
 
 A trusted CutSell.ai 11 recovery checkpoint is:

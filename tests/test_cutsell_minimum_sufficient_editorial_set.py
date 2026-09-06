@@ -93,7 +93,7 @@ def test_incomplete_semantic_winner_cannot_override_complete_local_winner():
         "incomplete-semantic": ("winner", 0.96),
     }
 
-    selected, preferred = pipeline._semantic_best_take(
+    selected, preferred, _reason = pipeline._semantic_best_take(
         (complete_local, incomplete_semantic),
         decisions,
         "complete-local",
@@ -111,7 +111,7 @@ def test_complete_semantic_winner_can_still_override_complete_local_winner():
         "complete-semantic": ("winner", 0.96),
     }
 
-    selected, preferred = pipeline._semantic_best_take(
+    selected, preferred, _reason = pipeline._semantic_best_take(
         (complete_local, complete_semantic),
         decisions,
         "complete-local",

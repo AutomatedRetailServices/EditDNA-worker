@@ -60,6 +60,9 @@ env:
   # QA-only authoritative Human Gold reference -- never read by production
   # Selection/Boundary code, never part of the run_op() payload.
   HUMAN_GOLD_KEY: Editdna longform validation/5E01F214-A364-4F4B-8F25-D39B1E2B21D2.MP4
+  # D-095 QA-only Cut.ai commercial-baseline reference (docs/video00-reference-oracles.md)
+  # -- same rule as Human Gold: never read by production code, never in the payload.
+  CUTAI_REFERENCE_KEY: Editdna longform validation/D40F1D43-7391-44D5-8D83-09CB62FBF397.MP4
   BENCHMARK_ID: video00-modal-${{ github.run_id }}-${{ github.run_attempt }}
 
 jobs:
@@ -115,7 +118,8 @@ jobs:
           # dependency before this): the local `modal run` wrapper now
           # checks/persists a durable S3 result marker itself -- see
           # "Run Modal full Video00 benchmark" below.
-          pip install --disable-pip-version-check --quiet modal boto3
+          # numpy: D-095 quality-ladder audio alignment on the runner (CPU, QA-only).
+          pip install --disable-pip-version-check --quiet modal boto3 'numpy>=1.26,<3'
 
       - name: Load base RunPod template (env source of truth only)
         shell: bash
@@ -409,6 +413,12 @@ jobs:
           done
           aws s3 cp "s3://$S3_BUCKET/$HUMAN_GOLD_KEY" artifact/human-gold-video00.mp4
           test -s artifact/human-gold-video00.mp4
+          # D-095: Cut.ai commercial baseline (QA-only) + the RAW source for the
+          # four-way quality ladder below.
+          aws s3 cp "s3://$S3_BUCKET/$CUTAI_REFERENCE_KEY" artifact/cutai-video00.mp4
+          test -s artifact/cutai-video00.mp4
+          aws s3 cp "s3://$S3_BUCKET/$SOURCE_KEY" artifact/raw-video00.mp4
+          test -s artifact/raw-video00.mp4
 
       - name: Print full canonical diagnostics
         if: always()
@@ -609,6 +619,40 @@ jobs:
           echo "--- Human Gold regression QA summary ---"
           jq '{qa_pass, passed_check_count, failed_check_count, selected_count}' artifact/video00-modal-regression-qa-report.json
 
+      - name: Video00 quality ladder (RAW vs Cut.ai vs Human Gold vs CutSell, D-095)
+        # QA-only, CPU-only, runs on the runner after the paid computation is
+        # already over. continue-on-error so a QA-tooling failure never masks
+        # the RAW result itself -- the failure is still printed loudly.
+        if: always()
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ ! -s artifact/video00-modal.json ] || [ ! -s artifact/cutai-video00.mp4 ] || [ ! -s artifact/human-gold-video00.mp4 ] || [ ! -s artifact/raw-video00.mp4 ]; then
+            echo "Quality ladder skipped: result.json or a reference video is missing."
+            exit 0
+          fi
+          sudo apt-get update -qq >/dev/null && sudo apt-get install -y -qq ffmpeg >/dev/null
+          extra=()
+          if [ -s artifact/video00-modal.mp4 ]; then
+            extra=(--engine-mp4 artifact/video00-modal.mp4)
+          elif [ -s artifact/video00-modal-DIAGNOSTIC-INVALIDATED.mp4 ]; then
+            extra=(--engine-mp4 artifact/video00-modal-DIAGNOSTIC-INVALIDATED.mp4)
+          fi
+          python benchmarks/video00_quality_ladder.py \
+            --raw artifact/raw-video00.mp4 \
+            --cutai artifact/cutai-video00.mp4 \
+            --gold artifact/human-gold-video00.mp4 \
+            --engine-json artifact/video00-modal.json \
+            "${extra[@]}" \
+            --out-json artifact/video00-modal-quality-ladder.json \
+            --out-md artifact/video00-modal-quality-ladder.md \
+            --out-csv artifact/video00-modal-quality-ladder.csv
+          echo "--- quality ladder summary ---"
+          jq '.summary' artifact/video00-modal-quality-ladder.json
+          echo "--- LEVEL_1 regions with rationale ---"
+          jq -c '.regions[] | select(.level=="LEVEL_1" and .scope=="selection") | {i:.region_index, raw:[.raw_start,.raw_end], dur:.duration_sec, kind, refinement, authority:.attributed_authority, why:.attribution_rationale, cands:[.cutsell_candidates[] | {s:.status, id:.clip_id, t:(.text[:80])}]}' artifact/video00-modal-quality-ladder.json
+
       - name: Upload validator reports
         if: always()
         uses: actions/upload-artifact@v4
@@ -618,6 +662,9 @@ jobs:
             artifact/video00-modal-selection-lock-report.json
             artifact/video00-modal-architecture-report.json
             artifact/video00-modal-regression-qa-report.json
+            artifact/video00-modal-quality-ladder.json
+            artifact/video00-modal-quality-ladder.md
+            artifact/video00-modal-quality-ladder.csv
           retention-days: 14
           if-no-files-found: warn
 

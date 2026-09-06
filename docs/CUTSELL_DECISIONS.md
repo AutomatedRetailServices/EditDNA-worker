@@ -10468,3 +10468,137 @@ C (IdeaClusterer pair budget for F11).
 ## Change rule
 
 When a new decision changes product behavior, update this file in the same development cycle. Do not silently redefine CutSell through code alone.
+## D-095 -- CANONICAL QUALITY LADDER: RAW -> CUT.AI PARITY -> HUMAN GOLD PARITY -> HUMAN WATCH+LISTEN
+
+**Product Owner directive (2026-09-06, binding):** CutSell is NOT yet
+consistently achieving the commercial baseline that Cut.ai already achieves on
+the same RAW video. The previous diagnosis ("almost Human Gold except for
+complete-realization competition") is INCORRECT as a characterization of the
+current state: there are TWO separate quality gaps, and the order of
+validation changes accordingly.
+
+**Canonical quality ladder (supersedes any "Human Gold only" validation order):**
+
+    RAW -> CUT.AI PARITY -> HUMAN GOLD PARITY -> HUMAN WATCH + LISTEN PASS
+
+Human Gold remains the ultimate editorial authority. Cut.ai is an intermediate
+COMMERCIAL BASELINE ORACLE.
+
+**QA references -- Video00 (QA-ONLY; never exposed to production Selection,
+Boundary, BestTake, retry grouping, rendering, LLM reasoning, prompts or any
+production decision):**
+- RAW: `Editdna longform validation/VIDEO-2026-07-30-09-18-03.mp4`
+- CUT.AI: `Editdna longform validation/D40F1D43-7391-44D5-8D83-09CB62FBF397.MP4`
+- HUMAN GOLD: `Editdna longform validation/5E01F214-A364-4F4B-8F25-D39B1E2B21D2.MP4`
+Registered in `docs/video00-reference-oracles.md` and `ops/cutai-reference-video00.txt`
+(merged from `cutsell/mobile-v1-clean`), and as `CUTAI_REFERENCE_KEY` in the
+Modal RAW workflow and the new quality-ladder workflow.
+
+**LEVEL 1 -- CUT.AI PARITY (fix first).** CutSell must first reach Cut.ai-level
+commercial Clean Cut behaviour: (1) recording-process removal (resets,
+abandoned starts, preparation, self-review, camera disengagement, obvious
+failed takes, word-search, recording-process speech, unusable pauses,
+fragments of failed attempts); (2) basic retry resolution (failed/weak attempt
+-> clean complete retry: the clean retry wins reliably; failed material is not
+preserved merely because it contains semantic atoms); (3) take quality
+(completeness, verbal cleanliness, visual performance, confidence,
+naturalness, continuity, narrative usefulness -- semantic coverage alone never
+decides); (4) visual cleanliness (no ugly entry frames, reset gestures,
+partial resets, clipped words/breaths, abandoned gestures, micro-fragments,
+bad-boundary discontinuity, residual process frames, malformed cuts); (5)
+basic continuity (a continuous edited story, not concatenated transcript
+fragments); (6) basic redundancy removal (obvious retries never both play).
+LEVEL-1 failures take priority over Human-Gold-only differences.
+
+**LEVEL 2 -- HUMAN GOLD PARITY (only after a stable Level-1 baseline):**
+complete-realization competition, editorial-slot resolution, minimum
+sufficient editorial set, required proposition vs supporting elaboration,
+whole-take winner bias, superior micro-composites, narrative rhythm, human
+sacrifice of unnecessary facts, superior boundary choices. The existing
+diagnosis stays canonical: GOOD + GOOD does not mean KEEP BOTH -- two complete
+realizations of one editorial slot COMPETE -> ONE WINNER; complementary
+incomplete pieces -> MINIMAL COMPOSITE. Do not weaken this rule. Video00:
+Human Gold conclusion ~ RAW 294.87-313.87 then CTA ~ 358.11-361.41; Cut.ai
+keeps an extra ~22.6 s conclusion/restatement before the CTA (Level-2
+failure). Pimples/hair-loss: Human Gold composes ~ RAW 185.47-189.97 +
+191.77-197.52 + 213.46-221.71 + 226.49-231.74 (clean subpart A + clean
+complementary subpart B + continuation -> COMPOSITE). Never fix duplicate
+conclusions by globally suppressing composites.
+
+**LEVEL 3 -- CutSell matches or exceeds Human Gold: DO NOT TOUCH.**
+
+**Required diagnostic (built in this entry):** `benchmarks/video00_quality_ladder.py`
+-- QA-only. Projects Cut.ai, Human Gold and (when present) the CutSell rendered
+MP4 back onto the RAW timeline by audio cross-correlation (reusing the
+`human_gold_decision_map_v2` aligner), partitions RAW into editorial regions on
+every boundary any edit or CutSell candidate draws, and records per region:
+RAW range, Cut.ai/Gold/CutSell keep, CutSell candidates with status, retry
+family, family winner, idea id, winner/composite/discarded role, resolver
+restoration, Freeze plan id/version, rendered coverage, and the LEVEL 1/2/3
+classification with a refinement (missing_delivery: no_candidate_segmented /
+lost_family_competition / take_choice_against_both_references /
+false_delete_outside_family; false_keep: redundant_realization_both_kept /
+ungrouped_retry_of_kept_idea / failed_or_process_material_retained /
+restored_by_realization_resolver) and the attributed authority
+(AttemptReconstructor/RecordingProcessRemoval, IdeaClusterer, BestTakeResolver,
+RealizationResolver, CompositeResolver/PreResolverCleanup, BoundaryEngine).
+Sub-tolerance (< 0.35 s) edge differences are reported in a separate boundary
+scope, never as selection-level LEVEL-1. Attribution is a heuristic read of the
+engine diagnostics and is labelled as such in the output. Tests:
+`tests/test_cutsell_video00_quality_ladder.py` (28), including a guard that no
+`cutsell_worker` module ever imports the ladder.
+
+**Traceability requirement (every selected final fragment):** RAW SOURCE ->
+ATTEMPT -> IDEA / EDITORIAL FUNCTION -> RETRY FAMILY -> CANDIDATES ->
+BEST-TAKE / COMPOSITE DECISION -> SELECTION -> SELECTION FREEZE -> BOUNDARY
+DECISION -> RENDER RANGE -> FINAL MP4. The ladder's `traceability` table carries
+this chain from the result.json diagnostics plus the rendered-MP4 alignment. If
+a bad fragment appears in the rendered video, the responsible authority is
+named there; never fix a Selection error in Boundary, never fix a Boundary
+error in Selection, never add a rescue layer for a grouping failure.
+
+**Workflows:** `.github/workflows/cutsell-video00-quality-ladder.yml` (CPU-only,
+no GPU, no Modal/RunPod dispatch, no paid compute; downloads RAW + both
+references + an already-persisted CutSell result/preview from S3 and prints the
+four-way table; default benchmark id `video00-modal-33995806350-1`, the latest
+VALID CutSell artifact) and a new ladder step in
+`cutsell-video00-modal-raw.yml` so every future RAW prints the same table.
+
+**Canonical quality states remain separate:** CODE FIXED != TESTS PASS != CI
+GREEN != CUT.AI PARITY != HUMAN GOLD PARITY != HUMAN WATCH + LISTEN PASS.
+THE PRODUCT IS THE RENDERED VIDEO, NOT THE TEST SUITE. Never declare success
+from duration similarity, selection counts, or green CI; never deliver a video
+before the actual rendered artifact passes the relevant QA gate.
+
+**Architecture warning (binding):** do NOT automatically add another cleanup /
+rescue / guard / integrity / reconciliation / post-selection / Boundary
+authority. If the Video00 comparison shows widespread LEVEL-1 failures across
+multiple independent regions, stop patching symptoms and produce an
+architecture-level diagnosis: whether the active path should be simplified
+toward Attempt Detection -> Recording Process Removal -> Retry Family Formation
+-> Clean Take Ranking -> COMMERCIAL CLEAN CUT -> Editorial Slot Refinement ->
+Composite Refinement -> Selection Freeze -> Boundary Polish -> Render/QC. No
+large rewrite yet: DIAGNOSE FIRST.
+
+**Branch integration (this entry):** `origin/cutsell/mobile-v1-clean` (28
+parallel commits: D-042 editorial-slot resolution, minimum sufficient editorial
+set, complete-realization competition, pair-budget diversification, Cut.ai
+registration) merged into `feature/runpod-pod-on-demand` at 37ecec5 with no
+conflicts; the complete-realization/editorial-slot fixes are preserved. Two
+integration fixes: `semantic_best_take_integrity._reject_incomplete_semantic_override`
+now returns the D-082 3-tuple (`incomplete_semantic_override_rejected`), and the
+merged test unpacks 3 values. PR #25 stays OPEN / DRAFT / UNMERGED; `main`
+untouched; nothing pushed to `cutsell/mobile-v1-clean` (its push trigger fires
+a paid RunPod RAW per commit).
+
+**Status:** CODE FIXED (framework + integration) / TESTS PASS -- compileall
+clean; merged editorial-slot suites 89/89; ladder 28/28; CleanCutBench 54/54
+LEGACY and 54/54 AUTHORITATIVE; full `tests/test_cutsell_*.py` glob 2073/2073
+(2031 D-094.3 baseline + 14 merged + 28 ladder); evidence pending from the CPU ladder run on the latest valid artifact (D-095.1).
+NEXT AUTOMATIC ACTION: push, let the CPU ladder workflow register and run on
+`video00-modal-33995806350-1`, read the LEVEL-1 table, attribute authorities,
+then fix the highest-level root cause (or produce the architecture diagnosis if
+Level-1 failures are widespread), tests, CI, ONE fresh Video00 RAW (authorized
+by this directive), inspect the MP4, repeat until Cut.ai parity.
+HUMAN ACTION REQUIRED: NO (within this directive) -- acceptance thresholds for
+"Cut.ai parity" are reported, not gated, until the Product Owner sets them.

@@ -41,6 +41,25 @@ When sources conflict:
 5. historical checkpoint;
 6. old conversations.
 
+## Canonical quality ladder (D-095, binding)
+`RAW → CUT.AI PARITY → HUMAN GOLD PARITY → HUMAN WATCH + LISTEN PASS`.
+Human Gold is the ultimate editorial authority; Cut.ai is the intermediate
+COMMERCIAL BASELINE oracle. Video00 QA references (QA-ONLY, never exposed to
+production Selection/Boundary/BestTake/grouping/render/LLM prompts):
+- RAW `Editdna longform validation/VIDEO-2026-07-30-09-18-03.mp4`
+- CUT.AI `Editdna longform validation/D40F1D43-7391-44D5-8D83-09CB62FBF397.MP4`
+- HUMAN GOLD `Editdna longform validation/5E01F214-A364-4F4B-8F25-D39B1E2B21D2.MP4`
+Every CutSell discrepancy is classified LEVEL 1 (worse than Cut.ai: fix first),
+LEVEL 2 (≈Cut.ai, Gold better: after Level 1 is stable) or LEVEL 3 (matches/
+exceeds Gold: do not touch) with `benchmarks/video00_quality_ladder.py` (four-way
+region map + traceability + attributed authority) -- run it via
+`.github/workflows/cutsell-video00-quality-ladder.yml` (CPU, no paid compute) or
+the ladder step of the Modal RAW workflow. Do not characterize CutSell as "almost
+Human Gold"; do not add another rescue/guard/reconciliation authority for a
+symptom; if Level-1 failures are widespread across independent regions, produce
+an architecture-level diagnosis first (D-095). THE PRODUCT IS THE RENDERED VIDEO,
+NOT THE TEST SUITE.
+
 ## Current mission
 **Flow B → Clean Cut Core V1 (idea-first).** See `docs/CUTSELL_DECISIONS.md` D-019/D-020.
 
@@ -172,6 +191,12 @@ On `feature/runpod-pod-on-demand` no unpaid CI workflow runs on push (the
 clean-worker CI runs on pull requests to `main`), so the offline qualification
 set (compileall, targeted suites, CleanCutBench both modes, full
 `tests/test_cutsell_*.py`, whole `tests/`) is the CI-equivalent gate.
+
+## Quality states (D-095)
+`CODE FIXED != TESTS PASS != CI GREEN != CUT.AI PARITY != HUMAN GOLD PARITY !=
+HUMAN WATCH + LISTEN PASS`. Never declare success from duration similarity,
+selection counts or green CI; never deliver a video before the rendered artifact
+passes the relevant QA gate.
 
 ## Status vocabulary
 While continuing, report compactly with this block:

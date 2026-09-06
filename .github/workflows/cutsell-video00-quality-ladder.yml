@@ -1,0 +1,239 @@
+name: CutSell Video00 Quality Ladder (RAW vs Cut.ai vs Human Gold vs CutSell)
+
+# D-095: CPU-only QA comparison -- NO GPU, NO Modal/RunPod dispatch, no paid
+# compute. Downloads the RAW source, the Cut.ai commercial-baseline reference,
+# the Human Gold reference and an ALREADY-PERSISTED CutSell result (result.json
+# + rendered/diagnostic preview when one exists) from S3, projects every edited
+# video back onto the RAW timeline by audio cross-correlation, and prints the
+# four-way region table with LEVEL_1 / LEVEL_2 / LEVEL_3 classification and the
+# CutSell authority attributed to each LEVEL_1 discrepancy
+# (benchmarks/video00_quality_ladder.py).
+#
+# Cut.ai and Human Gold are QA-only oracles (docs/video00-reference-oracles.md):
+# nothing here feeds production Selection/Boundary code; this workflow only
+# reads a result CutSell already produced.
+#
+# workflow_dispatch only. Default benchmark_id = the latest VALID CutSell
+# artifact at the time of D-095 (run 33995806350 on df3946e: first live
+# Freeze PASS + render).
+
+on:
+  # Registration + first evidence run: pushing this workflow file (or the
+  # ladder module) to the feature branch runs the CPU-only ladder on the
+  # default benchmark id. No GPU, no Modal/RunPod dispatch, no paid compute.
+  push:
+    branches:
+      - feature/runpod-pod-on-demand
+    paths:
+      - .github/workflows/cutsell-video00-quality-ladder.yml
+      - benchmarks/video00_quality_ladder.py
+  workflow_dispatch:
+    inputs:
+      benchmark_id:
+        description: "Persisted CutSell benchmark id (e.g. video00-modal-33995806350-1). Result key derives from modal_gpu_config.benchmark_result_s3_key; the rendered/diagnostic preview is looked up under cutsell/serverless/<benchmark_id>/."
+        required: false
+        default: "video00-modal-33995806350-1"
+        type: string
+      engine_result_s3_key:
+        description: "Optional explicit S3 key of the CutSell result.json (overrides benchmark_id derivation)."
+        required: false
+        default: ""
+        type: string
+      engine_mp4_s3_key:
+        description: "Optional explicit S3 key of the CutSell rendered MP4 to align back to RAW (overrides the preview lookup)."
+        required: false
+        default: ""
+        type: string
+
+permissions:
+  contents: read
+
+env:
+  SOURCE_KEY: Editdna longform validation/VIDEO-2026-07-30-09-18-03.mp4
+  # QA-only references -- never read by production Selection/Boundary code.
+  CUTAI_REFERENCE_KEY: Editdna longform validation/D40F1D43-7391-44D5-8D83-09CB62FBF397.MP4
+  HUMAN_GOLD_KEY: Editdna longform validation/5E01F214-A364-4F4B-8F25-D39B1E2B21D2.MP4
+
+jobs:
+  video00-quality-ladder:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      PYTHONPATH: ${{ github.workspace }}
+      RUNPOD_API_KEY: ${{ secrets.RUNPOD_API_KEY }}
+      AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+      AWS_REGION: ${{ secrets.AWS_REGION }}
+      S3_BUCKET: ${{ secrets.S3_BUCKET }}
+      BENCHMARK_ID: ${{ inputs.benchmark_id || 'video00-modal-33995806350-1' }}
+      ENGINE_RESULT_S3_KEY: ${{ inputs.engine_result_s3_key }}
+      ENGINE_MP4_S3_KEY: ${{ inputs.engine_mp4_s3_key }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install QA runtime (CPU only)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg jq
+          python -m pip install -q 'numpy>=1.26,<3' 'boto3>=1.34' pytest
+
+      - name: Validate quality-ladder and decision-map regressions
+        run: |
+          pytest -q tests/test_cutsell_video00_quality_ladder.py tests/test_cutsell_human_gold_decision_map.py tests/test_cutsell_human_gold_decision_map_v2.py
+
+      - name: Load missing S3 runtime secrets from safe RunPod template
+        shell: bash
+        run: |
+          set -euo pipefail
+          missing=0
+          for key in AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_REGION S3_BUCKET; do
+            [ -n "${!key:-}" ] || missing=1
+          done
+          [ "$missing" = "1" ] || exit 0
+          test -n "${RUNPOD_API_KEY:-}" || { echo 'S3 credentials unavailable and RUNPOD_API_KEY missing'; exit 3; }
+          curl --fail --silent --show-error \
+            --url "https://rest.runpod.io/v1/templates" \
+            --header "Authorization: Bearer $RUNPOD_API_KEY" \
+            --output templates.json
+          TEMPLATE=$(jq -c '[.[] | select(.name == "EditDNA-Worker-2")][0]' templates.json)
+          test "$TEMPLATE" != "null" || { echo 'EditDNA-Worker-2 template not found'; exit 4; }
+          for key in AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_REGION S3_BUCKET; do
+            if [ -z "${!key:-}" ]; then
+              value=$(printf '%s' "$TEMPLATE" | jq -r --arg key "$key" '.env[$key] // empty')
+              test -n "$value" || { echo "$key missing"; exit 5; }
+              echo "::add-mask::$value"
+              printf '%s=%s\n' "$key" "$value" >> "$GITHUB_ENV"
+            fi
+          done
+          rm -f templates.json
+
+      - name: Download RAW, Cut.ai, Human Gold and the persisted CutSell result
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p ladder
+          python - <<'PY'
+          import json, os, sys
+          import boto3
+          from botocore.exceptions import ClientError
+          from modal_gpu_config import benchmark_result_s3_key
+
+          s3 = boto3.client('s3', region_name=os.environ.get('AWS_REGION') or None)
+          bucket = os.environ['S3_BUCKET']
+
+          def fetch(key, dest, *, required=True):
+              try:
+                  s3.download_file(bucket, key, dest)
+              except ClientError as exc:
+                  if required:
+                      raise SystemExit(f'required object missing: {key}: {exc}')
+                  print(json.dumps({'optional_missing': key}))
+                  return False
+              print(json.dumps({'downloaded': key, 'bytes': os.path.getsize(dest)}))
+              return True
+
+          fetch(os.environ['SOURCE_KEY'], 'ladder/video00-raw.mp4')
+          fetch(os.environ['CUTAI_REFERENCE_KEY'], 'ladder/video00-cutai.mp4')
+          fetch(os.environ['HUMAN_GOLD_KEY'], 'ladder/video00-human-gold.mp4')
+
+          benchmark_id = (os.environ.get('BENCHMARK_ID') or '').strip()
+          result_key = (os.environ.get('ENGINE_RESULT_S3_KEY') or '').strip()
+          if not result_key:
+              # The durable key holds the COMPACT run_op() summary (D-056.1); the full
+              # result.json (selected/discarded with start/end + diagnostics) lives at its
+              # result_uri. Resolve through the summary first, then fall back to the
+              # serverless_handler prefix layout.
+              summary_key = benchmark_result_s3_key(benchmark_id)
+              if fetch(summary_key, 'ladder/cutsell-summary.json', required=False):
+                  summary = json.load(open('ladder/cutsell-summary.json', encoding='utf-8'))
+                  if isinstance(summary.get('selected'), list):
+                      result_key = summary_key
+                  else:
+                      uri = str(summary.get('result_uri') or '')
+                      if uri.startswith('s3://'):
+                          result_key = uri.split('/', 3)[3]
+              if not result_key:
+                  result_key = f'cutsell/serverless/{benchmark_id}/result.json'
+          fetch(result_key, 'ladder/cutsell-result.json')
+          assert isinstance(json.load(open('ladder/cutsell-result.json', encoding='utf-8')).get('selected'), list), 'result.json has no selected list'
+
+          mp4_key = (os.environ.get('ENGINE_MP4_S3_KEY') or '').strip()
+          have_mp4 = False
+          if mp4_key:
+              have_mp4 = fetch(mp4_key, 'ladder/cutsell-rendered.mp4', required=False)
+          else:
+              # serverless_handler._focused uploads a QC-PASS candidate as preview.mp4 and an
+              # invalidated one ONLY as diagnostic-invalidated-preview.mp4 (D-036 item 6).
+              for candidate in (f'cutsell/serverless/{benchmark_id}/preview.mp4',
+                                f'cutsell/serverless/{benchmark_id}/diagnostic-invalidated-preview.mp4'):
+                  if fetch(candidate, 'ladder/cutsell-rendered.mp4', required=False):
+                      have_mp4 = True
+                      mp4_key = candidate
+                      break
+          with open(os.environ['GITHUB_ENV'], 'a', encoding='utf-8') as handle:
+              handle.write(f'LADDER_RESULT_KEY={result_key}\n')
+              handle.write(f'LADDER_MP4_KEY={mp4_key if have_mp4 else ""}\n')
+          PY
+
+      - name: Verify source identities and print reference durations
+        shell: bash
+        run: |
+          set -euo pipefail
+          for f in ladder/video00-raw.mp4 ladder/video00-cutai.mp4 ladder/video00-human-gold.mp4; do
+            d=$(ffprobe -v error -show_entries format=duration -of default=nk=1:nw=1 "$f")
+            echo "$f duration_sec=$d"
+          done
+          if [ -s ladder/cutsell-rendered.mp4 ]; then
+            echo "ladder/cutsell-rendered.mp4 duration_sec=$(ffprobe -v error -show_entries format=duration -of default=nk=1:nw=1 ladder/cutsell-rendered.mp4)"
+          fi
+          raw_dur=$(ffprobe -v error -show_entries format=duration -of default=nk=1:nw=1 ladder/video00-raw.mp4)
+          python - "$raw_dur" <<'PY'
+          import sys
+          raw = float(sys.argv[1])
+          assert 350 < raw < 380, f"unexpected RAW duration {raw}"
+          PY
+          echo "--- CutSell result identity ---"
+          jq '{benchmark_id: (.benchmark_id // null), delivery_status: (.delivery_status // null), deliverable: (.deliverable // null), selected_count: ((.selected // []) | length), discarded_count: ((.discarded // []) | length), freeze: (.diagnostics.selection_boundary_contract // null)}' ladder/cutsell-result.json
+
+      - name: Build the four-way quality ladder
+        shell: bash
+        run: |
+          set -euo pipefail
+          extra=()
+          if [ -s ladder/cutsell-rendered.mp4 ]; then
+            extra=(--engine-mp4 ladder/cutsell-rendered.mp4)
+          fi
+          python benchmarks/video00_quality_ladder.py \
+            --raw ladder/video00-raw.mp4 \
+            --cutai ladder/video00-cutai.mp4 \
+            --gold ladder/video00-human-gold.mp4 \
+            --engine-json ladder/cutsell-result.json \
+            "${extra[@]}" \
+            --out-json ladder/video00-quality-ladder.json \
+            --out-md ladder/video00-quality-ladder.md \
+            --out-csv ladder/video00-quality-ladder.csv
+          echo "--- summary (json) ---"
+          jq '.summary' ladder/video00-quality-ladder.json
+          echo "--- reference chunks (Cut.ai -> RAW) ---"
+          jq -c '.reference_chunks.cutai[] | {i:.index, raw:[.raw_start,.raw_end], edit:[.edit_start,.edit_end], conf:.alignment_confidence}' ladder/video00-quality-ladder.json
+          echo "--- reference chunks (Human Gold -> RAW) ---"
+          jq -c '.reference_chunks.gold[] | {i:.index, raw:[.raw_start,.raw_end], edit:[.edit_start,.edit_end], conf:.alignment_confidence}' ladder/video00-quality-ladder.json
+          echo "--- LEVEL_1 regions with rationale ---"
+          jq -c '.regions[] | select(.level=="LEVEL_1" and .scope=="selection") | {i:.region_index, raw:[.raw_start,.raw_end], dur:.duration_sec, kind, refinement, authority:.attributed_authority, why:.attribution_rationale, cands:[.cutsell_candidates[] | {s:.status, id:.clip_id, t:(.text[:80])}]}' ladder/video00-quality-ladder.json
+
+      - name: Upload quality ladder evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cutsell-video00-quality-ladder-${{ github.run_id }}
+          path: |
+            ladder/video00-quality-ladder.json
+            ladder/video00-quality-ladder.md
+            ladder/video00-quality-ladder.csv
+            ladder/cutsell-result.json
+          retention-days: 30
+          if-no-files-found: warn

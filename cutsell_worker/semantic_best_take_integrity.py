@@ -260,7 +260,10 @@ def install_semantic_best_take_integrity() -> None:
             selected,
             preferred,
         ):
-            return local_selected_clip_id, None
+            # D-095 merge integration: the D-082 contract is a 3-tuple
+            # (selected, preferred, reason); the rule keeps the local winner
+            # and names why the semantic override was refused.
+            return local_selected_clip_id, None, "incomplete_semantic_override_rejected"
 
         critical_peer = _prefer_complete_peer_with_preserved_critical_facts(
             members,
