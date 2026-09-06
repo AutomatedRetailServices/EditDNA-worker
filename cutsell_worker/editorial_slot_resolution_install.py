@@ -23,7 +23,7 @@ _SLOT_RULES = (
     "Infer audience-facing EDITORIAL FUNCTION before literal wording differences (for example hook, setup, diagnosis, symptom, example, reflection, conclusion, CTA).",
     "Two complete deliveries that perform the same editorial function and communicate the same core intended message are competing realizations of one retry family even when wording differs or one contains extra supporting detail.",
     "GOOD + GOOD does not imply keeping both. A complete realization may make another complete realization redundant.",
-    "Distinguish a genuinely new REQUIRED STORY PROPOSITION from SUPPORTING, RESTATED, or ELABORATIVE DETAIL. Unique supporting wording does not by itself create a separate idea.",
+    "Distinguish REQUIRED PROPOSITIONS from SUPPORTING, RESTATED, or ELABORATIVE DETAIL. A genuinely new required story proposition may be a separate idea; unique supporting wording does not by itself create one.",
     "Use a composite only when no single realization is sufficient and complementary clean pieces are genuinely required to create one coherent complete realization.",
     "A later conclusion/restatement after an already complete conclusion is normally a competing realization of the CONCLUSION slot unless it advances the story with a genuinely different required proposition.",
     "Do not collapse genuinely complementary micro-deliveries: incomplete pieces that advance different necessary parts of one message may remain continuation/composite material.",
