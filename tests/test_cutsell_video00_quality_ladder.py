@@ -440,3 +440,31 @@ def test_d089_placement_units_mark_member_clips_as_restored():
     report = build_region_map(raw_duration_sec=30.0, cutai=cutai, gold=gold, engine_result=engine)
     r = _region_at(report, 15, 20)
     assert (r["refinement"], r["attributed_authority"]) == (RESTORED_BY_RESOLVER, AUTH_REALIZATION)
+
+
+def test_physical_engine_result_uses_rendered_durations_for_trailing_trims():
+    from benchmarks.video00_quality_ladder import physical_engine_result
+    engine = _engine(selected=[("a", 0, 10, "hook"), ("b", 20, 30, "next")])
+    rv = {"render_duration_sec": 19.0, "fragments": [
+        {"clip_id": "a", "raw_start": 0.0, "raw_end": 10.0, "render_start": 0.0, "found": True, "physical_raw_end": 9.2},
+        {"clip_id": "b", "raw_start": 20.0, "raw_end": 30.0, "render_start": 9.2, "found": True, "physical_raw_end": 29.8},
+    ]}
+    physical = physical_engine_result(engine, rv)
+    assert [(r["clip_id"], r["start"], r["end"]) for r in physical["selected"]] == [("a", 0, 9.2), ("b", 20, 29.8)]
+    assert physical_engine_result(engine, None) is None
+
+
+def test_verify_render_reports_rendered_duration_and_trailing_trim(tmp_path):
+    pytest.importorskip("numpy")
+    raw, render = _synth_media(tmp_path)
+    # render = raw[10,14] + raw[2,6]; declare the second fragment one second longer than rendered.
+    selected = [
+        {"clip_id": "late", "start": 10.0, "end": 14.0, "text": "y"},
+        {"clip_id": "early", "start": 2.0, "end": 7.0, "text": "x"},
+    ]
+    rv = verify_render_against_plan(raw, render, selected, template_sec=3.0)
+    by_id = {f["clip_id"]: f for f in rv["fragments"]}
+    assert abs(by_id["late"]["rendered_duration"] - 4.0) < 0.2
+    assert abs(by_id["early"]["rendered_duration"] - 4.0) < 0.2
+    assert abs(by_id["early"]["trailing_trim_sec"] - 1.0) < 0.2
+    assert abs(by_id["early"]["physical_raw_end"] - 6.0) < 0.2

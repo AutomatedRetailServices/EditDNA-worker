@@ -753,6 +753,15 @@ def render_markdown(report: dict, *, max_text: int = 70) -> str:
             f"missing: {rv['missing_fragments'] or 'none'}",
             "",
         ]
+    ps = report.get("physical_summary")
+    if ps:
+        lines += [
+            f"FINAL MP4 (physical spans from render verification): LEVEL_1 {ps['by_level'][LEVEL_1]['selection_count']} regions / "
+            f"{ps['by_level'][LEVEL_1]['selection_seconds']} s selection + {ps['by_level'][LEVEL_1]['boundary_count']} / {ps['by_level'][LEVEL_1]['boundary_seconds']} s boundary; "
+            f"CutSell physical keep {ps['durations_sec']['cutsell_keep']} s; F1 vs Cut.ai {ps['selection_parity']['cutsell_vs_cutai']['f1']} / vs Gold {ps['selection_parity']['cutsell_vs_gold']['f1']}; "
+            "LEVEL_1 by authority: " + (", ".join(f"{k}: {v['count']} / {v['seconds']} s" for k, v in sorted(ps['level1_by_authority'].items(), key=lambda kv: -kv[1]['seconds'])) or "none"),
+            "",
+        ]
     lines += [
         "## Regions (selection scope)",
         "",
@@ -879,6 +888,18 @@ def verify_render_against_plan(
     found = [f for f in fragments if f["found"]]
     by_render = sorted(found, key=lambda f: f["render_start"])
     inversions = sum(1 for x, y in zip(by_render, by_render[1:]) if y["raw_start"] < x["raw_start"])
+    # Physical truth per fragment: the renderer may trim a fragment's trailing
+    # silence (render.tighten_trailing_silence) or Boundary repair may trim an
+    # edge, so the rendered duration is the distance to the next located
+    # fragment (or to the end of the render). The implied physical RAW span
+    # is raw_start .. raw_start + rendered_duration (trailing trims only).
+    for current, following in zip(by_render, by_render[1:] + [None]):
+        next_start = following["render_start"] if following is not None else render_duration
+        rendered = max(0.0, float(next_start) - float(current["render_start"]))
+        planned = float(current["raw_end"]) - float(current["raw_start"])
+        current["rendered_duration"] = _round(rendered)
+        current["trailing_trim_sec"] = _round(max(0.0, planned - rendered))
+        current["physical_raw_end"] = _round(min(float(current["raw_end"]), float(current["raw_start"]) + rendered))
     return {
         "render_duration_sec": _round(render_duration),
         "fragment_count": len(fragments),
@@ -888,6 +909,27 @@ def verify_render_against_plan(
         "render_order": [f["clip_id"] for f in by_render],
         "fragments": fragments,
     }
+
+
+def physical_engine_result(engine_result: dict, render_verification: dict | None) -> dict | None:
+    """A copy of ``engine_result`` whose selected spans are the PHYSICAL
+    (rendered) spans implied by render verification -- the final-MP4 truth
+    the Cut.ai parity ladder is ultimately about. None when unavailable."""
+    if not render_verification:
+        return None
+    by_clip = {f["clip_id"]: f for f in render_verification.get("fragments", ()) if f.get("found") and f.get("physical_raw_end") is not None}
+    if not by_clip:
+        return None
+    selected = []
+    for item in engine_result.get("selected") or ():
+        row = dict(item or {})
+        match = by_clip.get(str(row.get("clip_id") or ""))
+        if match is not None:
+            row["end"] = float(match["physical_raw_end"])
+        selected.append(row)
+    physical = dict(engine_result)
+    physical["selected"] = selected
+    return physical
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -925,6 +967,15 @@ def main(argv: Sequence[str] | None = None) -> int:
         rendered=rendered, boundary_tolerance_sec=args.boundary_tolerance_sec,
         render_verification=render_verification,
     )
+    physical = physical_engine_result(engine_result, render_verification)
+    if physical is not None:
+        physical_report = build_region_map(
+            raw_duration_sec=raw_duration, cutai=cutai, gold=gold, engine_result=physical,
+            rendered=rendered, boundary_tolerance_sec=args.boundary_tolerance_sec,
+            render_verification=render_verification,
+        )
+        report["physical_summary"] = physical_report["summary"]
+        report["physical_regions"] = physical_report["regions"]
     report["inputs"] = {"raw": str(args.raw), "cutai": str(args.cutai), "gold": str(args.gold),
                         "engine_json": str(args.engine_json), "engine_mp4": args.engine_mp4}
     report["reference_chunks"] = {"cutai": list(cutai.chunks), "gold": list(gold.chunks),

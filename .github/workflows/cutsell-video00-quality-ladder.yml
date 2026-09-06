@@ -228,6 +228,11 @@ jobs:
           jq -c '.regions[] | select(.level=="LEVEL_1" and .scope=="selection") | {i:.region_index, raw:[.raw_start,.raw_end], dur:.duration_sec, kind, refinement, authority:.attributed_authority, why:.attribution_rationale, cands:[.cutsell_candidates[] | {s:.status, id:.clip_id, t:(.text[:80])}]}' ladder/video00-quality-ladder.json
           echo "--- render verification (frozen plan -> final MP4) ---"
           jq '.render_verification | if . == null then "absent" else {render_duration_sec, fragment_count, found_count, missing_fragments, source_order_inversions_in_render, render_order} end' ladder/video00-quality-ladder.json
+          jq -c '.render_verification.fragments[]? | {id:.clip_id, raw:[.raw_start,.raw_end], render_start, rendered_duration, trailing_trim_sec, physical_raw_end, corr:.correlation, found}' ladder/video00-quality-ladder.json
+          echo "--- FINAL MP4 physical summary (rendered spans) ---"
+          jq '.physical_summary // "absent" | if type=="object" then {by_level, level1_by_authority, cutai_parity, durations_sec, selection_parity} else . end' ladder/video00-quality-ladder.json
+          echo "--- FINAL MP4 physical LEVEL_1 regions ---"
+          jq -c '(.physical_regions // [])[] | select(.level=="LEVEL_1" and .scope=="selection") | {i:.region_index, raw:[.raw_start,.raw_end], dur:.duration_sec, kind, refinement, authority:.attributed_authority, cands:[.cutsell_candidates[] | {s:.status, id:.clip_id, t:(.text[:60])}]}' ladder/video00-quality-ladder.json
 
       - name: Engine forensic evidence for authority attribution (read-only)
         shell: bash
