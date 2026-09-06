@@ -186,8 +186,13 @@ RAW 34045158712 PROVED both on the selection (abandoned stomach attempt
 contested and discarded; "¡Vamos!" dropped) but the drop was misread as an
 incomplete story and the clean MP4 refused, and an import-time coverage-first
 wrapper was found re-ordering R9's pair budget -- both fixed in D-097.9 (the
-no-usable basis; one pair-order authority); the next authorised RAW must
-prove the deliverable MP4; D-096 remains the source of
+no-usable basis; one pair-order authority); RAW 34047064840 then DELIVERED
+the MP4 (pending human Watch+Listen) with R12 proven on the selection, and
+D-097.10 fixed the post-render QA layers that read pre-render boundaries
+(R14: the perceptual reviewer and the ladder now measure the segments as
+rendered; the physical Level-1 view is the headline); the stomach aside is
+recorded as escalation A (arbiter inconsistency vs the D-085 fail-closed
+probe); the next authorised RAW must prove R14; D-096 remains the source of
 truth, its Appendix B records implementation status)
 (read its LAST VERIFIED RESULT / NEXT AUTOMATIC ACTION lines). The handoff
 document's `CURRENT LIVE BLOCKER` / `EXACT NEXT ACTION` sections are historical

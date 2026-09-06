@@ -571,6 +571,18 @@ Binding validation order (Product Owner, 2026-09-06):
   escalation-A families: the stomach aside kept on a run-to-run change of the
   multimodal confirmation kind (R13, needs the next forensic). Next: ONE RAW.
   Full entry: `docs/CUTSELL_DECISIONS.md` D-097.9.
+- D-097.10 (2026-09-06): RAW 34047064840 = Freeze PASS, QC PASS, DELIVERABLE
+  MP4 (pending human Watch+Listen). R12 proven: the arbiter budget spent in
+  strict score order, all three stomach pairs asked. The aside still plays:
+  the arbiter answered same/same/not-same on the triple and the D-085
+  fail-closed probe split the clean delivery off (F3b would not apply:
+  0.85 < 0.90) -- escalation A with evidence, not an engineering fix. R14: the
+  perceptual reviewer and the ladder read PRE-render segment ends while the
+  renderer's recorded trailing trims had already cut 9 of 13 flagged "exit
+  debris" windows; both now read the segments as rendered and the workflows
+  print the FINAL-MP4 (physical) Level-1 view as the headline (49.98 s this
+  run; the selection-plan view was 56.58 s). Next: ONE RAW. Full entry:
+  `docs/CUTSELL_DECISIONS.md` D-097.10.
 # HISTORICAL CUTSELL.AI 11 CONTINUITY
 
 A trusted CutSell.ai 11 recovery checkpoint is:

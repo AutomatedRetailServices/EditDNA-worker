@@ -225,6 +225,11 @@ jobs:
           echo "--- reference chunks (Human Gold -> RAW) ---"
           jq -c '.reference_chunks.gold[] | {i:.index, raw:[.raw_start,.raw_end], edit:[.edit_start,.edit_end], conf:.alignment_confidence}' ladder/video00-quality-ladder.json
           echo "--- LEVEL_1 regions with rationale ---"
+          echo "--- FINAL MP4 (physical) summary: the Level-1 headline (D-097.10 R14; falls back to the selection summary when no physical view exists) ---"
+          jq '{physical_source: (.physical_source // null), summary: (.physical_summary // .summary)}' ladder/video00-quality-ladder.json
+          echo "--- FINAL MP4 (physical) LEVEL_1 regions with rationale ---"
+          jq -c '(.physical_regions // .regions)[] | select(.level=="LEVEL_1" and .scope=="selection") | {i:.region_index, raw:[.raw_start,.raw_end], dur:.duration_sec, kind, refinement, authority:.attributed_authority, why:.attribution_rationale, cands:[.cutsell_candidates[] | {s:.status, id:.clip_id, t:(.text[:80])}]}' ladder/video00-quality-ladder.json
+          echo "--- selection-plan LEVEL_1 regions (pre-render spans; secondary) ---"
           jq -c '.regions[] | select(.level=="LEVEL_1" and .scope=="selection") | {i:.region_index, raw:[.raw_start,.raw_end], dur:.duration_sec, kind, refinement, authority:.attributed_authority, why:.attribution_rationale, cands:[.cutsell_candidates[] | {s:.status, id:.clip_id, t:(.text[:80])}]}' ladder/video00-quality-ladder.json
           echo "--- render verification (frozen plan -> final MP4) ---"
           jq '.render_verification | if . == null then "absent" else {render_duration_sec, fragment_count, found_count, missing_fragments, source_order_inversions_in_render, render_order} end' ladder/video00-quality-ladder.json

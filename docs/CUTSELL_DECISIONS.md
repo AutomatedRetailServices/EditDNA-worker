@@ -12170,3 +12170,126 @@ tie preference, 5 of 6 runs; complementary "Síntomas" pair), F (watch +
 listen: runs 34040848026, 34042123557, 34043967265; 34045158712's MP4 is a
 review artifact), B (the D-097.D polarity micro-fragment "No" 0.8 s), B/A
 (waiver narrowing), F3b.
+
+
+## D-097.10 -- RAW 34047064840 (head 6fc880d): Freeze PASS, QC PASS, DELIVERABLE MP4 (R11 gate open, R12 PROVEN on video: the budget spent in score order and every stomach pair asked); the arbiter's own inconsistent verdicts + the D-085 fail-closed probe keep the stomach aside (R13, recorded); the post-render QA layers were reading PRE-render boundaries (R14, fixed)
+
+**RAW COMPLETE (Modal run 34047064840, head `6fc880d`, 2026-09-06).**
+Worker ok, `hybrid_editorial = provider_complete`, Freeze PASSED, technical
+QC PASS on attempt 1 (0 findings, 16 renderer trailing trims), plan rendered
+155.1 s (physical keep 157.4 s), `story_completeness = complete`,
+`delivery_status = DELIVERABLE_PENDING_HUMAN_WATCH_LISTEN:perceptual=FAIL`
+(advisory), `render_verification` 23/25 fragments located, 1 source-order
+inversion (a resolver placement), missing `clip_f08c9e` ("La biopsia
+confirmó ...") and `clip_913297` (correlation estimate only). Final KEEP
+carries the clean gynaecologist retry, the diagnosis sentence and the clean
+gastritis delivery; the abandoned stomach attempt is discarded.
+
+**Per-fix MP4 report -- D-097.9 R11 (no-usable basis): gate open, path not
+exercised.** This run produced NO corroborated `bts` singleton (the
+"¡Vamos!" take of 34045158712 was not segmented as a take this time;
+`no_usable_realization_bts_singleton_ids: []`), so the R11 branch ran but
+had nothing to classify. The delivery gate no longer refused the clean MP4;
+the bts-singleton -> `complete` path is proven by tests only until a run
+carries one again.
+
+**Per-fix MP4 report -- D-097.9 R12 (one pair-order authority): PROVEN on
+the selection.** `pair_order_authority = take_grouping_provider._rank_
+candidate_pairs:content_overlap_v2+group_cap`; `ranked_pair_budget` = 14
+pairs in strictly descending priority (0.914 -> 0.275), no cap deferral,
+every asked pair carrying content or restart evidence (34045158712 under the
+retired wrapper: 0.019 / 0.032 zero-evidence neighbours inside the budget).
+All three stomach pairs were asked: abandoned<->clean 0.516 (5th),
+abandoned<->aside 0.399 (9th), aside<->clean 0.316 (12th).
+
+**R13 -- the stomach aside is now a BestTakeResolver item, owned by the
+arbiter's verdicts and the D-085 fail-closed probe (recorded, not fixed).**
+Verdicts: abandoned<->aside SAME 0.90 ("attempts to mention stomach problems
+in 2023"), aside<->clean SAME 0.85 ("stomach issues leading to medical
+tests"), abandoned<->clean NOT-same 0.85 ("second text provides specific
+gastritis diagnosis missing in the first" -- the incomplete-attempt reason
+the prompt already tells it to ignore). Union-find formed
+{abandoned, aside, clean}; the D-085 component-cohesion probe ("abandoned ||
+aside" vs clean) declined at 0.85 (`component_cohesion_declined`; the bridge
+floor is 0.90 anyway) and the clean delivery was split off (`grouping_
+safety_splits`). Family {abandoned `failed` 0.9, aside `alternate` 0.7 with
+`retry_setup` + `dense_physical_reset:4` corroboration} -> the aside won
+(`critical_coverage_dominance`, the "2023" atom); the clean delivery is a
+kept singleton. Both references remove the aside: 5.94 s Level-1 (region
+97). F3b (D-094.2, OFF by PO decision) would NOT apply either: it needs
+every cross pair at >= 0.90 and one pair was rejected. Deterministic restart
+evidence cannot claim the pair (3 shared opening tokens of 4 required;
+remainder overlap 0.33 < 0.40). The split is WHEN-UNCERTAIN-KEEP working as
+designed on an inconsistent arbiter; the remaining levers are the arbiter
+prompt/policy (D-042 editorial-slot injection) or the D-085 floor -- both
+semantic-authority policy: escalation A, with this run's evidence.
+
+**R14 -- the post-render QA layers read PRE-render boundaries.** Forensic
+trace of two "loose exit" clips: `clip_1b34ea` selection end 23.28,
+renderer `tighten_trailing_silence` -> 22.424, both references end 22.49;
+`clip_8ac907` 46.42 -> 45.254, references 45.37; `clip_aed103` 11.89 ->
+11.036, references 11.05. The MP4 already ends where the references do.
+(1) The perceptual reviewer (`_perceptual_review`) rebuilt the segments
+from the QC attempt's `input_boundary_state` -- pre-tighten ends -- so
+`reset_debris_at_edges_source_evidence` mapped source reset events onto
+material that is not in the file: 9 of its 13 exit findings lie entirely
+after the rendered end (e.g. `clip_1b34ea` hand reset 22.869-22.935 vs
+rendered end 22.424); perceptual FAIL, 22 BoundaryEngine routings, every
+run. Fix: `universal_clean_cut_validation.segments_as_rendered` applies the
+attempt's RECORDED `renderer_trailing_trims` (clip_id + render_fragment_id
+-> `tightened_end`; never lengthens, never empties) before
+`review_rendered_candidate`; the review records `segments_as_rendered` and
+`renderer_trims_applied`. The 4 real exit findings and the 7 entry findings
+(no entry tightening exists: `audio_entry_trim_count 0`) remain.
+(2) The ladder's physical view (`physical_engine_result`) depended on MP4
+render verification alone (a correlation estimate; 2 fragments missing this
+run); it now uses the renderer's recorded trims first (exact), verification
+for the rest, and reports `physical_source`. (3) The Modal RAW and CPU
+ladder workflows print the FINAL-MP4 (physical) summary and Level-1 rows as
+the headline, the selection-plan rows as secondary. The per-run Level-1
+numbers read in D-097.4-D-097.9 were the selection-plan view; the physical
+view (already in the markdown "FINAL MP4" line, and what the CLEAN RAW gate
+reads) is the canonical one from here on.
+
+**Ladder (QA-only, four-way), PHYSICAL (final MP4) view:** LEVEL_1 21
+regions / 49.98 s selection + 18 / 3.26 s boundary; F1 vs Cut.ai 0.8021 /
+vs Gold 0.7553; by authority: BestTakeResolver 6 / 33.52 s (pimples family
+20.1 s + "Síntomas" pair 7.8 s -- escalation A; the stomach aside 5.94 s --
+R13), CompositeResolver/PreResolverCleanup 2 / 6.59 s (the pimples take
+"También me salían espinillas. Era como un rush, una alergia." deleted by
+D-081 `semantic_failed_plus_local_performance`, both references keep it --
+a semantic-label + multimodal decision, recorded), BoundaryEngine 22 /
+5.67 s, AttemptReconstructor/RecordingProcessRemoval 6 / 4.59 s,
+IdeaClusterer 3 / 2.87 s. Selection-plan view for continuity: 28 / 56.58 s.
+Physical Level-1 seconds by run: 34043967265 53.36 -> 34045158712 49.94 ->
+34047064840 49.98.
+
+Tests: `tests/test_cutsell_d097_10_segments_as_rendered_and_physical_
+ladder.py` (8): recorded trims shorten the reviewed segments; a trim never
+lengthens/empties and matches fragments; exit debris after the rendered end
+is not a finding (the defect shape reproduced first); debris inside the
+rendered end still is; last-attempt-only recorded ends; physical fallback
+without an MP4; recorded trims outrank the correlation estimate and cover
+missing fragments; no physical view without any render truth. Ladder,
+perceptual/gate, harness live-render-QC and D-097.2 suites: 81/81.
+
+**Offline qualification:** compileall clean; CleanCutBench both files;
+full `tests/test_cutsell_*.py` glob 2287/2287.
+
+**LAST VERIFIED RESULT:** RAW 34047064840 = FREEZE PASS, QC PASS,
+DELIVERABLE MP4 (pending human Watch+Listen), R12 PROVEN on the selection,
+R11 gate open (path unexercised), physical Level-1 49.98 s; R14 CODE FIXED
+/ TESTS PASS.
+**NEXT AUTOMATIC ACTION:** commit + push; ONE authorised Modal RAW on the
+new head -- expected: perceptual reset-debris findings drop to the real
+ones (entries + the 4 inside exits), `renderer_trims_applied` > 0, the
+physical headline printed with `physical_source`; per-fix report as
+D-097.11; then the next Level-1 item that is not escalation A (the
+CompositeResolver/PreResolverCleanup pimples delete, the entry-edge
+debris the perceptual reviewer still flags).
+**HUMAN ACTION REQUIRED:** YES, non-blocking -- A (pimples later-attempt
+tie preference; the complementary "Síntomas" pair; the stomach aside: the
+arbiter's inconsistent verdicts vs the D-085 fail-closed probe / F3b), F
+(watch + listen: deliverable MP4s of runs 34040848026, 34042123557,
+34043967265, 34047064840), B (D-097.D polarity micro-fragment "No"), B/A
+(waiver narrowing).

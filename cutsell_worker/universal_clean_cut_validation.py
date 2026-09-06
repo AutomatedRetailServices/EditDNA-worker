@@ -72,6 +72,40 @@ def _render_validation_preview(
     return qc_result.output_path, None, qc_result
 
 
+def segments_as_rendered(segments, renderer_trailing_trims) -> tuple[tuple, int]:
+    """D-097.10 (R14): apply the renderer's RECORDED trailing trims (one row
+    per segment whose exit `tighten_trailing_silence` moved: `clip_id`,
+    optional `render_fragment_id`, `tightened_end`) to the QC attempt's
+    segment state, so every post-render reviewer reads the exact source
+    spans that exist in the file -- the recorded truth, never a re-probe. A
+    trim is applied only when it shortens the segment and leaves it a
+    positive span; returns the segments and the number of trims applied."""
+    by_key: dict[tuple[str, str | None], float] = {}
+    for row in renderer_trailing_trims or ():
+        if not isinstance(row, dict):
+            continue
+        try:
+            tightened = float(row.get("tightened_end"))
+        except (TypeError, ValueError):
+            continue
+        by_key[(str(row.get("clip_id") or ""), row.get("render_fragment_id") or None)] = tightened
+    if not by_key:
+        return tuple(segments), 0
+    out = []
+    applied = 0
+    for seg in segments:
+        fragment = getattr(seg, "render_fragment_id", None) or None
+        tightened = by_key.get((seg.clip_id, fragment))
+        if tightened is None and fragment is not None:
+            tightened = by_key.get((seg.clip_id, None))
+        if tightened is not None and float(seg.start) < tightened < float(seg.end):
+            out.append(replace(seg, end=tightened))
+            applied += 1
+        else:
+            out.append(seg)
+    return tuple(out), applied
+
+
 def _perceptual_review(
     preview_path: str | None,
     draft,
@@ -99,19 +133,32 @@ def _perceptual_review(
     if not media_path or not os.path.exists(media_path):
         return None
     artifact_kind = "deliverable_candidate" if deliverable else "diagnostic_invalidated"
+    applied_trims = 0
     try:
-        final_state = qc_result.attempts[-1].input_boundary_state if qc_result.attempts else ()
+        last_attempt = qc_result.attempts[-1] if qc_result.attempts else None
+        final_state = last_attempt.input_boundary_state if last_attempt is not None else ()
         plan = build_render_plan(draft, local_paths)
         by_id = {s.clip_id: s for s in plan}
         segments = tuple(
             replace(by_id[row["clip_id"]], start=float(row["start"]), end=float(row["end"]))
             for row in final_state if row.get("clip_id") in by_id
         ) or plan
+        # D-097.10 (R14): review the segments AS RENDERED. The renderer's
+        # last mechanical op (`tighten_trailing_silence`, recorded per
+        # segment in the attempt's `renderer_trailing_trims`) moved 16 exits
+        # on RAW 34047064840 by 0.24-2.10 s; the reviewer mapped source
+        # reset events onto the PRE-tighten ends, so 9 of 13 "exit debris"
+        # findings pointed at material that is not in the MP4 at all.
+        segments, applied_trims = segments_as_rendered(
+            segments, getattr(last_attempt, "renderer_trailing_trims", ()) if last_attempt is not None else (),
+        )
         windows = segment_output_windows(segments)
         review = review_rendered_candidate(media_path, draft, segments, windows).as_dict()
     except Exception as exc:  # noqa: BLE001 -- ERROR is a reported status, never a silent pass
         review = error_review(f"perceptual_review_failed: {exc}").as_dict()
     review["artifact_kind"] = artifact_kind
+    review["segments_as_rendered"] = True
+    review["renderer_trims_applied"] = applied_trims
     review["technical_qc_status"] = getattr(qc_result, "status", None)
     return review
 

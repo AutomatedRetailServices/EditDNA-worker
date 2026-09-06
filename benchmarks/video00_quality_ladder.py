@@ -756,7 +756,7 @@ def render_markdown(report: dict, *, max_text: int = 70) -> str:
     ps = report.get("physical_summary")
     if ps:
         lines += [
-            f"FINAL MP4 (physical spans from render verification): LEVEL_1 {ps['by_level'][LEVEL_1]['selection_count']} regions / "
+            f"FINAL MP4 (physical spans; sources {report.get('physical_source')}): LEVEL_1 {ps['by_level'][LEVEL_1]['selection_count']} regions / "
             f"{ps['by_level'][LEVEL_1]['selection_seconds']} s selection + {ps['by_level'][LEVEL_1]['boundary_count']} / {ps['by_level'][LEVEL_1]['boundary_seconds']} s boundary; "
             f"CutSell physical keep {ps['durations_sec']['cutsell_keep']} s; F1 vs Cut.ai {ps['selection_parity']['cutsell_vs_cutai']['f1']} / vs Gold {ps['selection_parity']['cutsell_vs_gold']['f1']}; "
             "LEVEL_1 by authority: " + (", ".join(f"{k}: {v['count']} / {v['seconds']} s" for k, v in sorted(ps['level1_by_authority'].items(), key=lambda kv: -kv[1]['seconds'])) or "none"),
@@ -911,24 +911,65 @@ def verify_render_against_plan(
     }
 
 
+def recorded_renderer_ends(engine_result: dict) -> dict[str, float]:
+    """D-097.10 (R14): the renderer's own recorded exit truth -- the last QC
+    attempt's `renderer_trailing_trims` (`tightened_end` per clip) from the
+    engine JSON. Available even when no MP4 can be aligned (forensic
+    context), and exact where render verification is a correlation
+    estimate. Empty when the engine recorded no trims."""
+    qc = engine_result.get("live_render_qc") or (engine_result.get("diagnostics") or {}).get("live_render_qc") or {}
+    attempts = qc.get("attempts") or ()
+    if not attempts:
+        return {}
+    ends: dict[str, float] = {}
+    for row in (attempts[-1].get("renderer_trailing_trims") or ()):
+        if not isinstance(row, dict):
+            continue
+        try:
+            ends[str(row.get("clip_id") or "")] = float(row.get("tightened_end"))
+        except (TypeError, ValueError):
+            continue
+    return ends
+
+
 def physical_engine_result(engine_result: dict, render_verification: dict | None) -> dict | None:
     """A copy of ``engine_result`` whose selected spans are the PHYSICAL
-    (rendered) spans implied by render verification -- the final-MP4 truth
-    the Cut.ai parity ladder is ultimately about. None when unavailable."""
-    if not render_verification:
-        return None
-    by_clip = {f["clip_id"]: f for f in render_verification.get("fragments", ()) if f.get("found") and f.get("physical_raw_end") is not None}
-    if not by_clip:
+    (rendered) spans -- the final-MP4 truth the Cut.ai parity ladder is
+    ultimately about. Sources, per selected clip: the renderer's RECORDED
+    trailing trim (exact; D-097.10 R14) first, then render verification's
+    located fragment (a correlation estimate that also covers Boundary
+    repairs). None when neither is available. `physical_source` on the
+    result names what was used."""
+    recorded = recorded_renderer_ends(engine_result)
+    by_clip = {}
+    if render_verification:
+        by_clip = {f["clip_id"]: f for f in render_verification.get("fragments", ()) if f.get("found") and f.get("physical_raw_end") is not None}
+    if not by_clip and not recorded:
         return None
     selected = []
+    sources = {"recorded_renderer_trims": 0, "render_verification": 0, "plan": 0}
     for item in engine_result.get("selected") or ():
         row = dict(item or {})
-        match = by_clip.get(str(row.get("clip_id") or ""))
-        if match is not None:
+        clip_id = str(row.get("clip_id") or "")
+        try:
+            start, end = float(row.get("start")), float(row.get("end"))
+        except (TypeError, ValueError):
+            selected.append(row)
+            continue
+        tightened = recorded.get(clip_id)
+        match = by_clip.get(clip_id)
+        if tightened is not None and start < tightened < end:
+            row["end"] = tightened
+            sources["recorded_renderer_trims"] += 1
+        elif match is not None:
             row["end"] = float(match["physical_raw_end"])
+            sources["render_verification"] += 1
+        else:
+            sources["plan"] += 1
         selected.append(row)
     physical = dict(engine_result)
     physical["selected"] = selected
+    physical["physical_source"] = sources
     return physical
 
 
@@ -976,6 +1017,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         )
         report["physical_summary"] = physical_report["summary"]
         report["physical_regions"] = physical_report["regions"]
+        report["physical_source"] = physical.get("physical_source")
     report["inputs"] = {"raw": str(args.raw), "cutai": str(args.cutai), "gold": str(args.gold),
                         "engine_json": str(args.engine_json), "engine_mp4": args.engine_mp4}
     report["reference_chunks"] = {"cutai": list(cutai.chunks), "gold": list(gold.chunks),
