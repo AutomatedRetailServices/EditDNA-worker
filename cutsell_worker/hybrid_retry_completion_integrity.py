@@ -153,6 +153,13 @@ def _safe_full_alternate_retry(take, ordered, index, semantic, context):
     if len(winners) != 1:
         return None
     winner = winners[0]
+    # Do not irreversibly delete a complete realization in favor of a winner that is
+    # itself incomplete. A later continuation may make the retry family sufficient,
+    # but that is an editorial competition/composite decision for downstream authority.
+    # Preserving the complete alternate here keeps both options available without
+    # weakening the existing failed-retry rule when the winner is independently complete.
+    if take.complete_idea and not winner.complete_idea:
+        return None
     if _coverage(take, (winner,)) >= 0.45:
         return winner
     try:
