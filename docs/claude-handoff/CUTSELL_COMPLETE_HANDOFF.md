@@ -537,6 +537,16 @@ Binding validation order (Product Owner, 2026-09-06):
   restored on lexical evidence, never a composite member) now holds at those
   guards. Pimples tie-break variance recurred (escalation A). Next: ONE RAW.
   Full entry: `docs/CUTSELL_DECISIONS.md` D-097.6.
+- D-097.7 (2026-09-06): RAW 34043247473 = R7 PROVEN on the selection (clean
+  gynaecologist retry kept, abandoned attempts discarded, diagnosis kept; L1
+  18 / 43.6 s, F1 vs Cut.ai 0.828 -- best yet) but Freeze BLOCKED: the
+  abandoned stomach take had been removed by clean-cut on a multimodal
+  `wrong_take` confirmation (0.97) and StoryValidator's pre-group credit,
+  trusting only the arbiter, blocked over 4 uncovered tokens and a CONTEXTUAL
+  year. The wrong_take confirmation is now a deterministic pre-group credit
+  (coarse vocabulary only; atoms untouched; fail-closed on every gap). The
+  pimples tie-break (escalation A) is now the dominant Level-1 item. Next: ONE
+  RAW. Full entry: `docs/CUTSELL_DECISIONS.md` D-097.7.
 # HISTORICAL CUTSELL.AI 11 CONTINUITY
 
 A trusted CutSell.ai 11 recovery checkpoint is:

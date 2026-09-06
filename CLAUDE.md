@@ -176,7 +176,10 @@ dead-air pause boundary); the waiver narrowing and F3b are Product Owner
 decisions; RAW 34042123557 proved R6 (diagnosis kept, QC PASS, deliverable) but
 the finer segmentation let the legacy pre-resolver guard chain compose two
 abandoned attempts over the `winner` clean retry -- D-097.6 applies the §3
-usability floor at those guards; the next authorised RAW must prove it; D-096 remains the source of
+usability floor at those guards -- PROVEN on RAW 34043247473 (best ladder so
+far), which then blocked Freeze over a take the multimodal layer had rejected
+as `wrong_take`; D-097.7 makes that confirmation a deterministic pre-group
+credit; the next authorised RAW must prove the deliverable MP4; D-096 remains the source of
 truth, its Appendix B records implementation status)
 (read its LAST VERIFIED RESULT / NEXT AUTOMATIC ACTION lines). The handoff
 document's `CURRENT LIVE BLOCKER` / `EXACT NEXT ACTION` sections are historical

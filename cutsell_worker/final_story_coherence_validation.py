@@ -551,6 +551,76 @@ def _same_idea_paraphrase_credit(
 PRE_GROUP_RESTART_SEMANTIC_EQUIVALENCE = "pre_group_restart_semantic_equivalence"
 
 
+PRE_GROUP_WRONG_TAKE_CONFIRMATION = "pre_group_wrong_take_confirmation"
+# D-097.7: the multimodal performance layer's own `wrong_take` verdict is
+# accepted at the same confidence floor the Resolver applies to a hybrid
+# `failed` label (`realization_resolver._SEMANTIC_FAILED_THRESHOLD`).
+_WRONG_TAKE_CONFIRMATION_FLOOR = 0.85
+_CLEAN_CUT_WRONG_TAKE_REASON = "whole_video_bad_take:wrong_take"
+
+
+def _pre_group_wrong_take_credit(clip, selected, diagnostics: Mapping[str, object] | None) -> tuple[bool, list[dict]]:
+    """D-097.7 (R8): recording-process evidence that the creator REJECTED
+    this delivery and retried it -- credited without any semantic judge.
+
+    RAW 34043247473: "Tuve problemas de estómago en una temporada, en 2023,
+    hay que voltar." was removed by the deterministic clean-cut stage
+    because `performance_confirmation` classified it `wrong_take` at 0.97
+    (facial-expression shift + hand reset at its end, a restart of the same
+    opening 0.74 s later, retry similarity 0.69) -- D-081's "mechanical
+    certainty may delete early", and exactly what both QA references do
+    with that take. StoryValidator then blocked Freeze over it: 4 of 7
+    content tokens uncovered, its only atom a CONTEXTUAL year, and the
+    D-097.1 pre-group credit's arbiter answered "the retry adds details"
+    (not same idea) -- a human-review block with no repair strategy for a
+    take the creator had visibly thrown away. A `wrong_take` confirmation
+    is the same recording-process class D-097.A ranks above the semantic
+    judge for grouping; it is accepted here for the SAME, narrow effect the
+    arbiter credit has: it suppresses only the coarse vocabulary signal.
+    Number/negation atoms are never touched (a CRITICAL or UNCERTAIN atom
+    still blocks). Fail-closed on every gap: the confirmation must name
+    this clip, be `wrong_take` (two evidence families -- a lone
+    `retry_setup` is deliberately not enough), reach the floor, the
+    clean-cut stage must actually have removed the clip for that reason,
+    and the clip must stand in D-097.1's retry adjacency to a SELECTED
+    delivery (same source, <= 8 s, shared opening, the discard shorter)."""
+    from .realization_resolver import _pre_group_retry_relation
+
+    diag = diagnostics or {}
+    confirmations = [
+        row for row in (diag.get("performance_confirmation") or ())
+        if isinstance(row, dict) and str(row.get("take_id") or "") == clip.clip_id
+        and str(row.get("confirmed_kind") or "") == "wrong_take"
+        and float(row.get("confidence") or 0.0) >= _WRONG_TAKE_CONFIRMATION_FLOOR
+    ]
+    if not confirmations:
+        return False, []
+    removed_for_it = any(
+        isinstance(row, dict) and str(row.get("clip_id") or "") == clip.clip_id
+        and not bool(row.get("keep", True)) and str(row.get("reason") or "") == _CLEAN_CUT_WRONG_TAKE_REASON
+        for row in (diag.get("clean_cut_decisions") or ())
+    )
+    if not removed_for_it:
+        return False, []
+    neighbours = [
+        other for other in selected
+        if other.clip_id != clip.clip_id and _pre_group_retry_relation(clip, other)
+    ]
+    if not neighbours:
+        return False, []
+    confirmation = confirmations[0]
+    rows = [{
+        "neighbour_clip_id": other.clip_id, "relation": "wrong_take_confirmation",
+        "same_idea": True, "confidence": round(float(confirmation.get("confidence") or 0.0), 4),
+        "reason": "multimodal wrong_take confirmation; clean-cut removed the take for it; arbiter not consulted",
+        "retry_take_id": str(confirmation.get("retry_take_id") or ""),
+        "retry_similarity": confirmation.get("retry_similarity"),
+        "candidate_event_kinds": list(confirmation.get("candidate_event_kinds") or ()),
+        "provider": "deterministic", "model": None,
+    } for other in neighbours]
+    return True, rows
+
+
 def _pre_group_restart_credit(
     clip, selected, semantic_equivalence_arbiter: SemanticEquivalenceArbiter | None,
 ) -> tuple[bool, list[dict]]:
@@ -723,14 +793,23 @@ def _lost_semantic_atoms(
                     content_loss = False
                     suppressed_reason = evidence_kind
             else:
-                # D-097.1: a pre-group discard has no family to credit it;
-                # ask the same arbiter the same question grouping would have.
-                credited, restart_consultations = _pre_group_restart_credit(
-                    clip, draft.selected, semantic_equivalence_arbiter,
+                # D-097.7: the multimodal layer's own wrong_take rejection
+                # (recording-process evidence) is consulted first.
+                credited, restart_consultations = _pre_group_wrong_take_credit(
+                    clip, draft.selected, draft.diagnostics,
                 )
                 if credited:
                     content_loss = False
-                    suppressed_reason = PRE_GROUP_RESTART_SEMANTIC_EQUIVALENCE
+                    suppressed_reason = PRE_GROUP_WRONG_TAKE_CONFIRMATION
+                else:
+                    # D-097.1: a pre-group discard has no family to credit it;
+                    # ask the same arbiter the same question grouping would have.
+                    credited, restart_consultations = _pre_group_restart_credit(
+                        clip, draft.selected, semantic_equivalence_arbiter,
+                    )
+                    if credited:
+                        content_loss = False
+                        suppressed_reason = PRE_GROUP_RESTART_SEMANTIC_EQUIVALENCE
 
         classifications = [
             classify_negation_atom(atom) if atom in own_negations else classify_number_atom(atom, text)

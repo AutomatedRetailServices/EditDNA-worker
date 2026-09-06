@@ -11820,3 +11820,94 @@ ladder L1 expected back near or below 40 s; per-fix report as D-097.7.
 deliverable MP4s of runs 34040848026 / 34042123557), A (later-attempt tie
 preference, now 3 of 4 runs; complementary same-idea deliveries; F3b),
 B/A (waiver narrowing, D-097.5).
+
+## D-097.7 -- RAW 34043247473 (head d59b94f): R7 PROVEN on the selection (clean retry kept, both abandoned attempts discarded, diagnosis kept; best ladder so far), Freeze BLOCKED over a take the multimodal layer had rejected as `wrong_take`; the wrong_take confirmation is now a deterministic pre-group credit (coarse vocabulary only)
+
+**RAW COMPLETE (Modal run 34043247473, head `d59b94f`, 2026-09-06).**
+Worker ok, `hybrid_editorial = provider_complete`, 20 kept, **Freeze
+BLOCKED** (`freeze_blocked = true`, repair loop `no_repair_strategy_exists_
+for_this_finding_kind`, NEEDS_HUMAN_REVIEW), no render (`NOT_DELIVERABLE_
+not_attempted`). Ladder (selection scope): **LEVEL_1 18 regions / 43.59 s
+(0.2597 of Cut.ai keep) -- the best yet** (70.35 s on 34042123557, 40.17 s
+on 34040848026 with fewer regions but the diagnosis missing); F1 vs Cut.ai
+**0.828** (best), vs Gold 0.764; keep 157.8 s; LEVEL_2 20.9 s (hereditary
+restatement Cut.ai keeps, Gold does not). By authority: BestTakeResolver
+3 / 27.4 s (the pimples family, 25.9 s), BoundaryEngine 26 / 7.2 s,
+CompositeResolver/PreResolverCleanup 3 / 7.1 s, AttemptReconstructor 5 /
+3.8 s, IdeaClusterer 2 / 2.4 s.
+
+### Per-fix report (selection; no MP4 this run)
+
+**Fix R7 (D-097.6, §3 usability floor at the legacy guards) -- PROVEN ON
+THE SELECTION.** Final KEEP: "Al terminar mi contrato, cambié de
+ginecóloga y le pedí que me hiciera un test de todo lo que ella se
+pudiera imaginar y me pudiese indicar." kept; "Al terminar mi contrato,
+hablé con mi ginecóloga..." and "Al terminar mi contrato, le pedí a mi
+ginecóloga." discarded (regions 26 / 29 / 33 are now edge-only, 2.6 s).
+**Fix R6 (D-097.5) -- HELD**: the diagnosis sentence is its own kept clip.
+**Stomach abandoned take -- REMOVED** ("Tuve problemas de estómago en una
+temporada, en 2023, hay que voltar." absent from KEEP; both references
+remove it) -- by the deterministic clean-cut stage this run, see below.
+
+### NEW ROOT CAUSE R8 -- Freeze blocked over a take the creator threw away
+
+FinalEditReviewer FAIL: `UNIQUE_FACT_LOST` on `clip_9f216f6d` ("Tuve
+problemas de estómago en una temporada, en 2023, hay que voltar."),
+`REAL_CONTENT_LOSS`, coverage 0.43 (4 of 7 content tokens), the only atom
+`2023` CONTEXTUAL (incidental year), `omission_permit_denied_reason:
+missing_identity` (no family: the take never reached grouping), D-097.1
+pre-group restart credit consulted the arbiter against the selected
+gastritis delivery and got `same_idea: false` ("the second text adds
+specific medical details not present in the first") -- an answer to the
+wrong question for a retry relation, and a human-review block with no
+repair strategy. Forensic (extract run 34043659777): the take was removed
+by `clean_cut_decisions` (`keep: false`, `whole_video_bad_take:wrong_take`,
+0.9686) because `performance_confirmation` classified it `wrong_take`
+(facial-expression shift + hand-motion reset at its end, a restart of the
+same opening "Tuve problemas de estómago," 0.74 s later, retry similarity
+0.69) -- D-081's "mechanical certainty may delete early", two evidence
+families, exactly what both references do. Under D-062.2 that block is
+human choice used as a convenience valve: the system HAD the evidence
+that the loss was by the creator's own decision.
+
+**Fix (owning authority = StoryValidator's pre-group credit):** `_pre_
+group_wrong_take_credit` runs before the D-097.1 arbiter credit: a
+`performance_confirmation` row naming the clip with `confirmed_kind =
+wrong_take` at >= 0.85 (the Resolver's own unusable floor), the clean-cut
+stage having removed the clip for exactly that reason, and D-097.1's
+retry adjacency to a SELECTED delivery (same source, <= 8 s, shared
+opening, the discard shorter) together suppress ONLY the coarse vocabulary
+signal (`content_loss_suppressed_by = pre_group_wrong_take_confirmation`;
+the consultation row records the confirmation's evidence, `provider:
+deterministic`). Number/negation atoms are untouched: a CRITICAL or
+UNCERTAIN atom still blocks. A lone `retry_setup` (one evidence family),
+a confirmation below the floor, a clip clean-cut did not remove for that
+reason, or no selected retry neighbour all fall through to the arbiter
+credit exactly as before. Tests: `tests/test_cutsell_d097_7_wrong_take_
+confirmation_credit.py` (7) + D-097.1 suite unchanged (18).
+
+### Remaining LEVEL_1 (no code this cycle)
+- Pimples family 25.9 s: both takes `winner`; the earlier, longer take
+  won the delivery tie-break again (wrong in 4 of 5 runs). **Escalation A
+  is now the single largest Level-1 item**: proposal unchanged (when
+  complete same-idea survivors tie below the decisive 0.30 gap, prefer the
+  later complete attempt).
+- The hereditary restatement (LEVEL_2; regions 110/115 edges) and the
+  loose exits (BoundaryEngine 7.2 s) are unchanged classes.
+
+**Offline qualification:** compileall clean; new suite 7/7 + D-097.1
+18/18; CleanCutBench 54/54 x2; full `tests/test_cutsell_*.py` glob (see
+commit).
+
+**LAST VERIFIED RESULT:** RAW 34043247473 = R7 PROVEN on the selection,
+best ladder so far (L1 43.6 s, F1 vs Cut.ai 0.828), FREEZE BLOCKED by a
+convenience-valve human-review finding on a multimodally rejected take;
+R8 CODE FIXED / TESTS PASS.
+**NEXT AUTOMATIC ACTION:** commit + push; ONE authorised Modal RAW on the
+new head -- expected: Freeze PASS with the stomach take lost by decision
+(recorded, non-blocking), QC PASS, deliverable MP4 with the clean retry
+and the diagnosis; ladder near 43 s with the pimples family as the
+dominant remainder; per-fix MP4 report as D-097.8.
+**HUMAN ACTION REQUIRED:** YES, non-blocking -- A (later-attempt tie
+preference: now the dominant Level-1 item), F (watch + listen the
+deliverables of 34040848026 / 34042123557), B/A (waiver narrowing), F3b.
