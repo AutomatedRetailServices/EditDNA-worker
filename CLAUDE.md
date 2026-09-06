@@ -167,7 +167,13 @@ identities preserved); RAW 34034507983 then PASSED Freeze and proved the
 renderer's frame-exact joins on video, but the technical QC's join probe
 flagged clean speech joins and its repairs lengthened the output -- both
 fixed in D-097.4 (join-instant step detector; repairs trim the tightened
-edge); the next authorised RAW must prove the deliverable MP4; D-096 remains the source of
+edge); RAW 34040848026 then produced the FIRST DELIVERABLE MP4 (QC PASS on
+attempt 1, pending human Watch+Listen) but lost the papillary-cancer
+diagnosis sentence: the AttemptReconstructor fused it with the next sentence
+across 2.96 s of measured dead air the ASR padded over and the D-089 waiver
+dropped the claim -- fixed in D-097.5 at the owning authority (measured
+dead-air pause boundary); the waiver narrowing and F3b are Product Owner
+decisions; the next authorised RAW must prove the diagnosis returns; D-096 remains the source of
 truth, its Appendix B records implementation status)
 (read its LAST VERIFIED RESULT / NEXT AUTOMATIC ACTION lines). The handoff
 document's `CURRENT LIVE BLOCKER` / `EXACT NEXT ACTION` sections are historical

@@ -238,7 +238,55 @@ def _attempt_boundary_reason(
 
     if gap > max_continuation_gap_sec:
         return "real_speech_pause"
+
+    # D-097.5 (R6): the ASR word timestamps are not the only clock. Whisper
+    # pads a segment's end/start into adjacent silence, so two sentences
+    # separated by SECONDS of real dead air can arrive with a sub-threshold
+    # `gap` and be fused into one delivery attempt. RAW 34040848026 fused
+    # "the biopsy confirmed papillary thyroid cancer" with the next
+    # sentence across 2.96 s of measured silence; the fused take was then
+    # labelled failed for the second half's resets and the diagnosis --
+    # the story's pivotal fact -- left the edit with Freeze passing. The
+    # source dead-air evidence (`audio_silence.audio_silence_events`, D-097
+    # Priority C) is already in the context at this point; a measured
+    # silence that spans the transition and is at least as long as the
+    # continuation ceiling is a real speech pause, whatever the ASR says.
+    if _measured_pause_at_transition(context, left, right) >= max_continuation_gap_sec:
+        return "measured_dead_air_pause"
     return None
+
+
+_AUDIO_SILENCE_KIND = "audio_silence_interval"  # audio_silence.AUDIO_SILENCE_EVENT_KIND; same string take_judge reads
+
+
+def _measured_pause_at_transition(
+    context: WholeVideoContext | None,
+    left: CandidateTake,
+    right: CandidateTake,
+    *,
+    tolerance_sec: float = 0.36,
+) -> float:
+    """Longest measured source-silence interval that reaches the ASR
+    transition between `left` and `right` (within `tolerance_sec` of the
+    boundary point on either side). 0.0 when no such evidence exists --
+    absent measurement, the ASR gap rule above stands alone, unchanged."""
+    if context is None or left.source_asset_id != right.source_asset_id:
+        return 0.0
+    boundary_lo = min(float(left.end), float(right.start)) - tolerance_sec
+    boundary_hi = max(float(left.end), float(right.start)) + tolerance_sec
+    best = 0.0
+    for event in _source_events(context, left.source_asset_id):
+        if _kind(event.kind) != _AUDIO_SILENCE_KIND or float(event.confidence) < 0.80:
+            continue
+        start, end = float(event.start), float(event.end)
+        if end < boundary_lo or start > boundary_hi:
+            continue  # silence elsewhere in the take, not at this transition
+        # Only the silence inside this pair's own span counts: a long
+        # silence that continues past `right`'s start belongs to a later
+        # transition (or to the ASR's own padding into it).
+        clipped = min(end, float(right.end)) - max(start, float(left.start))
+        best = max(best, clipped)
+    return best
 
 
 def _merge_signals(members: tuple[CandidateTake, ...]) -> MediaSignals | None:

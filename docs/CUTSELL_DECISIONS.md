@@ -11558,3 +11558,171 @@ family tie (pending escalation A) and the stomach/failed-take grouping.
 editorial policy "prefer the later complete attempt when same-idea
 survivors tie on delivery below the decisive gap" and for the standing
 question of complementary same-idea deliveries both references keep.
+
+## D-097.5 -- RAW 34040848026 (head 1d10799): FIRST DELIVERABLE Video00 MP4 (technical QC PASS on attempt 1; R4/R5 PROVEN on video); the MP4 lost the papillary-cancer diagnosis with Freeze passing clean -- AttemptReconstructor fused two sentences across 2.96 s of measured dead air; measured-pause boundary added; D-089 waiver hole and F3b evidence recorded
+
+**RAW COMPLETE (Modal run 34040848026, head `1d10799`, 2026-09-06).**
+Worker ok, `hybrid_editorial = provider_complete`, Freeze PASSED, 22 kept,
+BoundaryEngine post-freeze pass complete, **technical QC PASS on render
+attempt 1** (0 findings, 0 repairs; 9 renderer trailing trims / 5.55 s),
+`deliverable = true`, `delivery_status = DELIVERABLE_PENDING_HUMAN_WATCH_
+LISTEN:perceptual=FAIL`, `output_path` set, output 135.122 s for a
+143.595 s frozen plan; render verification 22/22 fragments, 1 source-order
+inversion (the composite reorder). The MP4 is in the run's
+`cutsell-video00-modal-human-review` artifact. Human Gold regression QA
+14/18 (same four checks as before). The workflow job is red only because
+that QA step exits 1.
+
+### Per-fix MP4 report
+
+**Fix R4 (D-097.4, join-instant QC probe) -- PROVEN ON VIDEO.** The same
+joins that produced 9 ABRUPT_AUDIO_DISCONTINUITY findings per attempt on
+34034507983 produced none; no repair was requested. Authority: technical
+post-render QC. MP4 effect: the first deliverable candidate. Regressions:
+none observed (silence / freeze / black checks unchanged). Not evaluated:
+audible click-freeness by a human (HUMAN WATCH+LISTEN pending).
+
+**Fix R5 (D-097.4, repair trims the tightened edge) -- NOT EXERCISED**
+(no repair was needed); the output-timeline mapping matched the render
+(ladder render verification located every fragment).
+
+**Perceptual System Watch+Listen (advisory_v1) on the deliverable:** FAIL --
+`reset_debris_at_edges_source_evidence` EVALUATED_FAIL (hand-motion reset
+candidates mapped onto cut edges, e.g. the exit of the kept stomach take at
+251.53-251.62 s with a `retry_setup` 0.86 event), `interior_dead_air_mp4`
+UNCERTAIN (one 0.97 s pause), `cut_adjacent_speech_energy_mp4` and
+`repeated_audience_content_transcript` PASS, 4 capabilities NOT_
+IMPLEMENTED; routing BoundaryEngine. Advisory only: never auto-PASS, never
+auto-FAIL delivery (D-097 §4). CLEAN RAW gate (forensic run on the engine
+JSON): technical evidence complete; perceptual FAIL and the ladder remain
+the blocking rows.
+
+### Ladder 34040848026 (selection scope)
+
+LEVEL_1 25 regions / 40.167 s (0.2393 of Cut.ai keep) vs 20 / 50.79 s on
+34034507983 and 25 / 35.82 s on 34033468088; F1 vs Cut.ai 0.777 (0.738),
+vs Gold 0.830 (0.794); keep 143.6 s; FINAL MP4 spans: L1 18 / 33.79 s, F1
+0.789 / 0.851. By authority: BestTakeResolver 9 / 23.6 s, Attempt-
+Reconstructor 8 / 10.95 s, BoundaryEngine 22 / 7.56 s, IdeaClusterer 1 /
+0.71 s, RealizationResolver 1 / 0.69 s. The pimples family resolved the
+way both references do this run (the later retry won: label variance
+again, not a fix); the acne family's "also I got pimples, like a rash"
+take is still deleted (5.75 s); the gynaecologist family edges persist.
+
+### NEW ROOT CAUSE R6 -- the diagnosis left the edit with Freeze passing
+
+The final KEEP sequence goes "a suspicious 3 cm nodule was sent to
+biopsy" -> "symptoms that did not seem suspicious ...": **"La biopsia
+confirmó que era un cáncer papilar de tiroides." is not in the MP4**
+(ladder regions 56 + 60, 10.5 s missing delivery, BestTakeResolver-
+attributed; regression QA `papillary_cancer_preserved` failed).
+Forensic chain (extract runs 34041648620 / 34041668424):
+
+1. **AttemptReconstructor** fused the diagnosis sentence (ASR clip
+   `clip_830b0a26`) and "Síntomas que tuve. Según yo era sintomática..."
+   (`clip_bb9ad4fb`) into ONE 14.08 s attempt `clip_1e60a3f6` (135.44-
+   149.52) although the source carries **2.96 s of measured dead air
+   between them** (DeliveryScorer's own `interior_dead_air_intervals
+   [138.196, 141.158]`, from the D-097 Priority C `audio_silence` events
+   already in the whole-video context). Whisper padded both segments into
+   the silence, so the ASR `gap` fell under the 1.2 s continuation ceiling
+   and `_attempt_boundary_reason` -- which reads only the ASR clock and
+   reset/camera/face events -- returned no boundary. (34034507983 had
+   segmented the same speech into two clips; the padding is ASR variance.)
+2. **IdeaClusterer**: the fused take was arbiter-merged (0.95, "both
+   discuss realizing past symptoms were signs") with "Síntomas que no me
+   parecían sospechosos...", and the arbiter correctly rejected pairing it
+   with the nodule/biopsy clip ("left discusses nodule biopsy results,
+   right discusses symptoms") -- the fused text is dominated by the second
+   sentence.
+3. **Hybrid label** `failed` 0.9 (locally corroborated `dense_physical_
+   reset:8` -- the 3 s hole and resets of the SECOND half) vs `winner`
+   0.95 for the clean retry -> `single_semantic_winner`; delivery score
+   0.423 (interior dead-air penalty 0.24) vs 0.715.
+4. **claim_coverage_best_take** (D-038) DID flag it: override "single
+   candidate covers all critical claims, previous winner did not"
+   (`missing_claim_texts: ["La biopsia confirmó que era un cáncer papilar
+   de tiroides."]`, `DIAGNOSIS_IDENTIFICATION`, CRITICAL) -- but the
+   AUTHORITATIVE Resolver then applied the D-089/D-097 waiver
+   `waived_failed_realization_source` (the claim's only source realization
+   is `failed` >= 0.85 -> effective importance SUPPORTING), StoryValidator
+   consumed that ONE importance truth (`critical_loss_suppressed_by:
+   canonical_effective_importance`), FinalEditReviewer PASS with no
+   warnings, Freeze PASS.
+
+**Fix (owning authority = AttemptReconstructor):** `_attempt_boundary_
+reason` gains a last rule, `measured_dead_air_pause`: an `audio_silence_
+interval` event (confidence >= 0.80) that reaches the ASR transition
+(within 0.36 s of the boundary point) and whose portion inside the pair's
+own span is at least `max_continuation_gap_sec` (1.2 s) is a real speech
+pause, whatever the ASR timestamps say. No other rule changes; without
+measurement the ASR gap rule stands alone exactly as before. Tests:
+`tests/test_cutsell_d097_5_measured_pause_attempt_boundary.py` (split on
+a padded ASR gap with 2.7 s measured silence; no split on a 0.7 s breath;
+no split when the silence is away from the transition; relaxed-floor
+confidence alone is not a boundary; no context = unchanged ASR rule;
+silence running past the pair counts only inside the span). Existing
+attempt-reconstruction + D-046 suites unchanged (39/39). MP4 effect: not
+yet (next RAW must show the diagnosis sentence as its own attempt --
+complete, no interior dead air -- kept as the sole carrier of a CRITICAL
+DIAGNOSIS claim; the "Síntomas que tuve" half then competes with its clean
+retry on its own).
+
+**Recorded, not fixed (escalation B/A -- authority contract):** the D-089/
+D-097 §3 waiver treats a Hybrid `failed` label >= 0.85 as sufficient to
+waive a CRITICAL requirement group sourced only by that realization. This
+run shows the label is REALIZATION-scoped while the failure evidence
+(dead air, resets) can sit entirely in one part of a multi-sentence
+realization; the waiver then drops a clean, unique, CRITICAL diagnosis
+sentence with no deterministic evidence against that sentence itself.
+PROPOSED: waive only when the claim's own span (its source clip / word
+span) overlaps the realization's measured failure evidence (interior dead
+air, multimodal/strong resets), otherwise keep the raw importance and let
+CRITICAL_CLAIM_LOST block Freeze (WHEN UNCERTAIN, KEEP). Strengthens
+critical-content protection; changes an approved doctrine (§3) -- needs
+the Product Owner's word before implementation.
+
+**Stomach failed take (region 97, 5.94 s false keep) -- F3b evidence,
+recorded, not fixed.** "Tuve problemas de estómago en una temporada, en
+2023, no hay que preguntar." (abandoned: `retry_setup` 0.86 toward the
+next restart, `lexical_restart` boundaries both sides, Hybrid `alternate`
+0.7-0.8 locally corroborated) was arbiter-confirmed same-idea with BOTH
+members of the gastritis family (0.9 with the earlier abandoned attempt,
+0.95 with the clean winner) yet the D-085 component probe answered
+`component_cohesion_declined` (0.9) and the split re-isolated it as a
+kept singleton. `same_opening_restart` does not apply (4-token opening
+differs at token 3: "estomacales a" vs "de estómago"). This is precisely
+the D-094.2 `accept_complete_pairwise_singleton_bridge` (F3b) shape --
+every cross pair confirmed >= floor -- which the Product Owner keeps OFF.
+With F3b ON it would join the family and lose to the clean retry. Third
+run in a row with this take kept; decision belongs to the PO.
+
+### Observability
+The forensic extract's `keywords`/`trace_clip_ids` are SPACE-separated
+(D-097.4 note); resolver authority, `live_render_qc`, perceptual review and
+the CLEAN RAW gate now arrive through it (D-097.4).
+
+**Offline qualification:** compileall clean; new suite 6/6; attempt-
+reconstruction + D-046 suites 39/39; CleanCutBench 54/54 x2; full
+`tests/test_cutsell_*.py` glob (see commit).
+
+**LAST VERIFIED RESULT:** RAW 34040848026 = FREEZE PASS, TECHNICAL QC PASS
+(attempt 1), FIRST DELIVERABLE MP4 (pending HUMAN WATCH+LISTEN; perceptual
+advisory FAIL on edge reset debris); R4 PROVEN on video; the MP4 lost a
+CRITICAL diagnosis sentence through R6 (fused attempt across measured dead
+air) + the D-089 waiver; R6 CODE FIXED / TESTS PASS at the owning
+authority; waiver and F3b recorded for the Product Owner.
+**NEXT AUTOMATIC ACTION:** commit + push; ONE authorised Modal RAW on the
+new head -- expected: the diagnosis sentence reconstructed as its own
+attempt and kept, `papillary_cancer_preserved` passing, QC PASS again,
+deliverable MP4; ladder + per-fix report as D-097.6; then the next LEVEL_1
+root cause within scope (gynaecologist family edges / loose exits are
+BoundaryEngine; the acne "rash" take needs the perceptual layer).
+**HUMAN ACTION REQUIRED:** YES.
+- F (HUMAN EDITORIAL ACCEPTANCE, non-blocking for engineering): the first
+  deliverable MP4 (run 34040848026 artifact `cutsell-video00-modal-human-
+  review`) needs a human watch + listen -- knowing it lacks the diagnosis
+  sentence (R6) and carries the stomach abandoned take.
+- B/A (non-blocking): approve or reject the waiver narrowing above.
+- A (non-blocking, standing): F3b evidence (this entry), the later-attempt
+  tie preference and the complementary same-idea question (D-097.4).

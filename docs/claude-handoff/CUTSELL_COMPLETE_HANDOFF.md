@@ -514,6 +514,19 @@ Binding validation order (Product Owner, 2026-09-06):
   attributed, no selection code). Forensic extract now exports the resolver
   tiers, QC, perceptual review and CLEAN RAW gate (inputs are SPACE-separated).
   Next: ONE RAW for the MP4. Full entry: `docs/CUTSELL_DECISIONS.md` D-097.4.
+- D-097.5 (2026-09-06): RAW 34040848026 = the FIRST DELIVERABLE Video00 MP4
+  (Freeze PASS, technical QC PASS on attempt 1, DELIVERABLE_PENDING_HUMAN_
+  WATCH_LISTEN; perceptual advisory FAIL on edge reset debris). The MP4 lost
+  "La biopsia confirmó que era un cáncer papilar de tiroides.": the
+  AttemptReconstructor fused it with the next sentence across 2.96 s of
+  measured dead air the ASR timestamps padded over, the fused take was
+  labelled failed for the second half, and the D-089 waiver downgraded the
+  diagnosis claim -- Freeze passed clean. Fixed at the owning authority
+  (`measured_dead_air_pause` boundary from the audio_silence evidence); the
+  waiver narrowing and the F3b stomach-take evidence are recorded for the
+  Product Owner. Ladder L1 25 / 40.17 s, F1 vs Cut.ai 0.777, vs Gold 0.830.
+  Next: ONE RAW to prove the diagnosis returns. Full entry:
+  `docs/CUTSELL_DECISIONS.md` D-097.5.
 # HISTORICAL CUTSELL.AI 11 CONTINUITY
 
 A trusted CutSell.ai 11 recovery checkpoint is:
