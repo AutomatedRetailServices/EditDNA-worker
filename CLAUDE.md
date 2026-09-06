@@ -163,7 +163,11 @@ and reviews diagnostic artifacts perceptually; the RAW on that head (34032322925
 died on a latent ledger crash, fixed in D-097.2.1; RAW 34033468088 then proved
 R1/R2 on the selection but Freeze was blocked by the continuity coalescer
 re-minting a family winner's identity, fixed in D-097.3 (gap restored,
-identities preserved); the next authorised RAW must prove the MP4 effect; D-096 remains the source of
+identities preserved); RAW 34034507983 then PASSED Freeze and proved the
+renderer's frame-exact joins on video, but the technical QC's join probe
+flagged clean speech joins and its repairs lengthened the output -- both
+fixed in D-097.4 (join-instant step detector; repairs trim the tightened
+edge); the next authorised RAW must prove the deliverable MP4; D-096 remains the source of
 truth, its Appendix B records implementation status)
 (read its LAST VERIFIED RESULT / NEXT AUTOMATIC ACTION lines). The handoff
 document's `CURRENT LIVE BLOCKER` / `EXACT NEXT ACTION` sections are historical

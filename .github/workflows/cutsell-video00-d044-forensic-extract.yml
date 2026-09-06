@@ -85,6 +85,15 @@ jobs:
           python3 benchmarks/video00_d044_forensic_extract.py /tmp/result.json $KEYWORDS \
             | tee /tmp/d044-forensic-extract.json
 
+      - name: Run CLEAN RAW gate (D-097 QA metric layer, engine JSON only)
+        shell: bash
+        run: |
+          set +e
+          echo "--- benchmarks/clean_raw_gate.py (no ladder JSON here: ladder-dependent metrics report as missing evidence) ---"
+          python3 benchmarks/clean_raw_gate.py --engine-json /tmp/result.json --out-json /tmp/d044-clean-raw-gate.json
+          echo "clean_raw_gate_exit_code=$?"
+          exit 0
+
       - name: Run authoritative Human Gold regression QA + architecture + selection-lock validators
         shell: bash
         run: |

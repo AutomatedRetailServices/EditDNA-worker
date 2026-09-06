@@ -11389,3 +11389,172 @@ perceptual chain then runs for the first time on Video00); ladder + CLEAN
 RAW gate + per-fix MP4 report as D-097.4; then the pimples family loss and
 the stomach failed-take grouping.
 **HUMAN ACTION REQUIRED:** NO.
+
+## D-097.4 -- RAW 34034507983 (head 19cec48): Freeze PASSED and the renderer placed every join frame-exactly (R3 PROVEN on video), but the technical QC judged the speech next to the joins instead of the joins and burnt its repairs; probe rebuilt as a join-instant step detector, trailing repairs now trim the renderer-tightened edge; per-fix MP4 report; selection Level-1 root causes attributed
+
+**RAW COMPLETE (Modal run 34034507983, head `19cec48`, 2026-09-06).**
+Worker ok, `hybrid_editorial = provider_complete` (R2 held), 1 restart-
+evidence merge (R1 held on this ASR segmentation), **Selection Freeze
+PASSED** (`freeze_blocked = false`, D-097.3 coalescer fix held: no identity
+re-mint, no false IDEA_COVERAGE_LOST), 22 kept, BoundaryEngine post-freeze
+pass `post_freeze_edge_interior_audio_edges_complete`, and -- for the first
+time on Video00 with the D-097.2 renderer -- the render / technical QC /
+perceptual chain ran: 3 render attempts, every one `PHYSICAL_FAIL_REPAIRED`,
+final `NEEDS_HUMAN_REVIEW`, `delivery_status = NOT_DELIVERABLE_NEEDS_HUMAN_
+REVIEW`, `perceptual_review_status = FAIL` (reviewed on the diagnostic
+artifact per D-097.2 §4; its capability rows sit above the 5000-line log
+tail the API returns and are now exported by the forensic extract, below),
+`output_duration` 141.767 s for a 147.114 s frozen plan (trailing-silence
+tightening 5.834 s over 8 segments). Human Gold regression QA 14/18
+(papillary sentence, pimples micro-2 + order, sonography order).
+
+### Per-fix MP4 report (D-096 approval format)
+
+**Fix R3 (D-097.2, renderer output timeline) -- PROVEN ON VIDEO.** Change:
+one-pass concat FILTER with frame-exact segment durations. Authority:
+Renderer. Verified execution: the run's own QC records place every reported
+join at the cumulative `rendered_segment_duration_sec` sum of the tightened
+segments to the millisecond (21.133 = 2.667 + 8.667 + 9.800; 29.733; 48.633;
+52.700; 58.100; 61.500; 99.767; 117.600; 136.867 s) -- the +41 ms/part drift
+of runs 34008386434 / 34029861712 is gone, the ladder's render verification
+located 22/22 fragments with 0 order inversions and a 141.767 s physical
+timeline. MP4 effect: the joins are where the plan says they are.
+Regressions: none. Not evaluated: audible click-freeness by a human
+(HUMAN WATCH+LISTEN pending).
+
+**Fix R4 (new, this entry) -- technical QC join probe judged speech, not
+joins.** Defect: `post_render_media_qc.check_audio_discontinuity_at_
+boundaries` compared the LARGEST sample-to-sample jump anywhere in a
++/-80 ms window against that window's median. A Boundary cut lands on a
+word onset, so the window always held a plosive / voiced onset tens of ms
+from the join, while the 12 ms join fades kept the join itself near-silent
+and dragged the median down: 9 of 21 frame-exact, click-free joins reported
+as `ABRUPT_AUDIO_DISCONTINUITY` (peak 579-707 vs "typical" 26-30, ratio
+19-27) on every attempt. Reproduced offline with ffmpeg's own `flite`
+speech cut tightly into words and rendered through the real renderer: 4/4
+joins flagged, the peak 15-72 ms AWAY from each join (`scratchpad/qcprobe/
+repro.py`). Root cause: the probe had no notion of WHERE the join is inside
+its window. Change: the probe now (1) only considers jumps within 5 ms of
+the probed join (the renderer places joins frame-exactly), (2) measures
+"typical" as the larger of the two 2 ms flank medians (3-sample codec
+guard), (3) requires the jump to exceed the largest jump in either flank
+3x (a splice click is ONE step nothing around it approaches; a fricative or
+plosive under the fade-in is a run of comparable jumps), (4) keeps the
+absolute >500 floor; detail now carries `offset_ms` and `neighbour_peak_
+sample_jump`. Authority: technical post-render QC (reviewer; routes, never
+edits membership). Verified execution: flite render 4/4 joins PASS; a raw
+PCM splice of two speech excerpts at opposite-sign peaks (step 19893)
+FAIL at offset -0.5 ms, still FAIL after AAC (15466); the D-097.2 tone
+control re-based on a genuine mid-swing splice (the old control spliced
+into a full-scale 1760 Hz tone whose own per-sample swing exceeds any
+splice step -- a probe that judges the join against its neighbours rightly
+calls that clean). Tests: `tests/test_cutsell_d097_4_join_probe_and_
+repair_edge.py` (deterministic synthetic voice: glottal pulse train,
+formants, syllable envelopes, plosive bursts, room floor; the fixture is
+asserted to reproduce the OLD false positive before asserting the new
+probe passes). MP4 effect: not yet (next RAW). Regressions: D-094.3 /
+D-097.2 / live_render_qc / media_qc suites green.
+
+**Fix R5 (new, this entry) -- a trailing repair could LENGTHEN the
+output.** Defect: `live_boundary_repair.repair_segment_for_finding` trimmed
+50 ms from the PLAN's segment end (45.54 -> 45.49 s). The renderer had
+already tightened that segment's silent tail to 45.254 s; after the
+"repair" the remaining silent tail (0.236 s) fell under the tightener's
+0.28 s minimum, the tightening vanished and the rendered segment came out
+0.236 s LONGER -- every later join moved by +0.233 s between attempt 1 and
+2 (21.133 -> 21.367 ...), i.e. a physical repair re-exposed dead air the
+renderer had removed. Change: a trailing repair trims from the renderer-
+tightened edge (`tightened_end` recorded on the repair attempt); a repair
+can now only shorten the output. Authority: BoundaryEngine (physical
+repair) honouring the D-097 physical ownership contract with the Renderer's
+tightening. Verified execution: test with a 0.8 s silent tail -- repaired
+end = tightened end - trim; output window shrinks by exactly the trim.
+
+**Attempt 2/3 finding shift and the wasted repairs** are consequences of R4
++ R5 (a false finding -> a trim that moved the joins -> the same false
+findings at the new positions); no third defect.
+
+### Selection: LEVEL-1 attribution (ladder 34034507983, selection scope)
+
+LEVEL_1 20 regions / 50.793 s (0.3026 of Cut.ai keep) -- WORSE than
+34033468088 (25 / 35.82 s); F1 vs Cut.ai 0.738 (0.805), vs Gold 0.794
+(0.855); keep 147.1 s (162.3 s). FINAL MP4 spans: L1 14 / 46.27 s, F1
+0.749 / 0.809. By authority: BestTakeResolver 8 / 31.31 s, Attempt-
+Reconstructor 5 / 8.11 s, BoundaryEngine 26 / 7.70 s, CompositeResolver/
+PreResolverCleanup 1 / 5.75 s, IdeaClusterer 1 / 2.63 s. The forensic
+extract (runs 34039854285 / 34040198452; NOTE: its `keywords` and
+`trace_clip_ids` inputs are SPACE-separated -- a comma-joined list matches
+nothing) attributes the three big BestTake regions:
+
+- **"pimples behind the ear" family `tg_7765ab` (11.72 s false keep +
+  8.0 s missing = 19.7 s).** Both takes labelled `winner` 0.95 by the
+  Hybrid judge; `_semantic_best_take` fell to `delivery_tie_break_among_
+  survivors` and picked the EARLIER, longer take on a 0.6846 vs 0.6742
+  watch/listen score (gap 0.010 -- the codebase's own "decisive" gap is
+  0.30, `deterministic_best_take_authority.CLEAR_WINNER_MINIMUM_GAP`).
+  Both references keep the later, cleaner retry. Root cause: a genuine
+  semantic tie is settled by delivery-score noise; the retry ORDER (the
+  creator re-recorded the idea) carries no weight anywhere in the ladder.
+  PROPOSED (not implemented -- editorial policy, escalation A below): when
+  survivors are complete same-idea realizations and the delivery gap is
+  below the decisive gap, prefer the later complete attempt.
+- **"also I got pimples, like a rash, an allergy" (5.75 s missing,
+  `clip_98baea`)** -- Hybrid label `failed` 0.8 (locally corroborated:
+  `dense_physical_reset:7`, `visual_fumble:0.85`), chunk kept it fail-open
+  (replacement rejected: sequence identity 0.42 < 0.52), then `hybrid_
+  retry_completion_integrity` deleted it as `semantic_failed_cross_group_
+  retry_covered` by the (wrong) family winner above. Both references keep
+  it; Human Gold keeps it as THREE micro-pieces -- i.e. the take has real
+  physical resets that Gold cut AROUND while keeping the speech. Root
+  cause: "failed" here means "physically fumbled", which is Boundary /
+  perceptual work, not a discard; the label collapses the two. Recorded,
+  not fixed (needs the perceptual layer, D-095 ladder stage).
+- **"symptoms I had ... signs in hindsight" family `tg_7fe8ed` (7.25 s
+  missing).** Arbiter merged the two sentences (0.9) as one idea; the
+  Hybrid judge labelled the first `failed` 0.85 and the second `winner`
+  0.95 -> `single_semantic_winner`. Both references keep BOTH sentences
+  consecutively (a statement and its elaboration). Same editorial question
+  as D-097.2 R2 / D-097.3 (escalation A, non-blocking): one-winner-per-
+  family doctrine vs two complementary deliveries; here the provider label
+  variance (34033468088 kept both) decided it.
+- The gynaecologist family (`tg_829a77`, 2.6 s of edges), the loose exits
+  (BoundaryEngine, 7.7 s over 26 regions) and "resorcina." alone are
+  unchanged classes.
+
+Architecture-level reading (D-095 "widespread Level-1" rule): all three
+large regions are decided by the Hybrid semantic LABEL layer (Gemini
+`winner`/`failed`) or by a tie-break that runs when that layer is silent;
+the deterministic evidence the architecture owns (retry order, delivery
+cleanliness, physical resets) is subordinate to it and cannot overturn a
+label. This run's selection delta vs 34033468088 is label variance, not a
+D-097.3 regression: the D-097.3 change (coalescer) runs post-Selection.
+
+### Observability
+
+`benchmarks/video00_d044_forensic_extract.py` now exports `realization_
+resolver_authority`, filtered `realization_resolver_shadow` ideas,
+`stage_status`, `live_render_qc`, `perceptual_watch_listen` and the hybrid
+stage/budget counters, and the forensic workflow runs `benchmarks/clean_
+raw_gate.py` on the engine JSON -- the RAW log tail cannot carry them.
+
+**Offline qualification:** compileall clean; `tests/test_cutsell_d097_4_
+join_probe_and_repair_edge.py` 6/6; D-097.2 + D-094.3 + live_render_qc +
+media_qc + boundary_repair + perceptual/gate + D-097.C suites 118/118;
+forensic extract 10/10; CleanCutBench 54/54 x2; full `tests/test_cutsell_
+*.py` glob green (see commit).
+
+**LAST VERIFIED RESULT:** RAW 34034507983 = FREEZE PASS, R3 PROVEN on video
+(joins frame-exact), technical QC blocked delivery on a probe defect (R4)
+and its repairs lengthened the output (R5); both CODE FIXED / TESTS PASS;
+selection Level-1 regressions attributed to Hybrid label variance and a
+delivery-noise tie-break (no code).
+**NEXT AUTOMATIC ACTION:** commit + push; ONE authorised Modal RAW on the
+new head -- expected: QC PASS on the first attempt or a REAL finding at a
+named offset, a `deliverable_candidate` perceptual review, CLEAN RAW gate
+with technical evidence complete; then the forensic extract (space-
+separated inputs) for the resolver tiers of `tg_7765ab`; then the pimples
+family tie (pending escalation A) and the stomach/failed-take grouping.
+**HUMAN ACTION REQUIRED:** NO for the RAW. YES (A, non-blocking) for the
+editorial policy "prefer the later complete attempt when same-idea
+survivors tie on delivery below the decisive gap" and for the standing
+question of complementary same-idea deliveries both references keep.

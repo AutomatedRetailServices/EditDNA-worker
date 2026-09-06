@@ -502,6 +502,18 @@ Binding validation order (Product Owner, 2026-09-06):
   them mechanically). Ladder (selection only): L1 25 / 35.82 s, F1 vs Cut.ai
   0.805, vs Gold 0.855, keep 162.3 s. Next: ONE RAW to finally produce the
   MP4. Full entry: `docs/CUTSELL_DECISIONS.md` D-097.3.
+- D-097.4 (2026-09-06): RAW 34034507983 completed: Freeze PASSED, the D-097.2
+  renderer placed every join frame-exactly (R3 proven on video), but the
+  technical QC flagged 9/21 clean joins (it judged speech transients in a
+  +/-80 ms window, not the join) and its 50 ms repairs re-exposed dead air the
+  renderer had tightened (+0.233 s per attempt) -> NEEDS_HUMAN_REVIEW, no
+  deliverable. Probe rebuilt as a join-instant isolated-step detector (real
+  speech clean joins pass, real splices fail at the named offset); trailing
+  repairs now trim the renderer-tightened edge. Ladder L1 20 / 50.79 s (worse:
+  Hybrid label variance + a 0.010 delivery tie-break in the pimples family;
+  attributed, no selection code). Forensic extract now exports the resolver
+  tiers, QC, perceptual review and CLEAN RAW gate (inputs are SPACE-separated).
+  Next: ONE RAW for the MP4. Full entry: `docs/CUTSELL_DECISIONS.md` D-097.4.
 # HISTORICAL CUTSELL.AI 11 CONTINUITY
 
 A trusted CutSell.ai 11 recovery checkpoint is:

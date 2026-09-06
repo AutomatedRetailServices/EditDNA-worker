@@ -134,18 +134,25 @@ def test_technical_qc_no_longer_flags_clean_joins_as_discontinuities(tone_source
 
 @pytestmark_ffmpeg
 def test_the_discontinuity_probe_still_catches_a_real_hard_step(tone_sources):
-    # Negative control: a hard, unfaded splice at full amplitude between the
-    # two tones must still be reported when probed at its true position.
+    # Negative control: a hard, unfaded splice at full amplitude must still
+    # be reported when probed at its true position. The first tone is cut
+    # at 1.001 s (220.22 cycles: mid-swing, ~0.98 of full scale) into a
+    # second tone restarting from phase 0 -- a single ~29000-count step at
+    # the join between two otherwise identical, ordinary signals. (D-097.4:
+    # the earlier control spliced into a full-scale 1760 Hz tone whose OWN
+    # per-sample swing is larger than any splice step; a probe that judges
+    # the join instant against its neighbours rightly calls that clean.)
     directory, low, high = tone_sources
     out = str(directory / "hard_step.wav")
     _ffmpeg([
-        "-y", "-f", "lavfi", "-i", "sine=frequency=220:sample_rate=48000:duration=1",
-        "-f", "lavfi", "-i", "sine=frequency=1760:sample_rate=48000:duration=1",
-        "-filter_complex", "[0:a]volume=0.9,asetpts=PTS-STARTPTS[a];[1:a]volume=0.9,aphaseshift=shift=0.5,asetpts=PTS-STARTPTS[b];[a][b]concat=n=2:v=0:a=1[o]",
+        "-y", "-f", "lavfi", "-i", "sine=frequency=220:sample_rate=48000:duration=1.001",
+        "-f", "lavfi", "-i", "sine=frequency=220:sample_rate=48000:duration=1",
+        "-filter_complex", "[0:a]volume=0.9,asetpts=PTS-STARTPTS[a];[1:a]volume=0.9,asetpts=PTS-STARTPTS[b];[a][b]concat=n=2:v=0:a=1[o]",
         "-map", "[o]", out,
     ])
-    result = check_audio_discontinuity_at_boundaries(out, [1.0])
+    result = check_audio_discontinuity_at_boundaries(out, [1.001])
     assert result.status == "FAIL"
+    assert abs(result.findings[0].detail["offset_ms"]) <= 1.0
 
 
 def test_render_command_is_one_pass_with_exact_trims_and_join_fades(monkeypatch, tmp_path):

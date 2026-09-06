@@ -51,6 +51,10 @@ class SegmentRepairAttempt:
     repaired_end: float
     trim_sec: float
     reason: str
+    # D-097.4: the renderer-tightened trailing edge the trim was taken from
+    # (None for a leading-edge repair) -- the repair record shows the edge
+    # the output really carried, not only the plan's own end.
+    tightened_end: float | None = None
 
 
 def segment_output_windows(segments: tuple[RenderSegment, ...]) -> list[tuple[float, float]]:
@@ -87,6 +91,8 @@ def repair_segment_for_finding(
     `None` if this finding is not safely repairable this way -- callers must
     treat `None` as "no safe repair", never retry with a different guess.
     """
+    from .render import tighten_trailing_silence
+
     windows = segment_output_windows(segments)
     finding_start, finding_end = float(finding.start), float(finding.end)
 
@@ -99,15 +105,25 @@ def repair_segment_for_finding(
         if not (near_trailing_edge or near_leading_edge):
             continue  # a mid-segment defect -- a boundary trim cannot reach it safely
 
+        # D-097.4: the edge the OUTPUT actually carries is the renderer's
+        # trailing-silence-tightened edge (`segment_output_windows` maps
+        # with it), so a trailing repair must trim from THAT edge. Run
+        # 34034507983 trimmed 50 ms from the un-tightened plan end instead:
+        # the remaining silent tail (0.236 s) fell under the tightener's
+        # 0.28 s minimum, the tightening vanished, and the "repair" made the
+        # rendered segment 0.236 s LONGER, re-exposing dead air the renderer
+        # had already removed and moving every later join by +0.233 s.
+        tightened_end = tighten_trailing_silence(seg).end if near_trailing_edge else None
+        effective_duration = (tightened_end - seg.start) if tightened_end is not None else seg.duration_sec
         defect_duration = max(_MIN_TRIM_SEC, finding_end - finding_start)
-        max_trim = seg.duration_sec * _MAX_TRIM_FRACTION
+        max_trim = effective_duration * _MAX_TRIM_FRACTION
         trim = min(defect_duration, max_trim)
-        if seg.duration_sec - trim < _MIN_REMAINING_SEGMENT_SEC:
+        if effective_duration - trim < _MIN_REMAINING_SEGMENT_SEC:
             continue  # would eat too much of the real segment -- refuse, do not guess
 
         edge = "trailing" if near_trailing_edge else "leading"
         if edge == "trailing":
-            repaired_seg = replace(seg, end=seg.end - trim)
+            repaired_seg = replace(seg, end=float(tightened_end) - trim)
         else:
             repaired_seg = replace(seg, start=seg.start + trim)
 
@@ -124,6 +140,7 @@ def repair_segment_for_finding(
             repaired_end=repaired_seg.end,
             trim_sec=trim,
             reason=f"trimmed_{edge}_edge_by_{trim:.3f}s_for_{finding.kind}",
+            tightened_end=tightened_end,
         )
         return tuple(new_segments), attempt
 

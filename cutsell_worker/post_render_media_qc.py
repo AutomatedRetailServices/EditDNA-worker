@@ -261,17 +261,45 @@ def check_audio_discontinuity_at_boundaries(
     window_sec: float = 0.08,
     sample_rate: int = 22_050,
     jump_ratio_threshold: float = 6.0,
+    join_tolerance_sec: float = 0.005,
+    flank_sec: float = 0.002,
+    guard_samples: int = 3,
+    min_step_sample_jump: float = 500.0,
+    flank_peak_ratio_threshold: float = 3.0,
 ) -> PostRenderQCResult:
     """At each caller-supplied edit-point timestamp, decode the real audio
-    immediately around it and compare the single largest sample-to-sample
-    jump against the local signal's typical (median) jump -- the actual
-    acoustic signature of a hard "click"/step discontinuity a bad cut
-    leaves, not inferred from text. A boundary with too few real samples to
+    immediately around it and look for the acoustic signature of a hard
+    "click"/step discontinuity a bad splice leaves: ONE isolated
+    sample-to-sample jump AT the join instant that dwarfs the signal's own
+    typical jumps immediately on either side of it.
+
+    D-097.4: the previous formulation compared the LARGEST jump anywhere in
+    the +/-`window_sec` window against the window-wide median. Real speech
+    tightly cut at a word onset (the normal shape of a Boundary cut) put a
+    plosive or a voiced onset tens of milliseconds from the join inside that
+    window, and the near-silent faded join itself dragged the median down:
+    run 34034507983 flagged 9 of 21 frame-exact, click-free joins (peak
+    579-707 vs "typical" 26-30) and burnt three 50 ms repairs on them. Any
+    speech transient is a burst of consecutive large jumps; a splice click
+    is a single jump whose neighbours (a few samples away, on both sides)
+    are ordinary. So the probe now (1) only considers jumps within
+    `join_tolerance_sec` of the probed join (the renderer places joins
+    frame-exactly, D-097.2), (2) measures "typical" as the LARGER of the two
+    flank medians (`flank_sec` on each side, skipping `guard_samples` around
+    the candidate so codec ringing does not count), (3) requires the jump to
+    also exceed the LARGEST jump in either flank by `flank_peak_ratio_threshold`
+    (a click is one step nothing around it comes close to; a noisy fricative
+    or plosive burst under the join fade-in is a run of comparable jumps),
+    and (4) still requires the absolute jump to exceed
+    `min_step_sample_jump` so a click-free silent join is never reported. A boundary with too few real samples to
     judge (e.g. right at the very start of the file) is skipped, not
     guessed at."""
     import numpy as np
 
     findings: list[PostRenderFinding] = []
+    tolerance = max(1, int(round(join_tolerance_sec * sample_rate)))
+    flank = max(1, int(round(flank_sec * sample_rate)))
+    guard = max(0, int(guard_samples))
     for timestamp in boundary_timestamps:
         pcm = _extract_pcm_window(media_path, center_sec=timestamp, window_sec=window_sec, sample_rate=sample_rate)
         if pcm.size < 8:
@@ -279,15 +307,36 @@ def check_audio_discontinuity_at_boundaries(
         deltas = np.abs(np.diff(pcm.astype(np.int64)))
         if deltas.size < 4:
             continue
-        peak = float(np.max(deltas))
-        typical = float(np.median(deltas)) + 1.0  # +1 avoids a divide-by-zero on true silence
-        if peak / typical >= jump_ratio_threshold and peak > 500:
-            findings.append(PostRenderFinding(
-                kind=ABRUPT_AUDIO_DISCONTINUITY,
-                start=timestamp, end=timestamp,
-                detail={"peak_sample_jump": peak, "typical_sample_jump": typical, "ratio": peak / typical},
-                routes_to="BoundaryEngine",
-            ))
+        center = deltas.size // 2
+        lo = max(flank + guard, center - tolerance)
+        hi = min(deltas.size - flank - guard, center + tolerance + 1)
+        best: tuple[float, float, float, float, int] | None = None  # ratio, peak, typical, neighbour peak, offset
+        for index in range(lo, hi):
+            peak = float(deltas[index])
+            if peak < min_step_sample_jump:
+                continue
+            left = deltas[index - guard - flank:index - guard]
+            right = deltas[index + guard + 1:index + guard + 1 + flank]
+            typical = max(float(np.median(left)), float(np.median(right))) + 1.0  # +1 avoids a divide-by-zero on true silence
+            neighbour_peak = max(float(np.max(left)), float(np.max(right))) + 1.0
+            ratio = peak / typical
+            if peak / neighbour_peak < flank_peak_ratio_threshold:
+                continue  # comparable jumps right next to it: a burst, not a step
+            if best is None or ratio > best[0]:
+                best = (ratio, peak, typical, neighbour_peak, index - center)
+        if best is None or best[0] < jump_ratio_threshold:
+            continue
+        ratio, peak, typical, neighbour_peak, offset = best
+        findings.append(PostRenderFinding(
+            kind=ABRUPT_AUDIO_DISCONTINUITY,
+            start=timestamp, end=timestamp,
+            detail={
+                "peak_sample_jump": peak, "typical_sample_jump": typical, "ratio": ratio,
+                "neighbour_peak_sample_jump": neighbour_peak,
+                "offset_ms": round(offset / sample_rate * 1000.0, 3),
+            },
+            routes_to="BoundaryEngine",
+        ))
     status = "FAIL" if findings else "PASS"
     return PostRenderQCResult(status=status, findings=tuple(findings))
 

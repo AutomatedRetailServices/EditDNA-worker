@@ -149,6 +149,26 @@ def extract(result_path: str, keywords: list[str] | None = None, trace_clips: li
         "final_story_coherence_validation": diagnostics.get("final_story_coherence_validation"),
         "post_selection_complementary_family_stabilizer": diagnostics.get("post_selection_complementary_family_stabilizer"),
         "post_selection_composite_handoff_trim": diagnostics.get("post_selection_composite_handoff_trim"),
+        # D-097.4: the authorities that decided RAW 34034507983's Level-1
+        # regions were invisible to this extract -- the Resolver's per-idea
+        # tiers/reasons, the render/QC/delivery chain, the perceptual
+        # reviewer and the stage statuses all live outside the curated
+        # subset above. Exposed here so a per-fix MP4 report never needs a
+        # second paid run to learn WHICH tier chose a winner or WHY the
+        # renderer's QC refused delivery.
+        "realization_resolver_authority": diagnostics.get("realization_resolver_authority"),
+        "realization_resolver_shadow_ideas_filtered": _filter_list(
+            (diagnostics.get("realization_resolver_shadow") or {}).get("ideas") or [],
+            ("semantic_idea_id", "decision_reason", "winner_realization_id"),
+        ),
+        "stage_status": result.get("stage_status"),
+        "live_render_qc": result.get("live_render_qc") or diagnostics.get("live_render_qc"),
+        "perceptual_watch_listen": result.get("perceptual_watch_listen") or diagnostics.get("perceptual_watch_listen"),
+        "hybrid_editorial_stage": {
+            "stage": (result.get("stage_status") or {}).get("hybrid_editorial"),
+            "requested_chunk_count": diagnostics.get("hybrid_editorial_requested_chunk_count"),
+            "budget_refused_count": diagnostics.get("hybrid_editorial_budget_exhausted_chunk_count"),
+        },
     }
     if trace_clips:
         # D-045: answers "which diagnostics path(s) mention this clip_id at
