@@ -14,12 +14,19 @@ from .canonical_identity import (
     mint_retry_family_id,
     mint_semantic_idea_id,
 )
-from .claim_coverage_best_take import critical_coverage_sets, resolve_critical_coverage_dominance
+from .claim_coverage_best_take import (
+    _content_overlap_coefficient,
+    critical_coverage_sets,
+    resolve_critical_coverage_dominance,
+)
 from .clean_cut import apply_clean_cut
 from .clean_cut_provider import CleanCutProvider, apply_provider_judgements, safe_clean_cut_judge
 from .contradiction_signal import any_pair_contradicts
 from .composer import compose_selected
 from .composer_provider import ComposerProvider, safe_compose_order
+from .final_sibling_grouping import _content
+from .semantic_atom_importance import _clause_has_any
+from .semantic_claims import _BELIEF_PERCEPTION_MARKERS, _RETROSPECTIVE_RECOGNITION_MARKERS
 from .contracts import (
     CandidateTake,
     DraftClip,
@@ -168,6 +175,99 @@ def family_scoped_semantic_decisions(
 _BTS_SINGLETON_UNUSABLE_CONFIDENCE = 0.85
 
 
+# D-103 (P0 follow-up, papillary-diagnosis closure): D-102's own real-media
+# qualification proved condition (d) below cannot catch every required-
+# meaning loss -- the D-101 papillary realization carries ZERO claims of
+# any type under `semantic_claims.py`'s classifier (its own sentences are
+# generic ACTION_EVENT/SUPPORTING), so `critical_coverage_sets` has
+# nothing to compare and the fast path stayed unprotected. Investigation
+# (see D-103 decision entry) confirmed no ALREADY-PRODUCTION-AUTHORITATIVE
+# representation captures this class of loss either: `semantic_ledger.py`
+# and `realization_resolver.py`'s `RequirementGroup`/`build_requirement_
+# groups` are both explicitly SHADOW-ONLY ("never consulted by ... today's
+# engine" -- their own module docstrings) and cannot be bridged into a live
+# veto without a separate authority-cutover directive, out of this bounded
+# task's scope.
+#
+# The minimum general representation added here is narrow and local to
+# this ONE veto -- it does not touch `semantic_claims.classify_claim`,
+# ClaimCoverage, StoryValidator, or D-063 dominance, and never reclassifies
+# anything CRITICAL globally. It reuses the SAME general (non-Video00)
+# marker vocabulary `semantic_claims.py` already uses for its own
+# `CONTRASTIVE_HINDSIGHT_NEGATION` claim role (`_BELIEF_PERCEPTION_
+# MARKERS`/`_RETROSPECTIVE_RECOGNITION_MARKERS`) -- a belief/perception
+# verb about one's own state, paired with an explicit retrospective-
+# recognition marker ("looking back", "now that I ...", "in hindsight") --
+# but recognizes it as a REQUIRED before/after realization about a
+# condition regardless of whether a negation marker also happens to be
+# present (the existing classifier only grants that pattern CRITICAL
+# status when it IS negated; the identical propositional shape phrased
+# positively is invisible to it today). This is a general linguistic
+# pattern, not a Video00 fact/phrase: it fires on the SHAPE of the
+# sentence, never on specific transcript wording.
+#
+# The veto only fires when a sibling matches this pattern AND the
+# proposed winner's own text does not already substantially overlap with
+# that sibling's content (`_content_overlap_coefficient`, the same
+# Szymkiewicz-Simpson overlap primitive `claim_coverage_best_take.py`'s
+# own D-065/D-066 hindsight-alignment machinery already uses) -- so a
+# winner that already expresses the same realization (a paraphrase) is
+# never forced open, and two candidates that both happen to carry this
+# pattern about genuinely different subjects are still correctly
+# distinguished by the overlap check, not merged or composited.
+_REQUIRED_REALIZATION_OVERLAP_FLOOR = 0.40
+
+
+def _is_retrospective_condition_realization(text: str) -> bool:
+    """A general (non-Video00) linguistic pattern: a belief/perception verb
+    about one's own state paired with an explicit retrospective-
+    recognition marker -- the same general vocabulary `semantic_claims.py`
+    already uses for `CONTRASTIVE_HINDSIGHT_NEGATION`, but without
+    requiring the negation marker that classifier currently insists on.
+    See the D-103 module comment above `_single_winner_safety_veto` for
+    the full rationale."""
+    return _clause_has_any(text, _BELIEF_PERCEPTION_MARKERS) and _clause_has_any(
+        text, _RETROSPECTIVE_RECOGNITION_MARKERS
+    )
+
+
+def _members_missing_required_condition_realization(
+    member_ids: list[str], by_id: dict[str, CandidateTake]
+) -> set[str]:
+    """Every member id whose own text fails to preserve ANOTHER member's
+    required before/after condition realization (`_is_retrospective_
+    condition_realization`). Shared by `_single_winner_safety_veto` (which
+    only needs to know whether the LABEL's own pick is missing one) and
+    the general ladder's own exclusion step below (D-103): a pure veto
+    that merely forces fallthrough is not enough here, because the
+    dominance step a few lines down is driven by the SAME CRITICAL-claim
+    classifier that is blind to this realization -- a sibling with zero
+    CRITICAL claims never registers as "dominant" over a winner that
+    happens to hold an unrelated CRITICAL claim of its own, so without an
+    explicit exclusion the ladder would silently re-derive the exact
+    label it was just told not to trust. This exclusion is therefore
+    computed and applied the SAME way D-081's `semantic_delete_
+    recommended` exclusion already is -- soft, `_exclude_unless_all`,
+    fail-open toward WHEN-UNCERTAIN-KEEP -- never a second, divergent
+    resolution path."""
+    missing: set[str] = set()
+    for cid in member_ids:
+        text = str(by_id[cid].text or "")
+        for other_id in member_ids:
+            if other_id == cid:
+                continue
+            other_text = str(by_id[other_id].text or "")
+            if not _is_retrospective_condition_realization(other_text):
+                continue
+            overlap = _content_overlap_coefficient(
+                frozenset(_content(other_text)), frozenset(_content(text))
+            )
+            if overlap < _REQUIRED_REALIZATION_OVERLAP_FLOOR:
+                missing.add(cid)
+                break
+    return missing
+
+
 # D-101 ROOT CAUSE #1 (P0 forensic, hereditary-cancer/papillary-diagnosis
 # cluster): `single_semantic_winner` used to trust a lone Hybrid/Gemini
 # "winner" label unconditionally, with NONE of the safety checks the
@@ -182,12 +282,15 @@ _BTS_SINGLETON_UNUSABLE_CONFIDENCE = 0.85
 # incomplete attempt (`complete_idea is False` -- WHEN-UNCERTAIN-KEEP:
 # unset/unknown is never a veto trigger), (c) factually contradict another
 # member (`contradiction_signal.any_pair_contradicts`, the same safety
-# gate used everywhere else in this function), or (d) fail to cover a
+# gate used everywhere else in this function), (d) fail to cover a
 # CRITICAL claim (`claim_coverage_best_take.critical_coverage_sets`) that
-# another member uniquely covers. No new heuristic: every check below is
-# the SAME deterministic function the multi-candidate branch already
-# calls. Vetoed cases fall through to that same branch (treated exactly
-# like a non-decisive label set), never a bespoke resolution path.
+# another member uniquely covers, or (e, D-103) fail to preserve a sibling's
+# required before/after condition realization (see above) that the
+# CRITICAL-claim classifier alone does not recognize. No new heuristic
+# beyond (e)'s own narrow, local pattern: every other check below is the
+# SAME deterministic function the multi-candidate branch already calls.
+# Vetoed cases fall through to that same branch (treated exactly like a
+# non-decisive label set), never a bespoke resolution path.
 def _single_winner_safety_veto(
     preferred_id: str,
     members: tuple[CandidateTake, ...],
@@ -214,6 +317,8 @@ def _single_winner_safety_veto(
                 continue
             if not covered.issubset(preferred_coverage):
                 return "winner_missing_unique_critical_claim"
+    if preferred_id in _members_missing_required_condition_realization(member_ids, by_id):
+        return "winner_missing_required_condition_realization"
     return None
 
 
@@ -421,6 +526,16 @@ def _semantic_best_take(
     # Step 2: attempt completeness.
     incomplete_ids = {cid for cid in survivors if by_id[cid].complete_idea is False}
     survivors = _exclude_unless_all(survivors, incomplete_ids)
+
+    # Step 2.5 (D-103): required-condition-realization safety. Excluded
+    # HERE, not merely vetoed at the fast path, because Steps 3/4's own
+    # CRITICAL_COVERAGE_DOMINANCE is driven by the SAME claim classifier
+    # that is blind to this realization -- a survivor missing it would
+    # otherwise still win dominance purely by holding an unrelated
+    # CRITICAL claim of its own. See `_members_missing_required_condition_
+    # realization`'s own docstring for the full rationale.
+    required_realization_missing_ids = _members_missing_required_condition_realization(survivors, by_id)
+    survivors = _exclude_unless_all(survivors, required_realization_missing_ids)
 
     if len(survivors) >= 2:
         members_pairs = [(cid, by_id[cid]) for cid in member_ids]

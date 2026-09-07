@@ -12939,3 +12939,124 @@ about Root Cause B still applies unchanged.
 decision (update the obsolete test, do not narrow the safety veto) and
 implemented accordingly. A future RAW authorization is needed to prove
 or disprove either fix's real-media effect.
+
+## D-103 -- papillary P0 general meaning-safety extension: required before/after condition realization (bounded encargo, no RAW)
+
+D-102's real-media qualification (run `34073301047`) proved Fix A's
+existing safety net (condition d, CRITICAL-claim coverage asymmetry)
+cannot catch every required-meaning loss: the D-101 papillary
+continuation realization carries ZERO claims of any type under
+`semantic_claims.py`'s classifier (its own sentences are generic
+ACTION_EVENT/SUPPORTING), so `critical_coverage_sets` has nothing to
+compare and the single-winner fast path stayed unprotected.
+
+**Missing-meaning signal root cause:** no existing representation
+captures this class of loss. Two candidates were investigated and both
+ruled out as production-ineligible: `semantic_ledger.py` (D-050B, SHADOW
+MODE -- its own docstring: "Nothing in the active pipeline reads a
+`SemanticLedger` value to branch on") and `realization_resolver.py`'s
+`RequirementGroup`/`build_requirement_groups` (D-050C1, SHADOW AUTHORITY
+-- its own docstring: "not consulted by, and never feeds back into ...
+today's engine"). Bridging either into a live veto would require a
+separate authority-cutover directive, out of this bounded task's scope.
+Answer to the investigation's own question ("is the required meaning
+already represented somewhere but ignored?"): **NO.**
+
+**Minimum general representation added:** `_is_retrospective_condition_
+realization` (`pipeline.py`) -- a belief/perception verb about one's own
+state paired with an explicit retrospective-recognition marker, reusing
+the SAME general (non-Video00) marker vocabulary `semantic_claims.py`
+already uses for its own `CONTRASTIVE_HINDSIGHT_NEGATION` claim role
+(`_BELIEF_PERCEPTION_MARKERS`/`_RETROSPECTIVE_RECOGNITION_MARKERS`), but
+without requiring the negation marker that classifier currently insists
+on -- the identical propositional shape phrased positively is invisible
+to it today. This is local to `pipeline.py` only: it does not touch
+`semantic_claims.classify_claim`, ClaimCoverage, StoryValidator, or D-063
+dominance, and never reclassifies anything CRITICAL globally.
+
+**Safety-veto extension:** `_single_winner_safety_veto` gains condition
+(e): vetoes when a sibling matches the pattern and the proposed winner's
+own text does not substantially overlap with that sibling's content
+(`_content_overlap_coefficient`, the SAME Szymkiewicz-Simpson overlap
+primitive `claim_coverage_best_take.py`'s own D-065/D-066 hindsight-
+alignment machinery already uses; floor 0.40, matching D-097.A's own
+`_RESTART_MINIMUM_REMAINDER_OVERLAP` convention). Critically, a pure veto
+was proven INSUFFICIENT during implementation: `resolve_critical_
+coverage_dominance` (Steps 3/4 of the general ladder the veto falls
+through to) is driven by the SAME blind claim classifier, so a winner
+with an unrelated CRITICAL claim of its own would still win "dominance"
+over a sibling with zero claims, silently re-deriving the exact label
+just vetoed. The fix is therefore a shared exclusion
+(`_members_missing_required_condition_realization`), applied BOTH at the
+fast-path veto AND as a new Step 2.5 in the general ladder itself
+(excluding the offending winner from `survivors` the same soft,
+fail-open way D-081's `semantic_delete_recommended` exclusion already
+works), so dominance and the delivery tie-break never see the excluded
+candidate at all.
+
+**Before -> after papillary path (generic reproduction of the exact D-101/
+D-102 structural shape, not the Video00 transcript):** Candidate A
+(model-labelled "winner" 0.95, unrelated content, own CRITICAL NEGATION
+claim) vs Candidate B (the required continuation-shaped realization, zero
+CRITICAL claims, HIGHER raw delivery score deliberately given to A to
+rule out delivery quality as the explanation). BEFORE: `single_semantic_
+winner` returns A unconditionally, B's required meaning is lost. AFTER:
+the veto fires (`winner_missing_required_condition_realization`), A is
+excluded from `survivors` before dominance runs, and B survives through
+the FULL authoritative path as `delivery_tie_break_among_survivors`
+despite A's higher raw score -- proving the fix, not delivery
+coincidence.
+
+Tests (`tests/test_cutsell_d103_required_condition_realization_safety.py`,
+11 new, all passing): the positive control above through the actual
+`_semantic_best_take` call path; a direct veto-reason check; a direct
+exclusion-helper check; a pattern-helper unit test (requires BOTH
+markers, neither alone qualifies); the required negative controls --
+unique low-value supporting detail never vetoes (no pattern match at
+all), a winner's own paraphrase that already covers the sibling's
+realization is never forced open (high overlap), a genuinely safe single
+winner is completely unaffected, two candidates that both happen to
+carry realization language still resolve to exactly one selection (never
+composite/keep-both), genuinely complementary (different-topic) content
+still resolves to one pick here (downstream `claim_coverage_best_take.py`
+composite logic, unaffected by this change, remains the sole place
+complementary pairs are ever combined), the existing contradiction veto
+(condition c) is still checked first and is never overridden by this new
+class, and D-102's own family-context fixture (the "5-10%" partial-
+paraphrase pair) is unaffected because neither candidate matches this
+new pattern at all.
+
+Regression (all green, no code outside `pipeline.py` touched): the full
+`test_cutsell_d097_*.py` family, `test_cutsell_d082_non_decisive_
+semantic_fallback.py`, `test_cutsell_d100_multimodal_retry_
+corroboration.py`, `test_cutsell_d101_semantic_best_take_safety_
+hardening.py`, and `test_cutsell_minimum_sufficient_editorial_set.py` --
+306/306 together with the new D-103 suite; `test_cutsell_clean_cut_core_
+evaluation_suite.py` and `test_cutsell_d050c1_5_full_cleancutbench_
+parity.py` -- 56/56; `compileall` clean; full `tests/` suite (excluding
+the one pre-existing, unrelated collection error already recorded at
+D-099/D-100, `test_semantic_stitch.py`) run as the one broader offline
+qualification: 2969 passed, 5 failed -- the SAME 5 pre-existing,
+unrelated failures already recorded at D-099/D-100/D-102
+(`test_hybrid_story_guard_incomplete_retry.py`,
+`test_video00_modal_hybrid_semantic_parity.py` x4), no new failure.
+
+Limits / not proven here: this is an OFFLINE fix only, verified against
+GENERIC fixtures reproducing the D-101/D-102 structural shape -- it was
+deliberately NOT validated against, or tuned to, the literal Video00
+transcript (per this task's own instruction). Whether the real papillary
+continuation clip's actual wording happens to trip the belief+
+retrospective marker combination on real media remains unverified until
+a future authorized RAW; if it does not, this extension closes the
+GENERAL architectural gap (the fast path and the ladder can now both
+recognize and protect this realization class) without yet proving the
+SPECIFIC real-media instance is caught. No RAW was dispatched, no
+provider/S3/infra work was performed. AttemptReconstructor/
+RecordingProcessRemoval (D-102's own identified next blocker) was not
+started, per this task's explicit priority ordering.
+
+**HUMAN ACTION REQUIRED:** NO to close this bounded implementation task.
+A future authorized RAW is needed to prove or disprove whether this
+general extension actually catches the real papillary instance, and
+whether it should be prioritized ahead of, or alongside,
+AttemptReconstructor/RecordingProcessRemoval next.
