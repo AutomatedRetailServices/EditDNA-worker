@@ -203,11 +203,30 @@ def apply_deterministic_best_take_authority(draft, *, swap_enabled: bool = False
         if m.get("reason") == "deterministic_clear_retry_family_winner" and m.get("group_id") is not None
     }
     if overridden_group_ids:
+        # D-123 (docs/CUTSELL_DECISIONS.md D-123): `winner_path_after`/
+        # `final_winner` are the same "what actually happened" fields
+        # `winner_path` already tracked for D-122 -- this authority is a
+        # LATER stage than `_semantic_best_take`, so its own move is the
+        # true final answer. `winner_path_before` is untouched: it is the
+        # semantic-only counterfactual computed upstream and is unaffected
+        # by this authority running afterward.
+        winner_by_group = {
+            str(m.get("group_id")): str(m.get("clip_id"))
+            for m in moves
+            if m.get("reason") == "deterministic_clear_retry_family_winner" and m.get("group_id") is not None
+        }
         existing_groups = list(diagnostics.get("take_judge_groups") or ())
         patched_groups = []
         for row in existing_groups:
             if isinstance(row, dict) and str(row.get("group_id")) in overridden_group_ids:
-                row = {**row, "winner_path": "DETERMINISTIC_OVERRIDE", "performance_consulted_before_winner": True}
+                gid_key = str(row.get("group_id"))
+                row = {
+                    **row,
+                    "winner_path": "DETERMINISTIC_OVERRIDE",
+                    "performance_consulted_before_winner": True,
+                    "winner_path_after": "DETERMINISTIC_OVERRIDE",
+                    "final_winner": winner_by_group.get(gid_key, row.get("final_winner")),
+                }
             patched_groups.append(row)
         diagnostics["take_judge_groups"] = patched_groups
 

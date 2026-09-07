@@ -15402,3 +15402,187 @@ to proceed from this evidence-infrastructure layer to an actual CASE B
 scoring/veto implementation (and, if so, how to resolve the double-
 counting question this layer now makes inspectable) remains the Product
 Owner decision D-121 identified; not made here.
+
+## D-123 -- BestTake CASE B performance-aware fast-path gate: bounded early-
+exit gate on `single_semantic_winner`, no new score/weight/threshold. The
+ONE authorized behavior change (post D-121/D-122): D-122's CASE B evidence
+may now prevent `_semantic_best_take`'s `single_semantic_winner` fast path
+from returning BEFORE performance is consulted, when a real, evidenced
+conflict exists. A bypass NEVER picks a winner from CASE B directly -- it
+only falls through to the SAME general ladder (steps 1-9) `_semantic_
+best_take` already had; that ladder, not CASE B, decides the winner.
+Proven by 23 new targeted tests, 557 bounded-regression tests, and a full
+offline suite showing zero new failures beyond the same 5 pre-existing/
+unrelated failures and 1 pre-existing/unrelated collection error already
+documented under D-122.
+
+**Implementation, exactly per this task's bounded scope:**
+
+1. **`pipeline.py` (additive).** `_meaning_sufficient_member_ids` re-derives
+   which members already pass the EXISTING meaning-sufficiency signals the
+   general ladder below already applies (D-081 `semantic_delete_
+   recommended`, `complete_idea is False`, D-103 required-condition-
+   realization) -- reused verbatim, never a new classifier. `_case_b_
+   fast_path_conflict` is a single read-only comparison of D-122's
+   already-computed `delivery_event_count` (never a new score) that
+   returns a factual conflict-basis dict iff ALL FOUR CORE RULE conditions
+   hold: (1) a decisive semantic fast-path candidate exists; (2) the
+   DeliveryScorer-preferred alternative (`local_selected_clip_id`) is
+   itself meaning-sufficient; (3) it differs from the semantic candidate
+   (no conflict when they already agree); (4) CASE B evidence shows a
+   real, strict asymmetry favoring the alternative (`winner_count >
+   alt_count`, never a guessed cutoff -- tied, absent, reversed, or
+   ENTRY/EXIT-only-derived (naturally 0 vs 0) evidence all return `None`,
+   preserving the fast path per this task's explicit fail-open rule).
+   `_semantic_best_take` gained one new keyword-only parameter,
+   `case_b_evidence_by_id: Mapping[str, object] | None = None` (omitted or
+   `None`, byte-identical to pre-D-123 behavior for every existing
+   caller). Inside the `len(winners) == 1` branch, AFTER the existing
+   D-101/D-103 safety veto already passes (the veto is checked first and
+   unconditionally -- D-123 never weakens or bypasses it), the gate is
+   consulted ONLY when evidence is supplied; a real conflict skips the
+   early `return` and falls through to the exact same fallthrough path a
+   vetoed label already used, landing in the unmodified general ladder
+   (D-081/D-103 exclusion, D-063/D-065/D-066 CRITICAL_COVERAGE_DOMINANCE,
+   D-101 unique-fact/contradiction safety, then the D-082 DeliveryScorer
+   tie-break) -- the SAME code, unmodified, that already existed.
+
+2. **Per-family call site (additive).** `build_flow_b_draft` now computes
+   D-122's CASE B evidence objects once per family (raw dataclasses, not
+   yet JSON-projected) and calls `_semantic_best_take` TWICE: once exactly
+   as before (no `case_b_evidence_by_id`) to capture the semantic-only
+   counterfactual (`winner_path_before`, observability only, never the
+   actual decision), and once with the evidence supplied (the actual
+   decision, `winner_path_after`). This mirrors D-122's own precedent of
+   computing an advisory counterfactual (`_single_semantic_winner_
+   candidate`) alongside the real decision without threading it through
+   the return value.
+
+3. **New `take_judge_groups` diagnostics keys (additive only).** Eight new
+   keys on the existing per-family row: `winner_path_before`, `winner_
+   path_after`, `semantic_fast_path_bypassed` (bool), `bypass_reason`
+   (`"case_b_performance_conflict"` or `None`), `case_b_conflict_present`
+   (bool), `case_b_conflict_basis` (the factual dict above, or `None`),
+   `meaning_sufficient_candidates` (sorted list), `final_winner`. All five
+   D-122 keys (`winner_path`, `performance_consulted_before_winner`,
+   `deliveryscore_top_candidate`, `semantic_fast_path_candidate`, `case_b_
+   evidence`) are unchanged and still present (regression preservation,
+   proven by test).
+
+4. **`deterministic_best_take_authority.py` (additive).** The existing
+   `DETERMINISTIC_OVERRIDE` annotation (D-122) now ALSO sets `winner_path_
+   after="DETERMINISTIC_OVERRIDE"` and `final_winner=<the actual moved
+   clip_id>` on the same patched rows, for consistency with the new field
+   pair -- `winner_path_before` is left untouched (it is the semantic-only
+   counterfactual computed upstream, unaffected by this later stage).
+
+5. **Bug found and fixed during implementation (in-scope, same authorized
+   objective, D-091 root-cause continuity -- not a separate escalation):**
+   `_semantic_best_take` is monkeypatched at package-import time by
+   `install_semantic_best_take_integrity()` (`cutsell_worker/__init__.py`
+   calls it on load), which replaces the module-global `pipeline._
+   semantic_best_take` with a wrapper (`semantic_best_take_with_
+   integrity`) that layers three additional, pre-existing D-082-era
+   safety checks on top of the real function's decision. That wrapper's
+   own signature did not accept (or forward) `case_b_evidence_by_id`,
+   so the new keyword argument at the per-family call site would have
+   raised `TypeError` in production, not merely in tests -- this was
+   caught by the targeted test suite BEFORE being missed, never shipped
+   unverified. Fixed by adding the parameter to the wrapper and
+   forwarding it verbatim to `original(...)`; the wrapper's own three
+   checks are unmodified and still run, unconditionally, on whatever the
+   real function decided either way (with or without a D-123 bypass).
+
+**Pimples-shaped fixture (mirrors D-118's exact real shape, docs/CUTSELL_
+BESTTAKE_CASE_B_FORENSIC_D121.md Section 5):** semantic winner A (label
+"winner" 0.95) carries MORE DELIVERY-zone reset evidence (2 events) than
+the DeliveryScorer-preferred, meaning-sufficient alternative B (0 events,
+DeliveryScorer score 0.90 vs A's 0.40). Without CASE B evidence: `_
+semantic_best_take` returns `("A", "A", "single_semantic_winner")`
+(`winner_path_before = SEMANTIC_FAST_PATH`, performance never consulted)
+-- the exact D-118 regression shape. With CASE B evidence supplied: the
+fast path is gated, falls through to the unmodified general ladder, and
+returns `("B", None, "delivery_tie_break_among_survivors")` --
+`winner_path_after = DELIVERYSCORE_PATH`, performance consulted, B (the
+EXISTING DeliveryScorer top pick) wins via the EXISTING ladder step, never
+via a CASE B score.
+
+**Negative controls, all proving the fast path is PRESERVED (no bypass):**
+(1) no CASE B evidence supplied; (2) the DeliveryScorer-preferred
+alternative is itself meaning-insufficient (`complete_idea=False`); (3)
+the semantic winner already equals the DeliveryScorer top pick (trivial
+no-conflict); (4) tied CASE B evidence (1 event each); (5) evidence
+asymmetry reversed (favors the semantic winner, not the alternative); (6)
+evidence missing for either candidate; (7) the only observed difference is
+an ENTRY-only event (naturally 0 vs 0 inside CASE B's own DELIVERY-zone
+filter); (8) the only observed difference is an EXIT-only event (same).
+Plus: the deterministic safety veto (D-101/D-103) still gates
+UNCONDITIONALLY before CASE B is even consulted -- proven identical
+results with and without CASE B evidence when a veto fires. Plus: a second,
+wholly unrelated family in the same pipeline call is proven unaffected by
+a bypass decided in another family (the gate is per-family, never global).
+
+**No new score, weight, or threshold.** `CaseBPerformanceEvidence`'s
+dataclass fields contain no `score`/`weight`/`threshold`-named field
+(static test). `_case_b_fast_path_conflict` reads only D-122's own
+`delivery_event_count` with a strict `>` comparison -- no numeric literal
+of its own. `take_judge.score_take`/`rank_takes`, `MediaSignals` object
+identity, D-097 cleanliness evidence, `apply_post_freeze_boundary_pass`,
+and `render_plan.py`/`canonical_edit_plan.py` (static no-reference check
+extended to all eight new diagnostics keys) are unaffected -- proven by
+test. No provider/network reference in the new gate helpers (static
+test). No RAW. No Modal/RunPod execution.
+
+**Offline qualification:**
+- 23 new targeted tests (`tests/test_cutsell_d123_case_b_fast_path_gate.
+  py`): `_meaning_sufficient_member_ids` unit tests, `_case_b_fast_path_
+  conflict` CORE RULE + all 8 negative controls, the pimples-shaped
+  fixture, the deterministic-safety-veto-precedence proof, the no-new-
+  score static check, no-behavior-change proofs (`rank_takes`/`score_
+  take`/`MediaSignals` identity unaffected), static no-provider and
+  no-render-plan-leak checks (extended for the 8 new keys), pipeline-level
+  wiring (`build_flow_b_draft` carries all new keys, unrelated-family
+  isolation), and the `deterministic_best_take_authority` `winner_path_
+  after`/`final_winner` additive-upgrade test. All 23 pass.
+- 557 bounded-regression tests (every D-097/D-101/D-103/D-115/D-116/D-122
+  file, D-082, both `clean_worker` boundary/take-judge-provider suites,
+  every boundary/render-boundary/human-boundary-polish file, `deterministic_
+  best_take_authority`, both `semantic_best_take*` suites, `hybrid_*`
+  take-judge/pipeline/composite/complementary-guard suites, `local_
+  performance`, `local_take_judge_expression`, `take_judge_v2`,
+  `pipeline_runtime_reliability`, `semantic_slot_v2_pipeline`) -- all pass,
+  unchanged.
+- `python3 -m compileall cutsell_worker tests` -- clean.
+- Full offline suite (`pytest tests/`, `--continue-on-collection-errors
+  --ignore=tests/test_cutsell_live_render_qc.py`): **5 failed, 3097
+  passed, 1 error, 13 subtests passed in 95.36s** -- the SAME 5 pre-
+  existing failures and 1 pre-existing collection error already
+  documented as the established baseline under D-122 (confirmed byte-
+  identical assertion text), plus the SAME excluded pre-existing hang
+  (`test_cutsell_live_render_qc.py`). Passed count rose from D-122's 3074
+  to 3097 (+23, exactly the new D-123 tests) -- zero new failures.
+
+**No engine, threshold, weight, or scoring behavior changed** beyond the
+one authorized early-exit gate. `take_judge.score_take`, `rank_takes`,
+`apply_delivery_cleanliness_evidence`, `deterministic_best_take_
+authority`'s `moves`/selection logic, `positioned_performance_evidence.py`,
+`local_performance.py`, `case_b_performance_evidence.py`, and `boundary_
+engine_pass.py` are byte-identical to pre-D-123 HEAD. `_semantic_best_
+take`'s general ladder (steps 1-9) is byte-identical -- D-123 only gates
+whether the `single_semantic_winner` early `return` fires, never what the
+ladder itself decides once reached.
+
+**RAW qualification:** NOT authorized in this task (explicit "NO RAW UNTIL
+OFFLINE GATES PASS" / "Do NOT launch RAW automatically"). Offline gates
+above are now green; a confirmatory Video00 RAW proving the pimples family
+resolves on real footage remains the Product Owner's call.
+
+**HUMAN ACTION REQUIRED:** YES (condition C, paid compute outside
+authorization) -- this task explicitly withheld RAW authorization; running
+one against a live Video00 source (to confirm the pimples-family fix on
+real footage, and to look for regressions on other already-passing
+families) is the Product Owner's next decision, not made here. No other
+condition (A/B/D/E/F/G) applies: no further product-behavior ambiguity
+remains bounded by this task, no additional safety/authority change is
+proposed, no protected-repository action was taken, and no new P0/P1
+accepted-risk decision arose.

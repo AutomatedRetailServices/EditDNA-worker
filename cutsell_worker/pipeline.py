@@ -131,6 +131,83 @@ def _winner_path_from_reason(reason: str) -> tuple[str, bool]:
     return _WINNER_PATH_OTHER_EXISTING_PATH, False
 
 
+# D-123 (docs/CUTSELL_DECISIONS.md D-123; bounded per docs/CUTSELL_
+# BESTTAKE_CASE_B_FORENSIC_D121.md): a GATE ON EARLY EXIT for the
+# `single_semantic_winner` fast path, not a new winner authority. D-121/
+# D-122 proved that fast path never consults DeliveryScorer or D-115/D-122
+# performance evidence at all. D-123 authorizes exactly one thing: when a
+# real, evidenced performance conflict exists AND the DeliveryScorer-
+# preferred alternative already passes the SAME meaning-sufficiency
+# signals the general ladder below already uses, `_semantic_best_take`
+# declines the fast-path shortcut and falls through to that unmodified
+# ladder -- the ladder itself (steps 1-9) picks the actual winner exactly
+# as it always has. No new score, weight, or threshold is introduced.
+def _meaning_sufficient_member_ids(
+    members: tuple[CandidateTake, ...],
+    semantic_delete_recommended: dict[str, bool] | None,
+) -> set[str]:
+    """Which members already pass the EXISTING meaning-sufficiency signals
+    `_semantic_best_take`'s own general ladder applies (D-081 semantic_
+    delete_recommended, attempt completeness, D-103 required-condition-
+    realization) -- reused verbatim as a raw per-candidate check, never a
+    new classifier of any kind."""
+    by_id = {member.clip_id: member for member in members}
+    ids = list(by_id)
+    delete_recommended_ids = {cid for cid in ids if (semantic_delete_recommended or {}).get(cid, False)}
+    incomplete_ids = {cid for cid in ids if by_id[cid].complete_idea is False}
+    required_missing_ids = _members_missing_required_condition_realization(ids, by_id)
+    insufficient = delete_recommended_ids | incomplete_ids | required_missing_ids
+    return {cid for cid in ids if cid not in insufficient}
+
+
+def _case_b_fast_path_conflict(
+    preferred_id: str,
+    local_selected_clip_id: str,
+    meaning_sufficient_ids: set[str],
+    case_b_evidence_by_id: Mapping[str, object] | None,
+) -> dict | None:
+    """Return a factual conflict-basis dict iff ALL of the CORE RULE
+    conditions hold, else None (the fast path is preserved). This is a
+    single read-only comparison of D-122's already-computed `delivery_
+    event_count` (never a new score) -- ties, absent evidence, or evidence
+    that favors the semantic winner all return None, per this task's
+    explicit "no guessed cutoff" / "if tied or ambiguous, preserve fast
+    path" rule."""
+    if not case_b_evidence_by_id:
+        return None
+    if local_selected_clip_id == preferred_id:
+        # Condition 3 fails: DeliveryScorer already agrees with the
+        # semantic winner -- nothing to bypass for.
+        return None
+    if local_selected_clip_id not in meaning_sufficient_ids:
+        # Condition 2 fails: the alternative DeliveryScorer prefers is
+        # itself meaning-insufficient -- the fast path stands.
+        return None
+    winner_evidence = case_b_evidence_by_id.get(preferred_id)
+    alt_evidence = case_b_evidence_by_id.get(local_selected_clip_id)
+    if winner_evidence is None or alt_evidence is None:
+        return None
+    winner_count = winner_evidence.delivery_event_count
+    alt_count = alt_evidence.delivery_event_count
+    if not (winner_count > alt_count):
+        # Condition 4 fails: no clear factual asymmetry favoring the
+        # alternative -- tied, absent, or contradicting evidence never
+        # bypasses (ENTRY/EXIT-only differences are naturally 0 vs 0 here,
+        # since case_b_evidence_by_id only ever contains DELIVERY-zone
+        # events -- D-116's territory is never eligible).
+        return None
+    return {
+        "semantic_fast_path_candidate": preferred_id,
+        "deliveryscore_top_candidate": local_selected_clip_id,
+        "semantic_fast_path_candidate_delivery_event_count": winner_count,
+        "deliveryscore_top_candidate_delivery_event_count": alt_count,
+        "semantic_fast_path_candidate_count_by_kind": dict(winner_evidence.count_by_kind),
+        "deliveryscore_top_candidate_count_by_kind": dict(alt_evidence.count_by_kind),
+        "semantic_fast_path_candidate_duration_by_kind": dict(winner_evidence.duration_by_kind),
+        "deliveryscore_top_candidate_duration_by_kind": dict(alt_evidence.duration_by_kind),
+    }
+
+
 def _draft_clip(take: CandidateTake, *, role: SemanticRole, group_id: str | None, selected: bool) -> DraftClip:
     # D-050A: `group_id` here is already the FINAL, post-semantic-
     # equivalence take-group id (pipeline.py is its one minting owner --
@@ -458,8 +535,19 @@ def _semantic_best_take(
     winner_confidence: float = 0.85,
     semantic_delete_recommended: dict[str, bool] | None = None,
     deterministic_unusable: dict[str, bool] | None = None,
+    case_b_evidence_by_id: Mapping[str, object] | None = None,
 ) -> tuple[str | None, str | None, str]:
     """Honor one clear semantic winner only inside an already-proven retry group.
+
+    D-123 (docs/CUTSELL_DECISIONS.md D-123; bounded per docs/CUTSELL_
+    BESTTAKE_CASE_B_FORENSIC_D121.md): `case_b_evidence_by_id` is optional
+    and additive -- omitted or `None`, this function is byte-identical to
+    pre-D-123 behavior for every existing caller. When provided (mapping
+    clip_id -> a `CaseBPerformanceEvidence`, D-122), it can ONLY gate the
+    `single_semantic_winner` early exit below (see `_case_b_fast_path_
+    conflict`'s own docstring for the exact four conditions) -- it never
+    selects a winner itself. A gated-out fast path falls through to the
+    SAME general ladder immediately below, completely unmodified.
 
     D-097.B (all-failed family): when EVERY member carries D-081 semantic
     delete-recommended evidence, Best Take no longer elects a survivor by
@@ -533,9 +621,21 @@ def _semantic_best_take(
         preferred_id, _ = winners[0]
         veto_reason = _single_winner_safety_veto(preferred_id, members, semantic_delete_recommended)
         if veto_reason is None:
-            if preferred_id == local_selected_clip_id:
-                return local_selected_clip_id, preferred_id, "single_semantic_winner"
-            return preferred_id, preferred_id, "single_semantic_winner"
+            case_b_conflict = None
+            if case_b_evidence_by_id:
+                meaning_sufficient_ids = _meaning_sufficient_member_ids(members, semantic_delete_recommended)
+                case_b_conflict = _case_b_fast_path_conflict(
+                    preferred_id, local_selected_clip_id, meaning_sufficient_ids, case_b_evidence_by_id,
+                )
+            if case_b_conflict is None:
+                if preferred_id == local_selected_clip_id:
+                    return local_selected_clip_id, preferred_id, "single_semantic_winner"
+                return preferred_id, preferred_id, "single_semantic_winner"
+            # D-123: a real, evidenced performance conflict gates this
+            # early exit -- fall through to the SAME general ladder below,
+            # exactly as though this family had zero/multiple "winner"
+            # labels. CASE B never picks a winner here; the ladder does,
+            # exactly as it always has.
         # D-101 Root Cause #1: the label is vetoed -- fall through to the
         # general resolution ladder below exactly as though this family
         # had zero/multiple "winner" labels (never a bespoke path).
@@ -906,6 +1006,27 @@ def build_flow_b_draft(
             )
             for member in members
         }
+        # D-123 (docs/CUTSELL_DECISIONS.md D-123): D-122's CASE B evidence
+        # objects (raw dataclasses, not yet JSON-projected) are built HERE,
+        # before the decision, so `_semantic_best_take` can use them to gate
+        # (never replace) its own `single_semantic_winner` early exit.
+        case_b_evidence_objects = {
+            member.clip_id: build_case_b_performance_evidence(member, whole_video_context)
+            for member in members
+        }
+        # D-123 counterfactual: the decision `_semantic_best_take` would
+        # make WITHOUT CASE B evidence -- byte-identical to pre-D-123/D-122
+        # behavior (omits `case_b_evidence_by_id`) -- computed for
+        # observability only (`winner_path_before`), never used as the
+        # actual decision below.
+        _before_selected_clip_id, _before_preferred_clip_id, before_semantic_best_take_reason = _semantic_best_take(
+            members,
+            family_semantic_decisions,
+            local_selected_clip_id,
+            ranked,
+            semantic_delete_recommended=hybrid_semantic_delete_recommended,
+            deterministic_unusable=deterministic_unusable,
+        )
         selected_clip_id, semantic_preferred_clip_id, semantic_best_take_reason = _semantic_best_take(
             members,
             family_semantic_decisions,
@@ -913,6 +1034,7 @@ def build_flow_b_draft(
             ranked,
             semantic_delete_recommended=hybrid_semantic_delete_recommended,
             deterministic_unusable=deterministic_unusable,
+            case_b_evidence_by_id=case_b_evidence_objects,
         )
         no_usable_realization = selected_clip_id is None
         all_delete_recommended = len(members) >= 2 and all(
@@ -942,21 +1064,40 @@ def build_flow_b_draft(
         if len(members) >= 2 or no_usable_realization:
             # D-122 (advisory/diagnostics only -- see docs/CUTSELL_DECISIONS.md
             # D-122): expose D-121's confirmed single_semantic_winner bypass
-            # and D-115's DELIVERY-zone performance evidence per competitor,
-            # WITHOUT changing anything computed above this line.
-            # `winner_path`/`performance_consulted_before_winner` classify the
-            # `semantic_best_take_reason` already produced by
-            # `_semantic_best_take`; `deterministic_best_take_authority.py`
-            # additively upgrades `winner_path` to DETERMINISTIC_OVERRIDE
-            # later, once it is known.
+            # and D-115's DELIVERY-zone performance evidence per competitor.
+            # `winner_path`/`performance_consulted_before_winner` reflect the
+            # ACTUAL final `semantic_best_take_reason` (D-123-aware, i.e.
+            # after any bypass); `deterministic_best_take_authority.py`
+            # additively upgrades both to DETERMINISTIC_OVERRIDE later, once
+            # that is known.
             case_b_winner_path, case_b_performance_consulted = _winner_path_from_reason(semantic_best_take_reason)
             case_b_semantic_fast_path_candidate = _single_semantic_winner_candidate(members, family_semantic_decisions)
             case_b_evidence_by_id = {
-                member.clip_id: case_b_performance_evidence_diagnostics(
-                    build_case_b_performance_evidence(member, whole_video_context)
-                )
-                for member in members
+                clip_id: case_b_performance_evidence_diagnostics(evidence)
+                for clip_id, evidence in case_b_evidence_objects.items()
             }
+            # D-123 (docs/CUTSELL_DECISIONS.md D-123): the gate is a pure,
+            # deterministic function of already-computed inputs -- recomputed
+            # here (never threaded through `_semantic_best_take`'s return
+            # value, matching D-122's own `_single_semantic_winner_candidate`
+            # precedent) so diagnostics can show WHY the bypass did or did
+            # not fire, using the EXACT same function `_semantic_best_take`
+            # itself called.
+            winner_path_before, performance_consulted_before = _winner_path_from_reason(before_semantic_best_take_reason)
+            winner_path_after, performance_consulted_after = case_b_winner_path, case_b_performance_consulted
+            meaning_sufficient_ids = _meaning_sufficient_member_ids(members, hybrid_semantic_delete_recommended)
+            case_b_conflict_basis = None
+            if case_b_semantic_fast_path_candidate is not None:
+                case_b_conflict_basis = _case_b_fast_path_conflict(
+                    case_b_semantic_fast_path_candidate, local_selected_clip_id,
+                    meaning_sufficient_ids, case_b_evidence_objects,
+                )
+            case_b_conflict_present = case_b_conflict_basis is not None
+            semantic_fast_path_bypassed = bool(
+                before_semantic_best_take_reason == "single_semantic_winner"
+                and semantic_best_take_reason != "single_semantic_winner"
+            )
+            bypass_reason = "case_b_performance_conflict" if semantic_fast_path_bypassed else None
             judge_group_diagnostics.append({
                 "group_id": gid,
                 "selected_clip_id": selected_clip_id,
@@ -1012,6 +1153,22 @@ def build_flow_b_draft(
                 "deliveryscore_top_candidate": local_selected_clip_id,
                 "semantic_fast_path_candidate": case_b_semantic_fast_path_candidate,
                 "case_b_evidence": case_b_evidence_by_id,
+                # D-123 (docs/CUTSELL_DECISIONS.md D-123): the bounded
+                # fast-path gate's own observability -- "before" reflects the
+                # semantic-only counterfactual (as if D-123 did not exist),
+                # "after" reflects what `_semantic_best_take` actually
+                # returned once the gate was consulted. A bypass NEVER picks
+                # a winner from CASE B evidence directly; it only prevents
+                # the single_semantic_winner early return so the EXISTING
+                # DeliveryScorer/deterministic path decides instead.
+                "winner_path_before": winner_path_before,
+                "winner_path_after": winner_path_after,
+                "semantic_fast_path_bypassed": semantic_fast_path_bypassed,
+                "bypass_reason": bypass_reason,
+                "case_b_conflict_present": case_b_conflict_present,
+                "case_b_conflict_basis": case_b_conflict_basis,
+                "meaning_sufficient_candidates": sorted(meaning_sufficient_ids),
+                "final_winner": selected_clip_id,
             })
         for member in members:
             clip_to_group[member.clip_id] = gid
