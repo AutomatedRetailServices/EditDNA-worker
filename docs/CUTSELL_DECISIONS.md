@@ -15008,3 +15008,169 @@ action is ONE fresh Video00 RAW to exercise this fixed workflow and, this
 time, recover the complete compact D-116 boundary/Watch+Listen summary
 from ordinary job logs; that RAW is a Product Owner paid-compute decision,
 not authorized by this task.
+
+## D-120 -- D-116 FINAL real-media requalification (RAW 34162868778, post
+D-119): D-119's tail-safe summary WORKED -- complete boundary/Watch+Listen
+evidence recovered from ordinary job logs, no artifact download needed.
+D-116 verdict finalized: B -- PARTIALLY REAL-MEDIA PROVEN. D-116 closes
+for the current milestone; recommend BestTake CASE B next, not another RAW.
+
+**D-119 operational proof (CONFIRMED, not an observability failure).** The
+"Print compact D-116/Watch+Listen qualification summary (D-119, tail-safe)"
+step (job `101868097362`, step 23) completed with conclusion `success`,
+ran immediately after the quality-ladder step (21:32:10-21:32:11) and
+immediately before "Upload validator reports"/"Modal teardown
+confirmation" (both also succeeded). The step's full JSON output (7179
+bytes, matching the `wc -c` the step itself printed) was recovered intact
+from an ordinary `get_job_logs` tail fetch -- no truncation, no SIGPIPE, no
+earlier-tail-window loss, every later step still executed. This is the
+FIRST RUN in the D-116/D-117/D-118 lineage where the complete boundary_
+engine_pass + perceptual_watch_listen evidence was recoverable from plain
+job logs alone (D-116's own qualification and D-118 could not do this).
+
+**Complete D-116 boundary accounting (from the recovered D-119 summary,
+verbatim):** `selected_count_in=22`, `selected_count_out=27`,
+`edge_trim_count=0`, `interior_split_count=5`, `interior_reject_count=77`,
+`audio_entry_trim_count=1`, `audio_exit_trim_count=1`, `audio_edge_row_
+count=2`, `visual_edge_row_count=82`, `visual_entry_trim_count=0`,
+`visual_exit_trim_count=0`, `visual_delivery_overlap_no_trim_count=82`,
+`visual_cross_boundary_count=3`, `visual_interior_not_edge_count=0`,
+`visual_blocked_by_delivery_floor_count=0`, `visual_trim_unavailable_
+count=0`, `no_op_visual_row_count=82`, `total_visual_trim_seconds=0.0`,
+`selected_count_before_visual_stage=27` (= `selected_count_in +
+interior_split_count` = 22+5, matching `selected_count_out` exactly --
+the D-119 invariant formula holds on real data), `selected_count_after_
+visual_stage=27`, `visual_stage_added_count=0`, `visual_stage_removed_
+count=0`, `visual_stage_split_count=0`. `applied_visual_trims: []`
+(empty).
+
+**Interpretation: ALL 82 real positioned visual events this run
+(camera/facial/body/hand-reset candidates) overlapped the measured
+DELIVERY span and were correctly left untouched** -- including 3 events
+whose own start/end straddled the delivery boundary (`visual_cross_
+boundary_count=3`), which D-115's zone classifier correctly folds into
+DELIVERY (never partial-trims a straddle) and D-116 correctly never
+touches. Zero DELIVERY-overlap events were trimmed into speech (Question
+5 safety check: PASS, no regression). The membership invariant holds
+exactly on real data (before=after=27, added/removed/split=0), confirming
+D-116 CASE A structurally cannot and did not change membership, order, or
+create a split this run. **No real ENTRY/EXIT visual trim fired.** This is
+the third RAW in a row (D-116 qualification, D-118, this run) where the
+CASE A safety mechanism was exercised on real, substantial event volume
+(39, then an unretrieved count, now 82 real events) and never produced an
+unsafe trim -- and now, for the first time, with complete counts proving
+exactly why: every real event this run was too close to DELIVERY to ever
+qualify as an ENTRY/EXIT-zone edge trim.
+
+**Watch+Listen complete breakdown:** overall `status=FAIL`, `gate_
+mode=advisory_v1`, `artifact_kind=deliverable_candidate`, `technical_qc_
+status=PASS`. `capability_status_counts`: EVALUATED_PASS=2, EVALUATED_
+FAIL=1, UNCERTAIN=1, NOT_IMPLEMENTED=4, ERROR=0. `routing`:
+{BoundaryEngine: 16}. Capabilities: `interior_dead_air_mp4` UNCERTAIN (1
+finding -> BoundaryEngine); `cut_adjacent_speech_energy_mp4` EVALUATED_
+PASS (0); `reset_debris_at_edges_source_evidence` EVALUATED_FAIL (15
+`PERCEPTUAL_RESET_DEBRIS_AT_EDGE` findings, all -> BoundaryEngine);
+`repeated_audience_content_transcript` EVALUATED_PASS (0); the 4 D-098
+NOT_IMPLEMENTED capabilities (facial_expression_post_line, gesture_
+continuity_across_cut, clipped_phoneme_asr_realign, framing_and_eye_
+contact) reported explicitly, never collapsed into PASS. The 15
+`reset_debris_at_edges` FAIL findings are a DIFFERENT, POST-RENDER,
+source-evidence-mapped measurement than D-116's own pre-render
+`local_performance` events consumed by Boundary -- they measure real
+reset-artifact residue remaining at physical join edges in the delivered
+MP4, and are coherent with (not contradicted by) this run's `visual_edge_
+rows`: the same underlying real events exist, all classified DELIVERY-
+overlap, so D-116 correctly declined to trim them (trimming would have
+cut into measured speech), leaving the residue this Watch+Listen
+capability now flags for a human/reviewer. This is the CASE A safety
+contract working as designed, not a bug: a real, positioned defect too
+close to speech is reported for downstream editorial attention rather
+than unsafely trimmed.
+
+**Pimples Level-1: 0s this run**, owning authority N/A (no pimples-family
+LEVEL_1 region appears in the physical ladder at all this run; all 6
+pimples regression checks -- `pimples_micro_1/2/3_present`, `pimples_bad_
+monolith_absent`, `pimples_later_winner_present`, `pimples_micro_order`
+-- PASSED). Sequence across the four comparable RAWs: D-113 0s -> D-116
+first-qualification 19.689s -> D-118 17.439s -> **this run 0s** -- a
+fourth independent data point, this time at zero, still never attributed
+to BoundaryEngine when present (D-118's 17.439s was BestTakeResolver;
+this run's own single BestTakeResolver physical region, 0.75s, is an
+UNRELATED family -- a gynecologist-visit test-choice line, `tg_
+4702d288...` -- not pimples at all). Confirms conclusively across four
+runs that pimples-region volatility is BestTakeResolver semantic-arbiter
+run-to-run variance, structurally impossible for D-116/Boundary to cause
+(Boundary runs strictly post-Freeze on already-frozen membership). No
+BestTake change made or recommended here.
+
+**Physical quality ladder (D-097.10 R14 headline, canonical view):**
+overall LEVEL_1 = 28.728s (16 regions, selection scope) + 4.489s (27
+regions, boundary scope) = **33.217s total**; CutSell physical keep
+168.262s; F1 vs Cut.ai **0.8314**; F1 vs Human Gold **0.8215** (both the
+best F1 pair of the four comparable runs). `level1_by_authority`
+(physical): IdeaClusterer/RetryFamilyFormation 6/15.809s, AttemptReconstructor/
+RecordingProcessRemoval 3/8.909s, BoundaryEngine 32/6.909s, CompositeResolver/
+PreResolverCleanup 1/0.84s, BestTakeResolver 1/0.75s. Because `visual_
+entry_trim_count=visual_exit_trim_count=0` this run (proven above), **none**
+of BoundaryEngine's 32/6.909s physical Level-1 contribution can be
+attributed to D-116's visual CASE A -- it is byte-identical to what the
+pre-D-116 audio-only Boundary pass would have produced. D-116's own
+measured net physical effect this run is exactly 0 seconds, 0 regions,
+in both directions (no new Level-1 introduced, no existing Level-1
+resolved) -- the cleanest possible confirmatory result: real mechanism
+activity, zero side effects, by construction.
+
+**D-106/meaning safety: PASS, no regression.** `meaning_preservation.
+papillary_symptom_realization_meaning` passed (1/1); the non-gating
+`preferred_realization_parity` failed as documented ("editorial/take-
+selection mismatch only -- never gates qa_pass"), which is expected and
+unrelated to Boundary. Historical regression QA: 17/18 checks passed; the
+ONE failure (`sonography_good_before_diagnosis`, a pre-existing `required_
+order` check) is a known, recurring, non-Boundary-visual ordering pattern
+seen across multiple prior RAWs (semantic/selection-order territory, not
+a physical trim) -- not a new D-116 finding. `family_context_preserved`,
+`cta_preserved`, `cancer_hook_preserved`, `hair_loss_preserved`,
+`gastritis_preserved`, `acne_back_preserved`, `biopsy_nodule_preserved`,
+`papillary_diagnosis_preserved` all passed. No negation/polarity/numeric
+loss found. No meaning loss attributable to Boundary.
+
+**Freeze/QC/deliverable:** `architecture_verified=true`, `freeze_
+blocked=false` (and `freeze_blocked_pending_coherence_review=false`),
+`failed_check_count=0`. `technical_qc_status=PASS` (1 render attempt,
+PASS). `deliverable=true`, `delivery_status=DELIVERABLE_PENDING_HUMAN_
+WATCH_LISTEN:perceptual=FAIL`, `human_watch_listen_required=true` (the
+`perceptual=FAIL` reflects the real `reset_debris_at_edges` finding above,
+not a technical defect -- Watch+Listen's advisory_v1 gate mode never
+auto-PASSes, per doctrine).
+
+**FINAL D-116 VERDICT: B -- PARTIALLY REAL-MEDIA PROVEN.** Per this task's
+own explicit instruction ("If summary is complete and all real visual
+events overlap DELIVERY but no ENTRY/EXIT trim fires, prefer B rather than
+repeatedly spending RAWs trying to force an edge case"): this run's D-119
+evidence is fully complete (first time in the lineage), the safety/no-trim
+behavior is completely proven across 82 real events including 3 straddle
+cases with zero regressions, and no actual ENTRY/EXIT visual trim was
+reproduced because none of the real events this run ever qualified (all
+were DELIVERY-overlap). This is not verdict C (mechanism unexercised) --
+82 real events is substantial real activity, correctly and safely
+resolved every time.
+
+**D-116 CLOSES for the current milestone.** Per this task's own decision
+table, verdict B with complete observability and no regression means D-116
+stops consuming Video00 qualification budget. The CASE A trim path is
+offline-proven (19 targeted tests) and now real-safety-proven across three
+independent RAWs (39 events, an unretrieved-but-safe count, 82 events) with
+zero unsafe trims and zero membership/order/meaning violations. Recommend
+moving to **BestTake CASE B** (D-111's Behavior/Proposition abstraction
+groundwork, D-098 Section 10) as the next capability, rather than another
+Video00 RAW -- not authorized here, requires separate Product Owner
+authorization per this task's explicit "Do NOT implement BestTake CASE B
+automatically" instruction.
+
+**No engine, threshold, Boundary, BestTake, DeliveryScorer, or Watch+
+Listen change made during this measurement task.** Git tree clean at HEAD
+`6faabbd` throughout the RAW (verified before and after).
+
+**HUMAN ACTION REQUIRED:** YES (condition A, product decision) --
+authorizing BestTake CASE B as the next engineering objective is a Product
+Owner decision, not made here.
