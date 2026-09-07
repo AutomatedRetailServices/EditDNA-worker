@@ -13060,3 +13060,76 @@ A future authorized RAW is needed to prove or disprove whether this
 general extension actually catches the real papillary instance, and
 whether it should be prioritized ahead of, or alongside,
 AttemptReconstructor/RecordingProcessRemoval next.
+
+## D-104 -- BestTake wrong-winner class forensic: papillary + pimples proven to be TWO SEPARATE root causes, not one class (offline investigation only, no fix)
+
+Full report: `docs/CUTSELL_FORENSIC_BESTTAKE_WRONG_WINNER_CLASS_D104.md`.
+Product Owner directive: determine whether D-103's papillary miss and the
+newly-measured pimples family (RAW `34077889576`, D-103 real-media
+qualification, BestTakeResolver's `take_choice_against_both_references`
+class, 85.6% of physical Level-1 seconds) share ONE general BestTake
+failure that could be fixed without another family-specific heuristic.
+Investigation only -- no `pipeline.py` change, no marker expansion, no
+RAW.
+
+Method: the real clip texts and Hybrid/Gemini decision records from RAW
+`34077889576`'s own diagnostics were run through the ACTUAL, unmodified
+production functions (`classify_claim`, `resolve_critical_coverage_
+dominance`, `any_pair_contradicts`, `_is_retrospective_condition_
+realization`, `_is_incomplete_content_subset`) offline, giving direct
+proof of what the general ladder would conclude rather than inference
+from physical-region output alone.
+
+Key findings:
+- Papillary: bypassing the single-winner fast path would NOT have fixed
+  it. `resolve_critical_coverage_dominance`, run directly against the
+  real pair, independently re-selects the SAME wrong winner, because
+  `classify_claim` scores the model's incorrect winner's negated clause
+  as `CRITICAL`/`NEGATION` and the reference-correct realization as
+  `SUPPORTING`/`ACTION_EVENT`. D-103's own Step 2.5, run against the real
+  text, returns the REFERENCE-CORRECT clip as the "missing" one (the
+  marker pattern engages with the wrong side) -- a second, previously
+  unobserved failure mode of D-103's mechanism, latent because the fast
+  path never let the general ladder execute.
+- Pimples: NO existing content-representation check discriminates the
+  three real members at all -- `classify_claim` finds zero CRITICAL
+  claims in the whole family, so `resolve_critical_coverage_dominance`
+  returns `None` regardless of path; no contradiction; no D-103 pattern
+  match; no literal-subset relationship in either direction. All three
+  members carry confirmed local-performance corroboration
+  (`dense_physical_reset`); only the wrongly-kept winner lacks a reported
+  `visual_fumble` score. Whether DeliveryScorer's own `local_selected_
+  clip_id` (never consulted by the fast path) already agrees with the
+  model's winner is UNPROVEN -- that value is not surfaced in the
+  existing CI-safe diagnostics.
+- Additional finding (pimples): the same clip received a materially
+  different Hybrid label depending on which window/merge pass produced
+  it (`family_window_labels` "alternate" 0.6 vs `global_merge_labels`
+  "winner" 0.9) -- the same run-to-run arbiter-instability class already
+  recorded as an open escalation in D-097.11, not something this task is
+  scoped to fix.
+- Conclusion: no common general rule is proven by both families. Per the
+  task's own recommendation rule, the two root causes are NOT merged into
+  one implementation scope: papillary needs a semantic-sufficiency/
+  claim-representation fix (out of BestTake's gating scope, touching the
+  shared classifier every other CRITICAL_COVERAGE_DOMINANCE caller
+  depends on); pimples needs one additional diagnostic field
+  (`local_selected_clip_id`, a pure observability addition, not a
+  selection change) before any fix can even be proposed.
+
+No code was changed. No RAW/provider/S3/infra work was performed. No
+marker expansion, family-specific special-case, or Cut.ai/Gold runtime
+use was introduced -- both references were used only to identify which
+realization each family's correct answer is, never as production input.
+
+**HUMAN ACTION REQUIRED:** YES (condition A, product decision required) --
+this document proves no bounded BestTake gating fix is safe to authorize
+for either family from current evidence. Two independent next steps are
+identified, neither authorized here: (1) a semantic-sufficiency/claim-
+representation investigation for papillary (materially larger scope than
+this task, touches `semantic_claims.py`), and (2) a minimal diagnostics
+addition (surface `local_selected_clip_id` in the CI-safe diagnostic
+dump) to make the pimples question answerable at all. The Product Owner
+must choose whether either proceeds, and in what order relative to
+AttemptReconstructor/RecordingProcessRemoval (D-102's identified
+blocker, still not started).
