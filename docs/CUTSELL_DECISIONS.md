@@ -13133,3 +13133,103 @@ dump) to make the pimples question answerable at all. The Product Owner
 must choose whether either proceeds, and in what order relative to
 AttemptReconstructor/RecordingProcessRemoval (D-102's identified
 blocker, still not started).
+
+## D-105 -- Papillary P0 semantic-sufficiency v1: real pair reframed by existing evidence; attempted general mechanism proven UNSAFE and reverted (bounded implementation, no ship)
+
+Product Owner directive: implement the minimum GENERAL semantic-
+sufficiency representation letting `_semantic_best_take` recognize a
+sibling's required, non-equivalent continuation without reclassifying
+`classify_claim`, expanding D-103's markers, or using benchmark data at
+runtime. Bounded to `pipeline.py`; no RAW.
+
+**Decisive finding #1 -- the real papillary pair is reframed.** Direct
+offline reconstruction (real RAW `34077889576` diagnostics run through
+the actual, unmodified `_content` and the real
+`semantic_idea_equivalence` merge list) found an EXISTING, ACTIVE,
+already-computed merge record for the exact papillary pair
+(`clip_582ea96f...`/`clip_c4c94acb...`) at **confidence 0.95**, reason
+"Both rephrase realizing past symptoms were actually warning signs" --
+the SAME arbiter call `take_grouping_provider.reconcile_semantic_idea_
+equivalence` already made to form this retry family, and the SAME
+evidence `final_story_coherence_validation._same_idea_paraphrase_credit`
+already reuses downstream. By the engine's own best-available,
+already-paid-for judgment, the two candidates are NOT independently
+required -- they are a confirmed paraphrase pair. The `papillary_cancer_
+preserved` regression-QA failure driving D-101 through D-104 is
+therefore reframed: it is a `required_exact` (literal-wording) benchmark
+check flagging a genuinely-equivalent paraphrase substitution, not a
+proven semantic-sufficiency defect in `_semantic_best_take`. Direct
+reconstruction of `_lost_semantic_atoms`'s own content-loss math against
+the real 22-clip kept text independently confirms this: raw coverage is
+0.40 (would trip `content_loss` on vocabulary alone), but the SAME
+equivalence merge is exactly what `_same_idea_paraphrase_credit` already
+uses to correctly suppress it post-Freeze today.
+
+**Attempted general mechanism.** Reusing this merge evidence one stage
+EARLIER (inside `_semantic_best_take`/`_single_winner_safety_veto`, no
+new provider call, no `classify_claim` change): a candidate is treated
+as "missing required completion" when its own text has low content
+overlap with ANOTHER member's AND no high-confidence (>=0.85, matching
+D-061's own floor) `semantic_idea_equivalence` merge already excuses the
+gap. First cut applied this symmetrically across all member pairs inside
+a new general-ladder step; direct testing caught this immediately as
+mathematically incoherent (it flags BOTH sides of any low-overlap pair,
+so `_exclude_unless_all`'s fail-open rule excludes neither, silently
+no-op). Corrected to an ASYMMETRIC, single-target check applied only to
+the specific candidate about to be granted authority (the fast path's
+`preferred_id`, or Steps 3/4's own `dominant_id` -- discarding, never
+overriding, a coverage-blind dominance verdict) -- mirroring
+`_single_winner_safety_veto`'s existing directional structure exactly.
+
+**Decisive finding #2 -- the corrected mechanism is still UNSAFE, proven
+by direct counter-example, not merely suspected.** Content-overlap
+between a genuinely required, un-substituted sibling and pure,
+topically-unrelated trivia is IDENTICAL: `_content_overlap_coefficient`
+measured exactly `0.000` for both the working positive-control fixture
+(an event-recap "winner" vs. an ambulance-incident "required sibling")
+and every negative-control fixture (a diagnosis "winner" vs. weather/
+traffic trivia; a product-details "winner" vs. stylistic elaboration).
+Direct testing proved the failure mode is not theoretical: giving the
+IRRELEVANT TRIVIA clip a higher `RankedTake` delivery score than the
+genuine winner caused the mechanism to select the TRIVIA clip over the
+real winner (`_semantic_best_take` returned the trivia clip id) --
+exactly the "no maximum-coverage regression" this task explicitly
+forbade, manifesting as a **delivery-driven** regression instead: ANY
+topically-disjoint, unmerged sibling can now outrank a legitimate single
+winner whenever its raw delivery score happens to be higher, regardless
+of whether its content has any audience-facing value. No available
+deterministic evidence (content overlap, equivalence-merge presence,
+completeness, contradiction) distinguishes "required distinct
+continuation" from "irrelevant trivia" -- both produce the identical
+zero-overlap, no-merge signature.
+
+**Decision: implementation reverted, not shipped.** `pipeline.py` and
+`semantic_best_take_integrity.py` are byte-identical to `670c342`; no
+diff was committed. Per this task's own explicit permission ("If this
+cannot be achieved safely ... STOP without forcing an implementation"),
+this capability is NOT safely achievable from the deterministic evidence
+audited here (content overlap, `semantic_idea_equivalence` merge
+confidence, `complete_idea`, `any_pair_contradicts`, claim classification)
+without either: (a) a genuinely new distinguishing signal not yet
+computed anywhere in the codebase (e.g. a bounded semantic arbiter
+answering "is this sibling's content substitutable by the winner,"
+which is a NEW model decision requiring separate Product Owner
+authorization, explicitly out of this task's scope), or (b) accepting a
+policy tradeoff this task was not authorized to make on its own
+initiative.
+
+No code was changed (net). No RAW/provider/S3/infra work was performed.
+No `classify_claim`, marker, grouping, or scoring change was made. No
+pimples work was begun.
+
+**HUMAN ACTION REQUIRED:** YES (condition A/B) -- two decisions, neither
+authorized here: (1) whether the `papillary_cancer_preserved` regression-
+QA check itself should be revised to credit high-confidence
+`semantic_idea_equivalence`-confirmed paraphrases rather than requiring
+literal wording (a benchmark-design decision, not a BestTake fix -- this
+would need its own directive since QA references may only ever identify
+failing cases, never become production input); (2) whether a bounded
+semantic arbiter for winner/sibling substitutability is worth
+authorizing as separate, new-model-decision scope. Absent either, this
+specific P0 has no further safe engineering action available under the
+constraints given.
