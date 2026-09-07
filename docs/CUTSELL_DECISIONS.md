@@ -13233,3 +13233,119 @@ semantic arbiter for winner/sibling substitutability is worth
 authorizing as separate, new-model-decision scope. Absent either, this
 specific P0 has no further safe engineering action available under the
 constraints given.
+
+## D-106 -- QA semantics correction: MEANING PRESERVATION split from PREFERRED-REALIZATION PARITY (benchmark/QA only, no engine behavior change)
+
+Product Owner directive: D-105's decision #1 approved -- the old
+`papillary_cancer_preserved` `required_exact` check conflated two
+different questions ("did CutSell preserve the required meaning?" vs "did
+CutSell select the same realization the QA reference did?"). Split them
+into two explicit, separately-reported QA evaluations. Benchmark/QA-only;
+no `cutsell_worker/*.py` production selection code touched.
+
+Manifest change (`benchmarks/video00_regression_qa.json`): the old
+combined two-sentence `papillary_cancer_preserved` (`required_exact`)
+entry is replaced by three entries -- `papillary_diagnosis_preserved`
+(`required_exact`, protected diagnosis-identity sentence only, unchanged
+matching behavior, already passing every prior run) and a NEW pair,
+`papillary_symptom_realization_meaning` (`kind: "meaning_preservation"`,
+`protected: false`) and `papillary_symptom_realization_parity`
+(`kind: "preferred_realization_parity"`), both carrying the symptom-
+realization sentence D-101 through D-105 investigated.
+
+New evaluator logic (`benchmarks/validate_video00_regression_qa.py`):
+- `meaning_preservation`: PASS immediately if the canonical text is
+  found among selected (via the existing D-032 coverage-span search,
+  now ALSO required to not itself contradict the target per the safety
+  fix below). If not selected and `protected: true`, FAIL (protected
+  propositions never receive equivalence credit). Otherwise, search
+  `result["discarded"]` for a clip carrying the canonical proposition; if
+  none exists, FAIL (genuine content loss). If found, look up the
+  HIGHEST-confidence `semantic_idea_equivalence` merge (from
+  `result["diagnostics"]["semantic_idea_equivalence"]["merges"]` --
+  produced entirely by the ENGINE during grouping, the exact same
+  evidence `final_story_coherence_validation._same_idea_paraphrase_
+  credit` already reuses downstream, and the exact evidence D-105 found
+  for the real papillary pair at confidence 0.95) between the discarded
+  clip and every selected clip. Below the D-061-approved 0.85 confidence
+  floor: UNCERTAIN ("insufficient_equivalence_evidence" -- never silently
+  PASS on weak similarity). At or above the floor: the credited
+  realization must ALSO not contradict the canonical text -- reuses
+  `cutsell_worker.contradiction_signal.any_pair_contradicts` VERBATIM
+  (the same general, already-proven negation/number-conflict detector
+  D-063/D-101 rely on in production; reading a general production
+  primitive into a QA harness, not feeding QA data into production) --
+  any contradiction, polarity flip, or materially different number FAILS
+  regardless of confidence ("protected_contradiction_detected"); only a
+  confirmed, non-contradicting equivalence PASSES.
+- `preferred_realization_parity`: the SAME coverage-span presence check
+  the old check always did, reported separately, NEVER gating `qa_pass`
+  -- an editorial take-choice mismatch with meaning preserved is real and
+  visible, not hidden, but is not a meaning-safety defect.
+- SAFETY FIX discovered while testing: the "exact realization selected"
+  fast path itself was negation-blind (content-token coverage strips
+  "not"/"never" as stopwords, so a directly-negated candidate could score
+  full coverage of the target and false-PASS). Fixed by requiring the
+  SAME `any_pair_contradicts` check even on the direct-match path before
+  granting PASS -- proven necessary by a failing test before the fix, not
+  assumed safe.
+- `qa_pass` now requires no `failures`, no `meaning_failures`, AND no
+  `meaning_uncertain` -- UNCERTAIN never silently counts as PASS.
+
+Quality-ladder change (`benchmarks/video00_quality_ladder.py`): both
+`TAKE_CHOICE_AGAINST_REFERENCES` sites in `_refine_and_attribute`
+(MISSING_DELIVERY's lost-family-member case and FALSE_KEEP's rejected-
+winner case) now check the SAME engine-produced equivalence-merge
+evidence before attributing a LEVEL_1 meaning-safety defect. When the
+lost/rejected realization has a confirmed >=0.85-confidence merge with
+the kept realization, the region is reclassified `EQUIVALENT_
+REALIZATION_PARITY_MISMATCH` at LEVEL_2 (never silently dropped -- an
+explicit `meaning_preserved: true` flag distinguishes it from the OTHER
+LEVEL_2 categories), so P0/LEVEL_1 seconds are no longer inflated by a
+literal-take disagreement the engine's own evidence already resolves as
+meaning-preserving.
+
+Verified against the REAL papillary pair (RAW 34077889576's own
+diagnostics, reconstructed offline, matching D-104/D-105's evidence):
+`papillary_symptom_realization_meaning` -> PASS (`equivalent_realization_
+credited`, confidence 0.95); `papillary_symptom_realization_parity` ->
+FAIL (`preferred_realization_not_selected`), reported and non-blocking.
+`papillary_diagnosis_preserved` remains PASS, unaffected.
+
+Tests (`tests/test_cutsell_d106_meaning_vs_parity_qa.py`, 9 new, generic
+non-Video00 fixtures): all 7 mandated cases -- (1) exact realization ->
+meaning PASS + parity PASS; (2) strong equivalent paraphrase -> meaning
+PASS + parity FAIL, `qa_pass` unaffected by the parity mismatch; (3) weak/
+low-confidence similarity -> meaning UNCERTAIN, `qa_pass` false; (4)
+direct contradiction -> meaning FAIL; (5) polarity flip -> meaning FAIL;
+(6) numeric materially-different proposition -> meaning FAIL; (7) no
+Gold/Cut.ai text or benchmark filename appears anywhere in
+`cutsell_worker/*.py` -- plus a `protected: true` negative control (never
+equivalence-credited) and a genuine-content-loss control (neither
+selected nor discarded carries the proposition -> FAIL, never softened to
+UNCERTAIN merely because the check is unprotected).
+
+Regression: `tests/test_video00_regression_qa.py`,
+`tests/test_cutsell_video00_quality_ladder.py`,
+`tests/test_cutsell_d097_10_segments_as_rendered_and_physical_ladder.py`,
+`tests/test_benchmarks_d097_13_clean_raw_watch_listen_checkpoint.py`,
+`tests/test_video00_semantic_alignment.py`,
+`tests/test_cutsell_d056_3_contradiction_safe_composite.py` -- all green
+(98/98 together with the new suite); `compileall` clean across
+`cutsell_worker`, `benchmarks`, `tests`; full offline `tests/` suite run
+as the one broader qualification (excluding the two PRE-EXISTING,
+unrelated failures already recorded at D-099/D-100/D-102/D-104:
+`test_video00_modal_hybrid_semantic_parity.py`'s 4 known failures and
+`test_semantic_stitch.py`'s known collection error) -- no new failure.
+
+No `cutsell_worker/*.py` file was modified. No RAW/provider/S3/infra work
+was performed. No new arbiter, no D-103 marker expansion, no
+`classify_claim` change, no pimples work.
+
+**HUMAN ACTION REQUIRED:** NO to close this bounded QA-semantics task.
+The papillary P0, as originally framed, is now understood as CLOSED at
+the meaning-safety layer (PASS, confirmed via the engine's own
+equivalence evidence) with an OPEN, correctly-visible, non-blocking
+editorial-parity mismatch -- whether to pursue closing that parity gap
+(i.e. make CutSell prefer the reference's literal wording) is a separate,
+lower-priority product decision, not a P0.

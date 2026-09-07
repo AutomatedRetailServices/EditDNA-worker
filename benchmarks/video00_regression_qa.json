@@ -29,9 +29,20 @@
       "text": "En la sonografía de tiroides apareció un nódulo sospechoso de 3 centímetros que se mandó a biopsia."
     },
     {
-      "id": "papillary_cancer_preserved",
+      "id": "papillary_diagnosis_preserved",
       "kind": "required_exact",
-      "text": "La biopsia confirmó que era un cáncer papilar de tiroides. Síntomas que tuve según yo era sintomática pero si hubo indicios ahora mirándose atrás."
+      "text": "La biopsia confirmó que era un cáncer papilar de tiroides."
+    },
+    {
+      "id": "papillary_symptom_realization_meaning",
+      "kind": "meaning_preservation",
+      "protected": false,
+      "text": "Síntomas que tuve según yo era sintomática pero si hubo indicios ahora mirándose atrás."
+    },
+    {
+      "id": "papillary_symptom_realization_parity",
+      "kind": "preferred_realization_parity",
+      "text": "Síntomas que tuve según yo era sintomática pero si hubo indicios ahora mirándose atrás."
     },
     {
       "id": "acne_back_preserved",

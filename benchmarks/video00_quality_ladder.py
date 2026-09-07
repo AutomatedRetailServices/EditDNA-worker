@@ -65,6 +65,15 @@ NO_CANDIDATE = "no_candidate_segmented"
 FALSE_DELETE = "false_delete_outside_family"
 LOST_FAMILY_COMPETITION = "lost_family_competition"
 TAKE_CHOICE_AGAINST_REFERENCES = "take_choice_against_both_references"
+# D-106 (QA semantics correction): the SAME physical shape as
+# TAKE_CHOICE_AGAINST_REFERENCES, but the engine's OWN, already-computed
+# `semantic_idea_equivalence` merge evidence (never Gold/Cut.ai text)
+# establishes the lost realization as a confirmed high-confidence paraphrase
+# of the family's kept winner -- meaning is preserved even though the
+# specific reference-preferred wording was not selected. Reported at LEVEL_2
+# (visible, not urgent), never silently folded into LEVEL_1 P0 seconds.
+EQUIVALENT_REALIZATION_PARITY_MISMATCH = "equivalent_realization_parity_mismatch"
+_EQUIVALENCE_CONFIDENCE_FLOOR = 0.85  # same already-approved standard as D-061/D-106, not a new bar
 REDUNDANT_REALIZATION = "redundant_realization_both_kept"
 UNGROUPED_RETRY = "ungrouped_retry_of_kept_idea"
 FAILED_MATERIAL_RETAINED = "failed_or_process_material_retained"
@@ -241,6 +250,29 @@ def _diagnostics(engine_result: dict) -> dict:
     return diag if isinstance(diag, dict) else {}
 
 
+def _equivalence_merges(engine_result: dict) -> tuple[dict, ...]:
+    sie = _diagnostics(engine_result).get("semantic_idea_equivalence") or {}
+    return tuple(row for row in (sie.get("merges") or ()) if isinstance(row, dict))
+
+
+def _equivalence_confidence(merges: tuple[dict, ...], left_id: str, right_id: str) -> float:
+    """Highest confidence any EXISTING engine-produced `semantic_idea_
+    equivalence` merge record already established for this exact pair --
+    reused verbatim from the engine's own diagnostics (D-106), never
+    recomputed and never derived from Gold/Cut.ai text."""
+    if not left_id or not right_id:
+        return 0.0
+    pair = {left_id, right_id}
+    best = 0.0
+    for merge in merges:
+        if {str(merge.get("left_clip_id") or ""), str(merge.get("right_clip_id") or "")} == pair:
+            try:
+                best = max(best, float(merge.get("confidence") or 0.0))
+            except (TypeError, ValueError):
+                continue
+    return best
+
+
 def _judge_groups(engine_result: dict) -> tuple[dict, ...]:
     rows = _diagnostics(engine_result).get("take_judge_groups") or ()
     return tuple(row for row in rows if isinstance(row, dict))
@@ -361,6 +393,17 @@ def classify_triple(cutai_keep: bool, gold_keep: bool, cutsell_keep: bool) -> tu
     return LEVEL_3, MATCHES_GOLD_BEYOND_CUTAI  # (not cutai, gold, cutsell)
 
 
+def _equivalence_credited_rationale(
+    equivalence_merges: tuple[dict, ...], lost_id: str, winner_id: str | None
+) -> float | None:
+    """Confidence of an existing engine equivalence merge between the lost
+    candidate and the family winner, or None when winner_id is unknown."""
+    if not winner_id:
+        return None
+    confidence = _equivalence_confidence(equivalence_merges, lost_id, str(winner_id))
+    return confidence if confidence >= _EQUIVALENCE_CONFIDENCE_FLOOR else None
+
+
 def _refine_and_attribute(
     kind: str,
     overlapping: Sequence[dict],
@@ -369,6 +412,7 @@ def _refine_and_attribute(
     idea_index: dict[str, dict],
     restored_ids: frozenset[str],
     selected_candidates: Sequence[dict],
+    equivalence_merges: tuple[dict, ...] = (),
 ) -> tuple[str | None, str, str]:
     """Return (refinement, authority, rationale) for a LEVEL_1 region."""
     selected = [c for c in overlapping if c["status"] == "selected"]
@@ -383,6 +427,22 @@ def _refine_and_attribute(
         family = membership.get(probe["clip_id"]) or membership.get(pid)
         idea = idea_index.get(probe["clip_id"]) or idea_index.get(pid)
         if family is not None:
+            # D-106: the lost realization may be a confirmed high-confidence
+            # paraphrase of the kept winner per the ENGINE'S OWN equivalence
+            # evidence -- meaning preserved, take-choice parity mismatch,
+            # never silently counted as a LEVEL_1 meaning-safety defect.
+            credited = _equivalence_credited_rationale(
+                equivalence_merges, probe["clip_id"], family.get("selected_clip_id")
+            )
+            if credited is not None:
+                return (
+                    EQUIVALENT_REALIZATION_PARITY_MISMATCH,
+                    AUTH_BEST_TAKE,
+                    f"candidate {probe['clip_id']} lost family {family.get('group_id')} to "
+                    f"{family.get('selected_clip_id')} but the engine's own semantic_idea_equivalence "
+                    f"evidence (confidence {credited:.2f}) confirms it as a paraphrase of the kept "
+                    "realization -- meaning preserved, editorial take-choice differs from both references",
+                )
             return (
                 TAKE_CHOICE_AGAINST_REFERENCES,
                 AUTH_BEST_TAKE,
@@ -419,6 +479,27 @@ def _refine_and_attribute(
                     REDUNDANT_REALIZATION,
                     AUTH_BEST_TAKE,
                     f"family {family.get('group_id')} has two kept realizations ({probe['clip_id']} and {others[0]['clip_id']})",
+                )
+            # D-106: does the kept realization have an engine-confirmed
+            # equivalence merge with a REJECTED sibling in the same family?
+            # If so, the meaning both references wanted is still preserved
+            # by the kept realization -- a take-choice parity mismatch, not
+            # a meaning-safety defect.
+            best_credited = 0.0
+            for sibling_id in family.get("member_ids") or ():
+                if sibling_id == probe["clip_id"]:
+                    continue
+                credited = _equivalence_credited_rationale(equivalence_merges, sibling_id, probe["clip_id"])
+                if credited is not None:
+                    best_credited = max(best_credited, credited)
+            if best_credited:
+                return (
+                    EQUIVALENT_REALIZATION_PARITY_MISMATCH,
+                    AUTH_BEST_TAKE,
+                    f"family {family.get('group_id')} winner {probe['clip_id']} is a realization both "
+                    f"references rejected, but the engine's own semantic_idea_equivalence evidence "
+                    f"(confidence {best_credited:.2f}) confirms it as a paraphrase of a rejected sibling's "
+                    "realization -- meaning preserved, editorial take-choice differs from both references",
                 )
             return (
                 TAKE_CHOICE_AGAINST_REFERENCES,
@@ -497,6 +578,7 @@ def build_region_map(
     membership = _group_membership(engine_result)
     idea_index = _idea_index(engine_result)
     restored_ids = _restored_clip_ids(engine_result)
+    equivalence_merges = _equivalence_merges(engine_result)
     freeze = _freeze(engine_result)
 
     atoms = _atomic_intervals(
@@ -546,7 +628,15 @@ def build_region_map(
                 refinement, authority, rationale = _refine_and_attribute(
                     kind, overlapping, membership=membership, idea_index=idea_index,
                     restored_ids=restored_ids, selected_candidates=selected_candidates,
+                    equivalence_merges=equivalence_merges,
                 )
+                if refinement == EQUIVALENT_REALIZATION_PARITY_MISMATCH:
+                    # D-106: meaning is preserved per the engine's own
+                    # equivalence evidence -- never counted as a LEVEL_1
+                    # meaning-safety defect. Still fully visible (LEVEL_2,
+                    # not silently dropped) as an editorial take-choice
+                    # parity mismatch against both references.
+                    level = LEVEL_2
         cutsell_rows = []
         for c in overlapping:
             fam = membership.get(c["clip_id"]) or membership.get(c["parent_clip_id"])
@@ -578,6 +668,11 @@ def build_region_map(
             "refinement": refinement,
             "attributed_authority": authority,
             "attribution_rationale": rationale,
+            # D-106: explicit, never-hidden flag distinguishing this LEVEL_2
+            # region from the OTHER LEVEL_2 categories (Gold stricter/looser
+            # than Cut.ai) -- this one is a take-choice PARITY mismatch with
+            # meaning preserved per the engine's own equivalence evidence.
+            "meaning_preserved": refinement == EQUIVALENT_REALIZATION_PARITY_MISMATCH,
             "cutsell_candidates": cutsell_rows,
         })
 
