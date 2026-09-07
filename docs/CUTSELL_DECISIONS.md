@@ -15174,3 +15174,94 @@ Listen change made during this measurement task.** Git tree clean at HEAD
 **HUMAN ACTION REQUIRED:** YES (condition A, product decision) --
 authorizing BestTake CASE B as the next engineering objective is a Product
 Owner decision, not made here.
+
+## D-121 -- BestTake CASE B forensic + design (multimodal performance during
+DELIVERY): full dataflow trace, confirmed double-counting risk, confirmed
+Hybrid/Gemini single-winner bypass of all performance evidence (including
+already-computed evidence that favored the correct winner in a real
+regression), pimples cross-run trace attributes variance to two upstream
+factors (grouping + semantic-arbiter bypass), never to D-116/Boundary.
+FORENSIC + DESIGN ONLY -- no engine behavior changed.
+
+Full document: `docs/CUTSELL_BESTTAKE_CASE_B_FORENSIC_D121.md`.
+
+**Headline findings:**
+1. The retry-family COMPETITOR SET is formed once, upstream, by IdeaClusterer/
+   semantic-equivalence grouping -- neither DeliveryScorer nor BestTake can
+   ever add a member. A BestTake-looking regression can therefore originate
+   from grouping alone, before any scoring runs (proven live on D-113: the
+   two pimples deliveries were never grouped as a family at all that run).
+2. `pipeline.py::_semantic_best_take`'s `single_semantic_winner` fast path
+   (one Hybrid/Gemini "winner" label at >=0.85 confidence) returns
+   immediately without ever reading `ranked` (DeliveryScorer) or any
+   performance evidence. The only gate, `_single_winner_safety_veto`, checks
+   five meaning/safety conditions only -- correctly meaning-first per D-111,
+   but leaving zero performance consultation on this path. **Confirmed live
+   on RAW 34160335330 (D-118)**: the family's Hybrid decisions already
+   carried `local_failure_corroborated=true` for BOTH candidates, with the
+   eventual (wrong, both-references-rejected) "winner" carrying FEWER local-
+   failure reasons (`dense_physical_reset:7`) than the correct realization
+   both references chose (`dense_physical_reset:7` + `visual_fumble:0.85`)
+   -- already-computed evidence that was never consulted by the fast path
+   that decided the family.
+3. A second, independent override path exists (`deterministic_best_take_
+   authority.py`, active in the current `clean_cut_core_v1_enabled`
+   production path): it re-reads the same `ranked` scores after the family
+   loop and can move the DeliveryScorer top pick into `select` on a >=0.30
+   score-gap blowout, regardless of what `_semantic_best_take` already
+   decided -- a real, existing, coarse (non-graduated) performance-can-
+   override-semantics pathway, unaware of D-115 position/DELIVERY evidence.
+4. D-115's position-aware DELIVERY/ENTRY/EXIT evidence
+   (`positioned_performance_evidence.py`) is computed once per take in the
+   active pipeline (`flow_b.py`) but stored diagnostics-only; its only real
+   consumer anywhere is D-116's Boundary CASE A edge trim. Nothing in
+   DeliveryScorer/BestTake reads it today -- this is precisely the CASE B
+   gap.
+5. **Double-counting is not hypothetical -- it is already active today.**
+   `local_performance.apply_local_performance_to_takes` folds the same four
+   local-performance event kinds into whole-take `MediaSignals` aggregates
+   (feeding `score_take`'s base score) AND `take_judge.delivery_cleanliness_
+   evidence` (D-097) independently re-derives the SAME raw events over its
+   own 0.35s-margin "interior" window and applies a second, additive
+   penalty on top. A future CASE B DELIVERY-zone consumer would be a THIRD
+   independent consumption of the same physical defect unless this is
+   resolved first.
+6. `MediaSignals` REAL-vs-DEFAULT table (D-099/D-114 re-audit): face_
+   visibility/eye_contact/motion_stability/visual_fumble/expression_
+   naturalness/gesture_naturalness/distraction_risk are REAL when local_
+   performance (cv2/MediaPipe) runs; audio_quality is REAL (take_
+   segmentation-derived). framing_quality/product_visibility/continuity/
+   delivery_energy (0.25 of `score_take`'s total weight) have a real
+   provider path (`visual_analysis.py`/`visual_openai.py`) but fall back to
+   the MediaSignals dataclass default when that provider is not active --
+   **whether that provider was active on any of the four traced Video00
+   RAWs was NOT confirmed in this task** (flagged, not fabricated).
+7. Pimples cross-run trace (D-113/D-116-first/D-118/D-120): primary cause is
+   **E -- multiple factors** -- (A) competitor-set/grouping variance (D-113)
+   and (B) the semantic-arbiter single-winner bypass (D-118, concretely
+   traced with real evidence) -- **never D-116/Boundary**, independently
+   reconfirmed a fourth time (Boundary runs strictly post-Freeze on already-
+   frozen membership; D-120 measured zero visual trims in the one run with
+   complete accounting).
+8. Recommended minimum future CASE B representation, implementation shape,
+   required observability, and future-fallback trigger conditions are all
+   specified in the full document (Sections 10, 15-18) -- no threshold,
+   weight, or confidence cutoff is proposed; the double-counting resolution
+   (item 5) is named as the single highest-leverage open design question
+   before any implementation.
+
+**No engine, threshold, Boundary, BestTake, DeliveryScorer, or Watch+
+Listen behavior changed.** No test behavior changed. No provider call. No
+RAW. No Modal/RunPod execution. Git tree clean at HEAD `2fb0efb` throughout
+this forensic/design task except for this documentation.
+
+**HUMAN ACTION REQUIRED:** YES (condition A, product decision) -- whether
+and how to implement BestTake CASE B (including resolving the double-
+counting question and whether a CASE B veto should gate the
+`single_semantic_winner` fast path) is a Product Owner decision, not made
+here. Exact next implementation scope, if authorized: build the minimal
+`case_b_evidence` projection (Section 15/16 item 1) and its required
+observability (Section 17) FIRST, behind a diagnostics-only/advisory
+wiring exactly like Watch+Listen's `advisory_v1` doctrine, before any
+scoring or veto logic is touched -- so the double-counting question can be
+inspected on real evidence before it is resolved in code.
