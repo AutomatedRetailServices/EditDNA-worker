@@ -751,6 +751,222 @@ jobs:
           echo "--- selection-plan LEVEL_1 regions (pre-render spans; secondary) ---"
           jq -c '.regions[] | select(.level=="LEVEL_1" and .scope=="selection") | {i:.region_index, raw:[.raw_start,.raw_end], dur:.duration_sec, kind, refinement, authority:.attributed_authority, why:.attribution_rationale, cands:[.cutsell_candidates[] | {s:.status, id:.clip_id, t:(.text[:80])}]}' artifact/video00-modal-quality-ladder.json
 
+      - name: Print compact D-116/Watch+Listen qualification summary (D-119, tail-safe)
+        # D-119 (docs/CUTSELL_DECISIONS.md): D-118 found that even after D-117
+        # fixed the SIGPIPE, the full boundary_engine_pass/perceptual_watch_
+        # listen objects print too early in the long "Print full canonical
+        # diagnostics" step to survive a CI log-retrieval tool that only
+        # exposes roughly the last ~5000 lines of the job. This step is a
+        # SEPARATE, LATE-STAGE, BOUNDED summary -- placed after the large
+        # diagnostics step AND after the quality-ladder step (both of which
+        # can themselves print substantial content) so it stays near the
+        # tail regardless of how much earlier output grows. It reads the
+        # already-artifact-backed files D-117 wrote
+        # (video00-modal-boundary-engine-pass.json, video00-modal-perceptual-
+        # watch-listen.json) -- never the live diagnostics step's own pipe --
+        # so this cannot reintroduce the D-117 SIGPIPE. It recomputes nothing
+        # about engine behavior: every field here is a count/derivation over
+        # rows the engine already produced. Individual no-op visual_edge_rows
+        # are summarized by count only; only APPLIED trims are printed in
+        # full detail, and only EVALUATED_FAIL/ERROR Watch+Listen capabilities
+        # get a findings summary -- both to keep this step's own output small
+        # enough to stay inside the tail window it exists to survive within.
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p artifact
+          python - <<'PY'
+          import json, os, sys
+
+          def load(path):
+              if not os.path.exists(path) or os.path.getsize(path) == 0:
+                  return None
+              with open(path) as f:
+                  try:
+                      return json.load(f)
+                  except Exception as e:
+                      print(f"WARNING: failed to parse {path}: {e}", file=sys.stderr)
+                      return None
+
+          boundary_wrapper = load("artifact/video00-modal-boundary-engine-pass.json")
+          watchlisten = load("artifact/video00-modal-perceptual-watch-listen.json")
+
+          summary = {"schema_version": "cutsell.video00.d116_qualification_summary.v1"}
+
+          b = None
+          if isinstance(boundary_wrapper, dict):
+              b = boundary_wrapper.get("boundary_engine_pass")
+
+          if not isinstance(b, dict):
+              summary["boundary"] = {
+                  "status": "absent_or_not_object",
+                  "raw": b if b is not None else "missing_source_file_or_field",
+              }
+          else:
+              rows = b.get("visual_edge_rows") or []
+              audio_rows = b.get("audio_edge_rows") or []
+              cin = b.get("selected_count_in")
+              isplit = b.get("interior_split_count")
+              cout = b.get("selected_count_out")
+              before_visual = None
+              added = removed = None
+              if isinstance(cin, int) and isinstance(isplit, int):
+                  before_visual = cin + isplit
+                  if isinstance(cout, int):
+                      added = max(cout - before_visual, 0)
+                      removed = max(before_visual - cout, 0)
+
+              def is_applied_entry(r):
+                  return r.get("reason") == "visual_entry_edge_trim" and r.get("trim_applied") is True
+
+              def is_applied_exit(r):
+                  return r.get("reason") == "visual_exit_edge_trim" and r.get("trim_applied") is True
+
+              entry_trims = [r for r in rows if is_applied_entry(r)]
+              exit_trims = [r for r in rows if is_applied_exit(r)]
+              total_seconds = 0.0
+              for r in entry_trims:
+                  try:
+                      total_seconds += float(r.get("new_start")) - float(r.get("old_start"))
+                  except (TypeError, ValueError):
+                      pass
+              for r in exit_trims:
+                  try:
+                      total_seconds += float(r.get("old_end")) - float(r.get("new_end"))
+                  except (TypeError, ValueError):
+                      pass
+
+              def count_reason(reason):
+                  return sum(1 for r in rows if r.get("reason") == reason)
+
+              def is_cross_boundary(r):
+                  if r.get("reason") != "visual_event_overlaps_delivery_no_trim":
+                      return False
+                  ds, de = r.get("delivery_start"), r.get("delivery_end")
+                  es, ee = r.get("event_start"), r.get("event_end")
+                  try:
+                      if ds is not None and es is not None and float(es) < float(ds):
+                          return True
+                      if de is not None and ee is not None and float(ee) > float(de):
+                          return True
+                  except (TypeError, ValueError):
+                      pass
+                  return False
+
+              applied_trims = []
+              for r in entry_trims + exit_trims:
+                  seconds = None
+                  try:
+                      if r.get("reason") == "visual_entry_edge_trim":
+                          seconds = round(float(r["new_start"]) - float(r["old_start"]), 3)
+                      else:
+                          seconds = round(float(r["old_end"]) - float(r["new_end"]), 3)
+                  except (TypeError, ValueError, KeyError):
+                      pass
+                  applied_trims.append({
+                      "clip_id": r.get("clip_id"),
+                      "event_kind": r.get("event_kind"),
+                      "zone": r.get("zone"),
+                      "event_start": r.get("event_start"),
+                      "event_end": r.get("event_end"),
+                      "delivery_start": r.get("delivery_start"),
+                      "delivery_end": r.get("delivery_end"),
+                      "old_start": r.get("old_start"),
+                      "new_start": r.get("new_start"),
+                      "old_end": r.get("old_end"),
+                      "new_end": r.get("new_end"),
+                      "seconds_trimmed": seconds,
+                      "reason": r.get("reason"),
+                  })
+              applied_trims.sort(key=lambda x: (x.get("event_start") if x.get("event_start") is not None else 0))
+
+              summary["boundary"] = {
+                  "schema_version": b.get("schema_version"),
+                  "stage": b.get("stage"),
+                  "selected_count_in": cin,
+                  "selected_count_out": cout,
+                  "edge_trim_count": b.get("edge_trim_count"),
+                  "interior_split_count": isplit,
+                  "interior_reject_count": b.get("interior_reject_count"),
+                  "audio_entry_trim_count": b.get("audio_entry_trim_count"),
+                  "audio_exit_trim_count": b.get("audio_exit_trim_count"),
+                  "audio_edge_row_count": len(audio_rows),
+                  "visual_edge_row_count": len(rows),
+                  "visual_entry_trim_count": b.get("visual_entry_trim_count"),
+                  "visual_exit_trim_count": b.get("visual_exit_trim_count"),
+                  "visual_delivery_overlap_no_trim_count": count_reason("visual_event_overlaps_delivery_no_trim"),
+                  "visual_cross_boundary_count": sum(1 for r in rows if is_cross_boundary(r)),
+                  "visual_interior_not_edge_count": count_reason("visual_event_not_at_edge"),
+                  "visual_blocked_by_delivery_floor_count": count_reason("visual_trim_blocked_by_delivery_floor"),
+                  "visual_trim_unavailable_count": count_reason("visual_trim_unavailable"),
+                  "total_visual_trim_seconds": round(total_seconds, 3),
+                  "selected_count_before_visual_stage": before_visual,
+                  "selected_count_after_visual_stage": cout,
+                  "visual_stage_added_count": added,
+                  "visual_stage_removed_count": removed,
+                  "visual_stage_split_count": 0,
+                  "visual_stage_count_invariant_note": (
+                      "D-116 CASE A never changes membership: tighten_selected_visual_edges "
+                      "emits exactly one output clip per input clip (verified by code "
+                      "inspection, cutsell_worker/boundary_engine_pass.py -- not a new "
+                      "engine change here). No distinct before/after-visual-stage "
+                      "checkpoint is recorded upstream in boundary_engine_pass itself, so "
+                      "before_visual_stage is derived as selected_count_in + "
+                      "interior_split_count (the only prior stage that can change count); "
+                      "a nonzero added/removed value would indicate a genuine invariant "
+                      "violation worth escalating, not an expected outcome."
+                  ),
+                  "no_op_visual_row_count": len(rows) - len(applied_trims),
+                  "applied_visual_trims": applied_trims,
+              }
+
+          if watchlisten is None:
+              summary["watch_listen"] = {"status": "absent_or_missing_source_file"}
+          elif isinstance(watchlisten, str):
+              summary["watch_listen"] = {"status": watchlisten}
+          elif isinstance(watchlisten, dict):
+              caps = []
+              for c in watchlisten.get("capabilities") or []:
+                  status = c.get("status")
+                  findings = c.get("findings") or []
+                  entry = {
+                      "name": c.get("capability"),
+                      "status": status,
+                      "method": c.get("method"),
+                      "finding_count": c.get("finding_count", len(findings)),
+                      "routing_targets": sorted({f.get("routes_to") for f in findings if f.get("routes_to")}),
+                  }
+                  if status in ("EVALUATED_FAIL", "ERROR"):
+                      entry["findings_summary"] = [
+                          {"kind": f.get("kind"), "start": f.get("start"), "end": f.get("end"),
+                           "severity": f.get("severity"), "routes_to": f.get("routes_to")}
+                          for f in findings
+                      ]
+                  caps.append(entry)
+              summary["watch_listen"] = {
+                  "status": watchlisten.get("status"),
+                  "gate_mode": watchlisten.get("gate_mode"),
+                  "artifact_kind": watchlisten.get("artifact_kind"),
+                  "technical_qc_status": watchlisten.get("technical_qc_status"),
+                  "capability_status_counts": watchlisten.get("capability_status_counts"),
+                  "routing": watchlisten.get("routing"),
+                  "capabilities": caps,
+              }
+          else:
+              summary["watch_listen"] = {"status": "unexpected_type", "type": type(watchlisten).__name__}
+
+          os.makedirs("artifact", exist_ok=True)
+          out_path = "artifact/video00-modal-d116-qualification-summary.json"
+          with open(out_path, "w") as f:
+              json.dump(summary, f, indent=2, sort_keys=True)
+
+          size = os.path.getsize(out_path)
+          print("--- D-116/Watch+Listen compact qualification summary (D-119; derived from D-117's artifact-backed files; full artifacts remain source of detailed truth) ---")
+          print(f"summary file: {out_path} ({size} bytes)")
+          print(json.dumps(summary, indent=2, sort_keys=True))
+          PY
+
       - name: Upload validator reports
         if: always()
         uses: actions/upload-artifact@v4
@@ -764,6 +980,7 @@ jobs:
             artifact/video00-modal-quality-ladder.md
             artifact/video00-modal-quality-ladder.csv
             artifact/video00-modal-active-path-identity.json
+            artifact/video00-modal-d116-qualification-summary.json
           retention-days: 14
           if-no-files-found: warn
 

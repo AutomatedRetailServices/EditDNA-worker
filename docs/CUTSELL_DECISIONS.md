@@ -14867,3 +14867,144 @@ file sized to print in full near the end of the step, or splitting
 `boundary_engine_pass`/`perceptual_watch_listen` printing into their own
 short-lived step so they are never far from the tail), is a Product Owner
 paid-compute / prioritization decision, not made here.
+
+## D-119 -- Bounded late-stage D-116/Watch+Listen diagnostic retrieval
+surface (workflow-only): solves D-118's CI-log-retrieval limitation without
+touching any engine file or re-running a RAW
+
+D-118 found a SEPARATE, second observability problem downstream of D-117's
+own (confirmed working) fix: once the "Print full canonical diagnostics"
+step succeeds and prints its full content, the `boundary_engine_pass` and
+`perceptual_watch_listen` objects -- which print early in that long step --
+fall outside the roughly-5000-line tail window the available CI log
+retrieval tool exposes, because everything printed after them (including
+the quality-ladder step's own substantial output) pushes them out. This is
+a pure evidence-retrieval gap, not a defect in D-116, D-117, or the engine.
+
+**Fix: a new, dedicated, LATE-STAGE step**, "Print compact D-116/Watch+
+Listen qualification summary (D-119, tail-safe)", added to `.github/
+workflows/cutsell-video00-modal-raw.yml` immediately after the "Video00
+quality ladder" step and before "Upload validator reports" -- i.e. after
+BOTH of the two steps whose own output volume was shown (D-118) to consume
+most of the retrievable tail. It reads the two files D-117 already writes
+to disk (`artifact/video00-modal-boundary-engine-pass.json`, `artifact/
+video00-modal-perceptual-watch-listen.json`) -- never the live diagnostics
+step's own pipe -- so it cannot reintroduce the D-117 SIGPIPE, and it
+recomputes nothing about engine behavior: every emitted field is a
+count, filter, or arithmetic derivation over rows the engine already
+produced and D-117 already preserved in full.
+
+**Boundary summary fields:** `selected_count_in`, `selected_count_out`,
+`edge_trim_count`, `interior_split_count`, `interior_reject_count`,
+`audio_entry_trim_count`, `audio_exit_trim_count`, `audio_edge_row_count`,
+`visual_edge_row_count`, `visual_entry_trim_count`, `visual_exit_trim_
+count`, `visual_delivery_overlap_no_trim_count`, `visual_cross_boundary_
+count` (a DELIVERY-zone no-trim row whose own event_start/event_end
+straddles the delivery span boundary -- derived from the row's own
+start/end fields, not a new engine flag), `visual_interior_not_edge_count`
+(rows with reason `visual_event_not_at_edge`), `visual_blocked_by_
+delivery_floor_count`, `visual_trim_unavailable_count`, `total_visual_
+trim_seconds` (sum of `new_start-old_start` over applied ENTRY rows plus
+`old_end-new_end` over applied EXIT rows), `selected_count_before_visual_
+stage` / `selected_count_after_visual_stage` / `visual_stage_added_count`
+/ `visual_stage_removed_count` / `visual_stage_split_count` -- plus a
+`visual_stage_count_invariant_note` explaining these are DERIVED (before =
+`selected_count_in + interior_split_count`, since no engine checkpoint
+exists between the audio and visual sub-stages and none was added here,
+per this task's no-engine-change scope) rather than a separately recorded
+field, and that D-116 CASE A structurally cannot change membership
+(`tighten_selected_visual_edges` emits exactly one output clip per input
+clip, verified by code inspection, not by a new instrumentation point).
+`no_op_visual_row_count` (count only, no detail) and `applied_visual_
+trims` (full detail ONLY for rows with `trim_applied: true`): `clip_id`,
+`event_kind`, `zone`, `event_start`, `event_end`, `delivery_start`,
+`delivery_end`, `old_start`, `new_start`, `old_end`, `new_end`, `seconds_
+trimmed`, `reason`.
+
+**Watch+Listen summary fields:** overall `status`, `gate_mode`,
+`artifact_kind`, `technical_qc_status`, `capability_status_counts`,
+`routing`; per capability -- `name`, `status`, `method`, `finding_count`,
+`routing_targets` (unique `routes_to` values across that capability's own
+findings); a `findings_summary` (kind/start/end/severity/routes_to) is
+included ONLY when that capability's status is `EVALUATED_FAIL` or
+`ERROR` -- never a bulk findings dump, and NOT_IMPLEMENTED capabilities
+(the 4 named in D-098) print with an explicit status, never silently
+collapsed into PASS.
+
+**Optional machine-readable file, added:** `artifact/video00-modal-d116-
+qualification-summary.json`, written by the same step and added to the
+existing "Upload validator reports" artifact-upload step's path list (no
+new upload step needed). Small by construction: the large synthetic
+fixture below produced a 4808-byte file against a 166 KB source object.
+
+**No live-pipe SIGPIPE reintroduced.** The step never pipes a live
+producer into `head` or anything else that can exit early; it reads
+already-closed files with Python's own `json.load`, and the only bounded-
+size behavior (no-op rows summarized by count, findings shown only for
+FAIL/ERROR capabilities) is enforced by the projection logic itself, not
+by truncating a stream.
+
+**Static validation performed (no RAW, per this task's scope):**
+1. `python3 -c "import yaml; yaml.safe_load(...)"` on the full workflow --
+   parses cleanly (initially failed twice during development: once because
+   the embedded Python was left flush-left inside a `run: |` block scalar,
+   which YAML's indentation rule treats as ending the block early once a
+   line has LESS indentation than the block's own established level, and
+   once because a naive "already indented, skip" reindentation pass
+   accidentally left three deeply-nested lines under-indented by
+   coincidentally already having >= the target prefix length; both fixed
+   by rebuilding the heredoc body from the known-good flush-left source
+   with an unconditional 10-space prefix on every line, matching this
+   repo's own established `python - <<'PY'` indentation convention seen in
+   `benchmark49/50/51-controlled-*.yml`).
+2. `bash -n` on the extracted step script -- syntax OK.
+3. Full functional simulation against a synthetic 166 KB `video00-modal-
+   boundary-engine-pass.json` (303 `visual_edge_rows`: 2 real applied
+   trims -- one ENTRY, one EXIT -- 1 cross-boundary DELIVERY-overlap row,
+   300 no-op rows spanning every no-trim reason) and a padded `perceptual-
+   watch-listen.json` (7 capabilities: PASS/FAIL/UNCERTAIN/4x NOT_
+   IMPLEMENTED) run through the exact YAML-extracted step script: exit 0,
+   step stdout 5048 bytes (comfortably inside a 5000-LINE tail budget --
+   154 lines total), summary file 4808 bytes, `total_visual_trim_seconds`
+   correctly computed as 1.0 (0.4 ENTRY + 0.6 EXIT -- an initial sign bug,
+   `old_start - new_start` instead of `new_start - old_start` for the
+   ENTRY case, was caught and fixed by this same simulation before it
+   reached the workflow file), `visual_cross_boundary_count` correctly 1,
+   `no_op_visual_row_count` correctly 301, applied-trim detail correct for
+   both rows.
+4. Two edge cases, also run through the exact extracted script: (a) both
+   source files entirely absent -- exit 0, `{"boundary": {"status":
+   "absent_or_not_object", ...}, "watch_listen": {"status": "absent_or_
+   missing_source_file"}}`; (b) empty `visual_edge_rows`/`audio_edge_rows`
+   and a `perceptual_watch_listen.json` containing the literal string
+   `"absent"` (the exact shape D-117's own step writes when the source
+   field is missing) -- exit 0, all counts zero, no crash. Confirms
+   requirement 8 (workflow does not fail when optional detailed arrays are
+   empty or the whole object is absent).
+5. `git status`/`git diff --stat` -- only `.github/workflows/cutsell-
+   video00-modal-raw.yml` changed (+217 lines, one new step plus one path
+   line in the existing upload step). No `cutsell_worker/*.py` file
+   touched -- Boundary, BestTake, DeliveryScorer, Watch+Listen verdict
+   logic, grouping/retry logic, and every threshold are byte-identical to
+   HEAD `153d155`. No provider, Modal, or RunPod execution parameter
+   changed. No RAW launched.
+
+**D-118 compatibility.** D-118's own finding stands unedited; this entry
+does not rewrite it. **D-116 status is NOT upgraded here** -- it remains
+**B -- PARTIALLY REAL-MEDIA PROVEN** until a future authorized RAW actually
+exercises this new late-stage summary on real Video00 media and the
+complete `visual_entry_trim_count`/`visual_exit_trim_count`/`visual_edge_
+row_count`/applied-trim detail is recovered from that run's ordinary job
+log (no artifact download required, per this task's "no artifact
+dependency for basic qualification" requirement -- the summary prints to
+stdout in addition to writing the small file).
+
+**No engine, Boundary, BestTake, DeliveryScorer, Watch+Listen, grouping/
+retry, or threshold change.** No provider call. No RAW. No Modal/RunPod
+execution.
+
+**HUMAN ACTION REQUIRED:** YES (condition C) -- the exact next recommended
+action is ONE fresh Video00 RAW to exercise this fixed workflow and, this
+time, recover the complete compact D-116 boundary/Watch+Listen summary
+from ordinary job logs; that RAW is a Product Owner paid-compute decision,
+not authorized by this task.
