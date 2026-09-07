@@ -14385,3 +14385,135 @@ provider, S3, Modal, RunPod, or UI/Figma work was performed.
 minimum implementation shape in §13 of the forensic doc (three additive
 derived fields + wiring BoundaryEngine/BestTake to consume them) is a
 product/architecture decision, not made here.
+
+## D-115 -- Position-aware performance evidence layer: ONE canonical
+ENTRY/DELIVERY/EXIT interpretation of a take/attempt, additive and
+evidence-only (bounded implementation, no membership/scoring/trimming
+change, no RAW)
+
+**Core architectural rule.** D-114 warned that Boundary, BestTake, and
+Watch+Listen could each independently reinvent ENTRY/DELIVERY/EXIT logic.
+This task builds the ONE canonical temporal interpretation instead:
+`cutsell_worker/positioned_performance_evidence.py`, a new, self-contained,
+read-only module. Nothing else in the active pipeline consumes it yet --
+it is infrastructure for a later, separately-authorized BestTake/Boundary
+consumer.
+
+**DELIVERY span.** `compute_delivery_span(words)` = the take/attempt's own
+first-word-start .. last-word-end, off the already-existing aligned ASR
+word timestamps (`CandidateTake.words`) -- no fixed lead-in/tail seconds,
+no semantic lookahead, no provider call, no new threshold. A candidate with
+no words gets an explicit `available=False` span, never a fabricated one.
+
+**ENTRY / DELIVERY / EXIT classification.** `build_positioned_performance_
+evidence` classifies each already-real, already-timestamped performance
+event against that span: any overlap at all is classified DELIVERY (per
+this task's own conceptual semantics); an event entirely before/after is
+ENTRY/EXIT. A straddling event additionally sets `starts_before_delivery`/
+`ends_after_delivery` so the straddle is never silently collapsed into a
+single zone. When the delivery span itself is unavailable, every field is
+`None`/`UNKNOWN` -- never a guessed classification.
+
+**Event scope.** Exactly D-114's four proven local-performance candidate
+kinds (`camera_disengagement_candidate`, `facial_expression_shift_
+candidate`, `body_reset_candidate`, `hand_motion_reset_candidate`) plus
+`audio_silence_interval` -- the only other event already sharing the exact
+same `TemporalEvent` schema and already consulted elsewhere for boundary
+reasoning (`boundary_engine_pass.py`, `attempt_reconstruction._measured_
+pause_at_transition`). The 5 permanently-default `MediaSignals` fields
+(D-114's Gap 2, `visual_provider=None`) are never touched or faked into
+positioned evidence. Event selection reuses the EXACT source-window
+overlap test `local_performance.apply_local_performance_to_takes` already
+uses -- no new windowing rule.
+
+**Attempt-merge preservation, by construction.** Rather than threading a
+new field through `_merge_attempt`/`_merge_signals` (D-114's second loss
+point), this module is called AFTER `attempt_reconstruction.reconstruct_
+delivery_attempts` has already produced the final fused attempts. A fused
+attempt's `words` are already the verbatim concatenation of every member's
+words, and its `start`/`end` already span the full source-absolute range
+of its members -- so computing delivery span and positioned events
+directly off the FINAL attempt object automatically covers every member's
+evidence with no averaging and no change whatsoever to `_merge_signals`
+itself (unchanged, unedited, per this task's explicit scope). Proven by a
+targeted test: two raw takes fused into one attempt, one event near each
+member, both preserved with their exact original timestamps in the fused
+attempt's evidence, none averaged away.
+
+**Wiring (`flow_b.py`), diagnostics only.** `process_local_sources` now
+calls `build_positioned_performance_evidence_for_takes` once, immediately
+after `attempt_reconstruction_diagnostics` is finalized (on the FINAL
+post-reconstruction `takes` against the FINAL `whole_context`), and stores
+the JSON-safe rows under `attempt_reconstruction_diagnostics["positioned_
+performance_evidence"]` -- the same dict-merge pattern D-046 FIX B already
+used to add `preserved_borderline_subspans` to the identical dict, which
+`pipeline.py` already threads whole into `draft.diagnostics["attempt_
+reconstruction"]`. `takes` and `whole_context` themselves are never
+mutated; no `CandidateTake`/`MediaSignals` field was added.
+
+**No editorial authority, proven by regression.** The new layer is
+EVIDENCE ONLY. Targeted tests pin: scalar `MediaSignals` identity-unchanged
+after the evidence call; `take_judge.score_take`/`rank_takes` give byte-
+identical results before/after; `boundary_engine_pass.apply_post_freeze_
+boundary_pass` returns an identical `draft.selected` whether or not the new
+diagnostics key is present (BoundaryEngine simply never reads it). No
+render-plan file was touched, so the render plan is unaffected by
+construction, not merely by test. No Watch+Listen file was touched, so
+PASS/FAIL/UNCERTAIN semantics are unchanged by construction.
+
+**Tests (`tests/test_cutsell_d115_positioned_performance_evidence.py`, 19
+tests, generic fixtures -- no Video00 text/ids/timestamps):** delivery-span
+derivation from words; no-words UNKNOWN span with no fabricated zone
+certainty; event fully before/inside/after speech (ENTRY/DELIVERY-overlap/
+EXIT); event crossing the delivery start and crossing the delivery end
+(straddle recorded explicitly); multiple event kinds preserving independent
+timing; default-only signal kinds excluded even when temporally
+overlapping; `audio_silence_interval` included as real positioned evidence;
+events outside the take window excluded; events from a different source
+excluded; `context=None` safe; fused-attempt preservation without
+averaging; diagnostics provenance/timing shape, including rows with no
+events or an unavailable span; scalar-MediaSignals-unchanged; DeliveryScore/
+BestTake-ranking-unchanged; Boundary-pass-unaffected-by-the-new-diagnostics-
+key. All 19 pass.
+
+**Bounded regressions, all green:** the full D-097 BoundaryEngine suite
+(`test_cutsell_d097_c_boundary_engine_pass.py`), D-097 DeliveryScorer
+cleanliness evidence, `local_performance`/local-expression take-judge
+suites, both attempt-reconstruction suites (incl. D-046 FIX B subspan
+preservation), the take-judge provider/hybrid/v2 suites, D-097 perceptual
+Watch+Listen + CLEAN RAW gate, `performance_confirmation` -- 132 tests --
+plus every test file exercising `flow_b.process_local_sources` (clean-
+worker media ingest, D-050C3/D-056.1/D-087/D-089/D-090/D-092/D-093,
+editorial mode, universal clean cut) -- 164 tests. 296 total, zero
+failures, zero behavior change observed anywhere this new diagnostics key
+could theoretically be seen.
+
+**Full offline qualification:** `python3 -m compileall -q cutsell_worker
+benchmarks tests` clean. Full `tests/` run (excluding the pre-existing
+`test_semantic_stitch.py` collection error): **3029 passed, 5 failed** --
+all 5 exactly match the pre-existing documented baseline (the same 1
+`test_hybrid_story_guard_incomplete_retry.py` failure + 4 `test_video00_
+modal_hybrid_semantic_parity.py` CI-workflow-text failures carried since
+D-108/D-110/D-112/D-113); zero new failures (3029 = the 3010 D-113
+baseline + exactly the 19 new D-115 tests).
+
+**Files changed:** `cutsell_worker/positioned_performance_evidence.py`
+(new), `cutsell_worker/flow_b.py` (25 lines added: one import block, one
+diagnostics-only call site), `tests/test_cutsell_d115_positioned_
+performance_evidence.py` (new). No other `cutsell_worker/*.py` file
+touched -- `contracts.py`, `take_judge.py`, `boundary_engine_pass.py`,
+`attempt_reconstruction.py`, `perceptual_watch_listen.py`, `local_
+performance.py`, `whole_video_analysis.py`, and every render-plan file are
+all byte-identical to HEAD `9552bb4`.
+
+**No thresholds, no provider, no fallback, no RAW.** No motion/face/eye-
+contact/gesture/pause/retry/sequence-identity/coverage threshold was
+introduced or modified; no fixed entry/exit duration was introduced (the
+directive's own explicit prohibition). No Gemini/VLM/provider call, no
+learned classifier, no fallback arbiter. No RAW, S3, Modal, RunPod, or
+UI/Figma work was performed.
+
+**HUMAN ACTION REQUIRED:** YES (condition A) -- whether/when to authorize
+wiring this evidence into BoundaryEngine (CASE A trims) or BestTake/
+DeliveryScorer (CASE B penalties) is a separate, not-yet-made product/
+architecture decision; this task explicitly stops short of both.

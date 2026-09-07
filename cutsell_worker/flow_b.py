@@ -25,6 +25,10 @@ from .media_probe import probe_media
 from .observability import ExecutionTrace
 from .performance_confirmation import confirm_local_performance_events
 from .pipeline import build_flow_b_draft
+from .positioned_performance_evidence import (
+    build_positioned_performance_evidence_for_takes,
+    positioned_performance_evidence_diagnostics,
+)
 from .providers import NoopSemanticProvider, SemanticProvider, safe_semantic_classify
 from .semantic_idea_equivalence import SemanticEquivalenceArbiter
 from .silence_analysis import word_silence_gaps
@@ -358,6 +362,27 @@ def process_local_sources(
         merged_fragment_count=attempt_reconstruction_diagnostics.get("merged_fragment_count", 0),
         boundary_count=len(attempt_reconstruction_diagnostics.get("boundaries") or ()),
         preserved_subspan_count=len(preserved_subspans),
+    )
+
+    # D-115: the ONE canonical position-aware ENTRY/DELIVERY/EXIT evidence
+    # layer (docs/CUTSELL_DECISIONS.md D-115; forensic:
+    # docs/CUTSELL_FORENSIC_POSITION_AWARE_PERCEPTION_D114.md). Computed on
+    # the FINAL post-attempt-reconstruction `takes` against the FINAL
+    # `whole_context` so fused attempts are covered with no averaging (see
+    # positioned_performance_evidence.py's module docstring). Diagnostics
+    # only -- does not touch `takes`, `whole_context`, membership, scoring,
+    # or boundaries; no downstream authority consumes it yet.
+    positioned_evidence = build_positioned_performance_evidence_for_takes(takes, whole_context)
+    positioned_evidence_rows = positioned_performance_evidence_diagnostics(positioned_evidence)
+    attempt_reconstruction_diagnostics = {
+        **attempt_reconstruction_diagnostics,
+        "positioned_performance_evidence": positioned_evidence_rows,
+    }
+    trace.complete(
+        "positioned_performance_evidence",
+        candidate_count=len(positioned_evidence),
+        delivery_span_available_count=sum(1 for row in positioned_evidence_rows if row["delivery_span"]["available"]),
+        positioned_event_count=sum(row["positioned_event_count"] for row in positioned_evidence_rows),
     )
     notify("analyzing", 74)
 
