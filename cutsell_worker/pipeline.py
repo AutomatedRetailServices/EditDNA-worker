@@ -43,6 +43,7 @@ from .semantic_compute_planner import build_cost_contract_report
 from .semantic_idea_equivalence import SemanticEquivalenceArbiter, SemanticEquivalenceGatePolicy
 from .session_boundaries import safe_group_takes_by_sessions
 from .strategy import choose_strategy
+from .take_grouping import _natural_tokens, _restart_content
 from .take_grouping_provider import (
     TakeGroupingProvider,
     reconcile_semantic_idea_equivalence,
@@ -167,6 +168,123 @@ def family_scoped_semantic_decisions(
 _BTS_SINGLETON_UNUSABLE_CONFIDENCE = 0.85
 
 
+# D-101 ROOT CAUSE #1 (P0 forensic, hereditary-cancer/papillary-diagnosis
+# cluster): `single_semantic_winner` used to trust a lone Hybrid/Gemini
+# "winner" label unconditionally, with NONE of the safety checks the
+# `len(winners) != 1` branch below already has -- on real Video00 footage
+# this let a per-window classification error discard the realization
+# carrying unique required meaning while keeping an unrelated one. This is
+# a SAFETY VETO only, not a return to maximum semantic coverage: it never
+# manufactures a composite and never restores a losing realization merely
+# because it carries extra SUPPORTING/low-value content -- it only refuses
+# to trust the label when the label's own pick would (a) itself carry a
+# D-081 semantic-delete-recommended flag, (b) itself be an EXPLICITLY
+# incomplete attempt (`complete_idea is False` -- WHEN-UNCERTAIN-KEEP:
+# unset/unknown is never a veto trigger), (c) factually contradict another
+# member (`contradiction_signal.any_pair_contradicts`, the same safety
+# gate used everywhere else in this function), or (d) fail to cover a
+# CRITICAL claim (`claim_coverage_best_take.critical_coverage_sets`) that
+# another member uniquely covers. No new heuristic: every check below is
+# the SAME deterministic function the multi-candidate branch already
+# calls. Vetoed cases fall through to that same branch (treated exactly
+# like a non-decisive label set), never a bespoke resolution path.
+def _single_winner_safety_veto(
+    preferred_id: str,
+    members: tuple[CandidateTake, ...],
+    semantic_delete_recommended: dict[str, bool] | None,
+) -> str | None:
+    """Return a veto reason, or None when the single "winner" label is safe
+    to trust as-is (the common case -- byte-identical to pre-D-101
+    behavior whenever nothing below fires)."""
+    by_id = {member.clip_id: member for member in members}
+    member_ids = list(by_id)
+    if (semantic_delete_recommended or {}).get(preferred_id, False):
+        return "winner_carries_delete_recommended_evidence"
+    if by_id[preferred_id].complete_idea is False:
+        return "winner_is_explicitly_incomplete"
+    texts = [str(by_id[cid].text or "") for cid in member_ids]
+    if any_pair_contradicts(texts):
+        return "members_contradict"
+    members_pairs = [(cid, by_id[cid]) for cid in member_ids]
+    coverage = critical_coverage_sets(members_pairs, member_ids)
+    if coverage:
+        preferred_coverage = coverage.get(preferred_id, frozenset())
+        for cid, covered in coverage.items():
+            if cid == preferred_id:
+                continue
+            if not covered.issubset(preferred_coverage):
+                return "winner_missing_unique_critical_claim"
+    return None
+
+
+# D-101 ROOT CAUSE #2 (P0 forensic, same cluster): once the semantic label
+# stops being decisive, `delivery_tie_break_among_survivors` used to pick
+# among survivors by raw DeliveryScorer rank alone, with no awareness that
+# one survivor could be a strict, literal content subset of another --
+# on real footage this let an incomplete short prefix of a fuller passage
+# outscore (and so discard) the complete passage that contains and
+# completes it. Deliberately NOT "longer text always wins": the match
+# requires the shorter candidate's ENTIRE natural-token sequence to occur
+# verbatim, contiguously, inside the longer one (never a bag-of-words/
+# lexical-similarity test), so an unrelated pair sharing only a topic or
+# opening (same_opening_restart's own territory), two independently
+# COMPLETE statements, or a complementary pair never qualifies -- and a
+# genuine factual disagreement between the two (`any_pair_contradicts`,
+# the same D-063-family safety gate used throughout this function) always
+# suppresses the protection, so a contradicting fuller candidate is never
+# treated as automatically safe either.
+_SUBSET_MINIMUM_SHORT_CONTENT_TOKENS = 3
+_SUBSET_MINIMUM_EXTRA_CONTENT_TOKENS = 2
+
+
+def _is_incomplete_content_subset(short: CandidateTake, long: CandidateTake) -> bool:
+    """True when `short`'s full natural-token sequence is a contiguous
+    subsequence of `long`'s, with `long` carrying at least a minimum of
+    genuinely additional content beyond the matched span. See the D-101
+    Root Cause #2 module comment above for the full rationale/bounds."""
+    short_tokens = _natural_tokens(str(short.text or ""))
+    long_tokens = _natural_tokens(str(long.text or ""))
+    if len(short_tokens) >= len(long_tokens):
+        return False
+    short_content = _restart_content(short_tokens)
+    if len(short_content) < _SUBSET_MINIMUM_SHORT_CONTENT_TOKENS:
+        return False
+    window = len(short_tokens)
+    match_start = None
+    for start in range(len(long_tokens) - window + 1):
+        if long_tokens[start:start + window] == short_tokens:
+            match_start = start
+            break
+    if match_start is None:
+        return False
+    extra_tokens = long_tokens[:match_start] + long_tokens[match_start + window:]
+    extra_content = _restart_content(extra_tokens)
+    return len(extra_content) >= _SUBSET_MINIMUM_EXTRA_CONTENT_TOKENS
+
+
+def _exclude_incomplete_subset_losers(
+    candidate_ids: list[str],
+    by_id: dict[str, CandidateTake],
+) -> list[str]:
+    """Drop any candidate that is an incomplete content subset of ANOTHER
+    candidate in `candidate_ids`, unless the pair factually contradicts
+    (in which case the protection is suppressed for that pair -- the
+    fuller candidate is never assumed safe just because it is fuller).
+    Fails open: never excludes every candidate."""
+    excluded: set[str] = set()
+    for short_id in candidate_ids:
+        for long_id in candidate_ids:
+            if short_id == long_id:
+                continue
+            if not _is_incomplete_content_subset(by_id[short_id], by_id[long_id]):
+                continue
+            if any_pair_contradicts([str(by_id[short_id].text or ""), str(by_id[long_id].text or "")]):
+                continue
+            excluded.add(short_id)
+    survivors = [cid for cid in candidate_ids if cid not in excluded]
+    return survivors if survivors else candidate_ids
+
+
 def _semantic_best_take(
     members: tuple[CandidateTake, ...],
     semantic_decisions: dict[str, tuple[str, float]],
@@ -234,6 +352,13 @@ def _semantic_best_take(
     Any step that finds nothing decisive falls open to the next one; the
     final fallback is always `local_selected_clip_id`, never worse than
     today's behavior for a genuinely unresolved family.
+
+    D-101 (P0 forensic, hereditary-cancer/papillary-diagnosis cluster):
+    two additional, purely additive safety checks close the two proven
+    root causes found there -- see `_single_winner_safety_veto`'s and
+    `_exclude_incomplete_subset_losers`'s own module comments immediately
+    above this function for the full rationale. Neither changes this
+    function's contract for the common, safe case.
     """
     winners = []
     for member in members:
@@ -242,9 +367,14 @@ def _semantic_best_take(
             winners.append((member.clip_id, confidence))
     if len(winners) == 1:
         preferred_id, _ = winners[0]
-        if preferred_id == local_selected_clip_id:
-            return local_selected_clip_id, preferred_id, "single_semantic_winner"
-        return preferred_id, preferred_id, "single_semantic_winner"
+        veto_reason = _single_winner_safety_veto(preferred_id, members, semantic_delete_recommended)
+        if veto_reason is None:
+            if preferred_id == local_selected_clip_id:
+                return local_selected_clip_id, preferred_id, "single_semantic_winner"
+            return preferred_id, preferred_id, "single_semantic_winner"
+        # D-101 Root Cause #1: the label is vetoed -- fall through to the
+        # general resolution ladder below exactly as though this family
+        # had zero/multiple "winner" labels (never a bespoke path).
 
     member_ids = [member.clip_id for member in members]
     by_id = {member.clip_id: member for member in members}
@@ -325,7 +455,12 @@ def _semantic_best_take(
     rank_by_id = {row.clip_id: row.score for row in ranked}
     survivor_ranked = [cid for cid in survivors if cid in rank_by_id]
     if survivor_ranked:
-        best = max(survivor_ranked, key=lambda cid: rank_by_id[cid])
+        # D-101 Root Cause #2: raw delivery score alone may not settle a
+        # tie in favor of a candidate that is an incomplete, literal
+        # content subset of another survivor -- see
+        # `_exclude_incomplete_subset_losers`'s own module comment above.
+        tie_break_pool = _exclude_incomplete_subset_losers(survivor_ranked, by_id)
+        best = max(tie_break_pool, key=lambda cid: rank_by_id[cid])
         if best == local_selected_clip_id:
             return local_selected_clip_id, None, "delivery_tie_break_among_survivors"
         return best, best, "delivery_tie_break_among_survivors"

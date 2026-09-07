@@ -12796,3 +12796,146 @@ must choose which of the two candidate fix locations (or both) to
 authorize before any implementation begins; per this task's own closing
 instruction, no fix is implemented and no further task begins until that
 approval is given.
+
+## D-102 -- D-101 both proven root causes fixed: `_semantic_best_take` safety hardening (bounded encargo, no RAW)
+
+Product Owner approved BOTH D-101 candidate fixes in the SAME existing
+authority, `cutsell_worker/pipeline.py::_semantic_best_take` -- no new
+authority, grouping/D-097.12/D-100 untouched, D-099 Gap #2/#3 untouched.
+
+**FIX A (Root Cause #1, `single_semantic_winner` safety veto).** Before a
+lone Hybrid/Gemini "winner" label becomes an authoritative discard, a new
+`_single_winner_safety_veto` helper checks the SAME deterministic
+evidence the `len(winners) != 1` branch already consults -- no new
+heuristic: (a) the labelled winner itself carries D-081 semantic-delete-
+recommended evidence; (b) the labelled winner is itself EXPLICITLY
+incomplete (`complete_idea is False`; unset/unknown never vetoes, WHEN-
+UNCERTAIN-KEEP); (c) `contradiction_signal.any_pair_contradicts` finds a
+factual conflict among the family's members; (d) `claim_coverage_best_
+take.critical_coverage_sets` shows the labelled winner fails to cover a
+CRITICAL claim another member uniquely covers. Any one of these vetoes
+the fast path and falls through to the EXISTING `len(winners) != 1`
+resolution ladder unchanged -- never a bespoke resolution, never a
+composite manufactured merely because a losing realization carries extra
+SUPPORTING/low-value content (verified: a losing realization that only
+repeats the winner's own CRITICAL content plus filler never vetoes).
+
+**FIX B (Root Cause #2, incomplete-subset-aware delivery tie-break).**
+Before `delivery_tie_break_among_survivors` picks the highest raw
+DeliveryScorer score among survivors, a new `_exclude_incomplete_subset_
+losers` step (backed by `_is_incomplete_content_subset`) removes any
+survivor whose ENTIRE natural-token sequence occurs verbatim, contiguously,
+inside another survivor's (with that other survivor carrying a minimum of
+additional genuine content beyond the matched span) -- deliberately NOT a
+bag-of-words/lexical-similarity test and NOT "longer text always wins": an
+unrelated pair sharing only a topic or opening, two independently COMPLETE
+statements, or a complementary pair never match this literal-containment
+test. `contradiction_signal.any_pair_contradicts` (the same D-063-family
+gate used throughout this function) suppresses the exclusion for any pair
+that factually disagrees, so a fuller candidate is never assumed safe
+merely because it is fuller. The helper fails open -- it never excludes
+every candidate.
+
+Both fixes are pure safety vetoes, never a return to maximum semantic
+coverage, matching the Product Owner's explicit doctrine: CRITICAL
+coverage is a safety constraint, not the editorial objective.
+
+Tests (`tests/test_cutsell_d101_semantic_best_take_safety_hardening.py`,
+15 new, all passing): Root Cause A -- positive control (an unsafe single
+winner losing the unique required meaning is vetoed and the required
+realization survives through the FULL fallback ladder, not just the local
+helper); a direct veto-reason check; a negative control (a genuine safe
+single winner is unaffected, no unnecessary keep-both); an extra-
+supporting-content-only control (never vetoes on low-value content alone);
+delete-recommended, explicit-incompleteness, and contradiction veto
+triggers, each isolated. Root Cause B -- positive control (an incomplete
+short prefix scoring HIGHER than its own complete realization no longer
+wins the tie-break); a direct subset-detection check; four required
+negative controls (two complete alternatives; complementary realizations;
+same opening but different idea; a contradiction-bearing pair, where the
+existing contradiction gate keeps the safe default rather than either
+side automatically winning); a fail-open check on the exclusion helper;
+and a control proving independent (non-subset) content still competes
+normally on delivery merit.
+
+Regression: the full `test_cutsell_d097_*.py` family (D-097.1 through
+D-097.11, delivery cleanliness, perceptual Watch+Listen/CLEAN RAW gate,
+resolver usability, polarity safety, retry-family completeness,
+no-usable-realization, BoundaryEngine pass) plus `test_cutsell_d082_non_
+decisive_semantic_fallback.py`, `test_cutsell_d100_multimodal_retry_
+corroboration.py`, and `test_cutsell_minimum_sufficient_editorial_set.py`
+-- 295/295 together with the new D-101 suite; `test_cutsell_clean_cut_
+core_evaluation_suite.py` and `test_cutsell_d050c1_5_full_cleancutbench_
+parity.py` -- 56/56; `compileall` clean; full `tests/` suite (excluding
+the one pre-existing, unrelated collection error already recorded at
+D-099/D-100, `test_semantic_stitch.py`) run as the one broader offline
+qualification: 2958 passed, 5 failed -- all 5 are the SAME pre-existing,
+unrelated failures already recorded at D-099/D-100
+(`test_hybrid_story_guard_incomplete_retry.py`,
+`test_video00_modal_hybrid_semantic_parity.py` x4), confirmed unchanged
+by diffing against this same commit with the D-101 fix stashed out. No
+new failure anywhere in the suite.
+
+**FLAGGED CONFLICT, RESOLVED BY PRODUCT OWNER DISPOSITION:** implementing
+FIX A initially broke one pre-existing test,
+`test_cutsell_minimum_sufficient_editorial_set.py::test_complete_
+semantic_winner_can_still_override_complete_local_winner`. Its fixture is
+two near-paraphrases of the REAL hereditary-cancer family-context clip
+and its contradicting/aside sibling from the D-101 forensic's own cluster
+table ("soy la única en mi familia..." vs "soy la primera en mi
+familia... nadie en mi familia tiene un carcinoma papilar..."), and it
+asserted that a complete, Hybrid-labelled `"winner"` candidate should
+override a complete local winner via `single_semantic_winner`
+UNCONDITIONALLY -- i.e. it encoded, as a regression protection, exactly
+the trust-the-label-unconditionally behavior Root Cause #1 was approved
+to remove. `contradiction_signal.any_pair_contradicts` correctly flags
+this exact pair (`negation_conflict`: "nadie... tiene" has no counterpart
+negation in the other candidate's corresponding clause), so
+`_single_winner_safety_veto` fires `"members_contradict"` exactly as FIX
+A specifies -- this was the intended behavior, not a bug in the
+implementation. Per the directive's own "STOP and report the conflict"
+clause, the conflict was reported rather than resolved unilaterally; the
+Product Owner's explicit disposition was that the historical test
+expectation is obsolete (it encoded the exact unsafe assumption D-101
+exists to remove) and that FIX A's contradiction check must NOT be
+narrowed to preserve it. That single test was then updated (renamed
+`test_contradicting_semantic_winner_no_longer_overrides_unconditionally`)
+to assert the approved safety transition itself -- the labelled winner
+never receives unconditional fast-path authority, and the family falls
+through to this function's own SAME pre-existing, general
+`"unresolved_contradiction"` fallback, never a bespoke "keep both" -- and
+a new positive control (`test_noncontradicting_complete_semantic_winner_
+still_uses_fast_path`) was added in the same file proving a genuine,
+non-contradictory single semantic winner still resolves via the ordinary
+fast path unaffected: D-101 is a safety veto, not a removal of that path.
+
+Note on a pre-existing safety layer found while investigating the
+conflict above: `cutsell_worker/semantic_best_take_integrity.py`
+(installed as a module-level monkeypatch of `pipeline._semantic_best_
+take` at `cutsell_worker/__init__.py` import time, predating D-101) ALSO
+independently rejects an incomplete semantic override
+(`_reject_incomplete_semantic_override`) and prefers a complete peer that
+preserves critical numeric facts, layered on top of whatever this
+function itself returns. Both D-101 fixes live inside the wrapped
+`original` function and were verified through the ACTUAL wrapped call
+path (`from cutsell_worker import pipeline; pipeline._semantic_best_
+take(...)`), not just the raw unwrapped function -- the fixes and the
+new/updated tests hold under the real production call shape. No change
+was made to `semantic_best_take_integrity.py` itself; it remains a
+separate, pre-existing, non-overlapping safety authority.
+
+Limits / not proven here: this is an OFFLINE fix only, verified against
+generic fixtures and the existing regression suites. No RAW was
+dispatched, no provider/S3/infra work was performed. Whether this closes
+`papillary_cancer_preserved`/`family_context_preserved` on real Video00
+footage -- and Root Cause B's fix in particular, whose trigger (Gemini
+per-window label instability) is itself a run-to-run variable that a
+single future RAW may or may not reproduce -- remains unverified until a
+future authorized RAW; D-101's own Section 12 "expected effect" caveat
+about Root Cause B still applies unchanged.
+
+**HUMAN ACTION REQUIRED:** NO to close this bounded implementation task
+-- the flagged test conflict was disposed of by explicit Product Owner
+decision (update the obsolete test, do not narrow the safety veto) and
+implemented accordingly. A future RAW authorization is needed to prove
+or disprove either fix's real-media effect.

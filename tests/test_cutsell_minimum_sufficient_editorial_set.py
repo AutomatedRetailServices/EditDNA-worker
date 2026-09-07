@@ -103,7 +103,23 @@ def test_incomplete_semantic_winner_cannot_override_complete_local_winner():
     assert preferred is None
 
 
-def test_complete_semantic_winner_can_still_override_complete_local_winner():
+def test_contradicting_semantic_winner_no_longer_overrides_unconditionally():
+    """D-101 Root Cause #1 (superseding this test's pre-D-101 expectation,
+    per Product Owner disposition of the flagged D-101/D-102 conflict):
+    CONCLUSION_A ("soy la única en mi familia que tiene este tipo de
+    cáncer...") and CONCLUSION_B ("soy la primera en mi familia... nadie
+    en mi familia tiene un carcinoma papilar...") are near-paraphrases of
+    the real hereditary-cancer family-context clip and its contradicting/
+    aside sibling from the D-101 forensic cluster -- a genuine negation
+    conflict per `contradiction_signal.any_pair_contradicts`. A Hybrid/
+    Gemini "winner" label on the contradicting candidate must NOT receive
+    unconditional single-winner authority merely because both candidates
+    are complete: that is exactly the assumption Root Cause #1 was
+    approved to remove. The safety veto refuses the override and the
+    family falls through to the SAME pre-existing, conservative ladder
+    step (`unresolved_contradiction`) any other contradicting pair
+    already used before D-101 -- no bespoke "keep both", no new
+    authority, just this function's own existing fallback."""
     complete_local = _take("complete-local", 0.0, 18.0, CONCLUSION_A, complete=True)
     complete_semantic = _take("complete-semantic", 20.0, 36.0, CONCLUSION_B, complete=True)
     decisions = {
@@ -111,11 +127,55 @@ def test_complete_semantic_winner_can_still_override_complete_local_winner():
         "complete-semantic": ("winner", 0.96),
     }
 
-    selected, preferred, _reason = pipeline._semantic_best_take(
+    from cutsell_worker.contradiction_signal import any_pair_contradicts
+    assert any_pair_contradicts([CONCLUSION_A, CONCLUSION_B])
+
+    selected, preferred, reason = pipeline._semantic_best_take(
         (complete_local, complete_semantic),
         decisions,
         "complete-local",
     )
 
+    # The safety transition itself: the labelled winner never receives
+    # unconditional fast-path authority here -- assert that transition,
+    # not a hardcoded bypass outcome. The resulting behavior is this
+    # function's own pre-existing, general contradiction fallback.
+    assert reason != "single_semantic_winner"
+    assert preferred is None
+    assert selected == "complete-local"
+    assert reason == "unresolved_contradiction"
+
+
+def test_noncontradicting_complete_semantic_winner_still_uses_fast_path():
+    """Positive control: D-101 is a SAFETY VETO, not a removal of the
+    single-winner fast path. Two complete, NON-contradicting candidates
+    (one a near-verbatim extension of the other) with a decisive single
+    "winner" label still resolve via `single_semantic_winner`, unaffected
+    by the new contradiction/coverage safety checks."""
+    complete_local = _take(
+        "complete-local", 0.0, 18.0,
+        "Fui a mi doctora y me hicieron varios estudios de rutina.",
+        complete=True,
+    )
+    complete_semantic = _take(
+        "complete-semantic", 20.0, 36.0,
+        "Fui a mi doctora y me hicieron varios estudios de rutina completos ese mismo día.",
+        complete=True,
+    )
+    decisions = {
+        "complete-local": ("alternate", 0.78),
+        "complete-semantic": ("winner", 0.96),
+    }
+
+    from cutsell_worker.contradiction_signal import any_pair_contradicts
+    assert not any_pair_contradicts([complete_local.text, complete_semantic.text])
+
+    selected, preferred, reason = pipeline._semantic_best_take(
+        (complete_local, complete_semantic),
+        decisions,
+        "complete-local",
+    )
+
+    assert reason == "single_semantic_winner"
     assert selected == "complete-semantic"
     assert preferred == "complete-semantic"
