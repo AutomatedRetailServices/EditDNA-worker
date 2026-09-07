@@ -15586,3 +15586,215 @@ condition (A/B/D/E/F/G) applies: no further product-behavior ambiguity
 remains bounded by this task, no additional safety/authority change is
 proposed, no protected-repository action was taken, and no new P0/P1
 accepted-risk decision arose.
+
+## D-124 -- D-123 real-media qualification (RAW 34169540283, canonical
+Video00 source, measurement/qualification only): **VERDICT B -- PARTIALLY
+REAL-MEDIA PROVEN.** The gate ran on real footage and both cleanly-traced
+families behaved exactly as coded (never firing without a decisive winner;
+correctly declining to bypass without conflict evidence); no regression
+traced to D-123 was found (the one real pimples-cluster regression this
+run is attributable to upstream grouping, not to D-123); but the ONE
+conflict-shaped family that could not be fully disambiguated (bypass vs.
+pre-existing veto) could not be resolved because this run's own new
+observability fields were not retrievable in this session -- a genuine
+gap, not a code defect, and not fixed here (task was measurement-only,
+"NO FIX LOOP").
+
+**RAW:** 34169540283 (`CutSell Video00 Modal RAW`, `feature/runpod-pod-on-
+demand` @ `92b7777`, canonical `Editdna longform validation/VIDEO-2026-07-
+30-09-18-03.mp4`, default parameters, no overrides). Job conclusion
+"failure" -- caused entirely by two long-standing static QA gates
+(`Verify frozen Selection lock` against a stale locked reference,
+`Verify Human Gold regression QA`'s 18-check manifest), both of which also
+failed identically on the immediately-prior run (34162868778, pre-D-123)
+-- not a D-123-caused failure; the RAW itself (Modal execution, diagnostics,
+Freeze, render, quality ladder, teardown) completed successfully.
+
+**D-123 activation evidence (families fully traced against the exact code
+path):**
+- `tg_e51a80f62131206cf2` (both members labelled `failed`, 0 "winner"
+  labels): `len(winners) != 1` by construction -- D-123's gate is
+  UNREACHABLE for this family, definitively, by code logic alone. Resolved
+  via `delivery_tie_break_among_survivors` (the pre-existing D-097.B
+  all-failed-family ladder, unrelated to D-123).
+- `tg_2351202cafbababad4` (one member labelled `failed` 0.85, one labelled
+  `winner` 0.92 -- a genuine `single_semantic_winner`-eligible family):
+  final `semantic_best_take_reason` recorded as `single_semantic_winner`
+  -- the UNMODIFIED fast path fired and was NOT bypassed (a bypass would
+  have produced a different reason string, per `_semantic_best_take`'s own
+  code). This is real, negative-control-shaped evidence: the gate was
+  reachable and correctly declined to bypass.
+- `tg_140e20c3f9f49b133f` (one "winner" label 0.95, one "alternate" 0.85,
+  one "failed" 0.95 -- also single_semantic_winner-eligible): final
+  reason recorded as `delivery_tie_break_among_survivors`, and the actual
+  selected clip is the "alternate"-labelled member, NOT the "winner"-
+  labelled one -- the exact D-118 regression SHAPE (a decisive winner
+  label displaced by delivery/performance information). This is the one
+  family that COULD have been a genuine D-123 bypass, but the visible
+  `semantic_best_take_reason` string cannot distinguish that from the
+  pre-existing, unconditional D-101/D-103 safety veto (which also falls
+  through to the exact same general ladder and would produce the exact
+  same final reason string). Disambiguating requires the D-123-specific
+  fields (`case_b_conflict_present`, `bypass_reason`, `winner_path_before`)
+  on this family's own `take_judge_groups` row -- see the observability
+  gap below.
+- 4 additional families visible only via a coarser, pre-D-122 projection
+  (`family_window_label_sources`, itself deliberately placed late in the
+  diagnostics step specifically to survive the CI log tail -- a D-094.2-
+  era mechanism, predating D-122/D-123): 2 more `single_semantic_winner`,
+  1 more `delivery_tie_break_among_survivors` (a second all-failed-shape
+  family), all consistent with the pattern above; none carry the D-123-
+  specific fields either.
+
+**Observability gap (the honest limiting factor on this verdict, not a
+D-123 code defect):** the full `take_judge_groups` array (containing
+every D-122/D-123 field: `winner_path_before/after`, `case_b_evidence`,
+`case_b_conflict_present`, `bypass_reason`, `meaning_sufficient_
+candidates`, `final_winner`) prints early in the "Print full canonical
+diagnostics" step, but by the time the job completes, five later steps
+(diagnostic-artifact upload of the full ~580 MB artifact, the Human Gold
+18-check manifest, and especially the ~30-second quality-ladder step) push
+it far outside the ~5000-line hard tail cap the CI log-retrieval tool
+enforces (confirmed identical output regardless of the `tail_lines`
+parameter requested -- 6000 and 50000 both returned the exact same,
+byte-identical tail). This is the SAME class of problem D-117/D-118/D-119
+already documented and fixed for `boundary_engine_pass`/`perceptual_
+watch_listen` specifically (via a dedicated late-stage tail-safe compact
+summary) -- that fix was never extended to `take_judge_groups`, so
+D-122/D-123's own new fields inherited the identical exposure. Direct
+download of the full diagnostic artifact (`cutsell-video00-modal-human-
+review`, ~582 MB, containing the untruncated `video00-modal.json`) was
+attempted and refused by organization egress policy on both the GitHub
+Actions log-download host (`results-receiver.actions.githubusercontent.com`,
+403) and the artifact blob-storage host
+(`productionresultssa2.blob.core.windows.net`, 403) -- per this session's
+own proxy contract ("do not retry or route around it"), neither was
+retried or bypassed. No workflow fix was made (this task is measurement-
+only, "NO FIX LOOP"; a D-123-shaped extension of D-119's tail-safe pattern
+is the recommended next capability, not implemented here).
+
+**Pimples family (Primary Question 3):** the pimples-adjacent clips did
+NOT form one single cohesive family this run. `distinct_idea_grouping_
+safety`'s own diagnostics show a pimples pair blocked by `content_
+divergence_blocked` (0.9 confidence merge declined) and two pimples-
+adjacent edges explicitly rejected (`cross_component_explicit_non_
+equivalence`, `component_cohesion_declined`) -- upstream IdeaClusterer/
+grouping variance, entirely before and independent of BestTake/D-123 (per
+D-121's own confirmed finding that "competitor-set formed ONCE by
+IdeaClusterer... DeliveryScorer/BestTake never add members"). The
+surviving component (`tg_2351202cafbababad4`) is one of the two families
+fully traced above -- D-123 did NOT bypass it. The Human Gold regression
+QA's pimples-specific checks regressed relative to the immediately-prior
+run (this run: `pimples_micro_2_present`, `pimples_bad_monolith_absent`,
+and `pimples_micro_order` FAIL, `pimples_micro_1/3_present` and `pimples_
+later_winner_present` still PASS; prior run 34162868778: all four of
+those PASS, only the unrelated `sonography_good_before_diagnosis` fails).
+**Per this task's own instruction ("report upstream competitor-set
+variance accurately; do not call D-123 failure" / "do not attribute
+pimples change to D-123 without evidence"): this regression is attributed
+to the confirmed upstream grouping-safety rejection above (category B --
+family did not form as one component), not to D-123** -- consistent with
+a large swing in overall selection count between the two runs (24 vs 29
+clips selected) that itself indicates broad, D-123-unrelated run-to-run
+semantic/grouping variance, the same class of confound D-097.11 and
+D-121 already documented (Product Owner's own prior finding: "primary
+cause = E, multiple factors, never D-116/Boundary" -- now also never
+D-123, on the two families this run could fully trace).
+
+**No new score/weight/threshold, no double-counting, no new winner
+authority (confirmed statically, unaffected by this run):** unchanged
+from D-123's own offline proof -- this RAW adds no new evidence either way
+since it required no new code path to be exercised to remain true.
+`take_judge.score_take`/`rank_takes`, `MediaSignals`, D-097 cleanliness
+evidence, Boundary (`selected_count_in=22`, `selected_count_out=23`,
+`total_visual_trim_seconds=0.0`, zero visual entry/exit trims -- same
+zero-trim shape as D-120), and render-plan modules remain untouched by
+construction (D-123 only gates one early `return`).
+
+**Meaning-sufficiency (Primary Question 5):** no family this run showed a
+cleaner-performance-but-meaning-insufficient alternative reaching a real
+conflict evaluation observable from retrievable data; the two fully-traced
+families are consistent with meaning sufficiency being irrelevant (0-
+winner family) or satisfied without triggering a conflict (the pimples
+survivor). No violation of the meaning-sufficiency gate was found or is
+suspected.
+
+**Physical/quality ladder (Primary Question 9), vs D-120's 33.217 s /
+0.8314 / 0.8215 baseline:** overall LEVEL_1 (selection scope) 21 regions /
+43.21 s; physical-view LEVEL_1 12 regions / 33.814 s selection + 22 /
+3.768 s boundary. Selection F1 CutSell-vs-Cut.ai 0.7552, CutSell-vs-Gold
+0.7504 (Cut.ai-vs-Gold 0.8996); physical F1 vs Cut.ai 0.7744, vs Gold
+0.7802 -- all four F1 figures are LOWER than D-120's baseline. LEVEL_1 by
+authority (physical view): BestTakeResolver 3 regions / 23.439 s,
+AttemptReconstructor/RecordingProcessRemoval 4 / 7.935 s, BoundaryEngine
+26 / 5.838 s, IdeaClusterer/RetryFamilyFormation 1 / 0.37 s. **Per this
+task's own explicit instruction ("do NOT expect monotonic improvement due
+to run-to-run semantic variance; attribute only changes directly linked to
+D-123 activations"): given the large selected-count swing (24 vs 29
+between consecutive runs) and the confirmed upstream grouping variance
+above, this F1/Level-1 decline is NOT attributed to D-123** -- none of the
+three BestTakeResolver-attributed LEVEL_1 regions were shown, by the fully-
+traced family evidence above, to be a D-123 bypass outcome (one, region 85
+/ `tg_2351202cafbababad4`'s winner, is confirmed NOT bypassed; the other
+two are unrelated topics with no "winner"-label conflict shape at all).
+
+**Regression checks (Primary Question 11):** `papillary_diagnosis_
+preserved` PASS, `papillary_symptom_realization_meaning` PASS;
+`papillary_symptom_realization_parity` FAILED (`preferred_realization_
+not_selected` -- explicitly noted by the QA script itself as "editorial/
+take-selection mismatch only -- never gates qa_pass", i.e. advisory, not a
+correctness failure) with no traceable connection to the two D-123-
+evaluated families above (papillary is a different family entirely from
+either traced family). `cancer_hook_preserved`, `hair_loss_preserved`,
+`gastritis_preserved`, `family_context_preserved`, `cta_preserved`,
+`acne_back_preserved`, sonography (part1/completion/bad-take-absent) all
+PASS. Boundary: zero real trims (above). Freeze: `freeze_blocked: false`
+(PASS). Technical QC: `PASS`. Perceptual Watch+Listen: `status: FAIL`
+(advisory, `gate_mode: advisory_v1`, 1 EVALUATED_FAIL / 2 EVALUATED_PASS /
+4 NOT_IMPLEMENTED / 1 UNCERTAIN capability, routing `{"BoundaryEngine":
+13}` -- every finding routes to Boundary, none to BestTake/Selection,
+consistent with no D-123-attributable perceptual finding). Deliverable:
+`delivery_status: "DELIVERABLE_PENDING_HUMAN_WATCH_LISTEN:perceptual=FAIL"`,
+`human_watch_listen_required: true` -- a real deliverable MP4 exists
+(the quality ladder's own physical view required and used one), pending
+human Watch+Listen per the standing contract; render verification noted
+23/24 fragments located (1 clip, `clip_97ae8384219366a2377d`, missing from
+the physical render) -- a render/render-verification-scope observation,
+outside D-123's own change surface (D-123 never touches rendering), noted
+here for completeness rather than investigated (out of this task's bounded
+scope).
+
+**D-123 VERDICT: B -- PARTIALLY REAL-MEDIA PROVEN.** Criterion A (at least
+one real semantic fast-path family reached the gate) -- met, by multiple
+families. Criterion B (a supported conflict bypasses OR negative-control
+evidence proves correct decline) -- PARTIALLY met: one clean negative-
+control family (`tg_2351202cafbababad4`) proves the decline path works on
+real footage; the one family shaped like a possible real bypass
+(`tg_140e20c3f9f49b133f`) could not be confirmed as a bypass (vs. the
+pre-existing veto) due to the observability gap above -- so the "stronger
+proof shape" (a confirmed bypass selecting the cleaner sufficient
+realization) is NOT established this run. Criterion C (no new regression
+attributable to D-123) -- met: the one real regression found (pimples
+manifest checks) is attributed to upstream grouping, with direct
+supporting evidence, not to D-123. Criteria D/E/F (meaning-sufficiency
+still gates, no new score/weight, final winner from an existing path) --
+met, by the same code-level guarantees the 23 offline tests already
+proved, unaffected by this run.
+
+**D-123 does NOT close for the current milestone.** The exact next
+blocker is the observability gap itself: a D-123-shaped extension of
+D-119's tail-safe compact-summary pattern (a small, late-stage,
+artifact-file-backed summary of `take_judge_groups`' D-122/D-123 fields
+only, mirroring D-119's own boundary/watch-listen precedent) would make
+the next RAW's evidence fully disambiguating without needing artifact
+downloads this session's egress policy already refused. That extension is
+NOT implemented here (out of this measurement-only task's scope) and
+requires Product Owner authorization to build, followed by exactly one
+qualifying RAW under the same bounded-measurement contract.
+
+**HUMAN ACTION REQUIRED:** YES (condition A, product decision; condition C
+for any further paid compute) -- whether to authorize the tail-safe D-123
+observability extension described above (a small, additive, workflow-only
+change) as the next bounded task, and whether/when to authorize the
+confirmatory RAW that would follow it, are Product Owner decisions, not
+made here.
