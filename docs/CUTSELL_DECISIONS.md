@@ -14301,3 +14301,87 @@ by this task.
 **HUMAN ACTION REQUIRED:** YES (condition C) -- authorizing a confirmatory
 Video00 RAW to qualify this fix on real media is a Product Owner paid-
 compute decision, not made here.
+
+## D-114 -- Position-aware performance perception forensic: real timestamped
+evidence already exists; the loss point is the MediaSignals scalar
+aggregation, not perception itself (design + dataflow forensic only, no
+engine change, no RAW)
+
+**The premise "no position-aware evidence exists" is false.** `local_
+performance.py::detect_candidate_events` already produces four RAW-absolute-
+timestamped visual/motion event kinds (`camera_disengagement_candidate`,
+`facial_expression_shift_candidate`, `body_reset_candidate`, `hand_motion_
+reset_candidate`) from a MediaPipe Holistic pipeline that `flow_b.py` calls
+unconditionally (line 198, no feature flag) for every source. These events
+survive, unaggregated, in `WholeVideoContext.sources[].events` for the whole
+run and are already consumed positionally by four separate authorities:
+`take_judge.delivery_cleanliness_evidence` (fixed 0.35s edge margin --
+the only existing entry/interior/exit-style split in the codebase),
+`boundary_engine_pass.tighten_selected_audio_edges` (audio-only today),
+`attempt_reconstruction._measured_pause_at_transition` (D-097.5's measured
+transition-silence mechanism), and `perceptual_watch_listen._reset_debris_
+at_edges` (post-render routing only).
+
+**The actual loss point: `local_performance.apply_local_performance_to_
+takes`.** This function collapses every frame/event inside a take's window
+into duration-weighted scalar `MediaSignals` fields (`visual_fumble`/
+`distraction_risk` use `max()` instead, partially escaping dilution but
+still losing WHERE the event happened); `attempt_reconstruction._merge_
+signals` then compounds the same collapse a second time across fused
+attempt members. By the time `take_judge.score_take` (DeliveryScorer) runs
+its ranking formula, 7 of 12 `MediaSignals` fields are one or two collapses
+removed from the original event stream -- position-blind, even though the
+underlying events themselves were never deleted.
+
+**Target Entry/Delivery/Exit model (measured, not fixed-duration, per this
+task's explicit constraint).** DELIVERY = the take's/attempt's own word
+envelope (`first_word_start`..`last_word_end`, already present on every
+`CandidateTake.words` and already concatenated correctly across fused
+members by `_merge_attempt` -- no new measurement). ENTRY/EXIT = the gap
+before/after that envelope, extended by any reset/disengagement event
+overlapping the take's own start/end. D-111's CASE A (defect entirely
+outside the delivery span -> BoundaryEngine, trim) / CASE B (defect
+overlapping the delivery span -> BestTake, penalize usability) / CASE C
+(both, recorded independently) becomes a concrete, computable comparison:
+does a reset/break event's `[start, end]` intersect `[first_word_start,
+last_word_end]`.
+
+**Concrete gap found, not previously documented as a code gap:**
+`boundary_engine_pass.py`'s own `PHYSICAL_OWNERSHIP_CONTRACT` table already
+lists "multimodal reset evidence (edge-only trim)" as ENTRY evidence, but
+`tighten_selected_audio_edges` -- the only function implementing that
+contract row -- consumes ONLY `audio_silence_interval` events. The
+multimodal half of BoundaryEngine's own documented contract is undelivered
+code, not merely unoptimized code.
+
+**Pimples C timing answer (bounded, no RAW).** The mechanism to answer
+"does rapid movement begin before/during/after semantic completion" already
+runs unconditionally on real media; answering it for that specific region
+requires one comparison (earliest disqualifying event start vs. that take's
+own `words[-1].end`) inside that run's own diagnostics artifact -- not
+cached locally and out of this task's no-RAW scope. This narrows the open
+question from an architecture question (does evidence exist? -- yes) to an
+artifact-inspection question for a future, separately-authorized task.
+
+**Recommendation only, nothing implemented:** three additive derived fields
+at the existing aggregation call site (earliest defect offset from delivery
+end, latest settle offset from delivery start, `defect_overlaps_delivery_
+span: bool`), reusing the existing reset/break event vocabulary and word
+envelope -- no new provider, no new threshold, no fallback arbiter. See
+`docs/CUTSELL_FORENSIC_POSITION_AWARE_PERCEPTION_D114.md` for the full
+17-section dataflow map, signal table, and ownership analysis.
+
+**No engine, test, threshold, provider, or infra change.** This task read
+`local_performance.py`, `take_judge.py`, `attempt_reconstruction.py`,
+`boundary_engine_pass.py`, `perceptual_watch_listen.py`, `whole_video_
+analysis.py`, `performance_confirmation.py`, `flow_b.py` (targeted),
+`contracts.py` (targeted), the D-098 canon, and D-113's own entry, and wrote
+only the forensic document and this entry. No fallback arbiter was
+designed or invoked (D-111: this is a HIGH-confidence deterministic
+measurement question, not a MEDIUM-confidence arbitration case). No RAW,
+provider, S3, Modal, RunPod, or UI/Figma work was performed.
+
+**HUMAN ACTION REQUIRED:** YES (condition A) -- whether to authorize the
+minimum implementation shape in §13 of the forensic doc (three additive
+derived fields + wiring BoundaryEngine/BestTake to consume them) is a
+product/architecture decision, not made here.
