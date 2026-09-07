@@ -14051,3 +14051,131 @@ Modal/RunPod, or UI/Figma work was performed.
 **HUMAN ACTION REQUIRED:** NO to close this documentation task. A. YES
 for any future step in Section 10.10's roadmap (each requires its own
 Product Owner authorization per the anti-loop contract).
+
+## D-112 -- Retry replacement authority coordination sweep: TWO proven
+collisions + FIVE potential collisions across the pre-hook-#8
+composite/cleanup chain (offline forensic only, no engine change)
+
+**Purpose.** D-110's real-media qualification proved the D-109 collision
+shape (a hook independently re-deriving "same retry"/"replacement" and
+overriding `complete_retry_identity_guard`'s recorded rejection) recurs at
+`hybrid_retry_completion_integrity`, an EARLIER hook than the one D-110
+fixed. Before another single-hook patch, this bounded sweep traced all
+seven pre-hook-#8 hooks in `composite_resolver.py`'s real take-level
+chain to determine whether this is one more isolated collision or a
+repeated architectural defect. Full detail:
+`docs/CUTSELL_FORENSIC_RETRY_REPLACEMENT_AUTHORITY_SWEEP_D112.md`.
+
+**Verdict: B -- a repeated architectural defect, not an isolated
+collision.** Grep-confirmed: only `hybrid_session_cleanup.py` (stage 1)
+and `hybrid_retry_winner_authority.py` (D-110's fix) import anything from
+`complete_retry_identity_guard.py` anywhere in `cutsell_worker/`. The
+other six pre-hook-#8 hooks are blind to it by construction, and each
+independently re-derives "is this covered / the same retry / a valid
+replacement" with its OWN evidence computation:
+
+- **PROVEN_COLLISION (real RAW `34123511687` evidence, TWO separate
+  pairs this same run):**
+  - `hybrid_retry_completion_integrity::_safe_failed_retry` (hook 2) --
+    already known from D-110's own qualification; reconfirmed as the
+    FIRST hook in execution order to contradict a recorded rejection.
+    Removed pimples candidate A (`clip_593f2f22cb02fca4e346`) in favor
+    of C (`clip_390e5f221849f30bb34a`) despite this run's own
+    `complete_retry_identity_guard` recording `SEQUENCE_IDENTITY_BELOW_
+    THRESHOLD` (0.4153 < 0.52) for that exact pair.
+  - `hybrid_cross_group_retry_integrity::_covered_by_authoritative_peers`
+    (hook 5) -- **NEW finding.** Independently removed an unrelated
+    ob-gyn-family candidate (`clip_a3260a4974b01a17a628`, "Al terminar
+    mi contrato, le pedí a mi ginecóloga.") in favor of
+    `clip_2dfc08fc82f6830b17e5`, via its own coverage math
+    (`coverage: 1.0`, `shared_union: 4`), while this SAME run's own
+    `complete_retry_identity_guard` had already rejected that EXACT
+    (X, Y) pair (`SEQUENCE_IDENTITY_BELOW_THRESHOLD`, identical
+    0.4153/0.52 numbers). X stays deleted for the rest of the run --
+    never restored by `hybrid_failed_soft_restore`, which restored a
+    different clip from the same step. This proves the SAME candidate
+    can be evaluated for replacement-safety twice in one run with two
+    different outcomes (stage-1 cleanup declined to delete it; hook 5
+    deleted it anyway), the exact "re-litigation" risk the canonical
+    question asked about -- proven, not hypothetical.
+- **POTENTIAL_COLLISION (same missing consultation, not proven active
+  against a guard-rejected pair this run):** `semantic_fragment_guard`
+  (hook 1, gated to micro fragments <=1.6s/<=3 tokens -- narrow surface);
+  `hybrid_story_guard` (hook 3, restoration-suppression direction only
+  via `_covered_by_kept_delivery` -- cannot be the FIRST hook to
+  contradict a rejection, but can be the LAST hook that fails to undo
+  one); `hybrid_alternate_integrity` (hook 4, gated to `alternate`-
+  labelled candidates only); `incomplete_bridge_retry_authority` (hook 6
+  -- the WORST-shaped of the seven: it recomputes its own SequenceMatcher
+  `_sequence_identity`, the SAME metric the guard uses, at a LOWER
+  threshold, 0.42 vs 0.52 -- an independent re-derivation of the guard's
+  own evidence, not merely different evidence, and exactly the anti-
+  pattern D-110's own spec forbade "another sequence threshold"); `hybrid_
+  failed_continuation_integrity` (hook 7, two functions, both directions).
+- **SAFE:** `hybrid_retry_winner_authority` (hook 8, D-110's fix --
+  confirmed still conceptually correct, unaffected by this sweep).
+
+**Root architectural cause.** Not one bug repeated by coincidence: no
+chain-wide replacement-verdict contract has ever existed. Each of seven
+hooks was authored separately, over time, to solve its own narrow
+pattern, each inventing its own "is this covered/replaceable" evidence
+(five distinct computations found in this sweep alone), with no shared
+consultation point. D-096/D-098 named this class of risk in the
+abstract; D-109/D-110/D-112 are the concrete, now twice-proven case.
+
+**D-110 remains conceptually correct** -- its directional,
+non-global rule and its non-recomputation discipline are exactly right
+for the one hook it covers; nothing here suggests changing it. It was
+simply never asked to cover any OTHER hook, and this sweep proves that
+gap is real (two proven, five potential) rather than hypothetical.
+
+**Minimum general authority-coordination fix shape (conceptual only, NOT
+implemented):** one canonical directional replacement verdict --
+`candidate X -> proposed replacement Y -> ACCEPTED/REJECTED/UNKNOWN ->
+evidence -> confidence -> owning authority` -- computed once by
+`complete_retry_identity_guard` (already the strongest, most principled
+evidence; already has a documented, tested verdict vocabulary), consumed
+-- never recomputed -- by every hook capable of a destructive replacement
+decision. This is authority coordination, not a new heuristic: no new
+threshold, no new evidence type, no new authority that decides anything,
+reusing D-110's own `_prior_replacement_rejections`-style consumption
+pattern at each additional call site. Per D-111 doctrine (10.4/10.6):
+Hybrid/Gemini and any hook's own secondary evidence remain nominations;
+the guard's stricter deterministic verdict already outranks them.
+
+**Expected effect on pimples A: still likely incomplete if only hook 2
+is fixed next.** Hook 5 runs three positions later in the same chain and
+is structurally capable of independently re-deriving "C covers A" via its
+own coverage math even if hook 2 is fixed -- proven capable of exactly
+that shape against the unrelated ob-gyn pair this same run. A provably
+stable fix needs at minimum hooks 2 AND 5 consuming the shared verdict.
+
+**No effect expected on B/C's legitimate complementary rescue** -- the
+proposed contract only declines removals where a REJECTED verdict already
+exists for the EXACT pair being acted on; B and C have no recorded
+rejection between them, and the directional design never poisons an
+unrelated pair (reaffirmed, not just asserted, by this sweep).
+
+**Regression surface / risks (conceptual):** each additional consumer
+needs its own "no prior rejection -> unchanged behavior" positive
+control, exactly as D-110's own suite did; hook 6 is the highest-risk
+single migration since gating it on the guard's verdict (without
+touching its own 0.42 threshold, per "do not recompute") could change
+outcomes for genuine 0.42-0.52 cases it currently allows through on its
+own; the stage-1-computed verdict is available to every chain hook by
+construction (no read-order hazard), but `UNKNOWN`/`NOT_APPLICABLE` must
+never be treated as an implicit ACCEPT.
+
+Files changed: `docs/CUTSELL_FORENSIC_RETRY_REPLACEMENT_AUTHORITY_
+SWEEP_D112.md` (new) and this entry. No `cutsell_worker/*.py` file was
+modified. No test expectation changed. No RAW/provider/S3/Modal/RunPod/UI
+work was performed; all evidence reused the already-persisted RAW
+`34123511687` job log (re-fetched read-only via the GitHub Actions job-
+logs API).
+
+**HUMAN ACTION REQUIRED:** YES (condition A) -- whether to authorize the
+recommended next bounded task (wire the shared verdict-consumption helper
+into the two PROVEN-COLLISION hooks, `hybrid_retry_completion_integrity`
+and `hybrid_cross_group_retry_integrity`, leaving the five POTENTIAL-
+COLLISION hooks explicitly tracked but out of scope for now) is a Product
+Owner decision, not made here.
