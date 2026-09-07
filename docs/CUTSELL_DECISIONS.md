@@ -13829,3 +13829,114 @@ context) >= 0.84` actually fired this run) would need either the raw
 from this session's log tooling, per the same fixed-window limitation
 D-107/D-108 already documented) or a fresh diagnostic-only extraction --
 neither authorized here.
+
+## D-110 -- Authority-collision fix: `hybrid_retry_winner_authority` now
+honors a same-run `complete_retry_identity_guard` replacement rejection
+(bounded implementation, no RAW)
+
+**Authority collision fixed.** D-109 identified two authorities in
+`composite_resolver.py`'s take-level chain independently answering "is Y
+a valid replacement for failed candidate X" with different evidence:
+`complete_retry_identity_guard.py`'s strict `sequence_identity` check
+(consulted by `hybrid_session_cleanup.py` at stage 1, correctly recording
+`SEQUENCE_IDENTITY_BELOW_THRESHOLD` when a proposed replacement is too
+dissimilar) and `hybrid_retry_winner_authority.py::enforce_proven_retry_
+winners`'s own, independently-computed, looser `_same_retry_attempt`
+shared-content-token test (chain hook #9), which never consulted the
+first authority's verdict and could remove the failed candidate anyway.
+Fixed at the collision point only: `enforce_proven_retry_winners` now
+accepts an optional `session_diagnostics` parameter carrying this run's
+own already-computed cleanup decisions; a new `_prior_replacement_
+rejections` helper extracts, per failed `clip_id`, the exact proposed-
+replacement `clip_id` that `complete_retry_identity_guard` already
+rejected via `SEQUENCE_IDENTITY_BELOW_THRESHOLD` this run. Before
+removing `failed` in favor of `winner`, the loop now checks whether a
+prior rejection is recorded for that EXACT (failed, winner) pair; if so,
+it declines the removal (`prior_replacement_rejection_respected`,
+`retry_winner_deletion_applied: False`) instead of the original
+`failed_attempt_yields_to_proven_later_retry_winner` removal. No sequence
+identity is recomputed and no new threshold is introduced -- the fix
+reuses exactly the evidence `complete_retry_identity_guard` already
+produced this run, threaded in via `install_hybrid_retry_winner_
+authority`'s wrapper (`session_diagnostics=result.diagnostics`). The
+check is strictly directional: the lookup is keyed by the failed
+candidate's `clip_id` and compared against the specific proposed
+`winner.clip_id`, so a rejection recorded for (A, C) never blocks C from
+competing with, or replacing, any other candidate (e.g. B), and never
+poisons a whole family or source. A secondary accuracy bug found while
+implementing was fixed at the same time: `install_hybrid_retry_winner_
+authority`'s `deleted_ids` computation previously listed every diagnostic
+row's `clip_id` unconditionally, which would have mislabeled a declined
+(not-deleted) row as deleted once decline-diagnostics exist; it now
+filters on `retry_winner_deletion_applied`.
+
+**No new heuristic, no new authority.** Only the existing retry-winner
+authority (`hybrid_retry_winner_authority.py`) was modified. `complete_
+retry_identity_guard.py`, grouping (D-108), `BestTakeResolver`, and
+`BoundaryEngine` are unchanged. No visual-exit detection, no position-
+aware `MediaSignals`, no provider calls were added.
+
+**Positive retry behavior preserved.** When no prior replacement
+rejection is recorded for the exact pair (the common, legitimate case --
+D-097.1's original fumble-plus-retake shape, and any pair
+`complete_retry_identity_guard` never evaluated or accepted), removal
+proceeds exactly as before: `enforce_proven_retry_winners`'s existing
+three positional call sites and their exact `kept`/`removed`/
+`diagnostics[0]` assertions in `tests/test_cutsell_video00_round2_gold.py`
+pass unchanged (7/7), confirming the module's documented Human-Gold
+fumble+retake positive fixture is not weakened.
+
+**Tests added
+(`tests/test_cutsell_d110_retry_winner_authority_replacement_rejection.py`,
+8 tests, generic fixtures -- no Video00 text/ids/timestamps):**
+pimples-structural positive control (a strict-guard rejection for the
+exact (A, C) pair is respected -- A survives, `retry_winner_deletion_
+applied` is `False`, reason `prior_replacement_rejection_respected`);
+legitimate-retry positive control, both with no `session_diagnostics`
+argument at all and with an explicit empty tuple (existing behavior
+unchanged -- A is still removed in favor of C); directionality: a
+rejection for (A, C) does not block an unrelated (B, D) pair from
+legitimately collapsing on its own evidence; a rejection recorded against
+a clip id on a different source never leaks across sources; a
+`LEXICAL_REPLACEMENT_VERIFIED` (accepted) note and a `NOT_APPLICABLE`
+(guard not invoked) note are never treated as a rejection; a rejection
+recorded for (A, some other clip) does not block A's legitimate removal
+in favor of the actual proposed winner C. All 8 pass.
+
+**Regressions checked, all green, no new failures:**
+`tests/test_cutsell_video00_round2_gold.py` (7), `tests/test_cutsell_
+d108_retry_family_transitivity.py`, `tests/test_cutsell_d083_distinct_
+idea_grouping_safety.py`, `tests/test_cutsell_d085_bridge_aware_retry_
+family_cohesion.py` (D-108 grouping), `tests/test_cutsell_d100_
+multimodal_retry_corroboration.py` (D-100), `tests/test_cutsell_d106_
+meaning_vs_parity_qa.py` + `tests/test_video00_regression_qa.py` +
+`tests/test_cutsell_video00_quality_ladder.py` (D-106), `tests/test_
+cutsell_clean_cut_core_evaluation_suite.py` (CleanCutBench, includes
+D-097.12 stomach-family coverage) -- 173 passed total across this named
+set. `python3 -m compileall -q cutsell_worker benchmarks tests` clean.
+Full offline `tests/` qualification (one broader pass, excluding the
+already-documented pre-existing collection error in `test_semantic_
+stitch.py`): 2994 passed, 5 failed -- all 5 exactly match the
+pre-existing, previously-documented baseline (`test_hybrid_story_guard_
+incomplete_retry.py`'s one known-pre-existing failure plus the 4
+`test_video00_modal_hybrid_semantic_parity.py` CI-workflow-text failures
+unrelated to this change); no NEW failure was introduced. No expectation
+was modified to force a green result; no old expectation contradicted
+D-109's approved authority doctrine.
+
+**No real-media effect claimed yet.** This is an offline, bounded
+implementation only. Whether this fix changes the pimples-family RAW's
+delivered MP4 (restoring candidate A) has not been measured -- that
+requires a fresh authorized Video00 RAW, which this task's cost/loop
+control explicitly forbids. `retry_setup_confidence(A, context) >= 0.84`
+actually firing on the real run remains the one unconfirmed evidentiary
+gap from D-109; this fix does not change or bypass that gate, so if it
+did not fire on the real run this fix alone will not change the real
+delivered video.
+
+**Known limitations.** The fix only covers the exact collision D-109
+diagnosed (`complete_retry_identity_guard` vs `hybrid_retry_winner_
+authority`); other chain hooks that independently re-derive replacement
+or retry-attempt judgments without consulting recorded rejections are out
+of scope and untouched. Confirming the real-media effect requires a new
+authorized RAW (not run here).

@@ -15,12 +15,33 @@ attempt only when all of the following are true:
 - numeric facts are compatible.
 
 It never deletes a winner and fails open when the peer relationship is ambiguous.
+
+D-109/D-110 (authority collision fix, see docs/CUTSELL_DECISIONS.md): this
+module's own ``_same_retry_attempt`` is a second, independently-computed
+"is this the same retry attempt" judgment -- looser than, and blind to,
+``complete_retry_identity_guard.py``'s stricter ``sequence_identity`` check
+that ``hybrid_session_cleanup.py`` already consulted for the SAME failed
+candidate this run. D-109's forensic proved a real pimples-family run
+where that stricter guard explicitly rejected a candidate as a valid
+replacement (``SEQUENCE_IDENTITY_BELOW_THRESHOLD``) while this module's
+own looser test would independently say "same retry attempt" for the
+identical pair -- letting a later, weaker authority override an earlier,
+stricter one's explicit rejection. Fix: before removing ``failed`` in
+favor of a proposed ``winner``, check whether THIS SAME RUN's own
+``complete_retry_identity_guard`` evidence (threaded in via
+``session_diagnostics``) already recorded a rejection naming that EXACT
+(failed, winner) pair; if so, decline the removal and record
+``prior_replacement_rejection_respected`` instead. This reuses existing
+evidence verbatim (no new heuristic, no threshold recomputed) and is
+directional: a rejection recorded for (X, Y) never blocks Y from
+competing with, or replacing, any OTHER candidate.
 """
 from __future__ import annotations
 
 import re
-from typing import Iterable
+from typing import Iterable, Mapping
 
+from .complete_retry_identity_guard import SEQUENCE_IDENTITY_BELOW_THRESHOLD
 from .contracts import CandidateTake
 from .whole_video_analysis import WholeVideoContext
 
@@ -101,11 +122,44 @@ def _same_retry_attempt(failed: CandidateTake, winner: CandidateTake) -> tuple[b
     }
 
 
+def _prior_replacement_rejections(session_diagnostics: Iterable[dict]) -> dict[str, str]:
+    """D-109/D-110: extract, per failed candidate, the specific replacement
+    candidate id ``complete_retry_identity_guard.py`` already rejected THIS
+    RUN via ``SEQUENCE_IDENTITY_BELOW_THRESHOLD`` -- the only rejection
+    reason that co-occurs with a concrete ``replacement_candidate_clip_id_
+    before_guard`` in that guard's own contract (every other rejection
+    reason there is recorded with a null candidate id, e.g. NO_CANDIDATE).
+    Reused verbatim from ``hybrid_session_cleanup.py``'s own per-decision
+    diagnostics (the same records ``complete_retry_identity_guard.py``
+    writes into); no sequence identity or any other threshold is
+    recomputed here. Directional by construction: the returned mapping is
+    ``failed_clip_id -> rejected_replacement_clip_id``, one pair at a
+    time, never a blanket per-source or per-family veto."""
+    rejections: dict[str, str] = {}
+    for row in session_diagnostics:
+        if not isinstance(row, dict):
+            continue
+        decisions = row.get("decisions")
+        if not isinstance(decisions, list):
+            continue
+        for item in decisions:
+            if not isinstance(item, dict) or not item.get("clip_id"):
+                continue
+            if str(item.get("replacement_rejection_reason") or "") != SEQUENCE_IDENTITY_BELOW_THRESHOLD:
+                continue
+            candidate_id = item.get("replacement_candidate_clip_id_before_guard")
+            if not candidate_id:
+                continue
+            rejections[str(item["clip_id"])] = str(candidate_id)
+    return rejections
+
+
 def enforce_proven_retry_winners(
     kept: Iterable[CandidateTake],
     semantic_decisions: Iterable[tuple[str, str, float]],
     context: WholeVideoContext | None,
     *,
+    session_diagnostics: Iterable[dict] = (),
     failed_confidence: float = 0.80,
     winner_confidence: float = 0.90,
     retry_setup_confidence: float = 0.84,
@@ -116,6 +170,7 @@ def enforce_proven_retry_winners(
         str(clip_id): (str(label), float(confidence))
         for clip_id, label, confidence in semantic_decisions
     }
+    prior_rejections = _prior_replacement_rejections(session_diagnostics)
     removed_ids: set[str] = set()
     diagnostics: list[dict] = []
 
@@ -147,10 +202,44 @@ def enforce_proven_retry_winners(
         if not candidates:
             continue
         gap, _, _, winner, winner_conf, evidence = min(candidates, key=lambda item: item[:3])
+
+        # D-109/D-110: this run's own complete_retry_identity_guard evidence
+        # already rejected THIS EXACT (failed, winner) pair as a valid
+        # replacement -- an earlier, stricter authority's explicit finding.
+        # Never override it with this module's own looser test. Directional
+        # only: a rejection recorded for (failed, winner) never affects any
+        # OTHER pair, so `winner` remains free to compete with/replace any
+        # other candidate on its own separate evidence.
+        rejected_replacement_id = prior_rejections.get(failed.clip_id)
+        if rejected_replacement_id is not None and rejected_replacement_id == winner.clip_id:
+            diagnostics.append({
+                "clip_id": failed.clip_id,
+                "reason": "prior_replacement_rejection_respected",
+                "final_reason": "prior_replacement_rejection_respected",
+                "proposed_winner_clip_id": winner.clip_id,
+                "prior_replacement_rejection_found": True,
+                "prior_replacement_rejection_reason": SEQUENCE_IDENTITY_BELOW_THRESHOLD,
+                "retry_winner_deletion_applied": False,
+                "failed_confidence": round(confidence, 4),
+                "retry_setup_confidence": round(retry_conf, 4),
+                "winner_clip_id": winner.clip_id,
+                "winner_confidence": round(winner_conf, 4),
+                "gap_sec": round(gap, 3),
+                **evidence,
+                "failed_text": failed.text,
+                "winner_text": winner.text,
+            })
+            continue
+
         removed_ids.add(failed.clip_id)
         diagnostics.append({
             "clip_id": failed.clip_id,
             "reason": "failed_attempt_yields_to_proven_later_retry_winner",
+            "final_reason": "failed_attempt_yields_to_proven_later_retry_winner",
+            "proposed_winner_clip_id": winner.clip_id,
+            "prior_replacement_rejection_found": False,
+            "prior_replacement_rejection_reason": None,
+            "retry_winner_deletion_applied": True,
             "failed_confidence": round(confidence, 4),
             "retry_setup_confidence": round(retry_conf, 4),
             "winner_clip_id": winner.clip_id,
@@ -184,6 +273,7 @@ def install_hybrid_retry_winner_authority() -> None:
             result.kept,
             result.semantic_decisions,
             context,
+            session_diagnostics=result.diagnostics,
         )
         if not authority_diagnostics:
             return result
@@ -194,7 +284,13 @@ def install_hybrid_retry_winner_authority() -> None:
         deleted = tuple(take for take in input_takes if take.clip_id in deleted_ids)
         diagnostics = tuple(result.diagnostics) + ({
             "hybrid_retry_winner_authority": list(authority_diagnostics),
-            "deleted_ids": [item["clip_id"] for item in authority_diagnostics],
+            # D-109/D-110: only ACTUALLY-applied removals belong here -- a
+            # declined ("prior_replacement_rejection_respected") entry is
+            # observability only, its candidate was never deleted.
+            "deleted_ids": [
+                item["clip_id"] for item in authority_diagnostics
+                if item.get("retry_winner_deletion_applied", True)
+            ],
         },)
         return type(result)(
             kept=kept,
