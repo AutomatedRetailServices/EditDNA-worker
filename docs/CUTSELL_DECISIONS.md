@@ -13734,3 +13734,98 @@ on `tg_edb72c9305a16337b5` (or the next pimples-shaped family) would be
 the natural next verification step but is NOT authorized by this document
 -- this task's own scope ends at the bounded implementation and its
 offline test evidence.
+
+## D-109 -- Pimples Candidate A false-delete forensic: CompositeResolver / PreResolverCleanup authority collision (offline investigation only, no engine change)
+
+Product Owner directive: investigate why pimples Candidate A
+(`clip_c7c1e5ce8c3a68550ac2`, D-108's real-media qualification RAW
+`34113549497`) disappeared from the delivered edit (`missing_delivery`,
+LEVEL_1, 5.75s, ladder-attributed `CompositeResolver/PreResolverCleanup`)
+despite the engine's own replacement guard (`complete_retry_identity_
+guard.py`) recording `SEQUENCE_IDENTITY_BELOW_THRESHOLD` (0.415 < 0.52)
+-- i.e. explicitly finding Candidate C is NOT a valid semantic replacement
+for A. Full forensic:
+`docs/CUTSELL_FORENSIC_PIMPLES_A_FALSE_DELETE_D109.md`.
+
+**Finding.** The physical ladder's `CompositeResolver/PreResolverCleanup`
+attribution is the ladder's own generic fallback label for "candidate
+missing, no family/idea record found" (`benchmarks/video00_quality_
+ladder.py::_refine_and_attribute`'s `FALSE_DELETE`/`AUTH_COMPOSITE`
+branch) -- not proof any specific module by that name ran. Tracing the
+real decision path: `hybrid_session_cleanup.apply_hybrid_session_cleanup`
+(D-081) correctly does NOT delete A for `delete_basis =
+"semantic_failed_plus_local_performance"` (`applied_delete = false`,
+confirmed in the FINAL printed diagnostic) -- fully compliant with its own
+preserved doctrine that a probabilistic semantic-plus-performance
+judgment may only be RECORDED as `semantic_delete_recommended` evidence,
+never irreversibly applied before grouping/BestTake/StoryValidator. A
+never appears in ANY cross-group (`semantic_idea_equivalence`, 60
+candidates/14 checked) or within-group (`grouping_safety_budget`, 7 weak
+pairs/0 checked) pair this run -- it was removed before grouping ever ran.
+
+**Root cause: an authority collision inside `composite_resolver.py`'s
+19-hook take-level chain**, between two authorities answering the same
+question with different evidence:
+- `complete_retry_identity_guard.py` (consulted inside stage 1 for the
+  `semantic_failed_plus_later_overlapping_complete_retake` basis):
+  strict `sequence_identity` threshold (0.52); correctly rejects C as
+  A's replacement (0.415).
+- `hybrid_retry_winner_authority.py::enforce_proven_retry_winners`
+  (chain hook #9, installed via `composite_resolver.py`'s
+  `_CHAIN_SPEC`): an independent, LOOSER shared-content-token test
+  (`_same_retry_attempt`) that never consults the first guard's verdict.
+  Verified offline against the real transcript text:
+  `_same_retry_attempt(A, C)` returns `True` (5 shared content tokens,
+  0.833/0.333 coverage, gap 1.36s -- well inside this hook's own 20s
+  window; C's label `"winner"` 0.92 clears its 0.90 floor; A's label
+  `"failed"` 0.85 clears its 0.80 floor). Every gate in
+  `enforce_proven_retry_winners` is satisfied for (A, C) except
+  `retry_setup_confidence(A, context) >= 0.84`, which requires the raw
+  `whole_video_context` event stream and could not be confirmed from the
+  diagnostics captured this session (A's summarized `local_failure_
+  reasons` carries no `event:retry_setup:` entry, but this function reads
+  raw events directly -- a superset of that summary -- so absence there
+  does not rule it out). If that one gate also passed, this hook removes
+  A from `kept` directly by clip id, bypassing `delete_basis`/
+  `applied_delete` entirely -- which is also why those fields still read
+  `false` for A in the FINAL diagnostic dump even though A is missing
+  from the delivered video: this hook mutates the `kept` tuple, not the
+  per-clip decision record. **UNCONFIRMED as the exact firing mechanism,
+  but the single strongest, most directly evidenced candidate** -- no
+  code was changed to verify further.
+
+**Doctrine violated.** PERFORMANCE_BAD and SEMANTICALLY_REPLACEABLE are
+correctly kept as separate questions at stage 1 (D-081's own doctrine,
+and `complete_retry_identity_guard`'s dedicated check) but a LATER
+authority in the same chain can independently re-derive
+"replaceable" with a weaker test and act on it without ever seeing the
+first authority's rejection -- meaning preservation (no valid replacement
+exists) does not currently outrank a poor-performance judgment once a
+downstream hook re-asks the question its own way.
+
+**Minimum safe fix location identified, not implemented:** before
+`enforce_proven_retry_winners` removes a `failed`-labelled candidate in
+favor of a later `winner`, it should decline when `complete_retry_
+identity_guard`'s own sequence-identity evaluation for that exact pair
+already recorded a `replacement_rejection_reason` this same run --
+reusing existing evidence, no new heuristic, scoped to exactly this
+collision. Risk: `hybrid_retry_winner_authority.py`'s own documented
+positive case (Human Gold's fumble-plus-retake shape) must not regress;
+any implementation needs that fixture suite green first, which this task
+did not run.
+
+No `cutsell_worker/*.py` file was modified. No RAW/provider/S3/infra work
+was performed. No CompositeResolver, cleanup, grouping, or BestTake
+behavior was changed. No visual-exit detection or MediaSignals field was
+added.
+
+**HUMAN ACTION REQUIRED:** YES (condition A) -- whether to authorize the
+minimum-safe-fix location above (a genuine engine behavior change to
+`hybrid_retry_winner_authority.py`, requiring its own regression suite
+and a confirmatory RAW) is a Product Owner decision, not made here. The
+one remaining evidentiary gap (confirming `retry_setup_confidence(A,
+context) >= 0.84` actually fired this run) would need either the raw
+`whole_video_context` event stream from this exact RAW (not recoverable
+from this session's log tooling, per the same fixed-window limitation
+D-107/D-108 already documented) or a fresh diagnostic-only extraction --
+neither authorized here.
