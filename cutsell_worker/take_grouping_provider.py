@@ -1541,6 +1541,27 @@ def _accept_restart_singleton_bridge(
     return True, record
 
 
+def _cross_component_blocked_pair(
+    left_members: Tuple[str, ...],
+    right_members: Tuple[str, ...],
+    blocked_pairs: frozenset[frozenset[str]],
+) -> frozenset[str] | None:
+    """D-108: does ANY member of `left_members` already carry an explicit,
+    already-computed non-equivalence relationship (`content_divergence_
+    blocked` -- same-run evidence this function's own caller already
+    produced, never a new heuristic) with ANY member of `right_members`?
+    Returns the offending pair, or None. See the module comment above
+    `_bridge_aware_components` for why this check runs BEFORE any
+    acceptance path, not as one more path to satisfy, and for why a bare
+    `arbiter_rejected_pairs` decline is deliberately NOT included here."""
+    for left_id in left_members:
+        for right_id in right_members:
+            pair = frozenset((left_id, right_id))
+            if pair in blocked_pairs:
+                return pair
+    return None
+
+
 def _bridge_aware_components(
     group: Tuple[str, ...],
     edges: list[_RetryEdge],
@@ -1550,13 +1571,43 @@ def _bridge_aware_components(
     arbiter: SemanticEquivalenceArbiter | None,
     policy: SemanticEquivalenceGatePolicy,
     edge_trace: list[dict],
+    blocked_pairs: frozenset[frozenset[str]] = frozenset(),
 ) -> tuple[Tuple[str, ...], ...]:
     """D-085: bridge-sensitive replacement for plain union-find. Processes
     `edges` in the fixed, input-order-independent sequence `_edge_sort_key`
     defines; a non-bridge edge unions immediately (byte-identical to
     `_cohesive_components`'s own behavior for that case); a bridge edge only
     unions after `_evaluate_bridge_cohesion` accepts it. `protected_ids`
-    handling is unchanged from `_cohesive_components`."""
+    handling is unchanged from `_cohesive_components`.
+
+    D-108 (pimples family granularity, docs/CUTSELL_DECISIONS.md D-108):
+    D-085's own bridge-cohesion probes (`_evaluate_bridge_cohesion`,
+    `_accept_restart_singleton_bridge`, `_accept_complete_pairwise_bridge`)
+    all ask "does the MERGED component still share one proposition?" -- none
+    of them ever asks "did this run ALREADY determine two of the members
+    about to be merged are NOT the same idea?". Live shape (D-107/D-108): a
+    complementary beat A shares a deterministic same-opening/abandoned-start
+    edge with a retry-competitor C (a thin, order-independent lexical
+    coincidence -- shared opening words plus one shared content word), which
+    unions A and C as an ordinary non-bridge pair BEFORE a third member B's
+    own strong semantic edge to C ever runs. That later B-C edge becomes a
+    bridge into the now-2-member {A, C} component, and because {A, C}
+    carries a restart-evidence-kind edge, `_accept_restart_singleton_bridge`
+    accepts it under `confirmed_against_restart_component` WITHOUT ever
+    revisiting whether B belongs anywhere near A -- even though this SAME
+    run's own within-group weak-pair check already found A and B carry an
+    explicit, marker-gated content-divergence block (`content_divergence_
+    blocked`) for exactly that pair. FIX: before dispatching a bridge edge
+    to ANY acceptance path, check every cross pair between the two
+    components against this run's own already-computed non-equivalence
+    evidence (`blocked_pairs`, built by the caller from `content_divergence_
+    blocked` ONLY -- reused verbatim, not a new heuristic; a bare same_
+    idea=False decline is deliberately excluded, see the caller's own
+    comment for why); a hit vetoes the bridge outright, whichever acceptance
+    path would otherwise have granted it. An UNKNOWN relationship (a pair
+    simply never evaluated, e.g. A vs C when a fixture makes that pair the
+    untested one) is not in `blocked_pairs` and never triggers this veto --
+    only evidence this run already produced does."""
     parent = {clip_id: clip_id for clip_id in group}
     members_of: dict[str, list[str]] = {clip_id: [clip_id] for clip_id in group}
 
@@ -1605,6 +1656,23 @@ def _bridge_aware_components(
                 "evidence": edge.evidence,
                 "confidence": round(edge.confidence, 4) if edge.evidence == "semantic" else None,
                 "reason": edge.reason, "bridge_sensitive": False, "accepted": True,
+            })
+            continue
+        blocked_pair = _cross_component_blocked_pair(
+            tuple(left_members), tuple(right_members), blocked_pairs,
+        )
+        if blocked_pair is not None:
+            left_id, right_id = tuple(blocked_pair) if len(blocked_pair) == 2 else (edge.left_id, edge.right_id)
+            edge_trace.append({
+                "left_clip_id": edge.left_id, "right_clip_id": edge.right_id,
+                "evidence": edge.evidence,
+                "confidence": round(edge.confidence, 4) if edge.evidence == "semantic" else None,
+                "reason": edge.reason, "bridge_sensitive": True,
+                "left_component_members": list(left_members), "right_component_members": list(right_members),
+                "component_cohesion_evaluated": False,
+                "accepted": False,
+                "reason_rejected": "cross_component_explicit_non_equivalence",
+                "conflicting_pair": [left_id, right_id],
             })
             continue
         record = None
@@ -1685,6 +1753,7 @@ def split_incohesive_retry_groups(
             "splits": [],
             "edge_trace": [], "bridge_evaluated_count": 0, "bridge_accepted_count": 0,
             "bridge_rejected_count": 0, "component_semantic_call_count": 0,
+            "blocked_pair_veto_count": 0,
         }
 
     edges_by_group: dict[int, list[_RetryEdge]] = {id(group): [] for group in multi_member_groups}
@@ -1810,6 +1879,38 @@ def split_incohesive_retry_groups(
                 "confidence": round(confidence, 4), "reason": reason,
             })
 
+    # D-108: explicit, already-computed non-equivalence evidence this SAME
+    # pass produced. Reused verbatim (never a new heuristic) as a hard veto
+    # on any BRIDGE that would otherwise pull the blocked pair into one
+    # retry-family component; see the module comment above
+    # `_bridge_aware_components`. An unevaluated pair is absent from
+    # `content_divergence_blocked` and therefore never vetoes anything on
+    # its own (negative control: unknown does not mean blocked).
+    #
+    # Deliberately built from `content_divergence_blocked` ONLY, never
+    # `arbiter_rejected_pairs`. `content_divergence_blocked` is
+    # unconditionally strong: it already required the arbiter to CONFIRM
+    # same_idea, an explicit distinct-addition marker on exactly one side,
+    # AND a verified low shared-content floor overriding that confirmation
+    # (D-048 FIX 1's own "content divergence alone decides, confidence is
+    # never sole authority" rule) -- a structural signal, not a confidence
+    # number. A bare `arbiter_rejected_pairs` same_idea=False verdict, by
+    # contrast, is the ROUTINE, expected outcome for every topically-
+    # unrelated pair inside a larger multi-member group (e.g. an unrelated
+    # acne mention vs. a genuine pimples retry pair) -- proven unsafe to use
+    # here by `test_regression_full_five_member_conflated_group_resolves_
+    # to_three_families` (tests/test_cutsell_d083_distinct_idea_grouping_
+    # safety.py): a fixed-confidence test arbiter's routine decline of an
+    # unrelated pair would otherwise veto a wholly legitimate 3-member
+    # retry family. A same_idea=False decline says only "not confirmed the
+    # same idea," never "confirmed genuinely distinct" -- content_
+    # divergence_blocked is the only signal this run produces that means
+    # the latter.
+    blocked_pairs: frozenset[frozenset[str]] = frozenset(
+        frozenset((row["left_clip_id"], row["right_clip_id"]))
+        for row in content_divergence_blocked
+    )
+
     output_groups: list[Tuple[str, ...]] = []
     split_records: list[dict] = []
     groups_split = 0
@@ -1822,6 +1923,7 @@ def split_incohesive_retry_groups(
             group, edges_by_group.get(id(group), []),
             protected_ids=protected_ids, take_map=take_map,
             arbiter=arbiter, policy=policy, edge_trace=edge_trace,
+            blocked_pairs=blocked_pairs,
         )
         if len(components) <= 1:
             output_groups.append(group)
@@ -1838,6 +1940,15 @@ def split_incohesive_retry_groups(
     bridge_rejected_count = len(bridge_records) - bridge_accepted_count
     component_semantic_call_count = sum(
         1 for record in bridge_records if record.get("component_cohesion_evaluated")
+    )
+    # D-108: bridges vetoed purely because a cross pair already carried this
+    # SAME pass's own explicit non-equivalence evidence -- never reached any
+    # acceptance path at all. Counted separately from `bridge_rejected_count`
+    # (which also includes ordinary `_evaluate_bridge_cohesion` rejections)
+    # so a run can show WHICH guard actually stopped the merge.
+    blocked_pair_veto_count = sum(
+        1 for record in bridge_records
+        if record.get("reason_rejected") == "cross_component_explicit_non_equivalence"
     )
 
     return tuple(output_groups), {
@@ -1872,6 +1983,7 @@ def split_incohesive_retry_groups(
         "bridge_accepted_count": bridge_accepted_count,
         "bridge_rejected_count": bridge_rejected_count,
         "component_semantic_call_count": component_semantic_call_count,
+        "blocked_pair_veto_count": blocked_pair_veto_count,
     }
 
 

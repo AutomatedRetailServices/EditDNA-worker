@@ -13545,3 +13545,192 @@ scope); (2) whether entry/interior/exit `MediaSignals` localization is
 worth authorizing as new perception work before any future visual-quality
 BestTake gate is attempted -- absent it, any such gate remains unsafe by
 this task's own evidence.
+
+## D-108 -- Pimples family granularity fix: retry-family bridge veto on already-known non-equivalence (IdeaClusterer/RetryFamilyFormation, bounded implementation)
+
+Product Owner directive: D-107 found stronger RAW-derived evidence than a
+BestTake fix would address -- A+B independently blocked (`distinct_
+addition_blocked` / `content_divergence_blocked`, confidence 0.9 each) while
+B+C were accepted as equivalent (confidence 0.95) -- yet all three ended up
+in one single-winner retry-family contest. Authorized to investigate/fix
+the MINIMUM grouping/transitivity defect that lets an explicitly non-
+equivalent/complementary candidate be pulled into a retry family through
+another member, owned by IdeaClusterer/RetryFamilyFormation, never
+compensated inside BestTake or a new cleanup authority. Explicitly
+forbade entry/interior/exit `MediaSignals` work and any visual-quality
+BestTake penalty (D-107's own conclusion: insufficient evidence). Branch
+`feature/runpod-pod-on-demand`, HEAD `b116a49`, verified clean at start.
+
+**Root cause.** `_bridge_aware_components` (D-085's bridge-aware cohesion
+pass, `cutsell_worker/take_grouping_provider.py`) has three bridge-
+acceptance paths -- `_accept_restart_singleton_bridge`,
+`_accept_complete_pairwise_bridge`, `_evaluate_bridge_cohesion` -- and every
+one of them only ever asks "does the MERGED component still share one
+proposition?" (a forward-looking cohesion question, answered by a fresh
+arbiter probe or a restart-evidence shortcut). None of them ever asks
+"did THIS SAME run already determine two of the members about to be
+merged are NOT the same idea?" So once a complementary beat (A) and a
+retry-competitor (B) are independently found non-equivalent
+(`content_divergence_blocked`, from the marker-gated
+`_within_group_arbiter_confirmation_diverges` override), nothing stops A
+from being pulled into B's retry family through a THIRD member (C) that a
+weak, UNMARKED pairwise confirmation (and, worse, `_evaluate_bridge_
+cohesion`'s own coarse component-level probe, which can repeat the exact
+same "same general topic" mistake) judges close enough -- because
+`_within_group_arbiter_confirmation_diverges`'s divergence override is
+gated on marker ASYMMETRY (exactly one side carrying a `_DISTINCT_
+ADDITION_MARKERS` phrase); when NEITHER side of a pair carries the marker,
+the divergence check never even runs, regardless of actual content
+divergence. Proven with a direct before/after mechanism-level test
+(`test_bridge_aware_components_before_and_after_the_veto`): the identical
+edge set plus a component probe answered with the same coarse-similarity
+mistake merges all three into one family before the fix, and correctly
+rejects the bridge before that probe is even asked after it.
+
+**Fix (`cutsell_worker/take_grouping_provider.py`, `_bridge_aware_components`
++ `split_incohesive_retry_groups`).** Before dispatching ANY bridge edge to
+an acceptance path, check every cross pair between the two components
+against `blocked_pairs` -- a hard veto set built by the caller from
+`content_divergence_blocked` ONLY (never `arbiter_rejected_pairs` -- see
+below). A hit rejects the bridge outright (`reason_rejected:
+"cross_component_explicit_non_equivalence"`), regardless of which
+acceptance path would otherwise have granted it, and is never itself asked
+of the arbiter (no wasted component-probe call). `content_divergence_
+blocked` is unconditionally strong: it already required the arbiter to
+CONFIRM same_idea, an explicit marker on exactly one side, AND a verified
+low shared-content floor overriding that confirmation (D-048 FIX 1's
+"content divergence alone decides" rule) -- a structural signal, not a
+confidence number. A bare `arbiter_rejected_pairs` same_idea=False verdict
+is deliberately EXCLUDED: it is the routine, expected outcome for every
+topically-unrelated pair inside a larger multi-member group and says only
+"not confirmed the same idea," never "confirmed genuinely distinct" --
+proven necessary, not assumed, by a real regression caught before commit
+(below). An unevaluated pair (never asked, or asked and simply undecided)
+is absent from `content_divergence_blocked` and therefore never vetoes
+anything -- "unknown" never means "blocked."
+
+**Regression caught and fixed before commit.** An initial version of the
+fix also included high-confidence `arbiter_rejected_pairs` entries in
+`blocked_pairs`. This broke `tests/test_cutsell_d083_distinct_idea_
+grouping_safety.py::test_regression_full_five_member_conflated_group_
+resolves_to_three_families` (a PRE-EXISTING, protected regression, itself
+D-083's own generic analog of this exact pimples shape): its `FixedArbiter`
+test double returns a flat 0.9 confidence for every decision including
+declines, so the routine same_idea=False verdict for its unrelated
+`short`-vs-`restatement` pair crossed the 0.85 floor and wrongly vetoed
+that suite's own legitimate 3-member family (`short`+`monolith`+
+`restatement`, which the D-097.A deterministic restart-evidence path
+correctly keeps together). Root-caused and fixed by removing
+`arbiter_rejected_pairs` from `blocked_pairs` entirely (see Fix above) --
+not by weakening the veto's trigger condition, since `content_divergence_
+blocked` alone already covers every case this task's own evidence
+required.
+
+**Family construction before/after (structural fixture, generic, no
+pimples text/IDs/timestamps -- `tests/test_cutsell_d108_retry_family_
+transitivity.py`).** A: short, complete, unique/distinct-addition beat. B:
+another realization, explicit distinct-addition marker, shares specific
+content with C. C: high-confidence retry/equivalent of B. Evidence: A-B
+strong marker-gated content-divergence block; B-C strong (0.95)
+equivalence; A-C weak, UNMARKED confirmation (0.80) -- the exact shape that
+bypasses the marker gate. BEFORE: `('A','B','C')` -- one family, BestTake
+forced to pick a single winner among all three. AFTER: `('A',)` +
+`('B','C')` -- A survives independently; B and C compete for one winner
+(that contest's outcome is untouched, a later BestTake decision).
+
+**A+B block evidence used:** `content_divergence_blocked` (this run's own
+marker-gated override, confidence carried through verbatim).
+**B+C equivalence preserved:** the accepted semantic edge merges B and C
+exactly as before -- the veto never touches an edge that isn't crossing
+into a blocked pair.
+
+**Tests (8 new, `test_cutsell_d108_retry_family_transitivity.py`, all
+green):** 2 preconditions (fixture reproduces the real marker/divergence
+shape); the structural pimples-shape positive test (via `split_incohesive_
+retry_groups`, asserting the exact 2-group split, `blocked_pair_veto_
+count == 1`, and the `splits` diagnostic record); the direct before/after
+mechanism-level proof on `_bridge_aware_components` (item above); negative
+control 1 (a genuinely cohesive, unmarked 3-member family stays merged,
+`blocked_pair_veto_count == 0`); negative control 2 (a bare same_idea=False
+rejection -- weak 0.3 AND strong 0.95 -- never vetoes, the fix that closed
+the regression above); negative control 7 (an unevaluated A-C relationship
+alone isolates A only through absence-of-evidence, `blocked_pair_veto_
+count == 0` -- unknown never means blocked); negative control for an
+ordinary two-member retry pair (no bridge occurs at all, veto count 0).
+
+**Other regressions (all green, no new failures):** `test_cutsell_
+d097_a_retry_family_completeness.py` (40 combined with D-083/D-108, D-097.A
+restart-evidence and its own five-member conflated-group test, now fixed
+per above), `test_cutsell_d058_phase1/2/3_*.py`, `test_cutsell_d085_
+bridge_aware_retry_family_cohesion.py`, `test_cutsell_d094_2_fragment_
+identity_and_singleton_bridge.py`, `test_cutsell_d094_3_render_qc_
+placement_labels.py`, `test_cutsell_d094_video00_integration_fixes.py`,
+`test_cutsell_d100_multimodal_retry_corroboration.py`, `test_cutsell_
+d103_required_condition_realization_safety.py`, `test_cutsell_minimum_
+sufficient_editorial_set.py` (D-102's family-context/minimum-sufficient
+coverage), `test_cutsell_d106_meaning_vs_parity_qa.py`, `test_video00_
+regression_qa.py`, `test_cutsell_video00_quality_ladder.py` -- 198 tests
+total across these targeted suites, all passing. `test_cutsell_clean_cut_
+core_evaluation_suite.py` (CleanCutBench): 55/55.
+
+**Broader qualification.** `compileall` clean across `cutsell_worker`,
+`benchmarks`, `tests`. Full offline `tests/` suite (excluding `tests/
+test_semantic_stitch.py`, a pre-existing collection error unrelated to
+grouping, already recorded at D-099/D-100/D-102/D-104/D-106): 2986 passed,
+5 failed -- all 5 confirmed PRE-EXISTING and unrelated to this change
+(reproduced identically with this diff stashed): the 4 already-documented
+`test_video00_modal_hybrid_semantic_parity.py` failures (D-099/D-100/D-102/
+D-104/D-106's own recorded infra/workflow-config gap, untouched by this
+task), plus one newly-noticed pre-existing failure, `test_hybrid_story_
+guard_incomplete_retry.py::test_incomplete_failed_retry_is_covered_when_
+prior_delivery_preserves_numbers_and_negation`, verified to fail
+identically on the pre-D-108 tree and therefore not a regression this task
+introduced or is responsible for fixing.
+
+**Known limitations.** (1) The veto reuses ONLY `content_divergence_
+blocked` from `split_incohesive_retry_groups`'s OWN within-group pass, not
+the separate cross-group `distinct_addition_blocked` list `reconcile_
+semantic_idea_equivalence` produces earlier -- by the time `split_
+incohesive_retry_groups` runs on an already-multi-member group, the SAME
+pair is re-evaluated within-group and produces its own `content_
+divergence_blocked` entry (confirmed for the pimples A-B pair in D-107's
+own recovered diagnostics), so this is sufficient for the defect proven
+here; threading the cross-group list too would require widening `split_
+incohesive_retry_groups`'s signature and its `pipeline.py` call site, a
+larger change than this bounded task's evidence justifies. (2) The exact
+edge (deterministic restart, `_provider_members_compatible`, or a bare
+arbiter confirmation) that connected the real pimples A to C in RAW
+`34077889576` remains unproven from available diagnostics -- direct
+reproduction attempts with realistic gaps/timestamps showed none of the
+deterministic functions fire for this specific real Spanish text, so the
+live edge was very likely the arbiter's own coarse weak-pair or component-
+probe confirmation, consistent with, but not conclusively identical to,
+this task's generic reproduction. The FIX is general (it vetoes ANY bridge
+crossing a `content_divergence_blocked` pair, regardless of which edge
+type triggered it), so this does not weaken its applicability, but the
+exact real-run edge type is recorded as unproven rather than assumed. (3)
+No new position-aware perception work was added (out of scope, D-107).
+
+**Expected effect toward Cut.ai.** Removes a whole CLASS of future pimples-
+shaped defects (a genuinely complementary beat silently forced into a
+retry contest through a third, more-similar member) without touching
+DeliveryScorer, BestTakeResolver, or any selection-ranking code -- BestTake
+now receives the correct competitor SET for this shape rather than
+compensating downstream. No RAW-measured effect is claimed; this is a
+grouping-authority fix, not a selection-ranking one, and its real-media
+effect on RAW `34077889576`'s pimples family specifically remains
+unverified (no RAW was launched under this task).
+
+No `cutsell_worker/*.py` file other than `take_grouping_provider.py` was
+modified. No D-103 marker expansion, no `classify_claim` change, no
+entry/interior/exit MediaSignals field, no visual-quality BestTake
+penalty, no new provider, no RAW/provider/S3/Modal/RunPod/subagent/timer/
+UI work.
+
+**HUMAN ACTION REQUIRED:** NO to close this bounded implementation. The
+B-vs-C BestTake winner question (still open per D-104/D-107) is a
+separate, later decision, explicitly not decided here. A confirmatory RAW
+on `tg_edb72c9305a16337b5` (or the next pimples-shaped family) would be
+the natural next verification step but is NOT authorized by this document
+-- this task's own scope ends at the bounded implementation and its
+offline test evidence.
