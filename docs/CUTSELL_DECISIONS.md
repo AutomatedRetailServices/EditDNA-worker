@@ -14179,3 +14179,125 @@ into the two PROVEN-COLLISION hooks, `hybrid_retry_completion_integrity`
 and `hybrid_cross_group_retry_integrity`, leaving the five POTENTIAL-
 COLLISION hooks explicitly tracked but out of scope for now) is a Product
 Owner decision, not made here.
+
+## D-113 -- Shared retry-replacement verdict consumption wired into the two
+D-112 PROVEN-COLLISION hooks (bounded implementation, no RAW)
+
+**Authority coordination, not a new heuristic.** D-112's forensic sweep
+proved two independent chain hooks (`hybrid_retry_completion_integrity`
+and `hybrid_cross_group_retry_integrity`) could each remove a candidate in
+favor of a proposed winner that `complete_retry_identity_guard` had
+already REJECTED as a valid replacement for that exact directional pair,
+this same run. This directive authorizes wiring only those two PROVEN
+hooks to consult the guard's already-computed verdict before acting -- no
+new authority, no recomputed threshold, no widened semantics.
+
+**Shared helper (owner: `complete_retry_identity_guard.py`).** D-110's
+own `_prior_replacement_rejections` (previously private to `hybrid_retry_
+winner_authority.py`) is now `prior_replacement_rejections`, moved
+verbatim into `complete_retry_identity_guard.py` -- the module that
+already computes this evidence -- alongside a new convenience wrapper,
+`is_rejected_replacement(session_diagnostics, candidate_id, proposed_
+replacement_id) -> bool`. Only `SEQUENCE_IDENTITY_BELOW_THRESHOLD` is
+ever treated as an actionable REJECTED verdict (the only rejection
+reason this guard records together with a concrete replacement candidate
+id); every other reason (`NO_CANDIDATE`, `NOT_APPLICABLE`, etc. = UNKNOWN;
+`LEXICAL_REPLACEMENT_VERIFIED` = ACCEPTED) is, by construction, never
+returned as a rejection -- this preserves D-110's exact, already-tested
+semantics rather than widening them. `hybrid_retry_winner_authority.py`
+(D-110's hook) was refactored to call the shared function instead of its
+own private copy -- confirmed safe via its own 15-test suite passing
+unchanged before any other work proceeded, per this directive's own
+"extraordinarily small and obviously safe refactor" allowance.
+
+**Hook #2 (`hybrid_retry_completion_integrity::_safe_failed_retry`).**
+`apply_hybrid_retry_completion_integrity` now checks, after `_safe_failed_
+retry` proposes a winner and before removing the candidate, whether
+`result.diagnostics` (available at this point in the chain since stage 1
+runs first) already records a rejection for that EXACT (candidate,
+winner) pair; if so, the removal is declined and a
+`prior_replacement_rejection_respected` diagnostic is recorded instead
+(`removal_applied: False`). `_safe_short_alternate_debris` and `_safe_
+full_alternate_retry` are unchanged -- scope bounded to the one function
+D-112 proved active.
+
+**Hook #5 (`hybrid_cross_group_retry_integrity`).**
+`collapse_cross_group_semantic_retries` gained an optional `session_
+diagnostics` parameter (threaded through its `install_*` wrapper as
+`result.diagnostics`). The check applies ONLY when the covering evidence
+names a single peer (`coverage_mode == "single_authoritative_peer"` --
+the exact mode D-112's real ob-gyn collision was proven on); the
+multi-peer contiguous-chain mode has no single directional pair to
+consult and is deliberately left unchanged, per this directive's own
+no-widened-semantics scope. A related, pre-existing `deleted_ids`
+accuracy bug (mirroring the one D-110 fixed at hook #8) was fixed at the
+same time: the wrapper's separate `deleted_ids` diagnostic list now
+filters on `removal_applied` so a declined entry is never mislabeled as
+deleted.
+
+**Tests (`tests/test_cutsell_d113_shared_replacement_verdict_
+consumption.py`, 16 tests, generic fixtures -- no Video00 text/ids/
+timestamps):** pimples-shaped and ob-gyn-shaped positive controls (both
+hooks respect an exact recorded rejection); directional negative controls
+(a rejection for one pair does not block an unrelated pair sharing the
+same candidate, nor an entirely separate pair); reverse-direction
+controls (a rejection for (X,Y) does not imply (Y,X) is rejected -- using
+a near-symmetric-content fixture pair to isolate directionality from
+hook #5's own asymmetric coverage math); UNKNOWN/ACCEPTED-note controls
+(`NOT_APPLICABLE` and `LEXICAL_REPLACEMENT_VERIFIED` never behave like a
+rejection); legitimate-retry positive controls (no rejection recorded ->
+both hooks remove exactly as before); a B/C-complementary-shaped
+regression (a pair with insufficient covering evidence is left alone by
+both hooks regardless of guard evidence, unrelated to `hybrid_semantic_
+complementary_rescue.py`, untouched by this task); and a D-110/hook-#8
+smoke test confirming the shared-helper refactor changed nothing there.
+All 16 pass.
+
+**Regressions, all green, no new failures:** `tests/test_cutsell_d110_
+retry_winner_authority_replacement_rejection.py` (8) + `tests/test_
+cutsell_video00_round2_gold.py` (7) + `tests/test_cutsell_complete_
+retry_identity_guard.py` + D-108 grouping (`test_cutsell_d108_retry_
+family_transitivity.py`, `test_cutsell_d083_distinct_idea_grouping_
+safety.py`, `test_cutsell_d085_bridge_aware_retry_family_cohesion.py`) +
+D-100 + D-106 (`test_cutsell_d106_meaning_vs_parity_qa.py`, `test_
+video00_regression_qa.py`, `test_cutsell_video00_quality_ladder.py`) +
+CleanCutBench (D-097.12 stomach coverage) + every existing test file
+already referencing either hook (`test_cutsell_benchmark48/49_
+regressions.py`, `test_cutsell_composite_resolver.py`, `test_cutsell_
+d097_6_failed_label_never_restored_or_composited.py`, `test_cutsell_
+editorial_guardrails_v2.py`, `test_cutsell_focused_gold_block_00_02_03.
+py`, `test_cutsell_selection_phase_final_retry_guards.py`, `test_cutsell_
+video00_round3_gold_reconciliation.py`, `test_cutsell_video00_round9_
+regressions.py`, `test_video00_raw_trigger_coverage.py`) -- 251 tests
+total, all passing. `python3 -m compileall -q cutsell_worker benchmarks
+tests` clean. Full offline `tests/` qualification (excluding the
+pre-existing `test_semantic_stitch.py` collection error): **3010 passed,
+5 failed** -- all 5 exactly match the pre-existing documented baseline
+(the same 1 `test_hybrid_story_guard_incomplete_retry.py` failure + 4
+`test_video00_modal_hybrid_semantic_parity.py` CI-workflow-text failures
+carried since D-108/D-110/D-112); zero new failures (3010 = the 2994
+baseline + exactly the 16 new D-113 tests).
+
+**No offline expectation was modified.** No `cutsell_worker/*.py` change
+outside the four files named above (`complete_retry_identity_guard.py`,
+`hybrid_retry_winner_authority.py`, `hybrid_retry_completion_integrity.
+py`, `hybrid_cross_group_retry_integrity.py`). The five D-112
+POTENTIAL-COLLISION hooks (`semantic_fragment_guard`, `hybrid_story_
+guard`, `hybrid_alternate_integrity`, `incomplete_bridge_retry_
+authority`, `hybrid_failed_continuation_integrity`) were not touched --
+they remain tracked by D-112 for future, separately-authorized work.
+
+**No fallback, no RAW.** No multimodal fallback arbiter was implemented
+or invoked (D-111 doctrine: this task addressed a case where a stronger
+deterministic answer already existed, never a candidate for fallback
+arbitration). No RAW, provider, S3, Modal, RunPod, or UI/Figma work was
+performed.
+
+**No real-media effect claimed yet.** Whether this fix changes RAW
+`34123511687`-shaped pimples/ob-gyn outcomes on real media is unmeasured
+-- that requires a fresh authorized Video00 RAW, explicitly not launched
+by this task.
+
+**HUMAN ACTION REQUIRED:** YES (condition C) -- authorizing a confirmatory
+Video00 RAW to qualify this fix on real media is a Product Owner paid-
+compute decision, not made here.

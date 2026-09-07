@@ -9,6 +9,23 @@ A second narrow repair may roll back a genuinely incomplete retained clause when
 immediately following short suffix is already proven failed. A retained delivery that is
 already marked as a complete idea is protected: the failed suffix may be removed, but the
 completed delivery itself must not be shortened.
+
+D-112/D-113 (shared replacement-verdict consumption, see docs/CUTSELL_DECISIONS.md):
+``_safe_failed_retry`` is an independently-computed "is this the same retry attempt"
+judgment -- blind to ``complete_retry_identity_guard.py``'s stricter ``sequence_identity``
+check that ``hybrid_session_cleanup.py`` already consulted for the SAME candidate this
+run. D-112's forensic sweep proved a real pimples-family run where this exact function
+removed a candidate the stricter guard had already rejected as a valid replacement
+(``SEQUENCE_IDENTITY_BELOW_THRESHOLD``). Before actually removing a candidate this
+function has picked a winner for, ``apply_hybrid_retry_completion_integrity`` now checks
+whether this same run's own guard evidence already recorded a rejection naming that EXACT
+(candidate, winner) pair (via ``complete_retry_identity_guard.is_rejected_replacement``);
+if so, it declines the removal and records ``prior_replacement_rejection_respected``
+instead. No sequence identity or other threshold is recomputed; this reuses existing
+evidence verbatim and is directional (a rejection for (X, Y) never blocks Y from
+competing with, or replacing, any OTHER candidate). ``_safe_short_alternate_debris`` and
+``_safe_full_alternate_retry`` are unchanged -- this task's scope is bounded to
+``_safe_failed_retry``, the function D-112 proved active on real media.
 """
 from __future__ import annotations
 
@@ -16,6 +33,10 @@ from dataclasses import replace
 import re
 from typing import Iterable
 
+from .complete_retry_identity_guard import (
+    SEQUENCE_IDENTITY_BELOW_THRESHOLD,
+    is_rejected_replacement,
+)
 from .contracts import CandidateTake
 
 _TOKEN_RE = re.compile(r"[a-z0-9áéíóúñü]+", re.IGNORECASE)
@@ -234,12 +255,34 @@ def apply_hybrid_retry_completion_integrity(result, source_takes, context=None):
     kept = list(sorted(result.kept, key=lambda item: (item.source_order, item.start, item.end, item.clip_id)))
     removed_ids: set[str] = set()
     diagnostics = []
+    session_diagnostics = tuple(result.diagnostics)
 
     for index, take in enumerate(tuple(kept)):
         winner = _safe_failed_retry(take, tuple(kept), semantic, context)
         if winner is not None:
+            # D-112/D-113: honor an already-recorded, exact-directional
+            # complete_retry_identity_guard rejection for this (take, winner)
+            # pair before applying this hook's own, weaker, independent
+            # coverage judgment. Directional only: never affects any other
+            # pair involving `take` or `winner`.
+            if is_rejected_replacement(session_diagnostics, take.clip_id, winner.clip_id):
+                diagnostics.append({
+                    "clip_id": take.clip_id,
+                    "reason": "prior_replacement_rejection_respected",
+                    "proposed_winner_clip_id": winner.clip_id,
+                    "prior_replacement_rejection_found": True,
+                    "prior_replacement_rejection_reason": SEQUENCE_IDENTITY_BELOW_THRESHOLD,
+                    "removal_applied": False,
+                })
+                continue
             removed_ids.add(take.clip_id)
-            diagnostics.append({"clip_id": take.clip_id, "reason": "semantic_failed_cross_group_retry_covered", "winner_clip_id": winner.clip_id})
+            diagnostics.append({
+                "clip_id": take.clip_id,
+                "reason": "semantic_failed_cross_group_retry_covered",
+                "winner_clip_id": winner.clip_id,
+                "prior_replacement_rejection_found": False,
+                "removal_applied": True,
+            })
             continue
         previous = kept[index - 1] if index > 0 else None
         following = kept[index + 1] if index + 1 < len(kept) else None

@@ -16,6 +16,21 @@ WHY a candidate was or wasn't certified -- via the same ContextVar-side-channel 
 class of problem (produced here, read-and-cleared once by hybrid_session_cleanup.py's
 own per-decision loop). Purely additive: no return value, gate, or threshold below
 changes as a result.
+
+D-113 (shared replacement-verdict consumption, see docs/CUTSELL_DECISIONS.md): D-109/
+D-110 proved one destructive authority (``hybrid_retry_winner_authority``) could
+independently re-derive "same retry attempt" and override this guard's own recorded
+rejection for the exact same (candidate, proposed replacement) pair. D-112's forensic
+sweep then proved the identical collision shape recurring, uncoordinated, in at least
+one more chain hook (``hybrid_cross_group_retry_integrity``), via its own independent
+coverage evidence. ``prior_replacement_rejections``/``is_rejected_replacement`` below are
+this module's OWN shared, read-only consumption contract over evidence it already
+computes and writes into ``hybrid_session_cleanup.py``'s per-decision diagnostics --
+extracted from ``hybrid_retry_winner_authority.py``'s original D-110 implementation
+verbatim, not a new computation. Any destructive authority in the take-level chain may
+import and consult these helpers before acting on a proposed (X, Y) replacement; this
+module remains the sole source of the verdict -- no consumer may recompute sequence
+identity, introduce a new threshold, or otherwise become a second competing authority.
 """
 from __future__ import annotations
 
@@ -23,6 +38,7 @@ from contextvars import ContextVar
 from dataclasses import dataclass
 from difflib import SequenceMatcher
 import re
+from typing import Iterable
 import unicodedata
 
 _NUMBER_RE = re.compile(r"\b\d+(?:[.,]\d+)?\b")
@@ -266,3 +282,66 @@ def install_complete_retry_identity_guard() -> None:
 
     protected._cutsell_complete_retry_identity_guard = True
     cleanup._later_semantic_retry_replacement = protected
+
+
+# D-113: shared, chain-wide replacement-verdict consumption contract.
+#
+# Only SEQUENCE_IDENTITY_BELOW_THRESHOLD is treated as an actionable REJECTED
+# verdict here -- it is the only rejection reason this guard ever records
+# together with a concrete `replacement_candidate_clip_id_before_guard`
+# (every other rejection reason, e.g. NO_CANDIDATE, is recorded with a null
+# candidate id, so there is no directional pair to consult for those). This
+# preserves D-110's own, already-tested semantics verbatim; it is not widened
+# here. LEXICAL_REPLACEMENT_VERIFIED (ACCEPTED) and NOT_APPLICABLE/NO_CANDIDATE/
+# etc. (UNKNOWN) are both, by construction, never returned by these helpers as
+# a rejection -- a caller finding nothing here must treat that as "no verdict
+# recorded", never as an implicit accept or reject.
+def prior_replacement_rejections(session_diagnostics: Iterable[dict]) -> dict[str, str]:
+    """Extract, per candidate, the specific proposed-replacement clip id this
+    guard already rejected THIS RUN via SEQUENCE_IDENTITY_BELOW_THRESHOLD.
+
+    Reused verbatim from ``hybrid_session_cleanup.py``'s own per-decision
+    diagnostics (the same records this module's own ``protected()`` wrapper,
+    via ``hybrid_session_cleanup.py``'s per-decision loop, already writes).
+    No sequence identity or any other threshold is recomputed here -- this is
+    pure consumption of already-computed evidence. Directional by
+    construction: the returned mapping is
+    ``candidate_clip_id -> rejected_replacement_clip_id``, one pair at a
+    time, never a blanket per-source or per-family veto. A rejection
+    recorded for (X, Y) says nothing about (X, Z), (Y, X), or any other pair.
+    """
+    rejections: dict[str, str] = {}
+    for row in session_diagnostics:
+        if not isinstance(row, dict):
+            continue
+        decisions = row.get("decisions")
+        if not isinstance(decisions, list):
+            continue
+        for item in decisions:
+            if not isinstance(item, dict) or not item.get("clip_id"):
+                continue
+            if str(item.get("replacement_rejection_reason") or "") != SEQUENCE_IDENTITY_BELOW_THRESHOLD:
+                continue
+            candidate_id = item.get("replacement_candidate_clip_id_before_guard")
+            if not candidate_id:
+                continue
+            rejections[str(item["clip_id"])] = str(candidate_id)
+    return rejections
+
+
+def is_rejected_replacement(
+    session_diagnostics: Iterable[dict],
+    candidate_id: str | None,
+    proposed_replacement_id: str | None,
+) -> bool:
+    """Return True only when this run's own guard evidence already recorded
+    a REJECTED verdict for the EXACT directional (candidate_id, proposed_
+    replacement_id) pair. False for UNKNOWN/NOT_APPLICABLE (no verdict) and
+    for ACCEPTED (LEXICAL_REPLACEMENT_VERIFIED) alike -- callers must not
+    treat a False return as permission; it only means this shared contract
+    found no recorded rejection for this exact pair, so the caller's own
+    existing evidence/behavior governs unchanged."""
+    if not candidate_id or not proposed_replacement_id:
+        return False
+    rejections = prior_replacement_rejections(session_diagnostics)
+    return rejections.get(str(candidate_id)) == str(proposed_replacement_id)

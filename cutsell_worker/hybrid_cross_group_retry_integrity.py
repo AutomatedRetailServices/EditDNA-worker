@@ -13,12 +13,34 @@ The pass is deliberately conservative:
   form one contiguous reconstructed delivery on the same temporal side of the candidate;
 - critical meaning such as semantic negation and numbers must also be preserved by peers;
 - genuinely unique audience-facing material remains fail-open.
+
+D-112/D-113 (shared replacement-verdict consumption, see docs/CUTSELL_DECISIONS.md):
+``_covered_by_authoritative_peers``'s single-authoritative-peer path is an
+independently-computed "does this peer cover/replace the candidate" judgment -- blind to
+``complete_retry_identity_guard.py``'s stricter ``sequence_identity`` check that
+``hybrid_session_cleanup.py`` already consulted for the SAME candidate this run. D-112's
+forensic sweep proved a real run where this exact path removed a candidate in favor of a
+peer the stricter guard had already rejected as a valid replacement
+(``SEQUENCE_IDENTITY_BELOW_THRESHOLD``) for that exact pair.
+``collapse_cross_group_semantic_retries`` now checks, only when the covering evidence
+names a single peer (``coverage_mode == "single_authoritative_peer"`` -- the mode this
+collision was proven on; the multi-peer contiguous-chain mode has no single directional
+pair to consult and is left unchanged, per this task's own no-widening-semantics scope),
+whether this run's own guard evidence already recorded a rejection naming that EXACT
+(candidate, peer) pair; if so, it declines the removal and records
+``prior_replacement_rejection_respected`` instead. No sequence identity or other
+threshold is recomputed; directional only (a rejection for (X, Y) never blocks Y from
+being a valid peer for, or replacing, any OTHER candidate).
 """
 from __future__ import annotations
 
 import re
 from typing import Iterable
 
+from .complete_retry_identity_guard import (
+    SEQUENCE_IDENTITY_BELOW_THRESHOLD,
+    is_rejected_replacement,
+)
 from .contracts import CandidateTake
 
 _TOKEN_RE = re.compile(r"[a-z0-9áéíóúñü]+(?:[-–][0-9]+)?%?", re.IGNORECASE)
@@ -231,6 +253,8 @@ def _covered_by_authoritative_peers(
 def collapse_cross_group_semantic_retries(
     kept: Iterable[CandidateTake],
     semantic_decisions: Iterable[tuple[str, str, float]],
+    *,
+    session_diagnostics: Iterable[dict] = (),
 ) -> tuple[tuple[CandidateTake, ...], tuple[CandidateTake, ...], tuple[dict, ...]]:
     """Remove only semantically-proven retries already covered by authoritative peers."""
     kept_tuple = tuple(sorted(kept, key=lambda item: (item.source_order, item.start, item.end, item.clip_id)))
@@ -238,6 +262,7 @@ def collapse_cross_group_semantic_retries(
         str(clip_id): (str(label), float(confidence))
         for clip_id, label, confidence in semantic_decisions
     }
+    session_diagnostics_tuple = tuple(session_diagnostics)
     removed_ids: set[str] = set()
     diagnostics: list[dict] = []
 
@@ -249,6 +274,32 @@ def collapse_cross_group_semantic_retries(
         covered, evidence = _covered_by_authoritative_peers(candidate, peers)
         if not covered:
             continue
+
+        # D-112/D-113: only a single-peer coverage verdict names one exact
+        # directional (candidate, peer) pair a prior guard rejection can be
+        # checked against; the multi-peer contiguous-chain mode has no
+        # single such pair and is left unchanged (no widened semantics).
+        proposed_peer_id = (
+            evidence.get("strongest_peer_clip_id")
+            if evidence.get("coverage_mode") == "single_authoritative_peer"
+            else None
+        )
+        if proposed_peer_id and is_rejected_replacement(
+            session_diagnostics_tuple, candidate.clip_id, proposed_peer_id
+        ):
+            diagnostics.append({
+                "clip_id": candidate.clip_id,
+                "reason": "prior_replacement_rejection_respected",
+                "proposed_winner_clip_id": proposed_peer_id,
+                "prior_replacement_rejection_found": True,
+                "prior_replacement_rejection_reason": SEQUENCE_IDENTITY_BELOW_THRESHOLD,
+                "removal_applied": False,
+                "semantic_label": label,
+                "semantic_confidence": round(confidence, 4),
+                "text": candidate.text,
+            })
+            continue
+
         removed_ids.add(candidate.clip_id)
         diagnostics.append({
             "clip_id": candidate.clip_id,
@@ -256,6 +307,8 @@ def collapse_cross_group_semantic_retries(
             "semantic_label": label,
             "semantic_confidence": round(confidence, 4),
             "text": candidate.text,
+            "prior_replacement_rejection_found": False,
+            "removal_applied": True,
             **evidence,
         })
 
@@ -286,6 +339,7 @@ def install_hybrid_cross_group_retry_integrity() -> None:
         kept, extra_deleted, guard_diagnostics = collapse_cross_group_semantic_retries(
             result.kept,
             result.semantic_decisions,
+            session_diagnostics=result.diagnostics,
         )
         if not guard_diagnostics:
             return result
@@ -295,7 +349,13 @@ def install_hybrid_cross_group_retry_integrity() -> None:
         deleted = tuple(take for take in source_takes if take.clip_id in deleted_ids)
         diagnostics = tuple(result.diagnostics) + ({
             "hybrid_cross_group_retry_integrity": list(guard_diagnostics),
-            "deleted_ids": [item["clip_id"] for item in guard_diagnostics],
+            # D-112/D-113: only ACTUALLY-applied removals belong here -- a
+            # declined ("prior_replacement_rejection_respected") entry is
+            # observability only, its candidate was never deleted.
+            "deleted_ids": [
+                item["clip_id"] for item in guard_diagnostics
+                if item.get("removal_applied", True)
+            ],
         },)
         return type(result)(
             kept=kept,

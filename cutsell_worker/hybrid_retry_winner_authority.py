@@ -35,13 +35,25 @@ favor of a proposed ``winner``, check whether THIS SAME RUN's own
 evidence verbatim (no new heuristic, no threshold recomputed) and is
 directional: a rejection recorded for (X, Y) never blocks Y from
 competing with, or replacing, any OTHER candidate.
+
+D-113 (shared verdict-consumption contract): D-112's forensic sweep proved
+this exact collision shape recurring in at least one other chain hook
+(``hybrid_cross_group_retry_integrity``). The rejection-lookup helper this
+module introduced under D-110 is now owned by ``complete_retry_identity_
+guard.py`` itself (``prior_replacement_rejections``) so every destructive
+authority in the chain consumes the identical, single implementation
+instead of each hook copy-pasting its own. This module's own behavior,
+tests, and diagnostics are unchanged -- this is a call-site refactor only.
 """
 from __future__ import annotations
 
 import re
 from typing import Iterable, Mapping
 
-from .complete_retry_identity_guard import SEQUENCE_IDENTITY_BELOW_THRESHOLD
+from .complete_retry_identity_guard import (
+    SEQUENCE_IDENTITY_BELOW_THRESHOLD,
+    prior_replacement_rejections,
+)
 from .contracts import CandidateTake
 from .whole_video_analysis import WholeVideoContext
 
@@ -122,38 +134,6 @@ def _same_retry_attempt(failed: CandidateTake, winner: CandidateTake) -> tuple[b
     }
 
 
-def _prior_replacement_rejections(session_diagnostics: Iterable[dict]) -> dict[str, str]:
-    """D-109/D-110: extract, per failed candidate, the specific replacement
-    candidate id ``complete_retry_identity_guard.py`` already rejected THIS
-    RUN via ``SEQUENCE_IDENTITY_BELOW_THRESHOLD`` -- the only rejection
-    reason that co-occurs with a concrete ``replacement_candidate_clip_id_
-    before_guard`` in that guard's own contract (every other rejection
-    reason there is recorded with a null candidate id, e.g. NO_CANDIDATE).
-    Reused verbatim from ``hybrid_session_cleanup.py``'s own per-decision
-    diagnostics (the same records ``complete_retry_identity_guard.py``
-    writes into); no sequence identity or any other threshold is
-    recomputed here. Directional by construction: the returned mapping is
-    ``failed_clip_id -> rejected_replacement_clip_id``, one pair at a
-    time, never a blanket per-source or per-family veto."""
-    rejections: dict[str, str] = {}
-    for row in session_diagnostics:
-        if not isinstance(row, dict):
-            continue
-        decisions = row.get("decisions")
-        if not isinstance(decisions, list):
-            continue
-        for item in decisions:
-            if not isinstance(item, dict) or not item.get("clip_id"):
-                continue
-            if str(item.get("replacement_rejection_reason") or "") != SEQUENCE_IDENTITY_BELOW_THRESHOLD:
-                continue
-            candidate_id = item.get("replacement_candidate_clip_id_before_guard")
-            if not candidate_id:
-                continue
-            rejections[str(item["clip_id"])] = str(candidate_id)
-    return rejections
-
-
 def enforce_proven_retry_winners(
     kept: Iterable[CandidateTake],
     semantic_decisions: Iterable[tuple[str, str, float]],
@@ -170,7 +150,7 @@ def enforce_proven_retry_winners(
         str(clip_id): (str(label), float(confidence))
         for clip_id, label, confidence in semantic_decisions
     }
-    prior_rejections = _prior_replacement_rejections(session_diagnostics)
+    prior_rejections = prior_replacement_rejections(session_diagnostics)
     removed_ids: set[str] = set()
     diagnostics: list[dict] = []
 
