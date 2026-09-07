@@ -181,6 +181,16 @@ PRESERVE / CONSOLIDATE LATER / FUTURE only -- nothing marked obsolete).
   condition (as D-098's was) always takes precedence over D-091
   autonomous continuity for that task's own next step; D-091 continuity
   resumes normally for any separately-authorized objective.
+- **Behavior + Proposition Abstraction Doctrine (D-111), Section 10 of
+  the same document:** an additive evolution, not a second architecture
+  -- generalizes creator behavior into reusable BEHAVIOR/PROPOSITION/
+  ATTEMPT-RELATIONSHIP/CONFIDENCE abstractions; formalizes "same product/
+  topic/opener != same proposition" as a Milestone-1 (Cut.ai) requirement;
+  names a bounded multimodal fallback arbiter (NOT IMPLEMENTED, used only
+  for genuine medium-confidence conflict, never over a stronger
+  deterministic answer like D-110's replacement-rejection rule); and
+  binds an anti-rule-proliferation classification (A-I) before writing
+  any new special-case rule. Documentation only -- authorizes nothing.
 
 ## Current state pointer
 The live current state is the newest `D-xxx` entry in `docs/CUTSELL_DECISIONS.md`

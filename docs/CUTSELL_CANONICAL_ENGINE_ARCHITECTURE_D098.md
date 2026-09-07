@@ -387,3 +387,312 @@ accepted D-096/D-097.x authority contract. See `docs/CUTSELL_DECISIONS.md`
 D-107 for the empirical pimples-family forensic and signal audit that
 motivated naming these concepts now, and for why no BestTake selection
 code was changed to implement them in this task.
+
+---
+
+## 10. Behavior + Proposition Abstraction Doctrine, Confidence/Fallback,
+and Anti-Rule-Proliferation (D-111)
+
+**Status: additive doctrine, documentation only.** No layer is renumbered,
+no status in Section 3's table changes, no new authority is created, no
+`cutsell_worker/*.py` file was touched to write this section. This closes
+the gap Section 9 left open: D-107 named the *ranking* vocabulary
+(BestTake priority order, Performance Continuity, Delivery Energy Fit,
+Entry/Delivery/Exit ownership); this section names the *generalization*
+and *conflict-resolution* vocabulary the Product Owner's D-111 directive
+introduced — how CutSell should keep learning from new creator behavior
+without accreting an unbounded pile of one-off rules.
+
+### 10.1 Behavior + Proposition Abstraction Doctrine
+
+CutSell must generalize raw perception into two abstraction families
+BEFORE editorial selection runs, rather than accumulating
+benchmark-specific lexical/timing/motion/product/creator rules one
+failure at a time:
+
+- **BEHAVIOR STATES** (Layer 2's existing target vocabulary — restated,
+  not expanded: `AUDIENCE_DELIVERY`, `PRE_TAKE_SETUP`, `FALSE_START`,
+  `ABANDONED_ATTEMPT`, `CLEAN_ATTEMPT`, `CORRECTION`, `CONTINUATION`,
+  `POST_TAKE_RESET`, `RETAKE_EVENT`, `RECORDING_PROCESS`, plus
+  `NEW_AUDIENCE_BEAT` and `BREAKING_CHARACTER` named here for
+  completeness). Many different physical behaviors (looking down,
+  laughing, freezing, dropping hands, reaching for a phone, resetting
+  posture, an expression change, a pause, saying "again", restarting a
+  sentence, an abrupt movement) may all, depending on context, contribute
+  EVIDENCE toward the SAME state. The target relationship is
+  many-signals-to-one-state, not one-signal-to-one-rule.
+- **PROPOSITION STATES** (new vocabulary, Layer 4/Layer 10 territory —
+  see 10.2). The audience-facing idea/job/claim/feature a piece of speech
+  is trying to deliver, distinct from its topic, product, or opening
+  words.
+- **ATTEMPT RELATIONSHIPS** — restates Layer 4's target relationship set
+  with two additions for completeness: `retry_of`, `continuation_of`,
+  `corrects`, `supersedes`, `complements`, `duplicate_of`, `setup_for`,
+  `same_editorial_function` (all already named in Layer 4), plus
+  `new_beat` (a distinct proposition — never grouped as a retry
+  competitor) named explicitly here. Canonical meanings: RETRY =
+  competing attempts at the SAME proposition/job; COMPLEMENT = additional
+  audience-facing content that advances meaning and must not
+  automatically compete for one winner; NEW_BEAT = a distinct
+  proposition / distinct audience-facing job.
+- **PERFORMANCE QUALITY** — Layer 6/16's existing target (multimodal
+  ranking evidence), not expanded here.
+- **CONFIDENCE** — see 10.4.
+
+Production logic should prefer reasoning from these abstractions
+(SIGNALS → GENERAL STATE → EDITORIAL DECISION) over inventing a new
+permanent special-case heuristic from one observed failure. This
+reaffirms, and gives a name to, the discipline every D-097.x/D-108/D-109/
+D-110 bounded fix already followed one at a time (reuse existing
+evidence and existing authorities; do not add a parallel decision path).
+
+### 10.2 Proposition Identity Precedes Retry Identity
+
+**New RAW → Cut.ai doctrine, required for Milestone 1, not deferred to
+Human Gold (Layer 10-16).**
+
+CRITICAL RULE:
+
+- SAME PRODUCT ≠ SAME PROPOSITION
+- SAME TOPIC ≠ SAME PROPOSITION
+- SAME OPENER ≠ SAME PROPOSITION
+- SAME SENTENCE STRUCTURE ≠ RETRY
+
+Example (illustrative only — never hardcoded into engine logic): "This
+32oz cup keeps drinks cold for 29 hours" (proposition: COLD_RETENTION),
+"This 32oz cup doesn't dent easily" (proposition: DURABILITY), "This 32oz
+cup fits any car cup holder" (proposition: CUP_HOLDER_COMPATIBILITY) share
+the same product, the same opener, and similar sentence structure, but
+are THREE distinct audience-facing propositions. `same_product=true` AND
+`same_opening=true` AND `same_proposition=false` → **do not group as
+retries.**
+
+Before forming retry competitors, the engine must first ask "are these
+attempts trying to deliver the same proposition/job?" and only THEN ask
+"are these alternative attempts/retries of that proposition?" Conceptual
+flow: `PRODUCT/TOPIC → PROPOSITION A → attempts/retries → BestTake`
+(repeated per distinct proposition B, C, ...). Propositions must never be
+collapsed merely because they share vocabulary.
+
+This is a target discipline for the existing retry-family/grouping
+authority (`take_grouping.py`/`take_grouping_provider.py`, Layer 4) — it
+does not change that authority's code today, and it does not retract
+D-108's already-implemented, narrower `blocked_pairs` veto (which acts on
+a different, already-proven signal: recorded non-equivalence, not
+proposition classification). A future proposition-identity implementation
+would be new, separately-authorized engineering, evaluated the same way
+every prior bounded fix was (positive tests, negative controls,
+regressions, one real-media qualification).
+
+### 10.3 Confidence / Conflict Resolution and the Multimodal Fallback Arbiter
+
+Formalizes three target decision modes for Layer 18 (Confidence +
+Abstention), extended with a named fallback consumer:
+
+- **HIGH CONFIDENCE / EVIDENCE AGREEMENT** → deterministic/automatic
+  decision (the normal case today: lexical rules, D-108's veto, D-109/
+  D-110's directional rejection-respect, D-106's LEVEL_2 reclassification
+  are all HIGH-confidence deterministic paths).
+- **MEDIUM CONFIDENCE / SIGNAL CONFLICT** → a bounded **multimodal
+  fallback arbiter** (target, NOT IMPLEMENTED — see 10.3.1).
+- **LOW CONFIDENCE / INSUFFICIENT EVIDENCE** → abstain / preserve safely
+  / route to review — never manufacture certainty.
+
+No numerical threshold is introduced by this documentation task;
+thresholds require calibration against real evaluation evidence, per the
+anti-loop contract (Section 6).
+
+#### 10.3.1 Multimodal Fallback Arbiter (target, not implemented)
+
+The fallback is explicitly **not** the primary editor — it is invoked
+only when the structured deterministic + multimodal-evidence system
+cannot safely resolve a BOUNDED conflict on its own, and it receives only
+the bounded finalists plus necessary context (never the whole family,
+never unrestricted authority). Possible future trigger conditions (target
+list, not an implementation): Hybrid/Gemini's winner disagrees with the
+measured DeliveryScorer winner; the semantic winner has a strong measured
+visual-performance defect while another sufficient competitor is cleaner;
+top candidates remain very close; retry-vs-complement remains genuinely
+unresolved; BestTake-vs-Boundary ownership remains ambiguous (D-107's
+CASE C); multimodal signals conflict. Possible conceptual outcomes:
+`BEST_TAKE_A`, `BEST_TAKE_B`, `EQUIVALENT`, `KEEP_BOTH_COMPLEMENTARY`,
+`GOOD_TAKE_TRIM_EXIT`, `UNCERTAIN`. **Not implemented by this or any
+prior task.**
+
+#### 10.3.2 When Fallback Must Not Be Used
+
+Do not escalate to the fallback arbiter when a stronger deterministic
+answer already exists. Confirmed examples from this project's own
+history: D-110's directional rule (a recorded strict replacement rejection
+already says candidate Y is NOT a valid replacement for candidate X — a
+later authority must respect that, never re-litigate it via a weaker
+arbiter); polarity/negation-inversion safety; an authority conflict
+already resolved by canonical safety evidence (D-109's own diagnosis);
+deterministic media-integrity failures. Rule: CLEAR DETERMINISTIC ANSWER
+→ use it; REAL CONFLICT → fallback may arbitrate; INSUFFICIENT EVIDENCE →
+abstain/review.
+
+### 10.4 Escalation Instead of Rule Proliferation (binding doctrine)
+
+When existing deterministic and multimodal evidence cannot safely resolve
+a case, the response is escalation through the three modes above, **never**
+an automatic new permanent heuristic minted from that one benchmark
+failure. A new benchmark failure is evidence for improving a GENERAL
+capability (Behavior Understanding, Proposition Understanding, Attempt
+Relationships, an existing authority's evidence intake), not automatic
+justification for another lexical/motion/product/creator-specific
+production rule. This restates, generalizes, and makes binding the
+discipline already visible across D-097.x's many `R`-numbered fixes and
+D-108/D-109/D-110's authority-collision fixes — each one reused existing
+evidence/authorities rather than adding a parallel rule or a parallel
+cleanup layer.
+
+**Anti-rule-proliferation classification.** When a new creator/benchmark
+failure appears, classify it before writing any code:
+
+- A. Perception missing?
+- B. Behavior-state understanding missing?
+- C. Proposition identity wrong?
+- D. Attempt relationship wrong?
+- E. Existing evidence not reaching its owning authority (a plumbing gap
+  — see the dataflow map's Gap 1)?
+- F. Authority collision (two authorities independently re-deriving the
+  same judgment with different evidence, as D-109/D-110 diagnosed and
+  fixed)?
+- G. BestTake quality issue?
+- H. Boundary issue?
+- I. Genuine unresolved multimodal conflict (10.3.1 territory)?
+
+Only add a new deterministic production rule when it expresses a GENERAL
+invariant supported by architecture/evidence — not a benchmark-specific
+special case.
+
+### 10.5 Safety / Architectural Invariants (extends Section 6, does not replace it)
+
+Permanent deterministic rules remain appropriate for universal
+invariants, restated and extended here for discoverability: meaning must
+not invert; negation/polarity must survive; diagnosis/number/correction
+safety; poor performance evidence does not by itself authorize deleting
+unique/unreplaced meaning without a valid replacement (D-109/D-110); a
+stronger, already-recorded prior replacement rejection cannot be silently
+overridden by a weaker later authority re-asking the same question
+(D-110's exact fix); same topic/product/opener does not prove same
+proposition (10.2); source RAW remains immutable (Section 9); an
+unsupported QA capability never silently becomes PASS (Section 2, Layer
+8); QA reference videos (Cut.ai, Human Gold) never enter production
+selection/prompts/timing; unique/complementary audience-facing meaning
+cannot disappear merely because another take is visually cleaner (D-107's
+BestTake priority order, meaning above cleanliness).
+
+### 10.6 Hybrid / Gemini Authority (clarifies, does not change, existing authority)
+
+Hybrid/Gemini may provide semantic interpretation, labels, equivalence
+evidence, ranking evidence, and bounded arbitration. A model "winner" is
+a strong NOMINATION — it is **not** absolute authority against: stronger
+deterministic safety evidence, a prior replacement rejection (D-110),
+strong measured multimodal disagreement, or a meaning/sufficiency
+failure. This restates the doctrine D-109/D-110 already proved
+empirically (a Gemini-labelled "winner" does not override a stricter
+guard's recorded rejection) as a general principle, not a new authority.
+No existing fast path is globally removed by naming this; any behavior
+change still requires its own bounded implementation + evaluation proof,
+per Section 6.
+
+### 10.7 Human Gold Remains Downstream (restates Section 5, sharpened)
+
+Cut.ai commercial parity (Milestone 1) comes first. "Same product but a
+different feature/proposition" (10.2) is a Milestone-1 (RAW → Cut.ai)
+requirement, not deferred Human Gold reasoning — proposition identity is
+more basic than editorial-function sufficiency (Layer 10-11) or
+good-vs-good ranking (Layer 14). Human Gold later adds editorial
+function, delivery sufficiency, information gain, the minimum sufficient
+set, good-vs-good refinement, composite necessity, and narrative/rhythm
+refinement (Layers 10-16, unchanged from Section 2). Nothing in this
+section authorizes starting Milestone 2 work.
+
+### 10.8 Evaluation Learning Loop (restates Layer 19, sharpened)
+
+Human/Product-Owner-reviewed cases (a stomach retry, a pimples family, a
+complementary-symptom pair, a diagnosis-preservation case, a polarity/"No"
+case, a duplicate conclusion, a boundary defect) should become evaluation
+cases, regression fixtures, and confidence-calibration evidence — never
+converted directly, one at a time, into a new production special-case
+rule. Long-term target path (Layer 20, roadmap only):
+`examples → eval dataset → confidence calibration → learned/ranked
+components when justified by sufficient evaluation evidence`.
+
+### 10.9 Current Implementation State (truthful snapshot at D-111)
+
+- D-110's authority-collision fix (`hybrid_retry_winner_authority`
+  respecting a same-run `complete_retry_identity_guard` rejection) is
+  IMPLEMENTED offline; targeted + regression tests green.
+- D-110's real-media qualification found the fix's own mechanism was
+  **not triggered** on RAW `34123511687` — a second, uncoordinated
+  authority earlier in the same take-level chain
+  (`hybrid_retry_completion_integrity::_safe_failed_retry`) removed the
+  same candidate first, via the identical doctrinal defect (an
+  independently-derived retry-equivalence judgment that never consults
+  the recorded guard rejection) at a different point in the chain. Not
+  yet fixed; recorded, not implemented, per that task's own no-fix-loop
+  scope.
+- D-106's meaning-vs-parity QA distinction is ACTIVE and reconfirmed
+  correct on real media (`34123511687`'s regression manifest: papillary
+  meaning PASS, parity-only mismatch correctly non-gating).
+- D-107's non-destructive doctrine (Section 9) is ACCEPTED; no editor
+  surface exists yet.
+- `MediaSignals` are PARTIALLY real (7 of 12 fields measured; 5 stay at
+  frozen defaults — dataflow map Gap 2).
+- Position-aware ENTRY/DELIVERY/EXIT perception (Section 9) is NOT
+  IMPLEMENTED.
+- The multimodal fallback arbiter (10.3.1) is NOT IMPLEMENTED.
+- Explicit proposition-level engine representation (10.2) is NOT fully
+  implemented — grouping remains lexical-only (dataflow map Gap 1).
+- Upstream perception exists PARTIALLY (dataflow map Section 1-4).
+- Downstream Watch+Listen remains PARTIAL/ADVISORY (4 of 8
+  `perceptual_watch_listen.py` v1 capabilities EVALUATED, 4
+  `NOT_IMPLEMENTED`).
+- Cut.ai commercial parity (Milestone 1) is NOT YET achieved (D-110's
+  qualification: overall LEVEL_1 28.744s this run, most of it in
+  IdeaClusterer/RetryFamilyFormation on families unrelated to pimples).
+- Human Gold implementation (Milestone 2) remains downstream, not
+  started.
+
+### 10.10 Likely Incremental Roadmap From Here (NOT an authorization)
+
+Documented for continuity only — this ordering is a plausible sequence
+given current evidence, not a commitment, and does not authorize any
+step:
+
+1. Current: D-110 real-media qualification is done (verdict B, MECHANISM
+   AVAILABLE BUT NOT TRIGGERED); the next open item is Product-Owner
+   authorization of a `hybrid_retry_completion_integrity` fix analogous
+   to D-110, or a broader sweep of the take-level chain for the same
+   collision shape.
+2. Position-aware performance perception (ENTRY/DELIVERY/EXIT, Section
+   9) — if evidence justifies it.
+3. Expose reliable DeliveryScorer/MediaSignals/local-winner diagnostics.
+4. Proposition identity / relationship consolidation where grouping
+   over-collapses same-topic distinct beats (10.2, dataflow map Gap 1).
+5. Multimodal BestTake v1 using only real measured evidence (Section 9).
+6. Bounded multimodal fallback for genuine conflicts (10.3.1).
+7. Boundary use of post-delivery visual reset evidence.
+8. Full Video00 Cut.ai parity qualification.
+9. Unseen-RAW Cut.ai-level generalization.
+10. Only then: the Human Gold intelligence milestone (10.7).
+
+This roadmap is not authorization for any of its own steps. Every step
+still requires its own bounded-capability authorization per Section 6.
+
+### 10.11 Anti-Loop Execution Contract (reaffirms Section 6)
+
+Architecture is not authorization. Every behavior-changing implementation
+still requires: one bounded capability, one owning authority, evidence,
+positive tests, negative controls, regression protection, a cost
+boundary, one real-media qualification when justified, and a STOP. A
+newly discovered defect does not automatically create a fix, a RAW, a new
+heuristic, or a provider call — see Section 6, unchanged.
+
+No change to Section 2's 20 layers, Section 3's status table, Section 9,
+or any accepted D-096/D-097.x/D-107/D-108/D-109/D-110 authority contract.
+See `docs/CUTSELL_DECISIONS.md` D-111 for the decision-log entry
+recording this section's doctrine.

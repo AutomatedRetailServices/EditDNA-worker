@@ -13940,3 +13940,114 @@ authority`); other chain hooks that independently re-derive replacement
 or retry-attempt judgments without consulting recorded rejections are out
 of scope and untouched. Confirming the real-media effect requires a new
 authorized RAW (not run here).
+
+## D-111 -- Behavior + Proposition Abstraction Doctrine, Confidence/
+Fallback, and Anti-Rule-Proliferation (canon evolution, documentation
+only, NO engine behavior change)
+
+**Status/context.** D-110's real-media qualification (one authorized
+Modal RAW, `34123511687`, run on this same head) found: the strict
+`complete_retry_identity_guard` rejection was recorded exactly as
+expected (A->C, `SEQUENCE_IDENTITY_BELOW_THRESHOLD`), but D-110's own fix
+in `hybrid_retry_winner_authority` never got a chance to fire, because a
+SECOND, uncoordinated authority earlier in the same 19-hook take-level
+chain (`hybrid_retry_completion_integrity::_safe_failed_retry`) removed
+the same candidate first, via the identical doctrinal defect (an
+independently-derived retry-equivalence judgment that never consults the
+recorded guard rejection) at a different point in the chain. Verdict: B
+(MECHANISM AVAILABLE BUT NOT TRIGGERED). Not fixed -- recorded only, per
+that task's own no-fix-loop scope. B/C (the legitimate pimples
+sub-competition) were unaffected and correctly both kept as a
+complementary composite; D-106, D-097.12, D-108, polarity, and Freeze/
+Technical-QC all reconfirmed correct or unchanged on that same run.
+
+**This is the next Product Owner directive, formalizing the canonical
+doctrine this repeated collision shape (D-109, D-110, and now the D-110
+qualification's new finding) motivates: CutSell should generalize from
+new creator-behavior failures into a small set of reusable behavioral,
+semantic, perceptual and editorial abstractions, instead of accreting an
+unbounded pile of one-off lexical/motion/product/creator-specific rules
+and independently-coded authorities that silently re-derive the same
+judgment differently.**
+
+**Documentation only.** No `cutsell_worker/*.py` file was touched. No
+test expectation was changed. No RAW/provider/S3/Modal/RunPod/UI work was
+performed. `docs/CUTSELL_CANONICAL_ENGINE_ARCHITECTURE_D098.md` gained
+one new, purely additive Section 10 (Sections 1-9, the 20-layer target
+architecture, and the Section 3 status table are unchanged) formalizing:
+
+- **Behavior + Proposition Abstraction Doctrine** (10.1) -- many
+  different physical/lexical behaviors may map to the same BEHAVIOR STATE
+  (Layer 2's existing vocabulary, restated); PROPOSITION STATES,
+  ATTEMPT RELATIONSHIPS (adds `new_beat` to Layer 4's existing set),
+  PERFORMANCE QUALITY and CONFIDENCE are the reusable abstraction
+  vocabulary production logic should reason from, instead of one-off
+  special cases.
+- **Proposition Identity Precedes Retry Identity** (10.2) -- a new RAW ->
+  Cut.ai (Milestone 1, not deferred Human Gold) doctrine: SAME PRODUCT /
+  SAME TOPIC / SAME OPENER / SAME SENTENCE STRUCTURE each individually
+  != SAME PROPOSITION; the engine must classify proposition identity
+  before asking whether two attempts are retries of each other. This is a
+  target discipline for the existing retry-family/grouping authority; it
+  does not change `take_grouping.py`/`take_grouping_provider.py` today
+  and does not retract D-108's already-implemented, narrower
+  `blocked_pairs` veto (a different, already-proven signal).
+- **Confidence / Conflict Resolution + Multimodal Fallback Arbiter**
+  (10.3) -- HIGH confidence -> deterministic (today's normal case,
+  including D-108/D-109/D-110's own fixes); MEDIUM confidence / genuine
+  signal conflict -> a bounded fallback arbiter receiving only bounded
+  finalists (target, NOT IMPLEMENTED, no numeric thresholds introduced);
+  LOW confidence -> abstain/preserve/review. Explicit "when fallback must
+  not be used" list, naming D-110's own directional rule as the canonical
+  example of a case where a stronger deterministic answer already exists
+  and must never be re-litigated by a weaker arbiter.
+- **Escalation Instead of Rule Proliferation** (10.4, binding) -- a new
+  benchmark failure is evidence for improving a GENERAL capability, never
+  automatic justification for another lexical/motion/product/creator rule;
+  a 9-way classification (A-I, including "F. authority collision" --
+  exactly D-109/D-110's shape) to run before writing any code.
+- **Safety/Architectural Invariants** (10.5, extends Section 6) --
+  restates and collects the project's accumulated universal invariants
+  (meaning non-inversion, polarity/negation survival, D-109/D-110's
+  replacement-safety rule, 10.2's proposition-identity rule, source-RAW
+  immutability, QA-capability honesty, QA-reference isolation,
+  complementary-meaning preservation) in one place.
+- **Hybrid/Gemini Authority** (10.6) -- a model "winner" is a strong
+  nomination, never absolute authority against stronger deterministic
+  safety evidence, a prior replacement rejection, strong measured
+  multimodal disagreement, or a meaning/sufficiency failure -- restates
+  D-109/D-110's proven doctrine as a general principle, no new authority.
+- **Human Gold Remains Downstream** (10.7) and **Evaluation Learning
+  Loop** (10.8) restate Section 5/Layer 19 with 10.2 folded in as a
+  Milestone-1 requirement, not deferred Human Gold reasoning.
+- **Current Implementation State** (10.9) and **Likely Incremental
+  Roadmap** (10.10, explicitly not an authorization) record the truthful
+  present state (D-110 fix implemented but not yet proven effective on
+  real media per its own qualification's verdict B; fallback arbiter,
+  position-aware perception, and explicit proposition representation all
+  NOT IMPLEMENTED; Milestone 1 not yet achieved) and the most likely next
+  bounded steps, without authorizing any of them.
+- **Anti-Loop Execution Contract** (10.11) reaffirms Section 6 verbatim
+  in spirit: architecture is not authorization; every behavior change
+  still needs its own bounded capability, tests, controls, regressions,
+  cost boundary, and STOP.
+
+`CLAUDE.md`'s "Canonical engine architecture pointer (D-098)" section
+gained a one-line pointer to this section so the doctrine is discoverable
+at startup, without rewriting any existing D-096 through D-110 pointer
+text.
+
+**Current milestone reaffirmed:** RAW -> CLEAN RAW -> Cut.ai Commercial
+Parity. Human Gold implementation is not activated by this document
+merely because Layer 10-16 concepts and this section's abstractions
+exist on paper.
+
+**This documentation does NOT authorize implementation** of the
+multimodal fallback arbiter, proposition-identity engine representation,
+position-aware `MediaSignals`, any BestTake/grouping behavior change, or
+any UI/editor surface. No engine behavior changed. No RAW, provider, S3,
+Modal/RunPod, or UI/Figma work was performed.
+
+**HUMAN ACTION REQUIRED:** NO to close this documentation task. A. YES
+for any future step in Section 10.10's roadmap (each requires its own
+Product Owner authorization per the anti-loop contract).
