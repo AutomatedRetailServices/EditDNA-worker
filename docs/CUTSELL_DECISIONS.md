@@ -14738,3 +14738,132 @@ separately-authorized future RAW is run against this fixed workflow.
 Video00 RAW to obtain a complete D-116 accounting (full visual_edge_rows,
 confirmed ENTRY/EXIT trim counts) under this fixed workflow is a Product
 Owner paid-compute decision, not made here.
+
+## D-118 -- D-116 real-media requalification (post D-117 fix): D-117's own
+fix confirmed working operationally; the mandated complete `boundary_
+engine_pass`/`perceptual_watch_listen` accounting remains unretrieved
+this run due to a separate, newly-discovered CI-log-retrieval tooling
+limit, not a D-117 or D-116 defect
+
+One fresh authorized Video00 RAW (`34160335330`, job `101860624941`, head
+`a8ac560`, same as D-117's own commit -- no code changed for this task)
+was dispatched to complete D-116's real-media qualification under D-117's
+fixed workflow. Result, split cleanly into what is proven and what is not:
+
+**D-117 itself: CONFIRMED WORKING.** The "Print full canonical
+diagnostics" step's conclusion flipped from `failure` (exit code 2, SIGPIPE)
+on the pre-fix run (`34150026795`) to `success` on this run. This is
+direct, on-the-record proof the write-then-preview-from-file fix
+structurally eliminated the SIGPIPE failure mode on real media, exactly as
+D-117's offline simulation predicted. No D-117 observability failure
+occurred; nothing was patched.
+
+**A separate, new limitation surfaced downstream of my own evidence-
+retrieval tooling (not the workflow):** the `get_job_logs` tool enforces a
+hard internal cap of roughly 4999 lines of TAIL content regardless of the
+requested `tail_lines` value (confirmed empirically: `tail_lines=9000` and
+`tail_lines=20000` returned byte-identical output), with no offset/head/
+range alternative, and only one job exists in this run (so `failed_only`
+targets the same job/log). Direct download of the run's log ZIP
+(`results-receiver.actions.githubusercontent.com`) and of the individual
+diagnostic artifact (`*.blob.core.windows.net`) are both hard-blocked by
+the sandbox's outbound egress policy (`EGRESS_BLOCKED` / 403 "organization
+policy"), confirmed via both direct `curl` and the `WebFetch` tool against
+the same signed URLs. Because D-117's fix means the step now succeeds and
+prints substantially MORE content than before (every section that used to
+be lost after the SIGPIPE now prints), the early sections of that step's
+own output -- specifically the full `boundary_engine_pass` object
+(`visual_entry_trim_count`, `visual_exit_trim_count`, the `visual_edge_
+rows` array) and the `perceptual_watch_listen` capability breakdown --
+were pushed outside the retrievable ~5000-line tail window by everything
+that now prints after them in the same job log. This is the mirror image
+of the problem D-117 fixed: D-117 solved data loss AT THE SOURCE (the
+workflow no longer crashes or truncates); this is a data-loss problem in
+MY OWN retrieval path once the source stopped truncating. It has no
+bearing on whether D-116's engine behavior is correct.
+
+**What WAS recovered and is evidentiary:**
+- `stage_status.boundary_engine_pass = "post_freeze_edge_interior_audio_
+  edges_complete"` -- the compact top-level status string confirms the
+  Boundary pass (audio + visual CASE A, one pass) ran to completion
+  without error.
+- `delivery_status = "DELIVERABLE_PENDING_HUMAN_WATCH_LISTEN:perceptual=
+  FAIL"`, `human_watch_listen_required = true`, `deliverable = true` -- an
+  MP4 was produced.
+- Human Gold regression QA: `qa_pass = false` (18-check manifest).
+  `papillary_diagnosis_preserved` and both `pimples_micro_1/3_present`
+  passed; `pimples_micro_2_present`, `pimples_bad_monolith_absent`,
+  `pimples_micro_order`, and `sonography_good_before_diagnosis` failed.
+  `meaning_preservation` (the D-106 gating split) fully PASSED
+  (`papillary_symptom_realization_meaning`: 1/1); the D-106 non-gating
+  `preferred_realization_parity` check failed as expected/documented
+  ("editorial/take-selection mismatch only -- never gates qa_pass"). No
+  D-106 meaning-safety regression.
+- Architecture verifier: `architecture_verified = true`,
+  `freeze_blocked = false`, `failed_check_count = 0` -- Clean Cut Core V1
+  active, Freeze reached cleanly, Boundary ran only after a validated
+  Freeze.
+- Physical quality ladder (D-095, D-097.10 R14 headline, the canonical
+  view): overall physical LEVEL_1 = 29.879 s (12 regions, selection scope)
+  + 3.64 s (21 regions, boundary scope) = **33.519 s total**, CutSell
+  physical keep 156.343 s, F1 vs Cut.ai 0.8013 / vs Gold 0.8183.
+  `level1_by_authority` (physical, both scopes combined):
+  BestTakeResolver 2/17.439 s, AttemptReconstructor/RecordingProcess
+  Removal 4/7.605 s, BoundaryEngine 24/5.18 s, IdeaClusterer/RetryFamily
+  Formation 2/2.455 s, CompositeResolver/PreResolverCleanup 1/0.84 s.
+  Every pimples-region LEVEL_1 entry in the per-region rationale dump
+  (`i:82` 5.75 s, `i:85` 11.689 s -- summing to exactly BestTakeResolver's
+  17.439 s) is attributed to `BestTakeResolver` / `take_choice_against_
+  both_references`, **never to BoundaryEngine** -- a THIRD independent
+  data point (after D-113 and the pre-D-117-fix D-116 qualification run)
+  confirming pimples-region Level-1 variance is semantic-arbiter run-to-
+  run noise, structurally impossible for D-116/Boundary to cause (Boundary
+  runs strictly post-Freeze on already-frozen membership). All 24
+  BoundaryEngine-attributed physical regions carry only the pre-existing
+  generic rationale strings this forensic ladder tool has always used
+  (`"CutSell cuts a head/tail both references keep"`, `"CutSell keeps a
+  tail of a fragment both references end earlier"`) -- this ladder tool
+  does not read D-116's own visual reason-string constants, so it cannot
+  by itself distinguish a D-116 visual-CASE-A trim from a pre-existing
+  D-115-independent audio-edge trim within that 24-region/5.18 s total.
+  That distinction lives only in the unretrieved `boundary_engine_pass`
+  diagnostics object.
+- Physical ladder cross-run comparison: D-113 (pre-D-115/D-116) 15.703 s
+  total, pimples 0 s; prior D-116 qualification (`34150026795`, pre-D-117
+  fix) 34.969 s total, pimples ~19.689 s; this run (`34160335330`,
+  post-D-117 fix) 33.519 s total, pimples ~17.439 s. The overall-Level-1
+  and pimples-Level-1 magnitudes are consistent with the prior D-116 run
+  within normal semantic-arbiter run-to-run variance, not a new
+  regression.
+
+**What was NOT recovered this run (retrieval-tool limitation, not an
+engine or D-117 defect):** the exact `visual_entry_trim_count`/`visual_
+exit_trim_count` values, the full `visual_edge_rows` array (event kind/
+zone/reason per row), `selected_count_in`/`selected_count_out`/`edge_trim_
+count`/`interior_split_count`/`interior_reject_count`/`audio_entry_trim_
+count`/`audio_exit_trim_count`/`audio_edge_row_count`, cross-boundary and
+interior-event accounting, and the full `perceptual_watch_listen`
+capability-status breakdown. No value for any of these is asserted, guessed,
+or fabricated here.
+
+**No code, test, threshold, provider, or workflow change was made for
+this task** (git tree clean at HEAD `a8ac560` throughout; this was a
+measurement-only RAW per its own "NO FIX LOOP" instruction).
+
+**Verdict: B -- PARTIALLY REAL-MEDIA PROVEN (unchanged from D-116's own
+qualification entry).** This run adds a third real-media data point
+confirming D-116 causes no pimples-family or Freeze/architecture/meaning-
+safety regression, and confirms D-117's fix works operationally on real
+media, but it does not newly confirm a real ENTRY/EXIT visual trim with
+exact counts -- that remains contingent on a future evidence-retrieval
+path (a smaller/paginated CI print, a dedicated small-artifact-only
+job, or direct artifact access once available) rather than on any further
+engine change.
+
+**HUMAN ACTION REQUIRED:** YES (condition C) -- any further Video00 RAW,
+and any decision to invest in a different diagnostics-retrieval mechanism
+(e.g., a dedicated tiny always-uploaded `visual_edge_rows`-only summary
+file sized to print in full near the end of the step, or splitting
+`boundary_engine_pass`/`perceptual_watch_listen` printing into their own
+short-lived step so they are never far from the tail), is a Product Owner
+paid-compute / prioritization decision, not made here.
