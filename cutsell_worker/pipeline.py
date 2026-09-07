@@ -58,6 +58,10 @@ from .take_grouping_provider import (
 )
 from .take_judge import FRAGMENT_PENALTY_MARKERS, apply_delivery_cleanliness_evidence
 from .take_judge_provider import TakeJudgeProvider, safe_rank_takes
+from .case_b_performance_evidence import (
+    build_case_b_performance_evidence,
+    case_b_performance_evidence_diagnostics,
+)
 from .temporal_editing import refine_takes_with_temporal_context
 from .whole_video_analysis import WholeVideoContext, confirmed_recording_behavior_events
 
@@ -70,6 +74,61 @@ def _env_flag_enabled(name: str) -> bool:
     """D-094.2: '1'/'true'/'yes'/'on' (case-insensitive) enables; anything else,
     including unset, is OFF."""
     return str(os.environ.get(name, "")).strip().lower() in {"1", "true", "yes", "on"}
+
+
+# D-122 (BestTake CASE B evidence infrastructure, advisory/diagnostics only
+# -- docs/CUTSELL_DECISIONS.md D-122, docs/CUTSELL_BESTTAKE_CASE_B_FORENSIC_
+# D121.md): a small, side-effect-free re-derivation of `_semantic_best_
+# take`'s OWN single-decisive-winner lookup (same `winner_confidence`
+# default, same label/confidence test), used ONLY to expose the
+# "semantic_fast_path_candidate" advisory counterfactual (D-122's
+# "ADVISORY COUNTERFACTUAL" requirement) without changing that function's
+# tested return signature or control flow.
+def _single_semantic_winner_candidate(
+    members: tuple[CandidateTake, ...],
+    semantic_decisions: dict[str, tuple[str, float]],
+    winner_confidence: float = 0.85,
+) -> str | None:
+    winners = [
+        member.clip_id for member in members
+        if semantic_decisions.get(member.clip_id, ("", 0.0))[0] == "winner"
+        and semantic_decisions.get(member.clip_id, ("", 0.0))[1] >= winner_confidence
+    ]
+    return winners[0] if len(winners) == 1 else None
+
+
+# D-122: `_semantic_best_take`'s own reason vocabulary, classified into the
+# coarse winner_path buckets this task asks for. This is a read-only
+# classification of an already-computed reason string -- it changes
+# nothing about which reason is produced. "single_semantic_winner" is the
+# ONLY reason string that reflects Hybrid/Gemini's decisive-label fast
+# path (D-121 Section 5): DeliveryScorer's `ranked` is never consulted on
+# that path. "delivery_tie_break_among_survivors" and "local_fallback" are
+# the only two reasons whose final pick is `local_selected_clip_id`/
+# `rank_by_id` (DeliveryScorer's own top-ranked survivor) -- everything
+# else is a meaning/safety-driven resolution
+# (critical_coverage_dominance, unresolved_unique_fact_asymmetry,
+# unresolved_contradiction, single_member_no_contest, single_bts_unusable,
+# no_usable_realization) that never reads a delivery/performance score.
+# `DETERMINISTIC_OVERRIDE` is never assigned here -- it is only ever known
+# once `deterministic_best_take_authority.py` runs, AFTER this diagnostics
+# row already exists; see that module's own additive annotation step.
+_WINNER_PATH_SEMANTIC_FAST_PATH = "SEMANTIC_FAST_PATH"
+_WINNER_PATH_DELIVERYSCORE_PATH = "DELIVERYSCORE_PATH"
+_WINNER_PATH_OTHER_EXISTING_PATH = "OTHER_EXISTING_PATH"
+_DELIVERYSCORE_DRIVEN_REASONS = frozenset({
+    "delivery_tie_break_among_survivors", "local_fallback",
+})
+
+
+def _winner_path_from_reason(reason: str) -> tuple[str, bool]:
+    """Return (winner_path, performance_consulted_before_winner) for one
+    `semantic_best_take_reason` value, per the classification above."""
+    if reason == "single_semantic_winner":
+        return _WINNER_PATH_SEMANTIC_FAST_PATH, False
+    if reason in _DELIVERYSCORE_DRIVEN_REASONS:
+        return _WINNER_PATH_DELIVERYSCORE_PATH, True
+    return _WINNER_PATH_OTHER_EXISTING_PATH, False
 
 
 def _draft_clip(take: CandidateTake, *, role: SemanticRole, group_id: str | None, selected: bool) -> DraftClip:
@@ -881,6 +940,23 @@ def build_flow_b_draft(
         # (a decision, never an accidental loss) -- ordinary singletons are
         # still not contests and stay out of these rows.
         if len(members) >= 2 or no_usable_realization:
+            # D-122 (advisory/diagnostics only -- see docs/CUTSELL_DECISIONS.md
+            # D-122): expose D-121's confirmed single_semantic_winner bypass
+            # and D-115's DELIVERY-zone performance evidence per competitor,
+            # WITHOUT changing anything computed above this line.
+            # `winner_path`/`performance_consulted_before_winner` classify the
+            # `semantic_best_take_reason` already produced by
+            # `_semantic_best_take`; `deterministic_best_take_authority.py`
+            # additively upgrades `winner_path` to DETERMINISTIC_OVERRIDE
+            # later, once it is known.
+            case_b_winner_path, case_b_performance_consulted = _winner_path_from_reason(semantic_best_take_reason)
+            case_b_semantic_fast_path_candidate = _single_semantic_winner_candidate(members, family_semantic_decisions)
+            case_b_evidence_by_id = {
+                member.clip_id: case_b_performance_evidence_diagnostics(
+                    build_case_b_performance_evidence(member, whole_video_context)
+                )
+                for member in members
+            }
             judge_group_diagnostics.append({
                 "group_id": gid,
                 "selected_clip_id": selected_clip_id,
@@ -928,6 +1004,14 @@ def build_flow_b_draft(
                     }
                     for member in members
                 },
+                # D-122: BestTake CASE B evidence infrastructure -- advisory
+                # only, never consulted above this line, never changes
+                # `selected_clip_id`/`ranked`/membership/grouping/Boundary.
+                "winner_path": case_b_winner_path,
+                "performance_consulted_before_winner": case_b_performance_consulted,
+                "deliveryscore_top_candidate": local_selected_clip_id,
+                "semantic_fast_path_candidate": case_b_semantic_fast_path_candidate,
+                "case_b_evidence": case_b_evidence_by_id,
             })
         for member in members:
             clip_to_group[member.clip_id] = gid

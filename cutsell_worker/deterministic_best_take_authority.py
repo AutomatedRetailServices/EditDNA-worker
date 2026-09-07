@@ -185,4 +185,30 @@ def apply_deterministic_best_take_authority(draft, *, swap_enabled: bool = False
         "swap_enabled": swap_enabled,
         "moves": moves,
     }
+
+    # D-122 (advisory/diagnostics only): a `deterministic_clear_retry_
+    # family_winner` move proves this authority actually changed a
+    # group's bucket assignment relative to whatever `_semantic_best_
+    # take` decided upstream (`move()` is a no-op when the bucket was
+    # already correct) -- the second, independent override path D-121
+    # Section 5 identified. Annotate ONLY those groups' existing
+    # `take_judge_groups` diagnostics rows (built additively by
+    # pipeline.py) so `winner_path` reflects the real final path;
+    # every other group's row is left byte-identical. This never reads
+    # or changes `ranked`/`selected`/membership -- it only overwrites
+    # two diagnostic fields on rows this same function's own `moves`
+    # already proves it changed.
+    overridden_group_ids = {
+        str(m.get("group_id")) for m in moves
+        if m.get("reason") == "deterministic_clear_retry_family_winner" and m.get("group_id") is not None
+    }
+    if overridden_group_ids:
+        existing_groups = list(diagnostics.get("take_judge_groups") or ())
+        patched_groups = []
+        for row in existing_groups:
+            if isinstance(row, dict) and str(row.get("group_id")) in overridden_group_ids:
+                row = {**row, "winner_path": "DETERMINISTIC_OVERRIDE", "performance_consulted_before_winner": True}
+            patched_groups.append(row)
+        diagnostics["take_judge_groups"] = patched_groups
+
     return replace(draft, selected=selected, alternates=alternates, discarded=discarded, diagnostics=diagnostics)

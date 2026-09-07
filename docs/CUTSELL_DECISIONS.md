@@ -15265,3 +15265,140 @@ observability (Section 17) FIRST, behind a diagnostics-only/advisory
 wiring exactly like Watch+Listen's `advisory_v1` doctrine, before any
 scoring or veto logic is touched -- so the double-counting question can be
 inspected on real evidence before it is resolved in code.
+
+## D-122 -- BestTake CASE B performance-evidence projection: advisory,
+diagnostics-only implementation of D-121's evidence-infrastructure
+recommendation. New `case_b_performance_evidence.py` re-projects D-115's
+DELIVERY-zone events per competitor with MediaSignals/D-097 provenance
+mapping; `pipeline.py`/`deterministic_best_take_authority.py` expose the
+D-121-confirmed `single_semantic_winner` bypass as `winner_path`/
+`performance_consulted_before_winner` on the existing `take_judge_groups`
+diagnostics row. NO scoring, ranking, winner, membership, grouping, or
+Boundary behavior changed -- proven by 41 new targeted tests, 276 bounded-
+regression tests, and a full offline suite showing zero new failures.
+
+**Implementation, exactly per this task's strict scope:**
+
+1. **`cutsell_worker/case_b_performance_evidence.py` (new).** Re-projects
+   D-115's `positioned_performance_evidence.build_positioned_performance_
+   evidence` output, filtered to `zone == DELIVERY` (D-115's own canonical
+   classification -- ENTRY/EXIT-only events, D-116's territory, are never
+   included; a straddling event that also touches ENTRY/EXIT is included,
+   flagged `straddle=True`, since D-115 classifies any overlap as
+   DELIVERY). Scoped to exactly the four D-114 local-performance kinds
+   named in this task (`camera_disengagement_candidate`, `facial_
+   expression_shift_candidate`, `body_reset_candidate`, `hand_motion_
+   reset_candidate`) -- `audio_silence_interval`, which D-115's general
+   evidence includes, is explicitly excluded from CASE B. Per-event fields:
+   `kind, start, end, confidence, duration, evidence_source, straddle`.
+   Factual, non-weighted aggregates only: `delivery_event_count,
+   delivery_event_duration_total, count_by_kind, duration_by_kind,
+   delivery_span_duration, event_density` (duration/span -- no threshold).
+   No GOOD/BAD/PASS/FAIL, no score, no weight.
+
+2. **Double-counting/provenance mapping (D-121 Section 9, now
+   inspectable).** `MEDIASIGNALS_PROVENANCE` is a static, code-derived
+   table read directly off `local_performance.py::apply_local_performance_
+   to_takes`'s own `body_n`/`face_n`/`disengage_n` bucket assignment:
+   `body_reset_candidate`/`hand_motion_reset_candidate` -> `(visual_fumble,
+   gesture_naturalness)`; `facial_expression_shift_candidate` ->
+   `(visual_fumble, expression_naturalness)`; `camera_disengagement_
+   candidate` -> `(distraction_risk,)`. Every CASE B event row carries its
+   own `mediasignal_fields`. D-097's own overlap is computed per-event, per-
+   take, by calling `take_judge.py`'s real private helpers directly
+   (`_interior_events`, `_RESET_KINDS`, `_BREAK_KINDS`, `_CLEANLINESS_EDGE_
+   MARGIN_SEC`) -- never a re-typed copy of its 0.35s margin or 0.88/0.76
+   confidence floors, so this can never silently drift from D-097's real
+   behavior. Each row exposes `d097_geometrically_inside`, `d097_meets_
+   confidence_floor`, `d097_would_be_counted` (the AND of the two) --
+   making the D-097-interior-window-vs-D-115-DELIVERY-span disagreement
+   directly visible per event, as this task required.
+
+3. **`pipeline.py` (additive only).** New helpers `_winner_path_from_
+   reason` and `_single_semantic_winner_candidate` classify/re-derive
+   values `_semantic_best_take` already computes, without changing that
+   function's signature, control flow, or return value: `single_semantic_
+   winner` -> `SEMANTIC_FAST_PATH` (`performance_consulted=False`,
+   confirming D-121's bypass finding in diagnostics form); `delivery_tie_
+   break_among_survivors`/`local_fallback` -> `DELIVERYSCORE_PATH`
+   (`performance_consulted=True`); every meaning/safety-driven reason ->
+   `OTHER_EXISTING_PATH`. The per-family `judge_group_diagnostics` row
+   (already existing, `diagnostics["take_judge_groups"]`) gains five new
+   keys ONLY: `winner_path, performance_consulted_before_winner,
+   deliveryscore_top_candidate (= local_selected_clip_id, an explicit
+   alias), semantic_fast_path_candidate, case_b_evidence` (per-member CASE
+   B diagnostics, keyed by clip_id). Nothing computed above these lines
+   was touched.
+
+4. **`deterministic_best_take_authority.py` (additive only).** After
+   `moves` is computed (unchanged), any group with a real `deterministic_
+   clear_retry_family_winner` move (proof, via `move()`'s own no-op-on-
+   unchanged-bucket rule, that this authority ACTUALLY changed something
+   -- D-121's second, independent override path) has its `take_judge_
+   groups` diagnostics row's `winner_path`/`performance_consulted_before_
+   winner` overwritten to `DETERMINISTIC_OVERRIDE`/`True`. Every other
+   group's row is left byte-identical. `moves`/selection logic itself is
+   completely untouched.
+
+**Pimples-shaped fixtures (CASE 1-6), all passing, all asserting the
+existing decision is UNCHANGED:** CASE 1 (semantic winner A, DeliveryScorer
+winner B, A has more DELIVERY reset evidence -> `_semantic_best_take`
+still returns A via the unmodified `single_semantic_winner` fast path;
+CASE B evidence shows the conflict without resolving it -- this is the
+exact D-118 pimples shape); CASE 2 (semantic winner also cleanest -> no
+conflict, no change); CASE 3 (cleaner CASE B evidence but `complete_
+idea=False` -> the existing D-082 meaning-sufficiency ladder still wins,
+unaffected); CASE 4 (same event's `mediasignal_fields` visible); CASE 5
+(a DELIVERY event geometrically outside D-097's narrower margin ->
+`d097_geometrically_inside=False`, visible); CASE 6 (a DELIVERY event
+counted by both -> both flags `True`, visible).
+
+**Offline qualification:**
+- 41 new targeted tests (`tests/test_cutsell_d122_case_b_performance_
+  evidence.py`): module-level projection/exclusion/aggregate correctness,
+  provenance mapping, D-097-vs-D-115 disagreement, `winner_path`
+  classification, no-behavior-change proofs (`_semantic_best_take`,
+  `rank_takes`/`score_take`, `apply_post_freeze_boundary_pass` byte-
+  identical before/after CASE B computation), static no-provider-call and
+  no-render-plan-coupling checks, the pimples-shaped CASE 1-6 fixtures,
+  and the `DETERMINISTIC_OVERRIDE` annotation. All 41 pass.
+- 276 bounded-regression tests (D-115, D-116, every D-097 file, D-082,
+  D-058 Phase 2, both `clean_worker` pipeline suites) -- all pass,
+  unchanged.
+- `python3 -m compileall cutsell_worker tests` -- clean.
+- Full offline suite (`pytest tests/`, `--continue-on-collection-errors
+  --ignore=tests/test_cutsell_live_render_qc.py`): **5 failed, 3074
+  passed, 1 error, 13 subtests passed in 96.04s** -- the SAME 5 pre-
+  existing failures (`test_hybrid_story_guard_incomplete_retry.py`'s one
+  case, and `test_video00_modal_hybrid_semantic_parity.py`'s four cases)
+  already documented as the established baseline earlier this session,
+  byte-identical, zero new failures. The 1 collection error
+  (`tests/test_semantic_stitch.py`) is a stale, unrelated, pre-existing
+  file importing from a DIFFERENT top-level `worker` package (not
+  `cutsell_worker`), last touched in an unrelated commit long before this
+  session -- confirmed by `git log`/`git status` to be completely outside
+  this task's diff. `tests/test_cutsell_live_render_qc.py` was excluded
+  after isolating it as a genuine, reproducible HANG (an open outbound
+  socket file descriptor observed on the blocked process, `futex_do_wait`)
+  in this sandbox -- confirmed pre-existing and unrelated by `git log`/
+  `git status` (neither the test file nor `live_render_qc.py` appear in
+  this task's diff) and by bisecting every other test file in the suite
+  individually with a timeout, isolating this one file as the sole hang.
+
+**No engine, threshold, weight, or scoring behavior changed.** `take_
+judge.score_take`, `rank_takes`, `apply_delivery_cleanliness_evidence`,
+`_semantic_best_take`'s decision logic, `deterministic_best_take_
+authority`'s `moves`/selection logic, `positioned_performance_evidence.py`,
+`local_performance.py`, and `boundary_engine_pass.py` are byte-identical
+to HEAD `5fb4b96`. No new threshold, weight, confidence cutoff, or winner-
+margin was introduced (confirmed: `case_b_performance_evidence.py`
+contains no numeric literal used as a decision threshold of its own --
+the only numeric constants it reads, `0.35`/`0.88`/`0.76`, are D-097's own,
+imported and reused, never re-typed). No provider call (confirmed by a
+dedicated static test). No RAW. No Modal/RunPod execution.
+
+**HUMAN ACTION REQUIRED:** YES (condition A, product decision) -- whether
+to proceed from this evidence-infrastructure layer to an actual CASE B
+scoring/veto implementation (and, if so, how to resolve the double-
+counting question this layer now makes inspectable) remains the Product
+Owner decision D-121 identified; not made here.
