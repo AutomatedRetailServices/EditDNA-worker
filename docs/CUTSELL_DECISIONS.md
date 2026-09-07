@@ -14517,3 +14517,134 @@ UI/Figma work was performed.
 wiring this evidence into BoundaryEngine (CASE A trims) or BestTake/
 DeliveryScorer (CASE B penalties) is a separate, not-yet-made product/
 architecture decision; this task explicitly stops short of both.
+
+## D-116 -- Boundary consumes the D-115 canonical position-aware evidence,
+CASE A only (bounded implementation, no membership/BestTake change, no
+RAW)
+
+**BoundaryEngine is the first real consumer, CASE A only.**
+`boundary_engine_pass.tighten_selected_visual_edges` calls D-115's own
+`compute_delivery_span`/`classify_event_zone` (the latter renamed public
+from `_classify_event`, behavior unchanged) directly on each selected
+`DraftClip`'s own words/events -- it never recomputes delivery start/end,
+ENTRY/DELIVERY/EXIT, or "event overlap" itself, per D-115/D-116's shared-
+temporal-authority rule. Consumes exactly D-114's four proven local-
+performance event kinds (`camera_disengagement_candidate`, `facial_
+expression_shift_candidate`, `body_reset_candidate`, `hand_motion_reset_
+candidate`); `audio_silence_interval` remains governed entirely by the
+existing, untouched `tighten_selected_audio_edges`.
+
+**CASE A only, both directions.** ENTRY: a real, positioned event
+classified ENTRY (entirely before the measured DELIVERY span) that touches
+the clip's own current leading edge (within the existing `AUDIO_EDGE_
+OVERLAP_TOLERANCE_SEC` tolerance, reused not reinvented) tightens `start`
+up to `min(event.end, delivery_span.start)` -- never past the measured
+first spoken word. EXIT is the mirror: `end` tightens down to
+`max(event.start, delivery_span.end)`. Multiple contiguous events on the
+same edge chain correctly (each processed outermost-in against the
+already-tightened running boundary from this same call), giving one
+deterministic tightest-safe result regardless of event count.
+
+**DELIVERY-zone events, including any straddle, are never trimmed.** D-115
+already classifies ANY overlap with the delivery span as DELIVERY (its own
+documented semantics: "DELIVERY = event overlaps DELIVERY"), so a
+straddling event is DELIVERY-zone by construction here too -- no separate
+straddle-handling branch was added. The current Boundary representation
+has no mechanism to trim exactly to `delivery_span.start`/`.end` without
+inventing a new trim shape (cutting to a floor distinct from the event's
+own boundary), so per this task's own "do not invent a heuristic"
+instruction such an event is preserved and recorded diagnostically
+(`visual_event_overlaps_delivery_no_trim`) -- reserved for a future,
+separately-authorized BestTake/DeliveryScorer CASE B consumer.
+
+**Edge-tightening only, never a split.** An ENTRY/EXIT-zone event that
+does not reach the clip's current edge within the reused tolerance is left
+untouched (`visual_event_not_at_edge`) -- D-116 never carves a hole out of
+an interior event. A candidate with no word envelope gets no visual trim
+at all (`visual_trim_unavailable`) -- D-115 never fabricates a delivery
+span, so there is no safety floor to trim against.
+
+**No new timing constants.** Reuses this module's own pre-existing
+`AUDIO_EDGE_OVERLAP_TOLERANCE_SEC` (edge-touch tolerance) and `AUDIO_EDGE_
+MINIMUM_REMAINING_SEC` (per-clip floor) invariants verbatim. No pad is
+added past a visual event's own boundary (unlike audio's natural-pause
+pad) -- the event's own start/end is the evidence, clamped only by the
+measured DELIVERY floor. No motion/face/gesture/eye-contact/retry/
+sequence-identity/coverage threshold touched; no fixed entry/exit duration
+introduced.
+
+**One pass, sequential composition, not competing passes.** `tighten_
+selected_visual_edges` runs LAST inside the same `apply_post_freeze_
+boundary_pass`, on whatever `tighten_selected_audio_edges` already left --
+audio and visual evidence combine through this one existing Boundary
+contract exactly as the edge-trim -> interior-split -> audio-tighten
+sequence already composes today. No second BoundaryEngine pass was added.
+
+**No membership, no BestTake, no render-plan-authority change.** Selection
+membership, order, and the frozen token stream are unchanged (only
+`start`/`end` may tighten, monotonically -- never extend, never reveal
+unselected source, never reorder/insert/delete/replace a clip). `take_
+judge.score_take`/`rank_takes` are untouched files, confirmed byte-
+identical before/after a Boundary run in the regression suite.
+`render_plan.build_render_plan` was not modified; segment membership/order
+is unaffected by construction, and a real Boundary-tightened edge value
+flows through it correctly (a genuine, expected physical change, not a
+membership change).
+
+**Tests (`tests/test_cutsell_d116_visual_boundary_consumption.py`, 19
+tests, generic fixtures -- no Video00 text/ids/timestamps):** EXIT/ENTRY
+edge trims; EXIT/ENTRY floor never crossed; event fully inside DELIVERY,
+crossing the delivery start, and crossing the delivery end all preserved
+(no trim); an ENTRY-zone event not at the edge left untouched (no split);
+multiple contiguous EXIT and ENTRY events chaining to one deterministic
+tightest-safe result; audio-only behavior unchanged when no visual events
+exist; audio+visual coexisting in one pass on the same clip; clip
+membership+order unchanged; Boundary-only-tightens-never-extends; render-
+plan membership unchanged across a Boundary run; a no-words candidate
+producing no unsafe visual trim; a clip carrying only default-scalar
+`MediaSignals` trimming identically to one with none (the visual path
+never reads `MediaSignals`); D-115's own diagnostics function still valid
+after D-116; `score_take`/`rank_takes` byte-identical before/after a
+Boundary run. All 19 pass.
+
+**Bounded regressions, all green:** 151 tests (D-116 + D-115 + D-097-C
+BoundaryEngine + D-097 DeliveryScorer cleanliness evidence + local_
+performance/local-expression take-judge + both attempt-reconstruction
+suites + take-judge provider/hybrid/v2 + perceptual Watch+Listen/CLEAN RAW
+gate + performance_confirmation) plus 123 tests across every render-plan/
+Boundary-adjacent test file (clean-worker audio/caption/export/render,
+D-094.3, D-097.2/.4/.10, live render QC, post-render structural cross-
+check, continuity coalescer, render boundary tightening, universal clean
+cut + live render QC, Video00 RAW trigger coverage, D-097.13 CLEAN RAW
+checkpoint) -- 274 total, zero failures.
+
+**Full offline qualification:** `python3 -m compileall -q cutsell_worker
+benchmarks tests` clean. Full `tests/` run (excluding the pre-existing
+`test_semantic_stitch.py` collection error): **3048 passed, 5 failed** --
+all 5 exactly match the pre-existing documented baseline (unchanged since
+D-108/D-110/D-112/D-113/D-115); zero new failures (3048 = the 3029 D-115
+baseline + exactly the 19 new D-116 tests).
+
+**Files changed:** `cutsell_worker/boundary_engine_pass.py` (new `tighten_
+selected_visual_edges`/`_visual_events_for_clip`/`_visual_row` + wiring
+into `apply_post_freeze_boundary_pass` + docstring/ownership-contract
+update), `cutsell_worker/positioned_performance_evidence.py` (`_classify_
+event` renamed to the public `classify_event_zone`, its one call site
+updated, docstring note on D-116 as first consumer -- no behavior change),
+`tests/test_cutsell_d116_visual_boundary_consumption.py` (new). No other
+`cutsell_worker/*.py` file touched -- `take_judge.py`, `attempt_
+reconstruction.py`, `render_plan.py`, `perceptual_watch_listen.py`,
+`local_performance.py`, `flow_b.py`, and every semantic/retry-authority
+module are byte-identical to HEAD `1279106`.
+
+**No thresholds, no provider, no fallback, no RAW.** No motion/face/
+gesture/eye-contact/retry/sequence-identity/coverage threshold or fixed
+visual trim/padding duration was introduced or modified (the two reused
+constants are pre-existing, unchanged values). No Gemini/VLM/learned-
+classifier/fallback-arbiter call. No RAW, S3, Modal, RunPod, or UI/Figma
+work was performed.
+
+**HUMAN ACTION REQUIRED:** YES (condition A/C) -- authorizing a real
+Video00 RAW to qualify CASE A on real media, and separately whether/when
+to authorize a future BestTake/DeliveryScorer CASE B consumer, are
+Product Owner decisions not made here.

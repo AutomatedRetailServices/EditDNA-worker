@@ -31,6 +31,14 @@ architectural rule). It is EVIDENCE ONLY:
   under `attempt_reconstruction_diagnostics["positioned_performance_
   evidence"]` and never feeds it back into `takes` or `whole_context`).
 
+D-116 (`docs/CUTSELL_DECISIONS.md`) is the first real consumer: `boundary_
+engine_pass.py`'s CASE A visual edge trimming calls `compute_delivery_span`
+and `classify_event_zone` directly on its own selected `DraftClip`s rather
+than recomputing ENTRY/DELIVERY/EXIT itself -- the shared-temporal-
+authority rule this module exists to enforce. D-116 never trims a
+DELIVERY-zone (or any straddling) event; that remains reserved for a
+future, separately-authorized BestTake/DeliveryScorer consumer (CASE B).
+
 Attempt-merge preservation (D-114's second loss point): this module is
 deliberately called AFTER `attempt_reconstruction.reconstruct_delivery_
 attempts` has already produced the final fused attempts. A fused attempt's
@@ -137,14 +145,16 @@ def compute_delivery_span(words: Iterable[Word]) -> DeliverySpan:
                          source=DELIVERY_SPAN_SOURCE_WORD_ENVELOPE)
 
 
-def _classify_event(
+def classify_event_zone(
     event_start: float, event_end: float, delivery_span: DeliverySpan,
 ) -> tuple[str, bool | None, bool | None, bool | None]:
-    """Zone classification. An event that overlaps the delivery span at all
-    is classified DELIVERY (per this task's conceptual semantics: "DELIVERY
-    = event overlaps DELIVERY") even when it also extends into ENTRY or
-    EXIT territory -- `starts_before_delivery`/`ends_after_delivery` record
-    that straddle explicitly rather than losing it to a single zone label."""
+    """The ONE canonical ENTRY/DELIVERY/EXIT zone classification (D-115/
+    D-116's shared temporal authority -- no other module may recompute this
+    itself). An event that overlaps the delivery span at all is classified
+    DELIVERY (per this task's conceptual semantics: "DELIVERY = event
+    overlaps DELIVERY") even when it also extends into ENTRY or EXIT
+    territory -- `starts_before_delivery`/`ends_after_delivery` record that
+    straddle explicitly rather than losing it to a single zone label."""
     if not delivery_span.available:
         return ZONE_UNKNOWN, None, None, None
     d_start = float(delivery_span.start)  # type: ignore[arg-type]
@@ -196,7 +206,7 @@ def build_positioned_performance_evidence(
             continue
         if not (event.end > candidate.start and event.start < candidate.end):
             continue
-        zone, overlaps, before, after = _classify_event(event.start, event.end, delivery_span)
+        zone, overlaps, before, after = classify_event_zone(event.start, event.end, delivery_span)
         positioned.append(PositionedEvent(
             kind=kind,
             start=float(event.start),
