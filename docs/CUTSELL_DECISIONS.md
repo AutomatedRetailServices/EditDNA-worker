@@ -13349,3 +13349,199 @@ equivalence evidence) with an OPEN, correctly-visible, non-blocking
 editorial-parity mismatch -- whether to pursue closing that parity gap
 (i.e. make CutSell prefer the reference's literal wording) is a separate,
 lower-priority product decision, not a P0.
+
+## D-107 -- Multimodal BestTake v1 / non-destructive editing doctrine / pimples visual-exit forensic (canon evolution + bounded investigation, NO engine behavior change)
+
+Product Owner directive: formalize the Multimodal BestTake doctrine and a
+non-destructive editing doctrine in D-098 (minimal update, Section 9);
+audit which `MediaSignals` fields are real vs default; forensically
+investigate Candidate C's visual-exit behavior in the pimples family
+(`tg_edb72c9305a16337b5`) using only already-persisted RAW evidence (no
+new RAW); determine Candidates A/B's relationship from RAW-derived
+evidence only; implement a "Safe Multimodal BestTake v1" ONLY if the
+evidence justifies it. Explicitly overrides D-091 continuity for this
+task; explicitly forbids reopening papillary (D-105/D-106 already closed
+it) or any general symmetric-exclusion mechanism (D-105's reverted
+precedent). Branch `feature/runpod-pod-on-demand`, HEAD `5b9911c`,
+verified clean at start.
+
+**Canon update:** `docs/CUTSELL_CANONICAL_ENGINE_ARCHITECTURE_D098.md`
+Section 9 (new) names, without changing any layer/status/authority:
+immutable source-media + PRESELECTED/NOT_PRESELECTED + source-range
+handles (non-destructive editing doctrine, future editor surface
+explicitly out of scope); the 5-tier BestTake priority order (meaning
+sufficiency > take usability > multimodal performance quality >
+editability/boundary quality > narrative/energy fit); DELIVERY_ENERGY_FIT
+(fit, not maximization) and PERFORMANCE_CONTINUITY as named but
+currently-unimplemented tier-3 concepts; ENTRY/DELIVERY/EXIT_QUALITY as a
+named but currently-unimplemented sub-take localization; the CASE A
+(post-delivery edge -> BoundaryEngine) / CASE B (delivery-overlapping ->
+BestTakeResolver) / CASE C (both, recorded independently, no silent
+compensation) visual-defect-ownership taxonomy; and a restated (not new)
+BestTake-owns-take-quality / Boundary-owns-edge-defects / Watch+Listen-
+verifies-and-routes authority statement.
+
+**Signal audit (real vs default `MediaSignals`, confirmed by direct code
+read of `local_performance.py`/`contracts.py`/`brain_runtime.py`, matching
+and extending `docs/CUTSELL_PERCEPTION_UNDERSTANDING_DATAFLOW_MAP.md`
+Section 4 item 2):**
+
+| `MediaSignals` field | Real or default on every live run? | Producer | Granularity |
+|---|---|---|---|
+| `face_visibility` | REAL | `local_performance.apply_local_performance_to_takes` | whole-clip aggregate |
+| `eye_contact` | REAL | same | whole-clip aggregate |
+| `motion_stability` | REAL | same | whole-clip aggregate |
+| `visual_fumble` | REAL | same | whole-clip aggregate |
+| `expression_naturalness` | REAL | same | whole-clip aggregate |
+| `gesture_naturalness` | REAL | same | whole-clip aggregate |
+| `distraction_risk` | REAL | same | whole-clip aggregate |
+| `audio_quality` | DEFAULT (0.5), always | `visual_analysis.apply_visual_observations`, never invoked (`brain_runtime.py` hardcodes `visual_provider=None`) | n/a |
+| `framing_quality` | DEFAULT (0.5), always | same never-invoked provider | n/a |
+| `product_visibility` | DEFAULT (0.0), always | same | n/a |
+| `continuity` | DEFAULT (0.5), always | same | n/a |
+| `delivery_energy` | DEFAULT (0.5), always | same | n/a |
+| `silence_ratio` | REAL (separately) | `audio_silence.py` ffmpeg `silencedetect`, merged into `whole_context.sources[].events`, consumed by `take_judge.delivery_cleanliness_evidence` | interior/edge split via a FIXED 0.35 s margin anchored to raw take `start`/`end` -- not a measured speech-end timestamp |
+
+`take_judge.score_take`'s weighted DeliveryScorer formula still weights
+all 12 fields, so ~37% of its weighted terms (`audio_quality`,
+`framing_quality`, `product_visibility`, `continuity`, `delivery_energy`)
+run on a frozen constant on every real run today, not a measurement --
+`docs/CUTSELL_PERCEPTION_UNDERSTANDING_DATAFLOW_MAP.md` Gap 2 already
+named this; this task adds no new fix, per its own no-`classify_claim`/
+no-new-provider scope limit. **No field, real or default, is localized to
+entry/interior/exit of a take anywhere in the codebase.** The only
+existing position-aware split at all is `delivery_cleanliness_evidence`'s
+fixed edge margin described above.
+
+**Pimples visual-exit forensic (Candidate C = `clip_adcd41770c19be740a67`,
+RAW `34077889576`, re-extracted from the job log this task, matching and
+extending D-104's Section 3):**
+
+| Candidate | Text | `local_failure_reasons` (whole-clip aggregate) | Hybrid label (governing) |
+|---|---|---|---|
+| A `clip_ecf64fd4c8a29eceab9e` | "También me salían espinillas, era como un rush, una alergia." | `dense_physical_reset:7`, `visual_fumble:0.85` | alternate, 0.6 (family window) / winner, 0.9 (global merge -- label-instability, see D-097.11/D-104) |
+| B `clip_d0291f191ca0f76bf71f` | "Otro síntoma era que me salían espinillas ... detrás de la oreja y en el cuello. Me salía por temporadas." | `dense_physical_reset:6`, `visual_fumble:0.71` | alternate, 0.7-0.8 |
+| C `clip_adcd41770c19be740a67` (model winner, both references reject) | "También me salían espinillas en esta parte de aquí, detrás de la oreja y todo el cuello, ..." | `dense_physical_reset:7`, **no `visual_fumble` value reported** | winner, 0.9 |
+
+Question A (was "rapid movement near end" measured?): a `dense_physical_
+reset` event COUNT was measured for C (7, matching A's count) -- this is
+real evidence, not absent. But it is a **whole-clip aggregate**, exactly
+like every other populated `MediaSignals` field; no timestamp or
+entry/interior/exit position for any of the 7 counted events is surfaced
+in the persisted diagnostics this task can read. **UNPROVEN**: whether
+those resets concentrate near the clip's end, its start, or its middle
+cannot be determined from any evidence available in this offline session.
+The PO's "rapid movement near end" observation is NOT encoded as true or
+false anywhere in this task's findings -- it remains an unverified
+hypothesis, exactly as the directive required.
+
+Question B (Boundary vs BestTake ownership, per the D-107 CASE A/B/C
+taxonomy): **UNPROVEN**, for the same reason -- ownership under this
+taxonomy turns entirely on WHEN the movement occurred relative to
+required delivery, which requires exactly the entry/interior/exit
+localization confirmed absent above. Assigning CASE A, B, or C to
+Candidate C's exit behavior from available evidence would be inventing
+timing, which this task's own directive explicitly forbids.
+
+The one attempted evidence-recovery step (`mcp__github__get_job_logs` on
+job `101607464633` with `tail_lines=20000`, vs. the previously-saved
+`tail_lines`-default fetch) returned a byte-identical 348,448-byte
+payload to the file already saved from this session's earlier D-104
+investigation -- the tool/API caps the returned window at a fixed size
+regardless of the requested `tail_lines`, and that fixed window does not
+include the `take_judge_groups` JSON block for this family (confirmed:
+`local_selected_clip_id` and `ranked` both occur 0 times in the
+recovered log). **DeliveryScorer's actual numeric preference among A/B/C,
+and whether the single-winner fast path overrode it, remain UNPROVEN --
+not recoverable from this session's available tooling** -- unchanged from
+D-104's own finding, now independently re-confirmed rather than merely
+re-asserted from memory.
+
+**A/B relationship (RAW-derived evidence only, never "references kept
+both" as the basis):** the same log recovery DID surface the family's
+full `semantic_idea_equivalence` record, not previously captured in
+D-104's forensic:
+- B and C received an ACCEPTED equivalence merge at confidence 0.95
+  ("Both describe experiencing pimples mistaken for allergies on the neck
+  and ears.") -- the engine's own arbiter judged B and C to express the
+  SAME idea.
+- A and B were independently blocked from merging by TWO separate guards:
+  `distinct_addition_blocked` (confidence 0.9, "Both discuss acne or
+  rash-like pimples acting as an early symptom") at the equivalence-merge
+  layer, and `content_divergence_blocked` (confidence 0.9, "Both
+  deliveries recount the exact same skin breakout experience and allergy
+  confusion") at the separate grouping-safety-budget layer.
+- A and C were never evaluated as a direct candidate pair anywhere in the
+  recovered diagnostics -- no equivalence evidence exists between them
+  either way.
+
+**Conclusion: A and B are LIKELY_COMPLEMENT (RAW-derived); B and C are
+LIKELY_COMPETE (RAW-derived); A and C are UNCERTAIN (no direct RAW
+evidence).** This independently corroborates (via the engine's own
+arbiter, not via "Cut.ai/Gold kept both") that this family plausibly
+contains TWO distinct ideas (A alone; B/C as two competing realizations
+of a second idea) folded into ONE single-winner retry family --
+consistent with, and now evidentially stronger than, D-104 Section 3.4's
+"family-membership granularity" hypothesis. **Future owner: IdeaClusterer/
+RetryFamilyFormation** (should this family have been split before
+BestTake ever ran), not BestTakeResolver. The separate, still-open
+question of whether C or B should win the B/C sub-competition remains
+BestTakeResolver's domain and remains UNPROVEN per the DeliveryScorer
+recovery gap above. No grouping/clustering code was changed to act on
+this finding -- it is a documented forensic conclusion, not an
+implementation, consistent with D-105's precedent that a plausible
+root-cause shape is not by itself a safe, general implementation.
+
+**PART 4 observability:** `pipeline.py`'s `judge_group_diagnostics`
+(`result["diagnostics"]["take_judge_groups"]`) already contains
+`local_selected_clip_id`, `semantic_preferred_clip_id`,
+`semantic_override_applied`, `semantic_best_take_reason`,
+`semantic_label_source`, `semantic_candidates`, `ranked` (DeliveryScorer
+score + reason per member), `delivery_cleanliness`, and
+`no_usable_realization` -- confirmed already printed verbatim by
+`.github/workflows/cutsell-video00-modal-raw.yml`'s "Print full canonical
+diagnostics" step since commit `9d85c69` (D-043), long predating every
+RAW this session analyzed. **No new observability code was needed or
+added** -- the gap this task found is evidentiary (this session's log-
+retrieval tooling cannot recover that specific block for this specific
+RAW), not architectural. No `cutsell_worker/*.py` file was modified.
+
+**PART 6 decision: Safe Multimodal BestTake v1 NOT implemented (SUCCESS
+B).** The evidence available does not justify implementation, per the
+directive's own explicit conditions:
+- MediaSignals has no entry/interior/exit localization anywhere (Question
+  A/B above) -- any visual-exit-based penalty would necessarily be a
+  single whole-clip-aggregate signal applied to a claim about clip
+  POSITION it cannot support, exactly the "single weak/positionally-blind
+  signal" shape the directive explicitly disallows.
+- DeliveryScorer's real numeric preference among A/B/C is unrecoverable
+  this session, so a v1 gate keyed to "override only when DeliveryScorer
+  disagrees with the model label" cannot be built OR tested against real
+  values from this exact case.
+- D-105's directly-preceding, fully-reverted precedent already proved
+  that a directional signal-fusion mechanism built on the SAME class of
+  deterministic evidence (content-overlap / no-merge signature) is
+  indistinguishable between "genuinely needs an override" and ordinary
+  noise/irrelevance without a new discriminating signal -- the same trap
+  applies here: no new STRONG, FUSED, multi-signal evidence exists to
+  safely gate on.
+- Per the directive's own stated valid outcome: "If the evidence does NOT
+  justify a safe BestTake implementation: implement observability only
+  and STOP. That is a successful result." No `cutsell_worker/*.py` file
+  was modified. No new tests were required (no behavior changed). No
+  regression run was needed beyond re-confirming git status clean.
+
+No RAW/provider/S3/Modal/RunPod/subagent/timer/UI work was performed. No
+D-103 marker expansion, no `classify_claim` change, no papillary work.
+Files changed: `docs/CUTSELL_CANONICAL_ENGINE_ARCHITECTURE_D098.md`
+(Section 9 added) and this entry.
+
+**HUMAN ACTION REQUIRED:** NO to close this bounded investigation.
+Two follow-on decisions are recorded, not authorized here: (1) whether to
+separately authorize splitting the pimples retry family in
+IdeaClusterer/RetryFamilyFormation given the new RAW-derived A/B-
+complement evidence (a grouping-authority change, out of this task's
+scope); (2) whether entry/interior/exit `MediaSignals` localization is
+worth authorizing as new perception work before any future visual-quality
+BestTake gate is attempted -- absent it, any such gate remains unsafe by
+this task's own evidence.

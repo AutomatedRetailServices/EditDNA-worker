@@ -293,3 +293,97 @@ consume it versus which target-layer consumers (L2-L4) do not exist yet.
 This is a read-only investigation candidate, not an implementation, and
 is **not authorized by this document** — it requires separate Product
 Owner authorization before any code is touched.
+
+*Answered by `docs/CUTSELL_PERCEPTION_UNDERSTANDING_DATAFLOW_MAP.md`,
+carried out under that separate authorization; its Section 7 gaps and
+Section 8 recommendation feed D-107 below.*
+
+---
+
+## 9. Non-destructive editing + Multimodal BestTake doctrine (D-107)
+
+Minimal formalization only — no layer is renumbered, no status in
+Section 3's table changes, no new authority is created. This section
+gives names to concepts the Product Owner's D-107 directive introduced so
+future work has a stable vocabulary; it does not itself authorize
+implementing any of them.
+
+**Non-destructive editing doctrine (target, not yet built — no Figma/UI
+work is authorized by naming it here).** Source RAW media is immutable.
+The engine's output is an *edit decision* over source-media ranges, never
+a mutation of the source. Every candidate realization carries a
+**source-range handle** (source asset id + start/end) that survives past
+Selection Freeze. Membership is **PRESELECTED** (currently part of the
+winning edit) or **NOT_PRESELECTED** (excluded from this edit, but never
+deleted, altered, or made unrecoverable) — replacing any framing where
+"discarded" implies destroyed. A future editor surface built on this
+doctrine (extending a clip, switching takes, restoring a NOT_PRESELECTED
+take) is Layer 20 territory (Future Learned Components / roadmap), not
+authorized here.
+
+**Multimodal BestTake doctrine (target ranking philosophy for L6/L16).**
+Among realizations that legitimately compete for the same semantic/
+editorial job AND sufficiently preserve the intended message, BestTake's
+job is to choose the realization with the best overall audience-facing
+delivery — not maximum claims, not longest transcript, not highest
+energy, not an automatic Hybrid-label winner, and not automatically the
+visually-cleanest take if it loses required meaning. Canonical priority
+order, highest first: (1) MEANING/MESSAGE SUFFICIENCY, (2) TAKE
+USABILITY, (3) MULTIMODAL PERFORMANCE QUALITY, (4) EDITABILITY/BOUNDARY
+QUALITY, (5) NARRATIVE/ENERGY FIT. This orders existing authorities
+(Selection/meaning-safety above BestTake's own delivery ranking above
+Boundary's physical execution) — it does not add a new one.
+
+Two new named concepts inside tier (3), both currently **undefined in
+code** (`MediaSignals` has no field for either — see D-107's signal
+audit):
+- **DELIVERY_ENERGY_FIT** — energy should be natural/appropriate to the
+  content, not maximized. This reframes the *existing but always-default*
+  `MediaSignals.delivery_energy` field's intended semantics (see D-098
+  Section 3 Gap 2 / D-107): it is a fit measure, not a "more energy is
+  better" score, whenever a real producer is ever wired for it.
+- **PERFORMANCE_CONTINUITY** — stable body/face across a delivery, no
+  abrupt error-reset behavior ("I messed up" visible recovery), a natural
+  transition into the take's end. Distinct from the existing whole-clip
+  aggregate `visual_fumble`/`motion_stability` fields: continuity is
+  about *where in the clip* instability falls and whether it interrupts
+  the delivery itself, not merely whether instability exists anywhere in
+  the clip.
+
+**ENTRY_QUALITY / DELIVERY_QUALITY / EXIT_QUALITY (target sub-take
+localization — not implemented).** D-107's forensic confirms
+`MediaSignals` and `local_performance.apply_local_performance_to_takes`
+produce **whole-clip aggregates only**; no field anywhere localizes a
+defect to the entry, interior delivery, or exit of a take. The only
+existing entry/interior/exit split in the codebase is
+`take_judge.delivery_cleanliness_evidence`'s fixed 0.35 s edge margin —
+anchored to the take's raw `start`/`end`, not to a measured speech-end
+timestamp. These three names give the target concept a vocabulary; they
+require new perception work (Layer 1/2) to populate and are not
+authorized by this document.
+
+**Visual-defect ownership (clarifies, does not change, Section 4's
+existing upstream/downstream split).**
+- **CASE A — post-delivery edge defect** (e.g. a speaker breaks character
+  strictly *after* a clean, complete delivery): owned by **BoundaryEngine**
+  (Layer 7) — trim the edge; never lower the take's overall BestTake rank
+  for a defect outside the delivery itself.
+- **CASE B — delivery-overlapping defect** (e.g. a fumble *while*
+  speaking the required content): owned by **BestTakeResolver /
+  DeliveryScorer** (Layer 6) — the take becomes less usable as a whole
+  realization of that idea.
+- **CASE C — both present**: recorded independently by each owning
+  authority. Neither authority silently compensates for the other's
+  finding.
+
+**Authority statement (restates, does not change, Section 4).** BestTake
+owns take-level (whole-realization) quality. BoundaryEngine owns
+edge-level physical-cut defects. Perceptual Watch+Listen verifies the
+*rendered* result and routes findings to whichever of the two owns the
+defect class — it never edits selection or boundaries itself.
+
+No change to Section 2's 20 layers, Section 3's status table, or any
+accepted D-096/D-097.x authority contract. See `docs/CUTSELL_DECISIONS.md`
+D-107 for the empirical pimples-family forensic and signal audit that
+motivated naming these concepts now, and for why no BestTake selection
+code was changed to implement them in this task.
