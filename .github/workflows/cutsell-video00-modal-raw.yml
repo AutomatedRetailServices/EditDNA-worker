@@ -479,9 +479,45 @@ jobs:
           echo "--- D-095.2 audio dead-air evidence + interior-gap trimmer (splits / rejections) ---"
           jq '{audio_silence: (.stage_status.audio_silence // "absent"), interior_gap_splits: (.diagnostics.post_selection_interior_gap_trim // []), interior_gap_audio_rejections: [(.diagnostics.post_selection_interior_gap_trace // [])[] | select(.evidence_mode == "long_audio_silence")]}' artifact/video00-modal.json
           echo "--- D-097: post-Freeze BoundaryEngine pass, polarity rejoins, renderer trailing trims, dead-air reconciliation, story completeness ---"
-          jq '{boundary_engine_pass: (.diagnostics.boundary_engine_pass // "absent" | if type=="object" then del(.ownership_contract) else . end), take_segmentation: (.stage_status.take_segmentation // "absent"), story_completeness: (.stage_status.story_completeness // "absent"), no_usable_realization_family_ids: (.stage_status.no_usable_realization_family_ids // []), last_attempt: ((.live_render_qc.attempts // [])[-1] // "absent" | if type=="object" then {status, renderer_trailing_trims, dead_air_reconciliation} else . end)}' artifact/video00-modal.json | head -c 30000
+          # D-117 (docs/CUTSELL_DECISIONS.md): this object grew past the old
+          # inline `| head -c 30000` cap once D-116 added a per-event
+          # visual_edge_rows array -- RAW 34150026795 confirmed live that the
+          # pipe's `head` consumer exits the moment it has read 30000 bytes,
+          # SIGPIPEing jq while it is still writing, which aborted this WHOLE
+          # step under `set -o pipefail` and silently lost every diagnostics
+          # section printed after this one (visual_entry_trim_count,
+          # visual_exit_trim_count, perceptual Watch+Listen, take_judge_groups,
+          # canonical_edit_plan, the final KEEP sequence, live_render_qc, ...).
+          # Fix (workflow-only, no engine change): write the FULL object to an
+          # artifact file first -- picked up whole, never truncated, by
+          # "Upload Video00 Modal diagnostic artifact" below -- then preview
+          # it with `head -c` reading FROM THAT FILE. A file has no live
+          # writer for `head` to SIGPIPE, so this exact failure mode cannot
+          # recur here, and the explicit derived counts below survive
+          # regardless of how large the object or how short the preview is.
+          jq '{boundary_engine_pass: (.diagnostics.boundary_engine_pass // "absent" | if type=="object" then del(.ownership_contract) else . end), take_segmentation: (.stage_status.take_segmentation // "absent"), story_completeness: (.stage_status.story_completeness // "absent"), no_usable_realization_family_ids: (.stage_status.no_usable_realization_family_ids // []), last_attempt: ((.live_render_qc.attempts // [])[-1] // "absent" | if type=="object" then {status, renderer_trailing_trims, dead_air_reconciliation} else . end)}' artifact/video00-modal.json > artifact/video00-modal-boundary-engine-pass.json
+          echo "full object ($(wc -c < artifact/video00-modal-boundary-engine-pass.json) bytes) preserved whole in the uploaded diagnostic artifact: video00-modal-boundary-engine-pass.json"
+          echo "--- boundary_engine_pass derived counts (D-116 visual + pre-existing audio/edge/interior; survive regardless of preview truncation) ---"
+          jq '.boundary_engine_pass | if type=="object" then {
+              schema_version, stage, selected_count_in, selected_count_out,
+              edge_trim_count, interior_split_count, interior_reject_count,
+              audio_entry_trim_count, audio_exit_trim_count,
+              audio_edge_row_count: (.audio_edge_rows // [] | length),
+              visual_entry_trim_count, visual_exit_trim_count,
+              visual_edge_row_count: (.visual_edge_rows // [] | length)
+            } else {status: "absent"} end' artifact/video00-modal-boundary-engine-pass.json
+          echo "--- boundary_engine_pass preview (first 30000 bytes of the full file above; never the source of a step failure) ---"
+          head -c 30000 artifact/video00-modal-boundary-engine-pass.json; echo
           echo "--- D-097 §4 perceptual System Watch+Listen (advisory_v1; never auto-PASS) ---"
-          jq '.perceptual_watch_listen // "absent" | if type=="object" then {status, gate_mode, artifact_kind, technical_qc_status, capability_status_counts, routing, capabilities:[.capabilities[]? | {capability, status, method, finding_count:(.findings|length), findings:[.findings[]? | {kind, start, end, severity, routes_to, detail}], note}]} else . end' artifact/video00-modal.json | head -c 30000
+          # D-117: same file-then-preview fix as boundary_engine_pass above --
+          # this object's own findings/capabilities list can also exceed the
+          # old inline cap and was equally exposed to the identical SIGPIPE.
+          jq '.perceptual_watch_listen // "absent" | if type=="object" then {status, gate_mode, artifact_kind, technical_qc_status, capability_status_counts, routing, capabilities:[.capabilities[]? | {capability, status, method, finding_count:(.findings|length), findings:[.findings[]? | {kind, start, end, severity, routes_to, detail}], note}]} else . end' artifact/video00-modal.json > artifact/video00-modal-perceptual-watch-listen.json
+          echo "full object ($(wc -c < artifact/video00-modal-perceptual-watch-listen.json) bytes) preserved whole in the uploaded diagnostic artifact: video00-modal-perceptual-watch-listen.json"
+          echo "--- perceptual Watch+Listen summary (survives regardless of preview truncation) ---"
+          jq 'if type=="object" then {status, gate_mode, artifact_kind, technical_qc_status, capability_status_counts, routing} else . end' artifact/video00-modal-perceptual-watch-listen.json
+          echo "--- perceptual Watch+Listen preview (first 30000 bytes of the full file above; never the source of a step failure) ---"
+          head -c 30000 artifact/video00-modal-perceptual-watch-listen.json; echo
           echo "--- D-097 CLEAN RAW gate (result only; the CPU ladder workflow adds the four-way regions) ---"
           python benchmarks/clean_raw_gate.py --engine-json artifact/video00-modal.json || true
           echo "--- diagnostics.take_judge_groups (retry families + DeliveryScorer scores) ---"

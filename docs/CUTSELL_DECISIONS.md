@@ -14648,3 +14648,93 @@ work was performed.
 Video00 RAW to qualify CASE A on real media, and separately whether/when
 to authorize a future BestTake/DeliveryScorer CASE B consumer, are
 Product Owner decisions not made here.
+
+## D-117 -- Modal RAW workflow diagnostic-print observability fix: file-
+then-preview replaces the SIGPIPE-fragile `head -c 30000` pipe (workflow-
+only, no engine change, no RAW)
+
+**Root cause, confirmed by direct A/B comparison.** RAW 34150026795's
+(D-116 qualification) "Print full canonical diagnostics" step aborted
+(exit code 2) mid-way through printing `diagnostics.boundary_engine_pass`,
+losing `visual_entry_trim_count`, `visual_exit_trim_count`, the remainder
+of `visual_edge_rows`, the entire perceptual Watch+Listen section, and
+every diagnostics section printed after it in that step (`take_judge_
+groups`, `canonical_edit_plan`, the final KEEP sequence, `live_render_qc`,
+...). Root cause: `jq '{...boundary_engine_pass...}' artifact/video00-
+modal.json | head -c 30000` -- once D-116 added a per-event `visual_edge_
+rows` array, this object's serialized size exceeded 30000 bytes for the
+first time; `head -c 30000` exits the instant it has read that many bytes,
+closing its stdin pipe while `jq` is still writing, SIGPIPE-killing `jq`,
+and `set -o pipefail` propagates that failure to the whole step. Confirmed
+NOT present on the pre-D-116 baseline run (34143240479): the identical
+step succeeded there with an identical script, because `boundary_engine_
+pass` was small enough (audio-only evidence) to stay under the cap. This
+is a CI-observability defect introduced by D-116's own diagnostic volume
+growth, not a D-116 engine correctness defect -- D-116's real-media
+qualification result (D-116's own decision entry) already stands
+independently of this fix.
+
+**Fix: write-then-preview-from-file, not a wider cap or a blanket
+`|| true`.** Both vulnerable lines (`boundary_engine_pass` and the
+`perceptual_watch_listen` object, which shares the identical shape/risk)
+now: (1) write the FULL `jq` projection to a new artifact file
+(`artifact/video00-modal-boundary-engine-pass.json`, `artifact/video00-
+modal-perceptual-watch-listen.json`) via `>` redirection -- never
+truncated, and picked up whole by the existing "Upload Video00 Modal
+diagnostic artifact" step's `path: artifact/` glob, no new upload step
+needed; (2) print an explicit derived-counts summary read from that file
+(`visual_entry_trim_count`, `visual_exit_trim_count`, `visual_edge_row_
+count`, `audio_edge_row_count`, plus the pre-existing scalar counts, and
+the Watch+Listen `status`/`gate_mode`/`capability_status_counts`/
+`routing` summary) -- small, never near the cap, so these survive
+regardless of anything else; (3) print a `head -c 30000` PREVIEW reading
+FROM THAT FILE, not from a live pipe. A file has no writer process for
+`head` to SIGPIPE, so this exact failure mode cannot recur at these two
+sites structurally, not just probabilistically. `set -euo pipefail`
+remains active for the whole step -- a genuinely broken `jq` filter
+elsewhere still fails loudly, per this task's explicit "do not blanket
+`|| true`" instruction; only the two vulnerable pipe shapes were changed,
+and changed by removing the hazard rather than masking it.
+
+**Verified by simulation (no paid RAW).** A synthetic `video00-modal.json`
+fixture (117 KB) shaped exactly like the real diagnostics -- 200 synthetic
+`visual_edge_rows` entries, `visual_entry_trim_count`/`visual_exit_trim_
+count` present, a `perceptual_watch_listen.capabilities[].findings` array
+padded past the cap -- was run through the exact extracted step script.
+Result: exit code 0 (previously would have been exit code 2 on the
+un-fixed script at this payload size); the full `artifact/video00-modal-
+boundary-engine-pass.json` file contained all 200 rows verified via
+`len(...) == 200`; the derived-counts summary printed `visual_entry_trim_
+count: 2`, `visual_exit_trim_count: 1`, `visual_edge_row_count: 200`
+correctly; every later `echo`/`jq` line in the step (through the final
+`live_render_qc` print) executed and printed its own output -- nothing
+after the fixed lines was lost. `python3 -c "import yaml; yaml.safe_load(...)"`
+confirms the workflow YAML parses; `bash -n` confirms the extracted step
+script has valid shell syntax.
+
+**Files changed:** `.github/workflows/cutsell-video00-modal-raw.yml`
+only (+38/−2 lines, both inside the "Print full canonical diagnostics"
+step). No `cutsell_worker/*.py` file touched -- `boundary_engine_pass.py`,
+`positioned_performance_evidence.py`, `flow_b.py`, and every BestTake/
+DeliveryScorer/AttemptReconstructor/Watch+Listen/Renderer module are
+byte-identical to HEAD `9c7ca32`. No test file changed (this is a
+workflow-only, offline-validated fix; no `cutsell_worker` behavior exists
+to add a `tests/` regression for).
+
+**No engine, threshold, provider, or infra change.** D-116's Boundary
+CASE A behavior (membership/order/DELIVERY-safety) is unchanged --
+verified by the fact that nothing under `cutsell_worker/` was edited. No
+threshold, no fallback, no provider call, no Modal/RunPod execution
+setting changed. No RAW was launched to produce or validate this fix.
+
+**Real D-116 requalification still pending.** This fix makes a FUTURE RAW's
+diagnostics fully recoverable (full `visual_edge_rows`, both trim counts,
+and every later section); it does not itself re-run or re-prove D-116's
+real-media behavior. D-116's own qualification verdict (B -- PARTIALLY
+REAL-MEDIA PROVEN, per its decision entry) stands unchanged until a
+separately-authorized future RAW is run against this fixed workflow.
+
+**HUMAN ACTION REQUIRED:** YES (condition C) -- authorizing a future
+Video00 RAW to obtain a complete D-116 accounting (full visual_edge_rows,
+confirmed ENTRY/EXIT trim counts) under this fixed workflow is a Product
+Owner paid-compute decision, not made here.
