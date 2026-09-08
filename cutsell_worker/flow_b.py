@@ -484,6 +484,7 @@ def process_local_sources(
         performance_confirmation_diagnostics=confirmation_diagnostics,
         semantic_equivalence_arbiter=semantic_equivalence_arbiter,
         boundary_owner=boundary_owner,
+        watch_listen_understandings=watch_listen_understandings,
     )
     notify("draft_ready", 100)
     return replace(

@@ -23536,3 +23536,230 @@ consume the fused evidence in Proposition Identity + Attempt Relationships
 D-158 Phase C, and in what order relative to D-156's still-open sonography-
 ordering/count-drift findings and the still-owed HUMAN WATCH+LISTEN PASS,
 are Product Owner decisions.
+
+## D-158: Upstream Watch+Listen Multimodal Understanding Phase C -- Proposition + Attempt Relation + Family Formation consumption
+
+Per the Product Owner's explicit Phase C authorization. This is the FIRST
+structured editorial CONSUMER of Watch+Listen Understanding V1 (D-157,
+unchanged). Doctrine preserved literally: PERCEPTION PROPOSES EVIDENCE
+(Tracks A-D). UNDERSTANDING FORMS HYPOTHESES (D-157, unchanged).
+STRUCTURED EDITORIAL AUTHORITIES DECIDE (this task, for exactly one narrow
+question). No BestTake/DeliveryScorer change, no RAW, no provider call, no
+Pacing/Boundary change, no fallback activation, no Minimal Composite, no
+iOS work. D-123/D-128/D-138/D-140-D-153 (the semantic-authority thread)/
+D-154/D-155/D-156/D-157 all CLOSED, unchanged.
+
+### New module: `attempt_relationship_authority.py`
+
+The one structured-conflict-resolution authority this task builds. Core
+asymmetric principle, enforced structurally rather than by convention:
+`resolve_final_attempt_relation` can only turn a pre-D-158 `would_merge=
+True` into `False` (WITHHOLD a merge) when real `SUPPORTED`-confidence
+Watch+Listen evidence for that EXACT pair materially disagrees -- it can
+NEVER turn `False` into `True`. A merge Watch+Listen support alone would
+argue for is never created; only a merge Proposition Identity evidence
+(the arbiter's `same_idea` decision, or `take_grouping.py`'s deterministic
+restart-evidence rules -- both unchanged) already decided on can be
+withheld. This is the literal implementation of "do NOT directly set
+family membership from one hypothesis alone."
+
+### Authority order (implemented literally, 7 steps)
+
+1. meaning/safety invariants -- untouched, upstream, never read here.
+2. Proposition Identity evidence -- the caller's own already-decided
+   `would_merge`/`would_merge_source` (unchanged existing rules).
+3. Watch+Listen attempt evidence -- `AttemptRelationHypothesis` tuples for
+   this exact pair (D-157, unchanged; `attempt_relation_hypotheses_for_
+   pair` looks these up, never widens D-157's own adjacent-span scope).
+4. semantic/provider relation evidence -- restated: step 2's own decision
+   IS this input; this module never calls a provider itself.
+5. structured conflict resolution -- `resolve_final_attempt_relation`.
+6. final attempt relationship -- `FinalAttemptRelationship` (relation,
+   would_merge, source, conflict, family_membership_action, reason,
+   watch_listen_relation_evaluated, watch_listen_supported).
+7. family formation -- the caller applies `would_merge`
+   (`reconcile_semantic_idea_equivalence`, unchanged elsewhere); family
+   formation never runs before step 6 resolves.
+
+### Final relation -> family-membership-action mapping (verbatim)
+
+RETRY -> ELIGIBLE_RETRY_FAMILY (merge proceeds); CORRECTION ->
+SEPARATE_CORRECTION; CONTINUATION -> SEPARATE_NOT_COMPETING; COMPLEMENTARY
+-> SEPARATE_NOT_COMPETING; NEW_AUDIENCE_BEAT -> SEPARATE_BEAT;
+DISTINCT_PROPOSITION -> SEPARATE_DISTINCT (handled defensively; D-157
+never actually asserts it above `UNCERTAIN`); UNCERTAIN ->
+ABSTAIN_UNCERTAIN (preserve separate, never a forced merge). Only `RETRY`
+ever yields a merge -- every other final relation withholds one, so this
+collapses cleanly onto the existing boolean union-find API with no change
+to its merge/no-merge machinery.
+
+### Conflict truth table (the actual behavior change this task authorizes)
+
+`would_merge=True` + Watch+Listen agrees `RETRY` -> merge proceeds, no
+conflict. `would_merge=True` + Watch+Listen says `CONTINUATION`/
+`COMPLEMENTARY`/`NEW_AUDIENCE_BEAT`/`CORRECTION`/`DISTINCT_PROPOSITION`
+(SUPPORTED) -> merge WITHHELD, conflict recorded, family-action set per
+the table above. `would_merge=False` + Watch+Listen agrees (not-competing
+relation) -> stays no-merge, no conflict (agreement, not escalated).
+`would_merge=False` + Watch+Listen says `RETRY`/`CORRECTION` (conflict the
+OTHER direction) -> reports `UNCERTAIN`, `ABSTAIN_UNCERTAIN` -- still never
+forces a merge. `WEAK`/`MIXED`/`UNCERTAIN`-only Watch+Listen evidence, or
+none at all -- treated as "no material evidence," fail-open: the pre-D-158
+decision passes through byte-identical, `conflict=False`.
+
+### Fail-open / rollback
+
+`watch_listen_family_evidence_enabled()` (env `CUTSELL_WATCH_LISTEN_
+FAMILY_EVIDENCE_ENABLED`, default **OFF**) is the ONE capability flag, per
+this task's own "do not create a complex flag framework" instruction. OFF
+= pre-D-158 behavior, byte-identical, verified live. ON with no Watch+
+Listen evidence supplied for a pair = also byte-identical (fail-open, not
+an error). ON with real conflicting evidence = the one live behavior
+change: a merge is withheld, never forced.
+
+### Live wiring (not just an isolated module)
+
+`take_grouping_provider.reconcile_semantic_idea_equivalence` gained an
+optional `watch_listen_spans_by_id` parameter; at BOTH of its existing
+merge points (the deterministic-restart-evidence loop and the arbiter-
+confirmed loop) it now consults this authority before committing a union,
+gated on the flag, and records `watch_listen_family_evidence` diagnostics
+in every return path (including the pre-existing early-exit branch this
+task found and fixed -- see below). `pipeline.py`'s `build_flow_b_draft`
+gained `watch_listen_understandings` (default `()`) and builds the span
+index via `build_understanding_span_index` only when the flag is on and
+understandings were supplied, passing it straight through.
+`flow_b.py`'s existing D-157 call site now threads its own already-
+computed `watch_listen_understandings` into `build_flow_b_draft`,
+completing the real production path end-to-end (not merely an unwired
+authority module) -- the flag is default-OFF, so this is a no-op today,
+exactly matching the required rollback contract.
+
+Circular-import note: `attempt_relationship_authority.py` imports
+`watch_listen_understanding.py`, which imports `attempt_reconstruction.
+py`, which imports `session_boundaries.py`, which imports `take_grouping_
+provider.py` for `TakeGroupingProvider` -- a pre-existing structural edge.
+A module-level import of the new authority INTO `take_grouping_provider.
+py` would close that cycle, so it is deferred via a small lazy-import
+helper (`_attempt_relationship_authority()`, called at point-of-use) --
+the standard, minimal fix; no behavior change, no new edge at import
+time. `pipeline.py` and `flow_b.py` sit outside this cycle (verified:
+nothing in the `watch_listen_understanding -> attempt_reconstruction ->
+session_boundaries -> take_grouping_provider` chain ever imports
+`pipeline.py` at module level -- every existing `pipeline` reference from
+that chain is itself a lazy `from . import pipeline` inside a function
+body), so both take the import at the top level.
+
+### Bug found and fixed during this task's own test-writing
+
+The pre-existing `if arbiter is None: if merged_count == 0: return groups,
+{"status": "not_requested", ...}` early-exit branch (predates D-158)
+returned WITHOUT the new `watch_listen_family_evidence` diagnostics --
+meaning a merge this function's own deterministic-restart rule proposed
+and D-158 correctly withheld would have silently vanished from
+observability whenever no arbiter was supplied. Fixed by attaching the
+same tail-safe summary to that return path too; caught by this task's own
+integration test (`test_30_flag_on_conflicting_evidence_blocks_the_merge`)
+before it ever reached production.
+
+### D-150 compatibility (unaffected, verified structurally)
+
+D-158 operates strictly BEFORE any family exists (whether two groups merge
+into one at all); D-150's semantic-authority gate (`family_complete_
+context`/`complete_context_conflict`) operates strictly AFTER a family
+already exists, deciding comparative-winner authority WITHIN it. Disjoint
+state, disjoint call sites -- `attempt_relationship_authority.py` never
+imports `semantic_authority_observability.py` (or any of BestTake/
+DeliveryScorer/Boundary/Renderer/Pacing), and `semantic_authority_
+observability.py` never references this task's new modules, both proven
+by module-leaf source-scan tests.
+
+### D-157's own forbidden-consumer test, updated (not the D-157 decision-
+### log entry itself, which stays unmodified)
+
+D-157 closed with a structural test asserting `pipeline.py` never
+references `watch_listen_understanding` -- true at the time ("read by
+nothing yet"). D-158 is the deliberately authorized supersession of that
+exact assertion: `pipeline.py` is now that first consumer, gated behind
+the default-OFF flag. `tests/test_cutsell_d157_watch_listen_understanding.
+py::test_module_is_not_imported_by_any_editorial_authority` was updated
+(comment explains why; `pipeline.py` removed from its forbidden list) --
+every OTHER authority in that test's list (Family Formation's `take_
+grouping.py`/`hybrid_session_cleanup.py`, D-150's gate, BestTake's `take_
+judge.py`/`claim_coverage_best_take.py`, Boundary's `boundary_engine_
+pass.py`) remains untouched and still asserted forbidden.
+
+### Tests (50 new, exceeding the 32-item requirement)
+
+`tests/test_cutsell_d158_attempt_relationship_authority.py`: the full
+truth table (agreement and conflict in both directions, every relation
+label, WEAK/MIXED/UNCERTAIN-as-no-evidence, missing/`None`/empty-index
+fail-open), span-index build/order-independence/non-adjacent-pair
+handling, deterministic first-SUPPORTED-wins tie-break, tail-safe
+diagnostics counting every bucket, the capability-flag default and
+true/false-like value parsing, SIX live integration tests through the
+REAL `reconcile_semantic_idea_equivalence` call (flag off -> ignored even
+with conflicting evidence supplied; flag on + no evidence -> unchanged;
+flag on + agreement -> merges, `evaluated`; flag on + conflict -> merge
+withheld, `conflict_blocked_count=1`; source ids/timestamps never mutated;
+`watch_listen_spans_by_id=None` under flag-on is a total no-op), plus
+module-leaf structural tests (no provider/network reference, no import of
+any downstream authority, D-150's own module clean, the lazy-import cycle
+fix verified end-to-end, the `pipeline.py` wiring present via source-text
+check since the real function is monkey-patch-wrapped by ~14 pre-existing
+`install_*` chains at package-import time).
+
+### Offline qualification
+
+`python3 -m compileall cutsell_worker tests`: clean. Targeted battery (the
+new D-158 suite + D-157's suite + D-155's two suites + D-150/D-123/D-128 +
+Family Formation grouping suites [`take_grouping`, `hybrid_session_
+cleanup`, `semantic_idea_equivalence_grouping`, `semantic_equivalence_
+candidate_ranking`, D-100, D-097.A] + `AttemptReconstructor` [both files]
++ D-142 pacing + Boundary [D-097.C, D-097.2, D-097.5, `selection_boundary_
+contract`, `final_boundary_authority_refresh`] + the real end-to-end
+media-ingest test): 397 passed, 0 failed.
+Full suite (`pytest tests/`, excluding the one pre-existing `test_
+semantic_stitch.py` collection error, unrelated, present since before
+D-155): 3539 passed, 13 subtests passed, 5 failed -- the SAME 5
+pre-existing, unrelated failures D-155/D-156/D-157 already documented
+(`test_hybrid_story_guard_incomplete_retry.py` +
+`test_video00_modal_hybrid_semantic_parity.py` x4). Delta +50 = exactly
+the new test count. Zero new failures.
+
+### D-098/D-148 architecture compatibility
+
+Parallel Multimodal Perception -> Watch+Listen Multimodal Understanding ->
+Structured Editorial Reasoning (Section 13) remains canonical -- Phase C
+is the first real Structured Editorial Reasoning consumption, exactly
+matching Section 13.3's own design, and grants authority over exactly one
+narrow question (attempt relationship / family-membership-eligibility),
+never comparative-winner authority. Adds no Layer, renumbers nothing,
+reopens no D-096/D-097.x/D-107/D-111/D-123/D-128/D-129/D-141-D-157
+authority contract.
+
+**Scope confirmed:** no BestTake/DeliveryScorer change; no RAW dispatched;
+no provider call; no Pacing/Boundary change; no fallback activation; no
+Minimal Composite implementation; no iOS work; D-150 semantic-authority
+firewall fully intact.
+
+**Phase-C verdict: A -- PROVEN OFFLINE, LIVE-WIRED, DEFAULT-OFF.** The
+authority module, its truth table, and its live wiring through both
+`take_grouping_provider.py` and `pipeline.py`/`flow_b.py` are complete,
+tested (50/50 passing, including 6 live end-to-end integration tests
+through the real production call site), and regression-clean (3539
+passed, same 5 pre-existing unrelated failures, zero new failures) --
+all behind a default-OFF capability flag, so today's live behavior is
+byte-identical to pre-D-158.
+
+**Exact next capability (NOT authorized by this task):** D-159 Phase D --
+BestTake/DeliveryScorer consumption of Watch+Listen evidence, still behind
+explicit structured authority/firewalls -- Product Owner decision, not
+made here.
+
+**HUMAN ACTION REQUIRED:** YES (condition A) -- whether/when to authorize
+D-159 Phase D, whether/when to flip `CUTSELL_WATCH_LISTEN_FAMILY_EVIDENCE_
+ENABLED` on for real-media qualification (a separate RAW-authorization
+decision, condition C), and how to sequence both against D-156's still-
+open sonography-ordering/count-drift findings and the still-owed HUMAN
+WATCH+LISTEN PASS, are Product Owner decisions.

@@ -56,6 +56,21 @@ from .take_grouping_provider import (
     reconcile_semantic_idea_equivalence,
     split_incohesive_retry_groups,
 )
+# D-158: live-wiring the ONLY call site of `reconcile_semantic_idea_
+# equivalence` to the real, already-computed D-157 Watch+Listen
+# Understanding V1 objects (`flow_b.py` builds them; this module just
+# threads them through). Safe as a plain top-level import -- unlike
+# `take_grouping_provider.py`, nothing in this module's own dependency
+# chain (`watch_listen_understanding -> attempt_reconstruction ->
+# session_boundaries -> take_grouping_provider`) ever imports `pipeline.py`
+# back at module load time (every existing `pipeline` reference from that
+# chain's modules is a lazy `from . import pipeline` inside a function
+# body) -- verified via `python3 -c "import cutsell_worker.pipeline"`.
+from .attempt_relationship_authority import (
+    build_understanding_span_index,
+    watch_listen_family_evidence_enabled,
+)
+from .watch_listen_understanding import WatchListenUnderstanding
 from .take_judge import FRAGMENT_PENALTY_MARKERS, apply_delivery_cleanliness_evidence
 from .take_judge_provider import TakeJudgeProvider, safe_rank_takes
 from .case_b_performance_evidence import (
@@ -788,6 +803,7 @@ def build_flow_b_draft(
     performance_confirmation_diagnostics: Iterable[dict] = (),
     semantic_equivalence_arbiter: SemanticEquivalenceArbiter | None = None,
     boundary_owner: str = "pre_freeze",
+    watch_listen_understandings: Iterable[WatchListenUnderstanding] = (),
 ) -> ProcessingResult:
     """Build an editable draft after understanding the complete source context.
 
@@ -949,10 +965,22 @@ def build_flow_b_draft(
     # a weaker lexical link than its existing rules require -- optional and
     # purely additive; see `take_grouping.multimodal_corroborated_retry`.
     confirmed_recording_evidence = confirmed_recording_behavior_events(whole_video_context)
+    # D-158: real Watch+Listen evidence only ever reaches the authority when
+    # the capability flag is ON (default OFF -- pre-D-158 behavior);
+    # `reconcile_semantic_idea_equivalence` itself also gates on the same
+    # flag, so this is belt-and-suspenders, not a second flag definition --
+    # skipping the index build entirely when OFF/empty keeps the OFF path
+    # byte-identical work, not just byte-identical output.
+    watch_listen_spans_by_id = (
+        build_understanding_span_index(watch_listen_understandings)
+        if watch_listen_family_evidence_enabled() and watch_listen_understandings
+        else None
+    )
     semantic_equivalence_groups, semantic_equivalence_diagnostics = reconcile_semantic_idea_equivalence(
         grouping.groups, kept, semantic_equivalence_arbiter,
         protected_ids=composite_split_ids,
         confirmed_recording_evidence=confirmed_recording_evidence,
+        watch_listen_spans_by_id=watch_listen_spans_by_id,
     )
 
     # D-058 Phase 1: one final cohesion-validation pass -- see

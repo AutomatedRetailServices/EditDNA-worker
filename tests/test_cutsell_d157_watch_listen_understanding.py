@@ -491,12 +491,22 @@ def test_module_never_imports_a_downstream_or_upstream_authority():
 
 
 def test_module_is_not_imported_by_any_editorial_authority():
+    # D-158 (Phase C, authorized supersession of this exact assertion,
+    # never rewritten silently): `pipeline.py` is now the deliberate FIRST
+    # structured editorial consumer of this module -- via the D-158
+    # `attempt_relationship_authority.py` bridge, gated behind
+    # `CUTSELL_WATCH_LISTEN_FAMILY_EVIDENCE_ENABLED` (default OFF) -- so it
+    # is intentionally removed from this forbidden list. Every OTHER
+    # authority below (the comparative-winner D-150 gate, BestTake/
+    # DeliveryScorer, Boundary, Renderer) remains untouched, exactly as
+    # D-157's own module docstring required; see
+    # test_cutsell_d158_attempt_relationship_authority.py's own module-leaf
+    # tests for the D-158-side half of this same boundary guarantee.
     import subprocess
     authority_files = [
         "cutsell_worker/take_grouping.py", "cutsell_worker/hybrid_session_cleanup.py",
         "cutsell_worker/semantic_authority_observability.py", "cutsell_worker/take_judge.py",
         "cutsell_worker/claim_coverage_best_take.py", "cutsell_worker/boundary_engine_pass.py",
-        "cutsell_worker/pipeline.py",
     ]
     for path in authority_files:
         try:

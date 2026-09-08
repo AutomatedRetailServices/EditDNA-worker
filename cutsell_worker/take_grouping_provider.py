@@ -28,6 +28,19 @@ from .take_grouping import (
     semantic_key,
 )
 
+
+def _attempt_relationship_authority():
+    """Lazy import (D-158): `attempt_relationship_authority.py` imports
+    `watch_listen_understanding.py`, which imports `attempt_reconstruction.
+    py`, which imports `session_boundaries.py`, which imports THIS module
+    for `TakeGroupingProvider` -- a module-level import here would be a
+    genuine import cycle. Deferring it to call time (Python caches the
+    module after the first successful import either way) is the standard,
+    minimal fix; it changes no behavior and adds no new dependency edge at
+    import time."""
+    from . import attempt_relationship_authority
+    return attempt_relationship_authority
+
 # General (English + Spanish) "this is a new/additional item, not a restatement"
 # discourse markers -- a candidate pair where exactly ONE side carries one of
 # these is EVIDENCE the marked side may be introducing a distinct point,
@@ -789,6 +802,26 @@ def _rank_candidate_pairs_with_marks(
     return tuple(accepted + deferred)
 
 
+def _watch_listen_family_evidence_summary(
+    enabled: bool, conflict_blocked: list[dict], final_relations: list,
+) -> dict:
+    """Tail-safe, counts-only D-158 summary -- matches the D-119/D-125/
+    D-152/D-155/D-157 compact-summary pattern (no transcript, no per-pair
+    reason string dumped here; those live only in `watch_listen_conflict_
+    blocked`'s own rows, which are themselves bounded to clip ids + short
+    enum/string fields, never transcript text)."""
+    if not enabled:
+        return {"status": "disabled"}
+    if not final_relations:
+        return {"status": "no_pairs_evaluated"}
+    m = _attempt_relationship_authority()
+    return {
+        "status": "evaluated",
+        "conflict_blocked_count": len(conflict_blocked),
+        **m.attempt_relationship_diagnostics(final_relations),
+    }
+
+
 def reconcile_semantic_idea_equivalence(
     groups: Tuple[Tuple[str, ...], ...],
     takes: Tuple[CandidateTake, ...],
@@ -798,6 +831,7 @@ def reconcile_semantic_idea_equivalence(
     maximum_gap_sec: float = 30.0,
     protected_ids: frozenset[str] = frozenset(),
     confirmed_recording_evidence: Mapping[str, Tuple[Tuple[str, float, float], ...]] | None = None,
+    watch_listen_spans_by_id: Mapping[str, object] | None = None,
 ) -> tuple[Tuple[Tuple[str, ...], ...], dict]:
     """Merge groups the lexical layer left separate only when a narrow
     semantic arbiter is confident they are recording attempts of the same
@@ -870,6 +904,19 @@ def reconcile_semantic_idea_equivalence(
     audit: list[dict] = []
     distinct_addition_blocked: list[dict] = []
     merged_count = 0
+    # D-158 Phase C: structured Attempt Relationship consumption of D-157's
+    # Watch+Listen Understanding V1 -- OFF by default
+    # (CUTSELL_WATCH_LISTEN_FAMILY_EVIDENCE_ENABLED), and a total no-op
+    # whenever `watch_listen_spans_by_id` is not supplied or carries no
+    # evidence for a given pair (fail-open; see attempt_relationship_
+    # authority.py's own module docstring for the full authority order and
+    # truth table). Can only WITHHOLD a merge this function's own existing
+    # rules already decided on -- never creates one from Watch+Listen
+    # evidence alone.
+    _wla = _attempt_relationship_authority()
+    watch_listen_enabled = _wla.watch_listen_family_evidence_enabled()
+    watch_listen_conflict_blocked: list[dict] = []
+    final_relations: list = []
 
     # D-097.2 (RAW 34029861712, D-096 C-1 again one tier later): a cross-
     # group candidate pair that carries DETERMINISTIC restart evidence
@@ -918,6 +965,28 @@ def reconcile_semantic_idea_equivalence(
             })
             remaining_pairs.append(pair)
             continue
+        if watch_listen_enabled and watch_listen_spans_by_id:
+            wl_relations = _wla.attempt_relation_hypotheses_for_pair(watch_listen_spans_by_id, left_id, right_id)
+            final = _wla.resolve_final_attempt_relation(
+                would_merge=True, would_merge_source=_wla.RELATION_SOURCE_DETERMINISTIC_RESTART,
+                watch_listen_relations=wl_relations,
+            )
+            final_relations.append(final)
+            if not final.would_merge:
+                watch_listen_conflict_blocked.append({
+                    "left_clip_id": left_id, "right_clip_id": right_id,
+                    "watch_listen_relation_evaluated": final.watch_listen_relation_evaluated,
+                    "proposition_evidence_status": "merge_proposed",
+                    "attempt_relation_final": final.relation,
+                    "attempt_relation_source": final.source,
+                    "attempt_relation_conflict": final.conflict,
+                    "watch_listen_hypothesis_used": final.watch_listen_supported,
+                    "semantic_relation_used": _wla.RELATION_SOURCE_DETERMINISTIC_RESTART,
+                    "family_membership_action": final.family_membership_action,
+                    "family_membership_reason": final.reason,
+                })
+                remaining_pairs.append(pair)
+                continue
         union(left_group_index, right_group_index)
         merged_count += 1
         row = {
@@ -940,7 +1009,18 @@ def reconcile_semantic_idea_equivalence(
     ranked_pair_budget: list[dict] = []
     if arbiter is None:
         if merged_count == 0:
-            return groups, {"status": "not_requested", "candidate_pair_count": len(candidate_pairs), "merged_pair_count": 0}
+            # D-158: this pre-existing early exit (no arbiter, no restart-
+            # evidence merge succeeded) must still surface the Watch+Listen
+            # evidence summary -- otherwise a merge this function's own
+            # deterministic-restart rule proposed and D-158 withheld would
+            # silently vanish from observability. Same tail-safe helper used
+            # by both later return paths.
+            return groups, {
+                "status": "not_requested", "candidate_pair_count": len(candidate_pairs), "merged_pair_count": 0,
+                "watch_listen_family_evidence": _watch_listen_family_evidence_summary(
+                    watch_listen_enabled, watch_listen_conflict_blocked, final_relations,
+                ),
+            }
         result = None
         truncated: tuple = ()
         decisions: dict = {}
@@ -1023,6 +1103,27 @@ def reconcile_semantic_idea_equivalence(
                 "reason": reason,
             })
             continue
+        if watch_listen_enabled and watch_listen_spans_by_id:
+            wl_relations = _wla.attempt_relation_hypotheses_for_pair(watch_listen_spans_by_id, left_id, right_id)
+            final = _wla.resolve_final_attempt_relation(
+                would_merge=True, would_merge_source=_wla.RELATION_SOURCE_SEMANTIC_PROVIDER,
+                watch_listen_relations=wl_relations,
+            )
+            final_relations.append(final)
+            if not final.would_merge:
+                watch_listen_conflict_blocked.append({
+                    "left_clip_id": left_id, "right_clip_id": right_id,
+                    "watch_listen_relation_evaluated": final.watch_listen_relation_evaluated,
+                    "proposition_evidence_status": "merge_proposed",
+                    "attempt_relation_final": final.relation,
+                    "attempt_relation_source": final.source,
+                    "attempt_relation_conflict": final.conflict,
+                    "watch_listen_hypothesis_used": final.watch_listen_supported,
+                    "semantic_relation_used": _wla.RELATION_SOURCE_SEMANTIC_PROVIDER,
+                    "family_membership_action": final.family_membership_action,
+                    "family_membership_reason": final.reason,
+                })
+                continue
         union(left_group_index, right_group_index)
         merged_count += 1
         audit.append({
@@ -1048,6 +1149,9 @@ def reconcile_semantic_idea_equivalence(
             "restart_evidence_merges": restart_merged,
             "arbiter_rejected_pairs": arbiter_rejected_pairs,
             "arbiter_rejected_pair_count": len(arbiter_rejected_pairs),
+            "watch_listen_family_evidence": _watch_listen_family_evidence_summary(
+                watch_listen_enabled, watch_listen_conflict_blocked, final_relations,
+            ),
         }
 
     clusters: dict[int, list[str]] = {}
@@ -1069,6 +1173,9 @@ def reconcile_semantic_idea_equivalence(
         "distinct_addition_blocked": distinct_addition_blocked,
         "arbiter_rejected_pairs": arbiter_rejected_pairs,
         "arbiter_rejected_pair_count": len(arbiter_rejected_pairs),
+        "watch_listen_family_evidence": _watch_listen_family_evidence_summary(
+            watch_listen_enabled, watch_listen_conflict_blocked, final_relations,
+        ),
     }
 
 
