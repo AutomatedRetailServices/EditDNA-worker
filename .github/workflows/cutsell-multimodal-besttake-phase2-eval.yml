@@ -41,7 +41,7 @@ permissions:
 jobs:
   phase2-eval:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 25
     env:
       OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
     steps:
@@ -63,9 +63,22 @@ jobs:
         if: github.event_name == 'workflow_dispatch'
         run: sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg
 
-      - name: Install Python dependencies (openai only -- no GPU/torch stack)
+      - name: Install Python dependencies
         if: github.event_name == 'workflow_dispatch'
-        run: pip install --quiet "openai>=1.7.1"
+        # D-136 mechanical fix (first dispatch, run 34195466100, failed):
+        # `import cutsell_worker...` triggers cutsell_worker/__init__.py's
+        # own eager module-level wiring (install_final_selection_retry_
+        # arbiter -> ... -> semantic_idea_equivalence_google, which needs
+        # `requests`) regardless of which submodule this eval actually
+        # calls -- a minimal `pip install openai` alone is not enough to
+        # import the package at all. This repo's own CPU-only CI already
+        # proves the full requirements.txt installs and runs on an
+        # ordinary ubuntu-latest runner (no GPU needed even though it
+        # includes CPU wheels for faster-whisper/CLIP/sentence-
+        # transformers) -- reusing the SAME proven install path here
+        # rather than hand-picking transitive dependencies one failure at
+        # a time.
+        run: pip install --quiet -r requirements.txt
 
       - name: Verify OPENAI_API_KEY present (report only, never print it)
         if: github.event_name == 'workflow_dispatch'
