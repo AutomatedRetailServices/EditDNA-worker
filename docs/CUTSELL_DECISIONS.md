@@ -22802,3 +22802,202 @@ only) -- NOT implemented, scheduled, or authorized by this task.
 Phase A implementation, and in what order relative to the still-open
 DeliveryScorer/sonography-ordering findings, is the Product Owner's
 decision, not made here.
+
+## D-155: Upstream Watch+Listen Multimodal Understanding Phase A -- parallel perception orchestration + Structured RAW Understanding Map V1
+
+Per D-154's own design. Implements exactly Phase A: (1) parallelize the
+already-independent Track A/B/C perception `flow_b.py` was running
+strictly sequentially; (2) normalize existing evidence onto one reusable
+per-source Structured RAW Understanding Map V1. No new editorial
+authority, no provider call, no BestTake/Family-Formation/DeliveryScorer/
+Boundary/Pacing change, no OpenAIVisualProvider activation, no RAW.
+
+### `parallel_perception.py` (new)
+
+`run_parallel_perception()` runs Track A (ASR), the real-signal half of
+Track B (`audio_silence.py`), and Track C (`local_performance.py`)
+concurrently via a bounded `ThreadPoolExecutor` -- each is I/O/subprocess/
+native-extension bound (ffmpeg subprocess, OpenCV/MediaPipe C++,
+faster-whisper's own C++ decode), so GIL contention does not block real
+overlap. `media_probe.probe_media` remains the one genuine
+HARD_DEPENDENCY (`source.has_audio` gates whether ASR runs at all) and
+stays synchronous, before this batch, exactly as today. Values are
+byte-identical parallel vs. sequential; only scheduling changes.
+`CUTSELL_PARALLEL_PERCEPTION_ENABLED` (default ON) is the rollback flag
+-- `0`/`false` forces the exact pre-D-155 sequential call order.
+
+Failure semantics preserve today's real behavior exactly, verified by
+direct code read (D-154): ASR (Track A) is MANDATORY -- `flow_b.py`
+never wrapped it in try/except before, and this module re-raises its
+exception unmodified. Track B/C are already fail-open in their own
+implementations (`detect_audio_silence_intervals` never raises by its
+own docstring guarantee; `analyze_local_performance` returns a
+`ProviderStatus`-carrying result on failure) -- this module additionally
+wraps their retrieval defensively (belt-and-braces) and reports
+`TRACK_STATUS_FAILED` for that one track only, without touching the
+other two. A self-introduced timing-measurement bug (external
+wait-for-`.result()` timing undercounted a track read back after a
+faster one already finished) was found and fixed via live execution
+before any test was written: each task is now wrapped in `_timed()`,
+measuring duration inside the worker thread itself, from start to
+finish -- proven via `test_independent_tracks_genuinely_overlap_in_
+parallel_mode`/`test_sequential_mode_wall_time_matches_sum_of_track_
+times` (parallel wall time << sum of track times; sequential wall time
+~= sum of track times).
+
+### `raw_understanding_map.py` (new)
+
+`build_raw_understanding_map()`/`build_raw_understanding_maps_for_
+sources()` assemble ONE `RawUnderstandingMap` per source: transcript +
+word timings (verbatim from ASR), audio events (`audio_silence_
+interval`), visual performance events, D-115's own `PositionAware
+PerformanceEvidence` (ENTRY/DELIVERY/EXIT), media facts (`media_probe`),
+and a bounded set of `BehaviorHypothesis` labels -- every field copied or
+trivially derived (set-membership, presence/absence, counting) from
+values Tracks A-D already compute. Computes nothing new about speech,
+audio, or visual content.
+
+Behavior hypotheses are bounded to exactly 8 labels (`ALLOWED_BEHAVIOR_
+HYPOTHESES`): `AUDIENCE_DELIVERY`, `PRE_TAKE_SETUP` (in the vocabulary,
+never emitted -- D-154 classified it MISSING_EVIDENCE), `FALSE_START`,
+`ABANDONED_ATTEMPT`, `CLEAN_ATTEMPT`, `POST_TAKE_RESET`, `RECORDING_
+PROCESS`, `BREAKING_CHARACTER`. `RETRY`/`CONTINUATION`/`CORRECTION`/
+`COMPLEMENTARY` are explicitly forbidden (`FORBIDDEN_RELATIONSHIP_
+LABELS`) -- those describe a cross-span RELATIONSHIP, D-145's own
+Attempt Relationship authority, never inferred here from one span's
+local evidence. `RawUnderstandingSpan` carries no `attempt_relation`/
+`proposition_relation` field at all (not merely left `None`) -- this
+module supplies evidence, never a relationship or membership verdict, so
+neither final Proposition Identity, retry family, BestTake, Boundary,
+Dialogue/Pacing, the Renderer, nor the D-145-D-153 semantic-authority
+gate is touched, read, or imported by this module (structurally asserted
+by `test_module_never_imports_a_downstream_authority`).
+
+**Real bug found and fixed during test-writing (not by inspection --
+by writing the ABANDONED_ATTEMPT/RECORDING_PROCESS/FALSE_START/
+BREAKING_CHARACTER test cases and watching them fail):**
+`positioned_performance_evidence.py`'s own default `event_kinds` filter
+(`POSITIONED_EVENT_KINDS`, D-115's own scope) is exactly the 4 D-114
+local-performance kinds + `audio_silence_interval` -- it does NOT include
+D-100's `wrong_take`/`retry_setup`, the recording-process family, or
+`false_start`/`breaking_character`. Since `build_raw_understanding_map`
+was calling `build_positioned_performance_evidence_for_takes` with that
+default, every one of those kinds was silently filtered out before ever
+reaching `_behavior_hypotheses_for_span` -- making ABANDONED_ATTEMPT/
+RECORDING_PROCESS/FALSE_START/BREAKING_CHARACTER permanently unreachable
+dead code, directly contradicting this module's own docstring claim that
+D-100's `confirm_local_performance_events` output feeds ABANDONED_
+ATTEMPT. Fixed by widening the `event_kinds` this module passes into
+D-115's own already-exposed `event_kinds` parameter
+(`_BEHAVIOR_RELEVANT_EVENT_KINDS = POSITIONED_EVENT_KINDS | {wrong_take,
+retry_setup} | <recording-process kinds> | {false_start} |
+{breaking_character}`) -- reuses the exact same shared `classify_event_
+zone`/windowing logic D-115 already owns; D-115's own default (used
+elsewhere, e.g. `flow_b.py`'s unrelated diagnostic call) is untouched.
+
+Overall map status (`raw_understanding_map_status`): `COMPLETE_EXISTING_
+EVIDENCE` when speech/audio/visual/media tracks all PASS; `FAILED` when
+media or speech (the two currently-hard-dependency tracks) failed;
+`PARTIAL_EXISTING_EVIDENCE` otherwise. `raw_understanding_map_
+diagnostics()` is a tail-safe, counts-only CI summary (span/event/
+conflict counts, per-map and aggregate status) -- never serializes a
+transcript or event payload, proven by `test_diagnostics_are_tail_
+safe_no_transcript_or_event_payload`.
+
+### `flow_b.py` wiring
+
+`process_local_sources` now calls `run_parallel_perception()` once
+(replacing the three separate sequential ASR/`audio_silence_events`/
+`analyze_local_performance` calls -- the latter two's results are reused
+verbatim from `perception_outcome`, never recomputed a second time) and,
+after the existing D-115 `positioned_evidence` diagnostic block, calls
+`build_raw_understanding_maps_for_sources()` and emits only bounded
+`trace.complete("raw_understanding_map", ...)` diagnostics (never the
+full map objects, per the same CI-tail-bloat discipline D-119/D-152
+already established) onto `ExecutionTrace`. `media_probes_by_source` is
+captured during the existing (unmodified) per-source `probe_media` loop
+so the map's `media_facts` can reuse those same objects rather than
+reprobing. `media_track_status` is `TRACK_STATUS_PASS` unconditionally at
+that call site because `probe_media` raises hard on failure (unchanged,
+still handled before this point) -- if execution has reached the map
+construction, every hydrated source's own probe already succeeded.
+
+### Tests (52 new, exceeding the 32-item requirement)
+
+`tests/test_cutsell_d155_raw_understanding_map.py` (31 tests): pure
+projection (identity/timing/transcript/word-timing preservation,
+positioned-evidence reuse, no `attempt_relation`/`proposition_relation`
+field), behavior-hypothesis correctness per real event-kind producer
+(reset-family -> POST_TAKE_RESET/VISUAL_SIGNAL, wrong_take/retry_setup ->
+ABANDONED_ATTEMPT/DETERMINISTIC_RULE, recording-process ->
+RECORDING_PROCESS/DETERMINISTIC_RULE, false_start/breaking_character
+correctness, no-event -> CLEAN_ATTEMPT/MULTIMODAL_FUSION,
+AUDIENCE_DELIVERY presence/absence), evidence-provenance tagging,
+per-source map assembly (source id/duration preserved, transcript join +
+word-timing concatenation, audio/visual event split by kind, media_facts
+from probe or empty), overall/aggregate status logic (all 3 branches +
+empty-batch), deterministic batch ordering independent of segment order,
+non-destructive input handling, schema-version stability, tail-safe
+diagnostics (no transcript leak), and a structural
+no-forbidden-label/no-downstream-authority-import guarantee across 11
+event-kind combinations.
+
+`tests/test_cutsell_d155_parallel_perception.py` (21 tests): env-flag
+rollback semantics (default-true, recognized truthy/falsy values),
+byte-identical values parallel vs. sequential, deterministic name-keyed
+readback, genuine wall-clock overlap in parallel mode vs. sum-of-tracks
+wall time in sequential mode (formalizing the live smoke-test proof from
+this task's own development), ASR failure propagation unmodified,
+audio-track and visual-track failure isolation (each independently, both
+other tracks still succeed), visual-status PARTIAL-vs-PASS branch
+coverage, tail-safe bounded diagnostics (exact key set, no transcript
+leak), and a static no-network/no-OpenAIVisualProvider-reference
+guarantee.
+
+### Offline qualification
+
+`python3 -m compileall cutsell_worker tests`: clean. Targeted battery
+(404 tests: both new D-155 files + `test_cutsell_clean_worker_media_
+ingest.py` [the one real end-to-end `process_local_sources` test] +
+`test_cutsell_editorial_mode.py` + ASR/canonical-ASR-evidence/ASR-
+determinism/audio-silence-interior-trim/local-performance/hybrid-
+pipeline/pipeline-runtime-reliability/semantic-slot-v2 + D-123/D-128/
+D-150/D-152/D-142/D-115/D-122 + 8 Boundary-family files): 404 passed, 0
+failed. Full suite (`pytest tests/`, excluding the one pre-existing
+script-style collection error in `test_semantic_stitch.py`, unrelated,
+present before this task): 3454 passed, 13 subtests passed, 5 failed --
+all 5 pre-existing and unrelated (`test_hybrid_story_guard_incomplete_
+retry.py`'s own retry-coverage fixture and 4 in `test_video00_modal_
+hybrid_semantic_parity.py`'s jq/masking checks against the Modal
+workflow's env-secret step), confirmed by `git diff --stat` to touch
+none of this task's 3 changed/added files (`flow_b.py`,
+`parallel_perception.py`, `raw_understanding_map.py`). Zero new
+failures; all 52 new D-155 tests included in the 3454 passed.
+
+### D-098/D-148 architecture compatibility
+
+Parallel Multimodal Perception -> Watch+Listen Multimodal Understanding
+-> Structured Editorial Reasoning (Section 13) remains canonical --
+Phase A only makes Tracks A-D's scheduling concurrent and their evidence
+normalized; it adds no Layer, renumbers nothing, and reopens no D-096/
+D-097.x/D-107/D-111/D-123/D-128/D-129/D-141-D-153 authority contract. The
+CLOSED D-145-D-153 semantic-authority thread is untouched: `semantic_
+authority_observability.py` and `pipeline.py`'s D-150 call site neither
+import nor are imported by either new module.
+
+**Scope confirmed:** no new editorial authority; no provider call; no
+new semantic/prosodic audio capability; no BestTake/Family-Formation/
+DeliveryScorer/Boundary/Pacing change; no OpenAIVisualProvider
+activation (still hardcoded `None` in `brain_runtime.py`, unmodified);
+no RAW/Modal/RunPod dispatch.
+
+**Exact next capability (NOT authorized by this task):** Phase B
+(consolidate duplicate readers) or Phase C (Proposition/Family Formation
+consumption of the map's behavior fields) per D-154's own 6-phase plan --
+Product Owner decision, not made here.
+
+**HUMAN ACTION REQUIRED:** YES (condition A) -- whether/when to authorize
+Phase B or C, and whether to schedule a Video00 qualification RAW against
+this Phase A change (observability-only; no editorial behavior change is
+expected, but D-095's doctrine requires the rendered artifact, not test
+counts, to confirm that), are Product Owner decisions.

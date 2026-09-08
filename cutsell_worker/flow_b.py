@@ -17,12 +17,12 @@ from .draft_review_provider import DraftReviewProvider
 from .frame_sampling import sample_take_frames
 from .hybrid_editorial import EditorialJudge
 from .local_performance import (
-    analyze_local_performance,
     apply_local_performance_to_takes,
     merge_local_events_into_context,
 )
 from .media_probe import probe_media
 from .observability import ExecutionTrace
+from .parallel_perception import run_parallel_perception
 from .performance_confirmation import confirm_local_performance_events
 from .pipeline import build_flow_b_draft
 from .positioned_performance_evidence import (
@@ -30,9 +30,14 @@ from .positioned_performance_evidence import (
     positioned_performance_evidence_diagnostics,
 )
 from .providers import NoopSemanticProvider, SemanticProvider, safe_semantic_classify
+from .raw_understanding_map import (
+    TRACK_STATUS_PASS,
+    build_raw_understanding_maps_for_sources,
+    raw_understanding_map_diagnostics,
+)
 from .semantic_idea_equivalence import SemanticEquivalenceArbiter
 from .silence_analysis import word_silence_gaps
-from .audio_silence import audio_silence_events, merge_audio_silence_into_context
+from .audio_silence import merge_audio_silence_into_context
 from .source_sampling import sample_source_frames
 from .take_grouping_provider import TakeGroupingProvider
 from .take_judge_provider import TakeJudgeProvider
@@ -94,6 +99,7 @@ def process_local_sources(
     transcripts = []
 
     notify("preparing", 2)
+    media_probes_by_source: dict = {}
     for source in sorted(request.sources, key=lambda item: item.source_order):
         path = local_paths.get(source.source_asset_id)
         if not path:
@@ -101,6 +107,7 @@ def process_local_sources(
         if not Path(path).exists():
             raise FileNotFoundError(path)
         probe = probe_media(path)
+        media_probes_by_source[source.source_asset_id] = probe
         hydrated_sources.append(replace(
             source,
             duration_sec=probe.duration_sec,
@@ -126,15 +133,23 @@ def process_local_sources(
     notify("transcribing", 12)
 
     source_by_id = {source.source_asset_id: source for source in hydrated_sources}
-    for source in sorted(hydrated_sources, key=lambda item: item.source_order):
-        if source.has_audio:
-            transcripts.extend(asr_provider.transcribe(
-                local_paths[source.source_asset_id],
-                source_asset_id=source.source_asset_id,
-                language_hint=request.language_hint,
-            ))
-    transcript_tuple = tuple(transcripts)
+    # D-155 Phase A: ASR (Track A), the real-signal half of audio perception
+    # (Track B, `audio_silence.py`), and local visual/motion perception
+    # (Track C, `local_performance.py`) are genuinely independent of each
+    # other (see `parallel_perception.py`'s own module docstring for the
+    # full dependency audit) -- run concurrently here instead of the three
+    # separate sequential calls this function used before D-155. Values are
+    # byte-identical either way; only scheduling changed. `hydrated_sources`
+    # already carries `probe_media`'s own `has_audio` (the one genuine hard
+    # dependency, resolved synchronously above, before this call).
+    # `CUTSELL_PARALLEL_PERCEPTION_ENABLED=0` forces the exact pre-D-155
+    # sequential order as a rollback.
+    perception_outcome = run_parallel_perception(
+        hydrated_sources, local_paths, asr_provider, request.language_hint,
+    )
+    transcript_tuple = perception_outcome.transcripts
     trace.complete("asr", segment_count=len(transcript_tuple))
+    trace.complete("parallel_perception", **perception_outcome.diagnostics())
     notify("analyzing", 27)
 
     # D-052 Part A Section 2/3 observability: compute canonical ASR evidence
@@ -199,7 +214,9 @@ def process_local_sources(
         ).strip().lower() in {"1", "true", "yes", "on"},
     )
 
-    local_performance = analyze_local_performance(local_paths, target_fps=12.0)
+    # D-155 Phase A: already computed above, concurrently with ASR/audio_silence
+    # (see `run_parallel_perception` above) -- reused verbatim, never recomputed.
+    local_performance = perception_outcome.local_performance
     local_frame_count = sum(len(item.observations) for item in local_performance.timelines)
     local_event_count = sum(len(item.events) for item in local_performance.timelines)
     if local_performance.status.available:
@@ -259,7 +276,9 @@ def process_local_sources(
     # silence signal available before Selection Freeze. word_silence_gaps
     # below is ASR-timing-derived and blind to words whose timestamps are
     # stretched over real silence. Evidence + observability only.
-    audio_silence_by_source = audio_silence_events(local_paths)
+    # D-155 Phase A: already computed above, concurrently with ASR/local_performance
+    # (see `run_parallel_perception` above) -- reused verbatim, never recomputed.
+    audio_silence_by_source = perception_outcome.audio_silence_by_source
     whole_context = merge_audio_silence_into_context(whole_context, audio_silence_by_source)
     trace.complete(
         "audio_silence",
@@ -385,6 +404,32 @@ def process_local_sources(
         positioned_event_count=sum(row["positioned_event_count"] for row in positioned_evidence_rows),
     )
     notify("analyzing", 74)
+
+    # D-155 Phase A: Structured RAW Understanding Map V1 -- a pure, additive
+    # projection of Tracks A-D's ALREADY-computed evidence (ASR, audio_silence,
+    # local_performance/positioned_performance_evidence, media_probe) onto one
+    # reusable per-source container. Diagnostics only: no downstream authority
+    # (BestTake, DeliveryScorer, StoryValidator, Boundary, Renderer, or the
+    # D-145/D-150 semantic-authority thread) reads `raw_understanding_maps`
+    # as of this task -- see raw_understanding_map.py's own module docstring
+    # for the full authority boundary. Every hydrated source's own media_probe
+    # already succeeded by construction (probe_media raises hard, above, on
+    # any failure) -- media_track_status is therefore TRACK_STATUS_PASS here.
+    raw_understanding_maps = build_raw_understanding_maps_for_sources(
+        sources=hydrated_sources,
+        transcript_tuple=transcript_tuple,
+        whole_context=whole_context,
+        takes=takes,
+        media_probes_by_source=media_probes_by_source,
+        speech_track_status=perception_outcome.speech_track_status,
+        audio_track_status=perception_outcome.audio_track_status,
+        visual_track_status=perception_outcome.visual_track_status,
+        media_track_status=TRACK_STATUS_PASS,
+    )
+    trace.complete(
+        "raw_understanding_map",
+        **raw_understanding_map_diagnostics(raw_understanding_maps),
+    )
 
     if mode == "full":
         semantic = safe_semantic_classify(semantic_provider or NoopSemanticProvider(), takes)
