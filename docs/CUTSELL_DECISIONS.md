@@ -24118,3 +24118,395 @@ its own HUMAN WATCH+LISTEN PASS (not performed in this measurement-only
 task); (G) whether/when to authorize D-160 Phase D, and in what order
 relative to the still-open sonography-ordering/diagnosis-retry finding
 and D-156's own still-open findings, are Product Owner decisions.
+
+## D-160: Watch+Listen Phase C -- Family-Formation reachability / consumption-seam forensic
+
+**Authorization:** Product Owner directive "CUTSELL -- D-160 WATCH+LISTEN
+PHASE C FAMILY-FORMATION REACHABILITY / CONSUMPTION-SEAM FORENSIC".
+Verified branch `feature/runpod-pod-on-demand`, HEAD `6a18ea3` (D-159),
+clean working tree. **FORENSIC ONLY** -- no code change, no RAW, no
+provider call, D-159's own entry not rewritten (this task supersedes one
+specific classification from D-159's own text below, but as a
+documented, evidence-based refinement in THIS entry, not an edit to
+D-159's).
+
+### Method
+
+Read persisted D-159 artifacts only (this session's own recovered
+`/tmp/job_log.txt` tail from Modal run `34280568497`, still in scope --
+same run, same evidence, deeper analysis). No new RAW. Traced the ACTUAL
+code path (`_cross_group_candidate_pairs` -> `_rank_candidate_pairs_
+with_marks` -> `reconcile_semantic_idea_equivalence`'s two merge loops ->
+`attempt_relationship_authority.py`) against the real clip ids for both
+named D-159 critical cases, using D-159's own recovered `take_group_
+members`, `semantic_idea_equivalence.{merges,restart_evidence_merges,
+arbiter_rejected_pairs}`, and the quality-ladder's region table --
+exactly the artifacts D-159 already fetched, read more deeply this time.
+
+==================================================
+CURRENT D-158 INTEGRATION SEAM
+==================================================
+
+`attempt_relationship_authority.resolve_final_attempt_relation` is called
+from exactly TWO points inside `take_grouping_provider.reconcile_
+semantic_idea_equivalence`, both **inside a branch that has already
+decided `would_merge=True`**:
+
+1. The deterministic-restart-evidence loop (`same_opening_restart`/
+   `_safe_short_prefix_retry`/`incomplete_attempt_completed_by_retry`/
+   `multimodal_corroborated_retry`) -- called only when `restart_kind is
+   not None`, i.e. only on a pair one of these four deterministic rules
+   has ALREADY decided is a retry. This loop iterates the FULL candidate-
+   pair set (unbounded by the arbiter's request cap).
+2. The arbiter-confirmed-merge loop -- called only inside `if same_idea:`,
+   i.e. only on a pair the LLM arbiter has ALREADY returned `same_idea=
+   True` for. This loop iterates ONLY `truncated = ranked_pairs[:policy.
+   max_pairs_per_request]` (hard cap **14**, confirmed by code
+   (`semantic_idea_equivalence.py` `max_pairs_per_request: int = 14`) and
+   by D-159's own run: `candidate_pair_count: 64`, `checked_pair_count:
+   14` -- exact match).
+
+**Proven by code, not inferred:** there is NO call to `resolve_final_
+attempt_relation` anywhere in the `not same_idea` branch (`arbiter_
+rejected_pairs.append(...); continue` -- no D-158 call) or anywhere else
+in the function. **`resolve_final_attempt_relation` is therefore NEVER
+invoked with `would_merge=False` in the live production wiring today** --
+the entire would_merge=False half of its own truth table (agreement on
+CONTINUATION/COMPLEMENTARY/NEW_AUDIENCE_BEAT, and the UNCERTAIN-conflict-
+the-other-way case) is exercised ONLY by this task's own D-158 unit tests
+(`test_cutsell_d158_attempt_relationship_authority.py`), never by real
+production data.
+
+==================================================
+MERGE-VETO SUPPORT STATUS: YES (confirmed)
+==================================================
+
+Both hook points above only ever call the authority with `would_merge=
+True`, and `resolve_final_attempt_relation`'s own structural guarantee
+(True can become False, never the reverse) means its ONLY live effect in
+production is to WITHHOLD a merge the pre-existing system already
+proposed. Fully functional, proven live-wired end-to-end in D-158's own
+tests and (mechanically) available in D-159's run.
+
+==================================================
+RELATION-DISCOVERY SUPPORT STATUS: NO (confirmed)
+==================================================
+
+`attempt_relation_hypotheses_for_pair` is only ever called with a
+`(left_id, right_id)` pair the PRE-EXISTING candidate-pair generator and
+merge-decision logic already produced. D-158 has no code path that
+enumerates `WatchListenUnderstanding.understanding_spans` on its own,
+searches for a `SUPPORTED` `RETRY` hypothesis between two spans NEITHER
+of `_cross_group_candidate_pairs` nor the batch-ranked arbiter ever
+proposed as a pair, and injects that pair into the union-find. **Critical
+Question 3 answered: YES -- D-158 today only acts on pairs the pre-
+existing semantic grouping system has already decided to compare.** It
+has VETO/CONFLICT authority on an existing merge opportunity; it has NO
+DISCOVERY authority for a legitimate retry pair the existing candidate-
+pair generator or its batch cap never proposed. Matches the directive's
+own expected finding exactly.
+
+==================================================
+CURRENT PAIR-GENERATION CONTRACT (`_cross_group_candidate_pairs` +
+`_rank_candidate_pairs_with_marks`)
+==================================================
+
+| gate | deterministic? | provider-backed? | can exclude a legitimate W+L retry pair before D-158 sees it? |
+|---|---|---|---|
+| cross-GROUP only (never within-group) | yes | no | YES -- if lexical/session clustering already placed both realizations in the SAME initial group, no cross-group pair is ever generated for them |
+| `_group_gap(...) > maximum_gap_sec` (default 30.0s) | yes | no | YES -- a retry more than ~30s apart across groups is never a candidate |
+| same `source_asset_id` | yes | no | no (correct exclusion, never legitimate to cross) |
+| `len(semantic_key(text).split()) <= 3` per side | yes | no | YES -- excludes any very short utterance entirely from candidacy |
+| `_rank_candidate_pairs_with_marks` priority order (content overlap + continuation/restart bonus + proximity) | yes | no | indirectly -- decides WHICH pairs get the batch's slots, not by itself a hard exclusion |
+| `policy.max_pairs_per_request` batch cap (=14) | yes (fixed constant) | no | **YES, directly -- this run 50 of 64 eligible candidate pairs (64-14) were never asked about at all** |
+| `_PAIR_BUDGET_PER_GROUP_CAP` (=2) per-group fairness cap | yes | no | YES -- a group whose 2 slots are spent on OTHER plausible pairs starves out a legitimate pair for the SAME clip even within the ranked top-N |
+| deterministic restart-evidence rules (4 lexical/multimodal rules) | yes | no | narrow by design -- only catches shared-opening/prefix/confirmed-event patterns; a retry pair with genuinely different openings and no confirmed multimodal event is invisible to all four |
+| the semantic-equivalence arbiter itself | no | **YES** (Gemini) | the only mechanism that can catch a non-lexical, non-restart-evidenced retry pair -- but only if it survives the batch cap above |
+
+No gate here is provider-backed except the arbiter call itself; every
+exclusion mechanism upstream of it is deterministic and none of them
+consult Watch+Listen evidence in deciding whether to GENERATE or RANK a
+pair -- W+L evidence is invisible to this entire stage.
+
+==================================================
+PIMPLES TRACE (8 questions)
+==================================================
+
+Real clips: `clip_23f9127e2704148bcf7b` ("Era como un rush, una
+alergia.", 197.61-198.12s) and `clip_a22922e9cd4ece10d7ac` ("Otro síntoma
+era que me salían espinillas... detrás de la oreja... Me salía por
+temporadas.", 221.71-222.98s). Both confirmed SINGLETON initial `take_
+group_members` entries (own separate groups, per D-159's own recovered
+`take_groups` array).
+
+1. **PRESENT** -- both are eligible candidates: different groups, same
+   `source_asset_id`, ~24s gap (< 30.0s default), both well above the
+   3-word floor.
+2. **PRESENT (as a pair-generation-eligible input) but PROPOSITION
+   EVIDENCE ITSELF IS GENUINELY AMBIGUOUS** -- same general symptom
+   (espinillas), textually and structurally distinct realizations (one
+   names a specific body location, the other does not) -- the SAME
+   ambiguity D-144's own forensic already named for this exact family.
+3. **candidate pair GENERATED: YES.**
+4. **`reconcile_semantic_idea_equivalence` called: YES** (status
+   `applied` this run).
+5. **D-158 authority evaluated: NO.** Exhaustively checked: neither clip
+   id appears in ANY of the 3 restart-evidence merges, 9 arbiter-accepted
+   merges, or 5 arbiter-rejected pairs D-159's own recovered diagnostics
+   list (the full 17-pair set this run's tail actually resolved,
+   summing exactly to `checked_pair_count` (14) + the 3 restart merges).
+   This pair is among the ~47 candidate pairs (64 - 17) that were
+   generated but never reached ANY evaluation mechanism this run.
+6. **merge proposed before D-158: NO** (never reached that stage).
+7. **merge blocked by D-158: NO** (D-158 never got the chance).
+8. **Final reason they remained separate: PAIR_GENERATION_FILTER /
+   BATCH TRUNCATION.** The pair matched none of the four deterministic
+   restart-evidence rules (different openings, no confirmed multimodal
+   `wrong_take`/`retry_setup` event linking them) and was ranked below
+   the top-14 cutoff among 64 competing candidates this run -- upstream
+   of BOTH the arbiter and D-158. **WATCH+LISTEN MADE NO OBSERVABLE
+   DIFFERENCE HERE FOR A STRUCTURAL REASON, NOT A WEAK-EVIDENCE REASON:
+   it was never consulted.** (Secondary, independent reachability gap
+   even if it HAD reached D-158's hook point: D-157's own attempt-
+   relation hypotheses are computed only between IMMEDIATE SOURCE-
+   TIMELINE NEIGHBORS in `build_watch_listen_understanding`'s own
+   sequential sliding window -- confirmed by code read, `watch_listen_
+   understanding.py` lines 541-563 -- and these two clips, ~24s apart in
+   source time with other spans very likely between them, are almost
+   certainly non-adjacent in that ordering, so `attempt_relation_
+   hypotheses_for_pair` would most likely have returned empty even had
+   the pair reached D-158.)
+
+==================================================
+DIAGNOSIS TRACE (8 questions) -- CORRECTION TO D-159's OWN CHARACTERIZATION
+==================================================
+
+D-159 characterized a "retry duplicate" of the diagnosis sentence as an
+`IdeaClusterer/RetryFamilyFormation` family-formation miss (quoting the
+quality-ladder's own `why` annotation verbatim). **Deeper forensic this
+task authorizes finds that characterization does not hold up**, and is
+recorded here as a correction (D-159's own entry is left unmodified,
+per this task's own instruction):
+
+- `clip_5013442808f146185bf4` ("La biopsia confirmó que era un cáncer
+  papilar de tiroides.") is a **SINGLETON** in D-159's own recovered
+  `take_group_members` -- no second clip with matching or duplicate text
+  exists anywhere in that array.
+- In `semantic_idea_equivalence.arbiter_rejected_pairs`, this clip WAS
+  checked by the arbiter twice, against two genuinely different clips
+  (a "nodule discovery" statement and a "symptoms I had" statement) --
+  both CORRECTLY rejected. It was never paired with `clip_
+  6090c497319bde135add` -- but that clip's real text is **the video's
+  OPENING HOOK line** ("tenía cáncer de tiroides y no lo sabía."), a
+  different proposition (a narrative preview, not a restatement of the
+  diagnosis) -- the quality ladder's own `why` heuristic appears to have
+  matched on coincidental lexical overlap ("cáncer"/"tiroides"), not a
+  genuine missed retry pair.
+- D-159's own render-verification line for this exact run lists `clip_
+  5013442808f146185bf4` as one of only 2 (of 26) render fragments the
+  verifier could not locate (`missing: ['clip_5013442808f146185bf4',
+  'clip_8655d4ac81d1aeb2bf51']`), while the quality-ladder's SELECTION-
+  scope region table shows this SAME clip_id's abbreviated suffix
+  (`sel:46185bf4`) at THREE separate output positions (135.44-138.37,
+  138.59-140.57, 140.79-140.96).
+
+1. **W+L relation hypothesis: N/A/UNKNOWN** -- no genuine second
+   candidate clip exists for this to relate to.
+2. **same-proposition evidence: N/A.**
+3. **pair generated: NO** -- correctly so; the only textually-similar
+   clip the ladder suggested is a different proposition (hook vs.
+   diagnosis statement), and no true duplicate clip exists in `take_
+   group_members`.
+4. **reconcile called: not relevant to this non-pair** (the function ran
+   this request generally; this specific "pair" never existed).
+5. **D-158 authority evaluated: NO** (nothing to evaluate).
+6-7. **merge proposed/blocked by D-158: NO / NO.**
+8. **Final reason:** the apparent "duplicate" is most consistent with a
+   DOWNSTREAM RENDER/physical-segmentation artifact (one selected clip
+   appearing at three output timestamps, one of which the render
+   verifier could not locate a physical fragment for) -- **outside
+   Family Formation, outside this forensic's scope, and outside D-158's
+   reach by construction** (a candidate-pair mechanism cannot pair a
+   clip with itself).
+
+**Root-cause relation to pimples: DIFFERENT_ROOT_CAUSE.** Pimples is a
+genuine two-distinct-clip pair-generation/batch-truncation exclusion.
+Diagnosis is most likely a single-clip render/physical-layer artifact
+mislabeled by the quality-ladder's own heuristic classifier as a family-
+formation miss -- not a family-formation reachability case at all. This
+finding does not reopen D-159 or D-097.5/D-097.6 (the earlier, DIFFERENT
+diagnosis-fusion defect those decisions fixed); it is a fresh observation
+about THIS run's own render layer, recorded for a future render/Boundary
+forensic, not acted on here (out of this task's strict scope).
+
+==================================================
+CONTINUATION / COMPLEMENTARY / NEW-BEAT REACHABILITY
+==================================================
+
+**NONE currently reachable**, by construction, not merely in practice.
+These three relation types are, in D-158's own vocabulary, exactly the
+`would_merge=False`-agreement or conflict-the-other-way cases -- and (per
+the Integration Seam finding above) `resolve_final_attempt_relation` is
+NEVER called with `would_merge=False` anywhere in the live wiring. A real
+CONTINUATION/COMPLEMENTARY/NEW_AUDIENCE_BEAT relation Watch+Listen
+correctly identifies today has **zero path** to influence editorial
+structure, regardless of confidence, because the only two call sites that
+exist are gated behind an ALREADY-True merge decision. This is the single
+most consequential finding of this forensic for anything beyond retry-
+veto: today's D-158 cannot do ANYTHING with these three relation types no
+matter how good the underlying evidence becomes.
+
+==================================================
+PROPOSITION FIREWALL
+==================================================
+
+Proposition evidence that ALREADY exists and could safely validate a
+future W+L-proposed relation, without merging from topic/symptom/opener
+alone: (1) `complete_idea` (real, already-computed per-take field); (2)
+the four existing deterministic restart-evidence rules themselves
+(lexical/structural retry signals, already proven safe); (3) the existing
+semantic-equivalence ARBITER (Gemini-backed `same_idea` + confidence +
+reason) -- the current, only real Proposition Identity authority for non-
+lexical cases; (4) D-150's own `family_complete_context`/`complete_
+context_conflict` gate machinery as a structural TEMPLATE (gate an
+existing decision, never invent one) for how a future bounded
+confirmatory check could validate a W+L-proposed pair before ever
+treating it as merge-eligible. None of these currently VALIDATE a W+L-
+originated candidate pair (because no such candidate exists yet) -- but
+all four are available, already-tested building blocks a bounded
+Discovery Gate could require, satisfying "Watch+Listen cannot create a
+retry family from same topic/symptom/opener alone" without inventing a
+new evidence source.
+
+==================================================
+OBSERVABILITY GAPS (design only, not implemented)
+==================================================
+
+Smallest future tail-safe fields needed to answer this forensic directly
+from a run's own CI-visible summary next time, without needing this
+task's own manual clip-id cross-referencing:
+
+- `watch_listen_pair_candidate_count` (== `candidate_pair_count`, but
+  scoped to pairs that ALSO have understanding spans on both sides)
+- `watch_listen_pair_evaluated_count` (pairs where `attempt_relation_
+  hypotheses_for_pair` returned non-empty, whether or not D-158 was ever
+  invoked on them)
+- `watch_listen_pair_not_reached_count` (candidate pairs excluded by
+  pair-generation/batch-cap/per-group-cap BEFORE either merge loop ever
+  ran, i.e. `candidate_pair_count - checked_pair_count - restart_merge_
+  count`)
+- `watch_listen_merge_veto_count` (== today's `conflict_blocked_count`,
+  already exists as of D-158)
+- `watch_listen_relation_discovery_candidate_count` (0 today, by
+  construction -- would only become nonzero if a future Discovery Gate
+  is built)
+
+**Persisted D-159 artifacts do NOT already answer this forensic
+directly** -- everything above (the 47 unreached pairs, the two specific
+clip-id traces) required manual cross-referencing of `take_group_
+members`/`semantic_idea_equivalence`/the quality-ladder region table
+against each other, which is exactly why these fields are recommended.
+**Not implemented in this task**, per its own explicit instruction.
+
+==================================================
+PRIMARY / SECONDARY ROOT CAUSE
+==================================================
+
+**PRIMARY ROOT CAUSE: D158_INTEGRATION_SEAM_TOO_LATE.** The integration
+point is structurally reactive-only: it sits inside branches that have
+ALREADY decided `would_merge=True`, so it can only ever veto an existing
+proposal, never discover one, and it structurally never sees a `would_
+merge=False` case at all -- making CONTINUATION/COMPLEMENTARY/NEW_
+AUDIENCE_BEAT completely unreachable today regardless of evidence
+quality.
+
+**SECONDARY CONTRIBUTORS:**
+1. **PAIR_GENERATION_FILTER** -- the deterministic candidate-pair
+   generator plus the fixed 14-pair batch cap and 2-pair-per-group
+   fairness cap excluded 47 of 64 eligible candidates this run from ANY
+   evaluation (arbiter or D-158) -- the direct, proven cause of the
+   pimples/espinillas miss.
+2. **WLA_PAIR_LOOKUP_MISMATCH** -- D-157's own attempt-relation
+   hypotheses are computed only between immediate source-timeline
+   neighbors; a real, non-adjacent retry pair (like pimples/espinillas,
+   ~24s apart with other spans between them) would very likely find no
+   evidence via `attempt_relation_hypotheses_for_pair` even if it DID
+   reach D-158's hook point -- a second, independent reachability gap
+   layered on top of #1.
+3. **PROPOSITION_EVIDENCE_GAP** (observational, not yet acted on) --
+   same-symptom-but-distinct-realization pairs like pimples/espinillas
+   are exactly the D-111-flagged ambiguous case; even a hypothetical
+   Discovery mechanism would need real Proposition Identity evidence
+   (the arbiter, or an equivalent bounded check), not W+L relation
+   hypotheses alone, to safely act on such a pair.
+
+**IS THIS VIDEO-SPECIFIC? NO.** Every mechanism named above (candidate-
+pair generation, the 14-pair batch cap, the 2-per-group fairness cap, the
+immediate-neighbor-only relation hypotheses, the would_merge=True-only
+integration seam) is a general code property, not tuned to or dependent
+on this specific video's content.
+
+==================================================
+NEXT IMPLEMENTATION CLASS (recommended, NOT implemented here)
+==================================================
+
+**WATCH+LISTEN RELATION DISCOVERY GATE** -- a new, bounded structured
+authority, distinct from (and additive to) today's veto-only integration,
+with these requirements: (a) only ever proposed from a `SUPPORTED`-
+confidence W+L relation; (b) requires independent Proposition Identity
+evidence sufficient to validate the SAME pair (the existing arbiter, or
+an equivalent bounded confirmatory check -- never W+L confidence alone);
+(c) same-source/time validity preserved (reuse the existing `_group_gap`/
+`source_asset_id` invariants, never widen them silently); (d) meaning/
+safety preservation unchanged (D-089 and all upstream invariants
+untouched); (e) NEVER forces a merge from W+L evidence alone -- exactly
+today's own False->True prohibition, extended to the discovery path; (f)
+a relation this gate proposes enters the SAME structured authority
+(`resolve_final_attempt_relation`'s own truth table), not a second
+decision path; (g) UNCERTAIN remains separate, exactly as today.
+
+==================================================
+D-148 ARCHITECTURE COMPATIBILITY
+==================================================
+
+Perception -> Understanding -> Structured Editorial Reasoning remains
+canonical. This forensic's own finding sharpens, rather than contradicts,
+Section 13.3's own design: Understanding (D-157) already CAN contribute
+evidence before the system has irreversibly missed a relationship (its
+51 real hypotheses this run prove the evidence exists) -- what is
+currently missing is a STRUCTURED EDITORIAL REASONING consumption point
+positioned EARLY enough (before pair-generation/batch-truncation
+irreversibly excludes a pair) rather than only after. Understanding still
+never becomes sole authority under the recommended Discovery Gate above
+-- Proposition Identity evidence remains a hard requirement, per the
+Proposition Firewall section.
+
+==================================================
+PHASE D STATUS
+==================================================
+
+**Phase D should WAIT.** This forensic did not attempt to determine
+whether Family Formation CAN safely consume W+L evidence for real missed
+relations (that requires implementing and qualifying the Discovery Gate
+above, not authorized here) -- and BestTake/DeliveryScorer consumption
+(D-160's original Phase-D candidate, per D-159's own "exact next
+capability" note) requires a STABLE competitor set to compare within,
+which Family Formation is not yet proven to reliably produce for the
+named critical cases. Recommending Family-Formation reachability be
+resolved (or explicitly deferred by the Product Owner) before Phase D.
+
+**Confirmations:** NO CODE CHANGE. NO RAW. NO provider call. NO new
+pairing, grouping, BestTake, DeliveryScorer, Boundary, Pacing, or
+fallback change. D-123/D-128/D-145-D-153/D-154/D-155/D-156/D-157/D-158's
+implementation all preserved CLOSED, untouched. D-159 remains PARTIALLY
+PROVEN, not CLOSED (unaffected by this forensic; its own entry is not
+rewritten -- the diagnosis-case correction above stands as new evidence
+in THIS entry only).
+
+**HUMAN ACTION REQUIRED:** YES (conditions A/G) -- whether to authorize
+building the WATCH+LISTEN RELATION DISCOVERY GATE described above (a new
+capability, not yet implemented), whether/how to address the render-
+layer artifact this forensic newly surfaced for the diagnosis clip
+(separate from Family Formation, a Boundary/render forensic candidate),
+and whether Phase D (BestTake/DeliveryScorer consumption) should continue
+to wait on Family-Formation reachability, are Product Owner decisions.
