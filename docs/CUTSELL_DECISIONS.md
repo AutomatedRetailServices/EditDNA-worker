@@ -19457,3 +19457,356 @@ measurement independent of Boundary's own trims) -- this task's own
 directive requires STOP before that work; Phase 1 itself required no
 escalation (no protected authority touched, no paid infrastructure, no
 RAW) and is complete as scoped.
+
+
+## D-143 -- Video00 full commercial-parity audit (RAW -> Cut.ai -> CutSell -> Human Gold, measurement only)
+
+**Status: AUDIT ONLY. Zero code changes. Zero fixes. Exactly ONE Video00 RAW
+(Modal run `34226872846`, head `05219ee`) authorized and dispatched.**
+
+**1) RAW identity.** `Editdna longform validation/VIDEO-2026-07-30-09-18-03.mp4`,
+canonical production path, default parameters (no `hybrid_max_edit_usd`/
+`bridge_complete_pairwise_singleton` overrides). Prior comparable run used
+for cross-run comparison per this task's own instruction: Modal run
+`34184212589` (head `ab40adad`, D-134, the immediately preceding Video00
+RAW on this branch, itself CI-"failure" on the same two hard-QA-gate steps
+this run also fails — same failure SHAPE, not a new failure mode).
+
+**2) Whole-video editorial parity matrix (selection scope, this run):**
+
+| region | Cut.ai membership match | Cut.ai realization match | Boundary match | Pacing (D-142) | Human Gold match | status | root cause |
+|---|---|---|---|---|---|---|---|
+| Hook (8.37-11.89) | yes | yes | NO (loose exit edge, +0.84s kept) | HARD_CUT (no Boundary trim recorded at this edge) | yes | CUTAI_GAP | BOUNDARY |
+| Early setup (13.78-46.42) | yes | yes | NO (loose exit edge x2, +0.79s/+1.05s) | HARD_CUT | yes | CUTAI_GAP | BOUNDARY |
+| Body/symptoms (48.45-104.32) | yes | yes | NO (tight_edge -0.52s; process-tail retained +0.84s) | mixed HARD_CUT | mostly (1 Gold-only tighten) | CUTAI_GAP (partial) | RECORDING_PROCESS_REMOVAL + BOUNDARY |
+| Sonography (35.46-46.42, 104.37-134.87) | yes | yes | mixed (tight_edge -0.34s/-0.16s) | HARD_CUT | mostly | CUTAI_GAP (minor) | BOUNDARY |
+| Diagnosis (135.44-158.14) | NO -- an ungrouped verbatim retry of the diagnosis sentence survives immediately after the kept realization (138.59-140.57, 1.98s) | partial | yes (no Boundary defect at this specific span) | HARD_CUT | NO (order check fails downstream) | CUTAI_GAP | RETRY_IDENTITY |
+| Pimples -- acné espalda (185.24-198.12) | yes, family `f038ea2f` resolved winner | yes | yes | HARD_CUT/TIGHT_CUT mix | yes (LEVEL_3, matches/exceeds Gold) | CUTAI_PASS | n/a |
+| Pimples -- espinillas (191.77-211.02) | **NO** -- family `tg_26c069cdca871a3e0b` real winner `clip_f6762951b0ffb02b4283` (DeliveryScorer top AND semantic winner agree, `case_b_conflict_present:false`); **both Cut.ai and Human Gold instead chose the sibling realization `clip_37639d71f9f7fe05c868`** | NO | n/a (wrong member, not a trim issue) | HARD_CUT | NO | **CUTAI_GAP (material, regressed vs the immediately prior run, where this pair did not even form a family)** | **BEST_TAKE** |
+| Sonography-order / diagnosis-order composite check | -- | -- | -- | -- | -- | CUTAI_GAP (hard regression-QA failure, `sonography_good_before_diagnosis`) | RETRY_IDENTITY (same duplicate as above breaks the required anchor sequence) |
+| Stomach (233.18-270.17) | yes, family `9653c07e`-equivalent this run resolved | partial (RealizationResolver restored `clip_177d10279f899972d3bc`, 268.39-269.37, that BOTH references reject) | yes | HARD_CUT | partial | CUTAI_GAP (minor, 0.98s) | CONTINUATION_RELATION / MEANING_SUFFICIENCY (RealizationResolver over-restoration) |
+| Family/Hereditary (295.52-345.4) | yes overall; one fragment ("cánceres son hereditarios.", 337.88-341.63) correctly discarded THIS run (LEVEL_3, matches Gold over Cut.ai -- improved vs the prior run, where the same fragment was wrongly kept) | yes | yes | HARD_CUT | mostly (Gold tightens further in places) | CUTAI_PASS (this specific fragment); residual HUMAN_GOLD_ONLY_GAP elsewhere in the block | n/a |
+| Conclusion/CTA (356.21-366.997) | yes (`cta_preserved` passes; core CTA line LEVEL_3) | yes | yes | HARD_CUT | yes on the core line; Gold trims a little further at the edges | CUTAI_PASS (CTA line); HUMAN_GOLD_ONLY_GAP (edge trim only) | n/a |
+| "Quiero sonar a conspiracion" transition (276-283.67) | NO | yes | n/a | HARD_CUT | NO | CUTAI_GAP (minor, 0.45s) | RECORDING_PROCESS_REMOVAL |
+
+**3-12) Per-region status summary:** HOOK=CUTAI_GAP(BOUNDARY, minor);
+EARLY SETUP=CUTAI_GAP(BOUNDARY, minor); BODY/SYMPTOMS=CUTAI_GAP(RECORDING_
+PROCESS_REMOVAL+BOUNDARY, minor); PIMPLES=**CUTAI_GAP, material and
+regressed** (acné-espalda sub-family is CUTAI_PASS/LEVEL_3; espinillas
+sub-family is the run's single largest Level-1 contributor, 17.89s,
+BEST_TAKE); SONOGRAPHY=CUTAI_GAP(BOUNDARY, minor) with the standing
+`sonography_good_before_diagnosis` order failure attributable to the
+Diagnosis region's RETRY_IDENTITY defect, not to sonography's own
+membership/boundary; DIAGNOSIS=CUTAI_GAP(RETRY_IDENTITY, standing across
+both runs); STOMACH=CUTAI_GAP(CONTINUATION_RELATION/MEANING_SUFFICIENCY,
+minor); FAMILY/HEREDITARY=mostly CUTAI_PASS this run (one fragment
+improved vs the prior run); CONCLUSION/CTA=CUTAI_PASS on the core CTA
+line, HUMAN_GOLD_ONLY_GAP on edge tightening only.
+
+**13) Conclusion candidate map.** RAW conclusion-zone attempts (295.52-345.4s):
+(a) `64a414d55110`/`7cd...55110`-family opening ("Esta es mi experiencia...
+única en mi familia...") -- COMPLETE, clean, LEVEL_3 both runs, structured
+winner both runs, Cut.ai used the SAME complete realization Human Gold
+also uses (no partial-continuation shape here); (b) "Soy la primera en mi
+familia..." continuation -- Cut.ai keeps it, Human Gold does NOT (Gold's
+conclusion is measurably TIGHTER than Cut.ai's here), CutSell correctly
+follows GOLD over Cut.ai in this specific instance (LEVEL_3
+`matches_gold_over_cutai`) both runs; (c) "cánceres son hereditarios."
+singleton -- an UNGROUPED RETRY of content already covered in (a)'s
+"...está comprobado científicamente que los cánceres son hereditarios"
+clause; WRONGLY kept in the prior run (LEVEL_1), CORRECTLY discarded this
+run (LEVEL_3) -- the SAME underlying RETRY_IDENTITY defect class as the
+Diagnosis-zone duplicate, just non-deterministically resolved differently
+run to run; (d) the CTA line itself -- COMPLETE, clean, LEVEL_3 both runs.
+
+**14) Useful-partial-continuation result.** The "bad-take-but-good-final-
+subspan" doctrine shape (D-097.x's stomach/pimples precedent) was NOT
+observed as the operative defect in this RAW's conclusion zone this run --
+no candidate here is a genuinely bad/abandoned full take whose only value
+is a salvageable tail. The zone's real defect is a same-content
+duplicate/retry surviving ungrouped (RETRY_IDENTITY), a distinct failure
+mode from continuation-subspan salvage. The doctrine itself remains
+architecturally valid (proven elsewhere in D-097.x); it simply has no live
+instance in this specific region this run -- do not read this as the
+doctrine being disproven.
+
+**15) Minimal composite doctrine result.** No evidence this run of an
+improper composite or an improperly-merged complementary pair; the one
+CompositeResolver/PreResolverCleanup Level-1 item (a 0.84s fragment
+"Al terminar mi contrato hablé con mi ginecóloga..." wrongly deleted as
+`false_delete_outside_family` when Cut.ai+Gold both keep it) is a
+SLOT_COMPLETION under-restoration, not a composite/complementary-merge
+defect -- the doctrine's COMPETE-vs-MINIMAL-COMPOSITE distinction is not
+implicated by anything found this run.
+
+**16) Pimples: full re-audit (per this task's explicit "do not trust
+offline fixture success" instruction).** Two DISTINCT sub-regions, never
+merged: (a) acné-espalda (185.24-198.12s), family `f038ea2f`, CUTAI_PASS
+and LEVEL_3 (matches/exceeds Gold) both runs -- the D-097.2 R1 fix here
+holds. (b) espinillas (191.77-211.02s), family `tg_26c069cdca871a3e0b`
+THIS RUN ONLY (the immediately prior run reported `pimples_clips_present_
+but_no_multi_member_family_or_no_usable_realization_row` -- i.e. these
+same clips did not even form a retry family last time): semantic winner
+== DeliveryScorer winner == `clip_f6762951b0ffb02b4283`
+(`case_b_conflict_present:false`, so D-123/D-128 never fire -- there is no
+disagreement for them to gate), yet BOTH Cut.ai and Human Gold chose the
+OTHER member (`clip_37639d71f9f7fe05c868`). Regression-QA confirms real
+damage: `pimples_micro_2_present` FAILED (missing_required_segment) and
+`pimples_bad_monolith_absent` FAILED (historical_bad_take_returned) --
+this run reintroduced a specific bad-take shape D-097.2 R1's own forensic
+fix was built to keep out. Status: **CUTAI_GAP, material, root cause
+BEST_TAKE** (the deterministic DeliveryScorer signal itself ranks the
+wrong member higher; this is not a D-123 disagreement case since both
+signals agree on the same wrong answer).
+
+**17) Sonography.** RAW carries one abandoned early attempt (23.28-35.37s,
+correctly consensus-deleted both runs) and one clean, complete
+realization (35.46-45.37s setup + 128.14-133.55s result), both correctly
+selected both runs, matching Cut.ai membership. The standing gap is NOT
+in sonography's own selection/boundary -- both runs' only sonography-zone
+Level-1 items are small Boundary loose/tight-edge amounts (<=1.05s each).
+`sonography_good_before_diagnosis` remains a MEANINGFUL, real, standing
+gap -- but its root cause lives downstream in the Diagnosis zone's
+RETRY_IDENTITY duplicate (Section 13/16 root-cause table), which the
+strict 4-anchor order-checker cannot pass through without extra
+unexpected content between the anchors. Classify this as ONE gap
+(RETRY_IDENTITY), not two.
+
+**18) Diagnosis.** Papillary diagnosis meaning preservation: PASSED both
+runs (`papillary_diagnosis_preserved`, `papillary_symptom_realization_
+meaning`) -- polarity/negation/completeness intact, D-106 not reopened
+(no meaning evidence regressed). Preferred-REALIZATION parity
+(`papillary_symptom_realization_parity`) fails both runs but is
+explicitly non-gating and Human-Gold-only (CutSell picks a different, but
+still meaning-sufficient, equivalent realization of the "sintomas que
+tuve..." continuation than the one both Cut.ai and Gold happen to share).
+The one real, hard-gating defect in this zone is the RETRY_IDENTITY
+duplicate (Section 13), standing across both runs, unchanged by D-142.
+
+**19) Stomach / Family / Hereditary-cancer -- audited independently, never
+merged by topic/speaker.** Stomach: one real family this run
+(digestion/endoscopy), correctly resolved, boundary-clean; one 0.98s
+CONTINUATION_RELATION/MEANING_SUFFICIENCY gap (RealizationResolver
+restored a fragment neither reference wants). Family/hereditary: mostly
+CUTAI_PASS this run, with the "cánceres son hereditarios." RETRY_IDENTITY
+instance correctly resolved this run (improved vs. prior run -- see
+Section 13c; not attributed to any specific fix, since none was made).
+These are governed by entirely separate proposition/retry identities and
+were never treated as one region by this audit.
+
+**20) CTA.** Single required CTA line ("Por eso cuídate, alimentate bien,
+hidrátate y haz ejercicio.") -- `cta_preserved` PASSED both runs, LEVEL_3
+(matches both Cut.ai and Gold) both runs. No duplicate CTA candidates
+exist in this RAW's transcript; no abrupt-transition or missing-setup
+defect found; the only CTA-adjacent difference from Gold is a small
+edge-tightening preference (Gold trims slightly more at 356.21s) --
+HUMAN_GOLD_ONLY_GAP, not a Cut.ai gap. Status: CUTAI_PASS.
+
+**21) Pacing / D-142 (first live exercise of this pass on a real RAW).**
+`stage_status.dialogue_pacing_transition = "dialogue_pacing_transition_
+phase1_planned"` -- confirmed the pass ran and completed without error on
+this run's real, frozen, Boundary-approved selection. The full per-
+transition `draft.diagnostics["dialogue_pacing_transition"]` block
+(transition_count, mode_counts, tight_cut_count, hard_cut_count,
+total_gap_removed_sec, fallback_count, fallback_reasons) is NOT visible in
+this run's CI log tail -- "Print full canonical diagnostics" emits it
+before the D-119/D-125-style tail-safe summaries run, so it scrolled
+outside this tool's ~5000-line retrieval window exactly as D-119/D-125
+independently fixed for boundary/Watch+Listen/D-123 diagnostics. **This is
+a genuine, newly-discovered observability gap this audit surfaces: D-142
+needs its own D-119/D-125-shaped tail-safe compact summary step** (not
+built here -- audit only, no fixes). What IS independently confirmed
+without that summary: every join in this render is representable only as
+HARD_CUT or TIGHT_CUT (D-142 Phase 1's own contract makes J_CUT/L_CUT/
+MICRO_AUDIO_OVERLAP unreachable, verified by code, not by log inspection)
+-- so no region "feels slower/looser than Cut.ai" for a pacing-owned
+reason; every LEVEL_1 pacing-adjacent difference found this audit (loose/
+tight edges) is attributed to BoundaryEngine, never to Dialogue/Pacing
+Transition, consistent with D-142 having zero editorial/physical
+authority in Phase 1.
+
+**22) Selection Level-1 (this run, selection scope):** 22 regions /
+35.61s (0.2122 of Cut.ai's own keep duration). **Boundary Level-1:** 16
+regions / 3.477s (selection-scope table) rising to 22 boundary-scope
+Level-1 rows once render-verified. **Overall physical Level-1 (rendered
+MP4):** 13 regions / 26.023s selection + 22 regions / 3.737s boundary.
+
+**23) F1 vs Cut.ai:** selection-scope 0.8191; rendered/physical 0.8396.
+**24) F1 vs Human Gold:** selection-scope 0.7816; rendered/physical
+0.8114. (Cut.ai-vs-Gold's own ceiling is 0.8996 both runs -- CutSell has
+real room below even that ceiling.)
+
+**Comparison to the immediately prior comparable run (`34184212589`,
+D-134):** LEVEL_1 selection seconds 20.96->35.61 (+70%), F1 vs Cut.ai
+0.8363->0.8191, F1 vs Gold 0.8349->0.7816, a NEW render-order inversion
+appeared (0->1), and TWO NEW Level-1 authority buckets appeared this run
+that were not Level-1 contributors last run: BestTakeResolver (17.89s,
+the single largest bucket) and RealizationResolver (0.98s). D-142's own
+diff is diagnostics-only and independently proven (by its own regression
+tests, Section 21) to touch nothing upstream of Boundary -- it is not a
+plausible cause of this delta. The most concrete, evidenced driver is the
+Section 16 pimples/espinillas BestTakeResolver miss, which did not even
+have a family to decide on in the prior run. Per this task's own
+instruction not to attribute run-to-run change to a mechanism without
+causal evidence: the EXACT commit responsible for the espinillas pair now
+forming a family (a grouping-stage change) is NOT identified by this
+audit and is the single most important open question this audit raises --
+named in Section 28 as the top investigation priority, not attributed to
+D-142/D-141/D-140/D-138/D-128/D-123 (all independently confirmed inert on
+this pathway).
+
+**25) Cut.ai gap inventory (deduplicated general root causes, this run):**
+- GAP-1 root_cause=BEST_TAKE; affected_regions=Pimples(espinillas);
+  evidence=family `tg_26c069cdca871a3e0b`, semantic+DeliveryScorer AGREE
+  on `clip_f6762951b0ffb02b4283`, both Cut.ai+Gold chose the sibling;
+  regression-QA `pimples_micro_2_present`+`pimples_bad_monolith_absent`
+  FAILED; reusable_abstraction="DeliveryScorer's local-performance-event
+  heuristic can outrank the commercially/humanly preferred realization
+  even with zero D-123 disagreement -- the ranking signal itself, not the
+  disagreement gate, needs review"; owning_layer=BestTakeResolver/
+  DeliveryScorer (take_judge.py + deterministic_best_take_authority.py).
+- GAP-2 root_cause=RETRY_IDENTITY; affected_regions=Diagnosis,
+  Sonography-order-check, (intermittently) Family/Hereditary; evidence=
+  ungrouped verbatim retries of an already-kept idea survive as extra
+  Level-1 fragments both runs (Diagnosis: stable; hereditary: resolved
+  this run, unresolved last run); reusable_abstraction="a later near-
+  verbatim retry of an idea already kept is not always clustered into the
+  same retry family, so both copies can survive"; owning_layer=
+  IdeaClusterer/RetryFamilyFormation.
+- GAP-3 root_cause=BOUNDARY; affected_regions=Hook, Early setup, Body/
+  symptoms, Sonography edges; evidence=repeated `loose_exit_edge`/
+  `tight_edge` sub-1.1s Level-1 rows, 16-22 regions depending on scope;
+  reusable_abstraction="Boundary's edge-tightening precision does not
+  always match Cut.ai's own cut points by a fraction of a second";
+  owning_layer=BoundaryEngine.
+- GAP-4 root_cause=RECORDING_PROCESS_REMOVAL; affected_regions=Body/
+  symptoms, the "quiero sonar a conspiracion" transition; evidence=
+  `failed_or_process_material_retained` Level-1 rows, small trailing
+  process-only fragments kept; reusable_abstraction="a clip's trailing
+  process-only material is not always fully separated from its useful
+  content"; owning_layer=AttemptReconstructor.
+- GAP-5 root_cause=CONTINUATION_RELATION / MEANING_SUFFICIENCY;
+  affected_regions=Stomach; evidence=RealizationResolver restored a
+  0.98s fragment neither reference wants; reusable_abstraction="a
+  restoration decision can add back a realization that is meaning-
+  sufficient in isolation but not the one either commercial or human
+  editor actually wanted"; owning_layer=RealizationResolver.
+- GAP-6 root_cause=SLOT_COMPLETION; affected_regions=Body/symptoms (the
+  0.84s "Al terminar mi contrato hablé con mi ginecóloga..." fragment);
+  evidence=`false_delete_outside_family`, both references keep it,
+  CutSell drops it; reusable_abstraction="a pre-resolver cleanup pass can
+  delete a fragment that belongs to an existing slot rather than
+  restoring it"; owning_layer=CompositeResolver/PreResolverCleanup.
+
+**26) Human-Gold-only gap inventory (CutSell~Cut.ai but Gold better --
+never a Level-1 blocker, never prioritized ahead of the above):** edge-
+level tightening Gold applies beyond Cut.ai at multiple points in Body/
+symptoms, Sonography, Family/hereditary, and the CTA edge (LEVEL_2
+`gold_removes_cutai_keeps` rows, 11 regions / 27.49s this run); the
+papillary-symptom continuation preferred-realization mismatch (Section
+18); Gold's tighter overall conclusion-zone edit (Section 13b). None of
+these gate `qa_pass` and none are treated as Cut.ai gaps.
+
+**27) Deduplicated general root causes (union of Section 25):**
+BEST_TAKE, RETRY_IDENTITY, BOUNDARY, RECORDING_PROCESS_REMOVAL,
+CONTINUATION_RELATION/MEANING_SUFFICIENCY, SLOT_COMPLETION. Six distinct,
+reusable, video-agnostic categories -- no per-timestamp gap list, no
+Video00-specific rule proposed for any of them.
+
+**28) Highest-priority root cause (per this task's own ranking rule --
+meaning/safety, then Cut.ai commercial impact, then frequency, then
+generalization value, then architecture ownership):** No candidate
+involves a meaning/safety violation (tie at criterion 1). By commercial
+impact (duration): GAP-1 BEST_TAKE (17.89s, the single largest Level-1
+bucket this run, and the one with a hard regression-QA failure attached)
+ranks first, ahead of GAP-3 BOUNDARY's larger region COUNT but smaller
+per-instance impact. GAP-1 is also the only gap this audit found to be a
+REGRESSION (a previously-fixed bad-take shape reappearing) rather than a
+standing residual -- raising its generalization value and urgency: an
+unstable BestTake ranking signal that can flip a family's winner run-to-
+run (Section 24) is a stability concern independent of this specific
+video. **RECOMMENDATION: the next engine capability is a root-cause
+investigation of the DeliveryScorer/BestTakeResolver ranking signal for
+the Pimples/espinillas family shape -- specifically why its local-
+performance-event heuristic outranks the commercially-and-humanly
+preferred realization when both signals agree (so D-123's disagreement
+gate never applies), and why the same clip pair's family-formation status
+itself changed between two consecutive runs.** This is a diagnosis
+target, not a patch -- no fix is proposed or implied here.
+
+**29) Owning engine layer:** BestTakeResolver / DeliveryScorer
+(`cutsell_worker/take_judge.py`, `cutsell_worker/deterministic_best_take_
+authority.py`) for GAP-1's ranking question; IdeaClusterer/grouping
+(`cutsell_worker/pipeline.py`'s grouping stage, `semantic_idea_
+equivalence.py`) for GAP-1's family-formation-instability question and
+GAP-2.
+
+**30) Watch+Listen result:** overall status **FAIL** (advisory, never
+auto-PASS) both runs. `capability_status_counts`: EVALUATED_PASS=2
+(`cut_adjacent_speech_energy_mp4`, `repeated_audience_content_
+transcript`), EVALUATED_FAIL=1 (`reset_debris_at_edges_source_evidence`,
+13 findings this run vs 15 the prior run, all routed to BoundaryEngine),
+UNCERTAIN=1 (`interior_dead_air_mp4`, 2 findings), NOT_IMPLEMENTED=4
+(`facial_expression_post_line`, `gesture_continuity_across_cut`,
+`clipped_phoneme_asr_realign`, `framing_and_eye_contact`) -- **never
+silently treated as PASS**, reported here exactly as NOT_IMPLEMENTED.
+`technical_qc_status`: PASS.
+
+**31) Technical QC:** PASS both runs (`live_render_qc`/post-render QC
+gate). `delivery_status`: `DELIVERABLE_PENDING_HUMAN_WATCH_LISTEN:
+perceptual=FAIL` both runs (a deliverable render exists; perceptual
+Watch+Listen still requires human sign-off per its own advisory-only
+contract). `failed_check_count` (regression-QA manifest): **4 this run**
+(up from 1 the prior run) -- `pimples_micro_2_present`, `pimples_bad_
+monolith_absent`, `pimples_micro_order`, `sonography_good_before_
+diagnosis`.
+
+**32) Freeze/architecture status:** `architecture_verified: true`,
+`freeze_blocked: false` both runs -- Selection Freeze and the D-095
+active-path-identity check both PASS; the render used IS the code that
+produced this run's decisions (CODE EXISTS == VIDEO USED IT, confirmed).
+
+**33) GENERALIZATION READINESS: D -- REGRESSION, CURRENT ENGINE WORSE
+THAN THE IMMEDIATELY PRIOR COMPARABLE BASELINE.** Justified strictly on
+Cut.ai-gap evidence, never on Human-Gold-only differences (per this
+task's own instruction): LEVEL_1 selection seconds +70% (20.96s->35.61s),
+F1 vs Cut.ai down (0.8363->0.8191), a real regression-QA content-coverage
+failure appeared (`pimples_micro_2_present`: missing_required_segment)
+alongside a previously-fixed bad-take shape reappearing (`pimples_bad_
+monolith_absent`: historical_bad_take_returned), and a new render-order
+inversion appeared. D-142 (this task's only code change) is independently
+proven inert on every pathway responsible for this delta.
+
+**34) Can Video00 stop being the primary development RAW?** **NO, not
+yet** -- not because the residual Cut.ai gaps are too large in the
+abstract, but because this audit found a REAL regression whose causal
+commit is unidentified; moving to unseen-RAW generalization now would
+mean generalizing an unstable baseline. Video00 remains the required
+diagnostic RAW until GAP-1's ranking-signal/family-formation-stability
+question (Section 28) is investigated and the regression is understood
+(root-caused, not necessarily reverted -- the fix, if any, is a future
+Product Owner decision).
+
+**35) Exact next engine capability (recommended, not authorized here):**
+a root-cause investigation (diagnose-only, no RAW required beyond
+existing artifacts + offline replay against the persisted result JSONs
+from runs `34184212589` and `34226872846`) into (a) why the DeliveryScorer/
+BestTakeResolver ranking signal prefers the wrong member of the Pimples/
+espinillas family even when semantic and DeliveryScorer signals agree,
+and (b) why that same clip pair's retry-family membership itself differs
+between two consecutive runs of materially similar code. A secondary,
+lower-priority follow-up: a D-142-shaped tail-safe compact diagnostics
+summary step (mirroring D-119/D-125) so `dialogue_pacing_transition`'s
+real per-run numbers are visible in future CI logs without exceeding the
+tail-cap.
+
+**Scope confirmed:** exactly ONE Video00 RAW dispatched and consumed (no
+second dispatch); zero code/threshold/prompt changes; zero provider
+calls; D-123/D-128/D-138/D-140/D-141/D-142 all preserved CLOSED and
+independently reconfirmed inert on every pathway this audit's findings
+implicate; no J/L/micro-overlap implementation; no iOS work.
+
+**HUMAN ACTION REQUIRED:** YES (condition A/G) -- whether to authorize
+the Section 35 root-cause investigation (and, separately, whether/when to
+revisit the unseen-RAW generalization question once that investigation
+concludes) is the Product Owner's decision, not made here.
