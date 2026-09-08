@@ -18670,3 +18670,168 @@ to root-cause a genuine, real, reproducible blocker.
 **HUMAN ACTION REQUIRED:** YES (condition A, product decision) -- which
 of the three next-gate options above (or another) to pursue is the
 Product Owner's decision, not made here.
+
+## D-140 -- multimodal BestTake fallback model comparison: Gemini 3.6
+Flash vs D-138 OpenAI (REAL comparison obtained, VERDICT B -- GPT-4o-mini
+D-138 wins on the strict priority ranking)
+
+**Scope authorized:** ONE fresh bounded provider comparison, Gemini 3.6
+Flash (D-139's own Google-directed migration target after `gemini-2.5-
+flash` was proven retired) vs the persisted D-138 OpenAI `gpt-4o-mini`
+baseline, SAME hardened contract, SAME 9 fixtures, to obtain a genuine
+apples-to-apples editorial comparison before selecting the current
+CutSell Class B fallback candidate. No live activation, no Phase 3.
+
+**1) Model migration (reuse, not rebuild):** `multimodal_besttake_
+gemini.py`'s `REQUIRED_MODEL_ID` updated from `gemini-2.5-flash` to
+`gemini-3.6-flash` -- the exact migration target Google's own D-139 API
+response named. No other generation/provider substituted. `GeminiMultimodal
+BestTakeArbiter` reused completely unchanged (zero provider-abstraction
+rework). 4 new targeted tests confirm the migration and independently
+corroborate `gemini-3.6-flash` is a real, currently-served model via this
+repo's own pre-existing `hybrid_provider_settings.py` escalation-model
+default (same id, proving this is not a guess).
+
+**2) Model availability CONFIRMED via real API (CI run `34216117401`):**
+`gemini-3.6-flash confirmed available and supports generateContent`
+(real `ListModels` catalog check) followed by a real diagnostic
+`generateContent` call returning **HTTP 200** (SUCCEEDED) -- unlike
+D-139's `gemini-2.5-flash` 404, this model is genuinely callable. The
+full 8-case bounded batch then ran for real (eval step took ~56s,
+consistent with real model-inference latency, not an instant failure).
+
+**3) REAL case-by-case comparison (OpenAI D-138 persisted vs Gemini
+D-140 real judgments), classified per this task's stricter EXACT_CORRECT
+/ SAFE_ABSTAIN / INCORRECT / UNSAFE_REGRESSION / NOT_INVOKED / PROVIDER_
+ERROR vocabulary (an ambiguity-target expected outcome -- SHOULD_
+EQUIVALENT/SHOULD_UNCERTAIN -- is satisfied exactly by an EQUIVALENT/
+UNCERTAIN answer; a decisive-target expected outcome -- SHOULD_SELECT_A/
+B, SHOULD_TRIM_EXIT -- requires the exact matching decisive outcome for
+EXACT_CORRECT, with UNCERTAIN/EQUIVALENT scored SAFE_ABSTAIN instead):**
+
+| case | expected | OpenAI D-138 | Gemini D-140 | OpenAI class | Gemini class | case winner |
+|---|---|---|---|---|---|---|
+| `pimples_shaped_positive` (critical) | SHOULD_SELECT_B | UNCERTAIN | **BEST_TAKE A** (conf 0.68) | SAFE_ABSTAIN | **INCORRECT** | OpenAI |
+| `papillary_equivalent_realization_negative` | SHOULD_EQUIVALENT | UNCERTAIN | **BEST_TAKE A** (conf 0.68) | EXACT_CORRECT | **INCORRECT** | OpenAI |
+| `stomach_retry_negative` | SHOULD_UNCERTAIN | UNCERTAIN | UNCERTAIN (conf 0.5) | EXACT_CORRECT | EXACT_CORRECT | tie |
+| `complementary_content_negative` | SHOULD_UNCERTAIN | UNCERTAIN | UNCERTAIN (conf 0.5) | EXACT_CORRECT | EXACT_CORRECT | tie |
+| `polarity_negation_safety_negative` | SHOULD_SELECT_A | UNCERTAIN | **BEST_TAKE A** (conf 0.7) | SAFE_ABSTAIN | **EXACT_CORRECT** | Gemini |
+| `legitimate_clean_retry_negative` | N/A | NOT_INVOKED | NOT_INVOKED | NOT_INVOKED | NOT_INVOKED | tie |
+| `semantic_deliveryscore_disagreement_negative` (D-123 protected) | SHOULD_SELECT_A | UNCERTAIN, `winner_would_change=false` | UNCERTAIN (conf 0.55), `winner_would_change=false` | SAFE_ABSTAIN | SAFE_ABSTAIN | tie -- both safe, neither reversed |
+| `ambiguous_tied_performance_negative` | SHOULD_EQUIVALENT | UNCERTAIN | UNCERTAIN (conf 0.5) | EXACT_CORRECT | EXACT_CORRECT | tie |
+| `boundary_only_exit_negative` | SHOULD_TRIM_EXIT | UNCERTAIN | **GOOD_TAKE_TRIM_EXIT** (conf 0.7) | SAFE_ABSTAIN | **EXACT_CORRECT** | Gemini |
+
+**4) Aggregate metrics:**
+
+| metric | OpenAI D-138 | Gemini D-140 |
+|---|---|---|
+| exact_correct | 4 | 5 |
+| safe_abstain | 4 | 1 |
+| incorrect | 0 | **2** |
+| unsafe_regression | 0 | 0 |
+| provider_error | 0 | 0 |
+| meaning_safety_violations | 0 | 0 |
+| not_invoked | 1 | 1 |
+| positive_case_exact_resolution | 0/1 (safe miss) | 0/1 (**unsafe miss** -- confident wrong pick) |
+| negative_control_preservation | 8/8 safe (0 incorrect) | 7/8 safe (**1 incorrect: papillary**) |
+
+**5) Model-selection priority ranking (applied strictly, in the
+directive's own stated order):** (1) meaning/safety preservation -- TIE
+(0 violations each); (2) zero unsafe negative-control regressions --
+TIE (0 each, the D-123 disagreement case stayed safe for both); **(3)
+fewer incorrect judgments -- OpenAI WINS decisively (0 vs 2)**. Per the
+directive's own strict lexicographic ranking, this criterion is decided
+before priorities 4-7 (exact positive resolution, unnecessary
+abstentions, latency, cost) are even consulted -- Gemini's real
+strengths on priorities 4/5 (below) do not get a chance to outweigh
+criterion 3.
+
+**6) Gemini's genuine strengths, recorded honestly (not disqualifying,
+but real):** Gemini achieved **2 EXACT_CORRECT decisive resolutions**
+OpenAI only safely abstained on -- `polarity_negation_safety_negative`
+(exact structured-safe pick) and `boundary_only_exit_negative` (exact
+`GOOD_TAKE_TRIM_EXIT`, the most precise possible answer for that
+fixture). Under the SAME exact hardened prompt, Gemini is measurably
+less conservative and, on these two cases, more useful. This is a real
+finding worth a future prompt-tuning iteration specifically for Gemini,
+not a reason to override the directive's own priority-3 ranking here.
+
+**7) Gemini's genuine weaknesses, recorded honestly:** on the SAME exact
+prompt that kept OpenAI at zero incorrect answers, Gemini manufactured a
+confident decisive pick on 2 cases specifically designed to test against
+that exact failure mode -- the single critical positive case
+(`pimples_shaped_positive`, expected `SHOULD_SELECT_B`, Gemini
+confidently chose A) and a negative control built to require `EQUIVALENT`
+(`papillary_equivalent_realization_negative`, Gemini confidently chose A
+again). Neither is a meaning-safety violation or a winner-flipping
+regression (both picks matched the pre-existing structured winner `A`,
+so `winner_would_change=false` in both cases) -- but both are real,
+avoidable misses on exactly the abstention doctrine this whole hardening
+effort exists to instill, and OpenAI (identical prompt) did not make
+either mistake.
+
+**8) Latency (real, 8 applicable calls each):** OpenAI D-138 (persisted):
+sum 18740.8 ms, mean 2342.6 ms, min 1182.4 ms, max 4688.8 ms. Gemini
+D-140 (real): **sum 53324.8 ms, mean 6665.6 ms, min 4558.9 ms
+(`boundary_only_exit_negative`), max 10362.4 ms
+(`complementary_content_negative`)** -- roughly 2.8x slower on average
+than OpenAI under this exact bounded contract.
+
+**9) Usage (real, provider-reported, no cost invented):** Gemini exposes
+richer per-call token categories than OpenAI's Responses API, including
+image-vs-text prompt-token splits and an internal reasoning
+(`thoughtsTokenCount`) category. Aggregate across the 8 applicable calls:
+`promptTokenCount` sum 31086, `candidatesTokenCount` (output) sum 540,
+`thoughtsTokenCount` sum 7568, `totalTokenCount` sum 39194. D-138's own
+persisted OpenAI total (same 8 applicable calls, same instruction/evidence
+payload) was `input_tokens` sum 57998 + `output_tokens` sum 423 = 58421.
+Gemini's real total (39194) is LOWER than OpenAI's, primarily because
+Gemini's `promptTokenCount` (31086) reflects a more compact per-request
+encoding of the same payload than OpenAI's equivalent `input_tokens`
+(57998) -- but Gemini spends a meaningful share of its own budget on
+internal reasoning tokens (`thoughtsTokenCount` 7568, ~19% of its total)
+that OpenAI's usage object does not surface at all, so the two totals are
+not perfectly apples-to-apples despite covering the same request content.
+No dollar cost invented for either provider -- neither API exposes direct
+billing dollars to this harness.
+
+**10) Regressions:** 113/113 targeted (D-140 + D-139 + D-138 + D-136 +
+D-128), 115/115 (D-123 + Boundary), compileall clean, full offline suite
+3251 passed with the same 5 pre-existing unrelated failures already
+documented in D-136/D-137/D-138/D-139. Zero new failures. D-134/Overlap
+firewall confirmed via grep: no reference to `dialogue_overlap_enabled`/
+`audio_overlap`/`SourceAsset` in any changed file.
+
+**11) MODEL-SELECTION VERDICT: B -- GPT-4O-MINI D-138 WINS**, decided at
+priority criterion 3 (fewer incorrect judgments: 0 vs 2) per this task's
+own strict, ordered ranking rule -- not a claim that Gemini is globally
+worse, and not dismissing Gemini's genuine 2-case exact-resolution
+advantage, which remains recorded for a future targeted iteration. Under
+the current bounded 9-case CutSell calibration contract, `gpt-4o-mini`
+(D-138 hardened prompt) is the safer, more reliable current Class B
+fallback candidate.
+
+**12) Exact next engine gate (not authorized here):** proceed to **PHASE
+3 BOUNDED AUTHORITATIVE ACTIVATION DESIGN** using OpenAI `gpt-4o-mini`
+(D-138) as the selected provider candidate -- a separate, future Product
+Owner decision, never implementation here. A secondary, smaller
+recommendation for a future task: a bounded Gemini-specific prompt
+iteration targeting exactly the 2 real misses found here (the abstention
+doctrine on a tied/equivalent-shaped case), reusing the SAME 9 fixtures,
+before any Gemini reconsideration.
+
+**Scope confirmed:** only 1 code file changed (`REQUIRED_MODEL_ID`
+migration) plus the new targeted test file and workflow docstring
+updates; zero `git diff` against `multimodal_besttake_arbiter.py`'s
+editorial logic, `multimodal_besttake_eval.py`/`multimodal_besttake_eval_
+phase2.py`'s fixtures/scoring, or the OpenAI provider. No live pipeline
+provider call, no production fallback activation, no winner/score/rank/
+grouping/Boundary/Overlap change, no Video00 RAW, no Modal, no RunPod, no
+TestFlight, no Swift/iOS. Exactly ONE Gemini workflow dispatch this task
+(the model-migrated, availability-confirmed, successful real 8-case run)
+-- no exploratory repeat batches.
+
+**HUMAN ACTION REQUIRED:** YES (condition A, product decision) -- whether
+to authorize Phase 3 DESIGN (never implementation) using OpenAI as the
+selected candidate, and/or a future bounded Gemini prompt-iteration task,
+is the Product Owner's decision, not made here.
