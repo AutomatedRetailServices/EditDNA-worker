@@ -241,6 +241,7 @@ def install_semantic_best_take_integrity() -> None:
         semantic_delete_recommended=None,
         deterministic_unusable=None,
         case_b_evidence_by_id=None,
+        semantic_comparative_authority=None,
     ):
         # D-082: `original` (pipeline._semantic_best_take) now takes `ranked`
         # and returns a 3-tuple (selected, preferred, reason) -- passed
@@ -252,6 +253,13 @@ def install_semantic_best_take_integrity() -> None:
         # `single_semantic_winner` early exit (see `_case_b_fast_path_
         # conflict`'s docstring); this wrapper's own three checks below run
         # on whatever `original` already decided, unchanged either way.
+        # D-150: `semantic_comparative_authority` is forwarded verbatim,
+        # never inspected by this wrapper -- same pass-through contract as
+        # `case_b_evidence_by_id` above. It only ever gates `original`'s own
+        # `single_semantic_winner` fast path; this wrapper's own three
+        # checks below run on whatever `original` already decided, and
+        # `None` (every pre-D-150 caller) reproduces the exact call made
+        # before this parameter existed.
         selected, preferred, reason = original(
             members,
             semantic_decisions,
@@ -261,6 +269,7 @@ def install_semantic_best_take_integrity() -> None:
             semantic_delete_recommended=semantic_delete_recommended,
             deterministic_unusable=deterministic_unusable,
             case_b_evidence_by_id=case_b_evidence_by_id,
+            semantic_comparative_authority=semantic_comparative_authority,
         )
         if selected is None:
             # D-097.B: no usable realization -- nothing to protect or prefer.

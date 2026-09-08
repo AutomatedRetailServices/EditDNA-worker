@@ -21284,3 +21284,206 @@ is an append-only new entry).
 Phase B (the actual family-complete + inter-complete-window-agreement
 gate, now fully measurable) is the Product Owner's decision, not made
 here.
+
+## D-150: Semantic Authority Phase B -- family-complete + complete-context-conflict authority gate
+
+**Authorization:** Product Owner directive "CUTSELL -- D-150 SEMANTIC
+AUTHORITY PHASE B / FAMILY-COMPLETE + COMPLETE-CONTEXT-CONFLICT AUTHORITY
+GATE / POST D-149 / GENERAL STABILITY FIX", verified HEAD `c05cb31`
+(D-149). This is a real behavior-affecting fix, not observability/docs --
+the Phase B gate D-149's own entry named as future work.
+
+**What it does.** A provider-backed comparative semantic label
+(`winner`/`alternate`/etc, merged across windows by `family_scoped_
+semantic_decisions`, D-094.3.F8) may only become the AUTHORITATIVE basis
+for `_semantic_best_take`'s decisive `single_semantic_winner` fast path
+when the owning family has a `family_complete_context=="true"` window AND
+D-149's `complete_context_conflict` detector reports no disagreement
+between independently family-complete windows. Otherwise the gate
+ABSTAINs and the fast path is refused, falling through to the untouched
+general ladder (D-081 semantic_delete_recommended check -> attempt
+completeness -> D-063/D-065/D-066 CRITICAL_COVERAGE_DOMINANCE ->
+DeliveryScorer tie-break -> final BestTake). Singleton families
+(`family_member_count < 2`, not a real contest) are always AUTHORITATIVE
+-- there is no comparison to abstain from.
+
+**Authority state contract (`resolve_semantic_comparative_authority`,
+`cutsell_worker/semantic_authority_observability.py`, D-150 new):**
+returns one of four states plus a machine-readable reason:
+- `AUTHORITATIVE` / `not_a_contest_single_member_family` (member count < 2)
+- `AUTHORITATIVE` / `family_complete_context_true_no_conflict` (the safe case)
+- `ABSTAIN_CONFLICT` / `complete_windows_disagree` (D-149's exact detector,
+  reused verbatim as the single source of truth -- no new conflict logic)
+- `ABSTAIN_INCOMPLETE_CONTEXT` / `no_family_complete_window`
+`ADVISORY` is defined as a reserved fourth constant for a future non-
+decisive-but-recorded state; this task's gate never emits it -- only the
+three states above are ever returned, by design (no unused-but-untested
+state is asserted "working").
+
+**`_decision_priority` firewall (the mathematical necessity proof).**
+Building the fixtures proved Phase B is not a no-op: in most complete-
+window-disagreement shapes, the existing per-clip max-`_decision_
+priority` merge already produces a double-winner artifact that already
+fails `_semantic_best_take`'s own `len(winners) == 1` check (D-147's real
+pimples case was accidentally already safe this way). But a genuine gap
+exists -- one decisive complete window (A=winner 0.95, B=alternate 0.7)
+plus one ambiguous complete window (A=alternate 0.6, B=alternate 0.65):
+neither window's assertion about B is strong enough to promote B to
+"winner" in the merge, so the merge yields exactly one winner (A) despite
+D-149 correctly flagging this as `complete_context_conflict=true`
+(different outcome signatures per window). `test_decision_priority_
+cannot_manufacture_authoritative_winner` reproduces this exact shape and
+proves the gate abstains it (`before=DECISIVE, after=NON_DECISIVE`),
+closing the gap the raw priority-merge alone cannot close.
+
+**Fail-open destination.** Confirmed unchanged: an ABSTAIN result never
+invents a new algorithm -- it sets `semantic_comparative_authority` to a
+non-`AUTHORITATIVE` value, which only suppresses `_semantic_best_take`'s
+own `len(winners) == 1` fast-path branch; every existing downstream tier
+(D-081/D-063/D-065/D-066/DeliveryScorer/final BestTake) runs exactly as
+it did before this task for every case that reaches it.
+
+**Implementation location: two files, both additive/optional-parameter.**
+- `cutsell_worker/semantic_authority_observability.py` (D-146/D-149's own
+  module): new constants (`AUTHORITY_ALLOWED`, `AUTHORITY_ADVISORY`,
+  `AUTHORITY_ABSTAIN_CONFLICT`, `AUTHORITY_ABSTAIN_INCOMPLETE_CONTEXT`,
+  reason strings), `resolve_semantic_comparative_authority`, `would_be_
+  decisive_semantic_winner`, `semantic_authority_gate_diagnostics`
+  (composes the two into one diagnostics dict, reusing D-146/D-149's
+  already-computed `family_authority_row` -- no new detector, no re-
+  querying grouping/BestTake/Boundary/Pacing/render), and a rewritten
+  `summarize_family_authority_observability` (fixed a self-introduced
+  iterator-exhaustion bug during development -- the function now
+  materializes `per_family_rows` once and does one pass, adding
+  `semantic_authority_allowed_count`, `semantic_authority_abstain_
+  incomplete_count`, `semantic_authority_abstain_conflict_count`,
+  `semantic_authority_advisory_count`; every D-146/D-149 key unchanged).
+- `cutsell_worker/pipeline.py`: `_semantic_best_take` gains one new
+  trailing keyword-only parameter, `semantic_comparative_authority:
+  str | None = None` -- `None` (every pre-D-150 call site) reproduces
+  byte-identical pre-D-150 behavior. The per-family loop (where `family_
+  authority_diagnostics` was already computed by D-146) now also computes
+  `semantic_authority_gate_diagnostics(...)` and threads its `status`
+  into the real `_semantic_best_take` call and its full dict into `judge_
+  group_diagnostics` via `**semantic_authority_gate` (new keys: `semantic_
+  authority_gate_evaluated`, `_status`, `_reason`, `_before`, `_after`,
+  plus the reused `complete_context_conflict`/`family_complete_context`/
+  `complete_window_agreement_status`; verified no static key collision).
+
+**Production bug found and fixed during this task (not a test-only
+issue).** `cutsell_worker/semantic_best_take_integrity.py`'s `install_
+semantic_best_take_integrity()` monkeypatches `pipeline._semantic_best_
+take` at package-import time with a fixed-signature wrapper. Because
+`pipeline.py`'s own call site invokes the bare module-global name, every
+real call is actually routed through this wrapper, not the raw function
+directly. The wrapper's signature did not know about `semantic_
+comparative_authority` and would have raised `TypeError` the first time
+this task's new call site ran in production (caught by the new test
+file's first `TypeError`, not by import-time or compileall checks). Fixed
+by adding `semantic_comparative_authority=None` to the wrapper's
+signature and forwarding it verbatim to the wrapped original -- the exact
+same pass-through contract this file already uses for D-123's `case_b_
+evidence_by_id`. This wrapper performs its own three independent safety
+checks *after* calling the original and is unaffected by the new
+parameter's value in any of its own logic.
+
+**Non-alteration of family topology / D-148 compatibility.** No grouping,
+membership, retry-family, or window-construction code is touched --
+`family_complete_context`, `complete_window_ids`, and `complete_window_
+agreement` (D-146/D-149) are the sole, unmodified sources of truth this
+gate reads. D-148 Section 13's Watch+Listen multimodal understanding
+layer is unaffected: this gate concerns only comparative *semantic*
+provider labels reaching `_semantic_best_take`'s fast path, never the
+perceptual Watch+Listen reviewer's own routing/advisory behavior.
+
+**Ten-scenario deterministic replay (A-J, all offline, no provider
+call):** one complete valid winner -> AUTHORITATIVE, selected; multiple
+complete agreeing windows -> AUTHORITATIVE; opposite complete winners ->
+ABSTAIN_CONFLICT, fast path refused; double-winner complete ambiguity ->
+ABSTAIN_CONFLICT; no complete window -> ABSTAIN_INCOMPLETE_CONTEXT;
+partial-conflict-only (D-146's own flag, no complete window) ->
+ABSTAIN_INCOMPLETE_CONTEXT, not conflated with `ABSTAIN_CONFLICT`;
+complete-agreement present alongside an irrelevant partial-only conflict
+-> AUTHORITATIVE (complete evidence wins); the D-147 abstract structural
+replay (real pimples-shaped candidate ids) -> ABSTAIN_CONFLICT end to
+end through `family_scoped_semantic_decisions` -> `family_authority_
+diagnostics` -> `semantic_authority_gate_diagnostics` -> `_semantic_best_
+take`; the `_decision_priority`-firewall edge case above -> ABSTAIN_
+CONFLICT; singleton family -> AUTHORITATIVE (`not_a_contest_single_
+member_family`), never gated. All ten are asserted by dedicated tests,
+each independently reproducible offline.
+
+**D-123/D-128/DeliveryScorer/BestTake/Diagnosis compatibility (proven,
+not asserted).** `case_b_evidence_by_id` (D-123) is forwarded unchanged
+alongside the new parameter at both the `pipeline.py` call site and the
+integrity wrapper -- a dedicated test confirms `_semantic_best_take`
+called without `semantic_comparative_authority` behaves identically to
+calling it with `semantic_comparative_authority=None`. D-128's
+multimodal-fallback module is proven structurally unreachable from
+`semantic_authority_observability.py` (no import). DeliveryScorer's
+tie-break in a conflict-fallthrough case is proven unaffected (same
+ranked order used). Final BestTake fail-through (no usable realization)
+is proven to still return `None`/`None`/its existing reason string when
+the gate abstains and no lower tier resolves either. A generic Diagnosis-
+shaped control fixture (a critical-meaning-bearing "biopsy confirmed a
+rare diagnosis" candidate vs. a shorter meaning-losing peer -- generic,
+never real Video00 content) proves the default (`None`) path is
+untouched and an `AUTHORITATIVE`-gated decisive winner still wins exactly
+as before; the gate never suppresses a trustworthy winner.
+
+**Tests (31, exceeding the 28-item minimum) --
+`tests/test_cutsell_d150_semantic_authority_phase_b_gate.py`.** The ten
+named scenarios above; the `_decision_priority`-firewall edge case;
+provider-error/invalid-response fail-open unchanged; deterministic-no-
+provider-path-unchanged (the `None`-equivalence proof); semantic-winner-
+removed-only-in-the-target-conflict-shape (proves the gate does not
+suppress unrelated decisive winners elsewhere); DeliveryScorer-unchanged;
+final-BestTake-fail-through; seven module-leaf no-import proofs (family
+membership/grouping, proposition identity, attempt relationships, D-123,
+D-128, Boundary, Pacing, render baseline -- via `not hasattr(module,
+...)` structural assertions, the same technique D-146/D-149's own suites
+established); the Diagnosis-shaped control plus a generic biopsy/
+diagnosis meaning-safety fixture; a no-provider/network-call structural
+proof (import-line scan, avoiding the false-positive a naive whole-file
+substring search would hit, per the lesson learned fixing D-149's own
+test suite); singleton-family-untouched; distinct-proposition-family-
+unaffected; continuation/complementary shapes (no decisive winner exists
+to gate) unaffected.
+
+**Full offline qualification.** `python3 -m compileall cutsell_worker
+tests` clean. Targeted regression (D-150's own 31 + D-149's 31 + D-146's
+32 + D-081 + D-082 + D-094.2/D-094.3/D-094-video00-integration + D-123 +
+D-128 + D-097.C-Boundary + D-142-Pacing + hybrid_session_cleanup +
+D-101/D-103/D-106/video00_regression_qa/D-097.5 Diagnosis-control battery
+-- 307 tests total in one run) all green, zero regressions. Full
+`tests/` suite (minus the pre-existing, unrelated `test_semantic_stitch.py`
+collection error, documented since before D-136) run once as the CI-
+equivalent gate; see this task's final report for the exact pass/fail
+counts and the pre-existing-baseline-failure confirmation carried forward
+from D-146/D-147/D-149's own established method.
+
+**Scope confirmed:** no RAW/Modal/RunPod dispatch, no provider call
+anywhere in this task's own code or tests (structurally proven); no
+BestTake redesign (the gate only refuses one existing fast-path branch,
+it invents no new selection logic); no Watch+Listen fusion
+implementation; no Pacing/Boundary/render change; family topology/
+grouping untouched; D-081/D-094/D-097/D-101/D-103/D-106/D-123/D-128/
+D-138/D-140-D-149 all preserved CLOSED and not reopened; D-149 itself not
+rewritten (this is an append-only new entry).
+
+**Verdict: B -- Phase B is implemented and offline-verified as a real,
+necessary general stability fix**, proven non-trivial by the
+`_decision_priority`-firewall edge case above (not merely a restatement
+of D-147's already-accidentally-safe shape). It has not yet been
+qualified against real Video00 media.
+
+**Exact next real-media qualification gate:** ONE canonical Video00 RAW
+run to confirm this gate fires (or correctly stays AUTHORITATIVE) on real
+provider evidence, read against the D-147 pimples finding this Phase was
+built to close, and against the general ladder/CleanCutBench regression
+surface -- NOT launched in this task, per this task's own explicit
+instruction.
+
+**HUMAN ACTION REQUIRED:** YES (condition A/C) -- authorization to launch
+the one real-media Video00 RAW qualifying this gate is the Product
+Owner's decision, not made here.

@@ -63,7 +63,11 @@ from .case_b_performance_evidence import (
     case_b_performance_evidence_diagnostics,
 )
 from .multimodal_besttake_fallback import detect_class_b_trigger, fallback_trigger_diagnostics
-from .semantic_authority_observability import family_authority_diagnostics
+from .semantic_authority_observability import (
+    AUTHORITY_ALLOWED,
+    family_authority_diagnostics,
+    semantic_authority_gate_diagnostics,
+)
 from .temporal_editing import refine_takes_with_temporal_context
 from .whole_video_analysis import WholeVideoContext, confirmed_recording_behavior_events
 
@@ -538,8 +542,26 @@ def _semantic_best_take(
     semantic_delete_recommended: dict[str, bool] | None = None,
     deterministic_unusable: dict[str, bool] | None = None,
     case_b_evidence_by_id: Mapping[str, object] | None = None,
+    semantic_comparative_authority: str | None = None,
 ) -> tuple[str | None, str | None, str]:
     """Honor one clear semantic winner only inside an already-proven retry group.
+
+    D-150 (Phase B; docs/CUTSELL_DECISIONS.md D-150): `semantic_
+    comparative_authority` is optional and additive -- omitted or `None`
+    (every existing caller before D-150, plus this function's own D-123
+    counterfactual call above), this function is byte-identical to
+    pre-D-150 behavior. When the caller (pipeline.py's per-family loop)
+    passes an explicit status from `semantic_authority_observability.
+    resolve_semantic_comparative_authority` -- `"ABSTAIN_CONFLICT"` or
+    `"ABSTAIN_INCOMPLETE_CONTEXT"` -- the `single_semantic_winner` early
+    exit below is skipped entirely, exactly like an existing D-101 `_
+    single_winner_safety_veto` hit: the fast path never runs (no
+    confidence check, no case_b gate, nothing), and control falls straight
+    through to the SAME general ladder immediately below, completely
+    unmodified. This never selects a winner itself, never touches
+    `semantic_delete_recommended`/`deterministic_unusable`/the ladder's own
+    steps, and never calls a provider -- it only decides whether the
+    comparative label ABOVE this point may be trusted at all.
 
     D-123 (docs/CUTSELL_DECISIONS.md D-123; bounded per docs/CUTSELL_
     BESTTAKE_CASE_B_FORENSIC_D121.md): `case_b_evidence_by_id` is optional
@@ -619,7 +641,13 @@ def _semantic_best_take(
         label, confidence = semantic_decisions.get(member.clip_id, ("", 0.0))
         if label == "winner" and confidence >= winner_confidence:
             winners.append((member.clip_id, confidence))
-    if len(winners) == 1:
+    # D-150 (Phase B): ABSTAIN_CONFLICT/ABSTAIN_INCOMPLETE_CONTEXT veto the
+    # fast path exactly like a D-101 `_single_winner_safety_veto` hit --
+    # `None` (every pre-D-150 caller) and `"AUTHORITATIVE"` are the only
+    # values that ever let this run, so this line is a no-op for every
+    # existing caller.
+    semantic_authority_blocks_fast_path = semantic_comparative_authority not in (None, AUTHORITY_ALLOWED)
+    if len(winners) == 1 and not semantic_authority_blocks_fast_path:
         preferred_id, _ = winners[0]
         veto_reason = _single_winner_safety_veto(preferred_id, members, semantic_delete_recommended)
         if veto_reason is None:
@@ -1041,6 +1069,23 @@ def build_flow_b_draft(
             semantic_delete_recommended=hybrid_semantic_delete_recommended,
             deterministic_unusable=deterministic_unusable,
         )
+        # D-150 (Phase B; docs/CUTSELL_DECISIONS.md D-150): the ONE narrow
+        # authority gate over `_semantic_best_take`'s `single_semantic_
+        # winner` fast path. Consumes `family_semantic_authority_
+        # observability`'s OWN already-computed `family_complete_context`/
+        # `complete_context_conflict` fields (single source of truth --
+        # never recomputed here) to decide whether the family-scoped
+        # comparative label above may be trusted at all. Computed for
+        # EVERY group (including singletons -- `resolve_semantic_
+        # comparative_authority` returns AUTHORITATIVE for `len(members) <
+        # 2`, so this is a no-op there) so the diagnostics below are always
+        # populated, exactly like `family_semantic_authority_observability`
+        # itself already is.
+        semantic_authority_gate = semantic_authority_gate_diagnostics(
+            [member.clip_id for member in members],
+            family_semantic_decisions,
+            family_semantic_authority_observability,
+        )
         selected_clip_id, semantic_preferred_clip_id, semantic_best_take_reason = _semantic_best_take(
             members,
             family_semantic_decisions,
@@ -1049,6 +1094,7 @@ def build_flow_b_draft(
             semantic_delete_recommended=hybrid_semantic_delete_recommended,
             deterministic_unusable=deterministic_unusable,
             case_b_evidence_by_id=case_b_evidence_objects,
+            semantic_comparative_authority=semantic_authority_gate["semantic_authority_gate_status"],
         )
         no_usable_realization = selected_clip_id is None
         all_delete_recommended = len(members) >= 2 and all(
@@ -1158,6 +1204,13 @@ def build_flow_b_draft(
                 # self-contained report). Zero effect on selected_clip_id,
                 # ranked, membership, grouping, or Boundary.
                 "semantic_authority_observability": family_semantic_authority_observability,
+                # D-150 (Phase B; docs/CUTSELL_DECISIONS.md D-150): the
+                # gate's own decision -- semantic_authority_gate_status is
+                # ALSO what was actually passed as semantic_comparative_
+                # authority to the real _semantic_best_take call above, so
+                # this is not merely descriptive, it is the exact input
+                # that produced selected_clip_id/semantic_best_take_reason.
+                **semantic_authority_gate,
                 "semantic_candidates": [
                     {
                         "clip_id": member.clip_id,
