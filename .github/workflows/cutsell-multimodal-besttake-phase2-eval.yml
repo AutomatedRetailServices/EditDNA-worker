@@ -1,0 +1,138 @@
+name: CutSell Multimodal BestTake Phase 2 Offline Eval
+
+# D-136 (D-127 Phase 2, docs/CUTSELL_DECISIONS.md D-136): provider-backed
+# OFFLINE evaluation of the bounded MultimodalBestTakeArbiter contract
+# against the SAME 9 D-127 Section 20 fixtures Phase 1's own
+# `multimodal_besttake_eval.py` already proves offline (unchanged, still
+# gating `detect_class_b_trigger` alone). This workflow runs ONLY that
+# bounded eval script -- it never touches Video00, never launches a
+# Modal/RunPod GPU job, never deploys anything, and never calls a
+# provider from the live pipeline (the live pipeline imports neither this
+# workflow's script nor `multimodal_besttake_openai.py` at all).
+#
+# Exists because this session's own remote sandbox cannot reach
+# api.openai.com (confirmed: org egress policy denies the CONNECT, per
+# the sandbox's own proxy status endpoint) -- the SAME "offload to a
+# GitHub-hosted runner that already has the needed reach" pattern this
+# repo used for D-131/D-132's macOS/Xcode builds, applied here for
+# OpenAI reachability instead of Xcode. `ubuntu-latest`, zero GPU, zero
+# Modal/RunPod cost -- only the OpenAI API calls this task's own
+# directive explicitly authorizes ("ONE call per required eval request").
+#
+# Bootstrap note (same precedent as every other workflow_dispatch-only
+# workflow this repo has added): GitHub's workflow_dispatch REST API
+# 404s for a workflow that has never completed a run via any trigger. A
+# narrow, self-scoped `push:` trigger (limited to this file's own path,
+# this branch only) registers the workflow on first push; the actual
+# eval-running step is gated to `workflow_dispatch` so that bootstrap run
+# stays inert (no OpenAI call on a push).
+
+on:
+  push:
+    branches:
+      - feature/runpod-pod-on-demand
+    paths:
+      - '.github/workflows/cutsell-multimodal-besttake-phase2-eval.yml'
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+jobs:
+  phase2-eval:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+    steps:
+      - name: Checkout exact test head
+        uses: actions/checkout@v4
+
+      - name: Print exact test head
+        run: |
+          echo "HEAD: $(git rev-parse HEAD)"
+          echo "Branch: $(git branch --show-current)"
+
+      - name: Set up Python
+        if: github.event_name == 'workflow_dispatch'
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install ffmpeg
+        if: github.event_name == 'workflow_dispatch'
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg
+
+      - name: Install Python dependencies (openai only -- no GPU/torch stack)
+        if: github.event_name == 'workflow_dispatch'
+        run: pip install --quiet "openai>=1.7.1"
+
+      - name: Verify OPENAI_API_KEY present (report only, never print it)
+        if: github.event_name == 'workflow_dispatch'
+        run: |
+          if [ -z "${OPENAI_API_KEY:-}" ]; then
+            echo "OPENAI_API_KEY is NOT configured for this repository -- the bounded eval below will report every case as a provider failure (this is expected and will be reported honestly, not treated as a code defect)."
+          else
+            echo "OPENAI_API_KEY is present."
+          fi
+
+      - name: Run D-136 Phase 2 bounded offline eval (real OpenAIMultimodalBestTakeArbiter, NOT the live pipeline)
+        if: github.event_name == 'workflow_dispatch'
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json
+          import tempfile
+
+          from cutsell_worker.multimodal_besttake_eval_phase2 import run_phase2_eval, summarize_phase2_eval
+          from cutsell_worker.multimodal_besttake_openai import OpenAIMultimodalBestTakeArbiter
+
+          arbiter = OpenAIMultimodalBestTakeArbiter()  # real openai.OpenAI(), never a fake -- this IS the bounded live call this task authorizes.
+          with tempfile.TemporaryDirectory() as workdir:
+              results = run_phase2_eval(arbiter, workdir=workdir)
+
+          rows = [
+              {
+                  "name": r.name,
+                  "trigger_class": r.trigger_class,
+                  "candidate_ids": list(r.candidate_ids),
+                  "structured_engine_winner": r.structured_engine_winner,
+                  "expected_outcome": r.expected_outcome,
+                  "arbiter_outcome": r.arbiter_outcome,
+                  "arbiter_candidate_id": r.arbiter_candidate_id,
+                  "confidence": r.confidence,
+                  "safe_call_status": r.safe_call_status,
+                  "verdict": r.verdict,
+                  "winner_would_change": r.winner_would_change,
+                  "would_improve_structured_result": r.would_improve_structured_result,
+                  "meaning_safety_violation": r.meaning_safety_violation,
+                  "latency_ms": r.latency_ms,
+                  "call_metadata": r.call_metadata,
+              }
+              for r in results
+          ]
+          summary = {
+              "schema_version": "cutsell.multimodal_besttake_phase2_eval.v1",
+              "audio_perception_available": False,
+              "provider": "openai",
+              "model": arbiter.model,
+              "cases": rows,
+              "metrics": summarize_phase2_eval(results),
+          }
+          print("--- D-136 Phase 2 bounded offline eval (real provider, offline fixtures only) ---")
+          print(json.dumps(summary, indent=2, sort_keys=True))
+
+          out_path = "phase2-eval-result.json"
+          with open(out_path, "w") as f:
+              json.dump(summary, f, indent=2, sort_keys=True)
+          print(f"result file: {out_path}")
+          PY
+
+      - name: Upload Phase 2 eval result
+        if: always() && github.event_name == 'workflow_dispatch'
+        uses: actions/upload-artifact@v4
+        with:
+          name: cutsell-multimodal-besttake-phase2-eval-result
+          path: phase2-eval-result.json
+          retention-days: 14
+          if-no-files-found: warn

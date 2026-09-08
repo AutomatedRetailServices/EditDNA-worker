@@ -34,6 +34,7 @@ from cutsell_worker.multimodal_besttake_arbiter import (
     ABSTAINED,
     BEST_TAKE,
     ERROR,
+    INVALID_RESPONSE,
     MultimodalBestTakeGatePolicy,
     MultimodalBestTakeRequest,
     MultimodalBestTakeResponse,
@@ -487,7 +488,13 @@ def test_invalid_response_rejected_safely_via_safe_arbitrate():
                  _finalist("B", _evidence("B", {"k": 1}, {"k": 0.1})))
     request = MultimodalBestTakeRequest(family_id="tg_x", proposition_context="", finalists=finalists)
     outcome, response = safe_arbitrate(_InvalidOutcomeArbiter(), request)
-    assert outcome == ERROR
+    # D-136 Phase 2 (docs/CUTSELL_DECISIONS.md D-136): safe_arbitrate now
+    # classifies a response-validation failure as the more specific
+    # INVALID_RESPONSE (previously the generic ERROR, which Phase 1 had no
+    # way to distinguish since no provider call existed yet to raise
+    # anything more specific) -- this is the exact "extend it minimally
+    # for concrete failure mapping" this task's own directive required.
+    assert outcome == INVALID_RESPONSE
     assert response is None
 
 

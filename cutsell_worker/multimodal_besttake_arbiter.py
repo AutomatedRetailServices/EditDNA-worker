@@ -170,6 +170,53 @@ class NullMultimodalBestTakeArbiter:
         )
 
 
+def _classify_provider_call_exception(exc: Exception) -> str:
+    """D-136 Phase 2: minimal, additive classification of an exception
+    raised by `arbiter.arbitrate(...)` itself (never a response-validation
+    failure, which `safe_arbitrate` classifies separately as `INVALID_
+    RESPONSE`). These named modes (D-127 Section 18) were declared but
+    explicitly unexercised in Phase 1 -- "no provider call exists yet to
+    time out, error, or exceed a cost ceiling." Phase 2 is the first
+    context that actually calls a provider, so this mapping is now
+    exercised for real. Falls back to the pre-existing generic `ERROR`
+    only for an exception class this minimal, name-based mapping does not
+    recognize -- never a new retry loop, never invented API-specific
+    exception types beyond matching on class name (works whether or not
+    the `openai` package's own exception classes are importable)."""
+    name = exc.__class__.__name__
+    if "Timeout" in name:
+        return TIMEOUT
+    if "APIError" in name or "APIConnection" in name or "APIStatus" in name or "RateLimit" in name or "AuthenticationError" in name:
+        return PROVIDER_ERROR
+    if isinstance(exc, ValueError):
+        # A malformed/non-JSON provider payload raises here (inside
+        # `arbiter.arbitrate(...)`, via `openai_json.parse_json_object`)
+        # rather than from `validate_multimodal_besttake_response` -- both
+        # shapes mean the same thing: an invalid response, not a transport
+        # or auth failure.
+        return INVALID_RESPONSE
+    return ERROR
+
+
+def _meaning_safety_violation(request: MultimodalBestTakeRequest, response: MultimodalBestTakeResponse) -> bool:
+    """D-136 Phase 2 meaning-safety check (directive-required, new):
+    every finalist entering a request already carries its own `meaning_
+    sufficient` flag (computed upstream, never re-derived here -- same
+    "classify, never re-derive" discipline as `detect_class_b_trigger`).
+    A `BEST_TAKE` response selecting a finalist whose own flag is `False`
+    is a safety mismatch regardless of the provider's stated confidence --
+    this never overrides an existing deterministic safety rule, it only
+    catches the provider re-introducing a candidate the structured system
+    had already excluded."""
+    if response.outcome != BEST_TAKE or response.best_take_candidate_id is None:
+        return False
+    finalist = next(
+        (item for item in request.finalists if item.candidate_id == response.best_take_candidate_id),
+        None,
+    )
+    return finalist is not None and not finalist.meaning_sufficient
+
+
 def safe_arbitrate(
     arbiter: MultimodalBestTakeArbiter | None,
     request: MultimodalBestTakeRequest,
@@ -177,16 +224,34 @@ def safe_arbitrate(
 ) -> tuple[str, MultimodalBestTakeResponse | None]:
     """Fail-open safe-call wrapper (mirrors `safe_check_idea_equivalence`/
     `safe_visual_analyze`). Returns `(shadow_call_outcome, response|None)`.
-    NOT called anywhere in the live pipeline in Phase 1 -- provided for the
-    offline eval harness (`multimodal_besttake_eval.py`) and any future
-    Phase 2/3 wiring, per this task's explicit "prepare failure-mode
-    structures but no actual retry/provider logic" scope."""
+    NOT called anywhere in the live pipeline -- provided for the offline
+    eval harness (`multimodal_besttake_eval.py`/`multimodal_besttake_eval_
+    phase2.py`) and any future Phase 3 wiring.
+
+    D-136 Phase 2 extension (minimal, additive -- the Protocol/dataclass
+    interfaces are unchanged): a raised `arbiter.arbitrate(...)` exception
+    is now classified via `_classify_provider_call_exception` (TIMEOUT/
+    PROVIDER_ERROR/generic ERROR) instead of always collapsing to `ERROR`;
+    a response-validation failure (`validate_multimodal_besttake_response`
+    raising `ValueError`) is reported as `INVALID_RESPONSE` specifically
+    (previously also generic `ERROR` -- Phase 1's own test asserting the
+    old generic value was updated to this more specific, correct code, see
+    D-136 decision entry); and every response is checked for a meaning-
+    safety violation (`_meaning_safety_violation`) BEFORE any other
+    classification -- a mismatch reports `MEANING_SAFETY_MISMATCH` and has
+    no authoritative effect (fail open, per directive)."""
     if arbiter is None or not should_request_multimodal_arbitration(request, policy):
         return NOT_INVOKED, None
     try:
-        response = validate_multimodal_besttake_response(request, arbiter.arbitrate(request))
-    except Exception:
-        return ERROR, None
+        raw_response = arbiter.arbitrate(request)
+    except Exception as exc:
+        return _classify_provider_call_exception(exc), None
+    try:
+        response = validate_multimodal_besttake_response(request, raw_response)
+    except ValueError:
+        return INVALID_RESPONSE, None
+    if _meaning_safety_violation(request, response):
+        return MEANING_SAFETY_MISMATCH, response
     if not response.available:
         return NOT_INVOKED, response
     if response.outcome == UNCERTAIN:
