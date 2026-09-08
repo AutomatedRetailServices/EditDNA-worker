@@ -20114,3 +20114,316 @@ Section 2-3's tables, never as the basis for a verdict).
 Section 20 stability-contract design task (and, separately, the Section
 19 observability additions) is the Product Owner's decision, not made
 here.
+
+
+## D-145 -- Semantic / Family-Formation Stability Contract (design only, no fix)
+
+**Status: DESIGN ONLY. Zero code changes. Zero RAW. Zero provider calls.**
+Designs the smallest safe authority contract that closes the structural
+gap D-144 proved: a provider-backed comparative label, formed against an
+incomplete competitor set, must never be trusted to name a family's
+winner.
+
+**1) Primary stability principle.** *A comparative label is only
+meaningful relative to the complete competitor set it was compared
+against.* Therefore: **NO COMPLETE FAMILY CONTEXT -> NO AUTHORITATIVE
+COMPARATIVE WINNER.** When completeness cannot be established, the
+system must abstain, preserve deterministic grouping, or request one
+bounded family-complete comparison -- it must never merge independent
+partial-window winners into a global answer, which is exactly what
+`hybrid_session_cleanup.py`'s existing `best_semantic` dict (fed by
+`_decision_priority`'s cross-window max) does today for the COMPARATIVE
+"winner"/"alternate" label class.
+
+**2) `family_complete_context` definition.** True iff, for the specific
+comparison being requested:
+(a) family membership was already finalized by the SEPARATE grouping
+    authority (Section 5), not inferred from this same request;
+(b) every member of that finalized family is present as a candidate in
+    this ONE bounded request -- no member is compared while a sibling is
+    absent;
+(c) no candidate KNOWN to belong to the same proposition (per the
+    grouping authority's own record) is omitted from the request;
+(d) the competitor set is frozen for the duration of this one comparison
+    -- no candidate is added or removed between request and response.
+**Never circular:** family identity itself must never be established
+FROM the same incomplete comparison that will later select a winner --
+(a) is a hard precondition, checked before the comparative-winner
+request is even built, using the grouping authority's own already-
+finalized output (Section 5), never re-derived from partial-window
+co-occurrence as `family_scoped_semantic_decisions` does today (Section
+14).
+
+**3) Grouping authority contract (Question A: should these items form
+one family?).** Outcome vocabulary (repo-conventional, extends
+`semantic_idea_equivalence.py`'s existing `same_idea: bool` into the
+5-way relation the directive names): `SAME_PROPOSITION_RETRY`,
+`SAME_PROPOSITION_CONTINUATION`, `SAME_PROPOSITION_COMPLEMENTARY`,
+`DISTINCT_PROPOSITION`, `UNCERTAIN`. `UNCERTAIN` is a valid, safe,
+terminal result -- it must never be silently coerced toward either
+merging or splitting; a pair that is `UNCERTAIN` stays exactly as the
+existing fail-open default already requires (`same_idea_by_pair_index`'s
+own doctrine: "an index absent... must be treated as same_idea=False...
+preserve as separate, never merge on absence of evidence"). This
+question is answered ONCE, using `semantic_idea_equivalence.py`'s
+existing provider-neutral, text-only, no-clip-id, no-video-identity
+pairwise contract -- unchanged in shape, only its output vocabulary
+widened from boolean to the 5-way relation above (a future, separate,
+still-not-implemented-here change).
+
+**4) Comparative winner authority contract (Question B: which member of
+an ALREADY-established family is best?).** A provider-generated
+comparative winner label may be trusted as authority for a family's
+BestTake nomination ONLY when ALL of: (i) the family is already
+established via the Section 3 grouping authority (never inferred from
+this same call); (ii) `family_complete_context = true` (Section 2); (iii)
+the competitor set is frozen for that one request; (iv) every member is
+visible in the ONE bounded request (never split across multiple partial
+requests whose outputs are later merged); (v) no omitted member could
+invalidate the comparison (guaranteed by (ii)-(iv) together); (vi) the
+result passes the EXISTING schema/safety validation
+(`validate_editorial_result`, unchanged). **Any single failure degrades
+the outcome to advisory/abstain** -- recorded for observability, never
+used to name a `single_semantic_winner` fast-path candidate.
+
+**5) Partial-window behavior.** A per-window comparative label (the
+EXISTING `apply_hybrid_session_cleanup` sliding-window mechanism)
+continues to exist and continues to feed the uses it is ALREADY correctly
+scoped for: mechanical/corroborated DELETE-recommendation evidence
+(D-081's own mechanical-vs-semantic-judgment distinction, which already
+never lets a bare semantic label irreversibly delete before grouping/
+BestTake ever sees the candidate) and general observability. **What it
+may NEVER do going forward is manufacture a family's comparative WINNER
+label when the window that produced "winner" did not contain the
+family's complete membership.** This is a NEW authority boundary, not a
+change to the existing delete-side behavior, which D-081 already governs
+correctly and which this design does not touch.
+
+**6) `_decision_priority` result.** Audited (`hybrid_session_cleanup.py`
+line ~505): a pure `{"failed"/"bts": 5, "winner": 4, "alternate": 3,
+"keep": 2, "uncertain": 1}` ordering plus confidence tie-break, applied
+GLOBALLY across every window a clip appeared in with no completeness
+check. **Verdict: this max-priority merge remains valid for its existing
+delete/diagnostic uses (Section 5) but must NEVER be the source of a
+comparative WINNER nomination across an incomplete family.** If two
+different windows, covering DIFFERENT partial subsets of the same family,
+each independently produce a "winner" label for a DIFFERENT member, the
+required outcome for WINNER-NOMINATION PURPOSES is **CONFLICT/UNCERTAIN**
+-- never "pick whichever label has the higher `_decision_priority`," per
+this task's own explicit instruction. This is a policy statement for a
+future implementation, not a code change made here.
+
+**7) Windowing strategy -- smallest safe design.** Of the four options
+named: **(A) create one bounded family-complete provider request** is
+the smallest safe design already supported by current architecture. The
+request-building primitives already exist verbatim
+(`EditorialSession`/`EditorialCandidate` construction, `safe_editorial_
+judge`'s gate/validate/retry plumbing) -- the only future change is WHAT
+candidate set is passed in: the grouping authority's already-finalized
+family (Section 3), not an index-sliced window of a session partition.
+(B) hierarchical tournament semantics is unnecessary overengineering for
+the family sizes actually observed in D-144's real evidence (2-3
+members); (C) deterministic-pre-group-then-rank-only-within-complete-
+family is effectively a restatement of (A) plus (4) together, not a
+distinct option; (D) blanket abstention from all provider winner
+authority would discard the many real, already-correct cases (D-126's
+own negative controls: 3 families with trivial semantic/DeliveryScorer
+agreement, `case_b_conflict_present=false`, correctly resolved) that
+never had a completeness problem to begin with. **Recommendation: (A).**
+
+**8) Provider variance policy.** Reuses the EXISTING transport-level
+retry already present in `safe_editorial_judge` (2 attempts on a
+`ValueError`/schema failure) -- this design adds NO new retry cascade
+and NO second provider. If a bounded family-complete request's own
+result is internally ambiguous, OR (in a future world where more than
+one bounded comparison of the SAME frozen family were ever made) two
+such comparisons disagree, the required policy is: **treat as
+UNCERTAIN**, preserve the family's existing deterministic
+grouping (members remain co-members, none forcibly promoted), **defer
+the winner** to the EXISTING general DeliveryScorer-driven ladder
+completely unchanged (the same fallthrough path D-123's own disagreement
+gate already uses today -- reused, not reinvented), and route to
+higher-confidence arbitration ONLY where an already-canonical authority
+for that exists (D-123's own bounded gate; D-128/D-141's future,
+still-unauthorized Class B fallback design) -- never a new model
+cascade, per this task's explicit prohibition.
+
+**9) Abstention policy.** Symmetric with `semantic_idea_equivalence.py`'s
+own existing doctrine: absence of a trustworthy comparative winner is
+NEVER treated as "pick something anyway" -- it fails open to "no
+comparative winner nominated this cycle," leaving the existing
+DeliveryScorer/general-ladder machinery (already fully deterministic and
+unchanged, Section 18) to decide, exactly as it already does today for
+every family that never had semantic evidence in the first place. No new
+`uncertain`-handling code path needs to be invented; UNCERTAIN routes to
+the ladder's own pre-existing fallback, unchanged.
+
+**10) Proposition Identity firewall (D-111 reasserted).** The Section 3
+grouping authority answers `SAME_PROPOSITION_*` vs `DISTINCT_PROPOSITION`
+vs `UNCERTAIN` BEFORE any retry-competition or comparative-winner
+question is ever asked. "Same symptom/topic/product" is explicitly
+insufficient evidence (D-111, D-098 Section 10, and D-144 Section 7's own
+finding that the Pimples/espinillas pair's proposition relationship is
+genuinely ambiguous from transcript alone). `UNCERTAIN` proposition
+relation blocks BOTH family formation AND any comparative-winner request
+for that pair -- a winner-authority call can never run on a family whose
+own existence is unresolved.
+
+**11) Retry Identity firewall.** Within a pair already classified
+`SAME_PROPOSITION_*`, only `SAME_PROPOSITION_RETRY` is eligible for
+competitive winner selection (compete, pick one). `SAME_PROPOSITION_
+CONTINUATION`/`SAME_PROPOSITION_COMPLEMENTARY` are explicitly NOT retry
+contests -- per the Minimal Composite doctrine (D-142's own directive
+language) and D-019's KEEP/DISCARD-only scope, these must never be
+routed to the comparative-winner authority as if they were competing
+alternatives of one delivery.
+
+**12) `family_scoped_semantic_decisions` audit (D-094.3 F8, `pipeline.
+py`).** **Exactly when it activates:** only when at least one of the
+sliding-window rows (`hybrid_cleanup.diagnostics`) happens, by the
+coincidence of index-based `_overlapping_windows` slicing over an
+already-ordered session-partition list, to contain every member of the
+retry family being scored; when such a row exists, its labels replace
+the cross-window `best_semantic` merge for those members. **Why it fails
+to protect D-144's shape:** it is a CONDITIONAL, OPPORTUNISTIC mitigation
+-- it depends on window/family alignment it does not control or
+guarantee, and when NO such window exists (a function of family size vs.
+`chunk_size=10`/`chunk_stride=5` and where the family's members happen to
+land in the ordered candidate sequence), the flawed global cross-window
+merge is used exactly as it was before D-094.3 F8 existed -- reproduced
+in D-144's D-143 evidence. **Should it become the canonical authority
+path?** **NO, not as-is.** It should be SUPERSEDED by Section 7's bounded
+family-complete request, which GUARANTEES completeness by construction
+(the request is built FROM the finalized family, not hoped to coincide
+with a window). **Minimal precondition missing:** a request-construction
+path keyed on the grouping authority's finalized family membership,
+rather than on incidental window/family index overlap.
+
+**13) Model/temperature observability (compact, per this task's
+required field list):** `semantic_provider_name`, `semantic_provider_
+model`, `semantic_provider_temperature`, `semantic_prompt_version`,
+`semantic_request_hash`, `semantic_window_id`, `family_complete_context`,
+`family_member_ids`, `omitted_candidate_ids`, `provider_outcome`,
+`provider_confidence`, `provider_raw_relation`, `provider_authority_
+applied`, `provider_abstained_reason`. Of these, `provider`/`model` are
+ALREADY exposed on `EditorialJudgeResult`/`IdeaEquivalenceResult` today
+(unchanged fields, just not yet threaded into a compact per-decision
+summary); every other field is new design, not yet implemented.
+`provider_authority_applied` (bool) and `provider_abstained_reason`
+(string, present iff false) are the two fields that make Section 4's gate
+outcome directly auditable from a future compact CI summary without
+requiring the cross-run decision-log forensic D-144 had to perform by
+hand.
+
+**14) Request hash / cache design (identity only, no infrastructure
+built).** A stable request identity = a hash over: sorted candidate ids,
+each candidate's source span (start/end), each candidate's transcript
+text, the proposition context text the arbiter is shown (never clip
+identity, per `semantic_idea_equivalence.py`'s own existing no-clip-id
+contract), the provider's model id, and a prompt-version string. This is
+a PURE identity function, useful for future de-duplication of identical
+repeated requests within one run and for reproducibility auditing across
+runs -- no cache store, no infrastructure, no persistence layer is
+proposed or built in this task.
+
+**15) Diagnosis relation.** **NO -- classify Diagnosis as a separate
+retry-identity issue, not resolved by this contract alone.** Per D-144
+Section 17, Diagnosis's ungrouped-duplicate defect is STABLE/reproducible
+across both inspected runs, unlike Pimples' run-to-run variance. This
+contract's job is to gate WHETHER an incomplete comparison is trusted --
+it does not improve the grouping arbiter's own classification ACCURACY
+for a specific, consistently-misjudged text pair. If Diagnosis's root
+cause is the grouping authority (Section 3) consistently returning
+`DISTINCT_PROPOSITION`/`UNCERTAIN` for a pair that should be
+`SAME_PROPOSITION_RETRY`, that is an arbiter-accuracy question, separate
+from this task's completeness/authority-boundary question, and is not
+solved here.
+
+**16) BestTake non-authority confirmation.** Nothing in this design
+changes `take_judge.py`'s `rank_takes`/`score_take`, `deterministic_
+best_take_authority.py`'s clear-winner promotion, D-123's fast-path gate,
+D-128's Phase 1 shadow detector, D-138/D-140/D-141's fallback-provider
+design, or `dialogue_pacing_transition.py`. BestTake continues to consume
+whatever family/winner state it is handed; this design only proposes
+tightening WHAT is allowed to produce a trusted comparative winner
+upstream of it.
+
+**17) D-123 compatibility.** Unaffected and unchanged. D-123's own
+disagreement-gated fast-path bypass already only fires on a semantic-
+vs-DeliveryScorer DISAGREEMENT; this design's abstention policy (Section
+9) increases the cases where NO comparative semantic winner is nominated
+at all, which simply means D-123 has nothing to gate for those families
+(same as today, for families with no semantic evidence) -- D-123's own
+6-condition contract is untouched.
+
+**18) D-128 compatibility.** Unaffected and unchanged. D-128's Phase 1
+shadow Class B trigger detector reads `semantic_winner`/`deliveryscore_
+winner`/CASE B evidence exactly as it does today; this design does not
+change D-128's inputs' TYPES, only makes the `semantic_winner` input more
+trustworthy when present and explicitly absent (rather than silently
+wrong) when family completeness cannot be established.
+
+**19) Boundary/Pacing compatibility.** Unaffected and unchanged. Boundary
+and D-142's Dialogue/Pacing Transition both consume the FROZEN, already-
+selected clip set; nothing in this design touches physical timing,
+Boundary's edge-trim authority, or D-142's HARD_CUT/TIGHT_CUT contract.
+
+**20) Phased implementation plan (future, not built here):**
+- **PHASE A -- observability only.** Add the Section 13 fields to
+  existing diagnostics (no behavior change); surface `family_scoped_
+  semantic_decisions`'s own `source_info` (already computed, Section 12)
+  in a tail-safe CI summary (closing the D-144 Section 19/22 gap) so
+  family-completeness can be inspected from ordinary CI logs.
+- **PHASE B -- family-complete authority gate / abstention behavior.**
+  Implement Section 4's gate: a comparative winner is trusted only when
+  `family_complete_context=true`; everything else routes to Section 9's
+  abstention, unchanged fallthrough to the general ladder.
+- **PHASE C -- offline regression + persisted-run replay.** Build fixture
+  coverage (generic, no Video00-specific rules) proving: a complete-
+  family comparison is trusted; an incomplete one abstains; a `CONFLICT`
+  shape (Section 6) resolves to UNCERTAIN, never highest-priority; replay
+  the PERSISTED D-126/D-135/D-143 result JSONs (already on hand from
+  D-144) through the new gate logic offline to confirm it would have
+  changed D-143's outcome to an honest abstention rather than a silent
+  wrong pick.
+- **PHASE D -- one Video00 RAW qualification.** Exactly one authorized
+  RAW, after A-C are green, to prove the gate behaves as designed on
+  real footage -- never combined with A-C, never skipped.
+
+**21) Activation evidence requirements (no arbitrary percentage
+threshold):** (1) the same persisted D-126/D-135/D-143 inputs, replayed
+offline through the new gate, produce the SAME family topology as an
+already-known-good run and an honest UNCERTAIN/abstain (not a silent
+wrong pick) on D-143's own incomplete-family shape; (2) a constructed
+partial-window-conflict fixture no longer manufactures a global winner
+(resolves to CONFLICT/UNCERTAIN); (3) a constructed family-complete
+fixture's comparison behavior is proven correct (trusted, applied); (4)
+D-123's own offline suite remains 100% green, unchanged; (5) D-128's own
+offline suite remains 100% green, unchanged; (6) Diagnosis's specific
+persisted case is re-examined and confirmed NOT to regress further
+(Section 15 -- not required to improve, only not to get worse); (7) no
+persisted fixture loses a legitimate retry that a pre-change offline
+replay correctly kept; (8) no persisted fixture shows two genuinely
+distinct propositions forced into one family; (9) no singleton-explosion
+regression (a family that legitimately formed before does not
+gratuitously fragment under the new gate); (10) no provider-induced
+membership oscillation across repeated offline replays of the identical
+persisted input (the whole point of the contract).
+
+**22) Exact next implementation capability (recommended, not
+authorized):** **FAMILY-COMPLETE SEMANTIC AUTHORITY GATE** -- Phase A
+(observability) first, as the smallest, lowest-risk, immediately useful
+increment; Phase B (the actual gate) only after Phase A's fields prove
+the completeness signal is being computed and surfaced correctly.
+
+**Scope confirmed:** zero code changes; zero RAW/Modal/RunPod dispatch;
+zero provider calls; no BestTake/D-123/D-128/fallback/Boundary/Pacing
+behavior changed; no Video00-specific rule proposed anywhere in the
+production contract (Sections 1-14 name zero clip ids, timestamps, or
+lexical content -- Pimples/Diagnosis appear only as forensic examples,
+per this task's own instruction); D-123/D-128/D-138/D-140/D-141/D-142/
+D-143/D-144 all preserved CLOSED and not reopened.
+
+**HUMAN ACTION REQUIRED:** YES (condition A) -- whether to authorize
+Phase A (observability only) is the Product Owner's decision, not made
+here.
