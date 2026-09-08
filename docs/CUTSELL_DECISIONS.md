@@ -16875,3 +16875,131 @@ process stays alive for N seconds with no crash) to close the "APP
 LAUNCH UNVERIFIED" gap -- the smallest next capability, since the build
 itself is now proven. No RAW, provider call, or infra change requested
 by this task.
+
+## D-132 -- iOS simulator runtime verification: boot/install/launch the
+existing app (post D-131). **BOOT/INSTALL/LAUNCH EXISTING APP ONLY. No
+new product feature. No Overlap implementation. No engine change. No
+RAW.** APP SHELL RUNTIME = PROVEN.
+
+Extended the SAME `cutsell-ios-ci.yml` workflow D-131 already proved
+builds successfully -- no second workflow, no new infrastructure. Two
+dispatches on `feature/runpod-pod-on-demand` were required:
+
+**Dispatch 1 (run `34178891454`, head `8d77e3c`) -- FAILED** at "Discover
+and boot an iOS Simulator": `/tmp/sim_selection.env: line 2: 16e: command
+not found` (exit 127). Root cause: the deterministically-selected
+simulator's name, "iPhone 16e", contains a space; the step wrote `name=
+iPhone 16e` to a file and then `source`d it as a shell script, and bash
+split the unquoted value at the space, running the bare word `16e` as a
+command. Diagnosed exactly, per this task's own failure policy (a tiny
+mechanical CI-script bug, not a product/architecture issue).
+
+**Mechanical fix applied:** the discovery step now writes plain `key=
+value` lines to `$GITHUB_OUTPUT` directly from Python (GitHub does not
+shell-parse that file, so those never needed quoting) and separately
+writes `shlex.quote()`-escaped assignments to a second, `source`-only
+file used solely by that same step's own immediate use of the values.
+Verified locally against a synthetic "iPhone 16e"-shaped device list
+before re-pushing: `$GITHUB_OUTPUT` got the plain value, the sourced
+file got the quoted value, and `source`-ing it reconstructed `$name`
+correctly. No selection/sort/filter logic changed.
+
+**Dispatch 2 (run `34179063142`, head `58c0e66`) -- SUCCESS, every
+step:** `checkout` -> `Install XcodeGen` -> `Generate Xcode project` ->
+`Build CutSell for iOS Simulator` -> `Discover and boot an iOS Simulator`
+-> `Install and launch CutSell in Simulator` -> `Capture simulator
+screenshot` -> `Upload simulator screenshot` -> `Shut down iOS Simulator`
+-> `Notify Claude Routine`, all `conclusion: success`.
+
+**Real evidence captured from this run's own logs (not inferred):**
+- Simulator: **iPhone 16e**, UDID `A3044FA3-EBC3-4291-A153-352B9541A61A`,
+  **iOS 26.2** -- discovered via `xcrun simctl list devices available
+  --json`, chosen deterministically (sorted candidates, first match),
+  never hardcoded. `simctl bootstatus -b` logged the real boot sequence
+  through to `isTerminal=YES ... Finished`.
+- App bundle: `mobile/ios/build/Build/Products/Debug-iphonesimulator/
+  CutSell.app` (deterministic via the `-derivedDataPath build` flag
+  added to the existing `xcodebuild` invocation -- the only change to
+  that step).
+- Bundle identifier: **`ai.cutsell.app`** -- read directly from the
+  built `Info.plist` via `/usr/libexec/PlistBuddy`, never guessed or
+  copied from `project.yml`.
+- Install: `xcrun simctl install` completed with no error (the step
+  would have aborted under `set -euo pipefail` otherwise).
+- Launch: `xcrun simctl launch` returned **`ai.cutsell.app: 4770`** --
+  **PID 4770**.
+- Process survival: after the bounded 5-second observation window, `ps
+  -p 4770` found the process alive (`process_alive=yes`) -- proven
+  indirectly but conclusively by the workflow's own control flow: the
+  downstream "Capture simulator screenshot" step is gated on `steps.
+  launch.outputs.process_alive == 'yes'` and it ran (`conclusion:
+  success`), which is only possible if that exact value was recorded.
+- Crash check: no fresh entries in `~/Library/Logs/DiagnosticReports/
+  CutSell*` (`crash_reports_found=no`) -- confirmed by the absence of
+  the step's own "Crash report(s) found" print in the log.
+- **Bounded runtime log (real, not fabricated):** the job's own
+  `simctl spawn log show` output shows a genuine, unbroken UIKit/
+  SwiftUI app lifecycle for PID 4770/4770:4d30 -- `cfprefsd` connection,
+  `CoreFoundation` preferences load, `libMobileGestalt`, background-task
+  assertion creation, `UNUserNotificationCenter` creation and
+  authorization request, keyboard arbiter startup, scene activation
+  (`ai.cutsell.app-A829BDB6-...`), key-window assignment, and clean
+  deactivation-reason transitions -- **zero fatal exception, zero
+  missing-resource error, zero configuration crash, zero network-
+  initialization crash, zero bootstrap crash** anywhere in the captured
+  window.
+- **Screenshot:** captured (`xcrun simctl io ... screenshot`, "Wrote
+  screenshot to: .../launch-screenshot.png") and uploaded as artifact
+  `cutsell-ios-simulator-screenshot` (106,865 bytes, artifact ID
+  `10038340816`). This session could not download the artifact's binary
+  content into this conversation -- the org egress proxy rejected the
+  blob-storage CONNECT tunnel with a 403, the same class of restriction
+  already documented earlier in this branch's own history (D-124) for
+  GitHub Actions artifact/blob-storage downloads; not retried, per that
+  same standing instruction. The screenshot exists and is retrievable
+  from the GitHub Actions run's own artifacts page by a human with
+  normal repository access.
+- Cleanup: `xcrun simctl shutdown` ran and completed (`conclusion:
+  success`); no simulator was left running by this task.
+
+**Scope discipline preserved throughout:** no camera/microphone
+interaction was attempted on the simulator (D-132 explicitly forbids
+using simulator launch as camera/microphone proof); no manual product-
+feature testing (Photos import, editor, playback) was performed; `audio_
+overlap`/`audioOverlap`/`dialogue_overlap_enabled` were not touched,
+read, or referenced anywhere in this task's changes; no signing,
+entitlements, or TestFlight action occurred; the app never made an
+intentional network/provider call (its own real startup logs show only
+local OS-level XPC/notification-center activity, no CutSell backend
+request observed in the captured window).
+
+**APP SHELL RUNTIME STATUS: PROVEN** -- install succeeded, launch
+succeeded, a real process started (PID 4770), and no immediate fatal
+crash occurred, exactly the four conditions this task's own directive
+requires before that claim may be made. **CAMERA, MICROPHONE, and REAL
+DEVICE status are UNCHANGED from D-130/D-131** (PARTIAL/PARTIAL/MISSING
+respectively) -- a successful simulator launch proves the app shell is
+runtime-valid; it proves nothing about camera/microphone hardware
+behavior or physical-device behavior, and this task does not claim
+otherwise.
+
+**Tests:** no new iOS tests added (none authorized). No iOS test target
+or test files exist anywhere under `mobile/` (unchanged from D-130).
+
+**Scope confirmed:** `git diff --stat` across this task's two commits
+(`8d77e3c`, `58c0e66`) shows exactly one file changed,
+`.github/workflows/cutsell-ios-ci.yml` -- no Swift file, no `cutsell_
+worker/*.py`, no backend route, no signing/entitlements file touched.
+
+**HUMAN ACTION REQUIRED:** NO new decision required by this task alone --
+the next iOS task below is a Product Owner authorization matter like
+every prior iOS task in this sequence, not an open question this task
+leaves unresolved. **Exact next iOS task (recommended, not authorized):**
+now that both the build (D-131) and the runtime app shell (D-132) are
+proven on simulator, the next bounded capability is either (a) a minimal
+in-app smoke assertion (e.g., have the CI job poll `simctl spawn ...
+log show` or a lightweight UI-test target for a specific "app reached
+ProjectsView" log marker, rather than only "process didn't crash"), or
+(b) beginning the real-device QA track named in D-129/D-130 (out of
+this task's own scope to start automatically). No RAW, provider call, or
+infra change requested by this task.
