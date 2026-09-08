@@ -63,6 +63,31 @@ jobs:
         if: github.event_name == 'workflow_dispatch'
         run: sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg
 
+      - name: Install libav* dev headers (pkg-config) for building the 'av' wheel
+        if: github.event_name == 'workflow_dispatch'
+        # D-136 mechanical fix (second dispatch, run 34195654032, failed):
+        # `faster-whisper==1.0.0` pins `av==11.*`, and PyPI has no
+        # prebuilt manylinux wheel for av 11.0.0 on this runner's
+        # Python/platform combo, so pip falls back to building it from
+        # source. That source build needs the FFmpeg *development*
+        # headers/pkg-config (.pc) files (libavformat-dev, libavcodec-dev,
+        # etc.) to compile its C-extension bindings against libav* -- the
+        # plain `ffmpeg` CLI package installed above only provides the
+        # runnable binary and runtime .so files, not those headers.
+        # Reproduced locally: `pip install --dry-run -r requirements.txt`
+        # fails with the exact same pkg-config errors until these -dev
+        # packages are present, then installs cleanly.
+        run: |
+          sudo apt-get install -y -qq \
+            pkg-config \
+            libavformat-dev \
+            libavcodec-dev \
+            libavdevice-dev \
+            libavutil-dev \
+            libavfilter-dev \
+            libswscale-dev \
+            libswresample-dev
+
       - name: Install Python dependencies
         if: github.event_name == 'workflow_dispatch'
         # D-136 mechanical fix (first dispatch, run 34195466100, failed):
