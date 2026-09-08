@@ -23763,3 +23763,358 @@ ENABLED` on for real-media qualification (a separate RAW-authorization
 decision, condition C), and how to sequence both against D-156's still-
 open sonography-ordering/count-drift findings and the still-owed HUMAN
 WATCH+LISTEN PASS, are Product Owner decisions.
+
+## D-159: Upstream Watch+Listen Phase C -- real-media family-formation qualification (ONE Video00 RAW)
+
+**Authorization:** Product Owner directive "CUTSELL -- D-159 UPSTREAM
+WATCH+LISTEN MULTIMODAL UNDERSTANDING PHASE C -- REAL-MEDIA FAMILY-
+FORMATION QUALIFICATION". Verified branch `feature/runpod-pod-on-demand`,
+HEAD `53effb0` (D-158), clean working tree, before any action.
+
+**Mechanism gap found and resolved (explicit Product Owner decision,
+not guessed):** `cutsell-video00-modal-raw.yml` had no existing input to
+set `CUTSELL_WATCH_LISTEN_FAMILY_EVIDENCE_ENABLED=1` for one run.
+Presented the gap and three options via `AskUserQuestion`; Product Owner
+selected the one-line input-gated workflow overlay, mirroring the
+existing D-094.2 `bridge_complete_pairwise_singleton` precedent already
+in the same file. Implemented as a new `watch_listen_family_evidence_
+enabled` `workflow_dispatch` input (default empty = OFF, byte-identical
+to every prior run), committed `9a7a3b0`, pushed. Zero `cutsell_worker/`
+editorial-module changes; no threshold/provider/BestTake/DeliveryScorer/
+Boundary/Pacing change.
+
+**RAW dispatched:** run `34280568497` on `cutsell-video00-modal-raw.yml`,
+head `9a7a3b0`, `watch_listen_family_evidence_enabled=1`, otherwise all-
+default inputs, canonical source (`Editdna longform validation/VIDEO-
+2026-07-30-09-18-03.mp4`). Modal benchmark succeeded, teardown confirmed.
+CI job conclusion `failure` is again the established QA-gate-finding
+shape (Selection lock / Human Gold regression QA), not an infra failure.
+**No second RAW dispatched.**
+
+==================================================
+UPSTREAM PIPELINE STATUS (all created successfully)
+==================================================
+
+`parallel_perception_enabled: true`. `raw_understanding_map_created:
+true`, status `COMPLETE_EXISTING_EVIDENCE`, `raw_understanding_span_
+count: 36`, `raw_understanding_event_count: 322`, `raw_understanding_
+conflict_count: 0`, `source_count: 1`. `watch_listen_understanding_
+created: true`, `understanding_span_count: 36`, `behavior_hypothesis_
+count: 33`, `attempt_boundary_hypothesis_count: 33`, `attempt_relation_
+hypothesis_count: 51`, `conflict_count: 2`. This confirms D-155/D-156/
+D-157's full evidence chain executed on real media and produced
+substantial real attempt-relation hypothesis data (51 hypotheses across
+36 spans) -- real evidence was available in principle for D-158 to
+consume this run.
+
+==================================================
+CRITICAL OBSERVABILITY GAP FOUND (honest, not smoothed over)
+==================================================
+
+The new `watch_listen_family_evidence` diagnostic key
+`reconcile_semantic_idea_equivalence` now attaches to `diagnostics.
+semantic_idea_equivalence` (D-158) is **NOT recoverable from this run's
+CI-visible log tail**. Root cause identified precisely (not merely
+suspected): the workflow's "Print full canonical diagnostics" step
+contains TWO different places that reference `diagnostics.semantic_idea_
+equivalence` --
+(1) an early, full unfiltered `jq '.diagnostics.semantic_idea_
+equivalence // {status:"absent"}'` dump (line ~555) that WOULD show
+`watch_listen_family_evidence` if present, but which falls entirely
+outside the ~5000-line `get_job_logs` retrievable tail this session can
+fetch (the same class of gap D-151/D-156 already documented -- confirmed
+by finding `arbiter_rejected_pair_count`, a genuinely pre-existing D-097-
+era field with the same fate, also absent from the recovered tail);
+(2) a SECOND, later, deliberately-late-printed curated projection (line
+~656, comment: "printed late so it survives the log tail cap") that
+hardcodes an explicit field allowlist -- `{status, candidate_pair_count,
+checked_pair_count, merged_pair_count, merges, restart_evidence_merges,
+distinct_addition_blocked, arbiter_rejected_pairs}` -- written before
+D-158 (and even before `arbiter_rejected_pair_count`) existed, so it
+structurally cannot show either field regardless of log-tail limits.
+**This IS what this run's recovered tail actually shows** (confirmed via
+its own literal object shape, ending at `arbiter_rejected_pairs` with no
+trailing key). Artifact download (which would contain the full,
+unfiltered JSON) remains blocked by this session's egress policy (`connect_
+rejected` on the Azure Blob signed URL, same as D-151/D-156). **Net
+effect: this task cannot directly confirm from this run's own evidence
+whether `reconcile_semantic_idea_equivalence` actually evaluated any pair
+against Watch+Listen relations this run, or what its would-be `watch_
+listen_family_evidence` counts were.** This is a data-recoverability gap,
+not a code defect -- `merged_pair_count: 12` and all upstream counts are
+otherwise present and sane, meaning the function executed to completion
+on its normal success path (the exact path this task's own D-158 fix
+attached `watch_listen_family_evidence` to). Recorded here as a concrete,
+bounded future observability task (adding the new field to the line-656
+curated late-print allowlist) -- **not implemented in this task** (NO
+CODE CHANGE beyond the explicitly authorized flag-enable overlay above).
+
+==================================================
+FAMILY TOPOLOGY THIS RUN
+==================================================
+
+`family_count: 6` (from both D-123's and D-150's tail-safe summaries).
+`semantic_authority_gate_evaluated_count: 6`; `semantic_authority_
+allowed_count: 3` (`AUTHORITATIVE`); `semantic_authority_abstain_
+conflict_count: 3` (`ABSTAIN_CONFLICT`, reason `multiple_family_complete_
+windows_disagree_on_comparative_winner`); `semantic_authority_abstain_
+incomplete_count: 0`; `semantic_authority_advisory_count: 0`. Family ids
+this run: `tg_e6214b9990607a0d7d`, `tg_24c1c7c2d121c0811d`, `tg_
+99bf5377dee51eb2a3`, `tg_fbdad35816055ad9f6`, `tg_d41b3b466e37be3db2`,
+`tg_5958a029660867a712` -- 3 `AUTHORITATIVE`, 3 `ABSTAIN_CONFLICT`,
+alternating, same shape D-153 already documented (roughly half the
+families land in each state). D-123: `family_count: 6`, `semantic_fast_
+path_family_count: 5`, `actionable_case_b_conflict_count: 0` (D-123/D-128
+never fire this run -- no signal disagreement for them to gate, unrelated
+to D-158). Multi-member family count: 6 (all 6 rows are >=2-member
+families by construction of the D-123/D-150 summaries, which only ever
+report multi-member rows). Singleton count for the two known critical
+regions specifically (Diagnosis, Pimples/espinillas): **both ungrouped
+this run** -- see below.
+
+**Comparison to D-143/D-147/D-151/D-153/D-156:** total family count (6)
+matches D-147 (6) and is close to D-143's/D-153's typical range;
+`semantic_authority_abstain_conflict_count` (3) is HIGHER than D-153's
+(1) and D-147's effective single-conflict shape, but this is the SAME
+already-documented "two independent complete windows can disagree with
+each other" mechanism D-146/D-147 identified as a structural gap, not a
+new one. None of the 6 families this run is the pimples/espinillas
+family or the diagnosis-retry pair -- both of those never reached
+multi-member family status at all this run (see next section) -- so
+neither the D-150 gate NOR D-158 ever had a chance to act on them.
+
+==================================================
+PIMPLES/ESPINILLAS TRACE (the named critical family across D-126/D-135/
+D-143/D-144/D-147/D-151/D-153)
+==================================================
+
+D-123 status this run: `"pimples_clips_present_but_no_multi_member_
+family_or_no_usable_realization_row"` -- **the pimples/espinillas pair
+did NOT form a retry family this run at all**, the SAME shape D-135
+(`34184212589`) showed and D-144's own forensic already root-caused as
+"UPSTREAM of BestTake, D-123, and D-128 entirely: whether the two real-
+world retry realizations are clustered into ONE retry family at all."
+Quality-ladder confirms the concrete symptom: TWO separate espinillas-
+adjacent clips both survived as independent `false_keep`/`LEVEL_1`/
+`ungrouped_retry_of_kept_idea` regions attributed to `IdeaClusterer/
+RetryFamilyFormation` -- region 87 (197.61-198.12s, "Era como un rush,
+una alergia.") and region 93 (221.71-222.98s, "Otro síntoma era que me
+salían espinillas como si fuera una alergia de..."). This is a DIFFERENT
+failure shape than D-126/D-143/D-153's "family forms, wrong member wins"
+-- here no family formed, so both realizations were kept side by side
+(content duplication) rather than one wrong one being selected. Semantic
+authority state: N/A (no family, gate never evaluates a non-family).
+DeliveryScorer/BestTake: N/A (no family, no comparative decision ever
+made). Cut.ai/Human Gold status this run: not independently re-audited
+in this task (out of the authorized "one RAW, no fix loop" scope) --
+`pimples_bad_monolith_absent` PASSED this run (unlike D-126/D-143/D-153,
+where it consistently FAILED), but this is attributable to the ABSENCE of
+a family (no "monolith" to wrongly return), not to any D-158 mechanism
+improving a comparative winner decision. **Critical question answered
+honestly: Watch+Listen did NOT make this family's topology more
+structurally correct or stable this run -- the pair never reached the
+stage (a proposed cross-group merge) where D-158's authority could ever
+have acted on it, one way or the other.** This is a Family Formation
+(session/lexical/semantic clustering, upstream of `reconcile_semantic_
+idea_equivalence`'s cross-group merge step) instability finding, not a
+D-158 finding, and not a BestTake finding.
+
+==================================================
+DIAGNOSIS CONTROL
+==================================================
+
+The papillary-thyroid-cancer diagnosis clip itself IS present and KEPT,
+`LEVEL_3`, `consensus_keep` (135.44-138.37s and 140.79-140.96s, "La
+biopsia confirmó que era un cáncer papilar de tiroides."). **But the
+same historical RETRY_IDENTITY defect (D-143/D-144/D-147) recurred**: a
+second, ungrouped-retry realization of the SAME sentence survived at
+138.59-140.57s (1.98s), `LEVEL_1`, `false_keep`, `ungrouped_retry_of_
+kept_idea`, `IdeaClusterer/RetryFamilyFormation`, with the trace's own
+explicit reason: "clip_5013442808f146185bf4 was never grouped with clip_
+6090c497319bde135add although their content overlaps." This is the SAME
+family-formation clustering miss as the pimples/espinillas trace above --
+upstream of D-158's own hook point (a pair D-158 could ever influence
+must first be PROPOSED as a candidate merge; this pair evidently never
+was). Watch+Listen relation hypothesis / final relation / merge action
+for this specific pair: **NOT OBSERVABLE** (same data-recoverability gap
+above -- and moot regardless, since D-158 cannot create a merge from
+nothing; if this pair never entered `reconcile_semantic_idea_equivalence`
+as a candidate cross-group pair, D-158 was never consulted on it either).
+**Verdict: UNCHANGED** (same defect class, same root layer, present
+before and after D-158). `sonography_good_before_diagnosis` still FAILED
+(`required_sequence_missing_or_reordered`) -- a downstream consequence of
+this same duplicate, not a new or different failure.
+
+==================================================
+CONTINUATION / COMPLEMENTARY / NEW-BEAT CONTROLS
+==================================================
+
+**CONTINUATION control: NOT OBSERVED.** No specific pair's Watch+Listen
+relation could be confirmed as CONTINUATION and traced through to a
+family-formation decision, given the `watch_listen_family_evidence`
+observability gap above. The upstream `attempt_relation_hypothesis_
+count: 51` proves CONTINUATION-shaped hypotheses were very likely among
+those 51 real evaluations (per D-157's own bounded vocabulary and this
+media's dense retry structure), but which specific pairs and their
+`reconcile_semantic_idea_equivalence`-level disposition are not
+recoverable this run.
+
+**COMPLEMENTARY control: NOT OBSERVED**, same reason.
+
+**NEW_AUDIENCE_BEAT control: NOT OBSERVED**, same reason.
+
+==================================================
+UNCERTAIN CONTROL
+==================================================
+
+No forced merge was created anywhere in this run attributable to D-158:
+`merged_pair_count: 12`, all 12 accounted for by the SAME pre-existing
+mechanisms (3 deterministic restart-evidence merges, 9 arbiter-confirmed
+merges) with no anomalous or unexplained merge in the recovered
+diagnostics. Combined with D-158's own structural guarantee (`would_
+merge` can only go `True -> False`, never `False -> True`), and this
+run's clean, sane final output (no crash, no exception, no orphaned/
+duplicated selection beyond the two ALREADY-documented pre-existing
+defects above), the fail-open contract held: **no evidence of an
+uncertain-relation-forced merge this run.**
+
+==================================================
+D-150 FIREWALL RESULT
+==================================================
+
+Fully intact. `semantic_authority_gate_evaluated_count: 6`,
+`AUTHORITATIVE`/`ABSTAIN_CONFLICT` counts exactly as printed above, same
+shape and same reasons (`family_complete_context_true_no_conflict` /
+`multiple_family_complete_windows_disagree_on_comparative_winner`) as
+D-147/D-151/D-153 -- byte-identical mechanism, no interaction with D-158
+observed or possible (disjoint call sites, per D-158's own structural
+proof). No family's gate status was bypassed, weakened, or overridden.
+
+==================================================
+D-123 / D-128 (NO BESTTAKE AUTHORITY CHANGE)
+==================================================
+
+D-123: `actionable_case_b_conflict_count: 0` -- no disagreement for D-123/
+D-128 to gate this run, same shape as D-143/D-147/D-153's own pimples/
+diagnosis findings (semantic and DeliveryScorer signals agree, or no
+family exists to compare within). D-128 fallback: not triggered
+(`CASE_B_NOT_DOMINATED` is the standing inert reason whenever D-123 finds
+nothing actionable). Neither module was touched, called differently, or
+influenced by D-158 this run -- confirmed both by design (disjoint code
+paths) and by this run's own evidence (no actionable conflict for either
+to act on).
+
+==================================================
+PARITY METRICS
+==================================================
+
+Selection-scope F1: CutSell vs Cut.ai **0.8358**, CutSell vs Human Gold
+**0.8352**, Cut.ai vs Human Gold 0.8996. Physical (FINAL MP4,
+post-render) F1: CutSell vs Cut.ai **0.8602**, CutSell vs Human Gold
+**0.8737**. Selection Level-1: 20.96s / 20 regions. Boundary Level-1
+(physical/rendered): 4.317s / 25 regions. Overall physical Level-1
+(FINAL MP4, selection + boundary): 15.302s / 34 regions (9 regions/
+10.985s selection-attributed + 25 regions/4.317s boundary-attributed).
+LEVEL_1 by authority (physical): `AttemptReconstructor/RecordingProcess
+Removal` 4 regions/7.935s, `BoundaryEngine` 29 regions/6.527s,
+`BestTakeResolver` 1 region/0.84s (`IdeaClusterer/RetryFamilyFormation`'s
+4-region/4.28s selection-scope contribution is absorbed/reattributed by
+the time physical Level-1 is computed, per D-097.10's own "segments-as-
+rendered" methodology -- consistent with prior runs' own reporting
+shape).
+
+Per this task's own explicit instruction: **no improvement over D-156's
+cited reference (Cut.ai 0.9018, Human Gold 0.8685) is assumed or implied
+here.** This run's physical F1 vs Cut.ai (0.8602) is LOWER than that
+reference; physical F1 vs Human Gold (0.8737) is marginally higher.
+Neither delta is attributed to D-158: (a) the observability gap above
+means D-158's own causal contribution this run cannot be confirmed either
+way; (b) the two concrete Level-1 contributors this run (the diagnosis
+retry duplicate, the two ungrouped pimples/espinillas retries) are the
+SAME pre-existing, upstream-of-D-158 family-formation instability
+documented since D-126/D-135/D-144, not a new defect and not something
+D-158's own scope (a cross-group merge WITHHOLD-only decision) could have
+caused or fixed. The much more likely explanation for any run-to-run F1
+delta remains the already-extensively-documented run-to-run semantic/LLM-
+provider variance (D-126 vs D-135 vs D-143 vs D-147 vs D-151 vs D-153 all
+show the same class of swing on this exact source).
+
+==================================================
+REAL AUDIO / MULTIMODAL HONESTY
+==================================================
+
+Signal-level audio/visual perception remains real (confirmed again this
+run: 322 real audio/visual events, 36 real spans, 51 real relation
+hypotheses). Semantic/prosodic audio understanding remains NOT
+IMPLEMENTED -- unchanged, not overclaimed here.
+
+==================================================
+PHASE-C REAL-MEDIA VERDICT: B -- PARTIALLY REAL-MEDIA PROVEN
+==================================================
+
+The mechanism (D-158's authority, its live wiring through `pipeline.py`/
+`take_grouping_provider.py`, and this task's new flag-enable overlay) ran
+on real media without any crash, exception, anomalous merge, unsafe
+merge, singleton explosion, or meaning regression -- the fail-open
+contract held throughout and D-150's firewall stayed fully intact. But
+**this run could not exercise or observe the mechanism's actual decision
+behavior**: the two named critical test cases (Diagnosis retry, Pimples/
+espinillas) both failed to reach the cross-group merge stage D-158 hooks
+into at all (a pre-existing, upstream family-formation instability, not
+a D-158 defect), and the one diagnostic field that WOULD show D-158's
+own evaluation counts (`watch_listen_family_evidence`) fell outside this
+run's recoverable CI log tail (a data-recoverability gap, not a code
+defect). Not verdict A (cannot confirm real evidence was actually
+consumed and acted on this run); not verdict C (no structural flaw was
+exposed -- the mechanism's own offline-proven truth table and fail-open
+guarantee were never contradicted by anything this run produced); not
+verdict D (no unsafe merge, no regression attributable to D-158).
+
+==================================================
+PHASE-C CLOSURE
+==================================================
+
+**Does NOT close** (verdict B, not A). The D-154 Phase C family-
+consumption thread remains open pending either (i) a bounded observability
+fix (add `watch_listen_family_evidence` to the workflow's own late-print
+curated allowlist, a docs/CI-only change, zero editorial risk) so a
+future qualification run's actual evaluation counts are recoverable, or
+(ii) a future RAW where the pimples/espinillas or diagnosis-retry pair
+DOES reach family-complete status (their own instability is run-to-run
+non-deterministic, per D-144), giving D-158 a real case to be observed
+acting on. No new family heuristic is proposed or needed -- the gap found
+here is observability, not mechanism design.
+
+**Exact next capability (NOT authorized by this task):** D-160 Watch+
+Listen Phase D -- consume fused performance/usability evidence in
+DeliveryScorer/BestTake, addressing the KNOWN downstream pimples quality
+issue generalistically. Separately, before or alongside D-160, the
+observability fix named above (line-656 allowlist) would let a future
+D-159-shaped qualification actually confirm D-158's real-media behavior.
+Neither is implemented here.
+
+==================================================
+VIDEO00 PRIMARY-RAW STATUS: NOT YET -- BESTTAKE/ORDERING/WATCH+LISTEN
+CAPABILITIES STILL PARTIAL
+==================================================
+
+Even with Phase C's mechanism proven safe (verdict B), Video00 remains
+non-primary: DeliveryScorer/BestTake's own pimples tie-break issue
+(D-143/D-144, unresolved), the sonography-ordering/diagnosis-retry defect
+(this run again, unresolved), and semantic/prosodic audio understanding
+(NOT IMPLEMENTED) all remain separate, open items.
+
+**Confirmations:** NO CODE CHANGE beyond the one explicitly Product-
+Owner-authorized workflow overlay (commit `9a7a3b0`, `.github/workflows/
+cutsell-video00-modal-raw.yml` only -- zero `cutsell_worker/` files
+touched). NO SECOND RAW (exactly one Video00 RAW dispatched, run
+`34280568497`). No BestTake/DeliveryScorer/semantic-authority/Boundary/
+Pacing/provider-policy change. No fallback activation. No iOS work.
+
+**HUMAN ACTION REQUIRED:** YES (conditions A/F/G) -- (A) whether to
+authorize the bounded observability fix named above before any further
+D-158 real-media qualification; (F) this run's rendered MP4 still needs
+its own HUMAN WATCH+LISTEN PASS (not performed in this measurement-only
+task); (G) whether/when to authorize D-160 Phase D, and in what order
+relative to the still-open sonography-ordering/diagnosis-retry finding
+and D-156's own still-open findings, are Product Owner decisions.
