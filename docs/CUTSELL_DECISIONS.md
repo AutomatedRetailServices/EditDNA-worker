@@ -16435,3 +16435,270 @@ next gate: shadow real-media qualification on an authorized RAW, or a
 provider-backed offline eval of the 9 existing Class-B fixtures) remains
 unchanged and independently pending its own separate authorization. No
 RAW, provider call, or infra change requested by this task.
+
+## D-130 -- iOS native foundation verification: existing Swift/XcodeGen
+source only, build/architecture/vertical-slice audit (post D-129). **AUDIT
+ONLY. No new iOS feature implemented. No engine change. No RAW. No
+provider call.** This task's own environment is a Linux container with no
+Xcode, `xcodebuild`, XcodeGen binary, or Swift toolchain installed
+(`xcodebuild`/`swift` both `command not found`) -- Xcode/`xcodebuild` are
+macOS-only and cannot run in this environment under any local tooling
+install, so project generation and the simulator build were **BLOCKED by
+environment, never attempted, and never failed** -- this is not glossed
+over as a pass. Every other requested audit dimension was performed by
+direct inspection of all 27 Swift files (~3,790 lines) plus `project.yml`.
+
+**Project inventory.** XcodeGen project generator, one target (`CutSell`,
+`type: application`, `platform: iOS`), `PRODUCT_BUNDLE_IDENTIFIER: ai.
+cutsell.app`, `IPHONEOS_DEPLOYMENT_TARGET: 17.0`, `SWIFT_VERSION` (see
+finding below), no committed `.xcodeproj`/`.xcworkspace`/`Package.swift`,
+no `.entitlements` file, no `.xcassets`/asset catalog, no `.xcscheme`
+(none would exist pre-generation), **no test target and no test files
+anywhere in `mobile/`**. `GENERATE_INFOPLIST_FILE: YES` supplies Info.plist
+keys inline (`INFOPLIST_KEY_*`) rather than a checked-in plist. Static
+`project.yml` validation via `yaml.safe_load` succeeded structurally, but
+found one latent footgun worth flagging for the next iOS task: `SWIFT_
+VERSION: 5.10` is an UNQUOTED YAML scalar, which a standards-compliant
+YAML 1.1 parser reads as the float `5.1` (trailing zero silently dropped)
+-- this was NOT touched in this audit-only task (no build exists to prove
+it actually breaks anything, and this task's build-fix policy requires an
+observed failure, not a hypothetical one) but should be quoted as `"5.10"`
+before the next real build attempt on macOS.
+
+**Vertical-slice audit (D-129's 22 items, traced through actual code, not
+inferred from filenames):**
+
+| # | Item | Status | Evidence |
+|---|---|---|---|
+| 1 | App shell | IMPLEMENTED | `CutSellApp.swift` (`@main`, `AppDelegate` for background session events, bootstrap task, `RootView`) |
+| 2 | Camera permission | IMPLEMENTED | `CameraController.prepare()` calls `AVCaptureDevice.requestAccess(for: .video)` |
+| 3 | Microphone permission | IMPLEMENTED | same method, `requestAccess(for: .audio)` |
+| 4 | Photo access | IMPLEMENTED | `PhotosPicker`/`PhotosUI` (privacy-preserving picker, no read-permission prompt by Apple design) for import; `PHPhotoLibrary.requestAuthorization(for: .addOnly)` explicitly requested before saving in `FinishedExportActionsView` |
+| 5 | Record video | IMPLEMENTED | `CameraController.record` + `AVCaptureMovieFileOutput` |
+| 6 | Front camera | IMPLEMENTED | `flipCamera()`, `AVCaptureDevice.Position.front`, mirroring set on the connection |
+| 7 | Back camera | IMPLEMENTED | default `.back` position |
+| 8 | Stop recording | IMPLEMENTED | `stopRecording()`; also auto-stops at the 60s/3m/10m preset limit |
+| 9 | Retake/delete local take before upload | PARTIAL | `NewCutView`'s `onDelete`/`onMove` let a clip be removed/reordered before submit; there is no dedicated post-capture preview-and-retake screen -- `CameraCaptureView`'s `onCapture` appends directly to the list and dismisses |
+| 10 | Import from Photos | IMPLEMENTED | `PhotosPicker` + `ImportedVideoFile: Transferable`, up to 10 clips in multi-clip mode |
+| 11 | Vertical 9:16 capture compatibility | PARTIAL | Playback/preview UI assumes 9:16 (`DraftPlaybackView`'s `.aspectRatio(9/16)`); capture itself sets no explicit orientation lock or aspect enforcement -- relies on device portrait convention + `preferredTransform`, so a landscape recording is not structurally prevented |
+| 12 | Orientation metadata handling | IMPLEMENTED | `VideoPreparation.prepare` reads `track.load(.preferredTransform)` to compute true display size; `DraftPlaybackView` reapplies `preferredTransform` onto the composition's video track -- real orientation-preserving handling, not a stub |
+| 13 | Media metadata extraction/logging | PARTIAL | Duration (from `AVURLAsset`) and resolution/`preferredTransform` (used only for the local transcode-threshold decision) are read; codec, fps, audio sample rate, and device model are **never read or sent anywhere** in the Swift source |
+| 14 | Upload RAW | IMPLEMENTED | `MultipartUploadManager` -- real presigned-S3-style multipart upload (start/presign-per-part/complete) |
+| 15 | Upload progress | IMPLEMENTED | per-part progress callback threaded through to `NewCutView`'s `ProgressView` |
+| 16 | Retry failed upload | PARTIAL | `UploadResumeStore` persists per-file upload state and `MultipartUploadManager` reconciles against backend-reported uploaded parts on relaunch/resubmission (a real resumable mechanism) -- but there is no automatic retry-with-backoff inside one `upload()` call; a mid-upload failure surfaces to the user, who must resubmit |
+| 17 | Background/interrupted upload strategy | IMPLEMENTED | `BackgroundPartUploader` (real `URLSessionConfiguration.background`, `AppDelegate.handleEventsForBackgroundURLSession` wiring) |
+| 18 | Processing/job status | IMPLEMENTED | `ProcessingView`'s 2-second polling loop against `/v1/jobs/{id}` |
+| 19 | Receive completed render | IMPLEMENTED | `ProcessingView` opens `DraftEditorView` on `state == "finished"`/`"draft_ready"` |
+| 20 | Play result | IMPLEMENTED | `DraftPlaybackView` builds a real `AVMutableComposition` from selected clips' source ranges (non-destructive, D-107-consistent) and plays via `AVPlayer`; `FinishedExportActionsView` downloads and plays the final MP4 |
+| 21 | Save/export result | IMPLEMENTED | `FinishedExportActionsView`'s `PHPhotoLibrary.performChanges` with `.addOnly` authorization |
+| 22 | Native share | IMPLEMENTED | `ShareLink` in `FinishedExportActionsView` |
+
+Result: 16 IMPLEMENTED, 5 PARTIAL, 1 (retake/delete) PARTIAL, 0 STUB, 0
+MISSING. No item was inferred from a filename alone -- every classification
+above traces an actual code path.
+
+**Camera audit.** `AVCaptureSession` present and real; separate video
+(`.builtInWideAngleCamera`) and audio device inputs; front/back switching
+via `AVCaptureDevice.Position` with mirroring set on the output connection
+for front; `AVCaptureMovieFileOutput` with stabilization when supported;
+explicit start/stop lifecycle on a dedicated serial `DispatchQueue`
+(`ai.cutsell.camera.session`); permission requested before configuration;
+structured `CameraError` (`permissionDenied`/`configurationFailed`/
+`recordingFailed`) surfaced to the UI; `AVCaptureFileOutputRecordingDelegate`
+correctly hops back to `@MainActor`. No stubs found -- this is a real,
+working camera layer (unverified on a physical device or simulator, per
+the environment limitation above).
+
+**Photo import audit.** Uses `PhotosPicker`/`PhotosUI` (`matching: .videos`,
+capped at the multi-clip budget) and a `Transferable` conformance
+(`ImportedVideoFile`) that copies the picked file into app-owned storage
+(`persistentMediaURL`, Application Support/Imports) rather than holding a
+security-scoped reference indefinitely -- correct, standard pattern. MIME/
+content-type is derived from the picker's `supportedContentTypes` with a
+path-extension fallback. No PHPicker-vs-PhotosPicker mismatch; metadata
+beyond duration is not extracted at import time (see item 13).
+
+**Media metadata audit.** Duration: read via `AVURLAsset.load(.duration)`
+and sent to the backend (`SourceInput.durationSec`). Resolution and
+orientation transform: read and used, but only to decide local 1080p
+transcode, never sent to the backend as metadata. Codec, container,
+fps/frame-rate (including VFR detection), audio format/sample rate, file
+size (used internally for the transcode-size check, not logged/sent), and
+front-camera/source-origin marker: **none are read, logged, or
+transmitted anywhere in the Swift source.** No fields are fabricated in
+this report -- this gap is real and material against D-129's Section 12.4
+item 13 and the media-reality contract (Section 12.5).
+
+**Upload/network audit.** Base URL: `UserDefaults` override falling back
+to the `Info.plist`-embedded `CutSellAPIBaseURL` (`http://127.0.0.1:8000`
+dev default), both validated for `http`/`https` scheme and a non-nil host
+before use -- **both schemes are currently accepted, TLS is not yet
+enforced exclusively** (acceptable for local dev, a gap for production).
+Auth: bearer token from `CutSellSession`, persisted via `KeychainStore`
+with `kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly`; no token-refresh
+path exists (`SessionResponse.expiresIn` is decoded but never consulted) --
+a session likely lives until a 401 forces re-auth, unverified. Upload
+mechanism: presigned-S3-style multipart (start/presign/PUT-per-part/
+complete), confirmed above. Progress/retry/background: confirmed above.
+Job id tracking: `MultipartStartResponse.uploadID`/`Project.latestJobID`/
+`JobStatus.jobID` threaded consistently. **Security check: a targeted
+scan (`sk-`/`api_key=`/`Bearer <long token>`/AWS key patterns/PEM headers)
+across all 27 files found zero embedded provider or API secrets.**
+
+**Processing status / result delivery.** Traced dataflow: upload
+completes -> `POST /v1/flow-b/jobs` creates the job -> `ProcessingView`
+polls `GET /v1/projects/{id}` and `GET /v1/jobs/{id}` every 2s (no
+websocket, a real but simple mechanism) -> on `finished`/`draft_ready`,
+`DraftEditorView` loads the draft snapshot -> `DraftPlaybackView` builds a
+live composition preview -> `FinishedExportActionsView` downloads the
+rendered MP4 for share/save. This is a complete, real, traceable pipeline
+end to end at the client-code level (server-side correctness is outside
+this iOS-only audit's scope).
+
+**Editor/timeline audit.** `VisualTimelineView` + `TimelineClipCell` (real
+horizontal timeline with server-provided filmstrip thumbnails and pinch-
+to-zoom) + `TimelineClipInspector`: **Swap Take** (IMPLEMENTED -- calls
+`/v1/draft-edits/swap`; this is `CLAUDE.md`'s already-carved-out manual
+editor-layer `swap_take`, a distinct product layer from the engine's
+SELECT/KEEP-vs-DISCARD semantic membership model D-019 puts out of scope
+-- **this audit did not reintroduce, alter, or need to alter anything
+here; it already existed pre-D-130 and is exactly the sanctioned
+exception CLAUDE.md itself names**), Trim (IMPLEMENTED, word-timestamp-
+aware slider bounds), Split (IMPLEMENTED, snaps to inter-word silence
+midpoints), Remove (IMPLEMENTED), Reorder (IMPLEMENTED, `ReorderList` in
+`DraftEditorView`), Captions (IMPLEMENTED, enable/preset + per-clip text
+edit), Audio controls (IMPLEMENTED, mute/volume presets), Text overlays
+(IMPLEMENTED, add/reposition/rescale/remove), Media overlays (IMPLEMENTED,
+photo/video import via `OverlayUploadManager` + reposition/rescale/mute/
+remove), Undo/redo (IMPLEMENTED, revision-based). Source handles/"restore
+source range" (D-107's non-destructive doctrine): trim adjusts `start`/
+`end` against the same immutable source id rather than mutating source
+media -- consistent with the doctrine at the client-call level, though
+whether the backend enforces true non-destructiveness is outside this
+iOS-only audit.
+
+**Overlap UI audit.** UI label `Overlap` and internal state `dialogue_
+overlap_enabled` (D-129's exact naming) are **MISSING** -- neither string
+appears anywhere in the Swift source. `overlaps_delivery` (the engine's
+internal perception term) is confirmed **never exposed** in the UI (it
+does not appear anywhere in `mobile/ios/CutSell/`). **Material finding
+this audit surfaces for Product Owner reconciliation, not decided here:**
+`NewCutView`/`PendingCutStore` already contain a **pre-existing, separately
+named** toggle -- UI label `"Natural audio overlap"`, Swift property
+`audioOverlap`, wire field `audio_overlap` -- sent once at job-submission
+time (default OFF, described in-app as "the safest default"). This predates
+D-129 and was not caught by D-129's own (shallower, filename-level) iOS
+inventory pass. Whether `audioOverlap` is the same product concept as
+D-129's canonical `Overlap` (a per-join, engine-mediated pacing toggle) or
+a distinct, already-shipped, submission-time audio-mixing setting is a
+product question this audit does not resolve -- no rename, wiring change,
+or new toggle was implemented per this task's explicit "Do NOT implement
+Overlap" scope.
+
+**Privacy/permission audit.** `project.yml` declares exact Info.plist
+keys: `INFOPLIST_KEY_NSCameraUsageDescription` ("CutSell can record
+product footage."), `INFOPLIST_KEY_NSMicrophoneUsageDescription`
+("CutSell records audio with your product footage."), `INFOPLIST_KEY_
+NSPhotoLibraryUsageDescription` ("CutSell needs access to videos you
+choose to edit."), `INFOPLIST_KEY_NSPhotoLibraryAddUsageDescription`
+("CutSell can save finished videos to your library."). All four are
+present and non-empty; copy reads as plausible placeholder/functional
+text, not obviously final production/legal-reviewed copy -- this audit
+does not invent or approve final copy, per scope.
+
+**Security audit findings (evidence only, nothing fixed):** (1) no
+hardcoded API keys/provider secrets/tokens found in any of the 27 files;
+(2) both `http` and `https` base-URL schemes are currently accepted
+(TLS-only is not enforced -- acceptable for the checked-in local dev
+default, a gap before any production base URL is configured); (3) auth
+session stored in Keychain with device-only, after-first-unlock
+accessibility (appropriate, not plaintext `UserDefaults`); (4) no token-
+refresh/expiry handling despite `expiresIn` being decoded; (5) local
+temp-file cleanup exists (`PendingCutStore.remove(deleteLocalFiles:)`,
+`VideoPreparation`'s transient transcode file is removed on failure, a
+re-downloaded export overwrites its own temp file) but is best-effort,
+not exhaustive (`UploadParts` cache-directory fragments are removed per
+part but not swept on abnormal termination); (6) no silent uploads found
+-- every upload originates from an explicit user action (`Create`/
+`Resume` button in `NewCutView`).
+
+**Device/codec readiness.** HEVC/H.264/MOV/MP4: no explicit codec branch
+exists anywhere -- `AVCaptureMovieFileOutput` records in the OS/device
+default container/codec (OS passthrough, not explicitly handled), and
+`VideoPreparation`'s transcode path always re-encodes to `.mp4`/H.264 via
+`AVAssetExportPreset1920x1080` when triggered, but only above the 1080p/
+500MB threshold -- smaller HEVC files pass through untouched with no
+codec normalization. VFR: not explicitly detected or handled anywhere
+(OS passthrough, unverified). Orientation metadata: explicitly handled
+(see item 12 above). Large files/long recordings: the 500MB/1080p
+transcode threshold and the 60s/3m/10m capture presets are the only
+explicit large-media accommodations; no explicit chunked-read safety
+beyond the multipart upload's own part-by-part `FileHandle` reads (which
+are memory-safe for large files by construction).
+
+**Observability audit.** **Zero logging calls exist anywhere in the iOS
+source** -- no `print`, `os_log`, `Logger`, or `NSLog` call was found in
+any of the 27 files. Device model, iOS version, and codec/fps/audio-format
+are never captured (confirmed above). Upload start/end/retry, backend job
+id, and processing duration are tracked in view state (`@Published`
+properties) but never persisted or logged for diagnostic purposes.
+Playback success/failure is surfaced to the user as UI text but not
+logged. **This is a complete gap against D-129 Section 12.9's
+observability target**, not a partial one.
+
+**iOS tests.** **No iOS unit test target and no test files exist anywhere
+under `mobile/`** (`project.yml` defines exactly one target, type
+`application`; no `CutSellTests` target; no `XCTest` import found in any
+file). No test coverage is claimed or fabricated by this report.
+
+**Build fix policy outcome.** No build was attempted (environment has no
+Xcode/`xcodebuild`), so no build failure occurred to diagnose or fix. The
+one static-config finding (`SWIFT_VERSION: 5.10`'s YAML float-truncation
+risk) is reported as a finding for the next macOS-based iOS task, not
+fixed here -- fixing it now would be speculative (unconfirmed to actually
+break a build this session cannot run) and this task's mandate is audit,
+not blind config editing.
+
+**iOS status matrix:**
+
+| Dimension | Status |
+|---|---|
+| Project source | PROVEN (27 files, ~3,790 lines, directly inspected) |
+| Project generation (XcodeGen) | BLOCKED (no XcodeGen binary, no Swift toolchain in this Linux container) |
+| Simulator build | BLOCKED (no Xcode/`xcodebuild` -- macOS-only, cannot run here) |
+| App launch | UNVERIFIED (no simulator/device run possible this session) |
+| Camera | PARTIAL (real, complete implementation; unverified at runtime) |
+| Microphone | PARTIAL (real permission/session wiring; unverified at runtime) |
+| Photo import | PARTIAL (real implementation; unverified at runtime) |
+| Media metadata | PARTIAL (duration/resolution only; codec/fps/audio-format/device model missing) |
+| Upload | PARTIAL (real multipart implementation; unverified at runtime/against a live backend) |
+| Progress | PARTIAL (real per-part callback; unverified at runtime) |
+| Retry | PARTIAL (resumable via saved state; no automatic retry-with-backoff) |
+| Background upload | PARTIAL (real background URLSession wiring; unverified at runtime) |
+| Job status | PARTIAL (real polling implementation; unverified at runtime) |
+| Result playback | PARTIAL (real AVComposition-based playback; unverified at runtime) |
+| Save/export | PARTIAL (real Photos-save/download implementation; unverified at runtime) |
+| Share | PARTIAL (real `ShareLink`; unverified at runtime) |
+| Editor | PARTIAL (trim/split/reorder/captions/audio/overlays/undo-redo/swap-take all real; unverified at runtime; backend correctness out of scope) |
+| Overlap UI | MISSING (D-129's exact naming absent; a differently-named pre-existing `audioOverlap` toggle exists and needs Product Owner reconciliation, not implemented here) |
+| Real device | MISSING (never run on a physical device; no evidence any prior task did either) |
+| Signing | MISSING (no entitlements, no provisioning/signing configuration present) |
+| TestFlight | MISSING (no submission has occurred; gated on all of the above) |
+
+**Exact next bounded iOS task (recommended, not authorized by this
+document):** on a macOS host with Xcode installed, run `xcodegen generate`
+against `mobile/ios/project.yml` (quoting `SWIFT_VERSION` as `"5.10"`
+first, per the finding above) and perform ONE simulator build (`xcodebuild
+build -scheme CutSell -destination 'generic/platform=iOS Simulator'` or a
+concrete simulator destination) against a running local backend at
+`http://127.0.0.1:8000`, fixing only mechanical compile/link errors
+surfaced by that build -- no new feature, no Overlap, no signing. This is
+the smallest capability that actually advances the vertical slice, because
+every other finding in this audit (media metadata gaps, missing
+observability, Overlap UI, real-device proof) is downstream of first
+proving the existing source actually compiles and launches at all.
+
+**HUMAN ACTION REQUIRED:** YES (condition A/C -- a macOS build environment
+is required and is outside this session's own capability; also a product
+decision on the `audioOverlap`-vs-`Overlap` naming reconciliation named
+above). No RAW, provider call, or infra change requested by this task.
