@@ -17706,3 +17706,276 @@ per this task's own stated goal (Part 2 rule 4/8).
 **STOPPING HERE per this task's own directive: no Dialogue/Pacing
 Transition implementation, no multimodal fallback provider call
 performed. Wait for Product Owner authorization.**
+
+## D-135 -- D-128 Phase 1 shadow real-media qualification (RAW `34184212589`,
+post D-134). **VERDICT A -- SHADOW REAL-MEDIA PROVEN. D-128 Phase 1 SHADOW
+QUALIFICATION CLOSES.** Exactly ONE Modal Video00 RAW, canonical source,
+default parameters, no code patch. `fallback_provider_invoked=false` and
+`fallback_winner_changed=false` held for all 6 real families; no winner/
+score/rank/grouping/Boundary change; no regression attributable to D-128.
+
+**Workflow conclusion was `failure`** (two known, pre-existing, unrelated
+gates -- "Verify frozen Selection lock" and "Verify Human Gold regression
+QA" -- see below); the RAW itself, its diagnostics, the D-125/D-128 tail-
+safe summary, the quality ladder, and the Watch+Listen summary all
+completed `success` and produced fully valid data (job `101929189844`,
+steps 1-18/20/22-26 all `success`).
+
+**1) Global family counts (exact, from the extended D-125/D-128 tail-safe
+summary, `artifact/video00-modal-d123-qualification-summary.json`):**
+`family_count=6`, `multi_member_family_count=6` (every family has >=2
+members: sizes 2/3/2/2/2/2), `families_with_semantic_winner=5` (one
+family, `tg_1ff41984e7f038ea2f`, had no semantic fast-path candidate at
+all), `families_with_deliveryscore_winner=6`, `families_with_case_b_
+evidence_count=6`, `fallback_shadow_evaluated_count=6` (every family
+carries a `fallback_trigger_reason`), `fallback_shadow_eligible_count=0`,
+`fallback_shadow_ineligible_count=6`.
+
+**2) Ineligibility reason counts (never merged, exact):**
+`SEMANTIC_DELIVERYSCORE_DISAGREE=2`, `NO_MEANING_SUFFICIENT_ALTERNATIVE=3`,
+`NO_SEMANTIC_WINNER=1`; `NOT_MULTI_MEMBER=0`, `NO_DELIVERYSCORE_WINNER=0`,
+`NO_CASE_B_EVIDENCE=0`, `SAFETY_EXCLUSION=0`, `CASE_B_NOT_DOMINATED=0`.
+Sum = 6 = `family_count`, confirmed.
+
+**3) Every Class B eligible family: NONE this run**
+(`fallback_shadow_eligible_count=0`) -- no family reached `CLASS_B_
+ELIGIBLE`. Nothing further to report for eligible-family detail, current
+final winner comparison, or shadow-eligibility-changed-nothing confirmation
+(vacuously true: zero eligible families means zero opportunity for
+anything to have changed).
+
+**4) Factual dominance validation:** not exercised this run (no eligible
+family produced a dominance comparison to validate). No contradiction of
+D-128's partial-order rule occurred anywhere -- **no regression**.
+
+**5) Shadow request assembly:** not exercised this run (no eligible
+family; `build_multimodal_besttake_request` was never called anywhere in
+this run's live pipeline path either way -- confirmed structurally,
+`pipeline.py` imports only `detect_class_b_trigger`/`fallback_trigger_
+diagnostics`, never the arbiter module). Generically, per family, the
+fields `build_multimodal_besttake_request`/`MultimodalFinalistInput`
+would need are already present in this run's own diagnostics rows for
+every family (`case_b_evidence` per candidate, `semantic_candidates`
+label/confidence, `deliveryscore_top_candidate`, `meaning_sufficient_
+candidates`) -- transcript text and exact source spans live one level up
+in the same run's `take_judge_groups`/draft data, not duplicated into
+this compact summary. **Absent future media fields, confirmed never
+populated, exactly as designed:** `video_span_reference`, `audio_span_
+reference`, `sampled_frame_references` remain `None`/`()` everywhere in
+the arbiter contract -- nothing in this task fetched or populated them.
+
+**6) Provider guarantee:** `fallback_provider_invoked=false` for all 6
+families (from the summary). Structural proof (code, unaffected by this
+RAW): `pipeline.py`'s live diagnostics loop imports only `detect_class_b_
+trigger`/`fallback_trigger_diagnostics` from `multimodal_besttake_
+fallback.py` -- it never imports `multimodal_besttake_arbiter.py`, so no
+code path in the live pipeline can reach `NullMultimodalBestTakeArbiter`,
+`safe_arbitrate`, or any provider. No OpenAI/Gemini/vision/multimodal call
+was introduced BY D-128 anywhere; the existing canonical Hybrid semantic
+provider (unrelated, pre-existing, D-061/D-082-era) is not a fallback-
+provider invocation and was not counted as one.
+
+**7) Winner/score no-change:** `fallback_winner_changed=false` for all 6
+families. `fallback_trigger_diagnostics`'s 8-field block is appended
+strictly AFTER the existing `final_winner` key in each row (unchanged
+code, D-128's own construction) -- structurally incapable of influencing
+`DeliveryScorer` numeric values, `rank_takes` ordering, semantic labels,
+D-123's own gate, `deterministic_best_take_authority`'s moves, or
+membership. No such value differs from what an equivalent pre-D-128 run
+would have produced (nothing new is read above that line).
+
+**8) D-123 compatibility -- validated on real media this run:**
+`actionable_case_b_conflict_count=1` (family `tg_ddd546c806e3f66642`:
+semantic winner `clip_828b281964a414d55110` vs. DeliveryScorer top
+`clip_c2cce25f9e2873fabe77`, both meaning-sufficient, `semantic_fast_
+path_bypassed=true`, `bypass_reason="case_b_performance_conflict"`,
+`winner_path_before="SEMANTIC_FAST_PATH"` -> `winner_path_after=
+"OTHER_EXISTING_PATH"`, final winner decided by the pre-existing
+`critical_coverage_dominance` authority -- the SAME shape D-126 already
+proved, reproduced independently on this run). **D-128's own classifier
+correctly returned `SEMANTIC_DELIVERYSCORE_DISAGREE` (never `CLASS_B_
+ELIGIBLE`) for this exact family** -- this is the single most important
+real-media validation this task sought: a genuine D-123-territory
+disagreement, exercised live, correctly excluded from Class B eligibility
+by D-128's own step-4 check, exactly as designed (D-123 already owns the
+disagreement shape; D-128 never re-litigates it). A second family
+(`tg_f5e099289b60ecb158`) also disagreed (semantic `clip_
+64e49915424664081b7c` vs. delivery `clip_4d914c81ae79a978163b`) but its
+alternative was not meaning-sufficient, so D-123 itself never bypassed
+(`case_b_conflict_present=false`, counted in the pre-existing `meaning_
+insufficient_alternative_block_count=1`) -- D-128 still correctly reports
+`SEMANTIC_DELIVERYSCORE_DISAGREE` for it (disagreement is checked before
+meaning-sufficiency in D-128's own ladder, so the classification is
+correct regardless of which reason would apply next). **D-128 shadow does
+not interfere with D-123 in any observed instance.**
+
+**9) Pimples (QA only, no production logic hardcoded):** the D-125/D-128
+summary's own text-matched pimples cross-check returned `"pimples_clips_
+present_but_no_multi_member_family_or_no_usable_realization_row"` --
+3 pimples-related clip ids exist this run but NONE of them appear as a
+member of any of the 6 multi-member families above (a legitimate,
+previously-documented D-121/D-124/D-126 shape: upstream grouping formed
+them as distinct/singleton clips this run, not a retry-family contest).
+**Separately and not contradictorily**, the Human Gold regression QA's
+own direct clip-selection checks (`pimples_micro_1/2/3_present`,
+`pimples_micro_order`, `pimples_bad_monolith_absent`, `pimples_later_
+winner_present`) **all PASS** this run -- the best pimples result in this
+run's own history (`pimples_bad_monolith_absent` had failed on every
+prior RAW back through D-124/D-126). **Determination: pimples is NOT a
+real Class B shadow candidate this run** -- not because D-128's factual-
+dominance logic rejected it, but because grouping never formed a
+multi-member contest for it this run at all; D-127 Section 13's own
+retrospective table already established that D-126's pimples family
+*would* have been Class B eligible had D-128 existed then (winner 9
+events/0.6s, alternative 7 events/0.467s, alternative strictly better on
+both dimensions) -- this run's grouping variance (a documented, expected,
+non-regressive shape) simply did not reproduce that same contest.
+
+**10) D-134 Overlap compatibility -- honest finding, not a regression:**
+this canonical Video00 RAW harness (`cutsell_worker.serverless_handler.
+_focused` -> `universal_clean_cut_validation.run_single_universal_clean_
+cut_validation`) constructs `ProcessingRequest` **directly via the
+dataclass constructor** (`ProcessingRequest(project_id=..., user_id=...,
+sources=(source,), language_hint=...)`), confirmed from the actual
+`CUTSELL_BENCHMARK_PAYLOAD_JSON` this run sent (`{"op":"focused",
+"source_key":..., "benchmark_id":..., "auto_speech_visual_
+microtrim":true}` -- no `audio_overlap`/`dialogue_overlap_enabled` key
+anywhere). This path **never calls `serde.request_from_dict`**, so D-134's
+`_normalize_dialogue_overlap` normalization point was never invoked on
+this run. Effective values: `request.dialogue_overlap_enabled=False` and
+`request.audio_overlap=False` (both dataclass defaults -- same numeric
+outcome the "default" branch of normalization would also have produced),
+but `request.overlap_diagnostics={}` (its own `default_factory` value,
+NOT the `{dialogue_overlap_enabled, dialogue_overlap_source, ...}` block
+`_normalize_dialogue_overlap` produces) -- the diagnostic label itself was
+never computed on this call path. **This is not a regression and does not
+affect editorial behavior in any way** (neither field has any consumer,
+per D-134 and confirmed unchanged here); it is a legitimate, honestly-
+reported scope boundary: D-134 hardened the two REAL client entry points
+(`/v1/flow-b/jobs`, `/v1/batches`) any app (including iOS) actually uses;
+this Video00 benchmark/validation harness is a third, pre-existing,
+direct-construction entry point to `ProcessingRequest` that neither D-134
+nor this task modifies (no code patch authorized here). **Confirmed:
+neither field affected D-123, D-128 eligibility, BestTake winner,
+Boundary, or the render plan anywhere in this run** (trivially, since
+both take their harmless default value and nothing reads either field).
+
+**11) iOS metadata non-authority (D-134 regression check):** every
+`SourceAsset` this run carries `metadata={}` (its own dataclass default --
+this run's single source was built without a `metadata=` argument at all,
+confirmed from the same direct-construction call site above; expected and
+correct, since this is an S3-sourced canonical benchmark run, not an
+iOS-submitted job). Presence confirmed (the field exists, empty);
+structurally it cannot have influenced grouping/BestTake/CASE B/D-123/
+D-128/Boundary, since it is empty and, per D-134's own structural tests,
+none of those modules ever reads a `metadata` field regardless of content.
+
+**12) Physical quality ladder (D-095, real, from `artifact/video00-modal-
+quality-ladder.json`):** FINAL MP4 (physical spans): **LEVEL_1 9 regions /
+10.985s selection + 25 regions / 4.315s boundary = 15.3s overall**; F1 vs
+Cut.ai (physical) **0.8606**; F1 vs Human Gold (physical) **0.8733**.
+LEVEL_1 by authority (physical): AttemptReconstructor/
+RecordingProcessRemoval 4/7.935s, BoundaryEngine 29/6.525s,
+CompositeResolver/PreResolverCleanup 1/0.84s. **Compared to D-126
+(overall 30.203s, F1 Cut.ai 0.8155, F1 Human Gold 0.8226): this run is
+numerically BETTER on all three measures.** Per this task's own explicit
+instruction, this is **NOT attributed to a D-128 improvement** -- D-128 is
+shadow-only and structurally cannot change render output (confirmed in
+items 6/7 above) -- this is ordinary run-to-run engine variance (Hybrid/
+Gemini semantic-labeling and grouping variance, the same class of
+variance D-126/D-127 already documented), consistent with a materially
+different family-count/shape this run (6 families here vs. 8 in D-126)
+and zero BestTakeResolver-attributed Level-1 mass this run (vs. D-126's
+21.339s) -- an independent, D-128-unrelated improvement in a different
+part of the ladder.
+
+**13) Meaning/safety (Human Gold regression QA, 18-check manifest,
+`qa_pass=false` only because of the ONE persistent pre-existing failure
+below):** `passed_check_count=17`, `failed_check_count=1`. PASS:
+`cancer_hook_preserved`, `sonography_good_take_part1_present`,
+`sonography_good_take_completion_present`, `sonography_bad_take_absent`,
+`biopsy_nodule_preserved`, `papillary_diagnosis_preserved`, `acne_back_
+preserved`, `pimples_micro_1/2/3_present`, `pimples_bad_monolith_absent`,
+`pimples_later_winner_present`, `hair_loss_preserved`, `gastritis_
+preserved`, `family_context_preserved`, `cta_preserved`, `pimples_micro_
+order`. **FAIL (persistent, pre-existing, unrelated to D-128/D-134):**
+`sonography_good_before_diagnosis` (a `required_order` check that has
+failed identically on every prior RAW in this history). `meaning_
+preservation`: 1/1 PASS (`papillary_symptom_realization_meaning`).
+`preferred_realization_parity`: 1 FAIL, explicitly non-gating
+(`"editorial/take-selection mismatch only -- never gates qa_pass"`, the
+same persistent note as every prior run). **No meaning/safety difference
+is attributable to D-128** -- D-128 changed nothing this run (items 6/7),
+so nothing here could be its effect.
+
+**14) Watch+Listen (D-119, advisory):** `status: "FAIL"`,
+`technical_qc_status: "PASS"`, `gate_mode: "advisory_v1"`, capability
+counts `{ERROR:0, EVALUATED_FAIL:1, EVALUATED_PASS:2, NOT_IMPLEMENTED:4,
+UNCERTAIN:1}` (the 4 `NOT_IMPLEMENTED` capabilities -- facial expression,
+gesture continuity, clipped-phoneme ASR realign, framing/eye contact --
+never treated as PASS), routing `{"BoundaryEngine": 17}` -- **every
+finding routes to Boundary, zero to BestTake/fallback**, confirming no
+D-128-attributable perceptual finding exists this run.
+
+**15) Freeze/QC/deliverable:** `architecture_verified: true`,
+`failed_check_count: 0` (all 12 architecture checks PASS, including
+`swap_absent_as_expected`, `freeze_references_exact_validated_plan`,
+`boundary_ran_only_after_validated_freeze`, `live_render_qc_ran_against_
+the_real_render`). Technical QC: PASS (`live_render_qc.status: PASS`,
+1 render attempt). `delivery_status: "DELIVERABLE_PENDING_HUMAN_WATCH_
+LISTEN:perceptual=FAIL"`, `human_watch_listen_required: true` -- the same
+shape as every prior RAW (technical PASS, perceptual advisory FAIL,
+pending human review). **The two job-level step failures this run
+(`"Verify frozen Selection lock"`, `"Verify Human Gold regression QA"`)
+are BOTH the same persistent, pre-existing, unrelated gates already
+documented in D-126** -- the selection-lock step compares against a
+stale baseline (`baseline_run_id: 33126865755`, `expected_selected_
+count: 23` vs. this run's real `actual_selected_count: 26`,
+`historical_regression_qa_pass: false` -- has failed identically on every
+run since before D-123 existed), and the regression-QA step's own exit
+code reflects its one real, persistent, pre-existing `sonography_good_
+before_diagnosis` failure (item 13) -- **neither is caused by, or related
+to, D-128 or D-135's own RAW.**
+
+**16) D-128 SHADOW VERDICT: A -- SHADOW REAL-MEDIA PROVEN.** All required
+conditions met: the Class B shadow classifier evaluated all 6 real
+families correctly (every reason traced to the exact code path that
+produced it); at least one meaningful real negative control was
+exercised -- in fact the single most important one, the real D-123
+disagreement/bypass family, correctly excluded via `SEMANTIC_
+DELIVERYSCORE_DISAGREE` (item 8), plus two further real negative-control
+shapes (`NO_MEANING_SUFFICIENT_ALTERNATIVE` x3, `NO_SEMANTIC_WINNER` x1);
+`fallback_provider_invoked=false` held for every family; `fallback_
+winner_changed=false` held for every family; no regression attributable
+to D-128 anywhere (physical/meaning/freeze/architecture/Watch+Listen all
+consistent with the established historical pattern, with the physical
+ladder's real improvement independently attributed to ordinary engine
+variance, never to D-128). No `CLASS_B_ELIGIBLE` family appeared this run
+-- an acceptable, expected outcome under verdict A's own stated bar
+("positive OR negative control"), not a shortfall.
+
+**D-128 PHASE 1 SHADOW QUALIFICATION CLOSES.** Per this task's own "no
+endless RAW loop" instruction: no further D-128 shadow RAW is authorized
+or needed. The exactly-one Video00 RAW this task was authorized to run
+(`34184212589`) has been run; no second RAW was dispatched.
+
+**Next gate (not authorized here):** D-127 PHASE 2 -- PROVIDER-BACKED
+OFFLINE EVALUATION, exercising a real vision-capable provider behind
+`MultimodalBestTakeArbiter` against the 9 existing bounded offline
+finalists/eval fixtures in `multimodal_besttake_eval.py` (never the live
+pipeline, never a Video00 RAW, never authoritative). This task implements
+none of it.
+
+**Scope confirmed:** this task's only artifact is this docs-only decision
+entry (`docs/CUTSELL_DECISIONS.md`) plus the one authorized GitHub Actions
+workflow dispatch (`cutsell-video00-modal-raw.yml`, default parameters, no
+overrides) and the one Modal L4 execution it triggered -- zero `git diff`
+against any `cutsell_worker/*.py`, `cutsell_app/*.py`, `mobile/ios/**`, or
+workflow file. No provider call, no authoritative fallback, no score/
+rank/grouping/Boundary/Overlap-pacing/iOS change.
+
+**HUMAN ACTION REQUIRED:** YES (condition A, product decision) -- whether
+to authorize D-127 Phase 2 (provider-backed OFFLINE evaluation only, per
+D-128's own next-gate options) is the Product Owner's decision, not made
+here. No RAW, provider call, or infra change requested by this task.
+
