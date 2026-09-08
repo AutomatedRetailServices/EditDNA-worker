@@ -21487,3 +21487,306 @@ instruction.
 **HUMAN ACTION REQUIRED:** YES (condition A/C) -- authorization to launch
 the one real-media Video00 RAW qualifying this gate is the Product
 Owner's decision, not made here.
+
+## D-151: Semantic Authority Phase B -- real-media Video00 qualification
+
+**Authorization:** Product Owner directive "CUTSELL -- D-151 SEMANTIC
+AUTHORITY PHASE B REAL-MEDIA VIDEO00 QUALIFICATION", verified HEAD
+`478bfc6` (D-150), clean working tree. ONE canonical Video00 RAW
+authorized (`Editdna longform validation/VIDEO-2026-07-30-09-18-03.mp4`,
+canonical production path, default parameters). No code change, no
+second RAW, per this task's own explicit constraint.
+
+**RAW dispatched:** run `34255812598` on `cutsell-video00-modal-raw.yml`,
+head `478bfc6`, workflow_dispatch with all-default inputs. Modal
+benchmark step itself completed successfully (teardown confirmed,
+technical `live_render_qc` PASS, `render_attempt_count: 1`, architecture
+verifier `architecture_verified: true`, `freeze_blocked: false`). The
+CI job's overall conclusion is `failure` because two of its own strict
+verifier steps (`Verify frozen Selection lock` / Human Gold ordered
+alignment, and `Verify Human Gold regression QA`) exited non-zero on
+real content-quality findings below -- this is a QA-gate failure, not an
+infrastructure or crash failure, and not evidence of a bug in D-150's
+own code (compileall/pytest are untouched by this task).
+
+**Access constraints (same class as D-147's own documented limit):** the
+per-family `judge_group_diagnostics` dump inside "Print full canonical
+diagnostics" exceeds `get_job_logs`'s retrievable tail (~5000 lines /
+~380KB), so the literal `semantic_authority_gate_evaluated` /
+`_status` / `_reason` / `_before` / `_after` field values for this run's
+families could not be read directly from the CI log. The
+`cutsell-video00-modal-validator-reports` artifact (42.8KB, small enough
+in principle) could not be downloaded either -- this session's egress
+proxy policy rejects the Azure Blob Storage host GitHub Actions serves
+artifacts from (`productionresultssa9.blob.core.windows.net`, CONNECT
+403). Both are honestly reported rather than worked around by relaxing
+scope, per this task's own precedent-setting rule from D-147.
+
+**What was recoverable and used instead:** the surviving reachable
+portion of the same log (`get_job_logs` tail, ~4999 lines back to the
+start of "Print full canonical diagnostics") plus the D-123 CASE B
+qualification summary's per-family projection (`semantic_fast_path_
+candidate`, `winner_path_before/after`, `final_reason`) -- these fields
+are printed in full for every family and were NOT truncated out.
+
+==================================================
+GLOBAL PHASE-B SUMMARY (partial -- see access constraint above)
+==================================================
+
+`family_count`: 7. `semantic_fast_path_family_count`: 5 (of 7 families,
+5 had ANY semantic fast-path candidate nominated at all).
+`semantic_fast_path_bypass_count`: 3. `actionable_case_b_conflict_
+count`: 2. `deliveryscore_path_count`: 4. `deliveryscore_disagreement_
+count`: 2. The four `semantic_authority_gate_*` tail-safe counts
+(`_allowed_count`, `_abstain_incomplete_count`, `_abstain_conflict_
+count`, `_advisory_count`) themselves are NOT confirmed this run -- their
+printed values sit inside the truncated diagnostics dump. This is the
+GLOBAL PHASE-B SUMMARY's own honest gap, not a fabricated zero.
+
+==================================================
+PIMPLES / ESPINILLAS -- CRITICAL TRACE
+==================================================
+
+Family `tg_b251dfddc4537bec72`, members `clip_4cbc97a5c3285905911b`
+("Otro síntoma era que me salían espinillas... Me salía por
+temporadas.") and `clip_97f22464f6203bfcea98` ("También me salían
+espinillas en esta parte de aquí detrás de la oreja y todo el cuello...
+como espinillas de personas con problemas hormonales."). This is the
+same real family D-147 forensically identified.
+
+`family_window_labels` (merged): BOTH members labelled `("winner",
+0.95)` -- a genuine double-winner artifact, confirming the two
+underlying complete windows disagreed on which member is "winner" (the
+same class of instability D-147 found on this exact family in an
+earlier run). `family_complete_context`/`complete_context_conflict`
+literal values: NOT RECOVERABLE this run (see access constraint).
+
+**Directly confirmed from D-123's own per-family fields (not truncated):**
+`semantic_fast_path_candidate: null`, `semantic_fast_path_bypassed:
+false`, `case_b_conflict_present: false`, `fallback_trigger_reason:
+"NO_SEMANTIC_WINNER"`, `final_reason: "delivery_tie_break_among_
+survivors"`, `winner_path_before: "DELIVERYSCORE_PATH"`, `winner_path_
+after: "DELIVERYSCORE_PATH"`, `final_selected_clip_id:
+clip_97f22464f6203bfcea98`.
+
+**Conclusion (causally supported, not inferred):** this family NEVER
+reached `_semantic_best_take`'s decisive `single_semantic_winner` fast
+path in the first place -- `semantic_fast_path_candidate` is `null`, not
+merely gated to non-authoritative. The double-`"winner"` merge already
+produced `len(winners) != 1` BEFORE D-150 is ever consulted, exactly the
+"already accidentally safe" shape identified during D-150's own design
+(the mathematical proof that most complete-window-disagreement shapes
+self-resolve to a non-decisive merge without needing the new gate).
+`winner_path_before == winner_path_after == "DELIVERYSCORE_PATH"` proves
+D-150 changed NOTHING about this family's path on this run -- consistent
+with, but not sufficient to prove, whatever the gate itself computed.
+DeliveryScorer's tie-break among the two `meaning_sufficient_candidates`
+then chose `clip_97f22464f6203bfcea98` -- the realization BOTH Cut.ai and
+Human Gold rejected (`pimples_bad_monolith_absent` failed:
+`historical_bad_take_returned`) -- entirely inside `DELIVERYSCORE_PATH`,
+a pre-existing D-082-era component untouched by D-150.
+
+==================================================
+COMPLETE/AGREED CONTROL
+==================================================
+
+NOT ISOLATED this run with field-level confirmation (same access
+constraint). Five families did reach a nominated `semantic_fast_path_
+candidate` (`semantic_fast_path_family_count: 5`); two of those went
+through `SEMANTIC_FAST_PATH`/`OTHER_EXISTING_PATH` decisively (e.g.
+`tg_e1972a45ff079a2b63`, `final_reason: "critical_coverage_dominance"`,
+`semantic_winner_label: "winner"`, `confidence 0.95`) without any
+recorded gate suppression -- behaviorally consistent with an
+`AUTHORITATIVE` gate result, but the literal `semantic_authority_gate_
+status` field for these families is likewise not recoverable this run.
+
+==================================================
+INCOMPLETE-CONTEXT CONTROL
+==================================================
+
+NOT OBSERVED with field-level confirmation this run (same access
+constraint; no family's `family_complete_context` value was
+recoverable).
+
+==================================================
+DIAGNOSIS CONTROL
+==================================================
+
+The diagnosis clause itself ("La biopsia confirmó que era un cáncer
+papilar de tiroides.") IS present and kept in the final MP4 (clip
+`4582fb048eb0`, 135.44-140.96s physical; `papillary_diagnosis_preserved`
+and the meaning-preservation check `papillary_symptom_realization_
+meaning` both PASS). The Human Gold ordered-alignment step separately
+flags gold span [11,12] as `MISSING` (`content_coverage: 0.0`) because
+that gold unit pairs the diagnosis sentence with a following reflective
+aside ("Síntomas que tuve según yo era sintomática pero si hubo indicios
+ahora mirándose atrás.") that was NOT selected as its own clip -- an
+ancillary-clause omission, not loss of the diagnosis itself; explicitly
+marked non-blocking by the report's own `preferred_realization_parity`
+note ("editorial/take-selection mismatch only -- never gates qa_pass").
+`sonography_good_before_diagnosis` (required ordering) FAILED --
+mechanism not diagnosed in this task (no code inspection performed, per
+this task's own scope). Nothing in the diagnosis family's own traced
+fields implicates the semantic authority gate; D-150 does not touch
+ordering/placement authority (StoryValidator/CanonicalEditPlan), and
+this task did not investigate further, per its own "NO CODE FIX" bound.
+
+==================================================
+WHOLE-VIDEO REGION STATUS SUMMARY (`benchmarks/video00_regression_qa.json`, 18 checks)
+==================================================
+
+Hook: CUTAI_PASS (`cancer_hook_preserved`). Sonography: CUTAI_PASS on
+presence (`sonography_good_take_part1/completion_present`,
+`sonography_bad_take_absent`) but REGRESSED on ordering
+(`sonography_good_before_diagnosis` failed). Pimples: REGRESSED
+(`pimples_bad_monolith_absent` failed -- see trace above; presence/order
+micro-checks all PASS). Diagnosis: CUTAI_PASS (content + meaning
+preserved; see Diagnosis Control). Body/Symptoms (acne, hair loss,
+gastritis, family context): CUTAI_PASS on all four. Stomach: not a named
+check in this fixture -- NOT_REEVALUATED. Conclusion: not separately
+named -- NOT_REEVALUATED. CTA: CUTAI_PASS (`cta_preserved`).
+`qa_pass: false` overall (16 passed / 2 failed / 25 selected vs 23
+expected, the count delta itself a non-blocking D-032 warning).
+
+==================================================
+CUT.AI / HUMAN GOLD METRICS
+==================================================
+
+Physical (rendered) Level-1 headline: 11 selection regions / 30.828s +
+23 boundary regions / 4.201s. F1 vs Cut.ai: 0.7822 (precision 0.8398,
+recall 0.732). F1 vs Gold: 0.7827 (precision 0.7703, recall 0.7955).
+Selection-level (pre-physical) parity: Cut.ai-vs-Gold F1 0.8996;
+CutSell-vs-Cut.ai F1 0.7608; CutSell-vs-Gold F1 0.7515.
+`level1_by_authority`: BestTakeResolver 3/25.689s (dominant --
+attributable to the pimples DeliveryScorer tie-break above),
+BoundaryEngine 28/6.941s, AttemptReconstructor/RecordingProcessRemoval
+3/2.399s. Compared to D-143 (Cut.ai 0.8396, Gold 0.8114) this run is
+lower on both; compared to D-147 (Cut.ai 0.7557-0.7709, Gold
+0.7097-0.7348) this run is higher on both. Per this task's own
+instruction, no causal attribution to D-150 is made -- `level1_by_
+authority` attributes the dominant Level-1 mass to `BestTakeResolver`
+(DeliveryScorer tier), not to the semantic authority layer D-150 added.
+
+==================================================
+PIMPLES COMMERCIAL PARITY
+==================================================
+
+REGRESSION relative to the fixed-baseline expectation encoded in
+`pimples_bad_monolith_absent` -- the historical bad/rejected realization
+returned as the final selection, matching neither Cut.ai nor Human Gold.
+Root cause (per the trace above) is DeliveryScorer's tie-break among two
+"meaning-sufficient" survivors inside `DELIVERYSCORE_PATH`, a path D-150
+never gates (D-150 gates only `_semantic_best_take`'s decisive
+`single_semantic_winner` fast path, which this family never reached).
+
+==================================================
+SEMANTIC STABILITY RESULT
+==================================================
+
+Pimples family `tg_b251dfddc4537bec72`: net behavioral effect at the
+semantic-authority layer is consistent with `STABLE_ABSTAIN_CONFLICT`
+(provider evidence never became decisive, on this run as on D-147's) --
+but the literal gate field could not be read this run, so this is
+recorded as **UNKNOWN (field-level) / behaviorally-consistent-with-
+ABSTAIN_CONFLICT**, not asserted as directly proven. The five families
+that did nominate a fast-path candidate: behaviorally consistent with
+`STABLE_AUTHORITATIVE` (no observed suppression), same field-level
+caveat. No family shows evidence of `UNSTABLE` handling (a decisive
+winner being manufactured from conflicting evidence) in what was
+recoverable this run.
+
+==================================================
+D-148 ARCHITECTURE COMPATIBILITY
+==================================================
+
+Confirmed: Parallel Multimodal Perception -> Watch+Listen Multimodal
+Understanding -> Structured Editorial Reasoning remains the canonical
+architecture (`docs/CUTSELL_CANONICAL_ENGINE_ARCHITECTURE_D098.md`
+Section 13, unchanged, re-read this task). D-150/D-151 are one
+semantic-authority safeguard inside that architecture, not a
+replacement for it. Family Formation is NOT declared complete --
+Section 13.20's own status matrix (`EXISTING, PROVIDER-EVIDENCE-
+DEPENDENT`) is unchanged and this run's pimples trace is a live instance
+of exactly that dependency.
+
+==================================================
+WATCH+LISTEN STATUS
+==================================================
+
+Upstream Watch+Listen Multimodal Understanding: PARTIAL (unchanged, per
+D-098 13.3.4/13.20 -- reset-debris/pre-group-credit evidence only, no
+Structured RAW Understanding Map producer). Downstream Watch+Listen
+(`perceptual_watch_listen.py` v1), this run's real counts: 2
+`EVALUATED_PASS` (`cut_adjacent_speech_energy_mp4`, `repeated_audience_
+content_transcript`), 1 `EVALUATED_FAIL` (`reset_debris_at_edges_
+source_evidence`, 13 findings routed to `BoundaryEngine`), 1
+`UNCERTAIN` (`interior_dead_air_mp4`), 4 `NOT_IMPLEMENTED` (facial
+expression, gesture continuity, clipped-phoneme ASR realign, framing/eye
+contact) -- exactly matching D-098's documented "4 EVALUATED, 4
+NOT_IMPLEMENTED" status. Unaffected by D-150 (module-leaf, no import,
+proven in D-150's own test suite).
+
+==================================================
+NO CODE FIX
+==================================================
+
+None applied. The two real QA-verifier failures and the diagnosis
+ordering/ancillary-clause finding are reported above without patching;
+no second RAW dispatched.
+
+==================================================
+PHASE-B REAL-MEDIA VERDICT
+==================================================
+
+**C. OBSERVABILITY / MECHANISM INSUFFICIENT.** Not because D-150
+malfunctioned -- every fact this task COULD directly confirm
+(`semantic_fast_path_candidate: null`, `winner_path_before ==
+winner_path_after` for the one family with genuine complete-window
+disagreement) is consistent with D-150 behaving exactly as designed and
+never being the deciding factor in this run's real output. But the
+literal gate fields (`semantic_authority_gate_status/_reason/_before/
+_after`, `family_complete_context`, `complete_context_conflict`) could
+not be read for ANY family this run (CI log truncation + artifact-
+storage host blocked by this session's egress policy), so this task
+cannot assert the gate was DIRECTLY, field-level PROVEN correct on real
+media -- only that its absence-of-effect is consistent with correctness
+given everything that was recoverable. This is a reporting/observability
+gap, not a code defect, and not a basis for a code change under this
+task's own "NO CODE FIX" bound.
+
+==================================================
+VIDEO00 PRIMARY-RAW STATUS
+==================================================
+
+**NOT YET -- WATCH+LISTEN / FAMILY FORMATION STILL PARTIAL.** Confirmed
+independently of the pimples finding: Family Formation remains
+`EXISTING, PROVIDER-EVIDENCE-DEPENDENT` (D-098 13.20) and Upstream
+Watch+Listen remains PARTIAL; this run's own DeliveryScorer tie-break
+regression (pimples) is a second, independent axis of instability beyond
+the semantic-provider layer D-150 addresses.
+
+==================================================
+NEXT ENGINE DECISION
+==================================================
+
+Per this task's own instruction, verdict C recommends only the smallest
+evidenced next step, not the Watch+Listen/Family-Formation leap reserved
+for verdict A: add a compact, tail-safe `semantic_authority_gate` summary
+print (matching the existing D-119/D-123 compact-summary pattern already
+in this workflow) so a future RAW's gate fields are retrievable without
+hitting the CI log's tail-truncation limit -- an observability addition,
+not a Phase B behavior change. NOT authorized or implemented by this
+task.
+
+==================================================
+PAID COMPUTE
+==================================================
+
+Exactly one Video00 RAW (`34255812598`). No second dispatch. No extra
+provider benchmark.
+
+**HUMAN ACTION REQUIRED:** YES (condition A) -- whether to authorize the
+smallest-next-step observability addition above, and separately whether
+to investigate the pimples DeliveryScorer tie-break regression and the
+`sonography_good_before_diagnosis` ordering failure (both pre-existing,
+outside D-150's own scope), are Product Owner decisions, not made here.
