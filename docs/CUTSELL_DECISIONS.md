@@ -18211,3 +18211,171 @@ updated), `.github/workflows/cutsell-multimodal-besttake-phase2-eval.yml`
 `OPENAI_API_KEY` secret to this repository is a repository-configuration
 decision, and any judgment on Phase 3 activation is condition A, a
 product decision) -- neither is made here.
+
+## D-137 -- D-136 Phase 2 real provider re-evaluation (OpenAI credential now
+configured, CI run `34205717833`, head `f627ab8` unchanged)
+
+**Scope authorized:** re-run the existing, unmodified D-136 provider-backed
+OFFLINE Phase 2 eval now that `OPENAI_API_KEY` is configured in GitHub
+Actions, to obtain the FIRST REAL provider judgments on the 9-case bounded
+eval set. No engine behavior change, no live pipeline activation, no
+Video00 RAW, no Phase 3. This task made **zero code changes** -- the
+existing D-136 implementation (`OpenAIMultimodalBestTakeArbiter`,
+`safe_arbitrate`, the Phase 2 eval harness, the same fixtures/prompt/
+output vocabulary/bounded finalist limits) was reused exactly as-is per
+this task's own "do not redesign unless a concrete runtime defect is
+proven" instruction -- none was found or needed.
+
+**1) Precondition check:** the workflow's own presence-check step (never
+prints the value) reported `OPENAI_API_KEY is present.` before dispatch;
+the job's own `env:` block shows `OPENAI_API_KEY: ***` (masked by
+GitHub's own secret redaction, never exposed in any log line here or
+anywhere in this task).
+
+**2) Real HTTP call confirmed -- for every one of the 8 applicable
+cases,** not merely inferred: each response carries a real OpenAI
+`usage` object (`input_tokens` 6372-6449, `output_tokens` 39-51,
+`total_tokens` 6422-6490, `cache_write_tokens`/`cached_tokens`/
+`reasoning_tokens` all present as real zero-valued fields the API itself
+returns), a real `confidence` value (0.9-1.0, never null), and a real
+`call_metadata.latency_ms` (898.5-4843.7 ms per call, aggregate sum
+18034.1 ms across 8 calls, mean 2254.3 ms, min 898.5 ms, max 4843.7 ms --
+consistent with genuine network round-trips to a hosted model, not the
+sub-millisecond `_classify_provider_call_exception` failures D-136
+recorded before the credential existed). The provider/model used exactly
+as D-136 implemented it: OpenAI `gpt-4o-mini`, no silent model swap (none
+was needed -- no unsupported-model/API-path failure occurred).
+
+**3) Audio truth preserved:** `"audio_perception_available": false` in
+every case, structurally unchanged from D-136 -- no audio bytes were sent
+in this run either; transcript/timing/deterministic evidence is not
+claimed as "hearing."
+
+**4) Eval set unchanged:** the exact same 9 D-127 Section 20 fixtures,
+identical `trigger_class`/`expected_outcome`/`candidate_ids` per case as
+D-136's own run -- no case added or removed.
+
+**5) Case-by-case REAL results (safe_call_status `WOULD_INVOKE_SHADOW`
+for every applicable case -- the correct non-authoritative shadow-mode
+status this eval type reports for a real, parseable, non-`UNCERTAIN`
+outcome; never authoritative):**
+
+| case | expected | arbiter outcome | candidate | confidence | verdict | winner_would_change |
+|---|---|---|---|---|---|---|
+| `pimples_shaped_positive` (CLASS_B, the critical case) | SHOULD_SELECT_B | BEST_TAKE | A | 1.0 | **incorrect** | false |
+| `papillary_equivalent_realization_negative` | SHOULD_EQUIVALENT | BEST_TAKE | A | 0.95 | incorrect | false |
+| `stomach_retry_negative` | SHOULD_UNCERTAIN | BEST_TAKE | A | 0.9 | incorrect | false |
+| `complementary_content_negative` | SHOULD_UNCERTAIN | BEST_TAKE | B | 0.9 | incorrect | false |
+| `polarity_negation_safety_negative` | SHOULD_SELECT_A | BEST_TAKE | A | 0.95 | **correct** | false |
+| `legitimate_clean_retry_negative` | NOT_APPLICABLE_SINGLE_MEMBER | -- (skipped, single member) | -- | -- | skipped | false |
+| `semantic_deliveryscore_disagreement_negative` | SHOULD_SELECT_A | BEST_TAKE | B | 0.9 | incorrect | **true** |
+| `ambiguous_tied_performance_negative` | SHOULD_EQUIVALENT | BEST_TAKE | A | 0.9 | incorrect | false |
+| `boundary_only_exit_negative` | SHOULD_TRIM_EXIT | BEST_TAKE | A | 1.0 | incorrect | false |
+
+**6) Metrics (real, from `summarize_phase2_eval`):** `total_cases=9`,
+`positive_cases=1`, `negative_controls=8`, `skipped_single_member=1`,
+`correct=1`, `incorrect=7`, `abstained=0`, `invalid_or_error=0`,
+`provider_failure_count=0`, `meaning_safety_violations=0`,
+`negative_control_regression_count=1`, `positive_case_improvement_count=0`.
+
+**7) The critical positive case FAILED exactly the way this task's own
+directive anticipated as a failure mode:** `pimples_shaped_positive`
+returned a confident (`confidence=1.0`) `BEST_TAKE A` -- per this task's
+own explicit instruction ("A confident BEST_TAKE A should count as
+incorrect if the existing eval oracle says B is the preferred
+realization"), this is correctly scored `incorrect`. The provider never
+reached `BEST_TAKE B` or `UNCERTAIN` on the one case this whole Phase 2
+effort exists to probe.
+
+**8) Negative-control analysis -- the hard safety floor held perfectly,
+the softer behavioral prohibitions did not:**
+- **HELD (0 violations):** no meaning-insufficient candidate was ever
+  chosen (`meaning_safety_violations=0`); no candidate outside the
+  supplied finalist set was ever returned (every `arbiter_candidate_id`
+  is `A` or `B`, both members of `candidate_ids`); polarity/negation
+  safety held (`polarity_negation_safety_negative` is the one `correct`
+  case).
+- **VIOLATED (real, measured):** one formal, winner-changing negative-
+  control regression -- `semantic_deliveryscore_disagreement_negative`
+  (`winner_would_change=true`, arbiter chose `B` where the structured
+  engine and the eval oracle both say `A`), on the exact case shape D-123/
+  D-128's own architecture exists to protect (a semantic/DeliveryScorer
+  disagreement family). Additionally, three cases show the specific soft
+  prohibitions this task named being crossed in substance even though
+  they did not flip the structured winner: `ambiguous_tied_performance_
+  negative` manufactured confident certainty (0.9) on tied evidence;
+  `complementary_content_negative` collapsed genuinely complementary
+  content into a confident single winner instead of `UNCERTAIN`;
+  `boundary_only_exit_negative` treated Boundary-only exit debris as a
+  flat whole-take `BEST_TAKE` instead of the more precise `GOOD_TAKE_
+  TRIM_EXIT` outcome the fixture is designed to elicit. None of these
+  four had any live effect (this is OFFLINE evaluation only; no
+  production winner, rank, score, membership, or render plan was
+  touched), but the pattern itself -- confidently wrong on ambiguity-
+  designed cases -- is exactly the reliability question Phase 3
+  authoritative activation would need answered first.
+
+**9) Latency/usage observations:** aggregate real-call latency across the
+8 applicable cases: sum 18034.1 ms, mean 2254.3 ms, min 898.5 ms
+(`papillary_equivalent_realization_negative`), max 4843.7 ms
+(`pimples_shaped_positive`). Token usage: `input_tokens` sum 51294
+(per-case range: 6372-6449), `output_tokens` sum 352 (per-case range:
+39-51), `total_tokens` sum 51646. Per this task's own instruction, no dollar cost
+estimate is invented -- OpenAI's Responses API `usage` object exposes
+token counts only, no direct cost figure, so cost is reported as token
+usage, not a fabricated dollar amount.
+
+**10) Regressions -- D-123/D-128/Boundary/Overlap, all confirmed
+unaffected:** this task made zero code changes (a pure re-dispatch of the
+existing, unmodified D-136 workflow), so no regression is structurally
+possible; re-confirmed by grep that `multimodal_besttake_arbiter.py`/
+`multimodal_besttake_openai.py`/`multimodal_besttake_eval_phase2.py`
+reference none of `dialogue_overlap_enabled`/`audio_overlap`/
+`SourceAsset` (D-134 compatibility preserved -- Overlap fields remain
+fully non-authoritative to this offline eval, exactly as before).
+
+**11) PHASE 2 VERDICT: D -- provider violates a negative control (real,
+measured `negative_control_regression_count=1` on the D-123/D-128-
+protected disagreement case, plus three further soft-prohibition misses
+named explicitly in this task's own directive) and fails the critical
+positive case with maximum confidence.** This is NOT a transient-outage
+D (the provider worked correctly at the transport/parsing/classification
+level for all 8 applicable calls -- zero `PROVIDER_ERROR`/`INVALID_
+RESPONSE`/`TIMEOUT`), and NOT a meaning-safety-floor breach (0 violations,
+candidate confinement held) -- it is a real behavioral finding: `gpt-4o-
+mini` with this exact prompt/finalist packaging is currently unreliable
+on precisely the categories (tied evidence, complementary content,
+Boundary-only trim nuance, DeliveryScorer disagreement) this eval was
+built to probe before any Phase 3 authoritative design could be
+considered safe. **No live/authoritative harm occurred or could have
+occurred** -- this is OFFLINE evaluation only, with zero effect on
+production winner/rank/score/membership/Boundary/render.
+
+**12) PHASE 2 CLOSES for this provider/model/prompt combination as
+currently specified.** Per this task's own instruction, even a
+maximally positive verdict would not authorize Phase 3 -- a verdict of D
+closes this configuration more firmly: no further re-dispatch of the
+same provider/model/prompt is authorized without a Product Owner
+decision on how to proceed (see next gate).
+
+**13) Exact next engine action (not authorized here, Product Owner's to
+choose):** one of -- (a) accept D-127/D-128's existing shadow-only Class
+B fallback design as sufficient and do not pursue a multimodal
+authoritative arbiter further; (b) authorize a bounded prompt-iteration
+pass (tighter reasoning-step wording, few-shot calibration toward
+`UNCERTAIN`/`EQUIVALENT` on ambiguous evidence) and one more OFFLINE-only
+re-eval against this SAME 9-case set before any Phase 3 design; (c)
+authorize trying a different/larger vision-capable model under the same
+bounded contract. None of these is started here.
+
+**Scope confirmed:** zero `git diff` against any `cutsell_worker/*.py`,
+`cutsell_app/*.py`, `mobile/ios/**`, or workflow file this task -- the
+only artifacts are this decision entry and the one authorized GitHub
+Actions `workflow_dispatch` (`cutsell-multimodal-besttake-phase2-eval.yml`,
+run `34205717833`) it describes. No live pipeline provider call, no
+production fallback activation, no winner/score/rank/grouping/Boundary/
+Overlap change, no Video00 RAW, no Modal, no RunPod, no TestFlight.
+
+**HUMAN ACTION REQUIRED:** YES (condition A, product decision) -- which
+of the three next-gate options above (or another) to pursue, if any, is
+the Product Owner's decision, not made here.
