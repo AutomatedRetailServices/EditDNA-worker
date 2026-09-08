@@ -63,6 +63,7 @@ from .case_b_performance_evidence import (
     case_b_performance_evidence_diagnostics,
 )
 from .multimodal_besttake_fallback import detect_class_b_trigger, fallback_trigger_diagnostics
+from .semantic_authority_observability import family_authority_diagnostics
 from .temporal_editing import refine_takes_with_temporal_context
 from .whole_video_analysis import WholeVideoContext, confirmed_recording_behavior_events
 
@@ -996,6 +997,18 @@ def build_flow_b_draft(
         family_semantic_decisions, semantic_label_source = family_scoped_semantic_decisions(
             members, hybrid_semantic_decisions, hybrid_cleanup.diagnostics,
         )
+        # D-146 (Phase A, observability only -- docs/CUTSELL_DECISIONS.md
+        # D-146): a pure, additive projection of the SAME hybrid_cleanup.
+        # diagnostics window rows and the SAME semantic_label_source computed
+        # immediately above. Read by nothing above this line and nothing
+        # below it that makes a decision -- see semantic_authority_
+        # observability.py's own module docstring for the non-circularity
+        # proof and today's honest authority description.
+        family_semantic_authority_observability = family_authority_diagnostics(
+            [member.clip_id for member in members],
+            hybrid_cleanup.diagnostics,
+            semantic_label_source,
+        )
         # D-097.B: deterministic unusability evidence per member -- a ranker
         # fragment penalty relative to a sibling, or D-081 local-performance
         # corroboration. Labels are never part of this map.
@@ -1134,6 +1147,17 @@ def build_flow_b_draft(
                 # D-094.3 (F8): the labels the decision was actually made on
                 # (family-window labels when a family-complete window exists).
                 "semantic_label_source": semantic_label_source,
+                # D-146 (Phase A, observability only): family_complete_context
+                # (true/false/unknown), omitted_candidate_ids, partial_window_
+                # conflict, provider_authority_applied (today's ACTUAL behavior,
+                # never a Phase-B aspiration), provider_config (temperature/
+                # prompt_version honestly reported UNKNOWN -- neither field
+                # exists in the current EditorialJudgeResult contract), and
+                # family_scoped_source_info (the same semantic_label_source
+                # above, re-exposed under this module's own field name for a
+                # self-contained report). Zero effect on selected_clip_id,
+                # ranked, membership, grouping, or Boundary.
+                "semantic_authority_observability": family_semantic_authority_observability,
                 "semantic_candidates": [
                     {
                         "clip_id": member.clip_id,

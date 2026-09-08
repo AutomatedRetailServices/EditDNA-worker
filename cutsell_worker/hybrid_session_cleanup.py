@@ -47,6 +47,7 @@ from .semantic_compute_planner import (
     SemanticWorkPriority,
     build_semantic_compute_plan,
 )
+from .semantic_authority_observability import stable_request_hash
 from .session_boundaries import partition_takes_by_sessions
 from .temporal_editing import harmful_events_for_take
 from .whole_video_analysis import WholeVideoContext
@@ -771,6 +772,18 @@ def apply_hybrid_session_cleanup(
                 "available": bool(result.available),
                 "provider": result.provider,
                 "model": result.model,
+                # D-146 (Phase A, observability only): a stable, content-
+                # sensitive, candidate-order-insensitive identity for this
+                # exact window request -- never read by any decision, never
+                # used as a cache key here. See semantic_authority_
+                # observability.stable_request_hash's own docstring.
+                "request_hash": stable_request_hash(
+                    [member.clip_id for member in members],
+                    {member.clip_id: member.text for member in members},
+                    {member.clip_id: member.start for member in members},
+                    {member.clip_id: member.end for member in members},
+                    result.model,
+                ),
                 # D-094.F2 observability: a window the transport's per-edit
                 # DollarBudgetLedger refused is a fail-open KEEP with zero
                 # semantic evidence -- never a silent provider string. The

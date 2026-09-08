@@ -20427,3 +20427,211 @@ D-143/D-144 all preserved CLOSED and not reopened.
 **HUMAN ACTION REQUIRED:** YES (condition A) -- whether to authorize
 Phase A (observability only) is the Product Owner's decision, not made
 here.
+
+## D-146 -- Family-Complete Semantic Authority Gate, Phase A (observability only)
+
+Authorized post D-145 (design). Builds the structural evidence D-145's
+future gate needs, with ZERO behavioral/authority/membership/winner/
+provider-policy/abstention change -- pure observability, additive dict
+keys only, on top of data `hybrid_session_cleanup.apply_hybrid_session_
+cleanup` and `pipeline.py::family_scoped_semantic_decisions` already
+compute.
+
+**Mandatory pipeline-ordering inspection (before any code):** confirmed
+`pipeline.py`'s `apply_composite_resolution` (which runs `hybrid_session_
+cleanup.apply_hybrid_session_cleanup`'s sliding per-window editorial-judge
+chain via `composite_resolver.py`'s 19-hook composition) executes on `kept`
+takes strictly BEFORE `safe_group_takes_by_sessions` assigns retry-family
+membership (`apply_composite_resolution` at pipeline.py line ~833 precedes
+`safe_group_takes_by_sessions` at line ~882; `reconcile_semantic_idea_
+equivalence`/`split_incohesive_retry_groups` finalize membership even
+later). The sliding windows themselves (`_overlapping_windows`, chunk_
+size=10/chunk_stride=5) are built over the GLOBAL kept-take pool, oblivious
+to family boundaries that do not exist yet at that point. Reported
+honestly per this task's own instruction ("D-146 must describe today's
+behavior... even if it violates the D-145 future contract"): a per-window
+label is NEVER minted with knowledge of its own family-completeness --
+`family_complete_context` can only be answered RETROACTIVELY, after
+grouping, by checking whether any already-fixed window's recorded
+`member_ids` happens to be a superset of the now-known family. That is
+exactly what `family_scoped_semantic_decisions` (D-094.3 F8) already
+opportunistically exploits for its own labeling preference, and exactly
+what this task's new detector reimplements as a side, non-circular,
+three-way observation (never replacing or being consulted by that
+function, which remains the sole decision authority, unchanged).
+
+**New module: `cutsell_worker/semantic_authority_observability.py`**
+(pure, stdlib-only, zero imports of any other `cutsell_worker` module --
+a true leaf, zero circular-import risk, zero provider/network reference).
+Functions, all pure projections of existing `hybrid_session_cleanup`
+window-diagnostics rows (`member_ids`, `session_id`, `provider`, `model`,
+`decisions`) and `family_scoped_semantic_decisions`'s own `source_info`
+return value:
+
+- `family_complete_context(family_member_ids, window_rows) -> "true"|
+  "false"|"unknown"`. THREE-WAY, disambiguating what the existing D-094.3
+  F8 function collapses into one falsy `None`: "true" = at least one
+  recorded window's `member_ids` is a superset of the whole family (same
+  test `family_scoped_semantic_decisions` already uses); "false" = at
+  least one window touches the family but none is a complete superset
+  (the historical D-094.3 F8 unsafe shape, run 33983880111); "unknown" =
+  no window evidence touches this family at all, or the family has fewer
+  than 2 members (the completeness question does not apply to a
+  non-contest). Verified byte-identical superset test against the
+  existing function's own logic.
+- `complete_window_ids` / `window_ids_touching_family` -- stable window
+  ids (the SAME `session_id` `_editorial_session` already mints via
+  sha256(source_id|partition_index|chunk_index|member_key)) that are
+  complete supersets, or that merely touch the family at all.
+- `omitted_candidate_ids(family_member_ids, window_rows) -> dict[window_id,
+  tuple[clip_id,...]]` -- per partial window, which family members it
+  never saw.
+- `partial_window_conflict(family_member_ids, window_rows) -> dict|None`
+  -- detects the EXACT D-094.3 F8 shape: two DIFFERENT family members each
+  labelled "winner" by two DIFFERENT windows, with NO family-complete
+  window present to arbitrate. Returns None whenever a family-complete
+  window exists (its labels are trusted, so a partial window's
+  disagreement is moot) or when fewer than two distinct "winner" labels
+  were ever recorded. Never used to change a decision.
+- `provider_config_from_window_rows(...)` -- `provider`/`model` collected
+  from the windows touching the family (both already recorded per-window);
+  `temperature`/`prompt_version` reported as the literal string
+  `"UNKNOWN"` -- confirmed via full read of `hybrid_editorial.py`'s
+  `EditorialJudgeResult`/`EditorialJudge`/`safe_editorial_judge` that
+  NEITHER field exists anywhere in the current contract. Never invented,
+  never defaulted to a guessed constant.
+- `stable_request_hash(member_ids, texts_by_id, starts_by_id, ends_by_id,
+  model, prompt_version=None) -> "rh_" + sha256(...)[:24]`. Canonicalizes
+  sorted (clip_id, rounded start, rounded end, text) tuples + model +
+  prompt_version (the literal string "UNKNOWN" when not supplied, never a
+  silent different-but-fixed placeholder). Deterministic, content-
+  sensitive (changes if any candidate's text/start/end or the model
+  changes), candidate-order-insensitive (sorted internally). Distinct
+  from and complementary to the existing window `session_id` (identity by
+  position/membership only, not content) -- this is the request-hash
+  D-145 asked for; `session_id` remains the window id.
+- `family_authority_diagnostics(...)` -- the composed per-family dict
+  (all fields above plus `family_scoped_source_info`, the SAME second
+  return value of `family_scoped_semantic_decisions`, re-exposed
+  verbatim so the report is self-contained rather than a second,
+  divergent computation) and `provider_authority_applied`, one of exactly
+  two literal values describing TODAY's real behavior: `FAMILY_COMPLETE_
+  WINDOW_PREFERRED` (a family-complete window existed and its labels were
+  preferred) or `GLOBAL_CROSS_WINDOW_MERGE` (no complete window existed;
+  the historically-unsafe global max-`_decision_priority` merge is what
+  actually decided the labels used). This is a description, not a gate --
+  D-145's Phase B (an actual family-complete gate/abstention) is NOT
+  implemented here.
+- `summarize_family_authority_observability(...)` -- a tail-safe,
+  counts-only aggregator (family_complete_context counts, provider_
+  authority_applied counts, partial_window_conflict family count, omitted-
+  candidate occurrence count) matching D-119/D-125's existing compact-
+  qualification-summary pattern -- no per-family clip id, window id, or
+  provider string leaks into it.
+
+**Wiring (additive dict keys only, verified via full offline regression
+below):**
+- `hybrid_session_cleanup.py`'s per-window `diagnostics.append({...})` row
+  gains one new key, `request_hash` (computed from that window's own
+  `members`/`result.model`, already in scope at that exact call site) --
+  every existing key unchanged.
+- `pipeline.py`'s per-family loop computes `family_authority_diagnostics`
+  immediately after the existing `family_scoped_semantic_decisions` call
+  (same inputs: `hybrid_cleanup.diagnostics`, the same `semantic_label_
+  source` just computed) and appends it to `judge_group_diagnostics` under
+  one new key, `semantic_authority_observability` -- appended strictly
+  after every existing D-097/D-122/D-123/D-128 field, read by nothing
+  above that line and nothing below it that makes a decision.
+
+**Tests (32, exceeding the 26-item minimum) --
+`tests/test_cutsell_d146_family_complete_semantic_authority_observability.py`.**
+Five named offline fixture shapes, hand-built window_rows in the exact
+shape the real diagnostics rows already have (no provider call anywhere):
+A (full family in one window -> `true`), B (partial family only, two
+windows each missing a different member -> `false`), C (two partial
+windows each crowning a DIFFERENT member "winner", the real D-094.3 F8
+shape -> `false` + `partial_window_conflict` populated), D (one
+family-complete window plus one disagreeing partial window -> `true`, and
+`partial_window_conflict` correctly suppressed because the complete
+window's presence makes the disagreement moot), E (window evidence exists
+for an unrelated family only -> `unknown`). Plus: singleton-family
+`unknown`, `complete_window_ids`/`window_ids_touching_family` correctness,
+`omitted_candidate_ids` for partial/complete/untouched windows,
+`partial_window_conflict` None-cases (complete window present, only one
+winner, singleton family), provider config UNKNOWN-reporting and
+multi-provider collection, five request-hash tests (stability, order-
+insensitivity, text-sensitivity, model-sensitivity, UNKNOWN-literal
+handling), `family_authority_diagnostics`'s verbatim `family_scoped_
+source_info` exposure and `provider_authority_applied` correctness, the
+tail-safe summary's counts-only shape, one true `apply_hybrid_session_
+cleanup` integration test (offline stub judge, `chunk_size`/`chunk_stride`
+small enough to build real windows) proving `request_hash` is present,
+deterministic across repeated calls, and additive (`kept`/`deleted`/
+`semantic_decisions` byte-identical with and without reading the new
+field), a module-leaf-import proof (no provider/network reference, no
+`cutsell_worker` sibling import at all), and two direct wiring-presence
+proofs (`pipeline.family_authority_diagnostics`/`hybrid_session_cleanup.
+stable_request_hash` importable from their respective modules).
+
+**Full offline qualification (all green, zero new failures):**
+`python3 -m compileall cutsell_worker tests` clean; the new D-146 suite (32
+tests); `test_cutsell_hybrid_session_cleanup.py`, `test_cutsell_d081_pre_
+resolver_semantic_authority.py`, `test_cutsell_d094_video00_integration_
+fixes.py`, `test_cutsell_d052_semantic_compute_planner.py` (semantic/
+grouping/window-planner regression); `test_cutsell_d128_multimodal_
+fallback_phase1.py` (D-128 preserved, its own `judge_group_diagnostics`
+fields byte-unchanged); `test_cutsell_d097_d_polarity_safety.py`, `test_
+cutsell_composite_resolver.py`, `test_cutsell_semantic_fragment_guard.py`,
+`test_cutsell_hybrid_complementary_delivery_guard.py`, `test_cutsell_
+hybrid_whole_source_context.py`, `test_cutsell_hybrid_unavailable_retry_
+fallback.py`, `test_cutsell_incomplete_bridge_retry_authority.py`, `test_
+cutsell_hybrid_composite_best_take.py` (the 19-hook CompositeResolver
+chain preserved byte-for-byte); `test_cutsell_d142_dialogue_pacing_
+transition_phase1.py` (D-142 pacing preserved) -- 212 tests, all passed,
+in the same run as the new D-146 suite. Full `tests/` suite (minus the
+pre-existing, unrelated `tests/test_semantic_stitch.py` collection error --
+documented since well before D-136, its own file untouched by this or any
+prior task, confirmed via `git log` predating this entire directive chain)
+run once as the CI-equivalent gate. Boundary-engine-adjacent suites
+(`test_cutsell_d097_c_boundary_engine_pass.py` et al.) included in the
+same full-suite pass -- Boundary owns zero fields this task touches (no
+`boundary_engine_pass` key was added or read here).
+
+**No-effect proof:** every new field is appended after every field an
+existing test already asserts on; no existing assertion was relaxed,
+deleted, or reordered to make room for the new keys; the one true
+`apply_hybrid_session_cleanup` integration test explicitly asserts
+`kept`/`deleted`/`semantic_decisions` are identical between two calls that
+differ only in whether the new `request_hash` field is inspected.
+BestTake/`deterministic_best_take_authority.py`, D-123's fast-path gate,
+D-128's Class B shadow trigger, the post-Freeze `BoundaryEngine` pass, and
+D-142's Dialogue/Pacing Transition Phase 1 are unmodified files in this
+diff (`git diff --stat` touches exactly `semantic_authority_
+observability.py` [new], `hybrid_session_cleanup.py` [+1 import, +1 dict
+key], `pipeline.py` [+1 import, +2 local lines, +1 dict key], and the new
+test file).
+
+**Exact Phase B gate (not started here):** D-145's actual family-complete
+authority gate/abstention behavior. Phase A's own recommendation, unchanged
+from D-145: only after Phase A's fields are confirmed (by a future
+Video00 RAW's real diagnostics artifact, not merely these offline
+fixtures) to correctly report `family_complete_context`/
+`partial_window_conflict`/`provider_authority_applied` on a live run,
+should Phase B gate `family_scoped_semantic_decisions`'s cross-window
+merge on `family_complete_context != "true"` ever be attempted -- and
+that remains the Product Owner's decision, not made here.
+
+**Scope confirmed:** zero authority/membership/winner/provider-policy/
+abstention change (verified by the no-effect proof above); zero RAW/
+Modal/RunPod dispatch; zero provider calls anywhere in this task's own
+code or tests; no Video00-specific rule anywhere in the new module or its
+tests (Pimples/D-094.3 F8's run id appear only as the historical forensic
+citation this task's own docstrings already carried forward from D-144/
+D-145); D-123/D-128/D-138/D-140/D-141/D-142/D-143/D-144/D-145 all
+preserved CLOSED and not reopened; D-145 itself not rewritten (this is an
+append-only new entry).
+
+**HUMAN ACTION REQUIRED:** NO for this task's own scope (Phase A is
+complete and self-contained). YES (condition A) for Phase B -- whether
+and how to implement the actual family-complete authority gate remains
+the Product Owner's decision.
