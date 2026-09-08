@@ -1,0 +1,207 @@
+name: CutSell Multimodal BestTake Gemini Offline Eval
+
+# D-139 (docs/CUTSELL_DECISIONS.md D-139, post D-138): provider-comparison
+# challenger run -- Gemini 2.5 Flash vs the D-138 OpenAI gpt-4o-mini
+# baseline, SAME hardened decision contract (the exact `INSTRUCTION`
+# constant imported from `multimodal_besttake_openai.py`, never copied),
+# SAME 9 D-127 Section 20 fixtures. This workflow never touches Video00,
+# never launches a Modal/RunPod GPU job, never deploys anything, and never
+# calls a provider from the live pipeline (the live pipeline imports
+# neither this workflow's script nor `multimodal_besttake_gemini.py`).
+#
+# MODEL AVAILABILITY IS VERIFIED, NEVER ASSUMED: the eval script's first
+# real call is Google's own read-only, zero-generation-cost `ListModels`
+# endpoint, confirming `gemini-2.5-flash` actually exists and supports
+# `generateContent` before any generation call is attempted. If the exact
+# model is unavailable, the script reports BLOCKED with the models it did
+# find and exits cleanly (still `conclusion: success` -- a verified
+# blocker is not a workflow failure) rather than silently substituting a
+# different Gemini generation. This keeps the whole precondition-check +
+# bounded-eval sequence to exactly ONE dispatch, per this task's own
+# "no exploratory repeat runs" instruction.
+#
+# Same "offload to a GitHub-hosted runner that already has the needed
+# reach" pattern as the sibling OpenAI eval workflow (this session's own
+# sandbox cannot reach generativelanguage.googleapis.com any more than it
+# can reach api.openai.com). `ubuntu-latest`, zero GPU, zero Modal/RunPod
+# cost.
+#
+# Bootstrap note (same precedent as every other workflow_dispatch-only
+# workflow this repo has added): a narrow, self-scoped `push:` trigger
+# (limited to this file's own path, this branch only) registers the
+# workflow on first push; the actual eval-running step is gated to
+# `workflow_dispatch` so that bootstrap run stays inert (no Gemini call on
+# a push).
+
+on:
+  push:
+    branches:
+      - feature/runpod-pod-on-demand
+    paths:
+      - '.github/workflows/cutsell-multimodal-besttake-gemini-eval.yml'
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+jobs:
+  gemini-eval:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+    steps:
+      - name: Checkout exact test head
+        uses: actions/checkout@v4
+
+      - name: Print exact test head
+        run: |
+          echo "HEAD: $(git rev-parse HEAD)"
+          echo "Branch: $(git branch --show-current)"
+
+      - name: Set up Python
+        if: github.event_name == 'workflow_dispatch'
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install ffmpeg
+        if: github.event_name == 'workflow_dispatch'
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg
+
+      - name: Install libav* dev headers (pkg-config) for building the 'av' wheel
+        if: github.event_name == 'workflow_dispatch'
+        # Same D-136 mechanical fix reused verbatim -- faster-whisper==1.0.0
+        # pins av==11.*, which has no prebuilt manylinux wheel for this
+        # runner's Python/platform combo and needs these -dev headers to
+        # build from source.
+        run: |
+          sudo apt-get install -y -qq \
+            pkg-config \
+            libavformat-dev \
+            libavcodec-dev \
+            libavdevice-dev \
+            libavutil-dev \
+            libavfilter-dev \
+            libswscale-dev \
+            libswresample-dev
+
+      - name: Install Python dependencies
+        if: github.event_name == 'workflow_dispatch'
+        run: pip install --quiet -r requirements.txt
+
+      - name: Verify GEMINI_API_KEY present (report only, never print it)
+        if: github.event_name == 'workflow_dispatch'
+        run: |
+          if [ -z "${GEMINI_API_KEY:-}" ]; then
+            echo "GEMINI_API_KEY is NOT configured for this repository -- the eval below will report BLOCKED_NO_CREDENTIAL and exit cleanly (this is expected and will be reported honestly, not treated as a code defect)."
+          else
+            echo "GEMINI_API_KEY is present."
+          fi
+
+      - name: Verify model availability, then run D-139 Gemini bounded offline eval (real GeminiMultimodalBestTakeArbiter, NOT the live pipeline)
+        if: github.event_name == 'workflow_dispatch'
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json
+          import tempfile
+
+          from cutsell_worker.multimodal_besttake_gemini import (
+              REQUIRED_MODEL_ID,
+              GeminiMultimodalBestTakeArbiter,
+              list_gemini_models,
+              model_supports_generate_content,
+          )
+          from cutsell_worker.multimodal_besttake_eval_phase2 import run_phase2_eval, summarize_phase2_eval
+
+          import os
+          api_key = os.environ.get("GEMINI_API_KEY", "")
+          out_path = "gemini-eval-result.json"
+
+          if not api_key:
+              summary = {
+                  "schema_version": "cutsell.multimodal_besttake_gemini_eval.v1",
+                  "status": "BLOCKED_NO_CREDENTIAL",
+                  "reason": "GEMINI_API_KEY is not configured for this repository.",
+              }
+              print("--- D-139 Gemini eval BLOCKED: no credential ---")
+              print(json.dumps(summary, indent=2, sort_keys=True))
+              with open(out_path, "w") as f:
+                  json.dump(summary, f, indent=2, sort_keys=True)
+              raise SystemExit(0)
+
+          # Read-only, zero-generation-cost model catalog check -- never
+          # guess model availability from a naming convention.
+          models = list_gemini_models(api_key)
+          available_flash_like = sorted({
+              str(m.get("name", "")).split("/")[-1]
+              for m in models
+              if isinstance(m, dict) and "flash" in str(m.get("name", "")).lower()
+          })
+
+          if not model_supports_generate_content(models, REQUIRED_MODEL_ID):
+              summary = {
+                  "schema_version": "cutsell.multimodal_besttake_gemini_eval.v1",
+                  "status": "BLOCKED_MODEL_UNAVAILABLE",
+                  "requested_model": REQUIRED_MODEL_ID,
+                  "available_flash_like_models": available_flash_like,
+                  "total_models_listed": len(models),
+              }
+              print(f"--- D-139 Gemini eval BLOCKED: {REQUIRED_MODEL_ID} not available (or does not support generateContent) ---")
+              print(json.dumps(summary, indent=2, sort_keys=True))
+              with open(out_path, "w") as f:
+                  json.dump(summary, f, indent=2, sort_keys=True)
+              raise SystemExit(0)
+
+          print(f"--- {REQUIRED_MODEL_ID} confirmed available and supports generateContent -- proceeding with bounded eval ---")
+
+          arbiter = GeminiMultimodalBestTakeArbiter(api_key=api_key)  # real HTTP call, never a fake -- this IS the bounded live call this task authorizes.
+          with tempfile.TemporaryDirectory() as workdir:
+              results = run_phase2_eval(arbiter, workdir=workdir)
+
+          rows = [
+              {
+                  "name": r.name,
+                  "trigger_class": r.trigger_class,
+                  "candidate_ids": list(r.candidate_ids),
+                  "structured_engine_winner": r.structured_engine_winner,
+                  "expected_outcome": r.expected_outcome,
+                  "arbiter_outcome": r.arbiter_outcome,
+                  "arbiter_candidate_id": r.arbiter_candidate_id,
+                  "confidence": r.confidence,
+                  "safe_call_status": r.safe_call_status,
+                  "verdict": r.verdict,
+                  "winner_would_change": r.winner_would_change,
+                  "would_improve_structured_result": r.would_improve_structured_result,
+                  "meaning_safety_violation": r.meaning_safety_violation,
+                  "latency_ms": r.latency_ms,
+                  "call_metadata": r.call_metadata,
+              }
+              for r in results
+          ]
+          summary = {
+              "schema_version": "cutsell.multimodal_besttake_gemini_eval.v1",
+              "status": "COMPLETED",
+              "audio_perception_available": False,
+              "provider": "gemini",
+              "model": arbiter.model,
+              "cases": rows,
+              "metrics": summarize_phase2_eval(results),
+          }
+          print("--- D-139 Gemini bounded offline eval (real provider, offline fixtures only) ---")
+          print(json.dumps(summary, indent=2, sort_keys=True))
+
+          with open(out_path, "w") as f:
+              json.dump(summary, f, indent=2, sort_keys=True)
+          print(f"result file: {out_path}")
+          PY
+
+      - name: Upload Gemini eval result
+        if: always() && github.event_name == 'workflow_dispatch'
+        uses: actions/upload-artifact@v4
+        with:
+          name: cutsell-multimodal-besttake-gemini-eval-result
+          path: gemini-eval-result.json
+          retention-days: 14
+          if-no-files-found: warn

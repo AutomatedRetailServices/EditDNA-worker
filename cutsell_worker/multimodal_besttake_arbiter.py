@@ -193,7 +193,17 @@ def _classify_provider_call_exception(exc: Exception) -> str:
         or "RateLimit" in name
         or "AuthenticationError" in name
         or name == "OpenAIError"
+        or "HTTPError" in name
+        or "ConnectionError" in name
     ):
+        # D-139: `HTTPError`/`ConnectionError` cover the `requests` library's
+        # own exception names -- the REST transport `GeminiMultimodalBestTake
+        # Arbiter` uses (mirroring the repo's existing `hybrid_google_
+        # transport.GoogleGeminiTransport` REST pattern, no SDK dependency).
+        # Needed for genuine cross-provider fail-open parity: without this,
+        # a real Gemini HTTP failure (auth, quota, invalid model, network)
+        # would misclassify as generic `ERROR` instead of `PROVIDER_ERROR`,
+        # breaking this task's own "same safe failure semantics" requirement.
         # `name == "OpenAIError"` (exact match, not substring) is the base
         # exception the `openai` SDK's own client constructor raises for a
         # missing/misconfigured credential (e.g. `OpenAI()` with no
