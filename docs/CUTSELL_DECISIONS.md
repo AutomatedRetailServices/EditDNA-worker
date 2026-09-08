@@ -22225,3 +22225,580 @@ recommended Watch+Listen design/forensic task, and separately whether to
 investigate the DeliveryScorer tie-break and sonography-ordering
 findings (both pre-existing, outside D-150's own scope), are Product
 Owner decisions, not made here.
+
+## D-154: Upstream Watch+Listen Multimodal Understanding -- design + implementation forensic
+
+**Authorization:** Product Owner directive "CUTSELL -- D-154 UPSTREAM
+WATCH+LISTEN MULTIMODAL UNDERSTANDING DESIGN + IMPLEMENTATION FORENSIC",
+verified HEAD `4ff9d66` (D-153), clean working tree. Design + forensic
+only. No code change, no RAW, no provider call. The semantic-authority
+thread (D-145-D-153) is preserved CLOSED and NOT reopened by this task.
+
+Everything below marked "(verified this session)" was confirmed by
+direct code reading during this task; everything marked "(per D-098,
+not re-verified)" restates existing canonical doctrine without new
+evidence.
+
+### Current perception DAG (verified this session, `flow_b.py`'s real
+### top-level orchestration -- this IS the production RAW→draft path)
+
+```
+RAW
+ └─ media_probe (ffprobe: duration/width/height/fps/has_audio)        [Track D]
+     └─ asr (Faster-Whisper -> TranscriptSegment+Word)                [Track A]
+         └─ segmentation/canonicalization (take_segmentation.py)
+             └─ whole_video_context (RunPodLocalWholeVideoProvider -- LOCAL SHELL ONLY, see finding below)
+                 └─ audio_silence (ffmpeg silencedetect, D-095.2)      [Track B, real signal]
+                     └─ silence_analysis (word-gap derived)            [Track B, transcript-derived]
+                         └─ local_performance (OpenCV/MediaPipe)       [Track C, real signal]
+                             └─ performance_confirmation
+                                 └─ visual (OpenAIVisualProvider -- SKIPPED, visual_provider=None in production)
+                                     └─ local_performance_fusion (writes MediaSignals back onto CandidateTake)
+                                         └─ attempt_reconstruction / pipeline.build_flow_b_draft (grouping/BestTake/Freeze)
+                                             └─ semantic (Hybrid/Gemini editorial judge, request-gated; "bypassed_clean_cut" in the active Clean Cut Core V1 branch)
+                                                 └─ composing -> draft_ready
+```
+
+Every arrow above is a real, verified sequential dependency in today's
+code (`flow_b.py`'s own linear `trace.complete(...)` sequence) -- **not**
+a designed dependency graph. No `asyncio`/`threading`/`multiprocessing`
+construct exists anywhere in this chain; it is one Python function
+calling the next.
+
+### TRACK A -- SPEECH/LANGUAGE (verified this session)
+
+Module: `asr.py` (`FasterWhisperASR`) + `canonical_asr_evidence.py` +
+`contracts.TranscriptSegment`/`Word`. Output: `TranscriptSegment
+(source_asset_id, start, end, text, words: Tuple[Word, ...])`, `Word
+(text, start, end, confidence)`. Runs once per source, deterministic-
+config-gated (`CUTSELL_ASR_DETERMINISTIC_CONFIG`, D-053). No speaker
+diarization field. No language-detection OUTPUT field (`language_hint`
+is an input only). `canonical_asr_evidence.py` additionally normalizes
+Whisper's own segment grouping into a deterministic, word-timeline-
+derived one (D-052) and fingerprints the full decode config for
+run-to-run comparability. Deterministic + provider-backed (the ASR model
+itself is a real ML model, but its DECODE CONFIG is made fully
+deterministic by D-053). Fully reusable downstream -- every candidate's
+`.text`/`.words` trace back to this. **Gap:** no confidence-weighted
+per-word usability signal is surfaced past the raw `Word.confidence`
+float; nothing downstream currently reads it.
+
+### TRACK B -- AUDIO PERCEPTION (verified this session)
+
+Two genuinely different mechanisms, both real:
+- **REAL AUDIO SIGNAL ANALYSIS**: `audio_silence.py` (D-095.2) runs
+  ffmpeg's `silencedetect` filter directly on the SOURCE waveform
+  (dB-floor dead-air detection, with a merge pass and a relaxed-floor
+  fallback for near-floor room tone, D-097 Priority C). This is genuine
+  waveform-level perception -- confirmed by direct code read, not
+  transcript-derived.
+- **TRANSCRIPT-DERIVED INFERENCE**: `silence_analysis.py`
+  (`word_silence_gaps`) infers pauses from ASR WORD TIMESTAMPS, not the
+  waveform. Whisper stretches word timestamps over real silence in
+  hesitant delivery (documented root cause of a real past incident, run
+  33995806350), so this is a weaker, text-timing-derived proxy, not
+  listening.
+- **REAL SEMANTIC/PROSODIC AUDIO UNDERSTANDING (tone, stress, emotional
+  affect FROM THE SIGNAL): DOES NOT EXIST.** No module anywhere computes
+  this (confirmed by the absence of any pitch/prosody/spectral-affect
+  analysis code in the repo, consistent with D-098 13.3.3's own audit,
+  now independently re-confirmed by direct search this session). Every
+  "semantic" judgment in the engine (Hybrid/Gemini editorial judging,
+  `semantic_idea_equivalence.py`) operates on ASR TEXT, never the raw
+  audio signal.
+
+### TRACK C -- VISUAL/PERFORMANCE (verified this session -- the single
+### most important correction to D-098's own prior "PARTIAL, not
+### re-verified" note)
+
+Two genuinely different mechanisms exist in code; only ONE is wired live:
+- **`local_performance.py` (OpenCV/MediaPipe, DETERMINISTIC, IS LIVE):**
+  dense face/pose/hand/motion trajectory measurement -> `PerformanceFrame`
+  observations -> `*_candidate` `TemporalEvent`s (`body_reset_candidate`,
+  `hand_motion_reset_candidate`, `facial_expression_shift_candidate`,
+  `camera_disengagement_candidate`, etc). This is REAL, ACTIVE, per-clip
+  visual/motion perception, running on every Video00 RAW -- it is the
+  exact source of the `case_b_evidence`/`hand_motion_reset_candidate`
+  counts D-151/D-153 read directly off `take_judge_groups` this session.
+  Position-aware (ENTRY/DELIVERY/EXIT zoning exists via
+  `positioned_performance_evidence.py`, consumed by `case_b_performance_
+  evidence.py`, D-115/D-122/D-123).
+- **`visual_openai.py` (`OpenAIVisualProvider`, GPT-4o-mini frame
+  scoring, EXISTS BUT IS NOT WIRED):** a real, complete, batched,
+  malformed-response-recovering visual-LLM adapter that would populate
+  `MediaSignals`' 11 holistic quality fields (face_visibility,
+  eye_contact, framing_quality, product_visibility, motion_stability,
+  continuity, visual_fumble, expression_naturalness, gesture_
+  naturalness, delivery_energy, distraction_risk) via
+  `apply_visual_observations`. **`brain_runtime.py`'s live production
+  `BrainRuntime` hardcodes `visual_provider=None`** -- confirmed by
+  direct read, not inferred. `flow_b.py`'s own `if visual_provider is
+  not None and takes:` branch therefore NEVER executes in the live
+  Video00 path; the "visual" trace stage always records `status:
+  "not_requested"`. **Concretely, this means every `MediaSignals`
+  instance in production carries its 11 visual-provider fields at their
+  hardcoded DEFAULT values (0.5 or 0.0) -- they are never real
+  measurements today**, only `silence_ratio` and `audio_quality` are
+  ever populated with real per-clip values (at candidate-creation time in
+  `take_segmentation.py`). D-098's own "Visual perception: PARTIAL...
+  production wiring/coverage not re-verified" row is hereby verified
+  precisely: the CV-based Track C signal is live and real; the LLM-based
+  holistic Track C signal exists in code and is completely dormant.
+
+### TRACK D -- MEDIA/TIMING (verified this session)
+
+`media_probe.py`: `MediaProbe(duration_sec, width, height, fps,
+has_audio)` via one `ffprobe` call. This is the ENTIRE media-metadata
+surface -- no codec/container field, no orientation field, no PTS/scene-
+cut probe, no explicit "source-safe span" object beyond `duration_sec`
+itself (used as a hard upper bound when clamping segment `end` in
+`take_segmentation.py`). All downstream timing (ASR segments, audio
+silence intervals, local-performance frames, `TemporalEvent`s,
+`CandidateTake.start/end`) already shares ONE canonical unit: **plain
+float seconds since the start of that `source_asset_id`'s own file** --
+there is no second, incompatible timestamp system anywhere in this
+chain (confirmed by direct read of `TemporalEvent`, `MediaSignals`,
+`CandidateTake`, `Word`, `MediaProbe` -- all use bare `float` seconds,
+never PTS/frame-index/wall-clock).
+
+### CURRENT PARALLELISM / SERIAL BOTTLENECKS
+
+**Current parallelism: NONE.** Every stage above runs strictly serially
+inside `flow_b.py`'s one linear function body. Real, evidence-based
+dependency classification:
+- `media_probe` -> `asr`: **NO_DEPENDENCY** (ASR needs the audio stream,
+  not `media_probe`'s parsed output; both could start from the RAW file
+  simultaneously).
+- `asr` -> `audio_silence`: **NO_DEPENDENCY** (`audio_silence.py` reads
+  the waveform directly via ffmpeg, never the transcript).
+- `asr` -> `silence_analysis`: **HARD_DEPENDENCY** (needs `Word` timings).
+- `asr`/`audio_silence` -> `local_performance`: **NO_DEPENDENCY**
+  (OpenCV/MediaPipe reads video frames only).
+- `local_performance` -> `visual` (OpenAIVisualProvider, if ever wired):
+  **NO_DEPENDENCY** on `local_performance`'s own output, but **HARD_
+  DEPENDENCY** on `frame_sampling.sample_take_frames`, which itself
+  depends on segmentation (needs `CandidateTake.start/end` spans) --
+  i.e. **OPTIONAL_DEPENDENCY** on segmentation, not on any other
+  perception track.
+- `whole_video_context` (`RunPodLocalWholeVideoProvider`) -> everything
+  after it: **NO_DEPENDENCY** in practice, because this provider "never
+  calls an external API" and only builds a metadata shell from sources/
+  transcripts already in hand -- it does not need to run before
+  `audio_silence`/`local_performance` at all; it currently does only
+  because of `flow_b.py`'s linear code order, not a real requirement.
+- `attempt_reconstruction`/`pipeline.build_flow_b_draft` (grouping/
+  BestTake/Freeze): **HARD_DEPENDENCY** on segmentation + whichever of
+  A/B/C/D's outputs have already been fused onto `CandidateTake` by that
+  point (today: ASR text, silence ratios, local-performance events;
+  visual-LLM fields never, per above).
+
+**Serial bottleneck this exposes:** Tracks A, B (the real-signal half),
+C, and D have almost no genuine cross-track dependency (only
+`silence_analysis` needs ASR, and `visual`/frame-sampling needs
+segmented spans) -- yet today's code forces all four through one
+sequential chain, and several outputs (whole-video semantic shell,
+visual-LLM fields) are either never populated or arrive too late/never
+to influence anything upstream. This IS the gap between CANONICAL
+PARALLEL PERCEPTION (D-148) and CURRENT ENGINE EXECUTION.
+
+### ADDITIONAL FORENSIC FINDING: the whole-video SEMANTIC shell is a
+### no-op in production (verified this session, not previously
+### precisely documented)
+
+`whole_video_openai.py` (an LLM-based whole-video style/topic/sales-
+intent analyzer) is defined but **imported nowhere in the codebase
+outside its own file** -- zero production callers, confirmed by search.
+The live `RunPodLocalWholeVideoProvider` (`whole_video_local.py`)
+explicitly "never calls an external API" and only assembles a metadata
+shell from sources/transcripts already on hand -- its `SourceVideoContext
+.summary/dominant_style/creator_intent/main_topic/product_or_subject/
+story_logic/sales_intent` fields are therefore never populated with a
+real semantic judgment in the live Video00 path; only `.events`
+(populated by `audio_silence`/`local_performance`, real signals) and the
+compacted transcript are real. This sharpens D-098 13.20's "Unified
+multimodal fusion: DESIGNED_NOT_IMPLEMENTED" row with a concrete,
+verified instance: even the EXISTING whole-video semantic container is a
+structural shell today, not a real understanding pass.
+
+### WATCH+LISTEN FUSION OWNERSHIP (design)
+
+A new, bounded component -- call it `raw_understanding_fusion.py` -- owns
+exactly: consuming Tracks A-D's ALREADY-COMPUTED evidence (never
+recomputing ASR/audio/visual/media itself), normalizing every event onto
+the one shared float-seconds-since-source timeline (already uniform,
+per Track D above -- no new alignment math needed, only a shared
+container), associating evidence to bounded spans (existing
+`CandidateTake`/`TemporalEvent` identity, never inventing a second span
+concept), producing the Structured RAW Understanding Map (below) as
+STRUCTURED HYPOTHESES with confidence and conflict flags, and preserving
+provenance per claim. It must NOT select BestTake, change Boundary,
+change Pacing, delete RAW content, or become one LLM deciding the whole
+edit (D-098 13.3.2's authority principle, restated and honored, not
+altered).
+
+### STRUCTURED RAW UNDERSTANDING MAP V1 (minimal, compact contract)
+
+One record per bounded span (today's natural unit: `CandidateTake`,
+pre-existing identity, no new minting):
+
+```
+source_asset_id, span_id (= clip_id or source_span_id, reused),
+source_start, source_end,                                  # Track D timeline, already float-sec
+
+transcript, word_timings,                                  # Track A, verbatim reference (not copied)
+speech_activity, pause_evidence, audio_usability,           # Track B (audio_silence + silence_analysis, reconciled)
+visual_events, performance_events,                          # Track C (local_performance events; visual-LLM fields IF ever wired)
+entry_state, delivery_state, exit_state,                    # positioned_performance_evidence.py's existing ENTRY/DELIVERY/EXIT zoning, reused
+
+behavior_state, behavior_confidence,                         # D-111/D-098 13.4 vocabulary, derived from the above (never invented per-span)
+proposition_candidate_id, proposition_relation, proposition_confidence,  # feeds Proposition Identity, decides nothing itself
+attempt_relation, attempt_confidence,                        # D-145's existing 5-way vocabulary, reused verbatim
+retry_candidate, correction_candidate, continuation_candidate,
+complementary_candidate, new_audience_beat_candidate,        # booleans/scores, not a forced single label
+
+meaning_sufficiency,                                         # reuse D-123's existing meaning_sufficient_candidates concept, generalized
+performance_usability, editability,                          # derived, bounded [0,1] or None-if-unmeasured
+
+conflict_flags,                                              # structured list, never silently dropped
+evidence_provenance,                                         # per-field: ASR | AUDIO_SIGNAL | VISUAL_SIGNAL | MEDIA_TIMING | SEMANTIC_PROVIDER | DETERMINISTIC_RULE | MULTIMODAL_FUSION | UNKNOWN
+```
+
+This is Section 13.3.1's own field list, made concrete against ACTUAL
+existing types (`CandidateTake`, `TemporalEvent`, `MediaSignals`,
+D-145's relation vocabulary, D-123's meaning-sufficiency concept) instead
+of an abstract list -- deliberately NOT overbuilt: every field maps to
+something Tracks A-D already compute or a structured authority already
+consumes, no speculative new field.
+
+### TIME ALIGNMENT DESIGN
+
+No new alignment work is required for V1 -- ASR words, audio events,
+visual events, behavior events, source spans, and candidate clips
+ALREADY share one canonical axis (plain float seconds since
+`source_asset_id`'s own start, confirmed above). V1's only job is to
+CONTAINERIZE existing values under one map per span, keyed by
+`source_asset_id` + `span_id`, never to invent a second timestamp
+system.
+
+### EVIDENCE PROVENANCE DESIGN
+
+Adopt the directive's own vocabulary directly, mapped onto real sources:
+`ASR` (asr.py/canonical_asr_evidence.py), `AUDIO_SIGNAL` (audio_silence.py
+only -- never silence_analysis.py, which is `ASR`-derived and should be
+tagged as such, not `AUDIO_SIGNAL`, per the Track B honesty rule above),
+`VISUAL_SIGNAL` (local_performance.py today; visual_openai.py if ever
+wired), `MEDIA_TIMING` (media_probe.py), `SEMANTIC_PROVIDER` (Hybrid/
+Gemini editorial judge, semantic_idea_equivalence.py), `DETERMINISTIC_
+RULE` (any hand-written threshold/heuristic, e.g. D-097's cleanliness
+evidence), `MULTIMODAL_FUSION` (this new layer's own derived fields,
+e.g. `behavior_state`), `UNKNOWN` (never invented -- an honestly-unmeasured
+field, matching D-146's own "UNKNOWN" precedent for temperature/prompt_
+version). Provider output remains evidence tagged `SEMANTIC_PROVIDER`,
+never promoted to ontology.
+
+### FUSION STRATEGY (smallest safe design)
+
+Structured evidence aggregation with explicit conflict, never a hidden
+weighted score. No canonical score to reuse exists for a
+performance-usability composite (`MediaSignals`' scalars are read
+individually today, e.g. `take_judge.py`'s own thresholds; no
+established `visual_score = a*x + b*y` formula exists anywhere in the
+repo to reuse) -- so D-154 does NOT invent one. V1's fusion output is a
+STRUCTURED RECORD (the map above) plus explicit `conflict_flags`; any
+future scalar composite is a SEPARATE, later, evidenced decision, not
+made here.
+
+### BEHAVIOR SUPPORT MATRIX
+
+| Canonical state | Classification | Basis |
+|---|---|---|
+| AUDIENCE_DELIVERY | PARTIAL_EVIDENCE | Absence of break/reset kinds + ENTRY/DELIVERY/EXIT zoning (positioned_performance_evidence.py) is a derived inference, never a directly emitted event |
+| PRE_TAKE_SETUP | MISSING_EVIDENCE | No literal event kind exists for this |
+| FALSE_START | SUPPORTED_NOW | Literal `false_start` event kind (attempt_reconstruction.py's `_EXPLICIT_ATTEMPT_BREAK_KINDS`) |
+| ABANDONED_ATTEMPT | PARTIAL_EVIDENCE | Inferred from `wrong_take`/`retry_setup` + resolver-level completeness logic, no single literal event |
+| CLEAN_ATTEMPT | PARTIAL_EVIDENCE | Inferred (absence of break kinds), never a directly emitted positive event |
+| RETRY | SUPPORTED_NOW | Literal `retry_setup` kind + D-100's `multimodal_corroborated_retry` |
+| CORRECTION | MISSING_EVIDENCE | No literal multimodal event kind; today's correction handling is ASR/polarity-text-based only (D-097 Priority D) |
+| CONTINUATION | MISSING_EVIDENCE | No literal multimodal event kind; today's continuation handling is text/completeness-based |
+| NEW_AUDIENCE_BEAT | MISSING_EVIDENCE | No literal event kind |
+| POST_TAKE_RESET | SUPPORTED_NOW | Literal `body_reset(_candidate)`/`hand_reset`/`hand_motion_reset_candidate`/`camera_disengagement(_candidate)` kinds, already routed by `perceptual_watch_listen.py`'s `reset_debris_at_edges` |
+| RECORDING_PROCESS | PARTIAL_EVIDENCE | `recording_joke`/`verbal_fumble`/`product_handling_mistake` kinds exist; BTS classification proper lives in the semantic layer (transcript), not multimodal |
+| BREAKING_CHARACTER | SUPPORTED_NOW | Literal `breaking_character` kind (`_FACE_KINDS`) |
+
+### PROPOSITION / ATTEMPT-RELATION INTEGRATION
+
+Fusion SUPPLIES evidence toward these judgments; it never decides them.
+Concretely: `behavior_state`/`visual_events`/`entry_state`/`delivery_
+state`/`exit_state` become additional SUPPORTING signals a Proposition
+Identity stage (still text/structure-led, per D-098 13.5, a Milestone-1
+requirement) or D-145's Attempt Relationship resolver may consult
+alongside their existing text-based evidence -- e.g. a `body_reset_
+candidate` immediately preceding a text-restart is corroborating (not
+sufficient) evidence for `RETRY` over `CONTINUATION`. No proposition/
+attempt authority is bypassed; the fused map only widens what each
+already-structured stage can look at, exactly as D-098 13.7 already
+names as the target (Family Formation "should NOT depend solely on
+textual/provider comparative judgments").
+
+### FAMILY-FORMATION INTEGRATION (explicitly preserves D-145-D-153)
+
+The fused map feeds Family Formation as ADDITIONAL EVIDENCE toward
+`family membership confidence`/`proposition confidence`/`attempt
+relationship confidence` -- it must NEVER bypass D-150's own gate.
+Concretely: `family_complete_context`/`complete_context_conflict`
+(D-146/D-149/D-150, unchanged) still gate whether a comparative semantic
+label may become AUTHORITATIVE; multimodal evidence may in the FUTURE
+also feed a genuinely NEW, separate completeness signal (e.g. "do we
+have complete PERFORMANCE evidence for every family member, not just
+complete comparative-label windows") but that is a DIFFERENT gate,
+scoped separately, never a relaxation of the closed D-150 gate. No
+complete-family-context requirement is weakened; multimodal evidence can
+only ADD confidence, never manufacture authority the closed gate would
+otherwise deny.
+
+### BESTTAKE INTEGRATION (design only, no implementation)
+
+Canonical priority is unchanged: meaning -> usability -> multimodal
+performance -> editability -> context/energy fit. The fused map's
+`performance_usability`/`meaning_sufficiency`/`editability` fields are
+designed to be consumable at the EXACT existing tier boundary D-082's
+ladder already has (`_semantic_best_take`'s general ladder: D-081
+semantic_delete_recommended -> attempt completeness -> D-063/D-065/D-066
+CRITICAL_COVERAGE_DOMINANCE -> DeliveryScorer) -- as an additional,
+richer evidence source for the DeliveryScorer tier specifically, since
+that is precisely where D-153 found the current per-candidate case_b
+event counts (16 events vs 0 events) already correlate with which
+realization references preferred. No BestTake code is touched in D-154.
+
+### D-153 DELIVERYSCORE FINDING -- RELATION (forensic only, general, not patched)
+
+D-153's conflicted family (`tg_d88e600fe6a5e92dc4`) had `meaning_
+sufficient_candidates: []` for BOTH members and a stark case_b event-
+count asymmetry (16 vs 0 delivery events) -- exactly the kind of
+evidence the fused map's `performance_usability`/`meaning_sufficiency`
+fields are designed to surface EARLIER and more RICHLY. The general gap:
+today, `case_b_performance_evidence.py`'s aggregates ARE computed and
+ARE present in diagnostics, but DeliveryScorer's own tie-break
+(`take_judge.py`'s scoring) does not consume `case_b_evidence` as a
+tie-break input at all -- it is generated too late / for a different
+consumer (D-122/D-123's ADVISORY diagnostics layer, explicitly "never
+changes... take_judge.rank_takes/score_take ordering" per that module's
+own docstring) rather than being fed INTO the scorer. **General finding:
+the evidence is not absent; it exists, is computed, and is currently
+NOT CONSUMED by the authority (DeliveryScorer) that most needs it for
+exactly this failure mode.** This is recorded as the target gap for a
+future, separately-authorized BestTake/DeliveryScorer phase -- not
+solved here.
+
+### SONOGRAPHY-ORDERING FINDING -- RELATION
+
+Classification: **SEPARATE_ORDERING_LOGIC.** `sonography_good_before_
+diagnosis` is a required-SEQUENCE check (StoryValidator/CanonicalEditPlan
+territory, D-038/D-089's claim-ordering machinery) -- it concerns WHICH
+ORDER two already-selected, already-correct clips appear in the final
+plan, not which clip is selected or how confidently. Nothing in Tracks
+A-D or the fused map as designed changes ordering/placement authority.
+Upstream multimodal evidence is not expected to plausibly help this
+specific failure mode; `INSUFFICIENT_EVIDENCE` is the honest fallback if
+a future investigation finds otherwise, but `SEPARATE_ORDERING_LOGIC` is
+the better-supported classification given what StoryValidator/
+CanonicalEditPlan actually own today (verified via CLAUDE.md's own D-021
+component map, not re-read line-by-line this session -- this
+classification is design-level, not a fresh code audit of ordering
+logic, which this task's scope does not authorize).
+
+### REAL AUDIO DESIGN (critical distinction, restated with evidence)
+
+A. **Signal-level audio analysis: EXISTS, LIVE** (`audio_silence.py`,
+   ffmpeg `silencedetect`, dB-floor dead-air).
+B. **Transcript-level language understanding: EXISTS, LIVE** (ASR text +
+   every semantic_provider/semantic_idea_equivalence judgment).
+C. **Semantic/prosodic REAL-AUDIO understanding (tone, stress, affect
+   FROM THE SIGNAL): DOES NOT EXIST ANYWHERE IN THIS REPO** (verified by
+   search this session -- no pitch/prosody/spectral-affect module).
+   Designed as a FUTURE capability only: a bounded, per-span audio-
+   affect classifier (open question for a later task: local
+   signal-processing feature extraction vs. a bounded provider call on
+   the raw audio segment) feeding one new `evidence_provenance:
+   AUDIO_SIGNAL`-tagged field into the fused map -- never implemented,
+   scheduled, or estimated here.
+
+### MULTIMODAL MODEL ROLE (bounded, per this task's own instruction)
+
+No design proposes a model watching the whole RAW and returning the
+edit. If/when a multimodal model is used inside the fused layer, its
+bounded roles are: (1) evidence extraction (mirrors `OpenAIVisualProvider`'s
+existing, dormant, per-clip scoring pattern -- reusable, not reinvented),
+(2) relationship classification (a bounded classifier over an ALREADY-
+short-listed candidate PAIR, mirroring D-061's `GoogleClaimEquivalence
+Arbiter`/`GoogleSemanticEquivalenceArbiter` pattern -- narrow, gated,
+never whole-video), (3) conflict arbitration (D-098 10.3.1's still-not-
+implemented bounded multimodal fallback arbiter, reused as designed,
+not reinvented), (4) span-level performance understanding (extends
+`OpenAIVisualProvider`'s existing per-clip contract, never a holistic
+judgment). Any such use remains bounded, observable (structured
+diagnostics, per every precedent from D-119 through D-152), fail-open
+(never blocks a decision on a provider outage, matching `safe_visual_
+analyze`'s own existing try/except-to-status pattern), and non-
+destructive (never deletes RAW content, mirrors every existing provider
+boundary in this repo).
+
+### COST/LATENCY REUSE DESIGN
+
+Preferred, and directly supported by existing code shape: one perception
+pass per modality per source (today's real `flow_b.py` stages, made
+concurrent rather than sequential) -> ONE fused map per span, computed
+once -> many downstream consumers read it (grouping, BestTake,
+Boundary, Pacing, semantic authority diagnostics) rather than each
+independently re-deriving or re-requesting evidence. This is ALREADY the
+shape `MediaSignals`/`TemporalEvent`/`CandidateTake` take today (compute
+once at candidate-creation/fusion time, read many times downstream) --
+V1's job is to extend that existing reuse pattern to the NEW fused
+fields, not invent a new one. No speculative dollar costs calculated,
+per this task's own instruction.
+
+### DUPLICATE-COMPUTE INVENTORY (verified this session)
+
+- `local_performance.py`'s dense events are independently re-consumed
+  and re-windowed by AT LEAST three separate downstream readers with
+  their own private logic: `attempt_reconstruction.py` (`_RESET_KINDS`/
+  `_CAMERA_KINDS`/`_FACE_KINDS`), `take_judge.py`'s own `delivery_
+  cleanliness_evidence` (`_interior_events`/`_RESET_KINDS`/`_BREAK_
+  KINDS`/`_CLEANLINESS_EDGE_MARGIN_SEC`), and `case_b_performance_
+  evidence.py` (re-imports `take_judge.py`'s own private helpers
+  directly to avoid a fourth, drifting copy -- its own docstring
+  explicitly names this as the D-121 "double-counting risk" it makes
+  INSPECTABLE, not eliminated). **This is the clearest, already-
+  self-documented duplicate-compute candidate for the fused map to
+  collapse into ONE computation, read by all three.**
+- `family_authority_diagnostics`/`semantic_authority_gate_diagnostics`
+  (D-146/D-149/D-150) and `case_b_performance_evidence.py`
+  (D-122/D-123) both independently re-derive per-family/per-candidate
+  views from the SAME underlying `take_judge_groups` construction inside
+  `pipeline.py`'s one per-family loop -- not truly duplicated compute
+  (each reads different underlying fields) but a duplicated ITERATION
+  pattern the fused map's single-pass-per-span design would naturally
+  consolidate.
+
+### UPSTREAM vs DOWNSTREAM WATCH+LISTEN -- SHARED CAPABILITIES
+
+Both roles could share the SAME underlying primitives without merging
+authority: `local_performance.py`'s OpenCV/MediaPipe extractor,
+`audio_silence.py`'s ffmpeg silencedetect, and `media_probe.py`'s
+ffprobe call are all reusable as-is by `perceptual_watch_listen.py`
+(downstream QA) exactly as `perceptual_watch_listen.py` ALREADY reuses
+`_reset_debris_at_edges` evidence sourced from the same reset-kind
+vocabulary (D-098 13.3.4 item 2, confirmed unchanged). Upstream decides
+nothing from these signals directly (only proposes evidence);
+Downstream verifies the RENDERED result and routes findings
+(Selection/BestTake/Boundary/Renderer) -- their AUTHORITIES remain
+separate, per D-098 13.3.4, unaltered by this design.
+
+### IMPLEMENTATION STATUS MATRIX
+
+| Capability | Module | Status | Output | Consumers | Missing piece | V1 action |
+|---|---|---|---|---|---|---|
+| ASR | `asr.py`/`canonical_asr_evidence.py` | EXISTING | `TranscriptSegment`/`Word` | segmentation, grouping, semantic, take_judge | speaker diarization, language-detect output | reuse verbatim |
+| Word timing | `asr.py` (word_timestamps=True) | EXISTING | `Word.start/end/confidence` | Boundary, AttemptReconstructor | none for V1 | reuse verbatim |
+| Audio signal perception | `audio_silence.py` | EXISTING | `TemporalEvent(audio_silence_interval)` | trimmer, cleanliness evidence | none for V1 | reuse verbatim, tag `AUDIO_SIGNAL` |
+| Semantic/prosodic audio | -- | MISSING | -- | -- | entire capability | mark absent honestly, do not fake |
+| Visual perception (CV) | `local_performance.py` | EXISTING, LIVE | `*_candidate` `TemporalEvent`s | attempt_reconstruction, take_judge, case_b_performance_evidence, perceptual_watch_listen | none structural; consolidation needed (see duplicate-compute) | reuse, consolidate readers |
+| Visual perception (LLM) | `visual_openai.py` | EXISTING, DORMANT (`visual_provider=None`) | `VisualObservation` -> `MediaSignals` 11 fields | none live (no wiring) | production wiring decision | leave dormant for V1; note as future toggle |
+| Position-aware performance | `positioned_performance_evidence.py` | EXISTING | ENTRY/DELIVERY/EXIT zoned events | `case_b_performance_evidence.py` | none for V1 | reuse verbatim |
+| Behavior states | `attempt_reconstruction.py` kind vocabulary | PARTIAL (6/12 SUPPORTED_NOW, see matrix) | event-kind classification | grouping, resolver | CORRECTION/CONTINUATION/NEW_AUDIENCE_BEAT/PRE_TAKE_SETUP multimodal evidence | expose as `behavior_state` field, do not invent new detectors |
+| Proposition evidence | D-145 vocabulary + `semantic_idea_equivalence.py` | PARTIAL, text-primary | 5-way relation | Family Formation | multimodal corroboration | fused map supplies corroborating evidence only |
+| Attempt relations | restart-evidence kinds + D-100 | PARTIAL | typed relation | grouping | explicit typed retry_of/corrects beyond kinds | fused map's `attempt_relation` field, evidence not authority |
+| Family formation | `take_grouping.py`/`hybrid_session_cleanup.py` | EXISTING, PROVIDER-EVIDENCE-DEPENDENT | family membership | BestTake | non-textual evidence intake | fused map widens intake, D-150 gate unchanged |
+| BestTake performance | `case_b_performance_evidence.py` (ADVISORY) | EXISTING, NOT CONSUMED BY SCORER | evidence dict | diagnostics only | scorer consumption | future phase, not D-154 |
+| Upstream fusion | -- (this task's design) | DESIGNED_NOT_IMPLEMENTED | -- | -- | entire orchestration + map | Phase A/B below |
+| Downstream Watch+Listen | `perceptual_watch_listen.py` | EXISTING, v1 (4/8 capabilities EVALUATED) | routed findings | Selection/Boundary/Renderer | 4 NOT_IMPLEMENTED capabilities (unchanged) | unaffected by this design |
+
+### ARCHITECTURAL DECISION: **C -- CURRENT PERCEPTION IS TOO FRAGMENTED; NORMALIZATION/ORCHESTRATION MUST PRECEDE FUSION**
+
+Not A: real signals exist (Tracks A/B-real/C-CV/D) but are consumed by
+at least three independently-duplicating readers (verified above) and
+one major consumer (DeliveryScorer) does not consume the richest
+existing evidence (case_b_performance_evidence) at all -- fusing on top
+of that fragmentation would encode, not fix, the duplication. Not B: no
+single MISSING perception capability blocks a V1 fusion layer -- the
+one genuinely missing capability (real semantic/prosodic audio) is
+honestly marked absent, not a blocker (V1 can and should ship without
+it). Not D: no evidence supports a major rework -- every existing
+signal-producing module (asr.py, audio_silence.py, local_performance.py,
+media_probe.py) is sound and reusable as-is; only their ORCHESTRATION
+(strictly serial today) and CONSUMPTION (duplicated, and in
+DeliveryScorer's case, absent) need to change. **C is the smallest
+truthful answer**: normalize the already-real evidence into one shared
+map, consolidate the three independent `_RESET_KINDS`-style readers onto
+it, BEFORE building a new fusion/hypothesis layer on top of a still-
+fragmented base.
+
+### V1 IMPLEMENTATION BOUNDARY (recommended, not authorized)
+
+Parallel orchestration of Tracks A/B-real/C-CV/D (genuinely
+independent per the DAG above) + normalize their EXISTING outputs into
+the Structured RAW Understanding Map + consolidate the three duplicate
+`_RESET_KINDS`-style readers onto that one map + expose `behavior_state`
+or the 6 SUPPORTED_NOW states + surface `proposition_relation`/
+`attempt_relation` as EVIDENCE fields (never a new authority) + honestly
+mark semantic/prosodic audio and the LLM-visual channel as
+NOT_IMPLEMENTED/DORMANT. **No new editorial authority. No BestTake/
+DeliveryScorer/Boundary/Pacing code change.**
+
+### PHASED BUILD PLAN
+
+- **PHASE A**: parallelize the real, independent perception calls
+  (media_probe, asr, audio_silence, local_performance can start
+  concurrently per the DAG above) + build the Structured RAW
+  Understanding Map container populated PURELY from existing outputs
+  (zero new detectors). Offline-testable, zero editorial effect.
+- **PHASE B**: consolidate the three duplicate `_RESET_KINDS`/behavior-
+  kind readers (`attempt_reconstruction.py`, `take_judge.py`'s
+  cleanliness evidence, `case_b_performance_evidence.py`) onto the one
+  fused map; expose `behavior_state` for the 6 SUPPORTED_NOW states.
+  Zero editorial effect (pure refactor + additive field), offline-
+  testable via the same fixture-replay technique this whole D-145-D-153
+  thread already established.
+- **PHASE C**: Proposition/Family Formation consumes the fused map's
+  `proposition_relation`/`attempt_relation`/behavior fields as
+  ADDITIONAL evidence (D-150's gate untouched, per the Family-Formation
+  Integration section above).
+- **PHASE D**: BestTake/DeliveryScorer consumes `performance_usability`/
+  `meaning_sufficiency` from the fused map (directly targets the D-153
+  finding) -- this is where the pimples-class DeliveryScorer gap would
+  actually close, in a FUTURE, separately-authorized task.
+- **PHASE E**: one Video00 qualification RAW, after A-D are offline-green.
+- **PHASE F**: unseen-RAW generalization proof (CleanCutBench-style,
+  never Video00-specific rules).
+
+None of A-F are authorized or scheduled by this task.
+
+**Do not overfit Video00**: nothing in this design encodes a pimples/
+sonography/transcript-specific rule; the DeliveryScorer and sonography
+findings above are used only as CONCRETE ILLUSTRATIONS of a general gap
+(evidence computed-but-unconsumed; ordering-is-separate-logic),
+generalized in the matrix/DAG/phased plan above, never as a special case.
+
+### D-148 architecture compatibility
+
+Confirmed preserved: Parallel Multimodal Perception -> Watch+Listen
+Multimodal Understanding -> Structured Editorial Reasoning remains
+canonical (`docs/CUTSELL_CANONICAL_ENGINE_ARCHITECTURE_D098.md` Section
+13, re-read this task, unchanged). This design sharpens Section 13.2's
+Tracks A-D and 13.3.1's map with verified, concrete code identity; it
+adds no new Layer, renumbers nothing, and reopens no D-096/D-097.x/D-107/
+D-111/D-123/D-128/D-129/D-141-D-153 authority contract.
+
+**Scope confirmed:** no code change, no test file, no RAW/Modal/RunPod
+dispatch, no provider call, no BestTake/DeliveryScorer/Boundary/Pacing
+patch, no reopening of the D-145-D-153 semantic-authority thread.
+D-153 is not rewritten (this is an append-only new entry).
+
+**Exact next implementation capability:** Phase A (parallel orchestration
++ Structured RAW Understanding Map populated from existing evidence
+only) -- NOT implemented, scheduled, or authorized by this task.
+
+**HUMAN ACTION REQUIRED:** YES (condition A) -- whether to authorize
+Phase A implementation, and in what order relative to the still-open
+DeliveryScorer/sonography-ordering findings, is the Product Owner's
+decision, not made here.
