@@ -159,9 +159,12 @@ def test_two_finalist_request_mapping_includes_instruction_and_both_ids(tmp_path
     joined = " ".join(text_parts)
     assert "A" in joined and "B" in joined
     assert INSTRUCTION in text_parts
-    # image parts are inline_data blocks, not text
-    image_parts = [p for p in parts if "inline_data" in p]
+    # image parts are inlineData blocks (camelCase, per the real Generative
+    # Language API JSON convention -- see multimodal_besttake_gemini.py's
+    # own D-139 real-evidence fix comment), not text.
+    image_parts = [p for p in parts if "inlineData" in p]
     assert len(image_parts) == 2  # one frame per candidate
+    assert image_parts[0]["inlineData"]["mimeType"] == "image/jpeg"
 
 
 # ---------------------------------------------------------------------------

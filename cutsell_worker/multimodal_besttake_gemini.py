@@ -147,10 +147,19 @@ class GeminiMultimodalBestTakeArbiter:
 
     @staticmethod
     def _image_part(path: str) -> dict:
+        # D-139 real-evidence fix: the Generative Language API's JSON
+        # representation is camelCase throughout (confirmed by this repo's
+        # own already-working `hybrid_google.build_gemini_generate_content_
+        # request`, which uses `generationConfig`/`maxOutputTokens`/
+        # `responseMimeType`) -- `inlineData`/`mimeType`, never snake_case.
+        # The first real dispatch of this provider (CI run 34210452645)
+        # used snake_case and every applicable call failed fast (~100-260ms)
+        # with a real HTTP 4xx, correctly classified PROVIDER_ERROR by
+        # `safe_arbitrate` but with zero real judgments obtained.
         raw = Path(path).read_bytes()
         return {
-            "inline_data": {
-                "mime_type": "image/jpeg",
+            "inlineData": {
+                "mimeType": "image/jpeg",
                 "data": base64.b64encode(raw).decode("ascii"),
             }
         }
