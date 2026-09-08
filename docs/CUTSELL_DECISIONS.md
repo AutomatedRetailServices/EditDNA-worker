@@ -20635,3 +20635,265 @@ append-only new entry).
 complete and self-contained). YES (condition A) for Phase B -- whether
 and how to implement the actual family-complete authority gate remains
 the Product Owner's decision.
+
+## D-147 -- Family-Complete Semantic Authority Phase A: real-media observability qualification
+
+Authorized post D-146. ONE canonical Video00 RAW (Modal run `34238705061`,
+head `253b3f4`, `feature/runpod-pod-on-demand`) to qualify D-146's Phase A
+observability against real media -- no code change, no authority change, no
+second RAW. Measurement only.
+
+**Access constraint (reported honestly, not worked around by relaxing scope):**
+the workflow's "Print full canonical diagnostics" step's UNFILTERED raw dump
+of `.diagnostics.take_judge_groups` (which would show `semantic_authority_
+observability` verbatim per family) and the full raw result JSON artifact
+(`cutsell-video00-modal-human-review`, 582 MB) both fell outside what this
+session's log-fetch tool and the environment's Azure-blob-storage network
+policy could retrieve (same documented constraint as D-143/D-144). The one
+CI print step that DOES survive in the retrievable log tail and that DOES
+name each family's D-094.3 F8 state (`family_window_label_sources`, a
+hand-picked jq projection built before D-146 existed) only ever selects
+`{group_id, selected_clip_id, semantic_best_take_reason, semantic_label_
+source}` -- it does not know `semantic_authority_observability` exists and
+never will until that jq filter is updated (a genuine, real observability-
+surfacing gap this qualification discovered, not a D-146 defect: the new
+field is computed, just not yet exposed by this one pre-existing CI
+projection). Not fixed here (NO CODE CHANGE is this task's own scope).
+Everything below is reconstructed BY HAND, using D-146's own detector logic
+applied to the real per-window rows that DID survive in the retrievable
+log tail (`hybrid_editorial_chunks`'s raw dump, which is unfiltered and did
+carry `request_hash`/`session_id`/`provider`/`model` for all 5 real windows,
+plus `family_window_label_sources`'s existing `semantic_label_source` for
+all 6 real families) -- proving the underlying computation is real and
+correct, even where the newest field names are not yet visible in this one
+CI projection.
+
+**Global semantic observability summary (reconstructed):**
+`semantic_comparison_count` (windows) = 5; `family_count` = 6;
+`families_with_complete_context` = 6 (every family had >=1 window whose
+`member_ids` superset its own membership -- confirmed via `family_window_
+label_sources`'s `semantic_label_source` being non-null for all 6 group_ids);
+`families_without_complete_context` = 0; `family_complete_unknown_count` =
+0; `partial_window_count` (windows that are NOT a superset of some family
+they touch) = at least 3 of 5 (chunks 0-2 each omit members of families
+whose full membership spans a later chunk); `provider_authoritative_count`
+(families where `family_scoped_semantic_decisions` preferred a complete-
+window merge over the global merge) = 6; `provider_advisory_count`
+(global-merge-only families) = 0; `partial_window_conflict_count` (as
+Phase A's own detector would report it, i.e. only among families with NO
+complete window) = 0, because every family had a complete window.
+
+**Pimples/espinillas critical trace.** Family `tg_dd54bcf6fc4c658f78`,
+members `clip_4739ff8c009bdfccb4ab` / `clip_ca8f4f2b1c0d4aef21ed`. TWO
+windows are each independently family-complete for this pair:
+- Window `hc_6c6f8f108cf91ef2c2` (chunk 3, request_hash
+  `rh_6058213185d2528cdf33c6b1`, provider `google`, model
+  `gemini-3.5-flash-lite`): `clip_4739ff8c009bdfccb4ab` = winner 0.92,
+  `clip_ca8f4f2b1c0d4aef21ed` = alternate 0.78.
+- Window `hc_949134802153fe0d6b` (chunk 4, request_hash
+  `rh_6ee12fca6ea6df33bbf9b880`, same provider/model):
+  `clip_4739ff8c009bdfccb4ab` = alternate 0.85, `clip_ca8f4f2b1c0d4aef21ed`
+  = winner 0.95 -- the EXACT OPPOSITE ranking of chunk 3, on the SAME two
+  candidates, same provider/model, same run.
+`family_complete_context` = **true** per D-146's own detector (both chunk 3
+and chunk 4 individually contain the whole family). `omitted_candidate_ids`
+= {} for chunks 3/4 with respect to this family (both are complete);
+non-empty for chunks 0-2 (neither member appears before chunk 3).
+`provider_authority_applied` = `FAMILY_COMPLETE_WINDOW_PREFERRED` (a
+complete window exists, so `family_scoped_semantic_decisions` fires).
+`family_scoped_source_info`: `family_complete_window_chunk_indices: [3, 4]`;
+`family_window_labels` = `{clip_4739ff8c009bdfccb4ab: [winner, 0.92],
+clip_ca8f4f2b1c0d4aef21ed: [winner, 0.95]}` -- BOTH members still land as
+"winner" even after restricting to family-complete windows only, because
+the merge is a per-clip max-`_decision_priority` across the TWO disagreeing
+complete windows, and "winner" is "winner" in each window's OWN eyes;
+`global_merge_labels` is byte-identical to `family_window_labels` here
+(the global cross-window merge and the family-scoped merge agree, for once,
+precisely because both complete windows independently produce a winner for
+each member -- there is no partial window to differ from). Temperature and
+prompt_version: **UNKNOWN** (confirmed, not invented -- the field genuinely
+does not exist in `EditorialJudgeResult`, exactly as designed in D-146).
+
+**STRUCTURAL FINDING (the reason this run matters): D-146's Phase A
+`partial_window_conflict` detector, EXACTLY AS BUILT, reports `None` for
+this family** -- because its rule ("suppress the conflict report whenever
+ANY complete window exists") was written against D-094.3 F8's original
+threat model (one complete window vs. several partial ones). This run
+proves a DIFFERENT, real threat model D-145/D-146 did not anticipate:
+**two INDEPENDENT complete windows can disagree with EACH OTHER**, and the
+existing merge (`_decision_priority` max, applied either globally or
+"family-scoped") cannot tell the two apart from a single coherent complete
+window -- it silently produces the same double-"winner" artifact D-094.3
+F8 already named, just from a different cause. `family_complete_context =
+true` is therefore proven on real media to be NECESSARY but NOT SUFFICIENT
+for a trustworthy single winner; a future Phase B needs a second check
+(multiple independent complete windows for the same family must AGREE, not
+merely exist) before treating any window's label as authoritative. This is
+recorded as a finding for Phase B design, not implemented here.
+
+**Deterministic downstream absorption (why this run's output stayed
+correct despite the instability):** `semantic_fast_path_candidate: null`
+for this family (`_semantic_best_take`'s `single_semantic_winner` early
+exit correctly refuses to fire when two members both carry "winner" --
+D-081's own "no single decisive winner" contract, unrelated to D-146,
+already handles a double-winner honestly). `semantic_best_take_reason:
+"delivery_tie_break_among_survivors"`; DeliveryScorer top =
+`clip_4739ff8c009bdfccb4ab`; final selected = `clip_4739ff8c009bdfccb4ab`.
+D-123: `case_b_conflict_present: false` (no actionable BestTake CASE B
+disagreement for this family). D-128: `fallback_trigger_reason:
+"CASE_B_NOT_DOMINATED"`, `fallback_shadow_eligible: false`,
+`fallback_provider_invoked: false`, `fallback_winner_changed: false` --
+correctly inert. Human Gold regression QA: `pimples_micro_1/2/3_present`,
+`pimples_later_winner_present`, `pimples_micro_order`, `pimples_bad_
+monolith_absent` all PASS this run -- the real instability documented
+above did NOT damage this run's deliverable; the pre-existing
+deterministic fallback ladder (D-082/D-097) absorbed it exactly as
+designed, independent of D-146.
+
+**Family formation vs. D-126/D-135/D-143:** this run again FORMS the
+pimples family (same as D-126/D-143; unlike D-135, which never grouped the
+pair at all) -- `IdeaClusterer/RetryFamilyFormation` contributed 3-4
+LEVEL_1 seconds this run per the quality ladder's authority breakdown,
+consistent with the family-formation-variance secondary root cause D-144
+already named. The two members are the SAME textual pair D-126 first
+documented (`clip_...` ids differ run to run by construction -- realization
+ids are minted per run -- but the underlying utterance pair, "También me
+salían espinillas en esta parte..." vs "Otro síntoma era que me salían
+espinillas...", is the same recorded pair). Total families this run: 6;
+D-143's comparable run reported a similar family count on the same source.
+
+**Request identity:** all 5 real windows carry a populated, distinct
+`request_hash` (`rh_c637e26f1dae22d80fe7ee14`, `rh_cefb52b7897b2faeecd8f433`,
+`rh_1263d54108fe2f70c8b2ae1f`, `rh_6058213185d2528cdf33c6b1`,
+`rh_6ee12fca6ea6df33bbf9b880`) and a populated, distinct `session_id`
+(`hc_27f0a52e0f863c51db`, `hc_95f0547917a70a5478`, `hc_503f107fa7c986d91e`,
+`hc_6c6f8f108cf91ef2c2`, `hc_949134802153fe0d6b`) -- zero collisions,
+exactly as expected since every window's candidate set genuinely differs.
+`stable_request_hash`'s own stability (same inputs -> same hash) is proven
+offline by D-146's own test suite; this run's evidence is that it populates
+correctly and uniquely on real media, which is the real-media-specific
+claim this task asks to qualify.
+
+**Diagnosis control:** the papillary-thyroid-cancer diagnosis clip
+(`clip_0a8ab8712487ea178212`, "La biopsia confirmó que era un cáncer
+papilar de tiroides.") appears exactly once in this run's KEEP sequence and
+NOT AT ALL in the DISCARD sequence or in any of the 6 retry families --
+i.e. it never entered a multi-candidate contest this run at all
+(`family_complete_context` = **unknown**, not applicable -- no family of
+size >=2 exists for it to be complete or incomplete). This is a DIFFERENT
+mechanism from pimples': pimples exhibits real window-to-window semantic
+label instability WITHIN a correctly-formed 2-member family; Diagnosis
+this run shows no retry contest ever formed (consistent with, though not
+independently re-proven here, D-143's previously-documented upstream
+RETRY_IDENTITY defect at AttemptReconstructor, which can fuse or drop a
+retry before hybrid_session_cleanup ever sees two candidates). `papillary_
+diagnosis_preserved` PASSED in this run's regression QA -- the clip
+survived intact regardless of mechanism. Not solved here, per this task's
+own instruction.
+
+**Other family controls:**
+- Complete-context control: family `tg_70e83bbde2f7f19d5b`
+  (`clip_937ee666afd655274ff9` / `clip_f3abc0c1efa33a51c594`), window `hc_
+  27f0a52e0f863c51db` (chunk 0, `rh_c637e26f1dae22d80fe7ee14`).
+  `family_complete_context = true` (`family_complete_window_chunk_indices:
+  [0]`, single complete window, no second complete window to disagree with).
+  `family_window_labels`: `clip_937ee666afd655274ff9` = alternate 0.7,
+  `clip_f3abc0c1efa33a51c594` = winner 0.95 -- a clean, DECISIVE, non-
+  conflicting semantic answer. Yet DeliveryScorer's own top candidate
+  disagreed (`clip_937ee666afd655274ff9`), producing D-123's genuine
+  `SEMANTIC_DELIVERYSCORE_DISAGREE`/`semantic_fast_path_bypassed: true`
+  case -- a real, working example of D-123's disagreement gate doing its
+  job on a family where D-146's completeness signal is trustworthy and
+  unambiguous, contrasted directly against pimples' shape where two
+  complete windows disagree with EACH OTHER.
+- Partial-context control: **NOT AVAILABLE this run.** All 6 real families
+  had at least one family-complete window (`families_without_complete_
+  context = 0`); no family in this run ever reached
+  `family_complete_context = false`. This is itself informative: the
+  chunk_size=10/stride=5 sliding window, on this ~50-candidate source, was
+  large enough relative to the (2-3 member) retry families actually formed
+  that genuine incompleteness never arose here -- D-094.3 F8's original
+  documented instance (run `33983880111`) evidently needed a larger/denser
+  candidate pool or smaller-window conditions than this run presented.
+  Recorded honestly as a gap in this run's coverage of the primary
+  question, not claimed as evidence the partial-window shape cannot occur.
+
+**Cut.ai/Human Gold parity context (D-143 minimum re-report only):**
+`cutai_vs_gold` F1 = 0.8996 (fixed reference pair, unaffected by CutSell);
+`cutsell_vs_cutai` F1 = 0.7557-0.7709 and `cutsell_vs_gold` F1 =
+0.7097-0.7348 depending on the pre-render-selection-plan vs. post-render-
+physical view (D-097.10) -- the physical/rendered view scores higher on
+both, consistent with D-097.10's own fix reducing false LEVEL_1 flags.
+Pimples status: ALL PASS (regression QA). Diagnosis status: PASS
+(`papillary_diagnosis_preserved`). The 5 real regression-QA failures this
+run are all sonography-region (`sonography_good_take_part1/completion_
+present` missing, `sonography_bad_take_absent` flagged, `sonography_good_
+before_diagnosis` order failure) -- a DIFFERENT, already-known region,
+untouched by anything in D-146/D-147's own scope. No new D-143-style
+regression audit performed (out of scope, per this task's own instruction).
+
+**D-146 no-behavior-change confirmation (real media):** candidate
+extraction (54 ASR segments -> 48 input candidates -> 36 attempts, per
+`stage_status`), proposition identity, retry-family membership (6 families,
+same shape class as prior comparable runs), semantic winner selection
+(`_semantic_best_take`'s existing reasons: `single_semantic_winner`,
+`delivery_tie_break_among_survivors`, `critical_coverage_dominance`,
+`information_rich_tied_winner` -- no new reason string introduced),
+DeliveryScorer, BestTake, D-123 (`actionable_case_b_conflict_count: 1`,
+same shape as historical runs), D-128 (`fallback_shadow_eligible_count: 0`
+-- still Phase 1 shadow-only, never invoked a provider), Boundary
+(`selected_count_in: 23` -> `selected_count_out: 24`, D-116 CASE A
+"never changes membership" invariant note printed and matches:
+`visual_stage_added_count: 0`), Dialogue/Pacing (`stage_status.dialogue_
+pacing_transition: "dialogue_pacing_transition_phase1_planned"`, D-142's
+own existing marker, unchanged shape), and the render plan are all
+observed operating exactly as their own pre-D-146 contracts describe --
+`semantic_authority_observability`/`request_hash` are additive fields
+alongside them, read by nothing that decided any of the above.
+
+**Observability verdict: B -- REAL-MEDIA OBSERVABILITY PROVEN, D-144's
+PARTIAL-WINDOW SHAPE NOT REPRODUCED (a DIFFERENT, more severe complete-
+window-vs-complete-window shape WAS reproduced instead).** Diagnostics
+compute correctly on real media (window/family fields populate, are
+distinct, are honest about UNKNOWN provider config); the specific D-094.3
+F8 partial-window-conflict shape this task's PRIMARY QUESTION asked about
+did not occur in this run (every family had a complete window); but real
+media surfaced a related, currently-undetected shape (two complete windows
+disagreeing) that Phase A's own `partial_window_conflict` detector
+currently misses by construction. This is reported as a finding for Phase
+B's design scope, not as an observability defect in what D-146 was asked
+to build (D-146 built exactly the detector D-145 specified; D-145 did not
+specify a complete-window-vs-complete-window check because D-144's
+evidence at the time was exclusively about partial-vs-complete
+disagreement).
+
+**Phase B authorization gate:** NOT YET SATISFIED as originally scoped.
+`family_complete_context` is proven trustworthy for existence but this run
+proves it is NOT sufficient alone (see the structural finding above);
+before any Phase B gate is designed, the detector needs to widen its own
+definition of "conflict" to also cover multiple-complete-windows-disagree,
+or Phase B's family-complete gate needs a companion cross-complete-window
+agreement check. Recommend: a bounded Phase A.2 (still observability
+only) that adds an `inter_complete_window_agreement` field before Phase B
+authority work begins -- not implemented here, Product Owner decision.
+
+**Exact next engine capability:** Phase A.2 (observability only) --
+extend `partial_window_conflict`-shaped detection to also flag when
+>=2 independently family-complete windows disagree on a member's label,
+using the SAME non-circular, additive-dict-key discipline as D-146. Then,
+and only then, Phase B (the actual family-complete + inter-window-
+agreement gate) becomes safely specifiable.
+
+Zero code changes. Zero authority/grouping/winner/provider-policy/
+threshold/BestTake/Boundary/Pacing changes (confirmed above). Exactly one
+Modal RAW dispatched (`34238705061`), no second dispatch, no provider call
+beyond the canonical engine's own inherent Google/Gemini semantic-judge
+calls already authorized by every prior Video00 RAW in this chain.
+D-123/D-128/D-138/D-140/D-141/D-142/D-143/D-144/D-145/D-146 all preserved
+CLOSED, not reopened. D-146 itself not rewritten (this is an append-only
+new entry).
+
+**HUMAN ACTION REQUIRED:** YES (condition A) -- whether to authorize
+Phase A.2 (widen the conflict detector to cover complete-window-vs-
+complete-window disagreement) before any Phase B work is the Product
+Owner's decision, not made here.
