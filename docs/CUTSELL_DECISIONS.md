@@ -24779,3 +24779,447 @@ merge-veto behavior, flag, and all 50 of its existing tests unchanged.
 **HUMAN ACTION REQUIRED:** YES (condition C) -- authorization for the ONE
 real-media Video00 qualification run named above is a Product Owner
 decision; Phase D remains explicitly blocked until that gate passes.
+
+
+==================================================
+D-162 -- WATCH+LISTEN RELATION DISCOVERY / PHASE C.2 FINAL REAL-MEDIA
+FAMILY-FORMATION QUALIFICATION (POST D-161)
+==================================================
+
+**RAW:** Modal run 34289933170, branch `feature/runpod-pod-on-demand`,
+head `ae4ba98`. Canonical Video00 source
+(`Editdna longform validation/VIDEO-2026-07-30-09-18-03.mp4`), all normal
+defaults except the two explicitly-enabled flags below. Exactly ONE
+dispatch, ONE GPU run; teardown confirmed by the workflow's own step.
+
+**Flag proof (from runtime diagnostics, not inferred):**
+`diagnostics.semantic_idea_equivalence.watch_listen_family_evidence.
+status == "evaluated"` (D-158's own flag ON) and
+`diagnostics.semantic_idea_equivalence.watch_listen_relation_discovery.
+status == "evaluated"` (D-161's new flag ON) both appear in the live
+result JSON -- both capabilities genuinely executed this run, not merely
+requested.
+
+**Workflow-only plumbing added for this run** (per this task's own
+authorization, mirroring D-159's exact overlay): new
+`watch_listen_relation_discovery_enabled` workflow_dispatch input,
+default OFF, overlaying `CUTSELL_WATCH_LISTEN_RELATION_DISCOVERY_
+ENABLED=1` only when set to exactly "1"; added to the CI-log unmask
+allowlist; the existing D-094.2 late-stage, tail-cap-safe grouping
+forensic summary mechanically extended (allowlist only, no new
+observability mechanism) to also project `watch_listen_family_evidence`,
+`watch_listen_relation_discovery`, `watch_listen_discovery_trace`, and a
+derived `family_topology_counts` block. Zero `cutsell_worker` editorial
+changes; committed separately (`ae4ba98`) before the RAW.
+
+==================================================
+GLOBAL DISCOVERY SUMMARY (real values, this run)
+==================================================
+
+```
+family_count: 22       multi_member_family_count: 7   singleton_count: 15
+watch_listen_discovery_evaluated_count: 1
+watch_listen_discovery_candidate_count: 1
+watch_listen_discovery_retry_count: 0          (the one candidate was rejected before reaching the structured authority)
+watch_listen_discovery_continuation_count: 0
+watch_listen_discovery_correction_count: 0
+watch_listen_discovery_complementary_count: 0
+watch_listen_discovery_new_beat_count: 0
+watch_listen_discovery_distinct_count: 0
+watch_listen_discovery_uncertain_skipped_count: 1
+semantic_pair_candidate_count: 0
+watch_listen_only_pair_count: 1
+both_source_pair_count: 0
+watch_listen_discovery_accepted_count: 0
+watch_listen_discovery_rejected_count: 1
+discovery_rejection_reasons: {"confidence_not_supported_or_uncertain": 1}
+```
+
+D-158's own (unchanged) merge-veto mechanism, evaluated 12 pairs this run
+(7 with real Watch+Listen relation hypotheses present, 0 SUPPORTED, 0
+conflicts) -- exactly the same shape D-159 already established; D-162
+changes nothing about it.
+
+The existing semantic pair-generation path this run: 82 candidate pairs
+generated, 14 checked (the arbiter batch cap), 12 merged (3 via
+deterministic restart evidence, 9 via the arbiter), 5 explicitly rejected
+by the arbiter, 0 distinct-addition-marker blocks.
+
+==================================================
+DISCOVERY CAUSAL TRACE (the only Watch+Listen-only candidate this run)
+==================================================
+
+```
+left_id:  clip_54921e81c0efaa2d2770  "Al terminar mi contrato hablé con mi
+                                      ginecóloga y le pedí todos los test..."
+right_id: clip_2254d2187e2e9dde65f5  "al terminar mi contrato cambié de
+                                      ginecóloga y le pedí que me hiciera..."
+pair_source: WATCH_LISTEN_DISCOVERY (not a semantic-path candidate this
+             run -- both clips were already members of the SAME lexical
+             family, tg_2870f5f34039afcd2c, before discovery ran; D-157's
+             own per-source sequential-neighbor relation naturally also
+             covers within-family neighbors, not only cross-group pairs)
+wla_relation: RETRY        wla_confidence: WEAK
+proposition_evidence_status: not_applicable (never reached; rejected earlier)
+structured_final_relation: null    family_action: null
+accepted: false     rejection_reason: confidence_not_supported_or_uncertain
+absent from the semantic resolved-pair set this run: YES (never a
+    `_cross_group_candidate_pairs` member -- same-group already)
+family topology changed because of this discovery: NO
+```
+
+This is the fail-open confidence gate working exactly as designed
+(D-161's own `REJECT_NOT_SUPPORTED` path): a real, directionally-correct
+RETRY signal (both clips genuinely are the same retry family, already
+correctly merged by the pre-existing pipeline) at WEAK confidence never
+reaches the Proposition Firewall or the structured authority at all --
+zero risk of a forced or spurious merge, and zero contribution either
+way to this already-correct family.
+
+**Critical distinction honored:** DISCOVERY (1 candidate produced) is
+reported separately from FINAL MERGE (0 accepted) -- the mechanism
+produced a candidate, structural gating correctly declined to act on it,
+and this is recorded as a safe, useful negative-control data point, not a
+failure of the gate.
+
+==================================================
+BATCH/FILTER BYPASS AND DEDUPE
+==================================================
+
+The one candidate discovered was never a member of the 82-pair cross-
+group candidate set (`semantic_pair_candidate_count: 0`,
+`both_source_pair_count: 0`) -- it is genuinely `WATCH_LISTEN_DISCOVERY`-
+only, so the batch cap (14 of 82 checked) and the 2-per-group fairness
+cap never had an opportunity to erase it; it was rejected on its own
+confidence, never on cap exhaustion. No pair this run needed the BOTH-
+source dedupe path (`both_source_pair_count: 0`), so the dedupe contract
+(evaluate once, `pair_source=BOTH`, no double merge/no double
+`merged_pair_count`) was NOT exercised this run -- confirmed proven
+offline in D-161's own test suite instead (tests 48/51).
+
+==================================================
+PROPOSITION FIREWALL / RELATION-TYPE CONTROLS
+==================================================
+
+- RETRY: 0 accepted this run (the one RETRY-shaped candidate was WEAK,
+  rejected before the firewall). Proposition Firewall itself NOT
+  exercised on real media this run (no candidate reached it) -- proven
+  offline instead (D-161 tests 29-30, 45-46).
+- CONTINUATION / COMPLEMENTARY / CORRECTION / NEW_AUDIENCE_BEAT /
+  DISTINCT_PROPOSITION: NOT OBSERVED this run (zero candidates of any of
+  these kinds were discovered).
+- UNCERTAIN: the one candidate's confidence gate produced exactly the
+  UNCERTAIN/skipped outcome the contract requires -- no forced relation,
+  no family action. Confirmed correct.
+- Intermediary bridge (PRE_TAKE_SETUP/POST_TAKE_RESET/RECORDING_PROCESS/
+  FALSE_START): NOT OBSERVED this run (no bridged candidate appeared in
+  the trace). Proven offline instead (D-161 tests 17-22).
+
+==================================================
+PIMPLES / ESPINILLAS -- REAL-MEDIA STRUCTURAL CONTROL
+==================================================
+
+Three real clips this run carry the pimples/espinillas content:
+
+- `clip_926bf7941a1cdd7324db` -- "También me salían espinillas. Era como
+  un rush, una alergia." (member of family `tg_b86b99c767f8dc7d9f`)
+- `clip_f08ab14b1d436b0933c8` -- "También me salían espinillas en esta
+  parte de aquí detrás de la oreja..." (same family, the OTHER member)
+- `clip_4aed8ee20f3af0855021` -- "Otro síntoma era que me salían
+  espinillas como si fuera una alergia..." (its OWN separate beat,
+  never merged into that family)
+
+**Family formation for the two-member family: CORRECT.** Both takes of
+the SAME realization are correctly in one family
+(`tg_b86b99c767f8dc7d9f`, `member_count: 2`). This is NOT the classic
+D-160 "never reaches evaluation" pimples shape from the original
+forensic -- that specific miss is not reproduced with these exact clip
+ids this run.
+
+**The `clip_4aed8ee20f3af0855021` bridge WAS evaluated, and rejected on
+real, correct evidence -- not starved by the batch cap.** The
+`distinct_idea_grouping_safety` authority (D-058/D-083/D-085, a
+DIFFERENT, pre-existing structured evaluator from `reconcile_semantic_
+idea_equivalence`'s own cross-group arbiter batch) explicitly evaluated
+the bridge from this clip to the pimples family (`evidence: "semantic"`,
+confidence `0.9`, reason `"Both detail hormonal acne behind the ears and
+neck resembling allergies."`) and rejected it as
+`cross_component_explicit_non_equivalence` -- the SAME D-048 discourse-
+marker contract this codebase already has ("Otro síntoma" = "ANOTHER
+symptom", an explicit distinctness marker). **The quality ladder's own
+region-89 finding confirms this rejection was CORRECT**: `clip_
+4aed8ee20f3af0855021` is a `LEVEL_3 consensus_keep` -- BOTH Cut.ai and
+Human Gold ALSO keep it as its own separate beat. The only LEVEL_1 miss
+near it (region 91, 1.27 s) is a small trailing BOUNDARY-scope sliver,
+not a family-formation failure.
+
+This pair was NEVER a member of `reconcile_semantic_idea_equivalence`'s
+own 82-candidate/14-checked-pair set this run (absent from both `merges`
+and `arbiter_rejected_pairs`) -- it reached structured evaluation through
+a DIFFERENT existing authority instead. Watch+Listen Discovery (D-161)
+never proposed this pair either (the one real candidate this run was
+elsewhere, the ginecóloga family).
+
+**The REAL, confirmed quality gap in this family is downstream of family
+formation.** `deliveryscore_top_candidate`, `semantic_fast_path_
+candidate`, and `final_selected_clip_id` all agree on `clip_
+f08ab14b1d436b0933c8` (the "detrás de la oreja" take) -- but BOTH Cut.ai
+and Human Gold instead keep `clip_926bf7941a1cdd7324db`'s realization.
+Confirmed by the fixed 18-check Human Gold regression manifest: 3 of its
+4 failed checks are exactly this family (`pimples_micro_2_present`
+missing -- the 926bf take never selected; `pimples_bad_monolith_absent`
+failed -- the f08ab take, both-references-rejected, IS present;
+`pimples_micro_order` failed). D-150's own gate correctly marked this
+family `ABSTAIN_CONFLICT`/`NON_DECISIVE`
+(`multiple_family_complete_windows_disagree_on_comparative_winner`),
+routing to `DELIVERYSCORE_PATH` -- which then also picked the wrong
+realization. **This is a BestTake/DeliveryScorer quality gap, not a
+family-formation defect** -- classified below per the directive's own
+FAMILY FORMATION SUCCESS + BESTTAKE QUALITY GAP rule, explicitly out of
+D-161/D-162's scope (no DeliveryScorer/BestTake change made or proposed
+here).
+
+**Pimples primary question: NOT EXERCISED.** D-161 did not change the
+failure shape for any of these three real clips this run, because the
+premise ("legitimate relation never reaches structured evaluation") does
+not hold for either real pimples relation present: the two-member family
+was already correctly formed before D-161 existed, and the third clip's
+bridge already reaches (and is correctly rejected by) a pre-existing
+structured authority. Watch+Listen Discovery touched neither pair.
+
+==================================================
+DIAGNOSIS CONTROL
+==================================================
+
+Per D-160's own correction (Diagnosis's apparent duplicate is likely a
+render/physical-layer artifact, not a proven second family-formation
+candidate): confirmed again this run. The papillary-cancer diagnosis
+clip (`clip_f536aef633b57e6738f4`, "La biopsia confirmó que era un cáncer
+papilar de tiroides.") reached the EXISTING semantic arbiter batch twice
+this run and was correctly rejected both times as a distinct narrative
+point (`"Describe distinct chronological stages: nodule discovery versus
+biopsy results."`, `"Connect different narrative points: diagnosis
+results versus symptom analysis."`) -- no family-formation contradiction.
+The quality ladder's own render-verification step flags this exact clip
+id as **NOT FOUND** in the rendered output (render-similarity `0.4682`,
+below threshold) -- a render/physical-layer artifact, exactly matching
+D-160's own prior correction, not a Watch+Listen or family-formation
+issue. Papillary diagnosis meaning itself is preserved
+(`papillary_symptom_realization_meaning`: passed in the regression
+manifest); `sonography_good_before_diagnosis` fails again this run --
+the SAME pre-existing, already-tracked ordering issue from prior runs,
+unrelated to and untouched by D-161/D-162.
+
+==================================================
+D-150 SEMANTIC AUTHORITY INTERACTION
+==================================================
+
+D-150's gate evaluated all 7 multi-member families with case_b evidence
+this run: 3 `AUTHORITATIVE` (decisive, no conflict), 4 `ABSTAIN_CONFLICT`
+(`multiple_family_complete_windows_disagree_on_comparative_winner`) --
+including BOTH the pimples family and the ginecóloga family (the one
+family Watch+Listen Discovery's single candidate touched). D-150's own
+abstention logic is completely independent of Watch+Listen Discovery
+(computed from D-149's complete-window agreement detector only) and
+fired correctly in both cases regardless of what Discovery did or didn't
+find. **No bypass of family completeness, complete-context conflict, or
+semantic abstention was observed or attempted.**
+
+==================================================
+D-123 / D-128 (DOWNSTREAM CONTEXT ONLY, UNCHANGED)
+==================================================
+
+D-123: 7 families with case_b evidence, 6 semantic-fast-path candidates,
+4 semantic-fast-path bypasses (case_b_performance_conflict), 1 meaning-
+insufficient-alternative block. The ginecóloga family
+(`tg_2870f5f34039afcd2c`) is one of the 4 bypasses:
+`deliveryscore_top_candidate=clip_54921e81c0efaa2d2770` (the SAME clip
+Watch+Listen Discovery's one candidate named) disagreed with the semantic
+candidate, but the final DeliveryScorer-path tie-break still landed on
+`clip_2254d2187e2e9dde65f5` -- matching both references' overall region
+choice at that point except for one 0.84 s missing-delivery span (region
+30). D-128 fallback-shadow fields present, unchanged, shadow-only, never
+consulted. No DeliveryScorer/BestTake/D-123/D-128 code was touched by
+D-161/D-162; every field reported here is pure downstream projection.
+
+==================================================
+FAMILY-TOPOLOGY COMPARISON
+==================================================
+
+| Family (this run) | vs D-143/D-147/D-151/D-153/D-156/D-159 | classification |
+|---|---|---|
+| pimples two-member (tg_b86b99c767f8dc7d9f) | consistent with the corrected D-160 finding (family forms; BestTake winner is the known gap) | UNCHANGED_GAP (BestTake, out of D-161 scope) |
+| pimples third-beat separation (clip_4aed8ee20f3af0855021 kept apart) | matches both references; consistent with D-048's own marker contract | UNCHANGED_VALID |
+| ginecóloga family (tg_2870f5f34039afcd2c) | same 3-member shape D-158/D-159's own fixtures describe; Discovery's one candidate here changed nothing | UNCHANGED_VALID (Discovery causally inert) |
+| Diagnosis clip / render-NOT-FOUND | matches D-160's own render/physical-layer correction, not a new finding | NOT_COMPARABLE (render layer, not family formation) |
+| Overall family_count/multi_member/singleton (22/7/15) | no prior run in this decision log reports this exact triple for comparison | NOT_COMPARABLE |
+
+No family topology changed as a causal result of Watch+Listen Discovery
+this run (0 accepted merges) -- every comparison above is UNCHANGED_* or
+NOT_COMPARABLE, never IMPROVED_STRUCTURE or REGRESSED, which is the
+expected, correct outcome of a mechanism that discovered one candidate
+and safely declined to act on it.
+
+==================================================
+WHOLE-VIDEO COMMERCIAL CONTEXT (compact)
+==================================================
+
+- Hook (thyroid cancer intro): CUTAI_PASS (consensus_keep; minor LEVEL_1
+  boundary looseness only)
+- Body / symptoms (swelling, weight, hair loss): CUTAI_PASS (consensus_
+  keep; recurring LEVEL_1 boundary "loose_exit_edge"/process-material
+  micro-trims, pre-existing Boundary-layer pattern, not evaluated further
+  here)
+- Sonography / nodule / biopsy / diagnosis: CUTAI_GAP (LEVEL_2 ginecóloga
+  retry-family region + the Diagnosis render-NOT-FOUND artifact above);
+  `sonography_good_before_diagnosis` still failing (pre-existing)
+- Pimples: CUTAI_GAP (BestTake winner-selection gap in the two-member
+  family, detailed above; the third beat is correctly separate)
+- Stomach: CUTAI_PASS (consensus_keep / RESOLVED_WINNER family, no new
+  finding)
+- Hereditary-cancer conclusion: mixed LEVEL_2/LEVEL_3 (`matches_gold_
+  over_cutai` in several spans; a few `gold_removes_cutai_keeps`
+  boundary-scope trims) -- CUTAI_PASS overall, pre-existing pattern
+- CTA: CUTAI_PASS (consensus_keep)
+
+No region in this summary is attributable to Watch+Listen Discovery
+(D-161/D-162); all are pre-existing Selection/Boundary/BestTake-layer
+patterns already tracked by earlier decisions.
+
+==================================================
+PHYSICAL / PARITY METRICS
+==================================================
+
+Selection-plan (pre-render) view: LEVEL_1 19 regions / 37.15 s selection +
+16 regions / 3.557 s boundary. Selection F1: CutSell vs Cut.ai **0.785**,
+CutSell vs Gold **0.792**, Cut.ai vs Gold 0.8996.
+
+FINAL MP4 (physical, post-render) view -- the headline per D-097.10 R14:
+LEVEL_1 10 regions / 27.754 s selection + 23 regions / 4.038 s boundary;
+CutSell physical keep 153.804 s. **F1 vs Cut.ai 0.8068, F1 vs Gold
+0.8244.**
+
+Reference points (docs/CUTSELL_DECISIONS.md): D-156 Cut.ai 0.9018 / Gold
+0.8685; D-159 Cut.ai 0.8602 / Gold 0.8737. This run's F1 is lower than
+both references on the Cut.ai axis and between them on the Gold axis.
+**Per this task's own instruction, no causal F1 claim is made either
+way**: Watch+Listen Discovery accepted zero merges this run
+(`watch_listen_discovery_accepted_count: 0`), so it structurally could
+not have caused any topology change that would move these numbers in
+either direction. The delta from D-156/D-159 reflects ordinary RAW-to-RAW
+segmentation/ASR/render variance and the unrelated engineering that has
+landed between those runs and this one, not D-161/D-162.
+
+Render verification: 23/24 fragments located, 0 source-order inversions;
+1 fragment (`clip_f536aef633b57e6738f4`, the Diagnosis clip) not located
+in the rendered output -- the render/physical-layer artifact discussed
+above, pre-existing per D-160's own correction.
+
+==================================================
+WATCH+LISTEN PIPELINE STATUS (real media, this run)
+==================================================
+
+- Parallel Perception (D-155): ran (ASR/audio/visual tracks feeding the
+  rest of the pipeline; unchanged).
+- RawUnderstandingMap (D-155): built (feeds behavior hypotheses D-161's
+  bridging logic would use if exercised).
+- WatchListenUnderstanding (D-157): computed; supplied the 7 pairs with
+  real relation hypotheses D-158 evaluated and the 1 candidate D-161
+  discovered.
+- Relation Discovery (D-161/D-162): executed, produced 1 candidate,
+  correctly rejected it at the confidence gate -- fail-open held.
+- Family Evidence / merge-veto (D-158): executed, 12 pairs evaluated, 0
+  conflicts, 0 supported -- behavior byte-identical to what D-159 already
+  proved.
+- Structured relation authority (`resolve_final_attempt_relation`):
+  reachable and correctly bypassed (the one candidate never reached it,
+  by design, since confidence was WEAK).
+
+This demonstrates the full Perception -> Understanding -> Discovery ->
+Structured Reasoning -> Family Formation chain executing end-to-end on
+real media, including its own internal safety gate correctly declining
+to act -- not merely offline.
+
+==================================================
+REAL AUDIO HONESTY
+==================================================
+
+Signal-level audio: REAL (measured dead air, hand-motion/facial-shift
+delivery events, `interior_dead_air_mp4`, `cut_adjacent_speech_energy_
+mp4` all real MP4-measured this run). Semantic/prosodic audio
+understanding: NOT IMPLEMENTED (D-157/D-161's relation hypotheses remain
+lexical/behavioral, not tone/prosody-based) -- no overclaim; this is
+exactly why the one real Watch+Listen relation candidate this run
+carried only WEAK, not SUPPORTED, confidence.
+
+==================================================
+PHASE C.2 REAL-MEDIA VERDICT: B. PARTIALLY REAL-MEDIA PROVEN
+==================================================
+
+The mechanism executed safely end-to-end on real media: it correctly
+generated exactly one candidate from real Watch+Listen evidence, that
+candidate's confidence was honestly assessed as WEAK (not SUPPORTED), the
+fail-open confidence gate correctly declined to let it reach the
+Proposition Firewall or the structured authority, no family topology
+changed, D-150's abstention/completeness firewall remained fully intact
+and was exercised independently in both families this run, and no unsafe
+merge of any kind occurred anywhere in the run. **This is Verdict A's own
+safety bar, fully met.** What keeps this Verdict B rather than A is the
+directive's own second Verdict-A condition: "at least one legitimate W+L
+relation reaches structured authority" was NOT met -- the one candidate
+this run never reached the structured authority (correctly rejected one
+gate earlier), and the two real pimples/espinillas relations this run
+were either already correctly formed before D-161 existed or already
+correctly evaluated by a pre-existing authority, so D-161 had no
+legitimate real-media relation available to demonstrate reaching
+structured evaluation for the first time. No meaningful Watch+Listen-only
+discovery was exercised this run -- a mechanism-safety proof, not yet a
+mechanism-value proof.
+
+==================================================
+PHASE C CLOSURE: DOES NOT CLOSE
+==================================================
+
+Per this task's own instruction for Verdict B: do not automatically run
+a repeated Video00 RAW hoping for a positive. No second RAW was run.
+Phase C / C.2 remains open pending either (a) a persisted/offline
+qualification path that can exercise a SUPPORTED-confidence real
+Watch+Listen relation the semantic path genuinely never reaches, or (b) a
+future real-media run where such a relation happens to occur naturally.
+No new grouping/relation heuristic is added here in response to this
+result, per the directive's own instruction.
+
+==================================================
+VIDEO00 PRIMARY-RAW STATUS
+==================================================
+
+**NOT YET -- BESTTAKE / ORDERING / AUDIO / PACING STILL PARTIAL.** Family
+Formation itself is real-media proven safe (this run and D-159 combined),
+but the pimples BestTake winner-selection gap, the sonography-before-
+diagnosis ordering gap, and the Diagnosis render/physical-layer gap all
+remain open and pre-existing, unrelated to and unresolved by D-161/D-162.
+
+==================================================
+EXACT NEXT ENGINE PHASE
+==================================================
+
+**Phase D remains BLOCKED**, per this task's own instruction, since
+Verdict B was returned (not A). Before any Phase D authorization
+(Watch+Listen performance/usability consumption in DeliveryScorer/
+BestTake), Family Formation needs either a real-media instance where
+Watch+Listen Discovery's mechanism value (not just its safety) is
+demonstrated, or an explicit Product Owner decision to proceed with
+Phase D despite the mechanism's real-media inertness so far, given its
+proven safety. No Phase D work is implemented or proposed here.
+
+**Confirmations:** NO CUTSELL_WORKER EDITORIAL CHANGE (this task's only
+code-adjacent change was the workflow-only plumbing committed in
+`ae4ba98`, before the RAW). NO SECOND RAW. NO BestTake/DeliveryScorer/
+D-123/D-128/Boundary/Pacing change. NO provider-policy change. D-150's
+firewall, D-158's merge-veto, and D-161's offline-proven mechanism all
+preserved CLOSED/unchanged; this entry does not rewrite D-161.
+
+**HUMAN ACTION REQUIRED:** YES (condition A) -- whether to authorize a
+further real-media attempt at exercising Watch+Listen Discovery's
+mechanism value, and/or whether to authorize Phase D despite this run's
+inertness, are Product Owner decisions.
