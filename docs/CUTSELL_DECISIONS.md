@@ -18534,3 +18534,139 @@ Overlap change, no Video00 RAW, no Modal, no RunPod, no TestFlight.
 to authorize a bounded, offline-only Phase 3 DESIGN task (never
 implementation/activation) is the Product Owner's decision, not made
 here.
+
+## D-139 -- multimodal BestTake fallback model comparison: Gemini 2.5 Flash
+BLOCKED (model retired for new users), D-138 OpenAI remains the only
+evidenced candidate
+
+**Scope authorized:** ONE bounded apples-to-apples offline comparison of
+Gemini 2.5 Flash against the D-138 OpenAI `gpt-4o-mini` baseline, SAME
+hardened decision contract, SAME 9 D-127 fixtures, to determine which
+model is the better candidate for CutSell's bounded Class B BestTake
+fallback. No live activation, no Phase 3, no Overlap change regardless of
+outcome.
+
+**1) Provider implementation built (real, tested, structurally isolated):**
+`cutsell_worker/multimodal_besttake_gemini.py` -- `GeminiMultimodalBestTake
+Arbiter`, mirroring the repo's EXISTING, already-proven `hybrid_google_
+transport.GoogleGeminiTransport` REST pattern (`POST .../{model}:
+generateContent` with an `x-goog-api-key` header, `requests` already a
+dependency -- no new SDK dependency). Imports and reuses the EXACT SAME
+`INSTRUCTION` constant from `multimodal_besttake_openai.py` (never copies
+or paraphrases it) -- decision-doctrine parity with D-138 guaranteed BY
+CONSTRUCTION, not merely by intent. `list_gemini_models`/`model_supports_
+generate_content` call Google's own read-only, zero-cost `ListModels`
+endpoint to verify availability before any generation call, exact-bare-id
+match only (never a substring match that could silently accept a
+different generation). 28 offline tests (the 20 required items + 8
+bonus), all passing, no real network call in the test suite. Extended
+`multimodal_besttake_arbiter.py`'s `_classify_provider_call_exception`
+(minimal, additive) with `HTTPError`/`ConnectionError` substring checks
+for genuine cross-provider fail-open parity.
+
+**2) Real-evidence bug found and fixed within this task's own scope
+(D-091 root-cause continuity):** the FIRST real dispatch (CI run
+`34210452645`) used snake_case `inline_data`/`mime_type` keys for image
+parts; the Generative Language API's JSON representation is camelCase
+throughout (confirmed by this repo's own already-working `hybrid_google.
+build_gemini_generate_content_request`: `generationConfig`/
+`maxOutputTokens`/`responseMimeType`). Fixed to `inlineData`/`mimeType`
+(commit `5a5a224`), regression test updated to assert the correct casing.
+
+**3) SECOND real dispatch (CI run `34211227809`, post camelCase fix)
+STILL failed identically** -- every applicable case reported
+`PROVIDER_ERROR` in ~100-260ms (a genuinely fast, real HTTP failure, not
+a timeout). `safe_arbitrate` intentionally swallows exception detail
+(fail-open design, correct for production), so neither of the first two
+real dispatches surfaced the actual HTTP status/body. A third, purely
+diagnostic workflow change (commit `c951ebc`, zero production code
+touched) added ONE minimal, direct, text-only `generateContent` call
+(bypassing the arbiter/safe_arbitrate wrapper entirely) before the
+8-case batch, printing the real HTTP status and response body.
+
+**4) THIRD dispatch (CI run `34211849818`) surfaced the definitive real
+root cause -- an explicit Google API 404, not a code defect:**
+```
+HTTP 404
+{
+  "error": {
+    "code": 404,
+    "message": "This model models/gemini-2.5-flash is no longer
+    available to new users. Please update your code to use
+    models/gemini-3.6-flash for the latest features and improvements.
+    We recommend you to use the Interactions API.",
+    "status": "NOT_FOUND"
+  }
+}
+```
+`gemini-2.5-flash` has been RETIRED for new users/projects by the current
+date, even though Google's own `ListModels` catalog still lists it with
+`generateContent` in its `supportedGenerationMethods` -- a real,
+generalizable finding for any future provider-availability check in this
+repo: **`ListModels` listing a model as generateContent-capable does not
+guarantee a real `generateContent` call will succeed for this API key/
+project; only an actual call (or Google's own deprecation-status field,
+if one exists) proves it.** This is independently consistent with this
+repo's own pre-existing Gemini policy allowlist (`hybrid_provider_
+settings.py`'s `primary_model`/`escalation_model` default to
+`gemini-3.5-flash-lite`/`gemini-3.6-flash`, generation 3.x, not 2.5) --
+the codebase had already, separately, moved past the 2.5 generation
+before this task began.
+
+**5) Per this task's own explicit instruction, this is a STOP condition,
+not a model-selection loss on the merits:** "If the exact Gemini 2.5
+Flash model is unavailable: STOP and report the blocker. Do NOT
+silently substitute Gemini Pro, Flash-Lite, another Gemini generation, or
+another provider." No such substitution was made. **Zero real Gemini
+editorial judgments were obtained on any of the 9 fixtures** -- the
+8-case bounded batch was never reached in either failing dispatch.
+Every A/B comparison metric this task's directive requests (case-by-case
+table, exact/safe-abstain/incorrect/unsafe-regression counts, positive-
+case resolution, latency, usage) is therefore N/A for Gemini: there is no
+real judgment to compare against D-138's own real, already-recorded
+results.
+
+**6) Regressions (unaffected by this diagnostic/infra work):** 109/109
+targeted (D-139 + D-138 + D-136 + D-128), 115/115 (D-123 + Boundary),
+compileall clean, full offline suite 3247 passed with the same 5
+pre-existing unrelated failures already documented in D-136/D-137/D-138.
+Zero new failures. D-134/Overlap firewall confirmed via grep: no
+reference to `dialogue_overlap_enabled`/`audio_overlap`/`SourceAsset`
+anywhere in the new or extended files.
+
+**7) MODEL-SELECTION VERDICT: effectively B (GPT-4o-mini D-138 remains
+the current candidate) BY DEFAULT, NOT ON EDITORIAL MERITS.** None of
+this task's own A/B/C/D definitions cleanly fit "the challenger could not
+be reached at all" -- A/B/C all presuppose a real Gemini judgment to
+compare, and D's own definition ("Gemini introduces unsafe behavior")
+does not describe what happened here either. Reporting this honestly as
+a verdict-B-by-default: D-138's OpenAI implementation is the only
+provider with real, recorded evidence (D-137/D-138: `correct=4,
+incorrect=0, abstained=4, negative_control_regression_count=0`) behind
+it; Gemini 2.5 Flash remains completely untested on editorial grounds,
+not disqualified by any editorial finding.
+
+**8) Exact next engine gate (not authorized here):** one of -- (a) accept
+D-138's OpenAI implementation as the current fallback candidate and
+proceed to Phase 3 DESIGN (never implementation) under that provider
+alone; (b) authorize a fresh Gemini comparison run against a currently-
+available Gemini generation (e.g. `gemini-3.5-flash-lite` or
+`gemini-3.6-flash`, this repo's own already-approved hybrid-brain models)
+under the SAME bounded contract and SAME 9 fixtures -- a NEW task, since
+this one's explicit model requirement (`gemini-2.5-flash`) is now proven
+unavailable and substituting was explicitly forbidden; (c) decide Gemini
+is not worth pursuing further and proceed with OpenAI alone. None of
+these is started here.
+
+**Scope confirmed:** no live pipeline provider call, no production
+fallback activation, no winner/score/rank/grouping/Boundary/Overlap
+change, no Video00 RAW, no Modal, no RunPod, no TestFlight. Only 3
+free `ubuntu-latest` GitHub Actions dispatches were run (the model-
+availability-confirmed-but-call-failed run, the post-camelCase-fix
+identical-failure run, and the diagnostic run that found the real 404) --
+zero paid/GPU compute, zero exploratory batches beyond what was needed
+to root-cause a genuine, real, reproducible blocker.
+
+**HUMAN ACTION REQUIRED:** YES (condition A, product decision) -- which
+of the three next-gate options above (or another) to pursue is the
+Product Owner's decision, not made here.
