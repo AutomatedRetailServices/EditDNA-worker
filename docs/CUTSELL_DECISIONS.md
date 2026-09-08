@@ -23001,3 +23001,304 @@ Phase B or C, and whether to schedule a Video00 qualification RAW against
 this Phase A change (observability-only; no editorial behavior change is
 expected, but D-095's doctrine requires the rendered artifact, not test
 counts, to confirm that), are Product Owner decisions.
+
+## D-156: Upstream Watch+Listen Phase A -- real-media integration qualification (ONE Video00 RAW)
+
+Per D-155's own required next gate. HEAD `6775233` (unchanged -- this task
+is measurement-only, no code, no docs beyond this entry). ONE Modal RAW
+authorized and dispatched (run `34269563901`, canonical source, default
+parameters, `feature/runpod-pod-on-demand`). No second RAW.
+
+### Track statuses (real, from this run's own printed diagnostics)
+
+`parallel_perception_enabled: true`; `tracks_started/completed/failed:
+3/3/0`; `speech_track_status/audio_track_status/visual_track_status: PASS/
+PASS/PASS`; `media_track_status: PASS` (inferred by construction -- 36
+candidate spans were produced downstream, and `probe_media` raises hard on
+any failure, so the pipeline could not have continued past it otherwise;
+this run's own "Verify active-path identity" step itself reported
+`success`, though its own printed fingerprint fell just outside the ~5000-
+line CI-log retrieval window this task could recover -- same class of
+log-tail limitation D-151 already documented, not a new one).
+
+### Real parallelism
+
+`parallel_wall_time_ms: 206332.043`; `sum_track_time_ms: 238710.479` --
+wall time is 32,378 ms (13.6%) LESS than the naive sequential sum, on real
+production media (a ~9-minute source), not a synthetic fixture. This is
+direct runtime evidence of genuine overlap (not inferred from
+`ThreadPoolExecutor`'s mere existence, per this task's own instruction):
+had the three tracks run fully sequentially, wall time would equal the
+sum: it does not. This run's own diagnostics are aggregate-only by design
+(D-155's tail-safety choice) and do not expose each track's individual
+duration, so the precise theoretical ceiling (wall time approaching the
+single slowest track's own duration, most likely ASR on a ~9-minute
+source) cannot be confirmed to the decimal -- a per-track duration
+breakdown in the printed summary is a good, bounded D-157-or-later
+observability addition, not made here. **Verdict: REAL_PARALLELISM_PROVEN**
+(a real, measured, nontrivial time reduction on real media; not proof of
+the maximum possible reduction).
+
+### Hard dependency (Track D)
+
+`media_probe` is confirmed to remain OUTSIDE `run_parallel_perception`'s
+concurrent batch, exactly as D-155 designed and this task's own code
+review (unchanged this task) already established: `probe_media` runs
+synchronously for every source before the parallel batch, and its
+`has_audio` measurement is what gates ASR eligibility. This run's own
+successful completion of `parallel_perception` (`tracks_started: 3`, not
+4) is itself evidence Track D was never folded into the parallel count.
+Never characterized as a fourth parallel track.
+
+### Structured RAW Understanding Map V1 -- created from real evidence
+
+`raw_understanding_map_created: true`; `raw_understanding_map_status:
+COMPLETE_EXISTING_EVIDENCE`; `raw_understanding_span_count: 36` (one per
+real candidate take on the real Video00 source); `raw_understanding_
+event_count: 324` (real audio-silence + real local-performance events,
+unfiltered at the map's own top-level event fields); `raw_understanding_
+conflict_count: 0` (expected -- V1 never cross-validates two independent
+sources yet, per its own honest scope). `source_count: 1`, matching
+Video00's single source asset.
+
+### Source / timeline invariants
+
+`positioned_performance_evidence` (D-115, reused unchanged by the map):
+`candidate_count: 36`, `delivery_span_available_count: 36` (every real
+candidate had a measured word-derived delivery span), `positioned_event_
+count: 192`. All spans/events are reported in `source_relative_seconds`
+(D-155's `SOURCE_TIMELINE_ORIGIN`, unchanged) -- no new clock or timebase
+was introduced; this is a code-level guarantee unchanged since D-155
+(confirmed by structural test, not re-derived from this run's own output,
+since the printed diagnostics are aggregate-only and do not echo raw
+per-span timestamps). `boundary`'s own visual-trim rows (D-116, real,
+unchanged) show real source-relative timestamps (e.g. `event_start:
+213.351` / `delivery_start: 213.5` on `clip_8dee06bc79f0371e4152`) on the
+SAME timeline the map itself reuses -- one coherent source-time axis,
+consistent with the invariant.
+
+### Provenance truth
+
+Cannot be broken down by provenance tag from this run's own printed CI
+output (aggregate counts only: span/event/conflict counts and overall
+status -- no per-tag breakdown is printed by design, D-155's tail-safety
+choice). Honestly reported as NOT AVAILABLE from this run's CI-visible
+diagnostics, not fabricated. What IS confirmed real on this exact run:
+`performance_confirmation` (D-100, unchanged) reports `confirmed_wrong_
+take_count: 1` and `confirmed_retry_setup_count: 3` -- REAL occurrences,
+on REAL Video00 media, of exactly the two event kinds D-155's fix targets
+(previously silently dropped by D-115's own default `event_kinds` filter
+before ever reaching the per-span behavior-hypothesis deriver). No
+`SEMANTIC_PROVIDER` or `MULTIMODAL_FUSION` evidence is claimed beyond
+what D-155 itself ever produces (`MULTIMODAL_FUSION` only for the
+absence-of-evidence-derived `CLEAN_ATTEMPT`/`AUDIENCE_DELIVERY` labels;
+`SEMANTIC_PROVIDER` is never emitted by this module at all, per its own
+module docstring -- unchanged).
+
+### Behavior hypotheses
+
+Per-label counts (AUDIENCE_DELIVERY / PRE_TAKE_SETUP / FALSE_START /
+ABANDONED_ATTEMPT / CLEAN_ATTEMPT / POST_TAKE_RESET / RECORDING_PROCESS /
+BREAKING_CHARACTER) are **NOT AVAILABLE** from this run's CI-visible
+diagnostics -- the printed `raw_understanding_map` summary is aggregate-
+only (span/event/conflict counts + status), exactly as D-155 designed it
+for tail-safety, and full-map artifact download remains blocked by this
+session's egress policy (same Azure Blob Storage host restriction D-151
+already documented -- confirmed again this task: `curl` to the artifact's
+signed URL failed with `connect_rejected`). This gap is reported plainly,
+not smoothed over; a compact per-label-count CI summary (mirroring D-152's
+own pattern for the semantic-authority gate) is a well-scoped candidate
+for D-157 or later, not built here (would be a code change, out of this
+task's strict scope).
+
+### D-155 event-kind fix qualification
+
+The fix's own target kinds (`wrong_take`, `retry_setup`) are CONFIRMED
+PRESENT on real Video00 media this run (`confirmed_wrong_take_count: 1`,
+`confirmed_retry_setup_count: 3`, from `performance_confirmation`, which
+runs earlier in the same pipeline and merges these events into the same
+`whole_context` the map's builder reads). The `recording-process`/`false_
+start`/`breaking_character` families were not confirmed present or absent
+from this run's own output (not printed at that granularity). Since these
+4 confirmed events exist in `whole_context` by the time `raw_
+understanding_map`'s builder runs, and the map's own widened `_BEHAVIOR_
+RELEVANT_EVENT_KINDS` (D-155's fix) is the ONLY thing standing between
+those events and the per-span `ABANDONED_ATTEMPT` hypothesis (proven by
+52 offline unit tests, unchanged since D-155), the fix's mechanism is
+exercised by real data this run -- but the exact per-span label outcome
+is not independently re-derivable from this run's own CI-visible output
+alone (see Behavior Hypotheses above). **No editorial improvement is
+claimed** -- these are evidence-layer facts only; nothing downstream
+consumes them yet.
+
+### No final Attempt Relationship manufactured
+
+Confirmed by code (unchanged this task): `RawUnderstandingSpan` carries no
+`attempt_relation`/`proposition_relation` field at all, and `RETRY`/
+`CONTINUATION`/`CORRECTION`/`COMPLEMENTARY`/`PROPOSITION_IDENTITY`/
+`FAMILY_MEMBERSHIP` are never emitted by this module (`FORBIDDEN_
+RELATIONSHIP_LABELS`, structurally asserted by test). This run's own
+family/proposition decisions (D-145's 5-way vocabulary, D-146-D-153's
+gate) ran exactly as before, reading nothing from the new map (module-leaf
+no-import proof, unchanged since D-155).
+
+### No editorial authority changed
+
+- **Family formation / semantic authority (D-145-D-153):** UNCHANGED.
+  D-150/D-152 summary: `family_count: 5`, all 5 `AUTHORITATIVE`
+  (`semantic_authority_allowed_count: 5`), 0 `ABSTAIN_CONFLICT`, 0
+  `ABSTAIN_INCOMPLETE` -- the gate ran exactly as its own closed design
+  dictates.
+- **DeliveryScorer / BestTake (D-123):** UNCHANGED. D-123 Case B summary:
+  `family_count: 5`, `semantic_fast_path_family_count: 5`, `deliveryscore_
+  path_count: 0`, `deterministic_override_count: 0` -- ordinary,
+  unmodified operation.
+- **D-128** (multimodal fallback, Phase 1 shadow-only): UNCHANGED, still
+  shadow-only, not gating anything this run.
+- **Boundary (D-116):** UNCHANGED. Real visual-edge trims applied exactly
+  as designed (`total_visual_trim_seconds: 0.096`, 2 entry trims, 0 count
+  change -- `visual_stage_added/removed_count: 0`), reading nothing from
+  the new map.
+- **Pacing (D-142):** UNCHANGED -- no pacing-specific gate fired or
+  failed this run; no code path in the Dialogue/Pacing stage reads the new
+  map.
+- **Renderer:** UNCHANGED (out of this task's inspection scope; no render-
+  stage code touched by D-155/D-156).
+
+The map/perception evidence now exists upstream but is consumed by
+nothing downstream yet -- exactly the D-155/D-156 boundary.
+
+### Current Video00 commercial context (compact; not a re-audit)
+
+| Region | Status | Basis |
+|---|---|---|
+| Hook | CUTAI_PASS | `cancer_hook_preserved` |
+| Body/Symptoms | CUTAI_PASS | `hair_loss_preserved` (swelling/weight-gain/hair-loss chain) |
+| Pimples | CUTAI_PASS | `pimples_micro_1/2/3_present`, `pimples_bad_monolith_absent`, `pimples_later_winner_present`, `pimples_micro_order` all passed |
+| Sonography | CUTAI_GAP | content present (`sonography_good_take_part1/completion_present`, `sonography_bad_take_absent` all pass) but `sonography_good_before_diagnosis` (required order) FAILED -- pre-existing, D-154-classified separate ordering logic, unrelated to D-155 |
+| Diagnosis | CUTAI_PASS | `biopsy_nodule_preserved`, `papillary_diagnosis_preserved` |
+| Stomach | CUTAI_PASS | `gastritis_preserved` |
+| Conclusion | CUTAI_PASS | `family_context_preserved`, `cta_preserved` (one non-blocking alignment-diff `missing_segment` noted on a supporting conclusion sentence; not a checked-manifest failure) |
+| CTA | CUTAI_PASS | `cta_preserved` |
+
+Not a re-run of D-143's full audit -- this table is the existing 18-check
+manifest's own pass/fail result, read and mapped, nothing re-derived.
+
+### Pimples (downstream state; map evidence only, winner untouched)
+
+This run's pimples content resolved as **ONE clip, no multi-member family,
+no contest** (`clip_1cd7e3ae56921daa16e0`; D-119 compact summary status:
+`pimples_clips_present_but_no_multi_member_family_or_no_usable_
+realization_row`) -- a DIFFERENT topology from D-151/D-153's own
+multi-member, contested pimples family. This is D-144's already-
+documented run-to-run instability (ASR/segmentation boundary variance),
+not a regression: all 5 pimples-specific content checks still passed.
+Family topology: single-clip, no contest this run. Semantic authority
+state: not evaluated (not one of the 5 multi-member families the gate
+saw). DeliveryScorer/BestTake winner: the single clip itself, by
+construction (no alternative to score against). Cut.ai status: PASS (see
+table above). Raw Understanding Map evidence available for future Phase D
+consumption: this clip is 1 of the 36 spans in this run's map (ENTRY/
+DELIVERY/EXIT positioned evidence + whatever local behavior hypotheses its
+own overlapping events produce) -- the exact per-span label is NOT
+independently confirmable from this run's aggregate-only CI output (see
+Behavior Hypotheses above). The map was not used to change this or any
+other winner.
+
+### Sonography order status
+
+`sonography_good_before_diagnosis`: **FAIL** (`required_sequence_missing_
+or_reordered`). Pre-existing, unresolved, exactly as D-154 classified it
+(separate ordering logic, explicitly out of D-155/D-156 scope). Not
+solved here.
+
+### Parity metrics (this run; qualitative comparison only)
+
+Selection-plan (pre-render) Level-1: 20 regions / 15.44 s (0.092 of Cut.ai
+keep). Physical (FINAL MP4, the D-097.10 R14 headline) Level-1: 9 regions
+/ 6.61 s selection + 27 regions / 4.522 s boundary = 11.132 s combined
+physical Level-1, out of 151.087 s total physical keep. F1 vs Cut.ai:
+**0.9018**. F1 vs Human Gold: **0.8685**. No prior run in this session's
+own semantic-authority/Watch+Listen thread (D-146 through D-155) recorded
+these same physical-ladder numbers for direct diffing (that thread's own
+RAWs qualified the semantic-authority gate, not the physical ladder), so
+this is reported as this run's own measurement, not a delta -- and, per
+this task's own instruction, no causality is attributed to D-155 either
+way (D-155 introduced no editorial authority capable of moving these
+numbers).
+
+### No-behavior-drift check
+
+`selected_count`: 24 (vs. the frozen baseline's 23, `baseline_run_id
+33126865755`) -- this exact drift is a KNOWN, PRE-EXISTING, non-blocking
+count difference already carved out by D-032 in the underlying regression
+check itself (`"reason": "count_differs_not_treated_as_failure_see_
+D-032"`); the separate, stricter `validate_video00_selection_lock.py`
+gate does treat it as failing (`selection_locked: false`), which is why
+"Verify frozen Selection lock" and "Verify Human Gold regression QA" both
+show `conclusion: failure` at the GitHub Actions level -- the SAME two
+gates that also failed on this session's immediately preceding runs
+(`34255812598`, `34261221207`), before any D-155/D-156 code existed. No
+causal link to concurrency, completion order, shared mutable state,
+evidence ordering, or the duplicate-compute removal is evidenced: `parallel_
+perception`'s own deterministic name-keyed readback order is unchanged
+code (structurally guaranteed, unchanged since D-155), and the actual
+qa_pass=false root cause is the pre-existing sonography-ordering issue
+plus the pre-existing count-drift gate, neither of which D-155 touches.
+**Classification: no drift attributable to D-155.**
+
+### Real-audio / visual honesty
+
+Signal-level audio analysis (`audio_silence.py`, ffmpeg `silencedetect`):
+REAL, confirmed by this run's own real `audio_track_status: PASS` and
+real merged `audio_events`. Semantic/prosodic audio UNDERSTANDING: NOT
+IMPLEMENTED (unchanged) -- the V1 map is not "full listening." Local
+deterministic visual/performance perception (`local_performance.py`,
+OpenCV/MediaPipe): REAL, confirmed by real `visual_track_status: PASS`
+and the real D-116 visual-trim rows above. `OpenAIVisualProvider`: still
+NOT ACTIVE (`brain_runtime.py` hardcodes `visual_provider=None`,
+unmodified) -- no provider-backed visual understanding is claimed.
+
+### Watch+Listen implementation status
+
+Parallel Multimodal Perception: **IMPLEMENTED** (proven on real media this
+run). Structured RAW Understanding Map: **IMPLEMENTED** (proven created,
+real evidence, correct status, on real media this run). Unified
+Watch+Listen Multimodal Understanding/Fusion: **DESIGNED_NOT_IMPLEMENTED**
+-- the map is a foundation, not fusion; `conflict_flags` stays empty by
+design (no cross-source corroboration logic exists yet).
+
+### Phase-A real-media verdict
+
+**A. PHASE A REAL-MEDIA PROVEN.** All perception tracks ran successfully
+on real media; real, measured (not inferred) parallelism was demonstrated
+(13.6% wall-time reduction vs. naive sum); the map was populated with real
+evidence, correct source identity/timeline/status; no regression is
+attributable to D-155 (the two failing CI gates are the same pre-existing
+gates that failed on the immediately preceding, pre-D-155 runs). The one
+honest gap -- per-provenance-tag and per-behavior-label counts not being
+independently confirmable from this run's own CI-visible output -- is a
+tail-safety/observability limitation, not a functional failure, and does
+not change the verdict.
+
+### Exact next engine phase (NOT authorized here)
+
+D-157: UPSTREAM WATCH+LISTEN PHASE B -- fusion + behavior/attempt
+hypotheses, consolidating duplicate consumers, using the existing V1 map,
+still without final Proposition/Family authority. A smaller, optional
+companion item worth naming for a future task: a compact per-provenance-
+tag and per-behavior-label CI summary (mirroring D-152's own pattern)
+would close this task's own observability gap without touching any
+authority -- not built here, no code change in this task.
+
+**Scope confirmed:** ONE RAW dispatched, ONE RAW only. No code change. No
+Family Formation consumption. No BestTake consumption. No DeliveryScorer
+change. No Watch+Listen Phase B implementation. No provider call beyond
+the canonical existing engine's own real ASR/audio/visual analysis. No
+Boundary change. No Pacing change. No fallback activation. No iOS work.
+
+**HUMAN ACTION REQUIRED:** YES (condition A/F) -- whether to authorize
+D-157 Phase B, and whether/when a human reviews the actual rendered MP4
+(Watch+Listen Pass is still owed per D-095's quality-states doctrine; this
+task measured diagnostics only, never claims HUMAN WATCH+LISTEN PASS), are
+Product Owner decisions.
