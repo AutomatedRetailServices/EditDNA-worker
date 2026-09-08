@@ -16142,3 +16142,77 @@ to authorize scoping/designing the bounded multimodal fallback arbiter
 D-111 already named (the recommended next architecture-level candidate
 above) is the Product Owner's decision, not made here. No further D-123
 RAW or Video00 paid compute is requested or needed at this time.
+
+## D-127 -- Bounded multimodal fallback arbiter: forensic + design (post
+D-126, documentation/design only). Full document: `docs/CUTSELL_
+MULTIMODAL_FALLBACK_ARBITER_FORENSIC_D127.md`. **No engine behavior
+changed. No fallback implemented. No provider call made. No RAW.**
+
+D-126 proved D-123's disagreement-gated CASE B mechanism works correctly,
+but also exposed a shape D-123 is not designed to catch: its own pimples
+family (`tg_dfa8f59296237ae030`) where semantic label and DeliveryScorer
+AGREED, D-123 therefore correctly never engaged, yet the agreed winner's
+own D-122 CASE B evidence (9 events/0.6s) was WORSE than the non-selected
+meaning-sufficient alternative's (7 events/0.467s), and the Human Gold
+regression QA (`pimples_bad_monolith_absent`) still failed.
+
+**Key findings:** (1) DeliveryScorer, D-097 cleanliness, and D-122 CASE B
+evidence are NOT three independent votes -- they are three views of the
+SAME four `local_performance` event streams (confirmed via `MEDIASIGNALS_
+PROVENANCE`); only critical-coverage-dominance is genuinely independent of
+performance evidence. "Semantic + DeliveryScorer agree" is therefore
+necessarily weaker confirmation than it first appears. (2) Of 7 general
+trigger classes derived from the actual evidence architecture (never from
+pimples-specific logic), only **Class B** ("semantic == DeliveryScorer
+agree, but D-122 CASE B evidence materially favors a different meaning-
+sufficient finalist") is both general and fully evidenced today with zero
+new wiring -- D-126 is the one real, complete instance it is derived FROM.
+Classes A and G are already handled safely by existing WHEN-UNCERTAIN-KEEP
+ladder terminals; Classes C/D/E/F are deferred (unproven, or require new
+wiring, or are eval-only). (3) A real, proven multimodal (vision) pipeline
+already exists (`frame_sampling.py` + `visual_analysis.py`/`visual_openai.
+py`, real ffmpeg-extracted frames sent as base64 images to a vision model,
+currently for Watch+Listen) and is reusable for a future arbiter's visual
+input with no new infrastructure; genuine AUDIO perception (raw waveform
+to a provider) does NOT currently exist anywhere in this codebase and
+would be new integration work. (4) Recommended interface: a NEW, distinct
+`MultimodalBestTakeArbiter` protocol (request/response/gate-policy/safe-
+call, mirroring `semantic_idea_equivalence.py`'s proven shape exactly) --
+NOT an extension of `SemanticEquivalenceArbiter`, whose text-only-no-
+clip-identity contract is a deliberate safety property that must not be
+broken. (5) Authority contract: fallback output should be **advisory
+evidence consumed by the existing ladder, never a standalone terminal
+authority** (every existing BestTake authority in this codebase is
+already advisory-into-the-ladder, never a bare terminal decision-maker;
+a new bare-terminal mechanism would be the first of its kind and would
+require re-implementing every existing safety veto). (6) Fallback-vs-D-123
+order, fallback-vs-grouping (cannot repair a missing competitor set --
+D-124's own fragmentation proves this concretely), and fallback-vs-
+Boundary (ENTRY/EXIT stays Boundary's; fallback may only ADVISE
+`GOOD_TAKE_TRIM_ENTRY/EXIT`, never edit a timestamp) all confirmed from
+actual code, no correction needed to the directive's proposed doctrine.
+(7) Cross-run pimples forensic (D-113/D-116/D-118/D-120/D-124/D-126):
+only D-126 has the complete diagnostics needed to fully evaluate Class B's
+own condition -- earlier runs predate D-122/D-123/D-125 and are missing
+required fields; no attempt made to retroactively guess them. (8) Run-to-
+run winner instability is formalized as eval/calibration evidence ONLY,
+never a production-time trigger (a single run has no access to other
+runs' outcomes). (9) `UNCERTAIN` must remain a first-class abstention
+outcome; every failure mode degrades to whatever the structured engine
+already decided pre-fallback, never a worse or manufactured outcome.
+(10) The directive's 4-phase staged rollout (shadow -> offline comparison
+-> bounded Class-B-only activation -> evidence-gated expansion) is
+confirmed appropriate and is the recommendation, with Phase 1 scoped (not
+built) in Section 22 of the full document.
+
+**No threshold was invented anywhere in this document** -- every trigger
+condition is either already-structural (categorical/existence-based,
+reusing D-123's own strict-`>` comparator pattern) or explicitly named as
+requiring future calibration before use, never guessed.
+
+**HUMAN ACTION REQUIRED:** YES (condition A, product decision) -- whether
+to authorize Phase 1 (Section 22 of the full document: build the
+`MultimodalBestTakeArbiter` interface + Class B trigger as pure, unwired,
+shadow-only diagnostics, zero behavior change) is the Product Owner's
+next decision, not made here. No RAW, provider call, or infra change
+requested.
