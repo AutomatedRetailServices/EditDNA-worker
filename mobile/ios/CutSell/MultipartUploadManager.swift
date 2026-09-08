@@ -119,6 +119,12 @@ actor MultipartUploadManager {
                 }
                 for part in status.uploadedParts { completedParts[part.partNumber] = part.etag }
                 start = saved.start
+                // D-133: bounded, diagnostics-only resume-detection log --
+                // no change to the existing reconciliation logic above.
+                CutSellDiagnostics.log("upload_resumed", [
+                    "resumed_part_count": String(completedParts.count),
+                    "total_part_count": String(start.partCount),
+                ])
             } catch APIError.http(let code, _) where code == 404 {
                 await resumeStore.remove(uploadID: saved.start.uploadID)
                 start = try await createStart(

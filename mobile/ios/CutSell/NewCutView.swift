@@ -213,6 +213,18 @@ struct NewCutView: View {
                 if selected.count < maxMultiClipSources {
                     selected.append(clip)
                 }
+                // D-133: bounded, diagnostics-only import-metadata log --
+                // fire-and-forget, never delays the import loop.
+                Task {
+                    let snapshot = await MediaDiagnostics.capture(fileURL: imported.url)
+                    var fields: [String: String] = [
+                        "device_model": CutSellDiagnostics.deviceModel,
+                        "ios_version": CutSellDiagnostics.iosVersion,
+                        "import_origin": "photos_picker",
+                    ]
+                    fields.merge(snapshot?.logFields ?? [:]) { current, _ in current }
+                    CutSellDiagnostics.log("import_completed", fields)
+                }
             } catch {
                 failures += 1
             }
@@ -289,6 +301,13 @@ struct NewCutView: View {
             for (index, video) in uploadVideos.enumerated() {
                 statusText = "Uploading \(index + 1) of \(uploadVideos.count)…"
                 let base = Double(index) / Double(uploadVideos.count)
+                // D-133: bounded, diagnostics-only upload-timing log around
+                // the EXISTING multipart upload call -- no networking change.
+                let uploadStartedAt = Date()
+                CutSellDiagnostics.log("upload_started", [
+                    "source_order": String(index),
+                    "content_type": video.contentType,
+                ])
                 let result = try await MultipartUploadManager.shared.upload(
                     fileURL: video.url,
                     projectID: projectID,
@@ -297,6 +316,10 @@ struct NewCutView: View {
                 ) { partProgress in
                     Task { @MainActor in progress = base + partProgress / Double(uploadVideos.count) }
                 }
+                CutSellDiagnostics.log("upload_completed", [
+                    "source_order": String(index),
+                    "elapsed_s": String(format: "%.2f", Date().timeIntervalSince(uploadStartedAt)),
+                ])
                 sources.append(SourceInput(
                     originalName: video.url.lastPathComponent,
                     uri: result.sourceURI,
@@ -313,7 +336,7 @@ struct NewCutView: View {
                 let language_hint: String?
                 let audio_overlap: Bool
             }
-            let _: FlowBSubmitResponse = try await APIClient.shared.request(
+            let submitResponse: FlowBSubmitResponse = try await APIClient.shared.request(
                 "/v1/flow-b/jobs",
                 method: "POST",
                 body: Body(
@@ -324,11 +347,16 @@ struct NewCutView: View {
                     audio_overlap: audioOverlap
                 )
             )
+            // D-133: bounded diagnostics only -- the response was previously
+            // discarded (`let _:`); this now also logs the backend job id
+            // D-133 requires capturing. No request/behavior change.
+            CutSellDiagnostics.log("job_submitted", ["job_id": submitResponse.jobID])
             await PendingCutStore.shared.remove(projectID: projectID, deleteLocalFiles: true)
             progress = 1
             try await appState.refreshProjects()
             dismiss()
         } catch {
+            CutSellDiagnostics.log("cut_submit_failed", ["reason": String(describing: type(of: error))])
             if !pendingSaved {
                 for url in transientPreparedFiles { try? FileManager.default.removeItem(at: url) }
             }

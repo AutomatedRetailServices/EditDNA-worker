@@ -154,6 +154,7 @@ final class DraftPlaybackController: ObservableObject {
             guard insertedVideo, CMTimeGetSeconds(cursor) > 0 else {
                 player.replaceCurrentItem(with: nil)
                 message = "Preview video is temporarily unavailable."
+                CutSellDiagnostics.log("playback_failed", ["reason": "no_playable_clips"])
                 return
             }
 
@@ -166,9 +167,11 @@ final class DraftPlaybackController: ObservableObject {
             player.replaceCurrentItem(with: item)
             duration = max(0, CMTimeGetSeconds(cursor))
             isReady = true
+            CutSellDiagnostics.log("playback_ready", ["duration_s": String(format: "%.2f", duration)])
         } catch {
             player.replaceCurrentItem(with: nil)
             message = "Preview is temporarily unavailable. The draft is still safe."
+            CutSellDiagnostics.log("playback_failed", ["reason": String(describing: type(of: error))])
         }
     }
 

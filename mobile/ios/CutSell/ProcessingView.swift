@@ -7,6 +7,9 @@ struct ProcessingView: View {
     @State private var job: JobStatus?
     @State private var errorMessage: String?
     @State private var openDraft = false
+    // D-133: bounded, diagnostics-only processing-duration timer -- never
+    // read by product logic, only by the CutSellDiagnostics.log calls below.
+    @State private var pollingStartedAt = Date()
 
     init(project: Project) {
         self.project = project
@@ -41,7 +44,10 @@ struct ProcessingView: View {
 
             Spacer()
         }
-        .task { await pollLoop() }
+        .task {
+            pollingStartedAt = Date()
+            await pollLoop()
+        }
         .navigationDestination(isPresented: $openDraft) {
             DraftEditorView(project: current)
         }
@@ -94,10 +100,19 @@ struct ProcessingView: View {
                 let status: JobStatus = try await APIClient.shared.request("/v1/jobs/\(jobID)")
                 job = status
                 if status.state == "finished" || refreshed.state == "draft_ready" {
+                    // D-133: bounded, diagnostics-only completion log -- no
+                    // change to the existing state transition above.
+                    CutSellDiagnostics.log("processing_completed", [
+                        "job_id": jobID,
+                        "processing_duration_s": String(format: "%.1f", Date().timeIntervalSince(pollingStartedAt)),
+                    ])
                     try? await appState.refreshProjects()
                     openDraft = true
                 }
-                if status.state == "failed" { errorMessage = status.error ?? "Processing failed" }
+                if status.state == "failed" {
+                    CutSellDiagnostics.log("processing_failed", ["job_id": jobID])
+                    errorMessage = status.error ?? "Processing failed"
+                }
             } else if refreshed.state == "draft_ready" || refreshed.state == "finished" {
                 openDraft = true
             }

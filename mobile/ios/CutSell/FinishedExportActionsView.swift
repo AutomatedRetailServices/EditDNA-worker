@@ -73,8 +73,12 @@ struct FinishedExportActionsView: View {
             try? FileManager.default.removeItem(at: destination)
             try FileManager.default.moveItem(at: temporary, to: destination)
             localURL = destination
+            // D-133: bounded, diagnostics-only "result received" flag --
+            // never the actual (possibly signed) result URL string.
+            CutSellDiagnostics.log("result_received", ["received": "true"])
         } catch {
             errorMessage = error.localizedDescription
+            CutSellDiagnostics.log("result_received", ["received": "false"])
         }
     }
 
@@ -92,8 +96,10 @@ struct FinishedExportActionsView: View {
                 PHAssetChangeRequest.creationRequestForAssetFromVideo(atFileURL: url)
             }
             saved = true
+            CutSellDiagnostics.log("save_to_photos_completed", ["succeeded": "true"])
         } catch {
             errorMessage = error.localizedDescription
+            CutSellDiagnostics.log("save_to_photos_completed", ["succeeded": "false"])
         }
     }
 }

@@ -93,6 +93,23 @@ struct CameraCaptureView: View {
                             stopTimer()
                             switch result {
                             case .success(let url):
+                                // D-133: bounded, diagnostics-only capture-metadata
+                                // log -- fire-and-forget, never delays onCapture/
+                                // dismiss, never changes capture control flow.
+                                let side = camera.cameraPosition == .front ? "front" : "back"
+                                Task {
+                                    let snapshot = await MediaDiagnostics.capture(
+                                        fileURL: url,
+                                        mirroredHint: side == "front"
+                                    )
+                                    var fields: [String: String] = [
+                                        "device_model": CutSellDiagnostics.deviceModel,
+                                        "ios_version": CutSellDiagnostics.iosVersion,
+                                        "camera_side": side,
+                                    ]
+                                    fields.merge(snapshot?.logFields ?? [:]) { current, _ in current }
+                                    CutSellDiagnostics.log("capture_completed", fields)
+                                }
                                 onCapture(url)
                                 dismiss()
                             case .failure(let error):
