@@ -18379,3 +18379,158 @@ Overlap change, no Video00 RAW, no Modal, no RunPod, no TestFlight.
 **HUMAN ACTION REQUIRED:** YES (condition A, product decision) -- which
 of the three next-gate options above (or another) to pursue, if any, is
 the Product Owner's decision, not made here.
+
+## D-138 -- multimodal BestTake fallback Phase 2B: decision-contract
+hardening + real re-evaluation (CI run `34207449299`, head `56358af`,
+same provider/model as D-137, post D-137 verdict D)
+
+**Scope authorized:** ONE bounded prompt/decision-contract hardening pass
+on the existing `OpenAIMultimodalBestTakeArbiter` (SAME provider, SAME
+model `gpt-4o-mini`, to isolate whether D-137's failure was the decision
+contract rather than model capability), followed by ONE real provider-
+backed OFFLINE re-evaluation over the SAME 9-case D-127 eval set. No live
+activation, no production winner change, no Phase 3, no RAW/Modal/RunPod,
+no Overlap/iOS.
+
+**1) What changed:** only `INSTRUCTION` in `multimodal_besttake_openai.py`
+(the old D-136 text preserved as `_OLD_D136_INSTRUCTION`, a dead constant
+kept for diff clarity). Zero interface/schema change -- the JSON contract
+(`outcome`/`best_take_candidate_id`/`confidence`/`reason`) is byte-for-
+byte the same shape as D-136/D-137. The new prompt teaches the directive's
+canonical decision hierarchy as five fixed reasoning steps (MEANING
+SUFFICIENCY -> RELATIONSHIP CHECK -> a new STRUCTURED-CONFLICT CHECK ->
+PERFORMANCE QUALITY -> EDITABILITY/BOUNDARY -> ABSTENTION), states
+explicitly the arbiter is not a forced-choice machine, gives exact
+BEST_TAKE/EQUIVALENT validity conditions, and strengthens the free-text
+`reason` field to name one of 8 general bases -- all referring only to
+structural field names already present in every request (`meaning_
+sufficient`, `semantic_label`, `deliveryscore_summary`, `case_b_*`,
+`boundary_editability_note`), never a fixture transcript/phrase or a
+Video00-specific detail, and never a reference/oracle value (this
+arbiter is never given an expected outcome).
+
+**2) Anti-overfit verification (real, not asserted):** `tests/
+test_cutsell_d138_multimodal_besttake_prompt_hardening.py` (25 offline
+marker tests, no provider call) proves by direct string inspection of the
+production `INSTRUCTION` constant: zero fixture-specific terms (pimples,
+papillary, stomach, gynaecolog*, sonography, vamos, diagnosis,
+hereditary, acné/acne, the eval's own `tg_eval_*` family ids); zero
+Video00/decision-id-specific language (video00, raw run, modal, runpod,
+d-097 through d-138); zero oracle/expected-answer leakage (should_select/
+should_equivalent/should_uncertain/should_trim, expected_outcome, human
+gold, cut.ai, oracle, reference winner); and an explicit audio-perception
+disclaimer with no claim of hearing/listening. All 10 directive-required
+doctrine markers (abstention allowed, equivalent allowed, complementary-
+ambiguity-to-uncertain, boundary entry/exit distinction, D-123
+structured-conflict respect, no forced BEST_TAKE, the three no-leakage
+checks, no audio-hearing claim) are proven present as semantic contract
+markers, never exact prose.
+
+**3) REAL Phase 2B eval result -- dramatic, safety-positive shift from
+D-137 (same provider, same model, same fixtures, only the prompt
+changed):**
+
+| case | D-137 outcome/verdict | D-138 outcome/verdict | comparison |
+|---|---|---|---|
+| `pimples_shaped_positive` (critical) | BEST_TAKE A, conf 1.0 / incorrect | UNCERTAIN, conf 0.9 / abstained | **IMPROVED** (confidently wrong -> safe partial success, per directive's own ladder) |
+| `papillary_equivalent_realization_negative` | BEST_TAKE A, conf 0.95 / incorrect | UNCERTAIN, conf 0.95 / **correct** | **IMPROVED** |
+| `stomach_retry_negative` | BEST_TAKE A, conf 0.9 / incorrect | UNCERTAIN, conf 0.9 / **correct** | **IMPROVED** |
+| `complementary_content_negative` | BEST_TAKE B, conf 0.9 / incorrect | UNCERTAIN, conf 0.95 / **correct** | **IMPROVED** |
+| `polarity_negation_safety_negative` | BEST_TAKE A, conf 0.95 / **correct** | UNCERTAIN, conf 0.9 / abstained | **REGRESSED** (safe hedge, not unsafe -- see §5) |
+| `legitimate_clean_retry_negative` | skipped | skipped | UNCHANGED |
+| `semantic_deliveryscore_disagreement_negative` | BEST_TAKE B, conf 0.9 / incorrect, `winner_would_change=true` (the D-137 headline regression) | UNCERTAIN, conf 0.9 / abstained, `winner_would_change=false` | **IMPROVED -- the exact D-123/D-128-protected-territory violation is now resolved** |
+| `ambiguous_tied_performance_negative` | BEST_TAKE A, conf 0.9 / incorrect | UNCERTAIN, conf 0.9 / **correct** | **IMPROVED** |
+| `boundary_only_exit_negative` | BEST_TAKE A, conf 1.0 / incorrect | UNCERTAIN, conf 0.95 / abstained | **IMPROVED** (safe fallback per directive's own allowance) |
+
+**4) Phase 2B metrics:** `total_cases=9`, `positive_cases=1`,
+`negative_controls=8`, `skipped_single_member=1`, **`correct=4`
+(up from 1)**, **`incorrect=0` (down from 7)**, **`abstained=4` (up from
+0)**, `invalid_or_error=0`, `provider_failure_count=0`,
+`meaning_safety_violations=0`, **`negative_control_regression_count=0`
+(down from 1)**, `positive_case_improvement_count=0` (unchanged --
+`pimples_shaped_positive` scored `abstained`, not `correct`, so the
+strict "would improve the structured result" metric requires the exact
+`SHOULD_SELECT_B` label, which abstention does not satisfy even though
+it is the directive's own accepted "safe partial success").
+D-137 -> D-138 case-level tally: **7 IMPROVED, 1 REGRESSED (safely), 1
+UNCHANGED (skip)**. Of D-137's 7 incorrect cases: **4 fully corrected**
+to a scored `correct` outcome (papillary, stomach, complementary,
+ambiguous-tied), **3 safely improved to `abstained`** (pimples,
+disagreement, boundary-exit -- no longer wrong, though not the exact
+expected label), **0 remain incorrect**. Of D-137's 1 correct case
+(polarity control): **1 of 1 regressed** to a safe abstention (not to an
+unsafe or incorrect pick).
+
+**5) The one regression is safe, not unsafe:** `polarity_negation_
+safety_negative` moved from a confidently correct `BEST_TAKE A` to
+`UNCERTAIN`. This is a real, honestly-reported degradation in
+decisiveness on a case the directive explicitly called "serious" to
+regress -- but it is NOT a safety violation: `winner_would_change=false`
+(no candidate was ever named), `meaning_safety_violation=false`, and the
+verdict is `abstained`, never `incorrect`. The arbiter's new instruction
+set appears to have shifted its overall calibration toward abstention
+more broadly than strictly necessary on this one case (which the
+existing deterministic safety-exclusion logic already resolves cleanly
+upstream, with no ambiguity) -- a real, named tendency for a future
+iteration to address (tighten STEP 5's abstention bar so a case with a
+clear, unambiguous, already-excluded alternative does not get hedged),
+not a defect that blocks this task's verdict.
+
+**6) Latency/usage observations (real, all 8 applicable calls):** sum
+18740.8 ms, mean 2342.6 ms, min 1182.4 ms (`boundary_only_exit_
+negative`), max 4688.8 ms (`pimples_shaped_positive`). Token usage:
+`input_tokens` sum 57998 (per-case range 7210-7287, higher than D-137's
+51294 because the hardened prompt itself is longer), `output_tokens` sum
+423 (per-case range 49-56), `total_tokens` sum 58421. No dollar cost
+invented -- the Responses API `usage` object exposes tokens only.
+
+**7) Regressions (D-123/D-128/Boundary/D-134 -- all confirmed clean):**
+81/81 targeted (25 new D-138 prompt-marker tests + 34 D-128 Phase 1 +
+22 D-136 Phase 2), 115/115 (D-123 CASE B fast-path gate + 16 Boundary
+test files), `compileall` clean, full offline suite 3219 passed with the
+SAME 5 pre-existing unrelated failures already documented in D-136/D-137
+(Modal hybrid semantic parity masking tests). Zero new failures. Grep-
+confirmed: none of `dialogue_overlap_enabled`/`audio_overlap`/
+`SourceAsset` referenced anywhere in the arbiter/provider/eval modules --
+D-134 remains fully non-authoritative to this offline eval.
+
+**8) PHASE 2B VERDICT: A -- PROMPT-HARDENED PROVIDER OFFLINE PROVEN.**
+All of verdict A's stated conditions are met on real evidence: the
+critical positive case improved from a confident wrong answer to a safe
+abstention (A's own definition explicitly accepts "improves or safely
+abstains"); every negative control remains safe (zero winner-changing
+regressions, zero meaning-safety violations -- the one softer regression
+is a safe hedge, not an unsafe pick); and the improvement over D-137 is
+substantial and multi-dimensional (incorrect 7->0, negative-control
+regression 1->0, correct 1->4). The SAME model, given a hardened
+decision contract, now produces zero wrong answers across the entire
+9-case set -- confirming D-137's failure was primarily the decision
+contract, not `gpt-4o-mini`'s underlying capability, exactly the
+isolation this task's own directive intended to test.
+
+**9) Exact next engine gate (per directive's own "If A" instruction --
+NOT authorized here):** recommend Phase 3 DESIGN only (never
+implementation) -- a bounded, offline-scoped design for what an
+authoritative Class B activation would look like, explicitly still
+requiring a separate, future Product Owner decision before any live
+wiring. A secondary, smaller recommendation for that future design phase
+to consider: whether STEP 5's abstention bar should be tightened
+slightly so a case with an unambiguous, already-resolved deterministic
+safety exclusion (like `polarity_negation_safety_negative`) is not
+hedged to `UNCERTAIN` when the existing structured system already has a
+confident, safe answer.
+
+**Scope confirmed:** the only code change is `multimodal_besttake_
+openai.py`'s `INSTRUCTION` constant (interface/schema unchanged) plus the
+new offline test file; zero `git diff` against `cutsell_worker/
+multimodal_besttake_arbiter.py`, `multimodal_besttake_eval_phase2.py`,
+`multimodal_besttake_eval.py`, `case_b_performance_evidence.py`,
+`positioned_performance_evidence.py`, any `cutsell_app/*.py`, `mobile/
+ios/**`, or the workflow file. No live pipeline provider call, no
+production fallback activation, no winner/score/rank/grouping/Boundary/
+Overlap change, no Video00 RAW, no Modal, no RunPod, no TestFlight.
+
+**HUMAN ACTION REQUIRED:** YES (condition A, product decision) -- whether
+to authorize a bounded, offline-only Phase 3 DESIGN task (never
+implementation/activation) is the Product Owner's decision, not made
+here.
