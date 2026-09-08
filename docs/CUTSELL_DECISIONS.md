@@ -17003,3 +17003,337 @@ ProjectsView" log marker, rather than only "process didn't crash"), or
 (b) beginning the real-device QA track named in D-129/D-130 (out of
 this task's own scope to start automatically). No RAW, provider call, or
 infra change requested by this task.
+
+## D-133 -- iOS real-device ingestion QA design: physical-iPhone validation
+plan + bounded diagnostics-only instrumentation (post D-132). **NO
+TESTFLIGHT. NO PRODUCT FEATURE. NO ENGINE CHANGE. NO RAW/PROVIDER RUN.**
+DIAGNOSTICS CODE = BUILT, COMMITTED, PUSHED, CI-VERIFIED (compile +
+simulator launch). REAL-DEVICE QA ITSELF = NOT YET RUN (no physical
+iPhone or macOS/Xcode host exists in this session).
+
+**What this task built:** one new file, `mobile/ios/CutSell/
+CutSellDiagnostics.swift` (`CutSellDiagnostics.log`/`.deviceModel`/
+`.iosVersion` + `MediaDiagnostics.capture`/`MediaDiagnosticsSnapshot`
+using `AVURLAsset`/`CMFormatDescriptionGetMediaSubType`/
+`CMAudioFormatDescriptionGetStreamBasicDescription`), and six additive,
+non-behavior-changing log call sites in existing files: `CameraCaptureView
+.swift` (`capture_completed`), `NewCutView.swift` (`import_completed`,
+`upload_started`/`upload_completed`, `job_submitted`, `cut_submit_failed`),
+`MultipartUploadManager.swift` (`upload_resumed`), `ProcessingView.swift`
+(`processing_completed`, `processing_failed`), `DraftPlaybackView.swift`
+(`playback_ready`, `playback_failed` x2), `FinishedExportActionsView.swift`
+(`result_received` x2, `save_to_photos_completed` x2). Every call is
+fire-and-forget or wraps an existing call site with no control-flow
+change; no networking, camera, upload, editor, or Overlap logic was
+touched. Media contents are never logged, only metadata fields (codec,
+container, duration, resolution, fps, orientation degrees, mirrored hint,
+file size, audio-track presence, audio sample rate, device model, iOS
+version, timing/ids) -- exactly the field list this task's directive
+required, and the (possibly signed) result URL string is deliberately
+never logged, only a boolean `received` flag.
+
+**Real CI verification (not simulator-launch-inferred, not claimed
+without evidence):** dispatched the same `cutsell-ios-ci.yml` workflow
+D-131/D-132 already proved (`workflow_dispatch`), run `34180362181`,
+head `b49c3e3` -- **SUCCESS, every step**, `checkout` -> `Install
+XcodeGen` -> `Generate Xcode project` -> **`Build CutSell for iOS
+Simulator`: `▸ Build Succeeded`** (the new `CutSellDiagnostics.swift`
+and its six call-site edits compiled with zero new errors -- no
+`error:` string anywhere in the job's log) -> `Discover and boot an iOS
+Simulator` (iPhone 16e, UDID `A3044FA3-EBC3-4291-A153-352B9541A61A`,
+iOS 26.2, same deterministic discovery as D-132) -> `Install and launch
+CutSell in Simulator`: bundle id read from the built `Info.plist` as
+`ai.cutsell.app`, **`xcrun simctl launch` returned `ai.cutsell.app:
+14790` -- PID 14790** -- a fresh, different PID from D-132's 4770,
+confirming a genuine new launch, not a cached/stale result -- the job's
+own `simctl spawn log show` output shows the same clean, unbroken UIKit/
+SwiftUI startup lifecycle pattern already proven in D-132 (`libMobile
+Gestalt`, `cfprefsd` XPC connection, `runningboard` handshake, background
+-task assertion, deactivation-reason transitions) with **zero fatal
+exception, zero crash, zero "Crash report(s) found" line** -> `Capture
+simulator screenshot` ran to `success` (gated on `process_alive ==
+'yes'`, the same indirect-but-conclusive proof method D-132 used) ->
+screenshot uploaded -> `Shut down iOS Simulator` completed -> `Notify
+Claude Routine` completed. **CONCLUSION: `success`, all 13 steps.** This
+is real evidence that the diagnostics code compiles cleanly under the
+same toolchain/Xcode version D-131/D-132 already proved, and that the
+app shell still launches and runs without crashing with the new
+instrumentation wired in -- it is NOT camera/microphone/Photos/upload/
+backend proof, and this entry does not claim otherwise.
+
+**1) Real-device QA plan -- 12-step manual flow (as required):**
+1. Install/run the built app on a physical iPhone (development-signed).
+2. Grant Camera + Microphone + Photo Library permissions when prompted.
+3. Record a front-camera clip via `CameraCaptureView`.
+4. Record a back-camera clip via `CameraCaptureView`.
+5. Import one clip via the Photos picker (`NewCutView`'s `PhotosPicker`
+   path).
+6. Inspect the on-device `CutSellDiagnostics`/`MediaDiagnostics` log
+   output (Console.app or `xcrun simctl`/device log streaming) for each
+   captured/imported clip's metadata fields.
+7. Upload one selected RAW clip (`MultipartUploadManager`, existing
+   presigned multipart path) -- **STOP HERE per the backend paid-run
+   gate below unless separately authorized to continue past upload.**
+8. Observe upload progress in the existing `NewCutView` progress UI.
+9. Confirm a real backend job id is received (`job_submitted` log, if
+   step 7 is authorized to continue).
+10. Receive the completed render (`ProcessingView` polling to
+    `draft_ready`/`finished`).
+11. Play the result on-device (`DraftPlaybackView`).
+12. Save to Photos and/or Share (`FinishedExportActionsView`).
+
+**2) Device/signing prerequisites (confirmed unchanged from D-130):**
+no `.entitlements` file exists anywhere under `mobile/ios/`; `project.yml`
+sets only `bundleIdPrefix: ai.cutsell` -- no `DEVELOPMENT_TEAM`, no
+provisioning profile, no code-signing identity configured anywhere in the
+repo. **Exact blocker:** installing on a physical iPhone requires an
+Apple Developer Team ID and a development provisioning profile, neither
+of which exists in this repo or session. Per this task's own scope, only
+a minimal development-signing configuration may be *proposed*, never
+performed: add `DEVELOPMENT_TEAM: <team id>` and
+`CODE_SIGN_STYLE: Automatic` to the `Debug`/simulator-adjacent config
+block in `project.yml`, supplied with a real Apple Developer Team ID by
+the Product Owner (or whoever holds the Apple Developer account) at the
+time of the real-device test -- not proposed as a code change here, since
+no team ID exists to put in it.
+
+**3) Camera checklist (front/back, permission, record, no crash):**
+| # | Check | Pass criteria |
+|---|---|---|
+| C1 | Camera permission prompt appears | `NSCameraUsageDescription` present (confirmed, D-130); OS prompt shown on first use |
+| C2 | Back camera preview renders | `CameraPreview`/`AVCaptureSession` live feed visible |
+| C3 | Front camera preview renders | `camera.flipCamera()` succeeds, preview updates |
+| C4 | Record start/stop (back) | file written, `onCapture(url)` fires, `capture_completed` logged with `camera_side=back` |
+| C5 | Record start/stop (front) | same, `camera_side=front`, `mirrored_hint=true` passed into `MediaDiagnostics.capture` |
+| C6 | Saved file exists and is playable | non-zero `file_size_bytes`, `duration_s` > 0 in the logged snapshot |
+| C7 | Vertical orientation preserved | `orientation_deg` logged matches the physical portrait recording (expect 90 or 270 depending on device rotation at record time) |
+| C8 | No crash across camera flip / record / stop | app remains foregrounded, no `cut_submit_failed`-class crash signal |
+
+**4) Microphone checklist:**
+| # | Check | Pass criteria |
+|---|---|---|
+| M1 | Microphone permission prompt appears | `NSMicrophoneUsageDescription` present (confirmed, D-130) |
+| M2 | Audio track present in recorded clip | `has_audio_track=true` in `capture_completed` log |
+| M3 | Audio sample rate captured | `audio_sample_rate` field populated (mechanically available via `CMAudioFormatDescriptionGetStreamBasicDescription`, confirmed working in this task's build) |
+
+**5) Photo import checklist:**
+| # | Check | Pass criteria |
+|---|---|---|
+| P1 | Photos permission (`NSPhotoLibraryUsageDescription`) prompt appears | confirmed present, D-130 |
+| P2 | `PhotosPicker` opens and lists videos | existing `NewCutView` picker UI |
+| P3 | Selected video imports and copies locally | `imported.url` resolves, `import_completed` logs `import_origin=photos_picker` |
+| P4 | Orientation preserved through import | `orientation_deg` in the `import_completed` log matches the original clip's visual orientation |
+| P5 | Metadata readable post-import | full `MediaDiagnosticsSnapshot` populated (codec/container/duration/resolution/fps/audio) |
+| P6 | Imported file accepted by the upload path | `upload_started`/`upload_completed` logged for the imported source with no `UploadError` |
+
+**6) Metadata fields available (mechanically confirmed via
+`MediaDiagnostics.capture`, real AVFoundation/CoreMedia calls, proven to
+compile and run in this task's CI dispatch):** codec (fourCC from
+`CMFormatDescriptionGetMediaSubType`), container (file extension),
+duration (`AVURLAsset.load(.duration)`), width/height (natural size
+rotated by `preferredTransform`), fps (`nominalFrameRate`), orientation
+degrees (quadrant-mapped from `preferredTransform`), file size
+(`FileManager` attributes), audio-track presence, audio sample rate
+(`CMAudioFormatDescriptionGetStreamBasicDescription`), device model
+(`utsname()` machine identifier), iOS version (`UIDevice.systemVersion`).
+
+**7) Metadata gaps (honest, not silently filled):** there is no
+API-measured "was this specific capture mirrored" fact -- only a
+call-site `mirroredHint` (true when `camera_side == front`, an
+assumption, not a measurement) is threaded through; true VFR
+(variable-frame-rate) detection is not implemented (`nominalFrameRate`
+reports the *nominal* rate only, not a real inter-frame delta
+histogram); no per-frame drop/stutter detection exists.
+
+**8) Diagnostics added:** the six call sites in section "What this task
+built" above; full event/field list already detailed there and in the
+compaction summary preceding this entry -- not restated a third time
+here to avoid drift between the two copies.
+
+**9) Orientation test plan (high priority, per-clip):** for each of the
+four capture/import sources (back camera, front camera, Photos-imported
+portrait clip, Photos-imported landscape clip if available), record:
+camera side (or `photos_picker`), `naturalSize` (pre-transform),
+`preferredTransform` (raw `CGAffineTransform` components), the derived
+`orientation_deg` this task's quadrant-mapping produces, and the actual
+on-screen display orientation as a human observes it during step 6 of
+the manual flow. **Pass:** all four agree with no manual correction
+needed downstream. **Fail:** `orientation_deg` disagrees with the human-
+observed display orientation for any source -- this would indicate the
+quadrant-mapping in `CutSellDiagnostics.swift` needs a case the current
+four (0/90/180/270 exact matches) do not cover (e.g. a non-exact
+transform from a device-specific capture pipeline), which is a
+diagnostics-code bug to fix within this task's own bounded scope, not an
+engine or product change.
+
+**10) Mirroring test plan:** record one front-camera clip, one back-
+camera clip. **Pass:** the front clip's `mirrored_hint=true`/back clip's
+`mirrored_hint` absent match what a human sees on played-back review (a
+front-camera clip mirrored during preview should NOT still be mirrored
+in the saved file, per standard `AVCaptureMovieFileOutput` behavior --
+verify this holds, since `mirroredHint` is a passed-in assumption, not a
+measured fact, per the gap noted in section 7).
+
+**11) Codec/FPS/VFR readiness (observe-only, per directive -- capture
+format was NOT modified anywhere in this task):** the real device's
+natively-produced `codec`/`fps` will be logged via `capture_completed`/
+`import_completed` with zero forced encoder settings anywhere in
+`CameraController.swift` or `VideoPreparation.swift` (neither file was
+touched by this task). **Pass:** the logged codec/fps values are
+whatever the physical iPhone's camera pipeline naturally produces (e.g.
+HEVC at the device's default frame rate) and the backend/renderer
+already handles that combination (no product claim made here about
+backend codec support -- that is the D-097.x engine's own concern, out
+of this task's scope).
+
+**12) Upload test plan (existing multipart/background path, no
+networking redesign):** presign (`/v1/uploads/multipart/start` +
+per-part `/presign`) -> part upload via `BackgroundPartUploader`'s real
+`URLSessionConfiguration.background(withIdentifier:)` session -> ETag
+capture per part -> `/complete` -> `MultipartCompleteResponse`. **Pass
+criteria:** `upload_started`/`upload_completed` logged per source with a
+plausible `elapsed_s`; no `UploadError.missingETag`/`.incompleteUpload`;
+resulting `sourceURI` accepted by the subsequent `/v1/flow-b/jobs`
+request body.
+
+**13) Background upload test plan:** background the app (home button/
+app-switch) mid-upload of a large clip; **pass** if `BackgroundPart
+Uploader`'s existing `URLSessionTaskDelegate`/`acceptBackgroundEvents
+Completion` wiring (`CutSellApp.swift`'s `handleEventsForBackgroundURL
+Session`, unchanged by this task) resumes the upload and it completes
+without the user having to reopen the app; **or**, on relaunch after the
+OS suspended/terminated the app, `upload_resumed` logs a non-zero
+`resumed_part_count` less than `total_part_count` and the remaining
+parts complete via `UploadResumeStore`'s existing reconciliation.
+
+**14) Job status test plan:** after `job_submitted` logs a real
+`job_id`, `ProcessingView`'s existing 2-second poll loop against
+`/v1/jobs/{jobID}` should progress through the real backend's state
+machine; **pass** when `processing_completed` logs a plausible
+`processing_duration_s` and `openDraft` fires; **fail** if `processing_
+failed` logs instead, in which case the backend's own `status.error`
+string (already surfaced to `errorMessage`, unchanged) is the next
+diagnostic input -- an engine-side investigation, out of this task's own
+scope to perform.
+
+**15) Result playback test plan:** `DraftPlaybackView`'s existing
+`AVMutableComposition`-based non-destructive rebuild; **pass** when
+`playback_ready` logs a `duration_s` matching the expected edit length
+and `VideoPlayer` renders/plays without stall; **fail** signals are
+already distinguished by this task's own added logging into `playback_
+failed` reasons (`no_playable_clips` vs. a thrown-error type name).
+
+**16) Save/share test plan:** `FinishedExportActionsView`'s existing
+download -> `ShareLink`/`saveToPhotos` flow; **pass** when `result_
+received` logs `true` and either `save_to_photos_completed` logs `true`
+(Photos permission granted, `PHAssetChangeRequest` succeeds) or the
+`ShareLink` sheet presents correctly for the manual share path.
+
+**17) Security checks:** no provider secrets (Modal/RunPod/Gemini keys)
+exist anywhere in `mobile/ios/` (confirmed by direct grep in this task,
+consistent with D-130); backend auth is a real `Authorization: Bearer
+<token>` header built from the Keychain-stored `CutSellSession.access
+Token` (`APIClient.swift`); no `NSAllowsArbitraryLoads`/ATS exception is
+configured anywhere in `project.yml` -- the only `http://` reference in
+the repo is the local-dev default `http://127.0.0.1:8000` (ATS's
+loopback exemption applies; a real device pointed at a real backend
+requires `CUTSELL_API_BASE_URL` to be overridden to an `https://` host,
+a build-config value, not a code change); `KeychainStore.swift` uses
+`kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly`, which is the correct
+accessibility class for a background-upload-capable session token that
+must survive app relaunch across a device lock/unlock cycle without
+iCloud Keychain syncing it off-device. No auth redesign performed or
+proposed.
+
+**18) Temp file/cleanup checks (unchanged, not broadened):** per-part
+upload temp files are removed immediately after each part completes
+(`defer { try? FileManager.default.removeItem(at: partFile) }` in
+`MultipartUploadManager.uploadPart`); local originals are deleted on a
+successful submit via `PendingCutStore.shared.remove(projectID:,
+deleteLocalFiles: true)`; this task added zero new temp-file writes and
+zero changes to any cleanup path.
+
+**19) THE BACKEND PAID-RUN GATE (the exact stop point this task's
+directive requires):** `NewCutView.submit()` (`mobile/ios/CutSell/
+NewCutView.swift:240-366`) runs prepare -> create-project -> multipart-
+upload-to-completion -> **immediately, inside the same `do` block, with
+no pause point, UI seam, or user confirmation step in between** -- a
+`POST /v1/flow-b/jobs` that enqueues a real `cutsell_worker` processing
+job on success. There is no "prepare-only, don't submit" toggle
+anywhere in the current app. **Consequence:** any real-device test that
+reaches manual-flow step 7 (upload one RAW) and lets the existing UI
+flow continue past the upload's own completion will, with today's code,
+necessarily also trigger a real, paid backend processing job -- this
+task stops here and does not perform that dispatch itself, per the
+directive's explicit instruction. **Two options for the Product Owner,
+recorded, not decided by this task:** (a) separately authorize accepting
+ONE such real paid processing job as part of the real-device test,
+following the same "one RAW" precedent used throughout this whole
+engagement's engine-side canary runs; or (b) authorize a separate,
+later, bounded code change adding a genuine "prepare-only, don't submit"
+test toggle to `NewCutView` -- explicitly NOT implemented by this task,
+since building new test-only product surface is itself outside D-133's
+own authorized scope (documentation/diagnostics/QA-planning only).
+
+**20) Real-device QA matrix (status honestly reflects what this session
+can and cannot prove without a physical iPhone or a macOS/Xcode host):**
+| Area | Item | Status | Evidence |
+|---|---|---|---|
+| Build | Diagnostics code compiles | PASS | CI run 34180362181, `Build CutSell for iOS Simulator` step succeeded, zero new errors |
+| Runtime shell | App launches, no immediate crash, with diagnostics wired in | PASS (simulator-only) | CI run 34180362181, PID 14790, clean lifecycle log, no crash report |
+| Camera (C1-C8) | All items | NOT_RUN | requires physical iPhone; simulator camera is synthetic/unavailable for this class of test |
+| Microphone (M1-M3) | All items | NOT_RUN | requires physical iPhone |
+| Photo import (P1-P6) | All items | NOT_RUN | requires physical iPhone (or could partially run on simulator via a seeded Photos library, but not yet attempted -- out of this task's own scope to run) |
+| Orientation test plan | All 4 sources | NOT_RUN | requires physical camera + Photos-imported real clips |
+| Mirroring test plan | Front/back comparison | NOT_RUN | requires physical front camera |
+| Codec/FPS/VFR | Observe real device output | NOT_RUN | requires physical camera |
+| Upload test plan | Presign/part/complete | BLOCKED | requires a real backend endpoint reachable from a physical device and, per item 19, crosses into the paid-run gate |
+| Background upload | Resume across suspend | NOT_RUN | requires physical device + real backend |
+| Job status | Real backend poll | BLOCKED | same gate as Upload |
+| Result playback | Real rendered MP4 | BLOCKED | requires a real completed job (same gate) |
+| Save/share | Photos save / ShareLink | NOT_RUN | requires a real local result file (same gate, downstream) |
+| Security checks | Static review only | PASS (static) | no secrets found; Keychain class correct; no ATS exception configured -- confirmed by direct repo inspection, not a live pen-test |
+| Signing prerequisite | Team ID / provisioning profile | BLOCKED | no Apple Developer Team ID exists in this repo or session (item 2) |
+
+**21) Confirmations required by this task's directive:**
+- **NO PRODUCT FEATURE** added -- every change is a logging call around
+  an existing control-flow path; no new UI, no new user-facing behavior.
+- **NO OVERLAP WORK** -- `audioOverlap`/`audio_overlap`/
+  `dialogue_overlap_enabled` were not read, touched, or referenced
+  anywhere in this task's diff (confirmed: the `audio_overlap:
+  audioOverlap` line in `NewCutView.swift`'s `Body` struct is
+  byte-for-byte unchanged).
+- **NO ENGINE/RAW/PROVIDER WORK** -- zero changes to `cutsell_worker/*`,
+  `BestTake`/fallback/Boundary/grouping/renderer code, or any Modal/
+  RunPod/provider call; the one CI dispatch performed was the same
+  zero-cost `macos-latest` GitHub-hosted-runner workflow D-131/D-132
+  already used, not a paid GPU/provider run.
+
+**Scope confirmed:** `git diff --stat` across this task's one commit
+(`b49c3e3`) shows exactly 7 files changed -- 1 new (`CutSellDiagnostics
+.swift`) + 6 modified (`CameraCaptureView.swift`, `NewCutView.swift`,
+`MultipartUploadManager.swift`, `ProcessingView.swift`, `DraftPlayback
+View.swift`, `FinishedExportActionsView.swift`) -- no `cutsell_worker/*
+.py`, no backend route, no `.entitlements`/signing file, no `project.yml`
+change.
+
+**Tests:** no new iOS test target or test files added (none authorized;
+still none exist anywhere under `mobile/`, unchanged from D-130).
+
+**HUMAN ACTION REQUIRED: YES** -- **exact next physical-device action
+(recommended, not authorized):** the Product Owner (or whoever holds an
+Apple Developer account) supplies a development Team ID so `project.yml`
+can be given minimal `DEVELOPMENT_TEAM`/`CODE_SIGN_STYLE: Automatic`
+values, at which point a physical iPhone can be connected to a Mac with
+Xcode and the app installed via `xcodebuild -destination 'platform=iOS,
+id=<device udid>'` (no TestFlight); the Product Owner also decides, per
+item 19, which of options (a)/(b) resolves the backend paid-run gate
+before manual-flow step 7 proceeds past upload. Both are escalation
+condition **A (PRODUCT DECISION REQUIRED)**-shaped and **C (PAID COMPUTE
+OUTSIDE AUTHORIZATION)**-shaped respectively, consistent with every
+prior iOS task's Product-Owner-authorization stopping point in this
+sequence.
+
+**STOPPING HERE per this task's own directive: no TestFlight, no
+App Store/signing work performed, no real-device QA started. Wait for
+Product Owner authorization.**
