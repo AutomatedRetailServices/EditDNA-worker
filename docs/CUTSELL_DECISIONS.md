@@ -20897,3 +20897,205 @@ new entry).
 Phase A.2 (widen the conflict detector to cover complete-window-vs-
 complete-window disagreement) before any Phase B work is the Product
 Owner's decision, not made here.
+
+## D-148 -- Canonical architecture evolution: Parallel Multimodal Perception + Watch+Listen Multimodal Understanding
+
+Docs/architecture design only, post D-147. Canonizes an explicit upstream
+architecture -- PARALLEL MULTIMODAL PERCEPTION -> WATCH+LISTEN MULTIMODAL
+UNDERSTANDING/FUSION -> STRUCTURED EDITORIAL REASONING -- as the intended
+foundation for RAW -> Cut.ai commercial parity and, later, Cut.ai -> Human
+Gold editorial refinement. Zero engine behavior change, zero RAW, zero
+provider call. Appended as `docs/CUTSELL_CANONICAL_ENGINE_ARCHITECTURE_
+D098.md` Section 13 -- Sections 1-12 unchanged, no layer renumbered, no
+Section 3 status changed, no accepted D-096/D-097.x/D-107/D-108/D-109/
+D-110/D-111/D-128/D-129/D-141 through D-147 authority contract touched.
+
+**Motivation (why now):** D-144 through D-147 proved provider-backed
+semantic/family decisions can vary even on the same RAW. D-147 specifically
+proved a real pimples/espinillas family where TWO independently
+family-complete windows nominated opposite winners for the same pair --
+`family_complete_context=true` is NECESSARY but NOT SUFFICIENT for
+authoritative semantic winner selection, and the existing deterministic
+downstream logic correctly refused to manufacture one. This is direct
+evidence that provider semantic comparison is one evidence source and must
+never become the sole perception/understanding layer for the RAW --
+exactly the architecture principle Section 13 canonizes.
+
+**Updated canonical top-level pipeline (Section 13.1, restates, does not
+renumber, the existing 20 layers + D-129's Section 11 pacing placement):**
+RAW -> Parallel Multimodal Perception (Layer 1) -> Watch+Listen Multimodal
+Understanding/Fusion (Layer 1->2 boundary, upstream role) -> Behavior State
+(Layer 2) -> Proposition Identity (Layer 4/10) -> Attempt Relationships
+(Layer 4) -> Confidence/Conflict (Layer 18) -> Stable Family Formation
+(Layer 4) -> BestTake (Layer 6) -> Freeze -> Boundary (Layer 7) ->
+Dialogue/Pacing Transition (Layer 7 execution sub-stage) -> Renderer ->
+Downstream Watch+Listen QA (Layer 8); then, only after stable RAW -> Cut.ai
+parity, Human Gold Editorial Refinement (Layers 10-16, still not started).
+
+**Four Parallel Multimodal Perception tracks (Section 13.2, Layer 1,
+conceptually concurrent -- no requirement that transcript finish before
+visual/audio perception starts):** Track A Speech/Language (ASR + word
+timing, `asr.py`/`canonical_asr_evidence.py`, IMPLEMENTED); Track B Audio
+Perception (silence/dead-air/pause/continuity, `audio_silence.py`/
+`silence_analysis.py`, PARTIAL -- real waveform-derived signal, narrow
+scope; real semantic/prosodic audio understanding named as a future
+capability, honestly marked DESIGNED_NOT_IMPLEMENTED, never claimed to
+exist); Track C Visual/Performance Perception (`visual_analysis.py`/
+`visual_openai.py`'s real `OpenAIVisualProvider` GPT-4o-mini frame-scoring
+adapter/`local_performance.py`, PARTIAL, restates D-107's existing 7-of-12
+`MediaSignals` finding, not re-audited field-by-field here); Track D
+Media/Timing (ffmpeg/ffprobe technical facts, IMPLEMENTED engine-side;
+iOS-side ingestion metadata per Section 12.6 remains DESIGNED_NOT_
+IMPLEMENTED).
+
+**Watch+Listen Multimodal Understanding (Section 13.3, upstream fusion,
+Layer 1->2 boundary):** purpose is to understand the RAW BEFORE editorial
+selection; combines Tracks A-D into a target **Structured RAW Understanding
+Map** (Section 13.3.1) -- a conceptual, per-bounded-source-span/attempt/beat
+output naming source identity/timing, transcript/word_timings, speech/
+audio/visual/behavior state, entry/delivery/exit state, audience_delivery_
+span, proposition_candidate_id/relation, attempt_relation, meaning_
+sufficiency, retry/correction/continuation/complementary/new_audience_beat
+candidate flags, performance/audio/visual usability, editability,
+confidence, conflict_flags, and evidence_provenance -- generalizing Layer
+3's existing "Canonical Multimodal Attempt Evidence" target with a full
+candidate field list. No production schema is implemented. Binding
+authority principle (Section 13.3.2, generalizes D-111 Section 10.6):
+PERCEPTION PROPOSES EVIDENCE, STRUCTURED EDITORIAL AUTHORITIES DECIDE --
+Watch+Listen must never mean "one multimodal LLM watches the whole RAW and
+decides the edit." Real-audio-honesty audit (Section 13.3.3): transcript +
+timestamps alone are NOT listening; real semantic/prosodic audio
+understanding is DESIGNED_NOT_IMPLEMENTED, not overclaimed. Two Watch+
+Listen roles (Section 13.3.4, sharpens the existing Section 4 split):
+upstream understanding informs editorial decisions; downstream QA
+(`perceptual_watch_listen.py`, `benchmarks/clean_raw_checkpoint.py`)
+diagnoses/routes a rendered result and must never silently edit -- they
+may share perception primitives but never authority.
+
+**Behavior State (Section 13.4) restates D-111 Section 10.1's vocabulary
+verbatim** (`AUDIENCE_DELIVERY`/`PRE_TAKE_SETUP`/`FALSE_START`/
+`ABANDONED_ATTEMPT`/`CLEAN_ATTEMPT`/`CORRECTION`/`CONTINUATION`/
+`NEW_AUDIENCE_BEAT`/`POST_TAKE_RESET`/`RECORDING_PROCESS`/
+`BREAKING_CHARACTER`), many-signals-to-one-state unchanged; clarifies
+(without renaming) that the code-level physical-manifestation term stays
+`RETAKE_EVENT` while "this attempt is a RETRY of that one" is an Attempt
+Relationship concept, not a Behavior State.
+
+**Proposition Identity (Section 13.5) restates D-111 Section 10.2
+verbatim** (PROPOSITION IDENTITY PRECEDES RETRY IDENTITY; same topic/
+product/opener/sentence-structure never implies same proposition);
+Watch+Listen may supply supporting evidence, never decide it unilaterally.
+
+**Attempt Relationships (Section 13.6)** consolidates the vocabulary
+across D-111 Section 10.1 and D-145's own already-implemented 5-way
+relation outcome (`SAME_PROPOSITION_RETRY`/`_CONTINUATION`/
+`_COMPLEMENTARY`/`DISTINCT_PROPOSITION`/`UNCERTAIN`) as one naming, not a
+new vocabulary or a code change; `UNCERTAIN` remains a valid first-class
+outcome, family formation is never forced.
+
+**Family Formation role (Section 13.7):** must consume transcript
+semantics + proposition evidence + behavior evidence + multimodal timing/
+performance evidence where relevant, never depend solely on textual/
+provider comparative judgment -- the direct architectural generalization
+of D-144's root cause and D-147's real-media proof; no evidence-intake
+code changes here.
+
+**D-145/D-146/D-147 compatibility, strengthened (Section 13.8):** NO
+COMPLETE FAMILY CONTEXT -> NO AUTHORITATIVE COMPARATIVE WINNER (D-145,
+unchanged) now reads, per D-147's proof: COMPLETE FAMILY CONTEXT + MULTIPLE
+COMPLETE WINDOWS DISAGREE -> NO AUTHORITATIVE COMPARATIVE WINNER. Names the
+new state **`COMPLETE_CONTEXT_CONFLICT`** (Section 13.8.1) -- all relevant
+competitors present, independent legitimate comparisons disagree; required
+policy: conflict must remain conflict, never merged into a winner merely
+because each request was individually complete. No detector/gate
+implementing this is built here -- that is D-149 (Phase A.2) and Phase B,
+neither implemented in this task.
+
+**Provider role (Section 13.9)** generalizes D-111 Section 10.6: provider
+output is evidence; provider CONSISTENCY itself is evidence (D-147's own
+same-provider self-disagreement is a conflict signal in its own right); a
+provider label never becomes unquestioned ontology for proposition, retry,
+family topology, or BestTake when other evidence conflicts.
+
+**BestTake (Section 13.10)** restates D-107's unchanged priority order
+(meaning/message sufficiency -> take usability -> multimodal performance ->
+editability/boundary quality -> narrative/energy fit); Multimodal
+Understanding provides evidence into tiers 2-3, never becomes the winner
+directly; Hybrid/Gemini/OpenAI nomination remains non-absolute.
+
+**Boundary (Section 13.11)** restates D-107 Section 9's CASE A/B/C split
+unchanged (post-delivery defect -> Boundary; during-delivery defect ->
+BestTake/DeliveryScorer); Watch+Listen may improve the supporting evidence,
+never merges Boundary's authority into perception.
+
+**Dialogue/Pacing (Section 13.12)** restates D-129 Section 11.4's unchanged
+placement (Freeze -> Boundary -> Dialogue/Pacing Transition -> Renderer);
+Pacing cannot reopen Proposition/Retry/Family Formation/BestTake.
+
+**Confidence/Conflict policy (Section 13.13)** restates D-111 Section
+10.3/10.4 unchanged (HIGH -> automatic; MEDIUM/conflicting -> bounded
+arbitration where authorized; LOW -> abstain); provider-vs-provider and
+complete-window-vs-complete-window disagreement are both real conflict
+signals under this ladder; a rare case never becomes a permanent regex/
+marker/timestamp-specific rule.
+
+**RAW -> Cut.ai Level-1 (Section 13.14) / Human Gold Level-2 (Section
+13.15)** restate Section 5's Milestone 1/2 and Section 10.7 unchanged;
+Human-Gold-only preferences never block Level 1; Level 2 remains not
+started, not authorized.
+
+**Non-destructive editing (Section 13.18)** restates D-107 Section 9
+unchanged -- no perception/understanding/fusion stage physically deletes
+RAW footage; Watch+Listen Multimodal Understanding is strictly an evidence
+producer.
+
+**Anti-rule-proliferation doctrine (Section 13.19)** promotes D-111 Section
+10.4 to explicit top-level canonical doctrine, unchanged in substance:
+CutSell generalizes through Behavior State/Proposition/Attempt Relationship/
+multimodal performance/Confidence-Conflict, never through thousands of
+video-specific rules; hard rules stay reserved for genuine invariants
+(meaning, negation, numbers, source identity, authority ordering, family
+completeness, **complete-context conflict newly added per D-147**,
+fail-open, truthful QA status).
+
+**Current implementation status matrix (Section 13.20, strict, distributed
+signals != completed fusion):** ASR IMPLEMENTED; word timing IMPLEMENTED;
+audio perception PARTIAL; real semantic/prosodic audio understanding
+DESIGNED_NOT_IMPLEMENTED; visual perception PARTIAL (a real OpenAI
+adapter exists; production coverage not re-verified here); position-aware
+performance DESIGNED_NOT_IMPLEMENTED; behavior understanding PARTIAL;
+proposition identity PARTIAL (design-layer implemented, grouping's primary
+signal remains lexical per the existing dataflow-map Gap 1); attempt
+relationships PARTIAL; family formation EXISTING but provider-evidence-
+dependent (D-144/D-147's own finding); parallel perception orchestration
+DESIGNED_NOT_IMPLEMENTED; unified multimodal fusion DESIGNED_NOT_
+IMPLEMENTED (no single component produces the Structured RAW Understanding
+Map -- today's evidence is distributed, not fused); Structured RAW
+Understanding Map DESIGNED_NOT_IMPLEMENTED; BestTake EXISTING; Boundary
+EXISTING; Dialogue/Pacing EXISTING (Phase 1, D-142); upstream Watch+Listen
+PARTIAL; downstream Watch+Listen PARTIAL (4 of 8 capabilities EVALUATED, 4
+NOT_IMPLEMENTED, unchanged from D-098 Section 3).
+
+**Exact next engine sequence (Section 13.22, NOT authorized here): D-149 --
+Semantic Authority Phase A.2 Observability** -- add detection for
+COMPLETE-WINDOW vs COMPLETE-WINDOW disagreement (D-147 proved D-146's
+existing `partial_window_conflict` observability misses this by
+construction); then Phase B's semantic authority gate must require more
+than `family_complete_context=true`, also accounting for inter-complete-
+window disagreement. Separately, before Family Formation is declared
+architecturally complete, the missing unified upstream Watch+Listen
+Multimodal Understanding capability (the Structured RAW Understanding Map)
+must be implemented and qualified. Neither is implemented, scheduled, or
+authorized by this task.
+
+**Scope confirmed:** zero engine behavior change (no `cutsell_worker/*.py`
+file touched); zero RAW/Modal/RunPod dispatch; zero provider calls; prior
+architecture fully preserved -- D-098 Sections 1-12 unchanged verbatim,
+Section 3's status table unchanged, D-096/D-097.x/D-107/D-108/D-109/D-110/
+D-111/D-128/D-129/D-141 through D-147 all preserved CLOSED and not
+reopened; D-147 itself not rewritten (this is a new, additive D-098
+Section 13 plus this append-only decision-log entry).
+
+**HUMAN ACTION REQUIRED:** YES (condition A) -- whether to authorize D-149
+(Semantic Authority Phase A.2 observability) is the Product Owner's
+decision, not made here.
