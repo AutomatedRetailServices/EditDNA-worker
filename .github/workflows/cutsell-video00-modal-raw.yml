@@ -967,6 +967,301 @@ jobs:
           print(json.dumps(summary, indent=2, sort_keys=True))
           PY
 
+      - name: Print compact D-123 BestTake qualification summary (tail-safe)
+        # D-125 (docs/CUTSELL_DECISIONS.md): D-124's real-media qualification
+        # of D-123 found one family (tg_140e20c3f9f49b133f) whose semantic-
+        # winner-vs-delivery-tie-break shape could NOT be classified as a
+        # genuine D-123 CASE B bypass vs. the pre-existing D-101/D-103 safety
+        # veto, because `take_judge_groups`' own D-122/D-123 fields print
+        # early in the "Print full canonical diagnostics" step and, by job
+        # end, scroll outside the same ~5000-line CI log tail cap D-117/
+        # D-118/D-119 already documented for boundary_engine_pass/perceptual_
+        # watch_listen -- that fix was never extended to take_judge_groups,
+        # so D-122/D-123's own newer fields inherited the identical exposure.
+        # This step is D-119's exact pattern applied to that gap: a SEPARATE,
+        # LATE-STAGE, BOUNDED summary placed after the large diagnostics step
+        # AND after the quality-ladder step, reading `artifact/video00-
+        # modal.json` (already on disk since "Download Video00 Modal
+        # artifacts", never a live pipe -- no D-117 SIGPIPE risk) and
+        # projecting ONLY the already-computed D-122/D-123 fields already on
+        # each `take_judge_groups` row. It recomputes NO BestTake decision,
+        # score, or ranking -- every field here is copied or trivially
+        # derived (set-membership, equality, counting) from fields
+        # `_semantic_best_take`/`case_b_performance_evidence.py`/
+        # `deterministic_best_take_authority.py` already computed. Full raw
+        # CASE B event detail (`delivery_events`) is deliberately NEVER
+        # printed here -- only the bounded per-candidate aggregates -- so
+        # this step cannot itself become a new tail-window problem.
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p artifact
+          python - <<'PY'
+          import json, os, sys
+
+          def load(path):
+              if not os.path.exists(path) or os.path.getsize(path) == 0:
+                  return None
+              with open(path) as f:
+                  try:
+                      return json.load(f)
+                  except Exception as e:
+                      print(f"WARNING: failed to parse {path}: {e}", file=sys.stderr)
+                      return None
+
+          engine = load("artifact/video00-modal.json")
+          regression_fixture = load("benchmarks/video00_regression_qa.json")
+
+          summary = {"schema_version": "cutsell.video00.d123_case_b_qualification_summary.v1"}
+          summary["source_status"] = "engine_json_present" if isinstance(engine, dict) else "engine_json_missing_or_unparseable"
+
+          groups = []
+          clip_text = {}
+          if isinstance(engine, dict):
+              diag = engine.get("diagnostics")
+              if isinstance(diag, dict):
+                  raw_groups = diag.get("take_judge_groups")
+                  if isinstance(raw_groups, list):
+                      groups = raw_groups
+              for bucket in ("selected", "alternates", "discarded"):
+                  for clip in engine.get(bucket) or []:
+                      if isinstance(clip, dict) and clip.get("clip_id"):
+                          clip_text[clip["clip_id"]] = str(clip.get("text") or "")
+
+          _WINNER_PATH_DELIVERYSCORE_PATH = "DELIVERYSCORE_PATH"
+          _WINNER_PATH_DETERMINISTIC_OVERRIDE = "DETERMINISTIC_OVERRIDE"
+
+          def _compact_case_b(evidence_dict):
+              # Projects ONLY the bounded, factual per-candidate aggregates
+              # D-122's own case_b_performance_evidence_diagnostics() already
+              # computed -- never the raw `delivery_events` list (that stays
+              # in the full artifact, per this task's explicit "no raw-event
+              # flood" requirement).
+              out = {}
+              for clip_id, row in (evidence_dict or {}).items():
+                  if not isinstance(row, dict):
+                      continue
+                  out[clip_id] = {
+                      "candidate_id": row.get("candidate_id", clip_id),
+                      "delivery_event_count": row.get("delivery_event_count"),
+                      "delivery_event_duration_total": row.get("delivery_event_duration_total"),
+                      "count_by_kind": row.get("count_by_kind"),
+                      "duration_by_kind": row.get("duration_by_kind"),
+                      "event_density": row.get("event_density"),
+                  }
+              return out
+
+          family_rows = []
+          counts = {
+              "family_count": 0,
+              "semantic_fast_path_family_count": 0,
+              "deliveryscore_disagreement_count": 0,
+              "families_with_case_b_evidence_count": 0,
+              "actionable_case_b_conflict_count": 0,
+              "semantic_fast_path_bypass_count": 0,
+              "deliveryscore_path_count": 0,
+              "deterministic_override_count": 0,
+              "meaning_insufficient_alternative_block_count": 0,
+              "no_case_b_evidence_no_bypass_count": 0,
+          }
+
+          for row in groups:
+              if not isinstance(row, dict):
+                  continue
+              counts["family_count"] += 1
+
+              semantic_candidates = row.get("semantic_candidates") or []
+              member_ids = sorted({
+                  c.get("clip_id") for c in semantic_candidates
+                  if isinstance(c, dict) and c.get("clip_id")
+              })
+              if not member_ids:
+                  # Older/degenerate rows may lack semantic_candidates;
+                  # case_b_evidence (D-122, present on every D-122+ row) is
+                  # keyed by the same member clip_ids as a fallback source of
+                  # truth -- never a guess, just a second existing field.
+                  member_ids = sorted((row.get("case_b_evidence") or {}).keys())
+
+              semantic_fast_path_candidate = row.get("semantic_fast_path_candidate")
+              semantic_winner_label = None
+              semantic_winner_confidence = None
+              if semantic_fast_path_candidate:
+                  for c in semantic_candidates:
+                      if isinstance(c, dict) and c.get("clip_id") == semantic_fast_path_candidate:
+                          semantic_winner_label = c.get("label")
+                          semantic_winner_confidence = c.get("confidence")
+                          break
+
+              deliveryscore_top_candidate = row.get("deliveryscore_top_candidate")
+              meaning_sufficient_candidates = row.get("meaning_sufficient_candidates")
+              case_b_evidence = row.get("case_b_evidence") or {}
+              case_b_conflict_present = row.get("case_b_conflict_present")
+              case_b_conflict_basis = row.get("case_b_conflict_basis")
+              semantic_fast_path_bypassed = row.get("semantic_fast_path_bypassed")
+              bypass_reason = row.get("bypass_reason")
+              winner_path = row.get("winner_path")
+              winner_path_before = row.get("winner_path_before")
+              winner_path_after = row.get("winner_path_after")
+              performance_consulted = row.get("performance_consulted_before_winner")
+              final_selected_clip_id = row.get("final_winner", row.get("selected_clip_id"))
+              final_reason = row.get("semantic_best_take_reason")
+
+              if semantic_fast_path_candidate:
+                  counts["semantic_fast_path_family_count"] += 1
+                  if deliveryscore_top_candidate and deliveryscore_top_candidate != semantic_fast_path_candidate:
+                      counts["deliveryscore_disagreement_count"] += 1
+              if case_b_evidence:
+                  counts["families_with_case_b_evidence_count"] += 1
+              if case_b_conflict_present is True:
+                  counts["actionable_case_b_conflict_count"] += 1
+              if semantic_fast_path_bypassed is True:
+                  counts["semantic_fast_path_bypass_count"] += 1
+              if winner_path == _WINNER_PATH_DELIVERYSCORE_PATH:
+                  counts["deliveryscore_path_count"] += 1
+              if winner_path == _WINNER_PATH_DETERMINISTIC_OVERRIDE:
+                  counts["deterministic_override_count"] += 1
+              if (
+                  semantic_fast_path_candidate
+                  and deliveryscore_top_candidate
+                  and deliveryscore_top_candidate != semantic_fast_path_candidate
+                  and isinstance(meaning_sufficient_candidates, list)
+                  and deliveryscore_top_candidate not in meaning_sufficient_candidates
+              ):
+                  counts["meaning_insufficient_alternative_block_count"] += 1
+              if not case_b_evidence and not semantic_fast_path_bypassed:
+                  counts["no_case_b_evidence_no_bypass_count"] += 1
+
+              compact_row = {
+                  "group_id": row.get("group_id"),
+                  "member_ids": member_ids,
+                  "semantic_fast_path_candidate": semantic_fast_path_candidate,
+                  "semantic_winner_label": semantic_winner_label,
+                  "semantic_winner_confidence": semantic_winner_confidence,
+                  "deliveryscore_top_candidate": deliveryscore_top_candidate,
+                  "meaning_sufficient_candidates": meaning_sufficient_candidates,
+                  "winner_path": winner_path,
+                  "winner_path_before": winner_path_before,
+                  "winner_path_after": winner_path_after,
+                  "performance_consulted_before_winner": performance_consulted,
+                  "case_b_conflict_present": case_b_conflict_present,
+                  "semantic_fast_path_bypassed": semantic_fast_path_bypassed,
+                  "bypass_reason": bypass_reason,
+                  "final_selected_clip_id": final_selected_clip_id,
+                  "final_reason": final_reason,
+                  "case_b_evidence": _compact_case_b(case_b_evidence),
+              }
+              if case_b_conflict_present:
+                  # Conflict families only: name the two candidates' meaning-
+                  # sufficiency status explicitly, per this task's "CONFLICT
+                  # BASIS" requirement -- non-conflict families never carry
+                  # this redundant block.
+                  sufficiency = {}
+                  if isinstance(case_b_conflict_basis, dict):
+                      for key in ("semantic_fast_path_candidate", "deliveryscore_top_candidate"):
+                          cid = case_b_conflict_basis.get(key)
+                          if cid is not None and isinstance(meaning_sufficient_candidates, list):
+                              sufficiency[cid] = cid in meaning_sufficient_candidates
+                  compact_row["case_b_conflict_basis"] = case_b_conflict_basis
+                  compact_row["case_b_conflict_meaning_sufficiency"] = sufficiency
+              else:
+                  compact_row["case_b_conflict_basis"] = None
+
+              family_rows.append(compact_row)
+
+          summary["global_counts"] = counts
+          summary["families"] = family_rows
+
+          # --- Pimples QA cross-check (QA/reporting only). Reuses the
+          # ALREADY checked-in benchmarks/video00_regression_qa.json
+          # fixture's own literal substrings -- never a new hardcoded
+          # production reference, and this summary is never read by
+          # production Selection/BestTake/grouping/render code. Matches by
+          # substring containment against the SAME selected/alternates/
+          # discarded clip texts the existing "Print full canonical
+          # diagnostics" step already reads for its own D-094.2 forensic
+          # summary. `required_order` checks are skipped here (their
+          # `texts` list is a composite of the other checks' own literal
+          # strings -- matching them again would be redundant, not
+          # additional evidence).
+          pimples_texts = []
+          if isinstance(regression_fixture, dict):
+              for check in regression_fixture.get("checks") or []:
+                  if not isinstance(check, dict) or not str(check.get("id", "")).startswith("pimples_"):
+                      continue
+                  if check.get("kind") == "required_order":
+                      continue
+                  text = check.get("text")
+                  if text:
+                      pimples_texts.append(str(text))
+
+          def _norm(s):
+              return " ".join(str(s or "").lower().split())
+
+          normalized_refs = [t for t in (_norm(x) for x in pimples_texts) if t]
+
+          if regression_fixture is None:
+              summary["pimples"] = {
+                  "status": "reference_fixture_absent",
+                  "reference_path": "benchmarks/video00_regression_qa.json",
+              }
+          elif not normalized_refs:
+              summary["pimples"] = {"status": "no_pimples_checks_in_reference_fixture"}
+          else:
+              pimples_clip_ids = sorted({
+                  cid for cid, text in clip_text.items()
+                  if any(ref in _norm(text) for ref in normalized_refs)
+              })
+              if not pimples_clip_ids:
+                  summary["pimples"] = {
+                      "status": "no_pimples_reference_text_found_in_this_runs_clips",
+                  }
+              else:
+                  matching_families = []
+                  for row in family_rows:
+                      if set(row["member_ids"]) & set(pimples_clip_ids):
+                          matching_families.append({
+                              "group_id": row["group_id"],
+                              "member_ids": row["member_ids"],
+                              "semantic_fast_path_candidate": row["semantic_fast_path_candidate"],
+                              "deliveryscore_top_candidate": row["deliveryscore_top_candidate"],
+                              "case_b_evidence": row["case_b_evidence"],
+                              "case_b_conflict_present": row["case_b_conflict_present"],
+                              "semantic_fast_path_bypassed": row["semantic_fast_path_bypassed"],
+                              "bypass_reason": row["bypass_reason"],
+                              "winner_path_after": row["winner_path_after"],
+                              "final_selected_clip_id": row["final_selected_clip_id"],
+                          })
+                  if not matching_families:
+                      # A pimples-referenced clip exists this run but never
+                      # appeared in a >=2-member/no-usable-realization row
+                      # (D-121/D-124 both proved this can legitimately
+                      # happen -- e.g. a singleton, or upstream grouping
+                      # split it away from any contest entirely).
+                      summary["pimples"] = {
+                          "status": "pimples_clips_present_but_no_multi_member_family_or_no_usable_realization_row",
+                          "pimples_related_clip_ids": pimples_clip_ids,
+                      }
+                  elif len(matching_families) == 1:
+                      summary["pimples"] = {"status": "family_formed", "families": matching_families}
+                  else:
+                      # D-124's own confirmed real shape: upstream grouping
+                      # can split pimples-adjacent clips across multiple
+                      # families in one run -- report ALL of them, never
+                      # silently collapse to one.
+                      summary["pimples"] = {"status": "fragmented_across_multiple_families", "families": matching_families}
+
+          os.makedirs("artifact", exist_ok=True)
+          out_path = "artifact/video00-modal-d123-qualification-summary.json"
+          with open(out_path, "w") as f:
+              json.dump(summary, f, indent=2, sort_keys=True)
+
+          size = os.path.getsize(out_path)
+          print("--- D-123 BestTake CASE B qualification summary (D-125; a pure projection of existing take_judge_groups/case_b_evidence diagnostics -- recomputes no BestTake decision, score, or ranking) ---")
+          print(f"summary file: {out_path} ({size} bytes)")
+          print(json.dumps(summary, indent=2, sort_keys=True))
+          PY
+
       - name: Upload validator reports
         if: always()
         uses: actions/upload-artifact@v4
@@ -981,6 +1276,7 @@ jobs:
             artifact/video00-modal-quality-ladder.csv
             artifact/video00-modal-active-path-identity.json
             artifact/video00-modal-d116-qualification-summary.json
+            artifact/video00-modal-d123-qualification-summary.json
           retention-days: 14
           if-no-files-found: warn
 

@@ -15798,3 +15798,150 @@ observability extension described above (a small, additive, workflow-only
 change) as the next bounded task, and whether/when to authorize the
 confirmatory RAW that would follow it, are Product Owner decisions, not
 made here.
+
+## D-125 -- Tail-safe BestTake CASE B / D-123 qualification summary
+(workflow/observability only, post D-124). Builds exactly the observability
+extension D-124 named as its own next blocker: a new, late-stage, tail-safe
+compact summary of `take_judge_groups`' D-122/D-123 fields, mirroring
+D-119's exact pattern. **No `cutsell_worker` file touched (confirmed by
+`git diff --stat` showing only the workflow YAML changed); no engine
+behavior, score, ranking, winner, grouping, or Boundary logic altered in
+any way.**
+
+**D-124 observability blocker (restated exactly):** `take_judge_groups`'
+own D-122/D-123 fields (`case_b_conflict_present`, `case_b_conflict_basis`,
+`semantic_fast_path_bypassed`, `bypass_reason`, `winner_path_before`,
+`winner_path_after`, `performance_consulted_before_winner`) print early in
+the "Print full canonical diagnostics" step, but by job end, five later
+steps (the ~580 MB diagnostic-artifact upload, the Human Gold 18-check
+manifest, and especially the ~30-second quality-ladder step) push that
+print far outside the CI log-retrieval tool's ~5000-line hard tail cap
+(confirmed identical regardless of the `tail_lines` parameter requested).
+D-119 already fixed this exact class of problem for `boundary_engine_
+pass`/`perceptual_watch_listen` specifically -- that fix was never
+extended to `take_judge_groups`, so D-122/D-123's newer fields inherited
+the identical exposure. This left `tg_140e20c3f9f49b133f` (D-124's one
+ambiguous family) unclassifiable as a genuine D-123 bypass vs. the
+pre-existing D-101/D-103 safety veto.
+
+**New summary step:** `.github/workflows/cutsell-video00-modal-raw.yml`,
+"Print compact D-123 BestTake qualification summary (tail-safe)" -- placed
+immediately after D-119's own compact-summary step (itself after the
+quality-ladder step) and before "Upload validator reports"/teardown, so it
+stays near job end regardless of how much earlier output grows. Reads
+`artifact/video00-modal.json` (already on disk since "Download Video00
+Modal artifacts", never a live pipe -- no D-117 SIGPIPE risk possible).
+Writes `artifact/video00-modal-d123-qualification-summary.json`, added to
+the existing `cutsell-video00-modal-validator-reports` artifact upload
+alongside D-119's own summary file.
+
+**Source-of-truth relationship:** a PURE PROJECTION. Every field in the
+new summary is either copied verbatim or trivially derived (set
+membership, equality, counting) from fields `_semantic_best_take`/
+`case_b_performance_evidence.py`/`deterministic_best_take_authority.py`
+already compute and already write onto each `take_judge_groups` row --
+`_case_b_fast_path_conflict`, `_meaning_sufficient_member_ids`, and every
+other decision function are never called, imported, or re-implemented by
+this script. Full raw CASE B event detail (`delivery_events`) is
+deliberately never emitted here -- only the bounded per-candidate
+aggregates D-122's own `case_b_performance_evidence_diagnostics()` already
+produced -- so this summary cannot itself become a new tail-window
+problem; full event detail remains in the (egress-policy-restricted) full
+artifact, unchanged.
+
+**Global count fields:** `family_count`, `semantic_fast_path_family_count`,
+`deliveryscore_disagreement_count`, `families_with_case_b_evidence_count`,
+`actionable_case_b_conflict_count`, `semantic_fast_path_bypass_count`,
+`deliveryscore_path_count`, `deterministic_override_count`,
+`meaning_insufficient_alternative_block_count`,
+`no_case_b_evidence_no_bypass_count`.
+
+**Family-level fields (one compact row per `take_judge_groups` entry):**
+`group_id`, `member_ids`, `semantic_fast_path_candidate`,
+`semantic_winner_label`, `semantic_winner_confidence`, `deliveryscore_top_
+candidate`, `meaning_sufficient_candidates`, `winner_path`, `winner_path_
+before`, `winner_path_after`, `performance_consulted_before_winner`,
+`case_b_conflict_present`, `semantic_fast_path_bypassed`, `bypass_reason`,
+`final_selected_clip_id`, `final_reason`, `case_b_evidence` (compact, see
+below), `case_b_conflict_basis` (full detail only when `case_b_conflict_
+present` is true; `null` otherwise -- no redundant empty structure),
+`case_b_conflict_meaning_sufficiency` (conflict families only: whether
+each of the two named candidates is in `meaning_sufficient_candidates`).
+
+**CASE B compact evidence fields (per candidate):** `candidate_id`,
+`delivery_event_count`, `delivery_event_duration_total`, `count_by_kind`,
+`duration_by_kind`, `event_density` -- `delivery_events` (the raw per-event
+list) is explicitly never included.
+
+**Pimples summary:** reuses the ALREADY checked-in `benchmarks/video00_
+regression_qa.json` fixture's own literal `pimples_*` check substrings
+(never a new hardcoded production reference; `required_order` checks
+skipped as redundant composites of the other checks' own texts) to find
+which `take_judge_groups` member clip_ids' texts (from `selected`/
+`alternates`/`discarded`) match, then reports every matching family's
+`group_id`, `member_ids`, `semantic_fast_path_candidate`, `deliveryscore_
+top_candidate`, `case_b_evidence`, `case_b_conflict_present`, `semantic_
+fast_path_bypassed`, `bypass_reason`, `winner_path_after`, `final_
+selected_clip_id`. Honestly reports one of four distinct states rather
+than fabricating a match: `reference_fixture_absent`, `no_pimples_
+reference_text_found_in_this_runs_clips`, `pimples_clips_present_but_no_
+multi_member_family_or_no_usable_realization_row` (a real, D-121/D-124-
+proven possibility -- a pimples clip can be a singleton or split away by
+upstream grouping before ever reaching a `take_judge_groups` row), or
+`family_formed`/`fragmented_across_multiple_families` (D-124's own real
+shape: pimples-adjacent clips split across two families in one run --
+this script reports ALL matching families, never silently collapses to
+one).
+
+**Static validation (no RAW):**
+1. YAML validation: `yaml.safe_load()` parses the full workflow; the new
+   step is step 22 of 25.
+2. Shell/Python validation: `bash -n` on the extracted `run:` block and
+   `python3 -m py_compile` on the extracted heredoc body -- both clean.
+3-9/11. Synthetic fixture harness (12 cases, all pass, run against the
+   heredoc body extracted from the actual (YAML-dedented) workflow text --
+   not a hand-copied re-implementation): one D-123 bypass family (`case_b_
+   conflict_present=True`, `semantic_fast_path_bypassed=True`, `winner_
+   path_before/after` correctly SEMANTIC_FAST_PATH -> DELIVERYSCORE_PATH);
+   one semantic fast-path no-bypass family; one meaning-insufficient-
+   alternative family (never bypasses, `deliveryscore_top_candidate`
+   correctly absent from `meaning_sufficient_candidates`); one no-CASE-B-
+   evidence family; one pimples-shaped family (matches the real
+   `pimples_bad_monolith_absent`/`pimples_later_winner_present` reference
+   texts) -- global counts exact (`family_count=5`, `semantic_fast_path_
+   family_count=5`, `deliveryscore_disagreement_count=2`, `families_with_
+   case_b_evidence_count=4`, `actionable_case_b_conflict_count=1`,
+   `semantic_fast_path_bypass_count=1`, `deliveryscore_path_count=1`,
+   `deterministic_override_count=0`, `meaning_insufficient_alternative_
+   block_count=1`, `no_case_b_evidence_no_bypass_count=1`), family rows
+   exact, conflict basis visible only on the one conflict family, pimples
+   section correctly identifies the one formed family. Missing-`video00-
+   modal.json` fixture: exit 0, `source_status: "engine_json_missing_or_
+   unparseable"`, zero families, no fabrication. Empty-`take_judge_groups`
+   fixture: exit 0, zero families, honest `no_pimples_reference_text_
+   found` status. Reference-fixture-absent edge case: exit 0, `pimples:
+   {"status": "reference_fixture_absent"}`. Older-diagnostic-shape fixture
+   (a row with none of the D-122/D-123 fields at all -- pre-D-122 shape):
+   exit 0, every missing field reported as `null`/`{}` accurately, never
+   fabricated.
+10. Output size: 5-family synthetic run produced 281 lines / 8,909 bytes
+    -- comfortably tail-safe; a real run's family count is bounded by the
+    number of genuine multi-member/no-usable-realization retry families in
+    one Video00-scale video (single digits to low tens), so this cannot
+    reproduce the take_judge_groups tail-window problem it exists to fix.
+12. `git diff --stat` after this task's edits: only `.github/workflows/
+    cutsell-video00-modal-raw.yml` changed (296 insertions) -- confirmed no
+    `cutsell_worker/` file touched; `tests/test_cutsell_d122_case_b_
+    performance_evidence.py` + `tests/test_cutsell_d123_case_b_fast_path_
+    gate.py` (64 tests) re-run unchanged and pass, confirming zero drift.
+
+**D-123 status:** remains **B -- PARTIALLY REAL-MEDIA PROVEN**, unchanged
+by this task (this task changes observability only; D-124's history is
+not rewritten). One future Video00 RAW is required, under this new
+summary, to actually resolve the one ambiguous family D-124 could not
+classify -- not run here (explicit "NO RAW" scope).
+
+**HUMAN ACTION REQUIRED:** YES (condition C, paid compute outside
+authorization) -- authorizing that one confirmatory Video00 RAW (which
+will now emit the disambiguating summary this task built) is the Product
+Owner's next decision, not made here.
