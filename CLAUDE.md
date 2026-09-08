@@ -191,6 +191,18 @@ PRESERVE / CONSOLIDATE LATER / FUTURE only -- nothing marked obsolete).
   deterministic answer like D-110's replacement-rejection rule); and
   binds an anti-rule-proliferation classification (A-I) before writing
   any new special-case rule. Documentation only -- authorizes nothing.
+- **Overlap editing doctrine + iOS Native Swift Foundation (D-129),
+  Sections 11-12 of the same document:** additive, documentation only.
+  Formalizes user-facing `Overlap` pacing/editing (internal name
+  `dialogue_overlap_enabled`, distinct from the unchanged internal term
+  `overlaps_delivery`; CLARITY-BEFORE-SPEED invariant; placed after
+  Selection Freeze/Boundary, before Renderer) and iOS as a required
+  parallel product-platform track. Honestly inventories `mobile/ios/`'s
+  EXISTING XcodeGen Swift skeleton (27 files, SOURCE PRESENT / NOT
+  BUILD-VERIFIED / NOT DEVICE-VERIFIED / NO TESTFLIGHT) against a 22-item
+  minimum vertical-slice target -- never claims it is proven or complete.
+  Runs in parallel with, never blocks, the current engine milestone.
+  Authorizes zero Swift/Xcode/Overlap-engine/backend/RAW/provider work.
 
 ## Current state pointer
 The live current state is the newest `D-xxx` entry in `docs/CUTSELL_DECISIONS.md`

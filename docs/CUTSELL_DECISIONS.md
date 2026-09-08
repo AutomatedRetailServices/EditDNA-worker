@@ -16332,3 +16332,106 @@ next gate ((a) or (b) above), and whether/when to authorize Phase 2 (live
 wiring behind a real provider, still advisory-only per D-127's authority
 contract) is the Product Owner's decision, not made here. No RAW,
 provider call, or infra change requested by this task.
+
+## D-129 -- Canonical product/platform evolution: Overlap editing doctrine
++ iOS native Swift foundation (post D-128). **DOCUMENTATION/CANON ONLY.
+No engine behavior changed. No iOS implementation. No RAW. No provider
+call.** Full doctrine: `docs/CUTSELL_CANONICAL_ENGINE_ARCHITECTURE_D098.md`
+Sections 11-12.
+
+**Part A -- Overlap.** Formalizes a user-facing editing/pacing feature
+named exactly `Overlap` (UI label), distinct from the existing internal
+perception term `overlaps_delivery` (D-107/D-115/D-122's visual/
+performance-event-intersects-spoken-DELIVERY concept, unchanged, never
+renamed). Canonical internal feature name: `dialogue_overlap_enabled`.
+Overlap means tight/overlapping speech and audiovisual transitions
+BETWEEN two already-selected, already-Freeze-safe, already-Boundary-safe
+consecutive clips, to produce faster/tighter/more-conversational
+commercial pacing. Core invariant (binding): **CLARITY BEFORE SPEED** --
+Overlap may tighten pacing, never at the cost of intelligibility.
+Authority: PHYSICAL/PACING only -- never changes semantic membership,
+BestTake winner, propositions, invented speech, Selection Freeze, or
+meaning safety. Canonical order: Selection/BestTake -> Selection Freeze ->
+Boundary -> Dialogue/Pacing Transition (new named target sub-capability
+inside Layer 7's existing Boundary-to-Renderer execution boundary --
+Section 2's 20 layers are NOT renumbered) -> Renderer. UI contract: toggle
+labeled `Overlap`; ON means "allowed", never "forced" -- per-join clarity/
+safety still governs every join; internal terms (`overlaps_delivery`,
+CASE B, `delivery_event_count`) are never exposed to the user. Target
+transition vocabulary named for future use only (`HARD_CUT`, `TIGHT_CUT`,
+`J_CUT`, `L_CUT`, `MICRO_AUDIO_OVERLAP`) -- not implemented.
+
+**Part B -- iOS Native Swift Foundation.** Formalizes iOS as a required,
+parallel product-platform track. **Honest inventory finding (this task
+inspected the repo rather than assuming greenfield):** `mobile/ios/`
+already contains a real XcodeGen-driven Swift app skeleton -- `project.
+yml` (no committed `.xcodeproj`/`Package.swift`) plus 27 Swift files
+under `mobile/ios/CutSell/` (~3,790 lines) apparently covering camera
+(front/back switching), Photos import, multipart/background upload with
+resume, processing-status polling, `AVKit` playback, a draft editor,
+export/share, `APIClient`/`KeychainStore` networking, and Info.plist
+Camera/Microphone/Photos usage-string declarations. A targeted scan found
+no embedded API keys/secrets. **Status is recorded honestly as SOURCE
+PRESENT / NOT BUILD-VERIFIED / NOT DEVICE-VERIFIED / NO TESTFLIGHT** --
+no prior decision-log entry records a build, simulator run, physical-
+device run, or QA pass, and this document does not claim otherwise.
+Canonical direction: Swift/SwiftUI with Apple-native media frameworks,
+consistent with what already exists. Minimum vertical slice (22 items:
+permissions, front/back camera record/stop/retake, Photos import, 9:16
+capture, orientation/codec/container/fps/audio-format detection, upload
+with progress/retry/background-interruption handling, job-status polling,
+render playback, save/export/share) is a REAL-DEVICE INGESTION HARNESS
+target, not the full editor, and is mapped (informally, by filename, not
+a functional claim) against the existing source in D-098 Section 12.1's
+table. Media reality contract: the engine must not assume every real
+iPhone RAW looks like Video00 fixtures (HEVC/H.264, VFR, mirroring,
+orientation metadata, interrupted/long/large recordings, multiple device/
+iOS generations all required future test inputs). iOS->engine contract:
+immutable original-source identity (asset id, codec, container,
+resolution, fps, orientation, audio metadata, capture origin) under the
+existing D-107 non-destructive PRESELECTED/NOT_PRESELECTED source-range
+doctrine -- source RAW stays immutable, unchanged. Non-destructive editor
+compatibility: trim/extend/restore/remove/reorder/split/captions/
+overlays/audio/undo-redo target support; **explicitly does NOT
+reintroduce automatic SWAP into Clean Cut V1** (D-019 unchanged;
+`draft_edits.py`'s manual `swap_take` remains its own already-carved-out
+product layer). iOS must expose the Overlap toggle from Part A using the
+same `dialogue_overlap_enabled` internal name, never `overlaps_delivery`.
+Privacy/security/observability requirements named as targets (Apple
+permission copy not invented here; no embedded provider secrets; backend
+owns credentials; TLS only; local cleanup policy; diagnostic logging
+without private media content). Real-device QA on physical iPhones is
+required before TestFlight beta closure -- simulator-only success is
+insufficient. Parallel roadmap: Phase 0 (this doc) -> Phase 1 (vertical
+slice, SOURCE EXISTS but unverified) -> Phase 2 (real-device ingestion QA
+against the engine) -> Phase 3 (editable mobile draft/timeline) -> Phase 4
+(Overlap toggle + pacing controls) -> Phase 5 (signing/TestFlight
+readiness). The iOS track runs IN PARALLEL with, and does not block, the
+current engine milestone (RAW -> CLEAN RAW -> CUT.AI COMMERCIAL PARITY,
+unchanged) or D-128's fallback work.
+
+**Canonical product architecture map (does not create a second engine):**
+iOS CAPTURE/IMPORT -> IMMUTABLE RAW INGESTION -> CUTSELL PERCEPTION/
+UNDERSTANDING (Layers 1-4) -> CLEAN CUT/BESTTAKE/BOUNDARY (Layers 5-9) ->
+PACING/DIALOGUE TRANSITION (Section 11) -> RENDER (Layer 7 execution) ->
+IOS EDITABLE DRAFT/PLAYBACK/EXPORT.
+
+**No implementation authorized by this task:** no Xcode project created,
+no Swift code written or modified, no camera/`AVFoundation`/UI work, no
+Overlap engine behavior, no renderer/backend/API change, no RAW, no
+provider call, no infra, no TestFlight, no signing. `git diff --stat`
+confirms scope: `docs/CUTSELL_CANONICAL_ENGINE_ARCHITECTURE_D098.md`
+(Sections 11-12 appended), this `docs/CUTSELL_DECISIONS.md` entry, and a
+`CLAUDE.md` pointer bullet -- zero `cutsell_worker/*.py`, zero
+`mobile/ios/**`, zero workflow files touched.
+
+**HUMAN ACTION REQUIRED:** YES (condition A, product decision) -- whether
+to authorize the exact next iOS foundation implementation scope (a
+bounded build/run/device-verification pass over the EXISTING `mobile/
+ios/CutSell/` source against Section 12.4's 22-item vertical slice,
+before any new Swift code is written) is the Product Owner's decision,
+not made here. The current engine's exact next task (D-128's own named
+next gate: shadow real-media qualification on an authorized RAW, or a
+provider-backed offline eval of the 9 existing Class-B fixtures) remains
+unchanged and independently pending its own separate authorization. No
+RAW, provider call, or infra change requested by this task.

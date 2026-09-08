@@ -696,3 +696,354 @@ No change to Section 2's 20 layers, Section 3's status table, Section 9,
 or any accepted D-096/D-097.x/D-107/D-108/D-109/D-110 authority contract.
 See `docs/CUTSELL_DECISIONS.md` D-111 for the decision-log entry
 recording this section's doctrine.
+
+---
+
+## 11. Overlap — Dialogue/Pacing Transition Doctrine (D-129)
+
+**Status: additive doctrine, documentation only.** No layer is renumbered,
+no status in Section 3's table changes, no new authority is created, no
+`cutsell_worker/*.py` file was touched to write this section. This names
+a target USER-FACING editing capability distinct from the existing
+internal perception term it is easily confused with.
+
+### 11.1 Naming contract (binding, prevents future ambiguity)
+
+- **`overlaps_delivery`** (existing internal perception term, UNCHANGED,
+  never renamed) — a visual/performance event temporally intersects the
+  required spoken DELIVERY span. Belongs to Layer 1/2 Perception, Layer 6
+  BestTake CASE B (D-122/D-123/D-128), and Layer 7 Boundary ownership
+  reasoning (D-107 Section 9's CASE A/B/C visual-defect split).
+- **`Overlap`** (NEW, user-facing product term, UI label exactly
+  `Overlap`) — tight/overlapping speech and audiovisual transitions
+  BETWEEN two already-selected, already-frozen, already-boundary-safe
+  consecutive clips, to produce faster, tighter, more conversational,
+  more TikTok/UGC-native commercial pacing. This is an editing/pacing
+  capability, not a perception signal, and not a BestTake competitor
+  concept.
+- **Canonical internal feature name (chosen, the only one used going
+  forward):** `dialogue_overlap_enabled`. (`speech_transition_overlap_
+  enabled` was the considered alternative; not used, to avoid ever being
+  read as a third overlap-shaped term alongside `overlaps_delivery` and
+  `Overlap`.)
+
+### 11.2 Product intent
+
+Overlap exists to make CutSell edits feel faster, tighter, more
+conversational, and less pause-heavy, while preserving intelligibility.
+Illustrative only (never hardcoded into engine logic): Clip A ("This cup
+keeps drinks cold for 29 hours.") transitioning into Clip B ("And it fits
+in your car cup holder.") without overlap leaves a pause-cut-pause gap
+before B starts; with tight pacing, B's speech/visual transition begins
+with little or no dead separation after A. Target transition vocabulary
+for a future implementation (named for future use, not implemented now):
+`HARD_CUT`, `TIGHT_CUT`, `J_CUT`, `L_CUT`, `MICRO_AUDIO_OVERLAP`.
+
+### 11.3 Core invariant (binding)
+
+**CLARITY BEFORE SPEED.** CutSell must never overlap intelligible dialogue
+so aggressively that the audience cannot understand either phrase. Overlap
+may tighten pacing; it may never sacrifice comprehension. This extends
+Section 6/10.5's existing safety-invariant discipline — a new permanent
+deterministic rule, not a benchmark-specific special case.
+
+### 11.4 Authority and pipeline placement
+
+Overlap is PHYSICAL/PACING behavior. It must NOT change semantic
+membership, choose a different BestTake, merge distinct propositions,
+create new speech, repair a bad retry family, override meaning safety,
+override Selection Freeze, invent words, or hide a semantic mistake.
+Canonical order (restates and extends Section 5's Milestone-1 progression
+and Layer 7's existing Boundary-then-render placement — inserts a named
+target sub-stage, does not renumber the 20 layers):
+
+```
+Selection / BestTake (Layer 6)
+        v
+Selection Freeze
+        v
+Boundary (Layer 7 -- safe clip start/end, dead-edge removal, ENTRY/EXIT)
+        v
+Dialogue / Pacing Transition  <-- NEW target sub-capability, Layer 7's
+        v                          own execution boundary, NOT a new layer
+Renderer (Layer 7 execution / render_plan.py)
+```
+
+Overlap occurs strictly AFTER semantic selection is frozen and AFTER
+Boundary has established safe edges — it is a target consumer of
+Boundary's output, never a replacement for it. Boundary remains
+responsible for safe clip start, safe clip end, dead-edge removal, and
+ENTRY/EXIT cleanup, unchanged. Overlap controls how two already-safe
+neighboring clips interact in time; it must never independently cut
+through required speech.
+
+### 11.5 UI contract (target, not implemented)
+
+- **Label:** `Overlap`. **Type:** toggle.
+- **OFF:** normal tight/hard transitions; no intentional dialogue overlap.
+- **ON:** CutSell MAY use speech-transition overlap where safe and useful
+  — this is a permission, not a command. The engine still decides WHERE
+  overlap is safe; per-join clarity/safety continues to govern every
+  join even when the toggle is ON. "Overlap ON" never means "force
+  overlap at every cut."
+- The UI must never expose internal engine terminology: `overlaps_
+  delivery`, `CASE B`, `delivery_event_count`, or any other Perception/
+  BestTake-internal field name. Optional helper copy (illustrative, not
+  final): "Faster, tighter speech transitions."
+
+### 11.6 Future Pacing/Dialogue Transition Intelligence (named, not authorized)
+
+A future implementation may consider: speech end/start timing, word
+timestamps, breath/pause, semantic phrase completion, neighboring clip
+pacing, sentence cadence, audio intelligibility, visual transition
+continuity, and narrative energy. No threshold or algorithm is authorized
+by naming these inputs here, per Section 6's anti-loop contract.
+
+---
+
+## 12. iOS Native Swift Foundation — Product/Platform Doctrine (D-129)
+
+**Status: additive product/platform doctrine, documentation only.** This
+section does not change any engine layer, does not authorize any Swift/
+Xcode/camera/upload/UI implementation, and does not change
+`cutsell_worker/*.py`. It formalizes iOS as a required, parallel product
+foundation and records an HONEST inventory of what already exists in
+THIS repository, since `mobile/ios/` was found to already contain real
+Swift source — this section documents that truthfully rather than
+treating iOS as greenfield.
+
+### 12.1 Honest current-repo inventory (verified by direct inspection, this task)
+
+`mobile/ios/` contains an XcodeGen-driven iOS app skeleton: `project.yml`
+(no committed `.xcodeproj`, no `Package.swift` — Xcode project generation
+is XcodeGen-based, `xcodegen generate`, unverified in this session) and
+27 Swift source files under `mobile/ios/CutSell/` (~3,790 lines total).
+`project.yml` already declares `NSCameraUsageDescription`,
+`NSMicrophoneUsageDescription`, `NSPhotoLibraryUsageDescription`, and
+`NSPhotoLibraryAddUsageDescription` Info.plist strings, and a
+configurable `CutSellAPIBaseURL` (defaults to `http://127.0.0.1:8000` in
+`APIClient.swift`, overridable via `UserDefaults`, `https`/`http` scheme
+validated). `KeychainStore.swift` persists the auth session via Keychain,
+not `UserDefaults`/plaintext. A targeted scan of the Swift sources for
+embedded API keys/secrets found none.
+
+**This inventory is a truthful file/responsibility mapping, not a
+functional or quality claim.** No build was attempted, no simulator or
+physical-device run was performed, and no decision-log (`D-xxx`) entry
+prior to this one records any iOS build, test, or QA pass. Per this
+document's own honesty requirement: **iOS status is SOURCE PRESENT / NOT
+BUILD-VERIFIED / NOT DEVICE-VERIFIED / NO TESTFLIGHT** — never
+characterized as a proven, working, or shippable app from this inventory
+alone.
+
+Apparent (filename/import-based, unverified) responsibility mapping
+against Section 12.7's target module list:
+
+| Target module | Apparent existing file(s) |
+|---|---|
+| Camera | `CameraCaptureView.swift`, `CameraController.swift` (front/back `AVCaptureDevice.Position`, start/stop), `CameraPreview.swift` |
+| MediaImport | `NewCutView.swift`, `PickedMediaTransfer.swift` (imports `PhotosUI`) |
+| MediaMetadata | `VideoPreparation.swift` |
+| Upload | `MultipartUploadManager.swift`, `BackgroundPartUploader.swift`, `UploadResumeStore.swift`, `OverlayUploadManager.swift` |
+| ProcessingStatus | `ProcessingView.swift`, `NotificationCenterModel.swift` |
+| Playback | `DraftPlaybackView.swift` (imports `AVKit`), `VisualTimelineView.swift`, `TimelineAssets.swift` |
+| Editor | `DraftEditorView.swift`, `DraftEditorViewModel.swift`, `EditorExtrasView.swift` (imports `PhotosUI`) |
+| ExportShare | `FinishedExportActionsView.swift` (imports `PhotosUI`) |
+| Networking | `APIClient.swift`, `KeychainStore.swift` |
+| Models | `Models.swift`, `JSONValueHelpers.swift` |
+| Diagnostics | `AppState.swift`, `PendingCutStore.swift`, `ProjectsView.swift` (no dedicated diagnostics/logging module apparent) |
+| App shell | `CutSellApp.swift` |
+
+No mapping above claims a target capability (Section 12.4's minimum
+vertical slice) is functionally COMPLETE, correct, or tested — only that
+source purporting to address it exists. Whether it satisfies Section 12.4
+item-by-item requires the real-device QA this section requires below
+(12.8), not authorized by this document.
+
+### 12.2 iOS product principle
+
+CutSell must validate the engine against footage produced by the actual
+mobile capture environment users will use — the worker must not assume
+every real iPhone RAW looks like the Video00 fixture set (Section 12.5).
+iOS foundation work should therefore begin, and continue, BEFORE the
+entire engine/product is considered beta-complete, running IN PARALLEL
+with engine development. It does not replace or block current RAW →
+Cut.ai engine work (Milestone 1, Section 5) — see Section 12.10.
+
+### 12.3 iOS technology direction
+
+Canonical native direction: **Swift / SwiftUI**, with Apple-native media
+frameworks as appropriate (conceptually: `AVFoundation`, `Photos`/
+`PhotosUI`, `AVKit`/`AVPlayer`, `URLSession`/background transfer APIs,
+`FileManager`/local media storage) — consistent with, not a departure
+from, the frameworks the existing `mobile/ios/CutSell/` sources already
+import per Section 12.1. No new implementation is authorized by naming
+this direction.
+
+### 12.4 iOS minimum vertical slice (target milestone, not a completion claim)
+
+The first iOS milestone is a REAL-DEVICE INGESTION / DELIVERY HARNESS,
+not the complete polished editor. Minimum required capabilities: (1)
+launch native app shell; (2) camera permission; (3) microphone
+permission; (4) Photo Library permission/access; (5) record video; (6)
+front camera; (7) back camera; (8) stop recording; (9) retake/delete
+local take before upload; (10) import existing video from Photos; (11)
+vertical 9:16 capture compatibility; (12) preserve real source
+orientation metadata; (13) detect/log codec, container, duration,
+resolution, FPS, variable-frame-rate when detectable, audio format/sample
+rate, orientation, front-camera mirroring metadata; (14) upload RAW to
+CutSell backend; (15) upload progress; (16) retry failed upload safely;
+(17) background/interrupted upload strategy; (18) receive processing/job
+status; (19) receive completed CutSell render; (20) play result
+on-device; (21) save/export result; (22) share result through native iOS
+share mechanisms when appropriate. Section 12.1's table names apparent
+existing source per item; none of the 22 is asserted DONE by this
+document.
+
+### 12.5 iOS media reality contract
+
+The engine must eventually be tested against real iPhone media including
+HEVC/H.265 (where produced by device/settings), H.264, MOV/MP4, variable
+frame rate, high-resolution capture, front-camera mirroring, rotation/
+orientation metadata, interrupted recordings, long recordings, large
+files, different iPhone generations, and different supported iOS
+versions. The worker must not assume all phone RAWs look like Video00
+fixtures (extends the existing Video00 QA-reference doctrine in
+`CLAUDE.md`'s quality-ladder section — those references stay QA-only and
+this does not change that).
+
+### 12.6 iOS → engine ingestion contract
+
+The iOS layer should deliver immutable original-source identity to the
+engine. Required conceptual upload metadata: asset id, local/source
+filename, duration, codec, container, resolution, fps/frame-rate
+metadata, orientation, audio metadata, capture/import origin, and source
+timestamp metadata where applicable. Source RAW remains immutable under
+this document's Section 9 (D-107) non-destructive-editing doctrine and
+D-111's restated invariant (Section 10.5) — this section does not change
+that doctrine, it names iOS as one of the producers that must honor it.
+
+### 12.7 iOS non-destructive editor compatibility
+
+The future iOS editor must remain compatible with CutSell's canonical
+**PRESELECTED / NOT_PRESELECTED** source-range model (Section 9) — the AI
+result is an editable draft, never a destructive mutation of source
+media. Future editor behavior should be able to support trim, extend
+source handles, restore source range, remove, reorder, split, captions,
+overlays, audio controls, and undo/redo, and future alternate-take/manual
+controls ONLY if product scope later authorizes them. **This document
+does NOT reintroduce automatic SWAP into Clean Cut V1** — D-019's
+KEEP/DISCARD-only doctrine and `CLAUDE.md`'s SWAP-out-of-scope decision
+are unchanged; `draft_edits.py`'s manual editor-layer `swap_take` remains
+the distinct, already-carved-out product layer CLAUDE.md already names.
+
+Target future modular Swift package structure (conceptually): `CutSellApp`,
+`Camera`, `MediaImport`, `MediaMetadata`, `Upload`, `ProcessingStatus`,
+`Playback`, `Editor`, `ExportShare`, `Networking`, `Models`,
+`Diagnostics` — Section 12.1's table already maps most of these onto
+existing files informally within one target, without Swift Package
+Manager module boundaries. If SPM modules are used in a future
+implementation, module boundaries should stay aligned to this list; not
+every module needs to become a separate package prematurely — the goal
+is maintainable native architecture, not package proliferation.
+
+### 12.8 iOS Overlap UI requirement
+
+The future iOS editing/settings surface must support a toggle labeled
+`Overlap` (Section 11.5), wired to the canonical internal feature name
+`dialogue_overlap_enabled` (Section 11.1) — never exposing the internal
+performance term `overlaps_delivery`. Not implemented by this document.
+
+### 12.9 iOS privacy, security, and observability requirements (target)
+
+**Privacy/permissions.** Camera, Microphone, and Photos usage require
+correct Apple permission declarations and user-facing reasons; `project.
+yml` already declares placeholder strings for all three (Section 12.1) —
+final approved user-facing copy is NOT invented by this document.
+
+**Auth/security (target).** Authenticated upload requests; no API/
+provider secrets embedded in the iOS client (Section 12.1's scan found
+none today); signed/temporary upload access where appropriate; the
+backend owns provider credentials (consistent with this repo's existing
+provider-abstraction doctrine); TLS only (`APIClient.swift` already
+validates `https`/`http` scheme, defaulting to a local dev URL); a local
+temporary-media cleanup policy; no silent upload of media without a
+user-initiated action/product flow.
+
+**Observability (target).** The real-device ingestion harness should log
+diagnostically: device model, iOS version, capture/import source, codec,
+resolution, fps, orientation, duration, file size, audio format, upload
+start/end, upload retry, backend job id, processing duration, and render
+playback success/failure — without logging private media content
+unnecessarily.
+
+### 12.10 iOS real-device QA requirement (gates beta, not Milestone 1)
+
+Before TestFlight beta closure, CutSell must be proven on physical
+iPhones. Simulator-only success is insufficient for camera, microphone,
+encoding, orientation, background upload, large-file handling, and
+playback/export. This requirement is downstream of, and does not block,
+the current engine milestone (Section 12.2/12.11).
+
+### 12.11 iOS parallel delivery roadmap (not an authorization for any phase)
+
+- **Phase 0** — canonical architecture/docs (this section).
+- **Phase 1** — Swift app shell + real camera/import/upload/playback
+  vertical slice. Per Section 12.1, SOURCE EXISTS in this repo mapping to
+  most of Section 12.4's items by file name; build/device verification of
+  this phase is NOT yet recorded in any decision-log entry.
+- **Phase 2** — real-device ingestion QA against the CutSell engine.
+- **Phase 3** — editable mobile draft/timeline.
+- **Phase 4** — Overlap toggle (Section 11) + pacing controls and other
+  editor settings.
+- **Phase 5** — signing/provisioning/TestFlight readiness.
+
+No phase is implemented, started, advanced, or authorized by this
+document.
+
+### 12.12 Engine roadmap relationship
+
+The current engine milestone remains unchanged: **RAW → CLEAN RAW →
+CUT.AI COMMERCIAL PARITY** (Section 5, Milestone 1). The iOS track runs
+IN PARALLEL and does not block D-128 (multimodal fallback) or any other
+authorized engine work merely because the complete iOS editor is
+unfinished. Before beta is considered physically/product-complete,
+real-iPhone capture/import/upload/playback validation (Section 12.10) is
+required.
+
+### 12.13 Canonical product architecture map
+
+This does not create a second engine — it places the existing 20-layer
+engine (Section 2) inside its real product context:
+
+```
+iOS CAPTURE / IMPORT
+        v
+IMMUTABLE RAW INGESTION  (Section 9 / 12.6 -- source-range handle)
+        v
+CUTSELL PERCEPTION / UNDERSTANDING  (Layers 1-4)
+        v
+CLEAN CUT / BESTTAKE / BOUNDARY  (Layers 5-9)
+        v
+PACING / DIALOGUE TRANSITION  (Section 11 -- Layer 7's execution boundary)
+        v
+RENDER  (Layer 7 execution)
+        v
+IOS EDITABLE DRAFT / PLAYBACK / EXPORT  (Section 12.7)
+```
+
+### 12.14 No implementation authorization (binding, restates Section 6)
+
+Architecture is not authorization. This section does NOT authorize:
+creating an Xcode project, Swift code, camera implementation,
+`AVFoundation` work, UI work, Overlap engine behavior, transition-timing
+changes, backend API changes, TestFlight submission, Apple signing,
+provider calls, or a RAW run. Every implementation requires its own
+bounded task, per Section 6's anti-loop/execution contract.
+
+---
+
+No change to Section 2's 20 layers, Section 3's status table, Section 9,
+Section 10, or any accepted D-096/D-097.x/D-107/D-108/D-109/D-110/D-111/
+D-128 authority contract. See `docs/CUTSELL_DECISIONS.md` D-129 for the
+decision-log entry recording Sections 11-12's doctrine.
