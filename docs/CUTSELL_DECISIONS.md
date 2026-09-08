@@ -18835,3 +18835,353 @@ TestFlight, no Swift/iOS. Exactly ONE Gemini workflow dispatch this task
 to authorize Phase 3 DESIGN (never implementation) using OpenAI as the
 selected candidate, and/or a future bounded Gemini prompt-iteration task,
 is the Product Owner's decision, not made here.
+
+
+## D-141 -- multimodal BestTake fallback Phase 3: bounded authoritative activation DESIGN (no implementation)
+
+**Status: DESIGN ONLY. Zero production code changed. Zero provider call.
+Zero live activation.** This entry is the durable record of the Phase 3
+architecture/authority contract for a FUTURE bounded activation of the
+D-140-selected provider (OpenAI `gpt-4o-mini` under the D-138 hardened
+prompt) inside live BestTake Class B resolution. Nothing here is enabled
+by this entry; Phase 3A/3B/3C (Section 9) remain future, separately
+authorized work.
+
+**1) Pipeline placement audit (`cutsell_worker/pipeline.py`,
+`cutsell_worker/take_judge.py`).** `take_judge.py` is the deterministic
+fail-open DeliveryScorer baseline (`rank_takes`/`score_take` plus D-097
+cleanliness-evidence re-ranking) -- it has no semantic authority, no
+Freeze/Boundary reference, and feeds `ranked`/`local_selected_clip_id`
+upstream of everything else. In `pipeline.py::build_flow_b_draft`, the
+current D-128 `detect_class_b_trigger`/`fallback_trigger_diagnostics`
+call site (lines ~1118-1202) sits **inside the per-family judge-group
+loop, strictly AFTER** `_semantic_best_take` has already produced the
+final `selected_clip_id` (the structured BestTake winner, line ~1031-1039)
+and AFTER the `TakeGroup` carrying that winner has been appended to
+`groups` (line ~1053) -- i.e. after Selection has already decided. It
+runs **strictly BEFORE** two later stages: (a) "Pass 4" physical boundary
+work inside the same function (comment at line ~1207: "only after retry
+families have been judged and a logical winner has been chosen do we
+touch physical edit boundaries"), and (b) Selection Freeze, which is a
+separate downstream module (`selection_boundary_contract.py`'s
+`freeze_selection_contract`, consuming `draft.selected` after
+`canonical_edit_plan.py`/`FinalEditReviewer` review) never called from
+inside `build_flow_b_draft` itself. **CONCLUSION: the current shadow call
+site CAN evolve into Phase 3A without architectural conflict** -- it
+already sits at exactly the correct authority boundary (after Selection
+has computed a structured winner, before Boundary/Freeze act on it), so
+a Phase 3A/3B upgrade only needs to add a real (shadow-compared, then
+bounded-authoritative) provider call at this SAME site, never move it.
+The one seam to design for (not built now): the loop currently computes
+`fallback_trigger_decision` once per eligible family with no returned
+value threaded back into `selected_clip_id` -- Phase 3 needs a new,
+narrow return path (Section 4's `BEST_TAKE` outcome only) from this call
+site back into the `selected_clip_id`/`TakeGroup` assignment, gated by
+every firewall in Sections 2-3, never a general rewrite of the loop.
+
+**2) Phase 3 authority scope -- Class B only, 14 eligibility conditions.**
+Phase 3 authority is scoped to exactly the CLASS_B trigger class D-128
+already defines, extended with 5 Phase-3-specific gates that do not exist
+in the current shadow detector. All 14 are necessary (AND, not OR); any
+single failure means NOT_ELIGIBLE and the structured winner stands
+untouched:
+1. `len(member_ids) >= 2` (not a singleton family) [D-128 step 1]
+2. a semantic winner exists [D-128 step 2]
+3. a DeliveryScorer winner exists [D-128 step 3]
+4. semantic winner == DeliveryScorer winner (agreement, not conflict)
+   [D-128 step 4]
+5. CASE B evidence exists for the winner [D-128 step 5]
+6. at least one other meaning-sufficient member exists [D-128 step 6]
+7. at least one safety-eligible (non-vetoed) alternative exists
+   [D-128 step 7]
+8. that alternative has CASE B evidence [D-128 step 8]
+9. that alternative factually dominates via `_factual_dominance`'s pure
+   partial-order comparison [D-128 step 9]
+10. the Phase 3 kill switch (Section 8) is ON for this deployment
+11. the D-123 firewall (Section 3) is clear -- no `SEMANTIC_DELIVERYSCORE
+    _DISAGREE` shape anywhere in this family's history (permanent, see
+    Section 3; condition 4 above already excludes live disagreement, this
+    condition additionally excludes a family whose disagreement was only
+    resolved by a prior bypass)
+12. the Proposition Identity firewall (Section 3) is clear -- winner and
+    alternative are already established (upstream, before this call) as
+    the SAME proposition, never inferred by the arbiter itself
+13. the Complementary firewall (Section 3) is clear -- no complementary/
+    composite relationship recorded for this family (the arbiter is
+    asked to pick a winner among alternatives of one idea, never to
+    merge two)
+14. the one-call-per-family budget (Section 6) has not already been
+    spent for this family in this render
+
+**3) Explicit ineligible conditions (non-exhaustive list, always wins
+over eligibility):** any D-128 step 1-9 failure (see Section 2, items
+1-9, restated as negatives); a family already flagged
+`case_b_conflict_present` for a reason OTHER than the exact D-128
+shape (i.e. any exotic/ambiguous conflict shape this design does not
+enumerate); a family with a recorded complementary/composite
+relationship; a family where the winner or the alternative carries a
+different Proposition Identity (D-111) even under superficial "same
+product/topic/opener" similarity; a family where Boundary has already
+recorded a physical-only concern (post-Freeze) -- Phase 3 never runs
+after Freeze; missing/partial media for any finalist; a family already
+consulted once this render (Section 6); the kill switch OFF; any
+`safe_arbitrate` fail-open status other than `BEST_TAKE`-with-full-
+validation (Section 5/7) for the `BEST_TAKE` outcome specifically --
+every other status (Section 7) always preserves the structured winner
+regardless of eligibility.
+
+**D-123 firewall (permanent, no override).** D-123's fast-path gate
+question -- semantic winner vs DeliveryScorer winner disagreement --
+is answered upstream, before this call site, and Phase 3 eligibility
+condition 4 already requires AGREEMENT, not disagreement, to even reach
+Class B. Phase 3 must never be given authority to resolve a live
+semantic/DeliveryScorer disagreement; that remains D-123's own bounded
+gate (which only ever prevents an early return, never picks a winner
+from CASE B evidence itself). This firewall is structural (a precondition
+of Class B itself, not a runtime check the arbiter could get wrong) and
+is declared PERMANENT: no future Phase may repurpose the Class B
+fallback arbiter to adjudicate a live D-123 disagreement.
+
+**Proposition Identity firewall (D-111 reasserted).** "Same product/
+topic/opener" is explicitly insufficient identity evidence (D-111,
+D-098 Section 10). Phase 3 never asks the arbiter to determine whether
+two clips are the same proposition -- that determination must already
+be settled by the time a family reaches this call site (family
+membership itself is a proposition-identity decision made upstream).
+The arbiter's ONLY question, for every outcome including `BEST_TAKE`, is
+"of these already-same-proposition finalists, which realization is
+better/equivalent/needs a trim" -- never "are these the same idea."
+
+**Complementary firewall.** Phase 3 grants zero composite/merge/SWAP
+authority. The bounded output vocabulary (Section 4) contains no
+KEEP_BOTH_COMPLEMENTARY, NEW_COMPOSITE, or SWAP option -- consistent
+with D-019's KEEP/DISCARD-only doctrine and the current SWAP-out-of-
+scope decision. If a family's finalists are complementary rather than
+alternative realizations of the same delivery, that family is already
+ineligible (Section 3) before an arbiter call is even considered.
+
+**Boundary firewall.** `GOOD_TAKE_TRIM_ENTRY`/`GOOD_TAKE_TRIM_EXIT`
+(Section 4) are advisory-only signals about where a legitimate physical
+trim point MIGHT be -- they are recorded as diagnostics for the existing
+post-Freeze BoundaryEngine to consider, and NEVER replace the structured
+BestTake winner, never change membership, and never themselves perform a
+physical edit. BoundaryEngine remains the sole final physical-timing
+authority (unchanged from the current contract); Phase 3 adds a hint
+channel, never a second Boundary authority.
+
+**4) Per-outcome authority contracts (bounded vocabulary: `BEST_TAKE`,
+`EQUIVALENT`, `GOOD_TAKE_TRIM_ENTRY`, `GOOD_TAKE_TRIM_EXIT`,
+`UNCERTAIN`):**
+- **`BEST_TAKE`** -- the ONLY outcome that may potentially replace the
+  structured winner. Requires ALL of: the response's own field says which
+  finalist wins and validates against `validate_multimodal_besttake_
+  response` (already-existing schema validator, unchanged); the winning
+  finalist is a family member currently marked meaning-sufficient
+  (Section 2 condition 6's alternative, not an arbitrary id); the
+  response passes `_meaning_safety_violation` (existing, unchanged) with
+  zero violations; the family passes ALL 14 Section-2 conditions; the
+  winner-would-change delta is logged (never silently applied without an
+  explicit before/after record, matching D-123's existing `winner_would_
+  change` observability convention); the safety-veto set
+  (`_single_winner_safety_veto`, unchanged, D-101/D-103) still excludes
+  the same ids it excluded before the call (an authoritative response
+  can never resurrect a safety-vetoed candidate); and this is the
+  family's only call this render (Section 6). Any single guard failure
+  degrades the outcome to advisory-only (winner unchanged), never a
+  partial override.
+- **`EQUIVALENT`** -- preserves the structured winner exactly. Recorded
+  as corroboration only (the arbiter agrees no change is warranted).
+- **`UNCERTAIN`** -- preserves the structured winner exactly (matches
+  the existing `safe_arbitrate` fail-open doctrine: abstention is always
+  safe). Recorded for observability (Section 10), never penalized.
+- **`GOOD_TAKE_TRIM_ENTRY`** -- preserves the structured winner and
+  membership exactly; forwarded as an advisory hint to the post-Freeze
+  BoundaryEngine pass only (see Boundary firewall above).
+- **`GOOD_TAKE_TRIM_EXIT`** -- same as TRIM_ENTRY, advisory-only, exit
+  edge.
+
+**5) Confidence is diagnostic-only.** The response's confidence value is
+recorded on every outcome (Section 10 observability) but Phase 3 defines
+NO numeric confidence threshold anywhere in this design -- confidence is
+never compared against a cutoff to decide whether to trust a `BEST_TAKE`
+outcome. The Section 4 `BEST_TAKE` guard list is the entire acceptance
+test; confidence is read-only telemetry for human/QA review, matching
+this whole design's avoidance of score-based authority (mirrors
+`_factual_dominance`'s existing no-scores-no-weights partial-order
+precedent).
+
+**6) Fail-open contract + call budget.** All 8 existing `safe_arbitrate`
+statuses (`NOT_INVOKED, WOULD_INVOKE_SHADOW, ABSTAINED, ERROR,
+INVALID_RESPONSE, TIMEOUT, PROVIDER_ERROR, UNSUPPORTED_MEDIA,
+LOW_CONFIDENCE, COST_CEILING, MEANING_SAFETY_MISMATCH`) -- 11 in the
+current enum, all counted here as "8 required statuses" per the
+directive's framing of the core fail-open set -- map to **winner
+preserved, zero exception**; none of them may ever be interpreted as
+authorization to change `selected_clip_id`. Only a fully-validated
+`BEST_TAKE` response reaching Section 4's complete guard list may change
+the winner. Phase 3 authority is capped at **one provider call maximum
+per eligible family per render** -- eligibility is evaluated once, the
+call is made once if eligible, and the result (whatever it is) is final
+for that family in that render; there is no retry-on-abstain, no
+resampling, no majority vote.
+
+**7) Media boundary.** Exactly the existing `MultimodalFinalistInput`
+media contract: 2-3 finalists (the existing `MultimodalBestTakeGatePolicy
+.max_finalists_per_request=3`, unchanged), same fields already defined
+on that dataclass (no new fields invented here) -- never the full RAW
+source, never sibling families, never other retry groups, never the
+Video00 QA oracles (which remain QA-ONLY per the D-095 quality-ladder
+doctrine and must never reach a production prompt).
+
+**8) Audio truth.** The arbiter perceives vision + transcript + timing
+only -- it does NOT genuinely perceive audio (no waveform/prosody/tone
+input in the current `MultimodalFinalistInput` contract, and Phase 3
+proposes adding none). Any prompt language implying audio judgment
+(e.g. "delivery energy") must be understood as inferred from
+transcript+visual cues, never a real audio-perception claim -- this
+must never be mis-described as genuine audio understanding in any future
+report or doctrine.
+
+**9) Provider-swappability + kill switch.** The provider stays fully
+swappable behind the existing `MultimodalBestTakeArbiter` Protocol
+(unchanged) -- `OpenAIMultimodalBestTakeArbiter` (D-138/D-140-selected)
+is the concrete Phase 3 candidate, but nothing in this design binds
+Phase 3 authority to a specific provider class; a future provider swap
+(e.g. a hardened Gemini prompt iteration, D-140 Section 12's secondary
+recommendation) would satisfy the Protocol without touching this
+authority contract. Kill switch (design only, not built): a single
+boolean flag, `multimodal_besttake_authority_enabled` (env-var-backed,
+mirroring the repo's existing `CUTSELL_CLEAN_CUT_CORE_V1`-style
+rollback convention), read once at the SAME call site identified in
+Section 1; OFF (the required default until Phase 3C is authorized) means
+the call site behaves EXACTLY as D-128 Phase 1 does today (shadow-only,
+diagnostics only, `fallback_provider_invoked`/`fallback_winner_changed`
+always False) -- the switch does not add a second code path, it gates
+whether the SAME call is allowed to act on its own `BEST_TAKE` result.
+
+**10) Activation sequence -- Phase 3A -> 3B -> 3C (never skip a stage):**
+- **Phase 3A (shadow-compared authoritative code, winner unchanged):**
+  the real provider call is made at the Section-1 call site whenever
+  Section-2 eligibility holds; the FULL Section 4 guard list and all
+  firewalls (Section 3) run for real; the outcome and every guard's
+  pass/fail is recorded (Section 10 observability); but the kill switch
+  (Section 9) stays OFF, so `selected_clip_id` is NEVER changed by the
+  result even when every guard would have passed. This is where the
+  code that WOULD become authoritative is exercised end-to-end for the
+  first time, safely.
+- **Phase 3B (one bounded real-media qualification):** exactly one
+  authorized run against real Video00 media with the kill switch still
+  OFF, evaluated against 5 specific control types: (i) a known Class B
+  family where the deterministic alternative is CORRECT (arbiter should
+  say `BEST_TAKE`-agrees or `EQUIVALENT`); (ii) a known Class B family
+  where the deterministic winner is CORRECT and should NOT change
+  (arbiter should say `EQUIVALENT`/`UNCERTAIN`, testing against exactly
+  the D-140 pimples/papillary-shaped failure mode); (iii) a D-123-
+  protected disagreement-shaped family (must never even reach eligibility
+  -- proves the firewall in real conditions, not just in fixtures); (iv)
+  a Proposition-Identity-adjacent family (same opener, different
+  proposition -- must be ineligible upstream, proves the Section 3
+  Proposition firewall against real footage); (v) a genuinely ambiguous
+  family (arbiter should abstain `UNCERTAIN`, proving fail-open holds
+  under real media, not just synthetic fixtures). No winner change is
+  permitted in Phase 3B regardless of result quality -- it is a
+  qualification run, not an activation.
+- **Phase 3C (bounded authority enabled):** the kill switch turns ON
+  ONLY after Phase 3B's evidence (Section 11) is reviewed and accepted by
+  the Product Owner. 3A and 3B may never be skipped; there is no path
+  from "design approved" directly to 3C.
+
+**11) Activation evidence required before 3C (10 proof points, no
+arbitrary percentage threshold):** (1) Phase 3A shadow-compared logs
+exist showing the guard list evaluated on at least one real render; (2)
+Phase 3B's exact 5 control types (Section 10) were each exercised at
+least once against real Video00 (or equivalent real) media; (3) control
+(ii) (a correct deterministic winner) produced `EQUIVALENT`/`UNCERTAIN`,
+never a confident wrong `BEST_TAKE` -- direct regression proof against
+the D-140 Gemini failure mode, required regardless of which provider is
+used; (4) control (iii) (D-123 disagreement shape) never reached
+eligibility -- the firewall held under real conditions, not just unit
+tests; (5) control (iv) (Proposition-Identity-adjacent) never reached
+eligibility; (6) control (v) (genuine ambiguity) abstained safely; (7)
+zero meaning-safety violations across every Phase 3A/3B call; (8) the
+one-call-per-family budget (Section 6) was never exceeded in either
+phase; (9) every observability field (Section 12) was populated and
+human-reviewable for every call made; (10) a human (Product Owner or
+delegated QA reviewer) has read the Phase 3B transcript-level evidence
+and explicitly signed off -- this is a Human Editorial Acceptance
+condition (D-091 condition F), never a Claude self-certification, exactly
+matching D-062's "an engine change is never self-certified release-ready
+by the role that implemented it."
+
+**12) Observability field design (15 named fields, extending the D-128
+`fallback_trigger_diagnostics` row rather than replacing it):**
+`fallback_phase` (`"3A"`/`"3B"`/`"3C"`/absent-if-Phase-1), `fallback_
+kill_switch_enabled` (bool), `fallback_eligibility_conditions_met`
+(list of which of the 14 Section-2 conditions held), `fallback_
+ineligible_reason` (Section 3 label, if any), `fallback_provider_
+invoked` (bool -- flips real once Phase 3A calls for real, unlike
+Phase 1's permanent False), `fallback_provider_name` (Protocol
+implementation class name), `fallback_outcome` (one of the 5 bounded
+vocabulary values or a `safe_arbitrate` fail-open status), `fallback_
+confidence` (raw value, diagnostic-only per Section 5), `fallback_
+reason_basis` (one of the D-138 8 general reason-basis labels),
+`fallback_winner_would_change` (bool, computed even when the kill switch
+is OFF -- this is what makes Phase 3A "shadow-compared"),
+`fallback_winner_changed` (bool -- only True in Phase 3C with the switch
+ON and every guard passed), `fallback_guard_failures` (list of which
+Section-4 `BEST_TAKE` guards failed, if the outcome degraded from a
+would-be `BEST_TAKE`), `fallback_d123_firewall_clear` (bool),
+`fallback_proposition_firewall_clear` (bool), `fallback_call_budget_
+remaining` (0 or 1, per family per render).
+
+**13) Non-destructive editing invariants.** Every invariant already
+guaranteed by the surrounding architecture continues unchanged under
+Phase 3: no content is ever deleted by this authority (a `BEST_TAKE`
+change only re-points which already-meaning-sufficient member is the
+family's `selected_clip_id`; DISCARD semantics remain KEEP/DISCARD-only,
+D-019); a rejected/unselected member is never physically removed by this
+call, only left un-selected exactly as today; the Freeze/Boundary
+contract (`selection_boundary_contract.py`) is untouched -- Phase 3 acts
+strictly BEFORE Freeze (Section 1), so `freeze_selection_contract`'s
+semantic-token-stream hash still freezes whatever `selected_clip_id`
+Phase 3 (if authoritative) or the deterministic path (otherwise) produced,
+with no special-casing needed downstream.
+
+**14) D-134 Overlap firewall (reasserted, verified again this task via
+`grep -rn "dialogue_overlap_enabled\|audio_overlap\|SourceAsset" ` against
+every file this design discusses -- zero matches in `multimodal_besttake_
+*.py`).** No element of this Phase 3 design reads or depends on
+`dialogue_overlap_enabled`, `audio_overlap`, or `SourceAsset.metadata`
+(except metadata may be used, as already, purely to LOCATE media bytes --
+never as editorial signal). Phase 3 authority and Overlap/Pacing
+Transition are, and remain, architecturally independent tracks.
+
+**15) Overlap/Pacing status (explicit, not deferred by this task).**
+Overlap/Pacing Transition remains ACTIVE in the current RAW->Cut.ai
+milestone (D-098 Sections 11-12; NOT deferred, NOT paused by D-141). The
+next major build block after D-141 is Dialogue/Pacing Transition/Overlap
+implementation, unless a smaller proven Level-1 blocker precedes it
+(matching the standing D-097.11 status: the remaining Level-1 mass is
+Product Owner territory pending a decision, so Overlap is the next
+default target). **D-141 itself implements none of it** -- this is a
+status note only, carried forward for the next authorized task.
+
+**16) Provider-selection thread status: CLOSED for the current
+milestone** per this directive's explicit "NO MORE MODEL BAKEOFF"
+instruction. D-136 through D-140 exhausted the currently-authorized
+comparison scope (OpenAI gpt-4o-mini D-138 hardened baseline vs Gemini
+2.5/3.6 Flash); no further provider comparison is in scope until a
+future task explicitly reopens it (e.g. the D-140 Section-12 secondary
+Gemini-prompt-iteration recommendation, which remains recorded but
+un-authorized).
+
+**Code changes: NONE.** This entry, plus the corresponding chat-delivered
+44-item report, are the only artifacts of D-141. No file under
+`cutsell_worker/` was modified. `git diff` against HEAD `818efc0` is
+empty except for this documentation commit. No provider call, no network
+call, no live pipeline change, no RAW/Modal/RunPod dispatch, no Swift/
+iOS/TestFlight work, no Overlap implementation.
+
+**HUMAN ACTION REQUIRED:** YES (condition A, product decision) --
+whether to authorize Phase 3A (shadow-compared authoritative code,
+winner still unchanged) is the Product Owner's decision, not made here.
