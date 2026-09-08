@@ -156,6 +156,41 @@ jobs:
 
           print(f"--- {REQUIRED_MODEL_ID} confirmed available and supports generateContent -- proceeding with bounded eval ---")
 
+          # D-139 diagnostic (post two identical PROVIDER_ERROR-on-every-case
+          # dispatches, runs 34210452645 and 34211227809, the second AFTER
+          # the confirmed camelCase inlineData/mimeType fix, both with zero
+          # useful evidence because safe_arbitrate intentionally swallows
+          # exception detail): ONE minimal, direct, text-only generateContent
+          # call -- bypassing the arbiter/safe_arbitrate wrapper entirely --
+          # to surface the REAL HTTP status/response body before spending
+          # the full 8-case batch on a call shape that might still be wrong.
+          import requests as _requests_diag
+          diag_url = f"https://generativelanguage.googleapis.com/v1beta/models/{REQUIRED_MODEL_ID}:generateContent"
+          diag_body = {"contents": [{"role": "user", "parts": [{"text": "Reply with the single word OK."}]}]}
+          try:
+              diag_resp = _requests_diag.post(
+                  diag_url,
+                  headers={"x-goog-api-key": api_key, "Content-Type": "application/json"},
+                  json=diag_body,
+                  timeout=30.0,
+              )
+              print(f"--- D-139 diagnostic call: HTTP {diag_resp.status_code} ---")
+              print(f"--- D-139 diagnostic response body (first 2000 chars): {diag_resp.text[:2000]} ---")
+              diag_resp.raise_for_status()
+              print("--- D-139 diagnostic call SUCCEEDED -- proceeding with the full 8-case bounded eval ---")
+          except Exception as diag_exc:
+              summary = {
+                  "schema_version": "cutsell.multimodal_besttake_gemini_eval.v1",
+                  "status": "BLOCKED_DIAGNOSTIC_CALL_FAILED",
+                  "diagnostic_exception_class": type(diag_exc).__name__,
+                  "diagnostic_exception_str": str(diag_exc)[:2000],
+              }
+              print("--- D-139 Gemini eval BLOCKED: minimal diagnostic generateContent call itself failed ---")
+              print(json.dumps(summary, indent=2, sort_keys=True))
+              with open(out_path, "w") as f:
+                  json.dump(summary, f, indent=2, sort_keys=True)
+              raise SystemExit(0)
+
           arbiter = GeminiMultimodalBestTakeArbiter(api_key=api_key)  # real HTTP call, never a fake -- this IS the bounded live call this task authorizes.
           with tempfile.TemporaryDirectory() as workdir:
               results = run_phase2_eval(arbiter, workdir=workdir)
