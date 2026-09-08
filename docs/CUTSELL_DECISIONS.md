@@ -19810,3 +19810,307 @@ implicate; no J/L/micro-overlap implementation; no iOS work.
 the Section 35 root-cause investigation (and, separately, whether/when to
 revisit the unseen-RAW generalization question once that investigation
 concludes) is the Product Owner's decision, not made here.
+
+
+## D-144 -- BestTake / family-formation stability forensic (Pimples/espinillas), root-cause only
+
+**Status: FORENSIC ONLY. Zero code changes. Zero RAW. Zero provider calls.**
+Investigates the D-143 Pimples/espinillas regression using persisted
+artifacts/decision-log text only.
+
+**1) Runs compared:** D-126 (Modal run `34172575066`, decision-log text,
+persisted D-125 tail-safe summary already quoted in D-126's own entry --
+no raw log re-fetched, none needed); D-135 (Modal run `34184212589`, this
+session's own decoded CI-log tail from the D-143 audit, retained in
+scratchpad); D-143 (Modal run `34226872846`, same). All three are the
+SAME canonical Video00 RAW under closely-related code (D-123 through
+D-142), never a different source.
+
+**2) Pimples/espinillas candidate map per run:**
+
+| run | family formed? | members | semantic winner | DeliveryScorer top | agree? | CASE B conflict | final selected | regression-QA (`pimples_bad_monolith_absent`) |
+|---|---|---|---|---|---|---|---|---|
+| D-126 (`34172575066`) | YES, `tg_dfa8f59296237ae030` | `clip_51e6a8e265a375059ea9` (winner, conf 0.95), `clip_c61869580931be9ba985` | `clip_51e6a8e265a375059ea9` | same | YES | `false` (no disagreement, D-123 never engaged) | `clip_51e6a8e265a375059ea9` (`single_semantic_winner`) | **FAILED** (`historical_bad_take_returned`) |
+| D-135 (`34184212589`) | **NO** -- `pimples_clips_present_but_no_multi_member_family_or_no_usable_realization_row` | 3 unrelated singleton pimples-adjacent clips (`657ed5262e1b`, discarded `...e587982a`, `824ed528e34d734426d4`) | n/a | n/a | n/a | n/a (no family) | (whichever singletons individually survived Boundary) | not evaluated as a distinct check this run's summary path (regression-QA still reported the OLDER 1-check-failure shape) |
+| D-143 (`34226872846`) | YES, `tg_26c069cdca871a3e0b` | `clip_37639d71f9f7fe05c868` ("También me salían espinillas. Era como un rush, una alergia."), `clip_f6762951b0ffb02b4283` ("También me salían espinillas en esta parte de aquí detrás de la oreja...") | `clip_f6762951b0ffb02b4283` | `clip_f6762951b0ffb02b4283` | YES | `false` | `clip_f6762951b0ffb02b4283` (`single_semantic_winner`) | **FAILED** (`historical_bad_take_returned`), plus NEW `pimples_micro_2_present` (`missing_required_segment`) and `pimples_micro_order` failures |
+
+Both Cut.ai AND Human Gold reject `clip_f6762951b0ffb02b4283` and
+`clip_51e6a8e265a375059ea9` respectively in D-126/D-143 -- in both cases
+the SAME shape: semantic label and DeliveryScorer independently agree on
+the wrong member, so D-123's disagreement-gated mechanism has nothing to
+gate.
+
+**3) Run-to-run field matrix:**
+
+| field | D-126 | D-135 | D-143 | stable? | first divergence point |
+|---|---|---|---|---|---|
+| retry-family formed for this pair | yes | **no** | yes | **NO** | **family/cluster formation (upstream of BestTake entirely)** |
+| family member set (when formed) | 2 members, acné-espalda-adjacent pair | n/a | 2 members, espinillas-adjacent pair (different specific clip ids/content emphasis than D-126) | n/a (different sub-shape both times a family forms) | same layer |
+| semantic winner vs DeliveryScorer top | agree | n/a | agree | stable WHEN a family forms | n/a |
+| D-123 `case_b_conflict_present` | false | n/a | false | stable WHEN a family forms | n/a |
+| `winner_path_after` | `SEMANTIC_FAST_PATH` | n/a | `SEMANTIC_FAST_PATH` | stable WHEN a family forms | n/a |
+| regression-QA `pimples_bad_monolith_absent` | FAILED | not the presenting failure this run (family didn't form, so no "monolith" to return) | FAILED | **NO across the 3 runs as a set**, but the underlying MECHANISM (agreement-on-wrong-pick once a family exists) is stable | family-formation |
+
+**The first divergence point is UPSTREAM of BestTake, D-123, and D-128
+entirely: whether the two real-world retry realizations are clustered
+into ONE retry family at all.** Once a family DOES form, the semantic-
+label/DeliveryScorer-agreement-on-the-wrong-member shape has repeated
+identically in kind (not necessarily the identical clip pair) across two
+separate runs (D-126, D-143) separated by many intervening commits --
+this is a genuine, reproducible, structural vulnerability, not one-off
+noise, even though its exact trigger (which specific pair forms a family,
+and which one of the two wins) varies.
+
+**4) Proposition identity result.** The espinillas/acné-adjacent
+candidates in this RAW genuinely intersect on "same symptom" (skin
+breakouts) but the two realizations differ meaningfully: one names a
+specific body location and comparison ("...en esta parte de aquí detrás
+de la oreja...") the other does not ("...Era como un rush, una
+alergia."). Per D-111 ("same symptom" is not sufficient evidence of same
+proposition), this audit cannot certify from these transcripts alone
+whether these are the SAME proposition (a retry of one intended
+statement) or genuinely DIFFERENT-but-adjacent audience beats about
+related but distinct symptom details. **This ambiguity is itself
+evidence for the primary root cause**: if proposition identity here is
+genuinely borderline, a provider-backed pairwise arbiter's own run-to-run
+variance on a borderline case is exactly the failure mode D-135 vs
+D-126/D-143's differing family-formation outcome would produce.
+
+**5) Retry identity result.** No evidence found that a candidate was
+mishandled as continuation/new-audience-beat/complementary in a way
+distinguishable from the proposition-identity ambiguity itself (Section
+4) -- the observed instability is at the boundary between "retry of the
+same idea" and "singleton," not between retry and some other relation
+class.
+
+**6) Family formation result -- mechanism identified in code, not
+guessed.** `cutsell_worker/pipeline.py::family_scoped_semantic_
+decisions` carries its OWN documented historical instance of this exact
+failure shape (D-094.3 F8 code comment, verbatim): *"Run 33983880111: the
+pimples monolith was 'winner' 0.96 in a window without the later
+delivery, 'alternate' 0.88 in the window holding all three takes (where
+the later delivery was 'winner' 0.95); the merge produced two 'winners',
+the ladder fell to DeliveryScorer and the monolith won."* The mechanism:
+`cutsell_worker/hybrid_session_cleanup.py::_overlapping_windows` splits a
+family's members into overlapping windows (`chunk_size=10`, `chunk_
+stride=5` by default -- pure, deterministic INDEX slicing over the
+already-assembled candidate tuple, confirmed by direct code reading, not
+itself the variance source). Each window is sent to a real, provider-
+backed `editorial_judge` (`hybrid_editorial.py`'s provider-neutral
+contract, backed by `hybrid_google.py` in production -- confirmed active
+in the Video00 path via the workflow's own `CUTSELL_HYBRID_LLM_ENABLED`/
+`CUTSELL_HYBRID_PROVIDER` env keys) which returns a COMPARATIVE "winner"/
+"alternate"/"failed" label PER WINDOW -- "best among the candidates THIS
+window saw," never a global judgment. The cross-window merge
+(`_decision_priority`: `failed`/`bts`=5 > `winner`=4 > `alternate`=3 >
+`keep`=2 > `uncertain`=1, then confidence) keeps each clip's HIGHEST-
+priority label across every window it appeared in. If clip A never shares
+a window with its true rival clip B, A can keep a spurious "winner" from
+a window that never saw B, while B independently earns its OWN correct
+"winner" in the window that DOES contain the full family -- two
+"winners," DeliveryScorer breaks the tie, and the DeliveryScorer signal
+(itself driven by hand-motion-reset/facial-expression EVENT COUNTS, which
+tend to correlate with a MORE ANIMATED, more assertive retake) can easily
+favor the WRONG one. `family_scoped_semantic_decisions` was built
+specifically to fix this by preferring the family-COMPLETE window's own
+labels when at least one such window exists -- **but this is a
+conditional mitigation, not an elimination**: when NO window happens to
+contain every family member simultaneously (a function of the family's
+member count vs. `chunk_size`/`chunk_stride` and where those members
+land inside the overlapping-window index slicing), the flawed global
+merge is still used, unchanged, exactly as it was before D-094.3 F8.
+Whether such a complete window exists for a GIVEN family in a GIVEN run
+depends on upstream candidate ordering/count, which is plausibly
+sensitive to run-to-run variance further upstream (ASR segmentation,
+attempt reconstruction) -- this audit did NOT verify that specific
+upstream stability directly (out of scope: no RAW, no live provider
+calls) and reports it honestly as unverified rather than assumed.
+
+**7) Semantic winner forensic.** When a family forms, the semantic
+winner and DeliveryScorer top AGREE in both D-126 and D-143 (`case_b_
+conflict_present=false` both times) -- so D-123 never has an opportunity
+to correct anything (D-123 only gates a DISAGREEMENT; a shared wrong
+answer is invisible to it by design, correctly so per D-123's own scope).
+What changed between the two runs is WHICH specific clip received the
+"winner" label and WHICH specific pair of realizations were even being
+compared -- consistent with Section 6's window-membership-dependent
+mechanism, not with a semantic CONFIDENCE threshold change (both runs
+report `semantic_winner_confidence: 0.95`, i.e. the confidence value
+itself is stable; the underlying CHOICE is not).
+
+**8) DeliveryScore forensic.** DeliveryScorer's own inputs (case_b_
+evidence: `delivery_event_count`, `count_by_kind`, `duration_by_kind`,
+`event_density`) are read, never invented, from `case_b_performance_
+evidence.py`'s aggregation over `positioned_performance_evidence.py`'s
+local vision-derived events. In D-143, the two members carry 8 vs 9
+delivery events (hand_motion_reset_candidate + facial_expression_shift_
+candidate) -- a real, if narrow, asymmetry that happens to favor the
+WRONG member this run. The ranking mechanism itself (`_factual_
+dominance`-style partial-order comparison, D-128's own precedent) is
+fully deterministic GIVEN its event-count inputs -- the RANKING DID NOT
+CHANGE; the CANDIDATE SET AND CONTENT DID (Section 3/6). Whether the
+underlying vision-derived event counts (`positioned_performance_
+evidence.py`'s consumer, ultimately a local/visual perception provider)
+are themselves stable frame-to-frame across repeated inference on the
+same source video was **NOT verified this task** (would require either a
+live re-run or a saved raw-event artifact this audit did not have access
+to) -- reported as an open determinism question (Section 15), not
+resolved.
+
+**9) CASE B forensic.** Both runs: CASE B evidence formed, non-actionable
+(`case_b_conflict_present: false` -- semantic and DeliveryScorer agree,
+so there is no conflict for CASE B to represent), never bypassed (no
+bypass is possible without a conflict), and irrelevant to the actual
+defect (the defect predates CASE B's own scope). D-135: CASE B not formed
+at all for this pair (no family existed to build evidence for).
+
+**10) Authority chain result (D-143's pimples family, exact sequence):**
+`semantic_fast_path_candidate = clip_f6762951b0ffb02b4283` (winner, conf
+0.95) -> `deliveryscore_top_candidate = clip_f6762951b0ffb02b4283` (same
+clip, so `_case_b_fast_path_conflict` finds no conflict, D-123 never
+consulted) -> `winner_path_after = SEMANTIC_FAST_PATH`, `final_reason =
+single_semantic_winner`, `final_selected_clip_id = clip_
+f6762951b0ffb02b4283`, `semantic_fast_path_bypassed = false`. **No later,
+weaker authority overwrote a stronger decision** -- there is only ONE
+decision point here (the initial semantic-fast-path return), and it was
+already wrong when it fired. This is emphatically NOT an authority-
+collision case (H); it is a wrong answer produced and accepted at the
+very first opportunity, upstream of every subsequent guard.
+
+**11) Downstream mutation check.** `boundary_engine_pass.py`'s post-
+Freeze pass, `human_boundary_polish_v5.py`, `selection_boundary_contract.
+py`'s freeze/enforce pair, and (D-142) `dialogue_pacing_transition.py`
+were all inspected for this family's specific clip ids across the run's
+diagnostics: none change membership or re-pick a winner (Boundary only
+ever trims edges of the ALREADY-selected clip; D-142 is diagnostics-only
+by its own regression-tested contract, Section 21 below). **D-142 does
+not contribute to this regression** -- confirmed both by its own code
+(no BestTake/grouping import, D-142's own tests) and by this run's
+evidence (the wrong winner was already fixed by the time Boundary/Pacing
+ever see the frozen selection).
+
+**12) Determinism audit:**
+
+| input | classification | basis |
+|---|---|---|
+| ASR (ideatext/timing) | UNKNOWN | not independently verified this task whether transcript/word timing is byte-stable run-to-run for this RAW |
+| semantic idea-equivalence arbiter (retry-family grouping, `semantic_idea_equivalence.py`) | **PROVIDER_VARIANT** | module's own docstring: "an optional narrow semantic arbiter" -- confirmed provider-backed in production |
+| hybrid editorial judge (per-window winner/alternate/failed labels, `hybrid_editorial.py`/`hybrid_google.py`) | **PROVIDER_VARIANT** | confirmed active via workflow env keys; the documented D-094.3 F8 mechanism (Section 6) is a direct, code-acknowledged consequence of this call's per-window, non-global nature |
+| DeliveryScorer / CASE B event ranking | DETERMINISTIC (given its inputs) | pure partial-order comparison over already-computed event counts, no scores/weights invented |
+| visual/local-performance event detection (`positioned_performance_evidence.py`'s upstream provider) | UNKNOWN | not verified whether the underlying vision classifier is a deterministic heuristic or an inference-variant model |
+| window construction (`_overlapping_windows`) | DETERMINISTIC | pure index slicing over an already-fixed tuple, confirmed by direct code reading |
+| float rounding | DETERMINISTIC | standard arithmetic, not implicated |
+| dict/set ordering | DETERMINISTIC | modern Python dict insertion order; the `family_set <= set(...)` subset test is order-independent by construction |
+| random seeds | UNKNOWN | no explicit seed found; would not fix real API sampling variance regardless |
+| provider temperature/model version | UNKNOWN | not verified this task (would require inspecting live call configuration, out of this forensic's code-only scope) |
+| API response variance | **PROVIDER_VARIANT** | inherent to any real hosted LLM call, generically |
+| parallel task ordering | UNKNOWN, likely immaterial | the merge is a max-priority reduction over per-window outputs, order-independent GIVEN identical per-window outputs -- instability traces to the outputs, not merge order |
+| cache hit/miss | UNKNOWN | not verified whether hybrid calls are cached; could plausibly explain why some defects (Diagnosis, Section 14) are stable while others (Pimples) vary |
+
+**13) Primary root cause: SEMANTIC_PROVIDER_VARIANCE.** The hybrid/
+Gemini-backed editorial-judge call that assigns per-window comparative
+"winner"/"alternate"/"failed" labels is not guaranteed stable across
+runs, and its cross-window merge (`_decision_priority`, `hybrid_session_
+cleanup.py`) can legitimately produce two independent "winners" for one
+retry family whenever no single window contains every member -- a
+documented, previously-encountered, only-conditionally-mitigated shape
+(D-094.3 F8). DeliveryScorer then breaks the tie deterministically but
+blindly, with no visibility into which "winner" is spurious.
+
+**14) Secondary contributor: FAMILY_FORMATION_VARIANCE.** The SAME class
+of provider-backed pairwise judgment (`semantic_idea_equivalence.py`'s
+idea-equivalence arbiter) governs whether two realizations are clustered
+into one retry family at all -- explaining D-135's "no family" outcome
+against D-126/D-143's "family formed" outcome for structurally similar
+content. This is the genuine FIRST divergence point (Section 3) and sits
+upstream of, and is a plausible root enabler for, the semantic-provider-
+variance mechanism in Section 13 (a family must exist before the window-
+merge shape can even occur).
+
+**15) Is this video-specific?** NO. Both the mechanism (a comparative,
+per-window provider judgment merged across possibly-incomplete windows)
+and its historical proof point (run `33983880111`, a DIFFERENT run,
+independently reproducing the identical shape before D-094.3 F8 was
+written) are general, structural properties of the hybrid session-
+cleanup/labeling architecture -- not a Video00 lexical or timing
+particularity. No Video00-specific rule is proposed anywhere in this
+entry.
+
+**16) General fix class: PROVIDER_STABILITY (primary), GROUPING
+(secondary).** The correction this forensic points toward -- not
+implemented here -- is a stability contract for the comparative per-
+window labeling mechanism (e.g., requiring a family-complete comparison
+before trusting any "winner" label, or bounded consensus/abstention
+across repeated windows, rather than a silent max-priority merge across
+incomplete comparisons) plus, secondarily, a robustness contract for
+retry-family formation itself so a single borderline pairwise call
+cannot single-handedly decide whether two realizations compete at all.
+Neither BESTTAKE nor RETRY_IDENTITY nor AUTHORITY_ORDER classifies this
+correctly on their own: DeliveryScorer's ranking logic itself needs no
+change (Section 8); this is not an authority-collision (Section 10); and
+the underlying grouping/labeling INPUT is where the fix belongs, not the
+consuming BestTake ladder.
+
+**17) Does the Diagnosis RETRY_IDENTITY gap share this root cause?**
+**PARTIALLY, not proven identical.** The Diagnosis-zone duplicate (an
+ungrouped verbatim retry of "La biopsia confirmó que era un cáncer
+papilar de tiroides.") sits in the SAME OWNING LAYER (retry-family
+formation / pairwise idea-equivalence clustering) as Section 14's
+secondary contributor -- but its MANIFESTATION is STABLE (reproduced
+identically in both the D-135 and D-143 runs this audit directly
+inspected), unlike Pimples' manifestation, which VARIES run to run
+(Section 3). A stable-wrong outcome is more consistent with a
+deterministic misclassification (e.g., a threshold or heuristic
+consistently failing on this specific text pair) than with live provider
+sampling variance, though a cached/consistently-reproduced provider
+response could also explain stability -- this forensic cannot
+distinguish those two possibilities from persisted artifacts alone.
+**Recommendation: treat Diagnosis and Pimples as two DISTINCT symptoms of
+one plausible shared owning layer (retry-family formation robustness),
+not as proven instances of the identical bug** -- a future structural fix
+to family-formation robustness should be evaluated against BOTH, but
+Diagnosis's specific instance should not be assumed fixed by a Pimples-
+specific correction, and vice versa.
+
+**18) Does D-142 (Dialogue/Pacing) contribute?** **NO**, confirmed by
+both code inspection (Section 11) and D-142's own regression-tested
+contract (D-142 imports nothing from BestTake/grouping/fallback modules
+and never mutates `draft.selected`).
+
+**19) Observability gaps found (not fixed here):** (a) the per-window
+editorial-judge raw request/response is not persisted anywhere this
+audit could inspect after the fact -- only the FINAL merged label per
+clip is visible in `take_judge_groups`/D-125's summary, so a future
+investigation cannot see WHICH window(s) produced WHICH label without a
+fresh RAW; (b) whether a family-complete window existed for a given
+family (`family_scoped_semantic_decisions`'s own `source_info`, when
+non-None) is computed but not surfaced in any of the existing tail-safe
+CI summaries (D-119/D-123/D-142's own gap, Section 21 of D-143) --
+surfacing `family_complete_window_chunk_indices`/`family_window_labels`/
+`global_merge_labels` in a future compact summary would make this exact
+forensic reproducible from ordinary CI logs instead of requiring a
+decision-log cross-reference exercise; (c) no persisted record of the
+hybrid provider's model id/temperature/call parameters was found in any
+artifact this audit read.
+
+**20) Exact next engine capability (recommended, not authorized):** a
+bounded design task (not this task) for a stability contract on the
+comparative per-window editorial-judge labeling mechanism -- e.g.,
+requiring family-completeness (or an explicit, visible abstention) before
+trusting a "winner" label used to break a semantic-vs-DeliveryScorer tie,
+and/or corroborating a borderline retry-family-formation judgment with a
+second independent signal before finalizing membership -- informed by
+Section 19's observability additions so the next Video00 RAW (once
+authorized) can actually show which window produced which label. No fix
+is proposed or implied to be built in this entry.
+
+**Scope confirmed:** zero code changes; zero RAW/Modal/RunPod dispatch;
+zero provider calls; D-123/D-128/D-138/D-140/D-141/D-142/D-143 all
+preserved CLOSED and not reopened; no Human-Gold optimization attempted
+(Human Gold referenced only as corroborating secondary evidence, per
+Section 2-3's tables, never as the basis for a verdict).
+
+**HUMAN ACTION REQUIRED:** YES (condition A) -- whether to authorize the
+Section 20 stability-contract design task (and, separately, the Section
+19 observability additions) is the Product Owner's decision, not made
+here.
