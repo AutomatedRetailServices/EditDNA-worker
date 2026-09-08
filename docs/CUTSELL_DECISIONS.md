@@ -17979,3 +17979,235 @@ to authorize D-127 Phase 2 (provider-backed OFFLINE evaluation only, per
 D-128's own next-gate options) is the Product Owner's decision, not made
 here. No RAW, provider call, or infra change requested by this task.
 
+
+## D-136 -- multimodal BestTake fallback Phase 2: provider-backed OFFLINE
+evaluation (D-127 Phase 2, post D-135, D-128 Phase 1 CLOSED)
+
+**Scope authorized:** implement and run D-127's own Phase 2 -- integrate
+ONE real vision-capable provider behind the existing, unmodified
+`MultimodalBestTakeArbiter` contract, exercise it ONLY on the same 9
+bounded D-127 Section 20 offline eval fixtures `multimodal_besttake_
+eval.py` already proves offline, measure the real outcome, and report.
+Explicitly NOT: wiring into the live pipeline, changing production
+winner/score/rank/grouping/Boundary, launching a Video00 RAW, or
+implementing Overlap pacing. Even a maximally positive Phase 2 result
+does NOT authorize live activation -- Phase 3 design is a separate,
+future Product Owner decision.
+
+**1) Provider infrastructure audit (reuse, not reinvention):** the
+existing `visual_openai.OpenAIVisualProvider` pattern was reused
+verbatim: `openai.OpenAI().responses.create(model=..., input=[{"role":
+"user","content":[...]}])`, `input_text`/`input_image` (base64 data URL)
+content blocks, and the repo-wide `client_factory: Callable[[], object]
+| None = None` dependency-injection convention every `*_openai.py`
+provider already uses for testing. `openai_json.parse_json_object`
+(tolerant JSON extraction, strips markdown fences) is reused unchanged
+for parsing the provider's text response. No parallel provider
+abstraction was built.
+
+**2) Audio perception -- honest, structural, not a claim:** the new
+provider (`OpenAIMultimodalBestTakeArbiter`, `cutsell_worker/
+multimodal_besttake_openai.py`) sends vision (sampled frames, base64
+`input_image`) and text (transcript, word timing, meaning-sufficiency,
+CASE B delivery-event evidence, semantic-label confidence, DeliveryScorer
+summary) -- **no audio bytes anywhere in the request construction**. The
+eval harness's own output always carries `"audio_perception_available":
+false`. No prompt or code path ever claims the provider "hears" the
+takes; D-127 Section 7's own limitation is preserved exactly.
+
+**3) Visual input method:** sampled frames only, reusing the request
+contract's existing `sampled_frame_references` field (paths on disk) --
+converted to base64 `data:image/jpeg;base64,...` URLs inline in
+`_content_for`. No parallel frame extractor was built; the eval harness's
+own synthetic fixtures generate their stub frames with a single-purpose
+`ffmpeg -f lavfi -i color=...` helper (test/eval infrastructure only,
+never a production frame source -- `frame_sampling.py`/`visual_analysis.
+py` remain the real-media frame path, untouched).
+
+**4) Request boundary -- bounded, no full RAW:** `_content_for` sends
+exactly what the existing `MultimodalBestTakeRequest`/`MultimodalBestTake
+Finalist` dataclasses already carry for the (at most 2-3) finalists in a
+family: candidate id, source span, transcript, meaning-sufficiency,
+semantic label + confidence, DeliveryScorer summary, CASE B delivery-
+event evidence, boundary-editability note, and the sampled frame count --
+never a full RAW transcript, never other families, never Human Gold/
+Cut.ai reference content (those stay OFFLINE-scoring-only, read only by
+the eval harness's own `_EXPECTED_OUTCOMES` table, never sent to the
+provider).
+
+**5) Prompt contract -- general, not Video00-shaped:** the `INSTRUCTION`
+constant in `multimodal_besttake_openai.py` gives 8 numbered reasoning
+steps and the bounded output vocabulary (`BEST_TAKE`/`EQUIVALENT`/
+`GOOD_TAKE_TRIM_ENTRY`/`GOOD_TAKE_TRIM_EXIT`/`UNCERTAIN` -- no `KEEP_BOTH_
+COMPLEMENTARY`/`NEW_COMPOSITE`/etc.). No pimples-specific language, no
+Video00 transcript hardcoding, no reference-oracle leakage -- verified by
+this task's own structural non-influence tests (grep-based, extending the
+D-136 test file's own assertions).
+
+**6) `safe_arbitrate` extension (minimal, additive):** `_classify_
+provider_call_exception` (new) maps a raised exception to `TIMEOUT`/
+`PROVIDER_ERROR`/`INVALID_RESPONSE`/generic `ERROR` by class-name
+matching (never a new retry loop); `_meaning_safety_violation` (new)
+checks, before any other classification, that a `BEST_TAKE` outcome's
+selected candidate is still in the meaning-sufficient set -- a mismatch
+reports `MEANING_SAFETY_MISMATCH` and has no authoritative effect (fail
+open). `safe_arbitrate` itself now classifies a malformed provider
+payload as `INVALID_RESPONSE` (previously generic `ERROR`; Phase 1's own
+`test_invalid_response_rejected_safely_via_safe_arbitrate` was updated to
+this more specific, correct code -- the other 33 Phase 1 tests are
+unaffected). Confidence is recorded exactly as the provider returns it --
+no invented activation threshold. `UNSUPPORTED_MEDIA`/`LOW_CONFIDENCE`/
+`COST_CEILING` remain declared, unexercised codes (D-127 Section 18's own
+"declared but not yet triggered" pattern, same as Phase 1 left `TIMEOUT`/
+`PROVIDER_ERROR` before this task gave them a real caller).
+
+**7) Real-evidence classifier fix (found and fixed within this task's own
+scope, D-091 root-cause continuity):** the FIRST real eval run (CI run
+`34196386677`, head `38a46db`) revealed that `openai.OpenAI()`'s own
+missing-credential failure raises a bare `openai.OpenAIError` (confirmed
+by direct local reproduction against the installed `openai` package: this
+is the SDK's own base exception class, not a more specific `Authentication
+Error`/`APIError` subclass) -- a class `_classify_provider_call_exception`
+did not recognize by its substring checks, so it fell through to the
+generic `ERROR` code instead of the more specific, directive-named
+`PROVIDER_ERROR`. Fixed with an exact-match (not substring) check on
+`name == "OpenAIError"`, committed as `8221e10` with one new regression
+test (a fake exception class literally named `OpenAIError`). A SECOND CI
+dispatch (run `34197240436`, same head) then confirmed the corrected
+classification for real: all 8 applicable cases now report `safe_call_
+status: "PROVIDER_ERROR"` (previously `"ERROR"`), identical case content
+otherwise.
+
+**8) Eval case set -- the same 9 D-127 fixtures, no additions:** `multimodal_
+besttake_eval_phase2.py` reuses Phase 1's own fixture builders unchanged.
+The directive's 10-item required list collapses onto these 9 because
+items 1 and 2 are explicitly the same underlying case
+(`pimples_shaped_positive`, the one real historical Class B-eligible
+positive from D-126's own forensic retrospective). No case was added
+(D-127 did not require one).
+
+**9) CI infrastructure (two real, in-scope mechanical fixes, zero paid
+compute):** this sandbox session cannot reach `api.openai.com` (org
+egress policy denial, confirmed via the proxy's own status endpoint) and
+this repository has no `OPENAI_API_KEY` secret configured (confirmed by
+the workflow's own presence-check step on every dispatch) -- the same
+"offload to a capable CI runner" pattern D-131/D-132 used for Xcode was
+reapplied here for OpenAI reachability: a new `workflow_dispatch`-only
+GitHub Actions workflow (`cutsell-multimodal-besttake-phase2-eval.yml`,
+`ubuntu-latest`, zero GPU/Modal/RunPod cost) with the repo's own proven
+bootstrap-push convention. Two real mechanical CI-script bugs were found
+and fixed within this task (same class as D-132's shell-quoting fix,
+never a scope expansion): (a) a minimal `pip install openai` could not
+even import `cutsell_worker` (its `__init__.py` eagerly wires
+`semantic_idea_equivalence_google`, which needs `requests`, regardless of
+which submodule this eval actually calls) -- fixed by installing the
+full, already-CI-proven `requirements.txt`; (b) `faster-whisper==1.0.0`
+pins `av==11.*`, which has no prebuilt manylinux wheel for this runner's
+Python/platform combo, so pip builds it from source, which needs FFmpeg's
+development headers/pkg-config files -- fixed by installing `pkg-config`
++ the seven `libav*-dev`/`libswscale-dev`/`libswresample-dev` packages
+before the pip install (root cause and fix both verified by direct local
+reproduction: `pip install --dry-run -r requirements.txt` failed with the
+identical pkg-config error until these packages were present, then
+succeeded).
+
+**10) REAL Phase 2 eval result (CI run `34197240436`, head `8221e10`,
+the corrected/final run):**
+
+| case | trigger_class | expected_outcome | safe_call_status | verdict |
+|---|---|---|---|---|
+| `pimples_shaped_positive` | CLASS_B | SHOULD_SELECT_B | PROVIDER_ERROR | error |
+| `papillary_equivalent_realization_negative` | NEGATIVE_CONTROL | SHOULD_EQUIVALENT | PROVIDER_ERROR | error |
+| `stomach_retry_negative` | NEGATIVE_CONTROL | SHOULD_UNCERTAIN | PROVIDER_ERROR | error |
+| `complementary_content_negative` | NEGATIVE_CONTROL | SHOULD_UNCERTAIN | PROVIDER_ERROR | error |
+| `polarity_negation_safety_negative` | NEGATIVE_CONTROL | SHOULD_SELECT_A | PROVIDER_ERROR | error |
+| `legitimate_clean_retry_negative` | NEGATIVE_CONTROL | NOT_APPLICABLE_SINGLE_MEMBER | NOT_INVOKED | skipped |
+| `semantic_deliveryscore_disagreement_negative` | NEGATIVE_CONTROL | SHOULD_SELECT_A | PROVIDER_ERROR | error |
+| `ambiguous_tied_performance_negative` | NEGATIVE_CONTROL | SHOULD_EQUIVALENT | PROVIDER_ERROR | error |
+| `boundary_only_exit_negative` | NEGATIVE_CONTROL | SHOULD_TRIM_EXIT | PROVIDER_ERROR | error |
+
+Metrics: `total_cases=9`, `positive_cases=1`, `negative_controls=8`,
+`skipped_single_member=1`, `correct=0`, `incorrect=0`, `abstained=0`,
+`invalid_or_error=8`, `provider_failure_count=8`,
+`meaning_safety_violations=0`, `positive_case_improvement_count=0`,
+`negative_control_regression_count=0`. Every applicable case's `arbiter.
+arbitrate(...)` call raised `openai.OpenAIError` at `OpenAI()`
+construction itself (the real error text, confirmed by local
+reproduction against the installed `openai` package: "Missing
+credentials. Please pass an `api_key`... or set the `OPENAI_API_KEY`...
+environment variable") -- **no HTTP request to `api.openai.com` was ever
+attempted**, this is a pure credential-configuration failure, not a rate
+limit, timeout, or model/API error. Cost: $0.00 (no request left the
+runner). Latency: the one non-zero `latency_ms` value (`701.1`) is the
+first case's `OpenAI()` constructor + exception time, not a real API
+round-trip; all other applicable cases show `0.2`-`0.4` ms (the failure
+happens before any network call).
+
+**11) Safety and non-authority (real, not merely designed):**
+`meaning_safety_violations=0` (no violation was possible -- the provider
+never returned a real outcome to check), `negative_control_regression_
+count=0` (all 8 negative-control cases correctly show no winner change:
+`winner_would_change: false` for every case), `positive_case_improvement_
+count=0` (the one positive case also produced no real judgment). No
+authoritative effect occurred anywhere -- confirmed both by the eval
+harness's own scoring and by this task's structural non-influence tests
+(grep: no live pipeline module imports `multimodal_besttake_openai.py` or
+`multimodal_besttake_eval_phase2.py`).
+
+**12) Regressions:** targeted (56/56: 22 D-136 Phase 2 tests + 34 D-128
+Phase 1 tests, including the 1 intentionally-updated Phase 1 assertion
+and the 1 new OpenAIError regression test), `compileall` clean, full
+offline suite 3194 passed with the SAME 5 pre-existing, unrelated
+failures already documented in this branch's baseline before D-136 began
+(`test_hybrid_story_guard_incomplete_retry.py::test_incomplete_failed_
+retry_is_covered_when_prior_delivery_preserves_numbers_and_negation` and
+four `test_video00_modal_hybrid_semantic_parity.py` cases -- all
+pre-existing D-044/D-097-era masking/env-var assertions unrelated to
+multimodal fallback, verified via `git stash` to fail identically before
+any D-136 change). Zero new failures. `tests/test_semantic_stitch.py`
+remains a separate, pre-existing collection-time error (`score_take()`
+missing an argument at import time) unrelated to this task, unchanged
+before/after, excluded from the run the same way it already was.
+
+**13) PHASE 2 VERDICT: D -- REAL PROVIDER CALL BLOCKED BY MISSING
+CREDENTIAL, NO JUDGMENT OBTAINED.** This is not verdict A/B/C (none of
+which fit: no real judgment was returned, so there is nothing to score as
+correct, incorrect, or ambiguous) and not a code defect on this task's
+own implementation -- every layer behind the actual provider call was
+exercised for real and behaved correctly: request construction, frame
+encoding, the `responses.create` call site, `safe_call_status`
+classification (now `PROVIDER_ERROR`, verified twice), meaning-safety
+non-authority, and the eval harness's honest reporting all worked exactly
+as designed. The one blocking cause is purely credential/environment:
+`OPENAI_API_KEY` is not configured on this repository, and this session's
+own sandbox has no route to `api.openai.com` at all -- both independently
+confirmed, neither fixable from inside this task's authorized scope
+(adding a real secret to the repository is a repository-configuration
+action, not a code change). **Even if verdict A/B/C had been reached,
+this does NOT authorize Phase 3/live activation** -- that remains a
+separate, future Product Owner decision per D-127 Section 21 and this
+task's own directive.
+
+**14) Exact next engine action (not authorized here):** add a real
+`OPENAI_API_KEY` GitHub Actions secret to this repository (a repository-
+configuration action, condition D, Product Owner's to make) so a future
+re-dispatch of `cutsell-multimodal-besttake-phase2-eval.yml` can obtain
+the first REAL provider judgment on `pimples_shaped_positive` and the 7
+negative controls; only after that real judgment exists can Phase 2 be
+re-scored against A/B/C and Phase 3 design even be considered.
+
+**Scope confirmed:** no live pipeline provider call, no production
+fallback activation, no production winner/score/rank change, no
+grouping/Boundary/Overlap/iOS/RAW/Modal/RunPod/TestFlight work. Files
+changed: `cutsell_worker/multimodal_besttake_arbiter.py` (extended,
+additive), `cutsell_worker/multimodal_besttake_openai.py` (new),
+`cutsell_worker/multimodal_besttake_eval_phase2.py` (new), `tests/
+test_cutsell_d136_multimodal_besttake_openai_phase2.py` (new, 22 tests),
+`tests/test_cutsell_d128_multimodal_fallback_phase1.py` (1 assertion
+updated), `.github/workflows/cutsell-multimodal-besttake-phase2-eval.yml`
+(new), this decision entry. D-127/D-128/D-135 are unmodified.
+
+**HUMAN ACTION REQUIRED:** YES (condition C-adjacent/A -- adding a real
+`OPENAI_API_KEY` secret to this repository is a repository-configuration
+decision, and any judgment on Phase 3 activation is condition A, a
+product decision) -- neither is made here.
