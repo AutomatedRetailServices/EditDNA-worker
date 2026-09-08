@@ -47,6 +47,23 @@ on:
         required: false
         default: ""
         type: string
+      watch_listen_family_evidence_enabled:
+        # D-159: "1" overlays CUTSELL_WATCH_LISTEN_FAMILY_EVIDENCE_ENABLED=1
+        # (D-158's Attempt Relationship structured authority -- lets real
+        # Watch+Listen Understanding V1 evidence withhold a Family Formation
+        # merge Proposition Identity evidence alone would otherwise make;
+        # can never create a merge from Watch+Listen evidence alone). Empty
+        # (default) = code default OFF, byte-identical to every run before
+        # D-159. Same input-gated overlay mechanism as
+        # bridge_complete_pairwise_singleton above -- explicitly authorized
+        # per run, never a silent default flip (docs/CUTSELL_DECISIONS.md
+        # D-159). No cutsell_worker editorial module is touched by this
+        # overlay; it only lets an existing, already-tested runtime flag be
+        # set for this one dispatch.
+        description: "Optional: '1' enables CUTSELL_WATCH_LISTEN_FAMILY_EVIDENCE_ENABLED (D-159). Empty = OFF."
+        required: false
+        default: ""
+        type: string
 
 concurrency:
   group: cutsell-video00-modal-raw-${{ github.ref }}
@@ -201,6 +218,14 @@ jobs:
             mv /tmp/cutsell-env.tmp.json /tmp/cutsell-env.json
           fi
           echo "D-094.2 singleton clique bridge for this run: CUTSELL_BRIDGE_COMPLETE_PAIRWISE_SINGLETON=$(jq -r '.CUTSELL_BRIDGE_COMPLETE_PAIRWISE_SINGLETON // "unset (code default OFF)"' /tmp/cutsell-env.json)"
+          # D-159: optional Watch+Listen family-evidence overlay, applied
+          # only when the dispatch input is exactly "1"; code default (OFF)
+          # otherwise -- same input-gated mechanism as D-094.2 above.
+          if [ "${{ github.event.inputs.watch_listen_family_evidence_enabled }}" = "1" ]; then
+            jq -c '. + {CUTSELL_WATCH_LISTEN_FAMILY_EVIDENCE_ENABLED:"1"}' /tmp/cutsell-env.json > /tmp/cutsell-env.tmp.json
+            mv /tmp/cutsell-env.tmp.json /tmp/cutsell-env.json
+          fi
+          echo "D-159 Watch+Listen family evidence for this run: CUTSELL_WATCH_LISTEN_FAMILY_EVIDENCE_ENABLED=$(jq -r '.CUTSELL_WATCH_LISTEN_FAMILY_EVIDENCE_ENABLED // "unset (code default OFF)"' /tmp/cutsell-env.json)"
           test "$(jq 'length' /tmp/cutsell-env.json)" != "0"
           test "$(jq -r '.CUTSELL_HYBRID_LLM_ENABLED' /tmp/cutsell-env.json)" = "1"
           test "$(jq -r '.CUTSELL_HYBRID_PROVIDER' /tmp/cutsell-env.json)" = "google"
@@ -232,7 +257,7 @@ jobs:
               # D-056 Section 1). A real secret (API key, token, bucket
               # name) is essentially always >= 12 characters, so this
               # threshold costs no actual masking coverage.
-              if value and key not in ('CUTSELL_HYBRID_LLM_ENABLED', 'CUTSELL_HYBRID_PROVIDER', 'CUTSELL_UNIFIED_REALIZATION_RESOLVER', 'CUTSELL_ASR_CANONICAL_NORMALIZATION', 'CUTSELL_SEMANTIC_COMPUTE_PLANNER', 'CUTSELL_HYBRID_MAX_EDIT_USD', 'CUTSELL_BRIDGE_COMPLETE_PAIRWISE_SINGLETON', 'CUTSELL_BUILD_GIT_SHA') and len(str(value)) >= 12:
+              if value and key not in ('CUTSELL_HYBRID_LLM_ENABLED', 'CUTSELL_HYBRID_PROVIDER', 'CUTSELL_UNIFIED_REALIZATION_RESOLVER', 'CUTSELL_ASR_CANONICAL_NORMALIZATION', 'CUTSELL_SEMANTIC_COMPUTE_PLANNER', 'CUTSELL_HYBRID_MAX_EDIT_USD', 'CUTSELL_BRIDGE_COMPLETE_PAIRWISE_SINGLETON', 'CUTSELL_WATCH_LISTEN_FAMILY_EVIDENCE_ENABLED', 'CUTSELL_BUILD_GIT_SHA') and len(str(value)) >= 12:
                   print(f'::add-mask::{value}')
           print(f'Loaded {len(env)} env vars from the live RunPod template plus the D-044 hybrid-semantic overlay, the D-050C2 resolver-mode overlay, and the D-052 stability-battery overlay (secret values masked).')
           "
