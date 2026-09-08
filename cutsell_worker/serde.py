@@ -20,6 +20,63 @@ from .contracts import (
 CAPTION_PRESETS = {"classic", "clean"}
 
 
+#: D-134 current effective default for the Overlap pacing permission, taken
+#: directly from the pre-D-134 code, not guessed: `ProcessingRequest.
+#: audio_overlap`'s own dataclass default (contracts.py) and the iOS
+#: `audioOverlap` toggle's own initial state (NewCutView.swift) were both
+#: already `False` before this task. Never change this without a Product
+#: Owner decision -- see CUTSELL_DECISIONS.md D-134 Part 4.
+_DIALOGUE_OVERLAP_DEFAULT = False
+
+# D-134 diagnostic source labels -- see docs/CUTSELL_DECISIONS.md D-134 Part 5.
+DIALOGUE_OVERLAP_SOURCE_CANONICAL = "canonical_request"
+DIALOGUE_OVERLAP_SOURCE_LEGACY = "legacy_audio_overlap"
+DIALOGUE_OVERLAP_SOURCE_DEFAULT = "default"
+
+
+def _normalize_dialogue_overlap(payload: dict) -> tuple[bool, dict]:
+    """D-134's ONE normalization point for the Overlap pacing permission.
+
+    Precedence (CUTSELL_DECISIONS.md D-134 Part 2, rules 1-5):
+      1. Both `dialogue_overlap_enabled` (canonical, D-129 naming) and
+         `audio_overlap` (legacy iOS field) represent the SAME future
+         pacing permission.
+      2. If `dialogue_overlap_enabled` is explicitly present (not None):
+         it wins, regardless of what `audio_overlap` carries.
+      3. Else if legacy `audio_overlap` is explicitly present (not None):
+         normalize its value into the canonical field.
+      4. Else: preserve the current effective default (`False`, per Part 4).
+      5. Downstream (`ProcessingRequest.dialogue_overlap_enabled`) receives
+         this ONE canonical normalized value; `ProcessingRequest.
+         audio_overlap` keeps carrying the raw legacy value unchanged, for
+         backward introspection only -- no consumer reads either field yet.
+
+    Returns `(dialogue_overlap_enabled, diagnostics)` where `diagnostics` is
+    the compact, request-level (not per-BestTake-family) block from Part 5:
+    `dialogue_overlap_enabled`, `dialogue_overlap_source`,
+    `legacy_audio_overlap_present`, `canonical_dialogue_overlap_present`.
+    """
+    canonical_value = payload.get("dialogue_overlap_enabled")
+    canonical_present = canonical_value is not None
+    legacy_value = payload.get("audio_overlap")
+    legacy_present = legacy_value is not None
+
+    if canonical_present:
+        enabled, source = bool(canonical_value), DIALOGUE_OVERLAP_SOURCE_CANONICAL
+    elif legacy_present:
+        enabled, source = bool(legacy_value), DIALOGUE_OVERLAP_SOURCE_LEGACY
+    else:
+        enabled, source = _DIALOGUE_OVERLAP_DEFAULT, DIALOGUE_OVERLAP_SOURCE_DEFAULT
+
+    diagnostics = {
+        "dialogue_overlap_enabled": enabled,
+        "dialogue_overlap_source": source,
+        "legacy_audio_overlap_present": legacy_present,
+        "canonical_dialogue_overlap_present": canonical_present,
+    }
+    return enabled, diagnostics
+
+
 def request_from_dict(payload: dict) -> ProcessingRequest:
     sources = tuple(
         SourceAsset(
@@ -31,12 +88,18 @@ def request_from_dict(payload: dict) -> ProcessingRequest:
             duration_sec=float(item.get("duration_sec") or 0.0),
             uri=str(item["uri"]),
             has_audio=bool(item.get("has_audio", True)),
+            # D-134: `metadata` already carried arbitrary JSON-safe keys
+            # before this task; it is now also the carrier for the optional,
+            # descriptive-only iOS media-ingestion fields (D-133 reality) --
+            # see docs/CUTSELL_DECISIONS.md D-134 Part 6. Unknown/absent
+            # keys are simply not present in the dict; nothing is required.
             metadata=dict(item.get("metadata") or {}),
         )
         for index, item in enumerate(payload.get("sources") or ())
     )
     if not sources:
         raise ValueError("processing request requires at least one source")
+    dialogue_overlap_enabled, overlap_diagnostics = _normalize_dialogue_overlap(payload)
     return ProcessingRequest(
         project_id=str(payload["project_id"]),
         user_id=str(payload["user_id"]),
@@ -44,6 +107,8 @@ def request_from_dict(payload: dict) -> ProcessingRequest:
         preferred_source_order=tuple(payload.get("preferred_source_order") or ()),
         audio_overlap=bool(payload.get("audio_overlap", False)),
         language_hint=(str(payload["language_hint"]) if payload.get("language_hint") else None),
+        dialogue_overlap_enabled=dialogue_overlap_enabled,
+        overlap_diagnostics=overlap_diagnostics,
     )
 
 

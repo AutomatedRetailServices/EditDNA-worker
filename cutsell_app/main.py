@@ -88,6 +88,14 @@ class SourceInput(BaseModel):
     uri: str
     source_order: int = Field(ge=0)
     duration_sec: float = Field(default=0.0, ge=0.0)
+    # D-134: optional, descriptive-only iOS media-ingestion metadata (D-133
+    # reality) -- e.g. container/codec/width/height/fps/orientation_degrees/
+    # mirrored_hint/file_size/audio_track_present/audio_codec/
+    # audio_sample_rate/device_model/ios_version/source_filename/
+    # capture_origin. Unknown fields are simply absent -- nothing is
+    # required. Never consumed by Selection/BestTake/Boundary/Renderer;
+    # see docs/CUTSELL_DECISIONS.md D-134 Part 6/Part 8.
+    metadata: dict[str, Any] | None = None
 
 
 class FlowBSubmitRequest(BaseModel):
@@ -96,6 +104,12 @@ class FlowBSubmitRequest(BaseModel):
     sources: list[SourceInput] = Field(min_length=1)
     language_hint: str | None = None
     audio_overlap: bool = False
+    # D-134: canonical Overlap field (D-129 naming). Optional/`None` so the
+    # normalization point (cutsell_worker.serde._normalize_dialogue_overlap)
+    # can tell "not sent" apart from "explicitly false" -- see D-134 Part 2.
+    # No pacing behavior is implemented; this only lets the request contract
+    # carry the field without a future migration rewriting it.
+    dialogue_overlap_enabled: bool | None = None
 
 
 class FlowBSubmitResponse(BaseModel):
@@ -287,14 +301,24 @@ def submit_flow_b(payload: FlowBSubmitRequest):
             "source_order": item.source_order,
             "duration_sec": item.duration_sec,
             "uri": item.uri,
+            # D-134: optional descriptive-only media metadata, forwarded
+            # as-is (empty dict when absent) -- see SourceInput.metadata.
+            "metadata": item.metadata or {},
         })
-    submission = enqueue_flow_b({
+    processing_payload = {
         "project_id": payload.project_id,
         "user_id": payload.user_id,
         "sources": sources,
         "language_hint": payload.language_hint,
         "audio_overlap": payload.audio_overlap,
-    })
+    }
+    # D-134: only forward the canonical field when the client explicitly
+    # sent it, so the normalization point's presence-detection (D-134 Part
+    # 2, rule 2) is accurate; when absent, `audio_overlap` above (unchanged,
+    # always forwarded) drives normalization exactly as it did before D-134.
+    if payload.dialogue_overlap_enabled is not None:
+        processing_payload["dialogue_overlap_enabled"] = payload.dialogue_overlap_enabled
+    submission = enqueue_flow_b(processing_payload)
     return FlowBSubmitResponse(job_id=submission.job_id, queue=submission.queue_name)
 
 

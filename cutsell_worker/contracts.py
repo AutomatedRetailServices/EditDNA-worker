@@ -346,6 +346,20 @@ class ProcessingRequest:
     preferred_source_order: Tuple[str, ...] = ()
     audio_overlap: bool = False
     language_hint: Optional[str] = None
+    # D-134: `audio_overlap` above is preserved byte-for-byte as the raw
+    # legacy wire value (still unread by any engine consumer, exactly as
+    # before). `dialogue_overlap_enabled` is the NEW canonical field the
+    # future Dialogue/Pacing Transition authority will eventually consume
+    # (D-129's canonical naming) -- normalized once, at the single dict ->
+    # ProcessingRequest boundary in serde.request_from_dict, from either
+    # this field's own wire value (if explicitly sent) or a fallback to
+    # `audio_overlap` (see serde._normalize_dialogue_overlap). No consumer
+    # reads it yet; it changes zero current editorial behavior.
+    dialogue_overlap_enabled: bool = False
+    # D-134: compact, request-level (not per-family) normalized diagnostics
+    # for the Overlap field -- see serde._normalize_dialogue_overlap for the
+    # precedence rule that produces these four values.
+    overlap_diagnostics: Dict[str, object] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)

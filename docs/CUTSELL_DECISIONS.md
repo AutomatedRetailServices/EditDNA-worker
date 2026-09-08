@@ -17337,3 +17337,372 @@ sequence.
 **STOPPING HERE per this task's own directive: no TestFlight, no
 App Store/signing work performed, no real-device QA started. Wait for
 Product Owner authorization.**
+
+## D-134 -- engine product-contract hardening: iOS ingestion + Overlap
+naming compatibility (post D-128/D-129/D-133). **RETURN TO ENGINE BUILD.
+NO OVERLAP PACING BEHAVIOR. NO FALLBACK AUTHORITY. NO RAW. NO PROVIDER.**
+CONTRACT/NORMALIZATION ONLY.
+
+D-128 Phase 1 (multimodal fallback shadow infrastructure) is preserved as
+already complete and NOT rebuilt. D-129/D-130/D-131/D-132/D-133's iOS
+findings are preserved unmodified (native Swift app exists; simulator
+build/runtime proven; camera/import/upload/playback/editor source exists;
+real-iPhone diagnostics metadata contract now exists; `audioOverlap`/
+`audio_overlap` remains the current iOS request field; no Overlap pacing
+behavior exists in the engine yet; no physical-device QA is authorized in
+this task either).
+
+### PART 1 -- Canonical Overlap naming (documentation, no behavior change)
+
+- USER UI: **Overlap**.
+- CANONICAL INTERNAL PRODUCT FIELD: **`dialogue_overlap_enabled`** (D-129).
+- LEGACY IOS FIELD (wire/JSON): **`audio_overlap`**.
+- LEGACY SWIFT STATE: **`audioOverlap`** (`NewCutView.swift`, untouched).
+- INTERNAL PERCEPTION FIELD: **`overlaps_delivery`** -- NOT renamed, NOT
+  repurposed. It remains D-115/CASE B/Boundary/BestTake evidence
+  (performance event intersects spoken DELIVERY) and has zero relationship
+  to the user-facing Overlap feature. Confirmed unchanged by this task's
+  own diff (`git diff --stat` below never touches `positioned_performance_
+  evidence.py` or `boundary_engine_pass.py`'s `overlaps_delivery` logic).
+
+### PART 2 -- Legacy iOS compatibility: the ONE normalization point
+
+Implemented in `cutsell_worker/serde.py::_normalize_dialogue_overlap`,
+called once from the single dict -> `ProcessingRequest` boundary
+(`request_from_dict`) that BOTH the single-job path (`cutsell_app/main.py`
+`/v1/flow-b/jobs` -> `enqueue_flow_b` -> `cutsell_worker/worker_job.py::
+run_flow_b_job`) and the batch path (`cutsell_app/batch_routes.py` ->
+`enqueue_batch_item` -> `cutsell_worker/batch_job.py::run_batch_item` ->
+the SAME `run_flow_b_job`) already funnel through -- confirmed by reading
+both call chains, not assumed.
+
+Precedence (exactly as directed):
+1. Both fields represent the SAME future pacing permission.
+2. If `dialogue_overlap_enabled` is explicitly present (not `None`): it
+   wins, regardless of `audio_overlap`.
+3. Else if legacy `audio_overlap` is explicitly present (not `None`):
+   its value is normalized into the canonical field.
+4. Else: the current effective default (`False`) is preserved.
+5. Downstream receives ONE canonical value: `ProcessingRequest.
+   dialogue_overlap_enabled`. The legacy `ProcessingRequest.audio_overlap`
+   field is preserved byte-for-byte (still `bool = False`, still the raw
+   wire value, still read by zero consumers) for backward introspection
+   only -- it was NOT renamed or removed, per the task's own "prefer
+   additive" and "no immediate Swift rename" instructions.
+6. Legacy `audio_overlap` remains accepted indefinitely for old iOS
+   clients and persisted RQ job payload dicts (RQ persists the raw dict
+   itself, not a serialized `ProcessingRequest` -- there is no separate
+   "old persisted object" shape to migrate).
+7. Zero Swift changes made (confirmed: `git diff --stat` touches no file
+   under `mobile/ios/`).
+8. Zero pacing behavior activated -- `dialogue_overlap_enabled` has no
+   consumer anywhere in this diff (confirmed by direct source-text
+   inspection of `multimodal_besttake_fallback.py`, `boundary_engine_
+   pass.py`, `render_plan.py`, `flow_b.py`, `pipeline.py` -- see tests).
+
+At the API boundary (`cutsell_app/main.py`'s `FlowBSubmitRequest` and
+`cutsell_app/batch_routes.py`'s `BatchProject`), `dialogue_overlap_enabled:
+bool | None = None` was added so the canonical field is actually reachable
+by a future iOS client, and is forwarded into the RQ payload dict ONLY
+when the client explicitly sent it (`is not None`) -- this keeps the
+normalization point's presence-detection accurate without touching the
+pre-existing, always-forwarded `audio_overlap` line at all.
+
+### PART 3 -- Overlap semantics (documentation only, no consumer)
+
+`dialogue_overlap_enabled = false` -> the future Dialogue/Pacing
+Transition authority is NOT allowed to introduce intentional dialogue
+overlap. `dialogue_overlap_enabled = true` -> that future authority MAY
+use overlap where safe -- this does **not** mean "force overlap at every
+transition." No consumer exists anywhere in this task's diff; the field
+is inert exactly like `audio_overlap` was before it.
+
+### PART 4 -- Current default (determined from actual code, not guessed)
+
+`ProcessingRequest.audio_overlap: bool = False` (contracts.py, pre-
+existing, unchanged) and the iOS `audioOverlap` toggle's own initial state
+(`NewCutView.swift`: `_audioOverlap = State(initialValue: pending?.
+audioOverlap ?? false)`, unchanged, not touched by this task) were both
+already `False`. `_normalize_dialogue_overlap`'s "neither present" branch
+returns this exact same `False` -- **no default behavior change**.
+
+### PART 5 -- Request-level observability
+
+`ProcessingRequest.overlap_diagnostics` (new field, `Dict[str, object]`,
+one object per processing request, never per BestTake family):
+```
+{
+  "dialogue_overlap_enabled": bool,
+  "dialogue_overlap_source": "canonical_request" | "legacy_audio_overlap" | "default",
+  "legacy_audio_overlap_present": bool,
+  "canonical_dialogue_overlap_present": bool,
+}
+```
+
+### PART 6 -- iOS media ingestion contract
+
+`SourceAsset.metadata: Dict[str, object]` (contracts.py) already existed,
+already free-form, and already threaded end-to-end (`serde.py`'s
+`request_from_dict` already did `metadata=dict(item.get("metadata") or
+{})` before this task). D-134 reuses it as-is -- **zero new dataclass
+fields on `SourceAsset`** -- and formalizes the canonical key vocabulary
+D-133 established real device-diagnostic capability for: `source_
+filename`, `capture_origin`, `container`, `codec`, `width`, `height`,
+`fps`, `variable_frame_rate_hint`, `orientation_degrees`, `mirrored_hint`,
+`duration`, `file_size`, `audio_track_present`, `audio_codec`, `audio_
+sample_rate`, `device_model`, `ios_version`. (`source_asset_id` is
+already its own dedicated top-level field, not a metadata key.) At the API
+boundary, `SourceInput.metadata: dict[str, Any] | None = None` (main.py)
+and `BatchSource.metadata` (batch_routes.py) were added, forwarded as
+`item.metadata or {}` -- absent/unknown fields are simply missing keys,
+nothing is required.
+
+**Naming decision (documented, not directed verbatim):** the directive
+offered "mirrored / mirrored_hint" and "variable_frame_rate / vfr" as
+alternatives; this task canonicalizes `mirrored_hint` and `variable_
+frame_rate_hint` specifically (never a bare `mirrored`/`variable_frame_
+rate` key) so the wire vocabulary itself can never be misread later as a
+proven, measured fact -- directly enforcing Part 7/Part 8's honesty
+requirement at the schema-naming level, not just in prose.
+
+### PART 7 -- D-133 known-vs-unknown metadata truth (preserved)
+
+Per D-133: codec, container, duration, width/height, fps, orientation,
+file size, audio-track presence, audio sample rate, device model, and iOS
+version are mechanically obtainable on a real iPhone; true measured
+mirroring and true VFR/frame-drop analysis are NOT. This task's schema
+never has a plain `mirrored` or `variable_frame_rate` key -- only the
+`_hint` forms -- and `tests/test_cutsell_d134_overlap_contract_
+normalization.py::test_mirrored_hint_does_not_become_proven_mirrored` /
+`::test_unknown_vfr_remains_unknown` assert this directly.
+
+### PART 8 -- Media metadata is descriptive only (structurally proven)
+
+`multimodal_besttake_fallback.py`, `boundary_engine_pass.py`, and
+`render_plan.py` were read in full: none references `dialogue_overlap_
+enabled`, `mirrored_hint`, `device_model`, or `audio_overlap` anywhere.
+`detect_class_b_trigger`'s own signature (the D-128 Class B trigger
+entry point) takes only `family_id`, `member_ids`, `semantic_winner`,
+`deliveryscore_winner`, `meaning_sufficient_ids`, `case_b_evidence_by_id`,
+`safety_excluded_ids` -- no `ProcessingRequest` or metadata of any kind
+reaches it, structurally. Three tests assert this by direct source-text
+inspection (`test_d128_fallback_module_never_references_overlap_or_
+media_metadata`, `test_boundary_engine_never_reads_dialogue_overlap_
+enabled`, `test_render_plan_never_reads_dialogue_overlap_enabled_or_
+media_metadata`).
+
+### PART 9 -- Source identity (D-107/D-129 invariants preserved)
+
+`SourceAsset.source_asset_id`, `.uri`, `.source_order`, `.duration_sec`
+are computed identically regardless of overlap fields or metadata
+presence (`stable_source_id(...)` in `cutsell_app/main.py`/`batch_
+routes.py` is untouched and never reads either). Verified by
+`test_source_identity_unchanged_by_overlap_or_metadata_fields` and
+`test_source_timestamps_and_duration_unchanged`. No media identities are
+ever merged on metadata similarity -- this task adds no such logic.
+
+### PART 10 -- Current media pipeline audit (static, no fixes, no
+physical-iPhone proof claimed)
+
+Read `cutsell_worker/media_probe.py` (the only ffprobe-backed probe in
+the worker) and `cutsell_worker/render.py`'s `_concat_render_command`
+(the only ffmpeg render invocation) directly, and confirmed the real
+worker-image ffmpeg build present in this session (`ffmpeg version
+6.1.1-3ubuntu5`, installed via `Dockerfile.worker`/`Dockerfile.cutsell.
+worker`/`Dockerfile.cutsell.serverless`'s `apt-get install ffmpeg`):
+
+| Item | Classification | Basis |
+|---|---|---|
+| HEVC / H.265 | SUPPORTED_VIA_EXISTING_FFMPEG/FFPROBE_PATH | `ffmpeg -decoders` lists a native `hevc` decoder; `render.py`'s `-i <path>` auto-detects codec, no CutSell-authored HEVC handling exists or is needed |
+| H.264 | SUPPORTED_VIA_EXISTING_FFMPEG/FFPROBE_PATH | same reasoning, native `h264` decoder confirmed present |
+| MOV | SUPPORTED_VIA_EXISTING_FFMPEG/FFPROBE_PATH | `ffmpeg -demuxers` lists `mov,mp4,m4a,3gp,3g2,mj2` |
+| MP4 | SUPPORTED_VIA_EXISTING_FFMPEG/FFPROBE_PATH | same demuxer entry |
+| Variable frame rate (input detection) | UNSUPPORTED | `media_probe.py` only reads `avg_frame_rate` via ffprobe -- it never reads `r_frame_rate` nor compares the two, and never measures per-frame `pts` deltas; there is no VFR-detection code anywhere in the worker |
+| Variable frame rate (render output) | SUPPORTED_VIA_EXISTING_FFMPEG/FFPROBE_PATH (incidental) | `_concat_render_command`'s filter chain already includes an explicit `fps={fps}` filter that forces CFR output regardless of input frame-rate variability -- a side effect of the existing filter chain, not a deliberate VFR-aware feature |
+| Audio sample-rate differences | EXPLICITLY_SUPPORTED | the same filter chain's audio path applies `aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=stereo`, explicitly resampling any input sample rate to 48 kHz |
+
+No codec fixes were made or proposed (out of scope, per directive). No
+physical-iPhone file was tested against this pipeline in this task.
+
+### PART 11 -- Orientation / mirroring (report only, zero new transforms)
+
+`render.py` passes no `-noautorotate`/`-autorotate` flag to ffmpeg at all
+-- it relies entirely on ffmpeg's own DEFAULT decoder behavior (auto-
+applying a source's rotation/display-matrix side data before the filter
+chain sees frames), which is implicit, not an explicit CutSell
+normalization step. This task adds **zero** new rotation or mirroring
+transformation anywhere -- Part 11's "preserve an existing explicit
+normalization's contract" does not apply because no such explicit
+normalization exists in the codebase to preserve; there is only ffmpeg's
+own generic default, which this task does not touch, wrap, or override.
+No physical-iPhone rotation-metadata proof is claimed.
+
+### PART 12/13 -- SERDE / backward compatibility / unknown-field discipline
+
+All seven required shapes (A-G) verified by direct test (`tests/
+test_cutsell_d134_overlap_contract_normalization.py`):
+- A. `audio_overlap` only -> loads (`test_old_serialized_request_loads`).
+- B. `dialogue_overlap_enabled` only -> loads (`test_canonical_request_
+  loads`).
+- C. both present -> canonical wins (`test_mixed_request_loads`, `test_
+  canonical_wins_over_conflicting_legacy`).
+- D. neither -> current default (`test_neither_present_preserves_
+  current_default`).
+- E. old persisted `ProcessingRequest` payload dicts still load: RQ
+  persists the raw dict passed to `enqueue_flow_b`/`enqueue_batch_item`,
+  never a serialized dataclass, so there is no separate "old object shape"
+  to break -- `request_from_dict`'s existing `payload.get(...)` calls
+  (never `payload[...]` for optional keys) were already tolerant of
+  missing keys before this task and remain so.
+- F. new optional iOS metadata -> safely loads (`test_optional_ios_
+  metadata_accepted`).
+- G. metadata absent -> safely loads (`test_absent_metadata_accepted`).
+
+Unknown-field discipline: `request_from_dict` operates on a plain `dict`
+via `.get(...)` -- it already silently ignores any key it does not
+explicitly read (not a strict/forbid schema), so no additive key this
+task introduces can ever break an older worker reading a newer payload,
+and no additive key ever raises on an unrecognized field. The Pydantic
+API models (`FlowBSubmitRequest`, `BatchProject`) use their v2.13.5
+default (`extra="ignore"`, not `"forbid"`) -- confirmed by reading `cutsell
+_app/main.py`/`batch_routes.py`: none of these `BaseModel` classes sets
+`model_config = {"extra": "forbid"}` anywhere. No compatibility-shape
+change was required beyond the additive optional fields already added.
+
+### PART 14 -- No editorial difference (proven, not asserted)
+
+`request_from_dict({no overlap fields})`, `{audio_overlap: false}`,
+`{dialogue_overlap_enabled: false}` produce byte-identical `Processing
+Request` fields outside the overlap block itself (`test_legacy_false_
+edit_unchanged`, `test_canonical_false_edit_unchanged`, `test_no_
+overlap_fields_edit_unchanged`). `{dialogue_overlap_enabled: true}` is
+preserved in `overlap_diagnostics` but is otherwise identical too (`test_
+canonical_true_edit_unchanged_no_consumer_exists`) because -- structurally,
+per Part 8 -- no code path in this diff reads the field at all, so there
+is nothing that COULD produce a different edit yet.
+
+### PART 15/16 -- D-128 / D-123 compatibility
+
+D-128's `detect_class_b_trigger`/`FallbackTriggerDecision`/`fallback_
+trigger_diagnostics` (the only definers of `fallback_shadow_eligible`-
+class names in the repo) are untouched -- `git diff --stat` never lists
+`multimodal_besttake_fallback.py`. `tests/test_cutsell_d128_multimodal_
+fallback_phase1.py` (D-128's own suite) and `tests/test_cutsell_d123_
+case_b_fast_path_gate.py` (D-123's own suite) both ran unmodified in the
+bounded regression below and passed with zero changes. D-123's semantic
+fast-path gate / CASE B conflict logic / meaning sufficiency /
+DeliveryScorer behavior were not touched.
+
+### PART 17 -- Future Overlap owner (documentation only)
+
+`Selection/BestTake -> Freeze -> Boundary -> Dialogue/Pacing Transition ->
+Renderer`. The future Dialogue/Pacing Transition stage is the ONLY
+editorial consumer of `dialogue_overlap_enabled`, and may eventually
+choose among `HARD_CUT`/`TIGHT_CUT`/`J_CUT`/`L_CUT`/`MICRO_AUDIO_OVERLAP`
+where safe. D-134 implements none of these.
+
+### PART 18 -- iOS client migration policy (documentation only, no Swift
+touched)
+
+Current client sends `audio_overlap`; backend now normalizes `audio_
+overlap -> dialogue_overlap_enabled`; future iOS change keeps the UI
+label "Overlap" while Swift/API migrate to sending `dialogue_overlap_
+enabled` directly; legacy `audio_overlap` stays accepted for backward
+compatibility for a migration period the Product Owner will define later
+-- not deleted now, not deleted by any date this task sets.
+
+### PART 19 -- Request versioning
+
+Audited: not required. Every change in this task is an additive optional
+field (`dialogue_overlap_enabled: bool | None`, `metadata: dict | None`)
+on already-permissive, `.get()`-based dict deserialization and
+`extra`-tolerant Pydantic models. No schema-version field was introduced
+-- there is nothing here that additive optional fields cannot evolve
+safely without one.
+
+### PART 20 -- Test results
+
+New file `tests/test_cutsell_d134_overlap_contract_normalization.py`, 26
+tests, covering items 1-27 of the directive's required list (some items
+collapsed into one assertion where the underlying mechanism is identical,
+e.g. old/new/mixed-request-loads also exercise legacy/canonical
+true/false normalization): **26/26 PASS**.
+
+Bounded regression (contracts/serde/Flow B submission/pipeline/D-123/
+D-128/Boundary/render-plan), 9 files: `test_cutsell_d134_overlap_
+contract_normalization.py`, `test_cutsell_clean_worker_api.py` (Flow B
+submission), `test_cutsell_hybrid_pipeline.py` + `test_pipeline_runtime_
+reliability.py` (pipeline), `test_cutsell_d123_case_b_fast_path_gate.py`,
+`test_cutsell_d128_multimodal_fallback_phase1.py`, `test_cutsell_d097_c_
+boundary_engine_pass.py` (Boundary), `test_cutsell_clean_worker_render.py`
++ `test_cutsell_render_boundary_tightening.py` (render-plan/renderer):
+**133/133 PASS**.
+
+`python3 -m compileall cutsell_worker cutsell_app tests`: clean, zero
+errors.
+
+Full offline suite (`pytest tests/`, one collection error pre-existing
+and unrelated: `test_semantic_stitch.py` is a legacy non-pytest script
+file whose module-level code calls `score_take(t)` with a missing
+required `slot` argument -- confirmed via `git stash`/`git log` to be
+broken identically on the pre-D-134 HEAD `f2d59d1`, untouched by this
+task's diff, excluded via `--ignore` to get a real result): **3172
+passed, 13 subtests passed, 5 pre-existing failures** (`test_hybrid_
+story_guard_incomplete_retry.py::test_incomplete_failed_retry_is_covered
+_when_prior_delivery_preserves_numbers_and_negation` and four assertions
+in `test_video00_modal_hybrid_semantic_parity.py` about a Modal-workflow
+env-secret-masking fix and a `D-044` string leak into `cutsell_worker/
+active_path_identity.py`'s diagnostics table) -- **re-confirmed via `git
+stash` to fail identically on HEAD `f2d59d1`, before any D-134 change**,
+so **NEW FAILURES INTRODUCED BY D-134: ZERO**. Neither pre-existing
+failure touches any file this task modified.
+
+### PART 21 -- Observability size
+
+`overlap_diagnostics` is exactly one small flat dict (4 keys) per
+`ProcessingRequest` -- one per processing request, never per BestTake
+family, never per source. No CI-tail-scale printing was added anywhere.
+
+### Confirmations
+
+- **NO OVERLAP PACING IMPLEMENTED**: confirmed -- `dialogue_overlap_
+  enabled` has zero consumers anywhere in this diff (Part 8's structural
+  proof); no `HARD_CUT`/`TIGHT_CUT`/`J_CUT`/`L_CUT`/`MICRO_AUDIO_OVERLAP`
+  logic exists.
+- **NO IOS QA/FEATURE WORK**: confirmed -- `git diff --stat` touches zero
+  files under `mobile/ios/`; no simulator/device work performed.
+- **NO RAW/PROVIDER/INFRA**: confirmed -- no Modal/RunPod call, no new
+  recurring paid infrastructure, no GitHub Actions workflow touched.
+
+### Scope confirmed
+
+`git diff --stat` across this task's commits: `cutsell_worker/contracts.
+py` (+2 additive `ProcessingRequest` fields), `cutsell_worker/serde.py`
+(+`_normalize_dialogue_overlap` and its two call-site wirings), `cutsell_
+app/main.py` (+`SourceInput.metadata`, +`FlowBSubmitRequest.dialogue_
+overlap_enabled`, +conditional forwarding in `submit_flow_b`), `cutsell_
+app/batch_routes.py` (mirrors the same three additions for the batch
+path), `tests/test_cutsell_d134_overlap_contract_normalization.py` (new,
+26 tests), `docs/CUTSELL_DECISIONS.md` (this entry). No Swift file, no
+`.github/workflows/*`, no `multimodal_besttake_fallback.py`, no
+`boundary_engine_pass.py`, no `render_plan.py`/`render.py`, no
+`media_probe.py` touched.
+
+**HUMAN ACTION REQUIRED: NO** -- this task's own next action is an
+ordinary technical consequence already named below, not a Product-Owner
+decision point; the directive's own STOP applies to the NEXT stage
+(Dialogue/Pacing Transition implementation and the D-128 provider call),
+not to this contract-hardening task's own completion.
+
+**Exact next engine task (recommended, not authorized to start
+automatically per this task's own "Then STOP"):** progress D-128 toward
+its next authorized milestone (provider-backed/shadow fallback
+evaluation) using the now-hardened request contract as its input surface
+-- `ProcessingRequest.dialogue_overlap_enabled`/`overlap_diagnostics` and
+`SourceAsset.metadata`'s canonical media-metadata vocabulary are both
+available for that work to build on without a future contract rewrite,
+per this task's own stated goal (Part 2 rule 4/8).
+
+**STOPPING HERE per this task's own directive: no Dialogue/Pacing
+Transition implementation, no multimodal fallback provider call
+performed. Wait for Product Owner authorization.**

@@ -1,6 +1,8 @@
 """Batch API for high-output CutSell creators."""
 from __future__ import annotations
 
+from typing import Any
+
 from fastapi import APIRouter, HTTPException, status
 from pydantic import BaseModel, Field
 
@@ -17,6 +19,9 @@ class BatchSource(BaseModel):
     uri: str
     source_order: int = Field(ge=0)
     duration_sec: float = Field(default=0.0, ge=0.0)
+    # D-134: same optional, descriptive-only media metadata as SourceInput
+    # in cutsell_app/main.py -- see docs/CUTSELL_DECISIONS.md D-134 Part 6.
+    metadata: dict[str, Any] | None = None
 
 
 class BatchProject(BaseModel):
@@ -24,6 +29,9 @@ class BatchProject(BaseModel):
     sources: list[BatchSource] = Field(min_length=1)
     language_hint: str | None = None
     audio_overlap: bool = False
+    # D-134: canonical Overlap field, same semantics as FlowBSubmitRequest's
+    # field of the same name -- see docs/CUTSELL_DECISIONS.md D-134 Part 2.
+    dialogue_overlap_enabled: bool | None = None
 
 
 class BatchCreateRequest(BaseModel):
@@ -58,14 +66,21 @@ def create_batch_job(payload: BatchCreateRequest):
                     "source_order": source.source_order,
                     "duration_sec": source.duration_sec,
                     "uri": source.uri,
+                    # D-134: optional descriptive-only media metadata.
+                    "metadata": source.metadata or {},
                 })
-            processing_payloads.append({
+            processing_payload = {
                 "project_id": project.project_id,
                 "user_id": payload.user_id,
                 "sources": sources,
                 "language_hint": project.language_hint,
                 "audio_overlap": project.audio_overlap,
-            })
+            }
+            # D-134: forward the canonical field only when explicitly sent
+            # -- see cutsell_app/main.py::submit_flow_b for the same rule.
+            if project.dialogue_overlap_enabled is not None:
+                processing_payload["dialogue_overlap_enabled"] = project.dialogue_overlap_enabled
+            processing_payloads.append(processing_payload)
         record = create_batch(user_id=payload.user_id, payloads=processing_payloads)
         submission = enqueue_batch_item(
             batch_id=record["batch_id"], user_id=payload.user_id, index=0
