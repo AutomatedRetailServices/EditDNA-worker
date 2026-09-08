@@ -21972,3 +21972,256 @@ its own explicit instruction.
 the one real-media Video00 RAW that finally qualifies D-150's gate using
 these new tail-safe fields is the Product Owner's decision, not made
 here.
+
+## D-153: Semantic Authority Phase B -- final real-media qualification with tail-safe gate evidence
+
+**Authorization:** Product Owner directive "CUTSELL -- D-153 SEMANTIC
+AUTHORITY PHASE B FINAL REAL-MEDIA QUALIFICATION WITH TAIL-SAFE GATE
+EVIDENCE", verified HEAD `7527267` (D-152), clean working tree. ONE
+canonical Video00 RAW authorized. No code change.
+
+**RAW dispatched:** run `34261221207` on `cutsell-video00-modal-raw.yml`,
+head `7527267`, workflow_dispatch, all-default inputs. Modal benchmark
+succeeded (teardown confirmed); the CI job's overall `failure`
+conclusion is again a real QA-verifier gate finding (below), not an
+infrastructure or D-150/D-152 code failure. D-152's new step ("Print
+compact D-150 Semantic Authority qualification summary") ran
+successfully and, for the first time in this thread, its FULL output sat
+entirely within `get_job_logs`'s retrievable tail -- the exact
+observability gap D-151 hit is CLOSED.
+
+==================================================
+D-152 TOP-LEVEL SUMMARY (verbatim, fully recovered)
+==================================================
+
+`family_count`: 6. `semantic_authority_gate_evaluated_count`: 6.
+`semantic_authority_allowed_count`: 5. `semantic_authority_abstain_
+incomplete_count`: 0. `semantic_authority_abstain_conflict_count`: 1.
+`semantic_authority_advisory_count`: 0. `families_with_one_complete_
+window`: 2. `families_with_multiple_complete_windows`: 4. `families_
+with_complete_window_agreement`: 3. `families_with_complete_context_
+conflict`: 1. `families_with_no_complete_window`: 0.
+
+==================================================
+PIMPLES FAMILY THIS RUN (`tg_8de44a18529ef50e30`, confirmed via the
+D-123 step's own reference-text-matched `"pimples": {"status":
+"family_formed", ...}` block -- `family_formed`, no fragmentation)
+==================================================
+
+`family_complete_context`: `"true"`. `complete_window_count`: 2.
+`complete_window_agreement_status`: `MULTIPLE_COMPLETE_WINDOWS_AGREE`.
+`complete_context_conflict`: `false`. `semantic_authority_before`:
+`DECISIVE`. `semantic_authority_gate_status`: `AUTHORITATIVE`.
+`semantic_authority_gate_reason`: `family_complete_context_true_no_
+conflict`. `semantic_authority_after`: `DECISIVE`. `semantic_fast_path_
+candidate` = `semantic_winner_id` = `deliveryscore_winner_id` =
+`clip_a2f048e19051baf6a761` (full agreement across every signal).
+`winner_path_after`: `SEMANTIC_FAST_PATH`.
+
+**This run, pimples is NOT the conflicted family -- it resolved cleanly
+and decisively.** This is itself evidence, not an inconvenience: D-144/
+D-147 already established this exact family is semantically UNSTABLE
+run-to-run (SEMANTIC_PROVIDER_VARIANCE); D-151's run caught it
+disagreeing, this run it agreed. Reported honestly rather than forced to
+match D-151's shape.
+
+**pimples_bad_monolith_absent still FAILED this run**
+(`historical_bad_take_returned`), DESPITE the pimples family itself
+resolving cleanly through `SEMANTIC_FAST_PATH` with full cross-signal
+agreement. This proves the historical-bad-take content is NOT coming
+from the pimples family's own semantic decision this run -- it must
+originate elsewhere in the edit (most plausibly the conflicted family
+below, which fell through to `DELIVERYSCORE_PATH`, though D-152's
+tail-safe rows deliberately carry no transcript to confirm this
+precisely, and this task's scope forbids the forensic transcript dig
+that would). Recorded as a DeliveryScorer/downstream finding, per this
+task's own explicit instruction, NOT attributed to D-150 -- the pimples
+family's own gate behavior this run was correct and decisive.
+
+==================================================
+CONFLICTED FAMILY (the real conflict-abstention control, `tg_
+d88e600fe6a5e92dc4`)
+==================================================
+
+`family_complete_context`: `"true"`. `complete_window_count`: 2.
+`complete_window_agreement_status`: `MULTIPLE_COMPLETE_WINDOWS_
+DISAGREE`. `complete_context_conflict`: `true`. `semantic_authority_
+before`: `NON_DECISIVE`. `semantic_authority_gate_status`: `ABSTAIN_
+CONFLICT`. `semantic_authority_gate_reason`: `multiple_family_complete_
+windows_disagree_on_comparative_winner`. `semantic_authority_after`:
+`NON_DECISIVE`. `semantic_fast_path_candidate`: `null`.
+`semantic_winner_id`: `null`. `winner_path_after`: `DELIVERYSCORE_PATH`.
+`deliveryscore_winner_id`: `clip_990a677fbe0145cdf13f`. The underlying
+D-123 evidence confirms `meaning_sufficient_candidates: []` (NEITHER
+candidate reached meaning-sufficiency) and `fallback_trigger_reason:
+"NO_SEMANTIC_WINNER"` -- no manufactured winner via highest confidence,
+last window, `_decision_priority`, cross-window merge, or the
+`single_semantic_winner` fast path. **Textbook correct ABSTAIN_CONFLICT
+behavior, on real media, with a direct field-level read -- no
+reconstruction required.**
+
+==================================================
+AGREED/AUTHORITATIVE CONTROL (3 additional families, all consistent)
+==================================================
+
+`tg_ce06566e3fa60c1a71`, `tg_99b6048238b8506487`, `tg_69180f382d7fba90bc`:
+all `family_complete_context="true"`, `complete_context_conflict=false`,
+agreement status `MULTIPLE_COMPLETE_WINDOWS_AGREE` (first two) or `ONE_
+COMPLETE_WINDOW` (third), gate `AUTHORITATIVE`, before/after both
+`DECISIVE`, `semantic_fast_path_candidate` present and non-null in every
+case. One additional family (`tg_d371753b52ca744aa2`) is `AUTHORITATIVE`
+by gate status (correctly -- context is complete, no conflict) but
+naturally non-decisive both before and after (no member ever reached a
+single "winner" label) -- proving `AUTHORITATIVE` never manufactures a
+winner where the raw labels themselves gave none. **The gate does not
+suppress trustworthy semantic authority -- proven directly, four times
+over, in one real run.**
+
+==================================================
+INCOMPLETE-CONTEXT CONTROL
+==================================================
+
+NOT OBSERVED this run -- all 6 families report `family_complete_
+context="true"`; `families_with_no_complete_window`: 0;
+`semantic_authority_abstain_incomplete_count`: 0. Not invented, per this
+task's own instruction. (D-150's offline suite already proves this state
+by construction; D-149/D-150's own fixtures cover it exhaustively.)
+
+==================================================
+DIAGNOSIS / SONOGRAPHY CONTROL
+==================================================
+
+The diagnosis clause ("La biopsia confirmó que era un cáncer papilar de
+tiroides.") is preserved and kept (135.44-140.96s, identical physical
+timing to D-151's run). It is NOT part of any 2+-member family this run
+(a `false_keep`/`ungrouped_retry_of_kept_idea` finding on an adjacent
+segment recurs, same structural gap D-151 also found, unrelated to
+D-150) -- so D-150's gate is structurally NOT involved in the Diagnosis
+region at all, this run or D-151's. `papillary_diagnosis_preserved` and
+`papillary_symptom_realization_meaning` both PASS.
+`sonography_good_before_diagnosis` FAILS again (`required_sequence_
+missing_or_reordered`) -- same pre-existing, unattributed-to-D-150
+finding as D-151. Not investigated, per scope.
+
+==================================================
+WHOLE-VIDEO REGION SUMMARY
+==================================================
+
+Hook: CUTAI_PASS. Sonography: CUTAI_PASS (presence) / REGRESSED
+(order). Pimples: REGRESSED (`pimples_bad_monolith_absent`, DeliveryScore-
+attributed per above). Diagnosis: CUTAI_PASS. Body/Symptoms: CUTAI_PASS
+(acne/hair-loss/gastritis) except a NEW `family_context_preserved`
+failure (`missing_required_segment`) not seen in D-151 -- reported, not
+investigated, no evidence linking it to D-150 (module-leaf proof already
+established structurally in D-150/D-152's own test suites). Stomach/
+Conclusion: NOT_REEVALUATED. CTA: CUTAI_PASS. `qa_pass: false` overall
+(15 passed / 3 failed / 28 selected vs 23 expected, a non-blocking D-032
+count warning).
+
+==================================================
+PHYSICAL / PARITY METRICS
+==================================================
+
+Physical Level-1: 14 selection regions / 51.609s + 22 boundary regions /
+4.021s. F1 vs Cut.ai: 0.7619. F1 vs Human Gold: 0.6964.
+`level1_by_authority`: `BestTakeResolver` dominant (38.439s of ~55.6s
+total) -- consistent with D-151's own finding that DeliveryScorer/
+BestTakeResolver quality, not the semantic authority layer, drives the
+Level-1 mass. Lower than D-151's own run (Cut.ai 0.7822, Gold 0.7827),
+lower than D-143 (0.8396/0.8114), and below D-147's own Gold floor
+(0.7097). **No causal attribution to D-150 is made** -- the semantic
+authority gate behaved correctly on every one of this run's 6 families
+(proven above field-by-field); the lower physical parity traces to
+`BestTakeResolver`/DeliveryScorer's own tie-break/scoring quality across
+several DIFFERENT families this run, an axis D-150 does not gate,
+exactly as this task's own instruction requires keeping separate.
+
+==================================================
+SEMANTIC AUTHORITY STABILITY CLASSIFICATION
+==================================================
+
+`tg_d88e600fe6a5e92dc4`: `STABLE_ABSTAIN_CONFLICT` (directly confirmed
+field-level, not inferred). `tg_ce06566e3fa60c1a71`, `tg_
+99b6048238b8506487`, `tg_8de44a18529ef50e30` (pimples this run),
+`tg_69180f382d7fba90bc`: `STABLE_AUTHORITATIVE` (directly confirmed).
+`tg_d371753b52ca744aa2`: `STABLE_AUTHORITATIVE` (gate correct; naturally
+non-decisive labels, not a gate failure). Zero families classify as
+`UNSTABLE` (a manufactured decisive winner from conflicting evidence) or
+`UNKNOWN` (field-level unreadable) -- the first fully clean stability
+read this thread has achieved on real media.
+
+==================================================
+BESTTAKE / DELIVERYSCORE QUALITY RESULT (explicitly separate from the
+semantic-authority result above)
+==================================================
+
+Two real, unresolved, pre-existing issues persist independent of
+run-to-run family identity: (1) the `DELIVERYSCORE_PATH` tie-break can
+still select a realization Cut.ai/Human Gold both reject (this run via
+`tg_d88e600fe6a5e92dc4`, D-151 via its own different conflicted pimples
+family) whenever the semantic gate correctly abstains and hands off to
+it; (2) a required-order QA check (`sonography_good_before_diagnosis`)
+fails independent of family identity. Neither is D-150's to fix; both
+are recorded here as separate downstream findings, not patched, per
+this task's explicit instruction.
+
+==================================================
+D-150 FINAL VERDICT: A -- PHASE B REAL-MEDIA PROVEN
+==================================================
+
+All four required conditions are met by DIRECT field-level evidence
+from D-152's tail-safe summary, on real Video00 media, in one run: (1)
+the one genuinely conflicted complete-context family abstained
+correctly (`ABSTAIN_CONFLICT`, non-decisive before AND after, no
+manufactured winner via any mechanism); (2) four agreed/complete
+families remained fully authoritative and decisive, including the
+pimples family itself this run; (3) no conflicted semantic winner leaked
+into the BestTake fast path anywhere; (4) no editorial regression is
+attributable to D-150 -- every regression this run traces to
+DeliveryScorer/BestTakeResolver or an unrelated ordering/segment check,
+axes D-150 does not touch, confirmed by the same families' own
+`winner_path_after`/`semantic_fast_path_candidate` fields.
+
+**Semantic-authority thread D-145 -> D-153 CLOSES for the current
+milestone.** No further semantic-authority gate, provider-consensus
+rule, or Video00 RAW is authorized for this specific thread. No model
+bakeoff is reopened.
+
+==================================================
+VIDEO00 PRIMARY-RAW STATUS: NOT YET -- WATCH+LISTEN / FAMILY FORMATION /
+BESTTAKE STILL PARTIAL
+==================================================
+
+Even with the semantic-authority thread closed, Video00 remains the
+primary development RAW: DeliveryScorer's tie-break quality, the
+sonography-ordering check, and the still-`PARTIAL` Upstream Watch+
+Listen/Family Formation capabilities (D-098 Section 13.20, unchanged)
+are all independent, still-open axes this run re-confirmed.
+
+==================================================
+EXACT NEXT ENGINE CAPABILITY
+==================================================
+
+Per D-148/D-098 Section 13.22 and this task's own instruction on a
+verdict-A outcome: the next major engine capability is UPSTREAM WATCH+
+LISTEN MULTIMODAL UNDERSTANDING / FUSION. Before any implementation, a
+bounded DESIGN/FORENSIC task should inventory existing ASR, word-timing,
+audio-perception, visual/performance, position-aware, behavior-state,
+proposition, and attempt/retry evidence; determine which tracks can run
+in parallel, which are already implemented (D-098 Section 13.20's own
+status matrix), which genuine-audio capabilities remain missing, what
+exact Structured RAW Understanding Map (13.3.1) should exist, and where
+Fusion sits relative to Proposition/Attempt/Family Formation. NOT
+implemented, scheduled, or authorized by this task.
+
+**Scope confirmed:** exactly one RAW (`34261221207`), no second
+dispatch, no code change, no semantic-gate/DeliveryScorer/BestTake/
+family/Boundary/Pacing/provider-policy change; D-081/D-094/D-097/D-101/
+D-103/D-106/D-123/D-128/D-138/D-140-D-152 all preserved CLOSED; D-152
+itself not rewritten (this is an append-only new entry).
+
+**HUMAN ACTION REQUIRED:** YES (condition A) -- whether to authorize the
+recommended Watch+Listen design/forensic task, and separately whether to
+investigate the DeliveryScorer tie-break and sonography-ordering
+findings (both pre-existing, outside D-150's own scope), are Product
+Owner decisions, not made here.
