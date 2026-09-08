@@ -1064,6 +1064,13 @@ jobs:
               "deterministic_override_count": 0,
               "meaning_insufficient_alternative_block_count": 0,
               "no_case_b_evidence_no_bypass_count": 0,
+              # D-128 (docs/CUTSELL_DECISIONS.md D-128): Phase 1 SHADOW-ONLY
+              # Class B fallback trigger observability, a pure projection of
+              # `multimodal_besttake_fallback.fallback_trigger_diagnostics`
+              # fields `pipeline.py` already attached to each
+              # `take_judge_groups` row -- recomputes nothing, never
+              # consulted by any BestTake/grouping/render decision.
+              "fallback_shadow_eligible_count": 0,
           }
 
           for row in groups:
@@ -1132,6 +1139,10 @@ jobs:
               if not case_b_evidence and not semantic_fast_path_bypassed:
                   counts["no_case_b_evidence_no_bypass_count"] += 1
 
+              fallback_shadow_eligible = row.get("fallback_shadow_eligible")
+              if fallback_shadow_eligible is True:
+                  counts["fallback_shadow_eligible_count"] += 1
+
               compact_row = {
                   "group_id": row.get("group_id"),
                   "member_ids": member_ids,
@@ -1150,6 +1161,15 @@ jobs:
                   "final_selected_clip_id": final_selected_clip_id,
                   "final_reason": final_reason,
                   "case_b_evidence": _compact_case_b(case_b_evidence),
+                  # D-128 Phase 1 shadow-only fields (bounded aggregates
+                  # only -- never raw delivery_events).
+                  "fallback_shadow_eligible": fallback_shadow_eligible,
+                  "fallback_trigger_reason": row.get("fallback_trigger_reason"),
+                  "fallback_structured_winner": row.get("fallback_structured_winner"),
+                  "fallback_candidate_ids": row.get("fallback_candidate_ids"),
+                  "fallback_case_b_dominance": row.get("fallback_case_b_dominance"),
+                  "fallback_provider_invoked": row.get("fallback_provider_invoked"),
+                  "fallback_winner_changed": row.get("fallback_winner_changed"),
               }
               if case_b_conflict_present:
                   # Conflict families only: name the two candidates' meaning-

@@ -16216,3 +16216,119 @@ to authorize Phase 1 (Section 22 of the full document: build the
 shadow-only diagnostics, zero behavior change) is the Product Owner's
 next decision, not made here. No RAW, provider call, or infra change
 requested.
+
+## D-128 -- Multimodal BestTake fallback Phase 1: Class B trigger +
+shadow-only arbiter contract (post D-127). **SHADOW/ADVISORY only. No
+provider call. No winner change. No score/rank/threshold change. No RAW.**
+
+Builds exactly the six things D-127's Phase 1 scope named, no more:
+
+1. **`cutsell_worker/multimodal_besttake_fallback.py`** -- pure, read-only
+   `detect_class_b_trigger()`. Classifies ALREADY-COMPUTED signals
+   (D-081/D-103 meaning sufficiency, D-101/D-103 safety veto reused
+   verbatim via `safety_excluded_ids`, D-122 CASE B evidence); never
+   re-derives or re-scores anything, never calls a provider. Eligibility
+   is 9 ordered checks producing the most specific compact reason on
+   failure: `NOT_MULTI_MEMBER` -> `NO_SEMANTIC_WINNER` -> `NO_
+   DELIVERYSCORE_WINNER` -> `SEMANTIC_DELIVERYSCORE_DISAGREE` (D-123's own
+   territory, always excluded) -> `NO_CASE_B_EVIDENCE` (winner) -> `NO_
+   MEANING_SUFFICIENT_ALTERNATIVE` -> `SAFETY_EXCLUSION` -> `NO_CASE_B_
+   EVIDENCE` (alternatives) -> `CASE_B_NOT_DOMINATED` -> `CLASS_B_
+   ELIGIBLE`. `_factual_dominance` is a pure partial-order comparison
+   (aggregate event count/duration + every individual event kind's own
+   count/duration, union of both candidates' kinds) -- no-worse on every
+   dimension and strictly better on at least one, or no dominance at all;
+   never a score, weight, or invented threshold.
+2. **`cutsell_worker/multimodal_besttake_arbiter.py`** -- a NEW, DISTINCT
+   `MultimodalBestTakeArbiter` Protocol (request/response/gate-policy/
+   safe-call, mirroring `semantic_idea_equivalence.py`'s proven shape),
+   deliberately not an extension of `SemanticEquivalenceArbiter` (D-127's
+   own recommendation). Output vocabulary bounded to `BEST_TAKE/
+   EQUIVALENT/GOOD_TAKE_TRIM_ENTRY/GOOD_TAKE_TRIM_EXIT/UNCERTAIN` --
+   excludes `KEEP_BOTH_COMPLEMENTARY`/`NEW_COMPOSITE`/`REWRITE`/
+   `MERGE_SPEECH` (D-019's KEEP/DISCARD-only doctrine). `validate_
+   multimodal_besttake_response` rejects an unknown outcome, a `BEST_TAKE`
+   referencing a candidate outside the request, or confidence outside
+   0..1. `NullMultimodalBestTakeArbiter` is an inert placeholder (mirrors
+   `visual_analysis.NoopVisualProvider`); `safe_arbitrate` is a fail-open
+   wrapper for the offline harness only. `build_multimodal_besttake_
+   request` refuses to build a request from a non-eligible trigger or with
+   fewer than 2 resolvable finalists, and never includes a candidate the
+   trigger didn't name. `MultimodalFinalistInput` carries references/
+   metadata only (`video_span_reference`/`audio_span_reference`/
+   `sampled_frame_references` default `None`/`()`) -- never raw media
+   bytes, never full RAW.
+3. **`cutsell_worker/multimodal_besttake_eval.py`** -- offline eval
+   harness, 9 fixtures (pimples-shaped positive plus 8 negative controls:
+   tied evidence, upstream semantic instability, semantic/DeliveryScore
+   disagreement x2, safety exclusion, single-member family, partial-order
+   conflict, ENTRY/EXIT-only). `run_offline_eval()`: all 9 PASS.
+4. **`cutsell_worker/pipeline.py`** wiring -- SHADOW ONLY. Imports only
+   `detect_class_b_trigger`/`fallback_trigger_diagnostics` (never the
+   arbiter module -- nothing in the live pipeline can call a provider).
+   Computed inside the existing per-family `judge_group_diagnostics` loop,
+   reusing `_single_winner_safety_veto` verbatim for `safety_excluded_
+   ids`; its 8-field projection (`fallback_shadow_evaluated/eligible`,
+   `fallback_trigger_class/reason`, `fallback_structured_winner`,
+   `fallback_candidate_ids`, `fallback_case_b_dominance`, `fallback_
+   request_candidate_count`, `fallback_provider_invoked=False`, `fallback_
+   winner_changed=False`) is appended to each row STRICTLY AFTER the
+   existing `final_winner` key -- never consulted above that line, never
+   changes `selected_clip_id`/`ranked`/`winner_path`/membership/Boundary/
+   render plan. `.github/workflows/cutsell-video00-modal-raw.yml`'s D-125
+   tail-safe summary step is extended (bounded, no raw-event dump) with
+   the same fields per family plus a global `fallback_shadow_eligible_
+   count`, so a future RAW's shadow evaluation stays retrievable in the CI
+   log tail window.
+5. **`tests/test_cutsell_d128_multimodal_fallback_phase1.py`** -- 34
+   tests: the pimples-shaped positive; every non-eligible reason
+   (disagreement, meaning-insufficient, tied evidence, partial-order
+   conflict, missing evidence on either side, single-member, ENTRY/EXIT-
+   only, safety exclusion, no semantic/no DeliveryScorer winner, trivial
+   agreement with no evidence); request assembly (legitimate finalists
+   only, never leaks an unnamed candidate, refuses to build on a
+   non-eligible trigger or under-populated finalist map); `MultimodalFinalistInput`
+   never carries raw media; response validation (`BEST_TAKE` must
+   reference a supplied id, confidence bounds); `UNCERTAIN` validity;
+   invalid-response safe rejection via `safe_arbitrate`; no-provider-call
+   proof (structural -- no network primitive referenced in any of the
+   three new modules; `pipeline.py` never imports the arbiter module;
+   boundary/render modules never reference fallback at all); shadow
+   diagnostic keys never collide with existing D-122/D-123 keys; JSON-safe
+   bounded diagnostics (never raw `delivery_events`); the offline eval
+   harness all-pass; output-vocabulary/gate-policy scope checks. All 34
+   PASS.
+6. Failure-mode names (`TIMEOUT`/`PROVIDER_ERROR`/`UNSUPPORTED_MEDIA`/
+   `LOW_CONFIDENCE`/`COST_CEILING`/`MEANING_SAFETY_MISMATCH`) declared in
+   `multimodal_besttake_arbiter.py` for a future Phase 2/3 -- unexercised,
+   since no provider call exists yet to time out or error.
+
+**Qualification:** `compileall` clean; targeted new suite 34/34; bounded
+regression (D-101/D-103/D-115/D-116/D-122/D-123/deterministic_best_take_
+authority/semantic_best_take*/boundary+render-boundary files, 205 tests)
+100% green; full offline suite (3131 passed, 13 subtests, same
+pre-existing 5 failed/1 error baseline -- `test_hybrid_story_guard_
+incomplete_retry`/`test_video00_modal_hybrid_semantic_parity` (unrelated
+D-044 workflow-overlay tests)/`test_semantic_stitch` (unrelated `score_
+take` signature) -- zero new failures, confirmed byte-for-byte the same
+pre-existing set). `git diff --stat` confirms scope: exactly the 3 new
+`multimodal_besttake_*.py` modules, `pipeline.py` (+31 lines, additive
+only), the workflow's D-125 step extension (+20 lines), and the new test
+file -- nothing else touched.
+
+**Next gate** (not authorized here): either (a) shadow real-media
+qualification -- run the authorized-when-requested next Video00 RAW and
+read the new `fallback_shadow_eligible` fields via the extended D-125
+summary to confirm Class B actually fires on real media the way D-126's
+pimples family predicts, purely as observability, or (b) a provider-backed
+offline eval (wiring a real vision-capable provider behind
+`MultimodalBestTakeArbiter` for the existing 9 fixtures, still never
+touching the live pipeline). NOT authorized here: making fallback
+authoritative, wiring the arbiter into the live pipeline, or any real
+provider call.
+
+**HUMAN ACTION REQUIRED:** YES (condition A, product decision) -- which
+next gate ((a) or (b) above), and whether/when to authorize Phase 2 (live
+wiring behind a real provider, still advisory-only per D-127's authority
+contract) is the Product Owner's decision, not made here. No RAW,
+provider call, or infra change requested by this task.

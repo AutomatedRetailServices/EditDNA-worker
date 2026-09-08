@@ -62,6 +62,7 @@ from .case_b_performance_evidence import (
     build_case_b_performance_evidence,
     case_b_performance_evidence_diagnostics,
 )
+from .multimodal_besttake_fallback import detect_class_b_trigger, fallback_trigger_diagnostics
 from .temporal_editing import refine_takes_with_temporal_context
 from .whole_video_analysis import WholeVideoContext, confirmed_recording_behavior_events
 
@@ -1098,6 +1099,31 @@ def build_flow_b_draft(
                 and semantic_best_take_reason != "single_semantic_winner"
             )
             bypass_reason = "case_b_performance_conflict" if semantic_fast_path_bypassed else None
+            # D-128 (docs/CUTSELL_DECISIONS.md D-128; docs/CUTSELL_
+            # MULTIMODAL_FALLBACK_ARBITER_FORENSIC_D127.md): Phase 1
+            # SHADOW-ONLY Class B detection. `detect_class_b_trigger` is a
+            # pure, read-only classifier of fields already computed above
+            # -- it NEVER calls a provider, NEVER changes `selected_
+            # clip_id`/`ranked`/`winner_path`/membership/Boundary. Reuses
+            # `_single_winner_safety_veto` (unchanged, D-101/D-103) as the
+            # SAME deterministic safety check the general ladder already
+            # applies -- never a new semantic classifier.
+            fallback_safety_excluded_ids = {
+                member.clip_id for member in members
+                if member.clip_id != case_b_semantic_fast_path_candidate
+                and _single_winner_safety_veto(
+                    member.clip_id, members, hybrid_semantic_delete_recommended,
+                ) is not None
+            }
+            fallback_trigger_decision = detect_class_b_trigger(
+                family_id=gid,
+                member_ids=tuple(member.clip_id for member in members),
+                semantic_winner=case_b_semantic_fast_path_candidate,
+                deliveryscore_winner=local_selected_clip_id,
+                meaning_sufficient_ids=meaning_sufficient_ids,
+                case_b_evidence_by_id=case_b_evidence_objects,
+                safety_excluded_ids=fallback_safety_excluded_ids,
+            )
             judge_group_diagnostics.append({
                 "group_id": gid,
                 "selected_clip_id": selected_clip_id,
@@ -1169,6 +1195,11 @@ def build_flow_b_draft(
                 "case_b_conflict_basis": case_b_conflict_basis,
                 "meaning_sufficient_candidates": sorted(meaning_sufficient_ids),
                 "final_winner": selected_clip_id,
+                # D-128 (docs/CUTSELL_DECISIONS.md D-128): Phase 1
+                # SHADOW-ONLY Class B fallback trigger observability --
+                # never consulted above this line, never changes
+                # selected_clip_id/ranked/membership/grouping/Boundary.
+                **fallback_trigger_diagnostics(fallback_trigger_decision),
             })
         for member in members:
             clip_to_group[member.clip_id] = gid
