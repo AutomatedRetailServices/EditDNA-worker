@@ -51,8 +51,8 @@ jobs:
         id: sim
         run: |
           set -euo pipefail
-          python3 - > /tmp/sim_selection.env <<'PY'
-          import json, subprocess, sys
+          python3 <<'PY'
+          import json, os, shlex, subprocess, sys
           raw = subprocess.check_output(["xcrun", "simctl", "list", "devices", "available", "--json"])
           data = json.loads(raw)
           candidates = []
@@ -71,15 +71,22 @@ jobs:
           candidates.sort()
           runtime, name, udid = candidates[0]
           version = runtime.rsplit(".", 1)[-1].replace("iOS-", "").replace("-", ".")
-          print(f"udid={udid}")
-          print(f"name={name}")
-          print(f"runtime=iOS {version}")
+          runtime_label = f"iOS {version}"
+          # $GITHUB_OUTPUT wants plain key=value (no shell quoting -- GitHub
+          # does not shell-parse it). Values like "iPhone 16e" contain a
+          # space, so this is safe there but NOT safe to `source` as shell
+          # variables directly (D-132's own first attempt broke exactly this
+          # way: `source`-ing an unquoted `name=iPhone 16e` ran "16e" as a
+          # separate command). Write a SEPARATE, shell-quoted file for this
+          # same step's own immediate use below.
+          with open(os.environ["GITHUB_OUTPUT"], "a") as f:
+              f.write(f"udid={udid}\nname={name}\nruntime={runtime_label}\n")
+          with open("/tmp/sim_selection.sh", "w") as f:
+              f.write(f"udid={shlex.quote(udid)}\n")
+              f.write(f"name={shlex.quote(name)}\n")
+              f.write(f"runtime={shlex.quote(runtime_label)}\n")
           PY
-          # $GITHUB_OUTPUT is set for DOWNSTREAM steps; ${{ steps.sim.outputs.* }}
-          # is not yet populated within this same step, so also load the
-          # selection into local shell variables for immediate use below.
-          cat /tmp/sim_selection.env >> "$GITHUB_OUTPUT"
-          source /tmp/sim_selection.env
+          source /tmp/sim_selection.sh
           echo "Selected simulator: udid=$udid name=$name runtime=$runtime"
           xcrun simctl boot "$udid"
           xcrun simctl bootstatus "$udid" -b
