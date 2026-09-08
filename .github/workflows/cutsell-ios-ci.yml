@@ -37,8 +37,120 @@ jobs:
             -scheme CutSell \
             -sdk iphonesimulator \
             -configuration Debug \
+            -derivedDataPath build \
             CODE_SIGNING_ALLOWED=NO \
             build | xcpretty
+
+      # D-132 (docs/CUTSELL_DECISIONS.md D-132): the ONLY change to the
+      # build step above this comment is the added -derivedDataPath build
+      # flag, so CutSell.app lands at a deterministic, known path for the
+      # runtime-verification steps below. No build flag was removed and
+      # no build behavior otherwise changed.
+
+      - name: Discover and boot an iOS Simulator
+        id: sim
+        run: |
+          set -euo pipefail
+          python3 - > /tmp/sim_selection.env <<'PY'
+          import json, subprocess, sys
+          raw = subprocess.check_output(["xcrun", "simctl", "list", "devices", "available", "--json"])
+          data = json.loads(raw)
+          candidates = []
+          for runtime, devices in data.get("devices", {}).items():
+              if "iOS" not in runtime:
+                  continue
+              for d in devices:
+                  if d.get("isAvailable") and str(d.get("name", "")).startswith("iPhone"):
+                      candidates.append((runtime, d["name"], d["udid"]))
+          if not candidates:
+              print("NO_DEVICE_FOUND", file=sys.stderr)
+              sys.exit(1)
+          # Deterministic: sort by (runtime, name, udid) and always take the
+          # first -- reproducible given this runner's own device list, never
+          # a hardcoded model/runtime that could be absent.
+          candidates.sort()
+          runtime, name, udid = candidates[0]
+          version = runtime.rsplit(".", 1)[-1].replace("iOS-", "").replace("-", ".")
+          print(f"udid={udid}")
+          print(f"name={name}")
+          print(f"runtime=iOS {version}")
+          PY
+          # $GITHUB_OUTPUT is set for DOWNSTREAM steps; ${{ steps.sim.outputs.* }}
+          # is not yet populated within this same step, so also load the
+          # selection into local shell variables for immediate use below.
+          cat /tmp/sim_selection.env >> "$GITHUB_OUTPUT"
+          source /tmp/sim_selection.env
+          echo "Selected simulator: udid=$udid name=$name runtime=$runtime"
+          xcrun simctl boot "$udid"
+          xcrun simctl bootstatus "$udid" -b
+
+      - name: Install and launch CutSell in Simulator
+        if: steps.sim.outcome == 'success'
+        id: launch
+        working-directory: mobile/ios
+        run: |
+          set -euo pipefail
+          UDID="${{ steps.sim.outputs.udid }}"
+          APP_PATH="$(pwd)/build/Build/Products/Debug-iphonesimulator/CutSell.app"
+          test -d "$APP_PATH"
+          echo "app_path=$APP_PATH" >> "$GITHUB_OUTPUT"
+
+          BUNDLE_ID="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$APP_PATH/Info.plist")"
+          echo "bundle_id=$BUNDLE_ID" >> "$GITHUB_OUTPUT"
+          echo "Bundle identifier (read from built Info.plist): $BUNDLE_ID"
+
+          xcrun simctl install "$UDID" "$APP_PATH"
+          echo "install_result=success" >> "$GITHUB_OUTPUT"
+
+          LAUNCH_OUTPUT="$(xcrun simctl launch "$UDID" "$BUNDLE_ID" 2>&1)"
+          echo "$LAUNCH_OUTPUT"
+          PID="$(echo "$LAUNCH_OUTPUT" | grep -oE '[0-9]+$' | tail -1 || true)"
+          echo "pid=${PID:-unknown}" >> "$GITHUB_OUTPUT"
+
+          # Bounded observation window -- not an arbitrary long sleep, just
+          # enough to distinguish "started" from "crashed on launch".
+          sleep 5
+
+          if [ -n "${PID:-}" ] && ps -p "$PID" > /dev/null 2>&1; then
+            echo "process_alive=yes" >> "$GITHUB_OUTPUT"
+          else
+            echo "process_alive=no" >> "$GITHUB_OUTPUT"
+          fi
+
+          CRASH_REPORTS="$(find "$HOME/Library/Logs/DiagnosticReports" -iname 'CutSell*' -newermt '-2 minutes' 2>/dev/null || true)"
+          if [ -n "$CRASH_REPORTS" ]; then
+            echo "crash_reports_found=yes" >> "$GITHUB_OUTPUT"
+            echo "--- Crash report(s) found ---"
+            echo "$CRASH_REPORTS"
+          else
+            echo "crash_reports_found=no" >> "$GITHUB_OUTPUT"
+          fi
+
+          echo "--- Bounded CutSell process log (last 1 minute) ---"
+          xcrun simctl spawn "$UDID" log show --style compact \
+            --predicate 'processImagePath contains "CutSell"' --last 1m \
+            2>/dev/null | tail -n 200 || echo "(no log output captured)"
+
+      - name: Capture simulator screenshot
+        if: steps.launch.outputs.process_alive == 'yes'
+        continue-on-error: true
+        run: |
+          mkdir -p "$RUNNER_TEMP/cutsell-sim"
+          xcrun simctl io "${{ steps.sim.outputs.udid }}" screenshot \
+            "$RUNNER_TEMP/cutsell-sim/launch-screenshot.png"
+
+      - name: Upload simulator screenshot
+        if: always()
+        continue-on-error: true
+        uses: actions/upload-artifact@v4
+        with:
+          name: cutsell-ios-simulator-screenshot
+          path: ${{ runner.temp }}/cutsell-sim/launch-screenshot.png
+          if-no-files-found: ignore
+
+      - name: Shut down iOS Simulator
+        if: always() && steps.sim.outcome == 'success'
+        run: xcrun simctl shutdown "${{ steps.sim.outputs.udid }}" || true
 
       - name: Notify Claude Routine
         if: always()
