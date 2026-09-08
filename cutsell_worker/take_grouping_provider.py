@@ -41,6 +41,15 @@ def _attempt_relationship_authority():
     from . import attempt_relationship_authority
     return attempt_relationship_authority
 
+
+def _watch_listen_relation_discovery():
+    """Lazy import (D-161), same cycle-avoidance reasoning as `_attempt_
+    relationship_authority` above: `watch_listen_relation_discovery.py`
+    imports `attempt_reconstruction.py` (for `_restart_evidence`), which
+    imports `session_boundaries.py`, which imports THIS module."""
+    from . import watch_listen_relation_discovery
+    return watch_listen_relation_discovery
+
 # General (English + Spanish) "this is a new/additional item, not a restatement"
 # discourse markers -- a candidate pair where exactly ONE side carries one of
 # these is EVIDENCE the marked side may be introducing a distinct point,
@@ -822,6 +831,22 @@ def _watch_listen_family_evidence_summary(
     }
 
 
+def _watch_listen_relation_discovery_summary(enabled: bool, rows: list[dict]) -> dict:
+    """Tail-safe, counts-only D-161 summary -- same pattern as `_watch_
+    listen_family_evidence_summary` above (per-pair basis strings never
+    appear here; `rows` themselves are already bounded to clip ids +
+    short enum/string fields, never transcript text)."""
+    if not enabled:
+        return {"status": "disabled"}
+    if not rows:
+        return {"status": "no_candidates_discovered"}
+    discovery = _watch_listen_relation_discovery()
+    return {
+        "status": "evaluated",
+        **discovery.discovery_diagnostics(rows),
+    }
+
+
 def reconcile_semantic_idea_equivalence(
     groups: Tuple[Tuple[str, ...], ...],
     takes: Tuple[CandidateTake, ...],
@@ -1007,8 +1032,18 @@ def reconcile_semantic_idea_equivalence(
         restart_merged.append(row)
 
     ranked_pair_budget: list[dict] = []
+    # D-161: computed early so the "arbiter is None" early exit right below
+    # (pre-existing, before D-161) does not skip Watch+Listen Relation
+    # DISCOVERY -- a mechanism this task's own directive requires to work
+    # with ZERO provider call, i.e. it must still run even when `arbiter`
+    # is None. Deferring the early return only when discovery might have
+    # something to contribute (flag on AND real Watch+Listen evidence
+    # supplied) keeps the flag-OFF path (the overwhelming default) byte-
+    # identical to pre-D-161 behavior.
+    watch_listen_discovery_enabled = _watch_listen_relation_discovery().watch_listen_relation_discovery_enabled()
+    discovery_may_contribute = bool(watch_listen_discovery_enabled and watch_listen_spans_by_id)
     if arbiter is None:
-        if merged_count == 0:
+        if merged_count == 0 and not discovery_may_contribute:
             # D-158: this pre-existing early exit (no arbiter, no restart-
             # evidence merge succeeded) must still surface the Watch+Listen
             # evidence summary -- otherwise a merge this function's own
@@ -1019,6 +1054,9 @@ def reconcile_semantic_idea_equivalence(
                 "status": "not_requested", "candidate_pair_count": len(candidate_pairs), "merged_pair_count": 0,
                 "watch_listen_family_evidence": _watch_listen_family_evidence_summary(
                     watch_listen_enabled, watch_listen_conflict_blocked, final_relations,
+                ),
+                "watch_listen_relation_discovery": _watch_listen_relation_discovery_summary(
+                    watch_listen_discovery_enabled, [],
                 ),
             }
         result = None
@@ -1133,6 +1171,124 @@ def reconcile_semantic_idea_equivalence(
             "reason": reason,
         })
 
+    # D-161 Phase C.2: WATCH+LISTEN RELATION DISCOVERY -- a SEPARATE flag
+    # from D-158's own merge-veto flag (different authorities, per this
+    # task's own instruction); `discovery_may_contribute` was computed
+    # earlier so the "arbiter is None" early exit above never skips this
+    # pass. D-160's own forensic proved D-158 only ever evaluates a pair
+    # the pre-existing semantic candidate-pair path (`_cross_group_
+    # candidate_pairs` -> the ranked/batch-capped arbiter request above)
+    # already decided to compare; this pass proposes candidates that path
+    # never generated or reached, from ALREADY-COMPUTED Watch+Listen
+    # Understanding evidence only (see watch_listen_relation_discovery.py's
+    # own module docstring for the full discovery/proposition-firewall
+    # contract). A discovered pair is NEVER merged directly here -- every
+    # candidate is handed to the SAME structured authority
+    # (`resolve_final_attempt_relation`, `semantic_path_evaluated=False`)
+    # D-158 itself uses, and only a final RETRY relation with independently
+    # sufficient proposition evidence ever produces a merge. Runs AFTER
+    # both existing mechanisms so it only ever considers a pair NEITHER
+    # already resolved (deduplication: "evaluate once").
+    _discovery = _watch_listen_relation_discovery()
+    discovery_trace_rows: list[dict] = []
+    if discovery_may_contribute:
+        clip_to_group_index = {cid: gi for gi, group in enumerate(groups) for cid in group}
+        resolved_pair_keys = {
+            frozenset((row["left_clip_id"], row["right_clip_id"]))
+            for row in (restart_merged + audit + arbiter_rejected_pairs + distinct_addition_blocked + watch_listen_conflict_blocked)
+        }
+        semantic_candidate_pair_keys = {
+            frozenset((left_id, right_id)) for (_, _, left_id, right_id) in candidate_pairs
+        }
+        for candidate in _discovery.discover_candidate_pairs(watch_listen_spans_by_id, take_map):
+            pair_key = frozenset((candidate.left_id, candidate.right_id))
+            pair_source = (
+                _discovery.PAIR_SOURCE_BOTH if pair_key in semantic_candidate_pair_keys
+                else _discovery.PAIR_SOURCE_WATCH_LISTEN
+            )
+            row = {
+                "left_id": candidate.left_id, "right_id": candidate.right_id,
+                "pair_source": pair_source,
+                "wla_relation": candidate.relation, "wla_confidence": candidate.confidence,
+                "proposition_evidence_status": "not_applicable",
+                "structured_final_relation": None, "family_action": None,
+                "accepted": False, "rejection_reason": None,
+            }
+            # Evaluate once (this task's own deduplication instruction):
+            # a pair the existing semantic path already resolved this run
+            # (merged, restart-merged, arbiter-rejected, marker-blocked, or
+            # already D-158-conflict-blocked) is never re-decided here.
+            if pair_key in resolved_pair_keys:
+                row["rejection_reason"] = _discovery.REJECT_ALREADY_RESOLVED
+                discovery_trace_rows.append(row)
+                continue
+            left_take = take_map.get(candidate.left_id)
+            right_take = take_map.get(candidate.right_id)
+            if (
+                left_take is None or right_take is None
+                or left_take.source_asset_id != right_take.source_asset_id
+                or candidate.left_id not in clip_to_group_index
+                or candidate.right_id not in clip_to_group_index
+            ):
+                row["rejection_reason"] = _discovery.REJECT_MISSING_TAKE
+                discovery_trace_rows.append(row)
+                continue
+            if candidate.confidence != _discovery.CONFIDENCE_SUPPORTED:
+                row["rejection_reason"] = _discovery.REJECT_NOT_SUPPORTED
+                discovery_trace_rows.append(row)
+                continue
+            right_span = watch_listen_spans_by_id.get(candidate.right_id)
+            conflict_flagged = bool(getattr(right_span, "conflict_flags", ()))
+            if candidate.relation == _discovery.RELATION_RETRY and conflict_flagged:
+                row["rejection_reason"] = _discovery.REJECT_CONFLICT_FLAGGED
+                discovery_trace_rows.append(row)
+                continue
+            left_marked = _has_distinct_addition_marker(left_take.text)
+            right_marked = _has_distinct_addition_marker(right_take.text)
+            if (
+                candidate.relation == _discovery.RELATION_RETRY
+                and left_marked != right_marked
+                and _marked_side_diverges_in_content(left_take.text, right_take.text)
+            ):
+                row["rejection_reason"] = _discovery.REJECT_MARKED_DISTINCT_ADDITION
+                discovery_trace_rows.append(row)
+                continue
+
+            proposition_sufficient = False
+            if candidate.relation == _discovery.RELATION_RETRY:
+                proposition_sufficient, proposition_kind = _discovery.proposition_evidence_for_pair(
+                    left_take, right_take, confirmed_recording_evidence=confirmed_recording_evidence,
+                )
+                row["proposition_evidence_status"] = proposition_kind if proposition_sufficient else "unresolved"
+
+            wl_hypothesis = _wla.AttemptRelationHypothesis(
+                relation=candidate.relation, confidence=candidate.confidence,
+                basis=candidate.basis, left_span_id=candidate.left_id,
+            )
+            final = _wla.resolve_final_attempt_relation(
+                would_merge=False, would_merge_source=_wla.RELATION_SOURCE_NO_SEMANTIC_PAIR,
+                watch_listen_relations=(wl_hypothesis,),
+                semantic_path_evaluated=False,
+                proposition_evidence_sufficient=proposition_sufficient,
+            )
+            row["accepted"] = True
+            row["structured_final_relation"] = final.relation
+            row["family_action"] = final.family_membership_action
+            if not final.would_merge and candidate.relation == _discovery.RELATION_RETRY and not proposition_sufficient:
+                row["rejection_reason"] = _discovery.REJECT_PROPOSITION_UNRESOLVED
+            if final.would_merge:
+                left_gi = find(clip_to_group_index[candidate.left_id])
+                right_gi = find(clip_to_group_index[candidate.right_id])
+                if left_gi != right_gi:
+                    union(left_gi, right_gi)
+                    merged_count += 1
+                    audit.append({
+                        "left_clip_id": candidate.left_id, "right_clip_id": candidate.right_id,
+                        "confidence": 1.0, "reason": final.reason,
+                        "accepted_by": "watch_listen_relation_discovery",
+                    })
+            discovery_trace_rows.append(row)
+
     if merged_count == 0:
         return groups, {
             "status": (
@@ -1152,6 +1308,10 @@ def reconcile_semantic_idea_equivalence(
             "watch_listen_family_evidence": _watch_listen_family_evidence_summary(
                 watch_listen_enabled, watch_listen_conflict_blocked, final_relations,
             ),
+            "watch_listen_relation_discovery": _watch_listen_relation_discovery_summary(
+                watch_listen_discovery_enabled, discovery_trace_rows,
+            ),
+            "watch_listen_discovery_trace": discovery_trace_rows,
         }
 
     clusters: dict[int, list[str]] = {}
@@ -1176,6 +1336,10 @@ def reconcile_semantic_idea_equivalence(
         "watch_listen_family_evidence": _watch_listen_family_evidence_summary(
             watch_listen_enabled, watch_listen_conflict_blocked, final_relations,
         ),
+        "watch_listen_relation_discovery": _watch_listen_relation_discovery_summary(
+            watch_listen_discovery_enabled, discovery_trace_rows,
+        ),
+        "watch_listen_discovery_trace": discovery_trace_rows,
     }
 
 

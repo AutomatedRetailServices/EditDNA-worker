@@ -128,6 +128,14 @@ RELATION_SOURCE_DETERMINISTIC_RESTART = "DETERMINISTIC_RESTART"
 RELATION_SOURCE_WATCH_LISTEN = "WATCH_LISTEN"
 RELATION_SOURCE_CONFLICT_RESOLUTION = "CONFLICT_RESOLUTION"
 RELATION_SOURCE_UNCERTAIN = "UNCERTAIN"
+# D-161: a pair the PRE-EXISTING semantic candidate-pair path never
+# generated or evaluated at all -- distinct from RELATION_SOURCE_WATCH_
+# LISTEN (which marks AGREEMENT with an existing would_merge=False
+# decision the semantic path actively made). "No semantic pair" is the
+# discovery module's own honest label for "nothing to agree or disagree
+# with existed" -- see resolve_final_attempt_relation's own docstring.
+RELATION_SOURCE_NO_SEMANTIC_PAIR = "NO_SEMANTIC_PAIR"
+RELATION_SOURCE_WATCH_LISTEN_DISCOVERY = "WATCH_LISTEN_DISCOVERY"
 
 FAMILY_ACTION_ELIGIBLE_RETRY_FAMILY = "ELIGIBLE_RETRY_FAMILY"
 FAMILY_ACTION_SEPARATE_NOT_COMPETING = "SEPARATE_NOT_COMPETING"
@@ -235,16 +243,84 @@ def _best_supported_relation(
     return None
 
 
+def _resolve_discovery_relation(
+    watch_listen_relations: Tuple[AttemptRelationHypothesis, ...],
+    proposition_evidence_sufficient: bool,
+) -> FinalAttemptRelationship:
+    """D-161 Phase C.2: the DISCOVERY half of this authority's truth
+    table -- reached only when the caller explicitly passes
+    `semantic_path_evaluated=False` (i.e. this pair was never generated
+    or evaluated by the pre-existing semantic candidate-pair path at
+    all; there is no `would_merge` decision to agree or conflict with).
+    `resolve_final_attempt_relation`'s own False->True prohibition still
+    holds here in spirit: a discovered RETRY relation ALONE is never
+    sufficient -- `proposition_evidence_sufficient` (independent
+    deterministic restart/completion evidence, computed by the caller,
+    e.g. `watch_listen_relation_discovery.proposition_evidence_for_pair`)
+    must ALSO be true before `would_merge` is ever set. Every other
+    relation (CORRECTION/CONTINUATION/COMPLEMENTARY/NEW_AUDIENCE_BEAT/
+    DISTINCT_PROPOSITION) is surfaced structurally but never merges,
+    exactly as the non-discovery truth table already does for those
+    labels."""
+    best = _best_supported_relation(watch_listen_relations)
+    if best is None:
+        return FinalAttemptRelationship(
+            RELATION_UNCERTAIN, False, RELATION_SOURCE_UNCERTAIN, False,
+            FAMILY_ACTION_ABSTAIN_UNCERTAIN,
+            "no material watch-listen evidence for this discovered pair; no discovery action",
+            bool(watch_listen_relations), False,
+        )
+
+    wl_relation = best.relation
+    if wl_relation == RELATION_RETRY:
+        if proposition_evidence_sufficient:
+            return FinalAttemptRelationship(
+                RELATION_RETRY, True, RELATION_SOURCE_WATCH_LISTEN_DISCOVERY, False,
+                FAMILY_ACTION_ELIGIBLE_RETRY_FAMILY,
+                "watch-listen discovery: SUPPORTED retry relation + independent proposition evidence",
+                True, True,
+            )
+        return FinalAttemptRelationship(
+            RELATION_UNCERTAIN, False, RELATION_SOURCE_WATCH_LISTEN_DISCOVERY, False,
+            FAMILY_ACTION_ABSTAIN_UNCERTAIN,
+            "watch-listen discovery: SUPPORTED retry relation but proposition evidence unresolved; not forcing a merge",
+            True, True,
+        )
+    # CORRECTION/COMPLEMENTARY/NEW_AUDIENCE_BEAT/DISTINCT_PROPOSITION:
+    # surfaced into their own structured family-membership action, never
+    # a retry-family merge -- these relations do not compete for
+    # membership, so no proposition-evidence gate applies to them.
+    return FinalAttemptRelationship(
+        wl_relation, False, RELATION_SOURCE_WATCH_LISTEN_DISCOVERY, False,
+        _FAMILY_ACTION_FOR_RELATION[wl_relation],
+        f"watch-listen discovery: surfaced {wl_relation} relation (not a retry-family merge)",
+        True, True,
+    )
+
+
 def resolve_final_attempt_relation(
     *,
     would_merge: bool,
     would_merge_source: str,
     watch_listen_relations: Tuple[AttemptRelationHypothesis, ...] = (),
+    semantic_path_evaluated: bool = True,
+    proposition_evidence_sufficient: bool = False,
 ) -> FinalAttemptRelationship:
     """The one structured-conflict-resolution function this module
     provides (Authority Order steps 5-6). Pure; no I/O, no provider call,
     no recomputation of perception. See module docstring for the full
-    truth table and its justification."""
+    truth table and its justification.
+
+    D-161: `semantic_path_evaluated=False` (default `True`, so every
+    existing D-158 call site is byte-identical unchanged) routes to
+    `_resolve_discovery_relation` -- the ONLY way this function's
+    `would_merge` can ever become `True` from Watch+Listen evidence when
+    no pre-existing semantic decision exists at all, and only when
+    `proposition_evidence_sufficient` is ALSO true (see that function's
+    own docstring)."""
+    if not semantic_path_evaluated:
+        return _resolve_discovery_relation(watch_listen_relations, proposition_evidence_sufficient)
+
     best = _best_supported_relation(watch_listen_relations)
 
     if best is None:

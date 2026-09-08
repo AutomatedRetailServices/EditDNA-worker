@@ -70,6 +70,11 @@ from .attempt_relationship_authority import (
     build_understanding_span_index,
     watch_listen_family_evidence_enabled,
 )
+# D-161: same top-level-safe reasoning as the D-158 import above --
+# `watch_listen_relation_discovery.py` sits in the SAME dependency chain
+# (`attempt_reconstruction -> session_boundaries -> take_grouping_
+# provider`), which never imports `pipeline.py` back at module load time.
+from .watch_listen_relation_discovery import watch_listen_relation_discovery_enabled
 from .watch_listen_understanding import WatchListenUnderstanding
 from .take_judge import FRAGMENT_PENALTY_MARKERS, apply_delivery_cleanliness_evidence
 from .take_judge_provider import TakeJudgeProvider, safe_rank_takes
@@ -971,9 +976,16 @@ def build_flow_b_draft(
     # flag, so this is belt-and-suspenders, not a second flag definition --
     # skipping the index build entirely when OFF/empty keeps the OFF path
     # byte-identical work, not just byte-identical output.
+    # D-161: the Relation Discovery Gate is a SEPARATE capability flag from
+    # D-158's merge-veto flag (different authorities -- see D-161 decision
+    # entry) and it also needs this same span index to build discovery
+    # candidates from. Build the index when EITHER flag is ON so that
+    # discovery works even when the family-evidence flag stays OFF; both
+    # flags OFF (the shared default) still skips the build entirely.
     watch_listen_spans_by_id = (
         build_understanding_span_index(watch_listen_understandings)
-        if watch_listen_family_evidence_enabled() and watch_listen_understandings
+        if (watch_listen_family_evidence_enabled() or watch_listen_relation_discovery_enabled())
+        and watch_listen_understandings
         else None
     )
     semantic_equivalence_groups, semantic_equivalence_diagnostics = reconcile_semantic_idea_equivalence(

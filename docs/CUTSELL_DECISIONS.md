@@ -24510,3 +24510,272 @@ layer artifact this forensic newly surfaced for the diagnosis clip
 (separate from Family Formation, a Boundary/render forensic candidate),
 and whether Phase D (BestTake/DeliveryScorer consumption) should continue
 to wait on Family-Formation reachability, are Product Owner decisions.
+
+
+==================================================
+D-161 -- WATCH+LISTEN RELATION DISCOVERY GATE (POST D-160, PHASE C.2)
+==================================================
+
+**STATUS: OFFLINE PROVEN (Verdict A).** Implements the bounded WATCH+LISTEN
+RELATION DISCOVERY GATE D-160 recommended (previous section) and the
+Product Owner's D-161 directive authorized. Branch
+`feature/runpod-pod-on-demand`, built on D-160's HEAD `bb708eb`.
+
+**Core principle (unchanged from the directive, now code):**
+
+    WATCH+LISTEN MAY DISCOVER. WATCH+LISTEN DOES NOT DECIDE.
+
+A Watch+Listen relation hypothesis may create a DISCOVERY CANDIDATE; it
+never directly creates a FINAL RELATION, FAMILY MERGE, or BESTTAKE WINNER.
+Every discovered candidate is handed to the SAME structured authority
+D-158 already uses (`attempt_relationship_authority.resolve_final_
+attempt_relation`, extended with two new keyword-only parameters,
+`semantic_path_evaluated` and `proposition_evidence_sufficient` -- default
+values make every pre-existing D-158 call site byte-identical unchanged);
+only a final `RETRY` relation with independently-sufficient proposition
+evidence ever produces `would_merge=True`.
+
+**New module: `cutsell_worker/watch_listen_relation_discovery.py`.**
+Discovery-only, no provider call, no perception recomputation:
+
+- `discover_candidate_pairs(understanding_spans_by_id, take_map)` walks
+  each source's own D-157 understanding-span sequence (sorted
+  deterministically by `(source_start, source_end, span_id)`, the SAME key
+  `build_watch_listen_understanding` itself uses) and proposes a
+  `DiscoveryCandidate` for every immediate-neighbor pair carrying a real
+  `SUPPORTED`-confidence, non-`UNCERTAIN` relation hypothesis D-157 itself
+  already computed -- O(n) per source, never O(n^2), never a new perception
+  signal.
+- **Immediate-neighbor bridging** (D-160's own named limitation): when a
+  span's immediate predecessor is classified EXCLUSIVELY as one of the four
+  non-audience intermediary behaviors (`PRE_TAKE_SETUP`/`POST_TAKE_RESET`/
+  `RECORDING_PROCESS`/`FALSE_START`, never `AUDIENCE_DELIVERY`/
+  `CLEAN_ATTEMPT`), the module also considers that span's OWN predecessor as
+  a candidate left side -- reusing `attempt_reconstruction._restart_
+  evidence` verbatim (the same primitive D-157 itself calls), exactly ONE
+  hop, never an arbitrary N-hop or all-pairs search.
+- `proposition_evidence_for_pair(left_take, right_take, ...)` is the
+  Proposition Firewall (D-111 reasserted: "PROPOSITION IDENTITY PRECEDES
+  RETRY IDENTITY"). It reuses the SAME four deterministic restart-evidence
+  functions the existing merge path already applies, in the same order
+  (`same_opening_restart` -> `_safe_short_prefix_retry` -> `incomplete_
+  attempt_completed_by_retry` -> `multimodal_corroborated_retry`), never a
+  new heuristic. A discovered `RETRY` is never sufficient alone.
+- `discovery_diagnostics(rows)` -- tail-safe, counts-only summary with
+  every observability field name the directive specified verbatim
+  (`watch_listen_discovery_evaluated_count`, `..._candidate_count`,
+  `..._retry_count`, `..._continuation_count`, `..._correction_count`,
+  `..._complementary_count`, `..._new_beat_count`, `..._distinct_count`,
+  `..._uncertain_skipped_count`, `semantic_pair_candidate_count`,
+  `watch_listen_only_pair_count`, `both_source_pair_count`, `..._accepted_
+  count`, `..._rejected_count`, `discovery_rejection_reasons`).
+
+**Pair-source contract:** `PAIR_SOURCE_SEMANTIC` (`_cross_group_candidate_
+pairs`, unchanged) / `PAIR_SOURCE_WATCH_LISTEN` (this module) /
+`PAIR_SOURCE_BOTH` (discovered by both this run, observability only). A
+pair resolved by the existing semantic/lexical path THIS run is evaluated
+exactly once -- discovery's own trace row records `REJECT_ALREADY_
+RESOLVED`, never re-decides or double-counts it.
+
+**`attempt_relationship_authority.py` extension.** `resolve_final_attempt_
+relation` gained `semantic_path_evaluated: bool = True` and `proposition_
+evidence_sufficient: bool = False`. `semantic_path_evaluated=False` routes
+to a new `_resolve_discovery_relation` branch: a `SUPPORTED RETRY`
+hypothesis merges (`ELIGIBLE_RETRY_FAMILY`) only when `proposition_
+evidence_sufficient` is ALSO true; without it, `UNCERTAIN`/`ABSTAIN_
+UNCERTAIN` (never forced). Every other relation (`CORRECTION`/
+`CONTINUATION`/`COMPLEMENTARY`/`NEW_AUDIENCE_BEAT`/`DISTINCT_PROPOSITION`)
+is surfaced into its own structured family-membership action and never
+competes for retry-family membership. New source labels `NO_SEMANTIC_
+PAIR` and `WATCH_LISTEN_DISCOVERY` distinguish "nothing to agree or
+disagree with existed" from D-158's own `WATCH_LISTEN` agreement label.
+Verified via live truth-table checks: every pre-existing D-158 call
+(default kwargs) is byte-identical; none of the 50 existing D-158 tests
+needed to change.
+
+**`take_grouping_provider.py` wiring.** New lazy-import helper
+`_watch_listen_relation_discovery()` (mirrors D-158's own `_attempt_
+relationship_authority()` -- same import-cycle reasoning:
+`watch_listen_relation_discovery.py` imports `attempt_reconstruction.py`,
+which imports `session_boundaries.py`, which imports THIS module).
+Discovery's enabled/spans-present computation (`discovery_may_
+contribute`) is placed BEFORE the pre-existing `if arbiter is None:` early
+exit and that exit's own condition widened to `merged_count == 0 and not
+discovery_may_contribute` -- fixing a genuine control-flow bug found
+during implementation: discovery must run with ZERO provider call (the
+directive's own hard requirement), and the naive placement would have
+skipped it silently whenever no arbiter was supplied. The discovery
+EXECUTION loop itself still runs AFTER both the existing restart-evidence
+loop and the arbiter loop complete (needs their resolved-pair set for
+deduplication), building candidates from `discover_candidate_pairs`,
+gating on (in order) already-resolved-this-run, missing take/group
+membership, `SUPPORTED` confidence, meaning-safety `conflict_flags`, the
+existing D-048 distinct-addition-marker guard, then the Proposition
+Firewall for `RETRY` candidates -- a final `RETRY` merges via the SAME
+union-find `find`/`union` closures the existing reconciliation already
+uses. Both return-dict shapes (`merged_count == 0` and the success path)
+carry `watch_listen_relation_discovery` (the same tail-safe summary shape
+as D-158's own `watch_listen_family_evidence`, co-existing, never
+replacing it) and `watch_listen_discovery_trace` (bounded per-pair rows:
+`left_id`, `right_id`, `pair_source`, `wla_relation`, `wla_confidence`,
+`proposition_evidence_status`, `structured_final_relation`,
+`family_action`, `accepted`, `rejection_reason` -- no transcript text).
+
+**`pipeline.py` wiring.** `watch_listen_spans_by_id`'s build condition
+widened from `watch_listen_family_evidence_enabled()` alone to `(watch_
+listen_family_evidence_enabled() or watch_listen_relation_discovery_
+enabled())` -- so the span index is built whenever EITHER capability flag
+is on, letting discovery work even when D-158's own flag stays off (both
+flags off, the shared default, still skips the build entirely -- byte-
+identical OFF path preserved).
+
+**Capability flag.** `CUTSELL_WATCH_LISTEN_RELATION_DISCOVERY_ENABLED`,
+default OFF, deliberately SEPARATE from D-158's `CUTSELL_WATCH_LISTEN_
+FAMILY_EVIDENCE_ENABLED` per the directive's own instruction (merge-veto
+and relation-discovery are different authorities). OFF: `take_grouping_
+provider.py`'s discovery block never executes; D-158's own behavior is
+completely unchanged (proven by the existing 50-test D-158 suite passing
+unmodified, plus new flag-OFF regression tests).
+
+**D-160 structural replay (the primary regression proof).** The real
+pimples/espinillas pair D-160 traced was excluded from `_cross_group_
+candidate_pairs`' own generation entirely by the `<=3 semantic-key-word`
+floor (D-160's own named `PAIR_GENERATION_FILTER` root cause) -- NOT
+merely truncated by the 14-pair arbiter batch cap, since any pair that
+DOES reach `_cross_group_candidate_pairs` and independently satisfies one
+of the four deterministic restart-evidence functions is already resolved
+by the pre-existing restart-evidence loop (which runs on the FULL
+candidate set, unconditional on the arbiter's batch cap) before ranking or
+the cap is ever consulted -- so a true "excluded only by the cap, yet has
+independently-sufficient lexical proposition evidence" case cannot occur
+for a literal `_cross_group_candidate_pairs` member in the current
+architecture; the batch cap's real exposure is pairs the arbiter would
+have to adjudicate on paraphrase alone (D-160's own secondary
+`WLA_PAIR_LOOKUP_MISMATCH`/`PROPOSITION_EVIDENCE_GAP` findings), for which
+discovery correctly reports `UNCERTAIN`/unresolved rather than forcing a
+merge, per the directive's own "if proposition evidence unresolved: do not
+force merge" instruction. The abstract structural fixture built for this
+entry (`test_cutsell_d161_watch_listen_relation_discovery.py::_pimples_
+shaped_fixture`, no pimples text or ids in production logic or the fixture
+itself) reproduces the `PAIR_GENERATION_FILTER` shape precisely: a short
+"false-start" fragment (<=3 words) exact-prefixes a much longer retry
+(`_safe_short_prefix_retry`'s own 2-3-word short-side allowance) -- a pair
+`_cross_group_candidate_pairs` never generates as a candidate at all, so
+neither the deterministic restart loop NOR the arbiter ever evaluates it,
+with `arbiter=None` (ZERO provider call) throughout. Discovery surfaces
+and merges it via the SAME structured authority D-158 uses. A second test
+proves the outcome is IDENTICAL regardless of `max_pairs_per_request`
+(parametrized 0/1/14), and a module-leaf source-text assertion proves
+`watch_listen_relation_discovery.py` never references `max_pairs_per_
+request` or `SemanticEquivalenceGatePolicy` at all -- explicit, structural
+proof that semantic ranking/batch exclusion and Watch+Listen discovery
+exclusion are two independent mechanisms.
+
+**Deduplication proven.** A pair discoverable by BOTH the existing
+restart-evidence loop and Watch+Listen discovery is merged exactly once
+by whichever mechanism resolves it first (the pre-existing loop, which
+always runs earlier); discovery's own trace row records `pair_source=
+BOTH`, `rejection_reason=already_resolved_by_semantic_path`, and
+`merged_pair_count` is never double-incremented. The same proof repeats
+for an arbiter-confirmed merge (the "conflict fixture": semantic path
+confirms `RETRY`, Watch+Listen independently carries `NEW_AUDIENCE_BEAT`
+evidence for the identical pair) -- the FIRST-resolved decision stands;
+discovery never re-litigates or forces a different outcome.
+
+**Relation-type routing proven.** `CONTINUATION`/`COMPLEMENTARY`/
+`CORRECTION`/`NEW_AUDIENCE_BEAT`/`DISTINCT_PROPOSITION` are surfaced
+(present in the trace with `accepted=True` and the correct `family_
+action`) but NEVER enter retry-family competition, even when `proposition_
+evidence_sufficient` is forced True in the isolated truth-table tests
+(defensive: only `RETRY` can ever reach `ELIGIBLE_RETRY_FAMILY` from
+discovery). `UNCERTAIN` produces no discovery candidate at the generation
+stage (`_best_supported` filters it out before a `DiscoveryCandidate` is
+ever created) -- exactly "NO DISCOVERY ACTION", preserving current
+behavior.
+
+**Fail-open proven throughout.** Missing/empty `WatchListenUnderstanding`,
+flag OFF, an unsupported/`UNCERTAIN` relation, an invalid/missing span or
+`CandidateTake`, a clip absent from `groups`, and a meaning-safety
+`conflict_flags` entry on the discovered span all fall back to pre-D-161
+behavior or a bounded rejection row -- never a crash, never a silently
+forced merge.
+
+**Determinism proven.** `discover_candidate_pairs` output is identical
+regardless of dict/map insertion order (explicit order-independence test);
+repeated `reconcile_semantic_idea_equivalence` calls on frozen input
+produce byte-identical family topology.
+
+**D-150/BestTake/DeliveryScorer/D-123/D-128/Boundary/Pacing untouched.**
+Module-leaf source-text assertions confirm `watch_listen_relation_
+discovery.py` never imports `semantic_authority_observability` (D-150),
+`deterministic_best_take_authority` (BestTake), `take_judge_provider`
+(DeliveryScorer/BestTake ranking), `boundary_engine`, `temporal_editing`
+(Boundary/Pacing), `renderer`, `composite_resolver`, or any provider/
+network symbol (`google.generativeai`, `requests`, `httpx`, `urllib`,
+`socket.`), and that D-150's own gate module never references this new
+module. `deterministic_best_take_authority.py`, `take_judge_provider.py`,
+`boundary_engine.py`, and `temporal_editing.py` themselves confirmed to
+never reference `watch_listen_relation_discovery` at all. No production
+runtime string in either new/changed module hardcodes a Video00-specific
+identity.
+
+**Tests.** New `tests/test_cutsell_d161_watch_listen_relation_discovery.py`
+-- 90 tests: capability flag (4), `discover_candidate_pairs` direct
+immediate-neighbor generation and determinism (9), immediate-neighbor
+bridging for all four intermediary kinds plus the audience/mixed-label
+non-bridging negative controls and the single-hop-only guard (10),
+`proposition_evidence_for_pair` covering all four underlying deterministic
+functions (6), the `resolve_final_attempt_relation(semantic_path_
+evaluated=False, ...)` truth table including backward-compatibility with
+existing D-158 call shapes (10), `discovery_diagnostics` field-name and
+counting correctness (4), and 21 live-wiring integration tests through
+`reconcile_semantic_idea_equivalence` (flag OFF/ON-no-spans, the D-160
+structural replay + batch-cap-value-independence, pair-provenance/
+deduplication for both the restart-evidence and arbiter-confirmed cases,
+each relation type's routing, conflict-flag/missing-take/orphan-clip
+rejection paths, determinism, and D-158's own summary co-existing
+unaffected), plus 8 module-leaf structural non-interference tests. All 90
+pass; zero skips.
+
+**Regression battery (this branch, this HEAD).** `python -m compileall`
+clean. Targeted D-161 suite (90) + D-158 suite (66) + D-157 suite (19, via
+the combined 175-test run) all green. Bounded regression set --
+`test_cutsell_clean_worker_take_grouping*.py` (3 files), `test_cutsell_
+attempt_reconstruction*.py` (2 files), `test_cutsell_semantic_idea_
+equivalence*.py` (3 files), `test_cutsell_d100_multimodal_retry_
+corroboration.py`, `test_cutsell_d150_semantic_authority_phase_b_gate.py`,
+`test_cutsell_d123_case_b_fast_path_gate.py`, `test_cutsell_d128_
+multimodal_fallback_phase1.py`, `test_cutsell_d142_dialogue_pacing_
+transition_phase1.py`, the D-097 family-formation/resolver/boundary suite,
+`test_cutsell_clean_worker_render.py`, `test_cutsell_video00_render_path_
+regressions.py` -- 313 tests, all green. Full offline suite (`tests/`,
+excluding the pre-existing, unrelated `test_semantic_stitch.py` collection
+error -- a bare module-level `print()` call with a wrong argument count,
+confirmed present and identically broken on the D-160 baseline HEAD
+`bb708eb` before any D-161 change, untouched by this work): 3629 passed,
+13 subtests passed, 5 pre-existing failures (`test_hybrid_story_guard_
+incomplete_retry.py` one case, `test_video00_modal_hybrid_semantic_
+parity.py` four cases -- all infrastructure/workflow-YAML and unrelated
+editorial tests) confirmed identically failing on the same `bb708eb`
+baseline via `git stash` before any D-161 file existed. Zero new
+failures introduced by this work.
+
+**Phase C.2 Verdict: A. WATCH+LISTEN RELATION DISCOVERY OFFLINE PROVEN.**
+
+**Next gate (per the directive, NOT authorized here):** ONE Video00
+real-media qualification run with BOTH `CUTSELL_WATCH_LISTEN_FAMILY_
+EVIDENCE_ENABLED=1` AND `CUTSELL_WATCH_LISTEN_RELATION_DISCOVERY_
+ENABLED=1`. Phase D (BestTake/DeliveryScorer consumption of Family
+Formation) remains BLOCKED until Family Formation is real-media proven
+stable under this combination -- this entry authorizes no RAW and no
+provider call, and none were run.
+
+**Confirmations:** NO RAW. NO provider/network call anywhere in the new
+or changed code (verified structurally, not just by convention). NO
+BestTake/DeliveryScorer/D-123/D-128/Boundary/Pacing change. D-150's
+comparative-winner safeguards untouched and unreferenced. D-158's own
+merge-veto behavior, flag, and all 50 of its existing tests unchanged.
+
+**HUMAN ACTION REQUIRED:** YES (condition C) -- authorization for the ONE
+real-media Video00 qualification run named above is a Product Owner
+decision; Phase D remains explicitly blocked until that gate passes.
