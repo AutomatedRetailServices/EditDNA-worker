@@ -19185,3 +19185,275 @@ iOS/TestFlight work, no Overlap implementation.
 **HUMAN ACTION REQUIRED:** YES (condition A, product decision) --
 whether to authorize Phase 3A (shadow-compared authoritative code,
 winner still unchanged) is the Product Owner's decision, not made here.
+
+
+## D-142 -- Dialogue/Pacing Transition foundation: Overlap + Tight Pacing, Phase 1
+
+**Status: FOUNDATION IMPLEMENTED (Phase 1 only). No BestTake/fallback/
+grouping/Boundary-behavior change. No RAW.** Returns to the RAW -> Cut.ai
+commercial-parity milestone per D-098 Sections 11-12/D-129's own status
+note ("Overlap/Pacing Transition remains ACTIVE, not deferred").
+
+**1) Pipeline placement.** Audited `cutsell_worker/pipeline.py`,
+`cutsell_worker/take_judge.py`, `cutsell_worker/boundary_engine_pass.py`,
+`cutsell_worker/render_plan.py`, `cutsell_worker/render.py`,
+`cutsell_worker/contracts.py`, `cutsell_worker/serde.py`,
+`cutsell_worker/universal_clean_cut.py`. The ONE new call site
+(`apply_dialogue_pacing_transition_pass`) is wired into `universal_clean_
+cut.py`'s `process_universal_clean_cut_sources`, strictly after
+`enforce_selection_contract` (which itself runs strictly after `apply_
+post_freeze_boundary_pass`/`polish_human_boundaries_v5`, i.e. after
+Boundary is fully complete on the frozen KEEP set) and strictly before any
+render is ever invoked (rendering happens later, at export time, from
+this persisted draft -- `export_job.py`/`validation.py`/`render_plan.
+build_render_plan`, all untouched). Canonical order realized exactly as
+specified: `Selection/BestTake -> Freeze -> Boundary -> Dialogue/Pacing
+Transition -> Renderer`. No second editor, no second pipeline: this is
+one new diagnostics-only call inside the existing orchestration function.
+
+**2) Canonical Dialogue/Pacing object/contract.** New module
+`cutsell_worker/dialogue_pacing_transition.py`:
+`DialogueTransitionPlan` (frozen dataclass; fields `transition_index,
+left_clip_id, right_clip_id, mode, dialogue_overlap_enabled,
+visual_cut_time, left_audio_end, right_audio_start, overlap_duration,
+gap_removed_duration, safety_status, fallback_reason, provenance` --
+exactly the repo-conventional shape requested), `TRANSITION_MODES =
+(HARD_CUT, TIGHT_CUT, J_CUT, L_CUT, MICRO_AUDIO_OVERLAP)`,
+`PHASE_1_EXECUTABLE_MODES = (HARD_CUT, TIGHT_CUT)` (the only modes the
+planner may ever actually select in Phase 1), `RENDERER_SUPPORT_MATRIX`
+(Section 12 below), `plan_dialogue_pacing_transitions` (the pure planner),
+`dialogue_pacing_transition_diagnostics` (the aggregate diagnostics
+builder), `apply_dialogue_pacing_transition_pass` (the one `ProcessingResult
+-> ProcessingResult` call site, mirroring `boundary_engine_pass.apply_
+post_freeze_boundary_pass`'s own shape). No duplicate parallel structure
+was introduced: `render_plan.RenderSegment`/`render_plan.build_render_
+plan` are completely untouched -- this module only adds a NEW diagnostics
+key (`draft.diagnostics["dialogue_pacing_transition"]`), never a new
+render/selection structure.
+
+**3) `dialogue_overlap_enabled` consumption (FIRST real consumer,
+D-134).** `apply_dialogue_pacing_transition_pass` is called with
+`dialogue_overlap_enabled=getattr(request, "dialogue_overlap_enabled",
+False)` (the `getattr` default is defensive against pre-existing test
+doubles that construct a bare `object()` as `request` -- a real
+`ProcessingRequest` always carries this field, defaulted `False` per
+D-134). This is the FIRST place in the codebase that actually reads
+`ProcessingRequest.dialogue_overlap_enabled` for a real decision -- every
+prior D-134 mention was explicitly "no consumer reads it yet." The
+legacy `audio_overlap` field is never read by this module or this call
+site (verified by a dedicated regression test parsing the module's AST
+and searching for the standalone identifier `audio_overlap` outside its
+own docstring prose) -- D-134's `serde._normalize_dialogue_overlap`
+remains the ONLY legacy-to-canonical normalization boundary.
+
+**4) HARD_CUT status: SUPPORTED_NOW.** This is literally the renderer's
+existing baseline (`render._concat_render_command`): every segment is
+independently trimmed to an exact matched audio/video duration and
+concatenated back to back via the `concat` filter, with zero inserted
+silence and only a 12 ms afade in/out per segment for click-avoidance
+(D-094.3 F14). The planner selects `HARD_CUT` whenever Boundary's own
+audit shows no applied edge trim at that specific join.
+
+**5) TIGHT_CUT status: SUPPORTED_NOW, planning proven with deterministic
+fixtures, NO NEW RENDERER MECHANIC ADDED.** Two independent, already-
+proven physical mechanisms already remove safe dead air: `boundary_
+engine_pass.py`'s post-Freeze audio/visual edge tightening (real measured
+`audio_silence_interval` events and D-115 positioned visual evidence,
+D-097.C/E) and `render.tighten_trailing_silence` (real `ffmpeg
+silencedetect`, the LAST mechanical op, D-097.E ownership table). Per
+D-142's own "prefer an existing canonical threshold over inventing one"
+instruction, the planner invents NO new silence measurement or threshold:
+it reads Boundary's OWN already-applied trim rows (`audio_edge_rows`,
+`visual_edge_rows`) for the specific pair being joined and labels that
+join `TIGHT_CUT` with `gap_removed_duration` equal to the sum of the
+already-applied trims -- purely attributive, never a second physical
+operation. A DELIVERY-zone event can never be counted (Boundary itself
+never writes a `trim_applied=True` row for one) -- proven by a dedicated
+negative-control test.
+
+**6) J_CUT / L_CUT / MICRO_AUDIO_OVERLAP status: contract established,
+never falsely claimed executable (REQUIRES_RENDERER_EXTENSION, all
+three).** Represented fully in the `TRANSITION_MODES` vocabulary and the
+`DialogueTransitionPlan` schema (so a future phase has a stable contract
+to target) but NEVER selected as the actual `mode` in Phase 1 -- the
+planner always falls back to `HARD_CUT`/`TIGHT_CUT` per the existing
+evidence rule, and records WHY via `fallback_reason`
+(`"overlap_disabled"` when the D-134 toggle is off, `"renderer_extension_
+required"` when the toggle is on but the renderer genuinely cannot
+execute the mode yet) -- so the toggle is honestly, observably consumed
+without ever faking execution of an unsupported mode.
+
+**7) Current gap/silence forensic (verified by direct code inspection,
+not assumed).** No literal inter-segment silence gap exists in the
+current renderer output: the `concat` filter joins `[v_i][a_i]` directly
+to `[v_{i+1}][a_{i+1}]` with nothing between them -- HARD_CUT is already
+the mechanical baseline, not a gap-then-cut. A tiny, sub-frame TECHNICAL
+padding can occur per segment (`apad=whole_dur=exact` rounding up to a
+whole output frame, at most `1/fps` ~= 33 ms at 30 fps) -- inaudible,
+not editorial dead air, unchanged since D-097.2. No PTS-reset/encoder
+timing gap remains: D-097.2's single `-filter_complex` pass with
+`setpts=PTS-STARTPTS`/`asetpts=PTS-STARTPTS` per segment already fixed
+the pre-D-097.2 concat-DEMUXER timeline drift (proven, not merely
+asserted, by D-097.2's own regression coverage). Genuine source-level
+pauses can remain INSIDE a selected clip's own span (interior dead air)
+-- `split_selected_interior_performance_gaps`'s territory, never this
+module's, since Dialogue/Pacing Transition only ever looks at the two
+EDGES of an adjacent pair.
+
+**8) Boundary ownership result: UNCHANGED, verified.** Boundary remains
+the sole owner of safe clip start/end, dead-edge removal, and ENTRY/EXIT
+cleanup -- Dialogue/Pacing Transition only ever READS Boundary's already-
+written diagnostics rows, never recomputes a trim, never calls
+`trim_locked_selection_edges`/`split_selected_interior_performance_gaps`/
+`tighten_selected_audio_edges`/`tighten_selected_visual_edges` itself, and
+never mutates `draft.selected`. A dedicated test confirms `boundary_
+engine_pass` diagnostics are byte-identical before and after the new
+pass runs.
+
+**9) Freeze/membership result: UNCHANGED, verified.** The new pass runs
+strictly after `freeze_selection_contract`/`enforce_selection_contract`
+inside `universal_clean_cut.py`'s frozen branch only (never in the
+`freeze_blocked` branch, where `pacing_stage` is explicitly set to
+`"not_applicable_freeze_blocked_by_coherence_validation"`). It never
+reassigns `draft.selected` -- membership, order, and every clip's
+`clip_id` are proven unchanged by dedicated tests (`test_planner_never_
+mutates_or_reorders_selected_clips`, `test_apply_pass_never_changes_
+selected_tuple`).
+
+**10) Source identity result: UNCHANGED, verified.** `left_audio_end`/
+`right_audio_start`/`visual_cut_time` are computed purely from each
+clip's own already-frozen, already-Boundary-approved `start`/`end` --
+never a new span, never crossing into another clip's source range
+(`test_plan_fields_never_exceed_clip_source_spans`).
+
+**11) Audio continuity result: assessed, no new DSP added.** Sample rate
+(48000), channel layout (stereo), and audio codec (AAC/160k) are already
+normalized once per segment via the existing `aformat=...`/final `-c:a
+aac` encode. PTS continuity is already exact (D-097.2). Click-avoidance
+already uses a 12 ms afade in/out on each segment's OWN edges (D-094.3
+F14) -- explicitly NOT a crossfade between neighbors (no `acrossfade`/
+`amix` exists in the current filter graph), which is exactly why `MICRO_
+AUDIO_OVERLAP` is classified `REQUIRES_RENDERER_EXTENSION`. Zero broad
+DSP work was introduced by this task.
+
+**12) Renderer support matrix (STATIC FORENSIC, no RAW/live render
+needed to answer):**
+
+| mode | classification | basis |
+|---|---|---|
+| HARD_CUT | SUPPORTED_NOW | existing `concat`-filter baseline, matched audio/video cut instant |
+| TIGHT_CUT | SUPPORTED_NOW | existing Boundary edge tightening + `render.tighten_trailing_silence`, both real and already proven |
+| J_CUT | REQUIRES_RENDERER_EXTENSION | `_concat_render_command` gives every segment's audio/video the SAME exact trimmed duration, synced to start together -- no mechanism for B's audio to precede A's video end without restructuring the filter graph across a segment boundary |
+| L_CUT | REQUIRES_RENDERER_EXTENSION | mirrored reasoning: A's audio continuing into B's video window needs a duration exceeding its own segment's trim window, unsupported today |
+| MICRO_AUDIO_OVERLAP | REQUIRES_RENDERER_EXTENSION | segments are concatenated end-to-end, never mixed; a true overlap needs `acrossfade`/`amix` between neighboring audio streams, absent from `render.py` |
+
+**13) Safety/fallback contract.** Every plan row carries `safety_status`
+(always `SAFE` in Phase 1, since only `HARD_CUT`/`TIGHT_CUT` are ever
+selected and neither can produce an unsafe outcome by construction) and
+`fallback_reason` (never `None` for the two modes never selected in
+practice -- always names WHY an overlap mode was not attempted). Every
+unsafe/unsupported transition falls to `HARD_CUT`/`TIGHT_CUT`, the
+current renderer-equivalent baseline -- never to dropping media (the
+planner cannot drop media: it never removes a `DialogueTransitionPlan`
+row nor a `DraftClip`).
+
+**14) Mode-selection contract.** Deterministic, evidence-only: `TIGHT_
+CUT` iff Boundary's own audit shows an applied trim at the specific
+join's edges (summed into `gap_removed_duration`); `HARD_CUT` otherwise.
+No score, no weight, no invented threshold -- matches this repo's
+existing no-scores-no-weights partial-order precedent (`_factual_
+dominance`, D-128).
+
+**15) Overlap OFF / ON results, both verified with fixtures.** OFF: HARD_
+CUT/TIGHT_CUT still fully available (neither needs cross-boundary
+dialogue overlap); overlap modes are never even hypothetically
+considered (`fallback_reason="overlap_disabled"`). ON: still never
+FORCES overlap at every cut -- the SAME evidence rule picks `HARD_CUT`/
+`TIGHT_CUT`; the only observable difference is the diagnostic reason
+(`"renderer_extension_required"`), honestly distinguishing user-disabled
+from renderer-incapable.
+
+**16) Diagnostics added.** `draft.diagnostics["dialogue_pacing_
+transition"]`: `schema_version, dialogue_pacing_evaluated, dialogue_
+overlap_enabled, transition_count, mode_counts, hard_cut_count, tight_
+cut_count, j_cut_count, l_cut_count, micro_audio_overlap_count, total_
+gap_removed_sec, total_audio_overlap_sec, fallback_count, fallback_
+reasons, renderer_support_matrix, transitions` (bounded per-transition
+rows, at most `len(selected) - 1`, the same order of magnitude as the
+existing family/judge-group diagnostics already printed elsewhere in
+this pipeline -- no CI-tail bloat). `universal_clean_cut.py`'s top-level
+`stage_status` dict gained one new key, `"dialogue_pacing_transition"`
+(`pacing_stage`), set on every code path (frozen-and-planned, freeze-
+blocked, missing-draft-contract) so nothing can leave it undefined.
+
+**17) No editorial authority, verified.** `dialogue_pacing_transition.py`
+imports nothing from `deterministic_best_take_authority.py`,
+`multimodal_besttake_fallback.py`, `multimodal_besttake_arbiter.py`, or
+`realization_resolver.py` (grep-verified in a dedicated regression test
+scanning only the module's actual `import`/`from` lines, not its prose
+docstring). D-123's fast-path gate, D-128's Phase 1 shadow Class B
+detector, and Boundary's own behavior are completely untouched by this
+task's diff.
+
+**18) Test matrix: 26 offline tests** in `tests/test_cutsell_d142_
+dialogue_pacing_transition_phase1.py`, covering all 20 directive-required
+fixture categories (no-gap HARD_CUT; Boundary-recorded exit/entry trim ->
+TIGHT_CUT, both directions and summed; overlap disabled prevents overlap
+modes; overlap enabled never forces overlap; DELIVERY-protected non-trim
+never yields TIGHT_CUT; visual exit-edge-trim evidence yields a correctly
+measured TIGHT_CUT; cross-semantic-role and CTA-adjacent pairs never
+overlap even when enabled; every selectable mode is Phase-1-executable;
+membership/order/source-ids unchanged; source spans stay within clip
+bounds; D-123/D-128 independence via import-line scan; Boundary
+diagnostics byte-identical before/after; render_plan/render modules never
+imported; legacy `audio_overlap` never referenced as a real identifier;
+the exact pipeline call-site text passes the canonical field; diagnostics
+correctly reflect the toggle) plus 6 additional contract/diagnostics
+regression tests (aggregate field presence, renderer-support-matrix
+honesty, empty-selected no-op, missing-draft-contract no-op, always-SAFE
+safety status).
+
+**19) Regressions: zero new failures.** Targeted (`boundary`, `d123`,
+`d128`, `contracts`, `serde`, `universal_clean_cut`, `d142` -- 266 tests)
+all green. Full offline suite: 3277 passed with the SAME 5 pre-existing
+unrelated failures already documented in D-136 through D-140 (`test_
+hybrid_story_guard_incomplete_retry.py`, 4 in `test_video00_modal_hybrid_
+semantic_parity.py`) -- delta from the prior documented baseline (3251
+passed) is exactly the 26 new D-142 tests. `compileall` clean on
+`cutsell_worker`/`tests`. `tests/test_semantic_stitch.py` remains a
+pre-existing, unrelated collection-time `TypeError` (a stale module-level
+smoke-test call with a since-changed `score_take` signature), unchanged
+by this task, excluded from collection exactly as in every prior D-14x
+qualification run this window.
+
+**20) Code changes: YES**, scoped exactly to Phase 1 foundation: new
+file `cutsell_worker/dialogue_pacing_transition.py` (planner + diagnostics
++ pipeline wrapper); `cutsell_worker/universal_clean_cut.py` (16-line
+additive wiring: one import, one call site inside the frozen branch, one
+new `stage_status` key populated on every branch); new test file
+`tests/test_cutsell_d142_dialogue_pacing_transition_phase1.py`. Zero
+changes to `render_plan.py`, `render.py`, `boundary_engine_pass.py`,
+`pipeline.py`, `take_judge.py`, `contracts.py`, `serde.py`, or any
+BestTake/fallback/grouping module.
+
+**21) Exact next pacing gate (not authorized here):** a Product Owner
+decision on whether to proceed to a Phase 2 that (a) begins the renderer
+extension work J_CUT/L_CUT/MICRO_AUDIO_OVERLAP would require (independent
+per-stream audio/video timing across a segment boundary, `acrossfade`/
+`amix` for true overlap) and/or (b) expands TIGHT_CUT's evidence beyond
+"Boundary already trimmed this edge" toward an independent pacing-owned
+gap measurement -- both explicitly out of this task's Phase 1 scope,
+which builds only the contract, the pipeline seam, and the two already-
+provably-safe modes.
+
+**Scope confirmed:** no RAW, no Modal, no RunPod, no provider/network
+call, no fallback-authority change (D-123/D-128/D-138/D-140/D-141 all
+untouched and preserved CLOSED), no iOS/Swift work, no BestTake/grouping/
+Boundary-behavior change, no broad renderer rewrite.
+
+**HUMAN ACTION REQUIRED:** YES (condition A/G) for any Phase 2 (renderer
+extension toward J_CUT/L_CUT/MICRO_AUDIO_OVERLAP, or a pacing-owned gap
+measurement independent of Boundary's own trims) -- this task's own
+directive requires STOP before that work; Phase 1 itself required no
+escalation (no protected authority touched, no paid infrastructure, no
+RAW) and is complete as scoped.

@@ -71,6 +71,7 @@ from .realization_resolver import (
 )
 from .resolver_mode import RESOLVER_MODE_AUTHORITATIVE, resolve_resolver_mode
 from .boundary_engine_pass import apply_post_freeze_boundary_pass
+from .dialogue_pacing_transition import apply_dialogue_pacing_transition_pass
 from .human_boundary_polish_v5 import polish_human_boundaries_v5
 from .hybrid_editorial import EditorialJudge
 from .providers import NoopSemanticProvider
@@ -665,6 +666,7 @@ def process_universal_clean_cut_sources(
             polish_stage = "not_applicable_freeze_blocked_by_coherence_validation"
             boundary_pass_stage = "not_applicable_freeze_blocked_by_coherence_validation"
             contract_stage = "not_applicable_freeze_blocked_by_coherence_validation"
+            pacing_stage = "not_applicable_freeze_blocked_by_coherence_validation"
             selection_stage = f"{selection_stage}+freeze_blocked_pending_human_review"
 
             # D-025 (Issue 2): install_selection_freeze()/install_boundary_
@@ -720,12 +722,25 @@ def process_universal_clean_cut_sources(
             # Fail closed if Boundary changed ordered spoken content after the freeze.
             result = replace(result, draft=enforce_selection_contract(result.draft))
             contract_stage = "selection_semantic_stream_verified_after_boundary"
+
+            # D-142 Phase 1: Dialogue/Pacing Transition planning -- strictly
+            # after Boundary, strictly before any render is ever invoked
+            # (which happens later, at export time, from this persisted
+            # draft). Diagnostics-only: never reassigns `draft.selected`,
+            # never touches D-123/D-128/BestTake/grouping. Consumes ONLY
+            # the canonical D-134 `dialogue_overlap_enabled` permission --
+            # never the legacy `audio_overlap` field directly.
+            result = apply_dialogue_pacing_transition_pass(
+                result, dialogue_overlap_enabled=getattr(request, "dialogue_overlap_enabled", False),
+            )
+            pacing_stage = "dialogue_pacing_transition_phase1_planned"
     else:
         selection_stage = "not_applicable_missing_draft_contract"
         polish_stage = "not_applicable_missing_draft_contract"
         boundary_pass_stage = "not_applicable_missing_draft_contract"
         recovery_stage = "not_applicable_missing_draft_contract"
         contract_stage = "not_applicable_missing_draft_contract"
+        pacing_stage = "not_applicable_missing_draft_contract"
         semantic_status = "not_requested_clean_cut_only"
         reasoner_status_label = "disabled"
         freeze_blocked = False
@@ -770,6 +785,7 @@ def process_universal_clean_cut_sources(
             "boundary_engine_pass": boundary_pass_stage,
             "human_boundary_polish": polish_stage,
             "final_boundary_authority": recovery_stage,
+            "dialogue_pacing_transition": pacing_stage,
         },
     )
 
