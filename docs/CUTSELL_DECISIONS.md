@@ -16702,3 +16702,176 @@ proving the existing source actually compiles and launches at all.
 is required and is outside this session's own capability; also a product
 decision on the `audioOverlap`-vs-`Overlap` naming reconciliation named
 above). No RAW, provider call, or infra change requested by this task.
+
+## D-131 -- iOS build verification: existing native Swift foundation
+(post D-130). **MACOS/XCODE BUILD ONLY. No new product feature. No
+Overlap implementation. No engine change. No RAW.**
+
+D-130 found this session's own environment (Linux, no Xcode/`xcodebuild`/
+Swift toolchain) structurally cannot run an Xcode build. This task found
+a way around that limitation WITHOUT leaving this session or touching
+`main`/PR #25: the repository already has `.github/workflows/cutsell-
+ios-ci.yml`, a `runs-on: macos-latest` job that installs XcodeGen,
+generates the Xcode project, and runs `xcodebuild -sdk iphonesimulator`
+-- previously wired only to `push`/`pull_request` against `main`. Two
+bounded, mechanical changes made this the real build-verification
+instrument for this task:
+
+1. **Pre-build mechanical fix (as directed):** `mobile/ios/project.yml`'s
+   `SWIFT_VERSION: 5.10` -> `SWIFT_VERSION: "5.10"`. Confirmed via `yaml.
+   safe_load` that the unquoted form parsed as the float `5.1`; quoting
+   makes it the exact string `'5.10'`. No other `project.yml` field
+   touched.
+2. **CI dispatch enablement (additive, no new infra):** added `workflow_
+   dispatch: {}` to `cutsell-ios-ci.yml`'s existing `on:` block (`pull_
+   request`/`push` to `main` left unchanged). This adds no build step, no
+   target, and no new infrastructure -- it lets the SAME existing macos-
+   latest job run on demand against a feature branch, avoiding a `main`
+   push/PR for a one-off verification.
+
+Both changes were committed and pushed to `feature/runpod-pod-on-demand`
+(head `bc2d67d`), then the workflow was dispatched via the GitHub API
+against that branch (`workflow_dispatch`, ref `feature/runpod-pod-on-
+demand`) and monitored via `list_workflow_jobs`/`get_job_logs` to
+completion.
+
+**Real build result: SUCCESS on the first and only dispatch, run
+`34178194668`, job `build-ios`.** Runner: GitHub-hosted `macos-26-arm64`
+image (`macOS 26.6.2`, image version `20260831.0337`). Every step
+(`checkout`, `Install XcodeGen` (Homebrew, xcodegen 2.46.0), `Generate
+Xcode project`, `Build CutSell for iOS Simulator`) completed with
+`conclusion: success`. `xcodebuild` command actually run: `-project
+CutSell.xcodeproj -scheme CutSell -sdk iphonesimulator -configuration
+Debug CODE_SIGNING_ALLOWED=NO build` (no `-destination`, so `xcodebuild`
+picked its own first matching iOS Simulator destination from the ~50
+enumerated on the runner, spanning iOS Simulator runtimes 26.2/26.4.1/
+26.5 -- confirms a real, current iOS SDK/simulator set, not a mock).
+Exact Xcode/Swift compiler version strings were **not printed** by this
+workflow (no `xcodebuild -version`/`swift --version` step exists in it,
+and none was added, per this task's bounded scope) -- reported honestly
+as not directly observed, rather than inferred or fabricated. Log tail:
+`▸ Linking CutSell.debug.dylib` / `▸ Linking CutSell` / `▸ Touching
+CutSell.app` / **`▸ Build Succeeded`**.
+
+**No mechanical build-fix was required beyond the pre-build SWIFT_VERSION
+quoting** -- the build produced zero errors and compiled/linked on the
+first attempt. It produced Swift 6 strict-concurrency WARNINGS only (not
+errors, so the build-fix policy's small-mechanical-fix path was never
+invoked): `@Sendable`-closure captures of main-actor-isolated state in
+`CameraController.swift` (`session`/`videoInput`/`movieOutput` referenced
+from the `withCheckedThrowingContinuation` closure in `configure(position:)`),
+`CameraCaptureView.swift` (`camera.isRecording`/`camera.stopRecording()`
+referenced from a `Timer` closure), and `VideoPreparation.swift`
+(`exporter` captured non-`Sendable` in the export-completion closure).
+These are pre-existing, not newly introduced by this task's two changes,
+and were left untouched -- fixing Swift 6 concurrency warnings is
+non-mechanical Swift refactoring, explicitly out of this task's scope.
+
+**Corroborating prior evidence found during this task (not previously
+surfaced in D-130):** `list_workflow_runs` shows this SAME workflow
+already ran successfully twice before, via PR #25, on `cutsell/mobile-
+v1-clean` at head SHAs `9a277db`/`cdbc487` (`conclusion: success`,
+2026-09-06) -- i.e. an earlier state of this iOS source had already been
+build-proven on macOS/Xcode before D-130 was ever written, D-130's own
+`NOT BUILD-VERIFIED` status was accurate for the decision log (no prior
+`D-xxx` entry recorded it) but incomplete against the full GitHub Actions
+history. This task's own dispatch is the first build-verification
+recorded IN THE DECISION LOG, on the current `feature/runpod-pod-on-
+demand` head.
+
+**Simulator launch:** NOT attempted. The workflow only builds (`xcodebuild
+... build`); booting a simulator and installing/launching the `.app`
+would require adding new steps (`xcrun simctl boot/install/launch`) to
+the workflow -- beyond the two minimal, already-bounded changes this task
+made. Per this task's own "if launch is not practical, skip and report
+UNVERIFIED" instruction: **APP LAUNCH is UNVERIFIED**, not claimed as
+proven. Per the same instruction, **CAMERA and REAL DEVICE status are
+UNCHANGED from D-130** (PARTIAL and MISSING respectively) -- a successful
+compile/link proves the code is well-formed Swift against real iOS SDKs;
+it proves nothing at runtime.
+
+**Overlap reconciliation audit (read-only, no UI change).** Traced
+`audioOverlap`/`audio_overlap` end to end across BOTH the iOS client and
+the Python backend/engine (this repository contains both):
+- **UI location:** `mobile/ios/CutSell/NewCutView.swift`'s "Cut behavior"
+  section, visible only in multi-clip mode: `Toggle("Natural audio
+  overlap", isOn: $audioOverlap)`, default OFF, captioned "Off is the
+  safest default. You can change audio later in the editor."
+- **Client dataflow:** `NewCutView`'s `@State private var audioOverlap`
+  -> persisted in `PendingCutRecord.audioOverlap` (for resumable
+  uploads) -> sent once, at job-submission time, as `audio_overlap` in
+  the `POST /v1/flow-b/jobs` body.
+- **Backend dataflow:** `cutsell_app/main.py`'s `FlowBSubmitRequest.
+  audio_overlap` (and `batch_routes.py`'s equivalent `BatchProject.
+  audio_overlap`) accept the field and pass it straight into the job
+  payload (`enqueue_flow_b({..., "audio_overlap": payload.audio_overlap})`)
+  -> `cutsell_worker/serde.py` deserializes it onto `ProcessingRequest.
+  audio_overlap` (`contracts.py`, a real dataclass field, default
+  `False`).
+- **Engine consumption: NONE FOUND.** A repository-wide search for
+  `.audio_overlap` attribute access outside its own definition and the
+  two pass-through app routes above found **zero** call sites in
+  `cutsell_worker/`'s actual pipeline (`pipeline.py`, `boundary_engine_
+  pass.py`, `render_plan.py`, `take_judge.py`, and every other authority
+  this repo's D-096/D-098 architecture names) that ever reads `.audio_
+  overlap` to change any editorial, Boundary, or render decision. The
+  field is real, plumbed end to end, and **entirely inert today** -- it
+  is accepted and stored, never acted upon.
+- **Match to D-129's canonical `Overlap` semantics:** **Very likely the
+  SAME underlying product concept**, not a coincidentally similar one.
+  D-129 Section 11 describes exactly this shape: a user-facing toggle
+  meaning "the engine MAY use tighter speech-transition pacing where
+  safe," consumed by a not-yet-built Dialogue/Pacing Transition
+  authority sitting after Boundary and before the Renderer. `audio_
+  overlap`'s current inertness is consistent with that authority simply
+  not existing yet -- not evidence the two concepts differ. The two
+  concrete differences from D-129's naming contract are the UI label
+  ("Natural audio overlap" vs. exactly "Overlap") and the field name
+  (`audio_overlap`/`audioOverlap` vs. `dialogue_overlap_enabled`), plus
+  one scope question genuinely open: `audio_overlap` today is a single
+  per-JOB flag set once at submission time, whereas D-129 frames Overlap
+  as an engine decision made per-JOIN ("the engine decides WHERE overlap
+  is safe... not force overlap at every cut") -- a future implementation
+  may keep `audio_overlap` as the user's job-level permission gate (ON =
+  allowed) while the per-join decision still lives entirely inside the
+  new Dialogue/Pacing Transition authority, which would make the two
+  concepts fully consistent rather than competing.
+- **Recommended reconciliation (not decided, not implemented here):**
+  when the Dialogue/Pacing Transition authority is eventually
+  authorized and built, rename `audio_overlap`/`audioOverlap` to the
+  canonical `dialogue_overlap_enabled` (client field, wire field, and
+  backend contract field, in the same change, to avoid a translation
+  shim) and relabel the UI control to exactly `Overlap`, at that
+  authority's own bounded implementation task -- not as an isolated
+  rename beforehand, since renaming an inert field in isolation would
+  itself be product/naming work this task is not authorized to do. No
+  rename was performed.
+
+**Tests.** No new iOS tests were added (none authorized). Confirmed
+unchanged from D-130: no iOS test target and no test files exist
+anywhere under `mobile/`.
+
+**Qualification of this task's own two changes:** `yaml.safe_load`
+confirmed both `project.yml` (`SWIFT_VERSION` now the string `'5.10'`)
+and `cutsell-ios-ci.yml` (`workflow_dispatch: {}` present, `pull_request`/
+`push` blocks unchanged) parse correctly; the real macOS build above is
+itself the qualification evidence for both changes (a malformed
+`project.yml` or a broken workflow trigger would have prevented the
+dispatch or the generation step from succeeding, and neither happened).
+
+**Scope confirmed:** `git diff --stat` for this task's commit
+(`bc2d67d`) shows exactly `mobile/ios/project.yml` (1 line changed) and
+`.github/workflows/cutsell-ios-ci.yml` (6 lines added) -- no Swift file,
+no `cutsell_worker/*.py`, no backend route, no signing/entitlements file
+touched. No Overlap UI or engine behavior was implemented.
+
+**HUMAN ACTION REQUIRED:** YES (condition A) -- the recommended Overlap
+naming reconciliation (rename at the same time the Dialogue/Pacing
+Transition authority is built, never in isolation) is a product decision,
+not made here. **Exact next iOS task (recommended, not authorized):**
+add a simulator boot/install/launch step to `cutsell-ios-ci.yml`
+(`xcrun simctl boot`, `simctl install`, `simctl launch`, then confirm the
+process stays alive for N seconds with no crash) to close the "APP
+LAUNCH UNVERIFIED" gap -- the smallest next capability, since the build
+itself is now proven. No RAW, provider call, or infra change requested
+by this task.
