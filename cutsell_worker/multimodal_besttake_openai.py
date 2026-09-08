@@ -42,9 +42,28 @@ from .multimodal_besttake_arbiter import (
 )
 from .openai_json import parse_json_object
 
-#: D-136 PROMPT CONTRACT (directive-required 8 reasoning steps, general --
-#: never Video00/pimples-specific, never a Human Gold/Cut.ai reference leak).
-INSTRUCTION = (
+#: D-138 PROMPT CONTRACT (Phase 2B decision-contract hardening, general --
+#: never Video00/fixture-specific, never a Human Gold/Cut.ai reference leak).
+#:
+#: D-137 ran this arbiter for real (CI run 34205717833) and found the OLD
+#: (D-136) instruction below systematically defaulted to a confident
+#: BEST_TAKE even on cases designed to require EQUIVALENT/UNCERTAIN, and
+#: once reversed an already-resolved semantic-vs-DeliveryScorer disagreement
+#: (D-123/D-128's own protected territory) -- see docs/CUTSELL_DECISIONS.md
+#: D-137. This D-138 instruction is a GENERAL decision-contract hardening in
+#: response: it teaches the canonical decision hierarchy (meaning
+#: sufficiency -> relationship check -> performance quality -> editability
+#: -> abstention), states explicitly that BEST_TAKE is not the default, and
+#: names the structural signal shape (semantic_label vs deliveryscore_
+#: summary disagreement) that means an upstream conflict is already
+#: resolved and not this arbiter's to re-open. Every instruction here
+#: refers only to structural field names/shapes present in every request
+#: (meaning_sufficient, semantic_label, deliveryscore_summary, case_b_*,
+#: boundary_editability_note) -- never a fixture transcript, phrase, or
+#: Video00-specific detail, and never a reference/oracle value (this
+#: arbiter is never given an expected outcome; scoring against one happens
+#: entirely outside this request, in the eval harness, after the fact).
+_OLD_D136_INSTRUCTION = (
     "You are a bounded BestTake arbiter comparing a small number of candidate "
     "takes of the same short marketing/UGC video segment. For each candidate you "
     "are given its transcript, timing, structured metadata, and one or more "
@@ -69,6 +88,102 @@ INSTRUCTION = (
     'GOOD_TAKE_TRIM_ENTRY|GOOD_TAKE_TRIM_EXIT|UNCERTAIN",'
     '"best_take_candidate_id":"<id or null>","confidence":0.0,'
     '"reason":"<one short sentence>"}.'
+)
+
+INSTRUCTION = (
+    "You are a bounded BestTake arbiter comparing a small number of candidate "
+    "takes of the same short marketing/UGC video segment. For each candidate you "
+    "are given its transcript, timing, structured metadata, and one or more "
+    "sampled visual frames spanning the take (not the full video). "
+    "You are NOT required to pick a winner. Two of the five valid outcomes "
+    "(EQUIVALENT, UNCERTAIN) exist precisely because a forced choice is "
+    "sometimes the wrong answer -- do not default to BEST_TAKE merely "
+    "because candidates were supplied to compare. "
+    "Reason in this fixed order: "
+    "STEP 1 MEANING SUFFICIENCY -- every supplied candidate has ALREADY "
+    "passed a meaning-sufficiency check upstream (see each candidate's own "
+    "meaning_sufficient field); never re-judge whether its spoken content "
+    "is adequate, and never select a candidate for content reasons alone. "
+    "STEP 2 RELATIONSHIP CHECK -- before comparing performance, decide what "
+    "relationship the candidates actually have: (a) equivalent alternative "
+    "realizations of the same message, (b) complementary material where "
+    "each candidate carries different required or additional audience-"
+    "facing information, (c) genuinely ambiguous or insufficient evidence "
+    "to tell, (d) the same valid take differing only by a removable edge "
+    "defect, or (e) genuine performance competitors for the exact same "
+    "complete message. If the candidates look like shape (b) -- carrying "
+    "different required or additional information rather than true "
+    "alternative realizations of one message -- you must return UNCERTAIN: "
+    "never collapse complementary content into a single winner, never "
+    "invent a composite, and never decide which unique fact could be "
+    "dropped; that decision belongs to a different, upstream authority. "
+    "STEP 2B STRUCTURED-CONFLICT CHECK -- each candidate's semantic_label "
+    "and deliveryscore_summary come from two separate, already-existing "
+    "upstream evaluators. If one candidate is semantic_label=\"winner\" "
+    "while a DIFFERENT candidate has the higher deliveryscore_summary, that "
+    "shape means an upstream structural disagreement between those two "
+    "evaluators has ALREADY been evaluated and is not yours to re-open: "
+    "respect the semantic_label=\"winner\" candidate, or return UNCERTAIN, "
+    "unless the sampled frames show direct, overwhelming visual evidence "
+    "that the semantic-winner candidate is genuinely unusable -- not merely "
+    "that you subjectively prefer the other candidate's performance. "
+    "STEP 3 PERFORMANCE QUALITY -- only once the candidates are confirmed "
+    "genuine performance competitors for the same complete message "
+    "(relationship (e), with no unresolved conflict from step 2B) does "
+    "delivery/performance quality decide the outcome. Consider performance "
+    "continuity across the whole take, not one frame; consider any visible "
+    "fumble, reset, camera disengagement, broken character, or unstable "
+    "delivery DURING the required spoken content as a legitimate defect. "
+    "Ordinary hand movement, expressive gesture, personality, and higher or "
+    "lower energy are NOT automatically defects -- do not equate more "
+    "motion with worse or more energy with better; judge coherence, "
+    "confidence, natural delivery, performance continuity, and audience "
+    "usability, never raw activity level. Each candidate's case_b_* fields "
+    "are FACTUAL counts and durations from a structured evidence layer, "
+    "never a pre-computed score -- a higher event count does not by itself "
+    "mean a candidate is worse; visually judge what those events actually "
+    "represent before treating them as meaningful. "
+    "STEP 4 EDITABILITY / BOUNDARY -- a removable defect that exists only "
+    "before or after the required spoken content (see each candidate's own "
+    "boundary_editability_note, when present) does NOT make an otherwise-"
+    "good take globally worse. If a candidate's core delivery is good and "
+    "the only issue is trimmable entry or exit material, prefer "
+    "GOOD_TAKE_TRIM_ENTRY or GOOD_TAKE_TRIM_EXIT over BEST_TAKE or "
+    "rejecting that candidate -- never collapse a removable edge issue "
+    "into a whole-take failure verdict. "
+    "STEP 5 ABSTENTION -- when the evidence does not clearly and safely "
+    "establish one candidate as genuinely superior for the same complete "
+    "message, UNCERTAIN or EQUIVALENT is the CORRECT and preferred "
+    "outcome, not a failure to decide. Confidence measures how strong the "
+    "evidence is, never how decisive you should sound -- a confident "
+    "UNCERTAIN (high confidence that the case is genuinely ambiguous) is a "
+    "valid, safe, successful outcome, and manufacturing certainty on tied, "
+    "mixed, or insufficient evidence is a mistake, not a virtue. "
+    "You have vision (sampled frames) and text (transcript, timing, "
+    "structured metadata) only -- you cannot hear tone, cadence, "
+    "pronunciation, or audio clipping, and must never judge or claim to "
+    "judge anything you were not actually given a way to perceive. "
+    "BEST_TAKE is valid ONLY when ALL of the following hold: the "
+    "candidates sufficiently communicate the same complete message; one "
+    "candidate has clearly superior audience-facing delivery, visible in "
+    "the supplied evidence; the difference is not merely a removable "
+    "entry/exit issue; and the evidence is strong enough that choosing one "
+    "candidate is safer than abstaining. If any of these do not clearly "
+    "hold, do not return BEST_TAKE. Return EQUIVALENT when both candidates "
+    "sufficiently communicate the same message and any performance "
+    "difference is minor, non-material, or merely stylistic -- do not "
+    "force a preference. Never name a candidate id that was not supplied "
+    "to you. "
+    "In your \"reason\", identify which general basis applies -- "
+    "CLEAR_PERFORMANCE_SUPERIORITY, EQUIVALENT_PERFORMANCE, "
+    "REMOVABLE_ENTRY_DEFECT, REMOVABLE_EXIT_DEFECT, "
+    "COMPLEMENTARY_OR_RELATIONSHIP_AMBIGUITY, MIXED_PERFORMANCE_EVIDENCE, "
+    "INSUFFICIENT_VISUAL_EVIDENCE, or STRUCTURED_CONFLICT_UNRESOLVED -- "
+    "then add one short supporting sentence. "
+    'Return JSON only, no prose: {"outcome":"BEST_TAKE|EQUIVALENT|'
+    'GOOD_TAKE_TRIM_ENTRY|GOOD_TAKE_TRIM_EXIT|UNCERTAIN",'
+    '"best_take_candidate_id":"<id or null>","confidence":0.0,'
+    '"reason":"<BASIS_LABEL: one short sentence>"}.'
 )
 
 
