@@ -44,6 +44,10 @@ from .take_judge_provider import TakeJudgeProvider
 from .take_segmentation import segment_takes
 from .usage_limits import check_processing_allowance
 from .visual_analysis import VisualProvider, apply_visual_observations, safe_visual_analyze
+from .watch_listen_understanding import (
+    build_watch_listen_understanding_for_sources,
+    watch_listen_understanding_diagnostics,
+)
 from .whole_video_analysis import WholeVideoProvider, safe_whole_video_analyze
 
 ProgressCallback = Callable[[str, int], None]
@@ -429,6 +433,22 @@ def process_local_sources(
     trace.complete(
         "raw_understanding_map",
         **raw_understanding_map_diagnostics(raw_understanding_maps),
+    )
+
+    # D-157 Phase B: Watch+Listen Multimodal Understanding V1 -- forms
+    # bounded, categorical HYPOTHESES (behavior state, attempt boundary,
+    # attempt relation, meaning completion, performance usability) from
+    # the map's ALREADY-computed evidence above. Diagnostics only: read by
+    # nothing (Family Formation, D-150 semantic authority, D-123/D-128
+    # BestTake, Boundary, Pacing, Renderer all remain untouched -- see
+    # watch_listen_understanding.py's own module docstring for the full
+    # authority boundary this task preserves).
+    watch_listen_understandings = build_watch_listen_understanding_for_sources(
+        raw_understanding_maps, takes,
+    )
+    trace.complete(
+        "watch_listen_understanding",
+        **watch_listen_understanding_diagnostics(watch_listen_understandings),
     )
 
     if mode == "full":

@@ -23302,3 +23302,237 @@ D-157 Phase B, and whether/when a human reviews the actual rendered MP4
 (Watch+Listen Pass is still owed per D-095's quality-states doctrine; this
 task measured diagnostics only, never claims HUMAN WATCH+LISTEN PASS), are
 Product Owner decisions.
+
+## D-157: Upstream Watch+Listen Multimodal Understanding Phase B -- fusion + behavior/attempt hypotheses (Watch+Listen Understanding V1)
+
+Per D-156's own authorized next gate. Implements the FIRST real
+Understanding layer above D-155's Structured RAW Understanding Map V1:
+`watch_listen_understanding.py` (new) consumes ONE `RawUnderstandingMap`
+and forms bounded, categorical HYPOTHESES -- behavior state, attempt
+boundary, attempt relation, meaning completion, performance usability --
+never a final editorial decision. No RAW, no provider call, no Family/
+BestTake/Boundary/Pacing change.
+
+### Understanding object
+
+`WatchListenUnderstanding(source_asset_id, understanding_spans, track_
+status)`; each `UnderstandingSpan` carries: identity (`span_id`/`source_
+asset_id`/`source_start`/`source_end`, copied verbatim from the map's own
+`RawUnderstandingSpan`), `behavior_state_hypotheses` (D-155's own
+`BehaviorHypothesis` tuple, reused unchanged) + `behavior_confidence`,
+`attempt_boundary_hypotheses` + `attempt_relation_hypotheses` + `relation_
+confidence`, `meaning_completion_hypothesis`, `performance_usability_
+hypothesis` + `entry_usability`/`delivery_usability`/`exit_usability`,
+`conflict_flags`, `evidence_provenance`.
+
+### Fusion strategy -- reuse, never reinvent
+
+Every atomic signal is either copied verbatim from the map, read directly
+off the original `CandidateTake` (`complete_idea` -- a real, already-
+computed field, never re-derived), or REUSED from `attempt_reconstruction.
+py`'s own already-vetted pure helpers (`_restart_evidence`, `_measured_
+pause_at_transition`, `_TERMINAL_PUNCT_RE`) -- the exact precedent `case_
+b_performance_evidence.py` already set for importing a sibling module's
+private helpers instead of a fourth, drifting copy. `_measured_pause_at_
+transition` is called against a minimal `WholeVideoContext` wrapper built
+from the map's OWN already-filtered `audio_events` (no re-derivation of
+its tolerance/confidence logic). No new detector, no new numeric
+threshold, no new provider call anywhere in this module.
+
+### Behavior support
+
+D-155's 8-label vocabulary and its per-span derivation are reused
+verbatim (`behavior_state_hypotheses` is literally `RawUnderstandingSpan.
+behavior_hypotheses`, unchanged) -- D-157 adds no new behavior label and
+no new per-event-kind rule; it only adds `behavior_confidence`
+(`SUPPORTED` when at least one hypothesis has real, directly-observed
+provenance; `WEAK` when only absence-derived; `MIXED` when `conflict_
+flags` is non-empty; `UNKNOWN` otherwise).
+
+### Attempt boundaries (evidence, never a physical cut)
+
+Five bounded kinds (`ATTEMPT_BEGINS`/`ATTEMPT_COMPLETES`/`ATTEMPT_
+ABANDONED`/`POST_TAKE_RESET`/`NEW_DELIVERY_BEGINS`), each at a `start`/
+`end` edge, each carrying a categorical confidence and its own basis
+string -- derived from real evidence (fresh-delivery hypotheses, `complete_
+idea` + terminal punctuation, confirmed `wrong_take`/`retry_setup`/`false_
+start`, EXIT-zone reset events, a SUPPORTED `RETRY` relation). Nothing
+here mutates a candidate's timing.
+
+### Attempt-relation hypotheses (never final Attempt Relationship)
+
+Bounded to `RETRY`/`CORRECTION`/`CONTINUATION`/`COMPLEMENTARY`/`NEW_
+AUDIENCE_BEAT`/`DISTINCT_PROPOSITION`/`UNCERTAIN`. Computed pairwise
+against each span's immediate predecessor in the same source (first span
+-> `UNCERTAIN`/`UNKNOWN`, `left_span_id=None`). `RETRY` requires lexical
+restart evidence (`_restart_evidence`) PLUS real prior-attempt breakage
+(confirmed abandonment/EXIT-zone reset/a measured real pause) for
+`SUPPORTED`, restart evidence alone for `WEAK`. `CORRECTION` requires
+restart evidence immediately after an apparently-complete prior statement
+with NO breakage evidence -- the same restart signal, differentiated from
+`RETRY` by whether the predecessor showed distress. `CONTINUATION`
+requires no restart, a non-terminal/incomplete predecessor, a tight gap
+(the SAME `1.20s` default `reconstruct_delivery_attempts` already uses,
+not a new number), and no measured pause. `COMPLEMENTARY` and `NEW_
+AUDIENCE_BEAT` require no restart and a complete-and-terminal predecessor,
+differentiated by gap width -- both capped at `WEAK`/`SUPPORTED`
+respectively per the evidence actually available, and `COMPLEMENTARY`
+is explicitly never used to merge anything (D-157 performs no merge).
+**`DISTINCT_PROPOSITION` is never emitted above `UNCERTAIN`** -- asserting
+it honestly needs semantic/topical judgment this module has no provider
+evidence for; D-111's "same topic/opener is NOT enough" invariant is
+restated here as a hard ceiling on this module's own confidence, verified
+by a structural source-scan test (`RELATION_DISTINCT_PROPOSITION` never
+appears inside `_relation_for_pair`'s own function body).
+
+### Meaning-completion model
+
+`COMPLETE`/`INCOMPLETE` directly from the real, already-computed `complete_
+idea` field; `UNCERTAIN` only for an empty/whitespace transcript. Never
+inferred from motion or behavior evidence alone, per this task's own
+instruction.
+
+### Performance usability
+
+Per-zone (`entry_usability`/`delivery_usability`/`exit_usability`):
+`UNKNOWN` when the delivery span itself is unmeasured; a real defect event
+(`_DEFECT_KINDS` -- the reset family, `wrong_take`/`retry_setup`, the
+recording-process family, `false_start`, `breaking_character`, all
+imported from `raw_understanding_map.py`'s own verified kind-sets) inside
+`ZONE_DELIVERY` -> `UNUSABLE`; inside `ZONE_ENTRY`/`ZONE_EXIT` ->
+`QUESTIONABLE` only (per this task's own instruction: "ENTRY/EXIT-only
+defects remain potential Boundary concerns," never full unusability);
+otherwise `USABLE`. Overall `performance_usability_hypothesis` follows
+DELIVERY first, then ENTRY/EXIT, never inventing a weighted score.
+
+### Conflict policy -- preserved, never collapsed
+
+Two bounded, deterministic conflict conditions, both directly named in
+this task's own worked examples: `MEANING_COMPLETE_VS_ABANDONED_ATTEMPT_
+EVIDENCE` (meaning `COMPLETE` + a real, confirmed `ABANDONED_ATTEMPT`
+hypothesis) and `EXIT_RESET_VS_MEANING_COMPLETE` (meaning `COMPLETE` + a
+`POST_TAKE_RESET` hypothesis whose underlying event is measured in the
+span's own EXIT zone). Neither flag changes `meaning_completion_
+hypothesis` or any other label -- the disagreement is exposed, never
+forced into one answer.
+
+### Confidence vocabulary
+
+`SUPPORTED`/`MIXED`/`WEAK`/`UNKNOWN` throughout -- no numeric probability,
+no new threshold, per this task's own instruction.
+
+### Provenance
+
+Every `BehaviorHypothesis`'s own D-155 provenance tag is carried through
+unchanged; each `UnderstandingSpan.evidence_provenance` names which class
+of evidence (`MULTIMODAL_FUSION`/`DETERMINISTIC_RULE`) backs its own
+hypothesis fields.
+
+### Duplicate-consumer consolidation -- deferred, not performed
+
+D-154 named three independent readers of `local_performance.py`'s dense
+events (`attempt_reconstruction.py`, `take_judge.py`'s cleanliness
+evidence, `case_b_performance_evidence.py`). This task's own directive
+explicitly permits, but does not require, migrating them onto this module
+or the map. **Deliberately NOT done here**: all three sit directly on the
+live Selection/BestTake path -- refactoring them for a task whose strict
+scope forbids any BestTake/DeliveryScorer/family change would trade real
+regression risk against those CLOSED authorities for a consolidation this
+task's own directive marks optional. Left for a separately-authorized
+future step.
+
+### Real-audio / visual honesty (restated, unchanged)
+
+Signal-level audio (silence/pause/speech-activity timing) is REAL and is
+exactly what this module reasons from (`_measured_pause_at_transition`);
+tone, emotion, prosodic correction, and spoken emphasis are NEVER claimed
+-- asserted by a structural source-scan test. Local deterministic visual
+perception is REAL; `OpenAIVisualProvider` remains NOT ACTIVE, untouched.
+
+### No new editorial authority
+
+Structurally asserted by two test classes: (1) the module imports none of
+`take_grouping.py`/`hybrid_session_cleanup.py`/`semantic_authority_
+observability.py`/`take_judge.py`/`claim_coverage_best_take.py`/
+`boundary_engine_pass.py`/`dialogue_pacing`/`composite_resolver.py`/the
+renderer; (2) none of those files (nor `pipeline.py`) reference this
+module. `flow_b.py`'s own wiring (see below) is the ONLY caller.
+
+### `flow_b.py` wiring (diagnostics only, mirrors D-155's own pattern)
+
+After the existing `raw_understanding_map` trace block, `process_local_
+sources` now calls `build_watch_listen_understanding_for_sources(raw_
+understanding_maps, takes)` and emits only bounded `trace.complete
+("watch_listen_understanding", ...)` diagnostics -- never the full
+understanding payload. No other line in `flow_b.py`, `pipeline.py`, or any
+editorial module reads `watch_listen_understandings`.
+
+### Diagnostics added
+
+`watch_listen_understanding_diagnostics()`: `watch_listen_understanding_
+created`, `understanding_span_count`, `behavior_hypothesis_count`,
+`attempt_boundary_hypothesis_count`, `attempt_relation_hypothesis_count`,
+`uncertain_relation_count`, `meaning_complete/incomplete/uncertain_count`,
+`performance_usable/questionable/unusable_count`, `conflict_count`,
+`provenance_counts` (per-tag), `source_count` -- tail-safe, counts-only,
+no transcript/basis-string dump, matching D-119/D-125/D-152/D-155's own
+compact-summary pattern.
+
+### Tests (35 new, exceeding the 32-item requirement)
+
+`tests/test_cutsell_d157_watch_listen_understanding.py`: all 32 required
+fixture categories (clean delivery, false-start/restart, abandoned-
+attempt retry, correction, incomplete+continuation, complementary, new
+audience beat, post-take reset + meaning-complete conflict, recording-
+process, breaking-character during/after delivery, meaning-incomplete +
+reset with no forced conflict, meaning-complete + confirmed abandonment
+conflict, uncertain relation (first-span and ambiguous-pair), same-topic/
+same-opener never asserting `DISTINCT_PROPOSITION`, ENTRY/DELIVERY/EXIT
+defect isolation, audio-pause corroboration, no-semantic-audio-claim,
+provenance retention, deterministic ordering, source id/timing
+preservation, no-family/BestTake/Boundary/Pacing-authority structural
+proofs, no-provider-reference) plus 3 additional structural/contract
+tests (bounded-vocabulary sweep, empty-transcript uncertainty, batch-vs-
+single-source equivalence, tail-safe diagnostics, schema-version
+stability, track-status pass-through).
+
+### Offline qualification
+
+`python3 -m compileall cutsell_worker tests`: clean. Targeted battery of
+365 tests (the new D-157 suite + D-155's two suites + the real end-to-end
+media-ingest test + `AttemptReconstructor` [both existing test files] +
+`take_grouping`/`hybrid_session_cleanup` [Family Formation] + D-123/D-128/
+D-150/D-152/D-142 + Boundary [D-097.C, D-097.5] + 8 render/QC files
+[Renderer]): 365 passed, 0 failed -- proving no behavior drift in every
+authority this task's strict scope forbids touching. Full suite (`pytest
+tests/`, excluding the one pre-existing `test_semantic_stitch.py`
+collection error, unrelated, present before D-155): 3489 passed, 13
+subtests passed, 5 failed -- the SAME 5 pre-existing, unrelated failures
+D-155/D-156 already documented (confirmed via `git diff --stat` to touch
+none of this task's 3 changed/added files: `flow_b.py`, `watch_listen_
+understanding.py`, the new test file). Delta +35 = exactly the new test
+count. Zero new failures.
+
+### D-098/D-148 architecture compatibility
+
+Parallel Multimodal Perception -> Watch+Listen Multimodal Understanding
+-> Structured Editorial Reasoning (Section 13) remains canonical -- Phase
+B adds the first real Understanding-layer hypotheses without granting
+authority, exactly matching Section 13.3's own design. Adds no Layer,
+renumbers nothing, reopens no D-096/D-097.x/D-107/D-111/D-123/D-128/D-129/
+D-141-D-156 authority contract. The CLOSED D-145-D-153 semantic-authority
+thread, D-154, D-155, and D-156 are all preserved unchanged.
+
+**Scope confirmed:** no final Proposition/Retry/family-topology/BestTake/
+Boundary/Pacing decision; no provider activation; no RAW dispatched; no
+Family Formation or BestTake code touched.
+
+**Exact next capability (NOT authorized by this task):** D-158 Phase C --
+consume the fused evidence in Proposition Identity + Attempt Relationships
++ Family Formation, still behind explicit structured authority/firewalls
+-- Product Owner decision, not made here.
+
+**HUMAN ACTION REQUIRED:** YES (condition A) -- whether/when to authorize
+D-158 Phase C, and in what order relative to D-156's still-open sonography-
+ordering/count-drift findings and the still-owed HUMAN WATCH+LISTEN PASS,
+are Product Owner decisions.
