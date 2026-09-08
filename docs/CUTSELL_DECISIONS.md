@@ -21790,3 +21790,185 @@ smallest-next-step observability addition above, and separately whether
 to investigate the pimples DeliveryScorer tie-break regression and the
 `sonography_good_before_diagnosis` ordering failure (both pre-existing,
 outside D-150's own scope), are Product Owner decisions, not made here.
+
+## D-152: Semantic Authority Gate -- tail-safe real-media observability
+
+**Authorization:** Product Owner directive "CUTSELL -- D-152 SEMANTIC
+AUTHORITY GATE / TAIL-SAFE REAL-MEDIA OBSERVABILITY", verified HEAD
+`c22b8f9` (D-151), clean working tree. Implements exactly the
+smallest-evidenced-next-step D-151 itself recommended: make the D-150
+gate's own fields recoverable from the normal CI tail. Observability
+only -- zero editorial behavior change.
+
+**D-151 observability gap (restated, not rewritten).** D-151 could
+recover family topology, the semantic fast-path candidate,
+DeliveryScorer's winner, and the final winner path from the surviving
+log tail, but could NOT recover field-level `semantic_authority_gate_
+status/_reason/_before/_after`, `family_complete_context`,
+`complete_context_conflict`, or `complete_window_agreement_status` for
+any family -- the full `judge_group_diagnostics` dump exceeds the CI log
+tool's retrievable tail, and the validator-reports artifact download is
+blocked by this session's egress proxy policy.
+
+**What was added (two new pure functions, `cutsell_worker/semantic_
+authority_observability.py` only -- no change to `pipeline.py` or
+`semantic_best_take_integrity.py`; both files inspected, confirmed to
+already carry every field needed):**
+- `semantic_authority_ci_row(judge_group_row)` -- ONE bounded per-family
+  row, built from an EXPLICIT field allowlist (never `**row`), so it is
+  structurally incapable of leaking a transcript, raw provider prose, or
+  a per-window/per-frame payload regardless of what `pipeline.py`'s own
+  row grows to carry later. Fields: `family_id`, `member_count`,
+  `family_complete_context`, `complete_window_count`, `complete_window_
+  agreement_status`, `complete_context_conflict`, `semantic_authority_
+  before`, `semantic_authority_gate_status`, `semantic_authority_gate_
+  reason`, `semantic_authority_after`, `semantic_fast_path_candidate`,
+  `semantic_winner_id` (derived from `semantic_candidates`, present only
+  when exactly one member carries the "winner" label -- ambiguous/absent
+  cases report `None`, never a guess), `deliveryscore_winner_id`,
+  `winner_path_after`.
+- `summarize_semantic_authority_gate_counts(judge_group_rows)` -- the
+  tail-safe top-level counts object, reading `take_judge_groups` rows
+  directly (the real shape CI has on hand): `family_count`,
+  `semantic_authority_gate_evaluated_count` (new), `semantic_authority_
+  allowed_count`, `semantic_authority_abstain_incomplete_count`,
+  `semantic_authority_abstain_conflict_count`, `semantic_authority_
+  advisory_count`, `families_with_one_complete_window`, `families_with_
+  multiple_complete_windows`, `families_with_complete_window_agreement`,
+  `families_with_complete_context_conflict`, `families_with_no_complete_
+  window`. A DELIBERATELY SEPARATE function from D-149's existing
+  `summarize_family_authority_observability` (which expects that
+  function's own flatter `family_authority_diagnostics` row shape) --
+  additive only, zero change to that existing, already-tested function
+  or its callers, avoiding any risk of behavior drift on a "preserve
+  CLOSED" component.
+
+**Why no `pipeline.py` change was needed.** Every field D-152 requires
+already exists on each `take_judge_groups` row: D-150 already spreads
+`semantic_authority_gate_evaluated/_status/_reason`, `semantic_authority_
+before/_after`, `family_complete_context`, `complete_context_conflict`,
+and `complete_window_agreement_status` onto the row's top level; D-146/
+D-149's `family_authority_diagnostics` output (including `complete_
+window_count`) is already nested under `semantic_authority_
+observability`; `semantic_fast_path_candidate`, `deliveryscore_top_
+candidate`, and `winner_path_after` were already written by D-122/D-123.
+D-152 only projects what is already there.
+
+**CI wiring.** One new workflow step, "Print compact D-150 Semantic
+Authority qualification summary (D-152, tail-safe)", added to
+`.github/workflows/cutsell-video00-modal-raw.yml` immediately after the
+existing D-123 compact-summary step and before "Upload validator
+reports" -- placed late-stage, after the large diagnostics and
+quality-ladder steps, per the exact D-119/D-125 pattern this workflow
+already established for the identical class of problem (`boundary_
+engine_pass`/`perceptual_watch_listen`/`take_judge_groups` fields
+scrolling outside the ~5000-line CI log tail cap). Following this
+workflow's own established isolation convention for these late tail-safe
+summary steps (D-119/D-123 also do this, never importing `cutsell_
+worker`), the step is a SELF-CONTAINED inline Python script that mirrors
+-- rather than imports -- `semantic_authority_ci_row`/`summarize_
+semantic_authority_gate_counts`'s logic; both are independently
+pytest-covered, and the mirrored CI logic was verified byte-for-byte
+equivalent against the two real functions on the exact synthetic pimples
+shape from D-151 before being committed (see this task's own working
+verification, not re-run here). The step reads `artifact/video00-
+modal.json` (already on disk from "Download Video00 Modal artifacts",
+never a live pipe -- no D-117 SIGPIPE risk), writes `artifact/video00-
+modal-d152-semantic-authority-summary.json`, and is added to the
+`cutsell-video00-modal-validator-reports` upload-artifact file list.
+
+**Bounded output guarantee.** The per-family row is an explicit-key
+dict (14 short scalar fields); the top-level counts object is 11 plain
+integers. A 50-family synthetic fixture serializes to well under 1KB per
+family with no per-window/per-frame/transcript growth -- proven by test.
+
+**Pimples traceability preserved as a general capability, not a special
+case.** No pimples-specific code, transcript keyword, or clip id exists
+anywhere in this task's new code -- the summary is sufficient to
+identify D-151's pimples family (or any other) purely through its
+`family_id`/member ids, exactly as D-151 itself did by reading the
+generic `take_judge_groups` structure.
+
+**Zero editorial effect (proven, not asserted).** Both new functions are
+read-only projections -- a dedicated test proves neither mutates its
+input row (byte-identical before/after). Module-leaf no-import proofs
+(the same technique D-146/D-149/D-150's own suites established) confirm
+`cutsell_worker.semantic_authority_observability` still cannot reach
+`build_case_b_performance_evidence`/`case_b_performance_evidence_
+diagnostics` (D-123), `detect_class_b_trigger`/`fallback_trigger_
+diagnostics` (D-128), `boundary_engine_pass`/`apply_post_freeze_
+boundary_pass` (Boundary), or `dialogue_pacing_transition`/`apply_
+dialogue_pacing_transition_pass` (Pacing). A signature-shape test
+confirms `_semantic_best_take`'s D-150 `semantic_comparative_authority`
+parameter and `semantic_authority_gate_diagnostics`'s own signature are
+byte-identical to what D-150 left them -- D-152 added no new call site
+in `pipeline.py`.
+
+**D-148 architecture compatibility.** Preserved -- Parallel Multimodal
+Perception -> Watch+Listen Multimodal Understanding -> Structured
+Editorial Reasoning remains canonical; D-152 is observability for the
+ONE existing D-150 semantic-authority safeguard, never an expansion into
+Watch+Listen or a claim that Family Formation is complete.
+
+**Pimples DeliveryScorer finding (D-151) -- recorded, not fixed.** D-151
+found the pimples family's wrong final take was selected entirely
+through `DELIVERYSCORE_PATH` (DeliveryScorer's tie-break among two
+"meaning-sufficient" survivors), a pre-existing D-082-era component
+D-150/D-152 do not gate. Not investigated or patched here, per this
+task's own explicit instruction; recorded as a separate downstream issue
+that may later benefit from the canonical upstream multimodal
+understanding work (D-098 Section 13) once that capability exists, but
+is not blocked on it.
+
+**Sonography ordering finding (D-151) -- recorded, not fixed.** D-151
+also reproduced `sonography_good_before_diagnosis = FAIL` (a required-
+order QA check). Not investigated in this task; recorded as an existing,
+separate Level-1 issue outside D-150/D-152's own scope.
+
+**Tests (31, exceeding the 26-item minimum) --
+`tests/test_cutsell_d152_semantic_authority_ci_summary.py`.** Top-level
+counts presence + 4 count-correctness cases (allowed/abstain-incomplete/
+abstain-conflict/complete-context-conflict, including a mixed multi-
+family fixture); per-family row presence + family id + gate status +
+gate reason + authority before/after + complete-window-agreement
+(including a top-level-absent fallback-to-nested case) + bounded
+semantic-winner field (single-winner/ambiguous/no-winner cases) +
+bounded DeliveryScorer-winner field + winner-path + member-count;
+no-transcript-leakage and no-raw-provider-prose proofs (a synthetic row
+with an injected hypothetical `text`/`case_b_evidence`/`ranked` field,
+proving the allowlist structurally excludes them); a 50-family bounded-
+output-size proof; a pure-function no-mutation proof; no-semantic-
+winner-change, no-DeliveryScore-change, no-BestTake-change proofs;
+4 module-leaf no-import proofs (D-123/D-128/Boundary/Pacing); a
+no-provider/network-call import-line scan; and a `_semantic_best_take`/
+`semantic_authority_gate_diagnostics` signature-shape proof that D-152
+added no new `pipeline.py` call site.
+
+**Full offline qualification:** `python3 -m compileall cutsell_worker
+tests` clean; targeted regression (D-152's own 31 + D-150's 31 + D-149's
+31 + D-146's 32 + D-081 + D-082 + D-094.2/D-094.3/D-094-video00-
+integration + D-123 + D-128 + D-097.C-Boundary + D-142-Pacing +
+hybrid_session_cleanup -- 293 tests total in one run) all green, zero
+regressions. Full `tests/` suite (minus the pre-existing, unrelated
+`test_semantic_stitch.py` collection error) run once as the CI-
+equivalent gate; see this task's final report for the exact pass/fail
+counts and the pre-existing-baseline-failure confirmation carried
+forward from D-146/D-147/D-149/D-150's own established method.
+
+**Scope confirmed:** no RAW/Modal/RunPod dispatch, no provider call
+anywhere in this task's own code or tests (structurally proven); no
+semantic authority behavior change, no family change, no BestTake
+change, no DeliveryScorer change, no Watch+Listen implementation, no
+Boundary change, no Pacing change; D-081/D-094/D-097/D-101/D-103/D-106/
+D-123/D-128/D-138/D-140-D-151 all preserved CLOSED and not reopened;
+D-151 itself not rewritten (this is an append-only new entry).
+
+**Exact next real-media gate:** if D-152's offline tests are green (they
+are), the next action is exactly ONE canonical Video00 RAW to qualify
+D-150 using these new tail-safe fields -- NOT launched in this task, per
+its own explicit instruction.
+
+**HUMAN ACTION REQUIRED:** YES (condition A/C) -- authorization to launch
+the one real-media Video00 RAW that finally qualifies D-150's gate using
+these new tail-safe fields is the Product Owner's decision, not made
+here.

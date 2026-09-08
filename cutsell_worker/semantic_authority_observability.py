@@ -490,6 +490,130 @@ def summarize_family_authority_observability(per_family_rows: Iterable[Mapping])
 
 
 # ---------------------------------------------------------------------------
+# D-152: SEMANTIC AUTHORITY GATE -- TAIL-SAFE REAL-MEDIA OBSERVABILITY.
+#
+# Per docs/CUTSELL_DECISIONS.md D-151/D-152. D-151's real-media qualification
+# of D-150 could not recover the gate's own field values because the full
+# `judge_group_diagnostics` ("take_judge_groups") dump exceeds the CI log
+# tool's retrievable tail. Both functions below are PURE PROJECTIONS of
+# fields `pipeline.py` already writes onto each `take_judge_groups` row
+# (`group_id`, `selected_clip_id`, `semantic_candidates`, `deliveryscore_
+# top_candidate`, `semantic_fast_path_candidate`, `winner_path_after`, and
+# the D-150 gate fields spread directly onto the row by `pipeline.py`:
+# `semantic_authority_gate_evaluated/_status/_reason`, `semantic_authority_
+# before/_after`, `family_complete_context`, `complete_context_conflict`,
+# `complete_window_agreement_status`) plus the nested `semantic_authority_
+# observability` sub-dict (D-146/D-149's own `family_authority_diagnostics`
+# output, for `complete_window_count`). Neither function recomputes a
+# decision, calls a provider, or reads anything not already written by
+# D-146/D-149/D-150 -- they only make those existing values printable in a
+# small, bounded, tail-safe shape (matching the D-119/D-125 compact-summary
+# pattern already used elsewhere in the Video00 Modal RAW workflow). Zero
+# effect on family formation, semantic merged labels, the gate's own
+# decision, DeliveryScorer, BestTake, D-123, D-128, Boundary, or Pacing.
+# ---------------------------------------------------------------------------
+
+
+def _agreement_status_of(judge_group_row: Mapping) -> str:
+    """Prefer the top-level `complete_window_agreement_status` D-150 already
+    spreads onto every `take_judge_groups` row; fall back to the nested
+    `semantic_authority_observability` sub-dict for a row shape that only
+    ever went through D-146/D-149 (no D-150 gate fields spread yet)."""
+    top = judge_group_row.get("complete_window_agreement_status")
+    if top is not None:
+        return str(top)
+    nested = judge_group_row.get("semantic_authority_observability")
+    if isinstance(nested, Mapping):
+        return str(nested.get("complete_window_agreement_status") or AGREEMENT_UNKNOWN)
+    return AGREEMENT_UNKNOWN
+
+
+def semantic_authority_ci_row(judge_group_row: Mapping) -> dict:
+    """The ONE bounded, per-family CI row D-152 requires -- an explicit
+    field allowlist (never `**judge_group_row`), so it structurally cannot
+    leak a transcript, raw provider prose, or a per-window/per-frame
+    payload regardless of what pipeline.py's own row grows to carry in the
+    future. `semantic_winner_id` is derived, not read, from `semantic_
+    candidates` (the same `[{clip_id, label, confidence}, ...]` list
+    `pipeline.py` already writes) -- present only when EXACTLY one member
+    carries the "winner" label, mirroring (never replacing)
+    `would_be_decisive_semantic_winner`'s own single-winner shape; ambiguous
+    or absent cases report `None`, never a guess."""
+    candidates = judge_group_row.get("semantic_candidates")
+    candidates = candidates if isinstance(candidates, list) else []
+    member_count = len(candidates)
+    winner_ids = [
+        str(c.get("clip_id"))
+        for c in candidates
+        if isinstance(c, Mapping) and str(c.get("label") or "") == "winner"
+    ]
+    semantic_winner_id = winner_ids[0] if len(winner_ids) == 1 else None
+
+    nested = judge_group_row.get("semantic_authority_observability")
+    complete_window_count = (
+        nested.get("complete_window_count") if isinstance(nested, Mapping) else None
+    )
+
+    return {
+        "family_id": str(judge_group_row.get("group_id") or ""),
+        "member_count": member_count,
+        "family_complete_context": judge_group_row.get("family_complete_context"),
+        "complete_window_count": complete_window_count,
+        "complete_window_agreement_status": _agreement_status_of(judge_group_row),
+        "complete_context_conflict": bool(judge_group_row.get("complete_context_conflict", False)),
+        "semantic_authority_before": judge_group_row.get("semantic_authority_before"),
+        "semantic_authority_gate_status": judge_group_row.get("semantic_authority_gate_status"),
+        "semantic_authority_gate_reason": judge_group_row.get("semantic_authority_gate_reason"),
+        "semantic_authority_after": judge_group_row.get("semantic_authority_after"),
+        "semantic_fast_path_candidate": judge_group_row.get("semantic_fast_path_candidate"),
+        "semantic_winner_id": semantic_winner_id,
+        "deliveryscore_winner_id": judge_group_row.get("deliveryscore_top_candidate"),
+        "winner_path_after": judge_group_row.get("winner_path_after"),
+    }
+
+
+def summarize_semantic_authority_gate_counts(judge_group_rows: Iterable[Mapping]) -> dict:
+    """Tail-safe, counts-only top-level summary over `take_judge_groups`
+    rows directly (the real shape CI has on hand -- never requires the
+    caller to pre-merge nested and top-level fields itself). A separate
+    function from `summarize_family_authority_observability` (which expects
+    D-146/D-149's own flatter `family_authority_diagnostics` row shape) --
+    additive only, changes nothing about that existing, already-tested
+    function or its callers. Materializes `judge_group_rows` once (the
+    same one-shot-iterable safety established for `summarize_family_
+    authority_observability`)."""
+    rows = [row for row in judge_group_rows if isinstance(row, Mapping)]
+    gate_status_counts: Counter = Counter()
+    agreement_counts: Counter = Counter()
+    gate_evaluated_count = 0
+    complete_context_conflict_count = 0
+    for row in rows:
+        if row.get("semantic_authority_gate_evaluated"):
+            gate_evaluated_count += 1
+        gate_status_counts[str(row.get("semantic_authority_gate_status") or "")] += 1
+        agreement_counts[_agreement_status_of(row)] += 1
+        if bool(row.get("complete_context_conflict", False)):
+            complete_context_conflict_count += 1
+    return {
+        "family_count": len(rows),
+        "semantic_authority_gate_evaluated_count": gate_evaluated_count,
+        "semantic_authority_allowed_count": gate_status_counts.get(AUTHORITY_ALLOWED, 0),
+        "semantic_authority_abstain_incomplete_count": gate_status_counts.get(
+            AUTHORITY_ABSTAIN_INCOMPLETE_CONTEXT, 0
+        ),
+        "semantic_authority_abstain_conflict_count": gate_status_counts.get(AUTHORITY_ABSTAIN_CONFLICT, 0),
+        "semantic_authority_advisory_count": gate_status_counts.get(AUTHORITY_ADVISORY, 0),
+        "families_with_one_complete_window": agreement_counts.get(AGREEMENT_ONE_COMPLETE_WINDOW, 0),
+        "families_with_multiple_complete_windows": (
+            agreement_counts.get(AGREEMENT_MULTIPLE_AGREE, 0) + agreement_counts.get(AGREEMENT_MULTIPLE_DISAGREE, 0)
+        ),
+        "families_with_complete_window_agreement": agreement_counts.get(AGREEMENT_MULTIPLE_AGREE, 0),
+        "families_with_complete_context_conflict": complete_context_conflict_count,
+        "families_with_no_complete_window": agreement_counts.get(AGREEMENT_NO_COMPLETE_WINDOW, 0),
+    }
+
+
+# ---------------------------------------------------------------------------
 # D-150: SEMANTIC AUTHORITY PHASE B -- FAMILY-COMPLETE + COMPLETE-CONTEXT-
 # CONFLICT AUTHORITY GATE.
 #

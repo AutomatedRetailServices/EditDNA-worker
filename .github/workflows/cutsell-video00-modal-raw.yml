@@ -1282,6 +1282,149 @@ jobs:
           print(json.dumps(summary, indent=2, sort_keys=True))
           PY
 
+      - name: Print compact D-150 Semantic Authority qualification summary (D-152, tail-safe)
+        # D-152 (docs/CUTSELL_DECISIONS.md): D-151's real-media qualification of
+        # the D-150 semantic authority gate could not recover the gate's own
+        # field values (`semantic_authority_gate_status/_reason/_before/_after`,
+        # `family_complete_context`, `complete_context_conflict`, `complete_
+        # window_agreement_status`) because they print inside the large "Print
+        # full canonical diagnostics" step and, by job end, scroll outside the
+        # same ~5000-line CI log tail cap D-117/D-118/D-119/D-125 already
+        # documented. This step is that same D-119/D-125 pattern applied to the
+        # D-150 gate fields specifically: a SEPARATE, LATE-STAGE, BOUNDED
+        # summary reading `artifact/video00-modal.json` (already on disk, never
+        # a live pipe) and projecting ONLY the D-146/D-149/D-150 fields
+        # `pipeline.py` already writes onto each `take_judge_groups` row --
+        # never a transcript, raw provider prose, or a per-window/per-frame
+        # payload. This logic mirrors (does not import, matching this
+        # workflow's existing D-119/D-123 isolation pattern for late tail-safe
+        # summary steps) `cutsell_worker.semantic_authority_observability`'s
+        # `semantic_authority_ci_row`/`summarize_semantic_authority_gate_
+        # counts` -- both pure projections, independently pytest-covered in
+        # `tests/test_cutsell_d152_semantic_authority_ci_summary.py`. Recomputes
+        # NO family formation, semantic label, gate decision, DeliveryScorer
+        # score, or BestTake winner -- every field here is copied verbatim or
+        # trivially derived (set-membership, equality, counting) from values
+        # `pipeline.py`'s own D-150 gate call already produced.
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p artifact
+          python - <<'PY'
+          import json, os, sys
+          from collections import Counter
+
+          def load(path):
+              if not os.path.exists(path) or os.path.getsize(path) == 0:
+                  return None
+              with open(path) as f:
+                  try:
+                      return json.load(f)
+                  except Exception as e:
+                      print(f"WARNING: failed to parse {path}: {e}", file=sys.stderr)
+                      return None
+
+          engine = load("artifact/video00-modal.json")
+
+          summary = {"schema_version": "cutsell.video00.d152_semantic_authority_summary.v1"}
+
+          rows = []
+          if isinstance(engine, dict):
+              diag = engine.get("diagnostics")
+              if isinstance(diag, dict):
+                  raw_groups = diag.get("take_judge_groups")
+                  if isinstance(raw_groups, list):
+                      rows = [r for r in raw_groups if isinstance(r, dict)]
+          summary["source_status"] = "engine_json_present" if isinstance(engine, dict) else "engine_json_missing_or_unparseable"
+
+          _ALLOWED = "AUTHORITATIVE"
+          _ABSTAIN_INCOMPLETE = "ABSTAIN_INCOMPLETE_CONTEXT"
+          _ABSTAIN_CONFLICT = "ABSTAIN_CONFLICT"
+          _ADVISORY = "ADVISORY"
+          _AGREEMENT_UNKNOWN = "UNKNOWN"
+          _AGREEMENT_NO_COMPLETE_WINDOW = "NO_COMPLETE_WINDOW"
+          _AGREEMENT_ONE_COMPLETE_WINDOW = "ONE_COMPLETE_WINDOW"
+          _AGREEMENT_MULTIPLE_AGREE = "MULTIPLE_COMPLETE_WINDOWS_AGREE"
+          _AGREEMENT_MULTIPLE_DISAGREE = "MULTIPLE_COMPLETE_WINDOWS_DISAGREE"
+
+          def agreement_status_of(row):
+              top = row.get("complete_window_agreement_status")
+              if top is not None:
+                  return str(top)
+              nested = row.get("semantic_authority_observability")
+              if isinstance(nested, dict):
+                  return str(nested.get("complete_window_agreement_status") or _AGREEMENT_UNKNOWN)
+              return _AGREEMENT_UNKNOWN
+
+          def ci_row(row):
+              candidates = row.get("semantic_candidates")
+              candidates = candidates if isinstance(candidates, list) else []
+              winner_ids = [
+                  str(c.get("clip_id")) for c in candidates
+                  if isinstance(c, dict) and str(c.get("label") or "") == "winner"
+              ]
+              nested = row.get("semantic_authority_observability")
+              complete_window_count = nested.get("complete_window_count") if isinstance(nested, dict) else None
+              return {
+                  "family_id": str(row.get("group_id") or ""),
+                  "member_count": len(candidates),
+                  "family_complete_context": row.get("family_complete_context"),
+                  "complete_window_count": complete_window_count,
+                  "complete_window_agreement_status": agreement_status_of(row),
+                  "complete_context_conflict": bool(row.get("complete_context_conflict", False)),
+                  "semantic_authority_before": row.get("semantic_authority_before"),
+                  "semantic_authority_gate_status": row.get("semantic_authority_gate_status"),
+                  "semantic_authority_gate_reason": row.get("semantic_authority_gate_reason"),
+                  "semantic_authority_after": row.get("semantic_authority_after"),
+                  "semantic_fast_path_candidate": row.get("semantic_fast_path_candidate"),
+                  "semantic_winner_id": winner_ids[0] if len(winner_ids) == 1 else None,
+                  "deliveryscore_winner_id": row.get("deliveryscore_top_candidate"),
+                  "winner_path_after": row.get("winner_path_after"),
+              }
+
+          gate_status_counts = Counter()
+          agreement_counts = Counter()
+          gate_evaluated_count = 0
+          complete_context_conflict_count = 0
+          family_rows = []
+          for row in rows:
+              if row.get("semantic_authority_gate_evaluated"):
+                  gate_evaluated_count += 1
+              gate_status_counts[str(row.get("semantic_authority_gate_status") or "")] += 1
+              agreement_counts[agreement_status_of(row)] += 1
+              if bool(row.get("complete_context_conflict", False)):
+                  complete_context_conflict_count += 1
+              family_rows.append(ci_row(row))
+
+          summary["counts"] = {
+              "family_count": len(rows),
+              "semantic_authority_gate_evaluated_count": gate_evaluated_count,
+              "semantic_authority_allowed_count": gate_status_counts.get(_ALLOWED, 0),
+              "semantic_authority_abstain_incomplete_count": gate_status_counts.get(_ABSTAIN_INCOMPLETE, 0),
+              "semantic_authority_abstain_conflict_count": gate_status_counts.get(_ABSTAIN_CONFLICT, 0),
+              "semantic_authority_advisory_count": gate_status_counts.get(_ADVISORY, 0),
+              "families_with_one_complete_window": agreement_counts.get(_AGREEMENT_ONE_COMPLETE_WINDOW, 0),
+              "families_with_multiple_complete_windows": (
+                  agreement_counts.get(_AGREEMENT_MULTIPLE_AGREE, 0) + agreement_counts.get(_AGREEMENT_MULTIPLE_DISAGREE, 0)
+              ),
+              "families_with_complete_window_agreement": agreement_counts.get(_AGREEMENT_MULTIPLE_AGREE, 0),
+              "families_with_complete_context_conflict": complete_context_conflict_count,
+              "families_with_no_complete_window": agreement_counts.get(_AGREEMENT_NO_COMPLETE_WINDOW, 0),
+          }
+          summary["families"] = family_rows
+
+          os.makedirs("artifact", exist_ok=True)
+          out_path = "artifact/video00-modal-d152-semantic-authority-summary.json"
+          with open(out_path, "w") as f:
+              json.dump(summary, f, indent=2, sort_keys=True)
+
+          size = os.path.getsize(out_path)
+          print("--- D-150 Semantic Authority gate qualification summary (D-152; a pure projection of existing take_judge_groups diagnostics -- recomputes no family formation, semantic label, gate decision, DeliveryScorer score, or BestTake winner) ---")
+          print(f"summary file: {out_path} ({size} bytes)")
+          print(json.dumps(summary, indent=2, sort_keys=True))
+          PY
+
       - name: Upload validator reports
         if: always()
         uses: actions/upload-artifact@v4
@@ -1297,6 +1440,7 @@ jobs:
             artifact/video00-modal-active-path-identity.json
             artifact/video00-modal-d116-qualification-summary.json
             artifact/video00-modal-d123-qualification-summary.json
+            artifact/video00-modal-d152-semantic-authority-summary.json
           retention-days: 14
           if-no-files-found: warn
 
