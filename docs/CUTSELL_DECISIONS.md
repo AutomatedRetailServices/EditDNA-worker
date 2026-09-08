@@ -15945,3 +15945,200 @@ classify -- not run here (explicit "NO RAW" scope).
 authorization) -- authorizing that one confirmatory Video00 RAW (which
 will now emit the disambiguating summary this task built) is the Product
 Owner's next decision, not made here.
+
+## D-126 -- D-123 FINAL real-media qualification (RAW 34172575066, post
+D-125): **VERDICT A -- REAL-MEDIA PROVEN. D-123 CLOSES for the current
+milestone.** D-125's tail-safe compact summary worked exactly as designed
+-- fully retrievable from ordinary CI-log tail (19,345-byte JSON, printed
+at line ~4377 of the ~5000-line tail, closing brace confirmed intact,
+zero truncation) -- and it resolved the ambiguity D-124 could not: this
+run produced one real, fully-observable, correctly-executed D-123 bypass
+on real footage, with every disambiguating field present and unambiguous.
+
+**D-125 operational status:** `source_status: "engine_json_present"`;
+`family_count: 8`; summary step (job step 24 of 26) concluded `success`;
+no SIGPIPE; every later step (Upload validator reports, Modal teardown,
+post-job cleanup) completed normally.
+
+**Global D-123 counts (exact, from the D-125 summary):**
+`family_count=8`, `semantic_fast_path_family_count=6`, `deliveryscore_
+disagreement_count=2`, `families_with_case_b_evidence_count=8`,
+`actionable_case_b_conflict_count=1`, `semantic_fast_path_bypass_count=1`,
+`deliveryscore_path_count=1`, `deterministic_override_count=0`,
+`meaning_insufficient_alternative_block_count=1`, `no_case_b_evidence_
+no_bypass_count=0`.
+
+**The one actionable conflict / actual bypass -- `tg_ef754f8f610ab360df`:**
+semantic winner `clip_97ea7e6086618f8d3411` (label "winner", confidence
+0.95) vs. DeliveryScorer top `clip_a146a21d0ea41fd39045`. CASE B evidence:
+semantic winner carries `delivery_event_count=7` (hand_motion_reset_
+candidate x7, 0.469s), DeliveryScorer top carries only `delivery_event_
+count=2` (facial_expression_shift_candidate x1 + hand_motion_reset_
+candidate x1, 0.133s) -- a real, strict, unambiguous asymmetry favoring
+the alternative. Both candidates confirmed meaning-sufficient
+(`case_b_conflict_meaning_sufficiency: {both: true}`). `case_b_conflict_
+present=true`, `semantic_fast_path_bypassed=true`, `bypass_reason=
+"case_b_performance_conflict"`, `winner_path_before="SEMANTIC_FAST_
+PATH"`, `winner_path_after="OTHER_EXISTING_PATH"`. All 6 D-123 conditions
+verified: (1) fast-path candidate existed; (2) DeliveryScorer preferred a
+different candidate; (3) that alternative was meaning-sufficient; (4) a
+real CASE B asymmetry existed (7 vs 2, never tied/guessed); (5) CASE B
+never chose the winner directly -- the fast path was only gated, then fell
+through to the SAME unmodified general ladder; (6) the ladder's own
+pre-existing D-063/D-065/D-066 `critical_coverage_dominance` step (never
+CASE B, never a new authority) then independently decided the winner --
+`final_reason="critical_coverage_dominance"`, `final_selected_clip_id=
+"clip_97ea7e6086618f8d3411"`. **No `CASE_B_WINNER` or equivalent new
+authority exists anywhere in this run's evidence or in the code** (static
+confirmation, D-122/D-123 offline tests, unaffected by this run).
+
+**Real negative controls, all correct:** (A) semantic winner ==
+DeliveryScorer top, trivially no conflict -- `tg_c544be70f7e22374bf`,
+`tg_dfa8f59296237ae030`, `tg_c4a0500ee6d8b3a45a` (3 families, all
+`case_b_conflict_present=false`). (E) alternative meaning-insufficient --
+`tg_7e13303b51e7b07a5f`: DeliveryScorer top `clip_49ac5a7dab84aea447aa`
+is absent from `meaning_sufficient_candidates` (`["clip_
+331b3ab7a1bc40044a26"]` only) despite a real disagreement and real CASE B
+asymmetry (8 vs 5 events) existing -- correctly never bypassed; this is
+the run's one instance of `meaning_insufficient_alternative_block_
+count=1`, exact match. (B)/(C)/(D) not exercised this run: `families_
+with_case_b_evidence_count=8` equals `family_count`, so no no-evidence
+case arose, and the only two real disagreements are already accounted for
+above (one conflict, one meaning-insufficient block) -- no tied-evidence
+or reversed-asymmetry shape happened to occur on this footage. (F)
+ENTRY/EXIT-only differences remain proven only at the code level (D-123's
+own offline suite) -- CASE B's own DELIVERY-zone-only filter makes this
+shape structurally invisible to the summary by construction, consistent
+with design.
+
+**D-124 ambiguous-shape resolution:** D-125's new fields fully eliminate
+the ambiguity class D-124 hit. This run's own comparable shape --
+`tg_0df2968b7e8d7cc067` (a "winner"-labelled semantic candidate,
+`clip_5cccc8f39c7f273de1b8`, displaced to a DIFFERENT final clip via
+`critical_coverage_dominance`) -- is now DEFINITIVELY resolved as
+**(B) NOT a D-123 bypass**: `case_b_conflict_present=false` and
+`semantic_fast_path_bypassed=false` are both explicit and present, so the
+displacement is attributable to the existing ladder/veto machinery, never
+D-123. No family this run reproduces `tg_140e20c3f9f49b133f`'s literal
+unresolved shape, because D-125 now resolves every such shape on sight --
+the observability gap D-124 identified is closed.
+
+**Pimples:** `family_formed` (NOT fragmented this run, unlike D-124) --
+`tg_dfa8f59296237ae030`, members `clip_51e6a8e265a375059ea9` (semantic
+winner, 0.95) and `clip_c61869580931be9ba985`. `deliveryscore_top_
+candidate` equals the semantic winner (no disagreement) -> `case_b_
+conflict_present=false`, `semantic_fast_path_bypassed=false`, `winner_
+path_after="SEMANTIC_FAST_PATH"`, `final_selected_clip_id=clip_
+51e6a8e265a375059ea9` via `single_semantic_winner`, unbypassed. Human Gold
+regression QA this run: `pimples_micro_1/2/3_present`, `pimples_micro_
+order`, and `pimples_later_winner_present` **all PASS** (an improvement
+over D-124's 3 pimples-check failures); only `pimples_bad_monolith_
+absent` still fails (`historical_bad_take_returned`) -- the chosen
+semantic-winner clip itself is, on this run's semantic labeling, the
+"monolith" take the QA fixture wants replaced by its cleaner split
+sibling. **Primary pimples failure class: (B) semantic fast-path
+variance** -- the family formed correctly (not A) and D-123 never
+bypassed (not C/D, since DeliveryScorer already agreed with the flawed
+label, giving D-123's disagreement-gated mechanism no opportunity to act)
+-- this is Hybrid/Gemini's own run-to-run semantic-labeling variance
+choosing the monolith over its split version, a layer entirely upstream
+of and out of scope for D-123's evidence-based gate (D-123 corrects
+fast-path-vs-DeliveryScorer *disagreement*, not a *shared* mislabel both
+signals agree on).
+
+**Grouping variance:** the pimples-adjacent competitor set formed as ONE
+genuine 2-member family this run (no rejected/declined merge edges
+observed for this cluster, unlike D-124) -- D-123 had a legitimate
+multi-member family to act on, and correctly found no actionable conflict
+within it (semantic and DeliveryScorer already agreed).
+
+**No double-counting:** confirmed both statically (unchanged code,
+offline-proven) and structurally in this run's own evidence -- `case_b_
+conflict_basis` carries only the two candidates' `delivery_event_count`/
+`count_by_kind`/`duration_by_kind` (D-122's own factual aggregates), never
+a summed score; DeliveryScorer's own numeric ranking is untouched by
+construction (D-123 only gates one early `return`, never writes to
+`ranked`).
+
+**Meaning safety:** `papillary_diagnosis_preserved` PASS, `papillary_
+symptom_realization_meaning` PASS; `papillary_symptom_realization_parity`
+FAILED but explicitly non-gating (`"note": "editorial/take-selection
+mismatch only -- never gates qa_pass"`), unrelated to either the bypass
+family or the pimples family. `cancer_hook_preserved`, sonography (part1/
+completion/bad-take-absent), `biopsy_nodule_preserved`, `hair_loss_
+preserved`, `gastritis_preserved`, `family_context_preserved`, `cta_
+preserved`, `acne_back_preserved` all PASS (16/18 overall; the same 2
+persistent, pre-existing, D-123-unrelated failures as every prior run --
+`sonography_good_before_diagnosis` and `pimples_bad_monolith_absent`).
+**No meaning regression attributable to D-123** -- the one bypass event's
+final winner is the SAME clip the (correct) semantic label already named,
+arrived at independently via the pre-existing CRITICAL-claim-coverage
+authority.
+
+**Physical quality ladder** (D-097.10 R14 physical headline, the
+authoritative view): selection-scope LEVEL_1 23 regions/36.72s + 16
+boundary/3.797s; **physical-scope LEVEL_1 11 regions/25.948s selection +
+23/4.255s boundary = 30.203s overall** -- BETTER than D-120's 33.217s
+baseline and D-124's ~37.582s. LEVEL_1 by authority (physical):
+BestTakeResolver 4/21.339s, BoundaryEngine 27/6.465s, AttemptReconstructor/
+RecordingProcessRemoval 3/2.399s. **F1 vs Cut.ai (physical) 0.8155**,
+**F1 vs Human Gold (physical) 0.8226** -- both close to or better than
+D-120's 0.8314/0.8215, and clearly better than D-124's 0.7744/0.7802.
+None of the BestTakeResolver-attributed Level-1 seconds are traceable to
+the one confirmed bypass (that family's own physical span is not among
+the listed BestTakeResolver regions in this ladder run) -- the remaining
+BestTakeResolver mass reflects other, non-D-123 `take_choice_against_
+both_references`-style decisions, unaffected by this task.
+
+**Watch+Listen:** `status: "FAIL"` (advisory, `gate_mode: "advisory_
+v1"`), `technical_qc_status: "PASS"`, capability counts `{ERROR:0,
+EVALUATED_FAIL:1, EVALUATED_PASS:2, NOT_IMPLEMENTED:4, UNCERTAIN:1}`
+(NOT_IMPLEMENTED never treated as PASS), routing `{"BoundaryEngine": 16}`
+-- every finding routes to Boundary, none to BestTake, consistent with no
+D-123-attributable perceptual finding.
+
+**Freeze/QC/deliverable:** `architecture_verified: true`; `freeze_
+blocked: false` (PASS); Technical QC PASS; render verification 23/25
+fragments located (2 missing -- `clip_c63ead8269f881b798d2`, `clip_
+64815fcc9f67733d8926` -- a render/render-verification-scope observation,
+outside D-123's change surface, noted for completeness only); `delivery_
+status: "DELIVERABLE_PENDING_HUMAN_WATCH_LISTEN:perceptual=FAIL"`,
+`human_watch_listen_required: true`. Boundary: `selected_count_in=22`,
+`selected_count_out=23`, `total_visual_trim_seconds=0.0` -- zero real
+trims, same shape as every prior run. `selection_locked: false` (the same
+persistent, stale-baseline gate that has failed identically on every run
+since before D-123 existed -- unrelated).
+
+**D-123 FINAL VERDICT: A -- REAL-MEDIA PROVEN.** All required conditions
+met: a real eligible CASE B conflict reached the gate; gate behavior was
+unequivocally observable (D-125 resolved every ambiguity on sight);
+bypass/no-bypass was correct in every observed instance (1 correct
+bypass, 1 correct meaning-insufficient block, 3 correct trivial-agreement
+non-conflicts); the existing winner authority (critical_coverage_
+dominance, an existing D-063/D-065/D-066 mechanism) remained the sole
+decider post-bypass -- no new `CASE_B_WINNER` authority exists; no meaning
+regression; no numeric double-counting.
+
+**D-123 CLOSES for the current milestone.** No further D-123 RAW is
+authorized or needed.
+
+**Dominant remaining blocker: OTHER -- semantic fast-path label variance
+(Hybrid/Gemini run-to-run labeling instability), not grouping/competitor-
+set variance (the pimples family formed correctly and stably this run)
+and not a BestTake-after-bypass defect (the one bypass this run resolved
+correctly).** Per the Next-Architecture-Decision framing: legitimate
+families are forming stably, and where D-123's structured performance
+evidence gets a genuine chance to act (a real DeliveryScorer disagreement)
+it resolves correctly -- but the pimples case shows a family where the
+semantic label and DeliveryScorer's own score AGREE on a flawed pick,
+which no disagreement-gated mechanism can catch. This points toward D-111's
+own named future capability -- a bounded multimodal fallback arbiter for
+genuine medium-confidence conflict -- as the next architecture-level
+candidate. **Not implemented, not designed further, and not authorized
+here** -- this is a recommendation only, per this task's explicit scope.
+
+**HUMAN ACTION REQUIRED:** YES (condition A, product decision) -- whether
+to authorize scoping/designing the bounded multimodal fallback arbiter
+D-111 already named (the recommended next architecture-level candidate
+above) is the Product Owner's decision, not made here. No further D-123
+RAW or Video00 paid compute is requested or needed at this time.
