@@ -60,7 +60,16 @@ GEMINI_API_BASE = "https://generativelanguage.googleapis.com/v1beta"
 
 #: The exact Gemini generation this task's directive requires -- never
 #: silently substituted for a different generation/tier.
-REQUIRED_MODEL_ID = "gemini-2.5-flash"
+#:
+#: D-140 update: D-139 proved `gemini-2.5-flash` is retired for new users
+#: (a real Google API 404: "This model models/gemini-2.5-flash is no
+#: longer available to new users. Please update your code to use
+#: models/gemini-3.6-flash..."). D-140 authorizes exactly that migration
+#: target, `gemini-3.6-flash` -- this repo's own pre-existing Gemini
+#: policy allowlist (`hybrid_provider_settings.py`'s `escalation_model`)
+#: already defaults to this same id, independently confirming it is a
+#: real, currently-served model id, not a guess.
+REQUIRED_MODEL_ID = "gemini-3.6-flash"
 
 
 def list_gemini_models(

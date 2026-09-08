@@ -1,17 +1,24 @@
 name: CutSell Multimodal BestTake Gemini Offline Eval
 
-# D-139 (docs/CUTSELL_DECISIONS.md D-139, post D-138): provider-comparison
-# challenger run -- Gemini 2.5 Flash vs the D-138 OpenAI gpt-4o-mini
-# baseline, SAME hardened decision contract (the exact `INSTRUCTION`
-# constant imported from `multimodal_besttake_openai.py`, never copied),
-# SAME 9 D-127 Section 20 fixtures. This workflow never touches Video00,
-# never launches a Modal/RunPod GPU job, never deploys anything, and never
-# calls a provider from the live pipeline (the live pipeline imports
-# neither this workflow's script nor `multimodal_besttake_gemini.py`).
+# D-139/D-140 (docs/CUTSELL_DECISIONS.md D-139, D-140, post D-138):
+# provider-comparison challenger run -- Gemini vs the D-138 OpenAI
+# gpt-4o-mini baseline, SAME hardened decision contract (the exact
+# `INSTRUCTION` constant imported from `multimodal_besttake_openai.py`,
+# never copied), SAME 9 D-127 Section 20 fixtures. This workflow never
+# touches Video00, never launches a Modal/RunPod GPU job, never deploys
+# anything, and never calls a provider from the live pipeline (the live
+# pipeline imports neither this workflow's script nor `multimodal_
+# besttake_gemini.py`).
+#
+# D-139 ran `gemini-2.5-flash` and got a real Google API 404 --
+# "no longer available to new users... use models/gemini-3.6-flash" --
+# and STOPPED per its own directive rather than silently substitute.
+# D-140 authorizes exactly that migration target,
+# `multimodal_besttake_gemini.REQUIRED_MODEL_ID` (now `gemini-3.6-flash`).
 #
 # MODEL AVAILABILITY IS VERIFIED, NEVER ASSUMED: the eval script's first
 # real call is Google's own read-only, zero-generation-cost `ListModels`
-# endpoint, confirming `gemini-2.5-flash` actually exists and supports
+# endpoint, confirming the required model actually exists and supports
 # `generateContent` before any generation call is attempted. If the exact
 # model is unavailable, the script reports BLOCKED with the models it did
 # find and exits cleanly (still `conclusion: success` -- a verified
