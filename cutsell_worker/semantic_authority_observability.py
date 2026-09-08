@@ -250,6 +250,146 @@ def stable_request_hash(
     return "rh_" + hashlib.sha256(blob.encode()).hexdigest()[:24]
 
 
+AGREEMENT_NO_COMPLETE_WINDOW = "NO_COMPLETE_WINDOW"
+AGREEMENT_ONE_COMPLETE_WINDOW = "ONE_COMPLETE_WINDOW"
+AGREEMENT_MULTIPLE_AGREE = "MULTIPLE_COMPLETE_WINDOWS_AGREE"
+AGREEMENT_MULTIPLE_DISAGREE = "MULTIPLE_COMPLETE_WINDOWS_DISAGREE"
+AGREEMENT_UNKNOWN = "UNKNOWN"
+
+CONFLICT_REASON_COMPLETE_WINDOWS_DISAGREE = "multiple_family_complete_windows_disagree_on_comparative_winner"
+
+
+def _normalized_window_outcome(family_set: set, row: Mapping) -> dict:
+    """D-149: a deterministic, STRUCTURED-FIELDS-ONLY comparison
+    representation for one family-complete window -- never raw prose. Built
+    only from fields `hybrid_session_cleanup.py`'s diagnostics rows already
+    carry (`decisions[].clip_id/label/confidence`, `request_hash`,
+    `session_id`). `raw_relation` is reported as `None` today because no
+    component anywhere in this codebase records a typed relation
+    (retry_of/corrects/complements/etc, D-098 Section 13.6) on a window row
+    -- never invented."""
+    winner_ids: set = set()
+    alternate_ids: set = set()
+    per_member: dict = {}
+    for decision in row.get("decisions") or ():
+        if not isinstance(decision, Mapping):
+            continue
+        clip_id = decision.get("clip_id")
+        if clip_id not in family_set:
+            continue
+        label = str(decision.get("label") or "")
+        per_member[str(clip_id)] = {
+            "label": label,
+            "confidence": decision.get("confidence"),
+        }
+        if label == "winner":
+            winner_ids.add(str(clip_id))
+        elif label == "alternate":
+            alternate_ids.add(str(clip_id))
+    return {
+        "window_id": _window_key(row),
+        "request_hash": row.get("request_hash"),
+        "member_ids": tuple(sorted(family_set)),
+        "provider_outcome_by_member": per_member,
+        "normalized_winner_ids": tuple(sorted(winner_ids)),
+        "normalized_alternate_ids": tuple(sorted(alternate_ids)),
+        "raw_relation": row.get("raw_relation"),
+    }
+
+
+def complete_window_outcomes(
+    family_member_ids: Sequence[str],
+    window_rows: Iterable[Mapping] | None,
+) -> tuple[dict, ...]:
+    """The normalized outcome (13.3.1-shaped, structured-fields-only) of
+    every window that is a family-complete superset for this family --
+    reuses the EXACT same completeness test as `complete_window_ids`
+    (D-146's retroactive, post-grouping semantics: evaluated only after
+    final family membership is known, never lets a window define the
+    family and then certify itself complete)."""
+    family_set = set(str(m) for m in family_member_ids)
+    if len(family_set) < 2 or not window_rows:
+        return ()
+    complete_rows = [
+        row for row in window_rows
+        if isinstance(row, Mapping) and family_set <= set(row.get("member_ids") or ())
+    ]
+    return tuple(_normalized_window_outcome(family_set, row) for row in complete_rows)
+
+
+def _outcome_signature(outcome: Mapping) -> tuple:
+    """The comparison key two complete windows must match on to AGREE:
+    the same normalized winner set AND the same normalized alternate set.
+    Never compares raw prose/confidence -- structured fields only."""
+    return (outcome["normalized_winner_ids"], outcome["normalized_alternate_ids"])
+
+
+def complete_window_agreement(
+    family_member_ids: Sequence[str],
+    window_rows: Iterable[Mapping] | None,
+) -> dict:
+    """D-149 (Phase A.2): classifies how the family's family-complete
+    windows (if any) relate to each other, and DETECTS (never enforces)
+    the new named state `COMPLETE_CONTEXT_CONFLICT` docs/CUTSELL_
+    CANONICAL_ENGINE_ARCHITECTURE_D098.md Section 13.8.1 names: all
+    relevant competitors were present in multiple independent requests,
+    but those requests disagree. `family_complete_context=true` is
+    necessary but NOT sufficient for a trustworthy single winner -- this
+    is the second check D-147's real-media finding proved necessary.
+
+    Status values: `NO_COMPLETE_WINDOW` / `ONE_COMPLETE_WINDOW` /
+    `MULTIPLE_COMPLETE_WINDOWS_AGREE` / `MULTIPLE_COMPLETE_WINDOWS_
+    DISAGREE` / `UNKNOWN`. Only the DISAGREE status sets
+    `complete_context_conflict=True` -- a single window's own internal
+    ambiguity (e.g. it alone labels two members both "winner") is not,
+    by itself, a cross-window disagreement; with >=2 complete windows, an
+    ambiguous window's outcome simply fails to match any other window's
+    signature and the family falls into DISAGREE via the same equality
+    check, never a separate rule. Never merges into a winner: this
+    function only classifies and reports, it changes nothing."""
+    completeness = family_complete_context(family_member_ids, window_rows)
+    outcomes = complete_window_outcomes(family_member_ids, window_rows)
+    if completeness == "unknown":
+        status = AGREEMENT_UNKNOWN
+    elif completeness == "false":
+        status = AGREEMENT_NO_COMPLETE_WINDOW
+    elif len(outcomes) <= 1:
+        status = AGREEMENT_ONE_COMPLETE_WINDOW
+    else:
+        signatures = {_outcome_signature(outcome) for outcome in outcomes}
+        status = AGREEMENT_MULTIPLE_AGREE if len(signatures) == 1 else AGREEMENT_MULTIPLE_DISAGREE
+
+    conflict = status == AGREEMENT_MULTIPLE_DISAGREE
+    if conflict:
+        conflict_window_ids = tuple(outcome["window_id"] for outcome in outcomes)
+        conflict_winner_sets = tuple(sorted({outcome["normalized_winner_ids"] for outcome in outcomes}))
+        conflict_reason = CONFLICT_REASON_COMPLETE_WINDOWS_DISAGREE
+    else:
+        conflict_window_ids = ()
+        conflict_winner_sets = ()
+        conflict_reason = None
+
+    sig_counts: Counter = Counter(_outcome_signature(outcome) for outcome in outcomes)
+    majority_count = max(sig_counts.values()) if sig_counts else 0
+
+    return {
+        "complete_window_count": len(outcomes),
+        "complete_window_ids": tuple(outcome["window_id"] for outcome in outcomes),
+        "complete_window_request_hashes": tuple(outcome["request_hash"] for outcome in outcomes),
+        "complete_window_outcomes": outcomes,
+        "complete_window_winner_sets": tuple(outcome["normalized_winner_ids"] for outcome in outcomes),
+        "complete_window_agreement_status": status,
+        "complete_context_conflict": conflict,
+        "complete_context_conflict_window_ids": conflict_window_ids,
+        "complete_context_conflict_winner_sets": conflict_winner_sets,
+        "complete_context_conflict_reason": conflict_reason,
+        # D-148 Section 13.9: provider CONSISTENCY itself is evidence. These
+        # are plain counts -- never a score or a confidence threshold.
+        "complete_window_consistency_count": majority_count,
+        "complete_window_disagreement_count": len(outcomes) - majority_count,
+    }
+
+
 def family_authority_diagnostics(
     family_member_ids: Sequence[str],
     window_rows: Iterable[Mapping] | None,
@@ -260,9 +400,16 @@ def family_authority_diagnostics(
     `family_scoped_semantic_decisions` (already surfaced today under
     `judge_group_diagnostics[...]["semantic_label_source"]`) -- exposed here
     verbatim under its own key so this module's report is self-contained,
-    never a second, divergent computation of the same thing."""
+    never a second, divergent computation of the same thing.
+
+    D-149 (Phase A.2) additive fields: `complete_window_agreement`'s own
+    dict is merged in verbatim under its own keys (`complete_window_count`,
+    `complete_window_agreement_status`, `complete_context_conflict`, etc.)
+    -- every D-146 key above is unchanged; `complete_window_ids` here is
+    the SAME field D-146 already returns (D-149 reuses it, never
+    duplicates it under a second name)."""
     window_rows = tuple(window_rows) if window_rows else ()
-    return {
+    d146_fields = {
         "family_complete_context": family_complete_context(family_member_ids, window_rows),
         "complete_window_ids": complete_window_ids(family_member_ids, window_rows),
         "semantic_window_ids": window_ids_touching_family(family_member_ids, window_rows),
@@ -275,29 +422,52 @@ def family_authority_diagnostics(
         "provider_config": provider_config_from_window_rows(family_member_ids, window_rows),
         "family_scoped_source_info": family_scoped_source_info,
     }
+    return {**d146_fields, **complete_window_agreement(family_member_ids, window_rows)}
 
 
 def summarize_family_authority_observability(per_family_rows: Iterable[Mapping]) -> dict:
     """Tail-safe, counts-only CI summary (same pattern as D-119/D-125's
-    compact qualification summaries) -- never the full per-family detail,
-    which stays in the full diagnostics artifact."""
+    compact qualification summaries) -- never the full per-family detail
+    (no clip ids), which stays in the full diagnostics artifact. D-149
+    adds complete-window-agreement counts alongside D-146's existing
+    counts; every existing key is unchanged."""
     counts: Counter = Counter()
     conflict_family_count = 0
     omitted_occurrences = 0
     authority_counts: Counter = Counter()
+    agreement_counts: Counter = Counter()
+    complete_context_conflict_family_count = 0
+    any_conflict_family_count = 0
     for row in per_family_rows:
         if not isinstance(row, Mapping):
             continue
         counts[str(row.get("family_complete_context") or "unknown")] += 1
         authority_counts[str(row.get("provider_authority_applied") or "")] += 1
-        if row.get("partial_window_conflict"):
+        has_partial_conflict = bool(row.get("partial_window_conflict"))
+        has_complete_conflict = bool(row.get("complete_context_conflict"))
+        if has_partial_conflict:
             conflict_family_count += 1
+        if has_complete_conflict:
+            complete_context_conflict_family_count += 1
+        if has_partial_conflict or has_complete_conflict:
+            any_conflict_family_count += 1
         for omitted in (row.get("omitted_candidate_ids") or {}).values():
             omitted_occurrences += len(omitted)
+        agreement_counts[str(row.get("complete_window_agreement_status") or AGREEMENT_UNKNOWN)] += 1
     return {
         "family_count": sum(counts.values()),
         "family_complete_context_counts": dict(counts),
         "provider_authority_applied_counts": dict(authority_counts),
         "partial_window_conflict_family_count": conflict_family_count,
         "omitted_candidate_occurrences": omitted_occurrences,
+        # D-149 (Phase A.2) additive counts -- counts only, no clip ids.
+        "families_with_no_complete_window": agreement_counts.get(AGREEMENT_NO_COMPLETE_WINDOW, 0),
+        "families_with_one_complete_window": agreement_counts.get(AGREEMENT_ONE_COMPLETE_WINDOW, 0),
+        "families_with_multiple_complete_windows": (
+            agreement_counts.get(AGREEMENT_MULTIPLE_AGREE, 0) + agreement_counts.get(AGREEMENT_MULTIPLE_DISAGREE, 0)
+        ),
+        "families_with_complete_window_agreement": agreement_counts.get(AGREEMENT_MULTIPLE_AGREE, 0),
+        "families_with_complete_context_conflict": complete_context_conflict_family_count,
+        "families_with_partial_window_conflict": conflict_family_count,
+        "families_with_any_semantic_conflict": any_conflict_family_count,
     }

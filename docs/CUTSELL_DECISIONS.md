@@ -21099,3 +21099,188 @@ Section 13 plus this append-only decision-log entry).
 **HUMAN ACTION REQUIRED:** YES (condition A) -- whether to authorize D-149
 (Semantic Authority Phase A.2 observability) is the Product Owner's
 decision, not made here.
+
+## D-149 -- Semantic Authority Phase A.2: COMPLETE_CONTEXT_CONFLICT observability
+
+Authorized post D-148. Extends D-146's Phase A observability so the engine
+can explicitly detect MULTIPLE FAMILY-COMPLETE WINDOWS disagreeing with
+each other -- the exact real-media shape D-147 proved and D-148 named
+`COMPLETE_CONTEXT_CONFLICT` (docs/CUTSELL_CANONICAL_ENGINE_ARCHITECTURE_
+D098.md Section 13.8.1). No authority change, no family-membership change,
+no semantic-winner change, no abstention-policy change, no RAW, no
+provider call. Zero Phase B.
+
+**Why D-146 Phase A alone was insufficient (restated from D-147):**
+`partial_window_conflict` (D-146) suppresses ANY conflict report the
+instant a family-complete window exists, by design -- it was built against
+D-094.3 F8's threat model (one complete window vs. several partial ones).
+D-147 proved a DIFFERENT real shape: pimples family, chunk 3 (complete)
+said A=winner/B=alternate; chunk 4 (also complete) said A=alternate/
+B=winner. Both windows individually satisfy `family_complete_context=
+true`, so D-146's own detector reported `partial_window_conflict=false`
+-- correct by its own definition, but blind to disagreement BETWEEN
+complete windows. D-149 closes exactly that gap.
+
+**Complete-window agreement model.** For each final family (membership
+already known -- D-149 reuses D-146's retroactive, post-grouping
+`family_complete_context` test verbatim, never lets a window define the
+family and then certify itself complete): collect every window where
+`family_complete_context==true` for that family, normalize each window's
+outcome to structured fields only (never raw prose), and compare.
+Classification: `NO_COMPLETE_WINDOW` (family touched by window evidence,
+none complete -- D-146's existing `false` case), `ONE_COMPLETE_WINDOW`
+(exactly one, nothing to compare against), `MULTIPLE_COMPLETE_WINDOWS_
+AGREE` (>=2 complete windows, identical normalized outcome),
+`MULTIPLE_COMPLETE_WINDOWS_DISAGREE` (>=2 complete windows, outcomes
+differ), `UNKNOWN` (no window evidence touches the family at all, or
+family size <2 -- D-146's existing `unknown` case). Only `MULTIPLE_
+COMPLETE_WINDOWS_DISAGREE` sets `complete_context_conflict=true`.
+
+**Normalized outcome design.** Per complete window: `window_id`,
+`request_hash` (both D-146's existing identity fields, reused verbatim --
+no duplicate id scheme minted), `member_ids` (family members only),
+`provider_outcome_by_member` (label + confidence per member, structured),
+`normalized_winner_ids` (members labelled "winner"), `normalized_
+alternate_ids` (members labelled "alternate"), `raw_relation` (honestly
+`None` -- no component anywhere records a typed retry_of/corrects/
+complements relation on a window row today; never invented). Agreement
+is decided purely on `(normalized_winner_ids, normalized_alternate_ids)`
+equality across all complete windows -- never on raw prose or confidence
+values. This naturally folds a single window's own internal ambiguity
+(e.g. it alone labels two members both "winner", giving a 2-member
+winner set) into the DISAGREE bucket the moment a second complete window
+exists with any different outcome, via the same equality check, with no
+separate "AMBIGUOUS" rule needed.
+
+**D-147 structural replay (abstract candidate ids A/B, never the real
+pimples transcript/clip ids):** family `{A, B}`; complete window 1: A=
+winner(0.92)/B=alternate(0.78); complete window 2: A=alternate(0.85)/B=
+winner(0.95). Result: `family_complete_context=true`, `complete_window_
+count=2`, `complete_window_agreement_status=MULTIPLE_COMPLETE_WINDOWS_
+DISAGREE`, `complete_context_conflict=true`, `complete_context_conflict_
+winner_sets=(("A",), ("B",))`. `provider_authority_applied` is UNCHANGED
+by D-149 -- it still reports `FAMILY_COMPLETE_WINDOW_PREFERRED` (today's
+real, preserved behavior: a complete window exists, so `family_scoped_
+semantic_decisions` still prefers it) even though that preferred answer
+is now KNOWN to be conflicted. D-149 never sanitizes this -- exactly the
+directive's own "do not sanitize" requirement.
+
+**Partial-vs-complete conflict, kept as two distinct, never-merged
+fields.** `partial_window_conflict` (D-146, unchanged) and `complete_
+context_conflict` (D-149, new) are separate dict keys, never OR'd into
+one boolean. An empirically important, honestly-reported finding from
+building the offline fixtures: under today's PRESERVED D-146 semantics,
+the two fields are mutually exclusive in VALUE for the same family --
+`partial_window_conflict` only ever fires when ZERO complete windows
+exist (by D-146's own suppression rule, `return None` the instant any
+complete window is present), so a family can show a genuine partial-only
+conflict OR a genuine complete-only conflict, never literally "both
+non-null" simultaneously, without D-146's own preserved rule changing.
+D-149 records both fields faithfully and does not force an artificial
+simultaneous-true state; the tail-safe summary reports each independently
+plus a compound `families_with_any_semantic_conflict` (OR of the two)
+for coarse triage.
+
+**Provider consistency as evidence (D-148 Section 13.9).** Adds
+`complete_window_consistency_count` (size of the largest group of complete
+windows that agree with each other) and `complete_window_disagreement_
+count` (the remainder) -- plain counts, no new score or confidence
+threshold, per this task's own explicit constraint.
+
+**Tail-safe summary** (`summarize_family_authority_observability`,
+counts-only, no clip/window ids) extended with: `families_with_no_
+complete_window`, `families_with_one_complete_window`, `families_with_
+multiple_complete_windows`, `families_with_complete_window_agreement`,
+`families_with_complete_context_conflict`, `families_with_partial_window_
+conflict` (D-146's existing count, exposed under this exact requested
+name too), `families_with_any_semantic_conflict`. Every existing D-146
+summary key is unchanged.
+
+**Implementation location: `cutsell_worker/semantic_authority_
+observability.py` only.** No other `cutsell_worker/*.py` file is touched
+-- `family_authority_diagnostics` (the single per-family composer already
+wired into `pipeline.py` by D-146) now additionally merges `complete_
+window_agreement`'s dict into its existing return value; every D-146 key
+and value is unchanged (verified byte-identical in the new test suite).
+Because `pipeline.py`/`hybrid_session_cleanup.py` already call this exact
+function and pass it the exact same inputs, ZERO wiring changes were
+needed anywhere else -- D-149 is a pure extension of the leaf observability
+module D-146 already established, exactly the "one narrow observability
+component" framing D-148 Section 13.9/13.22 anticipated.
+
+**Zero editorial effect (proven, not asserted):** a dedicated test
+constructs the full D-146 field set independently and asserts byte-
+identical equality against the same fields read off the D-149-extended
+`family_authority_diagnostics` output; the module remains a true leaf
+(no `cutsell_worker` sibling import, confirmed by AST/import-line scan,
+same technique D-146's own suite used) with structural proofs that
+`take_grouping`/`take_grouping_provider` (grouping), `pipeline.
+_semantic_best_take` (semantic winner), `deterministic_best_take_
+authority`/`take_judge` (BestTake), `multimodal_besttake_fallback`
+(D-123/D-128), `boundary_engine_pass` (Boundary), `dialogue_pacing_
+transition` (Pacing), and `render`/`render_plan` (render baseline) are
+none of them importable from, referenced by, or reachable through this
+module.
+
+**D-148 architecture compatibility.** D-149 is one narrow observability
+component inside PARALLEL MULTIMODAL PERCEPTION -> WATCH+LISTEN
+MULTIMODAL UNDERSTANDING -> STRUCTURED EDITORIAL REASONING (D-098 Section
+13) -- it does not turn semantic-provider consistency into the full
+understanding layer; it makes ONE more structural fact about the existing
+provider evidence source visible (D-098 Section 13.9's "provider
+consistency itself is evidence"). Future Watch+Listen fusion (Structured
+RAW Understanding Map, D-098 Section 13.3.1, still `DESIGNED_NOT_
+IMPLEMENTED`) may supply additional evidence toward the same question;
+D-149 does not anticipate or block that.
+
+**Phase B future gate (made measurable, not enforced):** an authoritative
+comparative semantic result should require `family_complete_context==
+true` AND `complete_context_conflict==false` AND all other D-145 safety/
+grouping preconditions. If `complete_context_conflict==true`, a future
+Phase B should abstain/advisory rather than trust either disagreeing
+window. Not enforced by this task -- `provider_authority_applied` still
+reports today's real (unchanged) behavior even in a conflicted case, per
+this task's own "do not sanitize" instruction.
+
+**Tests (31, exceeding the 26-item minimum) --
+`tests/test_cutsell_d149_complete_context_conflict_observability.py`.**
+Eight named offline fixture shapes (A: one complete window, no conflict;
+B: two complete windows agree; C: two complete windows disagree, the
+exact D-147 shape; D: one decisive + one double-winner complete window,
+conflict; E: genuinely partial windows + one complete window, both
+observabilities independently correct; F: partial-only windows + two
+disagreeing complete windows, both fields independently correct and
+never merged; G: no complete window, D-146 behavior fully preserved; H:
+unknown family completeness, no fabricated conflict) plus the dedicated
+D-147 abstract-candidate-id structural replay, normalization/id/hash/
+winner-set/reason recording tests, the byte-identical D-146-field-
+preservation proof, distinct no-change proofs for grouping/semantic-
+winner/BestTake/D-123/D-128/Boundary/Pacing/render (by construction, no
+import), a no-duplicate-id-scheme proof, a fixture-wide collision-freedom
+proof, the tail-safe summary's counts-only shape, and a no-provider/
+network-call structural proof (import-line scan, not whole-file substring
+search, avoiding the false-positive the naive approach would hit on this
+very test's own literal strings).
+
+**Full offline qualification:** `python3 -m compileall cutsell_worker
+tests` clean; the new D-149 suite (31 tests) plus D-146's own suite (32
+tests) plus semantic/grouping/pipeline/D-081/D-094/D-052/D-128/D-097.D/
+composite-resolver/D-142-pacing/D-097.C-Boundary regression (237 tests
+total in one run) all green. Full `tests/` suite (minus the pre-existing,
+unrelated `test_semantic_stitch.py` collection error, documented since
+before D-136) run once as the CI-equivalent gate -- see this task's final
+report for the exact pass/fail counts and the same pre-existing-baseline-
+failure confirmation method (`git stash`) established in D-146/D-147.
+
+**Scope confirmed:** zero authority/membership/winner/abstention-policy
+change (proven above); zero RAW/Modal/RunPod dispatch; zero provider
+calls anywhere in this task's own code or tests; no BestTake/Boundary/
+Pacing/fallback-activation/Watch+Listen-fusion-implementation/iOS work;
+D-123/D-128/D-138/D-140/D-141/D-142/D-143/D-144/D-145/D-146/D-147/D-148
+all preserved CLOSED and not reopened; D-148 itself not rewritten (this
+is an append-only new entry).
+
+**HUMAN ACTION REQUIRED:** YES (condition A) -- whether to authorize
+Phase B (the actual family-complete + inter-complete-window-agreement
+gate, now fully measurable) is the Product Owner's decision, not made
+here.
