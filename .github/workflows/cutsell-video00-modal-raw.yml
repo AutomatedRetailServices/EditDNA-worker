@@ -64,6 +64,28 @@ on:
         required: false
         default: ""
         type: string
+      watch_listen_relation_discovery_enabled:
+        # D-162: "1" overlays CUTSELL_WATCH_LISTEN_RELATION_DISCOVERY_ENABLED=1
+        # (D-161's Watch+Listen Relation Discovery Gate -- lets real Watch+
+        # Listen Understanding V1 evidence PROPOSE a candidate relation the
+        # existing semantic pair-generation/batch-cap path never reached;
+        # every candidate is still handed to the SAME structured authority
+        # D-158 already uses, and only a final RETRY relation with
+        # independently-sufficient proposition evidence ever merges --
+        # discovery alone can never force a merge). Empty (default) = code
+        # default OFF, byte-identical to every run before D-162. Deliberately
+        # a SEPARATE flag from watch_listen_family_evidence_enabled above
+        # (merge-veto and relation-discovery are different authorities, per
+        # D-161's own instruction) -- same input-gated overlay mechanism as
+        # that input and bridge_complete_pairwise_singleton, explicitly
+        # authorized per run, never a silent default flip
+        # (docs/CUTSELL_DECISIONS.md D-162). No cutsell_worker editorial
+        # module is touched by this overlay; it only lets an existing,
+        # already-tested runtime flag be set for this one dispatch.
+        description: "Optional: '1' enables CUTSELL_WATCH_LISTEN_RELATION_DISCOVERY_ENABLED (D-162/D-161). Empty = OFF."
+        required: false
+        default: ""
+        type: string
 
 concurrency:
   group: cutsell-video00-modal-raw-${{ github.ref }}
@@ -226,6 +248,16 @@ jobs:
             mv /tmp/cutsell-env.tmp.json /tmp/cutsell-env.json
           fi
           echo "D-159 Watch+Listen family evidence for this run: CUTSELL_WATCH_LISTEN_FAMILY_EVIDENCE_ENABLED=$(jq -r '.CUTSELL_WATCH_LISTEN_FAMILY_EVIDENCE_ENABLED // "unset (code default OFF)"' /tmp/cutsell-env.json)"
+          # D-162: optional Watch+Listen relation-discovery overlay, applied
+          # only when the dispatch input is exactly "1"; code default (OFF)
+          # otherwise -- same input-gated mechanism as D-159 above, but a
+          # SEPARATE flag (D-161's own instruction: merge-veto and relation-
+          # discovery are different authorities).
+          if [ "${{ github.event.inputs.watch_listen_relation_discovery_enabled }}" = "1" ]; then
+            jq -c '. + {CUTSELL_WATCH_LISTEN_RELATION_DISCOVERY_ENABLED:"1"}' /tmp/cutsell-env.json > /tmp/cutsell-env.tmp.json
+            mv /tmp/cutsell-env.tmp.json /tmp/cutsell-env.json
+          fi
+          echo "D-162 Watch+Listen relation discovery for this run: CUTSELL_WATCH_LISTEN_RELATION_DISCOVERY_ENABLED=$(jq -r '.CUTSELL_WATCH_LISTEN_RELATION_DISCOVERY_ENABLED // "unset (code default OFF)"' /tmp/cutsell-env.json)"
           test "$(jq 'length' /tmp/cutsell-env.json)" != "0"
           test "$(jq -r '.CUTSELL_HYBRID_LLM_ENABLED' /tmp/cutsell-env.json)" = "1"
           test "$(jq -r '.CUTSELL_HYBRID_PROVIDER' /tmp/cutsell-env.json)" = "google"
@@ -257,7 +289,7 @@ jobs:
               # D-056 Section 1). A real secret (API key, token, bucket
               # name) is essentially always >= 12 characters, so this
               # threshold costs no actual masking coverage.
-              if value and key not in ('CUTSELL_HYBRID_LLM_ENABLED', 'CUTSELL_HYBRID_PROVIDER', 'CUTSELL_UNIFIED_REALIZATION_RESOLVER', 'CUTSELL_ASR_CANONICAL_NORMALIZATION', 'CUTSELL_SEMANTIC_COMPUTE_PLANNER', 'CUTSELL_HYBRID_MAX_EDIT_USD', 'CUTSELL_BRIDGE_COMPLETE_PAIRWISE_SINGLETON', 'CUTSELL_WATCH_LISTEN_FAMILY_EVIDENCE_ENABLED', 'CUTSELL_BUILD_GIT_SHA') and len(str(value)) >= 12:
+              if value and key not in ('CUTSELL_HYBRID_LLM_ENABLED', 'CUTSELL_HYBRID_PROVIDER', 'CUTSELL_UNIFIED_REALIZATION_RESOLVER', 'CUTSELL_ASR_CANONICAL_NORMALIZATION', 'CUTSELL_SEMANTIC_COMPUTE_PLANNER', 'CUTSELL_HYBRID_MAX_EDIT_USD', 'CUTSELL_BRIDGE_COMPLETE_PAIRWISE_SINGLETON', 'CUTSELL_WATCH_LISTEN_FAMILY_EVIDENCE_ENABLED', 'CUTSELL_WATCH_LISTEN_RELATION_DISCOVERY_ENABLED', 'CUTSELL_BUILD_GIT_SHA') and len(str(value)) >= 12:
                   print(f'::add-mask::{value}')
           print(f'Loaded {len(env)} env vars from the live RunPod template plus the D-044 hybrid-semantic overlay, the D-050C2 resolver-mode overlay, and the D-052 stability-battery overlay (secret values masked).')
           "
@@ -650,10 +682,25 @@ jobs:
           jq '.stage_status.canonical_asr_evidence // {status:"absent"}' artifact/video00-modal.json
 
           echo "--- D-094.2 grouping forensic summary (take groups with member texts; IdeaClusterer merges / distinct-addition blocks; restore guards) -- printed late so it survives the log tail cap ---"
+          # D-162: mechanical allowlist extension only (no new observability
+          # mechanism) -- adds D-158's watch_listen_family_evidence and
+          # D-161's watch_listen_relation_discovery/watch_listen_discovery_
+          # trace fields to this SAME existing late-stage, tail-cap-safe
+          # summary, plus a derived family_topology_counts block (family_
+          # count/multi_member_family_count/singleton_count) from the
+          # take_group_members list already projected below.
           jq '( [ (.selected[]?), (.alternates[]?), (.discarded[]?) ] | map({(.clip_id): (.text // "")[:110]}) | add ) as $t
               | {
                   take_groups: ((.diagnostics.take_group_members // []) | map(map({id: ., text: ($t[.] // "?")}))),
+                  family_topology_counts: ((.diagnostics.take_group_members // []) as $groups | {
+                    family_count: ($groups | length),
+                    multi_member_family_count: ([$groups[] | select(length > 1)] | length),
+                    singleton_count: ([$groups[] | select(length == 1)] | length)
+                  }),
                   semantic_idea_equivalence: ((.diagnostics.semantic_idea_equivalence // {}) | {status, candidate_pair_count, checked_pair_count, merged_pair_count, merges, restart_evidence_merges, distinct_addition_blocked, arbiter_rejected_pairs}),
+                  watch_listen_family_evidence: (.diagnostics.semantic_idea_equivalence.watch_listen_family_evidence // {status: "absent"}),
+                  watch_listen_relation_discovery: (.diagnostics.semantic_idea_equivalence.watch_listen_relation_discovery // {status: "absent"}),
+                  watch_listen_discovery_trace: (.diagnostics.semantic_idea_equivalence.watch_listen_discovery_trace // []),
                   grouping_safety_splits: (.diagnostics.distinct_idea_grouping_safety.splits // []),
                   grouping_safety_budget: ((.diagnostics.distinct_idea_grouping_safety // {}) | {weak_pair_count, checked_pair_count, unchecked_weak_pair_count, unchecked_weak_pairs, content_divergence_blocked}),
                   grouping_safety_rejected_edges: [ (.diagnostics.distinct_idea_grouping_safety.edge_trace // [])[] | select(.accepted == false) ],
