@@ -11,6 +11,12 @@ on:
     paths:
       - 'mobile/ios/**'
       - '.github/workflows/cutsell-ios-ci.yml'
+  # D-131 (docs/CUTSELL_DECISIONS.md D-131): bounded manual-dispatch trigger
+  # so this SAME existing macos-latest build job can be run on demand
+  # against a feature branch for a one-off build-verification task,
+  # without waiting for a PR/push to main. Adds no new build step and no
+  # new infrastructure -- it is the same job this workflow already runs.
+  workflow_dispatch: {}
 
 jobs:
   build-ios:

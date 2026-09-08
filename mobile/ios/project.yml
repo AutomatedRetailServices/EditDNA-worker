@@ -4,7 +4,7 @@ options:
 settings:
   base:
     IPHONEOS_DEPLOYMENT_TARGET: 17.0
-    SWIFT_VERSION: 5.10
+    SWIFT_VERSION: "5.10"
     CUTSELL_API_BASE_URL: http://127.0.0.1:8000
 targets:
   CutSell:
