@@ -186,7 +186,26 @@ def _classify_provider_call_exception(exc: Exception) -> str:
     name = exc.__class__.__name__
     if "Timeout" in name:
         return TIMEOUT
-    if "APIError" in name or "APIConnection" in name or "APIStatus" in name or "RateLimit" in name or "AuthenticationError" in name:
+    if (
+        "APIError" in name
+        or "APIConnection" in name
+        or "APIStatus" in name
+        or "RateLimit" in name
+        or "AuthenticationError" in name
+        or name == "OpenAIError"
+    ):
+        # `name == "OpenAIError"` (exact match, not substring) is the base
+        # exception the `openai` SDK's own client constructor raises for a
+        # missing/misconfigured credential (e.g. `OpenAI()` with no
+        # OPENAI_API_KEY set) -- confirmed as the REAL failure mode hit by
+        # this task's own CI dispatch (D-136 Phase 2 eval run 34196386677,
+        # `OPENAI_API_KEY` not configured on this repository): every
+        # applicable case's `arbiter.arbitrate(...)` call raised this exact
+        # class and was previously falling through to the generic `ERROR`
+        # code instead of the more specific, directive-named
+        # `PROVIDER_ERROR`. Exact-match (not substring) so a real
+        # `APIError`/`AuthenticationError` subclass -- already handled
+        # above -- is never double-counted here.
         return PROVIDER_ERROR
     if isinstance(exc, ValueError):
         # A malformed/non-JSON provider payload raises here (inside

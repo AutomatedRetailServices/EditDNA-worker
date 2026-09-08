@@ -225,6 +225,33 @@ def test_provider_error_safe():
     assert response is None
 
 
+def _make_fake_openai_error_class():
+    # Built with an explicit `__name__` of exactly "OpenAIError" (not a
+    # Python identifier prefixed with `_Fake...`) so the exact-match check
+    # in `_classify_provider_call_exception` is exercised the same way it
+    # is by the real `openai` SDK's own base exception class -- which is
+    # what `openai.OpenAI()` itself raises for a missing/misconfigured
+    # credential (confirmed as the REAL failure mode hit by D-136 Phase 2
+    # eval run 34196386677: `OPENAI_API_KEY` was not configured on the CI
+    # repository, so every applicable case's `arbiter.arbitrate(...)` call
+    # raised this exact class).
+    return type("OpenAIError", (Exception,), {})
+
+
+_FakeOpenAIError = _make_fake_openai_error_class()
+
+
+def test_provider_missing_credential_openai_error_classified_as_provider_error():
+    # D-136 real-evidence regression: before this fix, a bare `OpenAIError`
+    # (not a more specific `AuthenticationError`/`APIError` subclass) fell
+    # through `_classify_provider_call_exception` to the generic `ERROR`
+    # code instead of the more specific, directive-named `PROVIDER_ERROR`.
+    request = MultimodalBestTakeRequest(family_id="fam", proposition_context="", finalists=(_finalist("A"), _finalist("B")))
+    status, response = safe_arbitrate(_RaisingArbiter(_FakeOpenAIError("Missing credentials.")), request)
+    assert status == PROVIDER_ERROR
+    assert response is None
+
+
 def test_invalid_response_safe(tmp_path):
     request = MultimodalBestTakeRequest(family_id="fam", proposition_context="", finalists=(_finalist("A"), _finalist("B")))
     arbiter = _arbiter("not json at all {{{")
