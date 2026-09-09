@@ -31603,3 +31603,256 @@ change. No second RAW.
 smallest-missing-proof options named above, whether/how to address
 Pimples' now-twice-confirmed terminal-tie-break defect, and whether/when
 to resume P1, remain Product Owner decisions).
+
+==================================================
+D-182: TERMINAL BESTTAKE TIE-BREAK ROOT-CAUSE FORENSIC + CONFIDENCE-STATE DESIGN
+==================================================
+
+Forensic-only (docs/CUTSELL_DECISIONS.md D-182): no RAW, no provider call,
+no cutsell_worker/tests/workflow change. Read-only inspection of
+`pipeline.py` (`_semantic_best_take`, `_exclude_incomplete_subset_losers`,
+`_meaning_sufficient_member_ids`), `take_judge.py` (`score_take`,
+`rank_takes`, `delivery_cleanliness_evidence`, `apply_delivery_
+cleanliness_evidence`), `case_b_performance_evidence.py`,
+`semantic_authority_observability.py` (`resolve_semantic_comparative_
+authority`), plus persisted D-181 and D-173 job-log evidence (fetched
+this task) and D-179's own already-committed forensic text (D-178B's
+data).
+
+EVIDENCE SOURCES: D-181 (run 34374941525, fully re-fetched and re-parsed
+this task -- the primary real Pimples instance, ABSTAIN_CONFLICT, no
+decisive winner); D-173 (run 34331209473, fetched fresh this task for its
+V2-enabled dispatch -- a DIFFERENT "pimples region" family instance, 1
+meaning-sufficient candidate, AUTHORITATIVE, V1 UNUSABLE/UNUSABLE, V2
+winner severity MILD, guard bypassed); D-179's own committed text (citing
+D-178B's data) for a THIRD prior confirmation of the ABSTAIN_CONFLICT/no-
+decisive-winner Pimples shape. D-170/D-175/D-178B's own raw job logs were
+NOT independently re-fetched this task (effort-bounded); nothing from
+them is asserted beyond what D-179's own already-committed text already
+records.
+
+PIMPLES CROSS-RUN INSTABILITY (a NEW finding this task): the "Pimples
+region" does NOT present the same competitive shape run to run. D-181:
+2 candidates, BOTH meaning-sufficient, D-150 ABSTAIN_CONFLICT (`MULTIPLE_
+COMPLETE_WINDOWS_DISAGREE`), no semantic winner, raw events 9 vs 7,
+material events 5 vs 5 (TIED), terminal `delivery_tie_break_among_
+survivors` picks A, both references prefer B. D-173: 2 candidates, only
+ONE meaning-sufficient, D-150 AUTHORITATIVE (decisive `single_semantic_
+winner`), V1 `candidate_usability_summary` UNUSABLE/UNUSABLE, V2 winner
+severity MILD (no dominant alternative), guard `BYPASS_POOR_USABILITY_
+WINNER`, `winner_immutability_check` OK (V2 never touched the winner).
+These are structurally DIFFERENT contests -- not the same two candidates
+recurring with the same shape. The specific "two meaning-sufficient,
+D-150-abstained, near-tied-materiality" shape this forensic targets is
+confirmed to recur across at least D-178B (per D-179's own committed
+text) and D-181 (this task) -- two independent real-media instances of
+the SAME class, sufficient basis for a bounded fix.
+
+TERMINAL LADDER RECONSTRUCTION (D-181 Pimples, traced against the exact
+code in `pipeline.py`): both `clip_17d83ce826ce72d4a52e` (A, 198.88-
+211.02s) and `clip_9d3cde41275a8c375b8c` (B, 213.34-222.98s) enter Steps
+6-9 -- Step 1 (delete-recommended) does not exclude either (both meaning-
+sufficient); Step 2/2.5 (completeness/required-realization) does not
+exclude either; Steps 3/4 (`resolve_critical_coverage_dominance`) found
+NO dominant candidate (confirmed: `semantic_best_take_reason` =
+`delivery_tie_break_among_survivors`, not `critical_coverage_dominance`);
+Step 5 (coverage-asymmetry/contradiction safety) did not fire (no
+`unresolved_unique_fact_asymmetry`/`unresolved_contradiction` reason
+recorded). Both reach Step 6: `rank_by_id = {row.clip_id: row.score for
+row in ranked}`. Step 7: `_exclude_incomplete_subset_losers` -- neither
+candidate's text is a lexical/near-lexical prefix subset of the other's
+(distinct full sentences), so BOTH remain in `tie_break_pool`. Step 8/9:
+`best = max(tie_break_pool, key=lambda cid: rank_by_id[cid])` -- a bare
+two-way comparison of `RankedTake.score`. The exact numeric `rank_by_id`
+values for A and B this run were NOT captured in any summary persisted or
+retrievable this task (the per-candidate `ranked`/score/reason detail
+lives only in the "Print full canonical diagnostics" step's own output,
+which scrolled outside the 5000-line job-log tail window before this
+task's own D-181 fetch, and the 581MB diagnostic artifact ZIP is not
+downloadable through this sandbox's egress proxy -- the same limitation
+D-178B recorded). SCORE MARGIN and MARGIN CLASSIFICATION are therefore
+reported UNKNOWN rather than invented, per this task's own instruction.
+
+SCORE_TAKE AUDIT (formula-level, from source -- `take_judge.score_take`):
+a pure linear combination of `MediaSignals` fields --
+0.16*completeness + 0.06*duration_fit + 0.12*audio_quality +
+0.08*face_visibility + 0.09*eye_contact + 0.06*framing_quality +
+0.05*product_visibility + 0.07*motion_stability + 0.07*continuity +
+0.10*expression_naturalness + 0.07*gesture_naturalness +
+0.07*delivery_energy - 0.12*visual_fumble - 0.08*distraction_risk -
+handling_failure_penalty (positive weights sum to exactly 1.00 before
+penalties). `rank_takes` layers three further, flag-based penalties on
+top (`material_prefix_fragment_penalty` -0.22, `repetitive_restart_
+fragment_penalty` -0.28, `restart_tail_fragment_penalty` -0.18, each
+text-similarity-triggered against sibling candidates), and `apply_
+delivery_cleanliness_evidence` (D-097) layers `interior_dead_air_penalty`
+(up to -0.24) and `multimodal_reset_penalty` (-0.10, fires when the SAME
+take's interior carries BOTH a >=0.88-confidence reset event AND a
+>=0.76-confidence break event). Every component is either a `MediaSignals`
+scalar (provenance: `local_performance.apply_local_performance_to_takes`,
+itself fed by the SAME whole-video provider events D-122/D-180 also
+consume) or a deterministic text/geometry check -- none is a meaning,
+narrative-fit, or reference-correlated signal. Exact per-clip values for
+A/B this run: UNKNOWN (not retrievable, as above) -- SCORE_TAKE A,
+SCORE_TAKE B, SCORE COMPONENT BREAKDOWN all UNKNOWN this task.
+
+DOUBLE-COUNTING AUDIT: CONFIRMED, and already CODE-DOCUMENTED (D-121,
+`case_b_performance_evidence.py`'s own module docstring states this
+module's purpose is to make "the D-121 double-counting risk INSPECTABLE
+rather than resolving it"). The SAME raw whole-video reset/break events
+can influence: (1) `MediaSignals.visual_fumble`/`gesture_naturalness`/
+`expression_naturalness` via `local_performance.py`'s bucket mapping; (2)
+`score_take`'s own direct weighting of those exact fields; (3) `take_
+judge.rank_takes`' separate, flat `multimodal_reset_penalty` triggered by
+the SAME raw event pattern independently of (1)/(2); (4) D-122/D-180's
+own `case_b_evidence`/materiality gate (explicitly advisory-only, never
+part of `ranked`). For two candidates with similar underlying event
+PATTERNS (both carry >=1 reset AND >=1 break, as Pimples' A and B both do
+per their `count_by_kind`), the SAME flat penalties likely apply near-
+identically to both, converging their scores toward each other rather
+than discriminating them -- consistent with (though not proven by, given
+UNKNOWN exact values) the observed reference disagreement despite tied
+materiality.
+
+RAW SCORE vs EDITORIAL DECISION: `score_take` was designed, and remains
+today, a GENERAL TECHNICAL A/V QUALITY score (audio/visual production
+signal only) -- it has never carried a meaning, narrative, or reference-
+correlated comparative term. It has nonetheless become, via Steps 6-9's
+own `max(...)`, the FINAL, TERMINAL, FORCED editorial BestTake authority
+whenever semantic/content evidence (Steps 1-5) is genuinely exhausted --
+a technical-quality score has structurally become terminal editorial
+authority by default, never by original design.
+
+ABSTENTION CONTRACT: Steps 1/5 DO carry abstention-shaped outcomes for
+their own specific failure modes (`no_usable_realization`, `unresolved_
+unique_fact_asymmetry`, `unresolved_contradiction` -- each a deliberate
+"cannot decide safely, preserve default" state). Steps 6-9 carry NONE:
+once two-plus candidates reach `rank_by_id`, `max(tie_break_pool, ...)`
+ALWAYS returns exactly one winner, with no representation of DECISIVE /
+NON_DECISIVE / TIED / CONFLICTED / ABSTAIN and no margin/confidence check
+of any kind. **NO TERMINAL CONFIDENCE STATE EXISTS at Steps 6-9** -- this
+is factually confirmed by direct code inspection, not inferred.
+
+CENTRAL DESIGN QUESTION: given current architecture (a technical-quality
+score with a documented double-counting risk, already thin on
+discriminating power for two near-identical adjacent retries) and the
+real evidence above (tied materiality, no confidence state, a confirmed
+real-media instance landing against both references), option B (represent
+NON_DECISIVE/ABSTAIN and route to a bounded comparative arbiter) is
+architecturally supported; option A (force a deterministic winner
+anyway) is exactly today's status quo and is the behavior that produced
+this defect.
+
+WATCH+LISTEN V2 CHECK: V2_NOT_AVAILABLE for D-181's own Pimples pair (D-
+163/D-172 were both flag-disabled this run -- `families: []`, `status:
+"disabled"`). D-173's own real V2 evidence exists but is for a
+DIFFERENT Pimples-region contest (1 meaning-sufficient candidate,
+`winner_severity` MILD, `alt_severity` null because no meaning-sufficient
+alternative existed to compare against) -- not directly transferable to
+D-181's 2-meaning-sufficient shape. Confirms D-170/D-173's own prior
+"near-equal" characterization only by class-level pattern (V2 rarely
+finds a clean dominant candidate in this region across runs), not by a
+directly reusable number for D-181's own pair.
+
+PROSODIC AUDIO RELEVANCE: LIKELY_RELEVANT. `score_take` carries no real
+vocal-prosody feature (only a generic, unexplained `delivery_energy`
+scalar) -- for two adjacent, same-proposition retries differing mainly in
+which framing/wording a human editor found more compelling, real
+prosodic evidence (intonation, pacing, vocal confidence) is exactly the
+class of comparative dimension current structured evidence cannot supply.
+
+P1 (EDITORIAL MOMENT & SEQUENCE UNDERSTANDING) RELEVANCE:
+NO_LOCAL_BESTTAKE_LAYER_MUST_RESOLVE_FIRST -- confirmed, consistent with
+D-179's own prior finding for the analogous gynecologist question. P1
+answers "what recording-process/sequence role does this moment play,"
+not "which of two adjacent same-proposition retries has the better local
+delivery." Not proposed as a workaround here.
+
+REFERENCE PREFERENCE FORENSIC: the only OBSERVABLE, persisted difference
+between rejected A and reference-preferred B is that A carries more raw
+(non-materially-different) perceptual events (9 vs 7, tied on
+materiality at 5) -- a weak, indirect signal (possibly more visible
+motion/gesture "noise" in A) not established as the causal reason. Both
+candidates' texts are complete, on-topic continuations of the same
+"espinillas" idea (distinct framing/location detail each). The SPECIFIC
+observable property driving both references' shared preference for B
+could not be established from persisted evidence this task: UNKNOWN.
+
+ROOT-CAUSE CLASSIFICATION: **F. MIXED** -- two independently necessary,
+sequentially-linked mechanisms: **C** (missing terminal confidence/
+abstention state -- Steps 6-9 never detect or represent a near-tie) and
+**D** (missing bounded multimodal finalist arbitration -- once a near-tie
+is correctly detected, today's architecture has no safe next step besides
+the SAME forced `max()`). **B** (the documented D-121 double-counting
+risk) is a real, code-confirmed secondary contributor explaining WHY the
+margin so often collapses near zero for this content shape, but is not
+itself the fix this forensic recommends pursuing (per this task's own
+"no new master score" instruction).
+
+BOUNDED ARBITER (design only, NOT implemented): a future finalist
+arbiter, invoked ONLY when (1) semantic authority has already abstained/
+is non-decisive AND (2) Steps 6-9's own new confidence classification
+(to be designed in D-183) reports NON_DECISIVE/TIED among exactly the
+final 2-3 meaning-sufficient survivors. Input: ONLY those finalists (no
+family re-formation, no transcript resegmentation, no full-video edit
+authority). Potential evidence: language/proposition parity, V1/V2
+delivery evidence (where available), real prosody (once implemented),
+editability, local narrative context. Output: `PREFER_A` / `PREFER_B` /
+`ABSTAIN` (an abstain here falls back to today's existing `local_
+selected_clip_id` default, never worse than current behavior). This
+generalizes the class ("two complete meaning-sufficient retries + semantic
+conflict/abstention + no factual performance dominance"), never a
+Pimples-specific rule.
+
+GYNECOLOGIST CONTRAST CONTROL (D-181's own data, not bundled with this
+fix): only ONE meaning-sufficient candidate existed in D-181's own
+gynecologist family (the alternative was excluded by condition 3/D-081
+meaning-sufficiency BEFORE any content-comparison step) -- Steps 6-9
+never had two genuinely competing survivors to arbitrate between; the
+family's own D-150 `ABSTAIN_CONFLICT` was reached for a DIFFERENT reason
+(window disagreement) and Steps 6-9 simply confirmed the sole survivor.
+This is a family/meaning-sufficiency TOPOLOGY-STABILITY question (D-179's
+own already-deferred item), structurally distinct from Pimples' genuine
+two-way, tied-materiality terminal contest -- confirmed NOT the same
+defect, not bundled here.
+
+D-123/D-150/D-167/D-174/D-177/D-180 STATUS: all preserved CLOSED,
+unmodified, not reopened. D-150's `ABSTAIN_CONFLICT` doctrine is exactly
+what correctly identifies Pimples as needing this future arbitration (it
+is the trigger condition, not the defect). D-180 remains A (offline
+proven + real-media safety proven + target non-material-suppression
+shape not yet exercised) -- not reopened by this forensic.
+
+VERDICT: **A. ROOT CAUSE IDENTIFIED -- ONE BOUNDED TERMINAL BESTTAKE FIX
+BEFORE P1.** The bounded fix is a SINGLE cohesive gate combining (a) a
+new, additive Steps-6-9 confidence/margin classification (DECISIVE /
+NON_DECISIVE / TIED, using partial-order/categorical evidence already
+computed -- no new weighted score) and (b) the bounded 2-3-candidate
+finalist arbiter described above, invoked only on NON_DECISIVE/TIED.
+
+RECOMMENDED D-183 GATE (not authorized here): design + implement the
+Steps-6-9 confidence classification as a PURE, additive observability/
+routing layer first (byte-identical selection for every DECISIVE case);
+offline test matrix covering decisive/near-tied/exact-tied synthetic
+fixtures plus a D-181-shaped abstract Pimples replay; full regression
+(D-123/D-128/D-150/D-158/D-161/D-163/D-167/D-174/D-177/D-180 suites); the
+bounded arbiter itself (design named above) is a SEPARATE, later phase --
+not proposed for D-183 to implement in full, only to make room for via
+the new confidence state. New RAW required after D-183: YES, exactly one,
+to confirm the confidence classification correctly flags D-181's own
+Pimples shape as NON_DECISIVE/TIED without changing ANY decisive family's
+selected winner anywhere else in the video.
+
+P1 STATUS AFTER FORENSIC: unchanged -- remains the next major canonical
+architecture capability, still paused. D-182 recommends the D-183 gate
+above run BEFORE P1 (Verdict A, not C) -- a small, well-evidenced, local
+fix, not a substitute for or blocker of P1's own eventual work.
+
+STRICT SCOPE CONFIRMATIONS: no RAW dispatched. No provider/network call.
+No cutsell_worker change. No tests/workflow change. No score-weight
+tuning. No terminal tie-break redesign. No P1/Prosodic-Audio
+implementation. D-123/D-128/D-145 through D-181 not rewritten.
+
+**HUMAN ACTION REQUIRED:** YES (condition A: whether to authorize the
+D-183 gate named above, and whether/when to resume P1, remain Product
+Owner decisions).
