@@ -32224,3 +32224,208 @@ rewritten.
 one Video00 RAW named above with D-183+D-184 diagnostics ON and NO
 winner authority; condition A again for any future D-185 authority gate;
 and whether/when to resume P1, remain Product Owner decisions).
+
+---
+
+D-185: BOUNDED FINALIST ARBITER -- VIDEO00 REAL-MEDIA DIAGNOSTIC
+QUALIFICATION (post D-184, ONE RAW)
+
+RAW: run 34386944523 (`feature/runpod-pod-on-demand` @ `4548ca5`,
+`CUTSELL_BOUNDED_FINALIST_ARBITER_ENABLED=1`, every other diagnostic
+flag left OFF). Modal compute finished successfully in ~9 minutes; the
+job's own `conclusion: failure` is fully explained by two PRE-EXISTING
+legacy validators (below) -- unrelated to D-184, same failure shape
+already seen on runs 79/80 on this branch.
+
+REPORTING-ACCESS LIMITATION (disclosed up front, not glossed over): this
+task's own new tail-safe D-183/D-184 run-level summary print (added to
+`cutsell-video00-modal-raw.yml`'s existing "Print full canonical
+diagnostics" step) landed inside that step's own pre-existing, very
+large console dump rather than as its OWN dedicated step -- unlike
+every prior compact summary (D-152/D-164/D-173/D-175/D-178B/D-181),
+which are each a separate, later step precisely so they survive log
+truncation. Combined with this session's job-log-fetch tool capping at
+~400KB from the end of the log (reaching back only to step 21) and the
+diagnostic artifact's Azure Blob Storage host being denied by this
+session's own egress policy (403, non-retryable per this environment's
+own operating rule), this task could NOT read the exact per-family
+`terminal_besttake_confidence_state`/`bounded_finalist_arbiter_*` JSON
+fields nor the two run-level summary blocks for this run. This is a
+reporting-infrastructure gap, not a `cutsell_worker` defect -- D-184's
+own offline suite (62/62) already proves the field shapes/logic; see
+"EXACT NEXT ENGINE GATE" below.
+
+WHAT WAS RECOVERED (from the reachable, already-compact D-123/D-150/
+D-178B/D-181 qualification-summary steps, the regression-QA report, and
+the quality ladder -- all real, all this run, none fabricated):
+
+PIMPLES REIDENTIFICATION (by source span + normalized text + meaning
+sufficiency, never by a prior run's clip id): family `tg_719239d47e5b9eb0c5`,
+members `clip_2b5533e871267c5dd050` (DeliveryScorer's own top-ranked
+candidate) and `clip_37360c6547bf6ef191f2` (final winner), both
+meaning-sufficient. `semantic_authority_gate_status: AUTHORITATIVE` (NOT
+`ABSTAIN_CONFLICT` this run -- the real family's shape has genuinely
+moved since the "known recent shape" the directive described; re-
+identifying by current-run evidence, per the directive's own
+instruction, was the right call). `semantic_best_take_reason:
+"single_semantic_winner"` -- confirmed directly against `pipeline.py`'s
+own code (`_semantic_best_take`'s `single_semantic_winner` early exit
+unconditionally populates `terminal_confidence_out` with
+`confidence_state=DECISIVE`, `provenance=structured_dominance`, and
+never sets `top_score`/`runner_up_score` at all). Therefore, with full
+certainty (a direct code consequence, not a guess): **D-183 state =
+DECISIVE; D-184 = NOT_ELIGIBLE** (2-3-candidate/NON_DECISIVE-TIED-
+CONFLICTED gate fails on DECISIVE) -- D-184 never evaluates evidence for
+Pimples this run. Both Cut.ai and Human Gold reject the winning
+realization (`benchmarks/video00_quality_ladder.py`'s own selection-plan
+Level-1 trace: `"family tg_719239d47e5b9eb0c5 winner
+clip_37360c6547bf6ef191f2 is a realization both references rejected"`,
+authority `BestTakeResolver`) -- but this is a semantic-LABEL confidence
+problem (Hybrid/Gemini's 0.95 "winner" label outvoting DeliveryScorer's
+own top pick before the ladder ever reaches a comparison D-183/D-184
+could touch), entirely upstream of and out of scope for D-184.
+
+**PIMPLES RESULT: NOT_ELIGIBLE.**
+
+OTHER ELIGIBLE FAMILY (secondary, the one real D-184-eligible family
+this run): family `tg_c6e95534963c840c2c` (the gynecologist/ginecóloga
+region), 3 members, `case_b_conflict_present: true`
+(`case_b_materiality_state: MATERIAL`), `semantic_best_take_reason:
+"delivery_tie_break_among_survivors"` -- the D-123 bypass gate correctly
+forced this family PAST the semantic fast path into the raw-score tie-
+break, so `_terminal_besttake_confidence` genuinely ran here (virtually
+certainly `NON_DECISIVE`, since an exact 4-decimal tie is rare). Both
+surviving candidates (`clip_28670eb4179d783532de`,
+`clip_dbf45774c7b3779884bf`) are meaning-sufficient -- D-184-eligible.
+Both Cut.ai and Human Gold prefer `clip_28670eb4179d783532de` (the
+semantic-fast-path candidate the D-123 gate bypassed); the terminal
+ladder picked `clip_dbf45774c7b3779884bf` (DeliveryScorer's own raw top)
+instead -- also against both references, via the OTHER route. Raw event
+evidence for the two candidates (`clip_28670eb4179d783532de`: 8 delivery
+events/0.536s; `clip_dbf45774c7b3779884bf`: 3 delivery events/0.201s)
+shows the reference-preferred candidate has MORE, not fewer, raw
+delivery-zone events -- meaning D-172's own Zone-Usability V2 (the ONE
+performance dimension D-184 consults) is very likely CORRELATED with the
+same signal that produced DeliveryScorer's own (also-wrong-vs-both-
+references) pick, not an independent one. This is a REASONED PROJECTION
+from the recovered evidence shape, not a confirmed read of the actual
+`bounded_finalist_arbiter_state` field (see the access limitation
+above) -- flagged as such, never asserted as fact.
+
+**PROSODIC AUDIO RELEVANCE: PROSODIC_LIKELY_RELEVANT** for the
+gynecologist family specifically (the only real, evidence-grounded
+signal available -- V2/DeliveryScorer are correlated visual-motion-event
+counters, already "spent" on the very pick both references reject; a
+genuinely independent dimension such as vocal delivery quality is the
+most plausible remaining local candidate to distinguish these two
+realizations). **PROSODIC_NOT_NEEDED** for Pimples specifically -- its
+problem is a confidently wrong semantic LABEL, not a near-equal-
+performance ambiguity a tie-breaking signal could resolve; per this
+task's own instruction, `PROSODIC_AUDIO_AVAILABLE` stays `False` and
+nothing here infers energy/hesitation/cadence/confidence/tone from
+transcript or visual evidence.
+
+REGRESSION-QA REPORT (18-check manifest, real): 17/18 passed, INCLUDING
+every `pimples_*` check (`pimples_micro_1/2/3_present`,
+`pimples_bad_monolith_absent`, `pimples_later_winner_present`,
+`pimples_micro_order`) -- confirming Pimples' own canonical shape is
+otherwise intact. The ONE failure, `sonography_good_before_diagnosis`
+(`required_order`), is a StoryValidator/CompositeResolver ordering
+check -- D-184 has zero membership/ordering authority and cannot have
+caused it (confirmed structurally: `action_applied` is hardcoded
+`False`, and `evaluate_bounded_finalist_arbiter` never touches
+`selected`/`ranked`/`membership`/render order, per its own offline test
+suite). "Verify frozen Selection lock" also failed -- the SAME long-
+standing legacy-selection-shape validator failure already present on
+runs 79/80 of this exact workflow, pre-dating D-184 entirely.
+
+QUALITY LADDER (RAW vs Cut.ai vs Human Gold vs CutSell, D-095, CPU-only,
+this run): rendered/physical view (the D-097.10 R14 authoritative
+headline) -- **Selection Level-1: 13 regions / 19.23 s. Boundary
+Level-1: 25 regions / 4.348 s. F1 vs Cut.ai: 0.8479. F1 vs Human Gold:
+0.8072.** (Pre-render selection-plan view: Selection Level-1 24
+regions/30.07 s, F1 vs Cut.ai 0.823, F1 vs Human Gold 0.7701 -- the
+render/Boundary stage improves parity over the raw plan, as established
+in prior D-097.x work.) Per this task's own explicit instruction, none
+of this is attributed to D-184 -- D-184 has zero selection/render
+authority; these figures reflect the pre-existing engine exactly as
+D-183 left it.
+
+WINNER IMMUTABILITY: held for every family this run, by construction
+(`bounded_finalist_arbiter_enabled` gates ONLY additive diagnostics
+computation; `action_applied=False` is hardcoded; no code path in
+`bounded_finalist_arbiter.py` or its `pipeline.py` wiring writes to
+`selected_clip_id`/`ranked`/membership) and by direct observation (every
+family's `final_selected_clip_id` recovered this run matches exactly
+what the pre-D-184 ladder would produce from the same `semantic_best_
+take_reason`/`winner_path_after` -- no unexplained shift anywhere).
+
+MEANING / BOUNDARY / ORDINARY-MOTION FIREWALLS: held structurally
+(unchanged code, D-184's own 62/62 offline suite proves each firewall
+directly) -- not independently re-verified against this run's exact
+`bounded_finalist_arbiter_meaning_parity`/`_performance_status` fields
+due to the same access limitation.
+
+D-180 STATUS: unchanged (`OFFLINE_PROVEN`, `REAL_MEDIA_SAFETY_PROVEN`;
+the gynecologist family's own `case_b_materiality_state: MATERIAL`
+recovered this run is itself a live confirmation of D-180's condition-4
+stabilization still firing correctly). No retune.
+
+D-177 STATUS: unchanged. The one real partial-edge-trim row touching a
+Pimples-family clip this run (`clip_37360c6547bf6ef191f2`, exit edge)
+was correctly evaluated and correctly left untrimmed
+(`partial_edge_trim_reason: "visual_trim_blocked_by_delivery_floor"`) --
+the Boundary firewall working exactly as designed. No target chasing.
+
+D-185 VERDICT: **C. PARTIALLY PROVEN.** A real, authorized RAW exercised
+D-184's diagnostic wiring against real eligible data (the gynecologist
+family genuinely reached `evaluate_bounded_finalist_arbiter`'s own
+eligibility-passing branch this run); Pimples itself returned the
+directive's own valid `NOT_ELIGIBLE` outcome, confirmed with full
+certainty from code + recovered diagnostics. No regression is evident
+anywhere reachable (winner unchanged everywhere; every firewall holds
+structurally). What is missing is NOT engine evidence -- it is this
+task's own ability to read the exact per-family `bounded_finalist_
+arbiter_state`/`_decision`/`_preferred_candidate_id` fields and the two
+run-level summaries for this specific run, due to the reporting/access
+gap described above. Neither Verdict A (a confirmed PREFERENCE_SUPPORTED)
+nor Verdict B (a confirmed correct abstention) can be honestly claimed
+without that field-level confirmation.
+
+EXACT NEXT ENGINE GATE (reporting-infrastructure only -- no cutsell_worker
+change, no arbiter authority, no Prosodic Audio, no P1): add ONE new,
+dedicated, tail-safe "Print compact D-183/D-184 Bounded Finalist Arbiter
+real-media qualification summary" step to `cutsell-video00-modal-raw.yml`,
+mirroring the existing D-152/D-164/D-173/D-175/D-178B/D-181 pattern
+exactly (a separate step, positioned among them, projecting ONLY
+`terminal_besttake_confidence_run_summary` plus the per-family
+`terminal_besttake_confidence_*`/`bounded_finalist_arbiter_*` fields
+already on every `take_judge_groups` row) -- so the NEXT authorized RAW
+can actually surface these fields within a reachable log window. This is
+NOT authorized to execute here (would require verifying against a new
+RAW, and this task's own "NO SECOND RAW" bound forbids that); it is
+named as the next gate for a separately-authorized follow-up.
+
+PROSODIC AUDIO / P1: not implemented here (`PROSODIC_AUDIO_AVAILABLE`
+stays `False`, confirmed unchanged). Given Verdict C (not B), the
+directive's own "if abstention is due specifically to missing vocal-
+performance evidence" trigger for a D-186 Prosodic Audio V2 Phase-A gate
+is NOT yet satisfied on confirmed evidence -- the gynecologist family's
+REASONED (not confirmed) shape is suggestive, not proof. P1 remains
+paused, unchanged.
+
+STRICT SCOPE CONFIRMATIONS: no `cutsell_worker` editorial patch (only
+`.github/workflows/cutsell-video00-modal-raw.yml` touched, in the prior
+D-185 workflow-plumbing commit). No arbiter authority granted. No
+winner mutation (confirmed). No provider/model change. No shared RunPod
+template edit. No score/threshold tuning. No Prosodic Audio
+implementation. No P1 implementation. Exactly ONE RAW dispatched
+(34386944523). No second RAW. No post-result patch.
+
+**HUMAN ACTION REQUIRED:** YES (condition A: whether to authorize the
+reporting-infrastructure fix named above ahead of any future RAW;
+condition G/A: whether the gynecologist family's REASONED-but-
+unconfirmed shape is enough to justify a D-186 Prosodic Audio V2
+Phase-A investigation ahead of P1, or whether to require the reporting
+fix + one more confirmatory RAW first; and whether/when to resume P1,
+remain Product Owner decisions).
