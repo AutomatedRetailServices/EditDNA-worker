@@ -35456,3 +35456,296 @@ doc reads). NO BestTake/Family/Boundary/Pacing/P1-authority change.
 D-194 -- the smallest offline Phase-A above -- as the next bounded
 implementation task, remains a Product Owner decision; D-194 is NOT
 implemented automatically by this entry).
+
+---
+
+# D-194: P1 EDITORIAL MOMENT & SEQUENCE UNDERSTANDING -- PHASE A --
+TYPED FOUNDATION + DETERMINISTIC LOCAL CLASSIFICATION
+
+Post D-193, Product Owner authorization: implement exactly D-193's
+Item-42 smallest Phase-A (D-193's own D-194 EXACT GATE, item 47 above)
+-- offline, no pipeline wiring, no provider, no RAW, no authority, no
+P2, no Commercial Moment/Sales Funnel.
+
+## 1. Scope executed
+
+One new module, `cutsell_worker/editorial_moment_sequence.py` (D-194's
+own single-module allowance), plus its own test file,
+`tests/test_cutsell_d194_editorial_moment_sequence.py`. Zero existing
+`cutsell_worker/*.py` file touched -- `git diff --stat HEAD` before this
+docs entry shows only two new, untracked files.
+
+## 2. `EditorialMoment` (typed, frozen, additive)
+
+Fields: `source_asset_id`, `editorial_moment_id` (minted, `emom_`
+prefix, content+timing+role+attempt-membership-anchored, mirrors
+`canonical_identity.mint_source_span_id`'s exact hashing shape),
+`source_start`/`source_end`, `source_span_id` (optional reference),
+`attempt_ids`/`proposition_candidate_ids`/`related_span_ids` (stable-id
+references, no full child objects copied), `moment_role`,
+`audience_delivery_status`, `recording_process_status`,
+`completion_status` (reuses `LanguageAttempt.meaning_completion`
+verbatim), `local_sequence_position`, `confidence` (categorical),
+`conflict_flags`, `provenance`.
+
+## 3. `EditorialSequenceHypothesis` (typed, frozen, additive)
+
+Fields: `source_asset_id`, `sequence_id` (minted, `eseq_` prefix,
+MEMBERSHIP-anchored -- sorted moment-id set, mirrors
+`canonical_identity.mint_attempt_id`'s own shape, order-independent),
+`moment_ids`, `source_start`/`source_end` (exact bounded union of
+member moments), `sequence_kind`, `sequence_completeness`,
+`audience_delivery_status`/`recording_process_status` (sequence-level
+aggregates), `proposition_progression_status`,
+`internal_redundancy_status`, `continuity_status`,
+`earlier_source_redundancy_status` (always `NOT_EVALUATED` -- P2
+territory, never computed here), `confidence`, `conflict_flags`,
+`provenance`.
+
+## 4. Moment-role vocabulary (12 values, as specified)
+
+`PRE_TAKE_SETUP`, `RECORDING_PROCESS`, `FALSE_START`,
+`ABANDONED_ATTEMPT`, `RETRY`, `CORRECTION`, `CONTINUATION`,
+`CLEAN_AUDIENCE_DELIVERY`, `POST_TAKE_RESET`, `BREAKING_CHARACTER`,
+`NEW_AUDIENCE_BEAT`, `UNCERTAIN`. `PREASSEMBLED_FINAL_SEQUENCE` is
+deliberately absent from this vocabulary (a sequence-only
+classification, per the directive's own instruction).
+
+## 5. Sequence-kind vocabulary (7 values, compact, no state zoo)
+
+`RECORDING_PROCESS_SEQUENCE`, `RETRY_SERIES`, `BLOOPER_SERIES`,
+`CLEAN_DELIVERY_SEQUENCE`, `PREASSEMBLED_FINAL_SEQUENCE`, `MIXED`,
+`UNCERTAIN`.
+
+## 6. Clean-audience-delivery contract
+
+Structure-first: a `LanguageAttempt` with `attempt_state ==
+ATTEMPT_CLEAN`, `meaning_completion == COMPLETE`, no behavior-hypothesis
+role override (`PRE_TAKE_SETUP`/`POST_TAKE_RESET`/`BREAKING_CHARACTER`),
+no `RETRY`/`NEW_AUDIENCE_BEAT` relation to its predecessor. Prosodic/
+visual evidence is consulted strictly AFTER this structural decision --
+it can only add provenance or an explicit conflict flag, never
+establish or upgrade the role (verified: `test_20c_good_prosody_alone_
+never_creates_clean_delivery`, `test_20d_good_visual_alone_never_
+creates_clean_delivery`).
+
+## 7. Preassembled-final-sequence contract
+
+Requires the conjunction: every moment in the local window
+independently classifies `CLEAN_AUDIENCE_DELIVERY` (no retry/
+correction/abandonment/reset/recording-process anywhere in the window)
+AND caller-supplied pairwise relation evidence yields
+`proposition_progression_status == FORWARD_PROGRESS`. Implemented in
+`_classify_sequence_kind`/`_progression_status_from_relations` --
+deterministic, no averaging.
+
+## 8. False-positive firewall
+
+An empty `relation_candidates` tuple (the honest default when no
+relation evidence is supplied) always yields `progression ==
+UNKNOWN`, so `all_clean` alone can only ever reach
+`CLEAN_DELIVERY_SEQUENCE`, never `PREASSEMBLED_FINAL_SEQUENCE` --
+proven by `test_21_multiple_clean_raw_takes_not_preassembled`,
+`test_26_false_positive_final_sequence_firewall_no_relation_evidence`,
+`test_d193_contract_a_several_clean_takes_not_preassembled`.
+
+## 9. Chronology firewall
+
+`_classify_sequence_kind` never reads source position/gap length --
+proven by `test_27_chronology_only_cannot_classify_final` (an
+identical clean-delivery window at `t=0` and `t=100` yields the
+identical `sequence_kind`) and `test_58_no_chronology_winner_rule`.
+
+## 10. Jump-cut firewall
+
+`jump_cut_evidence` is recorded ONLY in `continuity_status`
+(`NOT_AVAILABLE`/`TRANSITION_EVIDENCE_PRESENT`/`NO_TRANSITION_
+EVIDENCE`) and is never passed into `_classify_sequence_kind` at all --
+proven by `test_28_jump_cut_only_cannot_classify_final` (identical
+`sequence_kind` with `jump_cut_evidence=True` vs. `None`).
+
+## 11. Retry-series / blooper-series / clean-delivery-sequence /
+preassembled-final-sequence results
+
+All four proven by the fixture matrix (`test_22`-`test_25`) and the
+D-193 contract replay (A-D, all four passing): failed->retry->clean
+yields `RETRY_SERIES`; break/reset anywhere in the window yields
+`BLOOPER_SERIES` (reset/break takes precedence over retry-family
+roles); multiple clean takes with no relation evidence yields
+`CLEAN_DELIVERY_SEQUENCE`; multiple clean, forward-progressing,
+non-retry moments with supplied relation evidence yields
+`PREASSEMBLED_FINAL_SEQUENCE` at `CONFIDENCE_SUPPORTED`.
+
+## 12. Correction / continuation / recording-process / false-start /
+abandoned-attempt / breaking-character / new-audience-beat results
+
+Each is a direct, tested mapping from `LanguageAttempt.attempt_state`
+(or, for `NEW_AUDIENCE_BEAT`/`RETRY`, the caller-supplied relation-to-
+predecessor) -- `test_04`-`test_12`. No new heuristic invented for any
+of these seven.
+
+## 13-14. `LanguageAttempt`/behavior-hypothesis reuse
+
+`classify_editorial_moment` reads `LanguageAttempt.attempt_state`/
+`meaning_completion`/`confidence`/timing verbatim (D-168, unchanged),
+and an optional `BehaviorHypothesis` tuple (D-155, unchanged) for
+exactly three role refinements. Neither module is modified.
+
+## 15. `PropositionCandidate`/`RelationEvidence` reuse
+
+`classify_editorial_sequence` consumes D-169's `RelationEvidence.
+relation_candidate` vocabulary verbatim (as plain caller-supplied
+strings) for `proposition_progression_status` -- `language_
+proposition_relation.py` stays at zero diff.
+
+## 16. Visual/Prosodic evidence role
+
+Both are optional, corroboration-only inputs to
+`classify_editorial_moment` (`visual_reset_present: bool`,
+`prosodic_evidence: object` read via `getattr` for `vocal_continuity_
+state` only) -- neither module (`prosodic_audio_v2.py`,
+`watch_listen_understanding.py`) is imported for anything beyond that
+one optional field; both stay at zero diff.
+
+## 17. Meaning-completion reuse
+
+`completion_status`/branch logic reuse `LanguageAttempt.meaning_
+completion`'s existing `COMPLETE`/`INCOMPLETE`/`UNCERTAIN` values
+directly -- no new completion detector.
+
+## 18. Proposition-progression result
+
+`FORWARD_PROGRESS`/`CORRECTION`/`RETRY`/`MIXED`/`UNKNOWN` all real and
+tested (`test_29`-`test_32`, `test_d193_contract_c/d`). `REPETITION` is
+kept in the schema for completeness but never emitted by this V1
+deriver (the module docstring honestly states why -- no existing
+signal in `language_proposition_relation.py` cleanly distinguishes it
+from `RELATION_UNCERTAIN` today), mirroring D-155's own FALSE_START/
+PRE_TAKE_SETUP honest-gap precedent.
+
+## 19. Internal-redundancy result
+
+Caller-suppliable (`internal_redundancy_status` param, validated
+against the 3-value vocabulary); defaults to `NOT_EVALUATED` when
+omitted -- no redundancy-detection heuristic invented in Phase A
+(`test_57`, `test_internal_redundancy_default_not_evaluated`).
+
+## 20. Local-sequence-only result
+
+`classify_editorial_sequence` requires 2+ moments, all sharing one
+`source_asset_id`, supplied explicitly by the caller -- it performs no
+search (`test_sequence_requires_two_or_more_moments`, `test_sequence_
+requires_same_source_asset_id`).
+
+## 21. Distant-source-redundancy status
+
+`earlier_source_redundancy_status` is unconditionally
+`EARLIER_SOURCE_REDUNDANCY_NOT_EVALUATED` on every returned
+`EditorialSequenceHypothesis` -- `test_60_whole_video_distant_
+redundancy_stays_not_evaluated`.
+
+## 22-24. Confidence / conflict / source-timing / id / provenance
+contracts
+
+Confidence is categorical only (`SUPPORTED`/`WEAK`/`MIXED`/`UNKNOWN`,
+imported from `language_utterance_attempt.py`, never redefined or
+numeric). Any detected conflict (structural-vs-behavior, structural-
+vs-prosodic, structural-vs-visual, or a propagated moment-level
+conflict at the sequence level) forces `MIXED`, never averaged
+(`test_13`, `test_20`, `test_20b`, `test_43`, `test_45`). Source timing
+is preserved exactly (`test_38`, `test_39`). IDs are deterministic and
+membership/content-anchored (`test_40`-`test_42`). Provenance is
+retained per classification (`test_44`).
+
+## 25. Diagnostics / run summary
+
+`editorial_moment_diagnostics`/`editorial_sequence_diagnostics`/
+`editorial_moment_sequence_run_summary` -- tail-safe, counts/status
+only, no transcript dump (`test_no_transcript_dump_in_diagnostics`).
+Run summary exposes every count the directive's own "RUN/OFFLINE
+SUMMARY" section requires plus a few honest extras
+(`abandoned_attempt_count`, `post_take_reset_count`, `pre_take_setup_
+count`, `new_audience_beat_count`, `recording_process_sequence_count`,
+conflict counts).
+
+## 26. No-authority / no-pipeline-wiring / no-flag confirmations
+
+Structurally asserted, not merely claimed:
+`test_46`-`test_53`/`test_module_imports_nothing_from_authority_
+modules` grep the module's CODE (docstring stripped via AST before the
+check, since the docstring legitimately NAMES every authority it does
+NOT touch) for `selected_clip_id`/`take_group_id`/`bounded_finalist_*`/
+`boundary_engine_pass`/`dialogue_pacing_transition`/`render_plan`/
+provider-call surface, finding none.
+`test_not_imported_by_any_production_module` (parametrized over
+`pipeline.py`, `flow_b.py`, `bounded_finalist_arbiter.py`, `bounded_
+finalist_authority.py`, `composite_resolver.py`, `realization_
+resolver.py`, `boundary_engine_pass.py`, `dialogue_pacing_
+transition.py`, `take_grouping.py`, `take_grouping_provider.py`,
+`deterministic_best_take_authority.py`, `take_judge.py`, `semantic_
+authority_observability.py`, `whole_video_openai.py`) confirms none of
+them reference `editorial_moment_sequence` -- this module is imported
+by nothing in production, exactly as designed.
+`test_module_has_no_feature_flag` confirms no `os.environ`/`CUTSELL_`
+gate exists (there is nothing to gate -- nothing calls this module).
+`test_54`-`test_56` confirm no commercial/funnel field and no numeric
+master score exist on either dataclass.
+
+## 27. Regression battery
+
+`python3 -m compileall cutsell_worker tests` clean. Targeted D-123/
+D-128/D-142/D-145-D-194 suites: **1245 passed** (0 failed). Full
+offline suite (`pytest tests/ --ignore=tests/test_semantic_stitch.py`):
+**4462 passed, 5 failed, 13 subtests passed** -- all 5 failures (4 in
+`test_video00_modal_hybrid_semantic_parity.py`, 1 in `test_hybrid_
+story_guard_incomplete_retry.py`) and the one pre-existing collection
+error in `test_semantic_stitch.py` (a `TypeError` at module import time
+from a stale positional-argument call) were confirmed, by removing
+D-194's two new files and re-running the identical failing tests, to
+be PRE-EXISTING on this branch's `HEAD` (`7a5a762`) -- unrelated to
+this task, not introduced by it, and out of D-194's own strict scope
+to fix (no `pipeline.py`/workflow/`hybrid_*` file was touched).
+
+## 28. D-194 VERDICT
+
+**A. P1 PHASE-A EDITORIAL MOMENT / SEQUENCE FOUNDATION OFFLINE
+PROVEN.** Both typed containers, both deterministic classifiers,
+bounded diagnostics, and the full generic fixture/firewall/D-193-
+contract-replay test suite are implemented, green, and structurally
+proven to touch no authority, no pipeline call site, and no feature
+flag. No regression introduced (all pre-existing failures independently
+confirmed).
+
+## 29. Canonical status
+
+**P1 Editorial Moment & Sequence Understanding: PHASE_A_OFFLINE_
+PROVEN.** Not pipeline-integrated, not provider-backed, not
+whole-video, not an authority, not real-media-proven -- Phase A is an
+offline, generic-fixture-proven typed foundation only. P2 (Whole-Video
+Editorial Reasoning) and Commercial Moment/Sales Funnel status are
+UNCHANGED by this entry.
+
+## 30. Next gate (D-195, NOT implemented, NOT authorized)
+
+D-195 would be P1 PHASE B -- WATCH+LISTEN / CANONICAL-EVIDENCE
+INTEGRATION: construct a real `EditorialMomentUnderstanding` aggregate
+from actual pipeline-computed `RawUnderstandingMap`/
+`WatchListenUnderstanding`/`LanguageAttempt`/`PropositionCandidate`/
+`RelationEvidence` evidence inside the live pipeline -- still
+diagnostic/hypothesis-only, still no authority. NOT implemented by
+this task. No RAW should be launched until D-195 proves live
+diagnostic wiring offline.
+
+## 31. Confirmations
+
+NO RAW dispatched. NO provider/network call made. NO BestTake/Family/
+Ordering/Boundary/Pacing/render mutation (structurally proven, not
+merely claimed -- see item 26). NO feature flag added (none needed --
+nothing calls this module yet). Two new files only:
+`cutsell_worker/editorial_moment_sequence.py`,
+`tests/test_cutsell_d194_editorial_moment_sequence.py`.
+
+**HUMAN ACTION REQUIRED:** YES (condition A: whether to authorize
+D-195 -- P1 Phase B, live pipeline diagnostic wiring -- as the next
+bounded task, remains a Product Owner decision; D-195 is NOT
+implemented automatically by this entry).
