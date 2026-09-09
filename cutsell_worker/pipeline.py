@@ -2005,6 +2005,22 @@ def build_flow_b_draft(
                             "prosodic_pipeline_source_decode_reused": _prosodic_reused,
                             "prosodic_pipeline_pause_evidence_reused": True,
                             "prosodic_pipeline_language_evidence_reused": True,
+                            # D-190 (docs/CUTSELL_DECISIONS.md D-190): pure
+                            # additive reporting -- projects the SAME per-
+                            # candidate `ProsodicDeliveryEvidence` objects
+                            # already built above through D-187's own
+                            # `prosodic_delivery_diagnostics` (unchanged,
+                            # bounded, no waveform/transcript) so real-media
+                            # qualification can see each finalist's own
+                            # speech-rate/pause/hesitation/restart/
+                            # continuity/energy/emphasis/pitch state, not
+                            # just the family-level comparison. Recomputes
+                            # nothing; decides nothing.
+                            "prosodic_pipeline_candidate_evidence": {
+                                clip_id: prosodic_delivery_diagnostics(ev)
+                                for clip_id, ev in _prosodic_evidence_by_id.items()
+                                if ev is not None
+                            },
                         }
                         prosodic_pipeline_diagnostics_rows.append(prosodic_pipeline_row)
                 _arbiter_result = evaluate_bounded_finalist_arbiter(FinalistArbiterInput(

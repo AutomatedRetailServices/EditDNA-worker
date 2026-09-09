@@ -198,6 +198,25 @@ on:
         required: false
         default: ""
         type: string
+      prosodic_finalist_arbiter_diagnostics_enabled:
+        # D-190: "1" overlays CUTSELL_PROSODIC_FINALIST_ARBITER_DIAGNOSTICS_
+        # ENABLED=1 (D-189's own live pipeline diagnostic wiring,
+        # cutsell_worker/prosodic_audio_v2.py + prosodic_finalist_
+        # comparison.py, wired into pipeline.py/flow_b.py). A SEPARATE,
+        # independently-rollbackable, DIAGNOSTIC-ONLY flag -- only takes
+        # effect when bounded_finalist_arbiter_enabled=1 is ALSO set (D-189's
+        # own eligibility-first gate lives inside D-184's per-family block).
+        # Decodes source audio (once per source asset) ONLY for families
+        # D-184 already found eligible (NON_DECISIVE/TIED/CONFLICTED, 2-3
+        # meaning-sufficient finalists); NEVER mutates selected_clip_id/
+        # ranked/membership/Family Formation/Boundary/Pacing/Renderer --
+        # action_applied is hardcoded False -- see D-188/D-189's own module
+        # docstrings. Empty (default) = code default OFF, byte-identical to
+        # every run before D-189/D-190.
+        description: "Optional: '1' enables CUTSELL_PROSODIC_FINALIST_ARBITER_DIAGNOSTICS_ENABLED (D-190/D-189, diagnostic-only). Requires bounded_finalist_arbiter_enabled=1 too. Empty = OFF."
+        required: false
+        default: ""
+        type: string
 
 concurrency:
   group: cutsell-video00-modal-raw-${{ github.ref }}
@@ -422,6 +441,19 @@ jobs:
             mv /tmp/cutsell-env.tmp.json /tmp/cutsell-env.json
           fi
           echo "D-185 Bounded Finalist Arbiter (diagnostic-only) for this run: CUTSELL_BOUNDED_FINALIST_ARBITER_ENABLED=$(jq -r '.CUTSELL_BOUNDED_FINALIST_ARBITER_ENABLED // "unset (code default OFF)"' /tmp/cutsell-env.json)"
+          # D-190: optional D-189 Prosodic Finalist Arbiter diagnostic
+          # overlay, applied only when the dispatch input is exactly "1";
+          # code default (OFF) otherwise. DIAGNOSTIC-ONLY: only takes effect
+          # inside D-184's own per-family block, and only for families D-184
+          # already found eligible -- never mutates selected_clip_id/ranked/
+          # membership -- see cutsell_worker/prosodic_finalist_comparison.py
+          # and pipeline.py's own D-189 module docstrings and
+          # docs/CUTSELL_DECISIONS.md D-189.
+          if [ "${{ github.event.inputs.prosodic_finalist_arbiter_diagnostics_enabled }}" = "1" ]; then
+            jq -c '. + {CUTSELL_PROSODIC_FINALIST_ARBITER_DIAGNOSTICS_ENABLED:"1"}' /tmp/cutsell-env.json > /tmp/cutsell-env.tmp.json
+            mv /tmp/cutsell-env.tmp.json /tmp/cutsell-env.json
+          fi
+          echo "D-190 Prosodic Finalist Arbiter Diagnostics for this run: CUTSELL_PROSODIC_FINALIST_ARBITER_DIAGNOSTICS_ENABLED=$(jq -r '.CUTSELL_PROSODIC_FINALIST_ARBITER_DIAGNOSTICS_ENABLED // "unset (code default OFF)"' /tmp/cutsell-env.json)"
           test "$(jq 'length' /tmp/cutsell-env.json)" != "0"
           test "$(jq -r '.CUTSELL_HYBRID_LLM_ENABLED' /tmp/cutsell-env.json)" = "1"
           test "$(jq -r '.CUTSELL_HYBRID_PROVIDER' /tmp/cutsell-env.json)" = "google"
@@ -453,7 +485,7 @@ jobs:
               # D-056 Section 1). A real secret (API key, token, bucket
               # name) is essentially always >= 12 characters, so this
               # threshold costs no actual masking coverage.
-              if value and key not in ('CUTSELL_HYBRID_LLM_ENABLED', 'CUTSELL_HYBRID_PROVIDER', 'CUTSELL_UNIFIED_REALIZATION_RESOLVER', 'CUTSELL_ASR_CANONICAL_NORMALIZATION', 'CUTSELL_SEMANTIC_COMPUTE_PLANNER', 'CUTSELL_HYBRID_MAX_EDIT_USD', 'CUTSELL_BRIDGE_COMPLETE_PAIRWISE_SINGLETON', 'CUTSELL_WATCH_LISTEN_FAMILY_EVIDENCE_ENABLED', 'CUTSELL_WATCH_LISTEN_RELATION_DISCOVERY_ENABLED', 'CUTSELL_WATCH_LISTEN_BESTTAKE_EVIDENCE_ENABLED', 'CUTSELL_WATCH_LISTEN_ZONE_USABILITY_V2_BESTTAKE_ENABLED', 'CUTSELL_WATCH_LISTEN_BESTTAKE_GUARD_AUTHORITY_ENABLED', 'CUTSELL_BOUNDED_FINALIST_ARBITER_ENABLED', 'CUTSELL_BUILD_GIT_SHA') and len(str(value)) >= 12:
+              if value and key not in ('CUTSELL_HYBRID_LLM_ENABLED', 'CUTSELL_HYBRID_PROVIDER', 'CUTSELL_UNIFIED_REALIZATION_RESOLVER', 'CUTSELL_ASR_CANONICAL_NORMALIZATION', 'CUTSELL_SEMANTIC_COMPUTE_PLANNER', 'CUTSELL_HYBRID_MAX_EDIT_USD', 'CUTSELL_BRIDGE_COMPLETE_PAIRWISE_SINGLETON', 'CUTSELL_WATCH_LISTEN_FAMILY_EVIDENCE_ENABLED', 'CUTSELL_WATCH_LISTEN_RELATION_DISCOVERY_ENABLED', 'CUTSELL_WATCH_LISTEN_BESTTAKE_EVIDENCE_ENABLED', 'CUTSELL_WATCH_LISTEN_ZONE_USABILITY_V2_BESTTAKE_ENABLED', 'CUTSELL_WATCH_LISTEN_BESTTAKE_GUARD_AUTHORITY_ENABLED', 'CUTSELL_BOUNDED_FINALIST_ARBITER_ENABLED', 'CUTSELL_PROSODIC_FINALIST_ARBITER_DIAGNOSTICS_ENABLED', 'CUTSELL_BUILD_GIT_SHA') and len(str(value)) >= 12:
                   print(f'::add-mask::{value}')
           print(f'Loaded {len(env)} env vars from the live RunPod template plus the D-044 hybrid-semantic overlay, the D-050C2 resolver-mode overlay, and the D-052 stability-battery overlay (secret values masked).')
           "
@@ -2961,6 +2993,200 @@ jobs:
           print(json.dumps(summary, indent=2, sort_keys=True))
           PY
 
+      - name: D-190 Prosodic finalist compact diagnostics
+        # D-190 (docs/CUTSELL_DECISIONS.md D-190): the FIRST real-media
+        # qualification of D-187/D-188/D-189's Prosodic Audio V2 evidence
+        # chain -- its own dedicated, late, tail-safe summary step, same
+        # D-119/D-125/D-152/D-164/D-173/D-175/D-178B/D-181/D-186A pattern,
+        # positioned directly after D-186A (still before teardown) so its
+        # own small output survives any job-log-fetch truncation
+        # independently of D-186A's step. Reads the SAME `artifact/video00-
+        # modal.json` (already on disk) and PURE-PROJECTS fields D-187's
+        # `prosodic_audio_v2.py`, D-188's `prosodic_finalist_comparison.py`,
+        # and D-189's `pipeline.py` wiring already attached to each
+        # `take_judge_groups` row and to `diagnostics.prosodic_pipeline`/
+        # `diagnostics.bounded_finalist_arbiter` -- recomputes NO Prosodic
+        # evidence, NO comparison, NO arbiter verdict. Region source-mapping
+        # reuses the SAME QA-only span/text re-identification approach as
+        # D-123/D-181/D-186A, printing ONLY candidate_id/source_start/
+        # source_end/a short text hash -- never a transcript. Zero
+        # `cutsell_worker` decision-logic change; this step and its one
+        # small additive `prosodic_pipeline_candidate_evidence` reporting
+        # field on the per-family row (D-190's own minimal, disclosed
+        # reporting-only addition, gated by the SAME existing flags, adding
+        # no new decision path) are the only D-190 code changes.
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p artifact
+          python3 - <<'PY'
+          import hashlib
+          import json
+          import os
+          import sys
+
+          def load(path):
+              if not os.path.exists(path) or os.path.getsize(path) == 0:
+                  return None
+              with open(path) as f:
+                  try:
+                      return json.load(f)
+                  except Exception as e:
+                      print(f"WARNING: failed to parse {path}: {e}", file=sys.stderr)
+                      return None
+
+          engine = load("artifact/video00-modal.json")
+          regression_fixture = load("benchmarks/video00_regression_qa.json")
+
+          summary = {"schema_version": "cutsell.video00.d190_prosodic_finalist_diagnostics.v1"}
+          summary["source_status"] = "engine_json_present" if isinstance(engine, dict) else "engine_json_missing_or_unparseable"
+
+          rows = []
+          diag = None
+          clip_meta = {}
+          if isinstance(engine, dict):
+              diag = engine.get("diagnostics")
+              if isinstance(diag, dict):
+                  raw_groups = diag.get("take_judge_groups")
+                  if isinstance(raw_groups, list):
+                      rows = [r for r in raw_groups if isinstance(r, dict)]
+              for bucket in ("selected", "alternates", "discarded"):
+                  for clip in engine.get(bucket) or []:
+                      if isinstance(clip, dict) and clip.get("clip_id"):
+                          text_norm = " ".join(str(clip.get("text") or "").lower().split())
+                          clip_meta[clip["clip_id"]] = {
+                              "start": clip.get("start"),
+                              "end": clip.get("end"),
+                              "source_asset_id": clip.get("source_asset_id"),
+                              "text_hash": hashlib.sha256(text_norm.encode("utf-8")).hexdigest()[:12],
+                              "_norm_text": text_norm,
+                          }
+
+          # Pure passthrough of D-183/D-184/D-189's own already-computed
+          # run-level summaries -- no recomputation of any count here.
+          prosodic_pipeline_run_summary = diag.get("prosodic_pipeline") if isinstance(diag, dict) else None
+          bounded_finalist_arbiter_run_summary_block = diag.get("bounded_finalist_arbiter") if isinstance(diag, dict) else None
+
+          family_rows = []
+          for row in sorted(rows, key=lambda r: str(r.get("group_id") or "")):
+              family_rows.append({
+                  "family_id": row.get("group_id"),
+                  "meaning_sufficient_candidates": row.get("meaning_sufficient_candidates"),
+                  "semantic_authority_status": row.get("semantic_authority_gate_status"),
+                  "complete_window_agreement_status": row.get("complete_window_agreement_status"),
+                  "semantic_fast_path_candidate": row.get("semantic_fast_path_candidate"),
+                  "final_winner": row.get("final_winner", row.get("selected_clip_id")),
+                  "terminal_besttake_confidence_state": row.get("terminal_besttake_confidence_state"),
+                  "terminal_besttake_confidence_reason": row.get("terminal_besttake_confidence_reason"),
+                  "terminal_besttake_candidate_count": row.get("terminal_besttake_candidate_count"),
+                  "terminal_besttake_top_candidate_id": row.get("terminal_besttake_top_candidate_id"),
+                  "terminal_besttake_runner_up_candidate_id": row.get("terminal_besttake_runner_up_candidate_id"),
+                  "terminal_besttake_top_score": row.get("terminal_besttake_top_score"),
+                  "terminal_besttake_runner_up_score": row.get("terminal_besttake_runner_up_score"),
+                  "terminal_besttake_score_margin": row.get("terminal_besttake_score_margin"),
+                  "terminal_besttake_structured_dominance_present": row.get("terminal_besttake_structured_dominance_present"),
+                  "terminal_besttake_conflict_present": row.get("terminal_besttake_conflict_present"),
+                  "bounded_finalist_arbiter_eligible": row.get("bounded_finalist_arbiter_eligible"),
+                  "bounded_finalist_arbiter_candidate_count": row.get("bounded_finalist_arbiter_candidate_count"),
+                  "bounded_finalist_arbiter_state": row.get("bounded_finalist_arbiter_state"),
+                  "bounded_finalist_arbiter_decision": row.get("bounded_finalist_arbiter_decision"),
+                  "bounded_finalist_arbiter_preferred_candidate_id": row.get("bounded_finalist_arbiter_preferred_candidate_id"),
+                  "bounded_finalist_arbiter_reason": row.get("bounded_finalist_arbiter_reason"),
+                  "bounded_finalist_arbiter_meaning_parity": row.get("bounded_finalist_arbiter_meaning_parity"),
+                  "bounded_finalist_arbiter_performance_status": row.get("bounded_finalist_arbiter_performance_status"),
+                  "bounded_finalist_arbiter_editability_status": row.get("bounded_finalist_arbiter_editability_status"),
+                  "bounded_finalist_arbiter_prosodic_status": row.get("bounded_finalist_arbiter_prosodic_status"),
+                  "bounded_finalist_arbiter_conflict": row.get("bounded_finalist_arbiter_conflict"),
+                  "bounded_finalist_arbiter_missing_evidence": row.get("bounded_finalist_arbiter_missing_evidence"),
+                  "bounded_finalist_arbiter_action_applied": row.get("bounded_finalist_arbiter_action_applied"),
+                  "prosodic_pipeline_audio_available": row.get("prosodic_pipeline_audio_available"),
+                  "prosodic_pipeline_source_decode_status": row.get("prosodic_pipeline_source_decode_status"),
+                  "prosodic_pipeline_candidate_count": row.get("prosodic_pipeline_candidate_count"),
+                  "prosodic_pipeline_candidates_evaluated": row.get("prosodic_pipeline_candidates_evaluated"),
+                  "prosodic_pipeline_source_decode_reused": row.get("prosodic_pipeline_source_decode_reused"),
+                  "prosodic_pipeline_pause_evidence_reused": row.get("prosodic_pipeline_pause_evidence_reused"),
+                  "prosodic_pipeline_language_evidence_reused": row.get("prosodic_pipeline_language_evidence_reused"),
+                  "prosodic_pipeline_candidate_evidence": row.get("prosodic_pipeline_candidate_evidence"),
+                  "prosodic_finalist_evaluated": row.get("prosodic_finalist_evaluated"),
+                  "prosodic_finalist_state": row.get("prosodic_finalist_state"),
+                  "prosodic_finalist_preferred_candidate_id": row.get("prosodic_finalist_preferred_candidate_id"),
+                  "prosodic_finalist_continuity_relation": row.get("prosodic_finalist_continuity_relation"),
+                  "prosodic_finalist_hesitation_relation": row.get("prosodic_finalist_hesitation_relation"),
+                  "prosodic_finalist_restart_relation": row.get("prosodic_finalist_restart_relation"),
+                  "prosodic_finalist_pause_relation": row.get("prosodic_finalist_pause_relation"),
+                  "prosodic_finalist_descriptive_rate_relation": row.get("prosodic_finalist_descriptive_rate_relation"),
+                  "prosodic_finalist_descriptive_energy_relation": row.get("prosodic_finalist_descriptive_energy_relation"),
+                  "prosodic_finalist_descriptive_emphasis_relation": row.get("prosodic_finalist_descriptive_emphasis_relation"),
+                  "prosodic_finalist_directional_evidence_present": row.get("prosodic_finalist_directional_evidence_present"),
+                  "prosodic_finalist_conflict": row.get("prosodic_finalist_conflict"),
+                  "prosodic_finalist_missing_evidence": row.get("prosodic_finalist_missing_evidence"),
+              })
+
+          # --- Compact region source-mapping (QA-only; candidate_id + span +
+          # a short text hash ONLY -- never a transcript). SAME approach as
+          # D-123/D-181/D-186A's own steps.
+          GYNECOLOGIST_SPAN = (90.0, 109.0)  # generous window around 96.47-102.47s
+
+          def _span_overlaps(meta, lo, hi):
+              start, end = meta.get("start"), meta.get("end")
+              if not isinstance(start, (int, float)) or not isinstance(end, (int, float)):
+                  return False
+              return start < hi and end > lo
+
+          def _region_norm_refs(prefix):
+              out = []
+              if isinstance(regression_fixture, dict):
+                  for check in regression_fixture.get("checks") or []:
+                      if not isinstance(check, dict) or not str(check.get("id", "")).startswith(prefix):
+                          continue
+                      if check.get("kind") == "required_order":
+                          continue
+                      text = check.get("text")
+                      if text:
+                          out.append(" ".join(str(text).lower().split()))
+              return [t for t in out if t]
+
+          def _region_candidates(prefix, span=None):
+              refs = _region_norm_refs(prefix)
+              matched = set()
+              if span:
+                  lo, hi = span
+                  matched |= {cid for cid, meta in clip_meta.items() if _span_overlaps(meta, lo, hi)}
+              matched |= {
+                  cid for cid, meta in clip_meta.items()
+                  if refs and any(ref in meta.get("_norm_text", "") for ref in refs)
+              }
+              return [
+                  {
+                      "candidate_id": cid,
+                      "source_start": clip_meta[cid].get("start"),
+                      "source_end": clip_meta[cid].get("end"),
+                      "text_hash": clip_meta[cid].get("text_hash"),
+                  }
+                  for cid in sorted(matched)
+              ]
+
+          summary["prosodic_pipeline_run_summary"] = prosodic_pipeline_run_summary
+          summary["bounded_finalist_arbiter_run_summary"] = bounded_finalist_arbiter_run_summary_block
+          summary["family_count"] = len(family_rows)
+          summary["families"] = family_rows
+          summary["region_source_mapping"] = {
+              "pimples": _region_candidates("pimples"),
+              "gynecologist": _region_candidates("gynecologist", GYNECOLOGIST_SPAN),
+          }
+
+          os.makedirs("artifact", exist_ok=True)
+          out_path = "artifact/d190_prosodic_finalist_diagnostics_summary.json"
+          with open(out_path, "w") as f:
+              json.dump(summary, f, indent=2, sort_keys=True)
+
+          size = os.path.getsize(out_path)
+          print("--- D-190 Prosodic finalist compact diagnostics (a pure projection of already-computed take_judge_groups/diagnostics fields -- recomputes no Prosodic evidence, no comparison, no arbiter verdict) ---")
+          print(f"summary file: {out_path} ({size} bytes)")
+          print(json.dumps(summary, indent=2, sort_keys=True))
+          PY
+
       - name: Upload validator reports
         if: always()
         uses: actions/upload-artifact@v4
@@ -2984,6 +3210,7 @@ jobs:
             artifact/video00-modal-d178b-boundary-partial-edge-trim-summary.json
             artifact/video00-modal-d181-case-b-materiality-summary.json
             artifact/d186a_terminal_besttake_arbiter_summary.json
+            artifact/d190_prosodic_finalist_diagnostics_summary.json
           retention-days: 14
           if-no-files-found: warn
 

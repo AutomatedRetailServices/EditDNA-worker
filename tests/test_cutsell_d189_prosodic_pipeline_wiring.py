@@ -562,6 +562,11 @@ def test_25_pipeline_diagnostics_bounded_no_dump(tmp_path, monkeypatch):
     row = _group_row(result)
     prosodic_row = {k: v for k, v in row.items() if k.startswith("prosodic_")}
     encoded = json.dumps(prosodic_row)
-    assert len(encoded) < 2000
+    # Bounded means "no waveform/transcript dump", not an arbitrary byte
+    # ceiling -- D-190 additively includes per-candidate evidence rows
+    # (prosodic_pipeline_candidate_evidence), so the exact size scales
+    # with candidate count while staying tiny relative to any real dump.
+    assert len(encoded) < 4000
+    assert "prosodic_pipeline_candidate_evidence" in prosodic_row
     summary = result.draft.diagnostics["prosodic_pipeline"]
     json.dumps(summary)
