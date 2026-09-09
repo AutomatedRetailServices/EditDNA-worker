@@ -30113,3 +30113,141 @@ region).
 
 **HUMAN ACTION REQUIRED:** YES (condition A) -- authorizing the D-177
 implementation gate named above is a Product Owner decision.
+
+---
+
+## D-177: Boundary partial-edge trim for a straddling event (post D-176)
+
+**Context.** D-176's forensic proved a real, reproducible gap: across three
+independent Video00 RAWs (34306886345/34331209473/34337801450), the current
+gynecologist-retry winner's own DELIVERY content is validated `EXACT`
+(content_coverage 1.0) against Human Gold, and the same 6.0s core window is
+independently `consensus_keep` (Cut.ai and Human Gold agree) -- yet a narrow
+(~0.75s entry, ~1.04s exit) window of boundary-adjacent debris straddling
+the measured DELIVERY span was never trimmed, because
+`boundary_engine_pass.py`'s own D-115/D-116 rule classified ANY overlap,
+however small, as fully DELIVERY-owned with zero trim available. D-176
+named this exact gap in the module's own docstring and recommended D-177 as
+the smallest general fix. Not a BestTake/DeliveryScorer/semantic-authority
+defect -- BOUNDARY's own physical ownership contract.
+
+**Implementation (`cutsell_worker/boundary_engine_pass.py` only).**
+`tighten_selected_visual_edges` now handles the one-sided straddle case
+`classify_event_zone` already reports (`starts_before_delivery` XOR
+`ends_after_delivery`) that the pre-D-177 code discarded. Eligibility
+reuses the existing `AUDIO_EDGE_OVERLAP_TOLERANCE_SEC` (no new numeric
+constant): a straddling event's own portion INSIDE the measured DELIVERY
+span must be no larger than that tolerance, checked BEFORE the existing
+edge-touch (`touches`) test so any event whose inside-DELIVERY portion is
+material is left exactly as before
+(`BOUNDARY_REASON_VISUAL_DELIVERY_OVERLAP_NO_TRIM`, same reason, same
+D-116 tests, zero behavior change). An event straddling BOTH edges at once
+(wider than the whole measured span) is ambiguous and always fails open
+(`BOUNDARY_REASON_VISUAL_AMBIGUOUS_STRADDLE_NO_TRIM`).
+
+**Speech-safety hard floor (critical correction made during this task).**
+The first implementation moved the trimmed edge to the event's own outer
+boundary (`event.end`/`event.start`), which for an eligible straddle lies
+PAST `delivery_span.start`/`.end` by up to the tolerance -- i.e. it could
+shave up to ~0.08s off the very first/last aligned word. This contradicted
+both the directive's explicit speech-safety requirement and this module's
+own established invariant (words are the hard floor, never crossed). Fixed
+before landing: the eligible entry/exit straddle now clamps to
+`min(event.end, delivery_span.start)` / `max(event.start, delivery_span.end)`
+-- the SAME hard-floor formula the pre-existing pure ENTRY/EXIT loops
+already use. For any genuine straddle this always resolves to exactly
+`delivery_span.start`/`.end`: the debris outside DELIVERY is fully
+trimmed, the tolerance-bounded DELIVERY-side sliver is left completely
+untouched (never shaved), and not a single millisecond of a real word can
+ever be removed. `AUDIO_EDGE_MINIMUM_REMAINING_SEC` (the existing per-clip
+floor) still applies afterward via the pass's existing guard, unchanged.
+Idempotent (a straddle trimmed once to the delivery boundary is never
+re-evaluated as eligible again, since the remaining sliver's own
+`inside_delivery_overlap_sec` no longer changes on a second pass).
+
+**Diagnostics (provenance, D-177-mandated fields).** Every straddle
+decision row (`boundary_visual_edge_trim`) now carries
+`inside_delivery_overlap_sec` (`None` for every non-straddle row). A new
+compact per-clip summary (`boundary_partial_edge_trim`, plus a
+`boundary_engine_pass.partial_edge_trim_*` run-level count block) records
+`entry/exit_partial_edge_trim_applied`, the event kind and overlap on each
+side, and the clip's own before/after boundary -- built OUTSIDE
+`tighten_selected_visual_edges` in `apply_post_freeze_boundary_pass` so the
+function's existing 2-tuple return signature (~15+ existing call sites)
+is untouched.
+
+**Tests.** `tests/test_cutsell_d177_boundary_partial_edge_trim.py`, 34/34
+passing -- the full directive-mandated matrix (entry/exit tiny-overlap
+trim, entry/exit material-overlap preserve, fully-outside/fully-inside
+unchanged, ambiguous both-edges fail-open, required-word/negation/number/
+factual-term/clause-ending preservation after trim, minimum-remaining-
+duration floor via the pass, idempotence, determinism, provenance,
+real-bounds-never-fabricated, ordinary/high-confidence/repeated/multiple
+edge events, CASE-A/CASE-B ownership unchanged, not-at-edge fail-open,
+render-plan reflection, never-extends, no provider/network symbol,
+backward-compatible signature/constants) plus a dedicated GENERIC
+(non-Video00 text/timestamps) synthetic replay of the exact D-176 shape
+(items 21-24): a selected, content-correct realization with an ~0.80s
+entry sliver and ~1.04s exit sliver of debris straddling the measured
+DELIVERY span around a validated core -- Boundary trims both edges to the
+measured DELIVERY boundary, core/text/BestTake/DeliveryScorer ranking
+unaffected, diagnostics populate correctly, result is idempotent.
+
+**Regression.** `test_cutsell_d116_visual_boundary_consumption.py` (17) and
+`test_cutsell_d097_c_boundary_engine_pass.py` (17): 34/34 green, ZERO
+behavior change on any existing fixture (the critical materiality-before-
+touches ordering fix, needed to keep `test_exit_trim_never_crosses_
+delivery_end` green, is documented inline). D-123/D-163/D-167/D-174/D-171/
+D-169/D-168/D-166/D-150/D-158/D-161/D-142-pacing/render/live-render-QC/
+post-render-QC/multi-file-render suites: 659/661 -- the 2 "failures" are
+`test_cutsell_d171_language_spine_consumer_migration.py::test_25_boundary_
+unchanged` and `test_cutsell_d174_watch_listen_besttake_guard_authority.py
+::test_37_38_39_boundary_pacing_render_zero_diff`, both pre-existing
+git-diff guards asserting THEIR OWN prior task never touched
+`boundary_engine_pass.py` -- D-177 is specifically, authorizedly the task
+that touches it; `git diff --stat` confirms the ONLY file changed is
+`boundary_engine_pass.py`. Not a regression, same category as an
+established D-175 precedent finding. `python3 -m compileall` clean.
+Full offline `tests/` (`--ignore=tests/test_semantic_stitch.py`, the
+established pre-existing collection-error exclusion): 4057 passed, 8
+failed -- 3 are the SAME git-diff-guard category above plus
+`test_cutsell_d172_watch_listen_besttake_v2_evidence.py::test_31_
+boundary_unchanged` (identical pattern); the other 5
+(`test_hybrid_story_guard_incomplete_retry.py`'s one case,
+`test_video00_modal_hybrid_semantic_parity.py`'s four cases) are
+confirmed PRE-EXISTING at baseline HEAD (54ee948) via `git stash` --
+identical failure set with D-177's change reverted, wholly unrelated to
+`boundary_engine_pass.py`. Zero new, unexplained failure anywhere.
+
+**No BestTake/Family/Language-Spine/semantic-authority/Pacing/provider
+change.** `git diff --stat` confirms the only production file touched is
+`cutsell_worker/boundary_engine_pass.py`; the module has no provider/
+network symbol. No new numeric threshold: eligibility and the hard floor
+both reuse `AUDIO_EDGE_OVERLAP_TOLERANCE_SEC`/`AUDIO_EDGE_MINIMUM_
+REMAINING_SEC` verbatim. No interior split, no composite, no membership
+change -- entry/exit only, `enforce_selection_contract` still runs
+unmodified over the resulting token stream.
+
+**D-177 VERDICT: A. PARTIAL-EDGE BOUNDARY TRIM OFFLINE PROVEN.**
+
+**Exact next real-media gate (not launched here -- Product Owner
+decision):** exactly ONE Video00 RAW with this code on the current head,
+inspecting the gynecologist-retry region specifically. Success criteria:
+(a) same selected source-real gynecologist take (no BestTake/family
+change); (b) same meaning/content coverage (still `EXACT`/1.0 vs Human
+Gold); (c) the entry/exit `false_keep` window at this region shrinks
+toward or to zero (bounded to at most the existing tolerance, per this
+mechanism's own hard floor); (d) no new clipped phoneme and no sentence
+truncation anywhere in the video (the hard-floor fix above is the specific
+guarantee against this); (e) no new Boundary regression elsewhere in the
+video (the `tight_edge`/BoundaryEngine-attributed example the D-176
+forensic named should remain unchanged); (f) zero BestTake/Family/
+DeliveryScorer/Watch+Listen verdict change anywhere; (g) F1 vs Cut.ai
+improves or remains stable (physical view).
+
+No RAW dispatched this task. No provider/network call. No BestTake/
+DeliveryScorer/Family-Formation/Proposition/Attempt/Language-Spine/
+semantic-authority/Pacing/Renderer change.
+
+**HUMAN ACTION REQUIRED:** YES (condition A) -- authorizing the one
+confirmatory Video00 RAW above is a Product Owner decision.

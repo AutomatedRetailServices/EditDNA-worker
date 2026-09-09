@@ -50,18 +50,44 @@ BoundaryEngine's to trim; a defect overlapping DELIVERY is BestTake's, not
 implemented here). It calls `compute_delivery_span`/`classify_event_zone`
 directly on the selected clip's own words/events -- it never recomputes
 ENTRY/DELIVERY/EXIT or "event overlap" itself, per D-115/D-116's shared-
-temporal-authority rule. A DELIVERY-zone event (including any event that
-straddles a boundary -- D-115 classifies any overlap as DELIVERY) is never
-trimmed; the current Boundary representation has no partial-edge-trim
-mechanism that could shave a straddling event down to exactly
-`delivery_span.start`/`.end` without inventing a new trim shape, so per
-this task's own instruction such an event is preserved and only recorded
-diagnostically. Reuses this module's own existing `AUDIO_EDGE_OVERLAP_
-TOLERANCE_SEC` (edge-touch tolerance) and `AUDIO_EDGE_MINIMUM_REMAINING_SEC`
-(per-clip floor) invariants -- no new timing constant is introduced. Runs
-after `tighten_selected_audio_edges` in the same post-Freeze pass so visual
-and audio tightening combine through the one existing Boundary contract
-(sequential composition, not a second pass) rather than competing.
+temporal-authority rule. A DELIVERY-zone event that is genuinely embedded
+in DELIVERY (does not straddle a boundary) is never trimmed -- that
+remains BestTake/DeliveryScorer evidence, D-117 territory, not
+implemented here.
+
+## Partial-edge trim for a straddling event (D-177)
+
+D-176's forensic proved a real, reproducible shape (three independent
+Video00 RAWs): a selected candidate's own DELIVERY content is validated
+correct by both quality references, but a visual/performance event
+straddles the DELIVERY boundary by only a small amount -- `classify_
+event_zone` already reports this exactly (`starts_before_delivery`/
+`ends_after_delivery`, D-115's own straddle bookkeeping, never
+recomputed here) -- and the pre-D-177 code below always treated ANY
+overlap, however small, as a full DELIVERY-owned defect with zero trim
+available. D-177 closes that named gap with ONE bounded rule, using NO
+new numeric constant: when a straddling event's own portion INSIDE
+DELIVERY is no larger than this module's existing `AUDIO_EDGE_OVERLAP_
+TOLERANCE_SEC` (the same edge-touch tolerance already governing every
+other "is this event close enough to the edge to trim" decision in this
+module), the edge moves to the measured DELIVERY boundary itself
+(`delivery_span.start` for an entry straddle, `delivery_span.end` for an
+exit straddle) -- the exact same hard floor the pre-existing pure ENTRY/
+EXIT loops already enforce, so the DELIVERY-side sliver (by definition no
+larger than the tolerance) is always LEFT UNTOUCHED, never shaved: this
+mechanism never removes so much as a millisecond of a real word,
+satisfying the same speech-safety invariant as every other trim in this
+module. A straddling event whose inside-DELIVERY portion
+EXCEEDS that tolerance is a real DELIVERY defect and is left exactly as
+before (`BOUNDARY_REASON_VISUAL_DELIVERY_OVERLAP_NO_TRIM`, same reason,
+same behavior, same existing D-116 tests). An event that straddles BOTH
+DELIVERY edges at once (wider than the whole measured span) is ambiguous
+and always fails open, untrimmed. `AUDIO_EDGE_MINIMUM_REMAINING_SEC`
+(the same existing per-clip floor) still applies afterward, exactly as
+for every other trim this module performs. Entry/exit only: no interior
+split, no composite, no membership change -- the ordered token stream
+is untouched, verified by the same `enforce_selection_contract` call
+this pass already runs under.
 """
 from __future__ import annotations
 
@@ -112,6 +138,16 @@ BOUNDARY_REASON_VISUAL_DELIVERY_OVERLAP_NO_TRIM = "visual_event_overlaps_deliver
 BOUNDARY_REASON_VISUAL_NOT_AT_EDGE = "visual_event_not_at_edge"
 BOUNDARY_REASON_VISUAL_BLOCKED_BY_DELIVERY_FLOOR = "visual_trim_blocked_by_delivery_floor"
 BOUNDARY_REASON_VISUAL_TRIM_UNAVAILABLE = "visual_trim_unavailable"
+
+# D-177: partial-edge trim for a visual/performance event that straddles the
+# DELIVERY boundary by no more than this module's own existing
+# AUDIO_EDGE_OVERLAP_TOLERANCE_SEC -- see module docstring's own "Partial-
+# edge trim for a straddling event (D-177)" section. No new timing constant.
+BOUNDARY_REASON_VISUAL_ENTRY_PARTIAL_EDGE_TRIM = "visual_entry_partial_edge_trim"
+BOUNDARY_REASON_VISUAL_EXIT_PARTIAL_EDGE_TRIM = "visual_exit_partial_edge_trim"
+# An event straddling BOTH DELIVERY edges at once (wider than the whole
+# measured span) -- ambiguous, always fails open, never trimmed.
+BOUNDARY_REASON_VISUAL_AMBIGUOUS_STRADDLE_NO_TRIM = "visual_ambiguous_straddle_no_trim"
 
 PHYSICAL_OWNERSHIP_CONTRACT: tuple[dict[str, str], ...] = (
     {"concern": "entry", "owner": "boundary_engine_pass", "when": "post_freeze",
@@ -245,6 +281,7 @@ def _visual_row(
     *, reason: str, trim_side: str | None, trim_applied: bool,
     old_start: float | None = None, new_start_value: float | None = None,
     old_end: float | None = None, new_end_value: float | None = None,
+    inside_delivery_overlap_sec: float | None = None,
 ) -> dict:
     return {
         "authority": "boundary_engine_pass",
@@ -267,6 +304,13 @@ def _visual_row(
         "reason": reason,
         "evidence_source": "local_performance",
         "semantic_membership_changed": False,
+        # D-177: the portion of a STRADDLING event that falls inside the
+        # measured DELIVERY span -- None for every non-straddle row (the
+        # existing D-116 rows never set this). Never a fabricated value:
+        # only ever the real event/delivery-span arithmetic.
+        "inside_delivery_overlap_sec": (
+            round(inside_delivery_overlap_sec, 3) if inside_delivery_overlap_sec is not None else None
+        ),
     }
 
 
@@ -315,11 +359,28 @@ def tighten_selected_visual_edges(
         else:
             for event, zone, overlaps, before, after in classified:
                 if zone == ZONE_DELIVERY:
-                    rows.append(_visual_row(
-                        clip, event, zone, overlaps, delivery_span,
-                        reason=BOUNDARY_REASON_VISUAL_DELIVERY_OVERLAP_NO_TRIM,
-                        trim_side=None, trim_applied=False,
-                    ))
+                    if before and after:
+                        # D-177: straddles BOTH DELIVERY edges at once (an
+                        # event wider than the whole measured span) --
+                        # ambiguous, fails open, never trimmed.
+                        rows.append(_visual_row(
+                            clip, event, zone, overlaps, delivery_span,
+                            reason=BOUNDARY_REASON_VISUAL_AMBIGUOUS_STRADDLE_NO_TRIM,
+                            trim_side=None, trim_applied=False,
+                        ))
+                    elif not before and not after:
+                        # Genuinely embedded in DELIVERY -- unchanged D-116
+                        # behavior, same reason, same tests.
+                        rows.append(_visual_row(
+                            clip, event, zone, overlaps, delivery_span,
+                            reason=BOUNDARY_REASON_VISUAL_DELIVERY_OVERLAP_NO_TRIM,
+                            trim_side=None, trim_applied=False,
+                        ))
+                    # else: a one-sided straddle (before XOR after) -- its
+                    # own eligibility (D-177) is decided below, alongside
+                    # the ENTRY/EXIT edge loops, so it can chain correctly
+                    # off whatever those loops already moved the running
+                    # edge to.
 
             # ENTRY -- process outermost-in (ascending start) so contiguous
             # entry events correctly chain off the running (already-
@@ -383,6 +444,108 @@ def tighten_selected_visual_edges(
                     old_end=old_end, new_end_value=new_end,
                 ))
 
+            # D-177 -- ENTRY partial-edge trim: a DELIVERY-zone event that
+            # starts before delivery_span.start and ends inside it (before
+            # XOR after in classify_event_zone's own terms). Runs AFTER the
+            # pure-ENTRY loop above so it chains off whatever edge that
+            # loop already established. Eligible only when the event's own
+            # portion INSIDE DELIVERY is no larger than this module's
+            # existing AUDIO_EDGE_OVERLAP_TOLERANCE_SEC -- no new constant.
+            entry_straddle_events = sorted(
+                (item for item in classified if item[1] == ZONE_DELIVERY and item[3] and not item[4]),
+                key=lambda item: (item[0]["start"], item[0]["end"]),
+            )
+            for event, zone, overlaps, before, after in entry_straddle_events:
+                # Materiality first (D-177's own eligibility test): a
+                # straddling event whose inside-DELIVERY portion exceeds
+                # this module's existing edge-touch tolerance is real
+                # DELIVERY evidence regardless of where the clip's own
+                # current edge happens to sit -- same reason D-116 already
+                # uses for any DELIVERY-owned event, same D-116 tests.
+                inside_overlap = max(0.0, event["end"] - delivery_span.start)
+                if inside_overlap > AUDIO_EDGE_OVERLAP_TOLERANCE_SEC:
+                    rows.append(_visual_row(
+                        clip, event, zone, overlaps, delivery_span,
+                        reason=BOUNDARY_REASON_VISUAL_DELIVERY_OVERLAP_NO_TRIM, trim_side="ENTRY", trim_applied=False,
+                        inside_delivery_overlap_sec=inside_overlap,
+                    ))
+                    continue
+                touches = event["start"] <= new_start + AUDIO_EDGE_OVERLAP_TOLERANCE_SEC and event["end"] > new_start
+                if not touches:
+                    rows.append(_visual_row(
+                        clip, event, zone, overlaps, delivery_span,
+                        reason=BOUNDARY_REASON_VISUAL_NOT_AT_EDGE, trim_side="ENTRY", trim_applied=False,
+                        inside_delivery_overlap_sec=inside_overlap,
+                    ))
+                    continue
+                # Same hard floor as the pure-ENTRY loop above: never past
+                # delivery_span.start. For any genuine straddle this always
+                # resolves to exactly delivery_span.start (the event's own
+                # end is, by the materiality gate above, no more than
+                # `tolerance` past it) -- the DELIVERY-side sliver itself is
+                # left untouched, never shaved, per this module's own
+                # speech-safety invariant (words are the hard floor).
+                candidate = min(event["end"], delivery_span.start)
+                if candidate <= new_start:
+                    rows.append(_visual_row(
+                        clip, event, zone, overlaps, delivery_span,
+                        reason=BOUNDARY_REASON_VISUAL_BLOCKED_BY_DELIVERY_FLOOR, trim_side="ENTRY", trim_applied=False,
+                        inside_delivery_overlap_sec=inside_overlap,
+                    ))
+                    continue
+                old_start = new_start
+                new_start = candidate
+                entry_trim_applied = True
+                rows.append(_visual_row(
+                    clip, event, zone, overlaps, delivery_span,
+                    reason=BOUNDARY_REASON_VISUAL_ENTRY_PARTIAL_EDGE_TRIM, trim_side="ENTRY", trim_applied=True,
+                    old_start=old_start, new_start_value=new_start, inside_delivery_overlap_sec=inside_overlap,
+                ))
+
+            # D-177 -- EXIT partial-edge trim, symmetric to the ENTRY case
+            # above.
+            exit_straddle_events = sorted(
+                (item for item in classified if item[1] == ZONE_DELIVERY and item[4] and not item[3]),
+                key=lambda item: (item[0]["end"], item[0]["start"]),
+                reverse=True,
+            )
+            for event, zone, overlaps, before, after in exit_straddle_events:
+                inside_overlap = max(0.0, delivery_span.end - event["start"])
+                if inside_overlap > AUDIO_EDGE_OVERLAP_TOLERANCE_SEC:
+                    rows.append(_visual_row(
+                        clip, event, zone, overlaps, delivery_span,
+                        reason=BOUNDARY_REASON_VISUAL_DELIVERY_OVERLAP_NO_TRIM, trim_side="EXIT", trim_applied=False,
+                        inside_delivery_overlap_sec=inside_overlap,
+                    ))
+                    continue
+                touches = event["end"] >= new_end - AUDIO_EDGE_OVERLAP_TOLERANCE_SEC and event["start"] < new_end
+                if not touches:
+                    rows.append(_visual_row(
+                        clip, event, zone, overlaps, delivery_span,
+                        reason=BOUNDARY_REASON_VISUAL_NOT_AT_EDGE, trim_side="EXIT", trim_applied=False,
+                        inside_delivery_overlap_sec=inside_overlap,
+                    ))
+                    continue
+                # Symmetric hard floor: never past delivery_span.end -- the
+                # DELIVERY-side sliver is left untouched, same speech-safety
+                # invariant as the entry case above.
+                candidate = max(event["start"], delivery_span.end)
+                if candidate >= new_end:
+                    rows.append(_visual_row(
+                        clip, event, zone, overlaps, delivery_span,
+                        reason=BOUNDARY_REASON_VISUAL_BLOCKED_BY_DELIVERY_FLOOR, trim_side="EXIT", trim_applied=False,
+                        inside_delivery_overlap_sec=inside_overlap,
+                    ))
+                    continue
+                old_end = new_end
+                new_end = candidate
+                exit_trim_applied = True
+                rows.append(_visual_row(
+                    clip, event, zone, overlaps, delivery_span,
+                    reason=BOUNDARY_REASON_VISUAL_EXIT_PARTIAL_EDGE_TRIM, trim_side="EXIT", trim_applied=True,
+                    old_end=old_end, new_end_value=new_end, inside_delivery_overlap_sec=inside_overlap,
+                ))
+
         audit.extend(rows)
 
         if (new_start == start and new_end == end) or new_end - new_start < AUDIO_EDGE_MINIMUM_REMAINING_SEC:
@@ -394,6 +557,55 @@ def tighten_selected_visual_edges(
         )
         output.append(replace(clip, start=new_start, end=new_end, boundary_reason=reason))
     return tuple(output), tuple(audit)
+
+
+def _partial_edge_trim_summary(
+    before_by_id: Mapping[str, DraftClip],
+    after_by_id: Mapping[str, DraftClip],
+    visual_edge_audit: Iterable[dict],
+) -> tuple[dict, ...]:
+    """D-177: one compact, per-clip summary row -- only for a clip where at
+    least one straddling event was actually evaluated for partial-edge
+    eligibility (`inside_delivery_overlap_sec is not None` on its own
+    audit row). Never dumps a transcript; reuses the same real numbers
+    the per-event `visual_edge_audit` rows already carry."""
+    by_clip: dict[str, list[dict]] = {}
+    for row in visual_edge_audit:
+        if row.get("inside_delivery_overlap_sec") is None:
+            continue
+        by_clip.setdefault(row["clip_id"], []).append(row)
+
+    def _pick(rows: list[dict]) -> dict | None:
+        return next((r for r in rows if r.get("trim_applied")), rows[0] if rows else None)
+
+    summary: list[dict] = []
+    for clip_id, rows in by_clip.items():
+        entry_rows = [r for r in rows if r.get("trim_side") == "ENTRY"]
+        exit_rows = [r for r in rows if r.get("trim_side") == "EXIT"]
+        entry_pick = _pick(entry_rows)
+        exit_pick = _pick(exit_rows)
+        entry_applied = bool(entry_pick and entry_pick.get("trim_applied"))
+        exit_applied = bool(exit_pick and exit_pick.get("trim_applied"))
+        before_clip = before_by_id.get(clip_id)
+        after_clip = after_by_id.get(clip_id)
+        reasons = sorted({r["reason"] for r in (entry_pick, exit_pick) if r})
+        summary.append({
+            "clip_id": clip_id,
+            "partial_edge_trim_evaluated": True,
+            "partial_edge_trim_applied": entry_applied or exit_applied,
+            "entry_partial_edge_trim_applied": entry_applied,
+            "exit_partial_edge_trim_applied": exit_applied,
+            "entry_event_kind": entry_pick["event_kind"] if entry_pick else None,
+            "exit_event_kind": exit_pick["event_kind"] if exit_pick else None,
+            "entry_inside_delivery_overlap_sec": entry_pick["inside_delivery_overlap_sec"] if entry_pick else None,
+            "exit_inside_delivery_overlap_sec": exit_pick["inside_delivery_overlap_sec"] if exit_pick else None,
+            "boundary_before_start": round(float(before_clip.start), 3) if before_clip else None,
+            "boundary_before_end": round(float(before_clip.end), 3) if before_clip else None,
+            "boundary_after_start": round(float(after_clip.start), 3) if after_clip else None,
+            "boundary_after_end": round(float(after_clip.end), 3) if after_clip else None,
+            "partial_edge_trim_reason": "+".join(reasons) if reasons else None,
+        })
+    return tuple(summary)
 
 
 def apply_post_freeze_boundary_pass(result: ProcessingResult) -> ProcessingResult:
@@ -416,8 +628,15 @@ def apply_post_freeze_boundary_pass(result: ProcessingResult) -> ProcessingResul
     # D-116: visual CASE A edge trimming runs LAST in the same pass, on
     # whatever audio-tightening already left, so audio and visual evidence
     # combine through this one existing Boundary contract rather than
-    # competing (no second pass).
+    # competing (no second pass). D-177's own partial-edge trim runs
+    # inside this same call -- see tighten_selected_visual_edges's own
+    # docstring.
+    pre_visual_selected = {clip.clip_id: clip for clip in selected}
     selected, visual_edge_audit = tighten_selected_visual_edges(selected, diagnostics)
+    post_visual_selected = {clip.clip_id: clip for clip in selected}
+    partial_edge_trim_summary = _partial_edge_trim_summary(
+        pre_visual_selected, post_visual_selected, visual_edge_audit,
+    )
 
     splits = [row for row in interior_audit if row.get("decision") == "split"]
     rejects = [row for row in interior_audit if row.get("decision") == "reject"]
@@ -427,6 +646,14 @@ def apply_post_freeze_boundary_pass(result: ProcessingResult) -> ProcessingResul
     diagnostics["post_selection_interior_gap_trim"] = [*(diagnostics.get("post_selection_interior_gap_trim") or ()), *splits]
     diagnostics["post_selection_interior_gap_trace"] = [*(diagnostics.get("post_selection_interior_gap_trace") or ()), *rejects]
     diagnostics["boundary_visual_edge_trim"] = [*(diagnostics.get("boundary_visual_edge_trim") or ()), *visual_edge_audit]
+    # D-177: the compact per-clip partial-edge-trim summary -- separate key
+    # from the existing D-116 per-event `boundary_visual_edge_trim` list
+    # above (which already carries every straddle sub-decision too, via
+    # its own `inside_delivery_overlap_sec` field) so no existing consumer
+    # of that list's row shape is affected.
+    diagnostics["boundary_partial_edge_trim"] = [
+        *(diagnostics.get("boundary_partial_edge_trim") or ()), *partial_edge_trim_summary,
+    ]
     diagnostics["boundary_engine_pass"] = {
         "schema_version": SCHEMA_VERSION,
         "stage": STAGE_POST_FREEZE,
@@ -441,6 +668,13 @@ def apply_post_freeze_boundary_pass(result: ProcessingResult) -> ProcessingResul
         "visual_entry_trim_count": sum(1 for row in visual_edge_audit if row.get("reason") == BOUNDARY_REASON_VISUAL_ENTRY_EDGE_TRIM and row.get("trim_applied")),
         "visual_exit_trim_count": sum(1 for row in visual_edge_audit if row.get("reason") == BOUNDARY_REASON_VISUAL_EXIT_EDGE_TRIM and row.get("trim_applied")),
         "visual_edge_rows": list(visual_edge_audit),
+        # D-177 run-level counts (module docstring's own "Partial-edge trim
+        # for a straddling event" section).
+        "partial_edge_trim_evaluated_count": len(partial_edge_trim_summary),
+        "partial_edge_trim_applied_count": sum(1 for row in partial_edge_trim_summary if row["partial_edge_trim_applied"]),
+        "entry_partial_edge_trim_count": sum(1 for row in partial_edge_trim_summary if row["entry_partial_edge_trim_applied"]),
+        "exit_partial_edge_trim_count": sum(1 for row in partial_edge_trim_summary if row["exit_partial_edge_trim_applied"]),
+        "partial_edge_trim_rows": list(partial_edge_trim_summary),
         "ownership_contract": [dict(row) for row in PHYSICAL_OWNERSHIP_CONTRACT],
     }
     return replace(result, draft=replace(draft, selected=selected, diagnostics=diagnostics))
