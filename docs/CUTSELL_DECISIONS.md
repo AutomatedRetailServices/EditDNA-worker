@@ -34787,3 +34787,672 @@ bounded P1 architecture/forensic task is the recommended next gate and
 requires Product Owner authorization to begin; whether/how to close the
 remaining PARTIALLY_CLOSED BestTake-gap branches, if at all, before
 moving to P1, is also a Product Owner decision).
+
+---
+
+D-193: P1 EDITORIAL MOMENT & SEQUENCE UNDERSTANDING -- ARCHITECTURE /
+FORENSIC (post D-192, PHASE 0, no implementation, no RAW, no provider,
+no BestTake/Family/Boundary/Pacing change, no P1 authority)
+
+BRANCH/HEAD: `feature/runpod-pod-on-demand` @ `a5a28db95eae80bb754a4ba
+788aed5cb04de0fd3` (D-192 decision-log commit). Clean tree confirmed
+before and after. This entry is the ONLY change this task makes.
+
+FILES CHANGED: docs only (`docs/CUTSELL_DECISIONS.md`, this entry). No
+`cutsell_worker/*.py`, no `tests/*.py`, no `.github/workflows/*.yml`
+file touched. No RAW dispatched. No provider/network call made.
+
+**HEADLINE FINDING: P1's architecture is not merely "ready" -- it was
+already fully designed, name-for-name, in this repo's own docs at
+`docs/CUTSELL_CANONICAL_ENGINE_ARCHITECTURE_D098.md` Section 15
+(D-178A/D-178A.1), before this task began.** Section 15.4 ("New
+pre-parity capability: Editorial Moment & Sequence Understanding") IS
+P1; Section 15.5 ("Whole-Video Editorial Reasoning") IS the future P2;
+Section 15.15 already numbers Editorial Moment & Sequence Understanding
+as literally **P1** in its canonical P0-P11 priority list, with Whole-
+Video Editorial Reasoning as **P2** immediately after it. This task's
+own contribution is: (a) verify that design still holds against the
+ACTUAL current repo (post D-192, six months of D-150 through D-192
+work since D-178A), (b) do the concrete code-level capability/
+duplication audit the directive requires, (c) turn the doc's
+conceptual field lists into a repo-grounded, ID-reusing type design,
+and (d) recommend the smallest offline Phase-A (D-194).
+
+## 1. P1 OWNERSHIP DEFINITION
+
+P1 answers, per source-real region: **"what role does this moment play
+in the recording/editing PROCESS itself"** and, across adjacent
+moments, **"what sequence structure do they form."** This is Milestone-1
+(RAW -> Cut.ai) territory (D-098 Section 15.4), explicitly NOT Human
+Gold (Layers 10-16) and explicitly NOT Commercial Moment Understanding
+(Section 15.11/Item 22 below). P1 is a HIGHER-ORDER UNDERSTANDING layer:
+it CONSUMES already-produced evidence and forms HYPOTHESES; it does not
+decide membership, winner, order, or physical cuts (13.3.2's authority
+principle, restated at 15.4/15.10, binding).
+
+## 2. P1 NON-OWNERSHIP DEFINITION
+
+P1 does NOT own or re-derive: ASR/word timing (owned by `asr.py`/
+`canonical_asr_evidence.py`/`language_spine.py`'s `LanguageWord`);
+`LanguagePhrase`/`LanguageUtterance`/`LanguageAttempt` identity (owned
+by `language_spine.py`/`language_utterance_attempt.py`); Proposition
+Identity (owned by `language_proposition_relation.py`'s
+`PropositionCandidate`, `prop_`-prefixed, content+timing-anchored);
+Relation Identity (owned by `language_proposition_relation.py`'s
+`RelationEvidence` + `attempt_relationship_authority.py`'s
+`resolve_final_attempt_relation`); Behavior State (owned by
+`raw_understanding_map.py`'s `BehaviorHypothesis` + the D-111/13.4
+vocabulary); Family Formation (owned by `take_grouping.py`/`take_
+grouping_provider.py`/`hybrid_session_cleanup.py`); BestTake (owned by
+`pipeline.py::_semantic_best_take`, `deterministic_best_take_
+authority.py`, D-183/D-184/D-191's `bounded_finalist_arbiter.py`/
+`bounded_finalist_authority.py`); Boundary (`boundary_engine_pass.py`);
+Pacing (`dialogue_pacing_transition.py`); Ordering (no owner exists yet
+-- named future P7, Section 15.8, also not P1's job); Prosodic
+audio analysis (`prosodic_audio_v2.py`/`prosodic_finalist_
+comparison.py`); Commercial/sales-funnel scoring of any kind (`HOOK_
+STRENGTH`/`CTA_STRENGTH`/virality/conversion -- explicitly forbidden by
+this task's own directive and by D-098 Section 15.11's existing P1-vs-
+Commercial-Moment separation).
+
+## 3. EXISTING CAPABILITY MAP (forensic, code-verified this task)
+
+| CAPABILITY | CURRENT MODULE | CURRENT TYPE/FIELD | CURRENT AUTHORITY | P1 SHOULD |
+|---|---|---|---|---|
+| Recording process / false start / abandoned attempt / retry / correction / continuation / post-take reset / breaking character | `raw_understanding_map.py` (`BehaviorHypothesis.label`), D-111/13.4 vocabulary; `language_utterance_attempt.py`'s `LanguageAttempt.attempt_state` (`PRE_TAKE_SETUP`/`FALSE_START`/`ABANDONED_ATTEMPT`/`CLEAN_ATTEMPT`/`CORRECTION`/`CONTINUATION`/`POST_TAKE_RESET`/`RECORDING_PROCESS` -- IMPLEMENTED, D-168 OFFLINE PROVEN) | evidence dataclass field, not runtime-consumed by BestTake yet | none (evidence only) | **REFERENCE** -- reuse `LanguageAttempt.attempt_state` + `BehaviorHypothesis.label` verbatim as P1's moment-role EVIDENCE INPUT; never re-derive |
+| Audience delivery | `raw_understanding_map.py`/D-111 vocabulary names `AUDIENCE_DELIVERY`; no dedicated typed field exists on any CURRENT production object (`LanguageAttempt.attempt_state` does not include an `AUDIENCE_DELIVERY`/`CLEAN_AUDIENCE_DELIVERY` value today -- its 8 states are all process/interruption states, per code read this task) | vocabulary named in docs; not a code enum value | none | **NEW CAPABILITY** (P1's own `CLEAN_AUDIENCE_DELIVERY` classification, composed from the ABSENCE of process states + `meaning_completion=='MEANING_COMPLETE'` + no restart/correction evidence -- see Item 8) |
+| Clean attempt | `language_utterance_attempt.py::ATTEMPT_STATE` enum's `CLEAN_ATTEMPT` value | `LanguageAttempt.attempt_state` | none (evidence) | **REUSE** directly as one input signal toward `CLEAN_AUDIENCE_DELIVERY` |
+| Meaning completion | `language_utterance_attempt.py`/`language_proposition_relation.py`'s `meaning_completion` (`MEANING_COMPLETE`/`MEANING_INCOMPLETE`/`MEANING_UNCERTAIN`) | field on `LanguageAttempt` and `PropositionCandidate` | none (evidence) | **REUSE** verbatim |
+| Proposition identity | `language_proposition_relation.py::PropositionCandidate` (`prop_`-prefixed id, content+timing-anchored, D-169 OFFLINE PROVEN) | `proposition_candidate_id` | structured, not P1's | **REFERENCE by id only** |
+| Relation evidence | `language_proposition_relation.py::RelationEvidence` (paired `left_proposition_candidate_id`/`right_proposition_candidate_id`, D-169) + `attempt_relationship_authority.py`'s final 5-way resolution (D-158, RAW-proven) | dataclass, no own id (identified by the pair it relates) | structured (`resolve_final_attempt_relation`), not P1's | **REFERENCE by (left_id, right_id) pair** -- P1 must not mint a competing relation-identity scheme |
+| Visual usability | `watch_listen_understanding.py::UnderstandingSpan` (`entry_usability`/`delivery_usability`/`exit_usability`, `performance_usability_hypothesis`) + D-172's `CandidateZoneUsabilityV2` | dataclass fields | evidence only (D-172 consumed by D-184's arbiter as ONE dimension) | **REUSE** verbatim as one input |
+| Prosodic delivery | `prosodic_audio_v2.py::ProsodicDeliveryEvidence` (continuity/hesitation/restart/pause/speech-rate/energy/emphasis states, D-187/D-188/D-189, REAL_MEDIA_QA_CONFIRMED per D-190.1) | dataclass fields | evidence only (D-184's arbiter, D-191/D-192's authority) | **REUSE where already available** -- P1 must NOT reimplement Prosodic analysis (this task's own explicit instruction, honored: no new audio code proposed anywhere in this entry) |
+| Sequence / chronology | none dedicated -- `source_order`/`source_start`/`source_end` exist on every relevant object (`CandidateTake`, `LanguageAttempt`, `PropositionCandidate`, `UnderstandingSpan`) as plain source-position fields | plain numeric fields | none | **NEW CAPABILITY** (P1's `EditorialSequenceHypothesis` is the first thing that reasons ACROSS these positions as a sequence, not merely orders by them) |
+| Whole-video provider output | `whole_video_openai.py::OpenAIWholeVideoProvider` -> `whole_video_analysis.py::SourceVideoContext`/`TemporalEvent` (REAL, provider-backed, GPT-4o-mini) | `events: Tuple[TemporalEvent]` with a FIXED kind vocabulary (`false_start`/`wrong_take`/`verbal_fumble`/`body_reset`/`retry_setup`/`retry`/`valid_delivery`/`product_demo`/`story_beat`/`proof`/`reaction`/`transition`/`cta`/etc., NO `preassembled`/`final_sequence` kind exists today -- verified by direct read this task) | evidence only, consumed by `_reset_debris_at_edges`/pre-group credit (D-098 Section 4) | **REUSE as one optional evidence input** -- see Item 34 |
+| Current composite logic | `composite_resolver.py` (19-hook consolidation, D-023, ACTIVE) + `realization_resolver.py` (D-050C1, **SHADOW-ONLY** -- its own docstring: "not consulted by, and never feeds back into ... today's engine remains the sole active authority" -- verified by direct read this task; D-098 Section 3's "EXISTING/RAW-proven" label for `realization_resolver.py` refers to `realization_resolver.py`'s OWN offline-proven shadow computation, not to it being the live authority) | n/a | `composite_resolver.py` is the live authority; `realization_resolver.py` is diagnostics-only | **LEAVE ALONE** -- P1 has no composite role (15.7, restated) |
+| Current source-order logic | `realization_resolver.py`'s CTA-ordering logic (narrow, prompt-embedded, per D-098 14.7/15.8) is the only existing ordering-adjacent code, and it lives inside the SHADOW resolver, not the active path | n/a | none active | **LEAVE ALONE** -- Ordering is future P7 (15.8), not P1 |
+
+## 4. DUPLICATION AUDIT
+
+Source-scanned `cutsell_worker/*.py` for `preassembled`, `final_take`/
+`final take`, `final_sequence`/`final sequence`, `take_series`/`take
+series`, `recording_session`/`recording session`, `clean_sequence`/
+`clean sequence`, `edited_sequence`/`edited sequence`, `final_version`/
+`final version` (case-insensitive), including comments and docstrings.
+**Result: zero real implementations found.** Two incidental prose hits:
+`local_retry_grouping.py:302` ("become an independent final take, but
+it is never allowed to bridge...") and `pipeline.py:1097` ("intended
+final take. The local Watch+Listen ranker still establishes the
+fallback...") -- both plain-English uses of "final take" describing the
+EXISTING DeliveryScorer/fallback winner concept, not a sequence-
+detection mechanism. **No silent duplicate implementation exists.**
+Nothing in the codebase currently attempts "final take"/"best sequence"/
+"edited sequence"/"recording session"/"take series"/"clean sequence"/
+"preassembled" detection as its own capability. `whole_video_openai.py`'s
+prompt (Item 34) is the closest adjacent capability and does NOT
+attempt this either -- its event vocabulary has no preassembled/final-
+sequence kind.
+
+## 5-20. RELATIONSHIP AUDIT (per Section 15.10's corrected dependency
+stack, verified against the actual current repo, not just the doc)
+
+5. **Behavior-State relationship:** P1 CONSUMES `BehaviorHypothesis`/
+   `LanguageAttempt.attempt_state` (D-111/13.4 vocabulary, IMPLEMENTED);
+   never re-derives a behavior state itself.
+6. **Language-Spine relationship:** P1 CONSUMES `LanguageWord`/
+   `LanguagePhrase` (D-166), `LanguageUtterance`/`LanguageAttempt`
+   (D-168) -- all three OFFLINE PROVEN, code-verified this task. P1
+   sits ABOVE the Spine, never inside it.
+7. **Proposition relationship:** P1 CONSUMES `PropositionCandidate` by
+   id (D-169, OFFLINE PROVEN); does not mint a competing identity.
+8. **Relation relationship:** P1 CONSUMES `RelationEvidence` by the
+   (left, right) proposition-id pair (D-169) and `attempt_
+   relationship_authority.py`'s final resolved relation (D-158, RAW-
+   PROVEN, the "most mature layer already" per D-098 14.2); P1 may
+   GROUP relation chains (retry -> retry -> clean realization) into one
+   `EditorialSequenceHypothesis` but never overrides the relation
+   itself.
+9. **Watch+Listen relationship:** P1 CONSUMES `WatchListenUnderstanding`/
+   `UnderstandingSpan` (D-158-era, code-verified "read by nothing yet"
+   this task -- a genuinely unused, already-built hypothesis container)
+   and `RawUnderstandingMap`/`RawUnderstandingSpan` (D-155, also code-
+   verified "read by nothing yet"). **Major finding:** `UnderstandingSpan`
+   ALREADY carries `span_id`, `source_asset_id`, `source_start/end`,
+   `behavior_state_hypotheses`, `attempt_relation_hypotheses`,
+   `meaning_completion_hypothesis`, `entry_usability`/`delivery_
+   usability`/`exit_usability`, `conflict_flags`, `evidence_provenance`
+   -- this is structurally VERY CLOSE to what P1's per-moment output
+   needs. This changes the Phase-A recommendation (Item 43).
+10. **Visual relationship:** P1 may consume D-172's `CandidateZoneUsability
+    V2` evidence (already one of D-184's four dimensions) as one signal
+    toward performance usability; never re-scores visual quality itself.
+11. **Prosodic relationship:** P1 may consume `ProsodicDeliveryEvidence`
+    (D-187/D-188, REAL_MEDIA_QA_CONFIRMED per D-190.1) where already
+    computed for a family; P1 does not decide BestTake with it and does
+    not reimplement Prosodic analysis, per this task's own explicit
+    instruction.
+12. **Family relationship:** P1 does NOT form or split families in
+    Phase A (this task's own binding instruction, consistent with
+    D-098 15.10's "Stable Family/Realization Formation may CONSUME
+    P1's hypotheses" -- one-directional, P1 -> Family, never reverse).
+13. **BestTake relationship:** P1 may eventually supply CONTEXT ("this
+    candidate belongs to a recording-process sequence" / "this
+    candidate is part of a coherent final-looking sequence") to D-184's
+    arbiter or D-191's authority as ONE additional evidence dimension,
+    identical in shape to how D-188's Prosodic evidence was integrated
+    -- but ONLY via a SEPARATELY authorized integration gate (this
+    task's own binding instruction); D-193 proposes no such gate.
+14. **Composite relationship:** none -- `composite_resolver.py` is
+    unaffected; P1 has no composite role (Section 15.7, restated).
+15. **Freeze relationship:** none -- P1 produces hypotheses strictly
+    BEFORE Family Formation/BestTake/Freeze in the dependency chain
+    (15.10); it has no post-Freeze role.
+16. **Ordering relationship:** P1's `EditorialSequenceHypothesis` MAY
+    later become evidence for the still-unbuilt future P7 Ordering
+    capability (Section 15.8) -- P1 itself never reorders the frozen
+    edit, per this task's own explicit instruction.
+17. **Boundary relationship:** none -- Boundary still decides physical
+    source edges (`boundary_engine_pass.py`, D-177 CLOSED, unchanged);
+    P1 identifies structure only, per this task's own explicit
+    instruction.
+18. **Pacing relationship:** none -- `dialogue_pacing_transition.py`
+    (D-142) operates strictly on already-frozen, already-boundary-safe
+    membership (D-129 Section 11.4); P1 has no role there.
+19. **P1 vs P2 distinction:** P1 (Section 15.4) reasons LOCALLY and
+    across NEIGHBORING moments within/near one attempt/family
+    neighborhood; P2 -- Whole-Video Editorial Reasoning (Section 15.5,
+    named but MISSING/FUTURE, NOT started, NOT touched by this task --
+    reasons GLOBALLY across the complete RAW (duplicate-proposition
+    realization across DISTANT regions, source-take-regions-vs-final-
+    sequence, global redundancy, cross-region supersession, whole-video
+    narrative continuity). D-193 does not collapse these into one
+    module; the Final-Sequence-Supersession Hypothesis (Item 32) is
+    explicitly named as a P1-produced HYPOTHESIS that P2/structured
+    authority, not P1 itself, would act on.
+20. **P1 vs Commercial Moment distinction:** P1 answers "what role did
+    this moment play in the RECORDING/EDITING PROCESS" (Milestone 1);
+    Commercial Moment Understanding (Section 15.11, MISSING/FUTURE, P9
+    in the 15.15 priority list) answers "what COMMERCIAL/PERSUASIVE job
+    does kept content perform" (POST-PARITY, POST-HUMAN-GOLD). `contracts.
+    SemanticRole` (`HOOK`/`PROBLEM`/`FEATURES`/`BENEFITS`/`PROOF`/`STORY`/
+    `CTA`/`OTHER`) remains DORMANT on the active Clean Cut V1 path per
+    D-098 14.8/14.9 and CLAUDE.md's own "do not force rigid sales-funnel
+    logic during Clean Cut" rule -- P1 introduces NO `HOOK_STRENGTH`/
+    `PROBLEM_STRENGTH`/`BENEFIT_STRENGTH`/`PROOF_STRENGTH`/`CTA_
+    STRENGTH`/virality/conversion field of any kind, confirmed by this
+    entry's own type proposals (Items 23-24) containing none.
+
+## 21. EditorialMoment PROPOSED TYPE (design only, not built)
+
+Given Item 9's finding, `EditorialMoment` should be a THIN, ADDITIVE
+CLASSIFICATION layered onto the ALREADY-EXISTING `UnderstandingSpan`
+(D-158) + `RawUnderstandingSpan` (D-155) identity, not a duplicate
+container re-copying their fields:
+
+```
+EditorialMoment (proposed, NOT implemented):
+    span_id: str              # REUSE UnderstandingSpan.span_id verbatim
+                               # (already mirrors RawUnderstandingSpan's
+                               # own span_id -- one shared identity, per
+                               # watch_listen_understanding.py's own
+                               # docstring)
+    source_asset_id: str       # REUSE
+    source_start: float        # REUSE
+    source_end: float          # REUSE
+    attempt_id: str | None     # REFERENCE LanguageAttempt.attempt_id
+    proposition_candidate_id: str | None   # REFERENCE, never re-mint
+    related_span_ids: Tuple[str, ...]      # REFERENCE via
+                               # AttemptRelationHypothesis.left_span_id
+                               # chains, never a new relation identity
+    moment_role: str           # NEW -- Item 25's vocabulary
+    audience_delivery_status: str   # NEW (SUPPORTED/WEAK/MIXED/UNKNOWN)
+    recording_process_status: str   # NEW (categorical, same vocabulary)
+    completion_status: str     # REUSE meaning_completion_hypothesis
+                               # verbatim, renamed for this context only
+                               # in the local field, not the source object
+    local_sequence_position: int    # NEW (source-order index within its
+                               # local neighborhood only, never a global
+                               # position claim)
+    confidence: str            # SUPPORTED/WEAK/MIXED/UNKNOWN (Item 33)
+    conflict_flags: Tuple[str, ...]  # REUSE the same conflict-flag
+                               # convention every existing evidence
+                               # object already uses
+    provenance: Tuple[str, ...]      # names which existing objects/ids
+                               # this classification was derived from
+                               # (never invents new evidence)
+```
+
+No `selected_clip_id`, no score, no weight, no commercial field.
+
+## 22. EditorialSequenceHypothesis PROPOSED TYPE (design only, not built)
+
+This IS a genuinely new capability (Item 3's "sequence/chronology" row)
+-- nothing existing reasons across positions as a sequence:
+
+```
+EditorialSequenceHypothesis (proposed, NOT implemented):
+    sequence_id: str           # NEW, minted the same content+timing-
+                               # anchored way canonical_identity.py
+                               # already mints every other id (never
+                               # timestamp-only)
+    source_asset_id: str
+    moment_ids: Tuple[str, ...]      # REFERENCE EditorialMoment.span_id
+                               # values, ordered by source position
+    source_start: float
+    source_end: float
+    sequence_kind: str         # NEW -- Item 26's vocabulary
+    sequence_completeness: str       # SUPPORTED/WEAK/MIXED/UNKNOWN
+    recording_process_density: str   # categorical (LOW/MIXED/HIGH),
+                               # never a numeric score
+    audience_delivery_density: str   # categorical, same convention
+    proposition_progression_status: str   # derived from the REFERENCED
+                               # RelationEvidence chain's own resolved
+                               # relations (Item 8), never re-derived
+    internal_redundancy_status: str  # SUPPORTED/WEAK/MIXED/UNKNOWN
+    earlier_source_redundancy_status: str  # names the Final-Sequence-
+                               # Supersession Hypothesis (Item 32) --
+                               # a HYPOTHESIS field, never an action
+    continuity_status: str
+    confidence: str
+    conflict_flags: Tuple[str, ...]
+    provenance: Tuple[str, ...]
+```
+
+## 23. MOMENT-ROLE VOCABULARY
+
+`PRE_TAKE_SETUP`, `RECORDING_PROCESS`, `FALSE_START`, `ABANDONED_
+ATTEMPT`, `RETRY`, `CORRECTION`, `CONTINUATION`, `CLEAN_AUDIENCE_
+DELIVERY`, `POST_TAKE_RESET`, `BREAKING_CHARACTER`, `NEW_AUDIENCE_BEAT`,
+`PREASSEMBLED_FINAL_SEQUENCE` -- this is EXACTLY D-098 Section 15.4's
+already-named vocabulary, verified against Item 3's audit: `PRE_TAKE_
+SETUP`/`FALSE_START`/`ABANDONED_ATTEMPT`/`RECORDING_PROCESS`/`POST_TAKE_
+RESET`/`BREAKING_CHARACTER`/`NEW_AUDIENCE_BEAT` already exist as Behavior
+States; `RETRY`/`CORRECTION`/`CONTINUATION` already exist as Attempt
+Relationships (Section 13.6); only `CLEAN_AUDIENCE_DELIVERY` and
+`PREASSEMBLED_FINAL_SEQUENCE` are genuinely new (confirmed by Item 3's
+code audit: no `AUDIENCE_DELIVERY`-equivalent value exists on
+`LanguageAttempt.attempt_state` today). No duplicate competing enum is
+proposed anywhere in this entry -- `moment_role` REFERENCES the existing
+state/relation value where one exists (Item 21's `provenance` field
+records which).
+
+## 24. SEQUENCE-KIND VOCABULARY
+
+`RECORDING_PROCESS_SEQUENCE`, `TAKE_SERIES`, `CLEAN_DELIVERY_SEQUENCE`,
+`PREASSEMBLED_FINAL_SEQUENCE`, `MIXED`, `UNCERTAIN` -- six values, per
+this task's own "avoid a huge ontology" instruction, and per D-098's
+own repeated anti-rule-proliferation doctrine (13.19/15.17).
+
+## 25. CLEAN AUDIENCE DELIVERY CONTRACT
+
+A source-real moment that (a) shows NO process-state evidence
+(`recording_process_evidence`/`restart_evidence`/`correction_evidence`
+all False on the underlying `LanguageAttempt`, per D-168's own already-
+computed fields -- REUSED, never re-derived), (b) has `meaning_
+completion == MEANING_COMPLETE` (D-168/D-169, REUSED), and (c) carries
+no unresolved `FALSE_START`/`ABANDONED_ATTEMPT` relation evidence to an
+adjacent span. Supporting evidence where available (never required):
+D-172 Visual usability, D-187/D-188 Prosodic delivery (both REUSED, per
+Item 10-11). **Binding restatement of this task's own instruction: P1
+does NOT decide BestTake merely because a moment is `CLEAN_AUDIENCE_
+DELIVERY`** -- this remains a hypothesis field feeding a SEPARATE,
+future, separately-authorized BestTake integration gate (Item 13),
+exactly like D-188's Prosodic evidence became one of D-184's FOUR
+dimensions only after its OWN separate D-189 integration task.
+
+## 26. PREASSEMBLED FINAL SEQUENCE CONTRACT
+
+A contiguous or clearly source-assembled run of `EditorialMoment`s that
+behaves like an editorially COMPLETE sequence rather than a run of raw
+recording-process takes. This is explicitly a HYPOTHESIS, never an
+automatic "final-looking = keep" rule (this task's own binding
+instruction, honored: no such rule appears in Items 21-22's type
+design). Potential supporting evidence (all REUSED, none newly
+computed): multiple consecutive `CLEAN_AUDIENCE_DELIVERY` moments;
+`proposition_progression_status` showing forward movement across the
+REFERENCED `RelationEvidence` chain (not a re-derivation); absence of
+`RECORDING_PROCESS`/`FALSE_START`/`ABANDONED_ATTEMPT` moments between
+sequence elements; stable transitions (no unresolved boundary conflict
+per `AttemptBoundaryHypothesis`, D-158, REUSED); message continuity
+(no `meaning_conflict`/`proposition_conflict` on the REFERENCED
+`RelationEvidence`, REUSED verbatim); dense useful delivery; a
+redundancy relationship with EARLIER source material (Item 32); source
+chronology (evidence only, never decisive alone, per Item 30).
+
+## 27. FALSE-POSITIVE FINAL-SEQUENCE FIREWALL
+
+The mere presence of multiple clean takes, jump cuts, short gaps, and
+good delivery is explicitly NOT sufficient for
+`PREASSEMBLED_FINAL_SEQUENCE` (this task's own binding instruction).
+Additional evidence this design requires before that classification:
+(a) the REFERENCED `RelationEvidence` chain must show FORWARD
+proposition progression (each moment addressing a DIFFERENT, non-
+redundant proposition per D-169's own identity doctrine — Item 7),
+not merely several `CLEAN_AUDIENCE_DELIVERY` moments of the SAME or
+unrelated propositions; (b) the absence of `RETRY`/`CORRECTION` relation
+evidence BETWEEN the candidate sequence elements themselves (a `TAKE_
+SERIES` of several independently clean, unrelated takes of DIFFERENT
+attempts at the SAME thing is `TAKE_SERIES`, not `PREASSEMBLED_FINAL_
+SEQUENCE` -- Item 24's vocabulary keeps these as two distinct kinds
+precisely for this firewall); (c) `earlier_source_redundancy_status`
+evidence connecting this run to earlier, now-superseded material (Item
+32) is SUPPORTING, never required alone. Without (a) and (b) together,
+the honest classification is `TAKE_SERIES` or `CLEAN_DELIVERY_
+SEQUENCE`, never `PREASSEMBLED_FINAL_SEQUENCE`.
+
+## 28. CHRONOLOGY FIREWALL
+
+A later source position is evidence only, never a decision rule (this
+task's own binding "no final=latest" instruction). `local_sequence_
+position` (Item 21) and `source_start`/`source_end` ordering are always
+available as evidence but never independently sufficient for
+`moment_role` or `sequence_kind` classification in this design -- every
+classification in Items 25-26 requires REFERENCED relation/behavior/
+proposition evidence, never chronology alone.
+
+## 29. QUALITY-VS-STRUCTURE FIREWALL
+
+Restates this task's own binding "no edited=good" instruction: `Editorial
+SequenceHypothesis` and `EditorialMoment` describe STRUCTURE, never
+QUALITY. Neither proposed type (Items 21-22) contains a quality/goodness
+field; `sequence_completeness`/`audience_delivery_density`/etc. describe
+STRUCTURAL shape (how much of the sequence is process vs. delivery), not
+whether the delivery is GOOD. A `PREASSEMBLED_FINAL_SEQUENCE` may still
+contain bad meaning, a bad take, a bad boundary, or wrong order -- P1
+detects structure, BestTake/Boundary/Ordering still certify quality/
+correctness, unchanged.
+
+## 30. SUPERSESSION-HYPOTHESIS CONTRACT
+
+Named `EARLIER_SOURCE_MATERIAL_REDUNDANT_WITH_FINAL_SEQUENCE` --
+produced ONLY as evidence on `EditorialSequenceHypothesis.earlier_
+source_redundancy_status` (Item 22) when a later `PREASSEMBLED_FINAL_
+SEQUENCE` appears (per Item 26's own hypothesis-level contract) to
+realize propositions already represented in earlier source attempts (by
+REFERENCED `PropositionCandidate`/`RelationEvidence` identity, Item 7-8
+-- never a new equivalence heuristic). **Binding: P1 must never
+automatically delete or reclassify the earlier material as discarded**
+-- this is this task's own explicit instruction, honored: Items 12-15
+confirm P1 has no Family/BestTake/Freeze authority. Future P2 (Whole-
+Video Editorial Reasoning, Item 19) or a separately authorized
+structured authority decides how global redundancy affects the edit;
+D-193 authorizes neither.
+
+## 31. CONFIDENCE CONTRACT
+
+Categorical: `SUPPORTED` / `WEAK` / `MIXED` / `UNKNOWN` -- reusing the
+EXACT SAME confidence vocabulary `language_utterance_attempt.py`/
+`language_proposition_relation.py`/`watch_listen_understanding.py`
+already use (`CONFIDENCE_SUPPORTED`/`CONFIDENCE_WEAK`/`CONFIDENCE_
+MIXED`/`CONFIDENCE_UNKNOWN`, code-verified this task), not a new scale.
+No master/composite score anywhere in Items 21-22's design, consistent
+with D-098 15.6's "no master weighted score requirement" and 14.10's
+finding that every real confidence mechanism in this codebase is
+categorical.
+
+## 32. CONFLICT CONTRACT
+
+P1 must preserve uncertainty rather than force a classification. Named
+examples (this task's own): Language says clean continuation but
+Behavior shows a recording reset -> `moment_role` conflict, resolved to
+`MIXED`/`UNCERTAIN`, never forced to `CLEAN_AUDIENCE_DELIVERY`; a
+sequence looks final-like but contains an obvious `RECORDING_PROCESS`
+marker between elements -> `sequence_kind` resolved to `MIXED`, never
+forced to `PREASSEMBLED_FINAL_SEQUENCE` (this is exactly Item 27's
+firewall in the conflict vocabulary). `conflict_flags` (Items 21-22)
+records the specific disagreement, mirroring every existing evidence
+object's own `conflict_flags` convention (`RawUnderstandingSpan`,
+`UnderstandingSpan`, `PropositionCandidate`, `BoundedFinalistArbiterResult`
+-- all already use exactly this pattern).
+
+## 33. HYPOTHESIS != AUTHORITY (binding, restated)
+
+Editorial Moment Understanding produces HYPOTHESES. It does not
+directly alter the edit. No `selected_clip_id`, family membership,
+render plan, ordering, Boundary, or Pacing mutation of any kind is
+proposed anywhere in Items 21-22's type design or in the smallest
+Phase-A recommendation (Item 43) -- both are pure, additive, read-only
+constructors over already-existing evidence.
+
+## 34. CURRENT WHOLE-VIDEO-PROVIDER ROLE
+
+`whole_video_openai.py::OpenAIWholeVideoProvider` (code-read this task,
+Item 3): a REAL GPT-4o-mini adapter that samples frames + transcript and
+returns `SourceVideoContext` (per-source `summary`/`dominant_style`/
+`creator_intent`/`edit_mode`/`sales_intent`/`main_topic`/`story_logic`)
+plus `TemporalEvent`s tagged with a FIXED kind vocabulary (`false_
+start`/`wrong_take`/`verbal_fumble`/`visual_fumble`/`body_reset`/
+`retry_setup`/`frustration`/`breaking_character`/`recording_joke`/
+`accidental_laughter`/`camera_adjustment`/`product_handling_mistake`/
+`searching_for_words`/`unintentional_dead_air`/`retry`/`valid_
+delivery`/`product_demo`/`story_beat`/`proof`/`reaction`/`transition`/
+`cta`). **It understands, today: per-event recording-process/delivery
+classification and per-source narrative context, at PROVIDER
+discretion, on ONE forward pass with no repair for semantic content
+(only JSON-syntax repair, Item 3's read of `_parse_or_repair_json`).**
+**It does NOT emit any `preassembled`/`final_sequence`/take-series
+concept** -- confirmed no such event kind exists in its own prompt
+text or output schema. **It is PERCEPTION/EVIDENCE, never runtime
+authority** -- consumed only via `whole_video_context.sources[].events`
+by `_reset_debris_at_edges`/pre-group credit (D-098 Section 4, unchanged
+by this task). **Stability: PROVIDER-DEPENDENT, not deterministic** --
+a real network/LLM call, non-reproducible byte-for-byte across runs
+(same caveat as every other Hybrid/Gemini/OpenAI provider call in this
+codebase). P1 must not, and this entry does not, rename this provider's
+output as canonical truth -- Item 43's Phase A recommendation requires
+NO provider call at all (deterministic base), with `whole_video_
+context.sources[].events` usable strictly as ONE OPTIONAL evidence
+input where already present, per Item 3's "REUSE as optional input" row.
+
+## 35. P1 INPUT CONTRACT (recommended, IDs/references preferred)
+
+`RawUnderstandingSpan`/`RawUnderstandingMap` (D-155, by `span_id`);
+`WatchListenUnderstanding`/`UnderstandingSpan` (D-158, by `span_id` --
+Item 9's finding: reuse this container directly rather than duplicating
+its fields); `LanguageAttempt` (D-168, by `attempt_id`);
+`PropositionCandidate` (D-169, by `proposition_candidate_id`);
+`RelationEvidence` (D-169/D-158, by the proposition-id pair it
+relates); `BehaviorHypothesis` (D-155, already embedded in the above);
+performance/Zone-Usability-V2 evidence (D-172, by candidate id, OPTIONAL
+-- present only when that flag is on); `ProsodicDeliveryEvidence`
+(D-187, by candidate id, OPTIONAL -- present only when D-189's flags are
+on); `whole_video_context.sources[].events` (Item 34, OPTIONAL); source
+timeline (`source_asset_id`/`source_start`/`source_end`, already on
+every object above). **No new perception, no new provider call, no
+re-derivation of any of the above.**
+
+## 36. P1 OUTPUT CONTRACT (recommended, Phase A minimum)
+
+`EditorialMoment` (Item 21) + `EditorialSequenceHypothesis` (Item 22).
+An aggregate `EditorialMomentUnderstanding` container (mirroring
+`WatchListenUnderstanding`'s own per-source container shape) is
+RECOMMENDED as the outer return type of the Phase-A constructor (Item
+43) -- `{source_asset_id, moments: Tuple[EditorialMoment,...],
+sequences: Tuple[EditorialSequenceHypothesis,...], track_status:
+Mapping}` -- because every existing per-source hypothesis container in
+this codebase (`RawUnderstandingMap`, `WatchListenUnderstanding`) uses
+exactly this shape; a THIRD, differently-shaped container would be the
+first inconsistency in this pattern.
+
+## 37. PROVIDER ROLE
+
+OPTIONAL evidence input only (Item 34), never required for Phase A
+(Item 38). If a future phase adds a P1-specific provider call, it must
+follow the SAME authority principle every other provider already
+follows in this codebase (13.3.2/13.9): a strong evidence proposal,
+never unquestioned ontology, and provider self-consistency itself
+becomes a conflict signal (D-147, restated). No such call is proposed
+in this entry.
+
+## 38. DETERMINISTIC-BASE FEASIBILITY
+
+**YES, fully feasible for Phase A.** Every REUSED input in Item 35 (
+`LanguageAttempt.attempt_state`, `meaning_completion`,
+`PropositionCandidate`/`RelationEvidence`, `UnderstandingSpan`'s
+existing hypothesis fields) is ALREADY a deterministic, pure-function
+output (D-166/D-168/D-169/D-158, all OFFLINE PROVEN, zero provider
+dependency at their own layer). A Phase-A `EditorialMoment`/`Editorial
+SequenceHypothesis` constructor built purely from these inputs would be
+100% deterministic and provider-free, exactly matching this task's own
+"NO provider requirement" instruction for the smallest implementation.
+
+## 39. GENERIC OFFLINE FIXTURE PLAN (design only, not built)
+
+The 35 fixture categories this task's own directive lists (single clean
+audience delivery; pre-take setup; recording-process verbal marker;
+false start; abandoned attempt; retry sequence; correction;
+continuation; post-take reset; breaking character; clean take after
+failed takes; multiple clean raw takes NOT a final sequence; genuine
+preassembled final sequence; false-positive final-looking sequence;
+earlier takes redundant with later sequence; later sequence NOT
+covering an earlier unique proposition; final sequence containing one
+bad take; sequence with/without jump cuts; dense delivery but not
+preassembled; chronology-alone-cannot-classify; conflict case;
+incomplete source evidence; missing Prosody; missing visual;
+deterministic output; source timing; provenance; no family/BestTake/
+ordering/Boundary mutation; no provider required for deterministic
+base; provider evidence optional; no Commercial Moment fields) map
+DIRECTLY onto this entry's own contracts: category 12 vs 13 is Item
+27's firewall; category 15-16 is Item 30's supersession contract;
+category 21 is Item 28's chronology firewall; categories 29-35 are
+Items 33/37-38/20 respectively. **Recommendation: reuse the EXACT
+generic-fixture style already established by `test_cutsell_d191_
+bounded_finalist_authority.py`/`test_cutsell_d189_prosodic_pipeline_
+wiring.py`** (synthetic `LanguageAttempt`/`PropositionCandidate`/
+`UnderstandingSpan` objects built directly, no real audio/video file,
+no literal Video00 text/span/id) -- not built by this task.
+
+## 40. CUT.AI-PARITY VALUE
+
+P1 directly addresses the Product Owner's own motivating real-world
+behavior: bloopers/false-starts/retries/recording-process material
+mixed with a genuinely already-edited-looking final sequence in one
+source video. Specifically supported (per Items 25-27's own contracts,
+grounded in already-implemented evidence): recording-process vs
+audience-delivery discrimination (Item 25, built on D-168's ALREADY-
+PROVEN `attempt_state`); take-series understanding (Item 24's `TAKE_
+SERIES` kind); local editorial redundancy within a neighborhood (Item
+30's supersession hypothesis, bounded to hypothesis-only). **P1 does
+NOT solve, and this entry does not claim it solves:** the Prosodic
+BestTake gap (CLOSED separately by D-190/D-191/D-192, unrelated
+mechanism), Boundary defects (D-177, unrelated), terminal-score
+problems (D-183/D-184, unrelated), or global/whole-video ordering (P7,
+Section 15.8, a distinct future capability P1 only feeds evidence
+toward, never performs itself).
+
+## 41. VIDEO00 RELEVANCE (existing documented evidence only, no RAW)
+
+**DIRECTLY_RELEVANT:** none identified with certainty from existing
+Video00 evidence -- no prior D-095/D-096/D-097.x/D-190/D-192 forensic
+in this session's own decision log ever diagnosed a Video00 Level-1
+failure as "a preassembled/already-edited sequence was wrongly
+kept/dropped" or "recording-process material was misclassified as
+audience delivery" specifically; those forensics instead found
+retry-family completeness bugs, dead-air boundary bugs, Resolver
+tier bugs, and the now-CLOSED Prosodic BestTake gap (D-097.x/D-190-
+D-192, all handled by different, already-implemented mechanisms).
+**POSSIBLY_RELEVANT:** D-097.11's still-outstanding 46-of-53-physical-
+second Level-1 gap (D-192's own restated finding) has never been
+forensically attributed to a P1-shaped cause; it is POSSIBLE some
+remaining discrepancy is a recording-process/audience-delivery
+discrimination gap P1 would help with, but this is NOT established by
+any existing evidence -- fabricating that attribution is explicitly
+against this task's own "do not fabricate" instruction. **NOT_P1:** the
+Pimples/Prosodic gap (CLOSED, D-190-D-192, a delivery-quality
+discrimination problem among ALREADY-VALID realizations of the SAME
+proposition, not a recording-process/sequence-structure problem);
+Boundary join defects (D-177, physical-cut problem); the D-050-noted
+proposition/family-identity conflation (a Family Formation identity
+problem, Item 7's own scope, not P1's).
+
+## 42. SMALLEST D-194 IMPLEMENTATION (recommended, NOT authorized here)
+
+A single new, additive module (name TBD, e.g. `editorial_moment_
+understanding.py`) implementing:
+1. `EditorialMoment` (Item 21) and `EditorialSequenceHypothesis` (Item
+   22) as frozen dataclasses, field set as designed above (adjustable
+   only if implementation reveals a field this forensic missed --
+   never removed for convenience).
+2. ONE deterministic constructor function (mirroring `build_
+   proposition_candidates`'s own pure-function shape, D-169) that
+   builds `EditorialMoment` rows from ALREADY-COMPUTED `LanguageAttempt`/
+   `PropositionCandidate`/`RelationEvidence`/`UnderstandingSpan` inputs
+   (Item 35) -- zero provider call, 100% deterministic (Item 38).
+3. A second deterministic function that groups adjacent `EditorialMoment`
+   rows into `EditorialSequenceHypothesis` candidates per Items 24-27's
+   contracts.
+4. Bounded, JSON-safe diagnostics (mirroring every existing `*_
+   diagnostics()` function's own shape in this codebase) -- no
+   transcript/waveform dump.
+5. A dedicated test file (Item 39's fixture plan), reusing the D-191/
+   D-189 generic-fixture convention.
+6. **NO authority, NO provider requirement, NO pipeline.py wiring, NO
+   feature flag needed for Phase A** (nothing consumes this output yet
+   -- exactly like `RawUnderstandingMap`/`WatchListenUnderstanding`
+   before it, per Item 9's own finding), and NO integration with
+   BestTake/Family/Ordering/Boundary/Pacing.
+
+## 43. MODULES D-194 SHOULD OWN
+
+The one new module above, plus its own test file. Nothing else.
+
+## 44. MODULES D-194 MUST NOT MODIFY
+
+`language_spine.py`, `language_utterance_attempt.py`, `language_
+proposition_relation.py`, `raw_understanding_map.py`, `watch_listen_
+understanding.py`, `attempt_reconstruction.py`, `take_grouping.py`,
+`take_grouping_provider.py`, `hybrid_session_cleanup.py`,
+`bounded_finalist_arbiter.py`, `bounded_finalist_authority.py`,
+`composite_resolver.py`, `realization_resolver.py`, `deterministic_
+best_take_authority.py`, `boundary_engine_pass.py`, `dialogue_pacing_
+transition.py`, `pipeline.py` (P1 has no call site yet -- Phase A
+produces a standalone, unwired capability, exactly matching D-155/
+D-158's own precedent of shipping unused-but-tested foundations first).
+
+## 45. P1 AUTHORITY STATUS
+
+**NONE, by design, permanently for Phase A.** P1 produces hypotheses
+only (Item 33); no selected_clip_id/family/render/ordering/Boundary/
+Pacing mutation exists in this design at any point. Any future
+authority role (e.g., Item 13's BestTake-context integration) requires
+its own SEPARATE Product-Owner-authorized gate, exactly like D-188 ->
+D-189 -> D-191/D-192's own precedent for Prosodic evidence.
+
+## 46. D-193 VERDICT
+
+**A. P1 ARCHITECTURE READY -- SMALL OFFLINE PHASE-A IDENTIFIED.**
+D-098 Section 15's own D-178A/D-178A.1 doctrine already fully specifies
+P1's ownership, dependency direction, moment-role vocabulary, and P1-
+vs-P2/Commercial-Moment separation; this task's own code audit (Items
+3-4, 9) found zero duplicate implementation, confirmed every REUSE
+target actually exists and is OFFLINE PROVEN (D-166/D-168/D-169/D-158),
+and found TWO already-built-but-unused hypothesis containers
+(`RawUnderstandingMap`, `WatchListenUnderstanding`) structurally
+positioned to be P1's own foundation rather than something P1 must
+build from zero. The smallest Phase-A (Item 42) is fully deterministic,
+provider-free, unauthorized-boundary-free (no BestTake/Family/Ordering/
+Boundary/Pacing touch), and requires no new feature flag.
+
+## 47. D-194 EXACT GATE
+
+Implement Item 42's smallest Phase-A: `EditorialMoment` + `Editorial
+SequenceHypothesis` typed dataclasses, ONE deterministic local
+constructor + ONE deterministic sequence-grouping function (both pure,
+no provider call), bounded diagnostics, and the Item 39 generic fixture
+test suite -- NO authority, NO pipeline.py wiring, NO feature flag, NO
+provider requirement, NO Family/BestTake/Ordering/Boundary/Pacing
+change. NOT implemented by this task; requires separate Product Owner
+authorization.
+
+## 48-49. CONFIRMATIONS
+
+NO implementation (zero `cutsell_worker/*.py`/`tests/*.py` file
+touched -- `git diff --stat HEAD` confirms only `docs/CUTSELL_
+DECISIONS.md`, this entry). NO RAW dispatched. NO provider/network call
+made (all findings in this entry come from direct, offline code and
+doc reads). NO BestTake/Family/Boundary/Pacing/P1-authority change.
+
+**HUMAN ACTION REQUIRED:** YES (condition A: whether to authorize
+D-194 -- the smallest offline Phase-A above -- as the next bounded
+implementation task, remains a Product Owner decision; D-194 is NOT
+implemented automatically by this entry).
