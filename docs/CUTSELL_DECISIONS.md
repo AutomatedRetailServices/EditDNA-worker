@@ -30643,3 +30643,596 @@ entry.
 underlying BestTake tie-break (Escalation A) is a Product Owner decision;
 whether to author a bounded P1 (Editorial Moment & Sequence Understanding)
 gate is likewise a Product Owner decision.
+
+---
+
+## D-179: BestTake / DeliveryScore run-to-run winner-stability forensic (post D-178B, no code change)
+
+==================================================
+STATUS
+==================================================
+
+**H. MIXED -- TWO INDEPENDENT UNSTABLE SEAMS, ONE SHARED TERMINAL WEAK
+POINT.** Reconstructed from persisted job-log evidence only (D-170/D-173/
+D-175/D-176/D-178B), plus read-only inspection of `pipeline.py`,
+`take_judge.py`, `case_b_performance_evidence.py`, `whole_video_openai.py`,
+`visual_openai.py`. No RAW, no provider call, no code change.
+
+==================================================
+EVIDENCE SOURCES
+==================================================
+
+`docs/CUTSELL_DECISIONS.md` D-170/D-173/D-175/D-176/D-178B entries
+(persisted job-log extracts already recorded); this task's own read of
+the D-178B job log (already fetched and saved this session, not
+re-fetched from a new RAW); read-only inspection of `pipeline.py`
+(`_semantic_best_take`, `_case_b_fast_path_conflict`,
+`_single_semantic_winner_candidate`, `_winner_path_from_reason`),
+`take_judge.py` (`score_take`), `case_b_performance_evidence.py`,
+`whole_video_openai.py` (`OpenAIWholeVideoProvider.analyze`),
+`visual_openai.py` (`OpenAIVisualProvider`).
+
+==================================================
+RUNS COMPARED
+==================================================
+
+D-170 (RAW 34306886345, head `071e954`), D-173 (RAW 34331209473, head
+`e3019e9`), D-175 (RAW 34337801450, head `d9dcd59`), D-178B (RAW
+34363547729, head `e2c4532`) -- all four dispatch the SAME canonical
+Video00 source (`Editdna longform validation/VIDEO-2026-07-30-09-18-03.mp4`).
+
+==================================================
+GYNECOLOGIST -- NORMALIZED CANDIDATES (by content, not clip id)
+==================================================
+
+Three source-real realizations of the same idea (D-176's own numbering,
+reused): **(1)** full-content phrasing A ("hablé con mi ginecóloga y le
+pedí todos los test..."); **(2)** full-content phrasing B ("cambié de
+ginecóloga y le pedí que me hiciera un test de todo lo que ella se
+pudiera imaginar...", EXACT Human-Gold match, both references' preferred
+span, raw core 96.47-102.47s); **(3)** truncated/incomplete ("le pedí a
+mi ginecóloga", missing the test-request clause, meaning-insufficient in
+every run it appears).
+
+==================================================
+GYNECOLOGIST CROSS-RUN TABLE
+==================================================
+
+| Run | Candidate (1) status | Candidate (2) [both-refs pick] status | Candidate (3) status | Final winner | winner_path | semantic_fast_path_bypassed |
+|---|---|---|---|---|---|---|
+| D-170 | IN family, LOSES contest to (2) | WINS (both refs agree) | IN family, loses | (2) | (not recorded in persisted extract) | (not recorded) |
+| D-173 | deleted OUTSIDE family (never competes) | WINS (semantic_fast_path_candidate) | IN family, meaning-insufficient | (2) | SEMANTIC_FAST_PATH (D-176's own read) | not recorded as bypassed |
+| D-175 | deleted OUTSIDE family (never competes) | WINS (Meaning Firewall confirms, `BLOCKED_BY_MEANING_FIREWALL` on (3)) | IN family, meaning-insufficient | (2) | SEMANTIC_FAST_PATH | false (implied) |
+| D-178B | IN family, meaning-sufficient, `delivery_event_count=3` | LOSES via `take_choice_against_both_references` (BestTakeResolver), meaning-sufficient, `delivery_event_count=8` | not present in this family's 3 members list in the same shape (a 4th, differently-truncated candidate `clip_3f8055f5442fa8be4795` appears instead) | **(1)** | DELIVERYSCORE_PATH | **true** |
+
+Family id differs every run (per-run hash, not stable identity, per this
+session's established property) -- normalized above by content/phrasing,
+never by clip/family id.
+
+==================================================
+REFERENCE-PREFERRED CANDIDATE TRACE (candidate 2, 96.47-102.47s)
+==================================================
+
+- D-170: **SELECTED_WINNER**.
+- D-173: **SELECTED_WINNER**.
+- D-175: **SELECTED_WINNER**.
+- D-178B: **DELIVERYSCORE_LOSS** -- meaning-sufficient, semantically
+  correct (`semantic_fast_path_candidate`, confidence 0.95), but its own
+  `_semantic_best_take` fast path was bypassed
+  (`semantic_fast_path_bypassed: true`) because `_case_b_fast_path_
+  conflict` found candidate (1)'s `delivery_event_count` (3) lower than
+  candidate (2)'s (8) -- the ladder then fell through to the delivery-
+  score tie-break, which the code's own `deliveryscore_top_candidate`
+  field independently confirms already preferred candidate (1)
+  (`local_selected_clip_id == candidate 1` going in), and candidate (1)
+  won.
+
+==================================================
+GYNECOLOGIST FAMILY-STABILITY RESULT
+==================================================
+
+**UNSTABLE.** Candidate (1)'s family membership differs across all three
+prior runs already logged (D-170: in, D-173/D-175: deleted outside) and
+this run (in, and winning) -- four runs, at least two distinct topologies
+for the same source-real candidate. D-176 already flagged this exact
+instability as a SECONDARY, unresolved, non-deep-dived observation
+("Family Formation variance for candidate (1)... would require tracing
+the specific pre-resolver hybrid-delete/dedup code path... out of scope").
+This task does not deep-dive that module further (same read-only scope);
+it is recorded here as a CONFIRMED, RECURRING (4th observed instance)
+open item, still not root-caused to an exact function.
+
+==================================================
+GYNECOLOGIST MEANING-SUFFICIENCY STABILITY
+==================================================
+
+**STABLE for candidate (2)** (meaning-sufficient in every run it
+competes). **UNSTABLE for candidate (1)** only in the trivial sense that
+it cannot be meaning-sufficient or -insufficient in a run it was never a
+family member of (D-173/D-175); when present (D-170, D-178B) it is
+meaning-sufficient in D-178B (not evaluated for this label in the
+persisted D-170 extract). Candidate (3): meaning-INSUFFICIENT every time
+it appears (D-170 exact status not extracted; D-173/D-175 confirmed
+insufficient) -- consistent.
+
+==================================================
+GYNECOLOGIST SEMANTIC-AUTHORITY STABILITY
+==================================================
+
+**STABLE AND CORRECT in every run, including D-178B.**
+`semantic_fast_path_candidate` (the raw, unvetoed, unbypassed single-
+winner label) resolves to candidate (2) in D-173, D-175, AND D-178B
+(`semantic_winner_confidence: 0.95` in D-178B). D-150's semantic-
+authority gate is not the source of instability here -- it never even
+ran a conflict check for this family in D-178B (`before_semantic_best_
+take_reason == "single_semantic_winner"` -- decisive, no D-147/D-150
+complete-window conflict). **The instability is entirely DOWNSTREAM of a
+stable, correct semantic verdict** -- D-123's own `_case_b_fast_path_
+conflict` gate is what discards it.
+
+==================================================
+GYNECOLOGIST DELIVERYSCORE STABILITY
+==================================================
+
+**UNSTABLE, and this is the newly-traced first actionable seam.**
+`case_b_evidence` (per-candidate `TemporalEvent` counts inside the
+measured DELIVERY zone, sourced from `whole_video_openai.
+OpenAIWholeVideoProvider.analyze` -- a real `gpt-4o-mini` vision call over
+sampled frames, per `whole_video_openai.py` code inspection) recorded
+candidate (2) at `delivery_event_count: 8` (6 `hand_motion_reset_
+candidate` + 2 `facial_expression_shift_candidate`) vs. candidate (1) at
+`delivery_event_count: 3` this run. No persisted extract exists for
+candidate (2)'s own event count in D-170/D-173/D-175 (the field was never
+serialized in those runs' available diagnostics), so a byte-for-byte
+before/after comparison for the SAME candidate is not directly provable
+from persisted evidence alone -- but the mechanism generating this
+evidence (an LLM vision call, not a deterministic local computation) has
+no proven run-to-run stability guarantee anywhere in this codebase's own
+audit (D-098 Section 13.2 Track C / Section 10.9: "production wiring/
+coverage not re-verified," status PARTIAL). This is the most probable,
+best-evidenced explanation and is stated as such, not as a proven fact.
+
+==================================================
+GYNECOLOGIST TIE-BREAK RESULT
+==================================================
+
+`delivery_tie_break_among_survivors` selected candidate (1)
+(`clip_666d543d2ff5ea32d90b`) because it was ALREADY `local_selected_
+clip_id` (the raw DeliveryScorer top rank from `take_judge.score_take`,
+a SEPARATE signal path from `case_b_evidence`'s event counts -- it reads
+`CandidateTake.signals`/`MediaSignals.visual_fumble` and duration/
+completeness terms, not `TemporalEvent` counts) going into the ladder,
+and no CRITICAL_COVERAGE_DOMINANCE/contradiction step upstream in the
+ladder resolved the tie first (both are complete, non-contradicting,
+apparently coverage-equal statements of the same claim). What was
+"tied": CRITICAL-claim coverage between (1) and (2) (both fully cover the
+gynecologist-test-request claim, just in different words) -- the ladder's
+own steps 1-5 correctly find no dominance and correctly decline to force
+one, per design. The next ordering principle (delivery score) is
+EDITORIALLY MEANINGFUL IN INTENT (it exists to break genuine content
+ties by audience-facing delivery quality) but, on this evidence, is
+**id/order-INDEPENDENT yet feature-fragile**: it is a real score
+comparison, not an arbitrary id/hash tie-break, but the specific inputs
+feeding it (MediaSignals, PARTIALLY real per D-098's own audit) are
+themselves not proven stable or materially meaningful at this margin.
+
+==================================================
+GYNECOLOGIST WINNER-STABILITY RESULT
+==================================================
+
+**UNSTABLE across the 4 observed runs** -- 3/4 correct (candidate 2),
+1/4 wrong (candidate 1, D-178B), via a mechanically-traced, real,
+non-hash/non-id-driven but evidence-fragile pathway.
+
+==================================================
+PIMPLES -- NORMALIZED CANDIDATES
+==================================================
+
+Two source-real realizations of the "pimples/espinillas behind the ear"
+symptom idea: candidate **P1** ("También me salían espinillas en esta
+parte de aquí detrás de la oreja...", D-178B's WINNER, REJECTED by both
+references); candidate **P2** ("Otro síntoma era que me salían
+espinillas como si fuera una alergia...", D-178B's DISCARD, the
+realization BOTH Cut.ai and Human Gold actually keep).
+
+==================================================
+PIMPLES CROSS-RUN TABLE
+==================================================
+
+| Run | Winner | Both-refs-preferred candidate status | winner_path | Gate status |
+|---|---|---|---|---|
+| D-173/D-175 (per D-175's own decision entry) | near-equal/MILD family, D-174 correctly NO_ACTION | not separately re-derived in this forensic (out of this task's re-derivation scope beyond what D-175 already recorded) | (not fully re-extracted here) | (not fully re-extracted here) |
+| D-178B | P1 (`clip_dd346ff350c782645a9b`, `delivery_event_count: 9`) | P2 (`clip_4ec14a1644e8bd45f1b5`, `delivery_event_count: 7`) -- **DELIVERYSCORE_LOSS**, `take_choice_against_both_references` | DELIVERYSCORE_PATH | `semantic_authority_gate_status: ABSTAIN_CONFLICT`, `complete_window_agreement_status: MULTIPLE_COMPLETE_WINDOWS_DISAGREE`, `fallback_trigger_reason: NO_SEMANTIC_WINNER` |
+
+A full D-170/D-173/D-175 pimples cross-run table matching the
+gynecologist table's depth was NOT rebuilt here -- D-175's own decision
+entry already characterizes the pimples family as "near-equal/MILD...
+correctly NO_ACTION" for the Guard Authority question specifically, a
+narrower question than this forensic's own winner-vs-both-references
+trace; re-deriving it fully would require re-opening those two job logs
+beyond what is already extracted and persisted, which this task's
+read-only, no-new-fetch discipline did not require given the D-178B
+mechanism is independently conclusive.
+
+==================================================
+PIMPLES FAMILY-STABILITY RESULT
+==================================================
+
+Not independently re-established here (2 members in D-178B; no
+contradicting persisted extract exists that shows a different topology
+in a prior run). Reported `UNKNOWN` for cross-run stability specifically
+(not `UNSTABLE`, since no contradicting evidence was found -- but not
+`STABLE` either, since it was not actively re-verified against D-170/173/
+175's own persisted pimples data in this task).
+
+==================================================
+PIMPLES MEANING-SUFFICIENCY STABILITY
+==================================================
+
+D-178B: both P1 and P2 meaning-sufficient
+(`meaning_sufficient_candidates` lists both). Cross-run: `UNKNOWN` (not
+re-extracted from D-170/173/175 in this task).
+
+==================================================
+PIMPLES SEMANTIC-AUTHORITY STABILITY
+==================================================
+
+**D-150 correctly and stably ABSTAINS this run** -- `semantic_authority_
+gate_status: ABSTAIN_CONFLICT`, reason `multiple_family_complete_windows_
+disagree_on_comparative_winner`, `complete_window_agreement_status:
+MULTIPLE_COMPLETE_WINDOWS_DISAGREE`. This is D-147/D-150's own named,
+already-canonized `COMPLETE_CONTEXT_CONFLICT` state (D-098 Section
+13.8.1) working exactly as designed: it never forces a winner it cannot
+support. **D-150 is NOT reopened by this finding** -- its own output
+(abstain) is the CORRECT response to genuine upstream provider
+disagreement; the commercial defect is what happens AFTER the abstain.
+
+==================================================
+PIMPLES DELIVERYSCORE STABILITY
+==================================================
+
+Not independently cross-run-verified (same reason as Family-Stability
+above) -- `UNKNOWN` for cross-run comparison. Within D-178B alone:
+`deliveryscore_top_candidate` (P1, 9 events) beat P2 (7 events) despite
+BOTH references preferring P2 -- the raw event-count difference (9 vs 7)
+is smaller in both absolute and relative terms than the gynecologist
+case (8 vs 3), yet still decisive here because there was no competing
+semantic label to bypass in the first place (fell straight to the
+ladder's terminal tie-break via D-150's abstain, not via a D-123 bypass).
+
+==================================================
+PIMPLES TIE-BREAK RESULT
+==================================================
+
+Same terminal step as gynecologist (`delivery_tie_break_among_survivors`,
+`max(tie_break_pool, key=lambda cid: rank_by_id[cid])`) -- reached via a
+DIFFERENT entry point (D-150's own correct ABSTAIN on a genuine
+multi-window semantic conflict, not a D-123 bypass of a decisive
+winner). "What was tied": nothing was tied at the semantic level here --
+there was never a decisive semantic label to begin with
+(`semantic_winner_id: null`). The delivery-score step is therefore acting
+as the SOLE decision authority for this family, not merely a tie-breaker
+among otherwise-content-equal survivors -- a materially different,
+weaker use of the same mechanism than its own documented intent ("delivery's
+proper role once content is effectively tied").
+
+==================================================
+PIMPLES WINNER-STABILITY RESULT
+==================================================
+
+D-178B: WRONG (against both references). Cross-run comparison:
+`UNKNOWN` (not independently re-derived from D-170/173/175's own
+persisted pimples data in this task; D-175's own entry already
+characterizes this family as persistently near-equal/contested across
+runs, consistent with -- not contradicting -- a structurally weak
+terminal tie-break, but not independently re-verified here to the same
+depth as gynecologist).
+
+==================================================
+SHARED ROOT CAUSE?
+==================================================
+
+**PARTIALLY_SHARED.** Both regions terminate in the SAME weak mechanism
+(`delivery_tie_break_among_survivors`, a raw `take_judge.score_take`
+rank comparison with no reference-correlated signal) -- this is the
+shared, general, non-Video00-specific structural weak point. The
+UPSTREAM TRIGGER differs: gynecologist reaches it via D-123's
+`_case_b_fast_path_conflict` BYPASSING an otherwise-DECISIVE, CORRECT
+semantic winner (driven by `TemporalEvent`-count evidence variance);
+pimples reaches it via D-150's own CORRECT ABSTAIN on a genuine,
+already-documented, already-canonized (D-147) multi-window semantic
+DISAGREEMENT (no decisive winner ever existed). Do not bundle a fix for
+"why the bypass fires" (gynecologist-specific, D-123-owned) with a fix
+for "why the abstain happens" (pimples-specific, D-150-owned, already
+correct) -- they should stay separate; only the SHARED terminal weak
+point is a legitimate single general-fix target.
+
+==================================================
+ROOT-CAUSE CLASSIFICATION
+==================================================
+
+**CANDIDATE-SET VARIANCE (A):** not the primary finding -- all real
+candidates were source-real and correctly constructed in every run
+inspected; no fabrication or mis-split found.
+
+**FAMILY-TOPOLOGY VARIANCE (B):** CONFIRMED contributor for gynecologist
+(candidate (1)'s membership genuinely differs run to run, 4 runs, 2+
+distinct topologies) -- a real, recurring, still-unresolved-to-exact-
+module seam (D-176's own deferred finding, now confirmed a 4th time).
+Not established for pimples in this task.
+
+**MEANING-SUFFICIENCY VARIANCE (C):** not the primary finding -- stable
+and correct wherever evaluated.
+
+**SEMANTIC-AUTHORITY VARIANCE (D):** the ROOT TRIGGER for pimples
+specifically -- but this is D-147/D-150's OWN correctly-functioning,
+already-canonized `COMPLETE_CONTEXT_CONFLICT` detection, not a defect in
+D-150 itself. Recorded as a contributor, not reopened.
+
+**DELIVERYSCORE FEATURE VARIANCE (E): PRIMARY, newly-traced.** The
+`case_b_evidence` `TemporalEvent`-count evidence feeding D-123's bypass
+gate (gynecologist) is sourced from a provider-backed (`gpt-4o-mini`
+vision) analysis with no proven run-to-run stability; the terminal
+`take_judge.score_take` rank feeding BOTH regions' final tie-break reads
+`MediaSignals` fields that are themselves only PARTIALLY real per this
+codebase's own existing audit (D-098 Section 10.9: 7 of 12 fields
+measured). Both are visual-perception-provider-derived, both lack a
+demonstrated determinism guarantee.
+
+**TIE-BREAK ORDER DEPENDENCE (F):** explicitly RULED OUT as the
+mechanism -- `max(tie_break_pool, key=lambda cid: rank_by_id[cid])` is a
+real score comparison, never a dict/set-iteration-order, hash-id, or
+insertion-order artifact (see DETERMINISM AUDIT below).
+
+**DETERMINISTIC POLICY GAP (G): SECONDARY, confirmed contributor.**
+`_case_b_fast_path_conflict`'s own condition 4 (`winner_count >
+alt_count`) is a raw, unweighted integer comparison of `TemporalEvent`
+counts -- no duration, density, or materiality weighting (unlike D-167's
+own `SEVERITY_NONE/MILD/MATERIAL/SEVERE` vocabulary, or D-177's own
+`AUDIO_EDGE_OVERLAP_TOLERANCE_SEC` materiality floor, both already
+established elsewhere in this codebase). An 8-vs-3 count difference
+(0.533s vs 0.2s of total event duration, over an ~8s DELIVERY span) is
+treated identically to a 100-vs-1 difference -- the gate cannot
+distinguish "genuinely, materially worse" from "marginally, probably
+immaterially different." This is the STRUCTURAL AMPLIFIER that turns
+E's ordinary evidence noise into a flipped commercial decision.
+
+**MIXED (H): the honest PRIMARY classification.** Two independently
+real, differently-owned seams (B for gynecologist's topology precondition,
+D for pimples' correct-but-inconclusive semantic abstain) both route
+into the SAME structurally fragile terminal step (E's evidence variance,
+amplified by G's unweighted threshold). Forcing a single non-H letter
+would understate either the topology finding or the shared terminal
+weakness.
+
+==================================================
+FINAL DETERMINISM RESULT
+==================================================
+
+**IS THE FINAL TIE-BREAK DETERMINISTIC GIVEN IDENTICAL SEMANTIC/
+PERFORMANCE INPUT? YES.** `_semantic_best_take`'s entire ladder (Steps
+1-9, including `_case_b_fast_path_conflict` and the final `max(...,
+key=lambda cid: rank_by_id[cid])`) is a pure function of its inputs:
+`member_ids`/`survivors` iterate in the ORIGINAL candidate-construction
+order (not a hash/set/dict-iteration artifact -- `member_ids = [member.
+clip_id for member in members]`, and `members` is an ordered tuple built
+upstream by attempt reconstruction, not re-sorted here); `rank_by_id` is
+a real numeric score from `take_judge.score_take`; ties in `max()` break
+on that same stable input order, never on clip_id/hash value itself (no
+`sorted(... key=hash)` or set-iteration anywhere in this path). No
+dependence on `dict`/`set` iteration order, insertion order as a
+DECISION criterion (only as a stable tie-break AFTER score comparison,
+which is deterministic given identical scores), provider response
+ORDERING (the code consumes provider VALUES, never provider call
+sequence), unordered JSON serialization, hash-derived ids, or run-
+specific timestamps was found in this code path. **The observed
+instability originates upstream of this deterministic function, in the
+INPUTS it receives** (case_b_evidence event counts; MediaSignals scores;
+family membership) -- not in the tie-break logic itself.
+
+==================================================
+D-123 OWNERSHIP
+==================================================
+
+D-123 (`_case_b_fast_path_conflict`) behaved EXACTLY per its own written
+contract this run: a real, evidenced performance-count asymmetry existed,
+the alternative was meaning-sufficient, so it correctly declined the fast
+path. **D-123 is not broken; its own threshold (raw count, condition 4)
+is the SECONDARY structural gap (G above).** Not modified by this task.
+
+==================================================
+D-150 STATUS
+==================================================
+
+**STABLE.** D-150's own complete-context/conflict detection produced the
+CORRECT verdict (`ABSTAIN_CONFLICT`) for the pimples family given a
+genuine, real, already-documented multi-window semantic disagreement.
+Not reopened. The instability is explicitly DOWNSTREAM of D-150 (what the
+ladder does once D-150 abstains), not within it.
+
+==================================================
+D-174 STATUS
+==================================================
+
+Not evaluated this run by design (all three required overlay flags were
+OFF for D-178B's own dispatch, per that task's own "current canonical
+production path" choice). Whether D-174's own MORE REFINED V2 severity
+materiality check (already more nuanced than D-123's raw count) would
+have caught this exact gynecologist flip is a real, open question this
+forensic does NOT answer (would require a RAW with the flags on landing
+on this exact shape -- not authorized here, and not to be chased per this
+task's own "no RAW" scope). D-174's materiality authority is UNCHANGED
+by this task.
+
+==================================================
+D-177 / BOUNDARY STATUS
+==================================================
+
+**Unchanged, not implicated.** D-177 remains OFFLINE_PROVEN + REAL_MEDIA_
+SAFETY_PROVEN + TARGET_SHAPE_NOT_EXERCISED (D-178B, unmodified by this
+entry). D-178B's own winner variance is confirmed, independently, to be
+entirely a BestTake/DeliveryScore-layer phenomenon (`winner_path:
+DELIVERYSCORE_PATH`/`OTHER_EXISTING_PATH` in every affected family) --
+zero Boundary/visual-edge-trim rows are implicated in either region's
+winner flip. Not modified, not retuned, no second RAW dispatched to
+exercise it.
+
+==================================================
+IS BESTTAKE ACTUALLY ROOT CAUSE?
+==================================================
+
+**PARTIAL.** BestTake's OWN internal machinery (the ladder, D-123's gate,
+the tie-break) is behaving exactly as written given its inputs -- not
+itself buggy or non-deterministic. But BestTake IS the layer that OWNS
+the fragile decision (the unweighted count-comparison threshold, and the
+terminal tie-break's total reliance on a partially-real, provider-derived
+score) that converts upstream evidence noise into a wrong commercial
+choice. The fix belongs to BestTake's own existing evidence-comparison
+logic, not to a new authority.
+
+==================================================
+WOULD P1 EDITORIAL MOMENT & SEQUENCE UNDERSTANDING NATURALLY SOLVE THIS?
+==================================================
+
+**NO_EXISTING_BESTTAKE_LAYER_MUST_BE_FIXED_FIRST.** P1 (Editorial Moment
+& Sequence Understanding, D-178A Section 15.4) answers "what role did
+this moment play in the recording/editing process" -- a different
+question from "given two meaning-sufficient, source-real, complete
+realizations of the SAME idea, which one is materially better/worse by
+performance evidence." P1 would not change `_case_b_fast_path_conflict`'s
+threshold, would not change `take_judge.score_take`'s MediaSignals
+inputs, and would not resolve a D-147 complete-window semantic conflict
+-- building P1 now would not touch this instability at all, and risks
+being interpreted as "the fix" when it is not.
+
+==================================================
+SMALLEST GENERAL FIX
+==================================================
+
+Add a MATERIALITY FLOOR to the shared terminal tie-break's own INPUTS,
+reusing the SAME pattern this codebase already established twice
+(D-167's `SEVERITY_NONE/MILD/MATERIAL/SEVERE` vocabulary; D-177's
+`AUDIO_EDGE_OVERLAP_TOLERANCE_SEC`/materiality-before-eligibility
+ordering): (1) in `_case_b_fast_path_conflict` (D-123's own gate),
+require the winner/alternative `delivery_event_count` (or, better, total
+EVENT DURATION -- already computed, `delivery_event_duration_total`) gap
+to clear an existing-severity-vocabulary-derived materiality floor before
+it may bypass an otherwise-decisive semantic winner, rather than any
+strictly-positive integer difference; (2) more generally, before the
+ladder's terminal delivery-score tie-break is trusted as a SOLE decision
+authority (i.e., when it is reached via a D-150 ABSTAIN with zero
+decisive semantic signal, not merely as a tie-break among
+already-content-tied survivors), require the SAME kind of materiality
+check on the delivery-score margin itself, or explicitly flag the
+resulting winner as LOW-CONFIDENCE/UNCERTAIN rather than a decisive pick
+-- never inventing a new numeric threshold family, reusing the existing
+severity/materiality vocabulary and the existing `case_b_performance_
+evidence.py` fields (`delivery_event_duration_total`, `event_density`)
+that are already computed but not yet used for this purpose. This is a
+GENERAL BestTake-evidence-hierarchy hardening, not a Video00-specific
+rule, and does not prefer any provider's own candidate.
+
+==================================================
+MODULE(S) THAT SHOULD OWN FIX
+==================================================
+
+`cutsell_worker/pipeline.py` (`_case_b_fast_path_conflict`, its own
+existing, narrow, deterministic gate -- the natural extension point) and,
+if the second (terminal-tie-break-as-sole-authority) half is authorized
+separately, `cutsell_worker/pipeline.py`'s `_semantic_best_take`'s own
+Steps 6-9 block. Both are the SAME module that already owns this exact
+decision surface -- no new authority created.
+
+==================================================
+MODULES THAT MUST NOT OWN FIX
+==================================================
+
+`boundary_engine_pass.py` (Boundary is not implicated -- confirmed
+above); `watch_listen_besttake_guard_authority.py`/`watch_listen_
+besttake_v2_evidence.py` (D-174/D-172's own guard authority -- unchanged,
+not reopened, this is a DIFFERENT, narrower BYPASS gate than D-123's);
+`semantic_authority_observability.py`/D-150 (already correct, not
+reopened); `dialogue_pacing_transition.py`/Renderer (not implicated);
+any new "Editorial Moment" (P1) module (would not address this).
+
+==================================================
+REQUIRED OFFLINE FIXTURES (if a future D-180 is authorized)
+==================================================
+
+(1) two meaning-sufficient survivors where the semantic winner's event-
+count/duration is only MARGINALLY worse than the alternative's (below any
+proposed materiality floor) -> fast path preserved, no bypass; (2) the
+SAME shape but MATERIALLY worse (above the floor) -> bypass still fires,
+unchanged from today; (3) a genuine D-147 `COMPLETE_CONTEXT_CONFLICT`
+family reaching the terminal tie-break with a LOW delivery-score margin
+between survivors -> flagged low-confidence/uncertain rather than a
+silent decisive pick; (4) the SAME shape with a LARGE, clearly material
+delivery-score margin -> unchanged, decisive pick preserved; (5) full
+regression against D-116/D-123/D-150/D-163/D-167/D-174/D-177's own
+existing suites -- zero change to any of their own reason strings/
+verdicts for shapes outside this exact narrow gate.
+
+==================================================
+WHETHER RAW IS REQUIRED AFTER FIX
+==================================================
+
+YES -- exactly one, once authorized and offline-proven, to confirm the
+gynecologist family's D-178B shape (an available meaning-sufficient
+alternative with a small event-count edge) no longer bypasses the
+correct semantic winner, AND that the pimples family's terminal tie-break
+either correctly prefers the both-references-preferred candidate or is
+honestly flagged uncertain rather than silently wrong. Not authorized
+here.
+
+==================================================
+RECOMMENDED D-180 GATE
+==================================================
+
+If authorized: implement the materiality floor on `_case_b_fast_path_
+conflict`'s own condition 4 ONLY first (the narrower, better-evidenced
+half of the smallest general fix above), reusing D-167's existing
+severity vocabulary or `case_b_performance_evidence.py`'s own already-
+computed duration/density fields -- no new threshold family, no
+Video00-specific number. Offline test matrix per the 5 fixtures above
+(narrowed to items 1/2/5 for this first phase). Full regression
+(D-116/D-123/D-150/D-163/D-167/D-174/D-177, CleanCutBench, full suite).
+Then exactly one confirmatory Video00 RAW. The terminal-tie-break-as-
+sole-authority half (fixtures 3/4) is a SEPARATE, larger design question
+(does the ladder need an explicit LOW_CONFIDENCE outcome state at all)
+better deferred to its own gate, not bundled into D-180. Not decided
+here -- a Product Owner decision.
+
+==================================================
+P1 STATUS AFTER FORENSIC
+==================================================
+
+P1 (Editorial Moment & Sequence Understanding) remains the next named
+architectural priority (D-178A's P0-P11 sequence, P1 slot) but should NOT
+begin before a Product Owner decision on D-180 (the materiality-floor
+fix identified here) -- not because P1 depends technically on D-180, but
+because D-180 is a smaller, better-evidenced, more urgently commercially-
+relevant fix to an EXISTING layer, and building P1 first risks it being
+perceived as (and possibly, if implemented carelessly, actually becoming)
+a workaround for this lower-level defect rather than new capability in
+its own right.
+
+==================================================
+STRICT SCOPE CONFIRMATIONS
+==================================================
+
+No RAW dispatched this task. No provider/network call. No cutsell_worker
+editorial patch (read-only code inspection only). No threshold tuning.
+No P1 implementation. D-177/D-178A/D-178A.1/D-178B are not rewritten.
+
+==================================================
+D-179 VERDICT
+==================================================
+
+**A. ROOT CAUSE IDENTIFIED -- DETERMINISTIC/STABILITY FIX REQUIRED BEFORE
+P1.**
+
+**HUMAN ACTION REQUIRED:** YES (condition A) -- authorizing the D-180
+implementation gate named above (materiality floor on `_case_b_fast_
+path_conflict`) is a Product Owner decision, as is the separate, larger
+terminal-tie-break-confidence-state question and the timing/sequencing
+relative to P1.
