@@ -32429,3 +32429,108 @@ unconfirmed shape is enough to justify a D-186 Prosodic Audio V2
 Phase-A investigation ahead of P1, or whether to require the reporting
 fix + one more confirmatory RAW first; and whether/when to resume P1,
 remain Product Owner decisions).
+
+---
+
+D-186A: D-183/D-184 REAL-MEDIA OBSERVABILITY REPAIR (workflow/reporting
+only, post D-185, NO RAW)
+
+ROOT PROBLEM (per D-185): the new D-183/D-184 tail-safe summary landed
+inside `cutsell-video00-modal-raw.yml`'s existing, very large "Print
+full canonical diagnostics" step instead of its own dedicated step; this
+session's job-log-fetch tool truncates well before that section, and the
+diagnostic artifact's Azure Blob Storage download host is denied by this
+session's own organization egress policy (non-retryable) -- together,
+these made D-183's `terminal_besttake_confidence_*` and D-184's
+`bounded_finalist_arbiter_*` fields unreadable for that run, even though
+the engine itself computed them correctly (confirmed structurally by
+D-184's own 62/62 offline suite and by the D-183/D-150/D-123/D-181
+compact summaries that WERE reachable).
+
+FIX (workflow-only, zero `cutsell_worker` change, zero D-183/D-184 logic
+change): one new, standalone, LATE step, **"D-186A D-183 D-184 compact
+diagnostics"**, added to `cutsell-video00-modal-raw.yml` immediately
+before "Upload validator reports" (the last diagnostic-print step before
+teardown, maximizing survival against any log-tail truncation window --
+same D-119/D-125/D-152/D-164/D-173/D-175/D-178B/D-181 pattern, just
+positioned last). It reads `artifact/video00-modal.json` (already on
+disk) and PURE-PROJECTS:
+
+- D-183's run-level summary via `terminal_besttake_confidence_run_
+  summary` (D-183's own already-tested pure aggregator, imported
+  directly from `cutsell_worker.pipeline` -- same import style the
+  existing "Verify active-path identity" step already uses).
+- D-184's run-level summary via `bounded_finalist_arbiter_run_summary`
+  (D-184's own already-tested pure aggregator, imported from
+  `cutsell_worker.bounded_finalist_arbiter`), computed unconditionally
+  (all-zero counts is the correct, honest result when the flag was OFF
+  -- mirrors D-183's own "no flag" posture; this step never itself
+  distinguishes "off" from "no eligible families").
+- A per-family compact row (`family_id`, `meaning_sufficient_
+  candidates`, `semantic_authority_status` [mapped from the real field
+  `semantic_authority_gate_status`], `complete_window_agreement_status`,
+  `semantic_fast_path_candidate`, `final_winner`, all 10 requested D-183
+  fields, all 13 requested D-184 fields) for every row already on
+  `diagnostics.take_judge_groups` -- nothing recomputed, everything read
+  verbatim via `.get()` (fail-safe on any missing key).
+- A compact `region_source_mapping` (`pimples`, `gynecologist`) reusing
+  the SAME QA-only span/text re-identification the D-123/D-181 steps
+  already use, but emitting ONLY `candidate_id`/`source_start`/
+  `source_end`/a 12-hex-char SHA-256 text hash per candidate -- never a
+  transcript, never the regression-fixture's own text.
+
+The new file `artifact/d186a_terminal_besttake_arbiter_summary.json` is
+added to the existing "Upload validator reports" artifact (supplemental
+only -- direct log output is the mandatory access path, per this task's
+own requirement).
+
+OFFLINE VALIDATION (no RAW): YAML parses (PyYAML); the embedded Python
+block was extracted and `py_compile`-clean; run directly (same `python3
+- <<'PY'` invocation style the workflow itself uses) against a synthetic
+`artifact/video00-modal.json` covering `DECISIVE` (Pimples-shaped, no
+score fields -- `single_semantic_winner` never sets them, D-184
+`NOT_ELIGIBLE`), `NON_DECISIVE` (Gynecologist-shaped, D-184
+`PREFERENCE_SUPPORTED`), `TIED` (D-184 `NEAR_EQUAL`), `CONFLICTED`
+(both D-183 and D-184 `CONFLICTED`), a 4-candidate family (D-184
+`NOT_ELIGIBLE` via candidate count), an `INSUFFICIENT_EVIDENCE` family,
+and a true singleton row (D-183 state `None`, D-184 fields absent
+entirely) -- every state serialized correctly, the singleton row never
+raised. Missing-engine-JSON case (file absent) also exercised: exit 0,
+`source_status: engine_json_missing_or_unparseable`, every count
+correctly all-zero, no crash. Ran twice back-to-back: byte-identical
+output (deterministic; families sorted by `group_id`, `json.dumps(...,
+sort_keys=True)` throughout). Output size for the 7-family synthetic
+fixture: ~14 KB -- compact by construction (no full engine JSON, no
+transcripts, no giant candidate objects), and now positioned as this
+job's LAST diagnostic print, which is exactly the portion of the log
+this session's own job-log-fetch tool CAN retrieve (confirmed on the
+D-185 run itself, where the reachable window began mid-way through a
+step running well after this new step's own position would sit).
+
+VERDICT: **A. D-183/D-184 OBSERVABILITY REPAIR PROVEN** -- the dedicated
+step exists, is positioned to survive log truncation, exposes exactly
+the fields requested (mechanically necessary rename:
+`semantic_authority_status` in the request maps to the real, pre-
+existing field `semantic_authority_gate_status`; documented in the
+step's own comment, not a silent substitution), recomputes nothing, and
+every required synthetic state (`DECISIVE`/`NON_DECISIVE`/`TIED`/
+`CONFLICTED`/`NOT_ELIGIBLE`/`NEAR_EQUAL`/`INSUFFICIENT_EVIDENCE`/
+`PREFERENCE_SUPPORTED`) serializes correctly offline.
+
+STRICT SCOPE CONFIRMATIONS: no `cutsell_worker` file touched (confirmed
+by `git status` and by the full offline suite showing zero new
+failures and no git-diff-guard trip against `pipeline.py`/`contracts.py`/
+`canonical_identity.py`). No D-183 classifier change. No D-184 arbiter
+change. No semantic authority, BestTake, score, provider/model, Family
+Formation, Boundary, Prosodic Audio, or P1 change. No RAW dispatched.
+
+NEXT GATE (not launched automatically): exactly ONE Video00 RAW with
+`CUTSELL_BOUNDED_FINALIST_ARBITER_ENABLED=1` (same as D-185's own
+dispatch), purpose ONLY to retrieve the exact D-183/D-184 fields for the
+real Pimples/Gynecologist families from this new dedicated step's direct
+log output -- no winner authority, no Prosodic Audio, no P1. This is a
+CONFIRMATORY re-run of D-185's own real-media question with the
+reporting gap now fixed, not a new capability.
+
+**HUMAN ACTION REQUIRED:** YES (condition C: whether to authorize the
+one confirmatory Video00 RAW named above).
