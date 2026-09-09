@@ -2116,6 +2116,149 @@ jobs:
           print(json.dumps(summary, indent=2, sort_keys=True))
           PY
 
+      - name: Print compact D-178B D-177 Boundary partial-edge trim real-media qualification summary (tail-safe)
+        # D-178B: reporting-only plumbing, same D-119/D-152/D-164/D-173/D-175
+        # pattern -- reads `artifact/video00-modal.json` (already on disk,
+        # already contains the FULL diagnostics tree `boundary_engine_pass`
+        # unconditionally writes on every run, since `apply_post_freeze_
+        # boundary_pass` runs on the ordinary Clean Cut V1 path with no
+        # feature flag) and projects ONLY fields D-177's own (unchanged in
+        # this task) `tighten_selected_visual_edges`/`_partial_edge_trim_
+        # summary` already computed. Recomputes NO eligibility decision, no
+        # trim, no BestTake/family/selection state. Generic (no Video00-
+        # specific text/id is embedded in this step) -- the gynecologist
+        # region is re-identified afterward, by direct inspection of this
+        # summary's real clip_id/timing/text fields against the persisted
+        # D-170/D-173/D-175/D-176 evidence, never assumed stable run to run.
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p artifact
+          python - <<'PY'
+          import json, os
+
+          def load(path):
+              if not os.path.exists(path) or os.path.getsize(path) == 0:
+                  return None
+              with open(path) as f:
+                  try:
+                      return json.load(f)
+                  except Exception as e:
+                      print(f"WARNING: failed to parse {path}: {e}")
+                      return None
+
+          engine = load("artifact/video00-modal.json")
+
+          summary = {"schema_version": "cutsell.video00.d178b_boundary_partial_edge_trim_summary.v1"}
+          summary["source_status"] = "engine_json_present" if isinstance(engine, dict) else "engine_json_missing_or_unparseable"
+
+          bep = {}
+          visual_edge_rows = []
+          partial_edge_trim_rows = []
+          clip_text = {}
+          clip_span = {}
+          if isinstance(engine, dict):
+              diag = engine.get("diagnostics")
+              if isinstance(diag, dict):
+                  raw_bep = diag.get("boundary_engine_pass")
+                  bep = raw_bep if isinstance(raw_bep, dict) else {}
+                  raw_visual = bep.get("visual_edge_rows")
+                  if not isinstance(raw_visual, list):
+                      raw_visual = diag.get("boundary_visual_edge_trim")
+                  if isinstance(raw_visual, list):
+                      visual_edge_rows = [r for r in raw_visual if isinstance(r, dict)]
+                  raw_partial = bep.get("partial_edge_trim_rows")
+                  if not isinstance(raw_partial, list):
+                      raw_partial = diag.get("boundary_partial_edge_trim")
+                  if isinstance(raw_partial, list):
+                      partial_edge_trim_rows = [r for r in raw_partial if isinstance(r, dict)]
+              for bucket in ("selected", "alternates", "discarded"):
+                  for clip in engine.get(bucket) or []:
+                      if isinstance(clip, dict) and clip.get("clip_id"):
+                          clip_text[clip["clip_id"]] = str(clip.get("text") or "")
+                          clip_span[clip["clip_id"]] = {
+                              "source_asset_id": clip.get("source_asset_id"),
+                              "start": clip.get("start"),
+                              "end": clip.get("end"),
+                          }
+
+          summary["run_level"] = {
+              "partial_edge_trim_evaluated_count": bep.get("partial_edge_trim_evaluated_count"),
+              "partial_edge_trim_applied_count": bep.get("partial_edge_trim_applied_count"),
+              "entry_partial_edge_trim_count": bep.get("entry_partial_edge_trim_count"),
+              "exit_partial_edge_trim_count": bep.get("exit_partial_edge_trim_count"),
+          } if bep else {"status": "boundary_engine_pass_diagnostics_absent"}
+
+          # Per-clip compact summary rows (D-177's own `_partial_edge_trim_
+          # summary` output), enriched (reporting only) with the clip's real
+          # text/source span for post-hoc region identification.
+          enriched_partial_rows = []
+          for row in partial_edge_trim_rows:
+              cid = row.get("clip_id")
+              enriched_partial_rows.append({
+                  **row,
+                  "text_snippet": (clip_text.get(cid) or "")[:160],
+                  "source_span": clip_span.get(cid),
+              })
+          summary["partial_edge_trim_rows"] = enriched_partial_rows
+
+          # Straddle-eligibility rows: every visual_edge_rows entry D-177's
+          # loops actually evaluated for partial-edge eligibility (both
+          # applied and correctly-preserved), identified by the one real
+          # field D-177 added (`inside_delivery_overlap_sec is not None`) --
+          # never re-derived, a pure filter of the existing per-event audit.
+          straddle_rows = [r for r in visual_edge_rows if r.get("inside_delivery_overlap_sec") is not None]
+          for row in straddle_rows:
+              row["text_snippet"] = (clip_text.get(row.get("clip_id")) or "")[:160]
+          summary["straddle_eligibility_rows"] = straddle_rows
+
+          # Negative-control buckets, classified ONLY by D-177/D-116's own
+          # existing, unchanged reason strings -- never a new heuristic.
+          def _bucket(reason, has_overlap):
+              if reason == "visual_event_overlaps_delivery_no_trim" and not has_overlap:
+                  return "fully_inside_delivery_no_trim"
+              if reason == "visual_event_overlaps_delivery_no_trim" and has_overlap:
+                  return "material_straddle_preserved"
+              if reason == "visual_ambiguous_straddle_no_trim":
+                  return "ambiguous_both_edge_straddle_no_trim"
+              if reason in ("visual_entry_edge_trim", "visual_exit_edge_trim") and not has_overlap:
+                  return "fully_outside_ordinary_edge_trim"
+              if reason == "visual_event_not_at_edge":
+                  return "not_at_edge_no_trim"
+              if reason in ("visual_entry_partial_edge_trim", "visual_exit_partial_edge_trim"):
+                  return "partial_edge_trim_applied"
+              if reason == "visual_trim_blocked_by_delivery_floor":
+                  return "blocked_by_delivery_floor"
+              if reason == "visual_trim_unavailable":
+                  return "delivery_span_unavailable"
+              return "other:" + str(reason)
+
+          buckets = {}
+          for row in visual_edge_rows:
+              key = _bucket(row.get("reason"), row.get("inside_delivery_overlap_sec") is not None)
+              buckets.setdefault(key, []).append({
+                  "clip_id": row.get("clip_id"),
+                  "event_kind": row.get("event_kind"),
+                  "event_start": row.get("event_start"),
+                  "event_end": row.get("event_end"),
+                  "trim_side": row.get("trim_side"),
+                  "trim_applied": row.get("trim_applied"),
+                  "inside_delivery_overlap_sec": row.get("inside_delivery_overlap_sec"),
+              })
+          summary["reason_buckets"] = {k: {"count": len(v), "rows": v} for k, v in sorted(buckets.items())}
+
+          os.makedirs("artifact", exist_ok=True)
+          out_path = "artifact/video00-modal-d178b-boundary-partial-edge-trim-summary.json"
+          with open(out_path, "w") as f:
+              json.dump(summary, f, indent=2, sort_keys=True)
+
+          size = os.path.getsize(out_path)
+          print("--- D-178B D-177 Boundary partial-edge trim real-media qualification summary (a pure projection of existing D-177 diagnostics -- recomputes no eligibility decision, no trim, no BestTake/family/selection state) ---")
+          print(f"summary file: {out_path} ({size} bytes)")
+          print(json.dumps(summary, indent=2, sort_keys=True))
+          PY
+
       - name: Print compact D-170 Watch+Listen Zone-Usability V2 diagnostic qualification summary (tail-safe)
         # D-170: reconstructs cutsell_worker.watch_listen_zone_usability_v2
         # (D-167, DIAGNOSTIC-ONLY, still not wired to any authority) from
@@ -2362,6 +2505,7 @@ jobs:
             artifact/video00-modal-d170-zone-usability-v2-summary.json
             artifact/video00-modal-d173-watch-listen-besttake-v2-summary.json
             artifact/video00-modal-d175-watch-listen-besttake-guard-authority-summary.json
+            artifact/video00-modal-d178b-boundary-partial-edge-trim-summary.json
           retention-days: 14
           if-no-files-found: warn
 
