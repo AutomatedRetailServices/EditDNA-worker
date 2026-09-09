@@ -49,11 +49,36 @@ audit visibility ONLY -- the decision logic never reads it. Only
 `v2_evidence_by_id` (D-172) is ever consulted to produce a performance
 preference. D-163 and D-172 are never independently voted as two sources.
 
-Prosodic Audio: `PROSODIC_AUDIO_AVAILABLE = False`. This module never
-infers energy/confidence/hesitation/emphasis/cadence from transcript or
-visual evidence. When candidates remain indistinguishable without
-prosody, `ABSTAIN` (state `NEAR_EQUAL` or `INSUFFICIENT_EVIDENCE`) is the
-correct, expected result -- not a defect to be tuned away.
+Prosodic Audio: `PROSODIC_AUDIO_AVAILABLE = False` (module-level flag,
+UNCHANGED since D-184 -- restates the DEFAULT posture when no Prosodic
+comparison is supplied; every pre-D-188 test that never sets
+`FinalistArbiterInput.prosodic_comparison` sees byte-identical behavior).
+This module never itself infers energy/confidence/hesitation/emphasis/
+cadence from transcript or visual evidence -- ALL such inference happens
+exclusively in `prosodic_audio_v2.py` (D-187) and
+`prosodic_finalist_comparison.py` (D-188), never here.
+
+D-188 (POST D-184, ADDITIVE, OFFLINE, DIAGNOSTIC FUSION ONLY): when a
+caller supplies `FinalistArbiterInput.prosodic_comparison` (a
+`prosodic_finalist_comparison.ProsodicFinalistComparison`, default
+`None`), it is consulted as a FOURTH independent evidence dimension
+(`PROSODIC_DELIVERY`) alongside `MEANING` (P0), `VISUAL/PERFORMANCE`
+(D-172 V2), and `EDITABILITY` -- using the SAME unanimous-agreement-or-
+conflict merge this module already used for those three (never majority
+voting, never a new algorithm). A `ProsodicFinalistComparison` in its
+own internal `CONFLICTED` state aborts immediately to `ABSTAIN`/
+`CONFLICTED`, mirroring D-172's own `v2_conflict` early-return. Omitting
+`prosodic_comparison` entirely (the default) reproduces D-184's own
+original, closed behavior exactly -- `missing_evidence` still contains
+the literal string `"prosodic_audio"` and `bounded_finalist_arbiter_
+prosodic_audio_status` in `bounded_finalist_arbiter_diagnostics` stays
+the historical, always-`"NOT_AVAILABLE"` value it always was (that 13-
+key diagnostics contract is CLOSED and untouched by D-188 -- see the new,
+separate `bounded_finalist_arbiter_prosodic_fusion_diagnostics`/
+`prosodic_comparison_status` field instead). When candidates remain
+indistinguishable even with Prosodic evidence consulted, `ABSTAIN`
+(state `NEAR_EQUAL` or `INSUFFICIENT_EVIDENCE`) is still the correct,
+expected result -- not a defect to be tuned away.
 
 P1 / global context: NOT consulted, NOT implemented here. This is LOCAL
 FINALIST arbitration only -- no sequence-position role, no commercial
@@ -96,6 +121,12 @@ from typing import Iterable, Mapping, Sequence, Tuple
 import os
 
 from .language_proposition_relation import build_claim_signature, claim_signatures_conflict
+from .prosodic_finalist_comparison import (
+    COMPARISON_CONFLICTED,
+    COMPARISON_DOMINANT,
+    COMPARISON_NEAR_EQUAL,
+    ProsodicFinalistComparison,
+)
 from .watch_listen_zone_usability_v2 import CandidateZoneUsabilityV2, zone_usability_v2_dominates
 
 SCHEMA_VERSION = "cutsell.bounded_finalist_arbiter.v1"
@@ -143,7 +174,12 @@ DOUBLE_COUNTING_AUDIT: Mapping[str, str] = {
     "performance_evidence_by_id": "PARTIALLY_CORRELATED_WITH_v2_evidence_by_id_NEVER_INDEPENDENTLY_VOTED",
     "terminal_scores": "VISIBLE_ONLY_NEVER_DECISIVE",
     "editability_preferred_candidate_id": "INDEPENDENT_WHEN_SUPPLIED_NONE_EXISTS_TODAY_IN_LIVE_WIRING",
-    "prosodic_audio": "NOT_AVAILABLE_NEVER_INFERRED",
+    "prosodic_comparison": (
+        "D188_INDEPENDENT_FOURTH_DIMENSION_WHEN_SUPPLIED_DEFAULT_NONE_"
+        "PRESERVES_D184_ORIGINAL_BEHAVIOR_EXACTLY_SEE_prosodic_finalist_"
+        "comparison_py_OWN_DOUBLE_COUNTING_AUDIT_FOR_CONTINUITY_VS_PAUSE"
+    ),
+    "prosodic_audio": "LEGACY_ALWAYS_NOT_AVAILABLE_STRING_UNCHANGED_SINCE_D184_SEE_prosodic_comparison_FOR_D188",
     "p1_global_context": "NOT_AVAILABLE_NOT_CONSULTED",
 }
 
@@ -192,6 +228,13 @@ class FinalistArbiterInput:
     # canonical comparator supplies it (none exists in live wiring today
     # -- see module docstring). `None` is the honest, expected default.
     editability_preferred_candidate_id: str | None = None
+    # D-188: the FOURTH independent evidence dimension (PROSODIC_DELIVERY),
+    # a `prosodic_finalist_comparison.ProsodicFinalistComparison` built
+    # from D-187's `ProsodicDeliveryEvidence` for this same finalist set.
+    # `None` (the default) reproduces D-184's own original behavior
+    # exactly -- no existing caller/test that never sets this field is
+    # affected in any way.
+    prosodic_comparison: "ProsodicFinalistComparison | None" = None
     provenance: str = "bounded_finalist_arbiter_v1"
 
 
@@ -213,6 +256,15 @@ class BoundedFinalistArbiterResult:
     evidence_sources: Tuple[str, ...]
     provenance: str
     action_applied: bool
+    # D-188: per-call Prosodic fusion status -- NOT_AVAILABLE (no
+    # `prosodic_comparison` supplied, the D-184-original default),
+    # AVAILABLE (a real DOMINANT/NEAR_EQUAL comparison was consulted),
+    # INSUFFICIENT (supplied but NOT_EVALUABLE/INSUFFICIENT_EVIDENCE), or
+    # CONFLICTED (the comparison's own internal state was CONFLICTED).
+    # Deliberately NOT merged into the closed 13-key
+    # `bounded_finalist_arbiter_diagnostics` contract -- see
+    # `bounded_finalist_arbiter_prosodic_fusion_diagnostics` instead.
+    prosodic_comparison_status: str = "NOT_AVAILABLE"
 
 
 def _abstain(
@@ -228,6 +280,7 @@ def _abstain(
     evidence_sources: Tuple[str, ...] = (),
     preferred_candidate_id: str | None = None,
     provenance: str,
+    prosodic_comparison_status: str = "NOT_AVAILABLE",
 ) -> BoundedFinalistArbiterResult:
     return BoundedFinalistArbiterResult(
         candidate_ids=candidate_ids,
@@ -243,6 +296,7 @@ def _abstain(
         evidence_sources=evidence_sources,
         provenance=provenance,
         action_applied=False,
+        prosodic_comparison_status=prosodic_comparison_status,
     )
 
 
@@ -388,14 +442,49 @@ def evaluate_bounded_finalist_arbiter(data: FinalistArbiterInput) -> BoundedFina
         editability_comparison_status = _STATUS_NO_EVIDENCE
         missing_evidence.append("editability_evidence")
 
-    missing_evidence.append("prosodic_audio")
+    # D-188: PROSODIC_DELIVERY, the fourth independent evidence dimension.
+    # `prosodic_comparison` defaults to `None` -- every caller/test that
+    # never sets it reproduces D-184's own original hardcoded
+    # `missing_evidence.append("prosodic_audio")` behavior exactly.
+    prosodic_comparison = data.prosodic_comparison
+    prosodic_pref: str | None = None
+    prosodic_internal_conflict = False
+    if prosodic_comparison is None:
+        prosodic_comparison_status = "NOT_AVAILABLE"
+        missing_evidence.append("prosodic_audio")
+    elif set(prosodic_comparison.candidate_ids) != set(candidate_ids):
+        # Safety guard: a comparison built for a DIFFERENT finalist set is
+        # never trusted -- treated exactly like "not supplied".
+        prosodic_comparison_status = "NOT_AVAILABLE"
+        missing_evidence.append("prosodic_audio")
+    elif prosodic_comparison.comparison_state == COMPARISON_CONFLICTED:
+        prosodic_comparison_status = "CONFLICTED"
+        prosodic_internal_conflict = True
+    elif prosodic_comparison.comparison_state == COMPARISON_DOMINANT:
+        prosodic_comparison_status = "AVAILABLE"
+        evidence_sources.append("prosodic_delivery")
+        prosodic_pref = (
+            prosodic_comparison.preferred_candidate_id
+            if prosodic_comparison.preferred_candidate_id in candidate_ids else None
+        )
+        sources.append(("prosodic_delivery", prosodic_pref))
+    elif prosodic_comparison.comparison_state == COMPARISON_NEAR_EQUAL:
+        prosodic_comparison_status = "AVAILABLE"
+        evidence_sources.append("prosodic_delivery")
+        sources.append(("prosodic_delivery", None))
+    else:  # INSUFFICIENT_EVIDENCE / NOT_EVALUABLE
+        prosodic_comparison_status = "INSUFFICIENT"
+        missing_evidence.append("prosodic_audio")
+
     missing_evidence.append("p1_global_context")
 
     # --- Merge (mirrors D-183's own structured-signal aggregation
     # contract -- unanimous non-None preference = supported, disagreement
     # = conflict -- implemented independently here because D-183's own
     # function also folds in raw score, which this arbiter must never
-    # treat as decisive input; see module docstring). ---
+    # treat as decisive input; see module docstring). D-188 extends this
+    # SAME merge with a fourth `sources` entry -- no new algorithm, no
+    # majority voting, no score. ---
     if v2_conflict:
         return _abstain(
             candidate_ids=candidate_ids,
@@ -408,6 +497,22 @@ def evaluate_bounded_finalist_arbiter(data: FinalistArbiterInput) -> BoundedFina
             missing_evidence=tuple(missing_evidence),
             evidence_sources=tuple(evidence_sources),
             provenance=provenance,
+            prosodic_comparison_status=prosodic_comparison_status,
+        )
+
+    if prosodic_internal_conflict:
+        return _abstain(
+            candidate_ids=candidate_ids,
+            state=STATE_CONFLICTED,
+            reason="prosodic_delivery_internal_conflict",
+            meaning_parity_status=meaning_parity_status,
+            performance_comparison_status=performance_comparison_status,
+            editability_comparison_status=editability_comparison_status,
+            structured_conflict=True,
+            missing_evidence=tuple(missing_evidence),
+            evidence_sources=tuple(evidence_sources),
+            provenance=provenance,
+            prosodic_comparison_status=prosodic_comparison_status,
         )
 
     if not sources:
@@ -421,6 +526,7 @@ def evaluate_bounded_finalist_arbiter(data: FinalistArbiterInput) -> BoundedFina
             missing_evidence=tuple(missing_evidence),
             evidence_sources=tuple(evidence_sources),
             provenance=provenance,
+            prosodic_comparison_status=prosodic_comparison_status,
         )
 
     distinct_preferences = {pref for _name, pref in sources if pref is not None}
@@ -436,6 +542,7 @@ def evaluate_bounded_finalist_arbiter(data: FinalistArbiterInput) -> BoundedFina
             missing_evidence=tuple(missing_evidence),
             evidence_sources=tuple(evidence_sources),
             provenance=provenance,
+            prosodic_comparison_status=prosodic_comparison_status,
         )
     if len(distinct_preferences) == 0:
         return _abstain(
@@ -448,6 +555,7 @@ def evaluate_bounded_finalist_arbiter(data: FinalistArbiterInput) -> BoundedFina
             missing_evidence=tuple(missing_evidence),
             evidence_sources=tuple(evidence_sources),
             provenance=provenance,
+            prosodic_comparison_status=prosodic_comparison_status,
         )
 
     preferred = next(iter(distinct_preferences))
@@ -465,6 +573,7 @@ def evaluate_bounded_finalist_arbiter(data: FinalistArbiterInput) -> BoundedFina
         evidence_sources=tuple(evidence_sources),
         provenance=provenance,
         action_applied=False,
+        prosodic_comparison_status=prosodic_comparison_status,
     )
 
 
@@ -523,3 +632,36 @@ def bounded_finalist_arbiter_run_summary(rows: Iterable[Mapping]) -> dict:
         elif state == STATE_NOT_ELIGIBLE:
             counts["arbiter_not_eligible_count"] += 1
     return counts
+
+
+# ---------------------------------------------------------------------------
+# D-188: additive Prosodic-fusion diagnostics -- deliberately SEPARATE from
+# the closed 13-key `bounded_finalist_arbiter_diagnostics` contract above
+# (which stays byte-identical, including its historical always-
+# `"NOT_AVAILABLE"` `bounded_finalist_arbiter_prosodic_audio_status` key).
+# ---------------------------------------------------------------------------
+def bounded_finalist_arbiter_prosodic_fusion_diagnostics(result: BoundedFinalistArbiterResult) -> dict:
+    """One additional, bounded per-family row: the D-188 fusion's own
+    per-call status plus whether Prosodic evidence contributed to this
+    call's `evidence_sources` (regardless of whether it alone decided the
+    outcome -- see module docstring)."""
+    return {
+        "bounded_finalist_arbiter_prosodic_status": result.prosodic_comparison_status,
+        "bounded_finalist_arbiter_prosodic_contributed": "prosodic_delivery" in result.evidence_sources,
+    }
+
+
+def bounded_finalist_arbiter_prosodic_fusion_run_summary(
+    results: Iterable[BoundedFinalistArbiterResult],
+) -> dict:
+    """Tail-safe run-level count: how many `PREFER_CANDIDATE` diagnostic
+    preferences this run had Prosodic evidence contributing to (inclusive
+    of cases where Visual/Editability also agreed -- a simple, honest
+    definition, never a claim that Prosody was the SOLE cause)."""
+    count = 0
+    for result in results:
+        if not isinstance(result, BoundedFinalistArbiterResult):
+            continue
+        if result.decision == DECISION_PREFER_CANDIDATE and "prosodic_delivery" in result.evidence_sources:
+            count += 1
+    return {"arbiter_preferences_due_to_prosody_count": count}

@@ -33012,3 +33012,375 @@ launched. No iOS work.
 D-188 -- Prosodic Audio V2 to Bounded Finalist Arbiter diagnostic
 fusion, still no winner authority -- as the next canonical engineering
 gate, and whether/when to resume P1, remain Product Owner decisions).
+
+---
+
+D-188: PROSODIC AUDIO V2 -> BOUNDED FINALIST ARBITER -- PHASE B --
+DIAGNOSTIC FUSION ONLY (post D-187, offline, no winner authority, no
+RAW, no provider, no master prosody score, no "more energy = better"
+rule)
+
+BRANCH/HEAD: `feature/runpod-pod-on-demand` @ starting `8dd631b` (D-187
+docs+code commit).
+
+FILES CHANGED: ONE new file (`cutsell_worker/prosodic_finalist_
+comparison.py`), ONE new test file (`tests/test_cutsell_d188_prosodic_
+finalist_fusion.py`), and ONE existing file extended ADDITIVELY
+(`cutsell_worker/bounded_finalist_arbiter.py` -- +150/-8 lines: a new
+optional `FinalistArbiterInput.prosodic_comparison` field defaulting to
+`None`, a new `BoundedFinalistArbiterResult.prosodic_comparison_status`
+field defaulting to `"NOT_AVAILABLE"`, evidence-gathering/merge logic
+extended with a fourth `sources` entry, and two new additive functions
+`bounded_finalist_arbiter_prosodic_fusion_diagnostics`/`_run_summary`).
+NO other file touched -- `git diff --stat HEAD` confirms exactly this
+scope; `prosodic_audio_v2.py` (D-187), `pipeline.py`, `watch_listen_
+zone_usability_v2.py`, `language_proposition_relation.py`, and every
+Boundary/Pacing/Render module are byte-identical.
+
+PROSODIC COMPARISON TYPE: `ProsodicFinalistComparison` (frozen
+dataclass) -- `candidate_ids`, `comparison_state` (`DOMINANT`/`NEAR_
+EQUAL`/`CONFLICTED`/`INSUFFICIENT_EVIDENCE`/`NOT_EVALUABLE`),
+`preferred_candidate_id` (set ONLY on `DOMINANT`), `continuity_
+comparison`/`hesitation_comparison`/`restart_comparison`/`pause_
+structure_comparison`, `descriptive_rate_relation`/`descriptive_
+energy_relation`/`descriptive_emphasis_relation`, `pitch_status`,
+`directional_evidence_present`, `conflict_present`, `missing_evidence`,
+`evidence_sources`, `provenance`. NO `selected_clip_id`/`winner`/
+`action` field anywhere -- confirmed by direct dataclass-field-name
+inspection (tests 33/37).
+
+DIRECTIONALLY-SAFE EVIDENCE CONTRACT: exactly THREE independent
+categorical dimensions ever participate in the dominance test --
+vocal continuity (`CONTINUOUS`(2) > `MILDLY_INTERRUPTED`(1) >
+`FRAGMENTED`(0)), acoustic hesitation (`NOT_OBSERVED`(1) >
+`PRESENT`(0)), vocal restart/interruption (`NOT_OBSERVED`(1) >
+`SUPPORTED`(0)). No numeric threshold is invented anywhere -- each is
+already a D-187-produced categorical judgment, consumed via a static
+rank map only.
+
+DESCRIPTIVE-ONLY EVIDENCE CONTRACT: speech rate, energy mean/
+variation, emphasis dynamics, pitch NEVER independently create a
+preference (no `HIGH_ENERGY > LOW_ENERGY`, no `FAST > SLOW`, no `MORE_
+PITCH_VARIATION > LESS` rule exists anywhere -- source-scanned).
+Recorded on `descriptive_rate_relation`/`descriptive_energy_relation`/
+`descriptive_emphasis_relation` PURELY for future context-aware
+reasoning; structurally excluded from `comparison_state`/`preferred_
+candidate_id` (tests 17-20, 20b: a fixture differing ONLY on these axes
+always yields `NEAR_EQUAL`, never a fused `PREFER_CANDIDATE`).
+
+PARTIAL-ORDER CONTRACT: B prosodically dominates A only if (1) >=1
+safe dimension favors B, (2) no safe dimension favors A, (3) both carry
+REAL `EVALUATED` acoustic evidence (never a transcript-only guess).
+Mirrors `bounded_finalist_arbiter._v2_preferred_candidate`'s own
+generic N-candidate (2-3) dominance-search + directed-3-cycle-detection
+shape verbatim (`_dominant_candidate`) -- reused pattern, not a new
+algorithm family. A per-pair internal disagreement (one safe dimension
+favors A, another favors B, with no overall dominator) is CONFLICTED,
+never resolved by picking one (test 11 / the directive's own
+"Conflicted Prosody Control"). NO `ProsodyScore` anywhere -- confirmed
+by dataclass-field scan AND source-text scan for `prosody_score`/
+`master_score`/`score_weight`/`weighted_score` (tests 34-35).
+
+CONTINUITY RESULT: `test_13`/`test_16` -- continuity alone produces a
+clean `DOMINANT` preference; `pause_structure_comparison` is ALWAYS
+identical to `continuity_comparison` (D-187's own `vocal_continuity_
+state`/`pause_structure_state` are the SAME value by construction --
+`DOUBLE_COUNTING_AUDIT` documents this and the dominance test counts
+them as ONE vote, never two).
+
+HESITATION RESULT: `test_14` -- hesitation alone produces a clean
+`DOMINANT` preference, independent of continuity/restart.
+
+RESTART RESULT: `test_15` -- restart alone produces a clean `DOMINANT`
+preference, independent of continuity/hesitation.
+
+PAUSE RESULT: identical to CONTINUITY RESULT (same underlying signal,
+see above) -- this is a DELIBERATE, DOCUMENTED simplification of D-187
+Phase A's own field design, not an oversight.
+
+SPEECH-RATE ROLE: descriptive only -- `test_17`/`test_20b` prove a
+speech-rate-only difference never creates a preference through the
+full D-184 fusion, even when it is the ONLY evidence supplied.
+
+ENERGY ROLE: descriptive only -- `test_18` (energy-variation-only
+difference -> `NEAR_EQUAL`) plus `test_21` (gain-invariance: a 3x
+global amplitude multiplier on an identical delivery shape leaves
+`comparison_state`/`energy_variation` unchanged, `energy_mean` differs
+as expected -- CV's scale-invariance from D-187 propagates cleanly).
+
+EMPHASIS ROLE: descriptive only -- `test_19` (emphasis-presence-only
+difference -> `NEAR_EQUAL`, recorded on `descriptive_emphasis_relation`
+purely observationally).
+
+PITCH ROLE: always `PITCH_ANALYSIS_NOT_IMPLEMENTED`/`UNKNOWN` this
+phase (D-187's own honest absence, passed through verbatim) -- `test_
+20` confirms this never blocks or fakes a comparison.
+
+NO-PSYCHOLOGY RESULT: this module infers nothing beyond D-187's own
+categorical vocabulary (continuity/hesitation/restart/energy/emphasis/
+rate states) -- no new inference of any kind is added; the firewall is
+inherited structurally from D-187 and re-confirmed by the same source-
+scan discipline (no forbidden token in code, only in disclaiming
+docstrings).
+
+AUDIO-REQUIRED FIREWALL: `test_02`/`test_02b`/`test_12` -- no real
+audio for EITHER candidate -> `NOT_EVALUABLE`; real audio for only ONE
+-> `INSUFFICIENT_EVIDENCE` (a partial comparison is never guessed at);
+either state never contributes a `sources` entry to D-184's fusion.
+
+MEANING FIREWALL: `test_24`-`test_27` (using the SAME proven negation/
+number/outside-meaning-sufficient text pairs D-184's own test suite
+already validates) -- P0 meaning parity/safety runs FIRST in `evaluate_
+bounded_finalist_arbiter` and returns `CONFLICTED` before Prosodic
+evidence is even inspected; `prosodic_comparison_status` reports
+`"NOT_AVAILABLE"` in this path -- an honest "never even looked at",
+never a false claim of having consulted it.
+
+BOUNDARY FIREWALL: `test_23` -- a silence interval flush against
+EITHER edge of a candidate span (a natural boundary/dead-air pause,
+Boundary's own territory) is excluded from D-187's own interior-pause
+count (D-187's `_INTERIOR_PAUSE_MARGIN_SEC` firewall, reused verbatim,
+never re-implemented here) -- two candidates differing ONLY in a
+boundary pause compare as `NEAR_EQUAL`, never a forced loss.
+
+ORDINARY-MOTION COMPATIBILITY: N/A to this task (no motion/visual
+evidence is produced or consumed by this module -- Visual/Performance
+evidence enters the fusion exclusively through the PRE-EXISTING,
+UNTOUCHED D-172 `v2_evidence_by_id`/`editability_preferred_candidate_
+id` path).
+
+D-184 FUSION: `FinalistArbiterInput.prosodic_comparison` (new, optional,
+default `None`) is consulted as a FOURTH independent `sources` entry
+inside the SAME unanimous-agreement-or-conflict merge D-184 already
+used for `MEANING`(P0)/`VISUAL`(V2)/`EDITABILITY` -- no new algorithm,
+no majority voting (source-scanned, code+comments stripped of
+docstrings, `test_33`). A `ProsodicFinalistComparison` in its own
+internal `CONFLICTED` state aborts immediately to `ABSTAIN`/
+`CONFLICTED`, mirroring D-172's own `v2_conflict` early-return exactly.
+
+VISUAL+PROSODY SAME-PREFERENCE RESULT: `test_08` -- both sources
+naming the same candidate -> `PREFER_CANDIDATE` (unanimous agreement,
+unchanged from D-184's own pre-existing 2-source behavior).
+
+VISUAL-vs-PROSODY CONFLICT RESULT: `test_09` -- different candidates
+-> `ABSTAIN`/`CONFLICTED`, exactly the directive's own "VISUAL =
+DOMINANT_A, PROSODY = DOMINANT_B -> CONFLICTED -> ABSTAIN" example.
+
+VISUAL-NEAR-EQUAL + PROSODY-DOMINANCE RESULT: `test_07` -- Visual/
+Editability both absent (never appended to `sources`, matching D-184's
+own pre-existing "missing evidence is never guessed" contract) ->
+Prosody alone decides -> `PREFER_CANDIDATE`, exactly the directive's
+own "VISUAL unavailable, PROSODY = DOMINANT_B, meaning safe -> PREFER B
+allowed diagnostically" example.
+
+BOTH-NEAR-EQUAL RESULT: `test_10` -- both Visual and Prosody report
+`NEAR_EQUAL` (contribute `None` to `sources`) -> `ABSTAIN`/`NEAR_
+EQUAL`, exactly the directive's own example.
+
+MISSING-EVIDENCE RESULT: `test_01` (no `prosodic_comparison` supplied
+at all -> `"NOT_AVAILABLE"`, `"prosodic_audio"` in `missing_evidence`,
+BYTE-IDENTICAL to D-184's own original hardcoded behavior) and `test_
+12` (a supplied-but-partial comparison -> `"INSUFFICIENT"`, still never
+a `sources` entry).
+
+DESCRIPTIVE-ONLY DIFFERENCE RESULT: `test_20b` -- end-to-end through
+the full D-184 fusion, a descriptive-only-differentiated comparison
+(`NEAR_EQUAL` at the comparison level) never becomes a `PREFER_
+CANDIDATE`.
+
+GAIN-INVARIANCE RESULT: `test_21` -- see ENERGY ROLE above; the SAME
+comparison state survives a 3x global amplitude multiplier end-to-end
+through `analyze_prosodic_delivery` -> `compare_prosodic_finalists`.
+
+FILLER CONTROL: `test_22` -- Candidate A has filler text (Language
+Spine) but continuous acoustic delivery (`HESITATION_NOT_OBSERVED`);
+Candidate B has no filler but a real interior acoustic pause
+(`HESITATION_PRESENT`) -- the fusion correctly favors A (the actually-
+cleaner acoustic delivery), proving filler TEXT alone never overrides
+actual acoustic evidence in either direction.
+
+THREE-FINALIST RESULT: `test_28` (A/C both worse than B on all three
+safe dimensions -> clean `DOMINANT`/`PREFER B`, generalizing the 2-
+candidate case) and `test_29` (a genuine directed 3-cycle -- A>B on
+continuity, B>C on hesitation, C>A on restart -- reported as `CONFLICTED`
+via the SAME cycle-detection shape D-172's own `_v2_preferred_candidate`
+already used, never resolved by an arbitrary pick).
+
+D-186B PIMPLES ABSTRACT RESULT: `test_30` -- a GENERIC two-take fixture
+(same shape as D-186B's real, CONFIRMED Pimples finding: NON_DECISIVE/
+NEAR_EQUAL visual, no literal transcript text anywhere -- source-
+scanned) with Take A fragmented/hesitant/restarted and Take B
+continuous/clean -> the fusion PREFERS the clean delivery (B),
+`action_applied=False` -- exactly this task's own "Success
+Interpretation" and the D-186B roadmap's own stated expectation.
+
+D-186B PIMPLES NEAR-EQUAL CONTROL: `test_31` -- same Language/Visual
+shape, Audio A/B themselves near-equal (only descriptive rate/energy
+noise differs) -> `ABSTAIN`, never a forced preference from noise.
+
+D-186B GYNECOLOGIST CONTROL: `test_32`/`test_03` -- D-183 `DECISIVE`
+stays `NOT_ELIGIBLE` even when a real Prosodic dominance comparison is
+supplied; `prosodic_comparison_status` reports `"NOT_AVAILABLE"`
+(never even consulted) -- the eligibility gate runs strictly BEFORE any
+evidence-gathering, matching D-186B's own real, CONFIRMED Gynecologist
+finding (D-183 DECISIVE / D-184 NOT_ELIGIBLE) being correctly never
+reopened.
+
+DOUBLE-COUNTING RESULT: `DOUBLE_COUNTING_AUDIT` (new, mirrors D-184's
+own audit dict convention) documents `pause_structure_comparison` as
+`SAME_UNDERLYING_SIGNAL_AS_continuity_comparison_NEVER_AN_INDEPENDENT_
+VOTE` (test_16); D-184's own updated `DOUBLE_COUNTING_AUDIT` records
+`prosodic_comparison` as the new independent fourth dimension and
+restates `prosodic_audio`'s legacy always-`"NOT_AVAILABLE"` string is
+unchanged since D-184 (`test_46`, pre-existing, still passing).
+
+NO-MAJORITY-VOTING RESULT: `test_33` -- source-scanned (docstrings AND
+`#` comments stripped, so only executable code is inspected) for
+"majority"/"2-of-3" in both new/modified files -- zero hits. The merge
+itself is the SAME unanimous-agreement-or-conflict pattern D-184 always
+used, extended with a fourth entry, never a vote count.
+
+NO-MASTER-SCORE RESULT: `test_34` -- no `prosody_score`/`master_score`
+string, no `score`/`prosody_score` dataclass field on `ProsodicFinalist
+Comparison`.
+
+NO-WINNER-MUTATION RESULT: `test_37` -- `action_applied` remains
+hardcoded `False` on every path (unchanged since D-184); no `selected_
+clip_id`/`winner`/`action` field exists on either dataclass.
+
+DETERMINISM: `test_38` -- identical `ProsodicFinalistComparison`
+inputs (dataclass equality) yield identical `BoundedFinalistArbiterResult`
+outputs.
+
+PIPELINE / EVIDENCE-MAP SEAM: DESIGNED, NOT LIVE-WIRED this task (per
+the directive's own "if...allowed" permissive language, not a
+mandate). Documented seam: `pipeline.py`'s existing per-family call
+site (the SAME block that already builds `v2_evidence_by_id` per
+member) would extract each source's audio ONCE via the existing
+`local_paths` convention (`parallel_perception.py`'s own established
+pattern), build one `ProsodicDeliveryEvidence` per member via D-187's
+`analyze_prosodic_delivery`, then one `ProsodicFinalistComparison` via
+`compare_prosodic_finalists`, and pass it as `FinalistArbiterInput.
+prosodic_comparison`. A reserved, unused feature flag `prosodic_
+finalist_arbiter_diagnostics_enabled()` (env var `CUTSELL_PROSODIC_
+FINALIST_ARBITER_DIAGNOSTICS_ENABLED`, default OFF) exists in the new
+module for a FUTURE live-wiring task -- `pipeline.py` itself is
+UNTOUCHED and this flag is referenced by zero production code path in
+D-188.
+
+DIAGNOSTICS: `prosodic_finalist_diagnostics(comparison)` -- 13 keys
+(`prosodic_finalist_evaluated`, `_state`, `_preferred_candidate_id`,
+`_continuity_relation`, `_hesitation_relation`, `_restart_relation`,
+`_pause_relation`, `_descriptive_rate_relation`, `_descriptive_energy_
+relation`, `_descriptive_emphasis_relation`, `_directional_evidence_
+present`, `_conflict`, `_missing_evidence`) -- JSON-safe, <2KB, no
+waveform/transcript dump. Deliberately SEPARATE from D-184's own
+CLOSED 13-key `bounded_finalist_arbiter_diagnostics` (which stays
+byte-identical, `test_diagnostics_row_has_all_13_required_fields`
+still passes unmodified). A NEW, additive `bounded_finalist_arbiter_
+prosodic_fusion_diagnostics(result)` supplies `bounded_finalist_
+arbiter_prosodic_status`/`_prosodic_contributed`.
+
+TAIL-SAFE SUMMARY: `prosodic_finalist_run_summary` (5 counts:
+`prosodic_finalist_evaluated_count`/`_dominance_count`/`_near_equal_
+count`/`_conflicted_count`/`_insufficient_count`) plus `bounded_
+finalist_arbiter_prosodic_fusion_run_summary` (1 count: `arbiter_
+preferences_due_to_prosody_count`, inclusive of cases Visual also
+agreed -- an honest, simple definition, never a claim Prosody was the
+SOLE cause).
+
+D-123 REGRESSION: PASS (unchanged file, existing suite green).
+D-150 REGRESSION: PASS (unchanged file, existing suite green).
+D-167 REGRESSION: PASS (unchanged file, existing suite green -- D-172's
+`zone_usability_v2_dominates` reused verbatim, never modified).
+D-174 REGRESSION: PASS (unchanged file, existing suite green -- the
+Watch+Listen BestTake Guard's own "MAY VETO, NEVER SELECTS" authority
+is untouched and outside this arbiter's scope entirely).
+D-180 REGRESSION: PASS (unchanged file, existing suite green).
+D-183 REGRESSION: PASS (`pipeline.py` untouched; `TerminalBestTake
+Confidence` states/diagnostics byte-identical).
+D-184 REGRESSION: PASS -- all 62 pre-existing tests green UNMODIFIED,
+including `test_47`/`test_48` (`PROSODIC_AUDIO_AVAILABLE is False` and
+every scenario that never sets `prosodic_comparison` still reports
+`"NOT_AVAILABLE"`/`"prosodic_audio" in missing_evidence` exactly as
+before) and `test_diagnostics_row_has_all_13_required_fields` (`len(row)
+== 13`, the closed contract untouched).
+D-187 REGRESSION: PASS (`prosodic_audio_v2.py` untouched; all 51
+existing tests green).
+
+FAMILY NO-CHANGE: confirmed (zero Family-Formation file touched; `git
+diff --stat HEAD` shows only `bounded_finalist_arbiter.py`).
+LANGUAGE-SPINE NO-CHANGE: confirmed (`language_proposition_relation.py`
+untouched; the SAME `build_claim_signature`/`claim_signatures_conflict`
+primitives are reused verbatim, never re-implemented).
+BOUNDARY NO-CHANGE: confirmed (zero Boundary file touched; targeted
+Boundary suite green, 109/109 combined with Pacing/render below).
+PACING NO-CHANGE: confirmed (`test_cutsell_d142_dialogue_pacing_
+transition_phase1.py` green, unchanged file).
+RENDER BASELINE: confirmed (`test_cutsell_clean_worker_render.py`,
+`test_cutsell_live_render_qc.py`, `test_cutsell_post_render_media_
+qc.py`, `test_cutsell_post_render_structural_cross_check.py`,
+`test_cutsell_video00_render_path_regressions.py` all green, unchanged
+files).
+
+TARGETED TESTS: new D-188 suite (`tests/test_cutsell_d188_prosodic_
+finalist_fusion.py`) 47/47 PASS (the directive's own 54-item matrix,
+items 1-41 as distinct test functions plus diagnostics/tail-safe-
+summary/backward-compat coverage; items 42-54 -- the named "*
+unchanged" regressions -- verified via the existing suites below plus
+the `git diff` scope check, not duplicated as new assertions). Combined
+targeted regression battery (new D-188 + D-187 + D-184 + D-183 + D-180
++ D-123 + D-128 + D-150 + D-158 + D-161 + D-163 + D-167 + D-172 + D-174
++ D-177 + D-171 + D-169 + D-168 + D-166): 901/901 PASS. Boundary/
+D-142-pacing/render targeted suites: 109/109 PASS.
+
+FULL OFFLINE SUITE: `python3 -m compileall cutsell_worker tests`
+clean (the one pre-existing, untouched `jobs_smoke.py` root-level
+shell-heredoc collection error predates and is unrelated to this task).
+Full `tests/` suite (excluding the one pre-existing, untouched `test_
+semantic_stitch.py` collection error): 4302 passed, 5 failed -- the
+SAME 5 pre-existing baseline failures repeatedly confirmed unrelated
+across this entire session's D-177 through D-187 work (`test_hybrid_
+story_guard_incomplete_retry.py` + 4 in `test_video00_modal_hybrid_
+semantic_parity.py`, all D-043/D-044 Modal-env-secret-overlay-workflow
+tests, wholly unrelated to Prosodic/BestTake logic).
+
+NEW FAILURES: ZERO. `git diff --stat HEAD` confirms exactly one
+existing file (`bounded_finalist_arbiter.py`) extended additively (all
+62 of its own pre-existing tests pass UNMODIFIED) plus two new files.
+
+D-188 VERDICT: **A. PROSODIC -> FINALIST-ARBITER DIAGNOSTIC FUSION
+OFFLINE PROVEN.**
+
+CANONICAL PROSODIC STATUS: Prosodic Audio V2: PHASE_A_OFFLINE_PROVEN +
+ARBITER_DIAGNOSTIC_FUSION_OFFLINE_PROVEN. This explicitly does NOT
+claim real-media (Video00) qualification or any live pipeline wiring
+-- `pipeline.py` is untouched and the fusion has never been exercised
+against real Video00 audio.
+
+EXACT NEXT REAL-MEDIA GATE: exactly ONE Video00 RAW with `CUTSELL_
+BOUNDED_FINALIST_ARBITER_ENABLED=1` AND live pipeline wiring for
+`FinalistArbiterInput.prosodic_comparison` (currently undesigned-as-
+code beyond the documented seam above -- a live-wiring implementation
+task would need to precede or accompany that RAW), Prosodic finalist
+diagnostics ON, NO winner authority, to evaluate the REAL Pimples
+finalists' actual audio and determine whether Prosody is `DOMINANT`/
+`NEAR_EQUAL`/`CONFLICTED`/`INSUFFICIENT` and whether D-184's diagnostic
+decision changes from `NEAR_EQUAL`/`ABSTAIN` to `PREFERENCE_SUPPORTED`
+on factual acoustic evidence -- exactly this task's own "Success
+Interpretation" section. NOT launched automatically; NOT authorized by
+this task.
+
+P1 STATUS: remains paused through D-188 and its still-pending single
+real-media qualification (unchanged from D-187's own guidance -- not
+reassessed further here, no RAW run in this task).
+
+CONFIRMATIONS: NO RAW launched. NO provider/network call (source-
+scanned). NO ARBITER AUTHORITY GRANTED -- `action_applied` remains
+hardcoded `False` on every path; D-184's own decision vocabulary
+(`PREFER_CANDIDATE`/`ABSTAIN`) is unchanged, still purely diagnostic.
+
+**HUMAN ACTION REQUIRED:** YES (condition A: whether to authorize the
+live pipeline-wiring + one confirmatory Video00 RAW named above as the
+next canonical engineering gate, and whether/when to resume P1, remain
+Product Owner decisions).
