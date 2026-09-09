@@ -2259,6 +2259,249 @@ jobs:
           print(json.dumps(summary, indent=2, sort_keys=True))
           PY
 
+      - name: Print compact D-181 D-180 Case-B materiality stabilization real-media qualification summary (tail-safe)
+        # D-181: reporting-only plumbing (docs/CUTSELL_DECISIONS.md D-181),
+        # same D-119/D-125/D-152/D-164/D-173/D-175/D-178B pattern applied to
+        # D-180's own new condition-4 fields (`case_b_count_difference_
+        # present`, `case_b_materiality_evidence_available`, `case_b_
+        # materiality_state`, `case_b_materiality_source`, `case_b_
+        # condition4_actionable`, `case_b_condition4_reason`), which
+        # `pipeline.py`'s D-180 wiring already spreads onto each `take_
+        # judge_groups` row (same row the D-123/D-125 step above already
+        # reads). A SEPARATE, LATE-STAGE, BOUNDED summary reading `artifact/
+        # video00-modal.json` (already on disk, never a live pipe) --
+        # recomputes NO family formation, semantic label, gate decision,
+        # DeliveryScorer score, materiality verdict, or BestTake winner;
+        # every field here is copied verbatim or trivially derived (set-
+        # membership, equality, counting, a per-event boolean count already
+        # present in `case_b_evidence[*].delivery_events[*].d097_would_be_
+        # counted`) from values `pipeline.py`'s own D-180 gate call already
+        # produced. Gynecologist/pimples region identification below is a
+        # QA-only re-identification by source span/normalized text -- never
+        # a hardcoded Video00 clip id, and never fed back into production
+        # Selection/BestTake/grouping/render logic.
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p artifact
+          python - <<'PY'
+          import json, os, sys
+          from collections import Counter
+
+          def load(path):
+              if not os.path.exists(path) or os.path.getsize(path) == 0:
+                  return None
+              with open(path) as f:
+                  try:
+                      return json.load(f)
+                  except Exception as e:
+                      print(f"WARNING: failed to parse {path}: {e}", file=sys.stderr)
+                      return None
+
+          engine = load("artifact/video00-modal.json")
+          regression_fixture = load("benchmarks/video00_regression_qa.json")
+
+          summary = {"schema_version": "cutsell.video00.d181_case_b_materiality_summary.v1"}
+          summary["source_status"] = "engine_json_present" if isinstance(engine, dict) else "engine_json_missing_or_unparseable"
+
+          rows = []
+          clip_meta = {}  # clip_id -> {text, start, end, source_asset_id}
+          if isinstance(engine, dict):
+              diag = engine.get("diagnostics")
+              if isinstance(diag, dict):
+                  raw_groups = diag.get("take_judge_groups")
+                  if isinstance(raw_groups, list):
+                      rows = [r for r in raw_groups if isinstance(r, dict)]
+              for bucket in ("selected", "alternates", "discarded"):
+                  for clip in engine.get(bucket) or []:
+                      if isinstance(clip, dict) and clip.get("clip_id"):
+                          clip_meta[clip["clip_id"]] = {
+                              "text": str(clip.get("text") or ""),
+                              "start": clip.get("start"),
+                              "end": clip.get("end"),
+                              "source_asset_id": clip.get("source_asset_id"),
+                          }
+
+          def _norm(s):
+              return " ".join(str(s or "").lower().split())
+
+          def _material_events(events):
+              if not isinstance(events, list):
+                  return None
+              return sum(1 for e in events if isinstance(e, dict) and e.get("d097_would_be_counted") is True)
+
+          def _per_candidate_evidence(case_b_evidence):
+              out = {}
+              for clip_id, row in (case_b_evidence or {}).items():
+                  if not isinstance(row, dict):
+                      continue
+                  events = row.get("delivery_events")
+                  out[clip_id] = {
+                      "candidate_id": row.get("candidate_id", clip_id),
+                      "source_asset_id": clip_meta.get(clip_id, {}).get("source_asset_id"),
+                      "start": clip_meta.get(clip_id, {}).get("start"),
+                      "end": clip_meta.get(clip_id, {}).get("end"),
+                      "delivery_event_count": row.get("delivery_event_count"),
+                      "material_delivery_event_count": _material_events(events),
+                      "count_by_kind": row.get("count_by_kind"),
+                      "duration_by_kind": row.get("duration_by_kind"),
+                  }
+              return out
+
+          counts = {
+              "case_b_condition4_evaluated_count": 0,
+              "case_b_count_difference_count": 0,
+              "case_b_materiality_available_count": 0,
+              "case_b_not_material_count": 0,
+              "case_b_material_count": 0,
+              "case_b_condition4_actionable_count": 0,
+              "case_b_condition4_suppressed_count": 0,
+          }
+          materiality_state_counts = Counter()
+          reason_counts = Counter()
+          family_rows = []
+
+          for row in rows:
+              materiality_state = row.get("case_b_materiality_state")
+              reason = row.get("case_b_condition4_reason")
+              materiality_state_counts[str(materiality_state or "")] += 1
+              reason_counts[str(reason or "")] += 1
+
+              if materiality_state not in (None, "NOT_EVALUATED"):
+                  counts["case_b_condition4_evaluated_count"] += 1
+              if row.get("case_b_count_difference_present") is True:
+                  counts["case_b_count_difference_count"] += 1
+              if row.get("case_b_materiality_evidence_available") is True:
+                  counts["case_b_materiality_available_count"] += 1
+              if materiality_state == "NOT_MATERIAL":
+                  counts["case_b_not_material_count"] += 1
+                  counts["case_b_condition4_suppressed_count"] += 1
+              if materiality_state == "MATERIAL":
+                  counts["case_b_material_count"] += 1
+              if row.get("case_b_condition4_actionable") is True:
+                  counts["case_b_condition4_actionable_count"] += 1
+
+              semantic_candidates = row.get("semantic_candidates") or []
+              member_ids = sorted({
+                  c.get("clip_id") for c in semantic_candidates
+                  if isinstance(c, dict) and c.get("clip_id")
+              })
+              if not member_ids:
+                  member_ids = sorted((row.get("case_b_evidence") or {}).keys())
+
+              family_rows.append({
+                  "group_id": row.get("group_id"),
+                  "member_ids": member_ids,
+                  "member_spans": {
+                      cid: {"start": clip_meta.get(cid, {}).get("start"), "end": clip_meta.get(cid, {}).get("end"),
+                            "source_asset_id": clip_meta.get(cid, {}).get("source_asset_id")}
+                      for cid in member_ids
+                  },
+                  "semantic_fast_path_candidate": row.get("semantic_fast_path_candidate"),
+                  "deliveryscore_top_candidate": row.get("deliveryscore_top_candidate"),
+                  "meaning_sufficient_candidates": row.get("meaning_sufficient_candidates"),
+                  "semantic_authority_gate_status": row.get("semantic_authority_gate_status"),
+                  "complete_context_conflict": row.get("complete_context_conflict"),
+                  "complete_window_agreement_status": row.get("complete_window_agreement_status"),
+                  "case_b_conflict_present": row.get("case_b_conflict_present"),
+                  "case_b_conflict_basis": row.get("case_b_conflict_basis"),
+                  "case_b_count_difference_present": row.get("case_b_count_difference_present"),
+                  "case_b_materiality_evidence_available": row.get("case_b_materiality_evidence_available"),
+                  "case_b_materiality_state": materiality_state,
+                  "case_b_materiality_source": row.get("case_b_materiality_source"),
+                  "case_b_condition4_actionable": row.get("case_b_condition4_actionable"),
+                  "case_b_condition4_reason": reason,
+                  "semantic_fast_path_bypassed": row.get("semantic_fast_path_bypassed"),
+                  "bypass_reason": row.get("bypass_reason"),
+                  "winner_path": row.get("winner_path"),
+                  "winner_path_before": row.get("winner_path_before"),
+                  "winner_path_after": row.get("winner_path_after"),
+                  "semantic_best_take_reason": row.get("semantic_best_take_reason"),
+                  "final_selected_clip_id": row.get("final_winner", row.get("selected_clip_id")),
+                  "case_b_evidence": _per_candidate_evidence(row.get("case_b_evidence")),
+              })
+
+          summary["global_counts"] = counts
+          summary["materiality_state_distribution"] = dict(materiality_state_counts)
+          summary["condition4_reason_distribution"] = dict(reason_counts)
+          summary["families"] = family_rows
+
+          # --- Gynecologist re-identification (QA-only): by RAW source span
+          # (~96.47-102.47s) and by normalized text substring, never by a
+          # previous run's clip id. Reuses the SAME checked-in benchmarks/
+          # video00_regression_qa.json fixture text-matching approach the
+          # existing D-123/D-125 step already applies to pimples.
+          GYNECOLOGIST_SPAN = (90.0, 109.0)  # generous window around 96.47-102.47s
+
+          def _span_overlaps(meta, lo, hi):
+              start, end = meta.get("start"), meta.get("end")
+              if not isinstance(start, (int, float)) or not isinstance(end, (int, float)):
+                  return False
+              return start < hi and end > lo
+
+          def _region_texts(prefix):
+              out = []
+              if isinstance(regression_fixture, dict):
+                  for check in regression_fixture.get("checks") or []:
+                      if not isinstance(check, dict) or not str(check.get("id", "")).startswith(prefix):
+                          continue
+                      if check.get("kind") == "required_order":
+                          continue
+                      text = check.get("text")
+                      if text:
+                          out.append(_norm(text))
+              return [t for t in out if t]
+
+          def _identify_region(prefix, span=None):
+              refs = _region_texts(prefix)
+              span_clip_ids = set()
+              if span:
+                  lo, hi = span
+                  span_clip_ids = {cid for cid, meta in clip_meta.items() if _span_overlaps(meta, lo, hi)}
+              text_clip_ids = {
+                  cid for cid, meta in clip_meta.items()
+                  if refs and any(ref in _norm(meta.get("text")) for ref in refs)
+              }
+              region_clip_ids = sorted(span_clip_ids | text_clip_ids)
+              if not region_clip_ids:
+                  return {
+                      "status": "no_region_clips_identified",
+                      "span_clip_ids": sorted(span_clip_ids),
+                      "text_clip_ids": sorted(text_clip_ids),
+                  }
+              matching = [
+                  row for row in family_rows
+                  if set(row["member_ids"]) & set(region_clip_ids)
+              ]
+              if not matching:
+                  return {
+                      "status": "region_clips_present_but_no_family_row",
+                      "region_clip_ids": region_clip_ids,
+                  }
+              status = "family_formed" if len(matching) == 1 else "fragmented_across_multiple_families"
+              return {
+                  "status": status,
+                  "region_clip_ids": region_clip_ids,
+                  "span_clip_ids": sorted(span_clip_ids),
+                  "text_clip_ids": sorted(text_clip_ids),
+                  "families": matching,
+              }
+
+          summary["gynecologist"] = _identify_region("gynecologist", GYNECOLOGIST_SPAN)
+          summary["pimples"] = _identify_region("pimples")
+
+          os.makedirs("artifact", exist_ok=True)
+          out_path = "artifact/video00-modal-d181-case-b-materiality-summary.json"
+          with open(out_path, "w") as f:
+              json.dump(summary, f, indent=2, sort_keys=True)
+
+          size = os.path.getsize(out_path)
+          print("--- D-181 D-180 Case-B materiality stabilization real-media qualification summary (a pure projection of existing D-180 diagnostics -- recomputes no materiality verdict, gate decision, or BestTake winner) ---")
+          print(f"summary file: {out_path} ({size} bytes)")
+          print(json.dumps(summary, indent=2, sort_keys=True))
+          PY
+
       - name: Print compact D-170 Watch+Listen Zone-Usability V2 diagnostic qualification summary (tail-safe)
         # D-170: reconstructs cutsell_worker.watch_listen_zone_usability_v2
         # (D-167, DIAGNOSTIC-ONLY, still not wired to any authority) from
@@ -2506,6 +2749,7 @@ jobs:
             artifact/video00-modal-d173-watch-listen-besttake-v2-summary.json
             artifact/video00-modal-d175-watch-listen-besttake-guard-authority-summary.json
             artifact/video00-modal-d178b-boundary-partial-edge-trim-summary.json
+            artifact/video00-modal-d181-case-b-materiality-summary.json
           retention-days: 14
           if-no-files-found: warn
 
