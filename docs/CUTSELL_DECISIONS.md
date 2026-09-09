@@ -26072,3 +26072,259 @@ alongside, not instead of, the existing Perceptual Spine.
 **HUMAN ACTION REQUIRED:** YES (condition A) -- whether to authorize
 Phase A of the phased build plan (14.21) as a future, separately-scoped
 implementation task is a Product Owner decision.
+
+
+==================================================
+D-166 -- LANGUAGE / TRANSCRIPT SPINE, PHASE A
+TYPED WORD/PHRASE SCHEMA + SHARED NORMALIZATION (POST D-165)
+==================================================
+
+**STATUS: OFFLINE PROVEN (Verdict A).** Branch
+`feature/runpod-pod-on-demand`, built on D-165's HEAD `60023c8`. Pure,
+additive foundation implementation -- no engine behavior change, no RAW,
+no provider call, no Family/BestTake/Proposition/Relation/Boundary/Pacing
+authority change.
+
+**New module `cutsell_worker/language_spine.py`** implements ONLY the
+first two rungs of D-165's canonical hierarchy (ASR Word -> LanguageWord
+-> LanguagePhrase); `LanguageUtterance`/`LanguageAttempt`/
+`PropositionCandidate`/`RelationEvidence` are explicitly out of scope
+(D-165's own Phase B gate) and are not implemented here (proven by
+`test_27_no_proposition_creation`/`test_28_no_retry_relation_creation`).
+Not wired into any production call site -- `pipeline.py`, `flow_b.py`,
+`take_grouping.py`/`take_grouping_provider.py`/`hybrid_session_cleanup.py`,
+`semantic_idea_equivalence.py`, `deterministic_best_take_authority.py`,
+`take_judge.py`, `watch_listen_besttake_evidence.py`,
+`boundary_engine_pass.py`, `dialogue_pacing_transition.py`,
+`semantic_authority_observability.py`, and `asr.py` are all confirmed
+unaware of this module's existence (module-leaf grep tests). No feature
+flag added -- per D-165's own preference, nothing exists yet to gate.
+
+==================================================
+LANGUAGEWORD / LANGUAGEPHRASE CONTRACTS
+==================================================
+
+`LanguageWord(source_asset_id, word_index, text_raw, text_normalized,
+start, end, confidence, punctuation_after, provenance, is_filler=False,
+is_partial=False)` -- the two additive optional annotations beyond this
+task's own stated minimum satisfy "annotate fillers/partial words, never
+delete or silently correct them."
+
+`LanguagePhrase(source_asset_id, phrase_id, word_start_index,
+word_end_index, source_start, source_end, text_raw, text_normalized,
+boundary_kind, confidence, provenance)`. `phrase_id` is a deterministic,
+timestamp-sensitive physical-span id (`lphrase_` prefix), minted the same
+way `canonical_identity.mint_source_span_id` mints `source_span_id` --
+not registered in `canonical_identity.py`'s ID ownership table yet
+because nothing reads it to make an editorial decision (D-050A's own
+precedent: register only once a real consumer exists).
+
+Boundary vocabulary: `PAUSE` / `PUNCTUATION` / `SPEECH_BOUNDARY` /
+`RESTART_BOUNDARY` / `END_OF_UTTERANCE` / `UNKNOWN`. Confidence
+vocabulary: `SUPPORTED` / `WEAK` / `UNKNOWN` (categorical, never an
+opaque master score).
+
+==================================================
+ASR ADAPTER
+==================================================
+
+`adapt_words_to_language_words(source_asset_id, words)` -- the ONE
+adapter from `contracts.Word` into `LanguageWord`. Pure, read-only;
+`asr.py` (`FasterWhisperASR`) itself is untouched (confirmed:
+`test_no_asr_provider_module_modified`).
+
+==================================================
+SHARED NORMALIZER
+==================================================
+
+`normalize_language_text` touches ONLY whitespace, case, and REPEATED
+non-terminal punctuation (`!`/`?`/`,`/`;`/`:`) -- `.` is never touched at
+all, protecting the existing ellipsis-sensitive "trails off" logic
+elsewhere in the codebase (`take_segmentation._trails_off`). Idempotent.
+
+**Negation preservation:** proven (`test_09`) -- "no"/"not"/"nunca"/
+"didn't" survive normalization intact.
+**Number preservation:** proven (`test_10`) -- "42"/"2024" intact.
+**Percentage preservation:** proven (`test_11`) -- "5%" intact.
+**Date preservation:** proven (`test_12`) -- "March 3rd, 2024" tokens
+intact (case-folded only).
+**Factual-term preservation:** proven (`test_13`) -- "thyroid"/"cancer"/
+"diagnosis" intact.
+**Named-entity preservation:** proven (`test_14`) -- "Martinez" intact
+(case-folded).
+**Filler result:** annotated (`LanguageWord.is_filler`), never deleted --
+proven (`test_15`, generic cross-language interjection set only: um/uh/
+uhm/erm/eh/hmm, never a Video00-specific list).
+**Partial-word result:** represented honestly via `is_partial` (a letter
+directly followed by a trailing hyphen, e.g. `"th-"`), never silently
+"corrected" into a guessed completion -- proven (`test_16`).
+
+A reusable runtime proof metric, `count_meaning_sensitive_tokens_
+preserved`, counts how many negation-vocabulary (`polarity_safety.
+POLARITY_PARTICLES`) and digit-bearing tokens found in raw text are still
+present in normalized text -- never a fixed Video00/medical-domain list.
+
+==================================================
+PHRASE SEGMENTER / `_speech_units` REUSE RESULT
+==================================================
+
+`segment_language_phrases` is the generalized promotion of
+`take_segmentation._speech_units`'s core word-timestamp-gap-splitting
+algorithm, extended with real-audio-silence-confirmed PAUSE
+classification, punctuation sub-classification (END_OF_UTTERANCE vs.
+weaker PUNCTUATION), and an optional restart-marker override.
+**`take_segmentation.py` itself is left completely BYTE-IDENTICAL and
+untouched** -- confirmed (`test_take_segmentation_untouched_speech_units_
+still_present`) -- a deliberate choice to guarantee zero regression risk
+to production take segmentation (this task's own "do not break existing
+take segmentation behavior" instruction) rather than a literal in-place
+refactor. A future phase may migrate `take_segmentation` to consume this
+module; not attempted here (D-166's own "no mass migration" instruction).
+
+**Pause integration:** real audio-silence evidence (an optional
+`audio_silence_intervals` parameter) takes priority over a bare word-
+timing gap; a raw gap with no audio confirmation classifies WEAK
+`SPEECH_BOUNDARY`, never a confirmed `PAUSE` -- proven (`test_03`,
+`test_04`, `test_24`, `test_25`). Missing audio evidence fails open to
+timing/punctuation-only segmentation -- proven (`test_23`).
+
+**Punctuation result:** trailing punctuation is captured non-destructively
+onto `LanguageWord.punctuation_after` without mutating `text_raw`; no
+grammar rewriting occurs anywhere in this module.
+
+**Source identity result:** every `LanguageWord`/`LanguagePhrase` maps
+exactly back to a recoverable `source_asset_id` + `start`/`end` range; no
+synthetic text node is ever created without one -- proven
+(`test_19`, `structural source_mapping_valid` diagnostic).
+
+**Timeline result:** reuses the exact D-155/D-156 source-relative
+timeline (`source_asset_id` + seconds) -- no duplicate clock.
+
+**Word confidence result:** the real ASR `confidence` float (or `None`)
+is carried through unchanged -- never recomputed or invented.
+**Phrase confidence result:** categorical only (`SUPPORTED`/`WEAK`/
+`UNKNOWN`), conservatively derived from the SAME evidence that produced
+the split -- never an opaque weighted score, proven (`test_22`).
+
+**Provenance result:** reuses `raw_understanding_map.py`'s existing
+vocabulary by direct import (`PROVENANCE_ASR`, `PROVENANCE_AUDIO_SIGNAL`,
+`PROVENANCE_DETERMINISTIC_RULE`, `PROVENANCE_UNKNOWN`) and adds exactly
+the three new tags this task's directive requires
+(`PROVENANCE_TRANSCRIPT_NORMALIZATION`, `PROVENANCE_WORD_TIMING`,
+`PROVENANCE_PHRASE_SEGMENTATION`) -- defined in the new module, not added
+to `raw_understanding_map.py` itself, so that D-155's own file stays at
+literal zero diff (confirmed:
+`test_raw_understanding_map_file_byte_identical_no_diff_expected`).
+
+==================================================
+DIAGNOSTICS
+==================================================
+
+`language_spine_diagnostics(words, phrases)` -- tail-safe, counts-only
+(same pattern as D-119/D-125/D-152/D-155/D-157/D-163's own compact
+summaries): `language_spine_created`, `language_word_count`,
+`language_phrase_count`, `phrase_boundary_counts`,
+`language_unknown_confidence_count`, `normalization_change_count`,
+`meaning_sensitive_token_preservation_count`, `source_mapping_valid`,
+`timeline_valid`. No transcript dump -- proven
+(`test_diagnostics_fields_present_and_bounded` asserts the actual
+transcript text never appears in the diagnostics payload). Not wired
+into any CI workflow print step in this task (no RAW authorized).
+
+==================================================
+RAW UNDERSTANDING MAP COMPATIBILITY
+==================================================
+
+No forced migration attempted (this task's own instruction: "do not
+force migration in D-166 unless a tiny additive field/reference is
+mechanically safe"). `language_spine.py` is a standalone module reusing
+`raw_understanding_map.py`'s provenance vocabulary by import only --
+zero changes to `raw_understanding_map.py`/`watch_listen_understanding.py`
+themselves (both remain CLOSED at literal zero diff), leaving both fully
+available for a future phase to consume this new foundation without any
+migration debt incurred here.
+
+==================================================
+DOWNSTREAM NO-CHANGE RESULTS
+==================================================
+
+- **Family no-change:** `take_grouping.py`/`take_grouping_provider.py`/
+  `hybrid_session_cleanup.py`/`semantic_idea_equivalence.py` confirmed
+  unaware of `language_spine` (module-leaf grep tests).
+- **BestTake no-change:** `deterministic_best_take_authority.py`/
+  `take_judge.py`/`watch_listen_besttake_evidence.py`/
+  `realization_resolver.py` confirmed unaware.
+- **D-150 regression:** `semantic_authority_observability.py` confirmed
+  unaware; full D-150 test suite (31 tests) passes unchanged.
+- **D-163 regression:** `watch_listen_besttake_evidence.py` confirmed
+  unaware and its own load-bearing symbols
+  (`evaluate_watch_listen_besttake_guard`,
+  `GUARD_PERFORMANCE_DOMINANT_ALTERNATIVE`) unchanged; full D-163 test
+  suite (64 tests) passes unchanged.
+- **Boundary regression:** `boundary_engine_pass.py` confirmed unaware;
+  8 Boundary-family test files (D-097.C, retry-tail-guard, bridge,
+  repair, dependency-boundary, etc.) pass unchanged.
+- **Pacing regression:** `dialogue_pacing_transition.py` confirmed
+  unaware; D-142 Phase 1 test suite passes unchanged.
+- **Render baseline:** `test_cutsell_clean_worker_render.py`/
+  `test_cutsell_live_render_qc.py` pass unchanged.
+
+==================================================
+TARGETED TESTS
+==================================================
+
+New D-166 suite: 48/48 pass. Targeted regression battery (D-166 x48 +
+take_segmentation-longform + D-052 canonical ASR evidence + D-155 x2
+(RawUnderstandingMap + parallel perception) + D-157 + D-158 attempt-
+relationship-authority + D-163 x64 + D-150 + D-123 + D-128 + Boundary x5
++ D-142 pacing + render x2): **434/434 pass, zero failures.**
+
+==================================================
+FULL OFFLINE SUITE
+==================================================
+
+`python -m pytest tests/ -q --ignore=tests/test_semantic_stitch.py`:
+**3741 passed, 13 subtests passed, 5 failed, in 155.51s.** Delta from the
+D-165 baseline (3693 passed) is exactly +48 -- the new D-166 test count.
+The 5 failures are the SAME pre-existing, already-documented,
+D-166-unrelated failures confirmed identical across this entire session
+(`test_hybrid_story_guard_incomplete_retry.py::test_incomplete_failed_
+retry_is_covered_when_prior_delivery_preserves_numbers_and_negation`,
+and 4 in `test_video00_modal_hybrid_semantic_parity.py` -- D-044 Modal
+env-secret masking overlay, unrelated to Language Spine).
+
+==================================================
+NEW FAILURES
+==================================================
+
+Zero.
+
+==================================================
+PHASE-A VERDICT
+==================================================
+
+**A. LANGUAGE SPINE WORD/PHRASE FOUNDATION OFFLINE PROVEN.**
+
+==================================================
+NEXT PHASE (NOT AUTHORIZED HERE)
+==================================================
+
+**D-167 -- Language Spine Phase B**: `LanguageUtterance` + `LanguageAttempt`,
+built on this Phase A Word/Phrase foundation, per D-165's own phased
+build plan (D098.md Section 14.21, Phase B). No implementation performed
+here; a Product Owner decision.
+
+==================================================
+CONFIRMATIONS
+==================================================
+
+NO RAW. NO provider/network call anywhere in the new module (verified
+structurally, `test_35_no_provider_network_call_in_module`). NO
+Proposition/Attempt Relation/Family Formation/semantic-authority (D-150)/
+DeliveryScorer/BestTake/Boundary/Pacing/Renderer authority change --
+every one of those modules is confirmed unaware of `language_spine.py`'s
+existence, and their own full test suites pass unchanged.
+
+**HUMAN ACTION REQUIRED:** YES (condition A) -- whether to authorize
+D-167 (Language Spine Phase B: LanguageUtterance + LanguageAttempt) as
+the next implementation task is a Product Owner decision.
