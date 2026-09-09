@@ -25470,3 +25470,463 @@ D-123's gate itself never called or duplicated).
 **HUMAN ACTION REQUIRED:** YES (condition C) -- authorization for the ONE
 real-media Video00 qualification run named above is a Product Owner
 decision.
+
+
+==================================================
+D-164 -- WATCH+LISTEN BESTTAKE EVIDENCE, PHASE D REAL-MEDIA DIAGNOSTIC
+QUALIFICATION (POST D-163)
+==================================================
+
+**STATUS: B -- PARTIALLY REAL-MEDIA PROVEN.** ONE Video00 Modal RAW (run
+34294671345, branch `feature/runpod-pod-on-demand`, head `507880c`) with
+`CUTSELL_WATCH_LISTEN_BESTTAKE_EVIDENCE_ENABLED=1` alongside D-159's
+`CUTSELL_WATCH_LISTEN_FAMILY_EVIDENCE_ENABLED=1` and D-162's
+`CUTSELL_WATCH_LISTEN_RELATION_DISCOVERY_ENABLED=1` (D-162's own
+established qualification configuration, preserved verbatim). Canonical
+source (`Editdna longform validation/VIDEO-2026-07-30-09-18-03.mp4`).
+Exactly ONE dispatch, ONE GPU run; Modal teardown confirmed automatic
+(scale-to-zero on function return, no persistent resource created).
+
+**Workflow-only plumbing added for this run** (commit `507880c`, before
+the RAW): new `watch_listen_besttake_evidence_enabled` workflow_dispatch
+input (default OFF), mirroring D-159/D-162's exact overlay mechanism; new
+tail-safe "Print compact D-164 Watch+Listen BestTake evidence
+qualification summary" step (same D-119/D-123/D-152 late-stage pattern),
+projecting only D-163's own existing fields. Zero `cutsell_worker`
+editorial changes (verified via `git diff --stat`). No D-163 code was
+touched or re-implemented for this qualification.
+
+**Flag proof (from runtime diagnostics, not inferred):**
+`diagnostics.semantic_idea_equivalence.watch_listen_family_evidence.status
+== "evaluated"`, `...watch_listen_relation_discovery.status ==
+"evaluated"`, and `diagnostics.watch_listen_besttake_evidence.status ==
+"evaluated"` all appear in the live result JSON -- all three Watch+Listen
+capabilities genuinely executed this run.
+
+==================================================
+GLOBAL D-163 SUMMARY (real values, this run)
+==================================================
+
+```
+family_count (multi-member): 6            singleton_count: 16   total families: 22
+watch_listen_besttake_evaluated_count: 6
+watch_listen_besttake_no_action_count: 1
+watch_listen_besttake_preserved_count: 0
+watch_listen_besttake_bypass_count: 5
+watch_listen_besttake_dominance_count: 0
+watch_listen_besttake_uncertain_count: 0
+families_with_watch_listen_besttake_evidence: 6 (== family_count -- every
+    multi-member family this run had usable Watch+Listen spans for at
+    least one candidate)
+```
+
+The evidence path reaches real BestTake families end-to-end: Parallel
+Perception -> RawUnderstandingMap -> WatchListenUnderstanding -> Relation
+Discovery (D-162 flag) -> Family Evidence (D-159 flag) -> BestTake Evidence
+(D-163/D-164 flag) -> Structured BestTake (`take_judge_groups`) -- all six
+stages produced real, non-empty, real-media output this run, proving the
+entire evidence pipeline is genuinely wired to real Video00 media, not
+merely offline-tested.
+
+==================================================
+PER-FAMILY TRACE (all 6 evaluated families; real clip ids)
+==================================================
+
+1. `tg_31c4dc583b648824a0` (3 candidates) -- semantic winner
+   `clip_f948...`, DeliveryScorer winner `clip_61317...` (D-123
+   `case_b_performance_conflict` bypass fired: `semantic_fast_path_
+   bypassed=true`, `winner_path SEMANTIC_FAST_PATH -> DELIVERYSCORE_PATH`).
+   All 3 candidates' delivery zone usability: UNUSABLE. Guard:
+   `BYPASS_POOR_USABILITY_WINNER`, reason
+   `winner_delivery_unusable_no_dominant_meaning_sufficient_alternative`
+   (no candidate could performance-dominate because every meaning-
+   sufficient alternative was ALSO categorically UNUSABLE). winner_before
+   == winner_after == `clip_61317...`. **This is the SAME family the
+   independently-measured physical quality ladder flags as a real
+   LEVEL_1 miss** (region i=34, authority `BestTakeResolver`,
+   `take_choice_against_both_references`: "candidate clip_f948... lost
+   family tg_31c4... to clip_61317... while both references chose this
+   realization"). D-164's guard did NOT catch this miss -- see Primary
+   Question analysis below.
+2. `tg_90334b326a122656fe` (3 candidates) -- single semantic winner
+   `clip_98ef...`, no case_b conflict. All 3 UNUSABLE delivery; only the
+   winner meaning-sufficient. Guard: `BYPASS_POOR_USABILITY_WINNER`
+   (trivial -- no alternative to compare). Immutable.
+3. `tg_2dd152f7f50f90919d` (2 candidates) -- same shape as #2. Guard:
+   `BYPASS_POOR_USABILITY_WINNER`. Immutable.
+4. `tg_91b442ffb8d3122fd4` (2 candidates) -- winner `clip_0e72...`
+   (delivery USABLE, zero delivery events), alternative `clip_8e08...`
+   (UNUSABLE, 16 events/1.07s). `meaning_sufficient_candidates: []` --
+   **neither candidate is meaning-sufficient upstream.** Guard:
+   `NO_ACTION`, reason `winner_not_meaning_sufficient_upstream_owned` --
+   the **Meaning Firewall firing correctly on real media**: even though
+   the winner is visibly cleaner, the guard never asserts an opinion
+   because meaning-sufficiency ownership stays upstream. Immutable.
+5. `tg_e91f2ebb3606a7e628` (2 candidates) -- single semantic winner
+   `clip_af4d...`. Same shape as #2/#3. Guard: `BYPASS_POOR_USABILITY_
+   WINNER`. Immutable.
+6. `tg_d5f0ce1ca99c30806f` (2 candidates) -- D-123 `case_b_performance_
+   conflict` bypass fired (`winner_path SEMANTIC_FAST_PATH ->
+   OTHER_EXISTING_PATH`, `final_reason: critical_coverage_dominance`).
+   Both candidates UNUSABLE delivery, both meaning-sufficient. Guard:
+   `BYPASS_POOR_USABILITY_WINNER` (no dominant alternative -- both
+   equally UNUSABLE by the categorical zone rule). Immutable.
+
+**Winner immutability: OK for all 6 families** (`watch_listen_besttake_
+winner_before == watch_listen_besttake_winner_after` in every row,
+`action_applied: false` throughout) -- no regression.
+
+==================================================
+PIMPLES / ESPINILLAS -- NOT EXERCISED
+==================================================
+
+Both D-123's own qualification summary and D-164's own summary
+independently confirm: 3 pimples-referenced clip ids exist in this run's
+selected/alternates/discarded pool (`clip_25f70758...`, `clip_27594bd4...`,
+`clip_2d1a7052...`) but **none of them belong to any of the 6 multi-member
+`take_judge_groups` rows this run** -- status
+`pimples_clips_present_but_no_multi_member_family_or_no_usable_
+realization_row` (D-123) / `..._not_a_watch_listen_besttake_evaluated_
+family` (D-164). The pimples family did not form as a contested,
+multi-candidate family this run (Family Formation's own topology this
+run, D-158/D-161 both unchanged and correctly reused). **Per this task's
+own instruction: NOT EXERCISED, not attributed to D-163/D-164 -- D-163
+only ever consumes frozen Family Formation finalists.**
+
+**PIMPLES PRIMARY QUESTION answer: NOT EXERCISED.**
+
+==================================================
+PRIMARY QUESTION -- answered on a different, real, exercised family
+==================================================
+
+"Does Watch+Listen performance/usability evidence identify real BestTake
+quality problems that the current structured/DeliveryScorer path
+misses?" This run exercised the exact target shape -- correct family
+(`tg_31c4dc583b648824a0`), meaning-sufficient finalists, D-123's own
+`case_b_performance_conflict` bypass firing, DeliveryScorer choosing a
+realization -- on a family independently proven by the physical quality
+ladder to be a real LEVEL_1 miss against BOTH Cut.ai and Human Gold.
+
+**Answer: NO, not on this occurrence.** D-163's guard evaluated this
+exact family and returned `BYPASS_POOR_USABILITY_WINNER` with no
+dominant alternative, because `watch_listen_understanding.py`'s existing,
+unchanged D-157 zone-usability rule (categorical, un-floored, fires
+UNUSABLE on ANY single defect-kind event in a zone) marked BOTH
+candidates UNUSABLE on delivery -- it could not distinguish that
+`clip_61317...` (chosen) is not "materially worse" than `clip_f948...`
+(the reference-preferred realization) on the performance/usability axis
+this module reads. Cross-checking the underlying D-122 factual counts
+independently shows `clip_f948...` actually has MORE raw delivery events
+(8, 0.533s) than `clip_61317...` (3, 0.2s) -- i.e. by the very evidence
+D-163 reuses, the reference-preferred realization is not the physically
+"cleaner" one either. This strongly suggests the real root cause of this
+specific LEVEL_1 miss is a **meaning/completeness** distinction (per the
+quality-ladder's own text excerpt, the losing candidate ends mid-clause:
+"...le pedí que me hiciera un test de") outside D-163's designed scope
+(performance/usability), not a Watch+Listen performance signal this
+module could ever have surfaced. This is an honest negative result on
+the mechanism's practical reach this run, not a defect in the guard's
+own logic (which behaved exactly as designed: fail-open, no forced
+dominance without genuine ordinal superiority).
+
+==================================================
+CASE A / B / C
+==================================================
+
+Every winner this run that reached the delivery-usability check had
+delivery UNUSABLE (CASE_B_DELIVERY_OWNED territory) except family #4,
+whose winner had delivery USABLE but never reached the case-classification
+step because the Meaning Firewall short-circuited first (by design --
+meaning-sufficiency is checked before delivery usability in the guard's
+control flow). No family exercised a pure CASE_A_BOUNDARY_ONLY or
+CASE_C_AMBIGUOUS winner shape this run (the un-floored zone-usability
+rule rarely leaves a winner at QUESTIONABLE/UNKNOWN on real Video00
+media rather than UNUSABLE -- see Mechanism Sensitivity Finding below).
+Confirmed: no family produced a BestTake rejection from a CASE_A-only
+defect; no family produced a forced UNCERTAIN from a genuine CASE_C
+without evidence (0 uncertain outcomes, correctly -- no modality
+conflict flags fired this run).
+
+==================================================
+MEANING FIREWALL -- PROVEN on real media
+==================================================
+
+Family #4 is a direct, real proof: a visibly cleaner candidate
+(`clip_0e72...`, 0 delivery events) was NEVER treated as a `dominant_
+candidate` because `meaning_sufficient_candidates` was empty for that
+family. `watch_listen_besttake_dominant_candidate` is `null` in every one
+of the 6 rows this run -- **no meaning-insufficient candidate ever became
+a dominant candidate.** No regression.
+
+==================================================
+BOUNDARY FIREWALL
+==================================================
+
+No family this run resolved to a CASE_A_BOUNDARY_ONLY winner shape (see
+CASE A/B/C above), so the Boundary Firewall was not directly exercised on
+a winner this run; the module's own unreachable defensive branch (`case_
+classification == CASE_A_BOUNDARY_ONLY` after `delivery_usability ==
+UNUSABLE` fails by construction) was not hit, matching the offline proof
+(D-163's own 64 tests already cover this branch structurally). No
+regression, nothing new to report.
+
+==================================================
+D-123 OWNERSHIP -- PROVEN preserved
+==================================================
+
+Two families this run (`tg_31c4dc583b648824a0`, `tg_d5f0ce1ca99c30806f`)
+show `semantic_fast_path_candidate != deliveryscore_top_candidate` with
+`case_b_conflict_present: true` -- D-123's own existing gate already
+identified and resolved both (bypassing the semantic fast path to
+`DELIVERYSCORE_PATH`/`OTHER_EXISTING_PATH` respectively). D-164's guard
+evaluated the SAME two families independently and, in both cases, only
+reported `BYPASS_POOR_USABILITY_WINNER` (a passive, no-action outcome) --
+it never asserted a different winner, never duplicated D-123's decision
+logic, and never called D-123's gate. D-123 remains the sole owner of
+this disagreement shape; D-164 layers a read-only second opinion beside
+it, exactly as designed.
+
+==================================================
+SEMANTIC + DELIVERYSCORE AGREEMENT SHAPE
+==================================================
+
+Three families (#2, #3, #5) show `semantic_fast_path_candidate ==
+deliveryscore_top_candidate` with no case_b conflict -- the "boring"
+control shape. In all three, only one candidate was meaning-sufficient
+(the winner itself), so the guard's own alternative-search trivially
+found nothing to compare against (`BYPASS_POOR_USABILITY_WINNER`, no
+dominant candidate). This run produced no instance of the specific
+residual shape D-163 most wanted to expose (semantic == DeliveryScorer
+agreement, but W+L contradicts with a genuine ordinal-dominant
+alternative) -- see Phase-D Verdict reasoning.
+
+==================================================
+SEMANTIC NON-DECISIVE SHAPE
+==================================================
+
+D-150's gate returned `AUTHORITATIVE` for all 6 families this run (0
+`ABSTAIN_CONFLICT`, 0 `ABSTAIN_INCOMPLETE_CONTEXT`) -- unlike D-162's
+pimples finding, no family was semantically non-decisive this run, so
+this specific shape (semantic abstain + DeliveryScorer decisive + W+L
+confirm/contradict) was also NOT exercised. D-150 remains untouched and
+unaware of D-163/D-164 (confirmed: its own module never imports or is
+imported by `watch_listen_besttake_evidence.py`).
+
+==================================================
+DOUBLE-COUNTING VALIDATION (one real family, `tg_31c4dc583b648824a0`)
+==================================================
+
+For `clip_61317...` (the winner): MediaSignals-derived `count_by_kind`
+(`facial_expression_shift_candidate: 2`, `hand_motion_reset_candidate:
+1`) feeds `take_judge.score_take`'s blended composite (`PARTIALLY_
+CORRELATED`, per the offline audit); the SAME 3 events feed D-097's
+`delivery_cleanliness_evidence` (confidence-floored, did not reach the
+`>=0.88`/`>=0.76` BOTH-required floor here per the visible event
+counts/durations, so no D-097 penalty fired for this candidate --
+consistent with `PARTIALLY_CORRELATED`, never double-applied); the SAME
+3 events feed `case_b_performance_evidence.py`'s factual re-projection
+(the exact `count_by_kind`/`duration_by_kind`/`event_density` block shown
+in the D-123 summary above); and the SAME events drive `watch_listen_
+understanding.py`'s own un-floored `delivery_usability = UNUSABLE` (fired
+categorically on the 3-event presence, `PARTIALLY_CORRELATED` with the
+above three, never `INDEPENDENT`). D-164's own guard consumed only the
+categorical `delivery_usability` value -- it never re-read the raw event
+counts, never double-counted the same 3 events as a second independent
+signal. No new double-counting introduced.
+
+==================================================
+AUDIO HONESTY
+==================================================
+
+`audio_signal_usability` is `UNKNOWN` in every candidate this run
+(structurally, per the module's own hard-coded honesty -- no live
+producer feeds audio-signal behavior hypotheses into `WatchListenUnderstanding`
+today). No tone/prosody/emotion-from-voice inference occurred anywhere
+this run.
+
+==================================================
+ORDINARY-MOTION CONTROL
+==================================================
+
+Not directly isolable from this run's data alone (every candidate with
+any delivery event, however small, was marked categorically UNUSABLE by
+the un-floored zone rule -- see Mechanism Sensitivity Finding). No
+candidate was penalized for motion/energy alone independent of the
+existing categorical usability computation; the guard itself applies no
+separate energy/motion penalty of its own (structurally proven offline,
+re-confirmed by code inspection this run -- unchanged).
+
+==================================================
+CONFLICT CONTROL
+==================================================
+
+Zero `conflict_flags` fired on any of the 6 families' candidates this
+run (`watch_listen_besttake_uncertain_count: 0`) -- the conflict-fail-open
+path was not exercised this run, but no incorrect forced outcome occurred
+either.
+
+==================================================
+FAMILY TOPOLOGY / PROPOSITION / ATTEMPT RELATION -- unchanged
+==================================================
+
+`family_topology_counts`: `family_count: 22, multi_member_family_count: 6,
+singleton_count: 16` -- reported as input context only. D-158's `watch_
+listen_family_evidence` (`status: evaluated`, 11 pairs, 11 retries, 0
+distinct-proposition/new-beat/complementary/correction) and D-161's
+`watch_listen_relation_discovery` (`status: evaluated`, 1 candidate, 0
+accepted -- rejected `confidence_not_supported_or_uncertain`) both ran
+normally and independently of D-163/D-164; neither Family Formation,
+Proposition Identity, nor Attempt Relation state was read, touched, or
+influenced by the new guard.
+
+==================================================
+D-150 / D-123 / D-128 STATUS
+==================================================
+
+D-150: `AUTHORITATIVE` x6, 0 abstain -- unaffected by D-163/D-164.
+D-123: 2 of 6 families exercised its `case_b_performance_conflict` bypass
+correctly (see D-123 Ownership above) -- unaffected, un-duplicated.
+D-128: `fallback_shadow_eligible_count: 0` this run -- Phase 1 shadow-only
+fallback path dormant, unaffected.
+
+==================================================
+WHOLE-VIDEO COMMERCIAL CONTEXT (compact)
+==================================================
+
+Human Gold regression QA: 17/18 checks PASS (`qa_pass: false` only on
+`sonography_good_before_diagnosis`, a pre-existing `required_order`
+finding unrelated to this task -- CUTAI_GAP, not newly introduced).
+Pimples-specific checks (`pimples_micro_1/2/3_present`, `pimples_bad_
+monolith_absent`, `pimples_later_winner_present`, `pimples_micro_order`)
+all PASS -- CUTAI_PASS. Hook/diagnosis/hair-loss/gastritis/family-context/
+CTA checks: all PASS -- CUTAI_PASS. `selection_count_23 -> 25` is a
+pre-existing, non-blocking warning per D-032 (not re-opened here).
+
+==================================================
+PARITY METRICS (physical, D-097.10 R14 headline)
+==================================================
+
+```
+Selection Level-1:  20 regions / 26.13 s   (selection-plan view)
+Physical Level-1:   10 regions / 16.675 s  (rendered-MP4 view, the headline)
+Boundary Level-1 (physical): 23 regions / 3.808 s
+Overall physical LEVEL_1 share of Cut.ai keep: 9.94%
+F1 vs Cut.ai (physical): 0.8205 (precision 0.8779, recall 0.7702)
+F1 vs Human Gold (physical): 0.8363 (precision 0.8204, recall 0.8527)
+```
+
+Reference recent runs (unchanged history, reproduced for trend only --
+**not attributed to D-163/D-164**, which are diagnostic-only): D-156
+Cut.ai 0.9018 / Gold 0.8685; D-159 Cut.ai 0.8602 / Gold 0.8737; D-162
+Cut.ai 0.8068 physical / Gold 0.8244 physical; **D-164 (this run) Cut.ai
+0.8205 physical / Gold 0.8363 physical.** The modest movement versus
+D-162 reflects normal run-to-run provider/content variance already
+documented across this history, not a D-163/D-164 effect (D-163's guard
+took `action_applied: false` in all 6 families -- it structurally cannot
+have moved these numbers).
+
+==================================================
+WATCH+LISTEN PIPELINE STATUS
+==================================================
+
+Parallel Perception: ran (ASR/audio/local-performance all present).
+RawUnderstandingMap: ran (behavior hypotheses feeding all downstream
+layers). WatchListenUnderstanding: ran (`entry/delivery/exit_usability`
+populated per candidate). Relation Discovery: `evaluated` (D-161).
+Family Evidence: `evaluated` (D-159). BestTake Evidence: `evaluated`
+(D-163/D-164, 6/6 families). Structured BestTake: `take_judge_groups`
+carries all of the above plus D-164's fields on every row. The full
+evidence path is proven to reach BestTake diagnostics on real media,
+end to end.
+
+==================================================
+MECHANISM SENSITIVITY FINDING (new, this run's own real-media evidence)
+==================================================
+
+`watch_listen_understanding.py`'s existing, unchanged D-157 zone-usability
+rule fires UNUSABLE categorically on ANY single defect-kind event inside
+a zone, with no confidence floor and no magnitude/duration weighting.
+On this real Video00 source, nearly every candidate in a contested family
+had at least one such event (hand-motion/facial-expression shifts of
+0.067-0.5s are common, ordinary human movement), so 10 of 11 non-trivial
+candidates across the 6 families were marked UNUSABLE on delivery. This
+saturates D-163's own ordinal-dominance comparison (`_performance_
+dominates` requires a candidate to be strictly better AND the other no
+worse) -- when nearly everything ties at UNUSABLE (rank 0), no dominance
+is structurally possible, so `PERFORMANCE_DOMINANT_ALTERNATIVE` and
+`PRESERVE_STRUCTURED_WINNER` could not fire this run regardless of
+whether a genuine quality difference existed underneath (as the
+`tg_31c4dc583b648824a0` cross-check above shows). This is not a defect
+in D-163's own guard logic (which correctly declines to assert dominance
+without genuine ordinal evidence, per its own no-new-opaque-score,
+no-arbitrary-threshold contract) -- it is a real limitation of the
+UPSTREAM, unchanged D-157 zone-usability signal's coarseness on this
+kind of real footage. Recorded as a finding for a future, separately-
+authorized task; **not fixed here** (D-157 is CLOSED, out of D-164's
+scope).
+
+==================================================
+PHASE-D REAL-MEDIA VERDICT
+==================================================
+
+**B. PARTIALLY REAL-MEDIA PROVEN.**
+
+The evidence path is proven safe and correctly wired end-to-end on real
+BestTake families (6/6 evaluated, winner immutability OK in all 6,
+Meaning Firewall proven firing correctly on a real family, D-123
+ownership preserved on both real conflict families, zero regressions in
+Family Formation/Proposition/Attempt Relation/Boundary/Pacing/D-150/D-128).
+However, the critical contradictory-winner shape this task's own
+directive names as the key qualification target (`PERFORMANCE_DOMINANT_
+ALTERNATIVE` actually catching a real BestTake error) was **not
+exercised** this run: zero dominance outcomes fired, and the one family
+independently proven a real LEVEL_1 miss by the physical quality ladder
+(`tg_31c4dc583b648824a0`) was evaluated by the guard but NOT flagged,
+because the upstream D-157 zone-usability signal's coarseness (see
+Mechanism Sensitivity Finding) saturated both candidates to UNUSABLE.
+
+==================================================
+NEXT AUTHORITY GATE (NOT authorized or implemented here)
+==================================================
+
+Per this task's own instruction: do NOT automatically repeat Video00
+hoping for a different trigger. The smallest missing proof is a fix (or
+at minimum a confidence/duration-aware refinement) to the upstream D-157
+zone-usability signal's coarseness, OR an offline fixture proving the
+guard's ordinal-dominance logic WOULD fire correctly given usability
+inputs with genuine ordinal separation (already proven in all 64 offline
+D-163 tests) -- the real-media gap is specifically that THIS Video00
+source rarely produces that separation under the current un-floored zone
+rule, not that the guard's own logic is unproven. A future, separately-
+authorized task should evaluate whether to (a) leave D-157 unchanged and
+accept that the BestTake guard is real-media-safe but rarely actionable
+on this class of footage, or (b) propose a bounded, confidence/duration-
+aware refinement to D-157's zone-usability computation (a Product Owner
+decision, out of D-164's own scope). No implementation is authorized here.
+
+==================================================
+VIDEO00 PRIMARY-RAW STATUS
+==================================================
+
+**NOT YET -- BESTTAKE / ORDERING / AUDIO / PACING STILL PARTIAL.** The
+`sonography_good_before_diagnosis` ordering gap and the `tg_31c4...`
+BestTakeResolver LEVEL_1 miss both remain open (pre-existing, not newly
+introduced), and D-164's own verdict is B (partial), not A.
+
+==================================================
+CONFIRMATIONS
+==================================================
+
+NO RAW beyond the one authorized dispatch (34294671345). NO provider/
+network call added by this task's own code (workflow-only overlay).
+NO Family Formation / Proposition / Attempt Relation change (D-158/D-161
+topology and status confirmed unchanged and independently re-verified
+live this run). NO semantic-authority change (D-150 unaware of D-163/
+D-164, `AUTHORITATIVE` x6 unaffected). NO Boundary/Pacing/render change.
+NO `selected_clip_id` mutation (`action_applied: false` x6, winner_before
+== winner_after x6). NO second RAW dispatched.
+
+**HUMAN ACTION REQUIRED:** YES (condition A) -- whether to authorize the
+D-157 zone-usability refinement named above as a future task, and/or
+whether Phase-D's guard should remain diagnostic-only pending that
+refinement, are Product Owner decisions.
