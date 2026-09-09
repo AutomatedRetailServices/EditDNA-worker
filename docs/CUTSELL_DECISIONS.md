@@ -26862,3 +26862,207 @@ all confirmed at literal zero diff (`git diff --stat`).
 D-169 (Language Spine Phase C: PropositionCandidate + RelationEvidence,
 and the semantic_idea_id/retry_family_id conflation resolution) as the
 next implementation task is a Product Owner decision.
+
+
+---
+
+## D-169: Language / Transcript Spine, Phase C -- PropositionCandidate + RelationEvidence
+
+==================================================
+STATUS
+==================================================
+
+**A. LANGUAGE PROPOSITION / RELATION FOUNDATION OFFLINE PROVEN.**
+
+==================================================
+SCOPE
+==================================================
+
+Post D-168. Pure, additive foundation implementation extending D-165's
+canonical hierarchy with the fifth and sixth rungs: `LanguageAttempt ->
+PropositionCandidate -> RelationEvidence`. Explicitly separates PROPOSITION
+identity (what editorial claim/job is communicated) from RETRY-FAMILY
+identity (which realizations compete for it) at the type-system level for
+the first time -- no `retry_family_id` is minted anywhere in this module.
+No Family Formation/D-150/D-158/D-161/DeliveryScorer/BestTake/D-163/
+D-167/Boundary/Pacing/Renderer change. No provider call, no RAW.
+
+==================================================
+CONFLATION AUDIT (this task's own required forensic, verified by direct
+code read, not guessed)
+==================================================
+
+| LOCATION | CURRENT FIELD | SEMANTIC MEANING | ACTUAL BEHAVIOR | CONFLATION RISK |
+|---|---|---|---|---|
+| `canonical_identity.mint_retry_family_id` | `retry_family_id` | which realizations compete for one slot | `return mint_semantic_idea_id(group_key)` -- literally the SAME hash of the SAME input; the function's own docstring says so outright | **CONFIRMED, MAXIMAL, DOCUMENTED.** `semantic_idea_id == retry_family_id` for every `DraftClip` this codebase has ever produced. |
+| `pipeline._draft_clip` | `semantic_idea_id`, `retry_family_id` | idea vs. retry-family | both minted from the SAME `group_id` in the SAME two-line block -- this IS the one minting site | Same as above; this is where the alias originates. |
+| `contracts.DraftClip` | `take_group_id` (live) vs. `semantic_idea_id`/`retry_family_id` (dormant shadow) | live grouping key vs. D-050A additive metadata | `take_group_id` drives real BestTake/Boundary/render decisions unmodified; the two shadow fields are read by nothing today (D-050A's own module docstring) | Low runtime risk today, high design risk for any future consumer -- reading either shadow field returns the other's value. |
+| `semantic_ledger.py` | `IdeaLedgerEntry.retry_family_ids` (plural tuple) | one idea MAY carry several retry families over time | schema already anticipates the separation this task performs; `assign_retry_family` appends to a tuple | Not the conflation site -- already correctly shaped; simply never exercised beyond one family because of the alias above. |
+| `take_grouping_provider.reconcile_semantic_idea_equivalence` | `take_group_id`/group index | the REAL, live Family-Formation decision | operates entirely pre-`semantic_idea_id`/`retry_family_id` minting; untouched | None -- correctly the source `take_group_id` (and hence both shadow fields) is minted FROM. |
+| `attempt_relationship_authority.py` (D-158) | `FinalAttemptRelationship.relation` | the real structured relation vocabulary this task's own `RelationEvidence.relation_candidate` mirrors | decides `would_merge`; never reads/writes `semantic_idea_id`/`retry_family_id` | None -- already treats "relation" and "family action" as related but distinct, the same posture this task's evidence layer takes. |
+
+**Conclusion:** one narrow, single-site alias (`mint_retry_family_id` calls
+`mint_semantic_idea_id` verbatim), a deliberate D-050A placeholder its own
+docstring flagged for a future split. This module does not touch that
+function (Family Formation stays byte-identical) -- it builds the
+SEPARATE `proposition_candidate_id` namespace (`prop_` prefix) that
+placeholder already anticipated, so a future migration task can retarget
+consumers one at a time without a schema break to the currently-
+serialized `semantic_idea_id`/`retry_family_id` fields.
+
+==================================================
+NEW MODULE
+==================================================
+
+`cutsell_worker/language_proposition_relation.py` -- fully additive, not
+wired into any production call site. Confirmed unaware-of by `pipeline.py`,
+`flow_b.py`, `take_grouping*.py`, `hybrid_session_cleanup.py`,
+`semantic_idea_equivalence.py`, `attempt_relationship_authority.py`,
+`deterministic_best_take_authority.py`, `take_judge.py`, `watch_listen_
+besttake_evidence.py`, `watch_listen_zone_usability_v2.py`,
+`boundary_engine_pass.py`, `dialogue_pacing_transition.py`, and
+`semantic_authority_observability.py` (module-leaf grep tests).
+
+- `ClaimSignature` (content_tokens, negation_present, numbers, claim_type,
+  negation_role, signature_hash) -- built ENTIRELY from `semantic_claims.
+  extract_claims`'s own already-vetted output; no new NLP/LLM engine.
+  Numbers read directly via `final_sibling_grouping._numbers` on the raw
+  text (not filtered through `extract_claims`'s own >=3-char content-token
+  floor, which would silently drop short numerals like "50").
+- `PropositionCandidate` (source_asset_id, proposition_candidate_id,
+  attempt_ids, source_start, source_end, text_raw, text_normalized,
+  claim_signature, meaning_completion, editorial_slot_evidence, confidence,
+  provenance, conflict_flags) -- V1 built ONE PER `LanguageAttempt`
+  (bounded, simple, per this task's own instruction). No `retry_family_id`
+  field.
+- `proposition_candidate_id` minted from (source_asset_id, claim_signature.
+  signature_hash, source_start, source_end) under a NEW, distinct `prop_`
+  namespace -- "same frozen proposition input -> same id" literally true
+  by construction; never registered in `canonical_identity.py` (D-050A's
+  own "no consumer yet" precedent).
+- Advisory editorial slot vocabulary (HOOK/SETUP/PROBLEM/FEATURE/PROOF/
+  CONCLUSION/CTA/OTHER, this module's own -- `contracts.SemanticRole`
+  untouched): CTA/CONCLUSION reactivate D-165's own finding using ONLY
+  generic, already-existing signals (`semantic_claims.classify_claim`'s
+  `UNIQUE_CONCLUSION`/`ACTION_EVENT` types + source position) -- no
+  hardcoded phrase, no selection authority touched.
+- `RelationEvidence` (left/right proposition ids, relation_candidate,
+  support_status, confidence, semantic_support, language_support,
+  watch_listen_support, meaning_conflict, proposition_conflict,
+  provenance) -- structured EVIDENCE, never a final merge action.
+  `relation_candidate` mirrors D-157/D-158's own 7-value vocabulary
+  verbatim. `semantic_support`/`watch_listen_support` are OPTIONAL,
+  caller-supplied `SUPPORT`/`CONFLICT`/`UNKNOWN` per pair (never computed
+  here -- no provider call anywhere in this module).
+- Relation classification: SUPPORT/CONFLICT/UNKNOWN fusion, never a
+  weighted score. RETRY requires same-proposition content overlap +
+  restart evidence + no meaning conflict; CORRECTION fires on D-168's own
+  `correction_evidence` flag, or restart + meaning conflict on shared
+  content (both before/after claim signatures preserved); CONTINUATION
+  fires when the left proposition is INCOMPLETE with no restart/conflict
+  (attempts stay physically distinct, joined only at the evidence level --
+  no composition performed); COMPLEMENTARY fires on matching advisory slot
+  with low content overlap; NEW_AUDIENCE_BEAT requires both sides COMPLETE
+  AND a real gap beyond `attempt_reconstruction`'s own 1.20s continuation
+  ceiling (reused, not reinvented -- "same topic/product is insufficient"
+  proven); DISTINCT_PROPOSITION is the low-overlap/no-gap default, or a
+  same-content meaning conflict with no restart evidence; UNCERTAIN fires
+  on conflicting evidence sources OR either side having no confident
+  proposition basis at all (an empty/uncertain attempt) -- never forced
+  toward RETRY or DISTINCT.
+
+==================================================
+COMPATIBILITY
+==================================================
+
+`raw_understanding_proposition_reference`/`watch_listen_proposition_
+reference`: two small, additive, JSON-safe row-builders letting a future
+task associate a `RawUnderstandingSpan.span_id` (D-155) or
+`UnderstandingSpan.span_id` (D-157) with this task's own `proposition_
+candidate_id`, WITHOUT modifying either CLOSED module (both confirmed
+zero diff). No production call site constructs or consumes these rows.
+
+==================================================
+TESTS
+==================================================
+
+`tests/test_cutsell_d169_language_proposition_relation.py`: 54 new tests
+covering all 42 directive-required fixture categories (one clean
+proposition, same-proposition-two-attempts retry, same-topic/same-product/
+same-opener distinct-proposition variants, retry/continuation/correction/
+complementary/new-beat/distinct/uncertain evidence, negation/number/
+factual-term safety, meaning-safe normalization, conclusion continuation,
+CTA/conclusion advisory, correction-with-numbers, one-proposition-no-
+family, no-retry_family_id-minted, separate id namespace, deterministic
+ids/ordering, source identity, timeline, categorical confidence,
+provenance, old-serialized-ids-unaffected, and 12 no-authority-change
+module-leaf/git-diff proofs) plus additional structural/contract tests
+(empty input, diagnostics shape, caller-supplied semantic-support seam,
+no family/authority fields on either type).
+
+Two fixture corrections during development (documented in test comments,
+not module defects): a CONCLUSION-advisory fixture lacked the digit
+`classify_claim`'s own `UNIQUE_CONCLUSION` marker check requires alongside
+the word "only," fixed with a real number; the same-product-different-
+claims/negation fixtures were rewritten to use digit-form numbers ("50"),
+since `_numbers` (reused verbatim from `final_sibling_grouping.py`) only
+detects digit-bearing tokens, never spelled-out number words -- an honest,
+documented reuse boundary, not a new heuristic.
+
+One relation-classification refinement made during development: NEW_
+AUDIENCE_BEAT was initially reachable merely from "not the same
+proposition + both complete," which fired even at zero temporal gap;
+fixed by requiring a real gap beyond `attempt_reconstruction`'s own 1.20s
+continuation ceiling (mirroring `watch_listen_understanding._relation_
+for_pair`'s own identical gate, D-157) -- this task's own "same topic/
+product is insufficient to classify [a beat]" instruction, now enforced
+structurally rather than only in spirit.
+
+Targeted regression battery (D-169 x54 + D-168 x55 + D-166 x48 + D-167
+x49 + D-163 x64 + D-157 + D-155 + D-150 + D-123 + D-128 + D-158 + D-161 +
+semantic_claims + semantic_idea_equivalence x2 + claim_coverage_best_take
++ D-059 + take_segmentation-longform + D-052 + D-142 pacing + D-097.C
+boundary engine pass + boundary/render suites) = 768/768 pass. Full
+offline suite: 3899 passed, 13 subtests passed, same 5 pre-existing unrelated
+failures (Modal env-secret masking/hybrid story guard, confirmed identical
+across this session) -- zero new failures, delta +54 = exactly the new test
+count. compileall clean.
+
+==================================================
+NEXT ENGINE STEP (NOT authorized here)
+==================================================
+
+Per this task's own instruction, do NOT implement consumer migration
+automatically. Next canonical build task, pending Product Owner
+authorization, is **D-170 -- Language Spine Phase D**: begin incremental
+migration of a SMALL, high-value subset of the 58 duplicated transcript
+consumers (14.12) onto this Utterance/Attempt/Proposition/Relation
+foundation, targeting the Proposition/Retry/Continuation cluster first,
+retaining full behavior-parity compatibility -- never all 58 at once.
+
+Zone Usability V2 (D-167) remains offline-proven and unwired; sequencing
+between Language Spine consumer migration and one real-media Zone
+Usability V2 qualification is a Product Owner decision, deferred until
+after D-169/D-170.
+
+==================================================
+CONFIRMATIONS
+==================================================
+
+NO RAW. NO provider/network call anywhere in this module (verified
+structurally). NO Family/Proposition-final/Attempt-Relation/BestTake/
+Boundary/Pacing/D-150/D-158/D-161/Zone-Usability-V2 authority change --
+this module mints no `retry_family_id` and is imported by nothing in any
+of those authorities. `language_utterance_attempt.py` (D-168), `language_
+spine.py` (D-166), `semantic_claims.py`, `semantic_idea_equivalence.py`,
+`attempt_relationship_authority.py` (D-158), `watch_listen_relation_
+discovery.py` (D-161), `watch_listen_besttake_evidence.py` (D-163),
+`watch_listen_zone_usability_v2.py` (D-167), `canonical_identity.py`,
+`contracts.py`, and `pipeline.py` are all confirmed at literal zero diff
+(`git diff --stat`) -- every previously-serialized `semantic_idea_id`/
+`retry_family_id` continues loading unmodified, no schema migration.
+
+**HUMAN ACTION REQUIRED:** YES (condition A) -- whether to authorize
+D-170 (Language Spine Phase D: bounded consumer migration) as the next
+implementation task, and the sequencing decision against a real-media
+Zone Usability V2 qualification, are Product Owner decisions.
