@@ -124,6 +124,18 @@ from .bounded_finalist_arbiter import (
     bounded_finalist_arbiter_run_summary,
     evaluate_bounded_finalist_arbiter,
 )
+# D-191 (docs/CUTSELL_DECISIONS.md D-191): Bounded Finalist Authority --
+# the FIRST gate where D-184's own already-closed arbiter result MAY
+# change the terminal BestTake winner. A SEPARATE, independently-
+# rollbackable flag layered strictly on top of D-184's own diagnostic
+# flag -- see bounded_finalist_authority.py's own module docstring for
+# the full D-183 firewall / meaning-P0 / D-123 / Boundary contract.
+from .bounded_finalist_authority import (
+    bounded_finalist_arbiter_authority_enabled,
+    bounded_finalist_authority_diagnostics,
+    bounded_finalist_authority_run_summary,
+    evaluate_bounded_finalist_authority,
+)
 # D-189 (docs/CUTSELL_DECISIONS.md D-189): live pipeline diagnostic wiring
 # for D-187/D-188's already-proven Prosodic evidence. A SEPARATE,
 # independently-rollbackable flag from D-184's own
@@ -1599,6 +1611,11 @@ def build_flow_b_draft(
     watch_listen_besttake_guard_authority_results: list = []
     bounded_finalist_arbiter_diagnostics_rows: list = []
     bounded_finalist_arbiter_results: list = []
+    # D-191: authority diagnostics/results, collected the SAME way as
+    # D-184's own arbiter rows immediately above -- a pure, additive
+    # per-family record, never a second source of truth.
+    bounded_finalist_authority_diagnostics_rows: list = []
+    bounded_finalist_authority_results: list = []
     no_usable_realization_ids: set[str] = set()
     events_by_source: dict[str, tuple] = {}
     if whole_video_context is not None:
@@ -1755,13 +1772,18 @@ def build_flow_b_draft(
             "|".join(sorted(member.clip_id for member in members)).encode()
         ).hexdigest()[:16]
         gid = _group_id(request.project_id, membership_key)
-        groups.append(TakeGroup(
-            group_id=gid,
-            semantic_key=membership_key,
-            candidate_ids=tuple(member.clip_id for member in members),
-            ranked=ranked,
-            selected_clip_id=selected_clip_id,
-        ))
+        # D-191 (docs/CUTSELL_DECISIONS.md D-191): the `TakeGroup` append
+        # itself is DEFERRED to immediately after the diagnostics block
+        # below (right before this iteration's `clip_to_group` update) --
+        # this is the ONE canonical BestTake mutation seam: D-191's own
+        # authority evaluation (inside the `bounded_finalist_arbiter_
+        # enabled()` block below) may reassign `selected_clip_id` to the
+        # bounded finalist arbiter's own supported preference BEFORE the
+        # family's immutable `TakeGroup` is ever constructed. Every family
+        # for which authority never fires (the flag is off, D-183 is
+        # DECISIVE/DECISIVE_BY_ELIMINATION/UNKNOWN, or any authority gate
+        # blocks it) reaches the deferred append with `selected_clip_id`
+        # byte-identical to what this line would have used pre-D-191.
         # D-097.8 (R10): a singleton dropped as no-usable (a corroborated
         # `bts` lone take) is recorded exactly like a dropped family so the
         # StoryValidator classifies it LOST_IN_NO_USABLE_REALIZATION_FAMILY
@@ -1930,6 +1952,11 @@ def build_flow_b_draft(
             bounded_finalist_arbiter_prosodic_row: dict = {}
             prosodic_pipeline_row: dict = {}
             prosodic_finalist_row: dict = {}
+            # D-191: reset every iteration; the diagnostics helper's own
+            # `None`-input branch supplies the honest NOT_ENABLED shape
+            # when this family's authority block below never runs (flag
+            # off, or `bounded_finalist_arbiter_enabled()` itself off).
+            bounded_finalist_authority_row: dict = bounded_finalist_authority_diagnostics(None)
             if bounded_finalist_arbiter_enabled():
                 _arbiter_terminal_state = (
                     _terminal_besttake_confidence_result.confidence_state
@@ -2043,6 +2070,54 @@ def build_flow_b_draft(
                 bounded_finalist_arbiter_prosodic_row = bounded_finalist_arbiter_prosodic_fusion_diagnostics(
                     _arbiter_result
                 )
+                # D-191 (docs/CUTSELL_DECISIONS.md D-191): Bounded Finalist
+                # Authority. Consumes ONLY the arbiter result already
+                # computed immediately above (no re-derivation, no second
+                # ranking engine) plus D-123's own already-computed `case_b_
+                # conflict_present` (a distinct, higher-priority actionable
+                # owner -- when present, D-191 never fires regardless of the
+                # arbiter's own verdict). `boundary_only_difference` is
+                # honestly `False` in all live wiring today -- no
+                # independent Boundary-ownership comparator exists in this
+                # codebase; see bounded_finalist_authority.py's own module
+                # docstring. The whole attempt is fail-open: any exception
+                # here preserves the pre-D-191 winner exactly, never crashes
+                # the family or the whole video. Skipped entirely when this
+                # family already resolved to no-usable-realization -- D-191
+                # arbitrates a live contest among real finalists, never
+                # rescues a family the general ladder already dropped.
+                try:
+                    _authority_result = evaluate_bounded_finalist_authority(
+                        enabled=bounded_finalist_arbiter_authority_enabled(),
+                        winner_before=selected_clip_id,
+                        candidate_ids=tuple(member.clip_id for member in members),
+                        terminal_confidence_state=_arbiter_terminal_state,
+                        arbiter_result=_arbiter_result,
+                        d123_actionable_conflict=case_b_conflict_present,
+                        boundary_only_difference=False,
+                    )
+                except Exception:  # noqa: BLE001 -- fail open, never crash the whole video
+                    _authority_result = None
+                if _authority_result is not None:
+                    bounded_finalist_authority_row = bounded_finalist_authority_diagnostics(_authority_result)
+                    bounded_finalist_authority_diagnostics_rows.append(bounded_finalist_authority_row)
+                    bounded_finalist_authority_results.append(_authority_result)
+                    if (
+                        _authority_result.authority_applied
+                        and not no_usable_realization
+                        and selected_clip_id
+                    ):
+                        # THE ONE canonical BestTake mutation seam this task
+                        # authorizes: replace the terminal, forced raw-score
+                        # winner with the bounded finalist arbiter's own
+                        # already-supported preference. This assignment is
+                        # read by every diagnostics field constructed below
+                        # (including "final_winner") and by the DEFERRED
+                        # `TakeGroup` append further down -- there is no
+                        # other place in this function where `selected_
+                        # clip_id` is written again after this point for
+                        # this family.
+                        selected_clip_id = _authority_result.winner_after
             judge_group_diagnostics.append({
                 "group_id": gid,
                 "selected_clip_id": selected_clip_id,
@@ -2185,7 +2260,26 @@ def build_flow_b_draft(
                 **bounded_finalist_arbiter_prosodic_row,
                 **prosodic_pipeline_row,
                 **prosodic_finalist_row,
+                # D-191 (docs/CUTSELL_DECISIONS.md D-191): Bounded Finalist
+                # Authority diagnostics -- NOT_ENABLED-shaped when the
+                # authority flag is off or this family never reached the
+                # D-184 arbiter block at all (see `bounded_finalist_
+                # authority_diagnostics(None)`'s own default above).
+                **bounded_finalist_authority_row,
             })
+        # D-191: the ONE deferred, canonical `TakeGroup` construction for
+        # this family -- see the comment left at this family's original
+        # (pre-D-191) append site above for the full seam rationale.
+        # `selected_clip_id` here is either byte-identical to the pre-
+        # D-191 value (authority never fired) or the bounded finalist
+        # arbiter's own supported preference (authority APPLIED).
+        groups.append(TakeGroup(
+            group_id=gid,
+            semantic_key=membership_key,
+            candidate_ids=tuple(member.clip_id for member in members),
+            ranked=ranked,
+            selected_clip_id=selected_clip_id,
+        ))
         for member in members:
             clip_to_group[member.clip_id] = gid
 
@@ -2452,6 +2546,22 @@ def build_flow_b_draft(
                         "prosodic_pipeline_candidate_evaluated_count": prosodic_pipeline_candidate_evaluated_count,
                         "prosodic_pipeline_audio_unavailable_count": prosodic_pipeline_audio_unavailable_count,
                         **prosodic_finalist_run_summary(prosodic_finalist_comparisons),
+                    }
+                )
+            ),
+            # D-191 (docs/CUTSELL_DECISIONS.md D-191): Bounded Finalist
+            # Authority tail-safe summary -- same pattern as D-183/D-184's
+            # own compact summaries. {"status": "disabled"} when the
+            # (separate, default-OFF) authority flag is off; the per-family
+            # fields already live on each take_judge_groups row above via
+            # bounded_finalist_authority_diagnostics.
+            "bounded_finalist_authority": (
+                {"status": "disabled"} if not bounded_finalist_arbiter_authority_enabled()
+                else (
+                    {"status": "no_families_evaluated"} if not bounded_finalist_authority_diagnostics_rows
+                    else {
+                        "status": "evaluated",
+                        **bounded_finalist_authority_run_summary(bounded_finalist_authority_diagnostics_rows),
                     }
                 )
             ),

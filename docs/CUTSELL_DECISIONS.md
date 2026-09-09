@@ -34122,3 +34122,410 @@ environment lacks the network egress or artifact-retrieval capability
 needed to close D-190's own identified gap; Product Owner choice among
 the three options above, or acceptance of D-190's Verdict D as final
 for now, is required).
+
+---
+
+D-190.1 UPDATE: PRODUCT-OWNER-SUPPLIED QA CONFIRMATION (supersedes this
+task's own `ARTIFACT_EVIDENCE_INSUFFICIENT` finding above)
+
+SOURCE: this update records values the Product Owner supplied directly
+(read independently from the existing `cutsell-video00-modal-validator-
+reports` artifact, id `10125845248`, `video00-modal-quality-ladder.
+json`, from completed run `34406357372`) at the start of the D-191
+directive -- NOT re-verified by this session (the egress/log-fetch
+blockers recorded immediately above were never resolved in-session).
+Recorded here as the authoritative QA result per the Product Owner's
+own direct account, distinct from and dated after this session's own
+`ARTIFACT_EVIDENCE_INSUFFICIENT` attempt.
+
+Pimples family `tg_c145285e700b2214a4` (unchanged from D-190):
+- CURRENT WINNER `clip_a489590ee18f3a87bdc7` (198.88-211.02s): quality-
+  ladder classification `false_keep`, `LEVEL_1`,
+  `take_choice_against_both_references` -- Cut.ai rejects this
+  realization; Human Gold rejects this realization.
+- PROSODIC-PREFERRED `clip_6aea1eaeaf02a42c154a` (213.34-222.98s):
+  quality-ladder core `213.55-221.55` overlaps this span; classification
+  `missing_delivery`, `LEVEL_1`, `cutai_keep=true`, `gold_keep=true`.
+  Reference cores: Cut.ai `213.55-221.55s`, Human Gold `213.46-221.71s`.
+  Rationale supplied: "candidate lost family while both references chose
+  this realization."
+
+QA CLASSIFICATION: `PROSODIC_PREFERENCE_MATCHES_BOTH`.
+
+D-190.1 VERDICT (updated): **A. PROSODIC REAL-MEDIA QA CONFIRMED.**
+
+UPDATED D-190 INTERPRETATION: **A. PROSODIC AUDIO REAL-MEDIA PROVEN --
+MISSING BESTTAKE DIMENSION CONFIRMED.** Every element of D-190's own
+Verdict A is now satisfied: the real, eligible Pimples contest was
+exercised on real Video00 audio; Prosodic Audio V2 produced a factual,
+safe-dimension-only `DOMINANT` preference; the descriptive-only firewall
+held; Visual/Performance was genuinely `NEAR_EQUAL`/`NO_EVIDENCE` pre-
+Prosody; the Gynecologist DECISIVE control was never reopened; the
+winner stayed immutable through D-190's own RAW (no authority existed
+yet); and the Prosodic-preferred candidate matches BOTH Cut.ai and Human
+Gold, while the raw-score-only winner D-190 observed is confirmed
+`LEVEL_1`/`false_keep` against both references. This is exactly the
+missing local BestTake dimension D-187/D-188/D-189/D-190 set out to
+test for.
+
+CANONICAL PROSODIC STATUS (updated): `PHASE_A_OFFLINE_PROVEN` +
+`ARBITER_DIAGNOSTIC_FUSION_OFFLINE_PROVEN` +
+`LIVE_PIPELINE_DIAGNOSTIC_WIRING_OFFLINE_PROVEN` +
+`REAL_MEDIA_DIAGNOSTIC_PROVEN` + `REAL_MEDIA_QA_CONFIRMED`. Still NO
+WINNER AUTHORITY as of this update -- that is exactly D-191's own
+subject, below.
+
+STILL TRUE: Cut.ai and Human Gold remain QA-ONLY. This update validates
+an independently-produced Prosodic preference after the fact; these
+reference values are not, and must never become, runtime BestTake
+inputs -- see D-191's own explicit structural no-QA-runtime-leak test
+below.
+
+**HUMAN ACTION REQUIRED:** NO (this update is a recorded Product-Owner
+finding, not a new open question).
+
+---
+
+D-191: PROSODIC-ASSISTED BOUNDED FINALIST AUTHORITY (post D-190.1,
+offline authority implementation, terminal BestTake only, no RAW, no
+provider, no P1, no score-weight change, no Family Formation change, no
+direct Prosody winner authority)
+
+BRANCH/HEAD: `feature/runpod-pod-on-demand` @ `96ee9f5b79fdf91a7415c058
+d09811b87f788e4d` (D-190.1 commit) at task start; clean tree confirmed.
+
+FILES CHANGED: ONE new module, `cutsell_worker/bounded_finalist_
+authority.py` (the authority gate itself); ONE existing file extended
+additively, `cutsell_worker/pipeline.py` (`git diff --stat HEAD` before
+this commit: 117 insertions / 7 deletions, one file); ONE new test file,
+`tests/test_cutsell_d191_bounded_finalist_authority.py` (44 tests).
+`bounded_finalist_arbiter.py`, `prosodic_finalist_comparison.py`,
+`prosodic_audio_v2.py`, `deterministic_best_take_authority.py`, and
+`watch_listen_besttake_guard_authority.py` all confirmed byte-identical
+(`git diff --stat HEAD` empty for each).
+
+D-190.1 QA CONFIRMATION RECORDED: yes, appended immediately above this
+entry (Product-Owner-supplied `PROSODIC_PREFERENCE_MATCHES_BOTH`,
+Verdict A) before this implementation began, per this task's own
+instruction.
+
+AUTHORITY FEATURE FLAG: `CUTSELL_BOUNDED_FINALIST_ARBITER_AUTHORITY_
+ENABLED`, default OFF, independently rollbackable from D-184's own
+`CUTSELL_BOUNDED_FINALIST_ARBITER_ENABLED` and D-189's own `CUTSELL_
+PROSODIC_FINALIST_ARBITER_DIAGNOSTICS_ENABLED`. The authority flag never
+implicitly turns on either diagnostic flag, and `bounded_finalist_
+authority.py` never reads them itself -- `pipeline.py` decides what
+evidence the `BoundedFinalistArbiterResult` it hands in was built from;
+with `bounded_finalist_arbiter_enabled()` off, no arbiter result exists
+at all and the authority gate reports `NOT_ENABLED`/no mutation
+regardless of its own flag.
+
+AUTHORITY TYPE: a narrow gate around D-184's OWN already-closed
+`BoundedFinalistArbiterResult` -- zero new scoring, zero new ranking,
+zero evidence re-derivation. `authority_source` is always literally
+`"bounded_finalist_arbiter"`, never `"prosodic_audio"` -- Prosody is one
+of the (up to four) independent evidence dimensions D-184's own
+unanimous-agreement merge may have already found unanimous; this module
+never re-derives that merge or looks at Prosodic evidence directly.
+
+AUTHORITY ELIGIBILITY (ALL required, mirrors the directive's own 16-item
+list, several folded into fewer distinct checks where they are
+structurally the SAME signal -- disclosed below, never silently
+dropped): (1) authority flag ON; (2) `terminal_confidence_state` in
+`{NON_DECISIVE, TIED, CONFLICTED}` -- the SAME frozenset `bounded_
+finalist_arbiter.py` already gates on, reused verbatim (this single
+check IS conditions 2 AND 16 together: D-150's own authoritative
+`single_semantic_winner` fast path expresses its authority entirely
+through the `DECISIVE` terminal state it produces, so there is no
+separate D-150 signal to re-consult -- D-150 `DECISIVE` and "semantic
+authority non-decisive at the terminal seam" are the same fact seen from
+two angles); (3) 2-3 candidates (D-184's own eligibility, reused, never
+re-implemented); (4)+(9) every finalist meaning-sufficient AND the
+preferred candidate belongs to the eligible finalist set -- both read
+directly off D-184's own result (`meaning_sufficient_candidate_ids`
+already gated D-184's own P0 check; `preferred_candidate_id` is
+independently re-checked against the family's own `candidate_ids` here
+as a fail-open defensive guard, never assumed safe); (5)+(6)+(7)+(8)
+D-184 `eligible=true`, `decision=PREFER_CANDIDATE`, `state=PREFERENCE_
+SUPPORTED`, `preferred_candidate_id` non-null -- read directly, never
+re-derived; (10)+(11) `meaning_parity_status==CONSISTENT` and `not
+structured_conflict` -- both read directly off D-184's own already-
+computed fields (meaning P0 is checked BEFORE D-123/Boundary, per its
+own absolute priority); (12) Visual/Prosody contradiction is exactly
+D-184's own `structured_conflict`/`CONFLICTED` state -- D-191 never re-
+derives the Visual-vs-Prosody comparison itself, it only refuses to act
+on a verdict D-184 already marked conflicted; (13) editability
+contradiction is likewise folded into D-184's own merge (an independent
+editability comparator, when one exists, is already one of D-184's four
+voted dimensions -- see `bounded_finalist_arbiter.py`'s own disclosed
+"realistically empty in live wiring" precedent); (14) Boundary ownership
+-- a NEW, caller-suppliable `boundary_only_difference` flag, honestly
+`False` in ALL live wiring today (no independent Boundary-ownership
+comparator exists anywhere in this codebase); (15) D-123 ownership -- a
+NEW, caller-suppliable `d123_actionable_conflict` flag, wired in live
+`pipeline.py` to the ALREADY-COMPUTED `case_b_conflict_present` (D-123's
+own `_case_b_fast_path_conflict` result), never re-derived.
+
+D-183 FIREWALL: `DECISIVE` / `DECISIVE_BY_ELIMINATION` / `UNKNOWN` (and
+any unrecognized state, and `None`) are NEVER eligible -- proven at
+`test_03_decisive_states_blocked` (parametrized over all four) and the
+Gynecologist-style generic replay `test_05_gynecologist_style_decisive_
+control_never_reopened`. D-191 never reopens a decisive structured
+decision.
+
+D-184 REQUIREMENT: exactly D-184's own `PREFERENCE_SUPPORTED` state via
+`PREFER_CANDIDATE` -- every other D-184 state/decision (`NOT_ELIGIBLE`/
+`ABSTAIN`, `NEAR_EQUAL`/`ABSTAIN`, `CONFLICTED`/`ABSTAIN`, `INSUFFICIENT_
+EVIDENCE`/`ABSTAIN`) is a first-class, non-forced result -- proven at
+`test_10_arbiter_not_eligible_blocked`, `test_11_near_equal_no_action`,
+`test_12_conflicted_blocked`, `test_13_insufficient_evidence_no_action`.
+`test_09_arbiter_result_none` (arbiter never evaluated at all) and
+`test_15_supported_candidate_outside_family_blocked` (malformed/out-of-
+family preferred id) both fail open to the unchanged winner.
+
+PROSODIC ROLE: evidence, never authority. `authority_source` is always
+`"bounded_finalist_arbiter"` (`test_14_preference_supported_applies`,
+`test_31_winner_provenance_fields`); Prosody's own contribution is
+visible only inside D-184's own already-existing `evidence_sources`/
+`prosodic_comparison_status` fields, which D-191 never reads to decide
+anything -- it only reads D-184's TERMINAL verdict.
+
+VISUAL ROLE: consulted exclusively through D-184's own merge --
+`test_21_visual_and_prosody_agree_applies` (a `PREFER_CANDIDATE` verdict
+applies regardless of which of D-184's dimensions produced the
+unanimous agreement) and `test_22_visual_prosody_conflict_never_applies`
+(D-184's own `CONFLICTED` state blocks authority unconditionally). D-191
+never independently asks "did Visual and Prosody agree?" -- it trusts
+D-184's own already-resolved answer.
+
+MEANING FIREWALL: P0, checked before D-123/Boundary/the arbiter's own
+verdict. `test_16_meaning_conflict_blocked` (D-184's own `CONFLICT`
+status) and `test_17_meaning_unknown_still_blocks_authority` (an
+unverified `UNKNOWN` basis is NOT treated as safe) both block
+`BLOCKED_BY_MEANING`, `meaning_firewall_passed=False`. No negation/
+number/factual-claim/proposition/meaning-sufficiency preference is ever
+overridden -- this firewall is D-184's own P0 gate, reused, never
+weakened or re-implemented.
+
+BOUNDARY FIREWALL: `boundary_only_difference`, honestly `False`
+everywhere in live `pipeline.py` wiring (disclosed in both the module
+docstring and this entry) -- no independent "the only difference is
+removable ENTRY/EXIT edge debris" comparator exists in this codebase.
+The parameter, the `BLOCKED_BY_BOUNDARY` state, and `test_20_boundary_
+only_difference_blocks` all exist so a genuinely independent future
+signal has somewhere principled and already-tested to plug in, without
+inventing one here.
+
+D-123 OWNERSHIP: `case_b_conflict_present` (D-123's own already-
+computed field, built by `_case_b_fast_path_conflict`, unchanged) is
+passed straight through as `d123_actionable_conflict`; `test_18_d123_
+actionable_conflict_blocks` / `test_19_no_d123_conflict_does_not_block`
+prove the gate both ways. D-191 never duplicates D-123's own comparison
+logic.
+
+D-150 COMPATIBILITY: D-150's `AUTHORITY_ALLOWED`/authoritative fast path
+is expressed as D-183 `DECISIVE` (reason `single_semantic_winner`) --
+already covered by the D-183 firewall above; D-150's own ABSTAIN path
+(`semantic_authority_gate_status != AUTHORITY_ALLOWED`) is exactly the
+`NON_DECISIVE`/etc. states D-191 IS eligible to consider -- `test_04_
+eligible_terminal_states_reach_arbiter_check` proves all three eligible
+states reach the arbiter check.
+
+AUTHORITY POSITION / CANONICAL MUTATION SEAM: inside `build_flow_b_
+draft`'s per-family loop, immediately after D-184's own arbiter result
+(`_arbiter_result`) is computed (same `if bounded_finalist_arbiter_
+enabled():` block D-184/D-189 already used) and BEFORE this family's
+`TakeGroup` (the structure `compose_selected`, and therefore Boundary/
+Pacing/Renderer, actually consumes) is ever constructed. The `TakeGroup`
+append itself was DEFERRED (moved from its original position immediately
+after `_semantic_best_take` returns, to immediately after the arbiter-
+plus-authority block, at the same loop-iteration level so ordinary
+singletons -- which never reach the arbiter block at all -- are
+unaffected) -- this is the ONE canonical BestTake mutation seam this
+task authorizes; `test_p3_authority_applies_winner_changes_to_arbiter_
+preference` proves the mutation lands in the `TakeGroup`/`final_winner`/
+`result.draft.selected` all consistently. No second BestTake engine, no
+post-Freeze winner replacement: D-183/D-184/D-188's own existing
+finalist set and verdict are reused verbatim.
+
+WINNER-BEFORE / SUPPORTED-CANDIDATE / WINNER-AFTER PROVENANCE: all three
+are explicit fields on `BoundedFinalistAuthorityResult`
+(`winner_before`, `supported_candidate_id`, `winner_after`) and on the
+per-family diagnostics row (`bounded_finalist_authority_winner_before`/
+`_supported_candidate_id`/`_winner_after`) -- `test_p3` asserts all
+three end-to-end through a real pipeline call
+(`winner_before="strong"`, `winner_after="weak"`,
+`final_winner=="weak"`).
+
+ABSTENTION CONTRACT: `ABSTAIN` (in any of D-184's own states) is always
+first-class, never forced to a pick -- `test_11`/`test_12`/`test_13`
+above, plus the run-summary's own `finalist_authority_no_action_count`.
+
+RESULT PER TERMINAL STATE: NON_DECISIVE -> eligible, arbiter consulted
+(`test_04`). TIED -> eligible, arbiter consulted (`test_04`). CONFLICTED
+(terminal) -> eligible, arbiter consulted (`test_04`; a SEPARATE
+condition from the arbiter's OWN internal `CONFLICTED` state, which is
+`test_12`/`test_22`). DECISIVE -> `NOT_ELIGIBLE`, never reopened
+(`test_03`, `test_05`). DECISIVE_BY_ELIMINATION -> `NOT_ELIGIBLE`
+(`test_03`). UNKNOWN -> `NOT_ELIGIBLE` (`test_03`).
+
+NEAR-EQUAL / VISUAL-PROSODY-CONFLICT / PROSODY-SUPPORTED / THREE-
+FINALIST RESULTS: `test_11_near_equal_no_action` (winner unchanged),
+`test_22_visual_prosody_conflict_never_applies` (winner unchanged),
+`test_14_preference_supported_applies` (winner changes to the supported
+candidate), `test_08_three_finalist_supported_preference_applies` (3
+finalists, `PREFER_CANDIDATE` toward the third candidate applies with no
+manual pairwise max -- D-184's own merge, reused).
+
+FAIL-OPEN / MISSING-AUDIO / MALFORMED-EVIDENCE RESULTS: `test_09`
+(arbiter result missing entirely), `test_15` (preferred candidate
+outside the family), `test_23` (malformed `candidate_ids` input --
+`None`), `test_24` (a non-`BoundedFinalistArbiterResult` object passed
+in) -- every case fails open to `winner_after == winner_before`.
+"Missing audio" itself is D-189's own already-proven fail-open path
+(Prosodic evidence never reaches D-184 at all; the arbiter's own result
+already reflects `INSUFFICIENT`/no Prosodic contribution -- D-191 adds
+no NEW audio-specific fail-open path, it inherits D-189's).
+Live-pipeline exception isolation: the WHOLE authority attempt in
+`pipeline.py` is wrapped in one `try/except Exception` that preserves
+`selected_clip_id` unchanged on any failure -- disclosed structurally
+(the `try/except` block itself, code-reviewed, not independently unit-
+tested with a forced exception in this task since D-184's own `test_13`
+precedent already proves per-candidate exception isolation at the
+evidence layer this authority consumes).
+
+D-190 GENERIC ABSTRACT REPLAY: `test_p3_authority_applies_winner_
+changes_to_arbiter_preference` -- 2 meaning-sufficient finalists,
+identical text (no meaning conflict), `semantic_authority_status`
+effectively `ABSTAIN_CONFLICT`-shaped (no family-complete window),
+`terminal_besttake_confidence_state=NON_DECISIVE`, Visual/Performance
+`NO_EVIDENCE`/`NEAR_EQUAL`, real Prosodic evidence via an injected
+Audio-V1-style interior-pause `TemporalEvent` (`AUDIO_SILENCE_EVENT_
+KIND`, the SAME reuse contract D-189 established) fragmenting the raw-
+score winner's own span and leaving the losing candidate continuous --
+`prosodic_finalist_state=DOMINANT`, `bounded_finalist_arbiter_
+state=PREFERENCE_SUPPORTED`, `bounded_finalist_authority_
+state=APPLIED`, `winner_before="strong"` (the legacy terminal winner),
+`winner_after="weak"` (D-184's own supported finalist). No literal
+Video00/Pimples transcript, timestamp, clip id, or family id anywhere in
+the fixture -- generic candidate ids/text throughout.
+
+NEAR-EQUAL CONTROL: same terminal shape, no injected pause evidence ->
+`bounded_finalist_arbiter_state=NEAR_EQUAL`, `bounded_finalist_
+authority_state=NO_SUPPORTED_PREFERENCE`, winner unchanged
+(`test_p2_diagnostic_preference_but_authority_off_no_mutation` covers
+the authority-off half of this; `test_11_near_equal_no_action` covers
+the authority-on-but-arbiter-near-equal half directly).
+
+GYNECOLOGIST-STYLE CONTROL: `test_05_gynecologist_style_decisive_
+control_never_reopened` -- a DECISIVE terminal state is never reopened
+by D-191, generic replay of the D-190/D-186B canonical negative control.
+
+NO-REFERENCE-LEAK / NO-VIDEO00-HARDCODE RESULT: `test_32_no_qa_
+reference_no_score_weight_in_source` source-scans `bounded_finalist_
+authority.py` for `cut.ai`/`cutai`/`human gold`/`human_gold`/`video00`/
+`pimples`/`weight =` -- zero hits. No test fixture in this task's own
+test file uses a literal Video00 transcript, timestamp, clip id, or
+family id.
+
+NO-SCORE-WEIGHT / NO-MASTER-SCORE RESULT: `evaluate_bounded_finalist_
+authority` reads no numeric score of any kind (not even D-184's own
+`terminal_scores`, which D-184 itself already refuses to read
+decisively) -- every branch is a categorical comparison over already-
+closed state strings and candidate-id membership. `test_32` additionally
+source-scans for `weight =`.
+
+NO-PROVIDER RESULT: `test_33_no_provider_network_in_source` source-scans
+for `requests`/`urllib`/`openai`/`anthropic`/`gemini`/`modal.com`/
+`http://`/`https://` -- zero hits.
+
+DETERMINISM / CANDIDATE-ORDER / ID INDEPENDENCE: `test_25_deterministic_
+repeat` (byte-identical dataclass equality across two calls),
+`test_26_candidate_order_independence` (`(cA,cB)` vs `(cB,cA)` both
+resolve to the SAME semantic winner), `test_27_id_independence_generic_
+relabeling` (arbitrary `alpha`/`beta` ids behave identically to `cA`/
+`cB`). Family-id independence is structural -- `evaluate_bounded_
+finalist_authority` never reads a family id at all (only `pipeline.py`'s
+own caller threads `gid` through for diagnostics, never into the
+decision function itself).
+
+DIAGNOSTICS: 16-key `bounded_finalist_authority_*` row (`test_28_
+diagnostics_row_shape`, exact key-set match) merged into each family's
+`take_judge_groups` row (an honest `NOT_ENABLED`-shaped default via
+`bounded_finalist_authority_diagnostics(None)` when the family never
+reached the arbiter block at all -- `test_29_diagnostics_none_input_
+honest_not_enabled_shape`); bounded and JSON-safe, no transcript/
+waveform dump (`test_p4_authority_diagnostics_bounded_no_dump`, < 1500
+bytes, literal fixture text absent).
+
+RUN SUMMARY: new top-level `"bounded_finalist_authority"` diagnostics
+key -- `{"status": "disabled"}` when the authority flag is off,
+`{"status": "no_families_evaluated"}` when the flag is on but no family
+ever reached the arbiter block, else `{"status": "evaluated",
+finalist_authority_evaluated_count, _applied_count, _no_action_count,
+_meaning_block_count, _d123_block_count, _boundary_block_count,
+_conflict_block_count, _winner_changed_count}` -- `test_30_run_summary_
+counts` and `test_p3`'s own summary assertions.
+
+DEFAULT-OFF COMPATIBILITY: `test_p1_default_off_byte_identical_winner`
+-- every flag off, the SAME `_weak_strong_fixture` D-189 itself uses,
+byte-identical winner to pre-D-191 (and pre-D-184/D-189) selection;
+`bounded_finalist_authority` summary reports `{"status": "disabled"}`.
+
+D-123/D-150/D-167/D-174/D-180/D-183/D-184/D-187/D-188/D-189 REGRESSION:
+PASS -- 934/935 tests green across the full named-suite battery (D-183/
+D-184/D-187/D-188/D-189/D-180/D-123/D-150/D-158/D-161/D-163/D-166/D-167/
+D-168/D-169/D-171/D-172/D-174/D-177 plus this task's own new D-191
+suite), the ONE failure being the SAME expected transient `test_cutsell_
+d169_language_proposition_relation.py::test_30_old_serialized_ids_
+unaffected` `git diff --stat HEAD` tripwire already documented at D-189/
+D-190 (resolves once this commit lands).
+
+FAMILY / LANGUAGE-SPINE / BOUNDARY / PACING / RENDER BASELINE: PASS --
+275/275 across every Boundary/render-named test file plus D-142 pacing;
+zero Family-Formation file touched (`git diff --stat HEAD` confirms only
+`pipeline.py` plus the two new files); `language_proposition_relation.
+py`/`audio_silence.py` untouched.
+
+FULL OFFLINE SUITE: `python3 -m compileall cutsell_worker tests` clean.
+Full `tests/` suite (excluding the one pre-existing, untouched `test_
+semantic_stitch.py` collection error): 4369 passed, 6 failed -- the SAME
+5 pre-existing baseline failures repeatedly confirmed unrelated across
+this entire session (`test_video00_modal_hybrid_semantic_parity.py` x4,
+`test_hybrid_story_guard_incomplete_retry.py`) PLUS the one transient
+D-169 tripwire above. ZERO genuine new failures.
+
+D-191 VERDICT: **A. PROSODIC-ASSISTED BOUNDED FINALIST AUTHORITY
+OFFLINE PROVEN.**
+
+EXACT NEXT REAL-MEDIA GATE: exactly ONE Video00 RAW with `CUTSELL_
+BOUNDED_FINALIST_ARBITER_ENABLED=1` AND `CUTSELL_PROSODIC_FINALIST_
+ARBITER_DIAGNOSTICS_ENABLED=1` AND `CUTSELL_BOUNDED_FINALIST_ARBITER_
+AUTHORITY_ENABLED=1` -- testing whether the REAL Pimples terminal winner
+changes from `clip_a489590ee18f3a87bdc7` (the old, QA-rejected
+realization) to the D-190/D-190.1-confirmed Prosodic/arbiter-supported
+realization (`clip_6aea1eaeaf02a42c154a`), with meaning preserved,
+family unchanged, D-183 still `NON_DECISIVE`, D-184 still `PREFERENCE_
+SUPPORTED`, Prosody still safely `DOMINANT`, authority applied, and no
+unrelated regression. NOT launched automatically; NOT authorized by this
+task.
+
+P1 STATUS: remains paused through D-191's own offline qualification. Per
+this task's own instruction, if the next RAW safely confirms real
+authority closes this local BestTake gap, the bounded BestTake seam is
+complete enough for now and P1 (Editorial Moment & Sequence
+Understanding) becomes the next candidate objective -- a Product Owner
+decision, not made here.
+
+CONFIRMATIONS: NO RAW launched. NO provider/network call (source-
+scanned, `test_33`). NO ARBITER/WINNER RUNTIME LEAK of QA references
+(source-scanned, `test_32`) -- Cut.ai/Human Gold remain QA-only,
+D-190.1's own confirmation justified this mechanism's design, it was
+never trained/hardcoded into it. NO SCORE/WEIGHT/THRESHOLD change
+anywhere in this task's diff.
+
+**HUMAN ACTION REQUIRED:** YES (condition A: whether to authorize the
+ONE confirmatory Video00 RAW above with all three flags on -- the first
+RAW where bounded finalist authority MAY actually change a real
+terminal winner -- as the next canonical engineering gate, and
+whether/when to resume P1, remain Product Owner decisions).
