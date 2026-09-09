@@ -86,6 +86,29 @@ on:
         required: false
         default: ""
         type: string
+      watch_listen_besttake_evidence_enabled:
+        # D-164: "1" overlays CUTSELL_WATCH_LISTEN_BESTTAKE_EVIDENCE_ENABLED=1
+        # (D-163's Watch+Listen PERFORMANCE/USABILITY BestTake evidence guard
+        # -- DIAGNOSTIC-ONLY: it evaluates whether the existing BestTake
+        # winner for a family has materially worse DELIVERY usability than a
+        # meaning-sufficient alternative and reports the judgment on each
+        # take_judge_groups row; it NEVER mutates selected_clip_id, ranked,
+        # membership, Family Formation, Boundary, or Pacing -- see D-163's
+        # own module docstring, cutsell_worker/watch_listen_besttake_
+        # evidence.py). Empty (default) = code default OFF, byte-identical
+        # to every run before D-164. A THIRD, separate flag from
+        # watch_listen_family_evidence_enabled (D-159, merge-veto) and
+        # watch_listen_relation_discovery_enabled (D-162/D-161, relation-
+        # discovery) above -- three different authorities, per D-163's own
+        # instruction. Same input-gated overlay mechanism as those two
+        # inputs, explicitly authorized per run, never a silent default flip
+        # (docs/CUTSELL_DECISIONS.md D-164). No cutsell_worker editorial
+        # module is touched by this overlay; it only lets an existing,
+        # already-tested runtime flag be set for this one dispatch.
+        description: "Optional: '1' enables CUTSELL_WATCH_LISTEN_BESTTAKE_EVIDENCE_ENABLED (D-164/D-163). Empty = OFF."
+        required: false
+        default: ""
+        type: string
 
 concurrency:
   group: cutsell-video00-modal-raw-${{ github.ref }}
@@ -258,6 +281,18 @@ jobs:
             mv /tmp/cutsell-env.tmp.json /tmp/cutsell-env.json
           fi
           echo "D-162 Watch+Listen relation discovery for this run: CUTSELL_WATCH_LISTEN_RELATION_DISCOVERY_ENABLED=$(jq -r '.CUTSELL_WATCH_LISTEN_RELATION_DISCOVERY_ENABLED // "unset (code default OFF)"' /tmp/cutsell-env.json)"
+          # D-164: optional Watch+Listen BestTake-evidence overlay, applied
+          # only when the dispatch input is exactly "1"; code default (OFF)
+          # otherwise -- same input-gated mechanism as D-159/D-162 above, but
+          # a THIRD, separate flag (D-163's own instruction: merge-veto,
+          # relation-discovery, and BestTake-evidence are different
+          # authorities). This guard is DIAGNOSTIC-ONLY: it never mutates
+          # selected_clip_id/ranked/membership.
+          if [ "${{ github.event.inputs.watch_listen_besttake_evidence_enabled }}" = "1" ]; then
+            jq -c '. + {CUTSELL_WATCH_LISTEN_BESTTAKE_EVIDENCE_ENABLED:"1"}' /tmp/cutsell-env.json > /tmp/cutsell-env.tmp.json
+            mv /tmp/cutsell-env.tmp.json /tmp/cutsell-env.json
+          fi
+          echo "D-164 Watch+Listen BestTake evidence (diagnostic-only) for this run: CUTSELL_WATCH_LISTEN_BESTTAKE_EVIDENCE_ENABLED=$(jq -r '.CUTSELL_WATCH_LISTEN_BESTTAKE_EVIDENCE_ENABLED // "unset (code default OFF)"' /tmp/cutsell-env.json)"
           test "$(jq 'length' /tmp/cutsell-env.json)" != "0"
           test "$(jq -r '.CUTSELL_HYBRID_LLM_ENABLED' /tmp/cutsell-env.json)" = "1"
           test "$(jq -r '.CUTSELL_HYBRID_PROVIDER' /tmp/cutsell-env.json)" = "google"
@@ -289,7 +324,7 @@ jobs:
               # D-056 Section 1). A real secret (API key, token, bucket
               # name) is essentially always >= 12 characters, so this
               # threshold costs no actual masking coverage.
-              if value and key not in ('CUTSELL_HYBRID_LLM_ENABLED', 'CUTSELL_HYBRID_PROVIDER', 'CUTSELL_UNIFIED_REALIZATION_RESOLVER', 'CUTSELL_ASR_CANONICAL_NORMALIZATION', 'CUTSELL_SEMANTIC_COMPUTE_PLANNER', 'CUTSELL_HYBRID_MAX_EDIT_USD', 'CUTSELL_BRIDGE_COMPLETE_PAIRWISE_SINGLETON', 'CUTSELL_WATCH_LISTEN_FAMILY_EVIDENCE_ENABLED', 'CUTSELL_WATCH_LISTEN_RELATION_DISCOVERY_ENABLED', 'CUTSELL_BUILD_GIT_SHA') and len(str(value)) >= 12:
+              if value and key not in ('CUTSELL_HYBRID_LLM_ENABLED', 'CUTSELL_HYBRID_PROVIDER', 'CUTSELL_UNIFIED_REALIZATION_RESOLVER', 'CUTSELL_ASR_CANONICAL_NORMALIZATION', 'CUTSELL_SEMANTIC_COMPUTE_PLANNER', 'CUTSELL_HYBRID_MAX_EDIT_USD', 'CUTSELL_BRIDGE_COMPLETE_PAIRWISE_SINGLETON', 'CUTSELL_WATCH_LISTEN_FAMILY_EVIDENCE_ENABLED', 'CUTSELL_WATCH_LISTEN_RELATION_DISCOVERY_ENABLED', 'CUTSELL_WATCH_LISTEN_BESTTAKE_EVIDENCE_ENABLED', 'CUTSELL_BUILD_GIT_SHA') and len(str(value)) >= 12:
                   print(f'::add-mask::{value}')
           print(f'Loaded {len(env)} env vars from the live RunPod template plus the D-044 hybrid-semantic overlay, the D-050C2 resolver-mode overlay, and the D-052 stability-battery overlay (secret values masked).')
           "
@@ -1497,6 +1532,168 @@ jobs:
           print(json.dumps(summary, indent=2, sort_keys=True))
           PY
 
+      - name: Print compact D-164 Watch+Listen BestTake evidence qualification summary (tail-safe)
+        # D-164: same D-119/D-123/D-152 pattern applied to D-163's own new
+        # `diagnostics.watch_listen_besttake_evidence` (run-level) and the
+        # `watch_listen_besttake_*` fields D-163's pipeline.py wiring already
+        # spreads onto each `take_judge_groups` row when
+        # CUTSELL_WATCH_LISTEN_BESTTAKE_EVIDENCE_ENABLED=1. A SEPARATE,
+        # LATE-STAGE, BOUNDED summary reading `artifact/video00-modal.json`
+        # (already on disk, never a live pipe -- no D-117 SIGPIPE risk) and
+        # projecting ONLY fields D-163's own (unchanged in this task) guard
+        # already computed. Recomputes NO guard decision, usability state,
+        # or BestTake winner -- every field here is copied verbatim from the
+        # existing row. D-163's `watch_listen_besttake_group_row` only
+        # persists `candidate_usability_summary` as a per-candidate
+        # DELIVERY-usability map (not the full per-candidate evidence
+        # record -- entry/exit usability, breaking_character_during_
+        # delivery, conflict_flags, etc. exist only transiently inside
+        # pipeline.py's per-family loop and are not serialized); this step
+        # honestly reports that limitation rather than fabricating fields,
+        # per this task's own "no cutsell_worker editorial change" scope.
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p artifact
+          python - <<'PY'
+          import json, os, sys
+
+          def load(path):
+              if not os.path.exists(path) or os.path.getsize(path) == 0:
+                  return None
+              with open(path) as f:
+                  try:
+                      return json.load(f)
+                  except Exception as e:
+                      print(f"WARNING: failed to parse {path}: {e}", file=sys.stderr)
+                      return None
+
+          engine = load("artifact/video00-modal.json")
+          regression_fixture = load("benchmarks/video00_regression_qa.json")
+
+          summary = {"schema_version": "cutsell.video00.d164_watch_listen_besttake_summary.v1"}
+          summary["source_status"] = "engine_json_present" if isinstance(engine, dict) else "engine_json_missing_or_unparseable"
+          summary["per_candidate_evidence_schema_note"] = (
+              "D-163's watch_listen_besttake_group_row persists only "
+              "candidate_usability_summary (a per-candidate DELIVERY-usability "
+              "map). Full per-candidate WatchListenBestTakeEvidence fields "
+              "(entry/exit usability, breaking_character_during_delivery, "
+              "reset_or_fumble_during_delivery, performance_continuity_status, "
+              "conflict_flags, editability_status) exist only transiently "
+              "inside pipeline.py's per-family loop and are not serialized to "
+              "this JSON -- not reported here, per D-164's no-cutsell_worker-"
+              "editorial-change scope."
+          )
+
+          groups = []
+          clip_text = {}
+          run_level = {"status": "absent"}
+          if isinstance(engine, dict):
+              diag = engine.get("diagnostics")
+              if isinstance(diag, dict):
+                  raw_groups = diag.get("take_judge_groups")
+                  if isinstance(raw_groups, list):
+                      groups = [r for r in raw_groups if isinstance(r, dict)]
+                  run_level = diag.get("watch_listen_besttake_evidence") or {"status": "absent"}
+              for bucket in ("selected", "alternates", "discarded"):
+                  for clip in engine.get(bucket) or []:
+                      if isinstance(clip, dict) and clip.get("clip_id"):
+                          clip_text[clip["clip_id"]] = str(clip.get("text") or "")
+
+          summary["run_level"] = run_level
+
+          family_rows = []
+          for row in groups:
+              if not row.get("watch_listen_besttake_evaluated"):
+                  continue
+              semantic_candidates = row.get("semantic_candidates") or []
+              member_ids = sorted({
+                  c.get("clip_id") for c in semantic_candidates
+                  if isinstance(c, dict) and c.get("clip_id")
+              }) or sorted((row.get("case_b_evidence") or {}).keys())
+              family_rows.append({
+                  "group_id": row.get("group_id"),
+                  "member_ids": member_ids,
+                  "meaning_sufficient_candidates": row.get("meaning_sufficient_candidates"),
+                  "semantic_fast_path_candidate": row.get("semantic_fast_path_candidate"),
+                  "deliveryscore_top_candidate": row.get("deliveryscore_top_candidate"),
+                  "winner_path_after": row.get("winner_path_after"),
+                  "final_selected_clip_id": row.get("final_winner", row.get("selected_clip_id")),
+                  "semantic_authority_gate_status": row.get("semantic_authority_gate_status"),
+                  "watch_listen_besttake_candidate_count": row.get("watch_listen_besttake_candidate_count"),
+                  "watch_listen_besttake_current_winner": row.get("watch_listen_besttake_current_winner"),
+                  "watch_listen_besttake_guard_status": row.get("watch_listen_besttake_guard_status"),
+                  "watch_listen_besttake_guard_reason": row.get("watch_listen_besttake_guard_reason"),
+                  "watch_listen_besttake_dominant_candidate": row.get("watch_listen_besttake_dominant_candidate"),
+                  "watch_listen_besttake_winner_before": row.get("watch_listen_besttake_winner_before"),
+                  "watch_listen_besttake_winner_after": row.get("watch_listen_besttake_winner_after"),
+                  "watch_listen_besttake_action_applied": row.get("watch_listen_besttake_action_applied"),
+                  "watch_listen_besttake_existing_ladder_agrees": row.get("watch_listen_besttake_existing_ladder_agrees"),
+                  "candidate_usability_summary": row.get("candidate_usability_summary"),
+                  "winner_immutability_check": (
+                      "OK" if row.get("watch_listen_besttake_winner_before") == row.get("watch_listen_besttake_winner_after")
+                      else "REGRESSION_WINNER_CHANGED"
+                  ),
+              })
+
+          summary["families_with_watch_listen_besttake_evidence"] = len(family_rows)
+          summary["families"] = family_rows
+
+          # Pimples QA cross-check (QA/reporting only) -- same substring-match
+          # mechanism the existing D-123 step (D-125) already uses against the
+          # checked-in benchmarks/video00_regression_qa.json fixture.
+          pimples_texts = []
+          if isinstance(regression_fixture, dict):
+              for check in regression_fixture.get("checks") or []:
+                  if not isinstance(check, dict) or not str(check.get("id", "")).startswith("pimples_"):
+                      continue
+                  if check.get("kind") == "required_order":
+                      continue
+                  text = check.get("text")
+                  if text:
+                      pimples_texts.append(str(text))
+
+          def _norm(s):
+              return " ".join(str(s or "").lower().split())
+
+          normalized_refs = [t for t in (_norm(x) for x in pimples_texts) if t]
+
+          if regression_fixture is None:
+              summary["pimples"] = {"status": "reference_fixture_absent"}
+          elif not normalized_refs:
+              summary["pimples"] = {"status": "no_pimples_checks_in_reference_fixture"}
+          else:
+              pimples_clip_ids = sorted({
+                  cid for cid, text in clip_text.items()
+                  if any(ref in _norm(text) for ref in normalized_refs)
+              })
+              if not pimples_clip_ids:
+                  summary["pimples"] = {"status": "no_pimples_reference_text_found_in_this_runs_clips"}
+              else:
+                  matching = [r for r in family_rows if set(r["member_ids"]) & set(pimples_clip_ids)]
+                  if not matching:
+                      summary["pimples"] = {
+                          "status": "pimples_clips_present_but_not_a_watch_listen_besttake_evaluated_family",
+                          "pimples_related_clip_ids": pimples_clip_ids,
+                          "note": "NOT EXERCISED for D-163/D-164 purposes -- D-164 only consumes frozen Family Formation finalists; do not blame D-163 if the pimples family did not form this run or was not evaluated by the guard.",
+                      }
+                  elif len(matching) == 1:
+                      summary["pimples"] = {"status": "family_formed_and_evaluated", "families": matching}
+                  else:
+                      summary["pimples"] = {"status": "fragmented_across_multiple_families", "families": matching}
+
+          os.makedirs("artifact", exist_ok=True)
+          out_path = "artifact/video00-modal-d164-watch-listen-besttake-summary.json"
+          with open(out_path, "w") as f:
+              json.dump(summary, f, indent=2, sort_keys=True)
+
+          size = os.path.getsize(out_path)
+          print("--- D-164 Watch+Listen BestTake evidence qualification summary (a pure projection of existing D-163 diagnostics -- recomputes no guard decision, usability state, or BestTake winner) ---")
+          print(f"summary file: {out_path} ({size} bytes)")
+          print(json.dumps(summary, indent=2, sort_keys=True))
+          PY
+
       - name: Upload validator reports
         if: always()
         uses: actions/upload-artifact@v4
@@ -1513,6 +1710,7 @@ jobs:
             artifact/video00-modal-d116-qualification-summary.json
             artifact/video00-modal-d123-qualification-summary.json
             artifact/video00-modal-d152-semantic-authority-summary.json
+            artifact/video00-modal-d164-watch-listen-besttake-summary.json
           retention-days: 14
           if-no-files-found: warn
 
