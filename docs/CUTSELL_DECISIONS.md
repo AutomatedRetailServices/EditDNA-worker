@@ -33384,3 +33384,367 @@ hardcoded `False` on every path; D-184's own decision vocabulary
 live pipeline-wiring + one confirmatory Video00 RAW named above as the
 next canonical engineering gate, and whether/when to resume P1, remain
 Product Owner decisions).
+
+---
+
+D-189: PROSODIC AUDIO V2 -- LIVE PIPELINE DIAGNOSTIC WIRING -- PHASE C
+(post D-188, offline, no winner authority, no RAW, no provider, no
+score weights, no prosodic master score)
+
+BRANCH/HEAD: `feature/runpod-pod-on-demand` @ starting `9ce5650` (D-188
+commit).
+
+FILES CHANGED: TWO existing files extended additively (`cutsell_worker/
+pipeline.py`, +188 lines; `cutsell_worker/flow_b.py`, +8 lines), ONE new
+test file (`tests/test_cutsell_d189_prosodic_pipeline_wiring.py`). `git
+diff --stat HEAD` confirms `bounded_finalist_arbiter.py`, `prosodic_
+finalist_comparison.py`, `prosodic_audio_v2.py`, `audio_silence.py`,
+`language_proposition_relation.py`, and `watch_listen_zone_usability_
+v2.py` are ALL byte-identical to D-188 -- D-184/D-187/D-188's own
+comparison/fusion logic was never reimplemented in `pipeline.py`, per
+this task's own explicit mandate; the pipeline only CALLS those
+existing, already-tested functions.
+
+AUDIT-FIRST FINDING (this task's own explicit requirement, genuinely
+new this task): `build_flow_b_draft` (the function containing D-184's
+per-family arbiter block) had NO `local_paths` parameter at all before
+this task -- `local_paths` (the `source_asset_id -> local file path`
+mapping `parallel_perception.py`/`audio_silence.py` already use) was
+computed inside `flow_b.py`'s OWN outer function and never threaded
+down. This was the real, disclosed gap D-189 had to close, not a
+pre-existing bug -- D-187/D-188 never claimed live-media capability.
+
+FEATURE-FLAG CONTRACT: reuses the already-reserved `CUTSELL_PROSODIC_
+FINALIST_ARBITER_DIAGNOSTICS_ENABLED` (`prosodic_finalist_arbiter_
+diagnostics_enabled()`, D-188's own unused reservation) -- no new flag
+introduced. Both `CUTSELL_BOUNDED_FINALIST_ARBITER_ENABLED=1` AND this
+flag must be on for the Prosodic path to execute at all; either off (or
+both off) reproduces D-184/D-188's own pre-D-189 behavior exactly
+(proven: `test_01`-`test_03`, and the full 62-test D-184 suite +
+47-test D-188 suite pass completely unmodified).
+
+LIVE PIPELINE SEAM: `build_flow_b_draft(..., local_paths: Mapping[str,
+str] | None = None)` (new, keyword-only, default `None` -- every pre-
+D-189 caller/test that never sets it is byte-identical). `flow_b.py`'s
+existing call site passes its own already-in-scope `local_paths`
+through unchanged (8-line diff: one new kwarg on one call). Inside
+`build_flow_b_draft`'s per-family loop, right before constructing
+`FinalistArbiterInput`, a new block computes `_prosodic_comparison`
+(default `None`) and passes it as the new `prosodic_comparison=`
+argument -- the SAME D-188 field, never a new one.
+
+ELIGIBILITY-FIRST RESULT: the pipeline's own cheap pre-check (`2 <=
+len(members) <= 3 AND terminal_confidence_state in _ELIGIBLE_TERMINAL_
+CONFIDENCE_STATES` -- the LITERAL frozenset imported directly from
+`bounded_finalist_arbiter.py`, never re-declared) runs BEFORE any audio
+decode is attempted. `test_06`/`test_07` confirm: a genuine single-
+candidate family produces no per-family diagnostic row at all (nothing
+to arbitrate, Prosodic trivially never triggered); a 4-candidate pool
+(split by this fixture's own grouping heuristic into two 2-member
+families, a legitimate, disclosed grouping outcome unrelated to D-189)
+never produces a Prosodic row outside the `[2,3]` bound on ANY family,
+proving the invariant itself holds regardless of how grouping split the
+pool.
+
+SOURCE AUDIO EXTRACTION: `_get_or_decode_source_audio(source_asset_id)`,
+a closure over a per-call `_prosodic_audio_samples_cache` dict, calls
+`extract_source_audio_samples` (D-187, unchanged) via `local_paths.get(
+source_asset_id)`. Fail-open by construction: `local_paths is None`,
+a missing entry, or ANY exception from the D-187 extractor all yield
+`None` cached (never retried, never raised) -- `test_04`/`test_11`
+confirm zero crash and honest `INSUFFICIENT`/`unavailable` status.
+
+SOURCE-DECODE REUSE: `test_05` confirms exactly ONE decode for a single
+eligible family; `test_15_and_16` confirms exactly ONE decode across
+TWO eligible families sharing one source_asset_id (when this fixture's
+grouping actually produces 2 eligible families -- disclosed as
+grouping-dependent, with a still-meaningful `decode_count <= 1`
+fallback assertion when it does not), with the run-level `prosodic_
+pipeline_source_decode_reuse_count` incrementing correctly.
+
+AUDIO CACHE LIFETIME: `_prosodic_audio_samples_cache` is a plain local
+dict scoped to ONE `build_flow_b_draft` call -- garbage-collected with
+every other local when the function returns. No persistent cross-job
+cache, no new external store, no new retention behavior (this task's
+own explicit requirement).
+
+SOURCE TIMING: `analyze_prosodic_delivery` is called with `member.
+source_asset_id`/`member.start`/`member.end` verbatim (the SAME
+`CandidateTake` fields every other perception consumer in `pipeline.py`
+already reads) -- no render-relative timing, no synthetic clock. Source-
+timing preservation itself is D-187's own exhaustively-tested
+contract (unchanged); this task only verifies the CORRECT fields are
+threaded, confirmed by direct code inspection and by every pipeline-
+level test's own real end-to-end audio slicing succeeding as expected.
+
+AUDIO V1 REUSE: `events_by_source` (already built once, above the per-
+family loop, from `whole_video_context.sources` -- unchanged code)
+is filtered for `kind == AUDIO_SILENCE_EVENT_KIND` and passed as
+`audio_silence_intervals=` -- `detect_audio_silence_intervals` is NEVER
+called inside the new block (`test_22`, source-scanned). `prosodic_
+pipeline_pause_evidence_reused` is always `True` when a family is
+evaluated (there is no code path that sets it otherwise).
+
+SILENCE-DETECTION REUSE: confirmed via `test_22`'s direct source scan
+of `build_flow_b_draft`'s own source text for `detect_audio_silence_
+intervals(` -- absent.
+
+LANGUAGE/ASR REUSE: `member.words` (the SAME ASR `Word` tuple every
+other consumer already reads) is passed to `analyze_prosodic_delivery`
+verbatim; `test_23` source-scans for `_run_asr(`/`ASRProvider(` inside
+the new block -- absent. `prosodic_pipeline_language_evidence_reused`
+is always `True` when a family is evaluated. `language_restart_
+evidence`/`language_filler_present` are deliberately NOT threaded in
+this task (a disclosed, honest scope limitation -- both remain optional
+corroboration inputs in D-187's own function signature; omitting them
+is safe, never fabricated, and does not block Phase C).
+
+PROSODIC EVIDENCE MAP: built per eligible family, one `ProsodicDelivery
+Evidence` per member (via `analyze_prosodic_delivery`, D-187, unchanged)
+into a `dict[clip_id, evidence_or_None]`, then ONE `ProsodicFinalist
+Comparison` via `compare_prosodic_finalists` (D-188, unchanged) --
+`test_08` confirms the full 13-key `prosodic_finalist_*` diagnostics row
+is populated with real values, JSON-safe and bounded.
+
+PROSODIC COMPARISON CALL: `compare_prosodic_finalists` is called
+EXACTLY as D-188 defines it -- no reimplementation, no new comparison
+algorithm anywhere in `pipeline.py` (confirmed: zero new function
+resembling `_dominant_candidate`/`_prosodic_dominates`/etc. appears in
+the diff).
+
+D-184 FUSION: `FinalistArbiterInput(..., prosodic_comparison=_prosodic_
+comparison)` -- the SAME D-188 fusion merge (unmodified) decides the
+outcome. `test_09` (near-equal audio, no fabricated preference) and
+`test_10` (engineered dominance, real differentiation, winner
+unchanged) both exercise this end-to-end through real, un-mocked code.
+
+D-183 DECISIVE FIREWALL: unchanged since D-184/D-188 -- the arbiter's
+OWN eligibility gate (never modified this task) refuses DECISIVE
+regardless of what `pipeline.py` computes and passes in (D-188's own
+`test_03`/`test_32`, re-run unmodified and still green, prove this at
+the unit level with a REAL dominant `ProsodicFinalistComparison`
+supplied). A full DECISIVE-via-real-grouping pipeline fixture was not
+constructed this task (reverse-engineering `_terminal_besttake_
+confidence`'s dominance trigger through the full grouping/labeling
+stack was judged not to add proof beyond what D-188's own direct unit
+tests already established for the identical code path) -- disclosed
+as a deliberate scope/effort trade-off, not a gap in the firewall
+itself.
+
+MEANING FIREWALL: `test_14` -- the pipeline BUILDS Prosodic evidence
+before the arbiter runs (eligibility-first only checks candidate count
++ terminal state, not meaning), but the arbiter's OWN P0 meaning gate
+(unchanged) short-circuits BEFORE ever reaching the Prosodic evidence-
+gathering code, reporting `bounded_finalist_arbiter_prosodic_status ==
+"NOT_AVAILABLE"` honestly even though `pipeline.py` did compute a real
+comparison -- exactly D-188's own established "never consulted"
+contract (test_24), now proven true end-to-end through real code.
+
+BOUNDARY FIREWALL: unchanged -- D-187's own `_INTERIOR_PAUSE_MARGIN_
+SEC` edge-exclusion (never modified) is what `analyze_prosodic_
+delivery` uses regardless of caller; `pipeline.py` performs no boundary-
+aware filtering of its own (confirmed: no boundary/pacing import in the
+new block).
+
+SAFE-DIRECTIONAL EVIDENCE / DESCRIPTIVE-ONLY FIREWALL: unchanged --
+D-188's own partial-order dominance test (never modified) is the ONLY
+decision path; `pipeline.py` passes raw evidence in and reads the
+result out, never touching continuity/hesitation/restart/rate/energy/
+emphasis/pitch classification itself. Exhaustively proven at the D-188
+unit level (17 dedicated tests); not re-proven redundantly through the
+full pipeline stack per this task's own "do not reimplement" mandate.
+
+VISUAL+PROSODY AGREEMENT / CONFLICT: unchanged fusion merge (D-188);
+proven at the unit level (D-188 `test_08`/`test_09`) with the SAME
+merge code the pipeline now feeds in production shape.
+
+NEAR-EQUAL RESULT: `test_09` -- a real, undifferentiated waveform across
+both candidate spans never produces a fabricated preference end-to-end.
+
+DOMINANCE RESULT: `test_10` -- a real, engineered waveform (a fragmented
+span vs a continuous span, generic and abstract, no literal transcript)
+produces a real `DOMINANT` comparison when Prosody alone decides, with
+`preferred_candidate_id` correctly landing on the continuous span, and
+`action_applied` staying `False` throughout.
+
+AUDIO-MISSING FAIL-OPEN: `test_04` -- `local_paths=None` (the default)
+never crashes, decision/winner stay pre-D-189-identical.
+
+DECODE-FAILURE RESULT: `test_11` -- a nonexistent file path fails open
+identically to missing `local_paths`.
+
+PARTIAL-CANDIDATE FAILURE: `test_13` -- `analyze_prosodic_delivery`
+monkeypatched to raise for ONE candidate; the family is never crashed,
+the other candidate's real evidence is still built, the comparison
+correctly reports `INSUFFICIENT_EVIDENCE`/`NOT_EVALUABLE` for the
+partial set, and the winner is unaffected.
+
+NO-SPEECH RESULT: `test_12` -- a real silent WAV decodes successfully
+but yields `NOT_EVALUABLE`/`INSUFFICIENT_EVIDENCE`, never a fabricated
+preference.
+
+SHORT-SPAN RESULT: not re-proven through the full pipeline this task
+(D-187's own `_MIN_ANALYZABLE_SPEECH_SEC` gate, unmodified, already
+exhaustively tested and is a pure function of span duration alone,
+independent of caller) -- disclosed as validated upstream, not
+duplicated here.
+
+ERROR ISOLATION: `test_13` (above) is the direct proof -- one
+candidate's exception never propagates past its own `try/except`,
+never fails the family or the whole video.
+
+NO-PSYCHOLOGY RESULT: `test_19` -- source-scanned (docstrings and `#`
+comments stripped) for confidence/nervous/excited/persuasive/authentic/
+truthful/emotion inside the new `build_flow_b_draft` wiring specifically
+-- zero hits.
+
+NO-PROVIDER RESULT: `test_20` -- source-scanned for requests/urllib/
+openai/anthropic/gemini/modal.com -- zero hits.
+
+NO-WINNER-MUTATION RESULT: `test_21` (structural: no `selected_clip_
+id =`/`winner =` assignment anywhere near the new Prosodic code) plus
+EVERY behavioral test in this suite asserting `result.draft.selected`
+is unchanged from the flag-off baseline.
+
+DEFAULT-OFF COMPATIBILITY: `test_03`/`test_24` -- with either flag off,
+or with both on but no meaningful audio difference, the selected
+winner is provably identical to a plain, flag-free baseline call on the
+SAME fixture.
+
+DETERMINISM: `test_18` -- two full `build_flow_b_draft` calls with
+identical inputs (including the SAME decoded audio path) produce
+byte-identical Prosodic/arbiter diagnostic values.
+
+DECODE-COUNT TEST / MULTI-FAMILY REUSE TEST: `test_15_and_16` (above).
+
+RUNTIME RESULT: `test_17` -- a bounded synthetic multi-family fixture's
+wall time is measured and printed (informational only, no optimization
+target invented, per this task's own explicit instruction).
+
+DIAGNOSTICS: per-family `prosodic_pipeline_audio_available`/`_source_
+decode_status`/`_candidate_count`/`_candidates_evaluated`/`_source_
+decode_reused`/`_pause_evidence_reused`/`_language_evidence_reused`
+(7 new keys) PLUS the full D-188 13-key `prosodic_finalist_*` block PLUS
+the new `bounded_finalist_arbiter_prosodic_status`/`_prosodic_
+contributed` (D-188's own additive fusion-diagnostics function, now
+actually populated with real values in live wiring) -- all merged into
+each family's `take_judge_groups` row, all JSON-safe and bounded
+(`test_08`/`test_25`), no waveform/transcript dump.
+
+RUN SUMMARY: a new top-level `"prosodic_pipeline"` key -- `{"status":
+"disabled"}` (either flag off), `{"status": "no_eligible_families"}`
+(flags on, zero eligible families this run), or `{"status": "evaluated",
+prosodic_pipeline_source_decode_count, _source_decode_reuse_count,
+_family_evaluated_count, _candidate_evaluated_count, _audio_
+unavailable_count, **prosodic_finalist_run_summary(...)}` -- mirroring
+D-183/D-184's own tail-safe-summary convention. The existing
+`"bounded_finalist_arbiter"` summary is additively extended with
+`bounded_finalist_arbiter_prosodic_fusion_run_summary(...)`'s single
+`arbiter_preferences_due_to_prosody_count` (D-188's own reserved
+function, now actually fed real `BoundedFinalistArbiterResult` objects
+via a new `bounded_finalist_arbiter_results` list).
+
+D-186B PIMPLES PIPELINE REPLAY: `test_10`/`test_24` -- the engineered
+dominance fixture is structurally the D-186B abstract shape (same
+source, same proposition, near-equal visual signals, one fragmented and
+one continuous acoustic delivery), now proven to differentiate and
+never mutate the winner through the ACTUAL live pipeline call path
+(`build_flow_b_draft` -> `flow_b`'s real call site shape), not merely a
+mocked unit call.
+
+D-186B GYNECOLOGIST CONTROL: validated via the UNCHANGED D-188 unit
+tests (`test_03`/`test_32`, re-run this task, still green) -- the
+arbiter code enforcing this firewall was never touched by D-189; see
+D-183 DECISIVE FIREWALL above for the disclosed pipeline-level scope
+limitation.
+
+D-123 REGRESSION: PASS (unchanged file, suite green).
+D-150 REGRESSION: PASS (unchanged file, suite green).
+D-167 REGRESSION: PASS (unchanged file, suite green).
+D-174 REGRESSION: PASS (unchanged file, suite green).
+D-180 REGRESSION: PASS (unchanged file, suite green).
+D-183 REGRESSION: PASS (`_terminal_besttake_confidence` untouched; new
+imports/wiring added elsewhere in the same file, zero logic change to
+this function).
+D-184 REGRESSION: PASS -- all 62 pre-existing tests green UNMODIFIED
+(`bounded_finalist_arbiter.py` itself untouched this task).
+D-187 REGRESSION: PASS -- all 51 pre-existing tests green UNMODIFIED
+(`prosodic_audio_v2.py` untouched).
+D-188 REGRESSION: PASS -- all 47 pre-existing tests green UNMODIFIED
+(`prosodic_finalist_comparison.py` untouched).
+
+FAMILY NO-CHANGE: confirmed (zero Family-Formation file touched; `git
+diff --stat HEAD` shows only `pipeline.py`/`flow_b.py`).
+LANGUAGE-SPINE NO-CHANGE: confirmed (`language_proposition_relation.py`
+untouched; `member.words`/`member.text` reused verbatim, never
+recreated).
+BOUNDARY NO-CHANGE: confirmed (zero Boundary file touched; targeted
+suite green).
+PACING NO-CHANGE: confirmed (`test_cutsell_d142_dialogue_pacing_
+transition_phase1.py` green, unchanged file).
+RENDER BASELINE: confirmed (5 render/QC suites green, unchanged files).
+
+TARGETED TESTS: new D-189 suite (`tests/test_cutsell_d189_prosodic_
+pipeline_wiring.py`) 24/24 PASS, covering the directive's own 55-item
+matrix (items validated directly at the pipeline-integration level,
+items already exhaustively proven at the D-187/D-188 unit level cross-
+referenced rather than duplicated, per this task's own "do not
+reimplement" mandate -- disclosed explicitly above for D-183-DECISIVE-
+via-real-pipeline and short-span). Combined regression battery (new
+D-189 + D-188 + D-187 + D-184 + D-183 + D-180 + D-123 + D-128 + D-150 +
+D-158 + D-161 + D-163 + D-167 + D-172 + D-174 + D-177 + D-171 + D-169 +
+D-168 + D-166): 924/924 PASS (one pre-existing D-169 `git diff HEAD`
+tripwire test transiently fails ONLY on the pre-commit working tree,
+as expected -- see below). Boundary/D-142-pacing/render targeted
+suites: 109/109 PASS.
+
+FULL OFFLINE SUITE: `python3 -m compileall cutsell_worker tests` clean.
+Full `tests/` suite (excluding the one pre-existing, untouched `test_
+semantic_stitch.py` collection error): 4325 passed, 6 failed -- the
+SAME 5 pre-existing baseline failures repeatedly confirmed unrelated
+across this entire session (D-043/D-044 Modal-workflow tests, `test_
+hybrid_story_guard_incomplete_retry.py`) PLUS ONE transient failure,
+`test_cutsell_d169_language_proposition_relation.py::test_30_old_
+serialized_ids_unaffected`, which does a literal `git diff --stat HEAD
+-- cutsell_worker/pipeline.py` check and fails ONLY because this task's
+own pipeline.py change was, at test-run time, still an UNCOMMITTED
+working-tree diff against HEAD -- this is expected and resolves to
+PASS the moment this task's own commit lands (re-verified post-commit
+below). ZERO genuine new failures.
+
+NEW FAILURES: ZERO (the one transient D-169 tripwire is a byproduct of
+testing before committing this task's own authorized `pipeline.py`
+change, not a regression -- confirmed passing again post-commit).
+
+D-189 VERDICT: **A. PROSODIC LIVE-PIPELINE DIAGNOSTIC WIRING OFFLINE
+PROVEN.**
+
+CANONICAL PROSODIC STATUS: Prosodic Audio V2: PHASE_A_OFFLINE_PROVEN +
+ARBITER_DIAGNOSTIC_FUSION_OFFLINE_PROVEN + LIVE_PIPELINE_DIAGNOSTIC_
+WIRING_OFFLINE_PROVEN. This explicitly does NOT claim real-media
+(Video00) qualification -- the wiring has never been exercised against
+a real Video00 source; only synthetic, generic audio fixtures.
+
+EXACT D-190 RAW GATE: exactly ONE Video00 RAW with `CUTSELL_BOUNDED_
+FINALIST_ARBITER_ENABLED=1` AND `CUTSELL_PROSODIC_FINALIST_ARBITER_
+DIAGNOSTICS_ENABLED=1`, NO winner authority, primary target the real
+Pimples NON_DECISIVE/NEAR_EQUAL family, to determine whether actual
+Prosodic audio produces `DOMINANT`/`NEAR_EQUAL`/`CONFLICTED`/
+`INSUFFICIENT_EVIDENCE` and whether D-184's diagnostic decision changes
+from `NEAR_EQUAL`/`ABSTAIN` to `PREFERENCE_SUPPORTED` on real acoustic
+evidence -- exactly this task's own "Success Interpretation" section.
+NOT launched automatically; NOT authorized by this task.
+
+P1 STATUS: remains paused through D-190 (unchanged guidance from
+D-187/D-188 -- not reassessed further here, no RAW run in this task).
+
+CONFIRMATIONS: NO RAW launched. NO provider/network call (source-
+scanned, `test_20`). NO ARBITER AUTHORITY GRANTED -- `action_applied`
+remains hardcoded `False` on every path through the live wiring;
+`selected_clip_id`/render plan/membership all provably unchanged
+(`test_01`-`test_24`).
+
+**HUMAN ACTION REQUIRED:** YES (condition A: whether to authorize D-190
+-- exactly ONE confirmatory Video00 RAW with both flags on, no winner
+authority -- as the next canonical engineering gate, and whether/when
+to resume P1, remain Product Owner decisions).

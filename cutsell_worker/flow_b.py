@@ -485,6 +485,14 @@ def process_local_sources(
         semantic_equivalence_arbiter=semantic_equivalence_arbiter,
         boundary_owner=boundary_owner,
         watch_listen_understandings=watch_listen_understandings,
+        # D-189 (docs/CUTSELL_DECISIONS.md D-189): the SAME source_asset_id
+        # -> local file path mapping this function already threads through
+        # to ASR/audio-silence/local-performance perception above -- passed
+        # through unchanged so D-187/D-188's Prosodic finalist diagnostics
+        # can decode source audio when both their own flags are on. `None`
+        # effect when CUTSELL_PROSODIC_FINALIST_ARBITER_DIAGNOSTICS_ENABLED
+        # is off (the default): identical to every pre-D-189 caller.
+        local_paths=local_paths,
     )
     notify("draft_ready", 100)
     return replace(

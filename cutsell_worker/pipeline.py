@@ -116,11 +116,36 @@ from .watch_listen_understanding import WatchListenUnderstanding
 # own module docstring for the full contract.
 from .bounded_finalist_arbiter import (
     FinalistArbiterInput,
+    _ELIGIBLE_TERMINAL_CONFIDENCE_STATES,
     bounded_finalist_arbiter_diagnostics,
     bounded_finalist_arbiter_enabled,
+    bounded_finalist_arbiter_prosodic_fusion_diagnostics,
+    bounded_finalist_arbiter_prosodic_fusion_run_summary,
     bounded_finalist_arbiter_run_summary,
     evaluate_bounded_finalist_arbiter,
 )
+# D-189 (docs/CUTSELL_DECISIONS.md D-189): live pipeline diagnostic wiring
+# for D-187/D-188's already-proven Prosodic evidence. A SEPARATE,
+# independently-rollbackable flag from D-184's own
+# CUTSELL_BOUNDED_FINALIST_ARBITER_ENABLED -- BOTH must be on for this
+# path to execute at all (see prosodic_finalist_arbiter_diagnostics_
+# enabled's own module docstring). Never mutates `selected_clip_id`/
+# `ranked`/membership/Boundary/Pacing/Renderer -- `action_applied` stays
+# `False` throughout, unchanged since D-184/D-188.
+from .prosodic_audio_v2 import (
+    AudioSamples,
+    STATUS_EVALUATED,
+    analyze_prosodic_delivery,
+    extract_source_audio_samples,
+    prosodic_delivery_diagnostics,
+)
+from .prosodic_finalist_comparison import (
+    compare_prosodic_finalists,
+    prosodic_finalist_arbiter_diagnostics_enabled,
+    prosodic_finalist_diagnostics,
+    prosodic_finalist_run_summary,
+)
+from .audio_silence import AUDIO_SILENCE_EVENT_KIND
 from .take_judge import FRAGMENT_PENALTY_MARKERS, apply_delivery_cleanliness_evidence
 from .take_judge_provider import TakeJudgeProvider, safe_rank_takes
 from .case_b_performance_evidence import (
@@ -1318,8 +1343,21 @@ def build_flow_b_draft(
     semantic_equivalence_arbiter: SemanticEquivalenceArbiter | None = None,
     boundary_owner: str = "pre_freeze",
     watch_listen_understandings: Iterable[WatchListenUnderstanding] = (),
+    local_paths: Mapping[str, str] | None = None,
 ) -> ProcessingResult:
     """Build an editable draft after understanding the complete source context.
+
+    ``local_paths`` (D-189, docs/CUTSELL_DECISIONS.md D-189): an optional
+    ``source_asset_id -> local file path`` mapping, the SAME contract
+    ``parallel_perception.py``/``audio_silence.py``/``flow_b.py`` already
+    use -- consumed ONLY to decode source audio (once per source asset,
+    cached for the duration of this single call) for D-187/D-188's
+    Prosodic finalist diagnostics, and ONLY when both
+    ``CUTSELL_BOUNDED_FINALIST_ARBITER_ENABLED`` and ``CUTSELL_PROSODIC_
+    FINALIST_ARBITER_DIAGNOSTICS_ENABLED`` are on AND a family is D-184-
+    eligible. ``None`` (the default) reproduces every pre-D-189 caller's
+    behavior exactly -- byte-identical `selected_clip_id`/`ranked`/
+    membership/Boundary/Pacing/Renderer either way.
 
     ``boundary_owner`` (D-097.C/E) is read only by the physical draft
     wrappers installed around this function (edge-only boundary, interior gap
@@ -1560,11 +1598,50 @@ def build_flow_b_draft(
     watch_listen_besttake_v2_results: list = []
     watch_listen_besttake_guard_authority_results: list = []
     bounded_finalist_arbiter_diagnostics_rows: list = []
+    bounded_finalist_arbiter_results: list = []
     no_usable_realization_ids: set[str] = set()
     events_by_source: dict[str, tuple] = {}
     if whole_video_context is not None:
         for source in whole_video_context.sources:
             events_by_source[source.source_asset_id] = tuple(source.events)
+    # D-189 (docs/CUTSELL_DECISIONS.md D-189): source-audio decode cache,
+    # bounded to this single `build_flow_b_draft` call -- extract each
+    # source asset's audio ONCE via ffmpeg (`extract_source_audio_
+    # samples`), regardless of how many D-184-eligible families share it.
+    # `None` local_paths or a decode failure both fail open (`None`
+    # cached, never retried, never a crash) -- see the per-family block
+    # below. No persistent cross-job cache; this dict is garbage-collected
+    # with the rest of this function's locals when it returns.
+    _prosodic_audio_samples_cache: dict[str, "AudioSamples | None"] = {}
+    prosodic_pipeline_diagnostics_rows: list = []
+    prosodic_finalist_comparisons: list = []
+    prosodic_pipeline_source_decode_count = 0
+    prosodic_pipeline_source_decode_reuse_count = 0
+    prosodic_pipeline_family_evaluated_count = 0
+    prosodic_pipeline_candidate_evaluated_count = 0
+    prosodic_pipeline_audio_unavailable_count = 0
+
+    def _get_or_decode_source_audio(source_asset_id: str) -> tuple["AudioSamples | None", bool, bool]:
+        """Returns `(audio_or_None, was_reused, decode_status_ok)`. Decodes
+        AT MOST ONCE per `source_asset_id` for the lifetime of this call.
+        Fail-open on missing `local_paths`, a missing entry, or any
+        `extract_source_audio_samples` failure -- never raises."""
+        nonlocal prosodic_pipeline_source_decode_count, prosodic_pipeline_source_decode_reuse_count
+        if source_asset_id in _prosodic_audio_samples_cache:
+            prosodic_pipeline_source_decode_reuse_count += 1
+            audio = _prosodic_audio_samples_cache[source_asset_id]
+            return audio, True, audio is not None
+        prosodic_pipeline_source_decode_count += 1
+        audio = None
+        if local_paths is not None:
+            path = local_paths.get(source_asset_id)
+            if path:
+                try:
+                    audio = extract_source_audio_samples(path, source_asset_id=source_asset_id)
+                except Exception:  # noqa: BLE001 -- fail open, never crash the whole video
+                    audio = None
+        _prosodic_audio_samples_cache[source_asset_id] = audio
+        return audio, False, audio is not None
 
     for members in group_members:
         if not members:
@@ -1850,11 +1927,86 @@ def build_flow_b_draft(
             # `selected_clip_id`/`ranked`/membership/Boundary/Pacing/
             # Renderer -- `action_applied` is always `False`.
             bounded_finalist_arbiter_row: dict = {}
+            bounded_finalist_arbiter_prosodic_row: dict = {}
+            prosodic_pipeline_row: dict = {}
+            prosodic_finalist_row: dict = {}
             if bounded_finalist_arbiter_enabled():
                 _arbiter_terminal_state = (
                     _terminal_besttake_confidence_result.confidence_state
                     if _terminal_besttake_confidence_result is not None else None
                 )
+                # D-189 (docs/CUTSELL_DECISIONS.md D-189): live Prosodic
+                # finalist diagnostic wiring. SEPARATELY flag-gated
+                # (`CUTSELL_PROSODIC_FINALIST_ARBITER_DIAGNOSTICS_ENABLED`,
+                # default OFF) -- with it off, or with `local_paths` never
+                # supplied, `_prosodic_comparison` stays `None` and
+                # `evaluate_bounded_finalist_arbiter` below is BYTE-
+                # IDENTICAL to its pre-D-189 (D-184/D-188) behavior.
+                # ELIGIBILITY FIRST (this task's own explicit requirement):
+                # the cheap candidate-count/terminal-state check below runs
+                # BEFORE any audio decode/analysis is attempted, so a
+                # DECISIVE family or an out-of-range candidate count never
+                # triggers Prosodic work at all -- bounded compute.
+                _prosodic_comparison = None
+                if prosodic_finalist_arbiter_diagnostics_enabled():
+                    _prosodic_candidate_ids = tuple(member.clip_id for member in members)
+                    _prosodic_eligible = (
+                        2 <= len(members) <= 3
+                        and _arbiter_terminal_state in _ELIGIBLE_TERMINAL_CONFIDENCE_STATES
+                    )
+                    if _prosodic_eligible:
+                        prosodic_pipeline_family_evaluated_count += 1
+                        _prosodic_source_id = members[0].source_asset_id
+                        _prosodic_audio, _prosodic_reused, _prosodic_decode_ok = (
+                            _get_or_decode_source_audio(_prosodic_source_id)
+                        )
+                        if not _prosodic_decode_ok:
+                            prosodic_pipeline_audio_unavailable_count += 1
+                        # Audio V1 reuse (this task's own explicit mandate):
+                        # filter the SAME already-computed source-level
+                        # silence/dead-air events (`events_by_source`, built
+                        # once above from `whole_video_context`) -- never a
+                        # second `detect_audio_silence_intervals` call.
+                        _prosodic_silence_intervals = tuple(
+                            (float(ev.start), float(ev.end))
+                            for ev in events_by_source.get(_prosodic_source_id, ())
+                            if getattr(ev, "kind", None) == AUDIO_SILENCE_EVENT_KIND
+                        )
+                        _prosodic_evidence_by_id: dict = {}
+                        for member in members:
+                            prosodic_pipeline_candidate_evaluated_count += 1
+                            try:
+                                # Language/ASR reuse: `member.words` is the
+                                # SAME ASR word-timing tuple already produced
+                                # upstream -- never re-run here.
+                                _prosodic_evidence_by_id[member.clip_id] = analyze_prosodic_delivery(
+                                    member.clip_id, member.source_asset_id, member.start, member.end,
+                                    _prosodic_audio, words=member.words,
+                                    audio_silence_intervals=_prosodic_silence_intervals,
+                                )
+                            except Exception:  # noqa: BLE001 -- one candidate's
+                                # failure is isolated; it never fails the
+                                # whole family or the whole video.
+                                _prosodic_evidence_by_id[member.clip_id] = None
+                        _prosodic_comparison = compare_prosodic_finalists(
+                            _prosodic_evidence_by_id, _prosodic_candidate_ids,
+                        )
+                        prosodic_finalist_comparisons.append(_prosodic_comparison)
+                        prosodic_finalist_row = prosodic_finalist_diagnostics(_prosodic_comparison)
+                        prosodic_pipeline_row = {
+                            "prosodic_pipeline_audio_available": _prosodic_decode_ok,
+                            "prosodic_pipeline_source_decode_status": (
+                                "decoded" if _prosodic_decode_ok else "unavailable"
+                            ),
+                            "prosodic_pipeline_candidate_count": len(members),
+                            "prosodic_pipeline_candidates_evaluated": sum(
+                                1 for v in _prosodic_evidence_by_id.values() if v is not None
+                            ),
+                            "prosodic_pipeline_source_decode_reused": _prosodic_reused,
+                            "prosodic_pipeline_pause_evidence_reused": True,
+                            "prosodic_pipeline_language_evidence_reused": True,
+                        }
+                        prosodic_pipeline_diagnostics_rows.append(prosodic_pipeline_row)
                 _arbiter_result = evaluate_bounded_finalist_arbiter(FinalistArbiterInput(
                     family_id=gid,
                     candidate_ids=tuple(member.clip_id for member in members),
@@ -1867,9 +2019,14 @@ def build_flow_b_draft(
                         for member in members
                     },
                     performance_evidence_by_id=case_b_evidence_objects,
+                    prosodic_comparison=_prosodic_comparison,
                 ))
                 bounded_finalist_arbiter_row = bounded_finalist_arbiter_diagnostics(_arbiter_result)
                 bounded_finalist_arbiter_diagnostics_rows.append(bounded_finalist_arbiter_row)
+                bounded_finalist_arbiter_results.append(_arbiter_result)
+                bounded_finalist_arbiter_prosodic_row = bounded_finalist_arbiter_prosodic_fusion_diagnostics(
+                    _arbiter_result
+                )
             judge_group_diagnostics.append({
                 "group_id": gid,
                 "selected_clip_id": selected_clip_id,
@@ -2003,6 +2160,15 @@ def build_flow_b_draft(
                 # D-184: Bounded Finalist Arbiter -- diagnostic only; empty
                 # dict when CUTSELL_BOUNDED_FINALIST_ARBITER_ENABLED is off.
                 **bounded_finalist_arbiter_row,
+                # D-189 (docs/CUTSELL_DECISIONS.md D-189): live Prosodic
+                # pipeline wiring -- ALL empty dicts (byte-identical to
+                # pre-D-189) unless both CUTSELL_BOUNDED_FINALIST_ARBITER_
+                # ENABLED and CUTSELL_PROSODIC_FINALIST_ARBITER_
+                # DIAGNOSTICS_ENABLED are on AND this family is D-184-
+                # eligible.
+                **bounded_finalist_arbiter_prosodic_row,
+                **prosodic_pipeline_row,
+                **prosodic_finalist_row,
             })
         for member in members:
             clip_to_group[member.clip_id] = gid
@@ -2248,6 +2414,28 @@ def build_flow_b_draft(
                     else {
                         "status": "evaluated",
                         **bounded_finalist_arbiter_run_summary(bounded_finalist_arbiter_diagnostics_rows),
+                        **bounded_finalist_arbiter_prosodic_fusion_run_summary(bounded_finalist_arbiter_results),
+                    }
+                )
+            ),
+            # D-189 (docs/CUTSELL_DECISIONS.md D-189): live Prosodic
+            # pipeline diagnostic wiring tail-safe summary -- {"status":
+            # "disabled"} when the (separate, default-OFF) prosodic flag
+            # is off, or when the arbiter itself is off, or when no D-184-
+            # eligible family was ever encountered this run.
+            "prosodic_pipeline": (
+                {"status": "disabled"}
+                if not (bounded_finalist_arbiter_enabled() and prosodic_finalist_arbiter_diagnostics_enabled())
+                else (
+                    {"status": "no_eligible_families"} if not prosodic_pipeline_diagnostics_rows
+                    else {
+                        "status": "evaluated",
+                        "prosodic_pipeline_source_decode_count": prosodic_pipeline_source_decode_count,
+                        "prosodic_pipeline_source_decode_reuse_count": prosodic_pipeline_source_decode_reuse_count,
+                        "prosodic_pipeline_family_evaluated_count": prosodic_pipeline_family_evaluated_count,
+                        "prosodic_pipeline_candidate_evaluated_count": prosodic_pipeline_candidate_evaluated_count,
+                        "prosodic_pipeline_audio_unavailable_count": prosodic_pipeline_audio_unavailable_count,
+                        **prosodic_finalist_run_summary(prosodic_finalist_comparisons),
                     }
                 )
             ),
