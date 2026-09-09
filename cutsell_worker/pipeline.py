@@ -81,6 +81,18 @@ from .watch_listen_besttake_evidence import (
     watch_listen_besttake_evidence_enabled,
     watch_listen_besttake_group_row,
 )
+# D-172: Zone-Usability V2 diagnostic consumption. A SEPARATE, default-OFF
+# flag from D-163's own `watch_listen_besttake_evidence_enabled` above --
+# see watch_listen_besttake_v2_evidence.py's own module docstring
+# ("Feature flag") for why independent rollback is needed. Diagnostic-only:
+# never mutates `selected_clip_id`/`ranked`/membership/Boundary/Pacing.
+from .watch_listen_besttake_v2_evidence import (
+    build_candidate_zone_usability_v2,
+    evaluate_watch_listen_besttake_guard_v2,
+    watch_listen_besttake_v2_diagnostics,
+    watch_listen_besttake_v2_group_row,
+    zone_usability_v2_besttake_enabled,
+)
 from .watch_listen_relation_discovery import watch_listen_relation_discovery_enabled
 from .watch_listen_understanding import WatchListenUnderstanding
 from .take_judge import FRAGMENT_PENALTY_MARKERS, apply_delivery_cleanliness_evidence
@@ -1055,6 +1067,7 @@ def build_flow_b_draft(
     semantic_best_take_override_count = 0
     judge_group_diagnostics = []
     watch_listen_besttake_results: list = []
+    watch_listen_besttake_v2_results: list = []
     no_usable_realization_ids: set[str] = set()
     events_by_source: dict[str, tuple] = {}
     if whole_video_context is not None:
@@ -1265,6 +1278,33 @@ def build_flow_b_draft(
                     )
                     watch_listen_besttake_row = watch_listen_besttake_group_row(_wlbt_result, selected_clip_id)
                     watch_listen_besttake_results.append(_wlbt_result)
+                    # D-172 (docs/CUTSELL_DECISIONS.md D-172): Zone-Usability
+                    # V2 diagnostic consumption. Nested inside D-163's own
+                    # evidence-collection block by construction -- V2
+                    # consumption is never evaluated when D-163's own base
+                    # evidence flag is off (see watch_listen_besttake_v2_
+                    # evidence.py's own "Feature flag" section). Recomputes
+                    # no perception: `build_candidate_zone_usability_v2`
+                    # wraps D-115/D-155/D-167's own already-tested, pure
+                    # projections. Diagnostic-only -- never mutates
+                    # `selected_clip_id`/`ranked`/membership/Boundary/Pacing;
+                    # `winner_after == winner_before` always in this task.
+                    if zone_usability_v2_besttake_enabled():
+                        _wlbt_v2_evidence_by_id = {
+                            member.clip_id: build_candidate_zone_usability_v2(member, whole_video_context)
+                            for member in members
+                        }
+                        _wlbt_v2_result = evaluate_watch_listen_besttake_guard_v2(
+                            winner_id=selected_clip_id or None,
+                            meaning_sufficient_ids=meaning_sufficient_ids,
+                            v1_evidence_by_id=_wlbt_evidence_by_id,
+                            v2_evidence_by_id=_wlbt_v2_evidence_by_id,
+                            ranked=[{"clip_id": item.clip_id, "score": item.score} for item in ranked],
+                        )
+                        watch_listen_besttake_row.update(
+                            watch_listen_besttake_v2_group_row(_wlbt_v2_result, selected_clip_id)
+                        )
+                        watch_listen_besttake_v2_results.append(_wlbt_v2_result)
             judge_group_diagnostics.append({
                 "group_id": gid,
                 "selected_clip_id": selected_clip_id,
@@ -1556,6 +1596,19 @@ def build_flow_b_draft(
                 else (
                     {"status": "no_families_evaluated"} if not watch_listen_besttake_results
                     else {"status": "evaluated", **watch_listen_besttake_diagnostics(watch_listen_besttake_results)}
+                )
+            ),
+            # D-172 (docs/CUTSELL_DECISIONS.md D-172): Zone-Usability V2
+            # diagnostic-consumption tail-safe summary -- same pattern as
+            # D-158/D-161/D-163's own compact summaries. {"status":
+            # "disabled"} when the (separate, default-OFF) V2 flag is off;
+            # the per-family fields already live on each take_judge_groups
+            # row above via watch_listen_besttake_v2_group_row.
+            "watch_listen_besttake_v2": (
+                {"status": "disabled"} if not zone_usability_v2_besttake_enabled()
+                else (
+                    {"status": "no_families_evaluated"} if not watch_listen_besttake_v2_results
+                    else {"status": "evaluated", **watch_listen_besttake_v2_diagnostics(watch_listen_besttake_v2_results)}
                 )
             ),
             "composer_status": composition.status.__dict__,

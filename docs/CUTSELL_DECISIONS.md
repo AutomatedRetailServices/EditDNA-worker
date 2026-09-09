@@ -27763,3 +27763,464 @@ diagnostic/unwired).
 (Zone Usability V2 -> D-163 diagnostic guard integration + real-media
 qualification, vs. one more bounded Language Spine migration cluster) is
 a Product Owner decision.
+
+
+---
+
+## D-172: Watch+Listen BestTake evidence -- Zone-Usability V2 diagnostic guard integration (post D-171)
+
+==================================================
+STATUS
+==================================================
+
+**A. ZONE-USABILITY V2 -> BESTTAKE DIAGNOSTIC INTEGRATION OFFLINE PROVEN.**
+D-163's own BestTake diagnostic guard (`watch_listen_besttake_evidence.py`,
+`evaluate_watch_listen_besttake_guard`, CLOSED, zero diff) now has a
+bounded, additive companion (`watch_listen_besttake_v2_evidence.py`) that
+lets the SAME diagnostic comparison consult D-167's refined Zone-Usability
+V2 evidence when available, wired into the real `pipeline.py` call site
+behind a new, separate, default-OFF flag. `WHAT THE GUARD KNOWS` changed;
+`WHAT THE ENGINE SELECTS` did not -- `winner_before == winner_after` for
+every family, proven by construction and by 45 offline tests.
+
+==================================================
+V2 ADAPTER
+==================================================
+
+New module `cutsell_worker/watch_listen_besttake_v2_evidence.py` (D-163
+and D-167 both remain at literal zero diff -- the directive's own "update
+watch_listen_besttake_evidence.py OR a bounded adapter module" resolved
+toward the bounded-adapter reading, the lower-regression-risk option for
+two heavily-audited CLOSED modules). Key pieces:
+
+- `build_candidate_zone_usability_v2(candidate, whole_video_context)` --
+  fail-open builder. Reuses, verbatim, three already-tested, unmodified
+  pure functions in this exact order: `positioned_performance_evidence.
+  build_positioned_performance_evidence` (D-115) -> `raw_understanding_
+  map.build_raw_understanding_span` (D-155) -> `watch_listen_zone_
+  usability_v2.build_zone_usability_v2` (D-167). Recomputes NO perception
+  -- every step is a pure projection of data D-115/D-155/D-167 already
+  compute elsewhere in this exact pipeline; this call is a SECOND
+  invocation of the same deterministic function on the same real
+  `CandidateTake`, not a new detector. Returns `None` on any exception
+  (never a pipeline failure) via a bare `except Exception` -- verified with
+  a deliberately-malformed candidate object.
+- Event-kind scope (honest, not silently widened): builds the fresh
+  `RawUnderstandingSpan` using `watch_listen_zone_usability_v2._DEFECT_
+  KINDS` (the SAME event-kind union V1's own `_usability_for_zone` and
+  V2's own severity table both already use), NOT the narrower `LOCAL_
+  PERFORMANCE_EVENT_KINDS` D-122's own `case_b_performance_evidence.py`
+  uses for its DELIVERY-only projection -- keeps this module's own scope
+  identical to V1's, whatever real `TemporalEvent`s of those kinds exist
+  in a given RAW's `whole_video_context`.
+- `evaluate_watch_listen_besttake_guard_v2(...)` -- the bounded guard.
+  Calls D-163's own `evaluate_watch_listen_besttake_guard` FIRST (never
+  re-derived) to get the real V1 verdict, then refines ONLY the one V1
+  outcome D-164 proved under-resolved (`BYPASS_POOR_USABILITY_WINNER`):
+  when the winner also carries real V2 evidence with no `zone_conflict`,
+  it asks D-167's own, unmodified `zone_usability_v2_dominates` (never a
+  second dominance algorithm) whether a meaning-sufficient, non-conflicted
+  alternative dominates under V2's finer per-zone/severity/pattern
+  resolution. Every other V1 outcome (`NO_ACTION`, `PRESERVE_STRUCTURED_
+  WINNER`, `UNCERTAIN`, or an ALREADY-found V1 `PERFORMANCE_DOMINANT_
+  ALTERNATIVE`) is passed through completely unchanged -- proven by a
+  dedicated regression test (`test_v1_already_found_dominance_never_
+  second_guessed`) constructing a real V1-level dominance and confirming
+  V2 never second-guesses it.
+- `watch_listen_besttake_v2_group_row`/`watch_listen_besttake_v2_
+  diagnostics` -- family-level and run-level tail-safe summaries, this
+  task's own exact required field names.
+
+==================================================
+EVIDENCE SOURCE CONTRACT
+==================================================
+
+Per candidate: `V2` (a real `CandidateZoneUsabilityV2` was built),
+`V1_FALLBACK` (no V2 evidence, D-163's own V1 evidence exists -- the
+pre-D-172 path, unchanged), `NO_EVIDENCE` (neither -- fail-open to
+`NO_ACTION`/`UNCERTAIN`, D-163's own existing contract). Reported per
+family as `watch_listen_besttake_evidence_source`.
+
+==================================================
+V1 FALLBACK
+==================================================
+
+Proven by 3 dedicated tests (`test_01_v2_absent_v1_fallback`, `test_20_
+missing_v2_fail_open`, `test_build_candidate_zone_usability_v2_fail_open_
+on_exception`) plus the "missing V2" and "V2 unavailable" branches inside
+`evaluate_watch_listen_besttake_guard_v2` itself: no crash, guard status
+and dominant-candidate-id identical to what D-163's own V1-only guard
+would have produced.
+
+==================================================
+DOUBLE-COUNTING RESULT
+==================================================
+
+Unchanged from D-167's own `DOUBLE_COUNTING_AUDIT_V2` (module reused
+verbatim, not re-derived): when V2 evidence is available it SUPERSEDES
+V1 for the refined zone-usability comparison dimension (the dominance
+search); V1's own full verdict (`v1_result`) is always carried through on
+the returned `WatchListenBestTakeV2GuardResult` for diagnostic visibility,
+never independently re-summed as a second vote alongside V2.
+
+==================================================
+MEANING FIREWALL
+==================================================
+
+No exception, proven by `test_09_meaning_insufficient_dominant_blocked`
+(the D-170 replay -- see below) and `test_10_meaning_sufficient_dominant_
+surfaced` (the positive control): a V2-dominant-but-meaning-insufficient
+candidate is NEVER `dominant_candidate_id`; `meaning_firewall_blocked`
+records the fact for a future authority to weigh, `guard_status` stays
+`BYPASS_POOR_USABILITY_WINNER`.
+
+==================================================
+CASE-A RESULT
+==================================================
+
+`test_14_case_a_preserved`: winner classified `CASE_A_BOUNDARY_ONLY` ->
+`zone_usability_v2_dominates` (D-167, unmodified) itself refuses to fire
+-- no dominance found, `BYPASS_POOR_USABILITY_WINNER` preserved, never a
+forced demotion of a Boundary-owned defect.
+
+==================================================
+CASE-B RESULT
+==================================================
+
+`test_15_case_b_exposed`: a real `CASE_B_DELIVERY_OWNED` winner with a
+genuine dominant alternative correctly surfaces `PERFORMANCE_DOMINANT_
+ALTERNATIVE` -- legitimate BestTake performance evidence, per D-107/D-115
+doctrine, reused not re-derived.
+
+==================================================
+CASE-C RESULT
+==================================================
+
+`test_16_case_c_uncertain_fail_open`: an `UNKNOWN`-delivery alternative is
+governed by the SAME ordinal partial order as every other state (no
+special-cased "uncertain never dominates" carve-out was added -- would
+have been a second dominance algorithm, forbidden by this task's own
+instruction); D-167's own `_USABILITY_RANK_V2` already treats `UNKNOWN`
+as rank 2 (neutral, same as `QUESTIONABLE`), so it can still lose to a
+genuinely `USABLE` (rank 3) alternative, or fail to dominate a stronger
+one -- exactly D-167's own existing, unmodified contract.
+
+==================================================
+V2 DOMINANCE CONSUMPTION
+==================================================
+
+`zone_usability_v2_dominates` (D-167) is called directly, unmodified, with
+no second copy of its partial-order logic anywhere in this task's new
+module -- confirmed by direct import (`from .watch_listen_zone_usability_
+v2 import ... zone_usability_v2_dominates`) and by `watch_listen_zone_
+usability_v2.py`'s own zero diff.
+
+==================================================
+ISOLATED-vs-SUSTAINED RESULT
+==================================================
+
+`test_06_isolated_vs_sustained`/`test_07_repeated_vs_isolated`: an
+isolated/repeated-but-milder alternative correctly dominates a sustained/
+severe winner under V2's own pattern-aware severity table (reused, not
+re-derived) -- a brief isolated event is never treated as equivalent to
+sustained impairment, this task's own explicit requirement.
+
+==================================================
+ORDINARY-MOTION RESULT
+==================================================
+
+`test_17_ordinary_motion_no_penalty`: a single real, isolated `hand_
+motion_reset_candidate` event (LOW materiality, D-167's own tier table)
+produces `SEVERITY_NONE`/`USABILITY_USABLE` -- the Ordinary Motion
+Firewall (D-167, unmodified) holds through this task's new live-pipeline
+wiring exactly as it did in D-167's own offline proof and D-170's real-
+media run.
+
+==================================================
+AUDIO HONESTY
+==================================================
+
+`test_18_audio_silence_not_semantic_defect`: `audio_silence_interval` is
+confirmed absent from `_DEFECT_KINDS` (D-167's own set, reused verbatim)
+-- audio evidence stays signal-level only; no tone/emotion/prosody/
+confidence-from-voice inference anywhere in this task's new code.
+
+==================================================
+D-170 ABSTRACT REPLAY
+==================================================
+
+`test_09_meaning_insufficient_dominant_blocked` reproduces D-170's own
+real-media finding shape exactly: current structured winner A (V1
+UNUSABLE), alternative B (V1 UNUSABLE, coarse buckets identical -- D-164's
+own saturation shape), V2 shows B factually less impaired (USABLE vs A's
+MATERIAL), but B is meaning-insufficient. Result: `meaning_firewall_
+blocked=True`, `dominant_candidate_id=None`, `guard_status` stays
+`BYPASS_POOR_USABILITY_WINNER`, winner unchanged -- proving better
+perception does not override meaning, exactly as this task required.
+
+==================================================
+MEANING-INSUFFICIENT DOMINANT ALT RESULT
+==================================================
+
+See D-170 Abstract Replay above -- blocked, never eligible, always
+reported.
+
+==================================================
+MEANING-SUFFICIENT DOMINANT ALT RESULT
+==================================================
+
+`test_04_material_vs_mild_dominance`/`test_10_meaning_sufficient_
+dominant_surfaced`: A and B both meaning-sufficient, DeliveryScorer/V1
+cannot separate them (both V1 UNUSABLE), V2 shows A MATERIAL vs B
+MILD/USABLE -- guard reports `PERFORMANCE_DOMINANT_ALTERNATIVE` with
+`dominant_candidate_id=B`, `winner_severity`/`alt_severity` populated,
+winner still unchanged (`action_applied: False` always).
+
+==================================================
+SEMANTIC+DELIVERYSCORE AGREEMENT RESULT
+==================================================
+
+`test_11_semantic_deliveryscore_agreement_contradiction`: winner_id
+modeled as the agreed semantic+DeliveryScorer pick (A); V2 strongly
+contradicts A on DELIVERY usability; B meaning-sufficient. Guard exposes
+the contradiction (`PERFORMANCE_DOMINANT_ALTERNATIVE`, `dominant_
+candidate_id=B`) but `result.winner_id` stays `A` -- never replaced.
+
+==================================================
+SEMANTIC NON-DECISIVE RESULT
+==================================================
+
+`test_12_semantic_non_decisive_contradiction`: semantic authority modeled
+as abstaining (tie-scored `ranked`), DeliveryScorer picked A anyway, V2
+says B dominates -- surfaced identically, no authority exercised.
+
+==================================================
+D-123 OWNERSHIP
+==================================================
+
+`test_13_d123_ownership_untouched`: `case_b_performance_evidence.py` and
+`multimodal_besttake_fallback.py` (D-123's own gate and CASE B fast-path
+conflict logic) both confirmed byte-identical (`git diff --stat` empty).
+This task never touches `_case_b_fast_path_conflict`/`detect_class_b_
+trigger`'s own call sites in `pipeline.py` -- the new V2 block is added
+strictly AFTER and separate from those existing D-123 computations.
+
+==================================================
+D-128 REGRESSION
+==================================================
+
+Unchanged -- `multimodal_besttake_fallback.py` (D-128's own module)
+confirmed byte-identical; no fallback provider added anywhere in this
+task's new code (grep-verified, item 34 below).
+
+==================================================
+FAMILY NO-CHANGE
+==================================================
+
+`take_grouping.py`, `take_grouping_provider.py`, `hybrid_session_
+cleanup.py`, `semantic_idea_equivalence.py` all confirmed unaware of the
+new module (module-leaf grep tests) and/or byte-identical.
+
+==================================================
+PROPOSITION/ATTEMPT NO-CHANGE
+==================================================
+
+`language_spine.py`, `language_utterance_attempt.py`, `language_
+proposition_relation.py`, `language_spine_consumer_migration.py` (D-166/
+D-168/D-169/D-171) all confirmed byte-identical (`git diff --stat` empty)
+and unaware of the new module.
+
+==================================================
+D-150 REGRESSION
+==================================================
+
+`semantic_authority_observability.py` byte-identical.
+
+==================================================
+D-158 REGRESSION
+==================================================
+
+`attempt_relationship_authority.py` byte-identical.
+
+==================================================
+D-161 REGRESSION
+==================================================
+
+`watch_listen_relation_discovery.py` byte-identical.
+
+==================================================
+D-163 COMPATIBILITY
+==================================================
+
+`watch_listen_besttake_evidence.py` byte-identical (`git diff --stat`
+empty) -- `test_28_d163_old_behavior_available` confirms the OLD
+`evaluate_watch_listen_besttake_guard` function still works standalone,
+unaffected by this task's new companion module.
+
+==================================================
+D-167 COMPATIBILITY
+==================================================
+
+`watch_listen_zone_usability_v2.py` byte-identical (`git diff --stat`
+empty).
+
+==================================================
+LANGUAGE-SPINE COMPATIBILITY
+==================================================
+
+Confirmed distinct, never conflated: Language Spine (D-166/D-168/D-169/
+D-171) provides meaning/proposition evidence; Zone-Usability V2 (D-167/
+D-172) provides perceptual performance evidence. Neither this task's new
+module nor `pipeline.py`'s new wiring reads or writes any Language-Spine
+type; confirmed by module-leaf grep (item 30) and zero diff on all four
+Language Spine modules.
+
+==================================================
+BOUNDARY REGRESSION
+==================================================
+
+`boundary_engine_pass.py` byte-identical.
+
+==================================================
+PACING REGRESSION
+==================================================
+
+`dialogue_pacing_transition.py` byte-identical.
+
+==================================================
+RENDER BASELINE
+==================================================
+
+`render.py`, `render_plan.py`, `render_versions.py` all byte-identical.
+
+==================================================
+DIAGNOSTICS
+==================================================
+
+Per-family row (`watch_listen_besttake_v2_group_row`, merged into the
+existing `take_judge_groups` row alongside D-163's own fields):
+`watch_listen_besttake_evidence_source`, `watch_listen_besttake_v2_
+available`, `watch_listen_besttake_v2_dominant_candidate`, `watch_listen_
+besttake_v2_guard_status`, `watch_listen_besttake_v2_guard_reason`,
+`watch_listen_besttake_v2_winner_severity`, `watch_listen_besttake_v2_
+alt_severity`, `watch_listen_besttake_v2_meaning_firewall_blocked`,
+`winner_before`, `winner_after` (always equal), `action_applied` (always
+`False`). No transcript dump (verified, `test_diagnostics_shape_no_
+transcript`).
+
+==================================================
+TAIL-SAFE SUMMARY
+==================================================
+
+`watch_listen_besttake_v2_diagnostics` -- `v2_evaluated_count`, `v2_no_
+action_count`, `v2_dominance_count`, `v2_bypass_count`, `v2_uncertain_
+count`, `v2_meaning_firewall_block_count`, `v1_fallback_count`. Wired into
+`pipeline.py`'s final diagnostics dict as `"watch_listen_besttake_v2"`
+(same `{"status": "disabled"}` / `{"status": "no_families_evaluated"}` /
+`{"status": "evaluated", ...}` shape D-158/D-161/D-163 already use).
+
+==================================================
+FEATURE FLAG
+==================================================
+
+`CUTSELL_WATCH_LISTEN_ZONE_USABILITY_V2_BESTTAKE_ENABLED`, default OFF --
+a SEPARATE flag from D-163's own `CUTSELL_WATCH_LISTEN_BESTTAKE_EVIDENCE_
+ENABLED`, per this task's own "unless implementation requires independent
+rollback" allowance. Rationale (documented in the new module's own
+docstring): V1 evidence collection must remain independently controllable
+from V2 consumption so a future RAW can isolate causal attribution between
+"collecting Watch+Listen BestTake evidence at all" and "additionally
+consuming the refined V2 signal" -- the same controlled-variable
+discipline D-164/D-170's own additive flags already established. In
+`pipeline.py`, the new V2 block is nested INSIDE D-163's own `if watch_
+listen_besttake_evidence_enabled() and watch_listen_spans_by_id:` block,
+so V2 consumption is structurally impossible when D-163's own base flag is
+off, regardless of the new flag's own value.
+
+==================================================
+OFFLINE FIXTURES
+==================================================
+
+`tests/test_cutsell_d172_watch_listen_besttake_v2_evidence.py`: 45 new
+tests covering all 34 directive-required fixture categories (V2 absent/
+present at every severity-pair combination, isolated/repeated/sustained,
+same-coarse-V1-different-V2, meaning-firewall blocked/surfaced, semantic-
+agreement/non-decisive contradiction exposure, D-123 ownership, CASE A/B/C,
+ordinary motion, audio honesty, conflict-flags/missing-V2 fail-open,
+deterministic output, winner immutability, Family/Proposition/D-150/D-158/
+D-161/D-163/D-167/Language-Spine/Boundary/Pacing/Render no-change, no
+provider/network) plus additional structural/integration tests (real
+`build_candidate_zone_usability_v2` end-to-end via a genuine `WholeVideo
+Context`, fail-open on a malformed candidate object, `None` context
+handling, diagnostics shape, exact group-row field names, V1-already-
+dominant pass-through, module-leaf no-import proofs, and confirmation that
+`pipeline.py` does import and gate on the new module/flag).
+
+==================================================
+TEST REQUIREMENTS -- targeted regression battery
+==================================================
+
+D-172 x45 + D-171 x42 + D-169 x54 + D-168 x55 + D-166 x48 + D-167 x49 +
+D-163 + D-123 + D-128 + D-150 + D-158 + D-161 + D-097.C boundary engine
+pass + D-142 pacing + `recording_meta_continuation` x9 + `semantic_
+claims`/`semantic_idea_equivalence` x3 = 732 passed (one file's git-diff-
+based CLOSED-module check, `test_cutsell_d169...test_30_old_serialized_
+ids_unaffected`, transiently read `pipeline.py` as dirty against the
+NOT-YET-COMMITTED HEAD during this battery -- resolved automatically once
+this task's own commit lands, since that check diffs the working tree
+against HEAD, and HEAD then includes this exact, intentional, authorized
+change; re-verified green post-commit). `compileall` clean.
+
+==================================================
+FULL OFFLINE SUITE
+==================================================
+
+3985 passed pre-commit (3941 D-171 baseline + 45 new D-172 tests - 1
+transient git-diff flip, see above -- re-verified 3986 passed post-commit,
+exactly baseline + new test count with zero net regression), 13 subtests
+passed, same 5 pre-existing unrelated failures (Modal env-secret masking/
+hybrid story guard, confirmed identical on baseline HEAD before this
+task's changes). `test_semantic_stitch.py`'s pre-existing collection error
+(confirmed identical on baseline HEAD, unrelated to this task) excluded
+from these counts exactly as it would be from any run on that baseline.
+
+==================================================
+D-172 VERDICT
+==================================================
+
+**A. ZONE-USABILITY V2 -> BESTTAKE DIAGNOSTIC INTEGRATION OFFLINE
+PROVEN.**
+
+==================================================
+EXACT NEXT REAL-MEDIA GATE
+==================================================
+
+Per this task's own instruction, NOT launched automatically. If
+authorized: ONE Video00 Modal RAW with `CUTSELL_WATCH_LISTEN_BESTTAKE_
+EVIDENCE_ENABLED=1` AND `CUTSELL_WATCH_LISTEN_ZONE_USABILITY_V2_BESTTAKE_
+ENABLED=1`, current family/relation configuration otherwise unchanged, to
+prove the real BestTake miss D-170 found (family `tg_7a3cfeb476440563c0`)
+becomes visible as a `PERFORMANCE_DOMINANT_ALTERNATIVE` diagnostic through
+the LIVE pipeline wiring (not a workflow-side reconstruction, unlike
+D-170's own qualification) -- still NO winner authority; `selected_clip_
+id` remains untouched regardless of what this run finds. A Product Owner
+decision, not decided here.
+
+==================================================
+STRICT SCOPE CONFIRMATIONS
+==================================================
+
+No winner mutation (`winner_before == winner_after` proven for every
+tested family; `action_applied` hardcoded `False`). No DeliveryScorer
+weighting (no new numeric score anywhere -- grep-verified categorical/
+ordinal comparisons only). No BestTake authority granted (`deterministic_
+best_take_authority.py` untouched; `clear_retry_family_winner` reused
+verbatim via D-163's own `_existing_ladder_pick`, never re-derived). No
+Family Formation/Proposition/Attempt-Relation/semantic-authority/Language-
+Spine-migration/Boundary/Pacing change (all confirmed byte-identical
+above). No provider/network call. No RAW dispatched this task. No fallback
+provider (D-128 untouched). No iOS work.
+
+**HUMAN ACTION REQUIRED:** YES (condition A) -- authorizing the one
+Video00 RAW named in "Exact next real-media gate" above is a Product
+Owner decision.
