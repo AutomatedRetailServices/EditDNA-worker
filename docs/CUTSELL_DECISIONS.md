@@ -28224,3 +28224,474 @@ provider (D-128 untouched). No iOS work.
 **HUMAN ACTION REQUIRED:** YES (condition A) -- authorizing the one
 Video00 RAW named in "Exact next real-media gate" above is a Product
 Owner decision.
+
+
+## D-173: Watch+Listen BestTake evidence -- Zone-Usability V2 real-media diagnostic qualification (post D-172)
+
+==================================================
+STATUS
+==================================================
+
+**A. V2 BESTTAKE DIAGNOSTIC REAL-MEDIA PROVEN.** One canonical Video00
+Modal RAW (id `34331209473`, workflow-dispatched on branch
+`feature/runpod-pod-on-demand` head `9347757` with the D-173 workflow-only
+plumbing commit `e3019e9` layered on top) ran with BOTH
+`CUTSELL_WATCH_LISTEN_BESTTAKE_EVIDENCE_ENABLED=1` and
+`CUTSELL_WATCH_LISTEN_ZONE_USABILITY_V2_BESTTAKE_ENABLED=1` for the first
+time against the live pipeline (not a workflow-side reconstruction, unlike
+D-170's own qualification). Job conclusion: `failure`, caused ONLY by the
+two long-known, pre-existing legacy validators ("Verify frozen Selection
+lock", "Verify Human Gold regression QA (18-check manifest)") on the
+pre-existing D-032 count-differs shape -- confirmed by direct step-by-step
+job inspection; every other step, including the new D-173 summary step
+itself, succeeded and produced its artifact.
+
+==================================================
+RAW IDENTIFICATION
+==================================================
+
+- Run id: `34331209473` (GitHub Actions workflow run).
+- Benchmark id: `video00-modal-34331209473-1`.
+- Flags this run: `CUTSELL_WATCH_LISTEN_BESTTAKE_EVIDENCE_ENABLED=1`,
+  `CUTSELL_WATCH_LISTEN_ZONE_USABILITY_V2_BESTTAKE_ENABLED=1` (both new
+  for this run; D-172's own qualification never set the second one on a
+  real Modal dispatch).
+- `story_completeness: "complete"`; `technical_qc_status: "PASS"`;
+  `delivery_status: "DELIVERABLE_PENDING_HUMAN_WATCH_LISTEN:perceptual=FAIL"`;
+  `perceptual_review_status: "FAIL"` -- the standard, already-established
+  advisory pattern (Watch+Listen perceptual reviewer v1 capability counts
+  this run: `EVALUATED_PASS: 2, NOT_IMPLEMENTED: 4, UNCERTAIN: 1`), not a
+  regression attributable to this task.
+
+==================================================
+D-172 LIVE SUMMARY (real pipeline, not reconstructed)
+==================================================
+
+`diagnostics.watch_listen_besttake_v2` run-level counts, real:
+```
+"run_level": {
+  "status": "evaluated",
+  "v1_fallback_count": 0,
+  "v2_bypass_count": 4,
+  "v2_dominance_count": 1,
+  "v2_evaluated_count": 6,
+  "v2_meaning_firewall_block_count": 2,
+  "v2_no_action_count": 0,
+  "v2_uncertain_count": 0
+}
+```
+`families_with_v2_besttake_evidence: 6`, `families_with_v2_dominant_
+candidate: 1`. All 6 `take_judge_groups` families this run reached the V2
+adapter (`watch_listen_besttake_v2_available: true` on every row); zero
+fell back to V1-only (`v1_fallback_count: 0`) and zero were `UNCERTAIN`.
+
+==================================================
+PER-FAMILY TRACE (all 6 families, real ids)
+==================================================
+
+1. `tg_5f0aa26b9be15d23b5` -- both candidates `UNUSABLE`, no meaning-
+   sufficient alternative. V1 `BYPASS_POOR_USABILITY_WINNER` ->
+   V2 same status, reason `winner_delivery_unusable_no_dominant_meaning_
+   sufficient_alternative`, `meaning_firewall_blocked: false` (nothing to
+   block -- no dominant alternative found at all). `winner_immutability_
+   check: OK`.
+2. `tg_ae21d152673e96080a` -- winner `clip_f754ccdbd7decfdacdef`
+   (`UNUSABLE`), alternative `clip_1bb0680cf97df7667a75` (`USABLE`). V1
+   `BYPASS_POOR_USABILITY_WINNER` -> V2 finds the alternative dominant
+   (`watch_listen_besttake_v2_dominant_candidate:
+   clip_1bb0680cf97df7667a75`) but the alternative is NOT meaning-
+   sufficient, so `watch_listen_besttake_v2_guard_reason:
+   "v2_dominant_alternative_meaning_insufficient_blocked"`,
+   `meaning_firewall_blocked: true` -- final guard status stays
+   `BYPASS_POOR_USABILITY_WINNER`, unchanged from V1. `winner_
+   immutability_check: OK`. **This is a real, ground-truth-confirmed
+   BestTake quality miss, not a hypothetical**: the independent
+   quality-ladder LEVEL_1 rationale export for this exact run flags
+   region `95.58-103.87` three times as `false_keep` /
+   `take_choice_against_both_references`, `authority: BestTakeResolver`,
+   `why: "family tg_ae21d152673e96080a winner clip_f754ccdbd7decfdacdef
+   is a realization both references rejected"` -- i.e. the CURRENT winner
+   IS a real, independently-confirmed bad take (rejected by both Cut.ai
+   and Human Gold), and V2's diagnostic correctly surfaced a dominant
+   USABLE alternative for it. The Meaning Firewall correctly still
+   declined to let the diagnostic override selection with an alternative
+   that is not provably meaning-sufficient -- exactly the D-123-philosophy
+   boundary this task exists to prove: real signal, no unsafe action.
+3. `tg_ae81109c416e0d8274` -- winner `USABLE`, alternative `UNUSABLE`. V1
+   `PRESERVE_STRUCTURED_WINNER` -> V2 `winner_delivery_usability_
+   acceptable`, same status, `winner_severity: NONE`. `winner_
+   immutability_check: OK`.
+4. `tg_f87a4e8c4a1b3b0dde` (the pimples family) -- both candidates
+   `UNUSABLE`, no meaning-sufficient alternative. Same shape as family 1:
+   V1/V2 both `BYPASS_POOR_USABILITY_WINNER`, `meaning_firewall_blocked:
+   false`. See PIMPLES ANALYSIS below for the real CASE B duration/pattern
+   evidence this family also produced.
+5. `tg_18304eb16b4890dcc7` -- winner `UNUSABLE`, alternative `UNUSABLE`.
+   V1 `BYPASS_POOR_USABILITY_WINNER` -> V2 finds a dominant candidate but
+   blocks it: `v2_dominant_alternative_meaning_insufficient_blocked`,
+   `meaning_firewall_blocked: true`. Second real Meaning Firewall block
+   this run, independent of family 2's. `winner_immutability_check: OK`.
+6. `tg_8cae696f55d852a3e5` -- the real BestTake-shaped contradiction case:
+   BOTH candidates meaning-sufficient (`clip_321c423285d2bc9cfbf3`,
+   `clip_ddd514ae4c22faad9616`), winner `UNUSABLE` (severity `MILD`),
+   alternative `USABLE`. V1 guard already independently found
+   `PERFORMANCE_DOMINANT_ALTERNATIVE` (`v1_watch_listen_besttake_
+   dominant_candidate: clip_321c423285d2bc9cfbf3`,
+   `v1_existing_ladder_agrees: false` -- the deterministic ladder would
+   NOT itself have picked this alternative). V2 evaluates the same pair,
+   confirms `winner_delivery_unusable_dominant_alternative_found`, and
+   passes the SAME dominant candidate through unchanged
+   (`watch_listen_besttake_v2_dominant_candidate:
+   clip_321c423285d2bc9cfbf3`, guard status unchanged
+   `PERFORMANCE_DOMINANT_ALTERNATIVE`). This is D-172's pass-through
+   contract proven on real media: V1 already found dominance, V2 does not
+   second-guess or re-derive it, it reuses V1's finding verbatim. No
+   meaning firewall block needed (both sides meaning-sufficient).
+   `winner_immutability_check: OK` -- `winner_before == winner_after ==
+   clip_ddd514ae4c22faad9616` despite the diagnostic dominance finding:
+   diagnostic-only, confirmed on real media.
+
+==================================================
+CRITICAL D-170 FAMILY REPLAY CHECK
+==================================================
+
+D-172's own "exact next real-media gate" named family `tg_7a3cfeb476440563c0`
+(the D-170 real BestTake miss) as the target replay shape. Family ids are
+per-run hashes (already an established, expected property of this
+pipeline across runs -- confirmed again this run: none of D-170's
+own family ids recur verbatim). The REPLAY SHAPE is what was proven, not
+the literal id: families 2 and 5 above (`tg_ae21d152673e96080a`,
+`tg_18304eb16b4890dcc7`) reproduce the exact D-170 pattern -- a V2-found
+dominant alternative that is meaning-insufficient, correctly blocked by
+the Meaning Firewall -- on THIS run's real media, and family 2 is
+additionally ground-truth-confirmed as a genuine bad winner (see above).
+The D-170 replay condition is satisfied twice over, once with independent
+ground-truth confirmation of the underlying quality problem.
+
+==================================================
+REAL BESTTAKE QUALITY MISS POSITIVE-CONTROL SEARCH
+==================================================
+
+Searched the run's independent quality-ladder LEVEL_1 rationale export
+(`authority: BestTakeResolver` entries) for any family both (a) flagged as
+a real selection defect by the ground-truth comparison and (b) evaluated
+by the V2 adapter this run. Found: family `tg_ae21d152673e96080a`,
+`false_keep` / `take_choice_against_both_references` at region
+95.58-103.87 (three fragments of the same discontinuous region), `why:
+"family tg_ae21d152673e96080a winner clip_f754ccdbd7decfdacdef is a
+realization both references rejected"`. This is the positive control: a
+REAL BestTake quality miss existed in this run, the V2 adapter evaluated
+that exact family, found a materially better alternative, and the Meaning
+Firewall correctly withheld it from actually changing the winner because
+the alternative did not clear the meaning-sufficiency bar. No other
+`BestTakeResolver`-attributed LEVEL_1 region this run maps to a family
+outside the 6 evaluated above.
+
+==================================================
+PIMPLES ANALYSIS
+==================================================
+
+Family `tg_f87a4e8c4a1b3b0dde` (member ids `clip_a7748f330a649d76edf9`,
+`clip_da2da90bfb90a9896a4a`) is the pimples/"espinillas" family. Unlike
+the prior summary's provisional NOT_EXERCISED assumption, this run's real
+D-123 CASE B qualification summary shows BOTH candidates carrying real
+`case_b_evidence` (contradicting that provisional read -- corrected here):
+```
+clip_a7748f330a649d76edf9: hand_motion_reset_candidate x8,
+  duration_by_kind 0.536s, delivery_event_duration_total 0.533s,
+  event_density 0.0939
+clip_da2da90bfb90a9896a4a: facial_expression_shift_candidate x1
+  (0.067s) + hand_motion_reset_candidate x8 (0.536s),
+  delivery_event_duration_total 0.6s, event_density 0.0493
+```
+Both candidates carry the SAME `hand_motion_reset_candidate` count (8,
+~0.536s) -- an ORDINARY-MOTION example: present symmetrically on both
+sides, so it does not drive a severity/dominance verdict by itself (see
+ORDINARY MOTION FIREWALL EXAMPLE below). The winning candidate additionally
+carries one `facial_expression_shift_candidate` event (0.067s) the
+alternative does not. Both ended `UNUSABLE` under V1's own usability
+classification with no meaning-sufficient alternative present
+(`meaning_sufficient_candidates: [clip_da2da90bfb90a9896a4a]` only), so
+the V2 guard correctly reached `BYPASS_POOR_USABILITY_WINNER` (unchanged
+from V1) rather than any dominance/bypass-override path. Winner path this
+family: `SEMANTIC_FAST_PATH`, `deliveryscore_top_candidate ==
+final_selected_clip_id == clip_da2da90bfb90a9896a4a`. Consistent, no
+regression.
+
+==================================================
+SEMANTIC + DELIVERYSCORER AGREEMENT / NON-DECISIVE CONTROLS
+==================================================
+
+`deliveryscore_top_candidate == final_selected_clip_id` for 5 of 6
+families (all but family 6, `tg_8cae696f55d852a3e5`, where DeliveryScorer
+top (`clip_321c423285d2bc9cfbf3`) and the actual selected winner
+(`clip_ddd514ae4c22faad9616`) DISAGREE -- confirmed by the D-152 summary's
+own `deliveryscore_disagreement_count: 2` global counter for this run
+[the second disagreement is not among the 6 BestTake-evaluated rows above;
+it belongs to another take_judge_groups mechanism outside this task's
+scope]). Family 6 is the genuine non-decisive control this task's
+directive asked for: DeliveryScorer and the actual winner disagree, V1's
+independent guard already flagged it (`existing_ladder_agrees: false`),
+and V2 passes the same finding through -- a real instance of the guard's
+designed purpose (flagging, never acting), not a fabricated fixture.
+
+==================================================
+D-123 FIREWALL CONFIRMATION
+==================================================
+
+The D-123/D-125 CASE B qualification summary for this run:
+`actionable_case_b_conflict_count: 0`, `families_with_case_b_evidence_
+count: 6`, `no_case_b_evidence_no_bypass_count: 0`,
+`meaning_insufficient_alternative_block_count: 2`,
+`semantic_fast_path_family_count: 5`, `semantic_fast_path_bypass_count: 0`.
+The `meaning_insufficient_alternative_block_count: 2` matches exactly the
+two Meaning Firewall blocks (families 2 and 5) found independently via the
+D-172/D-173 diagnostics above -- the same real blocking event is visible,
+consistently, from both the pre-existing D-123 layer and the new D-172/173
+diagnostic layer. Zero actionable conflicts confirms the D-150 Semantic
+Authority gate (D-152 summary: `family_count: 6`,
+`semantic_authority_abstain_conflict_count: 0`,
+`families_with_complete_context_conflict: 0`) never had to arbitrate any
+of these 6 families this run.
+
+==================================================
+MEANING FIREWALL AUDIT
+==================================================
+
+Two real blocks this run (families 2, 5), both structurally identical:
+winner `UNUSABLE`/`MILD` severity, V2 finds a dominant alternative,
+alternative absent from `meaning_sufficient_candidates`, guard reason
+`v2_dominant_alternative_meaning_insufficient_blocked`,
+`meaning_firewall_blocked: true`, final guard status unchanged
+(`BYPASS_POOR_USABILITY_WINNER`), `winner_before == winner_after` in both
+cases. Zero false-negatives found (no family where a meaning-insufficient
+alternative was allowed to reach `PERFORMANCE_DOMINANT_ALTERNATIVE`
+status). Zero false-positives found (family 6's real dominance case has
+BOTH candidates meaning-sufficient and correctly passed the firewall).
+
+==================================================
+CASE A / B / C COUNTS
+==================================================
+
+Applying D-123's CASE A (single meaning-sufficient candidate, resolved
+without a real 2-candidate multimodal comparison) / CASE B (a genuine
+comparison between >=2 meaning-sufficient candidates) / CASE C
+(ambiguous/conflict requiring escalation) vocabulary to this run's 6
+families:
+- CASE A: 5 families (1, 2, 3, 4, 5 above -- each has exactly one
+  candidate in `meaning_sufficient_candidates`).
+- CASE B: 1 family (6, `tg_8cae696f55d852a3e5` -- both candidates
+  meaning-sufficient, a real comparison occurred).
+- CASE C: 0 families (matches `actionable_case_b_conflict_count: 0` and
+  `semantic_authority_abstain_conflict_count: 0` exactly).
+
+==================================================
+ORDINARY MOTION FIREWALL EXAMPLE
+==================================================
+
+Family 4 (pimples): `hand_motion_reset_candidate` fires 8 times
+(~0.536s) on BOTH candidates equally. Because it is symmetric, it
+contributes no discriminating signal and the guard does not treat it as a
+defect driving dominance -- an ordinary, expected motion event correctly
+NOT firewalled into a false severity/dominance verdict. Contrast with the
+same family's single asymmetric `facial_expression_shift_candidate` event
+(0.067s, winner only), which likewise did not drive dominance because
+delivery-event totals stay close (0.533s vs 0.6s) and neither candidate
+was meaning-sufficient in the alternative -- correctly resolved via
+`BYPASS_POOR_USABILITY_WINNER`, not a false dominance claim.
+
+==================================================
+DURATION / PATTERN VALIDATION (>=2 CANDIDATES)
+==================================================
+
+Real, non-fixture duration/pattern figures for family 4's two candidates
+(the only family this run with real `case_b_evidence` on both sides):
+`clip_a7748f330a649d76edf9`: 8 events, 0.533s total, density 0.0939.
+`clip_da2da90bfb90a9896a4a`: 9 events, 0.6s total, density 0.0493. Both
+within V1's `UNUSABLE` classification; the V2 winner_severity for this
+family reads `MILD` at the run-level per-row summary (family 4's row:
+`watch_listen_besttake_v2_winner_severity: "MILD"`), consistent, not
+`SEVERE` -- the duration/pattern evidence is mild-magnitude and correctly
+did not escalate this family's severity beyond what V1 already reported.
+
+==================================================
+AUDIO HONESTY
+==================================================
+
+No new audio/ASR evidence kind was introduced by this task. `_DEFECT_
+KINDS` (D-172's declared, unchanged event-kind scope) covers the same
+union V1 already covers; this run's real evidence (hand-motion,
+facial-expression) is visual-channel, consistent with D-098's own
+inventory that clipped-phoneme ASR realignment remains `NOT_IMPLEMENTED`
+in the Watch+Listen perceptual reviewer v1 (confirmed again this run:
+`NOT_IMPLEMENTED: 4` in the perceptual capability counts). No claim of
+audio evidence is made anywhere in this task's real diagnostics.
+
+==================================================
+DOUBLE-COUNTING TRACE
+==================================================
+
+Traced for family 6 (`tg_8cae696f55d852a3e5`), the family with the
+richest real evidence chain this run: local_performance event detection
+(D-097-era per-candidate signals) -> `MediaSignals` aggregation -> D-097
+DeliveryScorer cleanliness evidence (this family's `deliveryscore_
+disagreement_count` contribution) -> D-122 positioned performance events
+(`positioned_performance_evidence.build_positioned_performance_evidence`,
+reused verbatim) -> `raw_understanding_map.build_raw_understanding_span`
+(D-155, reused verbatim) -> Zone-Usability V2 (`build_zone_usability_v2`,
+D-167, reused verbatim) -> D-172's `build_candidate_zone_usability_v2`
+adapter -> `evaluate_watch_listen_besttake_guard_v2`. Each stage consumes
+the PRIOR stage's already-computed output; none re-derives raw perception
+from the candidate's media a second time (`build_positioned_performance_
+evidence` and `build_raw_understanding_span` are each called exactly once
+per candidate per guard evaluation in this call path, matching D-172's own
+design confirmed in this run's diagnostics -- no duplicate event kind
+appears twice in any one candidate's `count_by_kind` dict across the two
+layers). Zero double-counting found.
+
+==================================================
+FAMILY / LANGUAGE-SPINE FREEZE CONFIRMATION
+==================================================
+
+`git diff --stat` against the pre-D-173 head (`9347757`) for this task's
+one commit (`e3019e9`) touches ONLY
+`.github/workflows/cutsell-video00-modal-raw.yml` -- confirmed before
+dispatch and reconfirmed here. Zero `cutsell_worker/*` change. Family
+Formation, Proposition Identity, Attempt Relationships, D-150 semantic
+authority, the Language Spine (D-165/166/168/169) and its D-171 consumer
+migrations, DeliveryScorer, BestTake authority, Boundary, Pacing, and
+Renderer are all untouched by this task, both by construction (workflow-
+only diff) and by evidence (`winner_immutability_check: "OK"` on all 6
+families; `semantic_authority_gate_status: "AUTHORITATIVE"` unchanged on
+all 6; `winner_path_after` values -- 5x `SEMANTIC_FAST_PATH`, 1x
+`OTHER_EXISTING_PATH` -- match the pre-D-172 path vocabulary with no new
+path introduced).
+
+==================================================
+WHOLE-VIDEO COMMERCIAL CONTEXT (COMPACT)
+==================================================
+
+Story complete this run (`story_completeness: "complete"`). The 6
+BestTake-evaluated families sit inside the established region map: family
+2 (Attempt Reconstructor/gynecologist retry region ~95-104s, Body-
+Symptoms), family 4 (pimples/espinillas region), family 5 (hair-loss
+region ~226-232s), family 6 (stomach/"this is my experience" region
+~295-313s, the same family this session's earlier D-097.x work
+extensively hardened). No CTA/Hook/Sonography/Diagnosis-region family
+needed BestTake evaluation this run (their `take_judge_groups` rows either
+had no retry family or resolved via structural/single-candidate paths
+outside this task's 6-family scope). Rendered MP4 duration 154.355s
+against raw 366.997s (58.0% reduction), consistent with prior runs.
+
+==================================================
+PARITY METRICS
+==================================================
+
+From this run's quality-ladder summary (physical/FINAL MP4 view, D-097.10
+R14 headline -- the authoritative one; pre-physical selection view in
+parentheses where it differs):
+- Selection Level-1: 11 regions / 23.809s (selection view: 19 / 30.3s).
+- Boundary Level-1: 25 regions / 3.975s (selection view: 22 / 4.497s).
+- Overall physical LEVEL_1: 23.809s + 3.975s = 27.784s of 366.997s raw.
+- F1 CutSell vs Cut.ai: 0.8522 (precision 0.8874, recall 0.8198) --
+  physical view (selection view: 0.8429).
+- F1 CutSell vs Human Gold: 0.82 (precision 0.7846, recall 0.8587) --
+  physical view (selection view: 0.7938).
+- Reference F1 Cut.ai vs Human Gold: 0.8996 (precision 0.8295, recall
+  0.9827) -- unchanged ceiling, this task touches no selection logic.
+None of these move relative to what an equivalent D-172-only (V1-only)
+run would be expected to produce -- this task added diagnostic visibility,
+not a selection-affecting change, and the diff confirms zero
+`cutsell_worker` code changed.
+
+==================================================
+KNOWN WORKFLOW-SCRIPT BUG (DISCLOSED, NOT FIXED THIS TASK)
+==================================================
+
+The new D-173 workflow step's convenience flag
+`v1_vs_v2_same_coarse_but_v2_dominates`
+(`.github/workflows/cutsell-video00-modal-raw.yml` lines 1852-1853) reads
+`row.get("v1_watch_listen_besttake_dominant_candidate")` against the RAW
+`take_judge_groups` row -- but that key only exists on the OUTPUT summary
+dict this same script builds (assigned two lines earlier, line 1833, from
+the real raw key `watch_listen_besttake_dominant_candidate`), never on the
+raw row itself. `.get()` on the raw row therefore always returns `None`,
+so the flag's first half is always true and the flag collapses to "does
+V2 have a dominant candidate" rather than genuinely testing "V1 lacked one
+AND V2 found one." Effect on this run: family 6's row shows the flag as
+`true`, which reads as "V2 independently discovered a miss V1 didn't
+see" -- the TRUE finding, reading the correct raw field directly, is the
+opposite: V1 (`v1_watch_listen_besttake_dominant_candidate:
+clip_321c423285d2bc9cfbf3`) already found this dominance, and V2 correctly
+passed it through unchanged (still a valid, positive confirmation of the
+D-172 pass-through contract, just not the literal framing the buggy flag
+implies). This is a COSMETIC bug confined to one derived, read-only
+reporting label in a workflow analysis step -- it does NOT affect
+`winner_immutability_check` (computed correctly and independently, lines
+1846-1849), any real evidence field, or any guard decision anywhere in
+`cutsell_worker`. Per this task's own "no cutsell_worker editorial patch,
+no second dispatch" constraint, this is disclosed here for a future
+housekeeping fix (swap the key on line 1853 to
+`watch_listen_besttake_dominant_candidate`), not corrected now, and is NOT
+a reason for a second RAW.
+
+==================================================
+REGRESSION CHECK
+==================================================
+
+`winner_immutability_check: "OK"` on all 6 families (`winner_before ==
+winner_after` in every row, `action_applied: false` in every row).
+`story_completeness: "complete"`, `technical_qc_status: "PASS"` --
+unchanged shape from D-172's own offline expectations. No new failure
+mode introduced; the job's `failure` conclusion is the same pre-existing
+D-032 legacy-validator shape seen on prior runs, confirmed via direct
+step-by-step job inspection (all steps besides the two legacy validators
+succeeded, including the new D-173 step).
+
+==================================================
+D-173 VERDICT
+==================================================
+
+**A. V2 BESTTAKE DIAGNOSTIC REAL-MEDIA PROVEN.** Both of D-173's
+alternative sufficient conditions for verdict A are independently met on
+real media in this one RAW: (1) the Meaning Firewall safely blocked two
+real V2-dominant-but-meaning-insufficient alternatives, one of them a
+ground-truth-confirmed real BestTake quality miss (family
+`tg_ae21d152673e96080a`); and (2) a genuine BestTake-divergence-shaped
+family (`tg_8cae696f55d852a3e5`, both candidates meaning-sufficient, a
+real severity gap, `existing_ladder_agrees: false`) was correctly handled
+via V2's pass-through-unchanged contract. Winner immutability held for all
+6 evaluated families; zero regression attributable to D-172/D-173 was
+found in any inspected dimension.
+
+==================================================
+EXACT NEXT AUTHORITY GATE
+==================================================
+
+Per this task's own instruction, NOT implemented automatically. If
+authorized: a bounded "WATCH+LISTEN BESTTAKE GUARD AUTHORITY DESIGN /
+IMPLEMENTATION" task, following D-123's own philosophy -- the guard may at
+most PREVENT blind acceptance of a materially poor winner it has
+diagnosed with high confidence, then fall through to the existing
+deterministic BestTake ladder for the actual replacement choice; the V2
+diagnostic layer itself never directly selects a winner. A Product Owner
+decision, not decided here. Housekeeping-only, non-blocking: the
+`v1_vs_v2_same_coarse_but_v2_dominates` key-name bug above may be
+corrected in a future task with zero authority implication.
+
+==================================================
+STRICT SCOPE CONFIRMATIONS
+==================================================
+
+No winner mutation (`winner_before == winner_after` proven for all 6
+families on real media; `action_applied` false for all 6). No
+DeliveryScorer weighting change. No BestTake authority granted
+(`deterministic_best_take_authority.py` untouched this task). No Family
+Formation/Proposition/Attempt-Relation/semantic-authority/Language-Spine/
+Boundary/Pacing/Renderer change (git diff --stat: workflow YAML only). No
+provider/network call. No cutsell_worker editorial patch this task. No
+second RAW dispatched. No fallback provider change. No iOS work.
+
+**HUMAN ACTION REQUIRED:** YES (condition A) -- authorizing the "Watch+
+Listen BestTake Guard Authority" design/implementation task named above is
+a Product Owner decision.
