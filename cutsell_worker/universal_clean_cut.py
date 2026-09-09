@@ -26,6 +26,7 @@ from .claim_coverage_best_take import apply_claim_coverage_best_take
 from .clean_cut_provider import CleanCutProvider
 from .contracts import ProcessingRequest, ProcessingResult
 from .deterministic_best_take_authority import apply_deterministic_best_take_authority
+from .watch_listen_besttake_guard_authority import apply_watch_listen_besttake_guard_authority
 from .final_boundary_authority import enforce_complete_idea_boundaries
 from .final_story_coherence_validation import (
     apply_final_story_coherence_validation,
@@ -174,6 +175,23 @@ def process_universal_clean_cut_sources(
             result = replace(
                 result,
                 draft=apply_deterministic_best_take_authority(result.draft, swap_enabled=False),
+            )
+            # D-174 (docs/CUTSELL_DECISIONS.md D-174): Watch+Listen BestTake
+            # Guard Authority, Phase 2 (the ONE real winner-mutation seam --
+            # see watch_listen_besttake_guard_authority.py's own module
+            # docstring for the full two-phase design). Runs immediately
+            # after the deterministic ranker's own verdict above -- the SAME
+            # existing place a family's real bucket assignment is already
+            # finalized -- so a rejected winner's replacement is decided by
+            # `deterministic_best_take_authority.clear_retry_family_winner`
+            # (reused verbatim) on the remainder, never by this module or by
+            # D-172's own V2 evidence directly. Default OFF
+            # (CUTSELL_WATCH_LISTEN_BESTTAKE_GUARD_AUTHORITY_ENABLED): a
+            # total no-op (byte-identical draft) when off, or when Phase 1
+            # marked no family GUARD_REJECT_CURRENT_WINNER.
+            result = replace(
+                result,
+                draft=apply_watch_listen_besttake_guard_authority(result.draft),
             )
             # D-038: a visually/performance-clean take must not beat a
             # semantically complete one -- runs strictly after the

@@ -93,6 +93,18 @@ from .watch_listen_besttake_v2_evidence import (
     watch_listen_besttake_v2_group_row,
     zone_usability_v2_besttake_enabled,
 )
+# D-174 (docs/CUTSELL_DECISIONS.md D-174): Watch+Listen BestTake Guard
+# Authority Phase 1 (pure eligibility decision only -- see watch_listen_
+# besttake_guard_authority.py's own module docstring for the full
+# two-phase design). A SEPARATE, independently-rollbackable flag from
+# D-163/D-172's own diagnostic-only flags. Nested inside D-172's own V2
+# block by construction: this authority never runs on V1-only evidence.
+from .watch_listen_besttake_guard_authority import (
+    evaluate_watch_listen_besttake_guard_authority,
+    watch_listen_besttake_guard_authority_diagnostics,
+    watch_listen_besttake_guard_authority_enabled,
+    watch_listen_besttake_guard_authority_row,
+)
 from .watch_listen_relation_discovery import watch_listen_relation_discovery_enabled
 from .watch_listen_understanding import WatchListenUnderstanding
 from .take_judge import FRAGMENT_PENALTY_MARKERS, apply_delivery_cleanliness_evidence
@@ -1068,6 +1080,7 @@ def build_flow_b_draft(
     judge_group_diagnostics = []
     watch_listen_besttake_results: list = []
     watch_listen_besttake_v2_results: list = []
+    watch_listen_besttake_guard_authority_results: list = []
     no_usable_realization_ids: set[str] = set()
     events_by_source: dict[str, tuple] = {}
     if whole_video_context is not None:
@@ -1305,6 +1318,29 @@ def build_flow_b_draft(
                             watch_listen_besttake_v2_group_row(_wlbt_v2_result, selected_clip_id)
                         )
                         watch_listen_besttake_v2_results.append(_wlbt_v2_result)
+                        # D-174 (docs/CUTSELL_DECISIONS.md D-174): Watch+
+                        # Listen BestTake Guard Authority, Phase 1 (pure
+                        # eligibility decision -- see watch_listen_besttake_
+                        # guard_authority.py's own module docstring). Nested
+                        # inside D-172's own V2 block: this authority never
+                        # considers V1-only evidence. Diagnostic-only here --
+                        # the real winner mutation (Phase 2) happens later,
+                        # in universal_clean_cut.py, only if this evaluation
+                        # marks GUARD_REJECT_CURRENT_WINNER and only when its
+                        # own separate flag is ON.
+                        if watch_listen_besttake_guard_authority_enabled():
+                            _wlbt_authority_result = evaluate_watch_listen_besttake_guard_authority(
+                                winner_id=selected_clip_id or None,
+                                meaning_sufficient_ids=meaning_sufficient_ids,
+                                member_count=len(members),
+                                v2_result=_wlbt_v2_result,
+                                v2_evidence_by_id=_wlbt_v2_evidence_by_id,
+                                case_b_conflict_present=case_b_conflict_present,
+                            )
+                            watch_listen_besttake_row.update(
+                                watch_listen_besttake_guard_authority_row(_wlbt_authority_result)
+                            )
+                            watch_listen_besttake_guard_authority_results.append(_wlbt_authority_result)
             judge_group_diagnostics.append({
                 "group_id": gid,
                 "selected_clip_id": selected_clip_id,
@@ -1609,6 +1645,30 @@ def build_flow_b_draft(
                 else (
                     {"status": "no_families_evaluated"} if not watch_listen_besttake_v2_results
                     else {"status": "evaluated", **watch_listen_besttake_v2_diagnostics(watch_listen_besttake_v2_results)}
+                )
+            ),
+            # D-174 (docs/CUTSELL_DECISIONS.md D-174): Watch+Listen BestTake
+            # Guard Authority Phase-1 tail-safe summary -- same pattern as
+            # D-158/D-161/D-163/D-172's own compact summaries. {"status":
+            # "disabled"} when the (separate, default-OFF) authority flag is
+            # off; the per-family Phase-1 fields already live on each
+            # take_judge_groups row above via watch_listen_besttake_guard_
+            # authority_row. Phase-2 outcome fields on that same row (patched
+            # in place by universal_clean_cut.py's apply_watch_listen_
+            # besttake_guard_authority, only when a real GUARD_REJECT_
+            # CURRENT_WINNER fired and the ladder resolved a replacement)
+            # are NOT reflected in this pipeline.py-stage summary -- this
+            # summary is Phase 1 only, computed before Phase 2 ever runs.
+            "watch_listen_besttake_guard_authority": (
+                {"status": "disabled"} if not watch_listen_besttake_guard_authority_enabled()
+                else (
+                    {"status": "no_families_evaluated"} if not watch_listen_besttake_guard_authority_results
+                    else {
+                        "status": "evaluated",
+                        **watch_listen_besttake_guard_authority_diagnostics(
+                            watch_listen_besttake_guard_authority_results
+                        ),
+                    }
                 )
             ),
             "composer_status": composition.status.__dict__,

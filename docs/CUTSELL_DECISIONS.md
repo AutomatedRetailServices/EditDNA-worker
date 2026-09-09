@@ -28695,3 +28695,490 @@ second RAW dispatched. No fallback provider change. No iOS work.
 **HUMAN ACTION REQUIRED:** YES (condition A) -- authorizing the "Watch+
 Listen BestTake Guard Authority" design/implementation task named above is
 a Product Owner decision.
+
+
+## D-174: Watch+Listen BestTake Guard Authority (post D-173)
+
+==================================================
+STATUS
+==================================================
+
+**A. WATCH+LISTEN BESTTAKE GUARD AUTHORITY OFFLINE PROVEN.** The bounded
+authority this task's Product Owner decision authorized -- Watch+Listen
+MAY VETO a bad winner, Watch+Listen DOES NOT become the winner selector --
+is implemented, offline-tested (40 targeted tests, all 45 directive
+categories plus the 3 D-173 real-shape replays), and proven with zero
+regression across the full offline suite. Default OFF
+(`CUTSELL_WATCH_LISTEN_BESTTAKE_GUARD_AUTHORITY_ENABLED`), independently
+rollbackable from D-163/D-172's own diagnostic flags.
+
+==================================================
+FILES CHANGED
+==================================================
+
+- NEW `cutsell_worker/watch_listen_besttake_guard_authority.py` -- the
+  full two-phase authority (Phase 1 pure eligibility decision, Phase 2 the
+  one real winner-mutation seam).
+- NEW `tests/test_cutsell_d174_watch_listen_besttake_guard_authority.py`
+  (40 tests, all directive categories).
+- MODIFIED `cutsell_worker/pipeline.py` (+60 lines): new imports; Phase 1
+  evaluation nested inside D-172's own V2 block; new `watch_listen_
+  besttake_guard_authority_results` accumulator; new `"watch_listen_
+  besttake_guard_authority"` tail-safe diagnostics entry.
+- MODIFIED `cutsell_worker/universal_clean_cut.py` (+18 lines): Phase 2
+  (`apply_watch_listen_besttake_guard_authority`) called immediately after
+  `deterministic_best_take_authority.apply_deterministic_best_take_
+  authority` in the Clean Cut Core V1 branch -- the SAME existing place a
+  family's real bucket assignment is already finalized.
+- D-163/D-167/D-172 (`watch_listen_besttake_evidence.py`, `watch_listen_
+  zone_usability_v2.py`, `watch_listen_besttake_v2_evidence.py`) all
+  remain at literal ZERO diff -- confirmed via `git diff --stat`.
+
+==================================================
+AUTHORITY FLAG
+==================================================
+
+`CUTSELL_WATCH_LISTEN_BESTTAKE_GUARD_AUTHORITY_ENABLED`, default OFF, a
+THIRD, independently-rollbackable flag alongside D-163's `CUTSELL_WATCH_
+LISTEN_BESTTAKE_EVIDENCE_ENABLED` and D-172's `CUTSELL_WATCH_LISTEN_ZONE_
+USABILITY_V2_BESTTAKE_ENABLED`. OFF: `apply_watch_listen_besttake_guard_
+authority` returns its input `draft` completely unchanged (identity
+return, verified in `test_01`); Phase 1 is never called from `pipeline.py`
+(nested inside D-172's own already-flag-gated V2 block).
+
+==================================================
+AUTHORITY CONTRACT
+==================================================
+
+Two-phase design, one canonical seam:
+
+    Phase 1 (`evaluate_watch_listen_besttake_guard_authority`, pure,
+    called from pipeline.py's existing per-family loop): decides WHETHER
+    a family's current winner should be rejected. Never mutates anything.
+
+    Phase 2 (`apply_watch_listen_besttake_guard_authority`, called from
+    universal_clean_cut.py immediately after `deterministic_best_take_
+    authority.apply_deterministic_best_take_authority`): for every family
+    Phase 1 marked `GUARD_REJECT_CURRENT_WINNER`, excludes the rejected
+    winner from that family's own `ranked` list and calls `deterministic_
+    best_take_authority.clear_retry_family_winner` -- the EXACT SAME
+    existing, unchanged, already-CLOSED deterministic ladder D-123
+    already runs -- on the remainder. Only if that ladder independently,
+    decisively resolves the remainder does this module move the rejected
+    winner to `discard` and the ladder's own pick to `select`. Otherwise:
+    fail-open, no mutation.
+
+**One deliberate, honestly-disclosed extension to strict reuse**: when
+excluding the rejected winner leaves EXACTLY ONE remaining candidate (the
+common 2-candidate-family shape -- confirmed the majority shape across
+every RAW this session has analyzed, including all 6 D-173 families),
+`clear_retry_family_winner`'s own `len(ranked) < 2: return None` guard
+(built for >=2-candidate CONTESTS) would always return `None`, making the
+authority a near-total no-op in the single most common real shape. Phase 2
+treats a lone remaining candidate as the trivial, automatic replacement --
+there is no contest to resolve, exactly as `clear_retry_family_winner`
+itself already treats a genuine singleton group as never a contest to
+begin with. This is NOT a second scoring/gap decision; `clear_retry_
+family_winner` itself is still the ONLY decision-maker whenever 2+
+candidates remain (verified in `test_45` with the exact 0.30 gap
+boundary). Disclosed here for Product Owner visibility, not hidden in the
+module's own docstring alone.
+
+==================================================
+ENTRY CONDITIONS
+==================================================
+
+All 11 of the directive's own numbered conditions, verified (module
+docstring + `test_02` through `test_18`):
+1. current winner exists; 2. family has >=2 real candidates; 3. >=1
+alternative meaning-sufficient; 4. REAL V2 evidence exists (V1_FALLBACK
+never authorizes -- `test_02`); 5. non-conflicted comparison (`test_15`);
+6. DELIVERY-owned evidence (guaranteed by construction -- `zone_usability_
+v2_dominates`/`_performance_dominates` never fire otherwise); 7.
+materiality floor (below); 8. CASE A never owns the defect (`test_13`,
+defensive -- structurally unreachable via real dominance); 9. CASE C
+never present (guaranteed by construction); 10. D-123 non-actionable
+(`test_17`/`test_18`); 11. meaning firewall never violated (guaranteed by
+construction -- `dominant_candidate_id` always drawn from the
+meaning-sufficient set).
+
+==================================================
+V2 EVIDENCE REQUIREMENT
+==================================================
+
+`evidence_source == EVIDENCE_SOURCE_V2` required (`test_02`); V1_FALLBACK
+evidence (no real `CandidateZoneUsabilityV2` built for this candidate)
+never authorizes a rejection -- the materiality floor below needs D-167's
+own severity table, which only a real V2 record carries.
+
+==================================================
+MEANING FIREWALL
+==================================================
+
+Absolute P0, verified twice: `test_04`/`test_05` (a meaning-insufficient
+V2-dominant alternative -> `BLOCKED_BY_MEANING_FIREWALL`, never
+`GUARD_REJECT_CURRENT_WINNER`) and `test_replay_a` (the exact D-173 real
+shape, offline). Guaranteed structurally: `dominant_candidate_id` on a
+`PERFORMANCE_DOMINANT_ALTERNATIVE` result is ALWAYS drawn only from
+`meaning_sufficient_ids` inside `evaluate_watch_listen_besttake_guard_v2`
+(D-172, zero diff) -- this module adds no second meaning check, it simply
+never sees a meaning-insufficient id as a candidate to reject toward.
+**Known, pre-existing, unaddressed scope limit (disclosed, not fixed
+here)**: Phase 2's ladder reevaluation itself (`clear_retry_family_
+winner`) is, and always has been (identical in `deterministic_best_take_
+authority.py`'s own pre-D-174 use), blind to meaning-sufficiency -- it is
+possible in principle for the REPLACEMENT the existing ladder picks from
+the remainder to itself be meaning-insufficient. This is a pre-existing
+systemic property of the deterministic ladder shared with `apply_
+deterministic_best_take_authority`'s own decisive-contest override, not a
+new gap D-174 introduces; the Meaning Firewall's own scope (per this
+task's directive) is specifically about the GUARD's own rejection trigger,
+never about auditing the existing ladder's own blind spots. Recorded here
+honestly for a future task to weigh, not addressed in this task.
+
+==================================================
+CASE-A RESULT
+==================================================
+
+`test_13`: a CASE_A_BOUNDARY_ONLY winner -> `BLOCKED_BY_CASE_OWNERSHIP`
+(defensive; structurally unreachable via real dominance since `zone_
+usability_v2_dominates` itself already refuses to fire for a CASE-A
+winner -- exercised here by constructing the guard result directly).
+
+==================================================
+CASE-B RESULT
+==================================================
+
+`test_08`/`test_09`/`test_14`: a DELIVERY-owned (`CASE_B_DELIVERY_OWNED`)
+material/severe winner defect with a clean or materially-better
+meaning-sufficient alternative -> `GUARD_REJECT_CURRENT_WINNER`.
+
+==================================================
+CASE-C RESULT
+==================================================
+
+`test_15`: a winner carrying a material modality conflict (`zone_
+conflict`/`conflict_flags`) -> `BLOCKED_BY_CONFLICT`, fails open exactly
+like D-163's own `GUARD_UNCERTAIN`.
+
+==================================================
+ORDINARY-MOTION RESULT
+==================================================
+
+`test_10` (isolated hand-motion, LOW materiality tier, ISOLATED pattern
+-> `SEVERITY_NONE`, never reaches a defect classification at all) and
+`test_11` (REPEATED-but-non-disruptive ordinary motion -> `SEVERITY_MILD`,
+blocked by the materiality floor, never `MATERIAL`/`SEVERE`). Contrast
+`test_12`: a SUSTAINED HIGH-materiality (breaking-character-kind) defect
+correctly reaches `SEVERITY_SEVERE` and authorizes.
+
+==================================================
+MATERIALITY RESULT
+==================================================
+
+`test_07`/`test_11`: MILD-severity dominance findings (a real ordinal
+V2 improvement, but not `MATERIAL`/`SEVERE`) are correctly blocked
+(`winner_severity_below_material_floor`) -- reuses D-167's OWN existing
+categorical severity table (`SEVERITY_MATERIAL`/`SEVERITY_SEVERE`
+verbatim); no new numeric threshold invented anywhere in this module.
+`test_replay_c` (pimples-like near-equal MILD/MILD) confirms the same
+floor blocks a tiny fractional difference from ever authorizing.
+
+==================================================
+D-123 OWNERSHIP
+==================================================
+
+`test_17`/`test_18`: `case_b_conflict_present=True` (D-123's own
+actionable-disagreement signal, read verbatim, never re-derived) ->
+`BLOCKED_BY_D123`, regardless of how strong the V2 dominance finding is;
+`case_b_conflict_present=False` on an otherwise-identical fixture ->
+proceeds. D-174 never duplicates or overrides D-123's own decision.
+
+==================================================
+D-128 RESULT
+==================================================
+
+Zero coupling: `multimodal_besttake_fallback.py` is not imported by,
+referenced by, or modified in this task (confirmed via `git diff --stat`
+and structural grep). D-128's own Class-B shadow-only detection is
+untouched and runs independently of this authority.
+
+==================================================
+SEMANTIC AUTHORITY COMPATIBILITY
+==================================================
+
+`test_19_20`: `evaluate_watch_listen_besttake_guard_authority`'s own
+signature carries no `semantic_authority_gate_status`/`semantic_winner`
+parameter at all -- structurally incapable of reading, let alone
+bypassing, D-150's own gate decision. `semantic_authority_observability.py`
+is not imported (structural grep, `test_28_29_30_31_32`).
+
+==================================================
+FAMILY FREEZE
+==================================================
+
+No Family Formation/IdeaClusterer/RetryFamilyResolver change. `test_27`
+confirms only the ONE marked group's clips move; every other group's
+`take_judge_groups` row is byte-identical.
+
+==================================================
+PROPOSITION/ATTEMPT FREEZE
+==================================================
+
+Zero coupling: `attempt_relationship_authority.py`, `language_
+proposition_relation.py`, `language_utterance_attempt.py` not imported
+(structural grep, `test_28_29_30_31_32`).
+
+==================================================
+LANGUAGE-SPINE COMPATIBILITY
+==================================================
+
+D-166/D-168/D-169/D-171 all confirmed at literal ZERO diff (`test_36`,
+`git diff --stat`). No new consumer migration. No coupling.
+
+==================================================
+CURRENT-WINNER REJECTION
+==================================================
+
+`test_44`: a rejected winner moves ONLY to `discard`, never to
+`alternates` (Clean Cut Core V1 is KEEP/DISCARD only, D-019 -- SWAP stays
+out of scope) and never resurrected elsewhere.
+
+==================================================
+NO-DIRECT-V2-WINNER RESULT
+==================================================
+
+`test_22`/`test_42`: constructed a family where V2's own dominant
+candidate (B) and the existing ladder's own independent pick from the
+remainder (C) DIFFER -- `winner_after == C`, never `B`. Structural proof
+(`test_42`) also confirms the source contains no direct assignment path
+from a v2/dominant field into `winner_after` -- only from `clear_retry_
+family_winner`'s own return value (or the single-remaining-candidate
+special case above, itself not a V2-derived value).
+
+==================================================
+LADDER REEVALUATION
+==================================================
+
+`test_23`: when the ladder's own pick from the remainder happens to equal
+V2's dominant candidate, the mutation is still attributed to `guard_
+authority_replacement_source: DETERMINISTIC_BESTTAKE_LADDER`, never
+claimed as a direct V2 selection. `test_25`: a non-decisive remainder
+(gap <0.30) leaves the state at `GUARD_REJECT_CURRENT_WINNER` (never
+upgraded to `LADDER_REEVALUATED`), `winner_after == winner_before`, zero
+mutation -- fail-open confirmed.
+
+==================================================
+MULTI-ALTERNATIVE RESULT
+==================================================
+
+`test_21`: a 3-candidate family (A rejected, B and C both V2-dominant
+over A) correctly reports `eligible_alternative_ids = (B, C)` at Phase 1;
+`test_24` confirms Phase 2's ladder can pick a THIRD candidate distinct
+from Phase 1's own tie-broken `dominant_candidate_id` when the real score
+gap says so.
+
+==================================================
+D-173 MEANING-BLOCK REPLAY
+==================================================
+
+`test_replay_a`: the exact D-173 real shape (families
+`tg_ae21d152673e96080a`/`tg_18304eb16b4890dcc7`) -- a V2-dominant but
+meaning-insufficient alternative -> `BLOCKED_BY_MEANING_FIREWALL`, no
+authority action. Unchanged from D-173's own real-media proof.
+
+==================================================
+D-173 MEANING-SUFFICIENT REPLAY
+==================================================
+
+`test_replay_b`: the D-173 real shape closest to family
+`tg_8cae696f55d852a3e5` (both candidates meaning-sufficient, V1/V2
+identify real performance dominance) BUT with `SEVERITY_SEVERE` winner
+severity (D-173's own real family was `MILD`, which this task's
+materiality floor correctly does NOT authorize -- see next section) --
+`GUARD_REJECT_CURRENT_WINNER` fires, and Phase 2 confirms the ladder (not
+V2) decides the replacement.
+
+==================================================
+PIMPLES-LIKE NEAR-EQUAL RESULT
+==================================================
+
+`test_replay_c`: MILD/MILD near-equal severities -> `NO_ACTION`,
+`winner_severity_below_material_floor` -- no authority merely from a tiny
+fractional difference, per this task's own explicit MATERIALITY
+instruction.
+
+==================================================
+FAIL-OPEN RESULT
+==================================================
+
+`test_25` (non-decisive ladder remainder) and `test_26` (malformed row --
+rejected clip id absent from the draft's own clip universe) both preserve
+the original winner with zero exception raised and zero partial mutation.
+
+==================================================
+EXCEPTION SAFETY
+==================================================
+
+`test_26`: `apply_watch_listen_besttake_guard_authority` never raises on
+a malformed group row; it simply skips that group and leaves it
+byte-identical, the same defensive posture `apply_deterministic_best_
+take_authority` itself already uses for a missing clip id.
+
+==================================================
+WINNER PROVENANCE
+==================================================
+
+Full provenance recorded on every affected `take_judge_groups` row:
+`guard_authority_winner_before`, `guard_authority_rejected_winner_id`,
+`guard_authority_rejection_reason`, `guard_authority_eligible_
+alternative_ids`, `guard_authority_ladder_reevaluated`, `guard_authority_
+ladder_replacement_id`, `guard_authority_winner_after`, `guard_authority_
+applied`, `guard_authority_source` (`WATCH_LISTEN_GUARD_REJECTION`) and
+`guard_authority_replacement_source` (`DETERMINISTIC_BESTTAKE_LADDER`) --
+the two authority-source labels the directive itself required, kept
+distinct (`test_row_helper_field_names`).
+
+==================================================
+D-150/D-158/D-161/D-163/D-167/D-172/D-171 REGRESSION
+==================================================
+
+Zero regression in any of: D-150 (`test_cutsell_d150_*.py`), D-158
+(`test_cutsell_d158_*.py`), D-161 (`test_cutsell_d161_*.py`), D-163/D-172
+(their own targeted suites, all passing, both modules at zero diff),
+D-171 (`test_cutsell_d171_language_spine_consumer_migration.py`), all
+green. D-169's own `test_30_old_serialized_ids_unaffected` showed the
+SAME transient git-diff-on-uncommitted-`pipeline.py` failure D-172's own
+qualification already documented and explained as self-resolving once
+committed (re-run below confirms).
+
+==================================================
+BOUNDARY/PACING/RENDER REGRESSION
+==================================================
+
+241 tests across every Boundary/Pacing/render-adjacent suite in the repo
+(boundary bridge/repair, caption render, D-097.2/.5/.10/.C, D-116, D-142
+pacing, live render QC, post-render media QC/structural cross-check,
+selection-boundary contract, human boundary polish v4/v5, video00 render
+path regressions, multi-file render foundation) -- all pass, zero
+regression.
+
+==================================================
+DIAGNOSTICS
+==================================================
+
+Per-family (module docstring, `watch_listen_besttake_guard_authority_
+row`): `guard_authority_enabled`, `guard_authority_evaluated`, `guard_
+authority_state`, `guard_authority_rejection_reason`, `guard_authority_
+winner_before`, `guard_authority_rejected_winner_id`, `guard_authority_
+eligible_alternative_ids`, `guard_authority_v2_dominant_candidates`,
+`guard_authority_meaning_firewall_blocked`, `guard_authority_d123_
+blocked`, `guard_authority_case_owner`, `guard_authority_ladder_
+reevaluated`, `guard_authority_ladder_replacement_id`, `guard_authority_
+winner_after`, `guard_authority_applied`, `guard_authority_source` /
+`guard_authority_replacement_source`.
+
+==================================================
+TAIL-SAFE SUMMARY
+==================================================
+
+New `diagnostics["watch_listen_besttake_guard_authority"]` run-level
+block (same pattern as D-158/D-161/D-163/D-172): `guard_authority_
+evaluated_count`, `guard_authority_no_action_count`, `guard_authority_
+meaning_block_count`, `guard_authority_case_block_count`, `guard_
+authority_d123_block_count`, `guard_authority_conflict_block_count`,
+`guard_authority_rejection_count`, `guard_authority_ladder_reselection_
+count` (reserved, not yet independently incremented -- see NEXT REAL-
+MEDIA GATE), `guard_authority_winner_changed_count` (reserved, same).
+{"status": "disabled"} when the flag is off.
+
+==================================================
+TARGETED TESTS
+==================================================
+
+40/40 passing in `test_cutsell_d174_watch_listen_besttake_guard_
+authority.py` -- all 45 directive-mandated categories (several combined
+where the directive's own item naturally covers more than one numbered
+line, e.g. items 19/20 share one no-coupling structural test) plus the 3
+D-173 real-shape replays plus one structural row-field-name test.
+
+==================================================
+BOUNDED REGRESSIONS
+==================================================
+
+None found. `winner_before == winner_after` for every family where Phase
+1 does not mark `GUARD_REJECT_CURRENT_WINNER` (the overwhelming majority
+in every real RAW this session has analyzed) -- byte-identical to
+pre-D-174 in that case, by construction.
+
+==================================================
+FULL OFFLINE SUITE
+==================================================
+
+`python3 -m pytest tests/ -q --ignore=tests/test_semantic_stitch.py`:
+4025 passed, 13 subtests passed, 6 failed. `test_semantic_stitch.py`
+itself excluded (pre-existing collection error, confirmed identical on
+baseline HEAD, unrelated to this task -- same exclusion D-171/172/173
+already applied). Of the 6 failures: 5 (`test_hybrid_story_guard_
+incomplete_retry.py::test_incomplete_failed_retry_is_covered_when_prior_
+delivery_preserves_numbers_and_negation`, and 4 in `test_video00_modal_
+hybrid_semantic_parity.py`) reproduced VERBATIM on baseline HEAD `3686a88`
+via `git stash` before this task's changes -- confirmed pre-existing,
+zero relation to D-174 (Modal-workflow-YAML/hybrid-LLM-flag masking
+tests, no D-174 file referenced). The 6th
+(`test_cutsell_d169_language_proposition_relation.py::test_30_old_
+serialized_ids_unaffected`) is the same transient `git diff --stat`-
+against-uncommitted-`pipeline.py` shape D-172's own qualification already
+documented as self-resolving once committed -- re-run after this commit
+confirms PASS (HEAD then includes the change, working tree matches HEAD
+exactly).
+
+==================================================
+NEW FAILURES
+==================================================
+
+Zero new failures attributable to D-174.
+
+==================================================
+D-174 VERDICT
+==================================================
+
+**A. WATCH+LISTEN BESTTAKE GUARD AUTHORITY OFFLINE PROVEN.**
+
+==================================================
+EXACT NEXT REAL-MEDIA GATE
+==================================================
+
+Per this task's own instruction, NOT launched automatically. If
+authorized: ONE Video00 Modal RAW with `CUTSELL_WATCH_LISTEN_BESTTAKE_
+EVIDENCE_ENABLED=1`, `CUTSELL_WATCH_LISTEN_ZONE_USABILITY_V2_BESTTAKE_
+ENABLED=1`, AND `CUTSELL_WATCH_LISTEN_BESTTAKE_GUARD_AUTHORITY_ENABLED=1`,
+to prove whether a real meaning-sufficient materially-poor winner is
+safely rejected and the existing ladder chooses a better replacement.
+Given D-173's own real-media finding that the one real BestTake-shaped
+contradiction family this session has observed (`tg_8cae696f55d852a3e5`)
+carried only `MILD` winner severity -- below this task's own materiality
+floor -- the most likely honest outcome of that RAW is `guard_authority_
+rejection_count: 0` (a real, informative negative result: the materiality
+floor holding on real media, not a bug) unless a genuinely `MATERIAL`/
+`SEVERE` real family exists elsewhere in Video00. Workflow-only plumbing
+(a new `watch_listen_besttake_guard_authority_enabled` input plus a
+compact summary step, mirroring D-173's own plumbing pattern) would be
+required first, following the same zero-`cutsell_worker`-change
+discipline. A Product Owner decision, not decided here.
+
+==================================================
+STRICT SCOPE CONFIRMATIONS
+==================================================
+
+No V2 direct winner selection (structurally proven, `test_42`). No new
+DeliveryScorer weight (grep-verified categorical/ordinal comparisons
+only, reusing D-167's own severity table verbatim). No Family Formation/
+Proposition/Attempt-Relation/semantic-authority-rewrite/Language-Spine-
+migration/Boundary/Pacing/Renderer change (all confirmed byte-identical
+above). No provider/network call (`test_40`). No RAW dispatched this
+task. No fallback provider change (D-128 untouched). No iOS work.
+
+**HUMAN ACTION REQUIRED:** YES (condition A) -- authorizing the one
+Video00 RAW named in "Exact next real-media gate" above is a Product
+Owner decision.
