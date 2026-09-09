@@ -528,7 +528,15 @@ def test_33_no_final_retry_relation_minted():
 # 34. No family change
 # ---------------------------------------------------------------------------
 def test_34_no_family_change():
-    for module_name in ("take_grouping", "take_grouping_provider", "hybrid_session_cleanup"):
+    # D-171 Language Spine Phase D, TARGET A explicitly and narrowly
+    # authorized `take_grouping_provider.py` to become a real, fail-open
+    # Language Spine consumer (transitively, via `language_spine_consumer_
+    # migration.py` -> `language_proposition_relation.py`), so it is
+    # expected to reference this module's name now -- see docs/
+    # CUTSELL_DECISIONS.md D-171. `take_grouping.py` (the underlying
+    # deterministic grouping module) and `hybrid_session_cleanup.py` stay
+    # untouched.
+    for module_name in ("take_grouping", "hybrid_session_cleanup"):
         source = inspect.getsource(__import__(f"cutsell_worker.{module_name}", fromlist=["_"]))
         assert "language_utterance_attempt" not in source
 
@@ -663,9 +671,14 @@ def test_watch_listen_understanding_untouched():
 
 
 def test_not_imported_by_any_production_call_site():
+    # D-171 Language Spine Phase D, TARGET A explicitly and narrowly
+    # authorized `take_grouping_provider.py` to become a real, fail-open
+    # Language Spine consumer -- see docs/CUTSELL_DECISIONS.md D-171 and
+    # this file's own `test_34_no_family_change`. Excluded from this list
+    # for that documented reason; every other call site stays unaware.
     call_sites = (
         "pipeline", "flow_b", "take_segmentation", "attempt_reconstruction",
-        "take_grouping", "take_grouping_provider", "hybrid_session_cleanup",
+        "take_grouping", "hybrid_session_cleanup",
         "semantic_idea_equivalence", "deterministic_best_take_authority",
         "take_judge", "watch_listen_besttake_evidence",
         "watch_listen_zone_usability_v2", "boundary_engine_pass",

@@ -91,15 +91,43 @@ def _nearest_prior_direct_meta(
     return max(prior, key=lambda item: (item.end, item.start)) if prior else None
 
 
+def _legacy_tiny_continuation(take: CandidateTake) -> bool:
+    """D-171: the original `_direct_meta_short_tail` length/duration
+    heuristic, extracted unchanged -- "is this take short enough (<=5
+    words, <=2.2s) to plausibly be a trailing fragment." Kept as its own
+    function so `_direct_meta_short_tail` below can fold it against
+    canonical Language Spine evidence without duplicating it."""
+    tokens = _tokens(take.text)
+    return bool(tokens) and len(tokens) <= 5 and take.duration_sec <= 2.2
+
+
 def _direct_meta_short_tail(
     take: CandidateTake,
     evidence: tuple[CandidateTake, ...],
     *,
     maximum_gap_sec: float = 1.10,
 ) -> CandidateTake | None:
-    """Return direct-meta anchor for a tiny syntactic continuation, if any."""
-    tokens = _tokens(take.text)
-    if not tokens or len(tokens) > 5 or take.duration_sec > 2.2:
+    """Return direct-meta anchor for a tiny syntactic continuation, if any.
+
+    D-171 Language Spine Phase D, TARGET B: the "is this a tiny
+    continuation" verdict now consults canonical Language Spine evidence
+    (`LanguageAttempt.meaning_completion`, built from this take's own ASR
+    word timing) alongside the legacy word-count/duration heuristic, via
+    `language_spine_consumer_migration.continuation_migration`. Per that
+    module's fail-open contract, the returned verdict is ALWAYS either the
+    legacy value, or a value proven identical to it for this take -- this
+    call site's editorial behavior is provably unchanged by D-171; only the
+    evidence source backing an agreeing verdict differs. When Spine
+    evidence disagrees or is unavailable (e.g. no word timing on `take`),
+    the pre-D-171 legacy verdict is used as-is.
+    """
+    legacy_is_tiny = _legacy_tiny_continuation(take)
+    from . import language_spine_consumer_migration
+    is_tiny, _trace = language_spine_consumer_migration.continuation_migration(
+        "recording_meta_continuation._direct_meta_short_tail",
+        take.source_asset_id, take.words, legacy_is_tiny,
+    )
+    if not is_tiny:
         return None
     return _nearest_prior_direct_meta(take, evidence, maximum_gap_sec=maximum_gap_sec)
 

@@ -143,7 +143,19 @@ _DIVERGENCE_MIN_SHARED_CONTENT = 6
 _DIVERGENCE_MIN_SHARED_COVERAGE = 0.55
 
 
-def _marked_side_diverges_in_content(left_text: str, right_text: str) -> bool:
+def _language_spine_consumer_migration():
+    """Lazy import (D-171), same cycle-avoidance reasoning as
+    `_attempt_relationship_authority`/`_watch_listen_relation_discovery`
+    above: the Language Spine Phase-D consumer-migration adapter
+    transitively imports the Phase B/C attempt/proposition modules, which
+    in turn import `attempt_reconstruction.py` -> `session_boundaries.py`,
+    which imports THIS module for `TakeGroupingProvider` -- a module-level
+    import here would be a genuine import cycle."""
+    from . import language_spine_consumer_migration
+    return language_spine_consumer_migration
+
+
+def _legacy_marked_side_diverges_in_content(left_text: str, right_text: str) -> bool:
     """D-048 FIX 1: is there enough of the marked candidate's OWN specific
     content -- beyond the addition marker's own generic scaffolding --
     absent from the other candidate to trust the marker as real evidence of
@@ -163,6 +175,12 @@ def _marked_side_diverges_in_content(left_text: str, right_text: str) -> bool:
     discourse framing only, let the arbiter's same-idea verdict stand) when
     the two share substantial specific content including whatever concrete
     nouns/details carry the claim, not just the generic setup.
+
+    D-171: renamed from `_marked_side_diverges_in_content` (this exact
+    function body is otherwise byte-identical) -- the public name below is
+    now the Language-Spine-consuming wrapper; this is the LEGACY evidence
+    path it always computes and, per D-171's own fail-open contract, always
+    falls back to on Spine unavailability/disagreement.
     """
     left = _content_tokens(left_text)
     right = _content_tokens(right_text)
@@ -175,6 +193,27 @@ def _marked_side_diverges_in_content(left_text: str, right_text: str) -> bool:
         return True
     coverage = len(shared) / min(len(left), len(right))
     return coverage < _DIVERGENCE_MIN_SHARED_COVERAGE
+
+
+def _marked_side_diverges_in_content(left_text: str, right_text: str) -> bool:
+    """D-171 Language Spine Phase D, TARGET A: fail-open canonical-evidence
+    wrapper around `_legacy_marked_side_diverges_in_content`. Computes the
+    legacy verdict (always -- it is both the input to the comparison and
+    the universal fallback), then asks `language_spine_consumer_migration.
+    proposition_divergence_migration` whether the canonical `PropositionCa
+    ndidate`/`ClaimSignature` (D-169) evidence agrees. The returned verdict
+    is ALWAYS either the legacy value, or a value proven identical to it
+    this call (see that module's own docstring for the full migration-state
+    contract) -- this call site's editorial behavior is provably unchanged
+    by D-171; only the evidence source backing an agreeing verdict differs.
+    """
+    legacy_diverges = _legacy_marked_side_diverges_in_content(left_text, right_text)
+    verdict, _trace = _language_spine_consumer_migration().proposition_divergence_migration(
+        "take_grouping_provider._marked_side_diverges_in_content",
+        "left", left_text, "right", right_text,
+        legacy_diverges,
+    )
+    return verdict
 
 
 # D-083: DISTINCT-IDEA RETRY GROUPING SAFETY (within-group weak-pair gate)

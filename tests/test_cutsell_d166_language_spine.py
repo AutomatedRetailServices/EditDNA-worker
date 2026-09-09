@@ -376,8 +376,13 @@ def test_28_no_retry_relation_creation():
 # 29. no family change
 # ---------------------------------------------------------------------------
 def test_29_no_family_module_imports_language_spine():
-    for path in ("take_grouping.py", "take_grouping_provider.py", "hybrid_session_cleanup.py",
-                 "semantic_idea_equivalence.py"):
+    # D-171 Language Spine Phase D, TARGET A explicitly and narrowly
+    # authorized `take_grouping_provider.py` to become a real, fail-open
+    # Language Spine consumer (via `language_spine_consumer_migration.py`,
+    # never `language_spine.py` directly) -- see docs/CUTSELL_DECISIONS.md
+    # D-171. `take_grouping.py` (the underlying deterministic grouping
+    # module) and the remaining Family Formation modules stay untouched.
+    for path in ("take_grouping.py", "hybrid_session_cleanup.py", "semantic_idea_equivalence.py"):
         text = (REPO_ROOT / "cutsell_worker" / path).read_text()
         assert "language_spine" not in text
 

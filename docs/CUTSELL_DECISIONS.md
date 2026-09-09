@@ -27460,3 +27460,306 @@ untouched, unimported by any production call site).
 **HUMAN ACTION REQUIRED:** YES (condition A) -- whether to authorize
 D-171 (Language Spine Phase D: bounded consumer migration) as the next
 implementation task is a Product Owner decision.
+
+
+---
+
+## D-171: Language / Transcript Spine, Phase D -- incremental, bounded consumer migration (post D-170)
+
+==================================================
+STATUS
+==================================================
+
+**A. INCREMENTAL LANGUAGE-SPINE CONSUMER MIGRATION OFFLINE PROVEN.** Two
+consumer clusters (this task's own "no more than 3" cap) migrated onto the
+canonical Language Spine (D-165/D-166/D-168/D-169) via a new, additive
+module `cutsell_worker/language_spine_consumer_migration.py`, in a
+strictly fail-open, zero-editorial-authority-change posture proven by
+construction (not merely tested) -- see "Design contract" below.
+
+==================================================
+MIGRATED CONSUMER CLUSTERS (2 of a possible 3)
+==================================================
+
+**TARGET A -- proposition/retry divergence evidence:**
+`take_grouping_provider._marked_side_diverges_in_content`/`_within_group_
+arbiter_confirmation_diverges` (D-048/D-083's marker-gated content-overlap
+guards, on `reconcile_semantic_idea_equivalence`'s cross-group merge path
+and `split_incohesive_retry_groups`'s within-group cohesion path). The
+original body was renamed `_legacy_marked_side_diverges_in_content`
+(byte-identical) and is now called first; its result and a canonical
+`PropositionCandidate`/`ClaimSignature` (D-169, `build_claim_signature`)
+comparison are folded via `language_spine_consumer_migration.proposition_
+divergence_migration`.
+
+**TARGET B -- continuation evidence:**
+`recording_meta_continuation._direct_meta_short_tail` (the tiny-
+continuation word-count/duration heuristic that decides whether a short
+survivor clip is a trailing fragment of a proven recording-meta remark).
+The original length/duration check was extracted unchanged as `_legacy_
+tiny_continuation`; the public function now folds it against a real
+`LanguageWord -> LanguagePhrase -> LanguageUtterance -> LanguageAttempt`
+hierarchy (D-166/D-168, built from the candidate's own ASR `words`) via
+`language_spine_consumer_migration.continuation_migration`, reading
+`LanguageAttempt.meaning_completion` as the canonical continuation signal.
+
+**TARGET C -- conclusion/CTA advisory: SKIPPED**, per this task's own "if
+this target requires more than a simple adapter, skip it" instruction.
+Audit finding: `realization_resolver.py` already consumes the shared,
+canonical `semantic_claims.classify_claim` `UNIQUE_CONCLUSION`/
+`ACTION_EVENT` vocabulary directly by import -- the SAME primitive
+`language_proposition_relation.build_claim_signature`'s own `SLOT_CTA`/
+`SLOT_CONCLUSION` advisory evidence (D-169) reuses. There is no
+independent duplicate parser left at this call site to migrate; building
+an adapter here would not remove any duplication, only wrap an already-
+centralized function. Two clean migrations, per this task's own
+preference over three risky ones.
+
+==================================================
+DESIGN CONTRACT (this task's own binding instruction, enforced
+structurally)
+==================================================
+
+Every migrated call site NEVER changes the boolean/decision its caller
+acts on. The Spine-computed verdict is substituted for the legacy
+computation ONLY in the branch where an explicit, per-call comparison
+proves the two are IDENTICAL for that exact input (`SPINE_CONSUMED`) --
+substituting is therefore provably a no-op on behavior, by construction,
+not merely by test coverage. Whenever the Spine's independent verdict
+DISAGREES with legacy, or Spine evidence cannot be computed at all (no
+ASR word timing, or an evidence-construction exception), the caller's
+existing pre-D-171 legacy path is exactly what gets used -- fail-open, per
+this task's CONFLICT POLICY ("do not silently pick the new one... No
+forced migration result").
+
+Migration states (`cutsell_worker/language_spine_consumer_migration.py`,
+`ConsumerMigrationTrace`): `LEGACY_ONLY` (Spine unavailable), `SPINE_
+AVAILABLE_LEGACY_FALLBACK` (Spine computed but disagreed), `SPINE_
+CONSUMED` (Spine computed and agreed -- the returned verdict is explicitly
+sourced from Spine), `SPINE_CONFLICT_FALLBACK` (disagreement corroborated
+by a concrete `claim_signatures_conflict` negation/number conflict --
+Target A only, behaviorally identical to the ordinary fallback state).
+
+==================================================
+LEGACY-VS-SPINE PARITY (proven, not merely observed)
+==================================================
+
+Both D-039/D-047/D-048/D-083 calibration fixtures verified byte-identical
+through the full public API after migration: the D-039 founding case (arm
+vs leg, genuinely distinct) still returns `diverges=True`; the D-047 Case
+1 restatement (same symptom + same location) still returns
+`diverges=False`. `recording_meta_continuation`'s own existing 9-test
+suite (`tests/test_cutsell_recording_meta_continuation.py`) and its full
+`apply_recording_meta_continuation_cleanup` flow (direct-meta anchor +
+tiny tail removal) verified unchanged end to end.
+
+==================================================
+BACKWARD COMPATIBILITY
+==================================================
+
+Confirmed both ways: Spine available and agreeing -> `SPINE_CONSUMED`
+(evidence source genuinely swapped, result identical); Spine unavailable
+(no `words` on the `CandidateTake`, Target B) or an evidence-construction
+exception (simulated via monkeypatch, Target A) -> `LEGACY_ONLY`, the
+pre-D-171 path used as-is, unchanged. No consumer requires Language Spine
+evidence to function.
+
+==================================================
+NO AUTHORITY CHANGE
+==================================================
+
+`git diff --stat` against this task's start (`5095d33`) shows exactly two
+`cutsell_worker/*.py` files modified (`take_grouping_provider.py`,
+`recording_meta_continuation.py`) plus one new additive module
+(`language_spine_consumer_migration.py`) and two small, documented test-
+assertion updates in D-166's and D-168's own suites (see "Preserve CLOSED"
+below) -- zero change to Family Formation's real decision logic
+(`take_grouping.py` byte-identical), zero change to `semantic_idea_
+equivalence.py`, `attempt_relationship_authority.py` (D-158), `watch_
+listen_relation_discovery.py` (D-161), `watch_listen_besttake_evidence.py`
+(D-163), `watch_listen_zone_usability_v2.py` (D-167), `semantic_authority_
+observability.py` (D-150), `deterministic_best_take_authority.py`/`take_
+judge.py` (BestTake/DeliveryScorer), `boundary_engine_pass.py` (Boundary),
+`dialogue_pacing_transition.py` (Pacing), or `render.py`/`render_plan.py`/
+`render_versions.py` (Renderer) -- all confirmed empty diffs. No id
+minted: `language_spine_consumer_migration.py` never calls `mint_retry_
+family_id`/`mint_semantic_idea_id` and never writes back onto any
+serialized `CandidateTake`/`DraftClip` field (D-169's own "NO ID
+MIGRATION YET" instruction, restated and enforced here).
+
+==================================================
+PRESERVE CLOSED -- two documented test-assertion updates (not a module
+change)
+==================================================
+
+D-171 Target A intentionally and narrowly authorizes `take_grouping_
+provider.py` to become the FIRST real Language Spine consumer. Two prior
+module-leaf grep tests in D-166's and D-168's own CLOSED test suites
+asserted the absence of exactly this (now-authorized) awareness:
+`tests/test_cutsell_d166_language_spine.py::test_29_no_family_module_
+imports_language_spine` and `tests/test_cutsell_d168_language_utterance_
+attempt.py::test_34_no_family_change`/`test_not_imported_by_any_
+production_call_site`. Both updated (with an explanatory comment pointing
+at this entry) to exclude `take_grouping_provider` from their "must never
+mention" list, while every OTHER module in those same lists (`take_
+grouping`, `hybrid_session_cleanup`, `semantic_idea_equivalence`, and all
+BestTake/D-150/D-158/D-161/D-163/D-167/Boundary/Pacing modules) is still
+asserted untouched. D-166's/D-168's/D-169's own SOURCE modules
+(`language_spine.py`, `language_utterance_attempt.py`, `language_
+proposition_relation.py`) remain byte-identical (`git diff --stat` empty
+on all three).
+
+==================================================
+DIAGNOSTICS
+==================================================
+
+`language_spine_consumer_migration_diagnostics(traces)` (compact, no
+transcript dump): `language_spine_consumer_evaluated_count`, `_used_
+count`, `_legacy_fallback_count`, `_conflict_count`, plus one row per
+trace (`consumer_name`, `spine_available`, `spine_used`, `legacy_
+fallback_used`, `conflict`, `result_source`). Exposed as an importable,
+directly-testable function this task (verified deterministic across
+repeated calls on identical fixtures) -- not yet wired into the live
+per-RAW artifact output (`this task's own "No RAW" scope did not require
+it; a natural D-172+ follow-up if a future RAW qualification wants the
+counters surfaced in `artifact/video00-modal.json`, honestly not claimed
+done here).
+
+==================================================
+MIGRATION FORENSIC
+==================================================
+
+Duplicated transcript-consumer count (D-165's own `grep -l "_content_
+tokens\|_tokens(text)\|\.lower()\.split()\|content_tokens"` query, re-run
+at this exact commit): **60** modules (D-169's own `language_proposition_
+relation.py`, itself a legitimate consumer of the same pattern for its
+`ClaimSignature`, accounts for the +2 since D-165's original 58-count
+audit; confirmed by direct re-grep, per this task's own "do not claim the
+count drops unless directly re-grepped" instruction -- it does NOT drop:
+D-171 is additive, not subtractive. The legacy tokenizer machinery inside
+`take_grouping_provider.py`/`recording_meta_continuation.py` is
+DELIBERATELY PRESERVED as the fail-open fallback, never removed, per the
+BACKWARD COMPATIBILITY contract above -- so the raw duplicate-parser count
+is unchanged by design, not by oversight.
+
+**Migrated this task:** `take_grouping_provider.py` (Target A), `recording_
+meta_continuation.py` (Target B) -- 2 of 60.
+
+**Deferred (not touched this task):** the remaining ~58 modules,
+including the ~26 `hybrid_*`/`round*`/`final_*`/`post_selection_*` retry-
+integrity family modules D-165's own audit named as the dominant
+fragmentation mass (`hybrid_alternate_integrity.py`, `hybrid_cross_group_
+retry_integrity.py`, `final_draft_retry_integrity.py`, `round8_retry_
+reconciliation.py`, `round9_orphan_prefix_integrity.py`, `round11_
+semantic_retry_cleanup.py`, and ~20 more of the same shape).
+
+**Highest expected-value next migration (not decided/authorized here):**
+the `hybrid_*`/`round*` retry-integrity family is the largest remaining
+mass by module count, but each member's own content-overlap threshold is
+individually calibrated against a specific RAW-proven regression (D-048/
+D-083/D-097.x); migrating that family would need the SAME per-call, fail-
+open, provably-identical-behavior discipline this task established for
+Target A/B, one module at a time, not a bulk cutover. A smaller, more
+immediately verifiable next step is `final_sibling_grouping.py` (D-048's
+own `_content` helper, the module `take_grouping_provider.py`'s comment
+already names as the origin of its own duplicated bag-of-words logic) --
+narrower in scope than the full retry-integrity family and directly
+adjacent to Target A's already-proven pattern.
+
+==================================================
+TARGETED TESTS
+==================================================
+
+`tests/test_cutsell_d171_language_spine_consumer_migration.py`: 42 new
+tests covering all 30 directive-required fixture categories (proposition/
+retry legacy==spine agreement, same-topic/same-opener distinct-proposition,
+negation/number conflict reported-not-forced, continuation legacy==spine,
+incomplete->continuation, complete-not-forced-into-continuation, no-
+authority-change proofs for D-158/D-161/D-163/D-167/DeliveryScorer/
+BestTake/Boundary/Pacing/Render, missing/partial spine->legacy fallback,
+spine/legacy conflict->safe fallback, deterministic diagnostics, source
+identity/timeline preserved, max-3-cluster confirmation, old serialized
+ids unaffected) plus additional structural/contract tests (boundary-value
+tiny-continuation semantics, empty-words handling, diagnostics shape, no
+id minted, not-imported-by-unrelated-call-sites).
+
+==================================================
+BOUNDED REGRESSIONS
+==================================================
+
+Two small, documented test-assertion updates (see "Preserve CLOSED"
+above) in `tests/test_cutsell_d166_language_spine.py` and `tests/test_
+cutsell_d168_language_utterance_attempt.py` -- both narrowly remove `take_
+grouping_provider` from a "must never mention this module" list, with an
+explanatory comment; no other line in either file changed; both modules'
+own SOURCE code (D-166/D-168) confirmed byte-identical throughout.
+
+==================================================
+TEST REQUIREMENTS -- targeted regression battery
+==================================================
+
+D-171 x42 + D-169 x54 + D-168 x55 + D-166 x48 + D-167 x49 + D-150 + D-158
++ D-161 + D-163 + D-123 + D-128 + D-142 pacing + D-097.C boundary engine
+pass + `semantic_claims`/`semantic_idea_equivalence`x3 +
+`recording_meta_continuation`x9 + CleanCutBench (both suites) = 678 +
+CleanCutBench + `recording_meta_continuation` pass counts folded in above
+-- all green, zero failures. `compileall` clean.
+
+==================================================
+FULL OFFLINE SUITE
+==================================================
+
+3941 passed, 13 subtests passed, same 5 pre-existing unrelated failures
+(`test_hybrid_story_guard_incomplete_retry.py`::1 + `test_video00_modal_
+hybrid_semantic_parity.py`::4, Modal env-secret masking/hybrid story
+guard, confirmed identical on baseline HEAD `5095d33` before this task's
+changes) -- zero new failures, delta from D-169's own reported 3899
+baseline is +42 = exactly the new D-171 test count (`test_semantic_
+stitch.py`'s pre-existing collection error, confirmed identical on
+baseline HEAD, excluded from this count exactly as it would be from any
+run on that same baseline).
+
+==================================================
+PHASE-D VERDICT
+==================================================
+
+**A. INCREMENTAL LANGUAGE-SPINE CONSUMER MIGRATION OFFLINE PROVEN.**
+
+==================================================
+RECOMMENDED NEXT GATE
+==================================================
+
+Per this task's own instruction, do NOT migrate another cluster
+automatically. Between the two options this task's directive names:
+(1) one more bounded Language Spine migration cluster (e.g. `final_
+sibling_grouping.py`, per the Migration Forensic above), or (2) connect
+Zone Usability V2 (D-167/D-170) into the D-163 diagnostic guard and run a
+real-media qualification before authority -- **recommend (2) first**: 
+D-170's own real-media run already found one concrete, real ordinal
+BestTake-comparison miss (family `tg_7a3cfeb476440563c0`) that D-163's
+guard could only mark `UNCERTAIN`, a more immediately measurable Cut.ai-
+parity lever than a third narrow tokenizer-consolidation migration whose
+Video00 impact is, by this task's own design, provably zero until a
+future authority-granting task changes that. Not decided here -- a
+Product Owner choice.
+
+==================================================
+CONFIRMATIONS
+==================================================
+
+NO mass migration (2 of 60 duplicated transcript consumers touched). NO
+Family-authority rewrite (`take_grouping.py` byte-identical; `git diff
+--stat` shows only the two named consumer files + one new additive
+module). NO BestTake authority (`deterministic_best_take_authority.py`/
+`take_judge.py` byte-identical; `language_spine_consumer_migration.py`
+mints no id, decides no winner). NO RAW (no Video00/Modal/RunPod dispatch
+this task). NO provider/network call anywhere in `language_spine_
+consumer_migration.py` (grep-verified: no `openai`/`gemini`/`requests.`/
+`httpx.`/`urllib.request`/`socket.`). NO Zone-Usability-V2 authority change
+(`watch_listen_zone_usability_v2.py` byte-identical; D-167/D-170 remain
+diagnostic/unwired).
+
+**HUMAN ACTION REQUIRED:** YES (condition A) -- the recommended next gate
+(Zone Usability V2 -> D-163 diagnostic guard integration + real-media
+qualification, vs. one more bounded Language Spine migration cluster) is
+a Product Owner decision.
