@@ -217,6 +217,38 @@ def _meaning_sufficient_member_ids(
     return {cid for cid in ids if cid not in insufficient}
 
 
+# D-180 (docs/CUTSELL_DECISIONS.md D-180; post D-179 forensic): condition
+# 4 of `_case_b_fast_path_conflict` originally compared RAW `delivery_
+# event_count` alone -- D-179 proved a raw count is EVIDENCE, not
+# MATERIALITY, and that a provider-backed perception count (`whole_video_
+# openai.OpenAIWholeVideoProvider`) with no proven run-to-run stability
+# can, via that raw comparison alone, flip a commercially material
+# BestTake winner (8-vs-3 events, real Video00 gynecologist family,
+# D-178B). This introduces NO new threshold family: it reuses `CaseBEvent.
+# d097_would_be_counted` -- ALREADY computed by `case_b_performance_
+# evidence.build_case_b_performance_evidence` for every delivery event,
+# from D-097's OWN existing, already-tested interior-window geometry
+# (`_CLEANLINESS_EDGE_MARGIN_SEC`) and confidence floors (0.88 RESET_
+# KINDS / 0.76 BREAK_KINDS) -- as the materiality qualifier. D-167's V2
+# severity vocabulary was considered and NOT used here: it is only
+# computed when `CUTSELL_WATCH_LISTEN_ZONE_USABILITY_V2_BESTTAKE_ENABLED`
+# is set, whereas this gate runs unconditionally on every family -- using
+# it would make condition 4's behavior depend on an unrelated feature
+# flag, a dependency problem this task's own directive asks to avoid.
+# `d097_would_be_counted` has no "missing/unknown" state of its own: it is
+# a pure, synchronous function of data already required to reach this
+# point (the same `CaseBEvent` objects `winner_count`/`alt_count` are
+# already computed from) -- so this refinement introduces no new failure
+# mode requiring a "preserve legacy behavior" fallback.
+def _material_delivery_event_count(evidence: object) -> int:
+    """Count of `evidence.delivery_events` D-097's OWN existing geometry/
+    confidence-floor doctrine would itself count as a real performance
+    defect (`d097_would_be_counted`) -- never a new confidence/duration/
+    density cutoff of this function's own invention."""
+    events = getattr(evidence, "delivery_events", ()) or ()
+    return sum(1 for event in events if getattr(event, "d097_would_be_counted", False))
+
+
 def _case_b_fast_path_conflict(
     preferred_id: str,
     local_selected_clip_id: str,
@@ -224,12 +256,23 @@ def _case_b_fast_path_conflict(
     case_b_evidence_by_id: Mapping[str, object] | None,
 ) -> dict | None:
     """Return a factual conflict-basis dict iff ALL of the CORE RULE
-    conditions hold, else None (the fast path is preserved). This is a
-    single read-only comparison of D-122's already-computed `delivery_
-    event_count` (never a new score) -- ties, absent evidence, or evidence
-    that favors the semantic winner all return None, per this task's
-    explicit "no guessed cutoff" / "if tied or ambiguous, preserve fast
-    path" rule."""
+    conditions hold, else None (the fast path is preserved). Condition 4
+    (D-180, post D-179 forensic) is now COUNT DIFFERENCE + MATERIAL
+    PERFORMANCE DIFFERENCE, not count difference alone: the raw `delivery_
+    event_count` asymmetry is preserved as the entry precondition (D-123's
+    original "is there a factual asymmetry at all" question), and a
+    SEPARATE, already-existing D-097 materiality classification
+    (`d097_would_be_counted`, see `_material_delivery_event_count` above)
+    must ALSO favor the alternative before the fast path may be bypassed
+    -- a raw count asymmetry driven only by events D-097's own doctrine
+    would not itself count (low confidence, or geometrically outside its
+    own interior window -- including an ambiguous straddle wider than the
+    whole measured span, D-177's own CASE-C shape, which fails D-097's
+    interior check and so never contributes here either) no longer
+    bypasses on its own. Absent evidence, a tie, or evidence that favors
+    the semantic winner all still return None, per this task's original
+    "no guessed cutoff" / "if tied or ambiguous, preserve fast path"
+    rule -- unchanged from pre-D-180 behavior for every OTHER condition."""
     if not case_b_evidence_by_id:
         return None
     if local_selected_clip_id == preferred_id:
@@ -247,11 +290,17 @@ def _case_b_fast_path_conflict(
     winner_count = winner_evidence.delivery_event_count
     alt_count = alt_evidence.delivery_event_count
     if not (winner_count > alt_count):
-        # Condition 4 fails: no clear factual asymmetry favoring the
+        # Condition 4a fails: no clear RAW factual asymmetry favoring the
         # alternative -- tied, absent, or contradicting evidence never
         # bypasses (ENTRY/EXIT-only differences are naturally 0 vs 0 here,
         # since case_b_evidence_by_id only ever contains DELIVERY-zone
         # events -- D-116's territory is never eligible).
+        return None
+    # D-180 Condition 4b: the raw asymmetry above must ALSO be corroborated
+    # by D-097's own existing materiality doctrine, never a bare count.
+    winner_material = _material_delivery_event_count(winner_evidence)
+    alt_material = _material_delivery_event_count(alt_evidence)
+    if not (winner_material > alt_material):
         return None
     return {
         "semantic_fast_path_candidate": preferred_id,
@@ -262,7 +311,65 @@ def _case_b_fast_path_conflict(
         "deliveryscore_top_candidate_count_by_kind": dict(alt_evidence.count_by_kind),
         "semantic_fast_path_candidate_duration_by_kind": dict(winner_evidence.duration_by_kind),
         "deliveryscore_top_candidate_duration_by_kind": dict(alt_evidence.duration_by_kind),
+        # D-180: the materiality corroboration this exact conflict fired on.
+        "semantic_fast_path_candidate_material_event_count": winner_material,
+        "deliveryscore_top_candidate_material_event_count": alt_material,
     }
+
+
+# D-180: pure, additive, observability-only companion to `_case_b_fast_
+# path_conflict` -- recomputes the SAME condition-4 evaluation for
+# diagnostics regardless of outcome (mirrors this module's own existing
+# "before"/"after" counterfactual precedent for D-123 itself). Never
+# called from inside `_semantic_best_take`'s own decision ladder; never
+# influences `selected_clip_id`/`ranked`/membership/Boundary/Pacing.
+def _case_b_condition4_diagnostics(
+    preferred_id: str | None,
+    local_selected_clip_id: str,
+    meaning_sufficient_ids: set[str],
+    case_b_evidence_by_id: Mapping[str, object] | None,
+) -> dict:
+    diag = {
+        "case_b_count_difference_present": None,
+        "case_b_materiality_evidence_available": False,
+        "case_b_materiality_state": "NOT_EVALUATED",
+        "case_b_materiality_source": "d097_would_be_counted",
+        "case_b_condition4_actionable": False,
+        "case_b_condition4_reason": "not_evaluated",
+    }
+    if preferred_id is None or not case_b_evidence_by_id:
+        diag["case_b_condition4_reason"] = "no_semantic_fast_path_candidate_or_no_evidence"
+        return diag
+    if local_selected_clip_id == preferred_id:
+        diag["case_b_condition4_reason"] = "deliveryscore_already_agrees_with_semantic_winner"
+        return diag
+    if local_selected_clip_id not in meaning_sufficient_ids:
+        diag["case_b_condition4_reason"] = "alternative_meaning_insufficient"
+        return diag
+    winner_evidence = case_b_evidence_by_id.get(preferred_id)
+    alt_evidence = case_b_evidence_by_id.get(local_selected_clip_id)
+    if winner_evidence is None or alt_evidence is None:
+        diag["case_b_condition4_reason"] = "evidence_missing_for_one_or_both_candidates"
+        return diag
+    diag["case_b_materiality_evidence_available"] = True
+    winner_count = winner_evidence.delivery_event_count
+    alt_count = alt_evidence.delivery_event_count
+    count_difference_present = bool(winner_count > alt_count)
+    diag["case_b_count_difference_present"] = count_difference_present
+    if not count_difference_present:
+        diag["case_b_materiality_state"] = "NO_COUNT_DIFFERENCE"
+        diag["case_b_condition4_reason"] = "no_raw_count_asymmetry"
+        return diag
+    winner_material = _material_delivery_event_count(winner_evidence)
+    alt_material = _material_delivery_event_count(alt_evidence)
+    if winner_material > alt_material:
+        diag["case_b_materiality_state"] = "MATERIAL"
+        diag["case_b_condition4_actionable"] = True
+        diag["case_b_condition4_reason"] = "material_count_difference_confirmed"
+    else:
+        diag["case_b_materiality_state"] = "NOT_MATERIAL"
+        diag["case_b_condition4_reason"] = "raw_count_difference_not_materially_corroborated"
+    return diag
 
 
 def _draft_clip(take: CandidateTake, *, role: SemanticRole, group_id: str | None, selected: bool) -> DraftClip:
@@ -1235,6 +1342,17 @@ def build_flow_b_draft(
                     meaning_sufficient_ids, case_b_evidence_objects,
                 )
             case_b_conflict_present = case_b_conflict_basis is not None
+            # D-180 (docs/CUTSELL_DECISIONS.md D-180): pure, additive
+            # observability companion -- recomputes the SAME condition-4
+            # evaluation regardless of outcome so diagnostics can show WHY
+            # a bypass did or did not fire, mirroring D-123's own before/
+            # after precedent above. Never consulted by `_semantic_best_
+            # take`'s own ladder; never changes `case_b_conflict_basis`/
+            # `case_b_conflict_present`/`selected_clip_id`/membership.
+            case_b_condition4_diagnostics = _case_b_condition4_diagnostics(
+                case_b_semantic_fast_path_candidate, local_selected_clip_id,
+                meaning_sufficient_ids, case_b_evidence_objects,
+            )
             semantic_fast_path_bypassed = bool(
                 before_semantic_best_take_reason == "single_semantic_winner"
                 and semantic_best_take_reason != "single_semantic_winner"
@@ -1428,6 +1546,13 @@ def build_flow_b_draft(
                 "bypass_reason": bypass_reason,
                 "case_b_conflict_present": case_b_conflict_present,
                 "case_b_conflict_basis": case_b_conflict_basis,
+                # D-180: condition-4 materiality-stabilization observability
+                # (case_b_count_difference_present, case_b_materiality_
+                # evidence_available, case_b_materiality_state, case_b_
+                # materiality_source, case_b_condition4_actionable, case_b_
+                # condition4_reason) -- no transcript dump, no QA reference
+                # info, advisory only.
+                **case_b_condition4_diagnostics,
                 "meaning_sufficient_candidates": sorted(meaning_sufficient_ids),
                 "final_winner": selected_clip_id,
                 # D-128 (docs/CUTSELL_DECISIONS.md D-128): Phase 1

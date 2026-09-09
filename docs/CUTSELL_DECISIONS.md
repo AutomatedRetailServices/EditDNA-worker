@@ -31236,3 +31236,192 @@ implementation gate named above (materiality floor on `_case_b_fast_
 path_conflict`) is a Product Owner decision, as is the separate, larger
 terminal-tie-break-confidence-state question and the timing/sequencing
 relative to P1.
+
+==================================================
+D-180: CASE-B FAST-PATH MATERIALITY STABILIZATION
+==================================================
+
+Implements the bounded fix D-179 recommended: refines ONLY condition 4 of
+`_case_b_fast_path_conflict` (`cutsell_worker/pipeline.py`), D-123's own
+gate on `_semantic_best_take`'s `single_semantic_winner` early exit.
+Module: `cutsell_worker/pipeline.py` only. No RAW, no provider/network
+call, no rewrite of `_semantic_best_take`'s Steps 6-9, the terminal
+tie-break, Family Formation, D-150, Boundary, Pacing, or the Renderer.
+
+CORE PRINCIPLE (verbatim intent): RAW EVENT COUNT IS EVIDENCE. RAW EVENT
+COUNT IS NOT MATERIALITY.
+
+OLD CONDITION 4 (pre-D-180): `winner_evidence.delivery_event_count >
+alt_evidence.delivery_event_count` -- a bare, unweighted integer
+comparison of D-122's own `case_b_evidence` counts. D-179 proved this
+raw count is itself provider-perceived (whole_video_openai's gpt-4o-mini
+vision call), with no proven run-to-run determinism, and carries no
+materiality weighting -- a run in which the "winner" candidate happens to
+attract more (even entirely marginal) perceived events than the
+DeliveryScore-preferred alternative was enough to bypass an otherwise
+decisive, correct semantic winner (D-178B's gynecologist shape: winner
+count 8, alternative count 3).
+
+NEW CONDITION 4 (post-D-180): two sub-conditions, both required --
+- 4a (unchanged): the same raw count asymmetry check as before
+  (`winner_count > alt_count`), preserved verbatim as the entry
+  precondition;
+- 4b (new): the SAME asymmetry must ALSO be corroborated by a materially-
+  counted-event-count asymmetry -- `_material_delivery_event_count(evidence)`
+  counts only `evidence.delivery_events` entries where
+  `d097_would_be_counted` is true, and 4b requires
+  `_material_delivery_event_count(winner) > _material_delivery_event_count(alt)`.
+
+MATERIALITY SOURCE CHOSEN AND WHY (no new threshold family): reuses
+`case_b_performance_evidence.py`'s ALREADY-COMPUTED `CaseBEvent.d097_
+would_be_counted` field (D-122's own pre-existing re-projection of D-097's
+own `take_judge.py` interior-window geometry, `_CLEANLINESS_EDGE_MARGIN_
+SEC` = 0.35s, and confidence floors -- 0.88 for `_RESET_KINDS`, 0.76 for
+`_BREAK_KINDS`). Zero new confidence cutoff, zero new duration/density
+cutoff, zero new magic weighted score, zero new benchmark-tuned number of
+this task's own invention -- `_material_delivery_event_count` is a pure
+count of an existing boolean fact.
+
+D-167's V2 Zone-Usability severity vocabulary (NONE/MILD/MATERIAL/SEVERE)
+was explicitly considered and NOT used: it is computed only when
+`CUTSELL_WATCH_LISTEN_ZONE_USABILITY_V2_BESTTAKE_ENABLED` is set, while
+`_case_b_fast_path_conflict` runs unconditionally on every family --
+reusing a flag-gated vocabulary here would make condition 4's own
+behavior silently depend on an unrelated feature flag (the exact
+dependency risk the task named). No double-counting risk exists as a
+result: raw event count and V2 severity are never combined as
+independent votes anywhere in this change (proven by test
+`test_31_no_zone_usability_v2_double_counting`).
+
+DELIVERY-OWNERSHIP PRESERVED: `case_b_performance_evidence.py`'s own
+existing `if event.zone != ZONE_DELIVERY: continue` filter (unmodified)
+already structurally excludes ENTRY/EXIT events from ever appearing in
+`case_b_evidence_by_id` at all -- D-180 added zero code to preserve this;
+it was already true. Ambiguous CASE-C both-edge-straddle-shaped events
+fail open under 4b by construction: `_interior_events`' own geometry
+excludes anything inside the 0.35s edge margin, so such an event is never
+`d097_geometrically_inside` and never counts toward materiality.
+
+MISSING-EVIDENCE COMPATIBILITY: unchanged from pre-D-180 -- the existing
+`winner_evidence is None or alt_evidence is None: return None` check
+still runs BEFORE 4a/4b are ever evaluated. Missing materiality evidence
+is never reinterpreted as MATERIAL (it is never reached in that branch at
+all); D-180 introduces no new "UNKNOWN" state that could be construed as
+stronger than pre-D-180 evidence.
+
+DIAGNOSTICS ADDED (pure, additive, observability-only; never consulted by
+`_semantic_best_take`'s own ladder): a new companion function
+`_case_b_condition4_diagnostics(...)` recomputes the SAME condition-4
+evaluation regardless of outcome (mirroring the module's own existing
+`before_semantic_best_take_reason` counterfactual precedent) and is wired
+into `judge_group_diagnostics.append({...})` in `pipeline.py` (spread
+alongside the pre-existing `case_b_conflict_present`/`case_b_conflict_
+basis` fields), producing exactly the six requested keys:
+`case_b_count_difference_present`, `case_b_materiality_evidence_
+available`, `case_b_materiality_state` (`NOT_EVALUATED` /
+`NO_COUNT_DIFFERENCE` / `NOT_MATERIAL` / `MATERIAL`), `case_b_
+materiality_source` (always `"d097_would_be_counted"`), `case_b_
+condition4_actionable`, `case_b_condition4_reason`. No transcript dump,
+no QA-reference info. No new feature flag was added for this narrow
+correctness refinement, per the task's own preference.
+
+D-150 FIREWALL CONFIRMED: a genuine `ABSTAIN_CONFLICT` (D-147's own
+`COMPLETE_CONTEXT_CONFLICT`) skips `_semantic_best_take`'s
+`single_semantic_winner` fast path entirely BEFORE condition 4 is ever
+reached -- D-180's materiality refinement cannot manufacture a semantic
+winner for a family D-150 correctly abstains on (pimples' own shape).
+Proven directly with strongly material evidence deliberately favoring one
+side (test 16): the general ladder still decides, never CASE-B evidence
+directly.
+
+D-179 ABSTRACT GYNECOLOGIST REPLAY (generic, non-Video00 fixture, test
+14): Candidate B is the decisive semantic winner (confidence 0.95) with 3
+MORE raw DELIVERY events than the DeliveryScore-preferred alternative A
+-- the exact pre-D-180 bypass shape -- but all 3 extra events are
+low-confidence/marginal (never meeting D-097's own reset/break floor).
+PRE-D-180 counterfactual (raw-count-only condition 4): would bypass.
+POST-D-180 (actual): NO bypass -- `_semantic_best_take` returns
+`single_semantic_winner` for B, unchanged from its own uncontested
+decision. Real-material control (test 15, same shape, genuinely material
+DELIVERY impairment instead): bypass REMAINS actionable, falling through
+to the SAME pre-existing `delivery_tie_break_among_survivors` ladder step
+-- the mechanism is not neutered, only made evidence-honest.
+
+FAMILY-TOPOLOGY VARIANCE AND TERMINAL-TIE-BREAK CONFIDENCE: both
+explicitly DEFERRED per D-179/D-180's own scope, not touched here. The
+terminal `delivery_tie_break_among_survivors` step (`max(tie_break_pool,
+key=lambda cid: rank_by_id[cid])`) is unmodified and remains a raw
+`take_judge.score_take` rank comparison with no reference-correlated
+confidence state.
+
+OFFLINE TEST MATRIX: `tests/test_cutsell_d180_case_b_materiality_
+stabilization.py`, 34/34 passing -- equal count (no conflict); small
+gap + zero/near-floor confidence (NONE/MILD-shaped, no conflict); large
+raw gap still not material (the key D-179-motivated case, no conflict);
+material and severe gaps (actionable); ENTRY-only and EXIT-only
+(structural zero, no conflict); CASE-C ambiguous straddle at the edge
+margin (fails open); missing evidence (fails open, unchanged); tied
+materiality (no conflict, never a coin-flip); ordinary non-reset/
+non-break motion (not material); breaking-character DELIVERY defect
+(material, actionable); the D-179 abstract gynecologist replay; the
+real-material control; the D-150 pimples firewall; determinism/candidate-
+order/clip-id/family-id independence; the full `_case_b_condition4_
+diagnostics` reason ladder (8 branches); no-new-threshold-field, no-
+provider/network, no-V2-double-counting, no-new-feature-flag guards;
+pipeline-level wiring of the six new diagnostics keys through `build_
+flow_b_draft`; and a same-file re-check of D-123's conditions 1-3.
+
+REGRESSION: `tests/test_cutsell_d123_case_b_fast_path_gate.py` (23/23,
+UNMODIFIED -- every existing fixture's events are either comfortably
+interior/high-confidence, already tied on raw count, or already tied on
+materiality, so D-180's added 4b sub-check changes zero existing
+verdicts) plus D-128/D-150/D-158/D-161/D-163/D-167/D-172/D-174/D-177/
+D-171/D-169/D-168/D-166/D-142/D-116/D-097-C targeted suites (752/753,
+the one non-D-180 failure being `test_cutsell_d169_language_proposition_
+relation.py::test_30_old_serialized_ids_unaffected`, a `git diff --stat
+HEAD -- cutsell_worker/pipeline.py` guard that fails against ANY
+uncommitted change to that file by construction -- confirmed via `git
+stash` to pass on a clean tree and to resolve once this task's own
+commit lands, exactly the same pre-existing pattern D-177 encountered),
+full `tests/test_cutsell_*.py` (4093/4099 passing after this task's
+commit removes the same guard failure), full offline `tests/` suite
+(4093/4099, the same 1 guard failure plus 5 baseline pre-existing
+failures -- `test_hybrid_story_guard_incomplete_retry.py::test_
+incomplete_failed_retry_is_covered_when_prior_delivery_preserves_
+numbers_and_negation` and 4 `test_video00_modal_hybrid_semantic_parity.py`
+failures -- all confirmed via `git stash` to fail identically on the
+clean pre-D-180 HEAD `6b0a8b2ac4ded8f5cd471b65101d17a02b219cd4`, unrelated
+to this task), `python3 -m compileall cutsell_worker tests` clean.
+
+VERDICT: **A. CASE-B MATERIALITY STABILIZATION OFFLINE PROVEN.**
+
+NEXT REAL-MEDIA GATE (not launched automatically): exactly ONE Video00
+RAW, testing whether marginal provider-perception variance no longer
+flips the gynecologist family's winner (the target shape D-178B observed
+was BestTake-attributed, not this task's own condition-4 shape -- this
+RAW would need to re-observe a `case_b_conflict_present` decision on that
+family under this fix to be conclusive) and confirming pimples' D-150
+`ABSTAIN_CONFLICT` behavior is byte-identical to pre-D-180 (expected,
+since the fast path never reaches condition 4 for that family). Not
+authorized here.
+
+P1 STATUS: remains the next named architectural priority (D-178A's
+P0-P11 sequence) but stays paused pending Product Owner review of this
+closure; not pre-authorized to begin here, and no separate terminal-
+tie-break-confidence-state gate is opened here either.
+
+STRICT SCOPE CONFIRMATIONS: no RAW dispatched. No provider/network call
+in any new or modified code (confirmed by test). No rewrite of
+`_semantic_best_take`'s Steps 6-9, the terminal tie-break, Family
+Formation, Proposition Identity, Attempt Relationships, D-150's semantic
+authority, DeliveryScorer's terminal comparison, BestTake authority
+(beyond condition 4's own narrow refinement), Boundary, Pacing, or the
+Renderer. No P1 implementation. No threshold tuning for Video00. No new
+feature flag. D-167 V2 vocabulary not consumed (avoiding the double-
+counting risk named in scope). D-177/D-178A/D-178A.1/D-178B/D-179 are not
+rewritten (append-only).
+
+**HUMAN ACTION REQUIRED:** YES (condition C: paid compute outside
+authorization for the next real-media gate; condition A: whether to
+authorize that one Video00 RAW now, and whether/when to resume P1,
+remain Product Owner decisions).
