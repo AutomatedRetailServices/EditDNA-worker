@@ -1554,3 +1554,483 @@ Section 10, Section 11, Section 12, or any accepted D-096/D-097.x/D-107/
 D-108/D-109/D-110/D-111/D-128/D-129/D-141 through D-147 authority
 contract. See `docs/CUTSELL_DECISIONS.md` D-148 for the decision-log
 entry recording this section's doctrine.
+
+---
+
+## 14. Language / Transcript Spine — Canonical Design (D-165)
+
+**Status: additive doctrine, docs/design/forensic only. No engine
+behavior change, no RAW, no provider call, no BestTake/Family/Pacing
+change.** No layer is renumbered, no Section 3 status changes, no
+`cutsell_worker/*.py` file was touched to write this section.
+
+**Numbering note (source-of-truth reconciliation, binding):** the task
+that produced this section referred to itself as "D-164"; by the time it
+began, `docs/CUTSELL_DECISIONS.md` already carried a D-164 entry (Watch+
+Listen BestTake Evidence real-media qualification, committed `07ff11e`,
+strictly earlier in the same engineering session). Per this document's
+own precedence rule (live Git/live docs state over a task's stated
+expectation), this section and its decision-log entry are recorded as
+**D-165**, not D-164. D-164's own entry is untouched.
+
+### 14.1 Core principle
+
+**THE TRANSCRIPT IS THE LINGUISTIC SPINE. WATCH+LISTEN IS THE MULTIMODAL
+CORROBORATION/UNDERSTANDING LAYER. Neither replaces the other.** This
+section canonizes the LANGUAGE side of the architecture Section 13
+already named for the PERCEPTUAL side, using the exact same authority
+principle (13.3.2): **PERCEPTION PROPOSES EVIDENCE. STRUCTURED EDITORIAL
+AUTHORITIES DECIDE.** The Language Spine is Track A (13.2) organized into
+an explicit typed hierarchy instead of the ASR transcript being read
+ad hoc by dozens of independent consumers (14.9).
+
+Updated conceptual pipeline (restates, does not renumber, Section 13.1):
+
+```
+RAW
+  v
+PARALLEL MULTIMODAL PERCEPTION (Section 13.2, four tracks)
+  v
+LANGUAGE / TRANSCRIPT SPINE  +  PERCEPTUAL SPINE      <- this section
+  v                              (Section 13.3)          names the left
+WATCH+LISTEN MULTIMODAL UNDERSTANDING / FUSION            branch
+  v
+STRUCTURED EDITORIAL REASONING
+  (Proposition -> Attempt Relationships -> Family Formation
+   -> BestTake -> Boundary -> Pacing -> Renderer, unchanged)
+```
+
+### 14.2 Canonical language hierarchy
+
+```
+WORD -> PHRASE -> SENTENCE/UTTERANCE -> ATTEMPT -> PROPOSITION
+     -> RELATION -> FAMILY -> SELECTED REALIZATION
+```
+
+Every level below is a **target conceptual contract**, in the same sense
+Section 13.3.1's "Structured RAW Understanding Map" is conceptual — no
+schema is implemented by naming it. Each level's real, already-existing
+code counterpart is named explicitly (14.10's inventory) so this is never
+mistaken for "nothing exists yet."
+
+- **`LanguageWord`** — text, start, end, ASR confidence, speaker (if
+  available), punctuation association, `source_asset_id`. Real
+  counterpart today: `contracts.Word` (text/start/end/confidence — no
+  speaker/punctuation field yet) plus `canonical_asr_evidence.py`'s
+  per-word normalization/fingerprinting. Word timestamps remain the base
+  language time index, reusing the exact same source-relative timeline
+  D-155/D-156 already proved (no duplicate clock — 14.15).
+- **`LanguagePhrase`** — a bounded sub-utterance span (pause/punctuation/
+  syntax/timing bounded), tagged `partial_thought` / `restart` /
+  `filler_segment` / `clause_boundary` / `continuation_boundary`. **No
+  dedicated type exists today** — `take_segmentation.py`'s
+  `_speech_units` (gap-based splitting, `split_gap_sec=0.75`) is the one
+  real, narrower instance of phrase-like segmentation, and it is
+  immediately consumed and discarded inside `segment_takes` rather than
+  surfaced as its own reusable object. This is the single largest
+  concrete gap in the hierarchy (14.11).
+- **`LanguageUtterance`** — a meaningful spoken unit, distinguishing
+  grammatical sentence completion from *editorial* utterance completion
+  (ends on restart/abandonment/new-beat/meaning-completion even with
+  imperfect punctuation). Real counterpart: `take_segmentation._ends_
+  sentence`/`_looks_complete_idea`/`_grammatically_open_tail`/`_trails_
+  off`, whose combined verdict becomes `CandidateTake.complete_idea`
+  (`contracts.py`). This IS a genuine editorial-utterance judgment
+  already, just expressed as one boolean on the take object rather than
+  a distinct typed layer.
+- **`LanguageAttempt`** — one attempt to communicate an editorial idea or
+  part of one; states `PRE_TAKE_SETUP`/`FALSE_START`/`ABANDONED_ATTEMPT`/
+  `CLEAN_ATTEMPT`/`CORRECTION`/`CONTINUATION`/`POST_TAKE_RESET`/
+  `RECORDING_PROCESS` (Section 13.4's Behavior State vocabulary, restated
+  here for the language side). Real counterpart: `attempt_
+  reconstruction.py`'s `reconstruct_delivery_attempts`/`_merge_attempt`
+  (mints `attempt_id`, the CANONICAL semantic identity per
+  `canonical_identity.py`'s ID ownership table — content/membership-
+  anchored, never timestamp-anchored) plus `raw_understanding_map.py`'s
+  `BehaviorHypothesis` (D-155, 8 allowed labels, provenance-tagged). The
+  Language Spine supplies the textual/timing evidence into this
+  judgment; Watch+Listen (Section 13.3) supplies the behavioral/
+  performance evidence — exactly the fusion split this task's directive
+  named, already real today at the evidence level, not yet unified under
+  one typed attempt object (Section 2 Layer 3's still-target "Canonical
+  Multimodal Attempt Evidence").
+- **`PropositionCandidate`** — the claim/informational unit/editorial job
+  an attempt represents, per D-111's binding invariant restated in
+  Section 13.5: **PROPOSITION IDENTITY PRECEDES RETRY IDENTITY**; same
+  topic/product/opener/sentence-structure is NEVER sufficient alone.
+  Real counterpart: `semantic_idea_equivalence.py`'s bounded arbiter +
+  `editorial_slot_resolution_install.py`'s `_SEMANTIC_EQUIVALENCE_
+  POLICY`/`_SLOT_RULES` (the actual "same intended idea is an editorial-
+  function question, not a union-of-facts test" rule the provider prompt
+  already encodes) + `semantic_claims.py`'s clause-level `Claim` objects
+  (a finer-grained factual unit than a proposition, reused for coverage
+  protection, not proposition identity itself). **Known, already-
+  documented gap:** `canonical_identity.py` mints `semantic_idea_id` and
+  `retry_family_id` from the SAME group key today — PROPOSITION identity
+  and FAMILY identity are conflated in the real architecture (D-050
+  Phase 3's own finding, explicitly deferred to D-050B/C, still deferred
+  here).
+- **`RelationEvidence`** — canonical relations `RETRY`/`CORRECTION`/
+  `CONTINUATION`/`COMPLEMENTARY`/`NEW_AUDIENCE_BEAT`/
+  `DISTINCT_PROPOSITION`/`UNCERTAIN` (D-145's 5-way outcome plus D-158's
+  `UNCERTAIN`, Section 13.6, unchanged). Real counterpart: this is the
+  **most mature, most fully implemented layer already** —
+  `attempt_relationship_authority.py`'s `resolve_final_attempt_relation`
+  (the full agree/conflict/fail-open truth table between the pre-existing
+  semantic/deterministic decision and real Watch+Listen relation
+  evidence) plus `watch_listen_relation_discovery.py`'s own discovery
+  half, both RAW-proven (D-158/D-161/D-162). `UNCERTAIN` is already a
+  first-class, never-forced outcome exactly as this task requires.
+- **`FAMILY`** — a set of legitimate competing realizations of the same
+  proposition/editorial job. Language Spine helps FORM the candidate set;
+  Watch+Listen and structured authority VALIDATE it; transcript alone is
+  never the sole family authority (Section 13.7, restated, unchanged).
+  Real counterpart: `take_grouping.py`/`take_grouping_provider.py`/
+  `hybrid_session_cleanup.py` (unchanged, D-158/D-161's own evidence-
+  widening doctrine already governs this — Section 13.7 is not modified
+  by this section).
+- **`SELECTED REALIZATION`** — BestTake's eventual winner among competing
+  realizations. Language Spine contributes meaning completeness,
+  coverage, duplication, semantic equivalence, factual consistency, slot
+  relevance; Perceptual Spine contributes delivery usability, fumble,
+  breaking character, entry/delivery/exit quality, performance
+  continuity (exactly D-163's own scope, Section 14.16 — unchanged,
+  unmodified by this section).
+
+### 14.3 Transcript normalization contract
+
+Audit result: real, already-implemented canonical normalization exists
+in `canonical_asr_evidence.py` (`_normalize_word_text`, `canonicalize_
+transcript_words`, `compute_canonical_equivalence_hash`, `normalize_
+transcript_segments`) and `take_segmentation.py`'s completion heuristics
+— case/punctuation/whitespace normalization is real and deterministic.
+**Never normalized away today, correctly:** negation, numbers, diagnosis/
+factual terms (protected by `semantic_claims.py`'s clause-level claim
+extraction and `polarity_safety.py`'s explicit polarity/negation guard —
+these operate on the RAW clause text, downstream of normalization, never
+letting canonicalization erase a meaning-changing word). Filler tokens,
+hesitation markers, and partial words are NOT currently canonicalized
+into one shared normalized-word vocabulary — each of the ~58 downstream
+consumers named in 14.9 does its own ad hoc `.lower()`/tokenization,
+which is exactly the fragmentation this task's directive anticipated.
+Named entities have no dedicated canonical treatment today (out of
+current scope; not required for Milestone 1 per 14.13).
+
+### 14.4 Dead-air / silence integration
+
+Confirmed: pause/attempt-boundary reasoning already uses REAL measured
+audio-silence evidence, not transcript-gap inference alone — `attempt_
+reconstruction.py`'s `_measured_pause_at_transition` (D-097.5/.6's own
+measured dead-air pause boundary fix, RAW-proven) and `audio_silence.py`/
+`silence_analysis.py`/`audio_boundary_completion.py` (Section 13.2 Track
+B). Not every pause is treated as a new attempt — `_tiny_nonterminal_
+continuation` and `_short_incomplete_suffix` (`attempt_reconstruction.py`)
+already exist specifically to prevent that overreach. This capability
+already satisfies the directive's own requirement; nothing new is
+proposed here.
+
+### 14.5 Filler / fumble contract
+
+**Lexical filler** (um/uh/like) has no single canonical detector today —
+it is handled inconsistently, if at all, inside individual consumers'
+own text heuristics (14.9). **Editorial fumble** (restart/self-
+correction/abandoned sentence/wrong word/repeated phrase) IS well
+covered, but by BEHAVIOR-level modules, not a language-level fumble
+type: `lexical_self_correction.py`, `internal_self_correction.py`,
+`frustrated_restart.py`, `micro_restart_cleanup.py`,
+`trailing_retry_restart.py` each independently detect a slice of this
+space via their own text pattern matching — a duplicate-consumer
+instance of the exact fumble/filler distinction this task asks for,
+never unified under one shared typed evidence layer.
+
+### 14.6 Retry / continuation / correction / complementary language evidence
+
+All four relations are ALREADY implemented with real evidence beyond
+"same opener/topic/keyword alone" (which is explicitly and correctly
+rejected — Section 13.5/13.6, `_SEMANTIC_EQUIVALENCE_POLICY`):
+
+- **Retry** — `same_opening_abandoned_start`/`incomplete_attempt_
+  completed_by_retry` deterministic restart evidence
+  (`take_grouping_provider.py`/`semantic_idea_equivalence.py`, proven
+  live this session's own D-164 RAW: `docs/CUTSELL_DECISIONS.md` D-164
+  Section "GLOBAL D-163 SUMMARY" merges list) plus D-100's `wrong_take`/
+  `retry_setup` corroboration.
+- **Continuation** — `_tiny_nonterminal_continuation` (language/timing
+  evidence) + `recording_meta_continuation.py` (behavior evidence);
+  incomplete-A + completing-B is already represented WITHOUT forcing
+  retry competition, per this task's own requirement.
+- **Correction** — `RELATION_CORRECTION` (D-145's 5-way outcome) +
+  `semantic_claims.py`'s `negation_role` field (`FACTUAL_NEGATION` vs
+  `CONTRASTIVE_HINDSIGHT_NEGATION`, D-066) — before/after meaning is
+  preserved via the claim's own `text`/`content_tokens`, never flattened
+  into duplicate takes.
+- **Complementary** — `RELATION_COMPLEMENTARY` (D-145) +
+  `hybrid_complementary_delivery_guard.py`/`hybrid_semantic_
+  complementary_rescue.py`/`post_selection_complementary_family_
+  stabilizer.py` — distinct useful information under one slot is kept out
+  of retry competition, per this task's own requirement, though (14.9)
+  by three separately-evolved modules rather than one shared authority.
+
+### 14.7 Conclusion structure
+
+**No explicit typed conclusion-slot evidence exists today.** The real,
+working equivalent is `realization_resolver.py`'s `UNIQUE_CONCLUSION`
+marker family (`claim_coverage_best_take.py`'s `_UNIQUE_CONCLUSION_
+MARKERS`, `_clause_has_any`) plus `editorial_slot_resolution_install.py`'s
+prompt rule: *"A later conclusion/restatement after an already complete
+conclusion is normally a competing realization of the CONCLUSION slot
+unless it advances the story with a genuinely different required
+proposition."* This rule is real, RAW-proven (it governs the same-family
+grouping this session's own D-164 RAW exercised), but it lives as
+free-text guidance INSIDE a provider prompt string, never as a structured
+field any code reads or writes. The directive's target shape (setup /
+main conclusion statement / supporting continuation / closing line / CTA
+transition, generalized, never Video00-hardcoded) is not implemented.
+
+### 14.8 CTA structure
+
+Partial, mixed evidence. `contracts.SemanticRole.CTA` is a REAL typed
+enum value, wired live into `pipeline.build_flow_b_draft`'s `DraftClip.
+role` field (via `flow_b.py`'s `semantic_labels = semantic.labels`) — but
+this is the LEGACY composer/Sales-funnel semantic layer (`semantic_
+openai.py`/`composer.py`), not Clean Cut Core V1's active idea-first
+path; per CLAUDE.md's own binding rule ("Do not force rigid sales-funnel
+logic during Clean Cut"), `DraftClip.role` defaults to `SemanticRole.
+OTHER` for essentially every clip on the active path today (confirmed:
+no call site in `pipeline.py`'s Clean Cut V1 flow populates real HOOK/
+CTA labels from a live classifier). The only LIVE CTA-adjacent evidence
+in the active path is textual, inside `realization_resolver.py`'s own
+CTA-ordering comment/logic (`comprehensive` closing-CTA anchor handling,
+`round9_orphan_prefix_integrity.py`-adjacent) and the prompt-level rule
+already covered in 14.7. **No CTA candidate/pre-CTA-setup/duplicate-CTA/
+partial-CTA/complete-CTA typed vocabulary exists**, and none is
+implemented here — this is a real, named gap for a future task.
+
+### 14.9 Editorial slot evidence
+
+`contracts.SemanticRole` (`HOOK`/`PROBLEM`/`FEATURES`/`BENEFITS`/`PROOF`/
+`STORY`/`CTA`/`OTHER`) is a real, typed 8-value enum, already wired end-
+to-end into `DraftClip.role` — but it is a DORMANT/legacy field on the
+active Clean Cut V1 path (14.8), not live editorial-context evidence for
+today's Selection/BestTake/Family decisions. The directive's proposed
+minimum slot abstraction (HOOK/SETUP/PROBLEM/FEATURE/PROOF/CONCLUSION/
+CTA/OTHER) is therefore NOT a new vocabulary to invent — it is
+`SemanticRole` itself, minimally extended (SETUP/CONCLUSION are the only
+two missing values) and RE-ACTIVATED as evidence/context only, never a
+forced funnel (this task's own explicit constraint, and CLAUDE.md's own
+binding rule, both satisfied by treating it as advisory context, never a
+membership decision). Not implemented here.
+
+### 14.10 Confidence / ambiguity and language provenance
+
+Confidence is already categorical/evidence-based, never one arbitrary
+weighted master score, at every real layer inspected: `Word.confidence`
+(ASR, optional float), `AttemptRelationHypothesis.confidence`
+(`CONFIDENCE_SUPPORTED`/`WEAK`/`UNKNOWN`, `watch_listen_understanding.
+py`), `semantic_idea_equivalence.py`'s per-merge `confidence` field
+(reported, not weighted into a composite), and D-145's discrete 5-way
+relation outcome. This already satisfies the directive's own "no
+arbitrary weighted master score" requirement — nothing new proposed.
+
+Provenance vocabulary already exists and is directly reusable:
+`raw_understanding_map.py`'s `PROVENANCE_VISUAL_SIGNAL`/
+`PROVENANCE_DETERMINISTIC_RULE`/`PROVENANCE_MULTIMODAL_FUSION`/
+`PROVENANCE_UNKNOWN` (no `PROVENANCE_AUDIO_SIGNAL` producer exists for
+behavior hypotheses today — the same Audio Honesty finding D-163
+documented). A future V1 Language Spine should ADD `ASR`,
+`TRANSCRIPT_NORMALIZATION`, `WORD_TIMING`, `PHRASE_SEGMENTATION`,
+`SEMANTIC_PROVIDER`, `DETERMINISTIC_LANGUAGE_RULE`,
+`WATCH_LISTEN_CORROBORATION` to this SAME shared vocabulary rather than
+inventing a parallel one — not implemented here.
+
+### 14.11 Current code inventory (factual matrix)
+
+| Capability | Module(s) | Current output | Consumers | Status | Duplication | Missing piece |
+|---|---|---|---|---|---|---|
+| ASR | `asr.py` (`FasterWhisperASR`) | `Word` list w/ confidence | `canonical_asr_evidence.py`, `take_segmentation.py` | EXISTING | none | speaker diarization |
+| Word timing | `contracts.Word`, `canonical_asr_evidence.py` | start/end/confidence per word | nearly every downstream module | EXISTING | none (single source) | punctuation association per word |
+| Transcript normalization | `canonical_asr_evidence.py` | canonical words, content hash, equivalence hash | fingerprinting/dedup only today | EXISTING | none at this layer | not reused by the ~58 modules in 14.9's own text-comparison helpers |
+| Phrase segmentation | `take_segmentation._speech_units` | gap-split sub-spans (internal only) | consumed then discarded by `segment_takes` | PARTIALLY IMPLEMENTED | n/a | no reusable `LanguagePhrase` type |
+| Sentence/utterance segmentation | `take_segmentation._looks_complete_idea`/`_ends_sentence`/`_grammatically_open_tail` | `CandidateTake.complete_idea` (bool) | `attempt_reconstruction.py`, judge/resolver chain | EXISTING | none | editorial-utterance boundary is a single bool, not a typed span |
+| `complete_idea` | `take_segmentation.py` | boolean on `CandidateTake` | Resolver/BestTake usability gates | EXISTING | none | — |
+| Attempt representation | `attempt_reconstruction.py` (`reconstruct_delivery_attempts`, `_merge_attempt`), `raw_understanding_map.py` (`BehaviorHypothesis`) | fused `CandidateTake` w/ `attempt_id`; 8-label behavior hypothesis | pre-group credit, `take_judge.py`, Resolver | EXISTING | 2 parallel representations (attempt_id vs BehaviorHypothesis) not yet unified | Layer 3's still-target "Canonical Multimodal Attempt Evidence" |
+| Proposition representation | `semantic_idea_equivalence.py`, `editorial_slot_resolution_install.py` (prompt policy) | merge/no-merge decision + confidence + reason | `take_grouping_provider.py` | EXISTING | conflated with family id (`retry_family_id`, see 14.2) | typed `PropositionCandidate` object |
+| Semantic similarity | ~58 modules, each own tokenizer (14.9) | ad hoc boolean/float | scattered | EXISTING, HEAVILY FRAGMENTED | **~58 independent implementations** | one canonical normalized-token/overlap function |
+| Retry evidence | `take_grouping_provider.py` restart-evidence rules, D-100 corroboration | merge decision + `accepted_by` reason | Family Formation | EXISTING | none | — |
+| Continuation evidence | `attempt_reconstruction._tiny_nonterminal_continuation`, `recording_meta_continuation.py` | boolean/candidate | AttemptReconstructor | EXISTING | 2 modules, same concept | unified typed relation |
+| Correction evidence | D-145 `RELATION_CORRECTION`, `semantic_claims.negation_role` | relation label / claim field | `attempt_relationship_authority.py` | EXISTING | none | — |
+| Complementary evidence | D-145 `RELATION_COMPLEMENTARY` + 3 `hybrid_*complementary*`/`post_selection_complementary_family_stabilizer.py` modules | relation label / guard decisions | Family/Resolver | EXISTING | **3 separately-evolved modules** | consolidation |
+| Conclusion evidence | `realization_resolver.UNIQUE_CONCLUSION`, prompt text only | marker match / prompt rule | Resolver, provider prompt | PARTIALLY IMPLEMENTED | n/a | typed conclusion-slot object |
+| CTA evidence | `contracts.SemanticRole.CTA` (dormant on active path), prompt text | enum value (mostly `OTHER` in practice) | legacy composer path only | PARTIALLY IMPLEMENTED / DORMANT | n/a | typed, live CTA evidence on the active path |
+| Slot evidence | `contracts.SemanticRole` (8 values, 2 missing: SETUP/CONCLUSION) | `DraftClip.role` | legacy composer path only | PARTIALLY IMPLEMENTED / DORMANT | n/a | re-activation as advisory context on the active path |
+| Family Formation | `take_grouping.py`/`take_grouping_provider.py`/`hybrid_session_cleanup.py` | `TakeGroup` | BestTake | EXISTING | none (single authority, D-158/D-161 already widen its evidence intake) | — |
+| BestTake language evidence | `take_judge.score_take` (`completeness` term), `claim_coverage_best_take.py` | scalar score component / coverage boolean | `deterministic_best_take_authority.py` | EXISTING | none | — |
+| `RawUnderstandingMap` | `raw_understanding_map.py` (D-155, CLOSED) | per-source behavior-hypothesis map | D-163's `watch_listen_besttake_evidence.py` | EXISTING | none | — |
+| `WatchListenUnderstanding` | `watch_listen_understanding.py` (D-157, CLOSED) | per-span entry/delivery/exit usability | D-163 guard, D-158/D-161 relation authority | EXISTING | none | — |
+
+### 14.12 Duplicate transcript consumers (identified, not fixed)
+
+Direct code inspection (not estimated) found **58 modules** under
+`cutsell_worker/` independently tokenizing/normalizing `CandidateTake.
+text` for their own content-overlap/similarity comparison (`grep -l
+"_content_tokens\|_tokens(text)\|\.lower()\.split()\|content_tokens"`),
+and **3 modules** independently reimplementing sentence/clause splitting
+(`semantic_claims.py`, `take_segmentation.py`, `incomplete_unique_
+bridge_completion_rescue.py`). This is the single largest concrete
+fragmentation finding in this audit — most of `cutsell_worker/`'s
+`hybrid_*`/`round*`/`final_*`/`post_selection_*` retry-integrity family
+of modules (visible in the file listing: `hybrid_alternate_integrity.py`,
+`hybrid_cross_group_retry_integrity.py`, `final_draft_retry_integrity.py`,
+`round8_retry_reconciliation.py`, `round9_orphan_prefix_integrity.py`,
+`round11_semantic_retry_cleanup.py`, and ~20 more of the same shape) each
+reimplement a small, slightly different content-overlap heuristic rather
+than consuming one canonical Language Spine tokenizer/normalizer. **What
+should be computed once and reused:** canonical word normalization
+(already centralized in `canonical_asr_evidence.py`, just not reused by
+these 58 consumers), a canonical content-token/overlap function, and a
+canonical phrase/clause boundary detector. No implementation is proposed
+in this task.
+
+### 14.13 Implementation gap — smallest truthful conclusion
+
+**B. LANGUAGE SPINE PARTIALLY EXISTS; TYPED HIERARCHY + NORMALIZATION
+MUST BE BUILT** — with a significant "fragmentation" (A-shaped)
+component that is the dominant migration cost, not a missing-capability
+(C/D-shaped) one. Every underlying EVIDENCE capability the hierarchy
+needs already exists and is real, working, RAW-proven code: ASR + word
+timing (`asr.py`), transcript normalization/fingerprinting
+(`canonical_asr_evidence.py`), editorial-utterance completion
+(`take_segmentation.py`), attempt reconstruction with canonical
+semantic identity (`attempt_reconstruction.py`, `canonical_identity.py`),
+a fully-implemented 5-way relation vocabulary with a real conflict/fail-
+open truth table (`attempt_relationship_authority.py`, D-145/D-158/
+D-161/D-162), and clause-level claim extraction (`semantic_claims.py`).
+This rules out C (segmentation is not "too weak" — it is real and
+proven) and D (no major ASR/semantic capability is missing). What is
+genuinely missing is (1) a PHRASE-level typed object (today only an
+internal, discarded heuristic), (2) ONE canonical normalized-token/
+overlap function shared by the ~58 modules that each reimplement their
+own today (14.12), (3) a de-conflation of `semantic_idea_id`/
+`retry_family_id` (already a documented D-050 gap), and (4) re-
+activating `SemanticRole`/conclusion evidence as live, structured
+context on the active Clean Cut V1 path rather than dormant legacy
+fields or prompt-only text. This is more work than pure consolidation
+(A) but far less than rebuilding segmentation (C) or adding a new
+language-model capability (D).
+
+### 14.14 V1 Language Spine contract (design only, NOT implemented)
+
+Smallest implementable V1, matching this task's own suggested shape and
+the existing repo-conventional dataclass style (`contracts.py`,
+`@dataclass(frozen=True)`):
+
+```
+LanguageWord(text, start, end, confidence, source_asset_id)
+LanguagePhrase(source_asset_id, start, end, text, words,
+               boundary_kind)  # partial_thought/restart/filler/
+                                # clause_boundary/continuation_boundary
+LanguageUtterance(source_asset_id, start, end, text, phrases,
+                  complete_idea, provenance)
+LanguageAttempt(attempt_id, source_asset_id, start, end, utterances,
+                behavior_state, confidence, provenance)
+PropositionCandidate(proposition_id, attempt_ids, content_tokens,
+                     confidence, provenance)
+RelationEvidence(relation, left_id, right_id, confidence, source,
+                 provenance)  # reuses attempt_relationship_authority.py's
+                              # existing FinalAttemptRelationship shape
+```
+
+`FAMILY` and `SELECTED REALIZATION` authority are explicitly OUT of V1's
+scope (this task's own instruction) — V1 only produces evidence these
+existing, unchanged authorities may consume later, in a separately-
+authorized task.
+
+### 14.15 Time index
+
+All language objects reuse the SAME source-relative timeline already
+proven in D-155/D-156 (`source_asset_id` + `start`/`end` seconds) — no
+duplicate clock is proposed. This is already true of every real module
+inspected in 14.11 (`Word.start/end`, `CandidateTake.start/end`,
+`UnderstandingSpan`'s own span timing) and would remain true of any V1
+`LanguageWord`/`LanguagePhrase`/etc.
+
+### 14.16 Non-destructive result
+
+The Language Spine, as designed, only INDEXES RAW — no physical deletion
+occurs at this layer (identical to every existing perception/
+understanding layer in Sections 2/13). Every language node maps back to
+a recoverable RAW range via `source_asset_id` + `start`/`end`, exactly
+as `CandidateTake`/`UnderstandingSpan` already do.
+
+### 14.17 Parallelism role
+
+Restates Section 13.2's existing finding: Language Spine construction
+(Track A) has no canonical requirement to finish before visual/audio
+perception (Tracks B/C) — they already run independently over the same
+RAW today (D-155's `parallel_perception.py`, `CUTSELL_PARALLEL_
+PERCEPTION_ENABLED`, default ON). A future V1 Language Spine should
+preserve this, not introduce a new blocking dependency.
+
+### 14.18 Cut.ai parity role (Milestone 1)
+
+The Language Spine's contribution to Level 1 (Section 5) is entirely
+things this audit found ALREADY REAL: clean retry identification
+(attempt reconstruction + D-145 relations), dead-air/filler structure
+(measured-pause boundary), complete-idea preservation (`complete_idea`),
+conclusion integrity (`UNIQUE_CONCLUSION` marker family), duplicate
+removal (Family Formation + claim dedup), meaning safety (`polarity_
+safety.py`, `semantic_claims.py`'s negation protection). CTA integrity
+and commercial beat structure are the two genuinely weaker areas (14.7/
+14.8) — a future, separately-authorized task's most defensible target.
+
+### 14.19 Human Gold role (Milestone 2, restates Section 13.15, unchanged)
+
+A richer Language Spine may later serve minimal-sufficient-set reasoning,
+narrative compression, preferred-realization ranking, stronger
+conclusions, advanced composites, and editorial taste (Layers 10-16) —
+explicitly NOT prioritized ahead of Cut.ai parity, per Section 5 and this
+task's own instruction.
+
+### 14.20 D-163 compatibility (binding, unmodified)
+
+D-163's Watch+Listen BestTake performance/usability evidence
+(`watch_listen_besttake_evidence.py`) remains fully valid and untouched.
+Language Spine strengthens meaning/proposition/relation/coverage; D-163
+strengthens performance/usability — complementary axes of the same
+`SELECTED REALIZATION` decision (14.2's final layer), never overlapping,
+never modified by this section.
+
+### 14.21 Phased build plan (NOT authorized here)
+
+A. Canonical `LanguageWord`/`LanguagePhrase` typed schema + one shared
+   normalization function (replaces the ~58 ad hoc tokenizers, 14.12).
+B. `LanguageUtterance`/`LanguageAttempt` construction (formalizes
+   `complete_idea` + `attempt_reconstruction.py`'s existing logic into
+   the typed hierarchy, no behavior change).
+C. `PropositionCandidate`/`RelationEvidence` integration (formalizes
+   `semantic_idea_equivalence.py` + `attempt_relationship_authority.py`
+   output into the typed hierarchy; also the natural point to resolve
+   the `semantic_idea_id`/`retry_family_id` conflation, D-050B/C).
+D. Replace duplicate transcript readers (14.12's 58 modules) with Spine
+   consumers, one module at a time, behavior-parity-tested each time
+   (same discipline as D-050A's own additive-shadow migration).
+E. ONE Video00 qualification (after A-D are offline-proven).
+F. Unseen-RAW generalization (CleanCutBench expansion).
+G. Human Gold refinement (14.19, explicitly deferred).
+
+Smaller phases may be chosen if the actual code, once touched, suggests
+better seams — this order is a starting proposal, not a commitment.
+
+### 14.22 Architecture verdict
+
+**B. LANGUAGE SPINE PARTIALLY EXISTS; TYPED HIERARCHY + NORMALIZATION
+MUST BE BUILT** (14.13).
+
+---
+
+No change to Section 2's 20 layers, Section 3's status table, Sections
+4-13, or any accepted D-096 through D-164 authority contract. Family
+Formation, Proposition Identity, Attempt Relationships, BestTake,
+Boundary, and Pacing are all restated, never modified, by this section.
+See `docs/CUTSELL_DECISIONS.md` D-165 for the decision-log entry
+recording this section's doctrine.

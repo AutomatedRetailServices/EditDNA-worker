@@ -25930,3 +25930,145 @@ NO `selected_clip_id` mutation (`action_applied: false` x6, winner_before
 D-157 zone-usability refinement named above as a future task, and/or
 whether Phase-D's guard should remain diagnostic-only pending that
 refinement, are Product Owner decisions.
+
+
+==================================================
+D-165 -- LANGUAGE / TRANSCRIPT SPINE CANONICAL DESIGN
+(TASK SELF-LABELED "D-164"; RENUMBERED PER SOURCE PRECEDENCE)
+==================================================
+
+**STATUS: DOCS/DESIGN/FORENSIC ONLY. NO ENGINE BEHAVIOR CHANGE.** The
+task that produced this entry referred to itself as "D-164"; that number
+was already in use (Watch+Listen BestTake Evidence real-media
+qualification, committed `07ff11e`, strictly earlier in this same
+session). Per CLAUDE.md's own source precedence (live Git/live docs
+state over a task's stated expectation) and per this document's "Never
+reset blindly" instruction, HEAD was verified at `07ff11e` (two commits
+ahead of the task's stated `53dce72`, both already-completed, in-scope
+D-164 work), and this entry is recorded as **D-165**. D-164's own entry
+is untouched.
+
+**Purpose:** canonize an explicit LANGUAGE/TRANSCRIPT SPINE as the
+linguistic backbone of CutSell, complementary to (never a replacement
+for) the existing Parallel Perception + Watch+Listen Multimodal
+Understanding architecture (D-148/Section 13). Full design appended to
+`docs/CUTSELL_CANONICAL_ENGINE_ARCHITECTURE_D098.md` Section 14.
+
+==================================================
+METHOD
+==================================================
+
+Direct code inspection (not estimated) of: `asr.py`, `contracts.py`
+(`Word`/`TranscriptSegment`/`CandidateTake`/`SemanticRole`/
+`SemanticLabel`), `canonical_asr_evidence.py`, `take_segmentation.py`,
+`attempt_reconstruction.py`, `canonical_identity.py` (ID ownership
+table), `attempt_relationship_authority.py`, `semantic_idea_equivalence.py`,
+`semantic_claims.py`, `editorial_slot_resolution_install.py`,
+`realization_resolver.py`, `raw_understanding_map.py`,
+`watch_listen_understanding.py`, plus a repo-wide grep for independent
+transcript tokenization/segmentation logic.
+
+==================================================
+KEY FINDINGS
+==================================================
+
+1. **The canonical hierarchy WORD -> PHRASE -> UTTERANCE -> ATTEMPT ->
+   PROPOSITION -> RELATION -> FAMILY -> SELECTED REALIZATION already has
+   a real code counterpart at every level except PHRASE** (which exists
+   only as an internal, immediately-discarded heuristic inside
+   `take_segmentation._speech_units`).
+2. **RELATION is the most mature layer already implemented**:
+   `attempt_relationship_authority.resolve_final_attempt_relation`'s
+   full agree/conflict/fail-open truth table (D-145/D-158/D-161/D-162,
+   RAW-proven), including `UNCERTAIN` as a genuine first-class outcome.
+3. **PROPOSITION and FAMILY identity are conflated** at the id-minting
+   level: `canonical_identity.py` mints `semantic_idea_id` and
+   `retry_family_id` from the SAME group key (an already-documented D-050
+   Phase 3 gap, still deferred, not fixed here).
+4. **CONCLUSION evidence is real but prompt-only**: `realization_
+   resolver.UNIQUE_CONCLUSION` markers plus a rule embedded as free text
+   inside `editorial_slot_resolution_install.py`'s provider prompt --
+   never a structured field any code reads/writes.
+5. **CTA/slot evidence is a real, typed, but DORMANT field on the active
+   path**: `contracts.SemanticRole` (HOOK/PROBLEM/FEATURES/BENEFITS/
+   PROOF/STORY/CTA/OTHER) is wired live into `DraftClip.role`, but only
+   via the LEGACY composer/Sales-funnel semantic layer -- on Clean Cut
+   Core V1's active idea-first path it defaults to `OTHER` for
+   essentially every clip, consistent with CLAUDE.md's own "do not force
+   rigid sales-funnel logic during Clean Cut" rule.
+6. **The single largest concrete fragmentation finding**: 58 modules
+   under `cutsell_worker/` each independently tokenize/normalize
+   candidate text for their own content-overlap comparison, and 3
+   modules independently reimplement sentence/clause splitting, rather
+   than sharing one canonical Language Spine tokenizer/normalizer
+   (`canonical_asr_evidence.py`'s own normalization exists but is reused
+   by fingerprinting only, not by these 58 consumers).
+7. Dead-air/silence integration, confidence/ambiguity categorization, and
+   language provenance vocabulary all ALREADY satisfy this task's own
+   stated requirements (measured audio evidence, no arbitrary weighted
+   master score, categorical provenance tags) -- no gap found.
+
+==================================================
+IMPLEMENTATION GAP VERDICT
+==================================================
+
+**B. LANGUAGE SPINE PARTIALLY EXISTS; TYPED HIERARCHY + NORMALIZATION
+MUST BE BUILT** -- with a dominant fragmentation (A-shaped) migration
+cost. Rules out C (segmentation is real and RAW-proven, not weak) and D
+(no missing ASR/semantic capability). See D098.md Section 14.13 for the
+full reasoning.
+
+==================================================
+V1 CONTRACT (DESIGN ONLY)
+==================================================
+
+`LanguageWord` / `LanguagePhrase` / `LanguageUtterance` / `LanguageAttempt`
+/ `PropositionCandidate` / `RelationEvidence` -- frozen dataclasses in the
+existing `contracts.py` style, reusing the SAME source-relative timeline
+D-155/D-156 already proved (no duplicate clock). FAMILY and SELECTED
+REALIZATION authority are explicitly OUT of V1 scope. Full field lists in
+D098.md Section 14.14.
+
+==================================================
+PHASED BUILD PLAN (NOT AUTHORIZED HERE)
+==================================================
+
+A. Typed `LanguageWord`/`LanguagePhrase` schema + one shared
+   normalization function (replaces the 58 ad hoc tokenizers).
+B. `LanguageUtterance`/`LanguageAttempt` construction (formalizes
+   existing `complete_idea`/`attempt_reconstruction.py` logic; no
+   behavior change).
+C. `PropositionCandidate`/`RelationEvidence` integration (also the
+   natural point to resolve the `semantic_idea_id`/`retry_family_id`
+   conflation, D-050B/C).
+D. Replace duplicate transcript readers with Spine consumers, one module
+   at a time, behavior-parity-tested each time.
+E. ONE Video00 qualification. F. Unseen-RAW generalization. G. Human
+Gold refinement (explicitly deferred behind Cut.ai parity).
+
+==================================================
+D-163 COMPATIBILITY
+==================================================
+
+D-163's Watch+Listen BestTake performance/usability evidence is fully
+preserved, untouched, and unmodified. Language Spine (meaning/
+proposition/relation/coverage) and D-163 (performance/usability) are
+complementary axes of the SELECTED REALIZATION decision, never
+overlapping.
+
+==================================================
+CONFIRMATIONS
+==================================================
+
+NO engine behavior change (zero `cutsell_worker/*.py` files touched --
+only `docs/CUTSELL_CANONICAL_ENGINE_ARCHITECTURE_D098.md` and
+`docs/CUTSELL_DECISIONS.md` changed this task). NO RAW. NO provider call.
+Multimodal architecture (Parallel Perception, Watch+Listen Multimodal
+Understanding, visual/performance evidence, audio-signal evidence,
+BestTake, Boundary, Pacing) fully preserved and restated, never replaced
+-- Section 14.1's own pipeline diagram places the Language Spine
+alongside, not instead of, the existing Perceptual Spine.
+
+**HUMAN ACTION REQUIRED:** YES (condition A) -- whether to authorize
+Phase A of the phased build plan (14.21) as a future, separately-scoped
+implementation task is a Product Owner decision.
