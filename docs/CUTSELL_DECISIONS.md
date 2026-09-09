@@ -31425,3 +31425,181 @@ rewritten (append-only).
 authorization for the next real-media gate; condition A: whether to
 authorize that one Video00 RAW now, and whether/when to resume P1,
 remain Product Owner decisions).
+
+==================================================
+D-181: D-180 CASE-B MATERIALITY STABILIZATION VIDEO00 REAL-MEDIA QUALIFICATION
+==================================================
+
+Records the results of the one authorized canonical Video00 Modal RAW
+(run 34374941525, exact test head 33e6c62 -- D-181's own reporting-only
+plumbing commit, all workflow_dispatch overlay flags at default/OFF, the
+canonical production path). No cutsell_worker patch after observing
+results. No second RAW.
+
+RUN-LEVEL D-180 SUMMARY (new `video00-modal-d181-case-b-materiality-
+summary.json`, a pure projection of `pipeline.py`'s own D-180 fields):
+8 families total, `case_b_condition4_evaluated_count` 1,
+`case_b_count_difference_count` 1, `case_b_materiality_available_count` 1,
+`case_b_not_material_count` 0, `case_b_material_count` 1, `case_b_
+condition4_actionable_count` 1, `case_b_condition4_suppressed_count` 0.
+`condition4_reason_distribution`: `alternative_meaning_insufficient` x2,
+`deliveryscore_already_agrees_with_semantic_winner` x3, `material_count_
+difference_confirmed` x1, `no_semantic_fast_path_candidate_or_no_
+evidence` x2 -- condition 4 was reached (past conditions 1-3) in only 1
+of 8 families this run.
+
+REAL MATERIAL CONTROL (family tg_3d23831a35bb9e5424, raw ~295.52-327.44s,
+"Esta es mi experiencia..." conclusion region): semantic_fast_path_
+candidate clip_2df581051516d6a5cdac (7 raw events, 7 material -- ALL
+counted) vs deliveryscore_top_candidate clip_481de2f27ba7e3d8b1f4 (2 raw,
+0 material) -- condition 4a AND 4b both held, `case_b_conflict_present`
+true, `case_b_materiality_state` MATERIAL, `case_b_condition4_actionable`
+true. The bypass correctly fired (a genuine, large material difference,
+not noise) and fell through to the general ladder exactly as designed --
+`winner_path_after` OTHER_EXISTING_PATH, `semantic_best_take_reason`
+`critical_coverage_dominance` (D-063, untouched), final winner
+clip_2df581051516d6a5cdac (the SAME candidate D-180's own gate protected
+from an unwarranted early exit). Quality ladder: this family's realization
+carries C-coverage 1.0, G-coverage 1.0, LEVEL_3 (full consensus match) --
+CONFIRMS D-123's condition 4 remains fully actionable for a real material
+difference; D-180 did not neuter legitimate performance-based protection.
+
+GYNECOLOGIST (raw ~82.82-104.32s, family tg_212d17c0cbb057adc1, 3
+candidates this run -- re-identified by source span, matching the target
+window; do not assume clip ids stable across runs): semantic_fast_path_
+candidate clip_d6a06e0ce580c33d2904 (95.52-104.32s, 8 raw / 5 material
+events -- the SAME 8-vs-3-shaped raw count gap D-179 traced in D-178B),
+`meaning_sufficient_candidates` = [clip_d6a06e0ce580c33d2904] ONLY --
+`deliveryscore_top_candidate` clip_8de06cc8d37982689dfa (82.82-90.6s, 3
+raw / 1 material) was excluded from meaning-sufficiency this run (D-081
+pre-resolver semantic authority / completeness marking, upstream of
+D-123/D-180's own scope) BEFORE condition 4 could ever be reached --
+`case_b_condition4_reason` = `alternative_meaning_insufficient`,
+`case_b_conflict_present` false. D-150 independently returned
+ABSTAIN_CONFLICT (`MULTIPLE_COMPLETE_WINDOWS_DISAGREE`) for this family --
+a SEPARATE, pre-existing bypass of the `single_semantic_winner` fast path
+(unrelated to D-123/D-180's own condition-4 gate), sending it to the
+general ladder, whose own Steps 6-9 (survivor-pool exclusion, unmodified)
+selected clip_d6a06e0ce580c33d2904 anyway (`winner_path` DELIVERYSCORE_
+PATH, `semantic_best_take_reason` `delivery_tie_break_among_survivors`).
+Quality ladder: this realization carries C-coverage 0.733, G-coverage
+0.7386 (LEVEL_2, not LEVEL_1) -- broadly matches both references; a
+separate, narrow (0.84s) `missing_delivery`/`take_choice_against_both_
+references` LEVEL_1 finding at raw 82.29-83.13s (attributed to
+BestTakeResolver, inside the excluded candidate's span) is a real, small,
+pre-existing BestTake/coverage-marking nuance, NOT a D-180 defect --
+condition 4 was never reached on this exact shape this run.
+
+D-180's OWN mechanism (condition 4) was therefore NOT exercised on the
+gynecologist family this run -- family/label-topology varied from
+D-178B's own shape (D-179's own flagged, deferred concern): the
+alternative that would have needed a materiality check this run was
+excluded one condition earlier (condition 3, meaning-sufficiency), a
+different, upstream, pre-existing gate. GYNECOLOGIST RESULT: NOT_EXERCISED.
+FAMILY-STABILITY RESULT: FAMILY_VARIANCE_BLOCKED_TEST (the reference-
+preferred candidate and its main competitor did not reach a stable, both-
+meaning-sufficient shape this run).
+
+PIMPLES (raw ~198.88-222.98s, family tg_2ccdbc619404d371fc, 2 candidates,
+re-identified by normalized text): D-150 correctly ABSTAIN_CONFLICTs
+(`MULTIPLE_COMPLETE_WINDOWS_DISAGREE`, D-147's own state) -- NO decisive
+semantic winner ever existed (`semantic_fast_path_candidate` null),
+exactly as D-179 established. `case_b_fast_path_conflict`/condition 4
+was NEVER reached (no candidate to evaluate) -- `case_b_condition4_
+reason` = `no_semantic_fast_path_candidate_or_no_evidence`. The terminal
+`delivery_tie_break_among_survivors` step selected clip_
+17d83ce826ce72d4a52e (198.88-211.02s); the quality ladder independently
+flags this exact realization as `take_choice_against_both_references`
+(LEVEL_1, `false_keep`) with both references instead choosing clip_
+9d3cde41275a8c375b8c (213.34-222.98s, LEVEL_1 `missing_delivery`).
+PIMPLES RESULT: D150_ABSTAIN_AND_TERMINAL_AGAINST_BOTH -- per this task's
+own instruction, classified as SEPARATE TERMINAL BESTTAKE TIE-BREAK
+DEFECT CANDIDATE (the same terminal mechanism D-179 already forensically
+identified as the structurally weak seam), NOT a D-180 failure and NOT
+fixed here.
+
+D-150 FIREWALL: confirmed intact. `semantic_authority_gate_evaluated_
+count` 8/8, `AUTHORITATIVE` 5, `ABSTAIN_CONFLICT` 3 (gynecologist,
+pimples, and one other family), `ABSTAIN_INCOMPLETE`/`ADVISORY` 0. D-180's
+condition-4 refinement never ran on any ABSTAIN_CONFLICT family (the fast
+path itself never reaches condition 4 there) -- D-150 behavior byte-
+identical to its own pre-D-180 contract.
+
+D-123 OWNERSHIP: 8/8 families carried case_b_evidence; 6/8 had a semantic_
+fast_path_candidate; condition 4 was reached (past conditions 1-3) in 1/8;
+1/8 had a raw count difference evaluated (present); 1/8 had a material
+count difference; 1/8 was condition-4-actionable; 0/8 had a raw count
+difference suppressed as non-material (the "core" D-180 scenario simply
+did not arise this run -- not a failure of the logic, absence of the
+shape).
+
+D-177 STATUS: unchanged -- 2 straddle events evaluated, 0 applied (both
+`blocked_by_delivery_floor`), zero visual trims. OFFLINE_PROVEN / REAL_
+MEDIA_SAFETY_PROVEN / TARGET_SHAPE_NOT_EXERCISED preserved verbatim, not
+chased this run.
+
+NO REGRESSION: Family Formation, Language Spine, Boundary, Pacing,
+Renderer untouched (no cutsell_worker file modified this task; D-181's
+own commit touched only the workflow YAML). The two job-level "failure"
+conclusions (`Verify frozen Selection lock`, `Verify Human Gold regression
+QA` 18-check manifest) match the SAME pre-existing, expected pattern seen
+on every one of the last 5+ consecutive dispatches on this branch
+(D-170/D-173/D-175/D-178B runs all show identical job-level `failure`
+conclusions from these same two validator steps, driven by ordinary run-
+to-run semantic/DeliveryScore variance against a frozen prior-run lock
+and an 18-check manifest tuned to an earlier selection) -- not newly
+introduced by D-180/D-181; the exact per-run text was not independently
+re-fetched this task (large diagnostics dump pushed it outside the log
+tail window; the artifact ZIP was not downloadable through this sandbox's
+egress proxy, same limitation D-178B recorded), but the job-step timeline
+and conclusion pattern are byte-for-byte consistent with that established
+baseline.
+
+PARITY: physical (final MP4) F1 vs Cut.ai 0.8015, vs Gold 0.8072;
+selection-plan (pre-render) F1 vs Cut.ai 0.7815, vs Gold 0.7738. Higher
+than D-178B (physical 0.7935/0.7467) on both axes, still below D-175
+(0.8501/0.8252). NOT attributed to D-180 causally except for the one
+family D-180's mechanism directly touched (tg_3d23831a35bb9e5424,
+C/G-coverage 1.0/1.0, LEVEL_3) -- ordinary run-to-run semantic/
+DeliveryScore variance otherwise, consistent with every prior run in
+this series.
+
+VERDICT: **B. SAFETY REAL-MEDIA PROVEN -- TARGET STABILITY SHAPE NOT
+EXERCISED.** D-180 ran safely on real media (no regression, D-150
+firewall intact, a genuine material difference remained fully
+actionable), but no family this run combined a meaning-sufficient
+alternative + a raw count difference + non-material corroboration --
+the exact "flip-prevented" scenario the fix targets never arose, blocked
+one condition earlier by pre-existing meaning-sufficiency marking on the
+one family (gynecologist) that carried the right raw-count shape.
+
+EXACT NEXT ENGINE GATE: per this task's own "verdict B/C: do not rerun
+Video00 repeatedly, identify the smallest missing proof" instruction --
+NOT another RAW. The smallest missing real-media proof is a family where
+an otherwise-meaning-sufficient DeliveryScore-preferred alternative
+coexists with a raw CASE-B count asymmetry that is genuinely non-material
+against the semantic winner; D-180's own 34/34 offline suite already
+proves this synthetically (items 4/14 of `tests/test_cutsell_d180_case_b_
+materiality_stabilization.py`) -- closing the real-media gap requires
+either (a) a future run that happens to reproduce that exact shape, or
+(b) a Product Owner decision on whether the upstream meaning-sufficiency/
+family-topology variance (D-179's own deferred item) is worth stabilizing
+first so this shape can be reliably reproduced. Not chased here. Pimples'
+own terminal-tie-break-against-both-references defect is recorded as
+already-known (D-179), a candidate for a future, separately-scoped
+TERMINAL BESTTAKE TIE-BREAK FORENSIC gate -- not opened here.
+
+P1 STATUS: unchanged, paused pending Product Owner review; not
+pre-authorized to begin. Family-topology variance and the terminal-tie-
+break-confidence question remain explicitly deferred, not fixed here.
+
+STRICT SCOPE CONFIRMATIONS: exactly one RAW dispatched. No cutsell_
+worker patch after observing results (none at all this task, before or
+after). No terminal tie-break redesign. No Family Formation fix. No
+Boundary change. No Language Spine change. No P1. No provider/model
+change. No second RAW.
+
+**HUMAN ACTION REQUIRED:** YES (condition A: whether to pursue the
+smallest-missing-proof options named above, whether/how to address
+Pimples' now-twice-confirmed terminal-tie-break defect, and whether/when
+to resume P1, remain Product Owner decisions).
