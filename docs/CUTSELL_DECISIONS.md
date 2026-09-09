@@ -33748,3 +33748,276 @@ remains hardcoded `False` on every path through the live wiring;
 -- exactly ONE confirmatory Video00 RAW with both flags on, no winner
 authority -- as the next canonical engineering gate, and whether/when
 to resume P1, remain Product Owner decisions).
+
+---
+
+D-190: PROSODIC AUDIO V2 -- VIDEO00 REAL-MEDIA DIAGNOSTIC QUALIFICATION
+(post D-189, ONE RAW, diagnostics only, no winner authority, no second
+RAW, no post-result patch, no provider/model change, no P1)
+
+BRANCH/HEAD: `feature/runpod-pod-on-demand` @ `c7b1333e4872c7fd8a13da
+453b5e85f74378f1dd` (plumbing commit; expected `075add7` predecessor
+head per the task's own preamble was the pre-existing tip at task
+start -- reconciled, no divergence).
+
+RAW: workflow run `34406357372` (job `102650171405`), commit `c7b1333`,
+Modal benchmark id `video00-modal-34406357372-1`, source `Editdna
+longform validation/VIDEO-2026-07-30-09-18-03.mp4`, dispatched with
+`bounded_finalist_arbiter_enabled=1` AND `prosodic_finalist_arbiter_
+diagnostics_enabled=1`. Job conclusion "failure" -- EXCLUSIVELY the
+same two pre-existing legacy validator steps ("Verify frozen Selection
+lock", "Verify Human Gold regression QA") that have failed on every
+prior RAW this entire session; the Modal benchmark itself, the new
+"D-190 Prosodic finalist compact diagnostics" step, and Modal teardown
+all succeeded. Exactly ONE dispatch; no second RAW.
+
+PLUMBING (pre-RAW, commit `c7b1333`): new `prosodic_finalist_arbiter_
+diagnostics_enabled` workflow_dispatch input mirroring D-185's own
+`bounded_finalist_arbiter_enabled` input exactly (default off,
+byte-identical otherwise); a new, dedicated, late "D-190 Prosodic
+finalist compact diagnostics" step (same D-119/D-125/.../D-186A
+pattern) that pure-projects `artifact/video00-modal.json`'s already-
+computed D-183/D-184/D-188/D-189 fields -- recomputes nothing; and ONE
+small, disclosed, additive `pipeline.py` reporting field,
+`prosodic_pipeline_candidate_evidence` (a per-candidate projection
+through D-187's own unchanged `prosodic_delivery_diagnostics()`),
+needed because D-189's own wiring had exposed only the family-level
+`prosodic_finalist_*` comparison, never the per-candidate evidence this
+task's own directive required. `bounded_finalist_arbiter.py`,
+`prosodic_finalist_comparison.py`, `prosodic_audio_v2.py`, and
+`flow_b.py` confirmed untouched this task.
+
+AUDIO-DECODE VALIDATION: `prosodic_pipeline_run_summary` = `{status:
+evaluated, prosodic_pipeline_source_decode_count: 1, _source_decode_
+reuse_count: 0, _family_evaluated_count: 1, _candidate_evaluated_count:
+2, _audio_unavailable_count: 0, prosodic_finalist_evaluated_count: 1,
+_dominance_count: 1, _near_equal_count: 0, _conflicted_count: 0,
+_insufficient_count: 0}`. Exactly ONE source decode for the ONE Video00
+source, as expected -- no undocumented exception.
+
+D-183 RUN SUMMARY (7 families evaluated): DECISIVE x5, DECISIVE_BY_
+ELIMINATION x1, NON_DECISIVE x1 (the real Pimples family, below); TIED
+0, CONFLICTED 0, UNKNOWN 0.
+
+D-184 RUN SUMMARY (`bounded_finalist_arbiter_run_summary`):
+`arbiter_evaluated_count: 7, _not_eligible_count: 6, _abstain_count: 6,
+_preference_supported_count: 1, _preferences_due_to_prosody_count: 1,
+_near_equal_count: 0, _conflicted_count: 0, _insufficient_evidence_
+count: 0`. The ONE eligible family is the ONE NON_DECISIVE family.
+
+PIMPLES REIDENTIFICATION (source-span/text-hash, NOT old clip ids, via
+`region_source_mapping.pimples`): three real Pimples-region source
+spans this run -- `clip_6aea1eaeaf02a42c154a` (213.34-222.98s, hash
+`8c30a9ccdbe3`), `clip_a489590ee18f3a87bdc7` (198.88-211.02s, hash
+`6e681b359143`), `clip_d2102550d3a7dbbb28b3` (195.12-198.12s, hash
+`b6f7dd4fd927`, a short adjacent fragment not part of the contested
+2-candidate finalist set). The ONE D-184-eligible family, `tg_
+c145285e700b2214a4`, has `meaning_sufficient_candidates` = exactly
+`[clip_6aea1eaeaf02a42c154a, clip_a489590ee18f3a87bdc7]` -- BOTH are in
+the Pimples region list, at NON-overlapping spans (198.88-211.02s and
+213.34-222.98s) inside the 195-223s Pimples window. This IS the real
+contested Pimples family. Its D-183 shape this run (margin `0.0461`,
+`raw_score_difference_without_structured_dominance`, `structured_
+dominance_present: false`) does NOT numerically match D-186B's
+previously-recorded shape (margin `0.0104`) -- consistent with this
+session's repeatedly-confirmed run-to-run family-shape variance -- but
+the evidentiary CHARACTER matches D-186B's documented priming exactly:
+`bounded_finalist_arbiter_editability_status: NO_EVIDENCE`, `_meaning_
+parity: CONSISTENT`, `_performance_status: NEAR_EQUAL` (i.e. Visual/V2
+NEAR_EQUAL pre-Prosody, as D-186B recorded).
+
+PIMPLES D-183 FIELDS (family `tg_c145285e700b2214a4`): `semantic_
+authority_status: ABSTAIN_CONFLICT`, `complete_window_agreement_
+status: MULTIPLE_COMPLETE_WINDOWS_DISAGREE`, `semantic_fast_path_
+candidate: null`, `terminal_besttake_confidence_state: NON_DECISIVE`,
+`_confidence_reason: raw_score_difference_without_structured_
+dominance`, `_candidate_count: 2`, `_top_candidate_id: clip_
+a489590ee18f3a87bdc7`, `_runner_up_candidate_id: clip_
+6aea1eaeaf02a42c154a`, `_top_score: 0.6671`, `_runner_up_score: 0.621`,
+`_score_margin: 0.0461`, `_structured_dominance_present: false`,
+`_conflict_present: false`.
+
+PIMPLES D-187 PER-CANDIDATE PROSODIC EVIDENCE (`prosodic_pipeline_
+candidate_evidence`, both `prosodic_audio_available: true`, `_
+confidence: SUPPORTED`, `_provenance: prosodic_audio_v2_phase_a`,
+`_missing_evidence: [pitch_analysis]`, `_pitch_status: PITCH_ANALYSIS_
+NOT_IMPLEMENTED` throughout -- pitch is NOT_IMPLEMENTED for both, never
+silently PASSed):
+- `clip_6aea1eaeaf02a42c154a`: continuity CONTINUOUS, pause_structure
+  CONTINUOUS, hesitation HESITATION_NOT_OBSERVED, restart RESTART_NOT_
+  OBSERVED, speech_rate MODERATE, energy_dynamics HIGH_VARIATION,
+  emphasis EMPHASIS_PATTERN_PRESENT, delivery_variation HIGH_
+  VARIATION.
+- `clip_a489590ee18f3a87bdc7`: continuity MILDLY_INTERRUPTED, pause_
+  structure MILDLY_INTERRUPTED, hesitation HESITATION_PATTERN_PRESENT,
+  restart RESTART_OR_INTERRUPTION_SUPPORTED, speech_rate MODERATE,
+  energy_dynamics HIGH_VARIATION, emphasis EMPHASIS_PATTERN_PRESENT,
+  delivery_variation HIGH_VARIATION.
+
+PIMPLES D-188 COMPARISON (`prosodic_finalist_*`, family `tg_
+c145285e700b2214a4`): `evaluated: true`, `state: DOMINANT`, `preferred_
+candidate_id: clip_6aea1eaeaf02a42c154a`, `continuity_relation: clip_
+6aea1eaeaf02a42c154a`, `hesitation_relation: clip_6aea1eaeaf02a42c
+154a`, `restart_relation: clip_6aea1eaeaf02a42c154a`, `pause_relation:
+clip_6aea1eaeaf02a42c154a` (all four SAFE votes unanimous), `_
+descriptive_rate_relation: clip_6aea1eaeaf02a42c154a`, `_descriptive_
+energy_relation: clip_6aea1eaeaf02a42c154a`, `_descriptive_emphasis_
+relation: NEAR_EQUAL`, `directional_evidence_present: true`,
+`conflict: false`, `missing_evidence: [pitch_analysis]`.
+
+PIMPLES D-184 FUSED DECISION (`bounded_finalist_arbiter_*`, family
+`tg_c145285e700b2214a4`): `eligible: true`, `state: PREFERENCE_
+SUPPORTED`, `decision: PREFER_CANDIDATE`, `preferred_candidate_id:
+clip_6aea1eaeaf02a42c154a`, `reason: structured_evidence_sources_
+unanimously_prefer_one_candidate`, `meaning_parity: CONSISTENT`,
+`performance_status: NEAR_EQUAL`, `editability_status: NO_EVIDENCE`,
+`prosodic_status: AVAILABLE`, `conflict: false`, `missing_evidence:
+[editability_evidence, p1_global_context]`, `action_applied: false`.
+`final_winner` (unchanged raw-score selection): `clip_
+a489590ee18f3a87bdc7`.
+
+QA MAPPING: `UNKNOWN`. The real, eligible Pimples contest WAS exercised
+(not `FAMILY_SHAPE_NOT_EXERCISED`) and Prosodic produced real, factual,
+safe-dimension `DOMINANT` evidence (not `PROSODY_INSUFFICIENT` or
+`PROSODY_CONFLICTED`) -- but this task could not retrieve the Video00
+quality-ladder / Cut.ai / Human Gold region-comparison step's own
+output this run: the job log exceeds the `get_job_logs` tool's fetch
+ceiling (confirmed at an identical 405,312-character cutoff across two
+independent calls with `tail_lines=6000` and `tail_lines=20000`,
+consistent with the ~400-430KB ceiling already documented from D-185/
+D-186B), and the ladder step runs early enough in the job that neither
+call's tail window reached it. Whether `clip_6aea1eaeaf02a42c154a`
+(Prosodic-preferred) or `clip_a489590ee18f3a87bdc7` (raw-score winner,
+unchanged) is the Cut.ai/Human-Gold-preferred candidate is therefore
+NOT verified this run -- disclosed honestly rather than assumed from
+D-186B's own differently-shaped prior run.
+
+SAFE-DIRECTIONAL AUDIT: the `DOMINANT` state is established ENTIRELY by
+the four SAFE/DIRECTIONALLY-SAFE votes (continuity, hesitation,
+restart, pause -- pause counted as the SAME lineage as continuity per
+D-188's own `DOUBLE_COUNTING_AUDIT`, not a second independent vote:
+`continuity_relation` and `pause_relation` carry the IDENTICAL value
+`clip_6aea1eaeaf02a42c154a` in this real case, i.e. one acoustic
+pause-interval measurement produced one continuity read and its
+one paired pause read, never two counted votes). All four unanimously
+favor `clip_6aea1eaeaf02a42c154a`: it is CONTINUOUS/RESTART_NOT_
+OBSERVED/HESITATION_NOT_OBSERVED against the other candidate's MILDLY_
+INTERRUPTED/RESTART_OR_INTERRUPTION_SUPPORTED/HESITATION_PATTERN_
+PRESENT. The descriptive-only firewall held: `_descriptive_emphasis_
+relation` is `NEAR_EQUAL` (a real non-decisive descriptive read,
+proving the pipeline does not silently force descriptive dimensions
+toward decisiveness), and although `_descriptive_rate_relation`/`_
+descriptive_energy_relation` both happen to also point to `clip_
+6aea1eaeaf02a42c154a`, per D-188's own unit-tested partial-order logic
+(unmodified this task) `comparison_state`/`preferred_candidate_id` are
+never a function of the descriptive dimensions -- they are read
+directly off the SAFE votes only, confirmed structurally (D-189's own
+regression suite, re-run green, never touched this task) and confirmed
+here on real audio: descriptive rate/energy/emphasis/pitch never
+independently created this preference.
+
+GAIN/RECORDING-LEVEL HONESTY: both candidates report the SAME coarse
+`energy_dynamics_state`: `HIGH_VARIATION`. No asymmetric gain signal is
+evident from this compact, bounded diagnostic (no waveform/amplitude
+values are exposed, by design -- D-187's own bounded-evidence
+contract). Regardless, this is immaterial to the DOMINANT verdict: raw
+loudness/energy is a descriptive-only dimension by construction and
+cannot create a preference under D-188's partial-order rule, confirmed
+above.
+
+NO PSYCHOLOGICAL INFERENCE: the full per-candidate/family evidence
+schema surfaced this run (continuity/hesitation/restart/pause/rate/
+energy/emphasis/pitch/confidence/missing_evidence/provenance) contains
+no confidence/nervousness/excitement/persuasiveness/authenticity/
+emotion/truthfulness field of any kind -- only observable acoustic-
+delivery states, by the schema's own construction (D-187, unmodified).
+
+GYNECOLOGIST CONTROL: reidentified via `region_source_mapping.
+gynecologist` (5 candidates, spans 82.82-112.42s) against each family's
+`semantic_fast_path_candidate`: family `tg_363669512cd9930e0c`'s fast-
+path candidate `clip_40bcbe40991e515ef342` is IN the Gynecologist span
+list -- this is the real Gynecologist family. Result: `terminal_
+besttake_confidence_state: DECISIVE` (`single_semantic_winner`),
+`bounded_finalist_arbiter_state: NOT_ELIGIBLE`, `decision: ABSTAIN`,
+`prosodic_finalist_state: null` -- Prosodic finalist arbitration did
+NOT run, exactly as expected; the D-183-DECISIVE firewall was never
+reopened for this control.
+
+OTHER FAMILIES: the remaining 5 families (`tg_059896f47e8ef7927f`,
+`tg_3276773c26da3963d4`, `tg_5d75c38bf4f54c5b7d`, `tg_
+6c4fbbf07813a14821`, `tg_70f52047fcb59af637`) are each DECISIVE (4x
+`single_semantic_winner`/`critical_coverage_dominance`) or DECISIVE_BY_
+ELIMINATION (1x `single_survivor_no_comparison_needed`, single
+candidate) -- all correctly `NOT_ELIGIBLE`/`ABSTAIN`, `prosodic_
+finalist_state: null` throughout. Prosodic finalist comparison executed
+for EXACTLY ONE family this run (the real Pimples family) -- no other
+family's classification (`VISUAL_NEAR_EQUAL_PROSODY_DOMINANT` etc.)
+applies since Prosodic never ran on them; this is the expected,
+correctly-gated outcome of the D-183-DECISIVE-first firewall, not a
+coverage gap.
+
+WINNER IMMUTABILITY: `bounded_finalist_arbiter_action_applied: false`
+on EVERY one of the 7 families (verified directly, not inferred). The
+Pimples `final_winner` is `clip_a489590ee18f3a87bdc7` -- the SAME raw-
+score top candidate D-183 would have produced with Prosodic/D-184 off.
+No winner changed on any family. NO REGRESSION on this axis.
+
+WHOLE-VIDEO REGION SUMMARY / PARITY METRICS: NOT RETRIEVED this run.
+The Video00 quality-ladder step (region CUTAI_PASS/CUTAI_GAP/REGRESSED/
+NOT_REEVALUATED summary; Selection/Boundary/overall Level-1; F1 vs
+Cut.ai/Human Gold) ran earlier in the same job than either `get_job_
+logs` call's tail window reached (see QA MAPPING above for the
+identical fetch-ceiling finding) -- disclosed as NOT_REEVALUATED /
+UNAVAILABLE this run rather than fabricated or carried over from a
+prior run's numbers. Per this task's own directive, no whole-video F1
+movement is attributed to D-189/D-190 regardless (Prosodic has no
+winner authority).
+
+D-190 VERDICT: **D. PARTIALLY PROVEN.** Every element of Verdict A is
+satisfied on the evidence actually retrieved this run: a real, eligible
+Pimples contest was exercised on real Video00 audio; Prosodic Audio V2
+produced a factual, safe-dimension-only `DOMINANT` preference (not a
+descriptive artifact); the descriptive-only firewall held; the pause/
+continuity double-counting audit is clean; Visual/Performance was
+genuinely `NEAR_EQUAL` pre-Prosody exactly as D-186B primed; the
+Gynecologist DECISIVE control was never reopened; and the winner stayed
+immutable on all 7 families. The ONE missing element of Verdict A is
+external, not evidentiary: confirmation that the Prosodic-preferred
+candidate actually matches the Cut.ai/Human-Gold reference could not be
+retrieved this run because of a job-log fetch-size ceiling on the
+quality-ladder step, not because the underlying comparison doesn't
+exist or failed -- it is the smallest missing proof, not a design gap.
+
+EXACT NEXT ENGINEERING GATE: per the directive's own Verdict-D roadmap
+branch, identify and close the smallest missing proof -- a read-only,
+no-new-RAW retrieval of the ALREADY-COMPLETED run `34406357372`'s
+quality-ladder artifact (`artifact/video00-modal-quality-ladder.json`,
+already uploaded to the existing `cutsell-video00-modal-validator-
+reports` artifact, retention 14 days) via an artifact-download path
+rather than job-log tailing, to complete the QA mapping for the SAME
+real Pimples family identified above (`clip_6aea1eaeaf02a42c154a` vs
+`clip_a489590ee18f3a87bdc7`, spans 213.34-222.98s / 198.88-211.02s) --
+no second RAW required. Only once that mapping resolves to `PROSODY_
+DOMINANT_MATCHES_BOTH` (-> full Verdict A, D-191 gate) or `PROSODY_
+DOMINANT_AGAINST_BOTH` (-> Product Owner escalation, condition A) does
+the roadmap fork further. P1 remains paused.
+
+CANONICAL PROSODIC STATUS: Prosodic Audio V2 upgraded to `REAL_MEDIA_
+DIAGNOSTIC_PROVEN` on the acoustic-evidence axis only (real Video00
+audio decoded, real per-candidate delivery evidence extracted, a real
+safe-dimension `DOMINANT` comparison produced, firewall/immutability
+both held) -- explicitly NOT `REAL_MEDIA_QA_CONFIRMED` and NOT any form
+of arbiter/winner authority; the Cut.ai/Human-Gold ground-truth match
+for this specific real family remains open per the gate above.
+
+CONFIRMATIONS: NO SECOND RAW (exactly one dispatch, `34406357372`). NO
+POST-RESULT PATCH (`cutsell_worker/`, `bounded_finalist_arbiter.py`,
+`prosodic_finalist_comparison.py`, `prosodic_audio_v2.py`, `flow_b.py`
+all untouched after the RAW completed; this entry is docs-only). NO
+WINNER AUTHORITY (`action_applied` hardcoded `false`, confirmed on
+every family, both before and after this RAW). NO provider/model
+change. NO P1 implementation.
+
+**HUMAN ACTION REQUIRED:** YES (condition A: whether to authorize the
+read-only quality-ladder-artifact retrieval above as the immediate next
+step, and whether/when to resume P1, remain Product Owner decisions).
