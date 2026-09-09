@@ -34529,3 +34529,261 @@ ONE confirmatory Video00 RAW above with all three flags on -- the first
 RAW where bounded finalist authority MAY actually change a real
 terminal winner -- as the next canonical engineering gate, and
 whether/when to resume P1, remain Product Owner decisions).
+
+---
+
+D-192: PROSODIC-ASSISTED BOUNDED FINALIST AUTHORITY -- VIDEO00 REAL-
+MEDIA QUALIFICATION (post D-191, ONE RAW, authority ON, no second RAW,
+no post-result patch, no provider/model change, no threshold/weight
+tuning)
+
+BRANCH/HEAD: `feature/runpod-pod-on-demand` @ `11d00b94dbf80369eaa854e
+00c0f102e404c1906` (D-192 plumbing commit).
+
+RAW: workflow run `34414058142` (job `102674814199`), commit `11d00b9`,
+source `Editdna longform validation/VIDEO-2026-07-30-09-18-03.mp4`,
+dispatched with `bounded_finalist_arbiter_enabled=1` AND `prosodic_
+finalist_arbiter_diagnostics_enabled=1` AND `bounded_finalist_arbiter_
+authority_enabled=1`, all other overlays left at code default. Job
+conclusion "failure" -- EXCLUSIVELY the same two pre-existing legacy
+validator steps ("Verify frozen Selection lock", "Verify Human Gold
+regression QA") that fail on every prior RAW this session; the Modal
+benchmark, D-186A/D-190/D-192's own compact-diagnostics steps, and
+Modal teardown all succeeded. Exactly ONE dispatch; no second RAW.
+
+PLUMBING (pre-RAW, commit `11d00b9`): new `bounded_finalist_arbiter_
+authority_enabled` workflow_dispatch input mirroring D-185's/D-190's
+own inputs (default off, byte-identical otherwise), layered strictly
+on top of `bounded_finalist_arbiter_enabled`; a new, dedicated, late
+"D-192 Bounded finalist authority compact diagnostics" step (same
+D-119/.../D-190 pattern) that pure-projects `artifact/video00-
+modal.json`'s already-computed D-183/D-184/D-188/D-191 fields --
+recomputes nothing. No `cutsell_worker` file touched this commit.
+
+AUTHORITY RUN SUMMARY: `{status: evaluated, finalist_authority_
+evaluated_count: 7, _applied_count: 1, _no_action_count: 6, _meaning_
+block_count: 0, _d123_block_count: 0, _boundary_block_count: 0,
+_conflict_block_count: 0, _winner_changed_count: 1}`. `applied_count`
+and `winner_changed_count` reconcile exactly with the ONE per-family
+change found below -- no hidden mutation.
+
+PIMPLES REIDENTIFICATION (source-span/text-hash, via `region_source_
+mapping.pimples`, NOT old clip ids -- clip ids differ from every prior
+run as expected): family `tg_eb6555e017a0f595d9`, finalists `clip_
+b5b00f02926382a46d65` (198.88-211.02s, hash `6e681b359143` -- IDENTICAL
+hash to D-190's `clip_a489590ee18f3a87bdc7`, confirming the same
+underlying source content) and `clip_efc0184a8676bd78a224`
+(213.34-222.98s, hash `8c30a9ccdbe3` -- IDENTICAL hash to D-190's
+`clip_6aea1eaeaf02a42c154a`). `meaning_sufficient_candidates` = exactly
+these two. This IS the same real contested Pimples family D-190/D-190.1
+established, reidentified independently this run by content, not id.
+
+PIMPLES D-183: `terminal_besttake_confidence_state: NON_DECISIVE`,
+reason `raw_score_difference_without_structured_dominance`, top
+candidate `clip_b5b00f02926382a46d65` (score `0.6671`), runner-up
+`clip_efc0184a8676bd78a224` (score `0.621`), margin `0.0461` --
+byte-identical to D-190's own margin on this same family, confirming
+deterministic, unmoved evidence. `structured_dominance_present: false`,
+`conflict_present: false`.
+
+PIMPLES VISUAL/PERFORMANCE: `bounded_finalist_arbiter_performance_
+status: NEAR_EQUAL`. Editability: `NO_EVIDENCE` (`bounded_finalist_
+arbiter_editability_status`).
+
+PIMPLES PROSODIC: `prosodic_finalist_state: DOMINANT`, `preferred_
+candidate_id: clip_efc0184a8676bd78a224`, all four SAFE votes unanimous
+toward it (`continuity_relation`/`hesitation_relation`/`restart_
+relation`/`pause_relation` all = `clip_efc0184a8676bd78a224`),
+`conflict: false` -- the exact same safe-dimension shape D-190 proved
+on this family (D-190's own descriptive-only-firewall audit --
+emphasis `NEAR_EQUAL`, rate/energy non-causal per D-188's unmodified
+partial-order logic -- is inherited unchanged here: `prosodic_finalist_
+comparison.py` was not touched by D-191/D-192 and this run reproduces
+the byte-identical margin/safe-vote shape, so the same audit result
+applies; no new descriptive-dimension dump was re-run in this compact
+step, per its own "no waveform/transcript dump" scope).
+
+PIMPLES D-184: `eligible: true`, `state: PREFERENCE_SUPPORTED`,
+`decision: PREFER_CANDIDATE`, `preferred_candidate_id: clip_
+efc0184a8676bd78a224`, `meaning_parity: CONSISTENT`, `prosodic_status:
+AVAILABLE`, `conflict: false`.
+
+PIMPLES D-191/D-192 AUTHORITY -- THE FIRST REAL WINNER MUTATION: `
+enabled: true`, `evaluated: true`, `state: APPLIED`, `winner_before:
+clip_b5b00f02926382a46d65` (198.88-211.02s, the OLD raw-score-only
+realization D-190.1 confirmed both Cut.ai and Human Gold REJECT),
+`supported_candidate_id: clip_efc0184a8676bd78a224`, `winner_after:
+clip_efc0184a8676bd78a224` (213.34-222.98s, the D-190.1-confirmed
+realization BOTH Cut.ai and Human Gold CHOOSE), `terminal_confidence:
+NON_DECISIVE`, `arbiter_state: PREFERENCE_SUPPORTED`, `arbiter_
+decision: PREFER_CANDIDATE`, `meaning_passed: true`, `d123_blocked:
+false`, `boundary_blocked: false`, `conflict: false`, `applied: true`,
+`source: bounded_finalist_arbiter` (never `"prosodic_audio"` -- Prosody
+is evidence, not authority), `reason: structured_evidence_sources_
+unanimously_prefer_one_candidate`. `final_winner` on this family's
+`take_judge_groups` row is confirmed `clip_efc0184a8676bd78a224` --
+the mutation is real and reached the actual selection output.
+
+PIMPLES CUT.AI/GOLD QA (per D-190.1's own Product-Owner-supplied
+confirmation, spans matched by identical text hash -- this run's own
+quality-ladder step output could not be retrieved this session, same
+job-log fetch-ceiling limitation documented at D-190/D-190.1; the QA
+mapping below is therefore the D-190.1 record for this identical
+source span, not independently re-verified this run):
+- BEFORE (`clip_b5b00f02926382a46d65`, 198.88-211.02s): `false_keep`,
+  `LEVEL_1`, `take_choice_against_both_references` -- Cut.ai rejects,
+  Human Gold rejects.
+- AFTER (`clip_efc0184a8676bd78a224`, 213.34-222.98s): quality-ladder
+  core `213.55-221.55` overlaps; `missing_delivery`, `LEVEL_1`,
+  `cutai_keep=true`, `gold_keep=true` -- Cut.ai chooses, Human Gold
+  chooses.
+
+PIMPLES REFERENCE-IMPACT CLASSIFICATION: **IMPROVED_VS_BOTH.**
+
+PIMPLES RESULT: **AUTHORITY_CHANGED_WINNER_MATCHES_BOTH.**
+
+GYNECOLOGIST CONTROL: reidentified via `region_source_mapping.
+gynecologist` against each family's `final_winner`: family `tg_
+ec8d7d0c4c891c2f8d`'s winner `clip_4b7df282f72b6af352af` is IN the
+Gynecologist span list (95.52-104.32s, hash `90380eee5938` --
+identical hash to D-190's own Gynecologist winner). Result: `terminal_
+besttake_confidence_state: DECISIVE` (`single_semantic_winner`),
+`bounded_finalist_arbiter_state: NOT_ELIGIBLE`/`ABSTAIN`, Prosodic
+finalist arbitration NOT run (`prosodic_finalist_state: null`),
+`bounded_finalist_authority_state: NOT_ELIGIBLE`, `winner_before ==
+winner_after == clip_4b7df282f72b6af352af`. Exactly the expected
+negative control -- D-192 authority never reopened it.
+
+D-183 DECISIVE FIREWALL: the remaining 5 non-Pimples, non-Gynecologist
+families (`tg_2662badcc776dff756` DECISIVE_BY_ELIMINATION, `tg_
+3d9e8c1ffb93579f56`/`tg_460e444ec6f886cc3b`/`tg_7b1356b9d62a302bfb`/
+`tg_8d24abf343e0aa4198` DECISIVE) are ALL `bounded_finalist_authority_
+state: NOT_ELIGIBLE`, `applied: false`, `winner_before == winner_
+after` in every case. Firewall held on every DECISIVE/DECISIVE_BY_
+ELIMINATION family this run, no exceptions.
+
+D-184 ABSTENTION FIREWALL: `finalist_authority_no_action_count: 6` --
+every one of the 6 non-eligible families produced `NOT_ELIGIBLE`
+(D-184's own eligibility gate, arbiter never even reaching a verdict),
+consistent with "no forced pick" holding universally; no family this
+run reached D-184 `NEAR_EQUAL`/`CONFLICTED`/`INSUFFICIENT_EVIDENCE` to
+separately test that branch (only the DECISIVE firewall and the ONE
+PREFERENCE_SUPPORTED case were exercised) -- see BestTake-gap status
+below.
+
+MEANING FIREWALL: `bounded_finalist_authority_meaning_passed: true` on
+the one applied family (`meaning_parity: CONSISTENT`); zero families
+this run show `BLOCKED_BY_MEANING` (`finalist_authority_meaning_block_
+count: 0`) -- the applied replacement is meaning-sufficient, negation-
+safe, number-safe, factual-term-safe by D-184's own already-enforced
+P0 gate (unchanged this task).
+
+D-123 FIREWALL: `finalist_authority_d123_block_count: 0` this run --
+no family carried an actionable D-123 conflict; the Pimples family's
+own `d123_blocked: false` confirms the check ran and found nothing to
+block. No duplicate authority observed.
+
+BOUNDARY FIREWALL: `finalist_authority_boundary_block_count: 0` -- as
+disclosed at D-191, no independent Boundary-ownership comparator exists
+in live wiring, so this firewall could not be exercised as a REAL block
+this run (honestly reported, not fabricated).
+
+VISUAL/PROSODY CONFLICT FIREWALL: `finalist_authority_conflict_block_
+count: 0`, and the Pimples family's own `bounded_finalist_arbiter_
+conflict: false`/`structured_conflict: false` -- Visual (`NEAR_EQUAL`)
+and Prosody (`DOMINANT` toward the same candidate the arbiter
+ultimately preferred) never disagreed this run; no real Visual-vs-
+Prosody conflict occurred to test the ABSTAIN branch.
+
+OTHER AUTHORITY APPLICATIONS: exactly ONE (`applied_families` has a
+single entry -- the Pimples family above). No collateral changes on any
+other family; no regression attributable to authority anywhere in this
+run.
+
+FAMILY/PROPOSITION FREEZE: confirmed. `meaning_sufficient_candidates`
+for the Pimples family is unchanged (`[clip_b5b00f02926382a46d65,
+clip_efc0184a8676bd78a224]`) before and after; only `selected_clip_id`/
+`final_winner` changed. No family membership, candidate generation, or
+meaning-sufficiency classification was touched.
+
+BOUNDARY/PACING/RENDERER: confirmed unchanged -- this task's own diff
+(`git diff --stat HEAD` before commit `11d00b9`) touched ONLY the
+workflow YAML; zero Boundary/Pacing/Renderer file exists in that diff.
+
+WHOLE-VIDEO REGION SUMMARY / PARITY METRICS: NOT RETRIEVED this run.
+The "Video00 quality ladder" step (job step #22) ran earlier in the
+same job than the `get_job_logs` fetch window reached (confirmed: the
+full 411,181-character fetch, an near-identical ceiling to D-190's own
+405,312-character finding, did not contain the ladder step's output) --
+the SAME documented fetch-ceiling limitation from D-190/D-190.1, not a
+new problem. Disclosed as NOT_REEVALUATED/UNAVAILABLE rather than
+fabricated or carried over. Per this task's own directive, no whole-
+video F1 movement is attributed to D-191/D-192 regardless; the Pimples-
+specific QA classification above (IMPROVED_VS_BOTH) rests on D-190.1's
+own already-recorded reference spans/classifications for this
+byte-identical source content, not on this run's own ladder output.
+
+D-192 VERDICT: **A. PROSODIC-ASSISTED BOUNDED FINALIST AUTHORITY REAL-
+MEDIA PROVEN.** At least one legitimate authority application occurred
+(the Pimples family); the supported candidate came from D-184's own
+verdict; every firewall that could be exercised held (D-183 DECISIVE on
+5 families, D-184 NOT_ELIGIBLE on 6, meaning/D-123/Boundary/conflict
+all at zero blocks with the one applied family's own gates all passing
+cleanly); replacement provenance is correct (`authority_source:
+bounded_finalist_arbiter`, never Prosody); the primary real case
+improves QA against BOTH references (`IMPROVED_VS_BOTH`); and there is
+no collateral regression anywhere in this run (`applied_families`
+length 1, zero other state changes).
+
+PROSODIC-ASSISTED TERMINAL BESTTAKE GAP: **PARTIALLY_CLOSED.** The
+exact real-media shape D-190/D-191 were built to prove (2 meaning-
+sufficient finalists, NON_DECISIVE terminal state, Visual NEAR_EQUAL,
+Prosodic safely DOMINANT, D-184 PREFERENCE_SUPPORTED) is now closed end
+to end on real Video00 media with a positive commercial outcome. This
+is NOT a claim that BestTake is globally solved: this run never
+exercised D-183 `TIED`/`CONFLICTED` terminal states, a 3-finalist real
+case, a D-123/Boundary-blocked real case, or a real Visual-vs-Prosody
+conflict -- those branches remain offline-proven (D-191's own 44-test
+suite) but not yet real-media-qualified.
+
+VIDEO00 RAW -> CUT.AI STATUS: **NOT_YET.** One region (Pimples)
+improving against both references does not establish whole-video
+parity; D-097.11's own prior finding (46 of 53 physical Level-1 seconds
+still outstanding, Product Owner territory) is unaffected by this
+task, and this run's own whole-video metrics were not retrievable (see
+above) to even attempt re-measurement. Per this task's own explicit
+instruction, successful Pimples correction is never equated with
+complete Video00 parity.
+
+CANONICAL AUTHORITY STATUS: bounded finalist authority (D-191) upgraded
+to `REAL_MEDIA_QUALIFIED` for the specific shape proven above --
+explicitly NOT expanded, NOT generalized to untested branches, and
+still gated behind its own default-OFF flag in every other workflow
+run.
+
+EXACT NEXT ENGINE GATE: per this task's own Verdict-A roadmap, do NOT
+expand this authority and do NOT immediately add Articulation. The
+canonical next major capability is **P1 -- EDITORIAL MOMENT & SEQUENCE
+UNDERSTANDING** -- NOT implemented in this task; the next Product Owner
+gate should be a bounded P1 architecture/forensic task (documentation/
+investigation only, per D-098's own precedent), not a coding task.
+
+P1 STATUS: remains paused; per this verdict, ready to become the next
+candidate objective once the Product Owner authorizes a bounded P1
+architecture/forensic investigation.
+
+CONFIRMATIONS: NO SECOND RAW (exactly one dispatch, `34414058142`). NO
+POST-RESULT PATCH (`cutsell_worker/` untouched after the RAW completed;
+this entry and its own pre-RAW commit are the only changes). NO
+AUTHORITY EXPANSION (the flag/eligibility contract is byte-identical to
+D-191's own offline implementation; nothing in this task widened
+eligibility, added a new evidence source, or changed the P0/D-123/
+Boundary firewalls). NO threshold/weight tuning. NO provider/model
+change. NO P1 implementation.
+
+**HUMAN ACTION REQUIRED:** YES (condition F: a real rendered artifact
+from this RAW exists and awaits human Watch+Listen; condition A: a
+bounded P1 architecture/forensic task is the recommended next gate and
+requires Product Owner authorization to begin; whether/how to close the
+remaining PARTIALLY_CLOSED BestTake-gap branches, if at all, before
+moving to P1, is also a Product Owner decision).
