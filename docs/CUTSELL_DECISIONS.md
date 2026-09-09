@@ -26328,3 +26328,341 @@ existence, and their own full test suites pass unchanged.
 **HUMAN ACTION REQUIRED:** YES (condition A) -- whether to authorize
 D-167 (Language Spine Phase B: LanguageUtterance + LanguageAttempt) as
 the next implementation task is a Product Owner decision.
+
+
+==================================================
+D-167 -- WATCH+LISTEN ZONE-USABILITY REFINEMENT V2
+(POST D-164 REAL-MEDIA FINDING, POST D-166 LANGUAGE SPINE PHASE A)
+==================================================
+
+**STATUS: OFFLINE PROVEN (Verdict A).** Branch
+`feature/runpod-pod-on-demand`, built on D-166's HEAD `e4df989`. Pure,
+additive REFINEMENT of the FACTUAL RESOLUTION of the existing Watch+
+Listen zone-usability signal -- no new authority, no `selected_clip_id`
+mutation, no DeliveryScorer/D-123/D-128/Family Formation/D-150/Boundary/
+Pacing/Language-Spine change.
+
+**New module `cutsell_worker/watch_listen_zone_usability_v2.py`.**
+`watch_listen_understanding.py` (D-157) and `watch_listen_besttake_
+evidence.py` (D-163) both remain at LITERAL ZERO DIFF (verified via
+`git diff --stat` and module-leaf tests) -- see "D-163 guard
+compatibility" below for why this task's own "update the adapter only as
+needed" instruction resolved to zero actual need. `language_spine.py`
+(D-166) is also confirmed untouched.
+
+==================================================
+SATURATION ROOT CAUSE (this task's own forensic)
+==================================================
+
+`watch_listen_understanding._usability_for_zone` (D-157, unchanged):
+
+    if any(e.kind in _DEFECT_KINDS for e in events):
+        return USABILITY_UNUSABLE if zone == ZONE_DELIVERY else USABILITY_QUESTIONABLE
+
+A single boolean OR over event PRESENCE -- zero consideration of
+duration, confidence, isolation, or fraction of the zone affected.
+`_DEFECT_KINDS` bundles FIVE materially different behavioral classes
+(ordinary hand/body/facial motion, recording-process markers, false
+starts, abandoned-attempt confirmations, breaking-character) into one
+flat set with identical treatment. D-164's real-media finding
+(`docs/CUTSELL_DECISIONS.md` D-164) is the direct, confirmed consequence:
+two real candidates with materially different raw event counts/durations
+(3 events/0.2s vs. 8 events/0.533s, per D-122's own factual projection of
+the SAME underlying events) both landed on `UNUSABLE`, indistinguishable.
+
+**Event-kind inventory (audited, classified):** `camera_disengagement_
+candidate`/`facial_expression_shift_candidate`/`body_reset_candidate`/
+`hand_motion_reset_candidate` (Track C, real, D-114) -- V1 gives all four
+identical any-presence treatment; `wrong_take`/`retry_setup` (D-100
+deterministic confirmation), `false_start`, `breaking_character`,
+recording-process kinds -- all bundled identically; `audio_silence_
+interval` -- NOT in `_DEFECT_KINDS` at all in V1 (audio evidence never
+drives zone usability, consistent with the existing Audio Honesty
+finding). Full table in `watch_listen_zone_usability_v2.py`'s own module
+docstring.
+
+==================================================
+ZONE-USABILITY V2 CONTRACT
+==================================================
+
+Preserves V1's categorical 4-state contract unmodified and adds ONE new
+intermediate state, `IMPAIRED`, between `QUESTIONABLE` and `UNUSABLE`
+(the four shared string values are identical to V1's own). Per-zone
+`ZoneUsabilityResult`: `zone_usability`, `zone_severity`, `event_count`,
+`event_duration_total_sec`, `zone_duration_sec`, `affected_fraction`,
+`isolated_event`, `repeated_defect`, `sustained_defect`,
+`dominant_event_kinds`, `confidence`, `provenance`, `zone_conflict`. No
+winner field. `CandidateZoneUsabilityV2` composes ENTRY/DELIVERY/EXIT
+results plus a Boundary-firewalled `overall_usability` and the reused
+D-163 CASE A/B/C classification.
+
+==================================================
+SEVERITY CONTRACT
+==================================================
+
+`NONE`/`MILD`/`MATERIAL`/`SEVERE`/`UNKNOWN`/`MIXED` -- a small, explicit,
+inspectable STRUCTURAL lookup table over (materiality tier x pattern),
+never a weighted formula or numeric master score. Every cell is an
+individually-justifiable editorial classification (module's own
+`_SEVERITY_TABLE`).
+
+==================================================
+DELIVERY-DURATION NORMALIZATION
+==================================================
+
+`affected_fraction = trusted defect duration / zone duration`, computed
+from the SAME `DeliverySpan` (word-envelope, D-115, unchanged) D-122's
+own `case_b_performance_evidence.py` already uses for its `event_density`
+field -- this task REUSES that established normalization concept rather
+than inventing a second one. ENTRY/EXIT zone durations are newly derived
+(candidate-span-to-delivery-start / delivery-end-to-candidate-span-end)
+since D-115 never named an explicit ENTRY/EXIT span object.
+
+==================================================
+EVENT-DURATION RESULT
+==================================================
+
+Real interval `end - start` per event (`PositionedEvent`, D-115,
+unchanged) -- never fabricated. A zero-width point event contributes
+exactly `0.0`, honestly, never a manufactured nonzero span.
+
+==================================================
+EVENT-KIND SEVERITY RESULT
+==================================================
+
+Three materiality tiers, reused kind-sets (never new kind names):
+`HIGH_MATERIALITY_KINDS` (breaking_character, wrong_take, retry_setup),
+`MODERATE_MATERIALITY_KINDS` (false_start, recording-process, camera
+disengagement), `LOW_MATERIALITY_KINDS` (facial/body/hand motion family
+-- the ordinary-expressive-motion kinds).
+
+==================================================
+ORDINARY-MOTION FIREWALL
+==================================================
+
+**PROVEN**: an ISOLATED LOW-materiality event (ordinary hand/body/facial
+motion, brief, alone) produces `SEVERITY_NONE`/`USABILITY_USABLE` --
+literally zero penalty, not merely a small one (`test_02`, `test_09`,
+`test_10`). Motion becomes negative evidence only once it is REPEATED or
+SUSTAINED (continuity/delivery actually affected), exactly this task's
+own requirement.
+
+==================================================
+ISOLATED / REPEATED / SUSTAINED RESULT
+==================================================
+
+`ISOLATED` = exactly one trusted event; `REPEATED` = >= 2 trusted events
+below the sustained threshold; `SUSTAINED` = trusted defect duration
+covers >= half of the zone's OWN duration (`_SUSTAINED_FRACTION = 0.5`,
+a self-referential "majority of its own zone" definition, not an
+externally-tuned BestTake cutoff -- no authority reads this constant
+directly, per this task's own "no new opaque score" instruction). A
+brief isolated event never converts DELIVERY to UNUSABLE -- proven
+(`test_02`).
+
+==================================================
+CASE A / B / C RESULT
+==================================================
+
+Reused verbatim from D-163's own constants (`CASE_A_BOUNDARY_ONLY`/
+`CASE_B_DELIVERY_OWNED`/`CASE_C_AMBIGUOUS`/`CASE_CLEAN`), never re-
+derived with new semantics. CASE A (ENTRY/EXIT-only) never rejects the
+whole take (`test_11`, `test_12`); CASE B (DELIVERY-owned) is legitimate
+BestTake evidence; CASE C (delivery unavailable) is honestly uncertain
+(`test_13`).
+
+==================================================
+BOUNDARY FIREWALL
+==================================================
+
+**PROVEN**: `_overall_usability_v2` caps ENTRY/EXIT's own contribution at
+`QUESTIONABLE` regardless of how severe their OWN zone result is --
+`overall_usability` can reach `IMPAIRED`/`UNUSABLE` ONLY through
+DELIVERY. An ENTRY-only or EXIT-only defect, however severe in isolation,
+never produces a whole-take rejection (`test_11`, `test_12`).
+
+==================================================
+AUDIO-SIGNAL RESULT / SHORT-PAUSE / LONG-INTERRUPTION RESULT
+==================================================
+
+`audio_silence_interval` is NOT a member of `_DEFECT_KINDS` -- it is
+never classified as a defect event by V2 regardless of duration, proven
+identically for a short pause (`test_14`) and a long interruption
+(`test_15`). Audio Honesty preserved: no tone/emotion/prosody inference
+anywhere in this module.
+
+==================================================
+DOUBLE-COUNTING RESULT
+==================================================
+
+`DOUBLE_COUNTING_AUDIT_V2` extends D-163's own audit language: duration/
+severity/usability fields classified `PARTIALLY_CORRELATED` (same root
+events as MediaSignals/D-097/D-122, different aggregation); `pattern`
+classified `INDEPENDENT` (no existing consumer counts isolated-vs-
+repeated-vs-sustained at all); `dominant_event_kinds`/`zone_conflict`
+classified `SAME_SOURCE_DUPLICATE` (direct relabeling of existing
+fields).
+
+==================================================
+MISSING-EVIDENCE RESULT
+==================================================
+
+No delivery span -> `UNKNOWN`/`UNKNOWN`, never `USABLE` -- "not measured"
+is never equated with "clean" (`test_13`, `test_24`).
+
+==================================================
+CONFLICT RESULT
+==================================================
+
+A zone whose D-157 `conflict_flags` intersect it forces `SEVERITY_MIXED`
+-- never a forced categorical certainty (`test_23`).
+
+==================================================
+CLEAN / BRIEF-DEFECT / SUSTAINED-DEFECT RESULTS
+==================================================
+
+Clean delivery -> `NONE`/`USABLE` (`test_01`). Brief isolated defect ->
+categorically distinct from a sustained one covering >= 50% of the same
+zone (`test_03` vs. `test_02`; `test_25`/`test_26` clean-vs-mild-vs-
+severe ladder).
+
+==================================================
+DURATION-NORMALIZATION / DELIVERY-LENGTH-NORMALIZATION RESULTS
+==================================================
+
+Same event count, different durations -> different `event_duration_
+total_sec`/`affected_fraction`, and a genuine categorical distinction
+when duration crosses the sustained threshold (`test_16`). Identical
+defect duration over a SHORTER delivery produces a WORSE (higher)
+`affected_fraction` than the same defect over a longer delivery
+(`test_17`) -- delivery length is honestly normalized, not ignored.
+
+==================================================
+D-164 ABSTRACT REPLAY
+==================================================
+
+Abstract fixture (never real ids/text) matching the real finding's shape:
+Candidate A -- multiple low-materiality events, isolated-magnitude total;
+Candidate B -- similar event count, much larger total DELIVERY-affecting
+duration. V1 (unchanged): both `UNUSABLE`, indistinguishable. V2: exposes
+genuinely differing `event_duration_total_sec`/`affected_fraction`, and
+produces a real categorical distinction once B's duration crosses the
+sustained threshold (`test_29`) -- proving A and B are no longer
+indistinguishable solely because each has a DELIVERY event.
+
+==================================================
+D-163 GUARD COMPATIBILITY
+==================================================
+
+This task's own directive instructs "update `watch_listen_besttake_
+evidence.py` ONLY AS NEEDED." Because `CandidateZoneUsabilityV2` +
+`zone_usability_v2_dominates` (an ordinal comparison mirroring D-163's
+own `_performance_dominates` shape exactly) fully satisfy "improve
+D-163's factual comparison input" WITHOUT touching D-163's file at all,
+the actual need resolved to ZERO -- `watch_listen_besttake_evidence.py`
+is confirmed byte-identical (module-leaf test + `git diff --stat`). D-163's
+guard remains fully diagnostic-only, unmodified, and its own 64-test
+suite passes unchanged.
+
+==================================================
+WINNER IMMUTABILITY / FAMILY / PROPOSITION-ATTEMPT / LANGUAGE-SPINE
+NO-CHANGE
+==================================================
+
+No `selected_clip_id` field exists anywhere in the new module (structural
+proof). `take_grouping*.py`/`hybrid_session_cleanup.py`/`semantic_idea_
+equivalence.py`/`attempt_relationship_authority.py`/`language_spine.py`
+all confirmed unaware of `watch_listen_zone_usability_v2.py`'s existence.
+
+==================================================
+D-123 / D-128 / D-150 / BOUNDARY / PACING REGRESSION
+==================================================
+
+All confirmed unaware of the new module (module-leaf grep tests); their
+own full test suites (D-123, D-128, D-150, 5 Boundary files, D-142
+pacing) pass unchanged.
+
+==================================================
+RENDER BASELINE
+==================================================
+
+`test_cutsell_clean_worker_render.py`/`test_cutsell_live_render_qc.py`
+pass unchanged.
+
+==================================================
+DIAGNOSTICS
+==================================================
+
+Per-candidate row (`candidate_zone_usability_v2_row`): all 11 required
+fields (`watch_listen_zone_usability_v2`, `watch_listen_entry_severity`,
+`watch_listen_delivery_severity`, `watch_listen_exit_severity`,
+`watch_listen_delivery_event_count`, `watch_listen_delivery_event_
+duration_sec`, `watch_listen_delivery_duration_sec`, `watch_listen_
+delivery_affected_fraction`, `watch_listen_delivery_pattern`, `watch_
+listen_dominant_event_kinds`, `watch_listen_zone_conflict`). Tail-safe
+summary (`zone_usability_v2_diagnostics`): all 8 required counts
+(`usable_count`/`questionable_count`/`impaired_count`/`unusable_count`/
+`unknown_count`/`isolated_defect_count`/`repeated_defect_count`/
+`sustained_defect_count`) -- no family/clip ids in the aggregate (proven,
+`test_tail_safe_summary_counts_and_no_ids`). No transcript dump.
+
+==================================================
+TARGETED TESTS
+==================================================
+
+New D-167 suite: 49/49 pass. Targeted regression battery (D-167 x49 +
+D-166 x48 + D-163 x64 + D-157 + D-123 + D-128 + D-150 + Boundary x5 +
+D-142 pacing + render x2): **361/361 pass, zero failures.**
+
+==================================================
+FULL OFFLINE SUITE
+==================================================
+
+`python -m pytest tests/ -q --ignore=tests/test_semantic_stitch.py`:
+**3790 passed, 13 subtests passed, 5 failed, in 169.84s.** Delta from the
+D-166 baseline (3741 passed) is exactly +49 -- the new D-167 test count.
+The 5 failures are the SAME pre-existing, already-documented, D-167-
+unrelated failures confirmed identical across this entire session
+(`test_hybrid_story_guard_incomplete_retry.py::test_incomplete_failed_
+retry_is_covered_when_prior_delivery_preserves_numbers_and_negation`, and
+4 in `test_video00_modal_hybrid_semantic_parity.py` -- D-044 Modal
+env-secret masking overlay, unrelated to Zone Usability V2).
+
+==================================================
+NEW FAILURES
+==================================================
+
+Zero.
+
+==================================================
+D-167 VERDICT
+==================================================
+
+**A. ZONE-USABILITY REFINEMENT OFFLINE PROVEN.**
+
+==================================================
+NEXT ENGINE STEP (NOT authorized here)
+==================================================
+
+Per this task's own instruction, do NOT launch Video00 automatically.
+Next canonical build task returns to **D-168 -- Language Spine Phase B**
+(`LanguageUtterance` + `LanguageAttempt`, built on D-166's Word/Phrase
+foundation). After that, a Product Owner decision on whether to qualify
+Zone Usability V2 on Video00 first or continue Language Spine
+Proposition/Relation integration, based on evidence at that point.
+
+==================================================
+CONFIRMATIONS
+==================================================
+
+NO RAW. NO provider/network call anywhere in the new module (verified
+structurally, `test_40_no_provider_network_call`). NO BestTake authority
+-- the module produces evidence only; `zone_usability_v2_dominates` is an
+offline comparison utility, not wired to any authority or pipeline call
+site. `watch_listen_understanding.py` (D-157) and `watch_listen_besttake_
+evidence.py` (D-163) both confirmed at literal zero diff.
+
+**HUMAN ACTION REQUIRED:** YES (condition A) -- whether to authorize
+D-168 (Language Spine Phase B) as the next implementation task, and/or
+whether to qualify Zone Usability V2 on Video00 real media in a future,
+separately-scoped task, are Product Owner decisions.
