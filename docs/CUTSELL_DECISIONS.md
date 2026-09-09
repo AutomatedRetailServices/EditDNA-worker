@@ -30362,3 +30362,131 @@ authorization.
 **HUMAN ACTION REQUIRED:** YES (condition A) -- authorizing the D-177
 Video00 RAW named above is a Product Owner decision. This document does
 not launch it.
+
+---
+
+## D-178A.1: Canonical status / dependency correction (post D-178A)
+
+**Documentation only. Corrects stale status + dependency direction in
+D-178A's Section 15. No engine change, no RAW, no provider call, no
+`cutsell_worker/*.py`/`tests/*.py`/workflow file touched, no behavior
+change.**
+
+D-178A is broadly accepted; this task does NOT rewrite or remove its new
+architecture. It makes exactly the corrections the Product Owner named,
+inline in `docs/CUTSELL_CANONICAL_ENGINE_ARCHITECTURE_D098.md`'s Section
+15, plus this entry appended to the decision log.
+
+**Correction 1 -- Language Spine current status.** D-178A carried forward
+a stale D-165-era statement ("PARTIALLY EXISTS; typed hierarchy +
+normalization must be built") as if it were the current engine state.
+D-165's own verdict was accurate AT THE TIME (forensic/design-only task,
+zero implementation) and is preserved, untouched, as HISTORICAL
+PRE-IMPLEMENTATION STATE (Section 14.13/14.22, new Section 15.2.1 marks
+it explicitly historical). Section 15.2's restatement is corrected to:
+**LANGUAGE SPINE FOUNDATION: OFFLINE_PROVEN.** D-166 implemented
+`LanguageWord`+`LanguagePhrase` (`language_spine.py`, OFFLINE PROVEN);
+D-168 implemented `LanguageUtterance`+`LanguageAttempt`
+(`language_utterance_attempt.py`, OFFLINE PROVEN); D-169 implemented
+`PropositionCandidate`+`RelationEvidence`
+(`language_proposition_relation.py`, OFFLINE PROVEN, de-conflating
+proposition identity from retry-family identity at the type-system level
+for the first time). D-171 then began INCREMENTAL, bounded PRODUCTION
+consumer migration (`language_spine_consumer_migration.py`): exactly 2
+of 3 candidate consumer clusters migrated (proposition/retry divergence
+evidence in `take_grouping_provider.py`; continuation evidence in
+`recording_meta_continuation.py`), fail-open by construction, the third
+correctly skipped as non-duplicative. **Explicitly NOT claimed:** that
+all transcript consumers have migrated -- Section 14.12's own audit found
+~58 independent ad hoc tokenizers; D-171 migrated 2, ~56 remain
+unchanged. No Family/BestTake/Proposition/final-Relation/Boundary/Pacing
+authority was changed by D-166/D-168/D-169/D-171 (unchanged from each
+entry's own record).
+
+**Correction 2 -- Editorial Moment / Whole-Video Reasoning dependency
+direction.** D-178A's original Section 15.4/15.5 text and its 15.10
+diagram placed Editorial Moment & Sequence Understanding and Whole-Video
+Editorial Reasoning UPSTREAM of Behavior State/Proposition/Family,
+phrased as "widening the evidence" those structured stages consume --
+which read as if the new layers precede or replace the structured
+objects they actually depend on. Corrected: both are HIGHER-ORDER
+UNDERSTANDING layers that CONSUME already-produced evidence from
+Parallel Perception, Watch+Listen, Behavior State, and the Language
+Spine's `LanguageAttempt`/`PropositionCandidate`/`RelationEvidence`; they
+may form higher-order HYPOTHESES (recording process, clean audience
+delivery, preassembled final sequences, global redundancy, sequence
+structure) that Stable Family/Realization Formation may then consume --
+they do NOT independently recreate Behavior State, Attempt Identity,
+Proposition Identity, or Relation Identity. 15.10's Cut.ai Parity Stack
+diagram is corrected accordingly: RAW -> Parallel Perception -> Watch+
+Listen -> **STRUCTURED LOCAL UNDERSTANDING** (Behavior State +
+LanguageWord/Phrase/Utterance/Attempt + PropositionCandidate/
+RelationEvidence) -> Editorial Moment & Sequence Understanding ->
+Whole-Video Editorial Reasoning -> **Stable Family / Realization
+Formation** -> BestTake -> Freeze -> Ordering -> Boundary -> Pacing ->
+Renderer. Dependency direction only -- authorizes no implementation.
+
+**Correction 3 -- Continuation / Minimal Composite placement.** D-178A's
+original diagram implied Continuation/Minimal Composite is a single
+universal stage always after BestTake. Corrected to two distinct
+conceptual cases: **Case A (Realization Construction)** -- when
+complementary source-real pieces are REQUIRED to construct one
+meaning-sufficient realization at all, the bounded composite is built as
+part of Stable Family/Realization Formation, BEFORE final realization
+competition and Freeze, so BestTake can evaluate a real, complete,
+selectable realization -- this is the already-existing
+`CompositeResolver`/`RealizationResolver` behavior (Section 3's L6 row,
+unchanged code), only its correct pipeline position is now named
+explicitly. **Case B (Post-Selection Completion)** -- a later bounded
+continuation/repair may exist only where already supported by an
+existing canonical authority (e.g. Boundary's own edge-only physical
+repair, D-177) and must never implicitly mutate meaning/family doctrine
+-- not a second composite mechanism. Canonical doctrine unchanged:
+complete same-job realizations compete; complementary incomplete pieces
+form only the minimum sufficient source-real realization when all 7
+safety conditions (source-real, same proposition/slot, nonduplicate,
+meaning-safe, correct order, Boundary-isolatable, minimum necessary
+pieces) pass.
+
+**Realization Formation named.** "STABLE FAMILY / REALIZATION FORMATION"
+is now the explicit name for the pre-BestTake conceptual stage,
+comprising complete individual realizations (the ordinary case) and,
+only when necessary/eligible (Case A above), minimum sufficient
+composite realizations. Explicitly does NOT imply every family gets a
+composite -- the ordinary case builds none.
+
+**BestTake:** unchanged -- continues to decide among VALID REALIZATIONS
+(now explicit in the corrected diagram); Meaning remains P0; Boundary/
+Pacing are not moved into BestTake; D-174/D-175 Watch+Listen BestTake
+Guard doctrine (MAY VETO, NEVER SELECTS) is unchanged.
+
+**D-177:** preserved exactly -- Partial-Edge Boundary Trim, verdict A,
+OFFLINE PROVEN, unmodified by this correction. Next runtime gate remains
+exactly ONE Video00 RAW. No RAW dispatched in this docs task.
+
+**Priority P0-P11:** unchanged, restated verbatim from D-178A -- P0 one
+real-media D-177 Boundary qualification; P1 Editorial Moment & Sequence
+Understanding; P2 Whole-Video Editorial Reasoning; P3 Prosodic Audio
+Understanding; P4 BestTake Multimodal Fusion V2; P5 Continuation/Minimal
+Composite; P6 Family Formation stability/generalization; P7 Ordering/
+Sequence Intelligence; P8 Pacing V2; then unseen-RAW Cut.ai parity
+qualification; POST-PARITY: P9 Commercial Moment Understanding, P10
+Sales Funnel Intelligence, P11 Human Gold refinement.
+
+D-178A and D-177 are NOT rewritten -- both remain their own untouched
+decision-log entries; this entry records a correction applied to
+Section 15's restatement only, per the source-precedence rule (live
+decision-log state over any architecture document's restatement of it).
+
+No `cutsell_worker/*.py`, `tests/*.py`, or `.github/workflows/*.yml` file
+was touched. No RAW dispatched. No provider/network call. No feature
+flag. No BestTake/Family/Boundary/Pacing/Renderer authority change.
+
+**Exact next runtime gate (not launched here):** exactly ONE Video00 RAW
+on the current head, evaluating D-177's partial-edge Boundary trim
+against D-177's own named success criteria. Requires separate Product
+Owner authorization.
+
+**HUMAN ACTION REQUIRED:** YES (condition A) -- authorizing the D-177
+Video00 RAW named above is a Product Owner decision. This document does
+not launch it.

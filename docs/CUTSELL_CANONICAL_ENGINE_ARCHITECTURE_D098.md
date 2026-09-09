@@ -2075,9 +2075,54 @@ The following are PRESERVED, EXPLICITLY INTEGRATED, and not modified by
 this section — each already has its own canonical home in Sections
 2/9-14:
 
-- **Language Spine** (`Word` -> `Phrase` -> `Utterance` -> `Attempt` ->
-  `PropositionCandidate` -> `RelationEvidence`) — Section 14.2's canonical
-  hierarchy, verdict B (PARTIALLY EXISTS; 14.22), unchanged.
+- **Language Spine** (`LanguageWord` -> `LanguagePhrase` ->
+  `LanguageUtterance` -> `LanguageAttempt` -> `PropositionCandidate` ->
+  `RelationEvidence`, Section 14.2's canonical hierarchy) — **CURRENT
+  STATE (corrected D-178A.1): LANGUAGE SPINE FOUNDATION: OFFLINE_PROVEN.**
+  D-165's own verdict ("B. LANGUAGE SPINE PARTIALLY EXISTS; TYPED
+  HIERARCHY + NORMALIZATION MUST BE BUILT," Section 14.13/14.22) was the
+  correct finding AT THE TIME D-165 was written — a forensic/design-only
+  task with zero implementation. It is preserved below (15.2.1) as
+  HISTORICAL PRE-IMPLEMENTATION STATE, not the current state. D-166
+  (`language_spine.py`, `LanguageWord`+`LanguagePhrase`, OFFLINE PROVEN),
+  D-168 (`language_utterance_attempt.py`, `LanguageUtterance`+
+  `LanguageAttempt`, OFFLINE PROVEN), and D-169
+  (`language_proposition_relation.py`, `PropositionCandidate`+
+  `RelationEvidence`, OFFLINE PROVEN — proposition identity vs
+  retry-family identity de-conflated at the type-system level for the
+  first time) together IMPLEMENT the full six-rung hierarchy D-165 only
+  designed. D-171 then began INCREMENTAL, bounded PRODUCTION consumer
+  migration onto this foundation (`language_spine_consumer_migration.py`):
+  exactly 2 of 3 candidate consumer clusters migrated (proposition/retry
+  divergence evidence in `take_grouping_provider.py`; continuation
+  evidence in `recording_meta_continuation.py`), fail-open by
+  construction (Spine substitutes for legacy ONLY where a per-call
+  comparison proves the two verdicts IDENTICAL; any disagreement or
+  missing evidence falls back to the pre-existing legacy path
+  unchanged), the third candidate correctly skipped as already
+  non-duplicative. **This does NOT mean all transcript consumers have
+  migrated** — Section 14.12's own audit found ~58 independent ad hoc
+  tokenizers across `cutsell_worker/`; D-171 migrated 2. The remaining
+  ~56 are unchanged, still reading `CandidateTake.text` directly, exactly
+  as Section 14.12 originally found. No Family/BestTake/Proposition/
+  final-Relation/Boundary/Pacing authority was changed by D-166/D-168/
+  D-169/D-171 (see each entry's own decision-log record); Family
+  Formation/BestTake/Boundary/Pacing/Renderer remain governed exactly as
+  Sections 13/15.2 already state.
+
+#### 15.2.1 D-165 historical status (preserved, not current)
+
+For historical record only — **NOT the current engine state** (see the
+corrected bullet above): at the time D-165 was authored (forensic/design
+task, zero implementation), the accurate finding was **B. LANGUAGE SPINE
+PARTIALLY EXISTS; TYPED HIERARCHY + NORMALIZATION MUST BE BUILT**
+(Section 14.13/14.22, text unchanged, still visible verbatim at those
+locations). D-166 through D-171 are the separately-authorized
+implementation tasks that closed most of that gap; Section 14's own text
+is left untouched below (D-098's own precedent, e.g. the D-164/D-165
+numbering-reconciliation note) precisely so this document never erases
+its own history — only Section 15's restatement of "current state" is
+corrected here.
 - **Parallel perception** (Speech/Language, Visual/Performance, Audio,
   Media/Timing — Section 13.2's four tracks A-D), unchanged.
 - **Watch+Listen Multimodal Understanding** (upstream, Section 13.3;
@@ -2143,14 +2188,25 @@ Commercial Moment Understanding (15.13).**
 **Purpose:** understand the ROLE a moment plays in the recording/editing
 PROCESS itself — distinct from Behavior State (13.4, what is physically
 happening at an instant) and distinct from editorial FUNCTION (Layer 10,
-what job a kept realization performs for the audience). This is a new,
-named layer of understanding sitting between raw Behavior State evidence
-and structured Attempt Relationship/Family Formation reasoning — it
-widens the EVIDENCE those existing authorities may consume (per Section
-13.7's existing "must not depend solely on textual/provider comparative
-judgments" doctrine); it does not replace or bypass them, per 13.3.2's
-authority principle (PERCEPTION PROPOSES EVIDENCE; STRUCTURED EDITORIAL
-AUTHORITIES DECIDE).
+what job a kept realization performs for the audience). **Dependency
+direction (corrected D-178A.1 — binding):** Editorial Moment & Sequence
+Understanding is a HIGHER-ORDER understanding layer. It CONSUMES already-
+produced evidence from Parallel Perception (13.2), Watch+Listen (13.3),
+Behavior State (13.4), and the Language Spine's own structured objects
+(`LanguageAttempt`, `PropositionCandidate`, `RelationEvidence` — 14.2,
+15.2 corrected status) — it does not sit UPSTREAM of them, does not widen
+their evidence intake, and does not run before they exist. It may form
+HIGHER-ORDER HYPOTHESES about recording process, clean audience
+delivery, preassembled final sequences, and sequence structure by
+combining that already-produced evidence — it does **not** independently
+recreate Behavior State, Attempt Identity, Proposition Identity, or
+Relation Identity (those remain owned exactly where Sections 13.4-13.7/
+14 already place them, unchanged). This restates and sharpens 13.3.2's
+authority principle (PERCEPTION PROPOSES EVIDENCE; UNDERSTANDING FORMS
+HYPOTHESES; STRUCTURED EDITORIAL AUTHORITIES DECIDE) rather than
+conflicting with it — D-178A's original phrasing ("widens the evidence
+those existing authorities may consume," implying an upstream position)
+is the specific error this correction fixes; see 15.10's corrected stack.
 
 At minimum, future roles include: `PRE_TAKE_SETUP`, `RECORDING_PROCESS`,
 `FALSE_START`, `ABANDONED_ATTEMPT`, `RETRY`, `CORRECTION`,
@@ -2181,14 +2237,23 @@ implemented by naming it here.
 **Status: MISSING/FUTURE, named here for the first time.**
 
 Canonizes a GLOBAL reasoning layer sitting ABOVE local Watch+Listen
-evidence (13.3) and above per-span Editorial Moment Understanding (15.4)
-— reasoning across the FULL RAW rather than per-attempt or per-family in
-isolation. This does not create a new decision authority over Family
-Formation/BestTake/Boundary/Freeze (13.3.2's authority principle still
-governs: it proposes evidence, structured authorities still decide); it
-is a wider EVIDENCE-GATHERING pass that existing authorities may
-consume, analogous to how Section 13.7 already requires Family Formation
-to widen its evidence intake beyond textual/provider comparison alone.
+evidence (13.3), above Structured Local Understanding (Behavior State/
+Language Spine's `LanguageAttempt`/`PropositionCandidate`/
+`RelationEvidence` — 15.10's corrected stack), and above per-span
+Editorial Moment Understanding (15.4) — reasoning across the FULL RAW
+rather than per-attempt or per-family in isolation. **Dependency
+direction (corrected D-178A.1 — binding):** like Editorial Moment
+Understanding (15.4), Whole-Video Editorial Reasoning CONSUMES the
+already-produced structured evidence beneath it; it does not precede,
+replace, or independently re-derive Behavior State, Attempt Identity,
+Proposition Identity, or Relation Identity. This does not create a new
+decision authority over Family/Realization Formation, BestTake,
+Boundary, or Freeze (13.3.2's authority principle still governs: it
+proposes evidence and forms hypotheses, structured authorities still
+decide) — it is a wider EVIDENCE-GATHERING and HYPOTHESIS-FORMING pass
+that Family/Realization Formation (15.10) may consume, analogous to how
+Section 13.7 already requires Family Formation to widen its evidence
+intake beyond textual/provider comparison alone.
 
 Purpose — reason across the whole RAW about: recording-process regions;
 duplicate propositions; clean completed sequences; preassembled final
@@ -2241,7 +2306,34 @@ doctrine, no code change)
 (`CompositeResolver`/`RealizationResolver`, Section 3's existing L6 row),
 not a new capability.**
 
-Canonical doctrine, restated and sharpened:
+**Placement is NOT a single universal stage (corrected D-178A.1 —
+binding).** D-178A's original Cut.ai Parity Stack diagram (15.10)
+implied Continuation/Minimal Composite always runs strictly AFTER
+BestTake. That is corrected to two distinct conceptual cases:
+
+**Case A — REALIZATION CONSTRUCTION (before Freeze).** When multiple
+source-real complementary pieces are REQUIRED to construct one
+meaning-sufficient realization in the first place (no single complete
+take exists), the bounded composite must be constructed as part of
+Stable Family / Realization Formation (15.10's corrected stack) — BEFORE
+final realization competition and Freeze — so BestTake/Realization
+authority has a real, complete, selectable realization to evaluate
+against any competing complete take. This is the ALREADY-EXISTING
+behavior of `CompositeResolver`/`RealizationResolver` (Section 3's L6
+row, unchanged code) — this correction only names its correct pipeline
+position explicitly for the first time.
+
+**Case B — POST-SELECTION COMPLETION (after Freeze, narrowly bounded).**
+A later, bounded continuation/repair may exist only where already
+supported by an existing canonical authority (e.g., Boundary's own
+edge-only physical repair, D-107 Section 9/D-177) and must NEVER mutate
+meaning, membership, or family doctrine implicitly. This is not a second
+composite mechanism — it restates the existing, narrow, physical-only
+repair authorities already named elsewhere in this document (Boundary,
+Section 13.11).
+
+Canonical doctrine, restated and sharpened (applies to Case A; Case B is
+explicitly narrower and physical-only):
 
 **Complete same-job takes compete.** Two complete, sufficient
 realizations of the same proposition/job are Good-vs-Good competitors
@@ -2330,12 +2422,19 @@ document's restatement of it). **Next runtime gate:** exactly ONE Video00
 RAW (named, not launched by D-177 or by this document) — see 15.16.
 
 ### 15.10 Cut.ai Parity Stack (canonical conceptual pipeline, restates and
-consolidates Section 13.1, integrates 15.4/15.5/15.8)
+consolidates Section 13.1, integrates 15.4/15.5/15.7/15.8 — CORRECTED
+dependency order, D-178A.1)
 
-This is a clearer, more complete READING of Section 13.1's existing
-top-level pipeline, now naming 15.4/15.5/15.8's new capabilities at their
-canonical position — no layer is renumbered, no existing file's ownership
-moves, no new authority is created by drawing this diagram:
+**This diagram supersedes D-178A's original 15.10 diagram, which placed
+Editorial Moment & Sequence Understanding and Whole-Video Editorial
+Reasoning UPSTREAM of Behavior State/Proposition/Family — implying they
+replace or precede the structured objects they actually depend on. That
+was an error, corrected here.** This is a clearer, more complete READING
+of Section 13.1's existing top-level pipeline, now naming 15.4/15.5/15.7/
+15.8's capabilities at their CORRECT dependency position — no layer is
+renumbered, no existing file's ownership moves, no new authority is
+created by drawing this diagram; this is dependency direction only, not
+authorization to implement any future layer:
 
 ```
 RAW
@@ -2344,40 +2443,72 @@ PARALLEL PERCEPTION                    (Layer 1, Section 13.2: Language,
   v                                     Visual, Audio, Media/Timing)
 WATCH+LISTEN MULTIMODAL UNDERSTANDING  (Layer 1->2 boundary, Section 13.3)
   v
-EDITORIAL MOMENT & SEQUENCE UNDERSTANDING   (NEW, Section 15.4)
+STRUCTURED LOCAL UNDERSTANDING          (Behavior State, Section 13.4;
+  v                                      LanguageWord/Phrase/Utterance/
+                                         Attempt, Section 14.2, CURRENT
+                                         STATE corrected 15.2/15.2.1;
+                                         PropositionCandidate/
+                                         RelationEvidence, Section 13.5-
+                                         13.6/14.2)
   v
-WHOLE-VIDEO EDITORIAL REASONING             (NEW, Section 15.5)
-  v
-BEHAVIOR STATE                         (Layer 2, Section 13.4)
-  v
-PROPOSITION / RELATION                 (Layer 4/10, Section 13.5-13.6)
-  v
-FAMILY FORMATION                       (Layer 4, Section 13.7-13.8)
-  v
-BESTTAKE                               (Layer 6, Section 13.10, 15.6 future)
-  v
-CONTINUATION / MINIMAL COMPOSITE where required   (Section 15.7)
-  v
+EDITORIAL MOMENT & SEQUENCE UNDERSTANDING   (NEW, Section 15.4 --
+  v                                          CONSUMES the layer above,
+                                             corrected D-178A.1)
+WHOLE-VIDEO EDITORIAL REASONING             (NEW, Section 15.5 --
+  v                                          CONSUMES both layers above,
+                                             corrected D-178A.1)
+STABLE FAMILY / REALIZATION FORMATION   (Layer 4, Section 13.7-13.8 +
+  v                                      Case A Continuation/Minimal
+                                         Composite where eligible,
+                                         Section 15.7 -- renamed/
+                                         clarified D-178A.1, see below)
+BESTTAKE                               (Layer 6, Section 13.10, 15.6 future
+  v                                     -- decides among VALID REALIZATIONS)
 FREEZE                                 (Layer 5/6 boundary)
   v
 ORDERING                               (NEW, Section 15.8)
   v
-BOUNDARY                               (Layer 7, Section 13.11, D-177 15.9)
-  v
+BOUNDARY                               (Layer 7, Section 13.11, D-177 15.9
+  v                                     -- Case B bounded post-selection
+                                        completion, Section 15.7, is a
+                                        narrow Boundary-owned repair here,
+                                        never a second composite mechanism)
 PACING                                 (Layer 7 sub-stage, Section 13.12)
   v
 RENDERER                               (Layer 7 execution)
 ```
 
-Editorial Moment & Sequence Understanding and Whole-Video Editorial
-Reasoning are placed UPSTREAM of Behavior State/Proposition/Family
-because they widen the EVIDENCE those structured stages consume (13.3.2's
-authority principle: perception/understanding proposes, structured
-authorities decide) — they do not sit downstream as a QA/routing role
-(that remains Layer 8's Downstream Watch+Listen QA, unchanged, Section
-4/13.3.4). Continuation/Minimal Composite and Ordering are placed exactly
-where the existing `CompositeResolver`/Resolver and the target sequence
-authority (15.8) already conceptually sit relative to Freeze/Boundary.
+**Corrected dependency statement (D-178A.1, binding):** Editorial Moment
+& Sequence Understanding and Whole-Video Editorial Reasoning are
+HIGHER-ORDER UNDERSTANDING layers that CONSUME evidence from Parallel
+Perception, Watch+Listen, and Structured Local Understanding (Behavior
+State + the Language Spine's `LanguageAttempt`/`PropositionCandidate`/
+`RelationEvidence`) — they do not precede, replace, or independently
+recreate any of those structured objects (15.4/15.5's own corrected
+text). They may form higher-order HYPOTHESES (recording process, clean
+audience delivery, preassembled final sequences, global redundancy,
+sequence structure) that Stable Family/Realization Formation may then
+consume — they do not decide membership themselves (13.3.2's authority
+principle, unchanged). This restates the doctrine, corrects only the
+diagram's implied ordering. They do not sit downstream as a QA/routing
+role either (that remains Layer 8's Downstream Watch+Listen QA,
+unchanged, Section 4/13.3.4).
+
+**Stable Family / Realization Formation (named here, D-178A.1) —
+placement and scope.** This is the pre-BestTake conceptual stage
+(renames/clarifies what D-178A's original diagram called "FAMILY
+FORMATION" alone) where BestTake's actual input candidates are
+established: COMPLETE individual realizations (the ordinary case,
+Section 13.7-13.8's existing `take_grouping.py` family, unchanged code),
+and, ONLY when necessary and eligible per 15.7's 7-condition test (Case
+A), a minimum sufficient COMPOSITE realization. **This must NOT imply
+every family gets a composite** — for the ordinary case of one or more
+complete competing takes, no composite is built; Case A composite
+construction is the narrow exception, not the default path. Ordering and
+Boundary are placed exactly where the existing target sequence authority
+(15.8) and `boundary_engine_pass.py` (Section 13.11, D-177) already
+conceptually sit relative to Freeze/Pacing/Renderer, unchanged from
+D-178A's original placement.
 
 ### 15.11 Post-Parity Commercial Stack: Commercial Moment Understanding
 vs Editorial Moment Understanding (new, explicit separation)
