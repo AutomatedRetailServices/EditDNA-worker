@@ -30251,3 +30251,114 @@ semantic-authority/Pacing/Renderer change.
 
 **HUMAN ACTION REQUIRED:** YES (condition A) -- authorizing the one
 confirmatory Video00 RAW above is a Product Owner decision.
+
+---
+
+## D-178A: Canonical architecture consolidation -- POST D-177 (post D-177)
+
+**Documentation / architecture only. No engine implementation, no RAW, no
+provider call, no behavior change, no feature flag, no `cutsell_worker/*.py`
+file touched.**
+
+Appends Section 15 ("POST D-177 CANONICAL CONSOLIDATION") to
+`docs/CUTSELL_CANONICAL_ENGINE_ARCHITECTURE_D098.md`, incorporating the
+current proven engine state (through D-177) with the Product Owner's
+newly-approved forward architecture, read as ONE continuous architecture
+with Sections 1-14 -- no layer renumbered, no Section 3 status changed, no
+accepted D-096 through D-177 authority contract weakened.
+
+**North Star canonized:** RAW -> CLEAN RAW -> CUT.AI PARITY -> HUMAN GOLD
+REFINEMENT -> COMMERCIAL/SALES-FUNNEL INTELLIGENCE (extends Section 5's
+existing two-milestone progression with one new, explicitly post-Human-Gold
+milestone).
+
+**Current canonical foundations restated and explicitly integrated**
+(Language Spine, Parallel Perception, Watch+Listen Multimodal Understanding,
+Behavior State, Proposition Identity precedes Retry Identity, Attempt
+Relationships, Stable Family Formation, BestTake, Watch+Listen BestTake
+Guard, Freeze, Boundary, Dialogue/Pacing, Renderer) -- all unchanged,
+already canonized in Sections 2/9-14.
+
+**New forward architecture named (all MISSING/FUTURE, none authorized to
+implement):**
+- Audio V1 (current, EXISTING signal-level silence/dead-air/pause) vs
+  Audio V2 (future prosodic understanding: hesitation, vocal restart,
+  emphasis, cadence, rhythm, vocal continuity, flat/expressive delivery,
+  delivery energy) -- new binding invariant added: never canonize
+  psychological/emotional inference as fact, only observable signal shape.
+- Editorial Moment & Sequence Understanding (new pre-parity capability,
+  Milestone 1, NOT Commercial Moment Understanding) -- roles: PRE_TAKE_SETUP,
+  RECORDING_PROCESS, FALSE_START, ABANDONED_ATTEMPT, RETRY, CORRECTION,
+  CONTINUATION, CLEAN_AUDIENCE_DELIVERY, POST_TAKE_RESET, BREAKING_CHARACTER,
+  NEW_AUDIENCE_BEAT, PREASSEMBLED_FINAL_SEQUENCE.
+- Whole-Video Editorial Reasoning (new global reasoning layer above local
+  Watch+Listen evidence: recording-process regions, duplicate propositions,
+  clean completed sequences, preassembled final sequences, source takes vs
+  already-edited material, global redundancy, narrative continuity).
+- BestTake Multimodal Fusion V2 (Meaning -> Visual Delivery -> Vocal
+  Delivery -> Editability -> Narrative Context; no master weighted score;
+  Meaning remains P0 -- extends, does not modify, D-107 Section 9's existing
+  5-tier priority order).
+- Continuation/Minimal Composite doctrine formalized (7 required
+  conditions: source-real, same proposition/slot, nonduplicate,
+  meaning-safe, correct order, Boundary-isolatable, minimum necessary
+  pieces) -- formalizes the EXISTING CompositeResolver/RealizationResolver
+  authority, zero code change.
+- Ordering / Sequence Intelligence (new, distinct from Selection/BestTake/
+  Boundary/Pacing -- determines correct order of already-valid editorial
+  pieces).
+- Boundary current state recorded: D-177 partial-edge trim OFFLINE PROVEN,
+  one-sided straddle may trim external debris to the measured DELIVERY hard
+  floor without cutting required speech, no new threshold, no BestTake
+  change; next runtime gate one Video00 RAW (not launched here).
+- Cut.ai Parity Stack consolidated as one conceptual pipeline diagram
+  (restates Section 13.1, places the new capabilities at their canonical
+  position).
+- Commercial Moment Understanding explicitly separated from Editorial
+  Moment Understanding -- Commercial belongs to the future Sales Funnel
+  system, strictly post-parity; future roles/evidence named (HOOK, PROBLEM,
+  SOLUTION, FEATURE, BENEFIT, PROOF, DEMONSTRATION, OBJECTION, CTA;
+  specificity, novelty, commercial relevance, redundancy, product presence,
+  attention strength, commercial usefulness).
+- Sales Funnel Intelligence (future post-parity layer, flexible Hook/
+  Problem/Solution/Benefit/Proof/CTA vocabulary, supports multiple ad
+  structures).
+
+**Implementation priority canonized (P0-P11, none authorized by naming
+it):** P0 one real-media D-177 Boundary qualification; P1 Editorial Moment
+& Sequence Understanding; P2 Whole-Video Editorial Reasoning; P3 Prosodic
+Audio Understanding; P4 BestTake Multimodal Fusion V2; P5 Continuation/
+Minimal Composite; P6 Family Formation stability/generalization; P7
+Ordering/Sequence Intelligence; P8 Pacing V2; then Cut.ai parity
+qualification on multiple unseen RAWs; POST-PARITY: P9 Commercial Moment
+Understanding, P10 Sales Funnel Intelligence, P11 Human Gold refinement.
+
+**Generalization Gate restated and made numerically concrete:** do not
+declare RAW -> Cut.ai from Video00 alone; after Video00 stability, qualify
+5-10 unseen RAWs with no video-specific rules (restates Section 5's
+existing unseen-RAW exit criterion and CLAUDE.md's binding
+never-hardcode-Video00 rule as an explicit architectural gate).
+
+**Doctrine restated, extended, binding, none weakened:** PERCEPTION
+PROPOSES EVIDENCE; UNDERSTANDING FORMS HYPOTHESES; STRUCTURED EDITORIAL
+AUTHORITIES DECIDE; BOUNDARY/PACING EXECUTE; QA REFERENCES NEVER BECOME
+RUNTIME INPUTS; RAW REMAINS IMMUTABLE; MEANING PRESERVATION IS P0; NO
+COMPLETE FAMILY CONTEXT -> NO AUTHORITATIVE COMPARATIVE WINNER; PROPOSITION
+IDENTITY PRECEDES RETRY IDENTITY.
+
+D-177 confirmed preserved and unmodified by this section; the authoritative
+D-177 record remains its own decision-log entry, restated here for
+architectural context only, per this document's own precedence rule.
+
+No `cutsell_worker/*.py`, `tests/*.py`, or `.github/workflows/*.yml` file
+was touched. No RAW dispatched. No provider/network call. No feature flag.
+No BestTake/Family/Boundary/Pacing/Renderer authority change.
+
+**Exact next runtime gate (not launched here):** exactly ONE Video00 RAW on
+the current head, evaluating D-177's partial-edge Boundary trim against
+D-177's own named success criteria. Requires separate Product Owner
+authorization.
+
+**HUMAN ACTION REQUIRED:** YES (condition A) -- authorizing the D-177
+Video00 RAW named above is a Product Owner decision. This document does
+not launch it.

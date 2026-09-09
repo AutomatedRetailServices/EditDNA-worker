@@ -2034,3 +2034,511 @@ Formation, Proposition Identity, Attempt Relationships, BestTake,
 Boundary, and Pacing are all restated, never modified, by this section.
 See `docs/CUTSELL_DECISIONS.md` D-165 for the decision-log entry
 recording this section's doctrine.
+
+---
+
+## 15. POST D-177 CANONICAL CONSOLIDATION (D-178A)
+
+**Status: additive doctrine, documentation only. No engine behavior
+change, no RAW, no provider call, no BestTake/Family/Boundary/Pacing/
+Renderer authority change, no feature flag, no `cutsell_worker/*.py` file
+touched to write this section.** No layer is renumbered, no Section 3
+status changes, no accepted D-096 through D-177 authority contract is
+weakened or overridden. This section incorporates the current PROVEN
+engine state (through D-177) and canonizes the newly-approved forward
+architecture the Product Owner named in D-178A, reading as ONE continuous
+architecture with Sections 1-14, never a second system.
+
+### 15.1 North Star (canonical, restates and extends Section 5's Milestone
+progression)
+
+```
+RAW
+  v
+CLEAN RAW
+  v
+CUT.AI PARITY               (Milestone 1, Section 5, unchanged)
+  v
+HUMAN GOLD REFINEMENT        (Milestone 2, Section 5/13.15, unchanged, not started)
+  v
+COMMERCIAL / SALES-FUNNEL INTELLIGENCE   (NEW post-parity milestone, 15.13-15.14)
+```
+
+This restates Section 5's existing two-milestone progression and adds
+ONE new named downstream milestone after Human Gold. No milestone is
+reordered; Commercial/Sales-Funnel Intelligence remains explicitly
+POST-PARITY and POST-HUMAN-GOLD, never authorized to run ahead of either.
+
+### 15.2 Current canonical foundations (consolidated restatement, unchanged)
+
+The following are PRESERVED, EXPLICITLY INTEGRATED, and not modified by
+this section — each already has its own canonical home in Sections
+2/9-14:
+
+- **Language Spine** (`Word` -> `Phrase` -> `Utterance` -> `Attempt` ->
+  `PropositionCandidate` -> `RelationEvidence`) — Section 14.2's canonical
+  hierarchy, verdict B (PARTIALLY EXISTS; 14.22), unchanged.
+- **Parallel perception** (Speech/Language, Visual/Performance, Audio,
+  Media/Timing — Section 13.2's four tracks A-D), unchanged.
+- **Watch+Listen Multimodal Understanding** (upstream, Section 13.3;
+  distinct from downstream Watch+Listen QA, Section 13.3.4/4), unchanged.
+- **Behavior State** (Section 13.4/D-111 10.1 vocabulary), unchanged.
+- **Proposition Identity precedes Retry Identity** (Section 13.5/D-111
+  10.2, binding), unchanged.
+- **Attempt Relationships** (Section 13.6/13.7, D-145's 5-way outcome +
+  D-158's `UNCERTAIN`), unchanged.
+- **Stable Family Formation** (Section 13.7-13.8, `take_grouping.py`
+  family), unchanged.
+- **BestTake** (Section 13.10/D-107 Section 9 priority order), unchanged.
+- **Watch+Listen BestTake Guard** (D-174's
+  `watch_listen_besttake_guard_authority.py` — MAY VETO, NEVER SELECTS;
+  CLOSED, D-175 real-media-proven safe/discriminating), unchanged.
+- **Freeze** (Selection Freeze, Layer 5/6 boundary), unchanged.
+- **Boundary** (`boundary_engine_pass.py`, Section 13.11/D-107 CASE A/B/C
+  split), unchanged in authority; its CURRENT STATE is updated at 15.9
+  below to record D-177.
+- **Dialogue/Pacing** (Section 13.12/D-129 Section 11), unchanged.
+- **Renderer** (Layer 7 execution, `render_plan.py`), unchanged.
+
+### 15.3 Audio architecture: V1 (current) vs V2 (future prosodic
+understanding)
+
+Separates, for the first time as an explicit named split, the existing
+Track B (Section 13.2) into two generations:
+
+**AUDIO V1 — CURRENT (EXISTING, restates Section 13.2 Track B/13.3.3
+unchanged).** Signal-level silence/dead-air/pause/timing evidence only:
+`audio_silence.py`, `silence_analysis.py`, `audio_boundary_completion.py`,
+`attempt_reconstruction.py`'s measured-pause boundary (D-097.5/.6). Real,
+waveform-derived, genuinely computed — not a stub, but explicitly NOT
+semantic or prosodic understanding (Section 13.3.3's "Real audio honesty"
+finding, restated, unchanged).
+
+**AUDIO V2 — FUTURE PROSODIC UNDERSTANDING (MISSING/FUTURE, named here
+for the first time as its own forward contract; restates Section 13.2
+Track B's existing `DESIGNED_NOT_IMPLEMENTED` status, not a new gap).**
+Future observable evidence, named as a target vocabulary only:
+`hesitation`, `vocal_restart`, `emphasis`, `cadence`, `rhythm`,
+`vocal_continuity`, `flat_or_expressive_delivery`, `delivery_energy`
+(reframes the existing but always-default `MediaSignals.delivery_energy`
+field per D-107 Section 9's DELIVERY_ENERGY_FIT concept, unchanged).
+
+**Binding constraint (new invariant, extends Section 10.5/13.19's
+invariant list):** Audio V2 evidence describes OBSERVABLE vocal/acoustic
+signal properties only. **Do not canonize psychological or emotional
+inference as fact** — CutSell may observe "flat delivery" or "vocal
+restart" as measured signal shape; it must never assert or encode "the
+creator felt nervous/confident/frustrated" as ground truth. This is a
+permanent, general invariant (Section 6/10.4 anti-rule-proliferation
+class: a universal safety invariant, not a benchmark-specific rule), not
+implemented by naming it.
+
+### 15.4 New pre-parity capability: Editorial Moment & Sequence
+Understanding
+
+**Status: MISSING/FUTURE, named here for the first time. Belongs to RAW
+-> Cut.ai parity (Milestone 1), NOT Human Gold, and explicitly NOT
+Commercial Moment Understanding (15.13).**
+
+**Purpose:** understand the ROLE a moment plays in the recording/editing
+PROCESS itself — distinct from Behavior State (13.4, what is physically
+happening at an instant) and distinct from editorial FUNCTION (Layer 10,
+what job a kept realization performs for the audience). This is a new,
+named layer of understanding sitting between raw Behavior State evidence
+and structured Attempt Relationship/Family Formation reasoning — it
+widens the EVIDENCE those existing authorities may consume (per Section
+13.7's existing "must not depend solely on textual/provider comparative
+judgments" doctrine); it does not replace or bypass them, per 13.3.2's
+authority principle (PERCEPTION PROPOSES EVIDENCE; STRUCTURED EDITORIAL
+AUTHORITIES DECIDE).
+
+At minimum, future roles include: `PRE_TAKE_SETUP`, `RECORDING_PROCESS`,
+`FALSE_START`, `ABANDONED_ATTEMPT`, `RETRY`, `CORRECTION`,
+`CONTINUATION`, `CLEAN_AUDIENCE_DELIVERY`, `POST_TAKE_RESET`,
+`BREAKING_CHARACTER`, `NEW_AUDIENCE_BEAT`, `PREASSEMBLED_FINAL_SEQUENCE`.
+
+Relationship to existing vocabulary (clarifies, does not rename):
+`PRE_TAKE_SETUP`/`FALSE_START`/`ABANDONED_ATTEMPT`/`RECORDING_PROCESS`/
+`POST_TAKE_RESET`/`BREAKING_CHARACTER`/`NEW_AUDIENCE_BEAT` already exist
+as Behavior States (Section 13.4/D-111 10.1); `RETRY`/`CORRECTION`/
+`CONTINUATION` already exist as Attempt Relationships (Section 13.6).
+Editorial Moment & Sequence Understanding does not invent new states or
+relations for these — it reframes them as evidence about the moment's
+ROLE IN SEQUENCE (was this moment part of assembling the take, or part of
+delivering it to the audience), which is the missing piece Section
+13.3.1's Structured RAW Understanding Map already anticipated
+(`entry_state`/`delivery_state`/`exit_state`) but never fully specified.
+Two genuinely NEW concepts are named here for the first time:
+`CLEAN_AUDIENCE_DELIVERY` (a moment that IS the intended audience-facing
+content, as distinct from process around it) and
+`PREASSEMBLED_FINAL_SEQUENCE` (a RAW span that is ALREADY an edited/
+assembled sequence rather than a single unedited take — see 15.5's
+"source takes vs already-edited material" for why this matters). Not
+implemented by naming it here.
+
+### 15.5 Whole-Video Editorial Reasoning (new global reasoning layer)
+
+**Status: MISSING/FUTURE, named here for the first time.**
+
+Canonizes a GLOBAL reasoning layer sitting ABOVE local Watch+Listen
+evidence (13.3) and above per-span Editorial Moment Understanding (15.4)
+— reasoning across the FULL RAW rather than per-attempt or per-family in
+isolation. This does not create a new decision authority over Family
+Formation/BestTake/Boundary/Freeze (13.3.2's authority principle still
+governs: it proposes evidence, structured authorities still decide); it
+is a wider EVIDENCE-GATHERING pass that existing authorities may
+consume, analogous to how Section 13.7 already requires Family Formation
+to widen its evidence intake beyond textual/provider comparison alone.
+
+Purpose — reason across the whole RAW about: recording-process regions;
+duplicate propositions; clean completed sequences; preassembled final
+sequences (15.4's new state); source takes vs. already-edited material;
+global redundancy; narrative continuity. This generalizes and gives a
+name to a gap Section 13.3.1's Structured RAW Understanding Map already
+implied (a per-span conceptual output) but never extended to a
+WHOLE-VIDEO scope — today's real, narrower precursor is
+`whole_video_context.sources[].events` (`TemporalEvent`/
+`SourceVideoContext`, restated from Section 13.3.1, unchanged), which
+carries per-source events but no global cross-family/cross-region
+reasoning pass. No implementation is authorized here.
+
+### 15.6 BestTake Future: BestTake Multimodal Fusion V2
+
+**Status: MISSING/FUTURE, named here for the first time, extends but does
+not modify D-107 Section 9's existing priority order (13.10, unchanged).**
+
+Canonizes a future fusion sequence for BestTake's tier-(3) MULTIMODAL
+PERFORMANCE QUALITY evidence (D-107 Section 9's existing 5-tier order,
+restated unchanged: (1) MEANING/MESSAGE SUFFICIENCY, (2) TAKE USABILITY,
+(3) MULTIMODAL PERFORMANCE QUALITY, (4) EDITABILITY/BOUNDARY QUALITY, (5)
+NARRATIVE/ENERGY FIT):
+
+```
+Meaning
+  v
+Visual Delivery
+  v
+Vocal Delivery          (consumes Audio V2 evidence, 15.3, when it exists)
+  v
+Editability
+  v
+Narrative Context
+```
+
+**No master weighted score requirement** — restates D-098 Section 10.9's
+existing "no arbitrary weighted master score" finding and Section
+14.10's confirmation that every real confidence/ranking mechanism
+inspected in this codebase is categorical/evidence-based, never a single
+composite number. **Meaning remains P0** — restates D-107 Section 9's
+existing tier-(1) priority, unchanged; BestTake Multimodal Fusion V2 only
+elaborates tier (3), it never promotes Visual/Vocal Delivery ahead of
+Meaning or Take Usability. No implementation is authorized here.
+
+### 15.7 Continuation / Minimal Composite doctrine (formalizes existing
+doctrine, no code change)
+
+**Status: doctrine formalization of an ALREADY-EXISTING authority
+(`CompositeResolver`/`RealizationResolver`, Section 3's existing L6 row),
+not a new capability.**
+
+Canonical doctrine, restated and sharpened:
+
+**Complete same-job takes compete.** Two complete, sufficient
+realizations of the same proposition/job are Good-vs-Good competitors
+(restates Layer 14's existing target, and D-107 Section 9's existing
+BestTake ordering) — a composite is never built merely because a second
+complete take exists.
+
+**Complementary incomplete pieces may form a minimum sufficient
+composite ONLY when ALL of the following hold** (restates and
+consolidates the existing `RealizationResolver`/`CompositeResolver`
+usable-first-tiers, no-composite-with-failed-members, and
+critical-veto-not-composite-forcing doctrine, Section 3's existing L6
+row, unchanged code):
+
+1. **source-real** — every piece is real RAW content, never invented
+   speech (restates the binding "Never invent speech" editorial rule);
+2. **same proposition/slot** — pieces address the SAME proposition (15.2's
+   Proposition Identity doctrine), never merged across distinct
+   propositions;
+3. **nonduplicate** — no piece restates content another piece already
+   supplies (restates Layer 12's target REDUNDANT classification);
+4. **meaning-safe** — polarity/negation/numbers/factual terms survive
+   intact (restates `polarity_safety.py`'s existing binding invariant);
+5. **correct order** — pieces are sequenced per Ordering/Sequence
+   Intelligence (15.8), never assembled out of narrative order;
+6. **Boundary-isolatable** — each piece has a clean, Boundary-safe
+   physical cut point (restates D-107 Section 9's CASE A/B ownership
+   split — Boundary still trims; BestTake/Resolver still decides
+   membership);
+7. **minimum necessary pieces** — no more pieces than the minimum
+   sufficient set (restates Layer 13's existing target objective).
+
+**Do not implement** — this section formalizes doctrine already governing
+the EXISTING `CompositeResolver`/`RealizationResolver` authority
+(unchanged code); it authorizes no new composite logic, no threshold, and
+no BestTake/Family change.
+
+### 15.8 Ordering / Sequence Intelligence (new, distinct capability)
+
+**Status: MISSING/FUTURE, named here for the first time as its own
+distinct capability.**
+
+Canonizes Ordering / Sequence Intelligence as DISTINCT from Selection,
+BestTake, Boundary, and Pacing — restates and sharpens the existing
+authority-separation doctrine (Section 4/13.3.2: each authority owns one
+question). Purpose: determine the CORRECT ORDER of already-valid
+editorial pieces (i.e., pieces Selection/BestTake has already decided
+belong in the winning edit). This is explicitly NOT:
+
+- Selection/BestTake (which decides WHAT survives, Layer 6);
+- Boundary (which decides WHERE a clip starts/ends physically, Layer 7,
+  D-107 Section 9);
+- Pacing (which decides tightness/overlap BETWEEN two already-ordered,
+  already-boundary-safe clips, D-129 Section 11, Section 13.12).
+
+Ordering sits between Freeze/Boundary and Pacing in the Cut.ai Parity
+Stack (15.10) — it answers "in what sequence do these already-frozen,
+already-boundary-safe pieces play," which today has no dedicated
+authority (the closest existing evidence is `realization_resolver.py`'s
+own CTA-ordering logic, Section 14.7, which is narrow and
+prompt-embedded, not a general sequence authority). No implementation is
+authorized here.
+
+### 15.9 Boundary current state (records D-177, does not modify Boundary
+authority)
+
+**D-177 — PARTIAL-EDGE BOUNDARY TRIM: OFFLINE PROVEN (verdict A).**
+Records, without modifying, the current state of `boundary_engine_pass.py`
+(Section 3's existing EXISTING L7 row, Section 13.11's CASE A/B/C split,
+unchanged): a one-sided visual/performance event that STRADDLES the
+measured DELIVERY boundary (D-115's `starts_before_delivery` XOR
+`ends_after_delivery`) may now trim the EXTERNAL debris portion to the
+measured DELIVERY hard floor (`delivery_span.start`/`.end`) WITHOUT
+cutting into required speech — the trim clamps to the same hard floor the
+pre-existing pure ENTRY/EXIT loops already used, so it can never remove
+any part of a real word (docs/CUTSELL_DECISIONS.md D-177). **No new
+threshold** — reuses the existing `AUDIO_EDGE_OVERLAP_TOLERANCE_SEC`/
+`AUDIO_EDGE_MINIMUM_REMAINING_SEC` constants verbatim. **No BestTake
+change** — Boundary still only trims debris; BestTake still chooses among
+realizations, unchanged (D-177's own core doctrine, restating D-107
+Section 9's CASE A ownership). Offline-proven: 34/34 new tests, zero
+regression across the full Boundary/D-116/D-097-C/D-123/D-163/D-167/D-174
+etc. battery and the full offline suite (D-177 decision entry, this
+document's own precedence rule: live decision-log state over any
+document's restatement of it). **Next runtime gate:** exactly ONE Video00
+RAW (named, not launched by D-177 or by this document) — see 15.16.
+
+### 15.10 Cut.ai Parity Stack (canonical conceptual pipeline, restates and
+consolidates Section 13.1, integrates 15.4/15.5/15.8)
+
+This is a clearer, more complete READING of Section 13.1's existing
+top-level pipeline, now naming 15.4/15.5/15.8's new capabilities at their
+canonical position — no layer is renumbered, no existing file's ownership
+moves, no new authority is created by drawing this diagram:
+
+```
+RAW
+  v
+PARALLEL PERCEPTION                    (Layer 1, Section 13.2: Language,
+  v                                     Visual, Audio, Media/Timing)
+WATCH+LISTEN MULTIMODAL UNDERSTANDING  (Layer 1->2 boundary, Section 13.3)
+  v
+EDITORIAL MOMENT & SEQUENCE UNDERSTANDING   (NEW, Section 15.4)
+  v
+WHOLE-VIDEO EDITORIAL REASONING             (NEW, Section 15.5)
+  v
+BEHAVIOR STATE                         (Layer 2, Section 13.4)
+  v
+PROPOSITION / RELATION                 (Layer 4/10, Section 13.5-13.6)
+  v
+FAMILY FORMATION                       (Layer 4, Section 13.7-13.8)
+  v
+BESTTAKE                               (Layer 6, Section 13.10, 15.6 future)
+  v
+CONTINUATION / MINIMAL COMPOSITE where required   (Section 15.7)
+  v
+FREEZE                                 (Layer 5/6 boundary)
+  v
+ORDERING                               (NEW, Section 15.8)
+  v
+BOUNDARY                               (Layer 7, Section 13.11, D-177 15.9)
+  v
+PACING                                 (Layer 7 sub-stage, Section 13.12)
+  v
+RENDERER                               (Layer 7 execution)
+```
+
+Editorial Moment & Sequence Understanding and Whole-Video Editorial
+Reasoning are placed UPSTREAM of Behavior State/Proposition/Family
+because they widen the EVIDENCE those structured stages consume (13.3.2's
+authority principle: perception/understanding proposes, structured
+authorities decide) — they do not sit downstream as a QA/routing role
+(that remains Layer 8's Downstream Watch+Listen QA, unchanged, Section
+4/13.3.4). Continuation/Minimal Composite and Ordering are placed exactly
+where the existing `CompositeResolver`/Resolver and the target sequence
+authority (15.8) already conceptually sit relative to Freeze/Boundary.
+
+### 15.11 Post-Parity Commercial Stack: Commercial Moment Understanding
+vs Editorial Moment Understanding (new, explicit separation)
+
+**Status: MISSING/FUTURE, named here for the first time. Belongs primarily
+to the future Sales Funnel system (15.14), explicitly POST-PARITY.**
+
+**Editorial Moment Understanding** (15.4, this section) answers: "what
+role did this moment play in the RECORDING/EDITING PROCESS" — a
+Milestone-1 (RAW -> Cut.ai) concern.
+
+**Commercial Moment Understanding** (new, named here) answers: "what
+COMMERCIAL/PERSUASIVE job does this kept content perform for an
+audience/buyer" — a POST-PARITY, POST-HUMAN-GOLD concern, explicitly
+separate and never conflated with Editorial Moment Understanding. Future
+commercial roles/evidence may include: `HOOK`, `PROBLEM`, `SOLUTION`,
+`FEATURE`, `BENEFIT`, `PROOF`, `DEMONSTRATION`, `OBJECTION`, `CTA`; and
+evidence dimensions `specificity`, `novelty`, `commercial_relevance`,
+`redundancy`, `product_presence`, `attention_strength`,
+`commercial_usefulness`.
+
+Relationship to existing dormant vocabulary (clarifies, does not
+implement): `contracts.SemanticRole` (`HOOK`/`PROBLEM`/`FEATURES`/
+`BENEFITS`/`PROOF`/`STORY`/`CTA`/`OTHER`, Section 14.9) is the closest
+existing typed enum, but it is DORMANT on the active Clean Cut V1 path
+today (Section 14.8/14.9's own finding, unchanged) and, per CLAUDE.md's
+own binding rule ("Do not force rigid sales-funnel logic during Clean
+Cut"), must remain out of scope for Clean Cut / Milestone 1 reasoning.
+Commercial Moment Understanding is the FUTURE, properly-scoped home for
+eventually re-activating and extending that vocabulary — strictly
+post-parity, never pulled forward into Milestone 1's active path. No
+implementation is authorized here.
+
+### 15.12 Sales Funnel Intelligence (future post-parity layer)
+
+**Status: MISSING/FUTURE, restates and extends Layer 10 (Editorial
+Function)'s vocabulary toward a commercial-specific instance.**
+
+A future, FLEXIBLE (not rigid) post-parity layer supporting MULTIPLE ad
+structures, not one forced funnel shape: `Hook`, `Problem`, `Solution`,
+`Benefit`, `Proof`, `CTA` as a starting vocabulary, explicitly extensible
+— never hardcoded as the only valid structure. Consumes Commercial Moment
+Understanding (15.11) evidence; does not replace or precede Editorial
+Moment Understanding (15.4) or any Milestone-1 authority. No
+implementation is authorized here.
+
+### 15.13-15.14 (see 15.11-15.12 above; numbered per this section's own
+internal cross-references)
+
+### 15.15 Implementation Priority (canonical Product Owner sequence, P0-P11)
+
+This is the canonical priority ordering as of D-178A. It does not itself
+authorize any step — each step still requires its own bounded-capability
+authorization per Section 6's anti-loop/execution contract, exactly like
+every prior roadmap in this document (D-111 Section 10.10, D-148 Section
+13.22).
+
+- **P0** — one real-media D-177 Boundary qualification (15.9's named next
+  gate; the one item in this list that already has a fully-specified,
+  offline-proven implementation waiting on Product Owner authorization to
+  run).
+- **P1** — Editorial Moment & Sequence Understanding (15.4).
+- **P2** — Whole-Video Editorial Reasoning (15.5).
+- **P3** — Prosodic Audio Understanding (Audio V2, 15.3).
+- **P4** — BestTake Multimodal Fusion V2 (15.6).
+- **P5** — Continuation / Minimal Composite (15.7's doctrine, made
+  concrete/extended if evidence justifies it).
+- **P6** — Family Formation stability/generalization (Section 13.7-13.8's
+  existing evidence-breadth doctrine, hardened).
+- **P7** — Ordering / Sequence Intelligence (15.8).
+- **P8** — Pacing V2 (extends D-129/Section 13.12; J_CUT/L_CUT/
+  MICRO_AUDIO_OVERLAP per Section 13's existing D-142 status row).
+
+Then Cut.ai parity qualification on multiple unseen RAWs (15.16's
+Generalization Gate).
+
+**POST-PARITY:**
+
+- **P9** — Commercial Moment Understanding (15.11).
+- **P10** — Sales Funnel Intelligence (15.12).
+- **P11** — Human Gold refinement / higher editorial sophistication
+  (Milestone 2, Layers 10-16, Section 5/13.15, unchanged, still not
+  started).
+
+### 15.16 Generalization Gate (binding, restates and sharpens Section
+5/13.14's Milestone-1 exit criterion)
+
+**Do not declare RAW -> Cut.ai from Video00 alone.** After Video00
+stability (i.e., once Video00-measured LEVEL-1 discrepancies reach a
+stable, low-Level-1 state), the required next step before declaring
+Milestone 1 complete is to qualify **5-10 UNSEEN RAWs** with **no
+video-specific rules** — restates and makes numerically concrete Section
+5's existing "(J) Cut.ai-level behavior demonstrated on unseen RAWs" exit
+criterion and Section 6's binding "never hardcode Video00 timestamps,
+phrases or clip IDs" rule (CLAUDE.md's own Editorial rule, restated here
+as an architectural gate, not merely an editorial guideline). No RAW is
+launched by naming this gate.
+
+### 15.17 Canonical Doctrines (restated, binding, extends Section
+6/10.4-10.5/13.19's invariant lists — no new invariant removed or
+weakened)
+
+- **PERCEPTION PROPOSES EVIDENCE.** (Section 13.3.2, unchanged)
+- **UNDERSTANDING FORMS HYPOTHESES.** (extends 13.3.2's phrasing;
+  Editorial Moment/Whole-Video Reasoning, 15.4-15.5, are hypothesis-
+  forming, never decision-making, per this same principle)
+- **STRUCTURED EDITORIAL AUTHORITIES DECIDE.** (Section 13.3.2, unchanged
+  — Proposition Identity, Family Formation, BestTake, Boundary, Freeze)
+- **BOUNDARY/PACING EXECUTE.** (restates Section 4/13.11-13.12's existing
+  authority statement — execution of a physical decision, not a semantic
+  one)
+- **QA REFERENCES NEVER BECOME RUNTIME INPUTS.** (restates CLAUDE.md's
+  binding Cut.ai/Human Gold QA-only doctrine and Section 3's `video00_
+  quality_ladder.py` "architecturally enforced never-imported-by-
+  production" row, unchanged)
+- **RAW REMAINS IMMUTABLE.** (restates D-107 Section 9's non-destructive
+  editing doctrine, Section 13.18, unchanged)
+- **MEANING PRESERVATION IS P0.** (restates D-107 Section 9's BestTake
+  tier-(1) priority and `polarity_safety.py`'s binding invariant,
+  unchanged)
+- **NO COMPLETE FAMILY CONTEXT -> NO AUTHORITATIVE COMPARATIVE WINNER.**
+  (restates D-145, strengthened by D-147's `COMPLETE_CONTEXT_CONFLICT`,
+  Section 13.8/13.8.1, unchanged)
+- **PROPOSITION IDENTITY PRECEDES RETRY IDENTITY.** (restates D-111
+  Section 10.2/Section 13.5, unchanged, binding)
+
+### 15.18 Confirmation: D-177 preserved, unmodified
+
+No part of this section changes, weakens, or supersedes D-177's
+implementation, its offline proof, its verdict (A: PARTIAL-EDGE BOUNDARY
+TRIM OFFLINE PROVEN), or its named next real-media gate. Section 15.9
+above restates D-177's finding for architectural context only — the
+authoritative record remains `docs/CUTSELL_DECISIONS.md`'s own D-177
+entry, per this document's own precedence rule (Section 0's header:
+"Where sources conflict, the accepted contract wins").
+
+### 15.19 Confirmation: documentation only
+
+No `cutsell_worker/*.py` file, no `tests/*.py` file, no `.github/
+workflows/*.yml` file, no feature flag, and no authority contract was
+touched, added, or changed to write this section. No RAW was dispatched.
+No provider/network call was made.
+
+### 15.20 Exact next runtime gate (not launched by this document)
+
+Per P0 (15.15) and D-177's own named next step (15.9): exactly ONE
+Video00 RAW on the current head, evaluating D-177's partial-edge Boundary
+trim on the gynecologist-retry region, against D-177's own success
+criteria (same selected take, same content coverage, entry/exit
+`false_keep` window shrinks toward/to zero, no new clipped phoneme or
+truncation anywhere, no new Boundary regression elsewhere, zero BestTake/
+Family/DeliveryScorer/Watch+Listen verdict change, F1 vs Cut.ai improves
+or remains stable). **Not launched by this document.** Requires separate
+Product Owner authorization, per Section 6's anti-loop/execution
+contract and D-177's own "Wait for Product Owner authorization" close.
+
+---
+
+No change to Section 2's 20 layers, Section 3's status table, or any
+accepted D-096 through D-177 authority contract. Family Formation,
+Proposition Identity, Attempt Relationships, BestTake, Boundary, and
+Pacing are all restated, never modified, by this section. See
+`docs/CUTSELL_DECISIONS.md` D-178A for the decision-log entry recording
+this section's doctrine.
