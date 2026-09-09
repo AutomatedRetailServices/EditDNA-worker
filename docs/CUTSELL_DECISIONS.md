@@ -32711,3 +32711,304 @@ second RAW. No post-result patch.
 D-187 -- Prosodic Audio V2 Phase A, perception/evidence only, no
 BestTake authority, no winner mutation -- as the next canonical
 engineering gate ahead of resuming P1).
+
+---
+
+D-187: PROSODIC AUDIO V2 -- PHASE A -- REAL ACOUSTIC DELIVERY PERCEPTION
+/ EVIDENCE FOUNDATION (post D-186B, promoted before P1 by real-media
+evidence, NO BESTTAKE AUTHORITY, NO WINNER MUTATION, NO RAW)
+
+BRANCH/HEAD: `feature/runpod-pod-on-demand` @ starting `63d9b7e`
+(D-186B docs commit). This task adds two new, freestanding files only;
+no existing file is modified.
+
+AUDIO DEPENDENCY FORENSIC (verified directly in this environment, not
+assumed): `numpy` -- AVAILABLE (already a hard requirement).
+`ffmpeg`/`ffprobe` -- AVAILABLE (already a hard dependency of this
+codebase's render/QC/`audio_silence.py` path). `scipy`, `librosa`,
+`parselmouth`, `pyworld`, `soundfile`, `pydub` -- ALL NOT INSTALLED,
+and NONE added by this task (zero new dependency burden). This shaped
+every design choice below.
+
+NEW MODULE: `cutsell_worker/prosodic_audio_v2.py` (freestanding,
+self-contained -- imports only stdlib + `numpy`; zero import from
+`pipeline.py`, `bounded_finalist_arbiter.py`, `canonical_edit_plan.py`,
+`universal_clean_cut.py`, `watch_listen_understanding.py`, or any
+render/Boundary/Pacing module -- confirmed both by direct grep and by
+an AST-level structural test). Canonical position (per this task's own
+directive): `RAW AUDIO -> AUDIO V1 (silence/dead-air, unchanged,
+`audio_silence.py`) -> PROSODIC AUDIO V2 (this module) -> [Language
+Spine + Visual/Performance + Audio V1 + Prosodic Audio V2 + Media/
+Timing -> Watch+Listen Understanding LATER, not touched by this task]`.
+
+CAPABILITY-STATUS CONTRACT (`PROSODIC_CAPABILITY_STATUS` /
+`prosodic_capability_status_summary()`): speech_rate=AVAILABLE (pure
+ASR-word arithmetic, no audio signal required at all), pause_structure
+=AVAILABLE (REUSES `audio_silence.py`'s own ffmpeg `silencedetect`
+evidence verbatim -- this module never runs a second silence detector;
+confirmed structurally: no `audio_silence` import, no
+`detect_audio_silence_intervals(` call anywhere in the module, and
+`analyze_prosodic_delivery`'s own source contains neither `ffmpeg` nor
+`silencedetect`), continuity=AVAILABLE, energy=AVAILABLE (ffmpeg-
+decoded raw PCM + plain numpy RMS-over-20ms-frames, no DSP library),
+hesitation=PARTIAL, restart=PARTIAL, emphasis=PARTIAL (energy-excursion
+-only; no pitch-excursion or duration-elongation alignment yet),
+delivery_variation=PARTIAL, pitch=NOT_IMPLEMENTED (honest -- no
+parselmouth/pyworld/librosa in this environment; a from-scratch
+autocorrelation pitch tracker would be exactly the "faking it" this
+task explicitly forbids, and the task's own instruction explicitly
+permits this status). Overall `prosodic_audio_status` never claims a
+bare AVAILABLE (pitch's NOT_IMPLEMENTED forces PARTIAL) -- tested.
+
+REQUIRED TYPE: `ProsodicDeliveryEvidence` (frozen dataclass) with
+`candidate_id`, `source_asset_id`, `source_start`, `source_end`,
+`analysis_status`, `speech_duration_sec`, `voiced_or_active_speech_
+duration_sec`, `speech_rate`, `speech_rate_state`, `pause_count`,
+`pause_total_sec`, `pause_structure_state`, `hesitation_state`,
+`restart_or_interruption_state`, `vocal_continuity_state`,
+`energy_mean`, `energy_variation`, `energy_dynamics_state`,
+`emphasis_dynamics_state`, `pitch_analysis_status`, `pitch_variation_
+state`, `delivery_variation_state`, `evidence_confidence`, `missing_
+evidence`, `provenance` -- every numeric field `None`/categorical
+`UNKNOWN` when the underlying signal is genuinely unavailable, never
+fabricated (four distinct early-exit abstain paths: no audio at all ->
+`NOT_EVALUABLE`; empty/out-of-range span slice or sub-noise-floor RMS
+-> `NO_SPEECH`; span too short or too few RMS frames -> `INSUFFICIENT_
+EVIDENCE`; else `EVALUATED`).
+
+PER-CANDIDATE DIAGNOSTICS: `prosodic_delivery_diagnostics(evidence)`
+returns the exact 13-key compact row this task specified
+(`prosodic_audio_available`, `prosodic_speech_rate_state`, `prosodic_
+pause_structure_state`, `prosodic_hesitation_state`, `prosodic_restart_
+state`, `prosodic_continuity_state`, `prosodic_energy_dynamics_state`,
+`prosodic_emphasis_state`, `prosodic_pitch_status`, `prosodic_delivery_
+variation_state`, `prosodic_confidence`, `prosodic_missing_evidence`,
+`prosodic_provenance`) -- JSON-serializable, <2KB, no waveform/
+transcript dump (tested).
+
+SIGNAL-CATEGORY RESULTS (design + test-proven):
+1. Speech rate/cadence: pure ASR `Word.start`/`Word.end` arithmetic
+   over the candidate span -- zero audio DSP dependency; categorical
+   `SLOW`/`MODERATE`/`FAST`, never "good/bad".
+2. Pause structure: REUSES caller-supplied `audio_silence_intervals`
+   (Audio V1's own ffmpeg-`silencedetect` evidence) verbatim; an
+   `_INTERIOR_PAUSE_MARGIN_SEC = 0.15` edge-exclusion distinguishes a
+   natural boundary/dead-air pause (excluded) from an interior delivery
+   interruption (counted) -- the dead-air control.
+3. Hesitation: `HESITATION_PATTERN_PRESENT`/`HESITATION_NOT_OBSERVED`
+   (never `SPEAKER_UNCONFIDENT`) from interior-pause presence; filler
+   text alone (no interior pause) never escalates to hesitation --
+   filler control proven.
+4. Vocal restart/interruption: `RESTART_OR_INTERRUPTION_SUPPORTED`/
+   `RESTART_NOT_OBSERVED` from interior pauses, CORROBORATED (never
+   solely triggered) by optional `language_restart_evidence` -- proven
+   both directions (acoustic-alone and corroborated).
+5. Vocal continuity: categorical `CONTINUOUS`/`MILDLY_INTERRUPTED`/
+   `FRAGMENTED` from interior pause count and proportion of span.
+6. Energy dynamics: coefficient-of-variation (std/mean) of 20ms-frame
+   RMS -- `LOW_VARIATION`/`MODERATE_VARIATION`/`HIGH_VARIATION`, never
+   `EXCITEMENT`. CV is mathematically SCALE-INVARIANT: a global 3x gain
+   multiplier left `energy_dynamics_state` and `energy_variation`
+   byte-identical while `energy_mean` differed, satisfying the gain
+   control without any bespoke normalization logic (test-proven).
+7. Emphasis dynamics: RMS-frame-excursion count (frames exceeding
+   mean + 1.5*std) -- `EMPHASIS_PATTERN_PRESENT`/`EMPHASIS_NOT_
+   OBSERVED`, energy-only (no pitch excursion available yet) -- honest
+   PARTIAL capability.
+8. Pitch/F0: `PITCH_ANALYSIS_NOT_IMPLEMENTED` always -- no dependency
+   exists in this environment; never blocks Phase A (per this task's
+   own explicit allowance).
+9. Delivery flatness/variation: `LOW_VARIATION`/`MODERATE_VARIATION`/
+   `HIGH_VARIATION`/`UNKNOWN` (mirrors energy_dynamics_state, since
+   pitch is absent -- energy is the only variation axis available this
+   phase) -- never "boring"/"engaging"/"confident"/"nervous".
+10. Vocal fumble/interruption corroboration: restart/hesitation states
+    corroborate, never replace, existing `LanguageAttempt.restart_
+    evidence` / filler annotations.
+
+STRICT FIREWALLS -- ALL CONFIRMED (structural + tested): NO
+psychological inference (source-scanned for confidence/nervousness/
+emotion/lying/persuasiveness/authenticity -- zero hits in code, only
+in the docstring's own disclaiming list; word-boundary regex avoids
+"underlying"-style false positives). NO demographic/biometric/identity
+inference (age/gender/race/health/speaker-identity -- zero hits). NO
+master prosody score (no `prosody_score`/`overall_score`/`score` field
+anywhere on `ProsodicDeliveryEvidence` or in the module; every
+dimension stays separate -- tested). NO winner authority (no
+`selected_clip_id`/`winner`/`select`-named field anywhere on the
+evidence object or diagnostics row; the module never imports from
+`pipeline.py`/`bounded_finalist_arbiter.py`/`canonical_edit_plan.py`/
+any render module -- confirmed by direct grep AND by an AST-level
+import-set structural test). NO D-184 fusion (D-184's `bounded_
+finalist_arbiter.py` untouched this task -- the "import-free type
+compatibility test" this task's directive permitted as an optional
+exception was deliberately deferred to D-188, which owns the actual
+fusion). NO provider/network call (source-scanned for `requests`/
+`urllib`/`socket`/`http.client`/known provider hostnames -- zero hits).
+Every `ProsodicDeliveryEvidence` preserves `source_asset_id`/
+`source_start`/`source_end` verbatim from the caller -- no synthetic
+clock (structural: the function signature takes these as required
+positional args and stores them unmodified).
+
+AUDIO V1 REUSE MANDATE: audited first, per this task's own instruction
+-- `audio_silence.py` and `silence_analysis.py` read in full before any
+design decision. `analyze_prosodic_delivery` takes pause/silence
+intervals as an INPUT parameter (`audio_silence_intervals`) and never
+calls `detect_audio_silence_intervals` itself -- confirmed by grep (no
+`detect_audio_silence_intervals(` call anywhere) and by inspecting the
+function's own source (no `audio_silence` import, no `ffmpeg`/
+`silencedetect` string inside `analyze_prosodic_delivery`).
+
+LANGUAGE-SPINE CORROBORATION ONLY: `language_restart_evidence` and
+`language_filler_present` are consumed exclusively as corroborating
+context (never as the sole trigger for restart, and explicitly NOT
+escalating filler-alone to hesitation) -- Language Spine remains sole
+owner of words/meaning/attempt/proposition/relation identity; this
+module never recreates any of that. Structural test: a transcript-only
+caller (no real audio, `audio=None`) yields fully `UNKNOWN`/`None`
+acoustic fields regardless of how many words/filler/restart hints are
+supplied -- "without actual audio signal, acoustic fields remain
+UNKNOWN" proven directly.
+
+AUDIO EXTRACTION: reuses the existing ffmpeg-subprocess-decode pattern
+already used by this codebase's render/QC path (`extract_source_audio_
+samples`) -- decodes the WHOLE source to mono PCM16 ONCE via `-ac 1`
+(a deliberate, documented mono-downmix design choice matching this
+codebase's existing render/QC convention), never per-candidate;
+`_slice_samples(audio, start, end)` slices the ONE decoded array per
+candidate span (tested: two different spans sliced from one
+`AudioSamples` object). Fail-open on any error (missing file, missing
+ffmpeg binary, timeout, decode failure) -- returns `None`, matching
+`audio_silence.detect_audio_silence_intervals`'s own posture (tested
+against a nonexistent file and a nonexistent ffmpeg binary path).
+Sample rate: `DEFAULT_SAMPLE_RATE = 16000` Hz mono, explicit and
+documented (no arbitrary undocumented resampling).
+
+SIGNAL HONESTY / CROSS-TAKE COMPARABILITY: energy evidence is CV-based
+(scale-invariant) specifically so a louder recording is never confused
+with stronger delivery (gain control, tested). Two spans from the SAME
+`AudioSamples` source can be independently evaluated for later fair
+comparison (tested), but this task does NOT implement any comparison/
+fusion logic -- normalized factual evidence only, for D-188.
+
+D-186B ABSTRACT DIFFERENTIATING FIXTURE (generic, NOT the literal
+Pimples/gynecologist transcript -- confirmed by source-scan of both
+the module and the test file for those literal strings): a two-take
+synthetic fixture (Take A: broken cadence with two interior pauses +
+`language_restart_evidence=True`; Take B: continuous delivery, same
+source/span/duration) -- Prosodic evidence FACTUALLY DIFFERENTIATES:
+Take A `vocal_continuity_state` in {MILDLY_INTERRUPTED, FRAGMENTED}
+vs Take B `CONTINUOUS`; Take A `HESITATION_PATTERN_PRESENT` vs Take B
+`HESITATION_NOT_OBSERVED`; Take A `RESTART_OR_INTERRUPTION_SUPPORTED`
+vs Take B `RESTART_NOT_OBSERVED` -- and NEITHER evidence object nor its
+diagnostics row carries any field resembling a winner/selection
+(tested directly: no key containing "winner" or "select").
+
+ADDITIONAL REQUIRED CONTROLS -- ALL PASS: near-equal control (two
+takes differing only in noise seed produce identical `energy_dynamics_
+state`/`vocal_continuity_state` -- no manufactured distinction).
+Boundary-vs-interior dead-air control (silence flush against either
+span edge is excluded from the interior pause count; only a
+genuinely-interior gap counts). Filler control (filler text + fluent
+audio stays `HESITATION_NOT_OBSERVED`; filler text + a real interior
+pause still reads `HESITATION_PRESENT` -- audio determines the
+acoustic shape). Restart control (acoustic-alone vs corroborated
+paths both verified). Energy/gain control (CV invariant under a 3x
+global amplitude multiplier). Pitch control (explicit, non-blocking
+`PITCH_ANALYSIS_NOT_IMPLEMENTED` path, exactly as this task's directive
+permits). Clipping control (a heavily clipped [-1,1]-saturated
+waveform evaluates without crashing). No-speech control (silence-only
+span -> `NO_SPEECH`). Short-span control (0.2s span -> `INSUFFICIENT_
+EVIDENCE`). Mono downmix documented as a design choice, not a silent
+gap. Determinism: identical inputs (same `AudioSamples` object,
+`words`, `audio_silence_intervals`) produce byte-identical
+`ProsodicDeliveryEvidence` (dataclass equality, tested twice).
+Real ffmpeg-decode integration path exercised end-to-end against a
+stdlib-`wave`-authored synthetic PCM16 WAV file (2.5s tone), confirming
+actual sample-rate/duration/dtype correctness through the real
+subprocess path, not merely the pure in-memory analysis function.
+Runtime measurement (informational only, no optimization target
+invented): a 30-second synthetic span analyzed well under real-time on
+this environment's CPU (wall time and real-time-factor printed by the
+test, not asserted against a ceiling per this task's own instruction).
+
+TEST FILE: `tests/test_cutsell_d187_prosodic_audio_v2.py` -- 51 tests
+(45 matrix items numbered 1-45 plus 6 bonus integration/runtime/design-
+choice tests explicitly called out by the directive's own additional
+sections), covering every signal category, every firewall (as
+structural AST-level import-set and word-boundary regex source scans,
+not string-contains substring checks -- avoiding false positives like
+"underlying" containing "lying"), the abstract D-186B fixture, every
+required control, determinism, and the real-ffmpeg integration path.
+ALL 51 PASS.
+
+OFFLINE QUALIFICATION:
+- `python3 -m compileall cutsell_worker tests`: PASS (the one
+  pre-existing, untouched `jobs_smoke.py` shell-heredoc collection
+  error at repo root is unrelated scratch content, confirmed via `git
+  log`/`git diff` to predate and be untouched by this task).
+- New D-187 suite: 51/51 PASS.
+- Targeted regression battery (D-184/D-183/D-180/D-123/D-128/D-150/
+  D-158/D-161/D-163/D-167/D-172/D-174/D-177/D-171/D-169/D-168/D-166):
+  854/854 PASS.
+- Boundary/D-142-pacing/render targeted suites (`test_cutsell_d142_
+  dialogue_pacing_transition_phase1.py`, `test_cutsell_d097_c_boundary_
+  engine_pass.py`, `test_cutsell_selection_boundary_contract.py`,
+  `test_cutsell_clean_worker_boundary_bridge.py`, `test_cutsell_clean_
+  worker_boundary_repair.py`, `test_cutsell_clean_worker_render.py`,
+  `test_cutsell_live_render_qc.py`, `test_cutsell_post_render_media_
+  qc.py`, `test_cutsell_post_render_structural_cross_check.py`,
+  `test_cutsell_video00_render_path_regressions.py`): 109/109 PASS.
+- Full offline `tests/` suite (excluding the one pre-existing,
+  untouched `test_semantic_stitch.py` collection error, confirmed via
+  `git log`/`git diff` to predate this task): 4255 passed, 5 failed --
+  the SAME 5 pre-existing baseline failures repeatedly confirmed
+  unrelated across this entire session's D-177 through D-186B work
+  (`test_hybrid_story_guard_incomplete_retry.py::test_incomplete_
+  failed_retry_is_covered_when_prior_delivery_preserves_numbers_and_
+  negation` + 4 in `test_video00_modal_hybrid_semantic_parity.py`,
+  all D-043/D-044 Modal-env-secret-overlay-workflow tests, wholly
+  unrelated to audio/prosody). ZERO NEW FAILURES.
+- `git status`/`git diff --stat HEAD`: confirms exactly two new,
+  untracked files (`cutsell_worker/prosodic_audio_v2.py`, `tests/
+  test_cutsell_d187_prosodic_audio_v2.py`) and ZERO existing file
+  modified -- structurally guarantees no D-183/D-184/Family Formation/
+  Language/Visual/Boundary/Pacing/Renderer regression is even possible
+  from this task's own changes.
+
+D-187 VERDICT: **A. PROSODIC AUDIO V2 PHASE-A EVIDENCE FOUNDATION
+OFFLINE PROVEN.**
+
+CANONICAL STATUS UPDATE: Prosodic Audio V2: PHASE_A_OFFLINE_PROVEN.
+This explicitly does NOT claim BestTake integration, D-184 fusion,
+real-media (Video00) qualification, or any selection/winner authority
+-- those remain gated behind D-188 (fusion, still no winner authority)
+and a future confirmatory real-media RAW, both separately-authorized.
+
+EXACT NEXT GATE: **D-188 -- Prosodic Audio V2 to Bounded Finalist
+Arbiter diagnostic fusion** (still NO winner authority; consumes
+`ProsodicDeliveryEvidence`/`prosodic_delivery_diagnostics` as
+additional evidence inside D-184's existing `PREFER_CANDIDATE`/
+`ABSTAIN` decision, never a new authority). NOT implemented here -- a
+future, separately-authorized task, per this task's own explicit "Do
+NOT implement D-188 automatically" instruction.
+
+P1 STATUS: remains paused. This task's own guidance: if D-187/D-188/
+one confirmatory RAW show Prosodic Audio safely closes the CONFIRMED
+local BestTake evidence gap (the real Pimples-family comparative gap
+D-186B found), finish that bounded seam first, then resume P1. Not
+reassessed further in this task (no RAW run here).
+
+STRICT SCOPE CONFIRMATIONS: no BestTake/arbiter authority added or
+exercised. No D-184 fusion (bounded_finalist_arbiter.py untouched; the
+optional type-compatibility test was deliberately deferred to D-188).
+No winner mutation (no such field/code path exists in the new module,
+confirmed structurally). No provider call. No P1 implementation. No
+Commercial Moment/Sales Funnel work. No Family Formation/semantic-
+authority/Boundary/Pacing change (zero existing file touched). No RAW
+launched. No iOS work.
+
+**HUMAN ACTION REQUIRED:** YES (condition A: whether to authorize
+D-188 -- Prosodic Audio V2 to Bounded Finalist Arbiter diagnostic
+fusion, still no winner authority -- as the next canonical engineering
+gate, and whether/when to resume P1, remain Product Owner decisions).
