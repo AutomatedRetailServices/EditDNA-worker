@@ -29182,3 +29182,393 @@ task. No fallback provider change (D-128 untouched). No iOS work.
 **HUMAN ACTION REQUIRED:** YES (condition A) -- authorizing the one
 Video00 RAW named in "Exact next real-media gate" above is a Product
 Owner decision.
+
+
+## D-175: Watch+Listen BestTake Guard Authority -- real-media qualification (post D-174)
+
+==================================================
+STATUS
+==================================================
+
+**B. AUTHORITY SAFETY REAL-MEDIA PROVEN -- NO MATERIAL TRIGGER OBSERVED.**
+One canonical Video00 Modal RAW (id `34337801450`, workflow-dispatched on
+branch `feature/runpod-pod-on-demand` head `6138171` with the D-175
+workflow-only plumbing commit `d9dcd59` layered on top) ran with ALL
+THREE Watch+Listen flags on for the first time:
+`CUTSELL_WATCH_LISTEN_BESTTAKE_EVIDENCE_ENABLED=1`,
+`CUTSELL_WATCH_LISTEN_ZONE_USABILITY_V2_BESTTAKE_ENABLED=1`,
+`CUTSELL_WATCH_LISTEN_BESTTAKE_GUARD_AUTHORITY_ENABLED=1`. Job conclusion:
+`failure` -- confirmed, via direct step-by-step job inspection, caused
+ONLY by the two long-known, pre-existing legacy validators ("Verify
+frozen Selection lock", "Verify Human Gold regression QA"); every other
+step, including the new D-175 summary step itself, succeeded. The
+authority executed safely across all 6 real families this run: zero
+rejection, because no real family's winner reached the `MATERIAL`/
+`SEVERE` materiality floor D-174 requires -- exactly the honest negative
+outcome the directive's own "Important Prior Expectation" section named
+as a valid, non-failure result.
+
+==================================================
+RAW IDENTIFICATION
+==================================================
+
+Run id `34337801450`, benchmark id derived from the same canonical
+source (`Editdna longform validation/VIDEO-2026-07-30-09-18-03.mp4`).
+`story_completeness: "complete"`, `technical_qc_status: "PASS"`,
+`delivery_status: "DELIVERABLE_PENDING_HUMAN_WATCH_LISTEN:perceptual=FAIL"`
+(standard advisory pattern, not a regression).
+
+==================================================
+GLOBAL AUTHORITY SUMMARY
+==================================================
+
+```
+"run_level": {
+  "status": "evaluated",
+  "guard_authority_evaluated_count": 6,
+  "guard_authority_no_action_count": 5,
+  "guard_authority_meaning_block_count": 1,
+  "guard_authority_case_block_count": 0,
+  "guard_authority_d123_block_count": 0,
+  "guard_authority_conflict_block_count": 0,
+  "guard_authority_rejection_count": 0,
+  "guard_authority_ladder_reselection_count": 0,
+  "guard_authority_winner_changed_count": 0
+}
+```
+All 6 real `take_judge_groups` families reached the authority this run
+(`guard_authority_enabled: true`, `guard_authority_evaluated: true` on
+every row). `families_with_guard_authority_applied: 0`.
+
+==================================================
+PER-FAMILY AUTHORITY TRACE (all 6, real ids)
+==================================================
+
+1. `tg_81b2518da4d50741bd` (winner `clip_1f9dcbb1059e81b62033`, alt
+   `clip_9277f4994039a57f61b5`) -- V2 `BYPASS_POOR_USABILITY_WINNER`,
+   winner severity `MILD`, no dominant alternative found at all
+   (`meaning_firewall_blocked: false`) -> `NO_ACTION` /
+   `no_dominant_meaning_sufficient_alternative`.
+2. `tg_ee0ca4fa454c61c354` (winner `clip_e01bf5f9523f229bc423`, members
+   also `clip_0811c77c325b2c80dca8`, `clip_ae124265b108aa3f9fed`;
+   `semantic_authority_gate_status: ABSTAIN_CONFLICT`) -- V2 finds a
+   dominant alternative, but it is meaning-insufficient
+   (`meaning_sufficient_candidates` lists only the winner) ->
+   `BLOCKED_BY_MEANING_FIREWALL` / `v2_dominant_alternative_meaning_
+   insufficient_blocked`, winner severity `MILD`. **This is the SAME
+   real ground-truth-confirmed BestTake miss D-173 found**: the
+   independent quality-ladder rationale export flags this exact family
+   `false_keep` / `take_choice_against_both_references` at region
+   95.58-103.87s, `why: "family tg_ee0ca4fa454c61c354 winner clip_
+   e01bf5f9523f229bc423 is a realization both references rejected"` --
+   the D-173 real miss replaying on this run, and the Meaning Firewall
+   again correctly declined to let the diagnostic finding authorize a
+   rejection.
+3. `tg_0add98e729d0c7c371` (sonography region, winner `clip_
+   08be77c5515c7d2f567c`, alt `clip_e2b6e9184195a3aa6e6e`, both meaning-
+   sufficient) -- V1 `BYPASS_POOR_USABILITY_WINNER` but V2 winner
+   severity `NONE` (V1's flatter OR-over-presence rule vs V2's refined
+   per-zone accounting -- an existing, pre-D-174 V1-vs-V2 divergence,
+   not introduced by this task) -> `NO_ACTION` /
+   `no_dominant_meaning_sufficient_alternative`.
+4. `tg_74c1c07dc5f2755d8a` (winner `clip_6e8a7b46c4638d468fc3`) -- V2
+   `PRESERVE_STRUCTURED_WINNER`, severity `NONE` (clean winner) ->
+   `NO_ACTION` / `winner_usability_acceptable_or_evidence_missing`.
+5. `tg_8963c30dd30f0326a9` (the pimples/espinillas family, winner
+   `clip_ab39ffd9bf5bec9747d7`, alt `clip_686c81da81a6a4aeb5c1`) -- V2
+   `BYPASS_POOR_USABILITY_WINNER`, winner severity `MILD`, no dominant
+   alternative found -> `NO_ACTION` /
+   `no_dominant_meaning_sufficient_alternative`.
+6. `tg_16a03249955b78c7b3` (single-member family, `final_selected_
+   clip_id: ""` -- a no-usable-realization/singleton-drop shape, same
+   family class D-097.9's R11 already covers) -- no winner, no V2
+   evidence (`NO_EVIDENCE`) -> `NO_ACTION` /
+   `missing_winner_or_insufficient_candidates_or_no_v2_result`
+   (condition 1/2 correctly fail).
+
+`winner_immutability_check: "OK"` on all 6 families -- `winner_before ==
+winner_after` in every row, `guard_authority_applied: false` in every
+row.
+
+==================================================
+PRIMARY QUESTION
+==================================================
+
+No real family this run satisfied ALL bounded authority conditions
+strongly enough to reject the current winner. The lack of rejection is
+explained honestly, per family: family 1/3/4/5 -- no dominant
+meaning-sufficient alternative was ever found by V2 (family 3 also shows
+V1/V2 severity disagreement, unrelated to materiality); family 2 -- a
+real dominant alternative WAS found but the Meaning Firewall correctly
+blocked it (meaning-insufficient); family 6 -- a single-candidate
+no-usable-realization shape, condition 1/2 fail. No family reached
+`PERFORMANCE_DOMINANT_ALTERNATIVE` with a meaning-sufficient dominant
+candidate this run (`v2_dominance_count: 0` in D-172's own diagnostics,
+cross-referenced), so the MATERIALITY floor (condition 7) was never even
+reached as the limiting factor for any family -- the limiting factor was
+earlier in the chain (no dominance found, or meaning-insufficient) in
+every case.
+
+==================================================
+MATERIALITY CONTROL
+==================================================
+
+Real winner severities this run: `MILD` (families 1, 2, 5), `NONE`
+(families 3, 4), `null`/no-evidence (family 6). Zero `MATERIAL`/`SEVERE`
+findings anywhere. Confirmed: no tiny/near-equal/MILD-only difference
+ever triggered authority -- there was no case where authority would have
+needed to be blocked by the floor, because no family's V2 evaluation
+even reached a meaning-sufficient dominant finding this run.
+
+==================================================
+D-173 REAL MISS REPLAY
+==================================================
+
+Family `tg_ee0ca4fa454c61c354` (see per-family trace item 2) reproduces
+the exact D-173 real-media shape on this run: current winner `clip_
+e01bf5f9523f229bc423` (ground-truth `false_keep`, rejected by both
+Cut.ai and Human Gold per the independent rationale export), V2 found a
+dominant alternative, that alternative is meaning-insufficient ->
+`BLOCKED_BY_MEANING_FIREWALL`. D-175 authority correctly did NOT reject
+the current winner solely because of that ineligible alternative --
+exactly the directive's own required outcome.
+
+==================================================
+MEANING-SUFFICIENT POSITIVE CONTROL
+==================================================
+
+Searched all 6 families for: current winner meaning-sufficient AND
+alternative meaning-sufficient AND current winner `MATERIAL`/`SEVERE`
+worse on DELIVERY AND V2 dominance true. None found this run (family 3
+is the closest -- both meaning-sufficient -- but its winner severity is
+`NONE`, not a defect at all). This control is honestly `NOT SATISFIED
+ON THIS RUN` -- consistent with D-174's own decision entry, which
+predicted this exact outcome given D-173's own real family (`tg_
+8cae696f55d852a3e5`) carried only `MILD` severity and family ids/content
+segmentation vary run to run.
+
+==================================================
+PIMPLES / ESPINILLAS
+==================================================
+
+Family `tg_8963c30dd30f0326a9`: topology unchanged (2 members), meaning-
+sufficient candidates `[clip_ab39ffd9bf5bec9747d7]` only (the winner),
+winner severity `MILD`, no dominant alternative found ->
+`guard_authority_state: NO_ACTION`, `winner_after == winner_before`.
+D-173's own finding (near-equal/MILD) remains true this run -- no
+authority fired, no rejection manufactured, consistent.
+
+==================================================
+ORDINARY-MOTION FIREWALL
+==================================================
+
+No family this run reached a `MATERIAL`/`SEVERE` severity from ordinary
+expressive motion (hand/facial/body) alone -- the highest severity
+observed anywhere was `MILD`. Consistent with D-167's own Ordinary
+Motion Firewall (LOW-materiality + ISOLATED pattern never produces any
+severity) and D-174's own materiality floor (MILD never authorizes).
+
+==================================================
+CASE OWNERSHIP
+==================================================
+
+`guard_authority_case_owner` is `null` on all 6 families this run --
+honestly disclosed: `case_owner` is populated only inside the
+`PERFORMANCE_DOMINANT_ALTERNATIVE` evaluation branch (D-174's own code),
+and zero families reached that branch this run (all resolved earlier via
+`NO_ACTION`/`BLOCKED_BY_MEANING_FIREWALL`). CASE A: 0 observed (never
+reached). CASE B: 0 observed via the `case_owner` field specifically,
+though families 1/2/3/5 are DELIVERY-owned in the underlying V1/V2 sense
+(`BYPASS_POOR_USABILITY_WINNER` implies delivery UNUSABLE) -- just never
+reached far enough for this authority's own `case_owner` bookkeeping to
+record it. CASE C: 0 (`guard_authority_conflict_block_count: 0` --
+`BLOCKED_BY_CONFLICT` never fired). CASE CLEAN: family 4 (`PRESERVE_
+STRUCTURED_WINNER`, severity `NONE`) is the one clean-winner family this
+run, correctly `NO_ACTION`.
+
+==================================================
+D-123 OWNERSHIP
+==================================================
+
+`guard_authority_d123_blocked: false` on all 6 families
+(`guard_authority_d123_block_count: 0`) -- `case_b_conflict_present:
+false` on every row this run, so D-123 never had an actionable
+disagreement to own for any of these 6 families. No duplicate authority
+possible or exercised.
+
+==================================================
+MEANING FIREWALL
+==================================================
+
+`v2_dominant_candidates` this run: D-172's own run-level `v2_dominance_
+count: 0` and `v2_meaning_firewall_block_count: 1` (cross-referenced
+directly from the SAME run's D-173 step output, confirming internal
+consistency between the diagnostic and authority layers). One real V2
+dominant alternative was found (family 2) and it was meaning-
+insufficient; the Meaning Firewall blocked it. Zero meaning-sufficient
+dominant alternatives were found this run at all -- so the "zero
+meaning-insufficient candidate may cause current-winner rejection"
+requirement holds trivially and by direct confirmation
+(`guard_authority_rejection_count: 0`).
+(Distinct, unrelated count: D-123/D-128's OWN `meaning_insufficient_
+alternative_block_count: 2` this run is that DIFFERENT authority's own
+Class-B shadow-fallback-trigger count over `case_b_evidence` -- a
+separate mechanism from D-172/D-174's Zone-Usability V2 path; not to be
+conflated with the 1 counted here.)
+
+==================================================
+FAIL-OPEN
+==================================================
+
+Family 6 exercised the "missing V2/missing candidate" fail-open path
+live (`NO_EVIDENCE`, single member, no winner) -> `NO_ACTION`, zero
+mutation. No conflict, non-decisive-ladder, or exception path was
+exercised this run (no family ever reached Phase 2's ladder-reevaluation
+code at all, since zero families were marked `GUARD_REJECT_CURRENT_
+WINNER`) -- Phase 2 was a complete no-op this run, which is itself the
+correct, provably safe behavior when Phase 1 finds nothing to act on.
+
+==================================================
+FAMILY / PROPOSITION / LANGUAGE FREEZE
+==================================================
+
+`git diff --stat` for this task's plumbing commit (`d9dcd59`) touches
+ONLY `.github/workflows/cutsell-video00-modal-raw.yml` -- confirmed
+before dispatch and reconfirmed here. Zero Family Formation/Proposition
+Identity/Attempt Relations/Language Spine/D-150/D-158/D-161 change.
+
+==================================================
+BOUNDARY OWNERSHIP
+==================================================
+
+No family this run showed an ENTRY/EXIT-only defect reaching the
+authority's dominance search (all evaluated severities came from
+`BYPASS_POOR_USABILITY_WINNER`/`PRESERVE_STRUCTURED_WINNER` DELIVERY-zone
+outcomes) -- CASE A ownership was never even a live path this run, per
+the CASE OWNERSHIP section above.
+
+==================================================
+AUDIO HONESTY
+==================================================
+
+No new audio/tone/emotion/prosody/voice-confidence inference introduced
+or exercised. All real evidence this run is the same visual-channel
+Track C signal D-163/D-167/D-172 already use.
+
+==================================================
+WHOLE-VIDEO COMMERCIAL CONTEXT (COMPACT)
+==================================================
+
+Story complete this run. Region status (D-175 authority impact only;
+not a full D-143 forensic re-open): Hook/Body-Symptoms -- `NOT_
+REEVALUATED` (no BestTake-evaluated family in this region this run);
+gynecologist-retry region (~95-104s, family `tg_ee0ca4fa454c61c354`) --
+`CUTAI_GAP` (the known real BestTake miss, unresolved, correctly not
+touched by this authority); Sonography (family `tg_0add98e729d0c7c371`)
+-- `CUTAI_PASS` (`NO_ACTION`, clean/near-clean); Diagnosis-reflection
+(family `tg_74c1c07dc5f2755d8a`) -- `CUTAI_PASS`; Pimples (family `tg_
+8963c30dd30f0326a9`) -- `CUTAI_PASS` (MILD, correctly untouched);
+Stomach/Conclusion/CTA -- `NOT_REEVALUATED` (no BestTake-evaluated
+family reached this run's 6-family set in those regions). Zero
+`REGRESSED` regions.
+
+==================================================
+PARITY METRICS
+==================================================
+
+Physical (rendered) view, this run: Selection Level-1 11 regions /
+23.459s; Boundary Level-1 24 regions / 3.958s; overall physical
+LEVEL_1 27.417s of 366.997s raw; F1 vs Cut.ai 0.8501; F1 vs Human Gold
+0.8252; reference Cut.ai-vs-Gold ceiling 0.8996.
+
+**D-173 comparison**: D-173 F1 Cut.ai = 0.8522, F1 Gold = 0.8200 (physical
+view). This run: F1 Cut.ai = 0.8501 (-0.0021), F1 Gold = 0.8252 (+0.0052).
+**Causality**: `guard_authority_winner_changed_count == 0` this run, so
+NONE of this movement is attributable to D-174/D-175 authority -- it is
+ordinary RAW-to-RAW measurement variance (family ids are per-run hashes,
+per-run segmentation of the false_keep/missing_delivery boundary differs
+slightly), exactly as the directive's own instruction anticipated.
+
+==================================================
+WINNER CHANGE AUDIT
+==================================================
+
+Zero winners changed this run (`guard_authority_winner_changed_count:
+0`). No family/winner_before/winner_after/reference-preference table
+applies -- there is nothing to classify (IMPROVED/NEUTRAL/REGRESSED all
+require a change; none occurred).
+
+==================================================
+NO UNAUTHORIZED MUTATION
+==================================================
+
+Only the D-174 BestTake winner seam could have mutated anything, and it
+mutated nothing this run (`guard_authority_applied: false` on all 6 rows,
+`winner_immutability_check: OK` on all 6). Family membership, clip
+boundaries, ordering, Pacing, semantic authority, and Proposition
+Identity are all confirmed unaffected -- unreachable by this task's own
+code by construction, and confirmed unaffected by this run's evidence.
+
+==================================================
+D-175 VERDICT
+==================================================
+
+**B. AUTHORITY SAFETY REAL-MEDIA PROVEN -- NO MATERIAL TRIGGER
+OBSERVED.** The authority executed safely across all 6 real families;
+zero rejection because no real family met the MATERIAL/SEVERE
+materiality floor; the Meaning Firewall held (1/1 real dominant-alternative
+finding correctly blocked, reproducing the D-173 real miss shape
+exactly); D-123 ownership never had to be tested (zero actionable
+conflicts this run); zero regression in any inspected dimension. This is
+a successful negative qualification, not a failure.
+
+==================================================
+BESTTAKE GAP STATUS
+==================================================
+
+**PARTIALLY CLOSED.** The diagnostic/authority infrastructure (D-163
+through D-175) is now proven, on real media, to be both discriminating
+(finds real dominance when it exists, D-173's own family 6) and safe
+(never overrides meaning, CASE ownership, or D-123; never acts below the
+materiality floor). The one real, ground-truth-confirmed BestTake miss
+this session has repeatedly found (the gynecologist-retry family) remains
+UNCLOSED -- its better alternative is meaning-insufficient, so THIS
+authority correctly cannot and does not touch it; closing that gap (if
+it is to be closed at all) requires a different, meaning-scoped
+intervention, out of this task's scope.
+
+==================================================
+VIDEO00 RAW -> CUT.AI STATUS
+==================================================
+
+**NOT YET.** F1 vs Cut.ai (physical) 0.8501, materially below full
+parity; the known gynecologist-region miss remains open; D-175's own
+verdict B does not itself move this needle (`winner_changed_count: 0`).
+
+==================================================
+EXACT NEXT ENGINE GATE
+==================================================
+
+Per this task's own instruction (Verdict B path): do NOT rerun Video00
+repeatedly hoping for MATERIAL severity, and do NOT tune thresholds to
+force activation. The Product Owner's next decision is between (1)
+qualifying D-174 on a different, unseen RAW more likely to contain a
+genuine strong bad-take/restart shape, or (2) moving to the next
+demonstrated Video00 commercial blocker -- most concretely the
+gynecologist-retry region's real BestTake miss (family shape confirmed
+independently by D-170/D-172/D-173/D-175 across four separate runs), which
+this authority is structurally unable to close because its better
+alternative is meaning-insufficient. Not decided here.
+
+==================================================
+STRICT SCOPE CONFIRMATIONS
+==================================================
+
+No cutsell_worker editorial patch this task (workflow-only diff,
+confirmed via `git diff --stat` before and after dispatch). No threshold
+tuning. No new severity rule. No Family Formation/Language-Spine/
+semantic-authority/Boundary/Pacing/provider-policy change. Exactly one
+RAW dispatched. No second RAW.
+
+**HUMAN ACTION REQUIRED:** YES (condition A) -- choosing between the two
+options in "Exact next engine gate" above is a Product Owner decision.
