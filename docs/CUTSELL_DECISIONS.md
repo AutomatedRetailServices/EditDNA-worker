@@ -32051,3 +32051,176 @@ change. D-123/D-128/D-145 through D-182 not rewritten.
 **HUMAN ACTION REQUIRED:** YES (condition A: whether to authorize the
 D-184 bounded finalist arbiter design/implementation gate named above,
 and whether/when to resume P1, remain Product Owner decisions).
+
+---
+
+D-184: BOUNDED FINALIST ARBITER -- OFFLINE / DIAGNOSTIC ONLY
+(`cutsell_worker/bounded_finalist_arbiter.py`, post D-183)
+
+CORE QUESTION (deliberately separate from D-183's own question): D-183
+answers "do we actually know who is better?" (a terminal Steps 6-9
+confidence/decisiveness classification). D-184 answers the narrower
+follow-on: "if the normal terminal ladder does NOT know
+(`terminal_besttake_confidence_state` in {NON_DECISIVE, TIED,
+CONFLICTED}), do our EXISTING independent structured signals provide a
+SAFE preference among a small (2-3) meaning-sufficient finalist set?"
+THE ARBITER MAY PREFER. THE ARBITER MAY ABSTAIN. THE ARBITER MUST NOT BE
+FORCED TO PICK -- there is no `max(score)`, no fallback-to-first, no
+source-order/clip-id/family-id pick anywhere in the new module.
+
+ELIGIBILITY GATE (checked first, nothing evaluated otherwise):
+`terminal_confidence_state` must be D-183's own public
+`NON_DECISIVE`/`TIED`/`CONFLICTED` (reused verbatim, never a duplicate
+ontology) AND `2 <= len(candidate_ids) <= 3`; otherwise `NOT_ELIGIBLE` /
+`ABSTAIN`.
+
+P0 MEANING PARITY (checked second, overrides everything below): any
+finalist outside the caller's own `meaning_sufficient_candidate_ids`, or
+a genuine negation/critical-number conflict between two finalists'
+supplied texts -- detected via `language_proposition_relation.py`'s OWN
+already-existing, already-vetted primitives (`build_claim_signature` /
+`claim_signatures_conflict`, themselves built entirely on
+`semantic_claims.extract_claims`) -- forces `CONFLICTED`/`ABSTAIN`
+before any performance evidence is even read. No new NLP/LLM engine.
+Text is optional; an unverified pair is reported `meaning_parity_status
+= UNKNOWN`, never silently assumed `CONSISTENT`.
+
+EVIDENCE / NO RAW-SCORE REPACKAGING: the ONE performance-comparison
+dimension consulted is D-172's own `zone_usability_v2_dominates`
+(reused verbatim -- no new severity-ranking algorithm), computed
+pairwise across the 2-3 finalists (`_v2_preferred_candidate`); a
+directed 3-cycle among the pairwise dominance edges is reported as an
+internal conflict rather than resolved by an arbitrary pick (proven
+mathematically unreachable from real V2 evidence -- Pareto-style
+dominance over totally-ordered per-zone ranks is transitive -- so this
+is a defensive path, exercised directly in `test_31` via a stubbed
+dominance function). `FinalistArbiterInput.terminal_scores` and
+`performance_evidence_by_id` (D-163's raw CASE B evidence) are carried
+for DIAGNOSTIC VISIBILITY / provenance ONLY -- `evaluate_bounded_
+finalist_arbiter`'s decision logic never reads either field (proven by
+`test_38`/`test_39`/`test_45`: identical evidence with and without these
+fields, or with wildly lopsided `terminal_scores`, yields an identical
+verdict). `DOUBLE_COUNTING_AUDIT` documents D-163/D-172 as one
+correlated performance dimension, never independently voted.
+
+EDITABILITY (evidence hierarchy tier 2): consumed only via an OPTIONAL
+`editability_preferred_candidate_id` when an independent, already-
+canonical comparator supplies one; none exists in live wiring today
+(V2's own Boundary firewall is already folded into `zone_usability_v2_
+dominates` itself), so this stays realistically empty outside the
+synthetic conflict-control test (`test_33`).
+
+MERGE / ABSTENTION LOGIC (mirrors, but does not literally call, D-183's
+own `structured_signals` unanimous-agreement/disagreement contract --
+implemented independently because D-183's own function also folds in
+raw score, which this arbiter must never treat as decisive): each
+evidence source with data contributes `None` (no preference) or a
+candidate id; >=2 distinct non-None preferences -> `CONFLICTED`/
+`ABSTAIN`; exactly one distinct preference -> `PREFERENCE_SUPPORTED`/
+`PREFER_CANDIDATE`; sources present but unanimous-`None` ->
+`NEAR_EQUAL`/`ABSTAIN`; no source with any evidence at all ->
+`INSUFFICIENT_EVIDENCE`/`ABSTAIN`.
+
+PROSODIC AUDIO / P1: `PROSODIC_AUDIO_AVAILABLE = False` module constant;
+never inferred from transcript or visual evidence -- every diagnostics
+row carries `bounded_finalist_arbiter_prosodic_audio_status =
+"NOT_AVAILABLE"` and `"prosodic_audio"`/`"p1_global_context"` in
+`missing_evidence`, unconditionally, across every branch (`test_48`).
+No sequence-position role, no commercial role, no upstream sales-
+conversion logic, no moment-level story understanding, no whole-video
+reasoning -- LOCAL FINALIST arbitration only.
+
+D-181 PIMPLES ABSTRACT REPLAY: a generic replay (two meaning-sufficient,
+same-proposition, non-subset texts; `NON_DECISIVE` terminal state; both
+V2 projections clean/near-equal; prosody unavailable) correctly
+`ABSTAIN`s (`NEAR_EQUAL` or `INSUFFICIENT_EVIDENCE`), never fabricating
+a preference just because a real family shares this shape (`test_41`) --
+this is Verdict A's own explicit, expected outcome, not a defect.
+
+`action_applied` is hardcoded `False` on every `BoundedFinalistArbiterResult`
+this task produces; `evaluate_bounded_finalist_arbiter` mutates nothing
+(`test_action_applied_is_always_false`, `test_result_carries_no_
+selection_mutation_fields`). No provider/network call anywhere (source-
+scanned). No `master_score`/`score_weight` (source-scanned). No Cut.ai/
+Human Gold reference string (source-scanned).
+
+DIAGNOSTICS: `bounded_finalist_arbiter_diagnostics` (13 fields:
+`_eligible`, `_candidate_count`, `_state`, `_decision`, `_preferred_
+candidate_id`, `_reason`, `_meaning_parity`, `_performance_status`,
+`_editability_status`, `_prosodic_audio_status`, `_conflict`, `_missing_
+evidence`, `_action_applied`); `bounded_finalist_arbiter_run_summary`
+(7 tail-safe counts: `arbiter_evaluated_count`, `_preference_supported_
+count`, `_abstain_count`, `_near_equal_count`, `_conflicted_count`,
+`_insufficient_evidence_count`, `_not_eligible_count`).
+
+WIRING (`cutsell_worker/pipeline.py`): independently flag-gated
+(`CUTSELL_BOUNDED_FINALIST_ARBITER_ENABLED`, default OFF -- never
+depends on D-163/D-172/D-174's own flags). OFF: total no-op, zero new
+keys anywhere, `{"status": "disabled"}` summary (`test_pipeline_wiring_
+flag_off_is_a_total_no_op`). ON: consumes D-183's OWN already-computed
+`_terminal_besttake_confidence_result` (never re-derived) plus a fresh
+D-172 V2 projection per member and each member's own text; spreads the
+13 diagnostics fields into the existing `take_judge_groups` row and adds
+a tail-safe `bounded_finalist_arbiter` summary block; `selected_clip_id`/
+membership/winner are provably unchanged either way
+(`test_pipeline_wiring_flag_on_carries_diagnostics_without_changing_
+winner`).
+
+REGRESSION: `tests/test_cutsell_d184_bounded_finalist_arbiter.py`
+(62/62, covering eligibility x candidate-count, P0 meaning parity
+(negation/number conflict via real `language_proposition_relation.py`
+primitives), V2 dominance and its reverse, near-equal/Pimples-replay
+abstention, three-finalist dominance and the defensive cycle path,
+performance-vs-editability conflict, missing-evidence/no-raw-score-
+fallback, determinism/order-independence, the double-counting audit,
+prosody/P1 explicit absence, diagnostics/run-summary shape, and live
+pipeline wiring both flag states) plus D-183 (48/48, unmodified) /
+D-123/D-128/D-150/D-158/D-161/D-163/D-167/D-172/D-174/D-177/D-171/
+D-169/D-168/D-166 targeted suites, Boundary/Pacing/D-142/Renderer
+suites (417/417), full `tests/` suite (4203/4209 passing after this
+task's commit removes the one guard failure that fails against ANY
+uncommitted `pipeline.py` change by construction, same D-177/D-180/
+D-181/D-183-established pattern; the remaining 5 failures confirmed
+pre-existing on baseline `1dd9667` and unrelated to this task via direct
+`git stash` comparison), `python3 -m compileall` clean.
+
+VERDICT: **A. BOUNDED FINALIST ARBITER OFFLINE PROVEN.** The Pimples
+abstract replay correctly abstains without fabricated preference, exactly
+as this task's own directive anticipated -- this is NOT "D-184 failed to
+fix Pimples," it is the arbiter correctly declining to invent evidence
+that does not exist.
+
+NEXT GATE (not launched automatically): exactly ONE Video00 RAW with
+D-183's confidence diagnostics ON and D-184's bounded finalist arbiter
+diagnostics ON (`CUTSELL_BOUNDED_FINALIST_ARBITER_ENABLED=1`), NO winner
+authority change of any kind -- purpose: observe whether the REAL
+Pimples family is `PREFERENCE_SUPPORTED`/`NEAR_EQUAL`/`CONFLICTED`/
+`INSUFFICIENT_EVIDENCE`, and whether any other real `NON_DECISIVE`
+family has enough structured evidence for a safe preference. If real
+Pimples comes back `NEAR_EQUAL`/`INSUFFICIENT_EVIDENCE`: do NOT tune
+D-184 to force a preference -- treat it as evidence the missing
+comparative dimension is likely Prosodic Audio or later P1/global
+context. If real Pimples comes back `PREFERENCE_SUPPORTED`: a LATER,
+separately-authorized D-185 authority gate MAY allow the arbiter to
+influence the terminal winner -- NOT decided or implemented here.
+
+P1 STATUS: unchanged -- remains the next major canonical architecture
+capability; first finish D-184's own one diagnostic real-media
+qualification, then an authority decision only if justified.
+
+STRICT SCOPE CONFIRMATIONS: no RAW dispatched. No provider/network call
+(confirmed by source scan + test). No winner/`selected_clip_id`/
+membership/Family-Formation/retry-family/render-plan mutation anywhere
+(`action_applied` hardcoded `False`; confirmed by direct structural
+test). No Prosodic Audio implementation (`PROSODIC_AUDIO_AVAILABLE =
+False`, never inferred). No P1/Editorial-Moment/whole-video/sequence-
+role/commercial-role implementation. No score-weight change, no new
+master score, no new severity-ranking algorithm (`zone_usability_v2_
+dominates` reused verbatim). No Family Formation/D-150-semantic-
+authority/Boundary/Pacing/Renderer change. D-123 through D-183 not
+rewritten.
+
+**HUMAN ACTION REQUIRED:** YES (condition A: whether to authorize the
+one Video00 RAW named above with D-183+D-184 diagnostics ON and NO
+winner authority; condition A again for any future D-185 authority gate;
+and whether/when to resume P1, remain Product Owner decisions).

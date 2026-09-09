@@ -107,6 +107,20 @@ from .watch_listen_besttake_guard_authority import (
 )
 from .watch_listen_relation_discovery import watch_listen_relation_discovery_enabled
 from .watch_listen_understanding import WatchListenUnderstanding
+# D-184 (docs/CUTSELL_DECISIONS.md D-184): Bounded Finalist Arbiter --
+# OFFLINE / DIAGNOSTIC ONLY. A SEPARATE, independently-rollbackable flag
+# from D-163/D-172/D-174's own diagnostic-only flags. Consulted ONLY when
+# D-183's own `TerminalBestTakeConfidence` already found the terminal
+# comparison non-decisive; never mutates `selected_clip_id`/`ranked`/
+# membership/Boundary/Pacing/Renderer -- see bounded_finalist_arbiter.py's
+# own module docstring for the full contract.
+from .bounded_finalist_arbiter import (
+    FinalistArbiterInput,
+    bounded_finalist_arbiter_diagnostics,
+    bounded_finalist_arbiter_enabled,
+    bounded_finalist_arbiter_run_summary,
+    evaluate_bounded_finalist_arbiter,
+)
 from .take_judge import FRAGMENT_PENALTY_MARKERS, apply_delivery_cleanliness_evidence
 from .take_judge_provider import TakeJudgeProvider, safe_rank_takes
 from .case_b_performance_evidence import (
@@ -1545,6 +1559,7 @@ def build_flow_b_draft(
     watch_listen_besttake_results: list = []
     watch_listen_besttake_v2_results: list = []
     watch_listen_besttake_guard_authority_results: list = []
+    bounded_finalist_arbiter_diagnostics_rows: list = []
     no_usable_realization_ids: set[str] = set()
     events_by_source: dict[str, tuple] = {}
     if whole_video_context is not None:
@@ -1824,6 +1839,37 @@ def build_flow_b_draft(
                                 watch_listen_besttake_guard_authority_row(_wlbt_authority_result)
                             )
                             watch_listen_besttake_guard_authority_results.append(_wlbt_authority_result)
+            # D-184 (docs/CUTSELL_DECISIONS.md D-184): Bounded Finalist
+            # Arbiter -- OFFLINE / DIAGNOSTIC ONLY. Independently flag-gated
+            # (never depends on D-163/D-172/D-174's own flags being on).
+            # Consumes D-183's OWN already-computed `_terminal_besttake_
+            # confidence_result` (never re-derived) plus a fresh D-172 V2
+            # projection per member (built here so this diagnostic never
+            # depends on D-172's own flag) and P0 language/proposition
+            # evidence from each member's own text. Zero effect on
+            # `selected_clip_id`/`ranked`/membership/Boundary/Pacing/
+            # Renderer -- `action_applied` is always `False`.
+            bounded_finalist_arbiter_row: dict = {}
+            if bounded_finalist_arbiter_enabled():
+                _arbiter_terminal_state = (
+                    _terminal_besttake_confidence_result.confidence_state
+                    if _terminal_besttake_confidence_result is not None else None
+                )
+                _arbiter_result = evaluate_bounded_finalist_arbiter(FinalistArbiterInput(
+                    family_id=gid,
+                    candidate_ids=tuple(member.clip_id for member in members),
+                    meaning_sufficient_candidate_ids=tuple(sorted(meaning_sufficient_ids)),
+                    terminal_confidence_state=_arbiter_terminal_state,
+                    terminal_scores={item.clip_id: item.score for item in ranked},
+                    candidate_texts={member.clip_id: member.text for member in members},
+                    v2_evidence_by_id={
+                        member.clip_id: build_candidate_zone_usability_v2(member, whole_video_context)
+                        for member in members
+                    },
+                    performance_evidence_by_id=case_b_evidence_objects,
+                ))
+                bounded_finalist_arbiter_row = bounded_finalist_arbiter_diagnostics(_arbiter_result)
+                bounded_finalist_arbiter_diagnostics_rows.append(bounded_finalist_arbiter_row)
             judge_group_diagnostics.append({
                 "group_id": gid,
                 "selected_clip_id": selected_clip_id,
@@ -1954,6 +2000,9 @@ def build_flow_b_draft(
                 # only in this task; empty dict when the flag is off or no
                 # Watch+Listen evidence exists for this family.
                 **watch_listen_besttake_row,
+                # D-184: Bounded Finalist Arbiter -- diagnostic only; empty
+                # dict when CUTSELL_BOUNDED_FINALIST_ARBITER_ENABLED is off.
+                **bounded_finalist_arbiter_row,
             })
         for member in members:
             clip_to_group[member.clip_id] = gid
@@ -2183,6 +2232,22 @@ def build_flow_b_draft(
                         **watch_listen_besttake_guard_authority_diagnostics(
                             watch_listen_besttake_guard_authority_results
                         ),
+                    }
+                )
+            ),
+            # D-184 (docs/CUTSELL_DECISIONS.md D-184): Bounded Finalist
+            # Arbiter tail-safe summary -- same pattern as D-158/D-161/
+            # D-163/D-172/D-174's own compact summaries. {"status":
+            # "disabled"} when the (separate, default-OFF) arbiter flag is
+            # off; the per-family fields already live on each take_judge_
+            # groups row above via bounded_finalist_arbiter_diagnostics.
+            "bounded_finalist_arbiter": (
+                {"status": "disabled"} if not bounded_finalist_arbiter_enabled()
+                else (
+                    {"status": "no_families_evaluated"} if not bounded_finalist_arbiter_diagnostics_rows
+                    else {
+                        "status": "evaluated",
+                        **bounded_finalist_arbiter_run_summary(bounded_finalist_arbiter_diagnostics_rows),
                     }
                 )
             ),
