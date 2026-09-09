@@ -182,6 +182,22 @@ on:
         required: false
         default: ""
         type: string
+      bounded_finalist_arbiter_enabled:
+        # D-185: "1" overlays CUTSELL_BOUNDED_FINALIST_ARBITER_ENABLED=1
+        # (D-184's own bounded finalist arbiter,
+        # cutsell_worker/bounded_finalist_arbiter.py) -- a SEPARATE,
+        # independently-rollbackable, DIAGNOSTIC-ONLY flag from every input
+        # above (never depends on any of them being set). Consumes D-183's
+        # own terminal_besttake_confidence classification (unconditional,
+        # no flag) plus a fresh D-172 Zone-Usability V2 projection computed
+        # inline; NEVER mutates selected_clip_id/ranked/membership/Family
+        # Formation/Boundary/Pacing/Renderer -- action_applied is hardcoded
+        # False -- see D-184's own module docstring. Empty (default) = code
+        # default OFF, byte-identical to every run before D-184/D-185.
+        description: "Optional: '1' enables CUTSELL_BOUNDED_FINALIST_ARBITER_ENABLED (D-185/D-184, diagnostic-only). Empty = OFF."
+        required: false
+        default: ""
+        type: string
 
 concurrency:
   group: cutsell-video00-modal-raw-${{ github.ref }}
@@ -394,6 +410,18 @@ jobs:
             mv /tmp/cutsell-env.tmp.json /tmp/cutsell-env.json
           fi
           echo "D-175 Watch+Listen BestTake Guard Authority for this run: CUTSELL_WATCH_LISTEN_BESTTAKE_GUARD_AUTHORITY_ENABLED=$(jq -r '.CUTSELL_WATCH_LISTEN_BESTTAKE_GUARD_AUTHORITY_ENABLED // "unset (code default OFF)"' /tmp/cutsell-env.json)"
+          # D-185: optional D-184 Bounded Finalist Arbiter diagnostic overlay,
+          # applied only when the dispatch input is exactly "1"; code default
+          # (OFF) otherwise -- same input-gated mechanism as the flags above,
+          # but independently rollbackable (never requires any of them).
+          # DIAGNOSTIC-ONLY: never mutates selected_clip_id/ranked/membership
+          # -- see cutsell_worker/bounded_finalist_arbiter.py's own module
+          # docstring and docs/CUTSELL_DECISIONS.md D-184.
+          if [ "${{ github.event.inputs.bounded_finalist_arbiter_enabled }}" = "1" ]; then
+            jq -c '. + {CUTSELL_BOUNDED_FINALIST_ARBITER_ENABLED:"1"}' /tmp/cutsell-env.json > /tmp/cutsell-env.tmp.json
+            mv /tmp/cutsell-env.tmp.json /tmp/cutsell-env.json
+          fi
+          echo "D-185 Bounded Finalist Arbiter (diagnostic-only) for this run: CUTSELL_BOUNDED_FINALIST_ARBITER_ENABLED=$(jq -r '.CUTSELL_BOUNDED_FINALIST_ARBITER_ENABLED // "unset (code default OFF)"' /tmp/cutsell-env.json)"
           test "$(jq 'length' /tmp/cutsell-env.json)" != "0"
           test "$(jq -r '.CUTSELL_HYBRID_LLM_ENABLED' /tmp/cutsell-env.json)" = "1"
           test "$(jq -r '.CUTSELL_HYBRID_PROVIDER' /tmp/cutsell-env.json)" = "google"
@@ -425,7 +453,7 @@ jobs:
               # D-056 Section 1). A real secret (API key, token, bucket
               # name) is essentially always >= 12 characters, so this
               # threshold costs no actual masking coverage.
-              if value and key not in ('CUTSELL_HYBRID_LLM_ENABLED', 'CUTSELL_HYBRID_PROVIDER', 'CUTSELL_UNIFIED_REALIZATION_RESOLVER', 'CUTSELL_ASR_CANONICAL_NORMALIZATION', 'CUTSELL_SEMANTIC_COMPUTE_PLANNER', 'CUTSELL_HYBRID_MAX_EDIT_USD', 'CUTSELL_BRIDGE_COMPLETE_PAIRWISE_SINGLETON', 'CUTSELL_WATCH_LISTEN_FAMILY_EVIDENCE_ENABLED', 'CUTSELL_WATCH_LISTEN_RELATION_DISCOVERY_ENABLED', 'CUTSELL_WATCH_LISTEN_BESTTAKE_EVIDENCE_ENABLED', 'CUTSELL_WATCH_LISTEN_ZONE_USABILITY_V2_BESTTAKE_ENABLED', 'CUTSELL_WATCH_LISTEN_BESTTAKE_GUARD_AUTHORITY_ENABLED', 'CUTSELL_BUILD_GIT_SHA') and len(str(value)) >= 12:
+              if value and key not in ('CUTSELL_HYBRID_LLM_ENABLED', 'CUTSELL_HYBRID_PROVIDER', 'CUTSELL_UNIFIED_REALIZATION_RESOLVER', 'CUTSELL_ASR_CANONICAL_NORMALIZATION', 'CUTSELL_SEMANTIC_COMPUTE_PLANNER', 'CUTSELL_HYBRID_MAX_EDIT_USD', 'CUTSELL_BRIDGE_COMPLETE_PAIRWISE_SINGLETON', 'CUTSELL_WATCH_LISTEN_FAMILY_EVIDENCE_ENABLED', 'CUTSELL_WATCH_LISTEN_RELATION_DISCOVERY_ENABLED', 'CUTSELL_WATCH_LISTEN_BESTTAKE_EVIDENCE_ENABLED', 'CUTSELL_WATCH_LISTEN_ZONE_USABILITY_V2_BESTTAKE_ENABLED', 'CUTSELL_WATCH_LISTEN_BESTTAKE_GUARD_AUTHORITY_ENABLED', 'CUTSELL_BOUNDED_FINALIST_ARBITER_ENABLED', 'CUTSELL_BUILD_GIT_SHA') and len(str(value)) >= 12:
                   print(f'::add-mask::{value}')
           print(f'Loaded {len(env)} env vars from the live RunPod template plus the D-044 hybrid-semantic overlay, the D-050C2 resolver-mode overlay, and the D-052 stability-battery overlay (secret values masked).')
           "
@@ -853,6 +881,27 @@ jobs:
 
           echo "--- live_render_qc (PostRenderWatchListenQC + bounded physical repair) ---"
           jq '.live_render_qc // {status:"absent"}' artifact/video00-modal.json
+
+          # D-185: D-183's own terminal_besttake_confidence_run_summary is a
+          # pure aggregator over already-computed take_judge_groups rows
+          # (never auto-added to the result JSON by pipeline.py itself, per
+          # its own module docstring) -- computed here, read-only, exactly
+          # as D-152/D-181's own workflow-side aggregation precedent. D-184's
+          # own bounded_finalist_arbiter run-level summary IS already a
+          # top-level diagnostics key (populated by pipeline.py itself when
+          # CUTSELL_BOUNDED_FINALIST_ARBITER_ENABLED=1) -- printed directly,
+          # no recomputation. Per-family D-183/D-184 fields already live on
+          # every take_judge_groups row printed above -- no duplication here.
+          echo "--- D-183 terminal_besttake_confidence run-level summary (docs/CUTSELL_DECISIONS.md D-183/D-185) ---"
+          python3 - <<'PY'
+          import json
+          from cutsell_worker.pipeline import terminal_besttake_confidence_run_summary
+          result = json.load(open('artifact/video00-modal.json', encoding='utf-8'))
+          rows = (result.get('diagnostics') or {}).get('take_judge_groups') or []
+          print(json.dumps(terminal_besttake_confidence_run_summary(rows), indent=2))
+          PY
+          echo "--- D-184 bounded_finalist_arbiter run-level summary (docs/CUTSELL_DECISIONS.md D-184/D-185; {\"status\":\"disabled\"} if the flag was off this run) ---"
+          jq '.diagnostics.bounded_finalist_arbiter // {status:"disabled"}' artifact/video00-modal.json
 
       - name: Upload Video00 Modal diagnostic artifact
         if: always()
