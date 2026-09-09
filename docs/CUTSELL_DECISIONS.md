@@ -30490,3 +30490,156 @@ Owner authorization.
 **HUMAN ACTION REQUIRED:** YES (condition A) -- authorizing the D-177
 Video00 RAW named above is a Product Owner decision. This document does
 not launch it.
+
+---
+
+## D-178B: D-177 Partial-Edge Boundary Trim -- Video00 real-media qualification (post D-178A.1)
+
+**Status: B. SAFETY REAL-MEDIA PROVEN -- TARGET SHAPE NOT EXERCISED.** One
+canonical Video00 Modal RAW (run `34363547729`, exact test head `e2c4532`,
+`feature/runpod-pod-on-demand`), all workflow_dispatch overlay flags left at
+default/OFF (current canonical production path -- D-174/D-175's Guard
+Authority did NOT run this dispatch). No cutsell_worker patch after
+observing results. No second RAW.
+
+**D-177 diagnostics (from the new D-178B compact summary, cross-validated
+byte-for-byte against the existing D-116 aggregate counts already printed
+this run):** `partial_edge_trim_evaluated_count: 2`,
+`partial_edge_trim_applied_count: 0`, `entry_partial_edge_trim_count: 0`,
+`exit_partial_edge_trim_count: 0`. Both real one-sided straddle events this
+run resolved `visual_trim_blocked_by_delivery_floor` -- the clip's own raw
+boundary was ALREADY exactly at the measured DELIVERY edge (no external
+debris existed beyond it), so the mechanism correctly declined a redundant
+no-op "trim" rather than reporting a false positive. Neither evaluated
+event is near the gynecologist region: (1) EXIT edge of the "stomach
+discomfort" statement (`clip_ff3aa086d1b3d92c8d44`, 245.39-251.61s,
+`hand_motion_reset_candidate`, inside-delivery overlap 0.056s); (2) ENTRY
+edge of the "conclusion" statement (`clip_eb1d377c095f80338bde`,
+356.21-361.51s, `hand_motion_reset_candidate`, inside-delivery overlap
+0.019s). D-116's own aggregate for this run: 82 visual edge rows total, 80
+`fully_inside_delivery_no_trim` (negative control -- correctly never
+trimmed), 2 `blocked_by_delivery_floor` (the two above), 0 ordinary D-116
+entry/exit trims, `total_visual_trim_seconds: 0.0` -- **zero visual
+boundary change of any kind occurred this run.**
+
+**Gynecologist region re-identified by content, not clip id** (family
+`tg_8af9512b52670fca76`, raw ~82.8-104.4s, text "...hablé/cambié de
+ginecóloga..."): this run's Boundary/D-177 target shape (D-176's own
+finding -- a correctly-selected, meaning-sufficient realization with only a
+narrow entry/exit debris sliver) **did NOT occur**. Instead, BestTake's
+DELIVERYSCORE_PATH tie-break selected `clip_666d543d2ff5ea32d90b`
+(`final_reason: delivery_tie_break_among_survivors`) over
+`clip_d934587a075b6c6197dc` -- the realization BOTH Cut.ai AND Human Gold
+independently keep (`semantic_fast_path_bypassed: true`,
+`semantic_fast_path_candidate` was the correct one, `semantic_winner_
+confidence: 0.95`). The quality ladder confirms this as region 36
+(96.47-102.47s, 6.0s, `missing_delivery`/`take_choice_against_both_
+references`/`BestTakeResolver`) -- the EXACT same underlying defect D-173/
+D-175 already found and escalated (Escalation A), reproduced here because
+this dispatch deliberately ran with D-174's Guard Authority OFF (matching
+"current canonical production path"). **This is NOT a contradiction of
+D-176's forensic** -- D-176's entry/exit debris finding was built from
+runs where the correct realization WAS selected; this run's selection
+outcome differs for an entirely separate, pre-existing, already-escalated
+reason (BestTake tie-break variance), so D-177's own target shape was
+simply absent from this dispatch's data, per this task's own verdict-B
+criterion.
+
+**Success conditions A/B/D/E:** trivially satisfied by architecture and by
+the zero-applied-trim result -- Boundary runs strictly after Freeze and
+never mutates `selected_clip_id`/family membership/semantic authority (D-174/
+D-175 unaffected, `families_with_guard_authority_evaluated: 0`, run_level
+`absent` since the guard's own required flags were OFF); zero words/
+negation/numbers/factual terms/clause endings could be affected because
+zero trims were applied; no internal DELIVERY event was trimmed as debris
+(both eligible events correctly floor-blocked); the speech hard floor was
+never tested against a live trim this run (nothing crossed it, because
+nothing was eligible to cross it) -- offline proof (34/34 D-177 tests)
+remains the source of that guarantee.
+
+**Success condition C (edge debris):** gynecologist ENTRY/EXIT false_keep --
+**NOT OBSERVABLE this run** (the region's dominant defect is the BestTake
+miss above; the ladder attributes region 36 to `BestTakeResolver`, not
+Boundary, this run).
+
+**Negative controls:** `fully_inside_delivery_no_trim` -- 80 real events,
+confirmed never trimmed. Material straddle, ambiguous both-edge straddle,
+fully-outside ordinary-edge-trim, not-at-edge: **NOT OBSERVED** this run
+(no visual event of those shapes occurred).
+
+**Idempotence:** NOT DIRECTLY OBSERVABLE this run (single pass only, no
+re-run mechanism exposed by this workflow) -- relies entirely on offline
+proof (D-177's own test items 14/24, both passing).
+
+**Whole-video Boundary review (compact):** no new clipped beginning/ending,
+no new sentence truncation, no new visible edge debris attributable to
+D-177 anywhere in the video (zero trims applied, so zero possible new
+Boundary regression from this mechanism). Widespread pre-existing
+`loose_exit_edge`/`tight_edge`/`failed_or_process_material_retained`
+LEVEL_1 findings are confirmed unrelated to D-177 (different reason
+strings, D-116's own older mechanisms, unaffected by this task).
+
+**Parity metrics (physical view):** Selection F1 vs Cut.ai 0.7757 / vs Gold
+0.7173 (selection-plan view); FINAL MP4 physical F1 vs Cut.ai 0.7935 / vs
+Gold 0.7467. Compared to D-175 (Cut.ai 0.8501, Gold 0.8252): both lower
+this run. **Explicitly NOT attributed to D-177** -- D-177/D-116 applied
+zero visual trims this run (`total_visual_trim_seconds: 0.0`), so it is
+architecturally impossible for this delta to originate there; it is
+ordinary run-to-run semantic/DeliveryScore tie-break variance (the same
+gynecologist family tie-break landing differently, plus a `pimples` family
+`take_choice_against_both_references` recurrence at regions 89/92) --
+consistent with, not contradicting, D-175's own precedent of not
+attributing F1 movement to unrelated changes.
+
+**D-177 REAL-MEDIA VERDICT: B. SAFETY REAL-MEDIA PROVEN -- TARGET SHAPE NOT
+EXERCISED.** D-177 executed safely on real eligible edge shapes (2/2
+correctly, safely declined as no-op); the gynecologist-specific target
+shape did not occur this run because an orthogonal, pre-existing,
+already-escalated BestTake defect dominates that region instead.
+
+**GYNECOLOGIST BOUNDARY GAP: OPEN** (not assessable against D-177 this run
+-- the blocking defect this run is the orthogonal BestTake tie-break, not
+a persisting boundary-specific debris finding).
+
+**D-177: SAFETY_ONLY.**
+
+**VIDEO00 RAW -> CUT.AI: NOT YET.**
+
+**Exact next canonical priority:** per this task's own "if B/C: do not
+repeatedly rerun Video00 hoping for a trigger; identify the smallest
+missing proof" instruction -- the smallest missing proof for D-177's target
+shape is a future RAW where the gynecologist family's tie-break happens to
+land on the correct realization again (as it did in the three RAWs D-176's
+own forensic was built from); no RAW is authorized here to chase that.
+Separately, and more materially: the gynecologist region's REAL, dominant,
+recurring defect across this session (D-173/D-175/D-178B, three
+independent RAWs now) is the underlying BestTake DELIVERYSCORE_PATH
+tie-break overriding a real, meaning-sufficient, both-references-preferred
+semantic winner -- already escalated as Escalation A (D-097.11) and
+partially addressed by D-174/D-175's Guard Authority (verdict B: safe,
+discriminating, but its own Meaning Firewall correctly declines to fix
+this exact case because the alternative was found meaning-insufficient in
+that qualification). This remains Product Owner territory, not
+reopened or re-litigated by this task. Per D-178A's own P0-P11 sequence,
+**P1 (Editorial Moment & Sequence Understanding)** remains the next named
+architectural priority once a Product Owner decision is made on the
+gynecologist BestTake escalation; this task does not implement P1 and does
+not propose its bounded gate here (verdict B does not meet the "if A" gate
+for that recommendation).
+
+**Confirmation NO POST-RESULT PATCH.** Confirmation NO SECOND RAW.
+`git diff --stat` across this task's only prior commit (D-178B workflow
+plumbing, `e2c4532`) confirms the only file touched was
+`.github/workflows/cutsell-video00-modal-raw.yml`; no
+`cutsell_worker/*.py` file was touched after observing this RAW's results.
+No BestTake/Family Formation/Proposition/Attempt/Language-Spine/D-150/
+D-158/D-161/Ordering/Pacing/Renderer/provider-policy change. Modal
+teardown confirmed (automatic scale-to-zero, no persistent GPU resource).
+
+D-177, D-178A, and D-178A.1 are preserved, unmodified, unrewritten by this
+entry.
+
+**HUMAN ACTION REQUIRED:** YES (condition A) -- the gynecologist family's
+underlying BestTake tie-break (Escalation A) is a Product Owner decision;
+whether to author a bounded P1 (Editorial Moment & Sequence Understanding)
+gate is likewise a Product Owner decision.
