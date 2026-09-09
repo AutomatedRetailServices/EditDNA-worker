@@ -157,6 +157,31 @@ on:
         required: false
         default: ""
         type: string
+      guard_authority_enabled:
+        # D-175: "1" overlays CUTSELL_WATCH_LISTEN_BESTTAKE_GUARD_AUTHORITY_
+        # ENABLED=1 (D-174's own bounded BestTake guard authority,
+        # cutsell_worker/watch_listen_besttake_guard_authority.py) -- a
+        # SEPARATE, LIVE-PIPELINE runtime flag from watch_listen_besttake_
+        # evidence_enabled and zone_usability_v2_besttake_enabled above.
+        # Unlike those two (DIAGNOSTIC-ONLY), this authority CAN mutate a
+        # family's selected_clip_id -- but ONLY when D-174's own bounded
+        # 11-condition eligibility test finds a real, meaning-sufficient,
+        # MATERIAL/SEVERE-dominated current winner, and even then ONLY the
+        # EXISTING deterministic BestTake ladder (deterministic_best_take_
+        # authority.clear_retry_family_winner, reused verbatim, D-123's own
+        # unchanged >=0.30 gap contract) ever chooses the replacement -- see
+        # D-174's own module docstring for the full "WATCH+LISTEN MAY VETO
+        # A BAD WINNER; IT DOES NOT BECOME THE WINNER SELECTOR" contract.
+        # Only takes effect when watch_listen_besttake_evidence_enabled=1
+        # AND zone_usability_v2_besttake_enabled=1 are ALSO set (D-174's own
+        # pipeline.py wiring nests Phase 1 inside D-172's own V2 block, and
+        # Phase 2's materiality floor requires a real V2 severity value).
+        # Empty (default) = code default OFF, byte-identical to every run
+        # before D-174/D-175.
+        description: "Optional: '1' enables CUTSELL_WATCH_LISTEN_BESTTAKE_GUARD_AUTHORITY_ENABLED (D-175/D-174). Requires watch_listen_besttake_evidence_enabled=1 AND zone_usability_v2_besttake_enabled=1 too. Empty = OFF."
+        required: false
+        default: ""
+        type: string
 
 concurrency:
   group: cutsell-video00-modal-raw-${{ github.ref }}
@@ -354,6 +379,21 @@ jobs:
             mv /tmp/cutsell-env.tmp.json /tmp/cutsell-env.json
           fi
           echo "D-173 Watch+Listen Zone-Usability V2 BestTake diagnostic consumption for this run: CUTSELL_WATCH_LISTEN_ZONE_USABILITY_V2_BESTTAKE_ENABLED=$(jq -r '.CUTSELL_WATCH_LISTEN_ZONE_USABILITY_V2_BESTTAKE_ENABLED // "unset (code default OFF)"' /tmp/cutsell-env.json)"
+          # D-175: optional bounded BestTake Guard Authority overlay
+          # (D-174's own live pipeline.py/universal_clean_cut.py wiring),
+          # applied only when the dispatch input is exactly "1"; code
+          # default (OFF) otherwise -- same input-gated mechanism as
+          # D-159/D-162/D-164/D-173 above, but a FIFTH, separate flag
+          # (D-174's own instruction: independent rollback from the two
+          # diagnostic-only flags). Unlike those, this authority CAN
+          # mutate selected_clip_id -- but only via D-174's own bounded
+          # 11-condition eligibility test plus the EXISTING deterministic
+          # ladder; see D-174's own module docstring.
+          if [ "${{ github.event.inputs.guard_authority_enabled }}" = "1" ]; then
+            jq -c '. + {CUTSELL_WATCH_LISTEN_BESTTAKE_GUARD_AUTHORITY_ENABLED:"1"}' /tmp/cutsell-env.json > /tmp/cutsell-env.tmp.json
+            mv /tmp/cutsell-env.tmp.json /tmp/cutsell-env.json
+          fi
+          echo "D-175 Watch+Listen BestTake Guard Authority for this run: CUTSELL_WATCH_LISTEN_BESTTAKE_GUARD_AUTHORITY_ENABLED=$(jq -r '.CUTSELL_WATCH_LISTEN_BESTTAKE_GUARD_AUTHORITY_ENABLED // "unset (code default OFF)"' /tmp/cutsell-env.json)"
           test "$(jq 'length' /tmp/cutsell-env.json)" != "0"
           test "$(jq -r '.CUTSELL_HYBRID_LLM_ENABLED' /tmp/cutsell-env.json)" = "1"
           test "$(jq -r '.CUTSELL_HYBRID_PROVIDER' /tmp/cutsell-env.json)" = "google"
@@ -385,7 +425,7 @@ jobs:
               # D-056 Section 1). A real secret (API key, token, bucket
               # name) is essentially always >= 12 characters, so this
               # threshold costs no actual masking coverage.
-              if value and key not in ('CUTSELL_HYBRID_LLM_ENABLED', 'CUTSELL_HYBRID_PROVIDER', 'CUTSELL_UNIFIED_REALIZATION_RESOLVER', 'CUTSELL_ASR_CANONICAL_NORMALIZATION', 'CUTSELL_SEMANTIC_COMPUTE_PLANNER', 'CUTSELL_HYBRID_MAX_EDIT_USD', 'CUTSELL_BRIDGE_COMPLETE_PAIRWISE_SINGLETON', 'CUTSELL_WATCH_LISTEN_FAMILY_EVIDENCE_ENABLED', 'CUTSELL_WATCH_LISTEN_RELATION_DISCOVERY_ENABLED', 'CUTSELL_WATCH_LISTEN_BESTTAKE_EVIDENCE_ENABLED', 'CUTSELL_WATCH_LISTEN_ZONE_USABILITY_V2_BESTTAKE_ENABLED', 'CUTSELL_BUILD_GIT_SHA') and len(str(value)) >= 12:
+              if value and key not in ('CUTSELL_HYBRID_LLM_ENABLED', 'CUTSELL_HYBRID_PROVIDER', 'CUTSELL_UNIFIED_REALIZATION_RESOLVER', 'CUTSELL_ASR_CANONICAL_NORMALIZATION', 'CUTSELL_SEMANTIC_COMPUTE_PLANNER', 'CUTSELL_HYBRID_MAX_EDIT_USD', 'CUTSELL_BRIDGE_COMPLETE_PAIRWISE_SINGLETON', 'CUTSELL_WATCH_LISTEN_FAMILY_EVIDENCE_ENABLED', 'CUTSELL_WATCH_LISTEN_RELATION_DISCOVERY_ENABLED', 'CUTSELL_WATCH_LISTEN_BESTTAKE_EVIDENCE_ENABLED', 'CUTSELL_WATCH_LISTEN_ZONE_USABILITY_V2_BESTTAKE_ENABLED', 'CUTSELL_WATCH_LISTEN_BESTTAKE_GUARD_AUTHORITY_ENABLED', 'CUTSELL_BUILD_GIT_SHA') and len(str(value)) >= 12:
                   print(f'::add-mask::{value}')
           print(f'Loaded {len(env)} env vars from the live RunPod template plus the D-044 hybrid-semantic overlay, the D-050C2 resolver-mode overlay, and the D-052 stability-battery overlay (secret values masked).')
           "
@@ -1914,6 +1954,168 @@ jobs:
           print(json.dumps(summary, indent=2, sort_keys=True))
           PY
 
+      - name: Print compact D-175 Watch+Listen BestTake Guard Authority real-media qualification summary (tail-safe)
+        # D-175: same D-119/D-152/D-164/D-173 pattern applied to D-174's own
+        # new `diagnostics.watch_listen_besttake_guard_authority` (run-level)
+        # and the `guard_authority_*` fields D-174's pipeline.py wiring
+        # already spreads onto each `take_judge_groups` row when ALL THREE
+        # of watch_listen_besttake_evidence_enabled/zone_usability_v2_
+        # besttake_enabled/guard_authority_enabled=1. A SEPARATE, LATE-
+        # STAGE, BOUNDED summary reading `artifact/video00-modal.json`
+        # (already on disk) and projecting ONLY fields D-174's own
+        # (unchanged in this task) authority already computed -- recomputes
+        # NO eligibility decision, no ladder reselection, no BestTake
+        # winner. Cross-references each family's D-164/D-172 fields (same
+        # row) so the full V1/V2/authority trace this task's directive
+        # requires reads directly off one summary, never re-derived.
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p artifact
+          python - <<'PY'
+          import json, os, sys
+
+          def load(path):
+              if not os.path.exists(path) or os.path.getsize(path) == 0:
+                  return None
+              with open(path) as f:
+                  try:
+                      return json.load(f)
+                  except Exception as e:
+                      print(f"WARNING: failed to parse {path}: {e}", file=sys.stderr)
+                      return None
+
+          engine = load("artifact/video00-modal.json")
+          regression_fixture = load("benchmarks/video00_regression_qa.json")
+
+          summary = {"schema_version": "cutsell.video00.d175_watch_listen_besttake_guard_authority_summary.v1"}
+          summary["source_status"] = "engine_json_present" if isinstance(engine, dict) else "engine_json_missing_or_unparseable"
+
+          groups = []
+          clip_text = {}
+          run_level = {"status": "absent"}
+          if isinstance(engine, dict):
+              diag = engine.get("diagnostics")
+              if isinstance(diag, dict):
+                  raw_groups = diag.get("take_judge_groups")
+                  if isinstance(raw_groups, list):
+                      groups = [r for r in raw_groups if isinstance(r, dict)]
+                  run_level = diag.get("watch_listen_besttake_guard_authority") or {"status": "absent"}
+              for bucket in ("selected", "alternates", "discarded"):
+                  for clip in engine.get(bucket) or []:
+                      if isinstance(clip, dict) and clip.get("clip_id"):
+                          clip_text[clip["clip_id"]] = str(clip.get("text") or "")
+
+          summary["run_level"] = run_level
+
+          family_rows = []
+          for row in groups:
+              if "guard_authority_state" not in row:
+                  continue
+              semantic_candidates = row.get("semantic_candidates") or []
+              member_ids = sorted({
+                  c.get("clip_id") for c in semantic_candidates
+                  if isinstance(c, dict) and c.get("clip_id")
+              }) or sorted((row.get("case_b_evidence") or {}).keys())
+              family_rows.append({
+                  "group_id": row.get("group_id"),
+                  "member_ids": member_ids,
+                  "meaning_sufficient_candidates": row.get("meaning_sufficient_candidates"),
+                  "semantic_authority_gate_status": row.get("semantic_authority_gate_status"),
+                  "deliveryscore_top_candidate": row.get("deliveryscore_top_candidate"),
+                  "final_selected_clip_id": row.get("final_winner", row.get("selected_clip_id")),
+                  "case_b_conflict_present": row.get("case_b_conflict_present"),
+                  # D-172/V2 fields (same row, cross-referenced -- never re-derived).
+                  "watch_listen_besttake_evidence_source": row.get("watch_listen_besttake_evidence_source"),
+                  "watch_listen_besttake_v2_dominant_candidate": row.get("watch_listen_besttake_v2_dominant_candidate"),
+                  "watch_listen_besttake_v2_guard_status": row.get("watch_listen_besttake_v2_guard_status"),
+                  "watch_listen_besttake_v2_winner_severity": row.get("watch_listen_besttake_v2_winner_severity"),
+                  "watch_listen_besttake_v2_alt_severity": row.get("watch_listen_besttake_v2_alt_severity"),
+                  "watch_listen_besttake_v2_meaning_firewall_blocked": row.get("watch_listen_besttake_v2_meaning_firewall_blocked"),
+                  # D-174/authority fields.
+                  "guard_authority_enabled": row.get("guard_authority_enabled"),
+                  "guard_authority_evaluated": row.get("guard_authority_evaluated"),
+                  "guard_authority_state": row.get("guard_authority_state"),
+                  "guard_authority_rejection_reason": row.get("guard_authority_rejection_reason"),
+                  "guard_authority_winner_before": row.get("guard_authority_winner_before"),
+                  "guard_authority_rejected_winner_id": row.get("guard_authority_rejected_winner_id"),
+                  "guard_authority_eligible_alternative_ids": row.get("guard_authority_eligible_alternative_ids"),
+                  "guard_authority_v2_dominant_candidates": row.get("guard_authority_v2_dominant_candidates"),
+                  "guard_authority_meaning_firewall_blocked": row.get("guard_authority_meaning_firewall_blocked"),
+                  "guard_authority_d123_blocked": row.get("guard_authority_d123_blocked"),
+                  "guard_authority_case_owner": row.get("guard_authority_case_owner"),
+                  "guard_authority_ladder_reevaluated": row.get("guard_authority_ladder_reevaluated"),
+                  "guard_authority_ladder_replacement_id": row.get("guard_authority_ladder_replacement_id"),
+                  "guard_authority_winner_after": row.get("guard_authority_winner_after"),
+                  "guard_authority_applied": row.get("guard_authority_applied"),
+                  "guard_authority_source": row.get("guard_authority_source"),
+                  "guard_authority_replacement_source": row.get("guard_authority_replacement_source"),
+                  "winner_immutability_check": (
+                      "OK" if row.get("guard_authority_winner_before") == row.get("guard_authority_winner_after")
+                      else "WINNER_CHANGED_BY_D174_AUTHORITY"
+                  ),
+              })
+
+          summary["families_with_guard_authority_evaluated"] = len(family_rows)
+          summary["families_with_guard_authority_applied"] = sum(
+              1 for r in family_rows if r.get("guard_authority_applied")
+          )
+          summary["families"] = family_rows
+
+          # Pimples QA cross-check (QA/reporting only) -- same mechanism the
+          # existing D-164/D-173 steps already use against the checked-in
+          # benchmarks/video00_regression_qa.json fixture.
+          pimples_texts = []
+          if isinstance(regression_fixture, dict):
+              for check in regression_fixture.get("checks") or []:
+                  if not isinstance(check, dict) or not str(check.get("id", "")).startswith("pimples_"):
+                      continue
+                  if check.get("kind") == "required_order":
+                      continue
+                  text = check.get("text")
+                  if text:
+                      pimples_texts.append(str(text))
+
+          def _norm(s):
+              return " ".join(str(s or "").lower().split())
+
+          normalized_refs = [t for t in (_norm(x) for x in pimples_texts) if t]
+
+          if regression_fixture is None:
+              summary["pimples"] = {"status": "reference_fixture_absent"}
+          elif not normalized_refs:
+              summary["pimples"] = {"status": "no_pimples_checks_in_reference_fixture"}
+          else:
+              pimples_clip_ids = sorted({
+                  cid for cid, text in clip_text.items()
+                  if any(ref in _norm(text) for ref in normalized_refs)
+              })
+              if not pimples_clip_ids:
+                  summary["pimples"] = {"status": "no_pimples_reference_text_found_in_this_runs_clips"}
+              else:
+                  matching = [r for r in family_rows if set(r["member_ids"]) & set(pimples_clip_ids)]
+                  if not matching:
+                      summary["pimples"] = {
+                          "status": "pimples_clips_present_but_not_a_guard_authority_evaluated_family",
+                          "pimples_related_clip_ids": pimples_clip_ids,
+                      }
+                  elif len(matching) == 1:
+                      summary["pimples"] = {"status": "family_formed_and_evaluated", "families": matching}
+                  else:
+                      summary["pimples"] = {"status": "fragmented_across_multiple_families", "families": matching}
+
+          os.makedirs("artifact", exist_ok=True)
+          out_path = "artifact/video00-modal-d175-watch-listen-besttake-guard-authority-summary.json"
+          with open(out_path, "w") as f:
+              json.dump(summary, f, indent=2, sort_keys=True)
+
+          size = os.path.getsize(out_path)
+          print("--- D-175 Watch+Listen BestTake Guard Authority real-media qualification summary (a pure projection of existing D-174 diagnostics -- recomputes no eligibility decision, ladder reselection, or BestTake winner) ---")
+          print(f"summary file: {out_path} ({size} bytes)")
+          print(json.dumps(summary, indent=2, sort_keys=True))
+          PY
+
       - name: Print compact D-170 Watch+Listen Zone-Usability V2 diagnostic qualification summary (tail-safe)
         # D-170: reconstructs cutsell_worker.watch_listen_zone_usability_v2
         # (D-167, DIAGNOSTIC-ONLY, still not wired to any authority) from
@@ -2159,6 +2361,7 @@ jobs:
             artifact/video00-modal-d164-watch-listen-besttake-summary.json
             artifact/video00-modal-d170-zone-usability-v2-summary.json
             artifact/video00-modal-d173-watch-listen-besttake-v2-summary.json
+            artifact/video00-modal-d175-watch-listen-besttake-guard-authority-summary.json
           retention-days: 14
           if-no-files-found: warn
 
