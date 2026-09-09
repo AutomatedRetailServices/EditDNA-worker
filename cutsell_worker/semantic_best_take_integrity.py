@@ -242,6 +242,7 @@ def install_semantic_best_take_integrity() -> None:
         deterministic_unusable=None,
         case_b_evidence_by_id=None,
         semantic_comparative_authority=None,
+        terminal_confidence_out=None,
     ):
         # D-082: `original` (pipeline._semantic_best_take) now takes `ranked`
         # and returns a 3-tuple (selected, preferred, reason) -- passed
@@ -260,6 +261,12 @@ def install_semantic_best_take_integrity() -> None:
         # checks below run on whatever `original` already decided, and
         # `None` (every pre-D-150 caller) reproduces the exact call made
         # before this parameter existed.
+        # D-183: `terminal_confidence_out` is forwarded verbatim, never
+        # inspected or mutated by this wrapper -- it describes the
+        # confidence of `original`'s OWN Steps 3-9 comparison, populated
+        # exactly as `original` would populate it whether or not this
+        # wrapper's own three additional D-101 safety checks below go on
+        # to further override the winner for an unrelated reason.
         selected, preferred, reason = original(
             members,
             semantic_decisions,
@@ -270,6 +277,7 @@ def install_semantic_best_take_integrity() -> None:
             deterministic_unusable=deterministic_unusable,
             case_b_evidence_by_id=case_b_evidence_by_id,
             semantic_comparative_authority=semantic_comparative_authority,
+            terminal_confidence_out=terminal_confidence_out,
         )
         if selected is None:
             # D-097.B: no usable realization -- nothing to protect or prefer.

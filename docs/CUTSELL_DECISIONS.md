@@ -31856,3 +31856,198 @@ implementation. D-123/D-128/D-145 through D-181 not rewritten.
 **HUMAN ACTION REQUIRED:** YES (condition A: whether to authorize the
 D-183 gate named above, and whether/when to resume P1, remain Product
 Owner decisions).
+
+==================================================
+D-183: TERMINAL BESTTAKE CONFIDENCE-STATE CLASSIFICATION (STEPS 6-9)
+==================================================
+
+Implements the bounded fix D-182 recommended: a PURE, ADDITIVE terminal
+BestTake confidence/decisiveness CLASSIFICATION over `_semantic_best_
+take`'s comparative span (Steps 3-9). No finalist arbiter (explicitly
+deferred to a future D-184). No score-weight change. No RAW. No provider
+call. No winner mutation anywhere in this task.
+
+EXISTING TERMINAL FORCED-WINNER CONTRACT (confirmed unchanged): Steps 3/4
+(`resolve_critical_coverage_dominance`), Step 5 (asymmetry/contradiction),
+and Steps 6-9 (`rank_by_id`, `tie_break_pool` via `_exclude_incomplete_
+subset_losers`, `max(tie_break_pool, key=lambda cid: rank_by_id[cid])`)
+are byte-identical to pre-D-183 -- confirmed by `test_no_winner_mutation_
+before_after_terminal_confidence_out_identical` and the `before == after`
+assertion in the D-181 abstract replay test.
+
+FORENSIC OF EXISTING SCORE SCALE (performed before any code): `take_
+judge.score_take` produces a `RankedTake.score` already bounded to [0,1]
+and already rounded to 4 decimals (`round(_bounded(score), 4)`) --
+reused verbatim for TIED (exact equality of that same value, never a new
+epsilon). An existing DECISIVE/NON_DECISIVE string vocabulary was found
+already canonical in this codebase: `semantic_authority_observability.
+semantic_authority_gate_diagnostics` (D-146/D-150) already uses these
+exact two string literals for its own (upstream, label-decisiveness)
+question -- reused verbatim here for the same general concept at the
+terminal-comparison layer, never a duplicate ontology. No existing score-
+equality/confidence-margin/dominance vocabulary beyond that was found
+elsewhere in the repo (confirmed by direct search); TIED/CONFLICTED/
+UNKNOWN are new state NAMES but introduce no new NUMBER.
+
+NEW CONFIDENCE TYPE: `TerminalBestTakeConfidence` (frozen dataclass,
+`cutsell_worker/pipeline.py`) -- `candidate_ids`, `ranked_candidate_ids`,
+`top_candidate_id`, `runner_up_candidate_id`, `top_score`, `runner_up_
+score`, `score_margin`, `confidence_state`, `reason`, `provenance`. No
+winner-selection field of any kind.
+
+CONFIDENCE STATES: `DECISIVE`, `DECISIVE_BY_ELIMINATION`, `NON_DECISIVE`,
+`TIED`, `CONFLICTED`, `UNKNOWN`.
+
+- DECISIVE: reserved for STRUCTURED evidence that already, genuinely
+  settles the comparison -- Steps 3/4's own `critical_coverage_dominance`
+  (provenance `structured_dominance`), a confident `single_semantic_
+  winner` (also `structured_dominance` -- the ladder's own most decisive
+  possible outcome, which never even reaches `rank_by_id`), or an
+  explicitly supplied external comparator unanimously agreeing with the
+  raw-score top candidate (provenance `structured_signals`). Raw score
+  ALONE, however large the gap, NEVER produces DECISIVE.
+- DECISIVE_BY_ELIMINATION: exactly one candidate remains before a
+  comparison would even be needed (a true single-member family; a
+  singleton left by `_exclude_unless_all`'s own exclusions; a subset
+  loser excluded by `_exclude_incomplete_subset_losers`). No fake score
+  comparison is manufactured for a population of one.
+- NON_DECISIVE: 2+ genuine survivors, no structured dominance, and the
+  raw scores DIFFER (however slightly) -- the CORE PRINCIPLE this task
+  names verbatim: a deterministic score difference is not automatically
+  an editorially decisive difference.
+- TIED: 2+ genuine survivors, no structured dominance, and the raw
+  scores are EXACTLY equal (the same pre-existing `round(x, 4)` value).
+- CONFLICTED: structured evidence sources materially disagree -- an
+  asymmetric/disjoint CRITICAL-claim coverage split, a factual
+  contradiction between survivors, or (via the optional `structured_
+  signals` contract) an external comparator naming a DIFFERENT candidate
+  than another comparator, or than the raw-score ranking itself.
+- UNKNOWN: no score exists for any survivor at all (the pre-existing
+  `no_usable_realization`/`local_fallback` shapes).
+
+WIRING (additive, `terminal_confidence_out: dict | None = None`): `_
+semantic_best_take` gained ONE new keyword-only parameter, forwarded
+verbatim through the ONE existing monkeypatch wrapper (`semantic_best_
+take_integrity.py`'s `semantic_best_take_with_integrity`, which itself
+never inspects or mutates it). Every existing caller (every test file
+written before this task, every production call site that omits the
+parameter) is byte-identical. The REAL per-family call in `pipeline.py`'s
+own loop now passes a fresh dict, populated at the EXACT point each
+outcome is reached inside the SAME function call -- never a second
+invocation, never a re-derivation that could drift from the actual
+decision (the same "recompute nothing, project only" discipline D-123/
+D-180's own diagnostics already established).
+
+SCORE-MARGIN SOURCE: `round(top_score - runner_up_score, 4)` -- the
+SAME two already-computed `RankedTake.score` values `max()` itself
+compares, reported for observability only; NEVER consulted by the
+DECISIVE/NON_DECISIVE/TIED classification logic itself (which is
+categorical, structured-evidence-or-exact-equality only).
+
+NO-NEW-THRESHOLD RESULT: confirmed by test (`test_24_no_new_numeric_
+threshold_in_classifier`, source-inspection) -- no float/percent literal
+appears anywhere in the classifier as a margin comparison. The only
+numeric comparison in the entire function is exact equality
+(`top_score == runner_up_score`), which is not a threshold.
+
+STRUCTURED-DOMINANCE ROLE: Steps 3/4's dominance and Step 5's asymmetry/
+contradiction checks are the PRIMARY basis for DECISIVE/CONFLICTED;
+reaching the raw-score `max()` at all is, by this ladder's own
+construction, definitionally the case where no structured evidence
+already settled it.
+
+RAW SCORE ROLE: demoted to TIE-BREAK-ONLY EVIDENCE for confidence
+purposes -- it still (unchanged) decides the ACTUAL winner among
+genuinely tied/non-dominant survivors (D-082's own established role: "its
+proper role once content is effectively tied"), but it can no longer, by
+itself, cause this task's own new classification to report DECISIVE.
+
+V2 ROLE: OPTIONAL, NEVER MANDATORY, NEVER FABRICATED. `structured_
+signals: Mapping[str, str | None] | None` accepts a source-name ->
+preferred-candidate-id mapping for a future D-163/D-172 (or other)
+comparator; no live `pipeline.py` call site supplies it today (D-163/
+D-172 are diagnostic-only, disabled by default, and structurally outside
+`_semantic_best_take`'s own current inputs) -- this task does not wire
+them in, per its own "classify only" scope. When absent (every call
+today), CONFLICTED can never arise from this source. V1+V2 double-voting
+is structurally impossible here since neither is ever passed at all.
+
+DOUBLE-COUNTING RESULT: CONFIRMED SAFE. `test_no_double_counting_source_
+independence` (source inspection) proves the classifier itself never
+reads or re-derives `visual_fumble`/`gesture_naturalness`/`expression_
+naturalness`/`multimodal_reset_penalty`/any per-signal take-level field
+or `delivery_cleanliness_evidence` -- it consumes ONLY the final,
+already-aggregated `RankedTake.score` once computed, exactly as D-182's
+own forensic recommended auditing for.
+
+D-181 ABSTRACT PIMPLES REPLAY (generic, non-Video00 fixture): two
+complete, meaning-sufficient candidates, `AUTHORITY_ABSTAIN_CONFLICT`, no
+critical coverage dominance, no subset relationship, near-equal
+performance evidence (raw scores 0.62 vs 0.58). Result: `NON_DECISIVE`,
+provenance `raw_score_only`. The pre-existing winner (`before == after`)
+is completely unchanged -- D-183 only adds the observation that this
+decision was NOT actually decisive, exactly the gap D-182 identified.
+
+DECISIVE CONTROL: the proven D-082 completeness-dominance fixture (a
+thin candidate the raw score favors vs. a rich candidate carrying the
+required diagnosis fact) -- `critical_coverage_dominance` fires,
+classified `DECISIVE`, provenance `structured_dominance`, existing winner
+unchanged.
+
+EXACT-TIE CONTROL: `_terminal_besttake_confidence(["a","b"], {"a":0.7,
+"b":0.7})` -> `TIED`, `score_margin` 0.0. Ordering-independent (`test_17`).
+
+CONFLICT CONTROL: (a) two structured comparators naming different
+candidates via `structured_signals` -> `CONFLICTED`; (b) a single
+comparator disagreeing with the raw-score ranking -> `CONFLICTED`, never
+silently overridden; (c) a real asymmetric CRITICAL-claim coverage split
+(`unresolved_unique_fact_asymmetry`) -> `CONFLICTED` at that exact
+pre-existing return point.
+
+D-150 FIREWALL: confirmed intact -- `test_07` proves `ABSTAIN_CONFLICT`
+still skips `single_semantic_winner` entirely; the terminal classifier
+never records a `single_semantic_winner` provenance for an abstained
+family, and D-183 manufactures no semantic winner where D-150 abstains.
+
+REGRESSION: `tests/test_cutsell_d183_terminal_besttake_confidence.py`
+(48/48, covering the full 40-item matrix plus wiring/no-mutation/no-
+double-counting extras) plus D-123 (23/23, unmodified)/D-128/D-150/D-158/
+D-161/D-163/D-167/D-172/D-174/D-177/D-171/D-169/D-168/D-166/D-142/D-116/
+D-097-C/D-101/D-082 targeted suites, full `tests/` suite (4141/4147
+passing after this task's commit removes the one guard failure that
+fails against ANY uncommitted `pipeline.py` change by construction,
+confirmed via the same D-177/D-180/D-181-established pattern; the
+remaining 5 failures confirmed pre-existing and unrelated by that same
+established baseline), `python3 -m compileall cutsell_worker tests`
+clean.
+
+VERDICT: **A. TERMINAL BESTTAKE CONFIDENCE CLASSIFICATION OFFLINE
+PROVEN.**
+
+NEXT GATE: the confidence state is NOT surfaced in current persisted
+Video00 workflow diagnostics without a further change (D-181's own
+reporting step does not yet project these new fields) -- no RAW launched
+this task per that condition. Recommended next bounded phase: **D-184 --
+BOUNDED FINALIST ARBITER DESIGN / OFFLINE IMPLEMENTATION**, scoped
+strictly to `terminal_besttake_confidence_state` in {NON_DECISIVE, TIED,
+CONFLICTED} and exactly 2-3 meaning-sufficient finalists, output
+`PREFER_A`/`PREFER_B`/`ABSTAIN` only -- never family formation, never
+transcript resegmentation, never full-video edit authority. Not
+authorized here.
+
+P1 STATUS: unchanged -- remains the next major canonical architecture
+capability, waiting until this bounded terminal BestTake seam is
+structurally complete (D-184, and any real-media qualification after
+it) -- not pre-authorized to begin.
+
+STRICT SCOPE CONFIRMATIONS: no RAW dispatched. No provider/network call
+(confirmed by test). No finalist arbiter implemented. No winner mutation
+anywhere (confirmed by direct before/after equality tests). No score-
+weight change (confirmed: `score_take`'s positive-weight sum still
+equals 1.00). No new numeric threshold (confirmed by source inspection).
+No Family Formation/D-150-semantic-authority/Boundary/Pacing/Renderer
+change. D-123/D-128/D-145 through D-182 not rewritten.
+
+**HUMAN ACTION REQUIRED:** YES (condition A: whether to authorize the
+D-184 bounded finalist arbiter design/implementation gate named above,
+and whether/when to resume P1, remain Product Owner decisions).

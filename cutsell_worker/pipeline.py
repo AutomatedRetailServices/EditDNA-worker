@@ -4,9 +4,9 @@ from __future__ import annotations
 import os
 
 from collections import Counter
-from dataclasses import replace as dataclass_replace
+from dataclasses import dataclass, replace as dataclass_replace
 import hashlib
-from typing import Dict, Iterable, Mapping
+from typing import Dict, Iterable, Mapping, Sequence
 
 from .canonical_identity import (
     build_identity_chain_diagnostics,
@@ -372,6 +372,290 @@ def _case_b_condition4_diagnostics(
     return diag
 
 
+# D-183 (docs/CUTSELL_DECISIONS.md D-183; post D-182 forensic): terminal
+# BestTake confidence/decisiveness CLASSIFICATION ONLY -- no finalist
+# arbiter, no winner mutation, no score-weight change. D-182 proved Steps
+# 6-9 of `_semantic_best_take` (the `critical_coverage_dominance`/
+# asymmetry/contradiction checks above them, and the final
+# `max(tie_break_pool, key=lambda cid: rank_by_id[cid])` itself) carry NO
+# concept of confidence, margin, or abstention: once 2+ candidates reach
+# a comparative step, EXACTLY one winner is always forced, with no
+# representation of "this comparison was not actually decisive."
+#
+# `TerminalBestTakeConfidence` and `_terminal_besttake_confidence` are a
+# PURE, ADDITIVE observability layer over that same terminal span (Steps
+# 3-9 -- every genuinely COMPARATIVE step; Steps 1/2/2.5 are exclusion-
+# only safety filters, not confidence questions). They are wired into
+# `_semantic_best_take` via an optional `terminal_confidence_out: dict |
+# None` keyword-only side-channel (default `None`): every existing caller
+# that omits it is byte-identical to pre-D-183 behavior, and even when
+# supplied, the classification is recorded ALONGSIDE the existing return
+# value, never used to pick, veto, or alter `selected_clip_id`/
+# `preferred_id`/`reason`.
+#
+# CORE PRINCIPLE (this task's own words): a deterministic score
+# difference is not automatically an editorially decisive difference.
+# Steps 3/4's own `resolve_critical_coverage_dominance` and Step 5's own
+# asymmetry/contradiction checks ALREADY run before Steps 6-9 -- by
+# construction, reaching the raw-score `max()` comparison at all means
+# every prior structured-evidence check already found NO dominance. So
+# within Steps 6-9's own 2+-survivor branch, RAW SCORE ALONE (however
+# large the numeric gap) is classified NON_DECISIVE by this module's own
+# design -- DECISIVE is reserved for cases already settled by structured
+# evidence (dominance found earlier; a single survivor after subset-
+# exclusion; or an explicitly supplied, unanimous external comparator via
+# `structured_signals`, e.g. a future D-163/D-172 wiring -- optional,
+# never fabricated, never required, never double-counted against
+# `rank_by_id` itself).
+#
+# NO NEW MAGIC MARGIN: TIED is decided by EXACT equality of the two
+# scores as already rounded by `take_judge.score_take`/`rank_takes`/
+# `apply_delivery_cleanliness_evidence` (`round(x, 4)`, an existing,
+# already-applied precision -- never a newly invented epsilon or percent
+# threshold). NON_DECISIVE vs DECISIVE is never decided by comparing the
+# margin to any numeric cutoff at all -- see the paragraph above.
+#
+# REUSED VOCABULARY: "DECISIVE"/"NON_DECISIVE" are the SAME string
+# literals `semantic_authority_observability.semantic_authority_gate_
+# diagnostics` (D-146/D-150) already uses for its own (upstream, label-
+# level) decisiveness question -- reused verbatim here for the SAME
+# general concept at a different layer, never a duplicate ontology.
+_TERMINAL_CONFIDENCE_DECISIVE = "DECISIVE"
+_TERMINAL_CONFIDENCE_DECISIVE_BY_ELIMINATION = "DECISIVE_BY_ELIMINATION"
+_TERMINAL_CONFIDENCE_NON_DECISIVE = "NON_DECISIVE"
+_TERMINAL_CONFIDENCE_TIED = "TIED"
+_TERMINAL_CONFIDENCE_CONFLICTED = "CONFLICTED"
+_TERMINAL_CONFIDENCE_UNKNOWN = "UNKNOWN"
+
+# Provenances naming WHY a state was reached -- "structured_dominance"
+# (Steps 3/4's own dominance, or Step 5's own asymmetry/contradiction
+# finding) and "structured_signals" (an explicitly supplied external
+# comparator) are the only two that may ever justify DECISIVE/CONFLICTED
+# without a raw-score comparison; "raw_score_only"/"raw_score_equal"
+# never produce DECISIVE.
+_TERMINAL_CONFIDENCE_PROVENANCE_STRUCTURED_DOMINANCE = "structured_dominance"
+_TERMINAL_CONFIDENCE_PROVENANCE_STRUCTURED_SIGNALS = "structured_signals"
+_TERMINAL_CONFIDENCE_PROVENANCE_RAW_SCORE_ONLY = "raw_score_only"
+_TERMINAL_CONFIDENCE_PROVENANCE_RAW_SCORE_EQUAL = "raw_score_equal"
+_TERMINAL_CONFIDENCE_PROVENANCE_SINGLE_SURVIVOR = "single_survivor"
+_TERMINAL_CONFIDENCE_PROVENANCE_NO_SCORE = "no_score_available"
+
+_TERMINAL_CONFIDENCE_STRUCTURED_PROVENANCES = frozenset({
+    _TERMINAL_CONFIDENCE_PROVENANCE_STRUCTURED_DOMINANCE,
+    _TERMINAL_CONFIDENCE_PROVENANCE_STRUCTURED_SIGNALS,
+})
+
+
+@dataclass(frozen=True)
+class TerminalBestTakeConfidence:
+    """The terminal BestTake decision's own confidence, additive to (never
+    a replacement for) `_semantic_best_take`'s existing return value. Every
+    field is a fact about the comparison itself -- never a new winner."""
+    candidate_ids: tuple[str, ...]
+    ranked_candidate_ids: tuple[str, ...]
+    top_candidate_id: str | None
+    runner_up_candidate_id: str | None
+    top_score: float | None
+    runner_up_score: float | None
+    score_margin: float | None
+    confidence_state: str
+    reason: str
+    provenance: str
+
+
+def _terminal_confidence(
+    state: str,
+    reason: str,
+    provenance: str,
+    *,
+    candidate_ids: Sequence[str] = (),
+    ranked_candidate_ids: Sequence[str] = (),
+    top_id: str | None = None,
+    runner_up_id: str | None = None,
+    top_score: float | None = None,
+    runner_up_score: float | None = None,
+) -> TerminalBestTakeConfidence:
+    margin = (
+        round(top_score - runner_up_score, 4)
+        if top_score is not None and runner_up_score is not None
+        else None
+    )
+    return TerminalBestTakeConfidence(
+        candidate_ids=tuple(candidate_ids),
+        ranked_candidate_ids=tuple(ranked_candidate_ids),
+        top_candidate_id=top_id,
+        runner_up_candidate_id=runner_up_id,
+        top_score=top_score,
+        runner_up_score=runner_up_score,
+        score_margin=margin,
+        confidence_state=state,
+        reason=reason,
+        provenance=provenance,
+    )
+
+
+def _terminal_besttake_confidence(
+    candidate_ids: Sequence[str],
+    rank_by_id: Mapping[str, float],
+    *,
+    structured_signals: Mapping[str, str | None] | None = None,
+) -> TerminalBestTakeConfidence:
+    """Classify the terminal 2+-survivor raw-score comparison ONLY --
+    callers that already found structured dominance, a single survivor,
+    or an unresolved asymmetry/contradiction never reach this function at
+    all (they build their own `TerminalBestTakeConfidence` directly via
+    `_terminal_confidence`, at the exact point that evidence was found).
+
+    `structured_signals` (optional, additive, NEVER fabricated when
+    absent): a mapping of an external comparator's name (e.g. a future
+    "watch_listen_besttake_v2") to the candidate id it prefers among
+    `candidate_ids` (or `None` for no preference from that source). No
+    live caller supplies this today (D-163/D-172 are diagnostic-only and
+    off by default, and are not part of `_semantic_best_take`'s own
+    decision inputs) -- the parameter exists so a future, explicitly-
+    authorized wiring can supply it without a second confidence ontology.
+    Passing the SAME underlying evidence under two different source names
+    is a caller error this function cannot detect; see
+    `test_no_double_counting_source_independence` for the audit this
+    task's own scope requires instead (confirming this function itself
+    never re-derives or re-reads any per-signal take-level field)."""
+    candidate_ids = tuple(candidate_ids)
+    scored = [cid for cid in candidate_ids if cid in rank_by_id]
+    if not scored:
+        return _terminal_confidence(
+            _TERMINAL_CONFIDENCE_UNKNOWN,
+            "no_score_available_for_any_candidate",
+            _TERMINAL_CONFIDENCE_PROVENANCE_NO_SCORE,
+            candidate_ids=candidate_ids,
+        )
+    # Deterministic, candidate-order-independent ranking: the SAME sort
+    # key `rank_takes` itself already uses (`(-score, clip_id)`) -- never
+    # a new tie-break convention.
+    ranked_ids = tuple(sorted(scored, key=lambda cid: (-rank_by_id[cid], cid)))
+    if len(ranked_ids) == 1:
+        only = ranked_ids[0]
+        return _terminal_confidence(
+            _TERMINAL_CONFIDENCE_DECISIVE_BY_ELIMINATION,
+            "single_survivor_no_comparison_needed",
+            _TERMINAL_CONFIDENCE_PROVENANCE_SINGLE_SURVIVOR,
+            candidate_ids=candidate_ids, ranked_candidate_ids=ranked_ids,
+            top_id=only, top_score=rank_by_id[only],
+        )
+    top_id, runner_up_id = ranked_ids[0], ranked_ids[1]
+    top_score, runner_up_score = rank_by_id[top_id], rank_by_id[runner_up_id]
+
+    if structured_signals:
+        preferences = {
+            cid for cid in (structured_signals or {}).values()
+            if cid in (top_id, runner_up_id)
+        }
+        if preferences == {top_id}:
+            return _terminal_confidence(
+                _TERMINAL_CONFIDENCE_DECISIVE,
+                "structured_comparators_unanimously_agree_with_top_ranked_candidate",
+                _TERMINAL_CONFIDENCE_PROVENANCE_STRUCTURED_SIGNALS,
+                candidate_ids=candidate_ids, ranked_candidate_ids=ranked_ids,
+                top_id=top_id, runner_up_id=runner_up_id,
+                top_score=top_score, runner_up_score=runner_up_score,
+            )
+        if len(preferences) >= 2:
+            return _terminal_confidence(
+                _TERMINAL_CONFIDENCE_CONFLICTED,
+                "structured_comparators_disagree_on_preferred_candidate",
+                _TERMINAL_CONFIDENCE_PROVENANCE_STRUCTURED_SIGNALS,
+                candidate_ids=candidate_ids, ranked_candidate_ids=ranked_ids,
+                top_id=top_id, runner_up_id=runner_up_id,
+                top_score=top_score, runner_up_score=runner_up_score,
+            )
+        # A single structured comparator naming the RUNNER-UP (not the top
+        # score) is itself a disagreement with the raw score -- CONFLICTED,
+        # never silently overridden and never ignored.
+        if preferences == {runner_up_id}:
+            return _terminal_confidence(
+                _TERMINAL_CONFIDENCE_CONFLICTED,
+                "structured_comparator_disagrees_with_raw_score_ranking",
+                _TERMINAL_CONFIDENCE_PROVENANCE_STRUCTURED_SIGNALS,
+                candidate_ids=candidate_ids, ranked_candidate_ids=ranked_ids,
+                top_id=top_id, runner_up_id=runner_up_id,
+                top_score=top_score, runner_up_score=runner_up_score,
+            )
+        # Signals present but naming neither finalist -- no opinion here.
+
+    if top_score == runner_up_score:
+        return _terminal_confidence(
+            _TERMINAL_CONFIDENCE_TIED,
+            "terminal_score_exact_tie",
+            _TERMINAL_CONFIDENCE_PROVENANCE_RAW_SCORE_EQUAL,
+            candidate_ids=candidate_ids, ranked_candidate_ids=ranked_ids,
+            top_id=top_id, runner_up_id=runner_up_id,
+            top_score=top_score, runner_up_score=runner_up_score,
+        )
+    return _terminal_confidence(
+        _TERMINAL_CONFIDENCE_NON_DECISIVE,
+        "raw_score_difference_without_structured_dominance",
+        _TERMINAL_CONFIDENCE_PROVENANCE_RAW_SCORE_ONLY,
+        candidate_ids=candidate_ids, ranked_candidate_ids=ranked_ids,
+        top_id=top_id, runner_up_id=runner_up_id,
+        top_score=top_score, runner_up_score=runner_up_score,
+    )
+
+
+def terminal_besttake_confidence_diagnostics(confidence: TerminalBestTakeConfidence) -> dict:
+    """JSON-safe, bounded per-family diagnostics row -- no transcript
+    dump, no QA-reference info. Field names match this task's own
+    directive verbatim."""
+    return {
+        "terminal_besttake_confidence_state": confidence.confidence_state,
+        "terminal_besttake_confidence_reason": confidence.reason,
+        "terminal_besttake_candidate_count": len(confidence.candidate_ids),
+        "terminal_besttake_top_candidate_id": confidence.top_candidate_id,
+        "terminal_besttake_runner_up_candidate_id": confidence.runner_up_candidate_id,
+        "terminal_besttake_top_score": confidence.top_score,
+        "terminal_besttake_runner_up_score": confidence.runner_up_score,
+        "terminal_besttake_score_margin": confidence.score_margin,
+        "terminal_besttake_structured_dominance_present": (
+            confidence.provenance in _TERMINAL_CONFIDENCE_STRUCTURED_PROVENANCES
+            and confidence.confidence_state == _TERMINAL_CONFIDENCE_DECISIVE
+        ),
+        "terminal_besttake_conflict_present": confidence.confidence_state == _TERMINAL_CONFIDENCE_CONFLICTED,
+        "terminal_besttake_decisive": confidence.confidence_state in (
+            _TERMINAL_CONFIDENCE_DECISIVE, _TERMINAL_CONFIDENCE_DECISIVE_BY_ELIMINATION,
+        ),
+    }
+
+
+# D-183 run-level tail-safe summary -- a pure aggregator over already-
+# computed per-family diagnostics rows (e.g. `take_judge_groups`), never
+# a recomputation of any family's own confidence. Mirrors D-152/D-181's
+# own workflow-side aggregation pattern, kept here as a plain, directly
+# testable function since this task does not authorize a workflow change.
+def terminal_besttake_confidence_run_summary(rows: Iterable[Mapping]) -> dict:
+    counts = {
+        "terminal_besttake_evaluated_count": 0,
+        "terminal_besttake_decisive_count": 0,
+        "terminal_besttake_non_decisive_count": 0,
+        "terminal_besttake_tied_count": 0,
+        "terminal_besttake_conflicted_count": 0,
+        "terminal_besttake_unknown_count": 0,
+    }
+    for row in rows:
+        state = row.get("terminal_besttake_confidence_state") if isinstance(row, Mapping) else None
+        if state is None:
+            continue
+        counts["terminal_besttake_evaluated_count"] += 1
+        if state in (_TERMINAL_CONFIDENCE_DECISIVE, _TERMINAL_CONFIDENCE_DECISIVE_BY_ELIMINATION):
+            counts["terminal_besttake_decisive_count"] += 1
+        elif state == _TERMINAL_CONFIDENCE_NON_DECISIVE:
+            counts["terminal_besttake_non_decisive_count"] += 1
+        elif state == _TERMINAL_CONFIDENCE_TIED:
+            counts["terminal_besttake_tied_count"] += 1
+        elif state == _TERMINAL_CONFIDENCE_CONFLICTED:
+            counts["terminal_besttake_conflicted_count"] += 1
+        elif state == _TERMINAL_CONFIDENCE_UNKNOWN:
+            counts["terminal_besttake_unknown_count"] += 1
+    return counts
+
+
 def _draft_clip(take: CandidateTake, *, role: SemanticRole, group_id: str | None, selected: bool) -> DraftClip:
     # D-050A: `group_id` here is already the FINAL, post-semantic-
     # equivalence take-group id (pipeline.py is its one minting owner --
@@ -701,8 +985,22 @@ def _semantic_best_take(
     deterministic_unusable: dict[str, bool] | None = None,
     case_b_evidence_by_id: Mapping[str, object] | None = None,
     semantic_comparative_authority: str | None = None,
+    terminal_confidence_out: dict | None = None,
 ) -> tuple[str | None, str | None, str]:
     """Honor one clear semantic winner only inside an already-proven retry group.
+
+    D-183 (docs/CUTSELL_DECISIONS.md D-183; post D-182 forensic):
+    `terminal_confidence_out` is optional and purely additive -- omitted
+    or `None` (every existing caller before D-183), this function is
+    byte-identical to pre-D-183 behavior in every respect, including
+    return value. When a caller supplies a fresh `dict`, this function
+    populates `terminal_confidence_out["terminal_besttake_confidence"]`
+    with a `TerminalBestTakeConfidence` describing how DECISIVE the
+    comparative span (Steps 3-9 -- dominance, asymmetry/contradiction,
+    and the final raw-score tie-break) actually was, at the EXACT point
+    each outcome is reached -- never a second pass, never a re-derivation
+    that could drift from the real decision. It NEVER reads from or
+    writes to `selected_clip_id`/`preferred_id`/the returned reason.
 
     D-150 (Phase B; docs/CUTSELL_DECISIONS.md D-150): `semantic_
     comparative_authority` is optional and additive -- omitted or `None`
@@ -816,6 +1114,19 @@ def _semantic_best_take(
                     preferred_id, local_selected_clip_id, meaning_sufficient_ids, case_b_evidence_by_id,
                 )
             if case_b_conflict is None:
+                if terminal_confidence_out is not None:
+                    # D-183: a single, confidence-floor-passing, safety-
+                    # veto-clear, case-b-uncontested semantic label is
+                    # ALREADY the most decisive structured evidence this
+                    # ladder ever produces -- DECISIVE, never re-derived
+                    # from `ranked`/`rank_by_id` (which this path never
+                    # even consults).
+                    terminal_confidence_out["terminal_besttake_confidence"] = _terminal_confidence(
+                        _TERMINAL_CONFIDENCE_DECISIVE, "single_semantic_winner",
+                        _TERMINAL_CONFIDENCE_PROVENANCE_STRUCTURED_DOMINANCE,
+                        candidate_ids=tuple(member.clip_id for member in members),
+                        ranked_candidate_ids=(preferred_id,), top_id=preferred_id,
+                    )
                 if preferred_id == local_selected_clip_id:
                     return local_selected_clip_id, preferred_id, "single_semantic_winner"
                 return preferred_id, preferred_id, "single_semantic_winner"
@@ -865,6 +1176,14 @@ def _semantic_best_take(
         # usability instead of falling open to a tie-break among failures.
         usable = [cid for cid in member_ids if not (deterministic_unusable or {}).get(cid, False)]
         if not usable:
+            if terminal_confidence_out is not None:
+                # D-183: no valid finalist at all -- reuse existing
+                # "no_usable_realization" semantics rather than inventing
+                # a new no-candidate vocabulary.
+                terminal_confidence_out["terminal_besttake_confidence"] = _terminal_confidence(
+                    _TERMINAL_CONFIDENCE_UNKNOWN, "no_usable_realization", _TERMINAL_CONFIDENCE_PROVENANCE_NO_SCORE,
+                    candidate_ids=member_ids,
+                )
             return None, None, "no_usable_realization"
         survivors = usable
     else:
@@ -890,6 +1209,15 @@ def _semantic_best_take(
         # Step 3/4: D-063/D-065/D-066 CRITICAL_COVERAGE_DOMINANCE, reused.
         dominant_id, _hindsight_rows = resolve_critical_coverage_dominance(members_pairs, survivors)
         if dominant_id is not None:
+            if terminal_confidence_out is not None:
+                # D-183: Steps 3/4's own dominance IS structured evidence
+                # that already, genuinely settles the comparison -- DECISIVE,
+                # never re-derived from `rank_by_id`.
+                terminal_confidence_out["terminal_besttake_confidence"] = _terminal_confidence(
+                    _TERMINAL_CONFIDENCE_DECISIVE, "critical_coverage_dominance",
+                    _TERMINAL_CONFIDENCE_PROVENANCE_STRUCTURED_DOMINANCE,
+                    candidate_ids=survivors, ranked_candidate_ids=(dominant_id,), top_id=dominant_id,
+                )
             if dominant_id == local_selected_clip_id:
                 return local_selected_clip_id, dominant_id, "critical_coverage_dominance"
             return dominant_id, dominant_id, "critical_coverage_dominance"
@@ -907,8 +1235,25 @@ def _semantic_best_take(
         if coverage:
             coverage_values = list(coverage.values())
             if any(value != coverage_values[0] for value in coverage_values[1:]):
+                if terminal_confidence_out is not None:
+                    # D-183: an asymmetric/disjoint CRITICAL-claim split is
+                    # structured evidence that genuinely DISAGREES on which
+                    # survivor should win -- CONFLICTED, per this task's
+                    # own semantics ("structured evidence sources
+                    # materially disagree").
+                    terminal_confidence_out["terminal_besttake_confidence"] = _terminal_confidence(
+                        _TERMINAL_CONFIDENCE_CONFLICTED, "unresolved_unique_fact_asymmetry",
+                        _TERMINAL_CONFIDENCE_PROVENANCE_STRUCTURED_DOMINANCE,
+                        candidate_ids=survivors,
+                    )
                 return local_selected_clip_id, None, "unresolved_unique_fact_asymmetry"
         if any_pair_contradicts([str(by_id[cid].text or "") for cid in survivors]):
+            if terminal_confidence_out is not None:
+                terminal_confidence_out["terminal_besttake_confidence"] = _terminal_confidence(
+                    _TERMINAL_CONFIDENCE_CONFLICTED, "unresolved_contradiction",
+                    _TERMINAL_CONFIDENCE_PROVENANCE_STRUCTURED_DOMINANCE,
+                    candidate_ids=survivors,
+                )
             return local_selected_clip_id, None, "unresolved_contradiction"
 
     # Steps 6-9: delivery score / richness tie-break among the surviving,
@@ -923,10 +1268,22 @@ def _semantic_best_take(
         # `_exclude_incomplete_subset_losers`'s own module comment above.
         tie_break_pool = _exclude_incomplete_subset_losers(survivor_ranked, by_id)
         best = max(tie_break_pool, key=lambda cid: rank_by_id[cid])
+        if terminal_confidence_out is not None:
+            # D-183: the ACTUAL terminal comparison this decision was made
+            # on -- `tie_break_pool`/`rank_by_id`, the exact same values
+            # `max()` itself just used, never re-derived or duplicated.
+            terminal_confidence_out["terminal_besttake_confidence"] = _terminal_besttake_confidence(
+                tie_break_pool, rank_by_id,
+            )
         if best == local_selected_clip_id:
             return local_selected_clip_id, None, "delivery_tie_break_among_survivors"
         return best, best, "delivery_tie_break_among_survivors"
 
+    if terminal_confidence_out is not None:
+        terminal_confidence_out["terminal_besttake_confidence"] = _terminal_confidence(
+            _TERMINAL_CONFIDENCE_UNKNOWN, "no_score_available_for_any_survivor",
+            _TERMINAL_CONFIDENCE_PROVENANCE_NO_SCORE, candidate_ids=survivors,
+        )
     return local_selected_clip_id, None, "local_fallback"
 
 
@@ -1275,6 +1632,12 @@ def build_flow_b_draft(
             family_semantic_decisions,
             family_semantic_authority_observability,
         )
+        # D-183 (docs/CUTSELL_DECISIONS.md D-183): a fresh dict the REAL
+        # decision call below populates additively at the exact point its
+        # own comparative outcome (dominance / asymmetry / contradiction /
+        # raw-score tie-break) is reached -- never a second invocation,
+        # never a re-derivation that could drift from the actual decision.
+        _terminal_confidence_out: dict = {}
         selected_clip_id, semantic_preferred_clip_id, semantic_best_take_reason = _semantic_best_take(
             members,
             family_semantic_decisions,
@@ -1284,7 +1647,9 @@ def build_flow_b_draft(
             deterministic_unusable=deterministic_unusable,
             case_b_evidence_by_id=case_b_evidence_objects,
             semantic_comparative_authority=semantic_authority_gate["semantic_authority_gate_status"],
+            terminal_confidence_out=_terminal_confidence_out,
         )
+        _terminal_besttake_confidence_result = _terminal_confidence_out.get("terminal_besttake_confidence")
         no_usable_realization = selected_clip_id is None
         all_delete_recommended = len(members) >= 2 and all(
             hybrid_semantic_delete_recommended.get(member.clip_id, False) for member in members
@@ -1553,6 +1918,31 @@ def build_flow_b_draft(
                 # condition4_reason) -- no transcript dump, no QA reference
                 # info, advisory only.
                 **case_b_condition4_diagnostics,
+                # D-183 (docs/CUTSELL_DECISIONS.md D-183; post D-182
+                # forensic): terminal BestTake confidence/decisiveness
+                # CLASSIFICATION ONLY -- no finalist arbiter, no winner
+                # mutation. `None` only when this exact family never
+                # reached a comparative step at all (a true single-member
+                # family, out of this classification's own scope per its
+                # own docstring); every genuine >=2-member contest above
+                # is always populated.
+                **(
+                    terminal_besttake_confidence_diagnostics(_terminal_besttake_confidence_result)
+                    if _terminal_besttake_confidence_result is not None
+                    else {
+                        "terminal_besttake_confidence_state": None,
+                        "terminal_besttake_confidence_reason": "not_a_contest_single_member_family",
+                        "terminal_besttake_candidate_count": len(members),
+                        "terminal_besttake_top_candidate_id": None,
+                        "terminal_besttake_runner_up_candidate_id": None,
+                        "terminal_besttake_top_score": None,
+                        "terminal_besttake_runner_up_score": None,
+                        "terminal_besttake_score_margin": None,
+                        "terminal_besttake_structured_dominance_present": False,
+                        "terminal_besttake_conflict_present": False,
+                        "terminal_besttake_decisive": False,
+                    }
+                ),
                 "meaning_sufficient_candidates": sorted(meaning_sufficient_ids),
                 "final_winner": selected_clip_id,
                 # D-128 (docs/CUTSELL_DECISIONS.md D-128): Phase 1
