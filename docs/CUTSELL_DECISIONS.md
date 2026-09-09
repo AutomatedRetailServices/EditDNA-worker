@@ -34021,3 +34021,104 @@ change. NO P1 implementation.
 **HUMAN ACTION REQUIRED:** YES (condition A: whether to authorize the
 read-only quality-ladder-artifact retrieval above as the immediate next
 step, and whether/when to resume P1, remain Product Owner decisions).
+
+---
+
+D-190.1: PROSODIC AUDIO V2 -- QA-MAPPING COMPLETION ATTEMPT (post D-190,
+read-only, no RAW, no code change)
+
+BRANCH/HEAD: `feature/runpod-pod-on-demand` @ `bd21c30b15fa2028cfecfca
+292499d8aca9afcfc` (D-190 docs commit). Clean tree confirmed before and
+after.
+
+SOURCE RAW: workflow run `34406357372` (unchanged from D-190 -- no
+second RAW dispatched).
+
+ARTIFACT RETRIEVAL ATTEMPTED: `cutsell-video00-modal-validator-reports`
+(artifact id `10125845248`, 56,805 bytes, contains `artifact/video00-
+modal-quality-ladder.json`/`.md`/`.csv` per the workflow's own upload
+path list) via `mcp__github__actions_get` `download_workflow_run_
+artifact`. The GitHub API resolved a valid, unexpired SAS download URL
+on `productionresultssa3.blob.core.windows.net`.
+
+ARTIFACT RETRIEVAL STATUS: **BLOCKED -- EGRESS_BLOCKED, not attempted a
+second way.** Two independent fetch mechanisms were tried against that
+resolved URL: a direct `curl` (proxy responded "CONNECT tunnel failed,
+response 403") and `WebFetch` (explicit `EGRESS_BLOCKED` error naming
+`productionresultssa3.blob.core.windows.net`). Both are organization
+network-egress-policy denials against an Azure Blob Storage host, not a
+missing/expired artifact or a code problem -- GitHub's own Actions
+artifact-download flow always redirects through `*.blob.core.windows.
+net`, which is outside this session's egress allowlist. Per this
+session's own standing instruction, a 403/egress policy denial is
+reported, not retried against further hosts or workarounds.
+
+The prior D-190 finding (the job-log `get_job_logs` tool's own ~400-
+430KB fetch ceiling never reaching the quality-ladder step's console
+output) was independently reconfirmed as still the case and is a
+SEPARATE limitation from this one -- both of this run's two available
+retrieval paths for the quality-ladder evidence (job-log tail, artifact
+download) are blocked in this environment, one by a tool-side size
+ceiling, one by network egress policy. Neither is a defect in the
+underlying quality-ladder step, D-190's own diagnostics, or the
+Prosodic pipeline itself.
+
+CONSEQUENCE: the ONLY unresolved D-190 question -- whether source span
+213.34-222.98s (`clip_6aea1eaeaf02a42c154a`, Prosodic-preferred) or
+198.88-211.02s (`clip_a489590ee18f3a87bdc7`, current/unchanged winner)
+matches the Cut.ai/Human-Gold reference for the real Pimples family
+`tg_c145285e700b2214a4` -- remains UNANSWERED this task. No Cut.ai/Gold
+keep-delete interval mapping, no per-reference classification, no LEVEL
+or rationale evidence could be produced, because the only artifact that
+carries that comparison could not be read.
+
+QA CLASSIFICATION: **ARTIFACT_EVIDENCE_INSUFFICIENT** (the artifact
+exists, is not expired, and almost certainly carries the answer, but
+this session cannot read it -- an environment/tooling limitation, not
+an evidentiary gap in the underlying data).
+
+WHOLE-VIDEO METRICS: NOT RECOVERED, same reason.
+
+D-190 INTERPRETATION: UNCHANGED from D-190 itself (Verdict D,
+PARTIALLY PROVEN) -- this task neither strengthens nor weakens it; the
+smallest missing proof identified in D-190 remains open, now with its
+exact retrieval blocker identified and disclosed rather than merely
+deferred.
+
+D-190.1 VERDICT: **D. ARTIFACT / REFERENCE MAPPING INSUFFICIENT.**
+
+CANONICAL PROSODIC STATUS: UNCHANGED from D-190 (`REAL_MEDIA_
+DIAGNOSTIC_PROVEN` on the acoustic-evidence axis; NOT `REAL_MEDIA_QA_
+CONFIRMED`).
+
+RECOMMENDED NEXT GATE: unchanged in substance from D-190's own gate
+(complete the Cut.ai/Human-Gold QA mapping for family `tg_
+c145285e700b2214a4`), but the retrieval MECHANISM must change --
+neither `get_job_logs` tailing nor a GitHub Actions artifact-zip
+download is reachable from this session. Options for the Product Owner
+to choose among (none implemented here): (a) grant this session's
+environment an egress allowlist entry for `*.blob.core.windows.net` (or
+the specific SAS host) so the existing, already-uploaded artifact can
+be read directly; (b) have a session/environment with broader network
+access fetch and paste/attach the `video00-modal-quality-ladder.json`/
+`.md` content; (c) add a small, disclosed, read-only reporting step to
+the workflow itself (mirroring the D-190 step's own pattern) that
+prints the Pimples-region Cut.ai/Gold comparison compactly into the job
+log at a LATE step position, so it survives the log-tail ceiling the
+way D-190's own step was designed to -- this would be a workflow/
+reporting-plumbing change requiring explicit authorization, not
+executed here. No RAW is required for any of these options.
+
+P1 STATUS: unchanged, remains paused.
+
+CONFIRMATIONS: NO RAW dispatched. NO `cutsell_worker`/test/workflow
+file touched (docs-only). NO provider/network call succeeded (both
+attempts were blocked by egress policy before reaching any external
+service). NO winner authority granted or discussed. D-191 NOT
+implemented. P1 NOT implemented.
+
+**HUMAN ACTION REQUIRED:** YES (condition C-adjacent: this session's
+environment lacks the network egress or artifact-retrieval capability
+needed to close D-190's own identified gap; Product Owner choice among
+the three options above, or acceptance of D-190's Verdict D as final
+for now, is required).
